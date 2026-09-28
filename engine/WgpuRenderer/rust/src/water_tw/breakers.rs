@@ -327,6 +327,8 @@ impl BreakersGpu {
                 buf(10, B::Uniform),
                 buf(11, B::Storage { read_only: false }),
                 buf(12, B::Storage { read_only: false }),
+                // W6i: the CPU emit requests (the boats' bow spray)
+                buf(13, B::Storage { read_only: true }),
             ],
         });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -490,6 +492,7 @@ impl BreakersGpu {
                 wgpu::BindGroupEntry { binding: 10, resource: spray.params.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 11, resource: spray.ring.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 12, resource: spray.head.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 13, resource: spray.requests.as_entire_binding() },
             ],
         }));
     }
@@ -503,20 +506,22 @@ impl BreakersGpu {
     }
 
     /// The crest finder and the spray emitters (Breakers.update), then the spray update
-    /// (Spray.update). `spray_on`: the spray is on this frame.
-    pub fn dispatch(&self, encoder: &mut wgpu::CommandEncoder, spray_on: bool) {
+    /// (Spray.update). `crests`: the shore simulation runs (the crest finder has regions to
+    /// search); `breaker_spray`: the breakers emit; `spray_update`: the spray is on this frame
+    /// (breakers or, W6i, the boats' bow spray).
+    pub fn dispatch(&self, encoder: &mut wgpu::CommandEncoder, crests: bool, breaker_spray: bool, spray_update: bool) {
         let Some(bind) = &self.kernel_bind else { return };
-        if self.ns >= 2 && (self.lips_on || spray_on) {
+        if crests && self.ns >= 2 && (self.lips_on || breaker_spray) {
             let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("tw_brk_crests"), timestamp_writes: None });
             cp.set_pipeline(&self.kernel);
             cp.set_bind_group(0, bind, &[]);
             cp.dispatch_workgroups(self.ns.div_ceil(64), 1, 1);
         }
-        if spray_on {
+        if spray_update {
             let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("tw_spray_update"), timestamp_writes: None });
             cp.set_pipeline(&self.spray_update);
             cp.set_bind_group(0, bind, &[]);
-            cp.dispatch_workgroups(super::spray::RING.div_ceil(64), 1, 1);
+            cp.dispatch_workgroups(super::spray::SLOTS.div_ceil(64), 1, 1);
         }
     }
 

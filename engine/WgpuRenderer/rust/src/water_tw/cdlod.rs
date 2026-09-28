@@ -8,6 +8,18 @@
 //! world metres so the shader's FFT lookups are world-anchored.
 
 pub const GRID: u32 = 32;
+
+/// W7h: the grid resolution in use: `WGR_TW_GRID=<n>` (16..128, rounded to a multiple of 8) for the
+/// plan's mesh-density experiment (§7.2), else Tidewater's [`GRID`].
+pub fn grid() -> u32 {
+    static V: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("WGR_TW_GRID")
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .map_or(GRID, |g| ((g.clamp(16, 128) + 4) / 8) * 8)
+    })
+}
 pub const LEAF: f32 = 8.0;
 pub const LEVELS: usize = 12;
 pub const RANGE_FACTOR: f32 = 2.5;
@@ -33,7 +45,7 @@ impl Default for Cdlod {
             let r = LEAF * 2f32.powi(l as i32) * RANGE_FACTOR;
             ranges[l] = r;
             let start = prev + (r - prev) * MORPH_START_RATIO;
-            let spacing = LEAF * 2f32.powi(l as i32) / GRID as f32;
+            let spacing = LEAF * 2f32.powi(l as i32) / grid() as f32;
             morph[l] = [start, 1.0 / (r - start).max(1e-3), spacing, 0.0];
             prev = r;
         }
@@ -164,7 +176,7 @@ impl<'a> Selection<'a> {
 /// Grid in [0,1]^2 (x, z) plus the strip-ordered index list of CDLOD.js (STRIP = 8 columns,
 /// alternating diagonals).
 pub fn grid_mesh() -> (Vec<[f32; 2]>, Vec<u32>) {
-    let g = GRID;
+    let g = grid();
     let mut verts = Vec::with_capacity(((g + 1) * (g + 1)) as usize);
     for j in 0..=g {
         for i in 0..=g {

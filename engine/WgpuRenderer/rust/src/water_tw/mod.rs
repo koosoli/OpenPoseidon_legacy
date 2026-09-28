@@ -27,10 +27,13 @@
 //! ligaments, dense spray and mist thrown by the breakers, integrated on the GPU and drawn as soft
 //! sprites after the lips.
 //!
-//! Not yet, by design (later packages):
-//! boat spray and RefractionPass (W4b), underwater and caustics (W5), boat wakes (W6). Inland water
-//! bodies are not drawn in this mode yet (see TW-WATER-01, open question for the owner).
+//! W6: boat wakes (`wake.rs`, `tw_wake_kernel.wgsl`, `tw_wake.wgsl`) for the two boats nearest the
+//! camera, and (W6i) their bow spray (`boat_spray.rs`) into the spray ring's CPU tail.
+//!
+//! Not yet: inland water bodies are not drawn in this mode (see TW-WATER-01, open question for the
+//! owner).
 
+mod boat_spray;
 mod breakers;
 mod cdlod;
 mod fft;
@@ -41,6 +44,12 @@ pub mod spray;
 mod underwater;
 mod caustics;
 mod textures;
+mod wake;
+
+/// What a region's stations were traced from: centre, terrain generation, sea level in 0.1 m steps.
+type StationKey = ([f32; 2], u64, i32);
+/// Recent station traces kept for reuse (W7c).
+const STATION_CACHE: usize = 8;
 
 use std::sync::Arc;
 
@@ -65,7 +74,12 @@ const TW_WATER_WGSL: &str = concat!(
     include_str!("tw_spray.wgsl"),
     "\n",
     include_str!("tw_caustics.wgsl"),
+    "\n",
+    include_str!("tw_wake.wgsl"),
 );
+
+/// W6: the wake simulation kernels (tw_wake_kernel.wgsl) with the shared declarations.
+const TW_WAKE_KERNEL_WGSL: &str = concat!(include_str!("tw_common.wgsl"), "\n", include_str!("tw_wake_kernel.wgsl"));
 
 /// The breaker crest finder with the spray emitters, and the spray update: shared declarations,
 /// the shore waves, the spray helpers and emitters, the kernel, the update.
@@ -116,6 +130,13 @@ fn spray_override() -> Option<(f32, f32)> {
         let mut it = v.split(',').map(|x| x.trim().parse::<f32>().ok());
         Some((it.next()??, it.next().flatten().unwrap_or(1.0)))
     })
+}
+
+/// `WGR_TW_BOAT_SPRAY=off` turns the boats' bow spray off (W6i; A/B captures); a number sets the
+/// steady white-water gain instead (boat_spray.rs, W6i.1).
+fn boat_spray_enabled() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_BOAT_SPRAY").map_or(true, |v| v.trim() != "off"))
 }
 
 /// `WGR_TW_GLOW=<scale>`: overrides the Water tab's water glow (W3j), for A/B captures.
@@ -182,9 +203,11 @@ struct TwSurface {
     sim_p1: [f32; 4],
     brk: [f32; 4],
     morph: [[f32; 4]; cdlod::LEVELS],
+    // W6: the wake readers' lanes, 4 per slot (tw_wake.wgsl)
+    wake: [[f32; 4]; wake::SLOTS * 4],
 }
 
-const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (17 + cdlod::LEVELS));
+const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (17 + cdlod::LEVELS + wake::SLOTS * 4));
 
 /// Whether the shore simulation runs (Water tab, and only once the shore waves have a field).
 /// Breaker spray on (W4a): emission gain and sprite intensity above zero (the caller also needs
@@ -241,6 +264,8 @@ struct FrameInputs<'a> {
     stations: u32,
     // W5b: the caustic layers' tile sizes (fine, broad), m
     caustic_tiles: [f32; 2],
+    // W6: the wake readers' lanes
+    wake: [[f32; 4]; wake::SLOTS * 4],
 }
 
 fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
@@ -284,6 +309,7 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         // Breakers: station count, lip opacity (Tidewater `sheet`, Water tab lane)
         brk: [f.stations as f32, p.tidewater_shore[2][3].clamp(0.0, 2.0), f.caustic_tiles[0], f.caustic_tiles[1]],
         morph: *f.morph,
+        wake: f.wake,
     }
 }
 
@@ -395,7 +421,13 @@ pub struct Tidewater {
     brk: breakers::BreakersGpu,
     // stations per region slot, with what they were traced from (centre, terrain generation,
     // sea level in 0.1 m steps): a slot is re-traced only when that changes
-    brk_slots: [Option<(([f32; 2], u64, i32), Vec<breakers::Station>)>; shore_sim::K],
+    brk_slots: [Option<(StationKey, Arc<Vec<breakers::Station>>)>; shore_sim::K],
+    // W7c: stations are traced on a worker thread (a trace is ~11 ms of CPU); recent traces are
+    // kept so a key that comes back (sea level flickering over a 0.1 m step) costs nothing
+    st_tx: std::sync::mpsc::Sender<(usize, StationKey, Vec<breakers::Station>)>,
+    st_rx: std::sync::mpsc::Receiver<(usize, StationKey, Vec<breakers::Station>)>,
+    st_pending: Vec<(usize, StationKey)>,
+    st_cache: Vec<(usize, StationKey, Arc<Vec<breakers::Station>>)>,
     // W4a spray
     spray: spray::SprayGpu,
     // W5a underwater composite
@@ -403,6 +435,16 @@ pub struct Tidewater {
     linear: bool,
     // W5b caustics
     caustics: caustics::Caustics,
+    // W6 boat wakes
+    wake: wake::WakeGpu,
+    wake_lanes: [[f32; 4]; wake::SLOTS * 4],
+    // W6i boat bow spray
+    boat_spray: boat_spray::BoatSpray,
+    // W5e: the frame's spot lights (the diver's torch is picked from them in prepare)
+    spots: Vec<crate::ffi::WgrLight>,
+    // W7b: prepare CPU ms: sum, max, station update max, CDLOD selection sum, frames;
+    // W7c: traces started, cache hits
+    prep_stats: [f32; 7],
 }
 
 impl Tidewater {
@@ -550,6 +592,10 @@ impl Tidewater {
                 // W5b caustics: fine, broad
                 tex(23, D::D2, flt),
                 tex(24, D::D2, flt),
+                // W6 wakes: display (h, slopes, foam), near-field template, aeration
+                tex(25, D::D2Array, flt),
+                tex(26, D::D2Array, flt),
+                tex(27, D::D2Array, flt),
             ],
         });
 
@@ -637,6 +683,7 @@ impl Tidewater {
         let spray = spray::SprayGpu::new(device, queue, camera_layout, &layout, &shader, surface_format, sample_count, linear);
         let uw = underwater::TwUnderwater::new(device, surface_format);
         let caustics = caustics::Caustics::new(device);
+        let wake = wake::WakeGpu::new(device, TW_WAKE_KERNEL_WGSL);
 
         let (verts, indices) = cdlod::grid_mesh();
         let grid_vbuf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -656,6 +703,7 @@ impl Tidewater {
             mapped_at_creation: false,
         });
 
+        let (st_tx, st_rx) = std::sync::mpsc::channel();
         let mut me = Self {
             bind: device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("tw_group1_placeholder"),
@@ -701,10 +749,19 @@ impl Tidewater {
             coast: Vec::new(),
             brk,
             brk_slots: [const { None }; shore_sim::K],
+            st_tx,
+            st_rx,
+            st_pending: Vec::new(),
+            st_cache: Vec::new(),
+            spots: Vec::new(),
             spray,
             uw,
             linear: linear > 0.5,
             caustics,
+            wake,
+            wake_lanes: [[0.0; 4]; wake::SLOTS * 4],
+            boat_spray: Default::default(),
+            prep_stats: [0.0; 7],
         };
         me.rebuild_bind(device);
         me
@@ -741,8 +798,12 @@ impl Tidewater {
                 wgpu::BindGroupEntry { binding: 22, resource: R::TextureView(&self.spray.tex_view) },
                 wgpu::BindGroupEntry { binding: 23, resource: R::TextureView(self.caustics.fine_view()) },
                 wgpu::BindGroupEntry { binding: 24, resource: R::TextureView(self.caustics.broad_view()) },
+                wgpu::BindGroupEntry { binding: 25, resource: R::TextureView(self.wake.display_view()) },
+                wgpu::BindGroupEntry { binding: 26, resource: R::TextureView(self.wake.near_view()) },
+                wgpu::BindGroupEntry { binding: 27, resource: R::TextureView(self.wake.aer_view()) },
             ],
         });
+        self.wake.rebuild_bind(device, &self.heightmap_view, &self.conform_ubo);
         self.brk.rebuild_bind(
             device,
             &self.surface_ubo,
@@ -869,7 +930,17 @@ impl Tidewater {
     }
 
     /// CDLOD selection for this frame's water camera, plus the per-frame uniforms.
+    /// CDLOD selection for this frame's water camera, plus the per-frame uniforms (timed, W7b).
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, camera: Option<&WgrCamera>) {
+        let t0 = std::time::Instant::now();
+        self.prepare_inner(device, queue, camera);
+        let ms = t0.elapsed().as_secs_f32() * 1000.0;
+        self.prep_stats[0] += ms;
+        self.prep_stats[1] = self.prep_stats[1].max(ms);
+        self.prep_stats[4] += 1.0;
+    }
+
+    fn prepare_inner(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, camera: Option<&WgrCamera>) {
         if let Some(p) = self.last_params {
             self.update_shore_field(device, queue, &p);
         }
@@ -888,7 +959,9 @@ impl Tidewater {
             self.sim.regions = [None; shore_sim::K];
         }
         self.brk.lips_on = p.tidewater_shore[2][3] > 0.0;
+        let ts = std::time::Instant::now();
         self.update_stations(queue, p.sea_level);
+        self.prep_stats[2] = self.prep_stats[2].max(ts.elapsed().as_secs_f32() * 1000.0);
         // W4a: the spray lives where the breakers are (the simulated regions)
         let spray_on = (spray_on(&p) || spray_override().is_some_and(|(g, i)| g > 0.0 && i > 0.0))
             && self.sim.any_active()
@@ -896,7 +969,16 @@ impl Tidewater {
         self.spray.poll_stats();
         let cp = [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]];
         let (gain, intensity) = spray_override().unwrap_or((p.tidewater_fx[0], p.tidewater_fx[1]));
-        self.spray.set_frame(queue, dt, p.time, cp, gain, intensity, spray_on);
+        // W6i: the boats' bow spray into the ring's CPU tail, and their hulls as collision bodies
+        let spray_boats = boat_spray::SprayBoat::from_params(&p);
+        let mut requests = Vec::new();
+        if boat_spray_enabled() {
+            self.boat_spray.update(&spray_boats, dt, &mut requests, spray::MAX_REQUESTS);
+        }
+        let bodies: Vec<spray::Body> = spray_boats.iter().flatten().map(|b| b.body()).collect();
+        self.spray.set_frame(queue, dt, p.time, cp, gain, intensity, spray_on, &requests, &bodies);
+        // W6: the boats' wakes (visual only; see wake.rs)
+        self.wake_lanes = self.wake.update(queue, wake::WakeBoat::from_params(&p), dt, p.time, p.sea_level);
         let mut inputs = FrameInputs {
             detail_offset: self.detail_offset,
             morph: &self.cdlod.morph,
@@ -905,6 +987,7 @@ impl Tidewater {
             dt,
             stations: self.brk.ns,
             caustic_tiles: self.caustics.tiles,
+            wake: self.wake_lanes,
         };
         let block0 = surface_block(&p, &inputs);
         self.detail_offset[0] += block0.wind[0] * block0.sea[2] * 0.7 * dt;
@@ -922,7 +1005,8 @@ impl Tidewater {
         // W5a: the underwater composite's block (used only while OP's compositor is engaged)
         {
             let glow = glow_override().unwrap_or(p.tidewater_fx[2]);
-            let uwp = underwater::UwParams::new(cam, &p, self.linear, glow, spec.sizes, self.caustics.tiles, WATER_ABSORPTION, WATER_SCATTERING, p.underwater_gate[0] > 0.5);
+            let torch = underwater::pick_torch(&self.spots, [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]]);
+            let uwp = underwater::UwParams::new(cam, &p, self.linear, glow, spec.sizes, self.caustics.tiles, WATER_ABSORPTION, WATER_SCATTERING, p.underwater_gate[0] > 0.5, torch);
             self.uw.set_frame(queue, &uwp);
         }
         self.fft.set_frame(queue, spec, p.tidewater[0][1], p.time, dt);
@@ -930,7 +1014,9 @@ impl Tidewater {
         let cam_pos = glam::DVec3::new(cam.cam_pos[0] as f64, cam.cam_pos[1] as f64, cam.cam_pos[2] as f64);
         let clip = glam::Mat4::from_cols_array(&cam.proj) * glam::Mat4::from_cols_array(&cam.view);
         let planes = cdlod::SidePlanes::from_clip(clip);
+        let tc = std::time::Instant::now();
         let nodes = cdlod::Selection::new(&self.cdlod, cam_pos, p.sea_level, Some(planes)).run();
+        self.prep_stats[3] += tc.elapsed().as_secs_f32() * 1000.0;
         self.instance_count = nodes.len() as u32;
         if !nodes.is_empty() {
             queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&nodes));
@@ -941,16 +1027,33 @@ impl Tidewater {
     pub fn update(&mut self, encoder: &mut wgpu::CommandEncoder, timers: &crate::gpu_timers::GpuTimers) {
         if self.last_params.is_some() {
             self.fft.dispatch(encoder, timers);
-            // W5b: the caustics follow this frame's FFT
+            // W5b: the caustics follow this frame's FFT (W7h: timed)
             if !self.bind_dirty {
+                timers.begin(encoder, crate::gpu_timers::Region::TwCaustics);
                 self.caustics.dispatch(encoder);
+                timers.end(encoder, crate::gpu_timers::Region::TwCaustics);
+            }
+            // W6: the boat wakes (before the water draw reads them)
+            if !self.bind_dirty {
+                timers.begin(encoder, crate::gpu_timers::Region::TwWake);
+                self.wake.dispatch(encoder);
+                timers.end(encoder, crate::gpu_timers::Region::TwWake);
             }
             if self.sim.any_active() && !self.bind_dirty {
                 timers.begin(encoder, crate::gpu_timers::Region::TwShoreSim);
                 self.sim.dispatch(encoder);
-                self.brk.dispatch(encoder, self.spray.on);
-                self.spray.copy_stats(encoder);
                 timers.end(encoder, crate::gpu_timers::Region::TwShoreSim);
+                // W7h: the crest finder, the breakers' spray emitters and the spray update on their own
+                timers.begin(encoder, crate::gpu_timers::Region::TwBreakers);
+                self.brk.dispatch(encoder, true, self.spray.breakers_on, self.spray.on);
+                self.spray.copy_stats(encoder);
+                timers.end(encoder, crate::gpu_timers::Region::TwBreakers);
+            } else if self.spray.on && !self.bind_dirty {
+                // W6i: the boats' spray offshore, where no shore simulation runs
+                timers.begin(encoder, crate::gpu_timers::Region::TwBreakers);
+                self.brk.dispatch(encoder, false, false, true);
+                self.spray.copy_stats(encoder);
+                timers.end(encoder, crate::gpu_timers::Region::TwBreakers);
             }
         }
     }
@@ -996,6 +1099,96 @@ impl Tidewater {
         self.spray.draw_mask(&mut pass, camera, offset, &self.bind);
     }
 
+    /// W6: the wakes' slots, for the log.
+    /// W5e: this frame's lights; the spot lights are kept for the diver's torch (picked in
+    /// `prepare`, where the water camera is known).
+    pub fn set_lights(&mut self, lights: &[crate::ffi::WgrLight]) {
+        self.spots.clear();
+        self.spots.extend(lights.iter().filter(|l| l.dir[3] > 0.5).take(32).copied());
+    }
+
+    /// W6j.1: the bow-spray diagnostics windows since the last call, one line each (drained).
+    pub fn take_spray_diag(&mut self) -> Vec<String> {
+        self.boat_spray
+            .history
+            .drain(..)
+            .map(|(t, id, d)| {
+                let n = d.frames.max(1) as f32;
+                format!(
+                    "TW spray diag t {t:.2} boat {id}: drops {:.1} mist {:.1} lig {:.1} white {:.1} sheet {:.1} /frame; burst {:.2} impact {:.2}; stem depth {:.2}..{:.2} rate {:.2}; origin-sea {:.2} draft {:.2} fb {:.2}",
+                    d.kinds[0] as f32 / n,
+                    d.kinds[1] as f32 / n,
+                    d.kinds[2] as f32 / n,
+                    d.kinds[3] as f32 / n,
+                    d.kinds[4] as f32 / n,
+                    d.burst_max,
+                    d.imp_sum / n,
+                    d.stem_depth[0],
+                    d.stem_depth[1],
+                    d.rate_max,
+                    d.pose[0],
+                    d.pose[1],
+                    d.pose[2]
+                )
+            })
+            .collect()
+    }
+
+    pub fn wake_stats(&self) -> String {
+        let (particles, requests) = self.boat_spray.stats;
+        let mut diag = String::new();
+        for (id, d) in self.boat_spray.diag.iter().flatten() {
+            let n = d.frames.max(1) as f32;
+            diag += &format!(
+                " | spray diag boat {id}: {} frames, per frame drops {:.1} mist {:.1} lig {:.1} white {:.1} sheet {:.1}; burst max {:.2}, impact share {:.2}; stem depth {:.2}..{:.2} m, rate max {:.2} m/s; origin-sea {:.2} draft {:.2} freeboard {:.2} up.y {:.3}",
+                d.frames,
+                d.kinds[0] as f32 / n,
+                d.kinds[1] as f32 / n,
+                d.kinds[2] as f32 / n,
+                d.kinds[3] as f32 / n,
+                d.kinds[4] as f32 / n,
+                d.burst_max,
+                d.imp_sum / n,
+                d.stem_depth[0],
+                d.stem_depth[1],
+                d.rate_max,
+                d.pose[0],
+                d.pose[1],
+                d.pose[2],
+                d.pose[3]
+            );
+        }
+        format!("{}; bow spray: {particles} particles in {requests} requests last frame, spray on {}{diag}", self.wake.stats(), self.spray.on)
+    }
+
+    /// W7b: the CPU cost of `prepare` since the last call (mean / max ms, the largest shore
+    /// station re-trace, the CDLOD selection mean), then reset.
+    pub fn take_prepare_stats(&mut self) -> String {
+        let n = self.prep_stats[4].max(1.0);
+        let s = format!(
+            "TW prepare CPU ms: mean {:.3} max {:.3} over {} frames | station update max {:.3} ({} traces on the worker, {} from cache) | CDLOD selection mean {:.3} | (W7h) last frame: {} CDLOD nodes, {} triangles (grid {}), {} simulated shore regions",
+            self.prep_stats[0] / n,
+            self.prep_stats[1],
+            self.prep_stats[4] as u32,
+            self.prep_stats[2],
+            self.prep_stats[5] as u32,
+            self.prep_stats[6] as u32,
+            self.prep_stats[3] / n,
+            self.instance_count,
+            self.submitted_triangles(),
+            cdlod::grid(),
+            self.sim.regions.iter().flatten().count()
+        );
+        self.prep_stats = [0.0; 7];
+        // W7j: where the shore field found coast (16 samples), to pick a second coast for captures
+        let n = self.coast.len();
+        let samples: Vec<String> = (0..16.min(n)).map(|i| {
+            let c = self.coast[i * n / 16.min(n).max(1)];
+            format!("{:.0},{:.0}", c[0], c[1])
+        }).collect();
+        format!("{s} | coast blocks {n}: {}", samples.join(" "))
+    }
+
     /// Spray diagnostics for the log: on this frame, stations, and the latest readback.
     pub fn spray_stats(&self) -> (bool, u32, Option<spray::SprayStats>) {
         (self.spray.on, self.brk.ns, self.spray.stats)
@@ -1034,12 +1227,15 @@ impl Tidewater {
     }
 
     /// Shoreline stations for the breakers, traced per simulated region when the region, the
-    /// terrain or the sea level changes (W3d); the others are kept.
+    /// terrain or the sea level changes (W3d); the others are kept. W7c: the trace runs on a
+    /// worker thread and lands a frame or two later (a new region starts its 3 s warm-up
+    /// anyway); recent traces are reused from a small cache.
     fn update_stations(&mut self, queue: &wgpu::Queue, sea_level: f32) {
         let Some((heights, tp, generation)) = &self.terrain else {
             if self.brk.ns != 0 {
                 self.brk.set_stations(queue, &[]);
             }
+            self.brk_slots = [const { None }; shore_sim::K];
             return;
         };
         if tp.hm_width < 2 || tp.hm_height < 2 || tp.terrain_grid <= 0.0 {
@@ -1047,29 +1243,70 @@ impl Tidewater {
         }
         let sea_q = (sea_level / 0.1).round() as i32;
         let mut changed = false;
+        // finished traces: into the cache, and into their slot if it still wants that key
+        while let Ok((i, k, st)) = self.st_rx.try_recv() {
+            self.st_pending.retain(|p| !(p.0 == i && p.1 == k));
+            let st = Arc::new(st);
+            self.st_cache.retain(|c| !(c.0 == i && c.1 == k));
+            self.st_cache.push((i, k, st.clone()));
+            if self.st_cache.len() > STATION_CACHE {
+                self.st_cache.remove(0);
+            }
+            if self.sim.regions[i].map(|r| (r.centre, *generation, sea_q)) == Some(k) {
+                self.brk_slots[i] = Some((k, st));
+                changed = true;
+            }
+        }
         for (i, r) in self.sim.regions.iter().enumerate() {
             let key = r.map(|r| (r.centre, *generation, sea_q));
             let have = self.brk_slots[i].as_ref().map(|s| s.0);
             if key == have {
                 continue;
             }
-            changed = true;
-            self.brk_slots[i] = key.map(|k| {
-                let inp = shore_field::ShoreFieldInput {
-                    heights: heights.clone(),
-                    hm_width: tp.hm_width,
-                    hm_height: tp.hm_height,
-                    origin: [tp.world_origin.x, tp.world_origin.y],
-                    grid: tp.terrain_grid,
-                    sea_level,
-                    swell_dir: [1.0, 0.0],
-                    terrain_gen: *generation,
-                };
+            let Some(k) = key else {
+                self.brk_slots[i] = None;
+                changed = true;
+                continue;
+            };
+            if let Some(c) = self.st_cache.iter().find(|c| c.0 == i && c.1 == k) {
+                self.brk_slots[i] = Some((k, c.2.clone()));
+                self.prep_stats[6] += 1.0;
+                changed = true;
+                continue;
+            }
+            // until the trace lands the slot has no stations (not the old region's)
+            if self.brk_slots[i].is_some() {
+                self.brk_slots[i] = None;
+                changed = true;
+            }
+            if self.st_pending.iter().any(|p| p.0 == i && p.1 == k) {
+                continue;
+            }
+            self.st_pending.push((i, k));
+            self.prep_stats[5] += 1.0;
+            let inp = shore_field::ShoreFieldInput {
+                heights: heights.clone(),
+                hm_width: tp.hm_width,
+                hm_height: tp.hm_height,
+                origin: [tp.world_origin.x, tp.world_origin.y],
+                grid: tp.terrain_grid,
+                sea_level,
+                swell_dir: [1.0, 0.0],
+                terrain_gen: *generation,
+            };
+            let tx = self.st_tx.clone();
+            let job = move || {
                 let h = |x: f32, z: f32| shore_field::height_at(&inp, x, z);
                 let min = [k.0[0] - shore_sim::SIZE * 0.5, k.0[1] - shore_sim::SIZE * 0.5];
                 // runs are numbered per slot (512 apart), so no lip joins two regions
-                (k, breakers::trace_stations(&h, min, shore_sim::SIZE, sea_level, i as u32 * 512))
-            });
+                let st = breakers::trace_stations(&h, min, shore_sim::SIZE, inp.sea_level, i as u32 * 512);
+                // a closed receiver (backend switched away) just drops the result
+                let _ = tx.send((i, k, st));
+            };
+            if std::thread::Builder::new().name("tw-stations".into()).spawn(job).is_err() {
+                // no thread: forget it, the next frame asks again
+                self.st_pending.retain(|p| !(p.0 == i && p.1 == k));
+            }
         }
         if changed {
             let all: Vec<breakers::Station> = self.brk_slots.iter().flatten().flat_map(|s| s.1.iter().copied()).collect();
@@ -1078,8 +1315,7 @@ impl Tidewater {
     }
 
 
-    /// Triangles submitted by the last draw (for the §7 harness).
-    #[allow(dead_code)]
+    /// Triangles submitted by the last draw (for the §7 harness; W7h: in the prepare stats line).
     pub fn submitted_triangles(&self) -> u64 {
         self.instance_count as u64 * (self.grid_index_count as u64 / 3)
     }
@@ -1097,7 +1333,9 @@ mod tests {
         assert_eq!(std::mem::offset_of!(TwSurface, sim_p1), 240);
         assert_eq!(std::mem::offset_of!(TwSurface, brk), 256);
         assert_eq!(std::mem::offset_of!(TwSurface, morph), 272);
-        assert_eq!(std::mem::size_of::<TwSurface>(), 464);
+        // W6: the wake readers' lanes after the CDLOD morph table
+        assert_eq!(std::mem::offset_of!(TwSurface, wake), 464);
+        assert_eq!(std::mem::size_of::<TwSurface>(), 592);
     }
 
     #[test]

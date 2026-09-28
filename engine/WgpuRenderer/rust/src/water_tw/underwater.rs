@@ -10,8 +10,8 @@
 //! window, total internal reflection) is the water material's own (tw_water.wgsl).
 //!
 //! What OP changes: see the header of `tw_underwater.wgsl` (per-pixel medium instead of a
-//! medium pass, FFT-only water height, submerged scene lighting attenuated in post, no caustic
-//! shafts / torch yet: W5b).
+//! medium pass, FFT-only water height, submerged scene lighting attenuated in post; W5b the
+//! caustic shafts; W5e the diver's torch from OP's own spot lights).
 
 use crate::ffi::{WgrCamera, WgrWaterParams};
 
@@ -22,6 +22,45 @@ const UW_WGSL: &str = concat!(include_str!("tw_underwater.wgsl"), "\n", include_
 pub const BAND_PX: f32 = 9.0;
 /// Lowest in-scatter scale under water (see W3j.1: the water glow, at least this).
 pub const MIN_GLOW: f32 = 0.12;
+/// Tidewater's `torchBeam`: the flashlight beam's in-scatter strength (the suspended particles
+/// scatter more than the clear-water coefficient, so the beam reads).
+pub const TORCH_BEAM: f32 = 3.0;
+/// A spot light this close to the eye (m) is the viewer's own torch (W5e).
+pub const TORCH_REACH: f32 = 2.0;
+/// OP's default spot cone when a light gives none: (cos 12 deg)^2 (lighting.wgsl).
+const LOCAL_MIN_INSIDE2: f32 = 0.956_772_8;
+
+/// W5e: the diver's torch -- the brightest spot light within [`TORCH_REACH`] of the camera (OP's
+/// head torch sits 0.35 m ahead of the eye): (position, beam direction + cos^2 of the outer cone,
+/// colour (gamma, night-scaled as OP uploads it) + core radius, cone shaping exponent).
+pub fn pick_torch(lights: &[crate::ffi::WgrLight], cam: [f32; 3]) -> Option<([f32; 4], [f32; 4], [f32; 4], f32)> {
+    let mut best: Option<(f32, ([f32; 4], [f32; 4], [f32; 4], f32))> = None;
+    for l in lights {
+        if l.dir[3] <= 0.5 {
+            continue;
+        }
+        let d = [l.pos[0] - cam[0], l.pos[1] - cam[1], l.pos[2] - cam[2]];
+        if d[0] * d[0] + d[1] * d[1] + d[2] * d[2] > TORCH_REACH * TORCH_REACH {
+            continue;
+        }
+        let power = l.diffuse[0] + l.diffuse[1] + l.diffuse[2];
+        if power <= 1e-4 || best.is_some_and(|b| b.0 >= power) {
+            continue;
+        }
+        let dl = (l.dir[0] * l.dir[0] + l.dir[1] * l.dir[1] + l.dir[2] * l.dir[2]).sqrt().max(1e-6);
+        let cone2 = if l.diffuse[3] > 0.0 { l.diffuse[3] } else { LOCAL_MIN_INSIDE2 };
+        best = Some((
+            power,
+            (
+                [l.pos[0], l.pos[1], l.pos[2], 1.0],
+                [l.dir[0] / dl, l.dir[1] / dl, l.dir[2] / dl, cone2.clamp(0.0, 0.9999)],
+                [l.diffuse[0], l.diffuse[1], l.diffuse[2], l.pos[3].max(0.05)],
+                if l.ambient[3] > 0.0 { l.ambient[3] } else { 1.0 },
+            ),
+        ));
+    }
+    best.map(|b| b.1)
+}
 
 /// `UwParams` in tw_underwater.wgsl.
 #[repr(C)]
@@ -36,6 +75,12 @@ pub struct UwParams {
     pub scattering: [f32; 4],
     pub ocean: [f32; 4],
     pub sizes: [f32; 4],
+    /// W5e the diver's torch: position (w: on), beam direction (w: cos^2 outer cone), colour in
+    /// Tidewater's irradiance units (w: core radius, m), (shaping exponent, beam strength, -, -)
+    pub torch_pos: [f32; 4],
+    pub torch_dir: [f32; 4],
+    pub torch_col: [f32; 4],
+    pub torch_shape: [f32; 4],
 }
 
 fn srgb_to_linear(c: f32) -> f32 {
@@ -47,7 +92,18 @@ impl UwParams {
     /// pipelines' linear-lighting override; `glow`: the Water tab's water glow; `sizes`: the FFT
     /// cascade sizes; `absorption` / `scattering`: the water's coefficients (1/m).
     #[allow(clippy::too_many_arguments)]
-    pub fn new(cam: &WgrCamera, p: &WgrWaterParams, linear: bool, glow: f32, sizes: [f32; 4], caustic_tiles: [f32; 2], absorption: [f32; 3], scattering: [f32; 3], enabled: bool) -> Self {
+    pub fn new(
+        cam: &WgrCamera,
+        p: &WgrWaterParams,
+        linear: bool,
+        glow: f32,
+        sizes: [f32; 4],
+        caustic_tiles: [f32; 2],
+        absorption: [f32; 3],
+        scattering: [f32; 3],
+        enabled: bool,
+        torch: Option<([f32; 4], [f32; 4], [f32; 4], f32)>,
+    ) -> Self {
         let view = glam::DMat4::from_cols_array(&cam.view.map(f64::from));
         let proj = glam::DMat4::from_cols_array(&cam.proj.map(f64::from));
         let inv_vp = (view.inverse() * proj.inverse()).as_mat4().to_cols_array();
@@ -57,6 +113,17 @@ impl UwParams {
         let conv = linear && cam.sun_diffuse[3] <= 0.5;
         let lin = |c: f32| if conv { srgb_to_linear(c) } else { c };
         let pi = std::f32::consts::PI;
+        // (W5e) a local light's colour is its surface irradiance inside the core (lighting.wgsl:
+        // flat core, inverse square after); x PI into Tidewater's units, as the sun's is
+        let (torch_pos, torch_dir, torch_col, torch_shape) = match torch {
+            Some((tp, td, tc, shape)) if tc[0] + tc[1] + tc[2] > 1e-4 => (
+                tp,
+                td,
+                [lin(tc[0]) * pi, lin(tc[1]) * pi, lin(tc[2]) * pi, tc[3]],
+                [shape, torch_beam(), 0.0, 0.0],
+            ),
+            _ => ([0.0; 4], [0.0, 0.0, 1.0, 1.0], [0.0; 4], [1.0, 0.0, 0.0, 0.0]),
+        };
         Self {
             inv_view_proj: inv_vp,
             cam: [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2], near],
@@ -67,8 +134,18 @@ impl UwParams {
             scattering: [scattering[0], scattering[1], scattering[2], p.sea_level],
             ocean: [p.tidewater[0][0], 4.0, caustic_tiles[0], caustic_tiles[1]],
             sizes,
+            torch_pos,
+            torch_dir,
+            torch_col,
+            torch_shape,
         }
     }
+}
+
+/// `WGR_TW_TORCH_BEAM=<k>`: the torch beam's in-scatter strength (default Tidewater's 3; 0 = off).
+fn torch_beam() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_TORCH_BEAM").ok().and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(TORCH_BEAM).clamp(0.0, 50.0))
 }
 
 pub struct TwUnderwater {
@@ -211,7 +288,26 @@ mod tests {
 
     #[test]
     fn params_block_matches_the_wgsl() {
-        assert_eq!(std::mem::size_of::<UwParams>(), 64 + 8 * 16);
+        assert_eq!(std::mem::size_of::<UwParams>(), 64 + 12 * 16);
+    }
+
+    #[test]
+    fn the_torch_is_the_brightest_spot_at_the_eye() {
+        let spot = |x: f32, b: f32| crate::ffi::WgrLight {
+            pos: [x, 0.0, 0.0, 9.0],
+            diffuse: [b, b, b, 0.8],
+            ambient: [0.0, 0.0, 0.0, 0.7],
+            dir: [0.0, 0.0, 2.0, 1.0],
+        };
+        let mut point = spot(0.1, 5.0);
+        point.dir[3] = 0.0;
+        let far = spot(10.0, 5.0);
+        assert!(pick_torch(&[point, far], [0.0; 3]).is_none());
+        let t = pick_torch(&[spot(0.3, 0.5), spot(0.4, 1.0), point, far], [0.0; 3]).expect("torch");
+        assert_eq!(t.0[0], 0.4);
+        assert_eq!(t.1, [0.0, 0.0, 1.0, 0.8]);
+        assert_eq!(t.2[3], 9.0);
+        assert_eq!(t.3, 0.7);
     }
 
     #[test]

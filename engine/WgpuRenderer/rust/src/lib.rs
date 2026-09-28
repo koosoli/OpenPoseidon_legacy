@@ -3552,6 +3552,22 @@ impl Renderer {
         self.drain_deferred_mesh_destroys();
         // TW-WATER W1 — a Water-tab backend change takes effect here, at the frame boundary,
         // before anything this frame reads the water surface.
+        // TW-WATER W7h: the backend-switch soak (plan §8): `WGR_WATER_SOAK=<frames>[,<switches>]`
+        // flips the backend every <frames> frames, <switches> times (default 20), then hands the
+        // choice back; every switch logs the backend's GPU allocations and live handle counts
+        if let Some((every, total)) = water_soak() {
+            let f = WATER_SOAK_FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let k = f / every;
+            let pick = if k == 0 || k > total as u64 {
+                None
+            } else if k % 2 == 1 {
+                Some(crate::water_backend::WaterBackendKind::Tidewater)
+            } else {
+                Some(crate::water_backend::WaterBackendKind::CurrentOp)
+            };
+            self.water.set_soak(pick);
+        }
+        let switches_before = self.water.switch_count();
         if self.water.needs_terrain_heights() {
             if let Some((heights, params)) = self.terrain.shore_height_source() {
                 self.water.set_terrain_heights(heights, params);
@@ -3559,6 +3575,26 @@ impl Renderer {
         }
         self.water
             .apply_pending_switch(&self.device, &self.queue, &self.log);
+        if self.water.switch_count() != switches_before {
+            let c = self.device.get_internal_counters().hal;
+            let mb = ((c.buffer_memory.read().max(0) as u64).saturating_add(c.texture_memory.read().max(0) as u64)) as f64 / (1024.0 * 1024.0);
+            self.log.log(
+                log_level::INFO,
+                &format!(
+                    "W7 switch #{} to {}: backend allocations {:.1} MB | buffers {} textures {} views {} bind groups {} pipelines {} + {} shader modules {}",
+                    self.water.switch_count(),
+                    self.water.kind().label(),
+                    mb,
+                    c.buffers.read(),
+                    c.textures.read(),
+                    c.texture_views.read(),
+                    c.bind_groups.read(),
+                    c.render_pipelines.read(),
+                    c.compute_pipelines.read(),
+                    c.shader_modules.read()
+                ),
+            );
+        }
         let screen = glam::Vec2::new(self.config.width as f32, self.config.height as f32);
         self.gfx2d
             .prepare(&self.device, &self.queue, screen, fog, verts);
@@ -3924,8 +3960,21 @@ impl Renderer {
                         log_level::INFO,
                         &format!("TW spray (W4a): on {on}, breaker stations {stations}, ring {stats:?}"),
                     );
+                    self.log.log(log_level::INFO, &format!("TW wake (W6): {}", tw.wake_stats()));
+                }
+                // W7b: the Tidewater prepare's CPU cost since the last line
+                if let Some(prep) = self.water.tidewater_mut().map(|tw| tw.take_prepare_stats()) {
+                    self.log.log(log_level::INFO, &prep);
+                }
+                // W6j.1: the bow-spray diagnostics windows (WGR_TW_SPRAY_DIAG=1)
+                for line in self.water.tidewater_mut().map(|tw| tw.take_spray_diag()).unwrap_or_default() {
+                    self.log.log(log_level::INFO, &line);
                 }
             }
+        }
+        // W5e: the spot lights, for the Tidewater diver's torch
+        if let Some(tw) = self.water.tidewater_mut() {
+            tw.set_lights(lights);
         }
         self.water.prepare(
             &self.device,
@@ -4652,6 +4701,24 @@ impl Renderer {
         self.gfx3d
             .gi_dispatch(&mut encoder, self.main_cam_off, &self.gpu_timers);
         encoder.pop_debug_group();
+
+        // TW-WATER W7e: in Tidewater mode there is no planar reflection, so nothing splits the
+        // frame above and the GPU sits idle until the single submit at the end (~3 ms of CPU in
+        // W7b's P1 rows, on top of the GPU time). The early work (the water simulation, culls, far
+        // field, GI) is submitted here, as the planar split does, so the GPU runs it while the rest
+        // of the frame is recorded (W7e A/B: P1 wall p50 ~9.2 -> ~6.9 ms, P3 ~7.7 -> ~6.2 ms; W7f
+        // made it the default, WGR_TW_EARLY_SUBMIT=0 restores one submit). Every upload made so far
+        // is flushed with it; an upload made later lands before the second submit only.
+        if reflected_camera.is_none() && self.water.tidewater().is_some() && tw_early_submit() {
+            let early = std::mem::replace(
+                &mut encoder,
+                self.device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("wgr_frame_main"),
+                    }),
+            );
+            self.queue.submit(std::iter::once(early.finish()));
+        }
 
         // Cascade shadow depth passes run first so every segment's draws can
         // sample the completed map, regardless of submission order. Debug groups
@@ -6856,3 +6923,24 @@ mod residency_budget_tests {
         assert!(bytes > 0 && bytes < 64 * MB, "got {bytes} bytes");
     }
 }
+
+/// TW-WATER W7e/W7f: the early part of a Tidewater frame is submitted on its own;
+/// `WGR_TW_EARLY_SUBMIT=0` keeps the frame one submission (A/B, or if a pass is ever found reading
+/// an upload made after the split).
+fn tw_early_submit() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_EARLY_SUBMIT").map_or(true, |v| v.trim() != "0"))
+}
+
+/// TW-WATER W7h: `WGR_WATER_SOAK=<frames>[,<switches>]` (the backend-switch soak).
+fn water_soak() -> Option<(u64, u32)> {
+    static V: std::sync::OnceLock<Option<(u64, u32)>> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        let v = std::env::var("WGR_WATER_SOAK").ok()?;
+        let mut it = v.split(',').map(|x| x.trim().parse::<u64>().ok());
+        let every = it.next().flatten()?.max(2);
+        let total = it.next().flatten().unwrap_or(20).clamp(1, 1000) as u32;
+        Some((every, total))
+    })
+}
+static WATER_SOAK_FRAME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

@@ -92,7 +92,7 @@ fn vs_spray(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     // (OP diagnostics: sprite intensity >= 20, e.g. WGR_TW_SPRAY=1,20, draws every live particle as
     // an opaque magenta dot of at least 4 px, to show where the spray is)
     let dbgDots = sprayR.b.y >= 20.0;
-    let size = max(r, pixel * select(1.3, 4.0, dbgDots));
+    let size = max(r, pixel * select(1.3, 4.0, dbgDots || sprayR.seed.w > 0u));
 
     // motion blur along the velocity projected on the view plane; ligaments are elongated anyway
     let vPerp = vel - Vd * dot(vel, Vd);
@@ -168,7 +168,7 @@ fn vs_spray(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     // far: fade out; very near the eye: sheets and mist would fill the screen
     let maxD = sprayR.b.z;
     let distFade = smoothstep(maxD, maxD * 0.55, dist) * select(smoothstep(0.6, 3.0, dist), 1.0, water);
-    let a = select(baseA * fadeIn * fadeOut * cover * distFade * sprayR.b.y * sprayR.b.w, 1.0, dbgDots && sprayR.b.w > 0.5);
+    let a = select(baseA * fadeIn * fadeOut * cover * distFade * sprayR.b.y * sprayR.cam.w, 1.0, dbgDots && sprayR.cam.w > 0.5);
 
     var o: SprayOut;
     o.vUV = corner;
@@ -177,8 +177,8 @@ fn vs_spray(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     o.vFwd = vec4<f32>(select(select(select(fSpray, fClear, isClear), fMist, isMist), vec3<f32>(0.0), water), halfX / pixel);
     // x: kind + 0.45 x life fraction (the kind tests below have 0.5 of margin)
     o.vMisc = vec4<f32>(kind + sat(t) * 0.45, info.z, size, fract(info.w));
-    // dead particles collapse off-screen
-    let show = alive && a > 1e-4;
+    // dead particles collapse off-screen (OP diagnostics: every live one, WGR_TW_SPRAY_DEBUG)
+    let show = alive && (a > 1e-4 || sprayR.seed.w > 0u);
     let rel = select(vec3<f32>(0.0, -1e5, 0.0), world - frame.cam_pos.xyz, show);
     o.rel = rel;
     o.clip = select(vec4<f32>(2.0, 2.0, 2.0, 1.0), reverse_z(frame.proj * frame.view * vec4<f32>(rel, 1.0)), show);
@@ -233,12 +233,32 @@ fn sprayShade(in: SprayOut) -> vec4<f32> {
     let dsz = vec2<f32>(textureDimensions(waterSceneDepth));
     let suv = in.clip.xy / dsz;
     let sceneZ = _waterSceneZAt(suv);
-    let posViewZ = (frame.view * vec4<f32>(in.rel, 1.0)).z;
+    // (W6i.7: in the material's view space, -z forward; see twView in tw_water.wgsl)
+    let posViewZ = twView(vec4<f32>(in.rel, 1.0)).z;
     let soft = vMisc.z * 1.5 + 0.03;
     let fadeScene = sat((posViewZ - sceneZ) / soft);
     let pos = in.rel + frame.cam_pos.xyz;
     let fadeWater = sat((pos.y - vMisc.y) / (soft * 0.6) + 0.15);
     let aOut = in.vCol.w * shape * fadeScene * fadeWater * (1.0 - farK * 0.4);
+    // (OP diagnostics, WGR_TW_SPRAY_DEBUG=<n>: each live sprite as a disc whose brightness is one of
+    // its opacity factors: 1 vertex opacity (x10), 2 shape, 3 soft scene fade, 4 water fade; 5-7 below)
+    let dbgMode = sprayR.seed.w;
+    if (dbgMode > 0u) {
+        if (dot(uv, uv) > 1.0) { discard; }
+        var f = select(select(select(fadeWater, fadeScene, dbgMode == 3u), shape, dbgMode == 2u), sat(in.vCol.w * 10.0), dbgMode == 1u);
+        // 5: particle view depth minus the opaque scene's (0.5 = equal, 1 = 10 m in front),
+        // 6: the opaque scene's view distance / 100 m, 7: the particle's view distance / 100 m
+        if (dbgMode == 5u) { f = sat(0.5 + (posViewZ - sceneZ) / 20.0); }
+        if (dbgMode == 6u) { f = sat(-sceneZ / 100.0); }
+        if (dbgMode == 7u) { f = sat(-posViewZ / 100.0); }
+        // 8: the opaque depth sample x20 (reverse z), 9: the sprite's own depth x20, 10: the scene
+        // view distance / 20 m, 11: the sprite's view distance / 20 m
+        if (dbgMode == 8u) { f = sat(_waterSceneDepthAt(suv) * 20.0); }
+        if (dbgMode == 9u) { f = sat(in.clip.z * 20.0); }
+        if (dbgMode == 10u) { f = sat(-sceneZ / 20.0); }
+        if (dbgMode == 11u) { f = sat(-posViewZ / 20.0); }
+        return vec4<f32>(f, f * 0.2, 1.0 - f, 1.0);
+    }
     if (aOut < 0.002) { discard; }
     let cloud = cloud_sun_shadow(pos.xz);
     let lit = (in.vCol.rgb + in.vSun * cloud) * shade + in.vFwd.xyz * (glow * cloud);

@@ -11,7 +11,10 @@
 // * the water height is the sea level plus the FFT's vertical displacement (the shore waves are not
 //   evaluated here);
 // * the caustic light shafts are marched here at full resolution with fewer steps (W5b; Tidewater:
-//   a half-resolution pass, 20 steps, resolved by its TAA); the diver's torch is not ported;
+//   a half-resolution pass, 20 steps, resolved by its TAA);
+// * (W5e) the diver's torch is OP's own spot light at the eye (the dev head torch, or any spot
+//   within 2 m of the camera), with OP's cone and fall-off (lighting.wgsl: flat core, inverse
+//   square after, the cone ramped from the axis), marched at full resolution, 8 jittered steps;
 // * OP lights submerged surfaces as if in air: points seen below the surface get Tidewater's
 //   UnderwaterLighting attenuation here, in post (as the water material does from above, W3f);
 // * light in Tidewater's units from OP's sun and ambient (see the water material), the in-scatter
@@ -32,6 +35,10 @@ struct UwParams {
     scattering: vec4<f32>,      // 1/m, w: sea level
     ocean: vec4<f32>,           // FFT amplitude, cascade count, caustic tiles (fine, broad) m
     sizes: vec4<f32>,           // FFT cascade sizes (m)
+    torch_pos: vec4<f32>,       // (W5e) the torch: world position, w: on
+    torch_dir: vec4<f32>,       // beam direction, w: cos^2 of the outer cone
+    torch_col: vec4<f32>,       // irradiance in the core (Tidewater units), w: core radius (m)
+    torch_shape: vec4<f32>,     // x: cone shaping exponent, y: beam in-scatter strength
 };
 
 @group(0) @binding(0) var<uniform> uw: UwParams;
@@ -111,6 +118,17 @@ fn uwMedium(uv: vec2<f32>, camH: f32) -> f32 {
         water = select(0.0, 1.0, q.y < uwWaterHeight(q.xz));
     }
     return water;
+}
+
+// (W5e) OP's spot profile (lighting.wgsl, LGT-012/017): smoothstepped from the axis to the outer
+// cone in the angle, shaped by an exponent; 0 outside
+fn uwTorchCone(cosToAxis: f32) -> f32 {
+    let cOut2 = uw.torch_dir.w;
+    if (cosToAxis <= 0.0 || cosToAxis * cosToAxis < cOut2) { return 0.0; }
+    let aOut = acos(sqrt(clamp(cOut2, 0.0, 1.0)));
+    let aHere = acos(clamp(cosToAxis, 0.0, 1.0));
+    let t = clamp((aOut - aHere) / max(aOut, 1e-4), 0.0, 1.0);
+    return pow(t * t * (3.0 - 2.0 * t), uw.torch_shape.x);
 }
 
 fn uwLit(m: f32, sigT: vec3<f32>, zc: f32, dirY: f32, dist: f32) -> vec3<f32> {
@@ -222,8 +240,34 @@ fn fs_uw(in: UwOut) -> @location(0) vec4<f32> {
             }
             shafts = max(shafts * sunE * sigS * phase * 2.5 * k, vec3<f32>(0.0));
         }
+        // (W5e) the diver's torch (Underwater.js): single scattering of the beam along the view ray
+        // (the lamp sits beside the eye, so the beam is a shaft slightly off the view axis),
+        // extinction on the light and view legs, the sun's lobe (0.75 forward, Schlick) + 0.25
+        // isotropic, OP's flat-core / inverse-square fall-off; up to the scene, at most 25 m
+        var torch = vec3<f32>(0.0);
+        if (uw.torch_pos.w > 0.5 && uw.torch_shape.y > 0.0) {
+            let tSteps = 8;
+            let tMax = min(dist, 25.0);
+            let tds = tMax / f32(tSteps);
+            let tJit = fract(fract(dot(in.pos.xy + vec2<f32>(17.3, 17.3), vec2<f32>(0.06711056, 0.00583715))) * 52.9829189);
+            let sk = 1.55 * g - 0.55 * g * g * g;
+            let r0 = uw.torch_col.w;
+            for (var i = 0; i < tSteps; i++) {
+                let s = (f32(i) + tJit) * tds;
+                let v = uw.cam.xyz + dir * s - uw.torch_pos.xyz;
+                let r2 = max(dot(v, v), 1e-4);
+                let r = sqrt(r2);
+                let Lr = v / r;
+                let spot = uwTorchCone(dot(Lr, uw.torch_dir.xyz));
+                let sd = 1.0 - dot(dir, -Lr) * sk;
+                let ph = (1.0 - sk * sk) / (4.0 * UW_PI) * 0.75 / (sd * sd) + 0.25 / (4.0 * UW_PI);
+                let fall = select(1.0, r0 * r0 / r2, r2 > r0 * r0);
+                torch += exp(-sigT * (r + s)) * (spot * ph * fall);
+            }
+            torch = torch * uw.torch_col.rgb * sigS * tds * uw.torch_shape.y;
+        }
         let T = exp(-sigT * dist);
-        result = base * T + inSun + inAmb + shafts;
+        result = base * T + inSun + inAmb + shafts + torch;
     }
 
     // meniscus contact line and bright rim
