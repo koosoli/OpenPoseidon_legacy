@@ -3896,6 +3896,10 @@ impl Renderer {
                     );
                     self.log.log(log_level::INFO, &format!("TW wake (W6): {}", tw.wake_stats()));
                 }
+                // W7b: the Tidewater prepare's CPU cost since the last line
+                if let Some(prep) = self.water.tidewater_mut().map(|tw| tw.take_prepare_stats()) {
+                    self.log.log(log_level::INFO, &prep);
+                }
             }
         }
         self.water.prepare(

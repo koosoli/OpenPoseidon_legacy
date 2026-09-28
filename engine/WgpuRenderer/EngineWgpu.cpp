@@ -13521,6 +13521,14 @@ void EngineWgpu::PublishRendererStats()
         {
             static std::vector<float> wallMs, gpuMs;
             static double opWater = 0.0, twWater = 0.0;
+            // W7b: the render worker's CPU rows (setup incl. the water prepare, acquire, the encode
+            // split, submit, present), means over the window
+            static const int kCpuRows[] = {WGR_GPU_TIMER_WORKER_SETUP, WGR_GPU_TIMER_WORKER_ACQUIRE,
+                                           WGR_GPU_TIMER_WORKER_ENC_EARLY, WGR_GPU_TIMER_WORKER_ENC_SHADOW,
+                                           WGR_GPU_TIMER_WORKER_ENC_SKY, WGR_GPU_TIMER_WORKER_ENC_DRAW,
+                                           WGR_GPU_TIMER_WORKER_ENC_POST, WGR_GPU_TIMER_WORKER_SUBMIT,
+                                           WGR_GPU_TIMER_WORKER_PRESENT};
+            static double cpuSum[9] = {};
             static int nW = 0;
             static std::chrono::steady_clock::time_point lastFrame{}, lastLog{};
             const auto nowT = std::chrono::steady_clock::now();
@@ -13539,6 +13547,9 @@ void EngineWgpu::PublishRendererStats()
             opWater += op + pos(WGR_GPU_TIMER_WATER_DRAW);
             twWater += pos(WGR_GPU_TIMER_TW_OCEAN_SPECTRUM) + pos(WGR_GPU_TIMER_TW_OCEAN_FFT) + pos(WGR_GPU_TIMER_TW_SHORE_SIM) +
                        pos(WGR_GPU_TIMER_TW_WAKE) + pos(WGR_GPU_TIMER_WATER_DRAW);
+            for (int k = 0; k < 9; ++k)
+                if (kCpuRows[k] < cpuN && cpu[kCpuRows[k]] > 0.0f)
+                    cpuSum[k] += cpu[kCpuRows[k]];
             ++nW;
             if (nowT - lastLog >= std::chrono::seconds(5) && !wallMs.empty())
             {
@@ -13559,6 +13570,14 @@ void EngineWgpu::PublishRendererStats()
                          "| backend allocations {:.1f} MB",
                          frames, w50, w95, w99, g50, g95, g99, opWater / std::max(nW, 1), twWater / std::max(nW, 1),
                          ok ? raw.backend_allocation_bytes / (1024.0 * 1024.0) : -1.0);
+                const double inv = 1.0 / std::max(nW, 1);
+                LOG_INFO(Graphics,
+                         "W7 worker CPU ms mean: setup {:.3f} acquire {:.3f} enc early {:.3f} shadow {:.3f} sky {:.3f} "
+                         "draw {:.3f} post {:.3f} submit {:.3f} present {:.3f}",
+                         cpuSum[0] * inv, cpuSum[1] * inv, cpuSum[2] * inv, cpuSum[3] * inv, cpuSum[4] * inv,
+                         cpuSum[5] * inv, cpuSum[6] * inv, cpuSum[7] * inv, cpuSum[8] * inv);
+                for (double& c : cpuSum)
+                    c = 0.0;
                 wallMs.clear();
                 gpuMs.clear();
                 opWater = twWater = 0.0;

@@ -429,6 +429,8 @@ pub struct Tidewater {
     wake_lanes: [[f32; 4]; wake::SLOTS * 4],
     // W6i boat bow spray
     boat_spray: boat_spray::BoatSpray,
+    // W7b: prepare CPU ms: sum, max, station re-trace max, CDLOD selection sum, frames
+    prep_stats: [f32; 5],
 }
 
 impl Tidewater {
@@ -739,6 +741,7 @@ impl Tidewater {
             wake,
             wake_lanes: [[0.0; 4]; wake::SLOTS * 4],
             boat_spray: Default::default(),
+            prep_stats: [0.0; 5],
         };
         me.rebuild_bind(device);
         me
@@ -907,7 +910,17 @@ impl Tidewater {
     }
 
     /// CDLOD selection for this frame's water camera, plus the per-frame uniforms.
+    /// CDLOD selection for this frame's water camera, plus the per-frame uniforms (timed, W7b).
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, camera: Option<&WgrCamera>) {
+        let t0 = std::time::Instant::now();
+        self.prepare_inner(device, queue, camera);
+        let ms = t0.elapsed().as_secs_f32() * 1000.0;
+        self.prep_stats[0] += ms;
+        self.prep_stats[1] = self.prep_stats[1].max(ms);
+        self.prep_stats[4] += 1.0;
+    }
+
+    fn prepare_inner(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, camera: Option<&WgrCamera>) {
         if let Some(p) = self.last_params {
             self.update_shore_field(device, queue, &p);
         }
@@ -926,7 +939,9 @@ impl Tidewater {
             self.sim.regions = [None; shore_sim::K];
         }
         self.brk.lips_on = p.tidewater_shore[2][3] > 0.0;
+        let ts = std::time::Instant::now();
         self.update_stations(queue, p.sea_level);
+        self.prep_stats[2] = self.prep_stats[2].max(ts.elapsed().as_secs_f32() * 1000.0);
         // W4a: the spray lives where the breakers are (the simulated regions)
         let spray_on = (spray_on(&p) || spray_override().is_some_and(|(g, i)| g > 0.0 && i > 0.0))
             && self.sim.any_active()
@@ -978,7 +993,9 @@ impl Tidewater {
         let cam_pos = glam::DVec3::new(cam.cam_pos[0] as f64, cam.cam_pos[1] as f64, cam.cam_pos[2] as f64);
         let clip = glam::Mat4::from_cols_array(&cam.proj) * glam::Mat4::from_cols_array(&cam.view);
         let planes = cdlod::SidePlanes::from_clip(clip);
+        let tc = std::time::Instant::now();
         let nodes = cdlod::Selection::new(&self.cdlod, cam_pos, p.sea_level, Some(planes)).run();
+        self.prep_stats[3] += tc.elapsed().as_secs_f32() * 1000.0;
         self.instance_count = nodes.len() as u32;
         if !nodes.is_empty() {
             queue.write_buffer(&self.instance_buf, 0, bytemuck::cast_slice(&nodes));
@@ -1058,6 +1075,22 @@ impl Tidewater {
     pub fn wake_stats(&self) -> String {
         let (particles, requests) = self.boat_spray.stats;
         format!("{}; bow spray: {particles} particles in {requests} requests last frame, spray on {}", self.wake.stats(), self.spray.on)
+    }
+
+    /// W7b: the CPU cost of `prepare` since the last call (mean / max ms, the largest shore
+    /// station re-trace, the CDLOD selection mean), then reset.
+    pub fn take_prepare_stats(&mut self) -> String {
+        let n = self.prep_stats[4].max(1.0);
+        let s = format!(
+            "TW prepare CPU ms: mean {:.3} max {:.3} over {} frames | station re-trace max {:.3} | CDLOD selection mean {:.3}",
+            self.prep_stats[0] / n,
+            self.prep_stats[1],
+            self.prep_stats[4] as u32,
+            self.prep_stats[2],
+            self.prep_stats[3] / n
+        );
+        self.prep_stats = [0.0; 5];
+        s
     }
 
     /// Spray diagnostics for the log: on this frame, stations, and the latest readback.
