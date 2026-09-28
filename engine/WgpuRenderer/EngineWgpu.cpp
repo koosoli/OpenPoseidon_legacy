@@ -10865,6 +10865,48 @@ Engine::WarmPatnikProbeReport EngineWgpu::ProbeWarmPatnikStage() const
     return out; // current alias drops here; never retained in the report
 }
 
+bool EngineWgpu::CaptureWarmRapStageRead(const char* key, WarmTextureRead& out) const
+{
+    out = {};
+    static const bool exactFixtureEnabled = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_RAP_STAGE_WARM_CAPTURE");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    if (!exactFixtureEnabled || !ObjectStreamPreparer::WarmTextureJobsEnabled() ||
+        !ArchiveSourceBinding::ModelReadScope::MaterialPreflightReservationEnabled() ||
+        !Foundation::IsMainThread() || !_gpuDriven || !_renderer || !_wbank || !key ||
+        std::strcmp(key, R"(dz\plants\tree\data\t_piceaabies_trunk_no.paa)") != 0)
+        return false;
+    try
+    {
+        const TextureWgpu* texture = nullptr;
+        Ref<Texture> initialized;
+        const int index = _wbank->Find(RStringB(key)); // no-load lookup first
+        if (index >= 0)
+        {
+            if (index >= _wbank->NTextures()) return false;
+            texture = dynamic_cast<const TextureWgpu*>(_wbank->GetTexture(index));
+        }
+        else
+        {
+            // Existing TextureBank::Load performs header Init only; this scope
+            // reserves one of the two material-preflight binding slots.
+            ArchiveSourceBinding::ModelReadScope purpose(
+                ArchiveSourceBinding::ModelReadScope::Intent::MaterialPreflight);
+            initialized = _wbank->Load(key);
+            texture = dynamic_cast<const TextureWgpu*>(initialized.GetRef());
+        }
+        if (!texture || !texture->CanWarmPrepare() ||
+            render::PreparedTextureStore::Key(texture->SourceName()) != key) return false;
+        auto source = texture->CurrentArchiveSourceBinding(); // mounted exact member, no read
+        if (!source || !source->Request().HasArchiveIdentity() ||
+            !source->Request().bytes || source->Request().bytes > 16 * 1024 * 1024) return false;
+        out = {key, std::move(source)};
+        return true;
+    }
+    catch (...) { return false; } // optional capture preserves ordinary owner upload
+}
+
 void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
     std::vector<WarmTextureRead>& reads, size_t& workRemaining, size_t* stageSourceAttemptsRemaining) const
 {

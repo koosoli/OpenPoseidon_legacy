@@ -49,6 +49,7 @@
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // worker-prepared texture store (clear + stats)
 #include <Poseidon/World/Model/Model.hpp>              // the IR handed over by ObjectStreamPreparer
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamTreeFixture.hpp>
 #include <Poseidon/World/Terrain/WarmModelCaptureWindow.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp> // SnapshotObjectStreamDiag fills its counters
 #include <Poseidon/Asset/Formats/Material/ShaderSchema.hpp>
@@ -4270,8 +4271,58 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         if (row < 2)
                             for (const auto& material : conv.rapStages->materials)
                                 LOG_INFO(World, "RVMAT raP owner candidate: generation={} modelIndex={} material={} stage={} (names only; no current binding or PAA preparation)",
-                                    conv.rapStages->generation, placement.modelIndex, material.key, material.stageName);
+                                     conv.rapStages->generation, placement.modelIndex, material.key, material.stageName);
                     }
+                    if (conv.rapStages) try
+                    {
+                        // One exact DayZ tree stage, under an additional default-off switch.
+                        // Candidate names are advisory until this owner captures a current
+                        // initialized PAA binding; the worker never touches a mounted bank.
+                        static const bool rapStageWarm = [] {
+                            const char* flag = std::getenv("WGR_OBJECT_STREAM_RAP_STAGE_WARM_CAPTURE");
+                            return flag && std::strcmp(flag, "1") == 0 &&
+                                ObjectStreamPreparer::WarmTextureJobsEnabled();
+                        }();
+                        if (rapStageWarm && GEngine && conv.model &&
+                            conv.rapStages->modelIndex == placement.modelIndex &&
+                            Streaming::SelectedTreeFixtureModel(conv.model->sourcePath))
+                        {
+                            const auto token = _modernObjectPreparer->QueryRadius(placement.modelIndex);
+                            if (token.generation == conv.rapStages->generation &&
+                                token.modelIdentity == conv.model->sourcePath)
+                            {
+                                for (const auto& material : conv.rapStages->materials)
+                                {
+                                    const bool exactMaterial =
+                                        material.key == R"(dz\plants\tree\data\t_piceaabies_2d_trunk.rvmat)" ||
+                                        material.key == R"(dz\plants\tree\data\d_piceaabies_stumpb_trunk_a.rvmat)";
+                                    if (!exactMaterial || material.stageName !=
+                                        R"(dz\plants\tree\data\t_piceaabies_trunk_no.paa)") continue;
+                                    WarmTextureRead read;
+                                    const bool captured = GEngine->CaptureWarmRapStageRead(
+                                        material.stageName.c_str(), read);
+                                    if (captured)
+                                    {
+                                        std::vector<WarmTextureRead> reads;
+                                        reads.push_back(std::move(read));
+                                        const auto submitted = _modernObjectPreparer->SubmitWarmTextures(
+                                            placement.modelIndex, token, std::move(reads));
+                                        static std::atomic<unsigned> rapWarmRows{0};
+                                        if (rapWarmRows.fetch_add(1, std::memory_order_relaxed) < 2)
+                                            LOG_INFO(World, "RVMAT raP stage warm admission: modelIndex={} source={} captured=true submit={} (current PAA source; no Take/upload proof)",
+                                                placement.modelIndex, material.stageName,
+                                                static_cast<unsigned>(submitted));
+                                        break; // the two exact materials share this one stage
+                                    }
+                                    static std::atomic<unsigned> rapWarmRefusals{0};
+                                    if (rapWarmRefusals.fetch_add(1, std::memory_order_relaxed) < 2)
+                                        LOG_INFO(World, "RVMAT raP stage warm admission: modelIndex={} source={} captured=false (ordinary upload fallback)",
+                                            placement.modelIndex, material.stageName);
+                                }
+                            }
+                        }
+                    }
+                    catch (...) {} // Optional stage admission never prevents shape install.
                     preadapted = conv.shape;
                     preparsed = std::move(conv.model);
                     coldTexture = std::move(conv.coldTexture);

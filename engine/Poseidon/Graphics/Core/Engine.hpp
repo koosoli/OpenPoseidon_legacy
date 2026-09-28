@@ -3367,6 +3367,9 @@ class Engine : public IGraphicsEngine
         float x=1200,float y=11.5f,float z=1200,const GeometryPageDiskFixtureInput* disk=nullptr,
         const GeometryPageCameraDemandInput* camera=nullptr) { return {}; }
     virtual WarmPatnikProbeReport ProbeWarmPatnikStage() const { return {}; } // append virtual slot
+    // Exact opted-in raP candidate only. The renderer may initialize one PAA
+    // header on the owner thread and return its current immutable source binding.
+    virtual bool CaptureWarmRapStageRead(const char*, WarmTextureRead&) const { return false; }
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy
