@@ -1,4 +1,4 @@
-param([ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
+param([ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$Interactive,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
  [string]$Label='original-geometry-pages',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
 if($SurfaceFault -ne 'None'){$SurfaceCertificate=$true}
@@ -6,6 +6,7 @@ if($MainCountProbe){$SurfaceCertificate=$true}
 if($CameraTupleScaleRefusal){$CameraTuple=$true}
 if($AutoFine -and !$ProjectedPrefetch){throw 'AutoFine requires the private projected prefetch fixture'}
 if($AutoCoarse -and !$AutoFine){throw 'AutoCoarse requires the private Auto-Fine fixture'}
+if($Interactive -and !$AutoFine){throw 'Interactive showcase requires private Auto-Fine'}
 if($ProjectedPrefetch){$CameraTuple=$true;if($CameraPrefetch -or $CameraTupleScaleRefusal){throw 'ProjectedPrefetch requires native camera tuple and is exclusive with distance prefetch'}}
 if($CameraTuple){$SurfaceCertificate=$true;if($DiskFault -ne 'None' -or $SurfaceFault -ne 'None'){throw 'CameraTuple requires valid disk and surface artifacts'}}
 if($CameraPrefetch -and $DiskFault -ne 'None'){throw 'CameraPrefetch requires a valid disk artifact'}
@@ -18,6 +19,7 @@ if(!$env:LOCK_OWNER){
  if($ProjectedPrefetch){$argv+='-ProjectedPrefetch'}
  if($AutoFine){$argv+='-AutoFine'}
  if($AutoCoarse){$argv+='-AutoCoarse'}
+ if($Interactive){$argv+='-Interactive'}
  if($CameraTuple){$argv+='-CameraTuple'}
  if($CameraTupleScaleRefusal){$argv+='-CameraTupleScaleRefusal'}
  if($SurfaceCertificate){$argv+='-SurfaceCertificate'}
@@ -166,7 +168,7 @@ try{
  $argv+=@('--geometry-original-source',('"'+$OriginalSource+'"'),'--geometry-original-sha256',$suppliedHash,'--geometry-original-bytes',[string]$rawBytes,'--geometry-original-key',$originalKey)
  if($SurfaceCertificate){$argv+=@('--geometry-pages-surface-manifest',('"'+$surfaceManifest+'"'),$surfaceManifestHash,'--geometry-pages-surface-certificate',('"'+$surfaceDescriptor+'"'),$surfaceDescriptorHash)}
  @{head=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash $PSCommandPath).Hash;generatorSha256=(Get-FileHash $generator).Hash;installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'));hashes=$hashes;environment=$environment;argv=$argv;fixture=$producer;originalProof=$originalProducer;sourceGeneratorSha256=(Get-FileHash $originalGenerator).Hash;diskFault=$DiskFault;surfaceCertificate=[bool]$SurfaceCertificate;surfaceFault=$SurfaceFault;surfaceProof=$surfaceProof;cameraPrefetch=[bool]$CameraPrefetch;projectedPrefetch=[bool]$ProjectedPrefetch;autoFine=[bool]$AutoFine;autoCoarse=[bool]$AutoCoarse;cameraTuple=[bool]$CameraTuple;cameraTupleScaleRefusal=[bool]$CameraTupleScaleRefusal;toolsSha256=$toolsHash;scope='Actual original-source private paging; copied record cuts, no retail/all-pass/pixel/FPS proof'}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'provenance.json')
- $p=Start-Process -FilePath $exe -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $argv
+ $p=Start-Process -FilePath $exe -WorkingDirectory $GameDir -WindowStyle $(if($Interactive){'Normal'}else{'Hidden'}) -PassThru -ArgumentList $argv
  $null=$p.Handle
  $client=[Net.Sockets.TcpClient]::new();$until=[DateTime]::UtcNow.AddSeconds(90)
  while(!$client.Connected){try{$client.Connect('127.0.0.1',$port)}catch{if($p.HasExited -or [DateTime]::UtcNow -gt $until){throw};Start-Sleep -Milliseconds 250}}
@@ -648,6 +650,13 @@ try{
          $autoSelected.pageReservedBytes -ne 0){throw 'Private Auto-Fine lacks fresh prepared source/renderer association'}
       $automaticPrepared=$autoSelected;$prepared=$autoSelected
       Capture 'camera-auto-fine.png'
+      if($Interactive){
+       @{pid=$p.Id;status='Ready';scope='Visible controlled original-model GeometryPage fixture; not whole-world asset streaming';output=$out;installed=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt'))}|ConvertTo-Json -Depth 4|Set-Content (Join-Path $out 'interactive-session.json')
+       Write-Host "Interactive GeometryPage fixture ready: PID $($p.Id), evidence $out"
+       $p.WaitForExit()
+       @{pid=$p.Id;status='Closed';exitCode=$p.ExitCode;normalShutdown=($p.ExitCode -eq 0)}|ConvertTo-Json -Depth 4|Set-Content (Join-Path $out 'interactive-session-closed.json')
+       return
+      }
      }else{
       $automaticPrepared=WaitCamera {param($c) $c.finePrepared -and $c.fineResident -and $c.status -eq 'Ready' -and $c.observedRequestId -eq $c.requestId -and $c.mainFrameReturned -and $c.renderReturnStatus -eq 0 -and $c.pageLiveJobs -eq 0 -and $c.pageReservedBytes -eq 0}
       if($automaticPrepared.cameraRequests -ne 2 -or $automaticPrepared.cameraAttempts -ne 2 -or $automaticPrepared.cameraRequestedRevision -ne $automaticPrepared.cameraDemandRevision -or $automaticPrepared.meshCount -ne (1+$originalProducer.selectedClusters) -or $automaticPrepared.meshesPresent -ne $automaticPrepared.meshCount -or $automaticPrepared.meshesAbsent -ne 0 -or $automaticPrepared.preparedProducerModel -eq 4294967295 -or $automaticPrepared.preparedProducerModel -eq $coarse.producerModel -or $automaticPrepared.fineGeneration -ne 1){throw 'Automatic fine preparation lacks complete fresh rows/identity'}
