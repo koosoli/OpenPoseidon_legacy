@@ -10591,7 +10591,8 @@ impl Gfx3d {
         if epoch != rendered_epoch || epoch != self.cull.instance_epoch() ||
             image != self.gi.rsm_image_generation ||
             !same_sky_view(view, self.gi.rsm_view) { return None; }
-        Some(gi_rsm_cached_count::Key::new(generation, image, view, epoch))
+        let cull = self.cull.sky_count_cull_key(sky_vis::DIRECTION_COUNT)?;
+        Some(gi_rsm_cached_count::Key::new(generation, image, view, epoch, cull))
     }
     pub fn local0_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
         self.cull.harvest_local0_target_count(device);
@@ -10622,8 +10623,9 @@ impl Gfx3d {
         let target = self.shadow_target.as_ref()?;
         let first_local = self.cull.shadow_view_count().checked_sub(self.local_shadow_count)?;
         let shape = (target.res, first_local, self.local_shadow_count as u32, self.shadow_gen);
+        let cull = self.cull.shadow_count_cull_key(tile.cull_index)?;
         local_cached_count::Key::current(publication, tile, shape, self.local_cache_shape,
-            target.layers, self.local_view_key[index], self.cull.instance_epoch())
+            target.layers, self.local_view_key[index], self.cull.instance_epoch(), cull)
     }
 
     pub fn reflection_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
@@ -10647,7 +10649,8 @@ impl Gfx3d {
         let (view, rendered_epoch) = self.interior_sky_rendered[i]?;
         if direction != i || epoch != rendered_epoch || epoch != self.cull.instance_epoch() ||
             !same_sky_view(view, self.interior_sky_views[i]) { return None; }
-        Some(interior_cached_count::Key::new(i, generation, self.interior_sky_gen, view, epoch))
+        let cull = self.cull.sky_count_cull_key(i)?;
+        Some(interior_cached_count::Key::new(i, generation, self.interior_sky_gen, view, epoch, cull))
     }
 
     pub fn cull_dispatch(

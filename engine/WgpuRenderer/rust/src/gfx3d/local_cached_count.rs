@@ -1,19 +1,20 @@
 //! Private COUNT retained only for the exact published local shadow tile.
 //! The request identity is separate from the atlas allocation and tile image identity.
 
-use super::{cull::{MainCountFact, MainCountIdentity, MainCountStatus}, local_publication::LocalTileIdentity};
+use super::{cull::{CountCullInputKey, MainCountFact, MainCountIdentity, MainCountStatus}, local_publication::LocalTileIdentity};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Key {
     pub publication: u64,
     pub tile: LocalTileIdentity,
+    pub cull: CountCullInputKey,
 }
 
 impl Key {
     pub fn current(publication: u64, tile: LocalTileIdentity,
                    target_shape: (u32, usize, u32, u64),
                    cache_shape: (u32, usize, u32, u64), target_layers: u32,
-                   rendered_key: Option<u64>, epoch: u64) -> Option<Self> {
+                   rendered_key: Option<u64>, epoch: u64, cull: CountCullInputKey) -> Option<Self> {
         let (res, first_local, local_count, _) = target_shape;
         (publication != 0 && tile.tile_index < 24 && tile.tile_index < local_count as usize &&
             res != 0 && local_count != 0 &&
@@ -22,7 +23,7 @@ impl Key {
             first_local.checked_add(tile.tile_index) == Some(tile.cull_index) &&
             tile.instance_epoch == epoch &&
             rendered_key == Some(tile.key))
-            .then_some(Self { publication, tile })
+            .then_some(Self { publication, tile, cull })
     }
 }
 
@@ -67,12 +68,27 @@ impl CachedCount {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytemuck::Zeroable;
+
+    #[test]
+    fn changed_cull_input_rejects_published_absence() {
+        let mut cache = CachedCount::default();
+        let old = key(1, 4);
+        let identity = id(1, 9);
+        cache.publish(old, identity);
+        cache.observe(MainCountFact { identity, status: MainCountStatus::Absent, count: 0 });
+        assert_eq!(cache.fact(Some(old)).status, MainCountStatus::Absent);
+        let mut params = super::super::cull::CullParamsGpu::zeroed();
+        params.frustum[0][0] = 1.0;
+        let changed = Key { cull: CountCullInputKey::from_params(&params), ..old };
+        assert_eq!(cache.fact(Some(changed)).status, MainCountStatus::Unknown);
+    }
 
     fn key(generation: u64, solar: usize) -> Key {
         Key { publication: generation, tile: LocalTileIdentity {
             tile_index: 0, key: 42, instance_epoch: 7,
             shape: (2048, solar, 1, 5), cull_index: solar,
-        }}
+        }, cull: CountCullInputKey::default() }
     }
     fn id(token: u64, source_generation: u64) -> MainCountIdentity {
         MainCountIdentity { token, model_id: 4, source_generation, cull_epoch: 7, target_revision: 1 }
@@ -81,7 +97,7 @@ mod tests {
         Key { publication: generation, tile: LocalTileIdentity {
             tile_index, key: 42 + tile_index as u64, instance_epoch: 7,
             shape: (2048, solar, 24, 5), cull_index: solar + tile_index,
-        }}
+        }, cull: CountCullInputKey::default() }
     }
 
     #[test]
@@ -134,7 +150,8 @@ mod tests {
             let tile = original.tile;
             let shape = tile.shape;
             let current = |publication, tile, target_shape, cache_shape, layers, rendered_key, epoch|
-                Key::current(publication, tile, target_shape, cache_shape, layers, rendered_key, epoch);
+                Key::current(publication, tile, target_shape, cache_shape, layers, rendered_key, epoch,
+                    CountCullInputKey::default());
             assert_eq!(current(1, tile, shape, shape, solar as u32 + 1, Some(42), 7), Some(original));
             assert_eq!(current(0, tile, shape, shape, solar as u32 + 1, Some(42), 7), None);
             assert_eq!(current(1, tile, shape, shape, solar as u32, Some(42), 7), None);
@@ -157,7 +174,8 @@ mod tests {
                 let tile = key.tile;
                 let shape = tile.shape;
                 let live = |candidate, target, cache, layers, rendered, epoch|
-                    Key::current(1, candidate, target, cache, layers, rendered, epoch);
+                    Key::current(1, candidate, target, cache, layers, rendered, epoch,
+                        CountCullInputKey::default());
                 assert_eq!(live(tile, shape, shape, solar as u32 + 1, Some(tile.key), 7), Some(key));
                 assert_eq!(live(tile, shape, shape, solar as u32, Some(tile.key), 7), None);
                 assert_eq!(live(tile, shape, shape, solar as u32 + 1, None, 7), None);

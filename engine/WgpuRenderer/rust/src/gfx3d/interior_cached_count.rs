@@ -2,7 +2,7 @@
 //! The readback identity is a request identity; the cache identity also needs
 //! the publication and texture generations and the view used to draw it.
 
-use super::{cull::{MainCountFact, MainCountIdentity, MainCountStatus}, SkyVisView};
+use super::{cull::{CountCullInputKey, MainCountFact, MainCountIdentity, MainCountStatus}, SkyVisView};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Key {
@@ -11,15 +11,17 @@ pub struct Key {
     pub target: u64,
     pub view: [u32; 18],
     pub epoch: u64,
+    pub cull: CountCullInputKey,
 }
 
 impl Key {
-    pub fn new(direction: usize, publication: u64, target: u64, view: SkyVisView, epoch: u64) -> Self {
+    pub fn new(direction: usize, publication: u64, target: u64, view: SkyVisView,
+               epoch: u64, cull: CountCullInputKey) -> Self {
         let mut bits = [0; 18];
         bits[..16].copy_from_slice(&view.view_proj.to_cols_array().map(f32::to_bits));
         bits[16] = view.kernel_uv.to_bits();
         bits[17] = view.bias_ndc.to_bits();
-        Self { direction, publication, target, view: bits, epoch }
+        Self { direction, publication, target, view: bits, epoch, cull }
     }
 }
 
@@ -63,10 +65,26 @@ impl CachedCount {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytemuck::Zeroable;
+
+    #[test]
+    fn changed_cull_input_rejects_published_absence() {
+        let mut cache = CachedCount::default();
+        let old = key(1);
+        let identity = id(1, 9);
+        cache.publish(old, identity);
+        cache.observe(MainCountFact { identity, status: MainCountStatus::Absent, count: 0 });
+        assert_eq!(cache.fact(Some(old)).status, MainCountStatus::Absent);
+        let mut params = super::super::cull::CullParamsGpu::zeroed();
+        params.pixel_limit = 1.0;
+        let changed = Key { cull: CountCullInputKey::from_params(&params), ..old };
+        assert_eq!(cache.fact(Some(changed)).status, MainCountStatus::Unknown);
+    }
 
     fn key(generation: u64) -> Key {
         Key::new(0, generation, 3, super::super::sky_vis::build_views(
-            glam::Vec3::ZERO, &super::super::sky_vis::SkyVisSettings::default())[0], 7)
+            glam::Vec3::ZERO, &super::super::sky_vis::SkyVisSettings::default())[0], 7,
+            CountCullInputKey::default())
     }
     fn id(token: u64, source_generation: u64) -> MainCountIdentity {
         MainCountIdentity { token, model_id: 4, source_generation, cull_epoch: 7, target_revision: 1 }

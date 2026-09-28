@@ -44,6 +44,31 @@ pub struct CullParamsGpu {
     pub _target_pad: [u32; 2],
 }
 
+/// Collision-free identity of the inputs that can change a plain COUNT's
+/// target-model zero/nonzero result. LOD section choice, Hi-Z and variant
+/// capacity do not affect that result. This private key is formed only for
+/// diagnostic cached-view publication/lookups, never in the normal cull path.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CountCullInputKey([u32; 32]);
+
+impl CountCullInputKey {
+    pub(crate) fn from_params(p: &CullParamsGpu) -> Self {
+        let mut bits = [0; 32];
+        for (i, plane) in p.frustum.iter().enumerate() {
+            for (j, value) in plane.iter().enumerate() {
+                bits[i * 4 + j] = value.to_bits();
+            }
+        }
+        for i in 0..3 { bits[24 + i] = p.cam_pos[i].to_bits(); }
+        bits[27] = p.objects_z2.to_bits();
+        bits[28] = p.lod_scale.to_bits();
+        bits[29] = p.lod_inv_width.to_bits();
+        bits[30] = p.pixel_limit.to_bits();
+        bits[31] = p.debug_flags & 1;
+        Self(bits)
+    }
+}
+
 // One retained instance. `world` is the ABSOLUTE model->world transform (the GPU-driven VS
 // subtracts cam_pos in-shader); `center.xyz` is the transformed bounding-sphere center and
 // `center.w` the uniform scale — both used by the cull compute (which never reads `world`).
@@ -2773,6 +2798,10 @@ impl CullState {
         }
     }
 
+    pub fn shadow_count_cull_key(&self, i: usize) -> Option<CountCullInputKey> {
+        self.shadow_views.get(i).map(|v| CountCullInputKey::from_params(&v.params))
+    }
+
     pub fn set_reflection_params(&mut self, device: &wgpu::Device, mut params: CullParamsGpu) {
         params.debug_flags = self.debug_flags;
         let view = self.reflection_view.get_or_insert_with(|| {
@@ -2807,6 +2836,10 @@ impl CullState {
             params.debug_flags = self.debug_flags;
             v.params = params;
         }
+    }
+
+    pub fn sky_count_cull_key(&self, i: usize) -> Option<CountCullInputKey> {
+        self.sky_views.get(i).map(|v| CountCullInputKey::from_params(&v.params))
     }
 
     // Upload dirty tables + instances + params and (re)build the bind group. Call once per
@@ -4424,6 +4457,42 @@ fn upload_slice<T: bytemuck::Pod>(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn plain_count_cull_key_tracks_exact_classify_inputs() {
+        let base = CullParamsGpu::zeroed();
+        let key = CountCullInputKey::from_params(&base);
+        let mut changed = base;
+        changed.frustum[5][3] = 1.0;
+        assert_ne!(CountCullInputKey::from_params(&changed), key);
+        changed = base; changed.cam_pos[2] = 1.0;
+        assert_ne!(CountCullInputKey::from_params(&changed), key);
+        changed = base; changed.objects_z2 = 1.0;
+        assert_ne!(CountCullInputKey::from_params(&changed), key);
+        changed = base; changed.lod_scale = 1.0;
+        assert_ne!(CountCullInputKey::from_params(&changed), key);
+        changed = base; changed.lod_inv_width = 1.0;
+        assert_ne!(CountCullInputKey::from_params(&changed), key);
+        changed = base; changed.pixel_limit = 1.0;
+        assert_ne!(CountCullInputKey::from_params(&changed), key);
+        changed = base; changed.debug_flags = 1;
+        assert_ne!(CountCullInputKey::from_params(&changed), key);
+
+        changed = base;
+        changed.cam_pos[3] = 1.0;
+        changed.debug_flags = 2;
+        changed.view_proj[0][0] = 1.0;
+        changed.viewport = [1.0, 1.0];
+        changed.hiz_mips = 1;
+        changed.occlusion = 1;
+        changed.variant_capacity = 1;
+        changed.variant_count = 1;
+        changed.instance_count = 1; // foreign rows may churn while target rows stay fixed
+        changed.target_model_id = 1;
+        changed.target_count_enabled = 1;
+        assert_eq!(CountCullInputKey::from_params(&changed), key,
+            "plain COUNT ignores the Hi-Z/variant tail and separately bound target identity");
+    }
 
     #[test]
     fn target_count_stamp_ignores_foreign_rows_and_rejects_changed_target_before_copy() {
@@ -7254,7 +7323,7 @@ pub(crate) mod tests {
         let sky_view = super::super::sky_vis::build_views(glam::Vec3::ZERO,
             &super::super::sky_vis::SkyVisSettings::default())[0];
         let cache_key = super::super::interior_cached_count::Key::new(
-            0, 1, 1, sky_view, cull.instance_epoch());
+            0, 1, 1, sky_view, cull.instance_epoch(), cull.sky_count_cull_key(0).unwrap());
         let mut cached_count = super::super::interior_cached_count::CachedCount::default();
         cached_count.publish(cache_key, cull.sky0_target_count_fact().identity);
         for _ in 0..64 {
@@ -7298,7 +7367,7 @@ pub(crate) mod tests {
         assert!(cull.sky0_target_count_submitted(4));
         assert!(cull.sky0_target_count_commit(4));
         let absent_key = super::super::interior_cached_count::Key::new(
-            0, 2, 1, sky_view, cull.instance_epoch());
+            0, 2, 1, sky_view, cull.instance_epoch(), cull.sky_count_cull_key(0).unwrap());
         cached_count.publish(absent_key, cull.sky0_target_count_fact().identity);
         for _ in 0..64 {
             cull.harvest_sky0_target_count(&device);
@@ -7364,7 +7433,8 @@ pub(crate) mod tests {
         local_publication.final_submit_accepted();
         let (generation, published) = local_publication.commit(local_tile).unwrap();
         let local_key = super::super::local_cached_count::Key::current(generation, published,
-            local_tile.shape, local_tile.shape, 5, Some(42), cull.instance_epoch()).unwrap();
+            local_tile.shape, local_tile.shape, 5, Some(42), cull.instance_epoch(),
+            cull.shadow_count_cull_key(local_tile.cull_index).unwrap()).unwrap();
         let mut local_cache = super::super::local_cached_count::CachedCount::default();
         local_cache.publish(local_key, cull.batch_target_count_fact(4).identity);
         let sky_views = super::super::sky_vis::build_views(glam::Vec3::ZERO,
@@ -7372,7 +7442,8 @@ pub(crate) mod tests {
         let mut interior_caches = [super::super::interior_cached_count::CachedCount::default(); 4];
         let interior_keys = std::array::from_fn::<_, 4, _>(|index|
             super::super::interior_cached_count::Key::new(index + 1, 1, 1,
-                sky_views[index + 1], cull.instance_epoch()));
+                sky_views[index + 1], cull.instance_epoch(),
+                cull.sky_count_cull_key(index + 1).unwrap()));
         for index in 0..4 {
             interior_caches[index].publish(interior_keys[index], cull.batch_target_count_fact(index).identity);
         }
@@ -7427,10 +7498,11 @@ pub(crate) mod tests {
         local_publication.final_submit_accepted();
         let (generation, published) = local_publication.commit(local_tile).unwrap();
         let absent_local_key = super::super::local_cached_count::Key::current(generation, published,
-            local_tile.shape, local_tile.shape, 5, Some(42), cull.instance_epoch()).unwrap();
+            local_tile.shape, local_tile.shape, 5, Some(42), cull.instance_epoch(),
+            cull.shadow_count_cull_key(local_tile.cull_index).unwrap()).unwrap();
         local_cache.publish(absent_local_key, cull.batch_target_count_fact(4).identity);
         let absent_interior_key = super::super::interior_cached_count::Key::new(
-            2, 2, 1, sky_views[2], cull.instance_epoch());
+            2, 2, 1, sky_views[2], cull.instance_epoch(), cull.sky_count_cull_key(2).unwrap());
         interior_caches[1].publish(absent_interior_key, cull.batch_target_count_fact(1).identity);
         for _ in 0..64 {
             cull.harvest_batch_target_count(&device);
@@ -7504,7 +7576,8 @@ pub(crate) mod tests {
         local_publication.final_submit_accepted();
         let (generation, published) = local_publication.commit(night_tile).unwrap();
         let night_key = super::super::local_cached_count::Key::current(generation, published,
-            night_tile.shape, night_tile.shape, 1, Some(42), cull.instance_epoch()).unwrap();
+            night_tile.shape, night_tile.shape, 1, Some(42), cull.instance_epoch(),
+            cull.shadow_count_cull_key(night_tile.cull_index).unwrap()).unwrap();
         local_cache.publish(night_key, cull.batch_target_count_fact(4).identity);
         local_cache.observe(cull.batch_target_count_fact(4));
         assert_eq!(local_cache.fact(Some(night_key)).count, 8);
@@ -7535,7 +7608,8 @@ pub(crate) mod tests {
         last_publication.final_submit_accepted();
         let (generation, published) = last_publication.commit(last_tile).unwrap();
         let last_key = super::super::local_cached_count::Key::current(generation, published,
-            last_tile.shape, last_tile.shape, 1, Some(99), cull.instance_epoch()).unwrap();
+            last_tile.shape, last_tile.shape, 1, Some(99), cull.instance_epoch(),
+            cull.shadow_count_cull_key(last_tile.cull_index).unwrap()).unwrap();
         let mut last_cache = super::super::local_cached_count::CachedCount::default();
         last_cache.publish(last_key, cull.batch_target_count_fact(26).identity);
         for _ in 0..64 {
@@ -7566,7 +7640,8 @@ pub(crate) mod tests {
         last_publication.final_submit_accepted();
         let (generation, published) = last_publication.commit(last_tile).unwrap();
         let last_zero_key = super::super::local_cached_count::Key::current(generation, published,
-            last_tile.shape, last_tile.shape, 1, Some(99), cull.instance_epoch()).unwrap();
+            last_tile.shape, last_tile.shape, 1, Some(99), cull.instance_epoch(),
+            cull.shadow_count_cull_key(last_tile.cull_index).unwrap()).unwrap();
         last_cache.publish(last_zero_key, cull.batch_target_count_fact(26).identity);
         for _ in 0..64 {
             cull.harvest_batch_target_count(&device);
