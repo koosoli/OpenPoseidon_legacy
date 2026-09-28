@@ -8,4 +8,6 @@ Both root-owned controlled-fixture runs passed with exit 0, normal shutdown and 
 
 A separate same-pair short DayZ tree probe selected `t_piceaabies_trunk_no.paa` with HotRetire OFF. Its first target bank read was wrapped and bound at 122 live of global limit 256; the sampled pending cut already had an exact current binding and GPU handle, yet `CanWarmPrepare=false`, no store entry and no exact trace token. The probe does not demonstrate a natural tree-stage worker Take/upload. Whole streaming plan stays OPEN, `defaultReady=false`, `performanceAccepted=false`.
 
+Source review explains the narrow timing result: `CollectObjectStreamTextureNames` does not extract DayZ `.rvmat` stages from the model IR. `RegisterGpuModel` resolves that material on the owner and uploads its normal map in the same registration operation, before the later warm capture can accept an unuploaded source. A worker-owned immutable `.rvmat` member snapshot, pure translation and exact owner-side source join would be needed before claiming stage preparation. The current parser's global virtual-file reads do not provide that contract. No new material-stage pipeline is included here.
+
 Evidence SHA-256 manifest: `build/private-auto-coarse-tree-artifact-manifest-20260928.json`.
