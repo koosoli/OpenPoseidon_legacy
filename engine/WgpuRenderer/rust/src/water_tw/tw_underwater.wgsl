@@ -299,6 +299,9 @@ fn fs_uw(in: UwOut) -> @location(0) vec4<f32> {
     // meniscus contact line and bright rim
     let line = smoothstep(2.0, 0.0, lineDist);
     let rim = smoothstep(bandW, bandW * 0.4, lineDist) * smoothstep(0.5, 2.5, lineDist);
-    let withLine = result * (1.0 - line * 0.55) + rim * 0.15 * (uw.sky_e.rgb * 2.5 + uw.sun_e.rgb * 0.02);
+    // (W9e, OP) the rim brightens what is there by up to 30% instead of adding Tidewater's
+    // absolute sky + sun term: in OP's light units that term is several times the scene's own
+    // brightness and drew the waterline as a hard double white stripe across the lens
+    let withLine = result * (1.0 - line * 0.45 + rim * 0.3);
     return vec4<f32>(min(withLine, vec3<f32>(60000.0)), 1.0);
 }
