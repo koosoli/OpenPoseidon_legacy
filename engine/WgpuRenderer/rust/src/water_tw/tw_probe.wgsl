@@ -12,19 +12,19 @@
 // steps), into an r32float target that the underwater composite reads for the waterline and the
 // camera's depth. The centre texel is also read back for the CPU side (the compositor gate, the
 // water material's view side), 1-3 frames late.
-// tw.probe: camera x, camera z, grid step (m), grid size (texels; 0 = off)
+// tw.probe: the grid's first lattice point x, z (m), grid step (m), grid size (texels; 0 = off)
+//
+// (W12d, OP) The grid holds the drawn mesh's own vertices, not heights at fixed points: texel
+// (i, j) is the displaced position of the finest CDLOD lattice point base + (i, j) x 0.25 m -- the
+// vertex the water vertex shader places there (the same twDisplace, the same spacing; near the
+// camera the mesh is the finest level, unmorphed). The underwater composite interpolates the
+// mesh's own triangles from them, so its waterline on the lens is where the drawn surface crosses
+// the near plane. With heights from the analytic surface (W9a) the two differed by millimetres,
+// and a camera a few centimetres from the water turned that into a band tens of pixels tall
+// between them where neither drew: the unfogged sea bed, a strip of sand across the lens (owner's
+// third-person shot, W12c).
 
 const PROBE_MESH: f32 = 0.25; // the finest CDLOD spacing (cdlod::LEAF / cdlod::GRID)
-
-fn twHeightAt(xz: vec2<f32>) -> f32 {
-    var p = xz;
-    var d = twDisplace(p, PROBE_MESH);
-    for (var i = 0; i < 3; i++) {
-        p += xz - d.world.xz;
-        d = twDisplace(p, PROBE_MESH);
-    }
-    return d.world.y;
-}
 
 @vertex
 fn vs_tw_probe(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
@@ -34,7 +34,7 @@ fn vs_tw_probe(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
 
 @fragment
 fn fs_tw_probe(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
-    let n = tw.probe.w;
-    let xz = tw.probe.xy + (floor(pos.xy) - (n - 1.0) * 0.5) * tw.probe.z;
-    return vec4<f32>(twHeightAt(xz), 0.0, 0.0, 1.0);
+    let xz = tw.probe.xy + floor(pos.xy) * tw.probe.z;
+    let d = twDisplace(xz, PROBE_MESH);
+    return vec4<f32>(d.world, 1.0);
 }

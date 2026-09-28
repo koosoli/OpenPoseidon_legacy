@@ -57,7 +57,7 @@ impl Probe {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R32Float,
+            format: wgpu::TextureFormat::Rgba32Float,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
@@ -80,7 +80,7 @@ impl Probe {
                 module,
                 entry_point: Some("fs_tw_probe"),
                 compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::R32Float, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                targets: &[Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::Rgba32Float, blend: None, write_mask: wgpu::ColorWrites::ALL })],
             }),
             multiview_mask: None,
             cache: None,
@@ -99,9 +99,13 @@ impl Probe {
         Self { view, tex, pipeline, empty, slots, next: 0, height: None, age: u32::MAX, ready: false }
     }
 
-    /// The `tw.probe` lanes for this frame's camera.
+    /// The `tw.probe` lanes for this frame's camera: the grid's first lattice point (W12d: the
+    /// finest CDLOD lattice, `STEP`-aligned, the camera between texels N/2 and N/2 + 1), step, size.
+    /// W12d: the texels hold the displaced mesh vertices (rgba32float), which the composite
+    /// interpolates as the mesh's own triangles.
     pub fn lanes(cam: [f32; 3]) -> [f32; 4] {
-        [cam[0], cam[2], STEP, N as f32]
+        let base = |c: f32| ((c as f64 / STEP as f64).floor() - (N / 2) as f64) * STEP as f64;
+        [base(cam[0]) as f32, base(cam[2]) as f32, STEP, N as f32]
     }
 
     /// Encoder side, after the FFT, wakes and shore simulation of the frame: the grid, and a copy of
@@ -133,7 +137,7 @@ impl Probe {
                 wgpu::TexelCopyTextureInfo {
                     texture: &self.tex,
                     mip_level: 0,
-                    origin: wgpu::Origin3d { x: N / 2 - 1, y: N / 2 - 1, z: 0 },
+                    origin: wgpu::Origin3d { x: N / 2, y: N / 2, z: 0 },
                     aspect: wgpu::TextureAspect::All,
                 },
                 wgpu::TexelCopyBufferInfo {
@@ -166,7 +170,8 @@ impl Probe {
                         let h = {
                             let data = slot.buf.slice(..).get_mapped_range();
                             let texel = |row: usize, col: usize| {
-                                let o = row * ROW as usize + col * 4;
+                                // (W12d) rgba32float vertices: the height is the second lane
+                                let o = row * ROW as usize + col * 16 + 4;
                                 f32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]])
                             };
                             // the camera sits between the four centre texels
@@ -196,12 +201,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn grid_is_centred_on_the_camera() {
-        // texel i centre: cam + (i - (N - 1) / 2) * STEP; the camera between N/2-1 and N/2
-        let c = (N as f32 - 1.0) * 0.5;
-        assert!(((N / 2 - 1) as f32 - c + 0.5).abs() < 1e-6);
-        assert!(((N / 2) as f32 - c - 0.5).abs() < 1e-6);
+    fn grid_is_the_lattice_around_the_camera() {
+        // texel i: lattice point base + i * STEP; the camera between texels N/2 and N/2 + 1
+        for cam in [[1.1f32, 2.0, 3.3], [-7.6, 0.0, 12345.3], [0.0, 0.0, 0.0]] {
+            let l = Probe::lanes(cam);
+            for (b, c) in [(l[0], cam[0]), (l[1], cam[2])] {
+                let k = b / STEP;
+                assert!((k - k.round()).abs() < 1e-4, "on the lattice");
+                let lo = b + (N / 2) as f32 * STEP;
+                assert!(lo <= c + 1e-3 && c < lo + STEP + 1e-3);
+            }
+            assert_eq!(l[2], STEP);
+        }
         assert!(STEP * N as f32 >= 8.0);
-        assert_eq!(Probe::lanes([1.0, 2.0, 3.0]), [1.0, 3.0, STEP, N as f32]);
     }
 }

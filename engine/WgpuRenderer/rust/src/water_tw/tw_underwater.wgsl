@@ -73,20 +73,71 @@ fn vs_uw(@builtin(vertex_index) vi: u32) -> UwOut {
 
 fn uwSat(x: f32) -> f32 { return clamp(x, 0.0, 1.0); }
 
-// (W9a) the drawn surface's height at xz from the probe grid (bilinear over exact loads);
-// y = 0 outside the grid or without one
+// (W12d) the drawn mesh's vertex at probe texel i (world position)
+fn uwProbeV(i: vec2<i32>) -> vec3<f32> { return textureLoad(uwProbe, i, 0).xyz; }
+
+// height of triangle (a, b, c) at xz when xz lies inside it in plan, else y = 0
+fn uwTri(xz: vec2<f32>, a: vec3<f32>, b: vec3<f32>, c: vec3<f32>) -> vec2<f32> {
+    let v0 = b.xz - a.xz;
+    let v1 = c.xz - a.xz;
+    let v2 = xz - a.xz;
+    let den = v0.x * v1.y - v1.x * v0.y;
+    if (abs(den) < 1e-10) { return vec2<f32>(0.0); }
+    let u = (v2.x * v1.y - v1.x * v2.y) / den;
+    let v = (v0.x * v2.y - v2.x * v0.y) / den;
+    if (u < -1e-4 || v < -1e-4 || u + v > 1.0 + 1e-4) { return vec2<f32>(0.0); }
+    return vec2<f32>(a.y + (b.y - a.y) * u + (c.y - a.y) * v, 1.0);
+}
+
+// (W9a, W12d) the drawn surface's height at xz: the mesh triangle over xz, from the mesh's own
+// vertices (tw_probe.wgsl). The triangles are CDLOD.js's grid (cdlod.rs grid_mesh): in a cell
+// (i, j) with i + j even, (a c b) (b c d), else (a c d) (a d b), a = (i, j), b = (i+1, j),
+// c = (i, j+1), d = (i+1, j+1); nodes start on even lattice indices, so the parity is the
+// world lattice's. The cell under xz is found from the lattice point displaced to it (two
+// fixed-point steps), then it and its 8 neighbours are tested. y = 0 outside the grid.
 fn uwProbeHeight(xz: vec2<f32>) -> vec2<f32> {
-    let n = uw.probe.w;
-    if (n < 2.0) { return vec2<f32>(0.0); }
-    let f = (xz - uw.probe.xy) / uw.probe.z + (n - 1.0) * 0.5;
-    if (any(f < vec2<f32>(0.0)) || any(f > vec2<f32>(n - 1.0))) { return vec2<f32>(0.0); }
-    let i = min(vec2<i32>(floor(f)), vec2<i32>(i32(n) - 2));
-    let t = f - vec2<f32>(i);
-    let h00 = textureLoad(uwProbe, i, 0).x;
-    let h10 = textureLoad(uwProbe, i + vec2<i32>(1, 0), 0).x;
-    let h01 = textureLoad(uwProbe, i + vec2<i32>(0, 1), 0).x;
-    let h11 = textureLoad(uwProbe, i + vec2<i32>(1, 1), 0).x;
-    return vec2<f32>(mix(mix(h00, h10, t.x), mix(h01, h11, t.x), t.y), 1.0);
+    let nf = uw.probe.w;
+    if (nf < 2.0) { return vec2<f32>(0.0); }
+    let n = i32(nf);
+    let h = uw.probe.z;
+    let base = uw.probe.xy;
+    var p = xz;
+    for (var k = 0; k < 2; k++) {
+        let f = clamp((p - base) / h, vec2<f32>(0.0), vec2<f32>(nf - 1.001));
+        let i = vec2<i32>(floor(f));
+        let t = f - vec2<f32>(i);
+        let d00 = uwProbeV(i).xz - (base + vec2<f32>(i) * h);
+        let d10 = uwProbeV(i + vec2<i32>(1, 0)).xz - (base + vec2<f32>(i + vec2<i32>(1, 0)) * h);
+        let d01 = uwProbeV(i + vec2<i32>(0, 1)).xz - (base + vec2<f32>(i + vec2<i32>(0, 1)) * h);
+        let d11 = uwProbeV(i + vec2<i32>(1, 1)).xz - (base + vec2<f32>(i + vec2<i32>(1, 1)) * h);
+        p = xz - mix(mix(d00, d10, t.x), mix(d01, d11, t.x), t.y);
+    }
+    let f = (p - base) / h;
+    if (any(f < vec2<f32>(1.0)) || any(f > vec2<f32>(nf - 2.0))) { return vec2<f32>(0.0); }
+    let c0 = vec2<i32>(floor(f));
+    let g0 = vec2<i32>(round(base / h));
+    for (var k = 0; k < 9; k++) {
+        let c = c0 + vec2<i32>(k % 3 - 1, k / 3 - 1);
+        if (any(c < vec2<i32>(0)) || any(c > vec2<i32>(n - 2))) { continue; }
+        let a = uwProbeV(c);
+        let b = uwProbeV(c + vec2<i32>(1, 0));
+        let cc = uwProbeV(c + vec2<i32>(0, 1));
+        let d = uwProbeV(c + vec2<i32>(1, 1));
+        let g = g0 + c;
+        let even = ((g.x + g.y) & 1) == 0;
+        var r: vec2<f32>;
+        if (even) {
+            r = uwTri(xz, a, cc, b);
+            if (r.y < 0.5) { r = uwTri(xz, b, cc, d); }
+        } else {
+            r = uwTri(xz, a, cc, d);
+            if (r.y < 0.5) { r = uwTri(xz, a, d, b); }
+        }
+        if (r.y > 0.5) { return r; }
+    }
+    // (no triangle found: a folded patch) the four vertices around the lattice point, averaged
+    let i = clamp(c0, vec2<i32>(0), vec2<i32>(n - 2));
+    return vec2<f32>((uwProbeV(i).y + uwProbeV(i + vec2<i32>(1, 0)).y + uwProbeV(i + vec2<i32>(0, 1)).y + uwProbeV(i + vec2<i32>(1, 1)).y) * 0.25, 1.0);
 }
 
 // water surface height at xz: the drawn surface near the camera (W9a), else sea level + the FFT's

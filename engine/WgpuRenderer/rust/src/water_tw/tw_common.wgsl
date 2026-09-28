@@ -29,7 +29,7 @@ struct TwSurface {
     morph: array<vec4<f32>, 16>, // CDLOD per level: morph start, 1/range, spacing (W9b: 16 levels)
     wake: array<vec4<f32>, 8>,   // W6: the wake readers' lanes, 4 per slot (tw_wake.wgsl)
     impacts: array<vec4<f32>, 8>, // W8b: explosions in the surface, 2 lanes per slot (tw_impact.wgsl)
-    probe: vec4<f32>,             // W9a: camera x, z, grid step (m), grid size (tw_probe.wgsl)
+    probe: vec4<f32>,             // W9a/W12d: grid origin lattice x, z, step (m), size (tw_probe.wgsl)
 };
 
 struct ConformParams {
