@@ -186,29 +186,26 @@ try{
         while (!(Test-Path -LiteralPath $path) -and [DateTime]::UtcNow -lt $until) {Start-Sleep -Milliseconds 100}
         if (!(Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -le 0) {throw "Missing capture: $path"}
     }
-    function WaitMainCountPublication($cut) {
+    function RequireMainCountPublication($cut) {
         if(!$MainCountProbe){return}
-        # GPU maps complete after submission. Keep this exact fixture request and
-        # model alive until the main and four solar facts have been published.
-        $identity='pageEpoch='+$cut.pageEpoch+' admissionEpoch='+$cut.sourceAdmissionEpoch+
-            ' request='+$cut.requestId+' model='+$cut.producerModel+' rendererModel='+$cut.rendererModel+' '
-        $passes=@('main','cascade-0','cascade-1','cascade-2','cascade-3')
-        $until=[DateTime]::UtcNow.AddSeconds(3)
-        do {
-            if(Test-Path -LiteralPath $log){
-                $lines=Get-Content -LiteralPath $log -ErrorAction Stop
-                $missing=@($passes | Where-Object {
-                    $pass=$_
-                    !@($lines | Where-Object {
-                        $_.Contains("Private $pass GPU COUNT: token=") -and
-                        $_.Contains($identity) -and $_ -match ' state=1 count=1\b'
-                    }).Count
-                })
-                if($missing.Count -eq 0){return}
-            }
-            Start-Sleep -Milliseconds 50
-        }while([DateTime]::UtcNow -lt $until)
-        throw "Main COUNT publication timed out for request $($cut.requestId), model $($cut.producerModel): $($missing -join ', ')"
+        # Observe may advance requestId without changing the selected model.
+        # A prior COUNT still proves that same live generation. Producer handles
+        # never recycle, and all five rows must share token, revision and cull.
+        if(!(Test-Path -LiteralPath $log)){throw 'Main COUNT log missing'}
+        $rows=Get-Content -LiteralPath $log -Raw -ErrorAction Stop
+        $pattern='Private (?<pass>main|cascade-[0-3]) GPU COUNT: token=(?<token>[1-9][0-9]*) pageEpoch='+$cut.pageEpoch+
+            ' admissionEpoch='+$cut.sourceAdmissionEpoch+' request=(?<request>[1-9][0-9]*) model='+$cut.producerModel+
+            ' rendererModel='+$cut.rendererModel+' sourceGeneration=(?<source>[1-9][0-9]*) cullEpoch=(?<cull>[1-9][0-9]*) state=1 count=1\b'
+        $groups=@{}
+        foreach($match in [regex]::Matches($rows,$pattern)){
+            if([uint64]$match.Groups['request'].Value -gt [uint64]$cut.requestId){continue}
+            $key=$match.Groups['token'].Value+':'+$match.Groups['request'].Value+':'+
+                $match.Groups['source'].Value+':'+$match.Groups['cull'].Value
+            if(!$groups.ContainsKey($key)){$groups[$key]=@{}}
+            $groups[$key][$match.Groups['pass'].Value]=$true
+            if($groups[$key].Count -eq 5){return}
+        }
+        throw "Main COUNT publication absent for selected model $($cut.producerModel), request <= $($cut.requestId)"
     }
     $script:fixtureObservedFrame=0
     function Observe($active,$fine) {
@@ -693,8 +690,8 @@ try{
     }else{
      BootstrapDiskCoarse;$coarse=PageCut (Observe $true $false)
      if($coarse.fallbackSelected -or $coarse.rendererModel -eq $fallback.rendererModel -or $coarse.rendererInstance -ne $fallback.rendererInstance -or $coarse.coarseTriangles -ne $originalProducer.coarseTriangles){throw 'Selected coarse not committed on fixed instance'}
-     WaitMainCountPublication $coarse
      Capture 'original-coarse.png'
+     RequireMainCountPublication $coarse
      $null=Action 'holdFine';$heldRequest=PageCut (Action 'requestFine');if($heldRequest.pageRequest -lt 1){throw 'No held request accepted'}
      $held=WaitPage {param($c) $c.pageActive -eq 1}
      $cancelled=PageCut (Action 'cancelFine')
@@ -713,8 +710,8 @@ try{
      }
      $fine=AdmitFine
      if($fine.fallbackSelected -or $fine.fineGeneration -ne 1 -or $fine.fineTriangles -ne 512 -or $fine.rendererModel -eq $coarse.rendererModel -or $fine.rendererInstance -ne $coarse.rendererInstance -or $fine.producerInstance -ne $coarse.producerInstance){throw 'First actual fine cut identity mismatch'}
-     WaitMainCountPublication $fine
      Capture 'original-fine.png'
+     RequireMainCountPublication $fine
      $cameraTupleEvidence=RunCameraTupleProof $fine
      $null=Action 'coarse';$returnedCoarse=PageCut (Observe $true $false)
      if($returnedCoarse.rendererModel -ne $coarse.rendererModel -or $returnedCoarse.rendererInstance -ne $coarse.rendererInstance -or $returnedCoarse.fallbackSelected){throw 'Coarse return lost fixed identity'}
@@ -726,8 +723,8 @@ try{
      if($refilled.producerInstance -ne $coarse.producerInstance -or $refilled.fineGeneration -ne 2 -or $refilled.fineEvictionCount -ne 1 -or $refilled.meshCount -le $evicted.meshCount -or $refilled.meshesAbsent -ne $evicted.retiredFineCount -or $refilled.rendererModel -eq $fine.rendererModel -or $refilled.producerModel -eq $fine.producerModel -or $refilled.rendererInstance -ne $coarse.rendererInstance){throw 'Refill lacked distinct generation/fixed instance'}
      for($i=0;$i -lt $evicted.meshCount;$i++){if($evicted.rendererMeshHandles[$i] -ne $fine.rendererMeshHandles[$i] -or $refilled.rendererMeshHandles[$i] -ne $evicted.rendererMeshHandles[$i]){throw 'Refill replaced retained full-generation history'}}
      if(@($fallback.rendererModel,$coarse.rendererModel,$fine.rendererModel,$refilled.rendererModel|Select-Object -Unique).Count -ne 4 -or @($fallback.producerModel,$coarse.producerModel,$fine.producerModel,$refilled.producerModel|Select-Object -Unique).Count -ne 4){throw 'Four birth identities alias'}
-     WaitMainCountPublication $refilled
      Capture 'original-refilled-fine.png'
+     RequireMainCountPublication $refilled
      if($CameraTuple){$finalTuple=ObserveTuple $cameraTupleEvidence.restored.cameraTupleGeneration $(if($CameraTupleScaleRefusal){'Scaled'}else{'Bound'});SameTupleModel $refilled $finalTuple;$cameraTupleEvidence.finalRefill=$finalTuple;$cameraTupleEvidence|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'camera-tuple-proof.json')}
      $null=Action 'fallback';$returnedFallback=PageCut (Observe $true $false)
      if(!$returnedFallback.fallbackSelected -or $returnedFallback.rendererModel -ne $fallback.rendererModel -or $returnedFallback.rendererInstance -ne $fallback.rendererInstance){throw 'Authored fallback was lost'}
