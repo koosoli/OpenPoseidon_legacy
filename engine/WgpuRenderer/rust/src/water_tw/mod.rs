@@ -128,6 +128,13 @@ fn debug_view_override() -> Option<f32> {
     *V.get_or_init(|| std::env::var("WGR_TW_DEBUG").ok().and_then(|v| v.trim().parse::<f32>().ok()))
 }
 
+/// `WGR_TW_SPRAY_EARLY=1`: the spray drawn inside the water pass, before the clouds (the order
+/// before W12a), for A/B captures of the clouds painted over the plumes.
+fn spray_early() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_SPRAY_EARLY").is_ok_and(|v| v.trim() == "1"))
+}
+
 /// `WGR_TW_SPRAY=<gain>,<intensity>`: overrides the Water tab's breaker spray (W4a), for captures.
 fn spray_override() -> Option<(f32, f32)> {
     static V: std::sync::OnceLock<Option<(f32, f32)>> = std::sync::OnceLock::new();
@@ -1305,6 +1312,9 @@ impl Tidewater {
         // the breaker lips over the surface (Tidewater: the transparent pass after the water)
         self.brk.draw(pass, camera, offset, &self.bind);
         // (the spray over both -- Tidewater: renderOrder 20, after the lips -- is `draw_spray`)
+        if spray_early() {
+            self.spray.draw(pass, camera, offset, &self.bind);
+        }
     }
 
     /// W12a: the spray sprites (breakers, bow spray, the water explosions' plumes), recorded by
@@ -1314,7 +1324,7 @@ impl Tidewater {
     /// behind it were painted over it (owner: "water explosions have the clouds clip through them
     /// when looked at from an angle"). The engine's own order is the same: clouds are background.
     pub fn draw_spray(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup, offset: u32) {
-        if self.bind_dirty {
+        if self.bind_dirty || spray_early() {
             return;
         }
         self.spray.draw(pass, camera, offset, &self.bind);
