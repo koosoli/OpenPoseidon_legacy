@@ -187,7 +187,7 @@ impl TwUnderwater {
                 wgpu::BindGroupLayoutEntry { binding: 5, visibility: f, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
                 tex(6, S::Float { filterable: true }, D::D2),
                 tex(7, S::Float { filterable: true }, D::D2),
-                // W9a: the probe grid (r32float heights, loaded)
+                // W9a/W12d: the probe grid (rgba32float mesh vertices, loaded)
                 tex(8, S::Float { filterable: false }, D::D2),
             ],
         });
