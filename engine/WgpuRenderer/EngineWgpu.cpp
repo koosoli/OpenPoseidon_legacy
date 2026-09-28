@@ -1446,6 +1446,17 @@ public:
 
 EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.useWindow)
 {
+    const char* sourceProbe = std::getenv("WGR_GEOMETRY_MAIN_COUNT_PROBE");
+    _geometrySourceRevisionEnabled = sourceProbe && std::strcmp(sourceProbe, "1") == 0;
+    if (_geometrySourceRevisionEnabled)
+    {
+        // No incarnation is ever reused, including after counter exhaustion.
+        static std::atomic<uint64_t> nextIncarnation{1};
+        uint64_t next = nextIncarnation.load();
+        while (next != UINT64_MAX &&
+            !nextIncarnation.compare_exchange_weak(next, next + 1)) {}
+        if (next != UINT64_MAX) _geometrySourceIncarnation = next;
+    }
     const char* ownerLedger = std::getenv("WGR_GEOMETRY_OWNER_LEDGER");
     if (ownerLedger && std::strcmp(ownerLedger, "1") == 0)
     {
@@ -2246,7 +2257,7 @@ struct EngineWgpu::GeometryPageFixtureState
 struct EngineWgpu::GeometryMainCountPending
 {
     std::weak_ptr<GeometryPageFixtureState> fixture;
-    uint64_t token=0, pageEpoch=0, admissionEpoch=0, requestId=0, sourceGeneration=0, cullEpoch=0;
+    uint64_t token=0, pageEpoch=0, admissionEpoch=0, requestId=0, sourceGeneration=0, sourceIncarnation=0, cullEpoch=0;
     uint32_t producerModel=UINT32_MAX, rendererModel=UINT32_MAX;
     unsigned ageFrames=0;
     bool mainReported=false, giReported=false, local0Reported=false, reflectionReported=false,
@@ -3370,6 +3381,35 @@ void EngineWgpu::FillGeometryMeshFacts(GeometryAllocationReport& report, const r
     }
 }
 
+uint32_t EngineWgpu::AllocateProducerModel()
+{
+    // UINT32_MAX is the sentinel. Leaving the counter there makes exhaustion
+    // sticky instead of silently recycling the first producer handle.
+    return _nextModelHandle == WGR_INVALID_MODEL ? WGR_INVALID_MODEL : _nextModelHandle++;
+}
+
+uint64_t EngineWgpu::AllocateProducerMesh()
+{
+    // Keep UINT64_MAX unused so increment can never wrap to the first handle.
+    return _nextMeshHandle == UINT64_MAX ? 0 : _nextMeshHandle++;
+}
+
+uint64_t EngineWgpu::NextGeometrySourceRevision()
+{
+    if (!_geometrySourceIncarnation || !_nextGeometrySourceRevision ||
+        _nextGeometrySourceRevision == UINT64_MAX) return 0;
+    return _nextGeometrySourceRevision++;
+}
+
+bool EngineWgpu::GeometrySourceFresh(uint32_t producer, uint32_t renderer,
+    uint64_t incarnation, uint64_t revision) const
+{
+    if (!revision || !incarnation || incarnation != _geometrySourceIncarnation) return false;
+    const auto source = _geometrySourceOf.find(producer);
+    return source != _geometrySourceOf.end() && source->second.valid &&
+        source->second.revision == revision && source->second.rendererModel == renderer;
+}
+
 void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
 {
     if (_geometryOwnerLedger) _geometryOwnerLedger->DrainDetachMailbox();
@@ -3404,6 +3444,15 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
         {
         case ResourceOp::MeshCreate:
         {
+            if (_meshIdOf.find(op.mesh) != _meshIdOf.end())
+            {
+                // A duplicate live producer must not overwrite the allocation that
+                // an already registered model may still reference.
+                for (auto& [producer, source] : _geometrySourceOf)
+                    if (std::find(source.meshes.begin(), source.meshes.end(), op.mesh) != source.meshes.end())
+                    { source.revision = NextGeometrySourceRevision(); source.valid = false; }
+                break;
+            }
             const uint64_t ownerVertexBytes = _geometryOwnerLedger ? op.verts.size() * sizeof(SVertex) : 0;
             const uint64_t ownerIndexBytes = _geometryOwnerLedger ? op.indices.size() * sizeof(uint32_t) : 0;
             // Crown centres first: their base is baked into the vertex data, which is why
@@ -3432,6 +3481,9 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
         }
         case ResourceOp::MeshDestroy:
         {
+            for (auto& [producer, source] : _geometrySourceOf)
+                if (std::find(source.meshes.begin(), source.meshes.end(), op.mesh) != source.meshes.end())
+                { source.revision = NextGeometrySourceRevision(); source.valid = false; }
             const auto it = _meshIdOf.find(op.mesh);
             if (it != _meshIdOf.end())
             {
@@ -3563,6 +3615,7 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
         }
         case ResourceOp::ModelRetire:
         {
+            _geometrySourceOf.erase(op.model);
             if (_geometryOwnerLedger) _geometryOwnerLedger->ModelRetired(_geometryOwnerEpoch, op.model);
             if (const auto it = _modelIdOf.find(op.model); it != _modelIdOf.end())
             {
@@ -3573,6 +3626,30 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
         }
         case ResourceOp::ModelRegister:
         {
+            if (_modelIdOf.find(op.model) != _modelIdOf.end())
+            {
+                // Fail closed on a duplicate live handle. Preserve the original
+                // Rust registration for its normal retirement, but poison facts.
+                if (const auto source = _geometrySourceOf.find(op.model);
+                    source != _geometrySourceOf.end())
+                { source->second.revision = NextGeometrySourceRevision(); source->second.valid = false; }
+                if (_geometryOwnerLedger)
+                    _geometryOwnerLedger->MarkIncomplete(_geometryOwnerEpoch, render::GeometryOwnerLedger::Reason::Protocol);
+                break;
+            }
+            GeometrySourceRecord source;
+            if (_geometrySourceRevisionEnabled)
+            {
+                try
+                {
+                    source.meshes.reserve(op.sections.size());
+                    for (const auto& section : op.sections) source.meshes.push_back(section.mesh);
+                    // A missing section mesh cannot substantiate this content revision.
+                    source.valid = !source.meshes.empty() && std::all_of(source.meshes.begin(), source.meshes.end(),
+                        [this](uint64_t mesh) { const auto it = _meshIdOf.find(mesh); return it != _meshIdOf.end() && it->second; });
+                }
+                catch (const std::bad_alloc&) { source.valid = false; source.meshes.clear(); }
+            }
             if (_geometryOwnerLedger)
             {
                 // Capture producer identities before translating sections to renderer
@@ -3620,6 +3697,14 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                 _renderer, op.sphereRadius, WgrSlice<WgrModelLod>{op.lods.data(), U32(op.lods.size())},
                 WgrSlice<WgrModelSection>{op.sections.data(), U32(op.sections.size())},
                 WgrSlice<WgrModelMaterial>{op.materials.data(), U32(op.materials.size())}, op.name.c_str());
+            if (_geometrySourceRevisionEnabled && _modelIdOf[op.model] != WGR_INVALID_MODEL)
+            {
+                source.rendererModel = _modelIdOf[op.model];
+                source.revision = NextGeometrySourceRevision();
+                source.valid = source.valid && source.revision != 0;
+                try { _geometrySourceOf[op.model] = std::move(source); }
+                catch (const std::bad_alloc&) { _geometrySourceOf.clear(); _geometrySourceRevisionEnabled = false; }
+            }
             if (_geometryOwnerLedger && _modelIdOf[op.model] == WGR_INVALID_MODEL)
             {
                 _geometryOwnerLedger->ModelRetired(_geometryOwnerEpoch, op.model);
@@ -4116,6 +4201,12 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
 
     // A previous GPU map is polled without waiting. The copied owner identity must
     // still describe the same original-source fixture before a diagnostic is logged.
+    if (_geometryMainCountPending &&
+        !GeometrySourceFresh(_geometryMainCountPending->producerModel,
+            _geometryMainCountPending->rendererModel,
+            _geometryMainCountPending->sourceIncarnation,
+            _geometryMainCountPending->sourceGeneration))
+        _geometryMainCountPending.reset();
     if (mainCountProbeEnabled && _geometryMainCountPending)
     {
         auto& pending = *_geometryMainCountPending;
@@ -4144,7 +4235,9 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
                         fixture->consumedModel == pending.rendererModel &&
                         fixture->consumedInstance != UINT32_MAX && fixture->instance < _instSlotOf.size() &&
                         _instSlotOf[fixture->instance] == fixture->consumedInstance &&
-                        model != _modelIdOf.end() && model->second == pending.rendererModel;
+                        model != _modelIdOf.end() && model->second == pending.rendererModel &&
+                        GeometrySourceFresh(pending.producerModel, pending.rendererModel,
+                            pending.sourceIncarnation, pending.sourceGeneration);
                 }
                 if (publish)
                 {
@@ -4190,7 +4283,9 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
                         fixture->consumedModel == pending.rendererModel &&
                         fixture->consumedInstance != UINT32_MAX && fixture->instance < _instSlotOf.size() &&
                         _instSlotOf[fixture->instance] == fixture->consumedInstance &&
-                        model != _modelIdOf.end() && model->second == pending.rendererModel;
+                        model != _modelIdOf.end() && model->second == pending.rendererModel &&
+                        GeometrySourceFresh(pending.producerModel, pending.rendererModel,
+                            pending.sourceIncarnation, pending.sourceGeneration);
                 }
                 if (publish)
                 {
@@ -4233,7 +4328,9 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
                         fixture->consumedModel == pending.rendererModel &&
                         fixture->consumedInstance != UINT32_MAX && fixture->instance < _instSlotOf.size() &&
                         _instSlotOf[fixture->instance] == fixture->consumedInstance &&
-                        model != _modelIdOf.end() && model->second == pending.rendererModel;
+                        model != _modelIdOf.end() && model->second == pending.rendererModel &&
+                        GeometrySourceFresh(pending.producerModel, pending.rendererModel,
+                            pending.sourceIncarnation, pending.sourceGeneration);
                 }
                 if (publish)
                 {
@@ -4276,7 +4373,9 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
                         fixture->consumedModel == pending.rendererModel &&
                         fixture->consumedInstance != UINT32_MAX && fixture->instance < _instSlotOf.size() &&
                         _instSlotOf[fixture->instance] == fixture->consumedInstance &&
-                        model != _modelIdOf.end() && model->second == pending.rendererModel;
+                        model != _modelIdOf.end() && model->second == pending.rendererModel &&
+                        GeometrySourceFresh(pending.producerModel, pending.rendererModel,
+                            pending.sourceIncarnation, pending.sourceGeneration);
                 }
                 if (publish)
                 {
@@ -4319,7 +4418,9 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
                         fixture->consumedModel == pending.rendererModel &&
                         fixture->consumedInstance != UINT32_MAX && fixture->instance < _instSlotOf.size() &&
                         _instSlotOf[fixture->instance] == fixture->consumedInstance &&
-                        model != _modelIdOf.end() && model->second == pending.rendererModel;
+                        model != _modelIdOf.end() && model->second == pending.rendererModel &&
+                        GeometrySourceFresh(pending.producerModel, pending.rendererModel,
+                            pending.sourceIncarnation, pending.sourceGeneration);
                 }
                 if (publish)
                 {
@@ -4362,7 +4463,9 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
                         fixture->consumedModel == pending.rendererModel &&
                         fixture->consumedInstance != UINT32_MAX && fixture->instance < _instSlotOf.size() &&
                         _instSlotOf[fixture->instance] == fixture->consumedInstance &&
-                        model != _modelIdOf.end() && model->second == pending.rendererModel;
+                        model != _modelIdOf.end() && model->second == pending.rendererModel &&
+                        GeometrySourceFresh(pending.producerModel, pending.rendererModel,
+                            pending.sourceIncarnation, pending.sourceGeneration);
                 }
                 if (publish)
                 {
@@ -4415,8 +4518,11 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
             fixture->originalAdmission->report.epoch == report.sourceAdmissionEpoch)
         {
             const auto found = _modelIdOf.find(report.producerModel);
+            const auto source = _geometrySourceOf.find(report.producerModel);
             if (found != _modelIdOf.end() && found->second != WGR_INVALID_MODEL &&
-                found->second == fixture->consumedModel)
+                found->second == fixture->consumedModel && source != _geometrySourceOf.end() &&
+                GeometrySourceFresh(report.producerModel, found->second,
+                    _geometrySourceIncarnation, source->second.revision))
             {
                 requested.emplace();
                 requested->fixture = fixture;
@@ -4424,7 +4530,8 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
                 requested->pageEpoch = report.pageEpoch;
                 requested->admissionEpoch = report.sourceAdmissionEpoch;
                 requested->requestId = report.requestId;
-                requested->sourceGeneration = uint64_t(report.producerModel) + 1;
+                requested->sourceGeneration = source->second.revision;
+                requested->sourceIncarnation = _geometrySourceIncarnation;
                 requested->producerModel = report.producerModel;
                 requested->rendererModel = found->second;
                 mainRequest = {sizeof(mainRequest), 1, requested->token,
@@ -6074,7 +6181,8 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     std::shared_ptr<CpuMeshSlot> slot;
     if (_geometryOwnerLedger) { attributedSlot=std::make_shared<AttributedCpuMeshSlot>(); slot=attributedSlot; }
     else slot=std::make_shared<CpuMeshSlot>();
-    slot->producer = _nextMeshHandle++; // one handle space with the retained meshes
+    slot->producer = AllocateProducerMesh(); // one handle space with the retained meshes
+    if (!slot->producer) return nullptr;
     slot->type = type;
     slot->verts = std::move(verts);
     slot->indices = std::move(indices);
@@ -6303,7 +6411,8 @@ Engine::SharedMeshFixtureReport EngineWgpu::ControlSharedMeshLifetimeFixture(Sha
                 std::lock_guard lock(fixture.mutex);
                 return fixture.report;
             }
-            fixture.producer = _nextMeshHandle++;
+            fixture.producer = AllocateProducerMesh();
+            if (!fixture.producer) throw std::runtime_error("standalone mesh identity exhausted");
             fixture.knownBytes = known;
             fixture.report.producer = fixture.producer;
             fixture.report.knownPayloadBytes = known;
@@ -9203,10 +9312,10 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             for(const auto& page:fallback.pages)known+=page.clusters.capacity()*sizeof(ResidentCluster);
             for(const auto& page:fallbackPackage.pages) known+=page.bytes.capacity();
             known+=fallbackPackage.pages.capacity()*sizeof(Page)+fallbackPackage.clusters.capacity()*sizeof(Cluster);
-            for(uint32_t slot=0;slot<4;++slot) {if(_nextModelHandle==WGR_INVALID_MODEL)return failure;fixture->models[slot]=_nextModelHandle++;}
+            for(uint32_t slot=0;slot<4;++slot) {fixture->models[slot]=AllocateProducerModel();if(fixture->models[slot]==WGR_INVALID_MODEL)return failure;}
             ResourceOp model;model.kind=ResourceOp::ModelRegister;model.model=fixture->models[0];model.sphereRadius=radius;model.name=originalMode?"private-original-disk-fallback":"private-disk-clod-fallback";
             for(const auto& page:fallback.pages)for(const auto& cluster:page.clusters) {
-                if(!_nextMeshHandle)return failure;ResourceOp mesh;mesh.kind=ResourceOp::MeshCreate;mesh.mesh=_nextMeshHandle++;
+                ResourceOp mesh;mesh.kind=ResourceOp::MeshCreate;mesh.mesh=AllocateProducerMesh();if(!mesh.mesh)return failure;
                 if(originalMode)for(const auto& v:cluster.vertices)if(!PageOriginalVertexEnclosed(v,radius))return failure;
                 mesh.verts=cluster.vertices;mesh.indices.reserve(cluster.indices.size());for(auto index:cluster.indices) {if(index>INT32_MAX)return failure;mesh.indices.push_back(VertexIndex(index));}
                 auto section=materialSection;section.mesh=mesh.mesh;section.index_begin=0;section.index_count=uint32_t(mesh.indices.size());
@@ -9382,13 +9491,13 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             for(const auto& cut:renderCuts) known+=cut.capacity()*sizeof(const ResidentCluster*);
             for(uint32_t representation=0;representation<(pagedPilot?(clodPaged?2u:1u):fixture->modelCount);++representation) {
 
-                if(_nextModelHandle==WGR_INVALID_MODEL) return failure;
-                ResourceOp model; model.kind=ResourceOp::ModelRegister; model.model=_nextModelHandle++; model.sphereRadius=5;
+                ResourceOp model; model.kind=ResourceOp::ModelRegister; model.model=AllocateProducerModel(); model.sphereRadius=5;
+                if(model.model==WGR_INVALID_MODEL) return failure;
                 fixture->models[representation]=model.model; model.name="private-page-box";
                 for(const auto* selected:renderCuts[representation]) {
                     const auto& cluster=*selected;
-                    if(!_nextMeshHandle) return failure;
-                    ResourceOp mesh; mesh.kind=ResourceOp::MeshCreate; mesh.mesh=_nextMeshHandle++;
+                    ResourceOp mesh; mesh.kind=ResourceOp::MeshCreate; mesh.mesh=AllocateProducerMesh();
+                    if(!mesh.mesh) return failure;
                     mesh.verts=cluster.vertices; mesh.indices.reserve(cluster.indices.size());
                     for(auto index:cluster.indices) { if(index>INT32_MAX) return failure; mesh.indices.push_back(VertexIndex(index)); }
                     fixture->meshes.push_back(mesh.mesh);
@@ -9408,8 +9517,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                 // Initial history includes the independent authored fallback in the combined mode.
                 if(uint64_t(fixture->meshes.size())+2*fineClusters>64) return failure;
                 for(uint32_t slot=fixture->pageFirstFineSlot;slot<fixture->modelCount;++slot) {
-                    if(_nextModelHandle==WGR_INVALID_MODEL) return failure;
-                    fixture->models[slot]=_nextModelHandle++;
+                    fixture->models[slot]=AllocateProducerModel();
+                    if(fixture->models[slot]==WGR_INVALID_MODEL) return failure;
                 }
             }
             known+=staged.capacity()*sizeof(ResourceOp)+fixture->meshes.capacity()*sizeof(uint64_t);
@@ -9779,8 +9888,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                     ResourceOp model;model.kind=ResourceOp::ModelRegister;model.model=fixture->models[fixture->pageFineSlot];model.sphereRadius=fixture->pageOriginRadius;model.name="private-authored-fine-page";
                     uint64_t extra=staged.capacity()*sizeof(ResourceOp)+meshes.capacity()*sizeof(uint64_t);
                     for(const auto& page:result->decoded.pages) for(const auto& cluster:page.clusters) {
-                        if(!_nextMeshHandle) return failure;
-                        ResourceOp mesh;mesh.kind=ResourceOp::MeshCreate;mesh.mesh=_nextMeshHandle++;
+                        ResourceOp mesh;mesh.kind=ResourceOp::MeshCreate;mesh.mesh=AllocateProducerMesh();
+                        if(!mesh.mesh) return failure;
                         if(report.originalFilePilot)for(const auto& v:cluster.vertices)
                             if(!PageOriginalVertexEnclosed(v,fixture->pageOriginRadius)){report.pageWorkState="OriginalBoundsRefused";report.status=GeometryReportStatus::Invalid;return report;}
                         mesh.verts=cluster.vertices;mesh.indices.reserve(cluster.indices.size());
@@ -11669,6 +11778,8 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         }
     }
 
+    if (_nextModelHandle == WGR_INVALID_MODEL)
+        return WGR_INVALID_MODEL; // no queued meshes or textures after handle exhaustion
     PrepareNativeNormalSources(shape);
     // Retain provenance only for existing owner-side material-stage Init calls.
     // The scope itself requires BOTH exact warm-source/jobs flags and MainThread;
@@ -12036,7 +12147,8 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             _ops.meshCreate++;
             ResourceOp op;
             op.kind = ResourceOp::MeshCreate;
-            op.mesh = _nextMeshHandle++;
+            op.mesh = AllocateProducerMesh();
+            if (!op.mesh) { eligible = false; break; }
             op.verts = std::move(verts);
             op.indices = std::move(indices);
             op.crownCentres = std::move(crownCentres);
@@ -12554,9 +12666,8 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         op.kind = ResourceOp::ModelRegister;
         // WGR_INVALID_MODEL must never be allocated as a handle, or an ineligible shape and a
         // real one would collide in _modelIdOf.
-        if (_nextModelHandle == WGR_INVALID_MODEL)
-            _nextModelHandle++;
-        op.model = _nextModelHandle++;
+        op.model = AllocateProducerModel();
+        if (op.model == WGR_INVALID_MODEL) return WGR_INVALID_MODEL;
         op.sphereRadius = shape->BoundingSphere();
         op.lods = std::move(lods);
         op.sections = std::move(sections); // .mesh fields are producer handles; drain translates

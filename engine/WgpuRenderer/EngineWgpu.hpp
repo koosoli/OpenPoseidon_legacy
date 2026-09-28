@@ -828,6 +828,22 @@ class EngineWgpu : public EngineDummy
     struct GeometryMainCountPending;
     std::unique_ptr<GeometryMainCountPending> _geometryMainCountPending; // opt-in only
     uint64_t _nextGeometryMainCountToken=1;
+    // Private count diagnostics only. LODs and materials are immutable after
+    // ModelRegister; changing them retires and re-registers the model. A
+    // revision names those contents and their live meshes, not a numeric slot.
+    struct GeometrySourceRecord
+    {
+        uint64_t revision=0;
+        uint32_t rendererModel=UINT32_MAX;
+        bool valid=false;
+        std::vector<uint64_t> meshes;
+    };
+    bool _geometrySourceRevisionEnabled=false;
+    uint64_t _geometrySourceIncarnation=0, _nextGeometrySourceRevision=1;
+    std::unordered_map<uint32_t, GeometrySourceRecord> _geometrySourceOf;
+    uint64_t NextGeometrySourceRevision();
+    bool GeometrySourceFresh(uint32_t producer, uint32_t renderer, uint64_t incarnation,
+        uint64_t revision) const;
     bool _geometryPageFixtureActive=false;
     std::unique_ptr<GeometryPages::AuthoredPageWorker> _geometryPageWorker;
     uint64_t _nextGeometryPageEpoch=1, _nextGeometryPageRequest=1;
@@ -1347,7 +1363,9 @@ class EngineWgpu : public EngineDummy
     };
     std::vector<ResourceOp> _resourceOps;
     uint64_t _nextMeshHandle = 1;  // 0 stays "no mesh", matching the FFI's failure value
+    uint64_t AllocateProducerMesh(); // exhaustion is sticky; no wrapped mesh identity
     uint32_t _nextModelHandle = 0; // WGR_INVALID_MODEL is the sentinel and is never allocated
+    uint32_t AllocateProducerModel(); // exhaustion is sticky; never wrap into a live handle
     std::unordered_map<uint64_t, uint64_t> _meshIdOf;  // producer -> renderer (post-drain)
     // Startup-only diagnostic, absent by default. Only the resource drain mutates
     // records; buffers retain its bounded numeric destructor mailbox, not the engine.
