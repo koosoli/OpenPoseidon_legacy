@@ -4,4 +4,4 @@
 
 This proves only that **the retained-static rows** did not change across the observed epoch increments. Dynamic instances, mesh/section uploads, material/texture changes, animation poses, and other casters remain outside this witness. It cannot establish image currency or permit cached COUNT reuse, Fine release, reclamation, or default policy promotion. Existing global epoch, upload, target revision, source and published-image gates remain unchanged.
 
-Isolated source validation: two device-free Rust tests passed. The root integrator owns the paired desktop build and installed-game check after cherry-picking this commit; no game deployment was attempted here.
+Two device-free Rust tests and `cargo check` passed in the isolated source. The paired desktop build and installed WGPU `--check` passed at `b24b117a`. No matched performance or visual acceptance follows.
