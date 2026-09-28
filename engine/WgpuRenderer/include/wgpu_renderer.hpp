@@ -2689,7 +2689,8 @@ extern "C"
         WgrRenderCallCpuTimings*, uint32_t output_size, uint32_t output_version);
 
     /* Diagnostic opt-in; exact v1 sizes required before pointer dereference.
-     * submitted=1 means the main encoder containing COUNT copy was accepted;
+     * submitted=1 means main colour indirect draws were recorded in a closed pass
+     * and the main encoder containing COUNT copy was accepted; it does not prove pixels.
      * render status 0 alone also includes a skipped surface acquisition.
      * The result state remains UNKNOWN until a later nonblocking fact poll. */
     WGR_API int32_t wgr_render_frame_main_target_count(WgrRenderer*, const WgrFrame*,

@@ -10283,7 +10283,7 @@ impl Gfx3d {
         textures: &SharedTextures,
         cam_off: u32,
         timers: &crate::gpu_timers::GpuTimers,
-    ) {
+    ) -> bool {
         let (args, group1, counters) = if self.occlusion_active() {
             (
                 self.cull.color_out_args(),
@@ -10312,7 +10312,7 @@ impl Gfx3d {
                     crate::gpu_timers::Region::ObjColorAlpha,
                 ],
             )),
-        );
+        )
     }
 
     // Draw only the reflected view's independently culled retained opaque scene. The mirrored

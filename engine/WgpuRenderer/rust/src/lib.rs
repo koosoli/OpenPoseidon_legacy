@@ -4945,6 +4945,9 @@ impl Renderer {
         let mut resolved = false;
         let mut start = 0usize;
         let mut seg_idx = 0usize;
+        // Only the opt-in COUNT request consumes this witness. A cull dispatch alone
+        // cannot prove that the main world colour draw reached a closed pass.
+        let mut main_world_draw_closed = false;
 
         // Aerial perspective is a DEFERRED pass over the scene depth, so it must run after
         // all foggable 3D world geometry but before the 2D overlays (HUD / sights / scope),
@@ -5491,6 +5494,7 @@ impl Renderer {
             // 3D sub-pass: all non-2D draws. Depth/stencil are cleared here only when the
             // prepass didn't already fill them (stencil to 0 so shadow draws EQUAL 0 /
             // INCR darken each pixel once); colour per the load.
+            let mut main_world_draw_recorded = false;
             {
                 // PERF-005 CONTAINER: the WORLD 3D colour sub-pass. Its leaves are the terrain
                 // colour, grass colour and the two GPU-driven colour variants; container minus
@@ -5553,7 +5557,7 @@ impl Renderer {
                 // GPU-driven colour has to be present first (else the sky shows through).
                 if start == 0 && !self.suppress_world_objects {
                     let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
-                    self.gfx3d.draw_gpu_driven(
+                    main_world_draw_recorded = self.gfx3d.draw_gpu_driven(
                         &mut pass,
                         &self.textures,
                         cam_off,
@@ -5618,6 +5622,9 @@ impl Renderer {
                     self.gfx3d.draw_cull_spheres(&mut pass, cam_off);
                 }
                 drop(pass);
+                if main_count_armed && main_world_draw_recorded {
+                    main_world_draw_closed = true;
+                }
             }
 
             // Dedicated water pass. Water is transparent and reconstructs the seabed by SAMPLING
@@ -6255,7 +6262,9 @@ impl Renderer {
         self.gpu_timers
             .cpu_begin(crate::gpu_timers::Region::WorkerEncTail);
         self.gfx3d.resolve_object_stats(&mut encoder);
-        let main_count_copied = main_count_armed && self.gfx3d.copy_main_target_count(&mut encoder);
+        let main_count_copied = main_count_armed
+            && main_world_draw_closed
+            && self.gfx3d.copy_main_target_count(&mut encoder);
         self.gfx3d.resolve_lod_demand();
         self.gfx3d.resolve_mip_feedback(&mut encoder);
         self.water_visibility.resolve(&mut encoder);
