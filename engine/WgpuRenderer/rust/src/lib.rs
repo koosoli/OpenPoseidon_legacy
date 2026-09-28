@@ -3528,8 +3528,44 @@ impl Renderer {
         self.drain_deferred_mesh_destroys();
         // TW-WATER W1 — a Water-tab backend change takes effect here, at the frame boundary,
         // before anything this frame reads the water surface.
+        // TW-WATER W7h: the backend-switch soak (plan §8): `WGR_WATER_SOAK=<frames>[,<switches>]`
+        // flips the backend every <frames> frames, <switches> times (default 20), then hands the
+        // choice back; every switch logs the backend's GPU allocations and live handle counts
+        if let Some((every, total)) = water_soak() {
+            let f = WATER_SOAK_FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let k = f / every;
+            let pick = if k == 0 || k > total as u64 {
+                None
+            } else if k % 2 == 1 {
+                Some(crate::water_backend::WaterBackendKind::Tidewater)
+            } else {
+                Some(crate::water_backend::WaterBackendKind::CurrentOp)
+            };
+            self.water.set_soak(pick);
+        }
+        let switches_before = self.water.switch_count();
         self.water
             .apply_pending_switch(&self.device, &self.queue, &self.log);
+        if self.water.switch_count() != switches_before {
+            let c = self.device.get_internal_counters().hal;
+            let mb = ((c.buffer_memory.read().max(0) as u64).saturating_add(c.texture_memory.read().max(0) as u64)) as f64 / (1024.0 * 1024.0);
+            self.log.log(
+                log_level::INFO,
+                &format!(
+                    "W7 switch #{} to {}: backend allocations {:.1} MB | buffers {} textures {} views {} bind groups {} pipelines {} + {} shader modules {}",
+                    self.water.switch_count(),
+                    self.water.kind().label(),
+                    mb,
+                    c.buffers.read(),
+                    c.textures.read(),
+                    c.texture_views.read(),
+                    c.bind_groups.read(),
+                    c.render_pipelines.read(),
+                    c.compute_pipelines.read(),
+                    c.shader_modules.read()
+                ),
+            );
+        }
         let screen = glam::Vec2::new(self.config.width as f32, self.config.height as f32);
         self.gfx2d
             .prepare(&self.device, &self.queue, screen, fog, verts);
@@ -6850,3 +6886,16 @@ fn tw_early_submit() -> bool {
     static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *V.get_or_init(|| std::env::var("WGR_TW_EARLY_SUBMIT").map_or(true, |v| v.trim() != "0"))
 }
+
+/// TW-WATER W7h: `WGR_WATER_SOAK=<frames>[,<switches>]` (the backend-switch soak).
+fn water_soak() -> Option<(u64, u32)> {
+    static V: std::sync::OnceLock<Option<(u64, u32)>> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        let v = std::env::var("WGR_WATER_SOAK").ok()?;
+        let mut it = v.split(',').map(|x| x.trim().parse::<u64>().ok());
+        let every = it.next().flatten()?.max(2);
+        let total = it.next().flatten().unwrap_or(20).clamp(1, 1000) as u32;
+        Some((every, total))
+    })
+}
+static WATER_SOAK_FRAME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

@@ -1677,7 +1677,9 @@ enum WgrGpuTimerRegion : uint32_t
     WGR_GPU_TIMER_TW_OCEAN_FFT = 79,
     WGR_GPU_TIMER_TW_SHORE_SIM = 80, /* TW-WATER W3b: the shore simulation regions */
     WGR_GPU_TIMER_TW_WAKE = 81,      /* TW-WATER W6: the boat wake simulations */
-    WGR_GPU_TIMER_REGION_COUNT = 82,
+    WGR_GPU_TIMER_TW_CAUSTICS = 82,  /* TW-WATER W7h: the caustic splats + mip chains */
+    WGR_GPU_TIMER_TW_BREAKERS = 83,  /* TW-WATER W7h: crest finder, breaker spray, spray update */
+    WGR_GPU_TIMER_REGION_COUNT = 84,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.

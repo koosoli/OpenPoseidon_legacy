@@ -12775,6 +12775,8 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Tidewater: FFT + mips",           // WGR_GPU_TIMER_TW_OCEAN_FFT
         "Tidewater: shore sim",            // WGR_GPU_TIMER_TW_SHORE_SIM
         "Tidewater: boat wakes",           // WGR_GPU_TIMER_TW_WAKE (W6)
+        "Tidewater: caustics",             // WGR_GPU_TIMER_TW_CAUSTICS (W7h)
+        "Tidewater: breakers + spray",     // WGR_GPU_TIMER_TW_BREAKERS (W7h)
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }
@@ -13517,7 +13519,7 @@ void EngineWgpu::PublishRendererStats()
             const char* e = std::getenv("WGR_FRAME_STATS");
             return e != nullptr && std::atoi(e) != 0;
         }();
-        if (kFrameStats && gpuN > (int)WGR_GPU_TIMER_TW_WAKE)
+        if (kFrameStats && gpuN > (int)WGR_GPU_TIMER_TW_BREAKERS)
         {
             static std::vector<float> wallMs, gpuMs;
             static double opWater = 0.0, twWater = 0.0;
@@ -13529,6 +13531,7 @@ void EngineWgpu::PublishRendererStats()
                                            WGR_GPU_TIMER_WORKER_ENC_POST, WGR_GPU_TIMER_WORKER_SUBMIT,
                                            WGR_GPU_TIMER_WORKER_PRESENT};
             static double cpuSum[9] = {};
+            static double twParts[6] = {};
             static int nW = 0;
             static std::chrono::steady_clock::time_point lastFrame{}, lastLog{};
             const auto nowT = std::chrono::steady_clock::now();
@@ -13546,7 +13549,15 @@ void EngineWgpu::PublishRendererStats()
                     op += pos(r);
             opWater += op + pos(WGR_GPU_TIMER_WATER_DRAW);
             twWater += pos(WGR_GPU_TIMER_TW_OCEAN_SPECTRUM) + pos(WGR_GPU_TIMER_TW_OCEAN_FFT) + pos(WGR_GPU_TIMER_TW_SHORE_SIM) +
-                       pos(WGR_GPU_TIMER_TW_WAKE) + pos(WGR_GPU_TIMER_WATER_DRAW);
+                       pos(WGR_GPU_TIMER_TW_WAKE) + pos(WGR_GPU_TIMER_TW_CAUSTICS) + pos(WGR_GPU_TIMER_TW_BREAKERS) +
+                       pos(WGR_GPU_TIMER_WATER_DRAW);
+            // W7h: the Tidewater regions one by one (means over the window)
+            twParts[0] += pos(WGR_GPU_TIMER_TW_OCEAN_SPECTRUM) + pos(WGR_GPU_TIMER_TW_OCEAN_FFT);
+            twParts[1] += pos(WGR_GPU_TIMER_TW_SHORE_SIM);
+            twParts[2] += pos(WGR_GPU_TIMER_TW_BREAKERS);
+            twParts[3] += pos(WGR_GPU_TIMER_TW_CAUSTICS);
+            twParts[4] += pos(WGR_GPU_TIMER_TW_WAKE);
+            twParts[5] += pos(WGR_GPU_TIMER_WATER_DRAW);
             for (int k = 0; k < 9; ++k)
                 if (kCpuRows[k] < cpuN && cpu[kCpuRows[k]] > 0.0f)
                     cpuSum[k] += cpu[kCpuRows[k]];
@@ -13576,6 +13587,13 @@ void EngineWgpu::PublishRendererStats()
                          "draw {:.3f} post {:.3f} submit {:.3f} present {:.3f}",
                          cpuSum[0] * inv, cpuSum[1] * inv, cpuSum[2] * inv, cpuSum[3] * inv, cpuSum[4] * inv,
                          cpuSum[5] * inv, cpuSum[6] * inv, cpuSum[7] * inv, cpuSum[8] * inv);
+                LOG_INFO(Graphics,
+                         "W7 water GPU ms mean: TW spectrum+FFT {:.3f} shore sim {:.3f} breakers+spray {:.3f} caustics {:.3f} "
+                         "wakes {:.3f} | water draw {:.3f}",
+                         twParts[0] * inv, twParts[1] * inv, twParts[2] * inv, twParts[3] * inv, twParts[4] * inv,
+                         twParts[5] * inv);
+                for (double& c : twParts)
+                    c = 0.0;
                 for (double& c : cpuSum)
                     c = 0.0;
                 wallMs.clear();

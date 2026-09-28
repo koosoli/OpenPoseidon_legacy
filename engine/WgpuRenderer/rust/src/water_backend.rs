@@ -123,6 +123,8 @@ pub struct WaterBackend {
     requested: WaterBackendKind,
     refused_logged: Option<WaterBackendKind>,
     switches: u64,
+    /// W7h: the backend-switch soak's current pick (`WGR_WATER_SOAK`), ahead of everything else
+    soak: Option<WaterBackendKind>,
 }
 
 const MAX_REPLAYED_CASCADES: usize = 8;
@@ -151,6 +153,7 @@ impl WaterBackend {
             requested: WaterBackendKind::CurrentOp,
             refused_logged: None,
             switches: 0,
+            soak: None,
         }
     }
 
@@ -209,7 +212,13 @@ impl WaterBackend {
     /// The selection the backend should converge to: the env override when set, else the
     /// Water tab (via the params lane).
     fn wanted(&self) -> WaterBackendKind {
-        env_override().unwrap_or(self.requested)
+        self.soak.or(env_override()).unwrap_or(self.requested)
+    }
+
+    /// W7h: the backend-switch soak (plan §8): the lib's frame loop flips the backend with this
+    /// while `WGR_WATER_SOAK` runs; `None` hands the choice back.
+    pub fn set_soak(&mut self, kind: Option<WaterBackendKind>) {
+        self.soak = kind;
     }
 
     /// Called once per frame before anything reads the water: applies a pending selection

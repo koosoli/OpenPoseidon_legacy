@@ -1027,9 +1027,11 @@ impl Tidewater {
     pub fn update(&mut self, encoder: &mut wgpu::CommandEncoder, timers: &crate::gpu_timers::GpuTimers) {
         if self.last_params.is_some() {
             self.fft.dispatch(encoder, timers);
-            // W5b: the caustics follow this frame's FFT
+            // W5b: the caustics follow this frame's FFT (W7h: timed)
             if !self.bind_dirty {
+                timers.begin(encoder, crate::gpu_timers::Region::TwCaustics);
                 self.caustics.dispatch(encoder);
+                timers.end(encoder, crate::gpu_timers::Region::TwCaustics);
             }
             // W6: the boat wakes (before the water draw reads them)
             if !self.bind_dirty {
@@ -1040,13 +1042,18 @@ impl Tidewater {
             if self.sim.any_active() && !self.bind_dirty {
                 timers.begin(encoder, crate::gpu_timers::Region::TwShoreSim);
                 self.sim.dispatch(encoder);
+                timers.end(encoder, crate::gpu_timers::Region::TwShoreSim);
+                // W7h: the crest finder, the breakers' spray emitters and the spray update on their own
+                timers.begin(encoder, crate::gpu_timers::Region::TwBreakers);
                 self.brk.dispatch(encoder, true, self.spray.breakers_on, self.spray.on);
                 self.spray.copy_stats(encoder);
-                timers.end(encoder, crate::gpu_timers::Region::TwShoreSim);
+                timers.end(encoder, crate::gpu_timers::Region::TwBreakers);
             } else if self.spray.on && !self.bind_dirty {
                 // W6i: the boats' spray offshore, where no shore simulation runs
+                timers.begin(encoder, crate::gpu_timers::Region::TwBreakers);
                 self.brk.dispatch(encoder, false, false, true);
                 self.spray.copy_stats(encoder);
+                timers.end(encoder, crate::gpu_timers::Region::TwBreakers);
             }
         }
     }
@@ -1159,14 +1166,18 @@ impl Tidewater {
     pub fn take_prepare_stats(&mut self) -> String {
         let n = self.prep_stats[4].max(1.0);
         let s = format!(
-            "TW prepare CPU ms: mean {:.3} max {:.3} over {} frames | station update max {:.3} ({} traces on the worker, {} from cache) | CDLOD selection mean {:.3}",
+            "TW prepare CPU ms: mean {:.3} max {:.3} over {} frames | station update max {:.3} ({} traces on the worker, {} from cache) | CDLOD selection mean {:.3} | (W7h) last frame: {} CDLOD nodes, {} triangles (grid {}), {} simulated shore regions",
             self.prep_stats[0] / n,
             self.prep_stats[1],
             self.prep_stats[4] as u32,
             self.prep_stats[2],
             self.prep_stats[5] as u32,
             self.prep_stats[6] as u32,
-            self.prep_stats[3] / n
+            self.prep_stats[3] / n,
+            self.instance_count,
+            self.submitted_triangles(),
+            cdlod::grid(),
+            self.sim.regions.iter().flatten().count()
         );
         self.prep_stats = [0.0; 7];
         s
@@ -1298,8 +1309,7 @@ impl Tidewater {
     }
 
 
-    /// Triangles submitted by the last draw (for the §7 harness).
-    #[allow(dead_code)]
+    /// Triangles submitted by the last draw (for the §7 harness; W7h: in the prepare stats line).
     pub fn submitted_triangles(&self) -> u64 {
         self.instance_count as u64 * (self.grid_index_count as u64 / 3)
     }
