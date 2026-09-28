@@ -6083,6 +6083,45 @@ impl Renderer {
                 }
             }
 
+            // TW-WATER W12a: Tidewater's spray sprites (breakers, bow spray, the water explosions'
+            // plumes), here -- after the clouds, the god rays and the smoke, before the other
+            // transparents -- for the reason all three composites above are placed where they
+            // are: they stop at the scene depth and blended sprites write none. Drawn inside the
+            // water pass, a plume standing against the sky had the clouds behind it painted over
+            // it. Depth read-only, as in the water pass.
+            if self.water.has_spray_pass() && seg_ops.iter().any(|o| matches!(o, Plan3dOp::Water(_))) {
+                if let Some(cam) = self.gfx3d.camera_bind() {
+                    let mut spass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("wgr_tw_spray_pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &target,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                        })],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: seg_depth,
+                            depth_ops: None,
+                            stencil_ops: None,
+                        }),
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+                    for op in seg_ops {
+                        if let Plan3dOp::Water(arg) = op {
+                            if let Some(b) = water_batches.get(*arg as usize) {
+                                if b.first_node == 0 {
+                                    let off = (b.camera as u64 * self.gfx3d.camera_stride()) as u32;
+                                    self.water.draw_spray(&mut spass, cam, off);
+                                }
+                            }
+                        }
+                    }
+                    drop(spass);
+                }
+            }
+
             // The rest of the plan's world draws, now that water and clouds are down.
             // This is where Scene::ObjectsDrawn's output lands: the depth-sorted
             // transparent objects, the cloudlets, the rain streaks. They blend
