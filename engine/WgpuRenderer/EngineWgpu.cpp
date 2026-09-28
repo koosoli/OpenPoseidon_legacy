@@ -10902,6 +10902,17 @@ bool EngineWgpu::CaptureWarmRapStageRead(const char* key, WarmTextureRead& out) 
         if (!source || !source->Request().HasArchiveIdentity() ||
             !source->Request().bytes || source->Request().bytes > 16 * 1024 * 1024) return false;
         out = {key, std::move(source)};
+        if (auto* proof = Streaming::WarmTextureProvenance::Active())
+        {
+            BankReadMemberIdentity identity;
+            if (out.initializedSource->Request().CopyMemberIdentity(identity))
+            {
+                const auto token = proof->Admit(out.key, identity);
+                Streaming::WarmTextureProvenance::Emit(proof->Stamp(token,
+                    Streaming::WarmTextureProvenance::Event::Accepted,
+                    out.initializedSource->Request().bytes));
+            }
+        }
         return true;
     }
     catch (...) { return false; } // optional capture preserves ordinary owner upload
