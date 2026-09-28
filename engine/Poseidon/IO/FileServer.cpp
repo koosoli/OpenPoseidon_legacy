@@ -15,6 +15,7 @@
 #include <Poseidon/IO/Streams/FileOverlapped.hpp>
 #endif
 #include <Poseidon/IO/FileServerMT.hpp>
+#include <Poseidon/IO/Streams/PatnikArchiveReason.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp> // file-cache hit/miss + miss-latency counters
 #include <chrono>
@@ -107,6 +108,13 @@ int FileCache::Load(const char* name)
     int index = Find(name);
     if (index >= 0)
     {
+        if (PatnikArchiveReason::Enabled() && PatnikArchiveReason::Matches(name) &&
+            PatnikArchiveReason::ReserveRow())
+        {
+            const IFileBuffer* buffer = _cache[index]->_data.GetBuffer();
+            LOG_INFO(Core, "patnik_archive_reason stage=fileCache reason=hit bound={}",
+                buffer && static_cast<bool>(buffer->GetArchiveSourceBinding()));
+        }
         if (index != 0)
         {
             MoveToFront(index);
@@ -128,6 +136,13 @@ int FileCache::Load(const char* name)
     // does not touch the ring at all.
     Poseidon::WatchDogItem watch = Poseidon::WatchScopeFor("io.read", name ? name : "");
     FileInCache* newEntry = new FileInCache(name);
+    if (PatnikArchiveReason::Enabled() && PatnikArchiveReason::Matches(name) &&
+        PatnikArchiveReason::ReserveRow())
+    {
+        const IFileBuffer* buffer = newEntry->_data.GetBuffer();
+        LOG_INFO(Core, "patnik_archive_reason stage=fileCache reason=miss failed={} bound={}",
+            newEntry->_data.fail(), buffer && static_cast<bool>(buffer->GetArchiveSourceBinding()));
+    }
     if (newEntry->_data.fail())
     {
         delete newEntry;

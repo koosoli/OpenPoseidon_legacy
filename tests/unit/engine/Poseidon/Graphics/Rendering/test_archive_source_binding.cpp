@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/IO/Streams/PatnikArchiveReason.hpp>
 #include <Poseidon/Graphics/Textures/HotSourceProofRetirementPolicy.hpp>
 #include <Poseidon/IO/Streams/FileAccessPolicy.hpp>
 #include <Poseidon/IO/FileServerMT.hpp>
@@ -21,6 +22,16 @@ static_assert(!std::is_copy_constructible_v<ArchiveSourceBudget::Ticket>);
 static_assert(!std::is_move_constructible_v<ArchiveSourceBudget::Ticket>);
 static_assert(!std::is_copy_constructible_v<ArchiveSourceBinding::ModelReadScope>);
 static_assert(!std::is_move_constructible_v<ArchiveSourceBinding::ModelReadScope>);
+
+TEST_CASE("Patnik reason probe matches only the bounded member name", "[archive-source-binding][patnik-reason]")
+{
+    CHECK(PatnikArchiveReason::Matches("ca\\roads\\patnik_smdi.paa"));
+    CHECK(PatnikArchiveReason::Matches("PATNIK_SMDI.PAA"));
+    CHECK_FALSE(PatnikArchiveReason::Matches("patnik_smdi.paa.bak"));
+    CHECK_FALSE(PatnikArchiveReason::Matches("other_patnik_smdi.paa"));
+    CHECK_FALSE(PatnikArchiveReason::Matches(nullptr));
+    CHECK_FALSE(PatnikArchiveReason::Matches(std::string(8192, 'a').c_str()));
+}
 
 TEST_CASE("Archive binding debt remains charged through copied aliases", "[archive-source-binding][archive-source-budget]")
 {

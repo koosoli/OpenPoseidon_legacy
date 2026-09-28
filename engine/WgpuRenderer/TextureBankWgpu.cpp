@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cjson/cJSON.h>
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/IO/Streams/PatnikArchiveReason.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp>
@@ -557,6 +558,14 @@ Ref<Texture> TextureBankWgpu::Load(RStringB name)
     int index = Find(name);
     if (index >= 0)
     {
+        if (PatnikArchiveReason::Enabled() && PatnikArchiveReason::Matches((const char*)name) &&
+            PatnikArchiveReason::ReserveRow())
+        {
+            auto* existing = static_cast<TextureWgpu*>((Texture*)_texture[index]);
+            LOG_INFO(Graphics, "patnik_archive_reason stage=textureBank reason=existing mips={} initBound={} gpu={}",
+                existing->HasInitializedWarmSource(), existing->HasInitializedArchiveBinding(),
+                existing->GpuHandle() != 0);
+        }
         return (Texture*)_texture[index];
     }
 
@@ -595,6 +604,11 @@ Ref<Texture> TextureBankWgpu::Load(RStringB name)
     {
         texture->Init();
     }
+    if (PatnikArchiveReason::Enabled() && PatnikArchiveReason::Matches((const char*)name) &&
+        PatnikArchiveReason::ReserveRow())
+        LOG_INFO(Graphics, "patnik_archive_reason stage=textureBank reason=new mips={} initBound={} gpu={}",
+            texture->HasInitializedWarmSource(), texture->HasInitializedArchiveBinding(),
+            texture->GpuHandle() != 0);
     return texture;
 }
 

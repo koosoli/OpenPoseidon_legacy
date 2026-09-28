@@ -1,5 +1,6 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/IO/Streams/PatnikArchiveReason.hpp>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Core/ModSystem.hpp>
 #ifndef _WIN32
@@ -1494,8 +1495,22 @@ public:
 
 Ref<IFileBuffer> QFBank::Read(const char* name) const
 {
+    const bool patnik = PatnikArchiveReason::Enabled() && PatnikArchiveReason::Matches(name);
+    auto reason = [&](const char* why, bool bound)
+    {
+        if (!patnik || !PatnikArchiveReason::ReserveRow()) return;
+        try
+        {
+            const auto stats = ArchiveSourceBinding::SnapshotStats();
+            LOG_INFO(Core, "patnik_archive_reason stage=bank reason={} bound={} live={} limit={} capRefused={} captureRefused={} allocationRefused={}",
+                why, bound, stats.liveBindings, ArchiveSourceBinding::ModelReadScope::BindingLimit(),
+                stats.capacityRefused, stats.captureRefused, stats.allocationRefused);
+        }
+        catch (...) { } // Diagnostics cannot change the original read.
+    };
     if (!Load())
     {
+        reason("bankLoadFailed", false);
         return nullptr;
     }
     // log every file opened, even when the open later fails
@@ -1507,6 +1522,7 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
     const FileInfoO& info = FindFileInfo(name);
     if (IsNull(info))
     {
+        reason("memberMissing", false);
         return nullptr;
     }
 #if _ENABLE_PATCHING
@@ -1519,6 +1535,7 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
         Ref<IFileBuffer> data = QFileAccess::OpenFileBufferAuto(fullName);
         if (!data->GetError())
         {
+            reason("patchedLooseFile", false);
             return (IFileBuffer*)data;
         }
     }
@@ -1526,6 +1543,7 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
 
     if (info.compressedMagic == CompMagic) // some compression
     {
+        reason("compressedMember", false);
         Seek(info.startOffset);
         QIStream inBuf;
         // read compressed data into temporary buffer
@@ -1544,6 +1562,7 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
     }
     else if (info.compressedMagic == EncrMagic)
     {
+        reason("encryptedMember", false);
         Seek(info.startOffset);
         QIStream inBuf;
         // read compressed data into temporary buffer
@@ -1566,10 +1585,12 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
         // no compression
 
         std::shared_ptr<const ArchiveSourceBinding> binding;
+        const char* captureReason = "captureDisabled";
         if (CaptureWarmTextureSourceBinding() &&
             (!ArchiveSourceBinding::ModelReadScope::PurposeRequired() || ArchiveSourceBinding::ModelReadScope::IsActive()) &&
             _fileAccess && Foundation::IsMainThread() && name)
         {
+            captureReason = "notPaa";
             size_t length = 0;
             while (length < 8192 && name[length]) ++length;
             if (length >= 4 && length <= 8191 && name[length - 4] == '.' &&
@@ -1577,6 +1598,7 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
                 std::tolower(static_cast<unsigned char>(name[length - 2])) == 'a' &&
                 std::tolower(static_cast<unsigned char>(name[length - 1])) == 'a')
             {
+                captureReason = "captureRefused";
                 try
                 {
                     // Advisory count refusal before opening another denial handle. Acquire
@@ -1585,6 +1607,7 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
                     if (state.budget->Observe().bindings >=
                         ArchiveSourceBinding::ModelReadScope::BindingLimit())
                     {
+                        captureReason = "bindingCountCap";
                         state.capacityRefused.fetch_add(1, std::memory_order_relaxed);
                     }
                     else
@@ -1593,17 +1616,36 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
                         // Compare against the exact metadata selected by THIS original Read.
                         if (request && request->offset == static_cast<uint64_t>(info.startOffset) &&
                             request->bytes == static_cast<uint64_t>(info.length))
+                        {
                             binding = ArchiveSourceBinding::Create(std::move(*request));
+                            captureReason = binding ? "captured" : "bindingCreateRefused";
+                        }
                         else
+                        {
+                            captureReason = "readRequestRefusedOrMismatch";
                             SourceBindingState().captureRefused.fetch_add(1, std::memory_order_relaxed);
+                        }
                     }
                 }
-                catch (...) { } // Optional provenance never changes the original read result.
+                catch (...) { captureReason = "captureException"; } // Original read result is unchanged.
             }
+        }
+        if (patnik && std::strcmp(captureReason, "captureDisabled") == 0 &&
+            CaptureWarmTextureSourceBinding())
+        {
+            if (ArchiveSourceBinding::ModelReadScope::PurposeRequired() &&
+                !ArchiveSourceBinding::ModelReadScope::IsActive()) captureReason = "noOwnerPurpose";
+            else if (!_fileAccess) captureReason = "unmappedArchive";
+            else if (!Foundation::IsMainThread()) captureReason = "notMainThread";
         }
         auto bind = [&](Ref<IFileBuffer> buffer) -> Ref<IFileBuffer>
         {
-            if (!binding || !buffer || buffer->GetError() || buffer->GetSize() != info.length) return buffer;
+            if (!binding || !buffer || buffer->GetError() || buffer->GetSize() != info.length)
+            {
+                reason(!buffer || buffer->GetError() || buffer->GetSize() != info.length ?
+                    "mappedBufferInvalid" : captureReason, false);
+                return buffer;
+            }
             try
             {
                 Ref<IFileBuffer> wrapped;
@@ -1627,11 +1669,13 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
                 }
                 if (!wrapped) wrapped = new ArchiveBoundFileBuffer(buffer, binding);
                 ArchiveSourceBinding::NoteWrappedRead();
+                reason("wrapped", true);
                 return wrapped;
             }
             catch (...)
             {
                 SourceBindingState().allocationRefused.fetch_add(1, std::memory_order_relaxed);
+                reason("wrapperAllocationRefused", false);
                 return buffer;
             }
         };
@@ -1648,6 +1692,7 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
         // read directly from file
         Ref<FileBufferMemory> data = new FileBufferMemory(info.length);
         Read(data->GetWritableData(), info.length, name);
+        reason("unmappedCopied", false);
         return data.GetRef(); // Copied IO lacks a full-read witness; provenance remains Unknown.
     }
     else
