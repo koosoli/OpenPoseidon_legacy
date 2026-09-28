@@ -2249,7 +2249,8 @@ struct EngineWgpu::GeometryMainCountPending
     uint64_t token=0, pageEpoch=0, admissionEpoch=0, requestId=0, sourceGeneration=0, cullEpoch=0;
     uint32_t producerModel=UINT32_MAX, rendererModel=UINT32_MAX;
     unsigned ageFrames=0;
-    bool mainReported=false, shadowReported=false;
+    bool mainReported=false;
+    uint32_t shadowReportedMask=0;
 };
 
 struct EngineWgpu::SharedMeshFixtureState
@@ -4156,20 +4157,23 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
             }
             pending.mainReported = true;
         }
-        WgrMainTargetCountResult shadowFact{};
-        const bool shadowReady = wgr_shadow0_target_count_fact(_renderer, &shadowFact,
-                sizeof(shadowFact), 1) == 1 &&
-            shadowFact.struct_size == sizeof(shadowFact) && shadowFact.version == 1 &&
-            shadowFact.submitted == 1 && shadowFact.token == pending.token &&
-            shadowFact.model_id == pending.rendererModel &&
-            shadowFact.source_generation == pending.sourceGeneration &&
-            shadowFact.cull_epoch == pending.cullEpoch &&
-            (shadowFact.state == WGR_MAIN_TARGET_COUNT_PRESENT ||
-             shadowFact.state == WGR_MAIN_TARGET_COUNT_ABSENT) &&
-            (shadowFact.state != WGR_MAIN_TARGET_COUNT_ABSENT || shadowFact.count == 0) &&
-            (shadowFact.state != WGR_MAIN_TARGET_COUNT_PRESENT || shadowFact.count > 0);
-        if (shadowReady && !pending.shadowReported)
+        for (uint32_t cascade=0; cascade<4; ++cascade)
         {
+            const uint32_t bit = 1u << cascade;
+            if (pending.shadowReportedMask & bit) continue;
+            WgrMainTargetCountResult shadowFact{};
+            const bool shadowReady = wgr_shadow_target_count_fact(_renderer, cascade, &shadowFact,
+                    sizeof(shadowFact), 1) == 1 &&
+                shadowFact.struct_size == sizeof(shadowFact) && shadowFact.version == 1 &&
+                shadowFact.submitted == 1 && shadowFact.token == pending.token &&
+                shadowFact.model_id == pending.rendererModel &&
+                shadowFact.source_generation == pending.sourceGeneration &&
+                shadowFact.cull_epoch == pending.cullEpoch &&
+                (shadowFact.state == WGR_MAIN_TARGET_COUNT_PRESENT ||
+                 shadowFact.state == WGR_MAIN_TARGET_COUNT_ABSENT) &&
+                (shadowFact.state != WGR_MAIN_TARGET_COUNT_ABSENT || shadowFact.count == 0) &&
+                (shadowFact.state != WGR_MAIN_TARGET_COUNT_PRESENT || shadowFact.count > 0);
+            if (!shadowReady) continue;
             if (auto fixture = pending.fixture.lock())
             {
                 bool publish = false;
@@ -4190,16 +4194,16 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
                 if (publish)
                 {
                     static unsigned rows = 0;
-                    if (rows++ < 16)
-                        LOG_INFO(World, "Private cascade-0 GPU COUNT: token={} pageEpoch={} admissionEpoch={} request={} model={} rendererModel={} sourceGeneration={} cullEpoch={} state={} count={} (closed depth pass; no Fine release)",
-                            pending.token, pending.pageEpoch, pending.admissionEpoch, pending.requestId,
+                    if (rows++ < 64)
+                        LOG_INFO(World, "Private cascade-{} GPU COUNT: token={} pageEpoch={} admissionEpoch={} request={} model={} rendererModel={} sourceGeneration={} cullEpoch={} state={} count={} (closed depth pass; no Fine release)",
+                            cascade, pending.token, pending.pageEpoch, pending.admissionEpoch, pending.requestId,
                             pending.producerModel, pending.rendererModel, pending.sourceGeneration,
                             shadowFact.cull_epoch, shadowFact.state, shadowFact.count);
                 }
             }
-            pending.shadowReported = true;
+            pending.shadowReportedMask |= bit;
         }
-        if ((pending.mainReported && pending.shadowReported) || ++pending.ageFrames >= 16)
+        if ((pending.mainReported && pending.shadowReportedMask == 0xf) || ++pending.ageFrames >= 16)
             _geometryMainCountPending.reset();
     }
 
