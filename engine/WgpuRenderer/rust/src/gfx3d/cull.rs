@@ -411,14 +411,15 @@ pub(crate) struct InstanceTable {
     /// retirement even when its instance remains. Cached images must observe both kinds.
     /// This is not a revision for arbitrary mesh vertices, dynamic tails or pose palettes.
     epoch: u64,
-    /// Opt-in, retained-static-instance-only witness for one selected model.
-    /// This does not cover the dynamic tail, pose palettes or arbitrary mesh edits;
-    /// no COUNT/cache consumer may substitute it for the global epoch yet.
-    target_revision: Option<Box<RetainedTargetRevision>>,
+    /// Opt-in instance-row witness for one selected model (static plus dynamic).
+    /// This does not cover pose palettes, mesh vertex uploads or section/material
+    /// edits. The global epoch also omits dynamic-tail changes. Neither witness
+    /// authorizes cached COUNT reuse or Fine retirement.
+    target_revision: Option<Box<InstanceTargetRevision>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct RetainedTargetRevision {
+struct InstanceTargetRevision {
     model_id: u32,
     // Zero is permanently invalid after overflow; never wrap into an old fact.
     revision: u64,
@@ -437,7 +438,7 @@ impl InstanceTable {
                     witness.revision = witness.revision.checked_add(1).unwrap_or(0);
                 }
             }
-            None => self.target_revision = Some(Box::new(RetainedTargetRevision {
+            None => self.target_revision = Some(Box::new(InstanceTargetRevision {
                 model_id, revision: 1,
             })),
         }
@@ -572,6 +573,34 @@ impl InstanceTable {
     pub(crate) fn stale_ops(&self) -> u64 {
         self.stale_ops
     }
+}
+
+/// Compare only the selected model's dynamic rows. Other models may change or
+/// reorder without changing this witness. Full-row bit comparison is deliberately
+/// conservative: transform changes that do not affect the cull still bump it.
+/// Called only while the optional target witness is armed; the normal path has
+/// no extra dynamic scan, hashing or allocation.
+fn same_target_dynamic_rows(previous: &[InstanceGpu], next: &[InstanceGpu], model_id: u32) -> bool {
+    let mut old = previous.iter().filter(|row| row.model == model_id);
+    let mut new = next.iter().filter(|row| row.model == model_id);
+    loop {
+        match (old.next(), new.next()) {
+            (None, None) => return true,
+            (Some(a), Some(b)) if bytemuck::bytes_of(a) == bytemuck::bytes_of(b) => {},
+            _ => return false,
+        }
+    }
+}
+
+fn replace_dynamic_instances(dynamic: &mut Vec<InstanceGpu>, next: &[InstanceGpu],
+                             static_instances: &mut InstanceTable) {
+    if let Some((model_id, _)) = static_instances.target_revision() {
+        if !same_target_dynamic_rows(dynamic, next, model_id) {
+            static_instances.changed_target_model(model_id, INVALID_MODEL);
+        }
+    }
+    dynamic.clear();
+    dynamic.extend_from_slice(next);
 }
 
 pub struct CullState {
@@ -2595,9 +2624,10 @@ impl CullState {
         self.instances.remove(handle);
     }
 
-    /// Private opt-in witness for one retained static model. This deliberately
-    /// excludes the dynamic instance tail and mesh/material edits. Callers must
-    /// keep the existing global-epoch gate for cached COUNT and Fine residency.
+    /// Private opt-in witness for one model's static and dynamic instance rows.
+    /// It deliberately excludes mesh, section, material and palette edits.
+    /// The global epoch does not cover the dynamic tail, so neither witness is
+    /// a cached COUNT or Fine-residency authority.
     pub fn arm_retained_target_revision(&mut self, model_id: u32) -> Option<u64> {
         self.models.get(model_id as usize)?;
         self.instances.arm_target_revision(model_id)
@@ -2615,10 +2645,10 @@ impl CullState {
     }
 
     // Replace the whole dynamic set (re-copied every frame — the churny set the CPU already
-    // walks for simulation).
+    // walks for simulation). The optional target witness compares selected rows only;
+    // it does not advance the global epoch and cannot authorize cache reuse.
     pub fn set_dynamic(&mut self, instances: &[InstanceGpu]) {
-        self.dynamic.clear();
-        self.dynamic.extend_from_slice(instances);
+        replace_dynamic_instances(&mut self.dynamic, instances, &mut self.instances);
     }
 
     // Set this frame's cull params (frustum/cam/objectsZ/lod knobs). instance_count and the
@@ -6707,6 +6737,42 @@ pub(crate) mod tests {
         sentinel_table.changed_target_model(1, INVALID_MODEL);
         assert_eq!(sentinel_table.arm_target_revision(0), None,
             "overflow cannot revive an old serial");
+    }
+
+    #[test]
+    fn dynamic_target_rows_change_only_the_armed_model_revision() {
+        let row = |model, x| {
+            let mut value = InstanceGpu::zeroed();
+            value.model = model;
+            value.center[0] = x;
+            value
+        };
+        let a1 = row(7, 1.0);
+        let a2 = row(7, 2.0);
+        let b1 = row(8, 3.0);
+        let mut static_instances = InstanceTable::default();
+        let mut dynamic = Vec::new();
+        replace_dynamic_instances(&mut dynamic, &[a1, b1, a2], &mut static_instances);
+        assert_eq!(static_instances.target_revision(), None, "default path stays unarmed");
+        let global_epoch = static_instances.epoch;
+        assert_eq!(static_instances.arm_target_revision(7), Some(1));
+        replace_dynamic_instances(&mut dynamic, &[a1, b1, a2], &mut static_instances);
+        assert_eq!(static_instances.target_revision(), Some((7, 1)));
+        replace_dynamic_instances(&mut dynamic, &[row(8, 9.0), a1, a2], &mut static_instances);
+        assert_eq!(static_instances.target_revision(), Some((7, 1)),
+            "foreign row changes and reorder do not touch A");
+
+        replace_dynamic_instances(&mut dynamic, &[row(8, 9.0), a1, row(7, 4.0)], &mut static_instances);
+        assert_eq!(static_instances.target_revision(), Some((7, 2)), "A transform changed");
+        replace_dynamic_instances(&mut dynamic, &[row(8, 9.0), a1], &mut static_instances);
+        assert_eq!(static_instances.target_revision(), Some((7, 3)), "A was removed");
+        replace_dynamic_instances(&mut dynamic, &[row(8, 9.0), a1, a2], &mut static_instances);
+        assert_eq!(static_instances.target_revision(), Some((7, 4)), "A was added");
+        replace_dynamic_instances(&mut dynamic, &[a2, row(8, 9.0), a1], &mut static_instances);
+        assert_eq!(static_instances.target_revision(), Some((7, 5)),
+            "target-row reorder conservatively invalidates");
+        assert_eq!(static_instances.epoch, global_epoch,
+            "diagnostic witness never changes global visual-cache scheduling");
     }
 
 
