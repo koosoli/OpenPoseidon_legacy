@@ -31,6 +31,39 @@ pub const BATCHES: u32 = 8;
 pub const RSM_RES: u32 = 1024;
 pub const RSM_EXTENT: f32 = 48.0;
 
+fn rsm_refresh_requested(eligible: bool, view_moved: bool, budget_stale: bool,
+                         retry_unpublished: bool) -> bool {
+    eligible && (view_moved || budget_stale || retry_unpublished)
+}
+
+fn note_closed_rsm_sample(valid: &std::cell::Cell<bool>) {
+    valid.set(true);
+}
+
+#[test]
+fn gi_rsm_keeps_budgeted_refresh_except_after_failed_publication() {
+    assert!(!rsm_refresh_requested(true, false, false, false));
+    assert!(rsm_refresh_requested(true, false, true, false));
+    assert!(rsm_refresh_requested(true, true, false, false));
+    assert!(rsm_refresh_requested(true, false, false, true));
+    assert!(!rsm_refresh_requested(false, true, true, true));
+}
+
+#[test]
+fn closed_rsm_stays_sampleable_while_failed_publication_retries() {
+    use super::gi_rsm_publication::{GiRsmPublication, GI_CULL_VIEW};
+    let sample_valid = std::cell::Cell::new(false);
+    let mut publication = GiRsmPublication::default();
+    assert!(publication.plan(7));
+    note_closed_rsm_sample(&sample_valid);
+    publication.cull_recorded(GI_CULL_VIEW);
+    publication.final_submit_accepted();
+    assert_eq!(publication.commit(7), None); // no indirect GPU depth draw
+    assert!(sample_valid.get());
+    assert!(publication.needs_retry());
+    assert!(rsm_refresh_requested(true, false, false, publication.needs_retry()));
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct GiParamsGpu {
@@ -153,6 +186,7 @@ pub struct GiProbes {
     /// `prepare` meant the single draw landed on frame 0, whose world was still empty, and
     /// the proxy then stayed empty for the rest of the run (2026-09-03).
     pub rsm_refresh: std::cell::Cell<bool>,
+    pub rsm_eligible: std::cell::Cell<bool>,
     rsm_rendered: std::cell::Cell<Option<(SkyVisView, u64)>>,
     rsm_epoch: std::cell::Cell<u64>,
     rsm_valid: std::cell::Cell<bool>,
@@ -425,6 +459,7 @@ impl GiProbes {
             rsm_normal_view,
             rsm_view: sky_vis::build_view(glam::Vec3::ZERO, &SkyVisSettings::default()),
             rsm_refresh: std::cell::Cell::new(false),
+            rsm_eligible: std::cell::Cell::new(false),
             rsm_rendered: std::cell::Cell::new(None),
             rsm_epoch: std::cell::Cell::new(0),
             rsm_valid: std::cell::Cell::new(false),
@@ -451,6 +486,7 @@ impl GiProbes {
         cam_pos: glam::Vec3,
         to_sun: glam::Vec3,
         epoch: u64,
+        retry_unpublished: bool,
     ) -> (glam::Vec3, f32) {
         let s = self.settings;
         let origin = Self::origin_for(cam_pos, s.spacing);
@@ -470,6 +506,7 @@ impl GiProbes {
         )
         .normalize_or_zero();
         let rsm_ok = s.rsm_samples > 0 && sun_q.y > 0.02 && s.enabled;
+        self.rsm_eligible.set(rsm_ok);
         let mut rsm_settings = SkyVisSettings::default();
         rsm_settings.resolution = RSM_RES;
         rsm_settings.extent = RSM_EXTENT;
@@ -492,7 +529,7 @@ impl GiProbes {
             Some((_, e)) => e != epoch && self.frame % RSM_PERIOD == 0,
             None => true,
         };
-        self.rsm_refresh.set(rsm_ok && (view_moved || stale));
+        self.rsm_refresh.set(rsm_refresh_requested(rsm_ok, view_moved, stale, retry_unpublished));
         if !rsm_ok {
             self.rsm_valid.set(false);
         }
@@ -539,6 +576,13 @@ impl GiProbes {
             .set(Some((self.rsm_view, self.rsm_epoch.get())));
         self.rsm_valid.set(true);
         self.rsm_refresh.set(false);
+    }
+
+    /// Shader sample availability is separate from the optional cache publication
+    /// proof. A closed clear-only pass remains sampleable as in the ordinary path,
+    /// while the opt-in proof may still refuse to certify its cached contents.
+    pub fn mark_rsm_sample_ready(&self) {
+        note_closed_rsm_sample(&self.rsm_valid);
     }
 
     pub fn dispatch(

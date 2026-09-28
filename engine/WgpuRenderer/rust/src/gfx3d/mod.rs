@@ -11,6 +11,7 @@ mod section_refresh;
 mod section_span_pool;
 mod local_pose_cache;
 mod interior_publication;
+mod gi_rsm_publication;
 mod local0_publication;
 pub(crate) mod geometry_pass_facts;
 mod lod_feedback;
@@ -4113,6 +4114,10 @@ pub struct Gfx3d {
     // Distinct from solar bit zero: at night local tile zero uses cull index zero.
     local0_target_draw_closed: std::cell::Cell<bool>,
     gi_target_draw_closed: std::cell::Cell<bool>,
+    // Optional CPU-only RSM cache publication witness; absent on the default path.
+    gi_rsm_publication: Option<std::cell::Cell<gi_rsm_publication::GiRsmPublication>>,
+    gi_rsm_pending_view: Option<(SkyVisView, u64)>,
+    gi_rsm_publication_rows: u8,
     reflection_target_draw_closed: std::cell::Cell<bool>,
     sky0_target_draw_closed: std::cell::Cell<bool>,
     local_view_key: [Option<u64>; MAX_LOCAL_SHADOWS],
@@ -4967,6 +4972,10 @@ impl Gfx3d {
             shadow_target_draw_closed_mask: std::cell::Cell::new(0),
             local0_target_draw_closed: std::cell::Cell::new(false),
             gi_target_draw_closed: std::cell::Cell::new(false),
+            gi_rsm_publication: (std::env::var("WGR_GEOMETRY_GI_RSM_PUBLICATION").as_deref() == Ok("1"))
+                .then(|| std::cell::Cell::new(gi_rsm_publication::GiRsmPublication::default())),
+            gi_rsm_pending_view: None,
+            gi_rsm_publication_rows: 0,
             reflection_target_draw_closed: std::cell::Cell::new(false),
             sky0_target_draw_closed: std::cell::Cell::new(false),
             local_view_key: [None; MAX_LOCAL_SHADOWS],
@@ -7650,7 +7659,20 @@ impl Gfx3d {
             let sky_cam = glam::Vec3::new(main.cam_pos[0], main.cam_pos[1], main.cam_pos[2]);
             self.prepare_interior_sky(device, sky_cam);
             let epoch = self.cull.instance_epoch();
-            let (gi_origin, gi_spacing) = self.gi.prepare(queue, sky_cam, self.sun_dir, epoch);
+            let gi_retry = self.gi_rsm_publication.as_ref()
+                .is_some_and(|cell| cell.get().needs_retry());
+            let (gi_origin, gi_spacing) = self.gi.prepare(queue, sky_cam, self.sun_dir, epoch,
+                gi_retry);
+            if let Some(cell) = &self.gi_rsm_publication {
+                let mut state = cell.get();
+                if !self.gi.rsm_eligible.get() {
+                    state.abort();
+                    self.gi_rsm_pending_view = None;
+                } else if self.gi.rsm_refresh.get() {
+                    self.gi_rsm_pending_view = state.plan(epoch).then_some((self.gi.rsm_view, epoch));
+                }
+                cell.set(state);
+            }
             if let Some(cell)=&self.geometry_pass_facts {if self.gi.rsm_refresh.get() {let mut f=cell.get();f.invalidate_gi();cell.set(f);}}
             // Bind the current shadow map (or the dummy while none exists); the
             // depth passes for this frame were prepared before this call, so the
@@ -9203,10 +9225,17 @@ impl Gfx3d {
         );
         drop(rp);
         timers.end(encoder, crate::gpu_timers::Region::GiRsm);
-        // The cleared RSM is a valid cached result even with no indirect object draw.
-        // Preserve that ordinary GI cache transition; only an actual recorded draw
-        // may authorize the optional target-model COUNT diagnostic below.
-        self.gi.mark_rsm_drawn();
+        // The ordinary path treats even a cleared, draw-less RSM as valid. The
+        // opt-in publication witness requires an actual indirect draw and waits
+        // for final submit/FFI success before advancing the cached generation.
+        if let Some(cell) = &self.gi_rsm_publication {
+            self.gi.mark_rsm_sample_ready();
+            if drew_gpu {
+                let mut state = cell.get(); state.draw_closed(i); cell.set(state);
+            }
+        } else {
+            self.gi.mark_rsm_drawn();
+        }
         if !drew_gpu { return; }
         if self.cull.shadow_count_armed(4) {
             self.gi_target_draw_closed.set(true);
@@ -9387,7 +9416,12 @@ impl Gfx3d {
         }
         timers.end(encoder, crate::gpu_timers::Region::InteriorSkyCull);
         if self.gi.rsm_refresh.get() && self.gi.settings.enabled {
-            self.cull.dispatch_sky(encoder, sky_vis::DIRECTION_COUNT);
+            let i = gi_rsm_publication::GI_CULL_VIEW;
+            if self.cull.dispatch_sky(encoder, i) {
+                if let Some(cell) = &self.gi_rsm_publication {
+                    let mut state = cell.get(); state.cull_recorded(i); cell.set(state);
+                }
+            }
         }
     }
 
@@ -10022,6 +10056,41 @@ impl Gfx3d {
             for cell in cells {
                 let mut state = cell.get(); state.final_submit_accepted(); cell.set(state);
             }
+        }
+    }
+    pub fn gi_rsm_publication_submitted(&self) {
+        if let Some(cell) = &self.gi_rsm_publication {
+            let mut state = cell.get(); state.final_submit_accepted(); cell.set(state);
+        }
+    }
+    pub fn commit_gi_rsm_publication(&mut self) {
+        let Some(cell) = &self.gi_rsm_publication else { return; };
+        let mut state = cell.get();
+        let pending = self.gi_rsm_pending_view.take();
+        let Some((view, epoch)) = pending else {
+            if state.planned_epoch().is_some() { state.abort(); cell.set(state); }
+            return;
+        };
+        if state.planned_epoch() != Some(epoch) || self.cull.instance_epoch() != epoch ||
+            !self.gi.rsm_eligible.get() || !self.gi.rsm_refresh.get() ||
+            !self.interior_sky_active() || !same_sky_view(self.gi.rsm_view, view) {
+            state.abort(); cell.set(state); return;
+        }
+        let publication = state.commit(epoch);
+        cell.set(state);
+        if let Some((generation, _)) = publication {
+            self.gi.mark_rsm_drawn();
+            if self.gi_rsm_publication_rows < 16 {
+                self.gi_rsm_publication_rows += 1;
+                eprintln!("[wgr] GI RSM publication: generation={generation} instanceEpoch={epoch} view={} committed=true (CPU submit witness; no GPU completion or all-view proof)",
+                    gi_rsm_publication::GI_CULL_VIEW);
+            }
+        }
+    }
+    pub fn abort_gi_rsm_publication(&mut self) {
+        self.gi_rsm_pending_view = None;
+        if let Some(cell) = &self.gi_rsm_publication {
+            let mut state = cell.get(); state.abort(); cell.set(state);
         }
     }
     pub fn local0_publication_submitted(&self) {
