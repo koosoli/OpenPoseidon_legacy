@@ -968,12 +968,64 @@ void Landscape::GroundCollisionPlane(GroundCollisionBuffer& retVal, Object* with
     with->Deanimate(level);
 }
 
+namespace Poseidon
+{
+bool TidewaterWaterBurst(float x, float y, float z)
+{
+    static const bool keepLegacy = []
+    {
+        const char* v = std::getenv("WGR_TW_LEGACY_WATER_FX");
+        return v != nullptr && v[0] == '1';
+    }();
+    static const int envBackend = []
+    {
+        const char* v = std::getenv("WGR_WATER_BACKEND");
+        return (v != nullptr && (v[0] == '0' || v[0] == '1') && v[1] == '\0') ? v[0] - '0' : -1;
+    }();
+    if (keepLegacy || !GLandscape)
+        return false;
+    const int backend = envBackend >= 0 ? envBackend : (GEngine != nullptr ? GEngine->GetWaterSettings().waterBackend : 0);
+    if (backend != 1)
+        return false;
+    const float sea = GLandscape->GetSeaLevel();
+    return sea - GLandscape->SurfaceY(x, z) > 0.5f && y < sea + 1.5f;
+}
+} // namespace Poseidon
+
 void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* directHit, Vector3Par pos, Vector3Par dir,
                                         const AmmoType* type, bool enemyDammage)
 {
     if (!type)
     {
         return;
+    }
+
+    // TW-WATER W8a: an explosion on open water tells the water renderers so, with the ammo's blast
+    // (indirectHit, indirectHitRange) for the Tidewater plume. Submitted here rather than where the
+    // round meets the sea because every client runs this (the shooter's machine, and the others
+    // through the replicated explosion effects), and shells, rockets, missiles and bombs all end
+    // here. Lanes as the Hydro bridge's explosion event (Current OP's ring is unchanged); the mass
+    // lane carries indirectHit and the depth lane indirectHitRange (neither is read by Current OP).
+    if (type->explosive && !directHit)
+    {
+        const float sea = GetSeaLevel();
+        const float depth = sea - SurfaceY(pos.X(), pos.Z());
+        if (depth > 0.5f && pos.Y() < sea + std::max(1.5f, type->indirectHitRange * 0.5f))
+        {
+            HydroWaterInteractionEvent event{};
+            event.positionRadius[0] = pos.X();
+            event.positionRadius[1] = pos.Z();
+            event.positionRadius[2] = 3.5f;
+            event.positionRadius[3] = 4.5f;
+            event.velocityKind[2] = -25.0f;
+            event.velocityKind[3] = HydroWaterInteractionExplosion;
+            event.timeLifeFoamMass[1] = 1.8f;
+            event.timeLifeFoamMass[2] = 1.0f;
+            event.timeLifeFoamMass[3] = std::max(type->indirectHit, 1.0f);
+            event.directionDepthFlags[2] = std::max(type->indirectHitRange, 0.1f);
+            event.directionDepthFlags[3] = HydroWaterInteractionPendingImpulse;
+            SubmitWaterInteraction(event);
+        }
     }
 
     if (GSnow().CoverActive() && type->explosive)
