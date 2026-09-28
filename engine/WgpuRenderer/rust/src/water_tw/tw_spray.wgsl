@@ -233,7 +233,8 @@ fn sprayShade(in: SprayOut) -> vec4<f32> {
     let dsz = vec2<f32>(textureDimensions(waterSceneDepth));
     let suv = in.clip.xy / dsz;
     let sceneZ = _waterSceneZAt(suv);
-    let posViewZ = (frame.view * vec4<f32>(in.rel, 1.0)).z;
+    // (W6i.7: in the material's view space, -z forward; see twView in tw_water.wgsl)
+    let posViewZ = twView(vec4<f32>(in.rel, 1.0)).z;
     let soft = vMisc.z * 1.5 + 0.03;
     let fadeScene = sat((posViewZ - sceneZ) / soft);
     let pos = in.rel + frame.cam_pos.xyz;
