@@ -170,7 +170,11 @@ fn vs_spray(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     let t = age / max(life, 1e-3);
     let fadeIn = smoothstep(0.0, sprayByKind(kind, 0.02, 0.2, 0.02, 0.12, 0.02), t);
     let fadeOut = 1.0 - smoothstep(sprayByKind(kind, 0.8, 0.45, 0.8, 0.7, 0.5), 1.0, t);
-    let baseA = sprayByKind(kind, 0.55, 0.06, 0.8, 0.66, 0.22);
+    // (W10e, OP) dense spray 0.8 -> 0.45, sheets 0.66 -> 0.5, mist 0.22 -> 0.12 (drops and
+    // ligaments as Tidewater's): at the rates a 12-20 m/s surf reaches here (~16 000 particles/s,
+    // ~20 000 live) the breakers' spray stood as an opaque white wall 1-2 m tall along every wave,
+    // hiding the curl and the whitewater on the surface behind it
+    let baseA = sprayByKind(kind, 0.55, 0.06, 0.45, 0.5, 0.12);
     // far: fade out; very near the eye: sheets and mist would fill the screen
     let maxD = sprayR.b.z;
     let distFade = smoothstep(maxD, maxD * 0.55, dist) * select(smoothstep(0.6, 3.0, dist), 1.0, water);
