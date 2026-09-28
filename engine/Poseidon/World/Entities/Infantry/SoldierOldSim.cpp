@@ -10,6 +10,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <cmath>
+#include <cstdlib>
 #include <Poseidon/Foundation/Algorithms/Qsort.hpp>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
@@ -1034,7 +1035,16 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             {
                 maxSafeDepth = 0.6f;
             }
-            if (_waterDepth > maxSafeDepth && !playerControlled && !IsDead())
+            // Soldiers no longer drown (owner, 2026-09-28: "edit soldiers to stop dying in water,
+            // as we will add swimming later"): the 1999 rule killed AI soldiers standing deeper
+            // than 1.2 m (0.6 m prone) -- the player was already exempt. POSEIDON_INFANTRY_DROWN=1
+            // restores it.
+            static const bool drownOn = []
+            {
+                const char* v = std::getenv("POSEIDON_INFANTRY_DROWN");
+                return v && v[0] == '1';
+            }();
+            if (drownOn && _waterDepth > maxSafeDepth && !playerControlled && !IsDead())
             {
                 float drown = (_waterDepth - maxSafeDepth) * (1.0f / 0.5f);
                 saturateMin(drown, 2);
