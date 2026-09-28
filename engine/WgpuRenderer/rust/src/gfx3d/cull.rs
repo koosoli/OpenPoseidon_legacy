@@ -14,7 +14,7 @@ use std::cell::RefCell;
 
 // --- GPU buffer layouts (the CPU side of the structs in cull.wgsl) ---
 
-// Per-frame cull parameters (one uniform). 224 bytes, 16-aligned. The occlusion tail
+// Per-frame cull parameters (one uniform). 240 bytes, 16-aligned. The occlusion tail
 // (view_proj/viewport/hiz_mips/occlusion) is read only by main_occlude; the plain `main`
 // entry ignores it, so main/shadow views leave it zeroed.
 #[repr(C)]
@@ -38,6 +38,10 @@ pub struct CullParamsGpu {
     pub viewport: [f32; 2],
     pub hiz_mips: u32,
     pub occlusion: u32,
+    // Private diagnostic COUNT target; all-zero tail disables the extra atomic.
+    pub target_model_id: u32,
+    pub target_count_enabled: u32,
+    pub _target_pad: [u32; 2],
 }
 
 // One retained instance. `world` is the ABSOLUTE model->world transform (the GPU-driven VS
@@ -254,6 +258,8 @@ const ARG_WORDS: u64 = super::INDIRECT_ARG_SIZE / 4;
 // 8-storage-buffer GPU for one saved indexing offset. Word 3 is spare padding so STAT_BASE_WORD
 // lands on a round number; keep in lockstep with STAT_BASE in cull.wgsl.
 const STAT_BASE_WORD: u64 = 4;
+// Spare stats word +20; a future per-view async copy uses this byte offset.
+pub const TARGET_MODEL_COUNT_BYTE_OFFSET: u64 = (STAT_BASE_WORD + 20) * 4;
 pub const STATS_WORDS: usize = 24; // +16..+19 what-if triangles (see cull.wgsl word map)
 const COUNTER_WORDS: u64 = STAT_BASE_WORD + STATS_WORDS as u64;
 fn counter_words_for(feedback: bool) -> u64 { COUNTER_WORDS + if feedback { super::lod_feedback::WORDS } else { 0 } }
@@ -280,6 +286,7 @@ pub const STAT_LOD_HIST: usize = 8;
 pub const STAT_LOD_BUCKETS: usize = 8;
 pub const STAT_WHATIF: usize = 16;
 pub const STAT_WHATIF_COUNT: usize = 4;
+pub const STAT_TARGET_MODEL: usize = 20;
 /// The detail-multiplier scales the what-if words were computed for, in word order.
 pub const WHATIF_SCALES: [f32; STAT_WHATIF_COUNT] = [0.5, 0.70710678, 1.41421356, 2.0];
 /// Bytes gathered per view into a readback slot (the accounting tail of its counters buffer).
@@ -299,6 +306,9 @@ pub struct ViewStats {
     pub lod_hist: [u32; STAT_LOD_BUCKETS],
     /// Triangle total of the same survivors under WHATIF_SCALES[i] x lod_inv_width.
     pub whatif_tris: [u32; STAT_WHATIF_COUNT],
+    /// Opt-in target COUNT from this sampled view. Diagnostic only: no pass or
+    /// target generation accompanies the existing aggregate-stats readback.
+    pub target_model_count: u32,
 }
 
 /// The whole frame's object accounting, one entry per cull view.
@@ -575,6 +585,8 @@ pub struct CullState {
     // Debug flags written into CullParamsGpu.debug_flags each frame (cull.wgsl reads them). bit 0
     // = WGR_CULL_NO_FRUSTUM (skip the frustum test — discriminates "culled" from "not drawn").
     debug_flags: u32,
+    // CPU diagnostic selection only; no readback or residency policy consumes it.
+    target_model_id: Option<u32>,
     bind: Option<wgpu::BindGroup>,
 
     // Per-cascade shadow views (§6 multi-view). Length = active cascade count this frame
@@ -1022,6 +1034,9 @@ impl CullState {
             } else {
                 0
             },
+            target_model_id: std::env::var("WGR_GPU_VIEW_TARGET_MODEL_ID")
+                .ok().and_then(|s| s.parse::<u32>().ok())
+                .filter(|&id| id != INVALID_MODEL),
             bind: None,
             shadow_views: Vec::new(),
             reflection_view: None,
@@ -1149,6 +1164,7 @@ impl CullState {
                                 tris_alpha: word(b + STAT_TRIS_V0 + 1),
                                 lod_hist: [0; STAT_LOD_BUCKETS],
                                 whatif_tris: [0; STAT_WHATIF_COUNT],
+                                target_model_count: word(b + STAT_TARGET_MODEL),
                             };
                             for (k, h) in st.lod_hist.iter_mut().enumerate() {
                                 *h = word(b + STAT_LOD_HIST + k);
@@ -1543,10 +1559,13 @@ impl CullState {
         // view's params (frustum/cam differ; instance_count/variant_* are identical). Captured
         // as locals so the closure doesn't borrow self (rebuild_bind below needs &mut self).
         let variant_capacity = self.variant_capacity;
+        let target_model_id = self.target_model_id;
         let finalize = |p: &mut CullParamsGpu| {
             p.instance_count = total as u32;
             p.variant_capacity = variant_capacity;
             p.variant_count = CULL_VARIANT_COUNT;
+            p.target_model_id = target_model_id.unwrap_or(0);
+            p.target_count_enabled = u32::from(target_model_id.is_some());
         };
         finalize(&mut self.params);
         queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(&self.params));
@@ -3468,7 +3487,6 @@ pub(crate) mod tests {
         ];
         let materials = [SectionMaterialGpu::zeroed(); 2];
         let model = cull.register_model(1.0, &lods, &sections, &materials);
-
         let mk = |z: f32| InstanceGpu {
             world: Mat4::IDENTITY.to_cols_array(), // cull uses `center`, not `world`
             center: [0.0, 0.0, z, 1.0],
@@ -4086,6 +4104,7 @@ pub(crate) mod tests {
         ];
         let materials = [SectionMaterialGpu::zeroed(); 2];
         let model = cull.register_model(1.0, &lods, &sections, &materials);
+        cull.target_model_id = Some(model); // private diagnostic producer in this actual GPU test
         let mk = |z: f32| InstanceGpu {
             world: Mat4::IDENTITY.to_cols_array(),
             center: [0.0, 0.0, z, 1.0],
@@ -4153,11 +4172,35 @@ pub(crate) mod tests {
         assert_eq!(m.records, 8, "one record per (instance, section) pair");
         assert_eq!(m.tris, 8, "3 indices per section x 8 collapsed instances");
         assert_eq!(m.tris_solid, 8);
+        assert_eq!(m.target_model_count, 8, "target COUNT must come from GPU COUNT survivors");
         // A view that never dispatched must read zeros, not another view's numbers — this is the
         // stale-region trap the GPU timers document, in its counter form.
         let unused = stats.views[STATS_VIEW_REFLECTION];
         assert_eq!(unused.instances, 0);
         assert_eq!(unused.draws, 0);
+        assert_eq!(unused.target_model_count, 0, "an undispatched view cannot inherit main COUNT");
+
+        // Add an equally visible but different model. The aggregate survivor
+        // count rises while the exact target must remain unchanged.
+        let other = cull.register_model(1.0, &lods, &sections, &materials);
+        let mut other_instance = mk(5.0);
+        other_instance.model = other;
+        cull.instance_add(other_instance);
+        cull.prepare(&device, &queue);
+        let mut second = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut second);
+        cull.dispatch(&mut second);
+        cull.resolve_stats(&mut second);
+        queue.submit(std::iter::once(second.finish()));
+        for _ in 0..64 {
+            cull.harvest_stats(&device);
+            if cull.stats().views[STATS_VIEW_MAIN].instances == 9 { break; }
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        let second_main = cull.stats().views[STATS_VIEW_MAIN];
+        assert_eq!(second_main.instances, 9, "decoy model must survive this view");
+        assert_eq!(second_main.target_model_count, 8, "decoy must not alter exact model COUNT");
+        eprintln!("PASS exact target-model GPU COUNT: 8 target of 9 surviving instances");
     }
 
     #[test]

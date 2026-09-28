@@ -40,6 +40,10 @@ struct CullParams {
     viewport: vec2<f32>,     // Hi-Z mip0 dimensions in texels (= render target size)
     hiz_mips: u32,           // Hi-Z mip count (clamp the selected mip)
     occlusion: u32,          // 1 = run the Hi-Z occlusion test (main_occlude)
+    // Private diagnostic target; Rust CullParamsGpu carries the same aligned tail.
+    target_model_id: u32,
+    target_count_enabled: u32,
+    _target_pad: vec2<u32>,
 };
 
 struct Instance {
@@ -129,7 +133,7 @@ struct Record {
 //            what lets the CPU's LOD governor see the cost of a step BEFORE taking it
 //            (REN-VEG-004): the retained set's cost is a 700x ladder on a vegetation world and
 //            last frame's total says nothing about the next level.
-//   +20..+23 spare
+//   +20 exact-model COUNT (private opt-in); +21..+23 spare
 // The histogram is the point of this block: the standing hypothesis is that detailed building
 // and vegetation LODs stay active too far out, and only a per-level population count can test it.
 const STAT_BASE: u32 = 4u;
@@ -268,6 +272,12 @@ fn count_sections(idx: u32, level: u32) {
     }
     atomicAdd(&counters[STAT_BASE + 0u], 1u);
     atomicAdd(&counters[STAT_BASE + 8u + min(level, 7u)], 1u);
+    // COUNT sees the surviving instance and its exact model together. A zero-section
+    // LOD still counts as present, conservatively, for any future retirement.
+    if (cull.target_count_enabled != 0u &&
+        instances[idx].model == cull.target_model_id) {
+        atomicAdd(&counters[STAT_BASE + 20u], 1u);
+    }
 }
 
 // Triangles of one LOD level of one instance (sum of its sections' index counts / 3).
