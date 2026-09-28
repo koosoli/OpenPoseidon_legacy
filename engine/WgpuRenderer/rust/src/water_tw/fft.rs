@@ -140,8 +140,14 @@ impl SpectrumInputs {
         if sea[0] > 0.0 {
             local.wind_speed = sea[0];
         }
+        // W9c: WGR_TW_WIND=<m/s> sets the local wind for the session (captures)
+        if let Some(w) = wind_override() {
+            local.wind_speed = w;
+        }
         if sea[1] > 0.0 {
             local.fetch_km = sea[1];
+        } else {
+            local.fetch_km = wind_fetch_km(local.wind_speed);
         }
         let mut swell = WaveSystem::SWELL;
         swell.scale = tw[0][2].max(0.0);
@@ -154,11 +160,10 @@ impl SpectrumInputs {
         swell.scale = q(swell.scale, 0.01);
         swell.wind_direction_deg = q(swell.wind_direction_deg, 1.0);
         local.fetch_km = q(local.fetch_km, 1.0);
-        // AppUI.js whitecaps(): more whitecaps start at less compression, and more of them in
-        // fresh wind. (Its decay term is not taken over: OceanFFT's 0.35 stays, W3g notes.)
         // Zeroed params (no C++ side yet) read as Tidewater's 0.5.
         let whitecaps = if sea == [0.0; 4] { 0.5 } else { sea[2].clamp(0.0, 1.0) };
-        let foam_bias = q(0.5 + 0.16 * whitecaps + 0.01 * (local.wind_speed - 7.0).clamp(-5.0, 12.0), 0.005);
+        let choppiness = tw[0][1];
+        let foam_bias = q(whitecap_bias(sizes, local, swell, 500.0, choppiness, whitecaps), 0.005);
         Self { sizes, local, swell, depth: 500.0, seed: 1337, foam_bias }
     }
 
@@ -172,6 +177,171 @@ impl SpectrumInputs {
         }
         cuts
     }
+}
+
+/// `WGR_TW_WIND=<m/s>`: the local wind for the session (W9c captures), 0.5..40.
+pub fn wind_override() -> Option<f32> {
+    static V: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_WIND").ok().and_then(|v| v.trim().parse::<f32>().ok()).map(|w| w.clamp(0.5, 40.0)))
+}
+
+// ------------------------------------------------------------------ W9c: whitecap coverage
+
+/// The spectrum's height variance (m^2) and mean square slope, integrated on the CPU over the same
+/// cascades, cuts and formulas the init kernel uses (`SPECTRUM` below), on every 4th wavenumber of
+/// each 256^2 grid (x16 the cell). Cached for the last inputs.
+pub fn sea_stats(sizes: [f32; 4], local: WaveSystem, swell: WaveSystem, depth: f32) -> (f32, f32) {
+    type Key = ([f32; 4], [f32; 8], [f32; 8], f32);
+    static CACHE: std::sync::Mutex<Option<(Key, (f32, f32))>> = std::sync::Mutex::new(None);
+    let lanes = |w: &WaveSystem| [w.scale, w.wind_speed, w.wind_direction_deg, w.fetch_km, w.spread_blend, w.swell, w.peak_enhancement, w.short_waves_fade];
+    let key: Key = (sizes, lanes(&local), lanes(&swell), depth);
+    if let Ok(c) = CACHE.lock() {
+        if let Some((k, v)) = *c {
+            if k == key {
+                return v;
+            }
+        }
+    }
+    let g = GRAVITY as f64;
+    let d = depth as f64;
+    let disp = |k: f64| (k * g * (k * d).min(20.0).tanh()).sqrt();
+    let disp_d = |k: f64| {
+        let kd = (k * d).min(20.0);
+        let ch = kd.cosh();
+        g * (d * k / (ch * ch) + kd.tanh()) / disp(k) * 0.5
+    };
+    let tma = |w: f64| {
+        let wh = w * (d / g).sqrt();
+        if wh <= 1.0 { wh * wh * 0.5 } else if wh < 2.0 { 1.0 - (2.0 - wh).powi(2) * 0.5 } else { 1.0 }
+    };
+    let jonswap = |w: f64, a: [f32; 4], b: [f32; 4]| {
+        let (alpha, pw, gamma) = (b[0] as f64, b[1] as f64, b[2] as f64);
+        let sigma = if w <= pw { 0.07 } else { 0.09 };
+        let dd = w - pw;
+        let r = (-dd * dd / (sigma * sigma * pw * pw * 2.0)).exp();
+        a[0] as f64 * tma(w) * alpha * g * g * w.powi(-5) * (-(pw / w).powi(4) * 1.25).exp() * gamma.abs().powf(r)
+    };
+    let norm = |s: f64| {
+        let (s2, s3, s4) = (s * s, s * s * s, s * s * s * s);
+        if s < 5.0 {
+            s4 * -0.000564 + s3 * 0.00776 - s2 * 0.044 + s * 0.192 + 0.163
+        } else {
+            s4 * -4.80e-08 + s3 * 1.07e-05 - s2 * 9.53e-04 + s * 5.90e-02 + 3.93e-01
+        }
+    };
+    let dir = |th: f64, w: f64, a: [f32; 4], b: [f32; 4]| {
+        let ratio = w / b[1] as f64;
+        let sp = if w > b[1] as f64 { ratio.abs().powf(-2.5) * 9.77 } else { ratio.abs().powf(5.0) * 6.97 };
+        let s = sp + ratio.min(20.0).tanh() * 16.0 * (a[3] as f64).powi(2);
+        let dt = th - a[1] as f64;
+        let cos2s = norm(s) * (dt * 0.5).cos().abs().powf(s * 2.0);
+        let ct = dt.cos();
+        let base = if ct > 0.0 { ct * ct * (2.0 / std::f64::consts::PI) } else { 0.0 };
+        base + (cos2s - base) * a[2] as f64
+    };
+    let fade = |k: f64, b: [f32; 4]| (-(b[3] as f64).powi(2) * k * k).exp();
+    let (a0, b0) = local.packed();
+    let (a1, b1) = swell.packed();
+    let spec = SpectrumInputs { sizes, local, swell, depth, seed: 0, foam_bias: 0.0 };
+    let cuts = spec.cuts();
+    let (mut var_h, mut mss) = (0.0f64, 0.0f64);
+    const STEP: i32 = 4;
+    for c in 0..CASCADES as usize {
+        let dk = std::f64::consts::TAU / sizes[c] as f64;
+        for y in (0..N as i32).step_by(STEP as usize) {
+            for x in (0..N as i32).step_by(STEP as usize) {
+                let kx = (x - HALF as i32) as f64 * dk;
+                let kz = (y - HALF as i32) as f64 * dk;
+                let k = (kx * kx + kz * kz).sqrt();
+                if k < cuts[c][0] as f64 || k > cuts[c][1] as f64 {
+                    continue;
+                }
+                let w = disp(k);
+                let th = kz.atan2(kx);
+                let s = (jonswap(w, a0, b0) * dir(th, w, a0, b0) * fade(k, b0) + jonswap(w, a1, b1) * dir(th, w, a1, b1) * fade(k, b1)).max(0.0);
+                // var(height) = sum S |dw/dk| / k dk^2 (the init kernel's amplitude, squared x 2)
+                let e = s * disp_d(k).abs() / k * dk * dk * (STEP * STEP) as f64;
+                var_h += e;
+                mss += e * k * k;
+            }
+        }
+    }
+    let v = (var_h as f32, mss as f32);
+    if let Ok(mut c) = CACHE.lock() {
+        *c = Some((key, v));
+    }
+    v
+}
+
+/// Standard normal quantile (Acklam's rational approximation, |error| < 1.2e-9).
+fn normal_quantile(p: f64) -> f64 {
+    let p = p.clamp(1e-9, 1.0 - 1e-9);
+    const A: [f64; 6] = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2, 1.383577518672690e2, -3.066479806614716e1, 2.506628277459239];
+    const B: [f64; 5] = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2, 6.680131188771972e1, -1.328068155288572e1];
+    const C: [f64; 6] = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838, -2.549732539343734, 4.374664141464968, 2.938163982698783];
+    const D: [f64; 4] = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996, 3.754408661907416];
+    let pl = 0.02425;
+    if p < pl {
+        let q = (-2.0 * p.ln()).sqrt();
+        (((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5]) / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
+    } else if p > 1.0 - pl {
+        let q = (-2.0 * (1.0 - p).ln()).sqrt();
+        -(((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5]) / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
+    } else {
+        let q = p - 0.5;
+        let r = q * q;
+        (((((A[0] * r + A[1]) * r + A[2]) * r + A[3]) * r + A[4]) * r + A[5]) * q / (((((B[0] * r + B[1]) * r + B[2]) * r + B[3]) * r + B[4]) * r + 1.0)
+    }
+}
+
+/// Standard normal CDF (Abramowitz-Stegun 26.2.17 via erfc, |error| < 7.5e-8).
+fn normal_cdf(z: f64) -> f64 {
+    let t = 1.0 / (1.0 + 0.2316419 * z.abs());
+    let d = 0.3989422804014327 * (-z * z * 0.5).exp();
+    let p = d * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+    if z >= 0.0 { 1.0 - p } else { p }
+}
+
+/// W9c (OP): the fetch (km) for a wind the sea-conditions lane brings no fetch with (the weather's
+/// wind, or `WGR_TW_WIND`): as Tidewater's own presets pair them (Breezy 7 m/s / 120 km, Choppy
+/// 12 / 300, Storm 20 / 900: ~2.3 U^2), from its 120 km default up to 600 km. A strong wind then
+/// raises the sea, not only its foam: at 30 m/s the local sea's Hs goes from ~6 m (120 km) to
+/// ~7.6 m, at 15 m/s from ~3.6 m to ~6.5 m. (Above ~20 m/s the 733 m cascade holds the peak and the
+/// height levels off, as a fully risen sea's does.)
+pub fn wind_fetch_km(wind_speed: f32) -> f32 {
+    (2.3 * wind_speed * wind_speed).clamp(120.0, 600.0)
+}
+
+/// W9c (OP): the whitecap growth with the wind, relative to Tidewater's look at 7 m/s: x (U/7)^2,
+/// at most x4 (reached at 14 m/s). Measured whitecap cover grows ~U^3.4 (Monahan and
+/// O'Muircheartaigh 1980) and a hurricane sea is white, but in a game the owner asked for high
+/// wind to show as wave height, not as a sea turned to foam.
+pub const WHITECAP_GROWTH_MAX: f32 = 4.0;
+
+/// W9c (OP): the Jacobian foam threshold (OceanFFT `foamBias`) that gives the whitecap cover a set
+/// share of the surface. The foam kernel foams where the horizontal Jacobian J falls below the
+/// bias; J ~ 1 + choppiness x (divergence of the horizontal displacement), whose spread is
+/// choppiness x sqrt(mean square slope). Tidewater's fixed bias (0.58 at its defaults, plus 0.01
+/// per m/s of wind) foamed a share of the sea that grew with the slope spread itself: at 20-30 m/s
+/// most of J fell below it and the sea turned white while the waves barely looked bigger. Here
+/// the bias keeps the share Tidewater's 0.58 gives at its 7 m/s defaults, times the growth above,
+/// times 2^(2 (whitecaps - 0.5)) for the Water tab's whitecaps control (0.5 = Tidewater's).
+pub fn whitecap_bias(sizes: [f32; 4], local: WaveSystem, swell: WaveSystem, depth: f32, choppiness: f32, whitecaps: f32) -> f32 {
+    let chop = choppiness.max(0.05) as f64;
+    // Tidewater's reference: its defaults, bias 0.58
+    static REF: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    let p_ref = *REF.get_or_init(|| {
+        let (_, mss) = sea_stats(DEFAULT_CASCADE_SIZES, WaveSystem::LOCAL, WaveSystem::SWELL, 500.0);
+        let sigma = 0.9 * (mss as f64).sqrt();
+        normal_cdf((0.58 - 1.0) / sigma.max(1e-4))
+    });
+    let (_, mss) = sea_stats(sizes, local, swell, depth);
+    let sigma = chop * (mss as f64).sqrt();
+    let u = local.wind_speed.max(0.1) as f64;
+    let growth = ((u / 7.0) * (u / 7.0)).min(WHITECAP_GROWTH_MAX as f64);
+    let control = 2f64.powf(2.0 * (whitecaps.clamp(0.0, 1.0) as f64 - 0.5));
+    let share = (p_ref * growth * control).clamp(1e-6, 0.5);
+    (1.0 + sigma * normal_quantile(share)) as f32
 }
 
 /// Build the uniform for this frame.
@@ -902,6 +1072,11 @@ impl OceanFft {
         &self.current
     }
 
+    /// W9c: the spectrum inputs in use (for the log).
+    pub fn spectrum(&self) -> Option<SpectrumInputs> {
+        self.spectrum
+    }
+
     /// Upload this frame's uniform; a changed spectrum marks h0 for regeneration.
     pub fn set_frame(&mut self, queue: &wgpu::Queue, spec: SpectrumInputs, choppiness: f32, time: f32, dt: f32) {
         if self.spectrum != Some(spec) {
@@ -1034,13 +1209,52 @@ mod tests {
         let s = SpectrumInputs::from_params(&p);
         assert_eq!(s.local.wind_speed, 6.0);
         assert_eq!(s.local.fetch_km, 120.0);
-        assert!((s.foam_bias - 0.57).abs() < 1e-6);
         // Storm preset: 20 m/s, 900 km, whitecaps 1
         p.tidewater_sea = [20.0, 900.0, 1.0, 4.0];
         let s = SpectrumInputs::from_params(&p);
         assert_eq!(s.local.wind_speed, 20.0);
         assert_eq!(s.local.fetch_km, 900.0);
-        assert!((s.foam_bias - (0.5 + 0.16 + 0.12)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn whitecap_bias_keeps_tidewaters_look_and_bounds_the_foam_in_a_gale() {
+        // W9c: Tidewater's own defaults give its own bias
+        let b7 = whitecap_bias(DEFAULT_CASCADE_SIZES, WaveSystem::LOCAL, WaveSystem::SWELL, 500.0, 0.9, 0.5);
+        assert!((b7 - 0.58).abs() < 0.01, "{b7}");
+        // the foamed share: the bias's normal tail over the slope spread
+        let share = |w: f32, whitecaps: f32| {
+            let mut l = WaveSystem::LOCAL;
+            l.wind_speed = w;
+            let b = whitecap_bias(DEFAULT_CASCADE_SIZES, l, WaveSystem::SWELL, 500.0, 0.9, whitecaps) as f64;
+            let (_, mss) = sea_stats(DEFAULT_CASCADE_SIZES, l, WaveSystem::SWELL, 500.0);
+            normal_cdf((b - 1.0) / (0.9 * (mss as f64).sqrt()))
+        };
+        let s7 = share(7.0, 0.5);
+        // more foam in more wind, at most x4 Tidewater's 7 m/s share, however hard it blows
+        assert!(share(12.0, 0.5) > s7 * 2.0);
+        for w in [14.0, 20.0, 30.0, 40.0] {
+            let s = share(w, 0.5);
+            assert!(s <= s7 * (WHITECAP_GROWTH_MAX as f64) * 1.02 && s >= s7 * 3.9, "{w}: {s} vs {s7}");
+        }
+        // the Water tab's whitecaps control: x2 at 1, /2 at 0
+        assert!((share(7.0, 1.0) / s7 - 2.0).abs() < 0.05);
+        assert!((share(7.0, 0.0) / s7 - 0.5).abs() < 0.02);
+        // and the waves do grow: Hs rises with the wind (with the fetch the wind brings)
+        let hs = |w: f32| {
+            let mut l = WaveSystem::LOCAL;
+            l.wind_speed = w;
+            l.fetch_km = wind_fetch_km(w);
+            4.0 * sea_stats(DEFAULT_CASCADE_SIZES, l, WaveSystem::SWELL, 500.0).0.sqrt()
+        };
+        assert_eq!(wind_fetch_km(7.0), 120.0);
+        assert!(hs(15.0) > hs(7.0) * 1.5 && hs(30.0) > hs(15.0), "{} {} {}", hs(7.0), hs(15.0), hs(30.0));
+    }
+
+    #[test]
+    fn normal_quantile_inverts_the_cdf() {
+        for p in [1e-5, 0.001, 0.02, 0.2, 0.5, 0.8, 0.99] {
+            assert!((normal_cdf(normal_quantile(p)) - p).abs() < 1e-6 + p * 1e-4, "{p}");
+        }
     }
 
     #[test]

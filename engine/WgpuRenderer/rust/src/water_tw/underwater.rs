@@ -81,6 +81,9 @@ pub struct UwParams {
     pub torch_dir: [f32; 4],
     pub torch_col: [f32; 4],
     pub torch_shape: [f32; 4],
+    /// W9a: the drawn surface around the camera (`probe.rs`): camera x, z, grid step, grid size
+    /// (0: no grid yet, the FFT height alone)
+    pub probe: [f32; 4],
 }
 
 fn srgb_to_linear(c: f32) -> f32 {
@@ -138,6 +141,7 @@ impl UwParams {
             torch_dir,
             torch_col,
             torch_shape,
+            probe: [0.0; 4],
         }
     }
 }
@@ -183,6 +187,8 @@ impl TwUnderwater {
                 wgpu::BindGroupLayoutEntry { binding: 5, visibility: f, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
                 tex(6, S::Float { filterable: true }, D::D2),
                 tex(7, S::Float { filterable: true }, D::D2),
+                // W9a: the probe grid (r32float heights, loaded)
+                tex(8, S::Float { filterable: false }, D::D2),
             ],
         });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -247,6 +253,7 @@ impl TwUnderwater {
         destination: &wgpu::TextureView,
         displacement: &wgpu::TextureView,
         caustics: (&wgpu::TextureView, &wgpu::TextureView),
+        probe: &wgpu::TextureView,
     ) {
         use wgpu::BindingResource as R;
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -261,6 +268,7 @@ impl TwUnderwater {
                 wgpu::BindGroupEntry { binding: 5, resource: R::Sampler(&self.clamp) },
                 wgpu::BindGroupEntry { binding: 6, resource: R::TextureView(caustics.0) },
                 wgpu::BindGroupEntry { binding: 7, resource: R::TextureView(caustics.1) },
+                wgpu::BindGroupEntry { binding: 8, resource: R::TextureView(probe) },
             ],
         });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -288,7 +296,7 @@ mod tests {
 
     #[test]
     fn params_block_matches_the_wgsl() {
-        assert_eq!(std::mem::size_of::<UwParams>(), 64 + 12 * 16);
+        assert_eq!(std::mem::size_of::<UwParams>(), 64 + 13 * 16);
     }
 
     #[test]

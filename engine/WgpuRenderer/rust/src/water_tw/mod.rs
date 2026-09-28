@@ -35,6 +35,7 @@
 
 mod boat_spray;
 mod impacts;
+mod probe;
 mod breakers;
 mod cdlod;
 mod fft;
@@ -79,6 +80,8 @@ const TW_WATER_WGSL: &str = concat!(
     include_str!("tw_wake.wgsl"),
     "\n",
     include_str!("tw_impact.wgsl"),
+    "\n",
+    include_str!("tw_probe.wgsl"),
 );
 
 /// W6: the wake simulation kernels (tw_wake_kernel.wgsl) with the shared declarations.
@@ -210,9 +213,11 @@ struct TwSurface {
     wake: [[f32; 4]; wake::SLOTS * 4],
     // W8b: explosions in the surface, 2 lanes per slot (tw_impact.wgsl)
     impacts: [[f32; 4]; impacts::SURFACE_SLOTS * 2],
+    // W9a: the camera height probe's grid (tw_probe.wgsl)
+    probe: [f32; 4],
 }
 
-const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (17 + cdlod::LEVELS + wake::SLOTS * 4 + impacts::SURFACE_SLOTS * 2));
+const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (18 + cdlod::LEVELS + wake::SLOTS * 4 + impacts::SURFACE_SLOTS * 2));
 
 /// Whether the shore simulation runs (Water tab, and only once the shore waves have a field).
 /// Breaker spray on (W4a): emission gain and sprite intensity above zero (the caller also needs
@@ -272,6 +277,9 @@ struct FrameInputs<'a> {
     // W6: the wake readers' lanes
     wake: [[f32; 4]; wake::SLOTS * 4],
     impacts: [[f32; 4]; impacts::SURFACE_SLOTS * 2],
+    // W9a: the probe grid, and the surface height under the camera read back from it
+    probe: [f32; 4],
+    cam_surface: Option<f32>,
 }
 
 fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
@@ -292,7 +300,9 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         wind_speed = p.tidewater_sea[0];
     }
     // WRL-003: the level under the camera when the producer supplied one, else the sea.
-    let cam_water = if p.optics_params[3] > 0.0 { p.optics_params[2] } else { p.sea_level };
+    // W9a: in this mode the level is the drawn surface's own under the camera (the probe's
+    // readback) when there is one: the material's view side then agrees with the surface drawn.
+    let cam_water = f.cam_surface.unwrap_or(if p.optics_params[3] > 0.0 { p.optics_params[2] } else { p.sea_level });
     TwSurface {
         sea: [p.sea_level, p.time, wind_speed, cam_water],
         wind: [wind_dir[0], wind_dir[1], detail_offset[0], detail_offset[1]],
@@ -317,6 +327,7 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         morph: *f.morph,
         wake: f.wake,
         impacts: f.impacts,
+        probe: f.probe,
     }
 }
 
@@ -449,6 +460,8 @@ pub struct Tidewater {
     boat_spray: boat_spray::BoatSpray,
     // W8b: splashes from the engine's water-interaction events
     impacts: impacts::Impacts,
+    // W9a: the surface around the camera, as drawn (underwater composite, view side, gate)
+    probe: probe::Probe,
     // W5e: the frame's spot lights (the diver's torch is picked from them in prepare)
     spots: Vec<crate::ffi::WgrLight>,
     // W7b: prepare CPU ms: sum, max, station update max, CDLOD selection sum, frames;
@@ -691,6 +704,7 @@ impl Tidewater {
         );
         let spray = spray::SprayGpu::new(device, queue, camera_layout, &layout, &shader, surface_format, sample_count, linear);
         let uw = underwater::TwUnderwater::new(device, surface_format);
+        let probe = probe::Probe::new(device, &layout, &shader);
         let caustics = caustics::Caustics::new(device);
         let wake = wake::WakeGpu::new(device, TW_WAKE_KERNEL_WGSL);
 
@@ -764,6 +778,7 @@ impl Tidewater {
             st_cache: Vec::new(),
             spots: Vec::new(),
             impacts: Default::default(),
+            probe,
             spray,
             uw,
             linear: linear > 0.5,
@@ -977,6 +992,7 @@ impl Tidewater {
             && self.sim.any_active()
             && self.brk.ns >= 2;
         self.spray.poll_stats();
+        self.probe.poll();
         let cp = [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]];
         let (gain, intensity) = spray_override().unwrap_or((p.tidewater_fx[0], p.tidewater_fx[1]));
         // W6i: the boats' bow spray into the ring's CPU tail, and their hulls as collision bodies
@@ -1001,6 +1017,8 @@ impl Tidewater {
             caustic_tiles: self.caustics.tiles,
             wake: self.wake_lanes,
             impacts: self.impacts.lanes(),
+            probe: probe::Probe::lanes(cp),
+            cam_surface: self.probe.camera_height(),
         };
         let block0 = surface_block(&p, &inputs);
         self.detail_offset[0] += block0.wind[0] * block0.sea[2] * 0.7 * dt;
@@ -1019,7 +1037,10 @@ impl Tidewater {
         {
             let glow = glow_override().unwrap_or(p.tidewater_fx[2]);
             let torch = underwater::pick_torch(&self.spots, [cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]]);
-            let uwp = underwater::UwParams::new(cam, &p, self.linear, glow, spec.sizes, self.caustics.tiles, WATER_ABSORPTION, WATER_SCATTERING, p.underwater_gate[0] > 0.5, torch);
+            let mut uwp = underwater::UwParams::new(cam, &p, self.linear, glow, spec.sizes, self.caustics.tiles, WATER_ABSORPTION, WATER_SCATTERING, p.underwater_gate[0] > 0.5, torch);
+            // W9a: the drawn surface around the camera (the grid is drawn in `update`, before the
+            // composite reads it; until the first one exists the composite uses the FFT alone)
+            uwp.probe = if self.probe.ready || !self.bind_dirty { probe::Probe::lanes(cp) } else { [0.0; 4] };
             self.uw.set_frame(queue, &uwp);
         }
         self.fft.set_frame(queue, spec, p.tidewater[0][1], p.time, dt);
@@ -1068,7 +1089,17 @@ impl Tidewater {
                 self.spray.copy_stats(encoder);
                 timers.end(encoder, crate::gpu_timers::Region::TwBreakers);
             }
+            // W9a: the surface around the camera, after everything that displaces it
+            if !self.bind_dirty {
+                self.probe.record(encoder, &self.bind);
+            }
         }
+    }
+
+    /// W9a: the drawn surface's height under the camera (absolute m), read back from the probe
+    /// 1-3 frames late; None until the first readback, or when it is stale.
+    pub fn camera_surface_height(&self) -> Option<f32> {
+        self.probe.camera_height()
     }
 
     /// W5a: the Water tab's underwater checkbox (the same lane as Current OP's).
@@ -1085,7 +1116,7 @@ impl Tidewater {
         depth: &wgpu::TextureView,
         destination: &wgpu::TextureView,
     ) {
-        self.uw.render(device, encoder, source, depth, destination, self.fft.displacement_view(), (self.caustics.fine_view(), self.caustics.broad_view()));
+        self.uw.render(device, encoder, source, depth, destination, self.fft.displacement_view(), (self.caustics.fine_view(), self.caustics.broad_view()), &self.probe.view);
     }
 
     /// W4b: the lips' and the spray's coverage into the upscalers' history-control ("reactive")
@@ -1213,7 +1244,24 @@ impl Tidewater {
             let c = self.coast[i * n / 16.min(n).max(1)];
             format!("{:.0},{:.0}", c[0], c[1])
         }).collect();
-        format!("{s} | coast blocks {n}: {}", samples.join(" "))
+        // W9c: the sea state the FFT draws, and W9a: the probe's surface under the camera
+        let sea = match (self.last_params, self.fft.spectrum()) {
+            (Some(p), Some(spec)) => {
+                let (var_h, mss) = fft::sea_stats(spec.sizes, spec.local, spec.swell, spec.depth);
+                format!(
+                    " | (W9c) sea: wind {:.1} m/s fetch {:.0} km, Hs {:.2} m (x amplitude {:.2}), rms slope {:.3}, foam bias {:.3} | (W9a) surface under the camera {}",
+                    spec.local.wind_speed,
+                    spec.local.fetch_km,
+                    4.0 * var_h.max(0.0).sqrt() * p.tidewater[0][0],
+                    p.tidewater[0][0],
+                    mss.max(0.0).sqrt(),
+                    spec.foam_bias,
+                    self.probe.camera_height().map_or("none".to_string(), |h| format!("{h:.2} m (sea {:.2}, read {} frames ago)", p.sea_level, self.probe.age))
+                )
+            }
+            _ => String::new(),
+        };
+        format!("{s} | coast blocks {n}: {}{sea}", samples.join(" "))
     }
 
     /// Spray diagnostics for the log: on this frame, stations, and the latest readback.
@@ -1361,9 +1409,11 @@ mod tests {
         assert_eq!(std::mem::offset_of!(TwSurface, brk), 256);
         assert_eq!(std::mem::offset_of!(TwSurface, morph), 272);
         // W6: the wake readers' lanes after the CDLOD morph table
-        assert_eq!(std::mem::offset_of!(TwSurface, wake), 464);
-        assert_eq!(std::mem::offset_of!(TwSurface, impacts), 592);
-        assert_eq!(std::mem::size_of::<TwSurface>(), 720);
+        assert_eq!(std::mem::offset_of!(TwSurface, wake), 528);
+        assert_eq!(std::mem::offset_of!(TwSurface, impacts), 656);
+        // W9a: the probe grid last
+        assert_eq!(std::mem::offset_of!(TwSurface, probe), 784);
+        assert_eq!(std::mem::size_of::<TwSurface>(), 800);
     }
 
     #[test]

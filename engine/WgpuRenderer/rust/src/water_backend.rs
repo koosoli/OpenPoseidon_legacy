@@ -485,6 +485,16 @@ impl WaterBackend {
         self.surface_product().local
     }
 
+    /// TW-WATER W9a: the drawn surface's height under the camera when the backend measures it
+    /// (Tidewater: its probe grid, read back 1-3 frames late). Current OP: None (its eye
+    /// submersion comes with [`Self::underwater_params`]).
+    pub fn camera_surface_height(&self) -> Option<f32> {
+        match &self.active {
+            Active::Tidewater(tw) => tw.camera_surface_height(),
+            _ => None,
+        }
+    }
+
     pub fn low_quality(&self) -> bool {
         match &self.active {
             Active::CurrentOp(op) => op.water.low_quality(),

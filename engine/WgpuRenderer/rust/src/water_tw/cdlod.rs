@@ -21,7 +21,12 @@ pub fn grid() -> u32 {
     })
 }
 pub const LEAF: f32 = 8.0;
-pub const LEVELS: usize = 12;
+/// W9b (OP): 16 levels, not Tidewater's 12. Tidewater's 3 x 3 roots of 16 km stop the sea
+/// 16-41 km out, which is past its island's fog but not OP's: from a few hundred metres up the sea
+/// ended in a straight edge well short of the horizon (~140 km from 1500 m, ~226 km from 4 km).
+/// Four more levels (roots of 262 km, so at least 262 km of sea on every side) cost a few dozen
+/// coarse nodes; the near field is unchanged.
+pub const LEVELS: usize = 16;
 pub const RANGE_FACTOR: f32 = 2.5;
 pub const MORPH_START_RATIO: f32 = 0.66;
 pub const MAX_INSTANCES: usize = 1500;
@@ -214,11 +219,35 @@ mod tests {
         let c = Cdlod::default();
         assert_eq!(c.ranges[0], 20.0);
         assert_eq!(c.ranges[11], 8.0 * 2048.0 * 2.5);
+        assert_eq!(c.ranges[LEVELS - 1], 8.0 * 32768.0 * 2.5);
         // level 0: start = 0 + 20 * 0.66
         assert!((c.morph[0][0] - 13.2).abs() < 1e-5);
         assert!((c.morph[0][2] - 0.25).abs() < 1e-6);
         // level 1: start = 20 + (40 - 20) * 0.66
         assert!((c.morph[1][0] - 33.2).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_sea_reaches_the_horizon_from_high_up() {
+        // W9b: from 4 km up the horizon is ~226 km away; the selection must reach past 200 km
+        // in every direction, within the instance budget
+        let c = Cdlod::default();
+        let cam = glam::DVec3::new(6400.0, 4000.0, 6400.0);
+        let nodes = Selection::new(&c, cam, 0.0, None).run();
+        assert!(nodes.len() <= MAX_INSTANCES / 2, "{} nodes", nodes.len());
+        let (mut x0, mut x1, mut z0, mut z1) = (f64::MAX, f64::MIN, f64::MAX, f64::MIN);
+        for n in &nodes {
+            x0 = x0.min(n[0] as f64);
+            z0 = z0.min(n[1] as f64);
+            x1 = x1.max((n[0] + n[2]) as f64);
+            z1 = z1.max((n[1] + n[2]) as f64);
+        }
+        assert!(cam.x - x0 > 200_000.0 && x1 - cam.x > 200_000.0);
+        assert!(cam.z - z0 > 200_000.0 && z1 - cam.z > 200_000.0);
+        // and near the surface the finest level is still what the camera stands on
+        let low = Selection::new(&c, glam::DVec3::new(6400.5, 2.0, 5100.25), 0.0, None).run();
+        assert_eq!(low[0][3], 0.0);
+        assert!(low.len() <= MAX_INSTANCES / 2, "{} nodes", low.len());
     }
 
     #[test]

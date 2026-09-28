@@ -4030,9 +4030,18 @@ impl Renderer {
         // depth lane it used to rely on gates the water shader's tint, but the compositor also
         // engages on proximity to the surface, and a submerged camera is always proximate.
         let underwater_enabled = self.water.underwater_enabled();
+        // TW-WATER W9a: Tidewater measures the surface it draws under the eye; that, not the
+        // engine's submersion (Current OP's reference waves, shore waves included, which are not
+        // the surface drawn in that mode: at the beach they put the eye metres under water while
+        // it stood above it), decides the gate there.
+        let cam_surface = self.water.camera_surface_height();
         let underwater_state =
             self.water
                 .underwater_params()
+                .map(|(sea_level, time, submersion)| match cam_surface {
+                    Some(h) => (h, time, 0.0),
+                    None => (sea_level, time, submersion),
+                })
                 .and_then(|(sea_level, time, submersion)| {
                     let player_submerged = submersion > 0.0;
                     // Use the water draw camera, not an unrelated terrain/scene batch. The visual

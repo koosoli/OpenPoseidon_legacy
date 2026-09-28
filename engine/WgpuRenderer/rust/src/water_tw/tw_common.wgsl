@@ -26,9 +26,10 @@ struct TwSurface {
     simP0: vec4<f32>,      // ShoreSimParams: dryTime, foamLife, surfFoamLife, residueLife (s)
     simP1: vec4<f32>,      // ShoreSimParams: foamGen, depositGain, dt (s), shore sim on
     brk: vec4<f32>,        // Breakers: station count, lip opacity (Tidewater `sheet`); W5b caustic tiles (fine, broad) m
-    morph: array<vec4<f32>, 12>, // CDLOD per level: morph start, 1/range, spacing
+    morph: array<vec4<f32>, 16>, // CDLOD per level: morph start, 1/range, spacing (W9b: 16 levels)
     wake: array<vec4<f32>, 8>,   // W6: the wake readers' lanes, 4 per slot (tw_wake.wgsl)
     impacts: array<vec4<f32>, 8>, // W8b: explosions in the surface, 2 lanes per slot (tw_impact.wgsl)
+    probe: vec4<f32>,             // W9a: camera x, z, grid step (m), grid size (tw_probe.wgsl)
 };
 
 struct ConformParams {
@@ -66,6 +67,17 @@ fn terrainHeightAt(xz: vec2<f32>) -> f32 {
     // select, not an early return: keeps the fragment's derivatives in uniform control flow
     let lower = y00 + (y10 - y00) * f.y + (y01 - y00) * f.x;
     let upper = y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y;
-    return select(upper, lower, f.x <= 1.0 - f.y);
+    let h = select(upper, lower, f.x <= 1.0 - f.y);
+    // (W9b, OP) beyond the map the heightmap repeats its edge texels outward, so every edge texel
+    // ran on to the horizon as a straight strip of its own depth: seen from high up, parallel
+    // lines of shallow (cyan) or dry (holed) sea. The water's idea of the ground goes deep there
+    // over 400 m instead (OP's own sea shows open water beyond the map too).
+    let size = vec2<f32>(f32(cf.hm_width - 1u), f32(cf.hm_height - 1u)) * cf.terrain_grid;
+    let r = xz - cf.origin;
+    let outside = length(max(max(-r, r - size), vec2<f32>(0.0)));
+    return mix(h, min(h, OFF_MAP_GROUND), smoothstep(0.0, 400.0, outside));
 }
+
+// (W9b) the ground beyond the map as the water sees it (absolute m; deep open sea)
+const OFF_MAP_GROUND: f32 = -200.0;
 

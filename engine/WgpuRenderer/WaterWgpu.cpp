@@ -27,6 +27,21 @@
 #include <limits>
 #include <cstring> // memcpy — packs the WTR freeze mask into WgrWaterParams.fft_control.z
 
+namespace
+{
+// TW-WATER W9a: whether the Tidewater backend draws the water: WGR_WATER_BACKEND overrides the
+// Water tab for the session, as in the renderer (water_backend.rs env_override).
+bool TidewaterDrawsWater(int lookBackend)
+{
+    static const int envBackend = []
+    {
+        const char* v = std::getenv("WGR_WATER_BACKEND");
+        return (v != nullptr && (v[0] == '0' || v[0] == '1') && v[1] == '\0') ? v[0] - '0' : -1;
+    }();
+    return (envBackend >= 0 ? envBackend : lookBackend) == 1;
+}
+} // namespace
+
 namespace Poseidon
 {
 // CDLOD leaf span in terrain texels.  The GPU water mesh is intentionally denser
@@ -877,7 +892,11 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         cameraBodyWave = cameraBody->waveScale;
     }
     float localSurface = cameraBodyLevel;
-    if (look.cascadePreset == 1)
+    // TW-WATER W9a: Current OP's reference waves are its own surface, not Tidewater's. In the
+    // Tidewater mode they put the eye metres "under" a shore wave that is not drawn (at the beach
+    // the camera 0.1 m above the sea read 3.7 m submerged), and the renderer measures the surface
+    // it draws instead (water_tw/probe.rs); here the flat level stands.
+    if (look.cascadePreset == 1 && !TidewaterDrawsWater(look.waterBackend))
     {
         localSurface += ReferenceSurfaceHeight(cameraPos.X(), cameraPos.Z(), _params.time, look.waveAmp, look.waveSpeed,
                                                look.waveScale) *

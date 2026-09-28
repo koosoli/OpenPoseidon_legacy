@@ -117,12 +117,22 @@ struct VsOut {
     @location(7) surfMask: vec2<f32>, // clear plunging face, whitewater roller relief (m)
 };
 
-@vertex
-fn vs_tidewater(@location(0) grid: vec2<f32>, @location(1) node: vec4<f32>) -> VsOut {
+// W9a: the surface at Lagrangian point worldXZ (mesh spacing `spacing`, m): what the vertex
+// shader draws, shared with the camera height probe (tw_probe.wgsl) so that the underwater
+// composite's waterline is the drawn surface's own.
+struct TwDisp {
+    world: vec3<f32>,   // displaced point (absolute y)
+    total: vec3<f32>,   // displacement (x, z horizontal; y the wave height)
+    ground: f32,
+    depth: f32,
+    foam: f32,
+    shoreN: vec3<f32>,
+    shoreFoam: f32,
+    surfMask: vec2<f32>,
+};
+
+fn twDisplace(worldXZ: vec2<f32>, spacing: f32) -> TwDisp {
     let seaLevel = tw.sea.x;
-    let lod = cdlodMorph(node, grid, frame.cam_pos.xyz, seaLevel);
-    let worldXZ = lod.worldXZ;
-    let spacing = lod.spacing;
     let ground = terrainHeightAt(worldXZ);
     let depth = seaLevel - ground;
 
@@ -192,7 +202,31 @@ fn vs_tidewater(@location(0) grid: vec2<f32>, @location(1) node: vec4<f32>) -> V
     let below = select(ground - 0.06, min(ground - 2.0, seaLevel - 1.0), depth < -3.0);
     y = select(y, min(y, below), y < ground);
 
-    let world = vec3<f32>(worldXZ.x + total.x, y, worldXZ.y + total.z);
+    var o: TwDisp;
+    o.world = vec3<f32>(worldXZ.x + total.x, y, worldXZ.y + total.z);
+    o.total = total;
+    o.ground = ground;
+    o.depth = depth;
+    o.foam = foam;
+    o.shoreN = shoreN;
+    o.shoreFoam = shoreFoam;
+    o.surfMask = surfMask;
+    return o;
+}
+
+@vertex
+fn vs_tidewater(@location(0) grid: vec2<f32>, @location(1) node: vec4<f32>) -> VsOut {
+    let seaLevel = tw.sea.x;
+    let lod = cdlodMorph(node, grid, frame.cam_pos.xyz, seaLevel);
+    let worldXZ = lod.worldXZ;
+    let d = twDisplace(worldXZ, lod.spacing);
+    let world = d.world;
+    let total = d.total;
+    let depth = d.depth;
+    let foam = d.foam;
+    let shoreN = d.shoreN;
+    let shoreFoam = d.shoreFoam;
+    let surfMask = d.surfMask;
     let rel = world - frame.cam_pos.xyz;
     var out: VsOut;
     out.clip = reverse_z(frame.proj * frame.view * vec4<f32>(rel, 1.0));
@@ -215,7 +249,8 @@ fn seaDetailLoad(uv: vec2<f32>) -> vec4<f32> {
     return textureSampleLevel(seaDetailNoise, smpLinearRepeat, uv, 0.0);
 }
 
-fn seaDetailSample(xz: vec2<f32>) -> SeaDetailSample {
+// (W9b, OP) footprint: the pixel's size on the water (m)
+fn seaDetailSample(xz: vec2<f32>, footprint: f32) -> SeaDetailSample {
     let p = xz - tw.wind.zw;
     let g1 = seaDetailLoad(p / 620.0).x;
     let g2 = seaDetailLoad(p / 230.0 + vec2<f32>(tw.sea.y * 0.0009, 0.37)).y;
@@ -233,7 +268,11 @@ fn seaDetailSample(xz: vec2<f32>) -> SeaDetailSample {
     let st = seaDetailLoad(vec2<f32>(along / 380.0, across / 11.0) + vec2<f32>(0.13, 0.71)).w;
     let breakUp = seaDetailLoad(vec2<f32>(along / 140.0, across / 40.0) + vec2<f32>(0.51, 0.29)).x;
     let freshWind = smoothstep(6.0, 12.0, tw.sea.z);
-    let streak = smoothstep(0.68, 0.82, st) * smoothstep(0.4, 0.62, breakUp) * freshWind * tw.detail.z;
+    // (W9b, OP) the windrows are ~11 m across, read from the noise's full-resolution level: from
+    // high up (pixels of metres) they alias into long parallel lines. They fade out as the pixel
+    // grows past a few metres (Tidewater never looks from that high).
+    let streakFar = 1.0 - smoothstep(2.0, 8.0, footprint);
+    let streak = smoothstep(0.68, 0.82, st) * smoothstep(0.4, 0.62, breakUp) * freshWind * tw.detail.z * streakFar;
 
     let rough = mix(0.5, 1.5, gust) * (1.0 - slick * 0.8) * (1.0 - streak / max(tw.detail.z, 1e-3) * 0.45);
     return SeaDetailSample(rough, gust, slick, streak);
@@ -287,7 +326,7 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
     // bubbles mixed into the water (milky, turquoise, hides the bottom): surf and wake
     var aeration = 0.0;
 
-    let det = seaDetailSample(lagXZ);
+    let det = seaDetailSample(lagXZ, footprint);
     let rough = det.rough;
 
     for (var c = 0; c < CASCADES; c++) {
