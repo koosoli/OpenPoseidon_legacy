@@ -1304,7 +1304,19 @@ impl Tidewater {
         pass.draw_indexed(0..self.grid_index_count, 0, 0..self.instance_count);
         // the breaker lips over the surface (Tidewater: the transparent pass after the water)
         self.brk.draw(pass, camera, offset, &self.bind);
-        // the spray over both (Tidewater: renderOrder 20, after the lips)
+        // (the spray over both -- Tidewater: renderOrder 20, after the lips -- is `draw_spray`)
+    }
+
+    /// W12a: the spray sprites (breakers, bow spray, the water explosions' plumes), recorded by
+    /// the renderer after the cloud, god-ray and smoke composites, with the other transparents.
+    /// Drawn inside the water pass they came before the cloud composite, whose march stops at the
+    /// scene depth: sprites write none, so wherever a plume stood against the sky the clouds
+    /// behind it were painted over it (owner: "water explosions have the clouds clip through them
+    /// when looked at from an angle"). The engine's own order is the same: clouds are background.
+    pub fn draw_spray(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup, offset: u32) {
+        if self.bind_dirty {
+            return;
+        }
         self.spray.draw(pass, camera, offset, &self.bind);
     }
 

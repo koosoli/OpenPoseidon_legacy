@@ -633,6 +633,17 @@ impl WaterBackend {
         }
     }
 
+    /// W12a: Tidewater's spray sprites, after the clouds (no-op otherwise; see TwSurface::draw_spray).
+    pub fn draw_spray(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup, offset: u32) {
+        if let Some(tw) = self.tidewater() {
+            tw.draw_spray(pass, camera, offset);
+        }
+    }
+
+    pub fn has_spray_pass(&self) -> bool {
+        self.tidewater().is_some()
+    }
+
     pub fn draw_curling(&self, pass: &mut wgpu::RenderPass<'_>, camera: &wgpu::BindGroup, offset: u32) {
         if let Some(op) = self.op() {
             op.water.draw_curling(pass, camera, offset);
