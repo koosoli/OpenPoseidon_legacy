@@ -778,6 +778,9 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // sample, one set of weights, colours and normals agreeing per fragment by construction.
     // All zero means "layer 0 alone", which is every non-Multi section.
     var layer_w = vec3<f32>(0.0);
+#ifdef NATIVE_PBR_PREVIEW
+    var pbr_roughness = base.a;
+#endif
     if (sm.mask_slot != 0u && matdbg_flag(MATDBG_COMPOSE_MULTI)) {
         let mask_uv = select(in.uv, in.uv1, (sm.flags & SECTION_MASK_UV1) != 0u);
         let mask = textureSampleBias(textures[sm.mask_slot], samplers[sm.sampler_idx], mask_uv, frame.renscale.x).rgb;
@@ -803,16 +806,27 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         }
         layer_w = lw;
         var blended = vec3<f32>(0.0);
+#ifdef NATIVE_PBR_PREVIEW
+        var blended_roughness = 0.0;
+#endif
         for (var i = 0u; i < 3u; i = i + 1u) {
             if (sm.layer_slot[i] == 0u) {
                 continue;
             }
             let uv_i = in.uv * sm.layer_uv[i + 1u].xy + sm.layer_uv[i + 1u].zw;
-            let layer = textureSampleBias(textures[sm.layer_slot[i]], samplers[sm.sampler_idx], uv_i, frame.renscale.x).rgb;
+            let layer = textureSampleBias(textures[sm.layer_slot[i]], samplers[sm.sampler_idx], uv_i, frame.renscale.x);
             // RFG-072: each further layer in ITS colour (`Color_2..4`), identity when unnamed.
-            blended = blended + tint_albedo(layer, sm.layer_colour[i + 1u].rgb) * lw[i];
+            blended = blended + tint_albedo(layer.rgb, sm.layer_colour[i + 1u].rgb) * lw[i];
+#ifdef NATIVE_PBR_PREVIEW
+            blended_roughness = blended_roughness + layer.a * lw[i];
+#endif
         }
         let weight = min(total, 1.0);
+#ifdef NATIVE_PBR_PREVIEW
+        if ((sm.flags & SECTION_NATIVE_PBR_PREVIEW) != 0u) {
+            pbr_roughness = base.a * (1.0 - weight) + blended_roughness;
+        }
+#endif
         base = vec4<f32>(base.rgb * (1.0 - weight) + blended, base.a);
     }
     // A2C (MSAA): cutout sections (sm.alpha_ref > 0, uniform per quad) emit a sharpened coverage
@@ -891,7 +905,8 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     var specular_debug = vec3<f32>(
         clamp(max(sm.specular.r, max(sm.specular.g, sm.specular.b)), 0.0, 1.0),
         clamp(sm.specular.w / 128.0, 0.0, 1.0), 0.0);
-    if (sm.specular_slot != 0u && !matdbg_flag(MATDBG_DISABLE_SPECULAR)) {
+    if (sm.specular_slot != 0u && (sm.flags & SECTION_NATIVE_PBR_PREVIEW) == 0u
+        && !matdbg_flag(MATDBG_DISABLE_SPECULAR)) {
         let specular_texel = textureSampleBias(textures[sm.specular_slot], samplers[sm.sampler_idx], in.uv, frame.renscale.x);
         m.spec_mask = specular_texel.g;
         specular_debug = vec3<f32>(specular_texel.g, specular_texel.b, 1.0);
@@ -919,7 +934,10 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     var normal_ts_dbg = vec3<f32>(0.0, 0.0, 1.0);
 #ifdef NATIVE_PBR_PREVIEW
     var pbr_metal = 0.0;
+    var pbr_ao = 1.0;
     var pbr_sampled = false;
+    let preview_multi = (sm.flags & SECTION_NATIVE_PBR_PREVIEW) != 0u &&
+        sm.mask_slot != 0u && sm.specular_slot != 0u;
 #endif
     // MAT-048. Multi blends its NORMALS across the same four layers as its colours, with the
     // same mask weights. Until this, only layer 0's normal was ever bound, so on a wall whose
@@ -930,7 +948,11 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // "any normal at all", not "layer 0's normal".
     let has_layer_normals =
         (sm.layer_normal_slot[0] | sm.layer_normal_slot[1] | sm.layer_normal_slot[2]) != 0u;
-    if ((sm.normal_slot != 0u || has_layer_normals) && !matdbg_flag(MATDBG_DISABLE_NORMAL)) {
+    if ((sm.normal_slot != 0u || has_layer_normals
+#ifdef NATIVE_PBR_PREVIEW
+        || preview_multi
+#endif
+        ) && !matdbg_flag(MATDBG_DISABLE_NORMAL)) {
         // Layer 0's normal, at LAYER 0's transform. Identity for every non-Multi material
         // (ResolveMaterialLayers writes identity before any early return), so this is the
         // previous sample for them; on a Multi surface it is the correction that puts the
@@ -941,6 +963,17 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         // normals come from the same material, so they are the same convention. Reforger's
         // MatPBRMulti layers are `_NMO` files exactly like its base normal.
         let normal_rg = (sm.flags & SECTION_NORMAL_RG) != 0u;
+#ifdef NATIVE_PBR_PREVIEW
+        if (preview_multi) {
+            let uv0 = in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw;
+            let normal_sample = textureSampleBias(textures[sm.specular_slot], samplers[sm.sampler_idx], uv0, frame.renscale.x);
+            normal_ts = decode_nohq_packed(normal_sample, normal_rg);
+            let base_weight = 1.0 - min(layer_w.x + layer_w.y + layer_w.z, 1.0);
+            pbr_metal = normal_sample.b * base_weight;
+            pbr_ao = normal_sample.a * base_weight;
+            pbr_sampled = true;
+        } else
+#endif
         if (sm.normal_slot != 0u) {
             let uv0 = select(in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw, in.uv1,
                 (sm.flags & SECTION_GLOBALNMO_UV1) != 0u);
@@ -950,7 +983,7 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
 #ifdef NATIVE_PBR_PREVIEW
             if ((sm.flags & SECTION_NATIVE_PBR_PREVIEW) != 0u) {
                 pbr_metal = clamp(normal_sample.b, 0.0, 1.0);
-                m.native_ao = clamp(normal_sample.a, 0.0, 1.0);
+                pbr_ao = clamp(normal_sample.a, 0.0, 1.0);
                 pbr_sampled = true;
             }
 #endif
@@ -973,11 +1006,16 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
                 continue;
             }
             let uvn = in.uv * sm.layer_uv[i + 1u].xy + sm.layer_uv[i + 1u].zw;
-            let layer_n = decode_nohq_packed(
-                textureSampleBias(textures[sm.layer_normal_slot[i]], samplers[sm.sampler_idx], uvn, frame.renscale.x),
-                normal_rg);
+            let layer_sample = textureSampleBias(textures[sm.layer_normal_slot[i]], samplers[sm.sampler_idx], uvn, frame.renscale.x);
+            let layer_n = decode_nohq_packed(layer_sample, normal_rg);
             n_sum = n_sum + layer_n * layer_w[i];
             n_weight = n_weight + layer_w[i];
+#ifdef NATIVE_PBR_PREVIEW
+            if (preview_multi) {
+                pbr_metal = pbr_metal + layer_sample.b * layer_w[i];
+                pbr_ao = pbr_ao + layer_sample.a * layer_w[i];
+            }
+#endif
         }
         if (n_weight > 0.0) {
             let mixed = normal_ts * (1.0 - n_weight) + n_sum;
@@ -1045,7 +1083,8 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // and removes its diffuse share; NMO A attenuates ambient only. No extra fetch.
     var pbr_diffuse_scale = 1.0;
     if (pbr_sampled) {
-        let roughness = clamp(base.a, 0.08, 1.0);
+        let roughness = clamp(pbr_roughness, 0.08, 1.0);
+        m.native_ao = clamp(pbr_ao, 0.0, 1.0);
         m.spec_power = clamp(2.0 / (roughness * roughness) - 2.0, 1.0, 256.0);
         let reflected_f0 = mix(vec3<f32>(0.22), base.rgb, pbr_metal);
         m.specular = frame.sun_diffuse.rgb * reflected_f0;

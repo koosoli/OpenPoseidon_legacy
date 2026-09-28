@@ -12615,6 +12615,59 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                     }
                 }
             }
+            if (nativePbrPreview && baseColour != 0 && mat.texture_id == baseColour &&
+                !baseFromConstant && !sectionUntextured && mat.mask_texture_id != 0 &&
+                mat.specular_texture_id == 0 && mat.alpha_ref <= 0.0f && sec.variant == 0u)
+            {
+                const ShapeSection& sourceSection = s->GetSection(i);
+                const char* path = sourceSection.surfMat && sourceSection.surfMat->GetName().Data()
+                    ? sourceSection.surfMat->GetName().Data() : nullptr;
+                const auto found = path ? _materialBindings.find(path) : _materialBindings.end();
+                if (found != _materialBindings.end() &&
+                    Asset::Material::EmatMaterial::NameMatches(found->second.shaderFamily, "MatPBRMulti") &&
+                    found->second.ematPbr && found->second.ematPbr->baseLayerUsesTile &&
+                    found->second.ematPbr->bcrAlphaIsRoughness[0])
+                {
+                    using Slot = Asset::Material::MaterialSlot;
+                    const auto checkedNmo = [&](Slot slot) -> uint64_t
+                    {
+                        const auto* entry = found->second.Find(slot);
+                        if (!entry || entry->texture.isProcedural || entry->texture.path.empty())
+                            return 0;
+                        Ref<Texture> texture = _wbank->Load(entry->texture.path.canonical().c_str());
+                        auto* native = static_cast<TextureWgpu*>(texture.GetRef());
+                        const uint64_t handle = native ? native->EnsureUploaded() : 0;
+                        if (!handle || !native->NormalHasNativePbrChannels())
+                            return 0;
+                        return handle;
+                    };
+                    // Preview-only reuse of the otherwise empty specular-map handle for
+                    // NMO_1. The shader recognizes the flag before interpreting that slot;
+                    // the normal map's global/detail slot and all legacy ABI stay intact.
+                    const uint64_t baseNmo = checkedNmo(Slot::LayerNormal0);
+                    bool complete = baseNmo != 0;
+                    const Slot normals[3] = {Slot::LayerNormal1, Slot::LayerNormal2, Slot::LayerNormal3};
+                    for (size_t layer = 0; layer < 3; ++layer)
+                    {
+                        if (mat.layer_texture_id[layer] == 0)
+                            continue;
+                        complete = complete && found->second.ematPbr->bcrAlphaIsRoughness[layer + 1] &&
+                                   mat.layer_normal_texture_id[layer] != 0 &&
+                                   checkedNmo(normals[layer]) == mat.layer_normal_texture_id[layer];
+                    }
+                    if (complete)
+                    {
+                        mat.specular_texture_id = baseNmo;
+                        sec.flags |= WGR_MODEL_SECTION_NATIVE_PBR_PREVIEW | WGR_MODEL_SECTION_NORMAL_RG;
+                        static bool reportedMultiPreview = false;
+                        if (!reportedMultiPreview)
+                        {
+                            LOG_INFO(Graphics, "Wgpu Reforger PBR preview: first eligible layered section material={}", path);
+                            reportedMultiPreview = true;
+                        }
+                    }
+                }
+            }
             // Multi's mask lives on the second UV set in the BI corpora (TexGen uvSource
             // "tex1") and in Reforger's (`UVSrcGlobalMaps "UV set 2"`, RFG-072); the shader
             // samples it with uv1 when told so -- and ONLY when the shape carries a second

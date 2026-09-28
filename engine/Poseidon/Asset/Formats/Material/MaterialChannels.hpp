@@ -195,6 +195,7 @@ struct EmatPbrProvenance
     // True only for an opaque Enfusion PBR surface whose bound source is an
     // original *_BCR.edds, never a converter PAA or an OpacityMap composite.
     std::array<bool, 4> bcrAlphaIsRoughness{};
+    bool baseLayerUsesTile = false; // MatPBRMulti BCR_1, paired with NMO_1
     std::array<EmatAuthoredScalar, 4> roughness{}; // Roughness_1..4, as authored
     std::array<EmatAuthoredScalar, 4> metalness{}; // Metalness_1..4, as authored
     EmatAuthoredScalar roughnessScale;             // RoughnessScale

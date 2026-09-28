@@ -512,6 +512,9 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     if (!AddFirstEmatSlot(out, emat, {"BCRMap", "AlbedoMap"}, MaterialSlot::BaseColour))
         baseIsLayerTile = AddEmatSlot(out, emat, "BCR_1", MaterialSlot::BaseColour);
     AddFirstEmatSlot(out, emat, {"NMOMap", "GlobalNMOMap", "NTCMap", "NormalMap"}, MaterialSlot::NormalMap);
+    if (EmatPbrProvenanceEnabled() && EmatMaterial::NameMatches(emat.className, "MatPBRMulti") &&
+        baseIsLayerTile)
+        AddEmatSlot(out, emat, "NMO_1", MaterialSlot::LayerNormal0);
     AddEmatSlot(out, emat, "MaskMap", MaterialSlot::Mask);
     // A layer the material switched off (`Enabled_N 0`) binds nothing: drawing
     // it anyway paints a layer the author removed. Absent means on (layer 1
@@ -553,6 +556,7 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     if (EmatPbrProvenanceEnabled())
     {
         auto pbr = std::make_shared<EmatPbrProvenance>();
+        pbr->baseLayerUsesTile = baseIsLayerTile;
         if (EmatIsOpaqueSolid(emat))
         {
             const std::string baseBcr = emat.TextureOf(baseIsLayerTile ? "BCR_1" : "BCRMap");

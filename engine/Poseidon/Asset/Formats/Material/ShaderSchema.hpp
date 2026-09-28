@@ -58,6 +58,9 @@ enum class MaterialSlot
     SpecularDetail,
     Fresnel,
     Environment,
+    // Native MatPBRMulti's first tiling NMO, separate from its global NormalMap.
+    // Populated only for the opt-in PBR preview; appended to preserve slot IDs.
+    LayerNormal0,
     Count,
 };
 
@@ -77,6 +80,7 @@ inline const char* ToString(MaterialSlot slot)
         case MaterialSlot::LayerNormal1: return "LayerNormal1";
         case MaterialSlot::LayerNormal2: return "LayerNormal2";
         case MaterialSlot::LayerNormal3: return "LayerNormal3";
+        case MaterialSlot::LayerNormal0: return "LayerNormal0";
         case MaterialSlot::AmbientShadow: return "AmbientShadow";
         case MaterialSlot::SpecularDetail: return "SpecularDetail";
         case MaterialSlot::Fresnel: return "Fresnel";
