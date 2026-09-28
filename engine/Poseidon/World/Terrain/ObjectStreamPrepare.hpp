@@ -75,7 +75,6 @@
 // be a full set of unwanted models.)
 
 #include <Poseidon/Graphics/Textures/ColdPaaHandoff.hpp>
-#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -133,28 +132,6 @@ struct RapStageCandidateHandoff
         return true;
     }
 };
-
-// Exact opt-in fixture only. The raP payload is advisory; each returned name
-// still needs a fresh owner-side PAA binding before it can enter a warm job.
-// Put the second trunk stage first so the bounded serial worker can prepare it
-// before ordinary model registration consumes the texture.
-inline std::array<const std::string*, 2> SelectTreeFixtureWarmStages(
-    const RapStageCandidateHandoff& candidate)
-{
-    std::array<const std::string*, 2> selected{};
-    if (!candidate.Bounded()) return selected;
-    for (const auto& material : candidate.materials)
-    {
-        if (material.key == R"(dz\plants\tree\data\t_piceaabies_2d_trunk.rvmat)" &&
-            material.stageName == R"(dz\plants\tree\data\t_piceaabies_trunk_dxt5.paa)")
-            selected[0] = &material.stageName;
-        if ((material.key == R"(dz\plants\tree\data\t_piceaabies_2d_trunk.rvmat)" ||
-             material.key == R"(dz\plants\tree\data\d_piceaabies_stumpb_trunk_a.rvmat)") &&
-            material.stageName == R"(dz\plants\tree\data\t_piceaabies_trunk_no.paa)")
-            selected[1] = &material.stageName;
-    }
-    return selected;
-}
 struct Bc3EncodingObserver;
 namespace render { struct DdsPublicationObserver; struct ColdPaaOwned; }
 class LODShapeWithShadow;
