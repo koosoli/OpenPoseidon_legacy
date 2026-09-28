@@ -30,3 +30,23 @@ TEST_CASE("Warm material preflight cannot reload existing headers or bypass OFF 
     CHECK_FALSE(Policy::ReserveMissingSource(true, false, attempts, work));
     CHECK(attempts == 3); CHECK(work == 256);
 }
+
+TEST_CASE("A registered no-retained model saves both missing specular attempts for stages with consumers",
+    "[warm-material-preflight]")
+{
+    using Policy = Poseidon::Streaming::WarmMaterialStagePreflightPolicy;
+    size_t attempts = 2, work = 256;
+    // The caller supplies this negative ownership fact only for an absent
+    // SpecularDetail bank entry on a completed NoOwnedSection registration.
+    CHECK_FALSE(Policy::ReserveMissingSource(true, false, attempts, work, true));
+    CHECK_FALSE(Policy::ReserveMissingSource(true, false, attempts, work, true));
+    CHECK(attempts == 2); CHECK(work == 256);
+    // The same direct-drawn model can still consume NormalMap; it must retain
+    // the ordinary shared attempt/visit budget and byte-identical fallback.
+    REQUIRE(Policy::ReserveMissingSource(true, false, attempts, work, false));
+    CHECK(attempts == 1); CHECK(work == 255);
+    REQUIRE(Policy::ReserveMissingSource(true, false, attempts, work, false));
+    CHECK(attempts == 0); CHECK(work == 254);
+    CHECK_FALSE(Policy::ReserveMissingSource(true, false, attempts, work, false));
+    CHECK(work == 254);
+}

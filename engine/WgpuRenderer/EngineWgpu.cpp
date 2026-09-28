@@ -10747,6 +10747,23 @@ void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
         report(true);
         return;
     }
+    // A completed registration that retained NO section proves there is no
+    // retained material binding for this exact live shape. The direct
+    // DrawSectionTL path still consumes NormalMap, so only missing SpecularDetail
+    // headers can be skipped. Do not ask SectionGpuOwned here: its alpha/material
+    // classification may scan pixels or read a material, and an unregistered
+    // shape has no owner fact to borrow.
+    bool knownNoRetainedSections = false;
+    if (materialPreflightEnabled)
+    {
+        const auto registration = _gpuModels.find(shape);
+        if (registration != _gpuModels.end() && registration->second == WGR_INVALID_MODEL)
+        {
+            const auto reject = _gpuModelReject.find(shape);
+            knownNoRetainedSections = reject != _gpuModelReject.end() &&
+                reject->second == AdmitReject::NoOwnedSection;
+        }
+    }
     // Recreated registrations lost their recorded texture vector. Inspect only
     // already-cached normal/specular slots. Default only finds existing textures;
     // explicit preflight may load missing headers under its shared attempt budget,
@@ -10790,7 +10807,8 @@ void EngineWgpu::CaptureWarmTextureReads(const LODShapeWithShadow* shape,
             }
             if (!stageSourceAttemptsRemaining ||
                 !Streaming::WarmMaterialStagePreflightPolicy::ReserveMissingSource(
-                    materialPreflightEnabled, false, *stageSourceAttemptsRemaining, workRemaining)) continue;
+                    materialPreflightEnabled, false, *stageSourceAttemptsRemaining, workRemaining,
+                    knownNoRetainedSections && stage.slot == Asset::Material::MaterialSlot::SpecularDetail)) continue;
             // Two attempts across the entire owner recentre, including failures. Only cached
             // translated slots reach here; no material parsing, GPU upload, or worker bank access.
             // These counters are process-wide, so concurrent captures can contribute to a
