@@ -392,7 +392,9 @@ try {
         $g = $_.Matches[0].Groups
         [pscustomobject]@{ lineNumber = $_.LineNumber; source = [string]$g[1].Value; bytes = [uint64]$g[2].Value
             sourceMemberBytes = [uint64]$g[3].Value; row = [uint64]$g[4].Value
-            stageFamily = [bool]($g[1].Value -match '(?i)_(nohq|smdi|dtsmdi)\.paa$') }
+            # ShaderSchema also maps _sm to SpecularDetail (e.g. DayZ roads).
+            # This remains a filename-family hint, never proof of an actual slot consumer.
+            stageFamily = [bool]($g[1].Value -match '(?i)_(nohq|sm|smdi|dtsmdi)\.paa$') }
     })
     if (@($warmUploadObservations | Where-Object { $_.bytes -eq 0 -or $_.sourceMemberBytes -eq 0 -or
         $_.sourceMemberBytes -gt 16777216 -or $_.row -lt 1 -or $_.row -gt 64 }).Count -gt 0 -or
