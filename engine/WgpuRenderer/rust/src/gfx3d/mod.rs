@@ -9069,8 +9069,11 @@ impl Gfx3d {
         );
         drop(rp);
         timers.end(encoder, crate::gpu_timers::Region::GiRsm);
-        if !drew_gpu { return; }
+        // The cleared RSM is a valid cached result even with no indirect object draw.
+        // Preserve that ordinary GI cache transition; only an actual recorded draw
+        // may authorize the optional target-model COUNT diagnostic below.
         self.gi.mark_rsm_drawn();
+        if !drew_gpu { return; }
         if self.cull.shadow_count_armed(4) {
             self.gi_target_draw_closed.set(true);
         }
