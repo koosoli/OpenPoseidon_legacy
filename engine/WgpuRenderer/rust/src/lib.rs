@@ -6335,7 +6335,7 @@ impl Renderer {
         // This private cascade counter is copied from its own cull buffer only
         // after the cascade-0 depth pass closed. It stays Unknown if that view
         // was disabled, skipped, or lacked an actual GPU-driven draw.
-        let shadow0_count_copied = main_count_armed
+        let shadow0_count_copied = main_count_copied
             && self.gfx3d.copy_shadow0_target_count(&mut encoder);
         self.gfx3d.resolve_lod_demand();
         self.gfx3d.resolve_mip_feedback(&mut encoder);
@@ -6347,7 +6347,7 @@ impl Renderer {
         let main_commands = encoder.finish();
         let main_count_ready = main_count_copied && main_count_request.is_some_and(|(token, _, _)|
             self.gfx3d.main_target_count_before_submit(token));
-        let shadow0_count_ready = shadow0_count_copied && main_count_request.is_some_and(|(token, _, _)|
+        let shadow0_count_ready = main_count_ready && shadow0_count_copied && main_count_request.is_some_and(|(token, _, _)|
             self.gfx3d.shadow0_target_count_before_submit(token));
         self.queue.submit(std::iter::once(main_commands));
         let main_count_submitted = main_count_ready && main_count_request.is_some_and(|(token, _, _)|

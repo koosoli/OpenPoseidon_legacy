@@ -1112,6 +1112,10 @@ impl CullState {
     /// residency path calls this API. Invalid input clears any previous answer.
     pub fn arm_main_target_count(&mut self, device: &wgpu::Device, token: u64,
                                  model_id: u32, source_generation: u64) -> bool {
+        // An earlier failed render may have submitted an aborted cascade copy
+        // without leaving a C++ pending getter. Reclaim it on the next explicit
+        // request; the ordinary frame never polls this private ring.
+        if self.shadow0_count_slots.is_some() { self.harvest_shadow0_target_count(device); }
         self.target_model_id = self.target_model_default;
         self.main_count_armed = None;
         self.main_count_latest = MainCountFact::default();

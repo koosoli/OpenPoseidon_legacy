@@ -7238,8 +7238,11 @@ impl Gfx3d {
             // The pass must CLOSE before the encoder-level end timestamp — writing it while `rp`
             // is alive is a validation error, not a slightly wrong number.
             drop(rp);
-            if c == 0 && self.cull.shadow0_count_armed() && gpu_depth_draw_recorded &&
+            // When the sun is disabled, view 0 may instead be a local-light
+            // atlas tile. It must never masquerade as solar cascade 0.
+            if c == 0 && !is_local && self.cull.shadow0_count_armed() && gpu_depth_draw_recorded &&
                 self.geometry_shadow_cull_mask.get() & 1 != 0 {
+                debug_assert!(count > 0);
                 self.shadow0_target_draw_closed.set(true);
             }
             if let Some(cell)=&self.geometry_pass_facts {
