@@ -54,6 +54,43 @@ const STEADY_WHITE: f32 = 0.06;
 const DROP_SHARE: f32 = 0.5;
 const STEADY_MIST: f32 = 0.015;
 
+/// W6k: `WGR_TW_BOAT_SPRAY_TUNE=cap=..,drop=..,lig=..,white=..,mist=..,up=..` (any subset) scales
+/// the per-frame particle cap, the drops, ligaments, white water, mist and the upward launch
+/// speed, for tuning captures. All 1 by default.
+#[derive(Clone, Copy, Debug)]
+struct Tune {
+    cap: f32,
+    drop: f32,
+    lig: f32,
+    white: f32,
+    mist: f32,
+    up: f32,
+}
+
+fn tune() -> Tune {
+    static V: std::sync::OnceLock<Tune> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        let mut t = Tune { cap: 1.0, drop: 1.0, lig: 1.0, white: 1.0, mist: 1.0, up: 1.0 };
+        if let Ok(v) = std::env::var("WGR_TW_BOAT_SPRAY_TUNE") {
+            for kv in v.split(',') {
+                let mut it = kv.splitn(2, '=');
+                let (Some(k), Some(x)) = (it.next(), it.next().and_then(|x| x.trim().parse::<f32>().ok())) else { continue };
+                let x = x.clamp(0.0, 10.0);
+                match k.trim() {
+                    "cap" => t.cap = x,
+                    "drop" => t.drop = x,
+                    "lig" => t.lig = x,
+                    "white" => t.white = x,
+                    "mist" => t.mist = x,
+                    "up" => t.up = x,
+                    _ => {}
+                }
+            }
+        }
+        t
+    })
+}
+
 fn white_gain() -> f32 {
     static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
     *V.get_or_init(|| std::env::var("WGR_TW_BOAT_SPRAY").ok().and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(1.0).clamp(0.0, 10.0))
@@ -438,7 +475,8 @@ impl BoatSpray {
         }
         let boost = 1.0 + 2.5 * burst;
         // (OP: the cap is per 60 Hz frame, so the particle rate does not grow with the frame rate)
-        let budget = (MAX_PER_FRAME * dt * 60.0 / (total * EMIT_RATE * dt * boost * 1.3).max(1e-6)).min(1.0);
+        let tn = tune();
+        let budget = (MAX_PER_FRAME * tn.cap * dt * 60.0 / (total * EMIT_RATE * dt * boost * 1.3).max(1e-6)).min(1.0);
         let making = smooth(speed, 3.0, 6.0);
         // per side: the segment that throws most also throws the sheet, ligaments, white water, mist
         let mut best = [None::<usize>; 2];
@@ -467,7 +505,7 @@ impl BoatSpray {
             let vn = b.vel[0] * c.n[0] + b.vel[2] * c.n[2];
             let mut v = scale(add(b.vel, scale(c.n, -vn)), 0.6);
             v[1] = b.vel[1] * 0.3;
-            let up = c.r_v * 0.55 * (1.0 - imp) + c.r_i * 1.15 * imp + burst * 2.5;
+            let up = (c.r_v * 0.55 * (1.0 - imp) + c.r_i * 1.15 * imp + burst * 2.5) * tn.up;
             v = add(v, scale(c.n, 0.8 * r + 0.4 + burst * 1.0));
             v[1] += up;
             // the sheet leaves from where the surface meets the hull, raised by the stagnation rise
@@ -483,7 +521,7 @@ impl BoatSpray {
             let life = VELOCITY.lifetime * (1.0 - imp) + IMPACT.lifetime * imp;
             let carry = &mut st.contacts[k].carry;
             // drops (3-7 mm) from every wetted segment
-            em.emit(&mut carry[0], n * DROP_SHARE, pa, pb, v, DROPLET, 0.005 + 0.0006 * r, life, spread, 0.05, 0.6);
+            em.emit(&mut carry[0], n * DROP_SHARE * tn.drop, pa, pb, v, DROPLET, 0.005 + 0.0006 * r, life, spread, 0.05, 0.6);
             let s = k / SEGMENTS;
             if best[s] != Some(k) {
                 continue;
@@ -492,12 +530,12 @@ impl BoatSpray {
             // a few fragments of the clear sheet at the root (they tear into strands and drop clusters)
             em.emit(&mut carry[1], nn * 0.025 * making * (1.0 - burst * 0.5), pa, pb, v, SHEET, 0.12 + 0.02 * r, 0.45, spread * 0.5, 0.06, 0.6);
             // ligaments torn off the sheet: the readable blobs of water
-            em.emit(&mut carry[2], nn * 0.3 * smooth(r, 1.0, 5.0), pa, pb, v, LIGAMENT, 0.011 + 0.0012 * r, life, spread, 0.05, 0.6);
+            em.emit(&mut carry[2], nn * 0.3 * smooth(r, 1.0, 5.0) * tn.lig, pa, pb, v, LIGAMENT, 0.011 + 0.0012 * r, life, spread, 0.05, 0.6);
             // white water on impacts (torn white sheets) and (OP) from the steady bow wave at speed
             let steady = (1.0 - imp) * smooth(c.r_v, 4.0, 12.0) * white_gain();
             em.emit(
                 &mut carry[3],
-                nn * (0.06 * imp * smooth(c.r_i, 1.5, 5.0) + 0.1 * burst + STEADY_WHITE * steady) * making,
+                nn * (0.06 * imp * smooth(c.r_i, 1.5, 5.0) + 0.1 * burst + STEADY_WHITE * steady) * making * tn.white,
                 pa,
                 pb,
                 v,
@@ -511,7 +549,7 @@ impl BoatSpray {
             // a fine, faint mist on impacts that the relative wind carries aft over the boat
             em.emit(
                 &mut carry[4],
-                nn * (0.04 * imp + 0.15 * burst + STEADY_MIST * steady) * making,
+                nn * (0.04 * imp + 0.15 * burst + STEADY_MIST * steady) * making * tn.mist,
                 pa,
                 pb,
                 scale(v, 0.6),
