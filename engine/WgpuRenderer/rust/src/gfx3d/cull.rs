@@ -1495,6 +1495,15 @@ impl CullState {
                 _ => None,
             }).unwrap_or(0))
     }
+    /// Tile-index bits 1..23 whose private batch words were copied and committed.
+    pub fn batch_target_count_committed_local_mask(&self, token: u64) -> u32 {
+        self.batch_count.as_ref().map_or(0, |batch| batch.slots.iter()
+            .find_map(|(_, state)| match state {
+                BatchCountSlot::Submitted { identity, copied, committed: true, aborted: false }
+                    if identity.token == token => Some((*copied >> BATCH_SKY_VIEWS) << 1),
+                _ => None,
+            }).unwrap_or(0))
+    }
     pub fn batch_target_count_abort(&mut self, token: u64) {
         if let Some(b) = &mut self.batch_count { b.abort(token); }
         self.batch_sky_dispatch_mask.set(0);
@@ -6854,6 +6863,21 @@ pub(crate) mod tests {
         assert!(cull.batch_target_count_submitted(6));
         assert!(cull.batch_target_count_commit(6));
         assert_eq!(cull.batch_target_count_committed_sky_mask(6), 0b1111);
+        assert_eq!(cull.batch_target_count_committed_local_mask(6), 1 << 1);
+        let local_tile = super::super::local_publication::LocalTileIdentity {
+            tile_index: 1, key: 42, instance_epoch: cull.instance_epoch(),
+            shape: (2048, 4, 2, 5), cull_index: 5,
+        };
+        let mut local_publication = super::super::local_publication::LocalTilePublication::default();
+        assert!(local_publication.plan(local_tile));
+        local_publication.cull_recorded(5);
+        local_publication.draw_closed(5);
+        local_publication.final_submit_accepted();
+        let (generation, published) = local_publication.commit(local_tile).unwrap();
+        let local_key = super::super::local_cached_count::Key::current(generation, published,
+            local_tile.shape, local_tile.shape, 5, Some(42), cull.instance_epoch()).unwrap();
+        let mut local_cache = super::super::local_cached_count::CachedCount::default();
+        local_cache.publish(local_key, cull.batch_target_count_fact(4).identity);
         let sky_views = super::super::sky_vis::build_views(glam::Vec3::ZERO,
             &super::super::sky_vis::SkyVisSettings::default());
         let mut interior_caches = [super::super::interior_cached_count::CachedCount::default(); 4];
@@ -6877,6 +6901,9 @@ pub(crate) mod tests {
                 assert_eq!(interior_caches[i].fact(Some(interior_keys[i])), fact);
             }
         }
+        local_cache.observe(cull.batch_target_count_fact(4));
+        assert_eq!(local_cache.fact(Some(local_key)), cull.batch_target_count_fact(4));
+        assert_eq!(local_cache.fact(None).status, MainCountStatus::Unknown);
         for i in 0..4 {
             let mut wrong_direction = interior_keys[i];
             wrong_direction.direction = (i + 2) % 5;
@@ -6887,6 +6914,8 @@ pub(crate) mod tests {
             .all(|(_, state)| matches!(state, BatchCountSlot::Idle)));
 
         assert!(cull.arm_main_target_count(&device, 7, absent_model, 22));
+        local_cache.source_changed(cull.batch_target_count_fact(4).identity);
+        assert_eq!(local_cache.fact(Some(local_key)).status, MainCountStatus::Unknown);
         for (index, cache) in interior_caches.iter_mut().enumerate() {
             cache.source_changed(cull.batch_target_count_fact(index).identity);
             assert_eq!(cache.fact(Some(interior_keys[index])).status, MainCountStatus::Unknown);
@@ -6902,6 +6931,15 @@ pub(crate) mod tests {
         assert!(cull.batch_target_count_submitted(7));
         assert!(cull.batch_target_count_commit(7));
         assert_eq!(cull.batch_target_count_committed_sky_mask(7), 0b0010);
+        assert_eq!(cull.batch_target_count_committed_local_mask(7), 1 << 1);
+        assert!(local_publication.plan(local_tile));
+        local_publication.cull_recorded(5);
+        local_publication.draw_closed(5);
+        local_publication.final_submit_accepted();
+        let (generation, published) = local_publication.commit(local_tile).unwrap();
+        let absent_local_key = super::super::local_cached_count::Key::current(generation, published,
+            local_tile.shape, local_tile.shape, 5, Some(42), cull.instance_epoch()).unwrap();
+        local_cache.publish(absent_local_key, cull.batch_target_count_fact(4).identity);
         let absent_interior_key = super::super::interior_cached_count::Key::new(
             2, 2, 1, sky_views[2], cull.instance_epoch());
         interior_caches[1].publish(absent_interior_key, cull.batch_target_count_fact(1).identity);
@@ -6915,6 +6953,9 @@ pub(crate) mod tests {
         assert_eq!(interior_caches[1].fact(Some(absent_interior_key)).status, MainCountStatus::Absent);
         assert_eq!(interior_caches[1].fact(Some(interior_keys[1])).status, MainCountStatus::Unknown);
         assert_eq!(cull.batch_target_count_fact(4).status, MainCountStatus::Absent);
+        local_cache.observe(cull.batch_target_count_fact(4));
+        assert_eq!(local_cache.fact(Some(absent_local_key)).status, MainCountStatus::Absent);
+        assert_eq!(local_cache.fact(Some(local_key)).status, MainCountStatus::Unknown);
         assert_eq!(cull.batch_target_count_fact(0).status, MainCountStatus::Unknown,
             "a cached or draw-less direction must not inherit a zero");
 
@@ -6923,18 +6964,23 @@ pub(crate) mod tests {
         let mut abort_batch = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         cull.begin_frame_stats(&mut abort_batch);
         assert!(cull.dispatch_sky(&mut abort_batch, 1));
-        assert!(cull.copy_batch_target_count(&mut abort_batch, 1, 0, 4, 0));
+        assert!(cull.dispatch_shadow(&mut abort_batch, 5));
+        assert!(cull.copy_batch_target_count(&mut abort_batch, 1, 1 << 1, 4, 1 << 5));
         assert!(cull.batch_target_count_before_submit(8));
         queue.submit(std::iter::once(abort_batch.finish()));
         assert!(cull.batch_target_count_submitted(8));
         cull.batch_target_count_abort(8);
         assert_eq!(cull.batch_target_count_committed_sky_mask(8), 0);
+        assert_eq!(cull.batch_target_count_committed_local_mask(8), 0);
+        local_publication.abort();
+        local_cache.invalidate();
         interior_caches[1].invalidate();
         for _ in 0..64 {
             cull.harvest_batch_target_count(&device);
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
         }
         assert_eq!(cull.batch_target_count_fact(0).status, MainCountStatus::Unknown);
+        assert_eq!(cull.batch_target_count_fact(4).status, MainCountStatus::Unknown);
         interior_caches[1].observe(cull.batch_target_count_fact(1));
         assert_eq!(interior_caches[1].fact(Some(absent_interior_key)).status, MainCountStatus::Unknown);
         assert!(cull.batch_count.as_ref().unwrap().slots.iter()
@@ -6952,6 +6998,7 @@ pub(crate) mod tests {
         queue.submit(std::iter::once(night.finish()));
         assert!(cull.batch_target_count_submitted(9));
         assert!(cull.batch_target_count_commit(9));
+        assert_eq!(cull.batch_target_count_committed_local_mask(9), 1 << 1);
         for _ in 0..64 {
             cull.harvest_batch_target_count(&device);
             if cull.batch_target_count_fact(4).status == MainCountStatus::Present { break; }
@@ -6959,5 +7006,86 @@ pub(crate) mod tests {
         }
         assert_eq!(cull.batch_target_count_fact(4).count, 8);
         assert_eq!(cull.batch_target_count_fact(4).identity.source_generation, 24);
+        let night_tile = super::super::local_publication::LocalTileIdentity {
+            shape: (2048, 0, 2, 6), cull_index: 1, ..local_tile
+        };
+        assert!(local_publication.plan(night_tile));
+        local_publication.cull_recorded(1);
+        local_publication.draw_closed(1);
+        local_publication.final_submit_accepted();
+        let (generation, published) = local_publication.commit(night_tile).unwrap();
+        let night_key = super::super::local_cached_count::Key::current(generation, published,
+            night_tile.shape, night_tile.shape, 1, Some(42), cull.instance_epoch()).unwrap();
+        local_cache.publish(night_key, cull.batch_target_count_fact(4).identity);
+        local_cache.observe(cull.batch_target_count_fact(4));
+        assert_eq!(local_cache.fact(Some(night_key)).count, 8);
+        assert_eq!(local_cache.fact(Some(absent_local_key)).status, MainCountStatus::Unknown);
+
+        // The last atlas tile uses the last batch word, even at night.
+        cull.set_shadow_view_count(&device, 24);
+        cull.set_shadow_params(23, params);
+        assert!(cull.arm_main_target_count(&device, 10, model, 25));
+        cull.prepare(&device, &queue);
+        let mut last = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut last);
+        assert!(cull.dispatch_shadow(&mut last, 23));
+        assert!(cull.copy_batch_target_count(&mut last, 0, 1 << 23, 0, 1 << 23));
+        assert!(cull.batch_target_count_before_submit(10));
+        queue.submit(std::iter::once(last.finish()));
+        assert!(cull.batch_target_count_submitted(10));
+        assert!(cull.batch_target_count_commit(10));
+        assert_eq!(cull.batch_target_count_committed_local_mask(10), 1 << 23);
+        let last_tile = super::super::local_publication::LocalTileIdentity {
+            tile_index: 23, key: 99, instance_epoch: cull.instance_epoch(),
+            shape: (2048, 0, 24, 7), cull_index: 23,
+        };
+        let mut last_publication = super::super::local_publication::LocalTilePublication::default();
+        assert!(last_publication.plan(last_tile));
+        last_publication.cull_recorded(23);
+        last_publication.draw_closed(23);
+        last_publication.final_submit_accepted();
+        let (generation, published) = last_publication.commit(last_tile).unwrap();
+        let last_key = super::super::local_cached_count::Key::current(generation, published,
+            last_tile.shape, last_tile.shape, 1, Some(99), cull.instance_epoch()).unwrap();
+        let mut last_cache = super::super::local_cached_count::CachedCount::default();
+        last_cache.publish(last_key, cull.batch_target_count_fact(26).identity);
+        for _ in 0..64 {
+            cull.harvest_batch_target_count(&device);
+            if cull.batch_target_count_fact(26).status == MainCountStatus::Present { break; }
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        last_cache.observe(cull.batch_target_count_fact(26));
+        assert_eq!(last_cache.fact(Some(last_key)).count, 8);
+        assert_eq!(cull.batch_target_count_fact(25).status, MainCountStatus::Unknown);
+
+        assert!(cull.arm_main_target_count(&device, 11, absent_model, 26));
+        last_cache.source_changed(cull.batch_target_count_fact(26).identity);
+        assert_eq!(last_cache.fact(Some(last_key)).status, MainCountStatus::Unknown);
+        cull.prepare(&device, &queue);
+        let mut last_zero = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut last_zero);
+        assert!(cull.dispatch_shadow(&mut last_zero, 23));
+        assert!(cull.copy_batch_target_count(&mut last_zero, 0, 1 << 23, 0, 1 << 23));
+        assert!(cull.batch_target_count_before_submit(11));
+        queue.submit(std::iter::once(last_zero.finish()));
+        assert!(cull.batch_target_count_submitted(11));
+        assert!(cull.batch_target_count_commit(11));
+        assert_eq!(cull.batch_target_count_committed_local_mask(11), 1 << 23);
+        assert!(last_publication.plan(last_tile));
+        last_publication.cull_recorded(23);
+        last_publication.draw_closed(23);
+        last_publication.final_submit_accepted();
+        let (generation, published) = last_publication.commit(last_tile).unwrap();
+        let last_zero_key = super::super::local_cached_count::Key::current(generation, published,
+            last_tile.shape, last_tile.shape, 1, Some(99), cull.instance_epoch()).unwrap();
+        last_cache.publish(last_zero_key, cull.batch_target_count_fact(26).identity);
+        for _ in 0..64 {
+            cull.harvest_batch_target_count(&device);
+            if cull.batch_target_count_fact(26).status == MainCountStatus::Absent { break; }
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        last_cache.observe(cull.batch_target_count_fact(26));
+        assert_eq!(last_cache.fact(Some(last_zero_key)).status, MainCountStatus::Absent);
+        assert_eq!(last_cache.fact(Some(last_zero_key)).count, 0);
     }
 }

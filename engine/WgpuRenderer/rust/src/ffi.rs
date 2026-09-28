@@ -3626,8 +3626,9 @@ pub unsafe extern "C" fn wgr_interior_target_count_fact(
     })).is_ok() as u32
 }
 
-/// Private nonblocking COUNT for local shadow tiles 1..23. Fresh cull, closed
-/// indirect depth draw, final submit and successful render are required.
+/// Private nonblocking COUNT for local shadow tiles 1..23. With the opt-in
+/// publication witness, a mapped word remains bound to its exact tile, atlas
+/// generation/shape, day/night cull route, source and original token.
 /// # Safety
 /// Same live renderer and exact writable output contract as the main getter.
 #[unsafe(no_mangle)]
@@ -3642,8 +3643,7 @@ pub unsafe extern "C" fn wgr_local_shadow_target_count_fact(
     *output = WgrMainTargetCountResult::empty();
     catch_unwind(AssertUnwindSafe(|| {
         let renderer = unsafe { &mut *renderer };
-        let index = 4 + (tile - 1) as usize;
-        let fact = renderer.gfx3d.batch_target_count_fact(&renderer.device, index);
+        let fact = renderer.gfx3d.local_target_count_fact(&renderer.device, tile as usize);
         *output = WgrMainTargetCountResult::from_fact(fact);
     })).is_ok() as u32
 }

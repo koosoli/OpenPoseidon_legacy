@@ -2745,8 +2745,8 @@ extern "C"
     /* Local shadow tile 0, distinct from solar cascade 0 even at night.
      * With the opt-in publication witness, a mapped COUNT stays attached to
      * the exact cached tile and retains its original request token. A fresh
-     * cull and closed indirect depth draw are required to bind it. Other
-     * cached/skipped tiles stay UNKNOWN. No residency-release authority. */
+     * cull and closed indirect depth draw are required to bind it. Missing
+     * tile publication or skipped draws stay UNKNOWN. No residency-release authority. */
     WGR_API uint32_t wgr_local_shadow0_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
         uint32_t output_size, uint32_t output_version);
     /* Planar reflection's independently culled retained objects. UNKNOWN when
@@ -2768,8 +2768,11 @@ extern "C"
      * Failed or draw-less views stay UNKNOWN. No residency-release authority. */
     WGR_API uint32_t wgr_interior_target_count_fact(WgrRenderer*, uint32_t direction,
         WgrMainTargetCountResult*, uint32_t output_size, uint32_t output_version);
-    /* Local shadow tiles 1..23 require a fresh cull and closed indirect draw.
-     * Cached or skipped tiles stay UNKNOWN. */
+    /* Local shadow tiles 1..23 use private words in the bounded batch ring.
+     * With the opt-in publication witness, a mapped COUNT remains attached to
+     * its exact cached tile, atlas generation/shape, day/night cull index,
+     * source and original token. Failed or draw-less tiles stay UNKNOWN.
+     * No residency-release authority. */
     WGR_API uint32_t wgr_local_shadow_target_count_fact(WgrRenderer*, uint32_t tile,
         WgrMainTargetCountResult*, uint32_t output_size, uint32_t output_version);
 
