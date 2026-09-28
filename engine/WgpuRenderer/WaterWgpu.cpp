@@ -1149,7 +1149,10 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
             TwSea c{};
             if (seaMode == 0)
             {
-                const float w = _seaWindInit ? _seaWindSpeed : 7.0f;
+                // W9c: WGR_TW_WIND=<m/s> stands in for the weather's wind here (captures of the
+                // weather mode's sea state at a set wind); the renderer reads it too (fft.rs)
+                static const float envWind = [] { const float v = EnvFloat("WGR_TW_WIND", 0.0f); return v > 0.0f ? std::clamp(v, 0.5f, 40.0f) : 0.0f; }();
+                const float w = envWind > 0.0f ? envWind : (_seaWindInit ? _seaWindSpeed : 7.0f);
                 int i = 0;
                 while (i < 2 && w > kTwSea[i + 1].wind)
                 {
