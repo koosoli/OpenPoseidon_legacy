@@ -2753,7 +2753,9 @@ extern "C"
     WGR_API uint32_t wgr_reflection_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
         uint32_t output_size, uint32_t output_version);
     /* Interior sky-visibility zenith view 0, distinct from GI sky view 5.
-     * Cached/skipped layers stay UNKNOWN; this never authorizes residency release. */
+     * With the opt-in publication witness, a mapped count stays attached to
+     * its exact cached generation and keeps its original request token. Other
+     * cached/skipped layers stay UNKNOWN. No residency-release authority. */
     WGR_API uint32_t wgr_sky0_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
         uint32_t output_size, uint32_t output_version);
     /* The remaining interior directions 1..4 and local shadow tiles 1..23.

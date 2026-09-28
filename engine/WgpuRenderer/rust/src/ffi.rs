@@ -3577,8 +3577,11 @@ pub unsafe extern "C" fn wgr_reflection_target_count_fact(
 }
 
 /// Nonblocking exact target-model COUNT for interior sky zenith view 0.
-/// Only a freshly culled layer with a closed indirect depth pass and final
-/// submit may publish. A cached layer or GI sun-proxy view 5 remains Unknown.
+/// With the opt-in interior publication witness, a freshly culled, closed and
+/// submitted layer binds the mapped COUNT to its exact cache generation. A
+/// matching cached layer retains that fact and its original request token;
+/// refresh, abort and source/key changes return Unknown. Without the witness,
+/// only the fresh request may publish. GI sun-proxy view 5 cannot witness sky0.
 /// Diagnostic only; neither pixels nor residency release are certified.
 /// # Safety
 /// Same live renderer and exact writable output contract as the main getter.

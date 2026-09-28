@@ -12,6 +12,7 @@ mod section_refresh;
 mod section_span_pool;
 mod local_pose_cache;
 mod interior_publication;
+mod sky0_cached_count;
 mod gi_rsm_publication;
 mod local_publication;
 pub(crate) mod geometry_pass_facts;
@@ -4228,6 +4229,7 @@ pub struct Gfx3d {
     // Private CPU-only cache publication witness. None by default: no COUNT copy,
     // staging buffer, or additional view dispatch is created by this state.
     interior_publications: Option<[std::cell::Cell<interior_publication::InteriorPublication>; sky_vis::DIRECTION_COUNT]>,
+    sky0_cached_count: Option<sky0_cached_count::CachedCount>,
     interior_pending_views: [Option<(SkyVisView, u64, u64)>; sky_vis::DIRECTION_COUNT],
     interior_publication_rows: u8,
     interior_sky_cursor: usize,
@@ -5058,6 +5060,8 @@ impl Gfx3d {
             interior_sky_rendered: [None; sky_vis::DIRECTION_COUNT],
             interior_publications: (std::env::var("WGR_GEOMETRY_INTERIOR0_PUBLICATION").as_deref() == Ok("1"))
                 .then(|| std::array::from_fn(|_| std::cell::Cell::new(interior_publication::InteriorPublication::default()))),
+            sky0_cached_count: (std::env::var("WGR_GEOMETRY_INTERIOR0_PUBLICATION").as_deref() == Ok("1"))
+                .then(sky0_cached_count::CachedCount::default),
             interior_pending_views: [None; sky_vis::DIRECTION_COUNT],
             interior_publication_rows: 0,
             interior_sky_cursor: 0,
@@ -9329,6 +9333,9 @@ impl Gfx3d {
     // args, so with the CPU path there is nothing to render into it. Silently inert rather than
     // half-working — a map containing only some of the world would darken by accident.
     fn select_interior_sky_refresh(&mut self, i: usize, view: SkyVisView, epoch: u64) {
+        if i == 0 {
+            if let Some(cache) = &mut self.sky0_cached_count { cache.invalidate(); }
+        }
         self.interior_sky_views[i] = view;
         if let Some(cells) = &self.interior_publications {
             let cell = &cells[i];
@@ -9402,6 +9409,11 @@ impl Gfx3d {
         if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.required|=geometry_pass_facts::INTERIOR;
             if self.gi.settings.enabled {f.required|=geometry_pass_facts::GI;}cell.set(f);}
         let fresh = sky_vis::build_views(cam_pos, &self.interior_sky);
+        // A round-robin refresh may leave zenith's old image in use for this
+        // frame. Its COUNT cannot describe the newly requested view key.
+        if self.interior_sky_rendered[0].is_some_and(|(view, _)| !same_sky_view(view, fresh[0])) {
+            if let Some(cache) = &mut self.sky0_cached_count { cache.invalidate(); }
+        }
         let epoch = self.cull.instance_epoch();
         self.interior_sky_refresh.clear();
         let n = sky_vis::DIRECTION_COUNT;
@@ -10063,11 +10075,20 @@ impl Gfx3d {
     pub fn arm_main_target_count(&mut self, device: &wgpu::Device, token: u64,
                                  model_id: u32, source_generation: u64) -> bool {
         if let Some(witness) = self.main_count_completion.as_mut() { witness.invalidate(); }
+        if let Some(cache) = &mut self.sky0_cached_count {
+            // The cull arm replaces its one-request answer. Keep an already
+            // mapped answer for the published cache image before that reset.
+            self.cull.harvest_sky0_target_count(device);
+            cache.observe(self.cull.sky0_target_count_fact());
+        }
         let armed = self.gpu_driven_enabled && self.cull.arm_main_target_count(
             device, token, model_id, source_generation);
         if armed {
             let identity = self.cull.main_target_count_fact().identity;
             self.main_count_completion.get_or_insert_with(main_count_completion::Witness::new).arm(identity);
+            if let Some(cache) = &mut self.sky0_cached_count { cache.source_changed(identity); }
+        } else if let Some(cache) = &mut self.sky0_cached_count {
+            cache.invalidate();
         }
         armed
     }
@@ -10226,6 +10247,11 @@ impl Gfx3d {
             if let Some((generation, selected, selected_epoch)) = publication {
                 debug_assert_eq!((selected, selected_epoch), (i, epoch));
                 self.interior_sky_rendered[i] = Some((view, epoch));
+                // A new image generation starts without a mapped COUNT. The
+                // count commit below may bind the exact submitted request.
+                if i == 0 {
+                    if let Some(cache) = &mut self.sky0_cached_count { cache.invalidate(); }
+                }
                 if self.interior_publication_rows < 16 {
                     self.interior_publication_rows += 1;
                     eprintln!("[wgr] interior sky publication: direction={i} generation={generation} instanceEpoch={epoch} committed=true (CPU submit witness; no GPU completion or all-view proof)");
@@ -10234,6 +10260,7 @@ impl Gfx3d {
         }
     }
     pub fn abort_interior_publications(&mut self) {
+        if let Some(cache) = &mut self.sky0_cached_count { cache.invalidate(); }
         self.interior_pending_views = [None; sky_vis::DIRECTION_COUNT];
         if let Some(cells) = &self.interior_publications {
             for cell in cells {
@@ -10286,12 +10313,19 @@ impl Gfx3d {
             for cascade in 0..5 { self.cull.shadow_target_count_commit(token, cascade); }
             self.cull.local0_target_count_commit(token);
             self.cull.reflection_target_count_commit(token);
-            self.cull.sky0_target_count_commit(token);
+            if self.cull.sky0_target_count_commit(token) {
+                let identity = self.cull.sky0_target_count_fact().identity;
+                let key = self.sky0_current_count_key();
+                if let (Some(cache), Some(key)) = (&mut self.sky0_cached_count, key) {
+                    if identity.token == token { cache.publish(key, identity); }
+                }
+            }
             self.cull.batch_target_count_commit(token);
         }
         main
     }
     pub fn main_target_count_abort(&mut self, token: u64) {
+        if let Some(cache) = &mut self.sky0_cached_count { cache.invalidate(); }
         if let Some(witness) = self.main_count_completion.as_mut() { witness.abort(token); }
         self.cull.main_target_count_abort(token);
         for cascade in 0..5 { self.cull.shadow_target_count_abort(token, cascade); }
@@ -10330,7 +10364,22 @@ impl Gfx3d {
     }
     pub fn sky0_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
         self.cull.harvest_sky0_target_count(device);
-        self.cull.sky0_target_count_fact()
+        let raw = self.cull.sky0_target_count_fact();
+        let key = self.sky0_current_count_key();
+        if let Some(cache) = &mut self.sky0_cached_count {
+            cache.observe(raw);
+            cache.fact(key)
+        } else { raw }
+    }
+
+    fn sky0_current_count_key(&self) -> Option<sky0_cached_count::Key> {
+        if !self.interior_sky_active() { return None; }
+        let (generation, direction, epoch) = self.interior_publications.as_ref()?
+            .first()?.get().published()?;
+        let (view, rendered_epoch) = self.interior_sky_rendered[0]?;
+        if direction != 0 || epoch != rendered_epoch || epoch != self.cull.instance_epoch() ||
+            !same_sky_view(view, self.interior_sky_views[0]) { return None; }
+        Some(sky0_cached_count::Key::new(generation, self.interior_sky_gen, view, epoch))
     }
 
     pub fn cull_dispatch(

@@ -6739,6 +6739,12 @@ pub(crate) mod tests {
         queue.submit(std::iter::once(enc.finish()));
         assert!(cull.sky0_target_count_submitted(2));
         assert!(cull.sky0_target_count_commit(2));
+        let sky_view = super::super::sky_vis::build_views(glam::Vec3::ZERO,
+            &super::super::sky_vis::SkyVisSettings::default())[0];
+        let cache_key = super::super::sky0_cached_count::Key::new(
+            1, 1, sky_view, cull.instance_epoch());
+        let mut cached_count = super::super::sky0_cached_count::CachedCount::default();
+        cached_count.publish(cache_key, cull.sky0_target_count_fact().identity);
         for _ in 0..64 {
             cull.harvest_sky0_target_count(&device);
             if cull.sky0_target_count_fact().status == MainCountStatus::Present { break; }
@@ -6748,10 +6754,14 @@ pub(crate) mod tests {
         assert_eq!(present.identity.source_generation, 17);
         assert_eq!(present.status, MainCountStatus::Present);
         assert_eq!(present.count, 8);
+        cached_count.observe(present);
+        assert_eq!(cached_count.fact(Some(cache_key)), present);
 
         // Production caches this layer until the snapped VP or instance epoch
         // changes. A new token with no refresh has no fresh cull or draw.
         assert!(cull.arm_main_target_count(&device, 3, model, 18));
+        cached_count.source_changed(cull.sky0_target_count_fact().identity);
+        assert_eq!(cached_count.fact(Some(cache_key)).status, MainCountStatus::Unknown);
         cull.prepare(&device, &queue);
         let mut cached = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         cull.begin_frame_stats(&mut cached);
@@ -6775,6 +6785,9 @@ pub(crate) mod tests {
         queue.submit(std::iter::once(zero.finish()));
         assert!(cull.sky0_target_count_submitted(4));
         assert!(cull.sky0_target_count_commit(4));
+        let absent_key = super::super::sky0_cached_count::Key::new(
+            2, 1, sky_view, cull.instance_epoch());
+        cached_count.publish(absent_key, cull.sky0_target_count_fact().identity);
         for _ in 0..64 {
             cull.harvest_sky0_target_count(&device);
             if cull.sky0_target_count_fact().status == MainCountStatus::Absent { break; }
@@ -6784,6 +6797,9 @@ pub(crate) mod tests {
         assert_eq!(absent.identity.model_id, absent_model);
         assert_eq!(absent.status, MainCountStatus::Absent);
         assert_eq!(absent.count, 0);
+        cached_count.observe(absent);
+        assert_eq!(cached_count.fact(Some(absent_key)), absent);
+        assert_eq!(cached_count.fact(Some(cache_key)).status, MainCountStatus::Unknown);
 
         assert!(cull.arm_main_target_count(&device, 5, model, 20));
         cull.prepare(&device, &queue);
@@ -6795,11 +6811,14 @@ pub(crate) mod tests {
         queue.submit(std::iter::once(aborted.finish()));
         assert!(cull.sky0_target_count_submitted(5));
         cull.sky0_target_count_abort(5);
+        cached_count.invalidate();
         for _ in 0..64 {
             cull.harvest_sky0_target_count(&device);
             let _ = device.poll(wgpu::PollType::wait_indefinitely());
         }
         assert_eq!(cull.sky0_target_count_fact().status, MainCountStatus::Unknown);
+        cached_count.observe(absent);
+        assert_eq!(cached_count.fact(Some(absent_key)).status, MainCountStatus::Unknown);
         assert!(cull.sky0_count_slots.as_ref().unwrap().iter()
             .all(|(_, state)| matches!(state, MainCountSlot::Idle)),
             "aborted submitted copy must drain");
