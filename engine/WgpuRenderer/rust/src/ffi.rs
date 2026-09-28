@@ -3597,11 +3597,11 @@ unsafe fn render_frame_impl(
                 (request.token, request.model_id, request.source_generation)),
         ) {
             Ok(submitted) => {
-                // Selected interior-sky, GI RSM, and local0 images become published cache entries
+                // Selected interior-sky, GI RSM, and local depth images become published cache entries
                 // only after the final queue submit and successful render return.
                 renderer.gfx3d.commit_interior_publications();
                 renderer.gfx3d.commit_gi_rsm_publication();
-                renderer.gfx3d.commit_local0_publication();
+                renderer.gfx3d.commit_local_publications();
                 if let Some(request) = main_count_request {
                     if submitted {
                         main_count_submitted = true;
@@ -3628,7 +3628,7 @@ unsafe fn render_frame_impl(
             unsafe { &mut *renderer }.gfx3d.abort_gi_rsm_publication();
         }));
         let _ = catch_unwind(AssertUnwindSafe(|| {
-            unsafe { &mut *renderer }.gfx3d.abort_local0_publication();
+            unsafe { &mut *renderer }.gfx3d.abort_local_publications();
         }));
     }
     if let Some(request) = main_count_request {

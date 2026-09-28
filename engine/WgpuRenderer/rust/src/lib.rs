@@ -6399,7 +6399,7 @@ impl Renderer {
         self.queue.submit(std::iter::once(main_commands));
         self.gfx3d.interior_publications_submitted();
         self.gfx3d.gi_rsm_publication_submitted();
-        self.gfx3d.local0_publication_submitted();
+        self.gfx3d.local_publications_submitted();
         let main_count_submitted = main_count_ready && main_count_request.is_some_and(|(token, _, _)|
             self.gfx3d.main_target_count_submitted(token));
         if let Some((token, _, _)) = main_count_request {
