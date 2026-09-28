@@ -48,6 +48,10 @@ const MAX_THRUST_N: f32 = 26000.0;
 /// forward third of the hull. Scaled with the face's response, so it only appears at planing
 /// speeds.
 const STEADY_WHITE: f32 = 0.06;
+/// OP (W6i.8): the drops thrown from every wetted segment, x 0.5. With the view-space fix (W6i.7)
+/// the spray finally drew, and at a patrol boat's 13 m/s the full count read as a bright fan of
+/// streaks two beams wide in a side view; half keeps the sheet and wings of a real bow wave.
+const DROP_SHARE: f32 = 0.5;
 const STEADY_MIST: f32 = 0.015;
 
 fn white_gain() -> f32 {
@@ -413,7 +417,7 @@ impl BoatSpray {
             let life = VELOCITY.lifetime * (1.0 - imp) + IMPACT.lifetime * imp;
             let carry = &mut st.contacts[k].carry;
             // drops (3-7 mm) from every wetted segment
-            em.emit(&mut carry[0], n, pa, pb, v, DROPLET, 0.005 + 0.0006 * r, life, spread, 0.05, 0.6);
+            em.emit(&mut carry[0], n * DROP_SHARE, pa, pb, v, DROPLET, 0.005 + 0.0006 * r, life, spread, 0.05, 0.6);
             let s = k / SEGMENTS;
             if best[s] != Some(k) {
                 continue;
