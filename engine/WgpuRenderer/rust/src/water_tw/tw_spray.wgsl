@@ -50,7 +50,9 @@ fn sprayWaveShadow(p: vec3<f32>, seedTag: f32, L: vec3<f32>) -> f32 {
 // breakers' spray, Tidewater's Henyey-Greenstein peaks (up to ~6.5 x the sun for g = 0.85) summed
 // over hundreds of overlapping sprites into a blinding white band with a bloom star (the owner's
 // glowing surf). 0.9 keeps the backlit glow of spray, about 1/7 of the drops' peak.
-const SPRAY_LOBE_MAX: f32 = 0.9;
+// (W10g, OP) 0.35: at 20 m/s the breakers' spray, lit through the lobe, still stacked into a
+// clipped white wall a metre or two tall along every wave (captures with and without spray).
+const SPRAY_LOBE_MAX: f32 = 0.35;
 
 struct SprayOut {
     @builtin(position) clip: vec4<f32>,
