@@ -1702,6 +1702,42 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
                                           geom->_pointToVertex, geom->_vertexToPoint);
         }
         shape->ScanProxies();
+        // ScanProxies marks the MLOD proxy faces hidden after FindSections has
+        // already cached each section's render flags. Hide a section only when
+        // every face in it belongs to a proxy selection; otherwise hiding the
+        // section would also erase ordinary geometry. HorseTest's two isolated
+        // untextured proxy triangles otherwise remain visible as white sails.
+        for (int li = 0; li < shape->NLevels(); ++li)
+        {
+            Shape* lod = shape->Level(li);
+            if (!lod) continue;
+            std::unordered_set<int> proxyFaces;
+            for (int si = 0; si < lod->NNamedSel(); ++si)
+            {
+                const ::NamedSelection& sel = lod->NamedSel(si);
+                if (strncmp(sel.Name(), "proxy:", 6) != 0) continue;
+                for (int fi = 0; fi < sel.Faces().Size(); ++fi)
+                    proxyFaces.insert(static_cast<int>(lod->Faces().Find(sel.Faces()[fi])));
+            }
+            if (proxyFaces.empty()) continue;
+            for (int si = 0; si < lod->NSections(); ++si)
+            {
+                ShapeSection& sec = lod->GetSection(si);
+                if (sec.beg >= sec.end) continue;
+                bool allProxy = true;
+                for (Offset face = sec.beg; face < sec.end; lod->NextFace(face))
+                    if (proxyFaces.count(static_cast<int>(face)) == 0)
+                    {
+                        allProxy = false;
+                        break;
+                    }
+                if (allProxy)
+                {
+                    sec.properties.OrSpecial(IsHiddenProxy);
+                    sec.properties.SetTexture(nullptr);
+                }
+            }
+        }
         // The canonical MLOD path must honour the same reversed contract as the
         // ODOL tail. Do this after proxies exist but before convex geometry is
         // derived, so both the visible model and its simulation face the same way.

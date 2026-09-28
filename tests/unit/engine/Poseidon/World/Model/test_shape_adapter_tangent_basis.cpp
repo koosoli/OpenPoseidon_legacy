@@ -83,6 +83,30 @@ TEST_CASE("Reversed MLOD rotates geometry and its tangent frame exactly once", "
     }
 }
 
+TEST_CASE("MLOD proxy-only sections stay hidden after proxy scanning", "[ShapeAdapter][mlod][proxy]")
+{
+    Model model;
+    model.sourceFormat = "MLOD";
+    model.sourcePath = "proxy-section-fixture.p3d";
+    LODLevel lodLevel(1.0f);
+    Mesh& mesh = lodLevel.mesh;
+    mesh.vertices = {
+        Vertex({0.f, 0.f, 0.f}, {0.f, 0.f, 1.f}, {0.f, 0.f}),
+        Vertex({1.f, 0.f, 0.f}, {0.f, 0.f, 1.f}, {1.f, 0.f}),
+        Vertex({0.f, 1.f, 0.f}, {0.f, 0.f, 1.f}, {0.f, 1.f}),
+    };
+    mesh.triangles.emplace_back(0, 1, 2);
+    mesh.selections.emplace_back("proxy:missing_test_asset.01");
+    mesh.selections.back().vertexIndices = {0, 1, 2};
+    mesh.selections.back().triangleIndices = {0};
+    model.lodLevels.push_back(std::move(lodLevel));
+
+    std::unique_ptr<LODShapeWithShadow> shape(ShapeAdapter::convertToLODShape(model, false));
+    REQUIRE(shape);
+    REQUIRE(shape->Level(0)->NSections() == 1);
+    REQUIRE((shape->Level(0)->GetSection(0).properties.Special() & IsHiddenProxy) != 0);
+}
+
 TEST_CASE("Model sections preserve a quad-only MLOD material run", "[Model][sections][mlod]")
 {
     Model model;
