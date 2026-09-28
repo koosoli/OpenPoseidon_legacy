@@ -124,7 +124,9 @@ fn lipShade(in: LipOut, front: bool) -> vec4<f32> {
     let tint = vec3<f32>(0.16, 0.62, 0.56);
     let back = pow(sat(dot(-V, L) * 0.5 + 0.5), 4.0);
     let thin = mix(1.5, 0.7, v) * (sv.z * 0.3 + 0.8) * (sb * 0.8 + 0.6);
-    let glow = (sun * tint * (back * 0.9 + 0.08) + skyIrr * tint * 1.4) * thin;
+    // (W10d, OP) the backlit terms at about half Tidewater's (0.9 -> 0.5 here, 1.2 -> 0.5 in the
+    // foam below): against a low sun the lip and its foam clipped to flat white slabs
+    let glow = (sun * tint * (back * 0.5 + 0.08) + skyIrr * tint * 1.4) * thin;
     let aW = F + min((1.0 - F) * mix(0.42, 0.16, v) * (sv.x * 0.5 + 0.75) * (sb * 0.7 + 0.65), 0.85);
     let cW = refl * F + spec + glow * (1.0 - F) * 0.42;
 
@@ -148,7 +150,7 @@ fn lipShade(in: LipOut, front: bool) -> vec4<f32> {
     let clumps = sat((blot - gone) * 2.5);
     let fil = (1.0 - smoothstep(0.02, 0.12, sv.x)) * smoothstep(0.15, 0.8, v) * (sv.w * 0.5 + 0.25) * (sb * 0.9 + 0.3) * thrown;
     let aer = mix(max(rim, fil), 0.95, wh);
-    let foamLit = (sun * (max(dot(N, L), 0.0) * 0.5 + 0.5 + back * 1.2) / PI + skyIrr) * 0.9;
+    let foamLit = (sun * (max(dot(N, L), 0.0) * 0.5 + 0.5 + back * 0.5) / PI + skyIrr) * 0.9;
 
     // (OP) the wave's back hides the curtain from the sea side: where the sight line crosses the
     // vertical plane through the crest below the crest line
