@@ -280,6 +280,15 @@ pub struct BoatSpray {
     pub stats: (u32, u32),
     /// W6j: the last full diagnostics window per boat slot (id, diag)
     pub diag: [Option<(u32, SprayDiag)>; 2],
+    /// W6j.1: every window since the last drain, with the water clock (WGR_TW_SPRAY_DIAG=1)
+    pub history: Vec<(f32, u32, SprayDiag)>,
+    clock: f32,
+}
+
+/// `WGR_TW_SPRAY_DIAG=1`: keep every bow-spray diagnostics window for the log (W6j.1).
+pub fn diag_history_on() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_SPRAY_DIAG").is_ok_and(|v| v.trim() == "1"))
 }
 
 struct Emitter<'a> {
@@ -314,6 +323,7 @@ impl BoatSpray {
         for s in &mut self.boats {
             s.live = false;
         }
+        self.clock += dt;
         let mut em = Emitter { out, max: max_requests, particles: 0, kinds: [0; 5] };
         for b in boats.iter().flatten() {
             // the state kept for this boat, else a free one
@@ -334,8 +344,11 @@ impl BoatSpray {
                     d.kinds[k] += em.kinds[k] - before[k];
                 }
                 d.frames += 1;
-                if d.frames >= 120 {
+                if d.frames >= 60 {
                     self.diag[i] = Some((b.id, *d));
+                    if diag_history_on() && self.history.len() < 4096 {
+                        self.history.push((self.clock, b.id, *d));
+                    }
                     *d = SprayDiag::default();
                 }
             }

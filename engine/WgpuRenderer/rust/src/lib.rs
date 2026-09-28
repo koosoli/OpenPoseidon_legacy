@@ -3900,6 +3900,10 @@ impl Renderer {
                 if let Some(prep) = self.water.tidewater_mut().map(|tw| tw.take_prepare_stats()) {
                     self.log.log(log_level::INFO, &prep);
                 }
+                // W6j.1: the bow-spray diagnostics windows (WGR_TW_SPRAY_DIAG=1)
+                for line in self.water.tidewater_mut().map(|tw| tw.take_spray_diag()).unwrap_or_default() {
+                    self.log.log(log_level::INFO, &line);
+                }
             }
         }
         self.water.prepare(

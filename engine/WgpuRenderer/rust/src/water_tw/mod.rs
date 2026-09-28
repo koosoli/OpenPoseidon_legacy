@@ -1089,6 +1089,33 @@ impl Tidewater {
     }
 
     /// W6: the wakes' slots, for the log.
+    /// W6j.1: the bow-spray diagnostics windows since the last call, one line each (drained).
+    pub fn take_spray_diag(&mut self) -> Vec<String> {
+        self.boat_spray
+            .history
+            .drain(..)
+            .map(|(t, id, d)| {
+                let n = d.frames.max(1) as f32;
+                format!(
+                    "TW spray diag t {t:.2} boat {id}: drops {:.1} mist {:.1} lig {:.1} white {:.1} sheet {:.1} /frame; burst {:.2} impact {:.2}; stem depth {:.2}..{:.2} rate {:.2}; origin-sea {:.2} draft {:.2} fb {:.2}",
+                    d.kinds[0] as f32 / n,
+                    d.kinds[1] as f32 / n,
+                    d.kinds[2] as f32 / n,
+                    d.kinds[3] as f32 / n,
+                    d.kinds[4] as f32 / n,
+                    d.burst_max,
+                    d.imp_sum / n,
+                    d.stem_depth[0],
+                    d.stem_depth[1],
+                    d.rate_max,
+                    d.pose[0],
+                    d.pose[1],
+                    d.pose[2]
+                )
+            })
+            .collect()
+    }
+
     pub fn wake_stats(&self) -> String {
         let (particles, requests) = self.boat_spray.stats;
         let mut diag = String::new();
