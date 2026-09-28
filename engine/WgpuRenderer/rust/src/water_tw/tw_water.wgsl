@@ -670,7 +670,10 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     // the surface, the triangle winding near it.
     let camH = frame.cam_pos.y - tw.sea.w;
     let folded = surf.jacobian < 0.1 || normalize(in.shoreN).y < 0.35;
-    let nearSurface = abs(camH) < 1.5;
+    // (W10g, OP) ...and only near the lens (where the split view is): out on the sea the choppy
+    // FFT folds the coarse far mesh, and its back-facing triangles, read as the view from below,
+    // drew pale wedges and tiny triangles over the distant waves whenever the eye was near sea level
+    let nearSurface = abs(camH) < 1.5 && dist < 25.0;
     // (W9d, OP) OP's world is left-handed (x east, z north, y up) where Tidewater's is
     // right-handed: the grid's triangles, wound as in CDLOD.js, face DOWN here, so front_facing
     // is the view from below. Read as Tidewater's, it drew the surface as seen from below whenever
