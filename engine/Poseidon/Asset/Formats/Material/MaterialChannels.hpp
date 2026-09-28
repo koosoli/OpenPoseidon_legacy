@@ -179,6 +179,29 @@ struct TranslatedSlot
     bool           tintPresent = false;
 };
 
+// Source facts only. Enfusion's BCR alpha is roughness, while an OpacityMap
+// composite replaces that alpha with cutout coverage. These values are kept out
+// of the legacy specular/gloss lanes until a native PBR shader consumes them.
+struct EmatAuthoredScalar
+{
+    float value = 0.0f;
+    bool present = false;
+};
+
+struct EmatPbrProvenance
+{
+    // Index 0 is BCRMap (or BCR_1); indices 1..3 are BCR_2..4.
+    // True only for an opaque Enfusion PBR surface whose bound source is an
+    // original *_BCR.edds, never a converter PAA or an OpacityMap composite.
+    std::array<bool, 4> bcrAlphaIsRoughness{};
+    std::array<EmatAuthoredScalar, 4> roughness{}; // Roughness_1..4, as authored
+    std::array<EmatAuthoredScalar, 4> metalness{}; // Metalness_1..4, as authored
+    EmatAuthoredScalar roughnessScale;             // RoughnessScale
+    EmatAuthoredScalar metalnessScale;             // MetalnessScale
+    EmatAuthoredScalar roughnessScale2;            // RoughnessScale2 (MatPBR2Layers)
+    EmatAuthoredScalar metalnessScale2;            // MetalnessScale2 (MatPBR2Layers)
+};
+
 struct TranslatedMaterial
 {
     std::string                 origin;
@@ -216,6 +239,8 @@ struct TranslatedMaterial
     // double-sided (wire mesh, glass panes). False for every material that
     // names no Cull key, and all legacy.
     bool                 doubleSided = false;
+    // Diagnostic-only native source provenance. No GPU field or shading effect.
+    EmatPbrProvenance    ematPbr;
 
     const TranslatedSlot* Find(MaterialSlot slot) const
     {

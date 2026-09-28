@@ -348,6 +348,73 @@ TEST_CASE("EMAT adapter: a Reforger MatPBRBasic binds its BCR and its NMO", "[as
     REQUIRE(material.shaderFamily == "MatPBRBasic");
 }
 
+TEST_CASE("EMAT PBR provenance: opaque WaterTank and Granite BCR alpha is roughness, not coverage",
+          "[asset][material][emat][arf][pbr-provenance]")
+{
+    // Verbatim source keys from the installed Reforger archives. WaterTank's
+    // BC7 top mip has non-binary alpha (mean 220.4); Granite's layered BCR
+    // tiles likewise carry data alpha, not cutout coverage.
+    const auto tank = TranslateEmat(
+        ParseEmat("MatPBRBasic {\n Cull none\n MetalnessScale 0\n AOScale 0.5\n"
+                  " BCRMap \"{F31E1072EF532AE9}Assets/Props/Agricultural/WaterTank_01/Data/WaterTank_01_MLOD_BCR.edds\"\n}\n"),
+        "Assets/Props/Agricultural/WaterTank_01/Data/WaterTank_01_MLOD.emat", "");
+    REQUIRE(tank.ematPbr.bcrAlphaIsRoughness[0]);
+    REQUIRE_FALSE(tank.ematPbr.bcrAlphaIsRoughness[1]);
+    REQUIRE(tank.ematPbr.metalnessScale.present);
+    REQUIRE(tank.ematPbr.metalnessScale.value == 0.0f);
+    REQUIRE_FALSE(tank.ematPbr.roughnessScale.present);
+
+    // Real GraniteBoulder_01 MatPBRMulti uses distinct authored BCR tiles and
+    // roughness/metalness scalars; a zero metalness is still an authored value.
+    const auto granite = TranslateEmat(
+        ParseEmat("MatPBRMulti {\n RoughnessScale 0.85\n"
+                  " BCR_1 \"{C1B825901DFF5ACA}Assets/Rocks/Granite/Data/Granite_08_BCR.edds\"\n"
+                  " Metalness_1 0\n Enabled_2 1\n"
+                  " BCR_2 \"{808840ED6C676545}Assets/Rocks/Granite/Data/Granite_04_BCR.edds\"\n"
+                  " Metalness_2 0\n}\n"),
+        "Assets/Rocks/Granite/Data/GraniteBoulder_01.emat", "");
+    REQUIRE(granite.ematPbr.bcrAlphaIsRoughness[0]);
+    REQUIRE(granite.ematPbr.bcrAlphaIsRoughness[1]);
+    REQUIRE_FALSE(granite.ematPbr.bcrAlphaIsRoughness[2]);
+    REQUIRE(granite.ematPbr.roughnessScale.present);
+    REQUIRE(granite.ematPbr.roughnessScale.value == 0.85f);
+    REQUIRE(granite.ematPbr.metalness[0].present);
+    REQUIRE(granite.ematPbr.metalness[0].value == 0.0f);
+    REQUIRE(granite.ematPbr.metalness[1].present);
+    REQUIRE_FALSE(granite.ematPbr.metalness[2].present);
+
+    const auto jerrycan = TranslateEmat(ParseEmat(kMultiEmat), "Assets/Items/Fuel/Jerrycan_01/Data/JerryCan_01.emat", "");
+    REQUIRE(jerrycan.ematPbr.roughness[0].present);
+    REQUIRE(jerrycan.ematPbr.roughness[0].value == 1.118f);
+    REQUIRE_FALSE(jerrycan.ematPbr.roughness[1].present);
+}
+
+TEST_CASE("EMAT PBR provenance: Alnus OpacityMap and deployed PAA never claim BCR roughness",
+          "[asset][material][emat][arf][pbr-provenance]")
+{
+    // The native face becomes enfa|OpacityMap|BCRMap. Its GPU alpha is
+    // coverage, even though the original BCR source carries roughness.
+    const auto alnus = TranslateEmat(
+        ParseEmat("MatPBRTreeCrown {\n"
+                  " BCRMap \"{CFF8762C3EB0A8BC}Assets/Vegetation/_Polyplanes/polyplane_alnus_glutinosa_BCR.edds\"\n"
+                  " OpacityMap \"{CAC2E08429009AF9}Assets/Vegetation/_Polyplanes/polyplane_alnus_glutinosa_A.edds\"\n}\n"),
+        "Assets/Vegetation/Tree/Alnus_Glutinosa/Data/t_alnus_glutinosa_2f_polyplane.emat", "");
+    for (bool roughness : alnus.ematPbr.bcrAlphaIsRoughness)
+        REQUIRE_FALSE(roughness);
+
+    // Converted material files can keep the BCRMap key while pointing at a
+    // baked PAA, whose alpha has different semantics.
+    const auto deployed = TranslateEmat(
+        ParseEmat("MatPBRBasic {\n BCRMap \"reforger/everon/textures/watertank_01_mlod_ca.paa\"\n}\n"),
+        "reforger/everon/textures/watertank_01_mlod.emat", "");
+    REQUIRE_FALSE(deployed.ematPbr.bcrAlphaIsRoughness[0]);
+
+    const auto opaqueCutout = TranslateEmat(
+        ParseEmat("MatPBRBasic {\n AlphaTest 1\n BCRMap \"Assets/Props/Flag_BCR.edds\"\n}\n"),
+        "Assets/Props/Flag.emat", "");
+    REQUIRE_FALSE(opaqueCutout.ematPbr.bcrAlphaIsRoughness[0]);
+}
+
 TEST_CASE("EMAT adapter: MatPBRMulti's layer tiles never reach the object's slots", "[asset][material][emat][arf]")
 {
     const TranslatedMaterial material =
