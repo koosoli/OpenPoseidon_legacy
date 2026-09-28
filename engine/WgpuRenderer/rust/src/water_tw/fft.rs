@@ -312,8 +312,8 @@ pub fn wind_fetch_km(wind_speed: f32) -> f32 {
     (2.3 * wind_speed * wind_speed).clamp(120.0, 600.0)
 }
 
-/// W9c (OP): the whitecap growth with the wind, relative to Tidewater's look at 7 m/s: x (U/7)^2,
-/// at most x4 (reached at 14 m/s). Measured whitecap cover grows ~U^3.4 (Monahan and
+/// W9c (OP): the whitecap growth with the wind, relative to Tidewater's look at 7 m/s: x (U/7)^3.4
+/// below it, x (U/7)^2 above, at most x4 (reached at 14 m/s). Measured whitecap cover grows ~U^3.4 (Monahan and
 /// O'Muircheartaigh 1980) and a hurricane sea is white, but in a game the owner asked for high
 /// wind to show as wave height, not as a sea turned to foam.
 pub const WHITECAP_GROWTH_MAX: f32 = 4.0;
@@ -338,7 +338,9 @@ pub fn whitecap_bias(sizes: [f32; 4], local: WaveSystem, swell: WaveSystem, dept
     let (_, mss) = sea_stats(sizes, local, swell, depth);
     let sigma = chop * (mss as f64).sqrt();
     let u = local.wind_speed.max(0.1) as f64;
-    let growth = ((u / 7.0) * (u / 7.0)).min(WHITECAP_GROWTH_MAX as f64);
+    // below 7 m/s the measured cover's own U^3.4 (whitecaps fade out in a light breeze), above it
+    // (U/7)^2 up to the cap
+    let growth = if u < 7.0 { (u / 7.0).powf(3.41) } else { ((u / 7.0) * (u / 7.0)).min(WHITECAP_GROWTH_MAX as f64) };
     let control = 2f64.powf(2.0 * (whitecaps.clamp(0.0, 1.0) as f64 - 0.5));
     let share = (p_ref * growth * control).clamp(1e-6, 0.5);
     (1.0 + sigma * normal_quantile(share)) as f32

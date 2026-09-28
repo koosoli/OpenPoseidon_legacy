@@ -472,6 +472,19 @@ fn sky_env_sample(dir: vec3<f32>) -> vec3<f32> {
 // Camera-relative world position of the opaque scene at uv (y down), from OP's reversed depth.
 fn scene_rel_at(uv: vec2<f32>, d: f32) -> vec3<f32> {
     let ndc = vec2<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    // (W9b, OP) Not through the forward depth 1 - d: kilometres away d is ~1e-5 and 1 - d keeps
+    // only a few bits of it, so the reconstructed distance jumped in steps from one pixel row to
+    // the next -- from high up, bands of wrong water depth and path length across the whole sea
+    // (the horizontal cyan and white lines). The reversed depth is inverted exactly as reverse_z
+    // (frame.wgsl) wrote it (d = K - p32 / w), and the point is placed along the pixel's ray.
+    if (frame.proj[3].w == 0.0 && frame.proj[2].w != 0.0 && frame.proj[0].z == 0.0 && frame.proj[1].z == 0.0) {
+        let hm = frame.inv_view_proj * vec4<f32>(ndc, 0.5, 1.0);
+        let pm = hm.xyz / hm.w;
+        let wm = (frame.proj * (frame.view * vec4<f32>(pm, 1.0))).w;
+        let K = 1.0 - frame.proj[2].z / frame.proj[2].w;
+        let w = frame.proj[3].z / min(K - d, -1e-12);
+        return pm * (w / wm);
+    }
     let h = frame.inv_view_proj * vec4<f32>(ndc, 1.0 - d, 1.0);
     return h.xyz / h.w;
 }
@@ -654,7 +667,13 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     let camH = frame.cam_pos.y - tw.sea.w;
     let folded = surf.jacobian < 0.1 || normalize(in.shoreN).y < 0.35;
     let nearSurface = abs(camH) < 1.5;
-    let viewFromBelow = select(camH < 0.0, !front, nearSurface && !folded);
+    // (W9d, OP) OP's world is left-handed (x east, z north, y up) where Tidewater's is
+    // right-handed: the grid's triangles, wound as in CDLOD.js, face DOWN here, so front_facing
+    // is the view from below. Read as Tidewater's, it drew the surface as seen from below whenever
+    // the eye was within 1.5 m of the flat sea above it (the flat blue sheet at the waterline), and
+    // as seen from above when it was just under it.
+    let seenFromAbove = !front;
+    let viewFromBelow = select(camH < 0.0, !seenFromAbove, nearSurface && !folded);
     let Nup = surf.normal;
     let Nside = select(Nup, -Nup, viewFromBelow);
     let Nview = normalize(Nside + V * max(-dot(Nside, V) + 0.03, 0.0));
