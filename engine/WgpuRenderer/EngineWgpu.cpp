@@ -2240,7 +2240,7 @@ struct EngineWgpu::GeometryPageFixtureState
         return std::find(models.begin(),models.begin()+modelCount,model)!=models.begin()+modelCount; }
 };
 
-// One private main/cascade-0 diagnostic at a time. The owner compares these copied
+// One private exact-view diagnostic at a time. The owner compares these copied
 // identities again when the asynchronous GPU result arrives; this is never a
 // Fine-page release certificate or a persistent reference to a world object.
 struct EngineWgpu::GeometryMainCountPending
@@ -2249,7 +2249,7 @@ struct EngineWgpu::GeometryMainCountPending
     uint64_t token=0, pageEpoch=0, admissionEpoch=0, requestId=0, sourceGeneration=0, cullEpoch=0;
     uint32_t producerModel=UINT32_MAX, rendererModel=UINT32_MAX;
     unsigned ageFrames=0;
-    bool mainReported=false, giReported=false;
+    bool mainReported=false, giReported=false, local0Reported=false;
     uint32_t shadowReportedMask=0;
 };
 
@@ -4246,10 +4246,53 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
             }
             pending.giReported = true;
         }
+        WgrMainTargetCountResult local0Fact{};
+        const bool local0Ready = wgr_local_shadow0_target_count_fact(_renderer, &local0Fact,
+                sizeof(local0Fact), 1) == 1 &&
+            local0Fact.struct_size == sizeof(local0Fact) && local0Fact.version == 1 &&
+            local0Fact.submitted == 1 && local0Fact.token == pending.token &&
+            local0Fact.model_id == pending.rendererModel &&
+            local0Fact.source_generation == pending.sourceGeneration &&
+            local0Fact.cull_epoch == pending.cullEpoch &&
+            (local0Fact.state == WGR_MAIN_TARGET_COUNT_PRESENT ||
+             local0Fact.state == WGR_MAIN_TARGET_COUNT_ABSENT) &&
+            (local0Fact.state != WGR_MAIN_TARGET_COUNT_ABSENT || local0Fact.count == 0) &&
+            (local0Fact.state != WGR_MAIN_TARGET_COUNT_PRESENT || local0Fact.count > 0);
+        if (local0Ready && !pending.local0Reported)
+        {
+            if (auto fixture = pending.fixture.lock())
+            {
+                bool publish = false;
+                {
+                    std::lock_guard lock(fixture->mutex);
+                    const auto& report = fixture->report;
+                    const auto model = _modelIdOf.find(pending.producerModel);
+                    publish = report.active && report.originalFilePilot && fixture->originalAdmission &&
+                        report.pageEpoch == pending.pageEpoch && report.requestId == pending.requestId &&
+                        report.sourceAdmissionEpoch == pending.admissionEpoch &&
+                        fixture->originalAdmission->report.epoch == pending.admissionEpoch &&
+                        report.producerModel == pending.producerModel &&
+                        fixture->consumedModel == pending.rendererModel &&
+                        fixture->consumedInstance != UINT32_MAX && fixture->instance < _instSlotOf.size() &&
+                        _instSlotOf[fixture->instance] == fixture->consumedInstance &&
+                        model != _modelIdOf.end() && model->second == pending.rendererModel;
+                }
+                if (publish)
+                {
+                    static unsigned rows = 0;
+                    if (rows++ < 16)
+                        LOG_INFO(World, "Private local-shadow0 GPU COUNT: token={} pageEpoch={} admissionEpoch={} request={} model={} rendererModel={} sourceGeneration={} cullEpoch={} state={} count={} (fresh tile; no Fine release)",
+                            pending.token, pending.pageEpoch, pending.admissionEpoch, pending.requestId,
+                            pending.producerModel, pending.rendererModel, pending.sourceGeneration,
+                            local0Fact.cull_epoch, local0Fact.state, local0Fact.count);
+                }
+            }
+            pending.local0Reported = true;
+        }
         ++pending.ageFrames;
-        // GI redraws less often than the solar cascades. A short extra map window
-        // observes an in-flight copy without pinning this opt-in probe to one
-        // GI refresh phase for the whole fixture.
+        // GI and local tiles redraw less often than the solar cascades. A short
+        // extra map window observes in-flight copies without pinning the probe
+        // to one cache refresh phase for the whole fixture.
         if ((pending.mainReported && pending.shadowReportedMask == 0xf &&
              (pending.giReported || pending.ageFrames >= 3)) || pending.ageFrames >= 16)
             _geometryMainCountPending.reset();
