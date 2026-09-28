@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageProjectedDemand.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPagePrivateAutoFine.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPagePrivateAutoCoarse.hpp>
 #include <limits>
 #include <initializer_list>
 using namespace Poseidon::GeometryPages;
@@ -83,4 +84,31 @@ TEST_CASE("Private Auto-Fine needs the actual prepared and joined completed cut"
     REQUIRE(demand.Observe(11,rejected));cut.desiredFine=demand.DesiredFinePreparation();
     cut.policyGeneration=demand.LastGeneration();cut.cameraGeneration=cut.demandGeneration=2;
     REQUIRE_FALSE(cut.Eligible());
+}
+
+TEST_CASE("Private Auto-Coarse returns only on a fresh Fine-selected joined cut", "[geometry-page-projected-demand]") {
+    ProjectedPageDemand demand(Pair,{2,1,0,50});
+    REQUIRE(demand.LeaveUpper()==1);
+    PrivateAutoCoarseCut cut;
+    cut.enabled=cut.autoFineCommitted=cut.active=cut.readyReturned=cut.sourceVerified=true;
+    cut.idealBound=cut.fineSelected=cut.fineResident=cut.coarseResident=true;
+    cut.completeRows=cut.noWork=cut.withinWatchBudget=true;
+    cut.fixtureEpoch=1;cut.sourceEpoch=cut.ownerEpoch=cut.certificateEpoch=2;
+    cut.cameraGeneration=cut.demandGeneration=11;cut.autoFineGeneration=10;
+    cut.requestId=cut.observedRequestId=8;cut.autoFineSourceRequest=7;
+    cut.currentModel=cut.fineModel=43;cut.coarseModel=41;
+    cut.idealUpper=0.5;cut.leaveUpper=demand.LeaveUpper();
+    REQUIRE(cut.Eligible());
+    cut.cameraGeneration=10;REQUIRE_FALSE(cut.Eligible());cut.cameraGeneration=11;
+    cut.observedRequestId=7;REQUIRE_FALSE(cut.Eligible());cut.observedRequestId=8;
+    cut.sourceEpoch=3;REQUIRE_FALSE(cut.Eligible());cut.sourceEpoch=2;
+    cut.currentModel=41;REQUIRE_FALSE(cut.Eligible());cut.currentModel=43;
+    cut.completeRows=false;REQUIRE_FALSE(cut.Eligible());cut.completeRows=true;
+    cut.noWork=false;REQUIRE_FALSE(cut.Eligible());cut.noWork=true;
+    cut.withinWatchBudget=false;REQUIRE_FALSE(cut.Eligible());cut.withinWatchBudget=true;
+    cut.idealUpper=1.1;REQUIRE_FALSE(cut.Eligible());cut.idealUpper=0.5;
+    cut.idealUpper=std::numeric_limits<double>::infinity();REQUIRE_FALSE(cut.Eligible());cut.idealUpper=0.5;
+    cut.fineSelected=false;REQUIRE_FALSE(cut.Eligible());cut.fineSelected=true;
+    cut.alreadyReturned=true;REQUIRE_FALSE(cut.Eligible());cut.alreadyReturned=false;
+    cut.enabled=false;REQUIRE_FALSE(cut.Eligible());
 }

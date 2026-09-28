@@ -43,6 +43,7 @@ public:
     bool DesiredFinePreparation() const {return desired_;}
     uint64_t Revision() const {return revision_;}
     uint64_t LastGeneration() const {return lastGeneration_;}
+    double LeaveUpper() const {return settings_.leaveUpper;} // Read-only rail for a separate private return gate.
     uint32_t Attempts() const {return attempts_;}
     // Returns interest revocation. Cancel an unstaged owned request, retaining
     // its real worker debt until exit. No geometry/renderer ownership is changed.

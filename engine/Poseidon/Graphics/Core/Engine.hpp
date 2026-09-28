@@ -3223,7 +3223,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse };
     struct GeometryPageSourceIdentity
     {
         std::array<uint8_t,32> sha256{};
@@ -3334,6 +3334,10 @@ class Engine : public IGraphicsEngine
         double projectedDemandUpper=0; // Last authenticated pair discrepancy, not source error or pixels.
         bool privateAutoFineEnabled=false,privateAutoFineCommitted=false; // Historical one-way fixture action only.
         uint64_t privateAutoFineCameraGeneration=0,privateAutoFineSourceRequest=0; // Completed Observe request, not worker pageRequest.
+        bool privateAutoCoarseEnabled=false,privateAutoCoarseCommitted=false; // Separate one-way private return.
+        uint32_t privateAutoCoarseObservations=0; // At most 64 Fine-selected cuts.
+        uint64_t privateAutoCoarseCameraGeneration=0,privateAutoCoarseSourceRequest=0;
+        double privateAutoCoarseCertifiedUpper=0; // Fine-selected source-bound ideal pair upper at commit.
         uint64_t sourceAdmissionEpoch=0,originalSourceBytes=0,sourceAdmissionKnownBytes=0;
         uint32_t helperCount=0; // Original subset has no helper LODs; hashes stay empty.
         float originalOriginRadius=0;
