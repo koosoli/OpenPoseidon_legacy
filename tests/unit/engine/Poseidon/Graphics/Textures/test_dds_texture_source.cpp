@@ -387,6 +387,41 @@ TEST_CASE("Native NTC cavity survives compressed and decoded DDS upload classifi
                                                            "Assets/Trees/Leaf_NMO.edds"));
 }
 
+TEST_CASE("Native NMO auxiliary material channels require an original four-channel DDS",
+          "[graphics][edds][nmo-pbr]")
+{
+    const auto file = BcrBc7Alpha200(); // RGBA=(128,128,40,200): independent B/A lanes.
+    const char* name = "Assets/Materials/Metal_NMO.edds";
+    const auto reader = [&](const char*, std::vector<uint8_t>& out) { out = file; return true; };
+    for (bool compressed : {false, true})
+    {
+        Poseidon::DdsPreparationOptions options{compressed, true, 1024};
+        TextureSourceDDS source;
+        PacLevelMem mips[16]{};
+        REQUIRE(source.InitFromReader(name, mips, 16, reader, options));
+        const auto format = source.GetFormat();
+        REQUIRE(Poseidon::NativeNmoMaterialChannelsAvailable(format, !compressed, true, name));
+        if (!compressed)
+        {
+            mips[0].SetDestFormat(PacARGB8888, 8);
+            uint8_t pixels[64]{};
+            REQUIRE(source.GetMipmapData(pixels, mips[0], 0));
+            for (int i = 0; i < 64; i += 4)
+            {
+                CHECK(pixels[i] == 40);     // B: metalness
+                CHECK(pixels[i + 3] == 200); // A: ambient occlusion
+            }
+        }
+    }
+    CHECK_FALSE(Poseidon::NativeNmoMaterialChannelsAvailable(PacARGB8888, false, true, name));
+    CHECK_FALSE(Poseidon::NativeNmoMaterialChannelsAvailable(Poseidon::PacBC5, true, true, name));
+    CHECK_FALSE(Poseidon::NativeNmoMaterialChannelsAvailable(Poseidon::PacBC7, false, false, name));
+    CHECK_FALSE(Poseidon::NativeNmoMaterialChannelsAvailable(Poseidon::PacBC7, false, true,
+                                                              "Assets/Materials/Metal_NTC.edds"));
+    CHECK_FALSE(Poseidon::NativeNmoMaterialChannelsAvailable(Poseidon::PacBC7, false, true,
+                                                              "Assets/Materials/Metal_NMO.paa"));
+}
+
 TEST_CASE("Original BCR roughness survives compressed, decoded and tinted routes without opacity",
           "[graphics][edds][bcr-roughness]")
 {

@@ -10277,10 +10277,12 @@ uint64_t EngineWgpu::ResolveMaterialSpecularMap(const ShapeSection& section)
 // A procedural Stage1 is a genuine constant (`#(argb,8,8,3)color(0.5,0.5,1,1,NOHQ)`
 // is a flat normal) and generates like any other, so it binds here too.
 uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section, bool* rgPackedOut,
-                                            bool* nativeCavityOut)
+                                            bool* nativeCavityOut, bool* nativePbrChannelsOut)
 {
     if (nativeCavityOut != nullptr)
         *nativeCavityOut = false;
+    if (nativePbrChannelsOut != nullptr)
+        *nativePbrChannelsOut = false;
     if (rgPackedOut != nullptr)
         *rgPackedOut = false;
     // NOT honoured here any more. Baking the toggle into the material record meant it
@@ -10363,6 +10365,8 @@ uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section, bool*
         *rgPackedOut = wgpuTexture->NormalIsRgPacked();
     if (nativeCavityOut != nullptr && handle != 0 && wgpuTexture != nullptr)
         *nativeCavityOut = wgpuTexture->NormalHasNativeCavity();
+    if (nativePbrChannelsOut != nullptr && handle != 0 && wgpuTexture != nullptr)
+        *nativePbrChannelsOut = wgpuTexture->NormalHasNativePbrChannels();
     return report(handle, handle ? "" : "upload failed", loadName);
 }
 
@@ -12482,7 +12486,15 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // by ResolveMaterialBaseColour above.
             bool normalRgPacked = false;
             bool nativeCavity = false;
-            mat.normal_texture_id = ResolveMaterialNormalMap(s->GetSection(i), &normalRgPacked, &nativeCavity);
+            bool nativePbrChannels = false;
+            static const bool nativePbrPreview = []
+            {
+                const char* value = std::getenv("WGR_REFORGER_PBR_PREVIEW");
+                return value && value[0] == '1' && value[1] == '\0';
+            }();
+            mat.normal_texture_id = ResolveMaterialNormalMap(s->GetSection(i), &normalRgPacked,
+                                                             &nativeCavity,
+                                                             nativePbrPreview ? &nativePbrChannels : nullptr);
             // Authored normal intensity rides the same record; the 1.0 default keeps
             // every material that names none exactly where it was.
             mat.normal_power = ResolveMaterialNormalPower(s->GetSection(i));
@@ -12574,6 +12586,35 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 }
             }
             ResolveMaterialLayers(s->GetSection(i), mat);
+            // This is an A/B preview, not a global material migration. Both maps must be
+            // original four-channel Enfusion sources and the section must really draw the
+            // material's BCR (rather than its face fallback). Layer masks, alpha coverage,
+            // converted content and the direct-draw route stay on their established shading.
+            if (nativePbrPreview && nativePbrChannels && normalRgPacked && baseColour != 0 &&
+                mat.texture_id == baseColour && !baseFromConstant && !sectionUntextured &&
+                mat.normal_texture_id != 0 && mat.mask_texture_id == 0 && mat.specular_texture_id == 0 &&
+                mat.alpha_ref <= 0.0f && sec.variant == 0u)
+            {
+                const ShapeSection& sourceSection = s->GetSection(i);
+                const char* path = sourceSection.surfMat && sourceSection.surfMat->GetName().Data()
+                    ? sourceSection.surfMat->GetName().Data() : nullptr;
+                if (path)
+                {
+                    const auto found = _materialBindings.find(path);
+                    if (found != _materialBindings.end() &&
+                        Asset::Material::EmatMaterial::NameMatches(found->second.shaderFamily, "MatPBRBasic") &&
+                        found->second.ematPbr && found->second.ematPbr->bcrAlphaIsRoughness[0])
+                    {
+                        sec.flags |= WGR_MODEL_SECTION_NATIVE_PBR_PREVIEW;
+                        static bool reportedPreview = false;
+                        if (!reportedPreview)
+                        {
+                            LOG_INFO(Graphics, "Wgpu Reforger PBR preview: first eligible opaque section material={}", path);
+                            reportedPreview = true;
+                        }
+                    }
+                }
+            }
             // Multi's mask lives on the second UV set in the BI corpora (TexGen uvSource
             // "tex1") and in Reforger's (`UVSrcGlobalMaps "UV set 2"`, RFG-072); the shader
             // samples it with uv1 when told so -- and ONLY when the shape carries a second

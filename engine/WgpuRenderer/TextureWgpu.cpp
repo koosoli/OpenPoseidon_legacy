@@ -1492,6 +1492,16 @@ bool TextureWgpu::NormalHasNativeCavity() const
                                             NormalIsRgPacked(), Name());
 }
 
+bool TextureWgpu::NormalHasNativePbrChannels() const
+{
+    if (_nMipmaps <= 0)
+        return false;
+    const bool decodedDds = _mipmaps[0].DstFormat() == PacARGB8888 &&
+        dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(_src)) != nullptr;
+    return NativeNmoMaterialChannelsAvailable(_mipmaps[0].DstFormat(), decodedDds,
+                                               NormalIsRgPacked(), Name());
+}
+
 bool TextureWgpu::NormalIsRgPacked() const
 {
     if (_nMipmaps <= 0)

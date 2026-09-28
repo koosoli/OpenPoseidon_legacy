@@ -55,6 +55,9 @@ fn shader_defs() -> std::collections::HashMap<String, naga_oil::compose::ShaderD
     if std::env::var("WGR_NATIVE_LEAF_CAVITY").as_deref() == Ok("1") {
         defs.insert("NATIVE_LEAF_CAVITY".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
+    if std::env::var("WGR_REFORGER_PBR_PREVIEW").as_deref() == Ok("1") {
+        defs.insert("NATIVE_PBR_PREVIEW".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
     if std::env::var("WGR_NATIVE_GROUND_AO").as_deref() == Ok("0") {
         defs.insert("DISABLE_NATIVE_GROUND_AO".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }

@@ -34,6 +34,7 @@ struct ShadeMaterial {
     // highlight roughly a seventh of its intended strength.
     spec_mask: f32,
     native_cavity: f32,
+    native_ao: f32,
 };
 
 // Rotate `v` by the rotation that carries unit vector `src_n` onto unit vector `dst_n`.
@@ -250,9 +251,9 @@ fn shade(
     // unlike NMO ambient occlusion. It does not darken specular or emissive light.
     let leaf_cavity = select(1.0, mat.native_cavity, is_foliage);
     m_light_diffuse *= leaf_cavity;
-    m_light_ambient *= leaf_cavity;
+    m_light_ambient *= leaf_cavity * mat.native_ao;
     let amb_ao = sky_vis_ao(world_abs.xz) * gtao_t * interior_ao * clamp(baked_sky_vis, 0.0, 1.0)
-        * leaf_cavity;
+        * leaf_cavity * mat.native_ao;
     // ...and a FOURTH, at a scale none of the three can reach: the normal map's own micro-
     // occlusion. Sky-vis is keyed on the terrain column (km), GTAO marches the depth buffer
     // (~2 m), the interior term answers "is there a roof" (room-sized) — the smallest thing any

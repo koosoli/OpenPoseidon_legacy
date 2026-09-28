@@ -1056,7 +1056,7 @@ class EngineWgpu : public EngineDummy
     // function has just resolved, and re-finding it would mean repeating the whole
     // material-cache walk. nullptr for the per-draw callers, which have their own path.
     uint64_t ResolveMaterialNormalMap(const ShapeSection& section, bool* rgPackedOut = nullptr,
-                                      bool* nativeCavityOut = nullptr);
+                                     bool* nativeCavityOut = nullptr, bool* nativePbrChannelsOut = nullptr);
     // A section's authored normal-map intensity (Enfusion `NormalPower`), 1.0 when the
     // material names none. Read from the same translation cache ResolveMaterialBaseColour
     // fills, so this shares its ordering dependency. WGR_MATERIAL_NORMAL_POWER=0 forces

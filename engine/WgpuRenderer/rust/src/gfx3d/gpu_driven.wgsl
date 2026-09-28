@@ -157,6 +157,7 @@ const SECTION_MASK_UV1: u32 = 4u;
 // write, so the convention rides here instead. Clear for every PAA `_nohq` and for a decoded
 // `_NMO`, both of which keep the (a, g) read.
 const SECTION_NORMAL_RG: u32 = 8u;
+const SECTION_NATIVE_PBR_PREVIEW: u32 = 64u;
 // SectionMaterial.flags bit 5 (WGR_MODEL_SECTION_GLOBALNMO_UV1): the global
 // normal map (`UVSrcGlobNormal "UV set 2"`) is painted in the object's own
 // unwrap, so it is sampled with uv1, unscaled -- the tiling transform belongs
@@ -845,6 +846,7 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // path shade() ignores sun_*, so the emissive/light/specular terms are what carry.
     var m: ShadeMaterial;
     m.native_cavity = 1.0;
+    m.native_ao = 1.0;
     // Imported OFP/A3 materials use the legacy emissive lane for a mixture of
     // real signal lamps and fixed-function brightness compensation. The latter
     // was baked into plant materials to survive OFP's old lighting model; in
@@ -915,6 +917,10 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // Hoisted out of the branch: the Visualize Normal view needs it for sections that
     // bind no normal map too, where flat (0,0,1) is the honest answer (WGSL rule 7).
     var normal_ts_dbg = vec3<f32>(0.0, 0.0, 1.0);
+#ifdef NATIVE_PBR_PREVIEW
+    var pbr_metal = 0.0;
+    var pbr_sampled = false;
+#endif
     // MAT-048. Multi blends its NORMALS across the same four layers as its colours, with the
     // same mask weights. Until this, only layer 0's normal was ever bound, so on a wall whose
     // mask selects the plaster or stone layer you got that layer's colour over layer 0's
@@ -941,6 +947,13 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
             let normal_sample = textureSampleBias(textures[sm.normal_slot], samplers[sm.sampler_idx], uv0, frame.renscale.x);
             normal_ts = decode_nohq_packed(normal_sample,
                 normal_rg);
+#ifdef NATIVE_PBR_PREVIEW
+            if ((sm.flags & SECTION_NATIVE_PBR_PREVIEW) != 0u) {
+                pbr_metal = clamp(normal_sample.b, 0.0, 1.0);
+                m.native_ao = clamp(normal_sample.a, 0.0, 1.0);
+                pbr_sampled = true;
+            }
+#endif
 #ifdef NATIVE_LEAF_CAVITY
             if ((sm.flags & 16u) != 0u) {
                 m.native_cavity = clamp(normal_sample.a, 0.0, 1.0);
@@ -1026,6 +1039,21 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
             water_drift(WATER_DRIFT_DIR_B, WATER_DRIFT_SPEED_B, WATER_RIPPLE_PERIOD_B, t),
             frame.wateranim.y);
     }
+#ifdef NATIVE_PBR_PREVIEW
+    // A/B only: map authored native roughness to the exponent already consumed by
+    // the shared lighting/sky split. Metalness moves reflected F0 toward base colour
+    // and removes its diffuse share; NMO A attenuates ambient only. No extra fetch.
+    var pbr_diffuse_scale = 1.0;
+    if (pbr_sampled) {
+        let roughness = clamp(base.a, 0.08, 1.0);
+        m.spec_power = clamp(2.0 / (roughness * roughness) - 2.0, 1.0, 256.0);
+        let reflected_f0 = mix(vec3<f32>(0.22), base.rgb, pbr_metal);
+        m.specular = frame.sun_diffuse.rgb * reflected_f0;
+        m.local_specular = reflected_f0;
+        m.spec_mask = 1.0;
+        pbr_diffuse_scale = pow(1.0 - pbr_metal, 0.4545);
+    }
+#endif
     // Material Debug views. Placed after the tangent frame so Visualize Normal shows the
     // normal that actually shades this fragment, and after the alpha discard so cutouts stay
     // cut out. View 0 (full material) falls straight through.
@@ -1070,7 +1098,11 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         // ambient can recover how far the normal map turned this pixel; see shade()'s
         // `geo_normal` parameter. Kept in step with shader3d.wgsl's call by construction --
         // the two paths must not disagree about how a normal-mapped surface takes sky light.
+#ifdef NATIVE_PBR_PREVIEW
+        base.rgb * pbr_diffuse_scale, m, shading_normal, geometric_normal, in.world_pos, in.fog, dwx, dwy, linear,
+#else
         base.rgb, m, shading_normal, geometric_normal, in.world_pos, in.fog, dwx, dwy, linear,
+#endif
         // Per-model baked sky visibility (LIT-020 Stage 2), 1 when the model has no volume.
         baked_sky_visibility(in.model_id, in.model_pos),
         baked_sky_direction(in.model_id, in.model_pos,

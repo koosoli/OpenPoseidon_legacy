@@ -432,7 +432,10 @@ enum WgrModelSectionFlags : uint32_t
     WGR_MODEL_SECTION_NATIVE_CAVITY = 16u,
     /* The global normal map (`GlobalNMOMap`, `UVSrcGlobNormal "UV set 2"`) is
      * painted in the object's own unwrap: sample it with uv1, unscaled. */
-    WGR_MODEL_SECTION_GLOBALNMO_UV1 = 32u
+    WGR_MODEL_SECTION_GLOBALNMO_UV1 = 32u,
+    /* Experimental native-only PBR channel preview. Never set for legacy,
+     * converted, layered, cutout or non-original texture sources. */
+    WGR_MODEL_SECTION_NATIVE_PBR_PREVIEW = 64u
 };
 
 /* Per-section shading, parallel to a model's sections (one per section). The RAW
