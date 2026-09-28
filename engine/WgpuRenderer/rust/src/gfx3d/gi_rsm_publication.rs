@@ -67,7 +67,6 @@ impl GiRsmPublication {
         self.submitted = false;
     }
 
-    #[cfg(test)]
     pub fn published(self) -> Option<(u64, u64)> {
         self.published_epoch.map(|epoch| (self.generation, epoch))
     }

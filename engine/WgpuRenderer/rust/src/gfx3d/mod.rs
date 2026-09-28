@@ -14,6 +14,7 @@ mod local_pose_cache;
 mod interior_publication;
 mod interior_cached_count;
 mod gi_rsm_publication;
+mod gi_rsm_cached_count;
 mod local_publication;
 pub(crate) mod geometry_pass_facts;
 mod lod_feedback;
@@ -4119,7 +4120,9 @@ pub struct Gfx3d {
     gi_target_draw_closed: std::cell::Cell<bool>,
     // Optional CPU-only RSM cache publication witness; absent on the default path.
     gi_rsm_publication: Option<std::cell::Cell<gi_rsm_publication::GiRsmPublication>>,
-    gi_rsm_pending_view: Option<(SkyVisView, u64)>,
+    gi_rsm_pending_view: Option<(SkyVisView, u64, u64)>,
+    gi_rsm_published_view: Option<(SkyVisView, u64, u64)>,
+    gi_rsm_cached_count: Option<gi_rsm_cached_count::CachedCount>,
     gi_rsm_publication_rows: u8,
     reflection_target_draw_closed: std::cell::Cell<bool>,
     sky0_target_draw_closed: std::cell::Cell<bool>,
@@ -4987,9 +4990,13 @@ impl Gfx3d {
             shadow_target_draw_closed_mask: std::cell::Cell::new(0),
             local0_target_draw_closed: std::cell::Cell::new(false),
             gi_target_draw_closed: std::cell::Cell::new(false),
-            gi_rsm_publication: (std::env::var("WGR_GEOMETRY_GI_RSM_PUBLICATION").as_deref() == Ok("1"))
+            gi_rsm_publication: (std::env::var("WGR_GEOMETRY_GI_RSM_PUBLICATION").as_deref() == Ok("1") ||
+                std::env::var("WGR_GEOMETRY_GI_RSM_CACHED_COUNT").as_deref() == Ok("1"))
                 .then(|| std::cell::Cell::new(gi_rsm_publication::GiRsmPublication::default())),
             gi_rsm_pending_view: None,
+            gi_rsm_published_view: None,
+            gi_rsm_cached_count: (std::env::var("WGR_GEOMETRY_GI_RSM_CACHED_COUNT").as_deref() == Ok("1"))
+                .then(gi_rsm_cached_count::CachedCount::default),
             gi_rsm_publication_rows: 0,
             reflection_target_draw_closed: std::cell::Cell::new(false),
             sky0_target_draw_closed: std::cell::Cell::new(false),
@@ -6079,6 +6086,9 @@ impl Gfx3d {
         let size = (width.max(1), height.max(1));
         if self.depth_size == size && self.depth.is_some() {
             return;
+        }
+        if self.gi_rsm_cached_count.is_some() {
+            self.abort_gi_rsm_publication();
         }
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("wgr_3d_depth"),
@@ -7714,8 +7724,13 @@ impl Gfx3d {
                 if !self.gi.rsm_eligible.get() {
                     state.abort();
                     self.gi_rsm_pending_view = None;
+                    self.gi_rsm_published_view = None;
+                    if let Some(cache) = &mut self.gi_rsm_cached_count { cache.invalidate(); }
                 } else if self.gi.rsm_refresh.get() {
-                    self.gi_rsm_pending_view = state.plan(epoch).then_some((self.gi.rsm_view, epoch));
+                    self.gi_rsm_published_view = None;
+                    if let Some(cache) = &mut self.gi_rsm_cached_count { cache.invalidate(); }
+                    self.gi_rsm_pending_view = state.plan(epoch).then_some((
+                        self.gi.rsm_view, epoch, self.gi.rsm_image_generation));
                 }
                 cell.set(state);
             }
@@ -9324,7 +9339,11 @@ impl Gfx3d {
     }
 
     pub fn set_gi_settings(&mut self, p: &crate::ffi::WgrGi) {
+        let previous = self.gi.settings;
         self.gi.settings.apply(p);
+        if self.gi.settings != previous {
+            self.abort_gi_rsm_publication();
+        }
     }
 
     // (Re)allocate the sky depth target and build this frame's snapped ortho view. Called from
@@ -10089,6 +10108,12 @@ impl Gfx3d {
                 caches[i].observe(self.cull.batch_target_count_fact(i - 1));
             }
         }
+        if let Some(cache) = &mut self.gi_rsm_cached_count {
+            // Preserve a completed answer before the next request resets the
+            // one-shot GI view-5 fact. The image key is checked at read time.
+            self.cull.harvest_shadow_target_count(device, 4);
+            cache.observe(self.cull.shadow_target_count_fact(4));
+        }
         let armed = self.gpu_driven_enabled && self.cull.arm_main_target_count(
             device, token, model_id, source_generation);
         if armed {
@@ -10097,8 +10122,12 @@ impl Gfx3d {
             if let Some(caches) = &mut self.interior_cached_counts {
                 for cache in caches { cache.source_changed(identity); }
             }
+            if let Some(cache) = &mut self.gi_rsm_cached_count { cache.source_changed(identity); }
         } else if let Some(caches) = &mut self.interior_cached_counts {
             for cache in caches { cache.invalidate(); }
+        }
+        if !armed {
+            if let Some(cache) = &mut self.gi_rsm_cached_count { cache.invalidate(); }
         }
         armed
     }
@@ -10173,18 +10202,21 @@ impl Gfx3d {
         let Some(cell) = &self.gi_rsm_publication else { return; };
         let mut state = cell.get();
         let pending = self.gi_rsm_pending_view.take();
-        let Some((view, epoch)) = pending else {
+        let Some((view, epoch, image)) = pending else {
             if state.planned_epoch().is_some() { state.abort(); cell.set(state); }
             return;
         };
         if state.planned_epoch() != Some(epoch) || self.cull.instance_epoch() != epoch ||
             !self.gi.rsm_eligible.get() || !self.gi.rsm_refresh.get() ||
-            !self.interior_sky_active() || !same_sky_view(self.gi.rsm_view, view) {
+            !self.interior_sky_active() || !same_sky_view(self.gi.rsm_view, view) ||
+            self.gi.rsm_image_generation != image {
             state.abort(); cell.set(state); return;
         }
         let publication = state.commit(epoch);
         cell.set(state);
         if let Some((generation, _)) = publication {
+            self.gi_rsm_published_view = Some((view, epoch, image));
+            if let Some(cache) = &mut self.gi_rsm_cached_count { cache.invalidate(); }
             self.gi.mark_rsm_drawn();
             if self.gi_rsm_publication_rows < 16 {
                 self.gi_rsm_publication_rows += 1;
@@ -10195,6 +10227,8 @@ impl Gfx3d {
     }
     pub fn abort_gi_rsm_publication(&mut self) {
         self.gi_rsm_pending_view = None;
+        self.gi_rsm_published_view = None;
+        if let Some(cache) = &mut self.gi_rsm_cached_count { cache.invalidate(); }
         if let Some(cell) = &self.gi_rsm_publication {
             let mut state = cell.get(); state.abort(); cell.set(state);
         }
@@ -10332,7 +10366,15 @@ impl Gfx3d {
         let main = self.cull.main_target_count_commit(token);
         if main {
             if let Some(witness) = self.main_count_completion.as_mut() { witness.commit(token); }
-            for cascade in 0..5 { self.cull.shadow_target_count_commit(token, cascade); }
+            for cascade in 0..5 {
+                if self.cull.shadow_target_count_commit(token, cascade) && cascade == 4 {
+                    let identity = self.cull.shadow_target_count_fact(4).identity;
+                    let key = self.gi_rsm_current_count_key();
+                    if let (Some(cache), Some(key)) = (&mut self.gi_rsm_cached_count, key) {
+                        if identity.token == token { cache.publish(key, identity); }
+                    }
+                }
+            }
             self.cull.local0_target_count_commit(token);
             self.cull.reflection_target_count_commit(token);
             let sky0_committed = self.cull.sky0_target_count_commit(token);
@@ -10364,6 +10406,7 @@ impl Gfx3d {
         if let Some(caches) = &mut self.interior_cached_counts {
             for cache in caches { cache.invalidate(); }
         }
+        if let Some(cache) = &mut self.gi_rsm_cached_count { cache.invalidate(); }
         if let Some(witness) = self.main_count_completion.as_mut() { witness.abort(token); }
         self.cull.main_target_count_abort(token);
         for cascade in 0..5 { self.cull.shadow_target_count_abort(token, cascade); }
@@ -10389,7 +10432,24 @@ impl Gfx3d {
         self.cull.shadow_target_count_fact(cascade)
     }
     pub fn gi_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
-        self.shadow_target_count_fact(device, 4)
+        self.cull.harvest_shadow_target_count(device, 4);
+        let raw = self.cull.shadow_target_count_fact(4);
+        let key = self.gi_rsm_current_count_key();
+        if let Some(cache) = &mut self.gi_rsm_cached_count {
+            cache.observe(raw);
+            cache.fact(key)
+        } else { raw }
+    }
+
+    fn gi_rsm_current_count_key(&self) -> Option<gi_rsm_cached_count::Key> {
+        if !self.interior_sky_active() || !self.gi.rsm_eligible.get() ||
+            self.gi.rsm_refresh.get() { return None; }
+        let (generation, epoch) = self.gi_rsm_publication.as_ref()?.get().published()?;
+        let (view, rendered_epoch, image) = self.gi_rsm_published_view?;
+        if epoch != rendered_epoch || epoch != self.cull.instance_epoch() ||
+            image != self.gi.rsm_image_generation ||
+            !same_sky_view(view, self.gi.rsm_view) { return None; }
+        Some(gi_rsm_cached_count::Key::new(generation, image, view, epoch))
     }
     pub fn local0_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
         self.cull.harvest_local0_target_count(device);

@@ -78,7 +78,7 @@ struct GiParamsGpu {
     rsm_meta: [f32; 4],
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GiSettings {
     pub enabled: bool,
     /// 0 = six-face ambient cube (shipped), 1 = first-order SH. See `basis_from_env`.
@@ -175,6 +175,9 @@ pub struct GiProbes {
     // --- the sun proxy (REN-GI-002)
     _rsm_depth: wgpu::Texture,
     pub rsm_depth_view: wgpu::TextureView,
+    /// Identity of the depth/albedo/normal RSM allocation. A future resize
+    /// must assign a fresh identity when replacing those textures.
+    pub rsm_image_generation: u64,
     _rsm_albedo: wgpu::Texture,
     pub rsm_albedo_view: wgpu::TextureView,
     _rsm_normal: wgpu::Texture,
@@ -313,6 +316,13 @@ impl GiProbes {
                 view_formats: &[],
             })
         };
+        static NEXT_RSM_IMAGE: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(1);
+        let rsm_image_generation = NEXT_RSM_IMAGE.fetch_update(
+            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Relaxed,
+            |next| next.checked_add(1),
+        ).unwrap_or(0); // Exhaustion fails closed in the cached COUNT key.
         let rsm_depth = rsm_tex("wgr_gi_rsm_depth", super::SHADOW_FORMAT);
         let rsm_albedo = rsm_tex("wgr_gi_rsm_albedo", wgpu::TextureFormat::Rgba8Unorm);
         let rsm_normal = rsm_tex("wgr_gi_rsm_normal", wgpu::TextureFormat::Rgba8Unorm);
@@ -453,6 +463,7 @@ impl GiProbes {
             generation: 1,
             _rsm_depth: rsm_depth,
             rsm_depth_view,
+            rsm_image_generation,
             _rsm_albedo: rsm_albedo,
             rsm_albedo_view,
             _rsm_normal: rsm_normal,
