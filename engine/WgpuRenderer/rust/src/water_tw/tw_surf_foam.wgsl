@@ -155,7 +155,11 @@ fn surfFoamShading(a: SurfFoamArgs) -> SurfFoamInfo {
 
         let steep = smoothstep(0.82, 0.5, a.baseNormal.y);
         let ww = sat(a.fresh * 1.4);
-        let farOnly = a.footprint >= 0.12;
+        // (W10f, OP) Tidewater's 0.12 m / 0.03-0.12 m: at OP's view distances and FOV nearly all of
+        // a beach's whitewater band seen from the shore is past that, and the band was drawn as its
+        // flat average (the flat white stripe); the lace and lumps are mip-filtered
+        // (textureSampleGrad), so they are kept out to 0.3 m
+        let farOnly = a.footprint >= 0.3;
         var flat = vec4<f32>(0.5);
         if (!farOnly) { flat = surfFoamFlowLace(xz, dxz, dyz, flow, 0.0); }
         var lace = flat;
@@ -166,13 +170,16 @@ fn surfFoamShading(a: SurfFoamArgs) -> SurfFoamInfo {
             let vert = surfFoamFlowLace(qv.q, qv.dx, qv.dy, vec2<f32>(0.0, -0.9), 1.0);
             lace = mix(flat, vert, steep);
         }
-        if (ww > 0.02 && !farOnly) {
+        var bigFar = 0.5;
+        if (ww > 0.02) {
             let L = a.L;
             let pq = mix(xz, qv.q, steep);
             let pqx = mix(dxz, qv.dx, steep);
             let pqy = mix(dyz, qv.dy, steep);
             let pflow = mix(flow, vec2<f32>(0.0, -0.9), steep);
             let big = surfFoamBigAt(pq, pqx, pqy, pflow);
+            bigFar = big;
+          if (!farOnly) {
             let mid = sqrt(surfFoamFlowLace(pq / 2.2, pqx / 2.2, pqy / 2.2, pflow / 2.2, 3.0).x);
             lumps = big * 0.6 + mid * 0.4;
             let A = 0.22; // relief of the lumps (m)
@@ -190,7 +197,9 @@ fn surfFoamShading(a: SurfFoamArgs) -> SurfFoamInfo {
                 occ = max(occ, smoothstep(0.0, 0.05, (hk - big) * A - tanE * d));
             }
             wwShadow = 1.0 - occ * mix(0.85, 0.7, steep);
-            wwCav = mix(0.5, 1.0, smoothstep(0.05, 0.75, lumps));
+            // (W10f, OP) deeper dips between the lumps (Tidewater 0.5)
+            wwCav = mix(0.38, 1.0, smoothstep(0.05, 0.75, lumps));
+          }
         }
 
         let boil = lace.x * 0.7 + lace.z * 0.3;
@@ -205,8 +214,10 @@ fn surfFoamShading(a: SurfFoamArgs) -> SurfFoamInfo {
         let inner = sat((w - lace.x) / 0.25);
         let laceFoam = max(mat * sat(inner * 0.35 + 0.45 + lace.z * 0.3), bub);
 
-        let far = smoothstep(0.03, 0.12, a.footprint);
-        let average = max(sat(pow(w, 1.45) * 1.9) * 0.8, ww * 0.95);
+        let far = smoothstep(0.08, 0.3, a.footprint);
+        // (W10f, OP) far off the whitewater keeps its big lumps: patchy cover, shaded dips
+        let bigK = smoothstep(0.1, 0.8, bigFar);
+        let average = max(sat(pow(w, 1.45) * 1.9) * 0.8, ww * mix(0.72, 0.95, bigK));
         let near = max(laceFoam, whitewater);
         opacity = mix(a.foam, mix(near, average, far), surf);
 
@@ -214,8 +225,8 @@ fn surfFoamShading(a: SurfFoamArgs) -> SurfFoamInfo {
         let reliefThin = inner * sat(c * 1.5);
         let relief = reliefThin * (1.0 - ww);
         wwOut = ww * (1.0 - far * 0.6);
-        wwShadow = mix(wwShadow, 0.82, far);
-        wwCav = mix(wwCav, 0.8, far);
+        wwShadow = mix(wwShadow, mix(0.7, 0.9, bigK), far);
+        wwCav = mix(wwCav, mix(0.5, 0.95, bigK), far);
         wwRelief *= 1.0 - far;
         height = (relief + a.bubbles * 0.15) * surf * (1.0 - far);
         reliefK = ww * (1.0 - far);

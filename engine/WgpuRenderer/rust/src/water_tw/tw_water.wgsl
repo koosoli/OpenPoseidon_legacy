@@ -656,7 +656,11 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     let simIn = simPick.y * select(0.0, 1.0, tw.simP1.w > 0.5);
     let simOn = tw.simP1.w > 0.5;
     let sfCtx = SurfFoamCtx(simState, pos, dwx, dwy, L, simOn);
-    let surf = waterSurfaceFragment(lagXZ, footprint, vDepth, in.foam, in.shoreN, in.shoreFoam + edgeFoam, simState.x, in.surfMask, simIn, sfCtx);
+    // (W10f, OP) with the shore simulation on, most of the swash-front foam is drawn as carried
+    // lace (holes, strands) rather than as fresh whitewater: as whitewater it was an even, opaque
+    // white rope with detached blobs along the beach
+    let edgeLace = 0.75 * simIn;
+    let surf = waterSurfaceFragment(lagXZ, footprint, vDepth, in.foam, in.shoreN, in.shoreFoam + edgeFoam * (1.0 - edgeLace), simState.x + edgeFoam * edgeLace, in.surfMask, simIn, sfCtx);
     let foam = surf.foam;
     // the gradients the SurfFoam lighting differentiates, in uniform control flow (see tw_surf_foam.wgsl)
     let foamGrad = surfFoamGrad(surf.foamInfo, dwx, dwy);
