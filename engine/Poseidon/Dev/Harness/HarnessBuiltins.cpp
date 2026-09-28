@@ -1097,11 +1097,19 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddNumberToObject(result, "centerZ", GLandscape->ObjectStreamCenterZ());
             cJSON_AddNumberToObject(result, "admitUpdates", static_cast<double>(state.admitUpdates));
             cJSON_AddNumberToObject(result, "lastObjectId", GLandscape->GetLastObjectID());
+            cJSON_AddNumberToObject(result, "shapeCacheSize", static_cast<double>(state.shapeCacheSize));
+            cJSON_AddNumberToObject(result, "shapeCacheLimit", static_cast<double>(state.shapeCacheLimit));
+            cJSON_AddNumberToObject(result, "shapeCacheHits", static_cast<double>(state.shapeCacheHits));
+            cJSON_AddNumberToObject(result, "shapeCacheInserts", static_cast<double>(state.shapeCacheInserts));
+            cJSON_AddNumberToObject(result, "shapeCacheDrops", static_cast<double>(state.shapeCacheDrops));
             Engine::GpuMemoryStatsOut gpu{};
             const bool gpuValid = GEngine && GEngine->GetGpuMemoryStats(gpu);
             cJSON_AddBoolToObject(result, "gpuMemoryValid", gpuValid);
             if (gpuValid)
             {
+                cJSON_AddNumberToObject(result, "gpuTrackedBytes", static_cast<double>(gpu.trackedBytes));
+                cJSON_AddNumberToObject(result, "gpuBudgetBytes", static_cast<double>(gpu.budgetBytes));
+                cJSON_AddBoolToObject(result, "gpuOverBudget", gpu.overBudget);
                 cJSON_AddNumberToObject(result, "geometryLiveBytes", static_cast<double>(gpu.geometryLiveBytes));
                 cJSON_AddNumberToObject(result, "geometryCapacityBytes", static_cast<double>(gpu.geometryCapacityBytes));
                 cJSON_AddNumberToObject(result, "geometryRetiredBytes", static_cast<double>(gpu.geometryRetiredBytes));

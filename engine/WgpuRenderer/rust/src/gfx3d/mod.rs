@@ -12,6 +12,8 @@ mod section_span_pool;
 mod local_pose_cache;
 pub(crate) mod geometry_pass_facts;
 mod lod_feedback;
+#[allow(dead_code)]
+mod view_reference_facts;
 use pool::{GeometryPool, MeshAlloc};
 
 // GPU cull + LOD + indirect-arg compaction (docs/gpu-culling-and-depth-plan.md Stage 3).

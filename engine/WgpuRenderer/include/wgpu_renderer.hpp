@@ -2240,6 +2240,18 @@ static_assert(offsetof(WgrGeometryPassFacts,interior_epochs)==496);
 static_assert(offsetof(WgrGeometryPassFacts,reflection_epoch)==576);
 static_assert(offsetof(WgrGeometryPassFacts,reflection_frame)==584);
 
+// Private GeometryPage view-reference copied layout, not yet exposed by an FFI getter.
+// status 0=uncommitted, 1=all required input views known, 2=at least one Unknown.
+// An absent bit is a COUNT-input observation, never device retirement or all-pass proof.
+struct WgrViewReferenceFacts {
+ uint32_t version,struct_bytes,status,view_count;
+ uint64_t render_token,instance_epoch,required,present,absent,unknown,cached;
+ uint32_t pending_samples,dropped_samples;
+};
+static_assert(sizeof(WgrViewReferenceFacts)==80);
+static_assert(offsetof(WgrViewReferenceFacts,render_token)==16);
+static_assert(offsetof(WgrViewReferenceFacts,required)==32);
+static_assert(offsetof(WgrViewReferenceFacts,pending_samples)==72);
 extern "C"
 {
     WGR_API const char* wgr_version(void);

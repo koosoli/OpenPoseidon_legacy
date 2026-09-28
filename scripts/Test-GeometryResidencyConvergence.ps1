@@ -7,6 +7,7 @@ param(
     [switch]$MeshAck,
     [switch]$RegisteredRefs,
     [switch]$ParkedGeometryReport,
+    [switch]$PressureCacheTrim,
     [string]$Label = 'dayz-resource-convergence',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
@@ -27,6 +28,7 @@ if (!$env:LOCK_OWNER) {
     if ($MeshAck) { $lockArgs += '-MeshAck' }
     if ($RegisteredRefs) { $lockArgs += '-RegisteredRefs' }
     if ($ParkedGeometryReport) { $lockArgs += '-ParkedGeometryReport' }
+    if ($PressureCacheTrim) { $lockArgs += '-PressureCacheTrim' }
     $env:LOCK_OWNER = 'DayZ resource convergence'
     try {
         & 'C:\Program Files\Git\bin\bash.exe' @lockArgs
@@ -61,6 +63,7 @@ $environment = @{
     WGR_NATIVE_DDS_PREPARE = '0'; WGR_NATIVE_DDS_BC3_ONLY = '0'; WGR_SIMULATION_RESIDENCY = '0'
     WGR_ADAPTIVE_TEXTURE_DETAIL = '0'; WGR_LOD_GOVERNOR_RANGE = '1'; WGR_SKY_VOLUME_INCREMENTAL = '1'
     WGR_PASS1_STATS = '1'; WGR_RESIDENCY_TRACE = '1'
+    WGR_OBJECT_STREAM_PRESSURE_CACHE_TRIM = $(if ($PressureCacheTrim) { '1' } else { '0' })
 }
 if ($LodDemandReport) { $environment.WGR_GEOMETRY_LOD_FEEDBACK = '1' }
 if ($OwnerLedger) { $environment.WGR_GEOMETRY_OWNER_LEDGER = '1' }
@@ -477,6 +480,7 @@ try {
         allocationReport = $allocation; lodDemandMeasured = [bool]$LodDemandReport; ownerLedgerMeasured = [bool]$OwnerLedger; meshAckMeasured = [bool]$MeshAck
         registeredRefsMeasured = [bool]$RegisteredRefs
         parkedGeometryReportMeasured = [bool]$ParkedGeometryReport; parkedCandidateUsagePositive = [bool]($ParkedGeometryReport -and $parkedPositive)
+        pressureCacheTrim = [bool]$PressureCacheTrim
     } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'result.json')
     Write-Output "Resource convergence evidence: $out ($status)"
     if (!$parkedPositive) { throw 'NotExercised: parked selection did not capture actual model and allocation candidates; evidence retained' }

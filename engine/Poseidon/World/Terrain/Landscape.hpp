@@ -6,6 +6,7 @@
 #include <Poseidon/Foundation/Containers/BankArray.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/World/Terrain/ShapeCachePressurePolicy.hpp>
 #include <Poseidon/World/Terrain/SimulationObjectCoverage.hpp>
 #include <Poseidon/World/Terrain/SimulationResidency.hpp>
 #include <Poseidon/World/Terrain/StaticPlainRouteProbe.hpp>
@@ -759,6 +760,7 @@ class Landscape : public SerializeClass
     uint64_t _modernObjectShapeCacheInserts = 0;
     uint64_t _modernObjectShapeCacheDrops = 0;
     bool _modernObjectShapeCacheRegistered = false;
+    Streaming::ShapeCachePressurePolicy _modernObjectShapeCachePressure;
     // Declared LAST of the cache members so it is DESTROYED FIRST: the probe holds std::function
     // closures over `this`, and CLDLink's destructor is what unlinks it from the global
     // free-on-demand list. Destroying it before the containers it reads makes a pressure

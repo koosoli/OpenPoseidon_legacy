@@ -2358,6 +2358,7 @@ bool Landscape::LoadOprwModern(const char* path)
         _modernObjectShapeCacheHits = 0;
         _modernObjectShapeCacheInserts = 0;
         _modernObjectShapeCacheDrops = 0;
+        _modernObjectShapeCachePressure.Reset();
         _modernObjectVelocityValid = false;
         _modernObjectVelocityX = 0.0f;
         _modernObjectVelocityZ = 0.0f;
@@ -3012,6 +3013,15 @@ static uint64_t ObjectStreamUploadBudgetBytes()
 // cache retains is CPU-side geometry plus the shape's vertex buffers. That is an inference from
 // code and not a measurement; Chernarus is where it must be checked, and
 // WGR_OBJECT_STREAM_EVICT_CACHE=0 is the A/B.
+static bool ObjectStreamPressureCacheTrimEnabled()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_PRESSURE_CACHE_TRIM");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    return enabled;
+}
+
 static size_t ObjectStreamShapeCacheLimit()
 {
     static const size_t limit = []
@@ -3141,6 +3151,8 @@ void Landscape::RetainReleasedShape(LODShapeWithShadow* shape)
 {
     if (_modernObjectShapeCacheLimit == 0 || shape == nullptr)
         return;
+    if (ObjectStreamPressureCacheTrimEnabled() && _modernObjectShapeCachePressure.Active())
+        return; // optional pressure state sheds only redundant last-holder cache refs
     const auto slot = _modernObjectShapeCacheIndex.find(shape);
     if (slot != _modernObjectShapeCacheIndex.end())
     {
@@ -3465,7 +3477,35 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
         // never drawn from in between.
         if (!_modernObjectShapeCache.empty())
             TrimModernObjectShapeCache(0);
+        if (ObjectStreamPressureCacheTrimEnabled())
+            _modernObjectShapeCachePressure.Reset();
         return;
+    }
+    // Optional cache-only pressure response. Published scalar facts do not open a renderer
+    // producer window. A dropped Shape Ref is NOT a physical pool-reclaim acknowledgement.
+    if (ObjectStreamPressureCacheTrimEnabled())
+    {
+        Engine::GpuMemoryStatsOut memory{};
+        const bool available = GEngine && GEngine->GetGpuMemoryStats(memory);
+        _modernObjectShapeCachePressure.Observe(available, memory.trackedBytes, memory.budgetBytes);
+        if (_modernObjectShapeCachePressure.DropCount(_modernObjectShapeCache.size()))
+        {
+            const size_t before = _modernObjectShapeCache.size();
+            TrimModernObjectShapeCache(before - 1); // at most one cache reference this update
+            static unsigned rows = 0;
+            if (rows < 16)
+            {
+                ++rows;
+                LOG_INFO(World, "Object stream pressure cache: droppedRef=1 cacheBefore={} cacheAfter={} trackedBytes={} budgetBytes={} physicalReclaim=unknown row={} limit=16",
+                         before, _modernObjectShapeCache.size(), memory.trackedBytes,
+                         memory.budgetBytes, rows);
+            }
+            else if (rows == 16)
+            {
+                ++rows;
+                LOG_INFO(World, "Object stream pressure cache: log truncated after 16 drops; cache refs are not GPU reclaim evidence");
+            }
+        }
     }
     Vector3 effectivePosition = cameraPosition;
     // Deterministic residency-turnover smoke hook. It visits a non-overlapping
