@@ -46,6 +46,11 @@ mod caustics;
 mod textures;
 mod wake;
 
+/// What a region's stations were traced from: centre, terrain generation, sea level in 0.1 m steps.
+type StationKey = ([f32; 2], u64, i32);
+/// Recent station traces kept for reuse (W7c).
+const STATION_CACHE: usize = 8;
+
 use std::sync::Arc;
 
 use crate::ffi::{WgrCamera, WgrWaterParams};
@@ -416,7 +421,13 @@ pub struct Tidewater {
     brk: breakers::BreakersGpu,
     // stations per region slot, with what they were traced from (centre, terrain generation,
     // sea level in 0.1 m steps): a slot is re-traced only when that changes
-    brk_slots: [Option<(([f32; 2], u64, i32), Vec<breakers::Station>)>; shore_sim::K],
+    brk_slots: [Option<(StationKey, Arc<Vec<breakers::Station>>)>; shore_sim::K],
+    // W7c: stations are traced on a worker thread (a trace is ~11 ms of CPU); recent traces are
+    // kept so a key that comes back (sea level flickering over a 0.1 m step) costs nothing
+    st_tx: std::sync::mpsc::Sender<(usize, StationKey, Vec<breakers::Station>)>,
+    st_rx: std::sync::mpsc::Receiver<(usize, StationKey, Vec<breakers::Station>)>,
+    st_pending: Vec<(usize, StationKey)>,
+    st_cache: Vec<(usize, StationKey, Arc<Vec<breakers::Station>>)>,
     // W4a spray
     spray: spray::SprayGpu,
     // W5a underwater composite
@@ -429,8 +440,9 @@ pub struct Tidewater {
     wake_lanes: [[f32; 4]; wake::SLOTS * 4],
     // W6i boat bow spray
     boat_spray: boat_spray::BoatSpray,
-    // W7b: prepare CPU ms: sum, max, station re-trace max, CDLOD selection sum, frames
-    prep_stats: [f32; 5],
+    // W7b: prepare CPU ms: sum, max, station update max, CDLOD selection sum, frames;
+    // W7c: traces started, cache hits
+    prep_stats: [f32; 7],
 }
 
 impl Tidewater {
@@ -689,6 +701,7 @@ impl Tidewater {
             mapped_at_creation: false,
         });
 
+        let (st_tx, st_rx) = std::sync::mpsc::channel();
         let mut me = Self {
             bind: device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("tw_group1_placeholder"),
@@ -734,6 +747,10 @@ impl Tidewater {
             coast: Vec::new(),
             brk,
             brk_slots: [const { None }; shore_sim::K],
+            st_tx,
+            st_rx,
+            st_pending: Vec::new(),
+            st_cache: Vec::new(),
             spray,
             uw,
             linear: linear > 0.5,
@@ -741,7 +758,7 @@ impl Tidewater {
             wake,
             wake_lanes: [[0.0; 4]; wake::SLOTS * 4],
             boat_spray: Default::default(),
-            prep_stats: [0.0; 5],
+            prep_stats: [0.0; 7],
         };
         me.rebuild_bind(device);
         me
@@ -1082,14 +1099,16 @@ impl Tidewater {
     pub fn take_prepare_stats(&mut self) -> String {
         let n = self.prep_stats[4].max(1.0);
         let s = format!(
-            "TW prepare CPU ms: mean {:.3} max {:.3} over {} frames | station re-trace max {:.3} | CDLOD selection mean {:.3}",
+            "TW prepare CPU ms: mean {:.3} max {:.3} over {} frames | station update max {:.3} ({} traces on the worker, {} from cache) | CDLOD selection mean {:.3}",
             self.prep_stats[0] / n,
             self.prep_stats[1],
             self.prep_stats[4] as u32,
             self.prep_stats[2],
+            self.prep_stats[5] as u32,
+            self.prep_stats[6] as u32,
             self.prep_stats[3] / n
         );
-        self.prep_stats = [0.0; 5];
+        self.prep_stats = [0.0; 7];
         s
     }
 
@@ -1131,12 +1150,15 @@ impl Tidewater {
     }
 
     /// Shoreline stations for the breakers, traced per simulated region when the region, the
-    /// terrain or the sea level changes (W3d); the others are kept.
+    /// terrain or the sea level changes (W3d); the others are kept. W7c: the trace runs on a
+    /// worker thread and lands a frame or two later (a new region starts its 3 s warm-up
+    /// anyway); recent traces are reused from a small cache.
     fn update_stations(&mut self, queue: &wgpu::Queue, sea_level: f32) {
         let Some((heights, tp, generation)) = &self.terrain else {
             if self.brk.ns != 0 {
                 self.brk.set_stations(queue, &[]);
             }
+            self.brk_slots = [const { None }; shore_sim::K];
             return;
         };
         if tp.hm_width < 2 || tp.hm_height < 2 || tp.terrain_grid <= 0.0 {
@@ -1144,29 +1166,70 @@ impl Tidewater {
         }
         let sea_q = (sea_level / 0.1).round() as i32;
         let mut changed = false;
+        // finished traces: into the cache, and into their slot if it still wants that key
+        while let Ok((i, k, st)) = self.st_rx.try_recv() {
+            self.st_pending.retain(|p| !(p.0 == i && p.1 == k));
+            let st = Arc::new(st);
+            self.st_cache.retain(|c| !(c.0 == i && c.1 == k));
+            self.st_cache.push((i, k, st.clone()));
+            if self.st_cache.len() > STATION_CACHE {
+                self.st_cache.remove(0);
+            }
+            if self.sim.regions[i].map(|r| (r.centre, *generation, sea_q)) == Some(k) {
+                self.brk_slots[i] = Some((k, st));
+                changed = true;
+            }
+        }
         for (i, r) in self.sim.regions.iter().enumerate() {
             let key = r.map(|r| (r.centre, *generation, sea_q));
             let have = self.brk_slots[i].as_ref().map(|s| s.0);
             if key == have {
                 continue;
             }
-            changed = true;
-            self.brk_slots[i] = key.map(|k| {
-                let inp = shore_field::ShoreFieldInput {
-                    heights: heights.clone(),
-                    hm_width: tp.hm_width,
-                    hm_height: tp.hm_height,
-                    origin: [tp.world_origin.x, tp.world_origin.y],
-                    grid: tp.terrain_grid,
-                    sea_level,
-                    swell_dir: [1.0, 0.0],
-                    terrain_gen: *generation,
-                };
+            let Some(k) = key else {
+                self.brk_slots[i] = None;
+                changed = true;
+                continue;
+            };
+            if let Some(c) = self.st_cache.iter().find(|c| c.0 == i && c.1 == k) {
+                self.brk_slots[i] = Some((k, c.2.clone()));
+                self.prep_stats[6] += 1.0;
+                changed = true;
+                continue;
+            }
+            // until the trace lands the slot has no stations (not the old region's)
+            if self.brk_slots[i].is_some() {
+                self.brk_slots[i] = None;
+                changed = true;
+            }
+            if self.st_pending.iter().any(|p| p.0 == i && p.1 == k) {
+                continue;
+            }
+            self.st_pending.push((i, k));
+            self.prep_stats[5] += 1.0;
+            let inp = shore_field::ShoreFieldInput {
+                heights: heights.clone(),
+                hm_width: tp.hm_width,
+                hm_height: tp.hm_height,
+                origin: [tp.world_origin.x, tp.world_origin.y],
+                grid: tp.terrain_grid,
+                sea_level,
+                swell_dir: [1.0, 0.0],
+                terrain_gen: *generation,
+            };
+            let tx = self.st_tx.clone();
+            let job = move || {
                 let h = |x: f32, z: f32| shore_field::height_at(&inp, x, z);
                 let min = [k.0[0] - shore_sim::SIZE * 0.5, k.0[1] - shore_sim::SIZE * 0.5];
                 // runs are numbered per slot (512 apart), so no lip joins two regions
-                (k, breakers::trace_stations(&h, min, shore_sim::SIZE, sea_level, i as u32 * 512))
-            });
+                let st = breakers::trace_stations(&h, min, shore_sim::SIZE, inp.sea_level, i as u32 * 512);
+                // a closed receiver (backend switched away) just drops the result
+                let _ = tx.send((i, k, st));
+            };
+            if std::thread::Builder::new().name("tw-stations".into()).spawn(job).is_err() {
+                // no thread: forget it, the next frame asks again
+                self.st_pending.retain(|p| !(p.0 == i && p.1 == k));
+            }
         }
         if changed {
             let all: Vec<breakers::Station> = self.brk_slots.iter().flatten().flat_map(|s| s.1.iter().copied()).collect();
