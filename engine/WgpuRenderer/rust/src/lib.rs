@@ -4407,7 +4407,7 @@ impl Renderer {
                 // produce this pass's indirect args, so it is part of the planar-objects cost.
                 self.gpu_timers
                     .begin(&mut encoder, TimerRegion::PlanarObjects);
-                self.gfx3d.cull_dispatch_reflection(&mut encoder);
+                let reflection_cull_recorded = self.gfx3d.cull_dispatch_reflection(&mut encoder);
                 let mut object_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("wgr_planar_reflection_objects"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -4437,6 +4437,9 @@ impl Renderer {
                 drop(object_pass);
                 if reflection_recorded {
                     self.gfx3d.record_geometry_reflection();
+                    if reflection_cull_recorded {
+                        self.gfx3d.record_reflection_target_draw_closed();
+                    }
                 }
                 self.gpu_timers
                     .end(&mut encoder, TimerRegion::PlanarObjects);
@@ -4534,6 +4537,8 @@ impl Renderer {
             // flushed at an earlier submit than strictly needed is harmless). Timestamps are
             // queue-global and the query set is shared, so the FrameTotal bracket opened before
             // this submit still resolves correctly against its close in the second command buffer.
+            let reflection_count_copied = main_count_armed &&
+                self.gfx3d.copy_reflection_target_count(&mut encoder);
             let planar_encoder = std::mem::replace(
                 &mut encoder,
                 self.device
@@ -4541,7 +4546,16 @@ impl Renderer {
                         label: Some("wgr_frame_main"),
                     }),
             );
-            self.queue.submit(std::iter::once(planar_encoder.finish()));
+            let planar_commands = planar_encoder.finish();
+            let reflection_count_ready = reflection_count_copied &&
+                main_count_request.is_some_and(|(token, _, _)|
+                    self.gfx3d.reflection_target_count_before_submit(token));
+            self.queue.submit(std::iter::once(planar_commands));
+            if reflection_count_ready {
+                if let Some((token, _, _)) = main_count_request {
+                    self.gfx3d.reflection_target_count_submitted(token);
+                }
+            }
         } else {
             // The pass did not run this frame. The target still holds whatever it was last
             // rendered for, and `reflected_vp` in water's uniform is stale with it, so the fade

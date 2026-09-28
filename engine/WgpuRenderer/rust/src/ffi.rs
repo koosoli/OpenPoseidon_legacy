@@ -3354,6 +3354,7 @@ mod main_target_count_ffi_tests {
             assert_eq!(wgr_shadow_target_count_fact(renderer, 4, &mut output, 48, 1), 0);
             assert_eq!(wgr_gi_target_count_fact(renderer, &mut output, 47, 1), 0);
             assert_eq!(wgr_local_shadow0_target_count_fact(renderer, &mut output, 47, 1), 0);
+            assert_eq!(wgr_reflection_target_count_fact(renderer, &mut output, 47, 1), 0);
         }
         assert_eq!(output.token, 99);
     }
@@ -3493,6 +3494,29 @@ pub unsafe extern "C" fn wgr_local_shadow0_target_count_fact(
     })).is_ok() as u32
 }
 
+/** Nonblocking exact target-model COUNT for the independently culled planar
+ * reflection. Only an active, closed indirect object pass in its separately
+ * submitted encoder can publish a result. Disabled/skipped views stay Unknown.
+ * Diagnostic only; neither pixels nor residency release are certified.
+ * # Safety
+ * Same live renderer and exact writable output contract as the main getter.
+ */
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_reflection_target_count_fact(
+    renderer: *mut WgrRenderer, output: *mut WgrMainTargetCountResult,
+    output_size: u32, output_version: u32,
+) -> u32 {
+    if renderer.is_null() || output.is_null() ||
+        output_size != std::mem::size_of::<WgrMainTargetCountResult>() as u32 ||
+        output_version != WgrMainTargetCountResult::VERSION { return 0; }
+    let output = unsafe { &mut *output };
+    *output = WgrMainTargetCountResult::empty();
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let fact = renderer.gfx3d.reflection_target_count_fact(&renderer.device);
+        *output = WgrMainTargetCountResult::from_fact(fact);
+    })).is_ok() as u32
+}
 unsafe fn render_frame_impl(
     renderer: *mut WgrRenderer, frame: *const WgrFrame,
     mut call_timings: Option<&mut WgrRenderCallCpuTimings>,

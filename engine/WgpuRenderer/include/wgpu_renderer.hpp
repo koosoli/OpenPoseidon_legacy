@@ -2734,6 +2734,11 @@ extern "C"
      * cached/skipped tiles stay UNKNOWN. No residency-release authority. */
     WGR_API uint32_t wgr_local_shadow0_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
         uint32_t output_size, uint32_t output_version);
+    /* Planar reflection's independently culled retained objects. UNKNOWN when
+     * the mirror is disabled/skipped or its own early encoder did not submit
+     * a closed indirect draw. Diagnostic only, never residency authority. */
+    WGR_API uint32_t wgr_reflection_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
+        uint32_t output_size, uint32_t output_version);
 
     /* Debug: read back the current auto-exposure scale (blocking GPU sync; dev panel only). */
     WGR_API float wgr_get_exposure_scale(WgrRenderer* renderer);

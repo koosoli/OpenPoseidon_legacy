@@ -608,6 +608,12 @@ pub struct CullState {
     local0_count_slots: Option<Vec<(wgpu::Buffer, MainCountSlot)>>,
     local0_count_armed: Option<MainCountIdentity>,
     local0_count_latest: MainCountFact,
+    // The planar mirror submits its own encoder before the main frame. Its
+    // diagnostic copy therefore has a separate ring and submit transition.
+    reflection_count_slots: Option<Vec<(wgpu::Buffer, MainCountSlot)>>,
+    reflection_count_armed: Option<MainCountIdentity>,
+    reflection_count_latest: MainCountFact,
+    reflection_dispatch_recorded: Cell<bool>,
     bind: Option<wgpu::BindGroup>,
 
     // Per-cascade shadow views (§6 multi-view). Length = active cascade count this frame
@@ -1096,6 +1102,10 @@ impl CullState {
             local0_count_slots: None,
             local0_count_armed: None,
             local0_count_latest: MainCountFact::default(),
+            reflection_count_slots: None,
+            reflection_count_armed: None,
+            reflection_count_latest: MainCountFact::default(),
+            reflection_dispatch_recorded: Cell::new(false),
             bind: None,
             shadow_views: Vec::new(),
             reflection_view: None,
@@ -1136,6 +1146,9 @@ impl CullState {
         if self.local0_count_slots.is_some() {
             self.harvest_local0_target_count(device);
         }
+        if self.reflection_count_slots.is_some() {
+            self.harvest_reflection_target_count(device);
+        }
         self.target_model_id = self.target_model_default;
         self.main_count_armed = None;
         self.main_count_latest = MainCountFact::default();
@@ -1144,6 +1157,9 @@ impl CullState {
         self.shadow_count_latest = [MainCountFact::default(); 5];
         self.local0_count_armed = None;
         self.local0_count_latest = MainCountFact::default();
+        self.reflection_count_armed = None;
+        self.reflection_count_latest = MainCountFact::default();
+        self.reflection_dispatch_recorded.set(false);
         self.gi_dispatch_recorded.set(false);
         let epoch = self.instance_epoch();
         if token == 0 || token == u64::MAX || token <= self.main_count_last_token ||
@@ -1196,6 +1212,18 @@ impl CullState {
         }
         self.local0_count_armed = Some(identity);
         self.local0_count_latest.identity = identity;
+        if self.reflection_count_slots.is_none() {
+            self.reflection_count_slots = Some((0..3).map(|i| {
+                (device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(&format!("wgr_reflection_target_count_{i}")),
+                    size: 4,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                }), MainCountSlot::Idle)
+            }).collect());
+        }
+        self.reflection_count_armed = Some(identity);
+        self.reflection_count_latest.identity = identity;
         true
     }
 
@@ -1204,6 +1232,26 @@ impl CullState {
     }
 
     pub fn local0_count_armed(&self) -> bool { self.local0_count_armed.is_some() }
+
+    /// Copy the mirror's selected-model COUNT into its own encoder after a
+    /// real cull and a closed indirect object pass.
+    pub fn copy_reflection_target_count(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
+        let Some(identity) = self.reflection_count_armed else { return false; };
+        if !self.reflection_dispatch_recorded.get() ||
+            self.instance_epoch() != identity.cull_epoch { return false; }
+        let Some(view) = self.reflection_view.as_ref() else { return false; };
+        if view.params.target_count_enabled == 0 ||
+            view.params.target_model_id != identity.model_id { return false; }
+        let Some(slots) = self.reflection_count_slots.as_mut() else { return false; };
+        let Some((dst, state)) = slots.iter_mut()
+            .find(|(_, state)| matches!(state, MainCountSlot::Idle)) else { return false; };
+        encoder.copy_buffer_to_buffer(&view.counter_buf,
+            TARGET_MODEL_COUNT_BYTE_OFFSET, dst, 0, 4);
+        *state = MainCountSlot::Encoded(identity);
+        self.reflection_count_armed = None;
+        self.reflection_dispatch_recorded.set(false);
+        true
+    }
 
     /// `view_index` is the actual shadow cull index, solar_count + local tile 0.
     /// The owner alone can prove a fresh tile draw and a closed pass.
@@ -1514,6 +1562,124 @@ impl CullState {
         fact
     }
 
+    /// The planar command buffer is submitted before the main encoder. Reserve
+    /// its copy at that boundary; a panic must leave it drainable but invalid.
+    pub fn reflection_target_count_before_submit(&mut self, token: u64) -> bool {
+        let Some(slots) = self.reflection_count_slots.as_mut() else { return false; };
+        for (_, state) in slots {
+            if let MainCountSlot::Encoded(identity) = state {
+                if identity.token == token {
+                    *state = MainCountSlot::Submitted {
+                        identity: *identity, committed: false, aborted: true };
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn reflection_target_count_submitted(&mut self, token: u64) -> bool {
+        let Some(slots) = self.reflection_count_slots.as_mut() else { return false; };
+        for (_, state) in slots {
+            if let MainCountSlot::Submitted { identity, committed, aborted } = state {
+                if identity.token == token {
+                    *committed = false;
+                    *aborted = false;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn reflection_target_count_commit(&mut self, token: u64) -> bool {
+        let Some(slots) = self.reflection_count_slots.as_mut() else { return false; };
+        for (_, state) in slots {
+            if let MainCountSlot::Submitted { identity, committed, aborted } = state {
+                if identity.token == token && !*aborted {
+                    *committed = true;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn reflection_target_count_abort(&mut self, token: u64) {
+        if self.reflection_count_latest.identity.token == token {
+            self.reflection_count_latest.status = MainCountStatus::Unknown;
+            self.reflection_count_latest.count = 0;
+        }
+        if self.reflection_count_armed.is_some_and(|id| id.token == token) {
+            self.reflection_count_armed = None;
+        }
+        self.reflection_dispatch_recorded.set(false);
+        if let Some(slots) = self.reflection_count_slots.as_mut() {
+            for (_, state) in slots {
+                match state {
+                    MainCountSlot::Encoded(id) if id.token == token => *state = MainCountSlot::Idle,
+                    MainCountSlot::Submitted { identity, aborted, .. } if identity.token == token =>
+                        *aborted = true,
+                    MainCountSlot::Mapping { identity, aborted, .. } if identity.token == token =>
+                        *aborted = true,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    pub fn harvest_reflection_target_count(&mut self, device: &wgpu::Device) {
+        let current_epoch = self.instance_epoch();
+        let Some(slots) = self.reflection_count_slots.as_mut() else { return; };
+        for (buf, state) in slots.iter_mut() {
+            if let MainCountSlot::Submitted { identity, committed, aborted } = state {
+                if !*committed && !*aborted { continue; }
+                let (tx, rx) = mpsc::channel();
+                buf.slice(..).map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+                *state = MainCountSlot::Mapping {
+                    identity: *identity, committed: *committed, aborted: *aborted, done: rx };
+            }
+        }
+        let _ = device.poll(wgpu::PollType::Poll);
+        for (buf, state) in slots.iter_mut() {
+            let current = std::mem::replace(state, MainCountSlot::Idle);
+            match current {
+                MainCountSlot::Mapping { identity, committed, aborted, done } => {
+                    match done.try_recv() {
+                        Ok(Ok(())) => {
+                            let data = buf.slice(..).get_mapped_range();
+                            let count = u32::from_le_bytes(data[..4].try_into().unwrap());
+                            drop(data);
+                            buf.unmap();
+                            if committed && !aborted &&
+                                identity == self.reflection_count_latest.identity &&
+                                current_epoch == identity.cull_epoch {
+                                self.reflection_count_latest.count = count;
+                                self.reflection_count_latest.status = if count == 0 {
+                                    MainCountStatus::Absent
+                                } else { MainCountStatus::Present };
+                            }
+                        }
+                        Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {}
+                        Err(mpsc::TryRecvError::Empty) => {
+                            *state = MainCountSlot::Mapping {
+                                identity, committed, aborted, done };
+                        }
+                    }
+                }
+                other => *state = other,
+            }
+        }
+    }
+
+    pub fn reflection_target_count_fact(&self) -> MainCountFact {
+        let mut fact = self.reflection_count_latest;
+        if self.instance_epoch() != fact.identity.cull_epoch {
+            fact.status = MainCountStatus::Unknown;
+            fact.count = 0;
+        }
+        fact
+    }
     pub fn local0_target_count_before_submit(&mut self, token: u64) -> bool {
         let Some(slots) = self.local0_count_slots.as_mut() else { return false; };
         for (_, state) in slots {
@@ -2500,19 +2666,19 @@ impl CullState {
         true
     }
 
-    pub fn dispatch_reflection(&self, encoder: &mut wgpu::CommandEncoder) {
+    pub fn dispatch_reflection(&self, encoder: &mut wgpu::CommandEncoder) -> bool {
         if self.params.instance_count == 0 {
-            return;
+            return false;
         }
         let Some(view) = self.reflection_view.as_ref() else {
-            return;
+            return false;
         };
         let (Some(bind), Some(args), Some(sec)) = (
             view.bind.as_ref(),
             view.out_args.as_ref(),
             view.sec_count.as_ref(),
         ) else {
-            return;
+            return false;
         };
         self.record_collapse(
             encoder,
@@ -2526,8 +2692,11 @@ impl CullState {
             &self.scatter_pipeline,
             view.stats_view,
         );
+        if self.reflection_count_armed.is_some() {
+            self.reflection_dispatch_recorded.set(true);
+        }
+        true
     }
-
     // Record the interior sky-visibility cull (top-down ortho box). Recorded before the sky
     // depth pass so wgpu barriers the compute writes -> that pass's indirect reads. No-op until
     // set_sky_params + prepare() have run with instances present.
@@ -6024,5 +6193,124 @@ pub(crate) mod tests {
             (std::mem::size_of_val(retirement.models.as_slice()) / 4) as u64), bytemuck::cast_slice::<ModelGpu,u32>(&retirement.models));
         retirement.retire_model(a); assert_eq!(retirement.table_uploads, TableUploads::NONE);
         eprintln!("PASS model_row_upload_actual_gpu: actual production partial/full GPU writes and neighbor readback matched");
+    }
+#[test]
+    fn reflection_target_count_early_submit_present_absent_and_skip() {
+        let Some((device, queue)) = headless() else { return; };
+        let mut cull = CullState::new(&device);
+        let sections = [SectionGpu {
+            first_index: 0, index_count: 3, base_vertex: 0, variant: 0,
+        }];
+        let lods = [LodGpu {
+            resolution: 0.0, section_base: 0, section_count: 1, is_decal: 0,
+        }];
+        let materials = [SectionMaterialGpu::zeroed()];
+        let model = cull.register_model(1.0, &lods, &sections, &materials);
+        let absent_model = cull.register_model(1.0, &lods, &sections, &materials);
+        assert!(cull.reflection_count_slots.is_none());
+        assert!(!cull.arm_main_target_count(&device, 1, model, 0));
+        assert!(cull.reflection_count_slots.is_none(),
+            "invalid opt-in request must not allocate reflection staging");
+        for _ in 0..8 {
+            cull.instance_add(InstanceGpu {
+                world: Mat4::IDENTITY.to_cols_array(),
+                center: [0.0, 0.0, 0.0, 1.0],
+                model, flags: 0, cull_radius: 0, _pad: 0,
+                conform0: [0.0; 4], conform1: [0.0; 4], conform2: [0.0; 4],
+            });
+        }
+        let eye = Vec3::new(0.0, 0.0, 10.0);
+        let mut view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
+        view.w_axis = Vec4::new(0.0, 0.0, 0.0, 1.0);
+        let proj = Mat4::perspective_infinite_reverse_rh(60f32.to_radians(), 1.0, 0.1);
+        let mut params = CullParamsGpu::zeroed();
+        params.frustum = frustum_planes(proj * view);
+        params.cam_pos = [eye.x, eye.y, eye.z, 0.0];
+        params.objects_z2 = 1.0e6;
+        params.lod_scale = 1.0;
+        params.lod_inv_width = 1.0;
+        cull.set_params(params);
+        cull.set_reflection_params(&device, params);
+
+        assert!(cull.arm_main_target_count(&device, 2, model, 17));
+        cull.prepare(&device, &queue);
+        let mut planar = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut planar);
+        assert!(!cull.copy_reflection_target_count(&mut planar),
+            "a prepared view with no actual dispatch cannot publish zero");
+        assert!(cull.dispatch_reflection(&mut planar));
+        assert!(cull.copy_reflection_target_count(&mut planar));
+        assert!(cull.reflection_target_count_before_submit(2));
+        queue.submit(std::iter::once(planar.finish()));
+        assert!(cull.reflection_target_count_submitted(2));
+        // The real frame commits the early planar submission only after its
+        // later main encoder also succeeded.
+        assert!(cull.reflection_target_count_commit(2));
+        for _ in 0..64 {
+            cull.harvest_reflection_target_count(&device);
+            if cull.reflection_target_count_fact().status == MainCountStatus::Present { break; }
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        let present = cull.reflection_target_count_fact();
+        assert_eq!(present.identity.source_generation, 17);
+        assert_eq!(present.status, MainCountStatus::Present);
+        assert_eq!(present.count, 8);
+
+        // A new request with the mirror disabled must not inherit the old
+        // positive or fabricate an absence from begin_frame_stats' zeroing.
+        assert!(cull.arm_main_target_count(&device, 3, model, 18));
+        cull.clear_reflection_view();
+        cull.prepare(&device, &queue);
+        let mut skipped = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut skipped);
+        assert!(!cull.dispatch_reflection(&mut skipped));
+        assert!(!cull.copy_reflection_target_count(&mut skipped));
+        assert!(!cull.reflection_target_count_before_submit(3));
+        assert_eq!(cull.reflection_target_count_fact().status, MainCountStatus::Unknown);
+        cull.reflection_target_count_abort(3);
+
+        // True zero requires a current selected model, a live mirror cull,
+        // an encoded copy, accepted early submission, and final commit.
+        cull.set_reflection_params(&device, params);
+        assert!(cull.arm_main_target_count(&device, 4, absent_model, 19));
+        cull.prepare(&device, &queue);
+        let mut zero = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut zero);
+        assert!(cull.dispatch_reflection(&mut zero));
+        assert!(cull.copy_reflection_target_count(&mut zero));
+        assert!(cull.reflection_target_count_before_submit(4));
+        queue.submit(std::iter::once(zero.finish()));
+        assert!(cull.reflection_target_count_submitted(4));
+        assert!(cull.reflection_target_count_commit(4));
+        for _ in 0..64 {
+            cull.harvest_reflection_target_count(&device);
+            if cull.reflection_target_count_fact().status == MainCountStatus::Absent { break; }
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        let absent = cull.reflection_target_count_fact();
+        assert_eq!(absent.identity.model_id, absent_model);
+        assert_eq!(absent.status, MainCountStatus::Absent);
+        assert_eq!(absent.count, 0);
+
+        // A later failure after the early submit still invalidates that sample
+        // and drains its staging slot rather than treating acceptance as commit.
+        assert!(cull.arm_main_target_count(&device, 5, model, 20));
+        cull.prepare(&device, &queue);
+        let mut aborted = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut aborted);
+        assert!(cull.dispatch_reflection(&mut aborted));
+        assert!(cull.copy_reflection_target_count(&mut aborted));
+        assert!(cull.reflection_target_count_before_submit(5));
+        queue.submit(std::iter::once(aborted.finish()));
+        assert!(cull.reflection_target_count_submitted(5));
+        cull.reflection_target_count_abort(5);
+        for _ in 0..64 {
+            cull.harvest_reflection_target_count(&device);
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        assert_eq!(cull.reflection_target_count_fact().status, MainCountStatus::Unknown);
+        assert!(cull.reflection_count_slots.as_ref().unwrap().iter()
+            .all(|(_, state)| matches!(state, MainCountSlot::Idle)),
+            "an aborted early submission must drain its staging slot");
     }
 }
