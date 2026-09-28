@@ -9,7 +9,7 @@
 
 use std::mem::size_of;
 
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 pub const VIEWS: usize = 36; // main, 4 cascades, 24 locals, 5 interior, GI, reflection
 pub const MAIN: usize = 0;
 pub const CASCADES: std::ops::Range<usize> = 1..5;
@@ -19,6 +19,16 @@ pub const GI: usize = 34;
 pub const REFLECTION: usize = 35;
 pub const PENDING: usize = 3;
 pub const VIEW_MASK: u64 = (1u64 << VIEWS) - 1;
+
+/// Query identity. Instance handle zero means all instances of this model, required when
+/// proving a whole model unused. `source_generation` is a caller-owned, nonzero generation
+/// for the exact geometry source; it must change when source mesh handles/content change.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TargetIdentity {
+    pub model_id: u32,
+    pub instance_handle: u32,
+    pub source_generation: u64,
+}
 
 /// Proposed copied ABI record. Not exported until an actual readback producer is wired.
 /// `status=0` means no successful returned frame; `1` is a complete input observation;
@@ -39,6 +49,9 @@ pub struct WgrViewReferenceFacts {
     pub cached: u64,
     pub pending_samples: u32,
     pub dropped_samples: u32,
+    pub target_model_id: u32,
+    pub target_instance_handle: u32,
+    pub target_source_generation: u64,
 }
 
 pub fn valid_layout(bytes: u32, version: u32) -> bool {
@@ -49,19 +62,24 @@ pub fn valid_layout(bytes: u32, version: u32) -> bool {
 struct Record {
     generation: u64,
     epoch: u64,
+    target: TargetIdentity,
     sampled_token: u64,
     valid: bool,
     present: bool,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Pending {
     nonce: u64,
     token: u64,
     epoch: u64,
-    generation: u64,
-    view: u8,
-    submitted: bool,
+    target: TargetIdentity,
+    generations: [u64; VIEWS],
+    copied: u64,
+    invalidated: u64,
+    submitted: u64,
+    committed: bool,
+    aborted: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,12 +87,17 @@ pub struct Ticket {
     slot: u8,
     nonce: u64,
 }
+impl Ticket {
+    /// Index of the producer-owned staging buffer. Never reuse it until resolve drains it.
+    pub fn slot_index(self) -> usize { self.slot as usize }
+}
 
 /// A fixed-size state machine. The future GPU layer must never hold these tickets as pointers.
 /// There are no heap allocations, scans of scene objects, sleeps or GPU calls here.
 pub struct ViewReferenceFacts {
     token: u64,
     epoch: u64,
+    target: TargetIdentity,
     required: u64,
     generations: [u64; VIEWS],
     records: [Record; VIEWS],
@@ -89,6 +112,7 @@ impl Default for ViewReferenceFacts {
         Self {
             token: 0,
             epoch: 0,
+            target: TargetIdentity::default(),
             required: 0,
             generations: [0; VIEWS],
             records: [Record::default(); VIEWS],
@@ -105,46 +129,70 @@ impl ViewReferenceFacts {
     /// before its replacement is attempted, even when the instance epoch did not change.
     /// Generation zero refuses a cached-view proof. Caller must use an exact monotonic actual
     /// pass publication generation, never a hash of view/light/caster planning inputs.
-    pub fn begin(&mut self, token: u64, epoch: u64, required: u64, refresh: u64,
+    pub fn begin(&mut self, token: u64, epoch: u64, target: TargetIdentity,
+                 required: u64, refresh: u64,
                  generations: [u64; VIEWS]) -> bool {
         if token == 0 || token == u64::MAX || token <= self.token || epoch == 0 ||
-            epoch == u64::MAX || required & !VIEW_MASK != 0 || refresh & !required != 0 {
+            epoch == u64::MAX || target.model_id == u32::MAX ||
+            target.source_generation == 0 || required & !VIEW_MASK != 0 ||
+            refresh & !required != 0 {
             self.committed = false;
             self.required = 0;
             self.records = [Record::default(); VIEWS];
-            self.pending = [None; PENDING];
+            // Pending GPU buffers must remain occupied until their owner has drained the
+            // async map/callback. Invalidating a logical ticket must not recycle storage.
+            for p in self.pending.iter_mut().flatten() { p.invalidated |= p.copied; }
             return false;
         }
         self.token = token;
         self.epoch = epoch;
+        self.target = target;
+        let transitioned = self.required ^ required;
         self.required = required;
         self.generations = generations;
         self.committed = false;
+        for p in self.pending.iter_mut().flatten() {
+            if p.epoch != epoch || p.target != target {
+                p.invalidated |= p.copied;
+            } else {
+                for view in 0..VIEWS {
+                    let bit = 1u64 << view;
+                    if refresh & bit != 0 || transitioned & bit != 0 ||
+                        p.generations[view] != generations[view] ||
+                        generations[view] == 0 {
+                        p.invalidated |= bit;
+                    }
+                }
+            }
+        }
         for view in 0..VIEWS {
             let bit = 1u64 << view;
             let generation = generations[view];
-            if refresh & bit != 0 || generation == 0 || self.records[view].epoch != epoch ||
+            if refresh & bit != 0 || transitioned & bit != 0 || generation == 0 ||
+                self.records[view].target != target ||
+                self.records[view].epoch != epoch ||
                 self.records[view].generation != generation {
                 self.records[view].valid = false;
-            }
-            // A delayed committed copy remains eligible across a cache hit. Only an actual
-            // refresh, missing generation or changed epoch/generation invalidates its ticket.
-            for slot in &mut self.pending {
-                if slot.as_ref().is_some_and(|p| p.view as usize == view &&
-                    (refresh & bit != 0 || generation == 0 || p.epoch != epoch ||
-                     p.generation != generation)) { *slot = None; }
             }
         }
         true
     }
 
-    /// Reserve one actual per-view COUNT copy. No free slot, duplicate pending view, or nonce
-    /// exhaustion leaves that view Unknown. A queued copy is not yet a returned-frame sample.
+    /// Reserve one actual per-view COUNT copy within this render's frame slot. All 36 views
+    /// may share one staging buffer; three slots bound concurrent frame readbacks, not views.
+    /// The producer must copy word `view` at 4*view bytes into this ticket's staging buffer.
     pub fn queue_copy(&mut self, view: usize) -> Option<Ticket> {
         if view >= VIEWS || self.required & (1u64 << view) == 0 ||
-            self.generations[view] == 0 || self.token == 0 || self.committed ||
-            self.pending.iter().flatten().any(|p| p.view as usize == view) {
+            self.generations[view] == 0 || self.token == 0 || self.committed {
             return None;
+        }
+        if let Some((slot, p)) = self.pending.iter_mut().enumerate()
+            .find_map(|(slot, p)| p.as_mut().filter(|p| p.token == self.token)
+                .map(|p| (slot, p))) {
+            if p.copied & (1u64 << view) != 0 { return None; }
+            p.copied |= 1u64 << view;
+            self.records[view].valid = false;
+            return Some(Ticket { slot: slot as u8, nonce: p.nonce });
         }
         let Some(slot) = self.pending.iter().position(Option::is_none) else {
             self.dropped = self.dropped.saturating_add(1);
@@ -160,15 +208,32 @@ impl ViewReferenceFacts {
         self.next_nonce += 1;
         self.records[view].valid = false;
         self.pending[slot] = Some(Pending { nonce, token: self.token, epoch: self.epoch,
-            generation: self.generations[view], view: view as u8, submitted: false });
+            target: self.target, generations: self.generations, copied: 1u64 << view,
+            invalidated: 0,
+            submitted: 0, committed: false, aborted: false });
         Some(Ticket { slot: slot as u8, nonce })
     }
 
-    /// Mark copies from this render call as submitted only after that call returned successfully.
+    /// Mark exactly the view copies in a successfully submitted encoder. Reflection may
+    /// submit before the main encoder; later queued-but-unsubmitted copies remain Unknown.
+    /// Nonzero submitted bits also keep this staging buffer occupied through abort.
+    pub fn mark_submitted(&mut self, token: u64, views: u64) -> bool {
+        if views == 0 { return false; }
+        for p in self.pending.iter_mut().flatten() {
+            if p.token == token && views & !p.copied == 0 {
+                p.submitted |= views;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Accept this render call only after it returned successfully and all copied command
+    /// buffers were submitted. This still does not mean GPU completion.
     pub fn commit(&mut self, token: u64) -> bool {
         if token != self.token || self.committed { return false; }
         for p in self.pending.iter_mut().flatten() {
-            if p.token == token { p.submitted = true; }
+            if p.token == token { p.committed = true; }
         }
         self.committed = true;
         true
@@ -183,40 +248,60 @@ impl ViewReferenceFacts {
             if record.sampled_token == token { record.valid = false; }
         }
         for slot in &mut self.pending {
-            if slot.as_ref().is_some_and(|p| p.token == token) { *slot = None; }
+            if slot.as_ref().is_some_and(|p| p.token == token) {
+                // An unsubmitted encoded copy cannot run. A submitted planar copy can run,
+                // so keep its staging slot occupied until resolve() drains it.
+                if slot.as_ref().is_some_and(|p| p.submitted != 0) {
+                    slot.as_mut().unwrap().aborted = true;
+                } else { *slot = None; }
+            }
         }
     }
 
-    /// Called on nonblocking readback completion. `None` is a map/copy failure; `Some(false)`
-    /// is an actual zero COUNT bit. A late sample is accepted only if its exact view generation
-    /// and instance epoch are still current and its render call was committed.
-    pub fn resolve(&mut self, ticket: Ticket, present: Option<bool>) -> bool {
+    /// Called after async map completion. `None` is a map/copy failure. `Some` contains one
+    /// u32 per view; only bits in the frame's copied mask may become known, including zero.
+    /// Return value means at least one copied view matched the current target/cache generation.
+    pub fn resolve(&mut self, ticket: Ticket, counts: Option<&[u32; VIEWS]>) -> bool {
         let Some(slot) = self.pending.get_mut(ticket.slot as usize) else { return false; };
         let Some(p) = *slot else { return false; };
         if p.nonce != ticket.nonce { return false; }
         *slot = None;
-        let view = p.view as usize;
-        if !p.submitted || self.epoch != p.epoch ||
-            self.generations[view] != p.generation ||
-            self.required & (1u64 << view) == 0 { return false; }
-        let Some(present) = present else { return false; };
-        self.records[view] = Record { generation: p.generation, epoch: p.epoch,
-            sampled_token: p.token, valid: true, present };
-        true
+        if p.submitted == 0 || !p.committed || p.aborted || self.epoch != p.epoch ||
+            self.target != p.target { return false; }
+        let Some(counts) = counts else { return false; };
+        let mut accepted = false;
+        for view in 0..VIEWS {
+            let bit = 1u64 << view;
+            if p.submitted & bit == 0 || p.invalidated & bit != 0 ||
+                self.required & bit == 0 ||
+                p.generations[view] == 0 ||
+                self.generations[view] != p.generations[view] { continue; }
+            self.records[view] = Record { generation: p.generations[view], epoch: p.epoch,
+                target: p.target, sampled_token: p.token, valid: true,
+                present: counts[view] != 0 };
+            accepted = true;
+        }
+        accepted
     }
 
     pub fn snapshot(&self) -> WgrViewReferenceFacts {
         let mut out = WgrViewReferenceFacts { version: VERSION,
             struct_bytes: size_of::<WgrViewReferenceFacts>() as u32,
             view_count: VIEWS as u32, render_token: self.token, instance_epoch: self.epoch,
-            required: self.required, dropped_samples: self.dropped, ..Default::default() };
-        out.pending_samples = self.pending.iter().flatten().count() as u32;
+            required: self.required, dropped_samples: self.dropped,
+            target_model_id: self.target.model_id,
+            target_instance_handle: self.target.instance_handle,
+            target_source_generation: self.target.source_generation,
+            ..Default::default() };
+        out.pending_samples = self.pending.iter().flatten()
+            .map(|p| p.copied.count_ones()).sum();
         if !self.committed { out.unknown = self.required; return out; }
         for view in 0..VIEWS {
             let bit = 1u64 << view;
             if self.required & bit == 0 { continue; }
             let r = self.records[view];
-            if !r.valid || r.epoch != self.epoch || r.generation != self.generations[view] ||
+            if !r.valid || r.epoch != self.epoch || r.target != self.target ||
+                r.generation != self.generations[view] ||
                 r.sampled_token > self.token {
                 out.unknown |= bit;
             } else {
@@ -234,131 +319,182 @@ mod tests {
     use super::*;
     use std::mem::offset_of;
 
-    fn generations() -> [u64; VIEWS] { [1; VIEWS] }
+    fn generations(n: u64) -> [u64; VIEWS] { [n; VIEWS] }
+    fn target(n: u64) -> TargetIdentity {
+        TargetIdentity { model_id: 7, instance_handle: 0, source_generation: n }
+    }
+    fn counts() -> [u32; VIEWS] { [0; VIEWS] }
 
     #[test]
-    fn proposed_copied_layout_requires_exact_size_and_version() {
-        assert_eq!(size_of::<WgrViewReferenceFacts>(), 80);
+    fn copied_v2_layout_and_target_identity() {
+        assert_eq!(size_of::<WgrViewReferenceFacts>(), 96);
         assert_eq!(offset_of!(WgrViewReferenceFacts, render_token), 16);
         assert_eq!(offset_of!(WgrViewReferenceFacts, required), 32);
         assert_eq!(offset_of!(WgrViewReferenceFacts, pending_samples), 72);
-        assert!(valid_layout(80, 1));
-        assert!(!valid_layout(72, 1));
-        assert!(!valid_layout(80, 0));
-        assert!(!valid_layout(88, 1));
+        assert_eq!(offset_of!(WgrViewReferenceFacts, target_model_id), 80);
+        assert_eq!(offset_of!(WgrViewReferenceFacts, target_source_generation), 88);
+        assert!(valid_layout(96, 2));
+        assert!(!valid_layout(80, 1));
+        assert!(!valid_layout(96, 1));
     }
 
     #[test]
-    fn actual_zero_requires_committed_copy_and_cached_generation() {
+    fn five_refreshed_views_fit_one_frame_slot_and_resolve_together() {
         let mut facts = ViewReferenceFacts::default();
-        assert!(facts.begin(10, 4, 1, 1, generations()));
+        let required = (1u64 << 5) - 1;
+        assert!(facts.begin(1, 9, target(1), required, required, generations(1)));
         let ticket = facts.queue_copy(0).unwrap();
-        assert_eq!(facts.snapshot().unknown, 1);
-        assert!(!facts.resolve(ticket, Some(false)), "unsubmitted sample cannot prove absence");
-        let ticket = facts.queue_copy(0).unwrap();
-        assert!(facts.commit(10));
-        assert_eq!(facts.snapshot().unknown, 1);
-        assert!(facts.resolve(ticket, Some(false)));
-        assert_eq!(facts.snapshot().absent, 1);
-        assert_eq!(facts.snapshot().status, 1);
-        assert!(facts.begin(11, 4, 1, 0, generations()));
-        assert!(facts.commit(11));
-        let cached = facts.snapshot();
-        assert_eq!(cached.absent, 1);
-        assert_eq!(cached.cached, 1);
-        let mut changed = generations(); changed[0] = 2;
-        assert!(facts.begin(12, 4, 1, 1, changed));
-        assert!(facts.commit(12));
-        assert_eq!(facts.snapshot().unknown, 1);
-        assert_eq!(facts.snapshot().absent, 0);
-    }
-
-    #[test]
-    fn stale_aba_failed_map_and_abort_never_publish_zero() {
-        let mut facts = ViewReferenceFacts::default();
-        assert!(facts.begin(1, 1, 1, 1, generations()));
-        let old = facts.queue_copy(0).unwrap();
-        assert!(facts.commit(1));
-        assert!(facts.begin(2, 2, 1, 1, generations()));
-        assert!(!facts.resolve(old, Some(false)));
-        let current = facts.queue_copy(0).unwrap();
-        assert!(facts.commit(2));
-        assert!(!facts.resolve(old, Some(false)));
-        assert!(!facts.resolve(current, None));
-        assert_eq!(facts.snapshot().unknown, 1);
-        assert!(facts.begin(3, 2, 1, 1, generations()));
-        let failed = facts.queue_copy(0).unwrap();
-        facts.abort(3);
-        assert!(!facts.resolve(failed, Some(false)));
-        assert_eq!(facts.snapshot().status, 0);
-        assert_eq!(facts.snapshot().unknown, 1);
-    }
-
-    #[test]
-    fn three_slots_and_complete_36_view_mask_never_invent_absence() {
-        let mut facts = ViewReferenceFacts::default();
-        assert!(facts.begin(1, 1, VIEW_MASK, VIEW_MASK, generations()));
-        let a = facts.queue_copy(0).unwrap();
-        let b = facts.queue_copy(1).unwrap();
-        let c = facts.queue_copy(35).unwrap();
-        assert!(facts.queue_copy(2).is_none());
-        assert!(facts.commit(1));
-        assert!(facts.resolve(a, Some(true)));
-        assert!(facts.resolve(b, Some(false)));
-        assert!(facts.resolve(c, Some(false)));
-        let s = facts.snapshot();
-        assert_eq!(s.present, 1);
-        assert_eq!(s.absent, (1u64 << 1) | (1u64 << 35));
-        assert_eq!(s.unknown.count_ones(), 33);
-        assert_eq!(s.dropped_samples, 1);
-        assert_eq!(s.status, 2);
-    }
-
-    #[test]
-    fn late_committed_sample_can_validate_same_cached_generation_only() {
-        let mut facts = ViewReferenceFacts::default();
-        assert!(facts.begin(1, 8, 1, 1, generations()));
-        let late = facts.queue_copy(0).unwrap();
-        assert!(facts.commit(1));
-        assert!(facts.begin(2, 8, 1, 0, generations()));
-        assert!(facts.commit(2));
-        assert_eq!(facts.snapshot().unknown, 1);
-        assert!(facts.resolve(late, Some(false)));
-        assert_eq!(facts.snapshot().cached, 1);
-        assert_eq!(facts.snapshot().absent, 1);
-        assert!(facts.begin(3, 8, 1, 1, generations()));
-        assert!(facts.commit(3));
-        assert_eq!(facts.snapshot().unknown, 1, "same-epoch refresh invalidates cached image");
-    }
-
-    #[test]
-    fn invalid_new_frame_discards_previous_absence() {
-        let mut facts = ViewReferenceFacts::default();
-        assert!(facts.begin(10, 2, 1, 1, generations()));
-        let sample = facts.queue_copy(0).unwrap();
-        assert!(facts.commit(10));
-        assert!(facts.resolve(sample, Some(false)));
-        assert_eq!(facts.snapshot().absent, 1);
-        assert!(!facts.begin(11, 2, 1, 2, generations()));
-        assert_eq!(facts.snapshot().status, 0);
-        assert_eq!(facts.snapshot().absent, 0);
-        assert!(facts.begin(12, 2, 1, 0, generations()));
-        assert!(facts.commit(12));
-        assert_eq!(facts.snapshot().unknown, 1);
-    }
-    #[test]
-    fn invalid_tokens_masks_and_generation_zero_refuse_evidence() {
-        let mut facts = ViewReferenceFacts::default();
-        assert!(!facts.begin(0, 1, 1, 1, generations()));
-        assert!(!facts.begin(1, 0, 1, 1, generations()));
-        assert!(!facts.begin(1, 1, VIEW_MASK | (1u64 << 36), 0, generations()));
-        assert!(!facts.begin(1, 1, 1, 2, generations()));
-        let mut zero = generations(); zero[0] = 0;
-        assert!(facts.begin(1, 1, 1, 0, zero));
+        for view in 1..5 {
+            let next = facts.queue_copy(view).unwrap();
+            assert_eq!(next, ticket);
+        }
         assert!(facts.queue_copy(0).is_none());
+        assert_eq!(facts.snapshot().pending_samples, 5);
+        assert_eq!(facts.snapshot().unknown, required);
+        let mut returned = counts(); returned[2] = 1;
+        assert!(!facts.resolve(ticket, Some(&returned)), "unsubmitted copy is no evidence");
+        // An unsubmitted ticket was drained; reserve all five again.
+        let ticket = facts.queue_copy(0).unwrap();
+        for view in 1..5 { assert_eq!(facts.queue_copy(view).unwrap(), ticket); }
+        assert!(facts.mark_submitted(1, required));
         assert!(facts.commit(1));
+        assert!(facts.resolve(ticket, Some(&returned)));
+        let s = facts.snapshot();
+        assert_eq!(s.status, 1);
+        assert_eq!(s.present, 1u64 << 2);
+        assert_eq!(s.absent, required & !(1u64 << 2));
+        assert_eq!(s.unknown, 0);
+        assert_eq!(s.pending_samples, 0);
+    }
+
+    #[test]
+    fn delayed_readback_never_proves_refreshed_view_but_can_prove_unchanged_cache() {
+        let mut facts = ViewReferenceFacts::default();
+        let required = 0b11;
+        assert!(facts.begin(1, 8, target(1), required, required, generations(1)));
+        let ticket = facts.queue_copy(0).unwrap();
+        assert_eq!(facts.queue_copy(1).unwrap(), ticket);
+        assert!(facts.mark_submitted(1, required));
+        assert!(facts.commit(1));
+        let mut next_gens = generations(1); next_gens[0] = 2;
+        assert!(facts.begin(2, 8, target(1), required, 1, next_gens));
+        assert!(facts.commit(2));
+        assert!(facts.resolve(ticket, Some(&counts())));
+        let s = facts.snapshot();
+        assert_eq!(s.absent, 0b10);
+        assert_eq!(s.cached, 0b10);
+        assert_eq!(s.unknown, 0b01);
+    }
+
+    #[test]
+    fn same_generation_refresh_invalidates_pending_without_reusing_gpu_slot() {
+        let mut facts = ViewReferenceFacts::default();
+        assert!(facts.begin(1, 8, target(1), 1, 1, generations(7)));
+        let old = facts.queue_copy(0).unwrap();
+        assert!(facts.mark_submitted(1, 1)); assert!(facts.commit(1));
+        // Publication generation is still 7 while replacement draw is only attempted.
+        assert!(facts.begin(2, 8, target(1), 1, 1, generations(7)));
+        assert_eq!(facts.snapshot().pending_samples, 1);
+        assert!(facts.commit(2));
+        assert!(!facts.resolve(old, Some(&counts())));
         assert_eq!(facts.snapshot().unknown, 1);
-        assert!(!facts.begin(1, 1, 1, 0, generations()));
-        assert!(!facts.begin(u64::MAX, 1, 1, 0, generations()));
+    }
+
+    #[test]
+    fn disabled_then_reenabled_same_generation_requires_new_sample() {
+        let mut facts = ViewReferenceFacts::default();
+        let bit = 1u64 << GI;
+        assert!(facts.begin(1, 8, target(1), bit, bit, generations(7)));
+        let old = facts.queue_copy(GI).unwrap();
+        assert!(facts.mark_submitted(1, bit)); assert!(facts.commit(1));
+        assert!(facts.resolve(old, Some(&counts())));
+        assert_eq!(facts.snapshot().absent, bit);
+        assert!(facts.begin(2, 8, target(1), 0, 0, generations(7)));
+        assert!(facts.commit(2));
+        assert!(facts.begin(3, 8, target(1), bit, 0, generations(7)));
+        assert!(facts.commit(3));
+        assert_eq!(facts.snapshot().unknown, bit);
+        assert_eq!(facts.snapshot().absent, 0);
+    }
+
+    #[test]
+    fn early_planar_submit_does_not_certify_later_unsubmitted_main_copy() {
+        let mut facts = ViewReferenceFacts::default();
+        assert!(facts.begin(1, 8, target(1), 0b11, 0b11, generations(1)));
+        let ticket = facts.queue_copy(0).unwrap(); // copied in early planar encoder
+        assert!(facts.mark_submitted(1, 0b01));
+        assert_eq!(facts.queue_copy(1).unwrap(), ticket); // main encoder recorded, not submitted
+        assert!(facts.commit(1));
+        assert!(facts.resolve(ticket, Some(&counts())));
+        assert_eq!(facts.snapshot().absent, 0b01);
+        assert_eq!(facts.snapshot().unknown, 0b10);
+
+        assert!(facts.begin(2, 8, target(1), 0b11, 0b11, generations(2)));
+        let aborted = facts.queue_copy(0).unwrap();
+        assert!(facts.mark_submitted(2, 0b01));
+        assert_eq!(facts.queue_copy(1).unwrap(), aborted);
+        facts.abort(2);
+        assert_eq!(facts.snapshot().pending_samples, 2);
+        assert!(!facts.resolve(aborted, Some(&counts())));
+        assert_eq!(facts.snapshot().unknown, 0b11);
+    }
+
+    #[test]
+    fn target_or_epoch_change_invalidates_prior_zero_and_old_completion() {
+        let mut facts = ViewReferenceFacts::default();
+        assert!(facts.begin(1, 8, target(1), 1, 1, generations(1)));
+        let old = facts.queue_copy(0).unwrap();
+        assert!(facts.mark_submitted(1, 1)); assert!(facts.commit(1));
+        assert!(facts.begin(2, 8, target(2), 1, 1, generations(1)));
+        assert!(facts.commit(2));
+        assert!(!facts.resolve(old, Some(&counts())));
+        assert_eq!(facts.snapshot().unknown, 1);
+        assert!(facts.begin(3, 9, target(2), 1, 1, generations(1)));
+        assert!(facts.commit(3));
+        assert_eq!(facts.snapshot().unknown, 1);
+    }
+
+    #[test]
+    fn saturation_aborted_submit_and_failed_map_remain_unknown() {
+        let mut facts = ViewReferenceFacts::default();
+        let mut tickets = Vec::new();
+        for token in 1..=PENDING as u64 {
+            assert!(facts.begin(token, 2, target(1), 1, 1, generations(token)));
+            tickets.push(facts.queue_copy(0).unwrap());
+            assert!(facts.mark_submitted(token, 1));
+            assert!(facts.commit(token));
+        }
+        assert!(facts.begin(4, 2, target(1), 1, 1, generations(4)));
+        assert!(facts.queue_copy(0).is_none());
+        assert_eq!(facts.snapshot().dropped_samples, 1);
+        assert!(facts.commit(4));
+        assert!(!facts.resolve(tickets[0], Some(&counts())));
+        assert!(facts.begin(5, 2, target(1), 1, 1, generations(5)));
+        let latest = facts.queue_copy(0).unwrap();
+        assert!(facts.mark_submitted(5, 1));
+        facts.abort(5);
+        assert!(!facts.resolve(latest, Some(&counts())));
+        assert_eq!(facts.snapshot().status, 0);
+        assert!(facts.begin(6, 2, target(1), 1, 1, generations(6)));
+        let failed = facts.queue_copy(0).unwrap();
+        assert!(facts.mark_submitted(6, 1)); assert!(facts.commit(6));
+        assert!(!facts.resolve(failed, None));
+        assert_eq!(facts.snapshot().unknown, 1);
+    }
+
+    #[test]
+    fn only_actual_required_views_and_copies_can_prove_zero() {
+        let mut facts = ViewReferenceFacts::default();
+        assert!(!facts.begin(1, 1, TargetIdentity::default(), 1, 1, generations(1)));
+        assert!(facts.begin(1, 1, target(1), 1u64 << GI, 1u64 << GI, generations(1)));
+        assert!(facts.queue_copy(GI).is_some());
+        assert!(facts.mark_submitted(1, 1u64 << GI)); assert!(facts.commit(1));
+        assert_eq!(facts.snapshot().unknown, 1u64 << GI);
+        // A scene with no sky view must not add sky to the required mask. A scene with an
+        // enabled but skipped sky view must leave it required and Unknown until copied.
+        assert!(facts.begin(2, 1, target(1), 1, 1, generations(2)));
+        assert!(facts.commit(2));
+        assert_eq!(facts.snapshot().required, 1);
+        assert_eq!(facts.snapshot().unknown, 1);
     }
 }

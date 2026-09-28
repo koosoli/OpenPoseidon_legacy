@@ -2247,11 +2247,15 @@ struct WgrViewReferenceFacts {
  uint32_t version,struct_bytes,status,view_count;
  uint64_t render_token,instance_epoch,required,present,absent,unknown,cached;
  uint32_t pending_samples,dropped_samples;
+ uint32_t target_model_id,target_instance_handle; // handle 0 = all instances of model
+ uint64_t target_source_generation; // nonzero, exact source-content generation
 };
-static_assert(sizeof(WgrViewReferenceFacts)==80);
+static_assert(sizeof(WgrViewReferenceFacts)==96);
 static_assert(offsetof(WgrViewReferenceFacts,render_token)==16);
 static_assert(offsetof(WgrViewReferenceFacts,required)==32);
 static_assert(offsetof(WgrViewReferenceFacts,pending_samples)==72);
+static_assert(offsetof(WgrViewReferenceFacts,target_model_id)==80);
+static_assert(offsetof(WgrViewReferenceFacts,target_source_generation)==88);
 extern "C"
 {
     WGR_API const char* wgr_version(void);

@@ -182,11 +182,12 @@ inline void ReadVec3(const ParamClass& owner, const char* name, std::array<float
 
 } // namespace detail
 
-inline RvMaterialSource ParseArmaRapMaterial(const std::vector<uint8_t>& bytes, std::string origin)
+inline RvMaterialSource ParseArmaRapMaterial(const std::vector<uint8_t>& bytes, std::string origin,
+                                               Config::ArmaRapParseLimits limits = {})
 {
     RvMaterialSource material;
     material.origin = std::move(origin);
-    const auto root = Config::ArmaRapReader(bytes).root();
+    const auto root = Config::ArmaRapReader(bytes, limits).root();
     const auto findMember = [](const std::vector<Config::RapMember>& members, const char* name)
         -> const Config::RapMember*
     {

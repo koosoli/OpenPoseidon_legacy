@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Asset/Formats/Config/ArmaRap.hpp>
 #include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamRapStageNames.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <cstring>
@@ -40,7 +41,7 @@ void writeU32(std::vector<uint8_t>& out, size_t offset, uint32_t value)
         out[offset + shift / 8] = static_cast<uint8_t>(value >> shift);
 }
 
-std::vector<uint8_t> minimalRap()
+std::vector<uint8_t> minimalRap(const char* stageTexture = "a3\\rocks_f\\data\\stone_nohq.paa")
 {
     std::vector<uint8_t> out{0, 'r', 'a', 'P', 0, 0, 0, 0, 8, 0, 0, 0, 0x0a, 0x06, 0, 0};
     appendString(out, ""); // Root's binary parent-reference field.
@@ -87,7 +88,7 @@ std::vector<uint8_t> minimalRap()
     out.push_back(1);
     out.push_back(0);
     appendString(out, "texture");
-    appendString(out, "a3\\rocks_f\\data\\stone_nohq.paa");
+    appendString(out, stageTexture);
     out.push_back(1);
     out.push_back(0);
     appendString(out, "uvSource");
@@ -158,6 +159,54 @@ TEST_CASE("RVMAT conversion is a narrow view over generic ArmaRapReader", "[asse
     REQUIRE(material.texGens[0].uvTransform.present);
     REQUIRE(material.texGens[0].uvTransform.aside[0] == 2.0f);
     REQUIRE(material.texGens[0].uvTransform.up[1] == 3.0f);
+}
+
+TEST_CASE("Owned raP stage names are complete or refused", "[preparer][rap-stage-names]")
+{
+    using namespace Poseidon::Streaming;
+    auto extract = [](const std::vector<uint8_t>& input, std::string_view path = "A3/Rocks_F/Data/Stone.rvmat") {
+        const std::vector<char> bytes(input.begin(), input.end());
+        return ExtractOwnedRapStageNames(std::span<const char>(bytes.data(), bytes.size()), path);
+    };
+
+    const auto valid = extract(minimalRap());
+    REQUIRE(valid.status == RapStageNamesStatus::Complete);
+    REQUIRE(valid.names == std::vector<std::string>{"a3\\rocks_f\\data\\stone_nohq.paa"});
+
+    const auto procedural = extract(minimalRap("#(argb,8,8,3)color(1,1,1,1)"));
+    CHECK(procedural.status == RapStageNamesStatus::Complete);
+    CHECK(procedural.names.empty());
+
+    const auto unsupported = extract(minimalRap("a3/rocks_f/data/stone.png"));
+    CHECK(unsupported.status == RapStageNamesStatus::Unsupported);
+    CHECK(unsupported.names.empty());
+
+    const auto text = extract(std::vector<uint8_t>{'c','l','a','s','s',' ','S','t','a','g','e','1'});
+    CHECK(text.status == RapStageNamesStatus::NotRap);
+    CHECK(text.names.empty());
+
+    auto oversized = minimalRap();
+    oversized.resize(256 * 1024 + 1);
+    CHECK(extract(oversized).status == RapStageNamesStatus::OverLimit);
+    CHECK(extract(oversized).names.empty());
+
+    auto truncated = minimalRap();
+    truncated.resize(16);
+    CHECK(extract(truncated).status == RapStageNamesStatus::Invalid);
+    CHECK(extract(truncated).names.empty());
+
+    // A valid-looking class offset can point back to its own body. The bounded
+    // raP reader must reject the cycle rather than recurse until stack overflow.
+    std::vector<uint8_t> cycle{0, 'r', 'a', 'P', 0, 0, 0, 0, 8, 0, 0, 0, 10, 6, 0, 0};
+    appendString(cycle, "");
+    cycle.push_back(1); // one class member
+    cycle.push_back(0); // class
+    appendString(cycle, "Stage1");
+    appendU32(cycle, 16); // points back to the root body
+    CHECK(extract(cycle).status == RapStageNamesStatus::Invalid);
+    CHECK(extract(cycle).names.empty());
+
+    CHECK(extract(minimalRap(), "C:/host/stone.rvmat").status == RapStageNamesStatus::Unsupported);
 }
 
 static const char* kSuper = R"CFG(

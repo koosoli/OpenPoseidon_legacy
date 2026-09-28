@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -28,10 +29,47 @@ struct RapMember
     std::vector<RapMember> body;
 };
 
+// Optional strict work limits for parsing untrusted owned archive members. Defaults
+// preserve the legacy reader's count behaviour; the streamer supplies tight caps.
+struct ArmaRapParseLimits
+{
+    size_t maxDepth = std::numeric_limits<size_t>::max();
+    uint32_t maxMembers = 4096;
+    uint32_t maxArrayValues = std::numeric_limits<uint32_t>::max();
+    uint32_t maxNodes = std::numeric_limits<uint32_t>::max();
+};
+
 class ArmaRapReader
 {
     const std::vector<uint8_t>& bytes;
+    ArmaRapParseLimits limits;
     size_t cursor = 0;
+    size_t depth = 0;
+    uint32_t visited = 0;
+
+    void enter()
+    {
+        if (limits.maxDepth == std::numeric_limits<size_t>::max())
+            return; // preserve the ordinary unbounded reader's work
+        if (depth >= limits.maxDepth)
+            throw std::runtime_error("Arma raP nesting limit exceeded");
+        ++depth;
+    }
+
+    void leave()
+    {
+        if (limits.maxDepth != std::numeric_limits<size_t>::max())
+            --depth;
+    }
+
+    void node()
+    {
+        if (limits.maxNodes == std::numeric_limits<uint32_t>::max())
+            return; // strict node accounting is only for the opt-in owned-byte route
+        if (visited >= limits.maxNodes)
+            throw std::runtime_error("Arma raP node limit exceeded");
+        ++visited;
+    }
 
     void need(size_t n) const
     {
@@ -81,6 +119,8 @@ class ArmaRapReader
 
     RapValue value()
     {
+        enter();
+        node();
         RapValue result;
         result.type = byte();
         if (result.type == 0 || result.type == 4)
@@ -95,29 +135,34 @@ class ArmaRapReader
         else if (result.type == 3)
         {
             const uint32_t size = count();
+            if (size > limits.maxArrayValues)
+                throw std::runtime_error("Arma raP array limit exceeded");
             result.array.reserve(size);
             for (uint32_t i = 0; i < size; ++i)
                 result.array.push_back(value());
         }
         else
             throw std::runtime_error("unsupported Arma raP value type");
+        leave();
         return result;
     }
 
     std::vector<RapMember> members()
     {
+        enter();
         // Each class body starts with its NUL-terminated parent reference. The
         // root has one too; it is binary metadata in retail files rather than a
         // printable base-class name, so a neutral reader intentionally ignores it.
         (void)string();
         const uint32_t size = count();
-        if (size > 4096)
+        if (size > limits.maxMembers)
             throw std::runtime_error("invalid Arma raP member count");
 
         std::vector<RapMember> result;
         result.reserve(size);
         for (uint32_t i = 0; i < size; ++i)
         {
+            node();
             RapMember member;
             member.type = byte();
             if (member.type == 0)
@@ -152,6 +197,8 @@ class ArmaRapReader
                 member.name = string();
                 member.value.type = 3;
                 const uint32_t size = count();
+                if (size > limits.maxArrayValues)
+                    throw std::runtime_error("Arma raP array limit exceeded");
                 member.value.array.reserve(size);
                 for (uint32_t j = 0; j < size; ++j)
                     member.value.array.push_back(value());
@@ -162,11 +209,13 @@ class ArmaRapReader
                 throw std::runtime_error("unsupported Arma raP member type");
             result.push_back(std::move(member));
         }
+        leave();
         return result;
     }
 
   public:
-    explicit ArmaRapReader(const std::vector<uint8_t>& source) : bytes(source) {}
+    explicit ArmaRapReader(const std::vector<uint8_t>& source, ArmaRapParseLimits workLimits = {})
+        : bytes(source), limits(workLimits) {}
 
     std::vector<RapMember> root()
     {
