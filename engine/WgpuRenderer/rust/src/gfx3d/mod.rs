@@ -3925,6 +3925,7 @@ pub struct Gfx3d {
     registered_mesh_refs_enabled: bool,
     mesh_ack: Option<Box<mesh_ack::MeshAck>>,
     main_count_completion: Option<main_count_completion::Witness>,
+    view_applicability: Option<view_reference_facts::ApplicabilityPlan>,
     cameras: CameraGroup,
     conform: ConformGroup,
     gi: gi::GiProbes, // REN-GI-001
@@ -4911,6 +4912,7 @@ impl Gfx3d {
             registered_mesh_refs_enabled: std::env::var("WGR_GEOMETRY_REGISTERED_REFS").is_ok_and(|v| v == "1"),
             mesh_ack: None,
             main_count_completion: None,
+            view_applicability: None,
             cameras,
             conform,
             gi,
@@ -10108,6 +10110,7 @@ impl Gfx3d {
 
     pub fn arm_main_target_count(&mut self, device: &wgpu::Device, token: u64,
                                  model_id: u32, source_generation: u64) -> bool {
+        self.view_applicability = None;
         if let Some(witness) = self.main_count_completion.as_mut() { witness.invalidate(); }
         if let Some(caches) = &mut self.interior_cached_counts {
             // The cull arm replaces its one-request answer. Keep an already
@@ -10155,6 +10158,25 @@ impl Gfx3d {
             }
         }
         armed
+    }
+    /// A request that fails before arming (for example, no main camera) must
+    /// not expose the previous request's completed applicability snapshot.
+    pub fn begin_view_reference_request(&mut self) {
+        self.view_applicability = None;
+        if let Some(witness) = self.main_count_completion.as_mut() { witness.invalidate(); }
+    }
+    /// Freeze applicability for this exact request before any view draw is attempted.
+    /// Counts come from the immutable frame packet; feature eligibility comes from
+    /// this frame's prepared policy. Resource availability cannot shrink this mask.
+    pub fn freeze_view_applicability(&mut self, token: u64, shadow: &WgrShadowPass,
+                                     planar_active: bool) -> bool {
+        let identity = self.cull.main_target_count_fact().identity;
+        if identity.token != token || self.view_applicability.is_some() { return false; }
+        self.view_applicability = view_reference_facts::ApplicabilityPlan::from_frame(
+            identity, shadow.count, shadow.local_count,
+            self.interior_sky.enabled && self.gpu_driven_enabled,
+            self.gi.rsm_eligible.get(), planar_active);
+        self.view_applicability.is_some()
     }
     pub fn copy_main_target_count(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
         self.cull.copy_main_target_count(encoder)
@@ -10446,6 +10468,9 @@ impl Gfx3d {
         main
     }
     pub fn main_target_count_abort(&mut self, token: u64) {
+        if self.view_applicability.is_some_and(|p| p.identity.token == token) {
+            self.view_applicability = None;
+        }
         self.interior_count_published_mask = 0;
         if let Some(caches) = &mut self.interior_cached_counts {
             for cache in caches { cache.invalidate(); }
@@ -10518,7 +10543,7 @@ impl Gfx3d {
                 published_cached |= 1u64 << 34;
             }
         }
-        aggregate_existing_counts(completion, &facts, published_cached)
+        aggregate_existing_counts(completion, &facts, published_cached, self.view_applicability)
     }
     pub fn shadow_target_count_fact(&mut self, device: &wgpu::Device,
                                     cascade: usize) -> cull::MainCountFact {

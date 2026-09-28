@@ -21,6 +21,35 @@ pub const REFLECTION: usize = 35;
 pub const PENDING: usize = 3;
 pub const VIEW_MASK: u64 = (1u64 << VIEWS) - 1;
 
+/// The configured views for one exact model-scoped COUNT request. This is frozen
+/// from the frame packet and feature policy before resource, cull and draw gates.
+/// A missing target or skipped enabled pass therefore cannot make a view inactive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApplicabilityPlan {
+    pub identity: MainCountIdentity,
+    pub required: u64,
+}
+
+impl ApplicabilityPlan {
+    pub fn from_frame(identity: MainCountIdentity, solar: u32, local: u32,
+                      interior_enabled: bool, gi_rsm_eligible: bool,
+                      planar_active: bool) -> Option<Self> {
+        if identity.token == 0 || identity.token == u64::MAX ||
+            identity.cull_epoch == 0 || identity.cull_epoch == u64::MAX ||
+            identity.source_generation == 0 || identity.model_id == u32::MAX ||
+            solar > 4 || local > 24 { return None; }
+        let mut required = 1u64 << MAIN;
+        required |= ((1u64 << solar) - 1) << CASCADES.start;
+        required |= ((1u64 << local) - 1) << LOCALS.start;
+        if interior_enabled {
+            required |= ((1u64 << (INTERIOR.end - INTERIOR.start)) - 1) << INTERIOR.start;
+        }
+        if gi_rsm_eligible { required |= 1u64 << GI; }
+        if planar_active { required |= 1u64 << REFLECTION; }
+        Some(Self { identity, required })
+    }
+}
+
 /// The renderer supplies all 36 facts from one borrow. Only the publication-bound
 /// interior, GI and local getters may return a fact from an earlier request.
 /// Completion of the current request's final queue submission is a separate gate;
@@ -29,6 +58,7 @@ pub fn aggregate_existing_counts(
     completion: main_count_completion::Fact,
     facts: &[MainCountFact; VIEWS],
     published_cached: u64,
+    plan: Option<ApplicabilityPlan>,
 ) -> WgrViewReferenceFacts {
     let current = completion.identity;
     let mut out = WgrViewReferenceFacts {
@@ -38,12 +68,17 @@ pub fn aggregate_existing_counts(
         target_model_id: current.model_id, target_source_generation: current.source_generation,
         ..Default::default()
     };
+    let Some(plan) = plan.filter(|p| p.identity == current && p.required & !VIEW_MASK == 0 &&
+        p.required & (1u64 << MAIN) != 0) else { return out; };
+    out.required = plan.required;
+    out.unknown = plan.required;
     if completion.state != main_count_completion::COMPLETED ||
         current.token == 0 || current.cull_epoch == 0 || current.source_generation == 0 {
         return out;
     }
     for (view, fact) in facts.iter().enumerate() {
         let bit = 1u64 << view;
+        if plan.required & bit == 0 { continue; }
         let older_cached = fact.identity.token < current.token && published_cached & bit != 0;
         if !same_target(fact.identity, current) ||
             !(fact.identity.token == current.token || older_cached) { continue; }
@@ -374,18 +409,70 @@ mod tests {
             source_generation: 9, cull_epoch: 11 }, status, count }
     }
 
+    fn full_plan(identity: MainCountIdentity) -> ApplicabilityPlan {
+        ApplicabilityPlan::from_frame(identity, 4, 24, true, true, true).unwrap()
+    }
+
+    #[test]
+    fn applicability_uses_configured_views_not_recorded_draws() {
+        let id = count_fact(5, MainCountStatus::Absent, 0).identity;
+        let night = ApplicabilityPlan::from_frame(id, 0, 2, false, false, false).unwrap();
+        assert_eq!(night.required, 1 | (1 << 5) | (1 << 6));
+        let interior = ApplicabilityPlan::from_frame(id, 0, 0, true, false, false).unwrap();
+        assert_eq!(interior.required, 1 | (0b1_1111 << INTERIOR.start));
+        let gi = ApplicabilityPlan::from_frame(id, 0, 0, false, true, false).unwrap();
+        assert_eq!(gi.required, 1 | (1 << GI));
+        let all = full_plan(id);
+        assert_eq!(all.required, VIEW_MASK);
+        assert!(ApplicabilityPlan::from_frame(id, 5, 0, false, false, false).is_none());
+        assert!(ApplicabilityPlan::from_frame(id, 0, 25, false, false, false).is_none());
+        assert!(ApplicabilityPlan::from_frame(MainCountIdentity { source_generation: 0, ..id },
+            0, 0, false, false, false).is_none());
+    }
+
+    #[test]
+    fn exact_request_mask_keeps_enabled_skipped_views_unknown() {
+        let id = count_fact(5, MainCountStatus::Absent, 0).identity;
+        let completion = main_count_completion::Fact { identity: id,
+            state: main_count_completion::COMPLETED };
+        let plan = ApplicabilityPlan::from_frame(id, 0, 1, false, false, true).unwrap();
+        let mut facts = [MainCountFact::default(); VIEWS];
+        facts[MAIN] = count_fact(5, MainCountStatus::Absent, 0);
+        facts[5] = count_fact(5, MainCountStatus::Absent, 0);
+        facts[1] = count_fact(5, MainCountStatus::Present, 1); // inactive solar lane
+        let partial = aggregate_existing_counts(completion, &facts, 0, Some(plan));
+        assert_eq!(partial.required, (1 << MAIN) | (1 << 5) | (1 << REFLECTION));
+        assert_eq!(partial.absent, (1 << MAIN) | (1 << 5));
+        assert_eq!(partial.unknown, 1 << REFLECTION);
+        assert_eq!(partial.present, 0);
+        assert_eq!(partial.status, 2);
+        facts[REFLECTION] = count_fact(5, MainCountStatus::Absent, 0);
+        assert_eq!(aggregate_existing_counts(completion, &facts, 0, Some(plan)).status, 1);
+        let wrong = ApplicabilityPlan { identity: MainCountIdentity { token: 4, ..id }, ..plan };
+        let refused = aggregate_existing_counts(completion, &facts, 0, Some(wrong));
+        assert_eq!((refused.status, refused.absent, refused.unknown), (0, 0, VIEW_MASK));
+        let wrong_source = ApplicabilityPlan { identity: MainCountIdentity {
+            source_generation: 8, ..id }, ..plan };
+        assert_eq!(aggregate_existing_counts(completion, &facts, 0, Some(wrong_source)).status, 0);
+        let wrong_epoch = ApplicabilityPlan { identity: MainCountIdentity {
+            cull_epoch: 10, ..id }, ..plan };
+        assert_eq!(aggregate_existing_counts(completion, &facts, 0, Some(wrong_epoch)).status, 0);
+        assert_eq!(aggregate_existing_counts(completion, &facts, 0, None).status, 0);
+    }
+
     #[test]
     fn all_view_snapshot_requires_completion_and_all_36_real_facts() {
         let id = count_fact(5, MainCountStatus::Absent, 0).identity;
         let mut facts = [count_fact(5, MainCountStatus::Absent, 0); VIEWS];
         let mut completion = main_count_completion::Fact { identity: id,
             state: main_count_completion::SUBMITTED };
-        let pending = aggregate_existing_counts(completion, &facts, 0);
+        let plan = full_plan(id);
+        let pending = aggregate_existing_counts(completion, &facts, 0, Some(plan));
         assert_eq!((pending.status, pending.absent, pending.unknown), (0, 0, VIEW_MASK));
         completion.state = main_count_completion::COMPLETED;
-        assert_eq!(aggregate_existing_counts(completion, &facts, 0).status, 1);
+        assert_eq!(aggregate_existing_counts(completion, &facts, 0, Some(plan)).status, 1);
         facts[35] = MainCountFact::default();
-        let partial = aggregate_existing_counts(completion, &facts, 0);
+        let partial = aggregate_existing_counts(completion, &facts, 0, Some(plan));
         assert_eq!(partial.required, VIEW_MASK);
         assert_eq!(partial.unknown, 1u64 << 35);
         assert_eq!(partial.status, 2);
@@ -397,6 +484,7 @@ mod tests {
         let id = count_fact(5, MainCountStatus::Absent, 0).identity;
         let completion = main_count_completion::Fact { identity: id,
             state: main_count_completion::COMPLETED };
+        let plan = full_plan(id);
         let mut facts = [count_fact(5, MainCountStatus::Absent, 0); VIEWS];
         facts[0].identity.token = 4; // main has no published cache binding
         facts[1].identity.source_generation = 8;
@@ -407,12 +495,12 @@ mod tests {
         facts[29] = count_fact(4, MainCountStatus::Present, 3); // published interior fact
         facts[34] = count_fact(4, MainCountStatus::Absent, 0); // published GI fact
         facts[35] = count_fact(5, MainCountStatus::Absent, 4); // incoherent COUNT
-        let unbound = aggregate_existing_counts(completion, &facts, 0);
+        let unbound = aggregate_existing_counts(completion, &facts, 0, Some(plan));
         assert_ne!(unbound.unknown & (1u64 << 5), 0);
         assert_ne!(unbound.unknown & (1u64 << 29), 0);
         assert_ne!(unbound.unknown & (1u64 << 34), 0);
         let snapshot = aggregate_existing_counts(completion, &facts,
-            (1u64 << 5) | (1u64 << 29) | (1u64 << 34));
+            (1u64 << 5) | (1u64 << 29) | (1u64 << 34), Some(plan));
         assert_eq!(snapshot.unknown & 0b1_1111, 0b1_1111);
         assert_eq!(snapshot.cached, (1u64 << 5) | (1u64 << 29) | (1u64 << 34));
         assert_eq!(snapshot.present, 1u64 << 29);

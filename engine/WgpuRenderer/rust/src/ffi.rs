@@ -3476,7 +3476,8 @@ pub unsafe extern "C" fn wgr_main_target_completion_fact(
 
 /// Private, nonblocking all-36-view COUNT snapshot from one renderer borrow.
 /// An absent bit describes only a target-model cull COUNT, never pixels or
-/// permission to release/reclaim Fine geometry. Inactive views stay Unknown.
+/// permission to release/reclaim Fine geometry. The required mask is frozen
+/// from the exact frame plan; enabled but skipped views stay Unknown.
 /// # Safety
 /// Same live renderer and exact writable output contract as the main getter.
 #[unsafe(no_mangle)]
@@ -3690,6 +3691,7 @@ unsafe fn render_frame_impl(
     let mut main_count_submitted = false;
     let status = catch_unwind(AssertUnwindSafe(|| {
         let renderer = unsafe { &mut *renderer };
+        if main_count_request.is_some() { renderer.gfx3d.begin_view_reference_request(); }
         let frame = unsafe { &*frame };
         let cameras = unsafe { frame.cameras.as_slice() };
         let draws3d = unsafe { frame.draws3d.as_slice() };

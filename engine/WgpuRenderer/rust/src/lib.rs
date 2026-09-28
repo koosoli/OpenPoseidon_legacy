@@ -4004,6 +4004,11 @@ impl Renderer {
             (main_count_request.as_ref(), cameras.get(main_scene_cam)) {
             self.gfx3d.arm_main_target_count(&self.device, token, model_id, source_generation)
         } else { false };
+        if main_count_armed {
+            if let Some((token, _, _)) = main_count_request {
+                self.gfx3d.freeze_view_applicability(token, shadow, planar_active);
+            }
+        }
         // GPU-driven rendering (Stage 3): upload the retained scene + this frame's cull
         // params from the main scene camera (the terrain camera, else the first 3D draw's).
         // No-op when disabled; inert until C++ registers a scene.

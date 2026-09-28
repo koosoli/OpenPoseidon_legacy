@@ -2290,9 +2290,10 @@ static_assert(offsetof(WgrGeometryPassFacts,interior_epochs)==496);
 static_assert(offsetof(WgrGeometryPassFacts,reflection_epoch)==576);
 static_assert(offsetof(WgrGeometryPassFacts,reflection_frame)==584);
 
-// Private v2 all-view COUNT diagnostic. required is always all 36 bits:
-// main, 4 solar, 24 local, 5 interior, GI and planar reflection.
-// status 0 awaits current final queue completion, 1=all 36 known, 2=Unknown remains.
+// Private v2 36-lane COUNT diagnostic. required is the frozen applicable set:
+// main, up to 4 solar, up to 24 local, 5 interior, GI and planar reflection.
+// status 0 awaits a valid exact frame plan and final queue completion;
+// 1=all required views known, 2=Unknown remains among required views.
 // Cached facts keep their original token but must match the current target and
 // exact published image. No state certifies pixels or Fine release/reclaim.
 struct WgrViewReferenceFacts {
