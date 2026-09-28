@@ -135,7 +135,8 @@ TEST_CASE("ClassifyTextureAlpha: undecodable multi-bit alpha falls back to Opaqu
 TEST_CASE("ClassifyAlpha: an all-clear alpha channel is not a cutout mask", "[Graphics][AlphaClassify]")
 {
     // Alpha 0 at every texel. Classified as Cutout, every fragment is discarded and
-    // the surface renders completely invisible -- which no texture author intends.
+    // the surface renders completely invisible. That is wrong for packed-alpha
+    // modern materials; legacy AI88 coverage is handled by its format-aware route.
     // In practice this is packed data in the alpha channel, not coverage: three
     // shipped Reforger materials (glass, mate metal paint, plastic base) are alpha-0
     // across 100% of their texels and vanished entirely once a FLAG tagg routed them
@@ -148,6 +149,21 @@ TEST_CASE("ClassifyAlpha: an all-clear alpha channel is not a cutout mask", "[Gr
     REQUIRE(s.aMax == 0);
     REQUIRE(s.pctClear == 100.0);
     REQUIRE(s.kind == AlphaStats::Opaque);
+}
+
+TEST_CASE("Legacy AI88 all-clear coverage remains invisible without changing packed-alpha textures",
+          "[Graphics][AlphaClassify][AI88]")
+{
+    auto clear = rgbaWithAlphas(std::vector<int>(256, 0));
+    auto stats = ClassifyAlpha(clear.data(), 256);
+    REQUIRE(stats.kind == AlphaStats::Opaque);
+    REQUIRE(LegacyAi88CoverageClass(true, stats) == AlphaStats::Cutout);
+    REQUIRE(LegacyAi88CoverageClass(false, stats) == AlphaStats::Opaque);
+
+    auto mostlyClear = rgbaWithAlphas(std::vector<int>(256, 0));
+    mostlyClear[3 * 128 + 3] = 255;
+    stats = ClassifyAlpha(mostlyClear.data(), 256);
+    REQUIRE(LegacyAi88CoverageClass(true, stats) == AlphaStats::Cutout);
 }
 
 TEST_CASE("ClassifyAlpha: one opaque texel keeps a mostly-clear mask a Cutout",

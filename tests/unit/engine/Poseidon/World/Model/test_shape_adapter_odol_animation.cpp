@@ -46,4 +46,20 @@ TEST_CASE("ShapeAdapter: ODOL morph frames become animation phases", "[ShapeAdap
     lod->SetPhase(0.25f, 0.0f);
     REQUIRE(lod->Pos(0)[1] == Catch::Approx(0.225f));
     REQUIRE(lod->Pos(1)[1] == Catch::Approx(-0.175f));
+
+    // Reverse used to index each phase by the phase number instead of the
+    // vertex number, corrupting morph frames (and sometimes reading past them).
+    std::unique_ptr<LODShapeWithShadow> reversed(ShapeAdapter::convertToLODShape(model, true));
+    REQUIRE(reversed);
+    Shape* reversedLod = reversed->Level(0);
+    REQUIRE(reversedLod->NAnimationPhases() == lod->NAnimationPhases());
+    for (int phase = 0; phase < lod->NAnimationPhases(); ++phase)
+        for (int vertex = 0; vertex < lod->NVertex(); ++vertex)
+        {
+            const auto& a = lod->GetAnimationPhase(phase)[vertex];
+            const auto& b = reversedLod->GetAnimationPhase(phase)[vertex];
+            REQUIRE(b[0] == Catch::Approx(-a[0]));
+            REQUIRE(b[1] == Catch::Approx(a[1]));
+            REQUIRE(b[2] == Catch::Approx(-a[2]));
+        }
 }

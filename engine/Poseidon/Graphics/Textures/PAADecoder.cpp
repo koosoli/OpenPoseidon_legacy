@@ -92,7 +92,7 @@ AlphaStats FinishAlphaHistogram(const AlphaHistogram& histogram, size_t pixelCou
     else
         s.kind = AlphaStats::Opaque;
 
-    // An alpha channel that is clear EVERYWHERE is not an opacity mask.
+    // An alpha channel that is clear EVERYWHERE is not necessarily an opacity mask.
     //
     // A cutout surface whose alpha is 0 at every texel discards every fragment and
     // renders completely invisible -- and a texture author has no reason to ship a
@@ -102,8 +102,9 @@ AlphaStats FinishAlphaHistogram(const AlphaHistogram& histogram, size_t pixelCou
     // 100% of their texels. Classified as cutout, those surfaces disappear entirely.
     //
     // This is a structural check on the decoded pixels, deliberately narrow: it only
-    // catches the degenerate all-clear case, which cannot be a legitimate mask under
-    // any authoring intent. Partially-clear alpha -- including heavily dithered packed
+    // catches the degenerate all-clear case. Legacy AI88 intensity+coverage is
+    // resolved separately at texture routing, where its format is known.
+    // Partially-clear alpha -- including heavily dithered packed
     // alpha -- is left alone, because separating "packed detail" from "aggressive
     // foliage mask" needs a real perimeter/speckle metric and a policy decision, not a
     // guard. Falling back to Opaque keeps the surface visible and occluding, which is
@@ -214,6 +215,13 @@ AlphaStats::Kind ClassifyTextureAlpha(bool hasAlpha, bool isChromaKey, bool oneB
     if (decoded)
         return decoded->kind;
     return AlphaStats::Opaque; // undecodable multi-bit alpha: keep current behavior (occlude/batch)
+}
+
+AlphaStats::Kind LegacyAi88CoverageClass(bool isAi88, const AlphaStats& stats)
+{
+    return isAi88 && stats.aMax == 0 && stats.pctClear == 100.0
+               ? AlphaStats::Cutout
+               : stats.kind;
 }
 
 const char* AlphaKindName(AlphaStats::Kind kind)

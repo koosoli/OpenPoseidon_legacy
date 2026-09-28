@@ -1701,8 +1701,16 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
                 SynthesizeBoxGeometryMass(shape, geom, shape->_massArray, shape->_mass, shape->_invMass,
                                           geom->_pointToVertex, geom->_vertexToPoint);
         }
-        shape->InitConvexComponents();
         shape->ScanProxies();
+        // The canonical MLOD path must honour the same reversed contract as the
+        // ODOL tail. Do this after proxies exist but before convex geometry is
+        // derived, so both the visible model and its simulation face the same way.
+        if (reversed)
+        {
+            shape->Reverse();
+            shape->SetRemarks(shape->Remarks() | REM_REVERSED);
+        }
+        shape->InitConvexComponents();
         shape->ScanProperties();
         shape->CalculateHints();
         shape->_propertyClass = shape->PropertyValue("class");

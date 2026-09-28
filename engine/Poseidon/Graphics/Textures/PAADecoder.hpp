@@ -173,4 +173,9 @@ const char* AlphaKindName(AlphaStats::Kind kind);
 AlphaStats::Kind ClassifyTextureAlpha(bool hasAlpha, bool isChromaKey, bool oneBitAlphaFormat,
                                       const AlphaStats* decoded);
 
+// AI88 is a legacy intensity+coverage format. An entirely clear AI88 mask is
+// intentionally invisible; the generic histogram's all-clear fallback exists
+// for modern textures that may pack non-coverage data in their alpha channel.
+AlphaStats::Kind LegacyAi88CoverageClass(bool isAi88, const AlphaStats& stats);
+
 } // namespace Poseidon

@@ -1424,6 +1424,7 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
                 }
             }
             decoded = _alphaStats;
+            decoded.kind = LegacyAi88CoverageClass(_src->GetFormat() == PacAI88, decoded);
             decodedPtr = &decoded;
         }
         kind = ClassifyTextureAlpha(hasAlpha, chroma, oneBit, decodedPtr);

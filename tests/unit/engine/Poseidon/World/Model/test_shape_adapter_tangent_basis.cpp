@@ -48,6 +48,41 @@ TEST_CASE("ShapeAdapter derives tangent basis from UV0", "[ShapeAdapter][tangent
     }
 }
 
+TEST_CASE("Reversed MLOD rotates geometry and its tangent frame exactly once", "[ShapeAdapter][mlod][reversed]")
+{
+    Model model;
+    model.sourceFormat = "MLOD";
+    LODLevel lodLevel(1.0f);
+    Mesh& mesh = lodLevel.mesh;
+    mesh.vertices = {
+        Vertex({0.f, 0.f, 0.f}, {0.f, 0.f, 1.f}, {0.f, 0.f}),
+        Vertex({2.f, 0.f, 0.f}, {0.f, 0.f, 1.f}, {1.f, 0.f}),
+        Vertex({2.f, 1.f, 0.f}, {0.f, 0.f, 1.f}, {1.f, 1.f}),
+        Vertex({0.f, 1.f, 0.f}, {0.f, 0.f, 1.f}, {0.f, 1.f}),
+    };
+    mesh.quads.emplace_back(0, 1, 2, 3);
+    model.lodLevels.push_back(std::move(lodLevel));
+
+    std::unique_ptr<LODShapeWithShadow> normal(ShapeAdapter::convertToLODShape(model, false));
+    std::unique_ptr<LODShapeWithShadow> reversed(ShapeAdapter::convertToLODShape(model, true));
+    REQUIRE(normal);
+    REQUIRE(reversed);
+    REQUIRE((normal->Remarks() & REM_REVERSED) == 0);
+    REQUIRE((reversed->Remarks() & REM_REVERSED) != 0);
+    REQUIRE(normal->Level(0)->NVertex() == reversed->Level(0)->NVertex());
+    for (int i = 0; i < normal->Level(0)->NVertex(); ++i)
+    {
+        const Shape* a = normal->Level(0);
+        const Shape* b = reversed->Level(0);
+        REQUIRE(b->Pos(i)[0] == Catch::Approx(-a->Pos(i)[0]));
+        REQUIRE(b->Pos(i)[1] == Catch::Approx(a->Pos(i)[1]));
+        REQUIRE(b->Pos(i)[2] == Catch::Approx(-a->Pos(i)[2]));
+        REQUIRE(b->Norm(i)[2] == Catch::Approx(-a->Norm(i)[2]));
+        REQUIRE(b->Tangent(i)[0] == Catch::Approx(-a->Tangent(i)[0]));
+        REQUIRE(b->Binormal(i)[1] == Catch::Approx(a->Binormal(i)[1]));
+    }
+}
+
 TEST_CASE("Model sections preserve a quad-only MLOD material run", "[Model][sections][mlod]")
 {
     Model model;

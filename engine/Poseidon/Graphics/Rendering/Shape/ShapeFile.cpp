@@ -544,6 +544,8 @@ void Shape::Reverse()
     {
         ReverseVector(_pos[i]);
         ReverseVector(_norm[i]);
+        if (i < _tangent.Size()) ReverseVector(_tangent[i]);
+        if (i < _binormal.Size()) ReverseVector(_binormal[i]);
     }
 
     ReverseMinMax(_minMaxOrig);
@@ -585,7 +587,7 @@ void Shape::Reverse()
         AnimationPhase& phase = _phase[i];
         for (int p = 0; p < phase.Size(); p++)
         {
-            ReverseVector(phase[i]);
+            ReverseVector(phase[p]);
         }
     }
 }
