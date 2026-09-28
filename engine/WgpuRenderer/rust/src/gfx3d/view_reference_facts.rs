@@ -296,6 +296,9 @@ impl ViewReferenceFacts {
         out.pending_samples = self.pending.iter().flatten()
             .map(|p| p.copied.count_ones()).sum();
         if !self.committed { out.unknown = self.required; return out; }
+        // An empty caller-supplied mask is useful when views are disabled, but
+        // it cannot certify all-view absence without observing any GPU view.
+        if self.required == 0 { return out; }
         for view in 0..VIEWS {
             let bit = 1u64 << view;
             if self.required & bit == 0 { continue; }
@@ -411,6 +414,7 @@ mod tests {
         assert_eq!(facts.snapshot().absent, bit);
         assert!(facts.begin(2, 8, target(1), 0, 0, generations(7)));
         assert!(facts.commit(2));
+        assert_eq!(facts.snapshot().status, 0, "no required views cannot prove absence");
         assert!(facts.begin(3, 8, target(1), bit, 0, generations(7)));
         assert!(facts.commit(3));
         assert_eq!(facts.snapshot().unknown, bit);
