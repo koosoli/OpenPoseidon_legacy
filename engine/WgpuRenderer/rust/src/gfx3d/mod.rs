@@ -11,6 +11,7 @@ mod section_refresh;
 mod section_span_pool;
 mod local_pose_cache;
 mod interior0_publication;
+mod local0_publication;
 pub(crate) mod geometry_pass_facts;
 mod lod_feedback;
 #[allow(dead_code)]
@@ -3124,6 +3125,17 @@ pub(crate) fn sky0_count_pass_ready(active: bool, refresh: &[usize], draw_closed
     active && refresh.contains(&0) && draw_closed
 }
 
+fn local_shadow_refresh_needed(tile: usize, stale: bool, local0_unpublished: bool) -> bool {
+    stale || (tile == 0 && local0_unpublished)
+}
+
+#[test]
+fn unpublished_local0_retries_without_refreshing_other_cached_tiles() {
+    assert!(local_shadow_refresh_needed(0, false, true));
+    assert!(!local_shadow_refresh_needed(1, false, true));
+    assert!(!local_shadow_refresh_needed(0, false, false));
+}
+
 fn interior_sky_refresh_needed(view: usize, cache_stale: bool, sky0_unpublished: bool) -> bool {
     cache_stale || (view == 0 && sky0_unpublished)
 }
@@ -4082,6 +4094,9 @@ pub struct Gfx3d {
     reflection_target_draw_closed: std::cell::Cell<bool>,
     sky0_target_draw_closed: std::cell::Cell<bool>,
     local_view_key: [Option<u64>; MAX_LOCAL_SHADOWS],
+    // Optional CPU-only publication gate for tile zero; absent on the default path.
+    local0_publication: Option<std::cell::Cell<local0_publication::Local0Publication>>,
+    local0_publication_rows: u8,
     // Exact bounded CPU-caster pose witnesses; lazily allocated only when a
     // cached local view has an actual skinned caster. Retained/sky and concurrent
     // vertex-update freshness are separate contracts, not solved by this field.
@@ -4933,6 +4948,9 @@ impl Gfx3d {
             reflection_target_draw_closed: std::cell::Cell::new(false),
             sky0_target_draw_closed: std::cell::Cell::new(false),
             local_view_key: [None; MAX_LOCAL_SHADOWS],
+            local0_publication: (std::env::var("WGR_GEOMETRY_LOCAL0_PUBLICATION").as_deref() == Ok("1"))
+                .then(|| std::cell::Cell::new(local0_publication::Local0Publication::default())),
+            local0_publication_rows: 0,
             local_pose_cache: None,
             local_pose_cache_enabled: std::env::var("WGR_LOCAL_SHADOW_POSE_CACHE").is_ok_and(|v| v == "1"),
             local_pose_trace: std::env::var("WGR_LOCAL_POSE_CACHE_TRACE").is_ok_and(|v| v == "1")
@@ -6697,6 +6715,7 @@ impl Gfx3d {
             self.local_views_cached = 0;
             self.local_view_key = [None; MAX_LOCAL_SHADOWS];
             self.local_pose_cache = None;
+            self.abort_local0_publication();
             return;
         }
         // The shape the cached tiles were drawn under. A change in ANY of it moves the tiles,
@@ -6801,12 +6820,34 @@ impl Gfx3d {
                 // whatever the allocator left there, and it is sampled every frame.
                 None => true,
             };
+            let stale = local_shadow_refresh_needed(k, stale,
+                self.local0_publication.as_ref().is_some_and(|cell| cell.get().needs_refresh()));
             if !cache_on || forced || shape_changed || stale || pose_refresh_mask & (1u32 << k) != 0 {
                 self.local_view_refresh.push(k);
                 if let Some(cell)=&self.geometry_pass_facts {let mut f=cell.get();f.invalidate_local(k);cell.set(f);}
                 // Refused pose witnesses may draw, but cannot certify cached
                 // tile contents. Reentry must refresh even if old valid pose returns.
-                self.local_view_key[k] = local_pose_cache::published_key(keys[k], pose_unwitnessed_mask & (1u32 << k) != 0);
+                let candidate = local_pose_cache::published_key(keys[k], pose_unwitnessed_mask & (1u32 << k) != 0);
+                if k == 0 {
+                    if let Some(cell) = &self.local0_publication {
+                        let mut state = cell.get();
+                        let identity = local0_publication::Local0Identity {
+                            key: keys[k], instance_epoch: epoch, shape,
+                            cull_index: count,
+                        };
+                        if candidate.is_some() && state.plan(identity) {
+                            // Keep the old key unpublished until the final submit and
+                            // successful render return. Failure forces a fresh tile.
+                            cell.set(state);
+                            continue;
+                        }
+                        state.abort();
+                        cell.set(state);
+                        self.local_view_key[k] = None;
+                        continue;
+                    }
+                }
+                self.local_view_key[k] = candidate;
             }
         }
         self.local_views_rendered = self.local_view_refresh.len() as u32;
@@ -6882,6 +6923,7 @@ impl Gfx3d {
             // Nothing renders this frame, so nothing that is cached can be trusted next frame
             // either -- the tiles keep their contents but the world moved on without them.
             self.local_view_key = [None; MAX_LOCAL_SHADOWS];
+            self.abort_local0_publication();
             return;
         }
         // LGT-010: local light views live in layers count..count+local-1 of the SAME depth
@@ -7313,6 +7355,11 @@ impl Gfx3d {
                 gpu_depth_draw_recorded &&
                 self.geometry_shadow_cull_mask.get() & (1 << c) != 0 {
                 self.local0_target_draw_closed.set(true);
+            }
+            if is_local && local_index == 0 && gpu_depth_draw_recorded {
+                if let Some(cell) = &self.local0_publication {
+                    let mut state = cell.get(); state.draw_closed(c); cell.set(state);
+                }
             }
             if let Some(cell)=&self.geometry_pass_facts {
                 if gpu_depth_draw_recorded && c < u32::BITS as usize &&
@@ -9954,6 +10001,43 @@ impl Gfx3d {
             let mut state = cell.get(); state.final_submit_accepted(); cell.set(state);
         }
     }
+    pub fn local0_publication_submitted(&self) {
+        if let Some(cell) = &self.local0_publication {
+            let mut state = cell.get(); state.final_submit_accepted(); cell.set(state);
+        }
+    }
+    pub fn commit_local0_publication(&mut self) {
+        let Some(cell) = &self.local0_publication else { return; };
+        let mut state = cell.get();
+        let Some(pending) = state.pending() else { return; };
+        if self.local_shadow_count == 0 || self.shadow_target.is_none() {
+            state.abort(); cell.set(state); self.local_view_key[0] = None; return;
+        }
+        let current = local0_publication::Local0Identity {
+            key: pending.key,
+            instance_epoch: self.cull.instance_epoch(),
+            shape: self.local_cache_shape,
+            cull_index: self.cull.shadow_view_count().saturating_sub(self.local_shadow_count),
+        };
+        let publication = state.commit(current);
+        cell.set(state);
+        if let Some((generation, identity)) = publication {
+            self.local_view_key[0] = Some(identity.key);
+            if self.local0_publication_rows < 16 {
+                self.local0_publication_rows += 1;
+                eprintln!("[wgr] local tile0 publication: generation={generation} instanceEpoch={} cullIndex={} committed=true (CPU submit witness; no GPU completion or all-view proof)",
+                    identity.instance_epoch, identity.cull_index);
+            }
+        } else {
+            self.local_view_key[0] = None;
+        }
+    }
+    pub fn abort_local0_publication(&mut self) {
+        if let Some(cell) = &self.local0_publication {
+            let mut state = cell.get(); state.abort(); cell.set(state);
+            self.local_view_key[0] = None;
+        }
+    }
     pub fn commit_interior0_publication(&mut self) {
         let Some(cell) = &self.interior0_publication else { return; };
         let mut state = cell.get();
@@ -10412,7 +10496,14 @@ impl Gfx3d {
             if c >= n_cascades && !self.local_view_refresh.contains(&(c - n_cascades)) {
                 continue;
             }
-            if self.cull.dispatch_shadow(encoder, c) &&
+            let dispatched = self.cull.dispatch_shadow(encoder, c);
+            if dispatched && c == n_cascades && self.local_shadow_count > 0 &&
+                self.local_view_refresh.contains(&0) {
+                if let Some(cell) = &self.local0_publication {
+                    let mut state = cell.get(); state.cull_recorded(c); cell.set(state);
+                }
+            }
+            if dispatched &&
                 (self.geometry_pass_facts.is_some() ||
                  (c < n_cascades && self.cull.shadow_count_armed(c)) ||
                  (c == n_cascades && self.cull.local0_count_armed())) &&
