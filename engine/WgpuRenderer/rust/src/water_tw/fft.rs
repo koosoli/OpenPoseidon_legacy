@@ -111,8 +111,8 @@ pub struct SpectrumInputs {
 }
 
 impl SpectrumInputs {
-    /// Derive the spectrum from OP's water params: Tidewater's two systems with the local
-    /// wind from the weather (as Current OP does) and the Tidewater tab's swell/cascade lanes.
+    /// Derive the spectrum from Tidewater's authored sea lanes. Weather changes
+    /// surface amplitude only, which is intentionally absent from these inputs.
     pub fn from_params(p: &WgrWaterParams) -> Self {
         let tw = p.tidewater;
         let cascade_scale = if tw[2][0] > 0.0 { tw[2][0] } else { 1.0 };
@@ -140,10 +140,6 @@ impl SpectrumInputs {
         if sea[0] > 0.0 {
             local.wind_speed = sea[0];
         }
-        // W9c: WGR_TW_WIND=<m/s> sets the local wind for the session (captures)
-        if let Some(w) = wind_override() {
-            local.wind_speed = w;
-        }
         if sea[1] > 0.0 {
             local.fetch_km = sea[1];
         } else {
@@ -152,8 +148,7 @@ impl SpectrumInputs {
         let mut swell = WaveSystem::SWELL;
         swell.scale = tw[0][2].max(0.0);
         swell.wind_direction_deg = tw[0][3] + 180.0;
-        // Latch to coarse steps so weather noise cannot rebuild h0 every frame (the producer
-        // already latches wind into buckets; this only removes float jitter).
+        // Quantize authored edits to avoid spectrum rebuilds from float jitter.
         let q = |v: f32, step: f32| (v / step).round() * step;
         local.wind_speed = q(local.wind_speed, 0.25);
         local.wind_direction_deg = q(local.wind_direction_deg, 1.0);
@@ -177,12 +172,6 @@ impl SpectrumInputs {
         }
         cuts
     }
-}
-
-/// `WGR_TW_WIND=<m/s>`: the local wind for the session (W9c captures), 0.5..40.
-pub fn wind_override() -> Option<f32> {
-    static V: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
-    *V.get_or_init(|| std::env::var("WGR_TW_WIND").ok().and_then(|v| v.trim().parse::<f32>().ok()).map(|w| w.clamp(0.5, 40.0)))
 }
 
 // ------------------------------------------------------------------ W9c: whitecap coverage
@@ -302,8 +291,8 @@ fn normal_cdf(z: f64) -> f64 {
     if z >= 0.0 { 1.0 - p } else { p }
 }
 
-/// W9c (OP): the fetch (km) for a wind the sea-conditions lane brings no fetch with (the weather's
-/// wind, or `WGR_TW_WIND`): as Tidewater's own presets pair them (Breezy 7 m/s / 120 km, Choppy
+/// W9c (OP): the fetch (km) for an authored wind the sea-conditions lane brings no fetch with,
+/// as Tidewater's own presets pair them (Breezy 7 m/s / 120 km, Choppy
 /// 12 / 300, Storm 20 / 900: ~2.3 U^2), from its 120 km default up to 600 km. A strong wind then
 /// raises the sea, not only its foam: at 30 m/s the local sea's Hs goes from ~6 m (120 km) to
 /// ~7.6 m, at 15 m/s from ~3.6 m to ~6.5 m. (Above ~20 m/s the 733 m cascade holds the peak and the
@@ -1207,7 +1196,7 @@ mod tests {
         let mut p = <WgrWaterParams as bytemuck::Zeroable>::zeroed();
         p.tidewater = crate::water_tw::DEFAULT_PARAMS;
         p.fft_wind_sea = [1.0, 0.0, 6.0, 0.3];
-        // zeroed lane: Tidewater's defaults (weather wind, 120 km, foam bias 0.58 at 7 m/s)
+        // zeroed lane: Tidewater's defaults (120 km, foam bias at local 6 m/s)
         let s = SpectrumInputs::from_params(&p);
         assert_eq!(s.local.wind_speed, 6.0);
         assert_eq!(s.local.fetch_km, 120.0);
@@ -1216,6 +1205,16 @@ mod tests {
         let s = SpectrumInputs::from_params(&p);
         assert_eq!(s.local.wind_speed, 20.0);
         assert_eq!(s.local.fetch_km, 900.0);
+    }
+
+    #[test]
+    fn surface_amplitude_does_not_rebuild_tidewater_spectrum() {
+        let mut p = <WgrWaterParams as bytemuck::Zeroable>::zeroed();
+        p.tidewater = crate::water_tw::DEFAULT_PARAMS;
+        p.tidewater_sea = [7.0, 120.0, 0.5, 0.0];
+        let baseline = SpectrumInputs::from_params(&p);
+        p.tidewater[0][0] *= 1.6;
+        assert_eq!(SpectrumInputs::from_params(&p), baseline);
     }
 
     #[test]

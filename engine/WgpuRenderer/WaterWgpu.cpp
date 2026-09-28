@@ -249,21 +249,20 @@ static float SeaStateLengthMultiplier(float amplitude)
 }
 
 // ---------------------------------------------------------------------------
-// Sea-state wind latch.
+// Weather wind amplitude latch.
 //
 // The rule, stated explicitly because it is the whole reason the ocean can read
 // the live wind at all without costing a spectrum rebuild per frame:
 //
-//   The spectrum re-derives from wind ONLY when BOTH of these hold:
+//   Wave amplitude changes from weather ONLY when BOTH of these hold:
 //     (a) at least kSeaWindMinDwellSeconds have passed since the last re-derive, AND
 //     (b) the MEAN wind has moved out of the latched bucket by more than the
 //         bucket half-width plus a hysteresis band —
 //           speed:     1.0 m/s buckets, 0.35 m/s hysteresis
-//           direction: 15 deg buckets,  4 deg hysteresis
 //
 // Consequences worth being explicit about:
-//   * Gusts never rebuild the spectrum. Only WindSample::meanSpeed /
-//     meanDirectionRad are read here, and those move on a 4-20 minute clock. A
+//   * Gusts never rebuild the spectrum. Only WindSample::meanSpeed is read here;
+//     it moves on a 4-20 minute clock. A
 //     real sea is fetch/duration limited: it answers to the mean wind over tens
 //     of minutes, so this is the physically correct input as well as the cheap one.
 //   * Worst case is one rebuild per 20 s even if the wind is sitting exactly on
@@ -274,24 +273,19 @@ static float SeaStateLengthMultiplier(float amplitude)
 constexpr float kSeaWindMinDwellSeconds = 20.0f;
 constexpr float kSeaWindSpeedBucket = 1.0f;      // m/s
 constexpr float kSeaWindSpeedHysteresis = 0.35f; // m/s beyond the half bucket
-constexpr float kSeaWindDirBucket = 0.2617994f;  // 15 deg in rad
-constexpr float kSeaWindDirHysteresis = 0.06981f; // 4 deg in rad
-
-// Shortest signed angle from `from` to `to`, in (-pi, pi].
-static float AngleDelta(float from, float to)
-{
-    constexpr float kPi = 3.14159265358979323846f;
-    float d = std::fmod(to - from + kPi, 2.0f * kPi);
-    if (d < 0.0f)
-    {
-        d += 2.0f * kPi;
-    }
-    return d - kPi;
-}
 
 static float SnapToBucket(float value, float bucket)
 {
     return std::round(value / bucket) * bucket;
+}
+
+// Keep the authored sea unchanged at its reference wind. Weather changes only
+// displacement amplitude, including Tidewater's surface amplitude, and never
+// moves spectrum peak, heading, fetch, foam or material controls.
+static float WeatherAmplitudeScale(float windSpeed, float referenceSpeed, float calmScale)
+{
+    const float calm = std::clamp(calmScale, 0.0f, 1.0f);
+    return std::clamp(calm + (1.0f - calm) * windSpeed / referenceSpeed, calm, 1.60f);
 }
 
 // Opt-in measurement of CPU preparation/submission, never a GPU-time estimate.
@@ -324,8 +318,7 @@ struct OceanCpuSample
 };
 
 static void ApplyCascadePreset(WgrRenderer* renderer, int preset, int fftResolution = 512, uint32_t seedXor = 0,
-                               float windMultiplier = 1.0f, float lengthMultiplier = 1.0f,
-                               float windDirDeltaRad = 0.0f)
+                               float windMultiplier = 1.0f, float lengthMultiplier = 1.0f)
 {
     WgrWaterCascadeConfig c{};
     c.enabled = 1;
@@ -350,7 +343,7 @@ static void ApplyCascadePreset(WgrRenderer* renderer, int preset, int fftResolut
     // Push one cascade config, applying the WTR-001 dev seed override (xor) so a non-zero
     // override re-randomises the whole h0 field deterministically while seedXor == 0 leaves
     // the tuned preset seeds untouched.
-    auto push = [renderer, seedXor, windMultiplier, lengthMultiplier, windDirDeltaRad, preset](
+    auto push = [renderer, seedXor, windMultiplier, lengthMultiplier, preset](
                     uint32_t index, const WgrWaterCascadeConfig& cfg)
     {
         WgrWaterCascadeConfig out = cfg;
@@ -362,12 +355,7 @@ static void ApplyCascadePreset(WgrRenderer* renderer, int preset, int fftResolut
         out.wind_speed *= remoteSwell ? 1.0f : windMultiplier;
         out.tile_length_x *= lengthMultiplier;
         out.tile_length_y *= lengthMultiplier;
-        // World wind heading. Added as a DELTA rather than assigned, so the small
-        // authored spread between cascades (0.349 / 0.2618 rad — the directional
-        // spread that keeps the sea from being a single-heading corduroy) survives
-        // the rotation. The delta comes from the latched sea wind, so it changes in
-        // 15-degree steps at most once per 20 s and does not churn the spectrum.
-        out.wind_direction_rad += remoteSwell ? 0.0f : windDirDeltaRad;
+        // Preserve each cascade's authored direction, including the remote swell.
         EngineWgpu::AcquireProducerWindow("water cascade config"); // load-time / preset change
         wgr_water_set_cascade_config(renderer, index, &out);
     };
@@ -606,7 +594,7 @@ void WaterWgpu::BuildQuadtree(const Landscape& land)
     ApplyCascadePreset(_renderer, _engine.WaterLook().cascadePreset, _engine.WaterLook().fftResolution,
                        fz0.fftSeed >= 0 ? static_cast<uint32_t>(fz0.fftSeed) : 0u);
     _cascadeApplied = CascadeApplied{true, _engine.WaterLook().cascadePreset, _engine.WaterLook().fftResolution,
-                                     fz0.fftSeed >= 0 ? static_cast<uint32_t>(fz0.fftSeed) : 0u, 1.0f, 1.0f, 0.0f};
+                                     fz0.fftSeed >= 0 ? static_cast<uint32_t>(fz0.fftSeed) : 0u, 1.0f, 1.0f};
 }
 
 bool WaterWgpu::UpdateSeaWind(float now)
@@ -616,27 +604,24 @@ bool WaterWgpu::UpdateSeaWind(float now)
     const render::frame::PresentationSnapshot& windSnap = render::frame::GPresentationSnapshot();
     if (!_engine.WaterLook().windFromWeather || !envEnabled || !windSnap.windActive)
     {
+        _seaWindInit = false;
         return false;
     }
 
-    // MEAN wind only. Never `speed` / `directionRad` — see the latch commentary
-    // above ApplyCascadePreset for why a gust must not touch h0.
+    // Mean speed only; neither gusts nor heading alter the water configuration.
     const float wantSpeed = SnapToBucket(windSnap.windMeanSpeed, kSeaWindSpeedBucket);
-    const float wantDir = SnapToBucket(windSnap.windMeanDirectionRad, kSeaWindDirBucket);
 
     if (!_seaWindInit)
     {
         _seaWindInit = true;
         _seaWindSpeed = wantSpeed;
-        _seaWindDirRad = wantDir;
         _seaWindLatchTime = now;
         // Log the FIRST latch too, not only later re-derives. Without this a run that never
         // changes weather -- which is every scripted capture, and any mission with steady
         // weather -- prints nothing at all about the sea's wind, and "is the wave height
         // coupled to the wind?" cannot be answered from a log. It is asked (players, 2026-08-29:
         // "Does the wind setting influence the wave high? For me it looks all the same").
-        LOG_INFO(Graphics, "Water sea-state wind latched: {:.1f} m/s heading {:.0f} deg (first latch)",
-                 _seaWindSpeed, _seaWindDirRad * (180.0f / 3.14159265358979323846f));
+        LOG_INFO(Graphics, "Water amplitude wind latched: {:.1f} m/s (first latch)", _seaWindSpeed);
         return true;
     }
 
@@ -648,18 +633,14 @@ bool WaterWgpu::UpdateSeaWind(float now)
     // (b) moved out of the latched bucket by more than half a bucket + hysteresis
     const bool speedMoved =
         std::abs(windSnap.windMeanSpeed - _seaWindSpeed) > (kSeaWindSpeedBucket * 0.5f + kSeaWindSpeedHysteresis);
-    const bool dirMoved = std::abs(AngleDelta(_seaWindDirRad, windSnap.windMeanDirectionRad)) >
-                          (kSeaWindDirBucket * 0.5f + kSeaWindDirHysteresis);
-    if (!speedMoved && !dirMoved)
+    if (!speedMoved)
     {
         return false;
     }
 
     _seaWindSpeed = wantSpeed;
-    _seaWindDirRad = wantDir;
     _seaWindLatchTime = now;
-    LOG_INFO(Graphics, "Water sea-state wind latched: {:.1f} m/s heading {:.0f} deg (spectrum re-derives once)",
-             _seaWindSpeed, _seaWindDirRad * (180.0f / 3.14159265358979323846f));
+    LOG_INFO(Graphics, "Water amplitude wind latched: {:.1f} m/s", _seaWindSpeed);
     return true;
 }
 
@@ -859,7 +840,14 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     // cached vertices), and the Gerstner waves advance off `time` in the shader.
     _params.sea_level = land.GetSeaLevel();
     _params.time = fz.freezeTime ? fz.fixedTime : render::frame::GPresentationSnapshot().timeSeconds;
-    _params.wave_amp = look.waveAmp;
+    const bool weatherWindChanged = UpdateSeaWind(_params.time);
+    const float weatherAmplitude = _seaWindInit ? WeatherAmplitudeScale(_seaWindSpeed, 12.0f, look.seaCalmScale) : 1.0f;
+    if (weatherWindChanged)
+    {
+        LOG_INFO(Graphics, "Water weather wind {:.1f} m/s -> OP wave amplitude x{:.3f}, Tidewater Weather x{:.3f}",
+                 _seaWindSpeed, weatherAmplitude, WeatherAmplitudeScale(_seaWindSpeed, 7.0f, look.seaCalmScale));
+    }
+    _params.wave_amp = look.waveAmp * weatherAmplitude;
     _params.wave_choppy = look.waveChoppy;
     _params.wave_speed = look.waveSpeed;
     _params.wave_scale = look.waveScale;
@@ -898,7 +886,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     // it draws instead (water_tw/probe.rs); here the flat level stands.
     if (look.cascadePreset == 1 && !TidewaterDrawsWater(look.waterBackend))
     {
-        localSurface += ReferenceSurfaceHeight(cameraPos.X(), cameraPos.Z(), _params.time, look.waveAmp, look.waveSpeed,
+        localSurface += ReferenceSurfaceHeight(cameraPos.X(), cameraPos.Z(), _params.time, _params.wave_amp, look.waveSpeed,
                                                look.waveScale) *
                         cameraBodyWave;
     }
@@ -1008,48 +996,10 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     // matching set of cascade lengths, so a rougher sea grows longer waves rather than steeper
     // ones, and the spectrum pass is told to apply no residual amplitude of its own. Legacy mode
     // keeps the old behaviour (uniform variance scaling at unchanged wavelengths) for A/B.
-    float windMultiplier = look.seaStateCoupling ? SeaStateWindMultiplier(look.waveAmp) : 1.0f;
+    const float windMultiplier = look.seaStateCoupling ? SeaStateWindMultiplier(look.waveAmp) : 1.0f;
     const float lengthMultiplier = look.seaStateCoupling ? SeaStateLengthMultiplier(look.waveAmp) : 1.0f;
-    // WIND AUTHORITY — latch the world's mean wind into the spectrum. UpdateSeaWind
-    // is the throttle; everything below reads only the latched values, which change
-    // in 1 m/s / 15-degree steps and at most once per 20 s, so the h0 rebuild budget
-    // is spent on real sea-state changes and nothing else.
-    UpdateSeaWind(_params.time);
-    float windDirDeltaRad = 0.0f;
-    if (_seaWindInit)
-    {
-        _params.fft_wind_sea.x = std::cos(_seaWindDirRad);
-        _params.fft_wind_sea.y = std::sin(_seaWindDirRad);
-        _params.fft_wind_sea.z = _seaWindSpeed;
-        // Sea state lane. 12 m/s -> 0.667, which is where the authored 0.65 sat, so
-        // an average blustery day reproduces the shipped look.
-        _params.fft_wind_sea.w = std::clamp(_seaWindSpeed / 18.0f, 0.0f, 1.0f);
-        // Rotate the cascades off their authored reference heading (0.349 rad), which
-        // preserves the inter-cascade directional spread — see the push lambda.
-        windDirDeltaRad = _seaWindDirRad - 0.349f;
-        // Gentle energy coupling on top of the amplitude slider. Deliberately NOT a
-        // linear speed ratio: at calm the mean wind is ~1.5 m/s and a literal ratio
-        // would flatten the sea to a mirror, which reads as a broken ocean rather
-        // than a calm one. Intercept plus slope, with the slope DERIVED from the
-        // intercept so 12 m/s (the speed the spectrum was authored at) stays exactly
-        // 1.0 however the calm end is tuned. See WaterLook::seaCalmScale.
-        const float calmScale = std::clamp(look.seaCalmScale, 0.0f, 1.0f);
-        const float calmSlope = (1.0f - calmScale) / 12.0f;
-        windMultiplier *= std::clamp(calmScale + calmSlope * _seaWindSpeed, calmScale, 1.60f);
-        // The number that actually reaches the spectrum, once per change of it. This is the
-        // answer to "does wind change the waves": if this does not move when the weather does,
-        // the coupling is broken; if it moves and the sea looks the same, the coupling is too
-        // weak. Logging the value is what tells those two apart.
-        static float loggedMultiplier = -1.0f;
-        if (std::abs(windMultiplier - loggedMultiplier) > 0.01f)
-        {
-            loggedMultiplier = windMultiplier;
-            LOG_INFO(Graphics,
-                     "Water sea state: wind {:.1f} m/s -> energy x{:.3f}, sea-state lane {:.3f}, "
-                     "cascade length x{:.3f}",
-                     _seaWindSpeed, windMultiplier, _params.fft_wind_sea.w, lengthMultiplier);
-        }
-    }
+    // The authored spectrum speed, heading and tile lengths depend only on the
+    // Water tab. Weather amplitude is applied to sea_params.y below.
     if (look.seaStateCoupling)
     {
         _params.fft_cascade_lengths.x *= lengthMultiplier;
@@ -1063,14 +1013,13 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         // PERF-022: only when something in it changed (see CascadeApplied in the header).
         const CascadeApplied want{true, look.cascadePreset, look.fftResolution,
                                   fz.fftSeed >= 0 ? static_cast<uint32_t>(fz.fftSeed) : 0u, windMultiplier,
-                                  lengthMultiplier, windDirDeltaRad};
+                                  lengthMultiplier};
         const bool same = _cascadeApplied.valid && _cascadeApplied.preset == want.preset &&
                           _cascadeApplied.fft == want.fft && _cascadeApplied.seed == want.seed &&
-                          _cascadeApplied.wind == want.wind && _cascadeApplied.len == want.len &&
-                          _cascadeApplied.dir == want.dir;
+                          _cascadeApplied.wind == want.wind && _cascadeApplied.len == want.len;
         if (!same)
         {
-            ApplyCascadePreset(_renderer, want.preset, want.fft, want.seed, want.wind, want.len, want.dir);
+            ApplyCascadePreset(_renderer, want.preset, want.fft, want.seed, want.wind, want.len);
             _cascadeApplied = want;
             if (OceanProfileEnabled()) LOG_INFO(Graphics, "Ocean spectrum configuration changed: preset={} wind={:.3f} length={:.3f}", want.preset, want.wind, want.len);
         }
@@ -1122,12 +1071,13 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         //   preset 4 "Exposed coast / swell"   -> swell x1.90 (0.91), heading 180 deg (westward,
         //                                          the authored incoming direction)
         //   preset 5 "Rough open water"        -> amplitude x1.60, choppiness 1.0, swell x1.25
-        // Wind speed and heading reach Tidewater through fft_wind_sea, exactly as for Current OP.
+        // Tidewater uses its authored wind speed and heading for the spectrum and
+        // surface detail. Weather changes the surface amplitude only.
         auto t = look.tidewater;
-        // W3g — sea conditions from Tidewater's own preset table (AppUI.js SEA), so the sea state
-        // (wind, fetch, chop, swell, surf height and period, whitecaps) is Tidewater's at the same
-        // wind. Weather mode interpolates the table at the latched weather wind, so a 7 m/s day
-        // is exactly Breezy (Tidewater's defaults) and 3.5 m/s is Calm; a preset also sets the wind.
+        // W3g — sea conditions from Tidewater's own preset table (AppUI.js SEA).
+        // Weather mode holds Breezy's authored shape/material lanes while mean
+        // weather wind scales only the surface amplitude. Explicit presets retain
+        // their complete authored sea conditions.
         // The renderer scales the surf with swell / 0.48 (see tidewater_shore), so the preset
         // surf is pre-divided by that factor here and the net surf is the preset's own.
         struct TwSea
@@ -1140,37 +1090,32 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
             {12.0f, 300.0f, 1.05f, 0.68f, 0.56f, 8.5f, 0.75f}, // Choppy
             {20.0f, 900.0f, 1.2f, 1.0f, 0.9f, 12.0f, 1.0f},    // Storm
         };
-        float seaWindOverride = 0.0f;
-        float seaFetch = 0.0f;
+        float seaWindOverride = 7.0f; // Tidewater's authored Breezy local wind
+        float seaFetch = 120.0f;
         float seaWhitecaps = std::clamp(t.whitecaps, 0.0f, 1.0f);
         const int seaMode = std::clamp(t.seaConditions, 0, 5);
+        float tidewaterAmplitude = seaMode == 0 && _seaWindInit
+                                       ? WeatherAmplitudeScale(_seaWindSpeed, 7.0f, look.seaCalmScale)
+                                       : 1.0f;
         if (seaMode <= 4)
         {
             TwSea c{};
             if (seaMode == 0)
             {
-                // W9c: WGR_TW_WIND=<m/s> stands in for the weather's wind here (captures of the
-                // weather mode's sea state at a set wind); the renderer reads it too (fft.rs)
+                // WGR_TW_WIND=<m/s> is a capture override for amplitude only.
                 static const float envWind = [] { const float v = EnvFloat("WGR_TW_WIND", 0.0f); return v > 0.0f ? std::clamp(v, 0.5f, 40.0f) : 0.0f; }();
-                const float w = envWind > 0.0f ? envWind : (_seaWindInit ? _seaWindSpeed : 7.0f);
-                int i = 0;
-                while (i < 2 && w > kTwSea[i + 1].wind)
+                if (envWind > 0.0f)
                 {
-                    ++i;
+                    tidewaterAmplitude = WeatherAmplitudeScale(envWind, 7.0f, look.seaCalmScale);
                 }
-                const float f = std::clamp((w - kTwSea[i].wind) / (kTwSea[i + 1].wind - kTwSea[i].wind), 0.0f, 1.0f);
-                auto lerp = [f](float a, float b) { return a + (b - a) * f; };
-                const TwSea& a = kTwSea[i];
-                const TwSea& b = kTwSea[i + 1];
-                c = {w, lerp(a.fetch, b.fetch), lerp(a.chop, b.chop), lerp(a.swell, b.swell), lerp(a.surf, b.surf),
-                     lerp(a.period, b.period), lerp(a.whitecaps, b.whitecaps)};
+                c = kTwSea[1]; // Breezy, Tidewater's default
             }
             else
             {
                 c = kTwSea[seaMode - 1];
-                seaWindOverride = c.wind;
             }
             seaFetch = c.fetch;
+            seaWindOverride = c.wind;
             seaWhitecaps = c.whitecaps;
             t.choppiness = c.chop;
             t.swellScale = c.swell;
@@ -1193,6 +1138,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
             t.choppiness = 1.0f;
             t.swellScale *= 1.25f;
         }
+        t.amplitude *= tidewaterAmplitude;
         _params.tidewater[0] = {std::max(t.amplitude, 0.0f), std::clamp(t.choppiness, 0.0f, 2.0f),
                                 std::max(t.swellScale, 0.0f), t.swellHeadingDeg};
         _params.tidewater[1] = {std::max(t.foamCoverage, 0.0f), std::max(t.foamIntensity, 0.0f), t.ssr ? 1.0f : 0.0f,
@@ -1239,7 +1185,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         }
     }
     _params.sea_params = {look.seaStateCoupling ? 1.0f : 0.0f,
-                          look.seaStateCoupling ? SeaStateResidualAmplitude(look.waveAmp) : look.waveAmp,
+                          (look.seaStateCoupling ? SeaStateResidualAmplitude(look.waveAmp) : look.waveAmp) * weatherAmplitude,
                           look.lowQuality ? 1.0f : 0.0f, look.shoreWaveGain};
     // Runtime proof that the Water tab reaches the actual renderer. This is deliberately
     // edge-triggered: one log row per edited amplitude/resolution, not one row per frame.

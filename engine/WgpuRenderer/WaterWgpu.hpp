@@ -67,7 +67,7 @@ class WaterWgpu : public IWaterRenderer
         bool valid = false;
         int preset = 0, fft = 0;
         uint32_t seed = 0;
-        float wind = 1.0f, len = 1.0f, dir = 0.0f;
+        float wind = 1.0f, len = 1.0f;
     } _cascadeApplied;
     bool _haveInteractionDomain = false;
     bool _interactionDemo = false;
@@ -94,24 +94,13 @@ class WaterWgpu : public IWaterRenderer
 
     std::vector<WgrWaterNode> _selected;
 
-    // ---- Sea-state wind latch -------------------------------------------
-    // The FFT spectrum (h0) re-derives whenever ANY of its inputs change bits:
-    // fft_wind_sea, wave_amp, the cascade lengths, the seed, and each cascade's
-    // wind_speed / wind_direction_rad (see SpectrumInputs and set_cascade_config
-    // in rust/src/water/fft.rs). Feeding a continuously-varying wind straight in
-    // would therefore re-run the most expensive pass in the water system EVERY
-    // FRAME — a previous session measured only 2 rebuilds in 60+ frames, and
-    // that is the budget being protected here.
-    //
-    // So the live wind is LATCHED into coarse steps: the spectrum only re-derives
-    // when the mean wind has genuinely moved to a different sea state, and never
-    // more often than kSeaWindMinDwellSeconds. See UpdateSeaWind().
-    float _seaWindSpeed = 12.0f;      // latched m/s driving the spectrum
-    float _seaWindDirRad = 0.606f;    // latched heading (atan2 of the authored 0.82/0.57)
+    // The mean weather wind is latched before it scales wave amplitude. The authored
+    // spectrum, direction, fetch, foam and water material never take weather wind.
+    // Coarse steps also avoid re-deriving h0 on every frame.
+    float _seaWindSpeed = 12.0f;
     float _seaWindLatchTime = -1e9f;  // sim time of the last re-derive
     bool _seaWindInit = false;
-    // Returns true when the latch moved this frame (i.e. a spectrum rebuild is
-    // being deliberately spent).
+    // Returns true when the latched mean speed moved this frame.
     bool UpdateSeaWind(float now);
 };
 

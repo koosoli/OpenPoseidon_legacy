@@ -6553,16 +6553,15 @@ void DrawWaterTab()
         auto& t = s.tidewater;
         Dev::PanelSeparator();
         Dev::PanelHeading("Tidewater Native (W2 open sea, W3a shore waves)");
-        Dev::PanelHelp("Wind speed and heading come from the weather (or the reference sea below), as for "
-                       "Current OP. The Current OP controls further down do not affect this mode, except "
+        Dev::PanelHelp("Weather wind changes wave amplitude only. Spectrum heading, speed, fetch, "
+                       "foam and materials use the authored sea below. The Current OP controls further down do not affect this mode, except "
                        "Cascade Preset's reference seas, which map onto this group.");
-        const char* twSea[] = {"Weather (Tidewater table at the weather wind)", "Calm", "Breezy (Tidewater default)",
+        const char* twSea[] = {"Weather (Breezy shape, wind amplitude)", "Calm", "Breezy (Tidewater default)",
                                "Choppy", "Storm", "Custom (sliders)"};
         changed |= Dev::Combo("TW sea conditions", &t.seaConditions, twSea, IM_ARRAYSIZE(twSea));
-        Dev::PanelTooltip("Tidewater's own sea presets (wind, fetch, chop, swell, surf height and period, "
-                          "whitecaps). Weather interpolates them at the weather wind: 3.5 m/s is Calm, 7 m/s "
-                          "Breezy, 12 m/s Choppy, 20 m/s Storm. Custom uses the weather wind and the chop, "
-                          "swell, surf and whitecap sliders below.");
+        Dev::PanelTooltip("Tidewater's own sea presets set wind, fetch, chop, swell, surf and whitecaps. "
+                          "Weather keeps Breezy's shape and changes only amplitude from the mean weather wind. "
+                          "Custom uses authored Breezy wind and fetch with the sliders below.");
         const bool twCustom = t.seaConditions == 5;
         changed |= Dev::SliderFloat("TW amplitude", &t.amplitude, 0.0f, 3.0f, "%.2f");
         Dev::PanelTooltip("Displacement scale of all four cascades (WaterSurface amplitude).");
@@ -6778,12 +6777,12 @@ void DrawWaterTab()
                       "wavelength ~amp^0.75). OFF: the legacy behaviour — the whole spectrum is "
                       "scaled uniformly, so waves only get taller at the same wavelength, which "
                       "reads as short steep chop.");
-    changed |= Dev::SliderFloat("Calm sea energy", &s.seaCalmScale, 0.0f, 1.0f, "%.2f");
-    Dev::PanelTooltip("Wave energy left at DEAD CALM, as a fraction of the 12 m/s reference sea.\n"
+    changed |= Dev::SliderFloat("Calm wave amplitude", &s.seaCalmScale, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("Wave amplitude left at DEAD CALM, as a fraction of the reference sea.\n"
                       "Was effectively 0.61 at the calm-weather mean of 1.5 m/s -- a flat day carried\n"
                       "nearly two thirds of a blustery one. Not zero: a literal ratio flattens the sea\n"
                       "to a mirror, which reads as broken water rather than calm water.\n"
-                      "The 12 m/s look does not move: the slope is derived so that anchor always holds.");
+                      "The authored look stays at 12 m/s for Current OP and 7 m/s for Tidewater.");
     changed |= Dev::SliderFloat("Shore breaker gain", &s.shoreWaveGain, 0.0f, 3.0f, "%.2f");
     Dev::PanelTooltip("Strength of the shoaling swell that runs in toward the beach. The train "
                       "grows (Green's law) and its crests sharpen as the water shallows.");
