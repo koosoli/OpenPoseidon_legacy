@@ -69,7 +69,7 @@ mod tests {
             glam::Vec3::ZERO, &super::super::sky_vis::SkyVisSettings::default())[0], 7)
     }
     fn id(token: u64, source_generation: u64) -> MainCountIdentity {
-        MainCountIdentity { token, model_id: 4, source_generation, cull_epoch: 7 }
+        MainCountIdentity { token, model_id: 4, source_generation, cull_epoch: 7, target_revision: 1 }
     }
     #[test]
     fn retains_only_mapped_result_for_the_exact_cached_generation() {

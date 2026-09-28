@@ -76,7 +76,7 @@ impl Witness {
 mod tests {
     use super::*;
     fn id(token: u64, source_generation: u64) -> MainCountIdentity {
-        MainCountIdentity { token, model_id: 7, source_generation, cull_epoch: 12 }
+        MainCountIdentity { token, model_id: 7, source_generation, cull_epoch: 12, target_revision: 1 }
     }
     #[test]
     fn completion_needs_exact_identity_submit_and_successful_commit() {

@@ -10239,7 +10239,7 @@ impl Gfx3d {
             if let Some(caches) = &mut self.interior_cached_counts {
                 let cache = &mut caches[index + 1];
                 cache.observe(raw);
-                return cache.fact(key);
+                return self.cull.validate_target_fact(cache.fact(key));
             }
         }
         raw
@@ -10579,7 +10579,7 @@ impl Gfx3d {
         let key = self.gi_rsm_current_count_key();
         if let Some(cache) = &mut self.gi_rsm_cached_count {
             cache.observe(raw);
-            cache.fact(key)
+            self.cull.validate_target_fact(cache.fact(key))
         } else { raw }
     }
 
@@ -10599,7 +10599,7 @@ impl Gfx3d {
         let key = self.local_current_count_key(0);
         if let Some(caches) = &mut self.local_cached_counts {
             caches[0].observe(raw);
-            caches[0].fact(key)
+            self.cull.validate_target_fact(caches[0].fact(key))
         } else { raw }
     }
 
@@ -10611,7 +10611,7 @@ impl Gfx3d {
         let key = self.local_current_count_key(tile);
         if let Some(caches) = &mut self.local_cached_counts {
             caches[tile].observe(raw);
-            caches[tile].fact(key)
+            self.cull.validate_target_fact(caches[tile].fact(key))
         } else { raw }
     }
 
@@ -10636,7 +10636,7 @@ impl Gfx3d {
         let key = self.interior_current_count_key(0);
         if let Some(caches) = &mut self.interior_cached_counts {
             caches[0].observe(raw);
-            caches[0].fact(key)
+            self.cull.validate_target_fact(caches[0].fact(key))
         } else { raw }
     }
 

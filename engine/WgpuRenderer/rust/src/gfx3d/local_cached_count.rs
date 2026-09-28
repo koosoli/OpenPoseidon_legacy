@@ -75,7 +75,7 @@ mod tests {
         }}
     }
     fn id(token: u64, source_generation: u64) -> MainCountIdentity {
-        MainCountIdentity { token, model_id: 4, source_generation, cull_epoch: 7 }
+        MainCountIdentity { token, model_id: 4, source_generation, cull_epoch: 7, target_revision: 1 }
     }
     fn local_key(tile_index: usize, solar: usize, generation: u64) -> Key {
         Key { publication: generation, tile: LocalTileIdentity {

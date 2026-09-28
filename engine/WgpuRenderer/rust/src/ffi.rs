@@ -3497,17 +3497,23 @@ pub unsafe extern "C" fn wgr_view_reference_facts(
         // The off-handle uploader can issue CPU queue writes without this
         // renderer borrow. Its exclusive Published lock waits for an in-flight
         // writer's read guard; sample on both sides so a write overlapping this
-        // private getter advances the optional target witness. No GPU wait and
-        // no COUNT/cache classification consumes that witness yet.
+        // private getter advances the optional target witness. No GPU wait;
+        // stale COUNT classifications fail closed against the stamped revision.
         let track_uploader = renderer.gfx3d.retained_target_revision().is_some();
         if track_uploader {
             let (serial, _) = renderer.uploader.enable_mutation_serial_snapshot();
             renderer.gfx3d.observe_uploader_mutation_serial(serial);
         }
+        let revision_before = renderer.gfx3d.retained_target_revision();
         *output = renderer.gfx3d.view_reference_facts(&renderer.device);
         if track_uploader {
             if let Some(serial) = renderer.uploader.mutation_serial_snapshot() {
                 renderer.gfx3d.observe_uploader_mutation_serial(serial);
+            }
+            // A write overlapping aggregation may invalidate a count after it was
+            // copied into the output. Never export that stale Absent classification.
+            if renderer.gfx3d.retained_target_revision() != revision_before {
+                *output = WgrViewReferenceFacts::default();
             }
         }
     })).is_ok() as u32

@@ -409,7 +409,7 @@ mod tests {
 
     fn count_fact(token: u64, status: MainCountStatus, count: u32) -> MainCountFact {
         MainCountFact { identity: MainCountIdentity { token, model_id: 7,
-            source_generation: 9, cull_epoch: 11 }, status, count }
+            source_generation: 9, cull_epoch: 11, target_revision: 1 }, status, count }
     }
 
     fn full_plan(identity: MainCountIdentity) -> ApplicabilityPlan {

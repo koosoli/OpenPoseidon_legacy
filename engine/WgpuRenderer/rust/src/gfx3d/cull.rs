@@ -794,6 +794,8 @@ pub struct MainCountIdentity {
     pub model_id: u32,
     pub source_generation: u64,
     pub cull_epoch: u64,
+    // Private opt-in retained-target witness. Zero is never a valid sample.
+    pub target_revision: u64,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MainCountStatus { #[default] Unknown, Present, Absent }
@@ -910,7 +912,8 @@ impl BatchCountRing {
             }
         }
     }
-    fn harvest(&mut self, device: &wgpu::Device, epoch: u64) {
+    fn harvest(&mut self, device: &wgpu::Device, epoch: u64,
+               target_revision: Option<(u32, u64)>) {
         for (buf, state) in &mut self.slots {
             if let BatchCountSlot::Submitted { identity, copied, committed, aborted } = state {
                 if !*committed && !*aborted { continue; }
@@ -928,7 +931,8 @@ impl BatchCountRing {
                     match done.try_recv() {
                         Ok(Ok(())) => {
                             let data = buf.slice(..).get_mapped_range();
-                            if committed && !aborted && epoch == identity.cull_epoch {
+                            if committed && !aborted && epoch == identity.cull_epoch &&
+                                target_revision == Some((identity.model_id, identity.target_revision)) {
                                 for (i, fact) in self.latest.iter_mut().enumerate() {
                                     if copied & (1 << i) != 0 && fact.identity == identity {
                                         let count = u32::from_le_bytes(data[i*4..i*4+4].try_into().unwrap());
@@ -1456,7 +1460,9 @@ impl CullState {
             source_generation == 0 || epoch == 0 || epoch == u64::MAX {
             return false;
         }
-        let identity = MainCountIdentity { token, model_id, source_generation, cull_epoch: epoch };
+        let Some(target_revision) = self.arm_retained_target_revision(model_id) else { return false; };
+        let identity = MainCountIdentity { token, model_id, source_generation,
+            cull_epoch: epoch, target_revision };
         if self.main_count_slots.is_none() {
             self.main_count_slots = Some((0..3).map(|i| {
                 (device.create_buffer(&wgpu::BufferDescriptor {
@@ -1543,7 +1549,8 @@ impl CullState {
     pub fn copy_reflection_target_count(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
         let Some(identity) = self.reflection_count_armed else { return false; };
         if !self.reflection_dispatch_recorded.get() ||
-            self.instance_epoch() != identity.cull_epoch { return false; }
+            self.instance_epoch() != identity.cull_epoch ||
+            !self.target_revision_matches(identity) { return false; }
         let Some(view) = self.reflection_view.as_ref() else { return false; };
         if view.params.target_count_enabled == 0 ||
             view.params.target_model_id != identity.model_id { return false; }
@@ -1563,7 +1570,8 @@ impl CullState {
     pub fn copy_sky0_target_count(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
         let Some(identity) = self.sky0_count_armed else { return false; };
         if !self.sky0_dispatch_recorded.get() ||
-            self.instance_epoch() != identity.cull_epoch { return false; }
+            self.instance_epoch() != identity.cull_epoch ||
+            !self.target_revision_matches(identity) { return false; }
         let Some(view) = self.sky_views.first() else { return false; };
         if view.params.target_count_enabled == 0 ||
             view.params.target_model_id != identity.model_id { return false; }
@@ -1585,9 +1593,11 @@ impl CullState {
                                    sky_closed: u8, local_closed: u32,
                                    solar_count: usize, local_culled: u32) -> bool {
         let epoch = self.instance_epoch();
+        let target_revision = self.instances.target_revision();
         let Some(batch) = self.batch_count.as_mut() else { return false; };
         let Some(identity) = batch.armed else { return false; };
-        if epoch != identity.cull_epoch { return false; }
+        if epoch != identity.cull_epoch ||
+            target_revision != Some((identity.model_id, identity.target_revision)) { return false; }
         let Some((dst, state)) = batch.slots.iter_mut()
             .find(|(_, state)| matches!(state, BatchCountSlot::Idle)) else { return false; };
         let mut copied = 0u32;
@@ -1652,10 +1662,12 @@ impl CullState {
     }
     pub fn harvest_batch_target_count(&mut self, device: &wgpu::Device) {
         let epoch = self.instance_epoch();
-        if let Some(b) = &mut self.batch_count { b.harvest(device, epoch); }
+        let revision = self.instances.target_revision();
+        if let Some(b) = &mut self.batch_count { b.harvest(device, epoch, revision); }
     }
     pub fn batch_target_count_fact(&self, index: usize) -> MainCountFact {
-        self.batch_count.as_ref().map_or(MainCountFact::default(), |b| b.fact(index, self.instance_epoch()))
+        self.validate_target_fact(self.batch_count.as_ref().map_or(MainCountFact::default(),
+            |b| b.fact(index, self.instance_epoch())))
     }
 
     /// Exact current-request COUNT copies still awaiting their map result.
@@ -1667,7 +1679,8 @@ impl CullState {
             ring.as_ref().is_some_and(|slots|
                 slots.iter().any(|(_, state)| state.pending_for(request)))
         }
-        if request.token == 0 || request.cull_epoch != self.instance_epoch() {
+        if request.token == 0 || request.cull_epoch != self.instance_epoch() ||
+            !self.target_revision_matches(request) {
             return 0;
         }
         let mut mask = 0u64;
@@ -1696,6 +1709,7 @@ impl CullState {
         let Some(identity) = self.local0_count_armed else { return false; };
         let Some(view) = self.shadow_views.get(view_index) else { return false; };
         if self.instance_epoch() != identity.cull_epoch ||
+            !self.target_revision_matches(identity) ||
             view.params.target_count_enabled == 0 ||
             view.params.target_model_id != identity.model_id { return false; }
         let Some(slots) = self.local0_count_slots.as_mut() else { return false; };
@@ -1723,6 +1737,7 @@ impl CullState {
         };
         let Some(view) = view else { return false; };
         if self.instance_epoch() != identity.cull_epoch ||
+            !self.target_revision_matches(identity) ||
             view.params.target_count_enabled == 0 ||
             view.params.target_model_id != identity.model_id { return false; }
         let Some(slots) = self.shadow_count_slots[cascade].as_mut() else { return false; };
@@ -1740,6 +1755,7 @@ impl CullState {
     pub fn copy_main_target_count(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
         let Some(identity) = self.main_count_armed else { return false; };
         if !self.main_dispatch_recorded.get() || self.instance_epoch() != identity.cull_epoch ||
+            !self.target_revision_matches(identity) ||
             self.params.target_count_enabled == 0 ||
             self.params.target_model_id != identity.model_id {
             return false;
@@ -1829,6 +1845,7 @@ impl CullState {
     /// or stale identity/epoch cannot turn zero bytes into an Absent result.
     pub fn harvest_main_target_count(&mut self, device: &wgpu::Device) {
         let current_epoch = self.instance_epoch();
+        let current_revision = self.instances.target_revision();
         let Some(slots) = self.main_count_slots.as_mut() else { return; };
         for (buf, state) in slots.iter_mut() {
             if let MainCountSlot::Submitted { identity, committed, aborted } = state {
@@ -1852,7 +1869,8 @@ impl CullState {
                             buf.unmap();
                             if committed && !aborted &&
                                 identity == self.main_count_latest.identity &&
-                                current_epoch == identity.cull_epoch {
+                                current_epoch == identity.cull_epoch &&
+                                current_revision == Some((identity.model_id, identity.target_revision)) {
                                 self.main_count_latest.count = count;
                                 self.main_count_latest.status = if count == 0 {
                                     MainCountStatus::Absent
@@ -1872,12 +1890,7 @@ impl CullState {
     }
 
     pub fn main_target_count_fact(&self) -> MainCountFact {
-        let mut fact = self.main_count_latest;
-        if self.instance_epoch() != fact.identity.cull_epoch {
-            fact.status = MainCountStatus::Unknown;
-            fact.count = 0;
-        }
-        fact
+        self.validate_target_fact(self.main_count_latest)
     }
 
     pub fn shadow_target_count_before_submit(&mut self, token: u64, cascade: usize) -> bool {
@@ -1946,6 +1959,7 @@ impl CullState {
 
     pub fn harvest_shadow_target_count(&mut self, device: &wgpu::Device, cascade: usize) {
         let current_epoch = self.instance_epoch();
+        let current_revision = self.instances.target_revision();
         let Some(slots) = self.shadow_count_slots.get_mut(cascade).and_then(Option::as_mut) else { return; };
         for (buf, state) in slots.iter_mut() {
             if let MainCountSlot::Submitted { identity, committed, aborted } = state {
@@ -1969,7 +1983,8 @@ impl CullState {
                             buf.unmap();
                             if committed && !aborted &&
                                 identity == self.shadow_count_latest[cascade].identity &&
-                                current_epoch == identity.cull_epoch {
+                                current_epoch == identity.cull_epoch &&
+                                current_revision == Some((identity.model_id, identity.target_revision)) {
                                 self.shadow_count_latest[cascade].count = count;
                                 self.shadow_count_latest[cascade].status = if count == 0 {
                                     MainCountStatus::Absent
@@ -1990,12 +2005,7 @@ impl CullState {
 
     pub fn shadow_target_count_fact(&self, cascade: usize) -> MainCountFact {
         let Some(&latest) = self.shadow_count_latest.get(cascade) else { return MainCountFact::default(); };
-        let mut fact = latest;
-        if self.instance_epoch() != fact.identity.cull_epoch {
-            fact.status = MainCountStatus::Unknown;
-            fact.count = 0;
-        }
-        fact
+        self.validate_target_fact(latest)
     }
 
     /// The planar command buffer is submitted before the main encoder. Reserve
@@ -2066,6 +2076,7 @@ impl CullState {
 
     pub fn harvest_reflection_target_count(&mut self, device: &wgpu::Device) {
         let current_epoch = self.instance_epoch();
+        let current_revision = self.instances.target_revision();
         let Some(slots) = self.reflection_count_slots.as_mut() else { return; };
         for (buf, state) in slots.iter_mut() {
             if let MainCountSlot::Submitted { identity, committed, aborted } = state {
@@ -2089,7 +2100,8 @@ impl CullState {
                             buf.unmap();
                             if committed && !aborted &&
                                 identity == self.reflection_count_latest.identity &&
-                                current_epoch == identity.cull_epoch {
+                                current_epoch == identity.cull_epoch &&
+                                current_revision == Some((identity.model_id, identity.target_revision)) {
                                 self.reflection_count_latest.count = count;
                                 self.reflection_count_latest.status = if count == 0 {
                                     MainCountStatus::Absent
@@ -2109,12 +2121,7 @@ impl CullState {
     }
 
     pub fn reflection_target_count_fact(&self) -> MainCountFact {
-        let mut fact = self.reflection_count_latest;
-        if self.instance_epoch() != fact.identity.cull_epoch {
-            fact.status = MainCountStatus::Unknown;
-            fact.count = 0;
-        }
-        fact
+        self.validate_target_fact(self.reflection_count_latest)
     }
 
     /// Private zenith-view diagnostic: only the encoder containing its copied
@@ -2185,6 +2192,7 @@ impl CullState {
 
     pub fn harvest_sky0_target_count(&mut self, device: &wgpu::Device) {
         let current_epoch = self.instance_epoch();
+        let current_revision = self.instances.target_revision();
         let Some(slots) = self.sky0_count_slots.as_mut() else { return; };
         for (buf, state) in slots.iter_mut() {
             if let MainCountSlot::Submitted { identity, committed, aborted } = state {
@@ -2208,7 +2216,8 @@ impl CullState {
                             buf.unmap();
                             if committed && !aborted &&
                                 identity == self.sky0_count_latest.identity &&
-                                current_epoch == identity.cull_epoch {
+                                current_epoch == identity.cull_epoch &&
+                                current_revision == Some((identity.model_id, identity.target_revision)) {
                                 self.sky0_count_latest.count = count;
                                 self.sky0_count_latest.status = if count == 0 {
                                     MainCountStatus::Absent
@@ -2228,12 +2237,7 @@ impl CullState {
     }
 
     pub fn sky0_target_count_fact(&self) -> MainCountFact {
-        let mut fact = self.sky0_count_latest;
-        if self.instance_epoch() != fact.identity.cull_epoch {
-            fact.status = MainCountStatus::Unknown;
-            fact.count = 0;
-        }
-        fact
+        self.validate_target_fact(self.sky0_count_latest)
     }
 
     pub fn local0_target_count_before_submit(&mut self, token: u64) -> bool {
@@ -2301,6 +2305,7 @@ impl CullState {
 
     pub fn harvest_local0_target_count(&mut self, device: &wgpu::Device) {
         let current_epoch = self.instance_epoch();
+        let current_revision = self.instances.target_revision();
         let Some(slots) = self.local0_count_slots.as_mut() else { return; };
         for (buf, state) in slots.iter_mut() {
             if let MainCountSlot::Submitted { identity, committed, aborted } = state {
@@ -2324,7 +2329,8 @@ impl CullState {
                             buf.unmap();
                             if committed && !aborted &&
                                 identity == self.local0_count_latest.identity &&
-                                current_epoch == identity.cull_epoch {
+                                current_epoch == identity.cull_epoch &&
+                                current_revision == Some((identity.model_id, identity.target_revision)) {
                                 self.local0_count_latest.count = count;
                                 self.local0_count_latest.status = if count == 0 {
                                     MainCountStatus::Absent
@@ -2344,12 +2350,7 @@ impl CullState {
     }
 
     pub fn local0_target_count_fact(&self) -> MainCountFact {
-        let mut fact = self.local0_count_latest;
-        if self.instance_epoch() != fact.identity.cull_epoch {
-            fact.status = MainCountStatus::Unknown;
-            fact.count = 0;
-        }
-        fact
+        self.validate_target_fact(self.local0_count_latest)
     }
 
     /// PERF-005: the latest harvested per-view object accounting (see CullStats).
@@ -2663,9 +2664,8 @@ impl CullState {
     }
 
     /// Private opt-in witness for one model's static and dynamic instance rows.
-    /// It deliberately excludes mesh, section, material and palette edits.
-    /// The global epoch does not cover the dynamic tail, so neither witness is
-    /// a cached COUNT or Fine-residency authority.
+    /// Geometry edits also advance it conservatively. COUNT facts bind to this
+    /// revision in addition to the global epoch; neither permits Fine release.
     pub fn arm_retained_target_revision(&mut self, model_id: u32) -> Option<u64> {
         self.models.get(model_id as usize)?;
         self.instances.arm_target_revision(model_id)
@@ -2673,6 +2673,22 @@ impl CullState {
 
     pub fn retained_target_revision(&self) -> Option<(u32, u64)> {
         self.instances.target_revision()
+    }
+
+    fn target_revision_matches(&self, identity: MainCountIdentity) -> bool {
+        identity.target_revision != 0 &&
+            self.instances.target_revision() == Some((identity.model_id, identity.target_revision))
+    }
+
+    /// Cached and asynchronously mapped facts must retain the revision sampled
+    /// before their cull dispatch. A changed dynamic tail leaves the old count Unknown.
+    pub fn validate_target_fact(&self, mut fact: MainCountFact) -> MainCountFact {
+        if self.instance_epoch() != fact.identity.cull_epoch ||
+            !self.target_revision_matches(fact.identity) {
+            fact.status = MainCountStatus::Unknown;
+            fact.count = 0;
+        }
+        fact
     }
 
     /// An audited geometry mutation without reverse target-model ownership may
@@ -2683,7 +2699,7 @@ impl CullState {
     }
 
     /// Completed off-handle writes may belong to any registered model. This
-    /// private witness advances conservatively; COUNT/cache policy ignores it.
+    /// private witness advances conservatively, invalidating stamped COUNT facts.
     pub fn observe_uploader_mutation_serial(&mut self, serial: u64) {
         self.instances.observe_uploader_mutation_serial(serial);
     }
@@ -2697,7 +2713,7 @@ impl CullState {
 
     // Replace the whole dynamic set (re-copied every frame — the churny set the CPU already
     // walks for simulation). The optional target witness compares selected rows only;
-    // it does not advance the global epoch and cannot authorize cache reuse.
+    // it does not advance the global epoch or relax existing cache-image gates.
     pub fn set_dynamic(&mut self, instances: &[InstanceGpu]) {
         replace_dynamic_instances(&mut self.dynamic, instances, &mut self.instances);
     }
@@ -4410,9 +4426,76 @@ pub(crate) mod tests {
     use super::*;
 
     #[test]
+    fn target_count_stamp_ignores_foreign_rows_and_rejects_changed_target_before_copy() {
+        let Some((device, _queue)) = headless() else { return; };
+        let mut cull = CullState::new(&device);
+        let lod = [LodGpu { resolution: 0.0, section_base: 0,
+            section_count: 0, is_decal: 0 }];
+        let target = cull.register_model(1.0, &lod, &[], &[]);
+        let foreign = cull.register_model(1.0, &lod, &[], &[]);
+        let row = |model, z| InstanceGpu { model, center: [0.0, 0.0, z, 1.0],
+            ..InstanceGpu::zeroed() };
+        cull.instance_add(row(foreign, 1.0)); // establish the existing global-epoch prerequisite
+        cull.set_dynamic(&[row(target, 2.0)]);
+        assert!(cull.arm_main_target_count(&device, 1, target, 1));
+        let first = cull.main_target_count_fact().identity;
+        assert_ne!(first.target_revision, 0);
+        cull.set_dynamic(&[row(target, 2.0), row(foreign, 3.0)]);
+        assert!(cull.target_revision_matches(first), "foreign dynamic churn is irrelevant");
+        cull.params.target_count_enabled = 1;
+        cull.params.target_model_id = target;
+        cull.main_dispatch_recorded.set(true);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        assert!(cull.copy_main_target_count(&mut encoder), "unchanged target can be copied");
+
+        assert!(cull.arm_main_target_count(&device, 2, target, 1));
+        let second = cull.main_target_count_fact().identity;
+        cull.params.target_count_enabled = 1;
+        cull.params.target_model_id = target;
+        cull.main_dispatch_recorded.set(true);
+        cull.set_dynamic(&[row(target, 4.0), row(foreign, 3.0)]);
+        assert!(!cull.target_revision_matches(second));
+        assert!(!cull.copy_main_target_count(&mut encoder),
+            "a target change after arm cannot label an earlier COUNT with the new revision");
+        assert_eq!(cull.validate_target_fact(MainCountFact { identity: second,
+            status: MainCountStatus::Absent, count: 0 }).status, MainCountStatus::Unknown);
+        assert_eq!(cull.validate_target_fact(MainCountFact { identity: MainCountIdentity {
+            target_revision: 0, ..second }, status: MainCountStatus::Absent, count: 0 }).status,
+            MainCountStatus::Unknown, "unstamped old facts are never certified");
+    }
+
+    #[test]
+    fn pending_target_count_map_cannot_resolve_absent_after_dynamic_mutation() {
+        let Some((device, _queue)) = headless() else { return; };
+        let mut cull = CullState::new(&device);
+        let lod = [LodGpu { resolution: 0.0, section_base: 0,
+            section_count: 0, is_decal: 0 }];
+        let target = cull.register_model(1.0, &lod, &[], &[]);
+        let row = |z| InstanceGpu { model: target, center: [0.0, 0.0, z, 1.0],
+            ..InstanceGpu::zeroed() };
+        cull.instance_add(row(1.0));
+        cull.set_dynamic(&[row(2.0)]);
+        assert!(cull.arm_main_target_count(&device, 1, target, 1));
+        let identity = cull.main_target_count_fact().identity;
+        cull.main_count_slots.as_mut().unwrap()[0].1 = MainCountSlot::Submitted {
+            identity, committed: true, aborted: false };
+        cull.set_dynamic(&[row(3.0)]);
+        for _ in 0..100 {
+            cull.harvest_main_target_count(&device);
+            if matches!(cull.main_count_slots.as_ref().unwrap()[0].1, MainCountSlot::Idle) { break; }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(matches!(cull.main_count_slots.as_ref().unwrap()[0].1, MainCountSlot::Idle),
+            "the asynchronous map must have completed");
+        assert_eq!(cull.main_count_latest.status, MainCountStatus::Unknown,
+            "a mapped zero from the old revision must never become Absent");
+        assert_eq!(cull.main_target_count_fact().status, MainCountStatus::Unknown);
+    }
+
+    #[test]
     fn pending_count_copy_requires_exact_committed_request() {
         let current = MainCountIdentity { token: 7, model_id: 3,
-            source_generation: 11, cull_epoch: 13 };
+            source_generation: 11, cull_epoch: 13, target_revision: 1 };
         let old = MainCountIdentity { token: 6, ..current };
         assert!(!MainCountSlot::Encoded(current).pending_for(current));
         assert!(!MainCountSlot::Submitted { identity: current, committed: false,

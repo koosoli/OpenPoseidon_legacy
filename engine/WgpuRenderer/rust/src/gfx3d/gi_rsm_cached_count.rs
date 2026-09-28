@@ -68,7 +68,7 @@ mod tests {
             glam::Vec3::ZERO, &super::super::sky_vis::SkyVisSettings::default())[0], 7)
     }
     fn id(token: u64, model_id: u32, source_generation: u64) -> MainCountIdentity {
-        MainCountIdentity { token, model_id, source_generation, cull_epoch: 7 }
+        MainCountIdentity { token, model_id, source_generation, cull_epoch: 7, target_revision: 1 }
     }
     #[test]
     fn mapped_count_requires_exact_publication_image_view_epoch_model_and_source() {
