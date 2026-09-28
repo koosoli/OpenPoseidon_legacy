@@ -245,6 +245,22 @@ struct Contact {
     carry: [f32; 5],
 }
 
+/// W6j diagnostics per boat, accumulated over a window of stepped frames (WGR_TW_WAKE_STATS).
+#[derive(Clone, Copy, Default, Debug)]
+pub struct SprayDiag {
+    pub frames: u32,
+    /// particles thrown per kind: drops, mist, ligaments, white water, sheet
+    pub kinds: [u32; 5],
+    /// the largest slam burst, the mean impact share of the demand
+    pub burst_max: f32,
+    pub imp_sum: f32,
+    /// contact depth (hw - hull point, m) min / max over the stem contacts, the largest immersion rate
+    pub stem_depth: [f32; 2],
+    pub rate_max: f32,
+    /// the producer's frame: origin height above the sea at the stem contacts, draft, freeboard, up.y
+    pub pose: [f32; 4],
+}
+
 #[derive(Clone, Copy, Default)]
 struct BoatState {
     id: Option<u32>,
@@ -253,6 +269,7 @@ struct BoatState {
     wash_carry: f32,
     /// seen this frame
     live: bool,
+    diag: SprayDiag,
 }
 
 /// The boats' spray emitters (one state per boat, kept by id).
@@ -261,12 +278,15 @@ pub struct BoatSpray {
     boats: [BoatState; 2],
     /// the last stepped frame's (particles, requests), for the log
     pub stats: (u32, u32),
+    /// W6j: the last full diagnostics window per boat slot (id, diag)
+    pub diag: [Option<(u32, SprayDiag)>; 2],
 }
 
 struct Emitter<'a> {
     out: &'a mut Vec<EmitRequest>,
     max: usize,
     particles: u32,
+    kinds: [u32; 5],
 }
 
 impl Emitter<'_> {
@@ -283,6 +303,7 @@ impl Emitter<'_> {
         }
         self.out.push(EmitRequest { a, b, vel, count: m as u32, size, kind, spread, jitter, life, size_jitter });
         self.particles += m as u32;
+        self.kinds[(kind as usize).min(4)] += m as u32;
     }
 }
 
@@ -293,7 +314,7 @@ impl BoatSpray {
         for s in &mut self.boats {
             s.live = false;
         }
-        let mut em = Emitter { out, max: max_requests, particles: 0 };
+        let mut em = Emitter { out, max: max_requests, particles: 0, kinds: [0; 5] };
         for b in boats.iter().flatten() {
             // the state kept for this boat, else a free one
             let i = match self.boats.iter().position(|s| s.id == Some(b.id)) {
@@ -306,7 +327,17 @@ impl BoatSpray {
             };
             self.boats[i].live = true;
             if dt > 0.0 {
+                let before = em.kinds;
                 Self::update_boat(&mut self.boats[i], b, dt.min(1.0 / 20.0), &mut em);
+                let d = &mut self.boats[i].diag;
+                for k in 0..5 {
+                    d.kinds[k] += em.kinds[k] - before[k];
+                }
+                d.frames += 1;
+                if d.frames >= 120 {
+                    self.diag[i] = Some((b.id, *d));
+                    *d = SprayDiag::default();
+                }
             }
         }
         for s in &mut self.boats {
@@ -370,6 +401,28 @@ impl BoatSpray {
         // ---- emission, bounded per frame; a slam throws a burst
         st.burst = (st.burst * (-dt / 0.15).exp()).max(slam);
         let burst = st.burst;
+        {
+            let d = &mut st.diag;
+            let (mut dmin, mut dmax, mut rmax, mut di, mut dt_) = (f32::MAX, f32::MIN, 0.0f32, 0.0, 0.0);
+            for k in 0..CONTACTS {
+                if k % SEGMENTS == 0 {
+                    dmin = dmin.min(st.contacts[k].depth);
+                    dmax = dmax.max(st.contacts[k].depth);
+                }
+                rmax = rmax.max(st.contacts[k].rate.abs());
+                di += cs[k].demand_i;
+                dt_ += cs[k].demand_v + cs[k].demand_i;
+            }
+            if d.frames == 0 {
+                d.stem_depth = [dmin, dmax];
+            } else {
+                d.stem_depth = [d.stem_depth[0].min(dmin), d.stem_depth[1].max(dmax)];
+            }
+            d.rate_max = d.rate_max.max(rmax);
+            d.burst_max = d.burst_max.max(burst);
+            d.imp_sum += if dt_ > 1e-4 { di / dt_ } else { 0.0 };
+            d.pose = [b.origin[1] - 0.5 * (b.hw[0] + b.hw[SEGMENTS]), b.draft, b.freeboard, b.y[1]];
+        }
         let boost = 1.0 + 2.5 * burst;
         // (OP: the cap is per 60 Hz frame, so the particle rate does not grow with the frame rate)
         let budget = (MAX_PER_FRAME * dt * 60.0 / (total * EMIT_RATE * dt * boost * 1.3).max(1e-6)).min(1.0);

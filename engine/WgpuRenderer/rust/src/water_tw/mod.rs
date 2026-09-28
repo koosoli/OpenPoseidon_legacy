@@ -1091,7 +1091,29 @@ impl Tidewater {
     /// W6: the wakes' slots, for the log.
     pub fn wake_stats(&self) -> String {
         let (particles, requests) = self.boat_spray.stats;
-        format!("{}; bow spray: {particles} particles in {requests} requests last frame, spray on {}", self.wake.stats(), self.spray.on)
+        let mut diag = String::new();
+        for (id, d) in self.boat_spray.diag.iter().flatten() {
+            let n = d.frames.max(1) as f32;
+            diag += &format!(
+                " | spray diag boat {id}: {} frames, per frame drops {:.1} mist {:.1} lig {:.1} white {:.1} sheet {:.1}; burst max {:.2}, impact share {:.2}; stem depth {:.2}..{:.2} m, rate max {:.2} m/s; origin-sea {:.2} draft {:.2} freeboard {:.2} up.y {:.3}",
+                d.frames,
+                d.kinds[0] as f32 / n,
+                d.kinds[1] as f32 / n,
+                d.kinds[2] as f32 / n,
+                d.kinds[3] as f32 / n,
+                d.kinds[4] as f32 / n,
+                d.burst_max,
+                d.imp_sum / n,
+                d.stem_depth[0],
+                d.stem_depth[1],
+                d.rate_max,
+                d.pose[0],
+                d.pose[1],
+                d.pose[2],
+                d.pose[3]
+            );
+        }
+        format!("{}; bow spray: {particles} particles in {requests} requests last frame, spray on {}{diag}", self.wake.stats(), self.spray.on)
     }
 
     /// W7b: the CPU cost of `prepare` since the last call (mean / max ms, the largest shore
