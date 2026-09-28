@@ -411,9 +411,53 @@ pub(crate) struct InstanceTable {
     /// retirement even when its instance remains. Cached images must observe both kinds.
     /// This is not a revision for arbitrary mesh vertices, dynamic tails or pose palettes.
     epoch: u64,
+    /// Opt-in, retained-static-instance-only witness for one selected model.
+    /// This does not cover the dynamic tail, pose palettes or arbitrary mesh edits;
+    /// no COUNT/cache consumer may substitute it for the global epoch yet.
+    target_revision: Option<Box<RetainedTargetRevision>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RetainedTargetRevision {
+    model_id: u32,
+    // Zero is permanently invalid after overflow; never wrap into an old fact.
+    revision: u64,
 }
 
 impl InstanceTable {
+    /// Start observing a retained model explicitly. Reselecting a model advances
+    /// the serial even when no instance changed, so an older binding cannot alias.
+    fn arm_target_revision(&mut self, model_id: u32) -> Option<u64> {
+        if model_id == INVALID_MODEL { return None; }
+        match &mut self.target_revision {
+            Some(witness) if witness.model_id == model_id => {},
+            Some(witness) => {
+                witness.model_id = model_id;
+                if witness.revision != 0 {
+                    witness.revision = witness.revision.checked_add(1).unwrap_or(0);
+                }
+            }
+            None => self.target_revision = Some(Box::new(RetainedTargetRevision {
+                model_id, revision: 1,
+            })),
+        }
+        self.target_revision().map(|(_, revision)| revision)
+    }
+
+    fn target_revision(&self) -> Option<(u32, u64)> {
+        self.target_revision.as_deref().and_then(|witness| (witness.revision != 0)
+            .then_some((witness.model_id, witness.revision)))
+    }
+
+    fn changed_target_model(&mut self, first: u32, second: u32) {
+        if let Some(witness) = &mut self.target_revision {
+            if witness.revision != 0 &&
+                (witness.model_id == first || witness.model_id == second) {
+                witness.revision = witness.revision.checked_add(1).unwrap_or(0);
+            }
+        }
+    }
+
     fn handle(slot: u32, generation: u8) -> u32 {
         debug_assert!(slot < 0x00FF_FFFE, "instance slot space exhausted");
         (slot + 1) | ((generation as u32) << 24)
@@ -465,6 +509,7 @@ impl InstanceTable {
     /// A recycled slot keeps the generation its removal bumped it to, so the handle returned
     /// here can never equal a handle the caller still holds for the dead occupant.
     fn add(&mut self, inst: InstanceGpu) -> u32 {
+        let new_model = inst.model;
         let slot = if let Some(s) = self.free_slots.pop() {
             self.slots[s as usize] = inst;
             s
@@ -474,6 +519,7 @@ impl InstanceTable {
             (self.slots.len() - 1) as u32
         };
         self.mark_dirty(slot);
+        self.changed_target_model(new_model, INVALID_MODEL);
         Self::handle(slot, self.generations[slot as usize])
     }
 
@@ -484,8 +530,11 @@ impl InstanceTable {
             return;
         };
         if let Some(e) = self.slots.get_mut(slot as usize) {
+            let old_model = e.model;
+            let new_model = inst.model;
             *e = inst;
             self.mark_dirty(slot);
+            self.changed_target_model(old_model, new_model);
         }
     }
 
@@ -497,10 +546,12 @@ impl InstanceTable {
             return;
         };
         if let Some(e) = self.slots.get_mut(slot as usize) {
+            let old_model = e.model;
             e.model = INVALID_MODEL;
             self.generations[slot as usize] = self.generations[slot as usize].wrapping_add(1);
             self.free_slots.push(slot);
             self.mark_dirty(slot);
+            self.changed_target_model(old_model, INVALID_MODEL);
         }
     }
 
@@ -935,6 +986,7 @@ fn retire_model_content(models: &[ModelGpu], lods: &mut [LodGpu], id: u32,
                         instances: &mut InstanceTable, uploads: &mut TableUploads) -> bool {
     if !retire_model_lods(models, lods, id) { return false; }
     instances.invalidate_retained_content();
+    instances.changed_target_model(id, INVALID_MODEL);
     uploads.mark(TableDomain::Lod);
     true
 }
@@ -953,6 +1005,7 @@ fn retire_model_to_sentinel(models: &mut [ModelGpu], lods: &mut [LodGpu], id: u3
     if valid { for lod in &mut lods[span.base..span.base + span.count] { lod.section_count = 0; } }
     model.lod_base = 0; model.lod_count = 0; model._pad = 0;
     instances.invalidate_retained_content();
+    instances.changed_target_model(id, INVALID_MODEL);
     uploads.mark(TableDomain::Model); uploads.mark(TableDomain::Lod);
     (true, valid.then_some(span))
 }
@@ -2540,6 +2593,18 @@ impl CullState {
 
     pub fn instance_remove(&mut self, handle: u32) {
         self.instances.remove(handle);
+    }
+
+    /// Private opt-in witness for one retained static model. This deliberately
+    /// excludes the dynamic instance tail and mesh/material edits. Callers must
+    /// keep the existing global-epoch gate for cached COUNT and Fine residency.
+    pub fn arm_retained_target_revision(&mut self, model_id: u32) -> Option<u64> {
+        self.models.get(model_id as usize)?;
+        self.instances.arm_target_revision(model_id)
+    }
+
+    pub fn retained_target_revision(&self) -> Option<(u32, u64)> {
+        self.instances.target_revision()
     }
 
     /// Handles refused by the retained instance table since startup (ID-3). Nonzero means
@@ -6568,6 +6633,80 @@ pub(crate) mod tests {
         }
         assert!(retire_model_content(&models, &mut lods, 1, &mut instances, &mut uploads));
         assert_eq!(instances.epoch, epoch.wrapping_add(2));
+    }
+
+    #[test]
+    fn retained_target_revision_tracks_old_and_new_model_without_foreign_churn() {
+        let inst = |model| { let mut row = InstanceGpu::zeroed(); row.model = model; row };
+        let mut table = InstanceTable::default();
+        assert_eq!(table.target_revision(), None, "default path has no witness");
+        let a = table.add(inst(7));
+        let b = table.add(inst(8));
+        assert_eq!(table.arm_target_revision(7), Some(1));
+        assert_eq!(table.arm_target_revision(7), Some(1), "same target is inert");
+        table.update(b, inst(8));
+        let extra_b = table.add(inst(8));
+        table.remove(b);
+        let reused_b = table.add(inst(8));
+        assert_ne!(b, reused_b, "recycled slot has a new handle");
+        assert_eq!(table.target_revision(), Some((7, 1)));
+
+        table.update(a, inst(8)); // old A must invalidate A
+        assert_eq!(table.target_revision(), Some((7, 2)));
+        table.update(a, inst(7)); // new A must invalidate A
+        assert_eq!(table.target_revision(), Some((7, 3)));
+        table.update(a, inst(7)); // conservative same-model mutation
+        assert_eq!(table.target_revision(), Some((7, 4)));
+        table.remove(a); // capture old model before writing INVALID_MODEL
+        assert_eq!(table.target_revision(), Some((7, 5)));
+        let reused_a = table.add(inst(7)); // reused slot must count as a new A
+        assert_ne!(a, reused_a);
+        assert_eq!(table.target_revision(), Some((7, 6)));
+        table.update(a, inst(7)); // stale handle is refused
+        table.remove(a);
+        table.remove(extra_b);
+        assert_eq!(table.target_revision(), Some((7, 6)));
+
+        assert_eq!(table.arm_target_revision(8), Some(7));
+        table.update(reused_a, inst(8)); // new B must invalidate B
+        assert_eq!(table.target_revision(), Some((8, 8)));
+        assert_eq!(table.arm_target_revision(7), Some(9),
+            "switching back cannot alias an older A fact");
+    }
+
+    #[test]
+    fn retained_target_revision_covers_both_retirement_paths_and_fails_closed_on_wrap() {
+        let lod = LodGpu { resolution: 1.0, section_base: 0, section_count: 1, is_decal: 0 };
+        let models = [ModelGpu { lod_base: 0, lod_count: 1, bounding_sphere: 1.0, _pad: 0 },
+                      ModelGpu { lod_base: 1, lod_count: 1, bounding_sphere: 1.0, _pad: 0 }];
+        let mut lods = [lod, lod];
+        let mut table = InstanceTable::default();
+        let mut uploads = TableUploads::NONE;
+        assert_eq!(table.arm_target_revision(0), Some(1));
+        assert!(retire_model_content(&models, &mut lods, 1, &mut table, &mut uploads));
+        assert_eq!(table.target_revision(), Some((0, 1)), "foreign retirement is inert");
+        assert!(retire_model_content(&models, &mut lods, 0, &mut table, &mut uploads));
+        assert_eq!(table.target_revision(), Some((0, 2)));
+        assert!(!retire_model_content(&models, &mut lods, 0, &mut table, &mut uploads));
+        assert_eq!(table.target_revision(), Some((0, 2)), "repeat retirement is inert");
+
+        let mut sentinel_models = [ModelGpu { lod_base: 1, lod_count: 1, bounding_sphere: 1.0, _pad: 0 }];
+        let mut sentinel_lods = [LodGpu::zeroed(), lod];
+        let mut sentinel_table = InstanceTable::default();
+        assert_eq!(sentinel_table.arm_target_revision(0), Some(1));
+        let birth = Some(super::super::section_span_pool::Span { base: 1, count: 1 });
+        assert!(retire_model_to_sentinel(&mut sentinel_models, &mut sentinel_lods, 0,
+            birth, &mut sentinel_table, &mut uploads).0);
+        assert_eq!(sentinel_table.target_revision(), Some((0, 2)));
+        assert!(!retire_model_to_sentinel(&mut sentinel_models, &mut sentinel_lods, 0,
+            birth, &mut sentinel_table, &mut uploads).0);
+        assert_eq!(sentinel_table.target_revision(), Some((0, 2)));
+
+        sentinel_table.target_revision.as_mut().unwrap().revision = u64::MAX;
+        assert_eq!(sentinel_table.arm_target_revision(1), None);
+        sentinel_table.changed_target_model(1, INVALID_MODEL);
+        assert_eq!(sentinel_table.arm_target_revision(0), None,
+            "overflow cannot revive an old serial");
     }
 
 
