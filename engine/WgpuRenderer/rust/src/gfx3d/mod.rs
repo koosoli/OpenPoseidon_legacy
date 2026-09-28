@@ -20,7 +20,7 @@ mod local_publication;
 pub(crate) mod geometry_pass_facts;
 mod lod_feedback;
 #[allow(dead_code)]
-mod view_reference_facts;
+pub(crate) mod view_reference_facts;
 use pool::{GeometryPool, MeshAlloc};
 
 // GPU cull + LOD + indirect-arg compaction (docs/gpu-culling-and-depth-plan.md Stage 3).
@@ -10472,6 +10472,53 @@ impl Gfx3d {
     pub fn main_target_completion_fact(&self) -> main_count_completion::Fact {
         self.main_count_completion.as_ref().map_or(main_count_completion::Fact::default(),
             |witness| witness.fact(self.cull.instance_epoch()))
+    }
+    /// One renderer-owned snapshot. Every fact comes from its existing producer;
+    /// the getter adds no dispatch, copy, or allocation to the render path.
+    pub fn view_reference_facts(&mut self, device: &wgpu::Device)
+        -> view_reference_facts::WgrViewReferenceFacts {
+        use view_reference_facts::{aggregate_existing_counts, VIEWS};
+        let completion = self.main_target_completion_fact();
+        let mut facts = [cull::MainCountFact::default(); VIEWS];
+        facts[0] = self.main_target_count_fact(device);
+        for cascade in 0..4 {
+            facts[1 + cascade] = self.shadow_target_count_fact(device, cascade);
+        }
+        for tile in 0..MAX_LOCAL_SHADOWS {
+            facts[5 + tile] = if tile == 0 { self.local0_target_count_fact(device) }
+                else { self.local_target_count_fact(device, tile) };
+        }
+        for direction in 0..sky_vis::DIRECTION_COUNT {
+            facts[29 + direction] = if direction == 0 { self.sky0_target_count_fact(device) }
+                else { self.batch_target_count_fact(device, direction - 1) };
+        }
+        facts[34] = self.gi_target_count_fact(device);
+        facts[35] = self.reflection_target_count_fact(device);
+        let mut published_cached = 0u64;
+        if let Some(caches) = &self.local_cached_counts {
+            for tile in 0..self.local_publication_scope {
+                if caches[tile].fact(self.local_current_count_key(tile)) == facts[5 + tile] &&
+                    facts[5 + tile].status != cull::MainCountStatus::Unknown {
+                    published_cached |= 1u64 << (5 + tile);
+                }
+            }
+        }
+        if let Some(caches) = &self.interior_cached_counts {
+            for direction in 0..sky_vis::DIRECTION_COUNT {
+                if caches[direction].fact(self.interior_current_count_key(direction)) ==
+                    facts[29 + direction] &&
+                    facts[29 + direction].status != cull::MainCountStatus::Unknown {
+                    published_cached |= 1u64 << (29 + direction);
+                }
+            }
+        }
+        if let Some(cache) = &self.gi_rsm_cached_count {
+            if cache.fact(self.gi_rsm_current_count_key()) == facts[34] &&
+                facts[34].status != cull::MainCountStatus::Unknown {
+                published_cached |= 1u64 << 34;
+            }
+        }
+        aggregate_existing_counts(completion, &facts, published_cached)
     }
     pub fn shadow_target_count_fact(&mut self, device: &wgpu::Device,
                                     cascade: usize) -> cull::MainCountFact {

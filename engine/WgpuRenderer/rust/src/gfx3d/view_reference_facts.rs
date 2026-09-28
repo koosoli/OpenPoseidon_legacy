@@ -1,13 +1,14 @@
-//! Private-fixture, bounded bookkeeping for a future exact GPU cull reference readback.
+//! Bounded bookkeeping and an all-view diagnostic over existing exact COUNT facts.
 //!
-//! No shader, GPU copy, renderer getter, or retirement policy calls this yet. A zero may be
-//! published only from a successful readback of an actual view's target-model COUNT word.
+//! The renderer getter aggregates existing readbacks; it adds no shader or GPU copy.
+//! A zero may be published only from a successful readback of an actual view's COUNT word.
 //! In particular, an unrecorded view, cached image without an earlier sample, failed frame,
 //! dropped copy, or stale readback remains Unknown. The caller must supply the *complete*
 //! required-view set and a monotonic cache generation from actual pass publication; a
 //! planning hash or requested draw is not a cache generation.
 
 use std::mem::size_of;
+use super::{cull::{MainCountFact, MainCountIdentity, MainCountStatus}, main_count_completion};
 
 pub const VERSION: u32 = 2;
 pub const VIEWS: usize = 36; // main, 4 cascades, 24 locals, 5 interior, GI, reflection
@@ -20,6 +21,50 @@ pub const REFLECTION: usize = 35;
 pub const PENDING: usize = 3;
 pub const VIEW_MASK: u64 = (1u64 << VIEWS) - 1;
 
+/// The renderer supplies all 36 facts from one borrow. Only the publication-bound
+/// interior, GI and local getters may return a fact from an earlier request.
+/// Completion of the current request's final queue submission is a separate gate;
+/// it does not certify pixels or mesh retirement.
+pub fn aggregate_existing_counts(
+    completion: main_count_completion::Fact,
+    facts: &[MainCountFact; VIEWS],
+    published_cached: u64,
+) -> WgrViewReferenceFacts {
+    let current = completion.identity;
+    let mut out = WgrViewReferenceFacts {
+        version: VERSION, struct_bytes: size_of::<WgrViewReferenceFacts>() as u32,
+        view_count: VIEWS as u32, render_token: current.token,
+        instance_epoch: current.cull_epoch, required: VIEW_MASK, unknown: VIEW_MASK,
+        target_model_id: current.model_id, target_source_generation: current.source_generation,
+        ..Default::default()
+    };
+    if completion.state != main_count_completion::COMPLETED ||
+        current.token == 0 || current.cull_epoch == 0 || current.source_generation == 0 {
+        return out;
+    }
+    for (view, fact) in facts.iter().enumerate() {
+        let bit = 1u64 << view;
+        let older_cached = fact.identity.token < current.token && published_cached & bit != 0;
+        if !same_target(fact.identity, current) ||
+            !(fact.identity.token == current.token || older_cached) { continue; }
+        match (fact.status, fact.count) {
+            (MainCountStatus::Present, 1..) => out.present |= bit,
+            (MainCountStatus::Absent, 0) => out.absent |= bit,
+            _ => continue,
+        }
+        out.unknown &= !bit;
+        if older_cached { out.cached |= bit; }
+    }
+    out.status = if out.unknown == 0 { 1 } else { 2 };
+    out
+}
+
+fn same_target(fact: MainCountIdentity, current: MainCountIdentity) -> bool {
+    fact.token != 0 && fact.model_id == current.model_id &&
+        fact.source_generation == current.source_generation &&
+        fact.cull_epoch == current.cull_epoch
+}
+
 /// Query identity. Instance handle zero means all instances of this model, required when
 /// proving a whole model unused. `source_generation` is a caller-owned, nonzero generation
 /// for the exact geometry source; it must change when source mesh handles/content change.
@@ -30,9 +75,10 @@ pub struct TargetIdentity {
     pub source_generation: u64,
 }
 
-/// Proposed copied ABI record. Not exported until an actual readback producer is wired.
-/// `status=0` means no successful returned frame; `1` is a complete input observation;
-/// `2` has at least one Unknown. No status means GPU/device completion or safe mesh release.
+/// Copied private ABI record. The renderer getter always sets `required=VIEW_MASK`.
+/// `status=0` means the current request's final queue completion is unproven;
+/// `1` means all 36 COUNT facts are known; `2` has at least one Unknown.
+/// No status means pixel visibility or safe mesh release.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WgrViewReferenceFacts {
@@ -322,6 +368,57 @@ impl ViewReferenceFacts {
 mod tests {
     use super::*;
     use std::mem::offset_of;
+
+    fn count_fact(token: u64, status: MainCountStatus, count: u32) -> MainCountFact {
+        MainCountFact { identity: MainCountIdentity { token, model_id: 7,
+            source_generation: 9, cull_epoch: 11 }, status, count }
+    }
+
+    #[test]
+    fn all_view_snapshot_requires_completion_and_all_36_real_facts() {
+        let id = count_fact(5, MainCountStatus::Absent, 0).identity;
+        let mut facts = [count_fact(5, MainCountStatus::Absent, 0); VIEWS];
+        let mut completion = main_count_completion::Fact { identity: id,
+            state: main_count_completion::SUBMITTED };
+        let pending = aggregate_existing_counts(completion, &facts, 0);
+        assert_eq!((pending.status, pending.absent, pending.unknown), (0, 0, VIEW_MASK));
+        completion.state = main_count_completion::COMPLETED;
+        assert_eq!(aggregate_existing_counts(completion, &facts, 0).status, 1);
+        facts[35] = MainCountFact::default();
+        let partial = aggregate_existing_counts(completion, &facts, 0);
+        assert_eq!(partial.required, VIEW_MASK);
+        assert_eq!(partial.unknown, 1u64 << 35);
+        assert_eq!(partial.status, 2);
+        assert_eq!(partial.absent, VIEW_MASK & !(1u64 << 35));
+    }
+
+    #[test]
+    fn all_view_snapshot_rejects_stale_target_and_unbound_old_tokens() {
+        let id = count_fact(5, MainCountStatus::Absent, 0).identity;
+        let completion = main_count_completion::Fact { identity: id,
+            state: main_count_completion::COMPLETED };
+        let mut facts = [count_fact(5, MainCountStatus::Absent, 0); VIEWS];
+        facts[0].identity.token = 4; // main has no published cache binding
+        facts[1].identity.source_generation = 8;
+        facts[2].identity.cull_epoch = 10;
+        facts[3].identity.model_id = 8;
+        facts[4] = count_fact(6, MainCountStatus::Absent, 0);
+        facts[5] = count_fact(4, MainCountStatus::Absent, 0); // published local fact
+        facts[29] = count_fact(4, MainCountStatus::Present, 3); // published interior fact
+        facts[34] = count_fact(4, MainCountStatus::Absent, 0); // published GI fact
+        facts[35] = count_fact(5, MainCountStatus::Absent, 4); // incoherent COUNT
+        let unbound = aggregate_existing_counts(completion, &facts, 0);
+        assert_ne!(unbound.unknown & (1u64 << 5), 0);
+        assert_ne!(unbound.unknown & (1u64 << 29), 0);
+        assert_ne!(unbound.unknown & (1u64 << 34), 0);
+        let snapshot = aggregate_existing_counts(completion, &facts,
+            (1u64 << 5) | (1u64 << 29) | (1u64 << 34));
+        assert_eq!(snapshot.unknown & 0b1_1111, 0b1_1111);
+        assert_eq!(snapshot.cached, (1u64 << 5) | (1u64 << 29) | (1u64 << 34));
+        assert_eq!(snapshot.present, 1u64 << 29);
+        assert_ne!(snapshot.unknown & (1u64 << 35), 0);
+        assert_eq!(snapshot.status, 2);
+    }
 
     fn generations(n: u64) -> [u64; VIEWS] { [n; VIEWS] }
     fn target(n: u64) -> TargetIdentity {

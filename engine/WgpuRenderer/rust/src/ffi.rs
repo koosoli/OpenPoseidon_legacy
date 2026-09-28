@@ -3359,10 +3359,15 @@ mod main_target_count_ffi_tests {
             ..WgrMainTargetCountResult::empty() };
         let mut completion = WgrMainTargetCompletionResult { token: 99,
             ..WgrMainTargetCompletionResult::empty() };
+        let mut views = crate::gfx3d::view_reference_facts::WgrViewReferenceFacts {
+            render_token: 99, ..Default::default() };
         unsafe {
             assert_eq!(wgr_main_target_completion_fact(renderer, &mut completion, 47, 1), 0);
             assert_eq!(wgr_main_target_completion_fact(renderer, &mut completion, 48, 2), 0);
             assert_eq!(wgr_main_target_completion_fact(std::ptr::null_mut(), &mut completion, 48, 1), 0);
+            assert_eq!(wgr_view_reference_facts(renderer, &mut views, 95, 2), 0);
+            assert_eq!(wgr_view_reference_facts(renderer, &mut views, 96, 1), 0);
+            assert_eq!(wgr_view_reference_facts(std::ptr::null_mut(), &mut views, 96, 2), 0);
             assert_eq!(wgr_render_frame_main_target_count(renderer, frame, &request, 31, 1,
                 &mut output, 48, 1), -4);
             assert_eq!(wgr_render_frame_main_target_count(renderer, frame, &request, 32, 1,
@@ -3390,6 +3395,7 @@ mod main_target_count_ffi_tests {
         }
         assert_eq!(output.token, 99);
         assert_eq!(completion.token, 99);
+        assert_eq!(views.render_token, 99);
     }
 }
 
@@ -3465,6 +3471,29 @@ pub unsafe extern "C" fn wgr_main_target_completion_fact(
         output.model_id = fact.identity.model_id;
         output.source_generation = fact.identity.source_generation;
         output.cull_epoch = fact.identity.cull_epoch;
+    })).is_ok() as u32
+}
+
+/// Private, nonblocking all-36-view COUNT snapshot from one renderer borrow.
+/// An absent bit describes only a target-model cull COUNT, never pixels or
+/// permission to release/reclaim Fine geometry. Inactive views stay Unknown.
+/// # Safety
+/// Same live renderer and exact writable output contract as the main getter.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_view_reference_facts(
+    renderer: *mut WgrRenderer,
+    output: *mut crate::gfx3d::view_reference_facts::WgrViewReferenceFacts,
+    output_size: u32, output_version: u32,
+) -> u32 {
+    use crate::gfx3d::view_reference_facts::{valid_layout, WgrViewReferenceFacts};
+    if renderer.is_null() || output.is_null() || !valid_layout(output_size, output_version) {
+        return 0;
+    }
+    let output = unsafe { &mut *output };
+    *output = WgrViewReferenceFacts::default();
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        *output = renderer.gfx3d.view_reference_facts(&renderer.device);
     })).is_ok() as u32
 }
 

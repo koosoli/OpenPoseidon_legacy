@@ -2290,9 +2290,11 @@ static_assert(offsetof(WgrGeometryPassFacts,interior_epochs)==496);
 static_assert(offsetof(WgrGeometryPassFacts,reflection_epoch)==576);
 static_assert(offsetof(WgrGeometryPassFacts,reflection_frame)==584);
 
-// Private GeometryPage view-reference copied layout, not yet exposed by an FFI getter.
-// status 0=uncommitted, 1=all required input views known, 2=at least one Unknown.
-// An absent bit is a COUNT-input observation, never device retirement or all-pass proof.
+// Private v2 all-view COUNT diagnostic. required is always all 36 bits:
+// main, 4 solar, 24 local, 5 interior, GI and planar reflection.
+// status 0 awaits current final queue completion, 1=all 36 known, 2=Unknown remains.
+// Cached facts keep their original token but must match the current target and
+// exact published image. No state certifies pixels or Fine release/reclaim.
 struct WgrViewReferenceFacts {
  uint32_t version,struct_bytes,status,view_count;
  uint64_t render_token,instance_epoch,required,present,absent,unknown,cached;
@@ -2727,6 +2729,10 @@ extern "C"
     /* Exact opt-in main request only. state=3 is completion of preceding queue
      * submissions, not pixel visibility, all-view proof or Fine release. */
     WGR_API uint32_t wgr_main_target_completion_fact(WgrRenderer*, WgrMainTargetCompletionResult*,
+        uint32_t output_size, uint32_t output_version);
+    /* Private v2 all-view snapshot; one nonblocking renderer borrow and no new GPU copy.
+     * Returns 0 for foreign layout without touching output. Diagnostic only. */
+    WGR_API uint32_t wgr_view_reference_facts(WgrRenderer*, WgrViewReferenceFacts*,
         uint32_t output_size, uint32_t output_version);
     /* Same opt-in request, separate cascade-0 cull counter. UNKNOWN unless its
      * depth pass closed and the copied sample was committed after final submit.
