@@ -8,12 +8,14 @@
 #include <Poseidon/Asset/Formats/Config/ArmaRap.hpp>
 #include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamRapStageNames.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <cstring>
 #include <fstream>
 #include <iterator>
 #include <cstdlib>
+#include <memory>
 #include <string>
 
 using Poseidon::Asset::Material::ParseRvMaterial;
@@ -207,6 +209,29 @@ TEST_CASE("Owned raP stage names are complete or refused", "[preparer][rap-stage
     CHECK(extract(cycle).names.empty());
 
     CHECK(extract(minimalRap(), "C:/host/stone.rvmat").status == RapStageNamesStatus::Unsupported);
+}
+
+TEST_CASE("raP owner candidate is bounded names-only metadata", "[preparer][rap-stage-names]")
+{
+    Poseidon::RapStageCandidateHandoff handoff;
+    CHECK_FALSE(handoff.Bounded());
+    handoff.generation = 7; handoff.modelIndex = 3;
+    handoff.materials.push_back({"dz\\plants\\tree\\data\\t_piceaabies_2d_trunk.rvmat",
+        "dz\\plants\\tree\\data\\t_piceaabies_trunk_no.paa"});
+    REQUIRE(handoff.Bounded());
+    auto moved = std::make_unique<Poseidon::RapStageCandidateHandoff>(std::move(handoff));
+    REQUIRE(moved->Bounded());
+    CHECK(moved->modelIndex == 3);
+    CHECK(moved->materials[0].stageName == "dz\\plants\\tree\\data\\t_piceaabies_trunk_no.paa");
+    moved->materials.push_back({"dz\\plants\\tree\\data\\d_piceaabies_stumpb_trunk_a.rvmat",
+        "dz\\plants\\tree\\data\\t_piceaabies_trunk_no.paa"});
+    CHECK(moved->Bounded());
+    moved->materials.push_back({"third.rvmat", "third.paa"});
+    CHECK_FALSE(moved->Bounded());
+    Poseidon::RapStageCandidateHandoff tooLong;
+    tooLong.generation = 7;
+    tooLong.materials.push_back({"material.rvmat", std::string(241, 'x')});
+    CHECK_FALSE(tooLong.Bounded());
 }
 
 static const char* kSuper = R"CFG(

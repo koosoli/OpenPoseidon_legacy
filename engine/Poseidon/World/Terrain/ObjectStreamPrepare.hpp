@@ -91,6 +91,32 @@ struct WarmTextureRead
     std::string key;
     std::shared_ptr<const ArchiveSourceBinding> initializedSource;
 };
+
+// Advisory names from a completed, exact-source raP read. No texture or source
+// authority travels with this payload; the owner must recapture/validate later.
+struct RapStageCandidateHandoff
+{
+    struct Material { std::string key, stageName; };
+    uint64_t generation = 0;
+    uint32_t modelIndex = 0;
+    std::vector<Material> materials;
+    static constexpr size_t MaxKnownBytes = 2 * 1024;
+    bool Bounded() const
+    {
+        if (!generation || materials.empty() || materials.size() > 2 || materials.capacity() > 2) return false;
+        size_t charge = sizeof(*this);
+        auto add = [&](size_t bytes) { if (bytes > MaxKnownBytes - charge) return false; charge += bytes; return true; };
+        if (!add(materials.capacity() * sizeof(Material))) return false;
+        for (const auto& material : materials)
+        {
+            if (material.key.empty() || material.key.size() > 240 ||
+                material.stageName.empty() || material.stageName.size() > 240 ||
+                !add(material.key.capacity() + 1) || !add(material.stageName.capacity() + 1))
+                return false;
+        }
+        return true;
+    }
+};
 struct Bc3EncodingObserver;
 namespace render { struct DdsPublicationObserver; struct ColdPaaOwned; }
 class LODShapeWithShadow;
@@ -360,6 +386,7 @@ class ObjectStreamPreparer
         std::shared_ptr<Model::Model> model; // the IR it was converted from
         SourceConversionToken sourceToken; // actual job association; ordinary jobs remain zero
         std::unique_ptr<render::ColdPaaOwned> coldTexture; // operation-local, optional; no global TTL delivery
+        std::unique_ptr<RapStageCandidateHandoff> rapStages; // names only; exact opt-in fixture, no PAA readiness
     };
     // Main thread. If Converted, returns the shape + IR and returns the slot to
     // Unknown; else {}. The caller MUST run CreateAdapterProxies + ShapeBank install.

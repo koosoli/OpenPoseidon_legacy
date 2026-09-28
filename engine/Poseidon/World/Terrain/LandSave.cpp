@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <chrono>
+#include <atomic>
 #include <optional>
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -4261,6 +4262,15 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         ++waited;
                         ++scan;
                         continue;
+                    }
+                    if (conv.rapStages && conv.rapStages->modelIndex == placement.modelIndex)
+                    {
+                        static std::atomic<unsigned> rapHandoffRows{0};
+                        const unsigned row = rapHandoffRows.fetch_add(1, std::memory_order_relaxed);
+                        if (row < 2)
+                            for (const auto& material : conv.rapStages->materials)
+                                LOG_INFO(World, "RVMAT raP owner candidate: generation={} modelIndex={} material={} stage={} (names only; no current binding or PAA preparation)",
+                                    conv.rapStages->generation, placement.modelIndex, material.key, material.stageName);
                     }
                     preadapted = conv.shape;
                     preparsed = std::move(conv.model);

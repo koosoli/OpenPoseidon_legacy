@@ -418,6 +418,7 @@ struct ObjectStreamPreparer::Impl
     };
     static constexpr size_t PackedTextureLimit = 16 * 1024 * 1024;
     static constexpr size_t RapMaterialLimit = 256 * 1024;
+    static constexpr size_t RapCandidateLimit = RapStageCandidateHandoff::MaxKnownBytes;
     struct CapturedRapMaterial
     {
         std::string key;
@@ -426,7 +427,7 @@ struct ObjectStreamPreparer::Impl
     struct ConvertJob
     {
         std::vector<PackedTextureRead> textures;
-        std::vector<CapturedRapMaterial> rapMaterials; // diagnostic-only, no PAA work
+        std::vector<CapturedRapMaterial> rapMaterials; // names-only owner handoff, no PAA work
 
         std::unique_ptr<render::ColdPaaRead> coldTexture;
         uint64_t textureGeneration = 0;
@@ -507,6 +508,9 @@ struct ObjectStreamPreparer::Impl
     std::vector<std::unique_ptr<render::ColdPaaOwned>> convertedColdTextures;
     std::vector<LODShapeWithShadow*> convertedShapes;
     std::vector<ModelPtr> convertedModels;
+    // Two selected material fixtures per world. Empty slots allocate nothing when off.
+    struct RapReady { uint32_t index = uint32_t(-1); std::unique_ptr<RapStageCandidateHandoff> payload; };
+    std::array<RapReady, 2> convertedRapStages{};
     std::vector<uint64_t> conversionBytes;
     Stats stats;
     std::vector<uint64_t> payloadBytes;
@@ -744,6 +748,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 BankReadMemberIdentity member;
             };
             std::vector<RapObservation> rapObservations;
+            std::unique_ptr<RapStageCandidateHandoff> rapHandoff;
             if (shape && job.radiusIdentityAccepted && job.radiusGeneration == jobGen &&
                 !job.rapMaterials.empty())
             {
@@ -766,7 +771,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                         if (selected.read.bytes <= RapMaterialLimit && selected.read.Read(bytes) &&
                             bytes.size() == selected.read.bytes)
                         {
-                            const auto result = Streaming::ExtractOwnedRapStageNames(
+                            auto result = Streaming::ExtractOwnedRapStageNames(
                                 std::span<const char>(bytes.data(), bytes.size()), selected.key);
                             observed.status = static_cast<int>(result.status);
                             observed.count = result.names.size();
@@ -775,12 +780,22 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                                 if (!observed.names.empty()) observed.names += ';';
                                 observed.names += name;
                             }
+                            if (result.status == Streaming::RapStageNamesStatus::Complete && !result.names.empty())
+                            {
+                                if (!rapHandoff)
+                                {
+                                    rapHandoff = std::make_unique<RapStageCandidateHandoff>();
+                                    rapHandoff->generation = jobGen; rapHandoff->modelIndex = job.index;
+                                }
+                                rapHandoff->materials.push_back({selected.key, std::move(result.names.front())});
+                            }
                         }
                         rapObservations.push_back(std::move(observed));
                     }
                 }
-                catch (...) { rapObservations.clear(); } // Optional diagnostic cannot fail geometry conversion.
+                catch (...) { rapObservations.clear(); rapHandoff.reset(); } // Optional discovery cannot fail conversion.
             }
+            if (rapHandoff && !rapHandoff->Bounded()) rapHandoff.reset();
             PaaAttemptRow attemptRow;
             auto reportAttempts = [&](bool published, double publicationDelayMs) {
                 if (!paaAttemptDiagnostics || job.textures.empty()) return;
@@ -844,6 +859,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 delete shape;
                 ownedCold.reset(); job.coldTexture.reset();
                 job.rapMaterials.clear(); // release archive leases OUTSIDE queue mutex
+                rapHandoff.reset();
                 rapObservations.clear();
                 job.model.reset();
                 job.tables.reset();
@@ -865,6 +881,9 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 convertedShapes[job.index] = shape;
                 shape = nullptr; // Ownership is now in the published slot.
                 convertedModels[job.index] = std::move(job.model);
+                if (rapHandoff) for (auto& slot : convertedRapStages)
+                    if (!slot.payload)
+                    { slot.index = job.index; slot.payload = std::move(rapHandoff); break; }
                 if (ownedCold && job.index < convertedColdTextures.size())
                 {
                     const auto bytes = ownedCold->KnownBytes();
@@ -918,6 +937,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             delete shape;
             ownedCold.reset(); job.coldTexture.reset();
             job.rapMaterials.clear(); // release archive leases OUTSIDE queue mutex
+            rapHandoff.reset();
             rapObservations.clear();
             job.model.reset();
             job.tables.reset();
@@ -1462,6 +1482,7 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
     std::vector<Impl::ModelPtr> freeLater;
     std::vector<LODShapeWithShadow*> freeShapes;
     std::deque<Impl::ConvertJob> freeConversions;
+    std::array<std::unique_ptr<RapStageCandidateHandoff>, 2> freeRap;
     std::array<Impl::WarmJob, Streaming::WarmTextureJobPolicy::JobLimit> freeWarm;
     size_t freeWarmCount = 0;
     {
@@ -1522,6 +1543,11 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
                 freeLater.push_back(std::move(m));
         _impl->convertedShapes.assign(modelCount, nullptr);
         _impl->convertedModels.assign(modelCount, nullptr);
+        for (size_t i = 0; i < _impl->convertedRapStages.size(); ++i)
+        {
+            freeRap[i] = std::move(_impl->convertedRapStages[i].payload);
+            _impl->convertedRapStages[i].index = uint32_t(-1);
+        }
         _impl->models.assign(modelCount, nullptr);
         _impl->stale.assign(modelCount, false);
         _impl->requestedAtUs.assign(modelCount, 0);
@@ -1699,6 +1725,7 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
     std::vector<Impl::ModelPtr> freeLater;
     std::vector<LODShapeWithShadow*> freeShapes;
     std::deque<Impl::ConvertJob> freeConversions;
+    std::array<std::unique_ptr<RapStageCandidateHandoff>, 2> freeRap;
     std::array<Impl::WarmJob, Streaming::WarmTextureJobPolicy::JobLimit> freeWarm;
     size_t freeWarmCount = 0;
     size_t dropped = 0;
@@ -1750,6 +1777,12 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
                 }
                 freeLater.push_back(std::move(_impl->convertedModels[i]));
                 _impl->convertedModels[i].reset();
+                for (size_t slot = 0; slot < _impl->convertedRapStages.size(); ++slot)
+                    if (_impl->convertedRapStages[slot].payload && _impl->convertedRapStages[slot].index == i)
+                    {
+                        freeRap[slot] = std::move(_impl->convertedRapStages[slot].payload);
+                        _impl->convertedRapStages[slot].index = uint32_t(-1);
+                    }
                 _impl->Set(static_cast<uint32_t>(i), State::Unknown);
                 ++dropped;
             }
@@ -2087,7 +2120,7 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     job.coldTexture = std::move(coldTexture);
     if (!rapMaterials.empty())
     {
-        job.reservation += rapMaterials.capacity() * sizeof(Impl::CapturedRapMaterial);
+        job.reservation += Impl::RapCandidateLimit + rapMaterials.capacity() * sizeof(Impl::CapturedRapMaterial);
         for (const auto& material : rapMaterials)
             job.reservation += material.key.capacity() + 1 + material.read.archive.capacity() + 1 +
                 material.read.ArchiveIdentityBytes() + 64;
@@ -2133,6 +2166,9 @@ ObjectStreamPreparer::ConvertedShape ObjectStreamPreparer::TakeConverted(uint32_
     }
     out.model = std::move(_impl->convertedModels[index]);
     _impl->convertedModels[index].reset();
+    for (auto& slot : _impl->convertedRapStages)
+        if (slot.payload && slot.index == index)
+        { out.rapStages = std::move(slot.payload); slot.index = uint32_t(-1); break; }
     _impl->Set(index, State::Unknown);
     if (index < _impl->sourceEnvelopes.size())
     {
