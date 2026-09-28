@@ -250,6 +250,12 @@ fn sprayShade(in: SprayOut) -> vec4<f32> {
         if (dbgMode == 5u) { f = sat(0.5 + (posViewZ - sceneZ) / 20.0); }
         if (dbgMode == 6u) { f = sat(-sceneZ / 100.0); }
         if (dbgMode == 7u) { f = sat(-posViewZ / 100.0); }
+        // 8: the opaque depth sample x20 (reverse z), 9: the sprite's own depth x20, 10: the scene
+        // view distance / 20 m, 11: the sprite's view distance / 20 m
+        if (dbgMode == 8u) { f = sat(_waterSceneDepthAt(suv) * 20.0); }
+        if (dbgMode == 9u) { f = sat(in.clip.z * 20.0); }
+        if (dbgMode == 10u) { f = sat(-sceneZ / 20.0); }
+        if (dbgMode == 11u) { f = sat(-posViewZ / 20.0); }
         return vec4<f32>(f, f * 0.2, 1.0 - f, 1.0);
     }
     if (aOut < 0.002) { discard; }
