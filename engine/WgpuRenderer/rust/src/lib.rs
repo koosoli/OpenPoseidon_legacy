@@ -6454,7 +6454,7 @@ impl Renderer {
         self.gfx3d.gi_rsm_publication_submitted();
         self.gfx3d.local_publications_submitted();
         let main_count_submitted = main_count_ready && main_count_request.is_some_and(|(token, _, _)|
-            self.gfx3d.main_target_count_submitted(token));
+            self.gfx3d.main_target_count_submitted(token, &self.queue));
         if let Some((token, _, _)) = main_count_request {
             for cascade in 0..4 {
                 if shadow_count_ready[cascade] {

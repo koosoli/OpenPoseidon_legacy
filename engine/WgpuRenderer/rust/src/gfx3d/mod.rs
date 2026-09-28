@@ -6,6 +6,7 @@ pub(crate) mod pool;
 mod allocation_report;
 mod mesh_facts;
 mod mesh_ack;
+pub(crate) mod main_count_completion;
 mod registered_mesh_refs;
 mod section_refresh;
 mod section_span_pool;
@@ -3920,6 +3921,7 @@ pub struct Gfx3d {
     mesh_ack_enabled: bool,
     registered_mesh_refs_enabled: bool,
     mesh_ack: Option<Box<mesh_ack::MeshAck>>,
+    main_count_completion: Option<main_count_completion::Witness>,
     cameras: CameraGroup,
     conform: ConformGroup,
     gi: gi::GiProbes, // REN-GI-001
@@ -4899,6 +4901,7 @@ impl Gfx3d {
             mesh_ack_enabled: std::env::var("WGR_GEOMETRY_MESH_ACK").is_ok_and(|v| v == "1"),
             registered_mesh_refs_enabled: std::env::var("WGR_GEOMETRY_REGISTERED_REFS").is_ok_and(|v| v == "1"),
             mesh_ack: None,
+            main_count_completion: None,
             cameras,
             conform,
             gi,
@@ -5682,9 +5685,10 @@ impl Gfx3d {
         // reflection work is covered too. This is not GPU/device memory release.
         if let Some(state) = &mut self.mesh_ack {
             state.main_submitted(|signal| queue.on_submitted_work_done(move || signal.complete()));
-            if state.completion_pending() {
-                let _ = device.poll(wgpu::PollType::Poll); // Never wait.
-            }
+        }
+        if self.mesh_ack.as_ref().is_some_and(|state| state.completion_pending()) ||
+            self.main_count_completion.as_ref().is_some_and(main_count_completion::Witness::completion_pending) {
+            let _ = device.poll(wgpu::PollType::Poll); // Never wait.
         }
         // REN-RES-002: the pool may reallocate DOWN here. A shrink moves the pool buffers
         // exactly as a growth does, so it invalidates the same cache — the skin-bake binds
@@ -10058,8 +10062,14 @@ impl Gfx3d {
 
     pub fn arm_main_target_count(&mut self, device: &wgpu::Device, token: u64,
                                  model_id: u32, source_generation: u64) -> bool {
-        self.gpu_driven_enabled && self.cull.arm_main_target_count(
-            device, token, model_id, source_generation)
+        if let Some(witness) = self.main_count_completion.as_mut() { witness.invalidate(); }
+        let armed = self.gpu_driven_enabled && self.cull.arm_main_target_count(
+            device, token, model_id, source_generation);
+        if armed {
+            let identity = self.cull.main_target_count_fact().identity;
+            self.main_count_completion.get_or_insert_with(main_count_completion::Witness::new).arm(identity);
+        }
+        armed
     }
     pub fn copy_main_target_count(&mut self, encoder: &mut wgpu::CommandEncoder) -> bool {
         self.cull.copy_main_target_count(encoder)
@@ -10258,12 +10268,21 @@ impl Gfx3d {
     pub fn main_target_count_before_submit(&mut self, token: u64) -> bool {
         self.cull.main_target_count_before_submit(token)
     }
-    pub fn main_target_count_submitted(&mut self, token: u64) -> bool {
-        self.cull.main_target_count_submitted(token)
+    pub fn main_target_count_submitted(&mut self, token: u64, queue: &wgpu::Queue) -> bool {
+        if !self.cull.main_target_count_submitted(token) { return false; }
+        let identity = self.cull.main_target_count_fact().identity;
+        if identity.token == token {
+            if let Some(witness) = self.main_count_completion.as_mut() {
+                witness.submitted(identity, |signal|
+                    queue.on_submitted_work_done(move || signal.complete()));
+            }
+        }
+        true
     }
     pub fn main_target_count_commit(&mut self, token: u64) -> bool {
         let main = self.cull.main_target_count_commit(token);
         if main {
+            if let Some(witness) = self.main_count_completion.as_mut() { witness.commit(token); }
             for cascade in 0..5 { self.cull.shadow_target_count_commit(token, cascade); }
             self.cull.local0_target_count_commit(token);
             self.cull.reflection_target_count_commit(token);
@@ -10273,6 +10292,7 @@ impl Gfx3d {
         main
     }
     pub fn main_target_count_abort(&mut self, token: u64) {
+        if let Some(witness) = self.main_count_completion.as_mut() { witness.abort(token); }
         self.cull.main_target_count_abort(token);
         for cascade in 0..5 { self.cull.shadow_target_count_abort(token, cascade); }
         self.cull.local0_target_count_abort(token);
@@ -10286,6 +10306,10 @@ impl Gfx3d {
     }
     pub fn main_target_count_snapshot(&self) -> cull::MainCountFact {
         self.cull.main_target_count_fact()
+    }
+    pub fn main_target_completion_fact(&self) -> main_count_completion::Fact {
+        self.main_count_completion.as_ref().map_or(main_count_completion::Fact::default(),
+            |witness| witness.fact(self.cull.instance_epoch()))
     }
     pub fn shadow_target_count_fact(&mut self, device: &wgpu::Device,
                                     cascade: usize) -> cull::MainCountFact {

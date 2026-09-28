@@ -3303,6 +3303,27 @@ pub struct WgrMainTargetCountResult {
     pub cull_epoch: u64,
 }
 
+/// Separate additive diagnostic: the exact main COUNT request's final queue
+/// submission completed. It does not certify pixels, other views or release.
+#[repr(C)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct WgrMainTargetCompletionResult {
+    pub struct_size: u32,
+    pub version: u32,
+    pub state: u32, // 0 unknown, 1 armed, 2 submitted, 3 completed
+    pub reserved: u32,
+    pub token: u64,
+    pub model_id: u32,
+    pub reserved2: u32,
+    pub source_generation: u64,
+    pub cull_epoch: u64,
+}
+impl WgrMainTargetCompletionResult {
+    const VERSION: u32 = 1;
+    fn empty() -> Self { Self { struct_size: std::mem::size_of::<Self>() as u32,
+        version: Self::VERSION, ..Self::default() } }
+}
+
 impl WgrMainTargetCountResult {
     const VERSION: u32 = 1;
     fn empty() -> Self {
@@ -3329,13 +3350,19 @@ mod main_target_count_ffi_tests {
     fn versioned_request_rejects_foreign_layout_before_renderer_access() {
         assert_eq!(std::mem::size_of::<WgrMainTargetCountRequest>(), 32);
         assert_eq!(std::mem::size_of::<WgrMainTargetCountResult>(), 48);
+        assert_eq!(std::mem::size_of::<WgrMainTargetCompletionResult>(), 48);
         let renderer = 1usize as *mut WgrRenderer;
         let frame = 1usize as *const WgrFrame;
         let request = WgrMainTargetCountRequest { struct_size: 32, version: 1,
             token: 7, model_id: 3, reserved: 0, source_generation: 11 };
         let mut output = WgrMainTargetCountResult { token: 99,
             ..WgrMainTargetCountResult::empty() };
+        let mut completion = WgrMainTargetCompletionResult { token: 99,
+            ..WgrMainTargetCompletionResult::empty() };
         unsafe {
+            assert_eq!(wgr_main_target_completion_fact(renderer, &mut completion, 47, 1), 0);
+            assert_eq!(wgr_main_target_completion_fact(renderer, &mut completion, 48, 2), 0);
+            assert_eq!(wgr_main_target_completion_fact(std::ptr::null_mut(), &mut completion, 48, 1), 0);
             assert_eq!(wgr_render_frame_main_target_count(renderer, frame, &request, 31, 1,
                 &mut output, 48, 1), -4);
             assert_eq!(wgr_render_frame_main_target_count(renderer, frame, &request, 32, 1,
@@ -3362,6 +3389,7 @@ mod main_target_count_ffi_tests {
             assert_eq!(wgr_local_shadow_target_count_fact(renderer, 24, &mut output, 48, 1), 0);
         }
         assert_eq!(output.token, 99);
+        assert_eq!(completion.token, 99);
     }
 }
 
@@ -3412,6 +3440,31 @@ pub unsafe extern "C" fn wgr_main_target_count_fact(
         let renderer = unsafe { &mut *renderer };
         let fact = renderer.gfx3d.main_target_count_fact(&renderer.device);
         *output = WgrMainTargetCountResult::from_fact(fact);
+    })).is_ok() as u32
+}
+
+/// Read-only, nonblocking poll of the optional exact-request completion witness.
+/// Output remains Unknown on invalidation, replacement, failure or epoch change.
+/// # Safety
+/// `renderer` must be live; `output` must be aligned writable storage of the
+/// exact declared size and must not alias the renderer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_main_target_completion_fact(
+    renderer: *mut WgrRenderer, output: *mut WgrMainTargetCompletionResult,
+    output_size: u32, output_version: u32,
+) -> u32 {
+    if renderer.is_null() || output.is_null() ||
+        output_size != std::mem::size_of::<WgrMainTargetCompletionResult>() as u32 ||
+        output_version != WgrMainTargetCompletionResult::VERSION { return 0; }
+    let output = unsafe { &mut *output };
+    *output = WgrMainTargetCompletionResult::empty();
+    catch_unwind(AssertUnwindSafe(|| {
+        let fact = unsafe { &*renderer }.gfx3d.main_target_completion_fact();
+        output.state = fact.state;
+        output.token = fact.identity.token;
+        output.model_id = fact.identity.model_id;
+        output.source_generation = fact.identity.source_generation;
+        output.cull_epoch = fact.identity.cull_epoch;
     })).is_ok() as u32
 }
 

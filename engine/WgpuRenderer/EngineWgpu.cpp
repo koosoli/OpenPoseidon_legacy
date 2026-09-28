@@ -2264,7 +2264,7 @@ struct EngineWgpu::GeometryMainCountPending
     uint64_t token=0, pageEpoch=0, admissionEpoch=0, requestId=0, sourceGeneration=0, sourceIncarnation=0, cullEpoch=0;
     uint32_t producerModel=UINT32_MAX, rendererModel=UINT32_MAX;
     unsigned ageFrames=0;
-    bool mainReported=false, giReported=false, local0Reported=false, reflectionReported=false,
+    bool mainReported=false, completionReported=false, giReported=false, local0Reported=false, reflectionReported=false,
          sky0Reported=false;
     uint32_t shadowReportedMask=0;
 };
@@ -4232,6 +4232,49 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
                 }
             }
             pending.mainReported = true;
+        }
+        if (!pending.completionReported)
+        {
+            WgrMainTargetCompletionResult completion{};
+            const bool completed = wgr_main_target_completion_fact(_renderer, &completion,
+                sizeof(completion), 1) == 1 && completion.struct_size == sizeof(completion) &&
+                completion.version == 1 && completion.state == WGR_MAIN_TARGET_COMPLETION_COMPLETED &&
+                completion.token == pending.token && completion.model_id == pending.rendererModel &&
+                completion.source_generation == pending.sourceGeneration &&
+                completion.cull_epoch == pending.cullEpoch;
+            if (completed)
+            {
+                if (auto fixture = pending.fixture.lock())
+                {
+                    bool publish = false;
+                    {
+                        std::lock_guard lock(fixture->mutex);
+                        const auto& report = fixture->report;
+                        const auto model = _modelIdOf.find(pending.producerModel);
+                        publish = report.active && report.originalFilePilot && fixture->originalAdmission &&
+                            report.pageEpoch == pending.pageEpoch && report.requestId == pending.requestId &&
+                            report.sourceAdmissionEpoch == pending.admissionEpoch &&
+                            fixture->originalAdmission->report.epoch == pending.admissionEpoch &&
+                            report.producerModel == pending.producerModel &&
+                            fixture->consumedModel == pending.rendererModel &&
+                            fixture->consumedInstance != UINT32_MAX && fixture->instance < _instSlotOf.size() &&
+                            _instSlotOf[fixture->instance] == fixture->consumedInstance &&
+                            model != _modelIdOf.end() && model->second == pending.rendererModel &&
+                            GeometrySourceFresh(pending.producerModel, pending.rendererModel,
+                                pending.sourceIncarnation, pending.sourceGeneration);
+                    }
+                    if (publish)
+                    {
+                        static unsigned rows = 0;
+                        if (rows++ < 16)
+                            LOG_INFO(World, "Private main GPU completion: token={} pageEpoch={} admissionEpoch={} request={} model={} rendererModel={} sourceGeneration={} cullEpoch={} (preceding queue work done; no Fine release)",
+                                pending.token, pending.pageEpoch, pending.admissionEpoch, pending.requestId,
+                                pending.producerModel, pending.rendererModel, pending.sourceGeneration,
+                                pending.cullEpoch);
+                    }
+                }
+                pending.completionReported = true;
+            }
         }
         for (uint32_t cascade=0; cascade<4; ++cascade)
         {

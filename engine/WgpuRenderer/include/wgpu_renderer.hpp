@@ -1729,6 +1729,15 @@ struct WgrMainTargetCountResult
 };
 static_assert(sizeof(WgrMainTargetCountRequest) == 32, "main COUNT request layout");
 static_assert(sizeof(WgrMainTargetCountResult) == 48, "main COUNT result layout");
+struct WgrMainTargetCompletionResult
+{
+    uint32_t struct_size, version, state, reserved;
+    uint64_t token;
+    uint32_t model_id, reserved2;
+    uint64_t source_generation, cull_epoch;
+};
+static_assert(sizeof(WgrMainTargetCompletionResult) == 48, "main completion result layout");
+enum : uint32_t { WGR_MAIN_TARGET_COMPLETION_COMPLETED = 3 };
 enum : uint32_t
 {
     WGR_MAIN_TARGET_COUNT_UNKNOWN = 0,
@@ -2714,6 +2723,10 @@ extern "C"
         const WgrMainTargetCountRequest*, uint32_t request_size, uint32_t request_version,
         WgrMainTargetCountResult*, uint32_t output_size, uint32_t output_version);
     WGR_API uint32_t wgr_main_target_count_fact(WgrRenderer*, WgrMainTargetCountResult*,
+        uint32_t output_size, uint32_t output_version);
+    /* Exact opt-in main request only. state=3 is completion of preceding queue
+     * submissions, not pixel visibility, all-view proof or Fine release. */
+    WGR_API uint32_t wgr_main_target_completion_fact(WgrRenderer*, WgrMainTargetCompletionResult*,
         uint32_t output_size, uint32_t output_version);
     /* Same opt-in request, separate cascade-0 cull counter. UNKNOWN unless its
      * depth pass closed and the copied sample was committed after final submit.
