@@ -23,7 +23,4 @@ witness is not wired to the cached COUNT getter or image-current classifier.
 Existing global epoch, publication, source, COUNT and Fine gates are unchanged;
 GeometryPage stays off and physical reclamation remains forbidden.
 
-Two focused device-free Rust tests passed. They cover unchanged rows, a
-foreign-model transform, reorder, removal, unchanged target revision/global
-epoch, and fail-closed serial overflow. Integrated desktop build, installed-game smoke and matched
-performance verification are delegated to the integrating owner.
+Two focused device-free Rust tests and the existing dynamic target-row test passed. They cover unchanged rows, a foreign-model transform, reorder, removal, unchanged target revision/global epoch, and fail-closed serial overflow. The paired desktop build and installed WGPU `--check` passed at `4d975cce`. Matched performance remains open.
