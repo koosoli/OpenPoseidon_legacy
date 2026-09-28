@@ -222,6 +222,13 @@ const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (18 + cdlod::LEVE
 /// Whether the shore simulation runs (Water tab, and only once the shore waves have a field).
 /// Breaker spray on (W4a): emission gain and sprite intensity above zero (the caller also needs
 /// an active shore simulation and stations).
+/// W10: `WGR_TW_LIP=<opacity>` overrides the Water tab's breaker lip opacity (0 = no lips) for the
+/// session, for A/B captures of the curling breakers.
+fn lip_override() -> Option<f32> {
+    static V: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_LIP").ok().and_then(|v| v.trim().parse::<f32>().ok()))
+}
+
 fn spray_on(p: &WgrWaterParams) -> bool {
     p.tidewater_fx[0] > 0.0 && p.tidewater_fx[1] > 0.0
 }
@@ -323,7 +330,7 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         sim_p0,
         sim_p1,
         // Breakers: station count, lip opacity (Tidewater `sheet`, Water tab lane)
-        brk: [f.stations as f32, p.tidewater_shore[2][3].clamp(0.0, 2.0), f.caustic_tiles[0], f.caustic_tiles[1]],
+        brk: [f.stations as f32, lip_override().unwrap_or(p.tidewater_shore[2][3]).clamp(0.0, 2.0), f.caustic_tiles[0], f.caustic_tiles[1]],
         morph: *f.morph,
         wake: f.wake,
         impacts: f.impacts,
