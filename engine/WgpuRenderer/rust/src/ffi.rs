@@ -3597,6 +3597,9 @@ unsafe fn render_frame_impl(
                 (request.token, request.model_id, request.source_generation)),
         ) {
             Ok(submitted) => {
+                // A selected interior-sky layer becomes a published cache image
+                // only after the final queue submit and successful render return.
+                renderer.gfx3d.commit_interior0_publication();
                 if let Some(request) = main_count_request {
                     if submitted {
                         main_count_submitted = true;
@@ -3615,6 +3618,11 @@ unsafe fn render_frame_impl(
     }))
     .unwrap_or(-3);
     if status != 0 { if let Some(facts) = call_timings { facts.fail(); } }
+    if status != 0 && !renderer.is_null() {
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            unsafe { &mut *renderer }.gfx3d.abort_interior0_publication();
+        }));
+    }
     if let Some(request) = main_count_request {
         if status != 0 && !renderer.is_null() {
             let _ = catch_unwind(AssertUnwindSafe(|| {
