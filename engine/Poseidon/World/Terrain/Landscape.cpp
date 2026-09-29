@@ -60,6 +60,9 @@ bool Landscape::s_enfusionRoadClutterClear = true;
 
 void Landscape::Init()
 {
+    // A staged converted shape still owns section Texture references. Retire it before the
+    // reused world and its banks are cleared, not on the next residency draw.
+    _modernPendingOwnerPrimaryTextures.reset();
     ResetModernSimulationResidency();
     int i, x, z;
     // RFG-062: GLandscape is a reused singleton, so a world loaded after a native
@@ -1542,6 +1545,7 @@ void Landscape::SetTexture(int i, const char* name)
 
 Landscape::~Landscape()
 {
+    _modernPendingOwnerPrimaryTextures.reset();
     ResetModernSimulationResidency();
     ClearNativeFarResidency();
     // clear all objects

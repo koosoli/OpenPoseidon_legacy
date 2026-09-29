@@ -48,6 +48,7 @@
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp> // the split of `create`
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // worker-prepared texture store (clear + stats)
 #include <Poseidon/World/Model/Model.hpp>              // the IR handed over by ObjectStreamPreparer
+#include <Poseidon/World/Model/ModelMemory.hpp>        // conversion reservation estimate
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/World/Terrain/ObjectTextureUploadTrace.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamTreeFixture.hpp>
@@ -3296,6 +3297,9 @@ void Landscape::PrefetchModernObjectModels(const std::vector<ModernObjectCellCan
             if (_modernObjectModelPrefetchEpoch[model] == _modernObjectPrefetchEpoch)
                 continue;
             _modernObjectModelPrefetchEpoch[model] = _modernObjectPrefetchEpoch;
+            if (_modernPendingOwnerPrimaryTextures &&
+                _modernPendingOwnerPrimaryTextures->modelIndex == model)
+                continue; // Taken Converted belongs to the one owner staging slot.
             if (const auto* warm = Shapes.Find(_modernObjectModels[model], false, true))
             {
                 ++alreadyWarm;
@@ -3459,6 +3463,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
 {
     if (!_modernObjectStreaming || _modernObjectCells.empty())
     {
+        _modernPendingOwnerPrimaryTextures.reset();
         // (d) Same teardown argument as the cache below: a preparer still holding a dead
         // world's IRs, or a queue of its models, must be flushed. Reset only bumps a
         // generation and drops results; it never joins, so this costs nothing per frame.
@@ -3802,6 +3807,25 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
 
     _modernObjectDesiredCount = requested;
     _modernObjectDesiredBudget = effectiveBudget;
+    // The slot owns a converted shape that is deliberately absent from ShapeBank. A window
+    // change can make its originating placement irrelevant before its next upload.
+    if (_modernPendingOwnerPrimaryTextures)
+    {
+        const auto& pending = *_modernPendingOwnerPrimaryTextures;
+        const bool wanted = pending.cellIndex < _modernObjectCellDesired.size() &&
+            _modernObjectCellDesired[pending.cellIndex] &&
+            pending.placementIndex < _modernObjectPlacements.size() &&
+            !_modernObjectPlacements[pending.placementIndex].resident &&
+            _modernObjectPlacements[pending.placementIndex].modelIndex == pending.modelIndex;
+        if (!wanted || pending.modelIndex >= _modernObjectModels.size() ||
+            Shapes.Find(_modernObjectModels[pending.modelIndex], false, true))
+        {
+            LOG_INFO(World, "DayZ owner primary stage: cancelled modelIndex={} uploaded={} remaining={} reservedBytes={}",
+                     pending.modelIndex, pending.uploads, pending.textures.size() - pending.next,
+                     pending.reservedBytes);
+            _modernPendingOwnerPrimaryTextures.reset();
+        }
+    }
     uint32_t released = 0;
     if (demandChanged)
     {
@@ -3864,6 +3888,55 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
         // (and that the eviction cache did not keep) is cold now, and this is the walk that
         // must see it as such.
         PrefetchModernObjectModels(candidates);
+    }
+
+    // One initialized, distinct primary image per residency update. The prepared cold
+    // payload is deliberately not carried across updates: its scope is defined for the
+    // joined Converted -> ObjectCreate operation. Use the texture bank's ordinary source
+    // reader here; final registration still validates every material and GPU handle.
+    if (_modernPendingOwnerPrimaryTextures && !_modernPendingOwnerPrimaryTextures->failed &&
+        _modernPendingOwnerPrimaryTextures->next < _modernPendingOwnerPrimaryTextures->textures.size())
+    {
+        auto& pending = *_modernPendingOwnerPrimaryTextures;
+        Texture* texture = pending.textures[pending.next];
+        const bool residentBefore = texture && texture->IsGpuResident();
+        const auto began = std::chrono::steady_clock::now();
+        bool uploaded = false;
+        try
+        {
+            if (GEngine && GEngine->TextBank() && texture)
+            {
+                GEngine->TextBank()->UseMipmap(texture, 0, 0);
+                uploaded = texture->IsGpuResident();
+                if (uploaded && texture->IsAlpha())
+                    texture->GetAlphaClass(); // consume the top-mip handoff in the same update
+            }
+        }
+        catch (...)
+        {
+            uploaded = false;
+        }
+        const double elapsedMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - began).count();
+        pending.stepMs += elapsedMs;
+        pending.maxStepMs = std::max(pending.maxStepMs, elapsedMs);
+        if (uploaded && !residentBefore)
+            ++pending.uploads;
+        else if (!uploaded)
+        {
+            ++pending.uploadFailures;
+            pending.failed = true; // finish through unchanged synchronous registration
+        }
+        ++pending.next;
+        static uint32_t stepRows = 0;
+        if (stepRows < 64)
+        {
+            ++stepRows;
+            LOG_INFO(World, "DayZ owner primary stage: step={} total={} modelIndex={} texture={} uploaded={} stepMs={:.3f} maxStepMs={:.3f} row={} limit=64",
+                     pending.next, pending.textures.size(), pending.modelIndex,
+                     texture && texture->Name() ? texture->Name() : "(none)", uploaded, elapsedMs,
+                     pending.maxStepMs, stepRows);
+        }
     }
 
     uint32_t created = 0;
@@ -4129,7 +4202,36 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             std::shared_ptr<Model::Model> preparsed;
             LODShapeWithShadow* preadapted = nullptr;
             std::unique_ptr<render::ColdPaaOwned> coldTexture;
-            if (cold && asyncOn)
+            bool ownerPrimaryHandoff = false;
+            uint32_t ownerPrimaryUploads = 0, ownerPrimaryLost = 0;
+            uint32_t ownerPrimaryOriginPlacement = 0;
+            double ownerPrimaryStepMs = 0.0, ownerPrimaryMaxStepMs = 0.0, ownerPrimaryWaitMs = 0.0;
+            bool ownerPrimaryFailed = false;
+            if (cold && _modernPendingOwnerPrimaryTextures &&
+                _modernPendingOwnerPrimaryTextures->modelIndex == placement.modelIndex)
+            {
+                auto& pending = *_modernPendingOwnerPrimaryTextures;
+                if (!pending.failed && pending.next < pending.textures.size())
+                {
+                    ++waited;
+                    ++scan;
+                    continue;
+                }
+                ownerPrimaryHandoff = true;
+                ownerPrimaryOriginPlacement = pending.placementIndex;
+                ownerPrimaryUploads = pending.uploads;
+                ownerPrimaryStepMs = pending.stepMs;
+                ownerPrimaryMaxStepMs = pending.maxStepMs;
+                ownerPrimaryFailed = pending.failed;
+                ownerPrimaryWaitMs = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - pending.started).count();
+                for (Texture* texture : pending.textures)
+                    if (texture && !texture->IsGpuResident()) ++ownerPrimaryLost;
+                preadapted = pending.shape.release();
+                preparsed = std::move(pending.model);
+                _modernPendingOwnerPrimaryTextures.reset();
+            }
+            else if (cold && asyncOn)
             {
                 const ObjectStreamPreparer::State state = _modernObjectPreparer->Query(placement.modelIndex);
                 if (state == ObjectStreamPreparer::State::Ready)
@@ -4358,6 +4460,85 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         }
                     }
                     catch (...) {} // Optional stage admission never prevents shape install.
+                    // A deliberately narrow owner-side latency pilot. Its entire output is
+                    // the already initialized section Texture objects in this converted shape;
+                    // material-stage maps are still resolved by final registration. The shape
+                    // stays outside ShapeBank until all staged uploads finish, so no object or
+                    // partial retained model is published during these updates.
+                    static const bool ownerPrimaryStage = [] {
+                        const char* flag = std::getenv("WGR_OBJECT_STREAM_DAYZ_OWNER_PRIMARY_STAGE");
+                        return flag && std::strcmp(flag, "1") == 0;
+                    }();
+                    if (ownerPrimaryStage && !_modernPendingOwnerPrimaryTextures && GEngine &&
+                        GEngine->TextBank() && conv.model &&
+                        std::strcmp((const char*)modelName,
+                                    R"(dz\structures\residential\tenements\tenement_small.p3d)") == 0)
+                    {
+                        constexpr uint64_t kPendingLimit = 128ull * 1024 * 1024;
+                        constexpr size_t kTextureLimit = 64;
+                        constexpr size_t kSectionVisitLimit = 512;
+                        const uint64_t irBytes = Model::ResidentPayloadBytes(*conv.model);
+                        const uint64_t reservedBytes = irBytes <= kPendingLimit / 2 ? 2 * irBytes : kPendingLimit + 1;
+                        std::vector<Texture*> primary;
+                        bool admissible = reservedBytes <= kPendingLimit;
+                        if (admissible)
+                        {
+                            std::unordered_set<Texture*> seen;
+                            size_t visited = 0;
+                            if (conv.shape->NLevels() > 64) admissible = false;
+                            for (int level = 0; level < conv.shape->NLevels() && admissible; ++level)
+                            {
+                                if (!conv.shape->IsNormalLevel(level)) continue;
+                                Shape* lod = conv.shape->LevelOpaque(level);
+                                if (!lod) continue;
+                                for (int section = 0; section < lod->NSections(); ++section)
+                                {
+                                    if (++visited > kSectionVisitLimit) { admissible = false; break; }
+                                    const ShapeSection& source = lod->GetSection(section);
+                                    if (source.properties.Special() & (IsHidden | IsHiddenProxy)) continue;
+                                    Texture* texture = source.properties.GetTexture();
+                                    const char* name = texture ? texture->Name() : nullptr;
+                                    const char* extension = name ? std::strrchr(name, '.') : nullptr;
+                                    if (!texture || texture->IsGpuResident() || texture->ANMipmaps() <= 0 ||
+                                        texture->AWidth(0) <= 0 || texture->AHeight(0) <= 0 || !extension ||
+                                        std::strcmp(extension, ".paa") != 0 || !seen.insert(texture).second)
+                                        continue;
+                                    if (primary.size() == kTextureLimit) { admissible = false; break; }
+                                    primary.push_back(texture);
+                                }
+                            }
+                        }
+                        if (admissible && !primary.empty())
+                        {
+                            auto pending = std::make_unique<PendingOwnerPrimaryTextures>();
+                            pending->modelIndex = placement.modelIndex;
+                            pending->placementIndex = index;
+                            pending->cellIndex = cell.index;
+                            pending->reservedBytes = reservedBytes;
+                            pending->textures = std::move(primary);
+                            pending->started = std::chrono::steady_clock::now();
+                            pending->shape.reset(conv.shape);
+                            conv.shape = nullptr;
+                            pending->model = std::move(conv.model);
+                            // ColdPaaOwned is operation-local to the original joined admission.
+                            // Never keep or reopen it across owner frames.
+                            conv.coldTexture.reset();
+                            LOG_INFO(World, "DayZ owner primary stage: started modelIndex={} textures={} reservedBytes={} ordinarySource=true",
+                                     pending->modelIndex, pending->textures.size(), pending->reservedBytes);
+                            _modernPendingOwnerPrimaryTextures = std::move(pending);
+                            ++waited;
+                            ++scan;
+                            continue;
+                        }
+                        static uint32_t refusalRows = 0;
+                        if (refusalRows < 8)
+                        {
+                            ++refusalRows;
+                            LOG_INFO(World, "DayZ owner primary stage: refused modelIndex={} candidateTextures={} reservedBytes={} reason={} row={} limit=8",
+                                     placement.modelIndex, primary.size(), reservedBytes,
+                                     !admissible ? "bound" : "no-unuploaded-primary", refusalRows);
+                        }
+                    }
                     preadapted = conv.shape;
                     preparsed = std::move(conv.model);
                     coldTexture = std::move(conv.coldTexture);
@@ -4449,6 +4630,21 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             catch (const std::exception&)
             {
                 admitted = nullptr;
+            }
+            if (ownerPrimaryHandoff)
+            {
+                static uint32_t handoffRows = 0;
+                if (handoffRows < 8)
+                {
+                    ++handoffRows;
+                    LOG_INFO(World, "DayZ owner primary stage: handoff modelIndex={} originPlacement={} consumingPlacement={} admitted={} uploadSteps={} lostBeforeRegister={} uploadFailure={} stepMs={:.3f} maxStepMs={:.3f} waitToCreateMs={:.3f} finalCreateMs={:.3f} row={} limit=8",
+                             placement.modelIndex, ownerPrimaryOriginPlacement, index, admitted != nullptr, ownerPrimaryUploads,
+                             ownerPrimaryLost, ownerPrimaryFailed, ownerPrimaryStepMs,
+                             ownerPrimaryMaxStepMs, ownerPrimaryWaitMs,
+                             std::chrono::duration<double, std::milli>(
+                                 std::chrono::steady_clock::now() - createStart).count(),
+                             handoffRows);
+                }
             }
             Streaming::GObjectTextureUploadTrace = previousTextureTrace;
             if (textureTrace)
@@ -4935,6 +5131,9 @@ void Landscape::UpdateNativeFarResidency(Vector3Par cameraPosition)
             Ref<LODShapeWithShadow> shape = Shapes.Find(name, false, true);
             if (!shape)
             {
+                if (_modernPendingOwnerPrimaryTextures &&
+                    _modernPendingOwnerPrimaryTextures->modelIndex == modelIndex)
+                    continue; // The near owner already holds this Converted shape.
                 // Near admissions win. Never decode a cold far model synchronously.
                 if (_modernObjectResidencyPending || modelWork || !_modernObjectPreparer ||
                     !_modernObjectPreparer->Running())

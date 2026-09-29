@@ -2252,6 +2252,9 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
             size_t streamed = 0, streamedParts = 0;
             if (streamNative)
             {
+                // Native model/placement tables can be rebuilt independently of near-stream
+                // progress. Release an opt-in converted DayZ shape before either table changes.
+                _modernPendingOwnerPrimaryTextures.reset();
                 _modernObjectModels.clear();
                 _modernObjectModels.reserve(meshes.size() + attachMeshes.size());
                 for (const auto& mesh : meshes)

@@ -19,6 +19,7 @@ param(
     [switch]$RapBuildingMultistage,
     [switch]$DayZTextureTrace,
     [switch]$DayZShapeSplit,
+    [switch]$DayZOwnerPrimaryStage,
     [switch]$HotSourceProofRetirement,
     [switch]$WeakCacheProof,
     [switch]$WarmTextureProvenance,
@@ -82,6 +83,7 @@ if (!$env:LOCK_OWNER) {
         if ($RapBuildingMultistage) { $argv += '-RapBuildingMultistage' }
         if ($DayZTextureTrace) { $argv += '-DayZTextureTrace' }
         if ($DayZShapeSplit) { $argv += '-DayZShapeSplit' }
+        if ($DayZOwnerPrimaryStage) { $argv += '-DayZOwnerPrimaryStage' }
         if ($HotSourceProofRetirement) { $argv += '-HotSourceProofRetirement' }
         if ($WeakCacheProof) { $argv += '-WeakCacheProof' }
         if ($WarmTextureProvenance) { $argv += '-WarmTextureProvenance' }
@@ -153,6 +155,7 @@ $environment = @{
     WGR_OBJECT_STREAM_RAP_BUILDING_MULTISTAGE = $(if ($RapBuildingMultistage) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_TEXTURE_TRACE = $(if ($DayZTextureTrace) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_SHAPE_SPLIT = $(if ($DayZShapeSplit) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_DAYZ_OWNER_PRIMARY_STAGE = $(if ($DayZOwnerPrimaryStage) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WEAK_CACHE_PROOF = $(if ($WeakCacheProof) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WARM_TEXTURE_TRACE = $(if ($WarmTextureProvenance) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WARM_EARLY_SLICE = $(if ($WarmEarlySlice) { '1' } else { '0' })
@@ -212,6 +215,7 @@ try {
         rapBuildingMultistage = [bool]$RapBuildingMultistage
         dayZTextureTrace = [bool]$DayZTextureTrace
         dayZShapeSplit = [bool]$DayZShapeSplit
+        dayZOwnerPrimaryStage = [bool]$DayZOwnerPrimaryStage
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement
         weakCacheProof = [bool]$WeakCacheProof; warmTextureProvenance = [bool]$WarmTextureProvenance
         warmEarlySlice = [bool]$WarmEarlySlice
@@ -501,6 +505,16 @@ try {
         rows=@($shapeSplitRows | ForEach-Object { $_.Line })
         scope='One selected cold DayZ shape; separates WorldShapeLoaded from legacy OptimizeOneShape without changing either call. Neither split proves a removable cost or matched performance.'}
     $shapeSplitProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'dayz-shape-install-split-proof.json')
+    $ownerStageStarts = @(Select-String -LiteralPath $log -Pattern 'DayZ owner primary stage: started modelIndex=\d+ textures=\d+ reservedBytes=\d+ ordinarySource=true')
+    $ownerStageSteps = @(Select-String -LiteralPath $log -Pattern 'DayZ owner primary stage: step=\d+ total=\d+ modelIndex=\d+ texture=.* uploaded=true stepMs=[0-9.]+ maxStepMs=[0-9.]+ row=\d+ limit=64')
+    $ownerStageHandoffs = @(Select-String -LiteralPath $log -Pattern 'DayZ owner primary stage: handoff modelIndex=\d+ originPlacement=\d+ consumingPlacement=\d+ admitted=true uploadSteps=\d+ lostBeforeRegister=\d+ uploadFailure=false stepMs=[0-9.]+ maxStepMs=[0-9.]+ waitToCreateMs=[0-9.]+ finalCreateMs=[0-9.]+ row=\d+ limit=8')
+    $ownerStageProven = !$DayZOwnerPrimaryStage -or ($ownerStageStarts.Count -eq 1 -and
+        $ownerStageSteps.Count -gt 0 -and $ownerStageSteps.Count -le 64 -and $ownerStageHandoffs.Count -eq 1)
+    $ownerStageProof = @{requested=[bool]$DayZOwnerPrimaryStage; positive=[bool]$ownerStageProven
+        starts=@($ownerStageStarts | ForEach-Object { $_.Line }); steps=@($ownerStageSteps | ForEach-Object { $_.Line });
+        handoffs=@($ownerStageHandoffs | ForEach-Object { $_.Line })
+        scope='One exact DayZ tenement staged through ordinary owner primary-texture uploads before unchanged complete model admission; not RVMAT/proxy coverage, a per-upload deadline, visual or performance acceptance.'}
+    $ownerStageProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'dayz-owner-primary-stage-proof.json')
     # Separate warm-preflight proof still uses its own bound-upload witness.
     # The physical building pilot above uses its explicit Init/mount/layout witness.
     $preflightRawRows = @(Select-String -LiteralPath $log -Pattern 'Warm material source preflight: source=')
@@ -703,7 +717,7 @@ try {
         rows=@($promotionRows | ForEach-Object {$_.Line});
         scope='Historical exact-member promotion witness; not a later Take, source match, upload, or complete 32-entry scan'}
     $promotionProven = !$WarmPublishedReuse -or $promotionRows.Count -gt 0
-    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven -and $buildingPilotProven -and $multiStageProven -and $textureTraceProven -and $shapeSplitProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings; framePaceTrace = [bool]$FramePaceTrace
+    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven -and $buildingPilotProven -and $multiStageProven -and $textureTraceProven -and $shapeSplitProven -and $ownerStageProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings; framePaceTrace = [bool]$FramePaceTrace
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         renderCallCpuTimings = [bool]$TerrainPageTimings; renderCallCpuTimingProof = $callCpuProof
@@ -728,6 +742,8 @@ try {
         dayZTextureTraceProof = $textureTraceProof
         dayZShapeSplit = [bool]$DayZShapeSplit
         dayZShapeSplitProof = $shapeSplitProof
+        dayZOwnerPrimaryStage = [bool]$DayZOwnerPrimaryStage
+        dayZOwnerPrimaryStageProof = $ownerStageProof
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload; warmMaterialStageFamilyProof = $warmStageFamilyProof
         coldPaaHandoff = [bool]$ColdPaaHandoff; requireColdAlphaPeek = [bool]$RequireColdAlphaPeek; coldPaaHandoffProof = $coldPaaProof
@@ -748,6 +764,7 @@ try {
     if (!$multiStageProven) { throw 'NotExercised: no same-stage tenement multistage physical capture and validated upload; evidence retained' }
     if (!$textureTraceProven) { throw 'NotExercised: selected DayZ building texture trace incomplete; evidence retained' }
     if (!$shapeSplitProven) { throw 'NotExercised: selected DayZ shape install split absent; evidence retained' }
+    if (!$ownerStageProven) { throw 'NotExercised: selected DayZ owner primary stage incomplete; evidence retained' }
     if (!$warmStageFamilyProven) { throw 'Required bound worker normal/specular filename-family upload not exercised; evidence retained, no material-slot proof claimed' }
 } catch {
     $screeningFailure = $_.Exception.Message

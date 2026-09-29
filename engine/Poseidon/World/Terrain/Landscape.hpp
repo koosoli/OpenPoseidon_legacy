@@ -802,6 +802,27 @@ class Landscape : public SerializeClass
     // is not ready. See ObjectStreamPrepare.hpp for the thread-safety boundary and the levers.
     // Created lazily on the first streamed world; destroyed (joined) with the Landscape.
     std::unique_ptr<ObjectStreamPreparer> _modernObjectPreparer;
+    // Exact DayZ tenement experiment. A converted shape stays outside ShapeBank until its
+    // initialized primary textures have been touched across owner updates. One slot bounds
+    // retained conversion memory; the ordinary path owns every other model.
+    struct PendingOwnerPrimaryTextures
+    {
+        uint32_t modelIndex = 0;
+        uint32_t placementIndex = 0;
+        uint32_t cellIndex = 0;
+        std::unique_ptr<LODShapeWithShadow> shape;
+        std::shared_ptr<Model::Model> model;
+        std::vector<Texture*> textures; // borrowed from shape sections; shape outlives this list
+        size_t next = 0;
+        uint64_t reservedBytes = 0;
+        uint32_t uploads = 0;
+        uint32_t uploadFailures = 0;
+        bool failed = false;
+        double stepMs = 0.0;
+        double maxStepMs = 0.0;
+        std::chrono::steady_clock::time_point started;
+    };
+    std::unique_ptr<PendingOwnerPrimaryTextures> _modernPendingOwnerPrimaryTextures;
     struct ModernSourceDiagnosticEntry
     {
         uint32_t index = 0;
