@@ -2218,7 +2218,9 @@ bool TextureSourcePac::Init(const char* name, PacLevelMem* mips, int maxMips)
     // cache hit may preserve an older birth identity, never a fresh path claim.
     static const bool retainMemberIdentity = [] {
         const char* value = std::getenv("WGR_OBJECT_STREAM_RAP_BUILDING_PILOT");
-        return value && std::strcmp(value, "1") == 0;
+        const char* multi = std::getenv("WGR_OBJECT_STREAM_RAP_BUILDING_MULTISTAGE");
+        return (value && std::strcmp(value, "1") == 0) ||
+            (multi && std::strcmp(multi, "1") == 0);
     }();
     if (retainMemberIdentity && _isPaa && _mipmaps > 0 && in.GetBuffer())
         _hasArchiveMemberIdentity = in.GetBuffer()->CopyArchiveMemberIdentity(_archiveMemberIdentity);

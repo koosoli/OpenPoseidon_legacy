@@ -93,12 +93,12 @@ struct WarmTextureRead
     std::shared_ptr<const ArchiveSourceBinding> initializedSource;
 };
 
-// Advisory NormalMap names from a completed, exact-source raP read. No texture
-// authority travels with this payload; the owner rechecks the material member
-// and recaptures the current PAA binding before optional warm preparation.
+// Advisory NormalMap names from completed, exact-source raP reads. No texture
+// authority travels with this payload; the owner rechecks each material member
+// and captures the current physical PAA member before optional preparation.
 struct RapStageCandidateHandoff
 {
-    enum class Consumer : uint8_t { NormalMap };
+    enum class Consumer : uint8_t { NormalMap, LayerNormal1, LayerNormal2, LayerNormal3 };
     struct Material
     {
         std::string key, stageName;
@@ -107,12 +107,12 @@ struct RapStageCandidateHandoff
         bool SameCurrentMember(const BankReadMemberIdentity& current) const noexcept
         { return sourceMember == current; }
     };
-    static constexpr size_t MaxMaterials = 2, MaxStagesPerMaterial = 1;
-    static constexpr size_t MaxCandidates = MaxMaterials * MaxStagesPerMaterial;
+    static constexpr size_t MaxMaterials = 4, MaxStagesPerMaterial = 4;
+    static constexpr size_t MaxCandidates = 4;
     uint64_t generation = 0;
     uint32_t modelIndex = 0;
     std::vector<Material> materials;
-    static constexpr size_t MaxKnownBytes = 2 * 1024;
+    static constexpr size_t MaxKnownBytes = 4 * 1024;
     bool Bounded() const
     {
         if (!generation || materials.empty() || materials.size() > MaxCandidates ||
@@ -126,7 +126,7 @@ struct RapStageCandidateHandoff
             const auto& material = materials[i];
             if (material.key.empty() || material.key.size() > 240 ||
                 material.stageName.empty() || material.stageName.size() > 240 ||
-                material.consumer != Consumer::NormalMap || !material.sourceMember.bytes ||
+                material.consumer > Consumer::LayerNormal3 || !material.sourceMember.bytes ||
                 material.sourceMember.offset > material.sourceMember.archiveBytes ||
                 material.sourceMember.bytes > material.sourceMember.archiveBytes - material.sourceMember.offset ||
                 !add(material.key.capacity() + 1) || !add(material.stageName.capacity() + 1))
@@ -138,6 +138,7 @@ struct RapStageCandidateHandoff
                 {
                     ++appearances;
                     if (j < i) seenEarlier = true;
+                    if (j < i && materials[j].consumer == material.consumer) return false;
                 }
             if (appearances > MaxStagesPerMaterial ||
                 (!seenEarlier && ++uniqueMaterials > MaxMaterials)) return false;

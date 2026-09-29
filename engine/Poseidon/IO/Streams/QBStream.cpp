@@ -1228,7 +1228,9 @@ bool CaptureBuildingPilotMemberIdentity()
 {
     static const bool enabled = [] {
         const char* value = std::getenv("WGR_OBJECT_STREAM_RAP_BUILDING_PILOT");
-        return value && std::strcmp(value, "1") == 0;
+        const char* multi = std::getenv("WGR_OBJECT_STREAM_RAP_BUILDING_MULTISTAGE");
+        return (value && std::strcmp(value, "1") == 0) ||
+            (multi && std::strcmp(multi, "1") == 0);
     }();
     return enabled;
 }
@@ -1237,7 +1239,11 @@ bool IsBuildingPilotNormal(const char* prefix, const char* member)
     using namespace PatnikArchiveReason;
     return MatchesJoined(R"(dz\structures\data\plaster\plaster_flats01_nohq.paa)", prefix, member) ||
         MatchesJoined(R"(dz\structures\data\concrete\concrete_bare4_nohq.paa)", prefix, member) ||
-        MatchesJoined(R"(dz\structures\data\plaster\police_station_wall_nohq.paa)", prefix, member);
+        MatchesJoined(R"(dz\structures\data\plaster\police_station_wall_nohq.paa)", prefix, member) ||
+        MatchesJoined(R"(dz\structures\data\plaster\plaster_flats02_nohq.paa)", prefix, member) ||
+        MatchesJoined(R"(dz\structures\data\concrete\concrete_panels_dirty_nohq.paa)", prefix, member) ||
+        MatchesJoined(R"(dz\structures\data\concrete\concrete_panels_nohq.paa)", prefix, member) ||
+        MatchesJoined(R"(dz\structures\data\plaster\plaster_flats03_nohq.paa)", prefix, member);
 }
 thread_local unsigned ModelReadDepth = 0; // numeric owner-purpose nesting only; no retained resources
 thread_local unsigned MaterialPreflightDepth = 0; // owner-only nested stage intent; no names or resources

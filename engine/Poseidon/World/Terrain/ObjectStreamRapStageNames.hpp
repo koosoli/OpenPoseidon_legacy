@@ -4,6 +4,7 @@
 #include <Poseidon/Asset/Formats/Material/ShaderSchema.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -29,6 +30,8 @@ struct RapStageNames
     RapStageNamesStatus status = RapStageNamesStatus::Invalid;
     std::vector<std::string> names; // canonical virtual .paa/.pac keys, no source lease
     std::string normalMapName; // shader-schema NormalMap slot, not a filename-suffix guess
+    struct NormalStage { std::string name; uint8_t layer = 0; };
+    std::vector<NormalStage> normalStages; // typed Multi NormalMap + LayerNormal1..3 only
 };
 
 inline RapStageNames ExtractOwnedRapStageNames(std::span<const char> ownedBytes,
@@ -75,9 +78,23 @@ inline RapStageNames ExtractOwnedRapStageNames(std::span<const char> ownedBytes,
         const auto translated = Asset::Material::TranslateMaterial(material);
         if (translated.schemaKnown)
         {
-            const auto& normal = translated.Slot(Asset::Material::MaterialSlot::NormalMap);
-            if (normal.present && !normal.texture.isProcedural)
-                result.normalMapName = normal.texture.path.canonical();
+            constexpr std::array slots{
+                Asset::Material::MaterialSlot::NormalMap,
+                Asset::Material::MaterialSlot::LayerNormal1,
+                Asset::Material::MaterialSlot::LayerNormal2,
+                Asset::Material::MaterialSlot::LayerNormal3};
+            for (uint8_t layer = 0; layer < slots.size(); ++layer)
+            {
+                const auto& normal = translated.Slot(slots[layer]);
+                if (!normal.present || normal.texture.isProcedural) continue;
+                const auto& key = normal.texture.path.canonical();
+                if (key.empty() || key.size() > MaxName ||
+                    (normal.texture.path.extension() != ".paa" &&
+                     normal.texture.path.extension() != ".pac"))
+                    return {RapStageNamesStatus::Unsupported, {}};
+                result.normalStages.push_back({key, layer});
+                if (layer == 0) result.normalMapName = key;
+            }
         }
         return result;
     }

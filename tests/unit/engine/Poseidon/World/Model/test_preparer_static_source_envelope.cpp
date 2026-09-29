@@ -1034,7 +1034,7 @@ TEST_CASE("Exact raP stage is source-bound in the first conversion before owner 
     REQUIRE(shape);
     store.Clear();
 }
-TEST_CASE("Building raP discovery resumes complete conversion after owner source capture or refusal",
+TEST_CASE("Building raP discovery resumes complete conversion after physical owner capture",
           "[preparer][rap-building]")
 {
     auto enabled = [](const char* name) {
@@ -1042,6 +1042,7 @@ TEST_CASE("Building raP discovery resumes complete conversion after owner source
         return value && std::strcmp(value, "1") == 0;
     };
     if (!enabled("WGR_OBJECT_STREAM_RAP_BUILDING_PILOT") ||
+        enabled("WGR_OBJECT_STREAM_RAP_BUILDING_MULTISTAGE") ||
         !enabled("WGR_OBJECT_STREAM_WARM_TEXTURES") ||
         !enabled("WGR_OBJECT_STREAM_WARM_TEXTURE_JOBS") ||
         !enabled("WGR_OBJECT_STREAM_WARM_MATERIAL_PREFLIGHT"))
@@ -1144,30 +1145,18 @@ TEST_CASE("Building raP discovery resumes complete conversion after owner source
     SECTION("current source reaches worker Put before Converted")
     {
         store.Clear();
+        const auto physicalPutsBefore = store.SnapshotStats().physicalPuts;
         Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
         REQUIRE(prep.SubmitConvert(0,makeModel(),tables,nullptr,nullptr,true,capture,&bank.source));
         REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
         REQUIRE(prep.ResumeRapCapture(0,capture,&bank.source));
         REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
         const auto probe = store.ProbeWarmEntry(normalKey,&bank.source->Request());
-        REQUIRE(probe.entryPresent); REQUIRE(probe.warmBound); REQUIRE(probe.sameMember);
+        REQUIRE(probe.entryPresent); REQUIRE_FALSE(probe.warmBound);
+        REQUIRE(store.SnapshotStats().physicalPuts == physicalPutsBefore + 1);
         auto converted = prep.TakeConverted(0);
         std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
         REQUIRE(shape); REQUIRE(converted.model);
-        store.Clear();
-    }
-    SECTION("refused source still converts complete geometry")
-    {
-        store.Clear();
-        Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
-        REQUIRE(prep.SubmitConvert(0,makeModel(),tables,nullptr,nullptr,true,capture,&bank.source));
-        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
-        REQUIRE(prep.ResumeRapCapture(0,nullptr));
-        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
-        auto converted = prep.TakeConverted(0);
-        std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
-        REQUIRE(shape); REQUIRE(converted.model);
-        CHECK_FALSE(store.ProbeWarmEntry(normalKey,&bank.source->Request()).entryPresent);
         store.Clear();
     }
     SECTION("stale parked model releases its conversion reservation")
@@ -1193,19 +1182,172 @@ TEST_CASE("Building raP discovery resumes complete conversion after owner source
         REQUIRE(prep.SnapshotStats().conversionReservedBytes == 0);
         store.Clear();
     }
-    SECTION("world reset during owner capture retires the in-flight reservation")
+}
+TEST_CASE("Tenement multistage raP handoff prepares only exact authored physical NormalMaps",
+          "[preparer][rap-building-multistage]")
+{
+    auto enabled = [](const char* name) {
+        const char* value = std::getenv(name);
+        return value && std::strcmp(value,"1") == 0;
+    };
+    if (!enabled("WGR_OBJECT_STREAM_RAP_BUILDING_PILOT") ||
+        !enabled("WGR_OBJECT_STREAM_RAP_BUILDING_MULTISTAGE") ||
+        !enabled("WGR_OBJECT_STREAM_WARM_TEXTURES") ||
+        !enabled("WGR_OBJECT_STREAM_WARM_TEXTURE_JOBS") ||
+        !enabled("WGR_OBJECT_STREAM_WARM_MATERIAL_PREFLIGHT"))
+        SKIP("Fresh exact tenement multistage pilot flags required.");
+    Poseidon::Foundation::CaptureMainThread();
+    if (!QFileAccess::MappingSupported()) SKIP("Mapped PBO source required.");
+    constexpr const char* modelKey = R"(dz\structures\residential\tenements\tenement_small.p3d)";
+    const std::array<const char*,4> relativeMaterials{{
+        R"(residential\tenements\data\tb_small_flats2.rvmat)",
+        R"(residential\tenements\data\tb_small_dirty.rvmat)",
+        R"(residential\tenements\data\tb_small_ext.rvmat)",
+        R"(residential\tenements\data\tb_small_flats3.rvmat)"}};
+    const std::array<const char*,4> relativeNormals{{
+        R"(data\plaster\plaster_flats02_nohq.paa)",
+        R"(data\concrete\concrete_panels_dirty_nohq.paa)",
+        R"(data\concrete\concrete_panels_nohq.paa)",
+        R"(data\plaster\plaster_flats03_nohq.paa)"}};
+    struct Bank
     {
+        Poseidon::Ref<Poseidon::FileServer> previous = Poseidon::GFileServer;
+        bool caching = GEnableCaching, useBanks = GUseFileBanks;
+        ColdPaaTestServer* server = new ColdPaaTestServer;
+        std::filesystem::path path;
+        int index = -1;
+        std::array<std::string,4> materials, normals;
+        std::array<std::string,4> relativeNormals;
+        Bank(const std::array<const char*,4>& relativeMaterials,
+             const std::array<const char*,4>& paaNames, bool validFourth = true)
+        {
+            auto str = [](Bytes& b,const char* s) { while (*s) b.U8(uint8_t(*s++)); b.U8(0); };
+            std::array<Bytes,4> raps;
+            for (size_t i=0;i<4;++i)
+            {
+                materials[i] = std::string(R"(dz\structures\)") + relativeMaterials[i];
+                normals[i] = std::string(R"(dz\structures\)") + paaNames[i];
+                relativeNormals[i] = paaNames[i];
+                auto& rap = raps[i];
+                rap.data = {0,'r','a','P',0,0,0,0,8,0,0,0,0x0a,0x06,0,0};
+                rap.U8(0); rap.U8(2);
+                rap.U8(1); rap.U8(0); str(rap,"PixelShaderID"); str(rap,"Multi");
+                rap.U8(0); str(rap,"Stage11"); const size_t pointer = rap.data.size(); rap.U32(0);
+                const auto body = static_cast<uint32_t>(rap.data.size());
+                for (int j=0;j<4;++j) rap.data[pointer+j] = char(body >> (8*j));
+                rap.U8(0); rap.U8(1); rap.U8(1); rap.U8(0);
+                str(rap,"texture"); str(rap,normals[i].c_str());
+                if (i==3 && !validFourth) rap.data[1] = 'x';
+            }
+            const std::array<char,16> block = {char(0xF0),char(0xF0),char(0xF0),char(0xF0),
+                char(0xF0),char(0xF0),char(0xF0),char(0xF0),0,char(0xF8),0,char(0xF8),0,0,0,0};
+            std::vector<char> paa = {3,char(0xFF),0,0,8,0,8,0,64,0,0};
+            for (int j=0;j<4;++j) paa.insert(paa.end(),block.begin(),block.end());
+            paa.insert(paa.end(),4,0);
+            Bytes archive;
+            auto header = [&](const char* name,size_t size) {
+                str(archive,name); archive.U32(0); archive.U32(uint32_t(size));
+                archive.U32(0); archive.U32(0); archive.U32(uint32_t(size));
+            };
+            for (size_t i=0;i<4;++i) header(relativeMaterials[i],raps[i].data.size());
+            for (const char* name : paaNames) header(name,paa.size());
+            archive.U8(0); for (int j=0;j<5;++j) archive.U32(0);
+            for (const auto& rap : raps) archive.data.insert(archive.data.end(),rap.data.begin(),rap.data.end());
+            for (size_t i=0;i<4;++i) archive.data.insert(archive.data.end(),paa.begin(),paa.end());
+            path = std::filesystem::temp_directory_path() /
+                ("rap_building_multi_"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".pbo");
+            std::ofstream out(path,std::ios::binary);
+            out.write(archive.data.data(),std::streamsize(archive.data.size()));
+            REQUIRE(out.good()); out.close();
+            Poseidon::GFileServer = server; GEnableCaching = true; GUseFileBanks = true;
+            index = Poseidon::GFileBanks.Add();
+            auto name = path; name.replace_extension();
+            REQUIRE(Poseidon::GFileBanks[index].open(Poseidon::RString(name.string().c_str())));
+            Poseidon::GFileBanks[index].SetPrefix(Poseidon::RString(R"(dz\structures\)"));
+            Poseidon::GFileBanks[index].Lock();
+        }
+        ~Bank()
+        {
+            if (index >= 0) Poseidon::GFileBanks.Delete(index);
+            Poseidon::GFileServer = previous; GEnableCaching = caching; GUseFileBanks = useBanks;
+            std::error_code error; std::filesystem::remove(path,error);
+        }
+    };
+    SourceFile original;
+    auto makeModel = [&](const Bank& bank) {
+        std::string error; bool opened = false;
+        auto model = Poseidon::ModelCache::LoadLooseFile(original.path,&error,&opened);
+        REQUIRE(model);
+        model->sourcePath = modelKey;
+        auto& mesh = model->lodLevels[0].mesh;
+        for (const auto& material : bank.materials)
+        {
+            mesh.materials.emplace_back("raP multistage fixture");
+            mesh.materials.back().materialPath = material;
+        }
+        for (auto& triangle : mesh.triangles) triangle.materialIndex = 0;
+        return model;
+    };
+    auto tables = std::make_shared<Poseidon::Model::ShapeAdapter::AdapterBankTables>();
+    tables->textures.resize(4); // SourceFile's original ODOL7 fixture has four LODs.
+    auto capture = [](void*,const char*,Poseidon::WarmTextureRead&) { return false; };
+    std::string identity = modelKey;
+    auto& store = Poseidon::render::PreparedTextureStore::Instance();
+    SECTION("four distinct current members reach worker Put and physical Take")
+    {
+        Bank bank(relativeMaterials,relativeNormals);
         store.Clear();
         Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
-        REQUIRE(prep.SubmitConvert(0,makeModel(),tables,nullptr,nullptr,true,capture,&bank.source));
+        REQUIRE(prep.SubmitConvert(0,makeModel(bank),tables,nullptr,nullptr,true,capture));
         REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
-        auto resetCapture = [](void* context, const char*, Poseidon::WarmTextureRead&) {
-            auto* p = static_cast<Preparer*>(context);
-            p->Reset(nullptr,0);
-            return false;
-        };
-        REQUIRE_FALSE(prep.ResumeRapCapture(0,resetCapture,&prep));
+        REQUIRE(prep.ResumeRapCapture(0,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+        for (size_t i=0;i<4;++i)
+        {
+            const auto probe = store.ProbeWarmEntry(bank.normals[i], nullptr);
+            REQUIRE(probe.entryPresent); REQUIRE(probe.validChain); REQUIRE_FALSE(probe.warmBound);
+            auto source = Poseidon::GFileBanks[bank.index].CaptureReadRequest(
+                bank.relativeNormals[i].c_str(),true);
+            REQUIRE(source);
+            Poseidon::BankReadMemberIdentity member;
+            REQUIRE(source->CopyMemberIdentity(member));
+            Poseidon::PAABlockChain chain; Poseidon::BankReadRequest retained;
+            REQUIRE(store.TakePhysical(bank.normals[i],member,chain,retained));
+            REQUIRE(chain.valid()); REQUIRE(retained.SameArchiveMember(*source));
+        }
+        auto converted = prep.TakeConverted(0);
+        std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
+        REQUIRE(shape); REQUIRE(converted.model);
+        store.Clear();
+    }
+    SECTION("unsupported fourth raP never publishes that stage")
+    {
+        Bank bank(relativeMaterials,relativeNormals,false);
+        store.Clear();
+        Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
+        REQUIRE(prep.SubmitConvert(0,makeModel(bank),tables,nullptr,nullptr,true,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        REQUIRE(prep.ResumeRapCapture(0,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+        for (size_t i=0;i<3;++i) REQUIRE(store.ProbeWarmEntry(bank.normals[i], nullptr).entryPresent);
+        REQUIRE_FALSE(store.ProbeWarmEntry(bank.normals[3], nullptr).entryPresent);
+        auto converted = prep.TakeConverted(0);
+        std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
+        REQUIRE(shape); store.Clear();
+    }
+    SECTION("stale parked job drops all four candidates and reservation")
+    {
+        Bank bank(relativeMaterials,relativeNormals);
+        store.Clear();
+        Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
+        REQUIRE(prep.SubmitConvert(0,makeModel(bank),tables,nullptr,nullptr,true,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        const uint32_t epochs[] = {0};
+        REQUIRE(prep.DropStale(epochs,1,1) == 1);
+        REQUIRE(prep.Query(0) == Preparer::State::Unknown);
         REQUIRE(prep.SnapshotStats().conversionReservedBytes == 0);
+        for (const auto& normal : bank.normals)
+            REQUIRE_FALSE(store.ProbeWarmEntry(normal, nullptr).entryPresent);
         store.Clear();
     }
 }

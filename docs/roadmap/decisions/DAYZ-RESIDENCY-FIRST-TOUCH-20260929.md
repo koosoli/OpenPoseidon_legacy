@@ -179,6 +179,28 @@ identity and complete ordinary admission; do not raise the binding cap on
 these aggregate counts alone. All related flags remain off by default;
 `performanceAccepted=false`, `defaultReady=false`.
 
+## Actual DayZ first-touch upload inventory
+
+Commit `18c358c8` adds a default-off, owner-only `WGR_OBJECT_STREAM_DAYZ_TEXTURE_TRACE=1`
+diagnostic. While the three selected DayZ buildings are first admitted, it
+records the slowest 16 *actually reached* texture uploads per model, including
+proxies. Fixed top-K storage is allocated only for those model names. It is a
+source-read-cost inventory, not a material-slot attribution or GPU-time
+measurement; the default path does not perform the scans or logs.
+
+The paired installed build passed WGPU startup. A single locked DayZ route,
+`build/stream-residency/dayz-texture-trace-sep29-disabled-20260929-171445`,
+passed and exited normally (916 frames, zero dropped samples). Tenement,
+school and police reached 81, 119 and 43 uploads; measured aggregate read
+work was 359.0, 563.7 and 243.6 ms respectively. The most expensive tenement
+source was `plaster_flats02_nohq.paa` at 20.264 ms; school started with
+`school_doors_nohq.paa` at 21.830 ms and police with
+`police_station_wall_int_nohq.paa` at 20.584 ms. Each also has many other
+10-20 ms sources. This explains why a single prepared NormalMap cannot remove
+the first-touch hitch. Any broader worker prefetch should select sources
+proven to be consumed, respect material/source identity and the existing byte
+budget, and still measure matched performance before promotion.
+
 ## Binding-free physical-member building pilot
 
 Commit `4e04f796` keeps the same three-building, default-off raP pilot but

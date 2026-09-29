@@ -1921,10 +1921,20 @@ uint64_t TextureWgpu::EnsureUploaded()
                 const char* value = std::getenv("WGR_OBJECT_STREAM_RAP_BUILDING_PILOT");
                 return value && std::strcmp(value, "1") == 0;
             }();
-            if (!fromColdHandoff && physicalBuildingPilot && _src &&
+            static const bool physicalMultistage = [] {
+                const char* value = std::getenv("WGR_OBJECT_STREAM_RAP_BUILDING_MULTISTAGE");
+                return value && std::strcmp(value, "1") == 0;
+            }();
+            const bool pilotKey = physicalBuildingPilot &&
                 (key == R"(dz\structures\data\plaster\plaster_flats01_nohq.paa)" ||
                  key == R"(dz\structures\data\concrete\concrete_bare4_nohq.paa)" ||
-                 key == R"(dz\structures\data\plaster\police_station_wall_nohq.paa)"))
+                 key == R"(dz\structures\data\plaster\police_station_wall_nohq.paa)");
+            const bool multistageKey = physicalMultistage &&
+                (key == R"(dz\structures\data\plaster\plaster_flats02_nohq.paa)" ||
+                 key == R"(dz\structures\data\concrete\concrete_panels_dirty_nohq.paa)" ||
+                 key == R"(dz\structures\data\concrete\concrete_panels_nohq.paa)" ||
+                 key == R"(dz\structures\data\plaster\plaster_flats03_nohq.paa)");
+            if (!fromColdHandoff && _src && (pilotKey || multistageKey))
             {
                 BankReadMemberIdentity initializedMember;
                 if (_src->CopyArchiveMemberIdentity(initializedMember))
@@ -2173,10 +2183,10 @@ uint64_t TextureWgpu::EnsureUploaded()
         if (physicalPrepared && fromPrepared && _gpuHandle && Foundation::IsMainThread())
         {
             static unsigned rows = 0; // owner only; exact opt-in fixture
-            if (rows < 3)
+            if (rows < 7)
             {
                 ++rows;
-                LOG_INFO(Graphics, "RVMAT raP physical upload: source={} bytes={} memberBytes={} initMemberMatched=true currentMountMatched=true layoutMatched=true blockUploadSucceeded=true row={} limit=3",
+                LOG_INFO(Graphics, "RVMAT raP physical upload: source={} bytes={} memberBytes={} initMemberMatched=true currentMountMatched=true layoutMatched=true blockUploadSucceeded=true row={} limit=7",
                     SourceName(), total, physicalPreparedSource.bytes, rows);
             }
         }

@@ -11,6 +11,7 @@
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
+#include <array>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -177,6 +178,38 @@ TEST_CASE("Owned raP stage names are complete or refused", "[preparer][rap-stage
     REQUIRE(valid.status == RapStageNamesStatus::Complete);
     REQUIRE(valid.names == std::vector<std::string>{"a3\\rocks_f\\data\\stone_nohq.paa"});
     CHECK(valid.normalMapName == "a3\\rocks_f\\data\\stone_nohq.paa");
+    REQUIRE(valid.normalStages.size() == 1);
+    CHECK(valid.normalStages[0].layer == 0);
+
+    // Multi binds four typed normal layers in Stage11..14. A single authored
+    // material may therefore contribute several measured first-touch PAAs.
+    std::vector<uint8_t> layered{0,'r','a','P',0,0,0,0,8,0,0,0,0x0a,0x06,0,0};
+    appendString(layered, ""); layered.push_back(5);
+    layered.push_back(1); layered.push_back(0);
+    appendString(layered, "PixelShaderID"); appendString(layered, "Multi");
+    std::array<size_t,4> offsets{};
+    for (size_t i=0;i<4;++i)
+    {
+        layered.push_back(0);
+        const auto stage = "Stage" + std::to_string(11+i);
+        appendString(layered, stage.c_str());
+        offsets[i] = layered.size(); appendU32(layered,0);
+    }
+    for (size_t i=0;i<4;++i)
+    {
+        writeU32(layered,offsets[i],static_cast<uint32_t>(layered.size()));
+        appendString(layered,""); layered.push_back(1);
+        layered.push_back(1); layered.push_back(0); appendString(layered,"texture");
+        const auto key = "dz\\structures\\data\\plaster\\plaster_flats0" +
+            std::to_string(i+1) + "_nohq.paa";
+        appendString(layered,key.c_str());
+    }
+    const auto multi = extract(layered,"dz\\structures\\residential\\tenements\\data\\tb_small_flats_walls.rvmat");
+    REQUIRE(multi.status == RapStageNamesStatus::Complete);
+    REQUIRE(multi.normalStages.size() == 4);
+    CHECK(multi.normalMapName == multi.normalStages[0].name);
+    for (uint8_t i=0;i<4;++i)
+        CHECK(multi.normalStages[i].layer == i);
 
     const auto macro = extract(minimalRap("dz\\plants\\tree\\data\\trunk_dxt5.paa", "TreeAdvTrunk", 2));
     REQUIRE(macro.status == RapStageNamesStatus::Complete);
@@ -248,7 +281,12 @@ TEST_CASE("raP owner candidate is bounded NormalMap metadata with physical mater
     moved->materials.push_back({"dz\\plants\\tree\\data\\d_piceaabies_stumpb_trunk_a.rvmat",
         "dz\\plants\\tree\\data\\t_piceaabies_trunk_dxt5.paa",
         Poseidon::RapStageCandidateHandoff::Consumer::NormalMap, member});
-    CHECK_FALSE(moved->Bounded()); // one consumed normal per material
+    CHECK_FALSE(moved->Bounded()); // duplicate typed slot within the same material
+    moved->materials.pop_back();
+    moved->materials.push_back({"dz\\plants\\tree\\data\\d_piceaabies_stumpb_trunk_a.rvmat",
+        "dz\\plants\\tree\\data\\t_piceaabies_trunk_dxt5.paa",
+        Poseidon::RapStageCandidateHandoff::Consumer::LayerNormal1, member});
+    CHECK(moved->Bounded());
     Poseidon::RapStageCandidateHandoff tooLong;
     tooLong.generation = 7;
     tooLong.materials.push_back({"material.rvmat", std::string(241, 'x'),
