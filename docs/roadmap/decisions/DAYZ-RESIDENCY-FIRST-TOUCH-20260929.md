@@ -70,4 +70,34 @@ the existing owned-primary chain and the second reached a source-bound
 PreparedTextureStore entry, whose exact member could be claimed. The prior
 six cold-handoff cases passed 563 assertions. This proves the opt-in worker
 handoff for that original PAA fixture, not a DayZ performance gain or material
-completeness. Installed ON/OFF screening remains pending at this checkpoint.
+completeness.
+
+The first installed combined-option route stopped at the harness's initial
+sample, because it asserted that all `warmPrepared*` counters were zero when
+warm jobs were disabled. Those counters belong to the shared store, which the
+new cold path also uses. Its owned game exited normally, with no forced stop.
+Script commit `6c6cc9d7` keeps all warm-job queue/work counters strictly zero
+but permits shared-store counters only for the explicit combined option; it
+also records that combination in provenance. The repaired installed route
+`bound-paa-retry-sep29-disabled-20260929-153127` passed with normal shutdown,
+877 frames, no dropped samples and full 19,923/19,923 returned residency.
+It recorded 85 source-bound Puts, 45 Takes, 45 successful uploads and
+83,880,704 upload bytes, with zero warm jobs and zero source refusals.
+
+For a bounded comparison, the same installed `2233926b` EXE/DLL pair ran
+`packed-only-sep29-disabled-20260929-153344` with the existing PBO texture
+preparation but without cold handoff. It also passed normally and returned
+19,923/19,923, with 899 frames and no drops. Both runs were at the script's
+1280x720/4x MSAA/60-fps cap, fixed route, water backend 0, simulation mode
+Disabled and no frame-phase instrumentation. The combined route's `drw:init`
+mean/p95/max were 12.542/62.390/975.937 ms; packed-only measured
+12.530/49.900/1004.390 ms. `tenement_small` admitted in 287.8 ms with
+41 prepared texture uploads in the combined run, versus 232.3 ms and the
+same 41 in packed-only. `city_school` was 745.0 ms versus 611.7 ms, with
+21 versus 18 prepared uploads. The existing PBO path already served the large
+primary dependency set, so this new source binding has not shown an additional
+DayZ latency benefit. The runs have different asynchronous completion and
+cache histories, and enabling cold handoff also activates the existing
+owned-primary path; these rows are screening evidence, not an isolated causal
+effect of the new capture. Keep both options off by default and do not claim
+no-regression or promote them from this pair.
