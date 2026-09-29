@@ -1331,3 +1331,23 @@ classifier suite passed31 assertions/5 cases. Installed DayZ verification is
 pending. Whole plan remains OPEN/defaultReady=false/performanceAccepted=false;
 retail source leases, complete final material binding, paced owner registration,
 physical convergence and comparable-quality performance remain required.
+
+### 30 September — actual source precursor and pre-upload birth capture
+
+Installed `f62e5253` passed startup and DayZ prepared-classifier ON/OFF traversal,
+both normal/exit0 with returned19,923 resident/zero pending. ON classified34
+actual tenement sections; OFF emitted none. Ordered p95 frames126.680/106.170ms
+do not establish an improvement; feature remains default-off/performanceAccepted=false.
+Next source retains actual pre-upload texture refs/Init birth leases in a bounded
+selected-owner observer and adds a supplied-role dependency packet; it does not
+yet pace complete retail registration. After a missing-include build repair,
+dependency/birth/candidate checks passed5,228 assertions/18 cases.
+
+An additive128KiB Cprs lease preserves original raw-source refusal rules. Real
+installed skala_new.p3d decode/SHA/ODOL7 checks passed19 assertions; independent
+wire/Tools inspection and canonical raw-IR gate found four rigid visual LODs
+and one PAC opaque across all seven mips. This advances actual retail source
+inspection but not finalized SVertex/config/object/shadow/pass admission. Normal
+physics geometry, Roadway5 and fire/view6 must remain conventional. Installed
+observer/native verification is pending; whole plan remains OPEN/defaultReady=false,
+performanceAccepted=false, with no Nanite-equivalence claim.

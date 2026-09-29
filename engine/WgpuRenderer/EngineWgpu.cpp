@@ -12939,6 +12939,49 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
     // it adds no loads, cannot retrofit cached unknown headers, and retains no
     // read buffer. Live/valid parked registrations returned before this point.
     ArchiveSourceBinding::ModelReadScope materialSourcePurpose;
+    // Capture initialized source births before EnsureUploaded can retire their
+    // original proof. This diagnostic packet owns only observed unique images;
+    // it is not a declaration/final-role closure or a deferred registration.
+    std::unique_ptr<WgpuTextureBirthObserver> birthObserver;
+    std::optional<WgpuTextureBirthObserver::Scope> birthScope;
+    static const bool birthObserverEnabled = WgpuTextureBirthObserver::Enabled();
+    if (birthObserverEnabled && Foundation::IsMainThread() && shape && shape->Name() &&
+        std::strcmp(shape->Name(), R"(dz\structures\residential\tenements\tenement_small.p3d)") == 0)
+    {
+        try {
+            birthObserver = std::make_unique<WgpuTextureBirthObserver>();
+            birthScope.emplace(*birthObserver, true, true);
+        } catch (...) { birthObserver.reset(); } // ordinary complete registration continues
+    }
+    struct BirthObservationReport
+    {
+        WgpuTextureBirthObserver* observer;
+        ~BirthObservationReport()
+        {
+            if (!observer) return;
+            try {
+                const auto report = observer->Read();
+                size_t currentPhysical = 0, resident = 0;
+                for (size_t i = 0; i < report.captured; ++i) {
+                    const auto& entry = observer->At(i);
+                    const auto* texture = static_cast<const TextureWgpu*>(entry.texture.GetRef());
+                    if (!texture) continue;
+                    resident += texture->GpuHandle() != 0;
+                    if (entry.kind != WgpuTextureBirthObserver::Kind::Physical || !entry.birthLease ||
+                        !texture->SourceName() || std::string_view(texture->SourceName()) != entry.SourceName()) continue;
+                    QFBank* bank = QIFStreamB::AutoBank(texture->SourceName());
+                    const size_t prefix = bank ? size_t(bank->GetPrefix().GetLength()) : entry.sourceLength;
+                    if (bank && prefix < entry.sourceLength &&
+                        bank->MatchesMountedMember(texture->SourceName() + prefix, entry.birthLease->Request()))
+                        ++currentPhysical;
+                }
+                LOG_INFO(Graphics, "DayZ texture birth observer: calls={} duplicates={} captured={} physical={} generated={} missingSource={} unsupportedDynamic={} invalidName={} capacityRefused={} partial={} currentPhysical={} resident={} knownPacketBytes={} finalRoleClosure=false scope=before-Ensure-upload-owner",
+                    report.observedCalls, report.duplicateCalls, report.captured, report.physical, report.generated,
+                    report.missingSource, report.unsupportedDynamic, report.invalidName, report.capacityRefused,
+                    report.partial, currentPhysical, resident, sizeof(WgpuTextureBirthObserver));
+            } catch (...) {} // diagnostics never suppress ordinary registration
+        }
+    } birthObservationReport{birthObserver.get()};
     std::vector<TextureWgpu*> modelTextures;
     std::vector<uint64_t> modelMeshes;
     if (_wbank)

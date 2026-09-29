@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #ifndef _WIN32
@@ -67,6 +68,31 @@ struct BankReadRequest
     bool SameArchiveMember(const BankReadRequest& other) const;
     bool CopyMemberIdentity(BankReadMemberIdentity& out) const; // No IO; leaves out untouched on refusal.
     bool Read(std::vector<char>& out) const;
+};
+
+// Opt-in, bounded lease for a PBO Cprs member. The physical encoded range is
+// leased just like BankReadRequest, while the codec, decoded size and canonical
+// member name are frozen at capture. ReadDecoded verifies exact consumption and
+// returns a hash of the exact decoded bytes; the owner still compares that hash
+// with its admitted source and checks the current mount before publication.
+class BankCompressedReadRequest
+{
+    friend class QFBank;
+    BankReadRequest _encoded;
+    std::string _canonicalMember;
+    int _codec = 0;
+    uint32_t _decodedBytes = 0;
+    BankCompressedReadRequest(BankReadRequest encoded, std::string member, int codec, uint32_t decodedBytes)
+        : _encoded(std::move(encoded)), _canonicalMember(std::move(member)),
+          _codec(codec), _decodedBytes(decodedBytes) {}
+public:
+    static constexpr uint32_t MaxEncodedBytes = 128 * 1024;
+    static constexpr uint32_t MaxDecodedBytes = 128 * 1024;
+    const BankReadRequest& Encoded() const { return _encoded; }
+    const std::string& CanonicalMember() const { return _canonicalMember; }
+    int Codec() const { return _codec; }
+    uint32_t DecodedBytes() const { return _decodedBytes; }
+    bool ReadDecoded(std::vector<char>& out, std::string& decodedSha256) const;
 };
 
 class QFBank;
@@ -360,9 +386,16 @@ class QFBank
     // Required identity is unsupported on POSIX and returns nullopt. The default
     // retains the existing unleased read path and performs no native capture.
     std::optional<BankReadRequest> CaptureReadRequest(const char* member, bool requireArchiveIdentity = false) const;
+    // Model-page preparation only: exact Cprs member, bounded encoded/decoded
+    // sizes and mandatory Windows physical archive lease. Existing raw API is
+    // deliberately unchanged and continues to refuse compressed members.
+    std::optional<BankCompressedReadRequest> CaptureCompressedReadRequest(
+        const char* member, uint32_t maxEncodedBytes = BankCompressedReadRequest::MaxEncodedBytes,
+        uint32_t maxDecodedBytes = BankCompressedReadRequest::MaxDecodedBytes) const;
     // Owner-only observation of an ALREADY loaded mount. Never Load/Open/Read/Seek;
     // false includes unsupported/unknown. The source must retain its original lease.
     bool MatchesMountedMember(const char* member, const BankReadRequest& initializedSource) const;
+    bool MatchesMountedCompressedMember(const char* member, const BankCompressedReadRequest& initializedSource) const;
     bool FileExists(const char* name) const;
     // low level access to bank
     void Read(char* buf, long size, const char* name) const; // read raw bytes from bank

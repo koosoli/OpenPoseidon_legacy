@@ -1213,6 +1213,70 @@ std::optional<BankReadRequest> QFBank::CaptureReadRequest(const char* member, bo
 #endif
 }
 
+bool BankCompressedReadRequest::ReadDecoded(std::vector<char>& out, std::string& decodedSha256) const
+{
+    // Do not expose partly decoded data or a hash on any malformed stream.
+    if (_codec != CompMagic || !_encoded.HasArchiveIdentity() ||
+        _encoded.bytes == 0 || _encoded.bytes > MaxEncodedBytes ||
+        _decodedBytes == 0 || _decodedBytes > MaxDecodedBytes ||
+        _canonicalMember.empty() || _canonicalMember.size() >= 128) return false;
+    try
+    {
+        std::vector<char> encoded;
+        if (!_encoded.Read(encoded) || encoded.size() != _encoded.bytes) return false;
+        std::vector<char> decoded(_decodedBytes);
+        QIStream input(encoded.data(), static_cast<int>(encoded.size()));
+        SSCompress compressor;
+        if (!compressor.Decode(decoded.data(), static_cast<long>(decoded.size()), input) ||
+            input.fail() || input.rest() != 0) return false;
+        std::string hash = Foundation::Sha256::Of(decoded.data(), decoded.size());
+        out = std::move(decoded);
+        decodedSha256 = std::move(hash);
+        return true;
+    }
+    catch (...) { return false; }
+}
+
+std::optional<BankCompressedReadRequest> QFBank::CaptureCompressedReadRequest(
+    const char* member, uint32_t maxEncodedBytes, uint32_t maxDecodedBytes) const
+{
+    if (!Foundation::IsMainThread() || !member || !maxEncodedBytes || !maxDecodedBytes) return std::nullopt;
+    size_t length = 0;
+    while (length < 128 && member[length]) ++length;
+    if (!length || length >= 128 || !Load()) return std::nullopt;
+    const auto& info = FindFileInfo(member);
+    if (IsNull(info) || info.compressedMagic != CompMagic || info.startOffset < 0 ||
+        info.length <= 0 || info.uncompressedSize <= 0 ||
+        static_cast<uint32_t>(info.length) > BankCompressedReadRequest::MaxEncodedBytes ||
+        static_cast<uint32_t>(info.length) > maxEncodedBytes ||
+        static_cast<uint32_t>(info.uncompressedSize) > BankCompressedReadRequest::MaxDecodedBytes ||
+        static_cast<uint32_t>(info.uncompressedSize) > maxDecodedBytes) return std::nullopt;
+#if _ENABLE_PATCHING
+    if (info.loadFromFile) return std::nullopt;
+#endif
+    const std::string canonical((const char*)info.name);
+    if (canonical.empty() || canonical.size() >= 128) return std::nullopt;
+#ifdef _WIN32
+    BankReadRequest encoded{std::string(static_cast<const char*>(_openName)),
+                            static_cast<uint64_t>(info.startOffset), static_cast<uint64_t>(info.length)};
+    OwnedArchiveHandle held(static_cast<HANDLE>(OpenFileForRead(encoded.archive.c_str())));
+    ArchiveIdentity mounted, fresh;
+    if (!mounted.Capture(static_cast<HANDLE>(_handle)) || !fresh.Capture(held.Get()) ||
+        !mounted.Same(fresh) || encoded.offset > fresh.size ||
+        encoded.bytes > fresh.size - encoded.offset) return std::nullopt;
+    try
+    {
+        encoded.archiveLease = std::make_shared<const BankArchiveReadLease>(held.Get(), fresh, encoded);
+        held.Release();
+        return BankCompressedReadRequest(std::move(encoded), canonical, info.compressedMagic,
+                                         static_cast<uint32_t>(info.uncompressedSize));
+    }
+    catch (...) { return std::nullopt; }
+#else
+    return std::nullopt;
+#endif
+}
+
 namespace
 {
 bool CaptureWarmTextureSourceBinding()
@@ -1492,6 +1556,36 @@ bool QFBank::MatchesMountedMember(const char* member, const BankReadRequest& ini
     ArchiveIdentity mounted;
     return mounted.Capture(static_cast<HANDLE>(_handle)) &&
         mounted.Same(initializedSource.archiveLease->identity);
+#else
+    return false;
+#endif
+}
+
+bool QFBank::MatchesMountedCompressedMember(
+    const char* member, const BankCompressedReadRequest& initializedSource) const
+{
+    if (!Foundation::IsMainThread() || !member || !_handle || _error ||
+        initializedSource._codec != CompMagic ||
+        !initializedSource._encoded.HasArchiveIdentity()) return false;
+    size_t length = 0;
+    while (length < 128 && member[length]) ++length;
+    if (!length || length >= 128) return false;
+#ifdef _WIN32
+    const auto& info = FindFileInfo(member);
+    if (IsNull(info) || info.compressedMagic != initializedSource._codec ||
+        info.startOffset < 0 || info.length <= 0 || info.uncompressedSize <= 0 ||
+        static_cast<uint32_t>(info.length) > BankCompressedReadRequest::MaxEncodedBytes ||
+        static_cast<uint32_t>(info.uncompressedSize) > BankCompressedReadRequest::MaxDecodedBytes ||
+        std::string((const char*)info.name) != initializedSource._canonicalMember ||
+        static_cast<uint64_t>(info.startOffset) != initializedSource._encoded.offset ||
+        static_cast<uint64_t>(info.length) != initializedSource._encoded.bytes ||
+        static_cast<uint32_t>(info.uncompressedSize) != initializedSource._decodedBytes) return false;
+#if _ENABLE_PATCHING
+    if (info.loadFromFile) return false;
+#endif
+    ArchiveIdentity mounted;
+    return mounted.Capture(static_cast<HANDLE>(_handle)) &&
+        mounted.Same(initializedSource._encoded.archiveLease->identity);
 #else
     return false;
 #endif

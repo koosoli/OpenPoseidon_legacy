@@ -226,3 +226,28 @@ Next work: automatic projected demand across applicable views, supported static
 opaque retail source admission and world epochs, release/refill with measured
 byte convergence, and comparable-quality traversal measurements. No default
 activation or Nanite-equivalence claim follows from the private fixture.
+
+## 30 September — actual compressed retail source precursor
+
+A separate opt-in compressed-member lease now keeps the encoded physical range,
+canonical member name, Cprs codec and decoded byte count. It bounds both encoded
+and decoded buffers to128KiB, verifies checksum and exact encoded consumption,
+and returns the SHA of the same owned decoded buffer. Original raw PAA capture
+and mount matching still refuse compressed sources; no physical mount facts
+are added to ModelBlob or content DDC keys. Synthetic checks passed58 assertions;
+the explicit real installed source test passed19 assertions without a skip.
+
+Read-only `Inspect-RigidOdol7Candidate.py` independently decoded the installed
+data3d.pbo skala_new.p3d and matched Tools stdout exactly: encoded33,097 bytes,
+decoded53,786, SHA1048fad6987e65533c17146ab8b9d4ef70cd475e3ed88b2f7c76670504ecb78b.
+Canonical ODOL7 candidate inspection passed four visual levels250/144/72/30
+triangles; no animation/proxies. Its raw32-byte IR vertex export preserves
+source normals/UVs and actual special/LOD semantics, and is explicitly not
+renderer SVertex or live retail authority. Geometry4, Roadway5 and directory
+fire/view6 remain conventional nonvisual source roles. VisualLOD0/1 carry
+lodnoshadow; later ones do not. The sole skala_piskovec2.pac is an uncompressed
+43,839-byte DXT1 member; all5,461 blocks across seven mips have opaque endpoints.
+This is source evidence only: current-world/config/final Shape, actual opaque
+binding and all-pass replacement still need owner verification. Combined
+dependency/birth/candidate suite passed5,228 assertions/18 cases, including the
+explicit real lease/loader/candidate join. Installed next-source startup pending.

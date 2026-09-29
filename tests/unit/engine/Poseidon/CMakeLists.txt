@@ -27,6 +27,7 @@ set(POSEIDON_CORE_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_qstream_banks.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_qstream_buffers.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_qstream_compression.cpp
+    ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_compressed_model_member_lease.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_serializebin.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_qstream_file_input.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_qstream_file_output.cpp
@@ -176,6 +177,9 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_retained_material_role_declarations.cpp
     Graphics/test_deferred_procedural_admission.cpp
     Graphics/test_prepared_gpu_section_classification.cpp
+    Graphics/test_owned_material_dependency_packet.cpp
+    Graphics/test_geometry_page_rigid_odol7_candidate.cpp
+    Graphics/test_texture_birth_before_use.cpp
     Graphics/test_alpha_classify.cpp
     Graphics/test_surface_decompose.cpp
     Graphics/test_shadowmap_math.cpp

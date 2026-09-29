@@ -449,3 +449,30 @@ that is a read subset, not total frame time or matched causal improvement.
 The extension stays OFF by default. The next performance target is bounded
 resumable owner registration: proxy GPU registration currently occurs inside
 the synchronous parent ShapeBank load, before ObjectCreate.
+
+## 30 September — prepared classifier seam and source births
+
+Exact `f62e5253` passed paired installed startup. Ordered same-binary DayZ
+`prepared-classification-on-sep30-disabled-20260930-012659` and
+`prepared-classification-off-sep30-disabled-20260930-012855` both passed,
+normal exit0/no force, returned19,923 resident/zero pending. The ON run accepted
+34 actual selected-tenement GPU sections, including opaque and alpha-test
+routes; OFF emitted no prepared-classifier rows. Frames873/907, drops0/0.
+Route median23.363/23.337ms, p95 126.680/106.170ms, p99 356.493/310.908ms,
+max910.778/880.599ms. Cache order and first-touch variability were not controlled
+as a performance acceptance experiment: no causal gain/no-regression claim.
+The classifier remains OFF and face/material upload is still synchronous.
+
+Next source captures actual strong Texture refs and initialized current-mounted
+archive leases at the existing bank NoteTextureUse, before EnsureUploaded can
+retire the birth proof. The exact selected-tenement observer retains at most128
+rows across overlapping scopes; missing source evidence remains explicitly
+partial. Its final report rechecks held physical members against current mounts
+and observes residency, never claiming exhaustive final roles or a paced model.
+A separate bounded dependency packet binds caller-supplied actual declaration
+rows and stages one unique image per owner update, preserving physical leases
+and generated owner-stage witnesses. It is not yet the retail final resolver.
+Combined build first failed a missing ArchiveSourceBinding include, then passed
+after repair. Focused dependency/birth/candidate checks passed5,228 assertions
+in18 cases including the real external ODOL7 candidate. Installed observer
+verification is pending; complete owner registration remains OPEN.

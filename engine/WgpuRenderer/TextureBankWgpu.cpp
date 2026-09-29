@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <cctype>
 #include <cjson/cJSON.h>
+#include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/Streams/PatnikArchiveReason.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
@@ -43,6 +44,40 @@ void TextureBankWgpu::NoteTextureUse(TextureWgpu* texture)
 {
     if (!texture)
         return;
+    if (auto* observer = WgpuTextureBirthObserver::Active())
+    {
+        observer->Observe(texture, [texture]() {
+            WgpuTextureBirthObserver::Facts facts;
+            facts.texture = Ref<Texture>(texture);
+            facts.dynamic = texture->IsDynamicTexture();
+            facts.generatedDeferred = texture->HasDeferredGeneratedUpload();
+            facts.handleBeforeUse = texture->GpuHandle();
+            facts.slotLeaseBeforeUse = texture->SlotLease();
+            const char* name = facts.dynamic ? texture->Name() : texture->SourceName();
+            if (name)
+            {
+                size_t length = 0;
+                while (length <= WgpuTextureBirthObserver::MaxName && name[length]) ++length;
+                facts.sourceName = {name, length};
+            }
+            if (!facts.dynamic)
+            {
+                auto current = texture->CurrentArchiveSourceBinding(); // current mount, no pixel read
+                BankReadMemberIdentity member;
+                if (current && current->Request().CopyMemberIdentity(member))
+                {
+                    facts.member.volume = member.volume;
+                    facts.member.archiveBytes = member.archiveBytes;
+                    facts.member.offset = member.offset;
+                    facts.member.bytes = member.bytes;
+                    std::memcpy(facts.member.fileId.data(), member.fileId, sizeof(member.fileId));
+                    facts.mountedCurrent = true;
+                    facts.currentBirthLease = std::move(current);
+                }
+            }
+            return facts;
+        });
+    }
     texture->_lastUsedFrame = _residencyFrame;
     if (_capture && std::find(_capture->begin(), _capture->end(), texture) == _capture->end())
         _capture->push_back(texture);

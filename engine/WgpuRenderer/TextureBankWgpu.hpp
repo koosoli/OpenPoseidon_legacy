@@ -1,6 +1,7 @@
 #pragma once
 
 #include "TextureWgpu.hpp"
+#include <Poseidon/Graphics/Textures/TextureBirthBeforeUse.hpp>
 
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
@@ -15,6 +16,8 @@ struct WgrRenderer;
 
 namespace Poseidon
 {
+
+using WgpuTextureBirthObserver = render::TextureBirthBeforeUse<Ref<Texture>, ArchiveSourceBinding>;
 
 class TextureBankWgpu : public AbstractTextBank
 {

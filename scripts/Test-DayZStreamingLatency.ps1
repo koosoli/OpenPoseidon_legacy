@@ -22,6 +22,7 @@ param(
     [switch]$DayZTextureTrace,
     [switch]$DayZDependencyCensus,
     [switch]$PreparedSectionClassification,
+    [switch]$TextureBirthObserver,
     [switch]$DayZShapeSplit,
     [switch]$DayZOwnerPrimaryStage,
     [switch]$DayZOwnerNormalStage,
@@ -55,6 +56,7 @@ if ($RapStageEarlyPrepare) { $WarmMaterialPreflight = $true; $WarmTextureProvena
 if ($RapBuildingMultistage) { $RapBuildingPilot = $true }
 if ($RapBuildingPilot -or $RapBuildingMultistage) { $WarmMaterialPreflight = $true; $WarmTextureProvenance = $true }
 if ($DayZProxyPrefetch) { $DayZPhysicalPrefetch = $true }
+if ($TextureBirthObserver) { $HotSourceProofRetirement = $true }
 if ($DayZPhysicalPrefetch) { $DayZTextureTrace = $true }
 if ($WarmMaterialPreflight) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($WeakCacheProof) { $HotSourceProofRetirement = $true }
@@ -93,6 +95,7 @@ if (!$env:LOCK_OWNER) {
         if ($DayZTextureTrace) { $argv += '-DayZTextureTrace' }
         if ($DayZDependencyCensus) { $argv += '-DayZDependencyCensus' }
         if ($PreparedSectionClassification) { $argv += '-PreparedSectionClassification' }
+        if ($TextureBirthObserver) { $argv += '-TextureBirthObserver' }
         if ($DayZShapeSplit) { $argv += '-DayZShapeSplit' }
         if ($DayZOwnerPrimaryStage) { $argv += '-DayZOwnerPrimaryStage' }
         if ($DayZOwnerNormalStage) { $argv += '-DayZOwnerNormalStage' }
@@ -170,6 +173,7 @@ $environment = @{
     WGR_OBJECT_STREAM_DAYZ_TEXTURE_TRACE = $(if ($DayZTextureTrace) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_DEPENDENCY_CENSUS = $(if ($DayZDependencyCensus) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_PREPARED_SECTION = $(if ($PreparedSectionClassification) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_DAYZ_BIRTH_OBSERVER = $(if ($TextureBirthObserver) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_SHAPE_SPLIT = $(if ($DayZShapeSplit) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_OWNER_PRIMARY_STAGE = $(if ($DayZOwnerPrimaryStage) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_OWNER_NORMAL_STAGE = $(if ($DayZOwnerNormalStage) { '1' } else { '0' })
@@ -856,6 +860,17 @@ try {
     if($PreparedSectionClassification -and !$preparedAccepted.Count){throw 'NotExercised: no actual selected-tenement prepared GPU-owned section'}
     $preparedProof=@{requested=[bool]$PreparedSectionClassification;rows=@($preparedRows|ForEach-Object {$_.Line});acceptedRows=$preparedAccepted.Count;
         scope='First at most64 actual selected-tenement owner fact classifications; face upload remains synchronous, no complete role/model admission, source freshness, pixel parity or performance claim'}
+    $birthRows=@(Select-String -LiteralPath $log -Pattern 'DayZ texture birth observer: calls=(\d+) duplicates=(\d+) captured=(\d+) physical=(\d+) generated=(\d+) missingSource=(\d+) unsupportedDynamic=(\d+) invalidName=(\d+) capacityRefused=(\d+) partial=(true|false) currentPhysical=(\d+) resident=(\d+) knownPacketBytes=(\d+) finalRoleClosure=false scope=before-Ensure-upload-owner')
+    if (!$TextureBirthObserver -and $birthRows.Count) { throw 'Texture birth observer unexpectedly activated' }
+    $birthPositive=$false
+    foreach($row in $birthRows) {
+        $m=$row.Matches[0];$captured=[int]$m.Groups[3].Value;$physical=[int]$m.Groups[4].Value;$generated=[int]$m.Groups[5].Value
+        $current=[int]$m.Groups[11].Value;$resident=[int]$m.Groups[12].Value
+        if($captured -gt 128 -or $captured -ne ($physical+$generated) -or $current -gt $physical -or $resident -gt $captured){throw 'Texture birth observer exceeded bounds or returned inconsistent ownership'}
+        if($physical -gt 0 -and $current -eq $physical -and $resident -eq $captured){$birthPositive=$true}
+    }
+    if($TextureBirthObserver -and !$birthPositive){throw 'NotExercised: no captured physical source births remained current and resident through selected registration'}
+    $birthProof=@{requested=[bool]$TextureBirthObserver;positive=$birthPositive;rows=@($birthRows|ForEach-Object {$_.Line});scope='Selected owner before-Ensure unique texture refs and Init archive leases; unknown births remain partial, no exhaustive roles or paced registration/performance claim'}
     @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven -and $buildingPilotProven -and $multiStageProven -and $physicalPrefetchProven -and $proxyPrefetchProven -and $textureTraceProven -and $shapeSplitProven -and $ownerStageProven -and $normalStageProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings; framePaceTrace = [bool]$FramePaceTrace
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
@@ -885,6 +900,7 @@ try {
         dayZTextureTraceProof = $textureTraceProof
         dayZShapeSplit = [bool]$DayZShapeSplit
         preparedSectionClassification=[bool]$PreparedSectionClassification;preparedSectionProof=$preparedProof
+        textureBirthObserver=[bool]$TextureBirthObserver;textureBirthObserverProof=$birthProof
         dayZShapeSplitProof = $shapeSplitProof
         dayZOwnerPrimaryStage = [bool]$DayZOwnerPrimaryStage
         dayZOwnerPrimaryStageProof = $ownerStageProof
