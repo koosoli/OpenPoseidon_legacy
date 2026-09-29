@@ -15,6 +15,7 @@ param(
     [switch]$WarmTextureJobs,
     [switch]$WarmMaterialPreflight,
     [switch]$RapStageEarlyPrepare,
+    [switch]$RapBuildingPilot,
     [switch]$HotSourceProofRetirement,
     [switch]$WeakCacheProof,
     [switch]$WarmTextureProvenance,
@@ -42,6 +43,7 @@ $boundPackedSource = [bool]($PackedTextures -and $ColdPaaHandoff)
 if ($RequireWarmMaterialStageUpload) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($RequireWarmMaterialPreflightUpload) { $WarmMaterialPreflight = $true }
 if ($RapStageEarlyPrepare) { $WarmMaterialPreflight = $true; $WarmTextureProvenance = $true }
+if ($RapBuildingPilot) { $WarmMaterialPreflight = $true; $WarmTextureProvenance = $true }
 if ($WarmMaterialPreflight) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($WeakCacheProof) { $HotSourceProofRetirement = $true }
 if ($WarmEarlySlice -or $WarmPublishedReuse) { $WarmTextureProvenance = $true }
@@ -72,6 +74,7 @@ if (!$env:LOCK_OWNER) {
         if ($WarmTextureJobs) { $argv += '-WarmTextureJobs' }
         if ($WarmMaterialPreflight) { $argv += '-WarmMaterialPreflight' }
         if ($RapStageEarlyPrepare) { $argv += '-RapStageEarlyPrepare' }
+        if ($RapBuildingPilot) { $argv += '-RapBuildingPilot' }
         if ($HotSourceProofRetirement) { $argv += '-HotSourceProofRetirement' }
         if ($WeakCacheProof) { $argv += '-WeakCacheProof' }
         if ($WarmTextureProvenance) { $argv += '-WarmTextureProvenance' }
@@ -137,8 +140,9 @@ $environment = @{
     WGR_WATER_BACKEND = '0'
     WGR_OBJECT_STREAM_WARM_MATERIAL_PREFLIGHT = $(if ($WarmMaterialPreflight) { '1' } else { '0' })
     WGR_OBJECT_STREAM_RAP_STAGE_SOURCE = $(if ($RapStageEarlyPrepare) { '1' } else { '0' })
-    WGR_OBJECT_STREAM_RAP_STAGE_WARM_CAPTURE = $(if ($RapStageEarlyPrepare) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_RAP_STAGE_WARM_CAPTURE = $(if ($RapStageEarlyPrepare -or $RapBuildingPilot) { '1' } else { '0' })
     WGR_OBJECT_STREAM_RAP_STAGE_EARLY_PREPARE = $(if ($RapStageEarlyPrepare) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_RAP_BUILDING_PILOT = $(if ($RapBuildingPilot) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WEAK_CACHE_PROOF = $(if ($WeakCacheProof) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WARM_TEXTURE_TRACE = $(if ($WarmTextureProvenance) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WARM_EARLY_SLICE = $(if ($WarmEarlySlice) { '1' } else { '0' })
@@ -194,6 +198,7 @@ try {
         warmTextureJobs = [bool]$WarmTextureJobs
         warmMaterialPreflight = [bool]$WarmMaterialPreflight
         rapStageEarlyPrepare = [bool]$RapStageEarlyPrepare
+        rapBuildingPilot = [bool]$RapBuildingPilot
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement
         weakCacheProof = [bool]$WeakCacheProof; warmTextureProvenance = [bool]$WarmTextureProvenance
         warmEarlySlice = [bool]$WarmEarlySlice
@@ -308,10 +313,13 @@ try {
     $warmJobProof = @{enabled = [bool]$WarmTextureJobs; state = $returned.camera
         scope = 'Bounded requested dependencies of cached CPU models; successful GPU block uploads validate initialized physical member and current loaded mount, not whole-model texture readiness or a performance benefit'}
     $warmJobProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'warm-texture-job-proof.json')
-    $warmJobsProven = !$WarmTextureJobs -or ($returned.camera.warmTextureJobsSubmitted -ge 1 -and
-        $returned.camera.warmTextureMembersPrepared -ge 1 -and $returned.camera.warmPreparedPuts -ge 1 -and
+    $warmQueueProven = $returned.camera.warmTextureJobsSubmitted -ge 1 -and
+        $returned.camera.warmTextureMembersPrepared -ge 1
+    $warmStoreProven = $returned.camera.warmPreparedPuts -ge 1 -and
         $returned.camera.warmPreparedTakes -ge 1 -and $returned.camera.warmPreparedUploads -ge 1 -and
-        $returned.camera.warmPreparedUploadBytes -ge 1)
+        $returned.camera.warmPreparedUploadBytes -ge 1
+    # The building pilot uses the conversion worker, not the separate warm-job queue.
+    $warmJobsProven = !$WarmTextureJobs -or ($warmStoreProven -and ($RapBuildingPilot -or $warmQueueProven))
     $archiveBindings = Send @{cmd = 'archive_source_bindings'}
     if ($archiveBindings.enabled -ne [bool]$ArchiveSourceBindings -or
         $archiveBindings.liveBindings -gt $archiveBindings.capBindings -or
@@ -437,6 +445,14 @@ try {
         truncated = [bool](Select-String -LiteralPath $log -Pattern 'Warm prepared upload witness truncated:' -Quiet)
         scope = 'Successful source-validated bound worker upload of normal/specular filename family only; not shader slot role, visual quality, whole-model readiness or performance acceptance' }
     $warmStageFamilyProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'warm-material-stage-family-proof.json')
+    $buildingCaptureRows = @(Select-String -LiteralPath $log -Pattern 'RVMAT raP building owner capture: modelIndex=\d+ model=(.*?) stage=(.*?) sourceBound=true')
+    $buildingCaptureStages = @($buildingCaptureRows | ForEach-Object { $_.Matches[0].Groups[2].Value.ToLowerInvariant() })
+    $buildingUploads = @($warmUploadObservations | Where-Object { $_.source.ToLowerInvariant() -in $buildingCaptureStages })
+    $buildingPilotProven = !$RapBuildingPilot -or ($buildingCaptureStages.Count -gt 0 -and $buildingUploads.Count -gt 0)
+    $buildingPilotProof = @{requested=[bool]$RapBuildingPilot; positive=[bool]($buildingUploads.Count -gt 0)
+        capturedStages=$buildingCaptureStages; uploads=$buildingUploads
+        scope='Same named stage has an owner-bound current source and a later source-validated GPU upload; does not prove every building stage/proxy, pixel parity, or latency improvement'}
+    $buildingPilotProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'rap-building-pilot-proof.json')
     # The captured-stage source must also appear in the existing successful bound upload witness.
     # This is a same-source join, not a proof of shader slot usage, pixels or causal performance.
     $preflightRawRows = @(Select-String -LiteralPath $log -Pattern 'Warm material source preflight: source=')
@@ -639,7 +655,7 @@ try {
         rows=@($promotionRows | ForEach-Object {$_.Line});
         scope='Historical exact-member promotion witness; not a later Take, source match, upload, or complete 32-entry scan'}
     $promotionProven = !$WarmPublishedReuse -or $promotionRows.Count -gt 0
-    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings; framePaceTrace = [bool]$FramePaceTrace
+    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven -and $buildingPilotProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings; framePaceTrace = [bool]$FramePaceTrace
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         renderCallCpuTimings = [bool]$TerrainPageTimings; renderCallCpuTimingProof = $callCpuProof
@@ -657,6 +673,7 @@ try {
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement; hotSourceProofRetirementProof = $hotRetirementProof
         warmMaterialPreflight = [bool]$WarmMaterialPreflight; warmMaterialPreflightProof = $warmPreflightProof
         rapStageEarlyPrepare = [bool]$RapStageEarlyPrepare
+        rapBuildingPilot = [bool]$RapBuildingPilot; rapBuildingPilotProof = $buildingPilotProof
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload; warmMaterialStageFamilyProof = $warmStageFamilyProof
         coldPaaHandoff = [bool]$ColdPaaHandoff; requireColdAlphaPeek = [bool]$RequireColdAlphaPeek; coldPaaHandoffProof = $coldPaaProof
@@ -673,6 +690,7 @@ try {
     if (!$promotionProven) { throw 'NotExercised: no published warm entry promoted before model cancellation; evidence retained' }
     if (!$warmPreflightProven) { throw 'NotExercised: no same-source initialized-stage preflight and successful bound worker stage upload; evidence retained' }
     if (!$warmJobsProven) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
+    if (!$buildingPilotProven) { throw 'NotExercised: no same-stage building source capture and successful bound upload; evidence retained' }
     if (!$warmStageFamilyProven) { throw 'Required bound worker normal/specular filename-family upload not exercised; evidence retained, no material-slot proof claimed' }
 } catch {
     $screeningFailure = $_.Exception.Message

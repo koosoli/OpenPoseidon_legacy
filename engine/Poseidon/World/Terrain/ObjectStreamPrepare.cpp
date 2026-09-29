@@ -53,6 +53,31 @@ namespace Poseidon
 
 namespace
 {
+// Exact first-touch pilot, one authored Multi material and its NormalMap per
+// building. Other materials, layers and proxy models retain ordinary admission.
+struct BuildingRapFixture
+{
+    const char* model;
+    const char* material;
+    const char* normal;
+};
+constexpr std::array<BuildingRapFixture, 3> BuildingRapFixtures{{
+    {R"(dz\structures\residential\tenements\tenement_small.p3d)",
+     R"(dz\structures\residential\tenements\data\tb_small_flats_walls.rvmat)",
+     R"(dz\structures\data\plaster\plaster_flats01_nohq.paa)"},
+    {R"(dz\structures\residential\schools\city_school.p3d)",
+     R"(dz\structures\residential\schools\data\school_ext_walls.rvmat)",
+     R"(dz\structures\data\concrete\concrete_bare4_nohq.paa)"},
+    {R"(dz\structures\residential\police\village_policestation.p3d)",
+     R"(dz\structures\residential\police\data\police_station_wall_ext.rvmat)",
+     R"(dz\structures\data\plaster\police_station_wall_nohq.paa)"}
+}};
+int BuildingRapFixtureOrdinal(const std::string& model)
+{
+    for (size_t i = 0; i < BuildingRapFixtures.size(); ++i)
+        if (model == BuildingRapFixtures[i].model) return static_cast<int>(i);
+    return -1;
+}
 // Diagnostic filename overlap only: no archive identity, cache ownership or reuse verdict.
 // Constructed only for the explicit optional PBO diagnostic. Fixed storage bounds metadata.
 // Log saturation bounds output, not instrumentation: attempt clocks/scans continue
@@ -399,6 +424,7 @@ struct ObjectStreamPreparer::Impl
     std::vector<std::optional<BankReadRequest>> packedReads;
     // Owner-only, reset per world: one exact capture attempt per selected fixture.
     uint8_t rapFixtureAttempts = 0;
+    uint8_t rapBuildingAttempts = 0;
     std::unique_ptr<std::atomic<uint8_t>[]> states;
     std::vector<ModelPtr> models;
     // Protected by mutex. In-flight slots stay occupied until their worker exits.
@@ -428,6 +454,7 @@ struct ObjectStreamPreparer::Impl
     {
         std::vector<PackedTextureRead> textures;
         std::vector<CapturedRapMaterial> rapMaterials; // typed NormalMap owner handoff, no PAA work
+        int8_t buildingRapFixture = -1; // worker discovery before conversion, exact pilot only
 
         std::unique_ptr<render::ColdPaaRead> coldTexture;
         uint64_t textureGeneration = 0;
@@ -443,6 +470,13 @@ struct ObjectStreamPreparer::Impl
         std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables;
     };
     std::deque<ConvertJob> convertQueue;
+    struct PendingRap
+    {
+        uint32_t index = uint32_t(-1);
+        std::optional<ConvertJob> job;
+        std::unique_ptr<RapStageCandidateHandoff> handoff;
+    };
+    std::array<PendingRap, BuildingRapFixtures.size()> pendingRap{};
     struct WarmJob
     {
         uint32_t index = 0;
@@ -707,6 +741,85 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             const uint64_t jobGen = generation.load(std::memory_order_relaxed);
             const std::string conversionPath = paths[job.index];
             lock.unlock();
+
+            // Exact building pilot: raP parsing stays on the worker. A valid
+            // NormalMap name needs one owner round-trip for the CURRENT PAA
+            // binding before conversion resumes. Failure simply converts now.
+            if (job.buildingRapFixture >= 0)
+            {
+                std::unique_ptr<RapStageCandidateHandoff> candidate;
+                lock.lock();
+                const bool mayRead = !stop && jobGen == generation.load(std::memory_order_relaxed) &&
+                    job.index < count && !stale[job.index] && paths[job.index] == conversionPath &&
+                    job.texturePublication.Valid();
+                lock.unlock();
+                try
+                {
+                    const auto& fixture = BuildingRapFixtures[static_cast<size_t>(job.buildingRapFixture)];
+                    if (mayRead && job.rapMaterials.size() == 1 &&
+                        job.rapMaterials[0].key == fixture.material)
+                    {
+                        const auto& selected = job.rapMaterials[0];
+                        BankReadMemberIdentity member;
+                        std::vector<char> bytes;
+                        if (selected.read.CopyMemberIdentity(member) &&
+                            selected.read.bytes <= RapMaterialLimit && selected.read.Read(bytes) &&
+                            bytes.size() == selected.read.bytes)
+                        {
+                            const auto result = Streaming::ExtractOwnedRapStageNames(
+                                std::span<const char>(bytes.data(), bytes.size()), selected.key);
+                            if (result.status == Streaming::RapStageNamesStatus::Complete &&
+                                result.normalMapName == fixture.normal)
+                            {
+                                candidate = std::make_unique<RapStageCandidateHandoff>();
+                                candidate->generation = jobGen; candidate->modelIndex = job.index;
+                                candidate->materials.push_back({selected.key, result.normalMapName,
+                                    RapStageCandidateHandoff::Consumer::NormalMap, member});
+                                if (!candidate->Bounded()) candidate.reset();
+                            }
+                        }
+                    }
+                }
+                catch (...) { candidate.reset(); }
+                const size_t slot = static_cast<size_t>(job.buildingRapFixture);
+                job.buildingRapFixture = -1;
+                job.rapMaterials.clear(); // release physical archive lease outside queue mutex
+                static std::atomic<unsigned> discoveryRows{0};
+                if (discoveryRows.fetch_add(1, std::memory_order_relaxed) < BuildingRapFixtures.size())
+                    LOG_INFO(World, "RVMAT raP building discovery: modelIndex={} model={} material={} stage={} candidate={} (worker parse; no owner PAA binding yet)",
+                        job.index, conversionPath, BuildingRapFixtures[slot].material,
+                        BuildingRapFixtures[slot].normal, bool(candidate));
+                lock.lock();
+                const bool current = !stop && jobGen == generation.load(std::memory_order_relaxed) &&
+                    job.index < count && !stale[job.index] && paths[job.index] == conversionPath &&
+                    (!job.sourceToken.diagnosticParseToken ||
+                     SourceBindingMatches(job.index, job.sourceToken));
+                if (!current)
+                {
+                    stats.conversionReservedBytes -= job.reservation + textureScratch;
+                    if (jobGen == generation.load(std::memory_order_relaxed) && job.index < count)
+                        Set(job.index, State::Unknown);
+                    ++stats.dropped;
+                    cv.notify_all();
+                    lock.unlock();
+                    job.textures.clear(); job.texturePublication = {};
+                    job.model.reset(); job.tables.reset(); job.coldTexture.reset();
+                    lock.lock();
+                    continue;
+                }
+                if (candidate && job.radiusIdentityAccepted &&
+                    job.texturePublication.Valid() && !pendingRap[slot].job)
+                {
+                    stats.conversionReservedBytes -= textureScratch; // no worker scratch while parked
+                    pendingRap[slot].index = job.index;
+                    pendingRap[slot].job.emplace(std::move(job));
+                    pendingRap[slot].handoff = std::move(candidate);
+                    Set(pendingRap[slot].index, State::RapCapture);
+                    cv.notify_all();
+                    continue;
+                }
+                lock.unlock();
+            }
 
             Poseidon::WatchDogItem watch = Poseidon::WatchScopeFor("objconvert", conversionPath);
             const auto convStart = std::chrono::steady_clock::now();
@@ -1487,6 +1600,7 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
     std::vector<LODShapeWithShadow*> freeShapes;
     std::deque<Impl::ConvertJob> freeConversions;
     std::array<std::unique_ptr<RapStageCandidateHandoff>, 2> freeRap;
+    std::array<std::unique_ptr<RapStageCandidateHandoff>, BuildingRapFixtures.size()> freePendingRap;
     std::array<Impl::WarmJob, Streaming::WarmTextureJobPolicy::JobLimit> freeWarm;
     size_t freeWarmCount = 0;
     {
@@ -1507,6 +1621,7 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         // Do not clear parseReservedBytes: old-generation workers still own their reservation.
         _impl->payloadBytes.assign(modelCount, 0);
         _impl->rapFixtureAttempts = 0;
+        _impl->rapBuildingAttempts = 0;
         _impl->queue.clear();
         // Jobs own model IR and bank-table references, not just queue indices.
         // Their last-reference destructors must not run under the queue mutex.
@@ -1529,6 +1644,18 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         freeConversions.swap(_impl->convertQueue);
         for (const auto& job : freeConversions)
             _impl->stats.conversionReservedBytes -= job.reservation;
+        for (size_t i = 0; i < _impl->pendingRap.size(); ++i)
+        {
+            auto& pending = _impl->pendingRap[i];
+            if (pending.job)
+            {
+                _impl->stats.conversionReservedBytes -= pending.job->reservation;
+                freeConversions.push_back(std::move(*pending.job));
+                pending.job.reset();
+            }
+            freePendingRap[i] = std::move(pending.handoff);
+            pending.index = uint32_t(-1);
+        }
         for (const uint64_t bytes : _impl->conversionBytes)
             _impl->stats.conversionReservedBytes -= bytes;
         // Active jobs retain their local reservation across generation changes.
@@ -1730,6 +1857,7 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
     std::vector<LODShapeWithShadow*> freeShapes;
     std::deque<Impl::ConvertJob> freeConversions;
     std::array<std::unique_ptr<RapStageCandidateHandoff>, 2> freeRap;
+    std::array<std::unique_ptr<RapStageCandidateHandoff>, BuildingRapFixtures.size()> freePendingRap;
     std::array<Impl::WarmJob, Streaming::WarmTextureJobPolicy::JobLimit> freeWarm;
     size_t freeWarmCount = 0;
     size_t dropped = 0;
@@ -1787,6 +1915,22 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
                         freeRap[slot] = std::move(_impl->convertedRapStages[slot].payload);
                         _impl->convertedRapStages[slot].index = uint32_t(-1);
                     }
+                _impl->Set(static_cast<uint32_t>(i), State::Unknown);
+                ++dropped;
+            }
+            else if (state == State::RapCapture)
+            {
+                for (size_t slot = 0; slot < _impl->pendingRap.size(); ++slot)
+                {
+                    auto& pending = _impl->pendingRap[slot];
+                    if (pending.index != i || !pending.job) continue;
+                    _impl->stats.conversionReservedBytes -= pending.job->reservation;
+                    freeConversions.push_back(std::move(*pending.job));
+                    pending.job.reset();
+                    freePendingRap[slot] = std::move(pending.handoff);
+                    pending.index = uint32_t(-1);
+                    break;
+                }
                 _impl->Set(static_cast<uint32_t>(i), State::Unknown);
                 ++dropped;
             }
@@ -1977,6 +2121,7 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
         } catch (...) { coldTexture.reset(); } // Optional metadata failure falls back, no model-state change.
     }
     std::vector<Impl::CapturedRapMaterial> rapMaterials;
+    int buildingRapFixture = -1;
     // Exact selected DayZ fixtures only. No lookup, bank load or allocation in
     // the default path. A fixture is attempted at most once per world, whether
     // capture succeeds or not; it cannot grow per-model admission work unboundedly.
@@ -2050,6 +2195,67 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
         }
         catch (...) { rapMaterials.clear(); } // Optional diagnostic must not affect admission.
     }
+    static const bool buildingRapPilot = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_RAP_BUILDING_PILOT");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    if (buildingRapPilot && rapStageCapture && ownerTextureAdmission &&
+        Foundation::IsMainThread() && WarmTextureJobsEnabled() &&
+        ArchiveSourceBinding::ModelReadScope::MaterialPreflightReservationEnabled() &&
+        render::PreparedTextureStore::Enabled() && GUseFileBanks && !originalSource)
+    {
+        const int fixture = BuildingRapFixtureOrdinal(model->sourcePath);
+        if (fixture >= 0 && !(_impl->rapBuildingAttempts & (1u << fixture)))
+        {
+            bool currentJob = false;
+            {
+                std::lock_guard<std::mutex> guard(_impl->mutex);
+                currentJob = index < _impl->count && !_impl->workers.empty() &&
+                    _impl->Get(index) == State::Unknown && _impl->paths[index] == model->sourcePath &&
+                    _impl->ddsPublication && _impl->ddsPublication->Epoch(index) != 0;
+            }
+            if (currentJob)
+            {
+                _impl->rapBuildingAttempts |= static_cast<uint8_t>(1u << fixture);
+                try
+                {
+                    size_t visited = 0;
+                    const auto& wanted = BuildingRapFixtures[static_cast<size_t>(fixture)];
+                    for (const auto& level : model->lodLevels)
+                    {
+                        if (visited >= 256 || buildingRapFixture >= 0) break;
+                        if (level.purpose != Model::LodPurpose::Visual) continue;
+                        for (const auto& material : level.mesh.materials)
+                        {
+                            if (++visited > 256) break;
+                            const auto path = Asset::VirtualPath::Parse(material.materialPath);
+                            if (path.canonical() != wanted.material) continue;
+                            if (QFBank* bank = QIFStreamB::AutoBank(wanted.material))
+                            {
+                                const RString prefix = bank->GetPrefix();
+                                const size_t length = std::strlen(wanted.material);
+                                if (prefix.GetLength() >= 0 &&
+                                    static_cast<size_t>(prefix.GetLength()) < length &&
+                                    !CmpStartStr(wanted.material, prefix))
+                                {
+                                    auto read = bank->CaptureReadRequest(
+                                        wanted.material + prefix.GetLength(), true);
+                                    if (read && read->HasArchiveIdentity() && read->bytes &&
+                                        read->bytes <= Impl::RapMaterialLimit)
+                                    {
+                                        rapMaterials.push_back({wanted.material, std::move(*read)});
+                                        buildingRapFixture = fixture;
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+                catch (...) { rapMaterials.clear(); buildingRapFixture = -1; }
+            }
+        }
+    }
     // The Converted handoff reaches the owner immediately before ObjectCreate, so
     // a warm job submitted there cannot reliably finish before first registration.
     // This separate exact-fixture opt-in captures one current NormalMap source now;
@@ -2060,6 +2266,7 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     }();
     std::optional<WarmTextureRead> earlyRapRead;
     if (earlyRapStage && rapDiscovery && rapStageCapture && ownerTextureAdmission &&
+        Streaming::SelectedTreeFixtureModel(model->sourcePath) &&
         Foundation::IsMainThread() && WarmTextureJobsEnabled() &&
         ArchiveSourceBinding::ModelReadScope::MaterialPreflightReservationEnabled() &&
         render::PreparedTextureStore::Enabled() &&
@@ -2188,7 +2395,7 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     Impl::ConvertJob job;
     job.index = index;
     if (_impl->convertedColdTextures.size() != _impl->count) coldTexture.reset();
-    job.texturePublicationRequired = !textures.empty() || bool(coldTexture);
+    job.texturePublicationRequired = !textures.empty() || bool(coldTexture) || buildingRapFixture >= 0;
     if (job.texturePublicationRequired)
         job.texturePublication = {_impl->ddsPublication, index,
             _impl->ddsPublication ? _impl->ddsPublication->Epoch(index) : 0};
@@ -2220,6 +2427,7 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
                 material.read.ArchiveIdentityBytes() + 64;
     }
     job.rapMaterials = std::move(rapMaterials);
+    job.buildingRapFixture = static_cast<int8_t>(buildingRapFixture);
     if (!textures.empty())
     {
         job.reservation += textures.capacity() * sizeof(Impl::PackedTextureRead);
@@ -2240,6 +2448,142 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     _impl->convertQueue.push_back(std::move(job));
     _impl->cv.notify_one();
     return true;
+}
+
+bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capture, void* context)
+{
+    if (!Foundation::IsMainThread()) return false;
+    std::optional<Impl::ConvertJob> job;
+    std::unique_ptr<RapStageCandidateHandoff> handoff;
+    size_t slot = BuildingRapFixtures.size();
+    {
+        std::lock_guard<std::mutex> lock(_impl->mutex);
+        if (index >= _impl->count || _impl->Get(index) != State::RapCapture) return false;
+        for (size_t i = 0; i < _impl->pendingRap.size(); ++i)
+            if (_impl->pendingRap[i].index == index && _impl->pendingRap[i].job)
+            {
+                slot = i;
+                job.emplace(std::move(*_impl->pendingRap[i].job));
+                _impl->pendingRap[i].job.reset();
+                handoff = std::move(_impl->pendingRap[i].handoff);
+                _impl->pendingRap[i].index = uint32_t(-1);
+                break;
+            }
+        if (!job)
+        {
+            // A missing parked job must not strand the admission loop in
+            // RapCapture. Failed invokes the ordinary synchronous fallback.
+            _impl->Set(index, State::Failed);
+            _impl->cv.notify_all();
+            return false;
+        }
+    }
+    const uint64_t originalReservation = job->reservation;
+    const size_t existingTextures = job->textures.size();
+    uint64_t addedCharge = 0;
+    try
+    {
+        const auto& fixture = BuildingRapFixtures[slot];
+        if (capture && handoff && handoff->Bounded() &&
+            handoff->generation == job->radiusGeneration && handoff->modelIndex == index &&
+            handoff->materials.size() == 1 && job->texturePublication.Valid() &&
+            job->textureGeneration == render::PreparedTextureStore::Instance().Generation())
+        {
+            const auto& material = handoff->materials.front();
+            if (material.key == fixture.material && material.stageName == fixture.normal &&
+                material.consumer == RapStageCandidateHandoff::Consumer::NormalMap)
+            {
+                // Resolve the CURRENT mounted material, not merely the captured
+                // raP name. Loose/text/include/remounted material falls through.
+                QFBank* bank = QIFStreamB::AutoBank(material.key.c_str());
+                if (bank)
+                {
+                    const RString prefix = bank->GetPrefix();
+                    if (prefix.GetLength() >= 0 &&
+                        static_cast<size_t>(prefix.GetLength()) < material.key.size() &&
+                        !CmpStartStr(material.key.c_str(), prefix))
+                    {
+                        auto current = bank->CaptureReadRequest(
+                            material.key.c_str() + prefix.GetLength(), true);
+                        BankReadMemberIdentity currentMember;
+                        if (current && current->CopyMemberIdentity(currentMember) &&
+                            material.SameCurrentMember(currentMember) &&
+                            render::PreparedTextureStore::Instance().ShouldPrepareWarm(material.stageName))
+                        {
+                            WarmTextureRead read;
+                            if (capture(context, material.stageName.c_str(), read) &&
+                                read.key == material.stageName && read.initializedSource &&
+                                read.initializedSource->Request().HasArchiveIdentity() &&
+                                read.initializedSource->Request().bytes &&
+                                read.initializedSource->Request().bytes <= Impl::PackedTextureLimit &&
+                                read.key.capacity() <= 1024 &&
+                                job->textures.size() < 64 &&
+                                std::none_of(job->textures.begin(), job->textures.end(),
+                                    [&](const auto& prior) { return prior.key == read.key; }))
+                            {
+                                QFBank* textureBank = QIFStreamB::AutoBank(read.key.c_str());
+                                const size_t texturePrefix = textureBank ?
+                                    static_cast<size_t>(textureBank->GetPrefix().GetLength()) : read.key.size();
+                                if (textureBank && texturePrefix < read.key.size() &&
+                                    textureBank->MatchesMountedMember(
+                                        read.key.c_str() + texturePrefix,
+                                        read.initializedSource->Request()))
+                                {
+                                    const uint64_t knownSourceBytes =
+                                        read.key.capacity() + 1 + read.initializedSource->KnownCppBytes();
+                                    if (knownSourceBytes <= 8 * 1024)
+                                    {
+                                        const size_t previousCapacity = job->textures.capacity();
+                                        auto source = std::move(read.initializedSource);
+                                        const BankReadRequest* request = &source->Request();
+                                        job->textures.push_back({std::move(read.key), {}, std::move(source), request});
+                                        addedCharge = knownSourceBytes +
+                                            (job->textures.capacity() - previousCapacity) *
+                                                sizeof(Impl::PackedTextureRead);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    catch (...) { addedCharge = 0; job->textures.resize(existingTextures); } // preserve ordinary inputs
+    static std::atomic<unsigned> captureRows{0};
+    if (captureRows.fetch_add(1, std::memory_order_relaxed) < BuildingRapFixtures.size())
+        LOG_INFO(World, "RVMAT raP building owner capture: modelIndex={} model={} stage={} sourceBound={} (conversion resumes; no Take/upload proof)",
+            index, BuildingRapFixtures[slot].model, BuildingRapFixtures[slot].normal, addedCharge != 0);
+    {
+        std::lock_guard<std::mutex> lock(_impl->mutex);
+        const bool current = !_impl->stop && index < _impl->count &&
+            _impl->Get(index) == State::RapCapture && !_impl->stale[index] &&
+            handoff && handoff->generation == _impl->generation.load(std::memory_order_relaxed) &&
+            _impl->paths[index] == job->model->sourcePath &&
+            (!job->sourceToken.diagnosticParseToken ||
+             _impl->SourceBindingMatches(index, job->sourceToken));
+        if (current)
+        {
+            try
+            {
+                job->reservation += addedCharge;
+                _impl->convertQueue.push_back(std::move(*job));
+                _impl->stats.conversionReservedBytes += addedCharge;
+                _impl->stats.peakConversionReservedBytes = std::max(
+                    _impl->stats.peakConversionReservedBytes, _impl->stats.conversionReservedBytes);
+                _impl->Set(index, State::Converting);
+                _impl->cv.notify_one();
+                return true;
+            }
+            catch (...) { job->reservation -= addedCharge; }
+        }
+        _impl->stats.conversionReservedBytes -= originalReservation;
+        if (handoff && handoff->generation == _impl->generation.load(std::memory_order_relaxed) &&
+            index < _impl->count && _impl->Get(index) == State::RapCapture)
+            _impl->Set(index, current ? State::Failed : State::Unknown);
+        _impl->cv.notify_all();
+    }
+    return false;
 }
 
 ObjectStreamPreparer::ConvertedShape ObjectStreamPreparer::TakeConverted(uint32_t index)

@@ -11360,10 +11360,20 @@ bool EngineWgpu::CaptureWarmRapStageRead(const char* key, WarmTextureRead& out) 
         const char* value = std::getenv("WGR_OBJECT_STREAM_RAP_STAGE_WARM_CAPTURE");
         return value && std::strcmp(value, "1") == 0;
     }();
+    static const bool buildingPilot = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_RAP_BUILDING_PILOT");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    const bool treeKey = key && std::strcmp(key,
+        R"(dz\plants\tree\data\t_piceaabies_trunk_no.paa)") == 0;
+    const bool buildingKey = buildingPilot && key &&
+        (std::strcmp(key, R"(dz\structures\data\plaster\plaster_flats01_nohq.paa)") == 0 ||
+         std::strcmp(key, R"(dz\structures\data\concrete\concrete_bare4_nohq.paa)") == 0 ||
+         std::strcmp(key, R"(dz\structures\data\plaster\police_station_wall_nohq.paa)") == 0);
     if (!exactFixtureEnabled || !ObjectStreamPreparer::WarmTextureJobsEnabled() ||
         !ArchiveSourceBinding::ModelReadScope::MaterialPreflightReservationEnabled() ||
         !Foundation::IsMainThread() || !_gpuDriven || !_renderer || !_wbank || !key ||
-        std::strcmp(key, R"(dz\plants\tree\data\t_piceaabies_trunk_no.paa)") != 0)
+        (!treeKey && !buildingKey))
         return false;
     try
     {
@@ -11377,8 +11387,9 @@ bool EngineWgpu::CaptureWarmRapStageRead(const char* key, WarmTextureRead& out) 
         }
         else
         {
-            // Existing TextureBank::Load performs header Init only; this scope
-            // reserves one of the two material-preflight binding slots.
+            // Existing TextureBank::Load performs header Init only. The
+            // preparer attempts each exact fixture once per world; the shared
+            // binding allocator enforces its concurrent preflight limit.
             ArchiveSourceBinding::ModelReadScope purpose(
                 ArchiveSourceBinding::ModelReadScope::Intent::MaterialPreflight);
             initialized = _wbank->Load(key);

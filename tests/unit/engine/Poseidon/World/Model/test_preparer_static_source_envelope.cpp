@@ -1034,6 +1034,181 @@ TEST_CASE("Exact raP stage is source-bound in the first conversion before owner 
     REQUIRE(shape);
     store.Clear();
 }
+TEST_CASE("Building raP discovery resumes complete conversion after owner source capture or refusal",
+          "[preparer][rap-building]")
+{
+    auto enabled = [](const char* name) {
+        const char* value = std::getenv(name);
+        return value && std::strcmp(value, "1") == 0;
+    };
+    if (!enabled("WGR_OBJECT_STREAM_RAP_BUILDING_PILOT") ||
+        !enabled("WGR_OBJECT_STREAM_WARM_TEXTURES") ||
+        !enabled("WGR_OBJECT_STREAM_WARM_TEXTURE_JOBS") ||
+        !enabled("WGR_OBJECT_STREAM_WARM_MATERIAL_PREFLIGHT"))
+        SKIP("Fresh building raP pilot flags required.");
+    Poseidon::Foundation::CaptureMainThread();
+    if (!QFileAccess::MappingSupported()) SKIP("Mapped PBO source required.");
+    constexpr const char* modelKey = R"(dz\structures\residential\tenements\tenement_small.p3d)";
+    constexpr const char* materialKey = R"(dz\structures\residential\tenements\data\tb_small_flats_walls.rvmat)";
+    constexpr const char* normalKey = R"(dz\structures\data\plaster\plaster_flats01_nohq.paa)";
+    struct Bank
+    {
+        Poseidon::Ref<Poseidon::FileServer> previous = Poseidon::GFileServer;
+        bool caching = GEnableCaching, useBanks = GUseFileBanks;
+        ColdPaaTestServer* server = new ColdPaaTestServer;
+        std::filesystem::path path;
+        int index = -1;
+        std::unique_ptr<Poseidon::ITextureSource> texture;
+        std::array<Poseidon::PacLevelMem,7> mips;
+        std::shared_ptr<const Poseidon::ArchiveSourceBinding> source;
+        Bank(const char* key)
+        {
+            Bytes rap;
+            rap.data = {0,'r','a','P',0,0,0,0,8,0,0,0,0x0a,0x06,0,0};
+            auto str = [](Bytes& b, const char* s) { while (*s) b.U8(uint8_t(*s++)); b.U8(0); };
+            rap.U8(0); rap.U8(2);
+            rap.U8(1); rap.U8(0); str(rap,"PixelShaderID"); str(rap,"Multi");
+            rap.U8(0); str(rap,"Stage11"); const size_t pointer = rap.data.size(); rap.U32(0);
+            const auto body = static_cast<uint32_t>(rap.data.size());
+            for (int i=0;i<4;++i) rap.data[pointer+i] = char(body >> (8*i));
+            rap.U8(0); rap.U8(1); rap.U8(1); rap.U8(0);
+            str(rap,"texture"); str(rap,key);
+            const auto stages = Poseidon::Streaming::ExtractOwnedRapStageNames(
+                std::span<const char>(rap.data.data(),rap.data.size()), materialKey);
+            REQUIRE(stages.status == Poseidon::Streaming::RapStageNamesStatus::Complete);
+            REQUIRE(stages.normalMapName == key);
+            const std::array<char,16> block = {char(0xF0),char(0xF0),char(0xF0),char(0xF0),
+                char(0xF0),char(0xF0),char(0xF0),char(0xF0),0,char(0xF8),0,char(0xF8),0,0,0,0};
+            std::vector<char> paa = {3,char(0xFF),0,0,8,0,8,0,64,0,0};
+            for (int i=0;i<4;++i) paa.insert(paa.end(),block.begin(),block.end());
+            paa.insert(paa.end(),4,0);
+            Bytes archive;
+            auto header = [&](const char* name, size_t size) {
+                str(archive,name); archive.U32(0); archive.U32(uint32_t(size));
+                archive.U32(0); archive.U32(0); archive.U32(uint32_t(size));
+            };
+            header(R"(residential\tenements\data\tb_small_flats_walls.rvmat)",rap.data.size());
+            header(R"(data\plaster\plaster_flats01_nohq.paa)",paa.size());
+            archive.U8(0); for (int i=0;i<5;++i) archive.U32(0);
+            archive.data.insert(archive.data.end(),rap.data.begin(),rap.data.end());
+            archive.data.insert(archive.data.end(),paa.begin(),paa.end());
+            path = std::filesystem::temp_directory_path() /
+                ("rap_building_"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".pbo");
+            std::ofstream out(path,std::ios::binary); out.write(archive.data.data(),std::streamsize(archive.data.size()));
+            REQUIRE(out.good()); out.close();
+            Poseidon::GFileServer = server; GEnableCaching = true; GUseFileBanks = true;
+            index = Poseidon::GFileBanks.Add();
+            auto name = path; name.replace_extension();
+            REQUIRE(Poseidon::GFileBanks[index].open(Poseidon::RString(name.string().c_str())));
+            Poseidon::GFileBanks[index].SetPrefix(Poseidon::RString(R"(dz\structures\)"));
+            Poseidon::GFileBanks[index].Lock();
+            {
+                Poseidon::ArchiveSourceBinding::ModelReadScope purpose(
+                    Poseidon::ArchiveSourceBinding::ModelReadScope::Intent::MaterialPreflight);
+                Poseidon::QIFStreamB buffer;
+                buffer.open(Poseidon::GFileBanks[index],R"(data\plaster\plaster_flats01_nohq.paa)");
+                server->cache.Store(buffer,key);
+                auto* factory = Poseidon::SelectTextureSourceFactory(key); REQUIRE(factory);
+                texture.reset(factory->Create(key,mips.data(),7)); REQUIRE(texture);
+                source = texture->GetArchiveSourceBinding(); REQUIRE(source);
+            }
+        }
+        ~Bank()
+        {
+            source.reset(); texture.reset();
+            if (index >= 0) Poseidon::GFileBanks.Delete(index);
+            Poseidon::GFileServer = previous; GEnableCaching = caching; GUseFileBanks = useBanks;
+            std::error_code error; std::filesystem::remove(path,error);
+        }
+    } bank(normalKey);
+    SourceFile original;
+    auto& store = Poseidon::render::PreparedTextureStore::Instance();
+    auto makeModel = [&] {
+        std::string error; bool opened = false;
+        auto model = Poseidon::ModelCache::LoadLooseFile(original.path,&error,&opened);
+        REQUIRE(model);
+        model->sourcePath = modelKey;
+        auto& mesh = model->lodLevels[0].mesh;
+        mesh.materials.emplace_back("raP building NormalMap");
+        mesh.materials.back().materialPath = materialKey;
+        for (auto& triangle : mesh.triangles) triangle.materialIndex = 0;
+        return model;
+    };
+    auto tables = std::make_shared<Poseidon::Model::ShapeAdapter::AdapterBankTables>();
+    tables->textures.resize(makeModel()->lodLevels.size());
+    auto capture = [](void* context, const char* key, Poseidon::WarmTextureRead& out) {
+        auto& source = *static_cast<std::shared_ptr<const Poseidon::ArchiveSourceBinding>*>(context);
+        out = {key,source}; return true;
+    };
+    std::string identity = modelKey;
+    SECTION("current source reaches worker Put before Converted")
+    {
+        store.Clear();
+        Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
+        REQUIRE(prep.SubmitConvert(0,makeModel(),tables,nullptr,nullptr,true,capture,&bank.source));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        REQUIRE(prep.ResumeRapCapture(0,capture,&bank.source));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+        const auto probe = store.ProbeWarmEntry(normalKey,&bank.source->Request());
+        REQUIRE(probe.entryPresent); REQUIRE(probe.warmBound); REQUIRE(probe.sameMember);
+        auto converted = prep.TakeConverted(0);
+        std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
+        REQUIRE(shape); REQUIRE(converted.model);
+        store.Clear();
+    }
+    SECTION("refused source still converts complete geometry")
+    {
+        store.Clear();
+        Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
+        REQUIRE(prep.SubmitConvert(0,makeModel(),tables,nullptr,nullptr,true,capture,&bank.source));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        REQUIRE(prep.ResumeRapCapture(0,nullptr));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+        auto converted = prep.TakeConverted(0);
+        std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
+        REQUIRE(shape); REQUIRE(converted.model);
+        CHECK_FALSE(store.ProbeWarmEntry(normalKey,&bank.source->Request()).entryPresent);
+        store.Clear();
+    }
+    SECTION("stale parked model releases its conversion reservation")
+    {
+        store.Clear();
+        Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
+        REQUIRE(prep.SubmitConvert(0,makeModel(),tables,nullptr,nullptr,true,capture,&bank.source));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        const uint32_t epochs[] = {0};
+        REQUIRE(prep.DropStale(epochs,1,1) == 1);
+        REQUIRE(prep.Query(0) == Preparer::State::Unknown);
+        REQUIRE(prep.SnapshotStats().conversionReservedBytes == 0);
+        store.Clear();
+    }
+    SECTION("world reset retires the parked job without a stage callback")
+    {
+        store.Clear();
+        Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
+        REQUIRE(prep.SubmitConvert(0,makeModel(),tables,nullptr,nullptr,true,capture,&bank.source));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        prep.Reset(&identity,1);
+        REQUIRE(prep.Query(0) == Preparer::State::Unknown);
+        REQUIRE(prep.SnapshotStats().conversionReservedBytes == 0);
+        store.Clear();
+    }
+    SECTION("world reset during owner capture retires the in-flight reservation")
+    {
+        store.Clear();
+        Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
+        REQUIRE(prep.SubmitConvert(0,makeModel(),tables,nullptr,nullptr,true,capture,&bank.source));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        auto resetCapture = [](void* context, const char*, Poseidon::WarmTextureRead&) {
+            auto* p = static_cast<Preparer*>(context);
+            p->Reset(nullptr,0);
+            return false;
+        };
+        REQUIRE_FALSE(prep.ResumeRapCapture(0,resetCapture,&prep));
+        REQUIRE(prep.SnapshotStats().conversionReservedBytes == 0);
+        store.Clear();
+    }
+}
 TEST_CASE("Cold chain cancellation keeps actual worker debt until exit and replacement progresses", "[preparer][cold-paa-handoff]")
 {
     RequireColdPaaCapability(); SourceFile file,replacement; PaaWorkerBank bank(true); ColdPaaSourceFixture source(bank);

@@ -4257,6 +4257,18 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         }
                     }
                 }
+                else if (state == ObjectStreamPreparer::State::RapCapture)
+                {
+                    // Complete the bounded raP worker/owner/worker handoff without
+                    // waiting. Refused stage capture still resumes full conversion.
+                    _modernObjectPreparer->ResumeRapCapture(placement.modelIndex,
+                        [](void*, const char* key, WarmTextureRead& out) {
+                            return GEngine && GEngine->CaptureWarmRapStageRead(key, out);
+                        });
+                    ++waited;
+                    ++scan;
+                    continue;
+                }
                 else if (state == ObjectStreamPreparer::State::Converted)
                 {
                     ObjectStreamPreparer::ConvertedShape conv =

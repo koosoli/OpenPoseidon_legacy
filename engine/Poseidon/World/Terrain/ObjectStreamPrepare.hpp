@@ -170,6 +170,7 @@ class ObjectStreamPreparer
         Failed,      // sticky: loose file exists but did not parse; main thread repeats the old path
         Converting,  // stage 3: a worker is inside convertToLODShape for it
         Converted,   // stage 3: shape available; TakeConverted() hands it over
+        RapCapture,  // selected building raP parsed; owner must resume conversion
     };
 
     struct Stats
@@ -411,6 +412,12 @@ class ObjectStreamPreparer
                        const SourceEnvelopeSnapshot* originalSource = nullptr,
                        bool ownerTextureAdmission = false,
                        RapStageCapture rapStageCapture = nullptr, void* rapStageContext = nullptr);
+
+    // Owner-only, nonblocking second phase for the exact building pilot. The
+    // preparer rechecks the material member, captures at most one current PAA
+    // source through the callback, then resumes the original conversion job.
+    // Empty/refused capture still resumes complete geometry admission.
+    bool ResumeRapCapture(uint32_t index, RapStageCapture capture, void* context = nullptr);
 
     struct ConvertedShape
     {
