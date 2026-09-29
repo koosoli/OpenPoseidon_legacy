@@ -344,3 +344,12 @@ Commit `349b3410` separates those two fields; its exact paired build and
 installed WGPU startup passed. The route was not rerun merely to change that
 diagnostic verdict. Keep both pilots off: `performanceAccepted=false`,
 `defaultReady=false`.
+
+One subsequent default-off route on the installed `349b3410` code,
+`build/stream-residency/dayz-default-after-normal-sep29-disabled-20260929-190958`,
+passed with normal exit (831 frames, no dropped samples). Neither owner-stage
+flag was set and the log contains no staging rows. The ordinary tenement
+still took 618.4 ms with 81 uploads; its reported texture read work was
+434.0 ms. This is a default-path stability screen, not a controlled matched
+performance comparison: source cache, async order and admission coverage vary
+between routes. There is no evidence to enable either pilot by default.
