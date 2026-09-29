@@ -2054,6 +2054,36 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     const char* flag = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
     if (flag && flag[0] == '1' && GUseFileBanks && render::PreparedTextureStore::Enabled())
     {
+        // With both existing experiments explicitly enabled, prefer the source
+        // already initialized by BuildAdapterBankTables. Its immutable binding
+        // describes the physical mounted member that EnsureUploaded will use;
+        // a new name-based archive capture cannot establish that association.
+        // This is owner-only metadata capture. The worker receives no Texture.
+        if (ownerTextureAdmission && render::ColdPaaHandoffEnabled() && Foundation::IsMainThread())
+        {
+            for (const auto& level : tables->textures)
+            {
+                for (const auto& texture : level)
+                {
+                    if (textures.size() >= 64) break;
+                    if (!texture || texture->IsGpuResident()) continue;
+                    try
+                    {
+                        render::ColdPaaRead captured;
+                        if (!texture->CaptureColdPaaRead(captured) || !captured.Valid() ||
+                            captured.source->Request().bytes > Impl::PackedTextureLimit ||
+                            !render::PreparedTextureStore::Instance().ShouldPrepareWarm(captured.key) ||
+                            std::any_of(textures.begin(), textures.end(), [&](const auto& t) { return t.key == captured.key; }))
+                            continue;
+                        auto source = std::move(captured.source);
+                        const BankReadRequest* request = &source->Request();
+                        textures.push_back({std::move(captured.key), {}, std::move(source), request});
+                    }
+                    catch (...) {} // Optional preparation never prevents ordinary admission.
+                }
+                if (textures.size() >= 64) break;
+            }
+        }
         auto note = [&](const std::string& raw)
         {
             if (textures.size() >= 64) return; // bounded per-model metadata; remaining inputs use VFS
@@ -2135,7 +2165,8 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
         job.reservation += textures.capacity() * sizeof(Impl::PackedTextureRead);
         for (const auto& texture : textures)
             job.reservation += texture.key.capacity() + 1 + texture.read.archive.capacity() + 1 +
-                texture.read.ArchiveIdentityBytes() + (texture.read.archiveLease ? 64 : 0);
+                texture.read.ArchiveIdentityBytes() + (texture.read.archiveLease ? 64 : 0) +
+                (texture.initializedSource ? texture.initializedSource->KnownCppBytes() : 0);
     }
     // Scratch is charged when a worker starts, and released before publishing.
     // Retained chains are charged separately by PreparedTextureStore.

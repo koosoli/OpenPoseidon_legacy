@@ -870,6 +870,51 @@ TEST_CASE("Actual cold conversion owns the Init-bound chain independently of sto
       CHECK_FALSE(refused.valid()); }
     store.Clear();
 }
+TEST_CASE("Cold conversion prepares a second Init-bound PAA without recapturing its source", "[preparer][cold-paa-handoff][bound-packed-texture]")
+{
+    RequireColdPaaCapability();
+    const char* packed = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
+    if (!packed || packed[0] != '1') SKIP("Fresh WGR_OBJECT_STREAM_PBO_TEXTURES=1 process required.");
+    SourceFile file;
+    PaaWorkerBank primaryBank(true), secondBank(true);
+    ColdPaaSourceFixture primary(primaryBank), second(secondBank);
+    auto& store = Poseidon::render::PreparedTextureStore::Instance();
+    store.Clear();
+    REQUIRE(store.ShouldPrepareWarm(second.read.key));
+    Preparer prep; prep.Reset(&file.path, 1); RequireWorkers(prep);
+    REQUIRE(prep.Request(0));
+    REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Ready;}));
+    auto model=prep.Take(0); REQUIRE(model);
+    auto tables=std::make_shared<Poseidon::Model::ShapeAdapter::AdapterBankTables>();
+    tables->textures.resize(model->lodLevels.size());
+    auto& mesh=model->lodLevels[0].mesh;
+    const auto firstIndex=static_cast<uint32_t>(mesh.materials.size());
+    mesh.materials.emplace_back("primary",primary.read.key);
+    mesh.materials.emplace_back("second",second.read.key);
+    for(auto& triangle:mesh.triangles) triangle.materialIndex=firstIndex;
+    tables->textures[0].resize(mesh.materials.size());
+    tables->textures[0][firstIndex]=new ColdPaaTestTexture(primary.read);
+    tables->textures[0][firstIndex+1]=new ColdPaaTestTexture(second.read);
+    REQUIRE(prep.SubmitConvert(0,model,tables,nullptr,nullptr,true));
+    REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+    auto converted=prep.TakeConverted(0);
+    std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
+    REQUIRE(shape);
+    REQUIRE(converted.coldTexture);
+    REQUIRE(converted.coldTexture->read.key==primary.read.key);
+    REQUIRE(prep.SnapshotStats().texPrepared>=1);
+    const auto probe=store.ProbeWarmEntry(second.read.key,&second.read.source->Request());
+    REQUIRE(probe.entryPresent);
+    REQUIRE(probe.warmBound);
+    REQUIRE(probe.sameMember);
+    std::shared_ptr<const Poseidon::ArchiveSourceBinding> bound;
+    Poseidon::PAABlockChain chain;
+    REQUIRE(store.Take(second.read.key,chain,&bound));
+    REQUIRE(bound);
+    REQUIRE(bound->Request().SameArchiveMember(second.read.source->Request()));
+    REQUIRE(chain.valid());
+    store.Clear();
+}
 TEST_CASE("Cold chain cancellation keeps actual worker debt until exit and replacement progresses", "[preparer][cold-paa-handoff]")
 {
     RequireColdPaaCapability(); SourceFile file,replacement; PaaWorkerBank bank(true); ColdPaaSourceFixture source(bank);
