@@ -2830,6 +2830,11 @@ impl CullState {
         self.instances.arm_dynamic_image_mutation()
     }
 
+    pub(crate) fn dynamic_image_mutation_serial(&self) -> Option<u64> {
+        self.instances.dynamic_image_mutation.as_deref()
+            .and_then(|witness| (witness.serial != 0).then_some(witness.serial))
+    }
+
     pub(crate) fn dynamic_row_relation(&self, stamp: u64) -> DynamicRowRelation {
         self.instances.dynamic_row_relation(stamp)
     }

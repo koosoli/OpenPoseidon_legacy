@@ -3927,6 +3927,9 @@ pub struct Gfx3d {
     mesh_ack: Option<Box<mesh_ack::MeshAck>>,
     main_count_completion: Option<main_count_completion::Witness>,
     view_applicability: Option<view_reference_facts::ApplicabilityPlan>,
+    // Only armed for private cached COUNT requests. Foreign dynamic casters
+    // must invalidate an image even when target rows and static epoch agree.
+    count_dynamic_stamp: Option<(u64, u64)>,
     cameras: CameraGroup,
     conform: ConformGroup,
     gi: gi::GiProbes, // REN-GI-001
@@ -4914,6 +4917,7 @@ impl Gfx3d {
             mesh_ack: None,
             main_count_completion: None,
             view_applicability: None,
+            count_dynamic_stamp: None,
             cameras,
             conform,
             gi,
@@ -10126,6 +10130,7 @@ impl Gfx3d {
     pub fn arm_main_target_count(&mut self, device: &wgpu::Device, token: u64,
                                  model_id: u32, source_generation: u64) -> bool {
         self.view_applicability = None;
+        self.count_dynamic_stamp = None;
         if let Some(witness) = self.main_count_completion.as_mut() { witness.invalidate(); }
         if let Some(caches) = &mut self.interior_cached_counts {
             // The cull arm replaces its one-request answer. Keep an already
@@ -10154,6 +10159,8 @@ impl Gfx3d {
         let armed = self.gpu_driven_enabled && self.cull.arm_main_target_count(
             device, token, model_id, source_generation);
         if armed {
+            self.count_dynamic_stamp = self.cull.arm_dynamic_image_mutation()
+                .map(|serial| (token, serial));
             let identity = self.cull.main_target_count_fact().identity;
             self.main_count_completion.get_or_insert_with(main_count_completion::Witness::new).arm(identity);
             if let Some(caches) = &mut self.interior_cached_counts {
@@ -10178,6 +10185,7 @@ impl Gfx3d {
     /// not expose the previous request's completed applicability snapshot.
     pub fn begin_view_reference_request(&mut self) {
         self.view_applicability = None;
+        self.count_dynamic_stamp = None;
         if let Some(witness) = self.main_count_completion.as_mut() { witness.invalidate(); }
     }
     /// Freeze applicability for this exact request before any view draw is attempted.
@@ -10430,6 +10438,9 @@ impl Gfx3d {
     }
     pub fn main_target_count_commit(&mut self, token: u64) -> bool {
         let main = self.cull.main_target_count_commit(token);
+        let dynamic_current = self.count_dynamic_stamp.is_some_and(|(request, stamp)|
+            request == token &&
+            self.cull.dynamic_row_relation(stamp) == cull::DynamicRowRelation::Unchanged);
         if main {
             if let Some(witness) = self.main_count_completion.as_mut() { witness.commit(token); }
             for cascade in 0..5 {
@@ -10437,7 +10448,7 @@ impl Gfx3d {
                     let identity = self.cull.shadow_target_count_fact(4).identity;
                     let key = self.gi_rsm_current_count_key();
                     if let (Some(cache), Some(key)) = (&mut self.gi_rsm_cached_count, key) {
-                        if identity.token == token { cache.publish(key, identity); }
+                        if identity.token == token && dynamic_current { cache.publish(key, identity); }
                     }
                 }
             }
@@ -10445,7 +10456,7 @@ impl Gfx3d {
                 let identity = self.cull.local0_target_count_fact().identity;
                 let key = self.local_current_count_key(0);
                 if let (Some(caches), Some(key)) = (&mut self.local_cached_counts, key) {
-                    if identity.token == token { caches[0].publish(key, identity); }
+                    if identity.token == token && dynamic_current { caches[0].publish(key, identity); }
                 }
             }
             self.cull.reflection_target_count_commit(token);
@@ -10454,7 +10465,7 @@ impl Gfx3d {
                 let identity = self.cull.sky0_target_count_fact().identity;
                 let key = self.interior_current_count_key(0);
                 if let (Some(caches), Some(key)) = (&mut self.interior_cached_counts, key) {
-                    if identity.token == token { caches[0].publish(key, identity); }
+                    if identity.token == token && dynamic_current { caches[0].publish(key, identity); }
                 }
             }
             if self.cull.batch_target_count_commit(token) {
@@ -10465,7 +10476,7 @@ impl Gfx3d {
                     let identity = self.cull.batch_target_count_fact(4 + k - 1).identity;
                     let key = self.local_current_count_key(k);
                     if let (Some(caches), Some(key)) = (&mut self.local_cached_counts, key) {
-                        if identity.token == token { caches[k].publish(key, identity); }
+                        if identity.token == token && dynamic_current { caches[k].publish(key, identity); }
                     }
                 }
                 for i in 1..sky_vis::DIRECTION_COUNT {
@@ -10474,7 +10485,7 @@ impl Gfx3d {
                     let identity = self.cull.batch_target_count_fact(i - 1).identity;
                     let key = self.interior_current_count_key(i);
                     if let (Some(caches), Some(key)) = (&mut self.interior_cached_counts, key) {
-                        if identity.token == token { caches[i].publish(key, identity); }
+                        if identity.token == token && dynamic_current { caches[i].publish(key, identity); }
                     }
                 }
             }
@@ -10483,6 +10494,9 @@ impl Gfx3d {
         main
     }
     pub fn main_target_count_abort(&mut self, token: u64) {
+        if self.count_dynamic_stamp.is_some_and(|(request, _)| request == token) {
+            self.count_dynamic_stamp = None;
+        }
         if self.view_applicability.is_some_and(|p| p.identity.token == token) {
             self.view_applicability = None;
         }
@@ -10518,6 +10532,12 @@ impl Gfx3d {
     pub fn view_reference_facts(&mut self, device: &wgpu::Device)
         -> view_reference_facts::WgrViewReferenceFacts {
         use view_reference_facts::{aggregate_existing_counts, VIEWS};
+        let request_token = self.cull.main_target_count_fact().identity.token;
+        if !self.count_dynamic_stamp.is_some_and(|(token, stamp)|
+            token != 0 && token == request_token &&
+            self.cull.dynamic_row_relation(stamp) == cull::DynamicRowRelation::Unchanged) {
+            return view_reference_facts::WgrViewReferenceFacts::default();
+        }
         let completion = self.main_target_completion_fact();
         let mut facts = [cull::MainCountFact::default(); VIEWS];
         facts[0] = self.main_target_count_fact(device);
@@ -10613,7 +10633,8 @@ impl Gfx3d {
         if epoch != rendered_epoch || image != self.gi.rsm_image_generation ||
             !same_sky_view(view, self.gi.rsm_view) { return None; }
         let cull = self.cull.sky_count_cull_key(sky_vis::DIRECTION_COUNT)?;
-        Some(gi_rsm_cached_count::Key::new(generation, image, view, epoch, cull))
+        Some(gi_rsm_cached_count::Key::new(generation, image, view, epoch, cull)
+            .with_dynamic_serial(self.cull.dynamic_image_mutation_serial()?))
     }
 
     fn local_count_diagnostic_candidate(&self, index: usize) -> Option<local_cached_count::Key> {
@@ -10624,8 +10645,10 @@ impl Gfx3d {
         let first_local = self.cull.shadow_view_count().checked_sub(self.local_shadow_count)?;
         let shape = (target.res, first_local, self.local_shadow_count as u32, self.shadow_gen);
         let cull = self.cull.shadow_count_cull_key(tile.cull_index)?;
+        let dynamic_serial = self.cull.dynamic_image_mutation_serial()?;
         local_cached_count::Key::current(publication, tile, shape, self.local_cache_shape,
             target.layers, self.local_view_key[index], tile.instance_epoch, cull)
+            .map(|key| key.with_dynamic_serial(dynamic_serial))
     }
 
     fn interior_count_diagnostic_candidate(&self, i: usize) -> Option<interior_cached_count::Key> {
@@ -10636,7 +10659,8 @@ impl Gfx3d {
         if direction != i || epoch != rendered_epoch ||
             !same_sky_view(view, self.interior_sky_views[i]) { return None; }
         let cull = self.cull.sky_count_cull_key(i)?;
-        Some(interior_cached_count::Key::new(i, generation, self.interior_sky_gen, view, epoch, cull))
+        Some(interior_cached_count::Key::new(i, generation, self.interior_sky_gen, view, epoch, cull)
+            .with_dynamic_serial(self.cull.dynamic_image_mutation_serial()?))
     }
     pub fn shadow_target_count_fact(&mut self, device: &wgpu::Device,
                                     cascade: usize) -> cull::MainCountFact {
@@ -10662,7 +10686,8 @@ impl Gfx3d {
             image != self.gi.rsm_image_generation ||
             !same_sky_view(view, self.gi.rsm_view) { return None; }
         let cull = self.cull.sky_count_cull_key(sky_vis::DIRECTION_COUNT)?;
-        Some(gi_rsm_cached_count::Key::new(generation, image, view, epoch, cull))
+        Some(gi_rsm_cached_count::Key::new(generation, image, view, epoch, cull)
+            .with_dynamic_serial(self.cull.dynamic_image_mutation_serial()?))
     }
     pub fn local0_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
         self.cull.harvest_local0_target_count(device);
@@ -10694,8 +10719,10 @@ impl Gfx3d {
         let first_local = self.cull.shadow_view_count().checked_sub(self.local_shadow_count)?;
         let shape = (target.res, first_local, self.local_shadow_count as u32, self.shadow_gen);
         let cull = self.cull.shadow_count_cull_key(tile.cull_index)?;
+        let dynamic_serial = self.cull.dynamic_image_mutation_serial()?;
         local_cached_count::Key::current(publication, tile, shape, self.local_cache_shape,
             target.layers, self.local_view_key[index], self.cull.instance_epoch(), cull)
+            .map(|key| key.with_dynamic_serial(dynamic_serial))
     }
 
     pub fn reflection_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
@@ -10720,7 +10747,8 @@ impl Gfx3d {
         if direction != i || epoch != rendered_epoch || epoch != self.cull.instance_epoch() ||
             !same_sky_view(view, self.interior_sky_views[i]) { return None; }
         let cull = self.cull.sky_count_cull_key(i)?;
-        Some(interior_cached_count::Key::new(i, generation, self.interior_sky_gen, view, epoch, cull))
+        Some(interior_cached_count::Key::new(i, generation, self.interior_sky_gen, view, epoch, cull)
+            .with_dynamic_serial(self.cull.dynamic_image_mutation_serial()?))
     }
 
     pub fn cull_dispatch(

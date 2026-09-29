@@ -8,6 +8,7 @@ pub struct Key {
     pub publication: u64,
     pub tile: LocalTileIdentity,
     pub cull: CountCullInputKey,
+    pub dynamic_serial: u64,
 }
 
 impl Key {
@@ -23,7 +24,12 @@ impl Key {
             first_local.checked_add(tile.tile_index) == Some(tile.cull_index) &&
             tile.instance_epoch == epoch &&
             rendered_key == Some(tile.key))
-            .then_some(Self { publication, tile, cull })
+            .then_some(Self { publication, tile, cull, dynamic_serial: 0 })
+    }
+
+    pub fn with_dynamic_serial(mut self, serial: u64) -> Self {
+        self.dynamic_serial = serial;
+        self
     }
 }
 
@@ -69,7 +75,8 @@ impl CachedCount {
         let (Some((key, fact)), Some(candidate)) = (self.bound, candidate) else {
             return Relation::Unknown;
         };
-        let same_image = key.publication == candidate.publication && key.tile == candidate.tile;
+        let same_image = key.publication == candidate.publication && key.tile == candidate.tile &&
+            key.dynamic_serial == candidate.dynamic_serial;
         cached_count_equivalence::classify(fact, same_image, key.cull == candidate.cull,
             target, key.tile.instance_epoch, current_epoch)
     }
@@ -79,6 +86,20 @@ impl CachedCount {
 mod tests {
     use super::*;
     use bytemuck::Zeroable;
+
+    #[test]
+    fn foreign_dynamic_caster_invalidates_cached_absence_without_epoch_change() {
+        let mut cache = CachedCount::default();
+        let published = key(1, 4).with_dynamic_serial(9);
+        let identity = id(1, 9);
+        cache.publish(published, identity);
+        cache.observe(MainCountFact { identity, status: MainCountStatus::Absent, count: 0 });
+        assert_eq!(cache.fact(Some(published)).status, MainCountStatus::Absent);
+        let moved_caster = published.with_dynamic_serial(10);
+        assert_eq!(cache.fact(Some(moved_caster)).status, MainCountStatus::Unknown);
+        assert_eq!(cache.diagnose(Some(moved_caster), Some((4, 9, 1)), 7),
+            Relation::Unknown);
+    }
 
     #[test]
     fn changed_cull_input_rejects_published_absence() {
@@ -106,7 +127,7 @@ mod tests {
         Key { publication: generation, tile: LocalTileIdentity {
             tile_index: 0, key: 42, instance_epoch: 7,
             shape: (2048, solar, 1, 5), cull_index: solar,
-        }, cull: CountCullInputKey::default() }
+        }, cull: CountCullInputKey::default(), dynamic_serial: 0 }
     }
     fn id(token: u64, source_generation: u64) -> MainCountIdentity {
         MainCountIdentity { token, model_id: 4, source_generation, cull_epoch: 7, target_revision: 1 }
@@ -115,7 +136,7 @@ mod tests {
         Key { publication: generation, tile: LocalTileIdentity {
             tile_index, key: 42 + tile_index as u64, instance_epoch: 7,
             shape: (2048, solar, 24, 5), cull_index: solar + tile_index,
-        }, cull: CountCullInputKey::default() }
+        }, cull: CountCullInputKey::default(), dynamic_serial: 0 }
     }
 
     #[test]
