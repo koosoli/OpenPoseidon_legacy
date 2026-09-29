@@ -1,8 +1,10 @@
-param([switch]$PaletteContentWitness,[switch]$HierarchyDisk,[ValidateSet('None','Scalar','Localized')][string]$HierarchyCuts='None',[switch]$Hierarchy,[ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$Interactive,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
+param([switch]$DemandViews,[switch]$PaletteContentWitness,[switch]$HierarchyRefill,[switch]$HierarchyDisk,[ValidateSet('None','Scalar','Localized')][string]$HierarchyCuts='None',[switch]$Hierarchy,[ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$Interactive,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
  [string]$Label='original-geometry-pages',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
 if($PaletteContentWitness -and !$MainCountProbe){throw 'Palette content witness requires MainCountProbe'}
+if($HierarchyRefill){$HierarchyDisk=$true;if($HierarchyCuts -ne 'None'){throw 'Hierarchy refill needs a never-used fourth model slot; choose no intermediate cut'}}
 if($HierarchyDisk -or $HierarchyCuts -ne 'None'){$Hierarchy=$true}
+if($DemandViews -and !$Hierarchy){throw 'Demand-view collection currently requires the hierarchy fixture'}
 if($Hierarchy -and ($DiskFault -ne 'None' -or $CameraPrefetch -or $ProjectedPrefetch -or $AutoFine -or $AutoCoarse -or $Interactive -or $CameraTuple -or $CameraTupleScaleRefusal -or $SurfaceCertificate -or $MainCountProbe -or $SurfaceFault -ne 'None')){throw 'Hierarchy is an independent original-source page fixture'}
 if($SurfaceFault -ne 'None'){$SurfaceCertificate=$true}
 if($MainCountProbe){$SurfaceCertificate=$true}
@@ -20,6 +22,8 @@ if(!$env:LOCK_OWNER){
  if($Tools){$argv+=@('-Tools',$Tools)}
  if($Hierarchy){$argv+='-Hierarchy'}
  if($HierarchyDisk){$argv+='-HierarchyDisk'}
+ if($HierarchyRefill){$argv+='-HierarchyRefill'}
+ if($DemandViews){$argv+='-DemandViews'}
  if($PaletteContentWitness){$argv+='-PaletteContentWitness'}
  $argv+=@('-HierarchyCuts',$HierarchyCuts)
  if($CameraPrefetch){$argv+='-CameraPrefetch'}
@@ -176,6 +180,7 @@ $environment.WGR_GEOMETRY_PAGE_ORIGINAL_SOURCE='1';$environment.WGR_GEOMETRY_PAG
 $environment.WGR_GEOMETRY_PAGE_SURFACE_CERTIFICATE=$(if($SurfaceCertificate){'1'}else{'0'})
 $environment.WGR_GEOMETRY_MAIN_COUNT_PROBE=$(if($MainCountProbe){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PALETTE_CONTENT_WITNESS=$(if($PaletteContentWitness){'1'}else{'0'})
+$environment.WGR_GEOMETRY_PAGE_DEMAND_VIEWS=$(if($DemandViews){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_CAMERA_TUPLE=$(if($CameraTuple){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_PROJECTED_PREFETCH=$(if($ProjectedPrefetch){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_PRIVATE_AUTO_FINE=$(if($AutoFine){'1'}else{'0'})
@@ -513,7 +518,7 @@ try{
             $until=[DateTime]::UtcNow.AddSeconds(15)
             do {
                 $polled=PageCut (Action 'pollCoarse');$state=PageCut (Action 'status')
-                if ($state.coarseResident) {break}
+                if ($state.coarseResident -and $state.status -eq 'Ready' -and $state.mainFrameReturned -and $state.observedRequestId -eq $state.requestId) {break}
                 if ($state.pageWorkState -match 'Failed|Refused|Invalid|Mismatch|Capacity') {throw 'Disk coarse transaction refused'}
                 Start-Sleep -Milliseconds 100
             } while ([DateTime]::UtcNow -lt $until)
@@ -554,6 +559,19 @@ try{
      function HierarchyBounded($c){
       Require $c @('hierarchicalPilot','hierarchyPages','hierarchyRootPages','hierarchyResidentPages','hierarchyPackageSha256','sourceAdmissionEpoch','knownPayloadBytes','pageReservedBytes','meshCount','hierarchySelectedClusters','hierarchySelectedTriangles')
       if(!$c.hierarchicalPilot -or $c.hierarchyPages -lt 2 -or $c.hierarchyPages -gt 64 -or $c.hierarchyRootPages -lt 1 -or $c.hierarchyRootPages -gt $c.hierarchyPages -or $c.hierarchyResidentPages -gt $c.hierarchyPages -or $c.hierarchyPackageSha256 -notmatch '^[0-9a-f]{64}$' -or $c.sourceAdmissionEpoch -ne 1 -or ($c.knownPayloadBytes+$c.pageReservedBytes) -gt 1048576 -or $c.meshCount -gt 64 -or @($c.hierarchySelectedClusters).Count -gt 64){throw 'Hierarchy source, capacity or topology contract failed'}
+      if($DemandViews){
+       Require $c @('demandViews');$v=$c.demandViews
+       if(!$v.available -or !$v.mainPacketJoined -or $v.status -notin @(1,2) -or $v.viewCount -ne 36 -or $v.generation -lt 1 -or $v.instanceEpoch -lt 1 -or $v.required -lt 1 -or $v.required -ge 68719476736 -or ([uint64]$v.known -band [uint64]$v.unknown) -ne 0 -or ([uint64]$v.known -bor [uint64]$v.unknown) -ne [uint64]$v.required -or ([uint64]$v.known -band 1) -ne 1){throw 'Actual completed demand-view snapshot lacks exact main packet or complete configured mask'}
+       $seen=[uint64]0
+       foreach($row in @($v.rows)){
+        if($row.id -lt 1 -or $row.id -gt 36 -or $row.generation -ne $v.generation){throw 'Demand-view row identity/generation mismatch'}
+        $bit=[uint64]1 -shl ($row.id-1)
+        if(($seen -band $bit) -ne 0 -or ([uint64]$v.required -band $bit) -eq 0){throw 'Duplicate or unconfigured demand-view row'}
+        $seen=$seen -bor $bit
+        if(([uint64]$v.known -band $bit) -ne 0 -and ($row.status -ne 1 -or $row.kind -lt 1 -or $row.kind -gt 6 -or $row.provenance -lt 1 -or $row.width -lt 1 -or $row.height -lt 1 -or $row.width -gt 16384 -or $row.height -gt 16384 -or ($row.flags -band 1) -eq 0)){throw 'Known demand-view row lacks numeric provenance/viewport'}
+       }
+       if($seen -ne [uint64]$v.required){throw 'Missing enabled demand-view row was omitted'}
+      }
       return $c
      }
      $hierarchyBegin=if($HierarchyDisk){'beginOriginalHierarchyDisk'}else{'beginOriginalHierarchy'}
@@ -605,7 +623,9 @@ try{
        if($c.hierarchyResidentPages-$prior.hierarchyResidentPages -gt 1){throw 'More than one hierarchy page uploaded by one step'}
        if($c.rendererInstance -ne $fallback.rendererInstance -or $c.producerInstance -ne $fallback.producerInstance -or $c.hierarchyPackageSha256 -cne $fallback.hierarchyPackageSha256){throw 'Hierarchy source or fixed instance changed'}
        $steps+=@{target=$target;before=$prior;after=$c}
-       if(!$c.fallbackSelected -and $c.hierarchyMissingMask -eq 0 -and (($target -eq 'fineHierarchy') -eq $c.fineSelected)){break}
+       # Page residency alone leaves the previous complete cut selected. Wait
+       # for the returned cut publication, including non-Fine intermediate cuts.
+       if($c.pageWorkState -eq 'HierarchyCutResident' -and !$c.fallbackSelected -and $c.hierarchyMissingMask -eq 0 -and (($target -eq 'fineHierarchy') -eq $c.fineSelected)){break}
        if($HierarchyDisk -and $c.pageWorkState -eq 'HierarchyDiskQueued'){Start-Sleep -Milliseconds 50}
       }
       if($i -gt 65 -or $c.hierarchySelectedTriangles -lt 1 -or @($c.hierarchySelectedClusters).Count -lt 1){throw 'Complete requested hierarchy cut not published'}
@@ -628,11 +648,42 @@ try{
       foreach($c in @($fallback)+$cuts){Require $c @('hierarchicalDiskPilot','hierarchyDiskPageReads','diskReadStatus','pageLiveJobs','pageReservedBytes');if(!$c.hierarchicalDiskPilot -or $c.hierarchyDiskPageReads -ne $c.hierarchyResidentPages){throw 'Disk page read/publication counters disagree'}}
       if($fallback.hierarchyDiskPageReads -ne 0 -or $cuts[$last].diskReadStatus -ne 'Read' -or $cuts[$last].pageLiveJobs -ne 0 -or $cuts[$last].pageReservedBytes -ne 0){throw 'Independent disk reads did not settle without worker debt'}
      }
+     $badRelease=$null;$released=$null;$hierarchyRefilled=$null;$refillRoot=$null;$refillSteps=@()
+     if($HierarchyRefill){
+      $beforeRelease=HierarchyReady
+      $release=@{cmd='geometry_page_fixture';action='releaseHierarchyNonroot';packageSha256=$beforeRelease.hierarchyPackageSha256;sourceAdmissionEpoch=$beforeRelease.sourceAdmissionEpoch;pageEpoch=$beforeRelease.pageEpoch;expectedRequestId=$beforeRelease.observedRequestId;groupCount=$beforeRelease.hierarchyDemandGroupCount}
+      $bad=$release.Clone();$bad.pageEpoch=[uint64]$beforeRelease.pageEpoch+1
+      $badRelease=Send $bad;$unchanged=HierarchyReady
+      if($badRelease.status -ne 'Invalid' -or $unchanged.requestId -ne $beforeRelease.requestId -or $unchanged.meshCount -ne $beforeRelease.meshCount -or $unchanged.hierarchyDiskPageReads -ne $beforeRelease.hierarchyDiskPageReads -or $unchanged.hierarchyResidentMaskExact -cne $beforeRelease.hierarchyResidentMaskExact -or $unchanged.producerModel -ne $beforeRelease.producerModel){throw 'Stale release token changed owned resources'}
+      $acceptedRelease=Send $release
+      if($acceptedRelease.status -ne 'Pending' -or $acceptedRelease.pageWorkState -ne 'HierarchyReleasing'){throw 'Valid root release was refused'}
+      $released=HierarchyBounded (HierarchyReady)
+      Require $released @('hierarchyReleaseCount','hierarchyRefillCount','hierarchyRetirementPending','hierarchyRetiredPageMaskExact','expectedAbsentMeshes','observedExpectedAbsentMeshes','rendererMeshHandles')
+      if($released.pageWorkState -ne 'HierarchyReleased' -or $released.hierarchyReleaseCount -ne 1 -or $released.hierarchyRefillCount -ne 0 -or $released.hierarchyRetirementPending -or $released.hierarchySelectedTriangles -ne $cuts[0].hierarchySelectedTriangles -or $released.producerModel -ne $cuts[0].producerModel -or $released.rendererModel -ne $cuts[0].rendererModel -or $released.rendererInstance -ne $fallback.rendererInstance -or $released.hierarchyResidentPages -ne $released.hierarchyRootPages -or $released.hierarchyRetainedCutModels -ne 1 -or $released.expectedAbsentMeshes -lt 1 -or $released.observedExpectedAbsentMeshes -ne $released.expectedAbsentMeshes -or $released.meshesAbsent -ne $released.expectedAbsentMeshes -or $released.hierarchyDiskPageReads -ne $beforeRelease.hierarchyDiskPageReads -or $released.pageLiveJobs -ne 0 -or $released.pageReservedBytes -ne 0){throw 'Nonroot record retirement did not preserve a complete root and clear worker debt'}
+      Capture 'hierarchy-released-root.png'
+      $null=Action 'fineHierarchy'
+      for($i=0;$i -le 65;$i++){
+       $prior=HierarchyReady;$null=Action 'stepHierarchy';$c=HierarchyBounded (HierarchyReady)
+       if($c.hierarchyResidentPages-$prior.hierarchyResidentPages -gt 1 -or $c.hierarchyDiskPageReads-$prior.hierarchyDiskPageReads -gt 1 -or $c.rendererInstance -ne $fallback.rendererInstance -or $c.hierarchyPackageSha256 -cne $fallback.hierarchyPackageSha256){throw 'Refill exceeded one-page quota or changed the instance/source'}
+       $refillSteps+=@{before=$prior;after=$c}
+       if($c.pageWorkState -eq 'HierarchyCutResident' -and $c.fineSelected -and $c.hierarchyMissingMask -eq 0){break}
+       if($c.pageWorkState -eq 'HierarchyDiskQueued'){Start-Sleep -Milliseconds 50}
+      }
+      $hierarchyRefilled=$c
+      $newHandles=@($c.rendererMeshHandles|Where-Object {$_ -ne 0})
+      $oldHandles=@($released.rendererMeshHandles|Where-Object {$_ -ne 0})
+      $newOnly=@($newHandles|Where-Object {$_ -notin $oldHandles})
+      $loadedPages=$c.hierarchyResidentPages-$released.hierarchyResidentPages
+      if($i -gt 65 -or $loadedPages -lt 1 -or $c.hierarchySelectedTriangles -ne 512 -or $c.producerModel -eq $cuts[1].producerModel -or $c.rendererModel -eq $cuts[1].rendererModel -or $c.hierarchyReleaseCount -ne 1 -or $c.hierarchyRefillCount -ne $loadedPages -or $c.hierarchyDiskPageReads -ne ($released.hierarchyDiskPageReads+$loadedPages) -or $c.meshCount -le $released.meshCount -or $newOnly.Count -ne ($c.meshCount-$released.meshCount) -or $newHandles.Count -ne @($newHandles|Sort-Object -Unique).Count -or $c.expectedAbsentMeshes -ne $released.expectedAbsentMeshes -or $c.observedExpectedAbsentMeshes -ne $released.expectedAbsentMeshes -or $c.meshesAbsent -ne $released.expectedAbsentMeshes -or $c.pageLiveJobs -ne 0 -or $c.pageReservedBytes -ne 0){throw 'Refill did not append fresh owned IDs while retaining historical absence'}
+      Capture 'hierarchy-refilled-fine.png'
+      $null=Action 'rootHierarchy';$null=Action 'stepHierarchy';$refillRoot=HierarchyBounded (HierarchyReady)
+      if($refillRoot.producerModel -ne $released.producerModel -or $refillRoot.rendererModel -ne $released.rendererModel -or $refillRoot.rendererInstance -ne $released.rendererInstance -or $refillRoot.hierarchySelectedTriangles -ne $released.hierarchySelectedTriangles -or $refillRoot.meshCount -ne $hierarchyRefilled.meshCount -or $refillRoot.hierarchyDiskPageReads -ne $hierarchyRefilled.hierarchyDiskPageReads){throw 'Post-refill root return recreated or lost owned state'}
+     }
      $null=Action 'abort';$retired=HierarchyReady
      if($retired.active -or $retired.meshesPresent -ne 0 -or $retired.meshesAbsent -ne $retired.meshCount){throw 'Hierarchy Abort did not observe full record retirement'}
      $secondBegin=Action $hierarchyBegin
      if(!($secondBegin.status -eq 'Busy' -or ($secondBegin.status -eq 'Invalid' -and $secondBegin.pageWorkState -eq 'HierarchyAdmissionUnavailable' -and !$secondBegin.active -and $secondBegin.requestId -eq 0))){throw 'Original admission rearmed after Abort'}
-     $result=@{passed=$true;hierarchy=$true;hierarchyDisk=[bool]$HierarchyDisk;hierarchyCuts=$HierarchyCuts;badDiskAuthority=$badDiskAuthority;specialDemand=$specialDemand;rejectedDemand=$rejectedDemand;fullRefusal=$fullRefusal;begin=$begin;fallback=$fallback;cuts=$cuts;steps=$steps;retired=$retired;secondBegin=$secondBegin;scope='Authenticated original snapshot; bounded independent pages and complete cuts on one instance, record retirement; no automatic retail paging/all-view/device-free/performance proof'}
+     $result=@{passed=$true;hierarchy=$true;hierarchyDisk=[bool]$HierarchyDisk;hierarchyRefill=[bool]$HierarchyRefill;hierarchyCuts=$HierarchyCuts;badDiskAuthority=$badDiskAuthority;specialDemand=$specialDemand;rejectedDemand=$rejectedDemand;fullRefusal=$fullRefusal;badRelease=$badRelease;released=$released;hierarchyRefilled=$hierarchyRefilled;refillRoot=$refillRoot;refillSteps=$refillSteps;begin=$begin;fallback=$fallback;cuts=$cuts;steps=$steps;retired=$retired;secondBegin=$secondBegin;scope='Authenticated original snapshot; bounded independent pages and complete cuts on one instance, record retirement and optional fresh-ID refill; no automatic retail paging/all-view/device-free/performance proof'}
     }else{
     $begin=Action 'beginOriginalDiskClodPaged'
     $fallback=PageCut (Observe $true $false)
@@ -848,7 +899,7 @@ try{
      function AdmitFine{
       $request=PageCut (Action 'requestFine');if($request.pageRequest -lt 1){throw 'Fine request refused'}
       $until=[DateTime]::UtcNow.AddSeconds(15)
-      do{$null=Action 'pollFine';$state=PageCut (Action 'status');if($state.pageWorkState -match 'Failed|Refused|Invalid|Capacity'){throw 'Fine transaction refused'};if($state.fineResident){break};Start-Sleep -Milliseconds 100}while([DateTime]::UtcNow -lt $until)
+      do{$null=Action 'pollFine';$state=PageCut (Action 'status');if($state.pageWorkState -match 'Failed|Refused|Invalid|Capacity'){throw 'Fine transaction refused'};if($state.fineResident -and $state.status -eq 'Ready' -and $state.mainFrameReturned -and $state.observedRequestId -eq $state.requestId){break};Start-Sleep -Milliseconds 100}while([DateTime]::UtcNow -lt $until)
       if(!$state.fineResident -or $state.diskReadStatus -ne 'Read' -or $state.diskRequestedRepresentation -ne 'Fine'){throw 'Actual fine disk result not committed'}
       # Observe starts another request. Let the current Fine request publish
       # before it is superseded, for both first admission and refill.
@@ -907,5 +958,6 @@ finally{
  if($failure){@{passed=$false;reason=$failure.Exception.Message;diskFault=$DiskFault;exitCode=$(if($p -and $p.HasExited){$p.ExitCode}else{$null});normalShutdown=$normal;forcedTermination=$forced;pid=$(if($p){$p.Id}else{$null})}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $out 'failure.json')}
 }
 if($failure){throw $failure}
+$result.demandViewsRequested=[bool]$DemandViews
 $result|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'result.json')
 Write-Host $out

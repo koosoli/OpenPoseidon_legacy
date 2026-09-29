@@ -76,6 +76,62 @@ per-handle expected presence, unused model identity and refill headroom before
 planning nonroot retirement. It has no runtime retirement consumer yet and
 does not prove allocator release or all-view quality.
 
+## Installed independent-page validation
+
+The exact committed `a525fef8` EXE/DLL and producer passed installed WGPU
+startup. The first disk/local runner stopped at page residency while the old
+root cut was still selected and failed its distinct-local-cut check. The
+failure artifact `hierarchy-disk-local-sep29-20260929-233715-a58424` remains.
+Waiting for returned `HierarchyCutResident` fixes that harness race.
+`hierarchy-disk-local-returned-sep29-20260929-234025-af5c78` then passed and
+shut down normally: authored2/root64/local256/Fine512/root64 on one instance,
+three independent page reads, no worker debt, root model reuse, invalid
+external metadata/demand rejection and fourth-cut capacity refusal before
+mutation. Abort observed all eleven historical handles Absent. The maximum
+reported retained known charge was99,926 bytes; physical allocator bytes and
+frame-time improvement were not measured by this fixture.
+
+The next source integrates explicit source-bound `releaseHierarchyNonroot`
+after a returned root cut. It queues nonroot model retirement before mesh
+destruction, pins the complete root, tracks expected state per historical
+handle and allows one fresh-ID refill using the never-used fourth model slot.
+Observe is Busy during queued retirement to prevent superseding its token.
+The new `-HierarchyRefill` runner checks stale-token refusal, returned root
+preservation, exact old-handle absence and fresh IDs during disk reload.
+This is an explicit private record-lifetime test, not automatic all-view
+quality, device memory reclamation or retail policy. Build/runtime pending.
+
+## Completed-frame demand tuples and registration precursor
+
+The next source has a default-off CPU snapshot (`DEMAND_VIEWS=1` plus the
+fixture flag):40 fixed rows/36 actual view IDs,8096-byte additive ABI. Enabled
+families come from the existing applicability policy before resource gates;
+missing matrices remain required/Unknown. It copies actual main, solar/local,
+prepared reflection, retained interior and planned GI matrices/viewports.
+Completion is published only after successful outer render return; attempted
+failure/panic invalidates old completion. Camera knownness is separate from
+COUNT and image freshness. The C++ fixture joins main matrices/origin against
+the same immutable frame packet before exposing summaries. `-DemandViews`
+checks the frozen masks and all required rows; no automatic policy consumes
+these tuples yet.
+
+A pure combined light-VP helper supports RH perspective and signed affine
+matrices with outward homogeneous clip half-spaces. Unknown/clipped/outside
+views still force Fine; the baked error remains a heuristic. A separate unused
+resumable-registration helper requires a complete final-role plan, bounds
+duplicate geometry, checks physical source/mount/lease freshness, permits one
+texture upload/mesh admission per update, and keeps uncertain queue debt until
+ordered retirement settlement. It does not split the synchronous resolver.
+In particular, missing generated textures upload during ordinary Load, so the
+physical-only helper cannot yet admit the complete tenement role set.
+
+Game/tests/tools build passed after renaming a test helper that conflicted with
+the engine Package type. The first focused suite safely refused a mismatched
+test binding; correcting the omitted-view fixture made281 assertions/16 cases
+pass. Rust snapshot tests first failed to compile due a negative-zero literal;
+correcting it produced6/6 passing tests. Failed logs are preserved. Installed
+release/refill and tuple collection remain pending at this source checkpoint.
+
 Next work: independently addressable disk pages with authenticated metadata,
 asynchronous preparation and cancellation debt, arbitrary intermediate runtime
 cuts, automatic projected demand across applicable views, supported static

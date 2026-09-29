@@ -3221,7 +3221,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse, BeginOriginalHierarchy, StepHierarchy, RootHierarchy, FineHierarchy, IntermediateHierarchy, LocalHierarchy, BeginOriginalHierarchyDisk };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse, BeginOriginalHierarchy, StepHierarchy, RootHierarchy, FineHierarchy, IntermediateHierarchy, LocalHierarchy, BeginOriginalHierarchyDisk, ReleaseHierarchyNonroot };
     struct GeometryPageSourceIdentity
     {
         std::array<uint8_t,32> sha256{};
@@ -3307,6 +3307,9 @@ class Engine : public IGraphicsEngine
         bool hierarchicalPilot=false;
         bool hierarchicalDiskPilot=false;
         uint32_t hierarchyPages=0,hierarchyRootPages=0,hierarchyResidentPages=0,hierarchyRetainedCutModels=0,hierarchyDiskPageReads=0;
+        uint32_t hierarchyReleaseCount=0,hierarchyRefillCount=0;
+        uint64_t hierarchyRetiredPageMask=0;
+        bool hierarchyRetirementPending=false;
         uint32_t hierarchySelectedTriangles=0,hierarchyCutModel=UINT32_MAX;
         uint64_t hierarchyRequiredMask=0,hierarchyResidentMask=0,hierarchyMissingMask=0;
         std::vector<uint32_t> hierarchySelectedClusters;
@@ -3331,6 +3334,19 @@ class Engine : public IGraphicsEngine
             uint32_t cascadeDrawMask=0, cascadeCount=0;
             uint64_t localEpochs[24]{}, localFrames[24]{}, interiorEpochs[5]{}, interiorFrames[5]{};
         } passFacts;
+        // Optional completed CPU view tuples, separate from COUNT and cached
+        // images. Matrices remain renderer-owned; summaries copy only after
+        // exact main-packet association on the serialized renderer owner.
+        struct DemandViews {
+            bool enabled=false,available=false,mainPacketJoined=false;
+            uint32_t status=0,viewCount=0,mainCameraIndex=UINT32_MAX,mainCameraSource=0;
+            uint64_t generation=0,instanceEpoch=0,required=0,known=0,unknown=0;
+            struct Row {
+                uint32_t id=0,kind=0,status=0,provenance=0,width=0,height=0,originX=0,originY=0,flags=0;
+                uint64_t generation=0;
+            };
+            std::array<Row,40> rows{};
+        } demandViews;
         bool clodPilot=false, fallbackSelected=false;
         bool pagedPilot=false, fineResident=false;
         bool diskPilot=false,coarseResident=false;

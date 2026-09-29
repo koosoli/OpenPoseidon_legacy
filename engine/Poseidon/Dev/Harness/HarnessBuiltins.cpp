@@ -593,6 +593,7 @@ void RegisterScreenshot(HarnessServer& hs)
             else if(!std::strcmp(name,"fineHierarchy")) action=Engine::GeometryPageFixtureAction::FineHierarchy;
             else if(!std::strcmp(name,"intermediateHierarchy")) action=Engine::GeometryPageFixtureAction::IntermediateHierarchy;
             else if(!std::strcmp(name,"localHierarchy")) action=Engine::GeometryPageFixtureAction::LocalHierarchy;
+            else if(!std::strcmp(name,"releaseHierarchyNonroot")) action=Engine::GeometryPageFixtureAction::ReleaseHierarchyNonroot;
             else if(!std::strcmp(name,"followCamera")) action=Engine::GeometryPageFixtureAction::FollowCamera;
             else if(!std::strcmp(name,"followProjected")) action=Engine::GeometryPageFixtureAction::FollowProjected;
             else if(!std::strcmp(name,"stopCamera")) action=Engine::GeometryPageFixtureAction::StopCamera;
@@ -720,7 +721,8 @@ void RegisterScreenshot(HarnessServer& hs)
             Engine::GeometryPageHierarchyDemandInput hierarchy;
             const Engine::GeometryPageHierarchyDemandInput* hierarchyArgument=nullptr;
             if(action==Engine::GeometryPageFixtureAction::IntermediateHierarchy||
-               action==Engine::GeometryPageFixtureAction::LocalHierarchy) {
+               action==Engine::GeometryPageFixtureAction::LocalHierarchy||
+               action==Engine::GeometryPageFixtureAction::ReleaseHierarchyNonroot) {
                 const auto integer=[&](const char* key,uint64_t& value) {
                     const auto* item=cJSON_GetObjectItemCaseSensitive(root,key);
                     if(!cJSON_IsNumber(item)||!std::isfinite(item->valuedouble)||item->valuedouble<1||
@@ -759,7 +761,7 @@ void RegisterScreenshot(HarnessServer& hs)
                     if(!threshold(cJSON_GetObjectItemCaseSensitive(root,"threshold"),value))
                         return HarnessProtocol::ErrorResponse("finite hierarchy threshold required");
                     std::fill_n(hierarchy.groupThresholds.begin(),hierarchy.groupCount,value);
-                } else {
+                } else if(action==Engine::GeometryPageFixtureAction::LocalHierarchy) {
                     const auto* values=cJSON_GetObjectItemCaseSensitive(root,"groupThresholds");
                     if(!cJSON_IsArray(values)||cJSON_GetArraySize(values)!=int(hierarchy.groupCount))
                         return HarnessProtocol::ErrorResponse("exact bounded hierarchy group thresholds required");
@@ -872,6 +874,9 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(hierarchyPages);PAGE_FIXTURE_NUMBER(hierarchyRootPages);PAGE_FIXTURE_NUMBER(hierarchyResidentPages);
             PAGE_FIXTURE_NUMBER(hierarchyRetainedCutModels);
             PAGE_FIXTURE_NUMBER(hierarchyDiskPageReads);
+            PAGE_FIXTURE_NUMBER(hierarchyReleaseCount);PAGE_FIXTURE_NUMBER(hierarchyRefillCount);
+            cJSON_AddBoolToObject(result,"hierarchyRetirementPending",report.hierarchyRetirementPending);
+            cJSON_AddStringToObject(result,"hierarchyRetiredPageMaskExact",std::to_string(report.hierarchyRetiredPageMask).c_str());
             PAGE_FIXTURE_NUMBER(hierarchySelectedTriangles);PAGE_FIXTURE_NUMBER(hierarchyCutModel);PAGE_FIXTURE_NUMBER(hierarchyThreshold);
             PAGE_FIXTURE_NUMBER(hierarchyDemandGroupCount);
             PAGE_FIXTURE_NUMBER(hierarchyRequiredMask);PAGE_FIXTURE_NUMBER(hierarchyResidentMask);PAGE_FIXTURE_NUMBER(hierarchyMissingMask);
@@ -938,6 +943,26 @@ void RegisterScreenshot(HarnessServer& hs)
             for(size_t i=0;i<std::min<size_t>(report.meshCount,64);++i)
                 cJSON_AddItemToArray(history,cJSON_CreateString(std::to_string(report.rendererMeshHandles[i]).c_str()));
             auto* pass=cJSON_AddObjectToObject(result,"passFacts");
+            if(report.demandViews.enabled) {
+                const auto& d=report.demandViews;auto* views=cJSON_AddObjectToObject(result,"demandViews");
+                cJSON_AddBoolToObject(views,"available",d.available);
+                cJSON_AddBoolToObject(views,"mainPacketJoined",d.mainPacketJoined);
+#define DEMAND_VIEW_NUMBER(field) cJSON_AddNumberToObject(views,#field,double(d.field))
+                DEMAND_VIEW_NUMBER(status);DEMAND_VIEW_NUMBER(viewCount);DEMAND_VIEW_NUMBER(generation);
+                DEMAND_VIEW_NUMBER(instanceEpoch);DEMAND_VIEW_NUMBER(required);DEMAND_VIEW_NUMBER(known);DEMAND_VIEW_NUMBER(unknown);
+                DEMAND_VIEW_NUMBER(mainCameraIndex);DEMAND_VIEW_NUMBER(mainCameraSource);
+#undef DEMAND_VIEW_NUMBER
+                auto* rows=cJSON_AddArrayToObject(views,"rows");
+                for(size_t i=0;i<36;++i)if(d.required&(uint64_t(1)<<i)) {
+                    const auto& row=d.rows[i];auto* item=cJSON_CreateObject();cJSON_AddItemToArray(rows,item);
+#define DEMAND_ROW_NUMBER(field) cJSON_AddNumberToObject(item,#field,double(row.field))
+                    DEMAND_ROW_NUMBER(id);DEMAND_ROW_NUMBER(kind);DEMAND_ROW_NUMBER(status);DEMAND_ROW_NUMBER(provenance);
+                    DEMAND_ROW_NUMBER(width);DEMAND_ROW_NUMBER(height);DEMAND_ROW_NUMBER(originX);DEMAND_ROW_NUMBER(originY);
+                    DEMAND_ROW_NUMBER(flags);DEMAND_ROW_NUMBER(generation);
+#undef DEMAND_ROW_NUMBER
+                }
+                cJSON_AddStringToObject(views,"scope","CPU camera provenance only; no COUNT/cache-image/automatic-demand/retirement authority");
+            }
             cJSON_AddBoolToObject(pass,"valid",report.passFacts.valid);
 #define PAGE_PASS_NUMBER(field) cJSON_AddNumberToObject(pass,#field,double(report.passFacts.field))
             PAGE_PASS_NUMBER(version); PAGE_PASS_NUMBER(structBytes); PAGE_PASS_NUMBER(enabled);

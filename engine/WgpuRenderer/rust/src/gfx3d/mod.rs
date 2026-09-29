@@ -6868,6 +6868,66 @@ impl Gfx3d {
         ));
     }
 
+    // Optional demand-camera provenance. No COUNT reads, render selection or
+    // retirement mutation. Required families are frozen before resource gates.
+    pub(crate) fn configure_demand_view_snapshot(&self,tracker:&mut crate::demand_view_snapshot::Tracker,
+        shadow:&WgrShadowPass,planar_active:bool,request:Option<(u64,u32,u64)>) {
+        use crate::demand_view_snapshot as demand;
+        let identity=self.cull.main_target_count_fact().identity;
+        let source=request.filter(|(token,model,generation)|
+            *token==identity.token&&*model==identity.model_id&&*generation==identity.source_generation).map(|_|identity);
+        tracker.configure(demand::required_mask(shadow.count,shadow.local_count,
+            self.interior_sky.enabled&&self.gpu_driven_enabled,self.gi.rsm_eligible.get(),planar_active),
+            self.cull.instance_epoch(),source);
+    }
+    pub(crate) fn capture_demand_view_snapshot(&self,tracker:&mut crate::demand_view_snapshot::Tracker,
+        shadow:&WgrShadowPass,reflected:Option<&WgrCamera>,reflection_size:Option<(u32,u32)>,main:Option<&WgrCamera>) {
+        use crate::demand_view_snapshot as demand;
+        use crate::gfx3d::view_reference_facts as indices;
+        tracker.verify_instance_epoch(self.cull.instance_epoch());
+        let shadow_res=self.shadow_target.as_ref().map(|target|target.res);
+        for c in 0..(shadow.count as usize).min(MAX_CASCADES as usize) {
+            let res=shadow_res.unwrap_or(0);
+            let mut row=demand::combined_row(demand::SOLAR,2,shadow.light_vp[c],shadow.cam_pos,(res,res,0,0),0);
+            if shadow_res!=Some(shadow.resolution){row.status=5;}
+            tracker.capture(indices::CASCADES.start+c,row);
+        }
+        for k in 0..(shadow.local_count as usize).min(MAX_LOCAL_SHADOWS) {
+            let tile=shadow_res.unwrap_or(0)/LOCAL_ATLAS_GRID;
+            let origin_x=(k as u32%LOCAL_ATLAS_GRID)*tile;let origin_y=(k as u32/LOCAL_ATLAS_GRID)*tile;
+            let mut row=demand::combined_row(demand::LOCAL,3,shadow.local_vp[k],shadow.cam_pos,
+                (tile,tile,origin_x,origin_y),0);
+            if shadow_res!=Some(shadow.resolution)||k>=self.local_shadow_count {row.status=5;}
+            tracker.capture(indices::LOCALS.start+k,row);
+        }
+        // Reflection is copied from the actual widened, mirrored prepared camera,
+        // not reconstructed from main getters. Atlas/target dimensions are actual.
+        if let Some(camera)=reflected {
+            let size=reflection_size.unwrap_or((0,0));
+            tracker.capture(indices::REFLECTION,demand::Row{kind:demand::REFLECTION,provenance:4,flags:demand::NONJITTERED,
+                viewport_width:size.0,viewport_height:size.1,origin:[camera.cam_pos[0],camera.cam_pos[1],camera.cam_pos[2],0.],
+                projection:camera.proj,view:camera.view,..Default::default()});
+        }
+        let Some(camera)=main else{return;};
+        let position=glam::Vec3::new(camera.cam_pos[0],camera.cam_pos[1],camera.cam_pos[2]);
+        let origin=[position.x,position.y,position.z,0.];let rebase=glam::Mat4::from_translation(position);
+        // EXACT retained views used by prepare_cull and frame UBO; rebuilding
+        // fresh sky_vis views would describe a different round-robin cached map.
+        for i in 0..sky_vis::DIRECTION_COUNT {
+            let res=self.interior_sky_target.as_ref().map(|(target,_,_)|target.width()).unwrap_or(0);
+            let vp=(self.interior_sky_views[i].view_proj*rebase).to_cols_array();
+            let mut row=demand::combined_row(demand::INTERIOR,5,vp,origin,(res,res,0,0),demand::RETAINED_MATRIX);
+            if self.interior_sky_view.is_none(){row.status=5;}
+            tracker.capture(indices::INTERIOR.start+i,row);
+        }
+        // Planned next-draw GI matrix is numerically known independently of old
+        // sampled RSM/COUNT/publication. This row proves none of those contents.
+        let vp=(self.gi.rsm_view.view_proj*rebase).to_cols_array();
+        let mut row=demand::combined_row(demand::GI,6,vp,origin,(gi::RSM_RES,gi::RSM_RES,0,0),demand::PLANNED_MATRIX);
+        if self.interior_sky_view.is_none()||!self.gi.settings.enabled {row.status=5;}
+        tracker.capture(indices::GI,row);
+    }
+
     // Optional fixture recorder; no planning epoch is exported as a draw witness.
     pub fn begin_geometry_pass_facts(&self,shadow:&WgrShadowPass) {
         self.geometry_shadow_cull_mask.set(0);

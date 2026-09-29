@@ -1237,3 +1237,47 @@ COUNT from foreign cached-image mutations; twelve Rust tests passed. Installed
 combined validation is pending. Automatic retail paging, all-view collection,
 release/refill consumer, physical byte convergence and matched performance
 remain OPEN/defaultReady=false/performanceAccepted=false.
+
+### 29 September late installed validation and next lifetime step
+
+Committed `a525fef8` passed paired installed startup. The repaired independent
+disk/local runner passed/normal: authored2/root64/local256/Fine512/root reuse,
+three independent reads, fourth-cut/stale-token refusal and eleven-record
+Abort absence. The first run's early page-residency stopping race remains
+documented. The DayZ physical/proxy route passed/normal and consumed five
+same-source proxy textures (3,320,288 bytes); speculative coverage remained
+incomplete. Native Reforger's normal eight-pose route passed/normal, returning
+to19,999 resident/zero pending and1,707,629,924 tracked GPU bytes. Reforger
+compatibility anomalies are not rendering ground truth; these runs do not
+establish matched FPS/no-regression. The COUNT run logged current main and
+four solar positives for coarse/Fine, but failed a returned-request harness
+race; repaired verdict pending. The next unbuilt source adds explicit root
+preserving nonroot record retirement and fresh-ID refill. Agents are preparing
+an actual completed-frame view collector and bounded resumable DayZ owner
+registration accounting. Experimental geometry remains OFF; automatic
+retail paging, physical byte convergence, comparable-quality performance and
+Nanite equivalence remain OPEN/defaultReady=false/performanceAccepted=false.
+
+The repaired exact installed `a525fef8` COUNT run
+`count-palette-returned-sep30-20260929-235938-a6e2bc` subsequently passed,
+normalShutdown=true/no force: returned coarse/Fine/refill models3/4/5 each
+produced current main plus solar0–3 Present1, with reflection Absent0 on the
+last refill token9. This closes the runner race and narrow positive-path
+verification only; cached/local/interior/GI all-view absence remains open.
+
+### 30 September — returned-root release, actual views and bounded preparation
+
+The next source integrates explicit nonroot retirement/fresh refill, completed
+actual CPU view collection (36 IDs/40 rows, private8096-byte additive ABI),
+and a pure RH combined-light projection policy. Required Unknown views remain
+in the frozen set; C++ joins the actual main packet before exporting summaries.
+No default GPU copies/readbacks or automatic paging consumer are added.
+An unused resumable owner-admission precursor enforces source/lease checks,
+one upload/mesh per update, complete model acknowledgement and retained
+cancellation debt. Generated-role handling and a no-upload final material
+resolver remain prerequisites before DayZ runtime integration. After documented
+test fixture/literal repairs, the combined game/tests/tools build passed,
+281 assertions/16 C++ cases and6 Rust snapshot cases passed. Exact committed
+installed release/refill/tuple validation remains pending. Automatic retail
+paging, source-bound outside-view applicability, physical convergence and
+matched performance remain OPEN/defaultReady=false/performanceAccepted=false.

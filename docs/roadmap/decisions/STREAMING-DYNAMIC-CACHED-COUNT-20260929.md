@@ -67,3 +67,31 @@ The committed `bf76fa15` EXE/DLL pair passed installed WGPU `--check`.
 Non-texture
 material edits and other image producers are still untracked, so no cached
 image, Fine-release or default GeometryPage policy is promoted.
+
+## Rigid target and foreign palette images
+
+`a525fef8` separates full bounded palette-image mutation from an armed target
+COUNT revision. The revision survives a foreign pose change only when the
+actual current target is proven rigid within bounded model/mesh/section
+ownership checks; stale, missing, skinned or oversized targets invalidate.
+Palette bytes, buffer identity, slot order and stride remain in the distinct
+image serial and cached image keys. Allocation/cap/refusal discards the image
+baseline. Twelve focused Rust tests and the paired build/startup passed.
+
+Installed `count-palette-independent-sep29-20260929-234146-510de6` exited
+normally but its harness verdict failed: AdmitFine returned producer model4
+while renderer model3 still belonged to the previous Pending request. The
+log actually contains current main plus solar0–3 Present1 for coarse token1
+and Fine token3, with source generations4/5 and epochs4/6 respectively.
+The runner now requires exact returned Ready before checking its COUNT log.
+The failure artifact is preserved; a repaired verdict remains pending.
+No cached-image, all-view-zero, automatic Fine-release or performance gate
+was relaxed.
+
+The repaired installed `a525fef8` run
+`count-palette-returned-sep30-20260929-235938-a6e2bc` passed, exit0,
+normalShutdown=true and forcedTermination=false. Coarse/Fine/fresh refill
+returned exact producer=renderer models3/4/5 before COUNT checking. Each
+observed current main plus solar0–3 Present1; the last refill token9 also
+reported planar reflection Absent0. This confirms the narrow rigid-target
+positive path. It does not close cached/local/interior/GI all-view absence.

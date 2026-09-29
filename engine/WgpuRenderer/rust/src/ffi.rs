@@ -3724,6 +3724,7 @@ unsafe fn render_frame_impl(
     let mut main_count_submitted = false;
     let status = catch_unwind(AssertUnwindSafe(|| {
         let renderer = unsafe { &mut *renderer };
+        if let Some(tracker)=renderer.demand_view_snapshot.as_mut(){tracker.begin();}
         if main_count_request.is_some() { renderer.gfx3d.begin_view_reference_request(); }
         let frame = unsafe { &*frame };
         let cameras = unsafe { frame.cameras.as_slice() };
@@ -3789,6 +3790,11 @@ unsafe fn render_frame_impl(
         }
     }))
     .unwrap_or(-3);
+    // Publish only after the outer render/commit closure returned actual FFI
+    // success. Any renderer error/panic aborts the candidate and old completion.
+    if let Some(tracker)=unsafe{&mut *renderer}.demand_view_snapshot.as_mut() {
+        if status==0 {tracker.complete();} else {tracker.abort();}
+    }
     if status != 0 { if let Some(facts) = call_timings { facts.fail(); } }
     if status != 0 && !renderer.is_null() {
         let _ = catch_unwind(AssertUnwindSafe(|| {
@@ -5207,6 +5213,35 @@ pub unsafe extern "C" fn wgr_main_camera_tuple(renderer:*mut WgrRenderer,out:*mu
         let Some(tuple)=unsafe{&*renderer}.main_camera_tuple.as_ref().and_then(|t|t.snapshot()) else{return 0;};
         unsafe{*out=tuple;}1
     })).unwrap_or(2)
+}
+
+/// Additive default-off CPU demand-view tuples, not COUNT/cache/GPU release proof.
+/// 0 disabled/no completed attempt,1 copied,2 invalid arguments/panic. Output
+/// untouched on0/2. Preflight argument refusal is not a renderer-frame attempt.
+/// # Safety
+/// Exclusive owner access; output must be aligned writable8096B without aliasing.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_demand_view_snapshot(renderer:*mut WgrRenderer,
+    out:*mut crate::demand_view_snapshot::WgrDemandViewSnapshot,bytes:u32,version:u32)->u32 {
+    if renderer.is_null()||out.is_null()||!crate::demand_view_snapshot::valid_layout(bytes,version){return 2;}
+    catch_unwind(AssertUnwindSafe(|| {
+        let Some(snapshot)=unsafe{&*renderer}.demand_view_snapshot.as_ref().and_then(|t|t.snapshot()) else{return 0;};
+        unsafe{*out=*snapshot;}1
+    })).unwrap_or(2)
+}
+#[cfg(test)]
+mod demand_view_snapshot_getter_tests {
+    use super::*;
+    #[test] fn demand_view_snapshot_layout_preflight_never_dereferences_invalid_renderer_or_writes_output() {
+        let mut output=crate::demand_view_snapshot::WgrDemandViewSnapshot{generation:79,..Default::default()};
+        let before=output;let sentinel=1usize as *mut WgrRenderer;
+        assert_eq!(unsafe{wgr_demand_view_snapshot(sentinel,&mut output,8095,1)},2);
+        assert_eq!(unsafe{wgr_demand_view_snapshot(sentinel,&mut output,8096,0)},2);
+        assert_eq!(unsafe{wgr_demand_view_snapshot(std::ptr::null_mut(),&mut output,8096,1)},2);
+        assert_eq!(unsafe{wgr_demand_view_snapshot(sentinel,std::ptr::null_mut(),8096,1)},2);
+        assert_eq!(output,before);
+        assert_eq!(std::mem::offset_of!(crate::demand_view_snapshot::WgrDemandViewSnapshot,rows),96);
+    }
 }
 
 #[cfg(test)]

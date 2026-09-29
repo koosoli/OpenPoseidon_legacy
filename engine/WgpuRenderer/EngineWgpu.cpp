@@ -11,6 +11,7 @@
 #include <Poseidon/Graphics/Rendering/GeometryPageClodRamPackage.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalCut.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalLocalCut.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalRelease.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageControlledClodPilot.hpp>
 #include <Poseidon/Graphics/Rendering/AuthoredGeometryPageWorker.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageSurfaceAdmission.hpp>
@@ -23,6 +24,7 @@
 #include "EngineWgpu.hpp"
 #include "GeometryOwnerLedger.hpp"
 #include "GeometrySourceRevisions.hpp"
+#include "include/WgpuDemandViewSnapshot.hpp"
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/World/Terrain/WarmMaterialStagePreflightPolicy.hpp>
@@ -2258,6 +2260,9 @@ struct EngineWgpu::GeometryPageFixtureState
     uint64_t hierarchyWorkerRequest=0,hierarchyWorkerGeneration=0;
     std::array<uint64_t,64> hierarchyClusterMesh{}; // bounded source cluster ID -> producer mesh
     std::array<uint8_t,64> hierarchyResident{}; // only set after exact returned-frame mesh facts
+    std::array<uint32_t,64> hierarchyMeshClusterHistory{};
+    std::array<uint8_t,64> hierarchyExpectedMeshState{},hierarchyObservedMeshState{};
+    uint64_t hierarchyObservedGeneration=0;
     std::array<bool,4> hierarchyModelRegistered{},hierarchyCutReserved{};
     std::array<std::array<uint32_t,64>,4> hierarchyCutKeys{};
     std::array<uint8_t,4> hierarchyCutCounts{};
@@ -9472,6 +9477,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             mesh.indices.reserve(original.coarse.indices.size());
             for(auto index:original.coarse.indices) {if(index>INT32_MAX)return failure;mesh.indices.push_back(VertexIndex(index));}
             fixture->meshes.push_back(mesh.mesh);
+            fixture->hierarchyMeshClusterHistory[0]=UINT32_MAX;
+            fixture->hierarchyExpectedMeshState[0]=1;
             ResourceOp model;model.kind=ResourceOp::ModelRegister;model.model=fixture->models[0];
             model.sphereRadius=radius;model.name="private-original-hierarchy-fallback";
             coarseSection.mesh=mesh.mesh;coarseSection.index_begin=0;
@@ -9898,11 +9905,120 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
         if(report.hierarchicalPilot && action!=GeometryPageFixtureAction::RootHierarchy &&
            action!=GeometryPageFixtureAction::FineHierarchy && action!=GeometryPageFixtureAction::StepHierarchy &&
            action!=GeometryPageFixtureAction::IntermediateHierarchy && action!=GeometryPageFixtureAction::LocalHierarchy &&
+           action!=GeometryPageFixtureAction::ReleaseHierarchyNonroot &&
            action!=GeometryPageFixtureAction::Abort && action!=GeometryPageFixtureAction::Observe)
-            return failure;
+             return failure;
         if(report.hierarchicalPilot && action==GeometryPageFixtureAction::Observe &&
-           (fixture->hierarchyPendingPage!=UINT32_MAX||fixture->hierarchyPendingModel!=UINT32_MAX)) {
+           (fixture->hierarchyPendingPage!=UINT32_MAX||fixture->hierarchyPendingModel!=UINT32_MAX||
+            report.hierarchyRetirementPending)) {
             auto busy=report;busy.status=GeometryReportStatus::Busy;return busy;
+        }
+        if(action==GeometryPageFixtureAction::ReleaseHierarchyNonroot) {
+            using namespace Poseidon::GeometryPages;
+            if(!report.hierarchicalDiskPilot||!fixture->hierarchy||!fixture->hierarchyDiskAuthority||
+               !fixture->originalAdmission||!hierarchyDemand||report.hierarchyReleaseCount||
+               report.hierarchyRetirementPending||report.requestId==UINT64_MAX||
+               fixture->hierarchyGeneration==UINT64_MAX||
+               hierarchyDemand->packageSha256!=fixture->hierarchy->identity.packageSha256||
+               hierarchyDemand->sourceAdmissionEpoch!=report.sourceAdmissionEpoch||
+               hierarchyDemand->pageEpoch!=report.pageEpoch||
+               hierarchyDemand->expectedRequestId!=report.observedRequestId||
+               hierarchyDemand->groupCount!=fixture->hierarchy->groups.size())return failure;
+            std::array<HierarchicalReleaseCutSlot,4> slots{};
+            for(uint32_t i=0;i<4;++i) {
+                slots[i].producerModel=fixture->models[i];
+                slots[i].everUsed=fixture->hierarchyCutReserved[i];
+                slots[i].live=fixture->hierarchyModelRegistered[i];
+                if(i&&fixture->hierarchyCutReserved[i])slots[i].clusters=
+                    std::span<const uint32_t>(fixture->hierarchyCutKeys[i].data(),fixture->hierarchyCutCounts[i]);
+            }
+            if(fixture->meshes.size()>64)return failure;
+            std::array<HierarchicalReleaseMeshHistory,64> history{};
+            for(size_t i=0;i<fixture->meshes.size()&&i<64;++i) {
+                const auto cluster=fixture->hierarchyMeshClusterHistory[i];
+                const bool current=cluster==UINT32_MAX?i==0:
+                    cluster<fixture->hierarchyClusterMesh.size()&&fixture->hierarchyClusterMesh[cluster]==fixture->meshes[i];
+                history[i]={fixture->meshes[i],fixture->rendererMeshes[i],cluster,
+                    fixture->hierarchyExpectedMeshState[i],fixture->hierarchyObservedMeshState[i],current};
+            }
+            const auto model=_modelIdOf.find(report.producerModel);
+            const bool instanceExact=model!=_modelIdOf.end()&&model->second==fixture->consumedModel&&
+                report.rendererModel==model->second&&report.rendererInstance==fixture->consumedInstance&&
+                fixture->consumedInstance!=UINT32_MAX;
+            const auto worker=_geometryPageWorker?_geometryPageWorker->Snapshot():AuthoredPageWorker::Stats{};
+            HierarchicalReleaseInput input;
+            input.expected.identity=fixture->hierarchy->identity;
+            input.expected.sourceAdmissionEpoch=hierarchyDemand->sourceAdmissionEpoch;
+            input.expected.pageEpoch=hierarchyDemand->pageEpoch;
+            input.expected.demandGeneration=fixture->hierarchyGeneration;
+            input.expected.requestId=hierarchyDemand->expectedRequestId;
+            input.observed.identity=fixture->hierarchy->identity;
+            input.observed.sourceAdmissionEpoch=fixture->originalAdmission->report.epoch;
+            input.observed.pageEpoch=report.pageEpoch;
+            input.observed.demandGeneration=fixture->hierarchyObservedGeneration;
+            input.observed.requestId=report.observedRequestId;
+            input.admittedSource=fixture->originalAdmission->source.original.source;
+            input.residentPages=std::span<const uint8_t>(fixture->hierarchyResident.data(),fixture->hierarchy->pages.size());
+            input.selectedClusters=report.hierarchySelectedClusters;input.cutSlots=slots;
+            input.meshHistory=std::span<const HierarchicalReleaseMeshHistory>(history.data(),fixture->meshes.size());
+            input.selectedModel=report.producerModel;
+            input.consumedModel=instanceExact?report.producerModel:UINT32_MAX;
+            input.returnedFrameReady=report.active&&report.status==GeometryReportStatus::Ready&&
+                report.mainFrameReturned&&report.renderReturnStatus==0&&report.observedRequestId==report.requestId;
+            input.instanceExact=instanceExact;
+            input.pendingPage=fixture->hierarchyPendingPage!=UINT32_MAX;
+            input.pendingModel=fixture->hierarchyPendingModel!=UINT32_MAX;
+            input.pendingWorker=fixture->hierarchyWorkerRequest!=0;
+            input.workerLiveJobs=worker.liveJobs;input.workerReservedBytes=worker.reservedBytes;
+            input.knownBytes=report.knownPayloadBytes;
+            input.retirementStagingBytes=69*sizeof(ResourceOp);
+            input.refillReservationBytes=HierarchicalDiskPageInputKnownBytes(*fixture->hierarchyDiskAuthority)+
+                AuthoredPageWorker::HierarchyFileReservation+AuthoredPageWorker::HierarchyManifestReservation+
+                AuthoredPageWorker::ResultReservation+AuthoredPageWorker::MetadataReservation+2*65536;
+            HierarchicalReleasePlan plan;
+            if(!PlanHierarchicalRelease(*fixture->hierarchy,input,plan))return failure;
+            if(report.hierarchyRetainedCutModels<plan.retireModelCount)return failure;
+            std::vector<ResourceOp> staged;staged.reserve(plan.retireModelCount+plan.retireMeshCount+1);
+            for(uint32_t i=0;i<plan.retireModelCount;++i) {
+                ResourceOp op;op.kind=ResourceOp::ModelRetire;
+                op.model=fixture->models[plan.retireModelSlots[i]];staged.push_back(std::move(op));
+            }
+            for(uint32_t i=0;i<plan.retireMeshCount;++i) {
+                ResourceOp op;op.kind=ResourceOp::MeshDestroy;
+                op.mesh=fixture->meshes[plan.retireHistoryIndices[i]];staged.push_back(std::move(op));
+            }
+            ResourceOp observe;observe.kind=ResourceOp::GeometryPageFixtureObserve;
+            observe.fixtureData=fixture;observe.fixtureRequest=report.requestId+1;
+            staged.push_back(std::move(observe));
+            _resourceOps.reserve(_resourceOps.size()+staged.size());
+            for(uint32_t i=0;i<plan.retireModelCount;++i)
+                fixture->hierarchyModelRegistered[plan.retireModelSlots[i]]=false;
+            report.hierarchyRetainedCutModels-=plan.retireModelCount;
+            for(uint32_t i=0;i<plan.retireMeshCount;++i) {
+                const auto at=plan.retireHistoryIndices[i];
+                const auto cluster=fixture->hierarchyMeshClusterHistory[at];
+                fixture->hierarchyExpectedMeshState[at]=2;
+                fixture->hierarchyClusterMesh[cluster]=0;
+                fixture->hierarchyClusterIndexCounts[cluster]=0;
+            }
+            for(uint32_t p=0;p<fixture->hierarchy->pages.size();++p)
+                if(plan.retiredPages&(uint64_t(1)<<p))fixture->hierarchyResident[p]=0;
+            fixture->hierarchyDesiredThreshold=fixture->hierarchyRootThreshold;
+            fixture->hierarchyLocalDemand=false;++fixture->hierarchyGeneration;
+            std::fill_n(fixture->hierarchyDesiredGroupThresholds.begin(),fixture->hierarchy->groups.size(),fixture->hierarchyRootThreshold);
+            report.hierarchyThreshold=fixture->hierarchyRootThreshold;report.hierarchyLocalDemand=false;
+            report.hierarchyDemandThresholds=fixture->hierarchyDesiredGroupThresholds;
+            report.hierarchyRetiredPageMask=plan.retiredPages;report.hierarchyResidentMask&=~plan.retiredPages;
+            report.hierarchyResidentPages=0;
+            for(uint32_t p=0;p<fixture->hierarchy->pages.size();++p)
+                if(fixture->hierarchyResident[p])++report.hierarchyResidentPages;
+            report.hierarchyRequiredMask=plan.pinnedRootPages;report.hierarchyMissingMask=0;
+            report.hierarchyReleaseCount=1;report.hierarchyRetirementPending=true;
+            report.pageWorkState="HierarchyReleasing";report.status=GeometryReportStatus::Pending;
+            report.mainFrameReturned=false;report.renderReturnStatus=INT32_MIN;report.passFacts={};++report.requestId;
+            report.knownPayloadBytes+=staged.capacity()*sizeof(ResourceOp);
+            for(auto& op:staged)_resourceOps.push_back(std::move(op));
+            return report;
         }
         if(action==GeometryPageFixtureAction::RootHierarchy ||
            action==GeometryPageFixtureAction::FineHierarchy ||
@@ -9959,6 +10075,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             if(plan.requestedClusters.empty()||plan.requestedClusters.size()>63)return failure;
             uint32_t slot=UINT32_MAX;
             for(uint32_t i=1;i<fixture->modelCount;++i)if(fixture->hierarchyCutReserved[i] &&
+                fixture->hierarchyModelRegistered[i] &&
                 fixture->hierarchyCutCounts[i]==plan.requestedClusters.size() &&
                 std::equal(plan.requestedClusters.begin(),plan.requestedClusters.end(),
                     fixture->hierarchyCutKeys[i].begin())) {slot=i;break;}
@@ -10100,7 +10217,9 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                     _resourceOps.reserve(_resourceOps.size()+staged.size());
                     for(size_t i=0;i<handles.size();++i) {
                         const auto id=page.clusters[i].cluster;
+                        const auto at=fixture->meshes.size();
                         fixture->meshes.push_back(handles[i]);fixture->hierarchyClusterMesh[id]=handles[i];
+                        fixture->hierarchyMeshClusterHistory[at]=id;fixture->hierarchyExpectedMeshState[at]=1;
                         fixture->hierarchyClusterIndexCounts[id]=uint32_t(page.clusters[i].indices.size());
                     }
                     fixture->hierarchyWorkerPage=UINT32_MAX;fixture->hierarchyWorkerRequest=0;
@@ -10158,8 +10277,11 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                 if(_nextGeometryPageRequest==UINT64_MAX)return failure;
                 report.pageRequest=_nextGeometryPageRequest++;
                 for(size_t i=0;i<handles.size();++i) {
+                    const auto at=fixture->meshes.size();
                     fixture->meshes.push_back(handles[i]);
                     fixture->hierarchyClusterMesh[page.clusters[i].cluster]=handles[i];
+                    fixture->hierarchyMeshClusterHistory[at]=page.clusters[i].cluster;
+                    fixture->hierarchyExpectedMeshState[at]=1;
                 }
                 fixture->hierarchyPendingPage=pageId;
                 fixture->hierarchyPendingPageRequest=report.requestId+1;
@@ -10594,6 +10716,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                 report.hierarchyResidentPages=0;report.hierarchyRequiredMask=0;report.hierarchyMissingMask=0;
                 report.hierarchySelectedClusters.clear();report.hierarchySelectedTriangles=0;
                 report.hierarchyCutModel=UINT32_MAX;
+                report.hierarchyRetirementPending=false;
             }
             if(report.pagedPilot && _geometryPageWorker) { _geometryPageWorker->Cancel(report.pageEpoch);report.pageRequest=0;report.pageWorkState="Cancelled"; }
             EnqueueInstanceRemove(fixture->instance);
@@ -10637,6 +10760,43 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
     report.mainFrameReturned=renderReturnStatus==0;
     report.passFacts={}; // Failed frame/getter must never expose a prior valid cut.
     report.cameraTupleEnabled=PageCameraTupleEnabled();PageInvalidateCameraTuple(report);
+    report.demandViews={};
+    static const bool demandViewsEnabled=[] {
+        const char* v=std::getenv("WGR_GEOMETRY_PAGE_DEMAND_VIEWS");
+        return v&&std::strcmp(v,"1")==0;
+    }();
+    report.demandViews.enabled=demandViewsEnabled;
+    if(demandViewsEnabled&&report.mainFrameReturned) {
+        WgrDemandViewSnapshot snapshot;
+        if(wgr_demand_view_snapshot(_renderer,&snapshot,sizeof(snapshot),1)==1&&
+           snapshot.version==1&&snapshot.struct_bytes==sizeof(snapshot)&&
+           snapshot.view_count==36&&snapshot.status>=1&&snapshot.status<=3&&
+           snapshot.generation&&snapshot.generation!=UINT64_MAX&&snapshot.instance_epoch&&
+           snapshot.required&&!(snapshot.required>>36)&&
+           !(snapshot.known&snapshot.unknown)&&(snapshot.known|snapshot.unknown)==snapshot.required) {
+            auto& copied=report.demandViews;
+            copied.available=true;copied.status=snapshot.status;copied.viewCount=snapshot.view_count;
+            copied.generation=snapshot.generation;copied.instanceEpoch=snapshot.instance_epoch;
+            copied.required=snapshot.required;copied.known=snapshot.known;copied.unknown=snapshot.unknown;
+            copied.mainCameraIndex=snapshot.main_camera_index;copied.mainCameraSource=snapshot.main_camera_source;
+            const auto& main=snapshot.rows[0];const auto* cameras=frame.cameras.data;
+            copied.mainPacketJoined=snapshot.status!=3&&(snapshot.known&1)&&main.status==1&&
+                main.id==1&&main.kind==1&&main.provenance==1&&main.flags==1&&
+                main.generation==snapshot.generation&&main.matrix_generation==snapshot.generation&&
+                cameras&&snapshot.main_camera_index<frame.cameras.length&&
+                snapshot.main_camera_source>=1&&snapshot.main_camera_source<=4&&
+                std::memcmp(main.projection.data(),cameras[snapshot.main_camera_index].proj.m,64)==0&&
+                std::memcmp(main.view.data(),cameras[snapshot.main_camera_index].view.m,64)==0&&
+                main.origin[0]==cameras[snapshot.main_camera_index].cam_pos.x&&
+                main.origin[1]==cameras[snapshot.main_camera_index].cam_pos.y&&
+                main.origin[2]==cameras[snapshot.main_camera_index].cam_pos.z&&main.origin[3]==0;
+            for(size_t i=0;i<36;++i) {
+                const auto& r=snapshot.rows[i];
+                copied.rows[i]={r.id,r.kind,r.status,r.provenance,r.viewport_width,r.viewport_height,
+                    r.viewport_origin_x,r.viewport_origin_y,r.flags,r.generation};
+            }
+        }
+    }
     if(report.mainFrameReturned) {
         WgrGeometryPassFacts f{};
         if(wgr_geometry_pass_facts(_renderer,&f,sizeof(f),2)==1 &&
@@ -10669,12 +10829,16 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
         !summary.invalid && !summary.reserved && summary.record_scope_valid==1 &&
         summary.present+summary.absent==fixture->meshes.size();
     GeometryPages::PageHistoryScope history{uint32_t(fixture->meshes.size()),fixture->pageRetiredBegin,fixture->pageRetiredEnd,report.active};
-    valid=valid && history.Valid();bool expectations=true;
+    valid=valid && (report.hierarchicalPilot?(fixture->meshes.size()>0&&fixture->meshes.size()<=64):history.Valid());
+    const auto expectedMeshState=[&](size_t i)->uint8_t {
+        return report.hierarchicalPilot?(report.active?fixture->hierarchyExpectedMeshState[i]:2):uint8_t(history.Expected(uint32_t(i)));
+    };
+    bool expectations=true;
     report.meshesPresent=report.meshesAbsent=0;
     report.expectedPresentMeshes=report.expectedAbsentMeshes=report.observedExpectedPresentMeshes=report.observedExpectedAbsentMeshes=0;
     for(size_t i=0;i<64;++i) report.rendererMeshHandles[i]=i<fixture->meshes.size()?fixture->rendererMeshes[i]:0;
     for(size_t i=0;i<fixture->meshes.size();++i) {
-        const auto expected=history.Expected(uint32_t(i));
+        const auto expected=expectedMeshState(i);
         if(expected==1) ++report.expectedPresentMeshes;else if(expected==2) ++report.expectedAbsentMeshes;
     }
     for(size_t i=0;valid && i<fixture->meshes.size();++i) {
@@ -10682,7 +10846,8 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
             ((facts[i].state==1 && facts[i].vertex_bytes>0 && facts[i].index_bytes>0) ||
              (facts[i].state==2 && !facts[i].vertex_bytes && !facts[i].index_bytes));
         if(facts[i].state==1) ++report.meshesPresent; else if(facts[i].state==2) ++report.meshesAbsent;
-        const auto expected=history.Expected(uint32_t(i));expectations=expectations && facts[i].state==expected;
+        if(report.hierarchicalPilot)fixture->hierarchyObservedMeshState[i]=facts[i].state;
+        const auto expected=expectedMeshState(i);expectations=expectations && facts[i].state==expected;
         if(expected==1 && facts[i].state==1) ++report.observedExpectedPresentMeshes;
         if(expected==2 && facts[i].state==2) ++report.observedExpectedAbsentMeshes;
     }
@@ -10710,6 +10875,7 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
                 fixture->hierarchyPendingPageRequest=0;fixture->hierarchyPendingEpoch=0;
                 fixture->hierarchyPendingGeneration=0;
                 report.pageWorkState="HierarchyPageResident";
+                if(report.hierarchyReleaseCount&&report.hierarchyRefillCount!=UINT32_MAX)++report.hierarchyRefillCount;
                 if(report.pageCompleted!=UINT64_MAX)++report.pageCompleted;
             } else {report.pageWorkState="HierarchyPageFailed";valid=false;}
         }
@@ -10753,6 +10919,11 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
         report.fineEvictionPending=false;report.pageWorkState="Evicted";
         fixture->pageFineSlot=fixture->pageRefillSlot;fixture->pageFineFirst=0;
     }
+    if(valid&&expectations&&report.hierarchyRetirementPending) {
+        report.hierarchyRetirementPending=false;report.pageWorkState="HierarchyReleased";
+    }
+    if(valid&&expectations&&report.hierarchicalPilot)
+        fixture->hierarchyObservedGeneration=fixture->hierarchyGeneration;
     report.observedRequestId=request;
     // Inactive Ready preserves the original record-cut API; exact Absent counts
     // remain mandatory for caller cleanup proof. Active eviction never skips expectations.

@@ -16,6 +16,7 @@ mod grass;
 mod handles;
 mod log;
 mod main_camera_tuple;
+mod demand_view_snapshot;
 mod planar_mips;
 mod shaders;
 mod smoke_volume;
@@ -892,6 +893,8 @@ pub struct Renderer {
     last_upscaler: u32,
     // Exact startup opt-in only; OFF has no tuple allocation/copy.
     main_camera_tuple: Option<Box<main_camera_tuple::Tracker>>,
+    // Default OFF: bounded CPU tuple copies only for an explicitly enabled fixture.
+    demand_view_snapshot: Option<Box<demand_view_snapshot::Tracker>>,
     // MSAA sample count of the scene targets (1 = off). Fixed at startup (WGR_MSAA); pipelines
     // and offscreen targets are built against it.
     sample_count: u32,
@@ -2001,6 +2004,10 @@ impl Renderer {
                 std::env::var("WGR_GEOMETRY_PAGE_FIXTURE").ok().as_deref()==Some("1") &&
                 std::env::var("WGR_GEOMETRY_PAGE_SURFACE_CERTIFICATE").ok().as_deref()==Some("1"))
                 .then(|| Box::new(main_camera_tuple::Tracker::new())),
+            demand_view_snapshot: demand_view_snapshot::startup_enabled(
+                std::env::var("WGR_GEOMETRY_PAGE_DEMAND_VIEWS").ok().as_deref(),
+                std::env::var("WGR_GEOMETRY_PAGE_FIXTURE").ok().as_deref())
+                .then(|| Box::new(demand_view_snapshot::Tracker::new())),
             sample_count,
             tonemap,
             underwater_target: None,
@@ -4008,6 +4015,9 @@ impl Renderer {
             if let Some((token, _, _)) = main_count_request {
                 self.gfx3d.freeze_view_applicability(token, shadow, planar_active);
             }
+        }
+        if let Some(tracker)=self.demand_view_snapshot.as_mut() {
+            self.gfx3d.configure_demand_view_snapshot(tracker,shadow,planar_active,main_count_request);
         }
         // GPU-driven rendering (Stage 3): upload the retained scene + this frame's cull
         // params from the main scene camera (the terrain camera, else the first 3D draw's).
@@ -6556,6 +6566,12 @@ impl Renderer {
         self.gpu_timers
             .cpu_end(crate::gpu_timers::Region::WorkerHarvest);
         if let Some(facts) = call_timings { facts.complete(&self.gpu_timers); }
+        if let Some(tracker)=self.demand_view_snapshot.as_mut() {
+            tracker.capture_main(main_selection,cameras,self.hdr_size);
+            self.gfx3d.capture_demand_view_snapshot(tracker,shadow,
+                reflected_camera.map(|i|&prepared_cameras[i]),self.planar.as_ref().map(|p|p.size),
+                cameras.get(main_scene_cam));
+        }
         if let Some(tuple)=self.main_camera_tuple.as_mut(){tuple.complete();} // CPU returned frame, not GPU completion.
         Ok(main_count_submitted)
     }

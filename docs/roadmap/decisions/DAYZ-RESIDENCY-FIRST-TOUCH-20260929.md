@@ -434,3 +434,18 @@ source/upload witness after parent rows. Four focused mapped-PBO/bounds tests
 passed 455 assertions without skips with all required flags in a fresh process.
 The initial invocation skipped the multistage case due missing test flags;
 that artifact remains. Installed proxy verification is pending.
+
+Installed `a525fef8` route
+`dayz-proxy-source-sep29-disabled-20260929-234650` passed and shut down
+normally (890 frames, zero reported drops). Here Disabled describes the
+separate simulation-residency mode; physical/proxy preparation was enabled.
+Sixteen captured proxy P3Ds occupied1,059,350 source bytes; sixteen current
+raP captures yielded eight accepted PAA sources within the parent/proxy
+shared94,076,606 source bytes. Five proxy images reached source/mount/layout
+matched uploads totaling3,320,288 bytes. Parent uploads added96,468,544 bytes.
+The scan remained explicitly incomplete/speculative and overflowed candidate
+coverage. Tenement first-touch reads measured81.136 ms in this ordered run;
+that is a read subset, not total frame time or matched causal improvement.
+The extension stays OFF by default. The next performance target is bounded
+resumable owner registration: proxy GPU registration currently occurs inside
+the synchronous parent ShapeBank load, before ObjectCreate.
