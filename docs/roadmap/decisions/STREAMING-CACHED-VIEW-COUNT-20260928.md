@@ -36,3 +36,12 @@ local/interior/GI facts. The combined desktop build and installed WGPU
 startup passed with the subsequent exact `349b3410` source. The snapshot
 remains diagnostic; no all-view absence, pixel visibility, physical Fine
 reclaim, matched performance or GeometryPage default promotion follows.
+
+One installed original-source `-MainCountProbe` fixture on this build,
+`build/stream-residency/target-revision-aggregate-sep29-20260929-190456-ceba95`,
+exited normally but its *harness* failed: request token 1 and queue completion
+were logged, while the required main/cascade COUNT publication was absent in
+the bounded window. The private aggregate change does not feed the separate
+main fact logger. This route therefore offers no integrated COUNT-publication
+proof and does not establish a regression either. The same fixture had earlier
+intermittent publication under fixed captures; it was not blindly repeated.
