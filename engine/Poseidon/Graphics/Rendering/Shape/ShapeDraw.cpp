@@ -1059,10 +1059,37 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
     if (_bulkOptimizeDone && !CpuOnlyLoadActive())
     {
         const auto optimizeStart = ::Poseidon::Dev::Perf::Now();
-        // RFG-099: let the retained renderer own the mesh first (see Engine::WorldShapeLoaded).
-        if (_worldModelScope && GEngine)
-            GEngine->WorldShapeLoaded(shape);
-        OptimizeOneShape(shape);
+        // opt= in the cold-model row includes both retained registration (which
+        // may resolve many textures) and legacy vertex-buffer optimization.
+        // Split exactly one DayZ fixture only when explicitly requested; the
+        // ordinary path keeps its original two calls and clock count.
+        static const bool dayzSplit = [] {
+            const char* flag = std::getenv("WGR_OBJECT_STREAM_DAYZ_SHAPE_SPLIT");
+            return flag && std::strcmp(flag, "1") == 0;
+        }();
+        static bool dayzSplitLogged = false; // NewFromModel is main-thread-only.
+        if (dayzSplit && !dayzSplitLogged && timing &&
+            std::strcmp(lowName, R"(dz\structures\residential\tenements\tenement_small.p3d)") == 0)
+        {
+            const bool worldCalled = _worldModelScope && GEngine;
+            if (worldCalled)
+                GEngine->WorldShapeLoaded(shape);
+            const double worldRegisterMs = ::Poseidon::Dev::Perf::ElapsedMs(optimizeStart);
+            const auto legacyStart = ::Poseidon::Dev::Perf::Now();
+            OptimizeOneShape(shape);
+            const double legacyOptimizeMs = ::Poseidon::Dev::Perf::ElapsedMs(legacyStart);
+            dayzSplitLogged = true;
+            LOG_INFO(Graphics, "DayZ shape install split: model={} worldCalled={} worldRegisterMs={:.3f} legacyOptimizeMs={:.3f} totalOptimizeMs={:.3f}",
+                     lowName, worldCalled, worldRegisterMs, legacyOptimizeMs,
+                     ::Poseidon::Dev::Perf::ElapsedMs(optimizeStart));
+        }
+        else
+        {
+            // RFG-099: let the retained renderer own the mesh first.
+            if (_worldModelScope && GEngine)
+                GEngine->WorldShapeLoaded(shape);
+            OptimizeOneShape(shape);
+        }
         if (timing)
             timing->optimizeMs = ::Poseidon::Dev::Perf::ElapsedMs(optimizeStart);
     }

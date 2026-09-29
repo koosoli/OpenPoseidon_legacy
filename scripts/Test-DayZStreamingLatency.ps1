@@ -18,6 +18,7 @@ param(
     [switch]$RapBuildingPilot,
     [switch]$RapBuildingMultistage,
     [switch]$DayZTextureTrace,
+    [switch]$DayZShapeSplit,
     [switch]$HotSourceProofRetirement,
     [switch]$WeakCacheProof,
     [switch]$WarmTextureProvenance,
@@ -80,6 +81,7 @@ if (!$env:LOCK_OWNER) {
         if ($RapBuildingPilot) { $argv += '-RapBuildingPilot' }
         if ($RapBuildingMultistage) { $argv += '-RapBuildingMultistage' }
         if ($DayZTextureTrace) { $argv += '-DayZTextureTrace' }
+        if ($DayZShapeSplit) { $argv += '-DayZShapeSplit' }
         if ($HotSourceProofRetirement) { $argv += '-HotSourceProofRetirement' }
         if ($WeakCacheProof) { $argv += '-WeakCacheProof' }
         if ($WarmTextureProvenance) { $argv += '-WarmTextureProvenance' }
@@ -150,6 +152,7 @@ $environment = @{
     WGR_OBJECT_STREAM_RAP_BUILDING_PILOT = $(if ($RapBuildingPilot) { '1' } else { '0' })
     WGR_OBJECT_STREAM_RAP_BUILDING_MULTISTAGE = $(if ($RapBuildingMultistage) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_TEXTURE_TRACE = $(if ($DayZTextureTrace) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_DAYZ_SHAPE_SPLIT = $(if ($DayZShapeSplit) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WEAK_CACHE_PROOF = $(if ($WeakCacheProof) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WARM_TEXTURE_TRACE = $(if ($WarmTextureProvenance) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WARM_EARLY_SLICE = $(if ($WarmEarlySlice) { '1' } else { '0' })
@@ -208,6 +211,7 @@ try {
         rapBuildingPilot = [bool]$RapBuildingPilot
         rapBuildingMultistage = [bool]$RapBuildingMultistage
         dayZTextureTrace = [bool]$DayZTextureTrace
+        dayZShapeSplit = [bool]$DayZShapeSplit
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement
         weakCacheProof = [bool]$WeakCacheProof; warmTextureProvenance = [bool]$WarmTextureProvenance
         warmEarlySlice = [bool]$WarmEarlySlice
@@ -491,6 +495,12 @@ try {
         headers=@($textureTraceHeaders | ForEach-Object { $_.Line }); rows=@($textureTraceRows | ForEach-Object { $_.Line })
         scope='Top 16 observed source read costs per selected first-touch model, including proxies; not a material-slot role, GPU time, causal speedup or whole-world inventory'}
     $textureTraceProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'dayz-texture-first-touch-proof.json')
+    $shapeSplitRows = @(Select-String -LiteralPath $log -Pattern 'DayZ shape install split: model=dz\\structures\\residential\\tenements\\tenement_small\.p3d worldCalled=true worldRegisterMs=([0-9.]+) legacyOptimizeMs=([0-9.]+) totalOptimizeMs=([0-9.]+)')
+    $shapeSplitProven = !$DayZShapeSplit -or $shapeSplitRows.Count -eq 1
+    $shapeSplitProof = @{requested=[bool]$DayZShapeSplit; positive=[bool]$shapeSplitProven
+        rows=@($shapeSplitRows | ForEach-Object { $_.Line })
+        scope='One selected cold DayZ shape; separates WorldShapeLoaded from legacy OptimizeOneShape without changing either call. Neither split proves a removable cost or matched performance.'}
+    $shapeSplitProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'dayz-shape-install-split-proof.json')
     # Separate warm-preflight proof still uses its own bound-upload witness.
     # The physical building pilot above uses its explicit Init/mount/layout witness.
     $preflightRawRows = @(Select-String -LiteralPath $log -Pattern 'Warm material source preflight: source=')
@@ -693,7 +703,7 @@ try {
         rows=@($promotionRows | ForEach-Object {$_.Line});
         scope='Historical exact-member promotion witness; not a later Take, source match, upload, or complete 32-entry scan'}
     $promotionProven = !$WarmPublishedReuse -or $promotionRows.Count -gt 0
-    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven -and $buildingPilotProven -and $multiStageProven -and $textureTraceProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings; framePaceTrace = [bool]$FramePaceTrace
+    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven -and $buildingPilotProven -and $multiStageProven -and $textureTraceProven -and $shapeSplitProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings; framePaceTrace = [bool]$FramePaceTrace
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         renderCallCpuTimings = [bool]$TerrainPageTimings; renderCallCpuTimingProof = $callCpuProof
@@ -716,6 +726,8 @@ try {
         rapBuildingMultistageProof = $multiStageProof
         dayZTextureTrace = [bool]$DayZTextureTrace
         dayZTextureTraceProof = $textureTraceProof
+        dayZShapeSplit = [bool]$DayZShapeSplit
+        dayZShapeSplitProof = $shapeSplitProof
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload; warmMaterialStageFamilyProof = $warmStageFamilyProof
         coldPaaHandoff = [bool]$ColdPaaHandoff; requireColdAlphaPeek = [bool]$RequireColdAlphaPeek; coldPaaHandoffProof = $coldPaaProof
@@ -735,6 +747,7 @@ try {
     if (!$buildingPilotProven) { throw 'NotExercised: no same-stage building physical capture and validated upload; evidence retained' }
     if (!$multiStageProven) { throw 'NotExercised: no same-stage tenement multistage physical capture and validated upload; evidence retained' }
     if (!$textureTraceProven) { throw 'NotExercised: selected DayZ building texture trace incomplete; evidence retained' }
+    if (!$shapeSplitProven) { throw 'NotExercised: selected DayZ shape install split absent; evidence retained' }
     if (!$warmStageFamilyProven) { throw 'Required bound worker normal/specular filename-family upload not exercised; evidence retained, no material-slot proof claimed' }
 } catch {
     $screeningFailure = $_.Exception.Message
