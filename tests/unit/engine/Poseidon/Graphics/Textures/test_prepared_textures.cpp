@@ -769,6 +769,81 @@ TEST_CASE("Source-bound warm chains require explicit claims and retain cancellat
     CHECK(output.blocks == fixture.chain.blocks); CHECK(claimed == binding);
     store.Clear();
 }
+TEST_CASE("Physical-member chains require an exact initialized source and a live publication", "[physical-texture-store]")
+{
+    Foundation::CaptureMainThread();
+    auto& store = render::PreparedTextureStore::Instance();
+    if (!store.Enabled()) SKIP("Requires texture preparation");
+    AlphaArchiveFixture fixture;
+    if (!fixture.read.HasArchiveIdentity()) SKIP("Requires a physical archive identity");
+    BankReadMemberIdentity exact;
+    REQUIRE(fixture.read.CopyMemberIdentity(exact));
+    store.Clear();
+    const auto generation = store.Generation();
+    auto inventory = render::DdsPublicationInventory::Create(1); REQUIRE(inventory);
+    const render::DdsPublicationToken token{inventory, 0, inventory->Epoch(0)};
+    auto publish = [&](uint64_t gen, const render::DdsPublicationToken* claim) {
+        auto chain = fixture.chain;
+        return store.Put("physical-member", std::move(chain), gen, nullptr, claim, nullptr, &fixture.read);
+    };
+
+    CHECK_FALSE(publish(generation, nullptr));
+    CHECK_FALSE(publish(generation + 1, &token));
+    store.MarkUploaded("physical-member");
+    REQUIRE(publish(generation, &token)); // Exact claimed work may bypass an old uploaded mark.
+    CHECK(store.SnapshotStats().physicalPuts > 0);
+    CHECK(store.SnapshotStats().bytes >= fixture.chain.blocks.capacity() + sizeof(BankReadRequest));
+    PAABlockChain out;
+    BankReadRequest source;
+    const auto refusedBefore = store.SnapshotStats().physicalSourceRefused;
+    CHECK_FALSE(store.Take("physical-member", out));
+    CHECK_FALSE(out.valid());
+    CHECK(store.SnapshotStats().physicalSourceRefused == refusedBefore + 1);
+    REQUIRE(publish(generation, &token));
+    auto wrong = exact; ++wrong.offset;
+    CHECK_FALSE(store.TakePhysical("physical-member", wrong, out, source));
+    CHECK_FALSE(out.valid()); CHECK_FALSE(source.HasArchiveIdentity());
+    CHECK(store.SnapshotStats().physicalSourceRefused == refusedBefore + 2);
+    REQUIRE(publish(generation, &token));
+    REQUIRE(store.TakePhysical("physical-member", exact, out, source));
+    CHECK(out.blocks == fixture.chain.blocks);
+    CHECK(source.SameArchiveMember(fixture.read));
+    CHECK(store.SnapshotStats().physicalTakes > 0);
+    CHECK(store.SnapshotStats().bytes == 0);
+
+    REQUIRE(publish(generation, &token));
+    inventory->CancelModel(0);
+    CHECK_FALSE(store.TakePhysical("physical-member", exact, out, source));
+    CHECK_FALSE(out.valid()); CHECK_FALSE(source.HasArchiveIdentity());
+    CHECK(store.SnapshotStats().bytes == 0);
+    CHECK_FALSE(publish(generation, &token));
+    const render::DdsPublicationToken replacement{inventory, 0, inventory->Epoch(0)};
+    REQUIRE(publish(generation, &replacement));
+    store.Clear();
+    CHECK(store.SnapshotStats().bytes == 0);
+    CHECK_FALSE(publish(generation, &replacement));
+    REQUIRE(publish(store.Generation(), &replacement));
+    REQUIRE(store.TakePhysical("physical-member", exact, out, source));
+    store.Clear();
+}
+
+TEST_CASE("Physical-member claim leaves ordinary chains to their ordinary consumer", "[physical-texture-store]")
+{
+    auto& store = render::PreparedTextureStore::Instance();
+    if (!store.Enabled()) SKIP("Requires texture preparation");
+    store.Clear();
+    auto bytes = TinyDxt1Paa();
+    PAABlockChain chain;
+    REQUIRE(ReadPAABlockChainBuffer(bytes.data(), bytes.size(), chain));
+    REQUIRE(store.Put("ordinary-chain", std::move(chain)));
+    BankReadMemberIdentity unknown;
+    BankReadRequest source;
+    PAABlockChain out;
+    CHECK_FALSE(store.TakePhysical("ordinary-chain", unknown, out, source));
+    REQUIRE(store.Take("ordinary-chain", out));
+    CHECK(out.valid());
+    store.Clear();
+}
 TEST_CASE("Actual source-bound store retires the matching warm token by cause", "[warm-provenance-store]")
 {
     Foundation::CaptureMainThread();

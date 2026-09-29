@@ -1224,6 +1224,21 @@ bool CaptureWarmTextureSourceBinding()
     }();
     return enabled;
 }
+bool CaptureBuildingPilotMemberIdentity()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_RAP_BUILDING_PILOT");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    return enabled;
+}
+bool IsBuildingPilotNormal(const char* prefix, const char* member)
+{
+    using namespace PatnikArchiveReason;
+    return MatchesJoined(R"(dz\structures\data\plaster\plaster_flats01_nohq.paa)", prefix, member) ||
+        MatchesJoined(R"(dz\structures\data\concrete\concrete_bare4_nohq.paa)", prefix, member) ||
+        MatchesJoined(R"(dz\structures\data\plaster\police_station_wall_nohq.paa)", prefix, member);
+}
 thread_local unsigned ModelReadDepth = 0; // numeric owner-purpose nesting only; no retained resources
 thread_local unsigned MaterialPreflightDepth = 0; // owner-only nested stage intent; no names or resources
 struct ArchiveBindingState
@@ -1434,6 +1449,24 @@ bool QFBank::MatchesMountedMember(const char* member, const BankReadRequest& ini
 
 namespace
 {
+// This wrapper certifies only the mapped bytes selected by this QFBank::Read.
+// It holds no archive lease or binding-budget slot. Consumers must compare the
+// copied birth identity with their own captured request and the current mount.
+class ArchiveMemberIdentityFileBuffer final : public IFileBuffer
+{
+    Ref<IFileBuffer> _buffer;
+    BankReadMemberIdentity _identity;
+public:
+    ArchiveMemberIdentityFileBuffer(Ref<IFileBuffer> buffer, BankReadMemberIdentity identity)
+        : _buffer(buffer), _identity(identity) {}
+    bool GetError() const override { return _buffer->GetError(); }
+    const char* GetData() const override { return _buffer->GetData(); }
+    int GetSize() const override { return _buffer->GetSize(); }
+    bool IsFromBank(QFBank* bank) const override { return _buffer->IsFromBank(bank); }
+    bool IsReady() const override { return _buffer->IsReady(); }
+    bool CopyArchiveMemberIdentity(BankReadMemberIdentity& out) const override
+    { out = _identity; return true; }
+};
 // One cell per opted-in wrapper, bounded separately from live immutable native
 // leases. Charge survives weak binding/control-block retention. Members destroy
 // weak and strong aliases BEFORE releasing their conservative metadata ticket.
@@ -1474,6 +1507,8 @@ public:
     bool IsFromBank(QFBank* bank) const override { return _buffer->IsFromBank(bank); }
     bool IsReady() const override { return _buffer->IsReady(); }
     std::shared_ptr<const ArchiveSourceBinding> GetArchiveSourceBinding() const override { return _proof->Get(); }
+    bool CopyArchiveMemberIdentity(BankReadMemberIdentity& out) const override
+    { return _buffer->CopyArchiveMemberIdentity(out); }
     bool CompleteArchiveSourceInit(const std::shared_ptr<const ArchiveSourceBinding>& initialized) override
     { return _proof->Complete(initialized); }
 };
@@ -1490,6 +1525,8 @@ public:
     bool IsFromBank(QFBank* bank) const override { return _buffer->IsFromBank(bank); }
     bool IsReady() const override { return _buffer->IsReady(); }
     std::shared_ptr<const ArchiveSourceBinding> GetArchiveSourceBinding() const override { return _binding; }
+    bool CopyArchiveMemberIdentity(BankReadMemberIdentity& out) const override
+    { return _buffer->CopyArchiveMemberIdentity(out); }
 };
 }
 
@@ -1641,6 +1678,25 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
         }
         auto bind = [&](Ref<IFileBuffer> buffer) -> Ref<IFileBuffer>
         {
+            if (CaptureBuildingPilotMemberIdentity() && Foundation::IsMainThread() && _fileAccess &&
+                buffer && !buffer->GetError() && buffer->GetSize() == info.length &&
+                IsBuildingPilotNormal((const char*)GetPrefix(), name))
+            {
+                try
+                {
+                    BankReadMemberIdentity identity;
+                    bool exact = binding && binding->Request().CopyMemberIdentity(identity);
+                    if (!exact)
+                    {
+                        auto request = CaptureReadRequest(name, true);
+                        exact = request && request->offset == static_cast<uint64_t>(info.startOffset) &&
+                            request->bytes == static_cast<uint64_t>(info.length) &&
+                            request->CopyMemberIdentity(identity);
+                    }
+                    if (exact) buffer = new ArchiveMemberIdentityFileBuffer(buffer, identity);
+                }
+                catch (...) { } // Optional proof must never change the original read.
+            }
             if (!binding || !buffer || buffer->GetError() || buffer->GetSize() != info.length)
             {
                 reason(!buffer || buffer->GetError() || buffer->GetSize() != info.length ?

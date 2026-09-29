@@ -18,6 +18,7 @@
 
 namespace Poseidon
 {
+struct BankReadMemberIdentity;
 class MemoryHeap: public Poseidon::Foundation::Heap<byte *,int>
 {
 	#if DO_FILLS
@@ -251,6 +252,9 @@ class ITextureSource
 	// Appended: evidence from the exact buffer used by successful Init. Unknown
 	// for cached unwrapped/loose/transformed sources; never recaptured by name.
 	virtual std::shared_ptr<const ArchiveSourceBinding> GetArchiveSourceBinding() const { return {}; }
+	// Copied only after successful Init from the exact parsed PBO buffer.
+	// Consumers must also verify the current mount before using prepared data.
+	virtual bool CopyArchiveMemberIdentity(BankReadMemberIdentity&) const { return false; }
 
 	// Appended owner-only optional retirement of this source's Init evidence.
 	// Does not change headers/pixels/reads; copied aliases keep their own debt.

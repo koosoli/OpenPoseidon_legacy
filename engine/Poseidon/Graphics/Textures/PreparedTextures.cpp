@@ -42,6 +42,7 @@ struct PreparedTextureStore::Impl
         DdsPublicationToken publication;
         std::unique_ptr<PreparedAlphaFacts> alphaFacts;
         std::shared_ptr<const ArchiveSourceBinding> warmSource;
+        std::optional<BankReadRequest> physicalSource;
     };
     static size_t AddCharge(size_t a, size_t b)
     { return b > std::numeric_limits<size_t>::max() - a ? std::numeric_limits<size_t>::max() : a + b; }
@@ -52,8 +53,15 @@ struct PreparedTextureStore::Impl
         return AddCharge(chain.blocks.capacity(), chain.levels.capacity() * sizeof(PAABlockLevel));
     }
     static size_t EntryBytes(const Entry& entry)
-    { return AddCharge(ChainBytes(entry.chain) + entry.image.rgba.capacity() + (entry.dds ? entry.dds->bytes : 0) + entry.preparedDdsBytes + AlphaFactsBytes(entry.alphaFacts.get()),
-                      entry.warmSource ? entry.warmSource->KnownCppBytes() : 0); }
+    {
+        size_t bytes = AddCharge(ChainBytes(entry.chain) + entry.image.rgba.capacity() +
+            (entry.dds ? entry.dds->bytes : 0) + entry.preparedDdsBytes + AlphaFactsBytes(entry.alphaFacts.get()),
+            entry.warmSource ? entry.warmSource->KnownCppBytes() : 0);
+        if (entry.physicalSource)
+            bytes = AddCharge(bytes, AddCharge(sizeof(BankReadRequest) + 1 + 64 +
+                entry.physicalSource->archive.capacity(), entry.physicalSource->ArchiveIdentityBytes()));
+        return bytes;
+    }
     static size_t AlphaFactsBytes(const PreparedAlphaFacts* facts)
     {
         // Known C++ capacities plus a conservative shared_ptr control-block
@@ -84,7 +92,8 @@ struct PreparedTextureStore::Impl
 
     void EraseLocked(std::unordered_map<std::string, std::list<Entry>::iterator>::iterator it, PAABlockChain* takeInto,
                      DecodedImage* takeImageInto = nullptr, std::list<Entry>* retired = nullptr,
-                     Streaming::WarmTextureProvenance::RetireReason reason = Streaming::WarmTextureProvenance::RetireReason::Other)
+                     Streaming::WarmTextureProvenance::RetireReason reason = Streaming::WarmTextureProvenance::RetireReason::Other,
+                     BankReadRequest* takePhysicalInto = nullptr)
     {
         std::list<Entry>::iterator node = it->second;
         if (node->warmSource)
@@ -97,6 +106,8 @@ struct PreparedTextureStore::Impl
         if (cancellationCursor == node) ++cancellationCursor;
         if (node->publication.inventory) --tokenEntries;
         bytes -= EntryBytes(*node);
+        if (takePhysicalInto && node->physicalSource)
+            *takePhysicalInto = std::move(*node->physicalSource);
         if (node->dds)
             stats.ddsReuseBytes -= node->dds->bytes;
         if (takeInto)
@@ -395,12 +406,16 @@ void PreparedTextureStore::NoteAlphaFactsCancelled()
 bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
                                std::optional<uint64_t> generation, std::unique_ptr<PreparedAlphaFacts> alphaFacts,
                                const DdsPublicationToken* publication,
-                               std::shared_ptr<const ArchiveSourceBinding> warmSource)
+                               std::shared_ptr<const ArchiveSourceBinding> warmSource,
+                               const BankReadRequest* physicalSource)
 {
     if (!Enabled() || key.empty() || !chain.valid())
         return false;
     if (warmSource && (!generation || !publication || !publication->Valid() ||
         !warmSource->Request().HasArchiveIdentity() || warmSource->Request().bytes > 16 * 1024 * 1024))
+        return false;
+    if (physicalSource && (warmSource || !generation || !publication || !publication->Valid() ||
+        !physicalSource->HasArchiveIdentity() || physicalSource->bytes > 16 * 1024 * 1024))
         return false;
     if (alphaFacts && (!generation || alphaFacts->pairedBlocks != chain.blocks.data() || !alphaFacts->source.HasArchiveIdentity() ||
         alphaFacts->magic != chain.magic || alphaFacts->width != chain.width || alphaFacts->height != chain.height ||
@@ -412,7 +427,9 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
     pending.emplace_back(Impl::Entry{key, std::move(chain), DecodedImage{}, Impl::Clock::now()});
     pending.back().alphaFacts = std::move(alphaFacts);
     pending.back().warmSource = std::move(warmSource);
+    if (physicalSource) pending.back().physicalSource = *physicalSource;
     const bool boundWarm = bool(pending.back().warmSource);
+    const bool physical = bool(pending.back().physicalSource);
     auto* trace = Streaming::WarmTextureProvenance::Active();
     const auto traceToken = trace && boundWarm ? Streaming::WarmTextureProvenance::Match(key, pending.back().warmSource) : 0;
     if (publication) pending.back().publication = *publication;
@@ -440,7 +457,7 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
         {
             ++_impl->stats.rejectedStale;
         }
-        else if (!pending.back().warmSource && _impl->uploaded.count(key))
+        else if (!pending.back().warmSource && !pending.back().physicalSource && _impl->uploaded.count(key))
         {
             ++_impl->stats.skippedUploaded;
         }
@@ -463,6 +480,7 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain,
             _impl->bytes += retained;
             ++_impl->stats.puts;
             if (boundWarm) ++_impl->stats.warmPuts;
+            if (physical) ++_impl->stats.physicalPuts;
             _impl->stats.putBytes += size;
             _impl->stats.entries = _impl->byKey.size();
             _impl->stats.bytes = _impl->bytes;
@@ -591,9 +609,59 @@ bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out,
         trace.event = Proof::Event::StoreTakeWarm;
         ++_impl->stats.warmTakes;
     }
+    if (it->second->physicalSource)
+    {
+        // A key-only or old warm-source consumer has no access to the physical
+        // identity checked against the initialized PAA header. Retire rather
+        // than leave a same-key chain available for a later unsafe claim.
+        trace.event = Proof::Event::Count;
+        ++_impl->stats.physicalSourceRefused;
+        _impl->EraseLocked(it, nullptr, nullptr, &retired);
+        ++_impl->stats.misses;
+        return false;
+    }
     if (!it->second->warmSource) trace.event = Proof::Event::Count; // successful non-warm take is not a warm miss
     _impl->EraseLocked(it, &out, nullptr, &retired, Streaming::WarmTextureProvenance::RetireReason::Consumed);
     ++_impl->stats.takes;
+    _impl->stats.takeBytes += out.blocks.size();
+    return true;
+}
+
+bool PreparedTextureStore::TakePhysical(const std::string& key,
+    const BankReadMemberIdentity& initializedMember, PAABlockChain& out, BankReadRequest& source)
+{
+    out = PAABlockChain{};
+    source = BankReadRequest{};
+    if (!Enabled() || key.empty()) return false;
+    std::list<Impl::Entry> retired;
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    const auto it = _impl->byKey.find(key);
+    if (it == _impl->byKey.end() || !it->second->chain.valid() || !it->second->physicalSource)
+    {
+        ++_impl->stats.misses;
+        return false;
+    }
+    if (it->second->publication.inventory && !it->second->publication.Valid())
+    {
+        _impl->CountCancelled(*it->second);
+        _impl->EraseLocked(it, nullptr, nullptr, &retired,
+            Streaming::WarmTextureProvenance::RetireReason::Cancelled);
+        ++_impl->stats.misses;
+        return false;
+    }
+    BankReadMemberIdentity retainedMember;
+    if (!it->second->physicalSource->CopyMemberIdentity(retainedMember) ||
+        !(retainedMember == initializedMember))
+    {
+        ++_impl->stats.physicalSourceRefused;
+        _impl->EraseLocked(it, nullptr, nullptr, &retired);
+        ++_impl->stats.misses;
+        return false;
+    }
+    _impl->EraseLocked(it, &out, nullptr, &retired,
+        Streaming::WarmTextureProvenance::RetireReason::Consumed, &source);
+    ++_impl->stats.takes;
+    ++_impl->stats.physicalTakes;
     _impl->stats.takeBytes += out.blocks.size();
     return true;
 }

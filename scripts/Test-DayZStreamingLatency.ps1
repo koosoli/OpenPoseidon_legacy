@@ -319,7 +319,9 @@ try {
         $returned.camera.warmPreparedTakes -ge 1 -and $returned.camera.warmPreparedUploads -ge 1 -and
         $returned.camera.warmPreparedUploadBytes -ge 1
     # The building pilot uses the conversion worker, not the separate warm-job queue.
-    $warmJobsProven = !$WarmTextureJobs -or ($warmStoreProven -and ($RapBuildingPilot -or $warmQueueProven))
+    # The building pilot publishes through the conversion job, with its own
+    # exact physical-member upload witness below. It need not run the warm queue.
+    $warmJobsProven = !$WarmTextureJobs -or $RapBuildingPilot -or ($warmStoreProven -and $warmQueueProven)
     $archiveBindings = Send @{cmd = 'archive_source_bindings'}
     if ($archiveBindings.enabled -ne [bool]$ArchiveSourceBindings -or
         $archiveBindings.liveBindings -gt $archiveBindings.capBindings -or
@@ -445,16 +447,20 @@ try {
         truncated = [bool](Select-String -LiteralPath $log -Pattern 'Warm prepared upload witness truncated:' -Quiet)
         scope = 'Successful source-validated bound worker upload of normal/specular filename family only; not shader slot role, visual quality, whole-model readiness or performance acceptance' }
     $warmStageFamilyProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'warm-material-stage-family-proof.json')
-    $buildingCaptureRows = @(Select-String -LiteralPath $log -Pattern 'RVMAT raP building owner capture: modelIndex=\d+ model=(.*?) stage=(.*?) sourceBound=true')
+    $buildingCaptureRows = @(Select-String -LiteralPath $log -Pattern 'RVMAT raP building owner capture: modelIndex=\d+ model=(.*?) stage=(.*?) physicalMemberCaptured=true')
     $buildingCaptureStages = @($buildingCaptureRows | ForEach-Object { $_.Matches[0].Groups[2].Value.ToLowerInvariant() })
-    $buildingUploads = @($warmUploadObservations | Where-Object { $_.source.ToLowerInvariant() -in $buildingCaptureStages })
+    $buildingUploadRows = @(Select-String -LiteralPath $log -Pattern 'RVMAT raP physical upload: source=(.*?) bytes=(\d+) memberBytes=(\d+) initMemberMatched=true currentMountMatched=true layoutMatched=true blockUploadSucceeded=true row=(\d+) limit=3')
+    $buildingUploads = @($buildingUploadRows | ForEach-Object {
+        $g = $_.Matches[0].Groups
+        [pscustomobject]@{source=[string]$g[1].Value;bytes=[uint64]$g[2].Value;memberBytes=[uint64]$g[3].Value;row=[uint64]$g[4].Value}
+    } | Where-Object { $_.source.ToLowerInvariant() -in $buildingCaptureStages -and $_.bytes -gt 0 -and $_.memberBytes -gt 0 -and $_.row -le 3 })
     $buildingPilotProven = !$RapBuildingPilot -or ($buildingCaptureStages.Count -gt 0 -and $buildingUploads.Count -gt 0)
     $buildingPilotProof = @{requested=[bool]$RapBuildingPilot; positive=[bool]($buildingUploads.Count -gt 0)
         capturedStages=$buildingCaptureStages; uploads=$buildingUploads
-        scope='Same named stage has an owner-bound current source and a later source-validated GPU upload; does not prove every building stage/proxy, pixel parity, or latency improvement'}
+        scope='Same named stage has an owner-captured physical PBO member and a later Init-member/current-mount/layout-validated GPU upload; does not prove every building stage/proxy, pixel parity, or latency improvement'}
     $buildingPilotProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'rap-building-pilot-proof.json')
-    # The captured-stage source must also appear in the existing successful bound upload witness.
-    # This is a same-source join, not a proof of shader slot usage, pixels or causal performance.
+    # Separate warm-preflight proof still uses its own bound-upload witness.
+    # The physical building pilot above uses its explicit Init/mount/layout witness.
     $preflightRawRows = @(Select-String -LiteralPath $log -Pattern 'Warm material source preflight: source=')
     $preflightRows = @(Select-String -LiteralPath $log -Pattern 'Warm material source preflight: source=(.*?) attemptedLoad=true textureReturned=(true|false) threw=(true|false) textureUsable=(true|false) currentSource=(true|false) rejection=(NotInspected|VisitCap|NoWgpuTexture|SourceNotInitialized|NoUsableMips|AlreadyGpuResident|UploadAlreadyTried|NonReloadable|NoInitializedBinding|NoMountedMatch|Oversize|InvalidKey|DuplicateKey|Accepted|Exception) statsComparable=(true|false) globalCaptureRefusedDelta=(\d+) globalCapacityRefusedDelta=(\d+) globalAllocationRefusedDelta=(\d+) boundReadAccepted=(true|false) sourceMs=([0-9.]+) remainingAttempts=(\d+) metadataWorkLeft=(\d+) row=(\d+) limit=64')
     $preflightObservations = @($preflightRows | ForEach-Object {
@@ -690,7 +696,7 @@ try {
     if (!$promotionProven) { throw 'NotExercised: no published warm entry promoted before model cancellation; evidence retained' }
     if (!$warmPreflightProven) { throw 'NotExercised: no same-source initialized-stage preflight and successful bound worker stage upload; evidence retained' }
     if (!$warmJobsProven) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
-    if (!$buildingPilotProven) { throw 'NotExercised: no same-stage building source capture and successful bound upload; evidence retained' }
+    if (!$buildingPilotProven) { throw 'NotExercised: no same-stage building physical capture and validated upload; evidence retained' }
     if (!$warmStageFamilyProven) { throw 'Required bound worker normal/specular filename-family upload not exercised; evidence retained, no material-slot proof claimed' }
 } catch {
     $screeningFailure = $_.Exception.Message

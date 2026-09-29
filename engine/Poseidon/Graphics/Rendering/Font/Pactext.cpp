@@ -2043,6 +2043,8 @@ class TextureSourcePac : public ITextureSource
     bool _isPaa;
     RStringB _name;
     std::shared_ptr<const ArchiveSourceBinding> _archiveSourceBinding;
+    BankReadMemberIdentity _archiveMemberIdentity{};
+    bool _hasArchiveMemberIdentity = false;
 
   public:
     TextureSourcePac();
@@ -2062,6 +2064,12 @@ class TextureSourcePac : public ITextureSource
     void ForceAlpha() override { _pal._isAlpha = true; }
     std::shared_ptr<const ArchiveSourceBinding> GetArchiveSourceBinding() const override
     { return _archiveSourceBinding; }
+    bool CopyArchiveMemberIdentity(BankReadMemberIdentity& out) const override
+    {
+        if (!_hasArchiveMemberIdentity) return false;
+        out = _archiveMemberIdentity;
+        return true;
+    }
     bool ReleaseArchiveSourceBinding() override
     {
         if (!Foundation::IsMainThread() || !_archiveSourceBinding) return false;
@@ -2110,6 +2118,7 @@ static PacFormat BasicFormat(const char* name)
 bool TextureSourcePac::Init(const char* name, PacLevelMem* mips, int maxMips)
 {
     _archiveSourceBinding.reset();
+    _hasArchiveMemberIdentity = false;
     _name = name;
     QIFStream in;
     GFileServer->Open(in, name);
@@ -2204,6 +2213,15 @@ bool TextureSourcePac::Init(const char* name, PacLevelMem* mips, int maxMips)
         }
     }
     _mipmaps = i;
+
+    // The identity belongs to this exact successfully parsed Init buffer. A
+    // cache hit may preserve an older birth identity, never a fresh path claim.
+    static const bool retainMemberIdentity = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_RAP_BUILDING_PILOT");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    if (retainMemberIdentity && _isPaa && _mipmaps > 0 && in.GetBuffer())
+        _hasArchiveMemberIdentity = in.GetBuffer()->CopyArchiveMemberIdentity(_archiveMemberIdentity);
 
     // The shared binding contains metadata/lease only, not the Init read buffer.
     // Old cache entries remain unsupported, even when a fresh bank name resolves.

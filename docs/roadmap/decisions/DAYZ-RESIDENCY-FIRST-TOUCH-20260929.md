@@ -139,3 +139,42 @@ establish a performance gain or no-regression. This path covers one shared
 tree stage, while the `city_school`, `village_policestation` and
 `tenement_small` first-touch stalls remain unsolved. Keep the feature off by
 default; `performanceAccepted=false` and `defaultReady=false`.
+
+## Two-phase building raP pilot: runtime source-binding gate not exercised
+
+Commit `e6a0f501` adds a separate default-off pilot for one authored Multi
+NormalMap in each of `tenement_small`, `city_school` and
+`village_policestation`. The worker parses one exact physically captured raP
+before conversion; an intermediate `RapCapture` state lets the owner recheck
+the currently mounted material and capture the PAA source; then the worker
+resumes conversion. Refusal, stale work, reset and failed queueing retain the
+ordinary complete-model fallback. Other material layers and proxy models are
+uncovered. A review removed a process-lifetime two-attempt callback cap that
+would have prevented the third candidate even when source-binding capacity
+became available. Synthetic mapped-PBO tests passed 79 assertions across
+successful preparation, refusal, stale cancellation and reset; the tree test
+still passed 19. The paired build and installed WGPU startup passed.
+
+`Test-DayZStreamingLatency.ps1 -RapBuildingPilot` sets the exact warm/source
+options and requires a same-named building source capture and source-validated
+GPU upload. The installed `e6a0f501` route
+`build/stream-residency/rap-buildings-on-sep29-disabled-20260929-163310`
+ended the game normally with 912 frames, zero dropped samples and full
+19,923/19,923 returned residency, but the harness correctly reported
+`passed=false`: all three worker raP candidates were found, all three owner
+captures logged `sourceBound=false`, and no building prepared texture was
+taken/uploaded. The sole warm worker Put was from another stage and was never
+taken. Final archive-source inventory was 256/256 live bindings with 4,612
+cumulative capacity refusals. Those global totals do not prove the exact
+refusal reason for each of the three captures; earlier local DayZ probes have
+already shown exhausted material-preflight binding reservations. First-touch
+rows here were 516.2 ms/81 uploads for tenement, 940.7 ms/118 for school and
+283.0 ms/43 for police. They are not a matched performance comparison.
+
+Do not promote or infer a building-performance benefit. The next source seam
+should examine whether an immutable physical PBO member can be prepared on a
+worker and validated against the current mount at Take/upload without
+retaining one of the scarce initialized texture bindings. Preserve exact
+identity and complete ordinary admission; do not raise the binding cap on
+these aggregate counts alone. All related flags remain off by default;
+`performanceAccepted=false`, `defaultReady=false`.

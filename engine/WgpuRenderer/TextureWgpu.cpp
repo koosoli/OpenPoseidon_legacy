@@ -1893,6 +1893,8 @@ uint64_t TextureWgpu::EnsureUploaded()
         bool fromPrepared = false;
         bool fromColdHandoff = false;
         std::shared_ptr<const ArchiveSourceBinding> warmPreparedSource;
+        BankReadRequest physicalPreparedSource;
+        bool physicalPrepared = false;
         if (render::ColdPaaHandoffEnabled() || render::PreparedTextureStore::Enabled())
         {
             PAABlockChain prepared;
@@ -1911,8 +1913,23 @@ uint64_t TextureWgpu::EnsureUploaded()
                     Streaming::WarmTextureProvenance::Event::OwnerExactAttempt :
                     Streaming::WarmTextureProvenance::Event::OwnerKeyOnlyAttempt));
             }
-            const bool taken = fromColdHandoff || (render::PreparedTextureStore::Enabled() &&
-                render::PreparedTextureStore::Instance().Take(key, prepared, &warmPreparedSource));
+            static const bool physicalBuildingPilot = [] {
+                const char* value = std::getenv("WGR_OBJECT_STREAM_RAP_BUILDING_PILOT");
+                return value && std::strcmp(value, "1") == 0;
+            }();
+            if (!fromColdHandoff && physicalBuildingPilot && _src &&
+                (key == R"(dz\structures\data\plaster\plaster_flats01_nohq.paa)" ||
+                 key == R"(dz\structures\data\concrete\concrete_bare4_nohq.paa)" ||
+                 key == R"(dz\structures\data\plaster\police_station_wall_nohq.paa)"))
+            {
+                BankReadMemberIdentity initializedMember;
+                if (_src->CopyArchiveMemberIdentity(initializedMember))
+                    physicalPrepared = render::PreparedTextureStore::Instance().TakePhysical(
+                        key, initializedMember, prepared, physicalPreparedSource);
+            }
+            const bool taken = fromColdHandoff || physicalPrepared ||
+                (render::PreparedTextureStore::Enabled() &&
+                 render::PreparedTextureStore::Instance().Take(key, prepared, &warmPreparedSource));
             if (terrainTiming.enabled)
             {
                 terrainTiming.preparedTakeMs += (NowUs() - takeBegan) / 1000.0;
@@ -1924,6 +1941,16 @@ uint64_t TextureWgpu::EnsureUploaded()
                 bool matches = preparedFormat == dst &&
                                prepared.levels.size() >= static_cast<size_t>(firstLevel + levelCount);
                 bool sourceRefusedForTrace = false;
+                if (matches && physicalPrepared)
+                {
+                    const char* name = SourceName();
+                    QFBank* bank = name ? QIFStreamB::AutoBank(name) : nullptr;
+                    const size_t length = name ? std::strlen(name) : 0;
+                    const size_t prefix = bank ? static_cast<size_t>(bank->GetPrefix().GetLength()) : length;
+                    matches = bank && prefix < length &&
+                        bank->MatchesMountedMember(name + prefix, physicalPreparedSource);
+                    sourceRefusedForTrace = !matches;
+                }
                 if (matches && warmPreparedSource)
                 {
                     const auto currentSource = CurrentArchiveSourceBinding();
@@ -2134,6 +2161,16 @@ uint64_t TextureWgpu::EnsureUploaded()
                     ++rows;
                     LOG_INFO(Graphics, "Warm prepared upload witness truncated: limit=64; observed prefix only, no material-slot or whole-model proof");
                 }
+            }
+        }
+        if (physicalPrepared && fromPrepared && _gpuHandle && Foundation::IsMainThread())
+        {
+            static unsigned rows = 0; // owner only; exact opt-in fixture
+            if (rows < 3)
+            {
+                ++rows;
+                LOG_INFO(Graphics, "RVMAT raP physical upload: source={} bytes={} memberBytes={} initMemberMatched=true currentMountMatched=true layoutMatched=true blockUploadSucceeded=true row={} limit=3",
+                    SourceName(), total, physicalPreparedSource.bytes, rows);
             }
         }
     }

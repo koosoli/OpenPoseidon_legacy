@@ -89,6 +89,7 @@ class PreparedTextureStore
         uint64_t skippedUploaded = 0; // ShouldPrepare said no: main thread already uploaded it
         uint64_t uploadedMarks = 0; // names currently marked Uploaded
         uint64_t warmPuts = 0, warmTakes = 0, warmSourceRefused = 0;
+        uint64_t physicalPuts = 0, physicalTakes = 0, physicalSourceRefused = 0;
         uint64_t warmUploads = 0, warmUploadBytes = 0, warmUploadFailed = 0;
         // The RGBA8 side (non-DXT PAAs -- the Reforger mask population): whole-file
         // decodes done on a worker so the main thread's fallback path uploads instead
@@ -139,7 +140,8 @@ class PreparedTextureStore
              std::optional<uint64_t> generation = std::nullopt,
              std::unique_ptr<PreparedAlphaFacts> alphaFacts = nullptr,
              const DdsPublicationToken* publication = nullptr,
-             std::shared_ptr<const ArchiveSourceBinding> warmSource = nullptr);
+             std::shared_ptr<const ArchiveSourceBinding> warmSource = nullptr,
+             const BankReadRequest* physicalSource = nullptr);
     // Worker-only pure analysis, <=16 MiB aggregate chain and transient plane.
     // Cancellation is checked between decode/histogram/shape/publication; the
     // callback must own its context until return. Caller supplies the unchanged
@@ -164,6 +166,13 @@ class PreparedTextureStore
     // caller cannot silently consume one without receiving its source witness.
     bool Take(const std::string& key, PAABlockChain& out,
               std::shared_ptr<const ArchiveSourceBinding>* warmSource = nullptr);
+    // Exact physical-member hand-off for the optional raP building pilot. The
+    // initialized PAA source supplies its copied numeric member identity; a
+    // matching claim transfers both chain and retained worker read request.
+    // The caller must still verify the current mount against source before
+    // upload. Ordinary Take cannot consume an entry with this witness.
+    bool TakePhysical(const std::string& key, const BankReadMemberIdentity& initializedMember,
+                      PAABlockChain& out, BankReadRequest& source);
     // Read-only diagnostic. Copies scalars while holding the existing store mutex;
     // no TTL sweep, Take, lease retention, publication or upload side effect.
     struct WarmEntryProbe

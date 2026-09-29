@@ -99,8 +99,10 @@ struct Archives
                 for (int value : {0, 0, 0, 0, size}) out.write(reinterpret_cast<const char*>(&value), 4);
             };
             entry("texture.paa", int(data.size())); entry("notes.bin", int(data.size()));
+            entry("plaster_flats01_nohq.paa", int(data.size()));
             entry(LongMember().c_str(), int(data.size())); entry("bad.paa", 0); entry("malformed.paa", 8); entry("", 0);
-            out.write(data.data(), data.size()); out.write(data.data(), data.size()); out.write(data.data(), data.size());
+            out.write(data.data(), data.size()); out.write(data.data(), data.size());
+            out.write(data.data(), data.size()); out.write(data.data(), data.size());
             const char malformed[8] = {char(0x05), char(0xff), char(1), char(1), 0, 0, 0, 0};
             out.write(malformed, sizeof(malformed));
         }
@@ -143,6 +145,68 @@ std::unique_ptr<ITextureSource> CreateSource(const char* name)
     auto* factory = SelectTextureSourceFactory(name); REQUIRE(factory);
     return std::unique_ptr<ITextureSource>(factory->Create(name, mips.data(), int(mips.size())));
 }
+}
+
+TEST_CASE("Building pilot copies exact mapped member identity through cache and Pac Init",
+    "[archive-member-identity][archive-source-actual]")
+{
+#ifndef _WIN32
+    SKIP("Physical PBO member identity is Windows-only.");
+#else
+    const char* pilot = std::getenv("WGR_OBJECT_STREAM_RAP_BUILDING_PILOT");
+    if (!pilot || std::strcmp(pilot, "1") != 0)
+        SKIP("Requires fresh WGR_OBJECT_STREAM_RAP_BUILDING_PILOT=1 process.");
+    if (!QFileAccess::MappingSupported()) SKIP("Raw mapped bank read unavailable.");
+    Archives files;
+    constexpr const char* normal = "plaster_flats01_nohq.paa";
+    constexpr const char* path = R"(dz\structures\data\plaster\plaster_flats01_nohq.paa)";
+    files.first.SetPrefix(R"(dz\structures\data\plaster\)");
+    files.second.SetPrefix(R"(dz\structures\data\plaster\)");
+    ArchiveSourceBinding::ModelReadScope purpose;
+    std::vector<Ref<IFileBuffer>> held;
+    if (ArchiveSourceBinding::SnapshotStats().enabled)
+    {
+        // Saturate the ordinary source-binding budget. The numeric witness
+        // must still describe the exact mapped buffer at the next read.
+        while (ArchiveSourceBinding::SnapshotStats().liveBindings <
+            ArchiveSourceBinding::ModelReadScope::BindingLimit())
+        {
+            auto read = files.first.Read("texture.paa"); REQUIRE(read);
+            REQUIRE(read->GetArchiveSourceBinding());
+            held.push_back(read);
+        }
+    }
+    auto old = files.first.CaptureReadRequest(normal, true); REQUIRE(old);
+    BankReadMemberIdentity expected;
+    REQUIRE(old->CopyMemberIdentity(expected));
+    auto raw = files.first.Read(normal); REQUIRE(raw);
+    BankReadMemberIdentity actual;
+    REQUIRE(raw->CopyArchiveMemberIdentity(actual));
+    CHECK(actual == expected);
+    if (ArchiveSourceBinding::SnapshotStats().enabled)
+        CHECK_FALSE(raw->GetArchiveSourceBinding());
+    ServerScope server;
+    QIFStreamB cached; cached.open(files.first, normal); REQUIRE_FALSE(cached.fail());
+    server.server->cache.Store(cached, path);
+    auto source = CreateSource(path); REQUIRE(source);
+    BankReadMemberIdentity parsed;
+    REQUIRE(source->CopyArchiveMemberIdentity(parsed));
+    CHECK(parsed == expected);
+    auto newer = files.second.CaptureReadRequest(normal, true); REQUIRE(newer);
+    BankReadMemberIdentity changed;
+    REQUIRE(newer->CopyMemberIdentity(changed));
+    CHECK_FALSE(parsed == changed);
+    CHECK(files.first.MatchesMountedMember(normal, *old));
+    CHECK_FALSE(files.second.MatchesMountedMember(normal, *old));
+    // Reusing the old cache cannot relabel its parsed bytes as the new mount.
+    auto stale = CreateSource(path); REQUIRE(stale);
+    BankReadMemberIdentity staleIdentity;
+    REQUIRE(stale->CopyArchiveMemberIdentity(staleIdentity));
+    CHECK(staleIdentity == expected);
+    FileBufferMemory loose(4);
+    CHECK_FALSE(loose.CopyArchiveMemberIdentity(actual));
+    held.clear();
+#endif
 }
 
 TEST_CASE("Archive provenance never changes default bank bytes or adds OFF captures", "[archive-source-binding][archive-source-default]")

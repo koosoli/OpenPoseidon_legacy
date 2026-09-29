@@ -440,6 +440,7 @@ struct ObjectStreamPreparer::Impl
         BankReadRequest read;
         std::shared_ptr<const ArchiveSourceBinding> initializedSource; // null on original cold jobs
         const BankReadRequest* initializedRead = nullptr; // borrowed ONLY from owned immutable binding
+        bool physicalWitness = false; // exact building pilot; read owns the leased member
         const BankReadRequest& ReadRequest() const { return initializedRead ? *initializedRead : read; }
     };
     static constexpr size_t PackedTextureLimit = 16 * 1024 * 1024;
@@ -614,7 +615,9 @@ bool ObjectStreamPreparer::Impl::PreparePackedTexture(const PackedTextureRead& t
         if (stop || jobGen != generation.load(std::memory_order_relaxed) || index >= count || stale[index] ||
             (publicationRequired && !publication.Valid())) { trace.outcome = Proof::Event::WorkerCancelled; if (paaAttemptDiagnostics) ++attemptRow.cancelledBeforeRead; return false; }
     }
-    if (!(texture.initializedSource ? store.ShouldPrepareWarm(texture.key) : store.ShouldPrepare(texture.key))) { trace.outcome = Proof::Event::WorkerSkipped; ++skipped; if (paaAttemptDiagnostics) ++attemptRow.preSkipped; return true; }
+    if (!((texture.initializedSource || texture.physicalWitness) ?
+            store.ShouldPrepareWarm(texture.key) : store.ShouldPrepare(texture.key)))
+    { trace.outcome = Proof::Event::WorkerSkipped; ++skipped; if (paaAttemptDiagnostics) ++attemptRow.preSkipped; return true; }
     Streaming::PaaPreparationInflight::Result inflight{Streaming::PaaPreparationInflight::Outcome::UnleasedOrInvalid, {}};
     if (paaInflight && publicationRequired)
     {
@@ -671,7 +674,8 @@ bool ObjectStreamPreparer::Impl::PreparePackedTexture(const PackedTextureRead& t
         if (publicationObserver.beforePaaPut)
             publicationObserver.beforePaaPut(publicationObserver.context, bool(facts));
         if (store.Put(texture.key, std::move(chain), textureGeneration, std::move(facts),
-                publicationRequired ? &publication : nullptr, texture.initializedSource))
+                publicationRequired ? &publication : nullptr, texture.initializedSource,
+                texture.physicalWitness ? &texture.read : nullptr))
         { trace.outcome = Proof::Event::WorkerPut; ++prepared; preparedBytes += bytes; if (paaAttemptDiagnostics) ++attemptRow.accepted; }
         else { trace.outcome = Proof::Event::WorkerPutRefused; ++skipped; if (paaAttemptDiagnostics) { ++attemptRow.rejected; attemptRow.rejectedReadDecodeMs += readDecodeMs; attemptRow.rejectedReadDecodeFactsMs += readDecodeFactsMs; } }
     }
@@ -2484,7 +2488,7 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
     try
     {
         const auto& fixture = BuildingRapFixtures[slot];
-        if (capture && handoff && handoff->Bounded() &&
+        if (handoff && handoff->Bounded() &&
             handoff->generation == job->radiusGeneration && handoff->modelIndex == index &&
             handoff->materials.size() == 1 && job->texturePublication.Valid() &&
             job->textureGeneration == render::PreparedTextureStore::Instance().Generation())
@@ -2510,36 +2514,42 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
                             material.SameCurrentMember(currentMember) &&
                             render::PreparedTextureStore::Instance().ShouldPrepareWarm(material.stageName))
                         {
-                            WarmTextureRead read;
-                            if (capture(context, material.stageName.c_str(), read) &&
-                                read.key == material.stageName && read.initializedSource &&
-                                read.initializedSource->Request().HasArchiveIdentity() &&
-                                read.initializedSource->Request().bytes &&
-                                read.initializedSource->Request().bytes <= Impl::PackedTextureLimit &&
-                                read.key.capacity() <= 1024 &&
-                                job->textures.size() < 64 &&
+                            // The building pilot does not initialize a texture just to hold
+                            // scarce ArchiveSourceBinding capacity. Capture the currently
+                            // mounted physical PAA member; upload later proves that Init used
+                            // this exact member and that it is still mounted.
+                            const std::string& key = material.stageName;
+                            if (key.capacity() <= 1024 && job->textures.size() < 64 &&
                                 std::none_of(job->textures.begin(), job->textures.end(),
-                                    [&](const auto& prior) { return prior.key == read.key; }))
+                                    [&](const auto& prior) { return prior.key == key; }))
                             {
-                                QFBank* textureBank = QIFStreamB::AutoBank(read.key.c_str());
+                                QFBank* textureBank = QIFStreamB::AutoBank(key.c_str());
                                 const size_t texturePrefix = textureBank ?
-                                    static_cast<size_t>(textureBank->GetPrefix().GetLength()) : read.key.size();
-                                if (textureBank && texturePrefix < read.key.size() &&
-                                    textureBank->MatchesMountedMember(
-                                        read.key.c_str() + texturePrefix,
-                                        read.initializedSource->Request()))
+                                    static_cast<size_t>(textureBank->GetPrefix().GetLength()) : key.size();
+                                if (textureBank && texturePrefix < key.size() &&
+                                    !CmpStartStr(key.c_str(), textureBank->GetPrefix()))
                                 {
-                                    const uint64_t knownSourceBytes =
-                                        read.key.capacity() + 1 + read.initializedSource->KnownCppBytes();
-                                    if (knownSourceBytes <= 8 * 1024)
+                                    auto read = textureBank->CaptureReadRequest(
+                                        key.c_str() + texturePrefix, true);
+                                    if (read && read->HasArchiveIdentity() && read->bytes &&
+                                        read->bytes <= Impl::PackedTextureLimit &&
+                                        textureBank->MatchesMountedMember(key.c_str() + texturePrefix, *read))
                                     {
-                                        const size_t previousCapacity = job->textures.capacity();
-                                        auto source = std::move(read.initializedSource);
-                                        const BankReadRequest* request = &source->Request();
-                                        job->textures.push_back({std::move(read.key), {}, std::move(source), request});
-                                        addedCharge = knownSourceBytes +
-                                            (job->textures.capacity() - previousCapacity) *
-                                                sizeof(Impl::PackedTextureRead);
+                                        const uint64_t knownSourceBytes = key.capacity() + 1 +
+                                            read->archive.capacity() + 1 + read->ArchiveIdentityBytes() +
+                                            (read->archiveLease ? 64 : 0);
+                                        if (knownSourceBytes <= 8 * 1024)
+                                        {
+                                            const size_t previousCapacity = job->textures.capacity();
+                                            Impl::PackedTextureRead texture;
+                                            texture.key = key;
+                                            texture.read = std::move(*read);
+                                            texture.physicalWitness = true;
+                                            job->textures.push_back(std::move(texture));
+                                            addedCharge = knownSourceBytes +
+                                                (job->textures.capacity() - previousCapacity) *
+                                                    sizeof(Impl::PackedTextureRead);
+                                        }
                                     }
                                 }
                             }
@@ -2552,7 +2562,7 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
     catch (...) { addedCharge = 0; job->textures.resize(existingTextures); } // preserve ordinary inputs
     static std::atomic<unsigned> captureRows{0};
     if (captureRows.fetch_add(1, std::memory_order_relaxed) < BuildingRapFixtures.size())
-        LOG_INFO(World, "RVMAT raP building owner capture: modelIndex={} model={} stage={} sourceBound={} (conversion resumes; no Take/upload proof)",
+        LOG_INFO(World, "RVMAT raP building owner capture: modelIndex={} model={} stage={} physicalMemberCaptured={} (conversion resumes; upload validation still required)",
             index, BuildingRapFixtures[slot].model, BuildingRapFixtures[slot].normal, addedCharge != 0);
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
