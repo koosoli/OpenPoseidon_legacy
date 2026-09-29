@@ -4323,7 +4323,9 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 ownerPrimaryUploads = pending.uploads;
                 ownerPrimaryStepMs = pending.stepMs;
                 ownerPrimaryMaxStepMs = pending.maxStepMs;
-                ownerPrimaryFailed = pending.failed;
+                // The optional NormalMap phase can stop at its byte/section/deadline
+                // bound without any primary upload failing. Keep the two proofs separate.
+                ownerPrimaryFailed = pending.uploadFailures != 0;
                 ownerNormalsEnabled = pending.stageParentNormals;
                 ownerNormalsDone = pending.parentNormalsDone;
                 ownerNormalSections = pending.normalSections;
