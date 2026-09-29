@@ -267,3 +267,26 @@ This route has a different OS cache and async history from previous runs;
 neither its totals nor the four uploads prove a latency gain or regression.
 Most texture work and geometry optimization remain on the owner path.
 `performanceAccepted=false` and `defaultReady=false`; keep the pilot off.
+
+## Shape-install cost split: registration dominates vertex-buffer optimization
+
+Commit `306abcfd` adds a default-off, exact `tenement_small` diagnostic via
+`WGR_OBJECT_STREAM_DAYZ_SHAPE_SPLIT=1`. The existing cold-model `opt` timer
+encloses both `WorldShapeLoaded` (early retained model registration and texture
+resolution) and `OptimizeOneShape` (legacy vertex-buffer work). The new split
+does not skip or defer either call, and it adds no clocks or logging to the
+default path. The paired build, pushed installed EXE/DLL and WGPU startup
+passed. A single locked DayZ route,
+`build/stream-residency/dayz-shape-split-sep29-disabled-20260929-180019`,
+passed and exited normally (754 frames, no dropped samples). Its exact cold
+tenement was 685.4 ms/81 uploads; texture read was 474.7 ms. Of the 398.2 ms
+inside `opt`, `WorldShapeLoaded` took 396.709 ms and legacy
+`OptimizeOneShape` only 1.496 ms. The texture aggregate includes nested proxy
+work and overlaps that `opt` interval, so the buckets must not be added.
+
+Do not bypass `OptimizeOneShape`: late/partial coverage still needs its vertex
+buffers. The bottleneck is early owner-side model registration and texture
+first touch. The different cache/async history of this run prevents a matched
+regression claim. A useful next implementation must reduce or distribute that
+owner work without publishing incomplete model state; the default remains
+unchanged and no GeometryPage or DayZ performance acceptance follows.
