@@ -16,6 +16,7 @@ param(
     [switch]$WarmMaterialPreflight,
     [switch]$RapStageEarlyPrepare,
     [switch]$RapBuildingPilot,
+    [switch]$DayZTextureTrace,
     [switch]$HotSourceProofRetirement,
     [switch]$WeakCacheProof,
     [switch]$WarmTextureProvenance,
@@ -75,6 +76,7 @@ if (!$env:LOCK_OWNER) {
         if ($WarmMaterialPreflight) { $argv += '-WarmMaterialPreflight' }
         if ($RapStageEarlyPrepare) { $argv += '-RapStageEarlyPrepare' }
         if ($RapBuildingPilot) { $argv += '-RapBuildingPilot' }
+        if ($DayZTextureTrace) { $argv += '-DayZTextureTrace' }
         if ($HotSourceProofRetirement) { $argv += '-HotSourceProofRetirement' }
         if ($WeakCacheProof) { $argv += '-WeakCacheProof' }
         if ($WarmTextureProvenance) { $argv += '-WarmTextureProvenance' }
@@ -143,6 +145,7 @@ $environment = @{
     WGR_OBJECT_STREAM_RAP_STAGE_WARM_CAPTURE = $(if ($RapStageEarlyPrepare -or $RapBuildingPilot) { '1' } else { '0' })
     WGR_OBJECT_STREAM_RAP_STAGE_EARLY_PREPARE = $(if ($RapStageEarlyPrepare) { '1' } else { '0' })
     WGR_OBJECT_STREAM_RAP_BUILDING_PILOT = $(if ($RapBuildingPilot) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_DAYZ_TEXTURE_TRACE = $(if ($DayZTextureTrace) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WEAK_CACHE_PROOF = $(if ($WeakCacheProof) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WARM_TEXTURE_TRACE = $(if ($WarmTextureProvenance) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WARM_EARLY_SLICE = $(if ($WarmEarlySlice) { '1' } else { '0' })
@@ -199,6 +202,7 @@ try {
         warmMaterialPreflight = [bool]$WarmMaterialPreflight
         rapStageEarlyPrepare = [bool]$RapStageEarlyPrepare
         rapBuildingPilot = [bool]$RapBuildingPilot
+        dayZTextureTrace = [bool]$DayZTextureTrace
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement
         weakCacheProof = [bool]$WeakCacheProof; warmTextureProvenance = [bool]$WarmTextureProvenance
         warmEarlySlice = [bool]$WarmEarlySlice
@@ -459,6 +463,13 @@ try {
         capturedStages=$buildingCaptureStages; uploads=$buildingUploads
         scope='Same named stage has an owner-captured physical PBO member and a later Init-member/current-mount/layout-validated GPU upload; does not prove every building stage/proxy, pixel parity, or latency improvement'}
     $buildingPilotProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'rap-building-pilot-proof.json')
+    $textureTraceHeaders = @(Select-String -LiteralPath $log -Pattern 'DayZ texture first-touch trace: model=(.*?) uploads=(\d+) prepared=(\d+) succeeded=(\d+) measuredReadMs=([0-9.]+) slowestRows=(\d+) limit=16')
+    $textureTraceRows = @(Select-String -LiteralPath $log -Pattern 'DayZ texture first-touch row: model=(.*?) rank=(\d+) source=(.*?) readMs=([0-9.]+) bytes=(\d+) prepared=(true|false) uploaded=(true|false) limit=16')
+    $textureTraceProven = !$DayZTextureTrace -or ($textureTraceHeaders.Count -eq 3 -and $textureTraceRows.Count -ge 3 -and $textureTraceRows.Count -le 48)
+    $textureTraceProof = @{requested=[bool]$DayZTextureTrace; positive=[bool]$textureTraceProven
+        headers=@($textureTraceHeaders | ForEach-Object { $_.Line }); rows=@($textureTraceRows | ForEach-Object { $_.Line })
+        scope='Top 16 observed source read costs per selected first-touch model, including proxies; not a material-slot role, GPU time, causal speedup or whole-world inventory'}
+    $textureTraceProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'dayz-texture-first-touch-proof.json')
     # Separate warm-preflight proof still uses its own bound-upload witness.
     # The physical building pilot above uses its explicit Init/mount/layout witness.
     $preflightRawRows = @(Select-String -LiteralPath $log -Pattern 'Warm material source preflight: source=')
@@ -661,7 +672,7 @@ try {
         rows=@($promotionRows | ForEach-Object {$_.Line});
         scope='Historical exact-member promotion witness; not a later Take, source match, upload, or complete 32-entry scan'}
     $promotionProven = !$WarmPublishedReuse -or $promotionRows.Count -gt 0
-    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven -and $buildingPilotProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings; framePaceTrace = [bool]$FramePaceTrace
+    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven -and $buildingPilotProven -and $textureTraceProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings; framePaceTrace = [bool]$FramePaceTrace
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         renderCallCpuTimings = [bool]$TerrainPageTimings; renderCallCpuTimingProof = $callCpuProof
@@ -680,6 +691,8 @@ try {
         warmMaterialPreflight = [bool]$WarmMaterialPreflight; warmMaterialPreflightProof = $warmPreflightProof
         rapStageEarlyPrepare = [bool]$RapStageEarlyPrepare
         rapBuildingPilot = [bool]$RapBuildingPilot; rapBuildingPilotProof = $buildingPilotProof
+        dayZTextureTrace = [bool]$DayZTextureTrace
+        dayZTextureTraceProof = $textureTraceProof
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload; warmMaterialStageFamilyProof = $warmStageFamilyProof
         coldPaaHandoff = [bool]$ColdPaaHandoff; requireColdAlphaPeek = [bool]$RequireColdAlphaPeek; coldPaaHandoffProof = $coldPaaProof
@@ -697,6 +710,7 @@ try {
     if (!$warmPreflightProven) { throw 'NotExercised: no same-source initialized-stage preflight and successful bound worker stage upload; evidence retained' }
     if (!$warmJobsProven) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
     if (!$buildingPilotProven) { throw 'NotExercised: no same-stage building physical capture and validated upload; evidence retained' }
+    if (!$textureTraceProven) { throw 'NotExercised: selected DayZ building texture trace incomplete; evidence retained' }
     if (!$warmStageFamilyProven) { throw 'Required bound worker normal/specular filename-family upload not exercised; evidence retained, no material-slot proof claimed' }
 } catch {
     $screeningFailure = $_.Exception.Message

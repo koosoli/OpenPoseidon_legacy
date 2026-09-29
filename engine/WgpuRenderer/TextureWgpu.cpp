@@ -14,6 +14,7 @@
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>     // worker-prepared mip chains
 #include <Poseidon/Graphics/Textures/ProceduralTexture.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp> // per-admission split timers
+#include <Poseidon/World/Terrain/ObjectTextureUploadTrace.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp> // shared streaming counters (panel + capture)
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Containers/StaticArray.hpp>
@@ -1845,6 +1846,9 @@ uint64_t TextureWgpu::EnsureUploaded()
     // per REAL upload, which is a file read away from mattering.
     render::ObjectAdmitProfile& admit = render::GObjectAdmitProfile;
     const bool profiled = admit.active;
+    double diagnosticReadMs = 0.0;
+    size_t diagnosticBytes = 0;
+    bool diagnosticPrepared = false;
     if (profiled)
     {
         ++admit.textureUploads;
@@ -2046,10 +2050,13 @@ uint64_t TextureWgpu::EnsureUploaded()
         }
         if (profiled)
         {
-            admit.textureReadMs += (NowUs() - readBegan) / 1000.0;
+            diagnosticReadMs = (NowUs() - readBegan) / 1000.0;
+            admit.textureReadMs += diagnosticReadMs;
             if (fromPrepared)
                 ++admit.texturePrepared;
         }
+        diagnosticBytes = total;
+        diagnosticPrepared = fromPrepared;
         if (ok && !blocks.empty())
         {
             const uint64_t createBegan = (timed || profiled) ? NowUs() : 0;
@@ -2395,6 +2402,9 @@ uint64_t TextureWgpu::EnsureUploaded()
         render::PreparedTextureStore::Instance().MarkUploaded(render::PreparedTextureStore::Key(SourceName()));
     }
     if (terrainTiming.enabled) terrainTiming.uploaded = _gpuHandle != 0;
+    if (auto* trace = Streaming::GObjectTextureUploadTrace)
+        trace->Record(SourceName(), diagnosticReadMs, diagnosticBytes,
+                      diagnosticPrepared, _gpuHandle != 0);
     RetireHotSourceProof(); // After Claim/current-binding validation, upload and existing handoff bookkeeping.
     return _gpuHandle;
 }

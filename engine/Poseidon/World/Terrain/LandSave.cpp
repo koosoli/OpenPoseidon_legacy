@@ -49,6 +49,7 @@
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // worker-prepared texture store (clear + stats)
 #include <Poseidon/World/Model/Model.hpp>              // the IR handed over by ObjectStreamPreparer
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/World/Terrain/ObjectTextureUploadTrace.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamTreeFixture.hpp>
 #include <Poseidon/World/Terrain/WarmModelCaptureWindow.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp> // SnapshotObjectStreamDiag fills its counters
@@ -4401,6 +4402,18 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             render::ObjectAdmitProfile& admitProfile = render::GObjectAdmitProfile;
             WarmObjectAdmitProfileScope warmScope(admitProfile, !cold && warmProfileEnabled);
             const bool warmProfiled = warmScope.Opened();
+            static const bool textureTraceEnabled = [] {
+                const char* flag = std::getenv("WGR_OBJECT_STREAM_DAYZ_TEXTURE_TRACE");
+                return flag && std::strcmp(flag, "1") == 0;
+            }();
+            std::unique_ptr<Streaming::ObjectTextureUploadTrace> textureTrace;
+            if (cold && textureTraceEnabled &&
+                (std::strcmp((const char*)modelName, R"(dz\structures\residential\tenements\tenement_small.p3d)") == 0 ||
+                 std::strcmp((const char*)modelName, R"(dz\structures\residential\schools\city_school.p3d)") == 0 ||
+                 std::strcmp((const char*)modelName, R"(dz\structures\residential\police\village_policestation.p3d)") == 0))
+                textureTrace = std::make_unique<Streaming::ObjectTextureUploadTrace>();
+            auto* previousTextureTrace = Streaming::GObjectTextureUploadTrace;
+            Streaming::GObjectTextureUploadTrace = textureTrace.get();
             if (cold)
             {
                 ++coldAttempted;
@@ -4436,6 +4449,24 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             catch (const std::exception&)
             {
                 admitted = nullptr;
+            }
+            Streaming::GObjectTextureUploadTrace = previousTextureTrace;
+            if (textureTrace)
+            {
+                std::sort(textureTrace->slowest.begin(),
+                    textureTrace->slowest.begin() + textureTrace->count,
+                    [](const auto& lhs, const auto& rhs) { return lhs.readMs > rhs.readMs; });
+                LOG_INFO(World, "DayZ texture first-touch trace: model={} uploads={} prepared={} succeeded={} measuredReadMs={:.3f} slowestRows={} limit=16",
+                    (const char*)modelName, textureTrace->uploads, textureTrace->preparedUploads,
+                    textureTrace->successfulUploads, textureTrace->measuredReadMs,
+                    textureTrace->count);
+                for (size_t traceIndex = 0; traceIndex < textureTrace->count; ++traceIndex)
+                {
+                    const auto& row = textureTrace->slowest[traceIndex];
+                    LOG_INFO(World, "DayZ texture first-touch row: model={} rank={} source={} readMs={:.3f} bytes={} prepared={} uploaded={} limit=16",
+                        (const char*)modelName, traceIndex + 1, row.name, row.readMs,
+                        row.bytes, row.prepared, row.uploaded);
+                }
             }
             double geoOwnerMs = 0.0;
             if (admitted != nullptr && _geoAccumEnabled)
