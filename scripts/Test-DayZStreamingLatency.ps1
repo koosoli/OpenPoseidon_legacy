@@ -1,6 +1,7 @@
 param(
     [ValidateSet('Disabled', 'Cold')][string]$Mode = 'Disabled',
     [switch]$TerrainPageTimings,
+    [switch]$FramePaceTrace,
     [switch]$WarmProfile,
     [ValidateSet('Counted', 'Timed')][string]$AdmissionMode = 'Counted',
     [switch]$ParkedTextureRefill,
@@ -55,6 +56,7 @@ if (!$env:LOCK_OWNER) {
     try {
         $argv = @((Join-Path $PSScriptRoot 'with-game-lock.sh'), $shellExe, '-NoProfile', '-File', $PSCommandPath, '-Mode', $Mode, '-AdmissionMode', $AdmissionMode, '-Label', $Label, '-GameDir', $GameDir)
         if ($TerrainPageTimings) { $argv += '-TerrainPageTimings' }
+        if ($FramePaceTrace) { $argv += '-FramePaceTrace' }
         if ($WarmProfile) { $argv += '-WarmProfile' }
         if ($ParkedTextureRefill) { $argv += '-ParkedTextureRefill' }
         if ($LazyTextureGroups) { $argv += '-LazyTextureGroups' }
@@ -136,6 +138,9 @@ $environment = @{
     WGR_OBJECT_STREAM_WARM_PUBLISHED_REUSE = $(if ($WarmPublishedReuse) { '1' } else { '0' })
     WGR_OBJECT_STREAM_HOT_SOURCE_PROOF_RETIRE = $(if ($HotSourceProofRetirement) { '1' } else { '0' })
 }
+if ($FramePaceTrace) {
+    $environment.POSEIDON_FRAME_TRACE = Join-Path $out 'frame-pace'
+}
 if ($TerrainPageTimings) {
     $environment.WGR_TERRAIN_PAGE_TIMINGS = '1'
     $environment.WGR_RENDER_CALL_CPU_TIMINGS = '1'
@@ -189,6 +194,7 @@ try {
         requireWarmMaterialPreflightUpload = [bool]$RequireWarmMaterialPreflightUpload
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload
         renderCallCpuTimings = [bool]$TerrainPageTimings
+        framePaceTrace = [bool]$FramePaceTrace
         renderCallCpuTimingEnvironment = [string]$environment.WGR_RENDER_CALL_CPU_TIMINGS
         modelRowUpload = [bool]$ModelRowUpload; modelRowUploadEnvironment = [string]$environment.WGR_CULL_MODEL_ROW_UPLOAD
         legacySectionRefresh = [bool]$LegacySectionRefresh
@@ -347,6 +353,15 @@ try {
     $null = Send @{cmd = 'screenshot'; path = (Join-Path $out 'returned-settled.png')}
     $null = Send @{cmd = 'exit'}
     if (!$p.WaitForExit(15000) -or $p.ExitCode) { throw 'Owned game failed to exit cleanly' }
+    if ($FramePaceTrace) {
+        foreach ($side in @('main', 'producer', 'worker')) {
+            $trace = "$($environment.POSEIDON_FRAME_TRACE).$side.csv"
+            if (!(Test-Path -LiteralPath $trace -PathType Leaf) -or
+                (Get-Item -LiteralPath $trace).Length -lt 100) {
+                throw "Missing or empty frame-pace trace: $trace"
+            }
+        }
+    }
     if (Select-String -LiteralPath $log -Pattern 'Out of Memory|Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) { throw 'Renderer error' }
     if ($WarmProfile -and !(Select-String -LiteralPath $log -Pattern 'Object stream warm update profile: row=' -Quiet)) { throw 'Warm admission profile did not observe a measured update' }
     # Filename family does NOT establish an actual shader/material-slot role.
@@ -609,7 +624,7 @@ try {
         rows=@($promotionRows | ForEach-Object {$_.Line});
         scope='Historical exact-member promotion witness; not a later Take, source match, upload, or complete 32-entry scan'}
     $promotionProven = !$WarmPublishedReuse -or $promotionRows.Count -gt 0
-    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings
+    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings; framePaceTrace = [bool]$FramePaceTrace
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         renderCallCpuTimings = [bool]$TerrainPageTimings; renderCallCpuTimingProof = $callCpuProof
