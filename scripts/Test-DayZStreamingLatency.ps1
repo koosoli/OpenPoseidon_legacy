@@ -37,6 +37,7 @@ $ErrorActionPreference = 'Stop'
 if ($RequireColdAlphaPeek -and $RequireColdStartupAlphaPeek) { throw 'Choose exactly one cold alpha validation interval: route or startup admission' }
 if ($RequireColdAlphaPeek -or $RequireColdStartupAlphaPeek) { $ColdPaaHandoff = $true }
 if ($ColdPaaHandoff) { $ArchiveSourceBindings = $true }
+$boundPackedSource = [bool]($PackedTextures -and $ColdPaaHandoff)
 if ($RequireWarmMaterialStageUpload) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($RequireWarmMaterialPreflightUpload) { $WarmMaterialPreflight = $true }
 if ($WarmMaterialPreflight) { $WarmTextureJobs = $true; $WarmProfile = $true }
@@ -178,7 +179,7 @@ try {
         mode = $Mode; head = (& git -C $root rev-parse HEAD); scriptSha256 = (Get-FileHash $PSCommandPath).Hash
         paaLzoReplay = [bool]$PaaLzoReplay
         paaPreparationDiagnostics = [bool]$PaaPreparationDiagnostics
-        packedTextures = [bool]$PackedTextures; paaPreparationInflight = [bool]$PaaPreparationInflight
+        packedTextures = [bool]$PackedTextures; boundPackedSource = $boundPackedSource; paaPreparationInflight = [bool]$PaaPreparationInflight
         registrationQuota = [bool]$RegistrationQuota
         archiveSourceBindings = [bool]$ArchiveSourceBindings
         coldPaaHandoff = [bool]$ColdPaaHandoff; requireColdAlphaPeek = [bool]$RequireColdAlphaPeek
@@ -253,9 +254,16 @@ try {
                 'warmTextureJobsCoalesced','warmTextureJobsRejected','warmTextureMembersPrepared','warmTextureMembersSkipped',
                 'warmTextureMembersUnreadable','warmTextureQueued','warmTextureActive','warmTextureMetadataBytes',
                 'warmTextureMetadataBytesPeak','warmTextureScratchBytes','warmTextureScratchBytesPeak',
-                'warmTextureQueueBytes','warmTextureMs','warmPreparedPuts','warmPreparedTakes','warmPreparedSourceRefused',
-                'warmPreparedUploads','warmPreparedUploadBytes','warmPreparedUploadFailed')) {
+                'warmTextureQueueBytes','warmTextureMs')) {
                 if ($null -eq $camera.$field -or $camera.$field -ne 0) { throw "Disabled warm preparation did work or allocated queue storage: $field" }
+            }
+            # These counters belong to the shared PreparedTextureStore. The
+            # bound cold-PBO experiment legitimately uses it without warm jobs.
+            if (!$boundPackedSource) {
+                foreach ($field in @('warmPreparedPuts','warmPreparedTakes','warmPreparedSourceRefused',
+                    'warmPreparedUploads','warmPreparedUploadBytes','warmPreparedUploadFailed')) {
+                    if ($null -eq $camera.$field -or $camera.$field -ne 0) { throw "Disabled source-bound preparation did work: $field" }
+                }
             }
         }
         $p.Refresh()
@@ -414,7 +422,7 @@ try {
     if (@($warmUploadObservations | Where-Object { $_.bytes -eq 0 -or $_.sourceMemberBytes -eq 0 -or
         $_.sourceMemberBytes -gt 16777216 -or $_.row -lt 1 -or $_.row -gt 64 }).Count -gt 0 -or
         $warmUploadObservations.Count -gt 64) { throw 'Malformed bounded warm-upload witness' }
-    if ($warmUploadObservations.Count -gt 0 -and (!$WarmTextureJobs -or !$WarmProfile)) { throw 'Warm-upload witness unexpectedly active outside requested flags' }
+    if ($warmUploadObservations.Count -gt 0 -and !(($WarmTextureJobs -and $WarmProfile) -or $boundPackedSource)) { throw 'Source-bound upload witness unexpectedly active outside requested flags' }
     $warmStageFamilyObserved = @($warmUploadObservations | Where-Object { $_.stageFamily }).Count -gt 0
     $warmStageFamilyProven = !$RequireWarmMaterialStageUpload -or ($warmJobsProven -and $warmStageFamilyObserved)
     $warmStageFamilyProof = @{ required = [bool]$RequireWarmMaterialStageUpload; positive = [bool]$warmStageFamilyObserved
@@ -631,7 +639,7 @@ try {
         parkedRefillProof = $parkedProof
         paaLzoReplay = [bool]$PaaLzoReplay; paaLzoReplayProof = $replayProof
         paaPreparationDiagnostics = [bool]$PaaPreparationDiagnostics; paaPreparationProof = $attemptProof
-        packedTextures = [bool]$PackedTextures; paaPreparationInflight = [bool]$PaaPreparationInflight
+        packedTextures = [bool]$PackedTextures; boundPackedSource = $boundPackedSource; paaPreparationInflight = [bool]$PaaPreparationInflight
         paaPreparationInflightProof = $inflightProof
         registrationQuota = [bool]$RegistrationQuota; registrationQuotaProof = $quotaProof
         archiveSourceBindings = [bool]$ArchiveSourceBindings; archiveSourceBindingProof = $archiveBindings
