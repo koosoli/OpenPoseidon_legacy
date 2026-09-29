@@ -240,3 +240,30 @@ history, and their one-of-many upload coverage is too small to explain the
 different totals. Thus the source-safe handoff is demonstrated, while
 performance improvement and no-regression are *not* established. The pilot
 stays off by default; `performanceAccepted=false`, `defaultReady=false`.
+
+## Bounded tenement material-stage pilot
+
+Commit `f7d75802` adds a separate default-off
+`WGR_OBJECT_STREAM_RAP_BUILDING_MULTISTAGE=1` extension to the physical-member
+building pilot. For `tenement_small` only, the owner captures at most 16 authored
+visual-LOD raP material members; the worker identifies up to four schema-typed
+NormalMap/LayerNormal stages that were observed in the prior actual-upload
+trace; the owner revalidates each current material/PAA member before worker
+preparation. The existing publication, byte budget, stale/reset fallback and
+exact Init/current-mount/mip upload checks still apply. The single-stage school
+and police pilots are unchanged. Without the flag there is no extra material
+scan or texture work.
+
+The paired build and focused tests passed (111 assertions for raP names and
+multistage handoff; 90 for the old physical store/building pilot), followed by
+the pushed, installed EXE/DLL pair and WGPU startup check. One locked DayZ
+route, `build/stream-residency/rap-multistage-sep29-disabled-20260929-174520`,
+passed and exited normally (805 frames, zero dropped samples). It discovered
+four tenement candidates, captured all four physical PAA members and logged
+four validated GPU uploads of 5,592,064 bytes each. School and police retained
+their one validated physical upload apiece. Yet tenement first-touch was
+517.0 ms with 81 uploads, school 1,111.2 ms/118 and police 552.2 ms/43.
+This route has a different OS cache and async history from previous runs;
+neither its totals nor the four uploads prove a latency gain or regression.
+Most texture work and geometry optimization remain on the owner path.
+`performanceAccepted=false` and `defaultReady=false`; keep the pilot off.
