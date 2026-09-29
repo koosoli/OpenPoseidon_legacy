@@ -290,3 +290,29 @@ first touch. The different cache/async history of this run prevents a matched
 regression claim. A useful next implementation must reduce or distribute that
 owner work without publishing incomplete model state; the default remains
 unchanged and no GeometryPage or DayZ performance acceptance follows.
+
+## Exact owner primary-texture staging: safe handoff, insufficient coverage
+
+Commit `2e5d9f76` adds default-off
+`WGR_OBJECT_STREAM_DAYZ_OWNER_PRIMARY_STAGE=1` for the exact
+`tenement_small.p3d` model. One converted shape remains outside ShapeBank;
+one initialized primary section texture is uploaded per owner residency update.
+The slot is limited to one model, at most 64 distinct primary textures and a
+128 MiB conversion-size estimate. Cancellation releases the slot if its
+originating placement leaves the desired set. The ordinary complete
+`NewFromModel`/`ObjectCreate` path runs only after staging; material-stage and
+proxy textures still follow that path. No partial model is published.
+
+The paired game/test build, safety push and installed WGPU startup passed. One
+locked DayZ route,
+`build/stream-residency/dayz-owner-primary-sep29-disabled-20260929-183133`,
+passed and exited normally (687 frames, zero dropped samples, no forced exit).
+It staged seven primary uploads over seven updates, totaling 114.095 ms; the
+largest individual step was 37.654 ms. The same shape then admitted successfully
+with zero staged textures lost before registration, but final creation still
+took 586.831 ms. The remaining material/proxy work dominates. This is a
+correctness and handoff screen, not a matched FPS result or a frame-time
+deadline. Keep the flag off; `performanceAccepted=false`,
+`defaultReady=false`. The next useful slice needs measured, current-source
+coverage of the actually consumed material/proxy textures or a complete
+registration strategy that does not expose partial model state.
