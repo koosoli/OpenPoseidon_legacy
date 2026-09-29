@@ -407,3 +407,30 @@ passed; mapped-PBO multistage/physical-scope tests passed 376 assertions in two
 cases without skips, including an arbitrary Stage0 colour source, wrong-member
 refusal, exact-member take and scope-cap fallback. Installed validation is
 pending.
+
+Installed `232e2da7` route
+`dayz-physical-parent-sep29-disabled-20260929-224403` passed and shut down
+normally (856 frames, zero reported drops). Twelve parent raP captures yielded
+60 physical PAA candidates; all 60 were captured within 92,407,307 additional
+source bytes. Thirty-eight same-source uploads passed initialized-member,
+current-mount and mip-layout checks, totaling 93,148,256 prepared bytes.
+The measured tenement creation took 230.8 ms, including 82.0 ms source reads
+and 78 uploads. Compared with the earlier ordered census run this is promising,
+but cache order and asynchronous preparation differ: it is not a matched FPS
+comparison or proof of no regression. The extension remains default-off.
+One-hop speculative proxy preparation is the next bounded opt-in slice;
+complete selected-proxy/material coverage and resumable owner registration
+remain open.
+
+The opt-in proxy extension captures at most sixteen one-hop P3D members
+(4 MiB/member, 32 MiB total). A bounded lexical material-name scan avoids
+compressed-model parser allocation amplification and always labels coverage
+incomplete. Two owner capture handoffs revalidate P3D/raP current mounts and
+capture at most sixteen proxy materials/thirty-two proxy PAA candidates.
+Parent and proxy PAA sources share the existing 128 MiB cap, as do accepted
+prepared chains. Ordinary binding remains authoritative. The scoped physical
+upload log cap rises to 96 only with this proxy flag, allowing a joined proxy
+source/upload witness after parent rows. Four focused mapped-PBO/bounds tests
+passed 455 assertions without skips with all required flags in a fresh process.
+The initial invocation skipped the multistage case due missing test flags;
+that artifact remains. Installed proxy verification is pending.

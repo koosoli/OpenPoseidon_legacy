@@ -1201,3 +1201,39 @@ Follow-up `60b36d06` adds an internal read-only diagnosis that separates exact t
 Follow-up `6d4226eb` adds an opt-in source-local witness for bit-identical retained-static instance updates across global epoch changes. Focused Rust tests, `cargo check`, paired build and installed WGPU `--check` passed at `b24b117a`. Dynamic casters and mesh/material/texture/pose changes remain outside this witness; cache/image/Fine gates and default GeometryPage policy are unchanged. See `STREAMING-STATIC-NOOP-EPOCH-20260928.md`.
 
 Follow-up `4d975cce` adds an opt-in ordered dynamic-instance row mutation serial, including foreign casters that leave the selected target COUNT and global retained-instance epoch unchanged. Three focused Rust tests, the paired desktop build and installed WGPU `--check` passed. It is diagnostic-only and does not prove a cached image current or change cache/Fine gates; mesh/material/texture/pose and CPU casters remain separate. See `STREAMING-DYNAMIC-IMAGE-MUTATION-20260928.md`.
+
+### 29 September 22:47 — independent hierarchy and physical parent uploads
+
+`823270ae`/`232e2da7` passed the combined game/test build, 3,921 hierarchical
+assertions and 376 mapped-PBO material assertions without skips; the paired
+installed WGPU startup passed. The installed original RAM hierarchy exercised
+authored fallback, root64/Fine512/root reuse, two independently staged pages
+and all-eight-record retirement, then normal shutdown. Its harness verdict
+failed solely on an overly narrow final one-shot rearm expectation; the actual
+Invalid/HierarchyAdmissionUnavailable refusal was safe and is now accepted
+explicitly, with the failure artifact preserved. The DayZ physical-parent
+route passed/normal and proved 38 source/mount/layout-matched uploads. Its
+230.8 ms creation is an ordered observation, not matched no-regression/FPS
+evidence. The installed COUNT diagnosis failed publication normally and
+identified palette mutation kind6 at revision1→2/epoch4 unchanged. Next work
+adds source-bound local cuts, independent authenticated disk pages and bounded
+proxy preparation; actual source writes still invalidate COUNT. Whole plan
+OPEN/defaultReady=false/performanceAccepted=false; no Fine reclaim or Nanite
+equivalence claim. See the three 20260929 decision records.
+
+### 29 September — independently addressed disk pages and bounded local demand
+
+The next combined source adds the optional authenticated `hierarchy.ghp`
+producer, metadata-only disk admission, nonblocking one-page worker handoff,
+source-bound intermediate/local cuts and a three-cut retained cache. Fresh
+producer authority and per-page digests precede publication; authored/root
+fallback remains complete during partial residency. A pure forty-view policy
+supports actual perspective and orthographic matrices without pretending the
+baked CLOD error is a certified pixel error. After documented build/test
+fixture repairs, game/tests/tools build and 29,545 focused assertions/33 cases
+passed. Pure release/refill preflight passed83/4 and DayZ physical/proxy checks
+passed455/4 without skips. The opt-in palette repair separates rigid target
+COUNT from foreign cached-image mutations; twelve Rust tests passed. Installed
+combined validation is pending. Automatic retail paging, all-view collection,
+release/refill consumer, physical byte convergence and matched performance
+remain OPEN/defaultReady=false/performanceAccepted=false.

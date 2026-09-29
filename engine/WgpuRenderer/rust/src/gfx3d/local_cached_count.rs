@@ -9,6 +9,7 @@ pub struct Key {
     pub tile: LocalTileIdentity,
     pub cull: CountCullInputKey,
     pub dynamic_serial: u64,
+    pub palette_serial: u64,
 }
 
 impl Key {
@@ -24,11 +25,16 @@ impl Key {
             first_local.checked_add(tile.tile_index) == Some(tile.cull_index) &&
             tile.instance_epoch == epoch &&
             rendered_key == Some(tile.key))
-            .then_some(Self { publication, tile, cull, dynamic_serial: 0 })
+            .then_some(Self { publication, tile, cull, dynamic_serial: 0, palette_serial: 0 })
     }
 
     pub fn with_dynamic_serial(mut self, serial: u64) -> Self {
         self.dynamic_serial = serial;
+        self
+    }
+
+    pub fn with_palette_serial(mut self, serial: u64) -> Self {
+        self.palette_serial = serial;
         self
     }
 }
@@ -76,7 +82,8 @@ impl CachedCount {
             return Relation::Unknown;
         };
         let same_image = key.publication == candidate.publication && key.tile == candidate.tile &&
-            key.dynamic_serial == candidate.dynamic_serial;
+            key.dynamic_serial == candidate.dynamic_serial &&
+            key.palette_serial == candidate.palette_serial;
         cached_count_equivalence::classify(fact, same_image, key.cull == candidate.cull,
             target, key.tile.instance_epoch, current_epoch)
     }
@@ -99,6 +106,20 @@ mod tests {
         assert_eq!(cache.fact(Some(moved_caster)).status, MainCountStatus::Unknown);
         assert_eq!(cache.diagnose(Some(moved_caster), Some((4, 9, 1)), 7),
             Relation::Unknown);
+    }
+
+    #[test]
+    fn foreign_palette_change_invalidates_cached_absence_with_stable_target_revision() {
+        let mut cache = CachedCount::default();
+        let published = key(1, 4).with_palette_serial(2);
+        let identity = id(1, 9);
+        cache.publish(published, identity);
+        cache.observe(MainCountFact { identity, status: MainCountStatus::Absent, count: 0 });
+        assert_eq!(cache.fact(Some(published)).status, MainCountStatus::Absent);
+        let changed = published.with_palette_serial(3);
+        assert_eq!(cache.fact(Some(changed)).status, MainCountStatus::Unknown);
+        assert_eq!(cache.diagnose(Some(changed), Some((4, 9, 1)), 7), Relation::Unknown);
+        assert_eq!(cache.fact(None).status, MainCountStatus::Unknown);
     }
 
     #[test]
@@ -127,7 +148,7 @@ mod tests {
         Key { publication: generation, tile: LocalTileIdentity {
             tile_index: 0, key: 42, instance_epoch: 7,
             shape: (2048, solar, 1, 5), cull_index: solar,
-        }, cull: CountCullInputKey::default(), dynamic_serial: 0 }
+        }, cull: CountCullInputKey::default(), dynamic_serial: 0, palette_serial: 0 }
     }
     fn id(token: u64, source_generation: u64) -> MainCountIdentity {
         MainCountIdentity { token, model_id: 4, source_generation, cull_epoch: 7, target_revision: 1 }
@@ -136,7 +157,7 @@ mod tests {
         Key { publication: generation, tile: LocalTileIdentity {
             tile_index, key: 42 + tile_index as u64, instance_epoch: 7,
             shape: (2048, solar, 24, 5), cull_index: solar + tile_index,
-        }, cull: CountCullInputKey::default(), dynamic_serial: 0 }
+        }, cull: CountCullInputKey::default(), dynamic_serial: 0, palette_serial: 0 }
     }
 
     #[test]

@@ -142,6 +142,35 @@ pub struct SectionGpu {
     pub variant: u32,
 }
 
+// One exact, bounded read of the armed renderer model's CURRENT LOD/section
+// table. A retired model, out-of-range span or missing source cannot
+// certify palette independence. The caller resolves each section's current
+// generational mesh handle and skin state; no certificate is retained.
+fn palette_independent_target_sections(
+    models: &[ModelGpu], lods: &[LodGpu], sections: &[SectionGpu],
+    model_id: u32, mut section_plain: impl FnMut(usize, &SectionGpu) -> bool,
+) -> bool {
+    let Some(model) = models.get(model_id as usize) else { return false; };
+    let base = model.lod_base as usize;
+    let count = model.lod_count as usize;
+    if count == 0 || count > 16 || base.checked_add(count).is_none_or(|end| end > lods.len()) {
+        return false;
+    }
+    let mut visits = 0usize;
+    for lod in &lods[base..base + count] {
+        let first = lod.section_base as usize;
+        let n = lod.section_count as usize;
+        if n == 0 || n > 64 - visits || first.checked_add(n).is_none_or(|end| end > sections.len()) {
+            return false;
+        }
+        for section in first..first + n {
+            if sections[section].index_count == 0 || !section_plain(section, &sections[section]) { return false; }
+        }
+        visits += n;
+    }
+    visits != 0
+}
+
 // One per-draw record, written by the compute parallel to out_args: the instance + the
 // global section this sub-draw renders. A sub-draw's first_instance indexes this, so the
 // VS/FS recovers both the instance transform and the per-section material.
@@ -594,6 +623,15 @@ impl InstanceTable {
                 witness.revision = witness.revision.checked_add(1).unwrap_or(0);
                 witness.last_mutation = kind;
             }
+        }
+    }
+
+    fn palette_upload_changed(&mut self, independent_target: bool, image_serial: Option<u64>) {
+        // Fresh target COUNT is independent of a foreign pose only when every
+        // current target section was proved rigid AND the separate cached-image
+        // witness retained a checked stamp. Refusal preserves the old fallback.
+        if !independent_target || image_serial.is_none() {
+            self.advance_target_revision_with_kind(6);
         }
     }
 
@@ -2952,6 +2990,17 @@ impl CullState {
         self.instances.target_revision()
     }
 
+    pub(super) fn armed_target_palette_independent(
+        &self, source_len: usize, section_plain: impl FnMut(usize, &SectionGpu) -> bool,
+    ) -> bool {
+        if source_len != self.sections.len() || self.section_materials.len() != self.sections.len() {
+            return false;
+        }
+        let Some((model_id, _)) = self.instances.target_revision() else { return false; };
+        palette_independent_target_sections(
+            &self.models, &self.lods, &self.sections, model_id, section_plain)
+    }
+
     /// Opt-in source-local provenance for global-epoch churn caused by the
     /// retained static table. It is never evidence that a cached image is
     /// current: dynamic instances, mesh/material/texture/pose edits and other
@@ -3004,6 +3053,10 @@ impl CullState {
 
     pub fn advance_retained_target_revision_with_kind(&mut self, kind: u32) {
         self.instances.advance_target_revision_with_kind(kind);
+    }
+
+    pub(super) fn palette_upload_changed(&mut self, independent_target: bool, image_serial: Option<u64>) {
+        self.instances.palette_upload_changed(independent_target, image_serial);
     }
 
     pub fn retained_target_last_mutation(&self) -> u32 {
@@ -4744,6 +4797,53 @@ fn upload_slice<T: bytemuck::Pod>(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn palette_independent_target_requires_current_bounded_model_sections() {
+        let models = [
+            ModelGpu { lod_base: 0, lod_count: 1, bounding_sphere: 1.0, _pad: 0 },
+            ModelGpu { lod_base: 1, lod_count: 1, bounding_sphere: 1.0, _pad: 0 },
+        ];
+        let lods = [
+            LodGpu { resolution: 1.0, section_base: 0, section_count: 1, is_decal: 0 },
+            LodGpu { resolution: 1.0, section_base: 1, section_count: 1, is_decal: 0 },
+        ];
+        let sections = [SectionGpu { first_index: 0, index_count: 3, base_vertex: 0, variant: 0 }; 2];
+        assert!(palette_independent_target_sections(&models, &lods, &sections, 0,
+            |section, _| section == 0));
+        assert!(!palette_independent_target_sections(&models, &lods, &sections, 0,
+            |_, _| false), "a skinned or missing generational mesh refuses");
+        assert!(!palette_independent_target_sections(&models, &lods, &sections, 1,
+            |section, _| section == 0), "a new model incarnation cannot borrow the old section proof");
+        let retired = [ModelGpu { lod_count: 0, ..models[0] }, models[1]];
+        assert!(!palette_independent_target_sections(&retired, &lods, &sections, 0,
+            |_, _| true));
+        let missing = [LodGpu { section_base: 2, ..lods[0] }, lods[1]];
+        assert!(!palette_independent_target_sections(&models, &missing, &sections, 0,
+            |_, _| true));
+        let excessive = [ModelGpu { lod_count: 17, ..models[0] }, models[1]];
+        assert!(!palette_independent_target_sections(&excessive, &lods, &sections, 0,
+            |_, _| true));
+        let wide = [LodGpu { section_count: 65, ..lods[0] }, lods[1]];
+        let many_sections = vec![sections[0]; 65];
+        assert!(!palette_independent_target_sections(&models, &wide, &many_sections, 0,
+            |_, _| true));
+    }
+
+    #[test]
+    fn foreign_palette_upload_keeps_rigid_target_count_but_refusal_or_skin_invalidates() {
+        let mut instances = InstanceTable::default();
+        assert_eq!(instances.arm_target_revision(3), Some(1));
+        instances.palette_upload_changed(true, Some(2));
+        assert_eq!(instances.target_revision(), Some((3, 1)));
+        instances.palette_upload_changed(false, Some(3));
+        assert_eq!(instances.target_revision(), Some((3, 2)));
+        instances.palette_upload_changed(true, None);
+        assert_eq!(instances.target_revision(), Some((3, 3)));
+        assert_eq!(instances.arm_target_revision(4), Some(4));
+        instances.palette_upload_changed(false, Some(4));
+        assert_eq!(instances.target_revision(), Some((4, 5)));
+    }
 
     #[test]
     fn plain_count_cull_key_tracks_exact_classify_inputs() {

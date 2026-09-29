@@ -11,6 +11,7 @@ pub struct Key {
     pub epoch: u64,
     pub cull: CountCullInputKey,
     pub dynamic_serial: u64,
+    pub palette_serial: u64,
 }
 
 impl Key {
@@ -20,11 +21,16 @@ impl Key {
         bits[..16].copy_from_slice(&view.view_proj.to_cols_array().map(f32::to_bits));
         bits[16] = view.kernel_uv.to_bits();
         bits[17] = view.bias_ndc.to_bits();
-        Self { publication, image, view: bits, epoch, cull, dynamic_serial: 0 }
+        Self { publication, image, view: bits, epoch, cull, dynamic_serial: 0, palette_serial: 0 }
     }
 
     pub fn with_dynamic_serial(mut self, serial: u64) -> Self {
         self.dynamic_serial = serial;
+        self
+    }
+
+    pub fn with_palette_serial(mut self, serial: u64) -> Self {
+        self.palette_serial = serial;
         self
     }
 }
@@ -73,7 +79,8 @@ impl CachedCount {
         };
         let same_image = key.publication == candidate.publication &&
             key.image == candidate.image && key.view == candidate.view &&
-            key.epoch == candidate.epoch && key.dynamic_serial == candidate.dynamic_serial;
+            key.epoch == candidate.epoch && key.dynamic_serial == candidate.dynamic_serial &&
+            key.palette_serial == candidate.palette_serial;
         cached_count_equivalence::classify(fact, same_image, key.cull == candidate.cull,
             target, key.epoch, current_epoch)
     }
@@ -96,6 +103,20 @@ mod tests {
         assert_eq!(cache.fact(Some(moved_caster)).status, MainCountStatus::Unknown);
         assert_eq!(cache.diagnose(Some(moved_caster), Some((4, 9, 1)), 7),
             Relation::Unknown);
+    }
+
+    #[test]
+    fn foreign_palette_change_invalidates_cached_absence_with_stable_target_revision() {
+        let mut cache = CachedCount::default();
+        let published = key(1).with_palette_serial(2);
+        let identity = id(1, 4, 9);
+        cache.publish(published, identity);
+        cache.observe(MainCountFact { identity, status: MainCountStatus::Absent, count: 0 });
+        assert_eq!(cache.fact(Some(published)).status, MainCountStatus::Absent);
+        let changed = published.with_palette_serial(3);
+        assert_eq!(cache.fact(Some(changed)).status, MainCountStatus::Unknown);
+        assert_eq!(cache.diagnose(Some(changed), Some((4, 9, 1)), 7), Relation::Unknown);
+        assert_eq!(cache.fact(None).status, MainCountStatus::Unknown);
     }
 
     #[test]

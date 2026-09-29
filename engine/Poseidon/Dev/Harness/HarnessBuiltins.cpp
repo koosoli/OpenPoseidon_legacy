@@ -71,6 +71,7 @@ using namespace Poseidon;
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <cfloat>
 #include <cstdlib>
 #include <string>
 #include <thread>
@@ -586,9 +587,12 @@ void RegisterScreenshot(HarnessServer& hs)
             else if(!std::strcmp(name,"beginDiskClodPaged")) action=Engine::GeometryPageFixtureAction::BeginDiskClodPaged;
             else if(!std::strcmp(name,"beginOriginalDiskClodPaged")) action=Engine::GeometryPageFixtureAction::BeginOriginalDiskClodPaged;
             else if(!std::strcmp(name,"beginOriginalHierarchy")) action=Engine::GeometryPageFixtureAction::BeginOriginalHierarchy;
+            else if(!std::strcmp(name,"beginOriginalHierarchyDisk")) action=Engine::GeometryPageFixtureAction::BeginOriginalHierarchyDisk;
             else if(!std::strcmp(name,"stepHierarchy")) action=Engine::GeometryPageFixtureAction::StepHierarchy;
             else if(!std::strcmp(name,"rootHierarchy")) action=Engine::GeometryPageFixtureAction::RootHierarchy;
             else if(!std::strcmp(name,"fineHierarchy")) action=Engine::GeometryPageFixtureAction::FineHierarchy;
+            else if(!std::strcmp(name,"intermediateHierarchy")) action=Engine::GeometryPageFixtureAction::IntermediateHierarchy;
+            else if(!std::strcmp(name,"localHierarchy")) action=Engine::GeometryPageFixtureAction::LocalHierarchy;
             else if(!std::strcmp(name,"followCamera")) action=Engine::GeometryPageFixtureAction::FollowCamera;
             else if(!std::strcmp(name,"followProjected")) action=Engine::GeometryPageFixtureAction::FollowProjected;
             else if(!std::strcmp(name,"stopCamera")) action=Engine::GeometryPageFixtureAction::StopCamera;
@@ -713,7 +717,140 @@ void RegisterScreenshot(HarnessServer& hs)
                 }
                 cameraArgument=&camera;
             }
-            const auto report=GEngine->ControlGeometryPageFixture(action,xyz[0],xyz[1],xyz[2],diskArgument,cameraArgument);
+            Engine::GeometryPageHierarchyDemandInput hierarchy;
+            const Engine::GeometryPageHierarchyDemandInput* hierarchyArgument=nullptr;
+            if(action==Engine::GeometryPageFixtureAction::IntermediateHierarchy||
+               action==Engine::GeometryPageFixtureAction::LocalHierarchy) {
+                const auto integer=[&](const char* key,uint64_t& value) {
+                    const auto* item=cJSON_GetObjectItemCaseSensitive(root,key);
+                    if(!cJSON_IsNumber(item)||!std::isfinite(item->valuedouble)||item->valuedouble<1||
+                        item->valuedouble>9007199254740991.0||std::floor(item->valuedouble)!=item->valuedouble)return false;
+                    value=uint64_t(item->valuedouble);return true;
+                };
+                uint64_t groups=0;
+                if(!integer("sourceAdmissionEpoch",hierarchy.sourceAdmissionEpoch)||
+                   !integer("pageEpoch",hierarchy.pageEpoch)||
+                   !integer("expectedRequestId",hierarchy.expectedRequestId)||
+                   !integer("groupCount",groups)||groups>64)
+                    return HarnessProtocol::ErrorResponse("exact bounded hierarchy source, epoch, request and group count required");
+                hierarchy.groupCount=uint32_t(groups);
+                const auto* hash=cJSON_GetObjectItemCaseSensitive(root,"packageSha256");
+                if(!cJSON_IsString(hash)||!hash->valuestring||std::strlen(hash->valuestring)!=64)
+                    return HarnessProtocol::ErrorResponse("exact hierarchy package SHA-256 required");
+                const auto digit=[](char c)->int {
+                    if(c>='0'&&c<='9')return c-'0';
+                    if(c>='a'&&c<='f')return c-'a'+10;
+                    if(c>='A'&&c<='F')return c-'A'+10;
+                    return -1;
+                };
+                for(size_t i=0;i<32;++i) {
+                    const int hi=digit(hash->valuestring[2*i]),lo=digit(hash->valuestring[2*i+1]);
+                    if(hi<0||lo<0)return HarnessProtocol::ErrorResponse("hierarchy package SHA-256 must be hexadecimal");
+                    hierarchy.packageSha256[i]=uint8_t(hi*16+lo);
+                }
+                const auto threshold=[&](const cJSON* item,float& value) {
+                    if(!cJSON_IsNumber(item)||!std::isfinite(item->valuedouble)||item->valuedouble<0||
+                        item->valuedouble>=double(FLT_MAX))return false;
+                    value=float(item->valuedouble);
+                    return std::isfinite(value)&&value<FLT_MAX;
+                };
+                if(action==Engine::GeometryPageFixtureAction::IntermediateHierarchy) {
+                    float value=0;
+                    if(!threshold(cJSON_GetObjectItemCaseSensitive(root,"threshold"),value))
+                        return HarnessProtocol::ErrorResponse("finite hierarchy threshold required");
+                    std::fill_n(hierarchy.groupThresholds.begin(),hierarchy.groupCount,value);
+                } else {
+                    const auto* values=cJSON_GetObjectItemCaseSensitive(root,"groupThresholds");
+                    if(!cJSON_IsArray(values)||cJSON_GetArraySize(values)!=int(hierarchy.groupCount))
+                        return HarnessProtocol::ErrorResponse("exact bounded hierarchy group thresholds required");
+                    for(uint32_t i=0;i<hierarchy.groupCount;++i)
+                        if(!threshold(cJSON_GetArrayItem(values,int(i)),hierarchy.groupThresholds[i]))
+                            return HarnessProtocol::ErrorResponse("hierarchy group threshold must be finite nonnegative");
+                }
+                hierarchyArgument=&hierarchy;
+            }
+            Engine::GeometryPageHierarchyDiskFixtureInput hierarchyDisk;
+            const Engine::GeometryPageHierarchyDiskFixtureInput* hierarchyDiskArgument=nullptr;
+            if(action==Engine::GeometryPageFixtureAction::BeginOriginalHierarchyDisk) {
+                const auto* input=cJSON_GetObjectItemCaseSensitive(root,"hierarchyDisk");
+                if(!cJSON_IsObject(input))return HarnessProtocol::ErrorResponse("hierarchyDisk authority required");
+                const auto boundedInteger=[](const cJSON* object,const char* key,uint64_t& output,uint64_t maximum,uint64_t minimum=1) {
+                    const auto* item=cJSON_GetObjectItemCaseSensitive(object,key);
+                    if(!cJSON_IsNumber(item)||!std::isfinite(item->valuedouble)||item->valuedouble<double(minimum)||
+                       item->valuedouble>double(maximum)||std::floor(item->valuedouble)!=item->valuedouble)return false;
+                    output=uint64_t(item->valuedouble);return true;
+                };
+                uint64_t metadataBytes=0;
+                if(!boundedInteger(root,"sourceAdmissionEpoch",hierarchyDisk.sourceAdmissionEpoch,9007199254740991ULL)||
+                   !boundedInteger(root,"originalSourceBytes",hierarchyDisk.originalSourceBytes,128*1024)||
+                   !boundedInteger(input,"fileBytes",hierarchyDisk.fileBytes,Engine::GeometryPageHierarchyDiskFixtureInput::MaxFileBytes)||
+                   !boundedInteger(input,"metadataBytes",metadataBytes,Engine::GeometryPageHierarchyDiskFixtureInput::MaxMetadataBytes))
+                    return HarnessProtocol::ErrorResponse("bounded hierarchy disk sizes and source epoch required");
+                const auto digit=[](char c)->int {
+                    if(c>='0'&&c<='9')return c-'0';
+                    if(c>='a'&&c<='f')return c-'a'+10;
+                    if(c>='A'&&c<='F')return c-'A'+10;
+                    return -1;
+                };
+                const auto hash=[&](const cJSON* object,const char* key,uint8_t* output) {
+                    const auto* item=cJSON_GetObjectItemCaseSensitive(object,key);
+                    if(!cJSON_IsString(item)||!item->valuestring||std::strlen(item->valuestring)!=64)return false;
+                    for(size_t i=0;i<32;++i) {
+                        const int hi=digit(item->valuestring[2*i]),lo=digit(item->valuestring[2*i+1]);
+                        if(hi<0||lo<0)return false;output[i]=uint8_t(hi*16+lo);
+                    }
+                    return true;
+                };
+                const auto word=[&](const cJSON* object,const char* key,uint64_t& output) {
+                    const auto* item=cJSON_GetObjectItemCaseSensitive(object,key);
+                    if(!cJSON_IsString(item)||!item->valuestring||std::strlen(item->valuestring)!=16)return false;
+                    uint64_t value=0;for(size_t i=0;i<16;++i) {
+                        const int d=digit(item->valuestring[i]);if(d<0)return false;value=(value<<4)|uint64_t(d);
+                    }
+                    output=value;return true;
+                };
+                const auto* source=cJSON_GetObjectItemCaseSensitive(input,"source");
+                uint64_t producer=0,coarse=0,fine=0,layout=0,mapping=0;
+                if(!cJSON_IsObject(source)||
+                   !hash(input,"packageSha256",hierarchyDisk.packageSha256.data())||
+                   !hash(input,"metadataSha256",hierarchyDisk.metadataSha256.data())||
+                   !hash(source,"sourceSha256",hierarchyDisk.original.sha256.data())||
+                   !word(source,"geometryOptionsHex",hierarchyDisk.original.geometryOptions)||
+                   !word(source,"materialOptionsHex",hierarchyDisk.original.materialOptions)||
+                   !boundedInteger(source,"producerVersion",producer,UINT32_MAX)||
+                   !boundedInteger(source,"coarseRepresentation",coarse,UINT32_MAX,0)||
+                   !boundedInteger(source,"fineRepresentation",fine,UINT32_MAX,0)||
+                   !boundedInteger(source,"vertexLayout",layout,UINT32_MAX)||
+                   !boundedInteger(source,"materialMapping",mapping,UINT32_MAX))
+                    return HarnessProtocol::ErrorResponse("exact hierarchy identity required");
+                hierarchyDisk.original.producerVersion=uint32_t(producer);
+                hierarchyDisk.original.coarseRepresentation=uint32_t(coarse);
+                hierarchyDisk.original.fineRepresentation=uint32_t(fine);
+                hierarchyDisk.original.vertexLayout=uint32_t(layout);
+                hierarchyDisk.original.materialMapping=uint32_t(mapping);
+                const auto* path=cJSON_GetObjectItemCaseSensitive(input,"path");
+                const auto* hex=cJSON_GetObjectItemCaseSensitive(input,"metadataHex");
+                if(!cJSON_IsString(path)||!path->valuestring||!cJSON_IsString(hex)||!hex->valuestring)
+                    return HarnessProtocol::ErrorResponse("bounded hierarchy path and prefix required");
+                size_t length=0;while(length<hierarchyDisk.path.size()&&path->valuestring[length]) {
+                    const auto ch=static_cast<unsigned char>(path->valuestring[length]);
+                    if(ch<32||ch>126)return HarnessProtocol::ErrorResponse("hierarchy path must be bounded ASCII");
+                    hierarchyDisk.path[length]=char(ch);++length;
+                }
+                if(!length||length==hierarchyDisk.path.size())
+                    return HarnessProtocol::ErrorResponse("hierarchy path exceeds 1023 bytes");
+                size_t hexLength=0;while(hexLength<=2*Engine::GeometryPageHierarchyDiskFixtureInput::MaxMetadataBytes&&hex->valuestring[hexLength])++hexLength;
+                if(hexLength!=2*metadataBytes)
+                    return HarnessProtocol::ErrorResponse("hierarchy prefix hex length mismatch");
+                hierarchyDisk.metadataBytes.resize(size_t(metadataBytes));
+                for(size_t i=0;i<metadataBytes;++i) {
+                    const int hi=digit(hex->valuestring[2*i]),lo=digit(hex->valuestring[2*i+1]);
+                    if(hi<0||lo<0)return HarnessProtocol::ErrorResponse("hierarchy prefix must be hex");
+                    hierarchyDisk.metadataBytes[i]=uint8_t(hi*16+lo);
+                }
+                hierarchyDiskArgument=&hierarchyDisk;
+            }
+            const auto report=GEngine->ControlGeometryPageFixture(action,xyz[0],xyz[1],xyz[2],diskArgument,cameraArgument,hierarchyArgument,hierarchyDiskArgument);
             const char* status="Failed";
             switch(report.status) {
                 case Engine::GeometryReportStatus::Unsupported: status="Disabled"; break;
@@ -733,7 +870,10 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(meshCount); PAGE_FIXTURE_NUMBER(meshesPresent); PAGE_FIXTURE_NUMBER(meshesAbsent);
             PAGE_FIXTURE_NUMBER(coarseTriangles); PAGE_FIXTURE_NUMBER(fineTriangles); PAGE_FIXTURE_NUMBER(coarsePages); PAGE_FIXTURE_NUMBER(finePages);
             PAGE_FIXTURE_NUMBER(hierarchyPages);PAGE_FIXTURE_NUMBER(hierarchyRootPages);PAGE_FIXTURE_NUMBER(hierarchyResidentPages);
+            PAGE_FIXTURE_NUMBER(hierarchyRetainedCutModels);
+            PAGE_FIXTURE_NUMBER(hierarchyDiskPageReads);
             PAGE_FIXTURE_NUMBER(hierarchySelectedTriangles);PAGE_FIXTURE_NUMBER(hierarchyCutModel);PAGE_FIXTURE_NUMBER(hierarchyThreshold);
+            PAGE_FIXTURE_NUMBER(hierarchyDemandGroupCount);
             PAGE_FIXTURE_NUMBER(hierarchyRequiredMask);PAGE_FIXTURE_NUMBER(hierarchyResidentMask);PAGE_FIXTURE_NUMBER(hierarchyMissingMask);
             cJSON_AddStringToObject(result,"hierarchyRequiredMaskExact",std::to_string(report.hierarchyRequiredMask).c_str());
             cJSON_AddStringToObject(result,"hierarchyResidentMaskExact",std::to_string(report.hierarchyResidentMask).c_str());
@@ -771,6 +911,8 @@ void RegisterScreenshot(HarnessServer& hs)
 #define PAGE_FIXTURE_BOOL(field) cJSON_AddBoolToObject(result,#field,report.field)
             PAGE_FIXTURE_BOOL(clodPilot); PAGE_FIXTURE_BOOL(fallbackSelected);
             PAGE_FIXTURE_BOOL(hierarchicalPilot);
+            PAGE_FIXTURE_BOOL(hierarchicalDiskPilot);
+            PAGE_FIXTURE_BOOL(hierarchyLocalDemand);
             PAGE_FIXTURE_BOOL(pagedPilot); PAGE_FIXTURE_BOOL(fineResident); PAGE_FIXTURE_BOOL(fineEvictionPending);
             PAGE_FIXTURE_BOOL(diskPilot); PAGE_FIXTURE_BOOL(coarseResident);
             PAGE_FIXTURE_BOOL(originalFilePilot);PAGE_FIXTURE_BOOL(sourceSnapshotValidated);PAGE_FIXTURE_BOOL(sourceAdmissionConsumed);
@@ -824,7 +966,13 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddStringToObject(result,"hierarchyPackageSha256",report.hierarchyPackageSha256.c_str());
             auto* hierarchyClusters=cJSON_AddArrayToObject(result,"hierarchySelectedClusters");
             for(auto cluster:report.hierarchySelectedClusters)cJSON_AddItemToArray(hierarchyClusters,cJSON_CreateNumber(cluster));
-            cJSON_AddStringToObject(result,"scope","Private programmatically authored box/curved-grid pilot; explicit authored/selected-CLOD RAM, original-source hierarchy RAM pages, or private disk value-worker in paged mode; hierarchy stages at most one page per action and selects only complete root/fine cuts; disk expected keys supplied externally and raw pilot/helper source compared independently without owner file I/O/bake; explicit CLOD bake scratch/latency and physical GPU allocation peaks not hard-bounded; returned main frame and full-generation record cut, not all-pass/pixel, mounted-file provenance, queue-completion or device-free proof");
+            auto* hierarchyThresholds=cJSON_AddArrayToObject(result,"hierarchyDemandThresholds");
+            for(uint32_t g=0;g<report.hierarchyDemandGroupCount&&g<64;++g)
+                cJSON_AddItemToArray(hierarchyThresholds,cJSON_CreateNumber(report.hierarchyDemandThresholds[g]));
+            auto* hierarchyGroupErrors=cJSON_AddArrayToObject(result,"hierarchyGroupErrors");
+            for(uint32_t g=0;g<report.hierarchyDemandGroupCount&&g<64;++g)
+                cJSON_AddItemToArray(hierarchyGroupErrors,cJSON_CreateNumber(report.hierarchyGroupErrors[g]));
+            cJSON_AddStringToObject(result,"scope","Private programmatically authored box/curved-grid pilot; explicit authored/selected-CLOD RAM, original-source hierarchy RAM or independently authenticated disk pages, or private selected-cut disk value-worker; hierarchy stages at most one page per action and selects only complete retained root/fine/intermediate/local cuts; disk expected keys supplied externally and raw pilot/helper source compared independently without owner file I/O/bake; explicit CLOD bake scratch/latency and physical GPU allocation peaks not hard-bounded; returned main frame and full-generation record cut, not all-pass/pixel, mounted-file provenance, queue-completion or device-free proof");
             return HarnessProtocol::JsonResponse(result);
         });
     hs.RegisterCommand({"geometry_allocations", "Request/poll bounded retained mesh allocation diagnostics", {}},

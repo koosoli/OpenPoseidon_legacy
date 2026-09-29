@@ -6,6 +6,7 @@ pub(crate) mod pool;
 mod allocation_report;
 mod mesh_facts;
 mod mesh_ack;
+mod palette_content_witness;
 pub(crate) mod main_count_completion;
 mod registered_mesh_refs;
 mod section_refresh;
@@ -1252,6 +1253,73 @@ fn resolve_registered_section(meshes: &SlotMap<MeshKey, Mesh>, src: &GpuSectionS
             base_vertex: 0,
             variant: src.variant,
         },
+    }
+}
+
+// Check the same final section resolution used for drawing, with the full
+// generational mesh handle. A stale handle or changed source cannot inherit a
+// former model incarnation's rigid proof.
+fn palette_independent_section(
+    meshes: &SlotMap<MeshKey, Mesh>, source: &GpuSectionSrc, resolved: &cull::SectionGpu,
+) -> bool {
+    let key: MeshKey = KeyData::from_ffi(source.mesh).into();
+    let Some(mesh) = meshes.get(key) else { return false; };
+    source.index_count != 0 &&
+        source.index_begin.checked_add(source.index_count).is_some_and(|end| end <= mesh.index_count) &&
+        mesh.alloc.ibase.checked_add(source.index_begin)
+            .and_then(|first| first.checked_add(source.index_count)).is_some() &&
+        mesh.skin.is_none() && resolve_registered_section(meshes, source) == *resolved
+}
+
+fn palette_request_current(
+    witness: Option<&palette_content_witness::PaletteContentWitness>,
+    stamp: Option<(u64, u64)>, token: u64,
+) -> bool {
+    witness.is_none_or(|witness| stamp.is_some_and(|(request, serial)|
+        request == token && witness.image_serial() == Some(serial)))
+}
+
+#[cfg(test)]
+mod palette_section_tests {
+    use super::*;
+
+    #[test]
+    fn current_generational_rigid_mesh_and_exact_source_are_required() {
+        let mut meshes: SlotMap<MeshKey, Mesh> = SlotMap::with_key();
+        let make_mesh = || Mesh {
+            alloc: MeshAlloc { vbase: 2, ibase: 4 }, index_count: 9, vert_count: 3,
+            skin: None, aabb_min: [0.0; 3], aabb_max: [0.0; 3],
+        };
+        let first = meshes.insert(make_mesh());
+        let source = GpuSectionSrc { mesh: first.data().as_ffi(), index_begin: 2,
+            index_count: 3, variant: 0 };
+        let resolved = resolve_registered_section(&meshes, &source);
+        assert!(palette_independent_section(&meshes, &source, &resolved));
+        assert!(!palette_independent_section(&meshes, &GpuSectionSrc { index_begin: 8, ..source }, &resolved));
+        assert!(!palette_independent_section(&meshes, &source,
+            &cull::SectionGpu { first_index: 7, ..resolved }));
+        meshes.remove(first);
+        let next = meshes.insert(make_mesh());
+        assert_ne!(first.data().as_ffi(), next.data().as_ffi());
+        assert!(!palette_independent_section(&meshes, &source, &resolved),
+            "a new incarnation cannot satisfy the old full-generational handle");
+    }
+
+    #[test]
+    fn cached_count_publication_refuses_palette_change_during_request() {
+        let mut witness = palette_content_witness::PaletteContentWitness::default();
+        assert!(palette_request_current(None, None, 9), "disabled flag keeps old behavior");
+        assert!(!palette_request_current(Some(&witness), None, 9));
+        let mut matrices = [[0.0; 16]; 128];
+        assert!(witness.observe(&matrices, 8192, false));
+        let stamp = (9, witness.image_serial().unwrap());
+        assert!(palette_request_current(Some(&witness), Some(stamp), 9));
+        assert!(!palette_request_current(Some(&witness), Some(stamp), 10));
+        matrices[0][0] = 1.0;
+        assert!(witness.observe(&matrices, 8192, false));
+        assert!(!palette_request_current(Some(&witness), Some(stamp), 9));
+        assert!(witness.observe(&matrices, 0, false));
+        assert!(!palette_request_current(Some(&witness), Some(stamp), 9));
     }
 }
 
@@ -3930,6 +3998,10 @@ pub struct Gfx3d {
     // Only armed for private cached COUNT requests. Foreign dynamic casters
     // must invalidate an image even when target rows and static epoch agree.
     count_dynamic_stamp: Option<(u64, u64)>,
+    // Opt-in image-input stamp captured when the private COUNT request is armed.
+    // A palette edit before cache publication must not certify the old image
+    // under the new current serial.
+    count_palette_stamp: Option<(u64, u64)>,
     cameras: CameraGroup,
     conform: ConformGroup,
     gi: gi::GiProbes, // REN-GI-001
@@ -3938,6 +4010,7 @@ pub struct Gfx3d {
     world: StorageArray,
     // Skinned draws: one PALETTE_SIZE-matrix block per slot, dynamic-offset UBO.
     palette: DynUbo,
+    palette_content_witness: Option<Box<palette_content_witness::PaletteContentWitness>>,
     // Per-draw material lighting, one entry per draw slot, read-only storage
     // indexed by instance_index. Bound at group(1)/binding(1) for both the plain
     // and skinned group-1 bind groups (combined with world / palette below).
@@ -4918,11 +4991,14 @@ impl Gfx3d {
             main_count_completion: None,
             view_applicability: None,
             count_dynamic_stamp: None,
+            count_palette_stamp: None,
             cameras,
             conform,
             gi,
             world,
             palette,
+            palette_content_witness: (std::env::var("WGR_GEOMETRY_PALETTE_CONTENT_WITNESS").as_deref() == Ok("1"))
+                .then(|| Box::new(palette_content_witness::PaletteContentWitness::default())),
             material,
             group1_plain_layout,
             group1_skinned_layout,
@@ -5786,6 +5862,24 @@ impl Gfx3d {
 
     pub fn retained_target_revision(&self) -> Option<(u32, u64)> {
         self.cull.retained_target_revision()
+    }
+
+    // Recompute from the CURRENT renderer model/LOD/section tables and full
+    // generational mesh handles. The exact pilot's MeshCreate-only sections
+    // pass; any stale resolution, missing mesh, new skin or oversized model
+    // keeps the old conservative target-revision invalidation.
+    fn armed_target_palette_independent(&self) -> bool {
+        if self.palette_content_witness.is_none() { return false; }
+        self.cull.armed_target_palette_independent(self.gpu_section_src.len(), |section, resolved| {
+            let Some(source) = self.gpu_section_src.get(section) else { return false; };
+            palette_independent_section(&self.meshes, source, resolved)
+        })
+    }
+
+    fn palette_image_serial(&self) -> Option<u64> {
+        // The opt-in witness is absent on the default path, preserving existing
+        // cached-key behavior and adding no default palette snapshot.
+        self.palette_content_witness.as_ref().map_or(Some(0), |witness| witness.image_serial())
     }
 
     pub fn texture_content_changed(&mut self) {
@@ -8179,11 +8273,18 @@ impl Gfx3d {
                     );
                 }
             }
-            // A pose change can move a caster in a cached depth image without
-            // altering its instance row or the selected model's COUNT inputs.
-            // The owner is not known here, so invalidate the optional witness
-            // conservatively after any successful palette upload.
-            self.cull.advance_retained_target_revision_with_kind(6); // pose palette
+        }
+        // Optional exact-content observation starts before COUNT requests, so
+        // identical rewrites can preserve a known baseline. Changed foreign
+        // slots/order, removed slots, stride/reallocation or refused bounded
+        // snapshot still invalidate. Normal rendering retains no snapshot and
+        // keeps the existing conservative successful-upload behavior.
+        let palette_mutated = self.palette_content_witness.as_mut().map_or(slots > 0,
+            |witness| witness.observe(&palette[..slots * PALETTE_SIZE], self.palette.stride, palette_grew));
+        if palette_mutated {
+            let independent = self.armed_target_palette_independent();
+            let image_serial = self.palette_image_serial();
+            self.cull.palette_upload_changed(independent, image_serial);
         }
 
         // (Re)build the combined group-1 bind groups when a backing buffer moved
@@ -10146,6 +10247,7 @@ impl Gfx3d {
                                  model_id: u32, source_generation: u64) -> bool {
         self.view_applicability = None;
         self.count_dynamic_stamp = None;
+        self.count_palette_stamp = None;
         if let Some(witness) = self.main_count_completion.as_mut() { witness.invalidate(); }
         if let Some(caches) = &mut self.interior_cached_counts {
             // The cull arm replaces its one-request answer. Keep an already
@@ -10176,6 +10278,8 @@ impl Gfx3d {
         if armed {
             self.count_dynamic_stamp = self.cull.arm_dynamic_image_mutation()
                 .map(|serial| (token, serial));
+            self.count_palette_stamp = self.palette_content_witness.as_ref()
+                .and_then(|witness| witness.image_serial()).map(|serial| (token, serial));
             let identity = self.cull.main_target_count_fact().identity;
             self.main_count_completion.get_or_insert_with(main_count_completion::Witness::new).arm(identity);
             if let Some(caches) = &mut self.interior_cached_counts {
@@ -10456,6 +10560,8 @@ impl Gfx3d {
         let dynamic_current = self.count_dynamic_stamp.is_some_and(|(request, stamp)|
             request == token &&
             self.cull.dynamic_row_relation(stamp) == cull::DynamicRowRelation::Unchanged);
+        let palette_current = palette_request_current(
+            self.palette_content_witness.as_deref(), self.count_palette_stamp, token);
         if main {
             if let Some(witness) = self.main_count_completion.as_mut() { witness.commit(token); }
             for cascade in 0..5 {
@@ -10463,7 +10569,7 @@ impl Gfx3d {
                     let identity = self.cull.shadow_target_count_fact(4).identity;
                     let key = self.gi_rsm_current_count_key();
                     if let (Some(cache), Some(key)) = (&mut self.gi_rsm_cached_count, key) {
-                        if identity.token == token && dynamic_current { cache.publish(key, identity); }
+                        if identity.token == token && dynamic_current && palette_current { cache.publish(key, identity); }
                     }
                 }
             }
@@ -10471,7 +10577,7 @@ impl Gfx3d {
                 let identity = self.cull.local0_target_count_fact().identity;
                 let key = self.local_current_count_key(0);
                 if let (Some(caches), Some(key)) = (&mut self.local_cached_counts, key) {
-                    if identity.token == token && dynamic_current { caches[0].publish(key, identity); }
+                    if identity.token == token && dynamic_current && palette_current { caches[0].publish(key, identity); }
                 }
             }
             self.cull.reflection_target_count_commit(token);
@@ -10480,7 +10586,7 @@ impl Gfx3d {
                 let identity = self.cull.sky0_target_count_fact().identity;
                 let key = self.interior_current_count_key(0);
                 if let (Some(caches), Some(key)) = (&mut self.interior_cached_counts, key) {
-                    if identity.token == token && dynamic_current { caches[0].publish(key, identity); }
+                    if identity.token == token && dynamic_current && palette_current { caches[0].publish(key, identity); }
                 }
             }
             if self.cull.batch_target_count_commit(token) {
@@ -10491,7 +10597,7 @@ impl Gfx3d {
                     let identity = self.cull.batch_target_count_fact(4 + k - 1).identity;
                     let key = self.local_current_count_key(k);
                     if let (Some(caches), Some(key)) = (&mut self.local_cached_counts, key) {
-                        if identity.token == token && dynamic_current { caches[k].publish(key, identity); }
+                        if identity.token == token && dynamic_current && palette_current { caches[k].publish(key, identity); }
                     }
                 }
                 for i in 1..sky_vis::DIRECTION_COUNT {
@@ -10500,7 +10606,7 @@ impl Gfx3d {
                     let identity = self.cull.batch_target_count_fact(i - 1).identity;
                     let key = self.interior_current_count_key(i);
                     if let (Some(caches), Some(key)) = (&mut self.interior_cached_counts, key) {
-                        if identity.token == token && dynamic_current { caches[i].publish(key, identity); }
+                        if identity.token == token && dynamic_current && palette_current { caches[i].publish(key, identity); }
                     }
                 }
             }
@@ -10511,6 +10617,9 @@ impl Gfx3d {
     pub fn main_target_count_abort(&mut self, token: u64) {
         if self.count_dynamic_stamp.is_some_and(|(request, _)| request == token) {
             self.count_dynamic_stamp = None;
+        }
+        if self.count_palette_stamp.is_some_and(|(request, _)| request == token) {
+            self.count_palette_stamp = None;
         }
         if self.view_applicability.is_some_and(|p| p.identity.token == token) {
             self.view_applicability = None;
@@ -10655,7 +10764,8 @@ impl Gfx3d {
             !same_sky_view(view, self.gi.rsm_view) { return None; }
         let cull = self.cull.sky_count_cull_key(sky_vis::DIRECTION_COUNT)?;
         Some(gi_rsm_cached_count::Key::new(generation, image, view, epoch, cull)
-            .with_dynamic_serial(self.cull.dynamic_image_mutation_serial()?))
+            .with_dynamic_serial(self.cull.dynamic_image_mutation_serial()?)
+            .with_palette_serial(self.palette_image_serial()?))
     }
 
     fn local_count_diagnostic_candidate(&self, index: usize) -> Option<local_cached_count::Key> {
@@ -10669,7 +10779,8 @@ impl Gfx3d {
         let dynamic_serial = self.cull.dynamic_image_mutation_serial()?;
         local_cached_count::Key::current(publication, tile, shape, self.local_cache_shape,
             target.layers, self.local_view_key[index], tile.instance_epoch, cull)
-            .map(|key| key.with_dynamic_serial(dynamic_serial))
+            .and_then(|key| self.palette_image_serial().map(|serial|
+                key.with_dynamic_serial(dynamic_serial).with_palette_serial(serial)))
     }
 
     fn interior_count_diagnostic_candidate(&self, i: usize) -> Option<interior_cached_count::Key> {
@@ -10681,7 +10792,8 @@ impl Gfx3d {
             !same_sky_view(view, self.interior_sky_views[i]) { return None; }
         let cull = self.cull.sky_count_cull_key(i)?;
         Some(interior_cached_count::Key::new(i, generation, self.interior_sky_gen, view, epoch, cull)
-            .with_dynamic_serial(self.cull.dynamic_image_mutation_serial()?))
+            .with_dynamic_serial(self.cull.dynamic_image_mutation_serial()?)
+            .with_palette_serial(self.palette_image_serial()?))
     }
     pub fn shadow_target_count_fact(&mut self, device: &wgpu::Device,
                                     cascade: usize) -> cull::MainCountFact {
@@ -10708,7 +10820,8 @@ impl Gfx3d {
             !same_sky_view(view, self.gi.rsm_view) { return None; }
         let cull = self.cull.sky_count_cull_key(sky_vis::DIRECTION_COUNT)?;
         Some(gi_rsm_cached_count::Key::new(generation, image, view, epoch, cull)
-            .with_dynamic_serial(self.cull.dynamic_image_mutation_serial()?))
+            .with_dynamic_serial(self.cull.dynamic_image_mutation_serial()?)
+            .with_palette_serial(self.palette_image_serial()?))
     }
     pub fn local0_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
         self.cull.harvest_local0_target_count(device);
@@ -10743,7 +10856,8 @@ impl Gfx3d {
         let dynamic_serial = self.cull.dynamic_image_mutation_serial()?;
         local_cached_count::Key::current(publication, tile, shape, self.local_cache_shape,
             target.layers, self.local_view_key[index], self.cull.instance_epoch(), cull)
-            .map(|key| key.with_dynamic_serial(dynamic_serial))
+            .and_then(|key| self.palette_image_serial().map(|serial|
+                key.with_dynamic_serial(dynamic_serial).with_palette_serial(serial)))
     }
 
     pub fn reflection_target_count_fact(&mut self, device: &wgpu::Device) -> cull::MainCountFact {
@@ -10769,7 +10883,8 @@ impl Gfx3d {
             !same_sky_view(view, self.interior_sky_views[i]) { return None; }
         let cull = self.cull.sky_count_cull_key(i)?;
         Some(interior_cached_count::Key::new(i, generation, self.interior_sky_gen, view, epoch, cull)
-            .with_dynamic_serial(self.cull.dynamic_image_mutation_serial()?))
+            .with_dynamic_serial(self.cull.dynamic_image_mutation_serial()?)
+            .with_palette_serial(self.palette_image_serial()?))
     }
 
     pub fn cull_dispatch(

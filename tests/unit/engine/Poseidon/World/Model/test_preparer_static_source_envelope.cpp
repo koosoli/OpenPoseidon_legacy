@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamRapStageNames.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamProxyMaterialScan.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
@@ -74,7 +75,7 @@ std::vector<char> Original(bool motion)
 
 // Original one-LOD MLOD quad, parsed by the real ModelCache path. No triangulation
 // or manually forged DTO hides the production pre-conversion quad representation.
-std::vector<char> OriginalMlodQuad()
+std::vector<char> OriginalMlodQuad(const std::string& materialPath = {})
 {
     Bytes b; b.data={'M','L','O','D'}; b.U32(257); b.U32(1);
     b.data.insert(b.data.end(),{'P','3','D','M'});
@@ -83,7 +84,9 @@ std::vector<char> OriginalMlodQuad()
     b.Point(1,1,0); b.U32(0); b.Point(0,1,0); b.U32(0);
     b.Point(0,0,1); b.U32(4);
     for(uint32_t i=0;i<4;++i){b.U32(i);b.U32(0);b.F32(i==1||i==2?1.f:0.f);b.F32(i>=2?1.f:0.f);}
-    b.U32(0); b.U8(0); b.U8(0); // empty original texture/material; test adds its actual bound dependency
+    b.U32(0); b.U8(0); // empty original texture
+    for (char c : materialPath) b.U8(static_cast<uint8_t>(c));
+    b.U8(0); // authored material (empty for existing quad fixtures)
     b.data.insert(b.data.end(),{'T','A','G','G'});b.U8(1);
     const char end[]="#EndOfFile#";b.data.insert(b.data.end(),end,end+sizeof(end));b.U32(0);b.F32(1);
     return b.data;
@@ -196,6 +199,32 @@ struct PaaPublicationLatch
     void Release() { std::lock_guard lock(mutex); released = true; cv.notify_all(); }
 };
 #endif
+}
+
+TEST_CASE("Speculative proxy material scan stays bounded without parsing compressed P3D counts", "[preparer][proxy-prefetch]")
+{
+    std::vector<char> source{'O','D','O','L',73,0,0,0};
+    source.insert(source.end(), {char(0xff),char(0xff),char(0xff),char(0x7f),0});
+    const std::string material = R"(DZ\Structures\Proxy\Wall.RVMAT)";
+    source.insert(source.end(), material.begin(), material.end()); source.push_back(0);
+    auto found = Poseidon::Streaming::ScanProxyMaterialNames(source);
+    REQUIRE(found.supportedSignature);
+    REQUIRE(found.names.size() == 1);
+    CHECK(found.names[0] == R"(dz\structures\proxy\wall.rvmat)");
+    CHECK_FALSE(found.overflow);
+
+    for (unsigned i = 0; i < 16; ++i)
+    {
+        const auto name = std::string("proxy\\material") + std::to_string(i) + ".rvmat";
+        source.insert(source.end(), name.begin(), name.end()); source.push_back(0);
+    }
+    found = Poseidon::Streaming::ScanProxyMaterialNames(source);
+    CHECK(found.names.size() == 16);
+    CHECK(found.overflow);
+    source.resize(Poseidon::Streaming::ProxyMaterialNameScan::MaxSourceBytes + 1);
+    found = Poseidon::Streaming::ScanProxyMaterialNames(source);
+    CHECK_FALSE(found.supportedSignature);
+    CHECK(found.names.empty());
 }
 
 #ifdef _WIN32
@@ -1218,9 +1247,12 @@ TEST_CASE("Tenement multistage raP handoff prepares only exact authored physical
         int index = -1;
         std::array<std::string,4> materials, normals;
         std::array<std::string,4> relativeNormals;
+        std::string proxyModel, proxyMaterial, proxyTexture;
+        std::string relativeProxyModel, relativeProxyMaterial, relativeProxyTexture;
         Bank(const std::array<const char*,4>& relativeMaterials,
              const std::array<const char*,4>& paaNames, bool validFourth = true,
-             const char* stageName = "Stage11")
+             const char* stageName = "Stage11", bool withProxy = false,
+             bool validProxyRap = true)
         {
             auto str = [](Bytes& b,const char* s) { while (*s) b.U8(uint8_t(*s++)); b.U8(0); };
             std::array<Bytes,4> raps;
@@ -1245,6 +1277,27 @@ TEST_CASE("Tenement multistage raP handoff prepares only exact authored physical
             std::vector<char> paa = {3,char(0xFF),0,0,8,0,8,0,64,0,0};
             for (int j=0;j<4;++j) paa.insert(paa.end(),block.begin(),block.end());
             paa.insert(paa.end(),4,0);
+            std::vector<char> proxyP3d;
+            Bytes proxyRap;
+            if (withProxy)
+            {
+                relativeProxyModel = R"(residential\tenements\proxy\prefetch_fixture.p3d)";
+                relativeProxyMaterial = R"(residential\tenements\proxy\prefetch_fixture.rvmat)";
+                relativeProxyTexture = R"(residential\tenements\proxy\prefetch_fixture_co.paa)";
+                proxyModel = std::string(R"(dz\structures\)") + relativeProxyModel;
+                proxyMaterial = std::string(R"(dz\structures\)") + relativeProxyMaterial;
+                proxyTexture = std::string(R"(dz\structures\)") + relativeProxyTexture;
+                proxyP3d = OriginalMlodQuad(proxyMaterial);
+                proxyRap.data = {0,'r','a','P',0,0,0,0,8,0,0,0,0x0a,0x06,0,0};
+                proxyRap.U8(0); proxyRap.U8(2);
+                proxyRap.U8(1); proxyRap.U8(0); str(proxyRap,"PixelShaderID"); str(proxyRap,"Multi");
+                proxyRap.U8(0); str(proxyRap,"Stage0"); const size_t pointer = proxyRap.data.size(); proxyRap.U32(0);
+                const auto body = static_cast<uint32_t>(proxyRap.data.size());
+                for (int j=0;j<4;++j) proxyRap.data[pointer+j] = char(body >> (8*j));
+                proxyRap.U8(0); proxyRap.U8(1); proxyRap.U8(1); proxyRap.U8(0);
+                str(proxyRap,"texture"); str(proxyRap,proxyTexture.c_str());
+                if (!validProxyRap) proxyRap.data[1] = 'x';
+            }
             Bytes archive;
             auto header = [&](const char* name,size_t size) {
                 str(archive,name); archive.U32(0); archive.U32(uint32_t(size));
@@ -1252,9 +1305,21 @@ TEST_CASE("Tenement multistage raP handoff prepares only exact authored physical
             };
             for (size_t i=0;i<4;++i) header(relativeMaterials[i],raps[i].data.size());
             for (const char* name : paaNames) header(name,paa.size());
+            if (withProxy)
+            {
+                header(relativeProxyModel.c_str(),proxyP3d.size());
+                header(relativeProxyMaterial.c_str(),proxyRap.data.size());
+                header(relativeProxyTexture.c_str(),paa.size());
+            }
             archive.U8(0); for (int j=0;j<5;++j) archive.U32(0);
             for (const auto& rap : raps) archive.data.insert(archive.data.end(),rap.data.begin(),rap.data.end());
             for (size_t i=0;i<4;++i) archive.data.insert(archive.data.end(),paa.begin(),paa.end());
+            if (withProxy)
+            {
+                archive.data.insert(archive.data.end(),proxyP3d.begin(),proxyP3d.end());
+                archive.data.insert(archive.data.end(),proxyRap.data.begin(),proxyRap.data.end());
+                archive.data.insert(archive.data.end(),paa.begin(),paa.end());
+            }
             path = std::filesystem::temp_directory_path() /
                 ("rap_building_multi_"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".pbo");
             std::ofstream out(path,std::ios::binary);
@@ -1273,6 +1338,10 @@ TEST_CASE("Tenement multistage raP handoff prepares only exact authored physical
             Poseidon::GFileServer = previous; GEnableCaching = caching; GUseFileBanks = useBanks;
             std::error_code error; std::filesystem::remove(path,error);
         }
+        void Unmount()
+        {
+            if (index >= 0) { Poseidon::GFileBanks.Delete(index); index = -1; }
+        }
     };
     SourceFile original;
     auto makeModel = [&](const Bank& bank) {
@@ -1287,6 +1356,8 @@ TEST_CASE("Tenement multistage raP handoff prepares only exact authored physical
             mesh.materials.back().materialPath = material;
         }
         for (auto& triangle : mesh.triangles) triangle.materialIndex = 0;
+        if (!bank.proxyModel.empty())
+            mesh.proxies.emplace_back("proxy:" + bank.proxyModel.substr(0,bank.proxyModel.size()-4));
         return model;
     };
     auto tables = std::make_shared<Poseidon::Model::ShapeAdapter::AdapterBankTables>();
@@ -1397,6 +1468,108 @@ TEST_CASE("Tenement multistage raP handoff prepares only exact authored physical
             REQUIRE_FALSE(store.ProbeWarmEntry(normal, nullptr).entryPresent);
         store.Clear();
     }
+    SECTION("bounded proxy P3D and raP handoffs prepare an exact proxy material stage")
+    {
+        if (!enabled("WGR_OBJECT_STREAM_DAYZ_PHYSICAL_PREFETCH") ||
+            !enabled("WGR_OBJECT_STREAM_DAYZ_PROXY_PREFETCH"))
+            SKIP("Fresh exact tenement proxy prefetch flags required.");
+        Bank bank(relativeMaterials,relativeNormals,true,"Stage0",true);
+        store.Clear();
+        Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
+        REQUIRE(prep.SubmitConvert(0,makeModel(bank),tables,nullptr,nullptr,true,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        REQUIRE(prep.ResumeRapCapture(0,capture)); // proxy P3D identity -> current raP
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        REQUIRE(prep.ResumeRapCapture(0,capture)); // current raP -> current PAA
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+        REQUIRE(store.ProbeWarmEntry(bank.proxyTexture,nullptr).entryPresent);
+        auto source = Poseidon::GFileBanks[bank.index].CaptureReadRequest(
+            bank.relativeProxyTexture.c_str(),true);
+        REQUIRE(source);
+        Poseidon::BankReadMemberIdentity birth;
+        REQUIRE(source->CopyMemberIdentity(birth));
+        Poseidon::PAABlockChain chain; Poseidon::BankReadRequest retained;
+        REQUIRE(store.TakePhysical(bank.proxyTexture,birth,chain,retained));
+        REQUIRE(chain.valid()); REQUIRE(retained.SameArchiveMember(*source));
+        auto converted = prep.TakeConverted(0);
+        std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
+        REQUIRE(shape); REQUIRE(converted.model);
+        store.Clear();
+    }
+    SECTION("changed proxy mount at first owner handoff refuses proxy preparation")
+    {
+        if (!enabled("WGR_OBJECT_STREAM_DAYZ_PHYSICAL_PREFETCH") ||
+            !enabled("WGR_OBJECT_STREAM_DAYZ_PROXY_PREFETCH"))
+            SKIP("Fresh exact tenement proxy prefetch flags required.");
+        Bank bank(relativeMaterials,relativeNormals,true,"Stage0",true);
+        store.Clear();
+        Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
+        REQUIRE(prep.SubmitConvert(0,makeModel(bank),tables,nullptr,nullptr,true,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        bank.Unmount();
+        REQUIRE(prep.ResumeRapCapture(0,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+        REQUIRE_FALSE(store.ProbeWarmEntry(bank.proxyTexture,nullptr).entryPresent);
+        auto converted = prep.TakeConverted(0);
+        std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
+        REQUIRE(shape); store.Clear();
+    }
+    SECTION("unsupported proxy raP refuses its stage and keeps complete conversion")
+    {
+        if (!enabled("WGR_OBJECT_STREAM_DAYZ_PHYSICAL_PREFETCH") ||
+            !enabled("WGR_OBJECT_STREAM_DAYZ_PROXY_PREFETCH"))
+            SKIP("Fresh exact tenement proxy prefetch flags required.");
+        Bank bank(relativeMaterials,relativeNormals,true,"Stage0",true,false);
+        store.Clear();
+        Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
+        REQUIRE(prep.SubmitConvert(0,makeModel(bank),tables,nullptr,nullptr,true,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        REQUIRE(prep.ResumeRapCapture(0,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+        REQUIRE_FALSE(store.ProbeWarmEntry(bank.proxyTexture,nullptr).entryPresent);
+        auto converted = prep.TakeConverted(0);
+        std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
+        REQUIRE(shape); store.Clear();
+    }
+    SECTION("departed material mount at second owner handoff refuses stale proxy stage")
+    {
+        if (!enabled("WGR_OBJECT_STREAM_DAYZ_PHYSICAL_PREFETCH") ||
+            !enabled("WGR_OBJECT_STREAM_DAYZ_PROXY_PREFETCH"))
+            SKIP("Fresh exact tenement proxy prefetch flags required.");
+        Bank bank(relativeMaterials,relativeNormals,true,"Stage0",true);
+        store.Clear();
+        Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
+        REQUIRE(prep.SubmitConvert(0,makeModel(bank),tables,nullptr,nullptr,true,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        REQUIRE(prep.ResumeRapCapture(0,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        bank.Unmount();
+        REQUIRE(prep.ResumeRapCapture(0,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+        REQUIRE_FALSE(store.ProbeWarmEntry(bank.proxyTexture,nullptr).entryPresent);
+        auto converted = prep.TakeConverted(0);
+        std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
+        REQUIRE(shape); store.Clear();
+    }
+    SECTION("second parked proxy capture drops cleanly on stale generation")
+    {
+        if (!enabled("WGR_OBJECT_STREAM_DAYZ_PHYSICAL_PREFETCH") ||
+            !enabled("WGR_OBJECT_STREAM_DAYZ_PROXY_PREFETCH"))
+            SKIP("Fresh exact tenement proxy prefetch flags required.");
+        Bank bank(relativeMaterials,relativeNormals,true,"Stage0",true);
+        store.Clear();
+        Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
+        REQUIRE(prep.SubmitConvert(0,makeModel(bank),tables,nullptr,nullptr,true,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        REQUIRE(prep.ResumeRapCapture(0,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        const uint32_t epochs[] = {0};
+        REQUIRE(prep.DropStale(epochs,1,1) == 1);
+        REQUIRE(prep.Query(0) == Preparer::State::Unknown);
+        REQUIRE(prep.SnapshotStats().conversionReservedBytes == 0);
+        REQUIRE_FALSE(store.ProbeWarmEntry(bank.proxyTexture,nullptr).entryPresent);
+        store.Clear();
+    }
 }
 
 TEST_CASE("Exact tenement PAA Init-purpose identity allowance refuses overflow",
@@ -1422,6 +1595,32 @@ TEST_CASE("Exact tenement PAA Init-purpose identity allowance refuses overflow",
         CHECK_FALSE(Poseidon::TenementPhysicalPaaScope::Overflowed());
         CHECK(Poseidon::TenementPhysicalPaaScope::ReserveIdentity());
     }
+}
+TEST_CASE("Exact tenement proxy source and candidate caps refuse overflow without borrowing parent capacity",
+          "[preparer][rap-building-physical]")
+{
+    using Bounds = Poseidon::DayzProxyPrefetchBounds;
+    CHECK(Bounds::AdmitProxyModel(0,0,Bounds::MaxProxyMember));
+    CHECK(Bounds::AdmitProxyModel(15,Bounds::MaxProxySources-Bounds::MaxProxyMember,
+                                  Bounds::MaxProxyMember));
+    CHECK_FALSE(Bounds::AdmitProxyModel(16,0,1));
+    CHECK_FALSE(Bounds::AdmitProxyModel(0,0,Bounds::MaxProxyMember+1));
+    CHECK_FALSE(Bounds::AdmitProxyModel(0,Bounds::MaxProxySources,1));
+    CHECK(Bounds::AdmitMaterialSource(Bounds::MaxMaterialSources-1,1));
+    CHECK_FALSE(Bounds::AdmitMaterialSource(Bounds::MaxMaterialSources-1,2));
+    Poseidon::RapStageCandidateHandoff proxy;
+    proxy.generation=1; proxy.broadParentPaa=true; proxy.proxyPaa=true;
+    proxy.materials.reserve(32);
+    Poseidon::BankReadMemberIdentity member;
+    member.bytes=1; member.archiveBytes=1;
+    for (int i=0;i<32;++i)
+        proxy.materials.push_back({i<16 ? "a.rvmat" : "b.rvmat",
+            "stage"+std::to_string(i)+".paa",
+            Poseidon::RapStageCandidateHandoff::Consumer::AuthoredStage, member});
+    REQUIRE(proxy.Bounded());
+    proxy.materials.push_back({"c.rvmat","overflow.paa",
+        Poseidon::RapStageCandidateHandoff::Consumer::AuthoredStage,member});
+    CHECK_FALSE(proxy.Bounded());
 }
 TEST_CASE("Cold chain cancellation keeps actual worker debt until exit and replacement progresses", "[preparer][cold-paa-handoff]")
 {

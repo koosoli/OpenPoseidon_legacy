@@ -2,6 +2,8 @@
 #include <Poseidon/Graphics/Rendering/GeometryPageControlledMlodAsset.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageClodDiskCodec.hpp>
 #include "SelectedCutSurfaceCertificate.hpp"
+#include "HierarchicalMlodPageProduct.hpp"
+#include <optional>
 #include <locale>
 #include <filesystem>
 #include <fstream>
@@ -25,11 +27,17 @@ inline const char* StatusName(ProducerStatus status)
 }
 struct Product {
     ClodRamPackage selected;std::vector<uint8_t> encoded;std::string manifest;
+    std::optional<HierarchyProduct> hierarchy;
     // Offline-only fixed numeric proof metadata. Default builds do not hash/seal;
     // only BuildOwned's optional successful publication can create this evidence.
+    bool RequiresPublicationBinding() const {return _publicationSealed||hierarchy.has_value();}
     bool HasProducedPublicationBinding() const {
         return _publicationSealed&&!encoded.empty()&&encoded.size()<=128*1024&&
-            !manifest.empty()&&manifest.size()<=8192&&_publicationDigest==PublicationDigest();
+            !manifest.empty()&&manifest.size()<=8192&&(!hierarchy||
+            (!hierarchy->image.bytes.empty()&&hierarchy->image.bytes.size()<=HierarchicalDiskDetail::MaxFileBytes&&
+            hierarchy->metadataBytes>=HierarchicalDiskDetail::HeaderBytes&&hierarchy->metadataBytes<=HierarchicalDiskDetail::MaxMetadataBytes&&
+            hierarchy->metadataBytes<=hierarchy->image.bytes.size()&&!hierarchy->authority.empty()&&hierarchy->authority.size()<=4096))&&
+            _publicationDigest==PublicationDigest();
     }
 private:
     std::array<uint8_t,32> _publicationDigest{};bool _publicationSealed=false;
@@ -40,9 +48,17 @@ private:
         const auto length=[&hash](uint64_t value){std::array<uint8_t,8> bytes{};
             for(unsigned i=0;i<8;++i)bytes[i]=uint8_t(value>>(8*i));hash.Update(bytes.data(),bytes.size());};
         length(encoded.size());hash.Update(encoded.data(),encoded.size());
-        length(manifest.size());hash.Update(manifest.data(),manifest.size());return ClodDiskDetail::HashBytes(hash);
+        length(manifest.size());hash.Update(manifest.data(),manifest.size());
+        if(hierarchy) {
+            length(hierarchy->image.bytes.size());hash.Update(hierarchy->image.bytes.data(),hierarchy->image.bytes.size());
+            length(hierarchy->authority.size());hash.Update(hierarchy->authority.data(),hierarchy->authority.size());
+            length(hierarchy->metadataBytes);
+            std::vector<uint8_t> key;HierarchicalDiskDetail::Identity(key,hierarchy->image.identity);
+            hash.Update(key.data(),key.size());hash.Update(hierarchy->image.metadataSha256.data(),hierarchy->image.metadataSha256.size());
+        }
+        return ClodDiskDetail::HashBytes(hash);
     }
-    friend ProducerStatus BuildOwned(std::vector<uint8_t>,Product&,bool);
+    friend ProducerStatus BuildOwned(std::vector<uint8_t>,Product&,bool,bool);
 };
 inline std::string Hex(const std::array<uint8_t,32>& value)
 {
@@ -64,7 +80,7 @@ inline std::string Identity(const SourceIdentity& value,bool classic=false)
 // one original loader call. This is NOT source-path freshness or general asset eligibility.
 // Upstream CLOD is synchronous/uninterruptible, with unmeasured scratch/time; these are
 // input, logical output and serialized caps, not allocator/RSS/peak-worker guarantees.
-inline ProducerStatus BuildOwned(std::vector<uint8_t> bytes,Product& destination,bool sealForSurfaceCertificate=false)
+inline ProducerStatus BuildOwned(std::vector<uint8_t> bytes,Product& destination,bool sealForSurfaceCertificate=false,bool hierarchyPages=false)
 {
     if(!Poseidon::Foundation::IsMainThread())return ProducerStatus::WrongOwner;
     try {
@@ -112,6 +128,14 @@ inline ProducerStatus BuildOwned(std::vector<uint8_t> bytes,Product& destination
         ClodRamPackage verified;
         if(DecodeClodDisk(result.encoded,result.selected.originalSource,result.selected.package.Identity(),verified)!=ClodDiskStatus::Decoded)
             return ProducerStatus::Invalid;
+        if(hierarchyPages) {
+            HierarchyProduct hierarchy;
+            const auto status=BuildHierarchyProduct(bake,asset.originalSourceBytes,hierarchy);
+            if(status!=HierarchicalDiskStatus::Encoded)return status==HierarchicalDiskStatus::Capacity?ProducerStatus::Capacity:
+                status==HierarchicalDiskStatus::AllocationFailed?ProducerStatus::AllocationFailed:ProducerStatus::Invalid;
+            if(hierarchy.image.identity.source!=result.selected.originalSource)return ProducerStatus::Invalid;
+            result.hierarchy=std::move(hierarchy);
+        }
         Poseidon::Foundation::Sha256 fileHash;fileHash.Update(result.encoded.data(),result.encoded.size());
         const auto identity=result.selected.package.Identity();const auto& packing=identity.packing;
         std::ostringstream out;
@@ -132,10 +156,11 @@ inline ProducerStatus BuildOwned(std::vector<uint8_t> bytes,Product& destination
            <<",\"fineTriangles\":"<<result.selected.selectedGeometry.fine.indices.size()/3
            <<",\"coarsePages\":"<<result.selected.package.coarsePages<<",\"finePages\":"<<result.selected.package.pages.size()-result.selected.package.coarsePages
            <<",\"selectedClusters\":"<<result.selected.package.clusters.size()<<",\"bakeGroups\":"<<bake.groups.size()<<",\"bakeClusters\":"<<bake.clusters.size()
-           <<",\"knownSourceBytes\":"<<result.selected.knownCapacityBytes
-           <<",\"scope\":\"external-original-byte-producer; independently-verify-input-hash; no-retail/runtime/GPU/source-freshness-or-hard-peak-proof\"\n}\n";
+           <<",\"knownSourceBytes\":"<<result.selected.knownCapacityBytes;
+        if(result.hierarchy)out<<",\"hierarchyPages\":"<<result.hierarchy->authority;
+        out<<",\"scope\":\"external-original-byte-producer; independently-verify-input-hash; no-retail/runtime/GPU/source-freshness-or-hard-peak-proof\"\n}\n";
         result.manifest=out.str();if(result.manifest.size()>8192)return ProducerStatus::Capacity;
-        if(sealForSurfaceCertificate){result._publicationDigest=result.PublicationDigest();result._publicationSealed=true;}
+        if(sealForSurfaceCertificate||hierarchyPages){result._publicationDigest=result.PublicationDigest();result._publicationSealed=true;}
         destination=std::move(result);return ProducerStatus::Produced;
     } catch(const std::bad_alloc&) {return ProducerStatus::AllocationFailed;}
       catch(const std::exception&) {return ProducerStatus::Invalid;}
@@ -209,7 +234,7 @@ inline ProducerStatus BuildSurfaceDescriptor(const Product& product,std::string&
      catch(const std::exception&){return ProducerStatus::Invalid;}
 }
 // Publish only a fully validated transaction in a NEW caller-owned private directory.
-// On write failure remove only our explicit two files (plus optional descriptor)
+// On write failure remove only our explicit two files (plus optional artifacts)
 // and empty directory, never recursively.
 inline ProducerStatus Publish(const Product& product,const std::filesystem::path& requested,std::ostream* manifestSink=nullptr,bool surfaceCertificate=false)
 {
@@ -223,6 +248,7 @@ inline ProducerStatus Publish(const Product& product,const std::filesystem::path
         }
         if(product.encoded.empty()||product.encoded.size()>128*1024||product.manifest.empty()||product.manifest.size()>8192)
             return ProducerStatus::Invalid;
+        if(product.RequiresPublicationBinding()&&!product.HasProducedPublicationBinding())return ProducerStatus::Invalid;
         if(requested.empty())return ProducerStatus::Invalid;
         const auto path=fs::absolute(requested).lexically_normal();
         if(path.native().size()>1024||path.filename().empty()||path.filename()=="."||path.filename()=="..")return ProducerStatus::Invalid;
@@ -238,6 +264,8 @@ inline ProducerStatus Publish(const Product& product,const std::filesystem::path
             throw std::runtime_error("private publication write failed");
         if(surfaceCertificate&&!write(directory/"surface-certificate.json",descriptor))
             throw std::runtime_error("private certificate write failed");
+        if(product.hierarchy&&!write(directory/"hierarchy.ghp",product.hierarchy->image.bytes))
+            throw std::runtime_error("private hierarchy page write failed");
         if(manifestSink) {
             *manifestSink<<product.manifest;manifestSink->flush();
             if(!*manifestSink)throw std::runtime_error("producer manifest output failed");
@@ -249,16 +277,17 @@ inline ProducerStatus Publish(const Product& product,const std::filesystem::path
             // Caller contract forbids concurrent mutation of this new private directory.
             if(!fs::is_symlink(directory,error)&&fs::canonical(directory,error)==directory&&!error) {
                 if(surfaceCertificate)fs::remove(directory/"surface-certificate.json",error);
+                if(product.hierarchy)fs::remove(directory/"hierarchy.ghp",error);
                 fs::remove(directory/"selected.gcd",error);fs::remove(directory/"manifest.json",error);fs::remove(directory,error);
             }
         }
         return ProducerStatus::IoFailure;
     }
 }
-inline ProducerStatus ProduceFile(const std::filesystem::path& source,const std::filesystem::path& output,Product& destination,std::ostream* manifestSink=nullptr,bool surfaceCertificate=false)
+inline ProducerStatus ProduceFile(const std::filesystem::path& source,const std::filesystem::path& output,Product& destination,std::ostream* manifestSink=nullptr,bool surfaceCertificate=false,bool hierarchyPages=false)
 {
     std::vector<uint8_t> bytes;auto status=ReadSnapshot(source,bytes);if(status!=ProducerStatus::Produced)return status;
-    Product result;status=BuildOwned(std::move(bytes),result,surfaceCertificate);if(status!=ProducerStatus::Produced)return status;
+    Product result;status=BuildOwned(std::move(bytes),result,surfaceCertificate,hierarchyPages);if(status!=ProducerStatus::Produced)return status;
     // Certificate construction/refusal occurs before the output directory exists.
     // Successful stdout follows ALL requested writes inside the same rollback guard.
     status=Publish(result,output,manifestSink,surfaceCertificate);if(status!=ProducerStatus::Produced)return status;

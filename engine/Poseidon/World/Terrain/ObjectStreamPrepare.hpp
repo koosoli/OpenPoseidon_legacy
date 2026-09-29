@@ -93,6 +93,22 @@ struct WarmTextureRead
     std::shared_ptr<const ArchiveSourceBinding> initializedSource;
 };
 
+// Exact-tenement speculative proxy preparation has separate source caps, but
+// accepted material PAA sources share the parent pilot's 128 MiB envelope.
+struct DayzProxyPrefetchBounds
+{
+    static constexpr uint64_t MaxProxyMember = 4ull * 1024 * 1024;
+    static constexpr uint64_t MaxProxySources = 32ull * 1024 * 1024;
+    static constexpr uint64_t MaxMaterialSources = 128ull * 1024 * 1024;
+    static constexpr size_t MaxProxyModels = 16;
+    static bool AdmitProxyModel(size_t accepted, uint64_t sourceBytes, uint64_t memberBytes) noexcept
+    { return accepted < MaxProxyModels && memberBytes != 0 && memberBytes <= MaxProxyMember &&
+        sourceBytes <= MaxProxySources && memberBytes <= MaxProxySources - sourceBytes; }
+    static bool AdmitMaterialSource(uint64_t sourceBytes, uint64_t memberBytes) noexcept
+    { return memberBytes != 0 && sourceBytes <= MaxMaterialSources &&
+        memberBytes <= MaxMaterialSources - sourceBytes; }
+};
+
 // Advisory NormalMap names from completed, exact-source raP reads. No texture
 // authority travels with this payload; the owner rechecks each material member
 // and captures the current physical PAA member before optional preparation.
@@ -110,6 +126,7 @@ struct RapStageCandidateHandoff
     static constexpr size_t MaxMaterials = 16, MaxStagesPerMaterial = 16;
     static constexpr size_t MaxCandidates = 64;
     bool broadParentPaa = false;
+    bool proxyPaa = false; // separate second capture; parent limits remain unchanged
     bool overflow = false; // partial candidate set; never a complete dependency claim
     uint64_t generation = 0;
     uint32_t modelIndex = 0;
@@ -117,7 +134,7 @@ struct RapStageCandidateHandoff
     static constexpr size_t MaxKnownBytes = 64 * 1024;
     bool Bounded() const
     {
-        const size_t limit = broadParentPaa ? MaxCandidates : 4;
+        const size_t limit = proxyPaa ? 32 : (broadParentPaa ? MaxCandidates : 4);
         const size_t byteLimit = broadParentPaa ? MaxKnownBytes : 4 * 1024;
         if (!generation || materials.empty() || materials.size() > limit ||
             materials.capacity() > limit) return false;

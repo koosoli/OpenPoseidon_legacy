@@ -2,6 +2,7 @@
 #include "../../../../../apps/tools/Tools/commands/ControlledMlodPageProducer.hpp"
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageSurfaceAdmission.hpp>
 #include <atomic>
 #include <chrono>
 #include <iterator>
@@ -48,7 +49,8 @@ struct PrivateFiles
     ~PrivateFiles(){namespace fs=std::filesystem;std::error_code e;
         if(root.empty()||fs::is_symlink(root,e)||fs::canonical(root,e).parent_path()!=parent||e)return;
         // Only exact owned paths; never recursive or arbitrary directory deletion.
-        fs::remove(output/"selected.gcd",e);fs::remove(output/"manifest.json",e);fs::remove(output,e);
+        fs::remove(output/"selected.gcd",e);fs::remove(output/"manifest.json",e);
+        fs::remove(output/"hierarchy.ghp",e);fs::remove(output/"surface-certificate.json",e);fs::remove(output,e);
         fs::remove(input,e);fs::remove(root,e);}
     void Write(const std::vector<uint8_t>& bytes){std::ofstream out(input,std::ios::binary);
         REQUIRE(out.good());out.write(reinterpret_cast<const char*>(bytes.data()),std::streamsize(bytes.size()));REQUIRE(out.good());}
@@ -70,6 +72,8 @@ TEST_CASE("Actual original curved MLOD file produces independently keyed selecte
     REQUIRE(decoded.selectedGeometry.fine.indices==result.selected.selectedGeometry.fine.indices);
     REQUIRE(result.manifest.find("\"schemaVersion\":2")!=std::string::npos);
     REQUIRE(result.manifest.find(raw.Hex())!=std::string::npos);
+    REQUIRE_FALSE(result.hierarchy.has_value());REQUIRE_FALSE(std::filesystem::exists(files.output/"hierarchy.ghp"));
+    REQUIRE(result.manifest.find("hierarchyPages")==std::string::npos);
     // Reuse of an existing output must fail without changing its valid original artifacts.
     Product untouched;REQUIRE(ProduceFile(files.input,files.output,untouched)==ProducerStatus::IoFailure);
     REQUIRE(untouched.encoded.empty());REQUIRE(std::filesystem::file_size(files.output/"selected.gcd")==actual.size());
@@ -104,6 +108,138 @@ TEST_CASE("Original producer output failure removes only its private artifact pa
     REQUIRE(ProduceFile(files.input,files.output,kept,&refused)==ProducerStatus::IoFailure);
     REQUIRE(kept.manifest=="sentinel");REQUIRE_FALSE(std::filesystem::exists(files.output));
     REQUIRE(std::filesystem::exists(files.input));
+}
+
+TEST_CASE("Actual MLOD hierarchy option publishes independently verified full DAG and page authority", "[geometry-page-mlod-producer][geometry-page-mlod-hierarchy]")
+{
+    namespace J=Poseidon::GeometryPages::SurfaceAdmission::Detail;
+    Poseidon::Foundation::CaptureMainThread();OriginalGrid source;PrivateFiles files;files.Write(source.bytes);
+    Product ordinary,result;REQUIRE(BuildOwned(source.bytes,ordinary)==ProducerStatus::Produced);
+    std::ostringstream captured;
+    REQUIRE(ProduceFile(files.input,files.output,result,&captured,false,true)==ProducerStatus::Produced);
+    REQUIRE(result.hierarchy.has_value());REQUIRE(result.HasProducedPublicationBinding());
+    REQUIRE(result.encoded==ordinary.encoded);REQUIRE(captured.str()==result.manifest);
+    J::Json json;REQUIRE(json.Parse(result.manifest));const auto& root=json.nodes[0];
+    const auto* authority=json.Get(root,"hierarchyPages");REQUIRE(authority);REQUIRE(authority->type==J::Json::Object);
+    REQUIRE(J::Exact(json,root,"schemaVersion",2));REQUIRE(json.StringIs(json.Get(root,"file"),"selected.gcd"));
+    REQUIRE(json.StringIs(json.Get(*authority,"file"),"hierarchy.ghp"));
+    REQUIRE(J::Exact(json,*authority,"sourceBytes",source.bytes.size()));
+    std::ifstream input(files.output/"hierarchy.ghp",std::ios::binary);
+    std::vector<uint8_t> actual{std::istreambuf_iterator<char>(input),std::istreambuf_iterator<char>()};
+    REQUIRE(actual==result.hierarchy->image.bytes);
+    uint64_t fileBytes=0,metadataBytes=0;
+    REQUIRE(json.U64(json.Get(*authority,"fileBytes"),fileBytes));REQUIRE(fileBytes==actual.size());
+    REQUIRE(json.U64(json.Get(*authority,"metadataBytes"),metadataBytes));REQUIRE(metadataBytes==result.hierarchy->metadataBytes);
+    REQUIRE(J::Exact(json,*authority,"metadataOffset",0));REQUIRE(metadataBytes<=32768);
+    HierarchicalIdentity expected;std::array<uint8_t,32> metadataSha{},fileSha{};
+    REQUIRE(J::Source(json,json.Get(*authority,"source"),expected.source));
+    REQUIRE(json.Hash(json.Get(*authority,"packageSha256"),expected.packageSha256));
+    REQUIRE(json.U32(json.Get(*authority,"adapterVersion"),expected.adapterVersion));
+    REQUIRE(json.Hash(json.Get(*authority,"metadataSha256"),metadataSha));
+    REQUIRE(json.Hash(json.Get(*authority,"fileSha256"),fileSha));
+    REQUIRE(fileSha==HierarchicalDiskDetail::Hash(actual));
+    const auto prefix=std::span<const uint8_t>(actual).first(size_t(metadataBytes));
+    REQUIRE(metadataSha==HierarchicalDiskDetail::Hash(prefix));
+    REQUIRE(expected.source==result.selected.originalSource);
+    REQUIRE(expected.source.sourceSha256==HierarchicalDiskDetail::Hash(source.bytes));
+    REQUIRE(expected==result.hierarchy->image.identity);
+    REQUIRE(J::Exact(json,*authority,"diskCodecSchema",HierarchicalDiskDetail::Schema));
+    REQUIRE(J::Exact(json,*authority,"headerBytes",HierarchicalDiskDetail::HeaderBytes));
+    REQUIRE(J::Exact(json,*authority,"sVertexBytes",sizeof(Poseidon::SVertex)));
+    REQUIRE(J::Exact(json,*authority,"vertexScalarBytes",HierarchicalDiskDetail::VertexScalarBytes));
+    REQUIRE(json.StringIs(json.Get(*authority,"clodLibraryRevision"),ClodBake::LibraryRevision));
+    REQUIRE(J::Exact(json,*authority,"clodAdapterVersion",ClodBake::AdapterVersion));
+    uint64_t layout=0;REQUIRE(json.Bits(json.Get(*authority,"sVertexLayoutKeyHex"),layout));REQUIRE(layout==ClodDiskDetail::LayoutKey());
+    HierarchicalDiskManifest manifest;
+    REQUIRE(DecodeHierarchicalManifest(prefix,fileBytes,expected,metadataSha,manifest)==HierarchicalDiskStatus::Decoded);
+    REQUIRE(J::Exact(json,*authority,"pageCount",manifest.pages.size()));
+    REQUIRE(J::Exact(json,*authority,"pageByteLimit",manifest.metadata.pageByteLimit));
+    REQUIRE(J::Exact(json,*authority,"groupCount",manifest.metadata.groups.size()));
+    REQUIRE(J::Exact(json,*authority,"clusterCount",manifest.metadata.clusters.size()));
+    std::array<uint32_t,64> roots{};uint32_t rootCount=0;
+    REQUIRE(json.Cut(json.Get(*authority,"rootPageIds"),roots,rootCount));
+    REQUIRE(std::vector<uint32_t>(roots.begin(),roots.begin()+rootCount)==manifest.metadata.rootPages);
+    ControlledMlodAsset original;REQUIRE(ExportControlledMlodOwned(source.bytes,original)==ControlledMlodStatus::Exported);
+    ClodBake bake;ClodBakeLimits limits;limits.groups=512;limits.clusters=256;limits.indexEntries=131072;limits.storedBytes=2*1024*1024;
+    REQUIRE(BakeClodPilot(original.original,true,bake,limits)==ClodBakeStatus::Baked);
+    REQUIRE(manifest.metadata.groups.size()==bake.groups.size());REQUIRE(manifest.metadata.clusters.size()==bake.clusters.size());
+    for(size_t c=0;c<bake.clusters.size();++c) {
+        REQUIRE(manifest.metadata.clusters[c].group==bake.clusters[c].group);
+        REQUIRE(manifest.metadata.clusters[c].refined==bake.clusters[c].refined);
+    }
+    uint64_t next=metadataBytes;std::vector<uint8_t> resident(manifest.pages.size(),1);
+    for(uint32_t p=0;p<manifest.pages.size();++p) {
+        const auto& range=manifest.pages[p];REQUIRE(range.offset==next);REQUIRE(range.bytes<=65536);next+=range.bytes;
+        HierarchicalPage decoded;
+        REQUIRE(DecodeHierarchicalDiskPage(manifest,p,std::span<const uint8_t>(actual).subspan(size_t(range.offset),range.bytes),decoded)==HierarchicalDiskStatus::Decoded);
+        REQUIRE(decoded.clusters.size()==manifest.metadata.pages[p].clusters.size());
+        for(const auto& cluster:decoded.clusters) {
+            const auto& baked=bake.clusters[cluster.cluster];
+            REQUIRE(cluster.indices.size()==baked.indices.size());
+            for(size_t i=0;i<cluster.indices.size();++i)
+                REQUIRE(cluster.originalVertexIds[cluster.indices[i]]==baked.indices[i]);
+        }
+    }
+    REQUIRE(next==fileBytes);
+    std::vector<float> thresholds{0.f,result.selected.coarseThreshold};
+    for(const auto& group:bake.groups)if(group.simplified.error!=FLT_MAX) {
+        thresholds.push_back(group.simplified.error);
+        thresholds.push_back(std::nextafter(group.simplified.error,0.f));
+    }
+    for(float threshold:thresholds) {
+        ClodCut upstream;REQUIRE(SelectClodCut(bake,threshold,upstream));HierarchicalCutPlan plan;
+        REQUIRE(PlanHierarchicalCut(manifest.metadata,threshold,{expected,resident},plan));
+        REQUIRE(plan.state==HierarchicalCutState::RequestedCut);REQUIRE(plan.selectedClusters==upstream.clusters);
+    }
+    std::fill(resident.begin(),resident.end(),0);for(auto p:manifest.metadata.rootPages)resident[p]=1;
+    HierarchicalCutPlan fallback;REQUIRE(PlanHierarchicalCut(manifest.metadata,0,{expected,resident},fallback));
+    REQUIRE(fallback.state==HierarchicalCutState::RootFallback);REQUIRE(fallback.selectedClusters==manifest.metadata.rootClusters);
+}
+
+TEST_CASE("Hierarchy optional publication refuses mutations and rolls back all private artifacts", "[geometry-page-mlod-producer][geometry-page-mlod-hierarchy]")
+{
+    Poseidon::Foundation::CaptureMainThread();OriginalGrid source;PrivateFiles files;files.Write(source.bytes);
+    SECTION("captured stdout failure with both optional artifacts") {
+        std::ostringstream refused;refused.setstate(std::ios::badbit);Product kept;kept.manifest="sentinel";
+        REQUIRE(ProduceFile(files.input,files.output,kept,&refused,true,true)==ProducerStatus::IoFailure);
+        REQUIRE(kept.manifest=="sentinel");REQUIRE_FALSE(kept.hierarchy.has_value());
+    }
+    SECTION("image corruption") {
+        Product product;REQUIRE(BuildOwned(source.bytes,product,false,true)==ProducerStatus::Produced);
+        product.hierarchy->image.bytes.back()^=1;
+        REQUIRE(Publish(product,files.output)==ProducerStatus::Invalid);
+    }
+    SECTION("authority mutation") {
+        Product product;REQUIRE(BuildOwned(source.bytes,product,false,true)==ProducerStatus::Produced);
+        product.hierarchy->image.identity.source.geometryOptions^=1;
+        REQUIRE(Publish(product,files.output)==ProducerStatus::Invalid);
+    }
+    SECTION("manifest or prefix mutation") {
+        Product product;REQUIRE(BuildOwned(source.bytes,product,false,true)==ProducerStatus::Produced);
+        product.hierarchy->metadataBytes+=4;
+        REQUIRE(Publish(product,files.output)==ProducerStatus::Invalid);
+    }
+    SECTION("removing the hierarchy cannot publish authority for a missing file") {
+        Product product;REQUIRE(BuildOwned(source.bytes,product,false,true)==ProducerStatus::Produced);
+        product.hierarchy.reset();
+        REQUIRE(Publish(product,files.output)==ProducerStatus::Invalid);
+    }
+    REQUIRE_FALSE(std::filesystem::exists(files.output));REQUIRE(std::filesystem::exists(files.input));
+}
+
+TEST_CASE("Hierarchy authority follows actual admitted MLOD bytes and optional refusal is transactional", "[geometry-page-mlod-producer][geometry-page-mlod-hierarchy]")
+{
+    Poseidon::Foundation::CaptureMainThread();OriginalGrid source;Product first,second;
+    REQUIRE(BuildOwned(source.bytes,first,false,true)==ProducerStatus::Produced);
+    auto changed=source.bytes;const uint32_t value=std::bit_cast<uint32_t>(-1.75f);
+    for(unsigned i=0;i<4;++i)changed[40+i]=uint8_t(value>>(i*8));
+    REQUIRE(BuildOwned(changed,second,false,true)==ProducerStatus::Produced);
+    REQUIRE(first.hierarchy->image.identity!=second.hierarchy->image.identity);
+    REQUIRE(first.hierarchy->image.metadataSha256!=second.hierarchy->image.metadataSha256);
+    REQUIRE(first.hierarchy->authority!=second.hierarchy->authority);
+    const auto kept=first.hierarchy->image.bytes;const auto authority=first.manifest;
+    changed.pop_back();REQUIRE(BuildOwned(changed,first,false,true)==ProducerStatus::Invalid);
+    REQUIRE(first.hierarchy->image.bytes==kept);REQUIRE(first.manifest==authority);
 }
 
 TEST_CASE("Authored original grid packs upward faces and matches ordinary conversion", "[geometry-page-mlod-producer]")

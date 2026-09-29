@@ -77,3 +77,27 @@ off-handle uploader or reselection). Several writes may coalesce before the
 getter; the field is not a complete history. Revision semantics and all
 freshness gates remain unchanged. This is to select a concrete repair rather
 than relaxing safety checks to make a test pass.
+
+Installed `232e2da7` run `count-mutation-sep29-20260929-224702-110d42`
+again exited normally but failed publication: main and solar token 1 changed
+from map-pending revision 1/1 to mismatch 1/2, with unchanged epoch 4/4 and
+last mutation kind 6 (pose palette). This identifies the observed invalidation
+source; multiple writes may still coalesce. An optional exact palette-content
+witness is being tested to distinguish identical reuploads from real mutations.
+It retains at most 1 MiB, compares actual uploaded bytes/stride/buffer identity,
+and fails closed on refusal. Default revision semantics remain unchanged.
+COUNT publication, all-view closure and Fine retirement are still unproven.
+
+The palette upload belongs to foreign direct/skinned draws; the controlled
+original target is rigid. The optional witness now separates these domains.
+At each changed upload it checks the armed model's current incarnation and
+at most sixteen LODs/sixty-four sections against exact current generational
+meshes, ranges and resolved section rows, refusing missing/retired/skinned or
+oversized bindings. Only that proven independent target preserves its fresh
+COUNT revision. A separate checked palette-image serial participates in
+local/interior/GI cached keys and request-arm/commit checks, so foreign pose
+changes still invalidate stale cached absence. Refusal/overflow stays Unknown.
+Flag OFF retains the old conservative revision and neutral cached serial,
+with no new palette snapshot or model scan. Twelve focused Rust palette tests
+passed, including source/skin/incarnation refusal, exact bytes, stale cached
+image and publication race. Installed verification remains pending.

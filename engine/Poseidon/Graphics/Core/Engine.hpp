@@ -3221,7 +3221,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse, BeginOriginalHierarchy, StepHierarchy, RootHierarchy, FineHierarchy };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse, BeginOriginalHierarchy, StepHierarchy, RootHierarchy, FineHierarchy, IntermediateHierarchy, LocalHierarchy, BeginOriginalHierarchyDisk };
     struct GeometryPageSourceIdentity
     {
         std::array<uint8_t,32> sha256{};
@@ -3279,6 +3279,21 @@ class Engine : public IGraphicsEngine
         double enterUpper=2,leaveUpper=1; // Experimental pair-discrepancy preparation preference only.
         uint32_t dwellMs=200,retryMs=250;
     };
+    struct GeometryPageHierarchyDemandInput {
+        std::array<uint8_t,32> packageSha256{};
+        uint64_t sourceAdmissionEpoch=0,pageEpoch=0,expectedRequestId=0;
+        uint32_t groupCount=0;
+        std::array<float,64> groupThresholds{};
+    };
+    struct GeometryPageHierarchyDiskFixtureInput {
+        static constexpr uint64_t MaxMetadataBytes=32768;
+        static constexpr uint64_t MaxFileBytes=MaxMetadataBytes+64ull*65536;
+        std::array<char,1024> path{};
+        GeometryPageSourceIdentity original;
+        std::array<uint8_t,32> packageSha256{},metadataSha256{};
+        std::vector<uint8_t> metadataBytes;
+        uint64_t fileBytes=0,sourceAdmissionEpoch=0,originalSourceBytes=0;
+    };
     struct GeometryPageFixtureReport
     {
         GeometryReportStatus status=GeometryReportStatus::Unsupported;
@@ -3290,12 +3305,17 @@ class Engine : public IGraphicsEngine
         // Private original-source hierarchy: individual RAM page residency and
         // complete selected cuts. No pixel/quality or physical GPU-free claim.
         bool hierarchicalPilot=false;
-        uint32_t hierarchyPages=0,hierarchyRootPages=0,hierarchyResidentPages=0;
+        bool hierarchicalDiskPilot=false;
+        uint32_t hierarchyPages=0,hierarchyRootPages=0,hierarchyResidentPages=0,hierarchyRetainedCutModels=0,hierarchyDiskPageReads=0;
         uint32_t hierarchySelectedTriangles=0,hierarchyCutModel=UINT32_MAX;
         uint64_t hierarchyRequiredMask=0,hierarchyResidentMask=0,hierarchyMissingMask=0;
         std::vector<uint32_t> hierarchySelectedClusters;
         std::string hierarchyPackageSha256;
         float hierarchyThreshold=0;
+        bool hierarchyLocalDemand=false;
+        uint32_t hierarchyDemandGroupCount=0;
+        std::array<float,64> hierarchyDemandThresholds{};
+        std::array<float,64> hierarchyGroupErrors{}; // exact admitted simplified.error, FLT_MAX roots
         bool active=false, fineSelected=false, cpuHelpersUnchanged=false;
         bool mainFrameReturned=false, cascadeConfigured=false, localShadowConfigured=false;
         int32_t renderReturnStatus=INT32_MIN;
@@ -3372,7 +3392,9 @@ class Engine : public IGraphicsEngine
     };
     virtual GeometryPageFixtureReport ControlGeometryPageFixture(GeometryPageFixtureAction,
         float x=1200,float y=11.5f,float z=1200,const GeometryPageDiskFixtureInput* disk=nullptr,
-        const GeometryPageCameraDemandInput* camera=nullptr) { return {}; }
+        const GeometryPageCameraDemandInput* camera=nullptr,
+        const GeometryPageHierarchyDemandInput* hierarchyDemand=nullptr,
+        const GeometryPageHierarchyDiskFixtureInput* hierarchyDisk=nullptr) { return {}; }
     virtual WarmPatnikProbeReport ProbeWarmPatnikStage() const { return {}; } // append virtual slot
     // Exact opted-in raP candidate only. The renderer may initialize one PAA
     // header on the owner thread and return its current immutable source binding.

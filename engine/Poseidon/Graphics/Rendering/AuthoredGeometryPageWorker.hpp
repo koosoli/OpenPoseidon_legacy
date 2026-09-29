@@ -1,6 +1,7 @@
 #pragma once
 #include <Poseidon/Graphics/Rendering/GeometryPageRepresentationDecode.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageDiskSource.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalDiskSource.hpp>
 #include <atomic>
 #include <condition_variable>
 #include <memory>
@@ -34,6 +35,7 @@ public:
     static constexpr uint64_t ResultReservation=128*1024, MetadataReservation=16*1024;
     static constexpr uint64_t MaxReserved=1024*1024;
     static constexpr uint64_t DiskFileReservation=128*1024, DiskSourceReservation=128*1024;
+    static constexpr uint64_t HierarchyFileReservation=65536, HierarchyManifestReservation=128*1024;
     enum class SubmitStatus { Queued, Duplicate, Busy, Invalid, Capacity, Failed };
     struct Stats { uint32_t queued=0,active=0,ready=0,liveJobs=0; uint64_t reservedBytes=0,completed=0,cancelled=0,stale=0,failedEpoch=0,failedRequest=0; uint32_t awaitingPublication=0; };
 private:
@@ -48,6 +50,7 @@ private:
         uint64_t epoch,request,reservation;
         std::shared_ptr<const AuthoredPageInput> input;
         std::shared_ptr<const DiskPageInput> disk;
+        std::shared_ptr<const HierarchicalDiskPageInput> hierarchyDisk;
         std::shared_ptr<Budget> budget;
         std::atomic<bool> cancelled{false};
         Job(uint64_t e,uint64_t r,std::shared_ptr<const AuthoredPageInput> i,std::shared_ptr<Budget> b)
@@ -55,6 +58,10 @@ private:
         { budget->Acquire(reservation); }
         Job(uint64_t e,uint64_t r,std::shared_ptr<const DiskPageInput> d,std::shared_ptr<Budget> b)
             :epoch(e),request(r),reservation(DiskPageKnownBytes(*d)+DiskFileReservation+DiskSourceReservation+ResultReservation+MetadataReservation),disk(std::move(d)),budget(std::move(b))
+        { budget->Acquire(reservation); }
+        Job(uint64_t e,uint64_t r,std::shared_ptr<const HierarchicalDiskPageInput> d,std::shared_ptr<Budget> b)
+            :epoch(e),request(r),reservation(HierarchicalDiskPageInputKnownBytes(*d)+HierarchyFileReservation+
+                HierarchyManifestReservation+ResultReservation+MetadataReservation),hierarchyDisk(std::move(d)),budget(std::move(b))
         { budget->Acquire(reservation); }
         ~Job() { budget->Release(reservation); }
     };
@@ -67,6 +74,14 @@ public:
         Frontier requestedRepresentation=Frontier::Fine;
         ResidentRepresentation decoded;
         std::shared_ptr<const AuthoredPageInput> source;
+        // Independent hierarchy jobs share this worker, but return one page
+        // rather than a complete authored representation. Zero/default fields
+        // leave existing authored and selected-cut result contracts unchanged.
+        HierarchicalDiskReadStatus hierarchyDiskStatus=HierarchicalDiskReadStatus::NotRequested;
+        uint32_t hierarchyPageId=UINT32_MAX;
+        HierarchicalIdentity hierarchyIdentity;
+        HierarchicalPage hierarchyPage;
+        std::shared_ptr<const HierarchicalDiskPageInput> hierarchySource;
         // Keeps the exact request source/reservation alive through owner staging.
         std::shared_ptr<Job> ownership;
     };
@@ -88,12 +103,25 @@ private:
                 changed_.wait(lock,[&]{return closed_ || (pending_ && !ready_);});
                 if(closed_) return;
                 job=std::move(pending_);active_=job;
-                if(job->disk) changed_.wait(lock,[&]{return closed_ || !holdBeforeDiskOpen_;});
+                if(job->disk||job->hierarchyDisk) changed_.wait(lock,[&]{return closed_ || !holdBeforeDiskOpen_;});
             }
             std::unique_ptr<Result> result;
             try {
                 result=std::make_unique<Result>(); result->epoch=job->epoch;result->request=job->request;result->ownership=job;result->source=job->input;
                 result->requestedRepresentation=job->disk?job->disk->representation:Frontier::Fine;
+                if(job->hierarchyDisk) {
+                    result->hierarchySource=job->hierarchyDisk;
+                    result->hierarchyPageId=job->hierarchyDisk->pageId;
+                    result->hierarchyIdentity=job->hierarchyDisk->expectedIdentity;
+                    result->hierarchyDiskStatus=ReadHierarchicalDiskPage(*job->hierarchyDisk,result->hierarchyPage,job->cancelled);
+                    switch(result->hierarchyDiskStatus) {
+                        case HierarchicalDiskReadStatus::Read:result->status=DecodeStatus::Decoded;break;
+                        case HierarchicalDiskReadStatus::Cancelled:result->status=DecodeStatus::Cancelled;break;
+                        case HierarchicalDiskReadStatus::Capacity:result->status=DecodeStatus::Capacity;break;
+                        case HierarchicalDiskReadStatus::AllocationFailed:result->status=DecodeStatus::AllocationFailed;break;
+                        default:result->status=DecodeStatus::Invalid;break;
+                    }
+                }
                 if(job->disk) {
                     ClodRamPackage loaded;result->diskStatus=ReadDiskPageSource(*job->disk,loaded,job->cancelled);
                     if(result->diskStatus==DiskReadStatus::Read && !job->cancelled.load()) {
@@ -106,7 +134,7 @@ private:
                 }
                 RepresentationDecodeLimits limits;limits.pages=8;limits.clusters=64;limits.vertexRecords=1024;limits.indices=4096;
                 limits.decodedBytes=ResultReservation;limits.serializedBytes=AuthoredPageInput::MaxSourceBytes;
-                if(result->source && !job->cancelled.load())
+                if(!job->hierarchyDisk && result->source && !job->cancelled.load())
                     result->status=DecodeResidentRepresentation(result->source->package,result->source->identity,result->requestedRepresentation,
                         result->source->original,result->decoded,limits,&job->cancelled);
                 else if(job->cancelled.load()) result->status=DecodeStatus::Cancelled;
@@ -115,7 +143,9 @@ private:
                     capacity+=page.clusters.capacity()*sizeof(ResidentCluster);
                     for(const auto& cluster:page.clusters) capacity+=cluster.vertices.capacity()*sizeof(SVertex)+cluster.indices.capacity()*sizeof(uint32_t);
                 }
-                if(capacity>ResultReservation) { result->decoded={};result->status=DecodeStatus::Capacity; }
+                capacity+=HierarchicalDiskPageKnownBytes(result->hierarchyPage)-sizeof(HierarchicalPage);
+                if(capacity>ResultReservation) { result->decoded={};result->hierarchyPage={};result->status=DecodeStatus::Capacity;
+                    if(job->hierarchyDisk)result->hierarchyDiskStatus=HierarchicalDiskReadStatus::Capacity; }
             } catch(...) { result.reset(); }
             {
                 std::unique_lock lock(mutex_);
@@ -183,6 +213,37 @@ public:
             if(frozenReservation>availableBytes-bytes) return SubmitStatus::Capacity;
             pending_=std::make_shared<Job>(epoch,request,std::move(frozen),budget_);
         } catch(...) {return SubmitStatus::Failed;}
+        changed_.notify_all();return SubmitStatus::Queued;
+    }
+    SubmitStatus SubmitHierarchyDisk(uint64_t epoch,uint64_t request,std::shared_ptr<const HierarchicalDiskPageInput> input,uint64_t availableBytes)
+    {
+        if(!epoch||!request||!input||!ValidHierarchicalDiskPageInput(*input))return SubmitStatus::Invalid;
+        const uint64_t reservation=HierarchicalDiskPageInputKnownBytes(*input)+HierarchyFileReservation+
+            HierarchyManifestReservation+ResultReservation+MetadataReservation;
+        std::lock_guard lock(mutex_);
+        if(closed_)return SubmitStatus::Failed;
+        const auto same=[&](const std::shared_ptr<Job>& job){return job&&job->epoch==epoch&&job->request==request&&!job->cancelled.load();};
+        const auto matching=[&](const std::shared_ptr<Job>& job){return job->hierarchyDisk&&
+            job->hierarchyDisk->pageId==input->pageId&&job->hierarchyDisk->path==input->path&&
+            job->hierarchyDisk->expectedIdentity==input->expectedIdentity&&
+            job->hierarchyDisk->expectedMetadataSha256==input->expectedMetadataSha256&&
+            job->hierarchyDisk->fileBytes==input->fileBytes&&job->hierarchyDisk->metadataBytes==input->metadataBytes;};
+        for(const auto& job:{active_,pending_,ready_?ready_->ownership:std::shared_ptr<Job>{}})
+            if(same(job))return matching(job)?SubmitStatus::Duplicate:SubmitStatus::Invalid;
+        const auto [live,bytes]=budget_->Snapshot();
+        if(pending_||live>=2)return SubmitStatus::Busy;
+        if(availableBytes>MaxReserved||bytes>availableBytes||reservation>availableBytes-bytes)return SubmitStatus::Capacity;
+        try {
+            // Freeze BOTH path and prefix after preflight. A caller must still
+            // avoid concurrent mutation DURING submission; later aliases cannot
+            // replace the authenticated table or page address of this job.
+            auto frozen=std::make_shared<const HierarchicalDiskPageInput>(*input);
+            if(!ValidHierarchicalDiskPageInput(*frozen))return SubmitStatus::Invalid;
+            const uint64_t charge=HierarchicalDiskPageInputKnownBytes(*frozen)+HierarchyFileReservation+
+                HierarchyManifestReservation+ResultReservation+MetadataReservation;
+            if(charge>availableBytes-bytes)return SubmitStatus::Capacity;
+            pending_=std::make_shared<Job>(epoch,request,std::move(frozen),budget_);
+        }catch(...){return SubmitStatus::Failed;}
         changed_.notify_all();return SubmitStatus::Queued;
     }
     // Deterministic test latch; default false. Held cancellation debt belongs to

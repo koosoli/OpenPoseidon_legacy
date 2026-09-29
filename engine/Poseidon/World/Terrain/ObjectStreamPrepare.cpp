@@ -5,6 +5,7 @@
 #include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamTextureNames.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamRapStageNames.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamProxyMaterialScan.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamTreeFixture.hpp>
 #include <Poseidon/Asset/Addon/VirtualPath.hpp>
 #include <Poseidon/World/Terrain/LoosePaaPreparation.hpp>
@@ -26,6 +27,7 @@
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/World/Model/ModelMemory.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/World/Terrain/WarmTextureJobPolicy.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
@@ -461,15 +463,33 @@ struct ObjectStreamPreparer::Impl
     static constexpr size_t PackedTextureLimit = 16 * 1024 * 1024;
     static constexpr size_t RapMaterialLimit = 256 * 1024;
     static constexpr size_t RapCandidateLimit = RapStageCandidateHandoff::MaxKnownBytes;
+    static constexpr size_t ProxyModelLimit = DayzProxyPrefetchBounds::MaxProxyModels;
+    static constexpr size_t ProxyModelMemberLimit = DayzProxyPrefetchBounds::MaxProxyMember;
+    static constexpr size_t ProxyRapLimit = 16;
+    static constexpr size_t ProxyPaaLimit = 32;
     struct CapturedRapMaterial
     {
         std::string key;
         BankReadRequest read; // exact immutable physical member; never a QFBank pointer
     };
+    struct CapturedProxyModel
+    {
+        std::string key;
+        BankReadRequest read;
+    };
+    struct ProxyMaterialCandidate
+    {
+        std::string proxyKey, materialKey;
+        BankReadMemberIdentity proxyMember;
+    };
     struct ConvertJob
     {
         std::vector<PackedTextureRead> textures;
         std::vector<CapturedRapMaterial> rapMaterials; // typed NormalMap owner handoff, no PAA work
+        std::vector<CapturedProxyModel> proxyModels; // leased P3D sources; worker scans one at a time
+        uint8_t proxyPhase = 0; // 0=P3D discovery, 1=proxy raP discovery, 2=ordinary conversion
+        bool proxyCaptureIncomplete = false;
+        uint64_t materialStageSourceBytes = 0; // parent and proxy PAA source cap is shared
         int8_t buildingRapFixture = -1; // worker discovery before conversion, exact pilot only
         bool tenementMultistage = false; // separate default-off measured first-touch slice
         bool broadParentPaa = false; // exact-tenement authored PAA worker preparation
@@ -494,6 +514,7 @@ struct ObjectStreamPreparer::Impl
         uint32_t index = uint32_t(-1);
         std::optional<ConvertJob> job;
         std::unique_ptr<RapStageCandidateHandoff> handoff;
+        std::vector<ProxyMaterialCandidate> proxyMaterials; // first owner pass only
     };
     std::array<PendingRap, BuildingRapFixtures.size()> pendingRap{};
     struct WarmJob
@@ -761,8 +782,13 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                         sizeof(render::PreparedAlphaFacts) + texture.read.archive.capacity() + 1 + 64);
             const uint64_t rapScratch = job.rapMaterials.empty() ? 0 :
                 RapMaterialLimit + job.rapMaterials.size() * 16 * 240 + 8192;
+            // No P3D/ODOL model parse is allowed on this speculative path:
+            // compressed arrays can amplify a small physical member before an
+            // IR-size check. The byte scanner retains only short candidate keys.
+            const uint64_t proxyScratch = job.proxyModels.empty() ? 0 :
+                2 * ProxyModelMemberLimit + 8192;
             const uint64_t textureScratch = ((job.textures.empty() && !job.coldTexture) ? 0 :
-                4 * PackedTextureLimit + 8192 + alphaMetadataScratch) + rapScratch;
+                4 * PackedTextureLimit + 8192 + alphaMetadataScratch) + rapScratch + proxyScratch;
             stats.conversionReservedBytes += textureScratch;
             stats.peakConversionReservedBytes = std::max(stats.peakConversionReservedBytes, stats.conversionReservedBytes);
             const uint64_t jobGen = generation.load(std::memory_order_relaxed);
@@ -775,6 +801,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             if (job.buildingRapFixture >= 0)
             {
                 std::unique_ptr<RapStageCandidateHandoff> candidate;
+                std::vector<ProxyMaterialCandidate> proxyDiscovered;
                 lock.lock();
                 const bool mayRead = !stop && jobGen == generation.load(std::memory_order_relaxed) &&
                     job.index < count && !stale[job.index] && paths[job.index] == conversionPath &&
@@ -783,7 +810,81 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 try
                 {
                     const auto& fixture = BuildingRapFixtures[static_cast<size_t>(job.buildingRapFixture)];
-                    if (mayRead && job.broadParentPaa &&
+                    if (mayRead && job.proxyPhase == 0 && !job.proxyModels.empty())
+                    {
+                        // The lexical scan cannot prove full IR coverage, even
+                        // when every physical member was captured successfully.
+                        job.proxyCaptureIncomplete = true;
+                        for (const auto& selected : job.proxyModels)
+                        {
+                            {
+                                std::lock_guard<std::mutex> guard(mutex);
+                                if (stop || jobGen != generation.load(std::memory_order_relaxed) ||
+                                    job.index >= count || stale[job.index] ||
+                                    paths[job.index] != conversionPath || !job.texturePublication.Valid())
+                                    break;
+                            }
+                            BankReadMemberIdentity member;
+                            std::vector<char> bytes;
+                            if (!selected.read.CopyMemberIdentity(member) ||
+                                selected.read.bytes > ProxyModelMemberLimit ||
+                                !selected.read.Read(bytes) || bytes.size() != selected.read.bytes ||
+                                bytes.capacity() > 2 * ProxyModelMemberLimit)
+                            { job.proxyCaptureIncomplete = true; continue; }
+                            const auto scan = Streaming::ScanProxyMaterialNames(
+                                std::span<const char>(bytes.data(), bytes.size()));
+                            std::vector<char>().swap(bytes);
+                            if (!scan.supportedSignature || scan.overflow)
+                                job.proxyCaptureIncomplete = true;
+                            for (const auto& key : scan.names)
+                            {
+                                if (std::any_of(proxyDiscovered.begin(), proxyDiscovered.end(),
+                                    [&](const auto& prior) { return prior.materialKey == key; })) continue;
+                                if (proxyDiscovered.size() >= ProxyRapLimit)
+                                { job.proxyCaptureIncomplete = true; break; }
+                                proxyDiscovered.push_back({selected.key, key, member});
+                            }
+                            if (proxyDiscovered.size() >= ProxyRapLimit) break;
+                        }
+                    }
+                    if (mayRead && job.proxyPhase == 1 && job.broadParentPaa &&
+                        job.buildingRapFixture == 0 && job.rapMaterials.size() <= ProxyRapLimit)
+                    {
+                        candidate = std::make_unique<RapStageCandidateHandoff>();
+                        candidate->generation = jobGen;
+                        candidate->modelIndex = job.index;
+                        candidate->broadParentPaa = true;
+                        candidate->proxyPaa = true;
+                        candidate->overflow = job.proxyCaptureIncomplete;
+                        for (const auto& selected : job.rapMaterials)
+                        {
+                            BankReadMemberIdentity member;
+                            std::vector<char> bytes;
+                            if (!selected.read.CopyMemberIdentity(member) ||
+                                selected.read.bytes > RapMaterialLimit ||
+                                !selected.read.Read(bytes) || bytes.size() != selected.read.bytes)
+                            { candidate->overflow = true; continue; }
+                            const auto result = Streaming::ExtractOwnedRapStageNames(
+                                std::span<const char>(bytes.data(), bytes.size()), selected.key);
+                            if (result.status != Streaming::RapStageNamesStatus::Complete)
+                            { candidate->overflow = true; continue; }
+                            for (const auto& name : result.names)
+                            {
+                                if (std::any_of(candidate->materials.begin(), candidate->materials.end(),
+                                    [&](const auto& prior) { return prior.stageName == name; })) continue;
+                                if (std::count_if(candidate->materials.begin(), candidate->materials.end(),
+                                    [&](const auto& prior) { return prior.key == selected.key; }) >=
+                                    RapStageCandidateHandoff::MaxStagesPerMaterial)
+                                { candidate->overflow = true; break; }
+                                if (candidate->materials.size() >= ProxyPaaLimit)
+                                { candidate->overflow = true; break; }
+                                candidate->materials.push_back({selected.key, name,
+                                    RapStageCandidateHandoff::Consumer::AuthoredStage, member});
+                            }
+                        }
+                        if (candidate->materials.empty() || !candidate->Bounded()) candidate.reset();
+                    }
+                    else if (mayRead && job.proxyPhase == 0 && job.broadParentPaa &&
                         job.buildingRapFixture == 0 && job.rapMaterials.size() <= 16)
                     {
                         candidate = std::make_unique<RapStageCandidateHandoff>();
@@ -872,13 +973,15 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                         }
                     }
                 }
-                catch (...) { candidate.reset(); }
+                catch (...) { candidate.reset(); job.proxyCaptureIncomplete = true; }
                 const size_t slot = static_cast<size_t>(job.buildingRapFixture);
                 const bool multistage = job.tenementMultistage;
                 const bool broadParent = job.broadParentPaa;
                 const size_t materialCount = job.rapMaterials.size();
+                const bool hadProxyModels = !job.proxyModels.empty();
                 job.buildingRapFixture = -1;
                 job.rapMaterials.clear(); // release physical archive lease outside queue mutex
+                job.proxyModels.clear(); // release P3D leases after bounded byte scan
                 static std::atomic<unsigned> discoveryRows{0};
                 static std::atomic<bool> multistageDiscoveryLogged{false};
                 const bool logDiscovery = broadParent || multistage ?
@@ -893,8 +996,15 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                             (multistage ? "trace-top-four-normals" : BuildingRapFixtures[slot].normal),
                         candidate ? candidate->materials.size() : 0,
                         multistage);
-                if (broadParent)
-                    LOG_INFO(World, "DayZ physical prefetch: modelIndex={} parentMaterials={} stageCandidates={} candidateOverflow={} sourceReady={} (worker raP names; no proxy IR coverage)",
+                if (job.proxyPhase == 0 && hadProxyModels)
+                    LOG_INFO(World, "DayZ proxy prefetch: modelIndex={} proxyMaterialCandidates={} captureIncomplete={} sourceReady={} phase=proxy-P3D speculative=true",
+                        job.index, proxyDiscovered.size(), job.proxyCaptureIncomplete, !proxyDiscovered.empty());
+                if (job.proxyPhase == 1)
+                    LOG_INFO(World, "DayZ proxy prefetch: modelIndex={} proxyRaP={} stageCandidates={} candidateOverflow={} sourceReady={} phase=proxy-raP speculative=true",
+                        job.index, materialCount, candidate ? candidate->materials.size() : 0,
+                        candidate ? candidate->overflow : true, candidate != nullptr);
+                if (broadParent && job.proxyPhase == 0)
+                    LOG_INFO(World, "DayZ physical prefetch: modelIndex={} parentMaterials={} stageCandidates={} candidateOverflow={} sourceReady={} (worker parent raP names; proxy coverage separate)",
                         job.index, materialCount, candidate ? candidate->materials.size() : 0,
                         candidate ? candidate->overflow : true, candidate != nullptr);
                 lock.lock();
@@ -915,13 +1025,22 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                     lock.lock();
                     continue;
                 }
-                if (candidate && job.radiusIdentityAccepted &&
+                uint64_t proxyCharge = proxyDiscovered.capacity() * sizeof(ProxyMaterialCandidate);
+                for (const auto& source : proxyDiscovered)
+                    proxyCharge += source.proxyKey.capacity() + 1 + source.materialKey.capacity() + 1;
+                if (proxyCharge > 64 * 1024)
+                { std::vector<ProxyMaterialCandidate>().swap(proxyDiscovered);
+                  proxyCharge = 0; job.proxyCaptureIncomplete = true; }
+                if ((candidate || !proxyDiscovered.empty()) && job.radiusIdentityAccepted &&
                     job.texturePublication.Valid() && !pendingRap[slot].job)
                 {
+                    job.reservation += proxyCharge;
+                    stats.conversionReservedBytes += proxyCharge;
                     stats.conversionReservedBytes -= textureScratch; // no worker scratch while parked
                     pendingRap[slot].index = job.index;
                     pendingRap[slot].job.emplace(std::move(job));
                     pendingRap[slot].handoff = std::move(candidate);
+                    pendingRap[slot].proxyMaterials = std::move(proxyDiscovered);
                     Set(pendingRap[slot].index, State::RapCapture);
                     cv.notify_all();
                     continue;
@@ -1711,6 +1830,7 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
     std::deque<Impl::ConvertJob> freeConversions;
     std::array<std::unique_ptr<RapStageCandidateHandoff>, 2> freeRap;
     std::array<std::unique_ptr<RapStageCandidateHandoff>, BuildingRapFixtures.size()> freePendingRap;
+    std::array<std::vector<Impl::ProxyMaterialCandidate>, BuildingRapFixtures.size()> freeProxyMaterials;
     std::array<Impl::WarmJob, Streaming::WarmTextureJobPolicy::JobLimit> freeWarm;
     size_t freeWarmCount = 0;
     {
@@ -1764,6 +1884,7 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
                 pending.job.reset();
             }
             freePendingRap[i] = std::move(pending.handoff);
+            freeProxyMaterials[i] = std::move(pending.proxyMaterials);
             pending.index = uint32_t(-1);
         }
         for (const uint64_t bytes : _impl->conversionBytes)
@@ -1968,6 +2089,7 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
     std::deque<Impl::ConvertJob> freeConversions;
     std::array<std::unique_ptr<RapStageCandidateHandoff>, 2> freeRap;
     std::array<std::unique_ptr<RapStageCandidateHandoff>, BuildingRapFixtures.size()> freePendingRap;
+    std::array<std::vector<Impl::ProxyMaterialCandidate>, BuildingRapFixtures.size()> freeProxyMaterials;
     std::array<Impl::WarmJob, Streaming::WarmTextureJobPolicy::JobLimit> freeWarm;
     size_t freeWarmCount = 0;
     size_t dropped = 0;
@@ -2038,6 +2160,7 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
                     freeConversions.push_back(std::move(*pending.job));
                     pending.job.reset();
                     freePendingRap[slot] = std::move(pending.handoff);
+                    freeProxyMaterials[slot] = std::move(pending.proxyMaterials);
                     pending.index = uint32_t(-1);
                     break;
                 }
@@ -2235,6 +2358,8 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     bool tenementMultistage = false;
     bool broadParentPaa = false;
     bool broadCaptureIncomplete = false;
+    std::vector<Impl::CapturedProxyModel> proxyModels;
+    bool proxyCaptureIncomplete = false;
     if (TenementPhysicalPaaScope::Enabled() && ownerTextureAdmission &&
         Foundation::IsMainThread() && GUseFileBanks && !originalSource &&
         render::PreparedTextureStore::Enabled() &&
@@ -2286,6 +2411,58 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
         }
         catch (...) { rapMaterials.clear(); broadParentPaa = false; buildingRapFixture = -1;
             broadCaptureIncomplete = true; }
+    }
+    static const bool dayzProxyPrefetch = [] {
+        const char* flag = std::getenv("WGR_OBJECT_STREAM_DAYZ_PROXY_PREFETCH");
+        return flag && std::strcmp(flag, "1") == 0;
+    }();
+    if (dayzProxyPrefetch && broadParentPaa && model->sourceFormat == "ODOL")
+    {
+        // These are speculative file-backed one-hop proxy candidates. The adapter's
+        // later config probe may skip or replace any of them; only final PAA Init and
+        // upload can prove actual consumption. Never load a proxy shape here.
+        try
+        {
+            size_t visits = 0;
+            uint64_t sourceBytes = 0;
+            for (const auto& level : model->lodLevels)
+            {
+                if (level.purpose != Model::LodPurpose::Visual) continue;
+                for (const auto& proxy : level.mesh.proxies)
+                {
+                    if (++visits > 256 || proxyModels.size() >= Impl::ProxyModelLimit)
+                    { proxyCaptureIncomplete = true; break; }
+                    const auto normalized = Model::ShapeAdapter::normalizeProxyModelName(proxy.name);
+                    const RString shapeName = GetShapeName(RString(normalized.modelName.c_str()));
+                    const auto path = Asset::VirtualPath::Parse(static_cast<const char*>(shapeName));
+                    const std::string& key = path.canonical();
+                    if (key.empty() || key.size() > 240 || path.extension() != ".p3d" ||
+                        path.looksHostAbsolute())
+                    { proxyCaptureIncomplete = true; continue; }
+                    if (std::any_of(proxyModels.begin(), proxyModels.end(),
+                        [&](const auto& prior) { return prior.key == key; })) continue;
+                    QFBank* bank = QIFStreamB::AutoBank(key.c_str());
+                    if (!bank) { proxyCaptureIncomplete = true; continue; }
+                    const RString prefix = bank->GetPrefix();
+                    if (prefix.GetLength() < 0 || static_cast<size_t>(prefix.GetLength()) >= key.size() ||
+                        CmpStartStr(key.c_str(), prefix))
+                    { proxyCaptureIncomplete = true; continue; }
+                    auto read = bank->CaptureReadRequest(key.c_str() + prefix.GetLength(), true);
+                    if (!read || !read->HasArchiveIdentity() ||
+                        !DayzProxyPrefetchBounds::AdmitProxyModel(
+                            proxyModels.size(), sourceBytes, read->bytes) ||
+                        !bank->MatchesMountedMember(key.c_str() + prefix.GetLength(), *read))
+                    { proxyCaptureIncomplete = true; continue; }
+                    sourceBytes += read->bytes;
+                    proxyModels.push_back({key, std::move(*read)});
+                }
+                if (visits > 256 || proxyModels.size() >= Impl::ProxyModelLimit)
+                { proxyCaptureIncomplete = true; break; }
+            }
+            LOG_INFO(World, "DayZ proxy prefetch: parent={} capturedP3D={} visits={} sourceBytes={} captureIncomplete={} maxP3D=16 memberLimit=4194304 sourceLimit=33554432 speculative=true",
+                model->sourcePath, proxyModels.size(), visits, sourceBytes, proxyCaptureIncomplete);
+        }
+        catch (...) { proxyModels.clear(); proxyCaptureIncomplete = true; }
     }
     // Exact selected DayZ fixtures only. No lookup, bank load or allocation in
     // the default path. A fixture is attempted at most once per world, whether
@@ -2572,7 +2749,8 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     Impl::ConvertJob job;
     job.index = index;
     if (_impl->convertedColdTextures.size() != _impl->count) coldTexture.reset();
-    job.texturePublicationRequired = !textures.empty() || bool(coldTexture) || buildingRapFixture >= 0;
+    job.texturePublicationRequired = !textures.empty() || bool(coldTexture) ||
+        buildingRapFixture >= 0 || !proxyModels.empty();
     if (job.texturePublicationRequired)
         job.texturePublication = {_impl->ddsPublication, index,
             _impl->ddsPublication ? _impl->ddsPublication->Epoch(index) : 0};
@@ -2609,6 +2787,15 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     job.tenementMultistage = tenementMultistage;
     job.broadParentPaa = broadParentPaa;
     job.broadCaptureIncomplete = broadCaptureIncomplete;
+    if (!proxyModels.empty())
+    {
+        job.reservation += proxyModels.capacity() * sizeof(Impl::CapturedProxyModel);
+        for (const auto& proxy : proxyModels)
+            job.reservation += proxy.key.capacity() + 1 + proxy.read.archive.capacity() + 1 +
+                proxy.read.ArchiveIdentityBytes() + 64;
+    }
+    job.proxyModels = std::move(proxyModels);
+    job.proxyCaptureIncomplete = proxyCaptureIncomplete;
     if (!textures.empty())
     {
         job.reservation += textures.capacity() * sizeof(Impl::PackedTextureRead);
@@ -2636,6 +2823,7 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
     if (!Foundation::IsMainThread()) return false;
     std::optional<Impl::ConvertJob> job;
     std::unique_ptr<RapStageCandidateHandoff> handoff;
+    std::vector<Impl::ProxyMaterialCandidate> proxyMaterials;
     size_t slot = BuildingRapFixtures.size();
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
@@ -2647,6 +2835,7 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
                 job.emplace(std::move(*_impl->pendingRap[i].job));
                 _impl->pendingRap[i].job.reset();
                 handoff = std::move(_impl->pendingRap[i].handoff);
+                proxyMaterials = std::move(_impl->pendingRap[i].proxyMaterials);
                 _impl->pendingRap[i].index = uint32_t(-1);
                 break;
             }
@@ -2664,8 +2853,11 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
     uint64_t addedCharge = 0;
     const bool multistage = job->tenementMultistage && slot == 0;
     const bool broadParent = job->broadParentPaa && slot == 0;
-    uint64_t addedSourceBytes = 0; // extra material stages only; earlier primary inputs are separate
+    const bool firstProxyPass = job->proxyPhase == 0 && !proxyMaterials.empty();
+    const bool proxyPaa = job->proxyPhase == 1 && handoff && handoff->proxyPaa;
+    uint64_t addedSourceBytes = job->materialStageSourceBytes; // parent + proxy stages, not primary inputs
     size_t sourceRefused = 0;
+    size_t proxyRaPCaptured = 0, proxySourceRefused = 0;
     try
     {
         const auto& fixture = BuildingRapFixtures[slot];
@@ -2712,7 +2904,7 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
                             // this exact member and that it is still mounted.
                             const std::string& key = material.stageName;
                             if (key.capacity() <= 1024 && job->textures.size() < existingTextures +
-                                    (broadParent ? RapStageCandidateHandoff::MaxCandidates :
+                                    (proxyPaa ? Impl::ProxyPaaLimit : broadParent ? RapStageCandidateHandoff::MaxCandidates :
                                         (multistage ? TenementMultistageNormals.size() : 1)) &&
                                 std::none_of(job->textures.begin(), job->textures.end(),
                                     [&](const auto& prior) { return prior.key == key; }))
@@ -2727,9 +2919,8 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
                                         key.c_str() + texturePrefix, true);
                                     if (read && read->HasArchiveIdentity() && read->bytes &&
                                         read->bytes <= Impl::PackedTextureLimit &&
-                                        (!broadParent ||
-                                            (addedSourceBytes <= 128ull * 1024 * 1024 &&
-                                             read->bytes <= 128ull * 1024 * 1024 - addedSourceBytes)) &&
+                                        (!broadParent || DayzProxyPrefetchBounds::AdmitMaterialSource(
+                                            addedSourceBytes, read->bytes)) &&
                                         textureBank->MatchesMountedMember(key.c_str() + texturePrefix, *read))
                                     {
                                         const uint64_t knownSourceBytes = key.capacity() + 1 +
@@ -2754,15 +2945,69 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
                                 else ++sourceRefused;
                             }
                             else if (key.capacity() > 1024 || job->textures.size() >= existingTextures +
-                                (broadParent ? RapStageCandidateHandoff::MaxCandidates :
+                                (proxyPaa ? Impl::ProxyPaaLimit : broadParent ? RapStageCandidateHandoff::MaxCandidates :
                                     (multistage ? TenementMultistageNormals.size() : 1))) ++sourceRefused;
                         }
                     }
                 }
             }
         }
+        if (firstProxyPass && job->texturePublication.Valid() &&
+            job->textureGeneration == render::PreparedTextureStore::Instance().Generation())
+        {
+            uint64_t proxyRapBytes = 0;
+            for (const auto& selected : proxyMaterials)
+            {
+                if (job->rapMaterials.size() >= Impl::ProxyRapLimit)
+                { job->proxyCaptureIncomplete = true; break; }
+                QFBank* proxyBank = QIFStreamB::AutoBank(selected.proxyKey.c_str());
+                if (!proxyBank) { ++proxySourceRefused; continue; }
+                const RString proxyPrefix = proxyBank->GetPrefix();
+                if (proxyPrefix.GetLength() < 0 ||
+                    static_cast<size_t>(proxyPrefix.GetLength()) >= selected.proxyKey.size() ||
+                    CmpStartStr(selected.proxyKey.c_str(), proxyPrefix))
+                { ++proxySourceRefused; continue; }
+                auto currentProxy = proxyBank->CaptureReadRequest(
+                    selected.proxyKey.c_str() + proxyPrefix.GetLength(), true);
+                BankReadMemberIdentity currentProxyMember;
+                if (!currentProxy || !currentProxy->CopyMemberIdentity(currentProxyMember) ||
+                    !(currentProxyMember == selected.proxyMember) ||
+                    !proxyBank->MatchesMountedMember(
+                        selected.proxyKey.c_str() + proxyPrefix.GetLength(), *currentProxy))
+                { ++proxySourceRefused; continue; }
+                if (std::any_of(job->rapMaterials.begin(), job->rapMaterials.end(),
+                    [&](const auto& prior) { return prior.key == selected.materialKey; })) continue;
+                QFBank* materialBank = QIFStreamB::AutoBank(selected.materialKey.c_str());
+                if (!materialBank) { ++proxySourceRefused; continue; }
+                const RString materialPrefix = materialBank->GetPrefix();
+                if (materialPrefix.GetLength() < 0 ||
+                    static_cast<size_t>(materialPrefix.GetLength()) >= selected.materialKey.size() ||
+                    CmpStartStr(selected.materialKey.c_str(), materialPrefix))
+                { ++proxySourceRefused; continue; }
+                auto read = materialBank->CaptureReadRequest(
+                    selected.materialKey.c_str() + materialPrefix.GetLength(), true);
+                if (!read || !read->HasArchiveIdentity() || !read->bytes ||
+                    read->bytes > Impl::RapMaterialLimit ||
+                    proxyRapBytes > 4ull * 1024 * 1024 - read->bytes ||
+                    !materialBank->MatchesMountedMember(
+                        selected.materialKey.c_str() + materialPrefix.GetLength(), *read))
+                { ++proxySourceRefused; continue; }
+                proxyRapBytes += read->bytes;
+                const size_t previousCapacity = job->rapMaterials.capacity();
+                addedCharge += selected.materialKey.capacity() + 1 + read->archive.capacity() + 1 +
+                    read->ArchiveIdentityBytes() + 64;
+                job->rapMaterials.push_back({selected.materialKey, std::move(*read)});
+                addedCharge += (job->rapMaterials.capacity() - previousCapacity) *
+                    sizeof(Impl::CapturedRapMaterial);
+                ++proxyRaPCaptured;
+            }
+        }
     }
-    catch (...) { addedCharge = 0; job->textures.resize(existingTextures); } // preserve ordinary inputs
+    catch (...) { addedCharge = 0; addedSourceBytes = job->materialStageSourceBytes;
+        job->textures.resize(existingTextures); job->rapMaterials.clear();
+        job->proxyCaptureIncomplete = true; } // preserve ordinary conversion
+    if (proxySourceRefused || (proxyPaa && sourceRefused))
+        job->proxyCaptureIncomplete = true;
     static std::atomic<unsigned> captureRows{0};
     static std::atomic<bool> multistageCaptureLogged{false};
     const bool logCapture = broadParent || multistage ?
@@ -2774,7 +3019,7 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
             broadParent ? "authored-file-backed-PAA" :
                 (multistage ? "trace-top-four-normals" : BuildingRapFixtures[slot].normal),
             job->textures.size() - existingTextures, multistage);
-    if (broadParent)
+    if (broadParent && !proxyPaa)
     {
         LOG_INFO(World, "DayZ physical prefetch: modelIndex={} stageCandidates={} captured={} sourceRefused={} candidateOverflow={} addedStageSourceBytes={} addedStageSourceLimit={} complete=false reason=parent-only-authored-superset",
             index, handoff ? handoff->materials.size() : 0, job->textures.size() - existingTextures,
@@ -2784,11 +3029,34 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
             LOG_INFO(World, "DayZ physical prefetch captured: source={} memberBytes={} row={} limit=64",
                 job->textures[i].key, job->textures[i].read.bytes, i - existingTextures + 1);
     }
+    if (firstProxyPass)
+        LOG_INFO(World, "DayZ proxy prefetch: modelIndex={} proxyMaterialCandidates={} capturedRaP={} sourceRefused={} captureIncomplete={} phase=proxy-material-owner speculative=true",
+            index, proxyMaterials.size(), proxyRaPCaptured, proxySourceRefused,
+            job->proxyCaptureIncomplete);
+    if (proxyPaa)
+    {
+        LOG_INFO(World, "DayZ proxy prefetch: modelIndex={} stageCandidates={} capturedPAA={} sourceRefused={} candidateOverflow={} addedSourceBytes={} sharedStageSourceBytes={} sharedStageSourceLimit=134217728 complete=false phase=proxy-PAA-owner speculative=true",
+            index, handoff->materials.size(), job->textures.size() - existingTextures, sourceRefused,
+            handoff->overflow, addedSourceBytes - job->materialStageSourceBytes,
+            addedSourceBytes);
+        for (size_t i = existingTextures; i < job->textures.size(); ++i)
+            LOG_INFO(World, "DayZ proxy prefetch captured: source={} memberBytes={} row={} limit=32 speculative=true",
+                job->textures[i].key, job->textures[i].read.bytes, i - existingTextures + 1);
+    }
+    if (firstProxyPass)
+    {
+        job->proxyPhase = proxyRaPCaptured ? 1 : 2;
+        job->buildingRapFixture = proxyRaPCaptured ? 0 : -1;
+    }
+    else if (job->proxyPhase == 1)
+        job->proxyPhase = 2;
+    job->materialStageSourceBytes = addedSourceBytes;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
         const bool current = !_impl->stop && index < _impl->count &&
             _impl->Get(index) == State::RapCapture && !_impl->stale[index] &&
-            handoff && handoff->generation == _impl->generation.load(std::memory_order_relaxed) &&
+            ((handoff && handoff->generation == _impl->generation.load(std::memory_order_relaxed)) ||
+             (firstProxyPass && job->radiusGeneration == _impl->generation.load(std::memory_order_relaxed))) &&
             _impl->paths[index] == job->model->sourcePath &&
             (!job->sourceToken.diagnosticParseToken ||
              _impl->SourceBindingMatches(index, job->sourceToken));
@@ -2808,7 +3076,7 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
             catch (...) { job->reservation -= addedCharge; }
         }
         _impl->stats.conversionReservedBytes -= originalReservation;
-        if (handoff && handoff->generation == _impl->generation.load(std::memory_order_relaxed) &&
+        if (job->radiusGeneration == _impl->generation.load(std::memory_order_relaxed) &&
             index < _impl->count && _impl->Get(index) == State::RapCapture)
             _impl->Set(index, current ? State::Failed : State::Unknown);
         _impl->cv.notify_all();

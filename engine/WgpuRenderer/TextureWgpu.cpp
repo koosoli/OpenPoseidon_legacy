@@ -2193,16 +2193,20 @@ uint64_t TextureWgpu::EnsureUploaded()
             if (TenementPhysicalPaaScope::Active())
             {
                 static unsigned tenementRows = 0;
-                if (tenementRows < 64)
+                static const unsigned tenementLimit = [] {
+                    const char* proxy = std::getenv("WGR_OBJECT_STREAM_DAYZ_PROXY_PREFETCH");
+                    return proxy && std::strcmp(proxy, "1") == 0 ? 96u : 64u;
+                }();
+                if (tenementRows < tenementLimit)
                 {
                     ++tenementRows;
-                    LOG_INFO(Graphics, "DayZ physical prefetch upload: source={} bytes={} memberBytes={} initMemberMatched=true currentMountMatched=true layoutMatched=true blockUploadSucceeded=true row={} limit=64",
-                        SourceName(), total, physicalPreparedSource.bytes, tenementRows);
+                    LOG_INFO(Graphics, "DayZ physical prefetch upload: source={} bytes={} memberBytes={} initMemberMatched=true currentMountMatched=true layoutMatched=true blockUploadSucceeded=true row={} limit={}",
+                        SourceName(), total, physicalPreparedSource.bytes, tenementRows, tenementLimit);
                 }
-                else if (tenementRows == 64)
+                else if (tenementRows == tenementLimit)
                 {
                     ++tenementRows;
-                    LOG_INFO(Graphics, "DayZ physical prefetch upload truncated: limit=64; observed prefix only");
+                    LOG_INFO(Graphics, "DayZ physical prefetch upload truncated: limit={}; observed prefix only", tenementLimit);
                 }
             }
         }

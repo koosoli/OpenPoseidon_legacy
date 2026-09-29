@@ -1,7 +1,9 @@
-param([switch]$Hierarchy,[ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$Interactive,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
+param([switch]$PaletteContentWitness,[switch]$HierarchyDisk,[ValidateSet('None','Scalar','Localized')][string]$HierarchyCuts='None',[switch]$Hierarchy,[ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$Interactive,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
  [string]$Label='original-geometry-pages',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
-if($Hierarchy -and ($DiskFault -ne 'None' -or $CameraPrefetch -or $ProjectedPrefetch -or $AutoFine -or $AutoCoarse -or $Interactive -or $CameraTuple -or $CameraTupleScaleRefusal -or $SurfaceCertificate -or $MainCountProbe -or $SurfaceFault -ne 'None')){throw 'Hierarchy is an independent original-source RAM-page fixture'}
+if($PaletteContentWitness -and !$MainCountProbe){throw 'Palette content witness requires MainCountProbe'}
+if($HierarchyDisk -or $HierarchyCuts -ne 'None'){$Hierarchy=$true}
+if($Hierarchy -and ($DiskFault -ne 'None' -or $CameraPrefetch -or $ProjectedPrefetch -or $AutoFine -or $AutoCoarse -or $Interactive -or $CameraTuple -or $CameraTupleScaleRefusal -or $SurfaceCertificate -or $MainCountProbe -or $SurfaceFault -ne 'None')){throw 'Hierarchy is an independent original-source page fixture'}
 if($SurfaceFault -ne 'None'){$SurfaceCertificate=$true}
 if($MainCountProbe){$SurfaceCertificate=$true}
 if($CameraTupleScaleRefusal){$CameraTuple=$true}
@@ -17,6 +19,9 @@ if(!$env:LOCK_OWNER){
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),$shell.Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python,'-DiskFault',$DiskFault)
  if($Tools){$argv+=@('-Tools',$Tools)}
  if($Hierarchy){$argv+='-Hierarchy'}
+ if($HierarchyDisk){$argv+='-HierarchyDisk'}
+ if($PaletteContentWitness){$argv+='-PaletteContentWitness'}
+ $argv+=@('-HierarchyCuts',$HierarchyCuts)
  if($CameraPrefetch){$argv+='-CameraPrefetch'}
  if($ProjectedPrefetch){$argv+='-ProjectedPrefetch'}
  if($AutoFine){$argv+='-AutoFine'}
@@ -78,7 +83,7 @@ $toolsHash=(Get-FileHash -LiteralPath $Tools).Hash
 $stdout=Join-Path $out 'original-producer-stdout.json';$stderr=Join-Path $out 'original-producer-stderr.txt';$offline=Join-Path $out 'offline-original'
 $toolProcess=$null
 try{
- $toolArgs=@('geometry-page-mlod','--input',('"'+$OriginalSource+'"'),'--output-directory',('"'+$offline+'"'));if($SurfaceCertificate){$toolArgs+='--surface-certificate'}
+ $toolArgs=@('geometry-page-mlod','--input',('"'+$OriginalSource+'"'),'--output-directory',('"'+$offline+'"'));if($SurfaceCertificate){$toolArgs+='--surface-certificate'};if($HierarchyDisk){$toolArgs+='--hierarchy-pages'}
  $toolProcess=Start-Process -FilePath $Tools -ArgumentList $toolArgs -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
  $until=[DateTime]::UtcNow.AddSeconds(60)
  while(!$toolProcess.HasExited){foreach($f in @($stdout,$stderr)){if((Test-Path -LiteralPath $f) -and (Get-Item -LiteralPath $f).Length -gt 8192){throw 'Offline output exceeds8192bytes'}};if([DateTime]::UtcNow -gt $until){throw 'Offline producer timed out'};Start-Sleep -Milliseconds 100}
@@ -95,6 +100,23 @@ foreach($identity in @($originalProducer.originalSource,$originalProducer.select
 }
 if($originalProducer.selectedCut.source.sourceSha256 -ceq $rawHash -or $originalProducer.selectedCut.formatVersion -ne 1 -or $originalProducer.selectedCut.algorithmVersion -ne 2 -or $originalProducer.selectedCut.packing.clusterVertices -ne 64 -or $originalProducer.selectedCut.packing.clusterTriangles -ne 124 -or $originalProducer.selectedCut.packing.pageBytes -ne 65536 -or $originalProducer.fileBytes -lt 1 -or $originalProducer.fileBytes -gt 131072 -or $originalProducer.knownSourceBytes -lt 1 -or $originalProducer.knownSourceBytes -gt 131072 -or $originalProducer.coarseTriangles -ne 64 -or $originalProducer.fineTriangles -ne 512 -or $originalProducer.authoredFallbackTriangles -ne 2 -or $originalProducer.originalFineVertices -ne 289 -or $originalProducer.originalFineTriangles -ne 512 -or $originalProducer.coarsePages -ne 1 -or $originalProducer.finePages -ne 1 -or $originalProducer.selectedClusters -lt 1 -or $originalProducer.selectedClusters -gt 64 -or $originalProducer.scope -cne 'external-original-byte-producer; independently-verify-input-hash; no-retail/runtime/GPU/source-freshness-or-hard-peak-proof'){throw 'Selected package scope/cap mismatch'}
 foreach($f in @((Join-Path $offline 'selected.gcd'))){if(!(Test-Path -LiteralPath $f) -or (Get-Item -LiteralPath $f).Length -ne $originalProducer.fileBytes -or (Get-FileHash -LiteralPath $f).Hash -ine $originalProducer.fileSha256){throw 'Selected file hash/length mismatch'}}
+$hierarchyAuthority=$null
+if($HierarchyDisk){
+ RequireFields $originalProducer @('hierarchyPages')
+ $h=$originalProducer.hierarchyPages
+ RequireFields $h @('file','fileBytes','fileSha256','metadataOffset','metadataBytes','metadataSha256','diskCodecSchema','headerBytes','sVertexBytes','vertexScalarBytes','sVertexLayoutKeyHex','clodLibraryRevision','adapterVersion','sourceBytes','source','packageSha256','pageCount','pageByteLimit','groupCount','clusterCount','rootPageIds')
+ if($h.file -cne 'hierarchy.ghp' -or $h.metadataOffset -ne 0 -or $h.metadataBytes -lt 212 -or $h.metadataBytes -gt 32768 -or $h.fileBytes -le $h.metadataBytes -or $h.fileBytes -gt (32768+64*65536) -or $h.diskCodecSchema -ne 1 -or $h.headerBytes -ne 212 -or $h.sVertexBytes -ne 68 -or $h.vertexScalarBytes -ne 68 -or $h.sVertexLayoutKeyHex -cne $originalProducer.sVertexLayoutKeyHex -or $h.clodLibraryRevision -cne $originalProducer.clodLibraryRevision -or $h.adapterVersion -ne 1 -or $h.sourceBytes -ne $rawBytes -or !(EqualJson $h.source $originalProducer.originalSource) -or $h.packageSha256 -notmatch '^[0-9a-f]{64}$' -or $h.pageCount -lt 2 -or $h.pageCount -gt 64 -or $h.pageByteLimit -ne 65536 -or $h.groupCount -lt 2 -or $h.groupCount -gt 64 -or $h.clusterCount -lt 1 -or $h.clusterCount -gt 64 -or !@($h.rootPageIds).Count){throw 'Hierarchy producer source/layout/metadata contract mismatch'}
+ $hierarchyPath=Join-Path $offline 'hierarchy.ghp'
+ if(!(Test-Path -LiteralPath $hierarchyPath -PathType Leaf) -or (Get-Item -LiteralPath $hierarchyPath).Length -ne $h.fileBytes -or (Get-FileHash -LiteralPath $hierarchyPath).Hash -ine $h.fileSha256){throw 'Hierarchy file hash/length mismatch'}
+ $prefix=New-Object byte[] ([int]$h.metadataBytes)
+ $stream=[IO.File]::OpenRead($hierarchyPath)
+ try{$got=0;while($got -lt $prefix.Length){$n=$stream.Read($prefix,$got,$prefix.Length-$got);if(!$n){throw 'Truncated hierarchy metadata'};$got+=$n}}finally{$stream.Dispose()}
+ $sha=[Security.Cryptography.SHA256]::Create()
+ try{$prefixHash=[BitConverter]::ToString($sha.ComputeHash($prefix)).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+ if($prefixHash -cne $h.metadataSha256){throw 'Hierarchy metadata hash mismatch'}
+ $hierarchyAuthority=@{path=$hierarchyPath;fileBytes=$h.fileBytes;metadataBytes=$h.metadataBytes;metadataSha256=$prefixHash;packageSha256=$h.packageSha256;source=$h.source;metadataHex=[BitConverter]::ToString($prefix).Replace('-','').ToLowerInvariant()}
+ @{producer=$h;verifiedPath=$hierarchyPath;verifiedPrefixSha256=$prefixHash;scope='Fresh source and Tools authority verified before game startup; per-page worker verification remains required'}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'hierarchy-disk-authority.json')
+}
 if((Get-FileHash -LiteralPath $OriginalSource).Hash -ine $rawHash -or (Get-FileHash -LiteralPath $Tools).Hash -ne $toolsHash){throw 'Source/Tools changed during proof'}
 $id=$originalProducer.originalSource
 $originalKey=@([Convert]::ToUInt64($id.geometryOptionsHex,16),[Convert]::ToUInt64($id.materialOptionsHex,16),$id.producerVersion,$id.coarseRepresentation,$id.fineRepresentation,$id.vertexLayout,$id.materialMapping)-join ':'
@@ -153,6 +175,7 @@ $environment=@{
 $environment.WGR_GEOMETRY_PAGE_ORIGINAL_SOURCE='1';$environment.WGR_GEOMETRY_PAGE_FIXTURE='1'
 $environment.WGR_GEOMETRY_PAGE_SURFACE_CERTIFICATE=$(if($SurfaceCertificate){'1'}else{'0'})
 $environment.WGR_GEOMETRY_MAIN_COUNT_PROBE=$(if($MainCountProbe){'1'}else{'0'})
+$environment.WGR_GEOMETRY_PALETTE_CONTENT_WITNESS=$(if($PaletteContentWitness){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_CAMERA_TUPLE=$(if($CameraTuple){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_PROJECTED_PREFETCH=$(if($ProjectedPrefetch){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_PRIVATE_AUTO_FINE=$(if($AutoFine){'1'}else{'0'})
@@ -182,6 +205,7 @@ try{
         $command=@{cmd='geometry_page_fixture';action=$action;x=1200;y=15;z=1240}
         if($action -eq 'beginOriginalDiskClodPaged'){$command.disk=@{path=$diskPath;producer=$originalProducer};$command.sourceAdmissionEpoch=1}
         if($action -eq 'beginOriginalHierarchy'){$command.sourceAdmissionEpoch=1}
+        if($action -eq 'beginOriginalHierarchyDisk'){$command.sourceAdmissionEpoch=1;$command.originalSourceBytes=$rawBytes;$command.hierarchyDisk=$hierarchyAuthority}
         Send $command
     }
     function Capture($name) {
@@ -532,28 +556,83 @@ try{
       if(!$c.hierarchicalPilot -or $c.hierarchyPages -lt 2 -or $c.hierarchyPages -gt 64 -or $c.hierarchyRootPages -lt 1 -or $c.hierarchyRootPages -gt $c.hierarchyPages -or $c.hierarchyResidentPages -gt $c.hierarchyPages -or $c.hierarchyPackageSha256 -notmatch '^[0-9a-f]{64}$' -or $c.sourceAdmissionEpoch -ne 1 -or ($c.knownPayloadBytes+$c.pageReservedBytes) -gt 1048576 -or $c.meshCount -gt 64 -or @($c.hierarchySelectedClusters).Count -gt 64){throw 'Hierarchy source, capacity or topology contract failed'}
       return $c
      }
-     $begin=Action 'beginOriginalHierarchy';$fallback=HierarchyBounded (HierarchyReady)
+     $hierarchyBegin=if($HierarchyDisk){'beginOriginalHierarchyDisk'}else{'beginOriginalHierarchy'}
+     $badDiskAuthority=$null
+     if($HierarchyDisk){
+      $badAuthority=$hierarchyAuthority.Clone()
+      $badAuthority.metadataSha256=('0'*64)
+      $badDiskAuthority=Send @{cmd='geometry_page_fixture';action=$hierarchyBegin;x=1200;y=15;z=1240;sourceAdmissionEpoch=1;originalSourceBytes=$rawBytes;hierarchyDisk=$badAuthority}
+      if($badDiskAuthority.status -ne 'Invalid' -or $badDiskAuthority.active -or $badDiskAuthority.meshCount -ne 0){throw 'Invalid external metadata authority published resources'}
+     }
+     $begin=Action $hierarchyBegin;$fallback=HierarchyBounded (HierarchyReady)
      if(!$fallback.fallbackSelected -or $fallback.fallbackTriangles -ne 2 -or $fallback.hierarchyResidentPages -ne 0 -or $fallback.meshesPresent -ne 1){throw 'Authored fallback missing before hierarchy page loading'}
      Capture 'hierarchy-authored.png'
-     $cuts=@();$steps=@()
-     foreach($target in @('rootHierarchy','fineHierarchy','rootHierarchy')){
-      $before=HierarchyReady;$null=Action $target
+     $cuts=@();$steps=@();$specialDemand=$null;$rejectedDemand=$null
+     $targets=@('rootHierarchy')
+     if($HierarchyCuts -eq 'Scalar'){$targets+='intermediateHierarchy'}
+     if($HierarchyCuts -eq 'Localized'){$targets+='localHierarchy'}
+     $targets+=@('fineHierarchy','rootHierarchy')
+     foreach($target in $targets){
+      $before=HierarchyReady
+      if($target -in @('intermediateHierarchy','localHierarchy')){
+       Require $before @('hierarchyDemandGroupCount','hierarchyGroupErrors','hierarchyRetainedCutModels')
+       $count=[int]$before.hierarchyDemandGroupCount
+       if($count -lt 2 -or $count -gt 64 -or @($before.hierarchyGroupErrors).Count -ne $count){throw 'Missing bounded actual group errors'}
+       # This generated chain has three non-root levels. Skip its finest level:
+       # refining that leaf activates every ancestor and requests the full Fine cut.
+       $finite=@($before.hierarchyGroupErrors|Where-Object {$_ -gt 0 -and $_ -lt 3.4e38}|Sort-Object -Unique)
+       if($finite.Count -lt 2){throw 'Actual source lacks distinct intermediate refinement errors'}
+       $command=@{cmd='geometry_page_fixture';action=$target;packageSha256=$before.hierarchyPackageSha256;sourceAdmissionEpoch=$before.sourceAdmissionEpoch;pageEpoch=$before.pageEpoch;expectedRequestId=$before.observedRequestId;groupCount=$count}
+       if($target -eq 'intermediateHierarchy'){$command.threshold=$finite[1]}
+       else {
+        $values=@(0..($count-1)|ForEach-Object {[double]$fallback.hierarchyThreshold})
+        $chosen=-1
+        for($g=0;$g -lt $count;$g++){if($before.hierarchyGroupErrors[$g] -eq $finite[1]){$chosen=$g;break}}
+        if($chosen -lt 0){throw 'No actual group to refine'}
+        $values[$chosen]=0;$command.groupThresholds=$values
+       }
+       # Incorrect source token must be rejected without changing demand or loading pages.
+       $bad=$command.Clone();$bad.pageEpoch=[uint64]$before.pageEpoch+1
+       $rejectedDemand=Send $bad
+       if($rejectedDemand.status -ne 'Invalid'){throw 'Foreign hierarchy demand was accepted'}
+       $unchanged=HierarchyReady
+       if($unchanged.requestId -ne $before.requestId -or $unchanged.hierarchyResidentPages -ne $before.hierarchyResidentPages -or $unchanged.producerModel -ne $before.producerModel){throw 'Refused demand changed owned state'}
+       $specialDemand=$command;$accepted=Send $command
+       if($accepted.status -ne 'Ready'){throw 'Valid source-bound hierarchy demand refused'}
+      }else{$null=Action $target}
       for($i=0;$i -le 65;$i++){
        $prior=HierarchyReady;$step=Action 'stepHierarchy';$c=HierarchyBounded (HierarchyReady)
        if($c.hierarchyResidentPages-$prior.hierarchyResidentPages -gt 1){throw 'More than one hierarchy page uploaded by one step'}
        if($c.rendererInstance -ne $fallback.rendererInstance -or $c.producerInstance -ne $fallback.producerInstance -or $c.hierarchyPackageSha256 -cne $fallback.hierarchyPackageSha256){throw 'Hierarchy source or fixed instance changed'}
        $steps+=@{target=$target;before=$prior;after=$c}
        if(!$c.fallbackSelected -and $c.hierarchyMissingMask -eq 0 -and (($target -eq 'fineHierarchy') -eq $c.fineSelected)){break}
+       if($HierarchyDisk -and $c.pageWorkState -eq 'HierarchyDiskQueued'){Start-Sleep -Milliseconds 50}
       }
       if($i -gt 65 -or $c.hierarchySelectedTriangles -lt 1 -or @($c.hierarchySelectedClusters).Count -lt 1){throw 'Complete requested hierarchy cut not published'}
       if($target -eq 'fineHierarchy' -and $c.hierarchySelectedTriangles -ne 512){throw 'Fine hierarchy lost original triangles'}
       $cuts+=,$c;Capture ('hierarchy-cut-'+$cuts.Count+'.png')
      }
-     if($cuts[0].producerModel -ne $cuts[2].producerModel -or $cuts[0].rendererModel -ne $cuts[2].rendererModel -or $cuts[2].meshCount -ne $cuts[1].meshCount){throw 'Root return recreated owned resources'}
+     $last=$cuts.Count-1
+     if($cuts[0].producerModel -ne $cuts[$last].producerModel -or $cuts[0].rendererModel -ne $cuts[$last].rendererModel -or $cuts[$last].meshCount -ne $cuts[$last-1].meshCount){throw 'Root return recreated owned resources'}
+     if($HierarchyCuts -ne 'None'){
+      if($cuts[1].hierarchySelectedTriangles -le $cuts[0].hierarchySelectedTriangles -or $cuts[1].hierarchySelectedTriangles -ge 512 -or $cuts[1].producerModel -eq $cuts[0].producerModel -or $cuts[1].producerModel -eq $cuts[2].producerModel -or $cuts[$last].hierarchyRetainedCutModels -ne 3){throw 'Intermediate/local frontier did not retain a distinct bounded cut'}
+      $beforeFull=HierarchyReady
+      $fourth=@{cmd='geometry_page_fixture';packageSha256=$beforeFull.hierarchyPackageSha256;sourceAdmissionEpoch=$beforeFull.sourceAdmissionEpoch;pageEpoch=$beforeFull.pageEpoch;expectedRequestId=$beforeFull.observedRequestId;groupCount=$count}
+      if($HierarchyCuts -eq 'Localized'){$fourth.action='intermediateHierarchy';$fourth.threshold=$finite[1]}
+      else{$fourth.action='localHierarchy';$values=@(0..($count-1)|ForEach-Object {[double]$fallback.hierarchyThreshold});for($g=0;$g -lt $count;$g++){if($beforeFull.hierarchyGroupErrors[$g] -eq $finite[1]){$values[$g]=0;break}};$fourth.groupThresholds=$values}
+      $fullRefusal=Send $fourth
+      $afterFull=HierarchyReady
+      if($fullRefusal.status -ne 'Busy' -or $fullRefusal.pageWorkState -ne 'HierarchyCutSlotsFull' -or $afterFull.requestId -ne $beforeFull.requestId -or $afterFull.producerModel -ne $beforeFull.producerModel -or $afterFull.hierarchyResidentPages -ne $beforeFull.hierarchyResidentPages -or $afterFull.meshCount -ne $beforeFull.meshCount){throw 'Fourth distinct cut bypassed bounded cache or changed retained state'}
+     }
+     if($HierarchyDisk){
+      foreach($c in @($fallback)+$cuts){Require $c @('hierarchicalDiskPilot','hierarchyDiskPageReads','diskReadStatus','pageLiveJobs','pageReservedBytes');if(!$c.hierarchicalDiskPilot -or $c.hierarchyDiskPageReads -ne $c.hierarchyResidentPages){throw 'Disk page read/publication counters disagree'}}
+      if($fallback.hierarchyDiskPageReads -ne 0 -or $cuts[$last].diskReadStatus -ne 'Read' -or $cuts[$last].pageLiveJobs -ne 0 -or $cuts[$last].pageReservedBytes -ne 0){throw 'Independent disk reads did not settle without worker debt'}
+     }
      $null=Action 'abort';$retired=HierarchyReady
      if($retired.active -or $retired.meshesPresent -ne 0 -or $retired.meshesAbsent -ne $retired.meshCount){throw 'Hierarchy Abort did not observe full record retirement'}
-     $secondBegin=Action 'beginOriginalHierarchy';if($secondBegin.status -ne 'Busy'){throw 'Original admission rearmed after Abort'}
-     $result=@{passed=$true;hierarchy=$true;begin=$begin;fallback=$fallback;cuts=$cuts;steps=$steps;retired=$retired;secondBegin=$secondBegin;scope='Authenticated original snapshot; bounded independent RAM pages and complete root/fine cuts on one instance, record retirement; no automatic retail paging/all-view/device-free/performance proof'}
+     $secondBegin=Action $hierarchyBegin
+     if(!($secondBegin.status -eq 'Busy' -or ($secondBegin.status -eq 'Invalid' -and $secondBegin.pageWorkState -eq 'HierarchyAdmissionUnavailable' -and !$secondBegin.active -and $secondBegin.requestId -eq 0))){throw 'Original admission rearmed after Abort'}
+     $result=@{passed=$true;hierarchy=$true;hierarchyDisk=[bool]$HierarchyDisk;hierarchyCuts=$HierarchyCuts;badDiskAuthority=$badDiskAuthority;specialDemand=$specialDemand;rejectedDemand=$rejectedDemand;fullRefusal=$fullRefusal;begin=$begin;fallback=$fallback;cuts=$cuts;steps=$steps;retired=$retired;secondBegin=$secondBegin;scope='Authenticated original snapshot; bounded independent pages and complete cuts on one instance, record retirement; no automatic retail paging/all-view/device-free/performance proof'}
     }else{
     $begin=Action 'beginOriginalDiskClodPaged'
     $fallback=PageCut (Observe $true $false)
