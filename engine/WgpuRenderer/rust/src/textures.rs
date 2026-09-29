@@ -137,10 +137,8 @@ impl TextureRegistry {
         self.map.get(KeyData::from_ffi(handle).into())
     }
 
-    fn destroy(&mut self, handle: u64) {
-        if handle != 0 {
-            self.map.remove(KeyData::from_ffi(handle).into());
-        }
+    fn destroy(&mut self, handle: u64) -> bool {
+        handle != 0 && self.map.remove(KeyData::from_ffi(handle).into()).is_some()
     }
 
     fn create(
@@ -234,9 +232,9 @@ impl TextureRegistry {
         key.data().as_ffi()
     }
 
-    fn update_rgba(&mut self, queue: &wgpu::Queue, handle: u64, data: &[u8]) {
+    fn update_rgba(&mut self, queue: &wgpu::Queue, handle: u64, data: &[u8]) -> bool {
         if handle == 0 {
-            return;
+            return false;
         }
         if let Some(t) = self.map.get(KeyData::from_ffi(handle).into()) {
             let size = t.texture.size();
@@ -249,8 +247,10 @@ impl TextureRegistry {
                     TextureFormat::Rgba8,
                     data,
                 );
+                return true;
             }
         }
+        false
     }
 }
 
@@ -693,9 +693,9 @@ impl SharedTextures {
     /// Return a lease. The slot goes back to the free list and may be handed to an
     /// unrelated texture, so this is only safe once no registered model can still be
     /// baked against it -- i.e. at the death of the logical texture, not its eviction.
-    pub fn slot_release(&mut self, slot: u32) {
+    pub fn slot_release(&mut self, slot: u32) -> bool {
         if slot == 0 || !self.bindless_leased.remove(&slot) {
-            return;
+            return false;
         }
         if let Some(entry) = self.bindless_slots.get_mut(slot as usize)
             && entry.is_some()
@@ -704,6 +704,7 @@ impl SharedTextures {
             self.bindless_dirty = true;
         }
         self.bindless_free.push(slot);
+        true
     }
 
     /// Upload into an already-leased slot, so this texture takes the index its previous
@@ -733,12 +734,14 @@ impl SharedTextures {
         handle
     }
 
-    pub fn update_rgba(&mut self, queue: &wgpu::Queue, handle: u64, data: &[u8]) {
-        self.registry.update_rgba(queue, handle, data);
+    pub fn update_rgba(&mut self, queue: &wgpu::Queue, handle: u64, data: &[u8]) -> bool {
+        self.registry.update_rgba(queue, handle, data)
     }
 
-    pub fn destroy(&mut self, handle: u64) {
+    pub fn destroy(&mut self, handle: u64) -> bool {
+        let mut existed = false;
         if let Some(t) = self.registry.get(handle) {
+            existed = true;
             self.retiring_this_submission += t.resident_bytes;
             self.retired_payload.fetch_add(t.resident_bytes, Ordering::Relaxed);
             let slot = t.slot;
@@ -759,7 +762,9 @@ impl SharedTextures {
                 }
             }
         }
-        self.registry.destroy(handle);
+        let removed = self.registry.destroy(handle);
+        debug_assert_eq!(removed, existed);
+        removed
     }
 
     // Called immediately after the frame's queue submit — the point at which no
@@ -950,6 +955,29 @@ pub(crate) fn write_rgba8_mip_chain(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mutation_results_distinguish_success_from_refused_texture_operations() {
+        let Some((device, queue)) = bindless_headless() else { return; };
+        let mut textures = shared(&device, &queue);
+        assert!(!textures.update_rgba(&queue, 0, &[1, 2, 3, 4]));
+        assert!(!textures.destroy(0));
+        assert!(!textures.slot_release(0));
+        let lease = textures.slot_acquire();
+        assert_ne!(lease, 0);
+        let first = textures.create_in_slot(&device, &queue, &data(&[1, 2, 3, 4]), lease);
+        assert_ne!(first, 0);
+        assert!(!textures.update_rgba(&queue, first, &[1, 2, 3]));
+        assert!(textures.update_rgba(&queue, first, &[4, 3, 2, 1]));
+        let replacement = textures.create_in_slot(
+            &device, &queue, &data(&[5, 6, 7, 8]), lease);
+        assert_ne!(replacement, 0);
+        assert!(textures.destroy(first), "old handle exists despite replacement");
+        assert!(!textures.destroy(first), "stale handle is not a mutation");
+        assert!(textures.slot_release(lease));
+        assert!(!textures.slot_release(lease));
+        assert!(textures.destroy(replacement));
+    }
 
     // A 1x1 RGBA8 upload, so a slot's identity is readable as a colour.
     fn texel(rgba: [u8; 4]) -> Vec<u8> {

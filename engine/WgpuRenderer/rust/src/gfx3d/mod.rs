@@ -5788,6 +5788,12 @@ impl Gfx3d {
         self.cull.retained_target_revision()
     }
 
+    pub fn texture_content_changed(&mut self) {
+        // The texture owner of an alpha-tested caster is not available here.
+        // Conservatively invalidate only an armed private COUNT witness.
+        self.cull.advance_retained_target_revision_for_geometry();
+    }
+
     pub fn observe_uploader_mutation_serial(&mut self, serial: u64) {
         self.cull.observe_uploader_mutation_serial(serial);
     }

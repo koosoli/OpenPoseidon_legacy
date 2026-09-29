@@ -6569,7 +6569,7 @@ impl Renderer {
         gen_mips: bool,
         data: &[u8],
     ) -> u64 {
-        self.textures.create(
+        let handle = self.textures.create(
             &self.device,
             &self.queue,
             &TextureData {
@@ -6580,7 +6580,9 @@ impl Renderer {
                 gen_mips,
                 bytes: data,
             },
-        )
+        );
+        if handle != 0 { self.gfx3d.texture_content_changed(); }
+        handle
     }
 
     // REN-RES-001: upload into a slot leased by the caller's logical texture, so an
@@ -6612,6 +6614,7 @@ impl Renderer {
         );
         if handle != 0 {
             self.gfx3d.invalidate_texture_feedback(self.textures.texture_slot(handle));
+            self.gfx3d.texture_content_changed();
         }
         handle
     }
@@ -6623,15 +6626,21 @@ impl Renderer {
     }
 
     fn texture_slot_release(&mut self, slot: u32) {
-        self.textures.slot_release(slot);
+        if self.textures.slot_release(slot) {
+            self.gfx3d.texture_content_changed();
+        }
     }
 
     fn texture_update(&mut self, handle: u64, data: &[u8]) {
-        self.textures.update_rgba(&self.queue, handle, data);
+        if self.textures.update_rgba(&self.queue, handle, data) {
+            self.gfx3d.texture_content_changed();
+        }
     }
 
     fn texture_destroy(&mut self, handle: u64) {
-        self.textures.destroy(handle);
+        if self.textures.destroy(handle) {
+            self.gfx3d.texture_content_changed();
+        }
     }
 
     fn mesh_create(&mut self, verts: &[WgrMeshVertex], indices: &[u32]) -> u64 {

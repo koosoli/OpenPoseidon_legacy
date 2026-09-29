@@ -47,6 +47,22 @@ skinned mesh; this is safe but can lower diagnostic coverage. The rigid opaque
 GeometryPage pilot is unaffected by the extra invalidation.
 
 The existing revision-transition test and paired desktop game/test build passed.
-Installed WGPU verification for this follow-up is pending its committed build.
-Bindless texture replacement and other material changes remain unwitnessed;
-the cached image and Fine-release gates therefore stay closed.
+The committed `a0ba77e9` EXE/DLL pair passed installed WGPU `--check`.
+## Texture-source follow-up
+
+Object textures may replace the view behind a leased bindless slot without
+changing a model's baked slot number. The Renderer now conservatively advances
+the optional target revision after a successful texture creation/replacement,
+accepted RGBA write, destruction of a live handle or release of a live lease.
+Refused or stale operations do not advance it. A replaced old upload remains a
+live handle until retired, so retiring it can advance the witness even though
+the newer view stays bound; generic overlay textures can also cause a safe
+false invalidation. This favors Unknown over reusing a stale shadow fact.
+
+The normal path performs only the optional target-witness check after existing
+texture operations; it adds no scan, GPU copy or readback. Focused texture
+tests passed (17/17), including valid/refused mutation results and real
+bindless replacement cases. The paired desktop game/test build passed.
+Installed WGPU verification is pending the committed build. Non-texture
+material edits and other image producers are still untracked, so no cached
+image, Fine-release or default GeometryPage policy is promoted.
