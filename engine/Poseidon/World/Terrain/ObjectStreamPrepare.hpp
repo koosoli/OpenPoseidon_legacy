@@ -402,11 +402,15 @@ class ObjectStreamPreparer
     // ordinary work. Cancellation invalidates publication even after rescue.
     // ownerTextureAdmission is explicit for LandSave cold visual admission; CPU-only
     // actor conversions never opt into unused texture work. Dedicated exact1 flag required.
+    // Optional owner callback captures the current initialized physical PAA source for
+    // a validated raP NormalMap. It runs only on the main thread, before enqueue.
+    using RapStageCapture = bool (*)(void*, const char*, WarmTextureRead&);
     bool SubmitConvert(uint32_t index, std::shared_ptr<Model::Model> model,
                        std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables,
                        const RadiusCertificate* inventoryToken = nullptr,
                        const SourceEnvelopeSnapshot* originalSource = nullptr,
-                       bool ownerTextureAdmission = false);
+                       bool ownerTextureAdmission = false,
+                       RapStageCapture rapStageCapture = nullptr, void* rapStageContext = nullptr);
 
     struct ConvertedShape
     {

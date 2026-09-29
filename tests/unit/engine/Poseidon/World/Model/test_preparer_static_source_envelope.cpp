@@ -4,6 +4,7 @@
 #include <Poseidon/IO/Streams/FileAccessPolicy.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamRapStageNames.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
@@ -913,6 +914,124 @@ TEST_CASE("Cold conversion prepares a second Init-bound PAA without recapturing 
     REQUIRE(bound);
     REQUIRE(bound->Request().SameArchiveMember(second.read.source->Request()));
     REQUIRE(chain.valid());
+    store.Clear();
+}
+TEST_CASE("Exact raP stage is source-bound in the first conversion before owner take", "[preparer][rap-stage-early]")
+{
+    auto enabled = [](const char* name) {
+        const char* value = std::getenv(name);
+        return value && std::strcmp(value, "1") == 0;
+    };
+    if (!enabled("WGR_OBJECT_STREAM_RAP_STAGE_SOURCE") ||
+        !enabled("WGR_OBJECT_STREAM_RAP_STAGE_EARLY_PREPARE") ||
+        !enabled("WGR_OBJECT_STREAM_WARM_TEXTURES") ||
+        !enabled("WGR_OBJECT_STREAM_WARM_TEXTURE_JOBS") ||
+        !enabled("WGR_OBJECT_STREAM_WARM_MATERIAL_PREFLIGHT"))
+        SKIP("Fresh exact raP early-preparation flag set required.");
+    Poseidon::Foundation::CaptureMainThread();
+    if (!QFileAccess::MappingSupported()) SKIP("Mapped PBO source required.");
+    constexpr const char* modelKey = R"(dz\plants\tree\t_piceaabies_2d.p3d)";
+    constexpr const char* materialKey = R"(dz\plants\tree\data\t_piceaabies_2d_trunk.rvmat)";
+    constexpr const char* normalKey = R"(dz\plants\tree\data\t_piceaabies_trunk_no.paa)";
+    struct Bank
+    {
+        Poseidon::Ref<Poseidon::FileServer> previous = Poseidon::GFileServer;
+        bool caching = GEnableCaching, useBanks = GUseFileBanks;
+        ColdPaaTestServer* server = new ColdPaaTestServer;
+        std::filesystem::path path;
+        int index = -1;
+        std::unique_ptr<Poseidon::ITextureSource> texture;
+        std::array<Poseidon::PacLevelMem,7> mips;
+        std::shared_ptr<const Poseidon::ArchiveSourceBinding> source;
+        Bank(const char* key)
+        {
+            Bytes rap;
+            rap.data = {0,'r','a','P',0,0,0,0,8,0,0,0,0x0a,0x06,0,0};
+            auto str = [](Bytes& b, const char* s) { while (*s) b.U8(uint8_t(*s++)); b.U8(0); };
+            rap.U8(0); rap.U8(2); // root parent and two members
+            rap.U8(1); rap.U8(0); str(rap,"PixelShaderID"); str(rap,"TreeAdvTrunk");
+            rap.U8(0); str(rap,"Stage1"); const size_t pointer = rap.data.size(); rap.U32(0);
+            const auto body = static_cast<uint32_t>(rap.data.size());
+            for (int i=0;i<4;++i) rap.data[pointer+i] = char(body >> (8*i));
+            rap.U8(0); rap.U8(1); rap.U8(1); rap.U8(0);
+            str(rap,"texture"); str(rap,key);
+            const auto stages = Poseidon::Streaming::ExtractOwnedRapStageNames(
+                std::span<const char>(rap.data.data(),rap.data.size()), materialKey);
+            REQUIRE(stages.status == Poseidon::Streaming::RapStageNamesStatus::Complete);
+            REQUIRE(stages.normalMapName == key);
+            const std::array<char,16> block = {char(0xF0),char(0xF0),char(0xF0),char(0xF0),
+                char(0xF0),char(0xF0),char(0xF0),char(0xF0),0,char(0xF8),0,char(0xF8),0,0,0,0};
+            std::vector<char> paa = {3,char(0xFF),0,0,8,0,8,0,64,0,0};
+            for (int i=0;i<4;++i) paa.insert(paa.end(),block.begin(),block.end());
+            paa.insert(paa.end(),4,0);
+            Bytes archive;
+            auto header = [&](const char* name, size_t size) {
+                str(archive,name); archive.U32(0); archive.U32(uint32_t(size));
+                archive.U32(0); archive.U32(0); archive.U32(uint32_t(size));
+            };
+            header("t_piceaabies_2d_trunk.rvmat",rap.data.size());
+            header("t_piceaabies_trunk_no.paa",paa.size());
+            archive.U8(0); for (int i=0;i<5;++i) archive.U32(0);
+            archive.data.insert(archive.data.end(),rap.data.begin(),rap.data.end());
+            archive.data.insert(archive.data.end(),paa.begin(),paa.end());
+            path = std::filesystem::temp_directory_path() /
+                ("rap_stage_"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".pbo");
+            std::ofstream out(path,std::ios::binary); out.write(archive.data.data(),std::streamsize(archive.data.size()));
+            REQUIRE(out.good()); out.close();
+            Poseidon::GFileServer = server; GEnableCaching = true; GUseFileBanks = true;
+            index = Poseidon::GFileBanks.Add();
+            auto name = path; name.replace_extension();
+            REQUIRE(Poseidon::GFileBanks[index].open(Poseidon::RString(name.string().c_str())));
+            Poseidon::GFileBanks[index].SetPrefix(Poseidon::RString(R"(dz\plants\tree\data\)"));
+            Poseidon::GFileBanks[index].Lock();
+            {
+                Poseidon::ArchiveSourceBinding::ModelReadScope purpose(
+                    Poseidon::ArchiveSourceBinding::ModelReadScope::Intent::MaterialPreflight);
+                Poseidon::QIFStreamB buffer;
+                buffer.open(Poseidon::GFileBanks[index],"t_piceaabies_trunk_no.paa");
+                server->cache.Store(buffer,key);
+                auto* factory = Poseidon::SelectTextureSourceFactory(key); REQUIRE(factory);
+                texture.reset(factory->Create(key,mips.data(),7)); REQUIRE(texture);
+                source = texture->GetArchiveSourceBinding(); REQUIRE(source);
+            }
+        }
+        ~Bank()
+        {
+            source.reset(); texture.reset();
+            if (index >= 0) Poseidon::GFileBanks.Delete(index);
+            Poseidon::GFileServer = previous; GEnableCaching = caching; GUseFileBanks = useBanks;
+            std::error_code error; std::filesystem::remove(path,error);
+        }
+    } bank(normalKey);
+    SourceFile original;
+    std::string error; bool opened = false;
+    auto model = Poseidon::ModelCache::LoadLooseFile(original.path,&error,&opened);
+    REQUIRE(model); model->sourcePath = modelKey;
+    auto& mesh = model->lodLevels[0].mesh;
+    mesh.materials.emplace_back("raP NormalMap stage");
+    mesh.materials.back().materialPath = materialKey;
+    for (auto& triangle : mesh.triangles) triangle.materialIndex = 0;
+    auto tables = std::make_shared<Poseidon::Model::ShapeAdapter::AdapterBankTables>();
+    tables->textures.resize(model->lodLevels.size());
+    auto& store = Poseidon::render::PreparedTextureStore::Instance(); store.Clear();
+    std::string identity = modelKey;
+    Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
+    auto capture = [](void* context, const char* key, Poseidon::WarmTextureRead& out) {
+        auto& source = *static_cast<std::shared_ptr<const Poseidon::ArchiveSourceBinding>*>(context);
+        out = {key,source}; return true;
+    };
+    REQUIRE(prep.SubmitConvert(0,model,tables,nullptr,nullptr,true,capture,&bank.source));
+    REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+    const auto probe = store.ProbeWarmEntry(normalKey,&bank.source->Request());
+    REQUIRE(probe.entryPresent); REQUIRE(probe.warmBound); REQUIRE(probe.sameMember);
+    Poseidon::PAABlockChain chain;
+    std::shared_ptr<const Poseidon::ArchiveSourceBinding> bound;
+    REQUIRE(store.Take(normalKey,chain,&bound));
+    REQUIRE(chain.valid()); REQUIRE(bound);
+    REQUIRE(bound->Request().SameArchiveMember(bank.source->Request()));
+    auto converted = prep.TakeConverted(0);
+    std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
+    REQUIRE(shape);
     store.Clear();
 }
 TEST_CASE("Cold chain cancellation keeps actual worker debt until exit and replacement progresses", "[preparer][cold-paa-handoff]")

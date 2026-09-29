@@ -1947,7 +1947,8 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
                                          std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables,
                                          const RadiusCertificate* inventoryToken,
                                          const SourceEnvelopeSnapshot* originalSource,
-                                         bool ownerTextureAdmission)
+                                         bool ownerTextureAdmission,
+                                         RapStageCapture rapStageCapture, void* rapStageContext)
 {
     if (!model || !tables)
         return false;
@@ -2049,8 +2050,67 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
         }
         catch (...) { rapMaterials.clear(); } // Optional diagnostic must not affect admission.
     }
+    // The Converted handoff reaches the owner immediately before ObjectCreate, so
+    // a warm job submitted there cannot reliably finish before first registration.
+    // This separate exact-fixture opt-in captures one current NormalMap source now;
+    // the existing conversion worker then prepares it before publishing Converted.
+    static const bool earlyRapStage = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_RAP_STAGE_EARLY_PREPARE");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    std::optional<WarmTextureRead> earlyRapRead;
+    if (earlyRapStage && rapDiscovery && rapStageCapture && ownerTextureAdmission &&
+        Foundation::IsMainThread() && WarmTextureJobsEnabled() &&
+        ArchiveSourceBinding::ModelReadScope::MaterialPreflightReservationEnabled() &&
+        render::PreparedTextureStore::Enabled() &&
+        !originalSource && !rapMaterials.empty())
+    {
+        constexpr const char* normalKey = R"(dz\plants\tree\data\t_piceaabies_trunk_no.paa)";
+        try
+        {
+            for (const auto& material : rapMaterials)
+            {
+                if (!material.read.HasArchiveIdentity() ||
+                    material.read.bytes > Impl::RapMaterialLimit) continue;
+                // A captured member is historical evidence. Confirm that the
+                // material mount still selects it before capturing its stage.
+                QFBank* bank = QIFStreamB::AutoBank(material.key.c_str());
+                if (!bank) continue;
+                const RString prefix = bank->GetPrefix();
+                if (prefix.GetLength() < 0 ||
+                    static_cast<size_t>(prefix.GetLength()) >= material.key.size() ||
+                    CmpStartStr(material.key.c_str(), prefix)) continue;
+                auto current = bank->CaptureReadRequest(
+                    material.key.c_str() + prefix.GetLength(), true);
+                if (!current || !current->SameArchiveMember(material.read)) continue;
+                std::vector<char> bytes;
+                if (!material.read.Read(bytes) || bytes.size() != material.read.bytes) continue;
+                const auto stages = Streaming::ExtractOwnedRapStageNames(
+                    std::span<const char>(bytes.data(), bytes.size()), material.key);
+                if (stages.status != Streaming::RapStageNamesStatus::Complete ||
+                    stages.normalMapName != normalKey) continue;
+                WarmTextureRead candidate;
+                if (!rapStageCapture(rapStageContext, normalKey, candidate) ||
+                    candidate.key != normalKey || !candidate.initializedSource ||
+                    !candidate.initializedSource->Request().HasArchiveIdentity() ||
+                    !candidate.initializedSource->Request().bytes ||
+                    candidate.initializedSource->Request().bytes > Impl::PackedTextureLimit ||
+                    !render::PreparedTextureStore::Instance().ShouldPrepareWarm(candidate.key))
+                    continue;
+                earlyRapRead.emplace(std::move(candidate));
+                break; // both selected raP fixtures name the same physical normal PAA
+            }
+        }
+        catch (...) { earlyRapRead.reset(); } // Optional work never changes model admission.
+    }
     std::vector<Impl::PackedTextureRead> textures;
     const uint64_t textureGeneration = render::PreparedTextureStore::Instance().Generation();
+    if (earlyRapRead)
+    {
+        auto source = std::move(earlyRapRead->initializedSource);
+        const BankReadRequest* request = &source->Request();
+        textures.push_back({std::move(earlyRapRead->key), {}, std::move(source), request});
+    }
     const char* flag = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
     if (flag && flag[0] == '1' && GUseFileBanks && render::PreparedTextureStore::Enabled())
     {

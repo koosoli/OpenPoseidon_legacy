@@ -14,6 +14,7 @@ param(
     [switch]$ArchiveSourceBindings,
     [switch]$WarmTextureJobs,
     [switch]$WarmMaterialPreflight,
+    [switch]$RapStageEarlyPrepare,
     [switch]$HotSourceProofRetirement,
     [switch]$WeakCacheProof,
     [switch]$WarmTextureProvenance,
@@ -40,6 +41,7 @@ if ($ColdPaaHandoff) { $ArchiveSourceBindings = $true }
 $boundPackedSource = [bool]($PackedTextures -and $ColdPaaHandoff)
 if ($RequireWarmMaterialStageUpload) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($RequireWarmMaterialPreflightUpload) { $WarmMaterialPreflight = $true }
+if ($RapStageEarlyPrepare) { $WarmMaterialPreflight = $true; $WarmTextureProvenance = $true }
 if ($WarmMaterialPreflight) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($WeakCacheProof) { $HotSourceProofRetirement = $true }
 if ($WarmEarlySlice -or $WarmPublishedReuse) { $WarmTextureProvenance = $true }
@@ -69,6 +71,7 @@ if (!$env:LOCK_OWNER) {
         if ($ArchiveSourceBindings) { $argv += '-ArchiveSourceBindings' }
         if ($WarmTextureJobs) { $argv += '-WarmTextureJobs' }
         if ($WarmMaterialPreflight) { $argv += '-WarmMaterialPreflight' }
+        if ($RapStageEarlyPrepare) { $argv += '-RapStageEarlyPrepare' }
         if ($HotSourceProofRetirement) { $argv += '-HotSourceProofRetirement' }
         if ($WeakCacheProof) { $argv += '-WeakCacheProof' }
         if ($WarmTextureProvenance) { $argv += '-WarmTextureProvenance' }
@@ -133,6 +136,9 @@ $environment = @{
     WGR_GEO_POOL_COPY_DIAGNOSTICS = $(if ($GeometryCopyDiagnostics) { '1' } else { '0' })
     WGR_WATER_BACKEND = '0'
     WGR_OBJECT_STREAM_WARM_MATERIAL_PREFLIGHT = $(if ($WarmMaterialPreflight) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_RAP_STAGE_SOURCE = $(if ($RapStageEarlyPrepare) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_RAP_STAGE_WARM_CAPTURE = $(if ($RapStageEarlyPrepare) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_RAP_STAGE_EARLY_PREPARE = $(if ($RapStageEarlyPrepare) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WEAK_CACHE_PROOF = $(if ($WeakCacheProof) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WARM_TEXTURE_TRACE = $(if ($WarmTextureProvenance) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WARM_EARLY_SLICE = $(if ($WarmEarlySlice) { '1' } else { '0' })
@@ -187,6 +193,7 @@ try {
         coldPaaHandoffEnvironment = [string]$environment.WGR_OBJECT_STREAM_COLD_TEXTURE_HANDOFF
         warmTextureJobs = [bool]$WarmTextureJobs
         warmMaterialPreflight = [bool]$WarmMaterialPreflight
+        rapStageEarlyPrepare = [bool]$RapStageEarlyPrepare
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement
         weakCacheProof = [bool]$WeakCacheProof; warmTextureProvenance = [bool]$WarmTextureProvenance
         warmEarlySlice = [bool]$WarmEarlySlice
@@ -649,6 +656,7 @@ try {
         warmPublishedReuse = [bool]$WarmPublishedReuse; warmPublishedReuseProof = $promotionProof
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement; hotSourceProofRetirementProof = $hotRetirementProof
         warmMaterialPreflight = [bool]$WarmMaterialPreflight; warmMaterialPreflightProof = $warmPreflightProof
+        rapStageEarlyPrepare = [bool]$RapStageEarlyPrepare
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload; warmMaterialStageFamilyProof = $warmStageFamilyProof
         coldPaaHandoff = [bool]$ColdPaaHandoff; requireColdAlphaPeek = [bool]$RequireColdAlphaPeek; coldPaaHandoffProof = $coldPaaProof

@@ -4237,7 +4237,10 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         ++tablesPrepared;
                         const auto radiusToken = _modernObjectPreparer->QueryRadius(placement.modelIndex);
                         if (_modernObjectPreparer->SubmitConvert(placement.modelIndex, std::move(preparsed),
-                                                                std::move(tables), &radiusToken, nullptr, true))
+                                                                std::move(tables), &radiusToken, nullptr, true,
+                                                                [](void*, const char* key, WarmTextureRead& out) {
+                                                                    return GEngine && GEngine->CaptureWarmRapStageRead(key, out);
+                                                                }))
                         {
                             ++waited;
                             ++scan;
