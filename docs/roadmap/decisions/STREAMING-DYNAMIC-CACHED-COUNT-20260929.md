@@ -34,3 +34,19 @@ contract, main/solar COUNT logging and normal shutdown. Its first launcher
 attempt failed before game start because Windows PowerShell did not expose
 `Get-FileHash` through Git Bash; invoking the installed PowerShell 7 runtime
 under the same game lock ran the fixture successfully.
+
+## Skin-source follow-up
+
+The next narrow source audit found two more ways to alter an image without an
+instance-row change. `mesh_set_skin` can replace a mesh's bone/weight buffer;
+the per-frame palette upload can move a skinned caster. Both now advance the
+same optional, conservative target revision after a successful upload. The
+ordinary unarmed path does only the existing Option check. Exact mesh ownership
+is not available here, so an armed target may be invalidated by a foreign
+skinned mesh; this is safe but can lower diagnostic coverage. The rigid opaque
+GeometryPage pilot is unaffected by the extra invalidation.
+
+The existing revision-transition test and paired desktop game/test build passed.
+Installed WGPU verification for this follow-up is pending its committed build.
+Bindless texture replacement and other material changes remain unwitnessed;
+the cached image and Fine-release gates therefore stay closed.

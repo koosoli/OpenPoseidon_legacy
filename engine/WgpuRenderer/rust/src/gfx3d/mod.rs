@@ -5758,6 +5758,10 @@ impl Gfx3d {
         // A cached skin-bake bind would reference the old (or absent) skin buffer.
         self.bake_bind_cache.remove(&key);
         self.bake_bind_cache_prev.remove(&key);
+        // The new skin data can move or reshape a shadow caster without
+        // changing its instance row. Keep private target COUNT/image facts
+        // from reusing an older geometry revision.
+        self.cull.advance_retained_target_revision_for_geometry();
     }
 
     // Re-upload vertex data for an existing (dynamic) mesh, e.g. a skeletally
@@ -8169,6 +8173,11 @@ impl Gfx3d {
                     );
                 }
             }
+            // A pose change can move a caster in a cached depth image without
+            // altering its instance row or the selected model's COUNT inputs.
+            // The owner is not known here, so invalidate the optional witness
+            // conservatively after any successful palette upload.
+            self.cull.advance_retained_target_revision_for_geometry();
         }
 
         // (Re)build the combined group-1 bind groups when a backing buffer moved
