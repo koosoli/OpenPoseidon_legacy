@@ -71,8 +71,8 @@ namespace
 // is the last point at which the expensive step can still be skipped and the
 // first at which the key's every input is known.
 //
-// `contentSha` is the member's SHA-256 -- from AST-003's memo when the bytes came
-// out of a PBO, computed here when they came off disk. An EMPTY sha means "the
+// `contentSha` is the SHA-256 of the exact bytes handed to the parser or cache
+// hit. An EMPTY sha means "the
 // key cannot be completed", and the only safe response to that is to derive
 // without touching the cache: a key missing an input is exactly the wrong-data
 // hit this design exists to prevent.
@@ -282,16 +282,11 @@ std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFileServer(const std
     memcpy(sig, data, 4);
     std::string signature(sig);
 
-    // AST-003's per-member hash, through its memo. It returns "" for a path the
-    // banks do not name (a mod override, a loose file reached through the file
-    // server), and DeriveOrHit reads that as "do not cache" rather than as a key.
-    std::string sha;
-    if (ModelDerivedCache::Instance().Enabled())
-    {
-        sha = ModelDerivedCache::HashBankMember(filePath.c_str());
-        if (sha.empty())
-            sha = ModelDerivedCache::HashBytes(data, static_cast<size_t>(dataSize));
-    }
+    // FileServer selected these bytes. AutoBank/GetContentHash may instead read
+    // a different mount (or return its earlier memo) for the same virtual path;
+    // that hash must never key a derivation from this stream's buffer.
+    const std::string sha = ModelDerivedCache::Instance().Enabled()
+        ? ModelDerivedCache::HashBytes(data, static_cast<size_t>(dataSize)) : std::string();
 
     return DeriveOrHit(data, dataSize, filePath, signature, sha, _lastError);
 }

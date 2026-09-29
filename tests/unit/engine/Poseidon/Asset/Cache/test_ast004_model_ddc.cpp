@@ -7,6 +7,8 @@
 #include <Poseidon/World/Model/ModelBlob.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
 #include <Poseidon/World/Model/ModelDerivedCache.hpp>
+#include <Poseidon/IO/FileServer.hpp>
+#include <Poseidon/IO/Streams/QBStream.hpp>
 
 #include "../../Support/test_fixtures.hpp"
 
@@ -362,6 +364,98 @@ TEST_CASE("Model DDC: changing the input content changes the key and misses", "[
     auto second = ModelCache::LoadLooseFile(copy.path.string(), &error, &opened);
     REQUIRE(ddc.GetStats().hits == 0);
     REQUIRE(ddc.GetStats().misses == 1);
+}
+
+TEST_CASE("Model DDC: FileServer bytes, not a different mounted member, determine the key", "[ast004]")
+{
+    const fs::path bankModel = ResolveFixturePath(kMlod);
+    // complex_vehicle_mlod.p3d is a byte-for-byte copy of kMlod. This smaller
+    // checked-in MLOD has distinct geometry and is parsed by the same loader.
+    const fs::path selectedModel = ResolveFixturePath("p3d/sky_plane.p3d");
+    if (!fs::exists(bankModel) || !fs::exists(selectedModel)) return;
+    const auto bankBytes = ReadAll(bankModel);
+    const auto selectedBytes = ReadAll(selectedModel);
+    REQUIRE(!bankBytes.empty());
+    REQUIRE(!selectedBytes.empty());
+    REQUIRE(bankBytes != selectedBytes);
+
+    ScopedCache cache("file-server-source");
+    // AutoBank deliberately names A while FileServer's actual selected stream
+    // first contains B. This can happen with an override or a changed mount.
+    // HashBankMember used to key the B derivation by A's independently-read hash.
+    static std::atomic<int> serial{0};
+    const fs::path archive = fs::temp_directory_path() /
+        ("ast004-source-" + std::to_string(serial.fetch_add(1)) + ".pbo");
+    struct MountedMember
+    {
+        fs::path archive;
+        int index = -1;
+        bool oldUseBanks = GUseFileBanks;
+        MountedMember(fs::path path, const std::vector<uint8_t>& bytes) : archive(std::move(path))
+        {
+            std::ofstream out(archive, std::ios::binary);
+            REQUIRE(out.good());
+            const char member[] = "model.p3d";
+            out.write(member, sizeof(member));
+            for (int value : {0, 0, 0, 0, int(bytes.size())})
+                out.write(reinterpret_cast<const char*>(&value), sizeof(value));
+            const char terminator = 0;
+            out.write(&terminator, 1);
+            for (int value : {0, 0, 0, 0, 0})
+                out.write(reinterpret_cast<const char*>(&value), sizeof(value));
+            out.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+            out.close();
+            REQUIRE(out.good());
+            GUseFileBanks = true;
+            index = GFileBanks.Add();
+            auto basename = archive;basename.replace_extension();
+            REQUIRE(GFileBanks[index].open(RString(basename.string().c_str())));
+            GFileBanks[index].SetPrefix(RString(R"(ast004_source_probe\)"));
+            GFileBanks[index].Lock();
+        }
+        ~MountedMember()
+        {
+            if (index >= 0) {
+                GFileBanks[index].Unlock();GFileBanks[index].close();GFileBanks.Delete(index);
+            }
+            GUseFileBanks = oldUseBanks;
+            std::error_code ec;fs::remove(archive, ec);
+        }
+    } mounted(archive, bankBytes);
+    constexpr const char* virtualPath = R"(ast004_source_probe\model.p3d)";
+    REQUIRE(ModelDerivedCache::HashBankMember(virtualPath) ==
+            ModelDerivedCache::HashBytes(bankBytes.data(), bankBytes.size()));
+    class RedirectServer final : public FileServer
+    {
+    public:
+        fs::path selected;
+        void Request(const char*, float, int, int) override {}
+        void CancelRequest(const char*, int, int) override {}
+        void Open(QIFStream& stream, const char*) override { stream.open(selected.string().c_str()); }
+        void Start() override {} void Stop() override {}
+        void FlushBank(QFBank*) override {}
+    };
+    const Ref<FileServer> previous = GFileServer;
+    GFileServer = new RedirectServer;
+    auto* redirect = static_cast<RedirectServer*>(GFileServer.GetRef());
+    struct RestoreServer
+    {
+        Ref<FileServer> previous;
+        ~RestoreServer() { GFileServer = previous; }
+    } restore{previous};
+
+    redirect->selected = selectedModel;
+    ModelCache firstCache;
+    auto first = firstCache.load(virtualPath);
+    REQUIRE(first);
+    REQUIRE(ModelDerivedCache::Instance().GetStats().misses == 1);
+    redirect->selected = bankModel;
+    ModelCache secondCache;
+    auto second = secondCache.load(virtualPath);
+    REQUIRE(second);
+    REQUIRE(ModelDerivedCache::Instance().GetStats().hits == 0);
+    REQUIRE(ModelDerivedCache::Instance().GetStats().misses == 2);
+    REQUIRE(ModelBlob::Serialize(*first) != ModelBlob::Serialize(*second));
 }
 
 TEST_CASE("Model DDC: the same bytes under two names are two entries", "[ast004]")

@@ -196,6 +196,32 @@ pilot witness. No selected owner scope is installed in retail DayZ yet. A
 one-shot live TextureBank Load/UseMipmap diagnostic and automatic traversal
 runner are prepared; installed verification is pending.
 
+## Installed automatic traversal and generated texture staging
+
+Exact committed `9ec4937c` passed paired installed WGPU startup. Runner
+`hierarchy-auto-generated-sep30-20260930-010540-46ce2e` passed, exit0 and normal
+shutdown without forced termination. Far/near/far/near/far selected
+root64/model3, Fine512/model4, root64/model3, Fine512/model4, root64/model3.
+Completed generations were58/90/122/141/171; independent reads1/2/2/2/2.
+Two refinements and two coarsenings retained eight historical mesh records;
+known charges rose60,642 to94,534 bytes and stayed there. This validates the
+private automatic binary consumer, not reclamation or retail geometry paging.
+
+The real TextureBank diagnostic observed two deferred generated payloads, one
+owner-stage upload and one ordinary early-consumer escape. Repeated owner use
+kept the same handle; eager fallback also stayed resident. Failed count was0,
+held bytes380 and final pending bytes0. No retail capture scope is installed.
+
+Next source stops automatic follow on a refused/failed owner step and resets
+automatic state on Abort. A default-off exact DayZ tenement classifier captures
+live section/material facts then executes a pure classification tail; face
+upload remains synchronous. The model DDC now hashes the exact FileServer
+parser buffer instead of an independent mount lookup. Its first regression
+fixture accidentally selected two identical MLODs; replacing the second with
+an existing valid distinct sky-plane fixture preserves the wrong-mount test.
+The repaired Core suite passed3,564 assertions/12 cases; prepared classifier
+passed31 assertions/5 cases. Installed next-source verification is pending.
+
 Next work: automatic projected demand across applicable views, supported static
 opaque retail source admission and world epochs, release/refill with measured
 byte convergence, and comparable-quality traversal measurements. No default

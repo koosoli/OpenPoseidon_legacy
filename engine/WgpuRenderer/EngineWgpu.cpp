@@ -14,6 +14,8 @@
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalRelease.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalOriginalDemand.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalBinaryDemand.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/RetainedMaterialRoleDeclarations.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/PreparedGpuSectionClassification.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageControlledClodPilot.hpp>
 #include <Poseidon/Graphics/Rendering/AuthoredGeometryPageWorker.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageSurfaceAdmission.hpp>
@@ -176,29 +178,7 @@ WgrSlice<WgrMeshVertex> AsMeshVerts(const std::vector<SVertex>& v)
 static const Asset::Material::TranslatedSlot* EffectiveBaseColourStage(
     const Asset::Material::TranslatedMaterial& translated, const char*& whichStage)
 {
-    using Slot = Asset::Material::MaterialSlot;
-    whichStage = "Stage0";
-    if (const auto* base = translated.Find(Slot::BaseColour))
-    {
-        return base;
-    }
-    struct LayerFallback
-    {
-        Slot        slot;
-        const char* label;
-    };
-    static constexpr LayerFallback kLayerFallback[] = {
-        {Slot::LayerColour1, "Stage1"}, {Slot::LayerColour2, "Stage2"}, {Slot::LayerColour3, "Stage3"}};
-    for (const auto& candidate : kLayerFallback)
-    {
-        const auto* layer = translated.Find(candidate.slot);
-        if (layer && !layer->texture.isProcedural && !layer->texture.path.empty())
-        {
-            whichStage = candidate.label;
-            return layer;
-        }
-    }
-    return nullptr;
+    return render::RetainedMaterialRoleDeclarations::EffectiveBaseColourStage(translated,whichStage);
 }
 
 // RFG-060: a face texture named `enfa|coverage|colour` is the ONLY complete albedo the
@@ -8638,7 +8618,7 @@ static void TraceEmatBlendDecision(const ShapeSection& sec, TextureWgpu* texture
 }
 
 bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::mesh::MeshSection>& secs, int i,
-                        WgrModelSection& secOut, WgrModelMaterial& matOut)
+                        WgrModelSection& secOut, WgrModelMaterial& matOut, bool preparedPilot=false)
 {
     if (i >= secs.Size())
     {
@@ -8680,6 +8660,44 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     {
         tex = texture->EnsureUploaded();
         alphaClass = texture->GetAlphaClass();
+    }
+    if(preparedPilot) {
+        // First runtime seam: capture live owner facts once, then classify without
+        // getters/uploads. Texture staging above is still synchronous; this does
+        // not claim complete resumable material/model admission.
+        render::PreparedGpuSectionFacts facts;
+        facts.gpuOwned=true;facts.indexCount=indexCount;facts.descriptor=desc;
+        facts.texturePresent=texture!=nullptr;facts.alphaClass=alphaClass;
+        if(texture) {
+            facts.alphaHoles=texture->HasAlphaHoles();
+            facts.legacyPlantName=render::IsLegacyPlantCutoutTexture(texture->Name());
+            facts.enfusionCoverageName=render::IsEnfusionCoverageTexture(texture->Name());
+            facts.barkOrTrunkName=GpuTextureIsBarkOrTrunk(texture);
+        }
+        facts.leafCards=GpuSectionMaterialUsesLeafCards(sec.surfMat);
+        facts.ematBlends=GpuEmatBlends(sec.surfMat);facts.ematGlass=GpuEmatIsGlass(sec.surfMat);
+        facts.ematOpaqueSolid=GpuEmatIsOpaqueSolid(sec.surfMat);facts.ematCullNone=GpuEmatCullNone(sec.surfMat);
+        const auto family=GpuEmatFamily(sec.surfMat);
+        facts.ematVegetationFamily=!family.empty()&&Asset::Material::IsEmatVegetationFamily(family);
+        TLMaterial m;CreateMaterial(m,HWhite,sec.material);
+        if(sec.surfMat) {TLMaterial mod;sec.surfMat->Combine(mod,m);m=mod;}
+        facts.materialFullyOpaque=MaterialIsFullyOpaque(m);
+        facts.foldedEmissive={m.emmisive.R(),m.emmisive.G(),m.emmisive.B(),m.emmisive.A()};
+        facts.emitterScale=StaticEmitterRadianceScale(sec.surfMat,m.emmisive);
+        facts.capturedGroups=render::PreparedGpuSectionFacts::All;facts.complete=true;
+        const auto decision=render::ClassifyPreparedGpuSection(facts,tex);
+        static uint32_t notices=0;
+        if(notices<64) {++notices;LOG_INFO(Graphics,
+            "Prepared GPU section: route={} accepted={} variant={} alphaRef={} texture={} facts={} scope=live-owner-classification",
+            uint32_t(decision.route),decision.Accepted(),decision.variant,decision.alphaRef,tex,facts.capturedGroups);}
+        if(!decision.Accepted()) {TraceClassifyReject(sec,"prepared classification CPU complement");return false;}
+        secOut.variant=decision.variant;secOut.flags=0;
+        matOut.emissive={decision.scaledEmissive[0],decision.scaledEmissive[1],decision.scaledEmissive[2],decision.scaledEmissive[3]};
+        matOut.ambient={m.ambient.R(),m.ambient.G(),m.ambient.B(),m.ambient.A()};
+        matOut.diffuse={m.diffuse.R(),m.diffuse.G(),m.diffuse.B(),m.diffuse.A()};
+        matOut.specular={m.specular.R(),m.specular.G(),m.specular.B(),float(m.specularPower)};
+        matOut.texture_id=tex;matOut.sampler=U32(SamplerForSpec(spec));matOut.alpha_ref=decision.alphaRef;
+        return true;
     }
     // Legacy A1 plants have no authored shader to consult, so the same per-LOD histogram slip
     // that fooled SectionIsBlend would push half a canopy's LODs out of the retained set.
@@ -9278,7 +9296,13 @@ void EngineWgpu::MaintainGeometryPageHierarchyDemand()
     }
     // Only this main-thread owner queues work. Each tick stages at most one page;
     // the snapshot getter itself is completed-frame CPU metadata, not GPU COUNT.
-    if(step)ControlGeometryPageFixture(GeometryPageFixtureAction::StepHierarchy);
+    if(step) {
+        const auto result=ControlGeometryPageFixture(GeometryPageFixtureAction::StepHierarchy);
+        if(result.status==GeometryReportStatus::Invalid||result.status==GeometryReportStatus::Failed) {
+            LOG_WARN(Graphics,"Private hierarchy automatic step refused; retaining current complete cut");
+            ControlGeometryPageFixture(GeometryPageFixtureAction::StopHierarchy);
+        }
+    }
     else if(project) {
         const auto result=ControlGeometryPageFixture(GeometryPageFixtureAction::ProjectHierarchy,
             1200,11.5f,1200,nullptr,nullptr,&input);
@@ -10931,6 +10955,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
         _instanceOps.reserve(_instanceOps.size()+1); _instFreeHandles.reserve(_instFreeHandles.size()+1);
         if(action==GeometryPageFixtureAction::Abort && report.active) {
             if(report.hierarchicalPilot) {
+                fixture->hierarchyAutoPolicy.reset();report.hierarchyAutoEnabled=false;
+                report.hierarchyAutoPending=false;report.hierarchyAutoSafeRootObservations=0;
                 if(report.hierarchicalDiskPilot&&_geometryPageWorker)_geometryPageWorker->Cancel(report.pageEpoch);
                 fixture->hierarchyWorkerPage=UINT32_MAX;fixture->hierarchyWorkerRequest=0;
                 fixture->hierarchyWorkerGeneration=0;report.pageRequest=0;
@@ -13321,7 +13347,13 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // ClassifyGpuSection returns false for a non-owned section (blend/decal — the CPU
             // complement, already tallied in hasComplement above) or a degenerate one (empty
             // index range). Either way the GPU doesn't draw it: skip, don't fail the model.
-            if (!ClassifyGpuSection(*s, mesh, secs, i, sec, mat))
+            static const bool preparedSectionEnabled=[] {
+                const char* flag=std::getenv("WGR_OBJECT_STREAM_DAYZ_PREPARED_SECTION");
+                return flag&&std::strcmp(flag,"1")==0;
+            }();
+            const bool preparedPilot=preparedSectionEnabled&&shape->Name()&&
+                std::strcmp(shape->Name(),R"(dz\structures\residential\tenements\tenement_small.p3d)")==0;
+            if (!ClassifyGpuSection(*s, mesh, secs, i, sec, mat,preparedPilot))
             {
                 // RFG-074: for the traced shape, say which sections the classifier
                 // REJECTED and what they carried -- these never reach the layer path.

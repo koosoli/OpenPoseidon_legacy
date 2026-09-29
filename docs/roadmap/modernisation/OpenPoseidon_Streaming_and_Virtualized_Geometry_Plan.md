@@ -1313,3 +1313,21 @@ final DayZ resolver. After documented compile-name repairs, game/tests/tools
 and397 assertions/17 focused cases passed. Installed automatic repeat-route and
 real generated TextureBank diagnostic remain pending. Whole plan OPEN;
 defaultReady=false/performanceAccepted=false, no Nanite equivalence claim.
+
+### 30 September — installed automatic traversal and next material seam
+
+Exact `9ec4937c` passed paired startup and the automatic/generated runner
+`hierarchy-auto-generated-sep30-20260930-010540-46ce2e`, exit0/normal without
+forced termination. Far/near/far/near/far reused root64/model3 and Fine512/model4,
+with reads1/2/2/2/2 and two refinements/two coarsenings. Generated TextureBank
+staging uploaded once under its owner stage, reused the handle, and detected
+an ordinary early consumer while preserving that consumer's normal upload.
+Final pending generated charge was0; no retail DayZ capture scope follows.
+Next source introduces an exact-tenement default-off pure classifier tail
+from live owner facts; its face upload remains synchronous. It also fixes the
+DDC key to hash the exact FileServer parser bytes. After replacing an identical
+test fixture, the proper Core suite passed3,564 assertions/12 cases and the
+classifier suite passed31 assertions/5 cases. Installed DayZ verification is
+pending. Whole plan remains OPEN/defaultReady=false/performanceAccepted=false;
+retail source leases, complete final material binding, paced owner registration,
+physical convergence and comparable-quality performance remain required.

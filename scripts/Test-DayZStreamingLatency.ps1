@@ -21,6 +21,7 @@ param(
     [switch]$DayZProxyPrefetch,
     [switch]$DayZTextureTrace,
     [switch]$DayZDependencyCensus,
+    [switch]$PreparedSectionClassification,
     [switch]$DayZShapeSplit,
     [switch]$DayZOwnerPrimaryStage,
     [switch]$DayZOwnerNormalStage,
@@ -91,6 +92,7 @@ if (!$env:LOCK_OWNER) {
         if ($DayZProxyPrefetch) { $argv += '-DayZProxyPrefetch' }
         if ($DayZTextureTrace) { $argv += '-DayZTextureTrace' }
         if ($DayZDependencyCensus) { $argv += '-DayZDependencyCensus' }
+        if ($PreparedSectionClassification) { $argv += '-PreparedSectionClassification' }
         if ($DayZShapeSplit) { $argv += '-DayZShapeSplit' }
         if ($DayZOwnerPrimaryStage) { $argv += '-DayZOwnerPrimaryStage' }
         if ($DayZOwnerNormalStage) { $argv += '-DayZOwnerNormalStage' }
@@ -167,6 +169,7 @@ $environment = @{
     WGR_OBJECT_STREAM_DAYZ_PROXY_PREFETCH = $(if ($DayZProxyPrefetch) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_TEXTURE_TRACE = $(if ($DayZTextureTrace) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_DEPENDENCY_CENSUS = $(if ($DayZDependencyCensus) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_DAYZ_PREPARED_SECTION = $(if ($PreparedSectionClassification) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_SHAPE_SPLIT = $(if ($DayZShapeSplit) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_OWNER_PRIMARY_STAGE = $(if ($DayZOwnerPrimaryStage) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_OWNER_NORMAL_STAGE = $(if ($DayZOwnerNormalStage) { '1' } else { '0' })
@@ -843,6 +846,16 @@ try {
         rows=@($promotionRows | ForEach-Object {$_.Line});
         scope='Historical exact-member promotion witness; not a later Take, source match, upload, or complete 32-entry scan'}
     $promotionProven = !$WarmPublishedReuse -or $promotionRows.Count -gt 0
+    $preparedRows=@(Select-String -LiteralPath $log -Pattern 'Prepared GPU section: route=([0-6]) accepted=(true|false) variant=([01]) alphaRef=([0-9.eE+-]+) texture=(\d+) facts=31 scope=live-owner-classification')
+    if($preparedRows.Count -gt 64 -or (!$PreparedSectionClassification -and $preparedRows.Count)){throw 'Prepared classification activated unexpectedly or exceeded trace bound'}
+    foreach($row in $preparedRows){
+        $m=$row.Matches[0];$route=[int]$m.Groups[1].Value;$accepted=$m.Groups[2].Value -eq 'true';$variant=[int]$m.Groups[3].Value;$alpha=[double]$m.Groups[4].Value
+        if([double]::IsNaN($alpha) -or [double]::IsInfinity($alpha) -or $alpha -lt 0 -or $alpha -gt 1 -or ($accepted -ne ($route -in @(5,6))) -or ($accepted -and (($variant -eq 1) -ne ($alpha -gt 0)))){throw 'Prepared classifier returned an inconsistent route/variant/alpha'}
+    }
+    $preparedAccepted=@($preparedRows|Where-Object {$_.Matches[0].Groups[2].Value -eq 'true'})
+    if($PreparedSectionClassification -and !$preparedAccepted.Count){throw 'NotExercised: no actual selected-tenement prepared GPU-owned section'}
+    $preparedProof=@{requested=[bool]$PreparedSectionClassification;rows=@($preparedRows|ForEach-Object {$_.Line});acceptedRows=$preparedAccepted.Count;
+        scope='First at most64 actual selected-tenement owner fact classifications; face upload remains synchronous, no complete role/model admission, source freshness, pixel parity or performance claim'}
     @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven -and $buildingPilotProven -and $multiStageProven -and $physicalPrefetchProven -and $proxyPrefetchProven -and $textureTraceProven -and $shapeSplitProven -and $ownerStageProven -and $normalStageProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings; framePaceTrace = [bool]$FramePaceTrace
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
@@ -871,6 +884,7 @@ try {
         dayZTextureTrace = [bool]$DayZTextureTrace
         dayZTextureTraceProof = $textureTraceProof
         dayZShapeSplit = [bool]$DayZShapeSplit
+        preparedSectionClassification=[bool]$PreparedSectionClassification;preparedSectionProof=$preparedProof
         dayZShapeSplitProof = $shapeSplitProof
         dayZOwnerPrimaryStage = [bool]$DayZOwnerPrimaryStage
         dayZOwnerPrimaryStageProof = $ownerStageProof
