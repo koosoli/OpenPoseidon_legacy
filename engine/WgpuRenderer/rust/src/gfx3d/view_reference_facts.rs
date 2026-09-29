@@ -36,7 +36,8 @@ impl ApplicabilityPlan {
                       planar_active: bool) -> Option<Self> {
         if identity.token == 0 || identity.token == u64::MAX ||
             identity.cull_epoch == 0 || identity.cull_epoch == u64::MAX ||
-            identity.source_generation == 0 || identity.model_id == u32::MAX ||
+            identity.source_generation == 0 || identity.target_revision == 0 ||
+            identity.model_id == u32::MAX ||
             solar > 4 || local > 24 { return None; }
         let mut required = 1u64 << MAIN;
         required |= ((1u64 << solar) - 1) << CASCADES.start;
@@ -97,7 +98,8 @@ pub fn aggregate_existing_counts(
 fn same_target(fact: MainCountIdentity, current: MainCountIdentity) -> bool {
     fact.token != 0 && fact.model_id == current.model_id &&
         fact.source_generation == current.source_generation &&
-        fact.cull_epoch == current.cull_epoch
+        fact.cull_epoch == current.cull_epoch &&
+        fact.target_revision != 0 && fact.target_revision == current.target_revision
 }
 
 /// Query identity. Instance handle zero means all instances of this model, required when
@@ -431,6 +433,8 @@ mod tests {
         assert!(ApplicabilityPlan::from_frame(id, 0, 25, false, false, false).is_none());
         assert!(ApplicabilityPlan::from_frame(MainCountIdentity { source_generation: 0, ..id },
             0, 0, false, false, false).is_none());
+        assert!(ApplicabilityPlan::from_frame(MainCountIdentity { target_revision: 0, ..id },
+            0, 0, false, false, false).is_none());
     }
 
     #[test]
@@ -508,6 +512,27 @@ mod tests {
         assert_eq!(snapshot.cached, (1u64 << 5) | (1u64 << 29) | (1u64 << 34));
         assert_eq!(snapshot.present, 1u64 << 29);
         assert_ne!(snapshot.unknown & (1u64 << 35), 0);
+        assert_eq!(snapshot.status, 2);
+    }
+
+    #[test]
+    fn all_view_snapshot_rejects_changed_target_revision_for_fresh_and_cached_facts() {
+        let id = count_fact(5, MainCountStatus::Absent, 0).identity;
+        let completion = main_count_completion::Fact { identity: id,
+            state: main_count_completion::COMPLETED };
+        let plan = full_plan(id);
+        let mut facts = [count_fact(5, MainCountStatus::Absent, 0); VIEWS];
+        facts[MAIN].identity.target_revision = 2;
+        for view in [LOCALS.start, INTERIOR.start, GI] {
+            facts[view].identity.token = 4;
+            facts[view].identity.target_revision = 2;
+        }
+        let published = (1u64 << LOCALS.start) | (1u64 << INTERIOR.start) | (1u64 << GI);
+        let snapshot = aggregate_existing_counts(completion, &facts, published, Some(plan));
+        assert_eq!(snapshot.unknown & (published | (1u64 << MAIN)),
+            published | (1u64 << MAIN));
+        assert_eq!(snapshot.absent & (published | (1u64 << MAIN)), 0);
+        assert_eq!(snapshot.cached & published, 0);
         assert_eq!(snapshot.status, 2);
     }
 

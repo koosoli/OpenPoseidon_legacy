@@ -2300,6 +2300,9 @@ bool Landscape::LoadOprwModern(const char* path)
              world.materials.size());
     ProgressRefresh();
     const DWORD tPlacements = Poseidon::Foundation::GlobalTickCount();
+    // A reused landscape may load another modern world without a fresh Init(). Retire
+    // any exact DayZ converted-shape staging slot before replacing model indices.
+    _modernPendingOwnerPrimaryTextures.reset();
 
     // Retain modern placements as compact authored rows and create only a
     // camera-centred working set. The opt-out is diagnostic: it preserves the
