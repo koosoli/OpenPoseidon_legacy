@@ -1,8 +1,9 @@
-param([switch]$DemandViews,[switch]$PaletteContentWitness,[switch]$HierarchyRefill,[switch]$HierarchyDisk,[ValidateSet('None','Scalar','Localized')][string]$HierarchyCuts='None',[switch]$Hierarchy,[ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$Interactive,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
+param([switch]$HierarchyProjected,[switch]$DemandViews,[switch]$PaletteContentWitness,[switch]$HierarchyRefill,[switch]$HierarchyDisk,[ValidateSet('None','Scalar','Localized')][string]$HierarchyCuts='None',[switch]$Hierarchy,[ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$Interactive,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
  [string]$Label='original-geometry-pages',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
 if($PaletteContentWitness -and !$MainCountProbe){throw 'Palette content witness requires MainCountProbe'}
 if($HierarchyRefill){$HierarchyDisk=$true;if($HierarchyCuts -ne 'None'){throw 'Hierarchy refill needs a never-used fourth model slot; choose no intermediate cut'}}
+if($HierarchyProjected){$HierarchyDisk=$true;$DemandViews=$true;if($HierarchyRefill -or $HierarchyCuts -ne 'None'){throw 'Projected hierarchy preference is an independent bounded-cut mode'}}
 if($HierarchyDisk -or $HierarchyCuts -ne 'None'){$Hierarchy=$true}
 if($DemandViews -and !$Hierarchy){throw 'Demand-view collection currently requires the hierarchy fixture'}
 if($Hierarchy -and ($DiskFault -ne 'None' -or $CameraPrefetch -or $ProjectedPrefetch -or $AutoFine -or $AutoCoarse -or $Interactive -or $CameraTuple -or $CameraTupleScaleRefusal -or $SurfaceCertificate -or $MainCountProbe -or $SurfaceFault -ne 'None')){throw 'Hierarchy is an independent original-source page fixture'}
@@ -23,6 +24,7 @@ if(!$env:LOCK_OWNER){
  if($Hierarchy){$argv+='-Hierarchy'}
  if($HierarchyDisk){$argv+='-HierarchyDisk'}
  if($HierarchyRefill){$argv+='-HierarchyRefill'}
+ if($HierarchyProjected){$argv+='-HierarchyProjected'}
  if($DemandViews){$argv+='-DemandViews'}
  if($PaletteContentWitness){$argv+='-PaletteContentWitness'}
  $argv+=@('-HierarchyCuts',$HierarchyCuts)
@@ -589,7 +591,7 @@ try{
      $targets=@('rootHierarchy')
      if($HierarchyCuts -eq 'Scalar'){$targets+='intermediateHierarchy'}
      if($HierarchyCuts -eq 'Localized'){$targets+='localHierarchy'}
-     $targets+=@('fineHierarchy','rootHierarchy')
+     if(!$HierarchyProjected){$targets+=@('fineHierarchy','rootHierarchy')}
      foreach($target in $targets){
       $before=HierarchyReady
       if($target -in @('intermediateHierarchy','localHierarchy')){
@@ -647,6 +649,31 @@ try{
      if($HierarchyDisk){
       foreach($c in @($fallback)+$cuts){Require $c @('hierarchicalDiskPilot','hierarchyDiskPageReads','diskReadStatus','pageLiveJobs','pageReservedBytes');if(!$c.hierarchicalDiskPilot -or $c.hierarchyDiskPageReads -ne $c.hierarchyResidentPages){throw 'Disk page read/publication counters disagree'}}
       if($fallback.hierarchyDiskPageReads -ne 0 -or $cuts[$last].diskReadStatus -ne 'Read' -or $cuts[$last].pageLiveJobs -ne 0 -or $cuts[$last].pageReservedBytes -ne 0){throw 'Independent disk reads did not settle without worker debt'}
+     }
+     $projectedCuts=@();$projectedSteps=@();$badProjected=$null
+     if($HierarchyProjected){
+      $previousFrame=[uint64]0
+      foreach($phase in @(@{name='far';pose='1080 1240 18 90 -1.4'},@{name='near';pose='1188 1240 18 90 -8'},@{name='far-return';pose='1080 1240 18 90 -1.4'})){
+       TuplePose $phase.pose;Capture ('projected-'+$phase.name+'-before.png')
+       $null=Action 'observe';$before=HierarchyBounded (HierarchyReady)
+       if($before.demandViews.generation -le $previousFrame){throw 'Projected demand reused an older returned camera cut'}
+       $previousFrame=[uint64]$before.demandViews.generation
+       $command=@{cmd='geometry_page_fixture';action='projectHierarchy';packageSha256=$before.hierarchyPackageSha256;sourceAdmissionEpoch=$before.sourceAdmissionEpoch;pageEpoch=$before.pageEpoch;expectedRequestId=$before.observedRequestId;groupCount=$before.hierarchyDemandGroupCount;frameGeneration=$before.demandViews.generation;pixelIndicatorAllowance=4}
+       $bad=$command.Clone();$bad.frameGeneration=[uint64]$before.demandViews.generation+1
+       $badProjected=Send $bad;$unchanged=HierarchyReady
+       if($badProjected.status -ne 'Invalid' -or $unchanged.requestId -ne $before.requestId -or $unchanged.producerModel -ne $before.producerModel -or $unchanged.meshCount -ne $before.meshCount -or $unchanged.hierarchyProjectedGeneration -ne $before.hierarchyProjectedGeneration){throw 'Foreign completed-camera generation changed demand/resources'}
+       $accepted=Send $command;if($accepted.status -ne 'Ready'){throw 'Actual-view hierarchy preference was refused'}
+       for($i=0;$i -le 65;$i++){
+        $prior=HierarchyReady;$null=Action 'stepHierarchy';$c=HierarchyBounded (HierarchyReady)
+        if($c.hierarchyResidentPages-$prior.hierarchyResidentPages -gt 1 -or $c.hierarchyDiskPageReads-$prior.hierarchyDiskPageReads -gt 1 -or $c.rendererInstance -ne $fallback.rendererInstance -or $c.hierarchyPackageSha256 -cne $fallback.hierarchyPackageSha256){throw 'Projected page staging exceeded quota or changed source/instance'}
+        $projectedSteps+=@{phase=$phase.name;before=$prior;after=$c}
+        if($c.pageWorkState -eq 'HierarchyCutResident' -and !$c.fallbackSelected -and $c.hierarchyMissingMask -eq 0){break}
+        if($c.pageWorkState -eq 'HierarchyDiskQueued'){Start-Sleep -Milliseconds 50}
+       }
+       if($i -gt 65 -or !$c.hierarchySourceVerticesExact -or $c.hierarchyProjectedGeneration -ne $previousFrame -or $c.hierarchyProjectedRequired -ne $before.demandViews.required -or ([uint64]$c.hierarchyProjectedOutside -band [uint64]$c.hierarchyProjectedRequired) -ne [uint64]$c.hierarchyProjectedOutside -or ([uint64]$c.hierarchyProjectedForcedFine -band [uint64]$c.hierarchyProjectedRequired) -ne [uint64]$c.hierarchyProjectedForcedFine -or $c.pageLiveJobs -ne 0 -or $c.pageReservedBytes -ne 0){throw 'Projected source/view closure or completed-cut proof failed'}
+       $projectedCuts+=,$c;Capture ('projected-'+$phase.name+'-after.png')
+      }
+      if($projectedCuts[0].hierarchySelectedTriangles -ne $cuts[0].hierarchySelectedTriangles -or $projectedCuts[1].hierarchySelectedTriangles -le $projectedCuts[0].hierarchySelectedTriangles -or $projectedCuts[2].producerModel -ne $cuts[0].producerModel -or $projectedCuts[2].rendererModel -ne $cuts[0].rendererModel -or $projectedCuts[2].hierarchySelectedTriangles -ne $cuts[0].hierarchySelectedTriangles){throw 'Actual far/near/far views did not refine and reuse complete root'}
      }
      $badRelease=$null;$released=$null;$hierarchyRefilled=$null;$refillRoot=$null;$refillSteps=@()
      if($HierarchyRefill){
@@ -959,5 +986,6 @@ finally{
 }
 if($failure){throw $failure}
 $result.demandViewsRequested=[bool]$DemandViews
+if($HierarchyProjected){$result.hierarchyProjected=$true;$result.projectedCuts=$projectedCuts;$result.projectedSteps=$projectedSteps;$result.badProjected=$badProjected}
 $result|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'result.json')
 Write-Host $out

@@ -1281,3 +1281,19 @@ test fixture/literal repairs, the combined game/tests/tools build passed,
 installed release/refill/tuple validation remains pending. Automatic retail
 paging, source-bound outside-view applicability, physical convergence and
 matched performance remain OPEN/defaultReady=false/performanceAccepted=false.
+
+### 30 September — installed refill and actual-view closure
+
+Exact committed `7d3bc635` passed paired installed startup and
+`hierarchy-refill-views-sep30-20260930-002012-78283f` passed/normal, without
+forced termination. Root64/model3 survived detail retirement; six old handles
+became Absent, one independent-page refill created Fine512/model5 with six
+fresh handles, root reuse read nothing further and Abort observed all fourteen
+historical handles Absent. Worker debt settled to zero. The same run joined
+all twelve enabled completed-frame camera rows (main, four solar, five interior,
+GI, reflection); no local lights were enabled. This verifies private record
+lifetime and camera provenance, not physical memory convergence or performance.
+Next source connects these actual tuples to explicit projected cut selection,
+with immutable-source vertex gates and conservative whole-object outside
+checks. Geometry remains default-off; whole plan OPEN/defaultReady=false/
+performanceAccepted=false, automatic retail paging and Nanite equivalence open.

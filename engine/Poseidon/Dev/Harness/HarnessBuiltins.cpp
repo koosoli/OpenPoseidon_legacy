@@ -594,6 +594,7 @@ void RegisterScreenshot(HarnessServer& hs)
             else if(!std::strcmp(name,"intermediateHierarchy")) action=Engine::GeometryPageFixtureAction::IntermediateHierarchy;
             else if(!std::strcmp(name,"localHierarchy")) action=Engine::GeometryPageFixtureAction::LocalHierarchy;
             else if(!std::strcmp(name,"releaseHierarchyNonroot")) action=Engine::GeometryPageFixtureAction::ReleaseHierarchyNonroot;
+            else if(!std::strcmp(name,"projectHierarchy")) action=Engine::GeometryPageFixtureAction::ProjectHierarchy;
             else if(!std::strcmp(name,"followCamera")) action=Engine::GeometryPageFixtureAction::FollowCamera;
             else if(!std::strcmp(name,"followProjected")) action=Engine::GeometryPageFixtureAction::FollowProjected;
             else if(!std::strcmp(name,"stopCamera")) action=Engine::GeometryPageFixtureAction::StopCamera;
@@ -722,7 +723,8 @@ void RegisterScreenshot(HarnessServer& hs)
             const Engine::GeometryPageHierarchyDemandInput* hierarchyArgument=nullptr;
             if(action==Engine::GeometryPageFixtureAction::IntermediateHierarchy||
                action==Engine::GeometryPageFixtureAction::LocalHierarchy||
-               action==Engine::GeometryPageFixtureAction::ReleaseHierarchyNonroot) {
+               action==Engine::GeometryPageFixtureAction::ReleaseHierarchyNonroot||
+               action==Engine::GeometryPageFixtureAction::ProjectHierarchy) {
                 const auto integer=[&](const char* key,uint64_t& value) {
                     const auto* item=cJSON_GetObjectItemCaseSensitive(root,key);
                     if(!cJSON_IsNumber(item)||!std::isfinite(item->valuedouble)||item->valuedouble<1||
@@ -736,6 +738,14 @@ void RegisterScreenshot(HarnessServer& hs)
                    !integer("groupCount",groups)||groups>64)
                     return HarnessProtocol::ErrorResponse("exact bounded hierarchy source, epoch, request and group count required");
                 hierarchy.groupCount=uint32_t(groups);
+                if(action==Engine::GeometryPageFixtureAction::ProjectHierarchy) {
+                    const auto* allowance=cJSON_GetObjectItemCaseSensitive(root,"pixelIndicatorAllowance");
+                    if(!integer("frameGeneration",hierarchy.frameGeneration)||
+                       !cJSON_IsNumber(allowance)||!std::isfinite(allowance->valuedouble)||
+                       allowance->valuedouble<=0||allowance->valuedouble>10000)
+                        return HarnessProtocol::ErrorResponse("exact completed frame and bounded positive indicator allowance required");
+                    hierarchy.pixelIndicatorAllowance=allowance->valuedouble;
+                }
                 const auto* hash=cJSON_GetObjectItemCaseSensitive(root,"packageSha256");
                 if(!cJSON_IsString(hash)||!hash->valuestring||std::strlen(hash->valuestring)!=64)
                     return HarnessProtocol::ErrorResponse("exact hierarchy package SHA-256 required");
@@ -875,6 +885,10 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(hierarchyRetainedCutModels);
             PAGE_FIXTURE_NUMBER(hierarchyDiskPageReads);
             PAGE_FIXTURE_NUMBER(hierarchyReleaseCount);PAGE_FIXTURE_NUMBER(hierarchyRefillCount);
+            PAGE_FIXTURE_NUMBER(hierarchyProjectedGeneration);PAGE_FIXTURE_NUMBER(hierarchyProjectedRequired);
+            PAGE_FIXTURE_NUMBER(hierarchyProjectedOutside);PAGE_FIXTURE_NUMBER(hierarchyProjectedForcedFine);
+            PAGE_FIXTURE_NUMBER(hierarchyProjectedAllowance);PAGE_FIXTURE_NUMBER(hierarchyProjectedMaximumIndicator);
+            cJSON_AddBoolToObject(result,"hierarchySourceVerticesExact",report.hierarchySourceVerticesExact);
             cJSON_AddBoolToObject(result,"hierarchyRetirementPending",report.hierarchyRetirementPending);
             cJSON_AddStringToObject(result,"hierarchyRetiredPageMaskExact",std::to_string(report.hierarchyRetiredPageMask).c_str());
             PAGE_FIXTURE_NUMBER(hierarchySelectedTriangles);PAGE_FIXTURE_NUMBER(hierarchyCutModel);PAGE_FIXTURE_NUMBER(hierarchyThreshold);

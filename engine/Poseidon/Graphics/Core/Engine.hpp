@@ -3221,7 +3221,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse, BeginOriginalHierarchy, StepHierarchy, RootHierarchy, FineHierarchy, IntermediateHierarchy, LocalHierarchy, BeginOriginalHierarchyDisk, ReleaseHierarchyNonroot };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse, BeginOriginalHierarchy, StepHierarchy, RootHierarchy, FineHierarchy, IntermediateHierarchy, LocalHierarchy, BeginOriginalHierarchyDisk, ReleaseHierarchyNonroot, ProjectHierarchy };
     struct GeometryPageSourceIdentity
     {
         std::array<uint8_t,32> sha256{};
@@ -3282,6 +3282,8 @@ class Engine : public IGraphicsEngine
     struct GeometryPageHierarchyDemandInput {
         std::array<uint8_t,32> packageSha256{};
         uint64_t sourceAdmissionEpoch=0,pageEpoch=0,expectedRequestId=0;
+        uint64_t frameGeneration=0;
+        double pixelIndicatorAllowance=1;
         uint32_t groupCount=0;
         std::array<float,64> groupThresholds{};
     };
@@ -3309,6 +3311,9 @@ class Engine : public IGraphicsEngine
         uint32_t hierarchyPages=0,hierarchyRootPages=0,hierarchyResidentPages=0,hierarchyRetainedCutModels=0,hierarchyDiskPageReads=0;
         uint32_t hierarchyReleaseCount=0,hierarchyRefillCount=0;
         uint64_t hierarchyRetiredPageMask=0;
+        uint64_t hierarchyProjectedGeneration=0,hierarchyProjectedRequired=0,hierarchyProjectedOutside=0,hierarchyProjectedForcedFine=0;
+        double hierarchyProjectedAllowance=0,hierarchyProjectedMaximumIndicator=0;
+        bool hierarchySourceVerticesExact=false;
         bool hierarchyRetirementPending=false;
         uint32_t hierarchySelectedTriangles=0,hierarchyCutModel=UINT32_MAX;
         uint64_t hierarchyRequiredMask=0,hierarchyResidentMask=0,hierarchyMissingMask=0;

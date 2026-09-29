@@ -164,6 +164,8 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_geometry_page_hierarchical_local_cut.cpp
     Graphics/test_geometry_page_hierarchical_projected_demand.cpp
     Graphics/test_geometry_page_hierarchical_combined_projection.cpp
+    Graphics/test_geometry_page_hierarchical_original_outside.cpp
+    Graphics/test_geometry_page_hierarchical_original_demand.cpp
     Graphics/test_geometry_page_hierarchical_release.cpp
     Graphics/test_geometry_page_hierarchical_disk.cpp
     Graphics/test_hierarchical_geometry_page_worker.cpp

@@ -132,6 +132,36 @@ pass. Rust snapshot tests first failed to compile due a negative-zero literal;
 correcting it produced6/6 passing tests. Failed logs are preserved. Installed
 release/refill and tuple collection remain pending at this source checkpoint.
 
+## Installed returned-root refill and actual-view validation
+
+Exact committed `7d3bc635` passed paired deployment and installed WGPU startup.
+`hierarchy-refill-views-sep30-20260930-002012-78283f` passed, exit0,
+normalShutdown=true, without forced termination. Root64/model3 remained
+selected after six detail records retired: eight historical handles became
+two Present/six Absent. Reload read one independently addressed page, produced
+Fine512/model5 and six fresh handles, and preserved all six old handles Absent.
+Returning to root reused model3 without another read; Abort observed all
+fourteen historical handles Absent with zero worker debt. Reported known
+charges were86,110 bytes before release,88,734 after release and122,626 after
+refill. These are retained-accounting observations, not physical convergence.
+
+The same run joined completed snapshot generation108/instance epoch8 with
+required=known68182605855 and unknown0. Twelve views were enabled: main1280x720,
+four solar2048x2048, five interior2048x2048, GI1024x1024 and reflection640x360.
+All required rows had matching generations and known numeric status. This
+scene had no enabled local-light view; no all-view COUNT claim follows.
+
+The next source gates every published hierarchy page against immutable Fine
+vertex IDs and serialized vertex fields. Its original coarse/Fine union box
+can exclude a view only through strict outward homogeneous-plane separation.
+An explicit source-bound owner action unions projected baked-error indicators
+from the actual completed views; unknown/clipped/unsupported views force Fine.
+This is still a private selection heuristic, not certified pixel quality or
+automatic retail paging. The initial combined build failed an ambiguous unit
+fixture name (`Asset` vs engine namespace); renaming it left game/tests/tools
+passing. Focused original outside/demand, local-cut and disk checks passed
+12,841 assertions in22 cases. Installed far/near/far verification is pending.
+
 Next work: independently addressable disk pages with authenticated metadata,
 asynchronous preparation and cancellation debt, arbitrary intermediate runtime
 cuts, automatic projected demand across applicable views, supported static

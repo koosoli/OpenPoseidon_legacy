@@ -12,6 +12,7 @@
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalCut.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalLocalCut.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalRelease.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalOriginalDemand.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageControlledClodPilot.hpp>
 #include <Poseidon/Graphics/Rendering/AuthoredGeometryPageWorker.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageSurfaceAdmission.hpp>
@@ -2263,6 +2264,8 @@ struct EngineWgpu::GeometryPageFixtureState
     std::array<uint32_t,64> hierarchyMeshClusterHistory{};
     std::array<uint8_t,64> hierarchyExpectedMeshState{},hierarchyObservedMeshState{};
     uint64_t hierarchyObservedGeneration=0;
+    std::optional<WgrDemandViewSnapshot> hierarchyDemandSnapshot;
+    uint64_t hierarchyDemandSnapshotRequest=0,hierarchyDemandOwnerEpoch=0;
     std::array<bool,4> hierarchyModelRegistered{},hierarchyCutReserved{};
     std::array<std::array<uint32_t,64>,4> hierarchyCutKeys{};
     std::array<uint8_t,4> hierarchyCutCounts{};
@@ -9516,6 +9519,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             report.sourceAdmissionKnownBytes=originalOwner->report.knownRetainedBytes;
             report.originalOriginRadius=radius;report.sourceSha256=PageHashHex(original.source.sourceSha256);
             report.hierarchicalPilot=true;report.hierarchicalDiskPilot=diskMode;
+            report.hierarchySourceVerticesExact=true; // Every subsequent page must pass the source-vertex gate.
             report.diskReadStatus="NotRequested";report.hierarchyPages=uint32_t(fixture->hierarchy->pages.size());
             report.hierarchyRootPages=uint32_t(fixture->hierarchy->rootPages.size());
             report.hierarchyPackageSha256=PageHashHex(fixture->hierarchy->identity.packageSha256);
@@ -9906,6 +9910,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
            action!=GeometryPageFixtureAction::FineHierarchy && action!=GeometryPageFixtureAction::StepHierarchy &&
            action!=GeometryPageFixtureAction::IntermediateHierarchy && action!=GeometryPageFixtureAction::LocalHierarchy &&
            action!=GeometryPageFixtureAction::ReleaseHierarchyNonroot &&
+           action!=GeometryPageFixtureAction::ProjectHierarchy &&
            action!=GeometryPageFixtureAction::Abort && action!=GeometryPageFixtureAction::Observe)
              return failure;
         if(report.hierarchicalPilot && action==GeometryPageFixtureAction::Observe &&
@@ -10024,6 +10029,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
            action==GeometryPageFixtureAction::FineHierarchy ||
            action==GeometryPageFixtureAction::IntermediateHierarchy ||
            action==GeometryPageFixtureAction::LocalHierarchy ||
+           action==GeometryPageFixtureAction::ProjectHierarchy ||
            action==GeometryPageFixtureAction::StepHierarchy) {
             using namespace Poseidon::GeometryPages;
             if(!report.hierarchicalPilot||!fixture->hierarchy||!report.active||
@@ -10046,6 +10052,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             auto desired=fixture->hierarchyDesiredGroupThresholds;
             float scalar=fixture->hierarchyDesiredThreshold;
             bool local=fixture->hierarchyLocalDemand;
+            std::optional<GeometryPages::HierarchicalOriginalDemand::Result> projected;
+            if(action!=GeometryPageFixtureAction::StepHierarchy&&fixture->hierarchyGeneration==UINT64_MAX)return failure;
             if(action!=GeometryPageFixtureAction::StepHierarchy) {
                 if(action==GeometryPageFixtureAction::RootHierarchy||action==GeometryPageFixtureAction::FineHierarchy) {
                     scalar=action==GeometryPageFixtureAction::RootHierarchy?fixture->hierarchyRootThreshold:0;
@@ -10057,7 +10065,60 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                        hierarchyDemand->packageSha256!=package.identity.packageSha256||
                        hierarchyDemand->groupCount!=package.groups.size())return failure;
                     desired=hierarchyDemand->groupThresholds;
-                    local=action==GeometryPageFixtureAction::LocalHierarchy;
+                    if(action==GeometryPageFixtureAction::ProjectHierarchy) {
+                        namespace H=GeometryPages::HierarchicalProjection;
+                        namespace O=GeometryPages::HierarchicalOriginalOutside;
+                        namespace D=GeometryPages::HierarchicalOriginalDemand;
+                        if(!report.hierarchySourceVerticesExact||!fixture->hierarchyDemandSnapshot||
+                           !report.demandViews.mainPacketJoined||
+                           fixture->hierarchyDemandSnapshotRequest!=report.observedRequestId||
+                           hierarchyDemand->frameGeneration!=fixture->hierarchyDemandSnapshot->generation)
+                            return failure;
+                        const auto& snapshot=*fixture->hierarchyDemandSnapshot;
+                        H::Authority authority;
+                        // This private fixture uses one Engine-owned arena and an
+                        // immutable loose-source admission era. These are not a
+                        // retail-world or current archive-mount certificate.
+                        authority.binding={package.identity,fixture->hierarchyDemandOwnerEpoch,
+                            report.sourceAdmissionEpoch,report.sourceAdmissionEpoch,
+                            uint64_t(fixture->models[0])+1,snapshot.generation,snapshot.required};
+                        authority.frameGeneration=snapshot.generation;
+                        std::array<O::View,40> views{};uint32_t viewCount=0;
+                        for(uint32_t i=0;i<36;++i)if(snapshot.required&(uint64_t(1)<<i)) {
+                            const auto& row=snapshot.rows[i];auto& view=views[viewCount++];
+                            view.binding=authority.binding;view.id=i+1;
+                            view.frameGeneration=snapshot.generation;view.generation=row.generation;
+                            authority.viewGenerations[i]=row.generation;
+                            view.enabled=true;view.joinedNonJittered=row.status==1&&row.id==i+1&&
+                                row.matrix_generation==snapshot.generation&&(row.flags&1)&&!row.reserved;
+                            switch(row.kind) {
+                                case 1:view.kind=H::ViewKind::Main;break;
+                                case 2:view.kind=H::ViewKind::SolarShadow;break;
+                                case 3:view.kind=H::ViewKind::LocalLight;break;
+                                case 4:view.kind=H::ViewKind::Interior;break;
+                                case 5:view.kind=H::ViewKind::GI;break;
+                                case 6:view.kind=H::ViewKind::Reflection;break;
+                                default:view.kind=H::ViewKind::Unknown;
+                            }
+                            std::copy_n(fixture->placement.world.m,16,view.model.begin());
+                            for(uint32_t axis=0;axis<3;++axis)view.model[12+axis]-=row.origin[axis];
+                            view.viewportWidth=row.viewport_width;view.viewportHeight=row.viewport_height;
+                            view.viewportOriginX=row.viewport_origin_x;view.viewportOriginY=row.viewport_origin_y;
+                            view.separateMainProjection=row.kind==1||row.kind==6;
+                            view.projection=row.projection;view.view=row.view;
+                            view.clipNear=-row.projection[14];view.combinedLightVP=row.projection;
+                        }
+                        O::Token token{authority,report.pageEpoch,report.observedRequestId,report.originalSourceBytes};
+                        D::Input input;input.views={token,std::span<const O::View>(views.data(),viewCount),true};
+                        input.pixelIndicatorAllowance=hierarchyDemand->pixelIndicatorAllowance;
+                        input.noNewPagePositionsVerified=true;
+                        D::Result result;
+                        const auto projectedStatus=D::Build(package,fixture->originalAdmission->source.original,input,token,result);
+                        if(projectedStatus!=D::Status::Ready&&projectedStatus!=D::Status::ForcedFine)
+                            return failure;
+                        projected=std::move(result);desired=projected->demand.groupThresholds;
+                    }
+                    local=action==GeometryPageFixtureAction::LocalHierarchy||action==GeometryPageFixtureAction::ProjectHierarchy;
                     scalar=local?0:desired[0];
                     if(!local)for(uint32_t g=1;g<package.groups.size();++g)
                         if(desired[g]!=scalar)return failure;
@@ -10091,6 +10152,17 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                 fixture->hierarchyLocalDemand=local;
                 report.hierarchyThreshold=scalar;report.hierarchyLocalDemand=local;
                 report.hierarchyDemandThresholds=desired;
+                if(projected) {
+                    report.hierarchyProjectedGeneration=hierarchyDemand->frameGeneration;
+                    report.hierarchyProjectedRequired=projected->outside.requiredViewMask;
+                    report.hierarchyProjectedOutside=projected->outside.outsideViewMask;
+                    report.hierarchyProjectedForcedFine=projected->demand.forcedFineViewMask;
+                    report.hierarchyProjectedAllowance=hierarchyDemand->pixelIndicatorAllowance;
+                    report.hierarchyProjectedMaximumIndicator=0;
+                    for(uint32_t g=0;g<package.groups.size();++g)
+                        report.hierarchyProjectedMaximumIndicator=std::max(report.hierarchyProjectedMaximumIndicator,
+                            projected->demand.projectedBakedErrorIndicators[g]);
+                }
                 ++fixture->hierarchyGeneration;
             }
             report.hierarchyRequiredMask=report.hierarchyMissingMask=0;
@@ -10188,6 +10260,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                         !page.clusters.empty()&&fixture->meshes.size()+page.clusters.size()<=64;
                     for(size_t i=0;exact&&i<page.clusters.size();++i)
                         exact=page.clusters[i].cluster==package.pages[pageId].clusters[i].cluster;
+                    exact=exact&&GeometryPages::HierarchicalOriginalOutside::ExactOriginalFinePageVertices(
+                        page,fixture->originalAdmission->source.original.fine.vertices);
                     if(!exact)return refuseDiskPage("HierarchyDiskFailed");
                     try {
                     std::vector<ResourceOp> staged;staged.reserve(page.clusters.size()+1);
@@ -10250,6 +10324,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                 }
                 const auto pageId=batch.pages.front();const auto& page=package.pages[pageId];
                 if(page.clusters.empty()||fixture->meshes.size()+page.clusters.size()>64)return failure;
+                if(!GeometryPages::HierarchicalOriginalOutside::ExactOriginalFinePageVertices(
+                    page,fixture->originalAdmission->source.original.fine.vertices))return failure;
                 std::vector<ResourceOp> staged;staged.reserve(page.clusters.size()+1);
                 std::vector<uint64_t> handles;handles.reserve(page.clusters.size());
                 uint64_t extra=staged.capacity()*sizeof(ResourceOp)+handles.capacity()*sizeof(uint64_t);
@@ -10760,6 +10836,7 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
     report.mainFrameReturned=renderReturnStatus==0;
     report.passFacts={}; // Failed frame/getter must never expose a prior valid cut.
     report.cameraTupleEnabled=PageCameraTupleEnabled();PageInvalidateCameraTuple(report);
+    fixture->hierarchyDemandSnapshot.reset();fixture->hierarchyDemandSnapshotRequest=0;
     report.demandViews={};
     static const bool demandViewsEnabled=[] {
         const char* v=std::getenv("WGR_GEOMETRY_PAGE_DEMAND_VIEWS");
@@ -10794,6 +10871,11 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
                 const auto& r=snapshot.rows[i];
                 copied.rows[i]={r.id,r.kind,r.status,r.provenance,r.viewport_width,r.viewport_height,
                     r.viewport_origin_x,r.viewport_origin_y,r.flags,r.generation};
+            }
+            if(copied.mainPacketJoined&&report.hierarchicalPilot&&report.active) {
+                fixture->hierarchyDemandSnapshot=snapshot;
+                fixture->hierarchyDemandSnapshotRequest=request;
+                fixture->hierarchyDemandOwnerEpoch=_geometryOwnerEpoch;
             }
         }
     }
