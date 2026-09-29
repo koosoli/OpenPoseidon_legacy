@@ -23,5 +23,14 @@ unproven. GeometryPage and pressure control remain default-off.
 
 Focused cached-count tests passed (16/16), including stale foreign-caster
 absence in local, interior and GI caches; 14/14 view-reference tests passed.
-The paired desktop PoseidonGame/PoseidonTests build passed. Installed WGPU
-startup and a representative streamer world run are pending this commit.
+The paired desktop PoseidonGame/PoseidonTests build passed. The committed
+`5a2ae871` EXE/DLL pair passed installed WGPU `--check` and a single
+90-second native Reforger Village route: normal exit, 20,683 registered
+instances, 4,930 main-pass instances and one captured 35.531 ms frame. This
+is a stability screen with no matched baseline or causal FPS conclusion.
+The original-source `-MainCountProbe` fixture
+`dynamic-count-20260929-20260929-143604-d29dc4` passed its geometry
+contract, main/solar COUNT logging and normal shutdown. Its first launcher
+attempt failed before game start because Windows PowerShell did not expose
+`Get-FileHash` through Git Bash; invoking the installed PowerShell 7 runtime
+under the same game lock ran the fixture successfully.
