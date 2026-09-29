@@ -63,6 +63,7 @@ The normal path performs only the optional target-witness check after existing
 texture operations; it adds no scan, GPU copy or readback. Focused texture
 tests passed (17/17), including valid/refused mutation results and real
 bindless replacement cases. The paired desktop game/test build passed.
-Installed WGPU verification is pending the committed build. Non-texture
+The committed `bf76fa15` EXE/DLL pair passed installed WGPU `--check`.
+Non-texture
 material edits and other image producers are still untracked, so no cached
 image, Fine-release or default GeometryPage policy is promoted.
