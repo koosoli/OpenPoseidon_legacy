@@ -353,3 +353,12 @@ still took 618.4 ms with 81 uploads; its reported texture read work was
 434.0 ms. This is a default-path stability screen, not a controlled matched
 performance comparison: source cache, async order and admission coverage vary
 between routes. There is no evidence to enable either pilot by default.
+
+The normal-stage reservation charges the worst-case RGBA8 image plus generated
+mips before upload. The two measured NormalMaps each reserved about 22.37 MiB;
+their source format can use a smaller BC chain, but the upload path can fall
+back to RGBA. Charging only the compressed source size would let a failed BC
+path exceed the promised 64 MiB bound. Do not loosen that cap without an
+accurate per-texture post-upload footprint and a safe rollback for a fallback
+allocation. More speculative uploads would still leave direct proxies and
+other material roles in the final 518 ms creation block.
