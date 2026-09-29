@@ -299,8 +299,9 @@ try {
                 if ($null -eq $camera.$field -or $camera.$field -ne 0) { throw "Disabled warm preparation did work or allocated queue storage: $field" }
             }
             # These counters belong to the shared PreparedTextureStore. The
-            # bound cold-PBO experiment legitimately uses it without warm jobs.
-            if (!$boundPackedSource) {
+            # bound cold-PBO experiment and exact-tenement physical prefetch
+            # legitimately use the shared store without warm-job queue admission.
+            if (!$boundPackedSource -and !$DayZPhysicalPrefetch) {
                 foreach ($field in @('warmPreparedPuts','warmPreparedTakes','warmPreparedSourceRefused',
                     'warmPreparedUploads','warmPreparedUploadBytes','warmPreparedUploadFailed')) {
                     if ($null -eq $camera.$field -or $camera.$field -ne 0) { throw "Disabled source-bound preparation did work: $field" }
