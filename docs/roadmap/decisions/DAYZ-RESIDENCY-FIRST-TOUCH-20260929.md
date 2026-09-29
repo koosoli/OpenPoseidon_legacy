@@ -316,3 +316,31 @@ deadline. Keep the flag off; `performanceAccepted=false`,
 `defaultReady=false`. The next useful slice needs measured, current-source
 coverage of the actually consumed material/proxy textures or a complete
 registration strategy that does not expose partial model state.
+
+## Bounded parent NormalMap staging
+
+Commit `be4d2fd8` extends only the exact tenement pilot with the independent
+default-off `WGR_OBJECT_STREAM_DAYZ_OWNER_NORMAL_STAGE=1` switch. With the
+primary switch also enabled, it visits at most one parent visual section per
+owner update and uploads at most one authored NormalMap. It stops after 32
+sections, 750 ms of this phase, 16 fresh uploads or a conservative 64 MiB
+reservation, then runs ordinary complete registration. Proxy children and
+other material roles are not staged. A completed-model capture check counts
+which speculative images were actually bound by the parent.
+
+The combined game/test build, safety push and installed WGPU startup passed.
+The single locked installed DayZ route
+`build/stream-residency/dayz-owner-normal-sep29-disabled-20260929-185822`
+exited normally (code 0, no forced stop). Its tenement staged seven primary
+images and then two NormalMaps, `plaster_blue_nohq.paa` and
+`plaster_flats01_nohq.paa`, over separate updates. Both NormalMaps were present
+in the completed parent's captured texture set. A third attempt hit the
+64 MiB reservation and fell back to full registration (`admitted=true`), with
+518.056 ms final creation. This is useful handoff evidence, not a matched
+performance improvement; the source cache and async histories differ from
+earlier routes. The screening harness reported `NotExercised` because the
+handoff logged this planned normal-phase fallback as a *primary upload failure*.
+Commit `349b3410` separates those two fields; its exact paired build and
+installed WGPU startup passed. The route was not rerun merely to change that
+diagnostic verdict. Keep both pilots off: `performanceAccepted=false`,
+`defaultReady=false`.

@@ -25,3 +25,14 @@ Follow-up `f3639c2c` stamps the explicitly armed target-model revision into the 
 Follow-up `a8194313` binds private cached COUNT facts for interior sky, GI RSM and all 24 local shadow views to a collision-free 32-word key of the plain COUNT cull inputs: frustum planes, camera xyz, distance and subpixel/LOD knobs, and the frustum-skip debug bit. A changed key returns Unknown even if the published image key appears unchanged. Main, solar and reflection facts are current-request reads; the Hi-Z color view is outside the 36. Focused key/cache and sky0 tests, Rust compile and no-run test compilation passed in the isolated branch. The paired desktop build and installed WGPU `--check` passed at `7b1089b5`. The global epoch/image/source gates remain; no selective cached reuse or Fine/default policy follows.
 
 Follow-up `60b36d06` adds an internal read-only classifier for optional cached local/interior/GI COUNT. For a successfully mapped Present/Absent fact it independently compares the published image identity, exact current COUNT cull inputs, target-model/source revision, and image epoch. It can report equivalent COUNT inputs with a stale image after unrelated global-epoch churn; that diagnostic does not make the old image current or change existing Unknown, cached/absent masks, publication checks, or Fine policy. Missing publication, unarmed target, bad readback, changed image, and inconsistent epoch stay unclassified. Thirteen focused cached-count Rust tests passed in the isolated worktree; the paired desktop build and installed WGPU `--check` passed at `adb19215`. The ImageCurrent relation means only that publication and global epochs match, not that every foreign dynamic caster, material, texture or pose mutation is witnessed. Matched performance remains open; flags OFF/defaultReady=false/performanceAccepted=false.
+
+Follow-up `2ae38b70` hardens the private 36-view aggregate proof boundary:
+applicability plans reject revision zero, and every fresh or historically
+published COUNT fact must match the exact nonzero target-model revision. The
+existing producer getters already validated that revision; this is defense at
+the aggregation boundary, not a reproduced live false-absence defect. Fifteen
+focused Rust tests passed, including changed fresh main and older cached
+local/interior/GI facts. The combined desktop build and installed WGPU
+startup passed with the subsequent exact `349b3410` source. The snapshot
+remains diagnostic; no all-view absence, pixel visibility, physical Fine
+reclaim, matched performance or GeometryPage default promotion follows.
