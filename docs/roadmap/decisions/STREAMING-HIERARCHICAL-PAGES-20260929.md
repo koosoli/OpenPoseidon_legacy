@@ -162,9 +162,41 @@ fixture name (`Asset` vs engine namespace); renaming it left game/tests/tools
 passing. Focused original outside/demand, local-cut and disk checks passed
 12,841 assertions in22 cases. Installed far/near/far verification is pending.
 
-Next work: independently addressable disk pages with authenticated metadata,
-asynchronous preparation and cancellation debt, arbitrary intermediate runtime
-cuts, automatic projected demand across applicable views, supported static
+## Installed source-bound projected cut selection
+
+Exact committed `1beeea3c` passed paired installed startup.
+`hierarchy-projected-sep30-20260930-004306-a2ead3` passed/exit0/normal, without
+forced termination. Actual far/near/far snapshot generations61/80/108 selected
+root64/model3, Fine512/model4, root64/model3 on the same instance. Independent
+reads were1/2/2; no root recreation or repeated read occurred. Outside masks
+were33822867458/34359738368/33822867458; forced-Fine masks0/1/0. The near main
+view was clipped and conservatively forced Fine. Maximum baked-error indicators
+were1.063829108/6.778723933/1.063829108 at allowance4. Root inspected the near
+capture: an untextured white mound was complete locally with no obvious holes.
+This is explicit owner preference, not automatic retail paging, raster error
+certification or measured performance.
+
+The next source adds a private binary root/Fine automatic consumer at <=10Hz.
+It freezes demand through charged pending page/model work, keeps both immutable
+cuts/pages, refines at allowance4 and requires three fresh known unions at
+allowance3 to prefer roots. Unknown views force Fine; invalid source/owner cuts
+refuse. No automatic eviction or GPU COUNT/readback is introduced. The initial
+build failed an undefined harness boolean macro; the repaired build then
+identified test-name collisions (`Fail` logging macro and engine `Frame`).
+Both were renamed. The combined game/tests/tools build and397 assertions in17
+binary-policy/material-declaration/generated-admission cases passed.
+
+A declaration-only material-role helper uses the actual translated IR, including
+mask-conditional layers and physical/generated source kinds. It is not final
+binding coverage. Generated TextureWgpu Init can now hold already encoded pixels
+only under an exact default-off owner scope, charging actual vector/string
+capacity against16 textures/1MiB process and owner limits. The planned owner
+stage creates once; an ordinary early consumer uploads normally and aborts the
+pilot witness. No selected owner scope is installed in retail DayZ yet. A
+one-shot live TextureBank Load/UseMipmap diagnostic and automatic traversal
+runner are prepared; installed verification is pending.
+
+Next work: automatic projected demand across applicable views, supported static
 opaque retail source admission and world epochs, release/refill with measured
 byte convergence, and comparable-quality traversal measurements. No default
 activation or Nanite-equivalence claim follows from the private fixture.

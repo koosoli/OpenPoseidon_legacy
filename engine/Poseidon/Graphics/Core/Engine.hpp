@@ -3221,7 +3221,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse, BeginOriginalHierarchy, StepHierarchy, RootHierarchy, FineHierarchy, IntermediateHierarchy, LocalHierarchy, BeginOriginalHierarchyDisk, ReleaseHierarchyNonroot, ProjectHierarchy };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse, BeginOriginalHierarchy, StepHierarchy, RootHierarchy, FineHierarchy, IntermediateHierarchy, LocalHierarchy, BeginOriginalHierarchyDisk, ReleaseHierarchyNonroot, ProjectHierarchy, FollowHierarchy, StopHierarchy };
     struct GeometryPageSourceIdentity
     {
         std::array<uint8_t,32> sha256{};
@@ -3284,6 +3284,7 @@ class Engine : public IGraphicsEngine
         uint64_t sourceAdmissionEpoch=0,pageEpoch=0,expectedRequestId=0;
         uint64_t frameGeneration=0;
         double pixelIndicatorAllowance=1;
+        bool privateBinaryOwner=false; // Only the serialized owner sets this; not a harness input.
         uint32_t groupCount=0;
         std::array<float,64> groupThresholds{};
     };
@@ -3314,6 +3315,9 @@ class Engine : public IGraphicsEngine
         uint64_t hierarchyProjectedGeneration=0,hierarchyProjectedRequired=0,hierarchyProjectedOutside=0,hierarchyProjectedForcedFine=0;
         double hierarchyProjectedAllowance=0,hierarchyProjectedMaximumIndicator=0;
         bool hierarchySourceVerticesExact=false;
+        bool hierarchyAutoEnabled=false,hierarchyAutoPending=false;
+        uint64_t hierarchyAutoObservations=0,hierarchyAutoRefines=0,hierarchyAutoCoarsens=0;
+        uint32_t hierarchyAutoSafeRootObservations=0;
         bool hierarchyRetirementPending=false;
         uint32_t hierarchySelectedTriangles=0,hierarchyCutModel=UINT32_MAX;
         uint64_t hierarchyRequiredMask=0,hierarchyResidentMask=0,hierarchyMissingMask=0;

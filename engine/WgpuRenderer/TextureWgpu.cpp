@@ -13,6 +13,7 @@
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>     // worker-prepared mip chains
 #include <Poseidon/Graphics/Textures/ProceduralTexture.hpp>
+#include <Poseidon/Graphics/Textures/DeferredProceduralAdmission.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp> // per-admission split timers
 #include <Poseidon/World/Terrain/ObjectTextureUploadTrace.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp> // shared streaming counters (panel + capture)
@@ -932,6 +933,14 @@ void ReportTextureStreamStats(uint64_t uploads)
 
 TextureWgpu::TextureWgpu(TextureBankWgpu* bank) : _bank(bank) {}
 
+struct TextureWgpu::DeferredGenerated
+{
+    std::string birthName;
+    std::vector<uint8_t> rgba;
+    std::shared_ptr<render::procedural::admission::Ledger> ledger;
+    std::unique_ptr<render::procedural::admission::Ledger::Charge> charge;
+};
+
 // REN-THR-012. These two are the texture paths that reach the renderer directly rather than
 // through the frame queues, and a texture can die (or be leased a slot) from anywhere a
 // reference drops. If that ever happens between publish and the next InitDraw while the
@@ -1004,6 +1013,55 @@ int TextureWgpu::Init()
     if (auto generated = render::procedural::Parse(Name()); generated.generated)
     {
         render::procedural::EncodeNormalUpload(generated);
+        // Exact-target owner capture only. The ordinary procedural path below is
+        // byte-for-byte the old eager InitDynamic path when no scope is active.
+        if (auto ledger = render::procedural::admission::CurrentCapture)
+        {
+            const char* birthName = Name();
+            const size_t nameBytes = birthName ? std::strlen(birthName) + 1 : 0;
+            if (Foundation::IsMainThread() && birthName && nameBytes <= render::procedural::admission::MaxBirthNameBytes &&
+                generated.rgba.capacity() <= render::procedural::admission::MaxPendingBytes -
+                                             sizeof(DeferredGenerated) - nameBytes)
+            {
+                try
+                {
+                    auto pending = std::make_unique<DeferredGenerated>();
+                    pending->birthName = birthName;
+                    pending->ledger = ledger;
+                    // Charge actual retained vector/string capacity, not only
+                    // their logical size. Pixel ownership moves only after the
+                    // final potentially throwing operation has succeeded.
+                    const size_t nameCapacity = pending->birthName.capacity() + 1;
+                    if (nameCapacity <= render::procedural::admission::MaxPendingBytes - sizeof(DeferredGenerated) &&
+                        generated.rgba.capacity() <= render::procedural::admission::MaxPendingBytes - sizeof(DeferredGenerated) - nameCapacity)
+                    {
+                        const size_t chargedBytes = sizeof(DeferredGenerated) + nameCapacity + generated.rgba.capacity();
+                        if (auto charge = ledger->Reserve(chargedBytes))
+                        {
+                            pending->charge = std::move(charge);
+                            pending->rgba = std::move(generated.rgba);
+                            _deferredGenerated = std::move(pending);
+                            _dynamic = true;
+                            _w = generated.width;
+                            _h = generated.height;
+                            _nMipmaps = 1;
+                            ledger->NoteDeferred();
+                            return 0;
+                        }
+                    }
+                    else
+                        ledger->NoteImmediateFallback();
+                }
+                catch (...)
+                {
+                    ledger->NoteImmediateFallback();
+                }
+            }
+            else
+            {
+                ledger->NoteImmediateFallback();
+            }
+        }
         InitDynamic(generated.width, generated.height, generated.rgba.data(),
                     static_cast<uint32_t>(generated.rgba.size()));
         return _gpuHandle ? 0 : -1;
@@ -1765,6 +1823,22 @@ uint64_t TextureWgpu::EnsureUploaded()
     if (_bank)
     {
         _bank->NoteTextureUse(this);
+    }
+    if (_deferredGenerated)
+    {
+        // Move first so a reentrant consumer cannot upload the same payload twice.
+        auto pending = std::move(_deferredGenerated);
+        auto& ledger = *pending->ledger;
+        if (!render::procedural::admission::SameBirthName(Name(), pending->birthName.c_str()))
+        {
+            ledger.NoteNameMismatch();
+            ledger.NoteFailed();
+            _uploadTried = true; // generated names have no file-backed retry path
+            return 0;
+        }
+        InitDynamic(_w, _h, pending->rgba.data(), static_cast<uint32_t>(pending->rgba.size()));
+        render::procedural::admission::NoteUploadAttempt(ledger, _gpuHandle != 0);
+        return _gpuHandle;
     }
     // RFG-086: an `enft|r,g,b|inner` face texture draws through its INNER image.
     //

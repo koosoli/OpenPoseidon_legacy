@@ -1297,3 +1297,19 @@ Next source connects these actual tuples to explicit projected cut selection,
 with immutable-source vertex gates and conservative whole-object outside
 checks. Geometry remains default-off; whole plan OPEN/defaultReady=false/
 performanceAccepted=false, automatic retail paging and Nanite equivalence open.
+
+### 30 September — projected far/near/far and next automatic consumer
+
+Exact `1beeea3c` installed WGPU startup and the original-source actual-view
+far/near/far route passed/normal. Completed generations61/80/108 selected
+root64/Fine512/root64, reused root model3 and performed1/2/2 independent reads.
+Near clipping forced Fine; outside-view filtering remained source-bound.
+Next source implements a <=10Hz private binary root/Fine owner consumer with
+three known lower-allowance observations before coarsening and frozen pending
+transactions. It retains pages/cuts and introduces no automatic reclamation.
+The actual material-IR declaration precursor and optional generated-pixel
+holding/staging path prepare paced registration; they do not yet split the
+final DayZ resolver. After documented compile-name repairs, game/tests/tools
+and397 assertions/17 focused cases passed. Installed automatic repeat-route and
+real generated TextureBank diagnostic remain pending. Whole plan OPEN;
+defaultReady=false/performanceAccepted=false, no Nanite equivalence claim.

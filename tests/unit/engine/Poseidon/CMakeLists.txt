@@ -166,12 +166,15 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_geometry_page_hierarchical_combined_projection.cpp
     Graphics/test_geometry_page_hierarchical_original_outside.cpp
     Graphics/test_geometry_page_hierarchical_original_demand.cpp
+    Graphics/test_geometry_page_hierarchical_binary_demand.cpp
     Graphics/test_geometry_page_hierarchical_release.cpp
     Graphics/test_geometry_page_hierarchical_disk.cpp
     Graphics/test_hierarchical_geometry_page_worker.cpp
     Graphics/test_geometry_page_clod_disk_codec.cpp
     Graphics/test_registration_cost_policy.cpp
     Graphics/test_resumable_model_admission.cpp
+    Graphics/test_retained_material_role_declarations.cpp
+    Graphics/test_deferred_procedural_admission.cpp
     Graphics/test_alpha_classify.cpp
     Graphics/test_surface_decompose.cpp
     Graphics/test_shadowmap_math.cpp

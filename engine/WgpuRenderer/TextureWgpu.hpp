@@ -7,6 +7,7 @@
 #include <Poseidon/Graphics/Textures/MipDemand.hpp>
 
 #include <cstdint>
+#include <memory>
 
 namespace Poseidon
 {
@@ -52,6 +53,8 @@ class TextureWgpu : public Texture
     // don't keep retrying a texture that fails to load
     bool _uploadTried = false;
     bool _dynamic = false;
+    struct DeferredGenerated;
+    std::unique_ptr<DeferredGenerated> _deferredGenerated;
     // Cached three-way alpha classification (-1 = not computed yet). Drives the section-sort
     // renderer's opaque-vs-blend pass routing (Shape::Draw / HasBlendSections). Mirrors
     // TextureGL33::GetAlphaClass — without this override the base default (always Opaque) left
@@ -113,7 +116,7 @@ class TextureWgpu : public Texture
     bool HasAttemptedGpuUpload() const { return _uploadTried; }
     // The optional owner pre-touch must not poison the ordinary registration
     // retry when its upload failed before a GPU handle was created.
-    void RetryAfterFailedOwnerStage() { if (!_gpuHandle) _uploadTried = false; }
+    void RetryAfterFailedOwnerStage() { if (!_gpuHandle && !_dynamic) _uploadTried = false; }
     bool HasInitializedArchiveBinding() const;
     bool CaptureColdPaaRead(render::ColdPaaRead& out) const override;
     bool CanWarmPrepare() const { return !_gpuHandle && !_uploadTried && HasReloadableSource(); }
@@ -131,6 +134,9 @@ class TextureWgpu : public Texture
     // per-upload slots, where that promise does NOT hold.
     uint32_t SlotLease() const { return _slotLease; }
     bool IsDynamicTexture() const { return _dynamic; }
+    // Owner registration may distinguish a held generated upload from an
+    // already-created dynamic texture without touching the renderer.
+    bool HasDeferredGeneratedUpload() const { return _deferredGenerated != nullptr; }
     // CPU source presence only; external file availability is checked by upload.
     bool HasReloadableSource() const
     {

@@ -13,6 +13,7 @@
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalLocalCut.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalRelease.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalOriginalDemand.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalBinaryDemand.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageControlledClodPilot.hpp>
 #include <Poseidon/Graphics/Rendering/AuthoredGeometryPageWorker.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageSurfaceAdmission.hpp>
@@ -2266,6 +2267,8 @@ struct EngineWgpu::GeometryPageFixtureState
     uint64_t hierarchyObservedGeneration=0;
     std::optional<WgrDemandViewSnapshot> hierarchyDemandSnapshot;
     uint64_t hierarchyDemandSnapshotRequest=0,hierarchyDemandOwnerEpoch=0;
+    std::optional<GeometryPages::HierarchicalBinaryDemand::Policy> hierarchyAutoPolicy;
+    uint64_t hierarchyAutoNextTick=0;
     std::array<bool,4> hierarchyModelRegistered{},hierarchyCutReserved{};
     std::array<std::array<uint32_t,64>,4> hierarchyCutKeys{};
     std::array<uint8_t,4> hierarchyCutCounts{};
@@ -5065,6 +5068,7 @@ void EngineWgpu::StopRenderThread()
 
 void EngineWgpu::NextFrame()
 {
+    if(_geometryPageFixture && _geometryPageFixture->hierarchyAutoPolicy)MaintainGeometryPageHierarchyDemand();
     if(_geometryPageFixture && (_geometryPageFixture->cameraDemand||_geometryPageFixture->projectedDemand))MaintainGeometryPageCameraDemand();
     // RFG-048: fire the interior-sky probe from a HEADLESS run.
     //
@@ -9231,6 +9235,58 @@ bool PageOriginalVertexEnclosed(const SVertex& vertex,float radius)
 }
 }
 
+void EngineWgpu::MaintainGeometryPageHierarchyDemand()
+{
+    if(!Foundation::IsMainThread()||!_geometryPageFixture)return;
+    auto fixture=_geometryPageFixture;
+    const auto now=uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+    bool project=false,step=false,observe=false;
+    GeometryPageHierarchyDemandInput input;
+    {
+        std::lock_guard lock(fixture->mutex);auto& report=fixture->report;
+        if(!fixture->hierarchyAutoPolicy||!report.hierarchyAutoEnabled||!report.active||
+           now<fixture->hierarchyAutoNextTick)return;
+        if(report.status==GeometryReportStatus::Failed||fixture->hierarchyDemandOwnerEpoch!=_geometryOwnerEpoch) {
+            fixture->hierarchyAutoPolicy.reset();report.hierarchyAutoEnabled=false;return;
+        }
+        fixture->hierarchyAutoNextTick=now>UINT64_MAX-100?UINT64_MAX:now+100;
+        if(report.status!=GeometryReportStatus::Ready||!report.mainFrameReturned||
+           report.renderReturnStatus!=0||report.observedRequestId!=report.requestId)return;
+        if(report.hierarchyAutoPending) {
+            // Freeze the chosen generation through worker/page/model acknowledgement.
+            if(report.pageWorkState=="HierarchyCutResident"&&report.hierarchyMissingMask==0&&
+               fixture->hierarchyObservedGeneration==fixture->hierarchyGeneration)
+                report.hierarchyAutoPending=false;
+            else step=true;
+        }
+        if(!report.hierarchyAutoPending) {
+            const auto& snapshot=fixture->hierarchyDemandSnapshot;
+            if(snapshot&&fixture->hierarchyDemandSnapshotRequest==report.observedRequestId&&
+               snapshot->generation>fixture->hierarchyAutoPolicy->LastGeneration()) {
+                project=true;
+                input.packageSha256=fixture->hierarchy->identity.packageSha256;
+                input.sourceAdmissionEpoch=report.sourceAdmissionEpoch;input.pageEpoch=report.pageEpoch;
+                input.expectedRequestId=report.observedRequestId;input.frameGeneration=snapshot->generation;
+                input.groupCount=uint32_t(fixture->hierarchy->groups.size());
+                input.pixelIndicatorAllowance=report.fineSelected?
+                    GeometryPages::HierarchicalBinaryDemand::Policy::CoarsenAllowance:
+                    GeometryPages::HierarchicalBinaryDemand::Policy::RefineAllowance;
+                input.privateBinaryOwner=true;
+            } else observe=true;
+        }
+    }
+    // Only this main-thread owner queues work. Each tick stages at most one page;
+    // the snapshot getter itself is completed-frame CPU metadata, not GPU COUNT.
+    if(step)ControlGeometryPageFixture(GeometryPageFixtureAction::StepHierarchy);
+    else if(project) {
+        const auto result=ControlGeometryPageFixture(GeometryPageFixtureAction::ProjectHierarchy,
+            1200,11.5f,1200,nullptr,nullptr,&input);
+        if(result.status==GeometryReportStatus::Invalid||result.status==GeometryReportStatus::Failed)
+            ControlGeometryPageFixture(GeometryPageFixtureAction::StopHierarchy);
+    } else if(observe)ControlGeometryPageFixture(GeometryPageFixtureAction::Observe);
+}
+
 void EngineWgpu::MaintainGeometryPageProjectedDemand()
 {
     if(!Foundation::IsMainThread()||!_geometryPageFixture)return;
@@ -9911,8 +9967,48 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
            action!=GeometryPageFixtureAction::IntermediateHierarchy && action!=GeometryPageFixtureAction::LocalHierarchy &&
            action!=GeometryPageFixtureAction::ReleaseHierarchyNonroot &&
            action!=GeometryPageFixtureAction::ProjectHierarchy &&
+           action!=GeometryPageFixtureAction::FollowHierarchy && action!=GeometryPageFixtureAction::StopHierarchy &&
            action!=GeometryPageFixtureAction::Abort && action!=GeometryPageFixtureAction::Observe)
              return failure;
+        if(action==GeometryPageFixtureAction::StopHierarchy) {
+            fixture->hierarchyAutoPolicy.reset();report.hierarchyAutoEnabled=false;
+            // A stopped pilot retains its requested cut and any charged pending
+            // work. Manual Step or Abort uses the ordinary lifetime rails.
+            report.hierarchyAutoPending=false;return report;
+        }
+        if(action==GeometryPageFixtureAction::FollowHierarchy) {
+            namespace B=GeometryPages::HierarchicalBinaryDemand;
+            if(!report.hierarchicalDiskPilot||!fixture->hierarchy||!fixture->originalAdmission||
+               !hierarchyDemand||report.hierarchyAutoEnabled||report.hierarchyReleaseCount||
+               !report.hierarchySourceVerticesExact||!report.demandViews.mainPacketJoined||
+               report.status!=GeometryReportStatus::Ready||!report.mainFrameReturned||report.renderReturnStatus!=0||
+               report.observedRequestId!=report.requestId||report.fallbackSelected||
+               report.hierarchyMissingMask||fixture->hierarchyPendingPage!=UINT32_MAX||
+               fixture->hierarchyPendingModel!=UINT32_MAX||fixture->hierarchyWorkerRequest||
+               report.hierarchyRetirementPending||hierarchyDemand->packageSha256!=fixture->hierarchy->identity.packageSha256||
+               hierarchyDemand->sourceAdmissionEpoch!=report.sourceAdmissionEpoch||hierarchyDemand->pageEpoch!=report.pageEpoch||
+               hierarchyDemand->expectedRequestId!=report.observedRequestId||
+               hierarchyDemand->groupCount!=fixture->hierarchy->groups.size())return failure;
+            const auto exactRoot=[&](std::span<const uint32_t> keys) {
+                const auto& roots=fixture->hierarchy->rootClusters;
+                return keys.size()==roots.size()&&std::all_of(keys.begin(),keys.end(),
+                    [&](auto key){return std::find(roots.begin(),roots.end(),key)!=roots.end();});
+            };
+            if(!exactRoot(report.hierarchySelectedClusters))return failure;
+            for(uint32_t i=1;i<fixture->modelCount;++i)if(fixture->hierarchyCutReserved[i]&&
+                !exactRoot(std::span<const uint32_t>(fixture->hierarchyCutKeys[i].data(),fixture->hierarchyCutCounts[i])))
+                return failure; // Reserve lifetime space for one immutable Fine cut.
+            fixture->hierarchyAutoPolicy.emplace(B::Binding{fixture->hierarchy->identity,
+                fixture->hierarchyDemandOwnerEpoch,report.sourceAdmissionEpoch,report.pageEpoch,
+                uint64_t(fixture->models[0])+1});
+            fixture->hierarchyAutoNextTick=0;report.hierarchyAutoEnabled=true;
+            report.hierarchyAutoPending=false;return report;
+        }
+        if(report.hierarchyAutoEnabled&&action!=GeometryPageFixtureAction::Observe&&
+           action!=GeometryPageFixtureAction::Abort&&action!=GeometryPageFixtureAction::StepHierarchy&&
+           !(action==GeometryPageFixtureAction::ProjectHierarchy&&hierarchyDemand&&hierarchyDemand->privateBinaryOwner)) {
+            auto busy=report;busy.status=GeometryReportStatus::Busy;return busy;
+        }
         if(report.hierarchicalPilot && action==GeometryPageFixtureAction::Observe &&
            (fixture->hierarchyPendingPage!=UINT32_MAX||fixture->hierarchyPendingModel!=UINT32_MAX||
             report.hierarchyRetirementPending)) {
@@ -10053,6 +10149,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             float scalar=fixture->hierarchyDesiredThreshold;
             bool local=fixture->hierarchyLocalDemand;
             std::optional<GeometryPages::HierarchicalOriginalDemand::Result> projected;
+            std::optional<GeometryPages::HierarchicalBinaryDemand::Policy> binaryPolicy;
+            auto binaryDecision=GeometryPages::HierarchicalBinaryDemand::Decision::Hold;
             if(action!=GeometryPageFixtureAction::StepHierarchy&&fixture->hierarchyGeneration==UINT64_MAX)return failure;
             if(action!=GeometryPageFixtureAction::StepHierarchy) {
                 if(action==GeometryPageFixtureAction::RootHierarchy||action==GeometryPageFixtureAction::FineHierarchy) {
@@ -10070,6 +10168,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                         namespace O=GeometryPages::HierarchicalOriginalOutside;
                         namespace D=GeometryPages::HierarchicalOriginalDemand;
                         if(!report.hierarchySourceVerticesExact||!fixture->hierarchyDemandSnapshot||
+                           fixture->hierarchyDemandOwnerEpoch!=_geometryOwnerEpoch||
                            !report.demandViews.mainPacketJoined||
                            fixture->hierarchyDemandSnapshotRequest!=report.observedRequestId||
                            hierarchyDemand->frameGeneration!=fixture->hierarchyDemandSnapshot->generation)
@@ -10117,6 +10216,48 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                         if(projectedStatus!=D::Status::Ready&&projectedStatus!=D::Status::ForcedFine)
                             return failure;
                         projected=std::move(result);desired=projected->demand.groupThresholds;
+                        if(hierarchyDemand->privateBinaryOwner) {
+                            namespace B=GeometryPages::HierarchicalBinaryDemand;
+                            if(!report.hierarchyAutoEnabled||!fixture->hierarchyAutoPolicy||
+                               report.hierarchyAutoPending||report.fallbackSelected)return failure;
+                            LocalizedHierarchicalCutPlan candidate;
+                            // Logical availability is used solely to classify the
+                            // requested frontier. It cannot authorize publication.
+                            std::array<uint8_t,64> logicalResident;logicalResident.fill(1);
+                            if(!PlanLocalizedHierarchicalCut(package,{package.identity,
+                                std::span<const float>(desired.data(),package.groups.size())},
+                                {package.identity,std::span<const uint8_t>(logicalResident.data(),package.pages.size())},candidate))return failure;
+                            const auto& keys=candidate.cut.requestedClusters;
+                            const bool root=keys.size()==package.rootClusters.size()&&
+                                std::all_of(keys.begin(),keys.end(),[&](auto key){return
+                                    std::find(package.rootClusters.begin(),package.rootClusters.end(),key)!=package.rootClusters.end();});
+                            double maximum=0;
+                            for(uint32_t g=0;g<package.groups.size();++g)maximum=std::max(maximum,
+                                projected->demand.projectedBakedErrorIndicators[g]);
+                            binaryPolicy=*fixture->hierarchyAutoPolicy;
+                            binaryDecision=binaryPolicy->Observe({{package.identity,fixture->hierarchyDemandOwnerEpoch,
+                                report.sourceAdmissionEpoch,report.pageEpoch,uint64_t(fixture->models[0])+1},
+                                snapshot.generation,snapshot.required,!root,projectedStatus==D::Status::ForcedFine,
+                                !report.fineSelected,false,maximum,hierarchyDemand->pixelIndicatorAllowance});
+                            if(binaryDecision==B::Decision::Refused) {
+                                fixture->hierarchyAutoPolicy=*binaryPolicy;
+                                report.hierarchyAutoSafeRootObservations=0;return failure;
+                            }
+                            if(binaryDecision==B::Decision::Hold) {
+                                fixture->hierarchyAutoPolicy=*binaryPolicy;
+                                report.hierarchyAutoSafeRootObservations=binaryPolicy->SafeRootObservations();
+                                if(report.hierarchyAutoObservations!=UINT64_MAX)++report.hierarchyAutoObservations;
+                                report.hierarchyProjectedGeneration=snapshot.generation;
+                                report.hierarchyProjectedRequired=snapshot.required;
+                                report.hierarchyProjectedOutside=projected->outside.outsideViewMask;
+                                report.hierarchyProjectedForcedFine=projected->demand.forcedFineViewMask;
+                                report.hierarchyProjectedAllowance=hierarchyDemand->pixelIndicatorAllowance;
+                                report.hierarchyProjectedMaximumIndicator=maximum;
+                                return report;
+                            }
+                            std::fill_n(desired.begin(),package.groups.size(),
+                                binaryDecision==B::Decision::Refine?0:fixture->hierarchyRootThreshold);
+                        }
                     }
                     local=action==GeometryPageFixtureAction::LocalHierarchy||action==GeometryPageFixtureAction::ProjectHierarchy;
                     scalar=local?0:desired[0];
@@ -10147,6 +10288,15 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                 full.pageWorkState="HierarchyCutSlotsFull";return full;
             }
             if(action!=GeometryPageFixtureAction::StepHierarchy) {
+                if(binaryPolicy) {
+                    fixture->hierarchyAutoPolicy=*binaryPolicy;
+                    report.hierarchyAutoSafeRootObservations=binaryPolicy->SafeRootObservations();
+                    report.hierarchyAutoPending=true;
+                    if(report.hierarchyAutoObservations!=UINT64_MAX)++report.hierarchyAutoObservations;
+                    auto& count=binaryDecision==GeometryPages::HierarchicalBinaryDemand::Decision::Refine?
+                        report.hierarchyAutoRefines:report.hierarchyAutoCoarsens;
+                    if(count!=UINT64_MAX)++count;
+                }
                 fixture->hierarchyDesiredGroupThresholds=desired;
                 fixture->hierarchyDesiredThreshold=scalar;
                 fixture->hierarchyLocalDemand=local;

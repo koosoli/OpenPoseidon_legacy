@@ -1,8 +1,9 @@
-param([switch]$HierarchyProjected,[switch]$DemandViews,[switch]$PaletteContentWitness,[switch]$HierarchyRefill,[switch]$HierarchyDisk,[ValidateSet('None','Scalar','Localized')][string]$HierarchyCuts='None',[switch]$Hierarchy,[ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$Interactive,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
+param([switch]$GeneratedTextures,[switch]$HierarchyAuto,[switch]$HierarchyProjected,[switch]$DemandViews,[switch]$PaletteContentWitness,[switch]$HierarchyRefill,[switch]$HierarchyDisk,[ValidateSet('None','Scalar','Localized')][string]$HierarchyCuts='None',[switch]$Hierarchy,[ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$Interactive,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
  [string]$Label='original-geometry-pages',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
 if($PaletteContentWitness -and !$MainCountProbe){throw 'Palette content witness requires MainCountProbe'}
 if($HierarchyRefill){$HierarchyDisk=$true;if($HierarchyCuts -ne 'None'){throw 'Hierarchy refill needs a never-used fourth model slot; choose no intermediate cut'}}
+if($HierarchyAuto){$HierarchyDisk=$true;$DemandViews=$true;if($HierarchyProjected -or $HierarchyRefill -or $HierarchyCuts -ne 'None'){throw 'Automatic binary hierarchy is an independent bounded-cut mode'}}
 if($HierarchyProjected){$HierarchyDisk=$true;$DemandViews=$true;if($HierarchyRefill -or $HierarchyCuts -ne 'None'){throw 'Projected hierarchy preference is an independent bounded-cut mode'}}
 if($HierarchyDisk -or $HierarchyCuts -ne 'None'){$Hierarchy=$true}
 if($DemandViews -and !$Hierarchy){throw 'Demand-view collection currently requires the hierarchy fixture'}
@@ -24,6 +25,8 @@ if(!$env:LOCK_OWNER){
  if($Hierarchy){$argv+='-Hierarchy'}
  if($HierarchyDisk){$argv+='-HierarchyDisk'}
  if($HierarchyRefill){$argv+='-HierarchyRefill'}
+ if($GeneratedTextures){$argv+='-GeneratedTextures'}
+ if($HierarchyAuto){$argv+='-HierarchyAuto'}
  if($HierarchyProjected){$argv+='-HierarchyProjected'}
  if($DemandViews){$argv+='-DemandViews'}
  if($PaletteContentWitness){$argv+='-PaletteContentWitness'}
@@ -183,6 +186,7 @@ $environment.WGR_GEOMETRY_PAGE_SURFACE_CERTIFICATE=$(if($SurfaceCertificate){'1'
 $environment.WGR_GEOMETRY_MAIN_COUNT_PROBE=$(if($MainCountProbe){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PALETTE_CONTENT_WITNESS=$(if($PaletteContentWitness){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_DEMAND_VIEWS=$(if($DemandViews){'1'}else{'0'})
+$environment.WGR_OBJECT_STREAM_DAYZ_GENERATED_DEFER=$(if($GeneratedTextures){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_CAMERA_TUPLE=$(if($CameraTuple){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_PROJECTED_PREFETCH=$(if($ProjectedPrefetch){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_PRIVATE_AUTO_FINE=$(if($AutoFine){'1'}else{'0'})
@@ -547,6 +551,11 @@ try{
     @{objects=$worldCoverage;camera=$camera}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $out 'normalworld-coverage.json')
     Capture 'baseline.png'
     $pose=Send @{cmd='eval';code='triFreeFlyPose "1184 1240 18 90 -8"'};Require $pose @('result');if($pose.result.Trim('"') -ne 'OK'){throw 'Original fixture camera refused'}
+    $generatedEvidence=$null
+    if($GeneratedTextures){
+     $generatedEvidence=Send @{cmd='geometry_generated_admission'}
+     if(!$generatedEvidence.passed -or !$generatedEvidence.capturedHeld -or !$generatedEvidence.ownerResident -or !$generatedEvidence.repeatStable -or !$generatedEvidence.escapedHeld -or !$generatedEvidence.escapedResident -or !$generatedEvidence.eagerResident -or $generatedEvidence.deferred -ne 2 -or $generatedEvidence.staged -ne 1 -or $generatedEvidence.escaped -ne 1 -or $generatedEvidence.failed -ne 0 -or $generatedEvidence.pendingBytes -ne 0 -or $generatedEvidence.heldBytes -lt 1 -or $generatedEvidence.heldBytes -gt 1048576){throw 'Actual generated capture/stage/escape/default contract failed'}
+    }
     if($Hierarchy){
      function HierarchyReady {
       $until=[DateTime]::UtcNow.AddSeconds(15)
@@ -591,7 +600,7 @@ try{
      $targets=@('rootHierarchy')
      if($HierarchyCuts -eq 'Scalar'){$targets+='intermediateHierarchy'}
      if($HierarchyCuts -eq 'Localized'){$targets+='localHierarchy'}
-     if(!$HierarchyProjected){$targets+=@('fineHierarchy','rootHierarchy')}
+     if(!$HierarchyProjected -and !$HierarchyAuto){$targets+=@('fineHierarchy','rootHierarchy')}
      foreach($target in $targets){
       $before=HierarchyReady
       if($target -in @('intermediateHierarchy','localHierarchy')){
@@ -674,6 +683,33 @@ try{
        $projectedCuts+=,$c;Capture ('projected-'+$phase.name+'-after.png')
       }
       if($projectedCuts[0].hierarchySelectedTriangles -ne $cuts[0].hierarchySelectedTriangles -or $projectedCuts[1].hierarchySelectedTriangles -le $projectedCuts[0].hierarchySelectedTriangles -or $projectedCuts[2].producerModel -ne $cuts[0].producerModel -or $projectedCuts[2].rendererModel -ne $cuts[0].rendererModel -or $projectedCuts[2].hierarchySelectedTriangles -ne $cuts[0].hierarchySelectedTriangles){throw 'Actual far/near/far views did not refine and reuse complete root'}
+     }
+     $autoCuts=@();$autoPolls=@();$badAuto=$null;$stoppedAuto=$null
+     if($HierarchyAuto){
+      TuplePose '1080 1240 18 90 -1.4';Capture 'auto-far-before.png';$null=Action 'observe';$before=HierarchyBounded (HierarchyReady)
+      $follow=@{cmd='geometry_page_fixture';action='followHierarchy';packageSha256=$before.hierarchyPackageSha256;sourceAdmissionEpoch=$before.sourceAdmissionEpoch;pageEpoch=$before.pageEpoch;expectedRequestId=$before.observedRequestId;groupCount=$before.hierarchyDemandGroupCount}
+      $bad=$follow.Clone();$bad.pageEpoch=[uint64]$before.pageEpoch+1;$badAuto=Send $bad
+      if($badAuto.status -ne 'Invalid' -or $badAuto.hierarchyAutoEnabled){throw 'Stale automatic hierarchy binding accepted'}
+      $accepted=Send $follow;if($accepted.status -ne 'Ready' -or !$accepted.hierarchyAutoEnabled){throw 'Complete-root automatic demand refused'}
+      $busy=Action 'fineHierarchy';if($busy.status -ne 'Busy'){throw 'Manual cut bypassed automatic owner'}
+      $previousFrame=[uint64]0
+      foreach($phase in @(@{name='far';pose='1080 1240 18 90 -1.4';triangles=64;refines=0;coarsens=0},@{name='near';pose='1188 1240 18 90 -8';triangles=512;refines=1;coarsens=0},@{name='far-return';pose='1080 1240 18 90 -1.4';triangles=64;refines=1;coarsens=1},@{name='near-again';pose='1188 1240 18 90 -8';triangles=512;refines=2;coarsens=1},@{name='far-return-again';pose='1080 1240 18 90 -1.4';triangles=64;refines=2;coarsens=2})){
+       TuplePose $phase.pose;Capture ('auto-'+$phase.name+'-before.png')
+       $until=[DateTime]::UtcNow.AddSeconds(20)
+       do {
+        $c=Action 'status';$autoPolls+=@{phase=$phase.name;report=$c}
+        if(!$c.hierarchyAutoEnabled -or $c.status -notin @('Ready','Pending','Busy')){throw 'Automatic hierarchy stopped or failed'}
+        if($c.status -eq 'Ready' -and $c.mainFrameReturned -and $c.observedRequestId -eq $c.requestId -and !$c.hierarchyAutoPending -and $c.hierarchySelectedTriangles -eq $phase.triangles -and $c.hierarchyProjectedGeneration -gt $previousFrame -and $c.hierarchyAutoObservations -gt 0 -and $c.hierarchyAutoRefines -ge $phase.refines -and $c.hierarchyAutoCoarsens -ge $phase.coarsens){break}
+        Capture 'auto-pump.png'
+       }while([DateTime]::UtcNow -lt $until)
+       if([DateTime]::UtcNow -ge $until){throw ('Automatic hierarchy did not reach '+$phase.name)}
+       $c=HierarchyBounded $c;$previousFrame=[uint64]$c.hierarchyProjectedGeneration
+       if($c.rendererInstance -ne $fallback.rendererInstance -or $c.hierarchyPackageSha256 -cne $fallback.hierarchyPackageSha256 -or $c.hierarchyRetainedCutModels -gt 2 -or !$c.hierarchySourceVerticesExact -or $c.pageLiveJobs -ne 0 -or $c.pageReservedBytes -ne 0){throw 'Automatic hierarchy violated fixed-instance/source/work bounds'}
+       $autoCuts+=,$c;Capture ('auto-'+$phase.name+'-after.png')
+      }
+      if($autoCuts[0].producerModel -ne $cuts[0].producerModel -or $autoCuts[2].producerModel -ne $cuts[0].producerModel -or $autoCuts[4].producerModel -ne $cuts[0].producerModel -or $autoCuts[1].producerModel -ne $autoCuts[3].producerModel -or $autoCuts[1].meshCount -ne $autoCuts[4].meshCount -or $autoCuts[1].hierarchyDiskPageReads -ne $autoCuts[4].hierarchyDiskPageReads){throw 'Automatic repeat traversal recreated root/Fine resources or reread resident pages'}
+      $null=Action 'stopHierarchy';$stoppedAuto=HierarchyBounded (HierarchyReady)
+      if($stoppedAuto.hierarchyAutoEnabled -or $stoppedAuto.hierarchyAutoPending -or $stoppedAuto.producerModel -ne $cuts[0].producerModel){throw 'Stopping automatic interest changed the complete root'}
      }
      $badRelease=$null;$released=$null;$hierarchyRefilled=$null;$refillRoot=$null;$refillSteps=@()
      if($HierarchyRefill){
@@ -986,6 +1022,8 @@ finally{
 }
 if($failure){throw $failure}
 $result.demandViewsRequested=[bool]$DemandViews
+if($GeneratedTextures){$result.generatedTextures=$true;$result.generatedEvidence=$generatedEvidence}
 if($HierarchyProjected){$result.hierarchyProjected=$true;$result.projectedCuts=$projectedCuts;$result.projectedSteps=$projectedSteps;$result.badProjected=$badProjected}
+if($HierarchyAuto){$result.hierarchyAuto=$true;$result.autoCuts=$autoCuts;$result.autoPolls=$autoPolls;$result.badAuto=$badAuto;$result.stoppedAuto=$stoppedAuto}
 $result|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'result.json')
 Write-Host $out

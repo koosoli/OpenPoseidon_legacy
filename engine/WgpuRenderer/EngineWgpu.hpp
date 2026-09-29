@@ -1383,6 +1383,7 @@ class EngineWgpu : public EngineDummy
         const GeometryPageHierarchyDiskFixtureInput* hierarchyDisk=nullptr) override;
     void MaintainGeometryPageCameraDemand();
     void MaintainGeometryPageProjectedDemand();
+    void MaintainGeometryPageHierarchyDemand();
     GeometryPageOriginalAdmissionReport AdmitGeometryPageOriginalStartup(const GeometryPageOriginalStartupInput&) override;
     GeometryPageOriginalAdmissionReport SnapshotGeometryPageOriginalAdmission() const override;
     void PublishGeometryPageFixtureObservation(const WgrFrame& frame, int32_t renderReturnStatus);

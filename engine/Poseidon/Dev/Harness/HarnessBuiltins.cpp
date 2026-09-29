@@ -13,6 +13,7 @@ using namespace Poseidon;
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
+#include <Poseidon/Graphics/Textures/DeferredProceduralAdmission.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
@@ -573,6 +574,59 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddStringToObject(result, "scope", "Private copied mesh lifetime and generational record state; no world rendering, queue-completion or device-free proof");
             return HarnessProtocol::JsonResponse(result);
         });
+    hs.RegisterCommand({"geometry_generated_admission", "One-shot actual generated texture capture/stage/escape diagnostic", {}},
+        [](const std::string&, cJSON*) -> std::string {
+            namespace A=render::procedural::admission;
+            const char* fixture=std::getenv("WGR_GEOMETRY_PAGE_FIXTURE");
+            if(!Foundation::IsMainThread()||!GEngine||!GWorld||GWorld->GetMode()==GModeNetware||
+               !GEngine->TextBank()||!fixture||std::strcmp(fixture,"1")||!A::Enabled())
+                return HarnessProtocol::ErrorResponse("requires owner-thread singleplayer and both exact private/generated flags");
+            static bool used=false;
+            if(used)return HarnessProtocol::ErrorResponse("one generated admission diagnostic per process");
+            used=true;
+            try {
+                auto ledger=std::make_shared<A::Ledger>();auto* bank=GEngine->TextBank();
+                Ref<Texture> staged,escaped;
+                {
+                    A::CaptureScope scope(ledger,true);
+                    staged=bank->Load("#(argb,7,9,3)color(0.137,0.271,0.413,1)");
+                }
+                const auto held=ledger->Read();
+                const bool capturedHeld=staged&&!staged->IsGpuResident()&&held.deferred==1&&held.pendingCount==1&&
+                    held.pendingBytes>0&&held.pendingBytes<=A::MaxPendingBytes&&!held.aborted;
+                {
+                    A::StageScope scope(ledger);
+                    if(staged)bank->UseMipmap(staged,0,0);
+                }
+                const auto owner=ledger->Read();
+                const bool ownerResident=staged&&staged->IsGpuResident()&&owner.staged==1&&owner.escaped==0&&
+                    owner.pendingCount==0&&owner.pendingBytes==0&&!owner.aborted;
+                if(staged)bank->UseMipmap(staged,0,0);
+                const bool repeatStable=ledger->Read().staged==owner.staged;
+                {
+                    A::CaptureScope scope(ledger,true);
+                    escaped=bank->Load("#(argb,7,9,3)color(0.173,0.317,0.467,1)");
+                }
+                const bool escapedHeld=escaped&&!escaped->IsGpuResident()&&ledger->Read().pendingCount==1;
+                if(escaped)bank->UseMipmap(escaped,0,0); // Ordinary consumer retains ordinary rendering.
+                const auto final=ledger->Read();
+                const bool escapedResident=escaped&&escaped->IsGpuResident()&&final.deferred==2&&final.staged==1&&
+                    final.escaped==1&&final.aborted&&!final.failed&&!final.immediateFallback&&!final.nameMismatch&&
+                    final.pendingCount==0&&final.pendingBytes==0;
+                auto eager=bank->Load("#(argb,7,9,3)color(0.193,0.353,0.491,1)");
+                const bool eagerResident=eager&&eager->IsGpuResident()&&ledger->Read().deferred==2;
+                auto* result=cJSON_CreateObject();
+                cJSON_AddBoolToObject(result,"passed",capturedHeld&&ownerResident&&repeatStable&&escapedHeld&&escapedResident&&eagerResident);
+                cJSON_AddBoolToObject(result,"capturedHeld",capturedHeld);cJSON_AddBoolToObject(result,"ownerResident",ownerResident);
+                cJSON_AddBoolToObject(result,"repeatStable",repeatStable);cJSON_AddBoolToObject(result,"escapedHeld",escapedHeld);
+                cJSON_AddBoolToObject(result,"escapedResident",escapedResident);cJSON_AddBoolToObject(result,"eagerResident",eagerResident);
+                cJSON_AddNumberToObject(result,"deferred",double(final.deferred));cJSON_AddNumberToObject(result,"staged",double(final.staged));
+                cJSON_AddNumberToObject(result,"escaped",double(final.escaped));cJSON_AddNumberToObject(result,"failed",double(final.failed));
+                cJSON_AddNumberToObject(result,"heldBytes",double(held.pendingBytes));cJSON_AddNumberToObject(result,"pendingBytes",double(final.pendingBytes));
+                cJSON_AddStringToObject(result,"scope","Actual TextureBank Load/UseMipmap generated holding, one owner create and ordinary escape create; no complete material/model admission or driver completion proof");
+                return HarnessProtocol::JsonResponse(result);
+            }catch(...){return HarnessProtocol::ErrorResponse("generated admission diagnostic allocation failed");}
+        });
     hs.RegisterCommand({"geometry_page_fixture", "Controlled authored resident geometry page draw fixture", {}},
         [](const std::string&, cJSON* root) -> std::string {
             if(!Foundation::IsMainThread() || !GEngine || !GWorld || GWorld->GetMode()==GModeNetware)
@@ -595,6 +649,8 @@ void RegisterScreenshot(HarnessServer& hs)
             else if(!std::strcmp(name,"localHierarchy")) action=Engine::GeometryPageFixtureAction::LocalHierarchy;
             else if(!std::strcmp(name,"releaseHierarchyNonroot")) action=Engine::GeometryPageFixtureAction::ReleaseHierarchyNonroot;
             else if(!std::strcmp(name,"projectHierarchy")) action=Engine::GeometryPageFixtureAction::ProjectHierarchy;
+            else if(!std::strcmp(name,"followHierarchy")) action=Engine::GeometryPageFixtureAction::FollowHierarchy;
+            else if(!std::strcmp(name,"stopHierarchy")) action=Engine::GeometryPageFixtureAction::StopHierarchy;
             else if(!std::strcmp(name,"followCamera")) action=Engine::GeometryPageFixtureAction::FollowCamera;
             else if(!std::strcmp(name,"followProjected")) action=Engine::GeometryPageFixtureAction::FollowProjected;
             else if(!std::strcmp(name,"stopCamera")) action=Engine::GeometryPageFixtureAction::StopCamera;
@@ -724,6 +780,7 @@ void RegisterScreenshot(HarnessServer& hs)
             if(action==Engine::GeometryPageFixtureAction::IntermediateHierarchy||
                action==Engine::GeometryPageFixtureAction::LocalHierarchy||
                action==Engine::GeometryPageFixtureAction::ReleaseHierarchyNonroot||
+               action==Engine::GeometryPageFixtureAction::FollowHierarchy||
                action==Engine::GeometryPageFixtureAction::ProjectHierarchy) {
                 const auto integer=[&](const char* key,uint64_t& value) {
                     const auto* item=cJSON_GetObjectItemCaseSensitive(root,key);
@@ -888,6 +945,10 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(hierarchyProjectedGeneration);PAGE_FIXTURE_NUMBER(hierarchyProjectedRequired);
             PAGE_FIXTURE_NUMBER(hierarchyProjectedOutside);PAGE_FIXTURE_NUMBER(hierarchyProjectedForcedFine);
             PAGE_FIXTURE_NUMBER(hierarchyProjectedAllowance);PAGE_FIXTURE_NUMBER(hierarchyProjectedMaximumIndicator);
+            cJSON_AddBoolToObject(result,"hierarchyAutoEnabled",report.hierarchyAutoEnabled);
+            cJSON_AddBoolToObject(result,"hierarchyAutoPending",report.hierarchyAutoPending);
+            PAGE_FIXTURE_NUMBER(hierarchyAutoObservations);PAGE_FIXTURE_NUMBER(hierarchyAutoRefines);PAGE_FIXTURE_NUMBER(hierarchyAutoCoarsens);
+            PAGE_FIXTURE_NUMBER(hierarchyAutoSafeRootObservations);
             cJSON_AddBoolToObject(result,"hierarchySourceVerticesExact",report.hierarchySourceVerticesExact);
             cJSON_AddBoolToObject(result,"hierarchyRetirementPending",report.hierarchyRetirementPending);
             cJSON_AddStringToObject(result,"hierarchyRetiredPageMaskExact",std::to_string(report.hierarchyRetiredPageMask).c_str());
