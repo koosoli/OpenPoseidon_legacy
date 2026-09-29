@@ -13908,6 +13908,108 @@ void EngineWgpu::WorldShapeLoaded(LODShapeWithShadow* shape)
     RegisterGpuModel(shape);
 }
 
+bool EngineWgpu::StageWorldShapeParentNormalMap(const LODShapeWithShadow* shape, int level, int section,
+                                                uint64_t remainingBytes, bool& attempted, bool& uploaded,
+                                                uint64_t& chargedBytes, std::string& uploadedName)
+{
+    attempted = uploaded = false;
+    chargedBytes = 0;
+    uploadedName.clear();
+    // This is deliberately an owner-only pre-touch, not a resumable GPU registration.
+    // The caller keeps the converted shape private until every staged section is visited.
+    if (!Foundation::IsMainThread() || !_gpuDriven || !_renderer || !_wbank || !shape ||
+        !shape->Name() || std::strcmp(shape->Name(),
+            R"(dz\structures\residential\tenements\tenement_small.p3d)") != 0 ||
+        level < 0 || level >= shape->NLevels() || !shape->IsNormalLevel(level))
+        return false;
+    const Shape* lod = shape->LevelOpaque(level);
+    if (!lod || section < 0 || section >= lod->NSections())
+        return false;
+    const ShapeSection& source = lod->GetSection(section);
+    if ((source.properties.Special() & (IsHidden | IsHiddenProxy)) || !source.surfMat ||
+        !SectionGpuOwned(source))
+        return true;
+    const char* materialPath = source.surfMat->GetName().Data();
+    if (!materialPath || !ContainsNoCase(materialPath, ".rvmat"))
+        return true;
+
+    // Do not seed _materialBindings here. A mount can change before the final
+    // registration, whose ordinary resolver must read its then-current material.
+    const auto translated = Asset::Material::LoadTranslatedMaterial(materialPath);
+    const auto* normal = translated.Find(Asset::Material::MaterialSlot::NormalMap);
+    if (!normal || normal->texture.isProcedural || normal->texture.path.empty())
+        return true;
+    const std::string name = normal->texture.path.canonical();
+    if (name.empty() || name.size() > 8191 || !ContainsNoCase(name.c_str(), ".paa"))
+        return true;
+    attempted = true;
+    // Use the same bank and EnsureUploaded as final registration. No model, mesh,
+    // section or instance is enqueued here. Missing/failed uploads are retried by
+    // the ordinary complete-model path after the caller drops this pilot slot.
+    Ref<Texture> loaded = _wbank->Load(name.c_str());
+    auto* texture = static_cast<TextureWgpu*>(loaded.GetRef());
+    if (!texture)
+        return false;
+    const bool residentBefore = texture->GpuHandle() != 0;
+    if (!residentBefore)
+    {
+        // A conservative RGBA8 + generated-mips reservation, even when the PAA
+        // will upload compressed. Charge only fresh textures, not bank hits.
+        const uint64_t width = texture->AWidth(0), height = texture->AHeight(0);
+        if (!width || !height || width > 16384 || height > 16384)
+            return false;
+        const uint64_t estimate = (width * height * 16 + 2) / 3;
+        if (estimate > remainingBytes)
+            return false;
+        chargedBytes = estimate;
+    }
+    uint64_t handle = 0;
+    try { handle = texture->EnsureUploaded(); }
+    catch (...)
+    {
+        texture->RetryAfterFailedOwnerStage();
+        throw;
+    }
+    uploaded = handle != 0 && !residentBefore;
+    if (!uploaded) chargedBytes = 0;
+    if (!handle) texture->RetryAfterFailedOwnerStage();
+    if (uploaded)
+    {
+        uploadedName = name;
+        static uint32_t rows = 0;
+        if (rows < 16)
+        {
+            ++rows;
+            LOG_INFO(Graphics, "DayZ owner normal stage: role=NormalMap material={} texture={} bytes={} "
+                     "lod={} section={} row={} limit=16", materialPath, name, chargedBytes,
+                     level, section, rows);
+        }
+    }
+    return handle != 0;
+}
+
+uint32_t EngineWgpu::CountWorldShapeCapturedTextures(const LODShapeWithShadow* shape,
+                                                      const std::vector<std::string>& names) const
+{
+    if (!Foundation::IsMainThread() || !_wbank || !shape || names.size() > 16)
+        return 0;
+    const auto captured = _gpuModelTextures.find(shape);
+    if (captured == _gpuModelTextures.end())
+        return 0;
+    uint32_t count = 0;
+    for (const std::string& name : names)
+    {
+        const int index = _wbank->Find(RStringB(name.c_str()));
+        if (index < 0 || index >= _wbank->NTextures())
+            continue;
+        const auto* texture = static_cast<const TextureWgpu*>(_wbank->GetTexture(index));
+        if (texture && texture->GpuHandle() != 0 &&
+            std::find(captured->second.begin(), captured->second.end(), texture) != captured->second.end())
+            ++count;
+    }
+    return count;
+}
+
 GpuDrawCoverage EngineWgpu::GpuDrivenCoverage(const Object* obj) const
 {
     // O(1) field read (Object::_gpuCoverage), stamped by Scene{ObjectCreated,Removed,Moved}. This

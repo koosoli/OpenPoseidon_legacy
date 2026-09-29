@@ -3897,9 +3897,11 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     // payload is deliberately not carried across updates: its scope is defined for the
     // joined Converted -> ObjectCreate operation. Use the texture bank's ordinary source
     // reader here; final registration still validates every material and GPU handle.
+    bool primaryStepThisUpdate = false;
     if (_modernPendingOwnerPrimaryTextures && !_modernPendingOwnerPrimaryTextures->failed &&
         _modernPendingOwnerPrimaryTextures->next < _modernPendingOwnerPrimaryTextures->textures.size())
     {
+        primaryStepThisUpdate = true;
         auto& pending = *_modernPendingOwnerPrimaryTextures;
         Texture* texture = pending.textures[pending.next];
         const bool residentBefore = texture && texture->IsGpuResident();
@@ -3939,6 +3941,96 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                      pending.next, pending.textures.size(), pending.modelIndex,
                      texture && texture->Name() ? texture->Name() : "(none)", uploaded, elapsedMs,
                      pending.maxStepMs, stepRows);
+        }
+    }
+
+    // The second, independently opted-in phase touches one parent section per update.
+    // A section can name one file-backed NormalMap, so this performs at most one
+    // material upload, and never overlaps a primary upload in the same update.
+    if (_modernPendingOwnerPrimaryTextures && !primaryStepThisUpdate)
+    {
+        auto& pending = *_modernPendingOwnerPrimaryTextures;
+        if (pending.stageParentNormals && !pending.failed && !pending.parentNormalsDone &&
+            pending.next == pending.textures.size())
+        {
+            constexpr uint64_t kNormalBudget = 64ull * 1024 * 1024;
+            constexpr uint32_t kNormalSectionLimit = 32;
+            constexpr uint32_t kNormalUploadLimit = 16;
+            const auto began = std::chrono::steady_clock::now();
+            if (pending.normalStarted == std::chrono::steady_clock::time_point{})
+                pending.normalStarted = began;
+            if (began - pending.normalStarted >= std::chrono::milliseconds(750))
+            {
+                pending.failed = true;
+                pending.normalStopReason = "deadline";
+            }
+            bool visited = false, attempted = false, uploaded = false;
+            uint64_t charged = 0;
+            std::string uploadedName;
+            int visitedLevel = -1, visitedSection = -1;
+            while (!pending.failed && pending.normalLevel < pending.shape->NLevels())
+            {
+                if (!pending.shape->IsNormalLevel(pending.normalLevel))
+                {
+                    ++pending.normalLevel;
+                    pending.normalSection = 0;
+                    continue;
+                }
+                const Shape* lod = pending.shape->LevelOpaque(pending.normalLevel);
+                if (!lod || pending.normalSection >= lod->NSections())
+                {
+                    ++pending.normalLevel;
+                    pending.normalSection = 0;
+                    continue;
+                }
+                visited = true;
+                visitedLevel = pending.normalLevel;
+                visitedSection = pending.normalSection++;
+                if (++pending.normalSections > kNormalSectionLimit || pending.normalUploads >= kNormalUploadLimit)
+                {
+                    pending.failed = true;
+                    pending.normalStopReason = pending.normalSections > kNormalSectionLimit ?
+                        "section-cap" : "upload-cap";
+                    break;
+                }
+                try
+                {
+                    const uint64_t remaining = kNormalBudget - pending.normalReservedBytes;
+                    if (!GEngine->StageWorldShapeParentNormalMap(pending.shape.get(), visitedLevel,
+                            visitedSection, remaining, attempted, uploaded, charged, uploadedName))
+                    {
+                        pending.failed = true;
+                        pending.normalStopReason = "source-or-budget";
+                    }
+                }
+                catch (...) { pending.failed = true; pending.normalStopReason = "exception"; }
+                if (attempted) ++pending.normalAttempts;
+                if (uploaded)
+                {
+                    ++pending.normalUploads;
+                    pending.normalReservedBytes += charged;
+                    if (!uploadedName.empty() && std::find(pending.normalUploadedNames.begin(),
+                            pending.normalUploadedNames.end(), uploadedName) == pending.normalUploadedNames.end())
+                        pending.normalUploadedNames.push_back(std::move(uploadedName));
+                }
+                break;
+            }
+            if (!visited && !pending.failed)
+                pending.parentNormalsDone = true;
+            const double elapsedMs = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - began).count();
+            pending.normalStepMs += elapsedMs;
+            pending.normalMaxStepMs = std::max(pending.normalMaxStepMs, elapsedMs);
+            static uint32_t normalRows = 0;
+            if (normalRows < 64)
+            {
+                ++normalRows;
+                LOG_INFO(World, "DayZ owner normal stage: modelIndex={} lod={} section={} attempted={} uploaded={} "
+                         "failed={} done={} stepMs={:.3f} maxStepMs={:.3f} uploads={} bytes={} row={} limit=64",
+                         pending.modelIndex, visitedLevel, visitedSection, attempted, uploaded,
+                         pending.failed, pending.parentNormalsDone, elapsedMs, pending.normalMaxStepMs,
+                         pending.normalUploads, pending.normalReservedBytes, normalRows);
+            }
         }
     }
 
@@ -4210,11 +4302,17 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             uint32_t ownerPrimaryOriginPlacement = 0;
             double ownerPrimaryStepMs = 0.0, ownerPrimaryMaxStepMs = 0.0, ownerPrimaryWaitMs = 0.0;
             bool ownerPrimaryFailed = false;
+            bool ownerNormalsEnabled = false, ownerNormalsDone = false;
+            uint32_t ownerNormalSections = 0, ownerNormalAttempts = 0, ownerNormalUploads = 0;
+            uint64_t ownerNormalBytes = 0;
+            double ownerNormalStepMs = 0.0, ownerNormalMaxStepMs = 0.0;
+            std::vector<std::string> ownerNormalNames;
+            std::string ownerNormalStopReason;
             if (cold && _modernPendingOwnerPrimaryTextures &&
                 _modernPendingOwnerPrimaryTextures->modelIndex == placement.modelIndex)
             {
                 auto& pending = *_modernPendingOwnerPrimaryTextures;
-                if (!pending.failed && pending.next < pending.textures.size())
+                if (!pending.failed && (pending.next < pending.textures.size() || !pending.parentNormalsDone))
                 {
                     ++waited;
                     ++scan;
@@ -4226,6 +4324,16 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 ownerPrimaryStepMs = pending.stepMs;
                 ownerPrimaryMaxStepMs = pending.maxStepMs;
                 ownerPrimaryFailed = pending.failed;
+                ownerNormalsEnabled = pending.stageParentNormals;
+                ownerNormalsDone = pending.parentNormalsDone;
+                ownerNormalSections = pending.normalSections;
+                ownerNormalAttempts = pending.normalAttempts;
+                ownerNormalUploads = pending.normalUploads;
+                ownerNormalBytes = pending.normalReservedBytes;
+                ownerNormalStepMs = pending.normalStepMs;
+                ownerNormalMaxStepMs = pending.normalMaxStepMs;
+                ownerNormalNames = std::move(pending.normalUploadedNames);
+                ownerNormalStopReason = pending.normalStopReason;
                 ownerPrimaryWaitMs = std::chrono::duration<double, std::milli>(
                     std::chrono::steady_clock::now() - pending.started).count();
                 for (Texture* texture : pending.textures)
@@ -4472,6 +4580,10 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         const char* flag = std::getenv("WGR_OBJECT_STREAM_DAYZ_OWNER_PRIMARY_STAGE");
                         return flag && std::strcmp(flag, "1") == 0;
                     }();
+                    static const bool ownerParentNormals = [] {
+                        const char* flag = std::getenv("WGR_OBJECT_STREAM_DAYZ_OWNER_NORMAL_STAGE");
+                        return flag && std::strcmp(flag, "1") == 0;
+                    }();
                     if (ownerPrimaryStage && !_modernPendingOwnerPrimaryTextures && GEngine &&
                         GEngine->TextBank() && conv.model &&
                         std::strcmp((const char*)modelName,
@@ -4519,6 +4631,8 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                             pending->cellIndex = cell.index;
                             pending->reservedBytes = reservedBytes;
                             pending->textures = std::move(primary);
+                            pending->stageParentNormals = ownerParentNormals;
+                            pending->parentNormalsDone = !ownerParentNormals;
                             pending->started = std::chrono::steady_clock::now();
                             pending->shape.reset(conv.shape);
                             conv.shape = nullptr;
@@ -4636,6 +4750,19 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             }
             if (ownerPrimaryHandoff)
             {
+                if (ownerNormalsEnabled)
+                {
+                    const uint32_t captured = admitted && GEngine ?
+                        GEngine->CountWorldShapeCapturedTextures(admitted->GetShape(), ownerNormalNames) : 0;
+                    LOG_INFO(World, "DayZ owner normal stage: handoff modelIndex={} done={} fallback={} "
+                             "reason={} sections={} attempts={} uploads={} stagedDistinct={} captured={} "
+                             "bytes={} stepMs={:.3f} maxStepMs={:.3f} admitted={} "
+                             "(parent NormalMap only; complete registration)",
+                             placement.modelIndex, ownerNormalsDone, ownerPrimaryFailed, ownerNormalStopReason,
+                             ownerNormalSections, ownerNormalAttempts, ownerNormalUploads,
+                             ownerNormalNames.size(), captured, ownerNormalBytes, ownerNormalStepMs,
+                             ownerNormalMaxStepMs, admitted != nullptr);
+                }
                 static uint32_t handoffRows = 0;
                 if (handoffRows < 8)
                 {

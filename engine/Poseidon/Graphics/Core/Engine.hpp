@@ -3368,6 +3368,16 @@ class Engine : public IGraphicsEngine
     // Exact opted-in raP candidate only. The renderer may initialize one PAA
     // header on the owner thread and return its current immutable source binding.
     virtual bool CaptureWarmRapStageRead(const char*, WarmTextureRead&) const { return false; }
+    // Exact, opt-in DayZ owner staging before a converted shape enters ShapeBank.
+    // One call inspects one parent section and may upload one authored NormalMap.
+    // A false result means the caller must finish through ordinary registration.
+    virtual bool StageWorldShapeParentNormalMap(const LODShapeWithShadow*, int, int, uint64_t,
+        bool& attempted, bool& uploaded, uint64_t& chargedBytes, std::string& uploadedName)
+    { attempted = uploaded = false; chargedBytes = 0; uploadedName.clear(); return false; }
+    // Proof after complete registration: number of staged parent images actually
+    // captured by that model's material bindings (never includes proxy children).
+    virtual uint32_t CountWorldShapeCapturedTextures(const LODShapeWithShadow*,
+        const std::vector<std::string>&) const { return 0; }
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy

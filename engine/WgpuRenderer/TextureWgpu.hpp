@@ -111,6 +111,9 @@ class TextureWgpu : public Texture
     bool HasTextureSourceObject() const { return _src != nullptr; }
     bool HasInitializedWarmSource() const { return _src != nullptr && _nMipmaps > 0; }
     bool HasAttemptedGpuUpload() const { return _uploadTried; }
+    // The optional owner pre-touch must not poison the ordinary registration
+    // retry when its upload failed before a GPU handle was created.
+    void RetryAfterFailedOwnerStage() { if (!_gpuHandle) _uploadTried = false; }
     bool HasInitializedArchiveBinding() const;
     bool CaptureColdPaaRead(render::ColdPaaRead& out) const override;
     bool CanWarmPrepare() const { return !_gpuHandle && !_uploadTried && HasReloadableSource(); }

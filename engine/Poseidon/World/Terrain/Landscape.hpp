@@ -817,6 +817,21 @@ class Landscape : public SerializeClass
         uint64_t reservedBytes = 0;
         uint32_t uploads = 0;
         uint32_t uploadFailures = 0;
+        // Optional second phase. Only the parent shape's authored NormalMap stages are
+        // touched here; registration and all proxy models remain complete at handoff.
+        bool stageParentNormals = false;
+        bool parentNormalsDone = true;
+        int normalLevel = 0;
+        int normalSection = 0;
+        uint32_t normalSections = 0;
+        uint32_t normalAttempts = 0;
+        uint32_t normalUploads = 0;
+        uint64_t normalReservedBytes = 0;
+        std::vector<std::string> normalUploadedNames;
+        double normalStepMs = 0.0;
+        double normalMaxStepMs = 0.0;
+        std::chrono::steady_clock::time_point normalStarted;
+        std::string normalStopReason;
         bool failed = false;
         double stepMs = 0.0;
         double maxStepMs = 0.0;

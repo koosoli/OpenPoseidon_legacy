@@ -204,6 +204,11 @@ class EngineWgpu : public EngineDummy
     bool GpuDrivenProxy(const Object* parent, int level, int proxyIndex) const override;
     void SceneObjectProxiesChanged(Object* obj) override;
     void WorldShapeLoaded(LODShapeWithShadow* shape) override;
+    bool StageWorldShapeParentNormalMap(const LODShapeWithShadow* shape, int level, int section,
+                                       uint64_t remainingBytes, bool& attempted, bool& uploaded,
+                                       uint64_t& chargedBytes, std::string& uploadedName) override;
+    uint32_t CountWorldShapeCapturedTextures(const LODShapeWithShadow* shape,
+                                             const std::vector<std::string>& names) const override;
     void SuppressWorldObjects(bool suppress) override;
 
     // Software-T&L path: 3D-in-UI objects (e.g. the menu laptop) arrive here with
