@@ -3445,6 +3445,11 @@ pub unsafe extern "C" fn wgr_main_target_count_fact(
     catch_unwind(AssertUnwindSafe(|| {
         let renderer = unsafe { &mut *renderer };
         let fact = renderer.gfx3d.main_target_count_fact(&renderer.device);
+        if let Some((token, reason, expected_revision, current_revision, expected_epoch, current_epoch)) =
+            renderer.gfx3d.take_main_count_probe_event(0) {
+            renderer.log.log(log_level::INFO,
+                &format!("private COUNT probe main token={token} reason={reason} revision={expected_revision}/{current_revision} epoch={expected_epoch}/{current_epoch} (0=no-copy 1=map-pending 2=map-failed 3=epoch 4=target-revision 5=ready 6=superseded; no Fine release)"));
+        }
         *output = WgrMainTargetCountResult::from_fact(fact);
     })).is_ok() as u32
 }
@@ -3554,6 +3559,11 @@ pub unsafe extern "C" fn wgr_shadow_target_count_fact(
     catch_unwind(AssertUnwindSafe(|| {
         let renderer = unsafe { &mut *renderer };
         let fact = renderer.gfx3d.shadow_target_count_fact(&renderer.device, cascade as usize);
+        if let Some((token, reason, expected_revision, current_revision, expected_epoch, current_epoch)) =
+            renderer.gfx3d.take_main_count_probe_event(1 + cascade as usize) {
+            renderer.log.log(log_level::INFO,
+                &format!("private COUNT probe solar-{cascade} token={token} reason={reason} revision={expected_revision}/{current_revision} epoch={expected_epoch}/{current_epoch} (0=no-copy 1=map-pending 2=map-failed 3=epoch 4=target-revision 5=ready 6=superseded; no Fine release)"));
+        }
         *output = WgrMainTargetCountResult::from_fact(fact);
     })).is_ok() as u32
 }

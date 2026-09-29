@@ -844,6 +844,10 @@ pub struct CullState {
     main_count_slots: Option<Vec<(wgpu::Buffer, MainCountSlot)>>,
     main_count_armed: Option<MainCountIdentity>,
     main_count_latest: MainCountFact,
+    main_count_probe_reason: u32,
+    count_probe_logged_reason: [u32; 5],
+    count_probe_events_emitted: u32,
+    count_probe_superseded: [Option<MainCountIdentity>; 5],
     main_count_last_token: u64,
     main_dispatch_recorded: Cell<bool>,
     // Each solar cascade shares the explicit main request identity, but never
@@ -853,6 +857,7 @@ pub struct CullState {
     shadow_count_slots: [Option<Vec<(wgpu::Buffer, MainCountSlot)>>; 5],
     shadow_count_armed: [Option<MainCountIdentity>; 5],
     shadow_count_latest: [MainCountFact; 5],
+    shadow_count_probe_reason: [u32; 5],
     gi_dispatch_recorded: Cell<bool>,
     // Tile k=0 has a distinct identity from solar cascade 0: at night both use
     // shadow cull index zero. Allocate this private readback ring only on an
@@ -941,6 +946,45 @@ pub struct MainCountFact {
     pub identity: MainCountIdentity,
     pub status: MainCountStatus,
     pub count: u32,
+}
+// Private probe-only reason. This never changes COUNT classification.
+pub const COUNT_PROBE_NO_COPY: u32 = 0;
+pub const COUNT_PROBE_WAITING_MAP: u32 = 1;
+pub const COUNT_PROBE_MAP_FAILED: u32 = 2;
+pub const COUNT_PROBE_EPOCH_CHANGED: u32 = 3;
+pub const COUNT_PROBE_TARGET_CHANGED: u32 = 4;
+pub const COUNT_PROBE_READY: u32 = 5;
+pub const COUNT_PROBE_SUPERSEDED: u32 = 6;
+fn classify_count_probe_reason(identity: MainCountIdentity, reason: u32,
+                               epoch: u64, revision: Option<(u32, u64)>) -> u32 {
+    if identity.token == 0 { return COUNT_PROBE_NO_COPY; }
+    if epoch != identity.cull_epoch { return COUNT_PROBE_EPOCH_CHANGED; }
+    if revision != Some((identity.model_id, identity.target_revision)) ||
+        identity.target_revision == 0 { return COUNT_PROBE_TARGET_CHANGED; }
+    reason
+}
+#[cfg(test)]
+mod count_probe_reason_tests {
+    use super::*;
+
+    #[test]
+    fn reason_distinguishes_unmapped_failed_stale_and_ready_without_changing_facts() {
+        let id = MainCountIdentity { token: 7, model_id: 3,
+            source_generation: 4, cull_epoch: 9, target_revision: 12 };
+        let current = Some((3, 12));
+        assert_eq!(classify_count_probe_reason(MainCountIdentity::default(),
+            COUNT_PROBE_WAITING_MAP, 9, current), COUNT_PROBE_NO_COPY);
+        assert_eq!(classify_count_probe_reason(id, COUNT_PROBE_WAITING_MAP, 9, current),
+            COUNT_PROBE_WAITING_MAP);
+        assert_eq!(classify_count_probe_reason(id, COUNT_PROBE_MAP_FAILED, 9, current),
+            COUNT_PROBE_MAP_FAILED);
+        assert_eq!(classify_count_probe_reason(id, COUNT_PROBE_WAITING_MAP, 10, current),
+            COUNT_PROBE_EPOCH_CHANGED);
+        assert_eq!(classify_count_probe_reason(id, COUNT_PROBE_READY, 9, Some((3, 13))),
+            COUNT_PROBE_TARGET_CHANGED);
+        assert_eq!(classify_count_probe_reason(id, COUNT_PROBE_READY, 9, current),
+            COUNT_PROBE_READY);
+    }
 }
 enum MainCountSlot {
     Idle,
@@ -1508,11 +1552,16 @@ impl CullState {
             main_count_slots: None,
             main_count_armed: None,
             main_count_latest: MainCountFact::default(),
+            main_count_probe_reason: COUNT_PROBE_NO_COPY,
+            count_probe_logged_reason: [u32::MAX; 5],
+            count_probe_events_emitted: 0,
+            count_probe_superseded: [None; 5],
             main_count_last_token: 0,
             main_dispatch_recorded: Cell::new(false),
             shadow_count_slots: std::array::from_fn(|_| None),
             shadow_count_armed: [None; 5],
             shadow_count_latest: [MainCountFact::default(); 5],
+            shadow_count_probe_reason: [COUNT_PROBE_NO_COPY; 5],
             gi_dispatch_recorded: Cell::new(false),
             local0_count_slots: None,
             local0_count_armed: None,
@@ -1574,12 +1623,26 @@ impl CullState {
             self.harvest_sky0_target_count(device);
         }
         if self.batch_count.is_some() { self.harvest_batch_target_count(device); }
+        if self.main_count_latest.identity.token != 0 &&
+            self.main_count_probe_reason() != COUNT_PROBE_READY {
+            self.count_probe_superseded[0] = Some(self.main_count_latest.identity);
+        }
+        for cascade in 0..4 {
+            if self.shadow_count_latest[cascade].identity.token != 0 &&
+                self.shadow_count_probe_reason(cascade) != COUNT_PROBE_READY {
+                self.count_probe_superseded[cascade + 1] =
+                    Some(self.shadow_count_latest[cascade].identity);
+            }
+        }
         self.target_model_id = self.target_model_default;
         self.main_count_armed = None;
         self.main_count_latest = MainCountFact::default();
+        self.main_count_probe_reason = COUNT_PROBE_NO_COPY;
+        self.count_probe_logged_reason = [u32::MAX; 5];
         self.main_dispatch_recorded.set(false);
         self.shadow_count_armed = [None; 5];
         self.shadow_count_latest = [MainCountFact::default(); 5];
+        self.shadow_count_probe_reason = [COUNT_PROBE_NO_COPY; 5];
         self.local0_count_armed = None;
         self.local0_count_latest = MainCountFact::default();
         self.reflection_count_armed = None;
@@ -1883,6 +1946,7 @@ impl CullState {
         encoder.copy_buffer_to_buffer(&view.counter_buf,
             TARGET_MODEL_COUNT_BYTE_OFFSET, dst, 0, 4);
         *state = MainCountSlot::Encoded(identity);
+        self.shadow_count_probe_reason[cascade] = COUNT_PROBE_WAITING_MAP;
         self.shadow_count_armed[cascade] = None;
         true
     }
@@ -1903,6 +1967,7 @@ impl CullState {
         encoder.copy_buffer_to_buffer(&self.counter_buf,
             TARGET_MODEL_COUNT_BYTE_OFFSET, dst, 0, 4);
         *state = MainCountSlot::Encoded(identity);
+        self.main_count_probe_reason = COUNT_PROBE_WAITING_MAP;
         self.target_model_id = self.target_model_default;
         self.main_count_armed = None;
         self.main_dispatch_recorded.set(false);
@@ -1959,6 +2024,7 @@ impl CullState {
         if self.main_count_latest.identity.token == token {
             self.main_count_latest.status = MainCountStatus::Unknown;
             self.main_count_latest.count = 0;
+            self.main_count_probe_reason = COUNT_PROBE_NO_COPY;
             self.target_model_id = self.target_model_default;
         }
         if self.main_count_armed.is_some_and(|id| id.token == token) {
@@ -2012,9 +2078,18 @@ impl CullState {
                                 self.main_count_latest.status = if count == 0 {
                                     MainCountStatus::Absent
                                 } else { MainCountStatus::Present };
+                                self.main_count_probe_reason = COUNT_PROBE_READY;
+                            } else if committed && !aborted && identity == self.main_count_latest.identity {
+                                self.main_count_probe_reason = if current_epoch != identity.cull_epoch {
+                                    COUNT_PROBE_EPOCH_CHANGED
+                                } else { COUNT_PROBE_TARGET_CHANGED };
                             }
                         }
-                        Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {}
+                        Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {
+                            if identity == self.main_count_latest.identity {
+                                self.main_count_probe_reason = COUNT_PROBE_MAP_FAILED;
+                            }
+                        }
                         Err(mpsc::TryRecvError::Empty) => {
                             *state = MainCountSlot::Mapping {
                                 identity, committed, aborted, done };
@@ -2028,6 +2103,48 @@ impl CullState {
 
     pub fn main_target_count_fact(&self) -> MainCountFact {
         self.validate_target_fact(self.main_count_latest)
+    }
+
+    pub fn main_count_probe_reason(&self) -> u32 {
+        self.probe_reason(self.main_count_latest, self.main_count_probe_reason)
+    }
+
+    /// Emit only a changed reason for the exact private request, capped for the
+    /// renderer lifetime. Called solely by the private FFI COUNT getters.
+    pub fn take_count_probe_event(&mut self, lane: usize) -> Option<(u64, u32, u64, u64, u64, u64)> {
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if !*ENABLED.get_or_init(|| std::env::var("WGR_GEOMETRY_MAIN_COUNT_PROBE")
+            .is_ok_and(|value| value == "1")) { return None; }
+        if lane >= 5 || self.count_probe_events_emitted >= 64 { return None; }
+        if let Some(old) = self.count_probe_superseded[lane].take() {
+            self.count_probe_events_emitted += 1;
+            return Some((old.token, COUNT_PROBE_SUPERSEDED, old.target_revision,
+                self.instances.target_revision().map_or(0, |(_, revision)| revision),
+                old.cull_epoch, self.instance_epoch()));
+        }
+        let (identity, reason) = if lane == 0 {
+            (self.main_count_latest.identity, self.main_count_probe_reason())
+        } else {
+            (self.shadow_count_latest[lane - 1].identity,
+                self.shadow_count_probe_reason(lane - 1))
+        };
+        let token = identity.token;
+        if token == 0 || self.count_probe_logged_reason[lane] == reason { return None; }
+        self.count_probe_logged_reason[lane] = reason;
+        self.count_probe_events_emitted += 1;
+        Some((token, reason, identity.target_revision,
+            self.instances.target_revision().map_or(0, |(_, revision)| revision),
+            identity.cull_epoch, self.instance_epoch()))
+    }
+
+    pub fn shadow_count_probe_reason(&self, cascade: usize) -> u32 {
+        self.shadow_count_latest.get(cascade).zip(self.shadow_count_probe_reason.get(cascade))
+            .map_or(COUNT_PROBE_NO_COPY, |(&fact, &reason)| self.probe_reason(fact, reason))
+    }
+
+    fn probe_reason(&self, fact: MainCountFact, reason: u32) -> u32 {
+        classify_count_probe_reason(fact.identity, reason,
+            self.instance_epoch(), self.instances.target_revision())
     }
 
     pub fn shadow_target_count_before_submit(&mut self, token: u64, cascade: usize) -> bool {
@@ -2076,6 +2193,7 @@ impl CullState {
         if latest.identity.token == token {
             latest.status = MainCountStatus::Unknown;
             latest.count = 0;
+            self.shadow_count_probe_reason[cascade] = COUNT_PROBE_NO_COPY;
         }
         if self.shadow_count_armed[cascade].is_some_and(|id| id.token == token) {
             self.shadow_count_armed[cascade] = None;
@@ -2126,9 +2244,19 @@ impl CullState {
                                 self.shadow_count_latest[cascade].status = if count == 0 {
                                     MainCountStatus::Absent
                                 } else { MainCountStatus::Present };
+                                self.shadow_count_probe_reason[cascade] = COUNT_PROBE_READY;
+                            } else if committed && !aborted &&
+                                identity == self.shadow_count_latest[cascade].identity {
+                                self.shadow_count_probe_reason[cascade] = if current_epoch != identity.cull_epoch {
+                                    COUNT_PROBE_EPOCH_CHANGED
+                                } else { COUNT_PROBE_TARGET_CHANGED };
                             }
                         }
-                        Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {}
+                        Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {
+                            if identity == self.shadow_count_latest[cascade].identity {
+                                self.shadow_count_probe_reason[cascade] = COUNT_PROBE_MAP_FAILED;
+                            }
+                        }
                         Err(mpsc::TryRecvError::Empty) => {
                             *state = MainCountSlot::Mapping {
                                 identity, committed, aborted, done };

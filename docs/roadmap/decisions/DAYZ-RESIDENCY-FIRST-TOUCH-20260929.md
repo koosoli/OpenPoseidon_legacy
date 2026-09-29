@@ -362,3 +362,22 @@ path exceed the promised 64 MiB bound. Do not loosen that cap without an
 accurate per-texture post-upload footprint and a safe rollback for a fallback
 allocation. More speculative uploads would still leave direct proxies and
 other material roles in the final 518 ms creation block.
+
+## Complete retained dependency census
+
+The next default-off slice, `WGR_OBJECT_STREAM_DAYZ_DEPENDENCY_CENSUS=1`,
+observes the existing `EnsureUploaded` texture captures for the exact tenement
+parent and its actually registered GPU proxies after complete object admission.
+It unions at most 256 texture pointers and visits at most 128 proxy instances.
+Each row reports the logical/source name, dimensions, residency, parent/proxy
+origin and conservative RGBA-plus-mips reservation. The summary explicitly
+reports missing captures, overflow, CPU complements and refused proxy coverage.
+It retains no new texture or shape pointer across admissions and performs no
+new material lookup, source read or upload.
+
+The census distinguishes retained capture completeness from full source and
+material coverage. It does not attribute shader roles, validate a physical
+source or measure only the first-touch uploads in that frame. A prior
+`WorldShapeLoaded` registration is labeled. Its output sizes the next staging
+step; even a complete capture says `stagingReady=false`. The desktop game/test
+build passed; the installed census route is pending at this checkpoint.

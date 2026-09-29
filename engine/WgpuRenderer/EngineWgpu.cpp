@@ -13500,6 +13500,168 @@ void EngineWgpu::RemoveGpuProxies(const Object* parent)
     _gpuProxies.erase(it);
 }
 
+namespace
+{
+bool DayzDependencyCensusEnabled()
+{
+    static const bool enabled = []
+    {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_DAYZ_DEPENDENCY_CENSUS");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    return enabled;
+}
+} // namespace
+
+void EngineWgpu::ReportDayzDependencyCensus(const Object* parent, const LODShapeWithShadow* shape,
+                                            bool firstObjectSight, bool allProxiesGpu,
+                                            GpuDrawCoverage finalCoverage)
+{
+    if (_dayzDependencyCensusEmitted || !shape || !shape->Name() ||
+        std::strcmp(shape->Name(), R"(dz\structures\residential\tenements\tenement_small.p3d)") != 0)
+        return;
+    _dayzDependencyCensusEmitted = true;
+
+    // The bank already captured every TextureWgpu::EnsureUploaded use while each
+    // retained model registered. WorldShapeLoaded may have registered the parent
+    // before SceneObjectCreated, so this is a dependency set, not a count of
+    // uploads performed in this particular ObjectCreate. Observe that existing
+    // result after eligible proxy registration; no material lookup, VFS read or
+    // new upload.
+    // A CPU complement or refused proxy is explicitly outside this captured set.
+    constexpr size_t kLimit = 256;
+    constexpr size_t kProxyLimit = 128;
+    constexpr uint64_t kPilotReservation = 128ull * 1024 * 1024;
+    struct Row
+    {
+        const TextureWgpu* texture = nullptr;
+        bool parent = false;
+        uint32_t proxyOccurrences = 0;
+    };
+    struct ProxyRow
+    {
+        int index = -1;
+        const LODShapeWithShadow* shape = nullptr;
+        size_t capturedTextures = 0;
+        bool capturePresent = false;
+    };
+    std::array<Row, kLimit> rows{};
+    std::array<ProxyRow, kProxyLimit> proxyRows{};
+    size_t count = 0, overflowOccurrences = 0, proxyCaptureMissing = 0, proxyInstances = 0;
+    bool proxyOverflow = false;
+    bool parentCapturePresent = false;
+    uint64_t rgbaMipReservation = 0;
+    bool reservationKnown = true;
+    const auto add = [&](const TextureWgpu* texture, bool fromParent)
+    {
+        if (!texture) return;
+        for (size_t i = 0; i < count; ++i)
+        {
+            if (rows[i].texture != texture) continue;
+            rows[i].parent |= fromParent;
+            if (!fromParent) ++rows[i].proxyOccurrences;
+            return;
+        }
+        if (count == kLimit)
+        {
+            ++overflowOccurrences; // occurrences, not a distinct-texture count
+            return;
+        }
+        Row& row = rows[count++];
+        row.texture = texture;
+        row.parent = fromParent;
+        row.proxyOccurrences = fromParent ? 0 : 1;
+        const int width = texture->AWidth(0), height = texture->AHeight(0);
+        if (width <= 0 || height <= 0 || width > 16384 || height > 16384)
+        {
+            reservationKnown = false;
+            return;
+        }
+        // The existing owner stage's conservative RGBA8 + generated-mips
+        // reservation. This is neither compressed PAA size nor actual GPU bytes.
+        rgbaMipReservation += (static_cast<uint64_t>(width) * static_cast<uint64_t>(height) * 16 + 2) / 3;
+    };
+    const auto collect = [&](const LODShapeWithShadow* modelShape, bool fromParent)
+    {
+        const auto found = _gpuModelTextures.find(modelShape);
+        if (found == _gpuModelTextures.end())
+        {
+            if (!fromParent) ++proxyCaptureMissing;
+            return;
+        }
+        if (fromParent) parentCapturePresent = true;
+        for (const TextureWgpu* texture : found->second)
+            add(texture, fromParent);
+    };
+    collect(shape, true);
+    if (const auto proxies = _gpuProxies.find(parent); proxies != _gpuProxies.end())
+    {
+        for (const GpuProxyChild& child : proxies->second.children)
+        {
+            if (proxyInstances == kProxyLimit)
+            {
+                proxyOverflow = true;
+                break;
+            }
+            ProxyRow& proxyRow = proxyRows[proxyInstances];
+            proxyRow.index = child.proxyIndex;
+            proxyRow.shape = child.shape;
+            if (const auto captured = _gpuModelTextures.find(child.shape); captured != _gpuModelTextures.end())
+            {
+                proxyRow.capturePresent = true;
+                proxyRow.capturedTextures = captured->second.size();
+            }
+            ++proxyInstances;
+            collect(child.shape, false);
+        }
+    }
+    const bool cpuComplement = _gpuModelComplement.count(shape) != 0;
+    const bool captureComplete = parentCapturePresent && proxyCaptureMissing == 0 &&
+        !proxyOverflow && overflowOccurrences == 0;
+    const bool retainedCoverageComplete = captureComplete && allProxiesGpu &&
+        !cpuComplement && finalCoverage == GpuDrawCoverage::Full;
+    LOG_INFO(Graphics,
+             "DayZ dependency census: model={} captured={} limit={} overflowOccurrences={} "
+             "parentCapturePresent={} proxyInstancesVisited={} proxyLimit={} proxyOverflow={} "
+             "proxyCaptureMissing={} parentRegistrationKnownBeforeScene={} "
+             "captureDefinition=EnsureUploadedUses firstTouchUploadsMeasured=false "
+             "allProxiesGpu={} cpuComplement={} finalCoverage={} "
+             "captureComplete={} retainedCoverageComplete={} materialRolesAttributed=false "
+             "physicalSourceValidated=false "
+             "rgbaMipReservationBytes={} reservationKnown={} within128MiB={} stagingReady=false",
+             shape->Name(), count, kLimit, overflowOccurrences, parentCapturePresent, proxyInstances,
+             kProxyLimit, proxyOverflow,
+             proxyCaptureMissing, !firstObjectSight, allProxiesGpu, cpuComplement, static_cast<int>(finalCoverage),
+             captureComplete, retainedCoverageComplete, reservationKnown ? rgbaMipReservation : 0,
+             reservationKnown, reservationKnown && rgbaMipReservation <= kPilotReservation);
+    for (size_t i = 0; i < proxyInstances; ++i)
+    {
+        const ProxyRow& proxy = proxyRows[i];
+        LOG_INFO(Graphics,
+                 "DayZ dependency census proxy: row={} limit={} proxyIndex={} model={} "
+                 "capturePresent={} capturedTextures={}",
+                 i + 1, kProxyLimit, proxy.index,
+                 proxy.shape && proxy.shape->Name() ? proxy.shape->Name() : "",
+                 proxy.capturePresent, proxy.capturedTextures);
+    }
+    for (size_t i = 0; i < count; ++i)
+    {
+        const TextureWgpu* texture = rows[i].texture;
+        const int width = texture->AWidth(0), height = texture->AHeight(0);
+        const bool dimensionsKnown = width > 0 && height > 0 && width <= 16384 && height <= 16384;
+        const uint64_t reserved = dimensionsKnown ?
+            (static_cast<uint64_t>(width) * static_cast<uint64_t>(height) * 16 + 2) / 3 : 0;
+        LOG_INFO(Graphics,
+                 "DayZ dependency census texture: row={} limit={} originParent={} proxyOccurrences={} "
+                 "materialRole=unattributed logical={} source={} resident={} reloadable={} dynamic={} "
+                 "width={} height={} mips={} rgbaMipReservationBytes={} reservationKnown={}",
+                 i + 1, kLimit, rows[i].parent, rows[i].proxyOccurrences,
+                 texture->Name() ? texture->Name() : "", texture->SourceName() ? texture->SourceName() : "",
+                 texture->GpuHandle() != 0, texture->HasReloadableSource(), texture->IsDynamicTexture(),
+                 width, height, texture->ANMipmaps(), reserved, dimensionsKnown);
+    }
+}
+
 void EngineWgpu::SceneObjectCreated(Object* obj)
 {
     if (!_gpuDriven || !_renderer || !obj)
@@ -13559,6 +13721,8 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
     {
         const auto why = _gpuModelReject.find(shape);
         NoteAdmitReject(why != _gpuModelReject.end() ? why->second : AdmitReject::NoOwnedSection, shape, firstSight);
+        if (DayzDependencyCensusEnabled())
+            ReportDayzDependencyCensus(obj, shape, firstSight, false, GpuDrawCoverage::None);
         return; // ineligible shape -> object drawn by the CPU path
     }
     NoteAdmitReject(AdmitReject::Admitted, shape, firstSight);
@@ -13573,12 +13737,13 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
     // draws proxies + blend/decal sections) — base decision per shape in RegisterGpuModel.
     const auto covIt = _gpuModelCoverage.find(shape);
     GpuDrawCoverage cov = covIt != _gpuModelCoverage.end() ? covIt->second : GpuDrawCoverage::Full;
+    bool allProxiesGpu = true;
     // §12d: a Partial object may carry interior furniture proxies — move the eligible ones onto
     // the GPU as child instances (only Partial objects have proxies; Full ones never do).
     if (cov == GpuDrawCoverage::Partial)
     {
         AdmitTimer proxiesTimer(&render::GObjectAdmitProfile.proxiesMs);
-        const bool allProxiesGpu = EmitGpuProxies(obj, shape);
+        allProxiesGpu = EmitGpuProxies(obj, shape);
         // §12d-full: if the ONLY reason this was Partial is proxies (no CPU complement) and every
         // proxy moved to the GPU, the whole object is now GPU-drawn -> Full, so DrawSortObject
         // skips its CPU Object::Draw entirely (the last per-building CPU walk goes away).
@@ -13588,6 +13753,8 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
         }
     }
     _gpuInstances[obj] = GpuInstance{model, slot, shape, obj->Transform().Position(), cp.mode, cov};
+    if (DayzDependencyCensusEnabled())
+        ReportDayzDependencyCensus(obj, shape, firstSight, allProxiesGpu, cov);
     // Mirror the coverage onto the Object so GpuDrivenCoverage() is an O(1) field read (see there).
     obj->SetGpuCoverage(static_cast<int>(cov));
 }

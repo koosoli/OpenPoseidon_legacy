@@ -843,6 +843,13 @@ class EngineWgpu : public EngineDummy
     uint64_t _nextGeometryPageEpoch=1, _nextGeometryPageRequest=1;
     std::shared_ptr<render::StandaloneMeshWitnessBudget> _standaloneWitnessBudget;
     std::unordered_map<const LODShapeWithShadow*, std::vector<TextureWgpu*>> _gpuModelTextures;
+    // One opt-in, synchronous registration-capture census for tenement_small. The report
+    // borrows the captured Texture pointers only while SceneObjectCreated owns the
+    // parent and its proxy registrations; it retains no pointer across admissions.
+    bool _dayzDependencyCensusEmitted = false;
+    void ReportDayzDependencyCensus(const Object* parent, const LODShapeWithShadow* shape,
+                                    bool firstObjectSight, bool allProxiesGpu,
+                                    GpuDrawCoverage finalCoverage);
     std::unordered_map<const LODShapeWithShadow*, uint32_t> _gpuModelRefs;
     void RetainGpuModel(const LODShapeWithShadow* shape);
     void ReleaseGpuModel(const LODShapeWithShadow* shape);

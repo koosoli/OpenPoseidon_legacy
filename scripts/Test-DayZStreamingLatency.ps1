@@ -18,6 +18,7 @@ param(
     [switch]$RapBuildingPilot,
     [switch]$RapBuildingMultistage,
     [switch]$DayZTextureTrace,
+    [switch]$DayZDependencyCensus,
     [switch]$DayZShapeSplit,
     [switch]$DayZOwnerPrimaryStage,
     [switch]$DayZOwnerNormalStage,
@@ -83,6 +84,7 @@ if (!$env:LOCK_OWNER) {
         if ($RapBuildingPilot) { $argv += '-RapBuildingPilot' }
         if ($RapBuildingMultistage) { $argv += '-RapBuildingMultistage' }
         if ($DayZTextureTrace) { $argv += '-DayZTextureTrace' }
+        if ($DayZDependencyCensus) { $argv += '-DayZDependencyCensus' }
         if ($DayZShapeSplit) { $argv += '-DayZShapeSplit' }
         if ($DayZOwnerPrimaryStage) { $argv += '-DayZOwnerPrimaryStage' }
         if ($DayZOwnerNormalStage) { $argv += '-DayZOwnerNormalStage' }
@@ -156,6 +158,7 @@ $environment = @{
     WGR_OBJECT_STREAM_RAP_BUILDING_PILOT = $(if ($RapBuildingPilot) { '1' } else { '0' })
     WGR_OBJECT_STREAM_RAP_BUILDING_MULTISTAGE = $(if ($RapBuildingMultistage) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_TEXTURE_TRACE = $(if ($DayZTextureTrace) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_DAYZ_DEPENDENCY_CENSUS = $(if ($DayZDependencyCensus) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_SHAPE_SPLIT = $(if ($DayZShapeSplit) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_OWNER_PRIMARY_STAGE = $(if ($DayZOwnerPrimaryStage) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_OWNER_NORMAL_STAGE = $(if ($DayZOwnerNormalStage) { '1' } else { '0' })

@@ -10538,6 +10538,9 @@ impl Gfx3d {
     pub fn main_target_count_snapshot(&self) -> cull::MainCountFact {
         self.cull.main_target_count_fact()
     }
+    pub fn take_main_count_probe_event(&mut self, lane: usize) -> Option<(u64, u32, u64, u64, u64, u64)> {
+        self.cull.take_count_probe_event(lane)
+    }
     pub fn main_target_completion_fact(&self) -> main_count_completion::Fact {
         self.main_count_completion.as_ref().map_or(main_count_completion::Fact::default(),
             |witness| witness.fact(self.cull.instance_epoch()))

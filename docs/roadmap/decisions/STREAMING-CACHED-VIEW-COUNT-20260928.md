@@ -45,3 +45,19 @@ the bounded window. The private aggregate change does not feed the separate
 main fact logger. This route therefore offers no integrated COUNT-publication
 proof and does not establish a regression either. The same fixture had earlier
 intermittent publication under fixed captures; it was not blindly repeated.
+
+## Bounded publication-failure diagnosis
+
+The existing `WGR_GEOMETRY_MAIN_COUNT_PROBE=1` fixture now obtains bounded
+Rust-side reason transitions through its existing main/solar fact getters.
+At most 64 rows per renderer distinguish no copy, pending map, failed map,
+changed instance epoch, changed target revision, ready and superseded token.
+Rows carry the exact token and expected/current revision and epoch. The COUNT
+classification and freshness gates remain intact; normal rendering creates
+no diagnostic GPU work or new getter calls. Rust cannot diagnose a later
+C++ fixture/source publication rejection.
+
+The focused pure reason-classification test and paired desktop game/test build
+passed. A single installed original-source fixture is pending at this
+checkpoint. This diagnostic is intended to select the next repair, with no
+Fine-release or default-promotion authority.
