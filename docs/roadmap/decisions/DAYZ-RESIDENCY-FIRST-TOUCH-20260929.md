@@ -101,3 +101,41 @@ cache histories, and enabling cold handoff also activates the existing
 owned-primary path; these rows are screening evidence, not an isolated causal
 effect of the new capture. Keep both options off by default and do not claim
 no-regression or promote them from this pair.
+
+## Exact raP NormalMap before first conversion
+
+Commit `b1792bcc` adds a separate default-off early path for the two already
+selected DayZ spruce-tree raP fixtures. On the owner thread, `SubmitConvert`
+rechecks the current physical material member, reads at most 256 KiB of that
+captured raP, extracts its NormalMap role, and asks the WGPU owner callback for
+the current initialized PAA binding. Only the exact
+`dz\plants\tree\data\t_piceaabies_trunk_no.paa` member, at most 16 MiB, is
+passed to the existing conversion worker. The worker prepares it before
+publishing `Converted`; failed capture/preparation leaves ordinary material
+loading available. The earlier late warm-stage path remains as fallback. The
+feature requires the existing source, warm-job, material-preflight and
+warm-stage-capture options plus `WGR_OBJECT_STREAM_RAP_STAGE_EARLY_PREPARE=1`.
+All remain off by default. `Test-DayZStreamingLatency.ps1 -RapStageEarlyPrepare`
+sets this exact combination and records it in the route provenance.
+
+A synthetic mapped-PBO test passed 19 assertions, including source-bound worker
+Put before the owner takes Converted and an exact-member Take. The paired
+game/test build passed; the committed `b1792bcc` EXE/DLL pair passed installed
+WGPU startup. One installed DayZ route,
+`build/stream-residency/rap-early-sep29-disabled-20260929-155623`, passed with
+normal exit, 908 frames, no dropped samples and returned 19,923/19,923
+residency. For model index 72 the log orders `accepted`, `storePut`,
+`workerPut` at 15:56:39.046-39.066, then owner `storeTakeWarm`,
+`sourceValidated`, a successful 2,796,032-byte upload and WGPU NormalMap bind
+at 15:56:39.195. The source member was 1,780,450 bytes. This is real
+same-source first-registration handoff for that tree NormalMap, not proof of
+pixel parity or coverage of building RVMAT dependencies. A second selected
+stump model found the PAA already resident and used ordinary registration.
+
+The route's `drw:init` mean/p95/max was 14.002/99.526/656.458 ms. It had
+extra warm/provenance instrumentation and a different asynchronous/cache
+history from the earlier packed-only/combined routes, so those values do not
+establish a performance gain or no-regression. This path covers one shared
+tree stage, while the `city_school`, `village_policestation` and
+`tenement_small` first-touch stalls remain unsolved. Keep the feature off by
+default; `performanceAccepted=false` and `defaultReady=false`.
