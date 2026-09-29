@@ -178,3 +178,43 @@ retaining one of the scarce initialized texture bindings. Preserve exact
 identity and complete ordinary admission; do not raise the binding cap on
 these aggregate counts alone. All related flags remain off by default;
 `performanceAccepted=false`, `defaultReady=false`.
+
+## Binding-free physical-member building pilot
+
+Commit `4e04f796` keeps the same three-building, default-off raP pilot but
+replaces its unsuccessful initialized-source-binding capture with an exact
+physical PBO member request. The owner rechecks the authored material and
+captures one current NormalMap member, at most 16 MiB, before conversion. The
+worker reads/prepares it under the existing publication and byte limits. Only
+these three PAA names can acquire a numeric birth identity from the precise
+mapped buffer used by `TextureSourcePac::Init`, including a cached buffer;
+loose, compressed, failed or unknown sources fall back. At Take, the store
+requires that Init identity to match the worker request. Before upload WGPU
+also checks that the same physical member is still mounted and that every mip
+matches the parsed header. No scarce `ArchiveSourceBinding` is retained for
+this path; the old bound tree pilot is unchanged. Its explicit environment
+switch is `WGR_OBJECT_STREAM_RAP_BUILDING_PILOT=1`.
+
+The paired game/test build and 67 focused assertions across three cases passed;
+the archive-member test also passed 25 assertions in a separate process with
+the source-binding-capacity options active. The committed, pushed EXE/DLL pair
+passed installed WGPU startup. One locked installed DayZ route,
+`build/stream-residency/rap-physical-sep29-disabled-20260929-165746`, passed
+the updated screening harness: normal exit, 909 frames, zero dropped samples,
+and three same-named captured/current/validated uploads. Tenement uploaded
+5,592,064 prepared bytes, school 1,398,016, and police 1,398,016. Their
+individual cold model admissions still cost 500.1 ms/81 uploads, 915.2 ms/118
+uploads, and 295.8 ms/43 uploads, with only one prepared upload each.
+
+One same-build control route with material-preflight/provenance flags but the
+building pilot off,
+`build/stream-residency/rap-physical-control-sep29-disabled-20260929-165952`,
+exited normally with 1,031 frames and no dropped samples. Its harness result
+was `passed=false` only because the warm-upload requirement was not exercised.
+Its `drw:init` mean/p95/max was 10.342/65.017/760.418 ms versus the pilot's
+14.570/102.151/686.906 ms; cold admissions for the same three buildings were
+329.5/608.1/189.6 ms. These sequential runs differ in OS cache and async
+history, and their one-of-many upload coverage is too small to explain the
+different totals. Thus the source-safe handoff is demonstrated, while
+performance improvement and no-regression are *not* established. The pilot
+stays off by default; `performanceAccepted=false`, `defaultReady=false`.
