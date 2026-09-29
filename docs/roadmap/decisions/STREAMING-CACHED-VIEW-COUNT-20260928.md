@@ -61,3 +61,19 @@ The focused pure reason-classification test and paired desktop game/test build
 passed. A single installed original-source fixture is pending at this
 checkpoint. This diagnostic is intended to select the next repair, with no
 Fine-release or default-promotion authority.
+
+The installed `063f6087` `count-reason-sep29` fixture exited normally but
+failed its publication requirement. Token 1 advances from map-pending to
+target-revision mismatch: revision 1/1 becomes 1/2 while the instance epoch
+stays 4/4 in main and all four solar lanes. One targeted player-isolation run,
+`count-isolated-player-sep29-20260929-222132-f9e19d`, reproduced the same
+transition and ended normally without force. Relocating the player did not
+repair it; that fixture change was reverted. These results identify revision
+invalidation, not its mutation source or a regression attribution.
+
+The next diagnostic reports the last observed invalidation kind beside each
+bounded reason transition (rows, sections, skin, mesh, texture, palette,
+off-handle uploader or reselection). Several writes may coalesce before the
+getter; the field is not a complete history. Revision semantics and all
+freshness gates remain unchanged. This is to select a concrete repair rather
+than relaxing safety checks to make a test pass.

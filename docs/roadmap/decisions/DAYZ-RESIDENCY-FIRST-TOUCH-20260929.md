@@ -381,3 +381,29 @@ source or measure only the first-touch uploads in that frame. A prior
 `WorldShapeLoaded` registration is labeled. Its output sizes the next staging
 step; even a complete capture says `stagingReady=false`. The desktop game/test
 build passed; the installed census route is pending at this checkpoint.
+
+The installed `063f6087` census route
+`dayz-dependency-census-sep29-disabled-20260929-221516` passed and exited
+normally. The parent/proxy union contains 78 unique textures from 32 GPU proxy
+instances (48 parent/shared, 30 proxy-only), without capture overflow. All 78
+are resident, 72 reloadable and six dynamic. Conservative RGBA-plus-mips is
+722,492,807 bytes, exceeding the 128 MiB all-pinned staging pilot. Although the
+capture itself is complete, CPU complements and partial retained coverage
+remain: `allProxiesGpu=false`, `retainedCoverageComplete=false`. Ordinary
+tenement creation still took 528.6 ms with 81 uploads and 369.2 ms source reads.
+This ordered diagnostic run does not establish a performance comparison.
+
+The next opt-in `WGR_OBJECT_STREAM_DAYZ_PHYSICAL_PREFETCH=1` slice reuses
+existing RapCapture and packed-texture workers for the exact tenement's parent
+IR material stages. It captures at most 16 physical raP members, discovers 64
+unique authored PAA/PAC candidates, and captures at most 128 MiB extra stage
+source bytes, with 16 MiB per member. Accepted prepared chains across the job
+are limited to 128 MiB. Init member identity capture is scoped to the selected
+owner table/admission operations and capped at 256 identities per operation.
+Uploads still require actual Init member, current mount and mip-layout match;
+refusals use normal loading. This is parent-only preparation, not complete
+proxy/material closure or a GPU allocation bound. The paired desktop build
+passed; mapped-PBO multistage/physical-scope tests passed 376 assertions in two
+cases without skips, including an arbitrary Stage0 colour source, wrong-member
+refusal, exact-member take and scope-cap fallback. Installed validation is
+pending.

@@ -17,6 +17,7 @@ param(
     [switch]$RapStageEarlyPrepare,
     [switch]$RapBuildingPilot,
     [switch]$RapBuildingMultistage,
+    [switch]$DayZPhysicalPrefetch,
     [switch]$DayZTextureTrace,
     [switch]$DayZDependencyCensus,
     [switch]$DayZShapeSplit,
@@ -51,6 +52,7 @@ if ($RequireWarmMaterialPreflightUpload) { $WarmMaterialPreflight = $true }
 if ($RapStageEarlyPrepare) { $WarmMaterialPreflight = $true; $WarmTextureProvenance = $true }
 if ($RapBuildingMultistage) { $RapBuildingPilot = $true }
 if ($RapBuildingPilot -or $RapBuildingMultistage) { $WarmMaterialPreflight = $true; $WarmTextureProvenance = $true }
+if ($DayZPhysicalPrefetch) { $DayZTextureTrace = $true }
 if ($WarmMaterialPreflight) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($WeakCacheProof) { $HotSourceProofRetirement = $true }
 if ($WarmEarlySlice -or $WarmPublishedReuse) { $WarmTextureProvenance = $true }
@@ -83,6 +85,7 @@ if (!$env:LOCK_OWNER) {
         if ($RapStageEarlyPrepare) { $argv += '-RapStageEarlyPrepare' }
         if ($RapBuildingPilot) { $argv += '-RapBuildingPilot' }
         if ($RapBuildingMultistage) { $argv += '-RapBuildingMultistage' }
+        if ($DayZPhysicalPrefetch) { $argv += '-DayZPhysicalPrefetch' }
         if ($DayZTextureTrace) { $argv += '-DayZTextureTrace' }
         if ($DayZDependencyCensus) { $argv += '-DayZDependencyCensus' }
         if ($DayZShapeSplit) { $argv += '-DayZShapeSplit' }
@@ -157,6 +160,7 @@ $environment = @{
     WGR_OBJECT_STREAM_RAP_STAGE_EARLY_PREPARE = $(if ($RapStageEarlyPrepare) { '1' } else { '0' })
     WGR_OBJECT_STREAM_RAP_BUILDING_PILOT = $(if ($RapBuildingPilot) { '1' } else { '0' })
     WGR_OBJECT_STREAM_RAP_BUILDING_MULTISTAGE = $(if ($RapBuildingMultistage) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_DAYZ_PHYSICAL_PREFETCH = $(if ($DayZPhysicalPrefetch) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_TEXTURE_TRACE = $(if ($DayZTextureTrace) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_DEPENDENCY_CENSUS = $(if ($DayZDependencyCensus) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_SHAPE_SPLIT = $(if ($DayZShapeSplit) { '1' } else { '0' })
@@ -219,6 +223,7 @@ try {
         rapStageEarlyPrepare = [bool]$RapStageEarlyPrepare
         rapBuildingPilot = [bool]$RapBuildingPilot
         rapBuildingMultistage = [bool]$RapBuildingMultistage
+        dayZPhysicalPrefetch = [bool]$DayZPhysicalPrefetch
         dayZTextureTrace = [bool]$DayZTextureTrace
         dayZShapeSplit = [bool]$DayZShapeSplit
         dayZOwnerPrimaryStage = [bool]$DayZOwnerPrimaryStage
@@ -506,6 +511,72 @@ try {
         headers=@($textureTraceHeaders | ForEach-Object { $_.Line }); rows=@($textureTraceRows | ForEach-Object { $_.Line })
         scope='Top 16 observed source read costs per selected first-touch model, including proxies; not a material-slot role, GPU time, causal speedup or whole-world inventory'}
     $textureTraceProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'dayz-texture-first-touch-proof.json')
+    $physicalParentRows = @(Select-String -LiteralPath $log -Pattern 'DayZ physical prefetch: parent model=dz\\structures\\residential\\tenements\\tenement_small\.p3d capturedRaP=(\d+) visitCount=(\d+) captureIncomplete=(true|false) materialSourceBytes=(\d+) maxRaP=16 maxVisits=256')
+    $physicalDiscoveryRows = @(Select-String -LiteralPath $log -Pattern 'DayZ physical prefetch: modelIndex=(\d+) parentMaterials=(\d+) stageCandidates=(\d+) candidateOverflow=(true|false) sourceReady=(true|false)')
+    $physicalCaptureRows = @(Select-String -LiteralPath $log -Pattern 'DayZ physical prefetch: modelIndex=(\d+) stageCandidates=(\d+) captured=(\d+) sourceRefused=(\d+) candidateOverflow=(true|false) addedStageSourceBytes=(\d+) addedStageSourceLimit=(\d+) complete=false')
+    $physicalSourceRows = @(Select-String -LiteralPath $log -Pattern 'DayZ physical prefetch captured: source=(.*?) memberBytes=(\d+) row=(\d+) limit=64')
+    $physicalUploadRows = @(Select-String -LiteralPath $log -Pattern 'DayZ physical prefetch upload: source=(.*?) bytes=(\d+) memberBytes=(\d+) initMemberMatched=true currentMountMatched=true layoutMatched=true blockUploadSucceeded=true row=(\d+) limit=64')
+    $physicalParents = @($physicalParentRows | ForEach-Object { $g = $_.Matches[0].Groups
+        [pscustomobject]@{capturedRaP=[uint64]$g[1].Value;visits=[uint64]$g[2].Value
+            captureIncomplete=($g[3].Value -eq 'true');materialSourceBytes=[uint64]$g[4].Value} })
+    $physicalDiscoveries = @($physicalDiscoveryRows | ForEach-Object { $g = $_.Matches[0].Groups
+        [pscustomobject]@{modelIndex=[uint64]$g[1].Value;parentMaterials=[uint64]$g[2].Value
+            stageCandidates=[uint64]$g[3].Value;candidateOverflow=($g[4].Value -eq 'true')
+            sourceReady=($g[5].Value -eq 'true')} })
+    $physicalCaptures = @($physicalCaptureRows | ForEach-Object { $g = $_.Matches[0].Groups
+        [pscustomobject]@{modelIndex=[uint64]$g[1].Value;stageCandidates=[uint64]$g[2].Value
+            captured=[uint64]$g[3].Value;sourceRefused=[uint64]$g[4].Value
+            candidateOverflow=($g[5].Value -eq 'true');addedStageSourceBytes=[uint64]$g[6].Value
+            addedStageSourceLimit=[uint64]$g[7].Value} })
+    $physicalUploads = @($physicalUploadRows | ForEach-Object { $g = $_.Matches[0].Groups
+        [pscustomobject]@{source=[string]$g[1].Value;bytes=[uint64]$g[2].Value
+            memberBytes=[uint64]$g[3].Value;row=[uint64]$g[4].Value} })
+    $physicalSources = @($physicalSourceRows | ForEach-Object { $g = $_.Matches[0].Groups
+        [pscustomobject]@{source=[string]$g[1].Value;memberBytes=[uint64]$g[2].Value
+            row=[uint64]$g[3].Value} })
+    if (@($physicalParents | Where-Object { $_.capturedRaP -gt 16 -or $_.visits -gt 257 -or
+        $_.materialSourceBytes -gt 4194304 }).Count -gt 0 -or
+        @($physicalDiscoveries | Where-Object { $_.parentMaterials -gt 16 -or $_.stageCandidates -gt 64 }).Count -gt 0 -or
+        @($physicalCaptures | Where-Object { $_.stageCandidates -gt 64 -or $_.captured -gt 64 -or
+            $_.addedStageSourceLimit -ne 134217728 -or $_.addedStageSourceBytes -gt 134217728 }).Count -gt 0 -or
+        @($physicalUploads | Where-Object { !$_.source -or $_.bytes -eq 0 -or $_.memberBytes -eq 0 -or
+            $_.memberBytes -gt 16777216 -or $_.row -lt 1 -or $_.row -gt 64 }).Count -gt 0 -or
+        @($physicalSources | Where-Object { !$_.source -or $_.memberBytes -eq 0 -or
+            $_.memberBytes -gt 16777216 -or $_.row -lt 1 -or $_.row -gt 64 }).Count -gt 0 -or
+        $physicalSources.Count -gt 64 -or
+        $physicalUploads.Count -gt 64) { throw 'Malformed bounded DayZ physical prefetch witness' }
+    if (!$DayZPhysicalPrefetch -and ($physicalParentRows.Count -or $physicalDiscoveryRows.Count -or
+        $physicalCaptureRows.Count -or $physicalSourceRows.Count -or $physicalUploadRows.Count)) {
+        throw 'DayZ physical prefetch unexpectedly active in OFF control'
+    }
+    $physicalPositive = $false
+    foreach ($capture in $physicalCaptures) {
+        if ($capture.captured -eq 0 -or $capture.addedStageSourceBytes -eq 0) { continue }
+        if (@($physicalDiscoveries | Where-Object { $_.modelIndex -eq $capture.modelIndex -and
+            $_.stageCandidates -gt 0 -and $_.sourceReady -and
+            $_.stageCandidates -eq $capture.stageCandidates }).Count -gt 0) {
+            $physicalPositive = $true; break
+        }
+    }
+    $tenementTrace = @($textureTraceHeaders | Where-Object {
+        $_.Matches[0].Groups[1].Value -eq 'dz\structures\residential\tenements\tenement_small.p3d' })
+    $tenementReadMs = if ($tenementTrace.Count -gt 0) {
+        [double]$tenementTrace[0].Matches[0].Groups[5].Value } else { $null }
+    $capturedSourceKeys = @($physicalSources | ForEach-Object { $_.source.Replace('\','/').ToLowerInvariant() })
+    $physicalSameSourceUploads = @($physicalUploads | Where-Object {
+        $_.source.Replace('\','/').ToLowerInvariant() -in $capturedSourceKeys })
+    $physicalPrefetchProven = !$DayZPhysicalPrefetch -or ($physicalParents.Count -gt 0 -and
+        @($physicalParents | Where-Object { $_.capturedRaP -gt 0 }).Count -gt 0 -and
+        $physicalPositive -and $physicalSameSourceUploads.Count -gt 0 -and $null -ne $tenementReadMs)
+    $physicalPrefetchProof = @{requested=[bool]$DayZPhysicalPrefetch;positive=[bool]$physicalPrefetchProven
+        parent=$physicalParents;discovery=$physicalDiscoveries;capture=$physicalCaptures
+        capturedSources=$physicalSources;uploads=$physicalUploads;sameSourceUploads=$physicalSameSourceUploads
+        uploadBytes=[uint64](($physicalUploads | Measure-Object -Property bytes -Sum).Sum)
+        uploadTruncated=[bool](Select-String -LiteralPath $log -Pattern 'DayZ physical prefetch upload truncated: limit=64' -Quiet)
+        tenementFirstTouchMeasuredReadMs=$tenementReadMs
+        timingScope='Existing selected tenement first-touch trace under the same run; a synchronous read subset, not total frame or causal speedup'
+        scope='Bounded parent-IR authored-stage speculative worker preparation with actual physical Take and validated GPU upload. Parent-only, source-specific and partial; no proxy, CPU-complement, material-role or performance acceptance.' }
+    $physicalPrefetchProof | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'dayz-physical-prefetch-proof.json')
     $shapeSplitRows = @(Select-String -LiteralPath $log -Pattern 'DayZ shape install split: model=dz\\structures\\residential\\tenements\\tenement_small\.p3d worldCalled=true worldRegisterMs=([0-9.]+) legacyOptimizeMs=([0-9.]+) totalOptimizeMs=([0-9.]+)')
     $shapeSplitProven = !$DayZShapeSplit -or $shapeSplitRows.Count -eq 1
     $shapeSplitProof = @{requested=[bool]$DayZShapeSplit; positive=[bool]$shapeSplitProven
@@ -732,7 +803,7 @@ try {
         rows=@($promotionRows | ForEach-Object {$_.Line});
         scope='Historical exact-member promotion witness; not a later Take, source match, upload, or complete 32-entry scan'}
     $promotionProven = !$WarmPublishedReuse -or $promotionRows.Count -gt 0
-    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven -and $buildingPilotProven -and $multiStageProven -and $textureTraceProven -and $shapeSplitProven -and $ownerStageProven -and $normalStageProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings; framePaceTrace = [bool]$FramePaceTrace
+    @{passed = [bool]($warmJobsProven -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven -and $buildingPilotProven -and $multiStageProven -and $physicalPrefetchProven -and $textureTraceProven -and $shapeSplitProven -and $ownerStageProven -and $normalStageProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings; framePaceTrace = [bool]$FramePaceTrace
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         renderCallCpuTimings = [bool]$TerrainPageTimings; renderCallCpuTimingProof = $callCpuProof
@@ -753,6 +824,8 @@ try {
         rapBuildingPilot = [bool]$RapBuildingPilot; rapBuildingPilotProof = $buildingPilotProof
         rapBuildingMultistage = [bool]$RapBuildingMultistage
         rapBuildingMultistageProof = $multiStageProof
+        dayZPhysicalPrefetch = [bool]$DayZPhysicalPrefetch
+        dayZPhysicalPrefetchProof = $physicalPrefetchProof
         dayZTextureTrace = [bool]$DayZTextureTrace
         dayZTextureTraceProof = $textureTraceProof
         dayZShapeSplit = [bool]$DayZShapeSplit
@@ -779,6 +852,7 @@ try {
     if (!$warmJobsProven) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
     if (!$buildingPilotProven) { throw 'NotExercised: no same-stage building physical capture and validated upload; evidence retained' }
     if (!$multiStageProven) { throw 'NotExercised: no same-stage tenement multistage physical capture and validated upload; evidence retained' }
+    if (!$physicalPrefetchProven) { throw 'NotExercised: no bounded parent raP stage capture and source-validated physical Take/upload for exact tenement; evidence retained' }
     if (!$textureTraceProven) { throw 'NotExercised: selected DayZ building texture trace incomplete; evidence retained' }
     if (!$shapeSplitProven) { throw 'NotExercised: selected DayZ shape install split absent; evidence retained' }
     if (!$ownerStageProven) { throw 'NotExercised: selected DayZ owner primary stage incomplete; evidence retained' }

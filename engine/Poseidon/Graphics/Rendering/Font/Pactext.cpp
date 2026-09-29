@@ -2222,7 +2222,7 @@ bool TextureSourcePac::Init(const char* name, PacLevelMem* mips, int maxMips)
         return (value && std::strcmp(value, "1") == 0) ||
             (multi && std::strcmp(multi, "1") == 0);
     }();
-    if (retainMemberIdentity && _isPaa && _mipmaps > 0 && in.GetBuffer())
+    if ((retainMemberIdentity || TenementPhysicalPaaScope::Active()) && _isPaa && _mipmaps > 0 && in.GetBuffer())
         _hasArchiveMemberIdentity = in.GetBuffer()->CopyArchiveMemberIdentity(_archiveMemberIdentity);
 
     // The shared binding contains metadata/lease only, not the Init read buffer.

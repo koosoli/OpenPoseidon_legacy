@@ -3221,7 +3221,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse, BeginOriginalHierarchy, StepHierarchy, RootHierarchy, FineHierarchy };
     struct GeometryPageSourceIdentity
     {
         std::array<uint8_t,32> sha256{};
@@ -3287,6 +3287,15 @@ class Engine : public IGraphicsEngine
         uint32_t producerInstance=UINT32_MAX, rendererInstance=UINT32_MAX;
         uint32_t meshCount=0, meshesPresent=0, meshesAbsent=0;
         uint32_t coarseTriangles=0, fineTriangles=0, coarsePages=0, finePages=0;
+        // Private original-source hierarchy: individual RAM page residency and
+        // complete selected cuts. No pixel/quality or physical GPU-free claim.
+        bool hierarchicalPilot=false;
+        uint32_t hierarchyPages=0,hierarchyRootPages=0,hierarchyResidentPages=0;
+        uint32_t hierarchySelectedTriangles=0,hierarchyCutModel=UINT32_MAX;
+        uint64_t hierarchyRequiredMask=0,hierarchyResidentMask=0,hierarchyMissingMask=0;
+        std::vector<uint32_t> hierarchySelectedClusters;
+        std::string hierarchyPackageSha256;
+        float hierarchyThreshold=0;
         bool active=false, fineSelected=false, cpuHelpersUnchanged=false;
         bool mainFrameReturned=false, cascadeConfigured=false, localShadowConfigured=false;
         int32_t renderReturnStatus=INT32_MIN;

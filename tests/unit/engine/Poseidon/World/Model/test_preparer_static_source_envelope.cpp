@@ -1219,7 +1219,8 @@ TEST_CASE("Tenement multistage raP handoff prepares only exact authored physical
         std::array<std::string,4> materials, normals;
         std::array<std::string,4> relativeNormals;
         Bank(const std::array<const char*,4>& relativeMaterials,
-             const std::array<const char*,4>& paaNames, bool validFourth = true)
+             const std::array<const char*,4>& paaNames, bool validFourth = true,
+             const char* stageName = "Stage11")
         {
             auto str = [](Bytes& b,const char* s) { while (*s) b.U8(uint8_t(*s++)); b.U8(0); };
             std::array<Bytes,4> raps;
@@ -1232,7 +1233,7 @@ TEST_CASE("Tenement multistage raP handoff prepares only exact authored physical
                 rap.data = {0,'r','a','P',0,0,0,0,8,0,0,0,0x0a,0x06,0,0};
                 rap.U8(0); rap.U8(2);
                 rap.U8(1); rap.U8(0); str(rap,"PixelShaderID"); str(rap,"Multi");
-                rap.U8(0); str(rap,"Stage11"); const size_t pointer = rap.data.size(); rap.U32(0);
+                rap.U8(0); str(rap,stageName); const size_t pointer = rap.data.size(); rap.U32(0);
                 const auto body = static_cast<uint32_t>(rap.data.size());
                 for (int j=0;j<4;++j) rap.data[pointer+j] = char(body >> (8*j));
                 rap.U8(0); rap.U8(1); rap.U8(1); rap.U8(0);
@@ -1320,6 +1321,52 @@ TEST_CASE("Tenement multistage raP handoff prepares only exact authored physical
         REQUIRE(shape); REQUIRE(converted.model);
         store.Clear();
     }
+    SECTION("exact tenement prefetch accepts authored base-colour stages, not a normal suffix list")
+    {
+        if (!enabled("WGR_OBJECT_STREAM_DAYZ_PHYSICAL_PREFETCH"))
+            SKIP("Fresh exact tenement physical prefetch flag required.");
+        const std::array<const char*,4> colours{{
+            R"(data\plaster\arbitrary_colour_a.paa)",
+            R"(data\plaster\arbitrary_colour_b.paa)",
+            R"(data\plaster\arbitrary_colour_c.paa)",
+            R"(data\plaster\arbitrary_colour_d.paa)"}};
+        Bank bank(relativeMaterials,colours,true,"Stage0");
+        store.Clear();
+        Preparer prep; prep.Reset(&identity,1); RequireWorkers(prep);
+        REQUIRE(prep.SubmitConvert(0,makeModel(bank),tables,nullptr,nullptr,true,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::RapCapture;}));
+        REQUIRE(prep.ResumeRapCapture(0,capture));
+        REQUIRE(Wait([&]{return prep.Query(0)==Preparer::State::Converted;}));
+        for (size_t i=0;i<colours.size();++i)
+        {
+            REQUIRE(store.ProbeWarmEntry(bank.normals[i],nullptr).entryPresent);
+            auto own = Poseidon::GFileBanks[bank.index].CaptureReadRequest(
+                bank.relativeNormals[i].c_str(),true);
+            auto other = Poseidon::GFileBanks[bank.index].CaptureReadRequest(
+                bank.relativeNormals[(i+1)%colours.size()].c_str(),true);
+            REQUIRE(own); REQUIRE(other);
+            Poseidon::BankReadMemberIdentity birth, changed;
+            REQUIRE(own->CopyMemberIdentity(birth)); REQUIRE(other->CopyMemberIdentity(changed));
+            Poseidon::PAABlockChain chain; Poseidon::BankReadRequest retained;
+            CHECK_FALSE(Poseidon::GFileBanks[bank.index].MatchesMountedMember(
+                bank.relativeNormals[i].c_str(),*other));
+            if (i == 0)
+            {
+                CHECK_FALSE(store.TakePhysical(bank.normals[i],changed,chain,retained));
+                CHECK_FALSE(store.ProbeWarmEntry(bank.normals[i],nullptr).entryPresent);
+            }
+            else
+            {
+                REQUIRE(store.TakePhysical(bank.normals[i],birth,chain,retained));
+                REQUIRE(chain.valid());
+                REQUIRE(Poseidon::GFileBanks[bank.index].MatchesMountedMember(
+                    bank.relativeNormals[i].c_str(),retained));
+            }
+        }
+        auto converted = prep.TakeConverted(0);
+        std::unique_ptr<Poseidon::LODShapeWithShadow> shape(converted.shape);
+        REQUIRE(shape); store.Clear();
+    }
     SECTION("unsupported fourth raP never publishes that stage")
     {
         Bank bank(relativeMaterials,relativeNormals,false);
@@ -1349,6 +1396,31 @@ TEST_CASE("Tenement multistage raP handoff prepares only exact authored physical
         for (const auto& normal : bank.normals)
             REQUIRE_FALSE(store.ProbeWarmEntry(normal, nullptr).entryPresent);
         store.Clear();
+    }
+}
+
+TEST_CASE("Exact tenement PAA Init-purpose identity allowance refuses overflow",
+          "[preparer][rap-building-physical]")
+{
+    const char* enabled = std::getenv("WGR_OBJECT_STREAM_DAYZ_PHYSICAL_PREFETCH");
+    if (!enabled || std::strcmp(enabled,"1") != 0)
+        SKIP("Fresh exact tenement physical prefetch flag required.");
+    Poseidon::Foundation::CaptureMainThread();
+    CHECK_FALSE(Poseidon::TenementPhysicalPaaScope::Active());
+    {
+        Poseidon::TenementPhysicalPaaScope scope(true);
+        REQUIRE(Poseidon::TenementPhysicalPaaScope::Active());
+        for (size_t i=0;i<256;++i)
+            REQUIRE(Poseidon::TenementPhysicalPaaScope::ReserveIdentity());
+        CHECK_FALSE(Poseidon::TenementPhysicalPaaScope::ReserveIdentity());
+        CHECK(Poseidon::TenementPhysicalPaaScope::Overflowed());
+    }
+    CHECK_FALSE(Poseidon::TenementPhysicalPaaScope::Active());
+    CHECK_FALSE(Poseidon::TenementPhysicalPaaScope::ReserveIdentity());
+    {
+        Poseidon::TenementPhysicalPaaScope next(true);
+        CHECK_FALSE(Poseidon::TenementPhysicalPaaScope::Overflowed());
+        CHECK(Poseidon::TenementPhysicalPaaScope::ReserveIdentity());
     }
 }
 TEST_CASE("Cold chain cancellation keeps actual worker debt until exit and replacement progresses", "[preparer][cold-paa-handoff]")

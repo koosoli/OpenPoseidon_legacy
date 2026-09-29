@@ -98,7 +98,7 @@ struct WarmTextureRead
 // and captures the current physical PAA member before optional preparation.
 struct RapStageCandidateHandoff
 {
-    enum class Consumer : uint8_t { NormalMap, LayerNormal1, LayerNormal2, LayerNormal3 };
+    enum class Consumer : uint8_t { NormalMap, LayerNormal1, LayerNormal2, LayerNormal3, AuthoredStage };
     struct Material
     {
         std::string key, stageName;
@@ -107,18 +107,22 @@ struct RapStageCandidateHandoff
         bool SameCurrentMember(const BankReadMemberIdentity& current) const noexcept
         { return sourceMember == current; }
     };
-    static constexpr size_t MaxMaterials = 4, MaxStagesPerMaterial = 4;
-    static constexpr size_t MaxCandidates = 4;
+    static constexpr size_t MaxMaterials = 16, MaxStagesPerMaterial = 16;
+    static constexpr size_t MaxCandidates = 64;
+    bool broadParentPaa = false;
+    bool overflow = false; // partial candidate set; never a complete dependency claim
     uint64_t generation = 0;
     uint32_t modelIndex = 0;
     std::vector<Material> materials;
-    static constexpr size_t MaxKnownBytes = 4 * 1024;
+    static constexpr size_t MaxKnownBytes = 64 * 1024;
     bool Bounded() const
     {
-        if (!generation || materials.empty() || materials.size() > MaxCandidates ||
-            materials.capacity() > MaxCandidates) return false;
+        const size_t limit = broadParentPaa ? MaxCandidates : 4;
+        const size_t byteLimit = broadParentPaa ? MaxKnownBytes : 4 * 1024;
+        if (!generation || materials.empty() || materials.size() > limit ||
+            materials.capacity() > limit) return false;
         size_t charge = sizeof(*this);
-        auto add = [&](size_t bytes) { if (bytes > MaxKnownBytes - charge) return false; charge += bytes; return true; };
+        auto add = [&](size_t bytes) { if (charge > byteLimit || bytes > byteLimit - charge) return false; charge += bytes; return true; };
         if (!add(materials.capacity() * sizeof(Material))) return false;
         size_t uniqueMaterials = 0;
         for (size_t i = 0; i < materials.size(); ++i)
@@ -126,7 +130,8 @@ struct RapStageCandidateHandoff
             const auto& material = materials[i];
             if (material.key.empty() || material.key.size() > 240 ||
                 material.stageName.empty() || material.stageName.size() > 240 ||
-                material.consumer > Consumer::LayerNormal3 || !material.sourceMember.bytes ||
+                material.consumer > (broadParentPaa ? Consumer::AuthoredStage : Consumer::LayerNormal3) ||
+                !material.sourceMember.bytes ||
                 material.sourceMember.offset > material.sourceMember.archiveBytes ||
                 material.sourceMember.bytes > material.sourceMember.archiveBytes - material.sourceMember.offset ||
                 !add(material.key.capacity() + 1) || !add(material.stageName.capacity() + 1))
@@ -138,10 +143,11 @@ struct RapStageCandidateHandoff
                 {
                     ++appearances;
                     if (j < i) seenEarlier = true;
-                    if (j < i && materials[j].consumer == material.consumer) return false;
+                    if (j < i && materials[j].consumer == material.consumer &&
+                        (!broadParentPaa || materials[j].stageName == material.stageName)) return false;
                 }
-            if (appearances > MaxStagesPerMaterial ||
-                (!seenEarlier && ++uniqueMaterials > MaxMaterials)) return false;
+            if (appearances > (broadParentPaa ? MaxStagesPerMaterial : 4) ||
+                (!seenEarlier && ++uniqueMaterials > (broadParentPaa ? MaxMaterials : 4))) return false;
         }
         return true;
     }

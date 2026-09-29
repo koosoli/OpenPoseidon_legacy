@@ -480,6 +480,9 @@ struct InstanceTargetRevision {
     // Last completed off-handle uploader write observed under its exclusive
     // CPU lock. None forces the first observation to invalidate old samples.
     uploader_serial: Option<u64>,
+    // Last observed invalidation kind, private diagnostic only. Multiple
+    // mutations may coalesce before a getter; this is not a complete history.
+    last_mutation: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -551,12 +554,13 @@ impl InstanceTable {
             Some(witness) => {
                 witness.model_id = model_id;
                 witness.uploader_serial = None;
+                witness.last_mutation = 8;
                 if witness.revision != 0 {
                     witness.revision = witness.revision.checked_add(1).unwrap_or(0);
                 }
             }
             None => self.target_revision = Some(Box::new(InstanceTargetRevision {
-                model_id, revision: 1, uploader_serial: None,
+                model_id, revision: 1, uploader_serial: None, last_mutation: 0,
             })),
         }
         self.target_revision().map(|(_, revision)| revision)
@@ -572,6 +576,7 @@ impl InstanceTable {
             if witness.revision != 0 &&
                 (witness.model_id == first || witness.model_id == second) {
                 witness.revision = witness.revision.checked_add(1).unwrap_or(0);
+                witness.last_mutation = 1;
             }
         }
     }
@@ -580,9 +585,14 @@ impl InstanceTable {
     /// serial conservatively, so old samples fail but fresh samples can follow.
     /// Only overflow permanently invalidates the witness.
     fn advance_target_revision_for_unattributed_geometry(&mut self) {
+        self.advance_target_revision_with_kind(0);
+    }
+
+    fn advance_target_revision_with_kind(&mut self, kind: u32) {
         if let Some(witness) = &mut self.target_revision {
             if witness.revision != 0 {
                 witness.revision = witness.revision.checked_add(1).unwrap_or(0);
+                witness.last_mutation = kind;
             }
         }
     }
@@ -592,9 +602,11 @@ impl InstanceTable {
         if witness.revision == 0 { return; }
         if serial == 0 || witness.uploader_serial.is_some_and(|old| serial < old) {
             witness.revision = 0; // serial wrapped or retreated: no safe identity
+            witness.last_mutation = 7;
         } else if witness.uploader_serial != Some(serial) {
             witness.uploader_serial = Some(serial);
             witness.revision = witness.revision.checked_add(1).unwrap_or(0);
+            witness.last_mutation = 7;
         }
     }
 
@@ -771,7 +783,7 @@ fn resolved_sections_changed(previous: &[SectionGpu], next: &[SectionGpu],
     if previous == next { return false; }
     // This comparison already belonged to set_sections. Unknown reverse
     // ownership advances only an explicitly armed target witness.
-    instances.advance_target_revision_for_unattributed_geometry();
+    instances.advance_target_revision_with_kind(2);
     true
 }
 
@@ -2988,6 +3000,14 @@ impl CullState {
     /// the next exact sample can use the new value. Visual policy is unchanged.
     pub fn advance_retained_target_revision_for_geometry(&mut self) {
         self.instances.advance_target_revision_for_unattributed_geometry();
+    }
+
+    pub fn advance_retained_target_revision_with_kind(&mut self, kind: u32) {
+        self.instances.advance_target_revision_with_kind(kind);
+    }
+
+    pub fn retained_target_last_mutation(&self) -> u32 {
+        self.instances.target_revision.as_ref().map_or(0, |w| w.last_mutation)
     }
 
     /// Completed off-handle writes may belong to any registered model. This

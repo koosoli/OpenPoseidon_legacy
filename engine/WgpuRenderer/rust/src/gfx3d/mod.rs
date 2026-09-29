@@ -5761,7 +5761,7 @@ impl Gfx3d {
         // The new skin data can move or reshape a shadow caster without
         // changing its instance row. Keep private target COUNT/image facts
         // from reusing an older geometry revision.
-        self.cull.advance_retained_target_revision_for_geometry();
+        self.cull.advance_retained_target_revision_with_kind(3); // skin data
     }
 
     // Re-upload vertex data for an existing (dynamic) mesh, e.g. a skeletally
@@ -5781,7 +5781,7 @@ impl Gfx3d {
         // witness after a successful on-renderer vertex update. Old samples
         // fail; new samples can use the new serial. The off-handle uploader
         // remains a separate unobserved path.
-        self.cull.advance_retained_target_revision_for_geometry();
+        self.cull.advance_retained_target_revision_with_kind(4); // owner mesh write
     }
 
     pub fn retained_target_revision(&self) -> Option<(u32, u64)> {
@@ -5791,7 +5791,7 @@ impl Gfx3d {
     pub fn texture_content_changed(&mut self) {
         // The texture owner of an alpha-tested caster is not available here.
         // Conservatively invalidate only an armed private COUNT witness.
-        self.cull.advance_retained_target_revision_for_geometry();
+        self.cull.advance_retained_target_revision_with_kind(5); // texture content
     }
 
     pub fn observe_uploader_mutation_serial(&mut self, serial: u64) {
@@ -8183,7 +8183,7 @@ impl Gfx3d {
             // altering its instance row or the selected model's COUNT inputs.
             // The owner is not known here, so invalidate the optional witness
             // conservatively after any successful palette upload.
-            self.cull.advance_retained_target_revision_for_geometry();
+            self.cull.advance_retained_target_revision_with_kind(6); // pose palette
         }
 
         // (Re)build the combined group-1 bind groups when a backing buffer moved
@@ -10540,6 +10540,9 @@ impl Gfx3d {
     }
     pub fn take_main_count_probe_event(&mut self, lane: usize) -> Option<(u64, u32, u64, u64, u64, u64)> {
         self.cull.take_count_probe_event(lane)
+    }
+    pub fn retained_target_last_mutation(&self) -> u32 {
+        self.cull.retained_target_last_mutation()
     }
     pub fn main_target_completion_fact(&self) -> main_count_completion::Fact {
         self.main_count_completion.as_ref().map_or(main_count_completion::Fact::default(),

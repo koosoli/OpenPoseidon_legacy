@@ -472,6 +472,8 @@ struct ObjectStreamPreparer::Impl
         std::vector<CapturedRapMaterial> rapMaterials; // typed NormalMap owner handoff, no PAA work
         int8_t buildingRapFixture = -1; // worker discovery before conversion, exact pilot only
         bool tenementMultistage = false; // separate default-off measured first-touch slice
+        bool broadParentPaa = false; // exact-tenement authored PAA worker preparation
+        bool broadCaptureIncomplete = false;
 
         std::unique_ptr<render::ColdPaaRead> coldTexture;
         uint64_t textureGeneration = 0;
@@ -552,7 +554,7 @@ struct ObjectStreamPreparer::Impl
     }
     bool PreparePackedTexture(const PackedTextureRead& texture, uint64_t jobGen, uint32_t index,
         uint64_t textureGeneration, const render::DdsPublicationToken& publication,
-        bool publicationRequired, PaaAttemptRow& attemptRow,
+        bool publicationRequired, bool boundedParentPaa, PaaAttemptRow& attemptRow,
         uint64_t& prepared, uint64_t& preparedBytes, uint64_t& skipped, uint64_t& unreadable);
 
     // Empty/default-off. Allocated only with a valid optional publication inventory.
@@ -609,6 +611,7 @@ struct ObjectStreamPreparer::Impl
 bool ObjectStreamPreparer::Impl::PreparePackedTexture(const PackedTextureRead& texture,
     uint64_t jobGen, uint32_t index, uint64_t textureGeneration,
     const render::DdsPublicationToken& publication, bool publicationRequired,
+    bool boundedParentPaa,
     PaaAttemptRow& attemptRow, uint64_t& prepared, uint64_t& preparedBytes,
     uint64_t& skipped, uint64_t& unreadable)
 {
@@ -669,6 +672,9 @@ bool ObjectStreamPreparer::Impl::PreparePackedTexture(const PackedTextureRead& t
         const double readDecodeMs = paaAttemptDiagnostics ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - readBegan).count() : 0;
         if (paaAttemptDiagnostics) attemptRow.readDecodeMs += readDecodeMs;
         const size_t bytes = chain.blocks.size();
+        if (boundedParentPaa && (preparedBytes > 128ull * 1024 * 1024 ||
+            bytes > 128ull * 1024 * 1024 - preparedBytes))
+        { trace.outcome = Proof::Event::WorkerPutRefused; ++skipped; return true; }
         // Source storage has already been released. The <=16 MiB
         // chain and compact alpha plane fit the existing 64 MiB
         // scratch reservation, including conservative growth.
@@ -777,7 +783,39 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 try
                 {
                     const auto& fixture = BuildingRapFixtures[static_cast<size_t>(job.buildingRapFixture)];
-                    if (mayRead && job.tenementMultistage &&
+                    if (mayRead && job.broadParentPaa &&
+                        job.buildingRapFixture == 0 && job.rapMaterials.size() <= 16)
+                    {
+                        candidate = std::make_unique<RapStageCandidateHandoff>();
+                        candidate->generation = jobGen;
+                        candidate->modelIndex = job.index;
+                        candidate->broadParentPaa = true;
+                        candidate->overflow = job.broadCaptureIncomplete;
+                        for (const auto& selected : job.rapMaterials)
+                        {
+                            BankReadMemberIdentity member;
+                            std::vector<char> bytes;
+                            if (!selected.read.CopyMemberIdentity(member) ||
+                                selected.read.bytes > RapMaterialLimit ||
+                                !selected.read.Read(bytes) || bytes.size() != selected.read.bytes)
+                            { candidate->overflow = true; continue; }
+                            const auto result = Streaming::ExtractOwnedRapStageNames(
+                                std::span<const char>(bytes.data(), bytes.size()), selected.key);
+                            if (result.status != Streaming::RapStageNamesStatus::Complete)
+                            { candidate->overflow = true; continue; }
+                            for (const auto& name : result.names)
+                            {
+                                if (std::any_of(candidate->materials.begin(), candidate->materials.end(),
+                                    [&](const auto& prior) { return prior.stageName == name; })) continue;
+                                if (candidate->materials.size() >= RapStageCandidateHandoff::MaxCandidates)
+                                { candidate->overflow = true; break; }
+                                candidate->materials.push_back({selected.key, name,
+                                    RapStageCandidateHandoff::Consumer::AuthoredStage, member});
+                            }
+                        }
+                        if (candidate->materials.empty() || !candidate->Bounded()) candidate.reset();
+                    }
+                    else if (mayRead && job.tenementMultistage &&
                         job.buildingRapFixture == 0 && job.rapMaterials.size() <= 16)
                     {
                         for (const auto& selected : job.rapMaterials)
@@ -837,20 +875,28 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 catch (...) { candidate.reset(); }
                 const size_t slot = static_cast<size_t>(job.buildingRapFixture);
                 const bool multistage = job.tenementMultistage;
+                const bool broadParent = job.broadParentPaa;
+                const size_t materialCount = job.rapMaterials.size();
                 job.buildingRapFixture = -1;
                 job.rapMaterials.clear(); // release physical archive lease outside queue mutex
                 static std::atomic<unsigned> discoveryRows{0};
                 static std::atomic<bool> multistageDiscoveryLogged{false};
-                const bool logDiscovery = multistage ?
+                const bool logDiscovery = broadParent || multistage ?
                     !multistageDiscoveryLogged.exchange(true, std::memory_order_relaxed) :
                     discoveryRows.fetch_add(1, std::memory_order_relaxed) < BuildingRapFixtures.size();
                 if (logDiscovery)
                     LOG_INFO(World, "RVMAT raP building discovery: modelIndex={} model={} material={} stage={} candidates={} multistage={} (worker parse; no owner PAA binding yet)",
                         job.index, conversionPath,
-                        multistage ? "authored-tenement-materials" : BuildingRapFixtures[slot].material,
-                        multistage ? "trace-top-four-normals" : BuildingRapFixtures[slot].normal,
+                        broadParent ? "parent-IR-physical-raP" :
+                            (multistage ? "authored-tenement-materials" : BuildingRapFixtures[slot].material),
+                        broadParent ? "authored-file-backed-PAA" :
+                            (multistage ? "trace-top-four-normals" : BuildingRapFixtures[slot].normal),
                         candidate ? candidate->materials.size() : 0,
                         multistage);
+                if (broadParent)
+                    LOG_INFO(World, "DayZ physical prefetch: modelIndex={} parentMaterials={} stageCandidates={} candidateOverflow={} sourceReady={} (worker raP names; no proxy IR coverage)",
+                        job.index, materialCount, candidate ? candidate->materials.size() : 0,
+                        candidate ? candidate->overflow : true, candidate != nullptr);
                 lock.lock();
                 const bool current = !stop && jobGen == generation.load(std::memory_order_relaxed) &&
                     job.index < count && !stale[job.index] && paths[job.index] == conversionPath &&
@@ -1013,7 +1059,8 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                     if (ownedCold && texture.key == ownedCold->read.key &&
                         texture.ReadRequest().SameArchiveMember(ownedCold->read.source->Request())) continue;
                     if (!PreparePackedTexture(texture, jobGen, job.index, job.textureGeneration,
-                        job.texturePublication, job.texturePublicationRequired, attemptRow,
+                        job.texturePublication, job.texturePublicationRequired,
+                        job.broadParentPaa, attemptRow,
                         prepared, preparedBytes, skipped, unreadable)) break;
                 }
             }
@@ -1155,7 +1202,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                             Streaming::WarmTextureProvenance::Event::WorkerStarted, job.index, job.generation));
                     }
                     keep = PreparePackedTexture(texture, job.generation, job.index, job.textureGeneration,
-                        job.publication, true, row, prepared, bytes, skipped, unreadable);
+                        job.publication, true, false, row, prepared, bytes, skipped, unreadable);
                     ++job.next;
                 }
                 catch (...) { ++unreadable; ++job.next; }
@@ -1600,7 +1647,8 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         const char* flag = std::getenv("WGR_OBJECT_STREAM_PBO_TEXTURES");
         return render::PreparedTextureStore::Enabled() && flag && flag[0] == '1';
     }();
-    auto publication = (render::PreparedTextureStore::NativeDdsEnabled() || pboTextures || WarmTextureJobsEnabled() || render::ColdPaaHandoffEnabled())
+    auto publication = (render::PreparedTextureStore::NativeDdsEnabled() || pboTextures || WarmTextureJobsEnabled() ||
+        TenementPhysicalPaaScope::Enabled() || render::ColdPaaHandoffEnabled())
         ? render::DdsPublicationInventory::Create(modelCount) : nullptr;
     std::vector<std::unique_ptr<render::ColdPaaOwned>> freshCold;
     if (render::ColdPaaHandoffEnabled() && publication)
@@ -2185,6 +2233,60 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     std::vector<Impl::CapturedRapMaterial> rapMaterials;
     int buildingRapFixture = -1;
     bool tenementMultistage = false;
+    bool broadParentPaa = false;
+    bool broadCaptureIncomplete = false;
+    if (TenementPhysicalPaaScope::Enabled() && ownerTextureAdmission &&
+        Foundation::IsMainThread() && GUseFileBanks && !originalSource &&
+        render::PreparedTextureStore::Enabled() &&
+        model->sourcePath == R"(dz\structures\residential\tenements\tenement_small.p3d)")
+    {
+        // Parent IR only. Do not infer proxy closure from names: the adapter's
+        // config/file probe decides those later, on the owner thread.
+        try
+        {
+            size_t visits = 0;
+            uint64_t materialBytes = 0;
+            for (const auto& level : model->lodLevels)
+            {
+                if (level.purpose != Model::LodPurpose::Visual) continue;
+                for (const auto& material : level.mesh.materials)
+                {
+                    if (++visits > 256 || rapMaterials.size() >= 16)
+                    { broadCaptureIncomplete = true; break; }
+                    const auto path = Asset::VirtualPath::Parse(material.materialPath);
+                    const std::string& key = path.canonical();
+                    if (key.empty()) continue;
+                    if (key.size() > 240 || path.extension() != ".rvmat" || path.looksHostAbsolute())
+                    { broadCaptureIncomplete = true; continue; }
+                    if (std::any_of(rapMaterials.begin(), rapMaterials.end(),
+                        [&](const auto& prior) { return prior.key == key; })) continue;
+                    QFBank* bank = QIFStreamB::AutoBank(key.c_str());
+                    if (!bank) { broadCaptureIncomplete = true; continue; }
+                    const RString prefix = bank->GetPrefix();
+                    if (prefix.GetLength() < 0 ||
+                        static_cast<size_t>(prefix.GetLength()) >= key.size() ||
+                        CmpStartStr(key.c_str(), prefix))
+                    { broadCaptureIncomplete = true; continue; }
+                    auto read = bank->CaptureReadRequest(key.c_str() + prefix.GetLength(), true);
+                    if (!read || !read->HasArchiveIdentity() || !read->bytes ||
+                        read->bytes > Impl::RapMaterialLimit ||
+                        materialBytes + read->bytes > 4ull * 1024 * 1024 ||
+                        !bank->MatchesMountedMember(key.c_str() + prefix.GetLength(), *read))
+                    { broadCaptureIncomplete = true; continue; }
+                    materialBytes += read->bytes;
+                    rapMaterials.push_back({key, std::move(*read)});
+                }
+                if (visits > 256 || rapMaterials.size() >= 16)
+                { broadCaptureIncomplete = true; break; }
+            }
+            broadParentPaa = !rapMaterials.empty();
+            if (broadParentPaa) buildingRapFixture = 0; // reuse the single parked raP slot
+            LOG_INFO(World, "DayZ physical prefetch: parent model={} capturedRaP={} visitCount={} captureIncomplete={} materialSourceBytes={} maxRaP=16 maxVisits=256 (proxy IR excluded)",
+                model->sourcePath, rapMaterials.size(), visits, broadCaptureIncomplete, materialBytes);
+        }
+        catch (...) { rapMaterials.clear(); broadParentPaa = false; buildingRapFixture = -1;
+            broadCaptureIncomplete = true; }
+    }
     // Exact selected DayZ fixtures only. No lookup, bank load or allocation in
     // the default path. A fixture is attempted at most once per world, whether
     // capture succeeds or not; it cannot grow per-model admission work unboundedly.
@@ -2266,7 +2368,7 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
         const char* value = std::getenv("WGR_OBJECT_STREAM_RAP_BUILDING_MULTISTAGE");
         return value && std::strcmp(value, "1") == 0;
     }();
-    if (buildingRapPilot && rapStageCapture && ownerTextureAdmission &&
+    if (!broadParentPaa && buildingRapPilot && rapStageCapture && ownerTextureAdmission &&
         Foundation::IsMainThread() && WarmTextureJobsEnabled() &&
         ArchiveSourceBinding::ModelReadScope::MaterialPreflightReservationEnabled() &&
         render::PreparedTextureStore::Enabled() && GUseFileBanks && !originalSource)
@@ -2496,7 +2598,8 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     job.coldTexture = std::move(coldTexture);
     if (!rapMaterials.empty())
     {
-        job.reservation += Impl::RapCandidateLimit + rapMaterials.capacity() * sizeof(Impl::CapturedRapMaterial);
+        job.reservation += (broadParentPaa ? Impl::RapCandidateLimit : 4 * 1024) +
+            rapMaterials.capacity() * sizeof(Impl::CapturedRapMaterial);
         for (const auto& material : rapMaterials)
             job.reservation += material.key.capacity() + 1 + material.read.archive.capacity() + 1 +
                 material.read.ArchiveIdentityBytes() + 64;
@@ -2504,6 +2607,8 @@ bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::
     job.rapMaterials = std::move(rapMaterials);
     job.buildingRapFixture = static_cast<int8_t>(buildingRapFixture);
     job.tenementMultistage = tenementMultistage;
+    job.broadParentPaa = broadParentPaa;
+    job.broadCaptureIncomplete = broadCaptureIncomplete;
     if (!textures.empty())
     {
         job.reservation += textures.capacity() * sizeof(Impl::PackedTextureRead);
@@ -2558,20 +2663,26 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
     const size_t existingTextures = job->textures.size();
     uint64_t addedCharge = 0;
     const bool multistage = job->tenementMultistage && slot == 0;
+    const bool broadParent = job->broadParentPaa && slot == 0;
+    uint64_t addedSourceBytes = 0; // extra material stages only; earlier primary inputs are separate
+    size_t sourceRefused = 0;
     try
     {
         const auto& fixture = BuildingRapFixtures[slot];
         if (handoff && handoff->Bounded() &&
             handoff->generation == job->radiusGeneration && handoff->modelIndex == index &&
-            (multistage || handoff->materials.size() == 1) && job->texturePublication.Valid() &&
+            (broadParent || multistage || handoff->materials.size() == 1) &&
+            job->texturePublication.Valid() &&
             job->textureGeneration == render::PreparedTextureStore::Instance().Generation())
         {
             for (const auto& material : handoff->materials)
             {
-                if ((multistage ?
+                if ((broadParent ?
+                        material.consumer != RapStageCandidateHandoff::Consumer::AuthoredStage :
+                    multistage ?
                         material.consumer > RapStageCandidateHandoff::Consumer::LayerNormal3 :
                         material.consumer != RapStageCandidateHandoff::Consumer::NormalMap) ||
-                    (multistage ?
+                    (broadParent ? false : multistage ?
                         material.key.compare(0, std::strlen(TenementMaterialPrefix),
                             TenementMaterialPrefix) != 0 ||
                             !IsTenementMultistageNormal(material.stageName) :
@@ -2601,7 +2712,8 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
                             // this exact member and that it is still mounted.
                             const std::string& key = material.stageName;
                             if (key.capacity() <= 1024 && job->textures.size() < existingTextures +
-                                    (multistage ? TenementMultistageNormals.size() : 1) &&
+                                    (broadParent ? RapStageCandidateHandoff::MaxCandidates :
+                                        (multistage ? TenementMultistageNormals.size() : 1)) &&
                                 std::none_of(job->textures.begin(), job->textures.end(),
                                     [&](const auto& prior) { return prior.key == key; }))
                             {
@@ -2615,6 +2727,9 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
                                         key.c_str() + texturePrefix, true);
                                     if (read && read->HasArchiveIdentity() && read->bytes &&
                                         read->bytes <= Impl::PackedTextureLimit &&
+                                        (!broadParent ||
+                                            (addedSourceBytes <= 128ull * 1024 * 1024 &&
+                                             read->bytes <= 128ull * 1024 * 1024 - addedSourceBytes)) &&
                                         textureBank->MatchesMountedMember(key.c_str() + texturePrefix, *read))
                                     {
                                         const uint64_t knownSourceBytes = key.capacity() + 1 +
@@ -2627,14 +2742,20 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
                                             texture.key = key;
                                             texture.read = std::move(*read);
                                             texture.physicalWitness = true;
+                                            addedSourceBytes += texture.read.bytes;
                                             job->textures.push_back(std::move(texture));
                                             addedCharge += knownSourceBytes +
                                                 (job->textures.capacity() - previousCapacity) *
                                                     sizeof(Impl::PackedTextureRead);
                                         }
                                     }
+                                    else ++sourceRefused;
                                 }
+                                else ++sourceRefused;
                             }
+                            else if (key.capacity() > 1024 || job->textures.size() >= existingTextures +
+                                (broadParent ? RapStageCandidateHandoff::MaxCandidates :
+                                    (multistage ? TenementMultistageNormals.size() : 1))) ++sourceRefused;
                         }
                     }
                 }
@@ -2644,14 +2765,25 @@ bool ObjectStreamPreparer::ResumeRapCapture(uint32_t index, RapStageCapture capt
     catch (...) { addedCharge = 0; job->textures.resize(existingTextures); } // preserve ordinary inputs
     static std::atomic<unsigned> captureRows{0};
     static std::atomic<bool> multistageCaptureLogged{false};
-    const bool logCapture = multistage ?
+    const bool logCapture = broadParent || multistage ?
         !multistageCaptureLogged.exchange(true, std::memory_order_relaxed) :
         captureRows.fetch_add(1, std::memory_order_relaxed) < BuildingRapFixtures.size();
     if (logCapture)
         LOG_INFO(World, "RVMAT raP building owner capture: modelIndex={} model={} stage={} physicalMembersCaptured={} multistage={} (conversion resumes; upload validation still required)",
             index, BuildingRapFixtures[slot].model,
-            multistage ? "trace-top-four-normals" : BuildingRapFixtures[slot].normal,
+            broadParent ? "authored-file-backed-PAA" :
+                (multistage ? "trace-top-four-normals" : BuildingRapFixtures[slot].normal),
             job->textures.size() - existingTextures, multistage);
+    if (broadParent)
+    {
+        LOG_INFO(World, "DayZ physical prefetch: modelIndex={} stageCandidates={} captured={} sourceRefused={} candidateOverflow={} addedStageSourceBytes={} addedStageSourceLimit={} complete=false reason=parent-only-authored-superset",
+            index, handoff ? handoff->materials.size() : 0, job->textures.size() - existingTextures,
+            sourceRefused, handoff ? handoff->overflow : true, addedSourceBytes,
+            128ull * 1024 * 1024);
+        for (size_t i = existingTextures; i < job->textures.size(); ++i)
+            LOG_INFO(World, "DayZ physical prefetch captured: source={} memberBytes={} row={} limit=64",
+                job->textures[i].key, job->textures[i].read.bytes, i - existingTextures + 1);
+    }
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
         const bool current = !_impl->stop && index < _impl->count &&

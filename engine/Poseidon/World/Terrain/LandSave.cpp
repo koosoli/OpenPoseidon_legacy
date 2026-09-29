@@ -4447,7 +4447,11 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         preparsed->sourcePath = low;
                         auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
                         const auto tableStart = std::chrono::steady_clock::now();
+                        TenementPhysicalPaaScope physicalPaaTables(
+                            low == R"(dz\structures\residential\tenements\tenement_small.p3d)");
                         Model::ShapeAdapter::BuildAdapterBankTables(*preparsed, *tables);
+                        if (TenementPhysicalPaaScope::Overflowed())
+                            LOG_INFO(World, "DayZ physical prefetch: parent Init identity capture overflowed 256 attempts; uncaptured sources use ordinary reads");
                         tablePrepareMs += std::chrono::duration<double, std::milli>(
                             std::chrono::steady_clock::now() - tableStart).count();
                         ++tablesPrepared;
@@ -4722,6 +4726,9 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             }
             // Same taken ConvertedShape, joined nonyielding owner operation through first GPU registration.
             render::ColdPaaAdmissionScope coldTextureScope(coldTexture.get());
+            TenementPhysicalPaaScope physicalPaaAdmission(cold &&
+                std::strcmp((const char*)modelName,
+                    R"(dz\structures\residential\tenements\tenement_small.p3d)") == 0);
             const auto createStart = std::chrono::steady_clock::now();
             try
             {
@@ -4750,6 +4757,8 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             {
                 admitted = nullptr;
             }
+            if (TenementPhysicalPaaScope::Overflowed())
+                LOG_INFO(World, "DayZ physical prefetch: admission Init identity capture overflowed 256 attempts; uncaptured sources use ordinary reads");
             if (ownerPrimaryHandoff)
             {
                 if (ownerNormalsEnabled)

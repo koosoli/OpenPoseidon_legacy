@@ -1934,7 +1934,8 @@ uint64_t TextureWgpu::EnsureUploaded()
                  key == R"(dz\structures\data\concrete\concrete_panels_dirty_nohq.paa)" ||
                  key == R"(dz\structures\data\concrete\concrete_panels_nohq.paa)" ||
                  key == R"(dz\structures\data\plaster\plaster_flats03_nohq.paa)");
-            if (!fromColdHandoff && _src && (pilotKey || multistageKey))
+            if (!fromColdHandoff && _src &&
+                (pilotKey || multistageKey || TenementPhysicalPaaScope::Active()))
             {
                 BankReadMemberIdentity initializedMember;
                 if (_src->CopyArchiveMemberIdentity(initializedMember))
@@ -2188,6 +2189,21 @@ uint64_t TextureWgpu::EnsureUploaded()
                 ++rows;
                 LOG_INFO(Graphics, "RVMAT raP physical upload: source={} bytes={} memberBytes={} initMemberMatched=true currentMountMatched=true layoutMatched=true blockUploadSucceeded=true row={} limit=7",
                     SourceName(), total, physicalPreparedSource.bytes, rows);
+            }
+            if (TenementPhysicalPaaScope::Active())
+            {
+                static unsigned tenementRows = 0;
+                if (tenementRows < 64)
+                {
+                    ++tenementRows;
+                    LOG_INFO(Graphics, "DayZ physical prefetch upload: source={} bytes={} memberBytes={} initMemberMatched=true currentMountMatched=true layoutMatched=true blockUploadSucceeded=true row={} limit=64",
+                        SourceName(), total, physicalPreparedSource.bytes, tenementRows);
+                }
+                else if (tenementRows == 64)
+                {
+                    ++tenementRows;
+                    LOG_INFO(Graphics, "DayZ physical prefetch upload truncated: limit=64; observed prefix only");
+                }
             }
         }
     }

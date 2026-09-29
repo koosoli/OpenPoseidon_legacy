@@ -160,6 +160,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_geometry_page_clod_bake.cpp
     Graphics/test_geometry_page_clod_cut_decode.cpp
     Graphics/test_geometry_page_clod_ram_package.cpp
+    Graphics/test_geometry_page_hierarchical.cpp
     Graphics/test_geometry_page_clod_disk_codec.cpp
     Graphics/test_registration_cost_policy.cpp
     Graphics/test_alpha_classify.cpp

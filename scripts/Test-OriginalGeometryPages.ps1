@@ -1,6 +1,7 @@
-param([ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$Interactive,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
+param([switch]$Hierarchy,[ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$Interactive,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
  [string]$Label='original-geometry-pages',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
+if($Hierarchy -and ($DiskFault -ne 'None' -or $CameraPrefetch -or $ProjectedPrefetch -or $AutoFine -or $AutoCoarse -or $Interactive -or $CameraTuple -or $CameraTupleScaleRefusal -or $SurfaceCertificate -or $MainCountProbe -or $SurfaceFault -ne 'None')){throw 'Hierarchy is an independent original-source RAM-page fixture'}
 if($SurfaceFault -ne 'None'){$SurfaceCertificate=$true}
 if($MainCountProbe){$SurfaceCertificate=$true}
 if($CameraTupleScaleRefusal){$CameraTuple=$true}
@@ -15,6 +16,7 @@ if(!$env:LOCK_OWNER){
  $shell=Join-Path $PSHOME $(if($PSVersionTable.PSEdition -eq 'Core'){'pwsh.exe'}else{'powershell.exe'})
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),$shell.Replace('\','/'),'-NoProfile','-File',$PSCommandPath,'-Label',$Label,'-GameDir',$GameDir,'-Python',$Python,'-DiskFault',$DiskFault)
  if($Tools){$argv+=@('-Tools',$Tools)}
+ if($Hierarchy){$argv+='-Hierarchy'}
  if($CameraPrefetch){$argv+='-CameraPrefetch'}
  if($ProjectedPrefetch){$argv+='-ProjectedPrefetch'}
  if($AutoFine){$argv+='-AutoFine'}
@@ -179,6 +181,7 @@ try{
     function Action($action) {
         $command=@{cmd='geometry_page_fixture';action=$action;x=1200;y=15;z=1240}
         if($action -eq 'beginOriginalDiskClodPaged'){$command.disk=@{path=$diskPath;producer=$originalProducer};$command.sourceAdmissionEpoch=1}
+        if($action -eq 'beginOriginalHierarchy'){$command.sourceAdmissionEpoch=1}
         Send $command
     }
     function Capture($name) {
@@ -513,6 +516,45 @@ try{
     @{objects=$worldCoverage;camera=$camera}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $out 'normalworld-coverage.json')
     Capture 'baseline.png'
     $pose=Send @{cmd='eval';code='triFreeFlyPose "1184 1240 18 90 -8"'};Require $pose @('result');if($pose.result.Trim('"') -ne 'OK'){throw 'Original fixture camera refused'}
+    if($Hierarchy){
+     function HierarchyReady {
+      $until=[DateTime]::UtcNow.AddSeconds(15)
+      do {
+       $c=Action 'status'
+       if($c.status -eq 'Ready' -and $c.mainFrameReturned -and $c.observedRequestId -eq $c.requestId){return $c}
+       if($c.status -notin @('Pending','Ready','Busy')){throw "Hierarchy refused: $($c|ConvertTo-Json -Compress)"}
+       $null=Send @{cmd='screenshot';path=(Join-Path $out 'hierarchy-pump.png')}
+      }while([DateTime]::UtcNow -lt $until)
+      throw 'Hierarchy did not settle'
+     }
+     function HierarchyBounded($c){
+      Require $c @('hierarchicalPilot','hierarchyPages','hierarchyRootPages','hierarchyResidentPages','hierarchyPackageSha256','sourceAdmissionEpoch','knownPayloadBytes','pageReservedBytes','meshCount','hierarchySelectedClusters','hierarchySelectedTriangles')
+      if(!$c.hierarchicalPilot -or $c.hierarchyPages -lt 2 -or $c.hierarchyPages -gt 64 -or $c.hierarchyRootPages -lt 1 -or $c.hierarchyRootPages -gt $c.hierarchyPages -or $c.hierarchyResidentPages -gt $c.hierarchyPages -or $c.hierarchyPackageSha256 -notmatch '^[0-9a-f]{64}$' -or $c.sourceAdmissionEpoch -ne 1 -or ($c.knownPayloadBytes+$c.pageReservedBytes) -gt 1048576 -or $c.meshCount -gt 64 -or @($c.hierarchySelectedClusters).Count -gt 64){throw 'Hierarchy source, capacity or topology contract failed'}
+      return $c
+     }
+     $begin=Action 'beginOriginalHierarchy';$fallback=HierarchyBounded (HierarchyReady)
+     if(!$fallback.fallbackSelected -or $fallback.fallbackTriangles -ne 2 -or $fallback.hierarchyResidentPages -ne 0 -or $fallback.meshesPresent -ne 1){throw 'Authored fallback missing before hierarchy page loading'}
+     Capture 'hierarchy-authored.png'
+     $cuts=@();$steps=@()
+     foreach($target in @('rootHierarchy','fineHierarchy','rootHierarchy')){
+      $before=HierarchyReady;$null=Action $target
+      for($i=0;$i -le 65;$i++){
+       $prior=HierarchyReady;$step=Action 'stepHierarchy';$c=HierarchyBounded (HierarchyReady)
+       if($c.hierarchyResidentPages-$prior.hierarchyResidentPages -gt 1){throw 'More than one hierarchy page uploaded by one step'}
+       if($c.rendererInstance -ne $fallback.rendererInstance -or $c.producerInstance -ne $fallback.producerInstance -or $c.hierarchyPackageSha256 -cne $fallback.hierarchyPackageSha256){throw 'Hierarchy source or fixed instance changed'}
+       $steps+=@{target=$target;before=$prior;after=$c}
+       if(!$c.fallbackSelected -and $c.hierarchyMissingMask -eq 0 -and (($target -eq 'fineHierarchy') -eq $c.fineSelected)){break}
+      }
+      if($i -gt 65 -or $c.hierarchySelectedTriangles -lt 1 -or @($c.hierarchySelectedClusters).Count -lt 1){throw 'Complete requested hierarchy cut not published'}
+      if($target -eq 'fineHierarchy' -and $c.hierarchySelectedTriangles -ne 512){throw 'Fine hierarchy lost original triangles'}
+      $cuts+=,$c;Capture ('hierarchy-cut-'+$cuts.Count+'.png')
+     }
+     if($cuts[0].producerModel -ne $cuts[2].producerModel -or $cuts[0].rendererModel -ne $cuts[2].rendererModel -or $cuts[2].meshCount -ne $cuts[1].meshCount){throw 'Root return recreated owned resources'}
+     $null=Action 'abort';$retired=HierarchyReady
+     if($retired.active -or $retired.meshesPresent -ne 0 -or $retired.meshesAbsent -ne $retired.meshCount){throw 'Hierarchy Abort did not observe full record retirement'}
+     $secondBegin=Action 'beginOriginalHierarchy';if($secondBegin.status -ne 'Busy'){throw 'Original admission rearmed after Abort'}
+     $result=@{passed=$true;hierarchy=$true;begin=$begin;fallback=$fallback;cuts=$cuts;steps=$steps;retired=$retired;secondBegin=$secondBegin;scope='Authenticated original snapshot; bounded independent RAM pages and complete root/fine cuts on one instance, record retirement; no automatic retail paging/all-view/device-free/performance proof'}
+    }else{
     $begin=Action 'beginOriginalDiskClodPaged'
     $fallback=PageCut (Observe $true $false)
     if(!$fallback.fallbackSelected -or $fallback.fallbackTriangles -ne 2 -or $fallback.coarseTriangles -ne 0 -or $fallback.fineTriangles -ne 0 -or $fallback.fineResident -or $fallback.coarseResident -or $fallback.meshesPresent -ne 1){throw 'Missing independently drawn original fallback'}
@@ -766,6 +808,7 @@ try{
     $result=@{passed=$true;surfaceCertificate=[bool]$SurfaceCertificate;surfaceFault=$SurfaceFault;surfaceProof=$surfaceProof;diskFault=$DiskFault;cameraPrefetch=[bool]$CameraPrefetch;projectedPrefetch=[bool]$ProjectedPrefetch;autoFine=[bool]$AutoFine;autoCoarse=[bool]$AutoCoarse;cameraTuple=[bool]$CameraTuple;cameraTupleScaleRefusal=[bool]$CameraTupleScaleRefusal;cameraEvidence=$cameraEvidence;cameraTupleEvidence=$cameraTupleEvidence;begin=$begin;baseline=$baseline;normalworldCoverage=$worldCoverage;normalworldCamera=$camera;fallback=$fallback;coarse=$coarse;fine=$fine;heldRequest=$heldRequest;held=$held;cancelled=$cancelled;cancelledCoarse=$cancelledCoarse;settledCancel=$settledCancel;evicted=$evicted;refilled=$refilled;returnedFallback=$returnedFallback;typedFault=$refused;retired=$retired;settled=$settled;secondBegin=$secondBegin;sourceFixture=$sourceFixture;producer=$originalProducer;scope='Original authored P3DM controlled subset, actual fallback/coarse/fine/refill record cuts; no retail/all-pass/pixel/FPS/device-free or complete ownership claim'}
     if($CameraPrefetch -or $ProjectedPrefetch){$result.scope='Actual original-file camera prefetch/held departure/complete prepared rows/coarse unchanged/manual Fine reuse/all-Absent cleanup; no eviction/refill/automatic quality/retail/all-pass/pixel/FPS/device-free/complete ownership claim'}
     if($ProjectedPrefetch){$cameraEvidence.projectedFar=$projectedFar;$cameraEvidence.scope=$(if($AutoCoarse){'One private Fine update and one source-bound far-view Coarse return on the same instance; no eviction/source-error/pixel/all-pass/FPS proof'}elseif($AutoFine){'One private prepared-Fine instance update after exact completed source/camera/mesh cut; no automatic coarse, source-error/pixel/all-pass/FPS proof'}else{'Actual ideal pair-discrepancy preparation preference, refusal/cancellation debt, fixed coarse/manual Fine reuse; no source-error/pixel/automatic quality/all-pass/FPS proof'});$result.scope=$cameraEvidence.scope}
+    }
     $null=Send @{cmd='exit'}
     if(!$p.WaitForExit(15000) -or $p.ExitCode -ne 0){throw 'Game did not exit normally'};$normal=$true
     $text=Get-Content -LiteralPath $log -Raw

@@ -1247,6 +1247,9 @@ bool IsBuildingPilotNormal(const char* prefix, const char* member)
 }
 thread_local unsigned ModelReadDepth = 0; // numeric owner-purpose nesting only; no retained resources
 thread_local unsigned MaterialPreflightDepth = 0; // owner-only nested stage intent; no names or resources
+thread_local unsigned TenementPaaDepth = 0;
+thread_local unsigned TenementPaaIdentities = 0;
+thread_local bool TenementPaaIdentityOverflow = false;
 struct ArchiveBindingState
 {
     static constexpr size_t FixedCharge = sizeof(ArchiveSourceBudget) + 256;
@@ -1257,6 +1260,47 @@ struct ArchiveBindingState
     std::atomic<uint64_t> weakWrappersPublished{0}, weakInitializedHandoffs{0}, weakFailedInitCompletions{0};
 };
 ArchiveBindingState& SourceBindingState() { static ArchiveBindingState state; return state; }
+}
+
+bool TenementPhysicalPaaScope::Enabled()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("WGR_OBJECT_STREAM_DAYZ_PHYSICAL_PREFETCH");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    return enabled;
+}
+bool TenementPhysicalPaaScope::Active()
+{
+    return Enabled() && Foundation::IsMainThread() && TenementPaaDepth != 0;
+}
+bool TenementPhysicalPaaScope::ReserveIdentity()
+{
+    // The counter is scoped to one owner operation, so a refusal cannot turn a
+    // truncated set of identities into an unbounded process-lifetime registry.
+    if (!Active()) return false;
+    if (TenementPaaIdentities >= 256)
+    { TenementPaaIdentityOverflow = true; return false; }
+    ++TenementPaaIdentities;
+    return true;
+}
+bool TenementPhysicalPaaScope::Overflowed()
+{
+    return Active() && TenementPaaIdentityOverflow;
+}
+TenementPhysicalPaaScope::TenementPhysicalPaaScope(bool selected)
+{
+    if (selected && Enabled() && Foundation::IsMainThread() && TenementPaaDepth < 8)
+    {
+        if (TenementPaaDepth == 0)
+        { TenementPaaIdentities = 0; TenementPaaIdentityOverflow = false; }
+        ++TenementPaaDepth;
+        _entered = true;
+    }
+}
+TenementPhysicalPaaScope::~TenementPhysicalPaaScope()
+{
+    if (_entered) --TenementPaaDepth;
 }
 
 bool ArchiveSourceBinding::CacheHandoffEnabled()
@@ -1684,9 +1728,15 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
         }
         auto bind = [&](Ref<IFileBuffer> buffer) -> Ref<IFileBuffer>
         {
-            if (CaptureBuildingPilotMemberIdentity() && Foundation::IsMainThread() && _fileAccess &&
+            const bool tenementPaa = TenementPhysicalPaaScope::Active() && name &&
+                ([&] { const size_t n = std::strlen(name); if (n < 4 || name[n - 4] != '.') return false;
+                    const char a = static_cast<char>(std::tolower(static_cast<unsigned char>(name[n - 3])));
+                    const char b = static_cast<char>(std::tolower(static_cast<unsigned char>(name[n - 2])));
+                    const char c = static_cast<char>(std::tolower(static_cast<unsigned char>(name[n - 1])));
+                    return (a == 'p' && b == 'a' && (c == 'a' || c == 'c')); })();
+            if ((CaptureBuildingPilotMemberIdentity() || tenementPaa) && Foundation::IsMainThread() && _fileAccess &&
                 buffer && !buffer->GetError() && buffer->GetSize() == info.length &&
-                IsBuildingPilotNormal((const char*)GetPrefix(), name))
+                (IsBuildingPilotNormal((const char*)GetPrefix(), name) || tenementPaa))
             {
                 try
                 {
@@ -1699,7 +1749,8 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
                             request->bytes == static_cast<uint64_t>(info.length) &&
                             request->CopyMemberIdentity(identity);
                     }
-                    if (exact) buffer = new ArchiveMemberIdentityFileBuffer(buffer, identity);
+                    if (exact && (!tenementPaa || TenementPhysicalPaaScope::ReserveIdentity()))
+                        buffer = new ArchiveMemberIdentityFileBuffer(buffer, identity);
                 }
                 catch (...) { } // Optional proof must never change the original read.
             }

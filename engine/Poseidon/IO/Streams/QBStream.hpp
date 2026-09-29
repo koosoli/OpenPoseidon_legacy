@@ -22,6 +22,22 @@
 namespace Poseidon
 {
 class BankArchiveReadLease;
+// Opt-in, owner-thread purpose for the exact tenement's physical PAA preparation.
+// The scope never carries a filename or grants source authority: only a successful
+// mapped member Init can attach a birth identity, and upload rechecks the mount.
+class TenementPhysicalPaaScope
+{
+    bool _entered = false;
+  public:
+    explicit TenementPhysicalPaaScope(bool selected);
+    ~TenementPhysicalPaaScope();
+    TenementPhysicalPaaScope(const TenementPhysicalPaaScope&) = delete;
+    TenementPhysicalPaaScope& operator=(const TenementPhysicalPaaScope&) = delete;
+    static bool Enabled();
+    static bool Active();
+    static bool ReserveIdentity(); // bounded attempts to tag successful Init buffers
+    static bool Overflowed();
+};
 // Owner-thread snapshot of an uncompressed member. Read owns its stream and never
 // accesses bank cursors, the VFS MRU or engine references. Consumers must reject
 // results from a departed mount/world generation before publishing them.

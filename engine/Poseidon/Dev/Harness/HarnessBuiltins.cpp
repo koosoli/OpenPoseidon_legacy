@@ -585,6 +585,10 @@ void RegisterScreenshot(HarnessServer& hs)
             else if(!std::strcmp(name,"beginClodPaged")) action=Engine::GeometryPageFixtureAction::BeginClodPaged;
             else if(!std::strcmp(name,"beginDiskClodPaged")) action=Engine::GeometryPageFixtureAction::BeginDiskClodPaged;
             else if(!std::strcmp(name,"beginOriginalDiskClodPaged")) action=Engine::GeometryPageFixtureAction::BeginOriginalDiskClodPaged;
+            else if(!std::strcmp(name,"beginOriginalHierarchy")) action=Engine::GeometryPageFixtureAction::BeginOriginalHierarchy;
+            else if(!std::strcmp(name,"stepHierarchy")) action=Engine::GeometryPageFixtureAction::StepHierarchy;
+            else if(!std::strcmp(name,"rootHierarchy")) action=Engine::GeometryPageFixtureAction::RootHierarchy;
+            else if(!std::strcmp(name,"fineHierarchy")) action=Engine::GeometryPageFixtureAction::FineHierarchy;
             else if(!std::strcmp(name,"followCamera")) action=Engine::GeometryPageFixtureAction::FollowCamera;
             else if(!std::strcmp(name,"followProjected")) action=Engine::GeometryPageFixtureAction::FollowProjected;
             else if(!std::strcmp(name,"stopCamera")) action=Engine::GeometryPageFixtureAction::StopCamera;
@@ -728,6 +732,12 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(producerInstance); PAGE_FIXTURE_NUMBER(rendererInstance);
             PAGE_FIXTURE_NUMBER(meshCount); PAGE_FIXTURE_NUMBER(meshesPresent); PAGE_FIXTURE_NUMBER(meshesAbsent);
             PAGE_FIXTURE_NUMBER(coarseTriangles); PAGE_FIXTURE_NUMBER(fineTriangles); PAGE_FIXTURE_NUMBER(coarsePages); PAGE_FIXTURE_NUMBER(finePages);
+            PAGE_FIXTURE_NUMBER(hierarchyPages);PAGE_FIXTURE_NUMBER(hierarchyRootPages);PAGE_FIXTURE_NUMBER(hierarchyResidentPages);
+            PAGE_FIXTURE_NUMBER(hierarchySelectedTriangles);PAGE_FIXTURE_NUMBER(hierarchyCutModel);PAGE_FIXTURE_NUMBER(hierarchyThreshold);
+            PAGE_FIXTURE_NUMBER(hierarchyRequiredMask);PAGE_FIXTURE_NUMBER(hierarchyResidentMask);PAGE_FIXTURE_NUMBER(hierarchyMissingMask);
+            cJSON_AddStringToObject(result,"hierarchyRequiredMaskExact",std::to_string(report.hierarchyRequiredMask).c_str());
+            cJSON_AddStringToObject(result,"hierarchyResidentMaskExact",std::to_string(report.hierarchyResidentMask).c_str());
+            cJSON_AddStringToObject(result,"hierarchyMissingMaskExact",std::to_string(report.hierarchyMissingMask).c_str());
             PAGE_FIXTURE_NUMBER(clodAdapterVersion); PAGE_FIXTURE_NUMBER(clodGroups); PAGE_FIXTURE_NUMBER(clodClusters);
             PAGE_FIXTURE_NUMBER(fallbackTriangles); PAGE_FIXTURE_NUMBER(authoredFineTriangles); PAGE_FIXTURE_NUMBER(clodBakeMs);
             PAGE_FIXTURE_NUMBER(coarseThreshold); PAGE_FIXTURE_NUMBER(fineThreshold);
@@ -760,6 +770,7 @@ void RegisterScreenshot(HarnessServer& hs)
 #undef PAGE_FIXTURE_NUMBER
 #define PAGE_FIXTURE_BOOL(field) cJSON_AddBoolToObject(result,#field,report.field)
             PAGE_FIXTURE_BOOL(clodPilot); PAGE_FIXTURE_BOOL(fallbackSelected);
+            PAGE_FIXTURE_BOOL(hierarchicalPilot);
             PAGE_FIXTURE_BOOL(pagedPilot); PAGE_FIXTURE_BOOL(fineResident); PAGE_FIXTURE_BOOL(fineEvictionPending);
             PAGE_FIXTURE_BOOL(diskPilot); PAGE_FIXTURE_BOOL(coarseResident);
             PAGE_FIXTURE_BOOL(originalFilePilot);PAGE_FIXTURE_BOOL(sourceSnapshotValidated);PAGE_FIXTURE_BOOL(sourceAdmissionConsumed);
@@ -810,7 +821,10 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddStringToObject(result,"diskReadStatus",report.diskReadStatus.c_str());
             cJSON_AddStringToObject(result,"diskRequestedRepresentation",report.diskRequestedRepresentation.c_str());
             cJSON_AddStringToObject(result,"selectedCutSha256",report.selectedCutSha256.c_str());
-            cJSON_AddStringToObject(result,"scope","Private programmatically authored box/curved-grid pilot; explicit authored/selected-CLOD RAM or private disk value-worker in paged mode; disk expected keys supplied externally and raw pilot/helper source compared independently without owner file I/O/bake; other explicit CLOD bake scratch/latency not hard-bounded; returned main frame and full-generation record cut, not all-pass/pixel, mounted-file provenance, queue-completion or device-free proof");
+            cJSON_AddStringToObject(result,"hierarchyPackageSha256",report.hierarchyPackageSha256.c_str());
+            auto* hierarchyClusters=cJSON_AddArrayToObject(result,"hierarchySelectedClusters");
+            for(auto cluster:report.hierarchySelectedClusters)cJSON_AddItemToArray(hierarchyClusters,cJSON_CreateNumber(cluster));
+            cJSON_AddStringToObject(result,"scope","Private programmatically authored box/curved-grid pilot; explicit authored/selected-CLOD RAM, original-source hierarchy RAM pages, or private disk value-worker in paged mode; hierarchy stages at most one page per action and selects only complete root/fine cuts; disk expected keys supplied externally and raw pilot/helper source compared independently without owner file I/O/bake; explicit CLOD bake scratch/latency and physical GPU allocation peaks not hard-bounded; returned main frame and full-generation record cut, not all-pass/pixel, mounted-file provenance, queue-completion or device-free proof");
             return HarnessProtocol::JsonResponse(result);
         });
     hs.RegisterCommand({"geometry_allocations", "Request/poll bounded retained mesh allocation diagnostics", {}},
