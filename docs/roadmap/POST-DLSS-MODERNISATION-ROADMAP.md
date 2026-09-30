@@ -36,18 +36,23 @@ September 30 snow continuation is **source integrated; installed acceptance
 pending**; the bounded stock-WB uniform slice is **shipped** on the matching
 `e0bb256a` installed pair. This follows the owner's
 request to finish snow appearance/roof-object cover and rain-soaked uniforms.
-The shared world-fixed powder filters colour and normals to their distant mean
-while preserving existing snow depth, tracks and road-depth rules. Explicit
-owner/mesh/material authority admits raised object coating; roof undersides,
-walls and unsupported sources remain excluded. Person wetness follows actual
+cc43fffb replaces the installed sine ridges with filtered, rotated world-fixed
+powder noise while preserving mean colour, existing snow depth, tracks and
+road-depth rules. Explicit owner/mesh/material authority admits raised object
+coating: bounded exact current-pose proofs handle unchanged dynamic direct
+sections and retained MAYANIMATE sources; configured retained animations remain
+excluded even when neutral. Source-proven Keep-only roofs retain raised cover,
+while pinned roads stay excluded. 94694933 adds solid cutout admission with
+unchanged alpha/discard/A2C coverage; translucency, roof undersides, walls and
+unsupported sources remain excluded. Person wetness follows actual
 simulation rain, self-ignored roof shelter and gradual drying; exact stock cloth
 identities/atlas masks exclude skin and proxies. These are bounded material
 slices, not snow geometry, hydrology, save/network state or broad asset support.
 
 | Current slice | Source/check evidence | Installed gate still open |
 |---|---|---|
-| Diffuse filtered snow powder | [material design](decisions/SNOW-SURFACE-MATERIAL-20260930.md), production GPU helper and shader composition evidence recorded there | Same installed pair powder ON/OFF, near/far/return views, preserved grain/track response and no distant sparkle. The older 8b3ae13c 1m walking/refill capture proves the retained contact baseline, not this shader. |
-| Raised roof/object coating | [explicit receiver and shelter contract](modernisation/OBJECT-SNOW-SURFACE-20260930.md), actual-helper/device tests authored; full integrated rerun pending | [Stock surface runner](decisions/SNOW-STOCK-SURFACE-FIXTURE-20260930.md): actual tent/source identity, dry/deposit/object OFF, exposed top positive, underside/wall negatives, same-ground roof delete/replace, camera return, disable/reset, stock Eden road controls. UAZ remains exploratory when source metadata excludes it. |
+| Diffuse filtered snow powder | [material design](decisions/SNOW-SURFACE-MATERIAL-20260930.md): cc43fffb replaces 6a388c62 diagonal ridges with filtered irregular noise. Root's build/weather-final-tests.log through 6cd5a1c5/d7aa2f4c records 585 passed/2 existing ignored renderer tests. | New matching pair powder ON/OFF, near/far/return views, preserved grain/track response and no distant sparkle. The older 8b3ae13c 1m walking/refill capture proves the retained contact baseline, not this shader. |
+| Raised roof/object coating | [receiver/shelter contract](modernisation/OBJECT-SNOW-SURFACE-20260930.md): f3073b3f bounded direct pose proof; b151a599 Keep-only admission; 6cd5a1c5 retained loaded-LOD proof with one 16,384-vertex budget and neutral configured-animation exclusion; 52e6dc09 smoothstep altitude and e0bb256a paused snapshot refresh. Standalone CPU policy passes; 94694933 solid cutout alpha preservation has new contract tests/full build pending. | Latest installed 6a388c62 tent remains bare in build/snow-surface/eden-gates-20260930-175343-1fa463. [Stock runner](decisions/SNOW-STOCK-SURFACE-FIXTURE-20260930.md) must still prove exposed roof positive, underside/wall negatives, same-ground roof delete/replace, camera return/reset and Eden roads on the corrected pair. UAZ remains exploratory until source and pixels pass. |
 | Wet stock uniforms | [installed real-rain acceptance](decisions/UNIFORM-WETNESS-STOCK-FIXTURE-20260930.md): matching e0bb256a ON/OFF, WB wetting/shelter/pause/return/drying and effective cloth encoding pass; 4 CPU cases/28 actual-helper GPU probes pass | Bounded WB shipped with delegated visual judgement: subtle cloth RGB darkening, no added gloss. ON/OFF natural rain/time/wetness differ slightly; no exact pixel-isolation claim. Broader models/atlases, save/network persistence and general performance remain unaccepted. |
 
 The authoritative renderer register records `RSYS-SNOW-SURFACES` as PARTIAL
@@ -56,6 +61,8 @@ retain installed provenance/hashes, actual state, source telemetry, owned normal
 exits and descriptive images. They deliberately do not promote capture success
 or whole-frame RGB differences to visual acceptance. Snow still needs its new
 matching installed commit and bounded runtime results before its gates close.
+At this source checkpoint, an unrelated running game (PID 31700) holds the
+installed binaries; new snow deployment/runtime controls remain pending.
 This work does not reopen parked streaming/architecture or rejected defaults.
 
 September 12 small-change follow-through:

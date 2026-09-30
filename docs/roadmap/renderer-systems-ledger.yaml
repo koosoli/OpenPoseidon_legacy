@@ -1288,18 +1288,43 @@ unbuilt_candidates: >-
     completeness: >-
       SOURCE INTEGRATED; NEW INSTALLED ACCEPTANCE PENDING. Baseline c9024bb4
       retained the earlier snow/contact layer and installed 8b3ae13c. Shared
-      powder d538b383 filters three world-fixed diffuse/normal bands against
-      projected pixel footprint, retaining the mean palette and compacted
-      track darkening. Terrain colour/normal prepass share relief; deposit,
-      drift, deficits, vertex displacement and road-depth evaluation remain.
-      The material design records production GPU helper/composition checks;
-      full integrated build/device checks and installed captures are pending.
+      Powder d538b383 introduced projected-footprint filtering. Installed
+      6a388c62 exposed diagonal sine ridges; cc43fffb replaces them with three
+      rotated world-cell value-noise bands and analytic gradients, with no
+      moving seeds. Colour/normal detail fades to the retained mean/base normal;
+      beyond a 1.5m pixel footprint the helper skips hash work entirely.
+      Terrain colour/normal prepass share relief; deposit, drift, deficits,
+      vertex displacement, compacted-track darkening and road-depth remain.
 
       Raised source integration 322e3d45 (agent implementation 423e3974) adds
       actual finite deposit and fragment-altitude snowline through a renderer
-      private camera lane. Direct and retained meshes require explicit source
-      owner/LOD flags; proxies, Person, animated/dynamic/skinned, vegetation,
-      conformed roads and unsupported materials do not inherit that authority.
+      private camera lane; 52e6dc09 aligns altitude falloff with smoothstep.
+      e0bb256a refreshes the presentation snapshot during paused camera/roof/
+      deposit changes without advancing retained weather history.
+      Direct and retained meshes require explicit source owner/LOD flags.
+      f3073b3f replaces a blanket dynamic-buffer veto with finite exact current
+      position/normal equality to saved originals over the direct section union,
+      bounded to 16,384 vertices. Skin/palette/CPU-pose and changed or incomplete
+      source remain excluded; a neutral articulated direct section can pass
+      only for its current unchanged pose, without persistent coating authority.
+
+      b151a599 permits source-proven mode 2 Keep-only raised roofs alongside
+      mode 0. Keep retains elevation above terrain; On pins vertices to ground.
+      Mixed Keep/On, pinned roads, forest-plane and unknown modes stay excluded.
+      6cd5a1c5 replaces the retained MAYANIMATE allocation-hint veto with actual
+      DeformsSharedShape/GetAnimated checks across loaded visual LODs. MAYANIMATE
+      sources require exact finite current/original positions and normals across
+      all visual LODs, sharing one 16,384-vertex budget; missing/deformed originals
+      fail closed. Static non-animated sources keep the zero-vertex-scan path.
+      Configured Entity geometry animations remain excluded even when neutral,
+      as do procedural Church/Fountain owners without reliable pose updates.
+      Retained admission is recomputed at instance registration/update.
+
+      94694933 permits eligible solid depth-writing cutouts. Direct translucency,
+      vegetation, foreign proxies, Person, glass/reflective/cockpit/monitor and
+      unsupported materials/poses remain excluded. Both colour paths retain base
+      texture alpha, discard/A2C coverage and returned alpha; normal prepasses and
+      shadow silhouettes are unchanged. The snow layer changes RGB only.
       Authored outward normal and view sidedness reject walls/undersides.
       Near physical zenith maps and conservative complete retained bake data
       supply shelter admission, independently of artistic AO strength/floor;
@@ -1311,12 +1336,24 @@ unbuilt_candidates: >-
       Source tests include actual object-helper composition and GPU directional
       depth falsifiers, finite surface parameters, normal-prepass/material flag
       contracts, private camera-tail offsets and streaming receiver-bit receipt
-      preservation. Presence of these tests is not an integrated PASS claim.
+      preservation. Root's build/weather-final-tests.log records 585 passed,
+      zero failed and two existing ignored renderer tests through
+      6cd5a1c5/d7aa2f4c, including the irregular powder and retained pose changes.
+      Standalone current/retained pose and conform policy checks pass.
+      The newer 94694933 cutout contract/full build are still pending at this
+      source checkpoint; the earlier full suite does not prove that newer hunk.
       Pure stock runner checks pass 32 assertions plus existing roof mocked RPC
       tests, without game/GPU use by the runner author. Prior installed roof
       rain/puddle evidence and 8b3ae13c walking/refill are retained baselines,
       not acceptance of this new object coat or powder.
     known_gap: >-
+      The latest installed 6a388c62 stock control in
+      build/snow-surface/eden-gates-20260930-175343-1fa463 still shows bare tent
+      fabric under deposit; the rejected retained animation hint motivated the
+      source correction, not a successful roof appearance result. Earlier failed
+      stock controls remain failed. New installed controls are pending; at this
+      checkpoint an unrelated running game (PID 31700) prevents safe replacement
+      of its binaries. No process stop, replacement or snow SHIPPED claim follows.
       Require the new matching installed build and ordinary shutdown/hash proof.
       Test-SnowSurfaceCoverage captures dry/deposit/object-OFF and powder-OFF
       controls with actual CampEastC identity/placement and effective uploaded
@@ -1348,6 +1385,14 @@ unbuilt_candidates: >-
         symbol: WGR_DRAW3D_SNOW_RECEIVER
       - file: engine/WgpuRenderer/EngineWgpu.cpp
         symbol: WGR_INSTANCE_SNOW_RECEIVER
+      - file: engine/WgpuRenderer/ObjectSnowSurface.hpp
+        symbol: RetainedVisualsRigid
+      - file: engine/WgpuRenderer/ObjectSnowSurface.hpp
+        symbol: CurrentSectionRigid
+      - file: engine/WgpuRenderer/ObjectSnowSurface.hpp
+        symbol: ConformAllowed
+      - file: engine/WgpuRenderer/TerrainWgpu.cpp
+        symbol: _snowUploadWallTime
 
   - id: RSYS-UNIFORM-WETNESS
     title: Actual rain history and stock cloth-only wet uniform shading
