@@ -38,7 +38,7 @@ function Assert-MudState($sample) {
 function Assert-MudSample($sample) {
     Assert-MudState $sample
     foreach ($field in @('x','z','offset','mudDx','mudDz','surfaceY','surfaceDx','surfaceDz')) { $null=Finite-MudNumber $sample.$field }
-    Require ($sample.offset -ge -.06001 -and $sample.offset -le .000001) 'Mud offset exceeds the signed six-centimetre contract.'
+    Require ($sample.offset -ge -.35001 -and $sample.offset -le .000001) 'Mud offset exceeds the signed 35-centimetre contract.'
     Require ($sample.sourceEligible -is [bool]) 'Actual source admission is missing.'
     Require ($sample.world -is [string] -and $sample.texture -is [string]) 'Actual terrain source identity is missing.'
 }
@@ -70,7 +70,7 @@ function Parse-MudStep([string]$line) {
     Require ($line -match 'MUD_STEP x=([\d.eE+-]+) z=([\d.eE+-]+) surface=(\S+) files=(\S+) sound=(\S+) texture=(\S+) wet=([\d.eE+-]+) depth=([\d.eE+-]+) revision=(\d+) chunks=(\d+)') 'Actual boot contact trace grammar is missing.'
     $row=@{x=[double]::Parse($Matches[1],$culture);z=[double]::Parse($Matches[2],$culture);surface=$Matches[3];files=$Matches[4];sound=$Matches[5];texture=$Matches[6];wet=[double]::Parse($Matches[7],$culture);depth=[double]::Parse($Matches[8],$culture);revision=[double]::Parse($Matches[9],$culture);chunks=[double]::Parse($Matches[10],$culture)}
     foreach ($field in @('x','z','wet','depth','revision','chunks')) { $null=Finite-MudNumber $row[$field] }
-    Require ($row.wet -gt .15 -and $row.wet -le 1 -and $row.depth -gt 0 -and $row.depth -le .06001 -and $row.chunks -gt 0) 'Contact trace has no bounded actual wet depression.'
+    Require ($row.wet -gt .15 -and $row.wet -le 1 -and $row.depth -gt 0 -and $row.depth -le .35001 -and $row.chunks -gt 0) 'Contact trace has no bounded actual wet depression.'
     return $row
 }
 function Assert-MudPair($before,$after) {
@@ -105,7 +105,7 @@ $result=[ordered]@{status='running';before=$before;gates=@{};samples=@();capture
     limitations='Nogova exact cultivated soil only. Hard road/grass/border and snow installed negatives remain untested; source/CPU exclusion tests are separate. Images are descriptive, not isolated pixel acceptance.'}
 $settings=@{POSEIDON_USER_DIR=$profile;POSEIDON_SNOWLINE='off';POSEIDON_MUD_TRACE='1';POSEIDON_UNIFORM_WET_TRACE='1';WGR_GRASS='0';WGR_OBJECT_SNOW='0';
     WGR_TEMPORAL='0';WGR_AUTO_EXPOSURE='0';WGR_EXPOSURE='1';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_CLOUD_COVERAGE='0';
-    WGR_TERRAIN_JITTER='0';WGR_LOD_GOVERNOR_RANGE='1';WGR_TERRAIN_PUDDLES='0';WGR_INTERIOR_SKY_DEBUG='0'}
+    WGR_TERRAIN_JITTER='0';WGR_LOD_GOVERNOR_RANGE='1';WGR_TERRAIN_PUDDLES='1';WGR_INTERIOR_SKY_DEBUG='0'}
 $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN',
     'POSEIDON_SNOW_TEST_DEPTH','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','POSEIDON_INTERIOR_SKY_PROBE')
 $keys=@($settings.Keys)+$clear; $savedEnv=@{}
@@ -250,7 +250,7 @@ try {
     do {
         Start-Sleep -Milliseconds 500;$wet=State 'wetting'
         Require ($wet.weather.rain -le .02 -and $wet.weather.particleDensity -ge .99 -and !$wet.weather.particleSnowflakes -and $wet.weather.liquidRain -ge .99) 'Visible-liquid diagnostic did not supply actual rain authority.'
-        if ($wet.mud.wetness -ge .65 -and $wet.time-$wetStart.time -ge 20) { break }
+        if ($wet.mud.wetness -ge .90 -and $wet.time-$wetStart.time -ge 20) { break }
         Require ([DateTime]::UtcNow -lt $deadline) 'Actual liquid rain did not wet the soil.'
     } while ($true)
     # A destination only 1.6m away is inside the AI arrival tolerance. Request
@@ -270,6 +270,7 @@ try {
     $geometry=@();for ($i=0;$i -lt $baseline.Count;++$i) { $geometry+=,(Assert-MudGeometry $baseline[$i] $after[$i]) }
     $negative=@($geometry | Where-Object {$_.depthDelta -lt -.001})
     Require ($negative.Count -gt 0) 'No meaningful negative physical terrain support height in the walked lane.'
+    Require (($negative | Measure-Object depthDelta -Minimum).Minimum -lt -.10) 'Wet mud did not create an actual decimetre-scale depression.'
     Require (@($negative | Where-Object {[Math]::Abs($_.dxDelta)+[Math]::Abs($_.dzDelta) -gt .001}).Count -gt 0) 'Mud changed no physical terrain gradient.'
     $result.gates.geometry=@{samples=$geometry;negativeCount=$negative.Count;minimumOffset=($negative | Measure-Object depthDelta -Minimum).Minimum}
     $trace=@(Select-String -LiteralPath $log -Pattern 'MUD_STEP' | ForEach-Object {Parse-MudStep $_.Line})

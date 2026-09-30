@@ -2,6 +2,7 @@
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/SnowShelter.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
+#include <Poseidon/World/Weather/MudGroundAdmission.hpp>
 #include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
 #include <Poseidon/World/Terrain/TerrainSatmap.hpp>
 
@@ -618,6 +619,13 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
                     TerrainPuddles::EligibleLegacySurface(quadrants[q]->_class.Data(), quadrants[q]->_name.Data(),
                                                          quadrants[q]->_soundEnv.Data(), quadrants[q]->_character.Data());
             if (allMud) material.puddle_flags = TerrainPuddles::SoftSoil;
+            const Texture* tile = land.GetTexture(i);
+            bool cultivated = quadrants != nullptr && tile != nullptr;
+            for (int q = 0; cultivated && q < 4; ++q)
+                cultivated = quadrants[q] != nullptr && StockNogovaMudSoil(land.GetName(), tile->GetName().Data(),
+                    quadrants[q]->_class.Data(), quadrants[q]->_name.Data(), quadrants[q]->_soundEnv.Data(),
+                    quadrants[q]->_character.Data(), 0.5f, 0.5f);
+            if (cultivated) material.puddle_flags |= 4u; // shader enforces the actual world-cell interior
         }
         material.puddle_flags |= TerrainPuddles::GroundReceiver;
         ++puddleMaterials;

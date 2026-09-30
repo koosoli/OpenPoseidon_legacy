@@ -191,6 +191,12 @@ fn snapshot(case: usize) -> Vec<f32> {
     if case == 6 {
         data[4..4 + GRID].fill(0.07);
     } // change only snow, not mud
+    if case == 8 {
+        data[4 + GRID + 3] = 0.35;
+        for (offset, depth) in [(0, -0.10), (1, -0.15), (512, -0.20), (513, -0.24)] {
+            data[start + offset] = depth;
+        }
+    } // decimetre layer: actual signed geometry and both normal consumers
     data
 }
 
@@ -323,7 +329,7 @@ fn mud_geometry_gpu_samples_signed_depression_without_corrupting_snow() {
             usage: wgpu::BufferUsages::UNIFORM,
         });
         let mut cases = Vec::new();
-        for case in 0..8 {
+        for case in 0..9 {
             let snow = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("mud_actual_appended_view"),
                 contents: bytemuck::cast_slice(&snapshot(case)),
@@ -399,6 +405,7 @@ fn mud_geometry_gpu_samples_signed_depression_without_corrupting_snow() {
             let expected_offset = match case {
                 1 | 6 => -0.0325,
                 4 => -0.06,
+                8 => -0.1725,
                 _ => 0.0,
             };
             assert!(
@@ -423,7 +430,7 @@ fn mud_geometry_gpu_samples_signed_depression_without_corrupting_snow() {
             drop(bytes);
             staging.unmap();
         }
-        for case in [1, 2, 3, 4, 5, 7] {
+        for case in [1, 2, 3, 4, 5, 7, 8] {
             assert_eq!(
                 cases[case][3], cases[0][3],
                 "appended/disabled mud must not change existing snow"
@@ -440,7 +447,7 @@ fn mud_geometry_gpu_samples_signed_depression_without_corrupting_snow() {
         assert!(cases[0][3] > 0.0, "fixture must exercise real nonzero snow");
         paths.push(cases);
     }
-    for case in 0..8 {
+    for case in 0..9 {
         for (conform, terrain) in paths[0][case].iter().zip(&paths[1][case]) {
             assert!(
                 (conform - terrain).abs() < 1e-5,

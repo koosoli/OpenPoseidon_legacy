@@ -33,7 +33,7 @@ $after.texture='o/pole1.paa';Refuses {Assert-MudGeometry $before $after};$after.
 foreach ($field in @('x','z','offset','mudDx','mudDz','surfaceY','surfaceDx','surfaceDz','wetness','chunks','revision','rejected')) {
     $bad=New-Sample;$bad[$field]=[double]::NaN;Refuses {Assert-MudSample $bad}
 }
-foreach ($case in @(@('enabled',0),@('enabled',$false),@('wetness',-.001),@('wetness',1.01),@('chunks',-1),@('revision',1.5),@('rejected',-1),@('offset',.001),@('offset',-.061),@('sourceEligible','true'),@('texture',$null))) {
+foreach ($case in @(@('enabled',0),@('enabled',$false),@('wetness',-.001),@('wetness',1.01),@('chunks',-1),@('revision',1.5),@('rejected',-1),@('offset',.001),@('offset',-.351),@('sourceEligible','true'),@('texture',$null))) {
     $bad=New-Sample;$bad[$case[0]]=$case[1];Refuses {Assert-MudSample $bad}
 }
 function New-Paused {
@@ -50,7 +50,7 @@ $bad=New-Paused;$bad.pose='Walk';Refuses {Assert-MudPaused $first $bad}
 $bad=New-Paused;$bad.uniformWetness+=.0001;Refuses {Assert-MudPaused $first $bad}
 $line='[INFO] MUD_STEP x=4975.123 z=4675.234 surface=Default files=default sound=normalExt texture=o\pole2.paa wet=0.6500 depth=0.0379 revision=8 chunks=1'
 $row=Parse-MudStep $line;Check ($row.x -eq 4975.123 -and $row.texture -ceq 'o\pole2.paa' -and $row.depth -eq .0379)
-foreach ($bad in @('MUD_STEP synthetic',$line.Replace('depth=0.0379','depth=0.0000'),$line.Replace('depth=0.0379','depth=0.0610'),$line.Replace('wet=0.6500','wet=0.1000'),$line.Replace('chunks=1','chunks=0'))) { Refuses {Parse-MudStep $bad} }
+foreach ($bad in @('MUD_STEP synthetic',$line.Replace('depth=0.0379','depth=0.0000'),$line.Replace('depth=0.0379','depth=0.3510'),$line.Replace('wet=0.6500','wet=0.1000'),$line.Replace('chunks=1','chunks=0'))) { Refuses {Parse-MudStep $bad} }
 $oldCulture=[Threading.Thread]::CurrentThread.CurrentCulture
 try {
     [Threading.Thread]::CurrentThread.CurrentCulture=[Globalization.CultureInfo]::GetCultureInfo('de-DE')

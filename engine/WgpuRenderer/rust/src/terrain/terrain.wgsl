@@ -9,6 +9,7 @@
 // sun lighting.
 #import frame::{frame, reverse_z, fog_factor, apply_fog, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_rain_coverage, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
 #import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
+#import ground_wet::{cultivated_soil_fraction, soil_wet_amount, soil_wet_fresnel, soil_wet_sun_lobe}
 #import shadow::shadow_strength
 #import lighting::lights_contrib
 #import color::srgb_to_linear
@@ -654,7 +655,9 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                         view_pos: vec3<f32>,
                         world_dwx: vec3<f32>, world_dwy: vec3<f32>) -> AuthoredCell {
     var material = terrain_materials[entry & CELL_LAYER_MASK];
-    let legacy_mud = f32((material.puddle_flags & 2u) >> 1u);
+    let legacy_mud = max(f32((material.puddle_flags & 2u) >> 1u),
+        cultivated_soil_fraction(material.puddle_flags,
+            fract((world_pos.xz - tp.world_origin) / tp.land_grid)));
     // The layer is a material-table lookup, but clamping belongs to the cell.
     material.legacy |= entry & CELL_CLAMPED;
     let authored_weight = clamp(a3_surface_blend, 0.0, 1.0);
@@ -1215,6 +1218,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let world_y = sample_height(in.world_xz);
     let line_depth = snowline_depth(in.world_xz, world_y);
     var rain_puddle = 0.0;
+    var soil_wet = soil_wet_amount(mud, tp.rain_wetness, snow_cover(in.world_xz, world_y));
     if (tp.rain_wetness > 0.0) {
         rain_puddle = ground_puddle_mask(in.world_xz, puddle_footprint, tp.rain_wetness)
             * ground_puddle_land_factor(geometric_n.y, world_y, tp.sea_level,
@@ -1360,15 +1364,17 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // bare 4% dielectric reallocation — an invisible result for a per-pixel reflect() plus a
     // second SH evaluation on the single most fill-heavy surface in the frame.
     let local_sky_visibility = interior_sky_ao(in.world_pos + frame.cam_pos.xyz, n);
-    if (rain_puddle > 0.0) {
+    if (rain_puddle > 0.0 || soil_wet > 0.0) {
         // Zenith geometry gates vertical rain independently of diffuse sky light
         // entering through windows or around a canopy. Only wet eligible puddle
         // pixels pay this one-layer query. Missing map coverage remains unproven.
         let rain_reach = interior_rain_reach(in.world_pos + frame.cam_pos.xyz);
         // Unknown physical coverage cannot prove an exposed ground surface.
-        rain_puddle *= ground_puddle_rain_factor(rain_reach, interior_rain_coverage(in.world_pos + frame.cam_pos.xyz));
+        let rain_proof = ground_puddle_rain_factor(rain_reach, interior_rain_coverage(in.world_pos + frame.cam_pos.xyz));
+        rain_puddle *= rain_proof;
+        soil_wet *= rain_proof;
     }
-    rgb *= 1.0 - rain_puddle * 0.38;
+    rgb *= (1.0 - rain_puddle * 0.38) * (1.0 - soil_wet * (1.0 - rain_puddle) * 0.30);
     sun_ambient *= sky_vis_ao(in.world_xz)
         * gtao_ao(in.clip.xy)
         * local_sky_visibility
@@ -1381,6 +1387,23 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let local = lights_contrib(in.world_pos, n, vec3<f32>(1.0), vec3<f32>(1.0), linear);
     let light_sum = sun + local;
     rgb *= select(clamp(light_sum, vec3<f32>(0.0), vec3<f32>(1.0)), max(light_sum, vec3<f32>(0.0)), linear > 0.5);
+    if (soil_wet > 0.0) {
+        let view = normalize(-in.world_pos);
+        // Filter the disturbed-soil normal at the actual pixel footprint;
+        // never reflect the authored albedo grain or its fine normal map.
+        let moist_n = geometric_n;
+        let fresnel = soil_wet_fresnel(dot(moist_n, view));
+        var reflected = sun_ambient;
+        if (sky_lit) {
+            reflected = sky_irradiance(reflect(-view, moist_n)) * frame.sun_ambient.w
+                * sky_vis_ao(in.world_xz) * local_sky_visibility;
+        }
+        let half_vector = normalize(view - frame.sun_dir_world.xyz + vec3<f32>(0.0, 1e-4, 0.0));
+        reflected += sun_diffuse * soil_wet_sun_lobe(dot(moist_n, half_vector))
+            * (1.0 - shadow) * cloud_sun_shadow(in.world_xz) * local_sky_visibility;
+        rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel,
+            soil_wet * (1.0 - rain_puddle));
+    }
     if (rain_puddle > 0.0) {
         // A flat water normal removes authored grain from the reflection: no
         // high-frequency sun dots. Reuse the bound SH sky, with no reflection

@@ -185,7 +185,7 @@ fn ground_weather_params(wetness: f32, rain: f32, sea_level: f32, time: f32) -> 
 
 fn valid_mud_view(data: &[f32]) -> bool {
     data.len() == 4 + 512 * 512 && data.iter().all(|v| v.is_finite())
-        && data[2] == 0.125 && data[3] >= 0.0 && data[3] <= 0.06
+        && data[2] == 0.125 && data[3] >= 0.0 && data[3] <= 0.35
         && data[4..].iter().all(|v| *v <= 0.0 && *v >= -data[3])
 }
 
@@ -198,7 +198,8 @@ fn mud_upload_rejects_nonfinite_positive_and_excess_depth_without_touching_snow(
     data[4] = -0.061; assert!(!valid_mud_view(&data));
     data[4] = f32::NAN; assert!(!valid_mud_view(&data));
     data[4] = 0.0; data[2] = 0.25; assert!(!valid_mud_view(&data));
-    data[2] = 0.125; data[3] = 0.07; assert!(!valid_mud_view(&data));
+    data[2] = 0.125; data[3] = 0.35; data[4] = -0.24; assert!(valid_mud_view(&data));
+    data[3] = 0.351; assert!(!valid_mud_view(&data));
     assert!(!valid_mud_view(&data[..data.len()-1]));
 }
 

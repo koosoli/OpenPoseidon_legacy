@@ -20,7 +20,7 @@ foreach ($token in $numbers) {
 }
 $root = Split-Path -Parent $PSScriptRoot
 $mission = Join-Path $root 'tests/perf/missions/perf_field.eden'
-if ($World -ne 'eden' && !$LegacyCwa) { throw 'Non-Everon mission requires LegacyCwa.' }
+if ($World -ne 'eden' -and !$LegacyCwa) { throw 'Non-Everon mission requires LegacyCwa.' }
 if ($World -eq 'noe') {
     $mission = Join-Path $root 'build/puddle-weather-fixture/perf_field.noe'
     New-Item -ItemType Directory -Force -Path $mission | Out-Null
