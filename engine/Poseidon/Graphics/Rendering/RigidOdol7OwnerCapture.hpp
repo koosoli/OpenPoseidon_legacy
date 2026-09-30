@@ -1,6 +1,8 @@
 #pragma once
 #include <Poseidon/Graphics/Rendering/GeometryPageRigidOdol7FinalShape.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/IO/Streams/PatnikArchiveReason.hpp>
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
 #include <cstdlib>
@@ -16,11 +18,13 @@ enum class RigidOdol7OwnerCaptureStatus
     Unsupported, Capacity, StaleSource, AdaptFailed, AllocationFailed
 };
 class RigidOdol7OwnerCapture;
-inline RigidOdol7OwnerCaptureStatus PrepareRigidOdol7OwnerCapture(RigidOdol7OwnerCapture& out);
+inline RigidOdol7OwnerCaptureStatus PrepareRigidOdol7OwnerCapture(
+    RigidOdol7OwnerCapture& out,const Ref<Texture>* privatePrimary=nullptr);
 namespace RigidOdol7OwnerDetail
 {
 inline constexpr char ModelPath[]="data3d\\skala_new.p3d";
 inline constexpr char ModelMember[]="skala_new.p3d";
+inline constexpr char PrimaryPac[]="data\\skala_piskovec2.pac";
 inline bool Enabled()
 {
     const char* value=std::getenv("WGR_GEOMETRY_PAGE_RETAIL_SOURCE");
@@ -84,7 +88,8 @@ inline bool WithinAdaptBudget(const Model::Model& model)
 // pointer is retained. The mutable renderer birth/epochs remain caller authority.
 class RigidOdol7OwnerCapture
 {
-    friend RigidOdol7OwnerCaptureStatus PrepareRigidOdol7OwnerCapture(RigidOdol7OwnerCapture&);
+    friend RigidOdol7OwnerCaptureStatus PrepareRigidOdol7OwnerCapture(
+        RigidOdol7OwnerCapture&,const Ref<Texture>*);
     std::vector<char> _decoded;
     std::shared_ptr<const BankCompressedReadRequest> _lease;
     RigidOdol7Candidate _candidate;
@@ -120,14 +125,22 @@ public:
 // Transactional output; source/header/material reads are explicit bounded owner
 // diagnostic work. No EnsureUploaded, synthetic alpha facts, cached-Init retrofit,
 // worker, pages, model registration or visual/all-pass routing occurs here.
-// Material staging is a subsequent caller step on these EXACT final sections:
-// retain actual initialized source binding before the single EnsureUploaded,
-// inspect physical identity/slot/facts, then export under a reuse-only guard.
-inline RigidOdol7OwnerCaptureStatus PrepareRigidOdol7OwnerCapture(RigidOdol7OwnerCapture& out)
+// Optional privatePrimary changes only the exact authored primary PAC refs in
+// the local adapter tables. The caller must prove on this same strong Ref both
+// before and after capture that its private Init-born source is current. Texture's
+// public interface cannot certify archive birth or native handle; this method
+// checks exact name, cold state and positive dimensions, and never retrofits
+// the global texture cache. Material staging remains a subsequent caller step.
+inline RigidOdol7OwnerCaptureStatus PrepareRigidOdol7OwnerCapture(
+    RigidOdol7OwnerCapture& out,const Ref<Texture>* privatePrimary)
 {
     using Status=RigidOdol7OwnerCaptureStatus;
     if(!RigidOdol7OwnerDetail::Enabled())return Status::Disabled;
     if(!Foundation::IsMainThread())return Status::WrongOwner;
+    if(privatePrimary && (!privatePrimary->GetRef() ||
+        !PatnikArchiveReason::Matches(RigidOdol7OwnerDetail::PrimaryPac,(*privatePrimary)->Name()) ||
+        (*privatePrimary)->IsGpuResident() || (*privatePrimary)->AWidth(0)<=0 ||
+        (*privatePrimary)->AHeight(0)<=0))return Status::InvalidSource;
     try {
         auto* bank=RigidOdol7OwnerDetail::ResolveBank();if(!bank)return Status::MissingSource;
         auto lease=bank->CaptureCompressedReadRequest(RigidOdol7OwnerDetail::ModelMember,
@@ -158,6 +171,24 @@ inline RigidOdol7OwnerCaptureStatus PrepareRigidOdol7OwnerCapture(RigidOdol7Owne
             ArchiveSourceBinding::RetailPacReadScope pacPurpose(RigidOdol7OwnerDetail::ModelPath);
             Model::ShapeAdapter::AdapterBankTables tables;
             Model::ShapeAdapter::BuildAdapterBankTables(*parsed,tables);
+            if(privatePrimary) {
+                if(tables.textures.size()!=parsed->lodLevels.size())return Status::AdaptFailed;
+                size_t replaced=0;
+                for(size_t lod=0;lod<parsed->lodLevels.size();++lod) {
+                    const auto& materials=parsed->lodLevels[lod].mesh.materials;
+                    auto& row=tables.textures[lod];
+                    if(row.size()!=materials.size())return Status::AdaptFailed;
+                    for(size_t mat=0;mat<materials.size();++mat) {
+                        if(!PatnikArchiveReason::Matches(RigidOdol7OwnerDetail::PrimaryPac,
+                            materials[mat].texturePath.c_str()))continue;
+                        if(!row[mat] || !PatnikArchiveReason::Matches(RigidOdol7OwnerDetail::PrimaryPac,
+                            row[mat]->Name()))return Status::AdaptFailed;
+                        row[mat]=*privatePrimary;
+                        ++replaced;
+                    }
+                }
+                if(!replaced)return Status::AdaptFailed;
+            }
             result._shape.reset(Model::ShapeAdapter::convertToLODShape(*parsed,false,&tables,true));
         }
         if(!result._shape || !RigidOdol7FinalDetail::SamePath(result._shape->Name(),source.canonicalPath))

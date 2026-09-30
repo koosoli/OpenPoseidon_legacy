@@ -3221,7 +3221,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse, BeginOriginalHierarchy, StepHierarchy, RootHierarchy, FineHierarchy, IntermediateHierarchy, LocalHierarchy, BeginOriginalHierarchyDisk, ReleaseHierarchyNonroot, ProjectHierarchy, FollowHierarchy, StopHierarchy, ProbeTextureReuseOnly, ProbeRetailOdol7 };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse, BeginOriginalHierarchy, StepHierarchy, RootHierarchy, FineHierarchy, IntermediateHierarchy, LocalHierarchy, BeginOriginalHierarchyDisk, ReleaseHierarchyNonroot, ProjectHierarchy, FollowHierarchy, StopHierarchy, ProbeTextureReuseOnly, ProbeRetailOdol7, PollRetailRecords, ReleaseRetailRecords, RefillRetailRecords, AbortRetailRecords, SnapshotRetailRecords };
     struct GeometryPageSourceIdentity
     {
         std::array<uint8_t,32> sha256{};
@@ -3306,6 +3306,13 @@ class Engine : public IGraphicsEngine
         uint32_t textureReuseAllowed=0,textureReuseDenied=0,textureReuseOwnerCreates=0;
         bool retailSourceProbe=false,retailSourceExported=false,retailSourceOtherPassesRequired=true;
         uint32_t retailSourcePrepareStatus=0,retailSourceExportStatus=0;
+        // Explicit source diagnostic records only: no instance or world routing.
+        bool retailRecordOnly=false,retailPixelSourceVerified=false,retailRecordDistinctCuts=false;
+        std::string retailPixelSourceSha256;
+        uint32_t retailHierarchyProductStatus=0,retailHierarchyPages=0;
+        uint32_t retailRecordMeshesPresent=0,retailRecordMeshesAbsent=0;
+        uint32_t retailRecordModelsPresent=0,retailRecordModelsAbsent=0;
+        uint64_t retailRecordRequestId=0,retailRecordWorkerReads=0,retailRecordFreshIds=0;
         uint32_t modelAdmissionAccepted=0,modelAdmissionRejected=0,modelAdmissionPending=0;
         uint64_t requestId=0, observedRequestId=0, knownPayloadBytes=0;
         uint32_t producerModel=UINT32_MAX, rendererModel=UINT32_MAX;

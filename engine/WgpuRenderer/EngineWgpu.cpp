@@ -35,6 +35,7 @@
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/Graphics/Textures/DeferredProceduralAdmission.hpp>
 #include <Poseidon/Graphics/Rendering/RigidOdol7OwnerCapture.hpp>
+#include "RetailPagePilotAdmission.hpp"
 #include <atomic>
 #include <optional>
 #include <stdexcept>
@@ -2302,6 +2303,7 @@ struct EngineWgpu::SharedMeshFixtureState
 EngineWgpu::~EngineWgpu()
 {
     StopRenderThread();
+    _retailPagePilot.reset(); // release private texture holds while its bank/renderer are alive
     _geometryPageWorker.reset(); // shutdown-only join; worker owns values, never renderer/Shape pointers
     _sharedMeshFixture.reset();
     // Serializes against late shared-buffer destroy enqueues before wgr_destroy.
@@ -3437,6 +3439,8 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                 auto failed = std::make_shared<LodDemandReport>(); failed->requestId = op.lodDemand->epoch;
                 _lodDemandUnpublished = std::move(failed); _lodDemandOwnerStatus = GeometryReportStatus::Failed;
             }
+            else if (op.kind == ResourceOp::RetailPageRecordObserve && op.retailPageRecordObservation)
+                op.retailPageRecordObservation->ConsumeRejected();
         ops.clear();
         return;
     }
@@ -3832,6 +3836,56 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                     if(const auto found=_meshIdOf.find(fixture->meshes[i]);found!=_meshIdOf.end())
                         fixture->rendererMeshes[i]=found->second;
             }
+            break;
+        }
+        case ResourceOp::RetailPageRecordObserve:
+        {
+            auto packet = op.retailPageRecordObservation;
+            if (!packet) break;
+            if (!packet->Valid()) { packet->ConsumeRejected(); break; }
+            using Observation = render::RetailPageRecordObservation;
+            Observation::DrainEvidence evidence;
+            std::array<uint64_t, Observation::MaxMeshes> handles{};
+            bool queryable = true;
+            for (size_t i = 0; i < packet->MeshCount(); ++i)
+            {
+                const auto expected = packet->MeshAt(i);
+                auto& row = evidence.meshes[i];
+                if (const auto found = _meshIdOf.find(expected.producer); found != _meshIdOf.end())
+                { row.mappingExists = true; row.mappedRenderer = found->second; }
+                handles[i] = expected.expected == Observation::ExpectedMesh::Present ?
+                    row.mappedRenderer : expected.previousRenderer;
+                if (!handles[i]) queryable = false;
+            }
+            for (size_t i = 0; i < packet->ModelCount(); ++i)
+            {
+                const auto expected = packet->ModelAt(i);
+                auto& row = evidence.models[i];
+                if (const auto found = _modelIdOf.find(expected.producer); found != _modelIdOf.end())
+                { row.mappingExists = true; row.mappedRenderer = found->second; }
+            }
+            if (queryable)
+            {
+                std::array<WgrMeshHandleFact, Observation::MaxMeshes> facts{};
+                WgrMeshHandleFactSummary summary{};
+                evidence.getterSucceeded = wgr_get_mesh_handle_facts(_renderer,
+                    WgrSlice<uint64_t>{handles.data(), static_cast<uint32_t>(packet->MeshCount())},
+                    facts.data(), static_cast<uint32_t>(packet->MeshCount()), &summary) != 0;
+                if (evidence.getterSucceeded)
+                {
+                    evidence.summary = {summary.handles_requested, summary.handles_inspected,
+                        summary.present, summary.absent, summary.invalid, summary.duplicate_handles,
+                        summary.complete, summary.flags, summary.record_scope_valid, summary.reserved};
+                    for (size_t i = 0; i < packet->MeshCount(); ++i)
+                    {
+                        auto& row = evidence.meshes[i]; const auto& fact = facts[i];
+                        row.factRenderer = fact.mesh_handle;
+                        row.vertexBytes = fact.vertex_bytes; row.indexBytes = fact.index_bytes;
+                        row.factState = fact.state; row.factReserved = fact.reserved;
+                    }
+                }
+            }
+            packet->Publish(evidence);
             break;
         }
         case ResourceOp::SharedMeshFixtureObserve:
@@ -9464,14 +9518,26 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
     if(!enabled) return failure;
     failure.status=GeometryReportStatus::Invalid;
     if(!Foundation::IsMainThread() || !_renderer || !_gpuDriven) return failure;
+    if(action==GeometryPageFixtureAction::SnapshotRetailRecords)return SnapshotRetailPageRecordPilot();
+    if(action==GeometryPageFixtureAction::PollRetailRecords||action==GeometryPageFixtureAction::ReleaseRetailRecords||
+       action==GeometryPageFixtureAction::RefillRetailRecords||action==GeometryPageFixtureAction::AbortRetailRecords)
+        return StepRetailPageRecordPilot(action);
+    if(_retailPagePilot&&SnapshotRetailPageRecordPilot().active)return failure;
     if(action==GeometryPageFixtureAction::ProbeRetailOdol7) {
         using namespace GeometryPages;
         failure.retailSourceProbe=true;failure.pageWorkState="RetailSourceRefused";
-        if(!WgpuTextureReuseOnlyBinding::Enabled())return failure;
+        if(!WgpuTextureReuseOnlyBinding::Enabled()||!_wbank||_geometryPageFixtureActive)return failure;
         static bool used=false;if(used)return failure;used=true;
         try {
+            Ref<Texture> privatePrimary=new TextureWgpu(_wbank);
+            privatePrimary->SetName(R"(data\skala_piskovec2.pac)");
+            auto* privateTexture=static_cast<TextureWgpu*>(privatePrimary.GetRef());
+            {ArchiveSourceBinding::RetailPacReadScope scope(R"(data3d\skala_new.p3d)");
+                if(!privateTexture->InitRetailPacSource()){failure.pageWorkState="RetailPrivateInitRefused";return failure;}}
+            render::ColdPaaRead beforeCapture;
+            if(!privateTexture->CaptureRetailPacRead(beforeCapture)){failure.pageWorkState="RetailPrivateReadRefused";return failure;}
             RigidOdol7OwnerCapture owner;
-            const auto prepared=PrepareRigidOdol7OwnerCapture(owner);
+            const auto prepared=PrepareRigidOdol7OwnerCapture(owner,&privatePrimary);
             failure.retailSourcePrepareStatus=uint32_t(prepared);
             if(!owner.FinalShape())return failure;
             auto& shape=*owner.FinalShape();
@@ -9485,12 +9551,24 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             if(section.surfMat||section.material!=0||!section.properties.GetTexture())return failure;
             Ref<Texture> held=section.properties.GetTexture();
             auto* texture=static_cast<TextureWgpu*>(held.GetRef());
+            if(texture!=privateTexture)return failure;
+            render::ColdPaaRead afterCapture;
+            if(!texture->CaptureRetailPacRead(afterCapture)||!afterCapture.source->Request().SameArchiveMember(beforeCapture.source->Request()))return failure;
             auto birth=texture->CurrentArchiveSourceBinding();
             BankReadMemberIdentity member;
             if(!birth||!birth->Request().CopyMemberIdentity(member)) {
                 failure.pageWorkState="RetailTextureInitUnknown";return failure;
             }
-            const uint64_t handle=texture->EnsureUploaded();
+            auto pixels=render::RetailPacPrepared::Prepare(std::move(afterCapture));
+            if(!pixels){failure.pageWorkState="RetailPixelPrepareRefused";return failure;}
+            TextureWgpu::RetailPacUploadWitness witness;
+            const uint64_t handle=texture->UploadRetailPacPrepared(*pixels,witness);
+            failure.retailPixelSourceVerified=handle&&witness.currentInit&&witness.layoutMatched&&witness.created&&witness.postMountMatched&&!witness.retiredAfterMismatch;
+            failure.retailPixelSourceSha256=witness.rawSha256;
+            if(!failure.retailPixelSourceVerified){failure.pageWorkState="RetailPixelUploadRefused";return failure;}
+            LOG_INFO(Graphics,"Retail PAC strict stage: rawSha256={} uploadedSha256={} sourceBytes={} uploadBytes={} firstLevel={} levels={} alphaPrepared={} alphaPixels={} clearPercent={} sourceCurrent={} scope=source-bound-upload-not-pixels",
+                witness.rawSha256,witness.uploadedSha256,witness.sourceBytes,witness.uploadedBytes,witness.firstLevel,witness.levels,
+                witness.alphaFromPrepared,witness.alphaTopPixels,witness.alphaClearPercent,witness.postMountMatched);
             if(!handle||!texture->SlotLease()||texture->GetAlphaClass()!=AlphaStats::Opaque||texture->HasAlphaHoles())return failure;
             const uint32_t slotLease=texture->SlotLease();
             WgpuTextureReuseOnlyBinding reuse;
@@ -9546,7 +9624,48 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             failure.sourceAdmissionEpoch=actual.sourceAdmissionEpoch;failure.originalSourceBytes=owner.DecodedBytes().size();
             failure.sourceSha256=PageHashHex(actual.actual.source.sourceSha256);
             failure.knownPayloadBytes=owner.RetainedDecodedCapacityBytes();
-            failure.status=GeometryReportStatus::Ready;failure.pageWorkState="RetailFinalShapeVerified";
+            RigidFinalHierarchyProduct product;
+            const auto built=BuildRigidFinalHierarchyProduct(actual,product);
+            failure.retailHierarchyProductStatus=uint32_t(built);
+            if(built!=RigidFinalHierarchyStatus::Produced){failure.pageWorkState="RetailHierarchyProducerRefused";return failure;}
+            render::RetailPagePilotAdmission admission;
+            {WgpuTextureReuseOnlyBinding::Scope scope(reuse,true,true);
+                AutoArray<render::mesh::MeshSection> sections;render::mesh::BuildSections(*shape.Level(actual.finalLevels[1]),sections);
+                if(!ClassifyGpuSection(*shape.Level(actual.finalLevels[1]),1,sections,0,admission.section,admission.material,true)||reuse.Read().failed)return failure;}
+            if(admission.material.texture_id!=handle)return failure;
+            admission.actual=std::make_shared<const RigidOdol7FinalExport>(std::move(actual));
+            admission.product=std::make_shared<const RigidFinalHierarchyProduct>(std::move(product));
+            admission.modelLease=owner.Lease();admission.texture=held;admission.textureBirth=birth;
+            for(const auto* mesh:{&admission.actual->actual.coarse,&admission.actual->actual.fine})
+                for(const auto& p:mesh->positions)
+                    admission.sphereRadius=std::max(admission.sphereRadius,std::nextafter(float(std::sqrt(double(p.x)*p.x+double(p.y)*p.y+double(p.z)*p.z)),std::numeric_limits<float>::infinity()));
+            admission.textureHandle=handle;admission.textureSlotLease=slotLease;
+            admission.pixelSourceVerified=true;
+            if(!RigidOdol7OwnerDetail::ParseHash(witness.rawSha256,admission.pixelSourceSha256))return failure;
+            admission.knownAuthorityBytes=sizeof(admission)+sizeof(BankCompressedReadRequest)+birth->KnownCppBytes()+
+                admission.modelLease->Encoded().ArchiveIdentityBytes()+admission.modelLease->Encoded().archive.capacity()+
+                admission.modelLease->CanonicalMember().capacity()+2+256;
+            const auto lease=admission.modelLease;const auto exportHold=admission.actual;
+            admission.sourceCurrent=[this,lease,exportHold,held,birth,handle,slotLease]() {
+                if(!Foundation::IsMainThread()||!RigidOdol7OwnerDetail::Enabled()||_geometryOwnerEpoch!=exportHold->ownerEpoch)return false;
+                auto* modelBank=RigidOdol7OwnerDetail::ResolveBank();
+                auto* t=static_cast<TextureWgpu*>(held.GetRef());
+                auto current=t->CurrentArchiveSourceBinding();
+                BankReadMemberIdentity modelMember;
+                if(!modelBank||!lease||!lease->Encoded().HasArchiveIdentity()||lease->DecodedBytes()!=53786||
+                   !modelBank->MatchesMountedCompressedMember(RigidOdol7OwnerDetail::ModelMember,*lease)||
+                   !lease->Encoded().CopyMemberIdentity(modelMember)||!(modelMember==exportHold->sourceMember)||
+                   !current||!current->Request().SameArchiveMember(birth->Request())||
+                   t->GpuHandle()!=handle||t->SlotLease()!=slotLease)return false;
+                return true; // immutable decoded hash supplied by the exact retained lease/export, no path recapture
+            };
+            auto records=BeginRetailPageRecordPilot(std::move(admission));
+            records.retailSourceProbe=true;records.retailSourceExported=true;
+            records.retailSourcePrepareStatus=failure.retailSourcePrepareStatus;
+            records.retailSourceExportStatus=failure.retailSourceExportStatus;
+            records.retailHierarchyProductStatus=failure.retailHierarchyProductStatus;
+            records.originalSourceBytes=failure.originalSourceBytes;
+            return records;
         }catch(...){failure.status=GeometryReportStatus::Failed;failure.pageWorkState="RetailSourceAllocationOrOwnerFailure";}
         return failure;
     }

@@ -1398,3 +1398,54 @@ receipts with actual owner/source epochs. Null-receipt ordinary operations retai
 the existing path, while invalid renderer IDs cannot become instances. Receipt
 consumption does not settle retirement debt. Installed verification remains
 pending; no performance/default-ready/Nanite claim.
+
+### 30 September — installed retail probe, receipts and normal DayZ controls
+
+Exact installed `99a200a0` passed paired WGPU startup and the combined
+`retail-final-reuse-receipt-sep30-20260930-023744-0a0740` runner normally/exit0.
+The real native ODOL7 source yielded 144/250 finalized triangles; a separate
+controlled hierarchy repeated root64/Fine512/root64/Fine512/root64 with
+accepted receipt counts2/3/3/3/3, no rejected/pending receipt, and reads1/2/2/2/2.
+The actual generated reuse guard allowed1, denied2, and preserved both owner
+creates/retries. This did not render retail pages or prove PAC GPU pixel birth.
+
+Normal disabled DayZ controls before/after (`default-control-1de-sep30-disabled-
+20260930-023330` and `default-control-99a-sep30-disabled-20260930-023938`) both
+exited normally with zero dropped trace frames. Median22.663/23.053ms,
+p95122.366/98.625ms and p99354.190/282.018ms are ordered-cache observations,
+not a causal performance improvement or comparable-quality acceptance.
+
+The birth/retirement route `birth-retirement-99a-sep30-disabled-20260930-024331`
+exited normally and captured28 current physical plus4 generated refs, but its
+result.passed remained false: the JSON verdict still required an independent
+warm-upload witness despite marking it optional for the observer. That failure
+is preserved; next source fixes the verdict expression and will rerun once.
+The observer remains partial (63 missing-source observations), role closure false.
+
+Next source connects fresh private PAC Init, pure leased BC1 preparation and
+one exact source-bound upload to the real final-shape exporter, then builds
+independently hashed GHP pages. Actual alpha facts come from those held blocks.
+The new diagnostic retains material/source identity and stages non-instanced
+page/model records with drain receipts and complete generational record checks.
+It intentionally does not replace world draws or shadow passes. Defaults remain
+unchanged; whole plan OPEN/defaultReady=false/performanceAccepted=false.
+
+The next source game/tests/tools build passed. Focused producer/reuse checks
+passed339 assertions/11 cases, exact record/model receipts68 assertions/5 cases,
+and fresh opt-in PAC preparation17 assertions/1 case. Two initially supplied
+Catch filters matched no cases; corrected receipt/record filters ran separately
+and their logs are retained. Independent review repaired an unreachable
+Failed-state cleanup branch; exact postcommit runtime verification is pending.
+The runtime pilot stages at most one mesh per owner frame, authenticates every
+independent page, retains fallback/root coverage as records only, and joins its
+worker before deleting an owned CREATE_NEW file. Capacity figures measure known
+owned storage; producer temporary peak, allocator/RSS and device completion
+remain unproved. No world replacement or performance/default promotion.
+
+The native file/teardown refinement build passed and the independent hierarchy
+codec/reader suite passed12,210 assertions/7 cases, including held DELETE-access
+read and exact-handle deletion with a preserved neighboring sentinel. Windows
+reads now share the producer's existing accesses while that producer still denies
+other writers/deleters. Teardown headroom is reserved before admission; reports
+carry actual worker debt, and historical mesh preflight counts the root/fine page
+union plus refill IDs. Installed verification remains pending.

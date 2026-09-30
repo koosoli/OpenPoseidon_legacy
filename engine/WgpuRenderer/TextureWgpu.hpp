@@ -6,9 +6,11 @@
 #include <wgpu_renderer.hpp>
 #include <Poseidon/Graphics/Textures/MipDemand.hpp>
 #include <Poseidon/Graphics/Textures/TextureReuseOnlyBinding.hpp>
+#include <Poseidon/Graphics/Textures/RetailPacPixelStage.hpp>
 
 #include <cstdint>
 #include <memory>
+#include <string>
 
 namespace Poseidon
 {
@@ -104,11 +106,35 @@ class TextureWgpu : public Texture
     bool ScanTopMipAlphaBlocks(AlphaScanPath& path);
 
   public:
+    struct RetailPacUploadWitness
+    {
+        bool currentInit = false, layoutMatched = false, createAttempted = false;
+        bool created = false, postMountMatched = false, retiredAfterMismatch = false;
+        bool alphaFromPrepared = false;
+        std::shared_ptr<const ArchiveSourceBinding> birth;
+        BankReadMemberIdentity member{};
+        std::string rawSha256, uploadedSha256;
+        uint64_t sourceBytes = 0, uploadedBytes = 0, handle = 0;
+        uint32_t slotLease = 0, width = 0, height = 0, levels = 0, firstLevel = 0;
+        uint64_t alphaTopPixels = 0;
+        double alphaClearPercent = 0.0;
+    };
     bool HasAdaptiveReplacement() const { return _gpuHandle && _slotLease && _mipDemand.replaced != 0; }
     explicit TextureWgpu(TextureBankWgpu* bank);
     ~TextureWgpu() override;
 
     uint64_t EnsureUploaded();
+    // Private exact-model diagnostic only: construct a fresh TextureWgpu(bank),
+    // SetName("data\\skala_piskovec2.pac"), then call InitRetailPacSource()
+    // inside RetailPacReadScope("data3d\\skala_new.p3d"). The object must be
+    // retained by the owner and destroyed before its bank/renderer. It is not
+    // inserted in TextureBankWgpu's shared name cache.
+    bool InitRetailPacSource();
+    bool CaptureRetailPacRead(render::ColdPaaRead& out) const;
+    // One source-bound BC1 create, no path reopen, store claim, or fallback.
+    // A refusal before create leaves normal EnsureUploaded retry state intact.
+    uint64_t UploadRetailPacPrepared(const render::RetailPacPrepared& prepared,
+                                     RetailPacUploadWitness& witness);
     const char* SourceName() const { return _sourceName.GetLength() ? (const char*)_sourceName : Name(); }
     // Owner-only metadata/native-handle observation. Never loads a bank or
     // recaptures provenance by name; unsupported/currently different mounts refuse.

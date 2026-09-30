@@ -57,6 +57,7 @@ corrosion_import_crate(
 
 add_library(WgpuRenderer STATIC
     EngineWgpu.cpp
+    EngineWgpuRetailPages.cpp
     EngineWgpuTextInput.cpp
     GraphicsBackendWgpu.cpp
     TerrainWgpu.cpp

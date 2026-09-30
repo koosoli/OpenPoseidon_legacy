@@ -559,9 +559,29 @@ try{
     $pose=Send @{cmd='eval';code='triFreeFlyPose "1184 1240 18 90 -8"'};Require $pose @('result');if($pose.result.Trim('"') -ne 'OK'){throw 'Original fixture camera refused'}
     $retailEvidence=$null
     if($RetailSource){
+     function RetailReady([string]$action){
+      $until=[DateTime]::UtcNow.AddSeconds(30)
+      $r=Send @{cmd='geometry_page_fixture';action=$action}
+      while($r.status -eq 'Pending' -and [DateTime]::UtcNow -lt $until){Start-Sleep -Milliseconds 120;$r=Send @{cmd='geometry_page_fixture';action='pollRetailRecords'}}
+      if($r.status -ne 'Ready'){ $r|ConvertTo-Json -Depth 10|Set-Content (Join-Path $out 'retail-record-failed.json');throw "Retail record action $action failed: $($r.pageWorkState)" }
+      return $r
+     }
      $retailEvidence=Send @{cmd='geometry_page_fixture';action='probeRetailOdol7'}
+     $retailBegin=$retailEvidence
+     if($retailEvidence.status -eq 'Pending'){$retailEvidence=RetailReady 'pollRetailRecords'}
      $retailEvidence|ConvertTo-Json -Depth 8|Set-Content (Join-Path $out 'retail-source-proof.json')
-     if($retailEvidence.status -ne 'Ready' -or !$retailEvidence.retailSourceProbe -or !$retailEvidence.retailSourceExported -or !$retailEvidence.retailSourceOtherPassesRequired -or $retailEvidence.coarseTriangles -ne 144 -or $retailEvidence.fineTriangles -ne 250 -or $retailEvidence.originalSourceBytes -ne 53786){throw 'Actual retail source/final Shape/Init texture proof failed'}
+     if($retailEvidence.status -ne 'Ready' -or !$retailEvidence.retailSourceProbe -or !$retailEvidence.retailSourceExported -or !$retailEvidence.retailSourceOtherPassesRequired -or !$retailEvidence.retailRecordOnly -or !$retailEvidence.retailPixelSourceVerified -or $retailEvidence.retailPixelSourceSha256.Length -ne 64 -or $retailEvidence.coarseTriangles -ne 144 -or $retailEvidence.fineTriangles -ne 250 -or $retailEvidence.originalSourceBytes -ne 53786 -or $retailEvidence.retailRecordMeshesPresent -lt 1 -or $retailEvidence.retailRecordModelsPresent -lt 1 -or $retailEvidence.modelAdmissionAccepted -lt 1 -or $retailEvidence.modelAdmissionRejected -ne 0 -or $retailEvidence.modelAdmissionPending -ne 0 -or $retailEvidence.retailRecordWorkerReads -lt 1){throw 'Actual retail source/final Shape/source-pixel/page record proof failed'}
+     if($retailEvidence.producerInstance -ne 4294967295 -or $retailEvidence.rendererInstance -ne 4294967295 -or $retailEvidence.mainFrameReturned){throw 'Retail record-only pilot unexpectedly claims instance/frame authority'}
+     $retailRelease=$null;$retailRefill=$null
+     if($retailEvidence.retailRecordDistinctCuts){
+      $retailRelease=RetailReady 'releaseRetailRecords'
+      if($retailRelease.retailRecordMeshesAbsent -lt 1 -or $retailRelease.retailRecordMeshesPresent -lt 1){throw 'Retail detail release failed historical Absent/root retention'}
+      $retailRefill=RetailReady 'refillRetailRecords'
+      if($retailRefill.retailRecordFreshIds -le $retailEvidence.retailRecordFreshIds -or $retailRefill.retailRecordMeshesAbsent -lt $retailRelease.retailRecordMeshesAbsent){throw 'Retail refill failed fresh IDs/historical Absent'}
+     }
+     $retailAbort=RetailReady 'abortRetailRecords'
+     if($retailAbort.retailRecordMeshesPresent -ne 0 -or $retailAbort.retailRecordModelsPresent -ne 0 -or $retailAbort.retailRecordMeshesAbsent -lt 1 -or $retailAbort.pageLiveJobs -ne 0 -or $retailAbort.pageReservedBytes -ne 0){throw 'Retail abort failed all-record absence or worker debt'}
+     @{begin=$retailBegin;ready=$retailEvidence;released=$retailRelease;refilled=$retailRefill;aborted=$retailAbort;scope='Actual immutable retail source and strict pixel upload plus non-instanced page/model records; no pixels/world routing/all-pass/device-free/performance acceptance'}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'retail-record-lifetime.json')
     }
     $reuseEvidence=$null
     if($TextureReuseOnly){

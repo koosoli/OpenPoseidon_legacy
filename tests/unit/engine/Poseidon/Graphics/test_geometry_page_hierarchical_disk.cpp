@@ -1,5 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
+#include <stdexcept>
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalDiskCodec.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalDiskSource.hpp>
+#ifdef _WIN32
+#include <Windows.h>
+#endif
 using namespace Poseidon;
 using namespace Poseidon::GeometryPages;
 namespace
@@ -54,6 +59,102 @@ void RefreshPageDigest(HierarchicalDiskImage& image,const HierarchicalDiskManife
     std::copy(digest.begin(),digest.end(),image.bytes.begin()+row+36);RefreshMetadataDigest(image);
 }
 }
+#ifdef _WIN32
+namespace
+{
+class HeldDeleteHierarchyFixture
+{
+    std::filesystem::path root_,directory_;
+    HANDLE held_=INVALID_HANDLE_VALUE;
+public:
+    HeldDeleteHierarchyFixture()
+    {
+        root_=std::filesystem::canonical(std::filesystem::temp_directory_path());
+        static std::atomic<uint64_t> serial{0};
+        for(unsigned attempt=0;attempt<64;++attempt) {
+            auto candidate=root_/("OpenPoseidon-hierarchy-owned-"+std::to_string(GetCurrentProcessId())+"-"+
+                std::to_string(GetTickCount64())+"-"+std::to_string(++serial));
+            if(std::filesystem::create_directory(candidate)){directory_=std::move(candidate);return;}
+        }
+        throw std::runtime_error("cannot reserve owned hierarchy fixture directory");
+    }
+    ~HeldDeleteHierarchyFixture()
+    {
+        if(held_!=INVALID_HANDLE_VALUE) {
+            FILE_DISPOSITION_INFO disposition{};disposition.DeleteFile=TRUE;
+            SetFileInformationByHandle(held_,FileDispositionInfo,&disposition,sizeof(disposition));
+            CloseHandle(held_);
+        }
+        std::error_code error;const auto resolved=std::filesystem::canonical(directory_,error);
+        if(error||resolved!=directory_||resolved.parent_path()!=root_||
+           resolved.filename().string().rfind("OpenPoseidon-hierarchy-owned-",0)!=0)return;
+        std::filesystem::remove(resolved/"sentinel.txt",error);
+        std::filesystem::remove(resolved,error); // never recursively remove unrelated entries
+    }
+    std::filesystem::path Path()const{return directory_/"hierarchy.ghp";}
+    std::filesystem::path Sentinel()const{return directory_/"sentinel.txt";}
+    bool Write(std::span<const uint8_t> bytes)
+    {
+        if(held_!=INVALID_HANDLE_VALUE||bytes.empty()||bytes.size()>1024*1024)return false;
+        const auto path=Path();
+        held_=CreateFileW(path.c_str(),GENERIC_READ|GENERIC_WRITE|DELETE,FILE_SHARE_READ,
+            nullptr,CREATE_NEW,FILE_ATTRIBUTE_TEMPORARY,nullptr);
+        if(held_==INVALID_HANDLE_VALUE)return false;
+        DWORD written=0;
+        return WriteFile(held_,bytes.data(),DWORD(bytes.size()),&written,nullptr)&&
+            written==bytes.size()&&FlushFileBuffers(held_);
+    }
+    bool DeleteExactHeldFile()
+    {
+        if(held_==INVALID_HANDLE_VALUE)return false;
+        FILE_DISPOSITION_INFO disposition{};disposition.DeleteFile=TRUE;
+        if(!SetFileInformationByHandle(held_,FileDispositionInfo,&disposition,sizeof(disposition)))return false;
+        const bool closed=CloseHandle(held_)!=0;held_=INVALID_HANDLE_VALUE;return closed;
+    }
+};
+}
+TEST_CASE("Windows independent hierarchy read shares the held DELETE lease without permitting replacement",
+          "[geometry-page-hierarchical-disk][geometry-page-hierarchy-held-delete]")
+{
+    // Trusted private producer image only; neither filesystem ownership nor
+    // successful decoding certifies a live model, material or GPU admission.
+    const auto package=DiskHierarchy();const auto image=Image(package);const auto manifest=Manifest(image);
+    HeldDeleteHierarchyFixture files;REQUIRE(files.Write(image.bytes));
+    {std::ofstream sentinel(files.Sentinel(),std::ios::binary);sentinel<<"preserve-neighbor";REQUIRE(bool(sentinel));}
+    const auto path=files.Path();
+    HANDLE writer=CreateFileW(path.c_str(),GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+        nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    const DWORD writerError=writer==INVALID_HANDLE_VALUE?GetLastError():ERROR_SUCCESS;
+    if(writer!=INVALID_HANDLE_VALUE)CloseHandle(writer);
+    REQUIRE(writer==INVALID_HANDLE_VALUE);REQUIRE(writerError==ERROR_SHARING_VIOLATION);
+    const bool deleted=DeleteFileW(path.c_str())!=0;
+    const DWORD deleteError=deleted?ERROR_SUCCESS:GetLastError();
+    REQUIRE_FALSE(deleted);REQUIRE(deleteError==ERROR_SHARING_VIOLATION);
+    HierarchicalDiskPageInput input;input.path=path;
+    input.metadataBytes.assign(image.bytes.begin(),image.bytes.begin()+manifest.metadataBytes);
+    input.expectedIdentity=image.identity;input.expectedMetadataSha256=image.metadataSha256;
+    input.fileBytes=image.bytes.size();input.pageId=package.rootPages.front();
+    std::atomic<bool> cancelled{false};HierarchicalPage page;
+    REQUIRE(ReadHierarchicalDiskPage(input,page,cancelled)==HierarchicalDiskReadStatus::Read);
+    const auto& expected=package.pages[input.pageId];
+    REQUIRE(page.group==expected.group);REQUIRE(page.clusters.size()==expected.clusters.size());
+    for(size_t c=0;c<page.clusters.size();++c) {
+        REQUIRE(page.clusters[c].cluster==expected.clusters[c].cluster);
+        REQUIRE(page.clusters[c].material==expected.clusters[c].material);
+        REQUIRE(page.clusters[c].vertices.size()==expected.clusters[c].vertices.size());
+        REQUIRE(page.clusters[c].originalVertexIds==expected.clusters[c].originalVertexIds);
+        REQUIRE(page.clusters[c].indices==expected.clusters[c].indices);
+        for(size_t v=0;v<page.clusters[c].vertices.size();++v)
+            CheckVertex(page.clusters[c].vertices[v],expected.clusters[c].vertices[v]);
+    }
+    REQUIRE(files.DeleteExactHeldFile());REQUIRE_FALSE(std::filesystem::exists(path));
+    std::ifstream sentinel(files.Sentinel(),std::ios::binary);
+    std::string contents;std::getline(sentinel,contents);REQUIRE(contents=="preserve-neighbor");
+    HierarchicalPage retained=page;
+    REQUIRE(ReadHierarchicalDiskPage(input,retained,cancelled)==HierarchicalDiskReadStatus::Missing);
+    REQUIRE(retained.clusters.front().originalVertexIds==page.clusters.front().originalVertexIds);
+}
+#endif
 TEST_CASE("Hierarchical independent disk pages preserve graph and exact scalar vertex records", "[geometry-page-hierarchical-disk]")
 {
     const auto package=DiskHierarchy();const auto image=Image(package);const auto manifest=Manifest(image);

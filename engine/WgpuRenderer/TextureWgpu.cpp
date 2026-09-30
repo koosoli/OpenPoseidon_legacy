@@ -7,6 +7,7 @@
 #include <Poseidon/Graphics/Textures/BlockCompression.hpp>
 #include <Poseidon/Graphics/Textures/AlphaShapeAnalysis.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp> // IsEnfusionRgNormalName (RFG-047)
+#include <Poseidon/Graphics/Textures/Image.hpp>
 #include <Poseidon/Graphics/Textures/NativeNormalChannels.hpp>
 #include <Poseidon/Graphics/Textures/HotSourceProofRetirementPolicy.hpp>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp> // SkipLayerTint (RFG-070)
@@ -25,6 +26,8 @@
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
+#include <Poseidon/Foundation/Algorithms/Sha256.hpp>
+#include <Poseidon/IO/Streams/PatnikArchiveReason.hpp>
 
 #include <Poseidon/Graphics/Textures/Bc3Encoder.hpp>
 
@@ -42,6 +45,8 @@
 
 namespace Poseidon
 {
+
+int TextureMipBias(); // shared with the ordinary block upload below
 
 namespace
 {
@@ -1211,6 +1216,167 @@ std::shared_ptr<const ArchiveSourceBinding> TextureWgpu::CurrentArchiveSourceBin
     const size_t prefix = static_cast<size_t>(bank->GetPrefix().GetLength());
     if (prefix >= length || !bank->MatchesMountedMember(name + prefix, binding->Request())) return {};
     return binding;
+}
+
+bool TextureWgpu::InitRetailPacSource()
+{
+    if (!Foundation::IsMainThread() || !ArchiveSourceBinding::RetailPacReadScope::MatchesLogicalName(Name()) ||
+        !_bank || _src || _gpuHandle || _uploadTried || _dynamic || _deferredGenerated) return false;
+    return Init() == 0 && _src && _nMipmaps > 0 && !!CurrentArchiveSourceBinding();
+}
+
+bool TextureWgpu::CaptureRetailPacRead(render::ColdPaaRead& out) const
+{
+    out = render::ColdPaaRead{};
+    if (!ArchiveSourceBinding::RetailPacReadScope::Enabled() || !Foundation::IsMainThread() ||
+        !PatnikArchiveReason::Matches(R"(data\skala_piskovec2.pac)", SourceName()) ||
+        _gpuHandle || _uploadTried || _dynamic || _tintDelegate || _cpuTintView || !_src ||
+        _nMipmaps <= 0 || _nMipmaps > 7 || _src->GetFormat() != PacDXT1) return false;
+    auto source = CurrentArchiveSourceBinding();
+    if (!source || source->Request().bytes > render::RetailPacPrepared::MaxSourceBytes) return false;
+    render::ColdPaaRead candidate;
+    candidate.key = SourceName();
+    candidate.source = std::move(source);
+    candidate.magic = 0xff01;
+    candidate.count = static_cast<size_t>(_nMipmaps);
+    size_t total = 0;
+    for (int i = 0; i < _nMipmaps; ++i)
+    {
+        const auto& mip = _mipmaps[i];
+        if (mip.SrcFormat() != PacDXT1 || mip.DstFormat() != PacDXT1 || mip._start < 0 ||
+            mip._w <= 0 || mip._h <= 0) return false;
+        const size_t bytes = static_cast<size_t>(render::mipmap::ComputeLayout(PacDXT1, mip._w, mip._h).dataSize);
+        if (!bytes || bytes > render::RetailPacPrepared::MaxBlockBytes - total) return false;
+        total += bytes;
+        candidate.levels[i] = {mip._w, mip._h, bytes, static_cast<size_t>(mip._start)};
+    }
+    if (!candidate.Valid()) return false;
+    out = std::move(candidate);
+    return true;
+}
+
+uint64_t TextureWgpu::UploadRetailPacPrepared(const render::RetailPacPrepared& prepared,
+                                               RetailPacUploadWitness& witness)
+{
+    witness = RetailPacUploadWitness{};
+    if (!ArchiveSourceBinding::RetailPacReadScope::Enabled() || !Foundation::IsMainThread() ||
+        !_bank || !_bank->Renderer() || _gpuHandle || _uploadTried || _dynamic || _deferredGenerated ||
+        _tintDelegate || _cpuTintView || !prepared.Valid()) return 0;
+    render::ColdPaaRead current;
+    if (!CaptureRetailPacRead(current) || current.key != prepared._header.key ||
+        !current.source->Request().SameArchiveMember(prepared._header.source->Request()) ||
+        current.magic != prepared._header.magic || current.count != prepared._header.count) return 0;
+    witness.currentInit = true;
+    for (size_t i = 0; i < current.count; ++i)
+    {
+        const auto& a = current.levels[i];
+        const auto& b = prepared._header.levels[i];
+        if (a.width != b.width || a.height != b.height || a.bytes != b.bytes || a.header != b.header)
+            return 0;
+    }
+    witness.layoutMatched = true;
+    if (!current.source->Request().CopyMemberIdentity(witness.member)) return 0;
+    witness.birth = current.source;
+    witness.sourceBytes = current.source->Request().bytes;
+    witness.rawSha256 = prepared._rawSha256;
+
+    const int firstLevel = std::min(TextureMipBias(), _nMipmaps - 1);
+    if (firstLevel < 0 || firstLevel >= _nMipmaps) return 0;
+    const int count = _nMipmaps - firstLevel;
+    std::vector<uint8_t> upload;
+    AlphaStats preparedAlpha;
+    try
+    {
+        // BC1 is a one-bit format, so ordinary GetAlphaClass never scans its
+        // pixels; HasAlphaHoles consequently has no histogram. Derive that
+        // missing fact from the exact retained top mip, even when mip bias
+        // starts the GPU upload lower. This decoder is pure and cannot reopen
+        // the PAC by name. At the 128 KiB BC1 block cap RGBA scratch is <=1 MiB.
+        const auto& alphaTop = prepared._chain.levels.front();
+        const int alphaW = _mipmaps[0]._w, alphaH = _mipmaps[0]._h;
+        constexpr size_t maxAlphaPixels = render::RetailPacPrepared::MaxBlockBytes * 2;
+        if (alphaW <= 0 || alphaH <= 0 || static_cast<size_t>(alphaW) > maxAlphaPixels / static_cast<size_t>(alphaH) ||
+            alphaTop.size != static_cast<size_t>(render::mipmap::ComputeLayout(PacDXT1, alphaW, alphaH).dataSize) ||
+            alphaTop.offset > prepared._chain.blocks.size() ||
+            alphaTop.size > prepared._chain.blocks.size() - alphaTop.offset) return 0;
+        const size_t alphaPixels = static_cast<size_t>(alphaW) * static_cast<size_t>(alphaH);
+        std::vector<uint8_t> rgba(alphaPixels * 4);
+        if (!ConvertPixels(prepared._chain.blocks.data() + alphaTop.offset, rgba.data(), alphaW, alphaH,
+                PixelFormat::DXT1, PixelFormat::RGBA8888)) return 0;
+        preparedAlpha = ClassifyAlpha(rgba.data(), alphaPixels);
+        std::vector<uint8_t>().swap(rgba);
+        size_t total = 0;
+        for (int i = firstLevel; i < _nMipmaps; ++i)
+        {
+            const auto& level = prepared._chain.levels[static_cast<size_t>(i)];
+            if (level.size > render::RetailPacPrepared::MaxBlockBytes - total) return 0;
+            total += level.size;
+        }
+        if (!total || total > UINT32_MAX) return 0;
+        upload.resize(total);
+        size_t offset = 0;
+        for (int i = firstLevel; i < _nMipmaps; ++i)
+        {
+            const auto& level = prepared._chain.levels[static_cast<size_t>(i)];
+            std::memcpy(upload.data() + offset, prepared._chain.blocks.data() + level.offset, level.size);
+            offset += level.size;
+        }
+        witness.uploadedSha256 = Foundation::Sha256::Of(upload.data(), upload.size());
+    }
+    catch (...) { return 0; }
+    // Repeat the current-mount check after pure preparation and immediately
+    // before the only GPU call. A changed source never reaches create.
+    auto beforeCreate = CurrentArchiveSourceBinding();
+    if (!beforeCreate || !beforeCreate->Request().SameArchiveMember(witness.birth->Request())) return 0;
+    WgrRenderer* renderer = _bank->Renderer();
+    CheckProducerMayTouchRenderer("retail PAC texture slot acquire");
+    const uint32_t slot = AcquireSlotLease();
+    if (!slot) return 0; // no stable reusable slot; lease state stays charged if acquired
+    witness.slotLease = slot;
+    CheckProducerMayTouchRenderer("retail PAC texture create");
+    // Slot acquisition may wait for a producer window. Refuse if that interval
+    // changed the loaded bank, before any texture resource is created. Acquire
+    // the window before this final check so no wait follows source validation.
+    beforeCreate = CurrentArchiveSourceBinding();
+    if (!beforeCreate || !beforeCreate->Request().SameArchiveMember(witness.birth->Request())) return 0;
+    const auto& top = _mipmaps[firstLevel];
+    witness.firstLevel = static_cast<uint32_t>(firstLevel);
+    witness.levels = static_cast<uint32_t>(count);
+    witness.width = static_cast<uint32_t>(top._w);
+    witness.height = static_cast<uint32_t>(top._h);
+    witness.uploadedBytes = upload.size();
+    GTextureStreamStats.frameUploadBytes.fetch_add(upload.size(), std::memory_order_relaxed);
+    witness.createAttempted = true;
+    const uint64_t created = wgr_texture_create_in_slot(renderer, witness.width, witness.height,
+        WGR_TEXTURE_BC1, witness.levels, 0, upload.data(), static_cast<uint32_t>(upload.size()), slot);
+    GTextureStreamStats.frameUploads.fetch_add(1, std::memory_order_relaxed);
+    witness.created = created != 0;
+    if (!created) return 0; // ordinary retry remains possible; slot lease remains owned
+    const auto afterCreate = CurrentArchiveSourceBinding();
+    witness.postMountMatched = afterCreate &&
+        afterCreate->Request().SameArchiveMember(witness.birth->Request());
+    if (!witness.postMountMatched)
+    {
+        CheckProducerMayTouchRenderer("retail PAC stale texture retire");
+        wgr_texture_destroy(renderer, created);
+        witness.retiredAfterMismatch = true;
+        return 0;
+    }
+    _gpuHandle = created;
+    _uploadTried = true;
+    _uploadedFirstLevel = firstLevel;
+    _w = top._w; _h = top._h;
+    _alphaStats = preparedAlpha;
+    _alphaStatsScanned = true;
+    if (_alphaClass < 0)
+        _alphaClass = static_cast<signed char>(ClassifyTextureAlpha(
+            _src->IsAlpha(), _src->IsTransparent(), true, nullptr));
+    witness.alphaFromPrepared = true;
+    witness.alphaTopPixels = static_cast<uint64_t>(_mipmaps[0]._w) * static_cast<uint64_t>(_mipmaps[0]._h);
+    witness.alphaClearPercent = _alphaStats.pctClear;
+    witness.handle = created;
+    NoteUploadSize(_w, _h, upload.size(), true);
+    return created;
 }
 
 bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)

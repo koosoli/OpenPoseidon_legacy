@@ -21,6 +21,7 @@
 #include "StandaloneMeshRetirementWitness.hpp"
 #include "ParkedGeometryReport.hpp"
 #include "ModelAdmissionReceipt.hpp"
+#include "RetailPageRecordObservation.hpp"
 
 #include <array>
 #include <chrono> // steady_clock, for the opt-in auto-exposure time constant (WGR_AUTO_EXPOSURE_TAU)
@@ -39,7 +40,7 @@ struct SDL_Window;
 
 namespace Poseidon
 {
-namespace render { class GeometryOwnerLedger; class GeometrySourceRevisions; }
+namespace render { class GeometryOwnerLedger; class GeometrySourceRevisions; struct RetailPagePilotAdmission; }
 namespace GeometryPages { class AuthoredPageWorker; }
 class TextureBankWgpu;
 class TextureWgpu;
@@ -829,6 +830,8 @@ class EngineWgpu : public EngineDummy
     std::shared_ptr<GeometryPageOriginalAdmissionState> _geometryPageOriginalAdmission;
     struct GeometryPageFixtureState;
     std::shared_ptr<GeometryPageFixtureState> _geometryPageFixture;
+    struct RetailPagePilotState;
+    std::shared_ptr<RetailPagePilotState> _retailPagePilot;
     std::shared_ptr<GeometryPageFixtureState> _geometryPageFixtureObservation;
     uint64_t _geometryPageFixtureObservationRequest=0;
     struct GeometryMainCountPending;
@@ -1325,7 +1328,8 @@ class EngineWgpu : public EngineDummy
             LodDemandStart,
             LodDemandCancel,
             SharedMeshFixtureObserve,
-            GeometryPageFixtureObserve
+            GeometryPageFixtureObserve,
+            RetailPageRecordObserve // explicit non-instanced retail record cut only
         };
         Kind kind = MeshCreate;
         uint64_t mesh = 0;  // MeshCreate: the producer handle being defined; MeshDestroy: the one dying
@@ -1342,6 +1346,7 @@ class EngineWgpu : public EngineDummy
         std::vector<WgrModelSection> sections;     // ModelRegister; .mesh holds PRODUCER handles
         std::vector<WgrModelMaterial> materials;   // ModelRegister (texture handles baked, see cpp)
         std::shared_ptr<render::ModelAdmissionReceipt> modelAdmissionReceipt; // selected ModelRegister only
+        std::shared_ptr<render::RetailPageRecordObservation> retailPageRecordObservation; // selected record-only observation
         std::string name;
         // Filled only by an explicit diagnostic request; names captured on producer,
         // never recovered by dereferencing a Shape after a later frame/lifetime change.
@@ -1384,6 +1389,9 @@ class EngineWgpu : public EngineDummy
         const GeometryPageHierarchyDemandInput* hierarchyDemand=nullptr,
         const GeometryPageHierarchyDiskFixtureInput* hierarchyDisk=nullptr) override;
     void MaintainGeometryPageCameraDemand();
+    GeometryPageFixtureReport BeginRetailPageRecordPilot(render::RetailPagePilotAdmission&&);
+    GeometryPageFixtureReport StepRetailPageRecordPilot(GeometryPageFixtureAction);
+    GeometryPageFixtureReport SnapshotRetailPageRecordPilot() const;
     void MaintainGeometryPageProjectedDemand();
     void MaintainGeometryPageHierarchyDemand();
     GeometryPageOriginalAdmissionReport AdmitGeometryPageOriginalStartup(const GeometryPageOriginalStartupInput&) override;

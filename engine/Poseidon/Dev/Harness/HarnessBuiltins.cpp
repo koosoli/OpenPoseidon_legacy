@@ -653,6 +653,11 @@ void RegisterScreenshot(HarnessServer& hs)
             else if(!std::strcmp(name,"stopHierarchy")) action=Engine::GeometryPageFixtureAction::StopHierarchy;
             else if(!std::strcmp(name,"probeTextureReuseOnly")) action=Engine::GeometryPageFixtureAction::ProbeTextureReuseOnly;
             else if(!std::strcmp(name,"probeRetailOdol7")) action=Engine::GeometryPageFixtureAction::ProbeRetailOdol7;
+            else if(!std::strcmp(name,"pollRetailRecords")) action=Engine::GeometryPageFixtureAction::PollRetailRecords;
+            else if(!std::strcmp(name,"releaseRetailRecords")) action=Engine::GeometryPageFixtureAction::ReleaseRetailRecords;
+            else if(!std::strcmp(name,"refillRetailRecords")) action=Engine::GeometryPageFixtureAction::RefillRetailRecords;
+            else if(!std::strcmp(name,"abortRetailRecords")) action=Engine::GeometryPageFixtureAction::AbortRetailRecords;
+            else if(!std::strcmp(name,"statusRetailRecords")) action=Engine::GeometryPageFixtureAction::SnapshotRetailRecords;
             else if(!std::strcmp(name,"followCamera")) action=Engine::GeometryPageFixtureAction::FollowCamera;
             else if(!std::strcmp(name,"followProjected")) action=Engine::GeometryPageFixtureAction::FollowProjected;
             else if(!std::strcmp(name,"stopCamera")) action=Engine::GeometryPageFixtureAction::StopCamera;
@@ -944,9 +949,17 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddBoolToObject(result,"retailSourceProbe",report.retailSourceProbe);
             cJSON_AddBoolToObject(result,"retailSourceExported",report.retailSourceExported);
             cJSON_AddBoolToObject(result,"retailSourceOtherPassesRequired",report.retailSourceOtherPassesRequired);
+            cJSON_AddBoolToObject(result,"retailRecordOnly",report.retailRecordOnly);
+            cJSON_AddBoolToObject(result,"retailRecordDistinctCuts",report.retailRecordDistinctCuts);
+            cJSON_AddBoolToObject(result,"retailPixelSourceVerified",report.retailPixelSourceVerified);
+            cJSON_AddStringToObject(result,"retailPixelSourceSha256",report.retailPixelSourceSha256.c_str());
 #define PAGE_FIXTURE_NUMBER(field) cJSON_AddNumberToObject(result,#field,double(report.field))
             PAGE_FIXTURE_NUMBER(textureReuseAllowed);PAGE_FIXTURE_NUMBER(textureReuseDenied);PAGE_FIXTURE_NUMBER(textureReuseOwnerCreates);
             PAGE_FIXTURE_NUMBER(retailSourcePrepareStatus);PAGE_FIXTURE_NUMBER(retailSourceExportStatus);
+            PAGE_FIXTURE_NUMBER(retailHierarchyProductStatus);PAGE_FIXTURE_NUMBER(retailHierarchyPages);
+            PAGE_FIXTURE_NUMBER(retailRecordMeshesPresent);PAGE_FIXTURE_NUMBER(retailRecordMeshesAbsent);
+            PAGE_FIXTURE_NUMBER(retailRecordModelsPresent);PAGE_FIXTURE_NUMBER(retailRecordModelsAbsent);
+            PAGE_FIXTURE_NUMBER(retailRecordRequestId);PAGE_FIXTURE_NUMBER(retailRecordWorkerReads);PAGE_FIXTURE_NUMBER(retailRecordFreshIds);
             PAGE_FIXTURE_NUMBER(modelAdmissionAccepted);PAGE_FIXTURE_NUMBER(modelAdmissionRejected);PAGE_FIXTURE_NUMBER(modelAdmissionPending);
             PAGE_FIXTURE_NUMBER(producerModel); PAGE_FIXTURE_NUMBER(rendererModel);
             PAGE_FIXTURE_NUMBER(producerInstance); PAGE_FIXTURE_NUMBER(rendererInstance);
@@ -1086,7 +1099,7 @@ void RegisterScreenshot(HarnessServer& hs)
             auto* hierarchyGroupErrors=cJSON_AddArrayToObject(result,"hierarchyGroupErrors");
             for(uint32_t g=0;g<report.hierarchyDemandGroupCount&&g<64;++g)
                 cJSON_AddItemToArray(hierarchyGroupErrors,cJSON_CreateNumber(report.hierarchyGroupErrors[g]));
-            cJSON_AddStringToObject(result,"scope","Private programmatically authored box/curved-grid pilot; explicit authored/selected-CLOD RAM, original-source hierarchy RAM or independently authenticated disk pages, or private selected-cut disk value-worker; hierarchy stages at most one page per action and selects only complete retained root/fine/intermediate/local cuts; disk expected keys supplied externally and raw pilot/helper source compared independently without owner file I/O/bake; explicit CLOD bake scratch/latency and physical GPU allocation peaks not hard-bounded; returned main frame and full-generation record cut, not all-pass/pixel, mounted-file provenance, queue-completion or device-free proof");
+            cJSON_AddStringToObject(result,"scope",report.retailRecordOnly ? "Actual source-bound retail PAC upload and ODOL final geometry page records; no instances, pixels, world routing, all-pass coverage, device completion or performance acceptance" : report.retailSourceProbe ? "Actual retail final Shape/Init source probe only; no world routing or all-pass coverage" : report.textureReuseProbe ? "Actual generated texture denial, frozen resident reuse and ordinary retry; no complete material/model authority" : "Private programmatically authored box/curved-grid pilot; explicit authored/selected-CLOD RAM, original-source hierarchy RAM or independently authenticated disk pages, or private selected-cut disk value-worker; hierarchy stages at most one page per action and selects only complete retained root/fine/intermediate/local cuts; disk expected keys supplied externally and raw pilot/helper source compared independently without owner file I/O/bake; explicit CLOD bake scratch/latency and physical GPU allocation peaks not hard-bounded; returned main frame and full-generation record cut, not all-pass/pixel, mounted-file provenance, queue-completion or device-free proof");
             return HarnessProtocol::JsonResponse(result);
         });
     hs.RegisterCommand({"geometry_allocations", "Request/poll bounded retained mesh allocation diagnostics", {}},

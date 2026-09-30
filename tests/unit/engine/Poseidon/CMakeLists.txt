@@ -29,6 +29,7 @@ set(POSEIDON_CORE_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_qstream_compression.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_compressed_model_member_lease.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_retail_pac_source_binding.cpp
+    ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_retail_pac_pixel_stage.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_serializebin.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_qstream_file_input.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_qstream_file_output.cpp
@@ -184,6 +185,8 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_texture_reuse_only_binding.cpp
     Graphics/test_geometry_page_rigid_odol7_final_shape.cpp
     Graphics/test_model_admission_receipt.cpp
+    Graphics/test_geometry_page_rigid_final_hierarchy_product.cpp
+    Graphics/test_retail_page_record_observation.cpp
     Graphics/test_alpha_classify.cpp
     Graphics/test_surface_decompose.cpp
     Graphics/test_shadowmap_math.cpp
