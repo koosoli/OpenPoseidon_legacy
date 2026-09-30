@@ -83,6 +83,91 @@ Pure checks extract the runner's actual helpers through the PowerShell AST:
 They exercise normalized scalar/type/nonfinite/refusal cases, SQF literal
 backslashes and doubled quotes, ASL arrays, actual rain/fog bounds, stationary
 pose/heading/position checks, culture-independent cameras, exact paused state
-and strict actual WB atlas/kind/encoded ON/OFF telemetry. This contribution
-contains scripts and documentation only. No runtime build, game/GPU launch,
-deployment or visual acceptance was performed by this subagent.
+and strict actual WB atlas/kind/encoded ON/OFF telemetry. These pure checks do
+not substitute for the installed results below.
+
+## Installed acceptance, 2026-09-30
+
+**SHIPPED for the bounded stock SoldierWB slice.** Oliver delegated current
+appearance judgement and deferred his own fine tuning. Root built/deployed the
+matching `codex/streaming-residency e0bb256a` pair and ran both locked private
+profile controls with normal exit code 0 and `Shutdown complete`. Before/after
+installed hashes and stamps match in both result records:
+
+- OpenPoseidon.exe SHA256 `2081E39256E02D92CAAAFFCC3BD2EBDA06568EEFBF495022BD86C3875DBDCED6`.
+- wgpu_renderer.dll SHA256 `7C26F82D6DDAA05AEC4E0C10DBB3B0121872929B6C2953245F3792DE07655728`.
+- [Renderer ON result](../../../build/uniform-wetness/eden-fixed-on-20260930-171900-5c0375/result.json).
+- [Renderer OFF result](../../../build/uniform-wetness/eden-fixed-off-20260930-172111-de3158/result.json).
+
+| Actual recorded quantity | ON | OFF |
+|---|---:|---:|
+| Initial exposed / covered wetness | 0 / 0 | 0 / 0 |
+| Wet paused simulation time | 35.428 s | 36.176 s |
+| Actual paused rain density | 0.8394246 | 0.8112407 |
+| Exposed wetness after more than 20 simulation seconds | 0.380630 | 0.391330 |
+| Covered CampEastC actor wetness throughout | 0 | 0 |
+| Wet pause and camera-return scalar/rain | Exactly retained | Exactly retained |
+| Actual rain during drying | 0 | 0 |
+| Drying duration | 122.944 s | 126.055 s |
+| Exposed drying start → end | 0.378732 → 0.310226 | 0.389432 → 0.317373 |
+| Final WB producer row wet / encoded | 0.3102 / 2.3102 | 0.3174 / 0 |
+
+Both runs retain the same verified actor positions, `civil` pose, 180-degree
+heading and cameras. The material rows establish exact primary stock model
+`data3d\mc vojakw2.p3d`, `merged\00007mc_vojakw2.paa`, kind 2 and the effective
+renderer switch. OFF preserves rain history and shelter while removing only
+the encoded material effect. Four actual CPU integrator/admission test cases
+and the actual shader's 28 GPU probe cases pass, including piecewise sRGB
+linear hue/brightness, hand/face-atlas exclusions, pelvis continuity,
+minification and the unchanged 128-byte material tail layout.
+
+Root and the reviewing agent inspected the wet exposed pictures and sheltered
+controls. Cloth darkening is subtle and consistent with retained moisture;
+the captures show no visible face/hand/weapon repaint or plastic shine. The
+production effect changes RGB only, reducing fully wet cloth's reflected
+linear light by at most 22%; **no wet gloss, specular or roughness change was
+added**. Coverage, alpha, geometry, depth and the shadow/prepass are retained.
+
+This is qualified appearance judgement, not exact pixel isolation: independent
+natural runs paused at slightly different times, rain densities and stored
+wetness. Authored state/world transforms match; live affine palettes are not
+certified by the fixture. Dry-versus-wet pictures additionally include real
+weather lighting changes. No whole-frame difference threshold, unchanged-face
+pixel certificate or broad texture acceptance is inferred from these images.
+
+## Failed controls retained and corrected
+
+The earlier native terrain control failed RPC JSON parsing before it established
+the required state. The first classic Eden attempt timed out; a later attempt
+failed the authored stationary-pose gate. These remain failed runs rather than
+being converted to passing evidence by relaxing gates.
+The successful fixture uses the existing `civil` pose with verified ASL/heading.
+
+`eden-on-idle-20260930-170647-c709f4` exposed a real shelter defect: the CampEastC
+actor reached about 0.226 wetness while the outdoor actor reached about 0.218,
+and production traces reported `sheltered=false`. Installed `Stan_eastC.p3d`
+has an explicitly empty FireGeometry LOD (7e15, zero vertices); its ViewGeometry
+LOD (6e15) has 80 vertices and seven components, including a central roof at
+model Y 1.689765. An empty authored fire LOD suppresses the engine's absent-LOD
+fallback. The Person correction preserves positive fire-ray hits, then checks
+the same upward segment against view geometry when fire misses, still ignoring
+the soldier. Bullet-permeable tents and glass can therefore stop rain without
+changing global bullet collision semantics. The installed ON/OFF controls above
+prove the corrected CampEastC actor remains dry.
+
+## Scope retained
+
+Wetness is cosmetic and mission-local. New/reset Persons start dry; the first
+non-unit-status load pass clears reused history. It adds no wetness setter,
+save/network fields, cloth physics, gameplay modifiers or new production ABI.
+Pause/repeated rendering does not advance history. Actual simulation seconds
+drive gradual wetting and drying; roof exposure is sampled at most once per
+simulation second with the actor excluded from both collision queries.
+
+WB lifecycle and delegated appearance are installed accepted. Exact EB atlas
+and named pilot/tank/resistance cloth admission have source/helper coverage,
+not an equivalent installed campaign. Unknown/wounded replacement textures,
+alternate/modded models and other LOD atlases remain unchanged unless explicitly
+admitted. Far baked whole-body atlas regions are deliberately excluded to
+protect their baked skin. No universal asset support, save/network persistence,
+all shelter geometry or general performance claim is made.

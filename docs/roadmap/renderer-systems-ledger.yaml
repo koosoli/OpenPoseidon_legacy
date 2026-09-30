@@ -1352,11 +1352,11 @@ unbuilt_candidates: >-
   - id: RSYS-UNIFORM-WETNESS
     title: Actual rain history and stock cloth-only wet uniform shading
     plan: docs/roadmap/decisions/UNIFORM-WETNESS-STOCK-FIXTURE-20260930.md
-    status: PARTIAL
+    status: SHIPPED
     owner: codex/streaming-residency
     audited: 2026-09-30
     completeness: >-
-      SOURCE INTEGRATED; INSTALLED STATE AND APPEARANCE ACCEPTANCE PENDING.
+      SHIPPED FOR BOUNDED STOCK SOLDIERWB LIFECYCLE AND DELEGATED APPEARANCE.
       a4b234c2 (agent dcdea4e0), 750395a9 and 3454b689 add normalized cosmetic
       Person water retention from actual GLandscape rain, an upward 30m
       self-ignored shelter probe refreshed at most once per simulation second,
@@ -1371,37 +1371,48 @@ unbuilt_candidates: >-
       cloth, WB and EB atlases. The WB pelvis remains cloth between exact hand
       exclusions; derivative-filtered atlas masks preserve skin/hands/face.
       Child weapon proxies do not inherit Person authority. The material
-      darkens linear cloth colour without changing hue and uses bounded damp
-      rough/specular response. Render-only WGR_UNIFORM_WET=0 retains CPU rain
+      darkens linear cloth RGB without changing hue; no wet gloss, specular or
+      roughness change is added. Render-only WGR_UNIFORM_WET=0 retains CPU rain
       history. UNIFORM_WET and UNIFORM_CLOTH opt-in traces record actual source
       exposure and encoded material state; decile rows are not per-frame values.
 
-      Authored CPU tests exercise actual integrator partitioning/exposure,
-      pause/nonfinite bounds and exact cloth identities/encoding. Authored GPU
-      tests exercise actual shader mask/linear colour and real material-tail
-      layout, including protected skin and preserved pelvis cloth. These need
-      root's integrated build and test execution. Pure runner helper checks
-      pass 50 assertions plus existing stock roof mocked RPC checks; no runtime or
-      GPU verification is inferred from those checks.
+      Four CPU integrator/admission cases and 28 actual-helper GPU probe cases
+      pass, including partitioning/exposure, pause/nonfinite bounds, skin/hand
+      exclusions, pelvis continuity, minification, linear colour and material
+      tail layout. Pure runner helper checks pass 50 assertions plus stock roof
+      mocked RPC checks; those do not replace the installed proof.
+
+      Installed matching e0bb256a ON/OFF controls are retained under
+      build/uniform-wetness/eden-fixed-on-20260930-171900-5c0375 and
+      eden-fixed-off-20260930-172111-de3158. Both pass actual rain, >20s wetting,
+      independently covered CampEastC actor zero, exact paused state/rain and
+      camera-return, >120s gradual natural drying, actual WB kind2 material,
+      normal exit 0/Shutdown complete and unchanged installed pair stamps/hashes.
+      ON outdoor wetness reaches 0.380630 at time 35.428/rain 0.8394246; covered 0.
+      Drying reduces 0.378732 to 0.310226 over 122.944s; actual encoded 2.3102.
+      OFF retains history (wet 0.391330, covered 0, dry 0.389432 to 0.317373 over
+      126.055s) while publishing encoded 0. Actual poses/ASL/cameras match.
+
+      Earlier controls remain failed. Stock Stan_eastC's explicit empty fire
+      LOD caused the first real shelter failure; its view LOD has a roof.
+      30069f14 (agent 05e0bc22) adds a same-segment self-ignored view fallback
+      after fire misses. Corrected installed controls preserve the tent actor
+      dry. Root/agent inspected cloth and protected regions: subtle damp cloth,
+      no visible face/hand/weapon repaint or plastic shine. Oliver delegated
+      current visual judgement and deferred his own fine tuning.
     known_gap: >-
-      Test-UniformWetness must run on the new matching installed pair under
-      the shared lock/private profile. Actual SoldierWB actors must remain in
-      EffectStandStill at their verified ASL/heading; exposed real-rain wetness
-      exceeds 0.2 after at least 20 simulation seconds, while the independently
-      covered actual CampEastC actor remains at most 0.001. Pause/camera return
-      must preserve exact scalar state and rain; at least 120 dry simulation
-      seconds must gradually reduce retained water. Unknown commands, absent
-      actual rain, invalid queries, missing cloth upload or unsupported source
-      are failures, not appearance evidence. Require actual WB atlas kind2,
-      matching renderer switch and positive paused-state band, encoded 2+row
-      wetness ON or zero OFF, respecting four-decimal decile trace precision.
-      Compare renderer ON/OFF using recorded time/weather/poses/state and
-      actual clothing, face/hands/weapon regions; dry/wet whole-frame changes
-      include weather lighting and cannot prove protected cloth-only shading.
+      Independent ON/OFF runs have slightly different simulation time, rain
+      and retained wetness, so the inspected appearance is qualified rather
+      than an exact pixel-isolation or unchanged-face pixel certificate.
+      The fixture verifies authored civil pose/world transforms, not identical
+      live affine palettes. Dry/wet whole-frame changes include real weather
+      lighting. EB and other positively named cloth have source/helper evidence,
+      not the same installed acceptance as WB. Unknown/wounded replacements and
+      far baked body/face atlas regions remain excluded from wet shading.
       Broader models, other engines/LOD atlases, cloth simulation, save/network
       persistence, gameplay effects and general performance are outside this
-      bounded source slice. No installed status or new screenshots are claimed
-      until root supplies its actual captured build/provenance and controls.
+      bounded shipped slice. All shelter geometry and general performance
+      acceptance are not established.
     production_call_sites:
       - file: engine/Poseidon/World/Entities/Infantry/Person.cpp
         symbol: AdvanceUniformWetness
