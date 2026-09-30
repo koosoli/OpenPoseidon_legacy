@@ -141,7 +141,10 @@ try {
     Start-Sleep -Seconds 15
     $result.screenshots += Screenshot 'wet'
     $wet = Weather-Sample; $result.samples.wet = $wet
-    if ($wet.time -le $rainStart -or $wet.rain -lt 0.9 -or $wet.accumulated -le 0.3) { throw 'Actual rain did not fill terrain wetness above 0.3.' }
+    # Ordinary weather interpolates toward its next forecast even after an
+    # immediate setRain. Require meaningful actual rain rather than a frozen
+    # full-rain override; recorded samples retain the actual observed density.
+    if ($wet.time -le $rainStart -or $wet.rain -lt 0.3 -or $wet.accumulated -le 0.3) { throw 'Actual rain did not fill terrain wetness above 0.3.' }
     $null = Send @{ cmd = 'exec'; code = 'setAccTime 0' }
     Start-Sleep -Seconds 1
     $pauseTimeA = Simulation-Time
@@ -154,7 +157,7 @@ try {
     $result.samples.pause = @{ simulationTimeA = $pauseTimeA; simulationTimeB = $pauseTimeB; before = $pauseA; after = $pauseB }
     if ([Math]::Abs($pauseTimeB - $pauseTimeA) -gt 0.001 -or $pauseA.generation -ne $pauseB.generation -or
         $pauseA.accumulated -ne $pauseB.accumulated -or $pauseA.uploaded -ne $pauseB.uploaded) { throw 'Simulation time or puddle telemetry advanced while paused.' }
-    $null = Send @{ cmd = 'exec'; code = '0 setRain 0; setAccTime 3' }
+    $null = Send @{ cmd = 'exec'; code = '0 setOvercast 0; 0 setRain 0; setAccTime 3' }
     $dryStart = Simulation-Time
     Start-Sleep -Seconds 12
     $result.screenshots += Screenshot 'drying'
