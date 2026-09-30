@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet('0','1')][string]$Filter = '1',
-    [ValidateSet('Aerial','Close')][string]$View = 'Aerial',
+    [ValidateSet('Aerial','Close','OwnerEveron')][string]$View = 'Aerial',
     [string]$Tag = 'grass',
     [int]$Msaa = 4,
     [float]$Altitude = -1
@@ -20,9 +20,11 @@ $env:WGR_GRASS_FILTER_SUBPIXEL = $Filter
 $exe = Join-Path $game 'OpenPoseidon.exe'
 $dll = Join-Path $game 'wgpu_renderer.dll'
 $mission = Join-Path $game 'dev-missions/devtest-dawn.abel'
+if ($View -eq 'OwnerEveron') { $mission = Join-Path $root 'tests/perf/missions/perf_field.eden' }
 $log = Join-Path $out 'engine.log'
 $metrics = Join-Path $out 'metrics.json'
 $pose = if ($View -eq 'Aerial') { @('5058.75','3902.55','110','0','-80') } else { @('5058.75','3902.55','73','0','-18') }
+if ($View -eq 'OwnerEveron') { $pose = @('5018.51','4087.66','117.58','220.8','-86.0') }
 if ($Altitude -ge 0) { $pose[2] = $Altitude.ToString([Globalization.CultureInfo]::InvariantCulture) }
 $shots = @(300..305 | ForEach-Object { Join-Path $out ("frame-$_.png") })
 $spec = (0..5 | ForEach-Object { "$($_ + 300):$($shots[$_])" }) -join ','
