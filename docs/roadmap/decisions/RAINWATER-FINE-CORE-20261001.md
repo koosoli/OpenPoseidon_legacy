@@ -104,7 +104,7 @@ explicit owners, topology, donor sums, deltas and face fluxes. The actual CPU
 test reports vector **capacities** for a 513-square domain: 29.74 MiB coarse-only
 and 33.75 MiB with 64 full fine tiles, excluding map nodes, snapshots and allocator
 overhead. This is about five times the existing six-array field storage. A full
-snapshot can add about 18 MiB at maximum ownership. Topology rebuild currently
+snapshot adds 14.86 MiB at maximum ownership (48 bytes per owner). Topology rebuild currently
 scans the bounded coarse domain after each new tile; this is event work, not a
 per-frame camera scan, but batching/incremental rebuild and measured cost remain
 necessary. The earlier 1.5 MiB number described only 65,536 extra cells times six
