@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Camera = '9481.25 2994.25 209.72 0 -18',
+    [ValidateRange(0,30)][double]$NegativeGroundClearance = 0,
     [string]$NegativeCamera = '2756.25 2369.25 10.44 0 -18',
     [string]$BoundaryCamera = '9481.25 3006.25 249.72 0 -85',
     [string]$RoofCamera = '',
@@ -70,7 +71,7 @@ foreach ($key in $keys) { $savedEnv[$key] = [Environment]::GetEnvironmentVariabl
 @{ scriptSha256 = (Get-FileHash -LiteralPath $PSCommandPath).Hash;
    metricsSha256 = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'TerrainPuddleMetrics.cs')).Hash;
    sourceHead = (& git -C $root rev-parse HEAD); installed = $before; mission = $mission;
-   nativeAddons = $NativeAddons; camera = $Camera; negativeCamera = $NegativeCamera; boundaryCamera = $BoundaryCamera;
+   nativeAddons = $NativeAddons; camera = $Camera; negativeCamera = $NegativeCamera; negativeGroundClearance = $NegativeGroundClearance; boundaryCamera = $BoundaryCamera;
    roofCamera = $RoofCamera; roofControl = $RoofExposedControlCamera; roofEvidence = $RoofFixtureEvidence;
    lockOwner = $env:LOCK_OWNER; fixedSimTime = 100; fixedDate = @(1985,6,21,16,0); fixedExposure = 1; roi = 'central 60% of width and height';
    maskThreshold = $MaskThreshold; minimumReturnIoU = $MinimumReturnIoU; requireNumericGates = [bool]$RequireNumericGates;
@@ -221,6 +222,11 @@ try {
         foreach ($expression in @('triSetSimTime 100','triSetBrightness 1')) {
             $reply = Send @{ cmd = 'eval'; code = $expression }
             if ($reply.result -notmatch 'OK') { throw "Deterministic setup refused: $expression" }
+        }
+        if ($NegativeGroundClearance -gt 0) {
+            . "$PSScriptRoot/TerrainPuddleStockRoof.ps1"
+            $ground = Get-TerrainPuddleFixtureHeight -SendCommand { param($request) Send $request } -X ([double]::Parse($negative[0],$culture)) -Z ([double]::Parse($negative[1],$culture))
+            $negative[2] = ($ground+$NegativeGroundClearance).ToString('R',$culture)
         }
         $captures = @{}
         if ($arm -ne 'raw-sky') {

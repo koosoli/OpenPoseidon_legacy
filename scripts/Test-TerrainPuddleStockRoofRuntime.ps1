@@ -1,6 +1,8 @@
 # Installed stock roof falsifier. Run only through with-game-lock.sh.
 [CmdletBinding()]
 param(
+    [double]$RoofX = 9486, [double]$RoofZ = 3006,
+    [double]$ControlX = 9475.25, [double]$ControlZ = 3018.25,
     [string]$Camera = '9481.25 2994.25 209.72 0 -18',
     [ValidateRange(1,15)][int]$SettleSeconds = 3,
     [ValidateRange(1,64)][int]$MaskThreshold = 8,
@@ -55,7 +57,7 @@ foreach ($key in $keys) { $savedEnv[$key] = [Environment]::GetEnvironmentVariabl
 @{ scriptSha256 = (Get-FileHash -LiteralPath $PSCommandPath).Hash;
    metricsSha256 = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'TerrainPuddleMetrics.cs')).Hash;
    sourceHead = (& git -C $root rev-parse HEAD); installed = $before; mission = $mission;
-   nativeAddons = $NativeAddons; camera = $Camera; stockRoofClass = 'CampEastC'; probeFrame = 3600;
+   nativeAddons = $NativeAddons; camera = $Camera; stockRoofClass = 'CampEastC'; probeFrame = 3600; roofCentre = @($RoofX,$RoofZ); controlCentre = @($ControlX,$ControlZ);
    lockOwner = $env:LOCK_OWNER; fixedSimTime = 100; fixedDate = @(1985,6,21,16,0); fixedExposure = 1; roi = 'central 60% of width and height';
    maskThreshold = $MaskThreshold; fixture = 'runtime heights and actual stock CampEastC over verified native dirt';
    wetnessOverrides = @(0,1); actualRain = 0; temporal = 0;
@@ -208,12 +210,12 @@ try {
             if ($reply.result -notmatch 'OK') { throw "Deterministic setup refused: $expression" }
         }
         $captures = @{}
-        $fixture = New-TerrainPuddleStockRoof -SendCommand { param($request) Send $request }
+        $fixture = New-TerrainPuddleStockRoof -SendCommand { param($request) Send $request } -X $RoofX -Z $RoofZ -ControlX $ControlX -ControlZ $ControlZ
         Remove-TerrainPuddleStockRoof -SendCommand { param($request) Send $request }
         $covered = @(Camera-Numbers $fixture.coveredCamera)
         $exposed = @(Camera-Numbers $fixture.exposedCamera)
         $captures.absent = Pose-Capture ($arm+'-absent') $covered
-        $fixture = New-TerrainPuddleStockRoof -SendCommand { param($request) Send $request }
+        $fixture = New-TerrainPuddleStockRoof -SendCommand { param($request) Send $request } -X $RoofX -Z $RoofZ -ControlX $ControlX -ControlZ $ControlZ
         $captures.covered = Pose-Capture ($arm+'-covered') $covered
         # The late frame probe must fire while the known tent and covered camera
         # are active. Retained instance identity is separate from pixel proof.
@@ -225,7 +227,7 @@ try {
             if ([DateTime]::UtcNow -gt $probeUntil) { throw 'Late retained-geometry probe did not fire.' }
         } while (!$probes.Count)
         $probeLine = $probes[-1].Line
-        if ($probeLine -notmatch 'stan_eastc' -or $probeLine -notmatch 'at \[9481 3005 ') {
+        if ($probeLine -notmatch 'stan_eastc' -or $probeLine -notmatch ('at \['+[Math]::Round($RoofX)+' '+[Math]::Round($RoofZ-1.5)+' ')) {
             throw "Probe did not identify the actual roof at the covered camera: $probeLine"
         }
         $coverageUntil = [DateTime]::UtcNow.AddSeconds(10)
@@ -259,7 +261,8 @@ try {
     }
     $result.comparisons.absent.removedWet = Pair-Metrics $wet.absent $wet.removed
     $result.comparisons.covered.staticWet = Pair-Metrics $wet.covered $wet.coveredStatic
-    $result.roof = @{ status = 'retained-captured-pixels-not-yet-accepted';
+    $positive = $result.comparisons.absent.wetDry.ChangedFraction -ge 0.001 -and $result.comparisons.exposed.wetDry.ChangedFraction -ge 0.001
+    $result.roof = @{ status = $(if ($positive) { 'retained-positive-controls-pixels-not-yet-accepted' } else { 'invalid-positive-control' }); positiveControls = $positive;
         reason = 'Inspect a common visible terrain ROI in absent/covered/removed views; central difference statistics include tent geometry.' }
     $result.status = 'captured'
 } catch {
