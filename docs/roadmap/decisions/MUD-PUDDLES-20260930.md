@@ -200,6 +200,13 @@ registered instances. Do not claim an FPS improvement or whole-frame causal
 equivalence from those values. The later zenith correction is not in this
 installed pair; its reduced query count still needs installed verification.
 
-Pending: later owner tuning,
-camera-motion/shoreline/roof fixtures and map-generation breadth.
+The [controlled stability record](MUD-PUDDLE-STABILITY-20260930.md) retains
+failed and passing camera-return campaigns. Nonempty Dirt/overhead masks return
+with IoU 1.0, and the final ground-only campaign passes unchanged numeric gates.
+The [stock floor-free tent record](MUD-PUDDLE-STOCK-ROOF-FIXTURE-20260930.md)
+accepts actual retained roof exclusion on installed `77299a74`: visible wet/dry
+response disappears with the tent and returns after removal, while exposed dirt
+remains wet. This is bounded fixture acceptance, not full-world rain collision.
+
+Pending: later owner tuning, source-pure shoreline control and map-generation breadth.
 Do not mark the broader wet-surface/hydrology roadmap complete from this slice.

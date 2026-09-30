@@ -148,6 +148,17 @@ are needed before treating that image as a pure BeachGrass exclusion test.
 No production RNG, texture detail, admission threshold or acceptance tolerance
 was changed to make the controls pass.
 
+`ground-only-return-20260930-125154-e4f920` uses the same installed `77299a74`
+pair and changes the old shore camera elevation to -80. All unchanged numeric
+gates pass: both return IoUs 1.0; master-off mean 0.000656; negative mean
+0.261800 and changed fraction 0.49913%. This view removes the ocean confound,
+but remains a mixed-source control. A read-only stock terrain-grid audit finds
+the original camera above Dirt_01, with BeachGrass 12 metres ahead and Dirt
+again beyond it. The tiny admitted dirt patch is therefore not evidence that
+BeachGrass itself is wet. A source-backed ineligible cell and queried height
+are the next negative fixture; passing this mixed image is not a material
+segmentation claim.
+
 Source inspection found no existing validated native roof-over-eligible-dirt
 fixture in the available scripts or mission evidence. The prior lighting plan's
 synthetic room validates its model-space sky bake, not these terrain pixels.

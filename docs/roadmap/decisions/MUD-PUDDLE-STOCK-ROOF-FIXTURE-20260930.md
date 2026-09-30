@@ -1,10 +1,9 @@
 # Stock tent rain-cover fixture — source evidence and candidate runtime procedure
 
-The installed stock class `CampEastC` is a defensible real roof candidate over
-the already validated native Dirt_02 patch. This document does **not** claim a
-runtime roof capture, retained target draw or terrain pixel acceptance. The root
-agent owns the installed runs; this investigation used file/config inspection,
-CPU asset tools and pure mocked-TCP checks only.
+The installed stock class `CampEastC` provides a floor-free roof over native
+Dirt_02. Root's relocated positive-control run accepts bounded rain exclusion
+under this actual tent. The original investigation used file/config
+inspection, CPU asset tools and pure mocked-TCP checks. Root evidence follows.
 
 ## Actual installed class and model
 
@@ -136,6 +135,53 @@ floor-covered camera. Root should inspect these candidate images and retain
 the material, identity, transform and removal controls before a roof claim.
 
 ## Reproducible CPU evidence
+
+### First actual retained fixture, and a rejected empty positive control
+
+Root installed `77299a74` campaign
+`stock-floorfree-roof-20260930-124657-bec9f5` captures dry/wet, absent/present,
+exposed and removed views with normal exits and unchanged installed hashes.
+Both requested probes identify `data3d/stan_eastc.p3d` as the nearest retained
+instance, 2.3 metres from the covered camera; zenith map coverage is 12.86%.
+The camera uses actual terrain height 204.75626 +1 metre at 9481.25/3004.75;
+the tent is at 9481.25/3006.25/207.549. Visible rocks and dirt grain match in
+roof-present and roof-absent views, so a floor does not hide the ground.
+
+This run **does not accept roof exclusion**. The absent and exposed wet/dry
+controls have zero pixels changed by eight levels; maximum difference is one.
+The production world-noise field at the tent centre is approximately 0.386,
+below its wet threshold 0.64. A dark unchanged ground image cannot falsify
+puddles under a roof when no puddle is admitted there without the roof.
+
+The relocated candidate uses roof centre 9486/3006 (field about 0.775), with
+the exposed centre 9475.25/3018.25 (field about 0.901). These are independent
+strong field locations, outside each other's tent bounds; actual material,
+flatness and pixel response still require installed verification. The runtime
+runner now reports `invalid-positive-control` unless both absent and exposed
+wet/dry images have a nonempty response. No material or puddle threshold was
+changed to create this fixture.
+
+### Relocated positive-control acceptance
+
+`positive-patch-roof-20260930-130319-05f563` passes capture/lifecycle checks on
+the same clean `77299a74` pair. Both actual retained probes identify the tent as
+nearest at 2.3 metres; zenith coverage is 12.14%. Root inspection confirms the
+same visible dirt grain and rocks with no intervening floor in the central 60%
+ROI. The covered camera is 9486/3004.5 at its queried ground height +1 metre.
+
+| Same visible terrain ROI | Wet/dry mean absolute RGB channel | Fraction changed by at least 8 |
+|---|---:|---:|
+| Tent absent | 24.891042 | 100% |
+| Tent present | 0 | 0% |
+| Tent removed again | 24.891041 | 100% |
+| Exposed dirt control | 21.785720 | 91.2097% |
+
+The wet absent/removed images differ by a maximum of one display level and a
+mean of 0.000001. The roof-present static repeat has the same tiny mean; dry/wet
+covered pixels are identical. This rules out an empty pattern, hidden floor,
+camera change or permanent suppression after deleting the roof. It accepts
+this retained stock roof and dirt patch; it does not establish all-map coverage,
+wind-driven rain, hydrology or the explicit outside-map open fallbacks.
 
 ### Relocation after the empty-pattern runtime control
 

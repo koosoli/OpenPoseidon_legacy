@@ -747,8 +747,14 @@ unbuilt_candidates: >-
         observe terrain colour snapshots 0.991 / 1.093 ms on the earlier a001b55f
         pair. Fixed-UV diagnostic camera returns preserve nonempty wet masks
         exactly (IoU 1.0), with the master-off control passing. A BeachGrass changed
-        fraction still fails its screening gate; its cause and a real floor-free
-        roof fixture remain under investigation. Owner tuning is deferred; no
+        fraction fails in the original sea-containing view. A steeper mixed-ground
+        view passes all unchanged numeric gates; source audit identifies nearby
+        Dirt rather than BeachGrass promotion. The installed 77299a74 stock
+        floor-free tent fixture passes absent/present/removed wet response:
+        absent and removed mean 24.891 display levels, covered zero, exposed
+        mean 21.786. Retained probes identify the real roof. Source-pure ineligible
+        ground and native grass frozen appearance remain follow-ups.
+        Owner tuning is deferred; no
       nearby-object reflections, physical depth, GL33, save or network state.
         See decisions/MUD-PUDDLES-20260930.md.
 

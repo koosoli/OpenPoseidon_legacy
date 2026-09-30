@@ -112,6 +112,31 @@ The rebuilt game passes normal-exit grass startup at Oliver's exact Everon
 camera. Explicit stock corpse capture and lifetime acceptance remain pending
 the isolated installed harness; this is not a completed ragdoll feature.
 
+### Installed stock corpse result
+
+`decoded-installed-proof-20260930-130109-7bcc3d` passes on clean installed
+`77299a74`, with unchanged binary hashes and normal TCP shutdown. The actual
+stock SoldierWB model is `data3d/mc vojakw2.p3d`: 33 palette bones, 25 captured
+primary matrices and no secondary contribution in this death pose. The default
+hold is inactive and a living fixture is refused. Actual Man consumer comparison
+reports **33 palette matrices bitwise equal, 542 sampled points with zero error,
+and 37 weighted proxies bitwise equal**. Two synthetic Point tails are explicitly
+skipped; the ordinary matrix tail fallback remains checked separately.
+
+Before, held and explicitly cleared images have the identical PNG SHA256 at
+simulation time 18.734; root inspection confirms the visible corpse and authored
+pose. A second independently spawned stock corpse passes the same comparison.
+The lease expires after 31.501 simulation seconds, `HIDEBODY` clears it and rejects
+recapture, and `deleteVehicle` clears the second lease. The player remains alive.
+Save/network behavior, other models, nonidentity articulation and solver motion
+are not accepted by this result.
+
+The first run `installed-proof-20260930-125612-49082e` remains a failed runner
+campaign: capture succeeded, but its script incorrectly parsed the SQF display
+string as JSON and rejected the literal backslash in the actual model name.
+The decoder now respects SQF outer/doubled quotes and preserves backslashes;
+engine eligibility and production pose math were not relaxed.
+
 ## Next actual articulation step
 
 After exact shared-pose equivalence is accepted, retain this same owned affine
