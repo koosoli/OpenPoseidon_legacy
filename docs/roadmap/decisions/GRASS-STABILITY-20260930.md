@@ -101,6 +101,32 @@ Oliver's preferred near/distant appearance and native atlas temporal acceptance
 remain visual gates. Rain/puddle source changes in this pair are dry in the stock
 grass comparison and do not redefine grass admission.
 
+### Settled repeated timing and owner delegation
+
+Oliver deferred appearance tuning on September 30 because local pictures do not
+load in his mobile app and asked us to use our own judgement and keep building.
+Owner review is therefore a later tuning step, not a blocker for this bounded
+implementation. This does not turn diagnostic image statistics into universal
+visual acceptance.
+
+`build/grass-puddle-perf/Grass-20260930-113457/results.json` records three
+alternating off/on pairs on the same clean installed `a001b55f` pair. Each run
+warms for 40 seconds before a single screenshot at the exact owner pose; all six
+exit normally, with identical 112,164 near / 18,466 mid grass instances. Native
+1280x720, MSAA 4, DLSS off, noon and dry terrain are fixed. No concurrent game,
+GPU tests, deployment or heavy builds ran during this campaign.
+
+Median final grass-colour GPU snapshots are **3.738 ms off / 4.018 ms on**
+(+0.281 ms); prepass snapshots are **1.831 / 1.841 ms**. The median CPU-ring
+frame p95 is **14.662 / 15.252 ms**. Colour deltas are positive in all three
+pairs; retain the filter for the demonstrated aerial stability improvement,
+while recording its cost. These GPU values are terminal snapshots, not
+whole-run GPU means. The 256-frame CPU ring includes screenshot readback; its
+roughly 199 ms maximum is not a normal-frame regression metric. Object LOD and
+shadow triangle counts vary between runs, so this is not an isolated FPS claim.
+The runner keeps full samples, installed provenance and hashes rather than
+reducing the campaign to its cheapest frame.
+
 ## Improved execution order
 
 1. Finish installed grass A/B and close-view regression checks; retain only
@@ -117,6 +143,11 @@ grass comparison and do not redefine grass admission.
    confirms Box3D joint support but finds nonrigid authored death transforms and
    separate rendering/interaction palettes. A render-only override is not safe;
    the bounded dry-ground single-player slice needs shared corpse pose ownership.
+   The [stock model admission census](PHY-040-stock-rig-admission-20260930.md)
+   now measures all 22 retail person models and 241 LODs, excludes attachment
+   helper triangles from anatomical fitting, and refuses uncalibrated joints.
+   The missing torso anchor and oversized clothing envelopes remain actual
+   rig gates; finite capsule fits alone do not justify enabling a solver.
 4. Reassess still-open modernisation tasks against the current ledger after the
    owner-priority visual gates. This update does not enable parked streaming,
    ocean, experimental paging or previously rejected foliage defaults.

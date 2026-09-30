@@ -66,4 +66,3 @@ for ($i=0; $i -lt 2; $i++) { if ($hashes[$i].Hash -ne $after[$i].Hash) { throw '
 @{scene=$Scene;installed=$stamp;runs=$rows;scope='Compare distributions and medians across alternating arms; final GPU snapshots are not a whole-run GPU average.'} |
     ConvertTo-Json -Depth 12 | Set-Content (Join-Path $out 'results.json')
 Write-Output $out
-
