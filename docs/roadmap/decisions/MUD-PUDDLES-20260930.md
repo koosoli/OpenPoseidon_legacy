@@ -181,6 +181,25 @@ Actual native roof-over-dirt acceptance remains separate from this directional
 GPU falsifier. Oliver has deferred his appearance tuning and asked us to use
 our own judgement and continue building.
 
-Pending: later owner tuning, repeated settled GPU measurements,
+### Repeated settled timing
+
+`build/grass-puddle-perf/Puddles-20260930-114753/results.json` records three
+alternating dry/wet pairs on the same clean installed `a001b55f` pair, with
+40-second warmup, one terminal screenshot per run, native 1280x720, MSAA 4,
+DLSS off, the validated Dirt camera, fixed hour 16 and actual rain zero.
+All six runs exit normally, the native preparer is idle at the cut, and installed
+hashes/stamp remain unchanged. No concurrent game, GPU tests or heavy builds
+ran during this campaign. Per-run raw metrics and provenance are retained.
+
+Median final terrain-colour GPU snapshots are **0.991 ms dry / 1.093 ms wet**
+(+0.101 ms). The three wet-minus-dry snapshots are +0.025, -0.011 and +0.119 ms,
+so this is a small observed cost with timing noise rather than a universal
+overhead bound. Median CPU-ring frame p95 is **23.876 / 23.691 ms**; main-object
+triangle counts differ substantially between arms despite identical 22,113
+registered instances. Do not claim an FPS improvement or whole-frame causal
+equivalence from those values. The later zenith correction is not in this
+installed pair; its reduced query count still needs installed verification.
+
+Pending: later owner tuning,
 camera-motion/shoreline/roof fixtures and map-generation breadth.
 Do not mark the broader wet-surface/hydrology roadmap complete from this slice.
