@@ -138,6 +138,7 @@ pub fn build_composer() -> Composer {
         ),
         (include_str!("gbuffer.wgsl"), "gbuffer.wgsl"),
         (include_str!("frame.wgsl"), "frame.wgsl"),
+        (include_str!("../rain_water_reflections.wgsl"), "rain_water_reflections.wgsl"),
         (include_str!("snow_material.wgsl"), "snow_material.wgsl"),
         (include_str!("ground_puddles.wgsl"), "ground_puddles.wgsl"),
         (include_str!("ground_wet.wgsl"), "ground_wet.wgsl"),

@@ -113,6 +113,7 @@ pub struct RainWater {
     uploaded: Option<(u64, u64, [f32; 3], u32, u32)>,
     current: WgrRainWaterParams,
     enabled: bool,
+    reflections: crate::rain_water_reflections::Reflections,
 }
 
 impl RainWater {
@@ -160,12 +161,13 @@ impl RainWater {
             layout: &empty,
             entries: &[],
         });
+        let reflections = crate::rain_water_reflections::Reflections::new(device, format);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("rain_water_pipeline_layout"),
             bind_group_layouts: &[
                 Some(camera),
                 Some(&layout),
-                Some(&empty),
+                Some(&reflections.layout),
                 Some(&empty),
                 Some(&terrain_layout),
             ],
@@ -259,6 +261,7 @@ impl RainWater {
             uploaded: None,
             current: bytemuck::Zeroable::zeroed(),
             enabled: std::env::var("WGR_RAIN_WATER").as_deref() != Ok("0"),
+            reflections,
         }
     }
 
@@ -363,7 +366,7 @@ impl RainWater {
         generation: u64,
         terrain: TerrainConformParams,
     ) {
-        self.count = 0;
+        self.invalidate_frame(queue);
         if !self.enabled || self.current.control[3] < 0.5 || terrain.enabled < 0.5 {
             return;
         }
@@ -393,6 +396,33 @@ impl RainWater {
         if selected.is_empty() {
             return;
         }
+        // Reuse actual selected simulation cells; no extra global wet-grid scan.
+        let width = self.current.control[0] as usize;
+        let spacing = self.current.domain[2];
+        if self.reflections.enabled() { for &cell in &selected {
+            if self.reflections.needed() { break; }
+            let i = cell as usize;
+            let x = self.current.domain[0] + (i%width) as f32*spacing;
+            let z = self.current.domain[1] + (i/width) as f32*spacing;
+            let dx = (camera.cam_pos[0]-camera.cam_pos[0].clamp(x,x+spacing)).abs();
+            let dz = (camera.cam_pos[2]-camera.cam_pos[2].clamp(z,z+spacing)).abs();
+            if dx*dx+dz*dz > crate::rain_water_reflections::NEAR_RANGE.powi(2) {continue;}
+            let corners = [i, i+1, i+width, i+width+1];
+            let mut minimum_bed = f32::INFINITY;
+            let mut maximum_bed = f32::NEG_INFINITY;
+            let mut minimum_depth = f32::INFINITY;
+            let mut maximum_depth = 0.0_f32;
+            for index in corners {
+                let c = self.grid[index];
+                minimum_bed = minimum_bed.min(c[0]-c[1]);
+                maximum_bed = maximum_bed.max(c[0]-c[1]);
+                minimum_depth = minimum_depth.min(c[1]);
+                maximum_depth = maximum_depth.max(c[1]);
+            }
+            self.reflections.offer_box(camera,
+                glam::Vec3::new(x, minimum_bed+minimum_depth, z),
+                glam::Vec3::new(x+spacing, maximum_bed+maximum_depth, z+spacing));
+        }}
         let size = (selected.len() * 4) as u64;
         if size > self.instance_capacity {
             self.instance_capacity = size.next_power_of_two();
@@ -410,6 +440,16 @@ impl RainWater {
     pub fn drawable(&self) -> bool {
         self.count > 0 && self.bind.is_some() && self.terrain_bind.is_some()
     }
+    pub fn reflections_needed(&self) -> bool { self.drawable() && self.reflections.needed() }
+    pub fn invalidate_frame(&mut self, queue:&wgpu::Queue) {
+        self.count=0;
+        self.reflections.begin_frame(queue);
+    }
+    pub fn record_reflections(&mut self, device:&wgpu::Device, queue:&wgpu::Queue,
+        encoder:&mut wgpu::CommandEncoder, source:&wgpu::Texture, view:&wgpu::TextureView,
+        depth:&wgpu::TextureView, generation:u64) {
+        self.reflections.record(device, queue, encoder, source, view, depth, generation);
+    }
     pub fn draw<'a>(
         &'a self,
         pass: &mut wgpu::RenderPass<'a>,
@@ -422,7 +462,7 @@ impl RainWater {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, camera, &[offset]);
         pass.set_bind_group(1, self.bind.as_ref().unwrap(), &[]);
-        pass.set_bind_group(2, &self.empty_bind, &[]);
+        pass.set_bind_group(2, &self.reflections.bind, &[]);
         pass.set_bind_group(3, &self.empty_bind, &[]);
         pass.set_bind_group(4, self.terrain_bind.as_ref().unwrap(), &[]);
         pass.set_vertex_buffer(0, self.instance.slice(..));

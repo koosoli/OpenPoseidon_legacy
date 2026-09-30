@@ -1,6 +1,7 @@
 #import frame::{frame, reverse_z, fog_factor, apply_fog, ground_sky_reflection, interior_rain_reach, interior_rain_coverage}
 #import conform::{bare_surface_y, bare_surface_valid}
 #import ground_puddles::{ground_puddle_rain_factor, ground_puddle_ripple_normal}
+#import rain_water_reflections::rain_water_scene_reflection
 
 struct RainWaterParams {
     domain: vec4<f32>, // absolute origin x/z, cell spacing, simulation time
@@ -123,7 +124,9 @@ fn fs_main(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
     let n = normalize(vec3<f32>(-hx + ripple.x + flow_slope.x, 1.0,
                                 -hz + ripple.z + flow_slope.y));
     let view = normalize(frame.cam_pos.xyz-in.world);
-    let reflected = ground_sky_reflection(reflect(-view,n));
+    let normal_variation=max(length(dpdx(n)),length(dpdy(n)));
+    let scene=rain_water_scene_reflection(in.world-frame.cam_pos.xyz,n,normal_variation,footprint);
+    let reflected = mix(ground_sky_reflection(reflect(-view,n)),scene.rgb,scene.a);
     let body = vec3<f32>(0.045,0.060,0.052) * (frame.sun_ambient.rgb + frame.sun_diffuse.rgb*0.2);
     let edge = smoothstep(0.001,0.012,min(water.y,local_depth));
     let optics = rain_water_optics(local_depth, dot(n,view), reflected, body, edge*cover);

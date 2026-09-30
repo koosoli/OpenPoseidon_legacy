@@ -32,6 +32,7 @@ mod upscaler;
 mod uploader;
 mod water;
 mod rain_water;
+mod rain_water_reflections;
 // TW-WATER W1 — the selectable water backend (Current OP / Tidewater Native).
 mod water_backend;
 mod water_tw;
@@ -3676,6 +3677,8 @@ impl Renderer {
         if let Some(camera) = cameras.get(main_scene_cam) {
             self.rain_water.prepare(&self.device, &self.queue, camera, &self.terrain.heightmap_view(),
                 self.terrain.heightmap_gen(), self.terrain.conform_params());
+        } else {
+            self.rain_water.invalidate_frame(&self.queue);
         }
         if self.main_camera_tuple.is_some() {
             let render=self.render_size(); let output=(self.config.width,self.config.height);
@@ -5751,6 +5754,16 @@ impl Renderer {
             // quadtree contributed a Water op. Draw once in the world segment,
             // after opaque colour and before ocean/transparent sorted tails.
             if start == 0 && self.rain_water.drawable() {
+                // Private current-world snapshot BEFORE land water. Ocean/monitor
+                // snapshots below retain their original content and ordering.
+                if self.rain_water.reflections_needed() && self.hdr_enabled {
+                    self.ensure_far_depth_resolve(&mut encoder);
+                    if let (Some((source, view)), Some(depth)) =
+                        (self.hdr.as_ref(), self.gfx3d.water_depth_view().cloned()) {
+                        self.rain_water.record_reflections(&self.device, &self.queue,
+                            &mut encoder, source, view, &depth, self.gfx3d.depth_gen());
+                    }
+                }
                 if let Some(camera) = self.gfx3d.camera_bind() {
                     let mut rain_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("wgr_rain_water_pass"),
