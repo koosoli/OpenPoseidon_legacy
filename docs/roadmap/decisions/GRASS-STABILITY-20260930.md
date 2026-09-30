@@ -209,3 +209,44 @@ delta 2.778 and luma 105.803: the demonstrated grass improvement is retained.
 
 Parallel agents use separate worktrees and disjoint files. Only root deploys or
 runs the game; an owner-started game is never terminated for testing.
+
+## Owner medium-distance lighting follow-up
+
+Oliver confirms the distant glitter is fixed but finds medium-distance grass
+too flat and asks for broad sun glare. This source follow-up preserves the
+existing width-filtered blade normals, opacity-weighted native atlas means,
+analytic unresolved procedural means, wind phases and coverage/placement.
+
+The prior width-only gate averaged the entire root/tip and occlusion ramp when
+a blade was thin, even if its projected height remained resolved. The new
+independent UV-y derivative gate restores only the procedural ramp and its
+matching root AO over 3..12 projected height pixels. A view fade over vertical
+direction 0.70..0.90 suppresses this extra ramp restoration in steep top views.
+Fully unresolved aerial blades retain their previous mean; already resolved
+widths retain their point shading. Native authored colour still uses its
+existing width filter and ground tint, without a new procedural palette grade.
+
+Ribbons and photographed cards gain a restrained leaf-cuticle response: a
+broad cosine-fourth-power half-vector lobe capped at 3.5% of sun radiance and
+slightly leaf tinted. Its rounded orientation follows existing metre-scale
+clump fields, with no new time seed, atlas grain or per-blade normal glint.
+Actual terrain/cloud and existing grass self/contact shadows attenuate it.
+Unresolved heights and steep top views receive no extra sheen. All silhouette,
+alpha/discard/A2C, prepass and shadow consumers remain unchanged.
+
+`WGR_GRASS_MEDIUM_LIGHTING=0` is the private same-binary ablation: it retains
+the previously shipped ramp gate and removes this new sun response while the
+existing subpixel filter remains on. Mandatory startup telemetry identifies
+the effective setting. No public renderer ABI or grass control-panel API changes.
+
+Actual production-helper GPU probes cover 300 height/view/control/alignment
+cases, bounded finite radiance, fully resolved and unresolved endpoints, the
+original steep owner view, exact OFF response and 25% of peak at a 45-degree
+half-vector (a broad lobe). The focused grass suite passes 33 tests with both
+default and `WGR_GRASS_MEDIUM_LIGHTING=0`, including
+actual 1×/4× pipelines, native means, analytic taper integrals and uniform-tail
+layout. This is source/device evidence; medium appearance and retained aerial
+temporal stability still require new matching installed controls. Root will
+compare ordinary medium views and the original Everon owner camera
+`5018.51 4087.66 117.58 220.8 -86` before accepting this follow-up. Earlier
+installed captures establish the retained baseline, not the new medium look.

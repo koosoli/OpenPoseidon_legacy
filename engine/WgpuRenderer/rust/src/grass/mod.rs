@@ -1203,7 +1203,13 @@ impl Grass {
         let filter_subpixel = std::env::var("WGR_GRASS_FILTER_SUBPIXEL")
             .map_or(true, |value| value != "0");
         eprintln!("Wgpu grass subpixel shading: {} (WGR_GRASS_FILTER_SUBPIXEL)", filter_subpixel);
-        let shading_constants = [("GRASS_FILTER_SUBPIXEL", if filter_subpixel { 1.0 } else { 0.0 })];
+        let medium_lighting = std::env::var("WGR_GRASS_MEDIUM_LIGHTING")
+            .map_or(true, |value| value != "0");
+        eprintln!("Wgpu grass medium lighting: {} (WGR_GRASS_MEDIUM_LIGHTING)", medium_lighting);
+        let shading_constants = [
+            ("GRASS_FILTER_SUBPIXEL", if filter_subpixel { 1.0 } else { 0.0 }),
+            ("GRASS_MEDIUM_LIGHTING", if medium_lighting { 1.0 } else { 0.0 }),
+        ];
         // `a2c`: alpha-to-coverage for the photo-card pipelines. Only ever true
         // under MSAA (wgpu validation rejects it at 1x), and only for entries
         // that write a vec4 whose .a is the coverage (fs_grass_mid_tuft_a2c and

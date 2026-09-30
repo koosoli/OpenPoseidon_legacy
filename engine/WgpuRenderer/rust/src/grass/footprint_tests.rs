@@ -197,12 +197,79 @@ fn native_filter_preserves_close_colour_and_empty_layers_and_converges_to_the_so
 
 #[test]
 fn unresolved_ramps_keep_the_native_and_resolved_paths_and_actual_taper() {
-    assert!(SHADER.contains("if (shading_detail < 1.0 && grass.native.x <= 0.0)"));
+    assert!(SHADER.contains("if (ramp_detail < 1.0 && grass.native.x <= 0.0)"));
     assert!(SHADER.contains(
-        "dry_colour = mix(blade_dry_mean(mean, patch_mask), dry_colour, shading_detail);"
+        "dry_colour = mix(blade_dry_mean(mean, patch_mask), dry_colour, ramp_detail);"
     ));
     assert!(SHADER.contains("@location(6) @interpolate(flat) blade_taper: f32"));
     assert!(SHADER.contains("out.blade_taper = max(shape.z * taper_jitter, 0.05);"));
     assert!(SHADER.contains("out.blade_taper = shape.z;"));
     assert!(SHADER.contains("albedo = textured;"));
+}
+
+#[test]
+fn medium_lighting_resolves_height_but_keeps_aerial_means_and_bounds_broad_sheen() {
+    let Some((device, queue)) = headless() else {
+        eprintln!("No headless grass adapter; medium lighting GPU probe unavailable");
+        return;
+    };
+    let start = SHADER.find("fn blade_height_resolution(").unwrap();
+    let end = SHADER.find("// End pure medium grass lighting.").unwrap();
+    let mut source = SHADER[start..end].to_owned();
+    source.push_str("\n@group(0) @binding(0) var<storage, read_write> results: array<vec4<f32>>;\n@compute @workgroup_size(1) fn probe() {\n");
+    let mut cases = Vec::new();
+    for pixels in [0.25_f32, 1.0, 3.0, 6.0, 12.0, 40.0] {
+        for vertical in [0.0_f32, 0.70, 0.80, 0.90, 0.9976] {
+            for enabled in [false, true] {
+                for alignment in [-1.0_f32, 0.0, 0.5, 0.70710677, 1.0] {
+                    source.push_str(&format!("{{ let height = blade_height_resolution({:.9}); results[{}] = vec4<f32>(height, grass_ramp_detail(0.0, height, {vertical:.9}, {enabled}), grass_broad_sun_response({alignment:.9}, height, {vertical:.9}, {enabled}), grass_ramp_detail(1.0, height, {vertical:.9}, {enabled})); }}\n", 1.0 / pixels, cases.len()));
+                    cases.push((pixels, vertical, enabled, alignment));
+                }
+            }
+        }
+    }
+    source.push_str("}\n");
+    let actual = gpu_probe(&device, &queue, source, cases.len());
+    let smooth = |lo: f32, hi: f32, x: f32| {
+        let t = ((x - lo) / (hi - lo)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    for (row, (pixels, vertical, enabled, alignment)) in actual.iter().zip(cases) {
+        let height = smooth(3.0, 12.0, pixels);
+        let view = 1.0 - smooth(0.70, 0.90, vertical);
+        assert!((row[0] - height).abs() < 0.000002);
+        assert!((row[1] - if enabled { height * view } else { 0.0 }).abs() < 0.000002);
+        let sheen = if enabled { 0.035 * alignment.clamp(0.0, 1.0).powi(4) * height * view } else { 0.0 };
+        assert!((row[2] - sheen).abs() < 0.000002);
+        assert!(row[2].is_finite() && row[2] >= 0.0 && row[2] <= 0.035001);
+        assert_eq!(row[3], 1.0, "resolved width retains the original point ramp");
+        if pixels <= 3.0 || vertical >= 0.90 || !enabled {
+            assert_eq!(row[1], 0.0);
+            assert_eq!(row[2], 0.0);
+        }
+        if pixels >= 12.0 && vertical <= 0.70 && enabled {
+            assert_eq!(row[1], 1.0);
+            if (alignment - 0.70710677).abs() < 0.000001 {
+                assert!((row[2] - 0.00875).abs() < 0.000002, "45 degree half-vector still has 25% of the broad peak");
+            }
+        }
+    }
+}
+
+#[test]
+fn medium_sun_response_preserves_native_atlas_filter_and_all_coverage_consumers() {
+    assert!(SHADER.contains("grass.blade_layer_means[min(u32(in.blade_uv.z), 7u)], shading_detail"));
+    assert!(SHADER.contains("let n = normalize(mix(upright, resolved_normal, shading_detail));"));
+    assert!(SHADER.contains("in.blade_taper, ramp_detail"));
+    assert!(SHADER.contains("grass_medium_view_weight(view_vertical)"));
+    assert!(SHADER.contains("(1.0 - max(terrain_shadow, self_shadow.x)) * cloud_lit"));
+    assert!(SHADER.contains("(1.0 - max(terrain_shadow, clump_shadow)) * cloud_lit"));
+    assert!(SHADER.contains("let cov = tuft_coverage(tex.a);"));
+    assert!(SHADER.contains("let cov = tuft_coverage(tuft_sample(in).a);"));
+    assert!(SHADER.contains("if (tuft_sample(in).a < tuft_alpha_cutoff()) { discard; }"));
+    let helpers = &SHADER[SHADER.find("// Begin pure medium grass lighting.").unwrap()..SHADER.find("// End pure medium grass lighting.").unwrap()];
+    let code = helpers.lines().filter(|line| !line.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
+    assert!(!code.contains("seed"));
+    assert!(!code.contains("textureSample"));
+    assert!(!code.contains("wind"));
 }

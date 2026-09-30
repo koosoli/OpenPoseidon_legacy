@@ -4,6 +4,7 @@
 
 // Diagnostic A/B only; coverage, placement and shadow geometry are unchanged.
 override GRASS_FILTER_SUBPIXEL: bool = true;
+override GRASS_MEDIUM_LIGHTING: bool = true;
 
 struct TerrainParams {
     world_origin: vec2<f32>,
@@ -1477,6 +1478,28 @@ fn blade_shading_detail(uv: vec2<f32>) -> f32 {
     return select(1.0, smoothstep(0.75, 3.0, width_pixels), GRASS_FILTER_SUBPIXEL);
 }
 
+// Begin pure medium grass lighting.
+// A thin blade can still resolve its vertical root/tip ramp. UV-y derivatives
+// measure projected height, not world height: foreshortened aerial blades stay
+// filtered. Require 3..12 pixels before restoring this lower-frequency detail.
+fn blade_height_resolution(height_gradient: f32) -> f32 {
+    return smoothstep(3.0, 12.0, 1.0 / max(height_gradient, 0.0001));
+}
+fn grass_medium_view_weight(view_vertical: f32) -> f32 {
+    return 1.0 - smoothstep(0.70, 0.90, abs(view_vertical));
+}
+fn grass_ramp_detail(width_detail: f32, height_detail: f32, view_vertical: f32, enabled: bool) -> f32 {
+    return select(width_detail, max(width_detail, height_detail * grass_medium_view_weight(view_vertical)), enabled);
+}
+// Rough leaf-cuticle response: a wide cosine^4 lobe, at most 3.5% of sun
+// radiance. Its orientation belongs to metre-scale clumps, never seed/atlas
+// fibres or moving per-blade normals. No extra sheen in unresolved/top views.
+fn grass_broad_sun_response(alignment: f32, height_detail: f32, view_vertical: f32, enabled: bool) -> f32 {
+    let lobe = pow(clamp(alignment, 0.0, 1.0), 4.0);
+    return select(0.0, 0.035 * lobe * clamp(height_detail, 0.0, 1.0) * grass_medium_view_weight(view_vertical), enabled);
+}
+// End pure medium grass lighting.
+
 // Pure footprint moments. An unresolved ribbon represents its entire tapered
 // area, not whichever bright tip happened to hit the sample this frame. Width
 // is (1-t)^p, so E[t^k] = k! / ((p+2)...(p+k+1)). Integrate the colour ramp,
@@ -1546,6 +1569,9 @@ fn native_blade_colour(sampled: vec3<f32>, mean: vec4<f32>, detail: f32) -> vec3
 
 fn grass_shade(in: VsOut) -> vec4<f32> {
     let shading_detail = blade_shading_detail(in.blade_uv.xy);
+    let height_detail = blade_height_resolution(length(vec2<f32>(dpdx(in.blade_uv.y), dpdy(in.blade_uv.y))));
+    let view_dir = -in.world_rel / max(length(in.world_rel), 0.0001);
+    let ramp_detail = grass_ramp_detail(shading_detail, height_detail, view_dir.y, GRASS_MEDIUM_LIGHTING);
     let world = in.world_rel + frame.cam_pos.xyz;
     let base = vec3<f32>(0.055, 0.16, 0.025);
     let tip = vec3<f32>(0.32, 0.43, 0.10);
@@ -1601,7 +1627,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // the atlas and falling all the way to procedural.
     let texture_amount = in.blade_uv.w * clamp(grass.shape_mix.w, 0.0, 1.0);
     var dry_colour = dry_patch(mix(procedural, textured, texture_amount), world.xz, in.height_t);
-    if (shading_detail < 1.0 && grass.native.x <= 0.0) {
+    if (ramp_detail < 1.0 && grass.native.x <= 0.0) {
         // Seed tint is constant per blade, and field tint is metre-scale; keep
         // both rather than erasing the meadow's stable colour variation.
         var mean = blade_ramp_mean(base, tip, blade_root_shade(),
@@ -1614,7 +1640,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
             let field = clump_noise(world.xz, max(grass.look.z, 0.002), 0x93b5e1a7u);
             patch_mask = smoothstep(1.0 - amount, 1.0 - amount * 0.30, field);
         }
-        dry_colour = mix(blade_dry_mean(mean, patch_mask), dry_colour, shading_detail);
+        dry_colour = mix(blade_dry_mean(mean, patch_mask), dry_colour, ramp_detail);
     }
     let graded = grass_saturation(dry_colour);
     // Per-patch hue drift on top of the luminance-only colour variation above:
@@ -1651,18 +1677,25 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // RFG-091: the blade-on-blade terms assume a bare procedural blade; the native atlas is
     // already a lit tuft, and the two together were black.
     let self_shadow = select(blade_self_shadow_terms(in.world_rel, n, in.height_t,
-                             in.blade_taper, shading_detail), vec2<f32>(0.0, 1.0),
+                             in.blade_taper, ramp_detail), vec2<f32>(0.0, 1.0),
                              grass.native.x > 0.0);
     let direct = frame.sun_diffuse.rgb * mix(ndl, wrap, 0.35) *
         (1.0 - max(terrain_shadow, self_shadow.x)) * cloud_lit;
     let ambient = sky_irradiance(normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.45))) * sky_vis_ao(world.xz) *
         self_shadow.y;
-    let view_dir = normalize(-in.world_rel);
     let transmission = species_transmission(u32(in.blade_uv.z));
     let transmission_amount = pow(max(dot(view_dir, -light_dir), 0.0), 1.5) * (1.0 - ndl) *
         grass.debug_flags.w * transmission.w;
     let subsurface = transmission.rgb * transmission_amount * frame.sun_diffuse.rgb * (1.0 - terrain_shadow) * cloud_lit;
-    let lit = albedo * (ambient + direct + subsurface);
+    // Reuse the existing 6m/11m stable fields for rounded clump orientation.
+    // The width-filtered blade normal above remains the diffuse authority.
+    let clump_normal = normalize(vec3<f32>((field_tint - 0.5) * 0.24, 1.0, (hue_field - 0.5) * 0.24));
+    let half_direction = (light_dir + view_dir) / max(length(light_dir + view_dir), 0.0001);
+    let sheen_amount = grass_broad_sun_response(dot(clump_normal, half_direction), height_detail,
+        view_dir.y, GRASS_MEDIUM_LIGHTING);
+    let sheen = frame.sun_diffuse.rgb * vec3<f32>(0.85, 1.0, 0.75) * sheen_amount *
+        (1.0 - max(terrain_shadow, self_shadow.x)) * cloud_lit;
+    let lit = albedo * (ambient + direct + subsurface) + sheen;
     let fogged = apply_fog(lit, in.world_rel);
     return vec4<f32>(select(lit, fogged, grass.render_flags.y >= 0.5), 1.0);
 }
@@ -1866,6 +1899,7 @@ fn tuft_coverage(tex_a: f32) -> f32 {
 // Shading shared by the discard and A2C colour entries. `tex` is tuft_sample(in).
 fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     let world = in.world_rel + frame.cam_pos.xyz;
+    let height_detail = blade_height_resolution(length(vec2<f32>(dpdx(in.blade_uv.y), dpdy(in.blade_uv.y))));
     // The photo already carries base-to-tip shading, so only the field-scale
     // tint and gust highlight are applied on top -- re-adding the procedural
     // root darkening would double up what the photograph already shows.
@@ -1938,7 +1972,15 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     // Ambient keeps the softer half-upright normal: the contour detail belongs
     // in the sun term, and applying it to skylight only flattens it again.
     let ambient = sky_irradiance(normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.45))) * sky_vis_ao(world.xz);
-    let lit = albedo * (ambient + direct);
+    let view_dir = -in.world_rel / max(length(in.world_rel), 0.0001);
+    let broad_field = clump_noise(world.xz, 0.09, 0x7a1c3e5du);
+    let clump_normal = normalize(vec3<f32>((field_tint - 0.5) * 0.24, 1.0, (broad_field - 0.5) * 0.24));
+    let half_direction = (light_dir + view_dir) / max(length(light_dir + view_dir), 0.0001);
+    let sheen_amount = grass_broad_sun_response(dot(clump_normal, half_direction), height_detail,
+        view_dir.y, GRASS_MEDIUM_LIGHTING);
+    let sheen = frame.sun_diffuse.rgb * vec3<f32>(0.85, 1.0, 0.75) * sheen_amount *
+        (1.0 - max(terrain_shadow, clump_shadow)) * cloud_lit;
+    let lit = albedo * (ambient + direct) + sheen;
     let fogged = apply_fog(lit, in.world_rel);
     return select(lit, fogged, grass.render_flags.y >= 0.5);
 }
