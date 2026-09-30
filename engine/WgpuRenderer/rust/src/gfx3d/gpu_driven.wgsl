@@ -10,7 +10,8 @@
 // the CPU path (they never enter the retained instance set), so this VS has no conform.
 
 #import frame::{frame, reverse_z, fog_factor, atmo_applied, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
-#import shading::{shade, ShadeMaterial, surface_normal}
+#import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal, object_snow_baked_exposure}
+#import frame::interior_rain_coverage
 #import color::srgb_to_linear
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
 // Terrain conform (group 4 heightmap + surface_y/surface_grad), shared with shader3d /
@@ -489,6 +490,7 @@ struct VsOut {
     // 1 = open sky). Smooth-interpolated like a baked vertex colour, which is what it
     // replaces. 1.0 for every section whose material names no volume.
     @location(12) crown_ao: f32,
+    @location(13) @interpolate(flat) snow_receiver: u32,
 };
 
 // WgrInstance::flags bits: vegetation canopy — bend cutout-section normals toward a radial crown
@@ -690,6 +692,9 @@ fn vs_gpu(
     // Vegetation = any canopy flag (bush/tree/forest cover the whole vegetation MapType set);
     // gates the foliage lighting in fs_gpu so non-plant cutouts don't get the leaf look.
     out.is_veg = select(0u, 1u, canopy != 0u);
+    // Explicit actual-owner proof; child proxies, authored far DTOs and conformed surfaces
+    // default dry. Vegetation trunks are excluded along with cutout leaves.
+    out.snow_receiver = select(0u, 1u, (inst.flags & 128u) != 0u && canopy == 0u && inst.conform2.z == 0.0);
     // Undeformed model-space position: the baked volume is a property of the AUTHORED model, so
     // the lookup must use the authored vertex, not a terrain-conformed one.
     out.model_pos = pos;
@@ -729,6 +734,29 @@ fn decode_nohq_packed(texel: vec4<f32>, rg_packed: bool) -> vec3<f32> {
 // The colour fragment body, shared by the two entries below. It discards (the cutout alpha
 // test), which is why the hardware cannot test depth before running it -- unless the entry
 // says so (REN-OBJ-004).
+fn retained_snow_receiver(in: VsOut) -> bool {
+    let sm = section_materials[in.section];
+    return in.snow_receiver != 0u && sm.alpha_ref <= 0.0 &&
+        (sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER)) == 0u &&
+        dot(sm.emissive.rgb, sm.emissive.rgb) < 1e-8 && dot(in.normal, in.normal) > 1e-8;
+}
+
+// Raw baked sky is only a conservative FAR fallback: diffuse light through a side window
+// is not rain proof. Require a real complete volume and almost fully open raw visibility;
+// artistic AO strength/floor never enter this admission. Missing/pending volume stays dry.
+fn retained_snow_exposure(in: VsOut) -> f32 {
+    if (!retained_snow_receiver(in) || (frame.snow_surface.x <= 0.0 && frame.snow_surface.w <= 0.0)) { return 0.0; }
+    if (interior_rain_coverage(in.world_pos + frame.cam_pos.xyz) >= 1.0) { return 0.0; }
+    let m = in.model_id * 2u;
+    if (m + 1u >= arrayLength(&sky_volume_meta) || sky_volume_meta[m + 1u].w < 0.5) { return 0.0; }
+    let base = u32(sky_volume_meta[m].w);
+    let count = SKY_VOL_X * SKY_VOL_Y * SKY_VOL_Z;
+    let len = arrayLength(&sky_volume_data);
+    if (base > len || count > len - min(base, len)) { return 0.0; }
+    let raw = clamp(sky_vol_sample(in.model_id, in.model_pos).w, 0.0, 1.0);
+    return object_snow_baked_exposure(raw, true);
+}
+
 fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
@@ -1152,6 +1180,7 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         // Retained objects are never the first-person cockpit (is_cockpit = false).
         veg_cutout, false, veg_cutout, false, in.clip.xy,
         !(veg_cutout && foliage_screen_ao < 0.5),
+        retained_snow_receiver(in), retained_snow_exposure(in),
     );
     // REN-ATM-001: read back what shade()'s apply_fog actually did to THIS fragment and bin it by
     // shader family. Placed immediately after shade() so nothing between the fog and the count can
@@ -1233,7 +1262,11 @@ fn fs_gpu_early(in: VsOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
-    let surface_n = surface_normal(in.normal, in.world_pos, dpdx(in.world_pos), dpdy(in.world_pos));
+    let dwx = dpdx(in.world_pos);
+    let dwy = dpdy(in.world_pos);
+    let surface_n = surface_normal(in.normal, in.world_pos, dwx, dwy);
+    let snow_cover = object_snow_coverage(in.world_pos, surface_n, retained_snow_receiver(in) && linear > 0.5, retained_snow_exposure(in));
+    let snow_surface_n = object_snow_normal(in.world_pos, surface_n, surface_n, dwx, dwy, snow_cover);
     census(2u);
     if (prepass_clipped(in.world_pos)) {
         discard;
@@ -1252,7 +1285,7 @@ fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
     }
     // in.normal is world space; the view matrix's translation is zeroed, so transforming the
     // direction gives view space (matches shader3d::fs_prepass).
-    let n_view = (frame.view * vec4<f32>(surface_n, 0.0)).xyz;
+    let n_view = (frame.view * vec4<f32>(snow_surface_n, 0.0)).xyz;
     return oct_encode(normalize(n_view));
 }
 
@@ -1263,7 +1296,11 @@ fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
 // per-fragment opaque/cutout split rather than a pipeline override.
 @fragment
 fn fs_gpu_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
-    let surface_n = surface_normal(in.normal, in.world_pos, dpdx(in.world_pos), dpdy(in.world_pos));
+    let dwx = dpdx(in.world_pos);
+    let dwy = dpdy(in.world_pos);
+    let surface_n = surface_normal(in.normal, in.world_pos, dwx, dwy);
+    let snow_cover = object_snow_coverage(in.world_pos, surface_n, retained_snow_receiver(in) && linear > 0.5, retained_snow_exposure(in));
+    let snow_surface_n = object_snow_normal(in.world_pos, surface_n, surface_n, dwx, dwy, snow_cover);
     census(2u);
     census(3u);
     if (prepass_clipped(in.world_pos)) {
@@ -1281,7 +1318,7 @@ fn fs_gpu_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
             discard;
         }
     }
-    let n_view = (frame.view * vec4<f32>(surface_n, 0.0)).xyz;
+    let n_view = (frame.view * vec4<f32>(snow_surface_n, 0.0)).xyz;
     let oct = oct_encode(normalize(n_view));
     return vec4<f32>(oct.x, oct.y, 0.0, cov);
 }

@@ -14,7 +14,7 @@
 #import color::srgb_to_linear
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
 // Shared fragment shading, also used by the GPU-driven indirect path (gpu_driven.wgsl).
-#import shading::{shade, ShadeMaterial, surface_normal}
+#import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal}
 // Group(4) terrain heightmap + surface_y, shared with the shadow depth pass.
 // surface_grad tilts conformed veg normals to follow the ground slope (color pass only).
 #import conform::{surface_y, surface_grad, surface_y_raster, hm_params, snow_depth}
@@ -117,6 +117,7 @@ const GLASS_MIN_ALPHA: f32 = 0.18;
 // stock T72 and UH-60 alike.
 const MATFLAG_COCKPIT: u32 = 16u;
 const MATFLAG_NORMAL_RG: u32 = 128u;
+const MATFLAG_SNOW_RECEIVER: u32 = 2048u;
 
 fn material_flags(m: Material) -> u32 {
     return u32(m.normal_map.w + 0.5);
@@ -763,6 +764,16 @@ fn surface_pixel_depth(in: VsOut) -> f32 {
     return mix(in.clip.z, clamp(ndc, 0.0, 1.0), w);
 }
 
+fn direct_snow_receiver(in: VsOut) -> bool {
+    let material = materials[in.instance];
+    let flags = material_flags(material);
+    return (flags & MATFLAG_SNOW_RECEIVER) != 0u &&
+        (flags & (2u | 4u | 8u | 16u | 32u)) == 0u &&
+        alpha_ref <= 0.0 && translucent <= 0.5 && material.sun_ambient.w <= 0.0 &&
+        dot(material.emissive.rgb, material.emissive.rgb) < 1e-8 &&
+        dot(in.normal, in.normal) > 1e-8 && in.conform_w <= 0.0;
+}
+
 fn shade_fragment(in: VsOut) -> vec4<f32> {
     // Derivatives must run in uniform control flow — before the discard.
     let dwx = dpdx(in.world_pos);
@@ -1105,6 +1116,7 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
         veg_cutout, translucent > 0.5 && (material_flags(material) & MATFLAG_GLASS) != 0u, veg_cutout,
         (material_flags(material) & MATFLAG_COCKPIT) != 0u, in.clip.xy,
         !(veg_cutout && foliage_screen_ao < 0.5),
+        direct_snow_receiver(in), 0.0,
     );
     // REN-ATM-001: the per-draw twin of gpu_driven.wgsl's atmosphere census -- same words, same
     // witness. Both paths draw vegetation (retained trees go GPU-driven, scripted/near ones do
@@ -1200,7 +1212,11 @@ fn surface_scattering(pos: vec3<f32>) -> vec3<f32> {
 // the textureSample stays legal.
 @fragment
 fn fs_prepass(in: VsOut) -> @location(0) vec2<f32> {
-    let surface_n = surface_normal(in.normal, in.world_pos, dpdx(in.world_pos), dpdy(in.world_pos));
+    let dwx = dpdx(in.world_pos);
+    let dwy = dpdy(in.world_pos);
+    let surface_n = surface_normal(in.normal, in.world_pos, dwx, dwy);
+    let snow_cover = object_snow_coverage(in.world_pos, surface_n, direct_snow_receiver(in) && linear > 0.5, 0.0);
+    let snow_surface_n = object_snow_normal(in.world_pos, surface_n, surface_n, dwx, dwy, snow_cover);
     census(2u);
     if (alpha_ref > 0.0) {
         let packed = bitcast<u32>(materials[in.instance].emissive.w);
@@ -1213,7 +1229,7 @@ fn fs_prepass(in: VsOut) -> @location(0) vec2<f32> {
     }
     // in.normal is world space (camera-relative world uses the same orientation); the
     // view matrix's translation is zeroed, so multiplying the direction gives view space.
-    let n_view = (frame.view * vec4<f32>(surface_n, 0.0)).xyz;
+    let n_view = (frame.view * vec4<f32>(snow_surface_n, 0.0)).xyz;
     return oct_encode(normalize(n_view));
 }
 
@@ -1224,7 +1240,11 @@ fn fs_prepass(in: VsOut) -> @location(0) vec2<f32> {
 // the colour pass will shade (terrain fills the rest -> no background halo at edges).
 @fragment
 fn fs_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
-    let surface_n = surface_normal(in.normal, in.world_pos, dpdx(in.world_pos), dpdy(in.world_pos));
+    let dwx = dpdx(in.world_pos);
+    let dwy = dpdy(in.world_pos);
+    let surface_n = surface_normal(in.normal, in.world_pos, dwx, dwy);
+    let snow_cover = object_snow_coverage(in.world_pos, surface_n, direct_snow_receiver(in) && linear > 0.5, 0.0);
+    let snow_surface_n = object_snow_normal(in.world_pos, surface_n, surface_n, dwx, dwy, snow_cover);
     census(2u);
     census(3u);
     let packed = bitcast<u32>(materials[in.instance].emissive.w);
@@ -1235,7 +1255,7 @@ fn fs_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
     if (cov <= 0.0) {
         discard;
     }
-    let n_view = (frame.view * vec4<f32>(surface_n, 0.0)).xyz;
+    let n_view = (frame.view * vec4<f32>(snow_surface_n, 0.0)).xyz;
     let oct = oct_encode(normalize(n_view));
     return vec4<f32>(oct.x, oct.y, 0.0, cov);
 }

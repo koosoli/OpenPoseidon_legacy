@@ -107,7 +107,7 @@ private:
     {
         const auto& v=e.row;
         if(e.model.producerModel==UINT32_MAX||e.model.rendererModel==UINT32_MAX||
-            !Serial(e.model.modelBirth)||v.model!=e.model.producerModel||v.flags!=flags||
+            !Serial(e.model.modelBirth)||v.model!=e.model.producerModel||(v.flags & ~WGR_INSTANCE_SNOW_RECEIVER)!=flags||
             v.cull_radius||v._pad||!std::isfinite(v.center.w)||v.center.w<=0||
             !std::isfinite(v.center.x)||!std::isfinite(v.center.y)||!std::isfinite(v.center.z))return false;
         for(float f:v.world.m)if(!std::isfinite(f))return false;
@@ -125,7 +125,9 @@ private:
             b.originalProducerInstance==b.pageProducerInstance||!Handle(r.originalRendererHandle)||
             !Handle(r.pageRendererHandle)||r.originalRendererHandle==r.pageRendererHandle||
             !Row(r.original,WGR_INSTANCE_OTHER_VIEWS_ONLY)||!Row(r.page,WGR_INSTANCE_MAIN_CAMERA_ONLY))return false;
-        auto a=r.original.row,c=r.page.row;a.model=c.model=0;a.flags=c.flags=0;
+        auto a=r.original.row,c=r.page.row;
+        if ((a.flags & WGR_INSTANCE_SNOW_RECEIVER) != (c.flags & WGR_INSTANCE_SNOW_RECEIVER)) return false;
+        a.model=c.model=0;a.flags=c.flags=0;
         return std::memcmp(&a,&c,sizeof(a))==0;
     }
     static bool Present(const InstanceEvidence& e,const RowExpectation& row,uint32_t producer,

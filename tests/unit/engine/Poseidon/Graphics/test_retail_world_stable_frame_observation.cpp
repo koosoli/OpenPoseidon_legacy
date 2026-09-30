@@ -180,3 +180,12 @@ TEST_CASE("Stable observation publication remains a coherent bounded snapshot ac
     done.store(true,std::memory_order_release);reader.join();
     REQUIRE(allPublished);CHECK_FALSE(bad.load());CHECK(tracker->Observe().acceptedFrames==32);
 }
+
+TEST_CASE("Stable world page frames retain matching snow proof without widening view authority", "[geometry-page][retail-world-stable-frame][object-snow]")
+{
+    auto r=StableRequest();r.original.row.flags |= WGR_INSTANCE_SNOW_RECEIVER;r.page.row.flags |= WGR_INSTANCE_SNOW_RECEIVER;
+    StableFrame accepted(r);REQUIRE(accepted.Valid());
+    auto drain=StableDrain(r);REQUIRE(accepted.Arm(drain));REQUIRE(accepted.PublishReturned(StableReturn(drain)));
+    auto lost=r;lost.page.row.flags &= ~WGR_INSTANCE_SNOW_RECEIVER;CHECK_FALSE(StableFrame(lost).Valid());
+    auto unsupported=r;unsupported.page.row.flags |= WGR_INSTANCE_CANOPY_BUSH;CHECK_FALSE(StableFrame(unsupported).Valid());
+}

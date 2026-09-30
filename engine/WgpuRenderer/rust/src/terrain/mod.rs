@@ -167,12 +167,37 @@ struct SkyvisSrc {
     terrain_grid: f32,
 }
 
+fn snow_surface_params(deposit: f32, height: f32, range: f32, depth: f32) -> [f32; 4] {
+    let deposit = if deposit.is_finite() { deposit.max(0.0) } else { 0.0 };
+    if height.is_finite() && height >= 0.0 && range.is_finite() && range > 0.0
+        && depth.is_finite() && depth > 0.0 {
+        [deposit, height, range, depth.clamp(0.0, 1.0)]
+    } else {
+        [deposit, -1.0, 0.0, 0.0]
+    }
+}
+
+#[test]
+fn object_snow_uses_actual_deposit_and_finite_surface_altitude_params() {
+    assert_eq!(snow_surface_params(0.18, 200.0, 50.0, 0.8), [0.18, 200.0, 50.0, 0.8]);
+    assert_eq!(snow_surface_params(0.0, -1.0, 50.0, 0.8), [0.0, -1.0, 0.0, 0.0]);
+    for invalid in [f32::NAN, f32::INFINITY, -1.0] {
+        assert_eq!(snow_surface_params(invalid, -1.0, 0.0, 0.0), [0.0, -1.0, 0.0, 0.0]);
+        assert_eq!(snow_surface_params(0.18, 200.0, invalid, 0.8), [0.18, -1.0, 0.0, 0.0]);
+        assert_eq!(snow_surface_params(0.18, 200.0, 50.0, invalid), [0.18, -1.0, 0.0, 0.0]);
+    }
+    assert_eq!(snow_surface_params(0.18, 200.0, 50.0, 2.0), [0.18, 200.0, 50.0, 1.0]);
+}
+
 pub struct Terrain {
     group1_layout: wgpu::BindGroupLayout,
     group2_layout: wgpu::BindGroupLayout,
 
     params_ubo: wgpu::Buffer,
     snow_buffer: wgpu::Buffer,
+    // Actual mission deposit from the accepted snow header. Ground deficits contain tracks
+    // and roof shelter and therefore must NEVER be applied to a raised object surface.
+    snow_deposit_depth: f32,
     params: WgrTerrainParams,
     #[allow(dead_code)] // kept alive: group1_bind references its view
     heightmap: wgpu::Texture,
@@ -936,6 +961,7 @@ impl Terrain {
             group2_layout,
             params_ubo,
             snow_buffer,
+            snow_deposit_depth: 0.0,
             params: default_params,
             heightmap,
             heightmap_view,
@@ -1015,7 +1041,13 @@ impl Terrain {
     pub fn set_snow(&mut self, queue: &wgpu::Queue, data: &[f32]) {
         if data.len() == 4 + 512 * 512 && data.iter().all(|v| v.is_finite()) {
             queue.write_buffer(&self.snow_buffer, 0, bytemuck::cast_slice(data));
+            self.snow_deposit_depth = data[3].max(0.0);
         }
+    }
+
+    pub fn snow_surface_params(&self) -> [f32; 4] {
+        snow_surface_params(self.snow_deposit_depth, self.params.snowline_height,
+            self.params.snowline_range, self.params.snowline_depth)
     }
 
     pub fn snow_buffer(&self) -> &wgpu::Buffer {

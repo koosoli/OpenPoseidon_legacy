@@ -164,6 +164,10 @@ struct Frame {
     // A zero-filled camera reads bias 0 / grad_scale() 1.0 and no feedback — bit-identical to
     // pre-lane.
     renscale: vec4<f32>,
+    // Renderer-private object snow, appended without changing WgrCamera's public ABI:
+    // actual deposit metres, snowline height (-1 disabled), ramp range, snowline depth.
+    // Raised roofs use their own fragment height and never the terrain shelter/track deficit.
+    snow_surface: vec4<f32>,
 };
 
 // REN-TEMP-001D helpers. Material/albedo/normal/cutout sampling uses `mip_bias()` via
@@ -865,6 +869,17 @@ fn interior_sky_reach(world_abs: vec3<f32>) -> f32 {
 // Artistic ambient strength/floor and tilted directions do not affect rain.
 // No map, outside coverage, and its feathered edge retain the lighting map's
 // open fallback: this bounded cosmetic query is not a world rain collider.
+// Coverage proof separate from the lighting map's OPEN fallback. Snow on a raised surface
+// must not interpret a disabled/out-of-box map as proof that an interior floor is outdoors.
+fn interior_rain_coverage(world_abs: vec3<f32>) -> f32 {
+    if (frame.skyvis.x < 0.5) { return 0.0; }
+    let clip = frame.skyvis_vp[0] * vec4<f32>(world_abs, 1.0);
+    if (clip.z < 0.0 || clip.z > 1.0) { return 0.0; }
+    let uv = vec2<f32>(clip.x * 0.5 + 0.5, -clip.y * 0.5 + 0.5);
+    let edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+    return smoothstep(0.0, 0.05, edge);
+}
+
 fn interior_rain_reach(world_abs: vec3<f32>) -> f32 {
     if (frame.skyvis.x < 0.5) {
         return 1.0;

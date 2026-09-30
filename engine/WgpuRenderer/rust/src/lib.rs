@@ -3819,6 +3819,11 @@ impl Renderer {
             self.water_flow_slot,
             self.water_flow_strength,
         );
+        // Deposit belongs to the whole mission; roof admission uses actual surface height
+        // and cover in the object shader, never the terrain shelter/track deficit texture.
+        if let Some(line) = self.gfx3d.set_snow_surface(self.terrain.snow_surface_params()) {
+            self.log.log(log_level::INFO, &line);
+        }
         let mut prepared_cameras = cameras.to_vec();
         // REN-TEMP-001E: temporal camera state + jitter. The UNJITTERED main camera is
         // snapshotted first (velocity and history math use it), then the jitter is folded

@@ -304,7 +304,11 @@ enum WgrDraw3DFlags : uint32_t
      * for the draw; every other draw keeps it. */
     WGR_DRAW3D_DOUBLE_SIDED = 64,
     WGR_DRAW3D_NORMAL_RG = 128, // BC5 / compressed Enfusion normal XY, not NOHQ alpha/green
-    WGR_DRAW3D_NATIVE_CAVITY = 1024 // 256/512 belong to Z bias
+    WGR_DRAW3D_NATIVE_CAVITY = 1024, // 256/512 belong to Z bias
+    /* Explicit producer proof: intact world-owner rigid source mesh, not a Person/proxy/
+     * animated/local/road surface. Shader still checks the material and outward side.
+     * New meaning in an unused flag bit, no struct/layout change. Old producers default dry. */
+    WGR_DRAW3D_SNOW_RECEIVER = 2048
 };
 
 /* Matrices per palette block (the engine's own bone-palette cap). Each skinned
@@ -529,7 +533,10 @@ enum WgrInstanceFlags : uint32_t
      * instance only when the cull carries positive main-camera authority.
      * Unknown and other views retain the original. Both view bits together
      * are invalid and conservatively exclude the instance from every view. */
-    WGR_INSTANCE_OTHER_VIEWS_ONLY = 64
+    WGR_INSTANCE_OTHER_VIEWS_ONLY = 64,
+    /* Actual rigid owner rain/snow receiver. Child proxies and far-authoring DTOs do not
+     * inherit the parent's authority. Independent of private page-view bits 32/64. */
+    WGR_INSTANCE_SNOW_RECEIVER = 128
 };
 
 struct WgrInstance

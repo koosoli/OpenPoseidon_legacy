@@ -69,6 +69,8 @@
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Scene/Pass1Submit.hpp>
 #include <Poseidon/World/Entities/Infantry/Head.hpp> // FACE-001 diagnostics
+#include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Scene/Thing.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Rendering/RenderFlags.hpp>
@@ -7314,6 +7316,41 @@ static bool TreeAdvLightTraceEnabled()
     return DrawSectionEnvCacheEnabled() ? cached : (std::getenv("WGR_TREEADV_LIGHT_TRACE") != nullptr);
 }
 
+// Ownership must be explicit: NO_PALETTE also describes CPU-posed soldiers and proxies.
+static bool ObjectSnowOwnerEligible(const Object& obj)
+{
+    if (obj.IsDestroyed() || dyn_cast<const Person>(&obj)) return false;
+    if (obj.GetType() == Primary) return true;
+    return obj.GetType() == TypeVehicle &&
+        (dyn_cast<const Thing>(&obj) || dyn_cast<const Vehicle>(&obj));
+}
+
+static bool ObjectOwnsSnowMesh(const Object& obj, const Shape& mesh)
+{
+    const auto* shape = obj.GetShape();
+    if (!shape) return false;
+    for (int level = 0; level < shape->NLevels(); ++level)
+        if (shape->Level(level) == &mesh) return true;
+    return false; // a proxy/source mesh cannot inherit its enclosing scene object's proof
+}
+
+static void TraceObjectSnowReceiver(const Object& obj, bool eligible, const char* path)
+{
+    static const bool fixture = [] {
+        const char* value = std::getenv("WGR_SNOW_SURFACE_FIXTURE");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    if (!fixture || !obj.GetShape()) return;
+    const char* name = obj.GetShape()->Name();
+    if (!name || (!ContainsNoCase(name, "stan_eastc") && !ContainsNoCase(name, "uaz"))) return;
+    static std::unordered_set<std::string> reported;
+    if (reported.size() >= 32) return;
+    const std::string key = std::string(name) + path + (eligible ? "1" : "0");
+    if (reported.insert(key).second)
+        LOG_INFO(Graphics, "Wgpu object snow receiver: model={} path={} eligible={} static={} type={} scope=source-owner-material-and-facing-gates-remain",
+                 name, path, eligible, obj.Static(), int(obj.GetType()));
+}
+
 void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
 {
     if (DrawSectionStatsEnabled())
@@ -8363,6 +8400,18 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     d.camera = _currentCamera;
     d.palette_slot = _currentPaletteSlot;
 
+    const auto* snowOwner = static_cast<const Object*>(GetDrawObject());
+    const bool snowReceiver = snowOwner && ObjectSnowOwnerEligible(*snowOwner) &&
+        !buf->isDynamic && !buf->skinned && !buf->cpuPosed && !_currentCpuPose &&
+        _currentPaletteSlot == WGR_NO_PALETTE && GetPassKindHint() == render::PassKindHint::None &&
+        ObjectOwnsSnowMesh(*snowOwner, sMesh) && !snowOwner->GetAnimated(sMesh) &&
+        d.blend == WGR_BLEND_OPAQUE && d.depth == WGR_DEPTH_TEST_WRITE && d.alpha_ref <= 0.0f &&
+        d.conform2.z == 0.0f &&
+        !GCurrentIsVegetation && (d.flags & (WGR_DRAW3D_ON_SURFACE | WGR_DRAW3D_REFLECTIVE |
+            WGR_DRAW3D_GLASS | WGR_DRAW3D_COCKPIT | WGR_DRAW3D_MONITOR)) == 0;
+    if (snowReceiver) d.flags |= WGR_DRAW3D_SNOW_RECEIVER;
+    if (snowOwner) TraceObjectSnowReceiver(*snowOwner, snowReceiver, "direct");
+
     // Per-material sun lighting, folded exactly like GL33's
     // UploadVSMaterialConstants: raw MainLight colour x captured material, with
     // the sun-enable (!DisableSun) multiplied into the sun terms (emissive shows
@@ -9074,6 +9123,12 @@ WgrInstance BuildGpuInstance(const Object& obj, uint32_t model, const ConformPla
     // (SceneDraw.cpp: center = trans.Position(), radius = BoundingSphere()*Scale).
     Vector3 center = obj.Transform().Position();
     inst.model = model;
+    // SceneObjectCreated's retained admission is static/intact rigid geometry. Give only the
+    // actual owner this proof; BuildGpuProxyInstance intentionally leaves it unset.
+    const bool snowReceiver = obj.Static() && ObjectSnowOwnerEligible(obj) && cp.mode == 0 &&
+        obj.GetShape() && !obj.GetShape()->GetAllowAnimation();
+    if (snowReceiver) inst.flags |= WGR_INSTANCE_SNOW_RECEIVER;
+    TraceObjectSnowReceiver(obj, snowReceiver, "retained");
     // Terrain-conform plane -> conform0/1/2, matching DrawSectionTL's per-draw fold.
     if (cp.mode == 1)
     {
@@ -11735,7 +11790,7 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
                     if(!report.active||report.status!=GeometryReportStatus::Ready) {report.cameraTupleValid=false;report.cameraTupleStatus=11;}
                     else if(!proof||!fixture->projectedSurfaceResult||(!report.surfaceSelectedVerified&&!(fixture->projectedDemand&&report.coarseResident&&
                         report.producerModel==fixture->models[fixture->pageCoarseSlot]))||report.fallbackSelected||!selected||
-                        fixture->placement.flags||fixture->placement.conform2.z!=0)report.cameraTupleStatus=10;
+                        (fixture->placement.flags & ~WGR_INSTANCE_SNOW_RECEIVER)||fixture->placement.conform2.z!=0)report.cameraTupleStatus=10;
                     else {
                         using namespace GeometryPages::ProjectedSurface;
                         const auto& certificate=proof->certificate;Input input;
@@ -15403,7 +15458,7 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
     auto* worldSource=worldVisible ? _retailWorldSource.get() : nullptr;
     const auto originalCoverage=_gpuModelCoverage.find(shape);
     if(worldSource && !worldSource->worldObjectBirth && !worldSource->worldInvalidated &&
-       worldSource->shape.GetRef()==shape && cp.mode==0 && inst.flags==0 &&
+       worldSource->shape.GetRef()==shape && cp.mode==0 && (inst.flags & ~WGR_INSTANCE_SNOW_RECEIVER)==0 &&
        originalCoverage!=_gpuModelCoverage.end() && originalCoverage->second==GpuDrawCoverage::Full &&
        !_gpuModelComplement.count(shape) && _nextRetailWorldObjectBirth && _nextRetailWorldObjectBirth<UINT64_MAX) {
         worldBirth=_nextRetailWorldObjectBirth++;

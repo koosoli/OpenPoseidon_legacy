@@ -12,6 +12,48 @@
 #import shadow::shadow_strength
 #import lighting::lights_material_contrib
 #import color::srgb_to_linear
+#import frame::{interior_rain_reach, interior_rain_coverage}
+#import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage}
+
+// Cosmetic coating uses the actual raised surface, never terrain snow_depth / ground shelter
+// deficits. Baked exposure is raw known-volume proof (0 if missing); active zenith wins nearby.
+fn object_snow_baked_exposure(raw_visibility: f32, known_volume: bool) -> f32 {
+    if (!known_volume) { return 0.0; }
+    return smoothstep(0.98, 0.995, clamp(raw_visibility, 0.0, 1.0));
+}
+
+fn object_snow_coverage(world_pos: vec3<f32>, geo_normal: vec3<f32>, eligible: bool,
+                        baked_exposure: f32) -> f32 {
+    if (!eligible || (frame.snow_surface.x <= 0.0 && frame.snow_surface.w <= 0.0)) { return 0.0; }
+    let n_len = length(geo_normal);
+    if (n_len < 1e-4 || dot(geo_normal, world_pos) > 0.0) { return 0.0; }
+    let n_up = geo_normal.y / n_len;
+    if (n_up <= 0.25) { return 0.0; }
+    let world_abs = world_pos + frame.cam_pos.xyz;
+    var depth = frame.snow_surface.x;
+    if (frame.snow_surface.y >= 0.0 && frame.snow_surface.z > 0.0) {
+        depth = max(depth, clamp((world_abs.y - frame.snow_surface.y) / frame.snow_surface.z,
+                                0.0, 1.0) * frame.snow_surface.w);
+    }
+    let validity = interior_rain_coverage(world_abs);
+    var exposed = baked_exposure;
+    if (validity > 0.0) {
+        // interior_rain_reach itself feathers toward OPEN at the map border. Undo that
+        // cosmetic fallback before blending to known baked proof, so an unbaked interior
+        // cannot acquire snow simply by entering the map's outer band.
+        let reach = interior_rain_reach(world_abs);
+        exposed = max(0.0, reach - (1.0 - validity)) + (1.0 - validity) * baked_exposure;
+    }
+    return snow_surface_coverage(depth, n_up, exposed);
+}
+
+fn object_snow_normal(world_pos: vec3<f32>, geo_normal: vec3<f32>, base_n: vec3<f32>,
+                      dwx: vec3<f32>, dwy: vec3<f32>, coverage: f32) -> vec3<f32> {
+    if (coverage <= 0.0) { return base_n; }
+    let footprint = max(length(dwx), length(dwy));
+    let powder = snow_powder_normal(world_pos + frame.cam_pos.xyz, normalize(geo_normal), footprint);
+    return normalize(mix(base_n, powder, coverage));
+}
 
 // The six material colour terms shade() consumes (raw gamma-space; shade srgb-decodes on
 // the HDR/linear path). sun_ambient/sun_diffuse are the SUN-FOLDED terms (material × sun),
@@ -143,6 +185,8 @@ fn shade(
     // was already mixed down to 35%; what it lost is two texture loads and a volume walk per
     // fragment over ~40% of the screen. WGR_FOLIAGE_SCREEN_AO=1 restores both.
     screen_ao: bool,
+    snow_eligible: bool,
+    snow_baked_exposure: f32,
 ) -> vec3<f32> {
     var albedo = albedo_in;
     var m_emissive = mat.emissive;
@@ -152,6 +196,8 @@ fn shade(
     var m_light_ambient = mat.light_ambient;
     var m_specular = mat.specular;
     var m_local_specular = mat.local_specular;
+    var m_spec_power = mat.spec_power;
+    var m_spec_mask = mat.spec_mask;
     if (linear > 0.5) {
         albedo = srgb_to_linear(albedo);
         m_emissive = srgb_to_linear(m_emissive);
@@ -175,6 +221,23 @@ fn shade(
     // sky, no sun N.L). For every real (unit-ish) normal this is bit-identical to normalize().
     let n_len = length(normal);
     var nrm = surface_normal(normal, world_pos, dwx, dwy);
+    // Powder is linear reflectance and belongs to the HDR path. Dry/disabled coverage is
+    // an exact early-out. Authored roof paint/gloss/cavity must not remain on top of snow.
+    let snow_cover = object_snow_coverage(world_pos, geo_normal,
+        snow_eligible && linear > 0.5 && !is_foliage && !is_cockpit && !is_translucent,
+        snow_baked_exposure);
+    if (snow_cover > 0.0) {
+        let footprint = max(length(dwx), length(dwy));
+        albedo = mix(albedo, snow_powder_albedo(world_pos + frame.cam_pos.xyz, footprint, 0.0), snow_cover);
+        nrm = object_snow_normal(world_pos, geo_normal, nrm, dwx, dwy, snow_cover);
+        m_emissive *= 1.0 - snow_cover;
+        m_light_diffuse = mix(m_light_diffuse, vec3<f32>(1.0), snow_cover);
+        m_light_ambient = mix(m_light_ambient, vec3<f32>(1.0), snow_cover);
+        m_specular *= 1.0 - snow_cover;
+        m_local_specular *= 1.0 - snow_cover;
+        m_spec_power = mix(m_spec_power, 8.0, snow_cover);
+        m_spec_mask = mix(m_spec_mask, 0.02, snow_cover);
+    }
     // Two-sided foliage. A leaf card is a thin surface authored with ONE normal, and the canopy
     // is built from cards facing every direction, so roughly half of any tree is seen from its
     // back face. Those keep a normal pointing away from the viewer: N.L collapses to zero and the
@@ -249,11 +312,11 @@ fn shade(
     }
     // Native NTC cavity attenuates ambient AND diffuse (Reforger texture contract),
     // unlike NMO ambient occlusion. It does not darken specular or emissive light.
-    let leaf_cavity = select(1.0, mat.native_cavity, is_foliage);
+    let leaf_cavity = mix(select(1.0, mat.native_cavity, is_foliage), 1.0, snow_cover);
     m_light_diffuse *= leaf_cavity;
-    m_light_ambient *= leaf_cavity * mat.native_ao;
+    m_light_ambient *= leaf_cavity * mix(mat.native_ao, 1.0, snow_cover);
     let amb_ao = sky_vis_ao(world_abs.xz) * gtao_t * interior_ao * clamp(baked_sky_vis, 0.0, 1.0)
-        * leaf_cavity * mat.native_ao;
+        * leaf_cavity * mix(mat.native_ao, 1.0, snow_cover);
     // ...and a FOURTH, at a scale none of the three can reach: the normal map's own micro-
     // occlusion. Sky-vis is keyed on the terrain column (km), GTAO marches the depth buffer
     // (~2 m), the interior term answers "is there a roof" (room-sized) — the smallest thing any
@@ -376,7 +439,7 @@ fn shade(
         // other. Letting it out of the occlusion is how crevices acquire glints.
         let view_dir_sky = normalize(-world_pos);
         let sky_spec = sky_specular_split(
-            nrm, view_dir_sky, spec_power_to_gloss(mat.spec_power), mat.spec_mask);
+            nrm, view_dir_sky, spec_power_to_gloss(m_spec_power), m_spec_mask);
         // REN-GI-001: the probe volume's irradiance replaces the analytic sky-dome ambient
         // where the volume covers the point (weight fades at its edge; 0 with the feature
         // off, which makes this line the pre-GI expression exactly). The probes already saw
@@ -502,7 +565,7 @@ fn shade(
         sun = m_emissive + m_sun_ambient * amb_ao * cavity + m_sun_diffuse * ndotl * sun_vis * leaf_cavity;
     }
     let local = lights_material_contrib(world_pos, nrm, m_light_diffuse, m_light_ambient,
-                                       m_local_specular, mat.spec_power, linear);
+                                       m_local_specular, m_spec_power, linear);
     let raw = sun + local.diffuse;
     let lit = select(clamp(raw, vec3<f32>(0.0), vec3<f32>(1.0)), max(raw, vec3<f32>(0.0)), linear > 0.5);
     var rgb = albedo * lit;
@@ -510,11 +573,11 @@ fn shade(
                   max(local.specular, vec3<f32>(0.0)), linear > 0.5);
     // Sun-only Blinn-Phong specular (untextured, additive, before the shadow multiply). The
     // camera is at the origin in camera-relative space, so view_dir = normalize(-world_pos).
-    if (mat.spec_power > 0.0) {
+    if (m_spec_power > 0.0) {
         let view_dir = normalize(-world_pos);
         let half_vec = normalize(-frame.sun_dir_world.xyz + view_dir);
         let n_dot_h = max(dot(nrm, half_vec), 0.0);
-        let spec = m_specular * pow(n_dot_h, max(mat.spec_power, 1.0));
+        let spec = m_specular * pow(n_dot_h, max(m_spec_power, 1.0));
         let spec_vis = spec * sun_vis;
         rgb += select(clamp(spec_vis, vec3<f32>(0.0), vec3<f32>(1.0)), max(spec_vis, vec3<f32>(0.0)), linear > 0.5);
     }

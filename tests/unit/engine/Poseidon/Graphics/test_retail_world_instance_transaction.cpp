@@ -275,3 +275,19 @@ TEST_CASE("World page switch only changes page model and restore never accepts a
     d.before.original.producerState=WorldTransaction::ProducerState::Unmapped;
     WorldTransaction noSource(restore);CHECK_FALSE(noSource.Consume(d));
 }
+
+TEST_CASE("World page transactions preserve only explicit snow receiver authority", "[geometry-page][retail-world][object-snow]")
+{
+    for (auto action : {WorldTransaction::Action::Takeover, WorldTransaction::Action::UpdatePage, WorldTransaction::Action::Restore}) {
+        auto r=WorldRequest(action);
+        for (auto* row : {&r.originalBefore,&r.originalAfter,&r.pageBefore,&r.pageAfter})
+            if (row->model.producerModel != UINT32_MAX) row->row.flags |= WGR_INSTANCE_SNOW_RECEIVER;
+        WorldTransaction accepted(r);REQUIRE(accepted.Valid());
+        auto wrong=r;wrong.originalAfter.row.flags ^= WGR_INSTANCE_SNOW_RECEIVER;
+        CHECK_FALSE(WorldTransaction(wrong).Valid());
+        for (auto forbidden : {uint32_t(WGR_INSTANCE_CANOPY_BUSH),uint32_t(WGR_INSTANCE_FAR_AUTHORED),uint32_t(256)}) {
+            auto bad=r;bad.originalBefore.row.flags |= forbidden;
+            CHECK_FALSE(WorldTransaction(bad).Valid());
+        }
+    }
+}

@@ -5,6 +5,8 @@ use wgpu::util::DeviceExt;
 pub(crate) mod pool;
 mod allocation_report;
 mod mesh_facts;
+#[cfg(test)]
+mod object_snow_tests;
 mod mesh_ack;
 mod palette_content_witness;
 pub(crate) mod main_count_completion;
@@ -58,6 +60,7 @@ fn direct_material_flags(flags: u32, misc: u32, late_surface: bool) -> u32 {
         | crate::ffi::WGR_DRAW3D_GLASS
         | crate::ffi::WGR_DRAW3D_COCKPIT
         | crate::ffi::WGR_DRAW3D_MONITOR
+        | crate::ffi::WGR_DRAW3D_SNOW_RECEIVER
         | crate::ffi::WGR_DRAW3D_NORMAL_RG
         | crate::ffi::WGR_DRAW3D_NATIVE_CAVITY;
     ((misc >> 8) & 1) | (flags & material_bits) | (u32::from(late_surface) << 6)
@@ -73,8 +76,8 @@ fn direct_normal_channels_keep_flags_and_exclude_red_from_parallax() {
         direct_material_flags(DRAW3D_ON_SURFACE | DRAW3D_ZBIAS_MASK, 0, false),
         0
     );
-    assert_eq!(direct_material_flags(u32::MAX, 0, true), 1278);
-    assert_eq!(direct_material_flags(u32::MAX, 0xffff_0100, true), 1279);
+    assert_eq!(direct_material_flags(u32::MAX, 0, true), 3326);
+    assert_eq!(direct_material_flags(u32::MAX, 0xffff_0100, true), 3327);
     assert_eq!(direct_material_flags(crate::ffi::WGR_DRAW3D_NATIVE_CAVITY, 0, false), 1024);
     let src = include_str!("shader3d.wgsl");
     assert!(src.contains("const MATFLAG_NORMAL_RG: u32 = 128u;"));
@@ -1464,6 +1467,8 @@ impl CameraGroup {
             + 16
             // REN-TEMP-001D render-scale texture LOD (frame.wgsl `renscale`): mip bias +
             // gradient scale. NOW the last lane; the four writes above it moved again.
+            + 16
+            // Renderer-private raised-surface snow state; public WgrCamera ABI unchanged.
             + 16;
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_3d_camera_layout"),
@@ -4108,6 +4113,10 @@ pub struct Gfx3d {
     // 2^bias, then AST-012A's mip-feedback rotation pair: this frame's group index and the
     // group count, 0 = feedback off). Set once per frame; all-zero = native, no feedback.
     render_scale_lane: [f32; 4],
+    snow_surface: [f32; 4],
+    object_snow_enabled: bool,
+    snow_surface_trace: bool,
+    snow_surface_trace_rows: u8,
     // AST-012A: the feedback buffer, its readback ring and the harvested per-slot answers.
     mip_feedback: MipFeedback,
     // Set when `ensure_mip_feedback` allocated (or reallocated) that buffer, so the group-1
@@ -5048,6 +5057,10 @@ impl Gfx3d {
                 0.0,
             ],
             render_scale_lane: [0.0; 4],
+            snow_surface: [0.0, -1.0, 0.0, 0.0],
+            object_snow_enabled: std::env::var("WGR_OBJECT_SNOW").as_deref() != Ok("0"),
+            snow_surface_trace: std::env::var("WGR_SNOW_SURFACE_FIXTURE").as_deref() == Ok("1"),
+            snow_surface_trace_rows: 0,
             mip_feedback: MipFeedback::new(),
             mip_feedback_grew: false,
             mip_bias_override: std::env::var("WGR_MIP_BIAS")
@@ -8117,8 +8130,8 @@ impl Gfx3d {
                     gs.basis as f32,
                 ];
                 let gi_origin_lane = [gi_origin.x, gi_origin.y, gi_origin.z, gi_spacing];
-                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 112, bytemuck::cast_slice(&gi_lane));
-                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 96, bytemuck::cast_slice(&gi_origin_lane));
+                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 128, bytemuck::cast_slice(&gi_lane));
+                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 112, bytemuck::cast_slice(&gi_origin_lane));
                 // Material Debug (frame.wgsl `matdbg`). Written unconditionally and derived
                 // from bind_size rather than from the sky offsets above, which live inside a
                 // conditional: the retained shader reads this every frame and a stale lane
@@ -8131,7 +8144,7 @@ impl Gfx3d {
                 ];
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 80,
+                    base + self.cameras.bind_size - 96,
                     bytemuck::cast_slice(&matdbg),
                 );
                 // DZ-005 water surface animation (frame.wgsl `wateranim`).
@@ -8139,7 +8152,7 @@ impl Gfx3d {
                 // water params cannot leave the ripple frozen at a stale time.
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 64,
+                    base + self.cameras.bind_size - 80,
                     bytemuck::cast_slice(&self.water_anim),
                 );
                 // Normal-map relief under ambient light (frame.wgsl `relief`), the LAST lane.
@@ -8153,7 +8166,7 @@ impl Gfx3d {
                 let relief = [normal_cavity(), sky_specular(), 0.0f32, 0.0f32];
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 48,
+                    base + self.cameras.bind_size - 64,
                     bytemuck::cast_slice(&relief),
                 );
                 // Far-fog closure (frame.wgsl `fogfar`). Unconditional for the same reason as
@@ -8161,7 +8174,7 @@ impl Gfx3d {
                 // frame left there.
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 32,
+                    base + self.cameras.bind_size - 48,
                     bytemuck::cast_slice(&self.fog_far),
                 );
                 // REN-TEMP-001D render-scale texture LOD (frame.wgsl `renscale`), the LAST
@@ -8170,8 +8183,13 @@ impl Gfx3d {
                 // the next camera happens to rewrite it.
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 16,
+                    base + self.cameras.bind_size - 32,
                     bytemuck::cast_slice(&self.render_scale_lane),
+                );
+                camera_upload.write_buffer(
+                    buf,
+                    base + self.cameras.bind_size - 16,
+                    bytemuck::cast_slice(&self.snow_surface),
                 );
             }
             camera_upload.finish();
@@ -11147,6 +11165,20 @@ impl Gfx3d {
         self.water_anim[3] = flow_slot as f32;
     }
 
+    // All cameras receive the effective state. The ablation is object-only, leaving terrain
+    // snow and the owner's profile alone. Return bounded opt-in evidence through the game log.
+    pub fn set_snow_surface(&mut self, params: [f32; 4]) -> Option<String> {
+        let effective = if self.object_snow_enabled { params } else { [0.0, -1.0, 0.0, 0.0] };
+        let changed = self.snow_surface != effective;
+        self.snow_surface = effective;
+        if self.snow_surface_trace && self.snow_surface_trace_rows < 32
+            && (changed || self.snow_surface_trace_rows == 0) {
+            self.snow_surface_trace_rows += 1;
+            Some(format!("wgpu object snow: enabled={} deposit={:.4} snowlineHeight={:.2} snowlineRange={:.2} snowlineDepth={:.4}",
+                u8::from(self.object_snow_enabled), effective[0], effective[1], effective[2], effective[3]))
+        } else { None }
+    }
+
     pub fn gtao_settings(&self) -> &GtaoSettings {
         &self.gtao_settings
     }
@@ -12377,7 +12409,7 @@ fn sky_specular_reallocates_the_ambient_and_cannot_add_energy() {
     );
     let shading = include_str!("../shaders/shading.wgsl");
     assert!(
-        shading.contains("nrm, view_dir_sky, spec_power_to_gloss(mat.spec_power), mat.spec_mask);"),
+        shading.contains("nrm, view_dir_sky, spec_power_to_gloss(m_spec_power), m_spec_mask);"),
         "the split must be driven by the MAPPED normal and the material's own gloss/spec mask"
     );
     assert!(
@@ -12540,11 +12572,14 @@ fn normal_relief_knobs_reach_the_shader_and_the_game_log() {
     // them alone looks right.
     let src = include_str!("mod.rs");
     for (offset, payload) in [
-        ("bind_size - 80", "cast_slice(&matdbg)"),
-        ("bind_size - 64", "cast_slice(&self.water_anim)"),
-        ("bind_size - 48", "cast_slice(&relief)"),
-        ("bind_size - 32", "cast_slice(&self.fog_far)"),
-        ("bind_size - 16", "cast_slice(&self.render_scale_lane)"),
+        ("bind_size - 128", "cast_slice(&gi_lane)"),
+        ("bind_size - 112", "cast_slice(&gi_origin_lane)"),
+        ("bind_size - 96", "cast_slice(&matdbg)"),
+        ("bind_size - 80", "cast_slice(&self.water_anim)"),
+        ("bind_size - 64", "cast_slice(&relief)"),
+        ("bind_size - 48", "cast_slice(&self.fog_far)"),
+        ("bind_size - 32", "cast_slice(&self.render_scale_lane)"),
+        ("bind_size - 16", "cast_slice(&self.snow_surface)"),
     ] {
         let at = src
             .find(offset)
@@ -12571,7 +12606,8 @@ fn normal_relief_knobs_reach_the_shader_and_the_game_log() {
         matdbg_at < water_at
             && water_at < relief_at
             && relief_at < fogfar_at
-            && fogfar_at < renscale_at,
+            && fogfar_at < renscale_at
+            && renscale_at < frame.find("    snow_surface: vec4<f32>,").expect("snow surface lane"),
         "the WGSL lane order must match the upload offsets"
     );
     // Defaults: both ON, because both are constructed so they cannot brighten anything — the

@@ -151,3 +151,11 @@ TEST_CASE("Retail instance malformed requests and frame-before-consumption fail 
     CHECK_FALSE(notConsumed.PublishReturned(VisibleReturn(VisibleDrain(validRequest))));
     CHECK(notConsumed.Observe().refusal==InstanceRecord::Refusal::Frame);
 }
+
+TEST_CASE("Visible page receipts accept the exact copied snow bit but reject other unsupported flags", "[geometry-page][retail-instance][object-snow]")
+{
+    auto r=VisibleRequest();r.expected.flags |= WGR_INSTANCE_SNOW_RECEIVER;
+    InstanceRecord accepted(r);REQUIRE(accepted.Valid());
+    auto drain=VisibleDrain(r);REQUIRE(accepted.Consume(drain));REQUIRE(accepted.PublishReturned(VisibleReturn(drain)));
+    auto bad=r;bad.expected.flags |= WGR_INSTANCE_FAR_AUTHORED;CHECK_FALSE(InstanceRecord(bad).Valid());
+}
