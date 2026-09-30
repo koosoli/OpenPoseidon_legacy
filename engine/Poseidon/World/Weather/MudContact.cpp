@@ -21,19 +21,27 @@ bool StampMudFootstep(const Landscape& land, Object& actor,
     // Until their exact point-mask producer is available, fail closed rather
     // than repurpose an inherited dirt texture or a representative tile label.
     if (land.GetEnfusionSurfaceCount() != 0) return false;
-    const float extent = land.GetLandRange() * land.GetLandGrid();
+    const float landGrid = land.GetLandGrid();
+    if (!std::isfinite(landGrid) || landGrid <= 0.0f) return false;
+    const float extent = land.GetLandRange() * landGrid;
     constexpr float guard = 0.4f; // entire boot kernel plus bilinear support
     for (int z = -1; z <= 1; ++z)
         for (int x = -1; x <= 1; ++x)
         {
             const float east = foot.X() + x * guard, north = foot.Z() + z * guard;
             if (!(east >= 0 && north >= 0 && east < extent && north < extent)) return false;
-            const int id = land.GetTexture(int(std::floor(north / land.GetLandGrid())),
-                                           int(std::floor(east / land.GetLandGrid())));
+            const int cellX = int(std::floor(east / landGrid)), cellZ = int(std::floor(north / landGrid));
+            const int id = land.GetTexture(cellZ, cellX);
             if (land.GetA3TerrainMaterial(id) != nullptr) return false;
             const auto& surface = land.SurfaceAt(east, north);
             if (!StockMudSoil(surface._class.Data(), surface._name.Data(),
-                              surface._soundEnv.Data(), surface._character.Data())) return false;
+                              surface._soundEnv.Data(), surface._character.Data()))
+            {
+                const Texture* texture = land.GetTexture(id);
+                if (!texture || !StockNogovaMudSoil(land.GetName(), texture->GetName().Data(),
+                    surface._class.Data(), surface._name.Data(), surface._soundEnv.Data(), surface._character.Data(),
+                    east / landGrid - cellX, north / landGrid - cellZ)) return false;
+            }
         }
     float dx, dz;
     const float ground = land.SurfaceY(foot.X(), foot.Z(), &dx, &dz);
@@ -62,8 +70,14 @@ bool StampMudFootstep(const Landscape& land, Object& actor,
         return value && value[0] == '1';
     }();
     if (trace && changed)
-        LOG_INFO(Graphics, "MUD_STEP x={:.3f} z={:.3f} surface=Field files=pol sound=dirt wet={:.4f} depth={:.4f} revision={} chunks={}",
-                 foot.X(), foot.Z(), mud.Wetness(), depth, mud.Revision(), mud.Chunks());
+    {
+        const auto& source = land.SurfaceAt(foot.X(), foot.Z());
+        const int id = land.GetTexture(int(std::floor(foot.Z() / landGrid)), int(std::floor(foot.X() / landGrid)));
+        const Texture* texture = land.GetTexture(id);
+        LOG_INFO(Graphics, "MUD_STEP x={:.3f} z={:.3f} surface={} files={} sound={} texture={} wet={:.4f} depth={:.4f} revision={} chunks={}",
+                 foot.X(), foot.Z(), source._class.Data(), source._name.Data(), source._soundEnv.Data(),
+                 texture ? texture->GetName().Data() : "", mud.Wetness(), depth, mud.Revision(), mud.Chunks());
+    }
     return changed;
 }
 } // namespace Poseidon

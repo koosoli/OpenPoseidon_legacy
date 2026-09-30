@@ -99,4 +99,36 @@ int main()
     assert(!StockMudSoil("Field", "unknown", "dirt", ""));
     for (const auto source : {"Grass", "GrassHigh", "Village", "MudBuilding", "Asphalt", "", "Soil"})
         assert(!StockMudSoil(source, "pol", "dirt", ""));
+    // Real Noe source evidence: exact retail world + cultivated texture +
+    // unchanged Default metadata. Neither Default nor a "pole" name is enough.
+    for (const auto texture : {"o/pole1.paa", "o\\pole2.paa", "\\O\\POLE1.PAA"})
+        assert(StockNogovaMudSoil("\\Noe\\Noe.wrp", texture, "Default", "default", "normalExt", "", .5f, .5f));
+    for (const auto texture : {"pole1.paa", "mod/o/pole1.paa", "o/pole3.paa", "o/POLE1.PAA.bak",
+                               "o/b1.paa", "o/blita2.paa", "o/pt.paa", "o/l1.paa", "o/ces_hned.paa"})
+        assert(!StockNogovaMudSoil("noe/noe.wrp", texture, "Default", "default", "normalExt", "", .5f, .5f));
+    for (const auto world : {"", "worlds/noe.wrp", "noe/custom.wrp", "worlds/abel.wrp"})
+        assert(!StockNogovaMudSoil(world, "o/pole2.paa", "Default", "default", "normalExt", "", .5f, .5f));
+    for (const auto source : {"GrassGrey", "Grass", "Village", "Lom", "MudBuilding", "", "Dirt"})
+        assert(!StockNogovaMudSoil("noe/noe.wrp", "o/pole2.paa", source, "default", "normalExt", "", .5f, .5f));
+    assert(!StockNogovaMudSoil("noe/noe.wrp", "o/pole2.paa", "Default", "pole2", "normalExt", "", .5f, .5f));
+    for (const auto sound : {"grass", "road", "rock", "sand", "dirt", ""})
+        assert(!StockNogovaMudSoil("noe/noe.wrp", "o/pole2.paa", "Default", "default", sound, "", .5f, .5f));
+    assert(!StockNogovaMudSoil("noe/noe.wrp", "o/pole2.paa", "Default", "default", "normalExt", "Grass", .5f, .5f));
+    for (const auto uv : {-.1f, .0f, .119f, .881f, 1.0f, nan, inf})
+    {
+        assert(!StockNogovaMudSoil("noe/noe.wrp", "o/pole2.paa", "Default", "default", "normalExt", "", uv, .5f));
+        assert(!StockNogovaMudSoil("noe/noe.wrp", "o/pole2.paa", "Default", "default", "normalExt", "", .5f, uv));
+    }
+    // The production nine support probes include the entire boot kernel. A
+    // centre exactly at the soil admission edge must fail the outer probes.
+    auto allBootProbes = [](float u, float v) {
+        for (int z = -1; z <= 1; ++z)
+            for (int x = -1; x <= 1; ++x)
+                if (!StockNogovaMudSoil("noe/noe.wrp", "o/pole2.paa", "Default", "default", "normalExt", "",
+                                       u + x * .4f / 50.0f, v + z * .4f / 50.0f)) return false;
+        return true;
+    };
+    assert(allBootProbes(.5f, .5f));
+    assert(!allBootProbes(.12f, .5f) && !allBootProbes(.5f, .88f));
+
 }
