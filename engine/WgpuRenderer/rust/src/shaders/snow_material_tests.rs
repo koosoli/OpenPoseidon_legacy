@@ -72,9 +72,10 @@ fn snow_powder_gpu_filters_distance_and_obeys_surface_admission() {
     let samples = bytemuck::cast_slice::<u8, f32>(&bytes);
     for (i, sample) in samples.chunks_exact(8).enumerate() {
         assert!(sample.iter().all(|v| v.is_finite()));
-        assert!(sample[..3].iter().all(|v| *v > 0.45 && *v < 0.85));
+        assert!(sample[..3].iter().all(|v| *v > 0.50 && *v < 0.90));
         assert!((sample[7] - 1.0).abs() < 1e-5);
-        assert!(sample[5] > 0.99, "powder must not turn a level roof into jagged spikes");
+        assert!(sample[5] >= 1.0 / (1.0_f32 + 0.16*0.16).sqrt() - 1e-6,
+            "resolved powder tilt must remain within the explicit 9.1-degree bound");
         match i % 8 {
             1..=4 => assert_eq!(sample[3], 0.0, "dry/wall/underside/shelter must stay bare"),
             5 => assert!(sample[3] > 0.0 && sample[3] < 0.5),
@@ -82,7 +83,7 @@ fn snow_powder_gpu_filters_distance_and_obeys_surface_admission() {
         }
         if i >= 16 {
             let scale = if i % 16 >= 8 { 0.72 } else { 1.0 };
-            for (value, mean) in sample[..3].iter().zip([0.70, 0.75, 0.80]) {
+            for (value, mean) in sample[..3].iter().zip([0.78, 0.80, 0.82]) {
                 assert!((*value - mean * scale).abs() < 1e-6);
             }
             assert_eq!(&sample[4..7], &[0.0, 1.0, 0.0], "unresolved powder must have its mean normal");

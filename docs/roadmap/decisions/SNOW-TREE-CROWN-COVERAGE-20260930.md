@@ -5,6 +5,12 @@ primary static MapTree/MapSmallTree owners. Installed acceptance is pending;
 the root agent owns builds, deployment and the game lock. No new assets, public
 buffer layouts, simulation state, save/load fields or network semantics change.
 
+Owner appearance rejection (2026-09-30 22:54): the actual Everon screenshot
+shows ugly uniform-white crossed-card wedges. Previous crown/trunk/alpha
+controls establish bounded coverage only and do not satisfy visual quality.
+The pending textured-material correction and remaining all-forest/top-view
+coverage are recorded in [SNOW-TEXTURED-MATERIAL-20260930.md](SNOW-TEXTURED-MATERIAL-20260930.md).
+
 ## Source identity and crown envelope
 
 The direct producer requires the current mesh to belong to the actual owner,

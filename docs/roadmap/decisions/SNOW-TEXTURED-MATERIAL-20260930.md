@@ -1,0 +1,29 @@
+# Textured tree frost and resolved ground powder
+
+Status: **source candidate, GPU/full-build/installed appearance acceptance pending**. Owner screenshot `C:/Users/mail/OneDrive/Pictures/Screenshots/Screenshot 2026-09-30 225408.png` rejects the current Everon tree appearance: complete crown coverage forms broad flat white billboard wedges. The earlier stock tree controls established crown coverage, preserved cutout holes and uncoated trunk bases; **they do not satisfy the requested visual quality**. This decision supersedes any appearance acceptance inferred from those controls.
+
+The owner's reference `Screenshot 2026-09-30 223502.png` shows resolved diffuse powder/granular relief, warm illuminated snow and blue shaded snow. It is an appearance reference, not a source for undocumented VBS4 implementation or performance claims.
+
+## Concrete source cause
+
+The shared `shading.wgsl` tree branch substitutes constant linear `(0.70,0.75,0.80)` for photographed leaf albedo and mixes toward it at crown coverage. At coverage 1, every authored RGB leaf/branch/recess detail disappears while the old crossed-card geometry remains. The crown envelope/alpha may be correct and still expose large uniformly white polygons. This is a material regression in the user's actual view, independent of whether the existing legacy geometry can become fully natural.
+
+`tree_snow_albedo(authoredLinear, absoluteWorldPosition, worldPixelFootprint)` retains filtered authored luminance in a neutral frost reflectance. Deep dark recesses remain authored; resolved leaf texture transitions continuously to brighter neutral frost, preserving photographic branch/leaf contrast at complete snow coverage. A small 1.8m diffuse mottling band fades by footprint to an exact source-driven mean. No fine powder normals, specular grains, time/camera seeds, texture-alpha changes or colour-based receiver admission are added. Existing individual-tree and exact far-forest coverage/proofs continue to decide eligibility. Shared shading integration is a separate root-owned hunk that must call this helper with **already linear** albedo.
+
+This preserves existing branch/leaf texture rather than replacing it with a white fill; it does not add branch geometry, physically accumulated snow volumes or wood/leaf semantic segmentation. Existing crossed cards can remain visible, especially in top views. Appearance is not accepted before fresh captures of the user's scene and bound near/far/top controls.
+
+## Ground/solid-surface powder
+
+Fresh linear reflectance changes from blue `(0.70,0.75,0.80)` to nearly neutral `(0.78,0.80,0.82)`. Actual sun/sky supply warm light and blue shade. Established compacted-track darkening remains 28%. Rotated, continuous world-stable value-noise bands at 3m, .6m and .12m gain bounded resolved contrast; a .035m diffuse granular band appears only at sufficiently close pixel footprints. Total worst-case multiplicative albedo modulation is ±8.5%, bounded to fresh RGB ≤.8897 and fully compacted RGB ≥.5138.
+
+The same bands provide tangent-space powder normal detail. Its vector magnitude is capped at .16, so a unit base normal tilts by at most `atan(.16)`, approximately 9.1 degrees. No spikes, glitter lobes or geometry displacement are introduced by this material change. Terrain and object/prepass consumers already call the same helper; snow-field displacement/collision/tracks/shelter and coverage gates are unchanged. Every band fades to zero when unresolved; footprints ≥1.5m use the exact fresh/compacted mean and base normal. Disabled powder detail follows the same mean contract.
+
+There is one additional four-corner value-noise band per resolved powder helper call. No new textures, render passes or CPU work are added. This is not a measured runtime-cost claim. Performance and possible stronger normal-driven aliasing must be checked with actual close/aerial sequences after root runs the canonical shader tests and installs a matched build.
+
+## Coverage and required acceptance
+
+The exact two-stock-far-forest atlas candidate remains partial: unsupported models, other LODs and unproven direct/material routes remain bare. The owner requests white forest crowns generally; neither the two atlas tuples nor the individual-tree coat fulfills all forest/map/LOD coverage. Additional source-proven masks/geometry admission and actual top-view controls remain required. This material improvement must not broaden eligibility by loose connectivity or whole-cluster height.
+
+`scripts/Test-SnowMaterialSourcePolicy.py` passed CPU algebra/source checks of the actual production coefficients: global reflectance [.513864,.889700], tangent tilt ≤9.0903 degrees, exact common fresh means, footprint band limits and 4097 monotone frost luminances with deep recess preservation. This is a bound/source check, not WGSL execution. Authored real-GPU tests exercise `tree_snow_albedo` with a range of photographic luminances, retaining deep recesses and monotone contrast, a visible neutral frost response and exact far mean. Powder tests check bounded reflectance/tilt, exact far normal/mean and unchanged dry/wall/underside/shelter rejection. The GPU tests have not been run by this source-only author; root owns the serial GPU/full-build/runtime gates.
+
+Required installed captures include the user's Everon church scene and a bound actual stock tree at near, 150/400m and top view; same-binary snow ON/OFF and motion sequences; dark branch/leaf detail, alpha holes and protected trunk bases; clear snowed crowns from above; a partial covered control and snow-off negative. Compare ground powder at a low oblique view and an aerial view, with compaction/footprints and camera return. Neither still screenshots nor numeric tests alone accept motion stability, all-tree coverage or final owner appearance.

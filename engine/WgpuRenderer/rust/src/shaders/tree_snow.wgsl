@@ -1,6 +1,6 @@
 #define_import_path tree_snow
 #import frame::{frame, interior_rain_coverage, interior_rain_reach, weather_map_coverage, weather_map_reach}
-#import snow_material::snow_surface_coverage
+#import snow_material::{snow_surface_coverage, snow_noise, snow_band}
 
 // Smooth broad crown envelope in AUTHORED model height, independent of wind,
 // selected LOD, camera and leaf-card normals. CPU proof restricts this to leaf
@@ -8,6 +8,27 @@
 fn tree_snow_height(model_y: f32, min_y: f32, inverse_height: f32, proof: f32) -> f32 {
     if (proof <= 0.5 || inverse_height <= 0.0) { return 0.0; }
     return smoothstep(0.45, 0.85, clamp((model_y - min_y) * inverse_height, 0.0, 1.0));
+}
+
+// Input/output are LINEAR reflectance. Constant white erased the photographed
+// branch/leaf recesses and exposed crossed-card wedges at complete coverage.
+// Keep the already mip-filtered authored luminance in a neutral frost layer;
+// dark recesses retain their depth rather than becoming a solid white polygon.
+// This is material detail, not colour-based receiver admission or alpha editing.
+fn tree_snow_albedo(authored: vec3<f32>, world: vec3<f32>, footprint: f32) -> vec3<f32> {
+    let source = clamp(authored, vec3<f32>(0.0), vec3<f32>(1.0));
+    let lum = dot(source, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let relief = 0.35 + 0.65 * lum / (lum + 0.10);
+    let recess = smoothstep(0.008, 0.060, lum);
+    // Only metre-scale diffuse clumps: no crystalline points, powder normals or
+    // time seed on moving/subpixel leaf cards. UV/albedo detail moves with leaves.
+    var mottling = 0.0;
+    if (footprint < 0.9) {
+        let p = world.xz + world.y * vec2<f32>(0.17, -0.11);
+        mottling = snow_noise(p / 1.8 + vec2<f32>(-31.2, 14.7)).x * 0.025 * snow_band(footprint, 1.8);
+    }
+    let frost = vec3<f32>(0.78, 0.80, 0.82) * relief * (1.0 + mottling);
+    return mix(source, frost, recess);
 }
 
 fn tree_snow_cover_depth(crown_height: f32, depth: f32, exposure: f32) -> f32 {

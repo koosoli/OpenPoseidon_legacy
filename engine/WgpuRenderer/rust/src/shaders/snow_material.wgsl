@@ -33,19 +33,21 @@ fn snow_noise(p: vec2<f32>) -> vec3<f32> {
 
 fn snow_powder_albedo(world: vec3<f32>, footprint: f32, compacted: f32) -> vec3<f32> {
 #ifdef DISABLE_SNOW_POWDER_DETAIL
-    return vec3<f32>(0.70, 0.75, 0.80) * (1.0 - clamp(compacted, 0.0, 1.0) * 0.28);
+    return vec3<f32>(0.78, 0.80, 0.82) * (1.0 - clamp(compacted, 0.0, 1.0) * 0.28);
 #else
     if (footprint >= 1.5) {
-        return vec3<f32>(0.70, 0.75, 0.80) * (1.0 - clamp(compacted, 0.0, 1.0) * 0.28);
+        return vec3<f32>(0.78, 0.80, 0.82) * (1.0 - clamp(compacted, 0.0, 1.0) * 0.28);
     }
     let p = world.xz + world.y * vec2<f32>(0.17, -0.11);
     let broad = snow_noise(vec2<f32>(dot(p, vec2<f32>(0.83, -0.56)), dot(p, vec2<f32>(0.56, 0.83))) / 3.0).x * snow_band(footprint, 3.0);
     let powder = snow_noise(vec2<f32>(dot(p, vec2<f32>(0.39, 0.92)), dot(p, vec2<f32>(-0.92, 0.39))) / 0.6 + vec2<f32>(17.3, -41.7)).x * snow_band(footprint, 0.6);
     let fine = snow_noise(vec2<f32>(dot(p, vec2<f32>(0.71, -0.71)), dot(p, vec2<f32>(0.71, 0.71))) / 0.12 + vec2<f32>(-11.8, 39.2)).x * snow_band(footprint, 0.12);
-    // Fresh powder retains the existing palette; directional sky supplies blue
-    // shadows. Compacted trails retain the established 28% darkening.
-    return vec3<f32>(0.70, 0.75, 0.80)
-        * (1.0 + broad * 0.018 + powder * 0.012 + fine * 0.008)
+    let granular = snow_noise(vec2<f32>(dot(p, vec2<f32>(0.93, 0.37)), dot(p, vec2<f32>(-0.37, 0.93))) / 0.035 + vec2<f32>(53.1, 8.7)).x * snow_band(footprint, 0.035);
+    // Nearly neutral fresh reflectance: sun/sky provide the warm light and blue
+    // shade. Resolved powder has diffuse grain, never specular sparkle. Every
+    // band converges to the exact mean, keeping distant snow stable.
+    return vec3<f32>(0.78, 0.80, 0.82)
+        * (1.0 + broad * 0.018 + powder * 0.025 + fine * 0.030 + granular * 0.012)
         * (1.0 - clamp(compacted, 0.0, 1.0) * 0.28);
 #endif
 }
@@ -59,12 +61,17 @@ fn snow_powder_normal(world: vec3<f32>, base: vec3<f32>, footprint: f32) -> vec3
     let broad = snow_noise(vec2<f32>(dot(p, vec2<f32>(0.83, -0.56)), dot(p, vec2<f32>(0.56, 0.83))) / 3.0);
     let powder = snow_noise(vec2<f32>(dot(p, vec2<f32>(0.39, 0.92)), dot(p, vec2<f32>(-0.92, 0.39))) / 0.6 + vec2<f32>(17.3, -41.7));
     let fine = snow_noise(vec2<f32>(dot(p, vec2<f32>(0.71, -0.71)), dot(p, vec2<f32>(0.71, 0.71))) / 0.12 + vec2<f32>(-11.8, 39.2));
-    let gradient = (broad.y * vec2<f32>(0.83, -0.56) + broad.z * vec2<f32>(0.56, 0.83)) * 0.012 * snow_band(footprint, 3.0)
-        + (powder.y * vec2<f32>(0.39, 0.92) + powder.z * vec2<f32>(-0.92, 0.39)) * 0.018 * snow_band(footprint, 0.6)
-        + (fine.y * vec2<f32>(0.71, -0.71) + fine.z * vec2<f32>(0.71, 0.71)) * 0.014 * snow_band(footprint, 0.12);
+    let granular = snow_noise(vec2<f32>(dot(p, vec2<f32>(0.93, 0.37)), dot(p, vec2<f32>(-0.37, 0.93))) / 0.035 + vec2<f32>(53.1, 8.7));
+    let gradient = (broad.y * vec2<f32>(0.83, -0.56) + broad.z * vec2<f32>(0.56, 0.83)) * 0.018 * snow_band(footprint, 3.0)
+        + (powder.y * vec2<f32>(0.39, 0.92) + powder.z * vec2<f32>(-0.92, 0.39)) * 0.040 * snow_band(footprint, 0.6)
+        + (fine.y * vec2<f32>(0.71, -0.71) + fine.z * vec2<f32>(0.71, 0.71)) * 0.036 * snow_band(footprint, 0.12)
+        + (granular.y * vec2<f32>(0.93, 0.37) + granular.z * vec2<f32>(-0.37, 0.93)) * 0.024 * snow_band(footprint, 0.035);
     let perturb = vec3<f32>(gradient.x, 0.0, gradient.y);
     let tangent = perturb - base * dot(perturb, base);
-    return normalize(base + tangent);
+    // At most atan(.16) ~= 9.1 degrees: visual powder roughness must not make
+    // flat terrain/roof normals look like sharp displaced spikes.
+    let bounded = tangent / max(1.0, length(tangent) / 0.16);
+    return normalize(base + bounded);
 #endif
 }
 

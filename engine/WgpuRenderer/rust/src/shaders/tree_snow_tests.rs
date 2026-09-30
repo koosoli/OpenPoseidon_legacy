@@ -230,3 +230,73 @@ fn forest_transport_is_private_exact_stock_and_does_not_change_alpha_or_geometry
     assert!(retained.contains("sm.alpha_ref <= 0.0") && retained.contains("a2c_coverage(") && retained.contains("discard;"));
     assert!(include_str!("../gfx3d/mod.rs").contains("flags: s.flags"),"register keeps private bits");
 }
+
+const TREE_FROST_PROBE: &str = r#"
+#import tree_snow::tree_snow_albedo
+@group(0) @binding(0) var<storage, read_write> result: array<vec4<f32>>;
+@compute @workgroup_size(8)
+fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {
+    var levels = array<f32,8>(0.0,0.005,0.02,0.04,0.08,0.16,0.32,0.64);
+    let i = id.x;
+    let authored = vec3<f32>(levels[i % 8u]);
+    let footprint = select(0.01,10.0,i >= 8u);
+    let frost = tree_snow_albedo(authored,vec3<f32>(5018.51,117.58,4087.66),footprint);
+    result[i] = vec4<f32>(frost,dot(frost,vec3<f32>(0.2126,0.7152,0.0722)));
+}
+"#;
+
+#[test]
+fn tree_frost_actual_gpu_retains_authored_leaf_contrast_and_dark_recesses() {
+    let (device,queue) = crate::gfx3d::cull::tests::headless().expect("textured frost acceptance requires a GPU");
+    let mut composer = super::build_composer();
+    let module = composer.make_naga_module(NagaModuleDescriptor {
+        source:TREE_FROST_PROBE,file_path:"tree_frost_probe.wgsl",..Default::default()
+    }).unwrap_or_else(|e| panic!("{}",e.emit_to_string(&composer)));
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label:Some("actual_textured_tree_frost"),source:wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(module)),
+    });
+    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label:None,layout:None,module:&shader,entry_point:Some("cs_probe"),compilation_options:Default::default(),cache:None,
+    });
+    let output = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label:None,contents:bytemuck::cast_slice(&[0_f32;64]),usage:wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    });
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label:None,size:256,usage:wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,mapped_at_creation:false,
+    });
+    let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label:None,layout:&pipeline.get_bind_group_layout(0),
+        entries:&[wgpu::BindGroupEntry{binding:0,resource:output.as_entire_binding()}],
+    });
+    let mut encoder = device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipeline);pass.set_bind_group(0,&bind,&[]);pass.dispatch_workgroups(2,1,1);
+    }
+    encoder.copy_buffer_to_buffer(&output,0,&staging,0,256);queue.submit(Some(encoder.finish()));
+    let slice = staging.slice(..);let (send,recv) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read,move |r| {let _=send.send(r);});
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();recv.recv().unwrap().unwrap();
+    let bytes = slice.get_mapped_range();let samples = bytemuck::cast_slice::<u8,f32>(&bytes);
+    let levels = [0.0,0.005,0.02,0.04,0.08,0.16,0.32,0.64];
+    for (i,sample) in samples.chunks_exact(4).enumerate() {
+        assert!(sample.iter().all(|v| v.is_finite() && *v >= 0.0 && *v < 0.85));
+        if i % 8 < 2 {
+            for v in &sample[..3] {assert!((*v-levels[i % 8]).abs()<1e-6,"deep photographed recesses remain authored");}
+        }
+        if i % 8 > 0 {assert!(sample[3] > samples[(i-1)*4+3],"authored contrast cannot collapse into uniform white");}
+        if i >= 8 {
+            let source = levels[i-8];
+            let t = ((source-0.008_f32)/(0.060-0.008)).clamp(0.0,1.0);
+            let recess = t*t*(3.0-2.0*t);
+            let relief = 0.35 + 0.65*source/(source+0.10);
+            for (v,mean) in sample[..3].iter().zip([0.78,0.80,0.82]) {
+                let expected = source*(1.0-recess)+mean*relief*recess;
+                assert!((*v-expected).abs()<1e-6,"unresolved broad mottling has exact source-driven mean");
+            }
+        }
+    }
+    assert!(samples[7*4+3] - samples[2*4+3] > 0.5,"photographic leaf/branch relief must survive full snow cover");
+    assert!(samples[4*4+3] > levels[4],"resolved foliage still gains a visible neutral frost coat");
+    drop(bytes);staging.unmap();
+}
