@@ -8978,7 +8978,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                     [](float v) { return std::isfinite(v); });
                 LOG_INFO(Graphics, "PLAYER_GROUND_SECTION camera={} hint={} model={} texture={} primaryMesh={} sections={}:{} indices={} flags={} blend={} depth={} alphaRef={} skinned={} cpuPosed={} palette={} conform={} finiteWorld={}",
                     int(GWorld->GetCameraType()), int(GetPassKindHint()), shape ? shape->Name() : "<none>",
-                    faceName, ObjectOwnsSnowMesh(*owner, sMesh), beg, end, indexCount, d.flags, d.blend, d.depth,
+                    faceName, ObjectOwnsSnowMesh(*owner, sMesh), beg, end, indexCount, d.flags, int(d.blend), int(d.depth),
                     d.alpha_ref, buf->skinned, buf->cpuPosed || _currentCpuPose != nullptr,
                     d.palette_slot, d.conform2.z, finiteWorld);
             }
