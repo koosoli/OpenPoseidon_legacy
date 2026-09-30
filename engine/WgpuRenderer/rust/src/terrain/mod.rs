@@ -6,6 +6,8 @@ use crate::gfx3d::{NORMAL_FORMAT, depth_format};
 
 mod shore_wet;
 mod skyvis;
+#[cfg(test)]
+mod puddle_tests;
 
 pub use shore_wet::TwWetParams;
 
@@ -1980,7 +1982,7 @@ mod enfusion_ground_tests {
         assert!(!native.contains("srgb_to_linear(packed"));
         assert!(native.contains("vec3<f32>(-xy.x, xy.y,"));
         assert!(native.contains("clamp(tp.enfusion_ground, 0.0, 1.0)"));
-        assert!(native.contains("return AuthoredCell(rgb, normal_ts, authored_ao)"));
+        assert!(native.contains("return AuthoredCell(rgb, normal_ts, authored_ao, legacy_mud)"));
         assert!(native.contains("clamp(packed.a, 0.0, 1.0)"));
         assert!(src.contains("* normal_map_cavity(geometric_n, n) * authored_ao"));
         assert!(src.contains("authored_ao = c.ambient_occlusion"));

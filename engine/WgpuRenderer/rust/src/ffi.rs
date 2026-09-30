@@ -1159,7 +1159,7 @@ pub struct WgrTerrainParams {
     pub snowline_height: f32,
     pub snowline_range: f32,
     pub snowline_depth: f32,
-    pub _pad1: f32,
+    pub _pad1: f32, // Cosmetic rain wetness [0,1], offset 72; WGSL rain_wetness. Preserve old initialisers.
     pub _pad2: f32,
     pub _pad3: f32,
     pub _pad4: f32,
@@ -1214,7 +1214,7 @@ pub struct WgrTerrainMaterial {
     // MiddleColor, a LINEAR multiplier on the middle map's texel; 1,1,1 when absent.
     // Own 16-byte row because the WGSL side is a vec3.
     pub middle_color: [f32; 3],
-    pub _pad3: u32,
+    pub puddle_flags: u32, // Former padding: legacy/native bit 0, authored slot bits 8..13.
 }
 
 // One terrain node (shared grid mesh at world-xz `origin`, `size` wide, level

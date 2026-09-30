@@ -40,7 +40,7 @@ struct TerrainParams {
     snowline_height: f32,
     snowline_range: f32,
     snowline_depth: f32,
-    _pad1: f32,
+    rain_wetness: f32, // cosmetic rain history [0,1], former padding at offset 72
     _pad2: f32,
     _pad3: f32,
     _pad4: f32,
@@ -161,9 +161,9 @@ struct TerrainMaterial {
     detail_fade: f32,
     legacy_detail_scale: f32,
     // MiddleColor: a LINEAR multiplier on the middle map's texel (1,1,1 when the
-    // material names none). Own 16-byte row; `_pad3` closes it to 384 bytes.
+    // material names none). Own 16-byte row; puddle_flags closes it to 384 bytes.
     middle_color: vec3<f32>,
-    _pad3: u32,
+    puddle_flags: u32, // former padding: legacy/native bit 0; authored slots bits 8..13
 };
 @group(2) @binding(6) var<storage, read> terrain_materials: array<TerrainMaterial>;
 
@@ -394,7 +394,35 @@ struct AuthoredCell {
     rgb: vec3<f32>,
     normal_ts: vec3<f32>,
     ambient_occlusion: f32,
+    mud: f32,
 };
+
+// Smooth value noise with metre-scale, world-absolute inputs. No frame, camera,
+// mesh LOD or animation seed: moving over the ground never moves the puddles.
+fn puddle_hash(p: vec2<f32>) -> f32 {
+    let q = vec2<u32>(vec2<i32>(p));
+    var h = q.x * 1597334677u ^ q.y * 3812015801u;
+    h = (h ^ (h >> 16u)) * 2246822519u;
+    return f32(h ^ (h >> 13u)) / 4294967295.0;
+}
+
+fn puddle_noise(p: vec2<f32>) -> f32 {
+    let b = floor(p);
+    let f = fract(p);
+    let w = f * f * (3.0 - 2.0 * f);
+    return mix(mix(puddle_hash(b), puddle_hash(b + vec2<f32>(1.0, 0.0)), w.x),
+               mix(puddle_hash(b + vec2<f32>(0.0, 1.0)), puddle_hash(b + vec2<f32>(1.0)), w.x), w.y);
+}
+
+fn mud_puddle_mask(xz: vec2<f32>, footprint: f32, wetness: f32) -> f32 {
+    let field = puddle_noise(xz / 6.0) * 0.8 + puddle_noise(xz / 2.2) * 0.2;
+    let threshold = mix(0.82, 0.64, wetness);
+    let edge = max(0.035, footprint / 6.0 * 0.5);
+    // Expanding connected patches, never one full-map reflective sheet. Fade
+    // before the finest 2.2 m field becomes subpixel instead of glittering.
+    return smoothstep(threshold - edge, threshold + edge, field)
+        * smoothstep(0.18, 0.6, wetness) * (1.0 - smoothstep(0.4, 0.9, footprint));
+}
 
 // Tangent-space view direction for the terrain's world-aligned frame (T = +X, B = +Z,
 // N = up). Terrain surface UVs are world-aligned by construction, so this needs no
@@ -596,6 +624,7 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                         view_pos: vec3<f32>,
                         world_dwx: vec3<f32>, world_dwy: vec3<f32>) -> AuthoredCell {
     var material = terrain_materials[entry & CELL_LAYER_MASK];
+    let legacy_mud = f32(material.puddle_flags & 1u);
     // The layer is a material-table lookup, but clamping belongs to the cell.
     material.legacy |= entry & CELL_CLAMPED;
     let authored_weight = clamp(a3_surface_blend, 0.0, 1.0);
@@ -682,11 +711,11 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
         // BIT-EXACT the legacy sample below. Full on costs ONE fetch (two with a
         // middle map): the legacy tap is only taken while the slider is between.
         if (tp.enfusion_ground >= 0.999) {
-            return AuthoredCell(rgb, normal_ts, authored_ao);
+            return AuthoredCell(rgb, normal_ts, authored_ao, legacy_mud);
         }
         let legacy_rgb = sample_cell(material.legacy, cell, tile_uv, ddx, ddy);
         return AuthoredCell(mix(legacy_rgb, rgb, clamp(tp.enfusion_ground, 0.0, 1.0)),
-                            normal_ts, authored_ao);
+                            normal_ts, authored_ao, legacy_mud);
     }
     // The normal renderer must remain byte-for-byte on the established cell
     // path while the authored composition is evaluated and compared.
@@ -696,22 +725,22 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
             let far = smoothstep(800.0, 2400.0, length(view_pos));
             if (far <= 0.0) {
                 return AuthoredCell(sample_cell(material.legacy,cell,tile_uv,ddx,ddy),
-                                    sample_legacy_normal(material,cell,tile_uv,ddx,ddy,world_pos,world_dwx,world_dwy,view_pos), 1.0);
+                                    sample_legacy_normal(material,cell,tile_uv,ddx,ddy,world_pos,world_dwx,world_dwy,view_pos), 1.0, legacy_mud);
             }
             let inv_span = 1.0 / (tp.land_grid * f32(tp.land_range));
             let uv = (world_pos.xz - tp.world_origin) * inv_span;
             let satellite = textureSampleGrad(ground[material.satellite], ground_clamp_samp,
                 uv, world_dwx.xz * inv_span, world_dwy.xz * inv_span).rgb;
             if (far >= 0.999) {
-                return AuthoredCell(satellite, vec3<f32>(0.0,0.0,1.0), 1.0);
+                return AuthoredCell(satellite, vec3<f32>(0.0,0.0,1.0), 1.0, legacy_mud);
             }
             let near = sample_cell(material.legacy,cell,tile_uv,ddx,ddy);
             let normal = sample_legacy_normal(material,cell,tile_uv,ddx,ddy,world_pos,world_dwx,world_dwy,view_pos);
             return AuthoredCell(mix(near,satellite,far),
-                                normalize(mix(normal,vec3<f32>(0.0,0.0,1.0),far)), 1.0);
+                                normalize(mix(normal,vec3<f32>(0.0,0.0,1.0),far)), 1.0, legacy_mud);
         }
         return AuthoredCell(sample_cell(material.legacy, cell, tile_uv, ddx, ddy),
-                            sample_legacy_normal(material,cell,tile_uv,ddx,ddy,world_pos,world_dwx,world_dwy,view_pos), 1.0);
+                            sample_legacy_normal(material,cell,tile_uv,ddx,ddy,world_pos,world_dwx,world_dwy,view_pos), 1.0, legacy_mud);
     }
     // RVMAT `worldPos` is the engine's own world vector, Y up -- the same axes
     // the renderer already carries. The swizzle that used to sit here was
@@ -754,7 +783,7 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     let detail_fade = 1.0 - smoothstep(detail_fade_start, detail_fade_end, view_dist);
     let blend = authored_weight * detail_fade;
     if (blend <= 0.001) {
-        return AuthoredCell(satellite, tile_normal, 1.0);
+        return AuthoredCell(satellite, tile_normal, 1.0, 0.0);
     }
     let mask = textureSampleGrad(ground[material.mask], ground_samp, mask_uv, mask_dwx, mask_dwy).rgba;
     // `var`, not `let`: the loop below indexes it with a non-constant slot.
@@ -785,6 +814,7 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     var surface = vec3<f32>(0.0);
     var normal_ts = vec3<f32>(0.0);
     var bound_weight = 0.0;
+    var mud_weight = 0.0;
     for (var i = 0u; i < min(material.surface_count, TERRAIN_SURFACE_SLOTS); i = i + 1u) {
         let colour_tex = material.surfaces[i];
         if (colour_tex == 0u || weights[i] <= 0.0) {
@@ -813,6 +843,9 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                                     &slot_normal_ts) * slot_gain * weights[i];
         normal_ts += slot_normal_ts * weights[i];
         bound_weight += weights[i];
+        if ((material.puddle_flags & (1u << (8u + i))) != 0u) {
+            mud_weight += weights[i];
+        }
     }
     if (bound_weight <= 0.0) {
         // Every slot the mask selected here is a hole. The satellite is still the
@@ -820,7 +853,7 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
         // rather than dividing by zero. The tile normal is a property of the TILE, not of
         // the slots the mask selected, so it still applies here.
         return AuthoredCell(sample_cell(material.legacy, cell, tile_uv, ddx, ddy),
-                            tile_normal, 1.0);
+                            tile_normal, 1.0, 0.0);
     }
     // `surface` already carries each slot's gain (the x2, or 1/its own average), applied
     // per slot inside the sum above. From here it IS the multiplier the satellite takes.
@@ -877,7 +910,7 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     // different bands and must not share a distance ramp.
     return AuthoredCell(satellite * gain,
                         blend_normal_ts(normalize(mix(vec3<f32>(0.0, 0.0, 1.0), normal_ts, normal_blend)),
-                                        tile_normal), 1.0);
+                                        tile_normal), 1.0, mud_weight / bound_weight);
 }
 
 struct VsOut {
@@ -1000,6 +1033,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // Receiver-plane derivatives must run in uniform control flow.
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
+    let puddle_footprint = max(length(dwx.xz), length(dwy.xz));
 
     // Continuous land-cell position; the ground texture repeats once per cell,
     // so this (plus jitter) doubles as the tiling UV. Blend the four cells
@@ -1076,6 +1110,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     var rgb = vec3<f32>(0.0);
     var authored_normal_ts = vec3<f32>(0.0, 0.0, 1.0);
     var authored_ao = 1.0;
+    var mud = 0.0;
     // The four-cell cross-fade exists to hide the LEGACY per-cell texture's hard cell
     // edge. When all four cells name the same entry it changes nothing -- and it is
     // the same entry over the whole interior of every cell, which is nearly the whole
@@ -1096,6 +1131,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         rgb = c.rgb;
         authored_normal_ts = c.normal_ts;
         authored_ao = c.ambient_occlusion;
+        mud = c.mud;
     } else {
         let c00 = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
         let c10 = sample_authored_cell(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
@@ -1108,6 +1144,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
                            + w01 * c01.normal_ts + w11 * c11.normal_ts;
         authored_ao = w00 * c00.ambient_occlusion + w10 * c10.ambient_occlusion
                     + w01 * c01.ambient_occlusion + w11 * c11.ambient_occlusion;
+        mud = w00 * c00.mud + w10 * c10.mud + w01 * c01.mud + w11 * c11.mud;
     }
 
     // High-frequency detail noise: alpha modulates around neutral (matches GL33's
@@ -1150,6 +1187,17 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // below and the terrain-shadow test further down (LOD/morph-independent).
     let world_y = sample_height(in.world_xz);
     let line_depth = snowline_depth(in.world_xz, world_y);
+    var rain_puddle = 0.0;
+    if (tp.rain_wetness > 0.0 && mud > 0.0) {
+        // Water rests horizontally. Only near-flat mud is eligible; do not drape
+        // a glossy water layer down slopes. Tidewater retains its entire coastal
+        // wet-sand/foam band, and snow consumes this cosmetic layer completely.
+        let flat_mud = smoothstep(0.995, 0.9995, geometric_n.y);
+        let inland = smoothstep(tp.sea_level + 3.5, tp.sea_level + 4.5, world_y);
+        let bare = 1.0 - smoothstep(0.002, 0.02, snow_cover(in.world_xz, world_y));
+        rain_puddle = mud_puddle_mask(in.world_xz, puddle_footprint, clamp(tp.rain_wetness, 0.0, 1.0))
+            * smoothstep(0.65, 0.95, mud) * flat_mud * inland * bare;
+    }
     if (snow.info.w > 0.0 || line_depth > 0.0) {
         let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, world_y);
         let snow_h = snow_cover(in.world_xz, world_y) * dry;
@@ -1285,13 +1333,16 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // result, which is precisely the (macro, micro) pair the term is defined on; at an unauthored
     // or fully faded-out cell they are the same vector and this is exactly 1.0.
     //
-    // Terrain gets NO sky specular, and that is a judgement rather than an omission: the term is
+    // Dry terrain gets NO sky specular, and that is a judgement rather than an omission: the term is
     // scaled by the material's gloss and terrain has no material at all, so ground would take the
     // bare 4% dielectric reallocation — an invisible result for a per-pixel reflect() plus a
     // second SH evaluation on the single most fill-heavy surface in the frame.
+    let local_sky_visibility = interior_sky_ao(in.world_pos + frame.cam_pos.xyz, n);
+    rain_puddle *= smoothstep(0.6, 0.95, local_sky_visibility);
+    rgb *= 1.0 - rain_puddle * 0.38;
     sun_ambient *= sky_vis_ao(in.world_xz)
         * gtao_ao(in.clip.xy)
-        * interior_sky_ao(in.world_pos + frame.cam_pos.xyz, n)
+        * local_sky_visibility
         * normal_map_cavity(geometric_n, n) * authored_ao;
     // CLD-020: cloud transmittance dims the DIRECT term only, leaving sky ambient intact, so
     // ground under a cloud settles toward ambient rather than toward black.
@@ -1301,6 +1352,27 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let local = lights_contrib(in.world_pos, n, vec3<f32>(1.0), vec3<f32>(1.0), linear);
     let light_sum = sun + local;
     rgb *= select(clamp(light_sum, vec3<f32>(0.0), vec3<f32>(1.0)), max(light_sum, vec3<f32>(0.0)), linear > 0.5);
+    if (rain_puddle > 0.0) {
+        // A flat water normal removes authored grain from the reflection: no
+        // high-frequency sun dots. Reuse the bound SH sky, with no reflection
+        // texture/pass/history. This first slice reflects SKY, not scene objects.
+        let view = normalize(-in.world_pos);
+        let water_n = vec3<f32>(0.0, 1.0, 0.0);
+        let grazing = 1.0 - clamp(dot(water_n, view), 0.0, 1.0);
+        let fresnel = 0.02 + 0.78 * pow(grazing, 5.0);
+        var reflected = sun_ambient;
+        if (sky_lit) {
+            reflected = sky_irradiance(reflect(-view, water_n)) * frame.sun_ambient.w
+                * sky_vis_ao(in.world_xz) * local_sky_visibility;
+        }
+        let half_vector = normalize(view - frame.sun_dir_world.xyz + vec3<f32>(0.0, 1e-4, 0.0));
+        let sun_lobe = pow(max(dot(water_n, half_vector), 0.0), 48.0);
+        reflected += sun_diffuse * sun_lobe * (1.0 - shadow) * cloud_sun_shadow(in.world_xz)
+            * local_sky_visibility;
+        // Covered terrain suppresses both the film and its reflected sky where
+        // the existing sky-visibility system supplies shelter information.
+        rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel, rain_puddle);
+    }
 
     // Debug: output the contrast-shaped sky-view factor as greyscale (unfogged) to inspect/tune the
     // mask — responds to radius/azimuths/downsample/contrast.

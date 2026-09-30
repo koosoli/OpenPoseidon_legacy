@@ -488,6 +488,7 @@ bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
     _uploaded = &land;
     _uploadedRange = range;
     _uploadedName = name;
+    if (!sameMap) _puddleWetness.Reset();
     // Confirmed from the installed CWA world data: Eden is Everon. Its raw
     // GeographyInfo flags are not reliable grass exclusions, unlike the other
     // stock worlds, so the shader must rely on exact height/slope plus the
@@ -585,6 +586,75 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
     // how its ground is tiled and what its middle-distance map is. Built once per world;
     // the table is empty everywhere else and the loop below is then unchanged.
     BuildEnfusionGroundMaterials(land);
+    // Eligibility belongs to the source material, never its sampled colour.
+    // The legacy quadrant order is not needed: mixed/unknown tiles stay dry.
+    size_t puddleMaterials = 0;
+    for (int i = 0; i < materialCount; ++i)
+    {
+        WgrTerrainMaterial& material = materials[static_cast<size_t>(i)];
+        const A3TerrainMaterial* source = land.GetA3TerrainMaterial(i);
+        if (source != nullptr && source->surfaceCount != 0)
+        {
+            for (uint32_t slot = 0; slot < std::min<uint32_t>(source->surfaceCount, WGR_TERRAIN_SURFACE_SLOTS); ++slot)
+                if (TerrainPuddles::EligibleSurface(source->surfaces[slot].Data()))
+                    material.puddle_flags |= 1u << (8u + slot);
+        }
+        else if (static_cast<size_t>(i) < _enfusionGround.size())
+        {
+            // Native BCRMap's source leaf was classified during material loading.
+            // Its CreateDynamic texture has no useful source name.
+            if (_enfusionGround[static_cast<size_t>(i)].puddleEligible)
+                material.puddle_flags = 1u;
+        }
+        else
+        {
+            const SurfaceInfo* const* quadrants = land.GetTextureQuadrants(i);
+            bool allMud = quadrants != nullptr;
+            for (int q = 0; allMud && q < 4; ++q)
+                allMud = quadrants[q] != nullptr && TerrainPuddles::EligibleSurface(quadrants[q]->_class.Data());
+            if (allMud) material.puddle_flags = 1u;
+        }
+        if (material.puddle_flags != 0u) ++puddleMaterials;
+    }
+    LOG_INFO(Graphics, "Wgpu terrain puddles: {} of {} source materials eligible (unknown/mixed/hard stay dry)",
+             puddleMaterials, materialCount);
+    // An opt-in installed-test fixture comes from this world's real material
+    // grid. Pick a 3x3 mud patch, away from native road ribbons and the coast,
+    // with the shader's exact central-difference flatness criterion. Only log a
+    // pose; do not teleport the owner or change terrain/weather/profile state.
+    if (!paged && puddleMaterials > 0 && EnvFloat("WGR_TERRAIN_PUDDLE_FIXTURE", 0.0f) > 0.5f)
+    {
+        const int range = land.GetLandRange();
+        bool found = false;
+        for (int z = 1; z + 1 < range && !found; ++z)
+            for (int x = 1; x + 1 < range && !found; ++x)
+            {
+                bool patch = true;
+                for (int dz = -1; patch && dz <= 1; ++dz)
+                    for (int dx = -1; patch && dx <= 1; ++dx)
+                    {
+                        const int id = land.GetTexture(z + dz, x + dx);
+                        patch = id >= 0 && id < materialCount &&
+                            (materials[static_cast<size_t>(id)].puddle_flags & 1u) != 0u &&
+                            !land.GetEnfusionRoadCell(z + dz, x + dx);
+                    }
+                if (!patch) continue;
+                const float east = (x + 0.5f) * land.GetLandGrid();
+                const float north = (z + 0.5f) * land.GetLandGrid();
+                const float h = land.SurfaceY(east, north);
+                const float step = land.GetTerrainGrid();
+                const float dx = (land.SurfaceY(east + step, north) - land.SurfaceY(east - step, north)) / (2.0f * step);
+                const float dz = (land.SurfaceY(east, north + step) - land.SurfaceY(east, north - step)) / (2.0f * step);
+                if (h <= land.GetSeaLevel() + 4.5f || 1.0f / std::sqrt(1.0f + dx * dx + dz * dz) < 0.9995f)
+                    continue;
+                const int id = land.GetTexture(z, x);
+                LOG_INFO(Graphics, "Wgpu terrain puddle fixture: freefly {:.2f} {:.2f} {:.2f} 0 -18; material={} "
+                         "source={} (CPU candidate, visual acceptance pending)",
+                         east, north - 12.0f, h + 5.0f, id, land.GetEnfusionSurface(id));
+                found = true;
+            }
+        if (!found) LOG_INFO(Graphics, "Wgpu terrain puddle fixture: no fully eligible flat 3x3 patch found");
+    }
     if (!paged)
     {
         for (int i = 0; i < materialCount; ++i)
@@ -3122,6 +3192,17 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         GSnow().EffSnowlineEnabled() && GSnow().snowlineRange > 0.0f ? GSnow().EffSnowlineHeight() : -1.0f;
     _params.snowline_range = std::max(GSnow().snowlineRange, 0.0f);
     _params.snowline_depth = std::clamp(GSnow().snowlineDepth, 0.0f, 1.0f);
+    const auto& weather = render::frame::GPresentationSnapshot();
+    _params._pad1 = _puddleWetness.Update(weather.timeSeconds,
+        std::max(weather.landscapeRainDensity, weather.rainEffectiveDensity));
+    // Process-local diagnostic controls: isolate appearance without editing a
+    // persistent weather/water profile. The wetness override still obeys mud,
+    // slope, shore, roof and snow eligibility in the shader.
+    static const float wetnessOverride = EnvFloat("WGR_TERRAIN_PUDDLE_WETNESS", -1.0f);
+    static const bool puddlesEnabled = EnvFloat("WGR_TERRAIN_PUDDLES", 1.0f) > 0.5f;
+    if (std::isfinite(wetnessOverride) && wetnessOverride >= 0.0f)
+        _params._pad1 = std::clamp(wetnessOverride, 0.0f, 1.0f);
+    if (!puddlesEnabled) _params._pad1 = 0.0f;
     _engine.QueueTerrainParams(_params); // REN-THR-013: queued, applied before wgr_render_frame
     const auto& snow = GSnow();
     if (camera && (snow.CoverActive() || _snowWasEnabled || uploaded) &&

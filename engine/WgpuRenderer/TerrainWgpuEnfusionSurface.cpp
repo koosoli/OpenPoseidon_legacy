@@ -280,6 +280,7 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
         if (detail == nullptr)
             continue;
         out.detail = detail;
+        out.puddleEligible = TerrainPuddles::EligibleSurface(colour);
         // No ScaleUV means the material never named one, and the only defensible
         // reading of that is the corpus median rather than the 12.5 m cell: 36 of the 51
         // shipped surfaces declare a scale and 20 of those declare exactly 4.

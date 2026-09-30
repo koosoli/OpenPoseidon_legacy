@@ -6,6 +6,7 @@
 #include <Poseidon/World/Terrain/TerrainSurfaceCatalog.hpp>
 
 #include <wgpu_renderer.hpp>
+#include "TerrainPuddles.hpp"
 
 #include <cstdint>
 #include <string>
@@ -131,6 +132,7 @@ class TerrainWgpu : public ITerrainRenderer
     uint32_t _geographyRevisionUploaded = 0;
     float _snowUploadTime = -1.0f;
     bool _snowWasEnabled = false;
+    TerrainPuddles::Wetness _puddleWetness;
     double _geographyRefreshLastMs = 0.0;
     // Reads the map's own CfgSurfaces / CfgSurfaceCharacters / clutter out of the
     // Arma-generation `config.bin` files of the archives that own THIS world's
@@ -266,6 +268,7 @@ class TerrainWgpu : public ITerrainRenderer
         Texture* detail = nullptr;  //!< BCRMap, mipped, tiled at `detailScale`
         Texture* middle = nullptr;  //!< BCRMiddleMap, or null
         Texture* normal = nullptr;  //!< NHOMap, raw RG normal channels, or null
+        bool puddleEligible = false; //!< Source BCR leaf, not the anonymous dynamic GPU texture.
         float detailScale = 0.0f;   //!< 1 / ScaleUV, repeats per world metre
         float middleScale = 0.0f;   //!< 1 / MiddleScaleUV
         float middleBlend = 0.0f;   //!< MiddleBCRBlend, clamped to 0..1
