@@ -5,6 +5,8 @@ param(
     [ValidateRange(1,10)][int]$SettleSeconds = 3,
     [ValidateRange(1,64)][int]$DifferenceThreshold = 8,
     [switch]$PowderOff,
+    [switch]$OnlyDeposited,
+    [switch]$AutoExposure,
     [switch]$LegacyCwa,
     [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label = 'stock-surface',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
@@ -79,6 +81,7 @@ function Assert-ObjectTelemetry([string]$line,[bool]$enabled,[double]$depth) {
     return @{ line = $line; enabled = $enabled; deposit = $deposit; snowlineHeight = $height; snowlineRange = $range; snowlineDepth = $lineDepth }
 }
 $before = Installed-State
+$selectedArms = if ($OnlyDeposited) { @('deposit-object-on') } else { @('dry-object-on','deposit-object-on','deposit-object-off') }
 $mission = Join-Path $root 'tests/perf/missions/perf_field.eden'
 foreach ($path in $(if ($LegacyCwa) { @($mission) } else { @($mission,$NativeAddons) })) {
     Require (Test-Path -LiteralPath $path) "Required fixture path missing: $path"
@@ -99,7 +102,7 @@ foreach ($key in $keys) { $savedEnv[$key] = [Environment]::GetEnvironmentVariabl
    metricsSha256 = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'TerrainPuddleMetrics.cs')).Hash;
    installed = $before; mission = $mission; nativeAddons = $(if ($LegacyCwa) { $null } else { $NativeAddons });
    legacyCwa = [bool]$LegacyCwa; powderOff = [bool]$PowderOff; lockOwner = $env:LOCK_OWNER;
-   depth = $Depth; arms = @('dry-object-on','deposit-object-on','deposit-object-off'); snowlineOverride = 'off';
+   depth = $Depth; arms = $selectedArms; autoExposure = [bool]$AutoExposure; snowlineOverride = 'off';
    stockRoof = 'CampEastC / stan_eastC.p3d'; roofCentre = @(9486,3006); openCentre = @(9475.25,3018.25);
    fixedDate = @(1985,6,21,16,0); fixedTime = 100; exposure = 1; temporal = 0; grass = 0; cloud = 0;
    wind = '0 90 0'; terrainJitter = 0; differenceThreshold = $DifferenceThreshold;
@@ -189,13 +192,13 @@ try {
     foreach ($key in @('POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','POSEIDON_INTERIOR_SKY_PROBE','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE')) {
         Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
     }
-    $env:WGR_TEMPORAL = '0'; $env:WGR_AUTO_EXPOSURE = '0'; $env:WGR_EXPOSURE = '1'
+    $env:WGR_TEMPORAL = '0'; $env:WGR_AUTO_EXPOSURE = if ($AutoExposure) { '1' } else { '0' }; $env:WGR_EXPOSURE = '1'
     $env:WGR_GRASS = '0'; $env:POSEIDON_WIND_OVERRIDE = '0 90 0'; $env:WGR_CLOUD_COVERAGE = '0'
     $env:WGR_LOD_GOVERNOR_RANGE = '1'; $env:WGR_TERRAIN_JITTER = '0'; $env:WGR_INTERIOR_SKY = '1'
     $env:WGR_INTERIOR_SKY_DEBUG = '0'; $env:WGR_TERRAIN_PUDDLES = '0'
     $env:WGR_SNOW_POWDER = if ($PowderOff) { '0' } else { '1' }
     $env:WGR_SNOW_SURFACE_FIXTURE = '1'
-    foreach ($arm in @('dry-object-on','deposit-object-on','deposit-object-off')) {
+    foreach ($arm in $selectedArms) {
         Require (!(Get-Process OpenPoseidon -ErrorAction SilentlyContinue)) 'Unexpected game process between arms.'
         $armDir = Join-Path $output $arm; $profile = Join-Path $armDir 'user'
         New-Item -ItemType Directory -Force -Path $profile | Out-Null
@@ -348,6 +351,7 @@ try {
         $null = Send @{ cmd = 'exec'; code = 'deleteVehicle snowSurfaceCar' }; Require ((Eval 'isNull snowSurfaceCar') -eq $true) 'Vehicle cleanup failed.'
         Close-Owned
     }
+    if (!$OnlyDeposited) {
     foreach ($view in $result.arms['dry-object-on'].views.Keys) {
         $dry = $result.arms['dry-object-on'].captures.enabled[$view]
         $on = $result.arms['deposit-object-on'].captures.enabled[$view]; $off = $result.arms['deposit-object-off'].captures.enabled[$view]
@@ -356,6 +360,7 @@ try {
     $result.comparisons.roofRemovedGround = @{
         depositDry = Pair $result.arms['dry-object-on'].captures.roofRemoved.coveredGround $result.arms['deposit-object-on'].captures.roofRemoved.coveredGround
         objectOnOff = Pair $result.arms['deposit-object-on'].captures.roofRemoved.coveredGround $result.arms['deposit-object-off'].captures.roofRemoved.coveredGround
+    }
     }
     $result.status = 'captured-not-visually-accepted'
 } catch { $result.status = 'failed'; $result.error = $_.Exception.Message; throw }
