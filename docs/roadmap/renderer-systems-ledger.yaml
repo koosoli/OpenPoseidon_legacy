@@ -1395,7 +1395,7 @@ unbuilt_candidates: >-
 
       Earlier controls remain failed. Stock Stan_eastC's explicit empty fire
       LOD caused the first real shelter failure; its view LOD has a roof.
-      30069f14 (agent 05e0bc22) adds a same-segment self-ignored view fallback
+      500fe28d (agent 05e0bc22) adds a same-segment self-ignored view fallback
       after fire misses. Corrected installed controls preserve the tent actor
       dry. Root/agent inspected cloth and protected regions: subtle damp cloth,
       no visible face/hand/weapon repaint or plastic shine. Oliver delegated
