@@ -6,6 +6,13 @@ not accept snow appearance from image differences. Its final successful status
 is `captured-not-visually-accepted`; installed appearance acceptance belongs to
 the recorded surface controls and source admission evidence.
 
+`-OnlyDeposited` runs just the deposited object-on arm for focused diagnosis or
+appearance supplements; it cannot replace the three-arm object ON/OFF control.
+`-AutoExposure` enables ordinary automatic exposure for appearance inspection.
+Both choices are recorded in provenance. Fixed-exposure and automatic-exposure
+pictures are separate evidence sets. The actual stock UAZ may seat within 1.5m
+of its requested position; its camera always uses the measured ASL position.
+
 ## Fixture and views
 
 The stock `CampEastC` / `stan_eastC.p3d` tent has an audited floor-free central

@@ -9,10 +9,18 @@ remain part of that baseline, rather than new work in this batch.
 ## Powder material
 
 The shared snow material uses subtle world-fixed diffuse powder variation and
-tangent normal relief. Three bands fade against the projected world pixel
+tangent normal relief. Three rotated value-noise bands fade against the projected world pixel
 footprint and converge to the existing mean colour and normal. There are no
 moving random seeds, glitter grains, narrow specular lobes or new textures.
 The existing linear mean palette and 28% compacted-track darkening are retained.
+
+The first sine-band implementation produced visible diagonal ridges in the
+automatic-exposure Eden capture on 6a388c62. It is superseded by cc43fffb:
+integer world-cell hashes, continuous interpolation and analytic gradients,
+with no time-dependent seeds. Beyond a 1.5m pixel footprint the helpers return
+the exact mean/base normal before doing hash work. The actual GPU powder probe
+passes bounded colour, finite unit normals and resolved-versus-distant detail;
+the final integrated material and installed pictures still need verification.
 
 Terrain colour and the normal prepass share powder normal evaluation. Track
 slope differences use at least a pixel's world footprint, avoiding fixed 12.5cm
