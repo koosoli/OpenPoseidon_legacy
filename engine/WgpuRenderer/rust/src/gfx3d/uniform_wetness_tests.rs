@@ -50,6 +50,9 @@ fn real_uniform_shader_preserves_skin_and_cloth_linear_hue_on_gpu() {
     let cases: Vec<([f32;4],f32)> = vec![
         ([0.38,0.10,0.0,0.001],0.0), // exact dry
         ([0.38,0.10,0.5,0.001],0.5), // separate authored cloth
+        ([0.38,0.10,2.08,0.001],0.08), // first actual damp history band
+        ([0.38,0.10,2.2,0.001],0.2), // wet enough for installed admission gate
+        ([0.38,0.10,2.38,0.001],0.38), // earlier subtle installed WB proof
         ([0.38,0.10,1.0,0.001],1.0),
         ([0.38,0.10,3.0,0.001],1.0), // west main uniform
         ([0.10,0.10,3.0,0.001],1.0),
@@ -125,8 +128,12 @@ fn real_uniform_shader_preserves_skin_and_cloth_linear_hue_on_gpu() {
                 assert_eq!(row[channel],original,"excluded/dry changed at case{i}: {input:?}");
             } else {
                 let ratio=decode(row[channel])/decode(original);
-                assert!((ratio-(1.0-0.22*wet)).abs()<0.00005,
+                let expected = 1.0-0.55*wet*(2.0-wet);
+                assert!((ratio-expected).abs()<0.00005,
                     "linear cloth hue/brightness changed at case{i} channel{channel}: ratio{ratio}");
+                if (*wet-0.38).abs()<0.00001 {
+                    assert!(ratio<0.67,"ordinary retained dampness must have visible absorption, not the old8% linear change");
+                }
             }
         }
     }

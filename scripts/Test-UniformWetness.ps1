@@ -265,8 +265,8 @@ try {
     $null=Capture 'drying'; $result.gates.drying=@{start=$dryStart;end=$dried}
     $trace=@(Select-String -LiteralPath $log -Pattern 'UNIFORM_WET|UNIFORM_CLOTH' | ForEach-Object { $_.Line })
     Require (($trace | Where-Object { $_ -match 'UNIFORM_WET' }).Count -gt 0) 'Installed actual uniform simulation trace missing.'
-    Require (($trace | Where-Object { $_ -match 'UNIFORM_CLOTH' }).Count -gt 0) 'Installed stock cloth material admission trace missing.'
-    $cloth=@($trace | Where-Object { $_ -match 'UNIFORM_CLOTH' } | ForEach-Object { Parse-ClothTrace $_ })
+    Require (($trace | Where-Object { $_ -match '\bUNIFORM_CLOTH ' }).Count -gt 0) 'Installed stock cloth material admission trace missing.'
+    $cloth=@($trace | Where-Object { $_ -match '\bUNIFORM_CLOTH ' } | ForEach-Object { Parse-ClothTrace $_ })
     $wetRows=@($cloth | Where-Object { $_.model -ceq 'data3d\mc vojakw2.p3d' -and $_.texture -ceq 'merged\00007mc_vojakw2.paa' -and
         $_.kind -eq 2 -and $_.wet -ge 0.2 -and [Math]::Floor($_.wet*10) -eq [Math]::Floor($wet.actors.exposed.wetness*10) -and
         $_.wet -le $wet.actors.exposed.wetness+0.00015 })

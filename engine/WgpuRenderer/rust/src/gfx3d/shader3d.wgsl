@@ -71,9 +71,14 @@ fn uniform_cloth_color(rgb: vec3<f32>, encoded: f32, uv: vec2<f32>, footprint: v
     else if (encoded >= 2.0) { wetness -= 2.0; }
     let wet = clamp(wetness, 0.0, 1.0) * uniform_cloth_mask(uv, encoded, footprint);
     if (wet <= 0.0) { return rgb; }
-    // 22% less reflected linear light when saturated, preserving cloth hue.
-    // Absorption only: no new plastic/specular highlight or procedural noise.
-    let c = srgb_to_linear(rgb) * (1.0 - 0.22 * wet);
+    // A visibly soaked textile retains 45% of its dry linear reflectance.
+    // The smooth early absorption response makes accumulated dampness visible
+    // before saturation: w=.2 retains .802, w=.38 retains .6614. The original
+    // linear22% response at w=.38 changed sRGB by only about4%, easily hidden
+    // by ordinary weather/exposure. Hue and authored detail remain unchanged;
+    // no plastic/specular highlight, spatial noise or history setter is added.
+    let absorption = wet * (2.0 - wet);
+    let c = srgb_to_linear(rgb) * (1.0 - 0.55 * absorption);
     return select(1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - 0.055, c * 12.92,
                   c <= vec3<f32>(0.0031308));
 }

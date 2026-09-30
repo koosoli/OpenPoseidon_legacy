@@ -202,3 +202,57 @@ with the production header. Its first standalone link failed a static/dynamic
 CRT mismatch; rebuilding with the existing Catch2 library's dynamic CRT passes.
 This source follow-up requires a new matching build and installed controls;
 no Nogova appearance fix or new runtime acceptance is claimed here.
+
+## Manual standard-US appearance follow-up
+
+Oliver's later manual failure is explicitly a standard US soldier on an
+original OFP map. The prior fixed nonplayer WB fixture therefore establishes
+its own lifecycle/material path, not that real player's current pose, draw LOD
+or camera. This follow-up starts from821784e5 and leaves the existing
+map-independent, shelter-aware rain/visible-liquid history unchanged.
+
+Source confirms ordinary/manual Man simulation reaches Person wetting. Primary
+WB body identity plus merged/00007mc_vojakw2.paa are admitted, and the encoded
+wetness travels unchanged through MaterialUbo byte124 to the common plain and
+GPU-skinned fragment path. Weapon/proxy identity, face/hand atlas exclusions,
+alpha, animation, depth and prepasses retain their existing policy. Exact EB
+atlas and the named resistance/pilot/tank cloth materials have source/helper
+support; unverified custom/RVMAT textures and far baked whole-body atlas areas
+remain unsupported rather than darkening baked faces. Actual player model,
+current material, weather density, shelter and renderer ablation still need
+installed diagnostic evidence.
+
+The original22% maximum linear-light absorption was too subtle for the earlier
+ordinary retained history: wetness0.38 reduced linear reflectance only8.36%,
+roughly4% in middle sRGB tones. The corrected cloth response retains45% of dry
+linear reflectance at saturation and uses continuous absorption w*(2-w).
+Wetness0.2 retains80.2%, and wetness0.38 retains66.14%. This is a stronger damp
+textile colour response with preserved hue/detail; it adds no plastic shine,
+procedural patches, forced wetness or instant drying. Exact dry and excluded
+skin/helmet/boot/face/weapon paths keep the original RGB values.
+
+The actual production WGSL GPU helper test now includes early wetness0.08,
+0.2 and the formerly subtle0.38 state, with explicit linear reflectance/hue
+expectations and existing protected atlas/minification cases. GPU and installed
+real-player acceptance for this correction remain pending. A matched paused
+actual-player ON/OFF pair under ordinary original-world liquid weather must
+show damp admitted torso/legs while face/hands/weapon stay protected. Retain
+actual triUniformWetness player, model/material/LOD admission and weather
+telemetry; a nonplayer civil-pose screenshot alone cannot close this issue.
+
+With POSEIDON_UNIFORM_WET_TRACE=1, the additional UNIFORM_CLOTH_SOURCE line
+records actual owner/model, drawn mesh/LOD, player and exact-primary identity,
+texture/category, combined-material gate, renderer ablation, wet/encoded value,
+skin/CPU-pose/palette path, cockpit/RVMAT and explicit refusal reason. It is
+producer-side read-only telemetry, including proxy/nonprimary and unverified
+material refusals. Separate capped player/AI populations prevent a large AI
+battle from exhausting the player's diagnostic rows. The old strict admission
+line remains unchanged; the runner now filters that exact line token rather
+than misparsing source/refusal diagnostics as material admission.
+
+CPU production helper/layout and full direct/retained shader composition pass.
+The real runner helper checks pass52 cases including source-trace rejection.
+The strengthened actual GPU colour/mask check, C++ game build, installed
+standard-US player ordinary-pose pair and manual appearance are pending root
+verification. No wetness simulation, asset admission or save/network semantics
+changed in this follow-up.

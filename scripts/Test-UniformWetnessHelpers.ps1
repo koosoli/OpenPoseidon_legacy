@@ -51,6 +51,9 @@ Refuses { Assert-WbCloth $row $true 0.32 }
 $row.encoded=0; Refuses { Assert-WbCloth $row $true 0.359 }
 $row.enabled=$false; $null=Assert-WbCloth $row $false 0.359; ++$script:checks
 Refuses { Parse-ClothTrace 'unknown cloth trace' }
+$sourceLine='[INFO] UNIFORM_CLOTH_SOURCE owner=0x123 model=data3d\mc vojakw2.p3d player=true primary=false wet=0.38 encoded=0'
+Check (!($sourceLine -match '\bUNIFORM_CLOTH '))
+Refuses { Parse-ClothTrace $sourceLine } # refusal trace is retained, never parsed as admission
 Refuses { Parse-ClothTrace ($line.Replace('wet=0.3590','wet=-1.0000')) }
 $row=Parse-ClothTrace ($line.Replace('kind=2','kind=1')); Refuses { Assert-WbCloth $row $true 0.359 }
 $row=Parse-ClothTrace ($line.Replace('mc vojakw2.p3d','mc vojakw3.p3d')); Refuses { Assert-WbCloth $row $true 0.359 }

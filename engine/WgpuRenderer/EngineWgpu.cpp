@@ -8810,15 +8810,25 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     {
         const auto* ownerShape = person->GetShape();
         const int level = sMesh.GetLevel();
+        static const bool trace = [] {
+            const char* value = std::getenv("POSEIDON_UNIFORM_WET_TRACE");
+            return value && value[0] == '1';
+        }();
+        static const bool uniformWetEnabled = [] {
+            const char* value = std::getenv("WGR_UNIFORM_WET");
+            return !(value && value[0] == '0');
+        }();
+        const bool primaryMesh = ownerShape && level >= 0 && level < ownerShape->NLevels() &&
+                                 ownerShape->Level(level) == &sMesh;
+        bool sameCloth = true;
         // A proxy can inherit the Person draw owner, so require exact primary
         // mesh identity as well as positive stock clothing texture admission.
-        if (ownerShape && level >= 0 && level < ownerShape->NLevels() && ownerShape->Level(level) == &sMesh)
+        if (primaryMesh)
         {
             const Texture* texture = sMesh.GetSection(beg).properties.GetTexture();
             const auto cloth = render::AdmitUniformCloth(static_cast<const char*>(ownerShape->GetName()),
                                                         texture ? texture->Name() : "");
             // A combined draw must contain ONLY the same admitted material.
-            bool sameCloth = true;
             for (int section = beg + 1; section < end; ++section)
             {
                 const Texture* next = sMesh.GetSection(section).properties.GetTexture();
@@ -8826,16 +8836,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                                              next ? next->Name() : "") != cloth)
                     sameCloth = false;
             }
-            static const bool uniformWetEnabled = [] {
-                const char* value = std::getenv("WGR_UNIFORM_WET");
-                return !(value && value[0] == '0');
-            }();
             if (sameCloth && uniformWetEnabled)
                 d.mat_local_specular.w = render::EncodeUniformWetness(cloth, person->GetUniformWetness());
-            static const bool trace = [] {
-                const char* value = std::getenv("POSEIDON_UNIFORM_WET_TRACE");
-                return value && value[0] == '1';
-            }();
             if (trace && cloth != render::UniformCloth::None)
             {
                 static std::unordered_map<std::string, int> lastBand;
@@ -8849,6 +8851,41 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                              static_cast<const char*>(ownerShape->GetName()), texture->Name(), int(cloth),
                              uniformWetEnabled, person->GetUniformWetness(), d.mat_local_specular.w);
                 }
+            }
+        }
+        if (trace)
+        {
+            // This producer-side diagnostic includes refusals. The admission
+            // line above deliberately retains its strict fixture grammar.
+            // No strings/map work is added when tracing is disabled; the source
+            // population is capped so a large battle cannot grow it forever.
+            static std::unordered_map<std::string, int> lastSourceBand;
+            static std::unordered_map<std::string, int> lastPlayerSourceBand;
+            const bool isPlayer = GWorld && GWorld->PlayerOn() == person;
+            auto& bands = isPlayer ? lastPlayerSourceBand : lastSourceBand;
+            const size_t cap = isPlayer ? 64 : 128; // AI cannot exhaust the actual player diagnostic
+            const Texture* sourceTexture = sMesh.GetSection(beg).properties.GetTexture();
+            const char* model = ownerShape ? static_cast<const char*>(ownerShape->GetName()) : "<none>";
+            const char* name = sourceTexture ? sourceTexture->Name() : "<none>";
+            const auto sourceCloth = render::AdmitUniformCloth(model, name);
+            const std::string key = std::to_string(reinterpret_cast<uintptr_t>(person)) + ":" +
+                                    std::to_string(reinterpret_cast<uintptr_t>(&sMesh)) + ":" + std::to_string(beg);
+            const int band = int(person->GetUniformWetness() * 10.0f);
+            const auto found = bands.find(key);
+            if ((found != bands.end() && found->second != band) ||
+                (found == bands.end() && bands.size() < cap))
+            {
+                bands[key] = band;
+                const char* reason = !primaryMesh ? "proxy-or-nonprimary" :
+                    sourceCloth == render::UniformCloth::None ? "unverified-texture" :
+                    !sameCloth ? "mixed-materials" : !uniformWetEnabled ? "render-disabled" :
+                    person->GetUniformWetness() <= 0.0f ? "dry-history" : "admitted";
+                LOG_INFO(Graphics, "UNIFORM_CLOTH_SOURCE owner={} model={} mesh={} level={} player={} primary={} texture={} kind={} sameCloth={} enabled={} wet={:.4f} encoded={:.4f} skinned={} cpuPosed={} palette={} cockpit={} rvmat={} reason={}",
+                         static_cast<const void*>(person), model, static_cast<const void*>(&sMesh), level,
+                         isPlayer, primaryMesh, name, int(sourceCloth), sameCloth,
+                         uniformWetEnabled, person->GetUniformWetness(), d.mat_local_specular.w, buf->skinned,
+                         buf->cpuPosed, _currentPaletteSlot, (d.flags & WGR_DRAW3D_COCKPIT) != 0,
+                         debugMaterialPath ? debugMaterialPath : "<none>", reason);
             }
         }
     }
