@@ -3203,6 +3203,19 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     if (std::isfinite(wetnessOverride) && wetnessOverride >= 0.0f)
         _params._pad1 = std::clamp(wetnessOverride, 0.0f, 1.0f);
     if (!puddlesEnabled) _params._pad1 = 0.0f;
+    // Diagnostic-only telemetry establishes that the installed weather snapshot
+    // reaches accumulation. Duplicate/paused draws do not produce new samples.
+    static const bool puddleDiagnostic = EnvFloat("WGR_TERRAIN_PUDDLE_FIXTURE", 0.0f) > 0.5f;
+    static float lastPuddleDiagnosticTime = -1.0f;
+    if (puddleDiagnostic && std::isfinite(weather.timeSeconds) &&
+        (lastPuddleDiagnosticTime < 0.0f || weather.timeSeconds < lastPuddleDiagnosticTime ||
+         weather.timeSeconds - lastPuddleDiagnosticTime >= 5.0f))
+    {
+        LOG_INFO(Graphics, "Wgpu terrain puddle weather: time={:.3f} rain={:.3f} accumulated={:.4f} uploaded={:.4f}",
+                 weather.timeSeconds, std::max(weather.landscapeRainDensity, weather.rainEffectiveDensity),
+                 _puddleWetness.value, _params._pad1);
+        lastPuddleDiagnosticTime = weather.timeSeconds;
+    }
     _engine.QueueTerrainParams(_params); // REN-THR-013: queued, applied before wgr_render_frame
     const auto& snow = GSnow();
     if (camera && (snow.CoverActive() || _snowWasEnabled || uploaded) &&
