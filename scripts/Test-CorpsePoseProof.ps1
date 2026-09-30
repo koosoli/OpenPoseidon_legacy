@@ -74,7 +74,23 @@ function Send($command) {
 function Eval([string]$code) {
     $reply = Send @{ cmd = 'eval'; code = $code }
     if ($null -eq $reply.result) { throw "Evaluator result missing: $code" }
-    return ConvertFrom-Json -InputObject ([string]$reply.result) -NoEnumerate
+    # reply.result is an SQF value display, not nested JSON. Strings retain
+    # literal model-path backslashes and escape embedded quotes by doubling them.
+    $display = ([string]$reply.result).Trim()
+    if ($display.StartsWith('"')) {
+        if ($display.Length -lt 2 -or !$display.EndsWith('"')) { throw "Malformed SQF string: $code" }
+        $inner = $display.Substring(1,$display.Length-2)
+        $decoded = [Text.StringBuilder]::new()
+        for ($i = 0; $i -lt $inner.Length; ++$i) {
+            if ($inner[$i] -eq '"') {
+                if ($i+1 -ge $inner.Length -or $inner[$i+1] -ne '"') { throw "Malformed doubled SQF quote: $code" }
+                ++$i
+            }
+            $null = $decoded.Append($inner[$i])
+        }
+        return $decoded.ToString()
+    }
+    return ConvertFrom-Json -InputObject $display -NoEnumerate
 }
 function Query([string]$command) {
     $value = Eval ('triPhysicsShowcase "' + $command + '"')
@@ -133,7 +149,7 @@ function Wait-Capture {
     do {
         $capture = Query 'corpse-capture'
         $result.observations.lastAdmission = $capture
-        if ($capture -match '^OK corpse-capture entity=\S+ model=\S+ .*expiresMs=30000 solver=none rootMotion=authored$') { return $capture }
+        if ($capture -match '^OK corpse-capture entity=\S+ model=.+ distance=[\d.eE+-]+ nearbyCorpses=\d+ eligible=\d+ bones=\d+ primaryMatrices=\d+ secondaryMatrices=\d+ expiresMs=30000 solver=none rootMotion=authored$') { return $capture }
         Require ($capture -match '^REFUSED corpse-capture .*reason=(settled-death-pose-required|dry-ground-contact-required|no-nearby-corpse)$') "Stock capture failed a non-transient admission gate: $capture"
         if ([DateTime]::UtcNow -gt $until) { throw "Stock corpse never met the unchanged capture gate: $capture" }
         Start-Sleep -Milliseconds 500
