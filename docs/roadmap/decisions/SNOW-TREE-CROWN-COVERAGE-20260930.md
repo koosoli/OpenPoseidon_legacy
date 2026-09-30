@@ -137,3 +137,61 @@ Every installed run needs matching EXE/DLL provenance, owned normal exit,
 validation-clean logs and before/after binary hashes. The existing roof/terrain
 snow fixture remains a separate regression gate; this change does not accept
 far roofs, roads, terrain powder quality or footprint behavior by inference.
+
+## Standalone installed capture runner
+
+`scripts/Test-TreeSnowCrowns.ps1` automates a bounded deposited-snow capture.
+Its default `-World Auto` tries the stock CWA/Everon candidate first. Only an
+explicit fixture-unavailable result before binding a tree permits a fresh native
+Eden fallback. Runtime errors, malformed telemetry, unsupported commands or an
+already selected tree that fails a control abort the campaign. Use an explicit
+world to require that world; `-Model` requires its literal full loaded model path.
+
+```bash
+LOCK_OWNER="stock tree snow crowns" scripts/with-game-lock.sh pwsh -NoProfile -File scripts/Test-TreeSnowCrowns.ps1 -World LegacyCwa
+LOCK_OWNER="native tree snow crowns" scripts/with-game-lock.sh pwsh -NoProfile -File scripts/Test-TreeSnowCrowns.ps1 -World Native
+LOCK_OWNER="direct tree snow crowns" scripts/with-game-lock.sh pwsh -NoProfile -File scripts/Test-TreeSnowCrowns.ps1 -World LegacyCwa -Direct
+```
+
+`pwsh -NoProfile -File scripts/Test-TreeSnowCrowns.ps1 -SelfTest` needs no lock,
+game, GPU or installed files. Its 27 pure checks cover the exact production
+trace grammar, paths with spaces/raw backslashes, literal SQF quoting, finite
+bounds and coordinates, owner IDs, budget limits, covered proof, deposited
+state/upload and invariant-culture camera calculations. The full runner has
+also passed PowerShell AST parsing; no installed run is claimed here.
+
+Each campaign holds the shared lock and uses fresh private profiles and owned
+processes for `WGR_TREE_SNOW=1` and `0`. It reads DEPLOYED-FROM first, records
+the EXE/DLL hashes, sizes and timestamps, and rejects final pair/stamp drift.
+It requires normal exit code0, Shutdown complete and validation-clean logs.
+Only its own process can be stopped during failed cleanup. Result JSON,
+command/response JSONL, engine logs, provenance and PNG hashes remain under
+`build/tree-snow/`.
+
+The target must have a real exposed owner proof, a loaded-model bounds row and
+a matching actual SQF nearest object's debug model and XZ. The proof's upper
+center is used only to find and aim at that actual tree; no geometry is spawned.
+The upright, recentered fixture requires origin XZ within25cm of that center.
+Native geometry with an offset center can therefore refuse instead of silently
+binding a different tree. The OFF process must bind the same model, bounds and
+actual ASL within2cm, and must issue no crown roof probes. RenderId births are
+recorded separately; cross-process RenderId equality is not a valid identity test.
+
+At fixed simulation time100, date1985-06-21 16:00, exposure1, wind/rain/cloud0,
+snowline off and temporal/jitter/grass off, the runner enables actual depth0.18
+without falling snow. Cameras aim at the bound crown at30m,150m,400m, from
+above and on return. Terrain height is queried for each derived perspective
+camera rather than guessed. It also captures the disabled state and restored
+near/far state, checking stored depth/chunks throughout. Current target ASL and
+paused time are checked for every screenshot. The trace is bounded to32 models
+and512 proof rows, so it establishes the initial admitted positive, not a fresh
+lease at every capture; no shelter/lifetime acceptance is inferred from it.
+
+The central60% image metric requires a nonzero ON/OFF difference at30/150/400m
+to reject a completely unused coat. Return, restore and top-view metrics are
+retained for inspection. That broad region includes terrain and other objects;
+it is not a crown, trunk or alpha-hole segmentation mask and is not a visual
+threshold for quality. Completion status is `captured-not-visually-accepted`.
+Review those masks, distant whiteness, LOD continuity and temporal glitter before
+accepting appearance. Real covered/moved/deleted controls, wind sequences and
+altitude-only snow remain the separate gates described above.
