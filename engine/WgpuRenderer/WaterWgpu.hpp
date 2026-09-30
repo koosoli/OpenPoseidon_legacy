@@ -26,6 +26,12 @@ class WaterWgpu : public IWaterRenderer
     void DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd) override;
 
   private:
+    void QueueRainWater(bool enabled);
+    uint64_t _rainWaterRevision = UINT64_MAX;
+    uint64_t _rainWaterGeneration = UINT64_MAX;
+    RStringB _rainWaterWorld;
+    bool _rainWaterEnabled = false;
+    bool _rainWaterHasSurface = false;
     // (Re)builds the quadtree when the map changes; returns true if it did.
     bool RebuildIfNeeded(const Landscape& land);
     void BuildQuadtree(const Landscape& land);

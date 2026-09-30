@@ -15,6 +15,8 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/LandscapeShared.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
+#include <Poseidon/World/Weather/RainWaterField.hpp>
+#include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/World/World.hpp>
 
@@ -782,6 +784,43 @@ bool WaterWgpu::RebuildIfNeeded(const Landscape& land)
     return true;
 }
 
+void WaterWgpu::QueueRainWater(bool enabled)
+{
+    static const bool featureEnabled = [] {
+#ifdef _WIN32
+        char* value = nullptr; size_t length = 0;
+        _dupenv_s(&value, &length, "WGR_RAIN_WATER");
+        const bool result = !value || value[0] != '0'; std::free(value); return result;
+#else
+        const char* value = std::getenv("WGR_RAIN_WATER");
+        return !value || value[0] != '0';
+#endif
+    }();
+    const auto& field = GRainWater();
+    WgrRainWaterParams p{};
+    p.domain = {field.OriginX(), field.OriginZ(), field.Spacing(), Glob.time.toFloat()};
+    const bool active = featureEnabled && enabled && field.Width() >= 2 && field.Height() >= 2;
+    const float rain = UniformWettingDensity(GLandscape->GetRainDensity(), GRain.EffectiveDensity(), GRain.Params().snowflakes);
+    p.control = {float(field.Width()), float(field.Height()), rain, active ? 1.0f : 0.0f};
+    p.generation = field.Generation();
+    const RStringB world = GLandscape->GetName();
+    std::vector<WgrVec4> cells;
+    if (active && (!_rainWaterEnabled || _rainWaterRevision != field.Revision() ||
+        _rainWaterGeneration != field.Generation() || _rainWaterWorld != world))
+    {
+        const auto snapshot = field.Snapshot();
+        cells.resize(snapshot.size() / 4);
+        static_assert(sizeof(WgrVec4) == 4 * sizeof(float));
+        if (!snapshot.empty()) std::memcpy(cells.data(), snapshot.data(), snapshot.size() * sizeof(float));
+        _rainWaterHasSurface = std::any_of(cells.begin(), cells.end(), [](const WgrVec4& cell) { return cell.y > 0.001f; });
+    }
+    if (!active) _rainWaterHasSurface = false;
+    _engine.QueueRainWater(p, field.Revision(), std::move(cells));
+    _rainWaterRevision = field.Revision(); _rainWaterWorld = world; _rainWaterEnabled = active;
+    _rainWaterGeneration = field.Generation();
+    if (_rainWaterHasSurface) _engine.SubmitRainWaterMarker();
+}
+
 void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
 {
     OceanCpuSample cpuSample;
@@ -790,6 +829,8 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         return;
     }
     const Engine::WaterSettings& look = _engine.WaterLook();
+    // Queue land water independently of the ocean quadtree's coastal pruning.
+    QueueRainWater(look.enabled);
     // Keep gameplay-side rifle droplets in lockstep with the renderer setting even
     // when the developer overlay has never been opened.
     SetRifleWaterImpactSprayEnabled(look.rifleImpactSpray);

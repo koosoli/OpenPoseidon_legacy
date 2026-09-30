@@ -3089,6 +3089,14 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
         wgr_water_set_params(_renderer, &p.waterParams);
         p.waterParamsDirty = false;
     }
+    if (p.rainWaterDirty)
+    {
+        wgr_rain_water_set_grid(_renderer, &p.rainWaterParams,
+            p.rainWaterCells.empty() ? nullptr : p.rainWaterCells.data(),
+            U32(p.rainWaterCells.size()), p.rainWaterRevision);
+        p.rainWaterCells.clear();
+        p.rainWaterDirty = false;
+    }
     if (p.waterInteractionDirty)
     {
         wgr_water_set_interaction_params(_renderer, &p.waterInteraction);
@@ -5145,6 +5153,23 @@ void EngineWgpu::QueueWaterParams(const WgrWaterParams& p)
     _pendingSet.waterParamsDirty = true;
 }
 
+void EngineWgpu::QueueRainWater(const WgrRainWaterParams& p, uint64_t revision, std::vector<WgrVec4> cells)
+{
+    // Preserve an already queued changed-grid snapshot if another camera queues
+    // only its time/rain parameters before the next overlap-safe drain.
+    const bool same = _pendingSet.rainWaterRevision == revision &&
+        _pendingSet.rainWaterParams.generation == p.generation &&
+        _pendingSet.rainWaterParams.domain.x == p.domain.x &&
+        _pendingSet.rainWaterParams.domain.y == p.domain.y &&
+        _pendingSet.rainWaterParams.domain.z == p.domain.z &&
+        _pendingSet.rainWaterParams.control.x == p.control.x &&
+        _pendingSet.rainWaterParams.control.y == p.control.y;
+    if (!cells.empty() || !same || p.control.w < 0.5f) _pendingSet.rainWaterCells = std::move(cells);
+    _pendingSet.rainWaterParams = p;
+    _pendingSet.rainWaterRevision = revision;
+    _pendingSet.rainWaterDirty = true;
+}
+
 void EngineWgpu::QueuePlanarReflectionPad(float pad)
 {
     _pendingSet.planarReflectionPad = pad;
@@ -7150,6 +7175,23 @@ void EngineWgpu::SubmitWater(std::span<const WgrWaterNode> nodes)
     _waterNodes.insert(_waterNodes.end(), nodes.begin(), nodes.end());
     _waterBatches.push_back(batch);
 
+    WgrCmd cmd{};
+    cmd.kind = WGR_CMD_DRAW_WATER;
+    cmd.arg = U32(_waterBatches.size() - 1);
+    _cmds.push_back(cmd);
+}
+
+void EngineWgpu::SubmitRainWaterMarker()
+{
+    // Preserve Scene's opaque/water/transparent sequencing on inland views
+    // where ocean culling produced no sea nodes. This batch draws zero ocean
+    // instances; the independent rainfall pipeline owns the actual geometry.
+    if (!_renderer) return;
+    EnsureCamera();
+    WgrWaterBatch batch{};
+    batch.first_node = U32(_waterNodes.size());
+    batch.camera = _currentCamera;
+    _waterBatches.push_back(batch);
     WgrCmd cmd{};
     cmd.kind = WGR_CMD_DRAW_WATER;
     cmd.arg = U32(_waterBatches.size() - 1);

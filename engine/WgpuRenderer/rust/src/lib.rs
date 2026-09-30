@@ -31,6 +31,7 @@ mod upscaler;
 // REN-THR-009 — the Send + Sync upload surface for CPU-path meshes.
 mod uploader;
 mod water;
+mod rain_water;
 // TW-WATER W1 — the selectable water backend (Current OP / Tidewater Native).
 mod water_backend;
 mod water_tw;
@@ -799,6 +800,7 @@ pub struct Renderer {
     // TW-WATER W1 — the active water backend. Owns the surface AND the underwater compositor
     // (Current OP: today's `Water` + `Underwater`, unchanged); see water_backend.rs.
     water: WaterBackend,
+    rain_water: rain_water::RainWater,
     // Actual depth-tested water coverage from the previous completed frame. This corrects the
     // world-sized sea quadtree's conservative CPU bounds before paying for a planar reflection.
     water_visibility: WaterVisibility,
@@ -1818,6 +1820,7 @@ impl Renderer {
             &device, &queue, gfx3d.camera_layout(), color_format, sample_count,
             &mut composer, fft_storage_supported,
         );
+        let rain_water = rain_water::RainWater::new(&device, gfx3d.camera_layout(), color_format, sample_count, &mut composer);
         log.log(log_level::INFO, &format!("Water backend: initial {}", water.kind().label()));
         if let Some(op) = water.current_op() {
             if op.water.fft_enabled() {
@@ -1912,6 +1915,7 @@ impl Renderer {
             grass,
             far,
             water,
+            rain_water,
             water_visibility,
             gpu_timers,
             direct_draws: std::cell::Cell::new(DirectDrawStats::default()),
@@ -3669,6 +3673,10 @@ impl Renderer {
             terrain_batches.first().map(|b| b.camera as usize), draws3d.first().map(|d| d.camera as usize),
             water_batches.first().map(|b| b.camera as usize), grass_batches.first().map(|b| b.camera as usize));
         let main_scene_cam = main_selection.index; // Same existing front-entry priority, not a new camera policy.
+        if let Some(camera) = cameras.get(main_scene_cam) {
+            self.rain_water.prepare(&self.device, &self.queue, camera, &self.terrain.heightmap_view(),
+                self.terrain.heightmap_gen(), self.terrain.conform_params());
+        }
         if self.main_camera_tuple.is_some() {
             let render=self.render_size(); let output=(self.config.width,self.config.height);
             self.main_camera_tuple.as_mut().unwrap().capture(main_selection,cameras,render,output);
@@ -5739,6 +5747,26 @@ impl Renderer {
                 }
             }
 
+            // Simulation-owned land water is independent of whether the ocean
+            // quadtree contributed a Water op. Draw once in the world segment,
+            // after opaque colour and before ocean/transparent sorted tails.
+            if start == 0 && self.rain_water.drawable() {
+                if let Some(camera) = self.gfx3d.camera_bind() {
+                    let mut rain_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("wgr_rain_water_pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &target, depth_slice: None, resolve_target: None,
+                            ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                        })],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: seg_depth, depth_ops: None, stencil_ops: None,
+                        }), timestamp_writes: None, occlusion_query_set: None, multiview_mask: None,
+                    });
+                    let offset = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
+                    self.rain_water.draw(&mut rain_pass, camera, offset);
+                }
+            }
+
             // Dedicated water pass. Water is transparent and reconstructs the seabed by SAMPLING
             // the opaque prepass depth — which it also depth-tests against — so its depth
             // attachment must be READ-ONLY (depth_ops/stencil_ops = None). The shared colour
@@ -6857,6 +6885,18 @@ impl Renderer {
 
     fn water_set_params(&mut self, params: WgrWaterParams) {
         self.water.set_params(&self.queue, params);
+    }
+
+    fn rain_water_set_grid(&mut self, params: ffi::WgrRainWaterParams, cells: &[WgrVec4], revision: u64) {
+        let accepted = self.rain_water.set_grid(&self.device, &self.queue, params, cells, revision);
+        static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let trace = *TRACE.get_or_init(|| std::env::var("WGR_RAIN_WATER_TRACE").as_deref()==Ok("1"));
+        if (!cells.is_empty() && trace) || !accepted {
+            let max_depth = cells.iter().map(|c| c[1]).fold(0.0f32, f32::max);
+            self.log.log(log_level::INFO, &format!(
+                "Rain water grid: revision={revision} width={} height={} copied={} enabled={} accepted={accepted} maxDepth={max_depth:.6} independent=1",
+                params.control[0], params.control[1], cells.len(), params.control[3]));
+        }
     }
 
     fn water_set_cascade_config(&mut self, index: u32, config: WgrWaterCascadeConfig) {

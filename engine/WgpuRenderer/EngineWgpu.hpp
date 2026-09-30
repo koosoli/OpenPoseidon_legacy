@@ -555,6 +555,7 @@ class EngineWgpu : public EngineDummy
     // Called by the water renderer: append a batch of `nodes` for the current camera
     // and enqueue its draw in submission order (after the opaque terrain + 3D).
     void SubmitWater(std::span<const WgrWaterNode> nodes);
+    void SubmitRainWaterMarker();
     // Called by TerrainWgpu after its terrain batch. The procedural grass system owns
     // all blade placement; C++ only preserves ordering and the source camera.
     void SubmitGrass();
@@ -1279,6 +1280,10 @@ class EngineWgpu : public EngineDummy
         // still direct -- and unguarded -- under overlap. Interaction events accumulate.
         WgrWaterParams waterParams{};
         bool waterParamsDirty = false;
+        WgrRainWaterParams rainWaterParams{};
+        uint64_t rainWaterRevision = 0;
+        bool rainWaterDirty = false;
+        std::vector<WgrVec4> rainWaterCells;
         float planarReflectionPad = 0.0f;
         bool planarPadDirty = false;
         WgrWaterInteractionParams waterInteraction{};
@@ -1703,6 +1708,7 @@ class EngineWgpu : public EngineDummy
     void QueueMud(std::vector<float> data) { _pendingSet.mudData = std::move(data); }
     void QueueSand(std::vector<float> data) { _pendingSet.sandData = std::move(data); }
     void QueueWaterParams(const WgrWaterParams& p);
+    void QueueRainWater(const WgrRainWaterParams& p, uint64_t revision, std::vector<WgrVec4> cells);
     void QueuePlanarReflectionPad(float pad);
     void QueueWaterInteraction(const WgrWaterInteractionParams& p, const WgrWaterInteractionEvent* events,
                                uint32_t count);

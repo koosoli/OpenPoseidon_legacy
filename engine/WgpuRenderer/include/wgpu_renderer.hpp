@@ -1380,6 +1380,12 @@ struct WgrGrassParams
  * draw in one frame. Metadata scales with this, nothing else does. */
 #define WGR_WATER_MAX_BODIES 16u
 
+/* Separate simulation-owned rainfall water; existing ocean ABI is unchanged.
+ * domain = origin X/Z, spacing metres, simulation time.
+ * control = integer width/height (as exact floats), liquid rain, enabled.
+ * Grid RGBA = physical surface height, water depth, flow X/Z. */
+struct WgrRainWaterParams { WgrVec4 domain; WgrVec4 control; uint64_t generation; uint64_t reserved; };
+
 struct WgrWaterParams
 {
     WgrVec2 world_origin;
@@ -2300,6 +2306,7 @@ static_assert(sizeof(WgrSmokeShadowBlob) == 32, "WgrSmokeShadowBlob layout must 
 static_assert(sizeof(WgrSmokeVolumeParams) == 96, "WgrSmokeVolumeParams layout must match the Rust #[repr(C)] struct");
   static_assert(sizeof(WgrGrassParams) == 4784, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterParams) == 1472, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrRainWaterParams) == 48, "WgrRainWaterParams must match Rust");
 static_assert(sizeof(WgrWaterNode) == 40, "WgrWaterNode layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterBatch) == 16, "WgrWaterBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterInteractionEvent) == 64 && alignof(WgrWaterInteractionEvent) == 16, "WgrWaterInteractionEvent must match Rust");
@@ -2764,6 +2771,10 @@ extern "C"
     /* Set/refresh the water placement params (see WgrWaterParams). Cheap; called on
      * map load and each frame to update the animated `sea_level`. */
     WGR_API void wgr_water_set_params(WgrRenderer* renderer, const WgrWaterParams* params);
+    /* Empty cells preserve a matching revision; changed grid/revision requires
+     * width*height cells. enabled=0 clears presentation, never simulation. */
+    WGR_API void wgr_rain_water_set_grid(WgrRenderer* renderer, const WgrRainWaterParams* params,
+        const WgrVec4* cells, uint32_t count, uint64_t revision);
 
     /* Set per-cascade configuration (0..7). Spectrum initialisation regenerates when spectrum parameters change. */
     WGR_API void wgr_water_set_cascade_config(WgrRenderer* renderer, uint32_t index, const WgrWaterCascadeConfig* config);
@@ -3229,6 +3240,7 @@ constexpr uint32_t WgrLayoutHash()
     h = WgrHashSize(h, sizeof(WgrGrassDownwash));
     h = WgrHashSize(h, sizeof(WgrGrassParams));
     h = WgrHashSize(h, sizeof(WgrWaterParams));
+    h = WgrHashSize(h, sizeof(WgrRainWaterParams));
     h = WgrHashSize(h, sizeof(WgrWaterNode));
     h = WgrHashSize(h, sizeof(WgrWaterBatch));
     h = WgrHashSize(h, sizeof(WgrWaterInteractionEvent));

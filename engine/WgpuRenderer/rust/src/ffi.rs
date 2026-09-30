@@ -1424,6 +1424,11 @@ pub struct WgrGrassParams {
     pub native_tint_lerp: f32,
 }
 
+// Additive rainfall grid API. The ocean/backends retain their existing layout.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct WgrRainWaterParams { pub domain: WgrVec4, pub control: WgrVec4, pub generation:u64, pub reserved:u64 }
+
 // Per-map + per-frame water parameters (a small UBO). See wgpu_renderer.hpp.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -1730,6 +1735,7 @@ const _: () = assert!(std::mem::size_of::<WgrGrassDownwash>() == 16);
 // the card-coverage / procedural-look pair (GrassParams.card_look / .blade_look).
 const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4784);
 const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 1472);
+const _: () = assert!(std::mem::size_of::<WgrRainWaterParams>() == 48);
 const _: () = assert!(std::mem::size_of::<WgrWaterNode>() == 40);
 const _: () = assert!(std::mem::size_of::<WgrWaterBatch>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrWaterInteractionEvent>() == 64);
@@ -1807,6 +1813,7 @@ const fn wgr_layout_hash() -> u32 {
     h = hash_size(h, sz::<WgrGrassDownwash>());
     h = hash_size(h, sz::<WgrGrassParams>());
     h = hash_size(h, sz::<WgrWaterParams>());
+    h = hash_size(h, sz::<WgrRainWaterParams>());
     h = hash_size(h, sz::<WgrWaterNode>());
     h = hash_size(h, sz::<WgrWaterBatch>());
     h = hash_size(h, sz::<WgrWaterInteractionEvent>());
@@ -3056,6 +3063,20 @@ pub unsafe extern "C" fn wgr_water_set_params(
         let renderer = unsafe { &mut *renderer };
         let params = unsafe { *params };
         renderer.water_set_params(params);
+    }));
+}
+
+/// # Safety
+/// Live renderer, valid params and `count` consecutive RGBA cells when nonzero.
+/// The renderer copies all cell bytes synchronously before this call returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_rain_water_set_grid(renderer:*mut WgrRenderer,
+    params:*const WgrRainWaterParams,cells:*const WgrVec4,count:u32,revision:u64) {
+    if renderer.is_null() || params.is_null() || count>1024*1024 || (count>0&&cells.is_null()) {return}
+    let _=catch_unwind(AssertUnwindSafe(|| {
+        let renderer=unsafe {&mut *renderer};let params=unsafe {*params};
+        let cells=if count==0 {&[]} else {unsafe {std::slice::from_raw_parts(cells,count as usize)}};
+        renderer.rain_water_set_grid(params,cells,revision);
     }));
 }
 
