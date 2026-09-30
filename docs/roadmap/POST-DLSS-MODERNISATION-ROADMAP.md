@@ -32,6 +32,31 @@ surface metadata; installed 8b3ae13c passes soil response, camera return,
 master-off and pure Grass exclusion. Parked architecture work
 and previously rejected defaults remain parked.
 
+September 30 weather continuation is **source integrated; installed acceptance
+pending** on the `codex/streaming-residency` baseline. It follows the owner's
+request to finish snow appearance/roof-object cover and rain-soaked uniforms.
+The shared world-fixed powder filters colour and normals to their distant mean
+while preserving existing snow depth, tracks and road-depth rules. Explicit
+owner/mesh/material authority admits raised object coating; roof undersides,
+walls and unsupported sources remain excluded. Person wetness follows actual
+simulation rain, self-ignored roof shelter and gradual drying; exact stock cloth
+identities/atlas masks exclude skin and proxies. These are bounded material
+slices, not snow geometry, hydrology, save/network state or broad asset support.
+
+| Current slice | Source/check evidence | Installed gate still open |
+|---|---|---|
+| Diffuse filtered snow powder | [material design](decisions/SNOW-SURFACE-MATERIAL-20260930.md), production GPU helper and shader composition evidence recorded there | Same installed pair powder ON/OFF, near/far/return views, preserved grain/track response and no distant sparkle. The older 8b3ae13c 1m walking/refill capture proves the retained contact baseline, not this shader. |
+| Raised roof/object coating | [explicit receiver and shelter contract](modernisation/OBJECT-SNOW-SURFACE-20260930.md), actual-helper/device tests authored; full integrated rerun pending | [Stock surface runner](decisions/SNOW-STOCK-SURFACE-FIXTURE-20260930.md): actual tent/source identity, dry/deposit/object OFF, exposed top positive, underside/wall negatives, same-ground roof delete/replace, camera return, disable/reset, stock Eden road controls. UAZ remains exploratory when source metadata excludes it. |
+| Wet stock uniforms | [real-rain fixture](decisions/UNIFORM-WETNESS-STOCK-FIXTURE-20260930.md), actual simulation/atlas-mask tests authored, 50 pure runner checks pass | Actual rain/time wetting above 0.2 after at least 20 simulation seconds, exact paused state, at least 120 simulation seconds natural drying and independently covered actor; effective WB cloth encoding and matched render ON/OFF with protected face/hands/guns. |
+
+The authoritative renderer register records these as PARTIAL:
+`RSYS-SNOW-SURFACES` and `RSYS-UNIFORM-WETNESS`. The locked private-profile runners
+retain installed provenance/hashes, actual state, source telemetry, owned normal
+exits and descriptive images. They deliberately do not promote capture success
+or whole-frame RGB differences to visual acceptance. Root must add the new
+matching installed commit and bounded runtime results before closing any gate.
+This work does not reopen parked streaming/architecture or rejected defaults.
+
 September 12 small-change follow-through:
 [camera upload batching and same-size terrain resource reuse](decisions/LOW-RISK-PERF-20260912.md).
 Camera CPU preparation is reduced; a sustained FPS gain is NOT established.

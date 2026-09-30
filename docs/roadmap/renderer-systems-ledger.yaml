@@ -770,7 +770,10 @@ unbuilt_candidates: >-
       2026-09-09 experimental snow: off-by-default Weather tab terrain layer,
       persistent mission-local foot/vehicle/explosion depressions, filled only
       by new snowfall. GPU camera-window detail does not evict CPU tracks.
-      No ground collision changes, roof coverage or save/network persistence.
+      That historical slice had no ground collision changes, roof coverage or
+      save/network persistence. September 30 shared powder/raised-coat source
+      integration is tracked separately as RSYS-SNOW-SURFACES below; its new
+      installed material/roof acceptance remains pending.
       Installed 5453ac8d captures confirm persistent boot/wheel/explosion marks
       after camera return and their filling by new snowfall. Terrain GPU median
       0.326 ms disabled versus 0.357 ms enabled in the short Desert comparison;
@@ -1275,3 +1278,142 @@ unbuilt_candidates: >-
 
 
 # =================================================================================
+
+  - id: RSYS-SNOW-SURFACES
+    title: Filtered terrain powder and explicitly admitted raised object snow
+    plan: docs/roadmap/decisions/SNOW-SURFACE-MATERIAL-20260930.md
+    status: PARTIAL
+    owner: codex/streaming-residency
+    audited: 2026-09-30
+    completeness: >-
+      SOURCE INTEGRATED; NEW INSTALLED ACCEPTANCE PENDING. Baseline c9024bb4
+      retained the earlier snow/contact layer and installed 8b3ae13c. Shared
+      powder d538b383 filters three world-fixed diffuse/normal bands against
+      projected pixel footprint, retaining the mean palette and compacted
+      track darkening. Terrain colour/normal prepass share relief; deposit,
+      drift, deficits, vertex displacement and road-depth evaluation remain.
+      The material design records production GPU helper/composition checks;
+      full integrated build/device checks and installed captures are pending.
+
+      Raised source integration 322e3d45 (agent implementation 423e3974) adds
+      actual finite deposit and fragment-altitude snowline through a renderer
+      private camera lane. Direct and retained meshes require explicit source
+      owner/LOD flags; proxies, Person, animated/dynamic/skinned, vegetation,
+      conformed roads and unsupported materials do not inherit that authority.
+      Authored outward normal and view sidedness reject walls/undersides.
+      Near physical zenith maps and conservative complete retained bake data
+      supply shelter admission, independently of artistic AO strength/floor;
+      unknown direct/outside/pending coverage fails closed. This adds a material
+      coat without snow geometry thickness, displacement or collision.
+      Public byte layouts/FFI exports are unchanged, but new flag/lane semantics
+      still require the matching installed executable and renderer DLL.
+
+      Source tests include actual object-helper composition and GPU directional
+      depth falsifiers, finite surface parameters, normal-prepass/material flag
+      contracts, private camera-tail offsets and streaming receiver-bit receipt
+      preservation. Presence of these tests is not an integrated PASS claim.
+      Pure stock runner checks pass 32 assertions plus existing roof mocked RPC
+      tests, without game/GPU use by the runner author. Prior installed roof
+      rain/puddle evidence and 8b3ae13c walking/refill are retained baselines,
+      not acceptance of this new object coat or powder.
+    known_gap: >-
+      Require the new matching installed build and ordinary shutdown/hash proof.
+      Test-SnowSurfaceCoverage captures dry/deposit/object-OFF and powder-OFF
+      controls with actual CampEastC identity/placement and effective uploaded
+      parameters. Inspect exposed roof pixels positively, underside and wall
+      pixels negatively; prove the identical covered-ground positive response
+      after roof deletion and restored shelter after replacing the same roof.
+      Inspect near/far/camera return and disabled/reset state, retained positive
+      stock tracks and grain, plus classic Eden road controls. Native road
+      poses are supplementary until their actual road source is established.
+      UAZ is exploratory unless receiver metadata and actual positive pixels
+      admit its owner mesh. Complete-bake far approximation, direct outside-map
+      failures, all ambient settings, other canopies/models/maps, ordinary
+      temporal/grass appearance and performance are not broadly accepted.
+      See decisions/SNOW-STOCK-SURFACE-FIXTURE-20260930.md and
+      modernisation/OBJECT-SNOW-SURFACE-20260930.md. Do not mark SHIPPED or use an
+      older snow capture to close the current installed gates.
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/shaders/snow_material.wgsl
+        symbol: fn snow_powder_albedo
+      - file: engine/WgpuRenderer/rust/src/shaders/snow_material.wgsl
+        symbol: fn snow_powder_normal
+      - file: engine/WgpuRenderer/rust/src/terrain/mod.rs
+        symbol: pub fn snow_surface_params
+      - file: engine/WgpuRenderer/rust/src/shaders/shading.wgsl
+        symbol: fn object_snow_coverage
+      - file: engine/WgpuRenderer/rust/src/gfx3d/shader3d.wgsl
+        symbol: direct_snow_receiver
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: WGR_DRAW3D_SNOW_RECEIVER
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: WGR_INSTANCE_SNOW_RECEIVER
+
+  - id: RSYS-UNIFORM-WETNESS
+    title: Actual rain history and stock cloth-only wet uniform shading
+    plan: docs/roadmap/decisions/UNIFORM-WETNESS-STOCK-FIXTURE-20260930.md
+    status: PARTIAL
+    owner: codex/streaming-residency
+    audited: 2026-09-30
+    completeness: >-
+      SOURCE INTEGRATED; INSTALLED STATE AND APPEARANCE ACCEPTANCE PENDING.
+      a4b234c2 (agent dcdea4e0), 750395a9 and 3454b689 add normalized cosmetic
+      Person water retention from actual GLandscape rain, an upward 30m
+      self-ignored shelter probe refreshed at most once per simulation second,
+      exact constant-exposure integration and gradual drying. Initial value
+      is zero, nonpositive/invalid simulation delta does not advance it, and
+      accelerated time changes duration rather than the integration result.
+      No setter is added; the readonly triUniformWetness object query returns
+      -1 for invalid/non-Person objects. State is cosmetic/mission-local, not
+      a saved/networked garment or gameplay wetness system.
+
+      Primary-owner LOD and exact model/texture identities admit stock plain
+      cloth, WB and EB atlases. The WB pelvis remains cloth between exact hand
+      exclusions; derivative-filtered atlas masks preserve skin/hands/face.
+      Child weapon proxies do not inherit Person authority. The material
+      darkens linear cloth colour without changing hue and uses bounded damp
+      rough/specular response. Render-only WGR_UNIFORM_WET=0 retains CPU rain
+      history. UNIFORM_WET and UNIFORM_CLOTH opt-in traces record actual source
+      exposure and encoded material state; decile rows are not per-frame values.
+
+      Authored CPU tests exercise actual integrator partitioning/exposure,
+      pause/nonfinite bounds and exact cloth identities/encoding. Authored GPU
+      tests exercise actual shader mask/linear colour and real material-tail
+      layout, including protected skin and preserved pelvis cloth. These need
+      root's integrated build and test execution. Pure runner helper checks
+      pass 50 assertions plus existing stock roof mocked RPC checks; no runtime or
+      GPU verification is inferred from those checks.
+    known_gap: >-
+      Test-UniformWetness must run on the new matching installed pair under
+      the shared lock/private profile. Actual SoldierWB actors must remain in
+      EffectStandStill at their verified ASL/heading; exposed real-rain wetness
+      exceeds 0.2 after at least 20 simulation seconds, while the independently
+      covered actual CampEastC actor remains at most 0.001. Pause/camera return
+      must preserve exact scalar state and rain; at least 120 dry simulation
+      seconds must gradually reduce retained water. Unknown commands, absent
+      actual rain, invalid queries, missing cloth upload or unsupported source
+      are failures, not appearance evidence. Require actual WB atlas kind2,
+      matching renderer switch and positive paused-state band, encoded 2+row
+      wetness ON or zero OFF, respecting four-decimal decile trace precision.
+      Compare renderer ON/OFF using recorded time/weather/poses/state and
+      actual clothing, face/hands/weapon regions; dry/wet whole-frame changes
+      include weather lighting and cannot prove protected cloth-only shading.
+      Broader models, other engines/LOD atlases, cloth simulation, save/network
+      persistence, gameplay effects and general performance are outside this
+      bounded source slice. No installed status or new screenshots are claimed
+      until root supplies its actual captured build/provenance and controls.
+    production_call_sites:
+      - file: engine/Poseidon/World/Entities/Infantry/Person.cpp
+        symbol: AdvanceUniformWetness
+      - file: engine/Poseidon/World/Entities/Infantry/Person.hpp
+        symbol: GetUniformWetness
+      - file: engine/Poseidon/World/Entities/Infantry/UniformWetness.hpp
+        symbol: inline float AdvanceUniformWetness
+      - file: engine/Poseidon/Graphics/Rendering/UniformClothAdmission.hpp
+        symbol: AdmitUniformCloth
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: EncodeUniformWetness
+      - file: engine/WgpuRenderer/rust/src/gfx3d/shader3d.wgsl
+        symbol: fn uniform_cloth_mask
+      - file: engine/WgpuRenderer/rust/src/gfx3d/shader3d.wgsl
+        symbol: fn uniform_cloth_color
