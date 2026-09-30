@@ -9,6 +9,7 @@
 // sun lighting.
 #import frame::{frame, reverse_z, fog_factor, apply_fog, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_rain_coverage, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
 #import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
+#import frame::ground_sky_reflection
 #import ground_wet::{cultivated_soil_fraction, soil_wet_amount, soil_wet_fresnel, soil_wet_sun_lobe}
 #import shadow::shadow_strength
 #import lighting::lights_contrib
@@ -1429,20 +1430,19 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
             soil_wet * (1.0 - rain_puddle));
     }
     if (rain_puddle > 0.0) {
-        // A flat water normal removes authored grain from the reflection: no
-        // high-frequency sun dots. Reuse the bound SH sky, with no reflection
-        // texture/pass/history. This first slice reflects SKY, not scene objects.
+        // Reflect actual directional sky/cloud radiance. Diffuse SH erased
+        // cloud contrast and made these wet patches read as a pale paint film.
         let view = normalize(-in.world_pos);
         let water_n = ground_puddle_ripple_normal(in.world_xz, tp.time, tp.rain_strength, puddle_footprint);
         let grazing = 1.0 - clamp(dot(water_n, view), 0.0, 1.0);
-        let fresnel = 0.02 + 0.78 * pow(grazing, 5.0);
+        let fresnel = 0.02 + 0.98 * pow(grazing, 5.0);
         var reflected = sun_ambient;
         if (sky_lit) {
-            reflected = sky_irradiance(reflect(-view, water_n)) * frame.sun_ambient.w
+            reflected = ground_sky_reflection(reflect(-view, water_n)) * frame.sun_ambient.w
                 * sky_vis_ao(in.world_xz) * local_sky_visibility;
         }
         let half_vector = normalize(view - frame.sun_dir_world.xyz + vec3<f32>(0.0, 1e-4, 0.0));
-        let sun_lobe = pow(max(dot(water_n, half_vector), 0.0), 48.0);
+        let sun_lobe = pow(max(dot(water_n, half_vector), 0.0), 96.0);
         reflected += sun_diffuse * sun_lobe * (1.0 - shadow) * cloud_sun_shadow(in.world_xz)
             * local_sky_visibility;
         // Raw roof admission above suppresses both the film and its reflected sky.

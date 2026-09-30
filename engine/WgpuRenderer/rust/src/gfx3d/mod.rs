@@ -1699,6 +1699,18 @@ impl CameraGroup {
                         view_dimension: wgpu::TextureViewDimension::D2, multisampled: false},
                     count: None,
                 },
+                // Borrow Sky's existing disc-free radiance map. Puddles need
+                // directional reflection, not the diffuse SH convolution.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 19,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let lights_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1808,6 +1820,7 @@ impl CameraGroup {
         weather_view: &wgpu::TextureView,
         weather_dummy: &wgpu::TextureView,
         weather_gen: u64,
+        sky_env_view: &wgpu::TextureView,
     ) {
         let needed = count as u64 * self.stride;
         let grow = self.cap < needed || self.buf.is_none();
@@ -1918,6 +1931,10 @@ impl CameraGroup {
                     wgpu::BindGroupEntry {
                         binding: 18,
                         resource: wgpu::BindingResource::TextureView(physical_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 19,
+                        resource: wgpu::BindingResource::TextureView(sky_env_view),
                     },
                 ],
             });
@@ -8062,6 +8079,7 @@ impl Gfx3d {
                 self.weather_cover.target.as_ref().map(|(_,v)|v).unwrap_or(&self.weather_cover.dummy),
                 &self.weather_cover.dummy,
                 self.weather_cover.generation,
+                env_view,
             );
             let buf = self.cameras.buf.as_ref().unwrap();
             let mut camera_upload = camera_upload::CameraUpload::new(

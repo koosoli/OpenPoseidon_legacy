@@ -120,11 +120,13 @@ struct Wetness
         value = 0.0f;
         lastTime = -1.0f;
     }
-    float Update(float time, float rain)
+    float Update(float time, float rain, float sunlight = 0.0f, float wind = 0.0f)
     {
         if (!std::isfinite(time) || !std::isfinite(rain))
             return value;
         rain = std::clamp(rain, 0.0f, 1.0f);
+        sunlight = std::isfinite(sunlight) ? std::clamp(sunlight, 0.0f, 1.0f) : 0.0f;
+        wind = std::isfinite(wind) ? std::clamp(wind, 0.0f, 1.0f) : 0.0f;
         if (lastTime < 0.0f || time < lastTime)
         {
             // A fresh mission starts dry; sustained rain fills it, rather than a
@@ -135,7 +137,8 @@ struct Wetness
         }
         const float dt = time - lastTime;
         lastTime = time;
-        const float rate = rain / 30.0f + (1.0f - rain) / 180.0f;
+        const float evaporation = (1.0f + 2.0f * sunlight + 0.5f * wind) / 180.0f;
+        const float rate = rain / 30.0f + (1.0f - rain) * evaporation;
         const float equilibrium = (rain / 30.0f) / rate;
         value = std::clamp(equilibrium + (value - equilibrium) * std::exp(-rate * dt), 0.0f, 1.0f);
         return value;

@@ -3210,7 +3210,11 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     const auto& weather = render::frame::GPresentationSnapshot();
     _params._pad2 = UniformWettingDensity(weather.landscapeRainDensity, weather.rainEffectiveDensity,
                                         weather.rainParticleSnowflakes);
-    _params._pad1 = _puddleWetness.Update(weather.timeSeconds, _params._pad2);
+    const float solarDrying = std::clamp(weather.sunDirection.Y(), 0.0f, 1.0f)
+        * std::pow(1.0f - std::clamp(weather.overcast, 0.0f, 1.0f), 2.0f)
+        * (1.0f - std::clamp(weather.nightEffect, 0.0f, 1.0f));
+    _params._pad1 = _puddleWetness.Update(weather.timeSeconds, _params._pad2,
+        solarDrying, weather.windSpeed / 20.0f);
     // Process-local diagnostic controls: isolate appearance without editing a
     // persistent weather/water profile. The wetness override still obeys ground,
     // slope, shore, roof and snow eligibility in the shader.

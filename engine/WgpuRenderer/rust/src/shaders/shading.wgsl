@@ -14,6 +14,8 @@
 #import color::srgb_to_linear
 #import frame::{interior_rain_reach, interior_rain_coverage, snow_receiver_reach}
 #import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
+#import tree_snow::tree_snow_albedo
+#import frame::ground_sky_reflection
 #import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage}
 
 // Cosmetic coating uses the actual raised surface, never terrain snow_depth / ground shelter
@@ -235,9 +237,9 @@ fn shade(
         let footprint = max(length(dwx), length(dwy));
         // Leaf cards use the powder MEAN only: no spatial/time seed or fine
         // normal detail that could sparkle when the cards move or shrink.
-        var powder = vec3<f32>(0.70, 0.75, 0.80);
-        if (tree_snow_cover <= 0.0) {
-            powder = snow_powder_albedo(world_pos + frame.cam_pos.xyz, footprint, 0.0);
+        var powder = snow_powder_albedo(world_pos + frame.cam_pos.xyz, footprint, 0.0);
+        if (tree_snow_cover > 0.0) {
+            powder = tree_snow_albedo(albedo, world_pos + frame.cam_pos.xyz, footprint);
         }
         albedo = mix(albedo, powder, snow_cover);
         nrm = object_snow_normal(world_pos, geo_normal, nrm, dwx, dwy, object_cover);
@@ -619,14 +621,14 @@ fn shade(
         let water_n = ground_puddle_ripple_normal(world_abs.xz, frame.ground_weather.w,
             frame.ground_weather.y, ground_footprint);
         let grazing = 1.0 - clamp(dot(water_n, view), 0.0, 1.0);
-        let fresnel = 0.02 + 0.78 * pow(grazing, 5.0);
+        let fresnel = 0.02 + 0.98 * pow(grazing, 5.0);
         var reflected = m_sun_ambient;
         if (sky_lit) {
-            reflected = sky_irradiance(reflect(-view, water_n)) * frame.sun_ambient.w
+            reflected = ground_sky_reflection(reflect(-view, water_n)) * frame.sun_ambient.w
                 * sky_vis_ao(world_abs.xz) * interior_sky_reach(world_abs);
         }
         let half_vector = normalize(view - frame.sun_dir_world.xyz + vec3<f32>(0.0, 1e-4, 0.0));
-        reflected += frame.sun_diffuse.rgb * pow(max(dot(water_n, half_vector), 0.0), 48.0) * sun_vis;
+        reflected += frame.sun_diffuse.rgb * pow(max(dot(water_n, half_vector), 0.0), 96.0) * sun_vis;
         rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel, rain_puddle);
     }
     // Debug: the raw AO buffer as greyscale, BEFORE fog — shipped alongside the effect because

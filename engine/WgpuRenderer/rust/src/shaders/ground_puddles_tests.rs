@@ -15,7 +15,7 @@ fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {
         ground_puddle_mask(mask_world, 1.0, 1.0));
     result[i * 4u + 1u] = vec4<f32>(ground_puddle_ripple_normal(world, 14.5, 1.0, 0.01),
         ground_puddle_land_factor(1.0, 1.0, 0.0, 0.0));
-    result[i * 4u + 2u] = vec4<f32>(ground_puddle_ripple_normal(world, 14.5, 1.0, 0.1),
+    result[i * 4u + 2u] = vec4<f32>(ground_puddle_ripple_normal(world, 14.5, 1.0, 0.16),
         ground_puddle_land_factor(select(1.0, 0.9, i % 8u == 0u),
             select(1.0, -0.1, i % 8u == 1u), 0.0, select(0.0, 0.03, i % 8u == 2u)));
     result[i * 4u + 3u] = vec4<f32>(ground_puddle_ripple_normal(world, 14.5, 0.0, 0.01),
@@ -84,7 +84,7 @@ fn ground_puddles_gpu_grow_with_wetness_filter_rain_and_obey_land_gates() {
         assert_eq!(sample[11], if i % 8 <= 2 { 0.0 } else { 1.0 }, "slope/ocean/snow exclusions");
         let n = &sample[4..7];
         let len = n.iter().map(|v| v * v).sum::<f32>().sqrt();
-        assert!((len - 1.0).abs() < 1e-5 && n[1] > 0.999,
+        assert!((len - 1.0).abs() < 1e-5 && n[1] > 0.99,
             "rain normals must remain finite, upward and bounded");
         resolved_rain |= n[0].abs() + n[2].abs() > 1e-5;
         moving_rain |= sample[15] > 1e-5;

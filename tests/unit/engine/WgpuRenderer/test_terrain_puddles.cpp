@@ -95,5 +95,23 @@ int main()
         stepped.Update(frame / 60.0f, 0.6f);
     assert(std::abs(single.value - stepped.value) < 0.00005f); // frame-rate independent
     assert(single.value > 0.0f && single.value < 1.0f);
+    Wetness shade, sun, wind;
+    for (auto* sample : {&shade, &sun, &wind}) {
+        sample->Update(0.0f, 1.0f);
+        sample->Update(60.0f, 1.0f);
+    }
+    shade.Update(120.0f, 0.0f);
+    sun.Update(120.0f, 0.0f, 1.0f);
+    wind.Update(120.0f, 0.0f, 0.0f, 1.0f);
+    assert(sun.value < wind.value && wind.value < shade.value);
+    const float sunPaused = sun.value;
+    assert(sun.Update(120.0f, 0.0f, 1.0f, 1.0f) == sunPaused);
+    Wetness sunSingle, sunStepped;
+    sunSingle.Update(0.0f, 0.8f);
+    sunStepped.Update(0.0f, 0.8f);
+    sunSingle.Update(90.0f, 0.8f, 0.7f, 0.4f);
+    for (int frame = 1; frame <= 5400; ++frame)
+        sunStepped.Update(frame / 60.0f, 0.8f, 0.7f, 0.4f);
+    assert(std::abs(sunSingle.value - sunStepped.value) < 0.00005f);
     return 0;
 }

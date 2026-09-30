@@ -404,6 +404,15 @@ struct SurfaceRays {
 @group(0) @binding(16) var<uniform> surface_rays: SurfaceRays;
 @group(0) @binding(17) var monitor_scene: texture_2d<f32>;
 @group(0) @binding(18) var weather_depth_map: texture_depth_2d;
+@group(0) @binding(19) var ground_sky_env: texture_2d<f32>;
+
+// Existing atmosphere/cloud radiance, shared with the sea. Its coarse 256x128
+// bake is already filtered; no sun disc or unresolved microtexture enters it.
+fn ground_sky_reflection(dir: vec3<f32>) -> vec3<f32> {
+    let u = fract(atan2(dir.z, dir.x) / 6.28318530718 + 0.5);
+    let v = acos(clamp(dir.y, -1.0, 1.0)) / 3.14159265359;
+    return textureSampleLevel(ground_sky_env, terrain_shadow_samp, vec2<f32>(u, v), 0.0).rgb;
+}
 
 // Diffuse sky irradiance for a world-space surface normal, from the SH-9 sky projection
 // (Ramamoorthi, "An Efficient Representation for Irradiance Environment Maps"), divided by PI so

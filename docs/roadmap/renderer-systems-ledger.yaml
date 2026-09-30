@@ -792,6 +792,14 @@ unbuilt_candidates: >-
       interactive smoke test; preserve that session. Snow roof correction
       remains isolated/uninstalled. See GROUNDED-RIGID-MESH-PUDDLES-20260930.md.
       Earlier source decisions:
+      New owner feedback rejects wet-mud/puddle/tree appearance and reports
+      missing standard-US controlled-player sand contacts, wet uniforms and
+      third-person visibility regressions. Earlier bounded AI fixtures do not
+      close those cases. Terrain-following physical runoff, hollow/crater
+      filling, valley flow and slow drainage are now authorised; the cosmetic
+      film does not implement them. Muzzle lighting and land rotor dust/sand/snow
+      are also authorised. Existing water rotor downwash is owner-accepted and
+      must remain unchanged. See WEATHER-OWNER-REGRESSIONS-20260930.md.
       MUD-VOLUMETRIC-CONTACT-20260930.md and NOGOVA-SOFT-MUD-CONTACT-20260930.md.
 
       Historical September 30 owner-priority mud puddle slice: rain-fed cosmetic wetness,
