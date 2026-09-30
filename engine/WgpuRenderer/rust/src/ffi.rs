@@ -2177,9 +2177,10 @@ mod abi_tests {
         let mut check = good_check();
         check.abi_version = 17;
         assert_eq!(unsafe { super::wgr_abi_validate(&check) }, 0);
-        assert_eq!(std::mem::size_of::<super::WgrWaterParams>(), 1216);
+        assert_eq!(std::mem::size_of::<super::WgrWaterParams>(), 1472);
         assert_eq!(std::mem::offset_of!(super::WgrWaterParams, tidewater_sea), 1184);
         assert_eq!(std::mem::offset_of!(super::WgrWaterParams, tidewater_fx), 1200);
+        assert_eq!(std::mem::offset_of!(super::WgrWaterParams, tidewater_wake), 1216);
     }
 
     #[test]

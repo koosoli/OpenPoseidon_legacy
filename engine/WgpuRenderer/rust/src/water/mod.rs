@@ -1814,7 +1814,7 @@ mod tests {
                 assert!((0.82..=1.0).contains(&(0.82 + 0.18 * rim)));
             }
         }
-        let shader = include_str!("water.wgsl");
+        let shader = include_str!("water.wgsl").replace("\r\n", "\n");
         let helper = shader.split("fn breaker_bubble_rim(").nth(1).unwrap()
             .split("\n}\n").next().unwrap();
         assert!(!helper.contains("texture"));
@@ -2270,7 +2270,7 @@ mod tests {
 
     #[test]
     fn bounded_bodies_draw_inside_their_ellipse_at_their_own_level() {
-        let shader = include_str!("water.wgsl");
+        let shader = include_str!("water.wgsl").replace("\r\n", "\n");
         // The vertex stage takes the level from the node's body, the ocean keeps sea_level...
         assert!(shader.contains("@location(7) body: f32,"));
         assert!(shader.contains("var surface_level = wp.sea_level;"));
