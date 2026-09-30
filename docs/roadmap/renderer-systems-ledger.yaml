@@ -644,9 +644,15 @@ systems:
       unresolved procedural root/tip/dry/gust colour suppresses the bright tips
       in installed 090a513e owner-pose A/B, with about 94 percent fewer large
       scheduled-image RGB changes. Close blades and density remain; this is not
-      an adjacent-rendered-frame proof. Native albedo and owner appearance
-      acceptance remain open. All 27 grass tests pass, including numeric GPU
-      mean checks and real 1x/4x pipelines.
+        an adjacent-rendered-frame proof. Native PlantMat uploads now retain
+        opacity-weighted linear RGB means for unresolved blades; sampled coverage
+        remains unchanged. All 31 grass tests pass, including numeric GPU mean
+        checks and real 1x/4x pipelines. Installed 2a15d74e retains the owner-pose
+        improvement and populated native close/aerial grass with varying gusts.
+        Native image deltas include gust phase and do not isolate a shimmer gain.
+        Three alternating owner-pose timing pairs observe grass colour snapshots
+        3.738 ms off / 4.018 ms on; retain the filter for stability with its cost.
+        Oliver delegated current visual judgement; owner tuning is deferred.
       Evidence and acceptance scope: decisions/GRASS-STABILITY-20260930.md.
     known_gap: >-
       GRS-GATE-1 unpassed: assets/ is gitignored, so the authored texture path is dead on
@@ -656,8 +662,10 @@ systems:
     production_call_sites:
       - file: engine/WgpuRenderer/rust/src/grass/mod.rs
         symbol: GrassStats
-      - file: engine/WgpuRenderer/rust/src/grass/blade_atlas.rs
-        symbol: LAYER_W
+        - file: engine/WgpuRenderer/rust/src/grass/blade_atlas.rs
+          symbol: LAYER_W
+        - file: engine/WgpuRenderer/rust/src/grass/blade_atlas.rs
+          symbol: blade_layer_means
       - file: engine/WgpuRenderer/TerrainWgpu.cpp
         symbol: UploadGrassBladeAtlas
       - file: engine/WgpuRenderer/include/wgpu_renderer.hpp
@@ -733,10 +741,16 @@ unbuilt_candidates: >-
       corrected inherited dirt textures admitting semantic BeachGrass; only
       explicit dirt palette identities now qualify. Real rain fills uploaded
       wetness, pause preserves simulation time/telemetry, and stopped rain dries
-      it gradually. Owner appearance acceptance and settled performance remain
-      open; no
+        it gradually. The matched 2a15d74e pair also includes a vertical rain-cover
+        query: actual GPU helper tests reject covered zenith with open sides,
+        independent of artistic ambient controls. Three settled dry/wet pairs
+        observe terrain colour snapshots 0.991 / 1.093 ms on the earlier a001b55f
+        pair. Fixed-UV diagnostic camera returns preserve nonempty wet masks
+        exactly (IoU 1.0), with the master-off control passing. A BeachGrass changed
+        fraction still fails its screening gate; its cause and a real floor-free
+        roof fixture remain under investigation. Owner tuning is deferred; no
       nearby-object reflections, physical depth, GL33, save or network state.
-      See decisions/MUD-PUDDLES-20260930.md.
+        See decisions/MUD-PUDDLES-20260930.md.
 
       2026-09-09 experimental snow: off-by-default Weather tab terrain layer,
       persistent mission-local foot/vehicle/explosion depressions, filled only
