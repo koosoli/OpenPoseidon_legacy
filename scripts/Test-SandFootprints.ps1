@@ -91,6 +91,11 @@ function Assert-SandEvidence($geometry) {
     return @{negativeCount=$negative.Count;positiveCount=$positive.Count;minimumOffset=($negative | Measure-Object depthDelta -Minimum).Minimum;
         maximumOffset=($positive | Measure-Object depthDelta -Maximum).Maximum;negativeGradientCount=$negativeGradient.Count;positiveGradientCount=$positiveGradient.Count}
 }
+function Assert-SandWalkPosition($position) {
+    Require ($position -is [array] -and $position.Count -eq 3) 'Walking position is missing.'
+    foreach ($coordinate in $position) { $null=Finite-SandNumber $coordinate }
+    Require ($position[0] -ge 2674 -and $position[0] -le 2679.4 -and $position[1] -ge 5125 -and $position[1] -le 5131.6) 'Actual walking path escaped the audited two-dimensional region.'
+}
 function Assert-SandPair($before,$after) {
     Require ([bool]$before.deployedFrom -and $before.deployedFrom -ceq $after.deployedFrom -and $before.files.Count -eq 2 -and $after.files.Count -eq 2) 'Installed pair stamp changed.'
     for ($i=0;$i -lt 2;++$i) {
@@ -135,6 +140,8 @@ foreach ($key in $keys) { $savedEnv[$key]=[Environment]::GetEnvironmentVariable(
     helperSha256=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Test-SandFootprintHelpers.ps1')).Hash;
     installed=$before;mission=$mission;lockOwner=$env:LOCK_OWNER;settings=$settings;clearedEnvironment=$clear;inheritedEnvironment=$savedEnv;
     sandCandidate=@(2675,5125);target=@(2675,5131);fullSupportGuard=.6;sourceUVInterior=@(.12,.88);
+    grid=@{x=@(2673.53125,2680.03125);z=@(5124.03125,5132.03125);samples=3445};
+    actualPathBounds=@{x=@(2674,2679.4);z=@(5125,5131.6)};
     cellSize=.125;width=1280;height=720;msaa=4;minimumWalkDistance=4;
     weatherAuthority='Actual weather rain zero, visible particle mode off/density0, snow disabled and snowline off. No direct sand stamp or wetness setter.';
     controls=@('fresh empty baseline','actual dry ordinary walking','physical negative depression and positive rim','paused camera return');limitations=$result.limitations
@@ -179,7 +186,7 @@ function Grid([string]$stage) {
     # Fixed before/after coordinates, deliberately offset from cell centres so
     # nonzero gradients are tested as well as deepest physical support height.
     $rows=@()
-    for ($j=0;$j -le 64;++$j) { for ($i=-8;$i -le 8;++$i) {
+    for ($j=0;$j -le 64;++$j) { for ($i=-12;$i -le 40;++$i) {
         $sample=Send @{cmd='dev_sand';action='sample';x=(2675+$i*.125+.03125);z=(5124+$j*.125+.03125)}
         Assert-SandSample $sample;Require ($sample.sourceEligible) 'Sampled walking lane left the admitted sand source.';$rows+=,$sample
     } }
@@ -188,18 +195,25 @@ function Grid([string]$stage) {
 }
 function Walk([string]$stage,[double]$targetZ,[double]$minimumDistance) {
     $start=State ($stage+'-before');$null=Send @{cmd='exec';code=('sandWalker setUnitPos "UP"; sandWalker setBehaviour "CARELESS"; group sandWalker setSpeedMode "LIMITED"; sandWalker doMove [2675,'+$targetZ.ToString('R',$culture)+',0]')}
+    Assert-SandWalkPosition $start.actor;$observed=@()
     Set-Acceleration 1;$deadline=[DateTime]::UtcNow.AddSeconds(25)
     do {
         Start-Sleep -Milliseconds 300;$position=Eval 'getPosASL sandWalker'
-        Require ($position -is [array] -and $position.Count -eq 3) 'Walking position is missing.'
-        foreach ($coordinate in $position) { $null=Finite-SandNumber $coordinate }
+        Assert-SandWalkPosition $position
+        # Admission is read-only: validate the whole .6m boot/rim support
+        # rectangle, not merely the centre of the ordinary AI's diagonal path.
+        foreach ($dx in @(-.6,.6)) { foreach ($dz in @(-.6,.6)) {
+            $support=Send @{cmd='dev_sand';action='sample';x=($position[0]+$dx);z=($position[1]+$dz)}
+            Assert-SandSample $support;Require ($support.sourceEligible) 'Actual path boot kernel left admitted sand.'
+        } }
+        $observed+=,@($position)
         $distance=[Math]::Sqrt([Math]::Pow($position[0]-$start.actor[0],2)+[Math]::Pow($position[1]-$start.actor[1],2))
         if ($distance -ge $minimumDistance) { break }
         Require ([DateTime]::UtcNow -lt $deadline) 'Actor did not actually walk the required distance.'
     } while ($true)
     Set-Acceleration 0;$end=State ($stage+'-after')
-    Require ([Math]::Abs($end.actor[0]-2675) -le .6 -and $end.actor[1] -ge 5125 -and $end.actor[1] -le 5131.6) 'Actual walking path escaped the sampled lane.'
-    $result.gates[$stage]=@{start=$start;end=$end;actualDistance=$distance};return $end
+    Assert-SandWalkPosition $end.actor
+    $result.gates[$stage]=@{start=$start;end=$end;actualDistance=$distance;observedPath=$observed};return $end
 }
 function Capture([string]$stage,[string]$camera) {
     Require ((Eval ('triFreeFlyPose "'+$camera+'"')) -ceq 'OK') 'Camera refused.';Start-Sleep -Seconds $SettleSeconds
@@ -233,7 +247,7 @@ try {
     } while (!$client)
     $stream=$client.GetStream();$stream.ReadTimeout=30000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
     Start-Sleep -Seconds 12;Require ((Eval 'triSceneReady') -ceq 'OK') 'Nogova mission not ready.'
-    $null=Send @{cmd='exec';code='player allowDamage false; 0 setFog 0; 0 setOvercast 0; 0 setRain 0; setDate [1985,6,21,16,0]; setAccTime 0; player setPos [2680,5125,0]'}
+    $null=Send @{cmd='exec';code='player allowDamage false; 0 setFog 0; 0 setOvercast 0; 0 setRain 0; setDate [1985,6,21,16,0]; setAccTime 0; player setPos [2686,5125,0]'}
     Require ((Eval 'triSetSimTime 100') -ceq 'OK:100000') 'Fixture simulation time refused.'
     Require ((Eval 'triSetBrightness 1') -ceq 'OK:1.000') 'Brightness refused.'
     $null=Send @{cmd='dev_snow';action='disable'}
@@ -253,8 +267,8 @@ try {
     Require ($centre.sourceEligible -and $centre.world.Replace('\','/').TrimStart('/').ToLowerInvariant() -ceq 'noe/noe.wrp' -and $centre.texture.Replace('\','/').TrimStart('/').ToLowerInvariant() -ceq 'o/pt.paa' -and $centre.surfaceClass -ceq 'SandDark' -and $centre.files -ceq 'pt??????' -and $centre.sound -ceq 'sand' -and $centre.character -ceq '') 'Actual Nogova sand source differs from the audited candidate.'
     $baseline=Grid 'baseline';Require (@($baseline | Where-Object {$_.offset -ne 0}).Count -eq 0) 'Baseline already contains signed sand edits.'
     $ground=$centre.surfaceY
-    $low='2675 5123.5 '+($ground+1).ToString('R',$culture)+' 0 -12'
-    $top='2675 5127 '+($ground+2).ToString('R',$culture)+' 0 -85'
+    $low='2676 5124 '+($ground+1).ToString('R',$culture)+' 35 -25'
+    $top='2676.5 5127 '+($ground+4).ToString('R',$culture)+' 0 -86'
     $away='2680 5131 '+($ground+8).ToString('R',$culture)+' 220 -65'
     Capture 'before-low' $low;Capture 'before-top' $top
     $walk=Walk 'dry-walking' 5131 4
@@ -264,11 +278,17 @@ try {
     $geometry=@();for ($i=0;$i -lt $baseline.Count;++$i) { $geometry+=,(Assert-SandGeometry $baseline[$i] $after[$i]) }
     $evidence=Assert-SandEvidence $geometry;$evidence.samples=$geometry;$result.gates.geometry=$evidence
     $trace=@(Select-String -LiteralPath $log -Pattern 'SAND_STEP' | ForEach-Object {Parse-SandStep $_.Line})
-    $lane=@($trace | Where-Object {$_.x -ge 2674.4 -and $_.x -le 2675.6 -and $_.z -ge 5124.4 -and $_.z -le 5131.6 -and $_.surface -ceq 'SandDark' -and $_.files -ceq 'pt??????' -and $_.sound -ceq 'sand' -and $_.wet -le .001 -and $_.texture.Replace('\','/').TrimStart('/').ToLowerInvariant() -ceq 'o/pt.paa'})
+    $lane=@($trace | Where-Object {$_.x -ge 2673.53125 -and $_.x -le 2680.03125 -and $_.z -ge 5124.03125 -and $_.z -le 5132.03125 -and $_.surface -ceq 'SandDark' -and $_.files -ceq 'pt??????' -and $_.sound -ceq 'sand' -and $_.wet -le .001 -and $_.texture.Replace('\','/').TrimStart('/').ToLowerInvariant() -ceq 'o/pt.paa'})
     Require ($lane.Count -gt 0) 'Actual stock-sand boot producer trace missing from the walked lane.';$result.gates.bootTrace=$lane
     # The measured walk and physical grid above are the proof. This paused
     # fixture relocation only clears the worker from subsequent appearance views.
-    $null=Send @{cmd='exec';code='sandWalker setPos [2680,5125,0]; doStop sandWalker'}
+    $centreX=($initial.actor[0]+$walk.actor[0])/2;$centreZ=($initial.actor[1]+$walk.actor[1])/2
+    $lowX=$centreX-.75
+    $azimuth=[Math]::Atan2(.75,$centreZ-5124)*180/[Math]::PI
+    $result.gates.cameraFraming=@{actualPathMidpoint=@($centreX,$centreZ);beforeLow=$low;beforeTop=$top;adaptiveAfter=$true;pixelIsolated=$false}
+    $low=$lowX.ToString('R',$culture)+' 5124 '+($ground+1).ToString('R',$culture)+' '+$azimuth.ToString('R',$culture)+' -25'
+    $top=$centreX.ToString('R',$culture)+' '+$centreZ.ToString('R',$culture)+' '+($ground+4).ToString('R',$culture)+' 0 -86'
+    $null=Send @{cmd='exec';code='sandWalker setPos [2686,5125,0]; doStop sandWalker'}
     $result.gates.workerRelocation=@{fixtureOnly=$true;excludedFromWalkingProof=$true;state=(State 'worker-away')}
     $pauseA=State 'pause-a'
     Capture 'after-low' $low;Capture 'after-top' $top;Capture 'after-away' $away;Capture 'after-return-low' $low

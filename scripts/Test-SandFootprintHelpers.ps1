@@ -5,7 +5,7 @@ $path=Join-Path $PSScriptRoot 'Test-SandFootprints.ps1'
 $ast=[Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
 if ($errors.Count) { throw ($errors | Out-String) }
 $culture=[Globalization.CultureInfo]::InvariantCulture
-foreach ($name in @('Require','Finite-SandNumber','Assert-SandState','Assert-SandSample','Assert-SandGeometry','Assert-SandPaused','Parse-SandStep','Assert-SandDry','Assert-SandEvidence','Assert-SandPair','Decode-Eval')) {
+foreach ($name in @('Require','Finite-SandNumber','Assert-SandState','Assert-SandSample','Assert-SandGeometry','Assert-SandPaused','Parse-SandStep','Assert-SandDry','Assert-SandEvidence','Assert-SandWalkPosition','Assert-SandPair','Decode-Eval')) {
     $definition=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
     if (!$definition) { throw "Actual helper missing: $name" };. ([scriptblock]::Create($definition.Extent.Text))
 }
@@ -79,4 +79,10 @@ Refuses {Assert-SandEvidence @($proof)};Refuses {Assert-SandEvidence @($rimProof
 $flat=$proof.Clone();$flat.dxDelta=0;$flat.dzDelta=0;Refuses {Assert-SandEvidence @($flat,$rimProof)}
 $shallow=$proof.Clone();$shallow.depthDelta=-.029;Refuses {Assert-SandEvidence @($shallow,$rimProof)}
 $lowRim=$rimProof.Clone();$lowRim.depthDelta=.001;Refuses {Assert-SandEvidence @($proof,$lowRim)}
+foreach ($position in @(@(2675,5125,14.9836),@(2678.44,5128.62,14.98),@(2674,5125,14.98),@(2679.4,5131.6,14.98))) {
+    Assert-SandWalkPosition $position;++$script:checks
+}
+foreach ($position in @(@(2673.99,5125,14.98),@(2679.41,5125,14.98),@(2675,5124.99,14.98),@(2675,5131.61,14.98),
+    @([double]::NaN,5125,14.98),@(2675,5125,$true),@(2675,5125))) { Refuses {Assert-SandWalkPosition $position} }
+Refuses {Assert-SandWalkPosition $null}
 Write-Host "Actual sand runner helper checks passed: $checks. No game/GPU used."

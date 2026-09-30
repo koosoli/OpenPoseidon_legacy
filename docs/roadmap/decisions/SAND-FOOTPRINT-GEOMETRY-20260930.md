@@ -134,7 +134,7 @@ unchanged through exit. Both stdout/stderr are retained. All changed/cleared
 environment values are recorded and restored, with previously absent values
 removed rather than assigned null (PowerShell7.6/.NET10 semantics).
 
-The minimal perf_sand.noe mission puts its player at2680/5125, away from the
+The minimal perf_sand.noe mission puts its player at2686/5125, away from the
 sampled lane. A fresh separate west group creates an ordinary SoldierWB leader
 at2675/5125, verified through actual type/leader/ASL/pose/heading queries. It uses
 normal doMove toward2675/5131 at LIMITED speed, and pauses after at least4m of
@@ -150,8 +150,8 @@ settling, uses brightness/exposure1, zero wind, temporal/jitter/adaptive exposur
 off, grass/puddles off, native1280x720/MSAA4 and fps cap60. Captures are paused.
 
 The actual centre must report noe/noe.wrp, o/pt.paa, SandDark/pt??????/sand,
-empty character and all-quadrant sourceEligible. The fixed1105-point grid
-samples X2674.03125-2676.03125 and Z5124.03125-5132.03125 every12.5cm, offset
+empty character and all-quadrant sourceEligible. The fixed3445-point grid
+samples X2673.53125-2680.03125 and Z5124.03125-5132.03125 every12.5cm, offset
 3.125cm from cell centres to include nonzero derivatives. Every point must
 remain source-admitted. The baseline must contain no signed field edits.
 Every identical-coordinate before/after query must show physical SurfaceY
@@ -162,9 +162,18 @@ on both. A normal decal or positive shader tint cannot pass these CPU physical
 support gates. Actual SAND_STEP rows from the correct dry stock lane are also
 mandatory. The actor's ASL support gap must stay within3cm at each recorded state.
 
+The observed actor path must stay within X2674-2679.4 and Z5125-5131.6; at
+every position poll, the four corners of its +/-60cm support rectangle must
+still report all-quadrant sourceEligible. The pre-walk fixed grid is never
+shifted around a result. This admits ordinary diagonal AI motion inside the
+same audited pure-sand tile rather than requiring a synthetic straight line.
+
 After the measured walk and geometry proof, the paused fixture moves the worker
-5m off-lane, then records a low view1m above actual ground, a top view2m above
-ground, an away view and the same low view on return. Time, actor pose/heading/
+to2686/5125, outside the views, then records a low view1m above actual ground,
+a top view4m above ground, an away view and the same low view on return. The
+after views centre on the measured start/end midpoint; their exact camera poses
+are recorded. Before/after adaptive framing is descriptive, not pixel-isolated
+appearance proof. Time, actor pose/heading/
 ASL, uniform wetness, rain authority, sand history and every signed grid sample
 must remain exactly unchanged through pause/camera return. Every PNG must be
 1280x720 with hash, camera and accompanying state retained. Normal exit0 and
@@ -172,7 +181,7 @@ Shutdown complete are mandatory; any forced cleanup retains failed status.
 
 scripts/Test-SandFootprintHelpers.ps1 parses the actual runner AST and extracts
 its production assertion functions without installed-file/process/network/GPU
-access. Its92 checks pass under bundled PowerShell7.6.5, covering signed limits,
+access. Its104 checks pass under bundled PowerShell7.6.5, covering signed limits,
 height/gradient parity for depressions **and positive rims**, dry authority,
 malformed numeric/trace/source data, minimum depth/rim evidence, pause changes,
 source-coordinate consistency, locale-independent trace parsing and pair changes.
@@ -180,3 +189,20 @@ This is runner/helper preparation only: no game/GPU was run. Positive installed
 physical geometry, GPU appearance and normal/standing support remain pending
 root execution. Wet cohesion and hard road/grass/source-border/snow installed
 negative controls are explicitly not covered by this first dry runner.
+
+### First installed attempt retained as a failed fixture
+
+Root's matching06a7c41e installed run
+build/sand-footprints/noe-dry-current-20260930-212526-1e02a7 exited normally0,
+with no reported validation error. The ordinary AI walker moved from2675/5125
+to2678.44/5128.62, with end support gap-0.00745m. Five actual dry SAND_STEP rows
+reported10cm depth/1.4cm rim and6 chunks/revision7. That proves the producer ran,
+not the required physical depression/rim or installed appearance gates: the
+fixture stopped before the after-grid because the original +/-60cm X lane was
+too narrow for the actual diagonal AI path. That campaign remains failed.
+
+The corrected baseline grid covers the bounded diagonal region before any
+movement. Actual distance4m, dry authority, exact source, depth>=3cm, positive
+rim>1mm, support/gradient equality, pause/camera return and normal exit/hash
+requirements are unchanged. The expanded grid and adaptive cameras have only
+CPU/helper/source verification so far; root must execute the corrected fixture.
