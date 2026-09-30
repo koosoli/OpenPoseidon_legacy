@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <unordered_map>
 #include <vector>
 
@@ -18,7 +19,10 @@ public:
     static constexpr int WindowSize = 512;
     static constexpr int ChunkSize = 16;
     static constexpr float CellSize = 0.125f;
-    static constexpr float MaxDepth = 0.06f;
+    static constexpr float DefaultLayerDepth = 0.24f;
+    static constexpr float MaxDepth = 0.35f;
+    static constexpr float MaxCellSlope = 0.45f;
+    static constexpr float MaxContactRadius = 4.0f * MaxDepth;
     static constexpr size_t MaxChunks = 8192;
     bool enabled = true;
 
@@ -41,29 +45,52 @@ public:
     }
     float Wetness() const { return _wetness; }
     bool ContactActive() const { return enabled && _wetness > 0.15f; }
-    // Wet soil gradually supports a 0..6cm impression, not a mandatory 2cm sink
-    // on the first rainy frame. The caller must independently prove soft ground.
+    // Thickness is capacity, not an automatic lowering of untouched terrain.
+    // Changing capacity never clips previously stored depressions.
+    bool SetLayerDepth(float metres)
+    {
+        if (!std::isfinite(metres) || metres < 0.05f || metres > MaxDepth) return false;
+        _layerDepth = metres;
+        return true;
+    }
+    float LayerDepth() const { return _layerDepth; }
+    static float ContactRadius(float depth) { return std::clamp(4.0f * depth, 0.35f, MaxContactRadius); }
+    // Rain gradually softens a decimetre-scale layer. Admission is caller-owned.
     float ContactDepth() const
     {
         const float t = std::clamp((_wetness - 0.15f) / 0.85f, 0.0f, 1.0f);
-        return enabled ? MaxDepth * t * t * (3.0f - 2.0f * t) : 0.0f;
+        return enabled ? _layerDepth * t * t * (3.0f - 2.0f * t) : 0.0f;
     }
     size_t Chunks() const { return _chunks.size(); }
     size_t Rejected() const { return _rejected; }
     uint64_t Revision() const { return _revision; }
 
-    // A finite bounded contact disc. Overlapping/repeated feet take the maximum
-    // depression rather than digging infinitely through repeated animation edges.
-    bool Stamp(float x, float z, float radius, float depth)
+    // One real loading edge compresses only a fraction of remaining capacity.
+    bool CompressBoot(float x, float z, float pressure = 0.65f)
+    {
+        if (!ContactActive()) return false;
+        const float depth = ContactDepth();
+        return Stamp(x, z, ContactRadius(depth), depth, pressure);
+    }
+
+    // Smooth finite support disc; neighbour limits bound the actual bilinear
+    // physical slope, including overlaps and repeated differently placed boots.
+    bool Stamp(float x, float z, float radius, float depth, float pressure = 1.0f)
     {
         if (!enabled || !FinitePosition(x, z) || !std::isfinite(radius) || radius <= 0.0f ||
-            !std::isfinite(depth) || depth <= 0.0f) return false;
-        radius = std::clamp(radius, CellSize, 0.25f);
+            !std::isfinite(depth) || depth <= 0.0f || !std::isfinite(pressure) || pressure <= 0.0f) return false;
+        pressure = std::min(pressure, 1.0f);
+        radius = std::clamp(radius, CellSize, MaxContactRadius);
         depth = std::min(depth, MaxDepth);
         const int x0 = int(std::floor((x - radius) / CellSize));
         const int x1 = int(std::floor((x + radius) / CellSize));
         const int z0 = int(std::floor((z - radius) / CellSize));
         const int z1 = int(std::floor((z + radius) / CellSize));
+        struct Target { int x, z; float depth; };
+        // Maximum diameter is 2.8m, at most 24x24 cell centres. Fixed scratch
+        // avoids a per-contact heap allocation and repeated pressure application.
+        std::array<Target, 26 * 26> targets{};
+        size_t targetCount = 0;
         bool changed = false;
         for (int iz = z0; iz <= z1; ++iz)
             for (int ix = x0; ix <= x1; ++ix)
@@ -71,6 +98,7 @@ public:
                 const float r = std::hypot((ix + 0.5f) * CellSize - x, (iz + 0.5f) * CellSize - z) / radius;
                 if (r >= 1.0f) continue;
                 const float value = depth * (1.0f - r * r * (3.0f - 2.0f * r));
+                if (value <= 0.000001f) continue;
                 const int cx = FloorChunk(ix), cz = FloorChunk(iz);
                 auto it = _chunks.find(Key(cx, cz));
                 if (it == _chunks.end())
@@ -79,7 +107,21 @@ public:
                     it = _chunks.emplace(Key(cx, cz), Chunk{}).first;
                 }
                 float& stored = it->second.cells[(iz - cz * ChunkSize) * ChunkSize + ix - cx * ChunkSize];
-                if (value > stored) { stored = value; changed = true; }
+                targets[targetCount++] = {ix, iz, stored + pressure * std::max(0.0f, value - stored)};
+            }
+        // Alternating sweeps grow a smooth shoulder together with its centre;
+        // each target was fixed from the pre-contact state above.
+        for (int pass = 0; pass < 4; ++pass)
+            for (size_t j = 0; j < targetCount; ++j)
+            {
+                const auto& target = targets[(pass & 1) ? targetCount - 1 - j : j];
+                const int ix = target.x, iz = target.z, cx = FloorChunk(ix), cz = FloorChunk(iz);
+                auto it = _chunks.find(Key(cx, cz));
+                float& stored = it->second.cells[(iz-cz*ChunkSize)*ChunkSize+ix-cx*ChunkSize];
+                const float neighbourLimit = std::min({CellDepth(ix-1, iz), CellDepth(ix+1, iz),
+                    CellDepth(ix, iz-1), CellDepth(ix, iz+1)}) + MaxCellSlope * CellSize;
+                const float next = std::min(target.depth, neighbourLimit);
+                if (next > stored + 0.000001f) { stored = next; changed = true; }
             }
         if (changed) ++_revision;
         return changed;
@@ -151,9 +193,23 @@ private:
     }
     std::unordered_map<uint64_t, Chunk> _chunks;
     float _wetness = 0.0f;
+    float _layerDepth = DefaultLayerDepth;
     size_t _rejected = 0;
     uint64_t _revision = 0;
 };
 
-inline MudField& GMud() { static MudField mud; return mud; }
+inline MudField& GMud()
+{
+    static MudField mud = [] {
+        MudField field;
+        if (const char* text = std::getenv("POSEIDON_MUD_LAYER_DEPTH"))
+        {
+            char* end = nullptr;
+            const float depth = std::strtof(text, &end);
+            if (end != text && end && *end == '\0') field.SetLayerDepth(depth);
+        }
+        return field;
+    }();
+    return mud;
+}
 } // namespace Poseidon

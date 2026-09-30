@@ -24,7 +24,7 @@ bool StampMudFootstep(const Landscape& land, Object& actor,
     const float landGrid = land.GetLandGrid();
     if (!std::isfinite(landGrid) || landGrid <= 0.0f) return false;
     const float extent = land.GetLandRange() * landGrid;
-    constexpr float guard = 0.4f; // entire boot kernel plus bilinear support
+    constexpr float guard = MudField::MaxContactRadius + 0.075f + MudField::CellSize;
     for (int z = -1; z <= 1; ++z)
         for (int x = -1; x <= 1; ++x)
         {
@@ -45,6 +45,10 @@ bool StampMudFootstep(const Landscape& land, Object& actor,
         }
     float dx, dz;
     const float ground = land.SurfaceY(foot.X(), foot.Z(), &dx, &dz);
+    // SurfaceY already includes stored mud. Source slope remains the original
+    // ground slope so a previous depression cannot veto its own next contact.
+    const auto mudGradient = mud.HeightGradientAt(foot.X(), foot.Z());
+    dx -= mudGradient[0]; dz -= mudGradient[1];
     if (!std::isfinite(ground) || ground <= land.GetSeaLevel() + 0.15f ||
         !std::isfinite(dx) || !std::isfinite(dz) || std::hypot(dx, dz) > 0.7f ||
         std::abs(foot.Y() - ground) > 0.25f || GSnow().BaseDepthAt(foot.X(), foot.Z()) > 0.002f) return false;
@@ -62,8 +66,8 @@ bool StampMudFootstep(const Landscape& land, Object& actor,
     const Vector3 axis(direction.X() / length, 0, direction.Z() / length);
     const Vector3 toe = foot + axis * 0.075f, heel = foot - axis * 0.075f;
     const float depth = mud.ContactDepth();
-    const bool toeChanged = mud.Stamp(toe.X(), toe.Z(), 0.125f, depth);
-    const bool heelChanged = mud.Stamp(heel.X(), heel.Z(), 0.125f, depth);
+    const bool toeChanged = mud.CompressBoot(toe.X(), toe.Z());
+    const bool heelChanged = mud.CompressBoot(heel.X(), heel.Z());
     const bool changed = toeChanged || heelChanged;
     static const bool trace = [] {
         const char* value = std::getenv("POSEIDON_MUD_TRACE");
@@ -74,9 +78,10 @@ bool StampMudFootstep(const Landscape& land, Object& actor,
         const auto& source = land.SurfaceAt(foot.X(), foot.Z());
         const int id = land.GetTexture(int(std::floor(foot.Z() / landGrid)), int(std::floor(foot.X() / landGrid)));
         const Texture* texture = land.GetTexture(id);
-        LOG_INFO(Graphics, "MUD_STEP x={:.3f} z={:.3f} surface={} files={} sound={} texture={} wet={:.4f} depth={:.4f} revision={} chunks={}",
+        LOG_INFO(Graphics, "MUD_STEP x={:.3f} z={:.3f} surface={} files={} sound={} texture={} wet={:.4f} depth={:.4f} revision={} chunks={} layer={:.4f} stored={:.4f} radius={:.4f}",
                  foot.X(), foot.Z(), source._class.Data(), source._name.Data(), source._soundEnv.Data(),
-                 texture ? texture->GetName().Data() : "", mud.Wetness(), depth, mud.Revision(), mud.Chunks());
+                 texture ? texture->GetName().Data() : "", mud.Wetness(), depth, mud.Revision(), mud.Chunks(),
+                 mud.LayerDepth(), mud.HeightOffsetAt(foot.X(), foot.Z()), MudField::ContactRadius(depth));
     }
     return changed;
 }
