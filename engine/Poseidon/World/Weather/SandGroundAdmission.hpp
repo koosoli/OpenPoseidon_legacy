@@ -15,11 +15,13 @@ inline bool StockSandSurface(std::string_view surfaceClass, std::string_view fil
          (surfaceClass == "SandDark" && files == "pt??????"));
 }
 
-// The whole boot/rim support must separately pass this interior and the four
-// actual cached quadrants. This leaves retail neighbouring-tile blends alone.
+// Valid local coordinates only. The contact producer independently proves all
+// four actual quadrants in EVERY tile touched by the whole boot/rim support.
+// An arbitrary outer-12% ban created multi-metre holes even between pure-sand
+// tiles; mixed/hard neighbours remain excluded by that actual source proof.
 inline bool SandSourceInterior(float u, float v)
 {
     return std::isfinite(u) && std::isfinite(v) &&
-        u >= 0.12f && u <= 0.88f && v >= 0.12f && v <= 0.88f;
+        u >= 0.0f && u < 1.0f && v >= 0.0f && v < 1.0f;
 }
 } // namespace Poseidon

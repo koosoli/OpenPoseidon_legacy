@@ -38,7 +38,7 @@ bool StampMudFootstep(const Landscape& land, Object& actor,
                               surface._soundEnv.Data(), surface._character.Data()))
             {
                 const Texture* texture = land.GetTexture(id);
-                if (!texture || !StockNogovaMudSoil(land.GetName(), texture->GetName().Data(),
+                if (!texture || !StockCultivatedMudSoil(texture->GetName().Data(),
                     surface._class.Data(), surface._name.Data(), surface._soundEnv.Data(), surface._character.Data(),
                     east / landGrid - cellX, north / landGrid - cellZ)) return false;
             }

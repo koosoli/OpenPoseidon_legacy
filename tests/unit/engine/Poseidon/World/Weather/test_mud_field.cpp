@@ -142,7 +142,7 @@ int main()
     assert(!StockMudSoil("Field", "unknown", "dirt", ""));
     for (const auto source : {"Grass", "GrassHigh", "Village", "MudBuilding", "Asphalt", "", "Soil"})
         assert(!StockMudSoil(source, "pol", "dirt", ""));
-    // Real Noe source evidence: exact retail world + cultivated texture +
+    // Real Noe source evidence: exact retail cultivated texture +
     // unchanged Default metadata. Neither Default nor a "pole" name is enough.
     for (const auto texture : {"o/pole1.paa", "o\\pole2.paa", "\\O\\POLE1.PAA"})
         assert(StockNogovaMudSoil("\\Noe\\Noe.wrp", texture, "Default", "default", "normalExt", "", .5f, .5f));
@@ -150,14 +150,15 @@ int main()
                                "o/b1.paa", "o/blita2.paa", "o/pt.paa", "o/l1.paa", "o/ces_hned.paa"})
         assert(!StockNogovaMudSoil("noe/noe.wrp", texture, "Default", "default", "normalExt", "", .5f, .5f));
     for (const auto world : {"", "worlds/noe.wrp", "noe/custom.wrp", "worlds/abel.wrp"})
-        assert(!StockNogovaMudSoil(world, "o/pole2.paa", "Default", "default", "normalExt", "", .5f, .5f));
+        assert(StockNogovaMudSoil(world, "o/pole2.paa", "Default", "default", "normalExt", "", .5f, .5f));
+    assert(StockCultivatedMudSoil("o/pole2.paa", "Default", "default", "normalExt", "", .01f, .99f));
     for (const auto source : {"GrassGrey", "Grass", "Village", "Lom", "MudBuilding", "", "Dirt"})
         assert(!StockNogovaMudSoil("noe/noe.wrp", "o/pole2.paa", source, "default", "normalExt", "", .5f, .5f));
     assert(!StockNogovaMudSoil("noe/noe.wrp", "o/pole2.paa", "Default", "pole2", "normalExt", "", .5f, .5f));
     for (const auto sound : {"grass", "road", "rock", "sand", "dirt", ""})
         assert(!StockNogovaMudSoil("noe/noe.wrp", "o/pole2.paa", "Default", "default", sound, "", .5f, .5f));
     assert(!StockNogovaMudSoil("noe/noe.wrp", "o/pole2.paa", "Default", "default", "normalExt", "Grass", .5f, .5f));
-    for (const auto uv : {-.1f, .0f, .119f, .881f, 1.0f, nan, inf})
+    for (const auto uv : {-.1f, 1.0f, nan, inf})
     {
         assert(!StockNogovaMudSoil("noe/noe.wrp", "o/pole2.paa", "Default", "default", "normalExt", "", uv, .5f));
         assert(!StockNogovaMudSoil("noe/noe.wrp", "o/pole2.paa", "Default", "default", "normalExt", "", .5f, uv));
@@ -172,6 +173,7 @@ int main()
         return true;
     };
     assert(allBootProbes(.5f, .5f));
-    assert(!allBootProbes(.12f, .5f) && !allBootProbes(.5f, .88f));
+    assert(allBootProbes(.12f, .88f));
+    assert(!allBootProbes(.0f, .5f) && !allBootProbes(.5f, 1.0f));
 
 }

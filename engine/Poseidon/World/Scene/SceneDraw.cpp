@@ -44,6 +44,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Scene/SurfaceDrawOrder.hpp>
+#include <Poseidon/World/Scene/InsideViewPass.hpp>
 #include <Poseidon/World/Scene/AlphaSortOrder.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
@@ -1910,8 +1911,8 @@ static void DrawSortObject(SortObject* oi)
         }
         ~DrawObjectGuard() { GEngine->SetDrawObject(prev); }
     } drawObjectGuard(obj);
-    const bool cockpit =
-        GWorld && oi->drawLOD != LOD_INVISIBLE && oi->drawLOD == obj->InsideLOD(GWorld->GetCameraType());
+    const bool cockpit = GWorld &&
+        ExplicitInsideViewDraw(oi->drawLOD, oi->forceDrawLOD, obj->InsideLOD(GWorld->GetCameraType()));
     // REN-INTERP-001: moving objects draw at their interpolated frame; everything else at
     // its own (RenderFrame returns *obj for those, one branch).
     FrameBase interpFrame;

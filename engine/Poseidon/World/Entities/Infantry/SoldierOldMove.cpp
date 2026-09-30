@@ -4,6 +4,7 @@
 #include <Poseidon/World/Weather/MudContact.hpp>
 #include <Poseidon/World/Weather/SandContact.hpp>
 #include <Poseidon/World/Weather/SandField.hpp>
+#include <Poseidon/World/Entities/Infantry/GroundBootEvents.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <limits.h>
@@ -141,6 +142,91 @@ void Man::ProcessMoveFunction(ActionContextBase* context)
     }
 }
 
+void Man::EmitGroundBootContact(bool left, SimulationImportance prec)
+{
+    if (!GLandscape || IsDead() ||
+        !(EnableVisualEffects(prec) || GSnow().CoverActive() || GMud().ContactActive() || GSand().ContactActive()) ||
+        ValueTest(&MoveInfo::OnLand) >= 0.5f) return;
+    static const bool playerTrace = [] {
+        const char* v = std::getenv("POSEIDON_PLAYER_GROUND_TRACE");
+        return v && v[0] == '1';
+    }();
+    static unsigned traceRows = 0;
+    const bool trace = playerTrace && traceRows < 256 && GWorld && GWorld->PlayerOn() == this;
+    int index = (left ? Type()->_stepLIndex : Type()->_stepRIndex);
+    if (index < 0 && trace)
+    {
+        ++traceRows;
+        LOG_INFO(Graphics, "PLAYER_GROUND_BOOT side={} reason=missing-memory-point model={} primary={} secondary={} factor={:.3f}",
+            left ? "left" : "right", _shape->Name(), NAME_T(Type(), _primaryMove.id),
+            NAME_T(Type(), _secondaryMove.id), _primaryFactor);
+    }
+    if (index >= 0)
+    {
+        Vector3 mPos = AnimatePoint(_shape->FindMemoryLevel(), index);
+        Vector3 pos = PositionModelToWorld(mPos);
+        if (!std::isfinite(pos.X()) || !std::isfinite(pos.Y()) || !std::isfinite(pos.Z()))
+        {
+            if (trace)
+            {
+                ++traceRows;
+                LOG_INFO(Graphics, "PLAYER_GROUND_BOOT side={} reason=nonfinite-animated-sole model={}",
+                    left ? "left" : "right", _shape->Name());
+            }
+            return;
+        }
+        // PERF-025: how long a footprint lives. 10 s is the shipped value and
+        // the default here; POSEIDON_MARK_TTL=<seconds> is the ABLATION arm --
+        // with ~190 soldiers walking, marks are the largest single group of
+        // CPU-drawn objects (2,572 of ~4,100 a frame), and this says what they
+        // are worth before anyone builds a batcher for them. 0 spawns none.
+        static const float markTtl = [] {
+            const char* v = std::getenv("POSEIDON_MARK_TTL");
+            if (v == nullptr || *v == 0)
+                return 10.0f;
+            const float t = std::strtof(v, nullptr);
+            return t < 0.0f ? 10.0f : t;
+        }();
+        float timeToLive = markTtl;
+        float ys = GLandscape->SurfaceY(pos.X(), pos.Z());
+        float yr = GLandscape->RoadSurfaceYAboveWater(pos);
+        bool mudChanged = false, sandChanged = false;
+        if (yr <= ys + 0.2f)
+        {
+            mudChanged = StampMudFootstep(*GLandscape, *this, pos, Direction());
+            sandChanged = StampSandFootstep(*GLandscape, *this, pos, Direction());
+            if (GSnow().CoverActive() && !GSnow().NeedsWalkingChannelAt(pos.X(), pos.Z()) && ys > GLandscape->GetSeaLevel())
+            {
+                const Vector3 toe = pos + Direction() * 0.075f;
+                const Vector3 heel = pos - Direction() * 0.075f;
+                GSnow().Stamp(toe.X(), toe.Z(), 0.125f);
+                GSnow().Stamp(heel.X(), heel.Z(), 0.125f);
+            }
+            LODShapeWithShadow* shape =
+                EnableVisualEffects(prec) && markTtl > 0.0f && !GSnow().NeedsWalkingChannelAt(pos.X(), pos.Z())
+                    ? GScene->Preloaded(left ? FootStepL : FootStepR) : nullptr;
+            if (shape)
+            {
+                Ref<Mark> mark = new Mark(shape, 0.25f, timeToLive);
+                mark->SetDirectionAndUp(Direction(), VUp);
+                mark->SetPosition(pos);
+                GWorld->AddAnimal(mark);
+            }
+        }
+        if (trace)
+        {
+            ++traceRows;
+            const auto& source = GLandscape->SurfaceAt(pos.X(), pos.Z());
+            LOG_INFO(Graphics, "PLAYER_GROUND_BOOT time={:.3f} manual={} side={} model={} primary={} secondary={} factor={:.3f} x={:.3f} y={:.3f} z={:.3f} ground={:.3f} delta={:.3f} road={:.3f} surface={} files={} sound={} mudActive={} sandActive={} mudChanged={} sandChanged={}",
+                Glob.time.toFloat(), QIsManual(), left ? "left" : "right", _shape->Name(),
+                NAME_T(Type(), _primaryMove.id), NAME_T(Type(), _secondaryMove.id), _primaryFactor,
+                pos.X(), pos.Y(), pos.Z(), ys, pos.Y()-ys, yr, source._class.Data(),
+                source._name.Data(), source._soundEnv.Data(), GMud().ContactActive(), GSand().ContactActive(),
+                mudChanged, sandChanged);
+        }
+    }
+}
+
 bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float& moveZ, SimulationImportance prec)
 {
     bool change = false;
@@ -192,67 +278,24 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
             {
                 float edge1Time = prim->GetSoundEdge1();
                 float edge2Time = prim->GetSoundEdge2();
-                bool step = false;
-                bool left = false;
                 if (oldPrimTime < edge1Time && oldPrimTime + priPhaseChng >= edge1Time)
                 {
                     _doSoundStep = true;
-                    step = true;
-                    left = true;
                     _soundStepOverride = prim->GetSoundOverride();
                 }
                 else if (oldPrimTime < edge2Time && oldPrimTime + priPhaseChng >= edge2Time)
                 {
                     _doSoundStep = true;
-                    step = true;
                     _soundStepOverride = prim->GetSoundOverride();
                 }
-                if (step && (EnableVisualEffects(prec) || GSnow().CoverActive() || GMud().ContactActive() || GSand().ContactActive()) && ValueTest(&MoveInfo::OnLand) < 0.5f)
-                {
-                    int index = (left ? Type()->_stepLIndex : Type()->_stepRIndex);
-                    if (index >= 0)
-                    {
-                        Vector3 mPos = AnimatePoint(_shape->FindMemoryLevel(), index);
-                        Vector3 pos = PositionModelToWorld(mPos);
-                        // PERF-025: how long a footprint lives. 10 s is the shipped value and
-                        // the default here; POSEIDON_MARK_TTL=<seconds> is the ABLATION arm --
-                        // with ~190 soldiers walking, marks are the largest single group of
-                        // CPU-drawn objects (2,572 of ~4,100 a frame), and this says what they
-                        // are worth before anyone builds a batcher for them. 0 spawns none.
-                        static const float markTtl = [] {
-                            const char* v = std::getenv("POSEIDON_MARK_TTL");
-                            if (v == nullptr || *v == 0)
-                                return 10.0f;
-                            const float t = std::strtof(v, nullptr);
-                            return t < 0.0f ? 10.0f : t;
-                        }();
-                        float timeToLive = markTtl;
-                        float ys = GLandscape->SurfaceY(pos.X(), pos.Z());
-                        float yr = GLandscape->RoadSurfaceYAboveWater(pos);
-                        if (yr <= ys + 0.2f)
-                        {
-                            StampMudFootstep(*GLandscape, *this, pos, Direction());
-                            StampSandFootstep(*GLandscape, *this, pos, Direction());
-                            if (GSnow().CoverActive() && !GSnow().NeedsWalkingChannelAt(pos.X(), pos.Z()) && ys > GLandscape->GetSeaLevel())
-                            {
-                                const Vector3 toe = pos + Direction() * 0.075f;
-                                const Vector3 heel = pos - Direction() * 0.075f;
-                                GSnow().Stamp(toe.X(), toe.Z(), 0.125f);
-                                GSnow().Stamp(heel.X(), heel.Z(), 0.125f);
-                            }
-                            LODShapeWithShadow* shape =
-                                EnableVisualEffects(prec) && markTtl > 0.0f && !GSnow().NeedsWalkingChannelAt(pos.X(), pos.Z())
-                                    ? GScene->Preloaded(left ? FootStepL : FootStepR) : nullptr;
-                            if (shape)
-                            {
-                                Ref<Mark> mark = new Mark(shape, 0.25f, timeToLive);
-                                mark->SetDirectionAndUp(Direction(), VUp);
-                                mark->SetPosition(pos);
-                                GWorld->AddAnimal(mark);
-                            }
-                        }
-                    }
-                }
+            }
+            if (DominantGroundBootMove(_primaryFactor, false))
+            {
+                const unsigned boots = GroundBootEvents(oldPrimTime, priPhaseChng,
+                    prim->GetSoundEdge1(), prim->GetSoundEdge2(), prim->GetSoundEnabled(),
+                    primA->GetStepLengthX(), primA->GetStepLength());
+                if (boots & 1u) EmitGroundBootContact(true, prec);
+                if (boots & 2u) EmitGroundBootContact(false, prec);
             }
         }
     }
@@ -275,6 +318,7 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
 
                 float secPhaseChng = deltaT * secSpeed * adjustSpeed;
 
+                const float oldSecTime = _secondaryTime;
                 _secondaryTime += secPhaseChng;
 
                 if (_secondaryTime >= 1)
@@ -298,6 +342,14 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
 
                 moveZ -= moveFactor * secA->GetStepLength();
                 moveX -= moveFactor * secA->GetStepLengthX();
+                if (DominantGroundBootMove(_primaryFactor, true))
+                {
+                    const unsigned boots = GroundBootEvents(oldSecTime, secPhaseChng,
+                        sec->GetSoundEdge1(), sec->GetSoundEdge2(), sec->GetSoundEnabled(),
+                        secA->GetStepLengthX(), secA->GetStepLength());
+                    if (boots & 1u) EmitGroundBootContact(true, prec);
+                    if (boots & 2u) EmitGroundBootContact(false, prec);
+                }
             }
         }
     }

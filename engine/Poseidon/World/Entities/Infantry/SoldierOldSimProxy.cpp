@@ -1,4 +1,6 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
+#include <Poseidon/World/Weather/MudField.hpp>
+#include <Poseidon/World/Weather/SandField.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/UI/Settings/AspectRatio.hpp>
@@ -519,6 +521,21 @@ int Man::PassNum(int lod)
 
 void Man::Draw(int level, ClipFlags clipFlags, const FrameBase& pos)
 {
+    static const bool playerTrace = [] {
+        const char* v = std::getenv("POSEIDON_PLAYER_GROUND_TRACE");
+        return v && v[0] == '1';
+    }();
+    static float nextTrace = -1.0f;
+    const float now = playerTrace ? Glob.time.toFloat() : 0.0f;
+    if (playerTrace && GWorld && GWorld->PlayerOn() == this && (now >= nextTrace || now < nextTrace-1.0f))
+    {
+        nextTrace = now + 0.5f;
+        const auto p = pos.Position();
+        LOG_INFO(Graphics, "PLAYER_GROUND_DRAW time={:.3f} camera={} level={} inside={} model={} x={:.3f} y={:.3f} z={:.3f} ground={:.3f} mud={:.3f} sand={:.3f} dead={} hidden={:.3f}",
+            now, int(GWorld->GetCameraType()), level, InsideLOD(GWorld->GetCameraType()), _shape->Name(),
+            p.X(), p.Y(), p.Z(), GLandscape ? GLandscape->SurfaceY(p.X(),p.Z()) : p.Y(),
+            GMud().HeightOffsetAt(p.X(),p.Z()), GSand().HeightOffsetAt(p.X(),p.Z()), IsDead(), _hideBody);
+    }
     if (level == LOD_INVISIBLE)
     {
         return;

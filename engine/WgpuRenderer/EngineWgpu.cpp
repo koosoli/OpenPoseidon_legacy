@@ -8957,6 +8957,33 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         }
     }
 
+    // Actual player submission facts, separate from appearance and from wet
+    // clothing admission. A deduplicated opt-in trace survives switching from
+    // first to third person without paying normal-play per-section logging.
+    static const bool playerGroundTrace = EnvFlagSet("POSEIDON_PLAYER_GROUND_TRACE");
+    if (playerGroundTrace && GWorld)
+    {
+        const auto* owner = static_cast<const Object*>(GetDrawObject());
+        if (owner && owner == GWorld->PlayerOn())
+        {
+            static std::unordered_set<std::string> reported;
+            const Texture* face = sMesh.GetSection(beg).properties.GetTexture();
+            const char* faceName = face ? face->Name() : "<none>";
+            const auto* shape = owner->GetShape();
+            const std::string key = std::string(shape ? shape->Name() : "<none>") + ":" + faceName + ":" +
+                std::to_string(int(GWorld->GetCameraType())) + ":" + std::to_string(int(GetPassKindHint()));
+            if (reported.size() < 64 && reported.insert(key).second)
+            {
+                const bool finiteWorld = std::all_of(std::begin(d.world.m), std::end(d.world.m),
+                    [](float v) { return std::isfinite(v); });
+                LOG_INFO(Graphics, "PLAYER_GROUND_SECTION camera={} hint={} model={} texture={} primaryMesh={} sections={}:{} indices={} flags={} blend={} depth={} alphaRef={} skinned={} cpuPosed={} palette={} conform={} finiteWorld={}",
+                    int(GWorld->GetCameraType()), int(GetPassKindHint()), shape ? shape->Name() : "<none>",
+                    faceName, ObjectOwnsSnowMesh(*owner, sMesh), beg, end, indexCount, d.flags, d.blend, d.depth,
+                    d.alpha_ref, buf->skinned, buf->cpuPosed || _currentCpuPose != nullptr,
+                    d.palette_slot, d.conform2.z, finiteWorld);
+            }
+        }
+    }
     _draws3d.push_back(d);
     // REN-THR-011 -- remembered by INDEX and patched after the drain. Registered here rather
     // than where d.mesh was filled because several doors above (WGR_KILL_TEX among them) can

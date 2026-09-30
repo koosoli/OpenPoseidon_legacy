@@ -126,8 +126,8 @@ int main()
     assert(!StockSandSurface("Sand", "pt??????", "sand", ""));
     assert(!StockSandSurface("Sand", "ps??????", "rock", ""));
     assert(!StockSandSurface("Sand", "ps??????", "sand", "clutter"));
-    for (const auto uv : {nan, inf, -.1f, .119f, .881f, 1.1f})
+    for (const auto uv : {nan, inf, -.1f, 1.0f, 1.1f})
         assert(!SandSourceInterior(uv, .5f) && !SandSourceInterior(.5f, uv));
-    assert(SandSourceInterior(.12f, .88f) && SandSourceInterior(.5f, .5f));
+    assert(SandSourceInterior(.0f, .999f) && SandSourceInterior(.119f, .881f) && SandSourceInterior(.5f, .5f));
     std::puts("Sand field dry/wet compaction, signed rims, gradient/snapshot parity, persistence/cap and exact stock source tests passed.");
 }

@@ -770,6 +770,7 @@ class Man: public Person
 
 	int PassNum( int lod ) override;
 	void Draw( int level, ClipFlags clipFlags, const FrameBase &pos ) override;
+	void EmitGroundBootContact(bool left, SimulationImportance prec);
 	#if ALPHA_SPLIT
 	void DrawAlpha( int level, ClipFlags clipFlags, const FrameBase &pos );
 	#endif

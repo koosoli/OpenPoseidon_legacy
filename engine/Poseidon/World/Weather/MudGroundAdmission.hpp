@@ -28,7 +28,7 @@ inline bool StockMudSourcePath(std::string_view actual, std::string_view expecte
     return true;
 }
 
-inline bool StockNogovaMudSoil(std::string_view world, std::string_view texture,
+inline bool StockCultivatedMudSoil(std::string_view texture,
                                std::string_view surfaceClass, std::string_view files,
                                std::string_view sound, std::string_view character,
                                float u, float v)
@@ -36,11 +36,23 @@ inline bool StockNogovaMudSoil(std::string_view world, std::string_view texture,
     // Noe palette 8/12 refer to retail O.pbo pole1/pole2: authored cultivated
     // soil, not the surrounding grass. Noe CfgSurfaces omits both; require the
     // unchanged base Default fallback instead of interpreting all Default soil.
-    // pole3 is not referenced by the retail Noe palette and is not admitted.
-    return StockMudSourcePath(world, "noe/noe.wrp") &&
-        (StockMudSourcePath(texture, "o/pole1.paa") || StockMudSourcePath(texture, "o/pole2.paa")) &&
+    // These actual authored assets remain soil when reused by another OFP map.
+    // No map filename whitelist, generic brown ground or substring admission.
+    // pole3 lacks the same audited source evidence and is not admitted.
+    return (StockMudSourcePath(texture, "o/pole1.paa") || StockMudSourcePath(texture, "o/pole2.paa")) &&
         StockMudSourcePath(surfaceClass, "default") && files == "default" && sound == "normalExt" &&
         character.empty() && std::isfinite(u) && std::isfinite(v) &&
-        u >= 0.12f && u <= 0.88f && v >= 0.12f && v <= 0.88f;
+        u >= 0.0f && u < 1.0f && v >= 0.0f && v < 1.0f;
+}
+
+// Compatibility name for material setup and harness callers. Authority is the
+// exact soil asset/metadata and complete footprint support, not the world name.
+inline bool StockNogovaMudSoil(std::string_view world, std::string_view texture,
+                               std::string_view surfaceClass, std::string_view files,
+                               std::string_view sound, std::string_view character,
+                               float u, float v)
+{
+    (void)world;
+    return StockCultivatedMudSoil(texture, surfaceClass, files, sound, character, u, v);
 }
 } // namespace Poseidon

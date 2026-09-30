@@ -39,6 +39,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/World/MapTypes.hpp>
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
+#include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Scene/SurfaceDrawOrder.hpp>
 #include <Poseidon/World/Scene/AlphaSortOrder.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -1054,6 +1055,22 @@ void Scene::LodTraceFlush()
 
 void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
 {
+    static const bool playerTrace = [] {
+        const char* v = std::getenv("POSEIDON_PLAYER_GROUND_TRACE");
+        return v && v[0] == '1';
+    }();
+    static float nextPlayerTrace = -1.0f;
+    const float now = playerTrace ? Glob.time.toFloat() : 0.0f;
+    if (playerTrace && obj && GWorld && obj == GWorld->PlayerOn() &&
+        (now >= nextPlayerTrace || now < nextPlayerTrace-1.0f))
+    {
+        nextPlayerTrace = now + 0.5f;
+        const auto* shape = obj->GetShape();
+        LOG_INFO(Graphics, "PLAYER_GROUND_QUEUE time={:.3f} camera={} forceLOD={} insideLOD={} resident={} invisible={} coverage={} model={} x={:.3f} y={:.3f} z={:.3f}",
+            now, int(GWorld->GetCameraType()), forceLOD, obj->InsideLOD(GWorld->GetCameraType()),
+            obj->IsVisualResident(), obj->Invisible(), obj->GetGpuCoverage(), shape ? shape->Name() : "<none>",
+            obj->Position().X(), obj->Position().Y(), obj->Position().Z());
+    }
     // Camera-independent collision/state must not re-enter through CPU fallback.
     if (!obj->IsVisualResident())
         return;
