@@ -7,6 +7,14 @@ using namespace Poseidon::ObjectSnowSurface;
 
 int main()
 {
+    assert(ConformAllowed(0.0f, false, false));
+    assert(ConformAllowed(2.0f, true, false)); // stock Keep-only roof
+    assert(!ConformAllowed(2.0f, true, true)); // mixed pinned road remains dry
+    assert(!ConformAllowed(2.0f, false, true));
+    assert(!ConformAllowed(2.0f, false, false)); // missing source proof
+    assert(!ConformAllowed(1.0f, true, false)); // forest plane
+    assert(!ConformAllowed(3.0f, true, false));
+    assert(!ConformAllowed(std::numeric_limits<float>::quiet_NaN(), true, false));
     std::array<PosePair, 8> mesh{};
     for (int i = 0; i < 8; ++i)
     {

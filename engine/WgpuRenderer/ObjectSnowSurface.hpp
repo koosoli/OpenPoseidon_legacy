@@ -14,6 +14,13 @@ struct PosePair
     std::array<float, 6> original;
 };
 
+inline bool ConformAllowed(float mode, bool hasKeep, bool hasPinned)
+{
+    // Keep changes elevation above the ground; On pins a surface onto it.
+    // Preserve the existing rigid path, reject forest-plane/unknown modes.
+    return mode == 0.0f || (mode == 2.0f && hasKeep && !hasPinned);
+}
+
 inline bool CoverPossible(bool enabled, float deposit, bool snowlineEnabled,
                           float snowlineHeight, float snowlineRange, float snowlineDepth,
                           float worldUpperY)

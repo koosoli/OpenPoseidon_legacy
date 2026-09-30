@@ -692,9 +692,11 @@ fn vs_gpu(
     // Vegetation = any canopy flag (bush/tree/forest cover the whole vegetation MapType set);
     // gates the foliage lighting in fs_gpu so non-plant cutouts don't get the leaf look.
     out.is_veg = select(0u, 1u, canopy != 0u);
-    // Explicit actual-owner proof; child proxies, authored far DTOs and conformed surfaces
-    // default dry. Vegetation trunks are excluded along with cutout leaves.
-    out.snow_receiver = select(0u, 1u, (inst.flags & 128u) != 0u && canopy == 0u && inst.conform2.z == 0.0);
+    // Explicit actual-owner proof; CPU admission permits rigid or Keep-only visual
+    // LODs. Keep retains roof height above SurfaceY. Pinned On vertices, forest
+    // planes, proxies and vegetation remain excluded in colour and both prepasses.
+    let snow_conform = mode == 0.0 || (mode == 2.0 && conform_sel <= 1u);
+    out.snow_receiver = select(0u, 1u, (inst.flags & 128u) != 0u && canopy == 0u && snow_conform);
     // Undeformed model-space position: the baked volume is a property of the AUTHORED model, so
     // the lookup must use the authored vertex, not a terrain-conformed one.
     out.model_pos = pos;

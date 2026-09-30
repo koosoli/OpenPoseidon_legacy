@@ -7335,6 +7335,25 @@ static bool ObjectOwnsSnowMesh(const Object& obj, const Shape& mesh)
     return false; // a proxy/source mesh cannot inherit its enclosing scene object's proof
 }
 
+static bool ObjectSnowConformAllowed(const LODShapeWithShadow& shape, int mode)
+{
+    if (mode == 0) return true;
+    if (mode != 2) return false;
+    bool hasKeep = false;
+    bool hasPinned = false;
+    // A retained receiver bit applies to every selected visual LOD. Unknown
+    // source levels fail closed; never infer Keep-only from one current section.
+    for (int level = 0; level < shape.NLevels(); ++level)
+    {
+        if (!shape.IsNormalLevel(level)) continue;
+        const Shape* mesh = shape.Level(level);
+        if (!mesh) return false;
+        hasKeep |= (mesh->GetOrHints() & ClipLandKeep) != 0;
+        hasPinned |= (mesh->GetOrHints() & ClipLandOn) != 0;
+    }
+    return ObjectSnowSurface::ConformAllowed(float(mode), hasKeep, hasPinned);
+}
+
 static bool CurrentSnowSectionRigid(const Object& obj, const Shape& mesh,
                                    const VertexBufferWgpu& buffer, int begin, int end)
 {
@@ -8448,7 +8467,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         _currentPaletteSlot == WGR_NO_PALETTE && GetPassKindHint() == render::PassKindHint::None &&
         ObjectOwnsSnowMesh(*snowOwner, sMesh) && !snowOwner->GetAnimated(sMesh) &&
         d.blend == WGR_BLEND_OPAQUE && d.depth == WGR_DEPTH_TEST_WRITE && d.alpha_ref <= 0.0f &&
-        d.conform2.z == 0.0f &&
+        ObjectSnowSurface::ConformAllowed(d.conform2.z,
+            (sMesh.GetOrHints() & ClipLandKeep) != 0, (sMesh.GetOrHints() & ClipLandOn) != 0) &&
         !GCurrentIsVegetation && (d.flags & (WGR_DRAW3D_ON_SURFACE | WGR_DRAW3D_REFLECTIVE |
             WGR_DRAW3D_GLASS | WGR_DRAW3D_COCKPIT | WGR_DRAW3D_MONITOR)) == 0 &&
         (!buf->isDynamic || CurrentSnowSectionRigid(*snowOwner, sMesh, *buf, beg, end));
@@ -9168,8 +9188,9 @@ WgrInstance BuildGpuInstance(const Object& obj, uint32_t model, const ConformPla
     inst.model = model;
     // SceneObjectCreated's retained admission is static/intact rigid geometry. Give only the
     // actual owner this proof; BuildGpuProxyInstance intentionally leaves it unset.
-    const bool snowReceiver = obj.Static() && ObjectSnowOwnerEligible(obj) && cp.mode == 0 &&
-        obj.GetShape() && !obj.GetShape()->GetAllowAnimation();
+    const bool snowReceiver = obj.Static() && ObjectSnowOwnerEligible(obj) &&
+        obj.GetShape() && !obj.GetShape()->GetAllowAnimation() &&
+        ObjectSnowConformAllowed(*obj.GetShape(), cp.mode);
     if (snowReceiver) inst.flags |= WGR_INSTANCE_SNOW_RECEIVER;
     TraceObjectSnowReceiver(obj, snowReceiver, "retained");
     // Terrain-conform plane -> conform0/1/2, matching DrawSectionTL's per-draw fold.

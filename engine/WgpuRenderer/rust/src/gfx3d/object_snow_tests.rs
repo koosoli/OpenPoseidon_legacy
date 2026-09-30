@@ -322,6 +322,10 @@ fn snow_material_flag_and_prepass_contracts_remain_explicit() {
     let direct = include_str!("shader3d.wgsl");
     let retained = include_str!("gpu_driven.wgsl");
     let shared = include_str!("../shaders/shading.wgsl");
+    assert!(retained.contains("mode == 0.0 || (mode == 2.0 && conform_sel <= 1u)"));
+    assert!(direct.contains("in.conform_w <= 0.0"));
+    assert!(direct.contains("world_pos.y = sy + world_pos.y - obj.conform0.x"));
+    assert!(retained.contains("world_pos.y = sy + world_pos.y - inst.conform0.x"));
     assert_eq!(
         super::direct_material_flags(crate::ffi::WGR_DRAW3D_SNOW_RECEIVER, 0, false),
         2048

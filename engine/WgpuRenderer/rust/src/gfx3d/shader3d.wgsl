@@ -778,6 +778,8 @@ fn surface_pixel_depth(in: VsOut) -> f32 {
 }
 
 fn direct_snow_receiver(in: VsOut) -> bool {
+    // Keep vertices leave conform_w zero; only pinned On vertices set it to one.
+    // CPU source admission separately proves mode-2 meshes contain no On hints.
     let material = materials[in.instance];
     let flags = material_flags(material);
     return (flags & MATFLAG_SNOW_RECEIVER) != 0u &&

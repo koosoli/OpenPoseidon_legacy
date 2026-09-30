@@ -170,3 +170,40 @@ height/depth/range admission. `git diff --check` passed. No game, GPU, full
 engine build, deployment or push was run. Parent must build the matched pair
 and verify source-admitted stock UAZ roof dry/coat-on/master-off controls,
 without treating a passing CPU proof as pixel acceptance.
+
+## Keep-only roof admission correction
+
+Read-only inspection of the exact stock `stan_eastc.p3d` fixture found 396
+first-LOD vertices with flags 2111 and 74 with flags 210765887: every vertex
+contains `ClipLandKeep` (0x800), none contains `ClipLandOn` (0x100). Root's
+matched `e0bb256a` Eden fixture recorded the tent's direct and retained receiver
+as false even after actual deposit reached 0.1800. UAZ direct true/false rows
+were present, ruling out a blanket vehicle `GetAnimated` exclusion; that method
+only tests destroyed-phase deformation, unlike `Car::IsAnimated`.
+
+The zero-conform source/shader gates excluded the intact tent's raised roof.
+Mode 2 Keep vertices use `SurfaceY + undeformedWorldY - bcSurfaceY` and keep
+their height above ground; mode 2 On vertices are pinned to SurfaceY. Keep is
+a per-vertex vertical shear over terrain, not necessarily a uniform rigid
+translation. Existing inverse-transpose normal handling and final world-space
+roof height remain authoritative; snow does not change that conform behavior.
+
+CPU admission now permits mode 0 or proven mode 2 Keep-only source meshes.
+Direct admission checks the drawn mesh hints. Retained admission checks every
+normal visual LOD, fails closed on missing source levels, and preserves the
+existing static/intact/no-authored-animation requirements. Any On hint rejects
+mode 2, including a mixed Keep/On source; mode 1 forest planes and unknown modes
+remain excluded. The retained vertex shader accepts only mode 0 or mode 2
+rigid/Keep selectors with the explicit CPU receiver bit. Its colour and both
+normal prepasses use the same resulting receiver flag. Direct Keep vertices
+already leave `conform_w` zero; its existing pinned-On rejection remains correct
+for all three material consumers. Existing vegetation, proxy, glass,
+translucency/cutout, emissive, cockpit and ON_SURFACE exclusions remain.
+
+The standalone CPU policy runner passed the additional rigid/Keep-only,
+mixed/pinned, missing-Keep, forest, unknown and nonfinite mode cases, as well as
+all earlier current-pose tests. Source assertions pin the actual Keep position
+equations, direct pinned weight exclusion and retained selector gate. Parent
+must run shader composition/renderer tests and repeat matched roof dry/coat-on/
+master-off pixel controls. No game, GPU, full build or deployment was run by
+this agent. The real tent coverage result remains pending that installed test.
