@@ -6,6 +6,7 @@ param([ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='stock-land-ring',
       [ValidateRange(0.1,1)][double]$SnowDepth=0.35,
       [ValidateRange(6,15)][int]$ObserveSeconds=8,
       [ValidateRange(12,24)][double]$HoverHeight=18,
+      [switch]$ManualPilot,
       [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Run through scripts/with-game-lock.sh.'}
@@ -39,7 +40,7 @@ $result=[ordered]@{status='running';before=$before;gates=@{};captures=@{};
 @{sourceHead=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;
   roofHelperSha256=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1')).Hash;
   installed=$before;mission=$mission;lockOwner=$env:LOCK_OWNER;requestedSand=@($SandX,$SandZ);
-  helicopter='stock UH60';pilot='stock SoldierWB in independent west group';hoverHeight=$HoverHeight;
+  helicopter='stock UH60';pilot='stock SoldierWB in independent west group';manualPilot=[bool]$ManualPilot;hoverHeight=$HoverHeight;
   observationSimulationSeconds=$ObserveSeconds;seaLevel=0;seaScope='Stock Noe default sea datum, bounded runtime terrain queries';
   relocation='One explicit setPosASL between stages; no setVelocity, forced RPM, repeated position pinning, synthetic particle or terrain stamps'} |
     ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'provenance.json')
@@ -48,7 +49,7 @@ $keys=@('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS
     'POSEIDON_SNOWLINE','POSEIDON_ROTOR_LAND','POSEIDON_ROTOR_LAND_TRACE','POSEIDON_WIND_OVERRIDE',
     'WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_RAIN_WATER_TRACE')
 $saved=@{};foreach($key in $keys) {$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
-$p=$null;$client=$null;$writer=$null;$reader=$null;$script:heliId=$null
+$p=$null;$client=$null;$writer=$null;$reader=$null;$script:heliId=$null;$script:heldUp=$false
 function Health {
     Require ($p -and !$p.HasExited) 'Owned game exited unexpectedly.'
     if ((Test-Path $log) -and (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION|Unbekannter Operator' -Quiet)) {throw 'Installed validation/script failure.'}
@@ -77,6 +78,13 @@ function Capture([string]$stage) {
 }
 function Height([double]$x,[double]$z) {Get-TerrainPuddleFixtureHeight {param($request) Send $request} $x $z}
 function View([double]$x,[double]$z,[double]$ground) {
+    if ($ManualPilot) {
+        # Scripted camera preserves ordinary helicopter keyboard control.
+        # Camera/target commands use AGL, unlike the stored ASL fixture height.
+        $cameraX=$x+30;$cameraZ=$z-36;$cameraGround=Height $cameraX $cameraZ
+        Exec ('rotorCamera camSetPos ['+(Number $cameraX)+','+(Number $cameraZ)+','+(Number ($ground+27-$cameraGround))+']; rotorCamera camSetTarget ['+(Number $x)+','+(Number $z)+',18]; rotorCamera camCommit 0')
+        return
+    }
     $pose=@(($x+30),($z-36),($ground+27),320,-23) | ForEach-Object {Number $_}
     Require ((Eval ('triFreeFlyPose "'+($pose -join ' ')+'"')) -ceq 'OK') 'Free-fly fixture camera refused.'
 }
@@ -118,7 +126,14 @@ function Observe([string]$stage,[double]$x,[double]$z,[bool]$mustTrace=$true) {
 }
 function Place([double]$x,[double]$z,[double]$height) {
     $ground=Height $x $z;$xz=(Number $x)+','+(Number $z)
-    Exec ('rotorHeli setPosASL ['+$xz+','+(Number ($ground+$height))+']; rotorHeli flyInHeight '+(Number $height)+'; rotorPilot doMove ['+$xz+',0]')
+    Exec ('rotorHeli setPosASL ['+$xz+','+(Number ($ground+$height))+']; rotorHeli flyInHeight '+(Number $height))
+    if ($ManualPilot) {
+        # Ordinary Q input refreshes the keyboard height helper after the one
+        # stage relocation. Rotor RPM/velocity/physics remain untouched.
+        $null=Send @{cmd='key';sc=20;hold=$true};$script:heldUp=$true
+        Exec 'setAccTime 1';Start-Sleep -Milliseconds 250
+        $null=Send @{cmd='key_up';sc=20};$script:heldUp=$false;Exec 'setAccTime 0'
+    } else {Exec ('rotorPilot doMove ['+$xz+',0]')}
     View $x $z $ground;return $ground
 }
 function AwaitHover([double]$x,[double]$z) {
@@ -134,6 +149,7 @@ function AwaitHover([double]$x,[double]$z) {
     $script:heliId=$rows[-1].object;Exec 'setAccTime 0';return $rows[-1]
 }
 function CloseOwned {
+    if ($script:heldUp) {$null=Send @{cmd='key_up';sc=20};$script:heldUp=$false}
     Require ($writer -and $reader) 'Harness not connected for normal shutdown.'
     Exec 'setAccTime 1';$null=Send @{cmd='exit'}
     Require ($p.WaitForExit(20000) -and $p.ExitCode -eq 0) 'Owned game did not quit normally with exit zero.'
@@ -164,6 +180,10 @@ try {
     $ground=Height $SandX $SandZ;$xz=(Number $SandX)+','+(Number $SandZ)
     Exec ('rotorHeli="UH60" createVehicle ['+$xz+',0]; rotorHeli allowDamage false; rotorHeli setFuel 0; rotorHeli engineOn false; rotorGroup=createGroup west; "SoldierWB" createUnit [['+$xz+',0],rotorGroup,"rotorPilot=this; this allowDamage false; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE"""]; rotorPilot moveInDriver rotorHeli; rotorHeli setPos ['+$xz+',0]; doStop rotorPilot; rotorHeli engineOn false')
     Require ((Eval 'typeOf rotorHeli') -ceq 'UH60' -and (Eval 'typeOf driver rotorHeli') -ceq 'SoldierWB') 'Real stock helicopter/crew identity missing.'
+    if ($ManualPilot) {
+        Exec ('selectPlayer rotorPilot; rotorPilot action ["AUTOHOVER",rotorHeli]; rotorCamera="camera" camCreate ['+$xz+',0]; rotorCamera cameraEffect ["internal","back"]')
+        Require ((Eval 'format ["%1",player]') -ceq (Eval 'format ["%1",rotorPilot]')) 'Actual controlled pilot identity differs.'
+    }
     $result.gates.object=Eval 'format ["%1",rotorHeli]';View $SandX $SandZ $ground
     $rows=@(Observe 'engine-off' $SandX $SandZ $false);Require (!$result.gates['engine-off'].engineOn -and $rows.Count -eq 0) 'Stopped rotor emitted land puffs.'
     Exec 'rotorHeli setFuel 1; rotorHeli engineOn true';$ground=Place $SandX $SandZ $HoverHeight
