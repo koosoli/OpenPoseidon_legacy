@@ -257,6 +257,15 @@ try {
         $returnViews = [ordered]@{ roofTop = $views.roofTop; coveredGround = $views.coveredGround; terrainGrain = $views.terrainGrain }
         $captures.return = Capture-Views 'return' $returnViews
         $returned = Snow-State $true $expectedDepth ([int]$enabled.chunks)
+        # Independent positive shelter control at the identical ground pixels:
+        # delete actual geometry, then re-create the same verified placement.
+        Remove-TerrainPuddleStockRoof -SendCommand { param($request) Send $request }
+        $captures.roofRemoved = Capture-Views 'roof-removed' ([ordered]@{ coveredGround = $views.coveredGround })
+        $replacedFixture = New-TerrainPuddleStockRoof -SendCommand { param($request) Send $request } -X 9486 -Z 3006 -ControlX 9475.25 -ControlZ 3018.25
+        for ($coordinate=0; $coordinate -lt 3; ++$coordinate) {
+            Require ([Math]::Abs([double]$replacedFixture.actualPosition[$coordinate]-[double]$fixture.actualPosition[$coordinate]) -lt 0.001) 'Restored roof placement changed.'
+        }
+        $captures.roofReplaced = Capture-Views 'roof-replaced' ([ordered]@{ coveredGround = $views.coveredGround })
         $null = Send @{ cmd = 'dev_snow'; action = 'disable' }; $disabled = Snow-State $false $expectedDepth ([int]$enabled.chunks)
         $captures.disabledAfter = Capture-Views 'disabled-after' $views
         $null = Send @{ cmd = 'dev_snow'; action = 'enable' }; $restored = Snow-State $true $expectedDepth ([int]$enabled.chunks)
@@ -323,6 +332,9 @@ try {
             views = $views; captures = $captures; initial = $initial; enabled = $enabled; returned = $returned;
             disabled = $disabled; restored = $restored; tracks = $tracks; actualWeather = $weather; log = $log }
         $result.arms[$arm].beforeReset = $beforeReset; $result.arms[$arm].resetDisabled = $reset
+        $result.arms[$arm].replacedFixture = $replacedFixture
+        $result.comparisons[$arm+'-roof-shelter'] = @{ removedPresent = Pair $captures.roofRemoved.coveredGround $captures.enabled.coveredGround;
+            replacedPresent = Pair $captures.roofReplaced.coveredGround $captures.enabled.coveredGround }
         foreach ($view in $returnViews.Keys) {
             $result.comparisons[$arm+'-'+$view] = @{ cameraReturn = Pair $captures.enabled[$view] $captures.return[$view];
                 restore = Pair $captures.enabled[$view] $captures.restored[$view] }
@@ -338,6 +350,10 @@ try {
         $dry = $result.arms['dry-object-on'].captures.enabled[$view]
         $on = $result.arms['deposit-object-on'].captures.enabled[$view]; $off = $result.arms['deposit-object-off'].captures.enabled[$view]
         $result.comparisons[$view] = @{ depositDry = Pair $dry $on; objectOnOff = Pair $on $off }
+    }
+    $result.comparisons.roofRemovedGround = @{
+        depositDry = Pair $result.arms['dry-object-on'].captures.roofRemoved.coveredGround $result.arms['deposit-object-on'].captures.roofRemoved.coveredGround
+        objectOnOff = Pair $result.arms['deposit-object-on'].captures.roofRemoved.coveredGround $result.arms['deposit-object-off'].captures.roofRemoved.coveredGround
     }
     $result.status = 'captured-not-visually-accepted'
 } catch { $result.status = 'failed'; $result.error = $_.Exception.Message; throw }

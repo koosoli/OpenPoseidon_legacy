@@ -53,6 +53,13 @@ restored views. The view sweep travels to the road and returns to the exact roof
 and ground poses, while simulation is paused at 100 seconds. It captures an
 actual stock UAZ, then removes it before a normal exit.
 
+Each arm also deletes the actual roof and captures the identical covered-ground
+camera, then recreates the verified stock class/model at the same measured ASL
+position and recaptures. Deposited/dry roof-removed pixels provide the positive
+control at the exact sheltered terrain ROI. Mere absence of a response beneath
+the tent cannot pass without this positive control; replaced-roof images check
+that geometry lifecycle restores shelter rather than permanently changing soil.
+
 The deposited arms create and move a real stock `SoldierWB` prone unit along the
 exposed ground. The runner requires actual movement, increased stored chunks and
 a positive `dev_snow sample` in the bounded trailing body footprint. Disabling
@@ -105,7 +112,9 @@ Process environment is restored at completion. Artifacts live in ignored
   statistics. No hard visual tolerance is invented by the runner.
 - Inspect covered and exposed ground at the verified visible soil/rock ROI,
   ensuring ground is not hidden by a tent floor. Shelter is independent from a
-  dark room. Tracks must survive camera travel and disabled/reset intervals.
+  dark room. Require a positive deposited/dry response after roof deletion at
+  the identical covered-ground pixels, and its suppression after replacing the
+  same actual roof. Tracks must survive camera travel and disabled/reset intervals.
 - Inspect classic Eden road near/far controls. Existing road behavior is to hide
   fully ground-conformed road/decal fragments under deposited snow of at least
   four centimetres, sharing terrain deficit/shelter depth. Rigid bridges remain
