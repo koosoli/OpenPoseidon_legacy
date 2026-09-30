@@ -79,7 +79,7 @@ bool CreateRetailFile(const std::vector<uint8_t>& bytes, std::filesystem::path& 
 struct EngineWgpu::RetailPagePilotState
 {
     enum class Phase : uint8_t {
-        AwaitFallback, Advance, AwaitWorker, StagePage, AwaitMesh, AwaitModel,
+        AwaitFallback, Advance, AwaitWorker, StagePage, AwaitMesh, AwaitModel, AwaitReadyHistory,
         RootOnlyReady, FineReady, AwaitRelease, Released, AwaitAbort, Aborted, Failed
     };
     enum class Target : uint8_t { Root, Fine, Refill };
@@ -108,7 +108,8 @@ struct EngineWgpu::RetailPagePilotState
     GeometryPages::HierarchicalPage decodedPage;
     uint64_t decodedPageCharge = 0;
     size_t clusterCursor = 0;
-    uint32_t pendingPage = UINT32_MAX, pendingCluster = UINT32_MAX, pendingModelSlot = UINT32_MAX;
+    uint32_t pendingPage = UINT32_MAX, pendingCluster = UINT32_MAX, pendingModelSlot = UINT32_MAX,
+        readyModelSlot = UINT32_MAX;
     uint64_t workerRequest = 0, pendingRequest = 0;
     uint32_t lastMeshFrame = UINT32_MAX;
     float rootThreshold = 0;
@@ -468,6 +469,38 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
         for (auto& item : staged) _resourceOps.push_back(std::move(item));
         return true;
     };
+    auto enqueueReadyHistory = [&](uint32_t slot) -> bool {
+        if (slot >= s.models.size() || !s.modelReady[slot] || !s.SourceCurrent() ||
+            s.history.empty() || s.history.size() > Record::MaxMeshes) return false;
+        std::array<Record::MeshExpectation, Record::MaxMeshes> meshes{};
+        std::array<Record::ModelExpectation, Record::MaxModels> models{};
+        for (size_t i = 0; i < s.history.size(); ++i)
+        {
+            const auto& row = s.history[i];
+            if (!row.producer || !row.renderer) return false;
+            meshes[i] = {row.producer, row.present ? Record::ExpectedMesh::Present :
+                Record::ExpectedMesh::Absent, row.present ? 0 : row.renderer};
+        }
+        size_t modelCount = 0;
+        for (size_t i = 0; i < s.models.size(); ++i)
+            if (s.models[i] != UINT32_MAX)
+                models[modelCount++] = {s.models[i], s.modelReady[i] ?
+                    Record::ExpectedModel::MappedValid : Record::ExpectedModel::Absent};
+        std::vector<ResourceOp> staged; staged.reserve(1);
+        const uint64_t extra = staged.capacity() * sizeof(ResourceOp) + sizeof(Record) + 256;
+        if (r.knownPayloadBytes > workingLimit || extra > workingLimit - r.knownPayloadBytes)
+            return false;
+        const uint64_t ticket = nextRequest();
+        if (!ticket || !enqueueRecord(std::span(meshes.data(),s.history.size()),
+            std::span(models.data(),modelCount),ticket,staged)) return false;
+        s.readyModelSlot = slot;
+        s.pendingModelSlot = UINT32_MAX; // the model receipt was accepted by the preceding packet
+        s.phase = RetailPagePilotState::Phase::AwaitReadyHistory;
+        r.knownPayloadBytes += extra;
+        r.status = GeometryReportStatus::Pending;
+        r.pageWorkState = "RetailFullHistoryQueued";
+        return true;
+    };
     auto abortNow = [&]() -> GeometryPageFixtureReport {
         if (s.phase == RetailPagePilotState::Phase::Aborted) return current();
         if (s.phase == RetailPagePilotState::Phase::AwaitAbort) return current();
@@ -590,6 +623,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
         if (s.phase == RetailPagePilotState::Phase::AwaitFallback ||
             s.phase == RetailPagePilotState::Phase::AwaitMesh ||
             s.phase == RetailPagePilotState::Phase::AwaitModel ||
+            s.phase == RetailPagePilotState::Phase::AwaitReadyHistory ||
             s.phase == RetailPagePilotState::Phase::AwaitRelease ||
             s.phase == RetailPagePilotState::Phase::AwaitAbort)
         {
@@ -641,7 +675,34 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
                 if (s.abortRequested) return abortNow();
                 return current();
             }
-            if (s.phase == RetailPagePilotState::Phase::AwaitFallback)
+            // A consumed packet is enough to retire its recorded resources.
+            // Abort does not need to create a fresh ready-history packet.
+            if (s.abortRequested) return abortNow();
+            if (s.phase == RetailPagePilotState::Phase::AwaitReadyHistory)
+            {
+                const uint32_t slot = s.readyModelSlot;
+                if (slot < 1 || slot >= s.models.size() || !s.modelReady[slot])
+                    return failed("RetailReadyHistorySlotInvalid");
+                s.readyModelSlot = UINT32_MAX;
+                updateResident();
+                if (s.abortRequested) return abortNow();
+                if (slot == 1 && r.retailRecordDistinctCuts)
+                {
+                    s.target = RetailPagePilotState::Target::Fine;
+                    s.phase = RetailPagePilotState::Phase::Advance;
+                    r.pageWorkState = "RetailRootHistoryPresent";
+                }
+                else
+                {
+                    s.phase = slot == 1 ? RetailPagePilotState::Phase::RootOnlyReady :
+                        RetailPagePilotState::Phase::FineReady;
+                    r.status = GeometryReportStatus::Ready;
+                    r.pageWorkState = slot == 1 ? "RetailRootOnlyRecordReady" :
+                        slot == 2 ? "RetailFineRecordReady" : "RetailRefillRecordReady";
+                    return current();
+                }
+            }
+            else if (s.phase == RetailPagePilotState::Phase::AwaitFallback)
             {
                 s.modelReady[0] = true; s.pendingModelSlot = UINT32_MAX;
                 s.phase = RetailPagePilotState::Phase::Advance;
@@ -671,21 +732,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
                 r.hierarchySelectedTriangles = 0;
                 for (auto cluster : selected) r.hierarchySelectedTriangles += s.clusterIndices[cluster] / 3;
                 r.producerModel = s.models[slot];
-                if (slot == 1 && r.retailRecordDistinctCuts)
-                {
-                    s.target = RetailPagePilotState::Target::Fine;
-                    s.phase = RetailPagePilotState::Phase::Advance;
-                    r.pageWorkState = "RetailRootRecordPresent";
-                }
-                else
-                {
-                    s.phase = slot == 1 ? RetailPagePilotState::Phase::RootOnlyReady :
-                        RetailPagePilotState::Phase::FineReady;
-                    r.status = GeometryReportStatus::Ready;
-                    r.pageWorkState = slot == 1 ? "RetailRootOnlyRecordReady" :
-                        slot == 2 ? "RetailFineRecordReady" : "RetailRefillRecordReady";
-                    updateResident(); return current();
-                }
+                if (!enqueueReadyHistory(slot)) return failed("RetailReadyHistoryUnavailable");
+                updateResident(); return current();
             }
             updateResident();
             if (s.abortRequested) return abortNow();
@@ -866,9 +914,11 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
                 model.materials.capacity()*sizeof(WgrModelMaterial) +
                 model.lods.capacity()*sizeof(WgrModelLod) + 2*sizeof(ResourceOp) +
                 sizeof(render::ModelAdmissionReceipt) + sizeof(Record) + 512;
+            const uint64_t readyHistoryReserve = sizeof(ResourceOp) + sizeof(Record) + 256;
             const uint64_t debt = s.worker->Snapshot().reservedBytes;
             if (r.knownPayloadBytes > workingLimit || debt > workingLimit-r.knownPayloadBytes ||
-                extra > workingLimit-r.knownPayloadBytes-debt) return failed("RetailCutModelCapacity");
+                extra + readyHistoryReserve > workingLimit-r.knownPayloadBytes-debt)
+                return failed("RetailCutModelCapacity");
             const uint64_t ticket = nextRequest();
             if (!ticket) return failed("RetailCutModelRequestExhausted");
             model.model = AllocateProducerModel();

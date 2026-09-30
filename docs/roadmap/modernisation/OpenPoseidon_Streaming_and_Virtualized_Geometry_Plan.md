@@ -1449,3 +1449,40 @@ reads now share the producer's existing accesses while that producer still denie
 other writers/deleters. Teardown headroom is reserved before admission; reports
 carry actual worker debt, and historical mesh preflight counts the root/fine page
 union plus refill IDs. Installed verification remains pending.
+
+### 30 September — actual retail records and a strict refill failure
+
+Exact paired installed `42f98d4b` passed startup. The first retail runner
+`retail-pixels-pages-sep30-20260930-033204-e70a1b` reached actual Fine records:
+144/250 source triangles, two independent pages, eight Present meshes and three
+accepted models, no worker debt. The PAC raw SHA was83d60c398c7fd2ebec3cafc31407021a2d120a675c097013f9a19eb173762769.
+Actual initialized upload used six levels/43,680 BC1 bytes from the43,839-byte
+source; alpha derived from65,536 top-mip pixels had zero clear pixels. This is
+upload-byte provenance, not raster/pixel or complete world/material authority.
+
+Release observed four old detail records Absent while retaining four. Refill
+created four fresh meshes plus one fresh model, but its latest confirmation
+covered only the selected new cut, omitting old Absent generations. The runner
+correctly failed its full-history check; normal shutdown/exit0 occurred without
+forced termination. That failed result remains preserved. Next source adds a
+full-history observation before every Ready; acceptance requires the rerun.
+
+The corrected birth-observer runner `birth-retirement-42f-sep30-disabled-
+20260930-033415` passed normally/exit0:32 current physical refs plus4 generated,
+all36 resident;47 observations still lacked source birth, role closure false.
+Independent warm-upload evidence stays separate and optional for this observer.
+
+Next source also adds an explicit retained-instance main-camera-only flag with
+positive main-view authority, so unknown/shadow/reflection/sky/GI culls exclude
+it. COUNT keys include that authority. No world/CPU suppression or page instance
+is enabled yet; focused actual-GPU validation and installed rerun are pending.
+Whole plan remains OPEN/defaultReady=false/performanceAccepted=false.
+
+The full-history Ready repair and main-camera-only source build passed. Actual
+GPU COUNT plus indirect-record validation passed for main and the separate color
+cull, with the page excluded from solar/local shadows, reflection, sky and GI;
+ordinary control instances survived every view. The COUNT key test also passed.
+Normal installed42f control `default-control-42f-sep30-disabled-20260930-034047`
+passed with921 frames, zero dropped trace frames and normal exit0/no force.
+These checks do not enable retail page instances or prove a world replacement.
+The corrected full-history installed rerun remains pending.

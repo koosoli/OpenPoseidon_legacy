@@ -12,6 +12,9 @@ use glam::{Mat4, Vec3, Vec4};
 use std::sync::mpsc;
 use std::cell::{Cell, RefCell};
 
+const INSTANCE_MAIN_CAMERA_ONLY: u32 = 32; // WGR_INSTANCE_MAIN_CAMERA_ONLY
+const CULL_VIEW_MAIN_CAMERA: u32 = 2; // positive authority, never inferred from an unknown view
+
 // --- GPU buffer layouts (the CPU side of the structs in cull.wgsl) ---
 
 // Per-frame cull parameters (one uniform). 240 bytes, 16-aligned. The occlusion tail
@@ -30,7 +33,7 @@ pub struct CullParamsGpu {
     pub instance_count: u32,
     pub variant_capacity: u32,
     pub variant_count: u32,
-    // Debug flags (bit 0 = skip the frustum test, WGR_CULL_NO_FRUSTUM); read by cull.wgsl.
+    // Bit 0 skips the frustum test; bit 1 authorizes main-camera-only instances.
     pub debug_flags: u32,
     // Occlusion (main_occlude only). Camera-relative proj*view projecting a camera-relative
     // point to clip, plus the Hi-Z size/mip count and the enable flag.
@@ -64,7 +67,7 @@ impl CountCullInputKey {
         bits[28] = p.lod_scale.to_bits();
         bits[29] = p.lod_inv_width.to_bits();
         bits[30] = p.pixel_limit.to_bits();
-        bits[31] = p.debug_flags & 1;
+        bits[31] = p.debug_flags & 3;
         Self(bits)
     }
 }
@@ -78,7 +81,7 @@ pub struct InstanceGpu {
     pub world: [f32; 16],
     pub center: [f32; 4],
     pub model: u32,
-    pub flags: u32, // reserved
+    pub flags: u32, // WgrInstanceFlags; bit 5 restricts a private page to main camera
     // Inflated frustum-cull radius (f32 bits) for terrain-conform instances, whose displaced
     // geometry escapes the flat model sphere; 0 = rigid (use model.bounding_sphere * scale).
     pub cull_radius: u32,
@@ -3086,14 +3089,14 @@ impl CullState {
     // Set this frame's cull params (frustum/cam/objectsZ/lod knobs). instance_count and the
     // variant fields are filled by prepare().
     pub fn set_params(&mut self, mut params: CullParamsGpu) {
-        params.debug_flags = self.debug_flags;
+        params.debug_flags = self.debug_flags | CULL_VIEW_MAIN_CAMERA;
         self.params = params;
     }
 
     // Set the color-pass occlusion view's params (frustum/LOD + the occlusion tail). Only used
     // when occlusion is active; instance_count/variant fields are filled by prepare().
     pub fn set_color_params(&mut self, mut params: CullParamsGpu) {
-        params.debug_flags = self.debug_flags;
+        params.debug_flags = self.debug_flags | CULL_VIEW_MAIN_CAMERA;
         self.color_params = params;
     }
 
@@ -4864,10 +4867,13 @@ pub(crate) mod tests {
         assert_ne!(CountCullInputKey::from_params(&changed), key);
         changed = base; changed.debug_flags = 1;
         assert_ne!(CountCullInputKey::from_params(&changed), key);
+        changed = base; changed.debug_flags = CULL_VIEW_MAIN_CAMERA;
+        assert_ne!(CountCullInputKey::from_params(&changed), key,
+            "a cached nonmain COUNT cannot stand in for a main-camera view");
 
         changed = base;
         changed.cam_pos[3] = 1.0;
-        changed.debug_flags = 2;
+        changed.debug_flags = 4; // unrelated/debug-future bit does not change classify
         changed.view_proj[0][0] = 1.0;
         changed.viewport = [1.0, 1.0];
         changed.hiz_mips = 1;
@@ -5631,6 +5637,102 @@ pub(crate) mod tests {
             1,
             "shadow record.section == LOD1 section id"
         );
+    }
+
+    #[test]
+    fn main_camera_only_instance_count_and_records_exclude_all_other_views() {
+        let Some((device, queue)) = headless() else {
+            assert_ne!(std::env::var("WGR_REQUIRE_TEST_GPU").as_deref(), Ok("1"),
+                "main-camera-only cull needs an actual GPU adapter");
+            return;
+        };
+        let mut cull = CullState::new(&device);
+        cull.variant_capacity = 16; // bounded readback; production capacity is unchanged
+        let sections = [SectionGpu { first_index: 0, index_count: 3, base_vertex: 0, variant: 0 }];
+        let lods = [LodGpu { resolution: 0.0, section_base: 0, section_count: 1, is_decal: 0 }];
+        let materials = [SectionMaterialGpu::zeroed()];
+        let page_model = cull.register_model(1.0, &lods, &sections, &materials);
+        let control_model = cull.register_model(1.0, &lods, &sections, &materials);
+        let make = |model, flags| InstanceGpu {
+            world: Mat4::IDENTITY.to_cols_array(), center: [0.0, 0.0, 0.0, 1.0],
+            model, flags, cull_radius: 0, _pad: 0,
+            conform0: [0.0; 4], conform1: [0.0; 4], conform2: [0.0; 4],
+        };
+        let page = raw_slot(cull.instance_add(make(page_model, INSTANCE_MAIN_CAMERA_ONLY)));
+        let control = raw_slot(cull.instance_add(make(control_model, 0)));
+        let mut params = CullParamsGpu::zeroed(); // zero planes include both instances
+        params.objects_z2 = 100.0;
+        params.lod_scale = 1.0;
+        params.lod_inv_width = 1.0;
+        params.pixel_limit = 0.0;
+        cull.set_params(params);
+        // Bind a real Hi-Z view so prepare/dispatch use the color compute path;
+        // occlusion stays disabled to isolate the pass-authority predicate.
+        cull.set_hiz(Some(const_hiz(&device, &queue, 4, 4, 0.0)));
+        cull.set_color_params(params);
+        cull.set_shadow_view_count(&device, 2); // solar cascade plus local-light tile
+        cull.set_shadow_params(0, params);
+        cull.set_shadow_params(1, params);
+        cull.set_reflection_params(&device, params);
+        let gi = super::super::sky_vis::DIRECTION_COUNT;
+        cull.set_sky_view_count(&device, gi + 1);
+        for i in 0..=gi { cull.set_sky_params(i, params); }
+        cull.target_model_id = Some(page_model);
+        cull.prepare(&device, &queue);
+        assert_eq!(cull.params.debug_flags & CULL_VIEW_MAIN_CAMERA, CULL_VIEW_MAIN_CAMERA);
+        assert_eq!(cull.color_params.debug_flags & CULL_VIEW_MAIN_CAMERA, CULL_VIEW_MAIN_CAMERA);
+        assert_eq!(cull.shadow_views[0].params.debug_flags & CULL_VIEW_MAIN_CAMERA, 0);
+        assert_eq!(cull.reflection_view.as_ref().unwrap().params.debug_flags & CULL_VIEW_MAIN_CAMERA, 0);
+        assert_eq!(cull.sky_views[gi].params.debug_flags & CULL_VIEW_MAIN_CAMERA, 0);
+
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        cull.begin_frame_stats(&mut enc);
+        cull.dispatch(&mut enc);
+        assert!(cull.color_active(), "color view must have its own live compute bind");
+        cull.dispatch_color(&mut enc);
+        for i in 0..2 { assert!(cull.dispatch_shadow(&mut enc, i)); }
+        assert!(cull.dispatch_reflection(&mut enc));
+        for i in 0..=gi { assert!(cull.dispatch_sky(&mut enc, i)); }
+        queue.submit([enc.finish()]);
+
+        let views = [
+            ("main", cull.out_args().unwrap(), cull.out_records().unwrap(), cull.counter_buf(), true),
+            ("color", cull.color_out_args().unwrap(), cull.color_out_records().unwrap(),
+                cull.color_counter_buf(), true),
+            ("solar", cull.shadow_out_args(0).unwrap(), cull.shadow_out_records(0).unwrap(),
+                cull.shadow_counter_buf(0).unwrap(), false),
+            ("local", cull.shadow_out_args(1).unwrap(), cull.shadow_out_records(1).unwrap(),
+                cull.shadow_counter_buf(1).unwrap(), false),
+            ("reflection", cull.reflection_out_args().unwrap(), cull.reflection_out_records().unwrap(),
+                cull.reflection_counter_buf().unwrap(), false),
+            ("sky0", cull.sky_out_args(0).unwrap(), cull.sky_out_records(0).unwrap(),
+                cull.sky_counter_buf(0).unwrap(), false),
+            ("sky1", cull.sky_out_args(1).unwrap(), cull.sky_out_records(1).unwrap(),
+                cull.sky_counter_buf(1).unwrap(), false),
+            ("gi", cull.sky_out_args(gi).unwrap(), cull.sky_out_records(gi).unwrap(),
+                cull.sky_counter_buf(gi).unwrap(), false),
+        ];
+        let slots = CULL_VARIANT_COUNT as u64 * cull.variant_capacity() as u64;
+        let target_word = (TARGET_MODEL_COUNT_BYTE_OFFSET / 4) as usize;
+        for (name, args, records, counters, main) in views {
+            let counts = read_u32s(&device, &queue, counters, target_word as u64 + 1);
+            assert_eq!(counts[target_word], u32::from(main), "{name} page COUNT");
+            assert_eq!(counts[STAT_BASE_WORD as usize], if main { 2 } else { 1 },
+                "{name} must still dispatch and retain the control instance");
+            let args = read_u32s(&device, &queue, args, slots * ARG_WORDS);
+            let records = read_u32s(&device, &queue, records, slots * 2);
+            let mut visible = Vec::new();
+            for arg in args.chunks_exact(ARG_WORDS as usize).filter(|arg| arg[1] != 0) {
+                let first = arg[4] as usize;
+                for index in first..first + arg[1] as usize {
+                    visible.push(records[index * 2]);
+                }
+            }
+            visible.sort_unstable();
+            let mut expected = if main { vec![control, page] } else { vec![control] };
+            expected.sort_unstable();
+            assert_eq!(visible, expected, "{name} emitted instance records");
+        }
     }
 
     // The sky map's ortho frustum, extracted exactly as prepare_cull does it, at the WORLD

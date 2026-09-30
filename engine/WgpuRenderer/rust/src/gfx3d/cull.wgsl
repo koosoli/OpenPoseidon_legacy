@@ -32,7 +32,7 @@ struct CullParams {
     instance_count: u32,
     variant_capacity: u32,   // max args per pipeline variant (partition stride into out_args)
     variant_count: u32,
-    debug_flags: u32,        // bit 0 = skip the frustum test (WGR_CULL_NO_FRUSTUM)
+    debug_flags: u32,        // bit 0 = no frustum; bit 1 = positive main-camera authority
     // Occlusion (main_occlude only; ignored by main). view_proj is the CAMERA-RELATIVE
     // proj*view (translation zeroed) that projects a camera-relative point to clip; the
     // Hi-Z is sampled with the resulting screen rect + reversed-Z depth (see occluded()).
@@ -59,6 +59,9 @@ struct Instance {
     conform1: vec4<f32>,
     conform2: vec4<f32>,
 };
+
+const INST_MAIN_CAMERA_ONLY: u32 = 32u; // WGR_INSTANCE_MAIN_CAMERA_ONLY
+const CULL_VIEW_MAIN_CAMERA: u32 = 2u;  // only main prepass/color setters grant this
 
 struct Model {
     lod_base: u32,           // first entry in lods[]
@@ -166,6 +169,13 @@ fn classify(idx: u32) -> CullResult {
     res.culled = true;
     res.level = 0u;
     let inst = instances[idx];
+    // A private page has no authority in shadow, reflection, sky/GI or a
+    // future view that has not explicitly opted into main-camera visibility.
+    // COUNT and SCATTER both pass through classify, so they exclude it alike.
+    if ((inst.flags & INST_MAIN_CAMERA_ONLY) != 0u &&
+        (cull.debug_flags & CULL_VIEW_MAIN_CAMERA) == 0u) {
+        return res;
+    }
     // Removed static slots are marked model = 0xFFFFFFFF (a free-list hole); this also
     // guards any out-of-range model id.
     if (inst.model >= arrayLength(&models)) {

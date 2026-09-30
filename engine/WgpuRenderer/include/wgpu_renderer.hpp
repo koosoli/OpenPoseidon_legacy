@@ -521,7 +521,10 @@ enum WgrInstanceFlags : uint32_t
     WGR_INSTANCE_CANOPY_TREE = 2,
     WGR_INSTANCE_CANOPY_FOREST = 4,
     WGR_INSTANCE_COHERENT_TREE_WIND = 8,
-    WGR_INSTANCE_FAR_AUTHORED = 16
+    WGR_INSTANCE_FAR_AUTHORED = 16,
+    /* Private visible-page pilot: only the main camera's prepass/color culls
+     * may emit this instance. The original object remains in other passes. */
+    WGR_INSTANCE_MAIN_CAMERA_ONLY = 32
 };
 
 struct WgrInstance
