@@ -1,5 +1,7 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/Weather/MudField.hpp>
+#include <Poseidon/World/Weather/MudContact.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <limits.h>
@@ -203,7 +205,7 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
                     step = true;
                     _soundStepOverride = prim->GetSoundOverride();
                 }
-                if (step && (EnableVisualEffects(prec) || GSnow().CoverActive()) && ValueTest(&MoveInfo::OnLand) < 0.5f)
+                if (step && (EnableVisualEffects(prec) || GSnow().CoverActive() || GMud().ContactActive()) && ValueTest(&MoveInfo::OnLand) < 0.5f)
                 {
                     int index = (left ? Type()->_stepLIndex : Type()->_stepRIndex);
                     if (index >= 0)
@@ -227,6 +229,7 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
                         float yr = GLandscape->RoadSurfaceYAboveWater(pos);
                         if (yr <= ys + 0.2f)
                         {
+                            StampMudFootstep(*GLandscape, *this, pos, Direction());
                             if (GSnow().CoverActive() && !GSnow().NeedsWalkingChannelAt(pos.X(), pos.Z()) && ys > GLandscape->GetSeaLevel())
                             {
                                 const Vector3 toe = pos + Direction() * 0.075f;

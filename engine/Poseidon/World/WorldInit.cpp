@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Game/GameLoop.hpp> // LockstepPacingActive (SIM-815)
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
@@ -861,6 +862,7 @@ void World::InitLandscape(Landscape* landscape)
     Dev::ClearTerrainEditBaseline();
     Dev::EndPhysicsShowcase();
     GSnow().Reset();
+    GMud().Reset();
     GSnowFlakes.ClearParticles();
     GSnow().enabled = false;
     if (const char* depth = std::getenv("POSEIDON_SNOW_TEST_DEPTH"))

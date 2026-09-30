@@ -1,5 +1,8 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/Weather/MudField.hpp>
+#include <Poseidon/World/Weather/RainVolume.hpp>
+#include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
 #include <Poseidon/World/Terrain/TerrainSubdivision.hpp>
 #include "SimVehicleCost.hpp" // PERF-023
 #include <Poseidon/Input/CheatCode.hpp>
@@ -752,6 +755,9 @@ void World::SimulateFastVehicles(float deltaT, VehicleSimulation simul)
 void World::SimulateCloudlets(float deltaT)
 {
     GSnow().Advance(deltaT);
+    if (GLandscape)
+        GMud().Advance(deltaT, UniformWettingDensity(GLandscape->GetRainDensity(),
+            GRain.EffectiveDensity(), GRain.Params().snowflakes));
     SimulationImportance prec = SimulateVisibleFar;
 
     // POSEIDON_TEST_SMOKE=1 drops one new-system plume in front of the camera a
