@@ -127,3 +127,46 @@ Authored checks (parent must execute after shared `snow_material` integration):
 
 Agent executed only new-test-file `rustfmt` and clean `git diff --check`; no
 compilation, GPU test, game launch, deploy or push was run in this worktree.
+
+## Direct animated-owner current-section proof
+
+Follow-up based on `52e6dc09`: the previous blanket `!isDynamic` exclusion
+mistook a whole-LOD allocation hint for proof that every roof vertex deforms.
+`ShapeDraw.cpp` chooses `VBDynamic` from `GetAllowAnimation` (also for the tent
+damage property); `VertexBufferWgpu::Update` hashes/reuploads actual current
+vertices. `Car::Animate` changes selected wheel, steering, turret and configured
+animation vertices, so unrelated roof vertices can retain their original pose.
+
+The direct draw now accepts a dynamic section run only after all previous
+source-owner, foreign-proxy, person, skin/palette, CPU-pose, destroyed mesh,
+cockpit, vegetation, conform, blend/cutout and reflective/glass/monitor gates
+pass. Every position and normal component within its conservative section
+vertex union must be finite and exactly equal to saved originals. Saved normal
+count is independently validated by the new `OriginalNormValid` accessor;
+absent or incomplete originals fail closed. Unordered section ranges are
+unioned rather than assuming index order implies vertex order. Unused vertices
+inside the union can cause a conservative false negative.
+
+The proof allocates nothing and examines at most 16,384 vertices and section
+records per run. It is skipped with `WGR_OBJECT_SNOW=0`, with no actual enabled
+deposit, and when the object bounding sphere cannot reach an enabled finite
+positive-depth snowline. The sphere uses the actual owner scale; it is only a
+cheap possible-cover bound. Fragment coverage remains the authority at actual
+surface height. Static direct draws retain their previous admission; retained
+animated-owner registration stays excluded by its existing rigid source gate.
+
+This is a current-pose proof, not a declaration that a selection can never
+animate. A neutral articulated section may pass and becomes excluded if its
+positions or normals change; no persistent coating follows an articulated
+selection. UV-only changes are not geometry deformation. A section sharing a
+vertex span with animated wheels can remain dry. No displacement, collision,
+model ownership, material or streaming authority is changed.
+
+`scripts/Test-ObjectSnowSurfacePolicy.ps1` passed in the isolated worktree:
+unchanged roof versus moved wheel, independently changed position/normal,
+nonfinite source data, missing originals, invalid bounds, read-free over-budget
+rejection, the exact budget edge, disabled/zero deposit and finite snowline
+height/depth/range admission. `git diff --check` passed. No game, GPU, full
+engine build, deployment or push was run. Parent must build the matched pair
+and verify source-admitted stock UAZ roof dry/coat-on/master-off controls,
+without treating a passing CPU proof as pixel acceptance.

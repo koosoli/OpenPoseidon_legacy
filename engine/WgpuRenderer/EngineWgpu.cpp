@@ -1,4 +1,6 @@
 #include "MeshRecordClosure.hpp"
+#include "ObjectSnowSurface.hpp"
+#include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageCameraDemand.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageProjectedDemand.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPagePrivateAutoFine.hpp>
@@ -7333,6 +7335,47 @@ static bool ObjectOwnsSnowMesh(const Object& obj, const Shape& mesh)
     return false; // a proxy/source mesh cannot inherit its enclosing scene object's proof
 }
 
+static bool CurrentSnowSectionRigid(const Object& obj, const Shape& mesh,
+                                   const VertexBufferWgpu& buffer, int begin, int end)
+{
+    // Dynamic is a whole-LOD hint: a car's wheels can animate without changing
+    // its roof. Only inspect the section being drawn, after all source gates.
+    static const bool objectSnow = [] {
+        const char* value = std::getenv("WGR_OBJECT_SNOW");
+        return !(value && std::strcmp(value, "0") == 0);
+    }();
+    if (!objectSnow || !obj.GetShape()) return false;
+    const auto& snow = GSnow(); // same weather authority used by TerrainWgpu
+    const float upperY = obj.Position().Y() +
+        std::abs(obj.GetShape()->BoundingSphere() * obj.Scale());
+    if (!ObjectSnowSurface::CoverPossible(snow.enabled, snow.Depth(), snow.EffSnowlineEnabled(),
+        snow.EffSnowlineHeight(), snow.snowlineRange, snow.snowlineDepth, upperY)) return false;
+    if (begin < 0 || end <= begin || end > buffer.sections.Size() ||
+        end - begin > ObjectSnowSurface::MaxProofVertices || mesh.NVertex() != buffer.vertexCount ||
+        mesh.NNorm() < mesh.NVertex()) return false;
+    int first = mesh.NVertex();
+    int last = 0;
+    // Section vertex ranges need not be ordered like their index ranges. Use a
+    // conservative union; holes can only reject an otherwise unchanged section.
+    for (int section = begin; section < end; ++section)
+    {
+        const auto& range = buffer.sections[section];
+        if (range.begVertex < 0 || range.endVertex <= range.begVertex ||
+            range.endVertex > mesh.NVertex()) return false;
+        first = std::min(first, range.begVertex);
+        last = std::max(last, range.endVertex);
+    }
+    return ObjectSnowSurface::CurrentSectionRigid(first, last, mesh.NVertex(),
+        mesh.OriginalPosValid() && mesh.OriginalNormValid(), [&](int vertex) {
+            const Vector3 pos = mesh.Pos(vertex), normal = mesh.Norm(vertex);
+            const Vector3 originalPos = mesh.OrigPos(vertex), originalNormal = mesh.OrigNorm(vertex);
+            return ObjectSnowSurface::PosePair{
+                {pos.X(), pos.Y(), pos.Z(), normal.X(), normal.Y(), normal.Z()},
+                {originalPos.X(), originalPos.Y(), originalPos.Z(),
+                 originalNormal.X(), originalNormal.Y(), originalNormal.Z()}};
+        });
+}
+
 static void TraceObjectSnowReceiver(const Object& obj, bool eligible, const char* path)
 {
     static const bool fixture = [] {
@@ -8401,13 +8444,14 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
 
     const auto* snowOwner = static_cast<const Object*>(GetDrawObject());
     const bool snowReceiver = snowOwner && ObjectSnowOwnerEligible(*snowOwner) &&
-        !buf->isDynamic && !buf->skinned && !buf->cpuPosed && !_currentCpuPose &&
+        !buf->skinned && !buf->cpuPosed && !_currentCpuPose &&
         _currentPaletteSlot == WGR_NO_PALETTE && GetPassKindHint() == render::PassKindHint::None &&
         ObjectOwnsSnowMesh(*snowOwner, sMesh) && !snowOwner->GetAnimated(sMesh) &&
         d.blend == WGR_BLEND_OPAQUE && d.depth == WGR_DEPTH_TEST_WRITE && d.alpha_ref <= 0.0f &&
         d.conform2.z == 0.0f &&
         !GCurrentIsVegetation && (d.flags & (WGR_DRAW3D_ON_SURFACE | WGR_DRAW3D_REFLECTIVE |
-            WGR_DRAW3D_GLASS | WGR_DRAW3D_COCKPIT | WGR_DRAW3D_MONITOR)) == 0;
+            WGR_DRAW3D_GLASS | WGR_DRAW3D_COCKPIT | WGR_DRAW3D_MONITOR)) == 0 &&
+        (!buf->isDynamic || CurrentSnowSectionRigid(*snowOwner, sMesh, *buf, beg, end));
     if (snowReceiver) d.flags |= WGR_DRAW3D_SNOW_RECEIVER;
     if (snowOwner) TraceObjectSnowReceiver(*snowOwner, snowReceiver, "direct");
 

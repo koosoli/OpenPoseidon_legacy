@@ -184,6 +184,7 @@ public:
 	void ClearOriginalPos() const;
 	void RestoreOriginalPos();
 	bool OriginalPosValid() const { return _pos.Size() == _orig.Size(); }
+	bool OriginalNormValid() const { return _norm.Size() == _origNorm.Size(); }
 
 	void Init(int nPos);
 	void Clear(){ ReleaseTables(); }
