@@ -960,6 +960,7 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddBoolToObject(result,"retailVisiblePresent",report.retailVisiblePresent);
             cJSON_AddBoolToObject(result,"retailVisibleRemoved",report.retailVisibleRemoved);
             cJSON_AddBoolToObject(result,"retailVisibleReturned",report.retailVisibleReturned);
+            cJSON_AddBoolToObject(result,"retailFineTriangleSetExact",report.retailFineTriangleSetExact);
             cJSON_AddStringToObject(result,"retailVisiblePhase",report.retailVisiblePhase.c_str());
             cJSON_AddBoolToObject(result,"retailRecordDistinctCuts",report.retailRecordDistinctCuts);
             cJSON_AddBoolToObject(result,"retailPixelSourceVerified",report.retailPixelSourceVerified);
@@ -967,6 +968,7 @@ void RegisterScreenshot(HarnessServer& hs)
 #define PAGE_FIXTURE_NUMBER(field) cJSON_AddNumberToObject(result,#field,double(report.field))
             PAGE_FIXTURE_NUMBER(retailVisibleBirth);PAGE_FIXTURE_NUMBER(retailVisibleRequest);PAGE_FIXTURE_NUMBER(retailVisibleFrame);
             PAGE_FIXTURE_NUMBER(retailVisibleRenderer);PAGE_FIXTURE_NUMBER(retailVisibleSlot);PAGE_FIXTURE_NUMBER(retailVisibleModel);
+            PAGE_FIXTURE_NUMBER(retailVisibleReferenceSourceLevel);PAGE_FIXTURE_NUMBER(retailVisibleReferenceTriangles);PAGE_FIXTURE_NUMBER(retailVisibleCameraGeneration);
             PAGE_FIXTURE_NUMBER(textureReuseAllowed);PAGE_FIXTURE_NUMBER(textureReuseDenied);PAGE_FIXTURE_NUMBER(textureReuseOwnerCreates);
             PAGE_FIXTURE_NUMBER(retailSourcePrepareStatus);PAGE_FIXTURE_NUMBER(retailSourceExportStatus);
             PAGE_FIXTURE_NUMBER(retailHierarchyProductStatus);PAGE_FIXTURE_NUMBER(retailHierarchyPages);

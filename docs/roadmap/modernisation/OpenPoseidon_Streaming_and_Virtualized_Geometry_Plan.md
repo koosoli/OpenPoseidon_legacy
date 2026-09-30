@@ -1515,3 +1515,37 @@ idempotent historical-Absent Remove observations. No stale Remove FFI is issued;
 terminal rejected receipts never become visible Ready. The maximum12 instance
 operations are reserved before visible admission. Installed visible verification
 remains pending; normal default paths do not query instance facts.
+
+### 30 September — actual visible lifecycle, material fidelity repair next
+
+Exact317ec996 installed startup and `retail-visible-317-20260930-041333-bdfe77`
+passed normally/exit0: one literal instance handle3 through source coarse/root/
+Fine/root/refilled-Fine, then returned historical removal. The images positively
+show rock presence and absence, but BOTH the source-coarse reference and paged
+Fine appear nearly black. This is not visual/material parity acceptance.
+
+Read-only audit identified a real private material-tail omission: scalar-only
+prepared classification retained zero layer UV/tint, while the ordinary
+ResolveMaterialLayers tail sets identity. The shader multiplied albedo by zero.
+Next source runs that actual ordinary no-surface tail under the frozen reuse
+scope and rejects nonidentity unlayered admission. Lighting/PAC bytes unchanged.
+
+Next source also uses an independent actual source Fine reference (250tris)
+only under private-visible gate, preserving record-only coarse144. Complete Fine
+page roundtrips now compare oriented original-ID triangles and multiplicities,
+plus scalar vertices, with bounded/charged scratch. Camera generation is reported
+separately from operation frame attempt. Runtime quality acceptance remains pending.
+
+Normal317 DayZ control passed/zero dropped/normal exit0, median22.587ms,
+p95123.927ms/p99360.358ms; variation versus prior b911 is not causal acceptance.
+Native Reforger Village317 captured4,930 main instances/13,451,410 main triangles,
+31.200ms sample, normal exit0/uncontended after79.57s. This is a populated native
+streaming lifecycle observation, not a quality ground truth, improvement or
+matched no-regression proof. Whole plan OPEN/defaultReady=false/performanceAccepted=false.
+
+The source-Fine/material game+Core+Tools-dependent test build passed after one
+Catch2 compound-assert parentheses repair (failure log preserved). Fine-product
+checks passed195 assertions/8 cases, including oriented parity rejection cases.
+The visible runner now records repeated source-Fine/Fine/source-Fine images with
+jitter/upscaling and grass/cloud/planar ablations isolated to this test process.
+No image registration or quality acceptance is inferred from the triangle proof.

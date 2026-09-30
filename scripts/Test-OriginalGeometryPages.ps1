@@ -201,6 +201,7 @@ $environment.WGR_GEOMETRY_PAGE_PROJECTED_PREFETCH=$(if($ProjectedPrefetch){'1'}e
 $environment.WGR_GEOMETRY_PAGE_PRIVATE_AUTO_FINE=$(if($AutoFine){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_PRIVATE_AUTO_COARSE=$(if($AutoCoarse){'1'}else{'0'})
 if($CameraTuple -or $RetailVisible){$environment.WGR_HDR='1';$environment.WGR_RENDER_SCALE=$(if($CameraTupleScaleRefusal){'75'}else{'100'})}
+if($RetailVisible){$environment.WGR_TEMPORAL='0';$environment.WGR_DLSS='0';$environment.WGR_ABLATE='grass,clouds,planar'}
 $old=@{};Get-ChildItem Env:|Where-Object {$_.Name -match '^(WGR_|POSEIDON_)'}|ForEach-Object {$old[$_.Name]=$_.Value}
 $p=$null;$client=$null;$normal=$false;$forced=$false;$result=$null;$failure=$null
 $exe=Join-Path $GameDir 'OpenPoseidon.exe';$dll=Join-Path $GameDir 'wgpu_renderer.dll';$log=Join-Path $out 'engine.log'
@@ -585,11 +586,15 @@ try{
        return $r
       }
       $v=VisibleReady 'beginRetailVisible';$visibleRows+=@{action='fallback';evidence=$v};Capture 'retail-fallback.png'
-      if(!$v.retailVisiblePresent -or $v.retailVisibleSlot -ne 0){throw 'Retail visible fallback was not consumed'}
+      if(!$v.retailVisiblePresent -or $v.retailVisibleSlot -ne 0 -or $v.retailVisibleReferenceTriangles -ne 250 -or !$v.retailFineTriangleSetExact){throw 'Retail exact source Fine reference was not consumed'}
+      Capture 'retail-reference-repeat.png'
       $v=VisibleReady 'rootRetailVisible';$visibleRows+=@{action='root';evidence=$v};Capture 'retail-root.png'
       if(!$v.retailVisiblePresent -or $v.retailVisibleSlot -ne 1){throw 'Retail visible root was not consumed'}
       $v=VisibleReady 'fineRetailVisible';$visibleRows+=@{action='fine';evidence=$v};Capture 'retail-fine.png'
       if(!$v.retailVisiblePresent -or $v.retailVisibleSlot -ne 2){throw 'Retail visible fine was not consumed'}
+      Capture 'retail-fine-repeat.png'
+      $v=VisibleReady 'fallbackRetailVisible';$visibleRows+=@{action='source-fine-reference-again';evidence=$v};Capture 'retail-reference-again.png'
+      $v=VisibleReady 'fineRetailVisible';$visibleRows+=@{action='fine-again';evidence=$v}
       $v=VisibleReady 'rootRetailVisible';$visibleRows+=@{action='root-before-release';evidence=$v}
      }
      $retailRelease=$null;$retailRefill=$null

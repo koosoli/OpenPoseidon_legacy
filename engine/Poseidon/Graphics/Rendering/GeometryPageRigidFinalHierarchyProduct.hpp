@@ -2,6 +2,7 @@
 #include <Poseidon/Graphics/Rendering/GeometryPageRigidOdol7FinalShape.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalDiskCodec.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalOriginalOutside.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalCut.hpp>
 
 namespace Poseidon::GeometryPages
 {
@@ -21,6 +22,9 @@ struct RigidFinalHierarchyProduct
     std::array<uint8_t,32> fileSha256{};
     uint64_t sourceAdmissionEpoch=0,ownerEpoch=0,modelBirth=0,shapeQueryRevision=0;
     bool actualNoShadow=false,requiresOriginalOtherPasses=true;
+    // Exact oriented original-ID triangle multiplicities for the complete Fine
+    // cut, plus separately checked scalar vertices. No raster/world claim.
+    bool fineTriangleSetExact=false;
     uint64_t knownSourceCapacityBytes=0,knownRetainedCapacityBytes=0;
     // Maximum observed owned capacities at our phase boundaries, INCLUDING
     // caller source. NOT a hard peak: upstream bake/builder/codec temporary
@@ -63,6 +67,63 @@ inline bool ValidLimits(const RigidFinalHierarchyLimits& l)
         l.encodedCapacityBytes&&l.encodedCapacityBytes<=HierarchicalDiskDetail::MaxFileBytes&&
         l.observedCapacityBytes&&l.observedCapacityBytes<=4*1024*1024;
 }
+// Sequential decoded-page accumulator: no all-pages payload copy. Original IDs
+// distinguish coincident authored seams; cyclic rotation preserves orientation.
+class FineTriangleParity
+{
+    using Triangle=std::array<uint32_t,3>;
+    std::vector<Triangle> source_,selected_;
+    std::array<bool,64> wanted_{},seen_{};
+    uint32_t vertexCount_=0;
+    bool prepared_=false,failed_=false;
+    bool Refuse(){failed_=true;return false;}
+    static Triangle Oriented(uint32_t a,uint32_t b,uint32_t c)
+    {return std::min({Triangle{a,b,c},Triangle{b,c,a},Triangle{c,a,b}});}
+public:
+    static uint64_t ReservationBytes(size_t triangles)
+    {return sizeof(FineTriangleParity)+triangles*2*sizeof(Triangle);}
+    uint64_t KnownBytes() const
+    {return sizeof(*this)+(source_.capacity()+selected_.capacity())*uint64_t(sizeof(Triangle));}
+    bool Prepare(const ExportedMesh& source,std::span<const uint32_t> clusters)
+    {
+        if(prepared_||failed_||source.vertices.empty()||source.vertices.size()>4096||source.indices.empty()||
+           source.indices.size()%3||source.indices.size()/3>8192||clusters.empty()||clusters.size()>63)return Refuse();
+        for(auto id:source.indices)if(id>=source.vertices.size())return Refuse();
+        for(auto id:clusters){if(id>=wanted_.size()||wanted_[id])return Refuse();wanted_[id]=true;}
+        vertexCount_=uint32_t(source.vertices.size());
+        source_.reserve(source.indices.size()/3);selected_.reserve(source.indices.size()/3);
+        for(size_t i=0;i<source.indices.size();i+=3)
+            source_.push_back(Oriented(source.indices[i],source.indices[i+1],source.indices[i+2]));
+        std::sort(source_.begin(),source_.end());prepared_=true;return true;
+    }
+    bool Add(const HierarchicalPage& page)
+    {
+        if(!prepared_||failed_)return Refuse();
+        for(const auto& cluster:page.clusters) {
+            if(cluster.cluster>=wanted_.size())return Refuse();
+            if(!wanted_[cluster.cluster])continue;
+            if(seen_[cluster.cluster]||cluster.vertices.empty()||cluster.vertices.size()>64||
+               cluster.originalVertexIds.size()!=cluster.vertices.size()||cluster.indices.empty()||
+               cluster.indices.size()%3||cluster.indices.size()/3>source_.size()-selected_.size())return Refuse();
+            for(size_t i=0;i<cluster.originalVertexIds.size();++i) {
+                if(cluster.originalVertexIds[i]>=vertexCount_)return Refuse();
+                for(size_t j=0;j<i;++j)if(cluster.originalVertexIds[i]==cluster.originalVertexIds[j])return Refuse();
+            }
+            for(auto local:cluster.indices)if(local>=cluster.originalVertexIds.size())return Refuse();
+            for(size_t i=0;i<cluster.indices.size();i+=3)
+                selected_.push_back(Oriented(cluster.originalVertexIds[cluster.indices[i]],
+                    cluster.originalVertexIds[cluster.indices[i+1]],cluster.originalVertexIds[cluster.indices[i+2]]));
+            seen_[cluster.cluster]=true;
+        }
+        return true;
+    }
+    bool Finish()
+    {
+        if(!prepared_||failed_||source_.size()!=selected_.size())return false;
+        for(size_t i=0;i<wanted_.size();++i)if(wanted_[i]!=seen_[i])return false;
+        std::sort(selected_.begin(),selected_.end());return selected_==source_;
+    }
+};
 }
 // Explicit producer-only call, never a camera/frame demand action. The root
 // passes its successful ACTUAL finalized export; this pure helper cannot prove
@@ -136,14 +197,31 @@ inline RigidFinalHierarchyStatus BuildRigidFinalHierarchyProduct(const RigidOdol
            manifest->metadata.rootClusters!=package.rootClusters)return Status::Invalid;
         result.knownRetainedCapacityBytes=sizeof(result)+imageBytes+manifest->knownCapacityBytes;
         if(!observe(packageBytes+result.knownRetainedCapacityBytes))return Status::Capacity;
+        std::array<uint8_t,64> allResident{};allResident.fill(1);
+        HierarchicalCutPlan fineCut;
+        if(!PlanHierarchicalCut(manifest->metadata,0,{manifest->metadata.identity,
+            std::span<const uint8_t>(allResident.data(),manifest->pages.size())},fineCut)||
+           fineCut.state!=HierarchicalCutState::RequestedCut)return Status::Invalid;
+        const uint64_t planBytes=sizeof(fineCut)+(fineCut.requestedClusters.capacity()+fineCut.requiredPages.capacity()+
+            fineCut.missingPages.capacity()+fineCut.selectedClusters.capacity())*uint64_t(sizeof(uint32_t));
+        RigidFinalHierarchyDetail::FineTriangleParity parity;
+        if(!observe(packageBytes+result.knownRetainedCapacityBytes+planBytes+
+            parity.ReservationBytes(actual.actual.fine.indices.size()/3)))return Status::Capacity;
+        if(!parity.Prepare(actual.actual.fine,fineCut.selectedClusters))return Status::Invalid;
+        const uint64_t scratchBytes=planBytes+parity.KnownBytes();
+        if(!observe(packageBytes+result.knownRetainedCapacityBytes+scratchBytes))return Status::Capacity;
         for(uint32_t p=0;p<manifest->pages.size();++p) {
             const auto& range=manifest->pages[p];HierarchicalPage page;
             if(range.bytes>65536||range.offset>image->bytes.size()||range.bytes>image->bytes.size()-range.offset||
                DecodeHierarchicalDiskPage(*manifest,p,std::span<const uint8_t>(image->bytes).subspan(size_t(range.offset),range.bytes),
                    page)!=HierarchicalDiskStatus::Decoded||
                !HierarchicalOriginalOutside::ExactOriginalFinePageVertices(page,actual.actual.fine.vertices))return Status::Invalid;
-            if(!observe(packageBytes+result.knownRetainedCapacityBytes+HierarchicalDiskPageKnownBytes(page)))return Status::Capacity;
+            if(!observe(packageBytes+result.knownRetainedCapacityBytes+scratchBytes+
+                HierarchicalDiskPageKnownBytes(page)))return Status::Capacity;
+            if(!parity.Add(page))return Status::Invalid;
         }
+        if(!parity.Finish())return Status::Invalid;
+        result.fineTriangleSetExact=true;
         result.fileSha256=HierarchicalDiskDetail::Hash(image->bytes);
         result.image=std::move(image);result.manifest=std::move(manifest);
         destination=std::move(result);return Status::Produced;

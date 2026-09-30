@@ -128,7 +128,7 @@ struct EngineWgpu::RetailPagePilotState
         visiblePendingSlot = UINT32_MAX, visibleSwitches = 0, visibleRemoveAttempts = 0;
     uint64_t visibleBirth = 0, visibleRequest = 0, visibleCameraGeneration = 0;
     uint32_t visibleRendererSlot = 0;
-    bool visibleRecoveryRemove = false;
+    bool visibleRecoveryRemove = false, visibleSourceFineReference = false;
     std::shared_ptr<render::RetailPageInstanceObservation> visibleObservation;
 
     void RefreshWorkerReport()
@@ -207,7 +207,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
     {
         const auto actual = input.actual;
         const auto product = input.product;
-        if (!actual || !product || !product->image || !product->manifest || !input.modelLease ||
+        if (!actual || !product || !product->fineTriangleSetExact || !product->image || !product->manifest || !input.modelLease ||
             !input.modelLease->Encoded().HasArchiveIdentity() || !input.texture || !input.textureBirth ||
             !input.pixelSourceVerified || !RetailNonzero(input.pixelSourceSha256) ||
             !input.sourceCurrent || !input.sourceCurrent() || !std::isfinite(input.sphereRadius) ||
@@ -236,6 +236,15 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
             input.modelLease->DecodedBytes() != 53786 ||
             actual->actual.coarse.vertices.empty() || actual->actual.fine.vertices.empty() ||
             actual->actual.coarse.indices.empty() || actual->actual.fine.indices.empty()) return failure;
+        for (const auto& uv : input.material.layer_uv)
+            if (uv[0]!=1 || uv[1]!=1 || uv[2]!=0 || uv[3]!=0) return failure;
+        for (const auto& colour : input.material.layer_colour)
+            for (auto component : colour) if (component!=1) return failure;
+        const char* visibleGate = std::getenv("WGR_GEOMETRY_PAGE_RETAIL_VISIBLE");
+        const bool visibleSourceFineReference = visibleGate && !std::strcmp(visibleGate, "1");
+        const size_t referenceIndex = visibleSourceFineReference ? 1 : 0;
+        if (actual->finalLevels[referenceIndex] < 0) return failure;
+        const auto& reference = visibleSourceFineReference ? actual->actual.fine : actual->actual.coarse;
         for (const auto* mesh : {&actual->actual.coarse, &actual->actual.fine})
             for (const auto& vertex : mesh->vertices)
                 if (!RetailEnclosed(vertex, input.sphereRadius)) return failure;
@@ -275,6 +284,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
             input.knownAuthorityBytes > RetailLimit - product->knownSourceCapacityBytes -
                 product->knownRetainedCapacityBytes) return failure;
         auto state = std::make_shared<RetailPagePilotState>();
+        state->visibleSourceFineReference = visibleSourceFineReference;
         state->admission = std::move(input);
         state->rootClusters = root.selectedClusters; state->fineClusters = fine.selectedClusters;
         state->rootPages = root.requiredPages; state->finePages = fine.requiredPages;
@@ -313,6 +323,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
         state->report.retailHierarchyProductStatus = uint32_t(RigidFinalHierarchyStatus::Produced);
         state->report.retailHierarchyPages = uint32_t(p.pages.size());
         state->report.retailRecordDistinctCuts = distinct;
+        state->report.retailFineTriangleSetExact = product->fineTriangleSetExact;
         state->report.hierarchicalPilot = true;
         state->report.hierarchicalDiskPilot = true;
         state->report.hierarchyPages = uint32_t(p.pages.size());
@@ -323,15 +334,18 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
         state->report.hierarchyPackageSha256 = RetailHex(p.identity.packageSha256);
         state->report.coarseTriangles = uint32_t(actual->actual.coarse.indices.size() / 3);
         state->report.fineTriangles = uint32_t(actual->actual.fine.indices.size() / 3);
+        state->report.retailVisibleReferenceSourceLevel = uint32_t(actual->finalLevels[referenceIndex]);
+        state->report.retailVisibleReferenceTriangles = uint32_t(reference.indices.size() / 3);
         state->report.knownPayloadBytes = known;
         state->report.active = true;
         state->report.pageEpoch = _nextGeometryPageEpoch++;
-        state->report.pageWorkState = "RetailFallbackQueued";
+        state->report.pageWorkState = visibleSourceFineReference ?
+            "RetailSourceFineReferenceQueued" : "RetailFallbackQueued";
         if (_frameCounter == UINT32_MAX) return failure;
         ResourceOp mesh; mesh.kind = ResourceOp::MeshCreate;
-        mesh.verts = actual->actual.coarse.vertices;
-        mesh.indices.reserve(actual->actual.coarse.indices.size());
-        for (auto index : actual->actual.coarse.indices)
+        mesh.verts = reference.vertices;
+        mesh.indices.reserve(reference.indices.size());
+        for (auto index : reference.indices)
         { if (index > INT32_MAX) return failure; mesh.indices.push_back(VertexIndex(index)); }
         const uint64_t meshCharge = mesh.verts.capacity() * sizeof(SVertex) +
             mesh.indices.capacity() * sizeof(VertexIndex);
@@ -345,7 +359,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
         const uint64_t producerMesh = mesh.mesh;
         ResourceOp model; model.kind = ResourceOp::ModelRegister; model.model = modelId;
         model.sphereRadius = state->admission.sphereRadius;
-        model.name = "private-retail-fallback-record";
+        model.name = visibleSourceFineReference ?
+            "private-retail-source-fine-reference" : "private-retail-fallback-record";
         auto section = state->admission.section;
         section.mesh = producerMesh; section.index_begin = 0;
         section.index_count = uint32_t(mesh.indices.size());
@@ -727,7 +742,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
                 s.modelReady[0] = true; s.pendingModelSlot = UINT32_MAX;
                 s.phase = RetailPagePilotState::Phase::Advance;
                 s.target = RetailPagePilotState::Target::Root;
-                r.pageWorkState = "RetailFallbackRecordPresent";
+                r.pageWorkState = s.visibleSourceFineReference ?
+                    "RetailSourceFineReferenceRecordPresent" : "RetailFallbackRecordPresent";
             }
             else if (s.phase == RetailPagePilotState::Phase::AwaitMesh)
             {
@@ -1143,7 +1159,9 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageVisiblePilot(Geometr
                     slot == 1 ? RetailPagePilotState::VisiblePhase::Root :
                     RetailPagePilotState::VisiblePhase::Fine;
                 r.retailVisiblePresent = true; r.retailVisibleRemoved = false;
-                r.retailVisiblePhase = slot == 0 ? "Reference" : slot == 1 ? "Root" : "Fine";
+                r.retailVisiblePhase = slot == 0 ?
+                    (s.visibleSourceFineReference ? "SourceFineReference" : "Reference") :
+                    slot == 1 ? "Root" : "Fine";
                 r.retailVisibleRenderer = observed.rendererModel;
                 r.retailVisibleSlot = slot;
                 r.retailVisibleModel = s.models[slot]; r.producerModel = s.models[slot];
@@ -1166,6 +1184,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageVisiblePilot(Geometr
             }
             s.visibleRendererSlot = observed.rendererHandle;
             s.visibleCameraGeneration = observed.camera.generation;
+            r.retailVisibleCameraGeneration = observed.camera.generation;
             s.visiblePendingSlot = UINT32_MAX;
             s.visibleObservation.reset();
             r.retailVisibleFrame = observed.frameAttempt;

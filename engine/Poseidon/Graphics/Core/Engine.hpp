@@ -3312,6 +3312,9 @@ class Engine : public IGraphicsEngine
         uint64_t retailVisibleBirth=0,retailVisibleRequest=0,retailVisibleFrame=0;
         uint32_t retailVisibleRenderer=UINT32_MAX,retailVisibleSlot=UINT32_MAX,retailVisibleModel=UINT32_MAX;
         std::string retailVisiblePhase;
+        uint32_t retailVisibleReferenceSourceLevel=UINT32_MAX,retailVisibleReferenceTriangles=0;
+        uint64_t retailVisibleCameraGeneration=0;
+        bool retailFineTriangleSetExact=false;
         std::string retailPixelSourceSha256;
         uint32_t retailHierarchyProductStatus=0,retailHierarchyPages=0;
         uint32_t retailRecordMeshesPresent=0,retailRecordMeshesAbsent=0;

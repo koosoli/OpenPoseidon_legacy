@@ -9708,9 +9708,17 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             failure.retailHierarchyProductStatus=uint32_t(built);
             if(built!=RigidFinalHierarchyStatus::Produced){failure.pageWorkState="RetailHierarchyProducerRefused";return failure;}
             render::RetailPagePilotAdmission admission;
+            const int materialLevel=actual.finalLevels[1]; // every paged cut derives from this actual Fine material
             {WgpuTextureReuseOnlyBinding::Scope scope(reuse,true,true);
-                AutoArray<render::mesh::MeshSection> sections;render::mesh::BuildSections(*shape.Level(actual.finalLevels[1]),sections);
-                if(!ClassifyGpuSection(*shape.Level(actual.finalLevels[1]),1,sections,0,admission.section,admission.material,true)||reuse.Read().failed)return failure;}
+                AutoArray<render::mesh::MeshSection> sections;render::mesh::BuildSections(*shape.Level(materialLevel),sections);
+                if(!ClassifyGpuSection(*shape.Level(materialLevel),materialLevel,sections,0,admission.section,admission.material,true)||reuse.Read().failed)return failure;
+                const auto& sourceSection=shape.Level(materialLevel)->GetSection(0);
+                // This exact retail source has no authored surface stages. Run
+                // the ordinary registration tail rather than carrying zero UV
+                // transforms/tints from the scalar-only prepared classifier.
+                if(sourceSection.surfMat || ResolveMaterialLayers(sourceSection,admission.material) || reuse.Read().failed)return failure;
+                admission.material.normal_power=1;
+            }
             if(admission.material.texture_id!=handle)return failure;
             admission.actual=std::make_shared<const RigidOdol7FinalExport>(std::move(actual));
             admission.product=std::make_shared<const RigidFinalHierarchyProduct>(std::move(product));

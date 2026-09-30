@@ -56,6 +56,7 @@ TEST_CASE("Final Shape producer preserves actual export associations and indepen
     REQUIRE(product.sourceAdmissionEpoch==7);REQUIRE(product.ownerEpoch==9);
     REQUIRE(product.modelBirth==11);REQUIRE(product.shapeQueryRevision==13);
     REQUIRE(product.actualNoShadow);REQUIRE(product.requiresOriginalOtherPasses);
+    REQUIRE(product.fineTriangleSetExact);
     REQUIRE(product.manifest->metadataBytes<=32768);REQUIRE(product.manifest->pages.size()<=64);
     REQUIRE(product.fileSha256==HierarchicalDiskDetail::Hash(product.image->bytes));
     REQUIRE(product.knownSourceCapacityBytes<=128*1024);
@@ -181,6 +182,7 @@ TEST_CASE("Terminal final-export pages remain useful residency when root and fin
     source.actual.fine=triangle;source.actual.coarse=triangle;
     const auto fineBefore=source.actual.fine.vertices;
     const auto product=Product(source);const auto& package=product.manifest->metadata;
+    REQUIRE(product.fineTriangleSetExact);
     REQUIRE(package.pages.size()==1);REQUIRE(package.clusters.size()==1);
     REQUIRE(package.rootPages==std::vector<uint32_t>{0});
     REQUIRE(package.rootClusters==std::vector<uint32_t>{0});
@@ -205,4 +207,60 @@ TEST_CASE("Terminal final-export pages remain useful residency when root and fin
     REQUIRE(fine.selectedClusters==root.selectedClusters);
     REQUIRE(fine.requiredPages==root.requiredPages);
     REQUIRE(fine.missingPages.empty());
+}
+
+TEST_CASE("Fine source triangle parity preserves winding, duplicate multiplicities and seam IDs",
+          "[geometry-page-rigid-final-hierarchy]")
+{
+    const auto source=SyntheticFinalExport();ExportedMesh fine;
+    for(auto id:{0u,1u,17u,18u})fine.vertices.push_back(source.actual.fine.vertices[id]);
+    fine.indices={0,1,2,0,1,2,1,3,2}; // an authored duplicate must occur exactly twice
+    HierarchicalPage page;HierarchicalPayload cluster;
+    cluster.cluster=3;cluster.material=0;cluster.vertices=fine.vertices;
+    cluster.originalVertexIds={0,1,2,3};
+    // Same oriented triangles, different order and cyclic rotations.
+    cluster.indices={3,2,1,1,2,0,2,0,1};page.clusters.push_back(cluster);
+    const std::array<uint32_t,1> selected{3};
+    RigidFinalHierarchyDetail::FineTriangleParity exact;
+    REQUIRE(exact.Prepare(fine,selected));REQUIRE(exact.Add(page));REQUIRE(exact.Finish());
+    REQUIRE(exact.KnownBytes()>=exact.ReservationBytes(3));
+    for(int variant=0;variant<8;++variant) {
+        auto changed=page;
+        switch(variant) {
+            case 0:std::swap(changed.clusters[0].indices[0],changed.clusters[0].indices[1]);break; // winding
+            case 1:changed.clusters[0].indices.resize(6);break; // missing duplicate
+            case 2:changed.clusters[0].indices={0,1,2,1,3,2,1,3,2};break; // wrong duplicate multiplicity
+            case 3:changed.clusters[0].indices[0]=4;break; // invalid local ID
+            case 4:changed.clusters[0].originalVertexIds[3]=4;break; // invalid original ID
+            case 5:changed.clusters[0].originalVertexIds[3]=2;break; // aliased original IDs
+            case 6:changed.clusters[0].cluster=4;break; // required cluster absent
+            case 7:changed.clusters[0].indices.push_back(0);break; // partial triangle
+        }
+        RigidFinalHierarchyDetail::FineTriangleParity wrong;
+        REQUIRE(wrong.Prepare(fine,selected));const bool appended=wrong.Add(changed);
+        REQUIRE_FALSE((appended&&wrong.Finish()));
+    }
+    RigidFinalHierarchyDetail::FineTriangleParity repeated;
+    REQUIRE(repeated.Prepare(fine,selected));REQUIRE(repeated.Add(page));
+    REQUIRE_FALSE(repeated.Add(page));REQUIRE_FALSE(repeated.Finish());
+}
+
+TEST_CASE("Fine source parity cannot substitute a coincident authored seam ID or invent source indices",
+          "[geometry-page-rigid-final-hierarchy]")
+{
+    auto source=SyntheticFinalExport();auto& fine=source.actual.fine;
+    fine.indices={uint32_t(fine.vertices.size()-1),1,17};
+    HierarchicalPage page;HierarchicalPayload cluster;
+    cluster.cluster=0;cluster.originalVertexIds={0,1,17};
+    for(auto id:cluster.originalVertexIds)cluster.vertices.push_back(fine.vertices[id]);
+    cluster.indices={0,1,2};page.clusters.push_back(cluster);
+    const std::array<uint32_t,1> selected{0};
+    RigidFinalHierarchyDetail::FineTriangleParity seam;
+    REQUIRE(seam.Prepare(fine,selected));REQUIRE(seam.Add(page));REQUIRE_FALSE(seam.Finish());
+    fine.indices[0]=uint32_t(fine.vertices.size());
+    RigidFinalHierarchyDetail::FineTriangleParity outside;
+    REQUIRE_FALSE(outside.Prepare(fine,selected));REQUIRE_FALSE(outside.Finish());
+    fine.indices={0,1,17};const std::array<uint32_t,2> repeated{0,0};
+    RigidFinalHierarchyDetail::FineTriangleParity duplicateSelection;
+    REQUIRE_FALSE(duplicateSelection.Prepare(fine,repeated));
 }
