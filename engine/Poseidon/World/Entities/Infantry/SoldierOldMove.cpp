@@ -276,17 +276,32 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
 
             if (prim->GetSoundEnabled())
             {
+                const auto captureSoundSole = [&](bool left)
+                {
+                    _soundStepSole.Clear();
+                    // Explicit fall/laydown/crawl overrides keep their authored
+                    // meaning. Cargo animation is not an outdoor boot event.
+                    if (GetHierachyParent() || prim->GetSoundOverride().GetLength() != 0 || !_shape) return;
+                    const int level = _shape->FindMemoryLevel();
+                    const int index = left ? Type()->_stepLIndex : Type()->_stepRIndex;
+                    const Shape* memory = level >= 0 ? _shape->Level(level) : nullptr;
+                    if (!memory || index < 0 || index >= memory->NPos()) return;
+                    const Vector3 sole = PositionModelToWorld(AnimatePoint(level, index));
+                    _soundStepSole.Capture(sole.X(), sole.Y(), sole.Z(), Glob.time.toInt());
+                };
                 float edge1Time = prim->GetSoundEdge1();
                 float edge2Time = prim->GetSoundEdge2();
                 if (oldPrimTime < edge1Time && oldPrimTime + priPhaseChng >= edge1Time)
                 {
                     _doSoundStep = true;
                     _soundStepOverride = prim->GetSoundOverride();
+                    captureSoundSole(true);
                 }
                 else if (oldPrimTime < edge2Time && oldPrimTime + priPhaseChng >= edge2Time)
                 {
                     _doSoundStep = true;
                     _soundStepOverride = prim->GetSoundOverride();
+                    captureSoundSole(false);
                 }
             }
             if (DominantGroundBootMove(_primaryFactor, false))

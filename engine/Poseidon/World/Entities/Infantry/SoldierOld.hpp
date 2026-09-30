@@ -14,6 +14,7 @@
 #include <Poseidon/World/Simulation/EnvTracker.hpp>
 #include <Poseidon/World/Entities/Infantry/ManActs.hpp>
 #include <Poseidon/World/Entities/Infantry/Wounds.hpp>
+#include <Poseidon/World/Entities/Infantry/FootstepWater.hpp>
 #include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
 
 namespace Poseidon
@@ -541,6 +542,7 @@ class Man: public Person
 	OLinkArray<Vehicle> _pipeBombs;
 
 	bool _doSoundStep;
+	SoundStepSole _soundStepSole;
 	bool _canMoveFast;
 
 	bool _nvg;

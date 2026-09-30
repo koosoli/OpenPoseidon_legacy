@@ -1,6 +1,7 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/World/Entities/Infantry/BodyWaterResponse.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/Weather/RainWaterField.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
@@ -15,6 +16,7 @@
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Math/Math3DP.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
@@ -1449,9 +1451,59 @@ void Man::Sound(bool inside, float deltaT)
     {
         const SoundPars* pars = nullptr;
         RStringB surface = _surfaceSound;
+        const SoundStepSole sole = _soundStepSole;
+        _soundStepSole.Clear(); // consumed even if playback/source/admission fails
+        bool puddleStep = false;
+        const char* puddleReason = "stale-or-ineligible-sole";
+        RainWaterField::Sample water;
+        float support = 0;
         if (_soundStepOverride.GetLength() > 0)
         {
             surface = _soundStepOverride;
+            puddleReason = "authored-override";
+        }
+        else if (stricmp(surface, "water") == 0)
+        {
+            puddleReason = "legacy-water-contact"; // existing sea/lake collision sound stays authoritative
+        }
+        else if (!_isDead && GLandscape && sole.Fresh(Glob.time.toInt()) && !GetHierachyParent() &&
+                 _landContact)
+        {
+            const Vector3 foot(sole.position[0], sole.position[1], sole.position[2]);
+            water = GRainWater().At(foot.X(), foot.Z()); // read only, no Advance
+            puddleReason = "dry-or-raised-support";
+            // A dry/unconfigured world adds no roadway or shelter query.
+            if (water.valid && std::isfinite(water.depth) && std::isfinite(water.height) &&
+                water.depth >= StandingWaterStepMinDepth)
+                support = GLandscape->RoadSurfaceY(foot + VUp * 0.5f);
+            if (StandingWaterFootstep(water.valid, water.depth, water.height, foot.Y(), support,
+                                      GLandscape->GetSeaLevel(), _landContact, false))
+            {
+                CollisionBuffer cover;
+                const Vector3 origin = foot + VUp * 0.15f;
+                GLandscape->ObjectCollision(cover, nullptr, this, origin, origin + VUp * 30.0f,
+                                           0.05f, ObjIntersectFire);
+                if (cover.Size() == 0)
+                    GLandscape->ObjectCollision(cover, nullptr, this, origin, origin + VUp * 30.0f,
+                                               0.05f, ObjIntersectView);
+                puddleReason = "sheltered";
+                if (cover.Size() == 0)
+                {
+                    // Verify an actual nonempty authored water entry. The existing
+                    // getter falls back to the ordinary step if the name is absent.
+                    const ParamEntry* environments = Type()->GetParamEntry().FindEntry("SoundEnvironExt");
+                    const ParamEntry* entry = environments ? environments->FindEntry("water") : nullptr;
+                    puddleReason = "missing-authored-water";
+                    if (entry && entry->IsArray() && entry->GetSize() > 0 &&
+                        &Type()->GetEnvSoundExt("water") != &Type()->GetEnvSound() &&
+                        Type()->GetEnvSoundExt("water").name.GetLength() > 0)
+                    {
+                        surface = "water";
+                        puddleStep = true;
+                        puddleReason = "standing-rain-water";
+                    }
+                }
+            }
         }
 
         pars = &Type()->GetEnvSoundExtRandom(surface);
@@ -1472,12 +1524,26 @@ void Man::Sound(bool inside, float deltaT)
             float volume = GRandGen.RandomValue() * 0.4f + 0.8f;
             float frequency = GRandGen.RandomValue() * 0.2f + 0.9f;
             Vector3 land = Position();
-            land[1] = GLandscape->RoadSurfaceY(land + VUp * 0.5f);
+            if (puddleStep)
+                land = Vector3(sole.position[0], water.height, sole.position[2]);
+            else
+                land[1] = GLandscape->RoadSurfaceY(land + VUp * 0.5f);
             _soundStep->SetVolume(pars->vol * volume, pars->freq * frequency);
             _soundStep->SetPosition(land, VZero);
             _soundStep->Repeat(1);
             _soundStep->Restart();
         }
+        static const bool puddleTrace = [] {
+            const char* value = std::getenv("POSEIDON_WATER_STEP_TRACE");
+            return value && value[0] == '1';
+        }();
+        static unsigned positiveRows = 0, refusalRows = 0;
+        unsigned& rows = puddleStep ? positiveRows : refusalRows;
+        if (puddleTrace && rows++ < 128)
+            LOG_INFO(Graphics, "PUDDLE_STEP model={} env={} reason={} depth={:.4f} height={:.3f} support={:.3f} sole={:.3f},{:.3f},{:.3f} source={} wave={} eventMs={} timeMs={} readonly=true",
+                     _shape ? _shape->Name().Data() : "", surface.Data(), puddleReason,
+                     water.depth, water.height, support, sole.position[0], sole.position[1], sole.position[2],
+                     pars->name.Data(), _soundStep != nullptr, sole.timeMs, Glob.time.toInt());
         _doSoundStep = false;
         _soundStepOverride = Foundation::RStringBEmpty;
     }
