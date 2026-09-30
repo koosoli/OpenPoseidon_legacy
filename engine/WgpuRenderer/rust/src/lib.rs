@@ -6894,8 +6894,8 @@ impl Renderer {
         if (!cells.is_empty() && trace) || !accepted {
             let max_depth = cells.iter().map(|c| c[1]).fold(0.0f32, f32::max);
             self.log.log(log_level::INFO, &format!(
-                "Rain water grid: revision={revision} width={} height={} copied={} enabled={} accepted={accepted} maxDepth={max_depth:.6} independent=1",
-                params.control[0], params.control[1], cells.len(), params.control[3]));
+                "Rain water grid: generation={} revision={revision} width={} height={} copied={} enabled={} accepted={accepted} maxDepth={max_depth:.6} independent=1",
+                params.generation, params.control[0], params.control[1], cells.len(), params.control[3]));
         }
     }
 

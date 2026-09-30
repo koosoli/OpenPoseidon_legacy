@@ -434,7 +434,7 @@ impl RainWater {
 mod tests {
     use super::*;
     #[test]
-    fn actual_gpu_bilinear_surface_and_support_policy() {
+    fn actual_gpu_triangular_bed_bilinear_depth_and_support_policy() {
         let (device, queue) = crate::gfx3d::cull::tests::headless()
             .expect("Rainwater sampling falsifier requires an actual device");
         let source = include_str!("rain_water.wgsl");
@@ -448,7 +448,9 @@ mod tests {
                 rain_water_support_depth(water,0.0,0.0),\n\
                 rain_water_support_depth(water,2.15,3.0),\n\
                 rain_water_support_depth(vec4<f32>(2.0,0.0,0.0,0.0),2.0,0.0));\n\
-            result[2]=water_at(vec2<f32>(-100.0,-100.0));\n}}",
+            result[2]=water_at(vec2<f32>(-100.0,-100.0));\n\
+            result[3]=water_at(vec2<f32>(102.5,202.5));\n\
+            result[4]=water_at(vec2<f32>(107.5,207.5));\n}}",
             &source[begin..end]
         );
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -524,7 +526,9 @@ mod tests {
             [2.1, 0.1, 0., -1.],
             [2.2, 0.1, 1., -2.],
             [2.3, 0.1, 1., -2.],
-            [2.4, 0.1, 2., -3.],
+            // Deliberately nonplanar bed and varying depth: bilinear surface
+            // height or triangular depth interpolation must both fail.
+            [5.7, 0.4, 2., -3.],
         ];
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -557,13 +561,13 @@ mod tests {
         });
         let output = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: 48,
+            size: 80,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
         let staging = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: 48,
+            size: 80,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -598,7 +602,7 @@ mod tests {
             pass.set_bind_group(1, &resources, &[]);
             pass.dispatch_workgroups(1, 1, 1);
         }
-        encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, 48);
+        encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, 80);
         queue.submit(Some(encoder.finish()));
         let slice = staging.slice(..);
         let (send, receive) = std::sync::mpsc::channel();
@@ -610,12 +614,18 @@ mod tests {
         let bytes = slice.get_mapped_range();
         let values = bytemuck::cast_slice::<u8, f32>(&bytes);
         assert!(values.iter().all(|v| v.is_finite()));
-        for (actual, expected) in values[..4].iter().zip([2.25, 0.1, 1.0, -2.0]) {
+        for (actual, expected) in values[..4].iter().zip([2.325, 0.175, 1.0, -2.0]) {
             assert!((actual - expected).abs() < 1e-5);
         }
-        assert!((values[4] - 0.1).abs() < 1e-5);
+        assert!((values[4] - 0.175).abs() < 1e-5);
         assert_eq!(&values[5..8], &[0., 0., 0.]);
-        for (actual, expected) in values[8..].iter().zip(cells[0]) {
+        for (actual, expected) in values[8..12].iter().zip(cells[0]) {
+            assert!((actual - expected).abs() < 1e-5);
+        }
+        for (actual, expected) in values[12..16].iter().zip([2.19375, 0.11875, 0.5, -1.5]) {
+            assert!((actual - expected).abs() < 1e-5);
+        }
+        for (actual, expected) in values[16..20].iter().zip([3.99375, 0.26875, 1.5, -2.5]) {
             assert!((actual - expected).abs() < 1e-5);
         }
         drop(bytes);

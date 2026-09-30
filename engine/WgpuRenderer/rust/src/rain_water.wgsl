@@ -16,8 +16,25 @@ fn water_at(world_xz: vec2<f32>) -> vec4<f32> {
     let bounded = clamp(t, vec2<f32>(0.0), vec2<f32>(dims) - vec2<f32>(1.001));
     let b = vec2<i32>(floor(bounded));
     let f = fract(bounded);
-    return mix(mix(textureLoad(grid,b,0), textureLoad(grid,b+vec2<i32>(1,0),0),f.x),
-               mix(textureLoad(grid,b+vec2<i32>(0,1),0),textureLoad(grid,b+vec2<i32>(1,1),0),f.x),f.y);
+    let a = textureLoad(grid,b,0);
+    let c = textureLoad(grid,b+vec2<i32>(1,0),0);
+    let d = textureLoad(grid,b+vec2<i32>(0,1),0);
+    let e = textureLoad(grid,b+vec2<i32>(1,1),0);
+    let water = mix(mix(a,c,f.x),mix(d,e,f.x),f.y);
+    // Landscape and RainWaterField use the anti-diagonal 00/10/01,10/11/01.
+    // Only depth/flow are bilinear: a saddle's bed must not become a floating
+    // bilinear surface between the authored terrain triangles.
+    let y00 = a.x-a.y;
+    let y01 = c.x-c.y;
+    let y10 = d.x-d.y;
+    let y11 = e.x-e.y;
+    var bed: f32;
+    if (f.x+f.y <= 1.0) {
+        bed = y00+(y01-y00)*f.x+(y10-y00)*f.y;
+    } else {
+        bed = y11+(y10-y11)*(1.0-f.x)+(y01-y11)*(1.0-f.y);
+    }
+    return vec4<f32>(bed+water.y,water.y,water.zw);
 }
 
 fn rain_water_support_depth(water: vec4<f32>, bed: f32, sea_level: f32) -> f32 {
@@ -33,8 +50,8 @@ struct VsOut {
 
 @vertex
 fn vs_main(@builtin(vertex_index) vertex: u32, @location(0) cell: u32) -> VsOut {
-    // Four subquads reproduce the simulation's bilinear surface rather than
-    // flattening a saddle-shaped cell to one arbitrary diagonal plane.
+    // Four subquads keep the authoritative anti-diagonal bed and approximate
+    // its smoothly interpolated water depth. Every subquad uses that diagonal.
     let corners = array<vec2<f32>,6>(vec2<f32>(0,0),vec2<f32>(0,1),vec2<f32>(1,0),
         vec2<f32>(1,0),vec2<f32>(0,1),vec2<f32>(1,1));
     let width = u32(rainwater.control.x);

@@ -27,7 +27,9 @@ if ($LASTEXITCODE -ne 0) {throw 'Actual rainfall/ocean ABI checks failed.'}
 if ($LASTEXITCODE -ne 0) {throw 'Rainwater ABI execution failed.'}
 $shader=Get-Content (Join-Path $repo 'engine/WgpuRenderer/rust/src/rain_water.wgsl') -Raw
 foreach ($proof in @('rain_water_support_depth(water,bed','bare_surface_valid','interior_rain_coverage','ground_sky_reflection',
-    'ground_puddle_ripple_normal','flow * rainwater.domain.w','water.y <= 0.001')) {
+    'ground_puddle_ripple_normal','flow * rainwater.domain.w','water.y <= 0.001',
+    'let water = mix(mix(a,c,f.x),mix(d,e,f.x),f.y)',
+    'if (f.x+f.y <= 1.0)', 'bed+water.y,water.y,water.zw')) {
     if (!$shader.Contains($proof)) {throw "Production rainwater shader proof missing: $proof"}
 }
 if ($shader.Contains('ground_puddle_mask')) {throw 'Physical rainwater geometry must not use a procedural puddle mask.'}
