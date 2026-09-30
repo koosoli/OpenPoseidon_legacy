@@ -8,6 +8,9 @@ using namespace Poseidon;
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/Weather/MudField.hpp>
+#include <Poseidon/World/Weather/MudGroundAdmission.hpp>
+#include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
@@ -1470,6 +1473,10 @@ void RegisterScreenshot(HarnessServer& hs)
             if (!GScene || !GLandscape) return HarnessProtocol::ErrorResponse("no world");
             auto* result = cJSON_CreateObject();
             cJSON_AddNumberToObject(result, "rain", GLandscape->GetRainDensity());
+            cJSON_AddNumberToObject(result, "particleDensity", GRain.EffectiveDensity());
+            cJSON_AddBoolToObject(result, "particleSnowflakes", GRain.Params().snowflakes);
+            cJSON_AddNumberToObject(result, "liquidRain", UniformWettingDensity(GLandscape->GetRainDensity(),
+                GRain.EffectiveDensity(), GRain.Params().snowflakes));
             cJSON_AddNumberToObject(result, "fog", GLandscape->GetFog());
             cJSON_AddNumberToObject(result, "terrainRange", GScene->GetFogMaxRange());
             cJSON_AddNumberToObject(result, "baseRange", GScene->GetBaseFogMaxRange());
@@ -1477,6 +1484,60 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddNumberToObject(result, "tacticalVisibility", GScene->GetTacticalVisibility());
             cJSON_AddNumberToObject(result, "selectedRange", ENGINE_CONFIG.tacticalZ);
             return HarnessProtocol::JsonResponse(result);
+        });
+    hs.RegisterCommand({"weather_particles", "Query/set only local rain mode, density and snowflake diagnostics", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if (!GLandscape) return HarnessProtocol::ErrorResponse("no landscape");
+            const char* action = HarnessProtocol::GetString(root, "action");
+            if (!action || (std::strcmp(action, "state") != 0 && std::strcmp(action, "set") != 0))
+                return HarnessProtocol::ErrorResponse("weather_particles action must be state or set");
+            auto params = GRain.Params();
+            auto mode = GRain.Mode();
+            const auto* modeItem = cJSON_GetObjectItemCaseSensitive(root, "mode");
+            const auto* density = cJSON_GetObjectItemCaseSensitive(root, "density");
+            const auto* flakes = cJSON_GetObjectItemCaseSensitive(root, "snowflakes");
+            if (std::strcmp(action, "state") == 0 && (modeItem || density || flakes))
+                return HarnessProtocol::ErrorResponse("state is read-only; use set for particle fields");
+            if (std::strcmp(action, "set") == 0)
+            {
+                if (!modeItem && !density && !flakes)
+                    return HarnessProtocol::ErrorResponse("set requires a particle field");
+                if (modeItem)
+                {
+                    if (!cJSON_IsString(modeItem)) return HarnessProtocol::ErrorResponse("particle mode must be a string");
+                    const char* value = modeItem->valuestring;
+                    if (std::strcmp(value, "off") == 0) mode = RainOff;
+                    else if (std::strcmp(value, "legacy") == 0) mode = RainLegacy;
+                    else if (std::strcmp(value, "particle") == 0) mode = RainParticle;
+                    else if (std::strcmp(value, "both") == 0) mode = RainBoth;
+                    else return HarnessProtocol::ErrorResponse("unknown particle mode");
+                }
+                if (density)
+                {
+                    if (!cJSON_IsNumber(density) || !std::isfinite(density->valuedouble) ||
+                        density->valuedouble < 0.0 || density->valuedouble > 1.0)
+                        return HarnessProtocol::ErrorResponse("particle density must be finite in [0,1]");
+                    params.densityOverride = float(density->valuedouble);
+                }
+                if (flakes)
+                {
+                    if (!cJSON_IsBool(flakes)) return HarnessProtocol::ErrorResponse("snowflakes must be boolean");
+                    params.snowflakes = cJSON_IsTrue(flakes);
+                }
+                // Validate the complete candidate before changing either producer.
+                GRain.SetParams(params);
+                GRain.SetMode(mode);
+            }
+            const char* name = mode == RainOff ? "off" : mode == RainLegacy ? "legacy" : mode == RainBoth ? "both" : "particle";
+            auto* out = cJSON_CreateObject();
+            cJSON_AddStringToObject(out, "mode", name);
+            cJSON_AddNumberToObject(out, "densityOverride", GRain.Params().densityOverride);
+            cJSON_AddBoolToObject(out, "snowflakes", GRain.Params().snowflakes);
+            cJSON_AddNumberToObject(out, "effectiveDensity", GRain.EffectiveDensity());
+            cJSON_AddNumberToObject(out, "weatherRain", GLandscape->GetRainDensity());
+            cJSON_AddNumberToObject(out, "liquidRain", UniformWettingDensity(GLandscape->GetRainDensity(),
+                GRain.EffectiveDensity(), GRain.Params().snowflakes));
+            return HarnessProtocol::JsonResponse(out);
         });
     hs.RegisterCommand({"water_bathymetry", "Read a bounded terrain-height grid for the ocean fixture", {}},
         [](const std::string&, cJSON* root) -> std::string
@@ -2156,6 +2217,63 @@ void RegisterSnowProbe(HarnessServer& hs)
             road.liftFlat = 0.03f;
             GEngine->SetRoadSettings(road);
             return HarnessProtocol::OkResponse();
+        });
+    hs.RegisterCommand({"dev_mud", "Read-only mud history and physical terrain height; no synthetic stamps", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if (!GWorld || !GLandscape) return HarnessProtocol::ErrorResponse("mud probe requires world");
+            const char* action = HarnessProtocol::GetString(root, "action");
+            if (!action || (std::strcmp(action, "state") != 0 && std::strcmp(action, "sample") != 0))
+                return HarnessProtocol::ErrorResponse("mud probe action must be state or sample");
+            const auto& mud = GMud();
+            float x = 0, z = 0;
+            if (std::strcmp(action, "sample") == 0)
+            {
+                const auto* east = cJSON_GetObjectItemCaseSensitive(root, "x");
+                const auto* north = cJSON_GetObjectItemCaseSensitive(root, "z");
+                if (!cJSON_IsNumber(east) || !cJSON_IsNumber(north) ||
+                    !std::isfinite(east->valuedouble) || !std::isfinite(north->valuedouble) ||
+                    std::abs(east->valuedouble) > 1000000 || std::abs(north->valuedouble) > 1000000)
+                    return HarnessProtocol::ErrorResponse("mud sample needs finite bounded x/z");
+                x = float(east->valuedouble); z = float(north->valuedouble);
+            }
+            auto* out = cJSON_CreateObject();
+            cJSON_AddBoolToObject(out, "enabled", mud.enabled);
+            cJSON_AddNumberToObject(out, "wetness", mud.Wetness());
+            cJSON_AddNumberToObject(out, "chunks", double(mud.Chunks()));
+            cJSON_AddNumberToObject(out, "revision", double(mud.Revision()));
+            cJSON_AddNumberToObject(out, "rejected", double(mud.Rejected()));
+            if (std::strcmp(action, "sample") == 0)
+            {
+                float dx = 0, dz = 0;
+                const float height = GLandscape->SurfaceY(x, z, &dx, &dz);
+                const auto gradient = mud.HeightGradientAt(x, z);
+                cJSON_AddNumberToObject(out, "x", x); cJSON_AddNumberToObject(out, "z", z);
+                cJSON_AddNumberToObject(out, "offset", mud.HeightOffsetAt(x, z));
+                cJSON_AddNumberToObject(out, "mudDx", gradient[0]); cJSON_AddNumberToObject(out, "mudDz", gradient[1]);
+                cJSON_AddNumberToObject(out, "surfaceY", height);
+                cJSON_AddNumberToObject(out, "surfaceDx", dx); cJSON_AddNumberToObject(out, "surfaceDz", dz);
+                const auto& surface = GLandscape->SurfaceAt(x, z);
+                const float grid = GLandscape->GetLandGrid();
+                const bool inMap = std::isfinite(grid) && grid > 0 && x >= 0 && z >= 0 &&
+                    x < GLandscape->GetLandRange()*grid && z < GLandscape->GetLandRange()*grid;
+                const int cx = inMap ? int(std::floor(x/grid)) : 0, cz = inMap ? int(std::floor(z/grid)) : 0;
+                const int id = inMap ? GLandscape->GetTexture(cz, cx) : -1;
+                const Texture* texture = id >= 0 ? GLandscape->GetTexture(id) : nullptr;
+                const char* textureName = texture ? texture->GetName().Data() : "";
+                cJSON_AddStringToObject(out, "world", GLandscape->GetName());
+                cJSON_AddStringToObject(out, "texture", textureName);
+                cJSON_AddStringToObject(out, "surfaceClass", surface._class.Data());
+                cJSON_AddStringToObject(out, "files", surface._name.Data());
+                cJSON_AddStringToObject(out, "sound", surface._soundEnv.Data());
+                cJSON_AddStringToObject(out, "character", surface._character.Data());
+                const bool source = inMap && GLandscape->GetEnfusionSurfaceCount() == 0 &&
+                    GLandscape->GetA3TerrainMaterial(id) == nullptr &&
+                    (StockMudSoil(surface._class.Data(), surface._name.Data(), surface._soundEnv.Data(), surface._character.Data()) ||
+                     StockNogovaMudSoil(GLandscape->GetName(), textureName, surface._class.Data(), surface._name.Data(),
+                        surface._soundEnv.Data(), surface._character.Data(), x/grid-cx, z/grid-cz));
+                cJSON_AddBoolToObject(out, "sourceEligible", source);
+            }
+            return HarnessProtocol::JsonResponse(out);
         });
     hs.RegisterCommand({"dev_snow", "Inspect snow or exercise settings resets (never clears tracks)",
                         {{"action", "string", true}}},
