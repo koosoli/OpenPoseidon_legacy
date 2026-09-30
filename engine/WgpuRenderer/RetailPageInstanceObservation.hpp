@@ -126,7 +126,7 @@ private:
     static bool ValidSerial(uint64_t value) noexcept {return value&&value!=UINT64_MAX;}
     static bool ValidRigid(const WgrInstance& v) noexcept
     {
-        if((v.flags & ~WGR_INSTANCE_SNOW_RECEIVER)!=WGR_INSTANCE_MAIN_CAMERA_ONLY||v.cull_radius||v._pad||
+        if((v.flags & ~WGR_INSTANCE_SURFACE_RECEIVERS)!=WGR_INSTANCE_MAIN_CAMERA_ONLY||v.cull_radius||v._pad||
            v.center.w<=0||!std::isfinite(v.center.x)||!std::isfinite(v.center.y)||
            !std::isfinite(v.center.z)||!std::isfinite(v.center.w))return false;
         for(float f:v.world.m)if(!std::isfinite(f))return false;

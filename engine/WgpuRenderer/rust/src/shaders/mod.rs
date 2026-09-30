@@ -36,6 +36,8 @@ mod mud_geometry_tests;
 #[cfg(test)]
 mod ground_road_tests;
 #[cfg(test)]
+mod ground_mesh_tests;
+#[cfg(test)]
 mod ground_wet_tests;
 #[cfg(test)]
 mod sand_geometry_tests;

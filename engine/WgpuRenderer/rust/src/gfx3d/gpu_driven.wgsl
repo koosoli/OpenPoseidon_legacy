@@ -18,7 +18,7 @@
 // Terrain conform (group 4 heightmap + surface_y/surface_grad), shared with shader3d /
 // shadow_depth. Lets the GPU-driven VS conform ClipLand vegetation/fences to the ground per
 // vertex, matching the per-draw path — so these objects no longer have to stay on the CPU.
-#import conform::{surface_y, surface_grad, surface_y_raster}
+#import conform::{surface_y, surface_grad, surface_y_raster, rigid_ground_fragment}
 
 // Pipeline-overridable constants (kept out of a per-draw binding), same as shader3d.
 override linear: f32 = 0.0;
@@ -492,7 +492,7 @@ struct VsOut {
     // 1 = open sky). Smooth-interpolated like a baked vertex colour, which is what it
     // replaces. 1.0 for every section whose material names no volume.
     @location(12) crown_ao: f32,
-    @location(13) @interpolate(flat) snow_receiver: u32,
+    @location(13) @interpolate(flat) surface_receivers: u32,
     @location(14) tree_snow: vec2<f32>, // authored crown height, cached actual world roof proof
 };
 
@@ -702,7 +702,8 @@ fn vs_gpu(
     // LODs. Keep retains roof height above SurfaceY. Pinned On vertices, forest
     // planes, proxies and vegetation remain excluded in colour and both prepasses.
     let snow_conform = mode == 0.0 || (mode == 2.0 && conform_sel <= 1u);
-    out.snow_receiver = select(0u, 1u, (inst.flags & 128u) != 0u && canopy == 0u && snow_conform);
+    // Existing flat lane: bit0 snow, bit1 grounded rigid paving. No extra varyings.
+    out.surface_receivers = select(0u, (inst.flags >> 7u) & 3u, canopy == 0u && snow_conform);
     let tree_proof = select(0.0, inst.conform2.w, canopy == INST_CANOPY_TREE);
     out.tree_snow = vec2<f32>(tree_snow_height(pos.y, inst.conform0.y, inst.conform0.z, tree_proof), inst.conform1.x);
     // Undeformed model-space position: the baked volume is a property of the AUTHORED model, so
@@ -748,9 +749,18 @@ fn retained_snow_receiver(in: VsOut) -> bool {
     let sm = section_materials[in.section];
     // Retained draws are opaque/cutout. Original base alpha drives their discard
     // and A2C coverage independently of the RGB-only snow material layer.
-    return in.snow_receiver != 0u &&
+    return (in.surface_receivers & 1u) != 0u &&
         (sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER)) == 0u &&
         dot(sm.emissive.rgb, sm.emissive.rgb) < 1e-8 && dot(in.normal, in.normal) > 1e-8;
+}
+
+fn retained_ground_receiver(in: VsOut) -> bool {
+    if ((in.surface_receivers & 2u) == 0u || frame.ground_weather.x <= 0.18 || linear <= 0.5 ||
+        in.is_veg != 0u) { return false; }
+    let sm = section_materials[in.section];
+    if ((sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER)) != 0u ||
+        dot(sm.emissive.rgb, sm.emissive.rgb) >= 1e-8) { return false; }
+    return rigid_ground_fragment(in.world_pos + frame.cam_pos.xyz, in.normal, in.world_pos);
 }
 
 fn retained_tree_snow_cover(in: VsOut) -> f32 {
@@ -1201,8 +1211,8 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         !(veg_cutout && foliage_screen_ao < 0.5),
         retained_snow_receiver(in), retained_snow_exposure(in),
         retained_tree_snow_cover(in),
-        false,
-        0.0,
+        retained_ground_receiver(in),
+        frame.snow_surface.x,
     );
     // REN-ATM-001: read back what shade()'s apply_fog actually did to THIS fragment and bin it by
     // shader family. Placed immediately after shade() so nothing between the fog and the count can

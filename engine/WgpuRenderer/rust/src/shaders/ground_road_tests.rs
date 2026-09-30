@@ -40,16 +40,16 @@ fn ground_roads_use_physical_cover_only_for_actual_wet_ground_film() {
         "only ground-pinned OnSurface draws enter road film"
     );
     assert_eq!(
-        direct.matches("returnshade_fragment(in,false)").count(),
+        direct.matches("returnshade_fragment(in,direct_ground_receiver(in))").count(),
         2,
-        "normal and early-Z object entries stay excluded"
+        "normal and early-Z object entries require explicit ground proof"
     );
     assert!(
         direct.contains("select(0.0,snow_depth(in.world_pos.xz+frame.cam_pos.xz),ground_surface)")
     );
     assert!(
-        compact(RETAINED).contains("retained_tree_snow_cover(in),false,0.0"),
-        "ordinary retained objects are not ground"
+        compact(RETAINED).contains("retained_tree_snow_cover(in),retained_ground_receiver(in),frame.snow_surface.x"),
+        "retained objects require explicit ground proof"
     );
     let terrain = compact(TERRAIN);
     assert!(terrain.contains("ground_puddle_rain_factor(rain_reach,interior_rain_coverage(in.world_pos+frame.cam_pos.xyz))"),

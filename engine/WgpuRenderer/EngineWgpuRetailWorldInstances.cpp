@@ -96,7 +96,7 @@ void EngineWgpu::RollbackRetailWorldPair(const WorldPair::Request& request)
     if(source.consumerInstanceBirth==b.originalInstanceBirth&&
         source.mappedRendererHandle==request.originalRendererHandle)
     {
-        auto baseline=request.originalBefore;baseline.row.flags &= WGR_INSTANCE_SNOW_RECEIVER;
+        auto baseline=request.originalBefore;baseline.row.flags &= WGR_INSTANCE_SURFACE_RECEIVERS;
         auto hidden=baseline;hidden.row.flags |= WGR_INSTANCE_OTHER_VIEWS_ONLY;
         if(ExactWorldRow(source,baseline,b.originalProducerInstance,b.originalInstanceBirth,request.originalRendererHandle))
             originalSafe=true;
@@ -109,7 +109,7 @@ void EngineWgpu::RollbackRetailWorldPair(const WorldPair::Request& request)
         }
         // A normal move can already have restored its NEW conventional row to
         // flags0. Do not write the old placement over it; only remove our page.
-        else if(source.getterSucceeded&&source.cpu.status==WGR_INSTANCE_CPU_FACT_PRESENT&&(source.cpu.row.flags & ~WGR_INSTANCE_SNOW_RECEIVER)==0)
+        else if(source.getterSucceeded&&source.cpu.status==WGR_INSTANCE_CPU_FACT_PRESENT&&(source.cpu.row.flags & ~WGR_INSTANCE_SURFACE_RECEIVERS)==0)
             originalSafe=true;
     }
     else if(source.consumerInstanceBirth!=b.originalInstanceBirth)

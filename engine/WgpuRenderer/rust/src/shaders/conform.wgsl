@@ -114,7 +114,20 @@ fn hm_load(ix: i32, iz: i32) -> f32 {
 // Absolute terrain height at world xz, matching Landscape::SurfaceY and the terrain
 // shader's sample_height exactly (per-cell two-triangle interpolation, NOT bilinear),
 // so conformed vegetation sits on the same ground the terrain pass renders.
-fn surface_y(world_xz: vec2<f32>) -> f32 {
+// The bare authored height is also sampled by grounded rigid pavement FRAGMENTS.
+// It intentionally excludes soft-ground displacement: rigid paving does not sink.
+// Validity is separate so a missing map or clamped edge cannot license height zero.
+fn bare_surface_valid(world_xz: vec2<f32>) -> bool {
+    let dims = textureDimensions(hm);
+    if (!(hm_params.enabled >= 0.5 && hm_params.terrain_grid > 0.0 &&
+          hm_params.terrain_grid < 1000000.0) || hm_params.hm_width < 2u ||
+          hm_params.hm_height < 2u || dims.x != hm_params.hm_width ||
+          dims.y != hm_params.hm_height) { return false; }
+    let t = (world_xz - hm_params.origin) / hm_params.terrain_grid;
+    return all(t >= vec2<f32>(0.0)) &&
+        all(t < vec2<f32>(f32(dims.x - 1u), f32(dims.y - 1u)));
+}
+fn bare_surface_y(world_xz: vec2<f32>) -> f32 {
     if (hm_params.enabled < 0.5) {
         return 0.0;
     }
@@ -128,9 +141,25 @@ fn surface_y(world_xz: vec2<f32>) -> f32 {
     let y10 = hm_load(ix, iz + 1);
     let y11 = hm_load(ix + 1, iz + 1);
     if (f.x <= 1.0 - f.y) {
-        return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x + mud_height_offset(world_xz) + sand_height_offset(world_xz);
+        return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x;
     }
-    return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y + mud_height_offset(world_xz) + sand_height_offset(world_xz);
+    return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y;
+}
+
+fn rigid_ground_fragment(world_abs: vec3<f32>, authored_normal: vec3<f32>,
+                         camera_relative: vec3<f32>) -> bool {
+    let n2 = dot(authored_normal, authored_normal);
+    // Never infer an upward authored side from derivative/fallback normals.
+    if (!(n2 > 1e-8 && n2 < 1e20) ||
+        !(authored_normal.y * inverseSqrt(n2) >= 0.995) ||
+        !(dot(authored_normal, camera_relative) <= 0.0) ||
+        !bare_surface_valid(world_abs.xz)) { return false; }
+    return abs(world_abs.y - bare_surface_y(world_abs.xz)) <= 0.15;
+}
+
+fn surface_y(world_xz: vec2<f32>) -> f32 {
+    if (hm_params.enabled < 0.5) { return 0.0; }
+    return bare_surface_y(world_xz) + mud_height_offset(world_xz) + sand_height_offset(world_xz);
 }
 
 // ---------------------------------------------------------------------------

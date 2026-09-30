@@ -1702,7 +1702,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
             !serial(s.cameraGeneration) || !s.pageRenderer || !sourceCurrent(s)) return false;
         Stable::Request request;
         request.binding = binding(s,s.requestId);
-        auto hidden = s.original; hidden.flags = (hidden.flags & WGR_INSTANCE_SNOW_RECEIVER) | WGR_INSTANCE_OTHER_VIEWS_ONLY;
+        auto hidden = s.original; hidden.flags = (hidden.flags & WGR_INSTANCE_SURFACE_RECEIVERS) | WGR_INSTANCE_OTHER_VIEWS_ONLY;
         request.original = row(s.originalModel,hidden);
         request.page = row(s.pageModel,s.page);
         request.originalRendererHandle = s.originalRenderer;
@@ -1781,7 +1781,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
                 originalSafe = !std::memcmp(&baseline,&original.cpu.row,sizeof(baseline));
             }
             else if (original.consumerInstanceBirth != s.objectBirth &&
-                (original.cpu.row.flags & ~WGR_INSTANCE_SNOW_RECEIVER) == 0)
+                (original.cpu.row.flags & ~WGR_INSTANCE_SURFACE_RECEIVERS) == 0)
                 originalSafe = true; // ordinary moved/replaced row; never rewrite it
         }
         else if (original.producerState == Pair::ProducerState::Unmapped &&
@@ -1890,7 +1890,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         const uint32_t fineSlot=p.FineSlot();
         next.pageModel = model(p.models[fineSlot]);
         next.page = s.original; next.page.model = p.models[fineSlot];
-        next.page.flags = (next.page.flags & WGR_INSTANCE_SNOW_RECEIVER) | WGR_INSTANCE_MAIN_CAMERA_ONLY;
+        next.page.flags = (next.page.flags & WGR_INSTANCE_SURFACE_RECEIVERS) | WGR_INSTANCE_MAIN_CAMERA_ONLY;
         next.pendingSlot = fineSlot; next.cleanupAttempts = 0;
         next.residence = RetailWorldVisibleState::Residence::RetakingFine;
         const auto ticket = nextRequest();
@@ -1899,7 +1899,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         Pair::Request request; request.binding = binding(next,ticket);
         request.action = Pair::Action::Takeover;
         request.originalBefore = row(next.originalModel,next.original);
-        auto hidden = next.original; hidden.flags = (hidden.flags & WGR_INSTANCE_SNOW_RECEIVER) | WGR_INSTANCE_OTHER_VIEWS_ONLY;
+        auto hidden = next.original; hidden.flags = (hidden.flags & WGR_INSTANCE_SURFACE_RECEIVERS) | WGR_INSTANCE_OTHER_VIEWS_ONLY;
         request.originalAfter = row(next.originalModel,hidden);
         request.pageAfter = row(next.pageModel,next.page);
         request.originalRendererHandle = next.originalRenderer;
@@ -1989,7 +1989,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
                 return refuse("RetailWorldOriginalBirthOrRowUnavailable");
             WgrInstance expected = source->worldOriginal;
             expected.model = originalModel.rendererModel;
-            if ((expected.flags & ~WGR_INSTANCE_SNOW_RECEIVER) || std::memcmp(&expected, &original.cpu.row, sizeof(expected)))
+            if ((expected.flags & ~WGR_INSTANCE_SURFACE_RECEIVERS) || std::memcmp(&expected, &original.cpu.row, sizeof(expected)))
                 return refuse("RetailWorldOriginalMovedOrChanged");
             auto state = std::make_shared<RetailWorldVisibleState>();
             state->normalShape = source->shape;
@@ -2007,7 +2007,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
             state->pageModel = model(p.models[2]);
             state->page = source->worldOriginal;
             state->page.model = p.models[2];
-            state->page.flags = (state->page.flags & WGR_INSTANCE_SNOW_RECEIVER) | WGR_INSTANCE_MAIN_CAMERA_ONLY;
+            state->page.flags = (state->page.flags & WGR_INSTANCE_SURFACE_RECEIVERS) | WGR_INSTANCE_MAIN_CAMERA_ONLY;
             state->pendingSlot = 2;
             state->surface = surface;
             if (!sourceCurrent(*state)) return refuse("RetailWorldSourceChangedBeforeBegin");
@@ -2021,7 +2021,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
             request.binding = binding(*state, ticket);
             request.action = Pair::Action::Takeover;
             request.originalBefore = row(state->originalModel,state->original);
-            auto hidden = state->original; hidden.flags = (hidden.flags & WGR_INSTANCE_SNOW_RECEIVER) | WGR_INSTANCE_OTHER_VIEWS_ONLY;
+            auto hidden = state->original; hidden.flags = (hidden.flags & WGR_INSTANCE_SURFACE_RECEIVERS) | WGR_INSTANCE_OTHER_VIEWS_ONLY;
             request.originalAfter = row(state->originalModel,hidden);
             request.pageAfter = row(state->pageModel,state->page);
             request.originalRendererHandle = state->originalRenderer;
@@ -2610,7 +2610,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         request.originalRendererHandle = s.originalRenderer;
         request.pageRendererHandle = s.pageRenderer;
         request.previousCameraGeneration = s.cameraGeneration;
-        auto hidden = s.original; hidden.flags = (hidden.flags & WGR_INSTANCE_SNOW_RECEIVER) | WGR_INSTANCE_OTHER_VIEWS_ONLY;
+        auto hidden = s.original; hidden.flags = (hidden.flags & WGR_INSTANCE_SURFACE_RECEIVERS) | WGR_INSTANCE_OTHER_VIEWS_ONLY;
         request.originalBefore = row(s.originalModel,hidden);
         request.originalAfter = request.originalBefore;
         request.pageBefore = row(s.pageModel,s.page);

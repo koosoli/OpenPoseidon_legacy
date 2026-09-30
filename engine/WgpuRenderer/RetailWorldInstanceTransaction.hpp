@@ -176,7 +176,7 @@ private:
     {return v.model==ModelIdentity{}&&ZeroRow(v.row);}
     static bool Rigid(const WgrInstance& v,uint32_t flags) noexcept
     {
-        if((v.flags & ~WGR_INSTANCE_SNOW_RECEIVER)!=flags||v.cull_radius||v._pad||v.center.w<=0||
+        if((v.flags & ~WGR_INSTANCE_SURFACE_RECEIVERS)!=flags||v.cull_radius||v._pad||v.center.w<=0||
             !std::isfinite(v.center.x)||!std::isfinite(v.center.y)||
             !std::isfinite(v.center.z)||!std::isfinite(v.center.w))return false;
         for(float f:v.world.m)if(!std::isfinite(f))return false;
@@ -191,7 +191,7 @@ private:
     }
     static bool SamePlacement(WgrInstance a,WgrInstance b) noexcept
     {
-        if ((a.flags & WGR_INSTANCE_SNOW_RECEIVER) != (b.flags & WGR_INSTANCE_SNOW_RECEIVER)) return false;
+        if ((a.flags & WGR_INSTANCE_SURFACE_RECEIVERS) != (b.flags & WGR_INSTANCE_SURFACE_RECEIVERS)) return false;
         a.model=b.model=0;a.flags=b.flags=0;
         return std::memcmp(&a,&b,sizeof(a))==0;
     }

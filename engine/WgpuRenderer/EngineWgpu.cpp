@@ -1,5 +1,6 @@
 #include "MeshRecordClosure.hpp"
 #include "ObjectSnowSurface.hpp"
+#include "GroundMeshSurface.hpp"
 #include "TreeSnowSurface.hpp"
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageCameraDemand.hpp>
@@ -7348,6 +7349,21 @@ static bool ObjectSnowOwnerEligible(const Object& obj)
         (dyn_cast<const Thing>(&obj) || dyn_cast<const Vehicle>(&obj));
 }
 
+static bool GroundMeshOwnerEligible(const Object& obj)
+{
+    const auto* shape = obj.GetShape();
+    if (!shape || dynamic_cast<const Church*>(&obj) || dynamic_cast<const Fountain*>(&obj)) return false;
+    const auto mt = shape->GetMapType();
+    const bool vegetation = mt == MapTree || mt == MapSmallTree || mt == MapBush ||
+        mt == MapForestBorder || mt == MapForestTriangle || mt == MapForestSquare;
+    const auto* entity = dyn_cast<const Entity>(&obj);
+    // Building/Thing rather than Vehicle: parked cars are not ground paving.
+    return GroundMeshSurface::OwnerAllowed(obj.Static(), !obj.IsDestroyed(),
+        obj.GetType() == Primary, dyn_cast<const Building>(&obj) || dyn_cast<const Thing>(&obj),
+        dyn_cast<const Person>(&obj) != nullptr, vegetation,
+        entity && entity->HasConfiguredGeometryAnimations());
+}
+
 static bool ObjectOwnsSnowMesh(const Object& obj, const Shape& mesh)
 {
     const auto* shape = obj.GetShape();
@@ -7438,21 +7454,9 @@ static bool ObjectSnowRetainedPoseAllowed(const Object& obj, const LODShapeWithS
         });
 }
 
-static bool CurrentSnowSectionRigid(const Object& obj, const Shape& mesh,
-                                   const VertexBufferWgpu& buffer, int begin, int end)
+static bool CurrentSectionGeometryRigid(const Shape& mesh,
+                                        const VertexBufferWgpu& buffer, int begin, int end)
 {
-    // Dynamic is a whole-LOD hint: a car's wheels can animate without changing
-    // its roof. Only inspect the section being drawn, after all source gates.
-    static const bool objectSnow = [] {
-        const char* value = std::getenv("WGR_OBJECT_SNOW");
-        return !(value && std::strcmp(value, "0") == 0);
-    }();
-    if (!objectSnow || !obj.GetShape()) return false;
-    const auto& snow = GSnow(); // same weather authority used by TerrainWgpu
-    const float upperY = obj.Position().Y() +
-        std::abs(obj.GetShape()->BoundingSphere() * obj.Scale());
-    if (!ObjectSnowSurface::CoverPossible(snow.enabled, snow.Depth(), snow.EffSnowlineEnabled(),
-        snow.EffSnowlineHeight(), snow.snowlineRange, snow.snowlineDepth, upperY)) return false;
     if (begin < 0 || end <= begin || end > buffer.sections.Size() ||
         end - begin > ObjectSnowSurface::MaxProofVertices || mesh.NVertex() != buffer.vertexCount ||
         mesh.NNorm() < mesh.NVertex()) return false;
@@ -7477,6 +7481,60 @@ static bool CurrentSnowSectionRigid(const Object& obj, const Shape& mesh,
                 {originalPos.X(), originalPos.Y(), originalPos.Z(),
                  originalNormal.X(), originalNormal.Y(), originalNormal.Z()}};
         });
+}
+
+static bool CurrentSnowSectionRigid(const Object& obj, const Shape& mesh,
+                                   const VertexBufferWgpu& buffer, int begin, int end)
+{
+    // Dynamic is a whole-LOD hint: a car's wheels can animate without changing
+    // its roof. Only inspect the section being drawn, after all source gates.
+    static const bool objectSnow = [] {
+        const char* value = std::getenv("WGR_OBJECT_SNOW");
+        return !(value && std::strcmp(value, "0") == 0);
+    }();
+    if (!objectSnow || !obj.GetShape()) return false;
+    const auto& snow = GSnow(); // same weather authority used by TerrainWgpu
+    const float upperY = obj.Position().Y() +
+        std::abs(obj.GetShape()->BoundingSphere() * obj.Scale());
+    if (!ObjectSnowSurface::CoverPossible(snow.enabled, snow.Depth(), snow.EffSnowlineEnabled(),
+        snow.EffSnowlineHeight(), snow.snowlineRange, snow.snowlineDepth, upperY)) return false;
+    return CurrentSectionGeometryRigid(mesh, buffer, begin, end);
+}
+
+static bool GroundRetainedSectionsAllowed(const LODShapeWithShadow& shape)
+{
+    int budget = ObjectSnowSurface::MaxProofVertices;
+    bool sawRetained = false;
+    for (int level = 0; level < shape.NLevels(); ++level)
+    {
+        if (!shape.IsNormalLevel(level)) continue;
+        const Shape* mesh = shape.Level(level);
+        if (!mesh || mesh->NSections() > budget) return false;
+        budget -= mesh->NSections();
+        for (int section = 0; section < mesh->NSections(); ++section)
+        {
+            const auto& source = mesh->GetSection(section);
+            if (!SectionGpuOwned(source)) continue; // complement draws prove themselves
+            sawRetained = true;
+            const auto desc = render::BuildRenderPassDescriptor(render::SplitLegacy(source.properties.Special()));
+            if (!GroundMeshSurface::SectionAllowed(desc.depth == render::DepthMode::Normal,
+                GpuEmatIsGlass(source.surfMat), GpuSectionMaterialUsesLeafCards(source.surfMat))) return false;
+        }
+    }
+    return sawRetained;
+}
+
+static void TraceGroundMeshReceiver(const Object& obj, bool eligible, const char* path)
+{
+    static const bool enabled = EnvFlagSet("WGR_GROUND_RECEIVER_TRACE");
+    const auto* shape = obj.GetShape();
+    if (!enabled || !shape) return;
+    static std::unordered_set<std::string> reported;
+    if (reported.size() >= 64) return;
+    const std::string key = std::string(shape->Name()) + path + (eligible ? "1" : "0");
+    if (!reported.insert(key).second) return;
+    LOG_INFO(Graphics, "Wgpu ground mesh receiver: model={} path={} eligible={} static={} x={} y={} z={} scope=source-proof-only-fragment-height-side-rain-gates-remain",
+        shape->Name(), path, eligible, obj.Static(), obj.Position().X(), obj.Position().Y(), obj.Position().Z());
 }
 
 static const char* ObjectSnowFixtureModel(const Object& obj)
@@ -8639,6 +8697,14 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         (snowRigidAttempted && CurrentSnowSectionRigid(*snowOwner, sMesh, *buf, beg, end));
     const bool snowReceiver = snowSourceEligible && snowRigidPassed;
     if (snowReceiver) d.flags |= WGR_DRAW3D_SNOW_RECEIVER;
+    // Independent rain receiver: never depend on whether snow is active. Static
+    // geometry with MAYANIMATE allocation hints still requires exact current pose.
+    const bool groundReceiver = snowSourceEligible && GroundMeshOwnerEligible(*snowOwner) &&
+        GroundMeshSurface::SectionAllowed(true, GpuEmatIsGlass(debugSection.surfMat),
+            GpuSectionMaterialUsesLeafCards(debugSection.surfMat)) &&
+        (!buf->isDynamic || snowRigidPassed || CurrentSectionGeometryRigid(sMesh, *buf, beg, end));
+    if (groundReceiver) d.flags |= WGR_DRAW3D_GROUND_RECEIVER;
+    if (snowOwner) TraceGroundMeshReceiver(*snowOwner, groundReceiver, "direct");
     const bool treeSource = snowOwner && TreeSnowOwner(*snowOwner) &&
         ObjectOwnsSnowMesh(*snowOwner, sMesh) && !snowOwner->GetAnimated(sMesh) &&
         !buf->isDynamic && !buf->skinned && !buf->cpuPosed && !_currentCpuPose &&
@@ -9378,6 +9444,12 @@ WgrInstance BuildGpuInstance(const Object& obj, uint32_t model, const ConformPla
         ObjectSnowConformAllowed(*obj.GetShape(), cp.mode) &&
         ObjectSnowRetainedPoseAllowed(obj, *obj.GetShape());
     if (snowReceiver) inst.flags |= WGR_INSTANCE_SNOW_RECEIVER;
+    // Proxy constructors do not inherit this proof. Rain eligibility is stable
+    // metadata; wetness and exact fragment proximity are evaluated by the shader.
+    const bool groundReceiver = snowReceiver && GroundMeshOwnerEligible(obj) &&
+        GroundRetainedSectionsAllowed(*obj.GetShape());
+    if (groundReceiver) inst.flags |= WGR_INSTANCE_GROUND_RECEIVER;
+    TraceGroundMeshReceiver(obj, groundReceiver, "retained");
     TraceObjectSnowReceiver(obj, snowReceiver, "retained");
     TraceObjectSnowRetainedGates(obj, cp.mode, snowReceiver);
     // Terrain-conform plane -> conform0/1/2, matching DrawSectionTL's per-draw fold.
@@ -12043,7 +12115,7 @@ void EngineWgpu::PublishGeometryPageFixtureObservation(const WgrFrame& frame, in
                     if(!report.active||report.status!=GeometryReportStatus::Ready) {report.cameraTupleValid=false;report.cameraTupleStatus=11;}
                     else if(!proof||!fixture->projectedSurfaceResult||(!report.surfaceSelectedVerified&&!(fixture->projectedDemand&&report.coarseResident&&
                         report.producerModel==fixture->models[fixture->pageCoarseSlot]))||report.fallbackSelected||!selected||
-                        (fixture->placement.flags & ~WGR_INSTANCE_SNOW_RECEIVER)||fixture->placement.conform2.z!=0)report.cameraTupleStatus=10;
+                        (fixture->placement.flags & ~WGR_INSTANCE_SURFACE_RECEIVERS)||fixture->placement.conform2.z!=0)report.cameraTupleStatus=10;
                     else {
                         using namespace GeometryPages::ProjectedSurface;
                         const auto& certificate=proof->certificate;Input input;
@@ -15711,7 +15783,7 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
     auto* worldSource=worldVisible ? _retailWorldSource.get() : nullptr;
     const auto originalCoverage=_gpuModelCoverage.find(shape);
     if(worldSource && !worldSource->worldObjectBirth && !worldSource->worldInvalidated &&
-       worldSource->shape.GetRef()==shape && cp.mode==0 && (inst.flags & ~WGR_INSTANCE_SNOW_RECEIVER)==0 &&
+       worldSource->shape.GetRef()==shape && cp.mode==0 && (inst.flags & ~WGR_INSTANCE_SURFACE_RECEIVERS)==0 &&
        originalCoverage!=_gpuModelCoverage.end() && originalCoverage->second==GpuDrawCoverage::Full &&
        !_gpuModelComplement.count(shape) && _nextRetailWorldObjectBirth && _nextRetailWorldObjectBirth<UINT64_MAX) {
         worldBirth=_nextRetailWorldObjectBirth++;

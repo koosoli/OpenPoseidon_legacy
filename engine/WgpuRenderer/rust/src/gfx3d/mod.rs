@@ -65,6 +65,7 @@ fn direct_material_flags(flags: u32, misc: u32, late_surface: bool) -> u32 {
         | crate::ffi::WGR_DRAW3D_COCKPIT
         | crate::ffi::WGR_DRAW3D_MONITOR
         | crate::ffi::WGR_DRAW3D_SNOW_RECEIVER
+        | crate::ffi::WGR_DRAW3D_GROUND_RECEIVER
         | crate::ffi::WGR_DRAW3D_NORMAL_RG
         | crate::ffi::WGR_DRAW3D_NATIVE_CAVITY;
     ((misc >> 8) & 1) | (flags & material_bits) | (u32::from(late_surface) << 6)
@@ -80,9 +81,10 @@ fn direct_normal_channels_keep_flags_and_exclude_red_from_parallax() {
         direct_material_flags(DRAW3D_ON_SURFACE | DRAW3D_ZBIAS_MASK, 0, false),
         0
     );
-    assert_eq!(direct_material_flags(u32::MAX, 0, true), 3326);
-    assert_eq!(direct_material_flags(u32::MAX, 0xffff_0100, true), 3327);
+    assert_eq!(direct_material_flags(u32::MAX, 0, true), 7422);
+    assert_eq!(direct_material_flags(u32::MAX, 0xffff_0100, true), 7423);
     assert_eq!(direct_material_flags(crate::ffi::WGR_DRAW3D_NATIVE_CAVITY, 0, false), 1024);
+    assert_eq!(direct_material_flags(crate::ffi::WGR_DRAW3D_GROUND_RECEIVER, 0, false), 4096);
     let src = include_str!("shader3d.wgsl");
     assert!(src.contains("const MATFLAG_NORMAL_RG: u32 = 128u;"));
     assert!(src.contains("alpha_ref <= 0.0 && !normal_rg"));

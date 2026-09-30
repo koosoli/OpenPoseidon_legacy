@@ -308,7 +308,10 @@ enum WgrDraw3DFlags : uint32_t
     /* Explicit producer proof: intact world-owner rigid source mesh, not a Person/proxy/
      * animated/local/road surface. Shader still checks the material and outward side.
      * New meaning in an unused flag bit, no struct/layout change. Old producers default dry. */
-    WGR_DRAW3D_SNOW_RECEIVER = 2048
+    WGR_DRAW3D_SNOW_RECEIVER = 2048,
+    /* Static owned rigid ground candidate; fragment must prove bare-terrain proximity
+     * and physical rain cover. No change to alpha, geometry or struct layout. */
+    WGR_DRAW3D_GROUND_RECEIVER = 4096
 };
 
 /* Matrices per palette block (the engine's own bone-palette cap). Each skinned
@@ -536,8 +539,12 @@ enum WgrInstanceFlags : uint32_t
     WGR_INSTANCE_OTHER_VIEWS_ONLY = 64,
     /* Actual rigid owner rain/snow receiver. Child proxies and far-authoring DTOs do not
      * inherit the parent's authority. Independent of private page-view bits 32/64. */
-    WGR_INSTANCE_SNOW_RECEIVER = 128
+    WGR_INSTANCE_SNOW_RECEIVER = 128,
+    WGR_INSTANCE_GROUND_RECEIVER = 256
 };
+
+inline constexpr uint32_t WGR_INSTANCE_SURFACE_RECEIVERS =
+    WGR_INSTANCE_SNOW_RECEIVER | WGR_INSTANCE_GROUND_RECEIVER;
 
 struct WgrInstance
 {

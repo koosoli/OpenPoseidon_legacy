@@ -164,8 +164,9 @@ fn sand_geometry_actual_helpers_match_and_compose_in_real_terrain() {
         declaration(CONFORM, "fn surface_y(")
             .matches("+ sand_height_offset(world_xz)")
             .count(),
-        2
+        1
     );
+    assert!(declaration(CONFORM, "fn surface_y(").contains("bare_surface_y(world_xz)"));
     assert!(declaration(CONFORM, "fn surface_grad(").contains("sand_height_gradient(world_xz"));
     assert!(declaration(TERRAIN, "fn sample_mud_normal(").contains("sand_height_gradient(world_xz"));
 }

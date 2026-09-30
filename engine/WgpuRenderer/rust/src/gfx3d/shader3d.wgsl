@@ -18,7 +18,7 @@
 #import tree_snow::{tree_snow_height, tree_snow_coverage}
 // Group(4) terrain heightmap + surface_y, shared with the shadow depth pass.
 // surface_grad tilts conformed veg normals to follow the ground slope (color pass only).
-#import conform::{surface_y, surface_grad, surface_y_raster, hm_params, snow_depth}
+#import conform::{surface_y, surface_grad, surface_y_raster, hm_params, snow_depth, rigid_ground_fragment}
 
 // BEGIN_UNIFORM_CLOTH_HELPERS (also exercised directly by the shader probe)
 fn uniform_cloth_rect(uv: vec2<f32>, lo: vec2<f32>, hi: vec2<f32>, pad: vec2<f32>) -> f32 {
@@ -132,6 +132,7 @@ const GLASS_MIN_ALPHA: f32 = 0.18;
 const MATFLAG_COCKPIT: u32 = 16u;
 const MATFLAG_NORMAL_RG: u32 = 128u;
 const MATFLAG_SNOW_RECEIVER: u32 = 2048u;
+const MATFLAG_GROUND_RECEIVER: u32 = 4096u;
 
 fn material_flags(m: Material) -> u32 {
     return u32(m.normal_map.w + 0.5);
@@ -589,7 +590,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (alpha_ref > 0.0) {
         census(1u);
     }
-    return shade_fragment(in, false);
+    return shade_fragment(in, direct_ground_receiver(in));
 }
 
 #ifdef EARLY_DEPTH
@@ -602,7 +603,7 @@ fn fs_main_early(in: VsOut) -> @location(0) vec4<f32> {
     if (alpha_ref > 0.0) {
         census(1u);
     }
-    return shade_fragment(in, false);
+    return shade_fragment(in, direct_ground_receiver(in));
 }
 #endif
 
@@ -797,6 +798,17 @@ fn direct_snow_receiver(in: VsOut) -> bool {
         translucent <= 0.5 && material.sun_ambient.w <= 0.0 &&
         dot(material.emissive.rgb, material.emissive.rgb) < 1e-8 &&
         dot(in.normal, in.normal) > 1e-8 && in.conform_w <= 0.0;
+}
+
+fn direct_ground_receiver(in: VsOut) -> bool {
+    if (frame.ground_weather.x <= 0.18 || linear <= 0.5) { return false; }
+    let material = materials[in.instance];
+    let flags = material_flags(material);
+    if ((flags & MATFLAG_GROUND_RECEIVER) == 0u ||
+        (flags & (2u | 4u | 8u | 16u | 32u)) != 0u || translucent > 0.5 ||
+        material.sun_ambient.w > 0.0 || dot(material.emissive.rgb, material.emissive.rgb) >= 1e-8 ||
+        in.conform_w > 0.0) { return false; }
+    return rigid_ground_fragment(in.world_pos + frame.cam_pos.xyz, in.normal, in.world_pos);
 }
 
 fn direct_tree_snow_cover(in: VsOut) -> f32 {

@@ -163,8 +163,9 @@ fn mud_geometry_actual_helpers_match_and_compose_in_real_terrain() {
         declaration(CONFORM, "fn surface_y(")
             .matches("+ mud_height_offset(world_xz)")
             .count(),
-        2
+        1
     );
+    assert!(declaration(CONFORM, "fn surface_y(").contains("bare_surface_y(world_xz)"));
 }
 
 fn snapshot(case: usize) -> Vec<f32> {

@@ -300,6 +300,7 @@ pub const WGR_DRAW3D_DOUBLE_SIDED: u32 = 64;
 pub const WGR_DRAW3D_NORMAL_RG: u32 = 128;
 pub const WGR_DRAW3D_NATIVE_CAVITY: u32 = 1024;
 pub const WGR_DRAW3D_SNOW_RECEIVER: u32 = 2048;
+pub const WGR_DRAW3D_GROUND_RECEIVER: u32 = 4096;
 
 // Per-section shading, parallel to a model's sections (one per section). The raw material is
 // folded with the frame sun in the GPU-driven fragment shader (matching the per-draw path);
