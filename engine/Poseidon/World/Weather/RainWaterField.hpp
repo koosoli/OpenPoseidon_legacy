@@ -81,6 +81,19 @@ public:
     int Width() const { return _width; }
     int Height() const { return _height; }
     float Spacing() const { return _spacing; }
+    float OriginX() const { return _originX; }
+    float OriginZ() const { return _originZ; }
+    void SetSeaLevel(float level) { if (std::isfinite(level)) _seaLevel = level; }
+    // Immutable simulation cell data, copied by the main-thread presentation
+    // producer. Camera movement does not seed, erase or recompute any water.
+    std::vector<float> Snapshot() const {
+        std::vector<float> cells(_bed.size() * 4);
+        for (size_t i=0; i<_bed.size(); ++i) {
+            cells[4*i] = _bed[i] + _depth[i]; cells[4*i+1] = _depth[i];
+            cells[4*i+2] = _flowX[i]; cells[4*i+3] = _flowZ[i];
+        }
+        return cells;
+    }
     double PendingSeconds() const { return _pending; }
     // Test/fixture seeding is explicit and finite; ordinary missions start dry.
     bool AddWater(int x, int z, float metres) {

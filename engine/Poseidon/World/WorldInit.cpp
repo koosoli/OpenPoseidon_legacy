@@ -3,6 +3,7 @@
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/World/Weather/SandField.hpp>
+#include <Poseidon/World/Weather/RainWaterField.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
@@ -865,6 +866,7 @@ void World::InitLandscape(Landscape* landscape)
     GSnow().Reset();
     GMud().Reset();
     GSand().Reset();
+    GRainWater().Reset();
     GSnowFlakes.ClearParticles();
     GSnow().enabled = false;
     if (const char* depth = std::getenv("POSEIDON_SNOW_TEST_DEPTH"))

@@ -2,6 +2,7 @@
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/World/Weather/SandField.hpp>
+#include <Poseidon/World/Weather/RainWaterField.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
 #include <Poseidon/World/Terrain/TerrainSubdivision.hpp>
@@ -762,6 +763,46 @@ void World::SimulateCloudlets(float deltaT)
             GRain.EffectiveDensity(), GRain.Params().snowflakes));
         GSand().Advance(deltaT, UniformWettingDensity(GLandscape->GetRainDensity(),
             GRain.EffectiveDensity(), GRain.Params().snowflakes));
+        const float liquidRain = UniformWettingDensity(GLandscape->GetRainDensity(),
+            GRain.EffectiveDensity(), GRain.Params().snowflakes);
+        auto& runoff = GRainWater();
+        static uint64_t bedRevision = 0;
+        const int terrainRange = GLandscape->GetTerrainRange();
+        const float extent = (terrainRange - 1) * GLandscape->GetTerrainGrid();
+        if (terrainRange >= 2 && std::isfinite(extent) && extent > 0 &&
+            (runoff.Width() != 0 || liquidRain > 0))
+        {
+            // Actual source resolution on stock OFP terrain; modern huge worlds
+            // use a bounded catchment grid. No world-name/material whitelist.
+            const int side = std::min(terrainRange, 512);
+            const float spacing = extent / (side - 1);
+            if (runoff.Width() == 0)
+            {
+                std::vector<float> bed(static_cast<size_t>(side) * side);
+                for (int z=0; z<side; ++z) for (int x=0; x<side; ++x)
+                    bed[static_cast<size_t>(z)*side+x] = GLandscape->SurfaceY(x*spacing,z*spacing);
+                if (runoff.Configure(side,side,spacing,std::move(bed),0,0,GLandscape->GetSeaLevel()))
+                {
+                    bedRevision = GLandscape->HeightRevision();
+                    LOG_INFO(Graphics,"RAIN_WATER_INIT world={} width={} spacing={:.3f}",
+                        GLandscape->GetName(),side,spacing);
+                }
+            }
+            else if (bedRevision != GLandscape->HeightRevision())
+            {
+                // Real craters/terrain edits change the bed while retained water
+                // volume survives. A new outlet then drains through normal flow.
+                for (int z=0; z<side; ++z) for (int x=0; x<side; ++x)
+                    runoff.SetBed(x,z,GLandscape->SurfaceY(x*spacing,z*spacing));
+                bedRevision = GLandscape->HeightRevision();
+            }
+            const auto* sun = _scene.MainLight();
+            const float overcast = std::clamp(GLandscape->GetOvercast(),0.0f,1.0f);
+            const float solar = sun ? std::clamp(sun->SunDirection().Y(),0.0f,1.0f)
+                * (1-overcast)*(1-overcast) * (1-std::clamp(sun->NightEffect(),0.0f,1.0f)) : 0;
+            runoff.SetSeaLevel(GLandscape->GetSeaLevel());
+            runoff.Advance(deltaT,liquidRain,solar,GWind.IsActive() ? GWind.Sample().speed/20.0f : 0);
+        }
     }
     SimulationImportance prec = SimulateVisibleFar;
 

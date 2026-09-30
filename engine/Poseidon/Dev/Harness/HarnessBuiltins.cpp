@@ -10,6 +10,7 @@ using namespace Poseidon;
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/World/Weather/SandField.hpp>
+#include <Poseidon/World/Weather/RainWaterField.hpp>
 #include <Poseidon/World/Weather/SandGroundAdmission.hpp>
 #include <Poseidon/World/Weather/MudGroundAdmission.hpp>
 #include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
@@ -2206,6 +2207,43 @@ void RegisterSqf(HarnessServer& hs)
 
 void RegisterSnowProbe(HarnessServer& hs)
 {
+    hs.RegisterCommand({"dev_rain_water", "Read-only simulation runoff cells and water budget", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            const char* action = HarnessProtocol::GetString(root,"action");
+            if (!GWorld || !action) return HarnessProtocol::ErrorResponse("rainwater query requires world and action");
+            const auto& field = GRainWater();
+            auto* out = cJSON_CreateObject();
+            if (std::strcmp(action,"sample") == 0) {
+                const auto* x = cJSON_GetObjectItemCaseSensitive(root,"x");
+                const auto* z = cJSON_GetObjectItemCaseSensitive(root,"z");
+                if (!cJSON_IsNumber(x) || !cJSON_IsNumber(z) ||
+                    !std::isfinite(x->valuedouble) || !std::isfinite(z->valuedouble)) {
+                    cJSON_Delete(out); return HarnessProtocol::ErrorResponse("sample needs finite world x/z");
+                }
+                const auto sample = field.At(float(x->valuedouble),float(z->valuedouble));
+                cJSON_AddBoolToObject(out,"valid",sample.valid);
+                cJSON_AddNumberToObject(out,"depth",sample.depth);
+                cJSON_AddNumberToObject(out,"height",sample.height);
+                cJSON_AddNumberToObject(out,"flowX",sample.flowX);
+                cJSON_AddNumberToObject(out,"flowZ",sample.flowZ);
+                if (GLandscape) cJSON_AddNumberToObject(out,"terrainY",GLandscape->SurfaceY(float(x->valuedouble),float(z->valuedouble)));
+            } else if (std::strcmp(action,"state") == 0) {
+                const auto& budget = field.WaterBudget();
+                cJSON_AddNumberToObject(out,"width",field.Width());
+                cJSON_AddNumberToObject(out,"height",field.Height());
+                cJSON_AddNumberToObject(out,"spacing",field.Spacing());
+                cJSON_AddNumberToObject(out,"volume",field.Volume());
+                cJSON_AddNumberToObject(out,"rainVolume",budget.rain);
+                cJSON_AddNumberToObject(out,"infiltrationVolume",budget.infiltration);
+                cJSON_AddNumberToObject(out,"evaporationVolume",budget.evaporation);
+                cJSON_AddNumberToObject(out,"outletVolume",budget.outlet);
+                cJSON_AddNumberToObject(out,"pendingSeconds",field.PendingSeconds());
+            } else {
+                cJSON_Delete(out); return HarnessProtocol::ErrorResponse("read-only state or sample only");
+            }
+            cJSON_AddNumberToObject(out,"revision",double(field.Revision()));
+            return HarnessProtocol::JsonResponse(out);
+        });
     hs.RegisterCommand({"dev_reset_probe", "Exercise renderer settings before a master reset", {}},
         [](const std::string&, cJSON*) -> std::string {
             if (!GEngine || !GEngine->SupportsSky()) return HarnessProtocol::ErrorResponse("requires procedural sky");
