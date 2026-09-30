@@ -12,6 +12,7 @@
 #import lighting::lights_contrib
 #import color::srgb_to_linear
 #import gbuffer::oct_encode
+#import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage}
 
 struct TerrainParams {
     world_origin: vec2<f32>,
@@ -107,11 +108,20 @@ fn snow_cover(world_xz: vec2<f32>, world_y: f32) -> f32 {
     if (snow.info.w <= 0.0 && line_depth <= 0.0) { return 0.0; }
     return max(max(snow.info.w * snow_drift(world_xz), line_depth) - snow_deficit(world_xz), 0.0);
 }
-fn snow_gradient(xz: vec2<f32>, world_y: f32) -> vec3<f32> {
-    let h = 0.125;
+fn snow_gradient(xz: vec2<f32>, world_y: f32, footprint: f32) -> vec3<f32> {
+    // Resolve the trail slope over at least one projected pixel, rather than
+    // letting subpixel 12.5cm track walls alias at aerial distances.
+    let h = max(0.125, footprint);
     let dx = (snow_cover(xz + vec2<f32>(h, 0.0), world_y) - snow_cover(xz - vec2<f32>(h, 0.0), world_y)) / (2.0 * h);
     let dz = (snow_cover(xz + vec2<f32>(0.0, h), world_y) - snow_cover(xz - vec2<f32>(0.0, h), world_y)) / (2.0 * h);
     return vec3<f32>(-dx, 0.0, -dz);
+}
+
+fn terrain_snow_normal(xz: vec2<f32>, world_y: f32, geometric: vec3<f32>,
+    footprint: f32, dry: f32) -> vec3<f32> {
+    let shape = normalize(geometric + snow_gradient(xz, world_y, footprint) * geometric.y * dry);
+    let powder = snow_powder_normal(vec3<f32>(xz.x, world_y, xz.y), shape, footprint);
+    return powder;
 }
 // Bindless ground textures: one texture_2d per Landscape texture index, native
 // size/format/mips. Indexed non-uniformly per fragment (needs the device's
@@ -1044,6 +1054,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // Receiver-plane derivatives must run in uniform control flow.
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
+    let snow_footprint = max(length(dwx), length(dwy));
     let puddle_footprint = max(length(dwx.xz), length(dwy.xz));
 
     // Continuous land-cell position; the ground texture repeats once per cell,
@@ -1212,16 +1223,16 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     if (snow.info.w > 0.0 || line_depth > 0.0) {
         let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, world_y);
         let snow_h = snow_cover(in.world_xz, world_y) * dry;
-        let coverage = smoothstep(0.002, 0.04, snow_h) * smoothstep(0.35, 0.7, geometric_n.y);
+        let coverage = snow_surface_coverage(snow_h, geometric_n.y, 1.0);
         // Compact against the deepest base present, so pressed altitude tracks
         // darken exactly like pressed deposit snow. Deposit-only is unchanged.
         let snow_ref = max(snow.info.w, line_depth);
         let compacted = clamp(1.0 - snow_h / max(snow_ref, 0.001), 0.0, 1.0);
-        var snow_rgb = vec3<f32>(0.70, 0.75, 0.80) * (1.0 - compacted * 0.28);
+        var snow_rgb = snow_powder_albedo(vec3<f32>(in.world_xz.x, world_y, in.world_xz.y), snow_footprint, compacted);
         if (linear <= 0.5) { snow_rgb = ground_linear_to_srgb(snow_rgb); }
         rgb = mix(rgb, snow_rgb, coverage);
         authored_ao = mix(authored_ao, 1.0, coverage);
-        n = normalize(mix(n, geometric_n, coverage) + snow_gradient(in.world_xz, world_y) * geometric_n.y * dry);
+        n = normalize(mix(n, terrain_snow_normal(in.world_xz, world_y, geometric_n, snow_footprint, dry), coverage));
     }
 
     // Combined sun shadow: CSM (objects + near contact) and the long-range
@@ -1426,11 +1437,13 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
 // space (view translation is zeroed, so the direction transform is a pure rotation).
 @fragment
 fn fs_terrain_prepass(in: VsOut) -> @location(0) vec2<f32> {
+    let footprint = max(length(dpdx(in.world_pos)), length(dpdy(in.world_pos)));
     var n = sample_normal(in.world_xz, tp.terrain_grid);
     let py = sample_height(in.world_xz);
     if (snow.info.w > 0.0 || snowline_depth(in.world_xz, py) > 0.0) {
         let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, py);
-        n = normalize(n + snow_gradient(in.world_xz, py) * n.y * dry);
+        let coverage = snow_surface_coverage(snow_cover(in.world_xz, py) * dry, n.y, 1.0);
+        n = normalize(mix(n, terrain_snow_normal(in.world_xz, py, n, footprint, dry), coverage));
     }
     let n_view = (frame.view * vec4<f32>(n, 0.0)).xyz;
     return oct_encode(normalize(n_view));

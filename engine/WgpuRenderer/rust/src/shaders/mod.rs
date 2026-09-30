@@ -21,6 +21,9 @@ mod shadow_tent_tests;
 #[cfg(test)]
 mod rain_cover_tests;
 
+#[cfg(test)]
+mod snow_material_tests;
+
 use naga_oil::compose::{
     ComposableModuleDescriptor, Composer, NagaModuleDescriptor, ShaderLanguage,
 };
@@ -46,6 +49,9 @@ pub fn early_depth_supported() -> bool {
 
 fn shader_defs() -> std::collections::HashMap<String, naga_oil::compose::ShaderDefValue> {
     let mut defs = std::collections::HashMap::new();
+    if std::env::var("WGR_SNOW_POWDER").as_deref() == Ok("0") {
+        defs.insert("DISABLE_SNOW_POWDER_DETAIL".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
     // Native (.xob) trees keep their authored leaf normals: the spherical crown
     // bend flattens dense native crowns into a smooth wash (Reference-spot A/B:
     // authored = modeled light/shade with depth, bent = flat bright). Default ON;
@@ -102,6 +108,7 @@ pub fn build_composer() -> Composer {
         ),
         (include_str!("gbuffer.wgsl"), "gbuffer.wgsl"),
         (include_str!("frame.wgsl"), "frame.wgsl"),
+        (include_str!("snow_material.wgsl"), "snow_material.wgsl"),
         (include_str!("skin.wgsl"), "skin.wgsl"),
         (include_str!("conform.wgsl"), "conform.wgsl"),
         (include_str!("lighting.wgsl"), "lighting.wgsl"),
