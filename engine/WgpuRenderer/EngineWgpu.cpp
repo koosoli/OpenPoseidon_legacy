@@ -82,6 +82,7 @@
 #include <Poseidon/Graphics/Rendering/RenderFlags.hpp>
 #include <Poseidon/Graphics/Rendering/DecalDepth.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Material.hpp> // TexMaterial::Combine (GPU-driven material extract)
+#include <Poseidon/Graphics/Rendering/Lighting/MuzzleFlashAppearance.hpp>
 #include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/ClipShape.hpp>
@@ -8952,6 +8953,49 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                          buf->cpuPosed, _currentPaletteSlot, (d.flags & WGR_DRAW3D_COCKPIT) != 0,
                          debugMaterialPath ? debugMaterialPath : "<none>", reason);
             }
+        }
+    }
+    // The real zasleh animation controls whether these sections draw at all.
+    // Require every combined section to be an audited stock sheet with the
+    // authored animated/no-shadow/ordered-blend flags. No actor-wide material
+    // change, new geometry, clock, light or public ABI is involved.
+    const Texture* firstMuzzleSource = sMesh.GetSection(beg).properties.GetTexture();
+    bool stockMuzzleDraw = firstMuzzleSource && firstMuzzleSource->Name() &&
+        render::StockMuzzleSheetAt(firstMuzzleSource->Name(), firstMuzzleSource->AWidth(0),
+                                  firstMuzzleSource->AHeight(0)) != render::StockMuzzleSheet::None;
+    for (int section = beg; stockMuzzleDraw && section < end; ++section)
+    {
+        const ShapeSection& ss = sMesh.GetSection(section);
+        const Texture* source = ss.properties.GetTexture();
+        const int special = ss.properties.Special();
+        const auto sheet = source && source->Name()
+            ? render::StockMuzzleSheetAt(source->Name(), source->AWidth(0), source->AHeight(0))
+            : render::StockMuzzleSheet::None;
+        stockMuzzleDraw &= render::StockMuzzleDrawAdmitted(sheet,
+            (special & IsAnimated) != 0, (special & NoShadow) != 0,
+            (special & IsAlphaOrdered) != 0, alphaClass == Poseidon::AlphaStats::Blend);
+    }
+    if (stockMuzzleDraw)
+    {
+        const bool enabled = render::StockMuzzleAppearanceEnabled();
+        if (enabled)
+        {
+            // Negative reserved scalar cannot enter the positive cloth encoding.
+            // shader3d overrides lighting only for this explicit admission.
+            d.mat_local_specular.w = -1.0f;
+        }
+        static const bool trace = [] {
+            const char* value = std::getenv("POSEIDON_MUZZLE_FLASH_TRACE");
+            return value && value[0] == '1';
+        }();
+        if (trace)
+        {
+            static std::unordered_set<std::string> traced;
+            const Texture* source = sMesh.GetSection(beg).properties.GetTexture();
+            if (traced.insert(source->Name()).second)
+                LOG_INFO(Graphics, "MUZZLE_FLASH_MATERIAL texture={} width={} height={} enabled={} admitted=true animated=true noShadow=true orderedAlpha=true blend=true encoded={:.1f} radiancePeak=1.25 timing=existing-zasleh",
+                         source->Name(), source->AWidth(0), source->AHeight(0), enabled,
+                         d.mat_local_specular.w);
         }
     }
     // Foliage class for the direct WGPU path: only real plants get the leaf look, and the vertex

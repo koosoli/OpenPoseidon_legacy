@@ -20,6 +20,13 @@
 // surface_grad tilts conformed veg normals to follow the ground slope (color pass only).
 #import conform::{surface_y, surface_grad, surface_y_raster, hm_params, snow_depth, rigid_ground_fragment}
 
+// BEGIN_MUZZLE_FLASH_HELPERS (actual helper exercised by the GPU probe)
+fn stock_muzzle_flash_radiance(srgb: vec3<f32>, linear: f32) -> vec3<f32> {
+    let bounded = clamp(srgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    return select(bounded, srgb_to_linear(bounded) * 1.25, linear > 0.5);
+}
+// END_MUZZLE_FLASH_HELPERS
+
 // BEGIN_UNIFORM_CLOTH_HELPERS (also exercised directly by the shader probe)
 fn uniform_cloth_rect(uv: vec2<f32>, lo: vec2<f32>, hi: vec2<f32>, pad: vec2<f32>) -> f32 {
     let edge = min(uv - lo, hi - uv) / max(pad, vec2<f32>(0.000001));
@@ -1132,7 +1139,7 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     if (material_view == MATDBG_VIEW_LIGHTING) {
         base = vec4<f32>(1.0, 1.0, 1.0, base.a);
     }
-    let rgb = shade(
+    var rgb = shade(
         // `geometric_normal` rides along beside the shading normal so the directional sky
         // ambient can recover how far the normal map turned this pixel; see shade()'s
         // `geo_normal` parameter.
@@ -1171,6 +1178,19 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         ground_surface,
         select(0.0, snow_depth(in.world_pos.xz + frame.cam_pos.xz), ground_surface),
     );
+    if (material.local_specular.w == -1.0) {
+        // Only exact authored animated stock muzzle sections receive this value.
+        // Evaluate shade uniformly first: its texture derivatives stay valid.
+        // The flame itself is radiance, not diffuse geometry receiving sun/SH.
+        rgb = stock_muzzle_flash_radiance(base.rgb, linear);
+        if (frame.params.fog_enabled >= 1.5) {
+            rgb = apply_fog(rgb, in.world_pos);
+        } else {
+            var fog_rgb = frame.fog_color.rgb;
+            if (linear > 0.5) { fog_rgb = srgb_to_linear(fog_rgb); }
+            rgb = mix(fog_rgb, rgb, in.fog);
+        }
+    }
     // REN-ATM-001: the per-draw twin of gpu_driven.wgsl's atmosphere census -- same words, same
     // witness. Both paths draw vegetation (retained trees go GPU-driven, scripted/near ones do
     // not), so counting only one of them would leave exactly the gap the measurement exists to

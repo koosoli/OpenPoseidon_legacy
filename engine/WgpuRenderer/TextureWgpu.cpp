@@ -31,6 +31,7 @@
 #include <Poseidon/IO/Streams/RetailRigidAssetProfile.hpp>
 
 #include <Poseidon/Graphics/Textures/Bc3Encoder.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/MuzzleFlashAppearance.hpp>
 
 
 #include <algorithm>
@@ -2491,9 +2492,27 @@ uint64_t TextureWgpu::EnsureUploaded()
             return encoded;
         };
         DecodedImage prepared;
+        // Original M16 animation frames are ARGB4444, so each real upload reaches
+        // this decoded path. Never alter alpha classification or phase selection.
+        const auto warmMuzzle = [&](std::vector<uint8_t>& pixels, int width, int height) {
+            const char* name = Name();
+            if (!name || render::StockMuzzleSheetAt(name, width, height) == render::StockMuzzleSheet::None)
+                return;
+            const bool enabled = render::StockMuzzleAppearanceEnabled();
+            const bool changed = render::WarmStockMuzzleSheet(name, width, height,
+                pixels.data(), pixels.size(), enabled);
+            static const bool trace = [] {
+                const char* value = std::getenv("POSEIDON_MUZZLE_FLASH_TRACE");
+                return value && value[0] == '1';
+            }();
+            if (trace)
+                LOG_INFO(Graphics, "MUZZLE_FLASH_SHEET texture={} source={} width={} height={} enabled={} remapped={} alpha=authored-unchanged",
+                         name, SourceName(), width, height, enabled, changed);
+        };
         if (render::PreparedTextureStore::Enabled() &&
             render::PreparedTextureStore::Instance().TakeDecoded(render::PreparedTextureStore::Key(SourceName()), prepared))
         {
+            warmMuzzle(prepared.rgba, prepared.width, prepared.height);
             std::vector<uint8_t>  bc3;
             std::vector<uint32_t> bc3Offsets;
             int                   bc3Levels = 0;
@@ -2564,6 +2583,7 @@ uint64_t TextureWgpu::EnsureUploaded()
                 if (dst == PacARGB8888)
                     for (size_t i = 0; i + 2 < pixels.size(); i += 4)
                         std::swap(pixels[i], pixels[i + 2]);
+                warmMuzzle(pixels, _w, _h);
                 std::vector<uint8_t>  bc3;
                 std::vector<uint32_t> bc3Offsets;
                 int                   bc3Levels = 0;
@@ -2624,6 +2644,7 @@ uint64_t TextureWgpu::EnsureUploaded()
             if (terrainTiming.enabled && fallbackReadBegan) terrainTiming.fallbackReadDecodeMs += (NowUs() - fallbackReadBegan) / 1000.0;
             if (img.valid())
             {
+                warmMuzzle(img.rgba, img.width, img.height);
                 const uint64_t terrainCreateBegan = terrainTiming.enabled ? NowUs() : 0;
                 CheckProducerMayTouchRenderer("texture create");
                 _gpuHandle = wgr_texture_create_in_slot(

@@ -16,6 +16,8 @@ mod section_span_pool;
 mod local_pose_cache;
 #[cfg(test)]
 mod uniform_wetness_tests;
+#[cfg(test)]
+mod muzzle_flash_tests;
 mod interior_publication;
 mod weather_cover;
 mod weather_cover_policy;
