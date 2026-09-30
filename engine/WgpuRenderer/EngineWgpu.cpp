@@ -7386,16 +7386,19 @@ static bool TreeSnowOwner(const Object& obj)
 static bool ForestAtlasSnowOwner(const Object& obj, int conformMode)
 {
     const auto* shape = obj.GetShape();
-    if (!shape || !ForestSnowSurface::AuditedModel(shape->Name())) return false;
+    if (!shape) return false;
     const auto mt = shape->GetMapType();
     const bool forest = mt == MapForestBorder || mt == MapForestTriangle || mt == MapForestSquare;
+    if (!forest) return false;
+    const auto* policy = ForestSnowSurface::FindModel(shape->Name());
+    if (!policy) return false;
     // Exact built-in classes: neither a proxy nor a subclass with unknown geometry
     // animation inherits the static ForestPlain terrain-conform authority.
     const bool knownClass = typeid(obj) == typeid(ForestPlain) || typeid(obj) == typeid(Forest);
-    const int level = ForestSnowSurface::AssetEquals(shape->Name(), "data3d\\les ctverec.p3d") ? 3 : 2;
-    const float resolution = level == 3 ? 40.0f : 12.0f;
-    const bool loaded = level < shape->NLevels() && shape->IsNormalLevel(level) && shape->Level(level) &&
-        shape->Resolution(level) == resolution && shape->Level(level)->NProxies() == 0;
+    bool loaded = false;
+    for (int level = 0; level < policy->visualLevels && level < shape->NLevels(); ++level)
+        loaded |= shape->IsNormalLevel(level) && shape->Level(level) &&
+            shape->Resolution(level) == policy->resolutions[level] && shape->Level(level)->NProxies() == 0;
     return ForestSnowSurface::OwnerAllowed(shape->Name(), obj.GetType() == Primary, obj.Static(),
         !obj.IsDestroyed(), knownClass, forest, conformMode, loaded);
 }
@@ -14924,7 +14927,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                     const char* value = std::getenv("WGR_FOREST_SNOW_ATLAS");
                     return !(value && value[0] == '0' && value[1] == '\0');
                 }();
-                const auto atlas = forestAtlasEnabled ? ForestSnowSurface::AdmitAtlas(shape->Name(), level, shape->Resolution(level),
+                const auto atlas = forestAtlasEnabled && s->NProxies() == 0 ? ForestSnowSurface::AdmitAtlas(shape->Name(), level, shape->Resolution(level),
                     face && face->SourceName() ? face->SourceName() : "", sec.variant == 1 && mat.alpha_ref > 0,
                     originalAlbedo, ordinary) : ForestSnowSurface::Atlas::None;
                 sec.flags |= ForestSnowSurface::Encode(atlas);

@@ -61,10 +61,27 @@ fn tree_snow_coverage(world_pos: vec3<f32>, crown_height: f32, cached_exposure: 
     return tree_snow_cover_depth(crown_height, depth, exposed);
 }
 
-// Exact stock far forest atlases only. These masks describe inspected authored
-// upper foliage regions, not an inferred per-tree component or cluster height.
-// Exposed lower trunks remain outside both envelopes. The merged atlas's entire
-// right half (small forest/ground/unrelated broadleaf card) is deliberately dry.
+// Match the actual material's eight-sampler ABI (bit0 clamp U, bit1 clamp V).
+// Far triangular strips and canopy tops repeat outside [0,1]; their photographed
+// foliage repeats with them. Clamped near atlases never wrap into a bark region.
+fn forest_snow_sample_uv(uv: vec2<f32>, sampler_index: u32) -> vec2<f32> {
+    if (!all(abs(uv) < vec2<f32>(1e20)) || sampler_index > 7u) { return vec2<f32>(1e30); }
+    return vec2<f32>(select(fract(uv.x), clamp(uv.x,0.0,1.0), (sampler_index & 1u) != 0u),
+        select(fract(uv.y), clamp(uv.y,0.0,1.0), (sampler_index & 2u) != 0u));
+}
+
+// Four texels inside an authored 1024px atlas boundary: protect neighbouring
+// bark/ground regions, including mip bleed. The exact texture is CPU-admitted.
+fn forest_snow_crown_rect(uv: vec2<f32>, lo: vec2<f32>, hi: vec2<f32>) -> f32 {
+    let edge = vec2<f32>(0.004);
+    let a = smoothstep(lo, lo + edge, uv);
+    let b = 1.0 - smoothstep(hi - edge, hi, uv);
+    return a.x * a.y * b.x * b.y;
+}
+
+// All inspected stock forest visual LODs: explicit photographic crown regions,
+// never an inferred per-tree component or whole-cluster height. Full foliage
+// category 5 is restricted to foliage-only photos, including canopy-top cards.
 fn forest_snow_atlas_crown(uv: vec2<f32>, category: u32) -> f32 {
     if (!all(abs(uv) < vec2<f32>(1e20)) || uv.y < 0.0 || uv.y > 1.01) { return 0.0; }
     if (category == 1u) {
@@ -76,6 +93,72 @@ fn forest_snow_atlas_crown(uv: vec2<f32>, category: u32) -> f32 {
         // Keep the authored atlas seam conservatively clear, including mip bleed.
         let seam = 1.0 - smoothstep(0.48, 0.5, uv.x);
         return seam * (1.0 - smoothstep(0.24, 0.38, uv.y));
+    }
+    if (category == 3u) {
+        // CWA 00001&krovi4: exclude the bare branch skeleton (U .25-.5,
+        // V .25-.5), lower-right bark/log and unused grey atlas regions.
+        if (uv.x < 0.0 || uv.x > 1.0) { return 0.0; }
+        if (uv.y < 0.25) {
+            var c = forest_snow_crown_rect(uv,vec2<f32>(0.0,0.0),vec2<f32>(0.25,0.14));
+            c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.25,0.0),vec2<f32>(0.5,0.24)));
+            c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.5,0.0),vec2<f32>(0.75,0.25)));
+            c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.75,0.0),vec2<f32>(1.0,0.25)));
+            return c;
+        }
+        if (uv.y < 0.5) {
+            var c = forest_snow_crown_rect(uv,vec2<f32>(0.0,0.25),vec2<f32>(0.25,0.5));
+            c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.5,0.25),vec2<f32>(0.75,0.5)));
+            c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.75,0.33),vec2<f32>(1.0,0.5)));
+            return c;
+        }
+        if (uv.y < 0.75) {
+            var c = forest_snow_crown_rect(uv,vec2<f32>(0.0,0.5),vec2<f32>(0.25,0.75));
+            c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.25,0.5),vec2<f32>(0.5,0.75)));
+            c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.5,0.5),vec2<f32>(0.75,0.75)));
+            return c;
+        }
+        var c = forest_snow_crown_rect(uv,vec2<f32>(0.0,0.75),vec2<f32>(0.25,0.88));
+        c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.25,0.75),vec2<f32>(0.5,0.875)));
+        c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.0,0.875),vec2<f32>(0.125,1.0)));
+        return c;
+    }
+    if (category == 4u) {
+        // Abel 00011&str_fikovnik: leaf-only tall card, crown photos and canopy
+        // top; omit the U .25-.35 bark strip and ALL V>=.75 root/bark/blank tiles.
+        if (uv.x < 0.0 || uv.x > 1.0) { return 0.0; }
+        if (uv.y < 0.25) {
+            var c = forest_snow_crown_rect(uv,vec2<f32>(0.0,0.0),vec2<f32>(0.25,0.18));
+            c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.25,0.0),vec2<f32>(0.5,0.17)));
+            c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.5,0.0),vec2<f32>(0.75,0.5)));
+            c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.75,0.0),vec2<f32>(1.0,0.22)));
+            return c;
+        }
+        if (uv.y < 0.5) {
+            var c = forest_snow_crown_rect(uv,vec2<f32>(0.5,0.0),vec2<f32>(0.75,0.5));
+            c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.0,0.25),vec2<f32>(0.25,0.35)));
+            c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.36,0.25),vec2<f32>(0.5,0.5)));
+            c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.75,0.25),vec2<f32>(1.0,0.43)));
+            return c;
+        }
+        if (uv.y >= 0.75) { return 0.0; }
+        var c = forest_snow_crown_rect(uv,vec2<f32>(0.0,0.5),vec2<f32>(0.25,0.66));
+        c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.25,0.5),vec2<f32>(0.5,0.75)));
+        c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.5,0.5),vec2<f32>(0.75,0.75)));
+        c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.75,0.5),vec2<f32>(0.875,0.61)));
+        c = max(c,forest_snow_crown_rect(uv,vec2<f32>(0.75,0.65),vec2<f32>(0.875,0.72)));
+        return c;
+    }
+    if (uv.x < -0.002 || uv.x > 1.002) { return 0.0; }
+    if (category == 5u) { return 1.0; } // inspected foliage-only cutout photos
+    if (category == 6u) { return 1.0 - smoothstep(0.65,0.90,uv.y); } // shrub stems protected
+    if (category == 7u) { return 1.0 - smoothstep(0.27,0.42,uv.y); } // passable forest strip
+    if (category == 8u) { return 1.0 - smoothstep(0.20,0.32,uv.y); } // dark strip, no V>=.5 ground
+    if (category == 9u) {
+        // lesabelnew's small crowns occupy two upper rows; its lower half is
+        // a photographed foliage wall. Protect the first row's exposed stems.
+        if (uv.y < 0.25) { return 1.0 - smoothstep(0.12,0.18,uv.y); }
+        if (uv.y < 0.5) { return 1.0 - smoothstep(0.43,0.48,uv.y); }
+        return 1.0 - smoothstep(0.88,0.98,uv.y);
     }
     return 0.0;
 }

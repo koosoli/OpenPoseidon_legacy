@@ -1,5 +1,7 @@
 # Bounded stock far forest crown snow candidate
 
+The subsequent [13-model / 45-visual-LOD source candidate](SNOW-STOCK-FOREST-FAMILY-20260930.md) supersedes this initial two-tuple restriction. This document preserves the initial audit and its limits; neither stage establishes installed visual acceptance.
+
 Status: **SOURCE CANDIDATE. GPU composition/numeric checks, full engine build and installed visual acceptance pending.** This is not general merged-forest or all-map tree coverage.
 
 ## Actual source evidence

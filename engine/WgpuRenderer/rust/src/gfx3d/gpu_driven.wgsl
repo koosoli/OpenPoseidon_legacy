@@ -11,7 +11,7 @@
 
 #import frame::{frame, reverse_z, fog_factor, atmo_applied, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
 #import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal, object_snow_baked_exposure}
-#import tree_snow::{tree_snow_height, tree_snow_coverage, forest_snow_coverage}
+#import tree_snow::{tree_snow_height, tree_snow_coverage, forest_snow_coverage, forest_snow_sample_uv}
 #import frame::interior_rain_coverage
 #import color::srgb_to_linear
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
@@ -773,7 +773,8 @@ fn retained_tree_snow_cover(in: VsOut) -> f32 {
     if (sm.alpha_ref <= 0.0 || linear <= 0.5 ||
         (sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER)) != 0u) { return 0.0; }
     if (in.tree_snow.y == -2.0) {
-        return forest_snow_coverage(in.world_pos, in.uv, (sm.flags >> 16u) & 3u);
+        return forest_snow_coverage(in.world_pos, forest_snow_sample_uv(in.uv, sm.sampler_idx),
+            (sm.flags >> 16u) & 255u);
     }
     return tree_snow_coverage(in.world_pos, in.tree_snow.x, in.tree_snow.y);
 }

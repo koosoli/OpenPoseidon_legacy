@@ -128,7 +128,7 @@ fn actual_tree_shader_consumers_keep_alpha_wind_normals_and_source_authority() {
 }
 
 const FOREST_PROBE: &str = r#"
-#import tree_snow::{forest_snow_atlas_crown, forest_snow_map_cover}
+#import tree_snow::{forest_snow_atlas_crown, forest_snow_map_cover, forest_snow_sample_uv}
 @group(0) @binding(0) var<storage, read_write> result: array<vec4<f32>>;
 @compute @workgroup_size(8)
 fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -150,8 +150,36 @@ fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {
         case 12u: { uv.x = -0.003; }
         case 13u: { uv.y = -0.001; }
         case 14u: { uv.y = bitcast<f32>(0x7fc00000u); }
-        case 15u: { kind = 3u; }
+        case 15u: { kind = 255u; }
+        case 16u: { kind = 3u; uv = vec2<f32>(0.375,0.1); }
+        case 17u: { kind = 3u; uv = vec2<f32>(0.9,0.9); }
+        case 18u: { kind = 3u; uv = vec2<f32>(0.375,0.375); }
+        case 19u: { kind = 3u; uv = vec2<f32>(0.65,0.94); }
+        case 20u: { kind = 4u; uv = vec2<f32>(0.625,0.25); }
+        case 21u: { kind = 4u; uv = vec2<f32>(0.3,0.375); }
+        case 22u: { kind = 4u; uv = vec2<f32>(0.375,0.8); }
+        case 23u: { kind = 4u; uv = vec2<f32>(0.625,0.625); }
+        case 24u: { kind = 5u; uv = vec2<f32>(0.5,0.7); }
+        case 25u: { kind = 6u; uv = vec2<f32>(0.5,0.95); }
+        case 26u: { kind = 7u; uv = vec2<f32>(0.5,0.8); }
+        case 27u: { kind = 8u; uv = vec2<f32>(0.25,0.6); }
+        case 28u: { kind = 9u; uv = vec2<f32>(0.1,0.23); }
+        case 29u: { kind = 9u; uv = vec2<f32>(0.5,0.6); }
+        case 30u: { uv = forest_snow_sample_uv(vec2<f32>(-0.75,0.1),2u); }
+        case 31u: { uv = forest_snow_sample_uv(uv,8u); }
+        case 40u: { uv = forest_snow_sample_uv(vec2<f32>(bitcast<f32>(0x7fc00000u),0.1),3u); }
+        case 41u: { uv = forest_snow_sample_uv(vec2<f32>(0.1,bitcast<f32>(0x7f800000u)),3u); }
+        case 42u: { kind = 4u; uv = vec2<f32>(0.1,0.47); }
+        case 43u: { kind = 4u; uv = vec2<f32>(0.9,0.49); }
+        case 44u: { kind = 3u; uv = vec2<f32>(0.15,0.21); }
+        case 45u: { kind = 6u; uv = vec2<f32>(0.5,0.2); }
+        case 46u: { kind = 9u; uv = vec2<f32>(0.5,0.32); }
+        case 47u: { kind = 9u; uv = vec2<f32>(0.5,0.995); }
         default: {}
+    }
+    if (i >= 32u && i < 40u) {
+        kind = 2u;
+        uv = forest_snow_sample_uv(vec2<f32>(1.25,1.1),i - 32u);
     }
     let crown = forest_snow_atlas_crown(uv, kind);
     result[i] = vec4<f32>(crown, forest_snow_map_cover(crown,0.18,0.0,1.0),
@@ -179,11 +207,11 @@ fn forest_actual_gpu_audited_atlas_crowns_trunks_ground_shelter_and_ablation() {
             compilation_options:Default::default(),cache:None,
         });
         let output = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label:None,contents:bytemuck::cast_slice(&[0_f32;64]),
+            label:None,contents:bytemuck::cast_slice(&[0_f32;192]),
             usage:wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         });
         let staging = device.create_buffer(&wgpu::BufferDescriptor {
-            label:None,size:256,usage:wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,mapped_at_creation:false,
+            label:None,size:768,usage:wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,mapped_at_creation:false,
         });
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label:None,layout:&pipeline.get_bind_group_layout(0),
@@ -192,15 +220,15 @@ fn forest_actual_gpu_audited_atlas_crowns_trunks_ground_shelter_and_ablation() {
         let mut encoder = device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&pipeline);pass.set_bind_group(0,&bind,&[]);pass.dispatch_workgroups(2,1,1);
+            pass.set_pipeline(&pipeline);pass.set_bind_group(0,&bind,&[]);pass.dispatch_workgroups(6,1,1);
         }
-        encoder.copy_buffer_to_buffer(&output,0,&staging,0,256);queue.submit(Some(encoder.finish()));
+        encoder.copy_buffer_to_buffer(&output,0,&staging,0,768);queue.submit(Some(encoder.finish()));
         let slice = staging.slice(..);let (send,recv) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read,move |r| {let _ = send.send(r);});
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();recv.recv().unwrap().unwrap();
         let bytes = slice.get_mapped_range();let samples = bytemuck::cast_slice::<u8,f32>(&bytes);
         for (i,sample) in samples.chunks_exact(4).enumerate() {
-            let expected = match i {0|2=>1.0,8|9|10=>0.5,_=>0.0};
+            let expected = match i {0|2|16|20|23|24|29|30|32|36|45|46=>1.0,8|9|10=>0.5,_=>0.0};
             assert!(sample.iter().all(|v| v.is_finite() && *v >= 0.0 && *v <= 1.0));
             assert!((sample[0]-expected).abs()<1e-5,"atlas sample {i}");
             assert_eq!(sample[1],0.0,"unpublished/outside/overflow physical map cannot certify openness");
@@ -226,9 +254,11 @@ fn forest_transport_is_private_exact_stock_and_does_not_change_alpha_or_geometry
     let policy = include_str!("../../../ForestSnowSurface.hpp");
     let forest = &crown[crown.find("fn forest_snow_atlas_crown").unwrap()..];
     assert!(retained.contains("canopy == INST_CANOPY_FOREST && inst.conform2.w == 2.0 && (mode == 0.0 || mode == 1.0)"));
-    assert!(retained.contains("forest_snow_coverage(in.world_pos, in.uv, (sm.flags >> 16u) & 3u)"));
-    assert!(policy.contains("AtlasShift = 16") && policy.contains("level == 3 && resolution == 40"));
-    assert!(policy.contains("level == 2 && resolution == 12"));
+    assert!(retained.contains("forest_snow_sample_uv(in.uv, sm.sampler_idx)"));
+    assert!(retained.contains("(sm.flags >> 16u) & 255u"));
+    assert!(policy.contains("AtlasShift = 16") && policy.contains("std::array<ModelPolicy, 13>"));
+    assert!(policy.contains("std::array<TexturePolicy, 29>"));
+    assert!(cpp.contains("forestAtlasEnabled && s->NProxies() == 0"));
     assert!(cpp.contains("typeid(obj) == typeid(ForestPlain) || typeid(obj) == typeid(Forest)"));
     assert!(cpp.contains("mat.texture_id == face->GpuHandle()"));
     assert!(forest.contains("weather_map_coverage(world_abs)") && forest.contains("weather_map_reach(world_abs)"));

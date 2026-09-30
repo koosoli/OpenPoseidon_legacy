@@ -1,0 +1,45 @@
+les ctverec dark|0|3|merged\00002.paa;data\les_dark_new.pac
+les ctverec dark|1|20|merged\00002.paa;data\les_dark_new.pac
+les ctverec mlazi|0|3|merged\00001&krovi4.paa;data\les_borovice2.pac;data\les_jehlic2.pac;data\les_jehlicnan2.pac;data\krovi1.pac;data\krovi6.pac;data\krovi4_start.pac
+les ctverec mlazi|1|15|merged\00001&krovi4.paa;data\les_borovice2.pac;data\les_jehlic2.pac;data\les2.pac;data\okrajlesa.pac
+les ctverec mlazi|2|40|data\okrajlesa.pac
+les ctverec pruchozi_t1|0|2|data\kmen1_les.pac;data\kmen2_les.pac;merged\00001&krovi4.paa;data\kmen_borovice.pac
+les ctverec pruchozi_t1|1|6|data\kmen2_les.pac;merged\00001&krovi4.paa;data\kmen_borovice.pac
+les ctverec pruchozi_t1|2|12|merged\00002.paa
+les ctverec pruchozi_t2|0|2|merged\00001&krovi4.paa;data\kmen2_les.pac;data\kmen1_les.pac;data\kmen_borovice.pac
+les ctverec pruchozi_t2|1|6|data\kmen2_les.pac;merged\00001&krovi4.paa;data\kmen_borovice.pac
+les ctverec pruchozi_t2|2|12|merged\00002.paa
+les ctverec|0|3|merged\00001&krovi4.paa;data\kmen_borovice.pac;data\lesni_kmen_smrku.pac
+les ctverec|1|10|data\stromky2.pac
+les ctverec|2|20|data\stromky2.pac
+les ctverec|3|40|data\stromky2.pac
+les trojuhelnik pruchozi|0|2|data\kmen1_les.pac;data\kmen2_les.pac;merged\00001&krovi4.paa
+les trojuhelnik pruchozi|1|6|data\kmen2_les.pac;merged\00001&krovi4.paa
+les trojuhelnik pruchozi|2|12|merged\00002.paa;data\les_pruchozi_lod.pac;merged\00001&krovi4.paa
+les trojuhelnik pruchozi|3|40|data\les_pruchozi_lod.pac;merged\00002.paa
+les trojuhelnik|0|3|merged\00001&krovi4.paa;data\kmen_borovice.pac;data\lesni_kmen_smrku.pac;data\les_borovice2.pac;data\les_jehlic2.pac;data\les_jehlicnan2.pac;data\les2.pac;data\krovi1.pac;data\krovi6.pac;data\kerik_bobul_02.pac;data\krovi4_start.pac;data\krovi4_konec.pac
+les trojuhelnik|1|16|data\stromky2.pac;data\stromky.pac;data\okrajtroj.pac
+les trojuhelnik|2|30|data\stromky2.pac;data\stromky.pac;data\okrajtroj.pac
+les trojuhelnik|3|60|data\stromky2.pac;data\stromky.pac;data\okrajtroj.pac
+les_su_ctver_mlaz|0|3|merged\00011&str_fikovnik.paa;data\abel_krovi1b.pac;merged\00001&krovi4.paa;data\krovi7.pac;data\krovi6.pac;data\krovi1.pac
+les_su_ctver_mlaz|1|15|merged\00011&str_fikovnik.paa;data\abel_krovi1b.pac;merged\00001&krovi4.paa;data\krovi7.pac;data\krovi6.pac;data\krovi1.pac
+les_su_ctver_mlaz|2|40|data\abelmlazi.pac
+les_su_ctver_pruhozi_t1|0|1|data\n_strom_01_kura.pac;merged\00011&str_fikovnik.paa
+les_su_ctver_pruhozi_t1|1|7|merged\00011&str_fikovnik.paa
+les_su_ctver_pruhozi_t1|2|16|merged\00011&str_fikovnik.paa
+les_su_ctver_pruhozi_t1|3|40|merged\00011&str_fikovnik.paa;data\lesabeltop.pac
+les_su_ctver_pruhozi_t2|0|1|merged\00011&str_fikovnik.paa;data\n_strom_01_kura.pac
+les_su_ctver_pruhozi_t2|1|7|merged\00011&str_fikovnik.paa
+les_su_ctver_pruhozi_t2|2|16|merged\00011&str_fikovnik.paa
+les_su_ctver_pruhozi_t2|3|40|merged\00011&str_fikovnik.paa;data\lesabeltop.pac
+les_su_ctver_pruhozi|0|1|merged\00011&str_fikovnik.paa;data\n_strom_01_kura.pac
+les_su_ctver_pruhozi|1|7|merged\00011&str_fikovnik.paa
+les_su_ctver_pruhozi|2|16|merged\00011&str_fikovnik.paa
+les_su_ctver_pruhozi|3|40|merged\00011&str_fikovnik.paa;data\lesabeltop.pac
+les_su_ctver|0|3|data\lesabeltop.pac;data\lesabelnew.pac
+les_su_ctver|1|16|data\lesabelnew.pac;data\lesabeltop.pac
+les_su_ctver|2|40|data\lesabelnew.pac;data\lesabeltop.pac
+les_su_trojuhelnik|0|1|merged\00011&str_fikovnik.paa;data\krovi6.pac;data\krovi7.pac;merged\00001&krovi4.paa;data\n_strom_01_kura.pac;data\krovi1.pac;data\abel_krovi1b.pac
+les_su_trojuhelnik|1|7|merged\00011&str_fikovnik.paa;data\krovi6.pac;data\krovi7.pac;merged\00001&krovi4.paa;data\krovi1.pac;data\abel_krovi1b.pac
+les_su_trojuhelnik|2|16|merged\00011&str_fikovnik.paa;data\krovi6.pac;data\krovi7.pac;merged\00001&krovi4.paa;data\krovi1.pac;data\abel_krovi1b.pac
+les_su_trojuhelnik|3|40|data\lesabeltop.pac;merged\00011&str_fikovnik.paa;data\abelpruchlod.pac
