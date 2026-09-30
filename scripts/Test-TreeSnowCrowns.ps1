@@ -83,6 +83,17 @@ function Read-TreeTrace([string[]]$lines) {
     }
     return @{ bounds = $bounds; proofs = $proofs }
 }
+function Read-LiveTreeLog([string]$path) {
+    # The native logger keeps its write handle open. Explicit sharing permits
+    # a read-only snapshot; omit a final incomplete line until the next poll.
+    $stream=[IO.FileStream]::new($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    $reader=[IO.StreamReader]::new($stream)
+    try {
+        $content=$reader.ReadToEnd();$lastNewline=$content.LastIndexOf("`n")
+        if($lastNewline -lt 0){return @()}
+        return $content.Substring(0,$lastNewline).Split("`n")
+    } finally {$reader.Dispose()}
+}
 function Assert-SnowState($state,[bool]$enabled,[double]$depth,[Nullable[int]]$chunks) {
     foreach ($field in @('enabled','falling','geometry','depth','chunks')) { Require ($null -ne $state.$field) "Actual snow field missing: $field" }
     Require ($state.enabled -is [bool] -and $state.enabled -eq $enabled) 'Actual snow enabled state differs.'
@@ -162,7 +173,7 @@ $keys=@('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS
     'WGR_OBJECT_SNOW','WGR_TREE_SNOW','WGR_TREE_SNOW_TRACE','WGR_SNOW_POWDER','WGR_SNOW_SURFACE_FIXTURE','WGR_GPU_DRIVEN',
     'WGR_TEMPORAL','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_GRASS','POSEIDON_WIND_OVERRIDE','WGR_CLOUD_COVERAGE',
     'WGR_LOD_GOVERNOR_RANGE','WGR_TERRAIN_JITTER','WGR_INTERIOR_SKY','WGR_INTERIOR_SKY_DEBUG','POSEIDON_INTERIOR_SKY_PROBE',
-    'WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_TERRAIN_PUDDLES','WGR_GROUND_PUDDLES')
+    'WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_TERRAIN_PUDDLES','WGR_GROUND_PUDDLES','WGR_WEATHER_COVER','WGR_WEATHER_COVER_TRACE')
 $saved=@{}; foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 @{sourceHead=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;
     helperSha256=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1')).Hash;
@@ -247,6 +258,7 @@ try {
     $env:WGR_GPU_DRIVEN=if($Direct){'0'}else{'1'};$env:WGR_SNOW_POWDER='1';$env:WGR_TEMPORAL='0';$env:WGR_AUTO_EXPOSURE='0';$env:WGR_EXPOSURE='1'
     $env:WGR_GRASS='0';$env:POSEIDON_WIND_OVERRIDE='0 90 0';$env:WGR_CLOUD_COVERAGE='0';$env:WGR_LOD_GOVERNOR_RANGE='1';$env:WGR_TERRAIN_JITTER='0'
     $env:WGR_INTERIOR_SKY='1';$env:WGR_INTERIOR_SKY_DEBUG='0';$env:WGR_TERRAIN_PUDDLES='0';$env:WGR_GROUND_PUDDLES='0'
+    $env:WGR_WEATHER_COVER='1';$env:WGR_WEATHER_COVER_TRACE='1'
     $worlds=if($World -eq 'Auto'){@('LegacyCwa','Native')}else{@($World)};$selected=$null;$views=$null
     foreach($worldArm in $worlds){
         $selected=$null;$views=$null;$result.arms=@{};$result.comparisons=@{}
@@ -263,7 +275,8 @@ try {
                 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
                 $arguments=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--test-world-hour','16','--test-world-freefly')+($seed -split '\s+')+@('--log-file',('"'+$log+'"'))
                 if($worldArm -eq 'Native'){$arguments+=@('--test-world',('"'+$NativeAddons+'"'))}
-                $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $arguments;$null=$p.Handle
+                $stdout=Join-Path $armDir 'stdout.txt';$stderr=Join-Path $armDir 'stderr.txt'
+                $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $arguments -RedirectStandardOutput $stdout -RedirectStandardError $stderr;$null=$p.Handle
                 $result.attempts[$worldArm].arms[$arm]=@{status='starting';pid=$p.Id;log=$log;arguments=$arguments;treeSwitch=$env:WGR_TREE_SNOW}
                 $until=[DateTime]::UtcNow.AddSeconds(120)
                 do{Assert-RunHealth;$client=[Net.Sockets.TcpClient]::new();try{$client.Connect('127.0.0.1',$port)}catch{$client.Dispose();$client=$null};if(!$client){Require ([DateTime]::UtcNow -lt $until) 'Harness unavailable after120s.';Start-Sleep -Milliseconds 250}}while(!$client)
@@ -276,7 +289,7 @@ try {
                 if($arm -eq 'deposit-tree-on'){
                     $deadline=[DateTime]::UtcNow.AddSeconds(20);$selected=$null
                     do{
-                        Assert-RunHealth;$trace=Read-TreeTrace @([IO.File]::ReadAllLines($log));$candidates=@()
+                        Assert-RunHealth;$trace=Read-TreeTrace @(Read-LiveTreeLog $log);$candidates=@()
                         foreach($proof in $trace.proofs){
                             $key=Model-Key $proof.model;$extension=if($worldArm -eq 'LegacyCwa'){'.p3d'}else{'.xob'}
                             if(!$proof.exposed -or !$key.EndsWith($extension) -or !$trace.bounds.ContainsKey($key) -or ($Model -and $key -cne (Model-Key $Model))){continue}
@@ -304,7 +317,7 @@ try {
                     $views.topShot=Camera-Pose $selected.top[0] ([double]$selected.top[2]-5) ([double]$selected.top[1]+40) 0 ([Math]::Atan2($aim-([double]$selected.top[1]+40),5)*180/[Math]::PI)
                     $views.returnNear=$views.distance30
                 }else{
-                    $bound=Bind-Target $selected $true;Start-Sleep -Seconds 1;$trace=Read-TreeTrace @([IO.File]::ReadAllLines($log));$key=Model-Key $selected.model
+                    $bound=Bind-Target $selected $true;Start-Sleep -Seconds 1;$trace=Read-TreeTrace @(Read-LiveTreeLog $log);$key=Model-Key $selected.model
                     Require ($trace.bounds.ContainsKey($key) -and $trace.bounds[$key].minY -eq $selected.minY -and $trace.bounds[$key].maxY -eq $selected.maxY) 'OFF loaded model bounds differ or are unavailable.'
                     Require ($trace.proofs.Count -eq 0) 'Tree-OFF arm unexpectedly issued crown roof probes.'
                 }
@@ -318,7 +331,7 @@ try {
                 $null=Send @{cmd='dev_snow';action='disable'};$final=Snow-State $false $Depth ([int]$enabled.chunks)
                 $armResult=@{status='captured';world=$worldArm;pid=$p.Id;log=$log;arguments=$arguments;treeSwitch=$env:WGR_TREE_SNOW;target=$selected;actualBinding=$bound;
                     views=$views;captures=$captures;initial=$initial;enabled=$enabled;afterViews=$afterViews;disabled=$disabled;restored=$restored;finalDisabled=$final;weather=$weather;objectUpload=$uploaded;
-                    treeTrace=(Read-TreeTrace @([IO.File]::ReadAllLines($log)));proofScope='ON actual admitted source and real positive upper-crown query; OFF binds actual same position/debug model/bounds without issuing queries. Captures do not prove semantic snow masks.'}
+                    treeTrace=(Read-TreeTrace @(Read-LiveTreeLog $log));stdout=$stdout;stderr=$stderr;proofScope='ON actual admitted source and real positive upper-crown query; OFF binds actual same position/debug model/bounds without issuing queries. Captures do not prove semantic snow masks.'}
                 $result.arms[$arm]=$armResult;$result.attempts[$worldArm].arms[$arm]=$armResult
                 $result.comparisons[$arm+'-return']=Pair $captures.enabled.distance30 $captures.enabled.returnNear
                 $result.comparisons[$arm+'-restoreNear']=Pair $captures.enabled.distance30 $captures.restored.distance30
