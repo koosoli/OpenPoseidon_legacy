@@ -40,7 +40,7 @@ for ($pair=1; $pair -le $Pairs; $pair++) {
             $benchmarkArgs.World='C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons'
             $benchmarkArgs.Freefly=@(9481.25,2994.25,209.72,0,-18); $benchmarkArgs.WorldHour=16; $benchmarkArgs.ExtraArgs=@('--dev')
         }
-        & "$PSScriptRoot/farfield-bench.ps1" @args
+        & "$PSScriptRoot/farfield-bench.ps1" @benchmarkArgs
         if ($LASTEXITCODE -ne 0) { throw "Benchmark $label failed" }
         $stem = Join-Path (Join-Path $out $label) 'run-01'
         & "$PSScriptRoot/Assert-CaptureLifecycle.ps1" -MetadataPath "$stem.meta.json" -LogPath "$stem.log"
@@ -66,3 +66,4 @@ for ($i=0; $i -lt 2; $i++) { if ($hashes[$i].Hash -ne $after[$i].Hash) { throw '
 @{scene=$Scene;installed=$stamp;runs=$rows;scope='Compare distributions and medians across alternating arms; final GPU snapshots are not a whole-run GPU average.'} |
     ConvertTo-Json -Depth 12 | Set-Content (Join-Path $out 'results.json')
 Write-Output $out
+
