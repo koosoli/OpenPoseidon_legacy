@@ -173,7 +173,13 @@ fn actual_object_snow_gpu_rejects_shelter_underside_unknown_and_ineligible() {
             resource: output.as_entire_binding(),
         }],
     });
-    let mut probe = |depths: [f32; 5], position: [f32; 3], gate: f32, strength: f32, floor: f32| {
+    let mut probe = |snow: [f32; 4],
+                     depths: [f32; 5],
+                     position: [f32; 3],
+                     gate: f32,
+                     strength: f32,
+                     floor: f32| {
+        put(&mut bytes, offset("snow_surface"), &snow);
         put(
             &mut bytes,
             offset("cam_pos"),
@@ -221,13 +227,20 @@ fn actual_object_snow_gpu_rejects_shelter_underside_unknown_and_ineligible() {
     };
     let centre = [0.0, 0.0, 0.75];
     for (strength, floor) in [(1.0, 0.32), (0.0, 0.0), (1.0, 1.0)] {
-        let roof = probe([0.25, 1.0, 1.0, 1.0, 1.0], centre, 1.0, strength, floor);
+        let roof = probe(
+            [0.18, -1.0, 0.0, 0.0],
+            [0.25, 1.0, 1.0, 1.0, 1.0],
+            centre,
+            1.0,
+            strength,
+            floor,
+        );
         assert!(
             roof[0] < 0.001 && roof[4] < 0.001,
             "zenith shelter must beat known diffuse-open bake and artistic AO: {roof:?}"
         );
     }
-    let open = probe([1.0; 5], centre, 1.0, 1.0, 0.32);
+    let open = probe([0.18, -1.0, 0.0, 0.0], [1.0; 5], centre, 1.0, 1.0, 0.32);
     assert!(
         open[0] > 0.99 && open[4] > 0.99,
         "exposed upward receiver must coat: {open:?}"
@@ -244,7 +257,7 @@ fn actual_object_snow_gpu_rejects_shelter_underside_unknown_and_ineligible() {
         ([0.0, 0.0, 2.0], 1.0),
         ([1.0, 0.0, 0.75], 1.0),
     ] {
-        let absent = probe([0.25; 5], position, gate, 1.0, 0.32);
+        let absent = probe([0.18, -1.0, 0.0, 0.0], [0.25; 5], position, gate, 1.0, 0.32);
         assert!(
             absent[0] < 0.001 && absent[4] > 0.99,
             "unknown coverage must fail closed; proven fully-open bake may carry far roof: {absent:?}"
@@ -252,10 +265,55 @@ fn actual_object_snow_gpu_rejects_shelter_underside_unknown_and_ineligible() {
     }
     // A covered point in the feather band has OPEN lighting fallback. Snow must undo that
     // fallback rather than paint a moving white rim on a sheltered interior.
-    let edge = probe([0.25; 5], [0.95, 0.0, 0.75], 1.0, 0.0, 1.0);
+    let edge = probe(
+        [0.18, -1.0, 0.0, 0.0],
+        [0.25; 5],
+        [0.95, 0.0, 0.75],
+        1.0,
+        0.0,
+        1.0,
+    );
     assert!(
         edge[0] < 0.001,
         "coverage feather must not leak open fallback: {edge:?}"
+    );
+    // Raw deposit is zero. A raised surface with known open cover must use its actual
+    // Y, not terrain altitude or origin. At quarter-ramp height, smoothstep gives
+    // 0.15625 rather than linear 0.25: choose line depth that leaves coverage unsaturated
+    // so the assertion detects a silently restored linear ramp.
+    let ramp = [0.0, 100.0, 1.0, 0.04];
+    let smooth = |lo: f32, hi: f32, v: f32| {
+        let t = ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    for fraction in [0.0_f32, 0.25, 0.5, 0.75, 1.0] {
+        let actual = probe(ramp, [1.0; 5], [0.0, 100.0 + fraction, 0.75], 1.0, 0.0, 1.0);
+        let expected = smooth(0.002, 0.04, smooth(100.0, 101.0, 100.0 + fraction) * 0.04);
+        assert!(
+            (actual[4] - expected).abs() < 1e-4,
+            "actual raised surface altitude must use smooth snowline ramp: fraction={fraction} actual={actual:?} expected={expected}"
+        );
+        assert!(
+            actual[0] < 0.001,
+            "unproven far cover must remain closed at any altitude: {actual:?}"
+        );
+    }
+    let below = probe(ramp, [1.0; 5], [0.0, 99.0, 0.75], 1.0, 1.0, 0.32);
+    assert!(
+        below[4] < 0.001,
+        "zero-deposit surface below the snowline must remain dry: {below:?}"
+    );
+    let deposited = probe(
+        [0.18, 100.0, 1.0, 0.04],
+        [1.0; 5],
+        [0.0, 99.0, 0.75],
+        1.0,
+        1.0,
+        0.32,
+    );
+    assert!(
+        deposited[4] > 0.99,
+        "real deposit must survive below the altitude snowline: {deposited:?}"
     );
 }
 
@@ -294,6 +352,9 @@ fn snow_material_flag_and_prepass_contracts_remain_explicit() {
     let coverage = &shared[shared.find("fn object_snow_coverage").unwrap()
         ..shared.find("fn object_snow_normal").unwrap()];
     assert!(!coverage.contains("snow_depth(") && !coverage.contains("snow_deficit("));
-    assert!(coverage.contains("world_abs.y - frame.snow_surface.y"));
+    assert!(
+        coverage.contains("smoothstep(frame.snow_surface.y")
+            && coverage.contains("frame.snow_surface.y + frame.snow_surface.z, world_abs.y")
+    );
     assert!(coverage.contains("dot(geo_normal, world_pos) > 0.0"));
 }
