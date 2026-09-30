@@ -10,6 +10,8 @@
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/Weather/SnowBulletImpact.hpp>
 #include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
@@ -48,6 +50,75 @@ using namespace Poseidon;
 namespace Poseidon
 {
 RString GetMissionDirectory();
+
+namespace
+{
+bool SnowBulletTraceEnabled()
+{
+    static const bool enabled = [] {
+#if defined(_WIN32)
+        char* value = nullptr; size_t size = 0;
+        _dupenv_s(&value, &size, "POSEIDON_SNOW_BULLET_TRACE");
+        const bool result = value && value[0] == '1'; std::free(value); return result;
+#else
+        const char* value = std::getenv("POSEIDON_SNOW_BULLET_TRACE");
+        return value && value[0] == '1';
+#endif
+    }();
+    return enabled;
+}
+
+void SnowBulletTerrainImpact(Object* projectile, Object* owner, const Vector3& point,
+    const Vector3& incoming, float speed, float damage, bool local, bool explosive, bool water)
+{
+    if (!GLandscape || !local || explosive || water || !GSnow().CoverActive()) return;
+    const float x = point.X(), z = point.Z();
+    const float extent = GLandscape->GetLandRange() * GLandscape->GetLandGrid();
+    if (!std::isfinite(x) || !std::isfinite(point.Y()) || !std::isfinite(z) ||
+        !std::isfinite(extent) || x < 0 || z < 0 || x >= extent || z >= extent) return;
+    const float base = GSnow().BaseDepthAt(x,z);
+    const int ix = int(std::floor(x / SnowField::CellSize)), iz = int(std::floor(z / SnowField::CellSize));
+    const float before = GSnow().DeficitAt(ix,iz);
+    const float remaining = std::max(0.0f,base-before);
+    float dx = 0, dz = 0;
+    const float ground = GLandscape->SurfaceY(x,z,&dx,&dz);
+    const Vector3 normal = Vector3(-dx,1.0f,-dz).Normalized();
+    auto cut = SnowBulletImpactPolicy(speed,damage,remaining,normal.Y(),incoming*normal,
+                                     point.Y()-ground,local,explosive,water,false,false);
+    bool roadway = false, sheltered = false;
+    bool changed = false;
+    static SnowBulletBudget budget;
+    const bool land = std::isfinite(ground) && ground > GLandscape->GetSeaLevel()+0.03f;
+    const bool budgetGranted = cut.depth > 0 && land && budget.Take(Glob.time.toFloat());
+    if (budgetGranted)
+    {
+        const Vector3 offsets[] = {VZero,Vector3(cut.radius,0,0),Vector3(-cut.radius,0,0),
+                                   Vector3(0,0,cut.radius),Vector3(0,0,-cut.radius)};
+        for (const Vector3& offset : offsets)
+        {
+            const Vector3 sample = point+offset;
+            if (sample.X() < 0 || sample.Z() < 0 || sample.X() >= extent || sample.Z() >= extent) {roadway = true; break;}
+            const float y = GLandscape->SurfaceY(sample.X(),sample.Z());
+            if (!std::isfinite(y) || y <= GLandscape->GetSeaLevel()+0.03f) {roadway = true; break;}
+            const Vector3 origin(sample.X(),y+0.015f,sample.Z());
+            Object* road = nullptr;
+            const float support = GLandscape->RoadSurfaceY(origin,nullptr,nullptr,nullptr,&road);
+            if (road || !std::isfinite(support) || support > y+0.03f) {roadway = true; break;}
+            CollisionBuffer hits;
+            // Physical sky proof, independent of artistic AO and camera maps.
+            // Ignore only this projectile and shooter, retaining actual roofs.
+            GLandscape->ObjectCollision(hits,projectile,owner,origin,origin+Vector3(0,30,0),0.01f,ObjIntersectView);
+            if (hits.Size()) {sheltered = true; break;}
+        }
+        cut = SnowBulletImpactPolicy(speed,damage,remaining,normal.Y(),incoming*normal,
+                                     point.Y()-ground,local,explosive,water,roadway,sheltered);
+        if (cut.depth > 0) changed = GSnow().BulletImpact(x,z,cut.radius,cut.depth);
+    }
+    if (SnowBulletTraceEnabled())
+        LOG_INFO(World, "SNOW_BULLET terrain=1 changed={} x={:.3f} y={:.3f} z={:.3f} speed={:.2f} base={:.4f} remaining={:.4f} radius={:.4f} depth={:.4f} before={:.4f} after={:.4f} roadway={} sheltered={} land={} budget={} up={:.4f} incidence={:.4f} supportError={:.4f}",
+                 changed,x,point.Y(),z,speed,base,remaining,cut.radius,cut.depth,before,GSnow().DeficitAt(ix,iz),roadway,sheltered,land,budgetGranted,normal.Y(),incoming*normal,point.Y()-ground);
+}
+} // namespace
 }
 
 using Poseidon::Foundation::EnumName;
@@ -1155,6 +1226,12 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                                                             ? Poseidon::Dev::BallisticTerminus::HitWater
                                                             : Poseidon::Dev::BallisticTerminus::HitGround,
                                                         nullptr);
+
+                // Persistent snow edits come only from this actual terminal
+                // terrain hit. Object/roof hits, fused bounces and water took
+                // their original routes above; existing impact FX remain below.
+                SnowBulletTerrainImpact(this,_parent,isect,lDirNorm,_speed.Size(),Type()->hit,
+                                        IsLocal(),Type()->explosive,hitSea || _waterImpactDone);
 
                 // A sea hit already submitted its water interaction above. Do not also
                 // run the legacy ground-impact presentation for ordinary rifle rounds:

@@ -107,14 +107,22 @@ public:
     static SnowlineOverride ResolveSnowlineOverride()
     {
         static const SnowlineOverride o = [] {
-            SnowlineOverride r;
-            const char* v = std::getenv("POSEIDON_SNOWLINE");
-            if (v == nullptr || v[0] == '\0') return r;
-            r.active = true;
-            if (v[0] == 'o' || v[0] == 'O') { r.off = true; return r; }
-            const float h = static_cast<float>(std::atof(v));
-            if (std::isfinite(h)) r.height = h; else r.active = false;
-            return r;
+            const auto parse = [](const char* v) {
+                SnowlineOverride r;
+                if (v == nullptr || v[0] == '\0') return r;
+                r.active = true;
+                if (v[0] == 'o' || v[0] == 'O') { r.off = true; return r; }
+                const float h = static_cast<float>(std::atof(v));
+                if (std::isfinite(h)) r.height = h; else r.active = false;
+                return r;
+            };
+#if defined(_WIN32)
+            char* value = nullptr; size_t size = 0;
+            _dupenv_s(&value, &size, "POSEIDON_SNOWLINE");
+            const auto result = parse(value); std::free(value); return result;
+#else
+            return parse(std::getenv("POSEIDON_SNOWLINE"));
+#endif
         }();
         return o;
     }
@@ -152,6 +160,14 @@ public:
     {
         ModifyDisc(x, z, radius, strength, false);
     }
+    // Actual projectile terrain impacts remove a bounded bowl of existing
+    // snow. The intact outer powder forms its rim; deficits remain nonnegative,
+    // preserving the existing geometry/snapshot/precipitation contract.
+    bool BulletImpact(float x, float z, float radius, float depth)
+    {
+        if (!std::isfinite(radius) || radius <= 0 || !std::isfinite(depth) || depth <= 0) return false;
+        return ModifyDisc(x, z, std::clamp(radius, CellSize, 0.35f), std::min(depth, 0.16f), true, true);
+    }
     // Rate-integrated removal, unlike a footprint's absolute compression depth.
     void ErodeRotor(float x, float z, float radius, float rotorSpeed, float height, float seconds)
     {
@@ -164,15 +180,15 @@ public:
     }
 
 private:
-    void ModifyDisc(float x, float z, float radius, float strength, bool additive)
+    bool ModifyDisc(float x, float z, float radius, float strength, bool additive, bool bowl = false)
     {
         if (!CoverActive() || !std::isfinite(x) || !std::isfinite(z) ||
             std::abs(x) > 1000000.0f || std::abs(z) > 1000000.0f ||
-            !std::isfinite(radius) || radius <= 0.0f || !std::isfinite(strength) || strength <= 0.0f) return;
+            !std::isfinite(radius) || radius <= 0.0f || !std::isfinite(strength) || strength <= 0.0f) return false;
         // Tracks carve into whatever snow is actually there: snowfall deposit
         // or altitude snowline cover. Below both there is nothing to press.
         const float base = BaseDepthAt(x, z);
-        if (base <= 0.0f) return;
+        if (base <= 0.0f) return false;
         // A manual deposit can fill the store between simulation ticks.
         if (_chunks.size() >= MaxChunks) ReclaimFilledChunks(128);
         radius = std::clamp(radius, CellSize, 15.0f);
@@ -180,6 +196,7 @@ private:
         const int z0 = static_cast<int>(std::floor((z - radius) / CellSize));
         const int x1 = static_cast<int>(std::floor((x + radius) / CellSize));
         const int z1 = static_cast<int>(std::floor((z + radius) / CellSize));
+        bool changed = false;
         for (int iz = z0; iz <= z1; ++iz)
             for (int ix = x0; ix <= x1; ++ix)
             {
@@ -206,13 +223,15 @@ private:
                     }
                 }
                 Cell& cell = it->second.cells[(iz - cz * ChunkSize) * ChunkSize + ix - cx * ChunkSize];
-                const float edge = std::clamp((1.0f - r) * 4.0f, 0.0f, 1.0f);
+                const float edge = bowl ? (1.0f-r*r)*(1.0f-r*r) : std::clamp((1.0f - r) * 4.0f, 0.0f, 1.0f);
                 const float remaining = Remaining(cell);
                 cell.deficit = additive ? std::min(base, remaining + strength * edge)
                     : std::max(remaining, base * std::clamp(strength, 0.0f, 1.0f) * edge);
+                changed |= cell.deficit > remaining;
                 cell.precipitation = _precipitation;
                 it->second.filledAt = std::max(it->second.filledAt, _precipitation + cell.deficit);
             }
+        return changed;
     }
 public:
     void Trail(float ax, float az, float bx, float bz, float radius, float strength = 0.8f)
