@@ -171,3 +171,34 @@ alternate/modded models and other LOD atlases remain unchanged unless explicitly
 admitted. Far baked whole-body atlas regions are deliberately excluded to
 protect their baked skin. No universal asset support, save/network persistence,
 all shelter geometry or general performance claim is made.
+
+## Owner Nogova follow-up: visible rain producer mismatch
+
+Oliver reported no visibly wet uniforms in his running Nogova session on the
+matching `6a388c62` pair. Source inspection found an additional producer gap:
+Person wetting read only `GLandscape::GetRainDensity()`, while the Weather tab's
+particle intensity/benchmark presets can set `RainParticle` with
+`densityOverride=1` without setting `ForceWeatherRain`. Those visible liquid
+drops already feed terrain/sea effects through their effective particle density,
+but could leave cloth history dry when landscape rain stayed zero or low.
+This diagnosis does not establish the actual model/atlas or density in his
+session, and does not retract the earlier installed WB natural-rain controls.
+
+The source correction uses finite, clamped `max(weather rain, effective liquid
+particle density)` for the existing cosmetic integrator and shelter query.
+`RainSystem::EffectiveDensity()` is an existing const getter, not a particle
+tick or weather mutation; particle-off/legacy-only modes contribute zero.
+Actual weather rain still wets uniforms with particles off or snowflakes on.
+Snowflake overrides alone are excluded from liquid wetting. The existing pause,
+shelter, drying, mission-local history and admitted RGB-only clothing effect
+remain unchanged; no Weather tab product controls or shader grading are changed.
+
+Optional `UNIFORM_WET` telemetry retains its wetting `rain` value and appends
+`weatherRain`, `particleRain` and `particleSnowflakes` to distinguish the
+producers. CPU cases cover particle override versus off, actual weather rain,
+snow-only override rejection, shelter, finite/clamped inputs and integration.
+The focused actual Catch2 translation unit passes 56 assertions in five cases
+with the production header. Its first standalone link failed a static/dynamic
+CRT mismatch; rebuilding with the existing Catch2 library's dynamic CRT passes.
+This source follow-up requires a new matching build and installed controls;
+no Nogova appearance fix or new runtime acceptance is claimed here.

@@ -4,6 +4,7 @@
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <cstdlib>
@@ -145,7 +146,10 @@ void Person::Simulate(float deltaT, SimulationImportance prec)
     base::Simulate(deltaT, prec);
     if (GLandscape == nullptr || !std::isfinite(deltaT) || deltaT <= 0.0f)
         return;
-    const float rain = GLandscape->GetRainDensity();
+    const float weatherRain = GLandscape->GetRainDensity();
+    const float particleRain = GRain.EffectiveDensity();
+    const bool particleSnowflakes = GRain.Params().snowflakes;
+    const float rain = UniformWettingDensity(weatherRain, particleRain, particleSnowflakes);
     _uniformWetnessProbeDue -= deltaT;
     if (rain > 0.0f && _uniformWetnessProbeDue <= 0.0f)
     {
@@ -173,9 +177,9 @@ void Person::Simulate(float deltaT, SimulationImportance prec)
         return value && value[0] == '1';
     }();
     if (trace && _uniformWetnessProbeDue == 1.0f)
-        LOG_INFO(Graphics, "UNIFORM_WET model={} rain={:.3f} sheltered={} wet={:.4f}",
+        LOG_INFO(Graphics, "UNIFORM_WET model={} rain={:.3f} sheltered={} wet={:.4f} weatherRain={:.3f} particleRain={:.3f} particleSnowflakes={}",
                  GetShape() ? static_cast<const char*>(GetShape()->GetName()) : "", rain,
-                 _uniformRainSheltered, _uniformWetness);
+                 _uniformRainSheltered, _uniformWetness, weatherRain, particleRain, particleSnowflakes);
 }
 
 TargetSide Person::GetTargetSide() const

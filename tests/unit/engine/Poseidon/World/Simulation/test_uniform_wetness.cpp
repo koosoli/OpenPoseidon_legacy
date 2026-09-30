@@ -5,7 +5,30 @@
 #include <limits>
 
 using Poseidon::AdvanceUniformWetness;
+using Poseidon::UniformWettingDensity;
 using namespace Poseidon::render;
+
+TEST_CASE("Uniform exposure includes visible liquid rain without mistaking snow for rain", "[simulation][uniform-wetness]")
+{
+    REQUIRE(UniformWettingDensity(0, 1, false) == 1); // liquid particle override on a clear day
+    REQUIRE(AdvanceUniformWetness(0, UniformWettingDensity(0, 1, false), false, 20) > 0.35f);
+    REQUIRE(AdvanceUniformWetness(0, UniformWettingDensity(0, 1, false), true, 20) == 0);
+    REQUIRE(UniformWettingDensity(0.4f, 1, false) == 1);
+    REQUIRE(UniformWettingDensity(0.7f, 0.2f, false) == 0.7f);
+    REQUIRE(UniformWettingDensity(0.6f, 0, false) == 0.6f); // particles off/legacy only
+    REQUIRE(UniformWettingDensity(0, 0, false) == 0); // disabled override cannot create rain
+    REQUIRE(UniformWettingDensity(0, 1, true) == 0); // snowflake density override is not wetting proof
+    REQUIRE(UniformWettingDensity(0.6f, 1, true) == 0.6f); // actual weather rain is retained
+    REQUIRE(UniformWettingDensity(-1, -1, false) == 0);
+    REQUIRE(UniformWettingDensity(2, 0, true) == 1);
+    REQUIRE(UniformWettingDensity(0, 2, false) == 1);
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    REQUIRE(UniformWettingDensity(nan, 0.3f, false) == 0.3f);
+    REQUIRE(UniformWettingDensity(0.3f, inf, false) == 0.3f);
+    REQUIRE(UniformWettingDensity(-inf, nan, false) == 0);
+    REQUIRE(UniformWettingDensity(nan, inf, true) == 0);
+}
 
 TEST_CASE("Uniform water retention follows actual simulation exposure", "[simulation][uniform-wetness]")
 {
