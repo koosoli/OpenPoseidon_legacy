@@ -90,6 +90,8 @@ class Helicopter: public Transport
 	float _rndFrequency; // volume control - low down hero sound
 	float _rotorSpeed,_rotorSpeedWanted; // turning motor on/off
 	float _snowRotorTime = 0;
+	float _landRotorTime = 0;
+	unsigned _landRotorPhase = 0;
 	float _rotorPosition;
 
 	// pilot can directly coordinate these parameters
@@ -326,6 +328,7 @@ class HelicopterAuto: public Helicopter
 	TMError TransferMsg(NetworkMessageContext &ctx) override;
 	float CalculateError(NetworkMessageContext &ctx) override;
 protected:
+	void EmitLandRotorRing(float deltaT, SimulationImportance prec);
 	void UpdateStopMode(AIUnit *unit);
 };
 

@@ -11,6 +11,15 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/AirflowField.hpp>
+#include <Poseidon/World/Weather/RotorGroundPolicy.hpp>
+#include <Poseidon/World/Weather/RainWaterField.hpp>
+#include <Poseidon/World/Weather/MudField.hpp>
+#include <Poseidon/World/Weather/SandField.hpp>
+#include <Poseidon/World/Weather/RainVolume.hpp>
+#include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
+#include <Poseidon/Graphics/Rendering/Effects/Smokes.hpp>
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>
+#include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
@@ -378,9 +387,142 @@ void Helicopter::SimulateOptimized(float deltaT, SimulationImportance prec)
     base::SimulateOptimized(deltaT, prec);
 }
 
+namespace
+{
+// A short-lived land puff shares the established cloudlet rendering and room
+// containment, but follows live airflow rather than baking wind at creation.
+// The bound is across all helicopters and resets naturally at world teardown.
+class RotorLandPuff final : public Cloudlet
+{
+public:
+    inline static unsigned Live = 0;
+    static constexpr unsigned MaxLive = 128;
+    explicit RotorLandPuff(LODShapeWithShadow* shape) : Cloudlet(shape, 2.0f, 0.65f)
+    {
+        ++Live;
+        SetSimulationPrecision(1.0f / 25.0f);
+    }
+    ~RotorLandPuff() override { --Live; }
+    void Simulate(float dt, SimulationImportance prec) override
+    {
+        if (std::isfinite(dt) && dt > 0)
+        {
+            const Vector3 air = GAirflow.Sample(Position());
+            const float blend = 1.0f - std::exp(-1.6f * std::min(dt, 0.25f));
+            _speed[0] += (air.X() - _speed.X()) * blend;
+            _speed[2] += (air.Z() - _speed.Z()) * blend;
+        }
+        Cloudlet::Simulate(dt, prec);
+        if (GLandscape)
+        {
+            const float floor = GLandscape->SurfaceY(Position().X(), Position().Z()) + 0.08f;
+            if (std::isfinite(floor) && Position().Y() < floor)
+            {
+                Vector3 p = Position(); p[1] = floor; SetPosition(p);
+                _speed[1] = std::max(_speed.Y(), 0.0f);
+            }
+        }
+    }
+};
+
+bool LandRotorFlag(const char* name, bool fallback)
+{
+#ifdef _WIN32
+        char* value = nullptr; size_t size = 0;
+        _dupenv_s(&value, &size, name);
+        const bool result = value ? value[0] != '0' : fallback; std::free(value); return result;
+#else
+        const char* value = std::getenv(name);
+        return value ? value[0] != '0' : fallback;
+#endif
+}
+}
+
+void Helicopter::EmitLandRotorRing(float dt, SimulationImportance prec)
+{
+    static const bool enabled = LandRotorFlag("POSEIDON_ROTOR_LAND", true);
+    static const bool trace = LandRotorFlag("POSEIDON_ROTOR_LAND_TRACE", false);
+    const float airflowScale = GAirflow.LocalScale();
+    if (!GLandscape || !GWorld || !GScene || !GScene->GetCamera() ||
+        !enabled || !GAirflow.LocalEnabled() || !std::isfinite(airflowScale) || airflowScale <= 0 ||
+        !EnableVisualEffects(prec) || _isDead ||
+        !std::isfinite(dt) || dt <= 0 || _rotorSpeed <= 0.2f || DirectionUp().Y() < 0.5f ||
+        (Position() - GScene->GetCamera()->Position()).SquareSize() > 350.0f * 350.0f)
+    {
+        _landRotorTime = 0; return;
+    }
+    _landRotorTime += std::min(dt, 0.25f);
+    if (_landRotorTime < 0.25f) return;
+    _landRotorTime -= 0.25f;
+    LODShapeWithShadow* shape = GScene->Preloaded(CloudletBasic);
+    if (!shape) return;
+    static Ref<CloudletTTable> table = [] {
+        auto* colours = new CloudletTTable; colours->Add(10000, HWhite); return colours;
+    }();
+    const Vector3 centre = Position();
+    const float centreGround = GLandscape->SurfaceY(centre.X(), centre.Z());
+    if (!std::isfinite(centreGround) || centre.Y() - centreGround < 0 ||
+        centre.Y() - centreGround >= 30) return;
+    RotorWash wash;
+    wash.position = centre;
+    wash.discRadius = std::max(GetRadius() * 0.8f, 3.0f);
+    wash.strength = 14.0f * _rotorSpeed * _rotorSpeed * std::clamp(airflowScale, 0.0f, 3.0f);
+    wash.groundY = centreGround;
+    const float rain = UniformWettingDensity(GLandscape->GetRainDensity(), GRain.EffectiveDensity(),
+                                            GRain.Params().snowflakes);
+    static RotorGroundBudget probeBudget;
+    unsigned emitted = 0, snowPuffs = 0, blocked = 0;
+    for (unsigned spoke = 0; spoke < 8 && RotorLandPuff::Live < RotorLandPuff::MaxLive; ++spoke)
+    {
+        if (!probeBudget.Take(Glob.time.toFloat())) break;
+        const auto offset = RotorGroundRing(_landRotorPhase, spoke, wash.discRadius);
+        const float x = centre.X() + offset[0], z = centre.Z() + offset[1];
+        const float extent = GLandscape->GetLandRange() * GLandscape->GetLandGrid();
+        if (!(x >= 0 && z >= 0 && x < extent && z < extent)) continue;
+        const float ground = GLandscape->SurfaceY(x, z);
+        if (!std::isfinite(ground) || ground <= GLandscape->GetSeaLevel() + 0.03f) continue;
+        const Vector3 origin(x, ground + 0.15f, z);
+        Object* roadway = nullptr;
+        const float support = GLandscape->RoadSurfaceY(origin, nullptr, nullptr, nullptr, &roadway);
+        const auto water = GRainWater().At(x, z);
+        const auto& surface = GLandscape->SurfaceAt(x, z);
+        const float remainingSnow = std::max(0.0f, GSnow().BaseDepthAt(x, z) -
+            GSnow().DeficitAt(int(std::floor(x / SnowField::CellSize)), int(std::floor(z / SnowField::CellSize))));
+        auto emission = RotorGroundPolicy(_rotorSpeed, centre.Y() - ground, DirectionUp().Y(),
+            surface._dustness, remainingSnow, std::max(GMud().Wetness(), GSand().Wetness()),
+            rain, water.depth, water.valid, true, false, roadway || !std::isfinite(support) || support > ground + 0.1f);
+        emission.density = std::clamp(emission.density * airflowScale, 0.0f, 1.0f);
+        if (emission.density < 0.025f) continue;
+        // The airflow must actually reach this spoke. Ignore only its own
+        // helicopter, retaining roof/tree/bridge geometry in the physical ray.
+        CollisionBuffer hits;
+        GLandscape->ObjectCollision(hits, nullptr, this, origin, centre, 0.05f, ObjIntersectView);
+        if (hits.Size()) { ++blocked; continue; }
+        auto* puff = new RotorLandPuff(shape);
+        Vector3 velocity = EvaluateRotorWash(wash, origin);
+        velocity[1] = emission.snow ? 0.7f : 0.35f;
+        puff->SetPosition(origin); puff->SetSpeed(velocity);
+        puff->SetSideSpeed(0, 0, 0, 0);
+        puff->SetClimbRate(-0.2f, -0.3f, 2.0f);
+        puff->SetFades(0.15f, 0.65f);
+        puff->SetGrowUp(0.25f, emission.snow ? 1.4f : 1.9f);
+        puff->SetAlpha((emission.snow ? 0.3f : 0.24f) * emission.density);
+        puff->SetColor(emission.snow ? Color(0.96f, 0.98f, 1.0f) : Color(0.56f, 0.49f, 0.37f));
+        puff->SetTemperature(0, 0, table); puff->SetShadeOrigin(centre, 1.45f);
+        puff->SetSmokeShadow(false);
+        GWorld->AddCloudlet(puff); ++emitted; snowPuffs += emission.snow ? 1u : 0u;
+    }
+    ++_landRotorPhase;
+    if (trace && (_landRotorPhase % 8 == 0))
+        LOG_INFO(World, "ROTOR_LAND object={} x={:.2f} y={:.2f} z={:.2f} rpm={:.3f} height={:.2f} emitted={} snow={} sheltered={} live={} rain={:.3f}",
+            RenderId(), centre.X(), centre.Y(), centre.Z(), _rotorSpeed, centre.Y() - centreGround,
+            emitted, snowPuffs, blocked, RotorLandPuff::Live, rain);
+}
+
 void Helicopter::Simulate(float deltaT, SimulationImportance prec)
 {
     _isDead = IsDammageDestroyed();
+    EmitLandRotorRing(deltaT, prec);
 
     // Persistent ground edits belong to each helicopter, not the camera's four
     // nearest airflow emitters. Keep the fine snow-field work at 4 Hz.
