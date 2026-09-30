@@ -323,6 +323,7 @@ void Man::RecalcPositions(const Frame& moveTrans)
 
 void Man::OnPositionChanged()
 {
+    if (_corpsePoseLease.world) ClearCorpsePose();
     _landContact = false;
     _objectContact = false;
     RecalcPositions(*this);

@@ -758,7 +758,7 @@ bool Man::UseCorpsePose() const
 {
     if (!_corpsePoseLease.world || _corpsePoseBypass) return false;
     // Reject removal/world changes before touching type-owned animation tables.
-    if (CorpsePoseRefusal()) { ClearCorpsePose(); return false; }
+    if (_corpsePoseLease.world != GWorld || CorpsePoseRefusal()) { ClearCorpsePose(); return false; }
     Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
     if (!skeleton || _corpsePoseWeights.GetRef() != &Type()->GetWeights() ||
         !_corpsePoseLease.Matches(GWorld, _shape.GetRef(), skeleton, skeleton->NBones(),
