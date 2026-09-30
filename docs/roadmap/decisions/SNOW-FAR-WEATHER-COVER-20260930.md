@@ -123,3 +123,9 @@ paths, native and CWA maps, reset/removal and a camera recenter are separate
 checks. Verify tree wind/holes/near-far crown continuity and no distant glitter.
 Measure active/dry GPU and CPU cost without overlapping test campaigns. Stock
 roof silhouettes, edge leakage and appearance remain visual review items.
+
+## Combined root checks
+
+Root's full serial renderer suite in build/weather-sand-combined-serial-tests-2.log passes609 tests, zero failures and two existing ignored. It includes the actual far-depth GPU and overflow-copy falsifiers, actual private96-byte tail/layout, retained8-fragment-storage budget, deep mud, signed sand, wet-soil and grass checks. The first combined run had606 passes plus3 stale source-contract failures after adding the seventh retained weather pipeline and sharing physical admission with moist soil; contracts now retain the material-independent film assertion and explicitly check the shared rain proof. No production GPU assertion failed in that first run.
+
+Root also avoids asymptotic after-rain work by activating the physical map only above0.03 retained ground wetness, the lowest actual moist-soil threshold. Dry tiny histories request no weather pass. The stock surface runner has independent WeatherCoverOff and InteriorSkyOff controls and records capped actual weather-submit trace rows. New installed near/200/500m and AO-off acceptance remains pending.

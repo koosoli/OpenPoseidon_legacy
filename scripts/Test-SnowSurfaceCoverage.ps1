@@ -8,6 +8,8 @@ param(
     [switch]$OnlyDeposited,
     [switch]$AutoExposure,
     [switch]$LegacyCwa,
+    [switch]$WeatherCoverOff,
+    [switch]$InteriorSkyOff,
     [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label = 'stock-surface',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
     [string]$NativeAddons = 'C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons'
@@ -94,6 +96,7 @@ $keys = @('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJEC
     'POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_DEPTH','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','POSEIDON_SNOWLINE',
     'WGR_OBJECT_SNOW','WGR_SNOW_POWDER','WGR_SNOW_SURFACE_FIXTURE','WGR_TEMPORAL','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_GRASS','POSEIDON_WIND_OVERRIDE',
     'WGR_CLOUD_COVERAGE','WGR_LOD_GOVERNOR_RANGE','WGR_TERRAIN_JITTER','WGR_INTERIOR_SKY','WGR_INTERIOR_SKY_DEBUG',
+    'WGR_WEATHER_COVER','WGR_WEATHER_COVER_TRACE',
     'POSEIDON_INTERIOR_SKY_PROBE','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_TERRAIN_PUDDLES')
 $savedEnv = @{}
 foreach ($key in $keys) { $savedEnv[$key] = [Environment]::GetEnvironmentVariable($key,'Process') }
@@ -194,7 +197,8 @@ try {
     }
     $env:WGR_TEMPORAL = '0'; $env:WGR_AUTO_EXPOSURE = if ($AutoExposure) { '1' } else { '0' }; $env:WGR_EXPOSURE = '1'
     $env:WGR_GRASS = '0'; $env:POSEIDON_WIND_OVERRIDE = '0 90 0'; $env:WGR_CLOUD_COVERAGE = '0'
-    $env:WGR_LOD_GOVERNOR_RANGE = '1'; $env:WGR_TERRAIN_JITTER = '0'; $env:WGR_INTERIOR_SKY = '1'
+    $env:WGR_LOD_GOVERNOR_RANGE = '1'; $env:WGR_TERRAIN_JITTER = '0'; $env:WGR_INTERIOR_SKY = $(if ($InteriorSkyOff) {'0'} else {'1'})
+    $env:WGR_WEATHER_COVER = $(if ($WeatherCoverOff) {'0'} else {'1'}); $env:WGR_WEATHER_COVER_TRACE = '1'
     $env:WGR_INTERIOR_SKY_DEBUG = '0'; $env:WGR_TERRAIN_PUDDLES = '0'
     $env:WGR_SNOW_POWDER = if ($PowderOff) { '0' } else { '1' }
     $env:WGR_SNOW_SURFACE_FIXTURE = '1'

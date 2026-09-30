@@ -46,7 +46,7 @@ impl Publication {
 pub fn active(enabled: bool, snow: [f32; 4], ground: [f32; 4]) -> bool {
     enabled
         && snow.iter().chain(ground.iter()).all(|v| v.is_finite())
-        && (snow[0] > 0.0 || (snow[1] >= 0.0 && snow[2] > 0.0 && snow[3] > 0.0) || ground[0] > 0.0)
+        && (snow[0] > 0.0 || (snow[1] >= 0.0 && snow[2] > 0.0 && snow[3] > 0.0) || ground[0] > 0.03)
 }
 
 #[cfg(test)]
@@ -92,6 +92,8 @@ mod tests {
     #[test]
     fn weather_cover_dry_or_invalid_state_never_requests_work() {
         assert!(!active(true, [0.0, -1.0, 0.0, 0.0], [0.0; 4]));
+        assert!(!active(true, [0.0, -1.0, 0.0, 0.0], [0.03, 0.0, 0.0, 0.0]));
+        assert!(active(true, [0.0, -1.0, 0.0, 0.0], [0.031, 0.0, 0.0, 0.0]));
         assert!(active(true, [0.18, -1.0, 0.0, 0.0], [0.0; 4]));
         assert!(active(true, [0.0, 500.0, 100.0, 0.18], [0.0; 4]));
         assert!(!active(true, [0.0, 500.0, 0.0, 0.18], [0.0; 4]));

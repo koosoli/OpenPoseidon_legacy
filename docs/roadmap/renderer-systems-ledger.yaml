@@ -1379,7 +1379,14 @@ unbuilt_candidates: >-
       Tree crown source c552aae2 uses actual bounded upper-center roof probes,
       model-height masks and matte mean powder in both draw paths; alpha, wind
       and normals remain. Unknown far proof stays bare. Installed tree and
-      near/200m/500m roof controls remain pending; no island-wide whitening claim.
+      Installed01e8c4fb near stock tent capture now shows white upward fabric,
+      bare vertical fabric and snow on the nearby rock tops, with normal shutdown.
+      New independent far physical-depth source8f3434ae covers640m radius,
+      replays current retained/direct geometry and fails closed on incomplete
+      publication or actual GPU output overflow. Combined serial renderer checks
+      pass609 tests, zero failed, two existing ignored, including actual far-depth,
+      deep mud, signed sand, wet soil and grass probes. New matching full build,
+      near/200m/500m and tree installed controls remain pending; no island-wide claim.
       Pure stock runner checks pass 32 assertions plus existing roof mocked RPC
       tests, without game/GPU use by the runner author. Prior installed roof
       rain/puddle evidence and 8b3ae13c walking/refill are retained baselines,

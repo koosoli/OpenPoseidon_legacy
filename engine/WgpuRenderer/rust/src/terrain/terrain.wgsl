@@ -1241,8 +1241,8 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // below and the terrain-shadow test further down (LOD/morph-independent).
     let world_y = sample_height(in.world_xz);
     let line_depth = snowline_depth(in.world_xz, world_y);
-    var rain_puddle = 0.0;
     var soil_wet = soil_wet_amount(mud, tp.rain_wetness, snow_cover(in.world_xz, world_y));
+    var rain_puddle = 0.0;
     if (tp.rain_wetness > 0.0) {
         rain_puddle = ground_puddle_mask(in.world_xz, puddle_footprint, tp.rain_wetness)
             * ground_puddle_land_factor(geometric_n.y, world_y, tp.sea_level,

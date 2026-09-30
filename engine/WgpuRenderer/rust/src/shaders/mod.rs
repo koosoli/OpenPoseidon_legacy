@@ -458,8 +458,8 @@ mod tests {
         assert!(layout.contains("visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE"));
         let start = gfx.find("let gpu_velocity_pipeline = cull::build_gpu_velocity_pipeline(").unwrap();
         let pipelines = gfx[start..].split("let cull_debug_layout").next().unwrap();
-        assert_eq!(pipelines.matches("&conform.gpu_layout").count(), 6);
+        assert_eq!(pipelines.matches("&conform.gpu_layout").count(), 7);
         assert!(!pipelines.contains("&conform.layout"));
-        assert_eq!(gfx.matches("self.conform.gpu_bind.as_ref()").count(), 3);
+        assert_eq!(gfx.matches("self.conform.gpu_bind.as_ref()").count(), 4);
     }
 }
