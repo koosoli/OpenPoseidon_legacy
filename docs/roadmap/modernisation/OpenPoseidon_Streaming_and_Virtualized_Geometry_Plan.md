@@ -1869,3 +1869,16 @@ driver requires actual staged upload, ordinary handoff and remaining-upload
 rows separately from warm-queue proof (this phase does not require a warm
 job to upload). Runtime/latency acceptance for these new slices is pending.
 Whole plan OPEN/defaultReady=false/performanceAccepted=false.
+
+
+### 30 September — PARKED at Oliver's explicit request
+
+Code f0f09a0e committed/safety-pushed; exact postcommit game build passed13steps.
+Owner game PID27856 observed running; root did not start/stop it or overwrite
+its binaries. Installed stamp remains b8f61b97 at08:08. New three-cycle,
+diagnostic-copy removal, Skala2 and parent-material runtime/deployment acceptance
+remain PENDING. The earlier b8 one-cycle runtime PASS remains established.
+No new derived GHP cache writes were applied; its agent was interrupted.
+Do not autonomously resume streamer work until Oliver asks. Continuation record:
+`../decisions/STREAMING-PARKED-20260930.md`. Whole plan OPEN, not complete;
+defaultReady=false/performanceAccepted=false and experimental flags OFF.
