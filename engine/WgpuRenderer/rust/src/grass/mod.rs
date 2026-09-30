@@ -1,4 +1,5 @@
 mod blade_atlas;
+mod wind;
 
 use crate::ffi::{
     WGR_GRASS_DOWNWASH_COUNT, WGR_GRASS_TRACK_COUNT, WgrGrassDownwash, WgrGrassParams,
@@ -357,6 +358,8 @@ struct GrassParams {
     // Renderer-derived from the uploaded atlas, never from the caller.
     photo_layer_bounds: [f32; 128],
     photo_layer_means: [f32; 128],
+    wind_advection: [f32; 4],
+    wind_flutter: [f32; 4],
 }
 
 /// Owner's fallback for photo-card coverage where the map's own clutter density
@@ -574,6 +577,7 @@ pub struct Grass {
     // Last pushed params, so set_tuft can re-publish them with the tuft flag set
     // without waiting for the Grass tab to touch a slider.
     last_params: GrassParams,
+    wind_phase: wind::WindPhase,
     // Photo-card placement spacing in metres; see CARD_SPACING_DEFAULT.
     card_spacing: f32,
     // The card pipelines were built with alpha-to-coverage (MSAA scene and
@@ -804,6 +808,8 @@ impl Grass {
             _native2_pad: [0.0; 3],
             photo_layer_bounds: default_layer_bounds(),
             photo_layer_means: default_layer_means(),
+            wind_advection: [0.0; 4],
+            wind_flutter: [0.0; 4],
         };
         queue.write_buffer(&grass_params, 0, bytemuck::bytes_of(&params));
 
@@ -1188,6 +1194,10 @@ impl Grass {
             compilation_options: Default::default(),
             cache: None,
         });
+        let filter_subpixel = std::env::var("WGR_GRASS_FILTER_SUBPIXEL")
+            .map_or(true, |value| value != "0");
+        eprintln!("Wgpu grass subpixel shading: {} (WGR_GRASS_FILTER_SUBPIXEL)", filter_subpixel);
+        let shading_constants = [("GRASS_FILTER_SUBPIXEL", if filter_subpixel { 1.0 } else { 0.0 })];
         // `a2c`: alpha-to-coverage for the photo-card pipelines. Only ever true
         // under MSAA (wgpu validation rejects it at 1x), and only for entries
         // that write a vec4 whose .a is the coverage (fs_grass_mid_tuft_a2c and
@@ -1227,7 +1237,10 @@ impl Grass {
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
                     entry_point: Some(entry),
-                    compilation_options: Default::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &shading_constants,
+                        ..Default::default()
+                    },
                     targets: &[Some(wgpu::ColorTargetState {
                         format: target,
                         blend: None,
@@ -1572,6 +1585,7 @@ impl Grass {
             tuft_bounds: default_layer_bounds(),
             tuft_means: default_layer_means(),
             last_params: params,
+            wind_phase: wind::WindPhase::default(),
             card_spacing,
             card_a2c,
             card_tone,
@@ -2079,6 +2093,8 @@ impl Grass {
             // Always the renderer's own measurement of the loaded atlas.
             photo_layer_bounds: self.tuft_bounds,
             photo_layer_means: self.tuft_means,
+            wind_advection: self.last_params.wind_advection,
+            wind_flutter: self.last_params.wind_flutter,
         };
         self.near_grid_dim = near_grid_dim;
         self.mid_grid_dim = mid_grid_dim;
@@ -2141,6 +2157,11 @@ impl Grass {
         terrain: &Terrain,
     ) {
         let params = terrain.params();
+        let (advection, flutter) = self.wind_phase.advance(params.time,
+            self.last_params.wind_strength, self.last_params.wind_direction, self.last_params.wind_scroll);
+        self.last_params.wind_advection = advection;
+        self.last_params.wind_flutter = flutter;
+        queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&self.last_params));
         queue.write_buffer(&self.terrain_params, 0, bytemuck::bytes_of(&params));
         self.have_heightmap = terrain.has_heightmap();
         if self.terrain_generation != terrain.heightmap_gen() {
@@ -2737,23 +2758,15 @@ mod tests {
     const SHADER: &str = include_str!("grass.wgsl");
     const SHADOW: &str = include_str!("grass_shadow.wgsl");
 
-    // The blade and the shadow it casts are two shaders reading one wind field. The scroll
-    // scale therefore has to reach BOTH copies of sample_wind_field and be applied to every
-    // scroll term in each -- miss one and a blade leans while its shadow leans somewhere
-    // else, which nobody notices in a screenshot and everybody notices in motion. Asserted
-    // on the source: a pipeline test would build happily with the override declared and
-    // never used.
+    // Colour and shadow must consume the same integrated wind phase.
     #[test]
-    fn the_wind_scroll_scale_reaches_every_scroll_term_in_both_grass_shaders()
+    fn both_grass_shaders_consume_integrated_wind_phases()
     {
         for (name, src) in [("grass.wgsl", SHADER), ("grass_shadow.wgsl", SHADOW)]
         {
-            assert!(
-                src.contains("fn wind_scroll_scale() -> f32 {")
-                    && src.contains("grass.card_tone.w"),
-                "{name} must read the scroll scale from the shared card_tone.w lane"
-            );
-            for term in ["broad_scroll", "gust_scroll", "flutter_scroll"]
+            for (term, phase) in [("broad_scroll", "grass.wind_advection.xy"),
+                                  ("gust_scroll", "grass.wind_advection.zw"),
+                                  ("flutter_scroll", "grass.wind_flutter.xy")]
             {
                 let head = format!("let {term} =");
                 let start = src
@@ -2761,9 +2774,35 @@ mod tests {
                     .unwrap_or_else(|| panic!("{name} has no `{head}`"));
                 let end = start + src[start..].find(';').expect("unterminated statement");
                 assert!(
-                    src[start..end].contains("wind_scroll_scale()"),
-                    "{name}: `{term}` is not scaled by wind_scroll_scale"
+                    src[start..end].contains(phase),
+                    "{name}: `{term}` does not read the integrated phase"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn colour_and_shadow_uniform_offsets_match_the_uploaded_rust_struct() {
+        for src in [SHADER, SHADOW] {
+            let mut declarations = String::new();
+            for name in ["GrassTrack", "GrassDownwash", "GrassParams"] {
+                let start = src.find(&format!("struct {name} {{")).unwrap();
+                let end = start + src[start..].find('}').unwrap() + 1;
+                declarations.push_str(&src[start..end]);
+                declarations.push(';');
+            }
+            let module = naga::front::wgsl::parse_str(&declarations).unwrap();
+            let ty = module.types.iter().find(|(_, ty)| ty.name.as_deref() == Some("GrassParams")).unwrap().1;
+            let naga::TypeInner::Struct { members, span } = &ty.inner else { panic!("not a struct"); };
+            assert_eq!(*span as usize, std::mem::size_of::<GrassParams>());
+            for (name, expected) in [
+                ("layer_bounds", std::mem::offset_of!(GrassParams, photo_layer_bounds)),
+                ("layer_means", std::mem::offset_of!(GrassParams, photo_layer_means)),
+                ("wind_advection", std::mem::offset_of!(GrassParams, wind_advection)),
+                ("wind_flutter", std::mem::offset_of!(GrassParams, wind_flutter)),
+            ] {
+                let field = members.iter().find(|m| m.name.as_deref() == Some(name)).unwrap();
+                assert_eq!(field.offset as usize, expected, "{name}");
             }
         }
     }
@@ -2915,7 +2954,7 @@ mod tests {
     fn card_spacing_only_engages_with_a_resident_atlas() {
         assert!(SHADER.contains("fn cards_on_mid() -> bool { return grass.species_mix.w > 0.5; }"));
         assert!(SHADER.contains(
-            "fn cards_on_near() -> bool { return cards_on_mid() && grass.renderer.x > 0.5; }"
+            "fn cards_on_near() -> bool { return cards_on_mid() && grass.renderer.x > 0.5 && grass.native.x <= 0.0; }"
         ));
         let src = include_str!("mod.rs");
         assert!(src.contains("let cards_mid = self.have_tuft && params.use_photo_tuft != 0.0;"));

@@ -213,6 +213,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_model_renderer.cpp
     Graphics/test_gl33_rendering.cpp
     Graphics/test_fan_decompose.cpp
+    Graphics/test_grass_wind.cpp
     Graphics/test_zbias_math.cpp
     Graphics/test_mipmap_layout.cpp
     Graphics/test_texture_dummy_size.cpp

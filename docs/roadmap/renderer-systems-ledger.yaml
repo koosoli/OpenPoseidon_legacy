@@ -637,6 +637,11 @@ systems:
       renderer. Near photo clumps now alpha-test into and receive the cascade map, giving
       clump-to-clump shadowing. The selected test framing does not expose enough bare terrain
       to accept the final ground-shadow/far-172m quality gate; those remain live-game checks.
+      September 30 continuation implements phase-continuous weather advection,
+      footprint-filtered blade/photo contour lighting, calm-wind handling and matching
+      native/shadow uniform offsets and height. Source checks pass; final installed
+      build, aerial temporal acceptance and native albedo shimmer remain pending.
+      Evidence and acceptance scope: decisions/GRASS-STABILITY-20260930.md.
     known_gap: >-
       GRS-GATE-1 unpassed: assets/ is gitignored, so the authored texture path is dead on
       any fresh clone and every user gets the procedural look. No ASSET-010 source

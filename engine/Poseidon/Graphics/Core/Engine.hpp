@@ -1582,19 +1582,10 @@ class Engine : public IGraphicsEngine
         // windScrollAuto). The manual value reaches 4 so the dev panel can still push it
         // past anything the weather will ever produce.
         float windScroll = 1.0f;
-        // Derive the scroll from the live wind speed instead of from `windScroll`. On by
-        // default, and the only reason the shipped game never sees a value above 1: 1.0 is
-        // reserved for a STORM (kWindScrollFullSpeed, the top of the weather model's
-        // envelope -- WindModel's 1.5 m/s calm plus 7.5 m/s of overcast, gusting). Calm air
-        // scrolls at the floor instead, so a still day stops shivering.
-        //
-        // Turn it off to use the slider, which is the only way to exceed 1.
+        // On by default: divide live speed by the shader's unscaled gust speed
+        // so fronts travel at the measured wind speed, including when the bend
+        // strength slider changes. Turn it off to use the manual scroll slider.
         bool windScrollAuto = true;
-        // Wind speed (m/s) at which the automatic scroll reaches its 1.0 ceiling.
-        static constexpr float kWindScrollFullSpeed = 13.0f;
-        // Floor for the automatic scroll: dead calm should still breathe rather than freeze
-        // the noise field into a static crumple.
-        static constexpr float kWindScrollFloor = 0.15f;
         // Reference-style field variation. These affect deterministic GPU
         // hashes, so they do not make blades swim when the camera moves.
         float clumping = 0.35f;

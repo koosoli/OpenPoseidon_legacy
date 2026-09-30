@@ -5,6 +5,7 @@
 #include <Poseidon/Graphics/Rendering/GeometryPagePrivateAutoCoarse.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageProjectedSurfaceBound.hpp>
 #include <Poseidon/Graphics/Rendering/Frame/PresentationSnapshot.hpp>
+#include <Poseidon/Graphics/Rendering/GrassWind.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageControlledMlodAsset.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageRepresentationDecode.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageClodCutDecode.hpp>
@@ -18241,21 +18242,15 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     const render::frame::PresentationSnapshot& grassWindSnap = render::frame::GPresentationSnapshot();
     if (settings.useLiveWind && grassWindSnap.windActive)
     {
-        if (grassWindSnap.windSpeed > 0.001f)
+        // Calm is a valid live sample too: retaining the manual strength here
+        // made a zero-wind field vibrate at the manual scroll speed.
+        params.wind_direction = grassWindSnap.windDirectionRad * (180.0f / 3.14159265358979323846f);
+        params.wind_strength =
+            std::clamp(grassWindSnap.windSpeed * 0.20f * settings.windStrength, 0.0f, 3.0f);
+        if (settings.windScrollAuto)
         {
-            params.wind_direction = grassWindSnap.windDirectionRad * (180.0f / 3.14159265358979323846f);
-            params.wind_strength =
-                std::clamp(grassWindSnap.windSpeed * 0.20f * settings.windStrength, 0.0f, 3.0f);
-            // Gust travel from the wind that causes it: linear in speed, reaching 1.0 only
-            // at a storm. Capped there rather than allowed to run on -- past 1 the field
-            // crosses the world faster than the shipped look and begins to strobe, and
-            // nothing the weather can produce should get there. The dev slider still can,
-            // by turning windScrollAuto off.
-            if (settings.windScrollAuto)
-            {
-                params.wind_scroll = std::clamp(grassWindSnap.windSpeed / GrassSettings::kWindScrollFullSpeed,
-                                                GrassSettings::kWindScrollFloor, 1.0f);
-            }
+            params.wind_scroll = Poseidon::render::grass::GustScrollForWind(
+                grassWindSnap.windSpeed, params.wind_strength);
         }
     }
     // The far ring must start beyond the mid ring, whose reach the shader

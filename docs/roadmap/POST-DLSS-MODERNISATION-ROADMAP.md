@@ -16,6 +16,11 @@ uses measurements as the gate for optional GPU features.
 
 ## Where the critical path stands, 2026-09-01
 
+September 30 owner priorities and execution order:
+[grass stability, mud puddles and corpse-ragdoll assessment](decisions/GRASS-STABILITY-20260930.md).
+Use the verified `codex/streaming-residency` baseline, preserve intervening work,
+and finish installed visual acceptance before claiming these improvements complete.
+
 September 12 small-change follow-through:
 [camera upload batching and same-size terrain resource reuse](decisions/LOW-RISK-PERF-20260912.md).
 Camera CPU preparation is reduced; a sustained FPS gain is NOT established.

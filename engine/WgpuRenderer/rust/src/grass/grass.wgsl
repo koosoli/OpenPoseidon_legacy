@@ -2,6 +2,9 @@
 #import gbuffer::{oct_encode, a2c_coverage}
 #import shadow::shadow_strength
 
+// Diagnostic A/B only; coverage, placement and shadow geometry are unchanged.
+override GRASS_FILTER_SUBPIXEL: bool = true;
+
 struct TerrainParams {
     world_origin: vec2<f32>,
     land_grid: f32,
@@ -119,6 +122,10 @@ struct GrassParams {
     // fixed pivot made contrast a brightness change, and a DISTANCE-dependent
     // one, because mips average each texel toward exactly this value.
     layer_means: array<vec4<f32>, 32>,
+    // Renderer-integrated phases, shared with shadow geometry. A weather
+    // change alters velocity without multiplying it by elapsed mission time.
+    wind_advection: vec4<f32>,
+    wind_flutter: vec4<f32>,
 };
 
 // 32 bytes. `pos_seed` stays f32 for world precision; everything the compute
@@ -602,21 +609,8 @@ fn density_field(world_xz: vec2<f32>) -> f32 {
     return mix(1.0, patchy * bare_gap, grass.debug_flags.y);
 }
 
-// How fast the wind NOISE FIELDS travel across the world, as a multiple of the shipped
-// speeds. 1.0 is the historical look, and 0 (an untouched uniform) reads as 1.0.
-// Rides card_tone.w -- the one lane both grass shaders already had spare -- so the whole
-// control stays off the ABI struct layout. Live from the dev panel's Grass tab.
-//
-// Why it is a knob worth having: the scroll speeds below are not tied to the wind speed at
-// all. At the default 6 m/s mean wind the shader's `wind_strength` is 1.2, which puts the
-// gust field at 30 + 1.2*15 = 48 m/s and the tip-flutter field at 2.1x that, ~101 m/s. The
-// gust pattern therefore crosses the field about EIGHT times faster than the wind that is
-// supposed to be driving it, and the flutter about seventeen. That is what reads as blades
-// shivering or springing rather than leaning and releasing.
-fn wind_scroll_scale() -> f32 {
-    return select(clamp(grass.card_tone.w, 0.02, 4.0), 1.0, grass.card_tone.w <= 0.0);
-}
-
+// The renderer integrates the scroll slider and weather into shared phases.
+// Reading the phase here avoids t * v(t), whose jumps grow with mission age.
 fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField {
     let strength = clamp(grass.wind_strength, 0.0, 3.0);
     let base_angle = grass.wind_direction * 0.01745329252;
@@ -628,8 +622,8 @@ fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField
     // which is also the direction blades bend. Sampling noise at `p + v*t`
     // makes the pattern travel along `-v`, so the scroll is negated -- gust
     // fronts previously swept across the field opposite to the blades' lean.
-    let broad_scroll = -base_direction * terrain.time * (16.0 + strength * 9.0) * wind_scroll_scale();
-    let gust_scroll = -base_direction * terrain.time * (30.0 + strength * 15.0) * wind_scroll_scale();
+    let broad_scroll = grass.wind_advection.xy;
+    let gust_scroll = grass.wind_advection.zw;
     let direction_noise = clump_noise(world_xz + broad_scroll, 0.006, 0x0d7e31a5u);
     let gust_noise = clump_noise(world_xz + gust_scroll, 0.022, 0xa12f7c59u);
     // There is always a small travelling sway. Stronger, soft-edged gusts
@@ -638,8 +632,7 @@ fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField
     let gust_pulse = pow(smoothstep(0.40, 0.84, gust_noise), 2.0);
     let gust = mix(0.18, 1.0, gust_pulse);
     let direction_angle = base_angle + (direction_noise - 0.5) * min(strength, 1.5) * 1.10;
-    let flutter_scroll =
-        gust_scroll * 2.1 + vec2<f32>(terrain.time * 3.7, -terrain.time * 2.9) * wind_scroll_scale();
+    let flutter_scroll = grass.wind_flutter.xy;
     let flutter_noise = clump_noise(world_xz + flutter_scroll + base_direction * (height_t * height_t * 4.0) +
                                     vec2<f32>(seed * 19.0, seed * 31.0),
                                     0.105, 0x3f5a91c7u);
@@ -1464,7 +1457,17 @@ fn blade_self_shadow_terms(world_rel: vec3<f32>, normal: vec3<f32>, height_t: f3
     return vec2<f32>(sun_occlusion, tuft_ao);
 }
 
+// A blade can be unresolved even inside the near ring, especially from above.
+// UV derivatives measure its projected width, so this works at every camera
+// pitch and render resolution rather than relying on world distance.
+fn blade_shading_detail(uv: vec2<f32>) -> f32 {
+    let width_gradient = length(vec2<f32>(dpdx(uv.x), dpdy(uv.x)));
+    let width_pixels = 1.0 / max(width_gradient, 0.0001);
+    return select(1.0, smoothstep(0.75, 3.0, width_pixels), GRASS_FILTER_SUBPIXEL);
+}
+
 fn grass_shade(in: VsOut) -> vec4<f32> {
+    let shading_detail = blade_shading_detail(in.blade_uv.xy);
     let world = in.world_rel + frame.cam_pos.xyz;
     let base = vec3<f32>(0.055, 0.16, 0.025);
     let tip = vec3<f32>(0.32, 0.43, 0.10);
@@ -1513,7 +1516,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // shape_mix.w scales the photo texture globally on top of the distance fade
     // already in blade_uv.w, so the detail can be dialled back without deleting
     // the atlas and falling all the way to procedural.
-    let texture_amount = in.blade_uv.w * clamp(grass.shape_mix.w, 0.0, 1.0);
+    let texture_amount = in.blade_uv.w * clamp(grass.shape_mix.w, 0.0, 1.0) * shading_detail;
     let graded = grass_saturation(dry_patch(mix(procedural, textured, texture_amount), world.xz, in.height_t));
     // Per-patch hue drift on top of the luminance-only colour variation above:
     // warm straw one way, cool blue-green the other, on a ~11 m field of its own
@@ -1537,7 +1540,9 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     }
     // Bend card normals toward an upright rounded-blade normal. This avoids
     // the flat dark-side look of a raw ribbon while preserving its silhouette.
-    let n = normalize(mix(normalize(in.normal), vec3<f32>(0.0, 1.0, 0.0), 0.24));
+    let upright = vec3<f32>(0.0, 1.0, 0.0);
+    let resolved_normal = normalize(mix(normalize(in.normal), upright, 0.24));
+    let n = normalize(mix(upright, resolved_normal, shading_detail));
     let light_dir = normalize(frame.sun_dir_world.xyz);
     let ndl = max(dot(n, light_dir), 0.0);
     let wrap = max((dot(n, light_dir) + 0.35) / 1.35, 0.0);
@@ -1700,16 +1705,14 @@ fn tuft_contour_normal(uv: vec2<f32>, layer: i32, card_normal: vec3<f32>) -> vec
     // Horizontal facing of the card, used for the vertical gradient's tilt.
     let facing_xz = vec3<f32>(n.x, 0.0, n.z);
     let facing = select(tangent, normalize(facing_xz), dot(facing_xz, facing_xz) > 0.0001);
-    // The tap offset TRACKS THE SAMPLED FOOTPRINT. A fixed two-texel offset is
-    // right at the top mip and useless further out: once a card is far enough
-    // that its footprint spans several texels, both taps land inside the same
-    // mip texel, the gradient collapses to zero and the contour lighting
-    // silently switches itself off with distance -- so distant cards flatten to
-    // one upright normal while near ones keep their relief. Widening the offset
-    // with the footprint keeps the same relief at every range, and costs
-    // nothing: the taps share the quad's derivatives, so they read the same mip.
+    // Keep close relief, but filter it as the photograph becomes unresolved.
+    // Preserving full-strength gradients at every mip made tiny wind-blown
+    // stems flash between sunlit and shaded in aerial views.
     let footprint = max(length(dpdx(uv)), length(dpdy(uv)));
     let texel = max(2.0 / 1024.0, footprint * 1.5);
+    let dimensions = vec2<f32>(textureDimensions(tuft_tex));
+    let texel_footprint = max(length(dpdx(uv) * dimensions), length(dpdy(uv) * dimensions));
+    let relief_detail = select(1.0, 1.0 - smoothstep(2.0, 8.0, texel_footprint), GRASS_FILTER_SUBPIXEL);
     let du = tuft_luma(uv + vec2<f32>(texel, 0.0), layer) - tuft_luma(uv - vec2<f32>(texel, 0.0), layer);
     // Texture v runs downward, so a positive dv means brighter BELOW.
     let dv = tuft_luma(uv + vec2<f32>(0.0, texel), layer) - tuft_luma(uv - vec2<f32>(0.0, texel), layer);
@@ -1725,7 +1728,7 @@ fn tuft_contour_normal(uv: vec2<f32>, layer: i32, card_normal: vec3<f32>) -> vec
     // never reach it (the dark A2 sets, du ~0.05-0.1) are untouched.
     let tilt_len = length(tilt);
     let bounded = tilt * (min(tilt_len, 1.2) / max(tilt_len, 1e-5));
-    return normalize(up + bounded);
+    return normalize(up + bounded * relief_detail);
 }
 
 // The ONE texture fetch every card entry point makes. Thin photographed stems
