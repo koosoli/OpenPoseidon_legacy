@@ -50,7 +50,7 @@ try {
     $logText = Get-Content -LiteralPath $log -Raw
     if ($p.ExitCode -ne 0 -or $logText -notmatch 'Shutdown complete' -or
         $logText -notmatch 'wgpu renderer created' -or
-        $logText -match 'panicked|UNHANDLED EXCEPTION|wgr_create failed') { throw 'Grass capture failed' }
+        $logText -match 'panicked|UNHANDLED EXCEPTION|wgr_create failed|Validation Error|DeviceLost') { throw 'Grass capture failed' }
     foreach ($shot in $shots) { if (!(Test-Path -LiteralPath $shot)) { throw "Missing $shot" } }
     $capture = Get-Content -LiteralPath $metrics -Raw | ConvertFrom-Json
     if (($capture.grass.near_instances + $capture.grass.mid_instances) -le 0) {

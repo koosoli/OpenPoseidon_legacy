@@ -6,7 +6,7 @@ ragdolls. Verified baseline `ed452be8` in `.claude/worktrees/combat-audit`, alig
 with its fetched upstream. Existing untracked `.tmp-movecam/missions/` is preserved.
 The root checkout is a different, older branch and is not the implementation base.
 
-## Implemented grass slice; installed acceptance pending
+## Implemented grass slice; visual acceptance still open
 
 - Live gust speed now divides by the shader's actual unscaled advection speed.
   The previous 6 m/s sample produced approximately 22 m/s gust travel. A zero
@@ -26,12 +26,14 @@ The root checkout is a different, older branch and is not the implementation bas
   omitted before photo layer bounds, shifting those bounds by 32 bytes. Shadow
   blade height now also applies the native height scale used by the colour pass.
 
-The first game/test build passed; C++ wind tests pass 17 assertions in two cases.
-Rust grass tests and the complete shader composition check pass after correcting
+The game/test build passed; C++ wind tests pass 17 assertions in two cases.
+All 25 Rust grass tests and the complete shader composition check pass after correcting
 a stale test expectation which omitted the existing native-near-blade condition.
 New tests cover late weather changes, pause/rewind/long gaps and actual Naga/Rust
-uniform byte offsets. The final phase/shadow source still requires the installed
-game build and smoke test. These checks do not establish visual acceptance.
+uniform byte offsets. Installed matched `c3f4b9d3` passes normal-exit captures with
+populated grass at close/aerial stock scenes and Oliver's exact OFP Everon camera.
+Both default and filter-off 1x/4x GPU pipelines validate. These checks do not
+establish visual acceptance.
 
 `scripts/Test-GrassStability.ps1` provides an isolated native-resolution profile,
 fixed close/aerial cameras, six adjacent scheduled captures, before/after binary
@@ -39,6 +41,65 @@ hashes, normal-exit checks and provenance. Run it under `with-game-lock.sh`.
 The screenshot scheduler can render extra frames; scheduled adjacency is not
 a guarantee of adjacent rendered frames. Image differences must be inspected
 over a populated grass region; stills alone do not prove absence of flicker.
+`python scripts/Score-GrassStability.py` reproduces the fixed-ROI RGB diagnostics
+and excludes failed, empty-grass, incomplete or incorrectly sized captures.
+
+### First installed comparison and owner reproduction
+
+Installed evidence is in ignored `build/grass-stability/`, with hashes, camera,
+profile, screenshots, metrics and normal-exit results per run. Corrected stock
+aerial runs `094409`/`094512` and repeat `094850`/`094832` have 89,184 near and
+2,700 mid instances. Close runs `094553`/`094709` retain visible blades. Initial
+`first-*` subterranean captures have zero grass and are excluded from acceptance.
+
+Oliver's OFP Everon pose is X/Z/altitude `5018.51 4087.66 117.58`, azimuth `220.8`,
+elevation `-86.0`. Runs `owner-OwnerEveron-0-20260930-095543` and
+`owner-OwnerEveron-1-20260930-100039` render 112,164 near/18,466 mid instances,
+photo cards **off**, native resolution 1280x720, MSAA 4, fixed noon lighting.
+The bright aerial speckles remain obvious in both. The first normal/texture
+filter therefore does **not** close Oliver's reported disco-ball defect.
+
+Offline RGB analysis uses a fixed grass ROI `[400,250,900,600]` over five
+scheduled-image deltas. Pixels with any channel delta >48 fall from 1.4128% to
+1.0578%; mean luma changes from 117.726 to 115.195. This includes coherent wind
+motion and screenshot timing, and is a diagnostic rather than a per-frame
+flicker measurement. The root/tip procedural ramp remains unfiltered in this
+first build; a follow-up must address its unresolved colour variation and
+recheck the exact owner pose without deleting geometry or changing density.
+
+### Procedural ramp follow-up
+
+`239cd386` carries the blade's actual taper to the fragment stage and blends
+unresolved procedural shading to the analytic area mean of colour/root/gust,
+including the correlated dry-tip colour and height AO. Close resolved shading,
+native authored albedo, world-scale patch tint, density, silhouettes and coverage
+are retained. The approximation integrates the ideal continuous taper rather
+than every projected curved triangle and does not integrate all lighting jointly.
+All 27 grass tests pass, including GPU execution of production helpers compared
+with independent 65,536-sample numerical integration across 16 cases and real
+1x/4x pipelines. This is a mean-preservation math test, not an image-brightness claim.
+
+Installed matched source `090a513e` (stamp `+dirty`: only status documents and
+Cargo's unrelated generated lockfile difference, no uncommitted rendering code)
+passes owner-pose runs `averaged-OwnerEveron-1-20260930-101857` and same-build
+`averaged-control-OwnerEveron-0-20260930-101953`. Bright white speckles are visibly
+suppressed. Identical grass counts are retained. In the same ROI, >48-channel
+deltas fall from 1.3937% to 0.0795% (about 94%); mean delta falls 5.478 to 2.816.
+Aerial mean luma changes 117.686 to 105.845 as unresolved bright tips are averaged.
+These are scheduled-image diagnostics including wind/capture timing, not a proof
+that every rendered frame is shimmer-free.
+Repeat `averaged-repeat-OwnerEveron-1-20260930-103709` retains the improvement:
+>48 deltas 0.0770%, mean delta 2.786 and mean luma 105.839.
+
+Close captures `averaged-Close-1-20260930-102050` and
+`averaged-control-Close-0-20260930-102340` retain visible individual blades;
+mean ROI luma is 115.530 versus 114.309. Large scheduled-image changes drop from
+6.6687% to 2.4760%. A single GPU snapshot shows grass colour 3.93 ms filtered
+versus 3.76 ms control, with prepass 2.49 versus 1.78 ms; these short single cuts
+have timing variation and are not a settled median benchmark or a speedup claim.
+Oliver's preferred near/distant appearance and native atlas temporal acceptance
+remain visual gates. Rain/puddle source changes in this pair are dry in the stock
+grass comparison and do not redefine grass admission.
 
 ## Improved execution order
 
@@ -52,6 +113,10 @@ over a populated grass region; stills alone do not prove absence of flicker.
    palette override or single dynamic capsule does not satisfy this feature.
    Stock authored death animation remains the default pending a real articulated
    opt-in implementation and its collision/network/save/load gates.
+   The completed [stock corpse articulation assessment](PHY-040-stock-corpse-articulation-assessment-20260930.md)
+   confirms Box3D joint support but finds nonrigid authored death transforms and
+   separate rendering/interaction palettes. A render-only override is not safe;
+   the bounded dry-ground single-player slice needs shared corpse pose ownership.
 4. Reassess still-open modernisation tasks against the current ledger after the
    owner-priority visual gates. This update does not enable parked streaming,
    ocean, experimental paging or previously rejected foliage defaults.

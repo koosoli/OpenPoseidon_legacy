@@ -56,6 +56,7 @@ $argv = @('--check','--render=wgpu','--window','--width=1280','--height=720','--
 $hashes = @(Get-FileHash -LiteralPath $exe,$dll)
 @{head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $game 'DEPLOYED-FROM.txt'));
   hashes=$hashes;argv=$argv;wetness=$Wetness;rain=$Rain;enabled=$Enabled;original=[bool]$Original;
+  snowTestDepth=$env:POSEIDON_SNOW_TEST_DEPTH;
   scope='Fixed-camera scheduled captures; does not establish actual rain fill/dry lifecycle or adjacent rendered-frame flicker.'
 } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'provenance.json')
 $p = $null
@@ -69,7 +70,7 @@ try {
     $logText = Get-Content -LiteralPath $log -Raw
     if ($p.ExitCode -ne 0 -or $logText -notmatch 'Shutdown complete' -or
         $logText -notmatch 'wgpu renderer created' -or
-        $logText -match 'panicked|UNHANDLED EXCEPTION|wgr_create failed') { throw 'Puddle capture failed' }
+        $logText -match 'panicked|UNHANDLED EXCEPTION|wgr_create failed|Validation Error|DeviceLost') { throw 'Puddle capture failed' }
     foreach ($shot in $shots) { if (!(Test-Path -LiteralPath $shot)) { throw "Missing $shot" } }
     $capture = Get-Content -LiteralPath $metrics -Raw | ConvertFrom-Json
     if (@($capture.gpu_timings_ms | Where-Object { $_.name -eq 'Terrain: main colour' -and $_.milliseconds -ge 0 }).Count -ne 1) {

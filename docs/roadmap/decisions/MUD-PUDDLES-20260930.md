@@ -4,7 +4,7 @@ Oliver explicitly prioritised mud puddles and authorised parallel implementation
 `codex/streaming-residency` (`ed452be8`). The roadmap's earlier wet-surface ticket excludes
 puddles; this owner request authorises a focused extension rather than a broad hydrology
 or terrain-accumulation framework. The integrating root owns full build/deployment/runtime
-acceptance. This decision records source implementation and CPU/shader checks only.
+acceptance. This decision records source checks and the bounded installed results below.
 
 ## Implemented behavior
 
@@ -115,6 +115,54 @@ opaque road ribbon still renders its source terrain and is normally concealed by
 ribbon; no new ribbon-gap or transparency solution is claimed. The diagnostic candidate
 excludes the native road-cell mask rather than assuming a dirt-colored road is mud.
 
-Pending: matched full game build, installed startup/smoke, appearance comparison, timing,
-and Oliver's visual preference. Do not mark the broad wet-surface or puddle roadmap work
-accepted from this source-only slice.
+## Installed first-slice evidence
+
+Full matched game builds pass, followed by serial, normal-exit installed captures.
+Source `090a513e` was installed with a `+dirty` stamp because status documents and
+Cargo's unrelated generated lockfile change were present; rendering code was
+committed. Per-run provenance retains the actual stamp, hashes and source HEAD.
+The final clean installation is recorded by `DEPLOYED-FROM.txt`; code-identical
+documentation/runner commits do not retroactively rename these captures.
+
+Ignored evidence is under `build/terrain-puddles/`. `semantic-fixture-20260930-101738`
+logs all 22 native palette material identities and inherited BCR paths: **two**
+explicit Dirt materials qualify, while BeachGrass, forest, grass, seabed, pebbles,
+and other unknown/hard identities remain dry. The flat native candidate is
+`9481.25 2994.25 209.72 0 -18`, material 1,
+`Terrains/Common/Surfaces/Dirt_02.emat`. It is an open patch with two boulders,
+not a building interior. The earlier BeachGrass candidate is rejected evidence,
+not a puddle acceptance site.
+
+- `dirt-wet-20260930-102108` versus `dirt-dry-20260930-102243`: wet override
+  creates connected blue-grey sky-reflecting patches; dry control has no film.
+  Both retain ground detail. Objects cast shadows but are **not** reflected.
+  Both runs have an idle object preparer at the final cut. Terrain colour is
+  1.110 versus 1.003 ms in single snapshots, not a repeated median benchmark.
+- `dirt-aerial-20260930-103219`: same area from
+  `9481.25 3006.25 244.72 0 -86`; broad dark patches retain the ground boundary,
+  adjacent grass stays dry, and there are no bright fine sun points in inspected
+  stills. Scheduled capture sequence is not proof against every-frame glint.
+- `dirt-snow-20260930-103316`: `POSEIDON_SNOW_TEST_DEPTH=0.2`, wet override still
+  one. The covered ground is white and the puddle film disappears. The isolated
+  process setting does not change the owner's snow profile.
+- `dirt-master-off-20260930-103612`: wet override one with master enabled zero;
+  uploaded wetness is zero and the puddle layer is disabled for the process.
+- `dirt-weather-varying-20260930-102907-041e0e`: no forced rain or wetness
+  override. The harness uses real weather setters and acceleration 3 to bound
+  the lifecycle test. Captured rain 0.702 fills accumulated/uploaded wetness to
+  0.6833. Pause reports mission time 55.114 twice five wall-clock seconds apart;
+  diagnostic generation and last uploaded/accumulated samples remain identical.
+  After rain stops, actual density is zero and wetness falls to 0.5819 at
+  presentation simulation time 90.780. Normal exit, stamp and binary hashes
+  are retained. This proves fill/partial drying and clock freeze, not complete
+  drying, save/network state, rain collision or all-map roof coverage.
+
+The initial lifecycle attempt correctly rejected its own constant-full-rain
+assumption: actual weather had already decreased to 0.743 despite the immediate
+setter, while wetness reached 0.7007. The corrected runner admits varying real
+rain and retains its actual telemetry; no fixed-rain override was added to make
+the test pass.
+
+Pending: Oliver's preferred puddle contrast and grass appearance, repeated settled
+GPU measurements, camera-motion/shoreline/roof fixtures and map-generation breadth.
+Do not mark the broader wet-surface/hydrology roadmap complete from this slice.
