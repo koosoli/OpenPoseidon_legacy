@@ -36,6 +36,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/MapTypes.hpp>
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Scene/SurfaceDrawOrder.hpp>

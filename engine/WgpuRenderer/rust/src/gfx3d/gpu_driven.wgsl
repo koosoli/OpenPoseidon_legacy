@@ -1197,6 +1197,8 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         !(veg_cutout && foliage_screen_ao < 0.5),
         retained_snow_receiver(in), retained_snow_exposure(in),
         retained_tree_snow_cover(in),
+        false,
+        0.0,
     );
     // REN-ATM-001: read back what shade()'s apply_fog actually did to THIS fragment and bin it by
     // shader family. Placed immediately after shade() so nothing between the fog and the count can

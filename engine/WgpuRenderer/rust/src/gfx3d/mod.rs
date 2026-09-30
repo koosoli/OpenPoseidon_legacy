@@ -12719,7 +12719,7 @@ fn road_pixel_conform_reseats_onsurface_depth_per_fragment() {
     assert!(
         shader.contains("@location(7) conform_w: f32,")
             && shader.contains("conform_w = 1.0;")
-            && shader.contains("vec3<f32>(0.0), vec3<f32>(0.0), uv, instance, 0.0);"),
+            && shader.contains("vec3<f32>(0.0), vec3<f32>(0.0), uv, instance, 0.0, vec2<f32>(0.0));"),
         "conform_w must be 1 for pinned (conform_sel 2) vertices and 0 for skinned draws"
     );
     // Pipeline selection: Offset::Decal, plain path, knob on -> fs_surface; nothing else.

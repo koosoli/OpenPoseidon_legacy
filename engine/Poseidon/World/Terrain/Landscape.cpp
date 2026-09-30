@@ -1649,11 +1649,10 @@ float Landscape::BumpySurfaceY(float xC, float zC, float& rdX, float& rdY, Textu
     Texture* rTexture = ClippedTexture(z >> tLog, x >> tLog);
     bump = CalculateBump(xC, zC, rTexture, bumpy);
     texture = rTexture;
-    float mudDx = 0, mudDz = 0;
-    GMud.HeightGradientAt(xC, zC, mudDx, mudDz);
-    rdX += mudDx;
-    rdY += mudDz;
-    return y + GMud.HeightOffsetAt(xC, zC);
+    const auto mudGradient = GMud().HeightGradientAt(xC, zC);
+    rdX += mudGradient[0];
+    rdY += mudGradient[1];
+    return y + GMud().HeightOffsetAt(xC, zC);
 }
 
 void Landscape::SurfacePlane(Plane& plane, float xC, float zC) const
@@ -1703,13 +1702,12 @@ void Landscape::SurfacePlane(Plane& plane, float xC, float zC) const
         normal[2] = (y11 - y01) * -_invTerrainGrid;
     }
     Vector3 point((x + 1) * _terrainGrid, y01, z * _terrainGrid);
-    float mudDx = 0, mudDz = 0;
-    GMud.HeightGradientAt(xC, zC, mudDx, mudDz);
-    const float mudHeight = GMud.HeightOffsetAt(xC, zC);
-    if (mudHeight != 0 || mudDx != 0 || mudDz != 0)
+    const auto mudGradient = GMud().HeightGradientAt(xC, zC);
+    const float mudHeight = GMud().HeightOffsetAt(xC, zC);
+    if (mudHeight != 0 || mudGradient[0] != 0 || mudGradient[1] != 0)
     {
-        normal[0] -= mudDx;
-        normal[2] -= mudDz;
+        normal[0] -= mudGradient[0];
+        normal[2] -= mudGradient[1];
         // The original plane passes through the terrain-cell corner. A local
         // boot depression instead needs its tangent anchored at this query.
         point = Vector3(xC, SurfaceY(xC, zC), zC);

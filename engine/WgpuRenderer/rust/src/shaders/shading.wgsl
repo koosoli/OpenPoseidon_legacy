@@ -13,6 +13,7 @@
 #import lighting::lights_material_contrib
 #import color::srgb_to_linear
 #import frame::{interior_rain_reach, interior_rain_coverage}
+#import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_ripple_normal}
 #import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage}
 
 // Cosmetic coating uses the actual raised surface, never terrain snow_depth / ground shelter
@@ -188,6 +189,8 @@ fn shade(
     snow_eligible: bool,
     snow_baked_exposure: f32,
     tree_snow_cover: f32,
+    ground_surface: bool,
+    ground_snow_depth: f32,
 ) -> vec3<f32> {
     var albedo = albedo_in;
     var m_emissive = mat.emissive;
@@ -282,6 +285,16 @@ fn shade(
     // Long-range terrain sun-shadow: removes direct sun (diffuse+specular), keeps ambient/
     // emissive/local, sampled by absolute world position (world_pos is camera-relative).
     let world_abs = world_pos + frame.cam_pos.xyz;
+    let ground_footprint = max(length(dwx.xz), length(dwy.xz));
+    var rain_puddle = 0.0;
+    if (ground_surface && linear > 0.5 && !is_foliage && !is_cockpit && snow_cover == 0.0) {
+        rain_puddle = ground_puddle_mask(world_abs.xz, ground_footprint, frame.ground_weather.x)
+            * ground_puddle_land_factor(surface_normal(geo_normal, world_pos, dwx, dwy).y,
+                world_abs.y, frame.ground_weather.z, ground_snow_depth)
+            * interior_rain_coverage(world_abs)
+            * smoothstep(0.6, 0.95, interior_rain_reach(world_abs));
+        albedo *= 1.0 - rain_puddle * 0.38;
+    }
     let terrain_s = terrain_sun_shadow(world_abs.xz, world_abs.y);
     let sun_occ = select(terrain_s, max(terrain_s, csm_s), sky_lit);
     // CLD-020: cloud transmittance MULTIPLIES the remaining direct sun rather than joining the
@@ -599,6 +612,21 @@ fn shade(
     // direct sun in shadow above, so it must not double-darken here.
     if (!sky_lit) {
         rgb *= mix(1.0, frame.shadow.ctlb.y, csm_s);
+    }
+    if (rain_puddle > 0.0) {
+        let view = normalize(-world_pos);
+        let water_n = ground_puddle_ripple_normal(world_abs.xz, frame.ground_weather.w,
+            frame.ground_weather.y, ground_footprint);
+        let grazing = 1.0 - clamp(dot(water_n, view), 0.0, 1.0);
+        let fresnel = 0.02 + 0.78 * pow(grazing, 5.0);
+        var reflected = m_sun_ambient;
+        if (sky_lit) {
+            reflected = sky_irradiance(reflect(-view, water_n)) * frame.sun_ambient.w
+                * sky_vis_ao(world_abs.xz) * interior_sky_reach(world_abs);
+        }
+        let half_vector = normalize(view - frame.sun_dir_world.xyz + vec3<f32>(0.0, 1e-4, 0.0));
+        reflected += frame.sun_diffuse.rgb * pow(max(dot(water_n, half_vector), 0.0), 48.0) * sun_vis;
+        rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel, rain_puddle);
     }
     // Debug: the raw AO buffer as greyscale, BEFORE fog — shipped alongside the effect because
     // judging AO through sun + SH ambient + fog + tonemap is far harder than looking at the

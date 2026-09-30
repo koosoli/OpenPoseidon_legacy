@@ -14,6 +14,7 @@ fn tree_snow_cover_depth(crown_height: f32, depth: f32, exposure: f32) -> f32 {
 #ifdef DISABLE_TREE_SNOW
     return 0.0;
 #else
+    if (crown_height <= 0.0 || depth <= 0.002 || exposure <= 0.0) { return 0.0; }
     // Card normals describe modeled leaves, not the upper canopy envelope.
     // Keep them intact for lighting, alpha/depth and wind; do not create noisy
     // powder normals or view-facing coat masks on these subpixel cards.

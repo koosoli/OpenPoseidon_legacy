@@ -585,7 +585,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (alpha_ref > 0.0) {
         census(1u);
     }
-    return shade_fragment(in);
+    return shade_fragment(in, false);
 }
 
 #ifdef EARLY_DEPTH
@@ -598,7 +598,7 @@ fn fs_main_early(in: VsOut) -> @location(0) vec4<f32> {
     if (alpha_ref > 0.0) {
         census(1u);
     }
-    return shade_fragment(in);
+    return shade_fragment(in, false);
 }
 #endif
 
@@ -633,7 +633,7 @@ fn fs_surface(in: VsOut) -> SurfaceOut {
         out.depth = 1.0; // reversed-Z near plane: wins every comparison
         return out;
     }
-    out.color = shade_fragment(in);
+    out.color = shade_fragment(in, in.conform_w > 0.99);
     // The road's distance-scaled depth lift is not physical elevation. Do not let
     // it pull a ground-pinned road/decal through an opaque snow cover. Tracks and
     // roof shelter use the same deficit buffer as the terrain; rigid bridges stay.
@@ -802,7 +802,7 @@ fn direct_tree_snow_cover(in: VsOut) -> f32 {
     return tree_snow_coverage(in.world_pos, in.tree_snow.x, in.tree_snow.y);
 }
 
-fn shade_fragment(in: VsOut) -> vec4<f32> {
+fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // Derivatives must run in uniform control flow — before the discard.
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
@@ -1147,6 +1147,8 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
         !(veg_cutout && foliage_screen_ao < 0.5),
         direct_snow_receiver(in), 0.0,
         direct_tree_snow_cover(in),
+        ground_surface,
+        select(0.0, snow_depth(in.world_pos.xz + frame.cam_pos.xz), ground_surface),
     );
     // REN-ATM-001: the per-draw twin of gpu_driven.wgsl's atmosphere census -- same words, same
     // witness. Both paths draw vegetation (retained trees go GPU-driven, scripted/near ones do

@@ -434,7 +434,7 @@ mod tests {
         // Shading computes derivatives before the conditional discard.
         let start = shader.find("fn fs_surface(").unwrap();
         let surface = &shader[start..shader[start..].find("fn surface_pixel_depth(").unwrap() + start];
-        assert!(surface.find("out.color = shade_fragment(in);").unwrap() < surface.find("snow_depth(").unwrap());
+        assert!(surface.find("out.color = shade_fragment(in, in.conform_w > 0.99);").unwrap() < surface.find("snow_depth(").unwrap());
     }
 
     #[test]

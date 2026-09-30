@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Camera,
+    [switch]$LegacyCwa,
+    [ValidateSet('eden','noe')][string]$World = 'eden',
     [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label = 'native-weather',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
     [string]$NativeAddons = 'C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons'
@@ -18,7 +20,15 @@ foreach ($token in $numbers) {
 }
 $root = Split-Path -Parent $PSScriptRoot
 $mission = Join-Path $root 'tests/perf/missions/perf_field.eden'
-foreach ($path in @($mission, $NativeAddons)) {
+if ($World -ne 'eden' && !$LegacyCwa) { throw 'Non-Everon mission requires LegacyCwa.' }
+if ($World -eq 'noe') {
+    $mission = Join-Path $root 'build/puddle-weather-fixture/perf_field.noe'
+    New-Item -ItemType Directory -Force -Path $mission | Out-Null
+    Copy-Item -LiteralPath (Join-Path $root 'tests/perf/missions/perf_field.eden/mission.sqm') -Destination (Join-Path $mission 'mission.sqm')
+}
+$requiredPaths = @($mission)
+if (!$LegacyCwa) { $requiredPaths += $NativeAddons }
+foreach ($path in $requiredPaths) {
     if (!(Test-Path -LiteralPath $path)) { throw "Required native fixture path missing: $path" }
 }
 function Installed-State {
@@ -37,10 +47,10 @@ $output = Join-Path $root ('build/terrain-puddles/' + $Label + '-' + (Get-Date -
 $privateProfile = Join-Path $output 'user'
 New-Item -ItemType Directory -Force -Path $privateProfile | Out-Null
 $log = Join-Path $output 'engine.log'
-$result = [ordered]@{ status = 'running'; scope = 'installed native rain/pause/partial-drying lifecycle; no appearance or performance acceptance';
+$result = [ordered]@{ status = 'running'; scope = 'installed rain growth/ripples/pause/partial-drying lifecycle; captures require visual acceptance';
     camera = ($numbers -join ' '); before = $before; samples = @{}; screenshots = @(); error = $null }
 @{ scriptSha256 = (Get-FileHash -LiteralPath $PSCommandPath).Hash; sourceHead = (& git -C $root rev-parse HEAD);
-   installed = $before; mission = $mission; nativeAddons = $NativeAddons; camera = ($numbers -join ' ');
+   installed = $before; mission = $mission; legacyCwa = [bool]$LegacyCwa; world = $World; nativeAddons = $NativeAddons; camera = ($numbers -join ' ');
    lockOwner = $env:LOCK_OWNER; forcedRain = $false; wetnessOverride = $false } |
     ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'provenance.json')
 $keys = @('POSEIDON_USER_DIR', 'POSEIDON_REFORGER_WORLD', 'POSEIDON_REFORGER_OBJECTS', 'POSEIDON_REFORGER_STREAM',
@@ -110,14 +120,16 @@ function Screenshot([string]$name) {
 try {
     $env:POSEIDON_USER_DIR = $privateProfile
     $env:POSEIDON_REFORGER_WORLD = 'worlds/eden'; $env:POSEIDON_REFORGER_OBJECTS = '1'; $env:POSEIDON_REFORGER_STREAM = '1'
+    if ($LegacyCwa) { Remove-Item Env:POSEIDON_REFORGER_WORLD, Env:POSEIDON_REFORGER_OBJECTS, Env:POSEIDON_REFORGER_STREAM -ErrorAction SilentlyContinue }
     Remove-Item Env:POSEIDON_TEST_RAIN, Env:WGR_TERRAIN_PUDDLE_WETNESS -ErrorAction SilentlyContinue
     $env:WGR_TERRAIN_PUDDLE_FIXTURE = '1'; $env:WGR_TERRAIN_PUDDLES = '1'
     [IO.File]::WriteAllText((Join-Path $privateProfile 'graphics.cfg'), "qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $listener.Start(); $port = $listener.LocalEndpoint.Port; $listener.Stop()
     $launchArguments = @('--render=wgpu', '--window', '--dev', '--width', '1280', '--height', '720', '--vd', '2000',
-        '--harness', "$port", '--test-mission', ('"' + $mission + '"'), '--test-world', ('"' + $NativeAddons + '"'),
-        '--test-world-hour', '16', '--test-world-freefly') + $numbers + @('--log-file', ('"' + $log + '"'))
+        '--harness', "$port", '--test-mission', ('"' + $mission + '"'))
+    if (!$LegacyCwa) { $launchArguments += @('--test-world', ('"' + $NativeAddons + '"')) }
+    $launchArguments += @('--test-world-hour', '16', '--test-world-freefly') + $numbers + @('--log-file', ('"' + $log + '"'))
     $p = Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $launchArguments
     $null = $p.Handle; $result.processId = $p.Id
     $until = [DateTime]::UtcNow.AddSeconds(120)
@@ -136,15 +148,28 @@ try {
     Start-Sleep -Seconds 12
     $pose = Send @{ cmd = 'eval'; code = ('triFreeFlyPose "' + ($numbers -join ' ') + '"') }
     if ($pose.result -notmatch 'OK') { throw 'Candidate camera pose refused.' }
-    $null = Send @{ cmd = 'exec'; code = 'player allowDamage false; 0 setFog 0; 0 setOvercast 1; 0 setRain 1; setAccTime 3' }
+    $null = Send @{ cmd = 'exec'; code = 'player allowDamage false; 0 setFog 0; 0 setOvercast 0; 0 setRain 0; setAccTime 1' }
+    Start-Sleep -Seconds 2
+    $result.screenshots += Screenshot 'dry'
+    $result.samples.dry = Weather-Sample
+    $null = Send @{ cmd = 'exec'; code = '0 setOvercast 1; 0 setRain 1; setAccTime 3' }
     $rainStart = Simulation-Time
-    Start-Sleep -Seconds 15
+    Start-Sleep -Seconds 5
+    $result.screenshots += Screenshot 'growing'
+    $result.samples.growing = Weather-Sample
+    Start-Sleep -Seconds 10
     $result.screenshots += Screenshot 'wet'
     $wet = Weather-Sample; $result.samples.wet = $wet
     # Ordinary weather interpolates toward its next forecast even after an
     # immediate setRain. Require meaningful actual rain rather than a frozen
     # full-rain override; recorded samples retain the actual observed density.
     if ($wet.time -le $rainStart -or $wet.rain -lt 0.3 -or $wet.accumulated -le 0.3) { throw 'Actual rain did not fill terrain wetness above 0.3.' }
+    if ($wet.accumulated -le $result.samples.growing.accumulated) { throw 'Puddle water history did not continue growing in real rain.' }
+    $null = Send @{ cmd = 'exec'; code = 'setAccTime 1' }
+    for ($i=0; $i -lt 4; ++$i) {
+        Start-Sleep -Milliseconds 200
+        $result.screenshots += Screenshot ('rain-ripple-' + $i)
+    }
     $null = Send @{ cmd = 'exec'; code = 'setAccTime 0' }
     Start-Sleep -Seconds 1
     $pauseTimeA = Simulation-Time

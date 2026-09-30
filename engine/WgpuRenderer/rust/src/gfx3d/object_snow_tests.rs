@@ -382,9 +382,9 @@ fn owned_cutout_snow_keeps_base_alpha_discard_and_a2c_silhouette() {
     let direct = include_str!("shader3d.wgsl");
     let retained = include_str!("gpu_driven.wgsl");
     let direct_receiver = &direct[direct.find("fn direct_snow_receiver").unwrap()
-        ..direct.find("fn shade_fragment").unwrap()];
+        ..direct.find("fn direct_tree_snow_cover").unwrap()];
     let retained_receiver = &retained[retained.find("fn retained_snow_receiver").unwrap()
-        ..retained.find("fn retained_snow_exposure").unwrap()];
+        ..retained.find("fn retained_tree_snow_cover").unwrap()];
     assert!(!direct_receiver.contains("alpha_ref"));
     assert!(!retained_receiver.contains("alpha_ref"));
     assert!(direct_receiver.contains("translucent <= 0.5"));
