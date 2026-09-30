@@ -93,14 +93,15 @@ inline bool EligibleNativeSurface(std::string_view semanticName)
 }
 
 inline bool EligibleLegacySurface(std::string_view semanticName, std::string_view filePattern,
-                                  std::string_view soundEnvironment)
+                                  std::string_view soundEnvironment, std::string_view character = {})
 {
     // Retail CWA's cultivated soil is authored as Field/files=pol/sound=dirt.
-    // Require all three statements: Field alone can describe crops/grass in mods,
+    // Require all three statements and the stock absence of clutter character:
+    // Field alone can describe crops/grass in mods,
     // and Village/bah and MudBuilding/hlinasterk are not bare muddy terrain.
     // Native and authored multi-surface policies retain their own classifiers.
     return EligibleSurface(semanticName) ||
-           (semanticName == "Field" && filePattern == "pol" && soundEnvironment == "dirt");
+           (semanticName == "Field" && filePattern == "pol" && soundEnvironment == "dirt" && character.empty());
 }
 
 // Cosmetic accumulation; no gameplay material or water-depth mutation. Uses the

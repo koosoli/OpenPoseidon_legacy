@@ -8,8 +8,9 @@ Clay. Its bare cultivated soil is authored as `CfgSurfaces/Field` with
 `eden/pol.paa` image is predominantly brown cultivated soil with small green
 edging; both root and the source-audit agent inspected its decoded 128x128 image.
 
-Admit this **exact three-part legacy identity**: class `Field`, file pattern
-`pol`, sound environment `dirt`. Field name alone, dirt sound alone, translated
+Admit this **exact legacy identity**: class `Field`, file pattern
+`pol`, sound environment `dirt`, and no clutter `character` (matching stock).
+Field name alone, dirt sound alone, translated
 texture-name guesses, altered patterns or missing/conflicting metadata remain
 insufficient. Each of the existing four terrain texture quadrants must still
 qualify; mixed tiles remain dry. Native semantic and authored A3 source-slot
@@ -72,6 +73,17 @@ There are 30 pol cell centres with source normal Y >=0.9995 and 79 with normal Y
 These are candidate flatness counts, not pixel acceptance, and do not assert
 that every admitted cell or every muddy part of the original map is covered.
 Fields from other maps/mods qualify only if all exact metadata statements match.
+
+The cached stock character string is empty. A mod retaining the other three
+strings but adding any clutter character remains excluded by this exception;
+explicit existing Mud admission retains its prior character behaviour.
+
+Nearby pure Grass negative controls are source cells `(128,142)` and `(129,143)`:
+centres `(6425,7125)` and `(6475,7175)`, both texture index 11 `eden/tn.paa`.
+All four quadrant classes are Grass and all four height nodes are 141.8849945068.
+Either overhead camera uses its own runtime height +5 and elevation -85, inside
+the 17.5 metre source-pure interior; nearby Field weights remain zero there.
+These are scene candidates, not a claim that objects cannot occlude the terrain.
 
 ## Source provenance and reproduction
 

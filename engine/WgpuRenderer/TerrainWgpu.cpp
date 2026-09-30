@@ -613,7 +613,7 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             for (int q = 0; allMud && q < 4; ++q)
                 allMud = quadrants[q] != nullptr &&
                     TerrainPuddles::EligibleLegacySurface(quadrants[q]->_class.Data(), quadrants[q]->_name.Data(),
-                                                         quadrants[q]->_soundEnv.Data());
+                                                         quadrants[q]->_soundEnv.Data(), quadrants[q]->_character.Data());
             if (allMud) material.puddle_flags = 1u;
         }
         if (material.puddle_flags != 0u) ++puddleMaterials;
