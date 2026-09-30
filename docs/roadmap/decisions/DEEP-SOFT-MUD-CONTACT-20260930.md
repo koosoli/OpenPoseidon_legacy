@@ -44,3 +44,26 @@ contact plumbing only; decimetre installed boot support, covered negative,
 rendered wet appearance, repeat compression and runtime cost remain pending.
 No full-map muddy lowering, fluid transport or arbitrary native-source support
 is claimed.
+
+### Integrated and installed deep-layer proof
+
+Root integrates the0.35m renderer header, actual GPU terrain/conform deep-height
+probes and physical Landscape heights/gradients in matching06a7c41e. The full
+engine build and609 serial Rust checks pass (two existing ignored). Installed
+`build/mud-footprints/noe-deep-slowcovered-20260930-214412-f119f5` passes:
+real stock Nogova soil walking4.310m,364 negative physical samples with minimum
+-0.199584m, exact physical height/gradient agreement, actual boot trace pressure
+at wetness0.92, paused state and exact camera-return grid, normal exit0 and
+unchanged installed pair. The actor's final physical support gap is2.45mm while
+standing in the deformed lane. Under the actual lifted stock roof,0.750m real
+walking leaves0 chunks and uniform wetness0; after roof removal actual uniform
+wetness reaches0.081998 under visible liquid particles.
+
+Root inspected dry and wet-close captures: broad supporting soil compression
+and darker wet material remain visible beneath boot details. These are
+descriptive appearance checks; actor position and wet shading differ, so they
+do not isolate a material-only pixel measurement. Exact byte-identical wet
+camera-return images additionally confirm persistence in this paused control.
+The earlier fast-poll covered run remains failed. Repeat installed compression,
+hard-ground/border/snow negatives, other maps, general cost and fluid transport
+remain open; the successful supported0.24m layer is not whole-map lowering.
