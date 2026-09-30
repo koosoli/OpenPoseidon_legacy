@@ -110,10 +110,16 @@ try {
     Capture 'real-rain-standing-water'
     $paused=Send @{cmd='dev_rain_water';action='state'}
     Require ($paused.revision -eq $wet.revision -and $paused.generation -eq $wet.generation -and $paused.volume -eq $wet.volume) 'Pause/camera/sample changed simulation water.'
-    Exec '0 setRain 0; setAccTime 8'
+    # Original weather deliberately regenerates rain under storm cloud. Leave
+    # the storm before measuring drainage; query the actual liquid rain gate.
+    Exec '0 setOvercast 0.6; 0 setRain 0; setAccTime 1'
+    Start-Sleep -Seconds 1;Exec 'setAccTime 0'
+    $stopWeather=Send @{cmd='weather_visibility'};Require ($stopWeather.liquidRain -eq 0) 'Storm has not actually stopped raining.'
+    $stop=Send @{cmd='dev_rain_water';action='state'};$result.gates.rainStopped=$stop
+    Exec 'setAccTime 8'
     Start-Sleep -Seconds 16;Exec 'setAccTime 0'
     $drain=Send @{cmd='dev_rain_water';action='state'};$result.gates.drain=$drain
-    Require ($drain.rainVolume -eq $wet.rainVolume -and $drain.volume -lt $wet.volume -and $drain.volume -gt 0) 'Actual rainwater did not gradually drain after rain.'
+    Require ($drain.rainVolume -eq $stop.rainVolume -and $drain.volume -lt $stop.volume -and $drain.volume -gt 0) 'Actual rainwater did not gradually drain after rain.'
     Capture 'after-rain-retained-water'
     Exec '0 setOvercast 0; setAccTime 8'
     Start-Sleep -Seconds 16;Exec 'setAccTime 0'
@@ -130,5 +136,5 @@ finally {
     $result.after=Pair;Require ($result.before.stamp -ceq $result.after.stamp -and $result.before.exe -ceq $result.after.exe -and $result.before.dll -ceq $result.after.dll) 'Installed pair changed during test.'
     foreach($key in $keys) {[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}
     $result|ConvertTo-Json -Depth 12|Set-Content (Join-Path $output 'result.json')
-    Write-Host "Actual player evidence: $output"
+    Write-Host "Actual rainwater evidence: $output"
 }
