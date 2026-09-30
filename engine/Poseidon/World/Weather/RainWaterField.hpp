@@ -18,6 +18,16 @@ public:
     static constexpr size_t MaxCells = 1024 * 1024;
     struct Sample { float depth = 0, height = 0, flowX = 0, flowZ = 0; bool valid = false; };
     struct Budget { double rain = 0, infiltration = 0, evaporation = 0, outlet = 0; };
+    struct SourceGrid { int side = 0, stride = 0; float spacing = 0; };
+    static SourceGrid AlignedSourceGrid(int range, float spacing) {
+        if (range < 2 || !std::isfinite(spacing) || spacing <= 0) return {};
+        int64_t stride = 1;
+        const int64_t last = static_cast<int64_t>(range)-1;
+        while ((last+stride-1)/stride+1 > 513) stride *= 2;
+        const float outputSpacing = spacing*static_cast<float>(stride);
+        if (!std::isfinite(outputSpacing)) return {};
+        return {static_cast<int>((last+stride-1)/stride+1),static_cast<int>(stride),outputSpacing};
+    }
 
     bool Configure(int width, int height, float spacing, std::vector<float> bed,
                    float originX = 0, float originZ = 0, float seaLevel = 0)
@@ -74,7 +84,13 @@ public:
             return a * (1-fz) + b * fz;
         };
         const float depth = interpolate(_depth);
-        return {depth, interpolate(_bed) + depth, interpolate(_flowX), interpolate(_flowZ), true};
+        // Match Landscape::SurfaceY's actual terrain triangle diagonal. A
+        // bilinear bed creates an artificial saddle between four corner heights.
+        const float y00=_bed[Index(ix,iz)], y01=_bed[Index(ix+1,iz)];
+        const float y10=_bed[Index(ix,iz+1)], y11=_bed[Index(ix+1,iz+1)];
+        const float bed = fx+fz <= 1 ? y00+(y01-y00)*fx+(y10-y00)*fz
+            : y11+(y10-y11)*(1-fx)+(y01-y11)*(1-fz);
+        return {depth, bed + depth, interpolate(_flowX), interpolate(_flowZ), true};
     }
     double Volume() const {
         double sum = 0; for (float d : _depth) sum += d;

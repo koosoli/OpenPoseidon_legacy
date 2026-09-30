@@ -772,15 +772,17 @@ void World::SimulateCloudlets(float deltaT)
         if (terrainRange >= 2 && std::isfinite(extent) && extent > 0 &&
             (runoff.Width() != 0 || liquidRain > 0))
         {
-            // Actual source resolution on stock OFP terrain; modern huge worlds
-            // use a bounded catchment grid. No world-name/material whitelist.
-            const int side = std::min(terrainRange, 512);
-            const float spacing = extent / (side - 1);
+            // Keep source vertices aligned through native terrain subdivision.
+            // The bounded grid uses a power-of-two stride, never a stretched
+            // spacing that moves every sample away from the authored triangles.
+            const auto grid = RainWaterField::AlignedSourceGrid(terrainRange,GLandscape->GetTerrainGrid());
+            const int side = grid.side;
+            const float spacing = grid.spacing;
             if (runoff.Width() == 0)
             {
                 std::vector<float> bed(static_cast<size_t>(side) * side);
                 for (int z=0; z<side; ++z) for (int x=0; x<side; ++x)
-                    bed[static_cast<size_t>(z)*side+x] = GLandscape->SurfaceY(x*spacing,z*spacing);
+                    bed[static_cast<size_t>(z)*side+x] = GLandscape->ClippedData(z*grid.stride,x*grid.stride);
                 if (runoff.Configure(side,side,spacing,std::move(bed),0,0,GLandscape->GetSeaLevel()))
                 {
                     bedRevision = GLandscape->HeightRevision();
@@ -793,7 +795,7 @@ void World::SimulateCloudlets(float deltaT)
                 // Real craters/terrain edits change the bed while retained water
                 // volume survives. A new outlet then drains through normal flow.
                 for (int z=0; z<side; ++z) for (int x=0; x<side; ++x)
-                    runoff.SetBed(x,z,GLandscape->SurfaceY(x*spacing,z*spacing));
+                    runoff.SetBed(x,z,GLandscape->ClippedData(z*grid.stride,x*grid.stride));
                 bedRevision = GLandscape->HeightRevision();
             }
             const auto* sun = _scene.MainLight();

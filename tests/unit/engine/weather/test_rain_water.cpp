@@ -7,6 +7,18 @@ static void advance(RainWaterField& f,float duration,float rain,float sun=0) {
     for(int i=0;i<int(duration*4);++i) f.Advance(.25f,rain,sun);
 }
 int main() {
+    const auto native=RainWaterField::AlignedSourceGrid(2048,6.25f);
+    assert(native.side==513 && native.stride==4 && native.spacing==25);
+    const auto stock=RainWaterField::AlignedSourceGrid(256,50);
+    assert(stock.side==256 && stock.stride==1 && stock.spacing==50);
+    assert(!RainWaterField::AlignedSourceGrid(1,50).side);
+    assert(!RainWaterField::AlignedSourceGrid(256,std::numeric_limits<float>::infinity()).side);
+    RainWaterField triangle;
+    assert(triangle.Configure(2,2,1,{10,10,10,14}));
+    assert(triangle.At(.25f,.25f).height==10); // no artificial bilinear saddle
+    assert(triangle.At(.75f,.75f).height==12);
+    assert(triangle.AddWater(1,1,.4f));
+    assert(std::abs(triangle.At(.25f,.25f).depth-.025f)<1e-6f);
     RainWaterField bowl;
     assert(bowl.Configure(9,9,1,std::vector<float>(81,10),0,0,0));
     for(int z=1;z<8;++z) for(int x=1;x<8;++x) {
