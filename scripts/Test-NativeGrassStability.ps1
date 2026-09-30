@@ -71,14 +71,14 @@ New-Item -ItemType Directory -Path $user -Force | Out-Null
 & "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $user -DlssMode 0 -MsaaSamples 4
 
 $pairPaths = @('OpenPoseidon.exe','wgpu_renderer.dll','DEPLOYED-FROM.txt') | ForEach-Object { Join-Path $GameDir $_ }
+$stamp = Get-Content -LiteralPath $pairPaths[2] -Raw
+if ([string]::IsNullOrWhiteSpace($stamp)) { throw 'Installed pair has an empty deployment stamp' }
 $beforeHashes = @(Get-FileHash -LiteralPath $pairPaths -Algorithm SHA256)
 # Serialize scalar records, avoiding PowerShell 5.1's traversal of FileHash
 # extended properties (including provider metadata) at deeper JSON levels.
 $hashRecords = @($beforeHashes | ForEach-Object {
     @{path=[string]$_.Path; sha256=[string]$_.Hash; algorithm='SHA256'}
 })
-$stamp = Get-Content -LiteralPath $pairPaths[2] -Raw
-if ([string]::IsNullOrWhiteSpace($stamp)) { throw 'Installed pair has an empty deployment stamp' }
 $inheritedWind = [Environment]::GetEnvironmentVariable('POSEIDON_WIND_OVERRIDE', 'Process')
 $settings = @{
     POSEIDON_USER_DIR=$user; POSEIDON_VSYNC='0';
