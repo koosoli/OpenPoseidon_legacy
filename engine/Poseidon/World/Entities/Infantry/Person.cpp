@@ -155,6 +155,13 @@ void Person::Simulate(float deltaT, SimulationImportance prec)
         const Vector3 origin = AimingPosition() + Vector3(0.0f, 0.15f, 0.0f);
         GLandscape->ObjectCollision(hits, nullptr, this, origin, origin + Vector3(0.0f, 30.0f, 0.0f),
                                    0.05f, ObjIntersectFire);
+        // Bullet-permeable covers can still stop rain. Stock CampEastC has
+        // an explicitly empty FireGeometry LOD, but a closed ViewGeometry roof;
+        // ShapeLOD falls back only for an absent LOD, not an empty authored one.
+        // Preserve existing fire hits, then include view blockers (also glass).
+        if (hits.Size() == 0)
+            GLandscape->ObjectCollision(hits, nullptr, this, origin, origin + Vector3(0.0f, 30.0f, 0.0f),
+                                       0.05f, ObjIntersectView);
         _uniformRainSheltered = hits.Size() > 0;
         _uniformWetnessProbeDue = 1.0f;
     }
