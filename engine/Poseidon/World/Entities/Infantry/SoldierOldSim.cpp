@@ -1541,7 +1541,7 @@ void Man::Sound(bool inside, float deltaT)
         unsigned& rows = puddleStep ? positiveRows : refusalRows;
         if (puddleTrace && rows++ < 128)
             LOG_INFO(Graphics, "PUDDLE_STEP model={} env={} reason={} depth={:.4f} height={:.3f} support={:.3f} sole={:.3f},{:.3f},{:.3f} source={} wave={} eventMs={} timeMs={} readonly=true",
-                     _shape ? _shape->Name().Data() : "", surface.Data(), puddleReason,
+                     _shape ? _shape->Name() : "", surface.Data(), puddleReason,
                      water.depth, water.height, support, sole.position[0], sole.position[1], sole.position[2],
                      pars->name.Data(), _soundStep != nullptr, sole.timeMs, Glob.time.toInt());
         _doSoundStep = false;
