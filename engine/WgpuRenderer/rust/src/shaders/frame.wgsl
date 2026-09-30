@@ -171,6 +171,15 @@ struct Frame {
     // Shared ground film: retained rain wetness, effective liquid rain, sea level, simulation time.
     // Renderer-private tail; the public WgrCamera layout is unchanged.
     ground_weather: vec4<f32>,
+    // Physical vertical weather depth, independent of artistic sky/AO settings.
+    // Absolute-world matrix of the map actually recorded before colour this frame.
+    weather_vp: mat4x4<f32>,
+    // ready, vertical bias in NDC, edge safety margin in UV, physical feature active.
+    // Pending/aborted/disabled maps are ready=0 and provide no exposure proof.
+    weather_cover: vec4<f32>,
+    // This physical cull's actual GPU counters: opaque args, cutout args,
+    // total record reservations, per-variant argument capacity. No fragment storage.
+    weather_gpu: vec4<u32>,
 };
 
 // REN-TEMP-001D helpers. Material/albedo/normal/cutout sampling uses `mip_bias()` via
@@ -394,6 +403,7 @@ struct SurfaceRays {
 };
 @group(0) @binding(16) var<uniform> surface_rays: SurfaceRays;
 @group(0) @binding(17) var monitor_scene: texture_2d<f32>;
+@group(0) @binding(18) var weather_depth_map: texture_depth_2d;
 
 // Diffuse sky irradiance for a world-space surface normal, from the SH-9 sky projection
 // (Ramamoorthi, "An Efficient Representation for Irradiance Environment Maps"), divided by PI so
@@ -870,11 +880,12 @@ fn interior_sky_reach(world_abs: vec3<f32>) -> f32 {
 // their cosine-weighted diffuse reach is then ~0.72, not proof of rain access.
 // Reuse the existing zenith depth layer and its filtered geometry comparison.
 // Artistic ambient strength/floor and tilted directions do not affect rain.
-// No map, outside coverage, and its feathered edge retain the lighting map's
-// open fallback: this bounded cosmetic query is not a world rain collider.
+// The near map retains its legacy OPEN edge internally. The separate physical
+// map below removes that feather before blending; absent active-map proof closes
+// the query outside near coverage. This remains bounded rendered geometry.
 // Coverage proof separate from the lighting map's OPEN fallback. Snow on a raised surface
 // must not interpret a disabled/out-of-box map as proof that an interior floor is outdoors.
-fn interior_rain_coverage(world_abs: vec3<f32>) -> f32 {
+fn near_rain_coverage(world_abs: vec3<f32>) -> f32 {
     if (frame.skyvis.x < 0.5) { return 0.0; }
     let clip = frame.skyvis_vp[0] * vec4<f32>(world_abs, 1.0);
     if (clip.z < 0.0 || clip.z > 1.0) { return 0.0; }
@@ -883,7 +894,45 @@ fn interior_rain_coverage(world_abs: vec3<f32>) -> f32 {
     return smoothstep(0.0, 0.05, edge);
 }
 
+fn weather_map_coverage(world_abs: vec3<f32>) -> f32 {
+    if (frame.weather_cover.x < 0.5) { return 0.0; }
+    if (frame.weather_gpu.w > 0u && (frame.weather_gpu.x > frame.weather_gpu.w ||
+        frame.weather_gpu.y > frame.weather_gpu.w || frame.weather_gpu.z > 2u * frame.weather_gpu.w)) {
+        return 0.0; // actual retained output overflow cannot certify physical openness
+    }
+    let clip = frame.weather_vp * vec4<f32>(world_abs, 1.0);
+    if (clip.z < 0.0 || clip.z > 1.0) { return 0.0; }
+    let uv = vec2<f32>(clip.x * 0.5 + 0.5, -clip.y * 0.5 + 0.5);
+    let edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+    // Unknown/outside never becomes open. Keep taps inside the rendered extent.
+    return select(0.0, 1.0, edge >= frame.weather_cover.z);
+}
+
+fn weather_map_reach(world_abs: vec3<f32>) -> f32 {
+    if (weather_map_coverage(world_abs) < 0.5) { return 0.0; }
+    let clip = frame.weather_vp * vec4<f32>(world_abs, 1.0);
+    let uv = vec2<f32>(clip.x * 0.5 + 0.5, -clip.y * 0.5 + 0.5);
+    return textureSampleCompareLevel(weather_depth_map, shadow_samp, uv,
+        clip.z - frame.weather_cover.y);
+}
+
+fn interior_rain_coverage(world_abs: vec3<f32>) -> f32 {
+    return max(near_rain_coverage(world_abs), weather_map_coverage(world_abs));
+}
+
 fn interior_rain_reach(world_abs: vec3<f32>) -> f32 {
+    if (weather_map_coverage(world_abs) > 0.5) {
+        let far_reach = weather_map_reach(world_abs);
+        let near_coverage = near_rain_coverage(world_abs);
+        if (near_coverage <= 0.0) { return far_reach; }
+        // Remove artistic OPEN feather before blending the physical maps.
+        let near_feather = interior_sky_reach_dir(world_abs, vec3<f32>(0.0, 1.0, 0.0), 0);
+        let near_raw = clamp((near_feather - (1.0 - near_coverage)) / near_coverage, 0.0, 1.0);
+        return mix(far_reach, near_raw, near_coverage);
+    }
+    if (frame.weather_cover.w > 0.5 && near_rain_coverage(world_abs) <= 0.0) {
+        return 0.0; // active physical query with no submitted map proof
+    }
     if (frame.skyvis.x < 0.5) {
         return 1.0;
     }

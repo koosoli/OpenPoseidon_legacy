@@ -99,6 +99,7 @@ fn rain_cover_gpu_uses_zenith_not_diffuse_window_light() {
             wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&sampler) },
             wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&sample_view) },
+            wgpu::BindGroupEntry { binding: 18, resource: wgpu::BindingResource::TextureView(&layer_views[0]) },
         ],
     });
     let results = device.create_bind_group(&wgpu::BindGroupDescriptor {

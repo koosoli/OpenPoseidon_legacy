@@ -22,6 +22,7 @@
 
 // Pipeline-overridable constants (kept out of a per-draw binding), same as shader3d.
 override linear: f32 = 0.0;
+override weather_depth: f32 = 0.0; // dedicated physical map only
 override foliage_shadow_ao: f32 = 0.35;
 // 1 = alpha-to-coverage active on this (single) GPU-driven pipeline under MSAA. The set mixes
 // opaque + cutout sections, so cutout-ness is decided per-fragment (sm.alpha_ref > 0, uniform
@@ -685,6 +686,9 @@ fn vs_gpu(
     }
     var out: VsOut;
     out.clip = reverse_z(frame.proj * frame.view * vec4<f32>(world_pos, 1.0));
+    if (weather_depth > 0.5) {
+        out.clip = frame.weather_vp * vec4<f32>(world_pos + frame.cam_pos.xyz, 1.0);
+    }
     out.uv = uv;
     out.uv1 = uv1;
     out.world_pos = world_pos;
@@ -1305,6 +1309,19 @@ fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
     // direction gives view space (matches shader3d::fs_prepass).
     let n_view = (frame.view * vec4<f32>(snow_surface_n, 0.0)).xyz;
     return oct_encode(normalize(n_view));
+}
+
+// Actual retained material alpha and authored wind; no shading/target sampling.
+@fragment
+fn fs_gpu_weather_depth(in: VsOut) {
+    let sm = section_materials[in.section];
+    if (sm.alpha_ref > 0.0) {
+        let base_uv = prepass_base_uv(in.uv, sm.layer_uv[0]);
+        let dims = vec2<f32>(textureDimensions(textures[sm.texture_slot]));
+        let alpha = mip_alpha_boost(textureSampleBias(textures[sm.texture_slot],
+            samplers[sm.sampler_idx], base_uv, frame.renscale.x).a, base_uv, dims, cutout_mip_alpha);
+        if (alpha < sm.alpha_ref) { discard; }
+    }
 }
 
 // A2C prepass twin (MSAA), mirroring shader3d::fs_prepass_a2c for the GPU-driven set. Returns a

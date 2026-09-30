@@ -296,6 +296,7 @@ fn env_reflection(shaded: vec3<f32>, normal: vec3<f32>, world_pos: vec3<f32>, fo
 // threshold and whether this is a shadow-darken pipeline. Keeping them out of a
 // per-draw binding avoids a 5th bind group (wgpu's default maxBindGroups is 4).
 override alpha_ref: f32 = 0.0;   // discard fragments with alpha below this (0 = off)
+override weather_depth: f32 = 0.0; // dedicated physical map only; ordinary paths unchanged
 override is_shadow: f32 = 0.0;   // 1 = output black + shadow-strength alpha
 // 1 = this cutout pipeline uses alpha-to-coverage (MSAA foliage): the fragment emits a
 // sharpened coverage alpha instead of a hard discard, and the pipeline has
@@ -388,6 +389,9 @@ fn finish_vertex(
 ) -> VsOut {
     var out: VsOut;
     out.clip = reverse_z(frame.proj * frame.view * world_pos);
+    if (weather_depth > 0.5) {
+        out.clip = frame.weather_vp * vec4<f32>(world_pos.xyz + frame.cam_pos.xyz, 1.0);
+    }
     // Bias toward the camera (larger reversed depth) so decals/overlays win the
     // depth test against coplanar geometry.
     //
@@ -1263,6 +1267,18 @@ fn fs_prepass(in: VsOut) -> @location(0) vec2<f32> {
     // view matrix's translation is zeroed, so multiplying the direction gives view space.
     let n_view = (frame.view * vec4<f32>(snow_surface_n, 0.0)).xyz;
     return oct_encode(normalize(n_view));
+}
+
+// Real direct geometry/pose/wind, without shading or reading the target being written.
+@fragment
+fn fs_weather_depth(in: VsOut) {
+    if (alpha_ref > 0.0) {
+        let packed = bitcast<u32>(materials[in.instance].emissive.w);
+        let dims = vec2<f32>(textureDimensions(textures[packed >> 3u]));
+        let alpha = mip_alpha_boost(textureSampleBias(textures[packed >> 3u],
+            samplers[packed & 7u], in.uv, frame.renscale.x).a, in.uv, dims, cutout_mip_alpha);
+        if (alpha < alpha_ref) { discard; }
+    }
 }
 
 // A2C prepass twin (MSAA cutout foliage). Same normal output as fs_prepass, but returns a

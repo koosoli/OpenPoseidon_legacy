@@ -166,6 +166,10 @@ fn actual_object_snow_gpu_rejects_shelter_underside_unknown_and_ineligible() {
                 binding: 12,
                 resource: wgpu::BindingResource::TextureView(&sample_view),
             },
+            wgpu::BindGroupEntry {
+                binding: 18,
+                resource: wgpu::BindingResource::TextureView(&layer_views[0]),
+            },
         ],
     });
     let results = device.create_bind_group(&wgpu::BindGroupDescriptor {
