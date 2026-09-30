@@ -12017,24 +12017,24 @@ fn multi_blends_layer_normals_with_the_same_weights_as_the_colours() {
         src.contains("let normal_rg = (sm.flags & SECTION_NORMAL_RG) != 0u;"),
         "the RG-packed convention must come from the section flag, not be guessed per texture"
     );
-    assert_eq!(
-        src.matches("                normal_rg);").count(),
-        2,
+    let compact = src.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        compact.contains("normal_ts = decode_nohq_packed(normal_sample, normal_rg);")
+            && compact.contains("let layer_n = decode_nohq_packed(layer_sample, normal_rg);"),
         "both the base normal and the layer normals must decode with the same convention flag"
     );
-    // The layer sample feeds decode_nohq directly -- nothing accumulates a raw texel.
+    // A typed RGBA sample is also read for authored PBR channels. Its normal
+    // is still decoded before any vector accumulation, never mixed packed.
     let layer_sample =
         "textureSampleBias(textures[sm.layer_normal_slot[i]], samplers[sm.sampler_idx], uvn, frame.renscale.x)";
     assert!(
         src.contains(layer_sample),
         "each layer normal must be sampled at its own uv"
     );
-    let decoded = src
-        .split_once(layer_sample)
-        .map(|(head, _)| head.trim_end().ends_with("decode_nohq_packed("))
-        .unwrap_or(false);
     assert!(
-        decoded,
+        compact.contains(&format!("let layer_sample = {layer_sample};"))
+            && compact.contains("let layer_n = decode_nohq_packed(layer_sample, normal_rg);")
+            && compact.contains("n_sum = n_sum + layer_n * layer_w[i];"),
         "each layer's normal must be decoded at its sample site, not blended packed"
     );
     assert!(
