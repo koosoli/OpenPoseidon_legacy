@@ -661,6 +661,8 @@ void RegisterScreenshot(HarnessServer& hs)
             else if(!std::strcmp(name,"restoreRetailWorldVisible")) action=Engine::GeometryPageFixtureAction::RestoreRetailWorldVisible;
             else if(!std::strcmp(name,"moveRetailWorldVisible")) action=Engine::GeometryPageFixtureAction::MoveRetailWorldVisible;
             else if(!std::strcmp(name,"removeRetailWorldVisible")) action=Engine::GeometryPageFixtureAction::RemoveRetailWorldVisible;
+            else if(!std::strcmp(name,"followRetailWorldVisible")) action=Engine::GeometryPageFixtureAction::FollowRetailWorldVisible;
+            else if(!std::strcmp(name,"stopRetailWorldVisible")) action=Engine::GeometryPageFixtureAction::StopRetailWorldVisible;
             else if(!std::strcmp(name,"pollRetailRecords")) action=Engine::GeometryPageFixtureAction::PollRetailRecords;
             else if(!std::strcmp(name,"beginRetailVisible")) action=Engine::GeometryPageFixtureAction::BeginRetailVisible;
             else if(!std::strcmp(name,"rootRetailVisible")) action=Engine::GeometryPageFixtureAction::RootRetailVisible;
@@ -976,6 +978,10 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddBoolToObject(result,"retailWorldRestored",report.retailWorldRestored);
             cJSON_AddBoolToObject(result,"retailWorldReturned",report.retailWorldReturned);
             cJSON_AddStringToObject(result,"retailWorldPhase",report.retailWorldPhase.c_str());
+            cJSON_AddBoolToObject(result,"retailWorldAutoEnabled",report.retailWorldAutoEnabled);
+            cJSON_AddBoolToObject(result,"retailWorldSurfaceCertified",report.retailWorldSurfaceCertified);
+            cJSON_AddBoolToObject(result,"retailWorldProjectedBounded",report.retailWorldProjectedBounded);
+            cJSON_AddBoolToObject(result,"retailWorldForcedFine",report.retailWorldForcedFine);
             cJSON_AddBoolToObject(result,"retailRecordDistinctCuts",report.retailRecordDistinctCuts);
             cJSON_AddBoolToObject(result,"retailPixelSourceVerified",report.retailPixelSourceVerified);
             cJSON_AddStringToObject(result,"retailPixelSourceSha256",report.retailPixelSourceSha256.c_str());
@@ -983,6 +989,11 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(retailWorldRequest);PAGE_FIXTURE_NUMBER(retailWorldPageBirth);PAGE_FIXTURE_NUMBER(retailWorldCameraGeneration);
             PAGE_FIXTURE_NUMBER(retailWorldOriginalInstance);PAGE_FIXTURE_NUMBER(retailWorldPageInstance);
             PAGE_FIXTURE_NUMBER(retailWorldPageModel);PAGE_FIXTURE_NUMBER(retailWorldPageRenderer);
+            PAGE_FIXTURE_NUMBER(retailWorldSelectedTriangles);PAGE_FIXTURE_NUMBER(retailWorldSafeRootObservations);
+            PAGE_FIXTURE_NUMBER(retailWorldProjectionStatus);PAGE_FIXTURE_NUMBER(retailWorldSurfaceStatus);
+            PAGE_FIXTURE_NUMBER(retailWorldStableFrameGeneration);PAGE_FIXTURE_NUMBER(retailWorldAutoObservations);
+            PAGE_FIXTURE_NUMBER(retailWorldAutoRefines);PAGE_FIXTURE_NUMBER(retailWorldAutoCoarsens);
+            PAGE_FIXTURE_NUMBER(retailWorldProjectedUpper);PAGE_FIXTURE_NUMBER(retailWorldSurfaceUpper);
             PAGE_FIXTURE_NUMBER(retailVisibleBirth);PAGE_FIXTURE_NUMBER(retailVisibleRequest);PAGE_FIXTURE_NUMBER(retailVisibleFrame);
             PAGE_FIXTURE_NUMBER(retailVisibleRenderer);PAGE_FIXTURE_NUMBER(retailVisibleSlot);PAGE_FIXTURE_NUMBER(retailVisibleModel);
             PAGE_FIXTURE_NUMBER(retailVisibleReferenceSourceLevel);PAGE_FIXTURE_NUMBER(retailVisibleReferenceTriangles);PAGE_FIXTURE_NUMBER(retailVisibleCameraGeneration);

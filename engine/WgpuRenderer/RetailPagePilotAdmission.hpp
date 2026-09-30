@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/Graphics/Rendering/GeometryPageRigidFinalHierarchyProduct.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageRigidFinalSurfaceCertificate.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
@@ -23,6 +24,11 @@ struct RetailPagePilotAdmission
 {
     std::shared_ptr<const GeometryPages::RigidOdol7FinalExport> actual;
     std::shared_ptr<const GeometryPages::RigidFinalHierarchyProduct> product;
+    // Present only for the exact default-off actual-world Auto pilot. This is
+    // independently decoded Root/Fine GHP geometry, never the authored coarse
+    // source LOD or a claim about pixels/all other render passes.
+    std::shared_ptr<const GeometryPages::RigidFinalSurface::Proof> certifiedSurface;
+    uint64_t knownProofBytes = 0;
     std::shared_ptr<const BankCompressedReadRequest> modelLease;
     Ref<Texture> texture;
     std::shared_ptr<const ArchiveSourceBinding> textureBirth;
@@ -33,8 +39,9 @@ struct RetailPagePilotAdmission
     uint32_t textureSlotLease = 0;
     bool pixelSourceVerified = false;
     std::array<uint8_t,32> pixelSourceSha256{};
-    // Extra held lease/birth/closure/control-block capacity, excluding actual
-    // ShapeExport and product capacities (charged from their own measurements).
+    // Extra held lease/birth/closure/control-block capacity, including the
+    // optional certified-surface proof charge. Actual ShapeExport and product
+    // capacities are measured and charged separately by record admission.
     uint64_t knownAuthorityBytes = 0;
     std::function<bool()> sourceCurrent;
 };

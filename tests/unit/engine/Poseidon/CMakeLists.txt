@@ -14,6 +14,8 @@ set(POSEIDON_CORE_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_compressed_model_source_birth.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Graphics/test_geometry_page_rigid_odol7_cold_world_candidate.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Graphics/test_retail_world_instance_transaction.cpp
+    ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Graphics/test_retail_world_stable_frame_observation.cpp
+    ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Graphics/test_geometry_page_rigid_final_surface_certificate.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Support/test_stubs.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Asset/Addon/test_config_replace.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Asset/Formats/Common/test_format_detector.cpp
@@ -86,6 +88,7 @@ add_executable(PoseidonCoreTests ${POSEIDON_CORE_TEST_SOURCES} ${POSEIDON_CORE_T
 
 target_link_libraries(PoseidonCoreTests PRIVATE
     Poseidon
+    OpenPoseidon::MeshoptimizerClod
     Catch2::Catch2WithMain
     $<$<BOOL:${WIN32}>:ws2_32>
 )

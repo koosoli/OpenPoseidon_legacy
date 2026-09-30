@@ -1,12 +1,14 @@
 param(
  [switch]$Records,
  [switch]$Visible,
+ [switch]$Auto,
  [ValidateSet('None','Move','Remove')][string]$Invalidate='None',
  [string]$Label='retail-cold-world-source',
  [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
  [string]$Python='C:\Program Files\Python311\python.exe'
 )
 $ErrorActionPreference='Stop'
+if($Auto){$Visible=$true}
 if($Invalidate -ne 'None'){$Visible=$true}
 if($Visible){$Records=$true}
 if($Label -notmatch '^[a-zA-Z0-9_-]{1,64}$'){throw 'Invalid bounded label'}
@@ -16,6 +18,7 @@ if(!$env:LOCK_OWNER){
   '-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
  if($Records){$argv+='-Records'}
  if($Visible){$argv+='-Visible'}
+ if($Auto){$argv+='-Auto'}
  if($Invalidate -ne 'None'){$argv+=@('-Invalidate',$Invalidate)}
  $env:LOCK_OWNER='retail cold world source fixture'
  try{& 'C:\Program Files\Git\bin\bash.exe' @argv;if($LASTEXITCODE){throw "Retail cold world child failed $LASTEXITCODE"}}
@@ -36,7 +39,7 @@ $generator=Join-Path $PSScriptRoot 'streaming/build_retail_cold_world_fixture.py
 $helper=Join-Path $PSScriptRoot 'streaming/build_simulation_residency_fixture.py'
 New-Item -ItemType Directory $out,$profile,$mission | Out-Null
 $old=@{};Get-ChildItem Env:|Where-Object {$_.Name -match '^(WGR_|POSEIDON_)'}|ForEach-Object {$old[$_.Name]=$_.Value}
-$p=$null;$client=$null;$normal=$false;$forced=$false;$failure=$null;$result=$null;$visibleTrace=$null
+$p=$null;$client=$null;$normal=$false;$forced=$false;$failure=$null;$result=$null;$visibleTrace=$null;$autoTrace=$null
 try{
  if(!(Test-Path -LiteralPath $exe) -or !(Test-Path -LiteralPath $dll) -or !(Test-Path -LiteralPath $stampPath)){
   throw 'Installed game or deployment stamp missing'
@@ -86,6 +89,7 @@ class OutroLoose { randomSeed=3; class Intel {}; };
   $environment.WGR_HDR='1';$environment.WGR_RENDER_SCALE='100'
   $environment.WGR_TEMPORAL='0';$environment.WGR_DLSS='0';$environment.WGR_AUTO_EXPOSURE='0'
  }
+ if($Auto){$environment.WGR_GEOMETRY_PAGE_RETAIL_WORLD_AUTO='1'}
  Get-ChildItem Env:|Where-Object {$_.Name -match '^(WGR_|POSEIDON_)'}|ForEach-Object {Remove-Item ('Env:'+$_.Name)}
  foreach($key in $environment.Keys){Set-Item ('Env:'+$key) $environment[$key]}
  $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
@@ -96,9 +100,9 @@ class OutroLoose { randomSeed=3; class Intel {}; };
  @{head=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash $PSCommandPath).Hash;
    generatorSha256=(Get-FileHash $generator).Hash;worldHelperSha256=(Get-FileHash $helper).Hash;
    installed=$installed;hashes=$initialHashes;environment=$environment;argv=$argv;fixture=$proof;
-   scope=$(if($Invalidate -ne 'None'){'Opt-in one-placement world/page transaction followed by ordinary moved/removed actor invalidation and returned page absence; no visual parity or GPU-completion proof'}elseif($Visible){'Opt-in one-placement main-view world/page transaction with exact CPU rows and returned main camera; screenshots are comparison evidence, not GPU completion or all-pass proof'}else{'Actual installed-archive cold-world Shape/primary source and ordinary queued placement only; no renderer-return, takeover, complete model, or visual parity proof'})}|
+   scope=$(if($Auto){'Opt-in one-placement original/page transaction with certified selected object-space unions and actual main-view projected demand; no pixel fidelity, other-view coverage or GPU-completion proof'}elseif($Invalidate -ne 'None'){'Opt-in one-placement world/page transaction followed by ordinary moved/removed actor invalidation and returned page absence; no visual parity or GPU-completion proof'}elseif($Visible){'Opt-in one-placement main-view world/page transaction with exact CPU rows and returned main camera; screenshots are comparison evidence, not GPU completion or all-pass proof'}else{'Actual installed-archive cold-world Shape/primary source and ordinary queued placement only; no renderer-return, takeover, complete model, or visual parity proof'})}|
   ConvertTo-Json -Depth 8|Set-Content (Join-Path $out 'provenance.json')
- $overall=[DateTime]::UtcNow.AddSeconds($(if($Visible){220}else{115}))
+ $overall=[DateTime]::UtcNow.AddSeconds($(if($Auto){240}elseif($Visible){220}else{115}))
  $p=Start-Process -FilePath $exe -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $argv
  $null=$p.Handle
  $client=[Net.Sockets.TcpClient]::new()
@@ -252,8 +256,117 @@ class OutroLoose { randomSeed=3; class Intel {}; };
    $visibleTrace.identity=$identity;$visibleTrace.steps.beginFine=$fine;SaveVisible
    $visibleTrace.images.pageFine1=CaptureVisible 'world-page-fine-1.png'
    $visibleTrace.images.pageFine2=CaptureVisible 'world-page-fine-2.png'
+   if($Auto){
+    foreach($field in @('retailWorldAutoEnabled','retailWorldSurfaceCertified','retailWorldSurfaceStatus',
+      'retailWorldSurfaceUpper','retailWorldSelectedTriangles','retailWorldSafeRootObservations',
+      'retailWorldProjectionStatus','retailWorldProjectedBounded','retailWorldProjectedUpper',
+      'retailWorldForcedFine','retailWorldStableFrameGeneration','retailWorldAutoObservations',
+      'retailWorldAutoRefines','retailWorldAutoCoarsens')){
+     if($null -eq $fine.PSObject.Properties[$field]){throw "Missing actual-world auto field: $field"}
+    }
+    if(!$fine.retailWorldSurfaceCertified -or [uint32]$fine.retailWorldSurfaceStatus -ne 0 -or
+       [double]$fine.retailWorldSurfaceUpper -lt 0 -or [uint32]$fine.retailWorldSelectedTriangles -ne 250){
+     throw ('Actual selected-surface certificate not verified at Fine: '+($fine|ConvertTo-Json -Depth 4 -Compress))
+    }
+    $autoTrace=@{scope='One original/page main-view follow using certified selected object-space surface bounds and returned stable frames; heuristic pixels only, no all-view or GPU-completion proof';
+      certificate=@{status=$fine.retailWorldSurfaceStatus;upper=$fine.retailWorldSurfaceUpper;
+        fineTriangles=$fine.retailWorldSelectedTriangles};poses=@();steps=@{initialFine=$fine};
+      boundRootThreshold=3;boundFineThreshold=4;passed=$false}
+    function SaveAuto {$autoTrace|ConvertTo-Json -Depth 18|Set-Content (Join-Path $out 'actual-world-auto.json')}
+    function SetAutoPose($pose){
+     $reply=Send @{cmd='eval';code=('triFreeFlyPose "'+$pose+'"')}
+     if($null -eq $reply.PSObject.Properties['result'] -or $reply.result.Trim('"') -cne 'OK'){
+      throw ('Actual-world auto pose refused: '+$pose)
+     }
+    }
+    $follow=WorldAction 'followRetailWorldVisible'
+    if($follow.status -notin @('Ready','Pending') -or !$follow.retailWorldAutoEnabled){
+     throw ('Actual-world follow refused: '+($follow|ConvertTo-Json -Depth 4 -Compress))
+    }
+    $autoTrace.steps.follow=$follow;SaveAuto
+    $autoRoot=$null
+    foreach($pose in @('200 1200 30 90 -1','-800 1200 30 90 -1',
+                      '-2800 1200 30 90 -1','-4800 1200 30 90 -1')){
+     SetAutoPose $pose
+     $entry=@{pose=$pose;reports=@();startedAtUtc=[DateTime]::UtcNow.ToString('o')}
+     $poseDeadline=[DateTime]::UtcNow.AddSeconds(3.5)
+     do{
+      $observed=WorldAction 'pollRetailWorldVisible'
+      $entry.reports+=@{status=$observed.status;phase=$observed.retailWorldPhase;
+       cameraGeneration=$observed.retailWorldCameraGeneration;
+       stableGeneration=$observed.retailWorldStableFrameGeneration;
+       selectedTriangles=$observed.retailWorldSelectedTriangles;
+       bounded=$observed.retailWorldProjectedBounded;upper=$observed.retailWorldProjectedUpper;
+       projectionStatus=$observed.retailWorldProjectionStatus;forcedFine=$observed.retailWorldForcedFine;
+       safeRoot=$observed.retailWorldSafeRootObservations;
+       observations=$observed.retailWorldAutoObservations;
+       refines=$observed.retailWorldAutoRefines;coarsens=$observed.retailWorldAutoCoarsens}
+      if($observed.status -notin @('Pending','Ready')){
+       throw ('Actual-world auto follow refused: '+($observed|ConvertTo-Json -Depth 4 -Compress))
+      }
+      if($observed.status -eq 'Ready' -and $observed.retailWorldPhase -ceq 'Root' -and
+         (!$observed.retailWorldProjectedBounded -or $observed.retailWorldForcedFine -or
+          [double]$observed.retailWorldProjectedUpper -ge 3)){
+       throw ('Actual-world auto selected unsafe Root: '+($observed|ConvertTo-Json -Depth 4 -Compress))
+      }
+      if($observed.status -eq 'Ready' -and $observed.retailWorldPhase -ceq 'Root' -and
+         $observed.retailWorldReturned -and $observed.retailWorldAutoEnabled -and
+         $observed.retailWorldSurfaceCertified -and $observed.retailWorldProjectedBounded -and
+         !$observed.retailWorldForcedFine -and
+         [double]$observed.retailWorldProjectedUpper -lt 3 -and
+         [uint32]$observed.retailWorldSelectedTriangles -lt 250 -and
+         [uint64]$observed.retailWorldAutoCoarsens -ge 1 -and
+         [uint32]$observed.retailWorldSafeRootObservations -ge 3 -and
+         [uint64]$observed.retailWorldStableFrameGeneration -gt [uint64]$follow.retailWorldStableFrameGeneration -and
+         [uint64]$observed.retailWorldCameraGeneration -gt [uint64]$fine.retailWorldCameraGeneration){
+       $autoRoot=$observed;break
+      }
+      Start-Sleep -Milliseconds 100
+     }while([DateTime]::UtcNow -lt $poseDeadline -and [DateTime]::UtcNow -lt $overall)
+     $entry.endedAtUtc=[DateTime]::UtcNow.ToString('o');$autoTrace.poses+=,$entry;SaveAuto
+     if($autoRoot){break}
+    }
+    if(!$autoRoot){throw 'Actual-world auto never returned a certified bounded Root across four far poses'}
+    CheckStableWorld $autoRoot $identity
+    $autoTrace.steps.farRoot=$autoRoot;SaveAuto
+    SetAutoPose '1184 1200 18 90 -8'
+    $autoFine=$null;$nearDeadline=[DateTime]::UtcNow.AddSeconds(8)
+    do{
+     $observed=WorldAction 'pollRetailWorldVisible'
+     if($observed.status -notin @('Pending','Ready')){
+      throw ('Actual-world auto near follow refused: '+($observed|ConvertTo-Json -Depth 4 -Compress))
+     }
+     if($observed.status -eq 'Ready' -and $observed.retailWorldPhase -ceq 'Root' -and
+        (!$observed.retailWorldProjectedBounded -or $observed.retailWorldForcedFine)){
+      throw ('Actual-world auto retained Root under unknown near projection: '+
+        ($observed|ConvertTo-Json -Depth 4 -Compress))
+     }
+     if($observed.status -eq 'Ready' -and $observed.retailWorldPhase -ceq 'Fine' -and
+        $observed.retailWorldReturned -and $observed.retailWorldAutoEnabled -and
+        [uint32]$observed.retailWorldSelectedTriangles -eq 250 -and
+        [uint64]$observed.retailWorldAutoRefines -ge 1 -and
+        [uint64]$observed.retailWorldStableFrameGeneration -gt [uint64]$autoRoot.retailWorldStableFrameGeneration -and
+        [uint64]$observed.retailWorldCameraGeneration -gt [uint64]$autoRoot.retailWorldCameraGeneration -and
+        ($observed.retailWorldForcedFine -or
+         ($observed.retailWorldProjectedBounded -and [double]$observed.retailWorldProjectedUpper -gt 4))){
+      $autoFine=$observed;break
+     }
+     Start-Sleep -Milliseconds 100
+    }while([DateTime]::UtcNow -lt $nearDeadline -and [DateTime]::UtcNow -lt $overall)
+    if(!$autoFine){throw 'Actual-world auto failed to return fresh near Fine after bounded far Root'}
+    CheckStableWorld $autoFine $identity
+    $autoTrace.steps.nearFine=$autoFine;SaveAuto
+    $stopped=WaitWorld (WorldAction 'stopRetailWorldVisible') 'Fine'
+    if($stopped.retailWorldAutoEnabled -or [uint32]$stopped.retailWorldSelectedTriangles -ne 250){
+     throw ('Actual-world auto did not stop on returned Fine: '+($stopped|ConvertTo-Json -Depth 4 -Compress))
+    }
+    CheckStableWorld $stopped $identity
+    $autoTrace.steps.stopped=$stopped;$autoTrace.passed=$true;SaveAuto
+    $visibleTrace.autoEvidence=Join-Path $out 'actual-world-auto.json';SaveVisible
+   }
+   $manualBeforeRoot=if($Auto){$stopped}else{$fine}
    $rootCut=WaitWorld (WorldAction 'rootRetailWorldVisible') 'Root'
-   CheckWorld $rootCut 'Root' $true $true $false ([uint64]$fine.retailWorldCameraGeneration) ([uint64]$fine.retailWorldRequest)
+   CheckWorld $rootCut 'Root' $true $true $false ([uint64]$manualBeforeRoot.retailWorldCameraGeneration) ([uint64]$manualBeforeRoot.retailWorldRequest)
    CheckStableWorld $rootCut $identity
    if($rootCut.retailWorldPageModel -eq $fine.retailWorldPageModel){throw 'Root did not select a distinct retained page model'}
    $visibleTrace.steps.root=$rootCut;SaveVisible
@@ -323,7 +436,8 @@ class OutroLoose { randomSeed=3; class Intel {}; };
       $aborted.pageLiveJobs -or $aborted.pageReservedBytes){throw 'World record abort debt'}
   }
   @{ready=$ready;released=$released;refilled=$refilled;aborted=$aborted;
-    scope=$(if($Invalidate -ne 'None'){'Actual one-placement world/page transaction followed by ordinary actor invalidation and returned historical page absence; terminal Failed is expected cleanup, not an active page or visual proof'}elseif($Visible){'Actual cold-world Shape export, source-bound page records, and one returned main-view world/page transaction; no pixel parity, GPU completion, or general all-pass proof'}else{'Actual cold-world Shape export and private record lifetime; ordinary world model retained, no page instance takeover'})}|
+    autoEvidence=$(if($Auto){Join-Path $out 'actual-world-auto.json'}else{$null});
+    scope=$(if($Auto){'Actual cold-world source records, certified Root/Fine object-space surface witness, returned main-view auto Root/Fine followed by manual lifecycle; no pixel fidelity or all-view proof'}elseif($Invalidate -ne 'None'){'Actual one-placement world/page transaction followed by ordinary actor invalidation and returned historical page absence; terminal Failed is expected cleanup, not an active page or visual proof'}elseif($Visible){'Actual cold-world Shape export, source-bound page records, and one returned main-view world/page transaction; no pixel parity, GPU completion, or general all-pass proof'}else{'Actual cold-world Shape export and private record lifetime; ordinary world model retained, no page instance takeover'})}|
    ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'actual-world-records.json')
  }
  $null=Send @{cmd='exit'}
@@ -336,11 +450,13 @@ class OutroLoose { randomSeed=3; class Intel {}; };
  for($i=0;$i -lt 2;$i++){if($finalHashes[$i].Hash -ne $initialHashes[$i].Hash){throw 'Installed binary changed during run'}}
  if((Get-Content -LiteralPath $stampPath -Raw) -cne $installed){throw 'Installed deployment stamp changed during run'}
  $result=@{passed=$true;normalShutdown=$true;forcedTermination=$false;exitCode=$p.ExitCode;
-  visible=[bool]$Visible;invalidation=$Invalidate;visibleEvidence=$(if($Visible){Join-Path $out 'actual-world-visible.json'}else{$null});
+  visible=[bool]$Visible;auto=[bool]$Auto;invalidation=$Invalidate;
+  visibleEvidence=$(if($Visible){Join-Path $out 'actual-world-visible.json'}else{$null});
+  autoEvidence=$(if($Auto){Join-Path $out 'actual-world-auto.json'}else{$null});
   sourceLine=$sourceMatch.Value;placementLine=$placementMatch.Value;shapeBirth=[uint64]$sourceMatch.Groups['birth'].Value;
   sourceSha256=$sourceMatch.Groups['source'].Value;pacRawSha256=$sourceMatch.Groups['raw'].Value;
   pacUploadedSha256=$sourceMatch.Groups['upload'].Value;primaryHandle=[uint64]$sourceMatch.Groups['handle'].Value;
-  scope=$(if($Invalidate -ne 'None'){'Actual installed-world Shape/PAC source and returned page cleanup after ordinary actor move/removal; Failed is the expected fail-closed invalidated state, not GPU-completion or visual-parity proof'}elseif($Visible){'Actual installed-world Shape/PAC source and one returned original-other-views/private-main-view transaction with record refill and restore; screenshots captured for human comparison, no GPU-completion, pixel-parity, general all-pass or performance proof'}else{'Actual installed-archive cold-world Shape and same normal-bank PAC strict upload, plus source-current ordinary placement queued; no renderer return, private page takeover, complete model, or visual parity proof'})}
+  scope=$(if($Auto){'Actual installed-world Shape/PAC source, object-space selected-surface certificate, returned main-view auto Root/Fine and manual record lifecycle; heuristic projected demand is not pixel fidelity, GPU completion or all-view coverage'}elseif($Invalidate -ne 'None'){'Actual installed-world Shape/PAC source and returned page cleanup after ordinary actor move/removal; Failed is the expected fail-closed invalidated state, not GPU-completion or visual-parity proof'}elseif($Visible){'Actual installed-world Shape/PAC source and one returned original-other-views/private-main-view transaction with record refill and restore; screenshots captured for human comparison, no GPU-completion, pixel-parity, general all-pass or performance proof'}else{'Actual installed-archive cold-world Shape and same normal-bank PAC strict upload, plus source-current ordinary placement queued; no renderer return, private page takeover, complete model, or visual parity proof'})}
  $result|ConvertTo-Json -Depth 5|Set-Content (Join-Path $out 'result.json')
 }catch{$failure=$_}
 finally{
@@ -352,6 +468,10 @@ finally{
  if($Visible -and $visibleTrace){
   if($failure){$visibleTrace.passed=$false;$visibleTrace.failure=$failure.Exception.Message}
   $visibleTrace|ConvertTo-Json -Depth 18|Set-Content (Join-Path $out 'actual-world-visible.json')
+ }
+ if($Auto -and $autoTrace){
+  if($failure){$autoTrace.passed=$false;$autoTrace.failure=$failure.Exception.Message}
+  $autoTrace|ConvertTo-Json -Depth 18|Set-Content (Join-Path $out 'actual-world-auto.json')
  }
  Get-ChildItem Env:|Where-Object {$_.Name -match '^(WGR_|POSEIDON_)'}|ForEach-Object {Remove-Item ('Env:'+$_.Name)}
  foreach($key in $old.Keys){Set-Item ('Env:'+$key) $old[$key]}

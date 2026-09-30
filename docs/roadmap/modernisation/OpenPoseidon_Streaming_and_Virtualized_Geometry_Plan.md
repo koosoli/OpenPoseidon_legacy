@@ -1671,3 +1671,55 @@ Neither refusal counts as passed world transition or camera evidence.
 Next renderer source independently enables the existing camera tracker under
 explicit fixture+actual-world-visible+camera gates, without advertising a
 surface certificate or triggering the private original-fixture startup action.
+
+
+### 30 September — actual world instance pair passes installed runtime
+
+Exact4a81250d build and paired installation passed. `world-visible4a-20260930-
+062353-f542b0` passed normal exit0/no force: actual original producer0 remained
+bound, page producer2/renderer3/birth1 stayed stable; Fine model3/camera129,
+Root model2/camera176, refilled Fine model4/camera250, original Restore/pageAbsent
+camera276. Root-confirmed release/refill and post-Restore abort had no worker debt.
+These are literal CPU-row pair and returned-camera facts, not GPU completion.
+
+Fixed rock-interior ROI[400,270,800,650], no alignment: source-repeat MAE0.007268,
+Fine-repeat0.014386, source/Fine0.006647, source/refilledFine0.092583,
+source/restored0.112546; all maximum channel differences1/255. Actual PAC and
+geometry look consistent at this one ordinary placement. Dynamic background,
+coarse Root appearance, all-view material/shadow quality and generic assets are
+not accepted by this small comparison.
+
+`world-move4a-20260930-062519-b4426e` and `world-remove4a-20260930-062708-c45a79`
+both passed normal exit0/no force. Actual landscape matrix move/removal invoked
+normal retained hooks; exact page historical absence was joined to fresh camera
+276/272 before producer quarantine/model lease release. The invalidated source
+remains Failed with phase InvalidatedPageAbsent, not falsely Ready or restored.
+
+Normal DayZ OFF control `worldpair4a-off-disabled-20260930-062930` passed1274
+frames/normal exit0, median22.4455ms/p95125.773ms/p99350.380ms. Historical f4
+22.702/127.600/336.965ms shows similar scale but ordered cache/first-touch variation
+prevents causal performance or no-regression acceptance. No competing GPU run.
+
+Next authorised work connects actual authenticated decoded GHP Root/Fine surface
+bounds to paced main-camera automatic selection. Authored coarse144 and stale
+hierarchySelectedTriangles250 must not be mistaken for decoded Root counts.
+Stable completed-frame observation will revoke old evidence on skipped/stale/
+mutated frames rather than manufacture updates to get a camera. Whole plan OPEN,
+defaultReady=false/performanceAccepted=false; world pilot remains default OFF.
+
+
+Actual decoded selected GHP Root/Fine certificate checks passed2490 assertions/
+4 cases; stable returned-two-row tracker checks184/6 passed. First Core build
+lacked the existing MeshoptimizerClod dependency; repaired target link exposed
+four mixed-type auto declarations in new tests, now split. Both failed logs
+preserved. Combined game+Core and final policy repair game build passed.
+
+Next source binds decoded selected cuts and numeric pair bounds to actual world
+source/shape/product and a nonterminal stable-frame tracker. Automatic main-only
+selection observes at most10Hz, requests Fine above4/unknown and Root only after
+three fresh safe observations below3. Refused frames break the safe streak;
+foreign stable bindings cannot retain Root. The finite eight-switch pilot falls
+back to uncapped original Restore if required Fine cannot be queued. Stop/reset
+joins the render owner before touching the shared tracker. Existing selected
+triangle telemetry is now recomputed from actual cluster indices after ACK.
+Installed automatic near/far validation remains pending; all new gates default OFF.

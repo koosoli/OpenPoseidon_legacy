@@ -24,6 +24,7 @@
 #include "RetailPageRecordObservation.hpp"
 #include "RetailPageInstanceObservation.hpp"
 #include "RetailWorldInstanceTransaction.hpp"
+#include "RetailWorldStableFrameObservation.hpp"
 
 #include <array>
 #include <chrono> // steady_clock, for the opt-in auto-exposure time constant (WGR_AUTO_EXPOSURE_TAU)
@@ -1357,6 +1358,11 @@ class EngineWgpu : public EngineDummy
     std::shared_ptr<render::RetailWorldInstanceTransaction> _retailWorldActivePair;
     render::RetailWorldInstanceTransaction::BeforeEvidence _retailWorldPairBefore{};
     uint64_t _retailWorldFrameAttempt = 0, _retailWorldCameraBefore = 0;
+    std::shared_ptr<render::RetailWorldStableFrameObservation> _retailWorldStableFrame;
+    std::shared_ptr<render::RetailWorldStableFrameObservation> _retailWorldStableArmed;
+    uint64_t _retailWorldStableFrameAttempt = 0;
+    void ArmRetailWorldStableFrame();
+    void ObserveRetailWorldStableReturned(const WgrFrame&, uint32_t);
     std::shared_ptr<render::RetailPageInstanceObservation> _retailInstanceReturn;
     uint64_t _retailInstanceFrameAttempt = 0;
     uint64_t _retailInstanceCameraBefore = 0;

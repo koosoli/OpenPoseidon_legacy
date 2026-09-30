@@ -3,15 +3,21 @@
 #include "RetailPageInstanceObservation.hpp"
 #include <Poseidon/Graphics/Rendering/AuthoredGeometryPageWorker.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalOriginalOutside.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalBinaryDemand.hpp>
+#include <Poseidon/Graphics/Rendering/GeometryPageProjectedSurfaceBound.hpp>
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <cfloat>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <iterator>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <string>
 #ifdef _WIN32
 #include <Windows.h>
@@ -193,6 +199,11 @@ struct EngineWgpu::RetailWorldVisibleState
     WgrInstance original{}, page{}; // both carry producer model IDs
     std::shared_ptr<render::RetailWorldInstanceTransaction> pair;
     std::shared_ptr<render::RetailPageInstanceObservation> cleanup;
+    std::shared_ptr<const GeometryPages::RigidFinalSurface::Proof> surface;
+    std::optional<GeometryPages::HierarchicalBinaryDemand::Policy> autoPolicy;
+    std::chrono::steady_clock::time_point lastAutoObservation{};
+    uint64_t lastAutoFrameGeneration = 0;
+    bool autoEnabled = false;
 };
 
 Engine::GeometryPageFixtureReport EngineWgpu::SnapshotRetailPageRecordPilot() const
@@ -230,6 +241,32 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
     {
         const auto actual = input.actual;
         const auto product = input.product;
+        const char* worldAutoFlag = std::getenv("WGR_GEOMETRY_PAGE_RETAIL_WORLD_AUTO");
+        const bool worldAuto = worldAutoFlag && worldAutoFlag[0] == '1' && !worldAutoFlag[1];
+        const auto proof = input.certifiedSurface;
+        if (worldAuto)
+        {
+            if (!proof || !proof->certificate || !proof->root || !proof->fine ||
+                !input.knownProofBytes || input.knownProofBytes > 512 * 1024 ||
+                input.knownAuthorityBytes < input.knownProofBytes || !actual || !product ||
+                !product->manifest || !product->image ||
+                proof->root->knownCapacityBytes > 512 * 1024 ||
+                proof->fine->knownCapacityBytes >
+                    512 * 1024 - proof->root->knownCapacityBytes ||
+                input.knownProofBytes != sizeof(RigidFinalSurface::Proof) +
+                    sizeof(RigidFinalSurface::Certificate) +
+                    proof->root->knownCapacityBytes + proof->fine->knownCapacityBytes + 512 ||
+                proof->certificate->sourceAdmissionEpoch != actual->sourceAdmissionEpoch ||
+                proof->certificate->ownerEpoch != actual->ownerEpoch ||
+                proof->certificate->modelBirth != actual->modelBirth ||
+                proof->certificate->shapeQueryRevision != actual->shapeQueryRevision ||
+                !(proof->certificate->identity == product->manifest->metadata.identity) ||
+                !(proof->certificate->originalSource == actual->actual.source) ||
+                proof->certificate->fileSha256 != product->fileSha256 ||
+                proof->certificate->metadataSha256 != product->image->metadataSha256)
+                return failure;
+        }
+        else if (proof || input.knownProofBytes) return failure;
         if (!actual || !product || !product->fineTriangleSetExact || !product->image || !product->manifest || !input.modelLease ||
             !input.modelLease->Encoded().HasArchiveIdentity() || !input.texture || !input.textureBirth ||
             !input.pixelSourceVerified || !RetailNonzero(input.pixelSourceSha256) ||
@@ -265,7 +302,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
             for (auto component : colour) if (component!=1) return failure;
         const char* visibleGate = std::getenv("WGR_GEOMETRY_PAGE_RETAIL_VISIBLE");
         const bool visibleSourceFineReference = visibleGate && !std::strcmp(visibleGate, "1");
-        const size_t referenceIndex = visibleSourceFineReference ? 1 : 0;
+        const size_t referenceIndex = worldAuto || visibleSourceFineReference ? 1 : 0;
         if (actual->finalLevels[referenceIndex] < 0) return failure;
         const auto& reference = visibleSourceFineReference ? actual->actual.fine : actual->actual.coarse;
         for (const auto* mesh : {&actual->actual.coarse, &actual->actual.fine})
@@ -278,7 +315,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
         for (const auto& group : p.groups)
             if (group.simplified.error != FLT_MAX)
                 threshold = std::max(threshold, group.simplified.error);
-        threshold = std::nextafter(threshold, std::numeric_limits<float>::infinity());
+        threshold = worldAuto ? std::bit_cast<float>(proof->certificate->rootThresholdBits) :
+            std::nextafter(threshold, std::numeric_limits<float>::infinity());
         if (!std::isfinite(threshold) || threshold == FLT_MAX ||
             !PlanHierarchicalCut(p, threshold,
                 {p.identity, std::span<const uint8_t>(allResident.data(), p.pages.size())}, root) ||
@@ -287,6 +325,12 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
             root.state != HierarchicalCutState::RequestedCut || fine.state != HierarchicalCutState::RequestedCut ||
             root.selectedClusters.empty() || fine.selectedClusters.empty() ||
             root.selectedClusters.size() > Record::MaxMeshes || fine.selectedClusters.size() > Record::MaxMeshes)
+            return failure;
+        if (worldAuto &&
+            (!RigidFinalSurface::MatchesSelected(*proof->root,root,threshold,proof->root->packed) ||
+             !RigidFinalSurface::MatchesSelected(*proof->fine,fine,0.f,proof->fine->packed) ||
+             proof->certificate->rootTriangles != proof->root->packed.indices.size()/3 ||
+             proof->certificate->fineTriangles != proof->fine->packed.indices.size()/3))
             return failure;
         const bool distinct = root.selectedClusters != fine.selectedClusters;
         uint32_t initialMeshes = 1, refillMeshes = 0;
@@ -347,6 +391,11 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
         state->report.retailHierarchyPages = uint32_t(p.pages.size());
         state->report.retailRecordDistinctCuts = distinct;
         state->report.retailFineTriangleSetExact = product->fineTriangleSetExact;
+        state->report.retailWorldSurfaceCertified = worldAuto;
+        state->report.retailWorldSurfaceStatus = worldAuto ?
+            uint32_t(RigidFinalSurface::Status::Certified) : 0;
+        state->report.retailWorldSurfaceUpper = worldAuto ?
+            proof->certificate->hausdorffUpper : 0;
         state->report.hierarchicalPilot = true;
         state->report.hierarchicalDiskPilot = true;
         state->report.hierarchyPages = uint32_t(p.pages.size());
@@ -362,7 +411,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
         state->report.knownPayloadBytes = known;
         state->report.active = true;
         state->report.pageEpoch = _nextGeometryPageEpoch++;
-        state->report.pageWorkState = visibleSourceFineReference ?
+        state->report.pageWorkState = referenceIndex == 1 ?
             "RetailSourceFineReferenceQueued" : "RetailFallbackQueued";
         if (_frameCounter == UINT32_MAX) return failure;
         ResourceOp mesh; mesh.kind = ResourceOp::MeshCreate;
@@ -618,6 +667,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
             if (s.phase != RetailPagePilotState::Phase::FineReady || !r.retailRecordDistinctCuts ||
                 (_retailWorldVisible &&
                  (_retailWorldVisible->phase != RetailWorldVisibleState::Phase::Root ||
+                  _retailWorldVisible->autoEnabled ||
                   _retailWorldVisible->pair || _retailWorldVisible->cleanup ||
                   !r.retailWorldReturned)) ||
                 (s.visiblePhase != RetailPagePilotState::VisiblePhase::Dormant &&
@@ -1319,6 +1369,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         !enabled("WGR_OBJECT_STREAM_DAYZ_REUSE_ONLY") ||
         enabled("WGR_GEOMETRY_PAGE_RETAIL_VISIBLE"))
         return unavailable;
+    const bool worldAuto = enabled("WGR_GEOMETRY_PAGE_RETAIL_WORLD_AUTO");
     auto pilot = _retailPagePilot;
     if (!pilot) return unavailable;
     auto& p = *pilot;
@@ -1398,6 +1449,11 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         const auto before = GetRetailWorldBefore(request, 1);
         if (receipt->CheckBefore(before) != Pair::Refusal::None) return false;
         _instanceOps.reserve(_instanceOps.size() + 1);
+        if (_retailWorldStableFrame)
+        {
+            _retailWorldStableFrame->Invalidate();
+            _retailWorldStableFrame.reset();
+        }
         InstanceOp operation{};
         operation.kind = InstanceOp::WorldPair;
         operation.handle = s.originalProducer;
@@ -1420,7 +1476,30 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         b.pageInstanceBirth = s.pageBirth;
         return b;
     };
+    auto armStable = [&](RetailWorldVisibleState& s) {
+        using Stable = render::RetailWorldStableFrameObservation;
+        if (!s.autoEnabled || s.pair || s.cleanup || s.invalidated ||
+            !serial(s.cameraGeneration) || !s.pageRenderer || !sourceCurrent(s)) return false;
+        Stable::Request request;
+        request.binding = binding(s,s.requestId);
+        auto hidden = s.original; hidden.flags = WGR_INSTANCE_OTHER_VIEWS_ONLY;
+        request.original = row(s.originalModel,hidden);
+        request.page = row(s.pageModel,s.page);
+        request.originalRendererHandle = s.originalRenderer;
+        request.pageRendererHandle = s.pageRenderer;
+        request.previousCameraGeneration = s.cameraGeneration;
+        auto tracker = std::make_shared<Stable>(request);
+        if (!tracker->Valid()) return false;
+        AcquireProducerWindow("retail world stable frame arm");
+        _retailWorldStableFrame = std::move(tracker);
+        return true;
+    };
     auto finishAbsent = [&](RetailWorldVisibleState& s, bool restored) {
+        if (_retailWorldStableFrame)
+        {
+            _retailWorldStableFrame->Invalidate();
+            _retailWorldStableFrame.reset();
+        }
         ReleaseRetailInstanceHandle(s.pageProducer);
         if (s.modelRetained)
         {
@@ -1429,8 +1508,12 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         }
         s.phase = restored ? RetailWorldVisibleState::Phase::Restored :
             RetailWorldVisibleState::Phase::Removed;
+        s.autoEnabled = false; s.autoPolicy.reset();
+        report.retailWorldAutoEnabled = false;
         s.pair.reset(); s.cleanup.reset();
         report.retailWorldPagePresent = false;
+        report.retailWorldSelectedTriangles = 0;
+        report.hierarchySelectedTriangles = 0;
         // A normal Restore certifies flags0. Invalidation cleanup instead
         // established flags0, historical absence, or a visible replacement;
         // this flag no longer asserts that our original is the other-views row.
@@ -1449,6 +1532,11 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         if (s.cleanup || s.cleanupAttempts >= 3 || !s.pageRenderer ||
             !serial(s.pageBirth) || !ready(s.selectedSlot)) return false;
         AcquireProducerWindow("retail world stale page cleanup");
+        if (_retailWorldStableFrame)
+        {
+            _retailWorldStableFrame->Invalidate();
+            _retailWorldStableFrame.reset();
+        }
         // A mount change alone does not remove or move the original. Ask the
         // consumer to roll back its exact active pair first. Its rollback may
         // restore only the same current flags64 row; it will not write an old
@@ -1544,11 +1632,26 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
                 !p.admission.actual || !serial(_nextRetailWorldPageBirth) ||
                 _nextRetailWorldPageBirth >= UINT64_MAX - 1)
                 return refuse("RetailWorldBeginUnavailable");
+            const auto surface = p.admission.certifiedSurface;
+            if (worldAuto && (!surface || !surface->certificate || !surface->root ||
+                !surface->fine || !report.retailWorldSurfaceCertified ||
+                !(surface->certificate->identity == p.Package().identity) ||
+                surface->certificate->sourceAdmissionEpoch != report.sourceAdmissionEpoch ||
+                surface->certificate->ownerEpoch != _geometryOwnerEpoch ||
+                surface->certificate->modelBirth != source->shapeBirth ||
+                surface->certificate->shapeQueryRevision !=
+                    p.admission.actual->shapeQueryRevision ||
+                surface->root->clusters != p.rootClusters ||
+                surface->fine->clusters != p.fineClusters ||
+                surface->certificate->fileSha256 != p.admission.product->fileSha256))
+                return refuse("RetailWorldSurfaceAuthorityUnavailable");
             constexpr uint64_t reservation = sizeof(RetailWorldVisibleState) +
                 12 * (sizeof(Pair) + sizeof(InstanceOp) + 128) +
                 3 * (sizeof(Cleanup) + sizeof(InstanceOp) + 128);
+            const uint64_t autoReservation = worldAuto ?
+                sizeof(render::RetailWorldStableFrameObservation) + 128 : 0;
             if (report.knownPayloadBytes > RetailLimit ||
-                reservation > RetailLimit - report.knownPayloadBytes)
+                reservation + autoReservation > RetailLimit - report.knownPayloadBytes)
                 return refuse("RetailWorldInstanceCapacity");
             AcquireProducerWindow("retail world original model and row");
             const auto normal = _gpuModels.find(source->shape.GetRef());
@@ -1591,6 +1694,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
             state->page.model = p.models[2];
             state->page.flags = WGR_INSTANCE_MAIN_CAMERA_ONLY;
             state->pendingSlot = 2;
+            state->surface = surface;
             if (!sourceCurrent(*state)) return refuse("RetailWorldSourceChangedBeforeBegin");
             const uint32_t pageProducer = ReserveRetailInstanceHandle();
             if (pageProducer == UINT32_MAX) return refuse("RetailWorldPageSlotExhausted");
@@ -1629,7 +1733,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
             }
             ++_nextRetailWorldPageBirth;
             _retailWorldVisible = std::move(state);
-            report.knownPayloadBytes += reservation;
+            report.knownPayloadBytes += reservation + autoReservation;
             report.retailWorldVisiblePilot = true;
             report.retailRecordOnly = false;
             report.retailWorldOriginalInstance = source->worldProducerInstance;
@@ -1643,6 +1747,59 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         auto state = _retailWorldVisible;
         if (!state) return refuse("RetailWorldNotBegun");
         auto& s = *state;
+        if (action == GeometryPageFixtureAction::FollowRetailWorldVisible)
+        {
+            if (!worldAuto || !s.surface || !s.surface->certificate ||
+                !s.surface->root || !s.surface->fine || s.autoEnabled ||
+                s.pair || s.cleanup || s.invalidated ||
+                (s.phase != RetailWorldVisibleState::Phase::Fine &&
+                 s.phase != RetailWorldVisibleState::Phase::Root) ||
+                p.phase != RetailPagePilotState::Phase::FineReady ||
+                !ready(1) || !ready(2) || !cut(1) || !cut(2) ||
+                !sourceCurrent(s) || !report.retailWorldReturned)
+                return refuse("RetailWorldAutoFollowUnavailable");
+            GeometryPages::HierarchicalBinaryDemand::Binding policyBinding;
+            policyBinding.identity = s.surface->certificate->identity;
+            policyBinding.privateOwnerEpoch = s.ownerEpoch;
+            policyBinding.sourceAdmissionEpoch = s.sourceEpoch;
+            policyBinding.pageEpoch = s.pageEpoch;
+            policyBinding.modelBirth = s.shapeBirth;
+            if (!policyBinding.Valid()) return refuse("RetailWorldAutoBindingInvalid");
+            s.autoPolicy.emplace(policyBinding);
+            s.autoEnabled = true;
+            s.lastAutoObservation = {};
+            s.lastAutoFrameGeneration = 0;
+            if (!armStable(s))
+            {
+                s.autoEnabled = false; s.autoPolicy.reset();
+                return refuse("RetailWorldAutoStableFrameUnavailable");
+            }
+            report.retailWorldAutoEnabled = true;
+            report.retailWorldAutoObservations = 0;
+            report.retailWorldAutoRefines = 0;
+            report.retailWorldAutoCoarsens = 0;
+            report.retailWorldSafeRootObservations = 0;
+            report.pageWorkState = "RetailWorldAutoFollowing";
+            return current();
+        }
+        if (action == GeometryPageFixtureAction::StopRetailWorldVisible)
+        {
+            if (!s.autoEnabled) return refuse("RetailWorldAutoNotFollowing");
+            AcquireProducerWindow("retail world stable frame stop");
+            s.autoEnabled = false;
+            s.autoPolicy.reset();
+            if (_retailWorldStableFrame)
+            {
+                _retailWorldStableFrame->Invalidate();
+                _retailWorldStableFrame.reset();
+            }
+            report.retailWorldAutoEnabled = false;
+            report.retailWorldSafeRootObservations = 0;
+            report.retailWorldProjectedBounded = false;
+            report.retailWorldForcedFine = false;
+            report.pageWorkState = "RetailWorldAutoStopped";
+            return current();
+        }
         if (action == GeometryPageFixtureAction::PollRetailWorldVisible)
         {
             if (s.phase == RetailWorldVisibleState::Phase::Restored ||
@@ -1651,6 +1808,16 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
             AcquireProducerWindow("retail world selected birth poll");
             if (GetRetailWorldConsumerBirth(s.originalProducer) != s.objectBirth)
                 s.invalidated = true;
+            if (s.invalidated && _retailWorldStableFrame)
+            {
+                _retailWorldStableFrame->Invalidate();
+                _retailWorldStableFrame.reset();
+            }
+            if (s.invalidated)
+            {
+                s.autoEnabled = false; s.autoPolicy.reset();
+                report.retailWorldAutoEnabled = false;
+            }
             if (s.cleanup)
             {
                 const auto result = s.cleanup->Observe();
@@ -1723,14 +1890,178 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
                 report.retailWorldPagePresent = true;
                 report.retailWorldOriginalOtherViews = true;
                 report.retailWorldPageModel = s.pageModel.producerModel;
+                const auto& selected = s.selectedSlot == 1 ? p.rootClusters : p.fineClusters;
+                uint64_t triangles = 0;
+                for (auto cluster : selected)
+                {
+                    if (cluster >= p.clusterIndices.size() || p.clusterIndices[cluster] % 3)
+                        return fail("RetailWorldSelectedTriangleRecordInvalid");
+                    triangles += p.clusterIndices[cluster] / 3;
+                }
+                if (!triangles || triangles > UINT32_MAX ||
+                    (s.surface && triangles != (s.selectedSlot == 1 ?
+                        s.surface->certificate->rootTriangles :
+                        s.surface->certificate->fineTriangles)))
+                    return fail("RetailWorldSelectedTriangleMismatch");
+                report.retailWorldSelectedTriangles = uint32_t(triangles);
+                report.hierarchySelectedTriangles = uint32_t(triangles);
                 report.retailWorldPhase = s.selectedSlot == 1 ? "Root" : "Fine";
                 report.status = GeometryReportStatus::Ready;
                 report.pageWorkState = "RetailWorldPairReturned";
+                if (s.autoEnabled && !s.invalidated && !armStable(s))
+                    return fail("RetailWorldStableFrameArmRefused");
             }
             if (s.invalidated)
             {
                 if (!cleanup(s)) return fail("RetailWorldInvalidatedPageQuarantined");
                 return current();
+            }
+            if (s.autoEnabled && s.autoPolicy && !s.pair && !s.cleanup &&
+                (s.phase == RetailWorldVisibleState::Phase::Fine ||
+                 s.phase == RetailWorldVisibleState::Phase::Root))
+            {
+                using namespace GeometryPages;
+                using Binary = HierarchicalBinaryDemand::Policy;
+                const auto now = std::chrono::steady_clock::now();
+                auto requireFine = [&](bool uncertain=true) -> GeometryPageFixtureReport {
+                    s.lastAutoObservation = now;
+                    if (uncertain) {
+                        report.retailWorldProjectedBounded = false;
+                        report.retailWorldForcedFine = true;
+                    }
+                    const auto changed = StepRetailWorldVisible(GeometryPageFixtureAction::FineRetailWorldVisible);
+                    if (changed.status == GeometryReportStatus::Pending) return changed;
+                    // The finite pilot must not keep an uncertified Root when
+                    // its switch allowance is exhausted. Restore is uncapped.
+                    s.autoEnabled = false; s.autoPolicy.reset();
+                    report.retailWorldAutoEnabled = false;
+                    AcquireProducerWindow("retail world unsafe root fallback");
+                    if (_retailWorldStableFrame) {
+                        _retailWorldStableFrame->Invalidate();
+                        _retailWorldStableFrame.reset();
+                    }
+                    return StepRetailWorldVisible(GeometryPageFixtureAction::RestoreRetailWorldVisible);
+                };
+                if (s.lastAutoObservation != std::chrono::steady_clock::time_point{} &&
+                    now - s.lastAutoObservation < std::chrono::milliseconds(100))
+                    return current();
+                const auto tracker = _retailWorldStableFrame;
+                if (!tracker) return fail("RetailWorldAutoStableFrameMissing");
+                const auto stable = tracker->Observe();
+                if (stable.state != render::RetailWorldStableFrameObservation::State::Ready)
+                {
+                    if (stable.refusedFrames && stable.frameAttempt) {
+                        // A refused frame breaks consecutive safe observations;
+                        // it supplies no fabricated camera generation to Policy.
+                        s.autoPolicy->Observe({});
+                        report.retailWorldSafeRootObservations = 0;
+                        s.lastAutoObservation = now;
+                    }
+                    // Initial Unknown has no returned frame yet. A refused
+                    // attempted frame while Root cannot justify staying coarse.
+                    if (s.selectedSlot == 1 && stable.refusedFrames &&
+                        stable.frameAttempt && !s.pair)
+                    {
+                        report.retailWorldProjectedBounded = false;
+                        report.retailWorldForcedFine = true;
+                        const auto changed = requireFine();
+                        if (changed.status == GeometryReportStatus::Pending)
+                        {
+                            if (report.retailWorldAutoRefines != UINT64_MAX)
+                                ++report.retailWorldAutoRefines;
+                            return current();
+                        }
+                        return changed;
+                    }
+                    return current();
+                }
+                if (stable.binding != binding(s,s.requestId)) {
+                    s.autoPolicy->Observe({});
+                    report.retailWorldSafeRootObservations = 0;
+                    if (s.selectedSlot == 1) return requireFine();
+                    return current();
+                }
+                if (stable.camera.generation <= s.lastAutoFrameGeneration ||
+                    stable.camera.generation == UINT64_MAX)
+                    return current();
+                s.lastAutoObservation = now;
+                s.lastAutoFrameGeneration = stable.camera.generation;
+                report.retailWorldStableFrameGeneration = stable.camera.generation;
+                const auto& certificate = *s.surface->certificate;
+                ProjectedSurface::Input projection;
+                auto& key = projection.binding;
+                key.originalSource = certificate.originalSource;
+                key.selectedKey = certificate.selectedDescriptor;
+                key.coarsePackedSha256 = certificate.rootScalarPackedSha256;
+                key.finePackedSha256 = certificate.fineScalarPackedSha256;
+                key.coarseCut = certificate.rootCut;
+                key.fineCut = certificate.fineCut;
+                key.coarseCutCount = certificate.rootCutCount;
+                key.fineCutCount = certificate.fineCutCount;
+                key.coarseThresholdBits = certificate.rootThresholdBits;
+                key.fineThresholdBits = certificate.fineThresholdBits;
+                key.certificateAlgorithmVersion =
+                    RigidFinalSurface::Certificate::AlgorithmVersion;
+                key.fineToCoarseUpperBits = std::bit_cast<uint64_t>(certificate.fineToRoot);
+                key.coarseToFineUpperBits = std::bit_cast<uint64_t>(certificate.rootToFine);
+                key.hausdorffUpperBits = std::bit_cast<uint64_t>(certificate.hausdorffUpper);
+                projection.cut = {stable.camera.generation,s.pageModel.modelBirth,
+                    certificate.sourceAdmissionEpoch};
+                projection.minimum = certificate.minimum;
+                projection.maximum = certificate.maximum;
+                projection.surfaceDistanceUpper = certificate.hausdorffUpper;
+                projection.viewportWidth = stable.camera.render_width;
+                projection.viewportHeight = stable.camera.render_height;
+                projection.clipNear = -stable.camera.projection[14];
+                std::copy(std::begin(stable.camera.projection),
+                    std::end(stable.camera.projection),projection.projection.begin());
+                std::copy(std::begin(stable.camera.view),
+                    std::end(stable.camera.view),projection.view.begin());
+                std::copy(std::begin(s.page.world.m),
+                    std::end(s.page.world.m),projection.model.begin());
+                for (size_t axis=0;axis<3;++axis)
+                    projection.model[12+axis] -= stable.camera.camera_position[axis];
+                ProjectedSurface::Result projected;
+                const auto projectedStatus = ProjectedSurface::Build(
+                    projection,key,projection.cut,projected);
+                const bool bounded = projectedStatus == ProjectedSurface::Status::Bounded;
+                report.retailWorldProjectionStatus = uint32_t(projectedStatus)+1;
+                report.retailWorldProjectedBounded = bounded;
+                report.retailWorldProjectedUpper = bounded ? projected.euclideanPixelUpper : 0;
+                report.retailWorldForcedFine = !bounded;
+                const bool root = s.selectedSlot == 1;
+                const double allowance = root ? Binary::RefineAllowance :
+                    Binary::CoarsenAllowance;
+                HierarchicalBinaryDemand::Observation observation;
+                observation.binding = {certificate.identity,s.ownerEpoch,s.sourceEpoch,
+                    s.pageEpoch,s.shapeBirth};
+                observation.frameGeneration = stable.camera.generation;
+                observation.requiredViewMask = 1; // fixed returned main camera only
+                observation.maximumIndicator = bounded ? projected.euclideanPixelUpper : 0;
+                observation.allowance = allowance;
+                observation.currentlyRoot = root;
+                observation.forcedFine = !bounded;
+                observation.wantsFine = !bounded ||
+                    projected.euclideanPixelUpper > allowance;
+                const auto decision = s.autoPolicy->Observe(observation);
+                const auto counters = s.autoPolicy->Stats();
+                report.retailWorldAutoObservations = counters.observations;
+                report.retailWorldAutoRefines = std::max(report.retailWorldAutoRefines,counters.refine);
+                report.retailWorldAutoCoarsens = std::max(report.retailWorldAutoCoarsens,counters.coarsen);
+                // Keep the last satisfied three-frame coarsen witness visible
+                // after Policy resets its internal consecutive counter.
+                report.retailWorldSafeRootObservations = std::max(
+                    report.retailWorldSafeRootObservations,
+                    decision == HierarchicalBinaryDemand::Decision::Coarsen ?
+                        Binary::RequiredSafeObservations :
+                        s.autoPolicy->SafeRootObservations());
+                if (decision == HierarchicalBinaryDemand::Decision::Refine)
+                    return requireFine(!bounded);
+                if (decision == HierarchicalBinaryDemand::Decision::Coarsen)
+                    return StepRetailWorldVisible(
+                        GeometryPageFixtureAction::RootRetailWorldVisible);
+                if (decision == HierarchicalBinaryDemand::Decision::Refused &&
+                    root) return requireFine();
             }
             return current();
         }

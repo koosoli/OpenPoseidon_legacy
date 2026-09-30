@@ -165,6 +165,15 @@ void EngineWgpu::RollbackRetailWorldPair(const WorldPair::Request& request)
 // the ordinary op can then publish its new conventional placement/lifetime.
 void EngineWgpu::InvalidateRetailWorldConsumer(uint32_t producer)
 {
+    if(const auto stable=_retailWorldStableFrame)
+    {
+        const auto& b=stable->GetRequest().binding;
+        if(producer==b.originalProducerInstance||producer==b.pageProducerInstance)
+        {
+            stable->Invalidate(render::RetailWorldStableFrameObservation::Refusal::Instance);
+            if(_retailWorldStableArmed==stable)_retailWorldStableArmed.reset();
+        }
+    }
     const auto active=_retailWorldActivePair;if(!active)return;
     const auto& r=active->GetRequest();
     if(producer!=r.binding.originalProducerInstance&&producer!=r.binding.pageProducerInstance)return;
@@ -202,6 +211,17 @@ void EngineWgpu::ExecuteRetailWorldPair(const std::shared_ptr<WorldPair>& receip
     _retailWorldPairBefore=GetRetailWorldBefore(r,++_retailWorldFrameAttempt);
     const auto preflight=receipt->CheckBefore(_retailWorldPairBefore);
     if(preflight!=WorldPair::Refusal::None){receipt->ConsumeRejected(preflight);return;}
+    // A stable tracker never crosses a changing cut or Restore transaction.
+    // This is revocation only; pair preflight/mutation still uses its own proof.
+    if(const auto stable=_retailWorldStableFrame)
+    {
+        const auto& sb=stable->GetRequest().binding;
+        if(sb.originalProducerInstance==b.originalProducerInstance||sb.pageProducerInstance==b.pageProducerInstance)
+        {
+            stable->Invalidate(render::RetailWorldStableFrameObservation::Refusal::Instance);
+            if(_retailWorldStableArmed==stable)_retailWorldStableArmed.reset();
+        }
+    }
     if(r.action==WorldPair::Action::Takeover)
     {
         for(const auto& slot:_retailWorldConsumerBirths)
@@ -294,5 +314,54 @@ void EngineWgpu::ObserveRetailWorldPairReturned(const WgrFrame& frame,uint32_t r
         (r.binding.pageProducerInstance>=_instSlotOf.size()||_instSlotOf[r.binding.pageProducerInstance]==MissingInstance))
         _retailWorldActivePair.reset();
     _retailWorldCameraBefore=0;
+}
+
+void EngineWgpu::ArmRetailWorldStableFrame()
+{
+    using Stable=render::RetailWorldStableFrameObservation;
+    if(_retailWorldStableArmed)
+    {
+        // A previous call without its matching return cannot leave ready data.
+        _retailWorldStableArmed->Invalidate(Stable::Refusal::Frame);
+        _retailWorldStableArmed.reset();
+    }
+    const auto tracker=_retailWorldStableFrame;if(!tracker)return;
+    const auto& r=tracker->GetRequest();
+    if(!_renderer||!tracker->Valid()||r.binding.ownerEpoch!=_geometryOwnerEpoch||
+        _retailWorldPairReturn||_retailInstanceReturn||_retailWorldStableFrameAttempt>=UINT64_MAX-1)
+    {tracker->Invalidate(Stable::Refusal::Binding);return;}
+    Stable::DrainEvidence e;e.binding=r.binding;e.frameAttempt=++_retailWorldStableFrameAttempt;
+    e.original=GetRetailWorldInstanceEvidence(r.binding.originalProducerInstance,r.original.model,
+        r.originalRendererHandle);
+    e.page=GetRetailWorldInstanceEvidence(r.binding.pageProducerInstance,r.page.model,r.pageRendererHandle);
+    e.instanceEpoch=e.original.getterSucceeded?e.original.cpu.instance_epoch:0;
+    WgrMainCameraTuple before{};
+    e.cameraGetterSucceeded=wgr_main_camera_tuple(_renderer,&before,sizeof(before),1)==1&&
+        before.version==1&&before.struct_bytes==sizeof(before)&&before.status==1&&!before.reserved;
+    e.cameraGenerationBeforeRender=e.cameraGetterSucceeded?before.generation:0;
+    if(tracker->Arm(e))_retailWorldStableArmed=tracker;
+}
+
+void EngineWgpu::ObserveRetailWorldStableReturned(const WgrFrame& frame,uint32_t renderStatus)
+{
+    using Stable=render::RetailWorldStableFrameObservation;
+    auto tracker=std::move(_retailWorldStableArmed);if(!tracker)return;
+    const auto& r=tracker->GetRequest();
+    if(tracker!=_retailWorldStableFrame||r.binding.ownerEpoch!=_geometryOwnerEpoch)
+    {tracker->Invalidate(Stable::Refusal::Binding);return;}
+    const auto armed=tracker->Observe();
+    Stable::ReturnedEvidence e;e.binding=r.binding;e.frameAttempt=armed.frameAttempt;
+    e.original=GetRetailWorldInstanceEvidence(r.binding.originalProducerInstance,r.original.model,
+        r.originalRendererHandle);
+    e.page=GetRetailWorldInstanceEvidence(r.binding.pageProducerInstance,r.page.model,r.pageRendererHandle);
+    e.instanceEpoch=e.original.getterSucceeded?e.original.cpu.instance_epoch:0;
+    e.renderReturnStatus=static_cast<int32_t>(renderStatus);
+    // Arm retained the actual pre-call generation. The tracker compares it to
+    // this returned value as part of its immutable attempt, never a later getter.
+    e.cameraGenerationBeforeRender=armed.cameraGenerationBeforeRender;
+    e.cameraGetterSucceeded=wgr_main_camera_tuple(_renderer,&e.camera,sizeof(e.camera),1)==1;
+    if(frame.cameras.data&&e.camera.camera_index<frame.cameras.length)
+    {e.packetCameraIndex=e.camera.camera_index;e.packetCamera=frame.cameras.data[e.packetCameraIndex];}
+    tracker->PublishReturned(e);
 }
 } // namespace Poseidon

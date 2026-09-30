@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -152,6 +153,33 @@ Engine::GeometryPageFixtureReport EngineWgpu::ProbeRetailColdWorldRecords()
             refusal.pageWorkState = "RetailColdWorldHierarchyRefused";
             return refusal;
         }
+        const char* autoFlag = std::getenv("WGR_GEOMETRY_PAGE_RETAIL_WORLD_AUTO");
+        const bool autoEnabled = autoFlag && autoFlag[0] == '1' && !autoFlag[1];
+        std::shared_ptr<const RigidFinalSurface::Proof> certifiedSurface;
+        uint64_t proofCharge = 0;
+        if (autoEnabled)
+        {
+            RigidFinalSurface::Proof proof;
+            const auto status = RigidFinalSurface::Build(actual, product, proof);
+            refusal.retailWorldSurfaceStatus = uint32_t(status);
+            if (status != RigidFinalSurface::Status::Certified || !proof.certificate ||
+                !proof.root || !proof.fine || !proof.certificate->rootTriangles ||
+                !proof.certificate->fineTriangles)
+            {
+                refusal.pageWorkState = "RetailColdWorldSurfaceCertificateRefused";
+                return refusal;
+            }
+            proofCharge = sizeof(RigidFinalSurface::Proof) + sizeof(RigidFinalSurface::Certificate) +
+                proof.root->knownCapacityBytes + proof.fine->knownCapacityBytes + 512;
+            if (proofCharge > 512 * 1024)
+            {
+                refusal.pageWorkState = "RetailColdWorldSurfaceCapacity";
+                return refusal;
+            }
+            certifiedSurface = std::make_shared<const RigidFinalSurface::Proof>(std::move(proof));
+            refusal.retailWorldSurfaceCertified = true;
+            refusal.retailWorldSurfaceUpper = certifiedSurface->certificate->hausdorffUpper;
+        }
         render::RetailPagePilotAdmission admission;
         const int fineLevel = actual.finalLevels[1];
         {
@@ -169,6 +197,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::ProbeRetailColdWorldRecords()
 
         admission.actual = std::make_shared<const RigidOdol7FinalExport>(std::move(actual));
         admission.product = std::make_shared<const RigidFinalHierarchyProduct>(std::move(product));
+        admission.certifiedSurface = std::move(certifiedSurface);
+        admission.knownProofBytes = proofCharge;
         admission.modelLease = sourceBirth->lease;
         admission.texture = primary;
         admission.textureBirth = textureBirth;
@@ -234,7 +264,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ProbeRetailColdWorldRecords()
         admission.knownAuthorityBytes = sizeof(admission) + sizeof(current) +
             sizeof(RetailWorldSource) + sourceBirth->KnownCppBytes() +
             textureBirth->KnownCppBytes() +
-            2 * (rawSha.capacity() + uploadedSha.capacity()) + 512;
+            2 * (rawSha.capacity() + uploadedSha.capacity()) + proofCharge + 512;
         if (admission.knownAuthorityBytes > 1024 * 1024)
         {
             refusal.pageWorkState = "RetailColdWorldAuthorityCapacity";

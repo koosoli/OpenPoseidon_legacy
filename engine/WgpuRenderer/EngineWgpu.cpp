@@ -4842,6 +4842,7 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
     // The explicit diagnostic replaces the optional CPU-timing call for this frame.
     // An Ok(None) acquire still returns 0, so only submitted=1 arms a pending map.
     if (requestMainCount) { callCpuToken = 0; mainResult = {}; }
+    if (_retailWorldStableFrame) ArmRetailWorldStableFrame();
     const int32_t renderReturnStatus = requestMainCount
         ? wgr_render_frame_main_target_count(_renderer, &frame, &mainRequest,
             sizeof(mainRequest), 1, &mainResult, sizeof(mainResult), 1)
@@ -4868,6 +4869,7 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
     if (_geometryPageFixtureObservation) PublishGeometryPageFixtureObservation(frame,renderReturnStatus);
     if (_retailInstanceReturn) ObserveRetailInstanceReturned(frame,renderReturnStatus);
     if (_retailWorldPairReturn) ObserveRetailWorldPairReturned(frame,renderReturnStatus);
+    if (_retailWorldStableArmed) ObserveRetailWorldStableReturned(frame,renderReturnStatus);
     if (_geometryOwnerLedger)
     {
         // Once per real renderer frame, after deferred uploader destroys drain.
@@ -9638,7 +9640,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
     }
     if(action==GeometryPageFixtureAction::BeginRetailWorldVisible || action==GeometryPageFixtureAction::PollRetailWorldVisible ||
        action==GeometryPageFixtureAction::RootRetailWorldVisible || action==GeometryPageFixtureAction::FineRetailWorldVisible ||
-       action==GeometryPageFixtureAction::RestoreRetailWorldVisible)
+       action==GeometryPageFixtureAction::RestoreRetailWorldVisible || action==GeometryPageFixtureAction::FollowRetailWorldVisible ||
+       action==GeometryPageFixtureAction::StopRetailWorldVisible)
         return StepRetailWorldVisible(action);
     if(action==GeometryPageFixtureAction::BeginRetailVisible || action==GeometryPageFixtureAction::RootRetailVisible ||
        action==GeometryPageFixtureAction::FineRetailVisible || action==GeometryPageFixtureAction::PollRetailVisible ||
