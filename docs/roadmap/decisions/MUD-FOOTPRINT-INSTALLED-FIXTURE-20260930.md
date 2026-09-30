@@ -34,6 +34,17 @@ coordinates and rejects support gaps above3cm. Production UNIFORM_WET tracing
 is enabled. Captures and actual movement are still required; no failed run is
 accepted as proof of wet contacts or volumetric appearance.
 
+The matching06a7c41e deep-layer run `noe-deep-current-20260930-213659-6fd5c5`
+exited normally without a renderer validation failure. It remains a failed
+fixture: RPC/poll latency allowed the covered walker to reachZ4676.60, outside
+the existingZ4676 endpoint bound. Wetness reached0.9129; actual covered uniform
+wetness stayed0 and mud chunks stayed0, but these observations do not replace
+the required bounded covered movement. The covered control now runs at0.2
+simulation acceleration, preserving the measured0.7m movement and exact roof
+endpoint, physical support, dry uniform and no-deformation assertions. Exposed
+walking stays at normal speed. All74 actual runner helper checks still pass;
+the corrected installed deep-layer run is pending.
+
 - `dev_mud {action:"state"}` reads enabled, wetness, chunks, revision and rejected count. `action:"sample",x,z` additionally reads signed offset, mud/physical gradients, physical height and actual world/texture/surface metadata. Coordinates must be finite and bounded to ±1,000,000m. `sourceEligible` means the exact terrain source admission only; it does not assert slope, road, snow, roof or actual boot contact acceptance. No mutation action exists.
 - `weather_particles {action:"state"}` is read-only. `action:"set"` accepts mode `off|legacy|particle|both`, finite density in [0,1], and Boolean snowflakes; at least one field is required, and the complete candidate validates before either rain producer is changed. These are private-game diagnostic controls, not a gameplay weather preset or synthetic wetness setter.
 - `weather_visibility` retains existing fields and appends `particleDensity`, `particleSnowflakes` and `liquidRain` from the shared `UniformWettingDensity` contract. Actual landscape rain remains independent. This exposes the Nogova owner gap where visible liquid particle overrides previously failed to wet uniforms.

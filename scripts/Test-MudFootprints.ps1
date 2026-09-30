@@ -164,9 +164,9 @@ function Grid([string]$stage) {
     $rows | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output ($stage+'-grid.json'))
     return ,$rows
 }
-function Walk([string]$stage,[double]$targetZ,[double]$minimumDistance) {
+function Walk([string]$stage,[double]$targetZ,[double]$minimumDistance,[double]$walkAcceleration=1) {
     $start=State ($stage+'-before');$null=Send @{cmd='exec';code=('mudWalker setUnitPos "UP"; mudWalker setBehaviour "CARELESS"; group mudWalker setSpeedMode "LIMITED"; mudWalker doMove [4975,'+$targetZ.ToString('R',$culture)+',0]')}
-    Set-Acceleration 1;$deadline=[DateTime]::UtcNow.AddSeconds(25)
+    Set-Acceleration $walkAcceleration;$deadline=[DateTime]::UtcNow.AddSeconds(25)
     do {
         Start-Sleep -Milliseconds 300;$position=Eval 'getPosASL mudWalker'
         $distance=[Math]::Sqrt([Math]::Pow($position[0]-$start.actor[0],2)+[Math]::Pow($position[1]-$start.actor[1],2))
@@ -255,8 +255,9 @@ try {
     } while ($true)
     # A destination only 1.6m away is inside the AI arrival tolerance. Request
     # the ordinary full walking lane, then pause after a measured .7m under
-    # the roof; the covered endpoint is independently bounded below.
-    Set-Acceleration 0;$coveredBefore=State 'covered-before';$covered=Walk 'covered-walking' 4680.25 .7
+    # the roof. Slow only this narrow control so RPC/poll latency cannot carry
+    # the actor beyond the independently bounded covered endpoint.
+    Set-Acceleration 0;$coveredBefore=State 'covered-before';$covered=Walk 'covered-walking' 4680.25 .7 .2
     Require ($covered.actor[1] -le 4676 -and $covered.actor[1] -ge 4674.25) 'Covered walking escaped the central floor-free roof region.'
     Require ($covered.mud.chunks -eq 0 -and $covered.mud.revision -eq $coveredBefore.mud.revision) 'Actual roof-covered walking produced mud depressions.'
     Require ($covered.uniformWetness -le .001) 'Actual roof-covered uniform became wet from liquid particles.'
