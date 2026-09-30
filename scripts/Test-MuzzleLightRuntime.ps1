@@ -19,7 +19,13 @@ function Decode-Eval([string]$display) {
         }
         return $decoded.ToString()
     }
-    return ConvertFrom-Json -InputObject $display -NoEnumerate
+    # Object values use an unquoted debug display (for example WEST Alpha
+    # Schwarz:1 (mail)); they are not JSON. Decode only actual JSON-shaped
+    # scalar/array values, retaining the custom object representation literally.
+    if($display.StartsWith('[') -or $display -cmatch '^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)$') {
+        return ConvertFrom-Json -InputObject $display -NoEnumerate
+    }
+    return $display
 }
 function Parse-MuzzleTrace([string]$line) {
     $number='[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?'
@@ -60,6 +66,8 @@ if($SelfTest) {
     Require ((Decode-Eval '"data3d\mc vojakw2.p3d"') -ceq 'data3d\mc vojakw2.p3d') 'Literal model path changed.'
     Require ((Decode-Eval '"a ""quoted"" value"') -ceq 'a "quoted" value') 'SQF quotes changed.'
     Require ((Decode-Eval '[1,2,3]').Count -eq 3) 'SQF vector decode failed.'
+    Require ((Decode-Eval 'WEST Alpha Schwarz:1 (mail)') -ceq 'WEST Alpha Schwarz:1 (mail)') 'Unquoted SQF object representation changed.'
+    Require ((Decode-Eval 'true') -is [bool] -and (Decode-Eval '1.25') -eq 1.25) 'Typed scalar decode failed.'
     Write-Host 'PASS muzzle runtime camera arithmetic, trace, peak/owner admission and SQF decoder helper checks (no game).';return
 }
 Require ([bool]$env:LOCK_OWNER) 'Run through scripts/with-game-lock.sh.'
@@ -149,7 +157,7 @@ try {
             Require ((Eval 'triSetBrightness 1') -ceq 'OK:1.000') 'Fixed brightness refused.'
             $position=Eval 'getPosASL player';Require ([Math]::Abs($position[0]-$x) -lt .3 -and [Math]::Abs($position[1]-$z) -lt .3) 'Roof collision displaced the actual shooter.'
             $views=New-MuzzleViews $x $z ([double]$position[2])
-            $case=[ordered]@{scenario=$kind;source=(Eval 'player');class=(Eval 'typeOf player');weapons=(Eval 'weapons player');position=$position;actualGroundHeight=$ground;requestedDate=@(1985,6,21,$hour,0);actualDayTime=(Eval 'dayTime');weather=(Send @{cmd='weather_visibility'});views=$views;roof=$roof;captures=@{}};$armResult.scenarios[$kind]=$case
+            $case=[ordered]@{scenario=$kind;source=(Eval 'format ["%1",player]');class=(Eval 'typeOf player');weapons=(Eval 'weapons player');position=$position;actualGroundHeight=$ground;requestedDate=@(1985,6,21,$hour,0);actualDayTime=(Eval 'dayTime');weather=(Send @{cmd='weather_visibility'});views=$views;roof=$roof;captures=@{}};$armResult.scenarios[$kind]=$case
             Require ($case.weapons -contains 'M16') 'Actual player has no M16.'
             Require ([Math]::Abs([double]$case.actualDayTime-$hour) -lt .02) 'Actual world hour differs from the scenario.'
             Require ($null -ne $case.weather.rain -and [double]$case.weather.rain -lt .001 -and $null -ne $case.weather.fog -and [double]$case.weather.fog -lt .001) 'Actual dry/clear weather control failed.'
