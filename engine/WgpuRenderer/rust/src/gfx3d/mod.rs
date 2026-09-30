@@ -14,6 +14,8 @@ mod registered_mesh_refs;
 mod section_refresh;
 mod section_span_pool;
 mod local_pose_cache;
+#[cfg(test)]
+mod uniform_wetness_tests;
 mod interior_publication;
 mod interior_cached_count;
 mod cached_count_equivalence;
