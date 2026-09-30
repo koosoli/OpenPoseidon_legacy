@@ -3147,6 +3147,19 @@ pub unsafe extern "C" fn wgr_terrain_set_snow(renderer: *mut WgrRenderer, data: 
     }));
 }
 
+/// Upload a signed mission-local mud view, independently of the snow deposit.
+/// # Safety
+/// `data` must address `count` floats; renderer must be live and exclusively owned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_mud(renderer: *mut WgrRenderer, data: *const f32, count: u32) {
+    if renderer.is_null() || data.is_null() || count != 4 + 512 * 512 { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        let values = unsafe { std::slice::from_raw_parts(data, count as usize) };
+        r.terrain.set_mud(&r.queue, values);
+    }));
+}
+
 /// Set the terrain ground layers as a list of wgr_texture_create handles (one
 /// per Landscape texture index). See wgpu_renderer.hpp.
 ///

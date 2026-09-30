@@ -1247,6 +1247,7 @@ class EngineWgpu : public EngineDummy
         WgrTerrainParams terrainParams{};
         bool terrainParamsDirty = false;
         std::vector<float> snowData;
+        std::vector<float> mudData;
         std::vector<WgrSmokeShadowBlob> smokeBlobs;
         // SMK-038: the same particles again, uncapped by the ground-shadow gates and
         // with a larger cap, for froxel injection. Collected only while the volumetric
@@ -1683,6 +1684,7 @@ class EngineWgpu : public EngineDummy
     static bool LastMemoryStats(WgrMemoryStats& out);
     void QueueTerrainParams(const WgrTerrainParams& p);
     void QueueSnow(std::vector<float> data) { _pendingSet.snowData = std::move(data); }
+    void QueueMud(std::vector<float> data) { _pendingSet.mudData = std::move(data); }
     void QueueWaterParams(const WgrWaterParams& p);
     void QueuePlanarReflectionPad(float pad);
     void QueueWaterInteraction(const WgrWaterInteractionParams& p, const WgrWaterInteractionEvent* events,

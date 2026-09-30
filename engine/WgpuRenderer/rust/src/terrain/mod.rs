@@ -183,6 +183,25 @@ fn ground_weather_params(wetness: f32, rain: f32, sea_level: f32, time: f32) -> 
     [bounded(wetness), bounded(rain), sea_level, time]
 }
 
+fn valid_mud_view(data: &[f32]) -> bool {
+    data.len() == 4 + 512 * 512 && data.iter().all(|v| v.is_finite())
+        && data[2] == 0.125 && data[3] >= 0.0 && data[3] <= 0.06
+        && data[4..].iter().all(|v| *v <= 0.0 && *v >= -data[3])
+}
+
+#[test]
+fn mud_upload_rejects_nonfinite_positive_and_excess_depth_without_touching_snow() {
+    let mut data = vec![0.0; 4 + 512 * 512];
+    data[2] = 0.125; data[3] = 0.06; data[4] = -0.03;
+    assert!(valid_mud_view(&data));
+    data[4] = 0.01; assert!(!valid_mud_view(&data));
+    data[4] = -0.061; assert!(!valid_mud_view(&data));
+    data[4] = f32::NAN; assert!(!valid_mud_view(&data));
+    data[4] = 0.0; data[2] = 0.25; assert!(!valid_mud_view(&data));
+    data[2] = 0.125; data[3] = 0.07; assert!(!valid_mud_view(&data));
+    assert!(!valid_mud_view(&data[..data.len()-1]));
+}
+
 #[test]
 fn ground_weather_preserves_drying_film_without_rain_and_rejects_invalid_state() {
     assert_eq!(ground_weather_params(0.6, 0.0, -2.0, 25.0), [0.6, 0.0, -2.0, 25.0]);
@@ -567,7 +586,9 @@ impl Terrain {
         });
         let snow_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_experimental_snow"),
-            size: (4 + 512 * 512) * 4,
+            // Snow occupies the first view, signed mud offsets the second. Reusing
+            // the storage binding keeps colour, depth and conformed meshes aligned.
+            size: 2 * (4 + 512 * 512) * 4,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1059,6 +1080,12 @@ impl Terrain {
         if data.len() == 4 + 512 * 512 && data.iter().all(|v| v.is_finite()) {
             queue.write_buffer(&self.snow_buffer, 0, bytemuck::cast_slice(data));
             self.snow_deposit_depth = data[3].max(0.0);
+        }
+    }
+
+    pub fn set_mud(&mut self, queue: &wgpu::Queue, data: &[f32]) {
+        if valid_mud_view(data) {
+            queue.write_buffer(&self.snow_buffer, (4 + 512 * 512) * 4, bytemuck::cast_slice(data));
         }
     }
 
