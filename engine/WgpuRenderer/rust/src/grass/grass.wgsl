@@ -1125,6 +1125,8 @@ struct VsOut {
     // layer, .w = texture strength (faded out by distance so sub-pixel blades
     // sample flat colour instead of sparkling).
     @location(5) blade_uv: vec4<f32>,
+    // Constant on each ribbon, including its near-ring taper jitter.
+    @location(6) @interpolate(flat) blade_taper: f32,
 };
 
 @vertex
@@ -1204,6 +1206,7 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     out.wind_gust = wind.gust;
     out.blade_uv = vec4<f32>(select(1.0, 0.0, left), 1.0 - t, f32(inst_packed.w & 7u),
                              blade_texture_strength(rel));
+    out.blade_taper = max(shape.z * taper_jitter, 0.05);
     return out;
 }
 
@@ -1259,6 +1262,7 @@ fn vs_grass_mid(@builtin(vertex_index) vertex_index: u32, @builtin(instance_inde
     out.wind_gust = wind.gust;
     out.blade_uv = vec4<f32>(select(1.0, 0.0, left), 1.0 - t, f32(inst_packed.w & 7u),
                              blade_texture_strength(rel));
+    out.blade_taper = shape.z;
     return out;
 }
 
@@ -1437,12 +1441,17 @@ fn blade_self_shadow() -> f32 { return clamp(grass.blade_look.x, 0.0, 1.0); }
 // first cascades a shadow texel is larger than a tuft and the sample degenerates
 // into a flat darkening of the distance. Returns (sun occlusion 0..1, ambient AO
 // multiplier 0..1); both are identity at strength 0.
-fn blade_self_shadow_terms(world_rel: vec3<f32>, normal: vec3<f32>, height_t: f32) -> vec2<f32> {
+fn blade_self_shadow_terms(world_rel: vec3<f32>, normal: vec3<f32>, height_t: f32,
+                           taper: f32, detail: f32) -> vec2<f32> {
     let strength = blade_self_shadow();
     // Root occlusion: at full strength the base sees ~35% of the light a tip
     // does, and the occlusion reaches most of the way up the blade -- neighbours
     // in a closed field stand shoulder-height, not knee-height.
-    let tuft_ao = mix(1.0 - 0.65 * strength, 1.0, smoothstep(0.0, 0.85, height_t));
+    var height_ao = smoothstep(0.0, 0.85, height_t);
+    if (detail < 1.0 && strength > 0.001) {
+        height_ao = mix(blade_height_ao_mean(taper), height_ao, detail);
+    }
+    let tuft_ao = mix(1.0 - 0.65 * strength, 1.0, height_ao);
     // Derivatives outside the branch: they must come from uniform control flow.
     let dwx = dpdx(world_rel);
     let dwy = dpdy(world_rel);
@@ -1465,6 +1474,67 @@ fn blade_shading_detail(uv: vec2<f32>) -> f32 {
     let width_pixels = 1.0 / max(width_gradient, 0.0001);
     return select(1.0, smoothstep(0.75, 3.0, width_pixels), GRASS_FILTER_SUBPIXEL);
 }
+
+// Pure footprint moments. An unresolved ribbon represents its entire tapered
+// area, not whichever bright tip happened to hit the sample this frame. Width
+// is (1-t)^p, so E[t^k] = k! / ((p+2)...(p+k+1)). Integrate the colour ramp,
+// quadratic root shade and linear gust highlight together to retain their mean.
+// This averages albedo only; it does not change silhouette or sample coverage.
+struct BladeRampMean {
+    colour: vec3<f32>,
+    height_colour: vec3<f32>,
+    height: f32,
+};
+fn blade_ramp_mean(base: vec3<f32>, tip: vec3<f32>, root_shade: f32,
+                   gust_amount: f32, taper: f32) -> BladeRampMean {
+    let p = max(taper, 0.05);
+    let m1 = 1.0 / (p + 2.0);
+    let m2 = m1 * 2.0 / (p + 3.0);
+    let m3 = m2 * 3.0 / (p + 4.0);
+    let m4 = m3 * 4.0 / (p + 5.0);
+    let m5 = m4 * 5.0 / (p + 6.0);
+    let a = 1.0 - root_shade;
+    let delta = tip - base;
+    let c0 = base * a;
+    let c1 = delta * a;
+    let c2 = base * root_shade;
+    let c3 = delta * root_shade;
+    let unlit = c0 + c1 * m1 + c2 * m2 + c3 * m3;
+    let height_unlit = c0 * m1 + c1 * m2 + c2 * m3 + c3 * m4;
+    let height2_unlit = c0 * m2 + c1 * m3 + c2 * m4 + c3 * m5;
+    let gust_base = 1.0 + gust_amount * 0.035;
+    let gust_tip = gust_amount * 0.075;
+    return BladeRampMean(unlit * gust_base + height_unlit * gust_tip,
+                         height_unlit * gust_base + height2_unlit * gust_tip, m1);
+}
+
+// dry_patch is affine in colour and height*colour. Keep that correlation:
+// merely grading the mean at the mean height would lose the dry, bright tips.
+fn blade_dry_mean(mean: BladeRampMean, patch_mask: f32) -> vec3<f32> {
+    let luma = vec3<f32>(0.2126, 0.7152, 0.0722);
+    let dry_colour = mean.colour * 0.45 + mean.height_colour * 0.55;
+    let straw = vec3<f32>(0.74, 0.66, 0.32) *
+        (0.55 * (0.45 + 0.55 * mean.height) + 1.35 * dot(dry_colour, luma));
+    return mean.colour + patch_mask * (straw - dry_colour);
+}
+
+// Integral of smoothstep(0, .85, t) under the same taper area. The tail moments
+// integrate t^2/t^3 over [.85,1], where the AO ramp has already reached one.
+fn blade_height_ao_mean(taper: f32) -> f32 {
+    let p = max(taper, 0.05);
+    let m2 = 2.0 / ((p + 2.0) * (p + 3.0));
+    let m3 = m2 * 3.0 / (p + 4.0);
+    let q = 0.15;
+    let tail = pow(q, p + 1.0);
+    let q1 = q * (p + 1.0) / (p + 2.0);
+    let q2 = q * q * (p + 1.0) / (p + 3.0);
+    let q3 = q * q * q * (p + 1.0) / (p + 4.0);
+    let tail2 = tail * (1.0 - 2.0 * q1 + q2);
+    let tail3 = tail * (1.0 - 3.0 * q1 + 3.0 * q2 - q3);
+    return clamp(3.0 * (m2 - tail2) / (0.85 * 0.85)
+        - 2.0 * (m3 - tail3) / (0.85 * 0.85 * 0.85) + tail, 0.0, 1.0);
+}
+// End pure footprint moments.
 
 fn grass_shade(in: VsOut) -> vec4<f32> {
     let shading_detail = blade_shading_detail(in.blade_uv.xy);
@@ -1516,8 +1586,24 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // shape_mix.w scales the photo texture globally on top of the distance fade
     // already in blade_uv.w, so the detail can be dialled back without deleting
     // the atlas and falling all the way to procedural.
-    let texture_amount = in.blade_uv.w * clamp(grass.shape_mix.w, 0.0, 1.0) * shading_detail;
-    let graded = grass_saturation(dry_patch(mix(procedural, textured, texture_amount), world.xz, in.height_t));
+    let texture_amount = in.blade_uv.w * clamp(grass.shape_mix.w, 0.0, 1.0);
+    var dry_colour = dry_patch(mix(procedural, textured, texture_amount), world.xz, in.height_t);
+    if (shading_detail < 1.0 && grass.native.x <= 0.0) {
+        // Seed tint is constant per blade, and field tint is metre-scale; keep
+        // both rather than erasing the meadow's stable colour variation.
+        var mean = blade_ramp_mean(base, tip, blade_root_shade(),
+            in.wind_gust * clamp(grass.wind_strength, 0.0, 1.5), in.blade_taper);
+        mean.colour *= variation;
+        mean.height_colour *= variation;
+        let amount = clamp(grass.look.y, 0.0, 1.0);
+        var patch_mask = 0.0;
+        if (amount > 0.001) {
+            let field = clump_noise(world.xz, max(grass.look.z, 0.002), 0x93b5e1a7u);
+            patch_mask = smoothstep(1.0 - amount, 1.0 - amount * 0.30, field);
+        }
+        dry_colour = mix(blade_dry_mean(mean, patch_mask), dry_colour, shading_detail);
+    }
+    let graded = grass_saturation(dry_colour);
     // Per-patch hue drift on top of the luminance-only colour variation above:
     // warm straw one way, cool blue-green the other, on a ~11 m field of its own
     // so it lines up with neither the dry patches nor the density. 0 = none.
@@ -1551,7 +1637,8 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // Blade-on-blade: (sun occlusion, ambient AO). Identity at strength 0.
     // RFG-091: the blade-on-blade terms assume a bare procedural blade; the native atlas is
     // already a lit tuft, and the two together were black.
-    let self_shadow = select(blade_self_shadow_terms(in.world_rel, n, in.height_t), vec2<f32>(0.0, 1.0),
+    let self_shadow = select(blade_self_shadow_terms(in.world_rel, n, in.height_t,
+                             in.blade_taper, shading_detail), vec2<f32>(0.0, 1.0),
                              grass.native.x > 0.0);
     let direct = frame.sun_diffuse.rgb * mix(ndl, wrap, 0.35) *
         (1.0 - max(terrain_shadow, self_shadow.x)) * cloud_lit;

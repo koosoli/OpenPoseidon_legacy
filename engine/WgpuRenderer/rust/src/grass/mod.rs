@@ -1,5 +1,7 @@
 mod blade_atlas;
 mod wind;
+#[cfg(test)]
+mod footprint_tests;
 
 use crate::ffi::{
     WGR_GRASS_DOWNWASH_COUNT, WGR_GRASS_TRACK_COUNT, WgrGrassDownwash, WgrGrassParams,
@@ -3059,7 +3061,7 @@ mod tests {
         );
     }
 
-    fn headless() -> Option<(wgpu::Device, wgpu::Queue)> {
+    pub(super) fn headless() -> Option<(wgpu::Device, wgpu::Queue)> {
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
