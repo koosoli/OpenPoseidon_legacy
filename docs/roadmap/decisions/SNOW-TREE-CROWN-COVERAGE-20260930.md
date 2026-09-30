@@ -195,3 +195,29 @@ threshold for quality. Completion status is `captured-not-visually-accepted`.
 Review those masks, distant whiteness, LOD continuity and temporal glitter before
 accepting appearance. Real covered/moved/deleted controls, wind sequences and
 altitude-only snow remain the separate gates described above.
+
+## Installed original Everon crown inspection
+
+Matching06a7c41e `build/tree-snow/stock-crowns-bound-20260930-220101-2790bb`
+completes both ON/OFF source, state, actual identity, capture and lifecycle
+controls. Actual target is `5242: str habr`, loaded `data3d\\str habr.p3d`,
+ASL `[4324.11,4341.45,62.3367]`; ON has a real retained exposed upper-crown
+owner query and OFF binds the same model/position without crown probes. Both
+exit normally0, with Shutdown complete and unchanged installed pair. Captured
+native renderer diagnostics report current physical-map ready/submitted state.
+Root inspects30m and400m ON/OFF: upper individual crowns visibly whiten, lower
+foliage stays coloured, lower trunks stay brown and cutout holes remain. This
+accepts bounded still-image crown visibility on this model; broad central image
+metrics alone are not its proof. Temporal wind/LOD transitions, covered/moved
+controls and merged forest crowns remain open. Camera aim uses loaded model
+height rather than per-instance scaled extent, so centre-pixel assumptions
+must still be checked against the actual silhouette.
+
+The earlier `stock-crowns-current-20260930-215220-a3eae1` remains failed on a
+live-log sharing conflict; the following `stock-crowns-sharedlog-20260930-215657-603df7`
+remains failed because it passed ASL into terrain-relative nearestObject and
+therefore could not bind a target. Both owned games shut down normally. The
+runner now reads complete log lines with explicit shared read access, pins and
+restores the physical-map setting, preserves stdout/stderr, and searches the
+proven XZ at terrain-relative0 before requiring actual model/ASL identity.
+All27 source/helper checks pass; these repairs do not weaken admission gates.

@@ -1392,21 +1392,30 @@ unbuilt_candidates: >-
       ignored, including cutout, irregular powder, tree crown and mud helpers.
       Tree crown source c552aae2 uses actual bounded upper-center roof probes,
       model-height masks and matte mean powder in both draw paths; alpha, wind
-      and normals remain. Unknown far proof stays bare. Installed tree and
+      and normals remain. Unknown far proof stays bare. Matching06a7c41e original
+      Everon individual str-habr tree ON/OFF controls pass actual owner/model/ASL
+      binding, paused state, normal exit and unchanged pair. Root inspects white
+      upper crowns at30m/400m with coloured lower foliage and brown lower trunks;
+      cutout holes persist. Wind/LOD transitions, sheltered/moved and merged
+      forest crown acceptance remain open. Failed log-sharing and ASL/AGL target
+      attempts stay failed. The corrected27 helper checks pass.
       Installed01e8c4fb near stock tent capture now shows white upward fabric,
       bare vertical fabric and snow on the nearby rock tops, with normal shutdown.
       New independent far physical-depth source8f3434ae covers640m radius,
       replays current retained/direct geometry and fails closed on incomplete
       publication or actual GPU output overflow. Combined serial renderer checks
       pass609 tests, zero failed, two existing ignored, including actual far-depth,
-      deep mud, signed sand, wet soil and grass probes. New matching full build,
-      near/200m/500m and tree installed controls remain pending; no island-wide claim.
+      deep mud, signed sand, wet soil and grass probes. Matching06a7c41e full
+      build/deployment and original Everon near/200m/500m captures complete.
+      The inclined tent roof still has self-occlusion stripes; appearance remains
+      unaccepted while a dedicated normal-aware physical snow query is developed.
+      No island-wide or complete shelter acceptance is claimed.
       Pure stock runner checks pass 32 assertions plus existing roof mocked RPC
       tests, without game/GPU use by the runner author. Prior installed roof
       rain/puddle evidence and 8b3ae13c walking/refill are retained baselines,
       not acceptance of this new object coat or powder.
     known_gap: >-
-      The latest installed 6a388c62 stock control in
+      Historical installed 6a388c62 stock control in
       build/snow-surface/eden-gates-20260930-175343-1fa463 still shows bare tent
       fabric under deposit; the rejected retained animation hint motivated the
       source correction, not a successful roof appearance result. Earlier failed
