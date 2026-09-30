@@ -670,7 +670,7 @@ mod tests {
         p.domain = [0., 0., 0.125, 10.];
         p.control = [1024., 1024., 1., 1.];
         let cells = vec![[2., 0.02, 0., 0.]; MAX_CELLS];
-        let selected = visible_cells(&cells, &p(), [64., 3., 64.]);
+        let selected = visible_cells(&cells, &p, [64., 3., 64.]);
         assert!(selected.len() <= MAX_DRAW_CELLS && !selected.is_empty());
         let source = include_str!("rain_water.wgsl");
         for proof in [

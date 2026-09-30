@@ -29,7 +29,7 @@ class WaterWgpu : public IWaterRenderer
     void QueueRainWater(bool enabled);
     uint64_t _rainWaterRevision = UINT64_MAX;
     uint64_t _rainWaterGeneration = UINT64_MAX;
-    RStringB _rainWaterWorld;
+    std::string _rainWaterWorld;
     bool _rainWaterEnabled = false;
     bool _rainWaterHasSurface = false;
     // (Re)builds the quadtree when the map changes; returns true if it did.

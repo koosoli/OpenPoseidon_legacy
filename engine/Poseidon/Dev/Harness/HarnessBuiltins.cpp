@@ -2238,6 +2238,7 @@ void RegisterSnowProbe(HarnessServer& hs)
                 cJSON_AddNumberToObject(out,"evaporationVolume",budget.evaporation);
                 cJSON_AddNumberToObject(out,"outletVolume",budget.outlet);
                 cJSON_AddNumberToObject(out,"pendingSeconds",field.PendingSeconds());
+                cJSON_AddNumberToObject(out,"generation",static_cast<double>(field.Generation()));
             } else {
                 cJSON_Delete(out); return HarnessProtocol::ErrorResponse("read-only state or sample only");
             }

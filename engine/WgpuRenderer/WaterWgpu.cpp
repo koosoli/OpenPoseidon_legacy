@@ -803,7 +803,7 @@ void WaterWgpu::QueueRainWater(bool enabled)
     const float rain = UniformWettingDensity(GLandscape->GetRainDensity(), GRain.EffectiveDensity(), GRain.Params().snowflakes);
     p.control = {float(field.Width()), float(field.Height()), rain, active ? 1.0f : 0.0f};
     p.generation = field.Generation();
-    const RStringB world = GLandscape->GetName();
+    const std::string world = GLandscape->GetName();
     std::vector<WgrVec4> cells;
     if (active && (!_rainWaterEnabled || _rainWaterRevision != field.Revision() ||
         _rainWaterGeneration != field.Generation() || _rainWaterWorld != world))
