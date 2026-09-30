@@ -1660,3 +1660,14 @@ unknown hidden rows retain their resources. Added bounded generated-fixture
 matrix-move/remove actions exercising the actual landscape hooks. The driver
 captures original/Fine/Root/refill/Restore and supports isolated lifecycle runs.
 Installed transition/quality/lifecycle validation of this source is pending.
+
+
+Installed83 pair driver failure is preserved (`world-visible83-20260930-061734-
+9cd22a`): the main-camera tracker was disabled by its older surface-certificate
+launch gate, so pair/cleanup camera receipts rejected; normal shutdown/exit0,
+no force. A driver-only attempt to enable that gate exited2 normally at startup:
+existing application correctly demanded a private original/surface fixture.
+Neither refusal counts as passed world transition or camera evidence.
+Next renderer source independently enables the existing camera tracker under
+explicit fixture+actual-world-visible+camera gates, without advertising a
+surface certificate or triggering the private original-fixture startup action.
