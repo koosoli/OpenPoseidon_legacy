@@ -757,8 +757,10 @@ const char* Man::CorpsePoseRefusal() const
 bool Man::UseCorpsePose() const
 {
     if (!_corpsePoseLease.world || _corpsePoseBypass) return false;
+    // Reject removal/world changes before touching type-owned animation tables.
+    if (CorpsePoseRefusal()) { ClearCorpsePose(); return false; }
     Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
-    if (CorpsePoseRefusal() || !skeleton || _corpsePoseWeights.GetRef() != &Type()->GetWeights() ||
+    if (!skeleton || _corpsePoseWeights.GetRef() != &Type()->GetWeights() ||
         !_corpsePoseLease.Matches(GWorld, _shape.GetRef(), skeleton, skeleton->NBones(),
                                   int(_primaryMove.id), int(_secondaryMove.id), _primaryFactor, Glob.time.toInt()) ||
         (_corpsePosePrimary.Valid() && Type()->GetAnimation(_primaryMove.id) != _corpsePosePrimaryAnimation.GetRef()) ||
