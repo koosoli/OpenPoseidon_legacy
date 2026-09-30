@@ -5,7 +5,7 @@ $tokens = $null; $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($source,[ref]$tokens,[ref]$errors)
 if ($errors.Count) { throw ($errors | Out-String) }
 $culture = [Globalization.CultureInfo]::InvariantCulture
-foreach ($name in @('Require','Camera-Pose','Assert-SnowState','Decode-Eval','Assert-ObjectTelemetry')) {
+foreach ($name in @('Require','Camera-Pose','Assert-SnowState','Decode-Eval','Assert-ObjectTelemetry','Set-FixedScene')) {
     $function = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name },$true)
     if (!$function) { throw "Actual helper absent: $name" }
     . ([scriptblock]::Create($function.Extent.Text))
@@ -59,4 +59,11 @@ Refuses { Assert-ObjectTelemetry ($line.Replace('snowlineDepth=0.0000','snowline
 Refuses { Assert-ObjectTelemetry 'unknown object snow' $true 0.18 }
 $actual = Assert-ObjectTelemetry ($line.Replace('enabled=1 deposit=0.1800','enabled=0 deposit=0.0000')) $false 0.18
 Check (!$actual.enabled -and $actual.deposit -eq 0) 'OFF arm must publish zero object deposit despite stored terrain cover.'
+$script:replies = @{ 'triSetSimTime 100' = 'OK:100000'; 'triSetBrightness 1' = 'OK:1.000' }
+function Eval([string]$code) { return $script:replies[$code] }
+Set-FixedScene; ++$script:checks
+$script:replies['triSetSimTime 100'] = 'OK'
+Refuses { Set-FixedScene }
+$script:replies['triSetSimTime 100'] = 'OK:100000'; $script:replies['triSetBrightness 1'] = 'OK:0.500'
+Refuses { Set-FixedScene }
 Write-Host "Snow surface actual helper checks passed: $checks. No game/GPU used."

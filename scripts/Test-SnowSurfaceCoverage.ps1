@@ -137,6 +137,11 @@ function Eval([string]$code) {
     Require ($null -ne $reply.result) "Evaluator returned no value: $code"
     return Decode-Eval ([string]$reply.result)
 }
+function Set-FixedScene {
+    # Production commands include the actual value in their success strings.
+    Require ((Eval 'triSetSimTime 100') -ceq 'OK:100000') 'Deterministic simulation time refused.'
+    Require ((Eval 'triSetBrightness 1') -ceq 'OK:1.000') 'Deterministic brightness refused.'
+}
 function Screenshot([string]$name) {
     $path = Join-Path $armDir ($name+'.png'); $null = Send @{ cmd = 'screenshot'; path = $path }
     $until = [DateTime]::UtcNow.AddSeconds(10)
@@ -215,7 +220,7 @@ try {
         $reader = [IO.StreamReader]::new($stream); $writer = [IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false)); $writer.AutoFlush = $true
         Start-Sleep -Seconds 12; Require ((Eval 'triSceneReady') -ceq 'OK') 'Mission scene not ready.'
         $null = Send @{ cmd = 'exec'; code = 'player allowDamage false; 0 setFog 0; 0 setOvercast 0; 0 setRain 0; setAccTime 0; setDate [1985,6,21,16,0]' }
-        foreach ($code in @('triSetSimTime 100','triSetBrightness 1')) { Require ((Eval $code) -ceq 'OK') "Deterministic setup refused: $code" }
+        Set-FixedScene
         $null = Send @{ cmd = 'dev_snow'; action = 'disable' }; $initial = Snow-State $false 0 0
         $fixture = New-TerrainPuddleStockRoof -SendCommand { param($request) Send $request } -X 9486 -Z 3006 -ControlX 9475.25 -ControlZ 3018.25
         $g = [double]$fixture.centreGroundHeight
@@ -271,7 +276,7 @@ try {
                 Require ([DateTime]::UtcNow -lt $deadline) 'Stock walker did not move along track fixture.'
             } while ($true)
             $null = Send @{ cmd = 'exec'; code = 'doStop snowSurfaceWalker; setAccTime 0' }
-            Require ((Eval 'triSetSimTime 100') -ceq 'OK') 'Track freeze refused.'
+            Require ((Eval 'triSetSimTime 100') -ceq 'OK:100000') 'Track freeze refused.'
             $trackState = Snow-State $true $expectedDepth $null
             Require ($trackState.chunks -gt $enabled.chunks) 'Real stock motion created no snow track chunks.'
             # The unit origin need not coincide with a stamped contact cell. Seek
