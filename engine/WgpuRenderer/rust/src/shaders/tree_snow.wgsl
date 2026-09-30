@@ -18,8 +18,12 @@ fn tree_snow_height(model_y: f32, min_y: f32, inverse_height: f32, proof: f32) -
 fn tree_snow_albedo(authored: vec3<f32>, world: vec3<f32>, footprint: f32) -> vec3<f32> {
     let source = clamp(authored, vec3<f32>(0.0), vec3<f32>(1.0));
     let lum = dot(source, vec3<f32>(0.2126, 0.7152, 0.0722));
-    let relief = 0.35 + 0.65 * lum / (lum + 0.10);
-    let recess = smoothstep(0.008, 0.060, lum);
+    // Retail photographed foliage is very dark in linear space (median around
+    // .01, not .1). The old .008..060 gate left most positively coated leaves
+    // green. Compress that photographic shading into a readable frost response
+    // while retaining genuinely black recesses and ordered luminance contrast.
+    let relief = 0.30 + 0.70 * sqrt(lum / (lum + 0.05));
+    let recess = smoothstep(0.001, 0.010, lum);
     // Only metre-scale diffuse clumps: no crystalline points, powder normals or
     // time seed on moving/subpixel leaf cards. UV/albedo detail moves with leaves.
     var mottling = 0.0;
@@ -28,7 +32,10 @@ fn tree_snow_albedo(authored: vec3<f32>, world: vec3<f32>, footprint: f32) -> ve
         mottling = snow_noise(p / 1.8 + vec2<f32>(-31.2, 14.7)).x * 0.025 * snow_band(footprint, 1.8);
     }
     let frost = vec3<f32>(0.78, 0.80, 0.82) * relief * (1.0 + mottling);
-    return mix(source, frost, recess);
+    // Covered dark recesses are neutral snow shade, never the original green
+    // hue. The caller still mixes this by actual physical snow coverage; source
+    // colour remains exact where coating/receiver/shelter admission is zero.
+    return mix(vec3<f32>(lum), frost, recess);
 }
 
 fn tree_snow_cover_depth(crown_height: f32, depth: f32, exposure: f32) -> f32 {
