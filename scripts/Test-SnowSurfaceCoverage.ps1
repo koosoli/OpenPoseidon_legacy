@@ -230,6 +230,8 @@ try {
         $views = [ordered]@{
             roofTop = (Camera-Pose 9486 2998 ($g+12) 0 -45)
             roofFar = (Camera-Pose 9486 2974 ($g+28) 0 -35)
+            roofLong = (Camera-Pose 9486 2806 ($g+90) 0 -23.8)
+            roofDistant = (Camera-Pose 9486 2506 ($g+130) 0 -14.4)
             underside = (Camera-Pose 9486 3004.5 ($g+1.0) 0 70)
             wall = (Camera-Pose 9494 3006 ($g+1.8) 270 0)
             coveredGround = $fixture.coveredCamera
@@ -259,7 +261,7 @@ try {
         Require ($telemetry.Count -gt 0) 'No installed effective object snow parameter upload telemetry.'
         $effectiveToggle = Assert-ObjectTelemetry $telemetry[-1] ($arm -ne 'deposit-object-off') $expectedDepth
         # This sweep travels kilometres to the road and returns to the exact roof pose.
-        $returnViews = [ordered]@{ roofTop = $views.roofTop; coveredGround = $views.coveredGround; terrainGrain = $views.terrainGrain }
+        $returnViews = [ordered]@{ roofTop = $views.roofTop; roofLong = $views.roofLong; roofDistant = $views.roofDistant; coveredGround = $views.coveredGround; terrainGrain = $views.terrainGrain }
         $captures.return = Capture-Views 'return' $returnViews
         $returned = Snow-State $true $expectedDepth ([int]$enabled.chunks)
         # Independent positive shelter control at the identical ground pixels:

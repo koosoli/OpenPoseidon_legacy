@@ -1471,6 +1471,8 @@ impl CameraGroup {
             // gradient scale. NOW the last lane; the four writes above it moved again.
             + 16
             // Renderer-private raised-surface snow state; public WgrCamera ABI unchanged.
+            + 16
+            // Shared ground puddle weather, independent of water feature activation.
             + 16;
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_3d_camera_layout"),
@@ -4116,6 +4118,7 @@ pub struct Gfx3d {
     // group count, 0 = feedback off). Set once per frame; all-zero = native, no feedback.
     render_scale_lane: [f32; 4],
     snow_surface: [f32; 4],
+    ground_weather: [f32; 4],
     object_snow_enabled: bool,
     snow_surface_trace: bool,
     snow_surface_trace_rows: u8,
@@ -5060,6 +5063,7 @@ impl Gfx3d {
             ],
             render_scale_lane: [0.0; 4],
             snow_surface: [0.0, -1.0, 0.0, 0.0],
+            ground_weather: [0.0; 4],
             object_snow_enabled: std::env::var("WGR_OBJECT_SNOW").as_deref() != Ok("0"),
             snow_surface_trace: std::env::var("WGR_SNOW_SURFACE_FIXTURE").as_deref() == Ok("1"),
             snow_surface_trace_rows: 0,
@@ -8132,8 +8136,8 @@ impl Gfx3d {
                     gs.basis as f32,
                 ];
                 let gi_origin_lane = [gi_origin.x, gi_origin.y, gi_origin.z, gi_spacing];
-                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 128, bytemuck::cast_slice(&gi_lane));
-                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 112, bytemuck::cast_slice(&gi_origin_lane));
+                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 144, bytemuck::cast_slice(&gi_lane));
+                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 128, bytemuck::cast_slice(&gi_origin_lane));
                 // Material Debug (frame.wgsl `matdbg`). Written unconditionally and derived
                 // from bind_size rather than from the sky offsets above, which live inside a
                 // conditional: the retained shader reads this every frame and a stale lane
@@ -8146,7 +8150,7 @@ impl Gfx3d {
                 ];
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 96,
+                    base + self.cameras.bind_size - 112,
                     bytemuck::cast_slice(&matdbg),
                 );
                 // DZ-005 water surface animation (frame.wgsl `wateranim`).
@@ -8154,7 +8158,7 @@ impl Gfx3d {
                 // water params cannot leave the ripple frozen at a stale time.
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 80,
+                    base + self.cameras.bind_size - 96,
                     bytemuck::cast_slice(&self.water_anim),
                 );
                 // Normal-map relief under ambient light (frame.wgsl `relief`), the LAST lane.
@@ -8168,7 +8172,7 @@ impl Gfx3d {
                 let relief = [normal_cavity(), sky_specular(), 0.0f32, 0.0f32];
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 64,
+                    base + self.cameras.bind_size - 80,
                     bytemuck::cast_slice(&relief),
                 );
                 // Far-fog closure (frame.wgsl `fogfar`). Unconditional for the same reason as
@@ -8176,7 +8180,7 @@ impl Gfx3d {
                 // frame left there.
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 48,
+                    base + self.cameras.bind_size - 64,
                     bytemuck::cast_slice(&self.fog_far),
                 );
                 // REN-TEMP-001D render-scale texture LOD (frame.wgsl `renscale`), the LAST
@@ -8185,13 +8189,18 @@ impl Gfx3d {
                 // the next camera happens to rewrite it.
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 32,
+                    base + self.cameras.bind_size - 48,
                     bytemuck::cast_slice(&self.render_scale_lane),
                 );
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 16,
+                    base + self.cameras.bind_size - 32,
                     bytemuck::cast_slice(&self.snow_surface),
+                );
+                camera_upload.write_buffer(
+                    buf,
+                    base + self.cameras.bind_size - 16,
+                    bytemuck::cast_slice(&self.ground_weather),
                 );
             }
             camera_upload.finish();
@@ -11181,6 +11190,10 @@ impl Gfx3d {
         } else { None }
     }
 
+    pub fn set_ground_weather(&mut self, params: [f32; 4]) {
+        self.ground_weather = params;
+    }
+
     pub fn gtao_settings(&self) -> &GtaoSettings {
         &self.gtao_settings
     }
@@ -12584,14 +12597,15 @@ fn normal_relief_knobs_reach_the_shader_and_the_game_log() {
     // them alone looks right.
     let src = include_str!("mod.rs");
     for (offset, payload) in [
-        ("bind_size - 128", "cast_slice(&gi_lane)"),
-        ("bind_size - 112", "cast_slice(&gi_origin_lane)"),
-        ("bind_size - 96", "cast_slice(&matdbg)"),
-        ("bind_size - 80", "cast_slice(&self.water_anim)"),
-        ("bind_size - 64", "cast_slice(&relief)"),
-        ("bind_size - 48", "cast_slice(&self.fog_far)"),
-        ("bind_size - 32", "cast_slice(&self.render_scale_lane)"),
-        ("bind_size - 16", "cast_slice(&self.snow_surface)"),
+        ("bind_size - 144", "cast_slice(&gi_lane)"),
+        ("bind_size - 128", "cast_slice(&gi_origin_lane)"),
+        ("bind_size - 112", "cast_slice(&matdbg)"),
+        ("bind_size - 96", "cast_slice(&self.water_anim)"),
+        ("bind_size - 80", "cast_slice(&relief)"),
+        ("bind_size - 64", "cast_slice(&self.fog_far)"),
+        ("bind_size - 48", "cast_slice(&self.render_scale_lane)"),
+        ("bind_size - 32", "cast_slice(&self.snow_surface)"),
+        ("bind_size - 16", "cast_slice(&self.ground_weather)"),
     ] {
         let at = src
             .find(offset)
@@ -12619,7 +12633,9 @@ fn normal_relief_knobs_reach_the_shader_and_the_game_log() {
             && water_at < relief_at
             && relief_at < fogfar_at
             && fogfar_at < renscale_at
-            && renscale_at < frame.find("    snow_surface: vec4<f32>,").expect("snow surface lane"),
+            && renscale_at < frame.find("    snow_surface: vec4<f32>,").expect("snow surface lane")
+            && frame.find("    snow_surface: vec4<f32>,").unwrap()
+                < frame.find("    ground_weather: vec4<f32>,").expect("ground weather lane"),
         "the WGSL lane order must match the upload offsets"
     );
     // Defaults: both ON, because both are constructed so they cannot brighten anything — the

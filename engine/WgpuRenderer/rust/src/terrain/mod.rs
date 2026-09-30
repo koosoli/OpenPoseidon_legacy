@@ -177,6 +177,23 @@ fn snow_surface_params(deposit: f32, height: f32, range: f32, depth: f32) -> [f3
     }
 }
 
+fn ground_weather_params(wetness: f32, rain: f32, sea_level: f32, time: f32) -> [f32; 4] {
+    if !sea_level.is_finite() || !time.is_finite() { return [0.0; 4]; }
+    let bounded = |v: f32| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
+    [bounded(wetness), bounded(rain), sea_level, time]
+}
+
+#[test]
+fn ground_weather_preserves_drying_film_without_rain_and_rejects_invalid_state() {
+    assert_eq!(ground_weather_params(0.6, 0.0, -2.0, 25.0), [0.6, 0.0, -2.0, 25.0]);
+    assert_eq!(ground_weather_params(2.0, -1.0, 0.0, 25.0), [1.0, 0.0, 0.0, 25.0]);
+    for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert_eq!(ground_weather_params(invalid, invalid, 0.0, 25.0), [0.0, 0.0, 0.0, 25.0]);
+        assert_eq!(ground_weather_params(1.0, 1.0, invalid, 25.0), [0.0; 4]);
+        assert_eq!(ground_weather_params(1.0, 1.0, 0.0, invalid), [0.0; 4]);
+    }
+}
+
 #[test]
 fn object_snow_uses_actual_deposit_and_finite_surface_altitude_params() {
     assert_eq!(snow_surface_params(0.18, 200.0, 50.0, 0.8), [0.18, 200.0, 50.0, 0.8]);
@@ -1052,6 +1069,11 @@ impl Terrain {
 
     pub fn snow_buffer(&self) -> &wgpu::Buffer {
         &self.snow_buffer
+    }
+
+    pub fn ground_weather_params(&self) -> [f32; 4] {
+        ground_weather_params(self.params._pad1, self.params._pad2,
+            self.params.sea_level, self.params.time)
     }
 
     /// Existing sky-visibility source, borrowed only for an explicit Tidewater activation.

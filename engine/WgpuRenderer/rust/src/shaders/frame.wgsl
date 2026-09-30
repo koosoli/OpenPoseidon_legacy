@@ -168,6 +168,9 @@ struct Frame {
     // actual deposit metres, snowline height (-1 disabled), ramp range, snowline depth.
     // Raised roofs use their own fragment height and never the terrain shelter/track deficit.
     snow_surface: vec4<f32>,
+    // Shared ground film: retained rain wetness, effective liquid rain, sea level, simulation time.
+    // Renderer-private tail; the public WgrCamera layout is unchanged.
+    ground_weather: vec4<f32>,
 };
 
 // REN-TEMP-001D helpers. Material/albedo/normal/cutout sampling uses `mip_bias()` via

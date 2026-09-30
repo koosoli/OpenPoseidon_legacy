@@ -3824,6 +3824,7 @@ impl Renderer {
         if let Some(line) = self.gfx3d.set_snow_surface(self.terrain.snow_surface_params()) {
             self.log.log(log_level::INFO, &line);
         }
+        self.gfx3d.set_ground_weather(self.terrain.ground_weather_params());
         let mut prepared_cameras = cameras.to_vec();
         // REN-TEMP-001E: temporal camera state + jitter. The UNJITTERED main camera is
         // snapshotted first (velocity and history math use it), then the jitter is folded
