@@ -82,8 +82,9 @@ fn puddle_roof_admission_uses_raw_geometry_not_artistic_ambient_controls() {
     let admission = src.split("if (rain_puddle > 0.0 && frame.skyvis.x >= 0.5) {")
         .nth(1).expect("must gate raw roof query on map availability and actual puddle work")
         .split('}').next().unwrap();
-    assert!(admission.contains("interior_sky_reach(in.world_pos + frame.cam_pos.xyz)"));
-    assert!(admission.contains("smoothstep(0.6, 0.95, rain_sky_reach)"));
+    assert!(admission.contains("interior_rain_reach(in.world_pos + frame.cam_pos.xyz)"));
+    assert!(admission.contains("smoothstep(0.6, 0.95, rain_reach)"));
+    assert!(!admission.contains("interior_sky_reach("));
     assert!(!admission.contains("local_sky_visibility") && !admission.contains("frame.skyvis.z")
         && !admission.contains("frame.skyvis.w"));
     assert!(src.contains("let local_sky_visibility = interior_sky_ao(in.world_pos + frame.cam_pos.xyz, n)"),

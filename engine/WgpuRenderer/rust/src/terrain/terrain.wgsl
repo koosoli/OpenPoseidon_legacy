@@ -7,7 +7,7 @@
 // Shares group(0) (the camera UBO + cascade shadow map) with the lit 3D
 // pipeline via the frame module, so terrain receives the same CSM shadows and
 // sun lighting.
-#import frame::{frame, reverse_z, fog_factor, apply_fog, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
+#import frame::{frame, reverse_z, fog_factor, apply_fog, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
 #import shadow::shadow_strength
 #import lighting::lights_contrib
 #import color::srgb_to_linear
@@ -1350,12 +1350,11 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // second SH evaluation on the single most fill-heavy surface in the frame.
     let local_sky_visibility = interior_sky_ao(in.world_pos + frame.cam_pos.xyz, n);
     if (rain_puddle > 0.0 && frame.skyvis.x >= 0.5) {
-        // Physical admission uses RAW geometric sky reach. Ambient-light strength
-        // and floor sliders must never invent rain beneath an opaque roof. This
-        // extra map query is confined to wet eligible puddle pixels. Without an
-        // active map there is no independent roof/rain-collision proof.
-        let rain_sky_reach = interior_sky_reach(in.world_pos + frame.cam_pos.xyz);
-        rain_puddle *= smoothstep(0.6, 0.95, rain_sky_reach);
+        // Zenith geometry gates vertical rain independently of diffuse sky light
+        // entering through windows or around a canopy. Only wet eligible puddle
+        // pixels pay this one-layer query. Missing map coverage remains unproven.
+        let rain_reach = interior_rain_reach(in.world_pos + frame.cam_pos.xyz);
+        rain_puddle *= smoothstep(0.6, 0.95, rain_reach);
     }
     rgb *= 1.0 - rain_puddle * 0.38;
     sun_ambient *= sky_vis_ao(in.world_xz)

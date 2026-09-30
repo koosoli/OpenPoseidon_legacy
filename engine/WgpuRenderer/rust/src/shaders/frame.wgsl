@@ -858,6 +858,20 @@ fn interior_sky_reach(world_abs: vec3<f32>) -> f32 {
     return interior_sky_reach_n(world_abs, vec3<f32>(0.0, 1.0, 0.0));
 }
 
+// Vertical rain admission is a different query from diffuse sky lighting. A
+// canopy can block the zenith while all four tilted sky directions stay open;
+// their cosine-weighted diffuse reach is then ~0.72, not proof of rain access.
+// Reuse the existing zenith depth layer and its filtered geometry comparison.
+// Artistic ambient strength/floor and tilted directions do not affect rain.
+// No map, outside coverage, and its feathered edge retain the lighting map's
+// open fallback: this bounded cosmetic query is not a world rain collider.
+fn interior_rain_reach(world_abs: vec3<f32>) -> f32 {
+    if (frame.skyvis.x < 0.5) {
+        return 1.0;
+    }
+    return interior_sky_reach_dir(world_abs, vec3<f32>(0.0, 1.0, 0.0), 0);
+}
+
 // Ambient multiplier from interior sky visibility [0,1]. AMBIENT ONLY — direct sun is already
 // occluded by the cascade shadow maps plus the terrain sun-shadow mask, and local lights are the
 // thing keeping an interior readable at all.

@@ -18,6 +18,9 @@ use std::borrow::Cow;
 #[cfg(test)]
 mod shadow_tent_tests;
 
+#[cfg(test)]
+mod rain_cover_tests;
+
 use naga_oil::compose::{
     ComposableModuleDescriptor, Composer, NagaModuleDescriptor, ShaderLanguage,
 };
