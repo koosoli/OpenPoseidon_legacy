@@ -12,7 +12,7 @@
 #import shadow::shadow_strength
 #import lighting::lights_material_contrib
 #import color::srgb_to_linear
-#import frame::{interior_rain_reach, interior_rain_coverage}
+#import frame::{interior_rain_reach, interior_rain_coverage, snow_receiver_reach}
 #import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
 #import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage}
 
@@ -26,6 +26,7 @@ fn object_snow_baked_exposure(raw_visibility: f32, known_volume: bool) -> f32 {
 fn object_snow_coverage(world_pos: vec3<f32>, geo_normal: vec3<f32>, eligible: bool,
                         baked_exposure: f32) -> f32 {
     if (!eligible || (frame.snow_surface.x <= 0.0 && frame.snow_surface.w <= 0.0)) { return 0.0; }
+    if (!all(abs(geo_normal) < vec3<f32>(1e20))) { return 0.0; }
     let n_len = length(geo_normal);
     if (n_len < 1e-4 || dot(geo_normal, world_pos) > 0.0) { return 0.0; }
     let n_up = geo_normal.y / n_len;
@@ -39,11 +40,10 @@ fn object_snow_coverage(world_pos: vec3<f32>, geo_normal: vec3<f32>, eligible: b
     let validity = interior_rain_coverage(world_abs);
     var exposed = baked_exposure;
     if (validity > 0.0) {
-        // interior_rain_reach itself feathers toward OPEN at the map border. Undo that
-        // cosmetic fallback before blending to known baked proof, so an unbaked interior
-        // cannot acquire snow simply by entering the map's outer band.
-        let reach = interior_rain_reach(world_abs);
-        exposed = max(0.0, reach - (1.0 - validity)) + (1.0 - validity) * baked_exposure;
+        // Dedicated surface-plane reach never contains the ambient OPEN feather.
+        // Blend only actual coverage with independently admitted baked proof.
+        let reach = snow_receiver_reach(world_abs, geo_normal);
+        exposed = validity * reach + (1.0 - validity) * baked_exposure;
     }
     return snow_surface_coverage(depth, n_up, exposed);
 }

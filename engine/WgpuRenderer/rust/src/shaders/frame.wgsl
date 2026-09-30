@@ -939,6 +939,103 @@ fn interior_rain_reach(world_abs: vec3<f32>) -> f32 {
     return interior_sky_reach_dir(world_abs, vec3<f32>(0.0, 1.0, 0.0), 0);
 }
 
+// Snow asks whether this actual surface receives precipitation, not how diffuse
+// light reaches a room. Never reuse the artistic metre-wide ambient kernel here:
+// comparing its uphill taps with the centre depth makes an open inclined roof
+// shadow itself. Predict the local receiver plane at each stored texel centre.
+// The view is the actual orthographic producer matrix; no camera/FOV assumption.
+fn snow_receiver_depth_gradient(vp: mat4x4<f32>, n: vec3<f32>) -> vec2<f32> {
+    let rx = vec3<f32>(vp[0].x, vp[1].x, vp[2].x);
+    let ry = vec3<f32>(vp[0].y, vp[1].y, vp[2].y);
+    let rz = vec3<f32>(vp[0].z, vp[1].z, vp[2].z);
+    let bx = rx / max(dot(rx, rx), 1e-20);
+    let by = ry / max(dot(ry, ry), 1e-20);
+    let bz = rz / max(dot(rz, rz), 1e-20);
+    let den = dot(n, bz);
+    if (abs(den) < 1e-8) { return vec2<f32>(0.0); }
+    // UV = (NDC.x/2+1/2, -NDC.y/2+1/2).
+    return vec2<f32>(-2.0 * dot(n, bx), 2.0 * dot(n, by)) / den;
+}
+
+fn snow_receiver_four_taps(uv: vec2<f32>, clip_depth: f32, dims: vec2<f32>,
+                          depth: vec4<f32>, gradient: vec2<f32>, bias: f32) -> f32 {
+    let px = uv * dims - vec2<f32>(0.5);
+    let base = floor(px);
+    let f = fract(px);
+    let weights = vec4<f32>((1.0-f.x)*(1.0-f.y), f.x*(1.0-f.y),
+                            (1.0-f.x)*f.y, f.x*f.y);
+    // Four occupied coplanar samples also reconstruct the roof at the receiver
+    // centre. This rejects a FLAT receiver just below a tilted roof even when a
+    // downslope texel is lower than that receiver. Do not bridge clear cutout
+    // holes/overhang edges with this extra plane proof. 1cm planarity tolerance
+    // scales with the same physical 8cm bias, never an enlarged slope bias.
+    let coplanar = abs(depth.x + depth.w - depth.y - depth.z) <= max(bias * 0.125, 1e-7);
+    if (all(depth < vec4<f32>(1.0)) && coplanar) {
+        // This actual depth plane is stronger self-surface evidence than a
+        // smooth authored vertex normal (stock tent fabric intentionally has
+        // smooth normals across bent facets). It also closes the flat-below-
+        // tilted-roof case. The remaining branch handles discontinuous/clear
+        // edges, where only the bounded local receiver-plane assumption remains.
+        return select(0.0, 1.0, clip_depth - bias <= dot(depth, weights));
+    }
+    let origin = (base + vec2<f32>(0.5)) / dims;
+    let step = vec2<f32>(1.0) / dims;
+    let receiver = vec4<f32>(
+        clip_depth + dot(gradient, origin - uv),
+        clip_depth + dot(gradient, origin + vec2<f32>(step.x,0.0) - uv),
+        clip_depth + dot(gradient, origin + vec2<f32>(0.0,step.y) - uv),
+        clip_depth + dot(gradient, origin + step - uv)) - vec4<f32>(bias);
+    return dot(select(vec4<f32>(0.0), vec4<f32>(1.0), receiver <= depth), weights);
+}
+
+fn snow_receiver_map_reach(world_abs: vec3<f32>, n: vec3<f32>, far: bool) -> f32 {
+    var vp = frame.skyvis_vp[0];
+    if (far) { vp = frame.weather_vp; }
+    let clip = vp * vec4<f32>(world_abs, 1.0);
+    let uv = vec2<f32>(clip.x * 0.5 + 0.5, -clip.y * 0.5 + 0.5);
+    var dims = vec2<f32>(textureDimensions(interior_sky_map));
+    if (far) { dims = vec2<f32>(textureDimensions(weather_depth_map)); }
+    let px = vec2<i32>(floor(uv * dims - vec2<f32>(0.5)));
+    // Neither clamping nor an unrendered map border is physical open proof.
+    if (any(px < vec2<i32>(0)) || any(px + vec2<i32>(1) >= vec2<i32>(dims))) { return 0.0; }
+    var depth: vec4<f32>;
+    if (far) {
+        depth = vec4<f32>(textureLoad(weather_depth_map, px, 0),
+            textureLoad(weather_depth_map, px + vec2<i32>(1,0), 0),
+            textureLoad(weather_depth_map, px + vec2<i32>(0,1), 0),
+            textureLoad(weather_depth_map, px + vec2<i32>(1,1), 0));
+    } else {
+        depth = vec4<f32>(textureLoad(interior_sky_map, px, 0, 0),
+            textureLoad(interior_sky_map, px + vec2<i32>(1,0), 0, 0),
+            textureLoad(interior_sky_map, px + vec2<i32>(0,1), 0, 0),
+            textureLoad(interior_sky_map, px + vec2<i32>(1,1), 0, 0));
+    }
+    // Near snow has its OWN tight physical bias, independent of artistic AO's
+    // 25cm bias/kernel knobs. Far retains the actual producer's 8cm lane.
+    let rz = vec3<f32>(vp[0].z, vp[1].z, vp[2].z);
+    let bias = select(0.08 * length(rz), frame.weather_cover.y, far);
+    return snow_receiver_four_taps(uv, clip.z, dims, depth,
+        snow_receiver_depth_gradient(vp, n), bias);
+}
+
+// Caller supplies its outward authored geometric normal, never powder/normal
+// detail. Raw physical reach has NO cosmetic OPEN feather; coverage is separate.
+fn snow_receiver_reach(world_abs: vec3<f32>, normal: vec3<f32>) -> f32 {
+    if (!all(abs(normal) < vec3<f32>(1e20)) || !all(abs(world_abs) < vec3<f32>(1e20))) { return 0.0; }
+    let len = length(normal);
+    if (len < 1e-4 || normal.y / len <= 0.25) { return 0.0; }
+    let n = normal / len;
+    let near = near_rain_coverage(world_abs);
+    let far = weather_map_coverage(world_abs);
+    var near_reach = 0.0;
+    if (near > 0.0) { near_reach = snow_receiver_map_reach(world_abs, n, false); }
+    if (far > 0.5) {
+        let far_reach = snow_receiver_map_reach(world_abs, n, true);
+        return mix(far_reach, near_reach, near);
+    }
+    return near_reach;
+}
+
 // Ambient multiplier from interior sky visibility [0,1]. AMBIENT ONLY — direct sun is already
 // occluded by the cascade shadow maps plus the terrain sun-shadow mask, and local lights are the
 // thing keeping an interior readable at all.

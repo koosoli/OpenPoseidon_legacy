@@ -22,6 +22,8 @@ mod shadow_tent_tests;
 mod rain_cover_tests;
 #[cfg(test)]
 mod weather_cover_tests;
+#[cfg(test)]
+mod snow_receiver_tests;
 
 #[cfg(test)]
 mod snow_material_tests;

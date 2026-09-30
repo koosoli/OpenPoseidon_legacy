@@ -129,3 +129,66 @@ roof silhouettes, edge leakage and appearance remain visual review items.
 Root's full serial renderer suite in build/weather-sand-combined-serial-tests-2.log passes609 tests, zero failures and two existing ignored. It includes the actual far-depth GPU and overflow-copy falsifiers, actual private96-byte tail/layout, retained8-fragment-storage budget, deep mud, signed sand, wet-soil and grass checks. The first combined run had606 passes plus3 stale source-contract failures after adding the seventh retained weather pipeline and sharing physical admission with moist soil; contracts now retain the material-independent film assertion and explicitly check the shared rain proof. No production GPU assertion failed in that first run.
 
 Root also avoids asymptotic after-rain work by activating the physical map only above0.03 retained ground wetness, the lowest actual moist-soil threshold. Dry tiny histories request no weather pass. The stock surface runner has independent WeatherCoverOff and InteriorSkyOff controls and records capped actual weather-submit trace rows. New installed near/200/500m and AO-off acceptance remains pending.
+
+## Inclined stock roof receiver correction
+
+Installed original Everon `06a7c41e`, evidence folder
+`build/snow-surface/eden-far-current-20260930-214723-8242af`, shows white ridges
+and comb-shaped bare fabric on `stan_eastc.p3d`. The older `01e8` capture in
+`eden-bindings-corrected-20260930-202322-81009b` already contains similar near
+patches. Near coverage takes precedence well inside the artistic 64m map;
+therefore the new far map's coarse texels cannot alone explain the near view.
+
+The old snow exposure reused the ambient ten-tap, one-metre kernel. Every tap
+compared against the centre depth with a 25cm bias and forced UP normal. Actual
+stock first-LOD side planes rise approximately 0.94–1.22m per horizontal metre,
+with normal-up 0.632–0.720. Even an unobstructed infinite plane returns only
+0.6–0.7 exposure under those taps. Snow's existing smoothstep 0.6–0.95 then
+removes or weakens the coating. At the far map's 0.625m texels, bilinear neighbours
+can span 0.35–0.44m vertical difference, also exceeding its 8cm bias. Increasing
+either bias would let sheltered surfaces receive snow.
+
+The correction adds a **snow-only** physical query to the shared Frame shader.
+It loads the immediate four depth texels and evaluates the receiver plane at
+each actual texel centre, using the actual orthographic matrix and outward
+geometric normal. Near snow uses its own fixed 8cm vertical bias; the far query
+keeps the producer's 8cm lane. Ambient lighting, generic rain, tree crown policy,
+ground wetness/puddles and their artistic filtering remain unchanged. Existing
+ready/extent/overflow gates, upward/front-facing receiver admission, source
+alpha discard and prepass consumers remain in force. No bindings, public ABI,
+Frame fields or render passes change.
+
+Stock fabric also has deliberately smooth authored vertex normals, differing
+from the actual side-triangle slopes by approximately 0.2–1.5m/m at vertices.
+When four occupied depth samples fit one plane within 1cm, their bilinear
+centre depth is stronger evidence than that smoothed normal. Compare against
+that reconstructed centre directly: a surface at/above it receives snow and
+a flat or parallel receiver 20cm below remains sheltered. Clear samples bypass
+that extra plane guard so real cutout openings and partial-overhang edges are
+not bridged. Noncoplanar edges still use the bounded local receiver-normal
+prediction and bilinear per-texel comparisons.
+
+Four samples cannot establish exact geometry between their centres. Roof
+ridges, disconnected overlaps, subtexel openings, curved fabric and external
+partial cover remain raster resolution limits; the local receiver plane is a
+cosmetic self-surface assumption, not a collision or full-world roof proof.
+The tiny 500m stock roof spans only about7×5pixels in the runner's1280×720 view.
+Review its actual silhouette near x637–644,y354–360 against a deposited object
+coat OFF control; global white-pixel or central 60% image metrics primarily
+measure terrain and cannot establish that roof's acceptance. The underside
+camera currently sees mostly sky/ropes, so it does not prove a protected visible
+ceiling. The wall camera has an actual visible negative control.
+
+CPU composition checks pass for actual production direct/retained consumers,
+object coating helper, prepass/source policy and the new actual-plane fixture.
+The new GPU test
+`snow_receiver_actual_gpu_slopes_subtexels_handoff_and_thin_roof_rejections`
+is pending root execution. It rasterises actual world-space roofs using the
+production near/far matrices and resolutions, sweeps both slope signs and
+subtexel recentering at 200/500m, crosses near/far coverage, reproduces legacy
+self-blocking, checks deliberately mismatched smooth normals, rejects flat and
+parallel receivers 20cm below flat/tilted roofs, and checks a real discarded
+opening, walls, underside, unready/overflow maps and nonfinite normals. Existing
+far partial-overhang/height/map-edge and object bake/snowline tests must also
+pass. Installed stock near/200/500m, AO-off, direct/retained and reset captures
+remain pending for this correction; no new visual acceptance is claimed.
