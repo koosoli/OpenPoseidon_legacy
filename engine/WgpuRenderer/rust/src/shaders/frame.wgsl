@@ -1025,7 +1025,15 @@ fn snow_receiver_reach(world_abs: vec3<f32>, normal: vec3<f32>) -> f32 {
     let len = length(normal);
     if (len < 1e-4 || normal.y / len <= 0.25) { return 0.0; }
     let n = normal / len;
-    let near = near_rain_coverage(world_abs);
+    var near = near_rain_coverage(world_abs);
+    // The lighting feather is not a valid physical sample when the four-tap
+    // footprint straddles the image edge. Let a published far map own that
+    // receiver completely, rather than blend an unknown near sample into it.
+    let clip = frame.skyvis_vp[0] * vec4<f32>(world_abs, 1.0);
+    let uv = vec2<f32>(clip.x * 0.5 + 0.5, -clip.y * 0.5 + 0.5);
+    let dims = vec2<f32>(textureDimensions(interior_sky_map));
+    let px = vec2<i32>(floor(uv * dims - vec2<f32>(0.5)));
+    if (any(px < vec2<i32>(0)) || any(px + vec2<i32>(1) >= vec2<i32>(dims))) { near = 0.0; }
     let far = weather_map_coverage(world_abs);
     var near_reach = 0.0;
     if (near > 0.0) { near_reach = snow_receiver_map_reach(world_abs, n, false); }
