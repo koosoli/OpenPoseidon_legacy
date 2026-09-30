@@ -9603,6 +9603,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
        action==GeometryPageFixtureAction::RefillRetailRecords||action==GeometryPageFixtureAction::AbortRetailRecords)
         return StepRetailPageRecordPilot(action);
     if(_retailPagePilot&&SnapshotRetailPageRecordPilot().active)return failure;
+    if(action==GeometryPageFixtureAction::ProbeRetailColdWorld) return ProbeRetailColdWorldRecords();
     if(action==GeometryPageFixtureAction::ProbeRetailOdol7) {
         using namespace GeometryPages;
         failure.retailSourceProbe=true;failure.pageWorkState="RetailSourceRefused";
@@ -15633,6 +15634,67 @@ void EngineWgpu::SceneObjectProxiesChanged(Object* obj)
 // vertex buffers OptimizeRendering builds find their level in _retainedMeshOfLevel and share
 // the retained mesh (RFG-088) instead of uploading a private copy. Only world models arrive
 // here (ShapeBank::WorldModelScope); animated shapes never take the retained path anyway.
+GeometryPages::RigidOdol7FinalMaterialHold EngineWgpu::InspectRetailWorldSection(
+    int finalLevel, const ShapeSection& section)
+{
+    GeometryPages::RigidOdol7FinalMaterialHold out;
+    const auto* held = _retailWorldSource.get();
+    if (!held || !held->shape || !held->texture || section.surfMat || section.material ||
+        section.properties.GetTexture() != held->texture.GetRef() || finalLevel < 0 ||
+        finalLevel >= held->shape->NLevels()) return out;
+    auto* texture = static_cast<TextureWgpu*>(held->texture.GetRef());
+    auto current = texture->CurrentArchiveSourceBinding();
+    BankReadMemberIdentity member;
+    if (!current || !held->textureBirth ||
+        !current->Request().SameArchiveMember(held->textureBirth->Request()) ||
+        !current->Request().CopyMemberIdentity(member) || texture->GpuHandle() != held->textureHandle ||
+        texture->SlotLease() != held->textureSlot) return out;
+    const Shape* lod = held->shape->Level(finalLevel);
+    if (!lod || lod->NSections() != 1 || &lod->GetSection(0) != &section) return out;
+    AutoArray<render::mesh::MeshSection> sections;
+    render::mesh::BuildSections(*lod, sections);
+    if (sections.Size() != 1) return out;
+    out.texture = held->texture; out.materialBindingBirth = held->shapeBirth;
+    out.current = {held->shapeBirth, texture->SourceName(),
+        {member.volume, member.archiveBytes, member.offset, member.bytes, {}},
+        texture->GpuHandle(), texture->SlotLease(), true, true};
+    std::memcpy(out.current.member.fileId.data(), member.fileId, out.current.member.fileId.size());
+    auto& facts = out.facts;
+    facts.gpuOwned = SectionGpuOwned(section);
+    facts.indexCount = sections[0].end - sections[0].beg;
+    facts.descriptor = render::BuildRenderPassDescriptor(render::SplitLegacy(section.properties.Special()));
+    facts.texturePresent = true; facts.alphaClass = texture->GetAlphaClass();
+    facts.alphaHoles = texture->HasAlphaHoles();
+    facts.legacyPlantName = render::IsLegacyPlantCutoutTexture(texture->Name());
+    facts.enfusionCoverageName = render::IsEnfusionCoverageTexture(texture->Name());
+    facts.barkOrTrunkName = GpuTextureIsBarkOrTrunk(texture);
+    facts.leafCards = GpuSectionMaterialUsesLeafCards(section.surfMat);
+    facts.ematBlends = GpuEmatBlends(section.surfMat); facts.ematGlass = GpuEmatIsGlass(section.surfMat);
+    facts.ematOpaqueSolid = GpuEmatIsOpaqueSolid(section.surfMat);
+    facts.ematCullNone = GpuEmatCullNone(section.surfMat);
+    const auto family = GpuEmatFamily(section.surfMat);
+    facts.ematVegetationFamily = !family.empty() && Asset::Material::IsEmatVegetationFamily(family);
+    TLMaterial material; CreateMaterial(material, HWhite, section.material);
+    facts.materialFullyOpaque = MaterialIsFullyOpaque(material);
+    facts.foldedEmissive = {material.emmisive.R(), material.emmisive.G(), material.emmisive.B(), material.emmisive.A()};
+    facts.emitterScale = StaticEmitterRadianceScale(section.surfMat, material.emmisive);
+    facts.capturedGroups = render::PreparedGpuSectionFacts::All; facts.complete = true;
+    return out;
+}
+
+bool EngineWgpu::ClassifyRetailWorldMaterial(int level, WgrModelSection& section, WgrModelMaterial& material)
+{
+    if (!_retailWorldSource || !_retailWorldSource->shape || level < 0 ||
+        level >= _retailWorldSource->shape->NLevels()) return false;
+    const Shape* lod = _retailWorldSource->shape->Level(level);
+    if (!lod || lod->NSections() != 1 || lod->GetSection(0).surfMat) return false;
+    AutoArray<render::mesh::MeshSection> sections; render::mesh::BuildSections(*lod, sections);
+    if (sections.Size() != 1 || !ClassifyGpuSection(*lod, level, sections, 0, section, material, true) ||
+        ResolveMaterialLayers(lod->GetSection(0), material)) return false;
+    material.normal_power = 1;
+    return material.texture_id == _retailWorldSource->textureHandle;
+}
+
 void EngineWgpu::PrepareRetailWorldSource(LODShapeWithShadow* shape)
 {
     if (!Foundation::IsMainThread() || !shape || _retailWorldSource ||

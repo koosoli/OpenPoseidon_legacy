@@ -653,6 +653,7 @@ void RegisterScreenshot(HarnessServer& hs)
             else if(!std::strcmp(name,"stopHierarchy")) action=Engine::GeometryPageFixtureAction::StopHierarchy;
             else if(!std::strcmp(name,"probeTextureReuseOnly")) action=Engine::GeometryPageFixtureAction::ProbeTextureReuseOnly;
             else if(!std::strcmp(name,"probeRetailOdol7")) action=Engine::GeometryPageFixtureAction::ProbeRetailOdol7;
+            else if(!std::strcmp(name,"probeRetailColdWorld")) action=Engine::GeometryPageFixtureAction::ProbeRetailColdWorld;
             else if(!std::strcmp(name,"pollRetailRecords")) action=Engine::GeometryPageFixtureAction::PollRetailRecords;
             else if(!std::strcmp(name,"beginRetailVisible")) action=Engine::GeometryPageFixtureAction::BeginRetailVisible;
             else if(!std::strcmp(name,"rootRetailVisible")) action=Engine::GeometryPageFixtureAction::RootRetailVisible;

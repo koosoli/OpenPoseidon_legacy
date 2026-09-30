@@ -42,7 +42,7 @@ struct SDL_Window;
 namespace Poseidon
 {
 namespace render { class GeometryOwnerLedger; class GeometrySourceRevisions; struct RetailPagePilotAdmission; }
-namespace GeometryPages { class AuthoredPageWorker; }
+namespace GeometryPages { class AuthoredPageWorker; struct RigidOdol7FinalMaterialHold; }
 class TextureBankWgpu;
 class TextureWgpu;
 class ArchiveSourceBinding;
@@ -1318,8 +1318,12 @@ class EngineWgpu : public EngineDummy
     };
     std::unique_ptr<RetailWorldSource> _retailWorldSource;
     uint32_t _retailWorldSourceAttempts = 0;
+    uint64_t _nextRetailWorldSourceEpoch = 1;
     void PrepareRetailWorldSource(LODShapeWithShadow*);
     void ObserveRetailWorldPlacement(Object*, const WgrInstance&, uint32_t);
+    GeometryPageFixtureReport ProbeRetailColdWorldRecords();
+    GeometryPages::RigidOdol7FinalMaterialHold InspectRetailWorldSection(int, const ShapeSection&);
+    bool ClassifyRetailWorldMaterial(int, WgrModelSection&, WgrModelMaterial&);
     std::shared_ptr<render::RetailPageInstanceObservation> _retailInstanceReturn;
     uint64_t _retailInstanceFrameAttempt = 0;
     uint64_t _retailInstanceCameraBefore = 0;

@@ -1595,3 +1595,30 @@ passed. Two initial test invocations matched no cases and were corrected to the
 actual target/tag; no zero-test result counted as validation. Normal scene/world
 hooks freeze the launch gate once, adding no per-object getenv/query/IO in OFF
 mode. Actual cold-world installed runtime is still pending.
+
+Exactf4ccb276 paired startup passed with matching build provenance/Tidewater.
+First cold-world driver failure is preserved (`retail-cold-world-f4ccb-20260930-
+051333-1d3b1f`): async screenshot was checked before readback finished. Engine
+already emitted actual parser/Shape/PAC and two current ordinary queued placement
+facts; cleanup exited0 normally, no force. The driver now waits bounded10s for
+readback and centers its camera on the unchanged placements.
+Same installedf4 repaired `retail-cold-world-f4ccb-repaired-20260930-051707-eaca6a`
+passed normally/exit0/no force: actual Shape birth1,53786 decoded bytes,4 visuals,
+P3D SHA1048fad...ecb78b, bank-owned PAC handle4294967316/slot20, raw83d60c...762769,
+uploaded4b6a89...47229, two ordinary queued placements0/1 sourceCurrent/static/
+intact=true, flags0. This is actual cold-world source/primary ownership evidence,
+not renderer-return or world page takeover.
+
+Normal f4 DayZ OFF control passed1259 frames/zero dropped/normal exit0,
+median22.702ms/p95127.600ms/p99336.965ms. Ordered cache/history and variable
+first-touch timing prevent causal performance or no-regression acceptance.
+No headless GPU job or second game overlapped this capture.
+
+Next source exports a candidate and pages from the SAME installed Shape birth,
+retaining all original levels/passes/model. Actual ordinary material facts and
+classifier are reused through member wrappers; no hand-authored sampler/tint.
+This record-only action requires explicit cold-source, fixture and frozen-reuse
+gates; no private replacement Shape/PAC or world-instance operation. Candidate
+refusal/capacity checks passed20 assertions/3 cases and game+Core build passed.
+Installed actual-world record lifetime remains pending; whole plan still OPEN,
+defaultReady=false/performanceAccepted=false.

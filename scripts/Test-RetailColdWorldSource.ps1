@@ -1,4 +1,5 @@
 param(
+ [switch]$Records,
  [string]$Label='retail-cold-world-source',
  [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
  [string]$Python='C:\Program Files\Python311\python.exe'
@@ -9,6 +10,7 @@ if(!$env:LOCK_OWNER){
  $shell=Join-Path $PSHOME $(if($PSVersionTable.PSEdition -eq 'Core'){'pwsh.exe'}else{'powershell.exe'})
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),$shell.Replace('\','/'),'-NoProfile','-File',$PSCommandPath,
   '-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
+ if($Records){$argv+='-Records'}
  $env:LOCK_OWNER='retail cold world source fixture'
  try{& 'C:\Program Files\Git\bin\bash.exe' @argv;if($LASTEXITCODE){throw "Retail cold world child failed $LASTEXITCODE"}}
  finally{Remove-Item Env:LOCK_OWNER}
@@ -71,12 +73,13 @@ class OutroLoose { randomSeed=3; class Intel {}; };
   POSEIDON_USER_DIR=$profile;POSEIDON_MODEL_DDC='0'
   WGR_GEOMETRY_PAGE_RETAIL_COLD_SOURCE='1';WGR_GEOMETRY_PAGE_RETAIL_SOURCE='1'
  }
+ if($Records){$environment.WGR_GEOMETRY_PAGE_FIXTURE='1';$environment.WGR_OBJECT_STREAM_DAYZ_REUSE_ONLY='1'}
  Get-ChildItem Env:|Where-Object {$_.Name -match '^(WGR_|POSEIDON_)'}|ForEach-Object {Remove-Item ('Env:'+$_.Name)}
  foreach($key in $environment.Keys){Set-Item ('Env:'+$key) $environment[$key]}
  $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
  $listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
  $argv=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000',
-  '--harness',[string]$port,'--test-world-freefly','1184','1240','18','90','-8',
+  '--harness',[string]$port,'--test-world-freefly','1184','1200','18','90','-8',
   '--test-world',('"'+$world+'"'),'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
  @{head=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash $PSCommandPath).Hash;
    generatorSha256=(Get-FileHash $generator).Hash;worldHelperSha256=(Get-FileHash $helper).Hash;
@@ -102,9 +105,14 @@ class OutroLoose { randomSeed=3; class Intel {}; };
   $line|Add-Content (Join-Path $out 'harness.jsonl')
   if(!$reply.ok){throw $line};return $reply
  }
- $null=Send @{cmd='eval';code='triFreeFlyPose "1184 1240 18 90 -8"'}
+ $null=Send @{cmd='eval';code='triFreeFlyPose "1184 1200 18 90 -8"'}
  $image=Join-Path $out 'retail-cold-world.png'
  $null=Send @{cmd='screenshot';path=$image}
+ $imageDeadline=[DateTime]::UtcNow.AddSeconds(10)
+ while([DateTime]::UtcNow -lt $imageDeadline){
+  if((Test-Path -LiteralPath $image) -and (Get-Item -LiteralPath $image).Length -gt 0){break}
+  Start-Sleep -Milliseconds 100
+ }
  if(!(Test-Path -LiteralPath $image) -or (Get-Item -LiteralPath $image).Length -le 0){throw 'Missing actual-world screenshot'}
  $sourceMatch=$null;$placementMatch=$null
  $sourcePattern='Retail actual-world source: shapeBirth=(?<birth>[1-9][0-9]*) sourceSha256=(?<source>[0-9a-f]{64}) decodedBytes=(?<decoded>[1-9][0-9]*) visualLevels=4 primaryHandle=(?<handle>[1-9][0-9]*) primarySlot=(?<slot>[1-9][0-9]*) rawSha256=(?<raw>[0-9a-f]{64}) uploadedSha256=(?<upload>[0-9a-f]{64})'
@@ -124,6 +132,33 @@ class OutroLoose { randomSeed=3; class Intel {}; };
  }while([DateTime]::UtcNow -lt $overall.AddSeconds(-15))
  if(!$sourceMatch -or !$sourceMatch.Success -or !$placementMatch -or !$placementMatch.Success){
   throw 'No exact cold-world Shape/PAC source plus current queued placement witness'
+ }
+ if($Records){
+  function RecordAction($action){return Send @{cmd='geometry_page_fixture';action=$action}}
+  function WaitRecord($first,$poll){
+   $recordDeadline=[DateTime]::UtcNow.AddSeconds(25);$record=$first
+   do{
+    if($record.status -eq 'Ready'){return $record}
+    if($record.status -ne 'Pending'){throw ('Record refused: '+($record|ConvertTo-Json -Depth 3 -Compress))}
+    Start-Sleep -Milliseconds 50;$record=RecordAction $poll
+   }while([DateTime]::UtcNow -lt $recordDeadline)
+   throw 'Bounded world record observation timed out'
+  }
+  $ready=WaitRecord (RecordAction 'probeRetailColdWorld') 'pollRetailRecords'
+  if(!$ready.retailRecordOnly -or !$ready.retailFineTriangleSetExact -or
+     $ready.retailRecordMeshesPresent -ne 8 -or $ready.retailRecordModelsPresent -ne 3 -or
+     $ready.mainFrameReturned -or $ready.producerInstance -ne 4294967295){throw 'Initial actual-world records mismatch'}
+  $released=WaitRecord (RecordAction 'releaseRetailRecords') 'pollRetailRecords'
+  if($released.retailRecordMeshesPresent -ne 4 -or $released.retailRecordMeshesAbsent -ne 4){throw 'World record release mismatch'}
+  $refilled=WaitRecord (RecordAction 'refillRetailRecords') 'pollRetailRecords'
+  if($refilled.retailRecordMeshesPresent -ne 8 -or $refilled.retailRecordMeshesAbsent -ne 4 -or
+     $refilled.retailRecordFreshIds -lt 8){throw 'World record fresh refill mismatch'}
+  $aborted=WaitRecord (RecordAction 'abortRetailRecords') 'pollRetailRecords'
+  if($aborted.retailRecordMeshesPresent -ne 0 -or $aborted.retailRecordModelsPresent -ne 0 -or
+     $aborted.pageLiveJobs -or $aborted.pageReservedBytes){throw 'World record abort debt'}
+  @{ready=$ready;released=$released;refilled=$refilled;aborted=$aborted;
+    scope='Actual cold-world Shape export and private record lifetime; ordinary world model retained, no page instance takeover'}|
+   ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'actual-world-records.json')
  }
  $null=Send @{cmd='exit'}
  if(!$p.WaitForExit(10000) -or $p.ExitCode -ne 0){throw 'Game did not exit normally'}

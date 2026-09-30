@@ -59,6 +59,7 @@ add_library(WgpuRenderer STATIC
     EngineWgpu.cpp
     EngineWgpuRetailPages.cpp
     EngineWgpuRetailInstances.cpp
+    EngineWgpuRetailWorld.cpp
     EngineWgpuTextInput.cpp
     GraphicsBackendWgpu.cpp
     TerrainWgpu.cpp
