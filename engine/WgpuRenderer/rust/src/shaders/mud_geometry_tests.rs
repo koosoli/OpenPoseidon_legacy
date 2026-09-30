@@ -128,8 +128,8 @@ fn mud_geometry_actual_helpers_match_and_compose_in_real_terrain() {
     ] {
         let marker = format!("fn {name}(");
         assert_eq!(
-            declaration(TERRAIN, &marker),
-            declaration(CONFORM, &marker),
+            declaration(TERRAIN, &marker).replace("\r\n", "\n"),
+            declaration(CONFORM, &marker).replace("\r\n", "\n"),
             "actual {name} paths diverged"
         );
     }
