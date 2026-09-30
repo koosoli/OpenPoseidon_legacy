@@ -64,7 +64,7 @@ $result = [ordered]@{ status = 'running'; scope = 'controlled installed capture 
 $keys = @('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM',
     'POSEIDON_TEST_RAIN','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_TERRAIN_PUDDLES',
     'WGR_TEMPORAL','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_INTERIOR_SKY','WGR_INTERIOR_SKY_DEBUG',
-    'WGR_GRASS','POSEIDON_WIND_OVERRIDE','WGR_CLOUD_COVERAGE','WGR_LOD_GOVERNOR_RANGE')
+    'WGR_GRASS','POSEIDON_WIND_OVERRIDE','WGR_CLOUD_COVERAGE','WGR_LOD_GOVERNOR_RANGE','WGR_TERRAIN_JITTER')
 $savedEnv = @{}
 foreach ($key in $keys) { $savedEnv[$key] = [Environment]::GetEnvironmentVariable($key, 'Process') }
 @{ scriptSha256 = (Get-FileHash -LiteralPath $PSCommandPath).Hash;
@@ -75,7 +75,7 @@ foreach ($key in $keys) { $savedEnv[$key] = [Environment]::GetEnvironmentVariabl
    lockOwner = $env:LOCK_OWNER; fixedSimTime = 100; fixedDate = @(1985,6,21,16,0); fixedExposure = 1; roi = 'central 60% of width and height';
    maskThreshold = $MaskThreshold; minimumReturnIoU = $MinimumReturnIoU; requireNumericGates = [bool]$RequireNumericGates;
    wetnessOverrides = @(0,1); actualRain = 0; temporal = 0;
-   grass = 0; windOverride = '0 90 0'; cloudCoverage = 0; fixedLodRange = 1;
+   grass = 0; windOverride = '0 90 0'; cloudCoverage = 0; fixedLodRange = 1; terrainJitter = 0;
    isolation = 'Terrain response controls exclude grass and pin wind/clouds; ordinary grass-on appearance is assessed separately.' } |
    ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'provenance.json')
 if (!('TerrainPuddleMetrics' -as [type])) {
@@ -178,6 +178,10 @@ try {
     # changes as puddle response or relaxing the independent master-off control.
     $env:WGR_GRASS = '0'; $env:POSEIDON_WIND_OVERRIDE = '0 90 0'
     $env:WGR_CLOUD_COVERAGE = '0'; $env:WGR_LOD_GOVERNOR_RANGE = '1'
+    # Geography initializes terrain UV offsets from wall-clock-seeded GRandGen.
+    # Native detail-noise still consumes tile_uv, so fixed time cannot reproduce
+    # its phase across processes. Keep detail, but remove only UV displacement.
+    $env:WGR_TERRAIN_JITTER = '0'
     $armNames = @('dry','wet','master-off')
     if ($roofEnabled) { $armNames += 'raw-sky' }
     foreach ($arm in $armNames) {
@@ -312,7 +316,10 @@ try {
         }
         if ($changed) { $result.status = 'failed'; $result.error = 'Installed provenance or binaries changed during the campaign.' }
     } catch { $result.status = 'failed'; $result.error = $_.Exception.Message }
-    foreach ($key in $keys) { [Environment]::SetEnvironmentVariable($key,$savedEnv[$key],'Process') }
+    foreach ($key in $keys) {
+        if ($null -eq $savedEnv[$key]) { Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue }
+        else { [Environment]::SetEnvironmentVariable($key,$savedEnv[$key],'Process') }
+    }
     $result | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath (Join-Path $output 'result.json')
     Write-Host "Puddle stability evidence: $output"
     if ($result.status -eq 'failed') { throw $result.error }
