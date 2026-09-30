@@ -69,6 +69,7 @@
 #include <Poseidon/Graphics/Rendering/AsciiSearch.hpp>
 #include <Poseidon/Graphics/Rendering/UniformClothAdmission.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Vehicles/House.hpp>
 #include <Poseidon/World/Scene/Pass1Submit.hpp>
 #include <Poseidon/World/Entities/Infantry/Head.hpp> // FACE-001 diagnostics
 #include <Poseidon/World/Scene/Thing.hpp>
@@ -7354,6 +7355,40 @@ static bool ObjectSnowConformAllowed(const LODShapeWithShadow& shape, int mode)
     return ObjectSnowSurface::ConformAllowed(float(mode), hasKeep, hasPinned);
 }
 
+static bool ObjectSnowRetainedPoseAllowed(const Object& obj, const LODShapeWithShadow& shape)
+{
+    const auto* entity = dyn_cast<const Entity>(&obj);
+    // These built-in owners have procedural geometry animations outside the
+    // configured Entity animation array. No reliable retained pose invalidation
+    // is available here; keep their complete models conservatively excluded.
+    // Church/Fountain do not declare their own legacy casting IDs; use real
+    // RTTI rather than inheriting Building's ID and rejecting every building.
+    if (dynamic_cast<const Church*>(&obj) || dynamic_cast<const Fountain*>(&obj)) return false;
+    return ObjectSnowSurface::RetainedVisualsRigid(shape.NLevels(), shape.GetAllowAnimation(),
+        entity && entity->HasConfiguredGeometryAnimations(), [&](int level) {
+            ObjectSnowSurface::VisualPose state;
+            state.visual = shape.IsNormalLevel(level);
+            if (!state.visual) return state;
+            const Shape* mesh = shape.Level(level);
+            state.loaded = mesh != nullptr;
+            if (!mesh) return state;
+            state.deforms = obj.DeformsSharedShape(level);
+            state.animated = obj.GetAnimated(*mesh);
+            state.vertices = mesh->NVertex();
+            state.originalsValid = mesh->OriginalPosValid() && mesh->OriginalNormValid() &&
+                mesh->NNorm() >= mesh->NVertex();
+            return state;
+        }, [&](int level, int vertex) {
+            const Shape& mesh = *shape.Level(level);
+            const Vector3 pos = mesh.Pos(vertex), normal = mesh.Norm(vertex);
+            const Vector3 originalPos = mesh.OrigPos(vertex), originalNormal = mesh.OrigNorm(vertex);
+            return ObjectSnowSurface::PosePair{
+                {pos.X(), pos.Y(), pos.Z(), normal.X(), normal.Y(), normal.Z()},
+                {originalPos.X(), originalPos.Y(), originalPos.Z(),
+                 originalNormal.X(), originalNormal.Y(), originalNormal.Z()}};
+        });
+}
+
 static bool CurrentSnowSectionRigid(const Object& obj, const Shape& mesh,
                                    const VertexBufferWgpu& buffer, int begin, int end)
 {
@@ -7483,10 +7518,12 @@ static void TraceObjectSnowRetainedGates(const Object& obj, int mode, bool eligi
     const std::string key = std::string(name) + ":" + std::to_string(mode) + ":" +
         std::to_string(eligible) + ":" + std::to_string(hints) + ":" + std::to_string(missing);
     if (!reported.insert(key).second) return;
-    LOG_INFO(Graphics, "Wgpu object snow retained gates: model={} eligible={} static={} ownerEligible={} destroyed={} allowAnimation={} conform={} conformAllowed={} visualLevels={} missingVisual={} keep={} pinned={} hints=0x{:x}",
+    const auto* entity = dyn_cast<const Entity>(&obj);
+    LOG_INFO(Graphics, "Wgpu object snow retained gates: model={} eligible={} static={} ownerEligible={} destroyed={} allowAnimation={} conform={} conformAllowed={} visualLevels={} missingVisual={} keep={} pinned={} hints=0x{:x} configuredAnimations={} poseAllowed={}",
         name, eligible, obj.Static(), ObjectSnowOwnerEligible(obj), obj.IsDestroyed(),
         shape->GetAllowAnimation(), mode, conform, visual, missing,
-        (hints & ClipLandKeep) != 0, (hints & ClipLandOn) != 0, uint32_t(hints));
+        (hints & ClipLandKeep) != 0, (hints & ClipLandOn) != 0, uint32_t(hints),
+        entity && entity->HasConfiguredGeometryAnimations(), ObjectSnowRetainedPoseAllowed(obj, *shape));
 }
 
 void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
@@ -9274,9 +9311,9 @@ WgrInstance BuildGpuInstance(const Object& obj, uint32_t model, const ConformPla
     inst.model = model;
     // SceneObjectCreated's retained admission is static/intact rigid geometry. Give only the
     // actual owner this proof; BuildGpuProxyInstance intentionally leaves it unset.
-    const bool snowReceiver = obj.Static() && ObjectSnowOwnerEligible(obj) &&
-        obj.GetShape() && !obj.GetShape()->GetAllowAnimation() &&
-        ObjectSnowConformAllowed(*obj.GetShape(), cp.mode);
+    const bool snowReceiver = obj.Static() && ObjectSnowOwnerEligible(obj) && obj.GetShape() &&
+        ObjectSnowConformAllowed(*obj.GetShape(), cp.mode) &&
+        ObjectSnowRetainedPoseAllowed(obj, *obj.GetShape());
     if (snowReceiver) inst.flags |= WGR_INSTANCE_SNOW_RECEIVER;
     TraceObjectSnowReceiver(obj, snowReceiver, "retained");
     TraceObjectSnowRetainedGates(obj, cp.mode, snowReceiver);

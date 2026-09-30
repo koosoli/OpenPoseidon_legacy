@@ -353,6 +353,7 @@ class Entity: public Object
 
 	float GetAnimationPhase(RString animation) const;
 	void SetAnimationPhase(RString animation, float phase);
+	bool HasConfiguredGeometryAnimations() const { return _animations.Size() != 0; }
 
 	public:
 	virtual void PlaceOnSurface(Matrix4 &trans); // place in steady position

@@ -51,6 +51,43 @@ int main()
     assert(CurrentSectionRigid(0, MaxProofVertices, MaxProofVertices, true,
         [](int) { return PosePair{}; }));
 
+    std::array<VisualPose, 3> visuals{{
+        {true, true, false, false, true, 4},
+        {true, true, false, false, true, 4},
+        {false, false, false, false, false, 0}}}; // memory LOD is not visual
+    const auto visual = [&](int i) { return visuals[i]; };
+    const auto pose = [&](int level, int vertex) { ++reads; return mesh[level * 4 + vertex]; };
+    mesh[6].current = mesh[6].original;
+    assert(RetainedVisualsRigid(3, true, false, visual, pose));
+    mesh[6].current[4] = 0.99f; // a different visual LOD deforms
+    assert(!RetainedVisualsRigid(3, true, false, visual, pose));
+    mesh[6].current = mesh[6].original;
+    visuals[1].loaded = false;
+    assert(!RetainedVisualsRigid(3, true, false, visual, pose));
+    visuals[1].loaded = true;
+    visuals[1].originalsValid = false;
+    assert(!RetainedVisualsRigid(3, true, false, visual, pose));
+    visuals[1].originalsValid = true;
+    visuals[1].deforms = true;
+    assert(!RetainedVisualsRigid(3, false, false, visual, pose));
+    visuals[1].deforms = false;
+    visuals[1].animated = true;
+    assert(!RetainedVisualsRigid(3, false, false, visual, pose));
+    visuals[1].animated = false;
+    reads = 0;
+    assert(!RetainedVisualsRigid(3, true, true, visual, pose)); // neutral configured door
+    assert(reads == 0);
+    assert(RetainedVisualsRigid(3, false, false, visual, pose));
+    assert(reads == 0); // no-animation static source still needs no vertex scan
+    const auto zeroPose = [&](int, int) { ++reads; return PosePair{}; };
+    visuals[0].vertices = MaxProofVertices;
+    visuals[1].vertices = 1;
+    assert(!RetainedVisualsRigid(3, true, false, visual, zeroPose));
+    assert(reads == MaxProofVertices); // shared budget, second LOD not read
+    visuals[0].vertices = 0;
+    visuals[1].vertices = 0;
+    assert(!RetainedVisualsRigid(3, true, false, visual, zeroPose));
+
     assert(CoverPossible(true, 0.18f, false, 100.0f, 25.0f, 0.06f, 1.0f));
     assert(!CoverPossible(false, 0.18f, false, 100.0f, 25.0f, 0.06f, 1.0f));
     assert(!CoverPossible(true, 0.0f, false, 100.0f, 25.0f, 0.06f, 200.0f));

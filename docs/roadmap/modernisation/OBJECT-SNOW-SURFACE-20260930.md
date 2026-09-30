@@ -242,3 +242,39 @@ uploaded through its separate effective snow parameter telemetry.
 The standalone CPU policy runner and `git diff --check` passed. Root owns full
 compilation and the next focused deposit-only installed run; this agent ran no
 game, GPU, full build or deployment and claims no roof appearance acceptance.
+
+## Retained current visual pose admission
+
+Root's matched `6a388c62` focused capture identified the remaining CPU gate:
+the tent's retained instance is static, owner-eligible, Keep-only across all four
+loaded visual LODs and conform-allowed, but `GetAllowAnimation` is true. Its
+opaque roof belongs to retained draws. The direct complement contains rope and
+chimney soot with actual transparent blend/pass/material flags and is correctly
+excluded. A blanket allocation/animation hint cannot establish roof deformation.
+
+The retained flag now checks each loaded visual source for actual
+`DeformsSharedShape` and `GetAnimated`. MAYANIMATE models additionally require
+finite exact current position/normal equality to saved originals across all
+visual LODs, with a shared 16,384-vertex budget, complete original streams and
+no allocation. Normal non-animated static sources retain their zero-vertex-scan
+fast path. Missing visual source, deformed/destroyed source and budget excess
+fail closed. This is evaluated at existing instance registration/update, not
+in every colour draw. Updates recompute the receiver bit.
+
+Because `Object::DeformsSharedShape` currently recognizes destruction rather
+than all configured animations, neutral configured Entity geometry animations
+are excluded too. The new read-only `HasConfiguredGeometryAnimations` accessor
+uses the actual Entity animation array, with no field/layout change. Built-in
+Church/Fountain procedural animation owners remain excluded until a reliable
+retained pose update authority exists. They lack independent legacy casting
+IDs, so their exact exclusion uses existing supported C++ RTTI, not `dyn_cast`
+with inherited Building IDs. Actual Camp Building->VehicleSupply ownership is
+retained; no Thing-only assumption is introduced.
+
+Standalone CPU tests passed multi-LOD unchanged versus deformed source,
+missing visual/original data, actual deformation/animation gates, neutral
+configured-animation rejection without vertex reads, unchanged no-animation
+zero-scan behavior, one shared budget and empty/nonvisual source rejection.
+Earlier source/section/snow controls still pass; `git diff --check` passed.
+Root must build and check the retained tent receiver and physical roof pixels;
+no runtime or appearance acceptance is claimed by this source-only agent.

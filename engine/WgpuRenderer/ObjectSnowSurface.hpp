@@ -51,4 +51,37 @@ bool CurrentSectionRigid(int begin, int end, int vertexCount,
     }
     return true;
 }
+
+struct VisualPose
+{
+    bool visual = false, loaded = false, deforms = false, animated = false;
+    bool originalsValid = false;
+    int vertices = 0;
+};
+
+// A stored retained receiver must not depend on a configured animation being
+// momentarily neutral. Exact current-pose proof is additionally required for
+// MAYANIMATE models, across all visual LODs and one shared vertex budget.
+template <typename ReadVisual, typename ReadPair>
+bool RetainedVisualsRigid(int levels, bool mayAnimate, bool configuredAnimations,
+                         ReadVisual readVisual, ReadPair readPair)
+{
+    if (configuredAnimations || levels <= 0 || levels > MaxProofVertices) return false;
+    int budget = MaxProofVertices;
+    bool sawVisual = false;
+    for (int level = 0; level < levels; ++level)
+    {
+        const VisualPose state = readVisual(level);
+        if (!state.visual) continue;
+        if (!state.loaded || state.deforms || state.animated || state.vertices < 0) return false;
+        if (state.vertices == 0) continue;
+        sawVisual = true;
+        if (!mayAnimate) continue; // preserve the existing static-source fast path
+        if (state.vertices > budget) return false;
+        budget -= state.vertices;
+        if (!CurrentSectionRigid(0, state.vertices, state.vertices, state.originalsValid,
+            [&](int vertex) { return readPair(level, vertex); })) return false;
+    }
+    return sawVisual;
+}
 } // namespace Poseidon::ObjectSnowSurface
