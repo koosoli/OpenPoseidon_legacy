@@ -2,7 +2,7 @@ use crate::ffi::{WgrTerrainMaterial, WgrTerrainParams};
 use naga_oil::compose::NagaModuleDescriptor;
 
 #[test]
-fn mud_puddles_compose_with_the_real_terrain_bindings() {
+fn ground_puddles_compose_with_the_real_terrain_bindings() {
     let mut composer = crate::shaders::build_composer();
     if let Err(error) = composer.make_naga_module(NagaModuleDescriptor {
         source: include_str!("terrain.wgsl"),
@@ -14,32 +14,40 @@ fn mud_puddles_compose_with_the_real_terrain_bindings() {
 }
 
 #[test]
-fn mud_puddles_keep_existing_uniform_and_material_layouts() {
+fn ground_puddles_keep_existing_uniform_and_material_layouts() {
     assert_eq!(std::mem::size_of::<WgrTerrainParams>(), 88);
     assert_eq!(std::mem::offset_of!(WgrTerrainParams, _pad1), 72);
+    assert_eq!(std::mem::offset_of!(WgrTerrainParams, _pad2), 76);
     assert_eq!(std::mem::size_of::<WgrTerrainMaterial>(), 384);
     assert_eq!(std::mem::offset_of!(WgrTerrainMaterial, puddle_flags), 380);
 }
 
 #[test]
-fn mud_puddles_obey_source_mask_weather_slope_coast_snow_and_footprint() {
+fn ground_puddles_ignore_source_language_but_obey_physical_admission() {
     let src = include_str!("terrain.wgsl");
-    assert!(src.contains("source_mud_fraction(weights, material.puddle_flags)"));
-    assert!(!src.contains("mud_weight / bound_weight"));
-    assert!(src.contains("tp.rain_wetness > 0.0 && mud > 0.0"));
-    assert!(src.contains("smoothstep(0.995, 0.9995, geometric_n.y)"));
-    assert!(src.contains("smoothstep(tp.sea_level + 3.5, tp.sea_level + 4.5, world_y)"));
-    assert!(src.contains("snow_cover(in.world_xz, world_y)"));
-    assert!(src.contains("smoothstep(0.4, 0.9, footprint)"));
-    let mask = src.split("fn mud_puddle_mask(").nth(1).unwrap().split("// Tangent-space").next().unwrap();
-    assert!(!mask.contains("frame.") && !mask.contains("tp.time"));
-    // No terrain/water geometry or additional texture allocation is introduced.
-    assert!(!mask.contains("texture"));
+    let film = src.split("var rain_puddle = 0.0;").nth(1).unwrap()
+        .split("if (snow.info.w >").next().unwrap();
+    assert!(film.contains("tp.rain_wetness > 0.0"));
+    assert!(film.contains("ground_puddle_mask(in.world_xz, puddle_footprint, tp.rain_wetness)"));
+    assert!(film.contains("ground_puddle_land_factor(geometric_n.y, world_y, tp.sea_level,"));
+    assert!(film.contains("snow_cover(in.world_xz, world_y)"));
+    assert!(!film.contains("mud") && !film.contains("puddle_flags"));
+    assert!(src.contains("ground_puddle_ripple_normal(in.world_xz, tp.time, tp.rain_strength, puddle_footprint)"));
+    let shared = include_str!("../shaders/ground_puddles.wgsl");
+    let mask = shared.split("fn ground_puddle_mask(").nth(1).unwrap()
+        .split("fn ground_puddle_land_factor").next().unwrap();
+    assert!(mask.contains("smoothstep(0.4, 0.9, footprint)"));
+    assert!(!mask.contains("frame.") && !mask.contains("time") && !mask.contains("texture"));
+    let land = shared.split("fn ground_puddle_land_factor(").nth(1).unwrap()
+        .split("fn ground_puddle_ripple_normal").next().unwrap();
+    assert!(land.contains("smoothstep(0.995, 0.9995, normal_up)"));
+    assert!(land.contains("smoothstep(sea_level + 0.15, sea_level + 0.5, height)"));
+    assert!(land.contains("smoothstep(0.002, 0.02, snow_depth)"));
 }
 
 #[test]
 fn missing_rock_or_unknown_colour_does_not_promote_minor_source_mud() {
-    // Independent admission oracle: painted SOURCE coverage is the denominator;
+    // Independent soft-soil oracle: painted SOURCE coverage is the denominator;
     // resident image coverage belongs only to the existing color composition.
     let source_weights = [0.8_f32, 0.2, 0.0, 0.0, 0.0, 0.0];
     let mud_slots = [false, true, false, false, false, false];
@@ -51,7 +59,7 @@ fn missing_rock_or_unknown_colour_does_not_promote_minor_source_mud() {
         let color_denominator = source_weights.iter().zip(bound).filter(|(_, bound)| *bound)
             .map(|(weight, _)| weight).sum::<f32>();
         assert!(color_denominator > 0.0); // normal color fallback is still available
-        assert!(expected < 0.65); // both fully bound and missing rock/unknown must reject puddles
+        assert!(expected < 0.65); // neither state may promote this mixture to predominantly soft soil
         if !bound[0] {
             assert!((source_weights[1] / color_denominator - 1.0).abs() < 1e-6,
                     "fixture must expose the old residency-dependent normalization bug");
@@ -79,11 +87,12 @@ fn puddle_roof_admission_uses_raw_geometry_not_artistic_ambient_controls() {
         assert!(raw_reach < 0.6);
     }
     let src = include_str!("terrain.wgsl");
-    let admission = src.split("if (rain_puddle > 0.0 && frame.skyvis.x >= 0.5) {")
-        .nth(1).expect("must gate raw roof query on map availability and actual puddle work")
+    let admission = src.split("if (rain_puddle > 0.0) {")
+        .nth(1).expect("must gate raw roof query on actual puddle work")
         .split('}').next().unwrap();
     assert!(admission.contains("interior_rain_reach(in.world_pos + frame.cam_pos.xyz)"));
     assert!(admission.contains("smoothstep(0.6, 0.95, rain_reach)"));
+    assert!(admission.contains("interior_rain_coverage(in.world_pos + frame.cam_pos.xyz)"));
     assert!(!admission.contains("interior_sky_reach("));
     assert!(!admission.contains("local_sky_visibility") && !admission.contains("frame.skyvis.z")
         && !admission.contains("frame.skyvis.w"));

@@ -256,6 +256,7 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
     }
 
     snap.rainEffectiveDensity = GRain.EffectiveDensity();
+    snap.rainParticleSnowflakes = GRain.Params().snowflakes;
     snap.seaRippleGain = GRain.Params().seaRippleGain;
 
     // S2: interactors. ONE walk of the vehicle list replaces the two per-frame RTTI
@@ -597,6 +598,7 @@ void ValidatePresentationSnapshot()
     checkF("seaLevel", cap.seaLevel, now.seaLevel);
     checkF("landscapeRainDensity", cap.landscapeRainDensity, now.landscapeRainDensity);
     checkF("rainEffectiveDensity", cap.rainEffectiveDensity, now.rainEffectiveDensity);
+    checkF("rainParticleSnowflakes", float(cap.rainParticleSnowflakes), float(now.rainParticleSnowflakes));
     checkF("seaRippleGain", cap.seaRippleGain, now.seaRippleGain);
     checkF("windSpeed", cap.windSpeed, now.windSpeed);
     checkF("windDirectionRad", cap.windDirectionRad, now.windDirectionRad);

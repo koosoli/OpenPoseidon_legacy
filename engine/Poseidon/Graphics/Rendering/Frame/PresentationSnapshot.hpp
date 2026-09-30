@@ -101,6 +101,7 @@ struct PresentationSnapshot
 
     // GRain (the visible-drops system) and GWind.
     float rainEffectiveDensity = 0.0f;
+    bool rainParticleSnowflakes = false; // Effective particle density may be snow, not liquid rain.
     float seaRippleGain = 0.0f;
     bool windActive = false;
     float windSpeed = 0.0f;

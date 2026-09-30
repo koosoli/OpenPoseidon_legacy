@@ -1,6 +1,7 @@
 #include "TerrainWgpu.hpp"
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/SnowShelter.hpp>
+#include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
 #include <Poseidon/World/Terrain/TerrainSatmap.hpp>
 
 #include "CdlodDriver.hpp"
@@ -586,8 +587,9 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
     // how its ground is tiled and what its middle-distance map is. Built once per world;
     // the table is empty everywhere else and the loop below is then unchanged.
     BuildEnfusionGroundMaterials(land);
-    // Eligibility belongs to the source material, never its sampled colour.
-    // The legacy quadrant order is not needed: mixed/unknown tiles stay dry.
+    // Every actual terrain material receives ground puddles, independent of
+    // source names or residency. Preserve semantic soft-soil metadata separately
+    // for contact deformation; unknown soil is not promoted to soft mud.
     size_t puddleMaterials = 0;
     for (int i = 0; i < materialCount; ++i)
     {
@@ -604,7 +606,7 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
             // Native palette .emat semantic identity was classified while loading;
             // a generic inherited BCRMap must never promote grass/unknown to mud.
             if (_enfusionGround[static_cast<size_t>(i)].puddleEligible)
-                material.puddle_flags = 1u;
+                material.puddle_flags = TerrainPuddles::SoftSoil;
         }
         else
         {
@@ -614,14 +616,15 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
                 allMud = quadrants[q] != nullptr &&
                     TerrainPuddles::EligibleLegacySurface(quadrants[q]->_class.Data(), quadrants[q]->_name.Data(),
                                                          quadrants[q]->_soundEnv.Data(), quadrants[q]->_character.Data());
-            if (allMud) material.puddle_flags = 1u;
+            if (allMud) material.puddle_flags = TerrainPuddles::SoftSoil;
         }
-        if (material.puddle_flags != 0u) ++puddleMaterials;
+        material.puddle_flags |= TerrainPuddles::GroundReceiver;
+        ++puddleMaterials;
     }
-    LOG_INFO(Graphics, "Wgpu terrain puddles: {} of {} source materials eligible (unknown/mixed/hard stay dry)",
+    LOG_INFO(Graphics, "Wgpu terrain puddles: {} of {} source materials eligible (all ground; soft-soil metadata remains separate)",
              puddleMaterials, materialCount);
     // An opt-in installed-test fixture comes from this world's real material
-    // grid. Pick a 3x3 mud patch, away from native road ribbons and the coast,
+    // grid. Pick a 3x3 ground patch, away from native road ribbons and the coast,
     // with the shader's exact central-difference flatness criterion. Only log a
     // pose; do not teleport the owner or change terrain/weather/profile state.
     if (!paged && puddleMaterials > 0 && EnvFloat("WGR_TERRAIN_PUDDLE_FIXTURE", 0.0f) > 0.5f)
@@ -3195,16 +3198,17 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     _params.snowline_range = std::max(GSnow().snowlineRange, 0.0f);
     _params.snowline_depth = std::clamp(GSnow().snowlineDepth, 0.0f, 1.0f);
     const auto& weather = render::frame::GPresentationSnapshot();
-    _params._pad1 = _puddleWetness.Update(weather.timeSeconds,
-        std::max(weather.landscapeRainDensity, weather.rainEffectiveDensity));
+    _params._pad2 = UniformWettingDensity(weather.landscapeRainDensity, weather.rainEffectiveDensity,
+                                        weather.rainParticleSnowflakes);
+    _params._pad1 = _puddleWetness.Update(weather.timeSeconds, _params._pad2);
     // Process-local diagnostic controls: isolate appearance without editing a
-    // persistent weather/water profile. The wetness override still obeys mud,
+    // persistent weather/water profile. The wetness override still obeys ground,
     // slope, shore, roof and snow eligibility in the shader.
     static const float wetnessOverride = EnvFloat("WGR_TERRAIN_PUDDLE_WETNESS", -1.0f);
     static const bool puddlesEnabled = EnvFloat("WGR_TERRAIN_PUDDLES", 1.0f) > 0.5f;
     if (std::isfinite(wetnessOverride) && wetnessOverride >= 0.0f)
         _params._pad1 = std::clamp(wetnessOverride, 0.0f, 1.0f);
-    if (!puddlesEnabled) _params._pad1 = 0.0f;
+    if (!puddlesEnabled) { _params._pad1 = 0.0f; _params._pad2 = 0.0f; }
     // Diagnostic-only telemetry establishes that the installed weather snapshot
     // reaches accumulation. Duplicate/paused draws do not produce new samples.
     static const bool puddleDiagnostic = EnvFloat("WGR_TERRAIN_PUDDLE_FIXTURE", 0.0f) > 0.5f;
@@ -3214,7 +3218,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
          weather.timeSeconds - lastPuddleDiagnosticTime >= 5.0f))
     {
         LOG_INFO(Graphics, "Wgpu terrain puddle weather: time={:.3f} rain={:.3f} accumulated={:.4f} uploaded={:.4f}",
-                 weather.timeSeconds, std::max(weather.landscapeRainDensity, weather.rainEffectiveDensity),
+                 weather.timeSeconds, _params._pad2,
                  _puddleWetness.value, _params._pad1);
         lastPuddleDiagnosticTime = weather.timeSeconds;
     }

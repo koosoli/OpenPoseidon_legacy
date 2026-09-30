@@ -1,0 +1,66 @@
+#define_import_path ground_puddles
+
+// Cosmetic standing-water film on actual ground. No source-language whitelist,
+// camera seed, texture allocation or geometry/collision change. Callers supply
+// absolute world coordinates and a derivative footprint from uniform control.
+fn puddle_hash(p: vec2<f32>) -> f32 {
+    let q = vec2<u32>(vec2<i32>(p));
+    var h = q.x * 1597334677u ^ q.y * 3812015801u;
+    h = (h ^ (h >> 16u)) * 2246822519u;
+    return f32(h ^ (h >> 13u)) / 4294967295.0;
+}
+
+fn puddle_noise(p: vec2<f32>) -> f32 {
+    let b = floor(p);
+    let f = fract(p);
+    let w = f * f * (3.0 - 2.0 * f);
+    return mix(mix(puddle_hash(b), puddle_hash(b + vec2<f32>(1.0, 0.0)), w.x),
+               mix(puddle_hash(b + vec2<f32>(0.0, 1.0)), puddle_hash(b + vec2<f32>(1.0)), w.x), w.y);
+}
+
+fn ground_puddle_mask(world_xz: vec2<f32>, footprint: f32, wetness: f32) -> f32 {
+    let wet = clamp(wetness, 0.0, 1.0);
+    let field = puddle_noise(world_xz / 6.0) * 0.8 + puddle_noise(world_xz / 2.2) * 0.2;
+    let threshold = mix(0.82, 0.64, wet);
+    let edge = max(0.035, max(footprint, 0.0) / 6.0 * 0.5);
+    // Wetness expands connected patches. Fade before the finest field becomes
+    // subpixel. Preserve the existing world mask, including accepted mud sites.
+    return smoothstep(threshold - edge, threshold + edge, field)
+        * smoothstep(0.18, 0.6, wet) * (1.0 - smoothstep(0.4, 0.9, footprint));
+}
+
+fn ground_puddle_land_factor(normal_up: f32, height: f32, sea_level: f32, snow_depth: f32) -> f32 {
+    // Standing water is near-level. Only actual submerged/coastal water is
+    // excluded: the previous four-metre coastline veto hid dry lowland ground.
+    return smoothstep(0.995, 0.9995, normal_up)
+        * smoothstep(sea_level + 0.15, sea_level + 0.5, height)
+        * (1.0 - smoothstep(0.002, 0.02, snow_depth));
+}
+
+fn ground_puddle_ripple_normal(world_xz: vec2<f32>, time: f32, rain: f32, footprint: f32) -> vec3<f32> {
+    // Each world-fixed 0.8m cell contains one bounded drop packet. Its centre
+    // stays at least .36m from the boundary; the packet radius never reaches
+    // that boundary. This avoids cell seams without a neighbour sample loop.
+    // Full temporal fade at both ends makes the repeating lifetime continuous.
+    if (rain <= 0.0 || footprint >= 0.09) { return vec3<f32>(0.0, 1.0, 0.0); }
+    let cell = floor(world_xz / 0.8);
+    let seed = puddle_hash(cell);
+    let centre = (cell + vec2<f32>(0.45 + seed * 0.1,
+        0.45 + puddle_hash(cell + vec2<f32>(17.0, 31.0)) * 0.1)) * 0.8;
+    let offset = world_xz - centre;
+    let radius = length(offset);
+    let age = fract(time * 1.1 + seed);
+    let ring_radius = mix(0.03, 0.25, age);
+    let width = max(0.025, max(footprint, 0.0) * 1.5);
+    let delta = radius - ring_radius;
+    let pulse = exp(-delta * delta / (width * width));
+    let lifetime = smoothstep(0.0, 0.12, age) * (1.0 - smoothstep(0.72, 1.0, age));
+    let distance_fade = 1.0 - smoothstep(0.02, 0.09, footprint);
+    let radial_fade = 1.0 - smoothstep(0.28, 0.34, radius);
+    // Normal amplitude is bounded, not a high-power glittering microfacet.
+    // No unresolved ripple survives into a distant/top-down film highlight.
+    let slope = sin(delta * 90.0) * pulse * lifetime * radial_fade
+        * distance_fade * clamp(rain, 0.0, 1.0) * 0.028;
+    let gradient = offset / max(radius, 0.0001) * slope;
+    return normalize(vec3<f32>(-gradient.x, 1.0, -gradient.y));
+}

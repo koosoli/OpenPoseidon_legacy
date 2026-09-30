@@ -24,6 +24,9 @@ mod rain_cover_tests;
 #[cfg(test)]
 mod snow_material_tests;
 
+#[cfg(test)]
+mod ground_puddles_tests;
+
 use naga_oil::compose::{
     ComposableModuleDescriptor, Composer, NagaModuleDescriptor, ShaderLanguage,
 };
@@ -109,6 +112,7 @@ pub fn build_composer() -> Composer {
         (include_str!("gbuffer.wgsl"), "gbuffer.wgsl"),
         (include_str!("frame.wgsl"), "frame.wgsl"),
         (include_str!("snow_material.wgsl"), "snow_material.wgsl"),
+        (include_str!("ground_puddles.wgsl"), "ground_puddles.wgsl"),
         (include_str!("skin.wgsl"), "skin.wgsl"),
         (include_str!("conform.wgsl"), "conform.wgsl"),
         (include_str!("lighting.wgsl"), "lighting.wgsl"),

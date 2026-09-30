@@ -6,13 +6,17 @@
 
 namespace Poseidon::TerrainPuddles
 {
+// Ground admission is renderer identity, never a language-dependent surface name.
+// Retain the classifiers below ONLY as conservative soft-soil metadata.
+inline constexpr unsigned GroundReceiver = 1u;
+inline constexpr unsigned SoftSoil = 2u;
 inline std::string_view SurfaceLeaf(std::string_view name)
 {
     return name.substr(name.find_last_of("/\\") == std::string_view::npos ? 0 : name.find_last_of("/\\") + 1);
 }
 
 // Read only the source leaf, never a containing directory called "mud". Unknown
-// surfaces are dry. Separators/numeric variants are accepted, with optional
+// soil stays unclassified. Separators/numeric variants are accepted, with optional
 // CamelCase for semantic material identities; "Soiled" is not positive evidence.
 inline bool HasSurfaceToken(std::string_view name, std::string_view wanted, bool camelCase = false)
 {

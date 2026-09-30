@@ -1,5 +1,6 @@
 // Standalone CPU policy test; scripts/Test-TerrainPuddles.ps1 compiles without the game/PCH.
 #include "../../../../engine/WgpuRenderer/TerrainPuddles.hpp"
+#include "../../../../engine/Poseidon/World/Entities/Infantry/UniformWetness.hpp"
 
 #include <cassert>
 #include <limits>
@@ -8,6 +9,22 @@ using namespace Poseidon::TerrainPuddles;
 
 int main()
 {
+    // Actual terrain is always a receiver; semantic classification is separate
+    // soft-soil metadata, never a grass/rock/unknown-map puddle veto.
+    static_assert(GroundReceiver == 1u && SoftSoil == 2u && (GroundReceiver & SoftSoil) == 0u);
+    for (const auto name : {"Grass", "Rock", "Default", "noe/pole1.paa", "Road"})
+    {
+        const unsigned flags = GroundReceiver | (EligibleSurface(name) ? SoftSoil : 0u);
+        assert((flags & GroundReceiver) != 0u && (flags & SoftSoil) == 0u);
+    }
+    // Render capture supplies the same finite liquid rain as uniform wetting.
+    // Falling snow alone must not accumulate or animate ground water.
+    Wetness snowOnly, liquidParticles;
+    snowOnly.Update(0.0f, Poseidon::UniformWettingDensity(0.0f, 1.0f, true));
+    assert(snowOnly.Update(60.0f, Poseidon::UniformWettingDensity(0.0f, 1.0f, true)) == 0.0f);
+    liquidParticles.Update(0.0f, Poseidon::UniformWettingDensity(0.0f, 0.6f, false));
+    assert(liquidParticles.Update(60.0f, Poseidon::UniformWettingDensity(0.0f, 0.6f, false)) > 0.0f);
+
     for (const auto name : {"Mud", "Soil", "Clay", "Dirt", "Terrains/Common/Surfaces/Dirt_01_BCR.edds",
                             "ca\\chernarus\\data\\mud2_detail_co.paa", "SoIl03"})
         assert(EligibleSurface(name));
@@ -29,7 +46,7 @@ int main()
           "mud/Unknown_01.emat", "beachgrass_mud_01.emat", "MudGrass_01.emat", "DirtAndRock.emat", "SandySoil_01.emat",
           "RoadDirt_01.emat", "TrailDirt_01.emat", "DirtPath_01.emat", "mud/Soiled_01.emat"})
         assert(!EligibleNativeSurface(semantic));
-    // A generic inherited BCR has no native admission authority.
+    // A generic inherited BCR has no native soft-soil classification authority.
     assert(EligibleSurface("Dirt_01_BCR.edds"));
     assert(!EligibleNativeSurface("BeachGrass_01.emat"));
     assert(!EligibleNativeSurface("Unknown_01.emat"));

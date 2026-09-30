@@ -9,4 +9,4 @@ $exe = Join-Path $output 'terrain_puddles_test.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Terrain puddle policy compilation failed.' }
 & $exe
 if ($LASTEXITCODE -ne 0) { throw 'Terrain puddle policy assertions failed.' }
-Write-Host 'Terrain puddle CPU eligibility/accumulation/pause/reset/frame-rate tests passed.'
+Write-Host 'Terrain puddle CPU ground-receiver/soft-soil/liquid-rain/accumulation/pause/reset/frame-rate tests passed.'

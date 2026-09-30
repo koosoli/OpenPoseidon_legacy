@@ -7,7 +7,8 @@
 // Shares group(0) (the camera UBO + cascade shadow map) with the lit 3D
 // pipeline via the frame module, so terrain receives the same CSM shadows and
 // sun lighting.
-#import frame::{frame, reverse_z, fog_factor, apply_fog, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
+#import frame::{frame, reverse_z, fog_factor, apply_fog, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_rain_coverage, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
+#import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_ripple_normal}
 #import shadow::shadow_strength
 #import lighting::lights_contrib
 #import color::srgb_to_linear
@@ -42,7 +43,7 @@ struct TerrainParams {
     snowline_range: f32,
     snowline_depth: f32,
     rain_wetness: f32, // cosmetic rain history [0,1], former padding at offset 72
-    _pad2: f32,
+    rain_strength: f32, // effective liquid rain, former padding at offset 76
     _pad3: f32,
     _pad4: f32,
 };
@@ -173,7 +174,7 @@ struct TerrainMaterial {
     // MiddleColor: a LINEAR multiplier on the middle map's texel (1,1,1 when the
     // material names none). Own 16-byte row; puddle_flags closes it to 384 bytes.
     middle_color: vec3<f32>,
-    puddle_flags: u32, // former padding: legacy/native bit 0; authored slots bits 8..13
+    puddle_flags: u32, // former padding: ground bit 0; legacy/native soft soil bit 1; authored soft slots bits 8..13
 };
 @group(2) @binding(6) var<storage, read> terrain_materials: array<TerrainMaterial>;
 
@@ -407,33 +408,6 @@ struct AuthoredCell {
     mud: f32,
 };
 
-// Smooth value noise with metre-scale, world-absolute inputs. No frame, camera,
-// mesh LOD or animation seed: moving over the ground never moves the puddles.
-fn puddle_hash(p: vec2<f32>) -> f32 {
-    let q = vec2<u32>(vec2<i32>(p));
-    var h = q.x * 1597334677u ^ q.y * 3812015801u;
-    h = (h ^ (h >> 16u)) * 2246822519u;
-    return f32(h ^ (h >> 13u)) / 4294967295.0;
-}
-
-fn puddle_noise(p: vec2<f32>) -> f32 {
-    let b = floor(p);
-    let f = fract(p);
-    let w = f * f * (3.0 - 2.0 * f);
-    return mix(mix(puddle_hash(b), puddle_hash(b + vec2<f32>(1.0, 0.0)), w.x),
-               mix(puddle_hash(b + vec2<f32>(0.0, 1.0)), puddle_hash(b + vec2<f32>(1.0)), w.x), w.y);
-}
-
-fn mud_puddle_mask(xz: vec2<f32>, footprint: f32, wetness: f32) -> f32 {
-    let field = puddle_noise(xz / 6.0) * 0.8 + puddle_noise(xz / 2.2) * 0.2;
-    let threshold = mix(0.82, 0.64, wetness);
-    let edge = max(0.035, footprint / 6.0 * 0.5);
-    // Expanding connected patches, never one full-map reflective sheet. Fade
-    // before the finest 2.2 m field becomes subpixel instead of glittering.
-    return smoothstep(threshold - edge, threshold + edge, field)
-        * smoothstep(0.18, 0.6, wetness) * (1.0 - smoothstep(0.4, 0.9, footprint));
-}
-
 // Tangent-space view direction for the terrain's world-aligned frame (T = +X, B = +Z,
 // N = up). Terrain surface UVs are world-aligned by construction, so this needs no
 // per-vertex tangent stream. `world_pos` is camera-relative, so the camera is at the
@@ -649,7 +623,7 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                         view_pos: vec3<f32>,
                         world_dwx: vec3<f32>, world_dwy: vec3<f32>) -> AuthoredCell {
     var material = terrain_materials[entry & CELL_LAYER_MASK];
-    let legacy_mud = f32(material.puddle_flags & 1u);
+    let legacy_mud = f32((material.puddle_flags & 2u) >> 1u);
     // The layer is a material-table lookup, but clamping belongs to the cell.
     material.legacy |= entry & CELL_CLAMPED;
     let authored_weight = clamp(a3_surface_blend, 0.0, 1.0);
@@ -1210,15 +1184,10 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let world_y = sample_height(in.world_xz);
     let line_depth = snowline_depth(in.world_xz, world_y);
     var rain_puddle = 0.0;
-    if (tp.rain_wetness > 0.0 && mud > 0.0) {
-        // Water rests horizontally. Only near-flat mud is eligible; do not drape
-        // a glossy water layer down slopes. Tidewater retains its entire coastal
-        // wet-sand/foam band, and snow consumes this cosmetic layer completely.
-        let flat_mud = smoothstep(0.995, 0.9995, geometric_n.y);
-        let inland = smoothstep(tp.sea_level + 3.5, tp.sea_level + 4.5, world_y);
-        let bare = 1.0 - smoothstep(0.002, 0.02, snow_cover(in.world_xz, world_y));
-        rain_puddle = mud_puddle_mask(in.world_xz, puddle_footprint, clamp(tp.rain_wetness, 0.0, 1.0))
-            * smoothstep(0.65, 0.95, mud) * flat_mud * inland * bare;
+    if (tp.rain_wetness > 0.0) {
+        rain_puddle = ground_puddle_mask(in.world_xz, puddle_footprint, tp.rain_wetness)
+            * ground_puddle_land_factor(geometric_n.y, world_y, tp.sea_level,
+                                       snow_cover(in.world_xz, world_y));
     }
     if (snow.info.w > 0.0 || line_depth > 0.0) {
         let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, world_y);
@@ -1360,12 +1329,14 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // bare 4% dielectric reallocation — an invisible result for a per-pixel reflect() plus a
     // second SH evaluation on the single most fill-heavy surface in the frame.
     let local_sky_visibility = interior_sky_ao(in.world_pos + frame.cam_pos.xyz, n);
-    if (rain_puddle > 0.0 && frame.skyvis.x >= 0.5) {
+    if (rain_puddle > 0.0) {
         // Zenith geometry gates vertical rain independently of diffuse sky light
         // entering through windows or around a canopy. Only wet eligible puddle
         // pixels pay this one-layer query. Missing map coverage remains unproven.
         let rain_reach = interior_rain_reach(in.world_pos + frame.cam_pos.xyz);
-        rain_puddle *= smoothstep(0.6, 0.95, rain_reach);
+        // Unknown physical coverage cannot prove an exposed ground surface.
+        rain_puddle *= interior_rain_coverage(in.world_pos + frame.cam_pos.xyz)
+            * smoothstep(0.6, 0.95, rain_reach);
     }
     rgb *= 1.0 - rain_puddle * 0.38;
     sun_ambient *= sky_vis_ao(in.world_xz)
@@ -1385,7 +1356,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         // high-frequency sun dots. Reuse the bound SH sky, with no reflection
         // texture/pass/history. This first slice reflects SKY, not scene objects.
         let view = normalize(-in.world_pos);
-        let water_n = vec3<f32>(0.0, 1.0, 0.0);
+        let water_n = ground_puddle_ripple_normal(in.world_xz, tp.time, tp.rain_strength, puddle_footprint);
         let grazing = 1.0 - clamp(dot(water_n, view), 0.0, 1.0);
         let fresnel = 0.02 + 0.78 * pow(grazing, 5.0);
         var reflected = sun_ambient;
