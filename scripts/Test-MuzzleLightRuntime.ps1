@@ -98,9 +98,15 @@ function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
 function Eval([string]$code){$reply=Send @{cmd='eval';code=$code};Require ($null -ne $reply.result) "No evaluator value: $code";return Decode-Eval ([string]$reply.result)}
 function Clock { $state=Send @{cmd='query';what='play_state'};Require ($null -ne $state.time_ms -and $state.has_player -eq $true -and $state.player_active -eq $true) 'Actual player/time query missing.';return [long]$state.time_ms }
 function View($scene) {
-    $x=$scene.camera[0].ToString('R',$culture);$z=$scene.camera[1].ToString('R',$culture);$y=$scene.camera[2].ToString('R',$culture)
-    $tx=$scene.target[0].ToString('R',$culture);$tz=$scene.target[1].ToString('R',$culture);$ty=$scene.target[2].ToString('R',$culture)
-    Exec ('muzzleView="camera" camCreate ['+$x+','+$z+','+$y+']; muzzleView cameraEffect ["internal","back"]; muzzleView camSetTarget ['+$tx+','+$tz+','+$ty+']; muzzleView camSetFov 0.8; muzzleView camCommit 0; showCinemaBorder false')
+    # Original camera vector commands consume terrain-relative height. Stored
+    # fixture views are ASL; subtract actual support at each distinct point.
+    $cameraGround=Get-TerrainPuddleFixtureHeight ${function:Send} $scene.camera[0] $scene.camera[1]
+    $targetGround=Get-TerrainPuddleFixtureHeight ${function:Send} $scene.target[0] $scene.target[1]
+    $x=$scene.camera[0].ToString('R',$culture);$z=$scene.camera[1].ToString('R',$culture);$y=([double]$scene.camera[2]-$cameraGround).ToString('R',$culture)
+    $tx=$scene.target[0].ToString('R',$culture);$tz=$scene.target[1].ToString('R',$culture);$ty=([double]$scene.target[2]-$targetGround).ToString('R',$culture)
+    Exec ('muzzleView="camera" camCreate ['+$x+','+$z+',0]; muzzleView camSetPos ['+$x+','+$z+','+$y+']; muzzleView cameraEffect ["internal","back"]; muzzleView camSetTarget ['+$tx+','+$tz+','+$ty+']; muzzleView camSetFov 0.8; muzzleView camCommit 0; showCinemaBorder false')
+    $actual=Eval 'getPosASL muzzleView'
+    for($i=0;$i -lt 3;++$i){Require ([Math]::Abs([double]$actual[$i]-[double]$scene.camera[$i]) -lt .05) 'Actual camera does not match the ASL fixture.'}
 }
 function Unview {Exec 'muzzleView cameraEffect ["terminate","back"]; deleteVehicle muzzleView; player switchCamera "EXTERNAL"'}
 function Capture([string]$name) {
