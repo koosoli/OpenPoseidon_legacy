@@ -6,6 +6,7 @@ use wgpu::util::DeviceExt;
 const PROBE: &str = r#"
 #import frame::{frame, interior_rain_coverage}
 #import shading::{object_snow_coverage, object_snow_normal, object_snow_baked_exposure}
+#import tree_snow::tree_snow_coverage
 @group(1) @binding(0) var<storage, read_write> result: array<vec4<f32>>;
 @compute @workgroup_size(1)
 fn cs_probe() {
@@ -19,6 +20,8 @@ fn cs_probe() {
         object_snow_baked_exposure(1.0, false), object_snow_baked_exposure(0.72, true),
         dot(object_snow_normal(p, up, up, vec3<f32>(0.01,0.0,0.0),
             vec3<f32>(0.0,0.0,0.01), 0.0), up));
+    result[2] = vec4<f32>(tree_snow_coverage(p, 1.0, 1.0), tree_snow_coverage(p, 1.0, 0.0),
+        tree_snow_coverage(p, 0.0, 1.0), tree_snow_coverage(p, 0.5, 1.0));
 }
 "#;
 
@@ -137,13 +140,13 @@ fn actual_object_snow_gpu_rejects_shelter_underside_unknown_and_ineligible() {
     });
     let output = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("object_snow_result"),
-        size: 32,
+        size: 48,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
     let staging = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("object_snow_readback"),
-        size: 32,
+        size: 48,
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -210,7 +213,7 @@ fn actual_object_snow_gpu_rejects_shelter_underside_unknown_and_ineligible() {
             pass.set_bind_group(1, &results, &[]);
             pass.dispatch_workgroups(1, 1, 1);
         }
-        encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, 32);
+        encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, 48);
         queue.submit(Some(encoder.finish()));
         let slice = staging.slice(..);
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -220,7 +223,7 @@ fn actual_object_snow_gpu_rejects_shelter_underside_unknown_and_ineligible() {
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         receiver.recv().unwrap().unwrap();
         let data = slice.get_mapped_range();
-        let values: [f32; 8] = bytemuck::cast_slice::<u8, f32>(&data).try_into().unwrap();
+        let values: [f32; 12] = bytemuck::cast_slice::<u8, f32>(&data).try_into().unwrap();
         drop(data);
         staging.unmap();
         values
@@ -239,12 +242,16 @@ fn actual_object_snow_gpu_rejects_shelter_underside_unknown_and_ineligible() {
             roof[0] < 0.001 && roof[4] < 0.001,
             "zenith shelter must beat known diffuse-open bake and artistic AO: {roof:?}"
         );
+        assert_eq!(&roof[8..12], &[0.0; 4], "known zenith roof beats coarse upper-crown proof");
     }
     let open = probe([0.18, -1.0, 0.0, 0.0], [1.0; 5], centre, 1.0, 1.0, 0.32);
     assert!(
         open[0] > 0.99 && open[4] > 0.99,
         "exposed upward receiver must coat: {open:?}"
     );
+    assert!(open[8] > 0.99 && open[9] > 0.99);
+    assert_eq!(open[10], 0.0, "lower crown/non-tree height stays bare");
+    assert!((open[11] - 0.5).abs() < 1e-5);
     for index in [1, 2, 3, 5, 6] {
         assert!(open[index] < 0.001, "policy rejection {index}: {open:?}");
     }
@@ -262,6 +269,8 @@ fn actual_object_snow_gpu_rejects_shelter_underside_unknown_and_ineligible() {
             absent[0] < 0.001 && absent[4] > 0.99,
             "unknown coverage must fail closed; proven fully-open bake may carry far roof: {absent:?}"
         );
+        assert!(absent[8] > 0.99 && absent[9] < 0.001,
+            "far tree must require actual cached external roof proof: {absent:?}");
     }
     // A covered point in the feather band has OPEN lighting fallback. Snow must undo that
     // fallback rather than paint a moving white rim on a sheltered interior.
@@ -277,6 +286,7 @@ fn actual_object_snow_gpu_rejects_shelter_underside_unknown_and_ineligible() {
         edge[0] < 0.001,
         "coverage feather must not leak open fallback: {edge:?}"
     );
+    assert_eq!(edge[8], 0.0, "known roof cannot whiten a crown in the cosmetic border feather");
     // Raw deposit is zero. A raised surface with known open cover must use its actual
     // Y, not terrain altitude or origin. At quarter-ramp height, smoothstep gives
     // 0.15625 rather than linear 0.25: choose line depth that leaves coverage unsaturated
@@ -293,6 +303,8 @@ fn actual_object_snow_gpu_rejects_shelter_underside_unknown_and_ineligible() {
             (actual[4] - expected).abs() < 1e-4,
             "actual raised surface altitude must use smooth snowline ramp: fraction={fraction} actual={actual:?} expected={expected}"
         );
+        assert!((actual[8] - expected).abs() < 1e-4, "tree uses actual smooth snowline altitude");
+        assert_eq!(actual[9], 0.0, "unproven far crown stays dry");
         assert!(
             actual[0] < 0.001,
             "unproven far cover must remain closed at any altitude: {actual:?}"
@@ -303,6 +315,7 @@ fn actual_object_snow_gpu_rejects_shelter_underside_unknown_and_ineligible() {
         below[4] < 0.001,
         "zero-deposit surface below the snowline must remain dry: {below:?}"
     );
+    assert!(below[8] < 0.001);
     let deposited = probe(
         [0.18, 100.0, 1.0, 0.04],
         [1.0; 5],
@@ -315,6 +328,7 @@ fn actual_object_snow_gpu_rejects_shelter_underside_unknown_and_ineligible() {
         deposited[4] > 0.99,
         "real deposit must survive below the altitude snowline: {deposited:?}"
     );
+    assert!(deposited[8] > 0.99);
 }
 
 #[test]

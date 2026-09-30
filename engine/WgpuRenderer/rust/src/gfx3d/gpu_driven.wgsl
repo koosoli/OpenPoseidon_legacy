@@ -11,6 +11,7 @@
 
 #import frame::{frame, reverse_z, fog_factor, atmo_applied, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
 #import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal, object_snow_baked_exposure}
+#import tree_snow::{tree_snow_height, tree_snow_coverage}
 #import frame::interior_rain_coverage
 #import color::srgb_to_linear
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
@@ -491,6 +492,7 @@ struct VsOut {
     // replaces. 1.0 for every section whose material names no volume.
     @location(12) crown_ao: f32,
     @location(13) @interpolate(flat) snow_receiver: u32,
+    @location(14) tree_snow: vec2<f32>, // authored crown height, cached actual world roof proof
 };
 
 // WgrInstance::flags bits: vegetation canopy — bend cutout-section normals toward a radial crown
@@ -697,6 +699,8 @@ fn vs_gpu(
     // planes, proxies and vegetation remain excluded in colour and both prepasses.
     let snow_conform = mode == 0.0 || (mode == 2.0 && conform_sel <= 1u);
     out.snow_receiver = select(0u, 1u, (inst.flags & 128u) != 0u && canopy == 0u && snow_conform);
+    let tree_proof = select(0.0, inst.conform2.w, canopy == INST_CANOPY_TREE);
+    out.tree_snow = vec2<f32>(tree_snow_height(pos.y, inst.conform0.y, inst.conform0.z, tree_proof), inst.conform1.x);
     // Undeformed model-space position: the baked volume is a property of the AUTHORED model, so
     // the lookup must use the authored vertex, not a terrain-conformed one.
     out.model_pos = pos;
@@ -743,6 +747,13 @@ fn retained_snow_receiver(in: VsOut) -> bool {
     return in.snow_receiver != 0u &&
         (sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER)) == 0u &&
         dot(sm.emissive.rgb, sm.emissive.rgb) < 1e-8 && dot(in.normal, in.normal) > 1e-8;
+}
+
+fn retained_tree_snow_cover(in: VsOut) -> f32 {
+    let sm = section_materials[in.section];
+    if (sm.alpha_ref <= 0.0 || linear <= 0.5 ||
+        (sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER)) != 0u) { return 0.0; }
+    return tree_snow_coverage(in.world_pos, in.tree_snow.x, in.tree_snow.y);
 }
 
 // Raw baked sky is only a conservative FAR fallback: diffuse light through a side window
@@ -1185,6 +1196,7 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         veg_cutout, false, veg_cutout, false, in.clip.xy,
         !(veg_cutout && foliage_screen_ao < 0.5),
         retained_snow_receiver(in), retained_snow_exposure(in),
+        retained_tree_snow_cover(in),
     );
     // REN-ATM-001: read back what shade()'s apply_fog actually did to THIS fragment and bin it by
     // shader family. Placed immediately after shade() so nothing between the fog and the count can

@@ -19,6 +19,7 @@
 #include <wgpu_renderer.hpp>
 #include "SharedRetainedMeshLifetime.hpp"
 #include "StandaloneMeshRetirementWitness.hpp"
+#include "TreeSnowSurface.hpp"
 #include "ParkedGeometryReport.hpp"
 #include "ModelAdmissionReceipt.hpp"
 #include "RetailPageRecordObservation.hpp"
@@ -207,6 +208,7 @@ class EngineWgpu : public EngineDummy
     void SceneObjectRemoved(Object* obj) override;
     void SceneObjectMoved(Object* obj) override;
     GpuDrawCoverage GpuDrivenCoverage(const Object* obj) const override;
+    void PrepareVisibleTreeSnow(const Object* obj) override;
     bool GpuDrivenProxy(const Object* parent, int level, int proxyIndex) const override;
     void SceneObjectProxiesChanged(Object* obj) override;
     void WorldShapeLoaded(LODShapeWithShadow* shape) override;
@@ -771,6 +773,19 @@ class EngineWgpu : public EngineDummy
     };
     // Objects handed to the GPU path -> their model + retained instance slot.
     std::unordered_map<const Object*, GpuInstance> _gpuInstances;
+    struct TreeSnowProof
+    {
+        uint32_t renderId = 0;
+        const LODShapeWithShadow* shape = nullptr;
+        WgrMat4 transform{};
+        std::chrono::steady_clock::time_point sampled{};
+        float exposure = 0;
+    };
+    std::unordered_map<const Object*, TreeSnowProof> _treeSnowProofs;
+    TreeSnowSurface::ProbeBudget _treeSnowBudget;
+    bool _treeSnowActive = false;
+    float TreeSnowExposure(const Object& obj);
+    void PublishTreeSnowExposure(const Object& obj, float exposure);
     struct FarGpuInstance
     {
         uint32_t slot;

@@ -1,5 +1,6 @@
 #include "MeshRecordClosure.hpp"
 #include "ObjectSnowSurface.hpp"
+#include "TreeSnowSurface.hpp"
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageCameraDemand.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageProjectedDemand.hpp>
@@ -2797,6 +2798,16 @@ void EngineWgpu::InitDraw(bool clear, PackedColor color)
     // without a world, tools) — it captures solely when nothing has since the last
     // FinishDraw, so a dead world's values never leak into a later frame.
     render::frame::CapturePresentationSnapshotIfStale();
+    _treeSnowBudget.BeginFrame(render::frame::GPresentationSnapshot().generation);
+    const auto& treeSnow = GSnow();
+    static const bool treeCoatEnabled = [] {
+        const char* value = std::getenv("WGR_TREE_SNOW");
+        const char* objects = std::getenv("WGR_OBJECT_SNOW");
+        return !(value && std::strcmp(value, "0") == 0) &&
+               !(objects && std::strcmp(objects, "0") == 0);
+    }();
+    _treeSnowActive = treeCoatEnabled && ((treeSnow.enabled && treeSnow.Depth() > 0.0f) ||
+        (treeSnow.EffSnowlineEnabled() && treeSnow.snowlineRange > 0.0f && treeSnow.snowlineDepth > 0.0f));
     ++_cpuPoseFrame;
     _currentCpuPose = nullptr;
     _currentCpuPoseSource = nullptr;
@@ -7341,6 +7352,34 @@ static bool ObjectOwnsSnowMesh(const Object& obj, const Shape& mesh)
     return false; // a proxy/source mesh cannot inherit its enclosing scene object's proof
 }
 
+static bool TreeSnowOwner(const Object& obj)
+{
+    const auto* shape = obj.GetShape();
+    const bool tree = shape && (shape->GetMapType() == MapTree || shape->GetMapType() == MapSmallTree);
+    return TreeSnowSurface::OwnerAllowed(obj.GetType() == Primary, obj.Static(),
+        !obj.IsDestroyed(), tree, true, shape && !shape->GetAllowAnimation(), true);
+}
+
+// y/z are unused by rigid/Keep conform; mode-1 forest planes are never admitted.
+// Proof remains zero on child proxies, bushes, merged forests and far DTOs.
+static void PublishTreeSnowBounds(const Object& obj, WgrVec4& conform0, WgrVec4& conform2)
+{
+    const auto* shape = obj.GetShape();
+    const auto bounds = TreeSnowSurface::AdmitBounds(shape->Min().Y(), shape->Max().Y());
+    if (bounds.inverseHeight <= 0.0f) return;
+    conform0.y = bounds.minY;
+    conform0.z = bounds.inverseHeight;
+    conform2.w = 1.0f;
+    static const bool trace = std::getenv("WGR_TREE_SNOW_TRACE") != nullptr;
+    if (trace)
+    {
+        static std::unordered_set<const LODShapeWithShadow*> seen;
+        if (seen.size() < 32 && seen.insert(shape).second)
+            LOG_INFO(Graphics, "Wgpu tree snow receiver: model={} minY={} maxY={} scope=primary-static-individual-tree-cutout-only",
+                shape->Name(), bounds.minY, shape->Max().Y());
+    }
+}
+
 static bool ObjectSnowConformAllowed(const LODShapeWithShadow& shape, int mode)
 {
     if (mode == 0) return true;
@@ -8595,6 +8634,20 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         (snowRigidAttempted && CurrentSnowSectionRigid(*snowOwner, sMesh, *buf, beg, end));
     const bool snowReceiver = snowSourceEligible && snowRigidPassed;
     if (snowReceiver) d.flags |= WGR_DRAW3D_SNOW_RECEIVER;
+    const bool treeSource = snowOwner && TreeSnowOwner(*snowOwner) &&
+        ObjectOwnsSnowMesh(*snowOwner, sMesh) && !snowOwner->GetAnimated(sMesh) &&
+        !buf->isDynamic && !buf->skinned && !buf->cpuPosed && !_currentCpuPose &&
+        _currentPaletteSlot == WGR_NO_PALETTE && GetPassKindHint() == render::PassKindHint::None &&
+        ObjectSnowSurface::ConformAllowed(d.conform2.z,
+            (sMesh.GetOrHints() & ClipLandKeep) != 0, (sMesh.GetOrHints() & ClipLandOn) != 0);
+    if (treeSource && TreeSnowSurface::LeafSectionAllowed(d.alpha_ref > 0.0f,
+        d.blend == WGR_BLEND_OPAQUE && d.depth == WGR_DEPTH_TEST_WRITE, true,
+        (d.flags & (WGR_DRAW3D_ON_SURFACE | WGR_DRAW3D_REFLECTIVE | WGR_DRAW3D_GLASS |
+                    WGR_DRAW3D_COCKPIT | WGR_DRAW3D_MONITOR)) == 0))
+    {
+        PublishTreeSnowBounds(*snowOwner, d.conform0, d.conform2);
+        d.conform1.x = TreeSnowExposure(*snowOwner);
+    }
     if (snowOwner)
     {
         TraceObjectSnowReceiver(*snowOwner, snowReceiver, "direct");
@@ -9335,6 +9388,8 @@ WgrInstance BuildGpuInstance(const Object& obj, uint32_t model, const ConformPla
         inst.conform2 = {0.0f, 0.0f, 2.0f, 0.0f};
     }
     // else rigid: conform2.z stays 0 (zero-initialised).
+    if (TreeSnowOwner(obj) && ObjectSnowConformAllowed(*obj.GetShape(), cp.mode))
+        PublishTreeSnowBounds(obj, inst.conform0, inst.conform2);
 
     // Cull sphere == the CPU's exactly: raw Transform.Position() + the model bounding sphere
     // (Scene.cpp:801). No conforming, no snapping, no inflation — CULLDUMP proved every
@@ -15872,6 +15927,7 @@ uint32_t EngineWgpu::CurrentDrawObjectId()
 
 void EngineWgpu::SceneObjectRemoved(Object* obj)
 {
+    _treeSnowProofs.erase(obj);
     if (_retailWorldSource) InvalidateRetailWorldObject(obj);
     if (!_renderer)
     {
@@ -15895,6 +15951,7 @@ void EngineWgpu::SceneObjectRemoved(Object* obj)
 
 void EngineWgpu::SceneObjectMoved(Object* obj)
 {
+    _treeSnowProofs.erase(obj); // geometry identity/root change revokes the old proof
     if (_retailWorldSource) InvalidateRetailWorldObject(obj);
     if (!_renderer)
     {
@@ -16359,6 +16416,96 @@ uint32_t EngineWgpu::CountWorldShapeCapturedTextures(const LODShapeWithShadow* s
             ++count;
     }
     return count;
+}
+
+void EngineWgpu::PublishTreeSnowExposure(const Object& obj, float exposure)
+{
+    const auto found = _gpuInstances.find(&obj);
+    if (found == _gpuInstances.end() || !obj.GetShape() || obj.GetShape() != found->second.shape) return;
+    const auto cp = GpuConformFor(const_cast<Object&>(obj), *obj.GetShape(), _gpuConformShapes.count(obj.GetShape()) != 0);
+    WgrInstance inst = BuildGpuInstance(obj, found->second.model, cp);
+    if (inst.conform2.w > 0.5f) inst.conform1.x = exposure;
+    _ops.instanceUpdate++;
+    EnqueueInstanceUpdate(found->second.slot, inst);
+}
+
+float EngineWgpu::TreeSnowExposure(const Object& obj)
+{
+    if (!_treeSnowActive || !GLandscape || !TreeSnowOwner(obj)) return 0.0f;
+    const auto* shape = obj.GetShape();
+    const auto bounds = TreeSnowSurface::AdmitBounds(shape->Min().Y(), shape->Max().Y());
+    if (bounds.inverseHeight <= 0) return 0.0f;
+    const auto cp = GpuConformFor(const_cast<Object&>(obj), *shape, _gpuConformShapes.count(shape) != 0);
+    if (!ObjectSnowConformAllowed(*shape, cp.mode)) return 0.0f;
+    Vector3 local = (shape->Min() + shape->Max()) * 0.5f;
+    local[1] = shape->Max().Y();
+    Vector3 origin = obj.PositionModelToWorld(local);
+    if (cp.mode == 2)
+        origin[1] += GLandscape->SurfaceY(origin.X(), origin.Z()) - cp.bcSurfaceY;
+    origin[1] += 0.15f;
+    if (!std::isfinite(origin.X()) || !std::isfinite(origin.Y()) || !std::isfinite(origin.Z())) return 0.0f;
+    const auto& snow = GSnow();
+    if (!ObjectSnowSurface::CoverPossible(snow.enabled, snow.Depth(), snow.EffSnowlineEnabled(),
+        snow.EffSnowlineHeight(), snow.snowlineRange, snow.snowlineDepth, origin.Y())) return 0.0f;
+    GfxMatrix matrix;
+    ConvertMatrix(matrix, obj.Transform());
+    WgrMat4 transform;
+    std::memcpy(transform.m, &matrix, sizeof(transform.m));
+    const auto now = std::chrono::steady_clock::now();
+    auto found = _treeSnowProofs.find(&obj);
+    bool sameIdentity = false;
+    const float previousExposure = found == _treeSnowProofs.end() ? 0.0f : found->second.exposure;
+    if (found != _treeSnowProofs.end())
+    {
+        auto& proof = found->second;
+        sameIdentity = TreeSnowSurface::SameOwner(proof.renderId, obj.RenderId(), proof.shape, shape,
+            proof.transform.m, transform.m);
+        if (TreeSnowSurface::ReuseProof(sameIdentity,
+            std::chrono::duration<double>(now - proof.sampled).count())) return proof.exposure;
+    }
+    if (!_treeSnowBudget.Take())
+    {
+        if (previousExposure > 0.0f) PublishTreeSnowExposure(obj, 0.0f);
+        if (found != _treeSnowProofs.end()) found->second.exposure = 0;
+        return 0.0f; // expired/pending never keeps a stale far positive
+    }
+    if (found == _treeSnowProofs.end() && _treeSnowProofs.size() >= TreeSnowSurface::MaxCachedOwners)
+    {
+        const auto evicted = _treeSnowProofs.begin();
+        // SceneObjectRemoved erases dead pointers. Also bind actual live birth
+        // before revoking a retained instance on bounded-capacity eviction.
+        if (const auto live = _gpuInstances.find(evicted->first); live != _gpuInstances.end() &&
+            evicted->first->RenderId() == evicted->second.renderId)
+            PublishTreeSnowExposure(*evicted->first, 0.0f);
+        _treeSnowProofs.erase(evicted);
+    }
+    const Vector3 end = origin + Vector3(0, 30, 0);
+    const bool exposed = TreeSnowSurface::ProbeOpen(const_cast<Object*>(&obj), origin, end,
+        [](Object* ignore, Vector3Par begin, Vector3Par finish, TreeSnowSurface::RoofGeometry mode) {
+            CollisionBuffer hits;
+            GLandscape->ObjectCollision(hits, nullptr, ignore, begin, finish, 0.05f,
+                mode == TreeSnowSurface::RoofGeometry::Fire ? ObjIntersectFire : ObjIntersectView);
+            return hits.Size() > 0;
+        });
+    TreeSnowProof proof{obj.RenderId(), shape, transform, now, exposed ? 1.0f : 0.0f};
+    _treeSnowProofs[&obj] = proof;
+    if (!sameIdentity || proof.exposure != previousExposure)
+        PublishTreeSnowExposure(obj, proof.exposure);
+    static const bool trace = std::getenv("WGR_TREE_SNOW_TRACE") != nullptr;
+    if (trace)
+    {
+        static unsigned traceRows = 0;
+        if (traceRows++ < 512)
+            LOG_INFO(Graphics, "Wgpu tree snow proof: id={} model={} path={} exposed={} top={:.3f},{:.3f},{:.3f} rays=fire-then-view-ignore-owner budgetRemaining={}",
+                obj.RenderId(), shape->Name(), _gpuInstances.count(&obj) ? "retained" : "direct",
+                exposed, origin.X(), origin.Y(), origin.Z(), _treeSnowBudget.remaining);
+    }
+    return proof.exposure;
+}
+
+void EngineWgpu::PrepareVisibleTreeSnow(const Object* obj)
+{
+    if (_treeSnowActive && obj && Foundation::IsMainThread()) TreeSnowExposure(*obj);
 }
 
 GpuDrawCoverage EngineWgpu::GpuDrivenCoverage(const Object* obj) const

@@ -15,6 +15,7 @@
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
 // Shared fragment shading, also used by the GPU-driven indirect path (gpu_driven.wgsl).
 #import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal}
+#import tree_snow::{tree_snow_height, tree_snow_coverage}
 // Group(4) terrain heightmap + surface_y, shared with the shadow depth pass.
 // surface_grad tilts conformed veg normals to follow the ground slope (color pass only).
 #import conform::{surface_y, surface_grad, surface_y_raster, hm_params, snow_depth}
@@ -376,13 +377,14 @@ struct VsOut {
     // depth re-seat across a triangle that mixes pinned and rigid vertices. Skinned draws
     // and every rigid vertex carry 0, which makes fs_surface a no-op for them.
     @location(7) conform_w: f32,
+    @location(8) tree_snow: vec2<f32>, // authored crown height, actual cached external exposure
 };
 
 // world_pos is camera-relative (the world matrix / palette is offset by the
 // camera position on the C++ side), so its length is the camera distance.
 fn finish_vertex(
     world_pos: vec4<f32>, normal_ws: vec3<f32>, tangent_ws: vec3<f32>, binormal_ws: vec3<f32>,
-    uv: vec2<f32>, instance: u32, conform_w: f32,
+    uv: vec2<f32>, instance: u32, conform_w: f32, tree_snow: vec2<f32>,
 ) -> VsOut {
     var out: VsOut;
     out.clip = reverse_z(frame.proj * frame.view * world_pos);
@@ -417,6 +419,7 @@ fn finish_vertex(
     out.fog = fog_factor(length(world_pos.xyz));
     out.instance = instance;
     out.conform_w = conform_w;
+    out.tree_snow = tree_snow;
     return out;
 }
 
@@ -549,7 +552,8 @@ fn vs_main(
             normal_ws = normalize(mix(normal_ws, normalize(radial), clamp(bend, 0.0, 1.0)));
         }
     }
-    return finish_vertex(world_pos, normal_ws, rot * tangent, rot * binormal, uv, instance, conform_w);
+    return finish_vertex(world_pos, normal_ws, rot * tangent, rot * binormal, uv, instance, conform_w,
+        vec2<f32>(tree_snow_height(pos.y, obj.conform0.y, obj.conform0.z, obj.conform2.w), obj.conform1.x));
 }
 
 // Linear-blend skinning (see the skin module). Vertices with no skin weight
@@ -569,7 +573,7 @@ fn vs_skinned(
     // uploads -OrigNorm), skin_normal rotates it into world space, and we light
     // with it as-is to match GL33 — no extra negation.
     let normal_ws = skin_normal(norm, bones, weights);
-    return finish_vertex(world_pos, normal_ws, vec3<f32>(0.0), vec3<f32>(0.0), uv, instance, 0.0);
+    return finish_vertex(world_pos, normal_ws, vec3<f32>(0.0), vec3<f32>(0.0), uv, instance, 0.0, vec2<f32>(0.0));
 }
 
 // The colour-pass fragment. Depth is fixed-function (no frag_depth), so early-Z stays on for
@@ -789,6 +793,13 @@ fn direct_snow_receiver(in: VsOut) -> bool {
         translucent <= 0.5 && material.sun_ambient.w <= 0.0 &&
         dot(material.emissive.rgb, material.emissive.rgb) < 1e-8 &&
         dot(in.normal, in.normal) > 1e-8 && in.conform_w <= 0.0;
+}
+
+fn direct_tree_snow_cover(in: VsOut) -> f32 {
+    let material = materials[in.instance];
+    if (alpha_ref <= 0.0 || translucent > 0.5 || linear <= 0.5 ||
+        material.sun_ambient.w < 1.5 || (material_flags(material) & (2u | 4u | 8u | 16u | 32u)) != 0u) { return 0.0; }
+    return tree_snow_coverage(in.world_pos, in.tree_snow.x, in.tree_snow.y);
 }
 
 fn shade_fragment(in: VsOut) -> vec4<f32> {
@@ -1135,6 +1146,7 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
         (material_flags(material) & MATFLAG_COCKPIT) != 0u, in.clip.xy,
         !(veg_cutout && foliage_screen_ao < 0.5),
         direct_snow_receiver(in), 0.0,
+        direct_tree_snow_cover(in),
     );
     // REN-ATM-001: the per-draw twin of gpu_driven.wgsl's atmosphere census -- same words, same
     // witness. Both paths draw vegetation (retained trees go GPU-driven, scripted/near ones do

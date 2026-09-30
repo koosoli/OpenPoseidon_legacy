@@ -3481,6 +3481,9 @@ class Engine : public IGraphicsEngine
     // captured by that model's material bindings (never includes proxy children).
     virtual uint32_t CountWorldShapeCapturedTextures(const LODShapeWithShadow*,
         const std::vector<std::string>&) const { return 0; }
+    // Optional bounded weather proof for source-visible individual tree owners.
+    // APPENDED to preserve existing vtable slots; other renderers do no work.
+    virtual void PrepareVisibleTreeSnow(const Object* /*obj*/) {}
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy

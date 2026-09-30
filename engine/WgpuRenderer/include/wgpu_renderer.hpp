@@ -556,6 +556,12 @@ struct WgrInstance
     WgrVec4 conform2;
 };
 
+/* Individual primary static tree crown proof (modes 0/2 only, never forest mode1):
+ * conform0.y/z = loaded owner model minY/inverseHeight, conform2.w = positive
+ * owner/geometry proof. conform1.x = bounded actual external crown roof-ray
+ * exposure. Zero proof/exposure is pending/unknown; proxies/far DTOs do not
+ * inherit it. These reserved lanes preserve the public struct layout. */
+
 static_assert(sizeof(WgrModelSection) == 24, "WgrModelSection must match Rust");
 static_assert(sizeof(WgrModelMaterial) == 320, "WgrModelMaterial must match Rust");
 static_assert(sizeof(WgrModelLod) == 16, "WgrModelLod must match Rust");

@@ -23,6 +23,8 @@ mod rain_cover_tests;
 
 #[cfg(test)]
 mod snow_material_tests;
+#[cfg(test)]
+mod tree_snow_tests;
 
 #[cfg(test)]
 mod ground_puddles_tests;
@@ -52,6 +54,9 @@ pub fn early_depth_supported() -> bool {
 
 fn shader_defs() -> std::collections::HashMap<String, naga_oil::compose::ShaderDefValue> {
     let mut defs = std::collections::HashMap::new();
+    if std::env::var("WGR_TREE_SNOW").as_deref() == Ok("0") {
+        defs.insert("DISABLE_TREE_SNOW".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
     if std::env::var("WGR_SNOW_POWDER").as_deref() == Ok("0") {
         defs.insert("DISABLE_SNOW_POWDER_DETAIL".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
@@ -113,6 +118,7 @@ pub fn build_composer() -> Composer {
         (include_str!("frame.wgsl"), "frame.wgsl"),
         (include_str!("snow_material.wgsl"), "snow_material.wgsl"),
         (include_str!("ground_puddles.wgsl"), "ground_puddles.wgsl"),
+        (include_str!("tree_snow.wgsl"), "tree_snow.wgsl"),
         (include_str!("skin.wgsl"), "skin.wgsl"),
         (include_str!("conform.wgsl"), "conform.wgsl"),
         (include_str!("lighting.wgsl"), "lighting.wgsl"),

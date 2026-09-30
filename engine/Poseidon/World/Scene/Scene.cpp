@@ -35,6 +35,7 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Scene/SurfaceDrawOrder.hpp>
@@ -1090,6 +1091,16 @@ void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
         LodTraceObserve(shape, _camera->Position().Distance2Inline(pos), obj->Scale(), obj->Direction());
     }
 
+    // Full retained trees never reach DrawSortObject. Only actual snow invokes
+    // the optional bounded owner proof, before that divert; dry worlds retain
+    // the field-only coverage read. No registration/all-world ray sweep.
+    const auto& treeSnow = GSnow();
+    if ((treeSnow.enabled && treeSnow.Depth() > 0.0f) || treeSnow.EffSnowlineEnabled())
+    {
+        const MapType canopy = shape->GetMapType();
+        if (canopy == MapTree || canopy == MapSmallTree)
+            GEngine->PrepareVisibleTreeSnow(obj);
+    }
     const int gpuCov = obj->GetGpuCoverage();
     if (gpuCov == static_cast<int>(GpuDrawCoverage::Full))
     {

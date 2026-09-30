@@ -187,6 +187,7 @@ fn shade(
     screen_ao: bool,
     snow_eligible: bool,
     snow_baked_exposure: f32,
+    tree_snow_cover: f32,
 ) -> vec3<f32> {
     var albedo = albedo_in;
     var m_emissive = mat.emissive;
@@ -223,13 +224,20 @@ fn shade(
     var nrm = surface_normal(normal, world_pos, dwx, dwy);
     // Powder is linear reflectance and belongs to the HDR path. Dry/disabled coverage is
     // an exact early-out. Authored roof paint/gloss/cavity must not remain on top of snow.
-    let snow_cover = object_snow_coverage(world_pos, geo_normal,
+    let object_cover = object_snow_coverage(world_pos, geo_normal,
         snow_eligible && linear > 0.5 && !is_foliage && !is_cockpit && !is_translucent,
         snow_baked_exposure);
+    let snow_cover = max(object_cover, tree_snow_cover);
     if (snow_cover > 0.0) {
         let footprint = max(length(dwx), length(dwy));
-        albedo = mix(albedo, snow_powder_albedo(world_pos + frame.cam_pos.xyz, footprint, 0.0), snow_cover);
-        nrm = object_snow_normal(world_pos, geo_normal, nrm, dwx, dwy, snow_cover);
+        // Leaf cards use the powder MEAN only: no spatial/time seed or fine
+        // normal detail that could sparkle when the cards move or shrink.
+        var powder = vec3<f32>(0.70, 0.75, 0.80);
+        if (tree_snow_cover <= 0.0) {
+            powder = snow_powder_albedo(world_pos + frame.cam_pos.xyz, footprint, 0.0);
+        }
+        albedo = mix(albedo, powder, snow_cover);
+        nrm = object_snow_normal(world_pos, geo_normal, nrm, dwx, dwy, object_cover);
         m_emissive *= 1.0 - snow_cover;
         m_light_diffuse = mix(m_light_diffuse, vec3<f32>(1.0), snow_cover);
         m_light_ambient = mix(m_light_ambient, vec3<f32>(1.0), snow_cover);
@@ -237,6 +245,7 @@ fn shade(
         m_local_specular *= 1.0 - snow_cover;
         m_spec_power = mix(m_spec_power, 8.0, snow_cover);
         m_spec_mask = mix(m_spec_mask, 0.02, snow_cover);
+        m_spec_mask *= 1.0 - tree_snow_cover;
     }
     // Two-sided foliage. A leaf card is a thin surface authored with ONE normal, and the canopy
     // is built from cards facing every direction, so roughly half of any tree is seen from its
@@ -531,7 +540,7 @@ fn shade(
             if (kc.w > 0.0) { dusk_k = clamp(kc.w, 0.05, 1.0); }
             var daylight = 0.0;
             if (daylight_raw > 0.0) { daylight = pow(min(daylight_raw, 1.0), dusk_k); }
-            ambient *= 1.0 + (kb.x - 1.0) * fade * daylight;
+            ambient *= 1.0 + (kb.x - 1.0) * fade * daylight * (1.0 - tree_snow_cover);
             // The sky irradiance is tuned for daylight readability. Leaving its full
             // strength on a leaf/card at night makes entire forests appear self-lit,
             // even where no local source reaches them. Keep a small moon/sky floor
@@ -552,7 +561,7 @@ fn shade(
             // The SSS fill is a NEAR-FIELD effect (per-leaf translucency shouldn't read as a glow at
             // distance, and low-LOD billboards otherwise flatten into a bright sheet), so it shares
             // the distance fade above; the base Lambert stays so far foliage matches terrain.
-            let fill = (wrap_fill + trans) * fade;
+            let fill = (wrap_fill + trans) * fade * (1.0 - tree_snow_cover);
             sun = m_emissive + ambient + frame.sun_diffuse.rgb * (front + fill) * sun_vis * leaf_cavity;
         } else {
             sun = m_emissive + ambient + frame.sun_diffuse.rgb * ndotl * sun_vis;
