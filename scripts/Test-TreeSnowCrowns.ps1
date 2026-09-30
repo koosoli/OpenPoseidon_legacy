@@ -218,8 +218,10 @@ function Close-Owned {
     $script:reader=$null;$script:writer=$null
 }
 function Bind-Target($target,[bool]$paired) {
-    $originY=[double]$target.top[1]-0.15-[double]$target.maxY
-    $point=(@($target.top[0],$target.top[2],$originY)|ForEach-Object{([double]$_).ToString('R',$culture)})-join ','
+    # nearestObject/GetPos expects terrain-relative height, whereas telemetry
+    # top/origin are ASL. Search at the proven XZ on the ground; the actual
+    # model and exact ASL identity below still determine acceptance.
+    $point=(@($target.top[0],$target.top[2],0)|ForEach-Object{([double]$_).ToString('R',$culture)})-join ','
     $null=Send @{cmd='exec';code=('treeSnowTarget=nearestObject ['+$point+']')}
     if((Eval 'isNull treeSnowTarget') -ne $false){throw 'FixtureUnavailable: actual nearest tree object not found.'}
     $debug=[string](Send @{cmd='eval';code='treeSnowTarget'}).result
