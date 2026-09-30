@@ -784,7 +784,9 @@ fn direct_snow_receiver(in: VsOut) -> bool {
     let flags = material_flags(material);
     return (flags & MATFLAG_SNOW_RECEIVER) != 0u &&
         (flags & (2u | 4u | 8u | 16u | 32u)) == 0u &&
-        alpha_ref <= 0.0 && translucent <= 0.5 && material.sun_ambient.w <= 0.0 &&
+        // Solid cutout fabric/mesh keeps the unchanged base-alpha discard/A2C
+        // coverage. Snow changes RGB, never its holes or sample mask.
+        translucent <= 0.5 && material.sun_ambient.w <= 0.0 &&
         dot(material.emissive.rgb, material.emissive.rgb) < 1e-8 &&
         dot(in.normal, in.normal) > 1e-8 && in.conform_w <= 0.0;
 }

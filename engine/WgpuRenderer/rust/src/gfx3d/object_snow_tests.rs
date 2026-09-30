@@ -362,3 +362,36 @@ fn snow_material_flag_and_prepass_contracts_remain_explicit() {
     );
     assert!(coverage.contains("dot(geo_normal, world_pos) > 0.0"));
 }
+
+#[test]
+fn owned_cutout_snow_keeps_base_alpha_discard_and_a2c_silhouette() {
+    let direct = include_str!("shader3d.wgsl");
+    let retained = include_str!("gpu_driven.wgsl");
+    let direct_receiver = &direct[direct.find("fn direct_snow_receiver").unwrap()
+        ..direct.find("fn shade_fragment").unwrap()];
+    let retained_receiver = &retained[retained.find("fn retained_snow_receiver").unwrap()
+        ..retained.find("fn retained_snow_exposure").unwrap()];
+    assert!(!direct_receiver.contains("alpha_ref"));
+    assert!(!retained_receiver.contains("alpha_ref"));
+    assert!(direct_receiver.contains("translucent <= 0.5"));
+    assert!(direct_receiver.contains("material.sun_ambient.w <= 0.0"));
+    // Admission cannot repaint a hole: colour coverage comes from the actual
+    // sampled alpha, before shade() applies the snow material to base.rgb.
+    for (src, threshold, return_alpha) in [
+        (direct, "alpha_ref", "return vec4<f32>(out_rgb, out_a2)"),
+        (retained, "sm.alpha_ref", "return vec4<f32>(out_rgb, out_a)"),
+    ] {
+        let alpha = &src[src.find("var cut_a = base.a;").unwrap()
+            ..src.find("let veg_cutout").unwrap()];
+        assert!(alpha.contains("var out_a = base.a;"));
+        assert!(alpha.contains(&format!("out_a = a2c_coverage(cut_a, {threshold})")));
+        assert!(alpha.contains(&format!("cut_a < {threshold}")));
+        assert!(alpha.contains("discard;"));
+        assert!(!alpha.contains("snow_cover") && !alpha.contains("object_snow_coverage"));
+        assert!(src.contains(return_alpha));
+        // Opaque and A2C prepasses independently keep the same base-alpha gates.
+        assert!(src.contains(&format!("if (a < {threshold})")));
+        assert!(src.contains(&format!("a2c_coverage(alpha, {threshold})")));
+        assert!(src.contains("return vec4<f32>(oct.x, oct.y, 0.0, cov)"));
+    }
+}

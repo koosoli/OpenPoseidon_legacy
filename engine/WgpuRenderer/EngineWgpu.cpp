@@ -7473,7 +7473,7 @@ static void TraceObjectSnowDirectGates(const Object& obj, const Shape& mesh,
         (cpuPose ? 32u : 0u) | (draw.palette_slot != WGR_NO_PALETTE ? 64u : 0u) |
         (passKind != int(render::PassKindHint::None) ? 128u : 0u) |
         (draw.blend != WGR_BLEND_OPAQUE ? 256u : 0u) |
-        (draw.depth != WGR_DEPTH_TEST_WRITE ? 512u : 0u) | (draw.alpha_ref > 0.0f ? 1024u : 0u) |
+        (draw.depth != WGR_DEPTH_TEST_WRITE ? 512u : 0u) |
         (!conform ? 2048u : 0u) | (GCurrentIsVegetation ? 4096u : 0u) |
         ((draw.flags & (WGR_DRAW3D_ON_SURFACE | WGR_DRAW3D_REFLECTIVE | WGR_DRAW3D_GLASS |
                        WGR_DRAW3D_COCKPIT | WGR_DRAW3D_MONITOR)) != 0 ? 8192u : 0u) |
@@ -8580,7 +8580,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         !buf->skinned && !buf->cpuPosed && !_currentCpuPose &&
         _currentPaletteSlot == WGR_NO_PALETTE && GetPassKindHint() == render::PassKindHint::None &&
         ObjectOwnsSnowMesh(*snowOwner, sMesh) && !snowOwner->GetAnimated(sMesh) &&
-        d.blend == WGR_BLEND_OPAQUE && d.depth == WGR_DEPTH_TEST_WRITE && d.alpha_ref <= 0.0f &&
+        d.blend == WGR_BLEND_OPAQUE && d.depth == WGR_DEPTH_TEST_WRITE &&
         ObjectSnowSurface::ConformAllowed(d.conform2.z,
             (sMesh.GetOrHints() & ClipLandKeep) != 0, (sMesh.GetOrHints() & ClipLandOn) != 0) &&
         !GCurrentIsVegetation && (d.flags & (WGR_DRAW3D_ON_SURFACE | WGR_DRAW3D_REFLECTIVE |

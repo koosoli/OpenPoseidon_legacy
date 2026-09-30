@@ -278,3 +278,35 @@ zero-scan behavior, one shared budget and empty/nonvisual source rejection.
 Earlier source/section/snow controls still pass; `git diff --check` passed.
 Root must build and check the retained tent receiver and physical roof pixels;
 no runtime or appearance acceptance is claimed by this source-only agent.
+
+## Solid cutout silhouette preservation
+
+The actual tent roof is retained opaque/cutout geometry; transparent rope and
+chimney soot stay in the direct complement. The first roof-texture audit
+classified `stan2_east_side.pac` opaque, while the live UAZ gate trace also
+contains solid depth-writing cutout sections (`alphaRef=0.5`). A whole-object
+roof cannot safely assume every owned surface has zero alpha reference.
+
+Direct opaque/depth-write and retained owned nonvegetation receivers now permit
+solid cutouts. Direct translucent blend, prohibited glass/reflective/cockpit/
+monitor/ON_SURFACE flags, vegetation, foreign proxies, characters and unsupported
+poses remain excluded. Retained source ownership, canopy, material reflective/
+emitter and actual normal/facing/shelter gates remain. No base texture sample,
+alpha value, cutoff, depth write, shadow silhouette or A2C setting changes.
+
+Both colour paths calculate cutout alpha and hard discard/A2C coverage from the
+actual base texture before invoking `shade(base.rgb, ...)`. Snow material
+operates on RGB and returns RGB; direct output retains `out_a2`, retained output
+retains `out_a`. Both normal prepass forms still use the original alpha sample,
+threshold and A2C coverage. The silhouette therefore cannot fill a texture hole
+just because its surviving fabric receives snow. Direct diagnostic bit 1024
+previously meant an alpha-reference denial; it is now unused, while actual
+`alphaRef` remains printed. Transparency/depth/material denials stay unchanged.
+
+Authored renderer contract tests pin absence of an alpha-reference snow
+receiver veto, direct transparency/vegetation exclusions, original alpha
+discard/A2C equations before snow shading, returned original alpha and both
+prepass coverage paths. A fast source check of those production equations,
+all standalone current/retained pose policy tests and `git diff --check` passed.
+Root must execute the Rust contract/composition tests and installed cutout roof
+capture; no GPU, full build or runtime test was run by this agent.

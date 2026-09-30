@@ -738,7 +738,9 @@ fn decode_nohq_packed(texel: vec4<f32>, rg_packed: bool) -> vec3<f32> {
 // says so (REN-OBJ-004).
 fn retained_snow_receiver(in: VsOut) -> bool {
     let sm = section_materials[in.section];
-    return in.snow_receiver != 0u && sm.alpha_ref <= 0.0 &&
+    // Retained draws are opaque/cutout. Original base alpha drives their discard
+    // and A2C coverage independently of the RGB-only snow material layer.
+    return in.snow_receiver != 0u &&
         (sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER)) == 0u &&
         dot(sm.emissive.rgb, sm.emissive.rgb) < 1e-8 && dot(in.normal, in.normal) > 1e-8;
 }
