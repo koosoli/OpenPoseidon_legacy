@@ -35,6 +35,8 @@ mod mud_geometry_tests;
 mod ground_road_tests;
 #[cfg(test)]
 mod ground_wet_tests;
+#[cfg(test)]
+mod sand_geometry_tests;
 
 use naga_oil::compose::{
     ComposableModuleDescriptor, Composer, NagaModuleDescriptor, ShaderLanguage,

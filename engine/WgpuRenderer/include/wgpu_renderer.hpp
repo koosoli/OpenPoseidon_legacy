@@ -2584,6 +2584,8 @@ extern "C"
     WGR_API void wgr_terrain_set_snow(WgrRenderer* renderer, const float* data, uint32_t count);
     // Separate signed 12.5cm mud height view; the snow data and public byte layouts remain intact.
     WGR_API void wgr_terrain_set_mud(WgrRenderer* renderer, const float* data, uint32_t count);
+    // Separate signed sand view; positive loose rims are preserved.
+    WGR_API void wgr_terrain_set_sand(WgrRenderer* renderer, const float* data, uint32_t count);
 
     /* Set the terrain ground layers: `handles[i]` is the wgr_texture_create
      * handle for Landscape texture index i (0 = the built-in white fallback).

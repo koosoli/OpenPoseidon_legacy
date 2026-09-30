@@ -3044,6 +3044,11 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
         wgr_terrain_set_mud(_renderer, p.mudData.data(), static_cast<uint32_t>(p.mudData.size()));
         p.mudData.clear();
     }
+    if (!p.sandData.empty())
+    {
+        wgr_terrain_set_sand(_renderer, p.sandData.data(), static_cast<uint32_t>(p.sandData.size()));
+        p.sandData.clear();
+    }
     if (p.smokeDirty)
     {
         wgr_set_smoke_shadow(_renderer, p.smokeBlobs.empty() ? nullptr : p.smokeBlobs.data(),

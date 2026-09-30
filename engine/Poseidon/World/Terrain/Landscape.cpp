@@ -12,6 +12,7 @@
 #include <Poseidon/AI/EntityAIType.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
+#include <Poseidon/World/Weather/SandField.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Random/randomGen.hpp>
@@ -1649,10 +1650,12 @@ float Landscape::BumpySurfaceY(float xC, float zC, float& rdX, float& rdY, Textu
     Texture* rTexture = ClippedTexture(z >> tLog, x >> tLog);
     bump = CalculateBump(xC, zC, rTexture, bumpy);
     texture = rTexture;
-    const auto mudGradient = GMud().HeightGradientAt(xC, zC);
+    auto mudGradient = GMud().HeightGradientAt(xC, zC);
+    const auto sandGradient = GSand().HeightGradientAt(xC, zC);
+    mudGradient[0] += sandGradient[0]; mudGradient[1] += sandGradient[1];
     rdX += mudGradient[0];
     rdY += mudGradient[1];
-    return y + GMud().HeightOffsetAt(xC, zC);
+    return y + GMud().HeightOffsetAt(xC, zC) + GSand().HeightOffsetAt(xC, zC);
 }
 
 void Landscape::SurfacePlane(Plane& plane, float xC, float zC) const
@@ -1702,8 +1705,10 @@ void Landscape::SurfacePlane(Plane& plane, float xC, float zC) const
         normal[2] = (y11 - y01) * -_invTerrainGrid;
     }
     Vector3 point((x + 1) * _terrainGrid, y01, z * _terrainGrid);
-    const auto mudGradient = GMud().HeightGradientAt(xC, zC);
-    const float mudHeight = GMud().HeightOffsetAt(xC, zC);
+    auto mudGradient = GMud().HeightGradientAt(xC, zC);
+    const auto sandGradient = GSand().HeightGradientAt(xC, zC);
+    mudGradient[0] += sandGradient[0]; mudGradient[1] += sandGradient[1];
+    const float mudHeight = GMud().HeightOffsetAt(xC, zC) + GSand().HeightOffsetAt(xC, zC);
     if (mudHeight != 0 || mudGradient[0] != 0 || mudGradient[1] != 0)
     {
         normal[0] -= mudGradient[0];
@@ -1759,14 +1764,14 @@ float Landscape::SurfaceY(float x, float z) const
     { // triangle 00,01,10
         float d1000 = y10 - y00;
         float d0100 = y01 - y00;
-        return y00 + d1000 * zIn + d0100 * xIn + GMud().HeightOffsetAt(x, z);
+        return y00 + d1000 * zIn + d0100 * xIn + GMud().HeightOffsetAt(x, z) + GSand().HeightOffsetAt(x, z);
     }
     else
     {
         // triangle 01,10,11
         float d1011 = y10 - y11;
         float d0111 = y01 - y11;
-        return y10 + d0111 - d1011 * xIn - d0111 * zIn + GMud().HeightOffsetAt(x, z);
+        return y10 + d0111 - d1011 * xIn - d0111 * zIn + GMud().HeightOffsetAt(x, z) + GSand().HeightOffsetAt(x, z);
     }
 }
 
@@ -1817,10 +1822,12 @@ float Landscape::SurfaceY(float x, float z, float* rdX, float* rdY, Texture** te
         {
             *rdX = d0100 * _invTerrainGrid;
             *rdY = d1000 * _invTerrainGrid;
-            const auto mudGradient = GMud().HeightGradientAt(x, z);
+            auto mudGradient = GMud().HeightGradientAt(x, z);
+            const auto sandGradient = GSand().HeightGradientAt(x, z);
+            mudGradient[0] += sandGradient[0]; mudGradient[1] += sandGradient[1];
             *rdX += mudGradient[0]; *rdY += mudGradient[1];
         }
-        return y00 + d1000 * zIn + d0100 * xIn + GMud().HeightOffsetAt(x, z);
+        return y00 + d1000 * zIn + d0100 * xIn + GMud().HeightOffsetAt(x, z) + GSand().HeightOffsetAt(x, z);
     }
     else
     {
@@ -1831,10 +1838,12 @@ float Landscape::SurfaceY(float x, float z, float* rdX, float* rdY, Texture** te
         {
             *rdX = d1011 * -_invTerrainGrid;
             *rdY = d0111 * -_invTerrainGrid;
-            const auto mudGradient = GMud().HeightGradientAt(x, z);
+            auto mudGradient = GMud().HeightGradientAt(x, z);
+            const auto sandGradient = GSand().HeightGradientAt(x, z);
+            mudGradient[0] += sandGradient[0]; mudGradient[1] += sandGradient[1];
             *rdX += mudGradient[0]; *rdY += mudGradient[1];
         }
-        return y10 + d0111 - d1011 * xIn - d0111 * zIn + GMud().HeightOffsetAt(x, z);
+        return y10 + d0111 - d1011 * xIn - d0111 * zIn + GMud().HeightOffsetAt(x, z) + GSand().HeightOffsetAt(x, z);
     }
 }
 

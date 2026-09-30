@@ -137,6 +137,10 @@ class TerrainWgpu : public ITerrainRenderer
     int _mudWindowX = 0, _mudWindowZ = 0;
     bool _mudUploaded = false;
     bool _mudWasEnabled = false;
+    uint64_t _sandRevision = 0;
+    int _sandWindowX = 0, _sandWindowZ = 0;
+    bool _sandUploaded = false;
+    bool _sandWasEnabled = false;
     TerrainPuddles::Wetness _puddleWetness;
     double _geographyRefreshLastMs = 0.0;
     // Reads the map's own CfgSurfaces / CfgSurfaceCharacters / clutter out of the

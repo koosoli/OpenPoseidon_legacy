@@ -189,6 +189,26 @@ fn valid_mud_view(data: &[f32]) -> bool {
         && data[4..].iter().all(|v| *v <= 0.0 && *v >= -data[3])
 }
 
+fn valid_sand_view(data: &[f32]) -> bool {
+    data.len() == 4 + 512 * 512 && data.iter().all(|v| v.is_finite())
+        && data[2] == 0.125 && data[3] >= 0.0 && data[3] <= 0.15
+        && data[4..].iter().all(|v| *v >= -data[3] && *v <= if data[3] > 0.0 { 0.02 } else { 0.0 })
+}
+
+#[test]
+fn sand_upload_accepts_signed_rims_and_rejects_unbounded_or_disabled_geometry() {
+    let mut data = vec![0.0; 4 + 512 * 512];
+    data[2] = 0.125; data[3] = 0.15; data[4] = -0.10; data[5] = 0.02;
+    assert!(valid_sand_view(&data));
+    data[5] = 0.021; assert!(!valid_sand_view(&data));
+    data[5] = 0.0; data[4] = -0.151; assert!(!valid_sand_view(&data));
+    data[4] = f32::NAN; assert!(!valid_sand_view(&data));
+    data[4] = 0.0; data[3] = 0.0; data[5] = 0.01; assert!(!valid_sand_view(&data));
+    data[5] = 0.0; assert!(valid_sand_view(&data));
+    data[2] = 0.25; assert!(!valid_sand_view(&data));
+    assert!(!valid_sand_view(&data[..data.len()-1]));
+}
+
 #[test]
 fn mud_upload_rejects_nonfinite_positive_and_excess_depth_without_touching_snow() {
     let mut data = vec![0.0; 4 + 512 * 512];
@@ -587,9 +607,9 @@ impl Terrain {
         });
         let snow_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_experimental_snow"),
-            // Snow occupies the first view, signed mud offsets the second. Reusing
+            // Snow occupies the first view, signed mud the second, sand the third. Reusing
             // the storage binding keeps colour, depth and conformed meshes aligned.
-            size: 2 * (4 + 512 * 512) * 4,
+            size: 3 * (4 + 512 * 512) * 4,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1093,6 +1113,12 @@ impl Terrain {
     pub fn snow_surface_params(&self) -> [f32; 4] {
         snow_surface_params(self.snow_deposit_depth, self.params.snowline_height,
             self.params.snowline_range, self.params.snowline_depth)
+    }
+
+    pub fn set_sand(&mut self, queue: &wgpu::Queue, data: &[f32]) {
+        if valid_sand_view(data) {
+            queue.write_buffer(&self.snow_buffer, 2 * (4 + 512 * 512) * 4, bytemuck::cast_slice(data));
+        }
     }
 
     pub fn snow_buffer(&self) -> &wgpu::Buffer {

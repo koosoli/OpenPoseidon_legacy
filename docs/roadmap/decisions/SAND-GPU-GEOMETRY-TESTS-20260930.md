@@ -38,3 +38,9 @@ workspace package name if different). Passing these tests proves bounded
 geometry sampling and integration, not stock sand source admission, boot
 production, physical Landscape support, wet/dry appearance or installed-game
 acceptance. Root owns those independent checks and the authoritative ledger.
+
+## Root integration and actual device checks
+
+Root integrates mission reset/simulation, authoritative Landscape height/gradients/tangent planes, independently queued GPU publication and the third signed storage view. CMake's existing CONFIGURE_DEPENDS World/*.cpp glob discovers both Sand cpp files. All public struct sizes remain; wgr_terrain_set_sand is a new export requiring the matching game/DLL. The reused storage binding expands by1MiB without an extra fragment storage binding. Close terrain uses the existing4m patch refinement, preserving12.5cm-or-finer grid spacing; conservative cull bounds include sand's15cm capacity. Existing geometry does not accumulate on camera movement.
+
+All3 canonical sand tests pass in build/sand-integration-device-tests.log: actual12-buffer GPU falsifiers across terrain/conform, full terrain composition/helper parity, and strict signed upload admission including positive rims. The device test requires a real adapter, not an optional early return. Root's production SandField C++ compile/tests also pass under -Wall -Wextra -Werror. Full game compilation and installed real walking/appearance remain pending. Root additionally subtracts existing sand slopes before the natural-slope contact gate, preventing its own depressions vetoing later contacts.

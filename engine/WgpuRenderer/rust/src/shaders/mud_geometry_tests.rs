@@ -48,6 +48,8 @@ fn probe_source(terrain: bool) -> String {
             "hm_load",
             "mud_height_offset",
             "mud_height_gradient",
+        "sand_height_offset",
+        "sand_height_gradient",
             "sample_height",
             "sample_normal",
             "sample_mud_normal",
@@ -118,6 +120,8 @@ fn mud_geometry_actual_helpers_match_and_compose_in_real_terrain() {
     for name in [
         "mud_height_offset",
         "mud_height_gradient",
+        "sand_height_offset",
+        "sand_height_gradient",
         "snow_depth",
         "snow_drift",
         "snow_deficit",

@@ -753,7 +753,17 @@ unbuilt_candidates: >-
       BumpySurfaceY and local tangent planes on admitted soft soil. Exact Noe
       cultivated-soil sources are admitted conservatively; arbitrary brown
       ground is not soil proof. GPU geometry tests pass; actual walking and
-      physical/visible depression acceptance remains pending. See decisions/
+      Matching installed01e8c4fb Nogova walking controls pass dry/covered
+      exclusions, physical support/gradient changes, pause/return and normal
+      shutdown;39 samples descend up to2cm. This earlier shallow result does
+      not meet the new decimetre requirement. Source now provides24cm rain-softened
+      compression capacity (35cm cap), plus a moist-soil coat between puddles.
+      Actual deep terrain/conform GPU probes pass; installed deep walking and
+      wet appearance remain pending. Sand source has dry compaction and raised
+      rims; signed GPU probes pass independently of snow/mud. Full engine and
+      installed sand walking remain pending. See decisions/WET-SOIL-MATERIAL-20260930.md,
+      SAND-FOOTPRINT-GEOMETRY-20260930.md and SAND-GPU-GEOMETRY-TESTS-20260930.md.
+      Earlier source decisions:
       MUD-VOLUMETRIC-CONTACT-20260930.md and NOGOVA-SOFT-MUD-CONTACT-20260930.md.
 
       Historical September 30 owner-priority mud puddle slice: rain-fed cosmetic wetness,

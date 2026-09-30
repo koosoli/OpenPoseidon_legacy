@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
+#include <Poseidon/World/Weather/SandField.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
 #include <Poseidon/World/Terrain/TerrainSubdivision.hpp>
@@ -756,8 +757,12 @@ void World::SimulateCloudlets(float deltaT)
 {
     GSnow().Advance(deltaT);
     if (GLandscape)
+    {
         GMud().Advance(deltaT, UniformWettingDensity(GLandscape->GetRainDensity(),
             GRain.EffectiveDensity(), GRain.Params().snowflakes));
+        GSand().Advance(deltaT, UniformWettingDensity(GLandscape->GetRainDensity(),
+            GRain.EffectiveDensity(), GRain.Params().snowflakes));
+    }
     SimulationImportance prec = SimulateVisibleFar;
 
     // POSEIDON_TEST_SMOKE=1 drops one new-system plume in front of the camera a

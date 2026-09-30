@@ -62,6 +62,8 @@ bool StampSandFootstep(const Landscape& land, Object& actor,
         }
     float dx, dz;
     const float ground = land.SurfaceY(foot.X(), foot.Z(), &dx, &dz);
+    const auto sandGradient = sand.HeightGradientAt(foot.X(), foot.Z());
+    dx -= sandGradient[0]; dz -= sandGradient[1];
     if (!std::isfinite(ground) || ground <= land.GetSeaLevel() + 0.02f ||
         !std::isfinite(dx) || !std::isfinite(dz) || std::hypot(dx, dz) > 0.7f ||
         std::abs(foot.Y() - ground) > 0.25f || GSnow().BaseDepthAt(foot.X(), foot.Z()) > 0.002f) return false;

@@ -9,6 +9,8 @@ using namespace Poseidon;
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
+#include <Poseidon/World/Weather/SandField.hpp>
+#include <Poseidon/World/Weather/SandGroundAdmission.hpp>
 #include <Poseidon/World/Weather/MudGroundAdmission.hpp>
 #include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
@@ -2271,6 +2273,68 @@ void RegisterSnowProbe(HarnessServer& hs)
                     (StockMudSoil(surface._class.Data(), surface._name.Data(), surface._soundEnv.Data(), surface._character.Data()) ||
                      StockNogovaMudSoil(GLandscape->GetName(), textureName, surface._class.Data(), surface._name.Data(),
                         surface._soundEnv.Data(), surface._character.Data(), x/grid-cx, z/grid-cz));
+                cJSON_AddBoolToObject(out, "sourceEligible", source);
+            }
+            return HarnessProtocol::JsonResponse(out);
+        });
+    hs.RegisterCommand({"dev_sand", "Read-only sand history and physical terrain height; no synthetic stamps; signed loose rims", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if (!GWorld || !GLandscape) return HarnessProtocol::ErrorResponse("sand probe requires world");
+            const char* action = HarnessProtocol::GetString(root, "action");
+            if (!action || (std::strcmp(action, "state") != 0 && std::strcmp(action, "sample") != 0))
+                return HarnessProtocol::ErrorResponse("sand probe action must be state or sample");
+            const auto& sand = GSand();
+            float x = 0, z = 0;
+            if (std::strcmp(action, "sample") == 0)
+            {
+                const auto* east = cJSON_GetObjectItemCaseSensitive(root, "x");
+                const auto* north = cJSON_GetObjectItemCaseSensitive(root, "z");
+                if (!cJSON_IsNumber(east) || !cJSON_IsNumber(north) ||
+                    !std::isfinite(east->valuedouble) || !std::isfinite(north->valuedouble) ||
+                    std::abs(east->valuedouble) > 1000000 || std::abs(north->valuedouble) > 1000000)
+                    return HarnessProtocol::ErrorResponse("sand sample needs finite bounded x/z");
+                x = float(east->valuedouble); z = float(north->valuedouble);
+            }
+            auto* out = cJSON_CreateObject();
+            cJSON_AddBoolToObject(out, "enabled", sand.enabled);
+            cJSON_AddNumberToObject(out, "wetness", sand.Wetness());
+            cJSON_AddNumberToObject(out, "chunks", double(sand.Chunks()));
+            cJSON_AddNumberToObject(out, "revision", double(sand.Revision()));
+            cJSON_AddNumberToObject(out, "rejected", double(sand.Rejected()));
+            if (std::strcmp(action, "sample") == 0)
+            {
+                float dx = 0, dz = 0;
+                const float height = GLandscape->SurfaceY(x, z, &dx, &dz);
+                const auto gradient = sand.HeightGradientAt(x, z);
+                cJSON_AddNumberToObject(out, "x", x); cJSON_AddNumberToObject(out, "z", z);
+                cJSON_AddNumberToObject(out, "offset", sand.HeightOffsetAt(x, z));
+                cJSON_AddNumberToObject(out, "sandDx", gradient[0]); cJSON_AddNumberToObject(out, "sandDz", gradient[1]);
+                cJSON_AddNumberToObject(out, "surfaceY", height);
+                cJSON_AddNumberToObject(out, "surfaceDx", dx); cJSON_AddNumberToObject(out, "surfaceDz", dz);
+                const auto& surface = GLandscape->SurfaceAt(x, z);
+                const float grid = GLandscape->GetLandGrid();
+                const bool inMap = std::isfinite(grid) && grid > 0 && x >= 0 && z >= 0 &&
+                    x < GLandscape->GetLandRange()*grid && z < GLandscape->GetLandRange()*grid;
+                const int cx = inMap ? int(std::floor(x/grid)) : 0, cz = inMap ? int(std::floor(z/grid)) : 0;
+                const int id = inMap ? GLandscape->GetTexture(cz, cx) : -1;
+                const Texture* texture = id >= 0 ? GLandscape->GetTexture(id) : nullptr;
+                const char* textureName = texture ? texture->GetName().Data() : "";
+                cJSON_AddStringToObject(out, "world", GLandscape->GetName());
+                cJSON_AddStringToObject(out, "texture", textureName);
+                cJSON_AddStringToObject(out, "surfaceClass", surface._class.Data());
+                cJSON_AddStringToObject(out, "files", surface._name.Data());
+                cJSON_AddStringToObject(out, "sound", surface._soundEnv.Data());
+                cJSON_AddStringToObject(out, "character", surface._character.Data());
+                bool source = inMap && GLandscape->GetEnfusionSurfaceCount() == 0 &&
+                    GLandscape->GetA3TerrainMaterial(id) == nullptr && SandSourceInterior(x/grid-cx, z/grid-cz) &&
+                    StockSandSurface(surface._class.Data(), surface._name.Data(), surface._soundEnv.Data(), surface._character.Data());
+                for (const float v : {0.25f, 0.75f})
+                    for (const float u : {0.25f, 0.75f})
+                    {
+                        if (!source) continue;
+                        const auto& corner = GLandscape->SurfaceAt((cx+u)*grid, (cz+v)*grid);
+                        source = StockSandSurface(corner._class.Data(), corner._name.Data(), corner._soundEnv.Data(), corner._character.Data());
+                    }
                 cJSON_AddBoolToObject(out, "sourceEligible", source);
             }
             return HarnessProtocol::JsonResponse(out);

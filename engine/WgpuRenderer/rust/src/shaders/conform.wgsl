@@ -76,6 +76,29 @@ fn mud_height_offset(world_xz: vec2<f32>) -> f32 {
     return clamp(offset, -limit, 0.0) * smoothstep(0.0, 24.0, edge);
 }
 
+// Third signed view: sand compaction and positive loose-grain rims.
+fn sand_height_offset(world_xz: vec2<f32>) -> f32 {
+    if (arrayLength(&snow.deficits) < 786440u) { return 0.0; }
+    let origin = vec2<f32>(snow.deficits[524292u], snow.deficits[524293u]);
+    let cell = snow.deficits[524294u];
+    let limit = snow.deficits[524295u];
+    if (limit <= 0.0 || cell != 0.125) { return 0.0; }
+    let t = (world_xz - origin) / cell - vec2<f32>(0.5);
+    if (any(t < vec2<f32>(0.0)) || any(t >= vec2<f32>(511.0))) { return 0.0; }
+    let b = vec2<u32>(floor(t));
+    let f = fract(t);
+    let i = 524296u + b.y * 512u + b.x;
+    let offset = mix(mix(snow.deficits[i], snow.deficits[i + 1u], f.x),
+                     mix(snow.deficits[i + 512u], snow.deficits[i + 513u], f.x), f.y);
+    let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
+    return clamp(offset, -limit, 0.02) * smoothstep(0.0, 24.0, edge);
+}
+fn sand_height_gradient(world_xz: vec2<f32>, footprint: f32) -> vec2<f32> {
+    let h = max(0.125, footprint);
+    return vec2<f32>(sand_height_offset(world_xz + vec2<f32>(h, 0.0)) - sand_height_offset(world_xz - vec2<f32>(h, 0.0)),
+        sand_height_offset(world_xz + vec2<f32>(0.0, h)) - sand_height_offset(world_xz - vec2<f32>(0.0, h))) / (2.0 * h);
+}
+
 fn mud_height_gradient(world_xz: vec2<f32>, footprint: f32) -> vec2<f32> {
     let h = max(0.125, footprint);
     return vec2<f32>(mud_height_offset(world_xz + vec2<f32>(h, 0.0)) - mud_height_offset(world_xz - vec2<f32>(h, 0.0)),
@@ -105,9 +128,9 @@ fn surface_y(world_xz: vec2<f32>) -> f32 {
     let y10 = hm_load(ix, iz + 1);
     let y11 = hm_load(ix + 1, iz + 1);
     if (f.x <= 1.0 - f.y) {
-        return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x + mud_height_offset(world_xz);
+        return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x + mud_height_offset(world_xz) + sand_height_offset(world_xz);
     }
-    return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y + mud_height_offset(world_xz);
+    return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y + mud_height_offset(world_xz) + sand_height_offset(world_xz);
 }
 
 // ---------------------------------------------------------------------------
@@ -166,9 +189,9 @@ fn lattice_y(world_xz: vec2<f32>, step_texels: f32) -> f32 {
     let y10 = hm_load(ix, iz + n);
     let y11 = hm_load(ix + n, iz + n);
     if (f.x <= 1.0 - f.y) {
-        return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x + mud_height_offset(world_xz);
+        return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x + mud_height_offset(world_xz) + sand_height_offset(world_xz);
     }
-    return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y + mud_height_offset(world_xz);
+    return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y + mud_height_offset(world_xz) + sand_height_offset(world_xz);
 }
 
 // Absolute terrain height at world xz ON THE DRAWN SURFACE. `cam_pos` is the ABSOLUTE camera
@@ -243,5 +266,5 @@ fn surface_grad(world_xz: vec2<f32>) -> vec2<f32> {
         dhx = -(y10 - y11);
         dhz = -(y01 - y11);
     }
-    return vec2<f32>(dhx, dhz) / hm_params.terrain_grid + mud_height_gradient(world_xz, 0.125);
+    return vec2<f32>(dhx, dhz) / hm_params.terrain_grid + mud_height_gradient(world_xz, 0.125) + sand_height_gradient(world_xz, 0.125);
 }
