@@ -122,3 +122,61 @@ order-independent overlaps, positive/negative coordinates, camera persistence,
 disable/reset/pause behaviour, capacity/no eviction and exact source negatives.
 These passed; no full build, game, GPU or deployment was performed by this agent.
 Installed physical/visual acceptance remains pending root integration.
+
+## Installed real-walking runner prepared
+
+scripts/Test-SandFootprints.ps1 reuses the installed mud fixture's proven TCP,
+private-profile, health-check, provenance and normal-exit structure. Only an
+owned fresh process may run through scripts/with-game-lock.sh; an existing
+OpenPoseidon/ColdWarAssault process blocks launch. DEPLOYED-FROM.txt is the first
+installed file read. EXE/DLL hashes, sizes, timestamps and stamp must remain
+unchanged through exit. Both stdout/stderr are retained. All changed/cleared
+environment values are recorded and restored, with previously absent values
+removed rather than assigned null (PowerShell7.6/.NET10 semantics).
+
+The minimal perf_sand.noe mission puts its player at2680/5125, away from the
+sampled lane. A fresh separate west group creates an ordinary SoldierWB leader
+at2675/5125, verified through actual type/leader/ASL/pose/heading queries. It uses
+normal doMove toward2675/5131 at LIMITED speed, and pauses after at least4m of
+measured movement. There is no unsupported enableAI, reused subordinate,
+synthetic sand stamp, direct deposit or wetness setter. Stationary placement and
+the later paused worker relocation are explicitly excluded from walking proof.
+
+The runner removes inherited weather/snow fixture overrides, sets actual rain,
+fog and cloud cover to0, particle mode off/density0/snowflakes false, snow
+disabled and snowline off. Actual weather_visibility authority must remain dry
+through every state query. It starts time100/date1985-06-21 hour16 before actor
+settling, uses brightness/exposure1, zero wind, temporal/jitter/adaptive exposure
+off, grass/puddles off, native1280x720/MSAA4 and fps cap60. Captures are paused.
+
+The actual centre must report noe/noe.wrp, o/pt.paa, SandDark/pt??????/sand,
+empty character and all-quadrant sourceEligible. The fixed1105-point grid
+samples X2674.03125-2676.03125 and Z5124.03125-5132.03125 every12.5cm, offset
+3.125cm from cell centres to include nonzero derivatives. Every point must
+remain source-admitted. The baseline must contain no signed field edits.
+Every identical-coordinate before/after query must show physical SurfaceY
+change matching signed sand offset within0.00006m, and both physical derivative
+changes matching sand derivatives within0.0001. Acceptance requires at least
+one depression >=3cm and one positive rim >1mm, with physical gradient change
+on both. A normal decal or positive shader tint cannot pass these CPU physical
+support gates. Actual SAND_STEP rows from the correct dry stock lane are also
+mandatory. The actor's ASL support gap must stay within3cm at each recorded state.
+
+After the measured walk and geometry proof, the paused fixture moves the worker
+5m off-lane, then records a low view1m above actual ground, a top view2m above
+ground, an away view and the same low view on return. Time, actor pose/heading/
+ASL, uniform wetness, rain authority, sand history and every signed grid sample
+must remain exactly unchanged through pause/camera return. Every PNG must be
+1280x720 with hash, camera and accompanying state retained. Normal exit0 and
+Shutdown complete are mandatory; any forced cleanup retains failed status.
+
+scripts/Test-SandFootprintHelpers.ps1 parses the actual runner AST and extracts
+its production assertion functions without installed-file/process/network/GPU
+access. Its92 checks pass under bundled PowerShell7.6.5, covering signed limits,
+height/gradient parity for depressions **and positive rims**, dry authority,
+malformed numeric/trace/source data, minimum depth/rim evidence, pause changes,
+source-coordinate consistency, locale-independent trace parsing and pair changes.
+This is runner/helper preparation only: no game/GPU was run. Positive installed
+physical geometry, GPU appearance and normal/standing support remain pending
+root execution. Wet cohesion and hard road/grass/source-border/snow installed
+negative controls are explicitly not covered by this first dry runner.
