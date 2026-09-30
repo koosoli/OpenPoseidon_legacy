@@ -205,7 +205,14 @@ fn forest_actual_gpu_audited_atlas_crowns_trunks_ground_shelter_and_ablation() {
             assert!((sample[0]-expected).abs()<1e-5,"atlas sample {i}");
             assert_eq!(sample[1],0.0,"unpublished/outside/overflow physical map cannot certify openness");
             assert_eq!(sample[2],0.0,"actual overhead roof stays bare");
-            assert!((sample[3]-if disabled {0.0} else {expected*0.8}).abs()<1e-5);
+            // Coverage uses the production powder's exposure transition, rather
+            // than multiplying raw rain reach. Evaluate that transition here
+            // independently so neither roofs nor partial shelter are waived.
+            let t = (0.8_f32 - 0.6) / (0.95 - 0.6);
+            let exposure = t * t * (3.0 - 2.0 * t);
+            let cover = if disabled {0.0} else {expected * exposure};
+            assert!((sample[3]-cover).abs()<1e-5,
+                "forest sample {i}, disabled={disabled}: actual={} expected={cover}",sample[3]);
         }
         drop(bytes);staging.unmap();
     }
