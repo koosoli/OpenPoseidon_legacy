@@ -11979,9 +11979,14 @@ fn multi_blends_layer_normals_with_the_same_weights_as_the_colours() {
         "the colour blend must publish its final per-layer weights for the normal blend"
     );
     assert!(
-        src.contains("blended + tint_albedo(layer, sm.layer_colour[i + 1u].rgb) * lw[i]"),
+        src.contains("blended + tint_albedo(layer.rgb, sm.layer_colour[i + 1u].rgb) * lw[i]"),
         "colours must use the renormalised weights (and RFG-072: each layer in its own Color_N)"
     );
+    // RGBA samples retain layer alpha for authored roughness; only RGB enters
+    // the albedo blend. Its coverage is the original base alpha, not mask sum.
+    assert!(src.contains("let layer = textureSampleBias(textures[sm.layer_slot[i]], samplers[sm.sampler_idx], uv_i, frame.renscale.x);"));
+    assert!(src.contains("lw = lw / total;"));
+    assert!(src.contains("base = vec4<f32>(base.rgb * (1.0 - weight) + blended, base.a);"));
     assert!(
         src.contains("layer_n * layer_w[i]"),
         "layer normals must be weighted by the SAME mask weights the colours use"
@@ -12318,7 +12323,7 @@ fn normal_map_cavity_only_darkens_the_ambient_and_is_inert_on_a_flat_map() {
     assert!(
         shading.contains("* amb_ao * cavity;")
             && shading
-                .contains("m_sun_ambient * amb_ao * cavity + m_sun_diffuse * ndotl * sun_vis;"),
+                .contains("m_sun_ambient * amb_ao * cavity + m_sun_diffuse * ndotl * sun_vis * leaf_cavity;"),
         "the cavity must multiply the ambient on BOTH the sky-lit and the legacy branch"
     );
     assert!(
@@ -12327,10 +12332,15 @@ fn normal_map_cavity_only_darkens_the_ambient_and_is_inert_on_a_flat_map() {
     );
     let terrain = include_str!("../terrain/terrain.wgsl");
     assert!(
-        terrain.contains("* normal_map_cavity(geometric_n, n);"),
+        terrain.contains("* normal_map_cavity(geometric_n, n) * authored_ao;"),
         "terrain must take the same term on its ambient — the dawn ground is flat for the same \
          reason the dawn wall is"
     );
+    // Native leaf cavity is a DIFFERENT authored contract (ambient+diffuse).
+    // Snow removes that underlying material term, while zero snow retains it;
+    // neither path moves normal-map cavity onto the direct sun term.
+    assert!(shading.contains("let leaf_cavity = mix(select(1.0, mat.native_cavity, is_foliage), 1.0, snow_cover);"));
+    assert!(shading.contains("if (snow_cover > 0.0) {"));
     // 5. The shader must be the maths the mirror above claims it is.
     let frame = include_str!("../shaders/frame.wgsl");
     assert!(
