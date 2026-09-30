@@ -105,6 +105,7 @@ try {
     $result.gates.samples=$samples
     $target=@($samples|Where-Object {$_.sample.valid -and $_.sample.depth -gt .001 -and [Math]::Abs($_.sample.height-$_.sample.depth-$_.sample.terrainY) -lt .15}|Sort-Object {$_.sample.depth} -Descending)[0]
     Require ($null -ne $target) 'No supported standing-water sample near actual player.'
+    $result.gates.selectedTarget=$target
     $x=$target.x;$z=$target.z;$y=[double]$target.sample.height
     Require ((Eval ('triFreeFlyPose "'+$x+' '+($z-24)+' '+($y+9)+' 0 -20.55"')) -ceq 'OK') 'Water camera refused.'
     Capture 'real-rain-standing-water'
@@ -116,15 +117,18 @@ try {
     Start-Sleep -Seconds 1;Exec 'setAccTime 0'
     $stopWeather=Send @{cmd='weather_visibility'};Require ($stopWeather.liquidRain -eq 0) 'Storm has not actually stopped raining.'
     $stop=Send @{cmd='dev_rain_water';action='state'};$result.gates.rainStopped=$stop
+    $result.gates.localRainStopped=Send @{cmd='dev_rain_water';action='sample';x=$x;z=$z}
     Exec 'setAccTime 8'
     Start-Sleep -Seconds 16;Exec 'setAccTime 0'
     $drain=Send @{cmd='dev_rain_water';action='state'};$result.gates.drain=$drain
     Require ($drain.rainVolume -eq $stop.rainVolume -and $drain.volume -lt $stop.volume -and $drain.volume -gt 0) 'Actual rainwater did not gradually drain after rain.'
+    $result.gates.localAfterRain=Send @{cmd='dev_rain_water';action='sample';x=$x;z=$z}
     Capture 'after-rain-retained-water'
     Exec '0 setOvercast 0; setAccTime 8'
     Start-Sleep -Seconds 16;Exec 'setAccTime 0'
     $sun=Send @{cmd='dev_rain_water';action='state'};$result.gates.sun=$sun
     Require ($sun.evaporationVolume -gt $drain.evaporationVolume -and $sun.volume -lt $drain.volume) 'Clear-day weather did not evaporate retained water.'
+    $result.gates.localSun=Send @{cmd='dev_rain_water';action='sample';x=$x;z=$z}
     Capture 'sun-drying-water'
     Require (Select-String -Path $log -Pattern 'RAIN_WATER_INIT' -Quiet) 'Actual world field initialization trace missing.'
     Require (Select-String -Path $log -Pattern 'Rain water grid:.*accepted=true' -Quiet) 'Actual renderer snapshot acceptance missing.'

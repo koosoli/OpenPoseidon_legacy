@@ -48,12 +48,13 @@ function New-MuzzleViews([double]$X,[double]$Z,[double]$SoleHeight) {
     # calculated coordinate must be parenthesized rather than subtracting an array.
     return [ordered]@{
         body=@{camera=@(($X-3.0),($Z-2.5),($SoleHeight+1.65));target=@($X,($Z+.4),($SoleHeight+1.05))}
+        frontBody=@{camera=@(($X-2.5),($Z+3.0),($SoleHeight+1.65));target=@($X,($Z+.4),($SoleHeight+1.25))}
         surfaces=@{camera=@(($X-3.0),($Z-3.0),($SoleHeight+1.2));target=@($X,($Z+1.5),($SoleHeight+2.8))}
     }
 }
 if($SelfTest) {
     $views=New-MuzzleViews 4975 4675 20
-    $expected=@{body=@{camera=@(4972,4672.5,21.65);target=@(4975,4675.4,21.05)};surfaces=@{camera=@(4972,4672,21.2);target=@(4975,4676.5,22.8)}}
+    $expected=@{body=@{camera=@(4972,4672.5,21.65);target=@(4975,4675.4,21.05)};frontBody=@{camera=@(4972.5,4678,21.65);target=@(4975,4675.4,21.25)};surfaces=@{camera=@(4972,4672,21.2);target=@(4975,4676.5,22.8)}}
     foreach($view in $views.Keys){foreach($field in @('camera','target')){Require ($views[$view][$field].Count -eq 3) 'Camera vector dimension changed.';for($axis=0;$axis -lt 3;++$axis){Require ([Math]::Abs($views[$view][$field][$axis]-$expected[$view][$field][$axis]) -lt .000001) 'Actual fixture coordinate arithmetic failed.'}}}
     $sample='[info] MUZZLE_LIGHT event=bullet timeMs=100012 pos=4975.100,21.400,4675.800 lifeMs=110 core=0.70 reach=8.40 daylight=true immediate=true active=true'
     $trace=Parse-MuzzleTrace $sample;$null=Assert-Peak $trace 100012 @(4975,4675,20)

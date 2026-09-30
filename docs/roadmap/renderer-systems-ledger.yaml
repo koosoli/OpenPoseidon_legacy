@@ -807,12 +807,28 @@ unbuilt_candidates: >-
       rain rings. Other maps and close depression appearance remain open.
       Physical runoff world integration88de8e3c and mission generationdba0072c
       pass conservative CPU hollow/spill/downhill/mass/drain/sun/pause checks.
-      New production builddba0072c passes; deployment was refused by the game
-      lock because an external game started00:22 on2026-10-01. Installed7e2f1df7
-      does not include runoff, muzzle lighting or land rotor particles.
-      Linked muzzle tests pass998 assertions/6 cases; rotor policy tests pass.
-      Installed night/interior illumination, dry/snow hover and real terrain
-      runoff/standing-water walking/drainage are still pending.
+      Matchingcff615b3 was built and installed00:43 after Oliver closed the game.
+      It includes independent physical rainwater rendering, standing-water sound
+      selection, muzzle local lighting and land rotor particles. Combined serial
+      renderer checks pass619 tests with zero failures and two existing ignored.
+      Actual Noe storm/runoff campaign stopped-storm-20261001-004751 passes
+      dry initialization, aligned terrain/depth queries, mass budget, exact pause,
+      natural rain accumulation and drainage with no new rain input. Volume falls
+      from390937 to249672 then219197 cubic metres after clear weather. The global
+      budget does not prove persistence of the photographed local pool; local
+      post-storm sampling and material appearance remain open. The current25m
+      stock grid also does not resolve arbitrary small craters. Source06296832
+      removes artificial reflective/opacity lifts in favour of actual-depth
+      transmission and Fresnel blending; it is not yet installed. Terrain film
+      and physical pool contributions still require isolated appearance controls.
+      Actual standard-US keyboard firing campaign actual-camera-20261001-010029
+      passes ammunition/Fired event, exact paused peak,200ms expiry, normal exit
+      and unchanged installed pair. Night ON/OFF images show warm ground and
+      shooter-edge illumination; front-body, daylight interiors, burst/AI and
+      the newly requested visible flash improvement remain open. Linked muzzle
+      policy tests pass998 assertions/6 cases. Land rotor policy tests pass, but
+      actual dry/snow hovering and standing-water footstep selection/listening
+      remain pending. Existing water downwash remains unchanged.
       MUD-VOLUMETRIC-CONTACT-20260930.md and NOGOVA-SOFT-MUD-CONTACT-20260930.md.
 
       Historical September 30 owner-priority mud puddle slice: rain-fed cosmetic wetness,
@@ -1367,16 +1383,22 @@ unbuilt_candidates: >-
     plan: docs/roadmap/decisions/SNOW-SURFACE-MATERIAL-20260930.md
     status: PARTIAL
     owner: codex/streaming-residency
-    audited: 2026-09-30
+    audited: 2026-10-01
     completeness: >-
-      SOURCE INTEGRATED; NEW INSTALLED ACCEPTANCE PENDING.
+      INSTALLED SIDE-VIEW IMPROVEMENT; FOREST TOP AND ROOF ACCEPTANCE OPEN.
       Latest185ccebd source admission covers25 stock/O-family models and84 raw
       visual LODs with actual compacted loaded LOD identity. CPU223 foliage/
       50 bark-or-skeleton negatives and64 actual-helper GPU cases pass.
-      Powder and textured tree frost are installed7e2f1df7; the expanded forest
-      families remain uninstalled. Owner-like forest top/side views and corrected
-      roof near/far handoff require installed acceptance; build alone does not
-      establish their appearance.
+      Powder, textured tree frost, expanded forest families and corrected roof
+      physical queries are installedcff615b3. Actual Eden and Noe forest ON/OFF
+      campaigns first-integrated-20261001-005626 and010239 pass source identity,
+      fixed weather/deposit, pause/return, normal exit and unchanged binary pair.
+      Eden60/200/500m side views retain textured frost, branch detail and alpha
+      holes instead of white wedges. Root-reviewed Noe top view remains largely
+      green; the white forest canopy requirement is not satisfied. Source93bf8399
+      adds an opt-in coat-coverage diagnostic preserving actual leaf alpha and
+      source-negative bark/skeletons, not yet installed. Corrected roof near/far
+      and new bullet-impact holes still require installed acceptance.
       Baseline c9024bb4 retained the earlier snow/contact layer and installed
       8b3ae13c. Shared
       Powder d538b383 introduced projected-footprint filtering. Installed
