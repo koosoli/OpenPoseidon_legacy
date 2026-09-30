@@ -2,6 +2,7 @@
 #include <Poseidon/Graphics/Textures/RetailPacPixelStage.hpp>
 #include <Poseidon/IO/Streams/FileAccessPolicy.hpp>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
+#include <Poseidon/IO/Streams/RetailRigidAssetProfile.hpp>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -33,7 +34,7 @@ struct RawBank
     std::filesystem::path root = std::filesystem::temp_directory_path() /
         ("retail-pixel-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     QFBank bank;
-    RawBank()
+    explicit RawBank(const RetailRigidAssetProfile::Profile& profile)
     {
         Foundation::CaptureMainThread();
         REQUIRE(std::filesystem::create_directory(root));
@@ -41,8 +42,8 @@ struct RawBank
         const auto bytes = DxtPac();
         std::ofstream out(root / "DTA" / "data.pbo", std::ios::binary);
         REQUIRE(out.good());
-        constexpr char name[] = "skala_piskovec2.pac";
-        out.write(name, sizeof(name));
+        const std::string name(profile.textureMember);
+        out.write(name.c_str(), static_cast<std::streamsize>(name.size() + 1));
         for (int value : {0, 0, 0, 0, int(bytes.size())})
             out.write(reinterpret_cast<const char*>(&value), 4);
         const char zero = 0;
@@ -75,14 +76,17 @@ TEST_CASE("Exact retail PAC preparation uses leased BC1 bytes and rejects change
     if (!ArchiveSourceBinding::RetailPacReadScope::Enabled())
         SKIP("Requires fresh WGR_GEOMETRY_PAGE_RETAIL_SOURCE=1 process.");
     if (!QFileAccess::MappingSupported()) SKIP("Original mapped bank read unavailable.");
-    RawBank files;
+    const auto* profile = RetailRigidAssetProfile::Selected();
+    REQUIRE(profile);
+    RawBank files(*profile);
     render::ColdPaaRead header;
     {
-        ArchiveSourceBinding::RetailPacReadScope purpose(R"(data3d\skala_new.p3d)");
-        auto raw = files.bank.Read("skala_piskovec2.pac"); REQUIRE(raw);
+        ArchiveSourceBinding::RetailPacReadScope purpose(profile->modelLogicalPath.data());
+        const std::string member(profile->textureMember);
+        auto raw = files.bank.Read(member.c_str()); REQUIRE(raw);
         header.source = raw->GetArchiveSourceBinding(); REQUIRE(header.source);
     }
-    header.key = R"(data\skala_piskovec2.pac)";
+    header.key = std::string(profile->primaryTexturePath);
     header.magic = 0xff01;
     header.count = 3;
     header.levels[0] = {16, 16, 128, 4};
@@ -96,9 +100,15 @@ TEST_CASE("Exact retail PAC preparation uses leased BC1 bytes and rejects change
     std::vector<char> reread;
     REQUIRE(header.source->Request().Read(reread));
     CHECK(reread == DxtPac());
+    CHECK(render::RetailPacPrepared::MatchesSelectedSource(header));
     auto staleHeader = header; ++staleHeader.levels[1].header;
     CHECK_FALSE(render::RetailPacPrepared::Prepare(staleHeader));
-    auto wrongKey = header; wrongKey.key = R"(data\other.pac)";
+    const auto* otherProfile = RetailRigidAssetProfile::ById(
+        profile->id == RetailRigidAssetProfile::Id::SkalaNew ?
+        RetailRigidAssetProfile::Id::Skala2 : RetailRigidAssetProfile::Id::SkalaNew);
+    REQUIRE(otherProfile);
+    auto wrongKey = header; wrongKey.key = std::string(otherProfile->primaryTexturePath);
+    CHECK_FALSE(render::RetailPacPrepared::MatchesSelectedSource(wrongKey));
     CHECK_FALSE(render::RetailPacPrepared::Prepare(wrongKey));
     auto wrongFormat = header; wrongFormat.magic = 0xff05;
     CHECK_FALSE(render::RetailPacPrepared::Prepare(wrongFormat));

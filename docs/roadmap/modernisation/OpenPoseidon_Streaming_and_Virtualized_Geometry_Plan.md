@@ -1775,3 +1775,46 @@ review found world reservation consuming abort headroom and stale refilled
 ACK publication risks; these and a manual-refill ordering bypass are being
 repaired before commit/deployment. Durable consumed-Restore facts replace
 racy transient-frame sampling in the residency driver.
+
+
+Exact4d95d065 postcommit game build, safety push and paired installation passed.
+Manual refill now needs the owner's synchronous handoff plus literal current
+original0/historical page absence; consumed Restore facts are retained across
+refill. World admission preserves record-abort headroom. Every returned
+takeover/update rechecks source/lifetime before publishing Ready; stale
+authority cancels and enters exact cleanup. Failed cancelled states retry
+bounded cleanup while retaining real debt. The refilled producer/birth are fresh.
+
+Installed `world-auto4d-20260930-073454-630650` still failed Root expectation,
+normal exit0/no force. V2 conservative surface upper fell to6.909925m; valid
+X200/X5/corner5,5 poses gave9.7510/8.1379/6.9236px and retained Fine250.
+No quality threshold relaxed and no automatic retirement/refill claimed.
+A source triangle spanning multiple fine target triangles still makes the
+single-target-triangle witness conservative; bounded subdivision is next.
+
+`world-skala2-4d-20260930-074014-6ee4fb` failed actual-source expectation, normal
+exit0/no force. Actual cold Shape birth1 was reached, but PreparedPrimaryRefused
+kept conventional rendering. RetailPacPrepared still has an old literal
+SkalaNew PAC key restriction; selected-profile preparation is being corrected
+without weakening Init-born physical member identity or BC1/mip bounds.
+Second-asset live admission remains unaccepted. Whole plan OPEN/defaultReady=false.
+
+
+V3 closed dyadic triangle coverage now refines completed conservative bounds
+under the unchanged2M-visit/4MiB limits; partial work retains the preceding
+complete bound. Outward interval witnesses and exact known-algorithm binding
+passed2511 assertions/6 surface cases and7458/7 projection cases. Independent
+review found no conservative-bound defect. Selected PAC preparation removes
+the stale single-key restriction while preserving exact current physical
+archive/member/Init-born authority. Fresh enabled SkalaNew and Skala2 PAC
+processes each passed21 assertions/1case; combined game/Core/Poseidon build
+passed. Installed Auto/residency/second-asset acceptance remains pending.
+
+Native Reforger control Village-streamer4d passed1/1, normal0/no force,
+20683registered/4930main/13451410maintriangles, GPUframe30.4015ms versus
+previous ordered31.121ms. Compatibility is incomplete and is not material
+ground truth; an ordered sample is not causal no-regression acceptance.
+DayZ connected4d-off-disabled-20260930-074805 passed normal0/no force,
+1269 frames, median23.0440/p95117.5896/p99322.0221ms (end-start).
+These controls had all geometry pilots OFF and establish startup/route
+continuity only. Whole plan OPEN/defaultReady=false/performanceAccepted=false.

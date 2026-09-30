@@ -2,7 +2,7 @@
 
 #include <Poseidon/Graphics/Textures/ColdPaaHandoff.hpp>
 #include <Poseidon/Foundation/Algorithms/Sha256.hpp>
-#include <Poseidon/IO/Streams/PatnikArchiveReason.hpp>
+#include <Poseidon/IO/Streams/RetailRigidAssetProfile.hpp>
 #include <optional>
 #include <string>
 #include <utility>
@@ -11,7 +11,7 @@ namespace Poseidon { class TextureWgpu; }
 
 namespace Poseidon::render
 {
-// One private, exact-source BC1 pixel payload. Preparation reads only the
+// One selected retail, exact-source BC1 pixel payload. Preparation reads only the
 // retained Init-born archive lease and uses the existing pure DXT parser. It
 // neither publishes a name-keyed cache entry nor touches a texture bank/GPU.
 class RetailPacPrepared
@@ -25,6 +25,13 @@ class RetailPacPrepared
 public:
     static constexpr size_t MaxSourceBytes = 128 * 1024;
     static constexpr size_t MaxBlockBytes = 128 * 1024;
+    static bool MatchesSelectedSource(const ColdPaaRead& header)
+    {
+        const auto* profile = RetailRigidAssetProfile::Selected();
+        return profile && header.source &&
+            profile->MatchesTexturePath(header.key) &&
+            profile->MatchesTextureArchive(header.source->Request().archive);
+    }
     RetailPacPrepared(const RetailPacPrepared&) = delete;
     RetailPacPrepared& operator=(const RetailPacPrepared&) = delete;
     RetailPacPrepared(RetailPacPrepared&&) = default;
@@ -33,7 +40,7 @@ public:
     template<class Cancelled>
     static std::optional<RetailPacPrepared> Prepare(ColdPaaRead header, Cancelled cancelled)
     {
-        if (!PatnikArchiveReason::Matches(R"(data\skala_piskovec2.pac)", header.key.c_str()) ||
+        if (!MatchesSelectedSource(header) ||
             header.key.capacity() > 256 ||
             !header.Valid() || header.magic != 0xff01 || header.count > 7 ||
             header.source->Request().bytes > MaxSourceBytes || cancelled()) return {};
@@ -57,7 +64,7 @@ public:
     { return Prepare(std::move(header), [] { return false; }); }
     bool Valid() const
     {
-        return PatnikArchiveReason::Matches(R"(data\skala_piskovec2.pac)", _header.key.c_str()) &&
+        return MatchesSelectedSource(_header) &&
             _header.key.capacity() <= 256 && _header.Valid() && _header.magic == 0xff01 && _header.count <= 7 &&
             _header.source->Request().bytes <= MaxSourceBytes && _chain.magic == 0xff01 &&
             _chain.blocks.capacity() <= MaxBlockBytes && _chain.levels.capacity() <= 32 &&

@@ -162,6 +162,9 @@ class OutroLoose { randomSeed=3; class Intel {}; };
   if($p.HasExited){throw 'Game exited before actual-world source/placement witness'}
   $text=if(Test-Path -LiteralPath $log){Get-Content -LiteralPath $log -Raw -ErrorAction SilentlyContinue}else{''}
   if($text){
+   $sourceRefusal=[regex]::Match($text,
+    'Retail actual-world source refused: reason=(?<reason>[A-Za-z0-9_]+) shapeBirth=[1-9][0-9]* scope=ordinary-world-kept')
+   if($sourceRefusal.Success){throw ('Actual selected retail source refused: '+$sourceRefusal.Groups['reason'].Value)}
    $sourceMatch=[regex]::Match($text,$sourcePattern)
    if($sourceMatch.Success){
     $placementPattern='Retail actual-world placement queued: shapeBirth='+$sourceMatch.Groups['birth'].Value+

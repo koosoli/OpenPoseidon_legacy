@@ -79,6 +79,10 @@ TEST_CASE("Projection admits known conservative surface algorithms with exact ve
     auto different=input.binding;different.certificateAlgorithmVersion=1;
     CHECK(PS::Build(input,different,input.cut,result)==PS::Status::IdentityMismatch);
     input.binding.certificateAlgorithmVersion=3;
+    REQUIRE(PS::Build(input,input.binding,input.cut,result)==PS::Status::Bounded);
+    different=input.binding;different.certificateAlgorithmVersion=2;
+    CHECK(PS::Build(input,different,input.cut,result)==PS::Status::IdentityMismatch);
+    input.binding.certificateAlgorithmVersion=4;
     CHECK(PS::Build(input,input.binding,input.cut,result)==PS::Status::Invalid);
 }
 TEST_CASE("Off-axis perspective depth sensitivity affine scale and rotations remain conservatively bounded", "[geometry-page-projected-surface-bound]")

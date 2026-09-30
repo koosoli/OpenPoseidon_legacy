@@ -33,7 +33,7 @@ struct SelectedCutArtifact
 };
 struct Certificate
 {
-    static constexpr uint32_t AlgorithmVersion = 2;
+    static constexpr uint32_t AlgorithmVersion = 3;
     HierarchicalIdentity identity;
     SourceIdentity originalSource;
     // Descriptor of this authenticated GHP codec/packing, not a legacy GCD
@@ -187,42 +187,162 @@ inline bool Append(const HierarchicalPayload& cluster,ExportedMesh& mesh)
     mesh.materials.insert(mesh.materials.end(),cluster.indices.size()/3,0);
     return true;
 }
-// For one source triangle, choose a SINGLE closed target triangle. Each source
-// corner may choose a different vertex of that target triangle. Applying the
-// source barycentric weights to those anchors gives a point inside that same
-// target triangle, and convexity bounds every distance by the maximum corner
-// distance. Taking a minimum over complete target triangles remains an upper
-// bound. Independent nearest anchors across different target triangles would
-// not have this property (their convex hull can span holes).
-// This optional refinement consumes only remaining visits; the independently
-// completed single-anchor baseline remains valid if the refinement budget ends.
+// An integer barycentric grid covers the entire CLOSED source triangle with
+// smaller closed triangles. A source grid point and its chosen target anchor
+// are evaluated as outward double intervals: no float-rounded point is ever
+// silently treated as lying on a surface. The target anchor uses quantized
+// nonnegative dyadic barycentric weights summing to one. All three anchors for
+// one source subtriangle belong to the SAME target triangle. Convexity then
+// bounds the whole subtriangle by its maximum corner distance. The heuristic
+// projection only chooses weights; it is never numerical authority.
+using Interval=SurfaceCertificate::Detail::Interval;
+struct DyadicPoint {std::array<Interval,3> axis{};std::array<double,3> estimate{};};
+inline Interval IntervalSum(Interval a,Interval b)
+{
+    using namespace SurfaceCertificate::Detail;
+    return {a.lo==-b.lo?0:Down(Add(a.lo,b.lo)),
+        a.hi==-b.hi?0:Up(Add(a.hi,b.hi))};
+}
+inline bool Dyadic(const ExportedMesh& mesh,size_t triangle,unsigned denominator,
+    unsigned b,unsigned c,DyadicPoint& out)
+{
+    if(!denominator||(denominator&(denominator-1))||b>denominator||c>denominator-b)return false;
+    const unsigned weights[]{denominator-b-c,b,c};
+    for(unsigned axis=0;axis<3;++axis) {
+        Interval value{};double estimate=0;
+        for(unsigned corner=0;corner<3;++corner) {
+            const auto& vertex=mesh.vertices[mesh.indices[triangle+corner]];
+            const double coordinate=axis==0?vertex.pos.X():axis==1?vertex.pos.Y():vertex.pos.Z();
+            const double weight=double(weights[corner])/denominator; // exact power-of-two fraction
+            value=IntervalSum(value,SurfaceCertificate::Detail::Product({coordinate,coordinate},{weight,weight}));
+            estimate+=coordinate*weight; // heuristic only
+        }
+        if(!std::isfinite(value.lo)||!std::isfinite(value.hi)||!std::isfinite(estimate))return false;
+        out.axis[axis]=value;out.estimate[axis]=estimate;
+    }
+    return true;
+}
+inline bool Anchor(const ExportedMesh& target,size_t triangle,const DyadicPoint& source,DyadicPoint& out)
+{
+    constexpr unsigned denominator=256;
+    const auto position=[&](unsigned corner,unsigned axis) {
+        const auto& v=target.vertices[target.indices[triangle+corner]].pos;
+        return double(axis==0?v.X():axis==1?v.Y():v.Z());
+    };
+    std::array<double,3> a{},u{},v{},p{};
+    for(unsigned axis=0;axis<3;++axis) {
+        a[axis]=position(0,axis);u[axis]=position(1,axis)-a[axis];
+        v[axis]=position(2,axis)-a[axis];p[axis]=source.estimate[axis]-a[axis];
+    }
+    const auto dot=[](const auto& x,const auto& y) {
+        return x[0]*y[0]+x[1]*y[1]+x[2]*y[2];
+    };
+    const double uu=dot(u,u),uv=dot(u,v),vv=dot(v,v),up=dot(u,p),vp=dot(v,p);
+    const double determinant=uu*vv-uv*uv;
+    double s=0,t=0;
+    if(std::isfinite(determinant)&&determinant>0) {
+        s=(vv*up-uv*vp)/determinant;t=(uu*vp-uv*up)/determinant;
+        if(!std::isfinite(s)||!std::isfinite(t))s=t=0;
+    }
+    s=std::clamp(s,0.0,1.0);t=std::clamp(t,0.0,1.0-s);
+    const auto b=unsigned(std::round(s*denominator));
+    const auto c=std::min(denominator-b,unsigned(std::round(t*denominator)));
+    return Dyadic(target,triangle,denominator,b,c,out);
+}
+inline bool IntervalDistanceUpper(const DyadicPoint& a,const DyadicPoint& b,double& out)
+{
+    using namespace SurfaceCertificate::Detail;
+    double sum=0;
+    for(unsigned axis=0;axis<3;++axis) {
+        const auto difference=Difference(a.axis[axis],b.axis[axis]);
+        double magnitude=std::max(std::abs(difference.lo),std::abs(difference.hi));
+        if(!std::isfinite(magnitude))return false;
+        if(magnitude==0)continue;
+        // Artificial interval ulps around exact zero may be subnormal; this
+        // larger normal floor prevents DAZ/square underflow from reducing an
+        // upper bound. Real dyadic positions in this float domain are normal.
+        magnitude=std::max(magnitude,1e-150);
+        sum=Up(Add(sum,Up(Mul(magnitude,magnitude))));
+    }
+    if(!std::isfinite(sum)||sum<0)return false;
+    if(sum==0){out=0;return true;}
+    volatile double root=std::sqrt(sum);double radius=root;
+    if(!std::isfinite(radius)||radius<=0)return false;
+    for(unsigned repair=0;repair<8;++repair) {
+        if(Down(Mul(radius,radius))>=sum){out=radius;return true;}
+        radius=Up(radius);
+    }
+    return false;
+}
+inline double BoxLower(const DyadicPoint& source,const ExportedMesh& target,size_t triangle)
+{
+    double lower=0;
+    for(unsigned axis=0;axis<3;++axis) {
+        double minimum=std::numeric_limits<double>::infinity(),maximum=-minimum;
+        for(unsigned corner=0;corner<3;++corner) {
+            const auto& v=target.vertices[target.indices[triangle+corner]].pos;
+            const double coordinate=axis==0?v.X():axis==1?v.Y():v.Z();
+            minimum=std::min(minimum,coordinate);maximum=std::max(maximum,coordinate);
+        }
+        using namespace SurfaceCertificate::Detail;
+        if(source.axis[axis].hi<minimum)
+            lower=std::max(lower,std::max(0.0,Down(Sub(minimum,source.axis[axis].hi))));
+        else if(source.axis[axis].lo>maximum)
+            lower=std::max(lower,std::max(0.0,Down(Sub(source.axis[axis].lo,maximum))));
+    }
+    return lower; // max-axis distance is a LOWER Euclidean distance bound
+}
+// Each completed grid level is a global bound. If the visit cap interrupts a
+// candidate, retain the previous completed level (or the v1 baseline).
 inline Status RefineDirected(const ExportedMesh& from,const ExportedMesh& target,
     uint64_t cap,uint64_t& visits,double& bound)
 {
-    double refined=0;
-    for(size_t triangle=0;triangle<from.indices.size();triangle+=3) {
-        double best=bound;
-        for(size_t candidate=0;candidate<target.indices.size();candidate+=3) {
-            if(cap-visits<9)return Status::Certified; // Preserve the complete baseline.
-            double maximum=0;
-            for(unsigned corner=0;corner<3;++corner) {
-                double nearest=std::numeric_limits<double>::infinity();
-                for(unsigned anchor=0;anchor<3;++anchor) {
-                    ++visits;double distance=0;
-                    if(!SurfaceCertificate::Detail::DistanceUpper(
-                        from.vertices[from.indices[triangle+corner]],
-                        target.vertices[target.indices[candidate+anchor]],distance))
-                        return Status::Unsupported;
-                    nearest=std::min(nearest,distance);
-                }
-                maximum=std::max(maximum,nearest);
-            }
-            best=std::min(best,maximum);
-            if(best==0)break;
+    if(bound==0||visits>=cap)return Status::Certified;
+    if(from.indices==target.indices&&from.vertices.size()==target.vertices.size()) {
+        bool same=true;
+        for(auto index:from.indices)for(unsigned axis=0;axis<3;++axis) {
+            const auto& a=from.vertices[index].pos;const auto& b=target.vertices[index].pos;
+            const float x=axis==0?a.X():axis==1?a.Y():a.Z();
+            const float y=axis==0?b.X():axis==1?b.Y():b.Z();
+            if(std::bit_cast<uint32_t>(x)!=std::bit_cast<uint32_t>(y))same=false;
         }
-        refined=std::max(refined,best);
+        if(same){bound=0;return Status::Certified;}
     }
-    bound=refined;
+    for(unsigned grid:{2u,4u,8u,16u,32u,64u,128u,256u}) {
+        double level=0;
+        for(size_t triangle=0;triangle<from.indices.size();triangle+=3)
+            for(unsigned i=0;i<grid;++i)for(unsigned j=0;j<grid-i;++j)
+                for(unsigned half=0;half<(i+j+1<grid?2u:1u);++half) {
+                    const std::array<std::array<unsigned,2>,3> vertices=half==0?
+                        std::array<std::array<unsigned,2>,3>{{{i,j},{i+1,j},{i,j+1}}}:
+                        std::array<std::array<unsigned,2>,3>{{{i+1,j},{i+1,j+1},{i,j+1}}};
+                    std::array<DyadicPoint,3> source{};
+                    for(unsigned corner=0;corner<3;++corner)
+                        if(!Dyadic(from,triangle,grid,vertices[corner][0],vertices[corner][1],source[corner]))
+                            return Status::Certified;
+                    double best=bound;
+                    for(size_t candidate=0;candidate<target.indices.size()&&best>0;candidate+=3) {
+                        if(visits>=cap)return Status::Certified;
+                        ++visits; // Charge even a pruned target triangle.
+                        if(BoxLower(source[0],target,candidate)>=best)continue;
+                        double maximum=0;
+                        for(unsigned corner=0;corner<3;++corner) {
+                            if(visits>=cap)return Status::Certified;
+                            ++visits;
+                            DyadicPoint anchor{};double distance=0;
+                            if(!Anchor(target,candidate,source[corner],anchor)||
+                               !IntervalDistanceUpper(source[corner],anchor,distance))
+                            {maximum=std::numeric_limits<double>::infinity();break;}
+                            maximum=std::max(maximum,distance);
+                            if(maximum>=best)break;
+                        }
+                        best=std::min(best,maximum);
+                    }
+                    level=std::max(level,best);
+                    if(level>=bound)return Status::Certified;
+                }
+        bound=level;
+    }
     return Status::Certified;
 }
 inline Status Distance(const ExportedMesh& root,const ExportedMesh& fine,Limits limits,Certificate& result)

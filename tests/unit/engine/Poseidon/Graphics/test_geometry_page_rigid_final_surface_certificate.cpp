@@ -16,6 +16,18 @@ ExportedMesh Triangle(float height=0)
     }
     mesh.indices={0,1,2};mesh.materials={0};return mesh;
 }
+ExportedMesh Square(bool oppositeDiagonal,float height=0)
+{
+    ExportedMesh mesh;
+    for(auto xyz:{Position{0,0,height},Position{100,0,height},
+                  Position{100,100,height},Position{0,100,height}}) {
+        SVertex vertex{};vertex.pos=Vector3P(xyz.x,xyz.y,xyz.z);
+        mesh.vertices.push_back(vertex);mesh.positions.push_back(xyz);
+    }
+    mesh.indices=oppositeDiagonal?std::vector<uint32_t>{0,1,3,1,2,3}:
+        std::vector<uint32_t>{0,1,2,0,2,3};
+    mesh.materials={0,0};return mesh;
+}
 // Actual-codec producer DTO, intentionally not a claim about a live Shape.
 RigidOdol7FinalExport CurvedFinal()
 {
@@ -96,6 +108,30 @@ TEST_CASE("Closed target triangle witnesses distinguish surface error from trian
     disconnected.indices={0,1,2,3,4,5};disconnected.materials={0,0};certificate={};
     REQUIRE(Cert::Detail::Distance(original,disconnected,{},certificate)==Cert::Status::Certified);
     CHECK(certificate.rootToFine>99);
+}
+
+TEST_CASE("Dyadic surface witness tightens identical differently triangulated planes and preserves shifts",
+          "[geometry-page-rigid-final-surface]")
+{
+    const auto first=Square(false),second=Square(true);
+    Cert::Certificate same;
+    REQUIRE(Cert::Detail::Distance(first,second,{},same)==Cert::Status::Certified);
+    CHECK(same.hausdorffUpper>=0);
+    CHECK(same.hausdorffUpper<1); // v2's vertex-only closed-triangle bound was >100.
+    CHECK(same.distanceVisits<=Cert::Limits{}.distanceVisits);
+    const auto raised=Square(true,2);
+    Cert::Certificate shifted;
+    REQUIRE(Cert::Detail::Distance(first,raised,{},shifted)==Cert::Status::Certified);
+    CHECK(shifted.hausdorffUpper>=2);
+    CHECK(shifted.hausdorffUpper<3);
+    Cert::Detail::DyadicPoint refused{};
+    CHECK_FALSE(Cert::Detail::Dyadic(first,0,3,1,1,refused)); // non-dyadic weights lack exact division
+    // A stopped candidate or subdivision level must leave the already valid
+    // global baseline, never publish a partly evaluated lower estimate.
+    uint64_t visits=0;double baseline=1000;
+    REQUIRE(Cert::Detail::RefineDirected(first,second,1,visits,baseline)==Cert::Status::Certified);
+    CHECK(visits==1);
+    CHECK(baseline==1000);
 }
 
 TEST_CASE("Actual decoded GHP Root and Fine have an immutable selected-surface witness",
