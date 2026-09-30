@@ -2,6 +2,7 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/Foundation/Algorithms/Sha256.hpp>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
+#include <Poseidon/IO/Streams/RetailRigidAssetProfile.hpp>
 #include <array>
 #include <algorithm>
 #include <atomic>
@@ -30,16 +31,20 @@ class ModelCompressedSourceBirth
     inline static thread_local unsigned Depth=0;
     std::shared_ptr<const Ticket> _ticket;
     ModelCompressedSourceBirth(std::shared_ptr<const BankCompressedReadRequest> source,
-        std::array<uint8_t,32> digest,uint64_t token,std::shared_ptr<const Ticket> ticket)
+        std::array<uint8_t,32> digest,uint64_t token,std::shared_ptr<const Ticket> ticket,
+        const RetailRigidAssetProfile::Profile& profile)
         :_ticket(std::move(ticket)),lease(std::move(source)),decodedSha256(digest),
-         decodedBytes(lease->DecodedBytes()),logicalName("data3d\\skala_new.p3d"),readScopeToken(token){}
+         decodedBytes(lease->DecodedBytes()),logicalName(profile.modelLogicalPath),
+         readScopeToken(token),profileId(profile.id){}
     static std::shared_ptr<const ModelCompressedSourceBirth> Capture(
         BankCompressedReadRequest source,std::span<const char> actual)
     {
-        if(!ReadScope::Active()||!source.Encoded().HasArchiveIdentity()||actual.empty()||
+        const auto* profile=RetailRigidAssetProfile::Selected();
+        if(!profile||!ReadScope::Active()||!source.Encoded().HasArchiveIdentity()||actual.empty()||
            actual.size()!=source.DecodedBytes()||actual.size()>BankCompressedReadRequest::MaxDecodedBytes||
            source.Encoded().bytes>BankCompressedReadRequest::MaxEncodedBytes||
-           source.CanonicalMember()!="skala_new.p3d")return {};
+           !profile->MatchesModelMember(source.CanonicalMember())||
+           !profile->MatchesModelArchive(source.Encoded().archive))return {};
         try {
             const uint64_t bytes=sizeof(ModelCompressedSourceBirth)+sizeof(BankCompressedReadRequest)+
                 sizeof(Ticket)+source.Encoded().archive.capacity()+source.CanonicalMember().capacity()+
@@ -64,7 +69,7 @@ class ModelCompressedSourceBirth
                 if(a<0||b<0)return {};raw[i]=uint8_t((a<<4)|b);}
             auto lease=std::make_shared<const BankCompressedReadRequest>(std::move(source));
             return std::shared_ptr<const ModelCompressedSourceBirth>(
-                new ModelCompressedSourceBirth(std::move(lease),raw,CurrentToken,std::move(ticket)));
+                new ModelCompressedSourceBirth(std::move(lease),raw,CurrentToken,std::move(ticket),*profile));
         }catch(...){return {};}
     }
 public:
@@ -75,23 +80,24 @@ public:
     const uint32_t decodedBytes;
     const std::string logicalName;
     const uint64_t readScopeToken;
+    const RetailRigidAssetProfile::Id profileId;
     class ReadScope
     {
         uint64_t _previous=0;bool _entered=false;
     public:
-        static bool Enabled(){const char* e=std::getenv("WGR_GEOMETRY_PAGE_RETAIL_COLD_SOURCE");return e&&std::strcmp(e,"1")==0;}
+        static bool Enabled(){const char* e=std::getenv("WGR_GEOMETRY_PAGE_RETAIL_COLD_SOURCE");
+            return e&&std::strcmp(e,"1")==0&&RetailRigidAssetProfile::Selected()!=nullptr;}
         static bool MatchesLogicalName(const char* name)
         {
-            constexpr char expected[]="data3d\\skala_new.p3d";
             if(!name)return false;
-            for(size_t i=0;i<sizeof(expected);++i){char c=name[i];
-                if(c=='/')c='\\';if(c>='A'&&c<='Z')c=char(c-'A'+'a');
-                if(c!=expected[i])return false;if(!c)return true;}
-            return false;
+            const auto* candidate=RetailRigidAssetProfile::ByModelPath(name);
+            return candidate&&candidate==RetailRigidAssetProfile::Selected();
         }
         explicit ReadScope(const char* exactLogicalName)
         {
-            if(!MatchesLogicalName(exactLogicalName)||!Enabled()||!Foundation::IsMainThread()||Depth>=8)return;
+            if(!exactLogicalName||!RetailRigidAssetProfile::ByModelPath(exactLogicalName)||
+               !Enabled()||!MatchesLogicalName(exactLogicalName)||
+               !Foundation::IsMainThread()||Depth>=8)return;
             uint64_t next=NextToken.load();
             do{if(!next||next==UINT64_MAX)return;}while(!NextToken.compare_exchange_weak(next,next+1));
             _previous=CurrentToken;CurrentToken=next;++Depth;_entered=true;
@@ -103,10 +109,14 @@ public:
     };
     bool Valid() const
     {
+        const auto* profile=RetailRigidAssetProfile::ById(profileId);
         return _ticket&&lease&&readScopeToken&&readScopeToken!=UINT64_MAX&&decodedBytes&&
             decodedBytes<=BankCompressedReadRequest::MaxDecodedBytes&&decodedBytes==lease->DecodedBytes()&&
-            lease->Encoded().HasArchiveIdentity()&&lease->CanonicalMember()=="skala_new.p3d"&&
-            logicalName=="data3d\\skala_new.p3d"&&
+            profile&&profile==RetailRigidAssetProfile::Selected()&&
+            lease->Encoded().HasArchiveIdentity()&&
+            profile->MatchesModelMember(lease->CanonicalMember())&&
+            profile->MatchesModelArchive(lease->Encoded().archive)&&
+            profile->MatchesModelPath(logicalName)&&
             std::any_of(decodedSha256.begin(),decodedSha256.end(),[](auto b){return b!=0;});
     }
     uint64_t KnownCppBytes() const{return _ticket?_ticket->bytes:0;}

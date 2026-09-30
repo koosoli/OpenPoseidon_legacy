@@ -9660,9 +9660,9 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
         static bool used=false;if(used)return failure;used=true;
         try {
             Ref<Texture> privatePrimary=new TextureWgpu(_wbank);
-            privatePrimary->SetName(R"(data\skala_piskovec2.pac)");
+            privatePrimary->SetName(RigidOdol7OwnerDetail::PrimaryPac);
             auto* privateTexture=static_cast<TextureWgpu*>(privatePrimary.GetRef());
-            {ArchiveSourceBinding::RetailPacReadScope scope(R"(data3d\skala_new.p3d)");
+            {ArchiveSourceBinding::RetailPacReadScope scope(RigidOdol7OwnerDetail::ModelPath);
                 if(!privateTexture->InitRetailPacSource()){failure.pageWorkState="RetailPrivateInitRefused";return failure;}}
             render::ColdPaaRead beforeCapture;
             if(!privateTexture->CaptureRetailPacRead(beforeCapture)){failure.pageWorkState="RetailPrivateReadRefused";return failure;}
@@ -15785,7 +15785,10 @@ void EngineWgpu::PrepareRetailWorldSource(LODShapeWithShadow* shape)
             if (primary.GetRef() != section.properties.GetTexture()) throw reason;
             ++visual;
         }
-        if (visual != 4 || !primary) throw reason;
+        const auto* asset = RetailRigidAssetProfile::Selected();
+        if (!asset || !asset->MatchesModelPath(source->logicalName) ||
+            visual != asset->visualLevels || !primary ||
+            !asset->MatchesTexturePath(primary->Name())) throw reason;
         auto* texture = static_cast<TextureWgpu*>(primary.GetRef());
         reason = "ActualPrimaryInitUnknownOrWarm";
         render::ColdPaaRead read;

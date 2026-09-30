@@ -204,6 +204,18 @@ struct EngineWgpu::RetailWorldVisibleState
     std::chrono::steady_clock::time_point lastAutoObservation{};
     uint64_t lastAutoFrameGeneration = 0;
     bool autoEnabled = false;
+    // One connected residency cycle only. Resource history/model slots keep
+    // their existing finite lifetime; no IDs or retired receipts are recycled.
+    enum class Residence : uint8_t { Disabled, Both, RetiringFine, RootOnly,
+        RestoringForRefill, Refilling, RetakingFine, Complete, Cancelled };
+    Residence residence = Residence::Disabled;
+    bool residencyEnabled = false;
+    uint64_t residencyTriggerCamera = 0, retirementRequest = 0, refillRequest = 0, fallbackCamera = 0;
+    uint64_t fallbackRequest = 0, fallbackPageBirth = 0, fallbackEpoch = 0, refillAtFallback = 0;
+    uint32_t fallbackOriginalFlags = UINT32_MAX;
+    bool fallbackPageAbsent = false, refillHandoff = false;
+    uint32_t residencyCycles = 0;
+    uint64_t autoObservationOffset = 0, autoRefineOffset = 0, autoCoarsenOffset = 0;
 };
 
 Engine::GeometryPageFixtureReport EngineWgpu::SnapshotRetailPageRecordPilot() const
@@ -664,10 +676,14 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
             (s.phase == RetailPagePilotState::Phase::Failed && !s.abortRequested)) return current();
         if (action == GeometryPageFixtureAction::ReleaseRetailRecords)
         {
+            const bool autoRelease = _retailWorldVisible &&
+                _retailWorldVisible->residencyEnabled &&
+                _retailWorldVisible->residence == RetailWorldVisibleState::Residence::RetiringFine;
             if (s.phase != RetailPagePilotState::Phase::FineReady || !r.retailRecordDistinctCuts ||
+                s.nonrootPages.empty() ||
                 (_retailWorldVisible &&
                  (_retailWorldVisible->phase != RetailWorldVisibleState::Phase::Root ||
-                  _retailWorldVisible->autoEnabled ||
+                  (_retailWorldVisible->autoEnabled && !autoRelease) ||
                   _retailWorldVisible->pair || _retailWorldVisible->cleanup ||
                   !r.retailWorldReturned)) ||
                 (s.visiblePhase != RetailPagePilotState::VisiblePhase::Dormant &&
@@ -715,6 +731,42 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
         }
         if (action == GeometryPageFixtureAction::RefillRetailRecords)
         {
+            if (const auto world = _retailWorldVisible; world && world->residencyEnabled)
+            {
+                // This bool is only a synchronous owner handoff. It does not
+                // authenticate a source or replace the returned/literal facts.
+                if (!world->refillHandoff || world->residence != RetailWorldVisibleState::Residence::Refilling ||
+                    world->phase != RetailWorldVisibleState::Phase::Restored || world->pair || world->cleanup ||
+                    world->invalidated || world->residencyCycles || !r.retailWorldRestored ||
+                    !r.retailWorldReturned || r.retailWorldPagePresent || !world->fallbackPageAbsent ||
+                    world->fallbackOriginalFlags != 0 || !world->fallbackRequest || !world->fallbackEpoch ||
+                    world->fallbackPageBirth != world->pageBirth || world->refillAtFallback != 0 ||
+                    !world->fallbackCamera || world->fallbackCamera != world->cameraGeneration)
+                    return refusal("RetailRefillConventionalHandoffRequired");
+                AcquireProducerWindow("retail world refill literal conventional rows");
+                const auto original = GetRetailWorldInstanceEvidence(world->originalProducer,
+                    world->originalModel,world->originalRenderer);
+                const auto page = GetRetailWorldInstanceEvidence(world->pageProducer,world->pageModel,world->pageRenderer);
+                WgrInstance expected = world->original; expected.model = world->originalModel.rendererModel;
+                const WgrInstance zero{};
+                if (!original.getterSucceeded || !page.getterSucceeded ||
+                    original.producerState != render::RetailWorldInstanceTransaction::ProducerState::Present ||
+                    original.consumerInstanceBirth != world->objectBirth ||
+                    original.consumerModelBirth != world->originalModel.modelBirth ||
+                    original.mappedRendererHandle != world->originalRenderer ||
+                    original.mappedRendererModel != world->originalModel.rendererModel ||
+                    original.cpu.status != WGR_INSTANCE_CPU_FACT_PRESENT ||
+                    original.cpu.queried_handle != world->originalRenderer ||
+                    original.cpu.instance_epoch < world->fallbackEpoch ||
+                    std::memcmp(&expected,&original.cpu.row,sizeof(expected)) ||
+                    page.producerState != render::RetailWorldInstanceTransaction::ProducerState::Unmapped ||
+                    page.consumerInstanceBirth || page.mappedRendererHandle ||
+                    page.cpu.status != WGR_INSTANCE_CPU_FACT_ABSENT ||
+                    page.cpu.queried_handle != world->pageRenderer || page.cpu.resolved_slot != UINT32_MAX ||
+                    page.cpu.instance_epoch != original.cpu.instance_epoch ||
+                    std::memcmp(&zero,&page.cpu.row,sizeof(zero)))
+                    return refusal("RetailRefillConventionalRowsChanged");
+            }
             if (s.phase != RetailPagePilotState::Phase::Released || !r.retailRecordDistinctCuts ||
                 s.refilled || !s.SourceCurrent() || s.history.size() >= Record::MaxMeshes ||
                 !s.worker || s.worker->Snapshot().reservedBytes)
@@ -1370,12 +1422,34 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         enabled("WGR_GEOMETRY_PAGE_RETAIL_VISIBLE"))
         return unavailable;
     const bool worldAuto = enabled("WGR_GEOMETRY_PAGE_RETAIL_WORLD_AUTO");
+    const bool worldResidency = worldAuto && enabled("WGR_GEOMETRY_PAGE_RETAIL_WORLD_RESIDENCY");
     auto pilot = _retailPagePilot;
     if (!pilot) return unavailable;
     auto& p = *pilot;
     auto& report = p.report;
     auto current = [&]() -> GeometryPageFixtureReport {
         p.RefreshWorkerReport();
+        if (_retailWorldVisible)
+        {
+            const auto& s = *_retailWorldVisible;
+            constexpr const char* names[] = {"Disabled","Both","RetiringFine","RootOnly",
+                "RestoringForRefill","Refilling","RetakingFine","Complete","Cancelled"};
+            report.retailWorldResidencyPhase = names[uint32_t(s.residence)];
+            report.retailWorldResidencyEnabled = s.residencyEnabled;
+            report.retailWorldResidencyCycles = s.residencyCycles;
+            report.retailWorldResidencyTriggerCamera = s.residencyTriggerCamera;
+            report.retailWorldRetirementRequest = s.retirementRequest;
+            report.retailWorldRefillRequest = s.refillRequest;
+            report.retailWorldFallbackCameraGeneration = s.fallbackCamera;
+            report.retailWorldFallbackRequest = s.fallbackRequest;
+            report.retailWorldFallbackPageBirth = s.fallbackPageBirth;
+            report.retailWorldFallbackInstanceEpoch = s.fallbackEpoch;
+            report.retailWorldFallbackOriginalFlags = s.fallbackOriginalFlags;
+            report.retailWorldFallbackPageAbsent = s.fallbackPageAbsent;
+            report.retailWorldRefillRequestAtFallback = s.refillAtFallback;
+            report.retailWorldConventionalFallback =
+                s.phase == RetailWorldVisibleState::Phase::Restored && report.retailWorldRestored;
+        }
         return report;
     };
     auto refuse = [&](const char* why) {
@@ -1508,6 +1582,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         }
         s.phase = restored ? RetailWorldVisibleState::Phase::Restored :
             RetailWorldVisibleState::Phase::Removed;
+        if (restored && s.residence == RetailWorldVisibleState::Residence::RestoringForRefill)
+            s.fallbackCamera = s.cameraGeneration; // exact successful joined Restore receipt, not a desired pose
         s.autoEnabled = false; s.autoPolicy.reset();
         report.retailWorldAutoEnabled = false;
         s.pair.reset(); s.cleanup.reset();
@@ -1618,6 +1694,94 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         report.pageWorkState = "RetailWorldInvalidationRemoveQueued";
         return true;
     };
+    auto cancelResidency = [&](RetailWorldVisibleState& s) {
+        s.residencyEnabled = false;
+        s.residence = RetailWorldVisibleState::Residence::Cancelled;
+        s.autoEnabled = false; s.autoPolicy.reset();
+        report.retailWorldAutoEnabled = false;
+        AcquireProducerWindow("retail world residency cancellation");
+        if (_retailWorldStableFrame)
+        {
+            _retailWorldStableFrame->Invalidate();
+            _retailWorldStableFrame.reset();
+        }
+        // Cancellation does not forgive the actual worker's active/reservation
+        // debt, erase staged history, or release the trusted owned GHP file.
+        if (p.worker) p.worker->Cancel(report.pageEpoch);
+    };
+    auto retakeFine = [&](RetailWorldVisibleState& s) -> bool {
+        if (!s.residencyEnabled || s.residence != RetailWorldVisibleState::Residence::Refilling ||
+            s.residencyCycles || s.phase != RetailWorldVisibleState::Phase::Restored ||
+            s.pair || s.cleanup || s.invalidated || s.modelRetained || !report.retailWorldRestored ||
+            !report.retailWorldReturned || report.retailWorldPagePresent || !p.refilled ||
+            p.phase != RetailPagePilotState::Phase::FineReady || p.observation || !cut(3) ||
+            !sourceCurrent(s) || !p.worker || !serial(_nextRetailWorldPageBirth) ||
+            _nextRetailWorldPageBirth >= UINT64_MAX - 1) return false;
+        const auto debt = p.worker->Snapshot();
+        if (debt.liveJobs || debt.queued || debt.active || debt.ready || debt.reservedBytes) return false;
+        AcquireProducerWindow("retail world refill fine takeover preflight");
+        if (!sourceCurrent(s) || GetRetailWorldConsumerBirth(s.originalProducer) != s.objectBirth)
+            return false;
+        const auto normal = _gpuModels.find(s.normalShape.GetRef());
+        if (normal == _gpuModels.end() || normal->second != s.originalModel.producerModel ||
+            model(normal->second) != s.originalModel) return false;
+        const auto refs = _gpuModelRefs.find(s.normalShape.GetRef());
+        if (refs != _gpuModelRefs.end() && refs->second == UINT32_MAX) return false;
+        const auto literal = GetRetailWorldInstanceEvidence(s.originalProducer,s.originalModel,s.originalRenderer);
+        WgrInstance expected = s.original; expected.model = s.originalModel.rendererModel;
+        if (!literal.getterSucceeded || literal.producerState != Pair::ProducerState::Present ||
+            literal.consumerInstanceBirth != s.objectBirth || literal.consumerModelBirth != s.originalModel.modelBirth ||
+            literal.mappedRendererHandle != s.originalRenderer || literal.mappedRendererModel != s.originalModel.rendererModel ||
+            literal.cpu.status != WGR_INSTANCE_CPU_FACT_PRESENT ||
+            std::memcmp(&expected,&literal.cpu.row,sizeof(expected))) return false;
+        // Reuse the already charged bounded owner state. The old page slot was
+        // released ONLY by the exact returned Restore absence receipt.
+        RetailWorldVisibleState next = s;
+        if (_nextInstanceHandle == UINT32_MAX) return false;
+        next.pageProducer = _nextInstanceHandle++; // new finite-pilot producer, not the released old free-list cell
+        next.pageBirth = _nextRetailWorldPageBirth; next.pageRenderer = 0;
+        next.pageModel = model(p.models[3]);
+        next.page = s.original; next.page.model = p.models[3];
+        next.page.flags = WGR_INSTANCE_MAIN_CAMERA_ONLY;
+        next.pendingSlot = 3; next.cleanupAttempts = 0;
+        next.residence = RetailWorldVisibleState::Residence::RetakingFine;
+        const auto ticket = nextRequest();
+        if (!ticket || next.pageModel.producerModel == UINT32_MAX)
+        { ReleaseRetailInstanceHandle(next.pageProducer); return false; }
+        Pair::Request request; request.binding = binding(next,ticket);
+        request.action = Pair::Action::Takeover;
+        request.originalBefore = row(next.originalModel,next.original);
+        auto hidden = next.original; hidden.flags = WGR_INSTANCE_OTHER_VIEWS_ONLY;
+        request.originalAfter = row(next.originalModel,hidden);
+        request.pageAfter = row(next.pageModel,next.page);
+        request.originalRendererHandle = next.originalRenderer;
+        request.previousCameraGeneration = next.cameraGeneration;
+        bool queued = false;
+        try
+        {
+            RetainGpuModel(next.normalShape.GetRef()); next.modelRetained = true;
+            queued = queue(next,request);
+        }
+        catch (...)
+        {
+            if (next.modelRetained) ReleaseGpuModel(next.normalShape.GetRef());
+            ReleaseRetailInstanceHandle(next.pageProducer); throw;
+        }
+        if (!queued)
+        {
+            ReleaseGpuModel(next.normalShape.GetRef());
+            ReleaseRetailInstanceHandle(next.pageProducer); return false;
+        }
+        ++_nextRetailWorldPageBirth;
+        next.phase = RetailWorldVisibleState::Phase::AwaitTakeover;
+        s = std::move(next);
+        report.retailWorldRestored = false; report.retailWorldPageBirth = s.pageBirth;
+        report.retailWorldPageInstance = s.pageProducer; report.retailWorldPageModel = s.pageModel.producerModel;
+        report.retailWorldPageRenderer = UINT32_MAX;
+        report.retailWorldPhase = "AwaitRefilledFineTakeover";
+        report.pageWorkState = "RetailWorldRefilledFineTakeoverQueued";
+        return true;
+    };
     try
     {
         if (action == GeometryPageFixtureAction::BeginRetailWorldVisible)
@@ -1650,8 +1814,11 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
                 3 * (sizeof(Cleanup) + sizeof(InstanceOp) + 128);
             const uint64_t autoReservation = worldAuto ?
                 sizeof(render::RetailWorldStableFrameObservation) + 128 : 0;
-            if (report.knownPayloadBytes > RetailLimit ||
-                reservation + autoReservation > RetailLimit - report.knownPayloadBytes)
+            constexpr uint64_t abortReserve = (Record::MaxMeshes + Record::MaxModels + 1) *
+                sizeof(ResourceOp) + sizeof(Record) + 256;
+            constexpr uint64_t workingLimit = RetailLimit - abortReserve;
+            if (report.knownPayloadBytes > workingLimit ||
+                reservation + autoReservation > workingLimit - report.knownPayloadBytes)
                 return refuse("RetailWorldInstanceCapacity");
             AcquireProducerWindow("retail world original model and row");
             const auto normal = _gpuModels.find(source->shape.GetRef());
@@ -1767,6 +1934,13 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
             if (!policyBinding.Valid()) return refuse("RetailWorldAutoBindingInvalid");
             s.autoPolicy.emplace(policyBinding);
             s.autoEnabled = true;
+            s.autoObservationOffset = s.autoRefineOffset = s.autoCoarsenOffset = 0;
+            if (worldResidency && s.residence == RetailWorldVisibleState::Residence::Disabled &&
+                !p.refilled && !p.nonrootPages.empty())
+            {
+                s.residencyEnabled = true;
+                s.residence = RetailWorldVisibleState::Residence::Both;
+            }
             s.lastAutoObservation = {};
             s.lastAutoFrameGeneration = 0;
             if (!armStable(s))
@@ -1784,8 +1958,18 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         }
         if (action == GeometryPageFixtureAction::StopRetailWorldVisible)
         {
-            if (!s.autoEnabled) return refuse("RetailWorldAutoNotFollowing");
+            if (!s.autoEnabled && !s.residencyEnabled) return refuse("RetailWorldAutoNotFollowing");
             AcquireProducerWindow("retail world stable frame stop");
+            if (s.residencyEnabled)
+            {
+                cancelResidency(s);
+                if (!s.pair && !s.cleanup && !s.invalidated &&
+                    (s.phase == RetailWorldVisibleState::Phase::Root ||
+                     s.phase == RetailWorldVisibleState::Phase::Fine))
+                    return StepRetailWorldVisible(GeometryPageFixtureAction::RestoreRetailWorldVisible);
+                report.pageWorkState = "RetailWorldResidencyStoppedPendingCleanup";
+                return current();
+            }
             s.autoEnabled = false;
             s.autoPolicy.reset();
             if (_retailWorldStableFrame)
@@ -1802,8 +1986,14 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         }
         if (action == GeometryPageFixtureAction::PollRetailWorldVisible)
         {
-            if (s.phase == RetailWorldVisibleState::Phase::Restored ||
-                s.phase == RetailWorldVisibleState::Phase::Removed) return current();
+            if (s.residence == RetailWorldVisibleState::Residence::Cancelled &&
+                p.phase == RetailPagePilotState::Phase::Aborted &&
+                (s.phase == RetailWorldVisibleState::Phase::Restored ||
+                 s.phase == RetailWorldVisibleState::Phase::Removed)) return current();
+            if ((s.phase == RetailWorldVisibleState::Phase::Restored ||
+                 s.phase == RetailWorldVisibleState::Phase::Removed) &&
+                !s.residencyEnabled && s.residence != RetailWorldVisibleState::Residence::Cancelled)
+                return current();
             if (!sourceCurrent(s)) s.invalidated = true;
             AcquireProducerWindow("retail world selected birth poll");
             if (GetRetailWorldConsumerBirth(s.originalProducer) != s.objectBirth)
@@ -1815,6 +2005,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
             }
             if (s.invalidated)
             {
+                if (s.residencyEnabled) cancelResidency(s);
                 s.autoEnabled = false; s.autoPolicy.reset();
                 report.retailWorldAutoEnabled = false;
             }
@@ -1858,7 +2049,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
                     s.pair.reset();
                     if (request.action == Pair::Action::Takeover)
                     {
-                        s.selectedSlot = 2;
+                        s.selectedSlot = s.pendingSlot;
                         s.pageModel = request.pageAfter.model;
                         s.page = request.pageAfter.row;
                         AcquireProducerWindow("retail world rejected takeover evidence");
@@ -1879,6 +2070,18 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
                 report.retailWorldReturned = true;
                 if (request.action == Pair::Action::Restore)
                 {
+                    if (s.residence == RetailWorldVisibleState::Residence::RestoringForRefill)
+                    {
+                        // The immutable consumed Restore receipt has checked
+                        // actual original0 and exact historical page ABSENT in
+                        // this returned frame. Retain its proof across refill.
+                        s.fallbackRequest = snapshot.binding.requestId;
+                        s.fallbackPageBirth = snapshot.binding.pageInstanceBirth;
+                        s.fallbackEpoch = snapshot.instanceEpoch;
+                        s.fallbackOriginalFlags = request.originalAfter.row.flags;
+                        s.fallbackPageAbsent = true;
+                        s.refillAtFallback = s.refillRequest;
+                    }
                     finishAbsent(s,true);
                     return current();
                 }
@@ -1906,15 +2109,125 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
                 report.retailWorldSelectedTriangles = uint32_t(triangles);
                 report.hierarchySelectedTriangles = uint32_t(triangles);
                 report.retailWorldPhase = s.selectedSlot == 1 ? "Root" : "Fine";
+                // The returned pair certifies literal rows, not continued source
+                // authority. A source change while its queue was in flight must
+                // never publish Ready or restore an old placement via a new pair.
+                if (s.invalidated || !sourceCurrent(s))
+                {
+                    s.invalidated = true;
+                    s.phase = RetailWorldVisibleState::Phase::Failed;
+                    cancelResidency(s);
+                    cleanup(s);
+                    return fail("RetailWorldReturnedSourceInvalidated");
+                }
                 report.status = GeometryReportStatus::Ready;
                 report.pageWorkState = "RetailWorldPairReturned";
+                if (s.residence == RetailWorldVisibleState::Residence::RetakingFine)
+                {
+                    if (s.selectedSlot != 3 || !s.residencyEnabled || !sourceCurrent(s))
+                    {
+                        cancelResidency(s);
+                        s.phase = RetailWorldVisibleState::Phase::Failed;
+                        cleanup(s);
+                        return fail("RetailWorldRefillTakeoverAuthorityRefused");
+                    }
+                    s.residencyCycles = 1;
+                    s.residence = RetailWorldVisibleState::Residence::Complete;
+                    s.autoObservationOffset = report.retailWorldAutoObservations;
+                    s.autoRefineOffset = report.retailWorldAutoRefines;
+                    s.autoCoarsenOffset = report.retailWorldAutoCoarsens;
+                    s.autoPolicy.emplace(GeometryPages::HierarchicalBinaryDemand::Binding{
+                        s.surface->certificate->identity,s.ownerEpoch,s.sourceEpoch,s.pageEpoch,s.shapeBirth});
+                    s.autoEnabled = true;
+                    s.lastAutoObservation = {}; s.lastAutoFrameGeneration = 0;
+                    report.retailWorldAutoEnabled = true;
+                    report.pageWorkState = "RetailWorldRefilledFineReturned";
+                }
                 if (s.autoEnabled && !s.invalidated && !armStable(s))
                     return fail("RetailWorldStableFrameArmRefused");
             }
             if (s.invalidated)
             {
+                if (s.phase == RetailWorldVisibleState::Phase::Restored ||
+                    s.phase == RetailWorldVisibleState::Phase::Removed)
+                {
+                    StepRetailPageRecordPilot(GeometryPageFixtureAction::AbortRetailRecords);
+                    StepRetailPageRecordPilot(GeometryPageFixtureAction::PollRetailRecords);
+                    return current();
+                }
                 if (!cleanup(s)) return fail("RetailWorldInvalidatedPageQuarantined");
                 return current();
+            }
+            using Residence = RetailWorldVisibleState::Residence;
+            if (s.residence == Residence::Cancelled)
+            {
+                if (s.phase == RetailWorldVisibleState::Phase::Restored ||
+                    s.phase == RetailWorldVisibleState::Phase::Removed)
+                {
+                    StepRetailPageRecordPilot(GeometryPageFixtureAction::AbortRetailRecords);
+                    StepRetailPageRecordPilot(GeometryPageFixtureAction::PollRetailRecords);
+                    return current();
+                }
+                if (!s.pair && !s.cleanup &&
+                    (s.phase == RetailWorldVisibleState::Phase::Root ||
+                     s.phase == RetailWorldVisibleState::Phase::Fine))
+                    return StepRetailWorldVisible(GeometryPageFixtureAction::RestoreRetailWorldVisible);
+                if (!s.pair && !s.cleanup && s.phase == RetailWorldVisibleState::Phase::Failed)
+                {
+                    if (!cleanup(s)) return fail("RetailWorldCancelledPageQuarantined");
+                    return current();
+                }
+                return current();
+            }
+            if (s.residence == Residence::RetiringFine || s.residence == Residence::RootOnly ||
+                s.residence == Residence::RestoringForRefill || s.residence == Residence::Refilling)
+            {
+                // Pending record packets and worker jobs keep their immutable
+                // actual owners. No per-frame bake, direct disk read or GPU probe.
+                if (p.phase != RetailPagePilotState::Phase::Released &&
+                    p.phase != RetailPagePilotState::Phase::FineReady)
+                {
+                    const auto progressed = StepRetailPageRecordPilot(GeometryPageFixtureAction::PollRetailRecords);
+                    if (progressed.status == GeometryReportStatus::Failed ||
+                        progressed.status == GeometryReportStatus::Invalid)
+                    {
+                        cancelResidency(s);
+                        if (s.phase == RetailWorldVisibleState::Phase::Root)
+                            return StepRetailWorldVisible(GeometryPageFixtureAction::RestoreRetailWorldVisible);
+                        return fail("RetailWorldRefillFailedConventionalFallback");
+                    }
+                }
+                if (s.residence == Residence::RetiringFine && p.phase == RetailPagePilotState::Phase::Released)
+                    s.residence = Residence::RootOnly;
+                if (s.residence == Residence::RestoringForRefill &&
+                    s.phase == RetailWorldVisibleState::Phase::Restored &&
+                    p.phase == RetailPagePilotState::Phase::Released)
+                {
+                    if (!serial(s.fallbackCamera) || s.fallbackCamera != s.cameraGeneration ||
+                        !report.retailWorldRestored || !report.retailWorldReturned || report.retailWorldPagePresent)
+                    { cancelResidency(s); return fail("RetailWorldRefillMissingConventionalAck"); }
+                    s.residence = Residence::Refilling;
+                    s.refillHandoff = true;
+                    struct HandoffReset { bool& value; ~HandoffReset() { value = false; } } handoff{s.refillHandoff};
+                    const auto requested = StepRetailPageRecordPilot(GeometryPageFixtureAction::RefillRetailRecords);
+                    if (requested.status != GeometryReportStatus::Pending)
+                    { cancelResidency(s); return fail("RetailWorldRefillRequestRefusedConventionalFallback"); }
+                    s.refillRequest = 0; // filled only when the actual one-page job is admitted
+                    return current();
+                }
+                if (s.residence == Residence::Refilling)
+                {
+                    if (p.workerRequest) s.refillRequest = p.workerRequest;
+                    if (p.phase == RetailPagePilotState::Phase::FineReady)
+                    {
+                        if (!retakeFine(s))
+                        { cancelResidency(s); return fail("RetailWorldRefilledTakeoverRefusedConventionalFallback"); }
+                    }
+                    return current();
+                }
+                // Root stable camera observations continue during retirement;
+                // a near/Unknown demand may restore immediately, before its ACK.
+                if (s.phase == RetailWorldVisibleState::Phase::Restored) return current();
             }
             if (s.autoEnabled && s.autoPolicy && !s.pair && !s.cleanup &&
                 (s.phase == RetailWorldVisibleState::Phase::Fine ||
@@ -1928,6 +2241,18 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
                     if (uncertain) {
                         report.retailWorldProjectedBounded = false;
                         report.retailWorldForcedFine = true;
+                    }
+                    if (s.residencyEnabled &&
+                        (s.residence == Residence::RetiringFine || s.residence == Residence::RootOnly))
+                    {
+                        // A camera may teleport; prefetch cannot guarantee a
+                        // valid coarse discrepancy throughout disk latency.
+                        // Keep original rendering while the complete Fine cut
+                        // is rebuilt, rather than selecting missing triangles.
+                        s.residence = Residence::RestoringForRefill;
+                        s.autoEnabled = false; s.autoPolicy.reset();
+                        report.retailWorldAutoEnabled = false;
+                        return StepRetailWorldVisible(GeometryPageFixtureAction::RestoreRetailWorldVisible);
                     }
                     const auto changed = StepRetailWorldVisible(GeometryPageFixtureAction::FineRetailWorldVisible);
                     if (changed.status == GeometryReportStatus::Pending) return changed;
@@ -2045,9 +2370,14 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
                     projected.euclideanPixelUpper > allowance;
                 const auto decision = s.autoPolicy->Observe(observation);
                 const auto counters = s.autoPolicy->Stats();
-                report.retailWorldAutoObservations = counters.observations;
-                report.retailWorldAutoRefines = std::max(report.retailWorldAutoRefines,counters.refine);
-                report.retailWorldAutoCoarsens = std::max(report.retailWorldAutoCoarsens,counters.coarsen);
+                const auto total = [](uint64_t base,uint64_t value) {
+                    return value > UINT64_MAX-base ? UINT64_MAX : base+value;
+                };
+                report.retailWorldAutoObservations = total(s.autoObservationOffset,counters.observations);
+                report.retailWorldAutoRefines = std::max(report.retailWorldAutoRefines,
+                    total(s.autoRefineOffset,counters.refine));
+                report.retailWorldAutoCoarsens = std::max(report.retailWorldAutoCoarsens,
+                    total(s.autoCoarsenOffset,counters.coarsen));
                 // Keep the last satisfied three-frame coarsen witness visible
                 // after Policy resets its internal consecutive counter.
                 report.retailWorldSafeRootObservations = std::max(
@@ -2062,6 +2392,27 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
                         GeometryPageFixtureAction::RootRetailWorldVisible);
                 if (decision == HierarchicalBinaryDemand::Decision::Refused &&
                     root) return requireFine();
+                if (root && bounded && projected.euclideanPixelUpper <= Binary::CoarsenAllowance &&
+                    s.residencyEnabled && s.residence == Residence::Both && !s.residencyCycles &&
+                    p.phase == RetailPagePilotState::Phase::FineReady && !p.refilled &&
+                    !p.nonrootPages.empty() && !p.observation && !s.pair && !s.cleanup)
+                {
+                    // Only a fresh successful Root frame with its own joined
+                    // certified bound authorizes retirement. The older Fine
+                    // coarsen decision alone is not enough after camera motion.
+                    s.residencyTriggerCamera = stable.camera.generation;
+                    s.residence = Residence::RetiringFine;
+                    const auto released = StepRetailPageRecordPilot(GeometryPageFixtureAction::ReleaseRetailRecords);
+                    if (released.status != GeometryReportStatus::Pending)
+                    {
+                        // Nothing was retired; preserve complete Fine and stop
+                        // this finite attempt rather than retrying allocations.
+                        s.residencyEnabled = false; s.residence = Residence::Disabled;
+                        return refuse("RetailWorldFineRetirementNotAdmitted");
+                    }
+                    s.retirementRequest = report.requestId;
+                    return current();
+                }
             }
             return current();
         }
@@ -2072,6 +2423,14 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
             !sourceCurrent(s) || !report.retailWorldReturned ||
             !report.retailWorldPagePresent)
             return refuse("RetailWorldCutUnavailable");
+        if (action == GeometryPageFixtureAction::FineRetailWorldVisible && s.residencyEnabled &&
+            (s.residence == RetailWorldVisibleState::Residence::RetiringFine ||
+             s.residence == RetailWorldVisibleState::Residence::RootOnly))
+        {
+            s.residence = RetailWorldVisibleState::Residence::RestoringForRefill;
+            s.autoEnabled = false; s.autoPolicy.reset(); report.retailWorldAutoEnabled = false;
+            return StepRetailWorldVisible(GeometryPageFixtureAction::RestoreRetailWorldVisible);
+        }
         uint32_t slot = UINT32_MAX;
         if (action == GeometryPageFixtureAction::RootRetailWorldVisible) slot = 1;
         else if (action == GeometryPageFixtureAction::FineRetailWorldVisible)
@@ -2083,6 +2442,9 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
             return refuse("RetailWorldCutNotReady");
         if (action == GeometryPageFixtureAction::RestoreRetailWorldVisible &&
             !ready(s.selectedSlot)) return refuse("RetailWorldRestoreModelUnavailable");
+        if (action == GeometryPageFixtureAction::RestoreRetailWorldVisible && s.residencyEnabled &&
+            s.residence != RetailWorldVisibleState::Residence::RestoringForRefill)
+            cancelResidency(s); // explicit restore/stop ends this finite residency objective
         AcquireProducerWindow("retail world cut model");
         const uint64_t ticket = nextRequest();
         if (!ticket) return refuse("RetailWorldRequestExhausted");

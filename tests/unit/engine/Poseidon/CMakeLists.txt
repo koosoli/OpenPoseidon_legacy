@@ -12,6 +12,7 @@ endif()
 set(POSEIDON_CORE_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Graphics/test_retail_page_instance_observation.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_compressed_model_source_birth.cpp
+    ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_retail_rigid_asset_profile.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Graphics/test_geometry_page_rigid_odol7_cold_world_candidate.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Graphics/test_retail_world_instance_transaction.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Graphics/test_retail_world_stable_frame_observation.cpp

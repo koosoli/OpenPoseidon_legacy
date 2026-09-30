@@ -70,6 +70,17 @@ TEST_CASE("Projected selected-surface bound uses actual row-memory camera conver
     const auto center=Project(input,{0,0,0});CHECK(center[0]==640);CHECK(center[1]==360);
     const auto side=Project(input,{1,0,0});CHECK(side[0]>center[0]);
 }
+
+TEST_CASE("Projection admits known conservative surface algorithms with exact version binding", "[geometry-page-projected-surface-bound]")
+{
+    auto input=ProjectionInput();PS::Result result;
+    input.binding.certificateAlgorithmVersion=2;
+    REQUIRE(PS::Build(input,input.binding,input.cut,result)==PS::Status::Bounded);
+    auto different=input.binding;different.certificateAlgorithmVersion=1;
+    CHECK(PS::Build(input,different,input.cut,result)==PS::Status::IdentityMismatch);
+    input.binding.certificateAlgorithmVersion=3;
+    CHECK(PS::Build(input,input.binding,input.cut,result)==PS::Status::Invalid);
+}
 TEST_CASE("Off-axis perspective depth sensitivity affine scale and rotations remain conservatively bounded", "[geometry-page-projected-surface-bound]")
 {
     auto centered=ProjectionInput();PS::Result base;

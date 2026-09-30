@@ -1313,6 +1313,7 @@ bool IsBuildingPilotNormal(const char* prefix, const char* member)
 thread_local unsigned ModelReadDepth = 0; // numeric owner-purpose nesting only; no retained resources
 thread_local unsigned MaterialPreflightDepth = 0; // owner-only nested stage intent; no names or resources
 thread_local unsigned RetailPacReadDepth = 0; // exact selected model only; no retained resources
+thread_local std::array<const RetailRigidAssetProfile::Profile*,8> RetailPacReadProfiles{};
 thread_local unsigned TenementPaaDepth = 0;
 thread_local unsigned TenementPaaIdentities = 0;
 thread_local bool TenementPaaIdentityOverflow = false;
@@ -1334,39 +1335,37 @@ bool ArchiveSourceBinding::RetailPacReadScope::Enabled()
         const char* value = std::getenv("WGR_GEOMETRY_PAGE_RETAIL_SOURCE");
         return value && std::strcmp(value, "1") == 0;
     }();
-    return enabled;
+    return enabled && RetailRigidAssetProfile::Selected()!=nullptr;
 }
 bool ArchiveSourceBinding::RetailPacReadScope::Active()
 {
-    return Enabled() && Foundation::IsMainThread() && RetailPacReadDepth != 0;
+    return Enabled() && Foundation::IsMainThread() && RetailPacReadDepth != 0 &&
+        RetailPacReadProfiles[RetailPacReadDepth-1]==RetailRigidAssetProfile::Selected();
 }
 ArchiveSourceBinding::RetailPacReadScope::RetailPacReadScope(const char* exactModelPath)
 {
-    if (Enabled() && Foundation::IsMainThread() && RetailPacReadDepth < 8 &&
-        PatnikArchiveReason::Matches(R"(data3d\skala_new.p3d)", exactModelPath))
-    { ++RetailPacReadDepth; _entered = true; }
+    const auto* profile=RetailRigidAssetProfile::Selected();
+    if (Enabled() && profile && Foundation::IsMainThread() && RetailPacReadDepth < 8 &&
+        exactModelPath && profile->MatchesModelPath(exactModelPath))
+    { RetailPacReadProfiles[RetailPacReadDepth++]=profile; _entered = true; }
 }
 ArchiveSourceBinding::RetailPacReadScope::~RetailPacReadScope()
 {
-    if (_entered) --RetailPacReadDepth;
+    if (_entered) RetailPacReadProfiles[--RetailPacReadDepth]=nullptr;
 }
 bool ArchiveSourceBinding::RetailPacReadScope::MatchesLogicalName(const char* name)
 {
-    return Active() && PatnikArchiveReason::Matches(R"(data\skala_piskovec2.pac)", name);
+    return Active() && name && RetailPacReadProfiles[RetailPacReadDepth-1]->MatchesTexturePath(name);
 }
 bool ArchiveSourceBinding::RetailPacReadScope::MatchesBankMember(
     const char* bankPath, const char* prefix, const char* member)
 {
-    if (!Active() || !PatnikArchiveReason::Matches(R"(data\)", prefix) ||
-        !PatnikArchiveReason::Matches("skala_piskovec2.pac", member)) return false;
-    constexpr std::string_view suffix = R"(DTA\data.pbo)";
+    if (!Active() || !bankPath || !prefix || !member ||
+        !PatnikArchiveReason::Matches(R"(data\)", prefix) ||
+        !RetailPacReadProfiles[RetailPacReadDepth-1]->MatchesTextureMember(member)) return false;
     const size_t length = PatnikArchiveReason::BoundedLength(bankPath);
-    if (length == 8192 || length < suffix.size()) return false;
-    if (length > suffix.size() && bankPath[length - suffix.size() - 1] != '/' &&
-        bankPath[length - suffix.size() - 1] != '\\') return false;
-    for (size_t i = 0; i < suffix.size(); ++i)
-        if (!PatnikArchiveReason::Same(bankPath[length - suffix.size() + i], suffix[i])) return false;
-    return true;
+    return length != 8192 && RetailPacReadProfiles[RetailPacReadDepth-1]->MatchesTextureArchive(
+        std::string_view(bankPath,length));
 }
 
 bool TenementPhysicalPaaScope::Enabled()

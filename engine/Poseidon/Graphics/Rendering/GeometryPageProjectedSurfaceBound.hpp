@@ -79,7 +79,9 @@ inline bool Mul(Interval a,Interval b,Interval& out){
 }
 inline bool NonzeroHash(const std::array<uint8_t,32>& bytes){for(auto b:bytes)if(b)return true;return false;}
 inline bool BoundIdentity(const Binding& b){
-    if(b.certificateAlgorithmVersion!=1||!NonzeroHash(b.originalSource.sourceSha256)||
+    // Version1: single surface anchor. Version2: closed-triangle convex witness.
+    // Both supply an authenticated conservative distance, with exact binding.
+    if((b.certificateAlgorithmVersion!=1&&b.certificateAlgorithmVersion!=2)||!NonzeroHash(b.originalSource.sourceSha256)||
        !NonzeroHash(b.selectedKey.source.sourceSha256)||!NonzeroHash(b.coarsePackedSha256)||!NonzeroHash(b.finePackedSha256)||
        !b.originalSource.producerVersion||!b.originalSource.vertexLayout||!b.originalSource.materialMapping||
        b.originalSource.coarseRepresentation==b.originalSource.fineRepresentation||

@@ -3326,6 +3326,15 @@ class Engine : public IGraphicsEngine
         uint64_t retailWorldStableFrameGeneration=0,retailWorldAutoObservations=0;
         uint64_t retailWorldAutoRefines=0,retailWorldAutoCoarsens=0;
         double retailWorldProjectedUpper=0,retailWorldSurfaceUpper=0;
+        bool retailWorldResidencyEnabled=false,retailWorldConventionalFallback=false;
+        uint32_t retailWorldResidencyCycles=0;
+        uint64_t retailWorldResidencyTriggerCamera=0,retailWorldRetirementRequest=0,retailWorldRefillRequest=0;
+        uint64_t retailWorldFallbackCameraGeneration=0;
+        uint64_t retailWorldFallbackRequest=0,retailWorldFallbackPageBirth=0,retailWorldFallbackInstanceEpoch=0;
+        uint64_t retailWorldRefillRequestAtFallback=0;
+        uint32_t retailWorldFallbackOriginalFlags=UINT32_MAX;
+        bool retailWorldFallbackPageAbsent=false;
+        std::string retailWorldResidencyPhase;
         uint32_t retailVisibleReferenceSourceLevel=UINT32_MAX,retailVisibleReferenceTriangles=0;
         uint64_t retailVisibleCameraGeneration=0;
         bool retailFineTriangleSetExact=false;

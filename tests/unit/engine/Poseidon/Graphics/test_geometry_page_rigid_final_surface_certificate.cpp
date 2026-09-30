@@ -7,6 +7,15 @@ namespace Cert=Poseidon::GeometryPages::RigidFinalSurface;
 
 namespace
 {
+ExportedMesh Triangle(float height=0)
+{
+    ExportedMesh mesh;
+    for(auto xyz:{Position{0,0,height},Position{100,0,height},Position{0,100,height}}) {
+        SVertex vertex{};vertex.pos=Vector3P(xyz.x,xyz.y,xyz.z);
+        mesh.vertices.push_back(vertex);mesh.positions.push_back(xyz);
+    }
+    mesh.indices={0,1,2};mesh.materials={0};return mesh;
+}
 // Actual-codec producer DTO, intentionally not a claim about a live Shape.
 RigidOdol7FinalExport CurvedFinal()
 {
@@ -57,6 +66,36 @@ HierarchicalCutPlan Plan(const RigidFinalHierarchyProduct& product,float thresho
     REQUIRE(plan.state==HierarchicalCutState::RequestedCut);
     return plan;
 }
+}
+
+TEST_CASE("Closed target triangle witnesses distinguish surface error from triangle diameter",
+          "[geometry-page-rigid-final-surface]")
+{
+    const auto original=Triangle();Cert::Certificate certificate;
+    REQUIRE(Cert::Detail::Distance(original,original,{},certificate)==Cert::Status::Certified);
+    CHECK(certificate.hausdorffUpper==0);
+    const auto raised=Triangle(2);certificate={};
+    REQUIRE(Cert::Detail::Distance(original,raised,{},certificate)==Cert::Status::Certified);
+    CHECK(certificate.hausdorffUpper>=2);
+    CHECK(certificate.hausdorffUpper<2.000001);
+    // A bounded optional refinement may not turn incomplete work into a lower bound.
+    certificate={};Cert::Limits budget;budget.distanceVisits=12;
+    REQUIRE(Cert::Detail::Distance(original,raised,budget,certificate)==Cert::Status::Certified);
+    CHECK(certificate.distanceVisits<=12);
+    CHECK(certificate.hausdorffUpper>100);
+    // Disconnected target triangles cannot use anchors from different components
+    // to certify their intervening empty space as a surface.
+    auto disconnected=Triangle();
+    for(auto& v:disconnected.vertices)v.pos=Vector3P(v.pos.X()*.001f,v.pos.Y()*.001f,0);
+    for(unsigned i=0;i<3;++i) {
+        auto vertex=disconnected.vertices[i];vertex.pos=Vector3P(vertex.pos.X()+100,vertex.pos.Y(),0);
+        disconnected.vertices.push_back(vertex);
+    }
+    disconnected.positions.clear();
+    for(const auto& v:disconnected.vertices)disconnected.positions.push_back({v.pos.X(),v.pos.Y(),v.pos.Z()});
+    disconnected.indices={0,1,2,3,4,5};disconnected.materials={0,0};certificate={};
+    REQUIRE(Cert::Detail::Distance(original,disconnected,{},certificate)==Cert::Status::Certified);
+    CHECK(certificate.rootToFine>99);
 }
 
 TEST_CASE("Actual decoded GHP Root and Fine have an immutable selected-surface witness",

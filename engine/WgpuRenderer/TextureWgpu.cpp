@@ -28,6 +28,7 @@
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Foundation/Algorithms/Sha256.hpp>
 #include <Poseidon/IO/Streams/PatnikArchiveReason.hpp>
+#include <Poseidon/IO/Streams/RetailRigidAssetProfile.hpp>
 
 #include <Poseidon/Graphics/Textures/Bc3Encoder.hpp>
 
@@ -1228,12 +1229,15 @@ bool TextureWgpu::InitRetailPacSource()
 bool TextureWgpu::CaptureRetailPacRead(render::ColdPaaRead& out) const
 {
     out = render::ColdPaaRead{};
-    if (!ArchiveSourceBinding::RetailPacReadScope::Enabled() || !Foundation::IsMainThread() ||
-        !PatnikArchiveReason::Matches(R"(data\skala_piskovec2.pac)", SourceName()) ||
+    const auto* profile = RetailRigidAssetProfile::Selected();
+    const char* sourceName = SourceName();
+    if (!profile || !ArchiveSourceBinding::RetailPacReadScope::Enabled() ||
+        !Foundation::IsMainThread() || !sourceName || !profile->MatchesTexturePath(sourceName) ||
         _gpuHandle || _uploadTried || _dynamic || _tintDelegate || _cpuTintView || !_src ||
         _nMipmaps <= 0 || _nMipmaps > 7 || _src->GetFormat() != PacDXT1) return false;
     auto source = CurrentArchiveSourceBinding();
-    if (!source || source->Request().bytes > render::RetailPacPrepared::MaxSourceBytes) return false;
+    if (!source || !profile->MatchesTextureArchive(source->Request().archive) ||
+        source->Request().bytes > render::RetailPacPrepared::MaxSourceBytes) return false;
     render::ColdPaaRead candidate;
     candidate.key = SourceName();
     candidate.source = std::move(source);

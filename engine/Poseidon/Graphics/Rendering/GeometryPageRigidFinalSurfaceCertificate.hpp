@@ -33,7 +33,7 @@ struct SelectedCutArtifact
 };
 struct Certificate
 {
-    static constexpr uint32_t AlgorithmVersion = 1;
+    static constexpr uint32_t AlgorithmVersion = 2;
     HierarchicalIdentity identity;
     SourceIdentity originalSource;
     // Descriptor of this authenticated GHP codec/packing, not a legacy GCD
@@ -187,6 +187,44 @@ inline bool Append(const HierarchicalPayload& cluster,ExportedMesh& mesh)
     mesh.materials.insert(mesh.materials.end(),cluster.indices.size()/3,0);
     return true;
 }
+// For one source triangle, choose a SINGLE closed target triangle. Each source
+// corner may choose a different vertex of that target triangle. Applying the
+// source barycentric weights to those anchors gives a point inside that same
+// target triangle, and convexity bounds every distance by the maximum corner
+// distance. Taking a minimum over complete target triangles remains an upper
+// bound. Independent nearest anchors across different target triangles would
+// not have this property (their convex hull can span holes).
+// This optional refinement consumes only remaining visits; the independently
+// completed single-anchor baseline remains valid if the refinement budget ends.
+inline Status RefineDirected(const ExportedMesh& from,const ExportedMesh& target,
+    uint64_t cap,uint64_t& visits,double& bound)
+{
+    double refined=0;
+    for(size_t triangle=0;triangle<from.indices.size();triangle+=3) {
+        double best=bound;
+        for(size_t candidate=0;candidate<target.indices.size();candidate+=3) {
+            if(cap-visits<9)return Status::Certified; // Preserve the complete baseline.
+            double maximum=0;
+            for(unsigned corner=0;corner<3;++corner) {
+                double nearest=std::numeric_limits<double>::infinity();
+                for(unsigned anchor=0;anchor<3;++anchor) {
+                    ++visits;double distance=0;
+                    if(!SurfaceCertificate::Detail::DistanceUpper(
+                        from.vertices[from.indices[triangle+corner]],
+                        target.vertices[target.indices[candidate+anchor]],distance))
+                        return Status::Unsupported;
+                    nearest=std::min(nearest,distance);
+                }
+                maximum=std::max(maximum,nearest);
+            }
+            best=std::min(best,maximum);
+            if(best==0)break;
+        }
+        refined=std::max(refined,best);
+    }
+    bound=refined;
+    return Status::Certified;
+}
 inline Status Distance(const ExportedMesh& root,const ExportedMesh& fine,Limits limits,Certificate& result)
 {
     if(!Platform())return Status::Unsupported;
@@ -202,6 +240,10 @@ inline Status Distance(const ExportedMesh& root,const ExportedMesh& fine,Limits 
         limits.distanceVisits,result.distanceVisits,result.rootToFine);
     if(reverse!=SurfaceCertificate::Status::Certified)
         return reverse==SurfaceCertificate::Status::Capacity?Status::Capacity:Status::Unsupported;
+    const auto halfway=result.distanceVisits+(limits.distanceVisits-result.distanceVisits)/2;
+    if(RefineDirected(fine,root,halfway,result.distanceVisits,result.fineToRoot)!=Status::Certified ||
+       RefineDirected(root,fine,limits.distanceVisits,result.distanceVisits,result.rootToFine)!=Status::Certified)
+        return Status::Unsupported;
     result.hausdorffUpper=std::max(result.fineToRoot,result.rootToFine);
     if(!std::isfinite(result.hausdorffUpper)||result.hausdorffUpper>10000)return Status::Unsupported;
     return Status::Certified;

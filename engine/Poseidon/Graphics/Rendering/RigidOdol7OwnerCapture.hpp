@@ -2,6 +2,7 @@
 #include <Poseidon/Graphics/Rendering/GeometryPageRigidOdol7FinalShape.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/IO/Streams/PatnikArchiveReason.hpp>
+#include <Poseidon/IO/Streams/RetailRigidAssetProfile.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
@@ -22,19 +23,26 @@ inline RigidOdol7OwnerCaptureStatus PrepareRigidOdol7OwnerCapture(
     RigidOdol7OwnerCapture& out,const Ref<Texture>* privatePrimary=nullptr);
 namespace RigidOdol7OwnerDetail
 {
-inline constexpr char ModelPath[]="data3d\\skala_new.p3d";
-inline constexpr char ModelMember[]="skala_new.p3d";
-inline constexpr char PrimaryPac[]="data\\skala_piskovec2.pac";
+// Paths select a bounded diagnostic profile; mounted leases and actual parsed
+// bytes remain the authority. Invalid startup selection disables all capture.
+inline const RetailRigidAssetProfile::Profile& Metadata()
+{
+    const auto* selected=RetailRigidAssetProfile::Selected();
+    return selected?*selected:*RetailRigidAssetProfile::ById(RetailRigidAssetProfile::Id::SkalaNew);
+}
+inline const char* const ModelPath=Metadata().modelLogicalPath.data();
+inline const char* const ModelMember=Metadata().modelMember.data();
+inline const char* const PrimaryPac=Metadata().primaryTexturePath.data();
 inline bool Enabled()
 {
     const char* value=std::getenv("WGR_GEOMETRY_PAGE_RETAIL_SOURCE");
-    return value && std::strcmp(value,"1")==0;
+    return value && std::strcmp(value,"1")==0 && RetailRigidAssetProfile::Selected();
 }
 // Explicit native-bank diagnostic selection, not the global ModelCache/VFS
 // precedence rule. No loose override, mount alias or failed open is followed.
 inline QFBank* ResolveBank()
 {
-    if(!Foundation::IsMainThread() || !GUseFileBanks)return nullptr;
+    if(!RetailRigidAssetProfile::Selected() || !Foundation::IsMainThread() || !GUseFileBanks)return nullptr;
     auto* bank=QIFStreamB::AutoBank(ModelPath);
     if(!bank || !RigidOdol7FinalDetail::SamePath((const char*)bank->GetPrefix(),"data3d\\"))return nullptr;
     const char* name=bank->GetOpenName();

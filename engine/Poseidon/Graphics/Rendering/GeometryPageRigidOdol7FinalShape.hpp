@@ -5,6 +5,7 @@
 #include <Poseidon/Graphics/Rendering/Shape/PreparedGpuSectionClassification.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/ResumableModelAdmission.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/IO/Streams/RetailRigidAssetProfile.hpp>
 #include <Poseidon/World/MapTypes.hpp>
 
 namespace Poseidon::GeometryPages
@@ -78,7 +79,9 @@ inline bool SourceCurrent(const RigidOdol7Candidate& candidate,const RigidOdol7F
     return hash && candidate.source.decodedBytes && candidate.source.decodedBytes<=128*1024 &&
         hold.lease && hold.bank && hold.sourceAdmissionEpoch && hold.ownerEpoch && hold.modelBirth &&
         hold.sourceAdmissionEpoch!=UINT64_MAX && hold.ownerEpoch!=UINT64_MAX && hold.modelBirth!=UINT64_MAX &&
-        SamePath(leaf,"skala_new.p3d") && SamePath(leaf,hold.lease->CanonicalMember()) &&
+        RetailRigidAssetProfile::ByModelPath(candidate.source.canonicalPath) &&
+        RetailRigidAssetProfile::ByModelPath(candidate.source.canonicalPath)->MatchesModelMember(leaf) &&
+        SamePath(leaf,hold.lease->CanonicalMember()) &&
         hold.decodedSha256==candidate.source.decodedSha256 &&
         hold.lease->DecodedBytes()==candidate.source.decodedBytes &&
         hold.bank->MatchesMountedCompressedMember(hold.lease->CanonicalMember().c_str(),*hold.lease);

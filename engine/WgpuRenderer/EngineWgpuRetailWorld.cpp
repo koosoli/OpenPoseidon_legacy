@@ -51,6 +51,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::ProbeRetailColdWorldRecords()
 
     try
     {
+        const auto* asset = RetailRigidAssetProfile::Selected();
+        if (!asset) return refusal;
         const auto shape = _retailWorldSource->shape;
         const auto primary = _retailWorldSource->texture;
         const auto textureBirth = _retailWorldSource->textureBirth;
@@ -65,7 +67,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ProbeRetailColdWorldRecords()
             _retailWorldSource->placements == 0 || rawSha.size() != 64 ||
             uploadedSha.size() != 64 || rawSha.capacity() > 128 ||
             uploadedSha.capacity() > 128 ||
-            !PatnikArchiveReason::Matches(R"(data\skala_piskovec2.pac)", texture->SourceName()) ||
+            !PatnikArchiveReason::Matches(RigidOdol7OwnerDetail::PrimaryPac, texture->SourceName()) ||
             texture->GpuHandle() != handle || texture->SlotLease() != slot ||
             texture->IsDynamicTexture() || texture->HasAttemptedGpuUpload() == false)
             return refusal;
@@ -127,12 +129,13 @@ Engine::GeometryPageFixtureReport EngineWgpu::ProbeRetailColdWorldRecords()
         {
             WgpuTextureReuseOnlyBinding::Scope scope(reuse, true, true);
             exported = ExportRigidOdol7FinalShape(
-                *shape, snapshot.candidate, 1, 0, sourceHold, inspect, actual);
+                *shape, snapshot.candidate, asset->coarseSourceLod, asset->fineSourceLod, sourceHold, inspect, actual);
         }
         refusal.retailSourceExportStatus = uint32_t(exported);
         refusal.retailSourceExported = exported == RigidOdol7FinalStatus::Exported;
         refusal.retailSourceOtherPassesRequired = actual.requiresOriginalOtherPasses;
         if (!refusal.retailSourceExported || reuse.Read().failed ||
+            actual.actualNoShadow != asset->selectedNoShadow ||
             actual.modelBirth != shapeBirthId ||
             actual.shapeQueryRevision != snapshot.shapeQueryRevision)
         {
@@ -258,7 +261,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ProbeRetailColdWorldRecords()
             auto* t = static_cast<TextureWgpu*>(primary.GetRef());
             auto init = t ? t->CurrentArchiveSourceBinding() : nullptr;
             return init && init->Request().SameArchiveMember(textureBirth->Request()) &&
-                PatnikArchiveReason::Matches(R"(data\skala_piskovec2.pac)", t->SourceName()) &&
+                PatnikArchiveReason::Matches(RigidOdol7OwnerDetail::PrimaryPac, t->SourceName()) &&
                 t->GpuHandle() == handle && t->SlotLease() == slot;
         };
         admission.knownAuthorityBytes = sizeof(admission) + sizeof(current) +

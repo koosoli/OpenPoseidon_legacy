@@ -119,6 +119,11 @@ inline RigidOdol7ColdWorldStatus CaptureRigidOdol7ColdWorldCandidate(
         if (inspected == RigidOdol7Status::AllocationFailed) return Status::AllocationFailed;
         if (inspected == RigidOdol7Status::Unsupported) return Status::Unsupported;
         if (inspected != RigidOdol7Status::Candidate) return Status::InvalidSource;
+        const auto* asset=RetailRigidAssetProfile::Selected();
+        if (!asset || !asset->MatchesModelPath(source.canonicalPath) ||
+            result.candidate.visual.size()!=asset->visualLevels) return Status::Unsupported;
+        for(const auto& visual:result.candidate.visual)
+            if(!asset->MatchesTexturePath(visual.texturePath)) return Status::Unsupported;
         if (!RigidOdol7ColdWorldDetail::CandidateCapacityBytes(
                 result.candidate, result.knownCandidateCapacityBytes))
             return Status::Capacity;

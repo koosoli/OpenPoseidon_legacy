@@ -1723,3 +1723,55 @@ back to uncapped original Restore if required Fine cannot be queued. Stop/reset
 joins the render owner before touching the shared tracker. Existing selected
 triangle telemetry is now recomputed from actual cluster indices after ACK.
 Installed automatic near/far validation remains pending; all new gates default OFF.
+
+
+### 30 September — camera-bound refusal diagnosed; connected residency underway
+
+Installed e0 automatic run `world-autoe0-20260930-064844-f33d5e` failed its
+Root-selection expectation, normal exit0/no force. The surface was certified
+with upper15.501010m, but projected bounds stayed18–22px. Three negative-X
+test commands were accepted then clamped by Zeus to the same1600m WRP edge;
+three boundary warnings and unchanged returned bounds corroborate this.
+Commands returning OK did not prove the simulated camera retained that pose.
+The driver now uses distinct valid in-world poses. No threshold was relaxed.
+
+The original certificate's single target vertex for each whole source triangle
+was conservative but could report its diameter even for identical surfaces.
+Rigid certificate algorithm2 adds an optional closed-target-triangle convex
+witness: independently selected corner anchors MUST belong to one target
+triangle; their barycentric combination stays on that triangle. Completed
+single-anchor bounds remain valid if the bounded refinement work ends.
+Legacy certificate algorithm1 remains unchanged. Projection authenticates the
+exact known algorithm binding1/2 and rejects unknown3. Targeted checks passed
+2500 assertions/5 surface cases and7456/7 projection cases, including identical
+large triangles, a known2m shift, disconnected target components and budget
+exhaustion. An old binary initially ran the pre-edit direction assertion; its
+failure is preserved, the rebuilt suite passed.
+
+A two-name immutable profile catalog passed38 assertions/3 cases. Independent
+installed archive inspection found second candidate `data3d\skala2.p3d`: Cprs
+ODOL7 decoded24442bytes SHA b92d0490860e98ffde6dc2969a248d19512f2db3de332793750cb4f6fcb2dad2,
+visual77/55/33triangles, sole opaque raw DXT1 `data\piskovec.pac`. Profile metadata
+is not live source authority. Selected-profile parser-born source, current
+physical archive/PAC, actual final Shape and returned world evidence still
+require runtime validation. Invalid startup selections refuse capture.
+
+Connected automatic residency source is being built behind an additional
+default-off gate. It retires only independently admitted GHP Fine pages/model;
+original other-view geometry and diagnostic reference remain resident. A near
+or Unknown camera must restore original rendering before worker refill and
+perform a fresh Fine takeover only after complete model/history admission.
+The existing finite slots support one cycle, not an unlimited general streamer.
+Installed automatic selection/residency and second-asset validation are pending.
+Whole plan OPEN/defaultReady=false/performanceAccepted=false; no Nanite parity
+or net geometry-memory/performance gain has been accepted.
+
+Combined game/Core/Poseidon test build passed. Profile/source/surface checks
+passed2720 assertions/12 cases; projection/final-Shape checks7700/11; fresh
+retail-PAC-enabled source-binding checks44/2. An ungated PAC check correctly
+skipped its enabled-only case, and the initially requested `[retail-pac]` tag
+matched no cases; neither is counted as enabled PAC validation. Independent
+review found world reservation consuming abort headroom and stale refilled
+ACK publication risks; these and a manual-refill ordering bypass are being
+repaired before commit/deployment. Durable consumed-Restore facts replace
+racy transient-frame sampling in the residency driver.

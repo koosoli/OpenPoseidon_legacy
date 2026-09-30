@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/IO/Streams/ModelCompressedSourceBirth.hpp>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <thread>
@@ -35,22 +36,25 @@ std::vector<char> Encoded(std::span<const char> bytes)
 struct ColdArchive
 {
     std::filesystem::path root,directory,file;QFBank bank;
-    ColdArchive(const std::vector<char>& bytes,int codec=CompMagic,bool trailing=false)
+    ColdArchive(const std::vector<char>& bytes,int codec=CompMagic,bool trailing=false,
+        const char* member="skala_new.p3d",const char* archiveDirectory="DTA")
     {
         Foundation::CaptureMainThread();
         static std::atomic<uint32_t> serial{0};
         root=std::filesystem::canonical(std::filesystem::temp_directory_path());
         directory=root/("cold-model-birth-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+
             "-"+std::to_string(++serial));
-        REQUIRE(std::filesystem::create_directory(directory));file=directory/"data3d.pbo";
+        REQUIRE(std::filesystem::create_directory(directory));
+        REQUIRE(std::filesystem::create_directory(directory/archiveDirectory));
+        file=directory/archiveDirectory/"data3d.pbo";
         auto encoded=codec==CompMagic?Encoded(bytes):bytes;if(trailing)encoded.push_back('!');
         std::ofstream out(file,std::ios::binary);REQUIRE(bool(out));
-        constexpr char member[]="skala_new.p3d";out.write(member,sizeof(member));
+        out.write(member,std::streamsize(std::strlen(member)+1));
         for(int value:{codec,int(bytes.size()),0,0,int(encoded.size())})out.write(reinterpret_cast<const char*>(&value),4);
         const char end=0;const int zero=0;out.write(&end,1);
         for(int i=0;i<5;++i)out.write(reinterpret_cast<const char*>(&zero),4);
         out.write(encoded.data(),std::streamsize(encoded.size()));out.close();REQUIRE(bool(out));
-        REQUIRE(bank.open(RString((directory/"data3d").string().c_str())));
+        REQUIRE(bank.open(RString((file.parent_path()/"data3d").string().c_str())));
         bank.SetPrefix("data3d\\");bank.Lock();
     }
     ~ColdArchive()
@@ -59,7 +63,9 @@ struct ColdArchive
         std::error_code error;const auto resolved=std::filesystem::canonical(directory,error);
         if(error||resolved!=directory||resolved.parent_path()!=root||
            resolved.filename().string().rfind("cold-model-birth-",0)!=0)return;
-        std::filesystem::remove(file,error);std::filesystem::remove(directory,error);
+        std::filesystem::remove(file,error);error.clear();
+        std::filesystem::remove(file.parent_path(),error);error.clear();
+        std::filesystem::remove(directory,error);
     }
 };
 }
@@ -135,12 +141,18 @@ TEST_CASE("Disabled, unscoped, foreign and unsupported reads stay unknown withou
         REQUIRE_FALSE(foreign.Active());REQUIRE_FALSE(compressed.bank.Read("skala_new.p3d")->GetCompressedModelSourceBirth());
     }
     ColdArchive raw(bytes,0),tail(bytes,CompMagic,true),oversized(std::vector<char>(128*1024+1,'b'));
+    ColdArchive otherProfile(bytes,CompMagic,false,"skala2.p3d");
+    ColdArchive wrongArchive(bytes,CompMagic,false,"skala_new.p3d","Other");
     ModelCompressedSourceBirth::ReadScope scope("data3d\\skala_new.p3d");
     for(auto* archive:{&raw,&tail,&oversized}) {
         auto read=archive->bank.Read("skala_new.p3d");REQUIRE(read);REQUIRE_FALSE(read->GetCompressedModelSourceBirth());
     }
     compressed.bank.SetPrefix("other\\");
     REQUIRE_FALSE(compressed.bank.Read("skala_new.p3d")->GetCompressedModelSourceBirth());
+    auto crossed=otherProfile.bank.Read("skala2.p3d");REQUIRE(crossed);
+    REQUIRE_FALSE(crossed->GetCompressedModelSourceBirth());
+    auto wrongMount=wrongArchive.bank.Read("skala_new.p3d");REQUIRE(wrongMount);
+    REQUIRE_FALSE(wrongMount->GetCompressedModelSourceBirth());
 }
 
 TEST_CASE("Cold compressed birth live metadata cap refuses proof and preserves ordinary IO",

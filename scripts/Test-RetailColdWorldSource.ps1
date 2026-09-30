@@ -2,12 +2,17 @@ param(
  [switch]$Records,
  [switch]$Visible,
  [switch]$Auto,
+ [switch]$Residency,
+ [ValidateSet('SkalaNew','Skala2')][string]$Asset='SkalaNew',
  [ValidateSet('None','Move','Remove')][string]$Invalidate='None',
  [string]$Label='retail-cold-world-source',
  [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
  [string]$Python='C:\Program Files\Python311\python.exe'
 )
 $ErrorActionPreference='Stop'
+$Asset=if($Asset -eq 'Skala2'){'Skala2'}else{'SkalaNew'}
+if($Residency -and $Invalidate -ne 'None'){throw 'Residency and actor invalidation are separate installed cycles'}
+if($Residency){$Auto=$true}
 if($Auto){$Visible=$true}
 if($Invalidate -ne 'None'){$Visible=$true}
 if($Visible){$Records=$true}
@@ -15,10 +20,12 @@ if($Label -notmatch '^[a-zA-Z0-9_-]{1,64}$'){throw 'Invalid bounded label'}
 if(!$env:LOCK_OWNER){
  $shell=Join-Path $PSHOME $(if($PSVersionTable.PSEdition -eq 'Core'){'pwsh.exe'}else{'powershell.exe'})
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),$shell.Replace('\','/'),'-NoProfile','-File',$PSCommandPath,
-  '-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
+ '-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
+ $argv+=@('-Asset',$Asset)
  if($Records){$argv+='-Records'}
  if($Visible){$argv+='-Visible'}
  if($Auto){$argv+='-Auto'}
+ if($Residency){$argv+='-Residency'}
  if($Invalidate -ne 'None'){$argv+=@('-Invalidate',$Invalidate)}
  $env:LOCK_OWNER='retail cold world source fixture'
  try{& 'C:\Program Files\Git\bin\bash.exe' @argv;if($LASTEXITCODE){throw "Retail cold world child failed $LASTEXITCODE"}}
@@ -37,6 +44,9 @@ $stampPath=Join-Path $GameDir 'DEPLOYED-FROM.txt'
 $log=Join-Path $out 'engine.log'
 $generator=Join-Path $PSScriptRoot 'streaming/build_retail_cold_world_fixture.py'
 $helper=Join-Path $PSScriptRoot 'streaming/build_simulation_residency_fixture.py'
+$assetId=if($Asset -eq 'Skala2'){'skala2'}else{'skala_new'}
+$modelPath=if($Asset -eq 'Skala2'){'data3d\skala2.p3d'}else{'data3d\skala_new.p3d'}
+$expectedFineTriangles=if($Asset -eq 'Skala2'){77}else{250}
 New-Item -ItemType Directory $out,$profile,$mission | Out-Null
 $old=@{};Get-ChildItem Env:|Where-Object {$_.Name -match '^(WGR_|POSEIDON_)'}|ForEach-Object {$old[$_.Name]=$_.Value}
 $p=$null;$client=$null;$normal=$false;$forced=$false;$failure=$null;$result=$null;$visibleTrace=$null;$autoTrace=$null
@@ -46,15 +56,27 @@ try{
  }
  $initialHashes=@(Get-FileHash -LiteralPath $exe,$dll)
  $installed=Get-Content -LiteralPath $stampPath -Raw
- $generated=@(& $Python $generator $fixture)
+ $generated=@(& $Python $generator $fixture --asset $assetId --game-root $GameDir)
  if($LASTEXITCODE -ne 0 -or $generated.Count -ne 1 -or $generated[0].Length -gt 8192){throw 'Bounded retail WRP generation failed'}
  $proof=$generated[0]|ConvertFrom-Json
  $world=Join-Path $fixture 'retail-cold.wrp'
- if($proof.schema -ne 1 -or $proof.modelPath -cne 'data3d\skala_new.p3d' -or
+ if($proof.schema -ne 1 -or $proof.asset -cne $assetId -or $proof.modelPath -cne $modelPath -or
     $proof.modelCount -ne 1 -or @($proof.placements).Count -ne 2 -or
     $proof.worldBytes -le 0 -or $proof.worldBytes -gt 131072 -or
     $proof.worldSha256 -cne (Get-FileHash -LiteralPath $world).Hash.ToLowerInvariant()){
   throw 'Retail WRP self-check/provenance mismatch'
+ }
+ $bankProof=$proof.installedBankEvidence
+ $expectedModelMember=if($Asset -eq 'Skala2'){'skala2.p3d'}else{'skala_new.p3d'}
+ $expectedPacMember=if($Asset -eq 'Skala2'){'piskovec.pac'}else{'skala_piskovec2.pac'}
+ if(!$bankProof.sourceEvidenceOnly -or $bankProof.liveMountedAuthority -or
+    $bankProof.model.member -cne $expectedModelMember -or
+    $bankProof.texture.member -cne $expectedPacMember -or
+    $bankProof.model.archive -ine (Join-Path $GameDir 'DTA\data3d.pbo') -or
+    $bankProof.texture.archive -ine (Join-Path $GameDir 'DTA\data.pbo') -or
+    $bankProof.model.decodedSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+    $bankProof.texture.rawSha256 -cnotmatch '^[0-9a-f]{64}$'){
+  throw 'Independent installed archive/member evidence mismatch'
  }
  $files=@(Get-ChildItem -LiteralPath $fixture -Recurse -File)
  if($files.Count -ne 2 -or @($files|Where-Object {$_.Extension -in @('.p3d','.pac','.paa','.pbo')}).Count){
@@ -81,6 +103,7 @@ class OutroLoose { randomSeed=3; class Intel {}; };
  $environment=@{
   POSEIDON_USER_DIR=$profile;POSEIDON_MODEL_DDC='0'
   WGR_GEOMETRY_PAGE_RETAIL_COLD_SOURCE='1';WGR_GEOMETRY_PAGE_RETAIL_SOURCE='1'
+  WGR_GEOMETRY_PAGE_RETAIL_ASSET=$assetId
  }
  if($Records){$environment.WGR_GEOMETRY_PAGE_FIXTURE='1';$environment.WGR_OBJECT_STREAM_DAYZ_REUSE_ONLY='1'}
  if($Visible){
@@ -90,6 +113,7 @@ class OutroLoose { randomSeed=3; class Intel {}; };
   $environment.WGR_TEMPORAL='0';$environment.WGR_DLSS='0';$environment.WGR_AUTO_EXPOSURE='0'
  }
  if($Auto){$environment.WGR_GEOMETRY_PAGE_RETAIL_WORLD_AUTO='1'}
+ if($Residency){$environment.WGR_GEOMETRY_PAGE_RETAIL_WORLD_RESIDENCY='1'}
  Get-ChildItem Env:|Where-Object {$_.Name -match '^(WGR_|POSEIDON_)'}|ForEach-Object {Remove-Item ('Env:'+$_.Name)}
  foreach($key in $environment.Keys){Set-Item ('Env:'+$key) $environment[$key]}
  $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
@@ -100,9 +124,10 @@ class OutroLoose { randomSeed=3; class Intel {}; };
  @{head=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash $PSCommandPath).Hash;
    generatorSha256=(Get-FileHash $generator).Hash;worldHelperSha256=(Get-FileHash $helper).Hash;
    installed=$installed;hashes=$initialHashes;environment=$environment;argv=$argv;fixture=$proof;
-   scope=$(if($Auto){'Opt-in one-placement original/page transaction with certified selected object-space unions and actual main-view projected demand; no pixel fidelity, other-view coverage or GPU-completion proof'}elseif($Invalidate -ne 'None'){'Opt-in one-placement world/page transaction followed by ordinary moved/removed actor invalidation and returned page absence; no visual parity or GPU-completion proof'}elseif($Visible){'Opt-in one-placement main-view world/page transaction with exact CPU rows and returned main camera; screenshots are comparison evidence, not GPU completion or all-pass proof'}else{'Actual installed-archive cold-world Shape/primary source and ordinary queued placement only; no renderer-return, takeover, complete model, or visual parity proof'})}|
+   asset=$Asset;expectedFineTriangles=$expectedFineTriangles;
+   scope=$(if($Residency){'Opt-in one-placement certified Root-only retirement, returned conventional original fallback, bounded one-page refill and fresh Fine takeover; no pixel fidelity, all-pass or GPU-completion proof'}elseif($Auto){'Opt-in one-placement original/page transaction with certified selected object-space unions and actual main-view projected demand; no pixel fidelity, other-view coverage or GPU-completion proof'}elseif($Invalidate -ne 'None'){'Opt-in one-placement world/page transaction followed by ordinary moved/removed actor invalidation and returned page absence; no visual parity or GPU-completion proof'}elseif($Visible){'Opt-in one-placement main-view world/page transaction with exact CPU rows and returned main camera; screenshots are comparison evidence, not GPU completion or all-pass proof'}else{'Actual installed-archive cold-world Shape/primary source and ordinary queued placement only; no renderer-return, takeover, complete model, or visual parity proof'})}|
   ConvertTo-Json -Depth 8|Set-Content (Join-Path $out 'provenance.json')
- $overall=[DateTime]::UtcNow.AddSeconds($(if($Auto){240}elseif($Visible){220}else{115}))
+ $overall=[DateTime]::UtcNow.AddSeconds($(if($Residency){300}elseif($Auto){240}elseif($Visible){220}else{115}))
  $p=Start-Process -FilePath $exe -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $argv
  $null=$p.Handle
  $client=[Net.Sockets.TcpClient]::new()
@@ -131,7 +156,8 @@ class OutroLoose { randomSeed=3; class Intel {}; };
  }
  if(!(Test-Path -LiteralPath $image) -or (Get-Item -LiteralPath $image).Length -le 0){throw 'Missing actual-world screenshot'}
  $sourceMatch=$null;$placementMatch=$null
- $sourcePattern='Retail actual-world source: shapeBirth=(?<birth>[1-9][0-9]*) sourceSha256=(?<source>[0-9a-f]{64}) decodedBytes=(?<decoded>[1-9][0-9]*) visualLevels=4 primaryHandle=(?<handle>[1-9][0-9]*) primarySlot=(?<slot>[1-9][0-9]*) rawSha256=(?<raw>[0-9a-f]{64}) uploadedSha256=(?<upload>[0-9a-f]{64})'
+ $expectedVisualLevels=if($Asset -eq 'Skala2'){3}else{4}
+ $sourcePattern='Retail actual-world source: shapeBirth=(?<birth>[1-9][0-9]*) sourceSha256=(?<source>[0-9a-f]{64}) decodedBytes=(?<decoded>[1-9][0-9]*) visualLevels='+$expectedVisualLevels+' primaryHandle=(?<handle>[1-9][0-9]*) primarySlot=(?<slot>[1-9][0-9]*) rawSha256=(?<raw>[0-9a-f]{64}) uploadedSha256=(?<upload>[0-9a-f]{64})'
  do{
   if($p.HasExited){throw 'Game exited before actual-world source/placement witness'}
   $text=if(Test-Path -LiteralPath $log){Get-Content -LiteralPath $log -Raw -ErrorAction SilentlyContinue}else{''}
@@ -149,6 +175,11 @@ class OutroLoose { randomSeed=3; class Intel {}; };
  if(!$sourceMatch -or !$sourceMatch.Success -or !$placementMatch -or !$placementMatch.Success){
   throw 'No exact cold-world Shape/PAC source plus current queued placement witness'
  }
+ if($sourceMatch.Groups['source'].Value -cne $bankProof.model.decodedSha256 -or
+    $sourceMatch.Groups['raw'].Value -cne $bankProof.texture.rawSha256 -or
+    [uint64]$sourceMatch.Groups['decoded'].Value -ne [uint64]$bankProof.model.decodedBytes){
+  throw 'Live source/PAC witness differs from independent installed bank member SHA'
+ }
  if($Records){
   function RecordAction($action){return Send @{cmd='geometry_page_fixture';action=$action}}
   function WaitRecord($first,$poll){
@@ -162,7 +193,15 @@ class OutroLoose { randomSeed=3; class Intel {}; };
   }
   $ready=WaitRecord (RecordAction 'probeRetailColdWorld') 'pollRetailRecords'
   if(!$ready.retailRecordOnly -or !$ready.retailFineTriangleSetExact -or
-     $ready.retailRecordMeshesPresent -ne 8 -or $ready.retailRecordModelsPresent -ne 3 -or
+     [uint32]$ready.fineTriangles -ne $expectedFineTriangles -or
+     [uint32]$ready.coarseTriangles -eq 0 -or
+     [uint32]$ready.coarseTriangles -ge $expectedFineTriangles -or
+     [uint32]$ready.retailRecordMeshesPresent -lt 3 -or
+     [uint32]$ready.retailRecordMeshesPresent -ne [uint32]$ready.meshCount -or
+     [uint32]$ready.retailRecordMeshesAbsent -ne 0 -or
+     $ready.retailRecordModelsPresent -ne 3 -or $ready.retailRecordModelsAbsent -ne 0 -or
+     $ready.sourceSha256 -cne $bankProof.model.decodedSha256 -or
+     $ready.retailPixelSourceSha256 -cne $bankProof.texture.rawSha256 -or
      $ready.mainFrameReturned -or $ready.producerInstance -ne 4294967295){throw 'Initial actual-world records mismatch'}
   if($Visible){
    # Screenshots are comparison artifacts only. The CPU row/returned-camera
@@ -244,7 +283,8 @@ class OutroLoose { randomSeed=3; class Intel {}; };
      throw 'Actual-world original/page identity changed across the transaction'
     }
    }
-   $visibleTrace=@{ready=$ready;invalidation=$Invalidate;sourceLine=$sourceMatch.Value;placementLine=$placementMatch.Value;
+   $visibleTrace=@{ready=$ready;invalidation=$Invalidate;asset=$Asset;residency=[bool]$Residency;
+     sourceLine=$sourceMatch.Value;placementLine=$placementMatch.Value;
      installed=$installed;environment=$environment;images=@{};steps=@{};
      scope='One actual installed-world placement with original other-view row and private main-only page; exact CPU rows and returned camera, not GPU completion, all-view coverage, pixel parity or performance acceptance'}
    $visibleTrace.images.sourceA1=CaptureVisible 'world-source-a1.png'
@@ -265,7 +305,8 @@ class OutroLoose { randomSeed=3; class Intel {}; };
      if($null -eq $fine.PSObject.Properties[$field]){throw "Missing actual-world auto field: $field"}
     }
     if(!$fine.retailWorldSurfaceCertified -or [uint32]$fine.retailWorldSurfaceStatus -ne 0 -or
-       [double]$fine.retailWorldSurfaceUpper -lt 0 -or [uint32]$fine.retailWorldSelectedTriangles -ne 250){
+       [double]$fine.retailWorldSurfaceUpper -lt 0 -or
+       [uint32]$fine.retailWorldSelectedTriangles -ne $expectedFineTriangles){
      throw ('Actual selected-surface certificate not verified at Fine: '+($fine|ConvertTo-Json -Depth 4 -Compress))
     }
     $autoTrace=@{scope='One original/page main-view follow using certified selected object-space surface bounds and returned stable frames; heuristic pixels only, no all-view or GPU-completion proof';
@@ -285,8 +326,13 @@ class OutroLoose { randomSeed=3; class Intel {}; };
     }
     $autoTrace.steps.follow=$follow;SaveAuto
     $autoRoot=$null
-    foreach($pose in @('200 1200 30 90 -1','-800 1200 30 90 -1',
-                      '-2800 1200 30 90 -1','-4800 1200 30 90 -1')){
+    # The fixture is a 32 x 50 m WRP. Zeus free-fly clamps its simulated
+    # position to [0, 1600] on both horizontal axes after triFreeFlyPose
+    # returns OK; negative coordinates would repeat the same border view.
+    # The southwest corner is the farthest in-world view of the (1200,1200)
+    # placement, with the heading aimed at the selected rock.
+    foreach($pose in @('200 1200 30 90 -1','5 1200 30 90 -1',
+                      '5 5 30 45 -0.6')){
      SetAutoPose $pose
      $entry=@{pose=$pose;reports=@();startedAtUtc=[DateTime]::UtcNow.ToString('o')}
      $poseDeadline=[DateTime]::UtcNow.AddSeconds(3.5)
@@ -314,7 +360,7 @@ class OutroLoose { randomSeed=3; class Intel {}; };
          $observed.retailWorldSurfaceCertified -and $observed.retailWorldProjectedBounded -and
          !$observed.retailWorldForcedFine -and
          [double]$observed.retailWorldProjectedUpper -lt 3 -and
-         [uint32]$observed.retailWorldSelectedTriangles -lt 250 -and
+         [uint32]$observed.retailWorldSelectedTriangles -lt $expectedFineTriangles -and
          [uint64]$observed.retailWorldAutoCoarsens -ge 1 -and
          [uint32]$observed.retailWorldSafeRootObservations -ge 3 -and
          [uint64]$observed.retailWorldStableFrameGeneration -gt [uint64]$follow.retailWorldStableFrameGeneration -and
@@ -326,9 +372,119 @@ class OutroLoose { randomSeed=3; class Intel {}; };
      $entry.endedAtUtc=[DateTime]::UtcNow.ToString('o');$autoTrace.poses+=,$entry;SaveAuto
      if($autoRoot){break}
     }
-    if(!$autoRoot){throw 'Actual-world auto never returned a certified bounded Root across four far poses'}
+    if(!$autoRoot){throw 'Actual-world auto never returned a certified bounded Root across three in-world far poses'}
     CheckStableWorld $autoRoot $identity
     $autoTrace.steps.farRoot=$autoRoot;SaveAuto
+    if($Residency){
+     $rootOnly=$null;$retireDeadline=[DateTime]::UtcNow.AddSeconds(20)
+     do{
+      $observed=WorldAction 'pollRetailWorldVisible'
+      if($observed.status -notin @('Pending','Ready')){
+       throw ('Actual-world Fine retirement refused: '+($observed|ConvertTo-Json -Depth 4 -Compress))
+      }
+      if($observed.retailWorldResidencyPhase -ceq 'RootOnly'){
+       if($observed.status -ne 'Ready' -or $observed.retailWorldPhase -cne 'Root' -or
+          !$observed.retailWorldReturned -or !$observed.retailWorldPagePresent -or
+          !$observed.retailWorldOriginalOtherViews -or !$observed.retailWorldResidencyEnabled -or
+          [uint64]$observed.retailWorldRetirementRequest -eq 0 -or
+          [uint64]$observed.retailWorldResidencyTriggerCamera -eq 0 -or
+          [uint32]$observed.retailRecordMeshesAbsent -eq 0 -or
+          [uint32]$observed.retailRecordMeshesPresent + [uint32]$observed.retailRecordMeshesAbsent -ne
+           [uint32]$ready.retailRecordMeshesPresent -or
+          [uint32]$observed.retailRecordModelsPresent -ne 2 -or
+          [uint32]$observed.retailRecordModelsAbsent -ne 1 -or
+          $observed.pageLiveJobs -or $observed.pageReservedBytes){
+        throw ('RootOnly lacks exact retired Fine ACK: '+($observed|ConvertTo-Json -Depth 4 -Compress))
+       }
+       $rootOnly=$observed;break
+      }
+      Start-Sleep -Milliseconds 100
+     }while([DateTime]::UtcNow -lt $retireDeadline -and [DateTime]::UtcNow -lt $overall)
+     if(!$rootOnly){throw 'Actual-world residency did not return RootOnly with retired Fine records'}
+     CheckStableWorld $rootOnly $identity
+     $autoTrace.steps.rootOnly=$rootOnly;SaveAuto
+     SetAutoPose '1184 1200 18 90 -8'
+     $fallback=$null;$completed=$null;$refillDeadline=[DateTime]::UtcNow.AddSeconds(35)
+     do{
+      $observed=WorldAction 'pollRetailWorldVisible'
+      if($observed.status -notin @('Pending','Ready')){
+       throw ('Actual-world residency refill refused: '+($observed|ConvertTo-Json -Depth 4 -Compress))
+      }
+      if(!$fallback -and $observed.retailWorldConventionalFallback -and
+         $observed.retailWorldResidencyPhase -ceq 'RestoringForRefill' -and
+         $observed.retailWorldPhase -ceq 'Restored' -and
+         $observed.retailWorldReturned -and !$observed.retailWorldPagePresent -and
+         !$observed.retailWorldOriginalOtherViews -and $observed.retailWorldRestored -and
+         [uint64]$observed.retailWorldFallbackCameraGeneration -gt
+          [uint64]$rootOnly.retailWorldCameraGeneration -and
+         [uint64]$observed.retailWorldRefillRequest -eq 0){
+       $fallback=$observed;$autoTrace.steps.conventionalFallback=$fallback;SaveAuto
+      }
+      if($observed.retailWorldResidencyPhase -ceq 'Complete'){
+       if($observed.status -ne 'Ready' -or
+          $observed.retailWorldPhase -cne 'Fine' -or !$observed.retailWorldReturned -or
+          !$observed.retailWorldPagePresent -or !$observed.retailWorldOriginalOtherViews -or
+          !$observed.retailWorldResidencyEnabled -or
+          [uint32]$observed.retailWorldResidencyCycles -ne 1 -or
+          [uint32]$observed.retailWorldSelectedTriangles -ne $expectedFineTriangles -or
+          [uint64]$observed.retailWorldFallbackCameraGeneration -le
+           [uint64]$rootOnly.retailWorldCameraGeneration -or
+          [uint64]$observed.retailWorldFallbackRequest -le
+           [uint64]$rootOnly.retailWorldRequest -or
+          [uint64]$observed.retailWorldFallbackRequest -ge
+           [uint64]$observed.retailWorldRequest -or
+          [uint64]$observed.retailWorldFallbackPageBirth -ne [uint64]$identity.birth -or
+          [uint64]$observed.retailWorldFallbackInstanceEpoch -eq 0 -or
+          [uint32]$observed.retailWorldFallbackOriginalFlags -ne 0 -or
+          !$observed.retailWorldFallbackPageAbsent -or
+          [uint64]$observed.retailWorldRefillRequestAtFallback -ne 0 -or
+          [uint64]$observed.retailWorldCameraGeneration -le
+           [uint64]$observed.retailWorldFallbackCameraGeneration -or
+          [uint64]$observed.retailWorldRefillRequest -eq 0 -or
+          [uint64]$observed.retailWorldPageBirth -le [uint64]$identity.birth -or
+          [uint64]$observed.retailWorldPageInstance -eq [uint64]$identity.page -or
+          [uint64]$observed.retailWorldPageRenderer -eq [uint64]$identity.renderer -or
+          [uint64]$observed.retailWorldPageModel -eq [uint64]$fine.retailWorldPageModel -or
+          [uint64]$observed.retailWorldPageModel -eq [uint64]$rootOnly.retailWorldPageModel -or
+          [uint64]$observed.retailWorldOriginalInstance -ne [uint64]$identity.original -or
+          [uint32]$observed.retailRecordMeshesPresent -ne [uint32]$ready.retailRecordMeshesPresent -or
+          [uint32]$observed.retailRecordMeshesAbsent -ne [uint32]$rootOnly.retailRecordMeshesAbsent -or
+          [uint32]$observed.retailRecordModelsPresent -ne 3 -or
+          [uint32]$observed.retailRecordModelsAbsent -ne 1 -or
+          [uint32]$observed.retailRecordFreshIds -lt
+           ([uint32]$ready.retailRecordFreshIds + [uint32]$rootOnly.retailRecordMeshesAbsent + 1) -or
+          $observed.pageLiveJobs -or $observed.pageReservedBytes){
+        throw ('Completed residency lacks fresh Fine takeover/record ACK: '+
+          ($observed|ConvertTo-Json -Depth 4 -Compress))
+       }
+       $completed=$observed;break
+      }
+      Start-Sleep -Milliseconds 20
+     }while([DateTime]::UtcNow -lt $refillDeadline -and [DateTime]::UtcNow -lt $overall)
+     if(!$completed){throw 'Actual-world residency never returned fresh Fine takeover'}
+     CheckWorld $completed 'Fine' $true $true $false `
+      ([uint64]$completed.retailWorldFallbackCameraGeneration) `
+      ([uint64]$completed.retailWorldFallbackRequest)
+     if(!$fallback){
+      $autoTrace.steps.conventionalFallback=@{
+       sampled=$false;returnedRestoreCameraGeneration=$completed.retailWorldFallbackCameraGeneration;
+       restoreRequest=$completed.retailWorldFallbackRequest;
+       retiredPageBirth=$completed.retailWorldFallbackPageBirth;
+       instanceEpoch=$completed.retailWorldFallbackInstanceEpoch;
+       originalFlags=$completed.retailWorldFallbackOriginalFlags;
+       pageAbsent=$completed.retailWorldFallbackPageAbsent;
+       refillRequestAtRestore=$completed.retailWorldRefillRequestAtFallback;
+       note='Durable exact returned Restore ACK retained by producer; transient Restored state was not sampled by harness'}
+     }elseif([uint64]$fallback.retailWorldFallbackRequest -ne
+              [uint64]$completed.retailWorldFallbackRequest -or
+            [uint64]$fallback.retailWorldFallbackInstanceEpoch -ne
+              [uint64]$completed.retailWorldFallbackInstanceEpoch){
+      throw 'Sampled conventional fallback differs from retained Restore ACK'
+     }
+     $autoTrace.steps.freshFine=$completed;SaveAuto
+     $visibleTrace.images.pageFreshFine=CaptureVisible 'world-page-fresh-fine.png';SaveVisible
+     $autoTrace.passed=$true;SaveAuto
+    }else{
     SetAutoPose '1184 1200 18 90 -8'
     $autoFine=$null;$nearDeadline=[DateTime]::UtcNow.AddSeconds(8)
     do{
@@ -343,7 +499,7 @@ class OutroLoose { randomSeed=3; class Intel {}; };
      }
      if($observed.status -eq 'Ready' -and $observed.retailWorldPhase -ceq 'Fine' -and
         $observed.retailWorldReturned -and $observed.retailWorldAutoEnabled -and
-        [uint32]$observed.retailWorldSelectedTriangles -eq 250 -and
+        [uint32]$observed.retailWorldSelectedTriangles -eq $expectedFineTriangles -and
         [uint64]$observed.retailWorldAutoRefines -ge 1 -and
         [uint64]$observed.retailWorldStableFrameGeneration -gt [uint64]$autoRoot.retailWorldStableFrameGeneration -and
         [uint64]$observed.retailWorldCameraGeneration -gt [uint64]$autoRoot.retailWorldCameraGeneration -and
@@ -357,13 +513,32 @@ class OutroLoose { randomSeed=3; class Intel {}; };
     CheckStableWorld $autoFine $identity
     $autoTrace.steps.nearFine=$autoFine;SaveAuto
     $stopped=WaitWorld (WorldAction 'stopRetailWorldVisible') 'Fine'
-    if($stopped.retailWorldAutoEnabled -or [uint32]$stopped.retailWorldSelectedTriangles -ne 250){
+    if($stopped.retailWorldAutoEnabled -or
+       [uint32]$stopped.retailWorldSelectedTriangles -ne $expectedFineTriangles){
      throw ('Actual-world auto did not stop on returned Fine: '+($stopped|ConvertTo-Json -Depth 4 -Compress))
     }
     CheckStableWorld $stopped $identity
     $autoTrace.steps.stopped=$stopped;$autoTrace.passed=$true;SaveAuto
+    }
     $visibleTrace.autoEvidence=Join-Path $out 'actual-world-auto.json';SaveVisible
    }
+   if($Residency){
+    $stopped=WaitWorld (WorldAction 'stopRetailWorldVisible') 'Restored'
+    if($stopped.retailWorldAutoEnabled -or $stopped.retailWorldPagePresent -or
+       $stopped.retailWorldOriginalOtherViews -or !$stopped.retailWorldRestored -or
+       [uint64]$stopped.retailWorldCameraGeneration -le
+        [uint64]$completed.retailWorldCameraGeneration){
+     throw ('Residency Stop did not restore ordinary original: '+($stopped|ConvertTo-Json -Depth 4 -Compress))
+    }
+    $visibleTrace.steps.stoppedRestored=$stopped;SaveVisible
+    $visibleTrace.images.sourceA3=CaptureVisible 'world-source-a3.png'
+    $visibleTrace.images.sourceA4=CaptureVisible 'world-source-a4.png'
+    $aborted=WaitRecord (RecordAction 'abortRetailRecords') 'pollRetailRecords'
+    if($aborted.retailRecordMeshesPresent -ne 0 -or $aborted.retailRecordModelsPresent -ne 0 -or
+       $aborted.pageLiveJobs -or $aborted.pageReservedBytes){throw 'World residency abort debt'}
+    $visibleTrace.steps.aborted=$aborted;$visibleTrace.passed=$true;SaveVisible
+    $released=$rootOnly;$refilled=$completed
+   }else{
    $manualBeforeRoot=if($Auto){$stopped}else{$fine}
    $rootCut=WaitWorld (WorldAction 'rootRetailWorldVisible') 'Root'
    CheckWorld $rootCut 'Root' $true $true $false ([uint64]$manualBeforeRoot.retailWorldCameraGeneration) ([uint64]$manualBeforeRoot.retailWorldRequest)
@@ -372,7 +547,12 @@ class OutroLoose { randomSeed=3; class Intel {}; };
    $visibleTrace.steps.root=$rootCut;SaveVisible
    $visibleTrace.images.pageRoot=CaptureVisible 'world-page-root.png'
    $released=WaitRecord (RecordAction 'releaseRetailRecords') 'pollRetailRecords'
-   if($released.retailRecordMeshesPresent -ne 4 -or $released.retailRecordMeshesAbsent -ne 4){throw 'World record release mismatch'}
+   if([uint32]$released.retailRecordMeshesPresent -eq 0 -or
+      [uint32]$released.retailRecordMeshesAbsent -eq 0 -or
+      [uint32]$released.retailRecordMeshesPresent + [uint32]$released.retailRecordMeshesAbsent -ne
+       [uint32]$ready.retailRecordMeshesPresent -or
+      [uint32]$released.retailRecordModelsPresent -ne 2 -or
+      [uint32]$released.retailRecordModelsAbsent -ne 1){throw 'World record release mismatch'}
    $stillRoot=WorldAction 'pollRetailWorldVisible'
    if($stillRoot.status -ne 'Ready' -or $stillRoot.retailWorldPhase -cne 'Root' -or
       !$stillRoot.retailWorldReturned -or !$stillRoot.retailWorldOriginalOtherViews -or !$stillRoot.retailWorldPagePresent){
@@ -381,8 +561,14 @@ class OutroLoose { randomSeed=3; class Intel {}; };
    CheckStableWorld $stillRoot $identity
    $visibleTrace.steps.released=$released;$visibleTrace.steps.rootAfterRelease=$stillRoot;SaveVisible
    $refilled=WaitRecord (RecordAction 'refillRetailRecords') 'pollRetailRecords'
-   if($refilled.retailRecordMeshesPresent -ne 8 -or $refilled.retailRecordMeshesAbsent -ne 4 -or
-      $refilled.retailRecordFreshIds -lt 8){throw 'World record fresh refill mismatch'}
+   if([uint32]$refilled.retailRecordMeshesPresent -ne [uint32]$ready.retailRecordMeshesPresent -or
+      [uint32]$refilled.retailRecordMeshesAbsent -ne [uint32]$released.retailRecordMeshesAbsent -or
+      [uint32]$refilled.retailRecordModelsPresent -ne 3 -or
+      [uint32]$refilled.retailRecordModelsAbsent -ne 1 -or
+      [uint32]$refilled.retailRecordFreshIds -lt
+       ([uint32]$ready.retailRecordFreshIds + [uint32]$released.retailRecordMeshesAbsent + 1)){
+    throw 'World record fresh refill mismatch'
+   }
    $visibleTrace.steps.refilled=$refilled;SaveVisible
    $freshFine=WaitWorld (WorldAction 'fineRetailWorldVisible') 'Fine'
    CheckWorld $freshFine 'Fine' $true $true $false ([uint64]$rootCut.retailWorldCameraGeneration) ([uint64]$rootCut.retailWorldRequest)
@@ -425,19 +611,32 @@ class OutroLoose { randomSeed=3; class Intel {}; };
    if($aborted.retailRecordMeshesPresent -ne 0 -or $aborted.retailRecordModelsPresent -ne 0 -or
       $aborted.pageLiveJobs -or $aborted.pageReservedBytes){throw 'World record abort debt'}
    $visibleTrace.steps.aborted=$aborted;$visibleTrace.passed=$true;SaveVisible
+   }
   }else{
    $released=WaitRecord (RecordAction 'releaseRetailRecords') 'pollRetailRecords'
-   if($released.retailRecordMeshesPresent -ne 4 -or $released.retailRecordMeshesAbsent -ne 4){throw 'World record release mismatch'}
+   if([uint32]$released.retailRecordMeshesPresent -eq 0 -or
+      [uint32]$released.retailRecordMeshesAbsent -eq 0 -or
+      [uint32]$released.retailRecordMeshesPresent + [uint32]$released.retailRecordMeshesAbsent -ne
+       [uint32]$ready.retailRecordMeshesPresent -or
+      [uint32]$released.retailRecordModelsPresent -ne 2 -or
+      [uint32]$released.retailRecordModelsAbsent -ne 1){throw 'World record release mismatch'}
    $refilled=WaitRecord (RecordAction 'refillRetailRecords') 'pollRetailRecords'
-   if($refilled.retailRecordMeshesPresent -ne 8 -or $refilled.retailRecordMeshesAbsent -ne 4 -or
-      $refilled.retailRecordFreshIds -lt 8){throw 'World record fresh refill mismatch'}
+   if([uint32]$refilled.retailRecordMeshesPresent -ne [uint32]$ready.retailRecordMeshesPresent -or
+      [uint32]$refilled.retailRecordMeshesAbsent -ne [uint32]$released.retailRecordMeshesAbsent -or
+      [uint32]$refilled.retailRecordModelsPresent -ne 3 -or
+      [uint32]$refilled.retailRecordModelsAbsent -ne 1 -or
+      [uint32]$refilled.retailRecordFreshIds -lt
+       ([uint32]$ready.retailRecordFreshIds + [uint32]$released.retailRecordMeshesAbsent + 1)){
+    throw 'World record fresh refill mismatch'
+   }
    $aborted=WaitRecord (RecordAction 'abortRetailRecords') 'pollRetailRecords'
    if($aborted.retailRecordMeshesPresent -ne 0 -or $aborted.retailRecordModelsPresent -ne 0 -or
       $aborted.pageLiveJobs -or $aborted.pageReservedBytes){throw 'World record abort debt'}
   }
   @{ready=$ready;released=$released;refilled=$refilled;aborted=$aborted;
+    asset=$Asset;residency=[bool]$Residency;independentBank=$bankProof;
     autoEvidence=$(if($Auto){Join-Path $out 'actual-world-auto.json'}else{$null});
-    scope=$(if($Auto){'Actual cold-world source records, certified Root/Fine object-space surface witness, returned main-view auto Root/Fine followed by manual lifecycle; no pixel fidelity or all-view proof'}elseif($Invalidate -ne 'None'){'Actual one-placement world/page transaction followed by ordinary actor invalidation and returned historical page absence; terminal Failed is expected cleanup, not an active page or visual proof'}elseif($Visible){'Actual cold-world Shape export, source-bound page records, and one returned main-view world/page transaction; no pixel parity, GPU completion, or general all-pass proof'}else{'Actual cold-world Shape export and private record lifetime; ordinary world model retained, no page instance takeover'})}|
+    scope=$(if($Residency){'Actual one-placement source records, certified bounded Root, returned Root-only Fine retirement, conventional original fallback before one-page refill, fresh Fine takeover and final Restore/Abort; no pixel fidelity, GPU completion or general all-pass proof'}elseif($Auto){'Actual cold-world source records, certified Root/Fine object-space surface witness, returned main-view auto Root/Fine followed by manual lifecycle; no pixel fidelity or all-view proof'}elseif($Invalidate -ne 'None'){'Actual one-placement world/page transaction followed by ordinary actor invalidation and returned historical page absence; terminal Failed is expected cleanup, not an active page or visual proof'}elseif($Visible){'Actual cold-world Shape export, source-bound page records, and one returned main-view world/page transaction; no pixel parity, GPU completion, or general all-pass proof'}else{'Actual cold-world Shape export and private record lifetime; ordinary world model retained, no page instance takeover'})}|
    ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'actual-world-records.json')
  }
  $null=Send @{cmd='exit'}
@@ -450,13 +649,15 @@ class OutroLoose { randomSeed=3; class Intel {}; };
  for($i=0;$i -lt 2;$i++){if($finalHashes[$i].Hash -ne $initialHashes[$i].Hash){throw 'Installed binary changed during run'}}
  if((Get-Content -LiteralPath $stampPath -Raw) -cne $installed){throw 'Installed deployment stamp changed during run'}
  $result=@{passed=$true;normalShutdown=$true;forcedTermination=$false;exitCode=$p.ExitCode;
-  visible=[bool]$Visible;auto=[bool]$Auto;invalidation=$Invalidate;
+  visible=[bool]$Visible;auto=[bool]$Auto;residency=[bool]$Residency;asset=$Asset;invalidation=$Invalidate;
   visibleEvidence=$(if($Visible){Join-Path $out 'actual-world-visible.json'}else{$null});
   autoEvidence=$(if($Auto){Join-Path $out 'actual-world-auto.json'}else{$null});
   sourceLine=$sourceMatch.Value;placementLine=$placementMatch.Value;shapeBirth=[uint64]$sourceMatch.Groups['birth'].Value;
   sourceSha256=$sourceMatch.Groups['source'].Value;pacRawSha256=$sourceMatch.Groups['raw'].Value;
+  independentModelSha256=$bankProof.model.decodedSha256;
+  independentPacRawSha256=$bankProof.texture.rawSha256;
   pacUploadedSha256=$sourceMatch.Groups['upload'].Value;primaryHandle=[uint64]$sourceMatch.Groups['handle'].Value;
-  scope=$(if($Auto){'Actual installed-world Shape/PAC source, object-space selected-surface certificate, returned main-view auto Root/Fine and manual record lifecycle; heuristic projected demand is not pixel fidelity, GPU completion or all-view coverage'}elseif($Invalidate -ne 'None'){'Actual installed-world Shape/PAC source and returned page cleanup after ordinary actor move/removal; Failed is the expected fail-closed invalidated state, not GPU-completion or visual-parity proof'}elseif($Visible){'Actual installed-world Shape/PAC source and one returned original-other-views/private-main-view transaction with record refill and restore; screenshots captured for human comparison, no GPU-completion, pixel-parity, general all-pass or performance proof'}else{'Actual installed-archive cold-world Shape and same normal-bank PAC strict upload, plus source-current ordinary placement queued; no renderer return, private page takeover, complete model, or visual parity proof'})}
+  scope=$(if($Residency){'Actual selected installed-bank Shape/PAC SHA, certified bounded Root-only retirement, returned ordinary-original fallback before bounded refill, fresh Fine takeover and final Restore/Abort; CPU receipts, not pixel fidelity, GPU completion or all-view coverage'}elseif($Auto){'Actual installed-world Shape/PAC source, object-space selected-surface certificate, returned main-view auto Root/Fine and manual record lifecycle; heuristic projected demand is not pixel fidelity, GPU completion or all-view coverage'}elseif($Invalidate -ne 'None'){'Actual installed-world Shape/PAC source and returned page cleanup after ordinary actor move/removal; Failed is the expected fail-closed invalidated state, not GPU-completion or visual-parity proof'}elseif($Visible){'Actual installed-world Shape/PAC source and one returned original-other-views/private-main-view transaction with record refill and restore; screenshots captured for human comparison, no GPU-completion, pixel-parity, general all-pass or performance proof'}else{'Actual installed-archive cold-world Shape and same normal-bank PAC strict upload, plus source-current ordinary placement queued; no renderer return, private page takeover, complete model, or visual parity proof'})}
  $result|ConvertTo-Json -Depth 5|Set-Content (Join-Path $out 'result.json')
 }catch{$failure=$_}
 finally{

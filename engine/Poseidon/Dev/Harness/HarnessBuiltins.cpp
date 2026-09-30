@@ -994,6 +994,16 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(retailWorldStableFrameGeneration);PAGE_FIXTURE_NUMBER(retailWorldAutoObservations);
             PAGE_FIXTURE_NUMBER(retailWorldAutoRefines);PAGE_FIXTURE_NUMBER(retailWorldAutoCoarsens);
             PAGE_FIXTURE_NUMBER(retailWorldProjectedUpper);PAGE_FIXTURE_NUMBER(retailWorldSurfaceUpper);
+            cJSON_AddBoolToObject(result,"retailWorldResidencyEnabled",report.retailWorldResidencyEnabled);
+            cJSON_AddBoolToObject(result,"retailWorldConventionalFallback",report.retailWorldConventionalFallback);
+            cJSON_AddStringToObject(result,"retailWorldResidencyPhase",report.retailWorldResidencyPhase.c_str());
+            PAGE_FIXTURE_NUMBER(retailWorldResidencyCycles);PAGE_FIXTURE_NUMBER(retailWorldResidencyTriggerCamera);
+            PAGE_FIXTURE_NUMBER(retailWorldRetirementRequest);PAGE_FIXTURE_NUMBER(retailWorldRefillRequest);
+            PAGE_FIXTURE_NUMBER(retailWorldFallbackCameraGeneration);
+            PAGE_FIXTURE_NUMBER(retailWorldFallbackRequest);PAGE_FIXTURE_NUMBER(retailWorldFallbackPageBirth);
+            PAGE_FIXTURE_NUMBER(retailWorldFallbackInstanceEpoch);PAGE_FIXTURE_NUMBER(retailWorldRefillRequestAtFallback);
+            PAGE_FIXTURE_NUMBER(retailWorldFallbackOriginalFlags);
+            cJSON_AddBoolToObject(result,"retailWorldFallbackPageAbsent",report.retailWorldFallbackPageAbsent);
             PAGE_FIXTURE_NUMBER(retailVisibleBirth);PAGE_FIXTURE_NUMBER(retailVisibleRequest);PAGE_FIXTURE_NUMBER(retailVisibleFrame);
             PAGE_FIXTURE_NUMBER(retailVisibleRenderer);PAGE_FIXTURE_NUMBER(retailVisibleSlot);PAGE_FIXTURE_NUMBER(retailVisibleModel);
             PAGE_FIXTURE_NUMBER(retailVisibleReferenceSourceLevel);PAGE_FIXTURE_NUMBER(retailVisibleReferenceTriangles);PAGE_FIXTURE_NUMBER(retailVisibleCameraGeneration);

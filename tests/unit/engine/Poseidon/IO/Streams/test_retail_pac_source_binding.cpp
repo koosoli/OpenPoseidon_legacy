@@ -131,6 +131,7 @@ TEST_CASE("Retail PAC source purpose is exact and owner-only", "[archive-source-
     REQUIRE(ArchiveSourceBinding::RetailPacReadScope::Active());
     CHECK(ArchiveSourceBinding::RetailPacReadScope::MatchesLogicalName(SelectedTexturePath));
     CHECK_FALSE(ArchiveSourceBinding::RetailPacReadScope::MatchesLogicalName(R"(data\skala_piskovec.pac)"));
+    CHECK_FALSE(ArchiveSourceBinding::RetailPacReadScope::MatchesLogicalName(R"(data\piskovec.pac)"));
     CHECK(ArchiveSourceBinding::RetailPacReadScope::MatchesBankMember(
         R"(C:\game\DTA\data.pbo)", R"(data\)", Member));
     CHECK_FALSE(ArchiveSourceBinding::RetailPacReadScope::MatchesBankMember(
@@ -139,6 +140,12 @@ TEST_CASE("Retail PAC source purpose is exact and owner-only", "[archive-source-
         R"(C:\game\DTA\data.pbo)", R"(other\)", Member));
     CHECK_FALSE(ArchiveSourceBinding::RetailPacReadScope::MatchesBankMember(
         R"(C:\game\DTA\data.pbo)", R"(data\)", "other.pac"));
+    CHECK_FALSE(ArchiveSourceBinding::RetailPacReadScope::MatchesBankMember(
+        R"(C:\game\DTA\data.pbo)", R"(data\)", "piskovec.pac"));
+    {
+        ArchiveSourceBinding::RetailPacReadScope otherProfile(R"(data3d\skala2.p3d)");
+        CHECK_FALSE(ArchiveSourceBinding::RetailPacReadScope::MatchesLogicalName(R"(data\piskovec.pac)"));
+    }
     auto offOwner = std::async(std::launch::async, [] {
         ArchiveSourceBinding::RetailPacReadScope other(SelectedModelPath);
         return ArchiveSourceBinding::RetailPacReadScope::Active();
