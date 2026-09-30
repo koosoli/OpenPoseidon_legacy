@@ -343,6 +343,23 @@ fn clump_noise(world_xz: vec2<f32>, frequency: f32, salt: u32) -> f32 {
     return mix(mix(a, b, s.x), mix(c, d, s.x), s.y);
 }
 
+// Begin pure straw palette.
+// A dry root remains darker than its tip. The previous 0.55 luma-independent
+// floor could lift low-albedo blades into pale grey masses under blue sky fill.
+// Keep a warm straw reflectance, with less blue and a modestly lower floor.
+// Shared by point shading and its exact affine footprint integral below.
+fn grass_straw_palette() -> vec4<f32> {
+    return vec4<f32>(0.70, 0.58, 0.20, 0.42);
+}
+fn grass_straw_luma_gain() -> f32 { return 1.25; }
+fn blade_dry_point(colour: vec3<f32>, height_t: f32, patch_mask: f32) -> vec3<f32> {
+    let palette = grass_straw_palette();
+    let luma = dot(colour, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let straw = palette.rgb * (palette.w + grass_straw_luma_gain() * luma);
+    return mix(colour, straw, patch_mask * (0.45 + 0.55 * height_t));
+}
+// End pure straw palette.
+
 // Sun-bleached patches: broad areas of the field shift toward dry straw and
 // brighten, the way real meadow burns off unevenly. Driven by its own coarse
 // noise field rather than the density or tint fields, so dry ground does not
@@ -359,11 +376,8 @@ fn dry_patch(colour: vec3<f32>, world_xz: vec2<f32>, height_t: f32) -> vec3<f32>
     // washing the whole field. Raising `amount` widens the band that qualifies.
     // Not `patch`: that is a WGSL reserved keyword and fails composition.
     let patch_mask = smoothstep(1.0 - amount, 1.0 - amount * 0.30, field);
-    let dry = patch_mask * (0.45 + 0.55 * height_t);
     // Straw keeps the source's luminance structure so blade detail survives.
-    let luma = dot(colour, vec3<f32>(0.2126, 0.7152, 0.0722));
-    let straw = vec3<f32>(0.74, 0.66, 0.32) * (0.55 + 1.35 * luma);
-    return mix(colour, straw, dry);
+    return blade_dry_point(colour, height_t, patch_mask);
 }
 
 // Grass albedo saturation, pushed about the luma axis so brightness is
@@ -1538,8 +1552,9 @@ fn blade_ramp_mean(base: vec3<f32>, tip: vec3<f32>, root_shade: f32,
 fn blade_dry_mean(mean: BladeRampMean, patch_mask: f32) -> vec3<f32> {
     let luma = vec3<f32>(0.2126, 0.7152, 0.0722);
     let dry_colour = mean.colour * 0.45 + mean.height_colour * 0.55;
-    let straw = vec3<f32>(0.74, 0.66, 0.32) *
-        (0.55 * (0.45 + 0.55 * mean.height) + 1.35 * dot(dry_colour, luma));
+    let palette = grass_straw_palette();
+    let straw = palette.rgb *
+        (palette.w * (0.45 + 0.55 * mean.height) + grass_straw_luma_gain() * dot(dry_colour, luma));
     return mean.colour + patch_mask * (straw - dry_colour);
 }
 

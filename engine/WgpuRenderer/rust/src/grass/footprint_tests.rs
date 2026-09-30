@@ -3,12 +3,12 @@ use std::borrow::Cow;
 
 const SHADER: &str = include_str!("grass.wgsl");
 
-// Independent midpoint integration of the original point shading. GPU probes
+// Independent midpoint integration of the point shading. GPU probes
 // execute the production WGSL helpers, rather than a Rust copy of their formula.
 fn integrate(taper: f64, root: f64, gust: f64, patch: f64, variation: f64) -> [[f64; 4]; 3] {
     let base = [0.055, 0.16, 0.025];
     let tip = [0.32, 0.43, 0.10];
-    let straw = [0.74, 0.66, 0.32];
+    let straw = [0.70, 0.58, 0.20];
     let mut out = [[0.0; 4]; 3];
     let mut weight_sum = 0.0;
     for i in 0..65536 {
@@ -23,7 +23,7 @@ fn integrate(taper: f64, root: f64, gust: f64, patch: f64, variation: f64) -> [[
         let luma = colour[0] * 0.2126 + colour[1] * 0.7152 + colour[2] * 0.0722;
         let dry = patch * (0.45 + 0.55 * t);
         for c in 0..3 {
-            out[0][c] += (colour[c] * (1.0 - dry) + straw[c] * (0.55 + 1.35 * luma) * dry) * weight;
+            out[0][c] += (colour[c] * (1.0 - dry) + straw[c] * (0.42 + 1.25 * luma) * dry) * weight;
             out[1][c] += colour[c] * weight;
             out[2][c] += colour[c] * t * weight;
         }
@@ -48,7 +48,10 @@ fn production_footprint_moments_preserve_taper_weighted_colour_dry_tips_and_ao()
     };
     let start = SHADER.find("struct BladeRampMean {").unwrap();
     let end = SHADER.find("// End pure footprint moments.").unwrap();
-    let mut source = SHADER[start..end].to_owned();
+    let palette_start = SHADER.find("// Begin pure straw palette.").unwrap();
+    let palette_end = SHADER.find("// End pure straw palette.").unwrap();
+    let mut source = SHADER[palette_start..palette_end].to_owned();
+    source.push_str(&SHADER[start..end]);
     source
         .push_str("\n@group(0) @binding(0) var<storage, read_write> results: array<vec4<f32>>;\n");
     source.push_str("@compute @workgroup_size(1) fn probe() {\n");
@@ -66,18 +69,28 @@ fn production_footprint_moments_preserve_taper_weighted_colour_dry_tips_and_ao()
                  mean.colour *= {variation:.6}; mean.height_colour *= {variation:.6};\n\
                  results[{}] = vec4<f32>(blade_dry_mean(mean, {patch:.6}), blade_height_ao_mean({taper:.6}));\n\
                  results[{}] = vec4<f32>(mean.colour, mean.height);\n\
-                 results[{}] = vec4<f32>(mean.height_colour, 0.0); }}\n",
-                case * 3, case * 3 + 1, case * 3 + 2
+                 results[{}] = vec4<f32>(mean.height_colour, 0.0);\n\
+                 var total = vec3<f32>(0.0); var weights = 0.0;\n\
+                 for (var i = 0u; i < 32768u; i++) {{\n\
+                     let t = (f32(i) + 0.5) / 32768.0;\n\
+                     let weight = pow(1.0 - t, {taper:.6});\n\
+                     let colour = mix(vec3<f32>(0.055, 0.16, 0.025), vec3<f32>(0.32, 0.43, 0.10), t)\n\
+                         * (1.0 - {root:.6} + {root:.6} * t * t)\n\
+                         * (1.0 + {gust:.6} * (0.035 + 0.075 * t)) * {variation:.6};\n\
+                     total += blade_dry_point(colour, t, {patch:.6}) * weight; weights += weight;\n\
+                 }}\n\
+                 results[{}] = vec4<f32>(total / weights, weights / 32768.0); }}\n",
+                case * 4, case * 4 + 1, case * 4 + 2, case * 4 + 3
             ));
             references.push(integrate(taper, root, gust, patch, variation));
         }
     }
     source.push_str("}\n");
-    let actual = gpu_probe(&device, &queue, source, references.len() * 3);
+    let actual = gpu_probe(&device, &queue, source, references.len() * 4);
     for (case, reference) in references.iter().enumerate() {
         for row in 0..3 {
             for channel in 0..4 {
-                let observed = actual[case * 3 + row][channel] as f64;
+                let observed = actual[case * 4 + row][channel] as f64;
                 assert!(
                     (observed - reference[row][channel]).abs() < 0.00005,
                     "case={case} row={row} channel={channel}: GPU={observed}, integral={}",
@@ -85,7 +98,102 @@ fn production_footprint_moments_preserve_taper_weighted_colour_dry_tips_and_ao()
                 );
             }
         }
+        // Independently evaluate the ACTUAL resolved WGSL helper at 32,768
+        // midpoint samples. This catches a point/mean palette drift even if the
+        // Rust reference happened to repeat the analytic branch's typo.
+        for channel in 0..3 {
+            assert!(
+                (actual[case * 4 + 3][channel] - actual[case * 4][channel]).abs() < 0.00005,
+                "case={case} channel={channel}: actual point integral={}, analytic mean={}",
+                actual[case * 4 + 3][channel],
+                actual[case * 4][channel]
+            );
+        }
     }
+}
+
+#[test]
+fn straw_palette_is_warm_bounded_monotone_and_inert_outside_dry_patches() {
+    let Some((device, queue)) = headless() else {
+        eprintln!("No headless grass adapter; straw palette GPU probe unavailable");
+        return;
+    };
+    let start = SHADER.find("// Begin pure straw palette.").unwrap();
+    let end = SHADER.find("// End pure straw palette.").unwrap();
+    let mut source = SHADER[start..end].to_owned();
+    source.push_str("\n@group(0) @binding(0) var<storage, read_write> results: array<vec4<f32>>;\n@compute @workgroup_size(1) fn probe() {\n");
+    let mut cases = Vec::new();
+    // Dark green roots, dry/olive photographs and bright foliage. The actual
+    // warm hue is tested before lighting; blue sky fill remains lighting data.
+    for colour in [
+        [0.0f32; 3],
+        [0.02, 0.08, 0.01],
+        [0.12, 0.10, 0.05],
+        [0.32, 0.43, 0.10],
+        [0.5; 3],
+        [1.0; 3],
+    ] {
+        for height in [0.0f32, 0.5, 1.0] {
+            for patch in [0.0f32, 0.5, 1.0] {
+                source.push_str(&format!("results[{}] = vec4<f32>(blade_dry_point(vec3<f32>({:.9}, {:.9}, {:.9}), {height:.9}, {patch:.9}), 1.0);\n",
+                    cases.len(), colour[0], colour[1], colour[2]));
+                cases.push((colour, height, patch));
+            }
+        }
+    }
+    source.push_str("}\n");
+    let actual = gpu_probe(&device, &queue, source, cases.len());
+    let luma = |rgb: [f32; 3]| rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+    for (row, &(colour, height, patch)) in actual.iter().zip(&cases) {
+        assert!(row.iter().all(|c| c.is_finite() && *c >= 0.0 && *c <= 1.17));
+        let input_luma = luma(colour);
+        let old_straw = [0.74, 0.66, 0.32].map(|c| c * (0.55 + 1.35 * input_luma));
+        let dry = patch * (0.45 + 0.55 * height);
+        let old: [f32; 3] = std::array::from_fn(|c| colour[c] * (1.0 - dry) + old_straw[c] * dry);
+        let observed = [row[0], row[1], row[2]];
+        assert!(luma(observed) <= luma(old) + 1e-6);
+        assert!(
+            luma(observed) >= luma(old) * 0.675 - 1e-6,
+            "bounded dry palette darkening: colour={colour:?} height={height} patch={patch}"
+        );
+        if patch == 0.0 {
+            for c in 0..3 {
+                assert!((row[c] - colour[c]).abs() < 1e-6);
+            }
+        }
+        if patch == 1.0 && height == 1.0 {
+            assert!(row[0] > row[1] && row[1] > row[2]);
+            assert!(row[2] / row[0] < 0.30); // warm straw, not neutral grey/white
+        }
+    }
+    // Patch interpolation remains affine; increasing source luminance must
+    // still increase dry-tip brightness, rather than flatten it to paint.
+    let mut previous_dry_luma = -1.0f32;
+    for chunk in actual.chunks_exact(9) {
+        let dry_tip = &chunk[8];
+        let dry_luma = luma([dry_tip[0], dry_tip[1], dry_tip[2]]);
+        assert!(dry_luma > previous_dry_luma);
+        previous_dry_luma = dry_luma;
+        for height in 0..3 {
+            let a = &chunk[height * 3];
+            let mid = &chunk[height * 3 + 1];
+            let end = &chunk[height * 3 + 2];
+            for c in 0..3 {
+                assert!((mid[c] - (a[c] + end[c]) * 0.5).abs() < 1e-6);
+            }
+        }
+    }
+    let point = &SHADER
+        [SHADER.find("fn dry_patch(").unwrap()..SHADER.find("fn grass_saturation(").unwrap()];
+    assert!(point.contains("return blade_dry_point(colour, height_t, patch_mask);"));
+    assert!(point.contains("if (amount <= 0.001) { return colour; }"));
+    assert!(!source_contains_camera_or_time(&SHADER[start..end]));
+}
+
+fn source_contains_camera_or_time(source: &str) -> bool {
+    ["frame.", "time", "dpdx", "dpdy", "seed", "textureSample"]
+        .iter()
+        .any(|token| source.contains(token))
 }
 
 fn gpu_probe(
@@ -198,9 +306,11 @@ fn native_filter_preserves_close_colour_and_empty_layers_and_converges_to_the_so
 #[test]
 fn unresolved_ramps_keep_the_native_and_resolved_paths_and_actual_taper() {
     assert!(SHADER.contains("if (ramp_detail < 1.0 && grass.native.x <= 0.0)"));
-    assert!(SHADER.contains(
-        "dry_colour = mix(blade_dry_mean(mean, patch_mask), dry_colour, ramp_detail);"
-    ));
+    assert!(
+        SHADER.contains(
+            "dry_colour = mix(blade_dry_mean(mean, patch_mask), dry_colour, ramp_detail);"
+        )
+    );
     assert!(SHADER.contains("@location(6) @interpolate(flat) blade_taper: f32"));
     assert!(SHADER.contains("out.blade_taper = max(shape.z * taper_jitter, 0.05);"));
     assert!(SHADER.contains("out.blade_taper = shape.z;"));
@@ -239,10 +349,17 @@ fn medium_lighting_resolves_height_but_keeps_aerial_means_and_bounds_broad_sheen
         let view = 1.0 - smooth(0.70, 0.90, vertical);
         assert!((row[0] - height).abs() < 0.000002);
         assert!((row[1] - if enabled { height * view } else { 0.0 }).abs() < 0.000002);
-        let sheen = if enabled { 0.035 * alignment.clamp(0.0, 1.0).powi(4) * height * view } else { 0.0 };
+        let sheen = if enabled {
+            0.035 * alignment.clamp(0.0, 1.0).powi(4) * height * view
+        } else {
+            0.0
+        };
         assert!((row[2] - sheen).abs() < 0.000002);
         assert!(row[2].is_finite() && row[2] >= 0.0 && row[2] <= 0.035001);
-        assert_eq!(row[3], 1.0, "resolved width retains the original point ramp");
+        assert_eq!(
+            row[3], 1.0,
+            "resolved width retains the original point ramp"
+        );
         if pixels <= 3.0 || vertical >= 0.90 || !enabled {
             assert_eq!(row[1], 0.0);
             assert_eq!(row[2], 0.0);
@@ -250,7 +367,10 @@ fn medium_lighting_resolves_height_but_keeps_aerial_means_and_bounds_broad_sheen
         if pixels >= 12.0 && vertical <= 0.70 && enabled {
             assert_eq!(row[1], 1.0);
             if (alignment - 0.70710677).abs() < 0.000001 {
-                assert!((row[2] - 0.00875).abs() < 0.000002, "45 degree half-vector still has 25% of the broad peak");
+                assert!(
+                    (row[2] - 0.00875).abs() < 0.000002,
+                    "45 degree half-vector still has 25% of the broad peak"
+                );
             }
         }
     }
@@ -258,7 +378,9 @@ fn medium_lighting_resolves_height_but_keeps_aerial_means_and_bounds_broad_sheen
 
 #[test]
 fn medium_sun_response_preserves_native_atlas_filter_and_all_coverage_consumers() {
-    assert!(SHADER.contains("grass.blade_layer_means[min(u32(in.blade_uv.z), 7u)], shading_detail"));
+    assert!(
+        SHADER.contains("grass.blade_layer_means[min(u32(in.blade_uv.z), 7u)], shading_detail")
+    );
     assert!(SHADER.contains("let n = normalize(mix(upright, resolved_normal, shading_detail));"));
     assert!(SHADER.contains("in.blade_taper, ramp_detail"));
     assert!(SHADER.contains("grass_medium_view_weight(view_vertical)"));
@@ -267,8 +389,13 @@ fn medium_sun_response_preserves_native_atlas_filter_and_all_coverage_consumers(
     assert!(SHADER.contains("let cov = tuft_coverage(tex.a);"));
     assert!(SHADER.contains("let cov = tuft_coverage(tuft_sample(in).a);"));
     assert!(SHADER.contains("if (tuft_sample(in).a < tuft_alpha_cutoff()) { discard; }"));
-    let helpers = &SHADER[SHADER.find("// Begin pure medium grass lighting.").unwrap()..SHADER.find("// End pure medium grass lighting.").unwrap()];
-    let code = helpers.lines().filter(|line| !line.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
+    let helpers = &SHADER[SHADER.find("// Begin pure medium grass lighting.").unwrap()
+        ..SHADER.find("// End pure medium grass lighting.").unwrap()];
+    let code = helpers
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(!code.contains("seed"));
     assert!(!code.contains("textureSample"));
     assert!(!code.contains("wind"));
