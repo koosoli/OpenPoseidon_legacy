@@ -29,6 +29,9 @@ mod tree_snow_tests;
 #[cfg(test)]
 mod ground_puddles_tests;
 
+#[cfg(test)]
+mod mud_geometry_tests;
+
 use naga_oil::compose::{
     ComposableModuleDescriptor, Composer, NagaModuleDescriptor, ShaderLanguage,
 };
