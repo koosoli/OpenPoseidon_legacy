@@ -37,7 +37,18 @@ function Assert-Peak($trace,[long]$timeMs,$playerAsl) {
     Require ($distance -le 3) 'Actual muzzle is not close to the controlled shooter.'
     return @{ageMs=$age;muzzleDistance=$distance}
 }
+function New-MuzzleViews([double]$X,[double]$Z,[double]$SoleHeight) {
+    # Comma binds before arithmetic in PowerShell array expressions. Every
+    # calculated coordinate must be parenthesized rather than subtracting an array.
+    return [ordered]@{
+        body=@{camera=@(($X-3.0),($Z-2.5),($SoleHeight+1.65));target=@($X,($Z+.4),($SoleHeight+1.05))}
+        surfaces=@{camera=@(($X-3.0),($Z-3.0),($SoleHeight+1.2));target=@($X,($Z+1.5),($SoleHeight+2.8))}
+    }
+}
 if($SelfTest) {
+    $views=New-MuzzleViews 4975 4675 20
+    $expected=@{body=@{camera=@(4972,4672.5,21.65);target=@(4975,4675.4,21.05)};surfaces=@{camera=@(4972,4672,21.2);target=@(4975,4676.5,22.8)}}
+    foreach($view in $views.Keys){foreach($field in @('camera','target')){Require ($views[$view][$field].Count -eq 3) 'Camera vector dimension changed.';for($axis=0;$axis -lt 3;++$axis){Require ([Math]::Abs($views[$view][$field][$axis]-$expected[$view][$field][$axis]) -lt .000001) 'Actual fixture coordinate arithmetic failed.'}}}
     $sample='[info] MUZZLE_LIGHT event=bullet timeMs=100012 pos=4975.100,21.400,4675.800 lifeMs=110 core=0.70 reach=8.40 daylight=true immediate=true active=true'
     $trace=Parse-MuzzleTrace $sample;$null=Assert-Peak $trace 100012 @(4975,4675,20)
     $null=Assert-Peak $trace 100032 @(4975,4675,20)
@@ -49,7 +60,7 @@ if($SelfTest) {
     Require ((Decode-Eval '"data3d\mc vojakw2.p3d"') -ceq 'data3d\mc vojakw2.p3d') 'Literal model path changed.'
     Require ((Decode-Eval '"a ""quoted"" value"') -ceq 'a "quoted" value') 'SQF quotes changed.'
     Require ((Decode-Eval '[1,2,3]').Count -eq 3) 'SQF vector decode failed.'
-    Write-Host 'PASS muzzle runtime trace, peak/owner admission and SQF decoder helper checks (no game).';return
+    Write-Host 'PASS muzzle runtime camera arithmetic, trace, peak/owner admission and SQF decoder helper checks (no game).';return
 }
 Require ([bool]$env:LOCK_OWNER) 'Run through scripts/with-game-lock.sh.'
 Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue)) 'Preserve the running game.'
@@ -137,7 +148,7 @@ try {
             Require ((Eval 'triSetSimTime 100') -ceq 'OK:100000') 'Matched actual simulation clock refused.'
             Require ((Eval 'triSetBrightness 1') -ceq 'OK:1.000') 'Fixed brightness refused.'
             $position=Eval 'getPosASL player';Require ([Math]::Abs($position[0]-$x) -lt .3 -and [Math]::Abs($position[1]-$z) -lt .3) 'Roof collision displaced the actual shooter.'
-            $views=[ordered]@{body=@{camera=@($x-3.0,$z-2.5,$position[2]+1.65);target=@($x,$z+.4,$position[2]+1.05)};surfaces=@{camera=@($x-3.0,$z-3.0,$position[2]+1.2);target=@($x,$z+1.5,$position[2]+2.8)}}
+            $views=New-MuzzleViews $x $z ([double]$position[2])
             $case=[ordered]@{scenario=$kind;source=(Eval 'player');class=(Eval 'typeOf player');weapons=(Eval 'weapons player');position=$position;actualGroundHeight=$ground;requestedDate=@(1985,6,21,$hour,0);actualDayTime=(Eval 'dayTime');weather=(Send @{cmd='weather_visibility'});views=$views;roof=$roof;captures=@{}};$armResult.scenarios[$kind]=$case
             Require ($case.weapons -contains 'M16') 'Actual player has no M16.'
             Require ([Math]::Abs([double]$case.actualDayTime-$hour) -lt .02) 'Actual world hour differs from the scenario.'
@@ -184,7 +195,11 @@ try {
         }
     }
     $result.status='functional-gates-passed-surface-illumination-review-required'
-}catch{$result.status='failed';$result.error=$_.Exception.Message;throw}
+}catch{
+    $result.status='failed';$result.error=$_.Exception.Message
+    $result.errorSource=@{file=$_.InvocationInfo.ScriptName;line=$_.InvocationInfo.ScriptLineNumber;position=$_.InvocationInfo.PositionMessage;stack=$_.ScriptStackTrace}
+    throw
+}
 finally {
     if($p -and !$p.HasExited){try{CloseOwned}catch{$result.cleanupError=$_.Exception.Message;if(!$p.HasExited){$p.Kill();$null=$p.WaitForExit(5000);$result.forcedCleanup=$true}}}
     if($client){$client.Dispose()}
