@@ -2,13 +2,67 @@
 
 ## Checkout and safety
 
-Continue only when Oliver resumes this scope. Active branch `codex/streaming-residency`,
-worktree `.claude/worktrees/combat-audit`. Code checkpoint `f0f09a0e` is committed
+Continue only when Oliver resumes this scope. HISTORICAL branch at pause:
+`codex/streaming-residency`, worktree `.claude/worktrees/combat-audit`. These are
+not instructions to switch branches or discard subsequent work.
+Code checkpoint `f0f09a0e` is committed
 and pushed to `safety` (PoseidonWGPU-private-safety-mirror).
 Authoritative plan: `../modernisation/OpenPoseidon_Streaming_and_Virtualized_Geometry_Plan.md`.
 Whole plan remains OPEN; defaultReady=false/performanceAccepted=false.
 Experimental geometry pages and DayZ owner material staging remain OFF by default.
 Tidewater Native remains default; ocean prototype/native material work is parked.
+
+## Mandatory restart discovery — preserve all intervening work
+
+Oliver will work on other changes while the streamer is parked. The successor
+must discover the current integration baseline, not blindly resume this old HEAD.
+There may be several parallel branches; newest commit time is not proof of the
+correct baseline. Treat every SHA, process, test result and path below as historical.
+
+1. Read applicable AGENTS.md, `.agents/README.md`, smoke instructions and the
+   current authoritative ledger. Inspect root and managed worktrees read-only:
+   `git status --short`, `git branch --show-current`, `git worktree list --porcelain`,
+   `git branch -vv`, `git remote -v`, and recent decorated history. Inspect the
+   installed `DEPLOYED-FROM.txt` separately; it describes binaries, not necessarily
+   the latest source branch. Inventory uncommitted/untracked work before changes.
+2. Fetch the configured relevant remotes without switching/resetting any checkout.
+   Compare local/upstream heads and ancestry. Identify Oliver's current integration
+   line and its intervening changes; do not assume main, this parked branch, the
+   installed branch or the branch with the newest timestamp is automatically right.
+   Report the selected branch/SHA and the evidence before starting implementation.
+   Ask Oliver only if the intended line remains ambiguous after this inspection.
+3. Check whether the selected line contains `f0f09a0e` (last streamer code) and
+   the parked documentation, using ancestry and diffs; equivalent cherry-picked
+   changes may have different SHAs. Read newer ledger entries and code before
+   redoing any task. A passing historical test does not validate intervening changes.
+4. Reuse a suitable isolated worktree or create a `codex/` integration branch from
+   the discovered current baseline. Preserve both newer work and missing streamer
+   changes through a reviewed merge/integration if needed. Do not switch to the old
+   branch as a shortcut, overwrite newer implementations, reset/rebase another
+   worktree, clean untracked files, stash someone else's work, or force-push.
+   Uncommitted user work stays untouched; if it is required for the baseline,
+   establish how it should be included before a dependent integration/deployment.
+   Resolve conflicts semantically and verify both features rather than choosing
+   an entire old file. Keep recoverable refs for pre-integration committed heads.
+5. Continue only the still-open streamer tasks on that combined current baseline.
+   Commit/push before paired deployment. Follow the ownership/game-lock rules and
+   verify the current installation belongs to or is included in the combined line.
+   Never deploy the historical f0/b8 binary over a newer unrelated build. Re-run
+   only relevant checks; preserve Tidewater and other intervening improvements.
+
+## Copyable successor prompt
+
+> Resume the OpenPoseidon streamer / virtualized-geometry plan. First read
+> `docs/roadmap/decisions/STREAMING-PARKED-20260930.md` and the current authoritative
+> plan and repository instructions. This handover is historical: independently
+> discover Oliver's current integration branch and all intervening changes from
+> worktrees, working-tree status, fetched remotes, ancestry and diffs. Preserve
+> newer commits and user changes; do not blindly switch to codex/streaming-residency
+> or reset to a parked SHA. Select or safely integrate a current baseline containing
+> both newer work and the streamer, then state its branch/SHA. Verify the pending
+> runtime gates and continue the remaining plan with bounded tests and performance
+> checks. Subagents may work on disjoint files; only the root owns build/deployment
+> and game/GPU tests. Reforger native anomalies are not material ground truth.
 
 ## Installed versus built
 
@@ -64,7 +118,8 @@ not count. Root script syntax checks passed.
 
 ## Resume sequence
 
-1. Confirm current checkout/stamp/game lock. Build exact committed source and
+1. Complete mandatory restart discovery above; then confirm stamp/game lock.
+   Build the selected combined committed source (not the historical f0 binary) and
    deploy matched EXE+DLL+assets only after owner game exits.
 2. `scripts/Test-RetailColdWorldSource.ps1 -Residency -Label world-threecycle-f0`
    now requires3cycles, compacted live-history counts, exact retirement ACK,
