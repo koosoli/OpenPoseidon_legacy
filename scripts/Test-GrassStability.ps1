@@ -4,7 +4,8 @@ param(
     [ValidateSet('0','1')][string]$Filter = '1',
     [ValidateSet('Aerial','Close')][string]$View = 'Aerial',
     [string]$Tag = 'grass',
-    [int]$Msaa = 4
+    [int]$Msaa = 4,
+    [float]$Altitude = -1
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -21,7 +22,8 @@ $dll = Join-Path $game 'wgpu_renderer.dll'
 $mission = Join-Path $game 'dev-missions/devtest-dawn.abel'
 $log = Join-Path $out 'engine.log'
 $metrics = Join-Path $out 'metrics.json'
-$pose = if ($View -eq 'Aerial') { @('5058.75','3902.55','55','0','-80') } else { @('5058.75','3890.55','18.5','0','-18') }
+$pose = if ($View -eq 'Aerial') { @('5058.75','3902.55','110','0','-80') } else { @('5058.75','3902.55','73','0','-18') }
+if ($Altitude -ge 0) { $pose[2] = $Altitude.ToString([Globalization.CultureInfo]::InvariantCulture) }
 $shots = @(300..305 | ForEach-Object { Join-Path $out ("frame-$_.png") })
 $spec = (0..5 | ForEach-Object { "$($_ + 300):$($shots[$_])" }) -join ','
 $argv = @('--check','--render=wgpu','--window','--width=1280','--height=720','--dev',
@@ -48,6 +50,10 @@ try {
         $logText -notmatch 'wgpu renderer created' -or
         $logText -match 'panicked|UNHANDLED EXCEPTION|wgr_create failed') { throw 'Grass capture failed' }
     foreach ($shot in $shots) { if (!(Test-Path -LiteralPath $shot)) { throw "Missing $shot" } }
+    $capture = Get-Content -LiteralPath $metrics -Raw | ConvertFrom-Json
+    if (($capture.grass.near_instances + $capture.grass.mid_instances) -le 0) {
+        throw 'Capture contains no near or mid grass; fix the camera before comparing shading'
+    }
     $after = @(Get-FileHash -LiteralPath $exe,$dll)
     for ($i=0; $i -lt 2; $i++) { if ($after[$i].Hash -ne $hashes[$i].Hash) { throw 'Installed pair changed' } }
     @{passed=$true;exitCode=$p.ExitCode;normalShutdown=$true;forcedTermination=$false;shots=$shots;
