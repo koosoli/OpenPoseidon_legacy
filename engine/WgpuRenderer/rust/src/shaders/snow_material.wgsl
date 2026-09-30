@@ -6,14 +6,42 @@ fn snow_band(footprint: f32, wavelength: f32) -> f32 {
     return 1.0 - smoothstep(wavelength * 0.18, wavelength * 0.5, footprint);
 }
 
+fn snow_hash(cell: vec2<i32>) -> f32 {
+    var h = bitcast<u32>(cell.x) * 1597334677u ^ bitcast<u32>(cell.y) * 3812015801u;
+    h = (h ^ (h >> 16u)) * 2246822519u;
+    h = (h ^ (h >> 13u)) * 3266489917u;
+    h = h ^ (h >> 16u);
+    return f32(h & 0x00ffffffu) * (2.0 / 16777215.0) - 1.0;
+}
+
+// Continuous value noise and its analytic gradient. Integer hashing keeps
+// absolute-world seeds stable; the rotated bands avoid parallel snow ridges.
+fn snow_noise(p: vec2<f32>) -> vec3<f32> {
+    let cell = vec2<i32>(floor(p));
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    let du = 6.0 * f * (1.0 - f);
+    let a = snow_hash(cell);
+    let b = snow_hash(cell + vec2<i32>(1, 0));
+    let c = snow_hash(cell + vec2<i32>(0, 1));
+    let d = snow_hash(cell + vec2<i32>(1, 1));
+    let lower = mix(a, b, u.x);
+    let upper = mix(c, d, u.x);
+    return vec3<f32>(mix(lower, upper, u.y),
+        mix(b - a, d - c, u.y) * du.x, (upper - lower) * du.y);
+}
+
 fn snow_powder_albedo(world: vec3<f32>, footprint: f32, compacted: f32) -> vec3<f32> {
 #ifdef DISABLE_SNOW_POWDER_DETAIL
     return vec3<f32>(0.70, 0.75, 0.80) * (1.0 - clamp(compacted, 0.0, 1.0) * 0.28);
 #else
+    if (footprint >= 1.5) {
+        return vec3<f32>(0.70, 0.75, 0.80) * (1.0 - clamp(compacted, 0.0, 1.0) * 0.28);
+    }
     let p = world.xz + world.y * vec2<f32>(0.17, -0.11);
-    let broad = sin(dot(p, vec2<f32>(1.13, 1.67))) * snow_band(footprint, 3.0);
-    let powder = sin(dot(p, vec2<f32>(7.31, -6.17))) * snow_band(footprint, 0.6);
-    let fine = sin(dot(p, vec2<f32>(37.0, 23.0))) * snow_band(footprint, 0.12);
+    let broad = snow_noise(vec2<f32>(dot(p, vec2<f32>(0.83, -0.56)), dot(p, vec2<f32>(0.56, 0.83))) / 3.0).x * snow_band(footprint, 3.0);
+    let powder = snow_noise(vec2<f32>(dot(p, vec2<f32>(0.39, 0.92)), dot(p, vec2<f32>(-0.92, 0.39))) / 0.6 + vec2<f32>(17.3, -41.7)).x * snow_band(footprint, 0.6);
+    let fine = snow_noise(vec2<f32>(dot(p, vec2<f32>(0.71, -0.71)), dot(p, vec2<f32>(0.71, 0.71))) / 0.12 + vec2<f32>(-11.8, 39.2)).x * snow_band(footprint, 0.12);
     // Fresh powder retains the existing palette; directional sky supplies blue
     // shadows. Compacted trails retain the established 28% darkening.
     return vec3<f32>(0.70, 0.75, 0.80)
@@ -26,12 +54,15 @@ fn snow_powder_normal(world: vec3<f32>, base: vec3<f32>, footprint: f32) -> vec3
 #ifdef DISABLE_SNOW_POWDER_DETAIL
     return base;
 #else
+    if (footprint >= 1.5) { return base; }
     let p = world.xz + world.y * vec2<f32>(0.17, -0.11);
-    let broad = cos(dot(p, vec2<f32>(1.13, 1.67))) * snow_band(footprint, 3.0);
-    let powder = cos(dot(p, vec2<f32>(7.31, -6.17))) * snow_band(footprint, 0.6);
-    let fine = cos(dot(p, vec2<f32>(37.0, 23.0))) * snow_band(footprint, 0.12);
-    let perturb = vec3<f32>(broad * 0.014 + powder * 0.025 + fine * 0.014,
-        0.0, broad * 0.020 - powder * 0.021 + fine * 0.009);
+    let broad = snow_noise(vec2<f32>(dot(p, vec2<f32>(0.83, -0.56)), dot(p, vec2<f32>(0.56, 0.83))) / 3.0);
+    let powder = snow_noise(vec2<f32>(dot(p, vec2<f32>(0.39, 0.92)), dot(p, vec2<f32>(-0.92, 0.39))) / 0.6 + vec2<f32>(17.3, -41.7));
+    let fine = snow_noise(vec2<f32>(dot(p, vec2<f32>(0.71, -0.71)), dot(p, vec2<f32>(0.71, 0.71))) / 0.12 + vec2<f32>(-11.8, 39.2));
+    let gradient = (broad.y * vec2<f32>(0.83, -0.56) + broad.z * vec2<f32>(0.56, 0.83)) * 0.012 * snow_band(footprint, 3.0)
+        + (powder.y * vec2<f32>(0.39, 0.92) + powder.z * vec2<f32>(-0.92, 0.39)) * 0.018 * snow_band(footprint, 0.6)
+        + (fine.y * vec2<f32>(0.71, -0.71) + fine.z * vec2<f32>(0.71, 0.71)) * 0.014 * snow_band(footprint, 0.12);
+    let perturb = vec3<f32>(gradient.x, 0.0, gradient.y);
     let tangent = perturb - base * dot(perturb, base);
     return normalize(base + tangent);
 #endif
