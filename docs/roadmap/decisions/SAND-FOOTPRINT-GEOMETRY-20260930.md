@@ -206,3 +206,24 @@ movement. Actual distance4m, dry authority, exact source, depth>=3cm, positive
 rim>1mm, support/gradient equality, pause/camera return and normal exit/hash
 requirements are unchanged. The expanded grid and adaptive cameras have only
 CPU/helper/source verification so far; root must execute the corrected fixture.
+
+### Corrected installed dry control
+
+Matching06a7c41e `build/sand-footprints/noe-dry-gridfixed-20260930-213903-a0074c`
+passes the installed physical/lifecycle gates. The stock actor walks4.336m on
+actual Nogova SandDark (`o\\pt.paa`) with dry liquid-rain authority. The3445-point
+before/after grid records a minimum signed support change of-0.081341m and
+maximum rim+0.010383m, with21 samples deeper than3cm and87 positive rim samples.
+Physical terrain heights and derivatives agree with the signed field. Actual
+boot producer traces are retained. Paused simulation, sand/rain/uniform state
+and all3445 physical samples survive the camera return exactly. Normal exit0,
+Shutdown complete and unchanged matching installed provenance/hashes pass.
+
+Root inspected after-low/after-top and the baseline: visible depressions and
+soft raised shoulders beneath the existing boot-detail decals read as compacted
+sand. Baseline and after cameras differ because the ordinary AI takes a diagonal
+path, so this is descriptive visual acceptance combined with numeric geometry
+proof, not a pixel-isolated before/after material measurement. Wet cohesion,
+hard-ground/border/snow installed negatives, other maps and gameplay friction
+remain unaccepted. This is persistent signed terrain compaction, not a granular
+flow simulation.

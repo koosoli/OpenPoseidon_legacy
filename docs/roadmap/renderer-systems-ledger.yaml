@@ -747,8 +747,10 @@ unbuilt_candidates: >-
       Universal actual terrain film and filtered liquid-rain ripples are source
       integrated, including actual ground-pinned road/decal shading. Nogova's
       installed 6a388c62 reported zero admitted materials under the old policy.
-      New original-map growth, road, shelter and moving-ripple acceptance is
-      pending. See decisions/ALL-GROUND-PUDDLES-20260930.md. Persistent signed
+      Matching01e8c4fb original Nogova real-rain lifecycle passes wetting,
+      exact paused state and gradual drying with visible field puddles; road,
+      general ground meshes and isolated moving-ripple acceptance remain pending.
+      See decisions/ALL-GROUND-PUDDLES-20260930.md. Persistent signed
       boot depressions also now displace close terrain and physical SurfaceY,
       BumpySurfaceY and local tangent planes on admitted soft soil. Exact Noe
       cultivated-soil sources are admitted conservatively; arbitrary brown
@@ -760,8 +762,14 @@ unbuilt_candidates: >-
       compression capacity (35cm cap), plus a moist-soil coat between puddles.
       Actual deep terrain/conform GPU probes pass; installed deep walking and
       wet appearance remain pending. Sand source has dry compaction and raised
-      rims; signed GPU probes pass independently of snow/mud. Full engine and
-      installed sand walking remain pending. See decisions/WET-SOIL-MATERIAL-20260930.md,
+      rims; signed GPU probes pass independently of snow/mud. Matching06a7c41e
+      full engine build and609 serial Rust checks pass (two existing ignored).
+      Installed dry Nogova sand walking passes4.336m actual movement, physical
+      height/gradient agreement,8.13cm depression and1.04cm rim, exact3445-point
+      paused camera return and normal exit0/unchanged pair. Root accepts the
+      descriptive close/top compaction appearance; wet cohesion, other maps
+      and installed hard-ground/border/snow negatives remain open. The first
+      narrow-grid campaign stays failed. See decisions/WET-SOIL-MATERIAL-20260930.md,
       SAND-FOOTPRINT-GEOMETRY-20260930.md and SAND-GPU-GEOMETRY-TESTS-20260930.md.
       Earlier source decisions:
       MUD-VOLUMETRIC-CONTACT-20260930.md and NOGOVA-SOFT-MUD-CONTACT-20260930.md.
