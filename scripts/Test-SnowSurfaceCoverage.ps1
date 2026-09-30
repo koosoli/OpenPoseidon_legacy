@@ -215,7 +215,8 @@ try {
             '--test-mission',('"'+$mission+'"'),'--test-world-hour','16',
             '--test-world-freefly','9486','3006','240','0','-70','--log-file',('"'+$log+'"'))
         if (!$LegacyCwa) { $arguments += @('--test-world',('"'+$NativeAddons+'"')) }
-        $p = Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $arguments
+        $stdout = Join-Path $armDir 'stdout.txt'; $stderr = Join-Path $armDir 'stderr.txt'
+        $p = Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $arguments -RedirectStandardOutput $stdout -RedirectStandardError $stderr
         $result.arms[$arm] = @{ status = 'starting'; pid = $p.Id; log = $log; arguments = $arguments }
         $null = $p.Handle; $until = [DateTime]::UtcNow.AddSeconds(120)
         do {
@@ -341,7 +342,7 @@ try {
             effectiveToggle = $effectiveToggle; fixture = $fixture; carPosition = $carPosition; carGround = $vehicleGround;
             vehicleScope = 'Exploratory: dynamic/animated/skinned mesh admission may exclude UAZ; positive pixels alone do not establish owner admission.';
             views = $views; captures = $captures; initial = $initial; enabled = $enabled; returned = $returned;
-            disabled = $disabled; restored = $restored; tracks = $tracks; actualWeather = $weather; log = $log }
+            disabled = $disabled; restored = $restored; tracks = $tracks; actualWeather = $weather; log = $log; stdout = $stdout; stderr = $stderr }
         $result.arms[$arm].beforeReset = $beforeReset; $result.arms[$arm].resetDisabled = $reset
         $result.arms[$arm].replacedFixture = $replacedFixture
         $result.comparisons[$arm+'-roof-shelter'] = @{ removedPresent = Pair $captures.roofRemoved.coveredGround $captures.enabled.coveredGround;
