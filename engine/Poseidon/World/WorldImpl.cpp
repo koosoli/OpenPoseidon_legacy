@@ -778,11 +778,21 @@ void World::SimulateCloudlets(float deltaT)
             const auto grid = RainWaterField::AlignedSourceGrid(terrainRange,GLandscape->GetTerrainGrid());
             const int side = grid.side;
             const float spacing = grid.spacing;
-            if (runoff.Width() == 0)
+            if (!runoff.MatchesDomain(side,side,spacing))
             {
                 std::vector<float> bed(static_cast<size_t>(side) * side);
                 for (int z=0; z<side; ++z) for (int x=0; x<side; ++x)
                     bed[static_cast<size_t>(z)*side+x] = GLandscape->ClippedData(z*grid.stride,x*grid.stride);
+                if (runoff.Width() != 0)
+                {
+                    // A runtime setTerrainGrid may change both the number and
+                    // area of water cells. The existing equal-area node storage
+                    // has no conservative regrid operator; retire it explicitly
+                    // instead of silently moving retained water to wrong places.
+                    LOG_INFO(Graphics,"RAIN_WATER_DOMAIN_RESET world={} oldWidth={} oldHeight={} oldSpacing={:.3f} newWidth={} newSpacing={:.3f} removedVolume_m3={:.6f}",
+                        GLandscape->GetName(),runoff.Width(),runoff.Height(),runoff.Spacing(),side,spacing,runoff.Volume());
+                    runoff.Reset();
+                }
                 if (runoff.Configure(side,side,spacing,std::move(bed),0,0,GLandscape->GetSeaLevel()))
                 {
                     bedRevision = GLandscape->HeightRevision();
@@ -802,8 +812,11 @@ void World::SimulateCloudlets(float deltaT)
             const float overcast = std::clamp(GLandscape->GetOvercast(),0.0f,1.0f);
             const float solar = sun ? std::clamp(sun->SunDirection().Y(),0.0f,1.0f)
                 * (1-overcast)*(1-overcast) * (1-std::clamp(sun->NightEffect(),0.0f,1.0f)) : 0;
-            runoff.SetSeaLevel(GLandscape->GetSeaLevel());
-            runoff.Advance(deltaT,liquidRain,solar,GWind.IsActive() ? GWind.Sample().speed/20.0f : 0);
+            if (runoff.MatchesDomain(side,side,spacing))
+            {
+                runoff.SetSeaLevel(GLandscape->GetSeaLevel());
+                runoff.Advance(deltaT,liquidRain,solar,GWind.IsActive() ? GWind.Sample().speed/20.0f : 0);
+            }
         }
     }
     SimulationImportance prec = SimulateVisibleFar;

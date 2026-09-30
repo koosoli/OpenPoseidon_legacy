@@ -80,4 +80,45 @@ int main() {
     const auto resetGeneration=single.Generation();
     assert(single.Configure(5,5,2,std::vector<float>(25,10)));
     assert(single.Generation()>resetGeneration && single.Revision()==0);
+
+    // The runtime producer uses this exact predicate before height revision
+    // updates. Grid changes must never reuse stale world coordinates/storage.
+    RainWaterField domain;
+    assert(!domain.MatchesDomain(0,0,1));
+    assert(domain.Configure(5,5,2,std::vector<float>(25,10),10,20));
+    assert(domain.MatchesDomain(5,5,2,10,20));
+    assert(!domain.MatchesDomain(9,9,1,10,20)); // same world extent, new cell area
+    assert(!domain.MatchesDomain(5,6,2,10,20));
+    assert(!domain.MatchesDomain(6,5,2,10,20));
+    assert(!domain.MatchesDomain(5,5,1,10,20));
+    assert(!domain.MatchesDomain(5,5,2,11,20));
+    assert(!domain.MatchesDomain(5,5,2,10,21));
+    assert(!domain.MatchesDomain(5,5,std::numeric_limits<float>::quiet_NaN(),10,20));
+    assert(domain.AddWater(2,2,.3f)); domain.Advance(.125f,1);
+    const double domainVolume=domain.Volume();
+    const auto domainGeneration=domain.Generation();
+    // Same-domain actual excavation preserves volume, generation and backlog.
+    assert(domain.SetBed(2,2,9));
+    assert(domain.MatchesDomain(5,5,2,10,20));
+    assert(domain.Volume()==domainVolume && domain.Generation()==domainGeneration);
+    assert(domain.PendingSeconds()==.125 && std::abs(domain.At(14,24).height-9.3f)<1e-6f);
+    // Explicit runtime regrid policy: retire the old domain before attempting
+    // the new configuration, including a failed finite-bed admission.
+    domain.Reset();
+    assert(!domain.MatchesDomain(5,5,2,10,20) && !domain.At(14,24).valid);
+    assert(domain.Generation()>domainGeneration && domain.PendingSeconds()==0);
+    std::vector<float> invalidBed(81,10); invalidBed[40]=std::numeric_limits<float>::infinity();
+    assert(!domain.Configure(9,9,1,std::move(invalidBed),10,20));
+    assert(!domain.At(14,24).valid && domain.Volume()==0);
+    assert(domain.Configure(9,9,1,std::vector<float>(81,10),10,20));
+    assert(domain.MatchesDomain(9,9,1,10,20) && !domain.MatchesDomain(5,5,2,10,20));
+    assert(domain.Volume()==0 && domain.PendingSeconds()==0 && domain.Revision()==0);
+    assert(domain.WaterBudget().rain==0 && domain.WaterBudget().outlet==0);
+    assert(domain.At(14,24).valid && domain.At(14,24).height==10);
+    // The inverse regrid is equally explicit; coordinates outside the newly
+    // smaller domain become invalid rather than reading old larger storage.
+    assert(domain.AddWater(8,8,.3f));
+    domain.Reset();
+    assert(domain.Configure(3,3,2,std::vector<float>(9,10),10,20));
+    assert(domain.MatchesDomain(3,3,2,10,20) && !domain.At(18,28).valid);
 }

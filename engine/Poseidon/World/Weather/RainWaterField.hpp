@@ -104,6 +104,14 @@ public:
     float Spacing() const { return _spacing; }
     float OriginX() const { return _originX; }
     float OriginZ() const { return _originZ; }
+    // Height revisions can also change terrain-grid identity. Never apply a
+    // differently spaced source bed to old water coordinates. Exact comparison
+    // is intentional: these values are copied from the same source-grid key.
+    bool MatchesDomain(int width, int height, float spacing,
+                       float originX = 0, float originZ = 0) const {
+        return !_bed.empty() && _width == width && _height == height &&
+               _spacing == spacing && _originX == originX && _originZ == originZ;
+    }
     void SetSeaLevel(float level) { if (std::isfinite(level)) _seaLevel = level; }
     // Immutable simulation cell data, copied by the main-thread presentation
     // producer. Camera movement does not seed, erase or recompute any water.
