@@ -22,6 +22,7 @@
 #include "ParkedGeometryReport.hpp"
 #include "ModelAdmissionReceipt.hpp"
 #include "RetailPageRecordObservation.hpp"
+#include "RetailPageInstanceObservation.hpp"
 
 #include <array>
 #include <chrono> // steady_clock, for the opt-in auto-exposure time constant (WGR_AUTO_EXPOSURE_TAU)
@@ -1291,14 +1292,25 @@ class EngineWgpu : public EngineDummy
         Kind kind;
         uint32_t handle;
         WgrInstance inst; // Add / Update payload; unused for Remove
+        std::shared_ptr<render::RetailPageInstanceObservation> retailReceipt;
     };
     std::vector<InstanceOp> _instanceOps;
     std::vector<uint32_t> _instSlotOf;       // consumer-owned: producer handle -> renderer slot
     uint32_t _nextInstanceHandle = 0;       // producer-owned; never reads/grows the consumer table
     std::vector<uint32_t> _instFreeHandles;  // recycled producer handles
-    uint32_t EnqueueInstanceAdd(const WgrInstance& inst);
-    void EnqueueInstanceUpdate(uint32_t handle, const WgrInstance& inst);
-    void EnqueueInstanceRemove(uint32_t handle);
+    uint32_t EnqueueInstanceAdd(const WgrInstance& inst, std::shared_ptr<render::RetailPageInstanceObservation> receipt = nullptr);
+    void EnqueueInstanceUpdate(uint32_t handle, const WgrInstance& inst, std::shared_ptr<render::RetailPageInstanceObservation> receipt = nullptr);
+    void EnqueueInstanceRemove(uint32_t handle, std::shared_ptr<render::RetailPageInstanceObservation> receipt = nullptr);
+    uint32_t ReserveRetailInstanceHandle();
+    void EnqueueInstanceAddAt(uint32_t handle, const WgrInstance&, std::shared_ptr<render::RetailPageInstanceObservation>);
+    void ReleaseRetailInstanceHandle(uint32_t handle);
+    uint64_t _nextRetailVisibleBirth = 1;
+    std::shared_ptr<render::RetailPageInstanceObservation> _retailInstanceReturn;
+    uint64_t _retailInstanceFrameAttempt = 0;
+    uint64_t _retailInstanceCameraBefore = 0;
+    void ObserveRetailInstanceDrain(const InstanceOp&);
+    void ObserveRetailInstanceReturned(const WgrFrame&, uint32_t renderStatus);
+    render::RetailPageInstanceObservation::InstanceEvidence GetRetailInstanceEvidence(const render::RetailPageInstanceObservation&) const;
     void DrainInstanceOps(std::vector<InstanceOp>& ops);
 
     // REN-THR-008 -- shape 3, the RETAINED-model half: mesh creates and destroys, crown
@@ -1392,6 +1404,7 @@ class EngineWgpu : public EngineDummy
     GeometryPageFixtureReport BeginRetailPageRecordPilot(render::RetailPagePilotAdmission&&);
     GeometryPageFixtureReport StepRetailPageRecordPilot(GeometryPageFixtureAction);
     GeometryPageFixtureReport SnapshotRetailPageRecordPilot() const;
+    GeometryPageFixtureReport StepRetailPageVisiblePilot(GeometryPageFixtureAction);
     void MaintainGeometryPageProjectedDemand();
     void MaintainGeometryPageHierarchyDemand();
     GeometryPageOriginalAdmissionReport AdmitGeometryPageOriginalStartup(const GeometryPageOriginalStartupInput&) override;

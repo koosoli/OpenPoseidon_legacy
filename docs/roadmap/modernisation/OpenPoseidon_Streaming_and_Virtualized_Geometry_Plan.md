@@ -1486,3 +1486,32 @@ Normal installed42f control `default-control-42f-sep30-disabled-20260930-034047`
 passed with921 frames, zero dropped trace frames and normal exit0/no force.
 These checks do not enable retail page instances or prove a world replacement.
 The corrected full-history installed rerun remains pending.
+
+### 30 September — complete retail history accepted, visible pilot pending
+
+Exact paired `b911afab` startup and `retail-full-history-b911-20260930-035017-dcc50c`
+passed normally/exit0. Initial Ready observed8 Present; release4 Present/4 Absent;
+refill8 Present/4 historical Absent with fresh IDs; final abort12 Absent meshes,
+all4 model maps absent, worker debt0. Separate controlled automatic traversal
+also passed. The earlier42f refill failure remains preserved.
+
+Normal DayZ controls42f/b911 both passed/no dropped trace frames, median
+22.921/22.612ms, p95108.242/113.111ms, p99354.061/339.959ms. Ordered-cache
+screening is not a causal performance benefit or acceptance.
+
+Next source adds an explicit default-off, bounded actual-retail private visible
+instance. A literal generation-bound CPU row fact and immutable operation receipt
+join add/switch/remove to a fresh actual returned main camera. Root-before-retire
+and remove-before-abort require separate owner frames. This private copy does
+not preserve/prove same-placement original other-pass geometry or replace world
+objects. Pure receipt checks passed187 assertions/6 cases; installed verification
+is pending. Whole plan OPEN/defaultReady=false/performanceAccepted=false.
+
+The visible source build and187 assertion/6-case receipt suite passed. Three
+pure Rust actual-table/ABI tests passed. Review repairs freeze epoch evidence
+AFTER the whole instance queue, preserve exact consumed rows for cleanup when
+owner source/camera validation fails, and allow at most three new-ticket
+idempotent historical-Absent Remove observations. No stale Remove FFI is issued;
+terminal rejected receipts never become visible Ready. The maximum12 instance
+operations are reserved before visible admission. Installed visible verification
+remains pending; normal default paths do not query instance facts.

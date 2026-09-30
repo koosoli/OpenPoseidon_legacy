@@ -372,6 +372,65 @@ pub struct WgrInstance {
     pub conform2: WgrVec4,
 }
 
+const INSTANCE_CPU_FACT_VERSION: u32 = 1;
+const INSTANCE_CPU_FACT_BYTES: u32 = 176;
+const INSTANCE_CPU_FACT_PRESENT: u32 = 1;
+const INSTANCE_CPU_FACT_ABSENT: u32 = 2;
+const INSTANCE_CPU_FACT_INVALID: u32 = 3;
+
+/// Additive one-handle CPU fact. `Absent` requires caller-held historical
+/// `Present` authority for the literal handle; this getter cannot prove birth.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct WgrInstanceCpuFact {
+    pub version: u32,
+    pub bytes: u32,
+    pub status: u32,
+    pub queried_handle: u32,
+    pub instance_epoch: u64,
+    pub row: WgrInstance,
+    pub resolved_slot: u32,
+    pub reserved: u32,
+}
+
+const _: () = assert!(std::mem::size_of::<WgrInstanceCpuFact>() == INSTANCE_CPU_FACT_BYTES as usize);
+const _: () = assert!(std::mem::offset_of!(WgrInstanceCpuFact, row) == 24);
+const _: () = assert!(std::mem::offset_of!(WgrInstanceCpuFact, resolved_slot) == 168);
+
+impl WgrInstanceCpuFact {
+    fn from_lookup(handle: u32, epoch: u64, lookup: crate::gfx3d::cull::InstanceCpuLookup) -> Self {
+        use crate::gfx3d::cull::InstanceCpuLookup;
+        let mut fact = Self {
+            version: INSTANCE_CPU_FACT_VERSION,
+            bytes: INSTANCE_CPU_FACT_BYTES,
+            status: INSTANCE_CPU_FACT_INVALID,
+            queried_handle: handle,
+            instance_epoch: epoch,
+            row: WgrInstance {
+                world: [0.0; 16], center: [0.0; 4], model: 0, flags: 0,
+                cull_radius: 0, _pad: 0, conform0: [0.0; 4],
+                conform1: [0.0; 4], conform2: [0.0; 4],
+            },
+            resolved_slot: u32::MAX,
+            reserved: 0,
+        };
+        match lookup {
+            InstanceCpuLookup::Invalid => {}
+            InstanceCpuLookup::Absent => fact.status = INSTANCE_CPU_FACT_ABSENT,
+            InstanceCpuLookup::Present { slot, row } => {
+                fact.status = INSTANCE_CPU_FACT_PRESENT;
+                fact.resolved_slot = slot;
+                fact.row = WgrInstance {
+                    world: row.world, center: row.center, model: row.model, flags: row.flags,
+                    cull_radius: row.cull_radius, _pad: row._pad,
+                    conform0: row.conform0, conform1: row.conform1, conform2: row.conform2,
+                };
+            }
+        }
+        fact
+    }
+}
+
 // Live tonemap/look parameters, pushed from the ImGui Tonemap tab via
 // wgr_set_tonemap. The Hable curve is fixed in the shader; these are exposure + the
 // colour-grade block. Layout matches the `Params` uniform in tonemap.wgsl and the
@@ -2722,6 +2781,87 @@ pub unsafe extern "C" fn wgr_instance_remove(renderer: *mut WgrRenderer, slot: u
     let _ = catch_unwind(AssertUnwindSafe(|| {
         unsafe { &mut *renderer }.instance_remove(slot);
     }));
+}
+
+/// Read one exact retained CPU instance row through the real renderer cull table.
+/// No GPU readback, frame dispatch, allocation, scan, or stale-operation mutation.
+/// Return 0 and leave output untouched for unsupported layout, null pointers or panic;
+/// otherwise return the fact status (Present/Absent/Invalid).
+///
+/// # Safety
+/// `renderer` must be live and exclusively owner accessed. `out` must point to
+/// a writable, correctly aligned, non-aliasing 176-byte fact allocation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_instance_cpu_fact(
+    renderer: *const WgrRenderer, handle: u32, out: *mut WgrInstanceCpuFact,
+    bytes: u32, version: u32,
+) -> u32 {
+    if renderer.is_null() || out.is_null() || bytes != INSTANCE_CPU_FACT_BYTES ||
+        version != INSTANCE_CPU_FACT_VERSION { return 0; }
+    catch_unwind(AssertUnwindSafe(|| {
+        let (epoch, lookup) = unsafe { &*renderer }.gfx3d.instance_cpu_lookup(handle);
+        let fact = WgrInstanceCpuFact::from_lookup(handle, epoch, lookup);
+        unsafe { *out = fact; }
+        fact.status
+    })).unwrap_or(0)
+}
+
+#[cfg(test)]
+mod instance_cpu_fact_tests {
+    use super::*;
+    use bytemuck::Zeroable;
+    use crate::gfx3d::cull::{InstanceCpuLookup, InstanceGpu};
+
+    #[test]
+    fn fixed_layout_and_full_row_bits_match_retained_gpu_row() {
+        assert_eq!(std::mem::size_of::<WgrInstance>(), 144);
+        assert_eq!(std::mem::size_of::<WgrInstanceCpuFact>(), 176);
+        assert_eq!(std::mem::offset_of!(WgrInstanceCpuFact, row), 24);
+        assert_eq!(std::mem::offset_of!(WgrInstanceCpuFact, resolved_slot), 168);
+        let mut row = InstanceGpu::zeroed();
+        row.world[0] = f32::from_bits(0x3f80_0001);
+        row.world[12] = -42.5;
+        row.center = [7.0, 8.0, 9.0, 3.0];
+        row.model = 123;
+        row.flags = 32;
+        row.cull_radius = 0x4123_4567;
+        row._pad = 0x5566_7788;
+        row.conform0 = [1.0, 2.0, 3.0, 4.0];
+        row.conform1 = [5.0, 6.0, 7.0, 8.0];
+        row.conform2 = [9.0, 10.0, 11.0, 12.0];
+        let fact = WgrInstanceCpuFact::from_lookup(0x1200_0042, 991,
+            InstanceCpuLookup::Present { slot: 65, row });
+        assert_eq!((fact.version, fact.bytes, fact.status, fact.queried_handle),
+            (1, 176, INSTANCE_CPU_FACT_PRESENT, 0x1200_0042));
+        assert_eq!((fact.instance_epoch, fact.resolved_slot, fact.reserved), (991, 65, 0));
+        let ffi_words: &[u32; 36] = unsafe { &*((&fact.row as *const WgrInstance).cast::<[u32; 36]>()) };
+        let gpu_words: &[u32; 36] = bytemuck::cast_ref(&row);
+        assert_eq!(ffi_words, gpu_words, "every 144-byte scalar and float bit must survive");
+    }
+
+    #[test]
+    fn invalid_layout_leaves_output_untouched_and_nonpresent_rows_are_zero() {
+        let absent = WgrInstanceCpuFact::from_lookup(91, 123, InstanceCpuLookup::Absent);
+        let invalid = WgrInstanceCpuFact::from_lookup(0, 123, InstanceCpuLookup::Invalid);
+        assert_eq!((absent.status, absent.queried_handle, absent.instance_epoch),
+            (INSTANCE_CPU_FACT_ABSENT, 91, 123));
+        assert_eq!((invalid.status, invalid.queried_handle), (INSTANCE_CPU_FACT_INVALID, 0));
+        assert_eq!(absent.resolved_slot, u32::MAX);
+        assert_eq!(invalid.resolved_slot, u32::MAX);
+        let absent_row: &[u32; 36] = unsafe { &*((&absent.row as *const WgrInstance).cast::<[u32; 36]>()) };
+        let invalid_row: &[u32; 36] = unsafe { &*((&invalid.row as *const WgrInstance).cast::<[u32; 36]>()) };
+        assert_eq!(*absent_row, [0; 36]);
+        assert_eq!(*invalid_row, [0; 36]);
+        let renderer = std::ptr::NonNull::<WgrRenderer>::dangling().as_ptr();
+        let mut output = absent;
+        for (bytes, version) in [(175, 1), (176, 0), (177, 1)] {
+            assert_eq!(unsafe { wgr_instance_cpu_fact(renderer, 12, &mut output, bytes, version) }, 0);
+            assert_eq!((output.status, output.queried_handle, output.instance_epoch),
+                (INSTANCE_CPU_FACT_ABSENT, 91, 123));
+        }
+        assert_eq!(unsafe { wgr_instance_cpu_fact(std::ptr::null(), 12, &mut output, 176, 1) }, 0);
+        assert_eq!(unsafe { wgr_instance_cpu_fact(renderer, 12, std::ptr::null_mut(), 176, 1) }, 0);
+    }
 }
 
 /// Replace the whole dynamic instance set for this frame (the churny set the CPU already

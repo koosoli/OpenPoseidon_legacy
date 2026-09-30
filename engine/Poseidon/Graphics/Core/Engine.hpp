@@ -3221,7 +3221,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse, BeginOriginalHierarchy, StepHierarchy, RootHierarchy, FineHierarchy, IntermediateHierarchy, LocalHierarchy, BeginOriginalHierarchyDisk, ReleaseHierarchyNonroot, ProjectHierarchy, FollowHierarchy, StopHierarchy, ProbeTextureReuseOnly, ProbeRetailOdol7, PollRetailRecords, ReleaseRetailRecords, RefillRetailRecords, AbortRetailRecords, SnapshotRetailRecords };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse, BeginOriginalHierarchy, StepHierarchy, RootHierarchy, FineHierarchy, IntermediateHierarchy, LocalHierarchy, BeginOriginalHierarchyDisk, ReleaseHierarchyNonroot, ProjectHierarchy, FollowHierarchy, StopHierarchy, ProbeTextureReuseOnly, ProbeRetailOdol7, PollRetailRecords, ReleaseRetailRecords, RefillRetailRecords, AbortRetailRecords, SnapshotRetailRecords, BeginRetailVisible, RootRetailVisible, FineRetailVisible, PollRetailVisible, RemoveRetailVisible, FallbackRetailVisible };
     struct GeometryPageSourceIdentity
     {
         std::array<uint8_t,32> sha256{};
@@ -3308,6 +3308,10 @@ class Engine : public IGraphicsEngine
         uint32_t retailSourcePrepareStatus=0,retailSourceExportStatus=0;
         // Explicit source diagnostic records only: no instance or world routing.
         bool retailRecordOnly=false,retailPixelSourceVerified=false,retailRecordDistinctCuts=false;
+        bool retailVisiblePilot=false,retailVisiblePresent=false,retailVisibleRemoved=false,retailVisibleReturned=false;
+        uint64_t retailVisibleBirth=0,retailVisibleRequest=0,retailVisibleFrame=0;
+        uint32_t retailVisibleRenderer=UINT32_MAX,retailVisibleSlot=UINT32_MAX,retailVisibleModel=UINT32_MAX;
+        std::string retailVisiblePhase;
         std::string retailPixelSourceSha256;
         uint32_t retailHierarchyProductStatus=0,retailHierarchyPages=0;
         uint32_t retailRecordMeshesPresent=0,retailRecordMeshesAbsent=0;

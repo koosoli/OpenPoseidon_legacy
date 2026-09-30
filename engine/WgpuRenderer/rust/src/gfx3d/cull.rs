@@ -95,6 +95,16 @@ pub struct InstanceGpu {
     pub conform2: [f32; 4],
 }
 
+/// One literal retained handle, resolved without touching stale-operation counters.
+/// `Absent` only becomes a removal witness when the caller retained a prior
+/// `Present` fact for the same handle; an arbitrary forged handle has no history.
+#[derive(Clone, Copy)]
+pub(crate) enum InstanceCpuLookup {
+    Invalid,
+    Absent,
+    Present { slot: u32, row: InstanceGpu },
+}
+
 // One model = a range of drawable LOD levels + its bounding radius at scale 1.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -682,6 +692,22 @@ impl InstanceTable {
                 }
                 None
             }
+        }
+    }
+
+    fn read_handle(&self, handle: u32) -> InstanceCpuLookup {
+        let biased = handle & 0x00FF_FFFF;
+        if biased == 0 { return InstanceCpuLookup::Invalid; }
+        let slot = biased - 1;
+        let Some(&generation) = self.generations.get(slot as usize) else {
+            return InstanceCpuLookup::Invalid;
+        };
+        if generation != (handle >> 24) as u8 {
+            return InstanceCpuLookup::Absent;
+        }
+        match self.slots.get(slot as usize).copied() {
+            Some(row) if row.model != INVALID_MODEL => InstanceCpuLookup::Present { slot, row },
+            _ => InstanceCpuLookup::Absent,
         }
     }
 
@@ -3924,6 +3950,10 @@ impl CullState {
         self.instances.epoch
     }
 
+    pub(crate) fn instance_cpu_lookup(&self, handle: u32) -> (u64, InstanceCpuLookup) {
+        (self.instances.epoch, self.instances.read_handle(handle))
+    }
+
     pub fn instance_count(&self) -> u32 {
         self.params.instance_count
     }
@@ -5234,6 +5264,48 @@ pub(crate) mod tests {
     // slot indices. Tests that assert against GPU records decode with this.
     fn raw_slot(handle: u32) -> u32 {
         (handle & 0x00FF_FFFF) - 1
+    }
+
+    #[test]
+    fn instance_cpu_lookup_is_literal_read_only_and_generation_checked() {
+        let mut table = InstanceTable::default();
+        assert!(matches!(table.read_handle(0), InstanceCpuLookup::Invalid));
+        assert!(matches!(table.read_handle(0xff00_0000), InstanceCpuLookup::Invalid));
+        assert!(matches!(table.read_handle(1), InstanceCpuLookup::Invalid));
+
+        let mut row = inst(31);
+        row.flags = INSTANCE_MAIN_CAMERA_ONLY;
+        row.world[12] = 123.25;
+        row.center = [8.0, 9.0, 10.0, 2.0];
+        row.conform2 = [1.0, 2.0, 3.0, 4.0];
+        let first = table.add(row);
+        let epoch = table.epoch;
+        let stale_ops = table.stale_ops();
+        let InstanceCpuLookup::Present { slot, row: actual } = table.read_handle(first) else {
+            panic!("new literal handle must resolve");
+        };
+        assert_eq!(slot, raw_slot(first));
+        assert_eq!(bytemuck::bytes_of(&actual), bytemuck::bytes_of(&row));
+        assert_eq!((table.epoch, table.stale_ops()), (epoch, stale_ops));
+
+        let mut updated = row;
+        updated.model = 32;
+        updated.world[12] = -456.5;
+        table.update(first, updated);
+        let InstanceCpuLookup::Present { row: actual, .. } = table.read_handle(first) else {
+            panic!("update must be visible through the same handle");
+        };
+        assert_eq!(bytemuck::bytes_of(&actual), bytemuck::bytes_of(&updated));
+        table.remove(first);
+        let removed_epoch = table.epoch;
+        assert!(matches!(table.read_handle(first), InstanceCpuLookup::Absent));
+        let second = table.add(inst(77));
+        assert_eq!(raw_slot(first), raw_slot(second));
+        assert_ne!(first, second);
+        assert!(matches!(table.read_handle(first), InstanceCpuLookup::Absent));
+        assert!(matches!(table.read_handle(second), InstanceCpuLookup::Present { row, .. } if row.model == 77));
+        assert!(table.epoch > removed_epoch);
+        assert_eq!(table.stale_ops(), stale_ops, "the getter must not count stale operations");
     }
 
     // ---- ID-3: the retained instance table's identity rules -------------------------

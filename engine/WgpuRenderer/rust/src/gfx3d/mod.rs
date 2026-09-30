@@ -9335,6 +9335,12 @@ impl Gfx3d {
         self.cull.instance_remove(slot);
     }
 
+    /// Read one actual retained row from the owner CPU table. This does not
+    /// prepare a frame, upload, scan, or mutate stale-handle accounting.
+    pub(crate) fn instance_cpu_lookup(&self, handle: u32) -> (u64, cull::InstanceCpuLookup) {
+        self.cull.instance_cpu_lookup(handle)
+    }
+
     pub fn set_dynamic(&mut self, instances: &[WgrInstance]) {
         // Convert explicitly rather than transmuting the slice (keeps the FFI + GPU structs
         // decoupled).

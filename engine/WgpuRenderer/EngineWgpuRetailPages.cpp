@@ -1,11 +1,14 @@
 #include "EngineWgpu.hpp"
 #include "RetailPagePilotAdmission.hpp"
+#include "RetailPageInstanceObservation.hpp"
 #include <Poseidon/Graphics/Rendering/AuthoredGeometryPageWorker.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageHierarchicalOriginalOutside.hpp>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cfloat>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <limits>
 #include <numeric>
@@ -83,6 +86,8 @@ struct EngineWgpu::RetailPagePilotState
         RootOnlyReady, FineReady, AwaitRelease, Released, AwaitAbort, Aborted, Failed
     };
     enum class Target : uint8_t { Root, Fine, Refill };
+    enum class VisiblePhase : uint8_t { Dormant, AwaitAdd, Reference, AwaitSwitch,
+        Root, Fine, AwaitRemove, Removed, Failed };
     struct MeshRow {
         uint64_t producer = 0, renderer = 0;
         uint32_t cluster = UINT32_MAX, page = UINT32_MAX;
@@ -117,6 +122,14 @@ struct EngineWgpu::RetailPagePilotState
     Phase phase = Phase::AwaitFallback;
     Target target = Target::Root;
     std::shared_ptr<Record> observation;
+    VisiblePhase visiblePhase = VisiblePhase::Dormant;
+    WgrInstance visiblePlacement{};
+    uint32_t visibleInstance = UINT32_MAX, visibleSelectedSlot = UINT32_MAX,
+        visiblePendingSlot = UINT32_MAX, visibleSwitches = 0, visibleRemoveAttempts = 0;
+    uint64_t visibleBirth = 0, visibleRequest = 0, visibleCameraGeneration = 0;
+    uint32_t visibleRendererSlot = 0;
+    bool visibleRecoveryRemove = false;
+    std::shared_ptr<render::RetailPageInstanceObservation> visibleObservation;
 
     void RefreshWorkerReport()
     {
@@ -504,6 +517,9 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
     auto abortNow = [&]() -> GeometryPageFixtureReport {
         if (s.phase == RetailPagePilotState::Phase::Aborted) return current();
         if (s.phase == RetailPagePilotState::Phase::AwaitAbort) return current();
+        if (s.visiblePhase != RetailPagePilotState::VisiblePhase::Dormant &&
+            s.visiblePhase != RetailPagePilotState::VisiblePhase::Removed)
+            return refusal("RetailVisibleRemoveRequired");
         s.abortRequested = true;
         if (s.worker) s.worker->Cancel(r.pageEpoch);
         if (s.observation)
@@ -558,6 +574,10 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
         if (action == GeometryPageFixtureAction::ReleaseRetailRecords)
         {
             if (s.phase != RetailPagePilotState::Phase::FineReady || !r.retailRecordDistinctCuts ||
+                (s.visiblePhase != RetailPagePilotState::VisiblePhase::Dormant &&
+                 s.visiblePhase != RetailPagePilotState::VisiblePhase::Removed &&
+                 (s.visiblePhase != RetailPagePilotState::VisiblePhase::Root ||
+                  s.visibleSelectedSlot != 1 || !r.retailVisibleReturned)) ||
                 s.refilled || !s.SourceCurrent() || !s.worker ||
                 s.worker->Snapshot().reservedBytes || s.observation ||
                 s.models[2] == UINT32_MAX || !s.modelReady[1] || !s.modelReady[2])
@@ -943,5 +963,292 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
         return current();
     }
     catch (...) { return failed("RetailRecordOwnerException"); }
+}
+
+Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageVisiblePilot(GeometryPageFixtureAction action)
+{
+    using InstanceRecord = render::RetailPageInstanceObservation;
+    GeometryPageFixtureReport unavailable;
+    unavailable.status = GeometryReportStatus::Invalid;
+    unavailable.pageWorkState = "RetailVisibleUnavailable";
+    const char* gate = std::getenv("WGR_GEOMETRY_PAGE_RETAIL_VISIBLE");
+    if (!gate || std::strcmp(gate,"1") || !Foundation::IsMainThread() || !_renderer ||
+        !_gpuDriven || !_retailPagePilot) return unavailable;
+    auto& s = *_retailPagePilot;
+    auto& r = s.report;
+    auto result = [&]() -> GeometryPageFixtureReport { s.RefreshWorkerReport(); return r; };
+    auto refuse = [&](const char* why) -> GeometryPageFixtureReport {
+        auto copy = result(); copy.status = GeometryReportStatus::Invalid;
+        copy.pageWorkState = why; return copy;
+    };
+    auto fail = [&](const char* why) -> GeometryPageFixtureReport {
+        s.visiblePhase = RetailPagePilotState::VisiblePhase::Failed;
+        r.status = GeometryReportStatus::Failed; r.pageWorkState = why;
+        r.retailVisiblePhase = why; return result();
+    };
+    auto nextRequest = [&]() -> uint64_t {
+        if (!_nextGeometryPageRequest || _nextGeometryPageRequest == UINT64_MAX) return 0;
+        return _nextGeometryPageRequest++;
+    };
+    auto workerEmpty = [&]() {
+        if (!s.worker) return false;
+        const auto debt = s.worker->Snapshot();
+        return !debt.liveJobs && !debt.queued && !debt.active && !debt.ready && !debt.reservedBytes;
+    };
+    auto modelReady = [&](uint32_t slot) {
+        return slot < s.models.size() && s.models[slot] != UINT32_MAX && s.modelReady[slot] &&
+            s.receipts[slot] && s.receipts[slot]->ProducerModel() == s.models[slot] &&
+            s.receipts[slot]->OwnerEpoch() == _geometryOwnerEpoch &&
+            s.receipts[slot]->SourceAdmissionEpoch() == r.sourceAdmissionEpoch &&
+            s.receipts[slot]->Observe().state == render::ModelAdmissionReceipt::State::ConsumedAccepted;
+    };
+    auto cutPresent = [&](uint32_t slot) {
+        if (!modelReady(slot)) return false;
+        if (slot == 0) return !s.history.empty() && s.history.front().present &&
+            s.history.front().renderer && s.history.front().producer;
+        const auto& selected = slot == 1 ? s.rootClusters : s.fineClusters;
+        if (selected.empty() || selected.size() > render::ModelAdmissionReceipt::MaxMeshes)
+            return false;
+        for (uint32_t cluster : selected)
+        {
+            if (cluster >= s.clusterMesh.size() || !s.clusterMesh[cluster]) return false;
+            const auto* row = s.Find(s.clusterMesh[cluster]);
+            if (!row || !row->present || !row->renderer || row->page >= s.resident.size() ||
+                !s.resident[row->page]) return false;
+        }
+        return true;
+    };
+    try
+    {
+        if (action == GeometryPageFixtureAction::BeginRetailVisible)
+        {
+            if (s.visiblePhase != RetailPagePilotState::VisiblePhase::Dormant ||
+                !r.active || (s.phase != RetailPagePilotState::Phase::FineReady &&
+                              s.phase != RetailPagePilotState::Phase::RootOnlyReady) ||
+                s.observation || !workerEmpty() || !s.SourceCurrent() || !cutPresent(0) ||
+                !_nextRetailVisibleBirth || _nextRetailVisibleBirth == UINT64_MAX)
+                return refuse("RetailVisibleAdmissionUnavailable");
+            constexpr uint64_t abortReserve = (Record::MaxMeshes + Record::MaxModels + 1) *
+                sizeof(ResourceOp) + sizeof(Record) + 256;
+            // Add + at most eight switches + at most three exact Remove
+            // attempts, including two idempotent returned-frame retries.
+            constexpr uint64_t visibleReservation = 12 *
+                (sizeof(InstanceOp) + sizeof(InstanceRecord) + 64);
+            if (r.knownPayloadBytes > RetailLimit - abortReserve ||
+                visibleReservation > RetailLimit - abortReserve - r.knownPayloadBytes)
+                return refuse("RetailVisibleCapacity");
+            WgrInstance placement{};
+            placement.world.m[0] = placement.world.m[5] = placement.world.m[10] =
+                placement.world.m[15] = 1;
+            placement.world.m[12] = 1200; placement.world.m[13] = 15;
+            placement.world.m[14] = 1240;
+            placement.center = {1200,15,1240,1};
+            placement.model = s.models[0];
+            placement.flags = WGR_INSTANCE_MAIN_CAMERA_ONLY;
+            _instanceOps.reserve(_instanceOps.size() + 1);
+            const uint32_t instance = ReserveRetailInstanceHandle();
+            if (instance == UINT32_MAX) return refuse("RetailVisibleInstanceIdExhausted");
+            const uint64_t ticket = nextRequest();
+            if (!ticket) { ReleaseRetailInstanceHandle(instance); return refuse("RetailVisibleRequestExhausted"); }
+            InstanceRecord::Request request;
+            request.binding = {_geometryOwnerEpoch,r.sourceAdmissionEpoch,r.pageEpoch,ticket,
+                _nextRetailVisibleBirth,instance,s.models[0]};
+            request.action = InstanceRecord::Action::Add;
+            request.expectedState = InstanceRecord::Expected::Present;
+            request.expected = placement;
+            std::shared_ptr<InstanceRecord> receipt;
+            try { receipt = std::make_shared<InstanceRecord>(request); }
+            catch (...) { ReleaseRetailInstanceHandle(instance); throw; }
+            if (!receipt->Valid())
+            { ReleaseRetailInstanceHandle(instance); return refuse("RetailVisibleAddPacketInvalid"); }
+            EnqueueInstanceAddAt(instance,placement,receipt);
+            s.visibleObservation = std::move(receipt);
+            s.visiblePlacement = placement; s.visibleInstance = instance;
+            s.visiblePendingSlot = 0; s.visibleBirth = _nextRetailVisibleBirth++;
+            s.visibleRequest = ticket; s.visiblePhase = RetailPagePilotState::VisiblePhase::AwaitAdd;
+            r.retailVisiblePilot = true; r.retailRecordOnly = false;
+            r.retailVisibleBirth = s.visibleBirth; r.retailVisibleRequest = ticket;
+            r.retailVisiblePhase = "AwaitAdd"; r.retailVisibleReturned = false;
+            r.retailVisiblePresent = false; r.retailVisibleRemoved = false;
+            r.producerInstance = instance; r.retailVisibleModel = s.models[0];
+            r.knownPayloadBytes += visibleReservation;
+            r.status = GeometryReportStatus::Pending;
+            r.pageWorkState = "RetailVisibleAddQueued";
+            return result();
+        }
+        if (action == GeometryPageFixtureAction::PollRetailVisible)
+        {
+            if (!s.visibleObservation) return result();
+            const auto observed = s.visibleObservation->Observe();
+            if (observed.state == InstanceRecord::State::Requested)
+            { r.status = GeometryReportStatus::Pending; return result(); }
+            const auto request = s.visibleObservation->GetRequest();
+            const bool exactToken = observed.binding.ownerEpoch == _geometryOwnerEpoch &&
+                observed.binding.sourceAdmissionEpoch == r.sourceAdmissionEpoch &&
+                observed.binding.pageEpoch == r.pageEpoch &&
+                observed.binding.requestId == s.visibleRequest &&
+                observed.binding.privateBirth == s.visibleBirth &&
+                observed.binding.producerInstance == s.visibleInstance &&
+                observed.binding == request.binding;
+            auto armRecoveryRemove = [&](uint32_t slot, bool alreadyAbsent) {
+                if (!exactToken || !observed.drained || !observed.rendererHandle ||
+                    !observed.instanceEpoch || slot >= s.models.size() ||
+                    request.binding.producerModel != s.models[slot] ||
+                    (alreadyAbsent ? observed.rendererModel != UINT32_MAX :
+                        observed.rendererModel == UINT32_MAX)) return false;
+                s.visiblePlacement = request.expected;
+                s.visibleSelectedSlot = slot; s.visibleRendererSlot = observed.rendererHandle;
+                s.visibleRecoveryRemove = true;
+                s.visibleObservation.reset(); // only a terminal receipt reaches this path
+                r.retailVisiblePresent = false; r.retailVisibleRemoved = false;
+                r.retailVisibleReturned = false;
+                r.retailVisibleSlot = UINT32_MAX;
+                r.retailVisibleRenderer = r.retailVisibleModel = UINT32_MAX;
+                r.rendererInstance = UINT32_MAX;
+                return true;
+            };
+            if (observed.state == InstanceRecord::State::Rejected)
+            {
+                // Camera acquisition or return can fail after an exact drain.
+                // The frozen row is cleanup authority only, never visible-frame
+                // acceptance. A drained Absent Remove gets a fresh idempotent
+                // Remove receipt on the same historical handle (bounded below).
+                const bool remove = request.action == InstanceRecord::Action::Remove;
+                const uint32_t slot = remove ? s.visibleSelectedSlot : s.visiblePendingSlot;
+                if (armRecoveryRemove(slot,remove))
+                    return fail(remove ? "RetailVisibleAbsentNeedsReturnRetry" :
+                        "RetailVisiblePresentNeedsRemove");
+                return fail("RetailVisibleReceiptRejectedOrUndrained");
+            }
+            if (observed.state != InstanceRecord::State::Consumed ||
+                !exactToken ||
+                !observed.frameAttempt || observed.renderReturnStatus != 0 ||
+                !observed.instanceEpoch || !observed.rendererHandle)
+                return fail("RetailVisibleReceiptRejectedOrStale");
+            const bool removing = s.visiblePhase == RetailPagePilotState::VisiblePhase::AwaitRemove;
+            if (!removing)
+            {
+                const uint32_t slot = s.visiblePendingSlot;
+                if (!s.SourceCurrent() || !cutPresent(slot) ||
+                    observed.binding.producerModel != s.models[slot] ||
+                    observed.rendererModel != s.receipts[slot]->Observe().rendererModel)
+                {
+                    if (armRecoveryRemove(slot,false))
+                        return fail("RetailVisibleSourceOrModelStaleRemoveRequired");
+                    return fail("RetailVisibleSourceOrModelStale");
+                }
+                s.visibleSelectedSlot = slot;
+                s.visiblePlacement.model = s.models[slot];
+                s.visiblePhase = slot == 0 ? RetailPagePilotState::VisiblePhase::Reference :
+                    slot == 1 ? RetailPagePilotState::VisiblePhase::Root :
+                    RetailPagePilotState::VisiblePhase::Fine;
+                r.retailVisiblePresent = true; r.retailVisibleRemoved = false;
+                r.retailVisiblePhase = slot == 0 ? "Reference" : slot == 1 ? "Root" : "Fine";
+                r.retailVisibleRenderer = observed.rendererModel;
+                r.retailVisibleSlot = slot;
+                r.retailVisibleModel = s.models[slot]; r.producerModel = s.models[slot];
+                r.pageWorkState = "RetailVisibleMainReturned";
+            }
+            else
+            {
+                if (observed.rendererModel != UINT32_MAX ||
+                    observed.rendererHandle != s.visibleRendererSlot)
+                    return fail("RetailVisibleRemoveNotAbsent");
+                s.visiblePhase = RetailPagePilotState::VisiblePhase::Removed;
+                ReleaseRetailInstanceHandle(s.visibleInstance);
+                r.retailVisiblePresent = false; r.retailVisibleRemoved = true;
+                r.retailVisiblePhase = "Removed";
+                r.retailVisibleRenderer = UINT32_MAX;
+                r.retailVisibleSlot = UINT32_MAX;
+                r.rendererInstance = UINT32_MAX;
+                r.pageWorkState = "RetailVisibleRemovedAfterMainReturn";
+                s.visibleRecoveryRemove = false;
+            }
+            s.visibleRendererSlot = observed.rendererHandle;
+            s.visibleCameraGeneration = observed.camera.generation;
+            s.visiblePendingSlot = UINT32_MAX;
+            s.visibleObservation.reset();
+            r.retailVisibleFrame = observed.frameAttempt;
+            r.retailVisibleReturned = true;
+            if (!removing) r.rendererInstance = observed.rendererHandle;
+            r.status = GeometryReportStatus::Ready;
+            return result();
+        }
+        if (action == GeometryPageFixtureAction::RemoveRetailVisible)
+        {
+            const bool recovery = s.visibleRecoveryRemove &&
+                s.visiblePhase == RetailPagePilotState::VisiblePhase::Failed;
+            if (!r.retailVisiblePilot ||
+                (!recovery && (!r.retailVisibleReturned || !r.retailVisiblePresent)) ||
+                s.visibleObservation || s.visibleRendererSlot == 0 ||
+                s.visibleRemoveAttempts >= 3 ||
+                s.visibleSelectedSlot >= s.models.size() ||
+                s.visiblePhase == RetailPagePilotState::VisiblePhase::Removed ||
+                (s.visiblePhase == RetailPagePilotState::VisiblePhase::Failed && !recovery))
+                return refuse("RetailVisibleRemoveUnavailable");
+            _instanceOps.reserve(_instanceOps.size() + 1);
+            const uint64_t ticket = nextRequest();
+            if (!ticket) return refuse("RetailVisibleRequestExhausted");
+            InstanceRecord::Request request;
+            request.binding = {_geometryOwnerEpoch,r.sourceAdmissionEpoch,r.pageEpoch,ticket,
+                s.visibleBirth,s.visibleInstance,s.models[s.visibleSelectedSlot]};
+            request.action = InstanceRecord::Action::Remove;
+            request.expectedState = InstanceRecord::Expected::Absent;
+            request.expected = s.visiblePlacement;
+            request.previousRenderer = s.visibleRendererSlot;
+            request.previousCameraGeneration = s.visibleCameraGeneration;
+            auto receipt = std::make_shared<InstanceRecord>(request);
+            if (!receipt->Valid()) return refuse("RetailVisibleRemovePacketInvalid");
+            EnqueueInstanceRemove(s.visibleInstance,receipt);
+            s.visibleObservation = std::move(receipt); s.visibleRequest = ticket;
+            ++s.visibleRemoveAttempts;
+            s.visiblePendingSlot = UINT32_MAX;
+            s.visiblePhase = RetailPagePilotState::VisiblePhase::AwaitRemove;
+            r.retailVisibleRequest = ticket; r.retailVisibleReturned = false;
+            r.retailVisiblePhase = "AwaitRemove";
+            r.status = GeometryReportStatus::Pending;
+            r.pageWorkState = "RetailVisibleRemoveQueued";
+            return result();
+        }
+        uint32_t slot = UINT32_MAX;
+        if (action == GeometryPageFixtureAction::RootRetailVisible) slot = 1;
+        else if (action == GeometryPageFixtureAction::FineRetailVisible)
+            slot = s.refilled && s.modelReady[3] ? 3 : 2;
+        else if (action == GeometryPageFixtureAction::FallbackRetailVisible) slot = 0;
+        else return refuse("RetailVisibleActionUnsupported");
+        if (!r.retailVisiblePilot || !r.retailVisibleReturned || !r.retailVisiblePresent ||
+            s.visibleObservation || s.visibleSwitches >= 8 || s.visibleSelectedSlot == slot ||
+            s.visibleRendererSlot == 0 || !s.SourceCurrent() || !workerEmpty() ||
+            !cutPresent(slot) ||
+            (s.phase != RetailPagePilotState::Phase::FineReady &&
+             s.phase != RetailPagePilotState::Phase::RootOnlyReady &&
+             s.phase != RetailPagePilotState::Phase::Released))
+            return refuse("RetailVisibleCutUnavailable");
+        WgrInstance placement = s.visiblePlacement;
+        placement.model = s.models[slot];
+        _instanceOps.reserve(_instanceOps.size() + 1);
+        const uint64_t ticket = nextRequest();
+        if (!ticket) return refuse("RetailVisibleRequestExhausted");
+        InstanceRecord::Request request;
+        request.binding = {_geometryOwnerEpoch,r.sourceAdmissionEpoch,r.pageEpoch,ticket,
+            s.visibleBirth,s.visibleInstance,s.models[slot]};
+        request.action = InstanceRecord::Action::Update;
+        request.expectedState = InstanceRecord::Expected::Present;
+        request.expected = placement;
+        request.previousRenderer = s.visibleRendererSlot;
+        request.previousCameraGeneration = s.visibleCameraGeneration;
+        auto receipt = std::make_shared<InstanceRecord>(request);
+        if (!receipt->Valid()) return refuse("RetailVisibleUpdatePacketInvalid");
+        EnqueueInstanceUpdate(s.visibleInstance,placement,receipt);
+        s.visibleObservation = std::move(receipt);
+        s.visiblePendingSlot = slot; s.visibleRequest = ticket; ++s.visibleSwitches;
+        s.visiblePhase = RetailPagePilotState::VisiblePhase::AwaitSwitch;
+        r.retailVisibleRequest = ticket; r.retailVisibleReturned = false;
+        r.retailVisiblePhase = "AwaitSwitch";
+        r.status = GeometryReportStatus::Pending;
+        r.pageWorkState = "RetailVisibleCutUpdateQueued";
+        return result();
+    }
+    catch (...) { return fail("RetailVisibleOwnerException"); }
 }
 } // namespace Poseidon

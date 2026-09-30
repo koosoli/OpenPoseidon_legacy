@@ -3067,7 +3067,7 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
     }
 }
 
-uint32_t EngineWgpu::EnqueueInstanceAdd(const WgrInstance& inst)
+uint32_t EngineWgpu::EnqueueInstanceAdd(const WgrInstance& inst, std::shared_ptr<render::RetailPageInstanceObservation> receipt)
 {
     uint32_t handle;
     if (!_instFreeHandles.empty())
@@ -3079,21 +3079,38 @@ uint32_t EngineWgpu::EnqueueInstanceAdd(const WgrInstance& inst)
     {
         handle = _nextInstanceHandle++;
     }
-    _instanceOps.push_back(InstanceOp{InstanceOp::Add, handle, inst});
+    _instanceOps.push_back(InstanceOp{InstanceOp::Add, handle, inst, std::move(receipt)});
     return handle;
 }
 
-void EngineWgpu::EnqueueInstanceUpdate(uint32_t handle, const WgrInstance& inst)
+void EngineWgpu::EnqueueInstanceUpdate(uint32_t handle, const WgrInstance& inst, std::shared_ptr<render::RetailPageInstanceObservation> receipt)
 {
-    _instanceOps.push_back(InstanceOp{InstanceOp::Update, handle, inst});
+    _instanceOps.push_back(InstanceOp{InstanceOp::Update, handle, inst, std::move(receipt)});
 }
 
-void EngineWgpu::EnqueueInstanceRemove(uint32_t handle)
+void EngineWgpu::EnqueueInstanceRemove(uint32_t handle, std::shared_ptr<render::RetailPageInstanceObservation> receipt)
 {
-    _instanceOps.push_back(InstanceOp{InstanceOp::Remove, handle, {}});
+    const bool quarantined = bool(receipt);
+    _instanceOps.push_back(InstanceOp{InstanceOp::Remove, handle, {}, std::move(receipt)});
     // Freed at enqueue, translated at drain: FIFO order guarantees the remove reads the old
     // slot before any same-frame reuse of this handle writes the new one.
-    _instFreeHandles.push_back(handle);
+    if (!quarantined) _instFreeHandles.push_back(handle);
+}
+
+uint32_t EngineWgpu::ReserveRetailInstanceHandle()
+{
+    if (!_instFreeHandles.empty()) { auto handle = _instFreeHandles.back(); _instFreeHandles.pop_back(); return handle; }
+    if (_nextInstanceHandle == UINT32_MAX) return UINT32_MAX;
+    return _nextInstanceHandle++;
+}
+void EngineWgpu::EnqueueInstanceAddAt(uint32_t handle, const WgrInstance& inst,
+    std::shared_ptr<render::RetailPageInstanceObservation> receipt)
+{
+    _instanceOps.push_back(InstanceOp{InstanceOp::Add,handle,inst,std::move(receipt)});
+}
+void EngineWgpu::ReleaseRetailInstanceHandle(uint32_t handle)
+{
+    if (handle != UINT32_MAX) _instFreeHandles.push_back(handle);
 }
 
 
@@ -4098,17 +4115,72 @@ void EngineWgpu::TranslateOverlayDrawHandles(std::vector<WgrOverlayDraw>& draws)
 void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
 {
     constexpr uint32_t InvalidInstanceSlot = ~uint32_t{0};
+    const InstanceOp* retailObserved = nullptr;
     if (ops.empty())
         return;
     if (!_renderer)
     {
         // No renderer, nothing to translate into; dropping the ops matches what the old
         // direct calls did behind their own null checks.
+        for (const auto& op : ops) if (op.retailReceipt) op.retailReceipt->ConsumeRejected();
         ops.clear();
         return;
     }
     for (const InstanceOp& op : ops)
     {
+        if (op.retailReceipt)
+        {
+            using Receipt = render::RetailPageInstanceObservation;
+            const auto& request = op.retailReceipt->GetRequest();
+            const auto model = _modelIdOf.find(request.binding.producerModel);
+            bool valid = op.retailReceipt->Valid() && request.binding.ownerEpoch == _geometryOwnerEpoch &&
+                request.binding.producerInstance == op.handle && model != _modelIdOf.end() &&
+                model->second != WGR_INVALID_MODEL && !_retailInstanceReturn && !retailObserved;
+            auto expected = request.expected;
+            if (valid) expected.model = model->second;
+            if (op.kind == InstanceOp::Add)
+            {
+                valid = valid && request.action == Receipt::Action::Add &&
+                    std::memcmp(&op.inst,&request.expected,sizeof(op.inst)) == 0;
+                if (valid)
+                {
+                    if (op.handle >= _instSlotOf.size()) _instSlotOf.resize(size_t(op.handle)+1,InvalidInstanceSlot);
+                    _instSlotOf[op.handle] = wgr_instance_add(_renderer,&expected);
+                }
+            }
+            else
+            {
+                WgrInstanceCpuFact prior{};
+                const auto factStatus = valid ? wgr_instance_cpu_fact(_renderer,request.previousRenderer,&prior,sizeof(prior),1) : 0;
+                const bool alreadyAbsent = op.kind == InstanceOp::Remove && op.handle < _instSlotOf.size() &&
+                    _instSlotOf[op.handle] == InvalidInstanceSlot && factStatus == WGR_INSTANCE_CPU_FACT_ABSENT;
+                valid = valid && op.handle < _instSlotOf.size() &&
+                    (alreadyAbsent || (_instSlotOf[op.handle] == request.previousRenderer && factStatus == WGR_INSTANCE_CPU_FACT_PRESENT)) &&
+                    prior.status == factStatus && prior.queried_handle == request.previousRenderer &&
+                    prior.version == 1 && prior.bytes == sizeof(prior) && !prior.reserved;
+                if (op.kind == InstanceOp::Update)
+                {
+                    valid = valid && request.action == Receipt::Action::Update &&
+                        std::memcmp(&op.inst,&request.expected,sizeof(op.inst)) == 0;
+                    if (valid) wgr_instance_update(_renderer,request.previousRenderer,&expected);
+                }
+                else
+                {
+                    valid = valid && request.action == Receipt::Action::Remove &&
+                        (alreadyAbsent || std::memcmp(&prior.row,&expected,sizeof(expected)) == 0);
+                    if (valid)
+                    {
+                        // A bounded retry after an already-consumed Remove only
+                        // reobserves the historical generation; never issue a stale remove.
+                        if (!alreadyAbsent) wgr_instance_remove(_renderer,request.previousRenderer);
+                        _instSlotOf[op.handle] = InvalidInstanceSlot;
+                    }
+                }
+            }
+            if (valid) retailObserved = &op;
+            else op.retailReceipt->ConsumeRejected(Receipt::Refusal::Instance);
+            continue;
+        }
         // Only the consumer owns this table: enqueue can overlap this drain.
         // Failed model translation must not leave a reused handle pointing at
         // another live instance (nor make a later remove index past the table).
@@ -4308,6 +4380,8 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
             break;
         }
     }
+    // Freeze the epoch after ordinary trailing mutations in this same queue.
+    if (retailObserved) ObserveRetailInstanceDrain(*retailObserved);
     ops.clear();
 }
 
@@ -4771,6 +4845,7 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
         catch (...) {} // a diagnostic allocation cannot fail the normal renderer frame
     }
     if (_geometryPageFixtureObservation) PublishGeometryPageFixtureObservation(frame,renderReturnStatus);
+    if (_retailInstanceReturn) ObserveRetailInstanceReturned(frame,renderReturnStatus);
     if (_geometryOwnerLedger)
     {
         // Once per real renderer frame, after deferred uploader destroys drain.
@@ -9518,6 +9593,10 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
     if(!enabled) return failure;
     failure.status=GeometryReportStatus::Invalid;
     if(!Foundation::IsMainThread() || !_renderer || !_gpuDriven) return failure;
+    if(action==GeometryPageFixtureAction::BeginRetailVisible || action==GeometryPageFixtureAction::RootRetailVisible ||
+       action==GeometryPageFixtureAction::FineRetailVisible || action==GeometryPageFixtureAction::PollRetailVisible ||
+       action==GeometryPageFixtureAction::RemoveRetailVisible || action==GeometryPageFixtureAction::FallbackRetailVisible)
+        return StepRetailPageVisiblePilot(action);
     if(action==GeometryPageFixtureAction::SnapshotRetailRecords)return SnapshotRetailPageRecordPilot();
     if(action==GeometryPageFixtureAction::PollRetailRecords||action==GeometryPageFixtureAction::ReleaseRetailRecords||
        action==GeometryPageFixtureAction::RefillRetailRecords||action==GeometryPageFixtureAction::AbortRetailRecords)

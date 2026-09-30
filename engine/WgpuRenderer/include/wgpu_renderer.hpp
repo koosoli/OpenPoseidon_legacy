@@ -549,6 +549,28 @@ static_assert(sizeof(WgrModelMaterial) == 320, "WgrModelMaterial must match Rust
 static_assert(sizeof(WgrModelLod) == 16, "WgrModelLod must match Rust");
 static_assert(sizeof(WgrInstance) == 144, "WgrInstance must match Rust");
 
+/* Additive, read-only owner CPU fact for one literal retained instance handle.
+ * Absent is usable as a removal ACK only after the caller observed Present for
+ * the same handle. The eight-bit handle generation can alias after 256 reuses;
+ * long-lived authority must also bind the caller's own instance birth. */
+enum WgrInstanceCpuFactStatus : uint32_t {
+    WGR_INSTANCE_CPU_FACT_UNSUPPORTED = 0,
+    WGR_INSTANCE_CPU_FACT_PRESENT = 1,
+    WGR_INSTANCE_CPU_FACT_ABSENT = 2,
+    WGR_INSTANCE_CPU_FACT_INVALID = 3
+};
+struct WgrInstanceCpuFact {
+    uint32_t version;          /* 1 */
+    uint32_t bytes;            /* sizeof(WgrInstanceCpuFact) */
+    uint32_t status;           /* WgrInstanceCpuFactStatus */
+    uint32_t queried_handle;   /* literal input, including for Absent/Invalid */
+    uint64_t instance_epoch;   /* current retained content epoch, not GPU completion */
+    WgrInstance row;           /* actual CPU row if Present; zero otherwise */
+    uint32_t resolved_slot;    /* actual raw slot if Present; UINT32_MAX otherwise */
+    uint32_t reserved;
+};
+static_assert(sizeof(WgrInstanceCpuFact) == 176, "WgrInstanceCpuFact ABI mismatch");
+
 /* Live tonemap/look parameters (from the ImGui Tonemap tab; pushed inside WgrRenderParams
  * via wgr_set_render_params). The Hable curve is fixed in the shader; these are exposure +
  * the colour-grade block. Layout matches the Rust WgrTonemap #[repr(C)] and tonemap.wgsl. */
@@ -2478,6 +2500,12 @@ extern "C"
     WGR_API uint32_t wgr_instance_add(WgrRenderer* renderer, const WgrInstance* inst);
     WGR_API void wgr_instance_update(WgrRenderer* renderer, uint32_t slot, const WgrInstance* inst);
     WGR_API void wgr_instance_remove(WgrRenderer* renderer, uint32_t slot);
+
+    /* Exact bytes=176/version=1. Returns the fact's status; 0 on unsupported
+     * layout/null/panic, leaving output untouched. Owner-thread read only: no
+     * GPU wait, table scan, stale-operation mutation, or render completion. */
+    WGR_API uint32_t wgr_instance_cpu_fact(const WgrRenderer* renderer, uint32_t handle,
+                                           WgrInstanceCpuFact* out, uint32_t bytes, uint32_t version);
 
     /* Replace the whole dynamic instance set for this frame (the churny set the CPU
      * already walks for simulation: vehicles, units, ...). Re-copied wholesale each

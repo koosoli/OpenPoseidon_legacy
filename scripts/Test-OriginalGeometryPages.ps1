@@ -1,6 +1,7 @@
-param([switch]$RetailSource,[switch]$TextureReuseOnly,[switch]$GeneratedTextures,[switch]$HierarchyAuto,[switch]$HierarchyProjected,[switch]$DemandViews,[switch]$PaletteContentWitness,[switch]$HierarchyRefill,[switch]$HierarchyDisk,[ValidateSet('None','Scalar','Localized')][string]$HierarchyCuts='None',[switch]$Hierarchy,[ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$Interactive,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
+param([switch]$RetailVisible,[switch]$RetailSource,[switch]$TextureReuseOnly,[switch]$GeneratedTextures,[switch]$HierarchyAuto,[switch]$HierarchyProjected,[switch]$DemandViews,[switch]$PaletteContentWitness,[switch]$HierarchyRefill,[switch]$HierarchyDisk,[ValidateSet('None','Scalar','Localized')][string]$HierarchyCuts='None',[switch]$Hierarchy,[ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$Interactive,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
  [string]$Label='original-geometry-pages',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
+if($RetailVisible){$RetailSource=$true}
 if($RetailSource){$TextureReuseOnly=$true}
 if($TextureReuseOnly){$GeneratedTextures=$true}
 if($PaletteContentWitness -and !$MainCountProbe){throw 'Palette content witness requires MainCountProbe'}
@@ -27,6 +28,7 @@ if(!$env:LOCK_OWNER){
  if($Hierarchy){$argv+='-Hierarchy'}
  if($HierarchyDisk){$argv+='-HierarchyDisk'}
  if($HierarchyRefill){$argv+='-HierarchyRefill'}
+ if($RetailVisible){$argv+='-RetailVisible'}
  if($RetailSource){$argv+='-RetailSource'}
  if($TextureReuseOnly){$argv+='-TextureReuseOnly'}
  if($GeneratedTextures){$argv+='-GeneratedTextures'}
@@ -186,18 +188,19 @@ $environment=@{
  WGR_CULL_MODEL_ROW_UPLOAD='0';WGR_LOCAL_SHADOW_POSE_CACHE='0';WGR_LOCAL_POSE_CACHE_TRACE='0';WGR_LAZY_TEXTURE_BIND_GROUPS='0';WGR_GEOMETRY_OWNER_LEDGER='0';WGR_PAA_PREP_INFLIGHT='0';WGR_PAA_PREP_ATTEMPT_DIAG='0';WGR_TERRAIN_PAGE_TIMINGS='0';WGR_OBJECT_STREAM_WARM_PROFILE='0';WGR_RENDER_CALL_CPU_TIMINGS='0';WGR_GPU_MODEL_PARK_REFILL='0';WGR_OBJECT_STREAM_REGISTRATION_QUOTA='0';WGR_CULL_SECTION_REUSE='0';WGR_CULL_LOD_REUSE='0';WGR_PAA_LZO_REPLAY_CACHE='0'
 }
 $environment.WGR_GEOMETRY_PAGE_ORIGINAL_SOURCE='1';$environment.WGR_GEOMETRY_PAGE_FIXTURE='1'
-$environment.WGR_GEOMETRY_PAGE_SURFACE_CERTIFICATE=$(if($SurfaceCertificate){'1'}else{'0'})
+$environment.WGR_GEOMETRY_PAGE_SURFACE_CERTIFICATE=$(if($SurfaceCertificate -or $RetailVisible){'1'}else{'0'})
 $environment.WGR_GEOMETRY_MAIN_COUNT_PROBE=$(if($MainCountProbe){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PALETTE_CONTENT_WITNESS=$(if($PaletteContentWitness){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_DEMAND_VIEWS=$(if($DemandViews){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_RETAIL_SOURCE=$(if($RetailSource){'1'}else{'0'})
 $environment.WGR_OBJECT_STREAM_DAYZ_REUSE_ONLY=$(if($TextureReuseOnly){'1'}else{'0'})
 $environment.WGR_OBJECT_STREAM_DAYZ_GENERATED_DEFER=$(if($GeneratedTextures){'1'}else{'0'})
-$environment.WGR_GEOMETRY_PAGE_CAMERA_TUPLE=$(if($CameraTuple){'1'}else{'0'})
+$environment.WGR_GEOMETRY_PAGE_CAMERA_TUPLE=$(if($CameraTuple -or $RetailVisible){'1'}else{'0'})
+$environment.WGR_GEOMETRY_PAGE_RETAIL_VISIBLE=$(if($RetailVisible){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_PROJECTED_PREFETCH=$(if($ProjectedPrefetch){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_PRIVATE_AUTO_FINE=$(if($AutoFine){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_PRIVATE_AUTO_COARSE=$(if($AutoCoarse){'1'}else{'0'})
-if($CameraTuple){$environment.WGR_HDR='1';$environment.WGR_RENDER_SCALE=$(if($CameraTupleScaleRefusal){'75'}else{'100'})}
+if($CameraTuple -or $RetailVisible){$environment.WGR_HDR='1';$environment.WGR_RENDER_SCALE=$(if($CameraTupleScaleRefusal){'75'}else{'100'})}
 $old=@{};Get-ChildItem Env:|Where-Object {$_.Name -match '^(WGR_|POSEIDON_)'}|ForEach-Object {$old[$_.Name]=$_.Value}
 $p=$null;$client=$null;$normal=$false;$forced=$false;$result=$null;$failure=$null
 $exe=Join-Path $GameDir 'OpenPoseidon.exe';$dll=Join-Path $GameDir 'wgpu_renderer.dll';$log=Join-Path $out 'engine.log'
@@ -572,13 +575,32 @@ try{
      $retailEvidence|ConvertTo-Json -Depth 8|Set-Content (Join-Path $out 'retail-source-proof.json')
      if($retailEvidence.status -ne 'Ready' -or !$retailEvidence.retailSourceProbe -or !$retailEvidence.retailSourceExported -or !$retailEvidence.retailSourceOtherPassesRequired -or !$retailEvidence.retailRecordOnly -or !$retailEvidence.retailPixelSourceVerified -or $retailEvidence.retailPixelSourceSha256.Length -ne 64 -or $retailEvidence.coarseTriangles -ne 144 -or $retailEvidence.fineTriangles -ne 250 -or $retailEvidence.originalSourceBytes -ne 53786 -or $retailEvidence.retailRecordMeshesPresent -lt 1 -or $retailEvidence.retailRecordModelsPresent -lt 1 -or $retailEvidence.modelAdmissionAccepted -lt 1 -or $retailEvidence.modelAdmissionRejected -ne 0 -or $retailEvidence.modelAdmissionPending -ne 0 -or $retailEvidence.retailRecordWorkerReads -lt 1){throw 'Actual retail source/final Shape/source-pixel/page record proof failed'}
      if($retailEvidence.producerInstance -ne 4294967295 -or $retailEvidence.rendererInstance -ne 4294967295 -or $retailEvidence.mainFrameReturned){throw 'Retail record-only pilot unexpectedly claims instance/frame authority'}
+     $visibleRows=@()
+     if($RetailVisible){
+      function VisibleReady([string]$action){
+       $until=[DateTime]::UtcNow.AddSeconds(15)
+       $r=Send @{cmd='geometry_page_fixture';action=$action}
+       while($r.status -eq 'Pending' -and [DateTime]::UtcNow -lt $until){Start-Sleep -Milliseconds 120;$r=Send @{cmd='geometry_page_fixture';action='pollRetailVisible'}}
+       if($r.status -ne 'Ready' -or !$r.retailVisiblePilot -or !$r.retailVisibleReturned -or $r.retailVisibleFrame -le 0){$r|ConvertTo-Json -Depth 10|Set-Content (Join-Path $out 'retail-visible-failed.json');throw "Retail visible $action failed: $($r.retailVisiblePhase)"}
+       return $r
+      }
+      $v=VisibleReady 'beginRetailVisible';$visibleRows+=@{action='fallback';evidence=$v};Capture 'retail-fallback.png'
+      if(!$v.retailVisiblePresent -or $v.retailVisibleSlot -ne 0){throw 'Retail visible fallback was not consumed'}
+      $v=VisibleReady 'rootRetailVisible';$visibleRows+=@{action='root';evidence=$v};Capture 'retail-root.png'
+      if(!$v.retailVisiblePresent -or $v.retailVisibleSlot -ne 1){throw 'Retail visible root was not consumed'}
+      $v=VisibleReady 'fineRetailVisible';$visibleRows+=@{action='fine';evidence=$v};Capture 'retail-fine.png'
+      if(!$v.retailVisiblePresent -or $v.retailVisibleSlot -ne 2){throw 'Retail visible fine was not consumed'}
+      $v=VisibleReady 'rootRetailVisible';$visibleRows+=@{action='root-before-release';evidence=$v}
+     }
      $retailRelease=$null;$retailRefill=$null
      if($retailEvidence.retailRecordDistinctCuts){
       $retailRelease=RetailReady 'releaseRetailRecords'
       if($retailRelease.retailRecordMeshesAbsent -lt 1 -or $retailRelease.retailRecordMeshesPresent -lt 1){throw 'Retail detail release failed historical Absent/root retention'}
       $retailRefill=RetailReady 'refillRetailRecords'
       if($retailRefill.retailRecordFreshIds -le $retailEvidence.retailRecordFreshIds -or $retailRefill.retailRecordMeshesAbsent -lt $retailRelease.retailRecordMeshesAbsent){throw 'Retail refill failed fresh IDs/historical Absent'}
+      if($RetailVisible){$v=VisibleReady 'fineRetailVisible';$visibleRows+=@{action='refill-fine';evidence=$v};Capture 'retail-refill-fine.png';if(!$v.retailVisiblePresent -or $v.retailVisibleSlot -ne 3){throw 'Retail visible refill did not use fresh model'}}
      }
+     if($RetailVisible){$v=VisibleReady 'removeRetailVisible';$visibleRows+=@{action='remove';evidence=$v};Capture 'retail-removed.png';if(!$v.retailVisibleRemoved -or $v.retailVisiblePresent){throw 'Retail visible remove failed exact historical absence'};$visibleRows|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'retail-visible-lifetime.json')}
      $retailAbort=RetailReady 'abortRetailRecords'
      if($retailAbort.retailRecordMeshesPresent -ne 0 -or $retailAbort.retailRecordModelsPresent -ne 0 -or $retailAbort.retailRecordMeshesAbsent -lt 1 -or $retailAbort.pageLiveJobs -ne 0 -or $retailAbort.pageReservedBytes -ne 0){throw 'Retail abort failed all-record absence or worker debt'}
      @{begin=$retailBegin;ready=$retailEvidence;released=$retailRelease;refilled=$retailRefill;aborted=$retailAbort;scope='Actual immutable retail source and strict pixel upload plus non-instanced page/model records; no pixels/world routing/all-pass/device-free/performance acceptance'}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'retail-record-lifetime.json')
