@@ -1357,8 +1357,12 @@ unbuilt_candidates: >-
       zero failed and two existing ignored renderer tests through
       6cd5a1c5/d7aa2f4c, including the irregular powder and retained pose changes.
       Standalone current/retained pose and conform policy checks pass.
-      The newer 94694933 cutout contract/full build are still pending at this
-      source checkpoint; the earlier full suite does not prove that newer hunk.
+      New combined renderer suite records 596 passed, zero failed, two existing
+      ignored, including cutout, irregular powder, tree crown and mud helpers.
+      Tree crown source c552aae2 uses actual bounded upper-center roof probes,
+      model-height masks and matte mean powder in both draw paths; alpha, wind
+      and normals remain. Unknown far proof stays bare. Installed tree and
+      near/200m/500m roof controls remain pending; no island-wide whitening claim.
       Pure stock runner checks pass 32 assertions plus existing roof mocked RPC
       tests, without game/GPU use by the runner author. Prior installed roof
       rain/puddle evidence and 8b3ae13c walking/refill are retained baselines,
@@ -1369,8 +1373,9 @@ unbuilt_candidates: >-
       fabric under deposit; the rejected retained animation hint motivated the
       source correction, not a successful roof appearance result. Earlier failed
       stock controls remain failed. New installed controls are pending; at this
-      checkpoint an unrelated running game (PID 31700) prevents safe replacement
-      of its binaries. No process stop, replacement or snow SHIPPED claim follows.
+      checkpoint PID 31700 had blocked replacement; a later process check found
+      no running game. The newer combined pair still requires final locked
+      deployment and installed acceptance before any snow SHIPPED claim.
       Require the new matching installed build and ordinary shutdown/hash proof.
       Test-SnowSurfaceCoverage captures dry/deposit/object-OFF and powder-OFF
       controls with actual CampEastC identity/placement and effective uploaded
