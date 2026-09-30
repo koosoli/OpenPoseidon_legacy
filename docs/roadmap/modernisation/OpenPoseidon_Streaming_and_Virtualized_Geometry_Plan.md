@@ -1351,3 +1351,50 @@ inspection but not finalized SVertex/config/object/shadow/pass admission. Normal
 physics geometry, Roadway5 and fire/view6 must remain conventional. Installed
 observer/native verification is pending; whole plan remains OPEN/defaultReady=false,
 performanceAccepted=false, with no Nanite-equivalence claim.
+
+### 30 September — native lifecycle and birth-observer test boundary
+
+Exact installed `1de1caa5` passed paired WGPU startup. Normal native Reforger
+`cancel-20260930-015556-texture-keys-1-authored-far-0-lazy-bcr-default-bc7-default`
+completed normally/exit0 with a valid capture and no contention. The recorded
+8.376ms frame was taken with main0/zero main triangles, so it is not comparable
+quality, an FPS improvement or a no-regression proof. Native compatibility is
+still not rendering ground truth.
+
+The first selected DayZ birth-observer route captured37 actual unique refs:
+33 physical and4 generated; all remained resident and the33 physical bindings
+remained current. Its overall runner failed an independent warm-upload witness.
+The source-only follow-up was a genuine negative capacity case: the unchanged
+256-binding pool was exhausted before the selected model, with6,246 refusals;
+only4 generated refs were captured. Neither failure is reclassified as a pass.
+The runner now uses retirement to exercise birth capture and reports independent
+warm-upload evidence separately; explicit Require* checks remain enforced.
+
+Next source adds a bounded scoped final-binding guard before upload mutation,
+with unchanged resident-handle/slot reuse and refusal of missing/deferred/new
+images. It does not intercept material Load/Init or prove complete roles. A
+strict finalized ODOL7 source-pair exporter verifies real MeshBuild packing,
+source lease and owner-supplied live material facts; source0/1 cannot replace
+original source2/3 shadow paths. Build-name/include repairs are retained in logs;
+installed verification is pending. Retail pacing and automatic geometry paging
+remain OPEN/defaultReady=false/performanceAccepted=false; no Nanite equivalence.
+
+The next combined source passes451 assertions/11 focused reuse/final-export/
+receipt cases,41 assertions/2 fresh opt-in PAC actual-read/Init cases, and3
+assertions/1 fresh default-off purpose case. Compile repairs corrected a
+missing header, ambiguous test names, RString conversion and C-array identity
+copy; failure logs remain. An exact native-bank owner capture now reaches the
+canonical parser and actual live adapter tail from the same decoded ODOL bytes.
+The PAC lease is born only in its original raw read under an exact default-off
+purpose and retained by successful Init; it does not retrofit cached unknowns.
+
+The private source probe stages its sole actual primary texture, then verifies
+144/250-triangle finalized MeshBuild payloads under a reuse-only guard and live
+material/slot checks. This is explicitly FinalShape/Init provenance, not exact
+GPU pixel-source provenance, global VFS/world admission, pass replacement or
+paced retail registration. ModelRegister now supports a bounded optional drain
+receipt; the private hierarchy gates fallback/cut instances on consumed accepted
+receipts with actual owner/source epochs. Null-receipt ordinary operations retain
+the existing path, while invalid renderer IDs cannot become instances. Receipt
+consumption does not settle retirement debt. Installed verification remains
+pending; no performance/default-ready/Nanite claim.

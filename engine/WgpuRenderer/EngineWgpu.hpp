@@ -20,6 +20,7 @@
 #include "SharedRetainedMeshLifetime.hpp"
 #include "StandaloneMeshRetirementWitness.hpp"
 #include "ParkedGeometryReport.hpp"
+#include "ModelAdmissionReceipt.hpp"
 
 #include <array>
 #include <chrono> // steady_clock, for the opt-in auto-exposure time constant (WGR_AUTO_EXPOSURE_TAU)
@@ -1340,6 +1341,7 @@ class EngineWgpu : public EngineDummy
         std::vector<WgrModelLod> lods;             // ModelRegister
         std::vector<WgrModelSection> sections;     // ModelRegister; .mesh holds PRODUCER handles
         std::vector<WgrModelMaterial> materials;   // ModelRegister (texture handles baked, see cpp)
+        std::shared_ptr<render::ModelAdmissionReceipt> modelAdmissionReceipt; // selected ModelRegister only
         std::string name;
         // Filled only by an explicit diagnostic request; names captured on producer,
         // never recovered by dereferencing a Shape after a later frame/lifetime change.

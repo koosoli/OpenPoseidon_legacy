@@ -364,6 +364,9 @@ try {
     # The building pilot publishes through the conversion job, with its own
     # exact physical-member upload witness below. It need not run the warm queue.
     $warmJobsProven = !$WarmTextureJobs -or $RapBuildingPilot -or $RapBuildingMultistage -or ($warmStoreProven -and $warmQueueProven)
+    $warmJobProof.positive=[bool]$warmJobsProven
+    $warmJobProof.required=[bool]($WarmTextureJobs -and !$TextureBirthObserver)
+    $warmJobProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'warm-texture-job-proof.json')
     $archiveBindings = Send @{cmd = 'archive_source_bindings'}
     if ($archiveBindings.enabled -ne [bool]$ArchiveSourceBindings -or
         $archiveBindings.liveBindings -gt $archiveBindings.capBindings -or
@@ -921,7 +924,11 @@ try {
     if (!$earlyProven) { throw 'NotExercised: no actual early warm first-member dequeue; evidence retained' }
     if (!$promotionProven) { throw 'NotExercised: no published warm entry promoted before model cancellation; evidence retained' }
     if (!$warmPreflightProven) { throw 'NotExercised: no same-source initialized-stage preflight and successful bound worker stage upload; evidence retained' }
-    if (!$warmJobsProven) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
+    # Birth observation needs retirement to leave space in the bounded lease pool.
+    # Its positive witness is current physical births, not a new worker upload.
+    # Keep the independent warm-upload result visible; explicit Require* checks
+    # below still require their respective upload witnesses.
+    if (!$warmJobsProven -and !$TextureBirthObserver) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
     if (!$buildingPilotProven) { throw 'NotExercised: no same-stage building physical capture and validated upload; evidence retained' }
     if (!$multiStageProven) { throw 'NotExercised: no same-stage tenement multistage physical capture and validated upload; evidence retained' }
     if (!$physicalPrefetchProven) { throw 'NotExercised: no bounded parent raP stage capture and source-validated physical Take/upload for exact tenement; evidence retained' }

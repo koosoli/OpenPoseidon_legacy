@@ -1,6 +1,8 @@
-param([switch]$GeneratedTextures,[switch]$HierarchyAuto,[switch]$HierarchyProjected,[switch]$DemandViews,[switch]$PaletteContentWitness,[switch]$HierarchyRefill,[switch]$HierarchyDisk,[ValidateSet('None','Scalar','Localized')][string]$HierarchyCuts='None',[switch]$Hierarchy,[ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$Interactive,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
+param([switch]$RetailSource,[switch]$TextureReuseOnly,[switch]$GeneratedTextures,[switch]$HierarchyAuto,[switch]$HierarchyProjected,[switch]$DemandViews,[switch]$PaletteContentWitness,[switch]$HierarchyRefill,[switch]$HierarchyDisk,[ValidateSet('None','Scalar','Localized')][string]$HierarchyCuts='None',[switch]$Hierarchy,[ValidateSet('None','Missing','Corrupt')][string]$DiskFault='None',[switch]$CameraPrefetch,[switch]$ProjectedPrefetch,[switch]$AutoFine,[switch]$AutoCoarse,[switch]$Interactive,[switch]$CameraTuple,[switch]$CameraTupleScaleRefusal,[switch]$SurfaceCertificate,[switch]$MainCountProbe,[ValidateSet('None','DigestMismatch','Malformed')][string]$SurfaceFault='None',[string]$Tools='',
  [string]$Label='original-geometry-pages',[string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',[string]$Python='C:\Program Files\Python311\python.exe')
 $ErrorActionPreference='Stop'
+if($RetailSource){$TextureReuseOnly=$true}
+if($TextureReuseOnly){$GeneratedTextures=$true}
 if($PaletteContentWitness -and !$MainCountProbe){throw 'Palette content witness requires MainCountProbe'}
 if($HierarchyRefill){$HierarchyDisk=$true;if($HierarchyCuts -ne 'None'){throw 'Hierarchy refill needs a never-used fourth model slot; choose no intermediate cut'}}
 if($HierarchyAuto){$HierarchyDisk=$true;$DemandViews=$true;if($HierarchyProjected -or $HierarchyRefill -or $HierarchyCuts -ne 'None'){throw 'Automatic binary hierarchy is an independent bounded-cut mode'}}
@@ -25,6 +27,8 @@ if(!$env:LOCK_OWNER){
  if($Hierarchy){$argv+='-Hierarchy'}
  if($HierarchyDisk){$argv+='-HierarchyDisk'}
  if($HierarchyRefill){$argv+='-HierarchyRefill'}
+ if($RetailSource){$argv+='-RetailSource'}
+ if($TextureReuseOnly){$argv+='-TextureReuseOnly'}
  if($GeneratedTextures){$argv+='-GeneratedTextures'}
  if($HierarchyAuto){$argv+='-HierarchyAuto'}
  if($HierarchyProjected){$argv+='-HierarchyProjected'}
@@ -186,6 +190,8 @@ $environment.WGR_GEOMETRY_PAGE_SURFACE_CERTIFICATE=$(if($SurfaceCertificate){'1'
 $environment.WGR_GEOMETRY_MAIN_COUNT_PROBE=$(if($MainCountProbe){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PALETTE_CONTENT_WITNESS=$(if($PaletteContentWitness){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_DEMAND_VIEWS=$(if($DemandViews){'1'}else{'0'})
+$environment.WGR_GEOMETRY_PAGE_RETAIL_SOURCE=$(if($RetailSource){'1'}else{'0'})
+$environment.WGR_OBJECT_STREAM_DAYZ_REUSE_ONLY=$(if($TextureReuseOnly){'1'}else{'0'})
 $environment.WGR_OBJECT_STREAM_DAYZ_GENERATED_DEFER=$(if($GeneratedTextures){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_CAMERA_TUPLE=$(if($CameraTuple){'1'}else{'0'})
 $environment.WGR_GEOMETRY_PAGE_PROJECTED_PREFETCH=$(if($ProjectedPrefetch){'1'}else{'0'})
@@ -551,6 +557,17 @@ try{
     @{objects=$worldCoverage;camera=$camera}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $out 'normalworld-coverage.json')
     Capture 'baseline.png'
     $pose=Send @{cmd='eval';code='triFreeFlyPose "1184 1240 18 90 -8"'};Require $pose @('result');if($pose.result.Trim('"') -ne 'OK'){throw 'Original fixture camera refused'}
+    $retailEvidence=$null
+    if($RetailSource){
+     $retailEvidence=Send @{cmd='geometry_page_fixture';action='probeRetailOdol7'}
+     $retailEvidence|ConvertTo-Json -Depth 8|Set-Content (Join-Path $out 'retail-source-proof.json')
+     if($retailEvidence.status -ne 'Ready' -or !$retailEvidence.retailSourceProbe -or !$retailEvidence.retailSourceExported -or !$retailEvidence.retailSourceOtherPassesRequired -or $retailEvidence.coarseTriangles -ne 144 -or $retailEvidence.fineTriangles -ne 250 -or $retailEvidence.originalSourceBytes -ne 53786){throw 'Actual retail source/final Shape/Init texture proof failed'}
+    }
+    $reuseEvidence=$null
+    if($TextureReuseOnly){
+     $reuseEvidence=Send @{cmd='geometry_page_fixture';action='probeTextureReuseOnly'}
+     if($reuseEvidence.status -ne 'Ready' -or !$reuseEvidence.textureReuseProbe -or !$reuseEvidence.textureReusePassed -or !$reuseEvidence.textureReuseHeldDenied -or !$reuseEvidence.textureReuseResidentStable -or !$reuseEvidence.textureReuseUnexpectedDenied -or !$reuseEvidence.textureReuseRetriesResident -or $reuseEvidence.textureReuseAllowed -ne 1 -or $reuseEvidence.textureReuseDenied -ne 2 -or $reuseEvidence.textureReuseOwnerCreates -ne 2){throw 'Actual reuse-only denial/retry contract failed'}
+    }
     $generatedEvidence=$null
     if($GeneratedTextures){
      $generatedEvidence=Send @{cmd='geometry_generated_admission'}
@@ -568,6 +585,8 @@ try{
       throw 'Hierarchy did not settle'
      }
      function HierarchyBounded($c){
+      Require $c @('modelAdmissionAccepted','modelAdmissionRejected','modelAdmissionPending')
+      if($c.modelAdmissionRejected -ne 0 -or ($c.modelAdmissionAccepted+$c.modelAdmissionPending) -gt 4 -or ($c.status -eq 'Ready' -and ($c.modelAdmissionPending -ne 0 -or $c.modelAdmissionAccepted -lt 1))){throw 'Selected model drain receipt was rejected, pending or absent at readiness'}
       Require $c @('hierarchicalPilot','hierarchyPages','hierarchyRootPages','hierarchyResidentPages','hierarchyPackageSha256','sourceAdmissionEpoch','knownPayloadBytes','pageReservedBytes','meshCount','hierarchySelectedClusters','hierarchySelectedTriangles')
       if(!$c.hierarchicalPilot -or $c.hierarchyPages -lt 2 -or $c.hierarchyPages -gt 64 -or $c.hierarchyRootPages -lt 1 -or $c.hierarchyRootPages -gt $c.hierarchyPages -or $c.hierarchyResidentPages -gt $c.hierarchyPages -or $c.hierarchyPackageSha256 -notmatch '^[0-9a-f]{64}$' -or $c.sourceAdmissionEpoch -ne 1 -or ($c.knownPayloadBytes+$c.pageReservedBytes) -gt 1048576 -or $c.meshCount -gt 64 -or @($c.hierarchySelectedClusters).Count -gt 64){throw 'Hierarchy source, capacity or topology contract failed'}
       if($DemandViews){
@@ -1022,6 +1041,8 @@ finally{
 }
 if($failure){throw $failure}
 $result.demandViewsRequested=[bool]$DemandViews
+if($RetailSource){$result.retailSource=$true;$result.retailSourceEvidence=$retailEvidence}
+if($TextureReuseOnly){$result.textureReuseOnly=$true;$result.textureReuseEvidence=$reuseEvidence}
 if($GeneratedTextures){$result.generatedTextures=$true;$result.generatedEvidence=$generatedEvidence}
 if($HierarchyProjected){$result.hierarchyProjected=$true;$result.projectedCuts=$projectedCuts;$result.projectedSteps=$projectedSteps;$result.badProjected=$badProjected}
 if($HierarchyAuto){$result.hierarchyAuto=$true;$result.autoCuts=$autoCuts;$result.autoPolls=$autoPolls;$result.badAuto=$badAuto;$result.stoppedAuto=$stoppedAuto}

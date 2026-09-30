@@ -1311,6 +1311,7 @@ bool IsBuildingPilotNormal(const char* prefix, const char* member)
 }
 thread_local unsigned ModelReadDepth = 0; // numeric owner-purpose nesting only; no retained resources
 thread_local unsigned MaterialPreflightDepth = 0; // owner-only nested stage intent; no names or resources
+thread_local unsigned RetailPacReadDepth = 0; // exact selected model only; no retained resources
 thread_local unsigned TenementPaaDepth = 0;
 thread_local unsigned TenementPaaIdentities = 0;
 thread_local bool TenementPaaIdentityOverflow = false;
@@ -1324,6 +1325,47 @@ struct ArchiveBindingState
     std::atomic<uint64_t> weakWrappersPublished{0}, weakInitializedHandoffs{0}, weakFailedInitCompletions{0};
 };
 ArchiveBindingState& SourceBindingState() { static ArchiveBindingState state; return state; }
+}
+
+bool ArchiveSourceBinding::RetailPacReadScope::Enabled()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("WGR_GEOMETRY_PAGE_RETAIL_SOURCE");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    return enabled;
+}
+bool ArchiveSourceBinding::RetailPacReadScope::Active()
+{
+    return Enabled() && Foundation::IsMainThread() && RetailPacReadDepth != 0;
+}
+ArchiveSourceBinding::RetailPacReadScope::RetailPacReadScope(const char* exactModelPath)
+{
+    if (Enabled() && Foundation::IsMainThread() && RetailPacReadDepth < 8 &&
+        PatnikArchiveReason::Matches(R"(data3d\skala_new.p3d)", exactModelPath))
+    { ++RetailPacReadDepth; _entered = true; }
+}
+ArchiveSourceBinding::RetailPacReadScope::~RetailPacReadScope()
+{
+    if (_entered) --RetailPacReadDepth;
+}
+bool ArchiveSourceBinding::RetailPacReadScope::MatchesLogicalName(const char* name)
+{
+    return Active() && PatnikArchiveReason::Matches(R"(data\skala_piskovec2.pac)", name);
+}
+bool ArchiveSourceBinding::RetailPacReadScope::MatchesBankMember(
+    const char* bankPath, const char* prefix, const char* member)
+{
+    if (!Active() || !PatnikArchiveReason::Matches(R"(data\)", prefix) ||
+        !PatnikArchiveReason::Matches("skala_piskovec2.pac", member)) return false;
+    constexpr std::string_view suffix = R"(DTA\data.pbo)";
+    const size_t length = PatnikArchiveReason::BoundedLength(bankPath);
+    if (length == 8192 || length < suffix.size()) return false;
+    if (length > suffix.size() && bankPath[length - suffix.size() - 1] != '/' &&
+        bankPath[length - suffix.size() - 1] != '\\') return false;
+    for (size_t i = 0; i < suffix.size(); ++i)
+        if (!PatnikArchiveReason::Same(bankPath[length - suffix.size() + i], suffix[i])) return false;
+    return true;
 }
 
 bool TenementPhysicalPaaScope::Enabled()
@@ -1505,7 +1547,7 @@ void ArchiveSourceBinding::NoteInitRetained()
 ArchiveSourceBinding::Stats ArchiveSourceBinding::SnapshotStats()
 {
     Stats out;
-    out.enabled = CaptureWarmTextureSourceBinding();
+    out.enabled = CaptureWarmTextureSourceBinding() || RetailPacReadScope::Enabled();
     if (!out.enabled) return out;
     try
     {
@@ -1768,17 +1810,20 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
 
         std::shared_ptr<const ArchiveSourceBinding> binding;
         const char* captureReason = "captureDisabled";
-        if (CaptureWarmTextureSourceBinding() &&
-            (!ArchiveSourceBinding::ModelReadScope::PurposeRequired() || ArchiveSourceBinding::ModelReadScope::IsActive()) &&
+        const bool retailPac = ArchiveSourceBinding::RetailPacReadScope::Active() &&
+            ArchiveSourceBinding::RetailPacReadScope::MatchesBankMember(
+            (const char*)GetOpenName(), (const char*)GetPrefix(), name);
+        if (((CaptureWarmTextureSourceBinding() &&
+            (!ArchiveSourceBinding::ModelReadScope::PurposeRequired() || ArchiveSourceBinding::ModelReadScope::IsActive())) || retailPac) &&
             _fileAccess && Foundation::IsMainThread() && name)
         {
             captureReason = "notPaa";
             size_t length = 0;
             while (length < 8192 && name[length]) ++length;
-            if (length >= 4 && length <= 8191 && name[length - 4] == '.' &&
+            if ((retailPac || (length >= 4 && length <= 8191 && name[length - 4] == '.' &&
                 std::tolower(static_cast<unsigned char>(name[length - 3])) == 'p' &&
                 std::tolower(static_cast<unsigned char>(name[length - 2])) == 'a' &&
-                std::tolower(static_cast<unsigned char>(name[length - 1])) == 'a')
+                std::tolower(static_cast<unsigned char>(name[length - 1])) == 'a')))
             {
                 captureReason = "captureRefused";
                 try

@@ -1824,6 +1824,13 @@ uint64_t TextureWgpu::EnsureUploaded()
     {
         _bank->NoteTextureUse(this);
     }
+    if (auto* reuseOnly = WgpuTextureReuseOnlyBinding::Active())
+    {
+        // Final owner binding may only reuse a held, unchanged resident image.
+        // Refusals leave deferred pixels, upload retry state and source proof intact.
+        return reuseOnly->Check(this, {_gpuHandle, _slotLease, _dynamic,
+                                       _deferredGenerated != nullptr});
+    }
     if (_deferredGenerated)
     {
         // Move first so a reentrant consumer cannot upload the same payload twice.

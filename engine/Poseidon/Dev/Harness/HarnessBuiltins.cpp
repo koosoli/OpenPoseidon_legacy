@@ -651,6 +651,8 @@ void RegisterScreenshot(HarnessServer& hs)
             else if(!std::strcmp(name,"projectHierarchy")) action=Engine::GeometryPageFixtureAction::ProjectHierarchy;
             else if(!std::strcmp(name,"followHierarchy")) action=Engine::GeometryPageFixtureAction::FollowHierarchy;
             else if(!std::strcmp(name,"stopHierarchy")) action=Engine::GeometryPageFixtureAction::StopHierarchy;
+            else if(!std::strcmp(name,"probeTextureReuseOnly")) action=Engine::GeometryPageFixtureAction::ProbeTextureReuseOnly;
+            else if(!std::strcmp(name,"probeRetailOdol7")) action=Engine::GeometryPageFixtureAction::ProbeRetailOdol7;
             else if(!std::strcmp(name,"followCamera")) action=Engine::GeometryPageFixtureAction::FollowCamera;
             else if(!std::strcmp(name,"followProjected")) action=Engine::GeometryPageFixtureAction::FollowProjected;
             else if(!std::strcmp(name,"stopCamera")) action=Engine::GeometryPageFixtureAction::StopCamera;
@@ -933,7 +935,19 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddNumberToObject(result,"requestId",double(report.requestId));
             cJSON_AddNumberToObject(result,"observedRequestId",double(report.observedRequestId));
             cJSON_AddNumberToObject(result,"knownPayloadBytes",double(report.knownPayloadBytes));
+            cJSON_AddBoolToObject(result,"textureReuseProbe",report.textureReuseProbe);
+            cJSON_AddBoolToObject(result,"textureReusePassed",report.textureReusePassed);
+            cJSON_AddBoolToObject(result,"textureReuseHeldDenied",report.textureReuseHeldDenied);
+            cJSON_AddBoolToObject(result,"textureReuseResidentStable",report.textureReuseResidentStable);
+            cJSON_AddBoolToObject(result,"textureReuseUnexpectedDenied",report.textureReuseUnexpectedDenied);
+            cJSON_AddBoolToObject(result,"textureReuseRetriesResident",report.textureReuseRetriesResident);
+            cJSON_AddBoolToObject(result,"retailSourceProbe",report.retailSourceProbe);
+            cJSON_AddBoolToObject(result,"retailSourceExported",report.retailSourceExported);
+            cJSON_AddBoolToObject(result,"retailSourceOtherPassesRequired",report.retailSourceOtherPassesRequired);
 #define PAGE_FIXTURE_NUMBER(field) cJSON_AddNumberToObject(result,#field,double(report.field))
+            PAGE_FIXTURE_NUMBER(textureReuseAllowed);PAGE_FIXTURE_NUMBER(textureReuseDenied);PAGE_FIXTURE_NUMBER(textureReuseOwnerCreates);
+            PAGE_FIXTURE_NUMBER(retailSourcePrepareStatus);PAGE_FIXTURE_NUMBER(retailSourceExportStatus);
+            PAGE_FIXTURE_NUMBER(modelAdmissionAccepted);PAGE_FIXTURE_NUMBER(modelAdmissionRejected);PAGE_FIXTURE_NUMBER(modelAdmissionPending);
             PAGE_FIXTURE_NUMBER(producerModel); PAGE_FIXTURE_NUMBER(rendererModel);
             PAGE_FIXTURE_NUMBER(producerInstance); PAGE_FIXTURE_NUMBER(rendererInstance);
             PAGE_FIXTURE_NUMBER(meshCount); PAGE_FIXTURE_NUMBER(meshesPresent); PAGE_FIXTURE_NUMBER(meshesAbsent);

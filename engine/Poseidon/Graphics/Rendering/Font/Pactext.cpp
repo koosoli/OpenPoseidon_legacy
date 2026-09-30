@@ -2232,7 +2232,11 @@ bool TextureSourcePac::Init(const char* name, PacLevelMem* mips, int maxMips)
         const char* cold = std::getenv("WGR_OBJECT_STREAM_COLD_TEXTURE_HANDOFF");
         return (value && std::strcmp(value, "1") == 0) || (cold && std::strcmp(cold, "1") == 0);
     }();
-    if (retainArchiveBinding && _isPaa && _mipmaps > 0 && in.GetBuffer())
+    // The exact retail PAC purpose retains only the binding from this original
+    // successfully parsed Init buffer. It does not recapture by filename or
+    // broaden the usual PAA rule for any other PAC.
+    const bool retailPac = !_isPaa && ArchiveSourceBinding::RetailPacReadScope::MatchesLogicalName(name);
+    if (((retainArchiveBinding && _isPaa) || retailPac) && _mipmaps > 0 && in.GetBuffer())
     {
         _archiveSourceBinding = in.GetBuffer()->GetArchiveSourceBinding();
         if (_archiveSourceBinding) ArchiveSourceBinding::NoteInitRetained();

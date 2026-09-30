@@ -116,6 +116,25 @@ public:
         static bool IsMaterialPreflightActive();
         static size_t BindingLimit(); // 254 ordinary/256 stage when explicitly enabled; 256 otherwise
     };
+    // Exact retail rigid-model PAC experiment. The selected model may enter
+    // this owner-only purpose while it performs its original Shape/texture Init.
+    // Only the matching raw data.pbo member may obtain a binding; this scope
+    // never resolves a path, opens a bank, or certifies a later mount by name.
+    class RetailPacReadScope
+    {
+        bool _entered = false;
+    public:
+        explicit RetailPacReadScope(const char* exactModelPath);
+        ~RetailPacReadScope();
+        RetailPacReadScope(const RetailPacReadScope&) = delete;
+        RetailPacReadScope& operator=(const RetailPacReadScope&) = delete;
+        RetailPacReadScope(RetailPacReadScope&&) = delete;
+        RetailPacReadScope& operator=(RetailPacReadScope&&) = delete;
+        static bool Enabled();
+        static bool Active();
+        static bool MatchesBankMember(const char* bankPath, const char* prefix, const char* member);
+        static bool MatchesLogicalName(const char* name);
+    };
     // Original raw mapped member only; names/headers are not source identity.
     // The process admission cap follows shared bindings retained by buffers/sources.
     // Subsequent worker copies must additionally be charged to their own bounded job.

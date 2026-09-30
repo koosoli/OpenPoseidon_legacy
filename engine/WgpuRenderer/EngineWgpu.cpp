@@ -33,6 +33,8 @@
 #include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/World/Terrain/WarmMaterialStagePreflightPolicy.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/Graphics/Textures/DeferredProceduralAdmission.hpp>
+#include <Poseidon/Graphics/Rendering/RigidOdol7OwnerCapture.hpp>
 #include <atomic>
 #include <optional>
 #include <stdexcept>
@@ -2250,6 +2252,7 @@ struct EngineWgpu::GeometryPageFixtureState
     std::optional<GeometryPages::HierarchicalBinaryDemand::Policy> hierarchyAutoPolicy;
     uint64_t hierarchyAutoNextTick=0;
     std::array<bool,4> hierarchyModelRegistered{},hierarchyCutReserved{};
+    std::array<std::shared_ptr<render::ModelAdmissionReceipt>,4> hierarchyReceipts{};
     std::array<std::array<uint32_t,64>,4> hierarchyCutKeys{};
     std::array<uint8_t,4> hierarchyCutCounts{};
     std::array<uint32_t,64> hierarchyFineKey{};
@@ -3629,11 +3632,26 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
         {
             if (_modelIdOf.find(op.model) != _modelIdOf.end())
             {
+                if (op.modelAdmissionReceipt) op.modelAdmissionReceipt->ConsumeRejected();
                 // Fail closed on a duplicate live handle. Preserve the original
                 // Rust registration for its normal retirement, but poison facts.
                 if (_geometrySourceRevisions) _geometrySourceRevisions->Duplicate(op.model);
                 if (_geometryOwnerLedger)
                     _geometryOwnerLedger->MarkIncomplete(_geometryOwnerEpoch, render::GeometryOwnerLedger::Reason::Protocol);
+                break;
+            }
+            // The selected receipt is a bounded drain witness, never a source or
+            // publication authority. Refuse BEFORE translating any section if
+            // its complete actual section/LOD table differs from the frozen
+            // expected mesh set or any producer mesh failed to materialize.
+            if (op.modelAdmissionReceipt &&
+                !op.modelAdmissionReceipt->MatchesBeforeTranslation(op.model, op.sections, op.lods,
+                    [this](uint64_t mesh) {
+                        const auto it = _meshIdOf.find(mesh);
+                        return it != _meshIdOf.end() && it->second != 0;
+                    }))
+            {
+                op.modelAdmissionReceipt->ConsumeRejected();
                 break;
             }
             std::vector<uint64_t> sourceMeshes;
@@ -3697,6 +3715,11 @@ void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
                 _renderer, op.sphereRadius, WgrSlice<WgrModelLod>{op.lods.data(), U32(op.lods.size())},
                 WgrSlice<WgrModelSection>{op.sections.data(), U32(op.sections.size())},
                 WgrSlice<WgrModelMaterial>{op.materials.data(), U32(op.materials.size())}, op.name.c_str());
+            if (op.modelAdmissionReceipt)
+            {
+                if (_modelIdOf[op.model] == WGR_INVALID_MODEL) op.modelAdmissionReceipt->ConsumeRejected();
+                else op.modelAdmissionReceipt->ConsumeAccepted(_modelIdOf[op.model]);
+            }
             if (_geometrySourceRevisions && _modelIdOf[op.model] != WGR_INVALID_MODEL)
                 _geometrySourceRevisions->Register(op.model, _modelIdOf[op.model],
                     std::move(sourceMeshes), sourceMeshesLive);
@@ -4061,7 +4084,7 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
                     continue;
             }
             const auto it = _modelIdOf.find(inst.model);
-            if (it == _modelIdOf.end())
+            if (it == _modelIdOf.end() || it->second == WGR_INVALID_MODEL)
             {
                 if(_geometryPageFixtureObservation && op.kind==InstanceOp::Update && op.handle==_geometryPageFixtureObservation->instance) {
                     auto& fixture=*_geometryPageFixtureObservation;std::lock_guard lock(fixture.mutex);
@@ -4082,6 +4105,18 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
                 break;
             }
             // Experimental authored paging commits only a full actual GPU cut.
+            if(_geometryPageFixtureObservation && op.kind==InstanceOp::Add &&
+                op.handle==_geometryPageFixtureObservation->instance) {
+                auto& fixture=*_geometryPageFixtureObservation;std::lock_guard lock(fixture.mutex);
+                if(fixture.report.hierarchicalPilot && op.inst.model==fixture.models[0]) {
+                    const auto& receipt=fixture.hierarchyReceipts[0];
+                    if(!receipt||receipt->ProducerModel()!=op.inst.model||receipt->OwnerEpoch()!=_geometryOwnerEpoch||
+                        receipt->SourceAdmissionEpoch()!=fixture.report.sourceAdmissionEpoch||
+                        receipt->Observe().state!=render::ModelAdmissionReceipt::State::ConsumedAccepted) {
+                        fixture.report.pageWorkState="HierarchyFallbackFailed";break;
+                    }
+                }
+            }
             // Holding the private state mutex makes Cancel/Abort vs commit explicit;
             // no other instance and no default frame invokes this fact probe.
             if(_geometryPageFixtureObservation && op.kind==InstanceOp::Update && op.handle==_geometryPageFixtureObservation->instance) {
@@ -4102,6 +4137,13 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
                         fixture.hierarchyGeneration==fixture.hierarchyPendingGeneration &&
                         !fixture.hierarchyPendingClusters.empty() && fixture.hierarchyPendingClusters.size()<=64 &&
                         cutSlot<fixture.modelCount && fixture.hierarchyCutReserved[cutSlot] &&
+                        fixture.hierarchyReceipts[cutSlot] &&
+                        fixture.hierarchyReceipts[cutSlot]->ProducerModel()==op.inst.model &&
+                        fixture.hierarchyReceipts[cutSlot]->OwnerEpoch()==_geometryOwnerEpoch &&
+                        fixture.hierarchyReceipts[cutSlot]->RequestId()>0 &&
+                        fixture.hierarchyReceipts[cutSlot]->RequestId()<=fixture.hierarchyPendingRequest &&
+                        fixture.hierarchyReceipts[cutSlot]->SourceAdmissionEpoch()==report.sourceAdmissionEpoch &&
+                        fixture.hierarchyReceipts[cutSlot]->Observe().state==render::ModelAdmissionReceipt::State::ConsumedAccepted &&
                         fixture.hierarchyModelRegistered[cutSlot] &&
                         fixture.hierarchyCutCounts[cutSlot]==fixture.hierarchyPendingClusters.size() &&
                         std::equal(fixture.hierarchyPendingClusters.begin(),fixture.hierarchyPendingClusters.end(),
@@ -9422,8 +9464,152 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
     if(!enabled) return failure;
     failure.status=GeometryReportStatus::Invalid;
     if(!Foundation::IsMainThread() || !_renderer || !_gpuDriven) return failure;
+    if(action==GeometryPageFixtureAction::ProbeRetailOdol7) {
+        using namespace GeometryPages;
+        failure.retailSourceProbe=true;failure.pageWorkState="RetailSourceRefused";
+        if(!WgpuTextureReuseOnlyBinding::Enabled())return failure;
+        static bool used=false;if(used)return failure;used=true;
+        try {
+            RigidOdol7OwnerCapture owner;
+            const auto prepared=PrepareRigidOdol7OwnerCapture(owner);
+            failure.retailSourcePrepareStatus=uint32_t(prepared);
+            if(!owner.FinalShape())return failure;
+            auto& shape=*owner.FinalShape();
+            const auto* fine=RigidOdol7FinalDetail::FindSource(owner.Candidate(),0);
+            if(!fine)return failure;
+            const int level=RigidOdol7FinalDetail::FindFinal(shape,fine->resolution);
+            if(level<0||shape.Level(level)->NSections()!=1)return failure;
+            const auto& section=shape.Level(level)->GetSection(0);
+            // This narrow source has one actual primary texture and no surface
+            // material. Keep unknown/cached Init evidence as a refusal.
+            if(section.surfMat||section.material!=0||!section.properties.GetTexture())return failure;
+            Ref<Texture> held=section.properties.GetTexture();
+            auto* texture=static_cast<TextureWgpu*>(held.GetRef());
+            auto birth=texture->CurrentArchiveSourceBinding();
+            BankReadMemberIdentity member;
+            if(!birth||!birth->Request().CopyMemberIdentity(member)) {
+                failure.pageWorkState="RetailTextureInitUnknown";return failure;
+            }
+            const uint64_t handle=texture->EnsureUploaded();
+            if(!handle||!texture->SlotLease()||texture->GetAlphaClass()!=AlphaStats::Opaque||texture->HasAlphaHoles())return failure;
+            const uint32_t slotLease=texture->SlotLease();
+            WgpuTextureReuseOnlyBinding reuse;
+            if(!reuse.Add(held,{handle,texture->SlotLease(),texture->IsDynamicTexture(),false})||!reuse.Seal())return failure;
+            auto inspect=[&](int finalLevel,const ShapeSection& actual) {
+                RigidOdol7FinalMaterialHold out;
+                if(actual.properties.GetTexture()!=texture||actual.surfMat||actual.material!=0)return out;
+                const char* name=texture->SourceName();
+                QFBank* bank=name?QIFStreamB::AutoBank(name):nullptr;
+                const size_t prefix=bank?size_t(bank->GetPrefix().GetLength()):0;
+                if(!bank||!name||prefix>=std::strlen(name)||
+                    !bank->MatchesMountedMember(name+prefix,birth->Request())||
+                    texture->GpuHandle()!=handle||texture->SlotLease()!=slotLease)return out;
+                auto* s=shape.Level(finalLevel);if(!s)return out;
+                AutoArray<render::mesh::MeshSection> sections;render::mesh::BuildSections(*s,sections);
+                if(sections.Size()!=1)return out;
+                out.texture=held;out.surface=actual.surfMat;out.materialBindingBirth=1;
+                out.current={1,texture->SourceName(),
+                    {member.volume,member.archiveBytes,member.offset,member.bytes,{}},
+                    texture->GpuHandle(),texture->SlotLease(),true,true};
+                std::memcpy(out.current.member.fileId.data(),member.fileId,out.current.member.fileId.size());
+                auto& facts=out.facts;facts.gpuOwned=SectionGpuOwned(actual);
+                facts.indexCount=sections[0].end-sections[0].beg;
+                facts.descriptor=render::BuildRenderPassDescriptor(render::SplitLegacy(actual.properties.Special()));
+                facts.texturePresent=true;facts.alphaClass=texture->GetAlphaClass();facts.alphaHoles=texture->HasAlphaHoles();
+                facts.legacyPlantName=render::IsLegacyPlantCutoutTexture(texture->Name());
+                facts.enfusionCoverageName=render::IsEnfusionCoverageTexture(texture->Name());
+                facts.barkOrTrunkName=GpuTextureIsBarkOrTrunk(texture);
+                facts.leafCards=GpuSectionMaterialUsesLeafCards(actual.surfMat);
+                facts.ematBlends=GpuEmatBlends(actual.surfMat);facts.ematGlass=GpuEmatIsGlass(actual.surfMat);
+                facts.ematOpaqueSolid=GpuEmatIsOpaqueSolid(actual.surfMat);facts.ematCullNone=GpuEmatCullNone(actual.surfMat);
+                const auto family=GpuEmatFamily(actual.surfMat);
+                facts.ematVegetationFamily=!family.empty()&&Asset::Material::IsEmatVegetationFamily(family);
+                TLMaterial material;CreateMaterial(material,HWhite,actual.material);
+                facts.materialFullyOpaque=MaterialIsFullyOpaque(material);
+                facts.foldedEmissive={material.emmisive.R(),material.emmisive.G(),material.emmisive.B(),material.emmisive.A()};
+                facts.emitterScale=StaticEmitterRadianceScale(actual.surfMat,material.emmisive);
+                facts.capturedGroups=render::PreparedGpuSectionFacts::All;facts.complete=true;
+                return out;
+            };
+            RigidOdol7FinalExport actual;
+            RigidOdol7FinalStatus exported;
+            const auto sourceHold=owner.CurrentSourceHold(1,_geometryOwnerEpoch,1);
+            if(!sourceHold)return failure;
+            {WgpuTextureReuseOnlyBinding::Scope scope(reuse,true,true);
+                exported=ExportRigidOdol7FinalShape(shape,owner.Candidate(),1,0,*sourceHold,inspect,actual);}
+            failure.retailSourceExportStatus=uint32_t(exported);
+            failure.retailSourceExported=exported==RigidOdol7FinalStatus::Exported;
+            failure.retailSourceOtherPassesRequired=actual.requiresOriginalOtherPasses;
+            if(!failure.retailSourceExported)return failure;
+            failure.coarseTriangles=U32(actual.actual.coarse.indices.size()/3);
+            failure.fineTriangles=U32(actual.actual.fine.indices.size()/3);
+            failure.sourceAdmissionEpoch=actual.sourceAdmissionEpoch;failure.originalSourceBytes=owner.DecodedBytes().size();
+            failure.sourceSha256=PageHashHex(actual.actual.source.sourceSha256);
+            failure.knownPayloadBytes=owner.RetainedDecodedCapacityBytes();
+            failure.status=GeometryReportStatus::Ready;failure.pageWorkState="RetailFinalShapeVerified";
+        }catch(...){failure.status=GeometryReportStatus::Failed;failure.pageWorkState="RetailSourceAllocationOrOwnerFailure";}
+        return failure;
+    }
+    if(action==GeometryPageFixtureAction::ProbeTextureReuseOnly) {
+        namespace A=render::procedural::admission;
+        failure.textureReuseProbe=true;failure.pageWorkState="ReuseOnlyRefused";
+        if(!_wbank||!A::Enabled()||!WgpuTextureReuseOnlyBinding::Enabled())return failure;
+        static bool used=false;if(used)return failure;used=true;
+        try {
+            auto ledger=std::make_shared<A::Ledger>();Ref<Texture> staged,unexpected;
+            {A::CaptureScope scope(ledger,true);staged=_wbank->Load("#(argb,7,9,3)color(0.211,0.379,0.523,1)");}
+            auto* first=static_cast<TextureWgpu*>(staged.GetRef());
+            if(!first||!first->HasDeferredGeneratedUpload()||first->GpuHandle())return failure;
+            const auto initial=ledger->Read();const bool triedBefore=first->HasAttemptedGpuUpload();
+            WgpuTextureReuseOnlyBinding empty;empty.Seal();
+            uint64_t denied=UINT64_MAX;
+            {WgpuTextureReuseOnlyBinding::Scope scope(empty,true,true);denied=first->EnsureUploaded();}
+            const auto blocked=ledger->Read();
+            failure.textureReuseHeldDenied=!denied&&!first->GpuHandle()&&first->HasDeferredGeneratedUpload()&&
+                first->HasAttemptedGpuUpload()==triedBefore&&initial.deferred==1&&blocked.pendingBytes==initial.pendingBytes&&
+                blocked.pendingCount==1&&!blocked.staged&&!blocked.escaped&&!blocked.failed&&!blocked.aborted;
+            {A::StageScope scope(ledger);first->EnsureUploaded();}
+            const uint64_t stable=first->GpuHandle();
+            if(!stable)return failure;
+            {A::CaptureScope scope(ledger,true);unexpected=_wbank->Load("#(argb,7,9,3)color(0.229,0.397,0.541,1)");}
+            auto* second=static_cast<TextureWgpu*>(unexpected.GetRef());
+            if(!second||!second->HasDeferredGeneratedUpload()||second->GpuHandle())return failure;
+            WgpuTextureReuseOnlyBinding allowed;
+            if(!allowed.Add(staged,{stable,first->SlotLease(),first->IsDynamicTexture(),false})||!allowed.Seal())return failure;
+            const auto beforeUnexpected=ledger->Read();const bool secondTried=second->HasAttemptedGpuUpload();
+            {WgpuTextureReuseOnlyBinding::Scope scope(allowed,true,true);
+                failure.textureReuseResidentStable=first->EnsureUploaded()==stable&&first->GpuHandle()==stable;
+                failure.textureReuseUnexpectedDenied=second->EnsureUploaded()==0&&second->GpuHandle()==0&&
+                    second->HasDeferredGeneratedUpload()&&second->HasAttemptedGpuUpload()==secondTried;
+            }
+            const auto afterUnexpected=ledger->Read();
+            failure.textureReuseUnexpectedDenied&=afterUnexpected.pendingBytes==beforeUnexpected.pendingBytes&&
+                afterUnexpected.staged==beforeUnexpected.staged&&!afterUnexpected.escaped&&!afterUnexpected.failed&&!afterUnexpected.aborted;
+            {A::StageScope scope(ledger);second->EnsureUploaded();}
+            const auto final=ledger->Read();const auto allowedReport=allowed.Read(),emptyReport=empty.Read();
+            failure.textureReuseAllowed=uint32_t(allowedReport.allowedChecks);
+            failure.textureReuseDenied=uint32_t(allowedReport.deniedUnexpected+emptyReport.deniedUnexpected);
+            failure.textureReuseOwnerCreates=uint32_t(final.staged);
+            failure.textureReuseRetriesResident=first->GpuHandle()==stable&&second->GpuHandle()!=0&&
+                final.deferred==2&&final.staged==2&&!final.escaped&&!final.failed&&!final.aborted&&
+                !final.pendingCount&&!final.pendingBytes;
+            failure.textureReusePassed=failure.textureReuseHeldDenied&&failure.textureReuseResidentStable&&
+                failure.textureReuseUnexpectedDenied&&failure.textureReuseRetriesResident&&
+                failure.textureReuseAllowed==1&&failure.textureReuseDenied==2;
+            failure.status=failure.textureReusePassed?GeometryReportStatus::Ready:GeometryReportStatus::Failed;
+            failure.pageWorkState=failure.textureReusePassed?"ReuseOnlyVerified":"ReuseOnlyFailed";
+        }catch(...){failure.status=GeometryReportStatus::Failed;failure.pageWorkState="ReuseOnlyAllocationFailed";}
+        return failure;
+    }
     const auto updatePageStats=[&](GeometryPageFixtureReport& report) {
         if(report.hierarchicalPilot) {
+            report.modelAdmissionAccepted=report.modelAdmissionRejected=report.modelAdmissionPending=0;
+            if(_geometryPageFixture)for(const auto& receipt:_geometryPageFixture->hierarchyReceipts)if(receipt) {
+                const auto state=receipt->Observe().state;
+                if(state==render::ModelAdmissionReceipt::State::ConsumedAccepted)++report.modelAdmissionAccepted;
+                else if(state==render::ModelAdmissionReceipt::State::ConsumedRejected)++report.modelAdmissionRejected;
+                else ++report.modelAdmissionPending;
+            }
             if(_geometryPageWorker) {
                 const auto stats=_geometryPageWorker->Snapshot();
                 report.pageReservedBytes=stats.reservedBytes;
@@ -9570,6 +9756,10 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             if(!fixture->pageMaterial.texture_id)fixture->pageMaterial.texture_id=UntexturedAlbedoHandle(false);
             model.sections.push_back(coarseSection);model.materials.push_back(coarseMaterial);
             model.lods.push_back(WgrModelLod{1,0,1,0});
+            const std::array<uint64_t,1> fallbackMeshes{mesh.mesh};
+            model.modelAdmissionReceipt=std::make_shared<render::ModelAdmissionReceipt>(
+                model.model,_geometryOwnerEpoch,originalOwner->report.epoch,1,fallbackMeshes);
+            fixture->hierarchyReceipts[0]=model.modelAdmissionReceipt;
             const uint64_t hierarchyKnown=diskMode?
                 fixture->hierarchyDiskManifest->knownCapacityBytes+
                     HierarchicalDiskPageInputKnownBytes(*fixture->hierarchyDiskAuthority):
@@ -9579,7 +9769,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                 mesh.verts.capacity()*sizeof(SVertex)+mesh.indices.capacity()*sizeof(VertexIndex)+
                 model.sections.capacity()*sizeof(WgrModelSection)+
                 model.materials.capacity()*sizeof(WgrModelMaterial)+model.lods.capacity()*sizeof(WgrModelLod)+
-                3*sizeof(ResourceOp)+fixture->meshes.capacity()*sizeof(uint64_t)+
+                3*sizeof(ResourceOp)+sizeof(render::ModelAdmissionReceipt)+64+fixture->meshes.capacity()*sizeof(uint64_t)+
                 fixture->report.pageWorkState.capacity()+fixture->report.hierarchyPackageSha256.capacity()+
                 fixture->report.sourceSha256.capacity()+fixture->report.diskReadStatus.capacity()+
                 (fixture->hierarchyPendingClusters.capacity()+fixture->report.hierarchySelectedClusters.capacity())*sizeof(uint32_t);
@@ -10567,8 +10757,16 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
                     model.sections.push_back(section);model.materials.push_back(fixture->pageMaterial);
                 }
                 model.lods.push_back(WgrModelLod{1,0,uint32_t(model.sections.size()),0});
+                std::array<uint64_t,render::ModelAdmissionReceipt::MaxMeshes> expectedMeshes{};
+                if(model.sections.size()>expectedMeshes.size())return failure;
+                for(size_t i=0;i<model.sections.size();++i)expectedMeshes[i]=model.sections[i].mesh;
+                model.modelAdmissionReceipt=std::make_shared<render::ModelAdmissionReceipt>(
+                    model.model,_geometryOwnerEpoch,report.sourceAdmissionEpoch,report.requestId+1,
+                    std::span<const uint64_t>(expectedMeshes.data(),model.sections.size()));
+                if(!model.modelAdmissionReceipt->ValidFor(model.model))return failure;
                 extra+=model.sections.capacity()*sizeof(WgrModelSection)+
-                    model.materials.capacity()*sizeof(WgrModelMaterial)+model.lods.capacity()*sizeof(WgrModelLod);
+                    model.materials.capacity()*sizeof(WgrModelMaterial)+model.lods.capacity()*sizeof(WgrModelLod)+
+                    sizeof(render::ModelAdmissionReceipt)+64;
                 staged.push_back(std::move(model));
             }
             const uint64_t debt=_geometryPageWorker?_geometryPageWorker->Snapshot().reservedBytes:0;
@@ -10580,6 +10778,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
             observe.fixtureData=fixture;observe.fixtureRequest=report.requestId+1;
             staged.push_back(std::move(observe));
             _resourceOps.reserve(_resourceOps.size()+staged.size());_instanceOps.reserve(_instanceOps.size()+1);
+            if(staged.front().kind==ResourceOp::ModelRegister)
+                fixture->hierarchyReceipts[slot]=staged.front().modelAdmissionReceipt;
             if(!fixture->hierarchyCutReserved[slot])++report.hierarchyRetainedCutModels;
             fixture->hierarchyCutReserved[slot]=true;
             fixture->hierarchyCutCounts[slot]=uint8_t(plan.selectedClusters.size());

@@ -5,6 +5,7 @@
 
 #include <wgpu_renderer.hpp>
 #include <Poseidon/Graphics/Textures/MipDemand.hpp>
+#include <Poseidon/Graphics/Textures/TextureReuseOnlyBinding.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -13,6 +14,8 @@ namespace Poseidon
 {
 class ITextureSource;
 class TextureBankWgpu;
+
+using WgpuTextureReuseOnlyBinding = render::TextureReuseOnlyBinding<Ref<Texture>>;
 
 // A texture for the wgpu backend. Two kinds:
 //   * file-backed - pixels are uploaded lazily on first use (EnsureUploaded)
