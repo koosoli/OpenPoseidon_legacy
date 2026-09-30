@@ -9712,9 +9712,11 @@ static uint32_t BuildForestCrownComponents(const std::vector<SVertex>& verts, co
     // Triangle adjacency: the three corners of a face are one component.
     for (size_t t = 0; t + 3 <= indices.size(); t += 3)
     {
-        const uint32_t a = uint32_t(uint16_t(indices[t]));
-        const uint32_t b = uint32_t(uint16_t(indices[t + 1]));
-        const uint32_t c = uint32_t(uint16_t(indices[t + 2]));
+        // VertexIndex is signed 32-bit; preserve large indices and let the bounds check
+        // reject negative/invalid corners rather than wrapping them into another tree.
+        const uint32_t a = uint32_t(indices[t]);
+        const uint32_t b = uint32_t(indices[t + 1]);
+        const uint32_t c = uint32_t(indices[t + 2]);
         if (a < nv && b < nv && c < nv)
         {
             unite(a, b);
