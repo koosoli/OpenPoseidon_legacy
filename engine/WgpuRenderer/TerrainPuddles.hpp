@@ -92,6 +92,17 @@ inline bool EligibleNativeSurface(std::string_view semanticName)
            HasSurfaceToken(semanticName, "clay", true);
 }
 
+inline bool EligibleLegacySurface(std::string_view semanticName, std::string_view filePattern,
+                                  std::string_view soundEnvironment)
+{
+    // Retail CWA's cultivated soil is authored as Field/files=pol/sound=dirt.
+    // Require all three statements: Field alone can describe crops/grass in mods,
+    // and Village/bah and MudBuilding/hlinasterk are not bare muddy terrain.
+    // Native and authored multi-surface policies retain their own classifiers.
+    return EligibleSurface(semanticName) ||
+           (semanticName == "Field" && filePattern == "pol" && soundEnvironment == "dirt");
+}
+
 // Cosmetic accumulation; no gameplay material or water-depth mutation. Uses the
 // captured simulation clock, so a pause and duplicate reflection draws are no-ops.
 struct Wetness

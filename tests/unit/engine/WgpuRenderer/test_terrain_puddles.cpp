@@ -34,6 +34,24 @@ int main()
     assert(!EligibleNativeSurface("BeachGrass_01.emat"));
     assert(!EligibleNativeSurface("Unknown_01.emat"));
 
+    // Exact actual CWA catalogue identity, not an inferred Czech texture alias or
+    // a blanket Field/sound=dirt rule. Conflicting/missing metadata stays dry.
+    assert(EligibleLegacySurface("Field", "pol", "dirt"));
+    assert(!EligibleSurface("Field"));
+    assert(!EligibleNativeSurface("Field"));
+    for (const auto semantic : {"", "Default", "field", "FieldGrass", "Field_Mod", "Village", "MudBuilding",
+                                "Grass", "Forest", "Sand", "Roadway", "Cesta", "Asfalt", "Runway"})
+        assert(!EligibleLegacySurface(semantic, "pol", "dirt"));
+    for (const auto pattern : {"", "POL", "pol*", "pol??????", "data/pol", "pol.paa", "bah", "hlinasterk*"})
+        assert(!EligibleLegacySurface("Field", pattern, "dirt"));
+    for (const auto sound : {"", "Dirt", "normalExt", "grass", "rock", "gravel", "road", "forest"})
+        assert(!EligibleLegacySurface("Field", "pol", sound));
+    assert(!EligibleLegacySurface("Village", "bah", "normalExt"));
+    assert(!EligibleLegacySurface("MudBuilding", "hlinasterk*", "rock"));
+    assert(!EligibleLegacySurface("Grass", "tn??????", "normalExt"));
+    assert(!EligibleLegacySurface("Roadway", "silnice*", "road"));
+    assert(EligibleLegacySurface("Mud", "custom-mud", "mud")); // previous explicit mud admission
+
     Wetness wet;
     assert(wet.Update(0.0f, 1.0f) == 0.0f);
     const float filled = wet.Update(30.0f, 1.0f);
