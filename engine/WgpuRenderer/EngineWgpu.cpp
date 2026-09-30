@@ -2304,7 +2304,9 @@ struct EngineWgpu::SharedMeshFixtureState
 EngineWgpu::~EngineWgpu()
 {
     StopRenderThread();
+    _retailWorldVisible.reset();
     _retailPagePilot.reset(); // release private texture holds while its bank/renderer are alive
+    _retailWorldSource.reset();
     _geometryPageWorker.reset(); // shutdown-only join; worker owns values, never renderer/Shape pointers
     _sharedMeshFixture.reset();
     // Serializes against late shared-buffer destroy enqueues before wgr_destroy.
@@ -3068,7 +3070,7 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
     }
 }
 
-uint32_t EngineWgpu::EnqueueInstanceAdd(const WgrInstance& inst, std::shared_ptr<render::RetailPageInstanceObservation> receipt)
+uint32_t EngineWgpu::EnqueueInstanceAdd(const WgrInstance& inst, std::shared_ptr<render::RetailPageInstanceObservation> receipt, uint64_t worldBirth)
 {
     uint32_t handle;
     if (!_instFreeHandles.empty())
@@ -3080,7 +3082,7 @@ uint32_t EngineWgpu::EnqueueInstanceAdd(const WgrInstance& inst, std::shared_ptr
     {
         handle = _nextInstanceHandle++;
     }
-    _instanceOps.push_back(InstanceOp{InstanceOp::Add, handle, inst, std::move(receipt)});
+    _instanceOps.push_back(InstanceOp{InstanceOp::Add, handle, inst, std::move(receipt), worldBirth});
     return handle;
 }
 
@@ -4123,12 +4125,25 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
     {
         // No renderer, nothing to translate into; dropping the ops matches what the old
         // direct calls did behind their own null checks.
-        for (const auto& op : ops) if (op.retailReceipt) op.retailReceipt->ConsumeRejected();
+        for (const auto& op : ops) {
+            if (op.retailReceipt) op.retailReceipt->ConsumeRejected();
+            if (op.worldPair) op.worldPair->ConsumeRejected(render::RetailWorldInstanceTransaction::Refusal::Frame);
+        }
         ops.clear();
         return;
     }
     for (const InstanceOp& op : ops)
     {
+        if (op.kind == InstanceOp::WorldPair) {
+            ExecuteRetailWorldPair(op.worldPair);
+            continue;
+        }
+        // Selected pilot lifetimes only. Before a normal move/remove/reuse,
+        // restore the exact old pair so it cannot survive beside the new row.
+        if (_retailWorldConsumerBirths[0].birth || _retailWorldConsumerBirths[1].birth) {
+            InvalidateRetailWorldConsumer(op.handle);
+            if (!op.retailReceipt) SetRetailWorldConsumerBirth(op.handle,0);
+        }
         if (op.retailReceipt)
         {
             using Receipt = render::RetailPageInstanceObservation;
@@ -4136,7 +4151,7 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
             const auto model = _modelIdOf.find(request.binding.producerModel);
             bool valid = op.retailReceipt->Valid() && request.binding.ownerEpoch == _geometryOwnerEpoch &&
                 request.binding.producerInstance == op.handle && model != _modelIdOf.end() &&
-                model->second != WGR_INVALID_MODEL && !_retailInstanceReturn && !retailObserved;
+                model->second != WGR_INVALID_MODEL && !_retailInstanceReturn && !retailObserved && !_retailWorldPairReturn;
             auto expected = request.expected;
             if (valid) expected.model = model->second;
             if (op.kind == InstanceOp::Add)
@@ -4175,6 +4190,7 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
                         // reobserves the historical generation; never issue a stale remove.
                         if (!alreadyAbsent) wgr_instance_remove(_renderer,request.previousRenderer);
                         _instSlotOf[op.handle] = InvalidInstanceSlot;
+                        SetRetailWorldConsumerBirth(op.handle,0);
                     }
                 }
             }
@@ -4358,7 +4374,10 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
             }
             inst.model = it->second;
             if (op.kind == InstanceOp::Add)
+            {
                 _instSlotOf[op.handle] = wgr_instance_add(_renderer, &inst);
+                if (_instSlotOf[op.handle] && op.worldBirth) SetRetailWorldConsumerBirth(op.handle,op.worldBirth);
+            }
             else
                 wgr_instance_update(_renderer, _instSlotOf[op.handle], &inst);
             // Producer instance slots recycle at enqueue. Model identities are
@@ -4383,6 +4402,7 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
     }
     // Freeze the epoch after ordinary trailing mutations in this same queue.
     if (retailObserved) ObserveRetailInstanceDrain(*retailObserved);
+    if (_retailWorldPairReturn) ObserveRetailWorldPairDrain();
     ops.clear();
 }
 
@@ -4847,6 +4867,7 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
     }
     if (_geometryPageFixtureObservation) PublishGeometryPageFixtureObservation(frame,renderReturnStatus);
     if (_retailInstanceReturn) ObserveRetailInstanceReturned(frame,renderReturnStatus);
+    if (_retailWorldPairReturn) ObserveRetailWorldPairReturned(frame,renderReturnStatus);
     if (_geometryOwnerLedger)
     {
         // Once per real renderer frame, after deferred uploader destroys drain.
@@ -5222,6 +5243,7 @@ void EngineWgpu::NextFrame()
 {
     if(_geometryPageFixture && _geometryPageFixture->hierarchyAutoPolicy)MaintainGeometryPageHierarchyDemand();
     if(_geometryPageFixture && (_geometryPageFixture->cameraDemand||_geometryPageFixture->projectedDemand))MaintainGeometryPageCameraDemand();
+    if(_retailWorldVisible) StepRetailWorldVisible(GeometryPageFixtureAction::PollRetailWorldVisible);
     // RFG-048: fire the interior-sky probe from a HEADLESS run.
     //
     // The measurement lives behind a dev-panel button, which a screenshot harness
@@ -9594,6 +9616,30 @@ Engine::GeometryPageFixtureReport EngineWgpu::ControlGeometryPageFixture(Geometr
     if(!enabled) return failure;
     failure.status=GeometryReportStatus::Invalid;
     if(!Foundation::IsMainThread() || !_renderer || !_gpuDriven) return failure;
+    if(action==GeometryPageFixtureAction::MoveRetailWorldVisible || action==GeometryPageFixtureAction::RemoveRetailWorldVisible) {
+        static const bool worldVisible=[] { const char* v=std::getenv("WGR_GEOMETRY_PAGE_RETAIL_WORLD_VISIBLE"); return v && std::strcmp(v,"1")==0; }();
+        if(!worldVisible || !_retailWorldVisible || !_retailWorldSource || !GLandscape || !GWorld || GWorld->GetMode()==GModeNetware)
+            return failure;
+        auto* source=_retailWorldSource.get();
+        if(source->worldInvalidated || !source->worldObject) return failure;
+        const auto found=_gpuInstances.find(source->worldObject);
+        auto* object=GLandscape->FindObject(1001); // bounded generated fixture only
+        if(found==_gpuInstances.end() || !object || object!=source->worldObject ||
+           found->second.slot!=source->worldProducerInstance || found->second.shape!=source->shape.GetRef()) return failure;
+        const auto before=StepRetailWorldVisible(GeometryPageFixtureAction::PollRetailWorldVisible);
+        if(before.status!=GeometryReportStatus::Ready || !before.retailWorldPagePresent || !before.retailWorldReturned) return failure;
+        Ref<Object> hold=object; // landscape removal may release its last ordinary reference
+        if(action==GeometryPageFixtureAction::MoveRetailWorldVisible) {
+            Matrix4 moved=object->Transform();
+            moved.SetPosition(moved.Position()+Vector3(5,0,0));
+            object->Move(moved); // ordinary landscape matrix move invokes retained hook
+        } else GLandscape->RemoveObject(object);
+        return StepRetailWorldVisible(GeometryPageFixtureAction::PollRetailWorldVisible);
+    }
+    if(action==GeometryPageFixtureAction::BeginRetailWorldVisible || action==GeometryPageFixtureAction::PollRetailWorldVisible ||
+       action==GeometryPageFixtureAction::RootRetailWorldVisible || action==GeometryPageFixtureAction::FineRetailWorldVisible ||
+       action==GeometryPageFixtureAction::RestoreRetailWorldVisible)
+        return StepRetailWorldVisible(action);
     if(action==GeometryPageFixtureAction::BeginRetailVisible || action==GeometryPageFixtureAction::RootRetailVisible ||
        action==GeometryPageFixtureAction::FineRetailVisible || action==GeometryPageFixtureAction::PollRetailVisible ||
        action==GeometryPageFixtureAction::RemoveRetailVisible || action==GeometryPageFixtureAction::FallbackRetailVisible)
@@ -15300,7 +15346,21 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
     const WgrInstance inst = BuildGpuInstance(*obj, model, cp);
     TraceGpuInstance("created", shape->Name(), obj->Transform(), shape->BoundingSphere(), cp, model);
     _ops.instanceAdd++;
-    const uint32_t slot = EnqueueInstanceAdd(inst);
+    static const bool worldVisible=[] { const char* v=std::getenv("WGR_GEOMETRY_PAGE_RETAIL_WORLD_VISIBLE"); return v && std::strcmp(v,"1")==0; }();
+    uint64_t worldBirth=0;
+    auto* worldSource=worldVisible ? _retailWorldSource.get() : nullptr;
+    const auto originalCoverage=_gpuModelCoverage.find(shape);
+    if(worldSource && !worldSource->worldObjectBirth && !worldSource->worldInvalidated &&
+       worldSource->shape.GetRef()==shape && cp.mode==0 && inst.flags==0 &&
+       originalCoverage!=_gpuModelCoverage.end() && originalCoverage->second==GpuDrawCoverage::Full &&
+       !_gpuModelComplement.count(shape) && _nextRetailWorldObjectBirth && _nextRetailWorldObjectBirth<UINT64_MAX) {
+        worldBirth=_nextRetailWorldObjectBirth++;
+    }
+    const uint32_t slot = EnqueueInstanceAdd(inst,nullptr,worldBirth);
+    if(worldBirth) {
+        worldSource->worldObject=obj;worldSource->worldObjectBirth=worldBirth;
+        worldSource->worldProducerInstance=slot;worldSource->worldOriginal=inst;
+    }
     RetainGpuModel(shape);
     // Full (whole object on the GPU) vs Partial (GPU owns the opaque geometry; the CPU still
     // draws proxies + blend/decal sections) — base decision per shape in RegisterGpuModel.
@@ -15512,6 +15572,7 @@ uint32_t EngineWgpu::CurrentDrawObjectId()
 
 void EngineWgpu::SceneObjectRemoved(Object* obj)
 {
+    if (_retailWorldSource) InvalidateRetailWorldObject(obj);
     if (!_renderer)
     {
         return;
@@ -15534,6 +15595,7 @@ void EngineWgpu::SceneObjectRemoved(Object* obj)
 
 void EngineWgpu::SceneObjectMoved(Object* obj)
 {
+    if (_retailWorldSource) InvalidateRetailWorldObject(obj);
     if (!_renderer)
     {
         return;
@@ -15748,6 +15810,13 @@ void EngineWgpu::PrepareRetailWorldSource(LODShapeWithShadow* shape)
     } catch (...) {
         LOG_INFO(Graphics, "Retail actual-world source refused: reason=AllocationOrPreparation shapeBirth={} scope=ordinary-world-kept", shape->GetCompressedModelSourceBirthId());
     }
+}
+
+void EngineWgpu::InvalidateRetailWorldObject(const Object* obj)
+{
+    if(!Foundation::IsMainThread() || !obj || !_retailWorldSource || _retailWorldSource->worldObject!=obj) return;
+    _retailWorldSource->worldInvalidated=true;
+    _retailWorldSource->worldObject=nullptr;
 }
 
 void EngineWgpu::ObserveRetailWorldPlacement(Object* obj, const WgrInstance& row, uint32_t slot)

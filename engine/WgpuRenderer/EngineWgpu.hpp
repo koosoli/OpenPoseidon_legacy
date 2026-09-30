@@ -23,6 +23,7 @@
 #include "ModelAdmissionReceipt.hpp"
 #include "RetailPageRecordObservation.hpp"
 #include "RetailPageInstanceObservation.hpp"
+#include "RetailWorldInstanceTransaction.hpp"
 
 #include <array>
 #include <chrono> // steady_clock, for the opt-in auto-exposure time constant (WGR_AUTO_EXPOSURE_TAU)
@@ -1288,18 +1289,21 @@ class EngineWgpu : public EngineDummy
         {
             Add,
             Update,
-            Remove
+            Remove,
+            WorldPair
         };
         Kind kind;
         uint32_t handle;
         WgrInstance inst; // Add / Update payload; unused for Remove
         std::shared_ptr<render::RetailPageInstanceObservation> retailReceipt;
+        uint64_t worldBirth = 0; // nonzero only for the selected private world pilot
+        std::shared_ptr<render::RetailWorldInstanceTransaction> worldPair;
     };
     std::vector<InstanceOp> _instanceOps;
     std::vector<uint32_t> _instSlotOf;       // consumer-owned: producer handle -> renderer slot
     uint32_t _nextInstanceHandle = 0;       // producer-owned; never reads/grows the consumer table
     std::vector<uint32_t> _instFreeHandles;  // recycled producer handles
-    uint32_t EnqueueInstanceAdd(const WgrInstance& inst, std::shared_ptr<render::RetailPageInstanceObservation> receipt = nullptr);
+    uint32_t EnqueueInstanceAdd(const WgrInstance& inst, std::shared_ptr<render::RetailPageInstanceObservation> receipt = nullptr, uint64_t worldBirth = 0);
     void EnqueueInstanceUpdate(uint32_t handle, const WgrInstance& inst, std::shared_ptr<render::RetailPageInstanceObservation> receipt = nullptr);
     void EnqueueInstanceRemove(uint32_t handle, std::shared_ptr<render::RetailPageInstanceObservation> receipt = nullptr);
     uint32_t ReserveRetailInstanceHandle();
@@ -1315,15 +1319,44 @@ class EngineWgpu : public EngineDummy
         uint64_t shapeBirth = 0, textureHandle = 0;
         uint32_t textureSlot = 0, placements = 0;
         std::string rawSha256, uploadedSha256;
+        const Object* worldObject = nullptr; // main-owner hook identity; never sent to consumer
+        uint64_t worldObjectBirth = 0;
+        uint32_t worldProducerInstance = UINT32_MAX;
+        WgrInstance worldOriginal{};
+        bool worldInvalidated = false;
     };
     std::unique_ptr<RetailWorldSource> _retailWorldSource;
+    struct RetailWorldVisibleState;
+    std::shared_ptr<RetailWorldVisibleState> _retailWorldVisible;
     uint32_t _retailWorldSourceAttempts = 0;
     uint64_t _nextRetailWorldSourceEpoch = 1;
+    uint64_t _nextRetailWorldObjectBirth = 1;
+    uint64_t _nextRetailWorldPageBirth = 1;
+    uint64_t _nextRetailWorldRequest = 1;
     void PrepareRetailWorldSource(LODShapeWithShadow*);
     void ObserveRetailWorldPlacement(Object*, const WgrInstance&, uint32_t);
     GeometryPageFixtureReport ProbeRetailColdWorldRecords();
     GeometryPages::RigidOdol7FinalMaterialHold InspectRetailWorldSection(int, const ShapeSection&);
     bool ClassifyRetailWorldMaterial(int, WgrModelSection&, WgrModelMaterial&);
+    GeometryPageFixtureReport StepRetailWorldVisible(GeometryPageFixtureAction);
+    void InvalidateRetailWorldObject(const Object*);
+    struct RetailWorldConsumerBirth { uint32_t producer = UINT32_MAX; uint64_t birth = 0; };
+    std::array<RetailWorldConsumerBirth,2> _retailWorldConsumerBirths{};
+    void SetRetailWorldConsumerBirth(uint32_t producer, uint64_t birth);
+    uint64_t GetRetailWorldConsumerBirth(uint32_t producer) const;
+    void ExecuteRetailWorldPair(const std::shared_ptr<render::RetailWorldInstanceTransaction>&);
+    void RollbackRetailWorldPair(const render::RetailWorldInstanceTransaction::Request&);
+    void InvalidateRetailWorldConsumer(uint32_t);
+    void ObserveRetailWorldPairDrain();
+    void ObserveRetailWorldPairReturned(const WgrFrame&, uint32_t);
+    render::RetailWorldInstanceTransaction::InstanceEvidence GetRetailWorldInstanceEvidence(
+        uint32_t, const render::RetailWorldInstanceTransaction::ModelIdentity&, uint32_t) const;
+    render::RetailWorldInstanceTransaction::BeforeEvidence GetRetailWorldBefore(
+        const render::RetailWorldInstanceTransaction::Request&, uint64_t) const;
+    std::shared_ptr<render::RetailWorldInstanceTransaction> _retailWorldPairReturn;
+    std::shared_ptr<render::RetailWorldInstanceTransaction> _retailWorldActivePair;
+    render::RetailWorldInstanceTransaction::BeforeEvidence _retailWorldPairBefore{};
+    uint64_t _retailWorldFrameAttempt = 0, _retailWorldCameraBefore = 0;
     std::shared_ptr<render::RetailPageInstanceObservation> _retailInstanceReturn;
     uint64_t _retailInstanceFrameAttempt = 0;
     uint64_t _retailInstanceCameraBefore = 0;

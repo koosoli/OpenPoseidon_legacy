@@ -1622,3 +1622,41 @@ gates; no private replacement Shape/PAC or world-instance operation. Candidate
 refusal/capacity checks passed20 assertions/3 cases and game+Core build passed.
 Installed actual-world record lifetime remains pending; whole plan still OPEN,
 defaultReady=false/performanceAccepted=false.
+
+
+### 30 September — actual cold-world page-record lifetime and paired-row admission
+
+Exact82c2b179 paired build/startup passed. Installed
+`retail-cold-world-records82c2-20260930-053645-a6a207` passed normal exit0/no force:
+actual world source export, Fine250 oriented parity, records ready8mesh/3model,
+release4present/4absent mesh and2present/1absent model, refill8present/4absent
+mesh with freshIDs16, abort0present/12absent mesh and0present/4absent model.
+Worker debt0. Original world model/placement remained unchanged; no page instance
+or world coverage takeover in this run.
+
+Native Reforger Village82c2 passed1/1 populated captures, normal exit0 and
+uncontended:20,683 registered/4,930 main instances,13,451,410 main triangles,
+31.121ms sample after79.4s. Prior317 sample31.200ms is an ordered historical
+comparison, not causal performance acceptance or material-quality ground truth.
+
+The next pure paired-row transaction passed463 assertions/8 cases. It requires
+literal actual original/page before and after rows, nonrecycled consumer births,
+full model/renderer mappings, one drained instance epoch and a fresh actual
+returned camera joined bitwise to the submitted packet. Partial mutation,
+wrong binding, stale camera, skipped return and alias facts fail closed. This is
+CPU row/returned-camera proof, not pixels, GPU completion or source authority.
+Actual world producer/consumer integration and installed runtime remain pending.
+Whole plan OPEN/defaultReady=false/performanceAccepted=false; no Nanite parity
+or generic geometry streaming acceptance inferred from this bounded pilot.
+
+
+Actual-world producer/consumer source now builds with the normal game target;
+final pure pair checks again passed463 assertions/8 cases. One explicit selected
+ordinary Add carries its nonwrapping object birth; ordinary move/remove/reuse
+first rolls back the exact source/page pair, then clears the old consumer birth.
+The original normal model is retained until returned page absence. Source-only
+invalidation restores a still-current original before private page cleanup;
+unknown hidden rows retain their resources. Added bounded generated-fixture
+matrix-move/remove actions exercising the actual landscape hooks. The driver
+captures original/Fine/Root/refill/Restore and supports isolated lifecycle runs.
+Installed transition/quality/lifecycle validation of this source is pending.

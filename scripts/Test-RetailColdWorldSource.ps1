@@ -1,16 +1,22 @@
 param(
  [switch]$Records,
+ [switch]$Visible,
+ [ValidateSet('None','Move','Remove')][string]$Invalidate='None',
  [string]$Label='retail-cold-world-source',
  [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
  [string]$Python='C:\Program Files\Python311\python.exe'
 )
 $ErrorActionPreference='Stop'
+if($Invalidate -ne 'None'){$Visible=$true}
+if($Visible){$Records=$true}
 if($Label -notmatch '^[a-zA-Z0-9_-]{1,64}$'){throw 'Invalid bounded label'}
 if(!$env:LOCK_OWNER){
  $shell=Join-Path $PSHOME $(if($PSVersionTable.PSEdition -eq 'Core'){'pwsh.exe'}else{'powershell.exe'})
  $argv=@((Join-Path $PSScriptRoot 'with-game-lock.sh'),$shell.Replace('\','/'),'-NoProfile','-File',$PSCommandPath,
   '-Label',$Label,'-GameDir',$GameDir,'-Python',$Python)
  if($Records){$argv+='-Records'}
+ if($Visible){$argv+='-Visible'}
+ if($Invalidate -ne 'None'){$argv+=@('-Invalidate',$Invalidate)}
  $env:LOCK_OWNER='retail cold world source fixture'
  try{& 'C:\Program Files\Git\bin\bash.exe' @argv;if($LASTEXITCODE){throw "Retail cold world child failed $LASTEXITCODE"}}
  finally{Remove-Item Env:LOCK_OWNER}
@@ -30,7 +36,7 @@ $generator=Join-Path $PSScriptRoot 'streaming/build_retail_cold_world_fixture.py
 $helper=Join-Path $PSScriptRoot 'streaming/build_simulation_residency_fixture.py'
 New-Item -ItemType Directory $out,$profile,$mission | Out-Null
 $old=@{};Get-ChildItem Env:|Where-Object {$_.Name -match '^(WGR_|POSEIDON_)'}|ForEach-Object {$old[$_.Name]=$_.Value}
-$p=$null;$client=$null;$normal=$false;$forced=$false;$failure=$null;$result=$null
+$p=$null;$client=$null;$normal=$false;$forced=$false;$failure=$null;$result=$null;$visibleTrace=$null
 try{
  if(!(Test-Path -LiteralPath $exe) -or !(Test-Path -LiteralPath $dll) -or !(Test-Path -LiteralPath $stampPath)){
   throw 'Installed game or deployment stamp missing'
@@ -74,6 +80,12 @@ class OutroLoose { randomSeed=3; class Intel {}; };
   WGR_GEOMETRY_PAGE_RETAIL_COLD_SOURCE='1';WGR_GEOMETRY_PAGE_RETAIL_SOURCE='1'
  }
  if($Records){$environment.WGR_GEOMETRY_PAGE_FIXTURE='1';$environment.WGR_OBJECT_STREAM_DAYZ_REUSE_ONLY='1'}
+ if($Visible){
+  $environment.WGR_GEOMETRY_PAGE_RETAIL_WORLD_VISIBLE='1'
+  $environment.WGR_GEOMETRY_PAGE_CAMERA_TUPLE='1'
+  $environment.WGR_HDR='1';$environment.WGR_RENDER_SCALE='100'
+  $environment.WGR_TEMPORAL='0';$environment.WGR_DLSS='0';$environment.WGR_AUTO_EXPOSURE='0'
+ }
  Get-ChildItem Env:|Where-Object {$_.Name -match '^(WGR_|POSEIDON_)'}|ForEach-Object {Remove-Item ('Env:'+$_.Name)}
  foreach($key in $environment.Keys){Set-Item ('Env:'+$key) $environment[$key]}
  $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
@@ -84,9 +96,9 @@ class OutroLoose { randomSeed=3; class Intel {}; };
  @{head=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash $PSCommandPath).Hash;
    generatorSha256=(Get-FileHash $generator).Hash;worldHelperSha256=(Get-FileHash $helper).Hash;
    installed=$installed;hashes=$initialHashes;environment=$environment;argv=$argv;fixture=$proof;
-   scope='Actual installed-archive cold-world Shape/primary source and ordinary queued placement only; no renderer-return, takeover, complete model, or visual parity proof'}|
+   scope=$(if($Invalidate -ne 'None'){'Opt-in one-placement world/page transaction followed by ordinary moved/removed actor invalidation and returned page absence; no visual parity or GPU-completion proof'}elseif($Visible){'Opt-in one-placement main-view world/page transaction with exact CPU rows and returned main camera; screenshots are comparison evidence, not GPU completion or all-pass proof'}else{'Actual installed-archive cold-world Shape/primary source and ordinary queued placement only; no renderer-return, takeover, complete model, or visual parity proof'})}|
   ConvertTo-Json -Depth 8|Set-Content (Join-Path $out 'provenance.json')
- $overall=[DateTime]::UtcNow.AddSeconds(115)
+ $overall=[DateTime]::UtcNow.AddSeconds($(if($Visible){220}else{115}))
  $p=Start-Process -FilePath $exe -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $argv
  $null=$p.Handle
  $client=[Net.Sockets.TcpClient]::new()
@@ -141,23 +153,177 @@ class OutroLoose { randomSeed=3; class Intel {}; };
     if($record.status -eq 'Ready'){return $record}
     if($record.status -ne 'Pending'){throw ('Record refused: '+($record|ConvertTo-Json -Depth 3 -Compress))}
     Start-Sleep -Milliseconds 50;$record=RecordAction $poll
-   }while([DateTime]::UtcNow -lt $recordDeadline)
+   }while([DateTime]::UtcNow -lt $recordDeadline -and [DateTime]::UtcNow -lt $overall)
    throw 'Bounded world record observation timed out'
   }
   $ready=WaitRecord (RecordAction 'probeRetailColdWorld') 'pollRetailRecords'
   if(!$ready.retailRecordOnly -or !$ready.retailFineTriangleSetExact -or
      $ready.retailRecordMeshesPresent -ne 8 -or $ready.retailRecordModelsPresent -ne 3 -or
      $ready.mainFrameReturned -or $ready.producerInstance -ne 4294967295){throw 'Initial actual-world records mismatch'}
-  $released=WaitRecord (RecordAction 'releaseRetailRecords') 'pollRetailRecords'
-  if($released.retailRecordMeshesPresent -ne 4 -or $released.retailRecordMeshesAbsent -ne 4){throw 'World record release mismatch'}
-  $refilled=WaitRecord (RecordAction 'refillRetailRecords') 'pollRetailRecords'
-  if($refilled.retailRecordMeshesPresent -ne 8 -or $refilled.retailRecordMeshesAbsent -ne 4 -or
-     $refilled.retailRecordFreshIds -lt 8){throw 'World record fresh refill mismatch'}
-  $aborted=WaitRecord (RecordAction 'abortRetailRecords') 'pollRetailRecords'
-  if($aborted.retailRecordMeshesPresent -ne 0 -or $aborted.retailRecordModelsPresent -ne 0 -or
-     $aborted.pageLiveJobs -or $aborted.pageReservedBytes){throw 'World record abort debt'}
+  if($Visible){
+   # Screenshots are comparison artifacts only. The CPU row/returned-camera
+   # receipt supplies transition evidence; image hashes are not pixel parity.
+   function SaveVisible {$visibleTrace|ConvertTo-Json -Depth 18|Set-Content (Join-Path $out 'actual-world-visible.json')}
+   function CaptureVisible($name){
+    $path=Join-Path $out $name
+    if(Test-Path -LiteralPath $path){throw "Visible capture already exists: $name"}
+    $null=Send @{cmd='screenshot';path=$path}
+    $captureDeadline=[DateTime]::UtcNow.AddSeconds(10)
+    $lastLength=-1;$stable=0
+    while([DateTime]::UtcNow -lt $captureDeadline -and [DateTime]::UtcNow -lt $overall){
+     if(Test-Path -LiteralPath $path){
+      $length=(Get-Item -LiteralPath $path).Length
+      if($length -gt 0 -and $length -eq $lastLength){$stable++}else{$stable=0}
+      if($stable -ge 2){break};$lastLength=$length
+     }
+     Start-Sleep -Milliseconds 100
+    }
+    if(!(Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -le 0 -or $stable -lt 2){
+     throw "Missing or incomplete actual-world visible capture: $name"
+    }
+    return @{path=$path;bytes=(Get-Item -LiteralPath $path).Length;
+      sha256=(Get-FileHash -LiteralPath $path).Hash.ToLowerInvariant();capturedAtUtc=[DateTime]::UtcNow.ToString('o')}
+   }
+   function WorldAction($action){return Send @{cmd='geometry_page_fixture';action=$action}}
+   function WaitWorld($first,$phase){
+    $until=[DateTime]::UtcNow.AddSeconds(30);$report=$first
+    do{
+     if($report.status -eq 'Ready'){
+      if($report.retailWorldPhase -cne $phase -or !$report.retailWorldReturned){
+       throw ('World transition returned wrong phase/facts: '+($report|ConvertTo-Json -Depth 4 -Compress))
+      }
+      return $report
+     }
+     if($report.status -ne 'Pending'){throw ('World transition refused: '+($report|ConvertTo-Json -Depth 4 -Compress))}
+     Start-Sleep -Milliseconds 50;$report=WorldAction 'pollRetailWorldVisible'
+    }while([DateTime]::UtcNow -lt $until -and [DateTime]::UtcNow -lt $overall)
+    throw "Bounded world visible transition timed out: $phase"
+   }
+   function WaitInvalidatedWorld($first){
+    $until=[DateTime]::UtcNow.AddSeconds(30);$report=$first
+    do{
+     if($report.retailWorldPhase -ceq 'InvalidatedPageAbsent'){return $report}
+     if($report.status -ne 'Pending' -and $report.status -ne 'Failed'){
+      throw ('World invalidation refused: '+($report|ConvertTo-Json -Depth 4 -Compress))
+     }
+     Start-Sleep -Milliseconds 50;$report=WorldAction 'pollRetailWorldVisible'
+    }while([DateTime]::UtcNow -lt $until -and [DateTime]::UtcNow -lt $overall)
+    throw 'Bounded actual-world invalidation cleanup timed out'
+   }
+   function CheckWorld($report,$phase,$other,$page,$restored,$previousCamera,$previousRequest){
+    foreach($field in @('retailWorldVisiblePilot','retailWorldOriginalOtherViews','retailWorldPagePresent',
+      'retailWorldRestored','retailWorldReturned','retailWorldPhase','retailWorldRequest',
+      'retailWorldPageBirth','retailWorldCameraGeneration','retailWorldOriginalInstance',
+      'retailWorldPageInstance','retailWorldPageModel','retailWorldPageRenderer')){
+     if($null -eq $report.PSObject.Properties[$field]){throw "Missing actual-world visible field: $field"}
+    }
+    if($report.status -ne 'Ready' -or !$report.retailWorldVisiblePilot -or !$report.retailWorldReturned -or
+       $report.retailWorldPhase -cne $phase -or [bool]$report.retailWorldOriginalOtherViews -ne $other -or
+       [bool]$report.retailWorldPagePresent -ne $page -or [bool]$report.retailWorldRestored -ne $restored -or
+       [uint64]$report.retailWorldCameraGeneration -le $previousCamera -or
+       [uint64]$report.retailWorldRequest -le $previousRequest -or
+       [uint64]$report.retailWorldPageBirth -eq 0 -or
+       [uint64]$report.retailWorldOriginalInstance -ge 4294967295 -or
+       [uint64]$report.retailWorldPageInstance -ge 4294967295){
+     throw ('Actual-world visible returned-row mismatch: '+($report|ConvertTo-Json -Depth 4 -Compress))
+    }
+    if($page -and ([uint64]$report.retailWorldPageRenderer -eq 0 -or
+                   [uint64]$report.retailWorldPageModel -ge 4294967295)){
+     throw 'Active actual-world page lacks renderer/model identity'
+    }
+   }
+   function CheckStableWorld($report,$identity){
+    if([uint64]$report.retailWorldOriginalInstance -ne $identity.original -or
+       [uint64]$report.retailWorldPageInstance -ne $identity.page -or
+       [uint64]$report.retailWorldPageBirth -ne $identity.birth -or
+       [uint64]$report.retailWorldPageRenderer -ne $identity.renderer){
+     throw 'Actual-world original/page identity changed across the transaction'
+    }
+   }
+   $visibleTrace=@{ready=$ready;invalidation=$Invalidate;sourceLine=$sourceMatch.Value;placementLine=$placementMatch.Value;
+     installed=$installed;environment=$environment;images=@{};steps=@{};
+     scope='One actual installed-world placement with original other-view row and private main-only page; exact CPU rows and returned camera, not GPU completion, all-view coverage, pixel parity or performance acceptance'}
+   $visibleTrace.images.sourceA1=CaptureVisible 'world-source-a1.png'
+   $visibleTrace.images.sourceA2=CaptureVisible 'world-source-a2.png'
+   $fine=WaitWorld (WorldAction 'beginRetailWorldVisible') 'Fine'
+   CheckWorld $fine 'Fine' $true $true $false 0 0
+   $identity=@{original=[uint64]$fine.retailWorldOriginalInstance;page=[uint64]$fine.retailWorldPageInstance;
+     birth=[uint64]$fine.retailWorldPageBirth;renderer=[uint64]$fine.retailWorldPageRenderer}
+   $visibleTrace.identity=$identity;$visibleTrace.steps.beginFine=$fine;SaveVisible
+   $visibleTrace.images.pageFine1=CaptureVisible 'world-page-fine-1.png'
+   $visibleTrace.images.pageFine2=CaptureVisible 'world-page-fine-2.png'
+   $rootCut=WaitWorld (WorldAction 'rootRetailWorldVisible') 'Root'
+   CheckWorld $rootCut 'Root' $true $true $false ([uint64]$fine.retailWorldCameraGeneration) ([uint64]$fine.retailWorldRequest)
+   CheckStableWorld $rootCut $identity
+   if($rootCut.retailWorldPageModel -eq $fine.retailWorldPageModel){throw 'Root did not select a distinct retained page model'}
+   $visibleTrace.steps.root=$rootCut;SaveVisible
+   $visibleTrace.images.pageRoot=CaptureVisible 'world-page-root.png'
+   $released=WaitRecord (RecordAction 'releaseRetailRecords') 'pollRetailRecords'
+   if($released.retailRecordMeshesPresent -ne 4 -or $released.retailRecordMeshesAbsent -ne 4){throw 'World record release mismatch'}
+   $stillRoot=WorldAction 'pollRetailWorldVisible'
+   if($stillRoot.status -ne 'Ready' -or $stillRoot.retailWorldPhase -cne 'Root' -or
+      !$stillRoot.retailWorldReturned -or !$stillRoot.retailWorldOriginalOtherViews -or !$stillRoot.retailWorldPagePresent){
+    throw 'World page ceased to be returned Root during record release'
+   }
+   CheckStableWorld $stillRoot $identity
+   $visibleTrace.steps.released=$released;$visibleTrace.steps.rootAfterRelease=$stillRoot;SaveVisible
+   $refilled=WaitRecord (RecordAction 'refillRetailRecords') 'pollRetailRecords'
+   if($refilled.retailRecordMeshesPresent -ne 8 -or $refilled.retailRecordMeshesAbsent -ne 4 -or
+      $refilled.retailRecordFreshIds -lt 8){throw 'World record fresh refill mismatch'}
+   $visibleTrace.steps.refilled=$refilled;SaveVisible
+   $freshFine=WaitWorld (WorldAction 'fineRetailWorldVisible') 'Fine'
+   CheckWorld $freshFine 'Fine' $true $true $false ([uint64]$rootCut.retailWorldCameraGeneration) ([uint64]$rootCut.retailWorldRequest)
+   CheckStableWorld $freshFine $identity
+   if($freshFine.retailWorldPageModel -eq $fine.retailWorldPageModel -or
+      $freshFine.retailWorldPageModel -eq $rootCut.retailWorldPageModel){throw 'Refill did not select a fresh Fine model'}
+   $visibleTrace.steps.freshFine=$freshFine;SaveVisible
+   $visibleTrace.images.pageFreshFine=CaptureVisible 'world-page-fresh-fine.png'
+   if($Invalidate -eq 'None'){
+    $restored=WaitWorld (WorldAction 'restoreRetailWorldVisible') 'Restored'
+    CheckWorld $restored 'Restored' $false $false $true ([uint64]$freshFine.retailWorldCameraGeneration) ([uint64]$freshFine.retailWorldRequest)
+    CheckStableWorld $restored $identity
+    $visibleTrace.steps.restored=$restored;SaveVisible
+    $visibleTrace.images.sourceA3=CaptureVisible 'world-source-a3.png'
+    $visibleTrace.images.sourceA4=CaptureVisible 'world-source-a4.png'
+   }else{
+    $lifecycleAction=$(if($Invalidate -eq 'Move'){'moveRetailWorldVisible'}else{'removeRetailWorldVisible'})
+    $invalidated=WaitInvalidatedWorld (WorldAction $lifecycleAction)
+    foreach($field in @('retailWorldVisiblePilot','retailWorldReturned','retailWorldPagePresent',
+      'retailWorldOriginalOtherViews','retailWorldRestored','retailWorldRequest',
+      'retailWorldCameraGeneration','retailWorldPageBirth','retailWorldOriginalInstance',
+      'retailWorldPageInstance','retailWorldPageRenderer')){
+     if($null -eq $invalidated.PSObject.Properties[$field]){throw "Missing invalidation field: $field"}
+    }
+    if($invalidated.status -ne 'Failed' -or !$invalidated.retailWorldVisiblePilot -or
+       !$invalidated.retailWorldReturned -or $invalidated.retailWorldPagePresent -or
+       $invalidated.retailWorldOriginalOtherViews -or $invalidated.retailWorldRestored -or
+       $invalidated.retailWorldPhase -cne 'InvalidatedPageAbsent' -or
+       [uint64]$invalidated.retailWorldRequest -le [uint64]$freshFine.retailWorldRequest){
+     throw ('Expected exact returned invalidation cleanup, not an active/ready page: '+
+       ($invalidated|ConvertTo-Json -Depth 4 -Compress))
+    }
+    CheckStableWorld $invalidated $identity
+    $visibleTrace.steps.invalidated=$invalidated
+    $visibleTrace.invalidationCameraGenerationAdvanced=
+      [uint64]$invalidated.retailWorldCameraGeneration -gt [uint64]$freshFine.retailWorldCameraGeneration
+    SaveVisible
+   }
+   $aborted=WaitRecord (RecordAction 'abortRetailRecords') 'pollRetailRecords'
+   if($aborted.retailRecordMeshesPresent -ne 0 -or $aborted.retailRecordModelsPresent -ne 0 -or
+      $aborted.pageLiveJobs -or $aborted.pageReservedBytes){throw 'World record abort debt'}
+   $visibleTrace.steps.aborted=$aborted;$visibleTrace.passed=$true;SaveVisible
+  }else{
+   $released=WaitRecord (RecordAction 'releaseRetailRecords') 'pollRetailRecords'
+   if($released.retailRecordMeshesPresent -ne 4 -or $released.retailRecordMeshesAbsent -ne 4){throw 'World record release mismatch'}
+   $refilled=WaitRecord (RecordAction 'refillRetailRecords') 'pollRetailRecords'
+   if($refilled.retailRecordMeshesPresent -ne 8 -or $refilled.retailRecordMeshesAbsent -ne 4 -or
+      $refilled.retailRecordFreshIds -lt 8){throw 'World record fresh refill mismatch'}
+   $aborted=WaitRecord (RecordAction 'abortRetailRecords') 'pollRetailRecords'
+   if($aborted.retailRecordMeshesPresent -ne 0 -or $aborted.retailRecordModelsPresent -ne 0 -or
+      $aborted.pageLiveJobs -or $aborted.pageReservedBytes){throw 'World record abort debt'}
+  }
   @{ready=$ready;released=$released;refilled=$refilled;aborted=$aborted;
-    scope='Actual cold-world Shape export and private record lifetime; ordinary world model retained, no page instance takeover'}|
+    scope=$(if($Invalidate -ne 'None'){'Actual one-placement world/page transaction followed by ordinary actor invalidation and returned historical page absence; terminal Failed is expected cleanup, not an active page or visual proof'}elseif($Visible){'Actual cold-world Shape export, source-bound page records, and one returned main-view world/page transaction; no pixel parity, GPU completion, or general all-pass proof'}else{'Actual cold-world Shape export and private record lifetime; ordinary world model retained, no page instance takeover'})}|
    ConvertTo-Json -Depth 12|Set-Content (Join-Path $out 'actual-world-records.json')
  }
  $null=Send @{cmd='exit'}
@@ -170,10 +336,11 @@ class OutroLoose { randomSeed=3; class Intel {}; };
  for($i=0;$i -lt 2;$i++){if($finalHashes[$i].Hash -ne $initialHashes[$i].Hash){throw 'Installed binary changed during run'}}
  if((Get-Content -LiteralPath $stampPath -Raw) -cne $installed){throw 'Installed deployment stamp changed during run'}
  $result=@{passed=$true;normalShutdown=$true;forcedTermination=$false;exitCode=$p.ExitCode;
+  visible=[bool]$Visible;invalidation=$Invalidate;visibleEvidence=$(if($Visible){Join-Path $out 'actual-world-visible.json'}else{$null});
   sourceLine=$sourceMatch.Value;placementLine=$placementMatch.Value;shapeBirth=[uint64]$sourceMatch.Groups['birth'].Value;
   sourceSha256=$sourceMatch.Groups['source'].Value;pacRawSha256=$sourceMatch.Groups['raw'].Value;
   pacUploadedSha256=$sourceMatch.Groups['upload'].Value;primaryHandle=[uint64]$sourceMatch.Groups['handle'].Value;
-  scope='Actual installed-archive cold-world Shape and same normal-bank PAC strict upload, plus source-current ordinary placement queued; no renderer return, private page takeover, complete model, or visual parity proof'}
+  scope=$(if($Invalidate -ne 'None'){'Actual installed-world Shape/PAC source and returned page cleanup after ordinary actor move/removal; Failed is the expected fail-closed invalidated state, not GPU-completion or visual-parity proof'}elseif($Visible){'Actual installed-world Shape/PAC source and one returned original-other-views/private-main-view transaction with record refill and restore; screenshots captured for human comparison, no GPU-completion, pixel-parity, general all-pass or performance proof'}else{'Actual installed-archive cold-world Shape and same normal-bank PAC strict upload, plus source-current ordinary placement queued; no renderer return, private page takeover, complete model, or visual parity proof'})}
  $result|ConvertTo-Json -Depth 5|Set-Content (Join-Path $out 'result.json')
 }catch{$failure=$_}
 finally{
@@ -182,6 +349,10 @@ finally{
   if(!$p.HasExited){Stop-Process -Id $p.Id -Force;$forced=$true;$p.WaitForExit(5000)|Out-Null}
  }
  if($client){$client.Dispose()}
+ if($Visible -and $visibleTrace){
+  if($failure){$visibleTrace.passed=$false;$visibleTrace.failure=$failure.Exception.Message}
+  $visibleTrace|ConvertTo-Json -Depth 18|Set-Content (Join-Path $out 'actual-world-visible.json')
+ }
  Get-ChildItem Env:|Where-Object {$_.Name -match '^(WGR_|POSEIDON_)'}|ForEach-Object {Remove-Item ('Env:'+$_.Name)}
  foreach($key in $old.Keys){Set-Item ('Env:'+$key) $old[$key]}
  if($failure){@{passed=$false;reason=$failure.Exception.Message;normalShutdown=$normal;

@@ -654,6 +654,13 @@ void RegisterScreenshot(HarnessServer& hs)
             else if(!std::strcmp(name,"probeTextureReuseOnly")) action=Engine::GeometryPageFixtureAction::ProbeTextureReuseOnly;
             else if(!std::strcmp(name,"probeRetailOdol7")) action=Engine::GeometryPageFixtureAction::ProbeRetailOdol7;
             else if(!std::strcmp(name,"probeRetailColdWorld")) action=Engine::GeometryPageFixtureAction::ProbeRetailColdWorld;
+            else if(!std::strcmp(name,"beginRetailWorldVisible")) action=Engine::GeometryPageFixtureAction::BeginRetailWorldVisible;
+            else if(!std::strcmp(name,"pollRetailWorldVisible")) action=Engine::GeometryPageFixtureAction::PollRetailWorldVisible;
+            else if(!std::strcmp(name,"rootRetailWorldVisible")) action=Engine::GeometryPageFixtureAction::RootRetailWorldVisible;
+            else if(!std::strcmp(name,"fineRetailWorldVisible")) action=Engine::GeometryPageFixtureAction::FineRetailWorldVisible;
+            else if(!std::strcmp(name,"restoreRetailWorldVisible")) action=Engine::GeometryPageFixtureAction::RestoreRetailWorldVisible;
+            else if(!std::strcmp(name,"moveRetailWorldVisible")) action=Engine::GeometryPageFixtureAction::MoveRetailWorldVisible;
+            else if(!std::strcmp(name,"removeRetailWorldVisible")) action=Engine::GeometryPageFixtureAction::RemoveRetailWorldVisible;
             else if(!std::strcmp(name,"pollRetailRecords")) action=Engine::GeometryPageFixtureAction::PollRetailRecords;
             else if(!std::strcmp(name,"beginRetailVisible")) action=Engine::GeometryPageFixtureAction::BeginRetailVisible;
             else if(!std::strcmp(name,"rootRetailVisible")) action=Engine::GeometryPageFixtureAction::RootRetailVisible;
@@ -963,10 +970,19 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddBoolToObject(result,"retailVisibleReturned",report.retailVisibleReturned);
             cJSON_AddBoolToObject(result,"retailFineTriangleSetExact",report.retailFineTriangleSetExact);
             cJSON_AddStringToObject(result,"retailVisiblePhase",report.retailVisiblePhase.c_str());
+            cJSON_AddBoolToObject(result,"retailWorldVisiblePilot",report.retailWorldVisiblePilot);
+            cJSON_AddBoolToObject(result,"retailWorldOriginalOtherViews",report.retailWorldOriginalOtherViews);
+            cJSON_AddBoolToObject(result,"retailWorldPagePresent",report.retailWorldPagePresent);
+            cJSON_AddBoolToObject(result,"retailWorldRestored",report.retailWorldRestored);
+            cJSON_AddBoolToObject(result,"retailWorldReturned",report.retailWorldReturned);
+            cJSON_AddStringToObject(result,"retailWorldPhase",report.retailWorldPhase.c_str());
             cJSON_AddBoolToObject(result,"retailRecordDistinctCuts",report.retailRecordDistinctCuts);
             cJSON_AddBoolToObject(result,"retailPixelSourceVerified",report.retailPixelSourceVerified);
             cJSON_AddStringToObject(result,"retailPixelSourceSha256",report.retailPixelSourceSha256.c_str());
 #define PAGE_FIXTURE_NUMBER(field) cJSON_AddNumberToObject(result,#field,double(report.field))
+            PAGE_FIXTURE_NUMBER(retailWorldRequest);PAGE_FIXTURE_NUMBER(retailWorldPageBirth);PAGE_FIXTURE_NUMBER(retailWorldCameraGeneration);
+            PAGE_FIXTURE_NUMBER(retailWorldOriginalInstance);PAGE_FIXTURE_NUMBER(retailWorldPageInstance);
+            PAGE_FIXTURE_NUMBER(retailWorldPageModel);PAGE_FIXTURE_NUMBER(retailWorldPageRenderer);
             PAGE_FIXTURE_NUMBER(retailVisibleBirth);PAGE_FIXTURE_NUMBER(retailVisibleRequest);PAGE_FIXTURE_NUMBER(retailVisibleFrame);
             PAGE_FIXTURE_NUMBER(retailVisibleRenderer);PAGE_FIXTURE_NUMBER(retailVisibleSlot);PAGE_FIXTURE_NUMBER(retailVisibleModel);
             PAGE_FIXTURE_NUMBER(retailVisibleReferenceSourceLevel);PAGE_FIXTURE_NUMBER(retailVisibleReferenceTriangles);PAGE_FIXTURE_NUMBER(retailVisibleCameraGeneration);
@@ -1115,7 +1131,7 @@ void RegisterScreenshot(HarnessServer& hs)
             auto* hierarchyGroupErrors=cJSON_AddArrayToObject(result,"hierarchyGroupErrors");
             for(uint32_t g=0;g<report.hierarchyDemandGroupCount&&g<64;++g)
                 cJSON_AddItemToArray(hierarchyGroupErrors,cJSON_CreateNumber(report.hierarchyGroupErrors[g]));
-            cJSON_AddStringToObject(result,"scope",report.retailVisiblePilot ? "Actual source-bound retail PAC and ODOL private main-camera instance plus fresh returned camera; no world replacement, same-placement other-pass coverage, pixel parity, device completion or performance acceptance" : report.retailRecordOnly ? "Actual source-bound retail PAC upload and ODOL final geometry page records; no instances, pixels, world routing, all-pass coverage, device completion or performance acceptance" : report.retailSourceProbe ? "Actual retail final Shape/Init source probe only; no world routing or all-pass coverage" : report.textureReuseProbe ? "Actual generated texture denial, frozen resident reuse and ordinary retry; no complete material/model authority" : "Private programmatically authored box/curved-grid pilot; explicit authored/selected-CLOD RAM, original-source hierarchy RAM or independently authenticated disk pages, or private selected-cut disk value-worker; hierarchy stages at most one page per action and selects only complete retained root/fine/intermediate/local cuts; disk expected keys supplied externally and raw pilot/helper source compared independently without owner file I/O/bake; explicit CLOD bake scratch/latency and physical GPU allocation peaks not hard-bounded; returned main frame and full-generation record cut, not all-pass/pixel, mounted-file provenance, queue-completion or device-free proof");
+            cJSON_AddStringToObject(result,"scope",report.retailWorldVisiblePilot ? "One actual source-bound world placement: original other-view row and private main-only page joined to fresh returned camera; CPU row facts, not pixels, GPU completion, general world routing, all-pass quality or performance acceptance" : report.retailVisiblePilot ? "Actual source-bound retail PAC and ODOL private main-camera instance plus fresh returned camera; no world replacement, same-placement other-pass coverage, pixel parity, device completion or performance acceptance" : report.retailRecordOnly ? "Actual source-bound retail PAC upload and ODOL final geometry page records; no instances, pixels, world routing, all-pass coverage, device completion or performance acceptance" : report.retailSourceProbe ? "Actual retail final Shape/Init source probe only; no world routing or all-pass coverage" : report.textureReuseProbe ? "Actual generated texture denial, frozen resident reuse and ordinary retry; no complete material/model authority" : "Private programmatically authored box/curved-grid pilot; explicit authored/selected-CLOD RAM, original-source hierarchy RAM or independently authenticated disk pages, or private selected-cut disk value-worker; hierarchy stages at most one page per action and selects only complete retained root/fine/intermediate/local cuts; disk expected keys supplied externally and raw pilot/helper source compared independently without owner file I/O/bake; explicit CLOD bake scratch/latency and physical GPU allocation peaks not hard-bounded; returned main frame and full-generation record cut, not all-pass/pixel, mounted-file provenance, queue-completion or device-free proof");
             return HarnessProtocol::JsonResponse(result);
         });
     hs.RegisterCommand({"geometry_allocations", "Request/poll bounded retained mesh allocation diagnostics", {}},

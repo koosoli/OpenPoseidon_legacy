@@ -3221,7 +3221,7 @@ class Engine : public IGraphicsEngine
     { return {}; }
 
     // Ready is a returned-main-frame record cut, not all-pass/pixel or GPU-free proof.
-    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse, BeginOriginalHierarchy, StepHierarchy, RootHierarchy, FineHierarchy, IntermediateHierarchy, LocalHierarchy, BeginOriginalHierarchyDisk, ReleaseHierarchyNonroot, ProjectHierarchy, FollowHierarchy, StopHierarchy, ProbeTextureReuseOnly, ProbeRetailOdol7, PollRetailRecords, ReleaseRetailRecords, RefillRetailRecords, AbortRetailRecords, SnapshotRetailRecords, BeginRetailVisible, RootRetailVisible, FineRetailVisible, PollRetailVisible, RemoveRetailVisible, FallbackRetailVisible, ProbeRetailColdWorld };
+    enum class GeometryPageFixtureAction { Begin, Coarse, Fine, Observe, Snapshot, Abort, BeginClod, Fallback, BeginPaged, RequestFine, PollFine, CancelFine, HoldFine, ReleaseFine, EvictFine, BeginClodPaged, BeginDiskClodPaged, RequestCoarse, PollCoarse, BeginOriginalDiskClodPaged, FollowCamera, StopCamera, PollFinePrefetch, RequestFinePrefetch, FollowProjected, PrivateAutoFine, PrivateAutoCoarse, BeginOriginalHierarchy, StepHierarchy, RootHierarchy, FineHierarchy, IntermediateHierarchy, LocalHierarchy, BeginOriginalHierarchyDisk, ReleaseHierarchyNonroot, ProjectHierarchy, FollowHierarchy, StopHierarchy, ProbeTextureReuseOnly, ProbeRetailOdol7, PollRetailRecords, ReleaseRetailRecords, RefillRetailRecords, AbortRetailRecords, SnapshotRetailRecords, BeginRetailVisible, RootRetailVisible, FineRetailVisible, PollRetailVisible, RemoveRetailVisible, FallbackRetailVisible, ProbeRetailColdWorld, BeginRetailWorldVisible, PollRetailWorldVisible, RootRetailWorldVisible, FineRetailWorldVisible, RestoreRetailWorldVisible, MoveRetailWorldVisible, RemoveRetailWorldVisible };
     struct GeometryPageSourceIdentity
     {
         std::array<uint8_t,32> sha256{};
@@ -3312,6 +3312,13 @@ class Engine : public IGraphicsEngine
         uint64_t retailVisibleBirth=0,retailVisibleRequest=0,retailVisibleFrame=0;
         uint32_t retailVisibleRenderer=UINT32_MAX,retailVisibleSlot=UINT32_MAX,retailVisibleModel=UINT32_MAX;
         std::string retailVisiblePhase;
+        // One actual world placement: CPU row pair and returned-camera proof only.
+        bool retailWorldVisiblePilot=false,retailWorldOriginalOtherViews=false,retailWorldPagePresent=false;
+        bool retailWorldRestored=false,retailWorldReturned=false;
+        uint64_t retailWorldRequest=0,retailWorldPageBirth=0,retailWorldCameraGeneration=0;
+        uint32_t retailWorldOriginalInstance=UINT32_MAX,retailWorldPageInstance=UINT32_MAX;
+        uint32_t retailWorldPageModel=UINT32_MAX,retailWorldPageRenderer=UINT32_MAX;
+        std::string retailWorldPhase;
         uint32_t retailVisibleReferenceSourceLevel=UINT32_MAX,retailVisibleReferenceTriangles=0;
         uint64_t retailVisibleCameraGeneration=0;
         bool retailFineTriangleSetExact=false;

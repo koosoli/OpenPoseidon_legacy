@@ -172,6 +172,29 @@ struct EngineWgpu::RetailPagePilotState
     uint32_t Slot() const { return target == Target::Root ? 1 : target == Target::Fine ? 2 : 3; }
 };
 
+// One selected, installed world object and one private page producer slot.  The
+// original normal model is retained independently of the world object's lease
+// until a returned-frame receipt proves that the private page is absent.
+struct EngineWgpu::RetailWorldVisibleState
+{
+    enum class Phase : uint8_t { AwaitTakeover, Fine, Root, AwaitUpdate,
+        AwaitRestore, AwaitCleanup, Restored, Removed, Failed };
+    Phase phase = Phase::AwaitTakeover;
+    Ref<LODShapeWithShadow> normalShape;
+    bool modelRetained = false, invalidated = false;
+    uint64_t ownerEpoch = 0, objectBirth = 0, sourceEpoch = 0, shapeBirth = 0,
+        shapeQueryRevision = 0, pageEpoch = 0, pageBirth = 0, requestId = 0,
+        cameraGeneration = 0;
+    uint32_t originalProducer = UINT32_MAX, pageProducer = UINT32_MAX;
+    uint32_t originalRenderer = 0, pageRenderer = 0;
+    uint32_t selectedSlot = UINT32_MAX, pendingSlot = UINT32_MAX;
+    uint32_t switches = 0, cleanupAttempts = 0;
+    render::RetailWorldInstanceTransaction::ModelIdentity originalModel, pageModel;
+    WgrInstance original{}, page{}; // both carry producer model IDs
+    std::shared_ptr<render::RetailWorldInstanceTransaction> pair;
+    std::shared_ptr<render::RetailPageInstanceObservation> cleanup;
+};
+
 Engine::GeometryPageFixtureReport EngineWgpu::SnapshotRetailPageRecordPilot() const
 {
     GeometryPageFixtureReport result;
@@ -532,6 +555,10 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
     auto abortNow = [&]() -> GeometryPageFixtureReport {
         if (s.phase == RetailPagePilotState::Phase::Aborted) return current();
         if (s.phase == RetailPagePilotState::Phase::AwaitAbort) return current();
+        if (_retailWorldVisible &&
+            _retailWorldVisible->phase != RetailWorldVisibleState::Phase::Restored &&
+            _retailWorldVisible->phase != RetailWorldVisibleState::Phase::Removed)
+            return refusal("RetailWorldRestoreOrRemoveRequired");
         if (s.visiblePhase != RetailPagePilotState::VisiblePhase::Dormant &&
             s.visiblePhase != RetailPagePilotState::VisiblePhase::Removed)
             return refusal("RetailVisibleRemoveRequired");
@@ -589,6 +616,10 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
         if (action == GeometryPageFixtureAction::ReleaseRetailRecords)
         {
             if (s.phase != RetailPagePilotState::Phase::FineReady || !r.retailRecordDistinctCuts ||
+                (_retailWorldVisible &&
+                 (_retailWorldVisible->phase != RetailWorldVisibleState::Phase::Root ||
+                  _retailWorldVisible->pair || _retailWorldVisible->cleanup ||
+                  !r.retailWorldReturned)) ||
                 (s.visiblePhase != RetailPagePilotState::VisiblePhase::Dormant &&
                  s.visiblePhase != RetailPagePilotState::VisiblePhase::Removed &&
                  (s.visiblePhase != RetailPagePilotState::VisiblePhase::Root ||
@@ -1269,5 +1300,500 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageVisiblePilot(Geometr
         return result();
     }
     catch (...) { return fail("RetailVisibleOwnerException"); }
+}
+Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPageFixtureAction action)
+{
+    using Pair = render::RetailWorldInstanceTransaction;
+    using Cleanup = render::RetailPageInstanceObservation;
+    GeometryPageFixtureReport unavailable;
+    unavailable.status = GeometryReportStatus::Invalid;
+    unavailable.pageWorkState = "RetailWorldVisibleUnavailable";
+    auto enabled = [](const char* name) {
+        const char* value = std::getenv(name);
+        return value && value[0] == '1' && !value[1];
+    };
+    if (!Foundation::IsMainThread() || !_renderer || !_gpuDriven ||
+        !enabled("WGR_GEOMETRY_PAGE_RETAIL_WORLD_VISIBLE") ||
+        !enabled("WGR_GEOMETRY_PAGE_RETAIL_COLD_SOURCE") ||
+        !enabled("WGR_GEOMETRY_PAGE_RETAIL_SOURCE") ||
+        !enabled("WGR_OBJECT_STREAM_DAYZ_REUSE_ONLY") ||
+        enabled("WGR_GEOMETRY_PAGE_RETAIL_VISIBLE"))
+        return unavailable;
+    auto pilot = _retailPagePilot;
+    if (!pilot) return unavailable;
+    auto& p = *pilot;
+    auto& report = p.report;
+    auto current = [&]() -> GeometryPageFixtureReport {
+        p.RefreshWorkerReport();
+        return report;
+    };
+    auto refuse = [&](const char* why) {
+        auto copy = current(); copy.status = GeometryReportStatus::Invalid;
+        copy.pageWorkState = why; return copy;
+    };
+    auto fail = [&](const char* why) {
+        report.status = GeometryReportStatus::Failed;
+        report.pageWorkState = why;
+        report.retailWorldPhase = why;
+        return current();
+    };
+    auto serial = [](uint64_t v) { return v && v != UINT64_MAX; };
+    auto nextRequest = [&]() {
+        if (!serial(_nextRetailWorldRequest) ||
+            _nextRetailWorldRequest >= UINT64_MAX - 1) return uint64_t{0};
+        return _nextRetailWorldRequest++;
+    };
+    auto model = [&](uint32_t producer) -> Pair::ModelIdentity {
+        if (producer == UINT32_MAX) return {};
+        const auto found = _modelIdOf.find(producer);
+        if (found == _modelIdOf.end() || found->second == WGR_INVALID_MODEL ||
+            found->second == UINT32_MAX) return {};
+        return {producer, found->second, uint64_t(producer) + 1};
+    };
+    auto ready = [&](uint32_t slot) {
+        return slot < p.models.size() && p.models[slot] != UINT32_MAX &&
+            p.modelReady[slot] && p.receipts[slot] &&
+            p.receipts[slot]->ProducerModel() == p.models[slot] &&
+            p.receipts[slot]->OwnerEpoch() == _geometryOwnerEpoch &&
+            p.receipts[slot]->SourceAdmissionEpoch() == report.sourceAdmissionEpoch &&
+            p.receipts[slot]->Observe().state ==
+                render::ModelAdmissionReceipt::State::ConsumedAccepted;
+    };
+    auto cut = [&](uint32_t slot) {
+        if (slot != 1 && slot != 2 && slot != 3) return false;
+        if (!ready(slot)) return false;
+        const auto& clusters = slot == 1 ? p.rootClusters : p.fineClusters;
+        if (clusters.empty() || clusters.size() > render::ModelAdmissionReceipt::MaxMeshes)
+            return false;
+        for (auto cluster : clusters)
+        {
+            if (cluster >= p.clusterMesh.size() || !p.clusterMesh[cluster]) return false;
+            const auto* row = p.Find(p.clusterMesh[cluster]);
+            if (!row || !row->present || !row->renderer || row->page >= p.resident.size() ||
+                !p.resident[row->page]) return false;
+        }
+        return true;
+    };
+    auto sourceCurrent = [&](const RetailWorldVisibleState& s) {
+        const auto* source = _retailWorldSource.get();
+        return source && !source->worldInvalidated && source->worldObject &&
+            source->worldObjectBirth == s.objectBirth &&
+            source->worldProducerInstance == s.originalProducer &&
+            source->shape.GetRef() == s.normalShape.GetRef() &&
+            source->shapeBirth == s.shapeBirth &&
+            p.admission.actual &&
+            p.admission.actual->shapeQueryRevision == s.shapeQueryRevision &&
+            report.sourceAdmissionEpoch == s.sourceEpoch &&
+            report.pageEpoch == s.pageEpoch &&
+            _geometryOwnerEpoch == s.ownerEpoch && p.SourceCurrent();
+    };
+    auto row = [](Pair::ModelIdentity identity, WgrInstance value) {
+        Pair::RowExpectation result; result.model = identity;
+        value.model = identity.producerModel; result.row = value; return result;
+    };
+    auto queue = [&](RetailWorldVisibleState& s, Pair::Request request) {
+        auto receipt = std::make_shared<Pair>(request);
+        if (!receipt->Valid()) return false;
+        AcquireProducerWindow("retail world pair preflight");
+        const auto before = GetRetailWorldBefore(request, 1);
+        if (receipt->CheckBefore(before) != Pair::Refusal::None) return false;
+        _instanceOps.reserve(_instanceOps.size() + 1);
+        InstanceOp operation{};
+        operation.kind = InstanceOp::WorldPair;
+        operation.handle = s.originalProducer;
+        operation.worldPair = receipt;
+        _instanceOps.push_back(std::move(operation));
+        s.pair = std::move(receipt);
+        s.requestId = request.binding.requestId;
+        report.retailWorldRequest = s.requestId;
+        report.retailWorldReturned = false;
+        report.status = GeometryReportStatus::Pending;
+        return true;
+    };
+    auto binding = [&](const RetailWorldVisibleState& s, uint64_t ticket) {
+        Pair::Binding b;
+        b.ownerEpoch = s.ownerEpoch; b.worldObjectBirth = s.objectBirth;
+        b.sourceAdmissionEpoch = s.sourceEpoch; b.shapeBirth = s.shapeBirth;
+        b.shapeQueryRevision = s.shapeQueryRevision; b.pageEpoch = s.pageEpoch;
+        b.requestId = ticket; b.originalProducerInstance = s.originalProducer;
+        b.pageProducerInstance = s.pageProducer; b.originalInstanceBirth = s.objectBirth;
+        b.pageInstanceBirth = s.pageBirth;
+        return b;
+    };
+    auto finishAbsent = [&](RetailWorldVisibleState& s, bool restored) {
+        ReleaseRetailInstanceHandle(s.pageProducer);
+        if (s.modelRetained)
+        {
+            ReleaseGpuModel(s.normalShape.GetRef());
+            s.modelRetained = false;
+        }
+        s.phase = restored ? RetailWorldVisibleState::Phase::Restored :
+            RetailWorldVisibleState::Phase::Removed;
+        s.pair.reset(); s.cleanup.reset();
+        report.retailWorldPagePresent = false;
+        // A normal Restore certifies flags0. Invalidation cleanup instead
+        // established flags0, historical absence, or a visible replacement;
+        // this flag no longer asserts that our original is the other-views row.
+        report.retailWorldOriginalOtherViews = false;
+        report.retailWorldRestored = restored;
+        report.retailWorldPhase = restored ? "Restored" : "InvalidatedPageAbsent";
+        report.retailWorldReturned = true;
+        report.status = restored ? GeometryReportStatus::Ready : GeometryReportStatus::Failed;
+        report.pageWorkState = restored ? "RetailWorldRestoreReturned" :
+            "RetailWorldInvalidatedPageRemoved";
+    };
+    // A stale actor/source never receives an owner-side old-placement write.
+    // The consumer may restore only its exact still-current flags64 original;
+    // cleanup then addresses only the quarantined page handle and birth.
+    auto cleanup = [&](RetailWorldVisibleState& s) {
+        if (s.cleanup || s.cleanupAttempts >= 3 || !s.pageRenderer ||
+            !serial(s.pageBirth) || !ready(s.selectedSlot)) return false;
+        AcquireProducerWindow("retail world stale page cleanup");
+        // A mount change alone does not remove or move the original. Ask the
+        // consumer to roll back its exact active pair first. Its rollback may
+        // restore only the same current flags64 row; it will not write an old
+        // placement over a moved/replaced original. Never remove our page while
+        // the original might still be hidden from the main camera.
+        InvalidateRetailWorldConsumer(s.originalProducer);
+        const auto original = GetRetailWorldInstanceEvidence(
+            s.originalProducer, s.originalModel, s.originalRenderer);
+        bool originalSafe = false;
+        if (original.producerState == Pair::ProducerState::Present &&
+            original.getterSucceeded &&
+            original.cpu.status == WGR_INSTANCE_CPU_FACT_PRESENT)
+        {
+            if (original.consumerInstanceBirth == s.objectBirth &&
+                original.mappedRendererHandle == s.originalRenderer &&
+                original.mappedRendererModel == s.originalModel.rendererModel)
+            {
+                WgrInstance baseline = s.original;
+                baseline.model = s.originalModel.rendererModel;
+                originalSafe = !std::memcmp(&baseline,&original.cpu.row,sizeof(baseline));
+            }
+            else if (original.consumerInstanceBirth != s.objectBirth &&
+                original.cpu.row.flags == 0)
+                originalSafe = true; // ordinary moved/replaced row; never rewrite it
+        }
+        else if (original.producerState == Pair::ProducerState::Unmapped &&
+            !original.consumerInstanceBirth && original.getterSucceeded &&
+            original.cpu.status == WGR_INSTANCE_CPU_FACT_ABSENT &&
+            original.cpu.resolved_slot == UINT32_MAX)
+        {
+            const WgrInstance zero{};
+            originalSafe = !std::memcmp(&zero,&original.cpu.row,sizeof(zero));
+        }
+        if (!originalSafe) return false;
+        const auto observed = GetRetailWorldInstanceEvidence(
+            s.pageProducer, s.pageModel, s.pageRenderer);
+        if (observed.producerInstance != s.pageProducer || !observed.getterSucceeded ||
+            observed.cpu.queried_handle != s.pageRenderer) return false;
+        if (observed.producerState == Pair::ProducerState::Present)
+        {
+            if (observed.mappedRendererHandle != s.pageRenderer ||
+                observed.consumerInstanceBirth != s.pageBirth ||
+                observed.mappedRendererModel != s.pageModel.rendererModel ||
+                observed.cpu.status != WGR_INSTANCE_CPU_FACT_PRESENT) return false;
+            WgrInstance expected = s.page;
+            expected.model = s.pageModel.rendererModel;
+            if (std::memcmp(&expected, &observed.cpu.row, sizeof(expected))) return false;
+        }
+        else if (observed.producerState != Pair::ProducerState::Unmapped ||
+            observed.consumerInstanceBirth ||
+            observed.cpu.status != WGR_INSTANCE_CPU_FACT_ABSENT ||
+            observed.cpu.resolved_slot != UINT32_MAX) return false;
+        if (observed.cpu.status == WGR_INSTANCE_CPU_FACT_ABSENT)
+        {
+            const WgrInstance zero{};
+            if (std::memcmp(&zero,&observed.cpu.row,sizeof(zero))) return false;
+        }
+        const uint64_t ticket = nextRequest();
+        if (!ticket) return false;
+        Cleanup::Request request;
+        request.binding = {s.ownerEpoch,s.sourceEpoch,s.pageEpoch,ticket,s.pageBirth,
+            s.pageProducer,s.pageModel.producerModel};
+        request.action = Cleanup::Action::Remove;
+        request.expectedState = Cleanup::Expected::Absent;
+        request.expected = s.page;
+        request.previousRenderer = s.pageRenderer;
+        request.previousCameraGeneration = s.cameraGeneration;
+        auto receipt = std::make_shared<Cleanup>(request);
+        if (!receipt->Valid()) return false;
+        _instanceOps.reserve(_instanceOps.size() + 1);
+        EnqueueInstanceRemove(s.pageProducer, receipt);
+        s.cleanup = std::move(receipt);
+        s.phase = RetailWorldVisibleState::Phase::AwaitCleanup;
+        ++s.cleanupAttempts;
+        report.retailWorldRequest = ticket;
+        report.retailWorldPhase = "AwaitInvalidationRemove";
+        report.retailWorldReturned = false;
+        report.status = GeometryReportStatus::Pending;
+        report.pageWorkState = "RetailWorldInvalidationRemoveQueued";
+        return true;
+    };
+    try
+    {
+        if (action == GeometryPageFixtureAction::BeginRetailWorldVisible)
+        {
+            const auto* source = _retailWorldSource.get();
+            if (_retailWorldVisible || !source || source->worldInvalidated ||
+                !source->worldObject || !serial(source->worldObjectBirth) ||
+                source->worldProducerInstance == UINT32_MAX ||
+                p.visiblePhase != RetailPagePilotState::VisiblePhase::Dormant ||
+                !report.active || p.phase != RetailPagePilotState::Phase::FineReady ||
+                p.observation || !p.SourceCurrent() || !cut(2) ||
+                !p.admission.actual || !serial(_nextRetailWorldPageBirth) ||
+                _nextRetailWorldPageBirth >= UINT64_MAX - 1)
+                return refuse("RetailWorldBeginUnavailable");
+            constexpr uint64_t reservation = sizeof(RetailWorldVisibleState) +
+                12 * (sizeof(Pair) + sizeof(InstanceOp) + 128) +
+                3 * (sizeof(Cleanup) + sizeof(InstanceOp) + 128);
+            if (report.knownPayloadBytes > RetailLimit ||
+                reservation > RetailLimit - report.knownPayloadBytes)
+                return refuse("RetailWorldInstanceCapacity");
+            AcquireProducerWindow("retail world original model and row");
+            const auto normal = _gpuModels.find(source->shape.GetRef());
+            if (normal == _gpuModels.end() || normal->second != source->worldOriginal.model ||
+                normal->second == UINT32_MAX || model(normal->second).producerModel == UINT32_MAX)
+                return refuse("RetailWorldOriginalModelUnavailable");
+            const auto refs = _gpuModelRefs.find(source->shape.GetRef());
+            if (refs != _gpuModelRefs.end() && refs->second == UINT32_MAX)
+                return refuse("RetailWorldModelLeaseOverflow");
+            const auto originalModel = model(normal->second);
+            const auto original = GetRetailWorldInstanceEvidence(
+                source->worldProducerInstance, originalModel, 0);
+            if (original.producerState != Pair::ProducerState::Present ||
+                original.consumerInstanceBirth != source->worldObjectBirth ||
+                !original.getterSucceeded ||
+                original.cpu.status != WGR_INSTANCE_CPU_FACT_PRESENT ||
+                !original.mappedRendererHandle ||
+                original.mappedRendererModel != originalModel.rendererModel ||
+                original.cpu.queried_handle != original.mappedRendererHandle)
+                return refuse("RetailWorldOriginalBirthOrRowUnavailable");
+            WgrInstance expected = source->worldOriginal;
+            expected.model = originalModel.rendererModel;
+            if (expected.flags || std::memcmp(&expected, &original.cpu.row, sizeof(expected)))
+                return refuse("RetailWorldOriginalMovedOrChanged");
+            auto state = std::make_shared<RetailWorldVisibleState>();
+            state->normalShape = source->shape;
+            state->ownerEpoch = _geometryOwnerEpoch;
+            state->objectBirth = source->worldObjectBirth;
+            state->sourceEpoch = report.sourceAdmissionEpoch;
+            state->shapeBirth = source->shapeBirth;
+            state->shapeQueryRevision = p.admission.actual->shapeQueryRevision;
+            state->pageEpoch = report.pageEpoch;
+            state->pageBirth = _nextRetailWorldPageBirth;
+            state->originalProducer = source->worldProducerInstance;
+            state->originalRenderer = original.mappedRendererHandle;
+            state->originalModel = originalModel;
+            state->original = source->worldOriginal;
+            state->pageModel = model(p.models[2]);
+            state->page = source->worldOriginal;
+            state->page.model = p.models[2];
+            state->page.flags = WGR_INSTANCE_MAIN_CAMERA_ONLY;
+            state->pendingSlot = 2;
+            if (!sourceCurrent(*state)) return refuse("RetailWorldSourceChangedBeforeBegin");
+            const uint32_t pageProducer = ReserveRetailInstanceHandle();
+            if (pageProducer == UINT32_MAX) return refuse("RetailWorldPageSlotExhausted");
+            state->pageProducer = pageProducer;
+            const uint64_t ticket = nextRequest();
+            if (!ticket) { ReleaseRetailInstanceHandle(pageProducer);
+                return refuse("RetailWorldRequestExhausted"); }
+            Pair::Request request;
+            request.binding = binding(*state, ticket);
+            request.action = Pair::Action::Takeover;
+            request.originalBefore = row(state->originalModel,state->original);
+            auto hidden = state->original; hidden.flags = WGR_INSTANCE_OTHER_VIEWS_ONLY;
+            request.originalAfter = row(state->originalModel,hidden);
+            request.pageAfter = row(state->pageModel,state->page);
+            request.originalRendererHandle = state->originalRenderer;
+            // The retained model lease prevents normal registration retirement
+            // while its original row is hidden in the main camera.
+            bool queued = false;
+            try
+            {
+                RetainGpuModel(state->normalShape.GetRef());
+                state->modelRetained = true;
+                queued = queue(*state, request);
+            }
+            catch (...)
+            {
+                if (state->modelRetained) ReleaseGpuModel(state->normalShape.GetRef());
+                ReleaseRetailInstanceHandle(pageProducer);
+                throw;
+            }
+            if (!queued)
+            {
+                ReleaseGpuModel(state->normalShape.GetRef());
+                ReleaseRetailInstanceHandle(pageProducer);
+                return refuse("RetailWorldTakeoverPreflightRefused");
+            }
+            ++_nextRetailWorldPageBirth;
+            _retailWorldVisible = std::move(state);
+            report.knownPayloadBytes += reservation;
+            report.retailWorldVisiblePilot = true;
+            report.retailRecordOnly = false;
+            report.retailWorldOriginalInstance = source->worldProducerInstance;
+            report.retailWorldPageInstance = pageProducer;
+            report.retailWorldPageBirth = _retailWorldVisible->pageBirth;
+            report.retailWorldPageModel = p.models[2];
+            report.retailWorldPhase = "AwaitTakeover";
+            report.pageWorkState = "RetailWorldFineTakeoverQueued";
+            return current();
+        }
+        auto state = _retailWorldVisible;
+        if (!state) return refuse("RetailWorldNotBegun");
+        auto& s = *state;
+        if (action == GeometryPageFixtureAction::PollRetailWorldVisible)
+        {
+            if (s.phase == RetailWorldVisibleState::Phase::Restored ||
+                s.phase == RetailWorldVisibleState::Phase::Removed) return current();
+            if (!sourceCurrent(s)) s.invalidated = true;
+            AcquireProducerWindow("retail world selected birth poll");
+            if (GetRetailWorldConsumerBirth(s.originalProducer) != s.objectBirth)
+                s.invalidated = true;
+            if (s.cleanup)
+            {
+                const auto result = s.cleanup->Observe();
+                if (result.state == Cleanup::State::Requested) return current();
+                if (result.state == Cleanup::State::Consumed &&
+                    result.binding == s.cleanup->GetRequest().binding &&
+                    result.binding.privateBirth == s.pageBirth &&
+                    result.binding.producerInstance == s.pageProducer &&
+                    result.rendererHandle == s.pageRenderer &&
+                    result.rendererModel == UINT32_MAX && result.renderReturnStatus == 0 &&
+                    result.camera.generation > s.cameraGeneration &&
+                    result.camera.generation != UINT64_MAX)
+                {
+                    s.cameraGeneration = result.camera.generation;
+                    report.retailWorldCameraGeneration = s.cameraGeneration;
+                    SetRetailWorldConsumerBirth(s.pageProducer,0);
+                    finishAbsent(s,false);
+                    return current();
+                }
+                s.cleanup.reset();
+                return fail("RetailWorldInvalidationRemoveUnconfirmed");
+            }
+            if (s.pair)
+            {
+                const auto snapshot = s.pair->Observe();
+                if (snapshot.state == Pair::State::Requested) return current();
+                const auto request = s.pair->GetRequest();
+                if (snapshot.state != Pair::State::Consumed ||
+                    snapshot.binding != request.binding ||
+                    snapshot.binding.requestId != s.requestId ||
+                    snapshot.renderReturnStatus != 0 ||
+                    !snapshot.drained || !snapshot.camera.generation)
+                {
+                    s.phase = RetailWorldVisibleState::Phase::Failed;
+                    if (!s.pageRenderer && snapshot.drained &&
+                        snapshot.pageRendererHandle)
+                        s.pageRenderer = snapshot.pageRendererHandle;
+                    s.pair.reset();
+                    if (request.action == Pair::Action::Takeover)
+                    {
+                        s.selectedSlot = 2;
+                        s.pageModel = request.pageAfter.model;
+                        s.page = request.pageAfter.row;
+                        AcquireProducerWindow("retail world rejected takeover evidence");
+                        const auto page = GetRetailWorldInstanceEvidence(
+                            s.pageProducer,s.pageModel,0);
+                        if (page.producerState == Pair::ProducerState::Present &&
+                            page.consumerInstanceBirth == s.pageBirth)
+                            s.pageRenderer = page.mappedRendererHandle;
+                    }
+                    cleanup(s); // unknown partial mutation keeps the slot and lease quarantined
+                    return fail("RetailWorldPairRejectedOrUnreturned");
+                }
+                s.cameraGeneration = snapshot.camera.generation;
+                s.pageRenderer = snapshot.pageRendererHandle;
+                s.pair.reset();
+                report.retailWorldCameraGeneration = s.cameraGeneration;
+                report.retailWorldPageRenderer = s.pageRenderer;
+                report.retailWorldReturned = true;
+                if (request.action == Pair::Action::Restore)
+                {
+                    finishAbsent(s,true);
+                    return current();
+                }
+                s.selectedSlot = s.pendingSlot;
+                s.pageModel = request.pageAfter.model;
+                s.page = request.pageAfter.row;
+                s.phase = s.selectedSlot == 1 ? RetailWorldVisibleState::Phase::Root :
+                    RetailWorldVisibleState::Phase::Fine;
+                report.retailWorldPagePresent = true;
+                report.retailWorldOriginalOtherViews = true;
+                report.retailWorldPageModel = s.pageModel.producerModel;
+                report.retailWorldPhase = s.selectedSlot == 1 ? "Root" : "Fine";
+                report.status = GeometryReportStatus::Ready;
+                report.pageWorkState = "RetailWorldPairReturned";
+            }
+            if (s.invalidated)
+            {
+                if (!cleanup(s)) return fail("RetailWorldInvalidatedPageQuarantined");
+                return current();
+            }
+            return current();
+        }
+        if (s.pair || s.cleanup || s.invalidated ||
+            s.phase == RetailWorldVisibleState::Phase::Failed ||
+            s.phase == RetailWorldVisibleState::Phase::Removed ||
+            s.phase == RetailWorldVisibleState::Phase::Restored ||
+            !sourceCurrent(s) || !report.retailWorldReturned ||
+            !report.retailWorldPagePresent)
+            return refuse("RetailWorldCutUnavailable");
+        uint32_t slot = UINT32_MAX;
+        if (action == GeometryPageFixtureAction::RootRetailWorldVisible) slot = 1;
+        else if (action == GeometryPageFixtureAction::FineRetailWorldVisible)
+            slot = p.refilled && p.modelReady[3] ? 3 : 2;
+        else if (action != GeometryPageFixtureAction::RestoreRetailWorldVisible)
+            return refuse("RetailWorldActionUnsupported");
+        if (action != GeometryPageFixtureAction::RestoreRetailWorldVisible &&
+            (slot == s.selectedSlot || s.switches >= 8 || !cut(slot)))
+            return refuse("RetailWorldCutNotReady");
+        if (action == GeometryPageFixtureAction::RestoreRetailWorldVisible &&
+            !ready(s.selectedSlot)) return refuse("RetailWorldRestoreModelUnavailable");
+        AcquireProducerWindow("retail world cut model");
+        const uint64_t ticket = nextRequest();
+        if (!ticket) return refuse("RetailWorldRequestExhausted");
+        Pair::Request request;
+        request.binding = binding(s,ticket);
+        request.originalRendererHandle = s.originalRenderer;
+        request.pageRendererHandle = s.pageRenderer;
+        request.previousCameraGeneration = s.cameraGeneration;
+        auto hidden = s.original; hidden.flags = WGR_INSTANCE_OTHER_VIEWS_ONLY;
+        request.originalBefore = row(s.originalModel,hidden);
+        request.originalAfter = request.originalBefore;
+        request.pageBefore = row(s.pageModel,s.page);
+        if (action == GeometryPageFixtureAction::RestoreRetailWorldVisible)
+        {
+            request.action = Pair::Action::Restore;
+            request.originalAfter = row(s.originalModel,s.original);
+        }
+        else
+        {
+            request.action = Pair::Action::UpdatePage;
+            auto page = s.page; page.model = p.models[slot];
+            request.pageAfter = row(model(p.models[slot]),page);
+            if (request.pageAfter.model.producerModel == UINT32_MAX)
+                return refuse("RetailWorldNewCutModelUnavailable");
+        }
+        if (!queue(s,request)) return refuse("RetailWorldPairPreflightRefused");
+        s.pendingSlot = slot;
+        if (request.action == Pair::Action::Restore)
+        {
+            s.phase = RetailWorldVisibleState::Phase::AwaitRestore;
+            report.retailWorldPhase = "AwaitRestore";
+            report.pageWorkState = "RetailWorldRestoreQueued";
+        }
+        else
+        {
+            ++s.switches;
+            s.phase = RetailWorldVisibleState::Phase::AwaitUpdate;
+            report.retailWorldPhase = "AwaitCutUpdate";
+            report.pageWorkState = "RetailWorldCutQueued";
+        }
+        return current();
+    }
+    catch (...) { return fail("RetailWorldOwnerExceptionQuarantined"); }
 }
 } // namespace Poseidon
