@@ -27,8 +27,9 @@ BeachGrass exclusion and an actual floor-free roof pass controlled checks.
 Oliver delegated current appearance judgement and deferred his own fine tuning.
 The stock corpse shared affine pose/lifetime prerequisite passes installed checks;
 uncalibrated joints and collider envelopes still prevent promoting a solver.
-Original CWA cultivated-soil admission is now narrowly implemented from verified
-surface metadata and awaits the fresh installed build. Parked architecture work
+Original CWA cultivated-soil admission is narrowly implemented from verified
+surface metadata; installed 8b3ae13c passes soil response, camera return,
+master-off and pure Grass exclusion. Parked architecture work
 and previously rejected defaults remain parked.
 
 September 12 small-change follow-through:
@@ -726,6 +727,15 @@ Also recorded there and not yet fixed: `setup` is marked twice per frame and `Ma
 `land:gnd`/`land:obj` read 0.000 rather than absent when `Landscape::Draw` is skipped; world-mode
 warmup is a 25 s wall clock with no frame floor; nothing verifies the exe and the DLL are one
 commit — `Deploy.ps1` stamps HEAD after a `Test-Path`.
+
+September 30 correction to that historical inventory: `triPerfStats` now adds
+one separate `sim:step=avg/p95` field while preserving every prior field and
+timing scope. An execution check of the actual formatter with distinct phase
+values preserves the old output after removing only the new field. Installed
+8b3ae13c reports the field once in each CWA arm (dry 0.18/0.33 ms). This is
+diagnostic completeness, not a simulation speedup or settled timing benchmark.
+The other items in the historical paragraph were not closed by this change;
+current paired deployment separately verifies provenance and staged build files.
 
 ### Next targets, 2026-09-01 (AUD-001 B.4)
 

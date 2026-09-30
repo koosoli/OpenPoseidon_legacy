@@ -179,6 +179,11 @@ redirected stderr alone, causing Windows bootstrap to reconnect both CRT streams
 to the console and lose mandatory mode proof. Redirecting both streams matches
 the working benchmark harness; no rendering change or weakened proof was used.
 
+After the CWA soil/performance-summary integration, clean installed `8b3ae13c`
+again passes the exact OFP owner camera (`cwa-soil-build-OwnerEveron-1-20260930-133338`),
+normal exit and unchanged pair. Its >48 scheduled changes are 0.0773%, mean
+delta 2.778 and luma 105.803: the demonstrated grass improvement is retained.
+
 1. Finish installed grass A/B and close-view regression checks; retain only
    demonstrated improvements. Extend to native photo grass and live varying wind.
 2. Mud puddles: independently implement a bounded terrain-material/weather

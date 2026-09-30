@@ -110,3 +110,33 @@ nonadmission, Village/MudBuilding/grass/road negatives and previous explicit mud
 admission. Accumulation, pause, reset and frame-rate tests also pass. No game,
 GPU, full engine build, deployment or runtime acceptance was performed by this
 source-only change; root owns the required installed checks.
+
+## Root installed acceptance
+
+Clean committed `8b3ae13c` PoseidonGame build passes and its matched EXE/DLL is
+installed via the shared game lock. Root's
+`original-cwa-soil-20260930-132905-2f94e2` campaign uses the original CWA world,
+private profiles, native 1280x720/MSAA4, fixed exposure/time/date, grass off and
+the same dry/wet/master-off gates. All three processes exit normally with
+unchanged hashes/stamp and no runtime failure. Runtime confirms **one of 241**
+materials eligible; no full 3x3 fixture is falsely claimed.
+
+Both runtime queried ground heights are 141.8849945 metres, agreeing with the
+source candidate. Root inspected visible cultivated soil at 6425/7175 and
+Grass at 6425/7125. The positive image includes the stock player and shadow,
+but the majority of the ROI is visible soil; statistics include those objects
+and are not a pixel-ID material segmentation. The wet soil darkens while
+retaining its grain; the grass remains unchanged.
+
+| Unchanged screening gate | Actual result |
+|---|---:|
+| Soil wet/dry response | 92.9130% changed by at least 8; mean 17.510101 |
+| Soil return mask IoU | 0.999987 |
+| Higher overhead return mask IoU | 1.0 |
+| Master-off/dry mean | 0.001395 |
+| Same-pose static mean | 0.000013 |
+| Pure Grass wet/dry response | zero changed pixels; mean zero |
+
+Every gate passes. This accepts a bounded original Everon cultivated-soil
+fixture; it does not reinterpret all fields/grass/roads as mud, prove every
+map generation or add physical depth and save/network wetness.

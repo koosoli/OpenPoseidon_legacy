@@ -208,5 +208,12 @@ accepts actual retained roof exclusion on installed `77299a74`: visible wet/dry
 response disappears with the tent and returns after removal, while exposed dirt
 remains wet. This is bounded fixture acceptance, not full-world rain collision.
 
-Pending: later owner tuning, source-pure shoreline control and map-generation breadth.
+The source-confirmed BeachGrass cell also passes with zero wet/dry changed
+pixels. Original Everon now accepts its verified bare cultivated-soil surface
+through exact cached metadata, with all four quadrants and no clutter character.
+Installed `8b3ae13c` passes soil response, camera returns, master-off and pure
+Grass exclusion; [the CWA record](MUD-PUDDLE-CWA-CULTIVATED-SOIL-20260930.md)
+retains the source census and bounds. No broader Field-name admission was added.
+
+Pending: later owner tuning and wider map/material-generation coverage.
 Do not mark the broader wet-surface/hydrology roadmap complete from this slice.

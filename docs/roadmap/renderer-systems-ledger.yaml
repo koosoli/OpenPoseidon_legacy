@@ -757,6 +757,12 @@ unbuilt_candidates: >-
         zero changed pixels in its bounded ROI. Native grass frozen comparison
         retains distinct foreground blades and textured aerial coverage under
         delegated judgement; later owner tuning and broader map coverage remain.
+        Original CWA cultivated soil now has an exact cached class/files/sound
+        identity exception, requiring no clutter character and all four source
+        quadrants. Installed 8b3ae13c admits one of 241 Everon materials and
+        passes visible soil response, both camera-return masks, master-off and
+        nearby pure Grass exclusion. This does not admit grass, mixed tiles or
+        fields by class name alone. See decisions/MUD-PUDDLE-CWA-CULTIVATED-SOIL-20260930.md.
         Owner tuning is deferred; no
       nearby-object reflections, physical depth, GL33, save or network state.
         See decisions/MUD-PUDDLES-20260930.md.
@@ -851,6 +857,10 @@ unbuilt_candidates: >-
         symbol: TERRAIN_MAX_GROUND_LAYERS
       - file: engine/WgpuRenderer/rust/src/terrain/terrain.wgsl
         symbol: fn fs_terrain
+      - file: engine/WgpuRenderer/rust/src/shaders/frame.wgsl
+        symbol: interior_rain_reach
+      - file: engine/WgpuRenderer/TerrainPuddles.hpp
+        symbol: EligibleLegacySurface
       - file: engine/WgpuRenderer/TerrainWgpu.cpp
         symbol: TerrainWgpu::DrawTerrain
       - file: engine/WgpuRenderer/include/wgpu_renderer.hpp
