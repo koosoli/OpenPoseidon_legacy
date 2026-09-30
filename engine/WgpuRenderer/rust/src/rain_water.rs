@@ -693,4 +693,236 @@ mod tests {
             })
             .unwrap();
     }
+
+    fn optics_source() -> &'static str {
+        let source = include_str!("rain_water.wgsl");
+        let begin = source.find("fn rain_water_optics(").unwrap();
+        let end = source[begin..].find("struct VsOut").unwrap() + begin;
+        &source[begin..end]
+    }
+
+    #[test]
+    fn actual_depth_optics_validates_without_resources_and_is_used_by_fragment() {
+        // Validate the actual production helper without GPU/resources, then
+        // verify that the composed real fragment calls it, not a test-only copy.
+        let module = naga::front::wgsl::parse_str(optics_source()).unwrap();
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap();
+        assert!(module.global_variables.is_empty());
+        let (_, helper) = module
+            .functions
+            .iter()
+            .find(|(_, f)| f.name.as_deref() == Some("rain_water_optics"))
+            .unwrap();
+        assert_eq!(
+            helper
+                .arguments
+                .iter()
+                .map(|arg| arg.name.as_deref().unwrap())
+                .collect::<Vec<_>>(),
+            [
+                "local_depth",
+                "view_cosine",
+                "reflected",
+                "body",
+                "coverage"
+            ]
+        );
+        // No instantaneous rain parameter: retained water keeps its optical
+        // body when drops stop. Rain continues to affect the existing ripples.
+        let mut composer = crate::shaders::build_composer();
+        let composed = composer
+            .make_naga_module(naga_oil::compose::NagaModuleDescriptor {
+                source: include_str!("rain_water.wgsl"),
+                file_path: "rain_water.wgsl",
+                ..Default::default()
+            })
+            .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&composer)));
+        let fragment = composed
+            .entry_points
+            .iter()
+            .find(|entry| entry.stage == naga::ShaderStage::Fragment && entry.name == "fs_main")
+            .unwrap();
+        assert!(
+            fragment.function.body.iter().any(|statement| {
+                if let naga::Statement::Call { function, .. } = statement {
+                    composed.functions[*function]
+                        .name
+                        .as_deref()
+                        .is_some_and(|name| name.ends_with("rain_water_optics"))
+                } else {
+                    false
+                }
+            }),
+            "the actual fragment must use the tested depth material"
+        );
+    }
+
+    #[test]
+    fn actual_gpu_depth_optics_transmits_bed_conserves_energy_and_is_not_milk() {
+        let (device, queue) = crate::gfx3d::cull::tests::headless()
+            .expect("Depth water optics require an actual device");
+        let probe = format!(
+            r#"{}
+@group(0) @binding(0) var<storage,read_write> result: array<vec4<f32>>;
+@compute @workgroup_size(64)
+fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {{
+    let i=id.x;
+    let depth=f32(i)/63.0*2.0;
+    let sky=vec3<f32>(4.0,8.0,16.0);
+    let body=vec3<f32>(0.045,0.060,0.052);
+    result[i*4u]=rain_water_optics(depth,1.0,sky,body,1.0);
+    result[i*4u+1u]=rain_water_optics(0.1,f32(i)/63.0,sky,body,1.0);
+    result[i*4u+2u]=rain_water_optics(depth,1.0,sky,body,0.25);
+    result[i*4u+3u]=vec4<f32>(
+        rain_water_optics(0.0,1.0,sky,body,1.0).a,
+        rain_water_optics(depth,1.0,sky,body,0.0).a,
+        rain_water_optics(-0.1,1.0,sky,body,1.0).a,
+        rain_water_optics(depth,1.0,sky,body,-1.0).a);
+    if(i==0u) {{
+        result[256]=rain_water_optics(1e30,1.0,sky,body,1.0);
+        result[257]=rain_water_optics(0.1,-10.0,sky,body,1.0);
+        result[258]=rain_water_optics(0.1,10.0,sky,body,1.0);
+        result[259]=rain_water_optics(0.1,1.0,sky,body,2.0);
+        result[260]=rain_water_optics(0.1,1.0,vec3<f32>(-1.0),vec3<f32>(-2.0),1.0);
+        result[261]=rain_water_optics(0.002,1.0,sky,body,1.0);
+    }}
+}}
+"#,
+            optics_source()
+        );
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("actual_depth_water_optics"),
+            source: wgpu::ShaderSource::Wgsl(probe.into()),
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("actual_depth_water_optics"),
+            layout: None,
+            module: &shader,
+            entry_point: Some("cs_probe"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let size = 262 * 16;
+        let output = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("water_optics_result"),
+            size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("water_optics_readback"),
+            size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: output.as_entire_binding(),
+            }],
+        });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind, &[]);
+            pass.dispatch_workgroups(1, 1, 1);
+        }
+        encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, size);
+        queue.submit(Some(encoder.finish()));
+        let slice = staging.slice(..);
+        let (send, receive) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = send.send(result);
+        });
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        receive.recv().unwrap().unwrap();
+        let bytes = slice.get_mapped_range();
+        let values = bytemuck::cast_slice::<u8, f32>(&bytes);
+        assert!(
+            values
+                .iter()
+                .all(|value| value.is_finite() && *value >= 0.0)
+        );
+        let mut previous_depth_alpha = 0.0;
+        let mut previous_view_alpha = 1.0;
+        let bed = [0.4, 0.3, 0.2];
+        let sky = [4.0, 8.0, 16.0];
+        let body = [0.045, 0.060, 0.052];
+        for i in 0..64 {
+            let s = &values[i * 16..i * 16 + 16];
+            let depth = i as f64 / 63.0 * 2.0;
+            let transmitted = (-3.0 * depth).exp();
+            assert!(s[3] >= previous_depth_alpha && s[3] <= 1.0);
+            previous_depth_alpha = s[3];
+            assert!(s[7] <= previous_view_alpha + 1e-6 && s[7] <= 1.0);
+            previous_view_alpha = s[7];
+            assert_eq!(
+                &s[12..16],
+                &[0.0; 4],
+                "dry/covered/negative inputs must be inert"
+            );
+            assert!((s[11] - s[3] * 0.25).abs() < 1e-6);
+            if i == 0 {
+                assert_eq!(&s[..4], &[0.0; 4]);
+            } else {
+                for channel in 0..3 {
+                    assert!(
+                        (s[channel] - s[channel + 8]).abs() < 1e-5,
+                        "coverage changes opacity without recolouring the pool"
+                    );
+                    assert!(
+                        s[channel] as f64 >= body[channel] - 1e-5
+                            && s[channel] as f64 <= sky[channel] + 1e-5
+                    );
+                    // Independent compositing oracle includes the destination
+                    // bed. This catches double premultiplication, fixed opacity,
+                    // sky lift, and an HDR clamp even if alpha alone looks valid.
+                    let actual =
+                        s[channel] as f64 * s[3] as f64 + bed[channel] * (1.0 - s[3] as f64);
+                    let expected = 0.025 * sky[channel]
+                        + 0.975
+                            * ((1.0 - transmitted) * body[channel] + transmitted * bed[channel]);
+                    assert!(
+                        (actual - expected).abs() < 1e-5,
+                        "depth={depth} channel={channel}: {actual} vs {expected}"
+                    );
+                }
+            }
+        }
+        let special = &values[256 * 4..];
+        assert!(
+            (special[3] - 1.0).abs() < 1e-6,
+            "deep pool must obscure the bed"
+        );
+        assert_eq!(
+            &special[4..8],
+            &[4.0, 8.0, 16.0, 1.0],
+            "grazing reflection retains HDR energy"
+        );
+        for channel in 0..4 {
+            assert!(
+                (special[8 + channel] - special[12 + channel]).abs() < 1e-6,
+                "view/coverage finite bounds must clamp consistently"
+            );
+        }
+        assert_eq!(
+            &special[16..19],
+            &[0.0; 3],
+            "negative radiance cannot create negative light"
+        );
+        assert!(
+            (0.025..0.04).contains(&special[23]),
+            "2mm water must not restore the old .3 opacity milk floor"
+        );
+        drop(bytes);
+        staging.unmap();
+    }
 }

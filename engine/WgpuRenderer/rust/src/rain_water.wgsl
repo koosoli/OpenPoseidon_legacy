@@ -43,6 +43,28 @@ fn rain_water_support_depth(water: vec4<f32>, bed: f32, sea_level: f32) -> f32 {
     return max(0.0,min(water.y,water.x - bed));
 }
 
+// Return straight-alpha colour for the existing ALPHA_BLENDING pipeline. The
+// destination is the actual already-lit bed, so transmission needs no copied
+// scene texture. A scalar extinction length of 1/3m gives shallow rainwater a
+// visible bed and progressively obscures it in a deep, turbid pool. The existing
+// body tint is scattering radiance, not an arbitrary grade on the terrain.
+fn rain_water_optics(local_depth: f32, view_cosine: f32, reflected: vec3<f32>,
+                     body: vec3<f32>, coverage: f32) -> vec4<f32> {
+    if (local_depth <= 0.0 || coverage <= 0.0) { return vec4<f32>(0.0); }
+    let mu = clamp(view_cosine, 0.0, 1.0);
+    let fresnel = 0.025 + 0.975 * pow(1.0 - mu, 5.0);
+    let transmission = exp(-3.0 * min(local_depth, 64.0));
+    let scatter_weight = (1.0 - fresnel) * (1.0 - transmission);
+    let opacity = fresnel + scatter_weight;
+    // Sky and scattering sum to opacity; the remaining energy transmits the
+    // destination bed. Normalisation is essential with straight alpha: blending
+    // an already-premultiplied colour would apply opacity twice. No +.18 sky
+    // lift or fixed .3 alpha floor survives, including with rain stopped.
+    let colour = (max(reflected, vec3<f32>(0.0)) * fresnel
+        + max(body, vec3<f32>(0.0)) * scatter_weight) / opacity;
+    return vec4<f32>(colour, opacity * clamp(coverage, 0.0, 1.0));
+}
+
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) world: vec3<f32>,
@@ -101,12 +123,12 @@ fn fs_main(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
     let n = normalize(vec3<f32>(-hx + ripple.x + flow_slope.x, 1.0,
                                 -hz + ripple.z + flow_slope.y));
     let view = normalize(frame.cam_pos.xyz-in.world);
-    let fresnel = 0.025 + 0.975*pow(1.0-clamp(dot(n,view),0.0,1.0),5.0);
     let reflected = ground_sky_reflection(reflect(-view,n));
     let body = vec3<f32>(0.045,0.060,0.052) * (frame.sun_ambient.rgb + frame.sun_diffuse.rgb*0.2);
-    var rgb = mix(body,reflected,clamp(fresnel+0.18,0.0,1.0));
+    let edge = smoothstep(0.001,0.012,min(water.y,local_depth));
+    let optics = rain_water_optics(local_depth, dot(n,view), reflected, body, edge*cover);
+    var rgb = optics.rgb;
     if (frame.params.fog_enabled >= 1.5) { rgb = apply_fog(rgb,in.world-frame.cam_pos.xyz); }
     else { rgb = mix(frame.fog_color.rgb,rgb,fog_factor(length(in.world-frame.cam_pos.xyz))); }
-    let edge = smoothstep(0.001,0.012,min(water.y,local_depth));
-    return vec4<f32>(rgb,edge*cover*clamp(0.3+fresnel*0.65,0.0,0.95));
+    return vec4<f32>(rgb,optics.a);
 }
