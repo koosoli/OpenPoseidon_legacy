@@ -63,7 +63,8 @@ $result = [ordered]@{ status = 'running'; scope = 'controlled installed capture 
     roof = @{ status = 'unavailable'; reason = 'No proven roof-over-eligible-dirt fixture supplied.' } }
 $keys = @('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM',
     'POSEIDON_TEST_RAIN','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_TERRAIN_PUDDLES',
-    'WGR_TEMPORAL','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_INTERIOR_SKY','WGR_INTERIOR_SKY_DEBUG')
+    'WGR_TEMPORAL','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_INTERIOR_SKY','WGR_INTERIOR_SKY_DEBUG',
+    'WGR_GRASS','POSEIDON_WIND_OVERRIDE','WGR_CLOUD_COVERAGE','WGR_LOD_GOVERNOR_RANGE')
 $savedEnv = @{}
 foreach ($key in $keys) { $savedEnv[$key] = [Environment]::GetEnvironmentVariable($key, 'Process') }
 @{ scriptSha256 = (Get-FileHash -LiteralPath $PSCommandPath).Hash;
@@ -73,7 +74,9 @@ foreach ($key in $keys) { $savedEnv[$key] = [Environment]::GetEnvironmentVariabl
    roofCamera = $RoofCamera; roofControl = $RoofExposedControlCamera; roofEvidence = $RoofFixtureEvidence;
    lockOwner = $env:LOCK_OWNER; fixedSimTime = 100; fixedDate = @(1985,6,21,16,0); fixedExposure = 1; roi = 'central 60% of width and height';
    maskThreshold = $MaskThreshold; minimumReturnIoU = $MinimumReturnIoU; requireNumericGates = [bool]$RequireNumericGates;
-   wetnessOverrides = @(0,1); actualRain = 0; temporal = 0 } |
+   wetnessOverrides = @(0,1); actualRain = 0; temporal = 0;
+   grass = 0; windOverride = '0 90 0'; cloudCoverage = 0; fixedLodRange = 1;
+   isolation = 'Terrain response controls exclude grass and pin wind/clouds; ordinary grass-on appearance is assessed separately.' } |
    ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'provenance.json')
 if (!('TerrainPuddleMetrics' -as [type])) {
     $drawingRefs = @([Drawing.Bitmap].Assembly.Location,[Drawing.Color].Assembly.Location)
@@ -170,6 +173,11 @@ try {
     Remove-Item Env:POSEIDON_TEST_RAIN -ErrorAction SilentlyContinue
     $env:WGR_TERRAIN_PUDDLE_FIXTURE = '1'; $env:WGR_TEMPORAL = '0'
     $env:WGR_AUTO_EXPOSURE = '0'; $env:WGR_EXPOSURE = '1'; $env:WGR_INTERIOR_SKY = '1'
+    # Phase-integrated grass/wind retains pre-pause history across process starts.
+    # Exclude grass from terrain-only pixel gates rather than treating vegetation
+    # changes as puddle response or relaxing the independent master-off control.
+    $env:WGR_GRASS = '0'; $env:POSEIDON_WIND_OVERRIDE = '0 90 0'
+    $env:WGR_CLOUD_COVERAGE = '0'; $env:WGR_LOD_GOVERNOR_RANGE = '1'
     $armNames = @('dry','wet','master-off')
     if ($roofEnabled) { $armNames += 'raw-sky' }
     foreach ($arm in $armNames) {
@@ -311,4 +319,3 @@ try {
     Write-Host "Numeric status: $($result.numericStatus). Boundary semantic identity and real-roof pixel acceptance remain separate."
     if ($RequireNumericGates -and $result.failedGates.Count) { throw "Controlled numeric gates did not pass: $($result.failedGates -join ', '). Captures are retained for diagnosis." }
 }
-
