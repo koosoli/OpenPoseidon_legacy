@@ -1,5 +1,5 @@
 #define_import_path tree_snow
-#import frame::{frame, interior_rain_coverage, interior_rain_reach}
+#import frame::{frame, interior_rain_coverage, interior_rain_reach, weather_map_coverage, weather_map_reach}
 #import snow_material::snow_surface_coverage
 
 // Smooth broad crown envelope in AUTHORED model height, independent of wind,
@@ -38,4 +38,45 @@ fn tree_snow_coverage(world_pos: vec3<f32>, crown_height: f32, cached_exposure: 
         exposed = clamp((interior_rain_reach(world_abs) - (1.0 - validity)) / validity, 0.0, 1.0);
     }
     return tree_snow_cover_depth(crown_height, depth, exposed);
+}
+
+// Exact stock far forest atlases only. These masks describe inspected authored
+// upper foliage regions, not an inferred per-tree component or cluster height.
+// Exposed lower trunks remain outside both envelopes. The merged atlas's entire
+// right half (small forest/ground/unrelated broadleaf card) is deliberately dry.
+fn forest_snow_atlas_crown(uv: vec2<f32>, category: u32) -> f32 {
+    if (!all(abs(uv) < vec2<f32>(1e20)) || uv.y < 0.0 || uv.y > 1.01) { return 0.0; }
+    if (category == 1u) {
+        if (uv.x < -0.002 || uv.x > 1.002) { return 0.0; }
+        return 1.0 - smoothstep(0.27, 0.42, uv.y);
+    }
+    if (category == 2u) {
+        if (uv.x < -0.002 || uv.x > 0.501) { return 0.0; }
+        // Keep the authored atlas seam conservatively clear, including mip bleed.
+        let seam = 1.0 - smoothstep(0.48, 0.5, uv.x);
+        return seam * (1.0 - smoothstep(0.24, 0.38, uv.y));
+    }
+    return 0.0;
+}
+
+fn forest_snow_map_cover(crown: f32, depth: f32, valid: f32, reach: f32) -> f32 {
+    if (valid < 0.5) { return 0.0; }
+    return tree_snow_cover_depth(crown, depth, clamp(reach, 0.0, 1.0));
+}
+
+fn forest_snow_coverage(world_pos: vec3<f32>, uv: vec2<f32>, category: u32) -> f32 {
+    let crown = forest_snow_atlas_crown(uv, category);
+    if (crown <= 0.0 || (frame.snow_surface.x <= 0.0 && frame.snow_surface.w <= 0.0)) { return 0.0; }
+    let world_abs = world_pos + frame.cam_pos.xyz;
+    if (!all(abs(world_abs) < vec3<f32>(1e20))) { return 0.0; }
+    // Dedicated physical map only: pending/outside/border/overflow has no proof.
+    // Do not invoke artistic near-map openness or a CPU lease for the whole forest.
+    let valid = weather_map_coverage(world_abs);
+    if (valid < 0.5) { return 0.0; }
+    var depth = frame.snow_surface.x;
+    if (frame.snow_surface.y >= 0.0 && frame.snow_surface.z > 0.0) {
+        depth = max(depth, smoothstep(frame.snow_surface.y,
+            frame.snow_surface.y + frame.snow_surface.z, world_abs.y) * frame.snow_surface.w);
+    }
+    return forest_snow_map_cover(crown, depth, valid, weather_map_reach(world_abs));
 }

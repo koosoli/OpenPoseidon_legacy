@@ -31,6 +31,8 @@
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp> // REN-THR-004: ticks per frame beside the frame hash
 #include <Poseidon/Dev/Diag/FramePaceTrace.hpp> // PACE-001: per-frame pacing trace
 #include "EngineWgpu.hpp"
+#include "ForestSnowSurface.hpp"
+#include <typeinfo>
 #include "GeometryOwnerLedger.hpp"
 #include "GeometrySourceRevisions.hpp"
 #include "include/WgpuDemandViewSnapshot.hpp"
@@ -7381,6 +7383,23 @@ static bool TreeSnowOwner(const Object& obj)
         !obj.IsDestroyed(), tree, true, shape && !shape->GetAllowAnimation(), true);
 }
 
+static bool ForestAtlasSnowOwner(const Object& obj, int conformMode)
+{
+    const auto* shape = obj.GetShape();
+    if (!shape || !ForestSnowSurface::AuditedModel(shape->Name())) return false;
+    const auto mt = shape->GetMapType();
+    const bool forest = mt == MapForestBorder || mt == MapForestTriangle || mt == MapForestSquare;
+    // Exact built-in classes: neither a proxy nor a subclass with unknown geometry
+    // animation inherits the static ForestPlain terrain-conform authority.
+    const bool knownClass = typeid(obj) == typeid(ForestPlain) || typeid(obj) == typeid(Forest);
+    const int level = ForestSnowSurface::AssetEquals(shape->Name(), "data3d\\les ctverec.p3d") ? 3 : 2;
+    const float resolution = level == 3 ? 40.0f : 12.0f;
+    const bool loaded = level < shape->NLevels() && shape->IsNormalLevel(level) && shape->Level(level) &&
+        shape->Resolution(level) == resolution && shape->Level(level)->NProxies() == 0;
+    return ForestSnowSurface::OwnerAllowed(shape->Name(), obj.GetType() == Primary, obj.Static(),
+        !obj.IsDestroyed(), knownClass, forest, conformMode, loaded);
+}
+
 // y/z are unused by rigid/Keep conform; mode-1 forest planes are never admitted.
 // Proof remains zero on child proxies, bushes, merged forests and far DTOs.
 static void PublishTreeSnowBounds(const Object& obj, WgrVec4& conform0, WgrVec4& conform2)
@@ -9504,6 +9523,19 @@ WgrInstance BuildGpuInstance(const Object& obj, uint32_t model, const ConformPla
     // else rigid: conform2.z stays 0 (zero-initialised).
     if (TreeSnowOwner(obj) && ObjectSnowConformAllowed(*obj.GetShape(), cp.mode))
         PublishTreeSnowBounds(obj, inst.conform0, inst.conform2);
+    // Existing reserved proof lane only: forest plane coefficients and component
+    // indices remain intact. No cluster-wide height mask or external CPU sky lease.
+    if (ForestAtlasSnowOwner(obj, cp.mode))
+    {
+        inst.conform2.w = ForestSnowSurface::OwnerProof;
+        if (std::getenv("WGR_TREE_SNOW_TRACE"))
+        {
+            static std::unordered_set<const LODShapeWithShadow*> seen;
+            if (seen.size() < 16 && seen.insert(obj.GetShape()).second)
+                LOG_INFO(Graphics, "FOREST_SNOW_OWNER model={} mode={} proof=2 scope=primary-static-known-ForestPlain-owned-mesh",
+                    obj.GetShape()->Name(), cp.mode);
+        }
+    }
 
     // Cull sphere == the CPU's exactly: raw Transform.Position() + the model bounding sphere
     // (Scene.cpp:801). No conforming, no snapping, no inflation — CULLDUMP proved every
@@ -14850,6 +14882,28 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                         mat.ambient = {grey, grey, grey, mat.ambient.w};
                     }
                 }
+            }
+            {
+                const ShapeSection& sourceSection = s->GetSection(i);
+                const auto* face = static_cast<const TextureWgpu*>(sourceSection.properties.GetTexture());
+                const bool originalAlbedo = face && face->GpuHandle() != 0 &&
+                    mat.texture_id == face->GpuHandle() &&
+                    ForestSnowSurface::AssetEquals(face->Name() ? face->Name() : "",
+                        face->SourceName() ? face->SourceName() : "");
+                const bool ordinary = sourceSection.surfMat.IsNull() &&
+                    mat.mask_texture_id == 0 && mat.normal_texture_id == 0 &&
+                    mat.specular_texture_id == 0 && sec.flags == 0;
+                static const bool forestAtlasEnabled = [] {
+                    const char* value = std::getenv("WGR_FOREST_SNOW_ATLAS");
+                    return !(value && value[0] == '0' && value[1] == '\0');
+                }();
+                const auto atlas = forestAtlasEnabled ? ForestSnowSurface::AdmitAtlas(shape->Name(), level, shape->Resolution(level),
+                    face && face->SourceName() ? face->SourceName() : "", sec.variant == 1 && mat.alpha_ref > 0,
+                    originalAlbedo, ordinary) : ForestSnowSurface::Atlas::None;
+                sec.flags |= ForestSnowSurface::Encode(atlas);
+                if (atlas != ForestSnowSurface::Atlas::None && std::getenv("WGR_TREE_SNOW_TRACE"))
+                    LOG_INFO(Graphics, "FOREST_SNOW_ATLAS model={} lod={} resolution={} texture={} category={} alphaRef={} scope=audited-uv-crowns-map-only",
+                        shape->Name(), level, shape->Resolution(level), face->SourceName(), uint32_t(atlas), mat.alpha_ref);
             }
             ++g_bakedSections;
             g_bakedSectionTris += sec.index_count / 3;

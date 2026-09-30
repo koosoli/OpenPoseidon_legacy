@@ -11,7 +11,7 @@
 
 #import frame::{frame, reverse_z, fog_factor, atmo_applied, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
 #import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal, object_snow_baked_exposure}
-#import tree_snow::{tree_snow_height, tree_snow_coverage}
+#import tree_snow::{tree_snow_height, tree_snow_coverage, forest_snow_coverage}
 #import frame::interior_rain_coverage
 #import color::srgb_to_linear
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
@@ -706,6 +706,11 @@ fn vs_gpu(
     out.surface_receivers = select(0u, (inst.flags >> 7u) & 3u, canopy == 0u && snow_conform);
     let tree_proof = select(0.0, inst.conform2.w, canopy == INST_CANOPY_TREE);
     out.tree_snow = vec2<f32>(tree_snow_height(pos.y, inst.conform0.y, inst.conform0.z, tree_proof), inst.conform1.x);
+    // Separate exact-stock owner proof, carried in existing lanes. Forest mode1
+    // plane coefficients and per-vertex component selectors are never repurposed.
+    if (canopy == INST_CANOPY_FOREST && inst.conform2.w == 2.0 && (mode == 0.0 || mode == 1.0)) {
+        out.tree_snow = vec2<f32>(0.0, -2.0);
+    }
     // Undeformed model-space position: the baked volume is a property of the AUTHORED model, so
     // the lookup must use the authored vertex, not a terrain-conformed one.
     out.model_pos = pos;
@@ -767,6 +772,9 @@ fn retained_tree_snow_cover(in: VsOut) -> f32 {
     let sm = section_materials[in.section];
     if (sm.alpha_ref <= 0.0 || linear <= 0.5 ||
         (sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER)) != 0u) { return 0.0; }
+    if (in.tree_snow.y == -2.0) {
+        return forest_snow_coverage(in.world_pos, in.uv, (sm.flags >> 16u) & 3u);
+    }
     return tree_snow_coverage(in.world_pos, in.tree_snow.x, in.tree_snow.y);
 }
 

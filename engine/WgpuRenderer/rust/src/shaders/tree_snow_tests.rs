@@ -117,11 +117,116 @@ fn actual_tree_shader_consumers_keep_alpha_wind_normals_and_source_authority() {
         assert!(source.contains("discard;"));
     }
     assert!(direct.contains("instance, 0.0, vec2<f32>(0.0)"),"skinned output cannot inherit crown proof");
-    assert!(retained.contains("canopy == INST_CANOPY_TREE"),"merged forests and bushes stay excluded");
+    assert!(retained.contains("let tree_proof = select(0.0, inst.conform2.w, canopy == INST_CANOPY_TREE)"),
+        "individual model-height masks do not leak into merged forests or bushes");
     assert!(direct.contains("alpha_ref <= 0.0")); assert!(retained.contains("sm.alpha_ref <= 0.0"));
     assert!(shared.contains("object_snow_normal(world_pos, geo_normal, nrm, dwx, dwy, object_cover)"));
     assert!(shared.contains("(wrap_fill + trans) * fade * (1.0 - tree_snow_cover)"));
     assert!(shared.contains("m_spec_mask *= 1.0 - tree_snow_cover"));
     assert!(!crown.contains("snow_powder_normal") && !crown.contains("timeSeconds"));
     assert!(crown.contains("frame.snow_surface.y + frame.snow_surface.z, world_abs.y"));
+}
+
+const FOREST_PROBE: &str = r#"
+#import tree_snow::{forest_snow_atlas_crown, forest_snow_map_cover}
+@group(0) @binding(0) var<storage, read_write> result: array<vec4<f32>>;
+@compute @workgroup_size(8)
+fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {
+    let i = id.x;
+    var uv = vec2<f32>(0.25, 0.1);
+    var kind = 1u;
+    switch i {
+        case 1u: { uv.y = 0.6; }
+        case 2u: { kind = 2u; }
+        case 3u: { kind = 2u; uv.x = 0.75; }
+        case 4u: { kind = 2u; uv = vec2<f32>(0.75,0.6); }
+        case 5u: { kind = 2u; uv = vec2<f32>(0.75,0.9); }
+        case 6u: { kind = 0u; }
+        case 7u: { kind = 2u; uv.y = 0.8; }
+        case 8u: { uv.y = 0.345; }
+        case 9u: { kind = 2u; uv.y = 0.31; }
+        case 10u: { kind = 2u; uv.x = 0.49; }
+        case 11u: { kind = 2u; uv.x = 0.51; }
+        case 12u: { uv.x = -0.003; }
+        case 13u: { uv.y = -0.001; }
+        case 14u: { uv.y = bitcast<f32>(0x7fc00000u); }
+        case 15u: { kind = 3u; }
+        default: {}
+    }
+    let crown = forest_snow_atlas_crown(uv, kind);
+    result[i] = vec4<f32>(crown, forest_snow_map_cover(crown,0.18,0.0,1.0),
+        forest_snow_map_cover(crown,0.18,1.0,0.0), forest_snow_map_cover(crown,0.18,1.0,0.8));
+}
+"#;
+
+#[test]
+fn forest_actual_gpu_audited_atlas_crowns_trunks_ground_shelter_and_ablation() {
+    // Mandatory real device; unavailable GPU is not a silently passing acceptance.
+    let (device, queue) = crate::gfx3d::cull::tests::headless().expect("forest atlas acceptance requires a GPU");
+    for disabled in [false,true] {
+        let mut composer = super::build_composer();
+        let mut defs = std::collections::HashMap::new();
+        if disabled { defs.insert("DISABLE_TREE_SNOW".into(),ShaderDefValue::Bool(true)); }
+        let module = composer.make_naga_module(NagaModuleDescriptor {
+            source: FOREST_PROBE, file_path:"forest_atlas_probe.wgsl", shader_defs:defs, ..Default::default()
+        }).unwrap_or_else(|e| panic!("{}",e.emit_to_string(&composer)));
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label:Some("actual_forest_atlas_functions"),
+            source:wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(module)),
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label:Some("forest_atlas_numeric"),layout:None,module:&shader,entry_point:Some("cs_probe"),
+            compilation_options:Default::default(),cache:None,
+        });
+        let output = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label:None,contents:bytemuck::cast_slice(&[0_f32;64]),
+            usage:wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        });
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label:None,size:256,usage:wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,mapped_at_creation:false,
+        });
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label:None,layout:&pipeline.get_bind_group_layout(0),
+            entries:&[wgpu::BindGroupEntry{binding:0,resource:output.as_entire_binding()}],
+        });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&pipeline);pass.set_bind_group(0,&bind,&[]);pass.dispatch_workgroups(2,1,1);
+        }
+        encoder.copy_buffer_to_buffer(&output,0,&staging,0,256);queue.submit(Some(encoder.finish()));
+        let slice = staging.slice(..);let (send,recv) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read,move |r| {let _ = send.send(r);});
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();recv.recv().unwrap().unwrap();
+        let bytes = slice.get_mapped_range();let samples = bytemuck::cast_slice::<u8,f32>(&bytes);
+        for (i,sample) in samples.chunks_exact(4).enumerate() {
+            let expected = match i {0|2=>1.0,8|9|10=>0.5,_=>0.0};
+            assert!(sample.iter().all(|v| v.is_finite() && *v >= 0.0 && *v <= 1.0));
+            assert!((sample[0]-expected).abs()<1e-5,"atlas sample {i}");
+            assert_eq!(sample[1],0.0,"unpublished/outside/overflow physical map cannot certify openness");
+            assert_eq!(sample[2],0.0,"actual overhead roof stays bare");
+            assert!((sample[3]-if disabled {0.0} else {expected*0.8}).abs()<1e-5);
+        }
+        drop(bytes);staging.unmap();
+    }
+}
+
+#[test]
+fn forest_transport_is_private_exact_stock_and_does_not_change_alpha_or_geometry() {
+    let retained = include_str!("../gfx3d/gpu_driven.wgsl");
+    let crown = include_str!("tree_snow.wgsl");
+    let cpp = include_str!("../../../EngineWgpu.cpp");
+    let policy = include_str!("../../../ForestSnowSurface.hpp");
+    let forest = &crown[crown.find("fn forest_snow_atlas_crown").unwrap()..];
+    assert!(retained.contains("canopy == INST_CANOPY_FOREST && inst.conform2.w == 2.0 && (mode == 0.0 || mode == 1.0)"));
+    assert!(retained.contains("forest_snow_coverage(in.world_pos, in.uv, (sm.flags >> 16u) & 3u)"));
+    assert!(policy.contains("AtlasShift = 16") && policy.contains("level == 3 && resolution == 40"));
+    assert!(policy.contains("level == 2 && resolution == 12"));
+    assert!(cpp.contains("typeid(obj) == typeid(ForestPlain) || typeid(obj) == typeid(Forest)"));
+    assert!(cpp.contains("mat.texture_id == face->GpuHandle()"));
+    assert!(forest.contains("weather_map_coverage(world_abs)") && forest.contains("weather_map_reach(world_abs)"));
+    assert!(!forest.contains("interior_rain_reach") && !forest.contains("cached_exposure"));
+    assert!(!forest.contains("timeSeconds") && !forest.contains("snow_powder_normal"));
+    assert!(retained.contains("sm.alpha_ref <= 0.0") && retained.contains("a2c_coverage(") && retained.contains("discard;"));
+    assert!(include_str!("../gfx3d/mod.rs").contains("flags: s.flags"),"register keeps private bits");
 }
