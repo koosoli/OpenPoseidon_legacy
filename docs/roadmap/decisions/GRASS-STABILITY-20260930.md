@@ -250,3 +250,29 @@ temporal stability still require new matching installed controls. Root will
 compare ordinary medium views and the original Everon owner camera
 `5018.51 4087.66 117.58 220.8 -86` before accepting this follow-up. Earlier
 installed captures establish the retained baseline, not the new medium look.
+
+## Installed medium and aerial controls
+
+Matching installed 01e8c4fb captures `medium-on-OwnerEveron-1-20260930-195351`
+and `medium-off-OwnerEveron-1-20260930-195557` use pose
+`5018.51 4087.66 20.5 220.8 -12`, 1280x720, MSAA4, native rendering, and
+29,447 near / 29,595 mid clumps. Root's inspection finds clearer blade/root
+separation and richer green depth with medium lighting on. Both show existing
+pale dry patches; they are not isolated to the new bounded sheen. Wind/tree
+pose differs between runs, so this is appearance acceptance, not a controlled
+per-pixel temporal comparison.
+
+`aerial-medium-on-OwnerEveron-1-20260930-195845` repeats Oliver's exact
+`5018.51 4087.66 117.58 220.8 -86` camera with 112,164 near / 18,466 mid
+clumps. All three runs exit normally with unchanged pair hashes and no WGPU
+validation errors. Six scheduled images scored with `Score-GrassStability.py`
+at ROI (400,250,900,600) give mean luma 105.7722, mean maximum-channel delta
+2.7800, 1.68789% above24 and 0.07897% above48. The last figure aligns with
+the historical filtered 0.0784% baseline (unfiltered 1.4128%). It includes
+natural wind and capture spacing; it is not adjacent-frame proof.
+
+The warmer dry palette is documented separately in
+`GRASS-STRAW-PALETTE-20260930.md`; its canonical root suite passes all34
+grass tests in `build/grass-palette-tests.log`, including actual GPU helpers.
+The full PoseidonGame build also succeeds in `build/grass-palette-build.log`.
+New installed palette captures remain pending.

@@ -15,7 +15,8 @@ function New-TerrainPuddleStockRoof {
     [CmdletBinding()]
     param([Parameter(Mandatory)][scriptblock]$SendCommand,
           [double]$X = 9481.25, [double]$Z = 3006.25,
-          [Nullable[double]]$ControlX, [Nullable[double]]$ControlZ)
+          [Nullable[double]]$ControlX, [Nullable[double]]$ControlZ,
+          [ValidateRange(0,10)][double]$RoofLift = 0)
     if (!$env:LOCK_OWNER) { throw 'Stock roof fixture requires the shared game lock.' }
     $openX = if ($null -ne $ControlX) { [double]$ControlX } else { $X+12.0 }
     $openZ = if ($null -ne $ControlZ) { [double]$ControlZ } else { $Z }
@@ -32,7 +33,10 @@ function New-TerrainPuddleStockRoof {
     # Engine LoadOptimized/SaveOptimized roundtrip preserves this model lower
     # bound and every audited roof height; recentering was checked offline.
     $modelMinimumY = -2.8100528717041
-    $originHeight = $ground - $modelMinimumY + 0.02
+    # The visual central region is floor-free, but the Geometry LOD is a
+    # solid hull. Walking fixtures may suspend it above the actual soldier;
+    # ordinary ground/roof captures retain their original placement.
+    $originHeight = $ground - $modelMinimumY + 0.02 + $RoofLift
     $xz = $X.ToString('R',$culture)+','+$Z.ToString('R',$culture)
     $spawnCode = 'puddleStockRoof = "CampEastC" createVehicle ['+$xz+',0]; puddleStockRoof setDir 0; puddleStockRoof setPosASL ['+$xz+',' + $originHeight.ToString('R',$culture) + ']; puddleStockRoof allowDamage false'
     $null = & $SendCommand @{ cmd = 'exec'; code = $spawnCode }
@@ -58,7 +62,7 @@ function New-TerrainPuddleStockRoof {
     $openCameraZ = $openZ - 1.5
     $exposedGround = Get-TerrainPuddleFixtureHeight $SendCommand $openX $openCameraZ
     return @{ class = 'CampEastC'; model = 'stan_eastC.p3d'; actualPosition = $actual; objectDebugName = $object.result;
-        modelMinimumY = $modelMinimumY; centreGroundHeight = $ground; coveredGroundHeight = $coveredGround; exposedGroundHeight = $exposedGround;
+        modelMinimumY = $modelMinimumY; roofLift = $RoofLift; centreGroundHeight = $ground; coveredGroundHeight = $coveredGround; exposedGroundHeight = $exposedGround;
         requestedCentre = @($X,$Z); requestedControlCentre = @($openX,$openZ);
         coveredCamera = ($X.ToString('R',$culture)+' '+$cameraZ.ToString('R',$culture)+' '+($coveredGround+1.0).ToString('R',$culture)+' 0 -55');
         exposedCamera = ($openX.ToString('R',$culture)+' '+$openCameraZ.ToString('R',$culture)+' '+($exposedGround+1.0).ToString('R',$culture)+' 0 -55');

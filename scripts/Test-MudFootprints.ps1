@@ -103,7 +103,7 @@ $profile=Join-Path $output 'user'; New-Item -ItemType Directory -Force -Path $pr
 $log=Join-Path $output 'engine.log'
 $result=[ordered]@{status='running';before=$before;gates=@{};samples=@();captures=@{};error=$null;
     limitations='Nogova exact cultivated soil only. Hard road/grass/border and snow installed negatives remain untested; source/CPU exclusion tests are separate. Images are descriptive, not isolated pixel acceptance.'}
-$settings=@{POSEIDON_USER_DIR=$profile;POSEIDON_SNOWLINE='off';POSEIDON_MUD_TRACE='1';WGR_GRASS='0';WGR_OBJECT_SNOW='0';
+$settings=@{POSEIDON_USER_DIR=$profile;POSEIDON_SNOWLINE='off';POSEIDON_MUD_TRACE='1';POSEIDON_UNIFORM_WET_TRACE='1';WGR_GRASS='0';WGR_OBJECT_SNOW='0';
     WGR_TEMPORAL='0';WGR_AUTO_EXPOSURE='0';WGR_EXPOSURE='1';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_CLOUD_COVERAGE='0';
     WGR_TERRAIN_JITTER='0';WGR_LOD_GOVERNOR_RANGE='1';WGR_TERRAIN_PUDDLES='0';WGR_INTERIOR_SKY_DEBUG='0'}
 $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN',
@@ -122,7 +122,7 @@ foreach ($key in $keys) { $savedEnv[$key]=[Environment]::GetEnvironmentVariable(
 $p=$null;$client=$null;$reader=$null;$writer=$null
 function Assert-RunHealth {
     if ($p -and $p.HasExited) { throw "Owned game exited early: $($p.ExitCode)" }
-    if ((Test-Path -LiteralPath $log) -and (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION|StartAutoTest could not boot' -Quiet)) { throw 'Installed runtime/mission failure.' }
+    if ((Test-Path -LiteralPath $log) -and (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION|StartAutoTest could not boot|Unbekannter Operator' -Quiet)) { throw 'Installed runtime/mission failure.' }
 }
 function Send($command) {
     Assert-RunHealth; $request=$command | ConvertTo-Json -Compress
@@ -148,6 +148,9 @@ function State([string]$stage) {
     Require ($sample.pose -is [string] -and [bool]$sample.pose) 'Actual actor pose is missing.'
     Require ($sample.uniformWetness -ge 0 -and $sample.uniformWetness -le 1) 'Actual uniform wetness is invalid.'
     Require ((Eval 'alive mudWalker') -eq $true) 'Actual walking actor died.'
+    $support=Send @{cmd='dev_mud';action='sample';x=$sample.actor[0];z=$sample.actor[1]};Assert-MudSample $support
+    $sample.groundSupport=$support;$sample.supportGap=$sample.actor[2]-$support.surfaceY
+    Require ([Math]::Abs($sample.supportGap) -le .03) 'Actual actor left physical ground support.'
     $result.samples+=,$sample;return $sample
 }
 function Grid([string]$stage) {
@@ -162,7 +165,7 @@ function Grid([string]$stage) {
     return ,$rows
 }
 function Walk([string]$stage,[double]$targetZ,[double]$minimumDistance) {
-    $start=State ($stage+'-before');$null=Send @{cmd='exec';code=('mudWalker enableAI "MOVE"; mudWalker setUnitPos "UP"; mudWalker setBehaviour "CARELESS"; group mudWalker setSpeedMode "LIMITED"; mudWalker doMove [4975,'+$targetZ.ToString('R',$culture)+',0]')}
+    $start=State ($stage+'-before');$null=Send @{cmd='exec';code=('mudWalker setUnitPos "UP"; mudWalker setBehaviour "CARELESS"; group mudWalker setSpeedMode "LIMITED"; mudWalker doMove [4975,'+$targetZ.ToString('R',$culture)+',0]')}
     Set-Acceleration 1;$deadline=[DateTime]::UtcNow.AddSeconds(25)
     do {
         Start-Sleep -Milliseconds 300;$position=Eval 'getPosASL mudWalker'
@@ -176,7 +179,9 @@ function Walk([string]$stage,[double]$targetZ,[double]$minimumDistance) {
 }
 function Reset-Walker {
     # Placement between controls is a fixture operation, never footprint proof.
-    $null=Send @{cmd='exec';code='doStop mudWalker; mudWalker disableAI "MOVE"; mudWalker setPos [4975,4674.25,0]; mudWalker setDir 0; mudWalker switchMove "civil"'}
+    # This engine implements disableAI but has no enableAI operator. A fresh
+    # fixture actor keeps each control independent without an unsupported call.
+    $null=Send @{cmd='exec';code='deleteVehicle mudWalker; mudWalkerGroup=createGroup west; "SoldierWB" createUnit [[4975,4674.25,0],mudWalkerGroup,"mudWalker=this; removeAllWeapons this; this allowDamage false"]; mudWalker setPos [4975,4674.25,0]; mudWalker setDir 0; mudWalker switchMove "civil"; doStop mudWalker'}
     Set-Acceleration 1;Start-Sleep -Seconds 2;Set-Acceleration 0
     $position=Eval 'getPosASL mudWalker';Require ([Math]::Abs($position[0]-4975) -lt .2 -and [Math]::Abs($position[1]-4674.25) -lt .2) 'Walker placement failed.'
 }
@@ -238,7 +243,7 @@ try {
     Require ($snow.mud.wetness -le .001 -and $snow.mud.chunks -eq 0 -and $snow.uniformWetness -le .001) 'Visible snowflakes incorrectly wet soil or stock uniform.'
     $result.gates.snowParticles=@{start=$snowStart;end=$snow;minimumSimSeconds=20}
     $null=Send @{cmd='weather_particles';action='set';mode='off';density=0;snowflakes=$false}
-    $roof=New-TerrainPuddleStockRoof -SendCommand {param($request) Send $request} -X 4975 -Z 4675 -ControlX 4987 -ControlZ 4675;$result.roof=$roof
+    $roof=New-TerrainPuddleStockRoof -SendCommand {param($request) Send $request} -X 4975 -Z 4675 -ControlX 4987 -ControlZ 4675 -RoofLift 3;$result.roof=$roof
     Reset-Walker
     $null=Send @{cmd='weather_particles';action='set';mode='particle';density=1;snowflakes=$false}
     $wetStart=State 'wetting-start';Set-Acceleration $Acceleration;$deadline=[DateTime]::UtcNow.AddSeconds($WetDeadlineSeconds)
@@ -248,7 +253,10 @@ try {
         if ($wet.mud.wetness -ge .65 -and $wet.time-$wetStart.time -ge 20) { break }
         Require ([DateTime]::UtcNow -lt $deadline) 'Actual liquid rain did not wet the soil.'
     } while ($true)
-    Set-Acceleration 0;$coveredBefore=State 'covered-before';$covered=Walk 'covered-walking' 4675.85 .7
+    # A destination only 1.6m away is inside the AI arrival tolerance. Request
+    # the ordinary full walking lane, then pause after a measured .7m under
+    # the roof; the covered endpoint is independently bounded below.
+    Set-Acceleration 0;$coveredBefore=State 'covered-before';$covered=Walk 'covered-walking' 4680.25 .7
     Require ($covered.actor[1] -le 4676 -and $covered.actor[1] -ge 4674.25) 'Covered walking escaped the central floor-free roof region.'
     Require ($covered.mud.chunks -eq 0 -and $covered.mud.revision -eq $coveredBefore.mud.revision) 'Actual roof-covered walking produced mud depressions.'
     Require ($covered.uniformWetness -le .001) 'Actual roof-covered uniform became wet from liquid particles.'

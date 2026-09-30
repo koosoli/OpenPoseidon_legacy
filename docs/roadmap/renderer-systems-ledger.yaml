@@ -656,7 +656,14 @@ systems:
       Owner medium-distance follow-up 1b5f8cd1 restores resolved blade-height
       contrast independently of width, suppresses the extra ramp in aerial
       views and adds a bounded broad sun sheen. Combined actual GPU tests pass;
-      new installed owner-pose and medium ON/OFF acceptance remains pending.
+      Matching installed 01e8c4fb medium ON/OFF controls show improved root/blade
+      separation and green depth. The original aerial pose remains stable:
+      scheduled-image changes above 48 RGB levels are 0.07897 percent in the
+      fixed ROI, similar to the retained filtered baseline. Wind differs between
+      launches; these are bounded appearance controls, not isolated frame proof.
+      The pale dry patches predate the medium lighting change. A warmer, lower
+      straw brightness floor in 97196c60 passes all 34 canonical grass checks,
+      including actual GPU point/mean agreement; its installed look is pending.
       Evidence and acceptance scope: decisions/GRASS-STABILITY-20260930.md.
     known_gap: >-
       GRS-GATE-1 unpassed: assets/ is gitignored, so the authored texture path is dead on
