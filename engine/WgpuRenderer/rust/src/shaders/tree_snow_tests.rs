@@ -57,7 +57,7 @@ fn forest_coverage_diagnostic_composes_only_after_actual_cutout_discard() {
     let branch=&source[debug..source[debug..].find("#endif").unwrap()+debug];
     assert!(branch.contains("in.tree_snow.y == -2.0"));
     assert!(branch.contains("retained_tree_snow_cover(in)"));
-    assert!(branch.contains("return vec4<f32>(diagnostic.rgb, out_a)"));
+    assert!(branch.contains("return vec4<f32>(coat_debug.rgb, out_a)"));
     let prepass=&source[source.find("fn fs_gpu_prepass").unwrap()..];
     assert!(!prepass.contains("forest_snow_diagnostic_colour"));
 }

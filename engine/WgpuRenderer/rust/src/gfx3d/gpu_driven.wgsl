@@ -994,10 +994,10 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // must all survive. Alpha/A2C/discard above and the prepass remain intact.
     if (in.tree_snow.y == -2.0 && sm.alpha_ref > 0.0 && linear > 0.5 &&
         (sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER)) == 0u) {
-        let diagnostic = forest_snow_diagnostic_colour(
+        let coat_debug = forest_snow_diagnostic_colour(
             forest_snow_sample_uv(in.uv, sm.sampler_idx), (sm.flags >> 16u) & 255u,
             retained_tree_snow_cover(in));
-        if (diagnostic.w > 0.5) { return vec4<f32>(diagnostic.rgb, out_a); }
+        if (coat_debug.w > 0.5) { return vec4<f32>(coat_debug.rgb, out_a); }
     }
 #endif
     // Stage1 normal mapping. The retained mesh carries no authored tangent stream, so the
