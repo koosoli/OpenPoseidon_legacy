@@ -188,6 +188,18 @@ fn forest_snow_map_cover(crown: f32, depth: f32, valid: f32, reach: f32) -> f32 
     return tree_snow_cover_depth(crown, depth, clamp(reach, 0.0, 1.0));
 }
 
+// Opt-in diagnostic uses the existing source crown mask, not a whole-cluster
+// colour override. RGB is actual final coverage before lighting/frost albedo;
+// w is a diagnostic admission marker, never the sampled/cutout output alpha.
+// Black = admitted crown with zero physical coat; white = complete coat.
+// Bark, skeleton, ground and unknown atlas categories retain normal rendering.
+fn forest_snow_diagnostic_colour(uv: vec2<f32>, category: u32, cover: f32) -> vec4<f32> {
+    if (forest_snow_atlas_crown(uv, category) <= 0.0) { return vec4<f32>(0.0); }
+    var finite_cover = 0.0;
+    if (abs(cover) < 1e20) { finite_cover = clamp(cover, 0.0, 1.0); }
+    return vec4<f32>(vec3<f32>(finite_cover), 1.0);
+}
+
 fn forest_snow_coverage(world_pos: vec3<f32>, uv: vec2<f32>, category: u32) -> f32 {
     let crown = forest_snow_atlas_crown(uv, category);
     if (crown <= 0.0 || (frame.snow_surface.x <= 0.0 && frame.snow_surface.w <= 0.0)) { return 0.0; }

@@ -39,6 +39,72 @@ fn tree_consumers_compose_enabled_and_disabled() {
 }
 
 #[test]
+fn forest_coverage_diagnostic_composes_only_after_actual_cutout_discard() {
+    let source=include_str!("../gfx3d/gpu_driven.wgsl");
+    for disabled in [false,true] {
+        let mut composer=super::build_composer();
+        let mut defs=std::collections::HashMap::new();
+        defs.insert("FOREST_SNOW_COVER_DEBUG".into(),ShaderDefValue::Bool(true));
+        defs.insert("NATIVE_AUTHORED_NORMALS".into(),ShaderDefValue::Bool(true));
+        if disabled {defs.insert("DISABLE_TREE_SNOW".into(),ShaderDefValue::Bool(true));}
+        composer.make_naga_module(NagaModuleDescriptor {
+            source,file_path:"gfx3d/gpu_driven.wgsl",shader_defs:defs,..Default::default()
+        }).unwrap_or_else(|e|panic!("{}",e.emit_to_string(&composer)));
+    }
+    let debug=source.find("#ifdef FOREST_SNOW_COVER_DEBUG").unwrap();
+    assert!(source.find("out_a = a2c_coverage(cut_a, sm.alpha_ref)").unwrap()<debug);
+    assert!(source[..debug].contains("discard;"));
+    let branch=&source[debug..source[debug..].find("#endif").unwrap()+debug];
+    assert!(branch.contains("in.tree_snow.y == -2.0"));
+    assert!(branch.contains("retained_tree_snow_cover(in)"));
+    assert!(branch.contains("return vec4<f32>(diagnostic.rgb, out_a)"));
+    let prepass=&source[source.find("fn fs_gpu_prepass").unwrap()..];
+    assert!(!prepass.contains("forest_snow_diagnostic_colour"));
+}
+
+#[test]
+fn forest_coverage_diagnostic_actual_gpu_keeps_source_negatives_and_raw_coat() {
+    let (device,queue)=crate::gfx3d::cull::tests::headless().expect("forest coverage diagnostic requires an actual GPU");
+    let source=r#"
+#import tree_snow::{forest_snow_diagnostic_colour, forest_snow_map_cover}
+@group(0) @binding(0) var<storage,read_write> result: array<vec4<f32>>;
+@compute @workgroup_size(8) fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {
+    let i=id.x;
+    var uv=vec2<f32>(0.375,0.10); var category=3u;
+    var cover=forest_snow_map_cover(1.0,0.18,1.0,1.0);
+    switch i {
+        case 1u: {cover=forest_snow_map_cover(1.0,0.18,1.0,0.0);}
+        case 2u: {cover=forest_snow_map_cover(1.0,0.18,0.0,1.0);}
+        case 3u: {uv=vec2<f32>(0.375,0.375);}
+        case 4u: {uv=vec2<f32>(0.9,0.9);}
+        case 5u: {category=0u;}
+        case 6u: {cover=0.25;}
+        case 7u: {cover=bitcast<f32>(0x7fc00000u);}
+        default: {}
+    }
+    result[i]=forest_snow_diagnostic_colour(uv,category,cover);
+}
+"#;
+    let mut composer=super::build_composer();
+    let module=composer.make_naga_module(NagaModuleDescriptor{source,file_path:"forest_cover_debug_probe.wgsl",..Default::default()})
+        .unwrap_or_else(|e|panic!("{}",e.emit_to_string(&composer)));
+    let shader=device.create_shader_module(wgpu::ShaderModuleDescriptor{label:Some("actual_forest_cover_debug"),source:wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(module))});
+    let pipeline=device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{label:None,layout:None,module:&shader,entry_point:Some("cs_probe"),compilation_options:Default::default(),cache:None});
+    let output=device.create_buffer_init(&wgpu::util::BufferInitDescriptor{label:None,contents:bytemuck::cast_slice(&[0_f32;32]),usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_SRC});
+    let staging=device.create_buffer(&wgpu::BufferDescriptor{label:None,size:128,usage:wgpu::BufferUsages::MAP_READ|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false});
+    let bind=device.create_bind_group(&wgpu::BindGroupDescriptor{label:None,layout:&pipeline.get_bind_group_layout(0),entries:&[wgpu::BindGroupEntry{binding:0,resource:output.as_entire_binding()}]});
+    let mut encoder=device.create_command_encoder(&Default::default());
+    {let mut pass=encoder.begin_compute_pass(&Default::default());pass.set_pipeline(&pipeline);pass.set_bind_group(0,&bind,&[]);pass.dispatch_workgroups(1,1,1);}
+    encoder.copy_buffer_to_buffer(&output,0,&staging,0,128);queue.submit(Some(encoder.finish()));
+    let slice=staging.slice(..);let (send,recv)=std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read,move|r|{let _=send.send(r);});device.poll(wgpu::PollType::wait_indefinitely()).unwrap();recv.recv().unwrap().unwrap();
+    let bytes=slice.get_mapped_range();let samples=bytemuck::cast_slice::<u8,f32>(&bytes);
+    let expected=[[1.,1.,1.,1.],[0.,0.,0.,1.],[0.,0.,0.,1.],[0.;4],[0.;4],[0.;4],[0.25,0.25,0.25,1.],[0.,0.,0.,1.]];
+    for (actual,want) in samples.chunks_exact(4).zip(expected) {for (a,b) in actual.iter().zip(want){assert!(a.is_finite() && (*a-b).abs()<1e-6);}}
+    drop(bytes);staging.unmap();
+}
+
+#[test]
 fn tree_crown_actual_gpu_height_depth_shelter_and_ablation() {
     let (device, queue) = crate::gfx3d::cull::tests::headless()
         .expect("tree crown acceptance requires a real GPU test device");

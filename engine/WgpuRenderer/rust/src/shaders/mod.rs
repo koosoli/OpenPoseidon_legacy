@@ -72,6 +72,13 @@ fn shader_defs() -> std::collections::HashMap<String, naga_oil::compose::ShaderD
     if std::env::var("WGR_TREE_SNOW").as_deref() == Ok("0") {
         defs.insert("DISABLE_TREE_SNOW".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }
+    if std::env::var("WGR_FOREST_SNOW_COVER_DEBUG").as_deref() == Ok("1") {
+        defs.insert("FOREST_SNOW_COVER_DEBUG".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+        static REPORTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        if REPORTED.set(()).is_ok() {
+            eprintln!("[wgr] forest snow coverage diagnostic: enabled=1 scope=admitted-retained-forest-leaves-only-preserve-alpha");
+        }
+    }
     if std::env::var("WGR_SNOW_POWDER").as_deref() == Ok("0") {
         defs.insert("DISABLE_SNOW_POWDER_DETAIL".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
     }

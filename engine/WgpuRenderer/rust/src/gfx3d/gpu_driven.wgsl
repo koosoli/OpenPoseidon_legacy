@@ -11,7 +11,7 @@
 
 #import frame::{frame, reverse_z, fog_factor, atmo_applied, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
 #import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal, object_snow_baked_exposure}
-#import tree_snow::{tree_snow_height, tree_snow_coverage, forest_snow_coverage, forest_snow_sample_uv}
+#import tree_snow::{tree_snow_height, tree_snow_coverage, forest_snow_coverage, forest_snow_sample_uv, forest_snow_diagnostic_colour}
 #import frame::interior_rain_coverage
 #import color::srgb_to_linear
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
@@ -989,6 +989,17 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     if (frame.skyvisc.x > 0.5 && frame.skyvisc.w > 0.5) {
         return vec4<f32>(vec3<f32>(baked_sky_visibility(in.model_id, in.model_pos)), out_a);
     }
+#ifdef FOREST_SNOW_COVER_DEBUG
+    // Owner proof, ordinary cutout material and actual authored UV admission
+    // must all survive. Alpha/A2C/discard above and the prepass remain intact.
+    if (in.tree_snow.y == -2.0 && sm.alpha_ref > 0.0 && linear > 0.5 &&
+        (sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER)) == 0u) {
+        let diagnostic = forest_snow_diagnostic_colour(
+            forest_snow_sample_uv(in.uv, sm.sampler_idx), (sm.flags >> 16u) & 255u,
+            retained_tree_snow_cover(in));
+        if (diagnostic.w > 0.5) { return vec4<f32>(diagnostic.rgb, out_a); }
+    }
+#endif
     // Stage1 normal mapping. The retained mesh carries no authored tangent stream, so the
     // frame comes from the interpolated UV0 / world-position derivatives -- the same
     // recovery the per-draw path uses, and the reason this needs no vertex-format change.
