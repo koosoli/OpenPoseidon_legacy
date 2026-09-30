@@ -1,4 +1,4 @@
-# Grounded rigid mesh puddles — source candidate
+# Grounded rigid mesh puddles â€” source candidate
 
 Base `06a7c41e`; isolated branch `codex/ground-mesh-puddles-20260930`.
 
@@ -25,3 +25,25 @@ Passed locally: `scripts/Test-GroundMeshSurfacePolicy.ps1 -Compiler 'd:/Program 
 Authored, **not run here**: `cargo test -p wgpu_renderer ground_mesh -- --test-threads=1`. It composes actual helpers and both complete entry shaders. The GPU falsifier requires a real device and production helper, non-planar 2x2 height texture and a resource layout without SnowData: both triangle heights, nearby paving, raised roof, large flat surface above sloping terrain, underside, zero/steep/down normals, disabled/malformed grid/dimensions and out-of-map points. Root owns GPU execution, full suite/build and matched installed deployment. No game/GPU/renderer/full-game build ran in this worktree.
 
 Installed proof still requires exact source model/pose and matched binary provenance for exposed stock pavement, raised roof/wall negatives, covered ground floor, cutout holes, drying/pause and camera return. Existing controlled paging takeover/restore must preserve the receiver tags. Source admission and terrain stills alone cannot certify this expanded mesh scope.
+
+## Root integration and owner smoke-test handoff
+
+Root integrates9d3f73ae and passes the canonical CPU/receipt policy and both
+required-device ground_mesh Rust tests. Full serial renderer run records609
+passes, two source-comparison failures and two existing ignored tests. The
+failures are CRLF/LF text inequality in otherwise identical Mud/Sand functions;
+b900d8ef normalizes line endings while preserving exact function comparison.
+Both failed cases subsequently pass, including their production composition
+checks. Raw logs remain `build/ground-mesh-combined-tests.log` and
+`build/ground-mesh-geometry-recheck.log`; this is coverage across those runs,
+not a claimed single611-pass full-suite result.
+
+After the32-bit forest-index correction654bbe57 and its four meaningful CPU
+fixtures, the full PoseidonGame build passes. Matching pair is deployed at22:27:
+EXE built22:25:18, DLL22:24:36, actual DEPLOYED-FROM654bbe57. Installed Everon
+startup/capture `build/grass-stability/pavement-pair-startup-OwnerEveron-1-20260930-222747`
+passes populated grass, actual retained-world rendering, normal exit0,
+Shutdown complete and unchanged pair. It does not prove wet pavement pixels.
+Oliver requests an interactive smoke-test handoff; preserve his game session.
+The inclined-roof snow correction4821711f remains in its isolated worktree,
+unintegrated/uninstalled and awaiting actual GPU/build/runtime verification.

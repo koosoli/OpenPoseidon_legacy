@@ -663,7 +663,11 @@ systems:
       launches; these are bounded appearance controls, not isolated frame proof.
       The pale dry patches predate the medium lighting change. A warmer, lower
       straw brightness floor in 97196c60 passes all 34 canonical grass checks,
-      including actual GPU point/mean agreement; its installed look is pending.
+      including actual GPU point/mean agreement. Matching06a7c41e medium and
+      exact owner-aerial captures complete with normal shutdown. Root inspects
+      retained blade contrast and warmer subdued dry patches. Aerial scheduled
+      image changes above48 RGB levels remain0.0798 percent in the fixed ROI;
+      capture timing/wind differences prevent an isolated shimmer attribution.
       Evidence and acceptance scope: decisions/GRASS-STABILITY-20260930.md.
     known_gap: >-
       GRS-GATE-1 unpassed: assets/ is gitignored, so the authored texture path is dead on
@@ -777,6 +781,16 @@ unbuilt_candidates: >-
       and installed hard-ground/border/snow negatives remain open. The first
       narrow-grid campaign stays failed. See decisions/WET-SOIL-MATERIAL-20260930.md,
       SAND-FOOTPRINT-GEOMETRY-20260930.md and SAND-GPU-GEOMETRY-TESTS-20260930.md.
+      Ordinary proven static rigid ground meshes now gain fragment-local bare
+      height admission and independently preserved residency tags. Canonical
+      CPU policy/actual receipt tests and two required-device GPU helper tests
+      pass. Full serial checks609 pass with two CRLF/LF comparison failures;
+      both corrected exact-function composition cases subsequently pass.
+      Matching654bbe57 full build/deployment22:27 and actual installed Everon
+      startup/retained rendering pass. Wet pavement positive/sheltered/raised
+      controls and general map coverage remain pending. Oliver requests his
+      interactive smoke test; preserve that session. Snow roof correction
+      remains isolated/uninstalled. See GROUNDED-RIGID-MESH-PUDDLES-20260930.md.
       Earlier source decisions:
       MUD-VOLUMETRIC-CONTACT-20260930.md and NOGOVA-SOFT-MUD-CONTACT-20260930.md.
 
