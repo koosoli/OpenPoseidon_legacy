@@ -127,6 +127,7 @@ class Helicopter: public Transport
 
 	protected:
 	float GetGlassBroken() const;
+	void EmitLandRotorRing(float deltaT, SimulationImportance prec);
 
 	void DammageAnimation( int level );
 	void DammageDeanimation( int level );
@@ -328,7 +329,6 @@ class HelicopterAuto: public Helicopter
 	TMError TransferMsg(NetworkMessageContext &ctx) override;
 	float CalculateError(NetworkMessageContext &ctx) override;
 protected:
-	void EmitLandRotorRing(float deltaT, SimulationImportance prec);
 	void UpdateStopMode(AIUnit *unit);
 };
 
