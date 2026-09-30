@@ -7398,7 +7398,8 @@ static bool ForestAtlasSnowOwner(const Object& obj, int conformMode)
     bool loaded = false;
     for (int level = 0; level < policy->visualLevels && level < shape->NLevels(); ++level)
         loaded |= shape->IsNormalLevel(level) && shape->Level(level) &&
-            shape->Resolution(level) == policy->resolutions[level] && shape->Level(level)->NProxies() == 0;
+            ForestSnowSurface::AuditedLevel(shape->Name(),level,shape->Resolution(level)) &&
+            shape->Level(level)->NProxies() == 0;
     return ForestSnowSurface::OwnerAllowed(shape->Name(), obj.GetType() == Primary, obj.Static(),
         !obj.IsDestroyed(), knownClass, forest, conformMode, loaded);
 }

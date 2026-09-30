@@ -2,6 +2,8 @@
 
 Status: **SOURCE CANDIDATE; expanded actual GPU probe, full build and installed appearance pending.** Supersedes the two-tuple restriction in [the original audit](SNOW-STOCK-FAR-FOREST-ATLAS-20260930.md). The owner's Everon screenshot rejects the earlier flat white billboard result. Alpha/crown coverage alone is not visual acceptance.
 
+The subsequent [Nogova audit and loader-compaction correction](SNOW-NOGOVA-FOREST-20261001.md) adds the separately inspected O family and maps unique original resolutions to left-compacted retained LOD slots. Counts in this original Data3D audit describe raw source visual LODs, not simultaneously loaded/rendered levels.
+
 ## Audited source family
 
 Offline extraction of installed CWA `DTA/Data3D.pbo`, followed by the existing `PoseidonTools model inspect --all`, simulation-source and loaded-engine UV diagnostics, establishes 13 models / 45 visual LODs / 29 unique referenced textures. All visual named-selection counts are zero; collision components are not per-tree visual identities. All 29 face textures were extracted from `Data.pbo` or `Merged.pbo`, decoded with the existing tool and inspected. The independently stored full texture census is [forest_stock_visuals.txt](../../../tests/unit/engine/WgpuRenderer/forest_stock_visuals.txt).
@@ -51,4 +53,3 @@ The actual production-helper GPU probe now has 48 samples in enabled/disabled ar
 Root must run consumer composition and numeric GPU probes, compile the full engine, then matched installed snow/atlas ON/OFF captures with actual owner/material trace, stable installed pair hashes, normal exit and weather-map ready/no-overflow proof. Inspect actual forest near/mid/far/top views and LOD transitions on Eden/Abel/Cain, with bark/ground/alpha negatives and a partial overhead roof control. Nogova requires the separately audited O family. The owner specifically requires textured snowy crowns and white forests from above; simply proving positive coverage is insufficient.
 
 No measured runtime cost or universal map/mod compatibility is claimed. Registration uses finite static tables; owner checks reject nonforest map types before model lookup. Fragment arithmetic is fixed and there is no new pass/ray scan. Same-path altered stock assets are not byte-certified by runtime policy.
-

@@ -175,6 +175,22 @@ fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {
         case 45u: { kind = 6u; uv = vec2<f32>(0.5,0.2); }
         case 46u: { kind = 9u; uv = vec2<f32>(0.5,0.32); }
         case 47u: { kind = 9u; uv = vec2<f32>(0.5,0.995); }
+        case 48u: { kind = 10u; uv = vec2<f32>(0.5,0.1); }
+        case 49u: { kind = 10u; uv = vec2<f32>(0.5,0.42); }
+        case 50u: { kind = 10u; uv = vec2<f32>(0.5,0.7); }
+        case 51u: { kind = 11u; uv = vec2<f32>(0.5,0.1); }
+        case 52u: { kind = 11u; uv = vec2<f32>(0.5,0.65); }
+        case 53u: { kind = 12u; uv = vec2<f32>(0.25,0.1); }
+        case 54u: { kind = 12u; uv = vec2<f32>(0.25,0.8); }
+        case 55u: { kind = 13u; uv = vec2<f32>(0.5,0.65); }
+        case 56u: { kind = 13u; uv = vec2<f32>(0.5,0.1); }
+        case 57u: { kind = 13u; uv = vec2<f32>(0.5,0.99); }
+        case 58u: { kind = 14u; uv = vec2<f32>(0.5,0.1); }
+        case 59u: { kind = 14u; uv = vec2<f32>(0.67,0.8); }
+        case 60u: { kind = 15u; uv = vec2<f32>(0.2,0.3); }
+        case 61u: { kind = 15u; uv = vec2<f32>(0.75,0.3); }
+        case 62u: { kind = 15u; uv = vec2<f32>(0.75,0.98); }
+        case 63u: { kind = 254u; }
         default: {}
     }
     if (i >= 32u && i < 40u) {
@@ -207,11 +223,11 @@ fn forest_actual_gpu_audited_atlas_crowns_trunks_ground_shelter_and_ablation() {
             compilation_options:Default::default(),cache:None,
         });
         let output = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label:None,contents:bytemuck::cast_slice(&[0_f32;192]),
+            label:None,contents:bytemuck::cast_slice(&[0_f32;256]),
             usage:wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         });
         let staging = device.create_buffer(&wgpu::BufferDescriptor {
-            label:None,size:768,usage:wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,mapped_at_creation:false,
+            label:None,size:1024,usage:wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,mapped_at_creation:false,
         });
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label:None,layout:&pipeline.get_bind_group_layout(0),
@@ -220,15 +236,16 @@ fn forest_actual_gpu_audited_atlas_crowns_trunks_ground_shelter_and_ablation() {
         let mut encoder = device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&pipeline);pass.set_bind_group(0,&bind,&[]);pass.dispatch_workgroups(6,1,1);
+            pass.set_pipeline(&pipeline);pass.set_bind_group(0,&bind,&[]);pass.dispatch_workgroups(8,1,1);
         }
-        encoder.copy_buffer_to_buffer(&output,0,&staging,0,768);queue.submit(Some(encoder.finish()));
+        encoder.copy_buffer_to_buffer(&output,0,&staging,0,1024);queue.submit(Some(encoder.finish()));
         let slice = staging.slice(..);let (send,recv) = std::sync::mpsc::channel();
         slice.map_async(wgpu::MapMode::Read,move |r| {let _ = send.send(r);});
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();recv.recv().unwrap().unwrap();
         let bytes = slice.get_mapped_range();let samples = bytemuck::cast_slice::<u8,f32>(&bytes);
         for (i,sample) in samples.chunks_exact(4).enumerate() {
-            let expected = match i {0|2|16|20|23|24|29|30|32|36|45|46=>1.0,8|9|10=>0.5,_=>0.0};
+            let expected = match i {0|2|16|20|23|24|29|30|32|36|45|46|48|51|53|55|58|61=>1.0,
+                8|9|10=>0.5,_=>0.0};
             assert!(sample.iter().all(|v| v.is_finite() && *v >= 0.0 && *v <= 1.0));
             assert!((sample[0]-expected).abs()<1e-5,"atlas sample {i}");
             assert_eq!(sample[1],0.0,"unpublished/outside/overflow physical map cannot certify openness");
@@ -256,8 +273,10 @@ fn forest_transport_is_private_exact_stock_and_does_not_change_alpha_or_geometry
     assert!(retained.contains("canopy == INST_CANOPY_FOREST && inst.conform2.w == 2.0 && (mode == 0.0 || mode == 1.0)"));
     assert!(retained.contains("forest_snow_sample_uv(in.uv, sm.sampler_idx)"));
     assert!(retained.contains("(sm.flags >> 16u) & 255u"));
-    assert!(policy.contains("AtlasShift = 16") && policy.contains("std::array<ModelPolicy, 13>"));
-    assert!(policy.contains("std::array<TexturePolicy, 29>"));
+    assert!(policy.contains("AtlasShift = 16") && policy.contains("std::array<ModelPolicy, 25>"));
+    assert!(policy.contains("std::array<TexturePolicy, 57>"));
+    assert!(policy.contains("std::array<uint64_t,4> textureMasks"));
+    assert!(policy.contains("uint64_t(1) << i"),"texture membership above bit31 stays intact");
     assert!(cpp.contains("forestAtlasEnabled && s->NProxies() == 0"));
     assert!(cpp.contains("typeid(obj) == typeid(ForestPlain) || typeid(obj) == typeid(Forest)"));
     assert!(cpp.contains("mat.texture_id == face->GpuHandle()"));

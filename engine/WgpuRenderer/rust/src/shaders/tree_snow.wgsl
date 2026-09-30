@@ -160,6 +160,26 @@ fn forest_snow_atlas_crown(uv: vec2<f32>, category: u32) -> f32 {
         if (uv.y < 0.5) { return 1.0 - smoothstep(0.43,0.48,uv.y); }
         return 1.0 - smoothstep(0.88,0.98,uv.y);
     }
+    // Nogova O family, independently decoded from original O.pbo. The far
+    // forest sheet includes LONG middle trunks and lower scattered leaf clumps:
+    // neither is part of its upper crown envelope.
+    if (category == 10u) { return 1.0 - smoothstep(0.20,0.31,uv.y); }
+    if (category == 11u) { return 1.0 - smoothstep(0.36,0.50,uv.y); }
+    if (category == 12u) { return 1.0 - smoothstep(0.48,0.62,uv.y); }
+    if (category == 13u) {
+        // smrcicicek: bare shoot at top, leaf-bearing branches below.
+        return smoothstep(0.32,0.42,uv.y) * (1.0 - smoothstep(0.85,0.96,uv.y));
+    }
+    if (category == 14u) {
+        // afn_strom_04_new2's left slender leaf sprays are separate from the
+        // large right tree; its extended central trunk is below the crown crop.
+        if (uv.x < 0.20) { return 1.0 - smoothstep(0.85,0.98,uv.y); }
+        return 1.0 - smoothstep(0.24,0.32,uv.y);
+    }
+    if (category == 15u) {
+        // dd_bush06 LEFT half is a completely bare branch skeleton.
+        return smoothstep(0.50,0.53,uv.x) * (1.0 - smoothstep(0.65,0.90,uv.y));
+    }
     return 0.0;
 }
 
