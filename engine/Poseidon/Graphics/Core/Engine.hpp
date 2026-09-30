@@ -3308,6 +3308,7 @@ class Engine : public IGraphicsEngine
         uint32_t retailSourcePrepareStatus=0,retailSourceExportStatus=0;
         // Explicit source diagnostic records only: no instance or world routing.
         bool retailRecordOnly=false,retailPixelSourceVerified=false,retailRecordDistinctCuts=false;
+        bool retailDiagnosticReferenceAllocated=false;
         bool retailVisiblePilot=false,retailVisiblePresent=false,retailVisibleRemoved=false,retailVisibleReturned=false;
         uint64_t retailVisibleBirth=0,retailVisibleRequest=0,retailVisibleFrame=0;
         uint32_t retailVisibleRenderer=UINT32_MAX,retailVisibleSlot=UINT32_MAX,retailVisibleModel=UINT32_MAX;
@@ -3328,6 +3329,9 @@ class Engine : public IGraphicsEngine
         double retailWorldProjectedUpper=0,retailWorldSurfaceUpper=0;
         bool retailWorldResidencyEnabled=false,retailWorldConventionalFallback=false;
         uint32_t retailWorldResidencyCycles=0;
+        uint32_t retailWorldResidencyCycleLimit=0,retailWorldLastRetiredMeshes=0;
+        uint32_t retailWorldCompactedMeshes=0,retailWorldRetiredFineModels=0;
+        uint64_t retailWorldResidencyReservedBytes=0,retailWorldRetirementAckRequest=0;
         uint64_t retailWorldResidencyTriggerCamera=0,retailWorldRetirementRequest=0,retailWorldRefillRequest=0;
         uint64_t retailWorldFallbackCameraGeneration=0;
         uint64_t retailWorldFallbackRequest=0,retailWorldFallbackPageBirth=0,retailWorldFallbackInstanceEpoch=0;
@@ -3474,6 +3478,14 @@ class Engine : public IGraphicsEngine
     virtual bool StageWorldShapeParentNormalMap(const LODShapeWithShadow*, int, int, uint64_t,
         bool& attempted, bool& uploaded, uint64_t& chargedBytes, std::string& uploadedName)
     { attempted = uploaded = false; chargedBytes = 0; uploadedName.clear(); return false; }
+    // Exact-tenement, default-off partial parent material pre-touch. The list comes
+    // from the translated material's declared file stages; it does not certify
+    // final bindings, proxy dependencies, or complete model admission.
+    virtual bool ListWorldShapeParentMaterialRoles(const LODShapeWithShadow*, int, int,
+        std::vector<std::string>& names) const { names.clear(); return false; }
+    virtual bool StageWorldShapeParentMaterialRole(const char*, uint64_t,
+        bool& attempted, bool& uploaded, uint64_t& chargedBytes)
+    { attempted = uploaded = false; chargedBytes = 0; return false; }
     // Proof after complete registration: number of staged parent images actually
     // captured by that model's material bindings (never includes proxy children).
     virtual uint32_t CountWorldShapeCapturedTextures(const LODShapeWithShadow*,

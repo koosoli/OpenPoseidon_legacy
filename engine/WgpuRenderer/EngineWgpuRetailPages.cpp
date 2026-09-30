@@ -28,6 +28,7 @@ namespace Poseidon
 namespace
 {
 constexpr uint64_t RetailLimit = 1024 * 1024;
+constexpr uint32_t RetailWorldResidencyCycleLimit = 3;
 using Record = render::RetailPageRecordObservation;
 std::string RetailHex(const std::array<uint8_t,32>& hash)
 {
@@ -112,6 +113,9 @@ struct EngineWgpu::RetailPagePilotState
     std::array<uint8_t,64> resident{};
     std::array<uint32_t,4> models{UINT32_MAX,UINT32_MAX,UINT32_MAX,UINT32_MAX};
     std::array<bool,4> modelReady{};
+    // Only models created by this private record owner may be retired here.
+    // The conventional world's retained model lease is never inserted here.
+    std::array<bool,4> ownsModels{};
     std::array<std::shared_ptr<render::ModelAdmissionReceipt>,4> receipts{};
     std::vector<MeshRow> history;
     std::vector<uint32_t> rootClusters, fineClusters;
@@ -125,6 +129,11 @@ struct EngineWgpu::RetailPagePilotState
     uint32_t lastMeshFrame = UINT32_MAX;
     float rootThreshold = 0;
     bool abortRequested = false, abortRecordSettled = false, refilled = false;
+    bool reusableWorldFine = false;
+    bool releaseRecordSettled = false;
+    uint32_t retiringFineSlot = UINT32_MAX, retiringMeshCount = 0;
+    uint64_t residencyReservation = 0, retirementAckRequest = 0;
+    uint32_t lastRetiredMeshes = 0, compactedMeshes = 0, retiredFineModels = 0;
     Phase phase = Phase::AwaitFallback;
     Target target = Target::Root;
     std::shared_ptr<Record> observation;
@@ -175,7 +184,9 @@ struct EngineWgpu::RetailPagePilotState
         for (auto& row : history) if (row.producer == producer) return &row;
         return nullptr;
     }
-    uint32_t Slot() const { return target == Target::Root ? 1 : target == Target::Fine ? 2 : 3; }
+    uint32_t Slot() const { return target == Target::Root ? 1 :
+        target == Target::Fine || reusableWorldFine ? 2 : 3; }
+    uint32_t FineSlot() const { return reusableWorldFine ? 2 : refilled && modelReady[3] ? 3 : 2; }
 };
 
 // One selected, installed world object and one private page producer slot.  The
@@ -204,8 +215,9 @@ struct EngineWgpu::RetailWorldVisibleState
     std::chrono::steady_clock::time_point lastAutoObservation{};
     uint64_t lastAutoFrameGeneration = 0;
     bool autoEnabled = false;
-    // One connected residency cycle only. Resource history/model slots keep
-    // their existing finite lifetime; no IDs or retired receipts are recycled.
+    // Actual-world-only residency permits three cycles. Complete retirement
+    // evidence precedes CPU history compaction; renderer model IDs still append.
+    // Other private fixtures retain their original single-cycle history.
     enum class Residence : uint8_t { Disabled, Both, RetiringFine, RootOnly,
         RestoringForRefill, Refilling, RetakingFine, Complete, Cancelled };
     Residence residence = Residence::Disabled;
@@ -314,7 +326,16 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
             for (auto component : colour) if (component!=1) return failure;
         const char* visibleGate = std::getenv("WGR_GEOMETRY_PAGE_RETAIL_VISIBLE");
         const bool visibleSourceFineReference = visibleGate && !std::strcmp(visibleGate, "1");
-        const size_t referenceIndex = worldAuto || visibleSourceFineReference ? 1 : 0;
+        const char* worldVisibleGate = std::getenv("WGR_GEOMETRY_PAGE_RETAIL_WORLD_VISIBLE");
+        // This selects an allocation optimization, never source/world authority.
+        // The actual world retains its conventional original for other passes
+        // and refill fallback, so it needs no duplicate diagnostic GPU model.
+        const bool actualWorldOnly = worldVisibleGate && !std::strcmp(worldVisibleGate,"1") &&
+            !visibleSourceFineReference;
+        const char* worldResidencyGate = std::getenv("WGR_GEOMETRY_PAGE_RETAIL_WORLD_RESIDENCY");
+        const bool reusableWorldFine = actualWorldOnly && worldAuto && worldResidencyGate &&
+            !std::strcmp(worldResidencyGate,"1");
+        const size_t referenceIndex = visibleSourceFineReference ? 1 : 0;
         if (actual->finalLevels[referenceIndex] < 0) return failure;
         const auto& reference = visibleSourceFineReference ? actual->actual.fine : actual->actual.coarse;
         for (const auto* mesh : {&actual->actual.coarse, &actual->actual.fine})
@@ -345,7 +366,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
              proof->certificate->fineTriangles != proof->fine->packed.indices.size()/3))
             return failure;
         const bool distinct = root.selectedClusters != fine.selectedClusters;
-        uint32_t initialMeshes = 1, refillMeshes = 0;
+        uint32_t initialMeshes = actualWorldOnly ? 0 : 1, refillMeshes = 0;
         for(auto page:root.requiredPages) {
             if(page>=p.pages.size())return failure;
             initialMeshes+=uint32_t(p.pages[page].clusters.size());
@@ -364,6 +385,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
                 product->knownRetainedCapacityBytes) return failure;
         auto state = std::make_shared<RetailPagePilotState>();
         state->visibleSourceFineReference = visibleSourceFineReference;
+        state->reusableWorldFine = reusableWorldFine;
         state->admission = std::move(input);
         state->rootClusters = root.selectedClusters; state->fineClusters = fine.selectedClusters;
         state->rootPages = root.requiredPages; state->finePages = fine.requiredPages;
@@ -371,6 +393,22 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
             if (std::find(state->rootPages.begin(), state->rootPages.end(), page) == state->rootPages.end())
                 state->nonrootPages.push_back(page);
         state->rootThreshold = threshold;
+        if (reusableWorldFine && distinct)
+        {
+            // Reserve the bounded three-cycle producer's worst private queue
+            // phases up front. Existing per-operation capacity checks and
+            // cumulative charges remain conservative; this is not a claim of
+            // constant renderer memory (renderer model births append rows).
+            uint64_t upload=0, clusters=0;
+            for (auto page : state->nonrootPages)
+            { upload += p.pages[page].uploadBytes; clusters += p.pages[page].clusters.size(); }
+            const uint64_t oneCycle = 2*upload + clusters*(2*sizeof(ResourceOp)+sizeof(Record)+256) +
+                2*fine.selectedClusters.size()*(sizeof(WgrModelSection)+sizeof(WgrModelMaterial)) +
+                (Record::MaxMeshes+7)*sizeof(ResourceOp) +
+                4*sizeof(Record)+sizeof(render::ModelAdmissionReceipt)+2048;
+            if (oneCycle > workingLimit/RetailWorldResidencyCycleLimit) return failure;
+            state->residencyReservation=oneCycle*RetailWorldResidencyCycleLimit;
+        }
         state->history.reserve(Record::MaxMeshes);
         state->worker = std::make_unique<AuthoredPageWorker>();
 #ifdef _WIN32
@@ -390,7 +428,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
         uint64_t known = product->knownSourceCapacityBytes + product->knownRetainedCapacityBytes +
             state->admission.knownAuthorityBytes + sizeof(RetailPagePilotState) +
             HierarchicalDiskPageInputKnownBytes(*state->diskBase) +
-            state->history.capacity() * sizeof(RetailPagePilotState::MeshRow) + 4096;
+            state->history.capacity() * sizeof(RetailPagePilotState::MeshRow) + 4096 +
+            state->residencyReservation;
         if (known >= workingLimit) return failure;
         state->report.status = GeometryReportStatus::Pending;
         state->report.retailRecordOnly = true;
@@ -418,11 +457,23 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
         state->report.hierarchyPackageSha256 = RetailHex(p.identity.packageSha256);
         state->report.coarseTriangles = uint32_t(actual->actual.coarse.indices.size() / 3);
         state->report.fineTriangles = uint32_t(actual->actual.fine.indices.size() / 3);
-        state->report.retailVisibleReferenceSourceLevel = uint32_t(actual->finalLevels[referenceIndex]);
-        state->report.retailVisibleReferenceTriangles = uint32_t(reference.indices.size() / 3);
+        state->report.retailVisibleReferenceSourceLevel = actualWorldOnly ? UINT32_MAX :
+            uint32_t(actual->finalLevels[referenceIndex]);
+        state->report.retailVisibleReferenceTriangles = actualWorldOnly ? 0 :
+            uint32_t(reference.indices.size() / 3);
         state->report.knownPayloadBytes = known;
+        state->report.retailWorldResidencyCycleLimit = reusableWorldFine ? RetailWorldResidencyCycleLimit : 1;
+        state->report.retailWorldResidencyReservedBytes = state->residencyReservation;
         state->report.active = true;
         state->report.pageEpoch = _nextGeometryPageEpoch++;
+        if (actualWorldOnly)
+        {
+            state->phase = RetailPagePilotState::Phase::Advance;
+            state->target = RetailPagePilotState::Target::Root;
+            state->report.pageWorkState = "RetailWorldPagesWithoutDiagnosticReference";
+            _retailPagePilot = std::move(state);
+            return _retailPagePilot->report;
+        }
         state->report.pageWorkState = referenceIndex == 1 ?
             "RetailSourceFineReferenceQueued" : "RetailFallbackQueued";
         if (_frameCounter == UINT32_MAX) return failure;
@@ -465,6 +516,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
         observe.retailPageRecordObservation = observation;
         _resourceOps.reserve(_resourceOps.size() + 3);
         state->models[0] = modelId;
+        state->ownsModels[0] = true;
         state->receipts[0] = model.modelAdmissionReceipt;
         state->observation = std::move(observation);
         state->pendingModelSlot = 0; state->pendingRequest = initialTicket;
@@ -473,6 +525,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::BeginRetailPageRecordPilot(render:
         state->report.producerModel = modelId;
         state->report.requestId = state->report.retailRecordRequestId = initialTicket;
         state->report.retailRecordFreshIds = 2;
+        state->report.retailDiagnosticReferenceAllocated = true;
         state->report.knownPayloadBytes += meshCharge + opCharge;
         state->lastMeshFrame = _frameCounter;
         _resourceOps.push_back(std::move(mesh));
@@ -498,7 +551,16 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
     constexpr uint64_t abortReserve = (Record::MaxMeshes + Record::MaxModels + 1) *
         sizeof(ResourceOp) + sizeof(Record) + 256;
     constexpr uint64_t workingLimit = RetailLimit - abortReserve;
-    auto current = [&]() -> GeometryPageFixtureReport { s.RefreshWorkerReport(); return r; };
+    auto current = [&]() -> GeometryPageFixtureReport {
+        s.RefreshWorkerReport();
+        r.retailWorldResidencyCycleLimit = s.reusableWorldFine ? RetailWorldResidencyCycleLimit : 1;
+        r.retailWorldResidencyReservedBytes = s.residencyReservation;
+        r.retailWorldLastRetiredMeshes = s.lastRetiredMeshes;
+        r.retailWorldCompactedMeshes = s.compactedMeshes;
+        r.retailWorldRetiredFineModels = s.retiredFineModels;
+        r.retailWorldRetirementAckRequest = s.retirementAckRequest;
+        return r;
+    };
     if (action == GeometryPageFixtureAction::SnapshotRetailRecords) return current();
     auto refusal = [&](const char* reason) {
         auto copy = current(); copy.status = GeometryReportStatus::Invalid; copy.pageWorkState = reason; return copy;
@@ -582,7 +644,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
         return true;
     };
     auto enqueueReadyHistory = [&](uint32_t slot) -> bool {
-        if (slot >= s.models.size() || !s.modelReady[slot] || !s.SourceCurrent() ||
+        if (slot >= s.models.size() || !s.ownsModels[slot] || !s.modelReady[slot] || !s.SourceCurrent() ||
             s.history.empty() || s.history.size() > Record::MaxMeshes) return false;
         std::array<Record::MeshExpectation, Record::MaxMeshes> meshes{};
         std::array<Record::ModelExpectation, Record::MaxModels> models{};
@@ -596,8 +658,11 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
         size_t modelCount = 0;
         for (size_t i = 0; i < s.models.size(); ++i)
             if (s.models[i] != UINT32_MAX)
+            {
+                if (!s.ownsModels[i]) return false;
                 models[modelCount++] = {s.models[i], s.modelReady[i] ?
                     Record::ExpectedModel::MappedValid : Record::ExpectedModel::Absent};
+            }
         std::vector<ResourceOp> staged; staged.reserve(1);
         const uint64_t extra = staged.capacity() * sizeof(ResourceOp) + sizeof(Record) + 256;
         if (r.knownPayloadBytes > workingLimit || extra > workingLimit - r.knownPayloadBytes)
@@ -634,14 +699,39 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
             { r.status = GeometryReportStatus::Pending; r.pageWorkState = "RetailAbortWaitingWorker"; return current(); }
         }
         s.decodedPage = {}; s.decodedPageCharge = 0; s.workerRequest = 0;
-        if (s.history.empty()) return failed("RetailAbortMissingHistory");
+        if (s.history.empty())
+        {
+            // The world-only path may be cancelled before its first private
+            // mesh/model is ever queued. No zero-row renderer receipt exists:
+            // this is owner cancellation of an unused producer, not a GPU ACK.
+            if (r.retailDiagnosticReferenceAllocated || r.retailRecordFreshIds ||
+                std::any_of(s.models.begin(),s.models.end(),[](uint32_t id){return id!=UINT32_MAX;}) ||
+                std::any_of(s.ownsModels.begin(),s.ownsModels.end(),[](bool owned){return owned;}) ||
+                std::any_of(s.clusterMesh.begin(),s.clusterMesh.end(),[](uint64_t id){return id!=0;}))
+                return failed("RetailAbortMissingHistory");
+            s.RefreshWorkerReport();
+            s.worker.reset(); // join before exact owned-file cleanup
+#ifdef _WIN32
+            if (!RemoveRetailFile(s.file,s.path)) return failed("RetailOwnedFileRemoveFailed");
+#endif
+            s.resident.fill(0); updateResident();
+            s.path.clear(); s.diskBase.reset(); s.admission = {};
+            s.phase = RetailPagePilotState::Phase::Aborted;
+            r.active = false; r.status = GeometryReportStatus::Ready;
+            r.pageWorkState = "RetailCancelledBeforeGpuResources";
+            r.retailRecordMeshesPresent = r.retailRecordMeshesAbsent = 0;
+            r.retailRecordModelsPresent = r.retailRecordModelsAbsent = 0;
+            return current();
+        }
         std::array<Record::MeshExpectation, Record::MaxMeshes> meshes{};
         std::array<Record::ModelExpectation, Record::MaxModels> models{};
         std::vector<ResourceOp> staged;
         staged.reserve(s.history.size() + s.models.size() + 1);
         size_t meshCount = 0, modelCount = 0;
-        for (auto model : s.models) if (model != UINT32_MAX)
+        for (size_t slot=0;slot<s.models.size();++slot) if (s.models[slot] != UINT32_MAX)
         {
+            if (!s.ownsModels[slot]) return failed("RetailAbortUnownedModel");
+            const auto model=s.models[slot];
             ResourceOp retire; retire.kind = ResourceOp::ModelRetire; retire.model = model;
             staged.push_back(std::move(retire));
             models[modelCount++] = {model, Record::ExpectedModel::Absent};
@@ -676,6 +766,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
             (s.phase == RetailPagePilotState::Phase::Failed && !s.abortRequested)) return current();
         if (action == GeometryPageFixtureAction::ReleaseRetailRecords)
         {
+            const uint32_t fineSlot=s.FineSlot();
             const bool autoRelease = _retailWorldVisible &&
                 _retailWorldVisible->residencyEnabled &&
                 _retailWorldVisible->residence == RetailWorldVisibleState::Residence::RetiringFine;
@@ -690,15 +781,17 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
                  s.visiblePhase != RetailPagePilotState::VisiblePhase::Removed &&
                  (s.visiblePhase != RetailPagePilotState::VisiblePhase::Root ||
                   s.visibleSelectedSlot != 1 || !r.retailVisibleReturned)) ||
-                s.refilled || !s.SourceCurrent() || !s.worker ||
+                (s.refilled && !s.reusableWorldFine) || !s.SourceCurrent() || !s.worker ||
                 s.worker->Snapshot().reservedBytes || s.observation ||
-                s.models[2] == UINT32_MAX || !s.modelReady[1] || !s.modelReady[2])
+                s.models[fineSlot] == UINT32_MAX || !s.ownsModels[1] || !s.ownsModels[fineSlot] ||
+                !s.modelReady[1] || !s.modelReady[fineSlot])
                 return refusal("RetailReleaseUnavailable");
             std::array<Record::MeshExpectation, Record::MaxMeshes> meshes{};
             std::array<Record::ModelExpectation, Record::MaxModels> models{};
             std::vector<ResourceOp> staged; staged.reserve(s.history.size() + 2);
-            ResourceOp retire; retire.kind = ResourceOp::ModelRetire; retire.model = s.models[2];
+            ResourceOp retire; retire.kind = ResourceOp::ModelRetire; retire.model = s.models[fineSlot];
             staged.push_back(std::move(retire));
+            uint32_t retiredMeshes=0;
             for (size_t i = 0; i < s.history.size(); ++i)
             {
                 const auto& row = s.history[i];
@@ -709,21 +802,28 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
                 {
                     ResourceOp destroy; destroy.kind = ResourceOp::MeshDestroy; destroy.mesh = row.producer;
                     staged.push_back(std::move(destroy));
+                    ++retiredMeshes;
                 }
                 meshes[i] = {row.producer, nonroot ? Record::ExpectedMesh::Absent :
                     row.present ? Record::ExpectedMesh::Present : Record::ExpectedMesh::Absent,
                     nonroot || !row.present ? row.renderer : 0};
             }
-            models[0] = {s.models[0], Record::ExpectedModel::MappedValid};
-            models[1] = {s.models[1], Record::ExpectedModel::MappedValid};
-            models[2] = {s.models[2], Record::ExpectedModel::Absent};
+            size_t modelCount=0;
+            if (s.models[0] != UINT32_MAX)
+            {
+                if (!s.ownsModels[0] || !s.modelReady[0]) return refusal("RetailReleaseUnownedReference");
+                models[modelCount++] = {s.models[0], Record::ExpectedModel::MappedValid};
+            }
+            models[modelCount++] = {s.models[1], Record::ExpectedModel::MappedValid};
+            models[modelCount++] = {s.models[fineSlot], Record::ExpectedModel::Absent};
             const uint64_t ticket = nextRequest();
             if (!ticket) return refusal("RetailReleaseRequestExhausted");
             const uint64_t extra = staged.capacity()*sizeof(ResourceOp) + sizeof(Record) + 256;
             if (r.knownPayloadBytes > workingLimit || extra > workingLimit - r.knownPayloadBytes ||
                 !enqueueRecord(std::span(meshes.data(),s.history.size()),
-                    std::span(models.data(),3),ticket,staged)) return refusal("RetailReleaseCapacity");
+                    std::span(models.data(),modelCount),ticket,staged)) return refusal("RetailReleaseCapacity");
             s.phase = RetailPagePilotState::Phase::AwaitRelease;
+            s.retiringFineSlot=fineSlot; s.retiringMeshCount=retiredMeshes; s.releaseRecordSettled=false;
             s.pendingModelSlot = UINT32_MAX;
             r.knownPayloadBytes += extra; r.status = GeometryReportStatus::Pending;
             r.pageWorkState = "RetailNonrootRetireQueued";
@@ -737,7 +837,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
                 // authenticate a source or replace the returned/literal facts.
                 if (!world->refillHandoff || world->residence != RetailWorldVisibleState::Residence::Refilling ||
                     world->phase != RetailWorldVisibleState::Phase::Restored || world->pair || world->cleanup ||
-                    world->invalidated || world->residencyCycles || !r.retailWorldRestored ||
+                    world->invalidated || world->residencyCycles >=
+                        (s.reusableWorldFine ? RetailWorldResidencyCycleLimit : 1) || !r.retailWorldRestored ||
                     !r.retailWorldReturned || r.retailWorldPagePresent || !world->fallbackPageAbsent ||
                     world->fallbackOriginalFlags != 0 || !world->fallbackRequest || !world->fallbackEpoch ||
                     world->fallbackPageBirth != world->pageBirth || world->refillAtFallback != 0 ||
@@ -768,7 +869,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
                     return refusal("RetailRefillConventionalRowsChanged");
             }
             if (s.phase != RetailPagePilotState::Phase::Released || !r.retailRecordDistinctCuts ||
-                s.refilled || !s.SourceCurrent() || s.history.size() >= Record::MaxMeshes ||
+                (s.refilled && !s.reusableWorldFine) || !s.SourceCurrent() || s.history.size() >= Record::MaxMeshes ||
                 !s.worker || s.worker->Snapshot().reservedBytes)
                 return refusal("RetailRefillUnavailable");
             s.refilled = true; s.target = RetailPagePilotState::Target::Refill;
@@ -795,7 +896,8 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
             s.phase == RetailPagePilotState::Phase::AwaitRelease ||
             s.phase == RetailPagePilotState::Phase::AwaitAbort)
         {
-            const int complete = s.phase == RetailPagePilotState::Phase::AwaitAbort && s.abortRecordSettled ?
+            const int complete = (s.phase == RetailPagePilotState::Phase::AwaitAbort && s.abortRecordSettled) ||
+                (s.phase == RetailPagePilotState::Phase::AwaitRelease && s.releaseRecordSettled) ?
                 1 : recordComplete();
             if (complete == 0) return current();
             if (complete < 0) return failed("RetailRecordRejectedOrStale");
@@ -827,12 +929,49 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
             }
             if (s.phase == RetailPagePilotState::Phase::AwaitRelease)
             {
+                s.releaseRecordSettled=true;
+                if (s.reusableWorldFine)
+                {
+                    const auto world=_retailWorldVisible;
+                    if (!world || !world->residencyEnabled || world->invalidated ||
+                        world->cleanup || world->pair ||
+                        (world->phase != RetailWorldVisibleState::Phase::Root &&
+                         world->phase != RetailWorldVisibleState::Phase::Restored))
+                    { r.pageWorkState="RetailRetireCompactionWaitingWorldAck"; return current(); }
+                    const auto debt=s.worker->Snapshot();
+                    if (debt.liveJobs || debt.queued || debt.active || debt.ready || debt.reservedBytes ||
+                        !s.decodedPage.clusters.empty() || s.pendingModelSlot != UINT32_MAX)
+                        return failed("RetailRetireCompactionOutstandingOwner");
+                    AcquireProducerWindow("retail world proved retired history compaction");
+                    if (!s.SourceCurrent() || world->invalidated || world->pair || world->cleanup ||
+                        s.retiringFineSlot != 2 || !s.ownsModels[2] || !s.modelReady[2] ||
+                        world->selectedSlot == 2 || !s.retiringMeshCount)
+                        return failed("RetailRetireCompactionAuthority");
+                    // Only complete actual absent mesh/model evidence permits
+                    // dropping history. Old handles are never queried again.
+                    s.lastRetiredMeshes=s.retiringMeshCount;
+                    s.retirementAckRequest=r.observedRequestId;
+                    ++s.retiredFineModels;
+                }
                 for (auto& row : s.history)
                     if (row.page != UINT32_MAX &&
                         std::find(s.nonrootPages.begin(),s.nonrootPages.end(),row.page) != s.nonrootPages.end())
                     { row.present = false; s.clusterMesh[row.cluster] = 0; s.clusterIndices[row.cluster] = 0; }
                 for (auto page : s.nonrootPages) s.resident[page] = 0;
-                s.modelReady[2] = false;
+                s.modelReady[s.retiringFineSlot] = false;
+                if (s.reusableWorldFine)
+                {
+                    const auto before=s.history.size();
+                    std::erase_if(s.history,[&](const RetailPagePilotState::MeshRow& row) {
+                        return !row.present && row.page != UINT32_MAX &&
+                            std::find(s.nonrootPages.begin(),s.nonrootPages.end(),row.page) != s.nonrootPages.end();
+                    });
+                    const auto removed=before-s.history.size();
+                    if (removed != s.lastRetiredMeshes) return failed("RetailRetiredHistoryCountMismatch");
+                    s.compactedMeshes+=uint32_t(removed);
+                    s.models[2]=UINT32_MAX; s.receipts[2].reset(); s.ownsModels[2]=false;
+                    s.workerRequest=0;
+                }
                 s.phase = RetailPagePilotState::Phase::Released;
                 r.status = GeometryReportStatus::Ready;
                 r.pageWorkState = "RetailNonrootRecordsAbsent";
@@ -1104,6 +1243,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageRecordPilot(Geometry
             if (!enqueueRecord(std::span(expectedMeshes.data(),selected.size()),expectedModel,ticket,staged))
                 return failed("RetailCutRecordPacketInvalid");
             s.models[slot] = modelId; s.receipts[slot] = receipt;
+            s.ownsModels[slot] = true;
             s.pendingModelSlot = slot; s.phase = RetailPagePilotState::Phase::AwaitModel;
             r.knownPayloadBytes += extra; ++r.retailRecordFreshIds;
             r.pageWorkState = "RetailCompleteCutModelQueued";
@@ -1365,7 +1505,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailPageVisiblePilot(Geometr
         uint32_t slot = UINT32_MAX;
         if (action == GeometryPageFixtureAction::RootRetailVisible) slot = 1;
         else if (action == GeometryPageFixtureAction::FineRetailVisible)
-            slot = s.refilled && s.modelReady[3] ? 3 : 2;
+            slot = s.FineSlot();
         else if (action == GeometryPageFixtureAction::FallbackRetailVisible) slot = 0;
         else return refuse("RetailVisibleActionUnsupported");
         if (!r.retailVisiblePilot || !r.retailVisibleReturned || !r.retailVisiblePresent ||
@@ -1429,6 +1569,12 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
     auto& report = p.report;
     auto current = [&]() -> GeometryPageFixtureReport {
         p.RefreshWorkerReport();
+        report.retailWorldResidencyCycleLimit=p.reusableWorldFine ? RetailWorldResidencyCycleLimit : 1;
+        report.retailWorldResidencyReservedBytes=p.residencyReservation;
+        report.retailWorldLastRetiredMeshes=p.lastRetiredMeshes;
+        report.retailWorldCompactedMeshes=p.compactedMeshes;
+        report.retailWorldRetiredFineModels=p.retiredFineModels;
+        report.retailWorldRetirementAckRequest=p.retirementAckRequest;
         if (_retailWorldVisible)
         {
             const auto& s = *_retailWorldVisible;
@@ -1711,10 +1857,11 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
     };
     auto retakeFine = [&](RetailWorldVisibleState& s) -> bool {
         if (!s.residencyEnabled || s.residence != RetailWorldVisibleState::Residence::Refilling ||
-            s.residencyCycles || s.phase != RetailWorldVisibleState::Phase::Restored ||
+            s.residencyCycles >= (p.reusableWorldFine ? RetailWorldResidencyCycleLimit : 1) ||
+            s.phase != RetailWorldVisibleState::Phase::Restored ||
             s.pair || s.cleanup || s.invalidated || s.modelRetained || !report.retailWorldRestored ||
             !report.retailWorldReturned || report.retailWorldPagePresent || !p.refilled ||
-            p.phase != RetailPagePilotState::Phase::FineReady || p.observation || !cut(3) ||
+            p.phase != RetailPagePilotState::Phase::FineReady || p.observation || !cut(p.FineSlot()) ||
             !sourceCurrent(s) || !p.worker || !serial(_nextRetailWorldPageBirth) ||
             _nextRetailWorldPageBirth >= UINT64_MAX - 1) return false;
         const auto debt = p.worker->Snapshot();
@@ -1740,10 +1887,11 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         if (_nextInstanceHandle == UINT32_MAX) return false;
         next.pageProducer = _nextInstanceHandle++; // new finite-pilot producer, not the released old free-list cell
         next.pageBirth = _nextRetailWorldPageBirth; next.pageRenderer = 0;
-        next.pageModel = model(p.models[3]);
-        next.page = s.original; next.page.model = p.models[3];
+        const uint32_t fineSlot=p.FineSlot();
+        next.pageModel = model(p.models[fineSlot]);
+        next.page = s.original; next.page.model = p.models[fineSlot];
         next.page.flags = WGR_INSTANCE_MAIN_CAMERA_ONLY;
-        next.pendingSlot = 3; next.cleanupAttempts = 0;
+        next.pendingSlot = fineSlot; next.cleanupAttempts = 0;
         next.residence = RetailWorldVisibleState::Residence::RetakingFine;
         const auto ticket = nextRequest();
         if (!ticket || next.pageModel.producerModel == UINT32_MAX)
@@ -2124,14 +2272,15 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
                 report.pageWorkState = "RetailWorldPairReturned";
                 if (s.residence == RetailWorldVisibleState::Residence::RetakingFine)
                 {
-                    if (s.selectedSlot != 3 || !s.residencyEnabled || !sourceCurrent(s))
+                    if (s.selectedSlot != p.FineSlot() || !s.residencyEnabled || !sourceCurrent(s) ||
+                        s.residencyCycles >= (p.reusableWorldFine ? RetailWorldResidencyCycleLimit : 1))
                     {
                         cancelResidency(s);
                         s.phase = RetailWorldVisibleState::Phase::Failed;
                         cleanup(s);
                         return fail("RetailWorldRefillTakeoverAuthorityRefused");
                     }
-                    s.residencyCycles = 1;
+                    ++s.residencyCycles;
                     s.residence = RetailWorldVisibleState::Residence::Complete;
                     s.autoObservationOffset = report.retailWorldAutoObservations;
                     s.autoRefineOffset = report.retailWorldAutoRefines;
@@ -2393,8 +2542,11 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
                 if (decision == HierarchicalBinaryDemand::Decision::Refused &&
                     root) return requireFine();
                 if (root && bounded && projected.euclideanPixelUpper <= Binary::CoarsenAllowance &&
-                    s.residencyEnabled && s.residence == Residence::Both && !s.residencyCycles &&
-                    p.phase == RetailPagePilotState::Phase::FineReady && !p.refilled &&
+                    s.residencyEnabled && (s.residence == Residence::Both ||
+                        (p.reusableWorldFine && s.residence == Residence::Complete)) &&
+                    s.residencyCycles < (p.reusableWorldFine ? RetailWorldResidencyCycleLimit : 1) &&
+                    p.phase == RetailPagePilotState::Phase::FineReady &&
+                    (!p.refilled || p.reusableWorldFine) &&
                     !p.nonrootPages.empty() && !p.observation && !s.pair && !s.cleanup)
                 {
                     // Only a fresh successful Root frame with its own joined
@@ -2402,6 +2554,11 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
                     // coarsen decision alone is not enough after camera motion.
                     s.residencyTriggerCamera = stable.camera.generation;
                     s.residence = Residence::RetiringFine;
+                    // A later cycle cannot borrow the previous returned Restore
+                    // witness or worker request as its own refill authority.
+                    s.refillRequest=0; s.fallbackCamera=s.fallbackRequest=s.fallbackPageBirth=s.fallbackEpoch=0;
+                    s.refillAtFallback=0; s.fallbackOriginalFlags=UINT32_MAX;
+                    s.fallbackPageAbsent=false;
                     const auto released = StepRetailPageRecordPilot(GeometryPageFixtureAction::ReleaseRetailRecords);
                     if (released.status != GeometryReportStatus::Pending)
                     {
@@ -2434,7 +2591,7 @@ Engine::GeometryPageFixtureReport EngineWgpu::StepRetailWorldVisible(GeometryPag
         uint32_t slot = UINT32_MAX;
         if (action == GeometryPageFixtureAction::RootRetailWorldVisible) slot = 1;
         else if (action == GeometryPageFixtureAction::FineRetailWorldVisible)
-            slot = p.refilled && p.modelReady[3] ? 3 : 2;
+            slot = p.FineSlot();
         else if (action != GeometryPageFixtureAction::RestoreRetailWorldVisible)
             return refuse("RetailWorldActionUnsupported");
         if (action != GeometryPageFixtureAction::RestoreRetailWorldVisible &&

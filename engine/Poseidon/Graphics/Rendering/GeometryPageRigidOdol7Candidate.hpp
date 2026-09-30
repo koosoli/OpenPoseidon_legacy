@@ -1,6 +1,7 @@
 #pragma once
 #include <Poseidon/Graphics/Rendering/GeometryPagePrototype.hpp>
 #include <Poseidon/World/Model/StaticSourceAudit.hpp>
+#include <array>
 #include <new>
 #include <string>
 #include <type_traits>
@@ -117,10 +118,27 @@ inline RigidOdol7Status Visual(const Model::LODLevel& lod,uint32_t index,
     }
     if(section.faceRangeKnown || section.startTriangle!=0 || section.triangleCount!=byteEnd)
         return RigidOdol7Status::Invalid;
+    // Source ODOL7 may retain vertices that no face uses. An unused zero
+    // normal is inert but must remain byte-exact for final Shape comparison;
+    // every vertex that can reach a triangle still needs a nonzero normal.
+    std::array<uint8_t,4096> referenced{};
+    for(const auto& face:faces) {
+        const auto mark=[&](const auto& polygon,size_t corners) {
+            for(size_t corner=0;corner<corners;++corner) {
+                const uint32_t vertex=polygon.indices[corner];
+                if(vertex>=mesh.vertices.size())return false;
+                referenced[vertex]=1;
+            }
+            return true;
+        };
+        if(face.quad ? !mark(mesh.quads[face.at],4) : !mark(mesh.triangles[face.at],3))
+            return RigidOdol7Status::Invalid;
+    }
     out.sourceLod=index;out.resolution=lod.resolution;out.sectionSpecial=special;
     out.lodNoShadow=noShadow;out.texturePath=material.texturePath;out.sourceBasis=lod.basis;
     out.vertices.reserve(mesh.vertices.size());out.positions.reserve(mesh.vertices.size());
-    for(const auto& vertex:mesh.vertices) {
+    for(size_t vertexIndex=0;vertexIndex<mesh.vertices.size();++vertexIndex) {
+        const auto& vertex=mesh.vertices[vertexIndex];
         if((uint32_t(vertex.flags)&~0x3fu) || vertex.hasTangentFrame ||
            vertex.uv1.u!=0 || vertex.uv1.v!=0)
             return RigidOdol7Status::Unsupported;
@@ -129,7 +147,8 @@ inline RigidOdol7Status Visual(const Model::LODLevel& lod,uint32_t index,
         const auto p=vertex.position,n=vertex.normal;
         if(std::abs(p.x)>10000 || std::abs(p.y)>10000 || std::abs(p.z)>10000)
             return RigidOdol7Status::Unsupported;
-        if(double(n.x)*n.x+double(n.y)*n.y+double(n.z)*n.z<=0)return RigidOdol7Status::Invalid;
+        if(referenced[vertexIndex] && double(n.x)*n.x+double(n.y)*n.y+double(n.z)*n.z<=0)
+            return RigidOdol7Status::Invalid;
         out.positions.push_back({p.x,p.y,p.z});
         out.vertices.push_back({{p.x,p.y,p.z},{n.x,n.y,n.z},vertex.uv.u,vertex.uv.v});
     }

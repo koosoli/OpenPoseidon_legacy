@@ -998,6 +998,9 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddBoolToObject(result,"retailWorldConventionalFallback",report.retailWorldConventionalFallback);
             cJSON_AddStringToObject(result,"retailWorldResidencyPhase",report.retailWorldResidencyPhase.c_str());
             PAGE_FIXTURE_NUMBER(retailWorldResidencyCycles);PAGE_FIXTURE_NUMBER(retailWorldResidencyTriggerCamera);
+            PAGE_FIXTURE_NUMBER(retailWorldResidencyCycleLimit);PAGE_FIXTURE_NUMBER(retailWorldLastRetiredMeshes);
+            PAGE_FIXTURE_NUMBER(retailWorldCompactedMeshes);PAGE_FIXTURE_NUMBER(retailWorldRetiredFineModels);
+            PAGE_FIXTURE_NUMBER(retailWorldResidencyReservedBytes);PAGE_FIXTURE_NUMBER(retailWorldRetirementAckRequest);
             PAGE_FIXTURE_NUMBER(retailWorldRetirementRequest);PAGE_FIXTURE_NUMBER(retailWorldRefillRequest);
             PAGE_FIXTURE_NUMBER(retailWorldFallbackCameraGeneration);
             PAGE_FIXTURE_NUMBER(retailWorldFallbackRequest);PAGE_FIXTURE_NUMBER(retailWorldFallbackPageBirth);
@@ -1007,6 +1010,7 @@ void RegisterScreenshot(HarnessServer& hs)
             PAGE_FIXTURE_NUMBER(retailVisibleBirth);PAGE_FIXTURE_NUMBER(retailVisibleRequest);PAGE_FIXTURE_NUMBER(retailVisibleFrame);
             PAGE_FIXTURE_NUMBER(retailVisibleRenderer);PAGE_FIXTURE_NUMBER(retailVisibleSlot);PAGE_FIXTURE_NUMBER(retailVisibleModel);
             PAGE_FIXTURE_NUMBER(retailVisibleReferenceSourceLevel);PAGE_FIXTURE_NUMBER(retailVisibleReferenceTriangles);PAGE_FIXTURE_NUMBER(retailVisibleCameraGeneration);
+            cJSON_AddBoolToObject(result,"retailDiagnosticReferenceAllocated",report.retailDiagnosticReferenceAllocated);
             PAGE_FIXTURE_NUMBER(textureReuseAllowed);PAGE_FIXTURE_NUMBER(textureReuseDenied);PAGE_FIXTURE_NUMBER(textureReuseOwnerCreates);
             PAGE_FIXTURE_NUMBER(retailSourcePrepareStatus);PAGE_FIXTURE_NUMBER(retailSourceExportStatus);
             PAGE_FIXTURE_NUMBER(retailHierarchyProductStatus);PAGE_FIXTURE_NUMBER(retailHierarchyPages);

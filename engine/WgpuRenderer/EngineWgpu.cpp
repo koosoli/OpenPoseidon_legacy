@@ -15860,6 +15860,108 @@ void EngineWgpu::WorldShapeLoaded(LODShapeWithShadow* shape)
     RegisterGpuModel(shape);
 }
 
+bool EngineWgpu::ListWorldShapeParentMaterialRoles(const LODShapeWithShadow* shape, int level,
+                                                    int section, std::vector<std::string>& names) const
+{
+    names.clear();
+    static const bool enabled = [] {
+        const char* flag = std::getenv("WGR_OBJECT_STREAM_DAYZ_OWNER_MATERIAL_STAGE");
+        return flag && std::strcmp(flag, "1") == 0;
+    }();
+    if (!enabled || !Foundation::IsMainThread() || !shape || !shape->Name() ||
+        std::strcmp(shape->Name(),
+            R"(dz\structures\residential\tenements\tenement_small.p3d)") != 0 ||
+        level < 0 || level >= shape->NLevels() || !shape->IsNormalLevel(level)) return false;
+    const Shape* lod = shape->LevelOpaque(level);
+    if (!lod || section < 0 || section >= lod->NSections()) return false;
+    const ShapeSection& source = lod->GetSection(section);
+    if ((source.properties.Special() & (IsHidden | IsHiddenProxy)) || !SectionGpuOwned(source) ||
+        !source.surfMat) return true;
+    const char* materialPath = source.surfMat->GetName().Data();
+    if (!materialPath || !*materialPath || !ContainsNoCase(materialPath, ".rvmat"))
+        return false; // an unrepresented material branch takes ordinary registration
+    try
+    {
+        // Translation is deliberately not inserted into _materialBindings: the
+        // ordinary final resolver must observe its then-current material source.
+        const auto translated = Asset::Material::LoadTranslatedMaterial(materialPath);
+        const auto declared = render::RetainedMaterialRoleDeclarations::Build(
+            &translated, {}, {});
+        if (!declared.DeclarationsComplete()) return false;
+        for (size_t i = 0; i < declared.Count(); ++i)
+        {
+            const auto& role = declared.At(i);
+            // The live resolver reads these unconditionally once the section
+            // reaches it. Layers after Mask are conditional on an actual mask
+            // handle and are not prefetched on a declaration alone.
+            if (role.condition != render::RetainedMaterialRoleDeclarations::Condition::Always)
+                continue;
+            if (role.sourceKind == render::RetainedMaterialRoleDeclarations::SourceKind::GeneratedColour)
+                continue; // final ordinary resolver owns generated upload
+            if (role.sourceKind != render::RetainedMaterialRoleDeclarations::SourceKind::PhysicalPaaPac ||
+                role.nameLength == 0) { names.clear(); return false; }
+            if (std::find(names.begin(), names.end(), role.name.data()) == names.end())
+                names.emplace_back(role.name.data(), role.nameLength);
+        }
+        return true;
+    }
+    catch (...) { names.clear(); return false; }
+}
+
+bool EngineWgpu::StageWorldShapeParentMaterialRole(const char* name, uint64_t remainingBytes,
+                                                    bool& attempted, bool& uploaded,
+                                                    uint64_t& chargedBytes)
+{
+    attempted = uploaded = false;
+    chargedBytes = 0;
+    static const bool enabled = [] {
+        const char* flag = std::getenv("WGR_OBJECT_STREAM_DAYZ_OWNER_MATERIAL_STAGE");
+        return flag && std::strcmp(flag, "1") == 0;
+    }();
+    if (!enabled || !Foundation::IsMainThread() || !_gpuDriven || !_renderer || !_wbank || !name ||
+        !*name || std::strlen(name) > render::RetainedMaterialRoleDeclarations::MaxName)
+        return false;
+    const char* extension = std::strrchr(name, '.');
+    if (!extension || (std::strcmp(extension, ".paa") && std::strcmp(extension, ".pac")))
+        return false;
+    attempted = true;
+    ArchiveSourceBinding::ModelReadScope sourcePurpose;
+    Ref<Texture> held = _wbank->Load(name);
+    auto* texture = static_cast<TextureWgpu*>(held.GetRef());
+    if (!texture || texture->IsDynamicTexture() || !texture->Name() ||
+        std::strcmp(texture->Name(), name) != 0) return false;
+    const auto before = texture->CurrentArchiveSourceBinding();
+    if (!before || !texture->SourceName()) return false;
+    const std::string sourceName = texture->SourceName();
+    QFBank* bank = QIFStreamB::AutoBank(sourceName.c_str());
+    if (!bank) return false;
+    const size_t prefix = static_cast<size_t>(bank->GetPrefix().GetLength());
+    if (prefix >= sourceName.size() ||
+        !bank->MatchesMountedMember(sourceName.c_str() + prefix, before->Request())) return false;
+    const bool residentBefore = texture->GpuHandle() != 0;
+    if (!residentBefore)
+    {
+        const uint64_t width = texture->AWidth(0), height = texture->AHeight(0);
+        if (!width || !height || width > 16384 || height > 16384) return false;
+        const uint64_t estimate = (width * height * 16 + 2) / 3;
+        if (estimate > remainingBytes) return false;
+        chargedBytes = estimate;
+    }
+    uint64_t handle = 0;
+    try { handle = texture->EnsureUploaded(); }
+    catch (...) { texture->RetryAfterFailedOwnerStage(); throw; }
+    if (!handle) { texture->RetryAfterFailedOwnerStage(); return false; }
+    // EnsureUploaded may intentionally retire the texture's Init proof. Keep
+    // the original lease alive through this check; never reconstruct it from
+    // a filename after upload.
+    if (!texture->SourceName() || sourceName != texture->SourceName() ||
+        !bank->MatchesMountedMember(sourceName.c_str() + prefix, before->Request()) ||
+        texture->GpuHandle() != handle) return false;
+    uploaded = !residentBefore;
+    if (!uploaded) chargedBytes = 0;
+    return true;
+}
+
 bool EngineWgpu::StageWorldShapeParentNormalMap(const LODShapeWithShadow* shape, int level, int section,
                                                 uint64_t remainingBytes, bool& attempted, bool& uploaded,
                                                 uint64_t& chargedBytes, std::string& uploadedName)

@@ -4,6 +4,7 @@
 #include <Poseidon/Foundation/Algorithms/Sha256.hpp>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/World/Model/ModelCache.hpp>
 #include <cstdlib>
 #include <filesystem>
 #include <cstring>
@@ -126,6 +127,31 @@ TEST_CASE("ODOL7 raw export rejects changed bindings and source face corruption"
         REQUIRE(kept.mapType==999);
     }
 }
+TEST_CASE("ODOL7 candidate preserves unused zero normals but refuses referenced zero normals", "[geometry-page-odol7-candidate]")
+{
+    Source source;
+    auto& mesh=source.model.lodLevels[0].mesh;
+    mesh.vertices.push_back(mesh.vertices[0]);
+    mesh.vertices.back().normal={0,0,0};
+    RigidOdol7Candidate candidate;
+    REQUIRE(InspectRigidOdol7Candidate(source.model,source.binding,candidate)==RigidOdol7Status::Candidate);
+    REQUIRE(candidate.visual[0].vertices.size()==5);
+    REQUIRE(candidate.visual[0].vertices.back().normal.x==0);
+    REQUIRE(candidate.visual[0].vertices.back().normal.y==0);
+    REQUIRE(candidate.visual[0].vertices.back().normal.z==0);
+    REQUIRE(candidate.visual[0].indices==std::vector<uint32_t>{0,1,2,0,2,3,0,2,3});
+
+    // The same literal zero becomes invalid as soon as an authored face uses it.
+    mesh.triangles[0].indices[0]=4;
+    RigidOdol7Candidate unchanged;unchanged.mapType=999;
+    REQUIRE(InspectRigidOdol7Candidate(source.model,source.binding,unchanged)==RigidOdol7Status::Invalid);
+    REQUIRE(unchanged.mapType==999);REQUIRE(unchanged.visual.empty());
+
+    // An invalid face index must fail before it can address the bounded mask.
+    mesh.triangles[0].indices[0]=4096;
+    REQUIRE(InspectRigidOdol7Candidate(source.model,source.binding,unchanged)==RigidOdol7Status::Invalid);
+    REQUIRE(unchanged.mapType==999);REQUIRE(unchanged.visual.empty());
+}
 TEST_CASE("ODOL7 candidate refuses special visual semantics and material mapping changes", "[geometry-page-odol7-candidate]")
 {
     Source original;
@@ -205,4 +231,50 @@ TEST_CASE("Real CWA leased ODOL7 exports bounded rock source candidates", "[.][g
     REQUIRE(model.geometryIdx==4);REQUIRE(model.geometryFireIdx==6);
     REQUIRE(model.geometryViewIdx==6);REQUIRE(model.roadwayIdx==5);
     REQUIRE(candidate.sourceRoleLods[2]==6);REQUIRE(candidate.sourceRoleLods[9]==5);
+}
+TEST_CASE("Real CWA Skala2 retains only unreferenced zero normals", "[.][geometry-page-odol7-candidate][retail]")
+{
+    const char* configured=std::getenv("WGR_TEST_COMPRESSED_MODEL_PBO");
+    REQUIRE(configured!=nullptr);
+    const std::filesystem::path archive(configured);
+    REQUIRE(std::filesystem::is_regular_file(archive));
+    Foundation::CaptureMainThread();QFBank bank;auto stem=archive;stem.replace_extension();
+    REQUIRE(bank.open(RString(stem.string().c_str())));bank.Lock();
+    struct Close {QFBank& bank;~Close(){if(bank.IsLocked())bank.Unlock();bank.close();}} close{bank};
+    auto lease=bank.CaptureCompressedReadRequest("skala2.p3d");REQUIRE(lease);
+    REQUIRE(bank.MatchesMountedCompressedMember("skala2.p3d",*lease));
+    REQUIRE(lease->DecodedBytes()==24442);
+    std::vector<char> decoded;std::string hash;REQUIRE(lease->ReadDecoded(decoded,hash));
+    REQUIRE(hash=="b92d0490860e98ffde6dc2969a248d19512f2db3de332793750cb4f6fcb2dad2");
+    REQUIRE(hash==Foundation::Sha256::Of(decoded.data(),decoded.size()));
+    std::string error;
+    auto model=ModelCache::LoadOwnedBytes(decoded.data(),decoded.size(),"data3d\\skala2.p3d",error);
+    REQUIRE(model);REQUIRE(Model::HasStaticOdolSourceAudit(*model));
+    REQUIRE(model->lodLevels.size()==6);
+    RigidOdol7SourceBinding binding;binding.decodedBytes=decoded.size();binding.canonicalPath=model->sourcePath;
+    const auto digit=[](char c){return uint8_t(c<='9'?c-'0':c-'a'+10);};
+    for(size_t i=0;i<32;++i)binding.decodedSha256[i]=uint8_t(digit(hash[i*2])*16+digit(hash[i*2+1]));
+    RigidOdol7Candidate candidate;
+    REQUIRE(InspectRigidOdol7Candidate(*model,binding,candidate)==RigidOdol7Status::Candidate);
+    REQUIRE(candidate.visual.size()==3);
+    const std::array<size_t,3> triangles{77,55,33},vertices{95,99,65};
+    const std::array<std::vector<size_t>,3> unusedZero{{{2,8,54},{2,52,63},{2,41}}};
+    for(size_t lod=0;lod<3;++lod) {
+        const auto& visual=candidate.visual[lod];
+        REQUIRE(visual.sourceLod==lod);
+        REQUIRE(visual.vertices.size()==vertices[lod]);
+        REQUIRE(visual.indices.size()==triangles[lod]*3);
+        REQUIRE(visual.texturePath=="data\\piskovec.pac");
+        std::vector<bool> referenced(vertices[lod]);
+        for(auto index:visual.indices){REQUIRE(index<referenced.size());referenced[index]=true;}
+        std::vector<size_t> zero;
+        for(size_t vertex=0;vertex<visual.vertices.size();++vertex) {
+            const auto& n=visual.vertices[vertex].normal;
+            if(n.x==0 && n.y==0 && n.z==0) {
+                REQUIRE_FALSE(referenced[vertex]);zero.push_back(vertex);
+            }
+        }
+        REQUIRE(zero==unusedZero[lod]);
+    }
+    REQUIRE(bank.MatchesMountedCompressedMember("skala2.p3d",*lease));
 }

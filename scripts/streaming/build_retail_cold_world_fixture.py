@@ -68,6 +68,9 @@ def generate(output: Path, asset: str = "skala_new", game_root: Path = None):
     if output.exists():
         raise ValueError("Output must be a new private directory")
     builder, helper = load_world_builder()
+    # Private module only: retain placements while adding a valid far camera edge.
+    # No shared fixture or installed source asset is modified.
+    builder.LAND = 64
     world = builder.build_world(model_path=model_path, model_count=1, placements=PLACEMENTS)
     builder.verify_world(world, model_path=model_path, model_count=1, placements=PLACEMENTS)
     if not world or len(world) > 128 * 1024:
@@ -80,6 +83,8 @@ def generate(output: Path, asset: str = "skala_new", game_root: Path = None):
         "asset": asset,
         "modelPath": model_path,
         "modelCount": 1,
+        "landSide": builder.LAND,
+        "cellMeters": builder.CELL,
         "placements": [
             {"id": identity, "modelIndex": 0, "position": [x, y, z]}
             for identity, x, y, z in PLACEMENTS

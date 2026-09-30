@@ -3950,7 +3950,117 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     if (_modernPendingOwnerPrimaryTextures && !primaryStepThisUpdate)
     {
         auto& pending = *_modernPendingOwnerPrimaryTextures;
-        if (pending.stageParentNormals && !pending.failed && !pending.parentNormalsDone &&
+        if (pending.stageParentMaterials && !pending.failed && !pending.parentNormalsDone &&
+            pending.next == pending.textures.size())
+        {
+            // The translated declaration is resolved once per parent section;
+            // one file-backed role is touched on a later update. This is a
+            // partial pre-touch, not a certificate of final/proxy bindings.
+            // Extra material images are bounded separately from the existing
+            // converted-shape/primary slot; this is not an all-model reservation.
+            constexpr uint64_t kMaterialBudget = 64ull * 1024 * 1024;
+            constexpr uint32_t kMaterialSectionLimit = 128;
+            constexpr uint32_t kMaterialRoleLimit = 128;
+            constexpr uint32_t kMaterialUploadLimit = 64;
+            const auto began = std::chrono::steady_clock::now();
+            if (pending.normalStarted == std::chrono::steady_clock::time_point{})
+                pending.normalStarted = began;
+            if (began - pending.normalStarted >= std::chrono::milliseconds(1500))
+            {
+                pending.failed = true;
+                pending.normalStopReason = "deadline";
+            }
+            bool attempted = false, uploaded = false;
+            uint64_t charged = 0;
+            int visitedLevel = -1, visitedSection = -1;
+            std::string roleName;
+            if (!pending.failed && pending.materialRoleNext < pending.materialRoleNames.size())
+            {
+                visitedLevel = pending.normalLevel;
+                visitedSection = pending.normalSection;
+                roleName = pending.materialRoleNames[pending.materialRoleNext++];
+                if (++pending.normalAttempts > kMaterialRoleLimit ||
+                    pending.normalUploads >= kMaterialUploadLimit)
+                {
+                    pending.failed = true;
+                    pending.normalStopReason = "role-or-upload-cap";
+                }
+                else try
+                {
+                    if (!GEngine->StageWorldShapeParentMaterialRole(roleName.c_str(),
+                            kMaterialBudget - pending.normalReservedBytes,
+                            attempted, uploaded, charged))
+                    {
+                        pending.failed = true;
+                        pending.normalStopReason = "source-or-budget";
+                    }
+                }
+                catch (...) { pending.failed = true; pending.normalStopReason = "exception"; }
+                if (uploaded)
+                {
+                    ++pending.normalUploads;
+                    pending.normalReservedBytes += charged;
+                    if (std::find(pending.normalUploadedNames.begin(),
+                            pending.normalUploadedNames.end(), roleName) == pending.normalUploadedNames.end())
+                        pending.normalUploadedNames.push_back(roleName);
+                }
+                if (pending.materialRoleNext == pending.materialRoleNames.size())
+                {
+                    pending.materialRoleNames.clear();
+                    pending.materialRoleNext = 0;
+                    ++pending.normalSection;
+                }
+            }
+            else if (!pending.failed)
+            {
+                // At most one material translation/section per update. The
+                // next update starts role uploads after this capture.
+                while (pending.normalLevel < pending.shape->NLevels())
+                {
+                    if (!pending.shape->IsNormalLevel(pending.normalLevel))
+                    { ++pending.normalLevel; pending.normalSection = 0; continue; }
+                    const Shape* lod = pending.shape->LevelOpaque(pending.normalLevel);
+                    if (!lod || pending.normalSection >= lod->NSections())
+                    { ++pending.normalLevel; pending.normalSection = 0; continue; }
+                    visitedLevel = pending.normalLevel;
+                    visitedSection = pending.normalSection;
+                    if (++pending.normalSections > kMaterialSectionLimit)
+                    { pending.failed = true; pending.normalStopReason = "section-cap"; break; }
+                    try
+                    {
+                        if (!GEngine->ListWorldShapeParentMaterialRoles(pending.shape.get(),
+                                visitedLevel, visitedSection, pending.materialRoleNames) ||
+                            pending.materialRoleNames.size() > 16) // declaration helper's fixed MaxRows
+                        { pending.failed = true; pending.normalStopReason = "declaration"; }
+                    }
+                    catch (...) { pending.failed = true; pending.normalStopReason = "exception"; }
+                    if (pending.materialRoleNames.empty()) ++pending.normalSection;
+                    break;
+                }
+                if (pending.normalLevel == pending.shape->NLevels() && !pending.failed)
+                    pending.parentNormalsDone = true;
+            }
+            const double elapsedMs = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - began).count();
+            pending.normalStepMs += elapsedMs;
+            pending.normalMaxStepMs = std::max(pending.normalMaxStepMs, elapsedMs);
+            static uint32_t materialRows = 0;
+            if (materialRows < 128)
+            {
+                ++materialRows;
+                LOG_INFO(World, "DayZ owner material stage: modelIndex={} lod={} section={} role={} attempted={} uploaded={} failed={} done={} roles={} uploads={} bytes={} stepMs={:.3f} maxStepMs={:.3f} row={} limit=128 scope=parent-declarations-partial",
+                         pending.modelIndex, visitedLevel, visitedSection, roleName, attempted,
+                         uploaded, pending.failed, pending.parentNormalsDone,
+                         pending.normalAttempts, pending.normalUploads, pending.normalReservedBytes,
+                         elapsedMs, pending.normalMaxStepMs, materialRows);
+            }
+            else if (materialRows == 128)
+            {
+                ++materialRows;
+                LOG_INFO(World, "DayZ owner material stage: step log truncated after 128 rows; no coverage inferred");
+            }
+        }
+        else if (pending.stageParentNormals && !pending.failed && !pending.parentNormalsDone &&
             pending.next == pending.textures.size())
         {
             constexpr uint64_t kNormalBudget = 64ull * 1024 * 1024;
@@ -4302,7 +4412,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             uint32_t ownerPrimaryOriginPlacement = 0;
             double ownerPrimaryStepMs = 0.0, ownerPrimaryMaxStepMs = 0.0, ownerPrimaryWaitMs = 0.0;
             bool ownerPrimaryFailed = false;
-            bool ownerNormalsEnabled = false, ownerNormalsDone = false;
+            bool ownerNormalsEnabled = false, ownerMaterialsEnabled = false, ownerNormalsDone = false;
             uint32_t ownerNormalSections = 0, ownerNormalAttempts = 0, ownerNormalUploads = 0;
             uint64_t ownerNormalBytes = 0;
             double ownerNormalStepMs = 0.0, ownerNormalMaxStepMs = 0.0;
@@ -4327,6 +4437,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 // bound without any primary upload failing. Keep the two proofs separate.
                 ownerPrimaryFailed = pending.uploadFailures != 0;
                 ownerNormalsEnabled = pending.stageParentNormals;
+                ownerMaterialsEnabled = pending.stageParentMaterials;
                 ownerNormalsDone = pending.parentNormalsDone;
                 ownerNormalSections = pending.normalSections;
                 ownerNormalAttempts = pending.normalAttempts;
@@ -4590,6 +4701,10 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         const char* flag = std::getenv("WGR_OBJECT_STREAM_DAYZ_OWNER_NORMAL_STAGE");
                         return flag && std::strcmp(flag, "1") == 0;
                     }();
+                    static const bool ownerParentMaterials = [] {
+                        const char* flag = std::getenv("WGR_OBJECT_STREAM_DAYZ_OWNER_MATERIAL_STAGE");
+                        return flag && std::strcmp(flag, "1") == 0;
+                    }();
                     if (ownerPrimaryStage && !_modernPendingOwnerPrimaryTextures && GEngine &&
                         GEngine->TextBank() && conv.model &&
                         std::strcmp((const char*)modelName,
@@ -4637,8 +4752,9 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                             pending->cellIndex = cell.index;
                             pending->reservedBytes = reservedBytes;
                             pending->textures = std::move(primary);
-                            pending->stageParentNormals = ownerParentNormals;
-                            pending->parentNormalsDone = !ownerParentNormals;
+                            pending->stageParentNormals = ownerParentNormals && !ownerParentMaterials;
+                            pending->stageParentMaterials = ownerParentMaterials;
+                            pending->parentNormalsDone = !(ownerParentNormals || ownerParentMaterials);
                             pending->started = std::chrono::steady_clock::now();
                             pending->shape.reset(conv.shape);
                             conv.shape = nullptr;
@@ -4761,6 +4877,15 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 LOG_INFO(World, "DayZ physical prefetch: admission Init identity capture overflowed 256 attempts; uncaptured sources use ordinary reads");
             if (ownerPrimaryHandoff)
             {
+                if (ownerMaterialsEnabled)
+                {
+                    LOG_INFO(World, "DayZ owner material stage: handoff modelIndex={} done={} fallback={} reason={} sections={} roleAttempts={} uploads={} stagedDistinct={} bytes={} stepMs={:.3f} maxStepMs={:.3f} admitted={} scope=parent-declarations-partial-final-registration-ordinary",
+                             placement.modelIndex, ownerNormalsDone, !ownerNormalsDone ||
+                                 !ownerNormalStopReason.empty(), ownerNormalStopReason,
+                             ownerNormalSections, ownerNormalAttempts, ownerNormalUploads,
+                             ownerNormalNames.size(), ownerNormalBytes, ownerNormalStepMs,
+                             ownerNormalMaxStepMs, admitted != nullptr);
+                }
                 if (ownerNormalsEnabled)
                 {
                     const uint32_t captured = admitted && GEngine ?
@@ -4797,6 +4922,9 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                     (const char*)modelName, textureTrace->uploads, textureTrace->preparedUploads,
                     textureTrace->successfulUploads, textureTrace->measuredReadMs,
                     textureTrace->count);
+                if (ownerMaterialsEnabled)
+                    LOG_INFO(World, "DayZ owner material stage: final-registration remainingUploads={} stagedParentUploads={} scope=includes-proxies-and-other-uncovered-roles-not-completeness",
+                             textureTrace->uploads, ownerNormalUploads);
                 for (size_t traceIndex = 0; traceIndex < textureTrace->count; ++traceIndex)
                 {
                     const auto& row = textureTrace->slowest[traceIndex];

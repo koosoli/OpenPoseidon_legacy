@@ -61,7 +61,8 @@ try{
  $proof=$generated[0]|ConvertFrom-Json
  $world=Join-Path $fixture 'retail-cold.wrp'
  if($proof.schema -ne 1 -or $proof.asset -cne $assetId -or $proof.modelPath -cne $modelPath -or
-    $proof.modelCount -ne 1 -or @($proof.placements).Count -ne 2 -or
+    $proof.modelCount -ne 1 -or $proof.landSide -ne 64 -or $proof.cellMeters -ne 50 -or
+    @($proof.placements).Count -ne 2 -or
     $proof.worldBytes -le 0 -or $proof.worldBytes -gt 131072 -or
     $proof.worldSha256 -cne (Get-FileHash -LiteralPath $world).Hash.ToLowerInvariant()){
   throw 'Retail WRP self-check/provenance mismatch'
@@ -195,6 +196,10 @@ class OutroLoose { randomSeed=3; class Intel {}; };
    throw 'Bounded world record observation timed out'
   }
   $ready=WaitRecord (RecordAction 'probeRetailColdWorld') 'pollRetailRecords'
+  if($null -eq $ready.PSObject.Properties['retailDiagnosticReferenceAllocated']){throw 'Missing private-reference ownership report'}
+  $referenceCount=if($ready.retailDiagnosticReferenceAllocated){1}else{0}
+  if(($Visible -and $referenceCount -ne 0) -or (!$Visible -and $referenceCount -ne 1)){throw 'Unexpected diagnostic reference ownership for selected mode'}
+  $initialModelCount=2+$referenceCount
   if(!$ready.retailRecordOnly -or !$ready.retailFineTriangleSetExact -or
      [uint32]$ready.fineTriangles -ne $expectedFineTriangles -or
      [uint32]$ready.coarseTriangles -eq 0 -or
@@ -202,7 +207,7 @@ class OutroLoose { randomSeed=3; class Intel {}; };
      [uint32]$ready.retailRecordMeshesPresent -lt 3 -or
      [uint32]$ready.retailRecordMeshesPresent -ne [uint32]$ready.meshCount -or
      [uint32]$ready.retailRecordMeshesAbsent -ne 0 -or
-     $ready.retailRecordModelsPresent -ne 3 -or $ready.retailRecordModelsAbsent -ne 0 -or
+     $ready.retailRecordModelsPresent -ne $initialModelCount -or $ready.retailRecordModelsAbsent -ne 0 -or
      $ready.sourceSha256 -cne $bankProof.model.decodedSha256 -or
      $ready.retailPixelSourceSha256 -cne $bankProof.texture.rawSha256 -or
      $ready.mainFrameReturned -or $ready.producerInstance -ne 4294967295){throw 'Initial actual-world records mismatch'}
@@ -329,13 +334,14 @@ class OutroLoose { randomSeed=3; class Intel {}; };
     }
     $autoTrace.steps.follow=$follow;SaveAuto
     $autoRoot=$null
-    # The fixture is a 32 x 50 m WRP. Zeus free-fly clamps its simulated
-    # position to [0, 1600] on both horizontal axes after triFreeFlyPose
+    # The fixture is a 64 x 50 m WRP. Zeus free-fly clamps its simulated
+    # position to [0, 3200] on both horizontal axes after triFreeFlyPose
     # returns OK; negative coordinates would repeat the same border view.
     # The southwest corner is the farthest in-world view of the (1200,1200)
-    # placement, with the heading aimed at the selected rock.
+    # placement, with the heading aimed at the selected rock. The elevated
+    # opposite edge adds valid horizontal distance; returned projection/ACK proves safety.
     foreach($pose in @('200 1200 30 90 -1','5 1200 30 90 -1',
-                      '5 5 30 45 -0.6')){
+                      '5 5 30 45 -0.6','3195 3195 30 225 -0.4')){
      SetAutoPose $pose
      $entry=@{pose=$pose;reports=@();startedAtUtc=[DateTime]::UtcNow.ToString('o')}
      $poseDeadline=[DateTime]::UtcNow.AddSeconds(3.5)
@@ -375,27 +381,39 @@ class OutroLoose { randomSeed=3; class Intel {}; };
      $entry.endedAtUtc=[DateTime]::UtcNow.ToString('o');$autoTrace.poses+=,$entry;SaveAuto
      if($autoRoot){break}
     }
-    if(!$autoRoot){throw 'Actual-world auto never returned a certified bounded Root across three in-world far poses'}
+    if(!$autoRoot){throw 'Actual-world auto never returned a certified bounded Root across four in-world far poses'}
     CheckStableWorld $autoRoot $identity
     $autoTrace.steps.farRoot=$autoRoot;SaveAuto
     if($Residency){
+     $autoTrace.cycles=@();$cycleStartIds=[uint32]$ready.retailRecordFreshIds
+     for($cycle=1;$cycle -le 3;$cycle++){
+     if($cycle -gt 1){SetAutoPose '3195 3195 30 225 -0.4'}
      $rootOnly=$null;$retireDeadline=[DateTime]::UtcNow.AddSeconds(20)
      do{
       $observed=WorldAction 'pollRetailWorldVisible'
       if($observed.status -notin @('Pending','Ready')){
        throw ('Actual-world Fine retirement refused: '+($observed|ConvertTo-Json -Depth 4 -Compress))
       }
-      if($observed.retailWorldResidencyPhase -ceq 'RootOnly'){
+      if($observed.retailWorldResidencyPhase -ceq 'RootOnly' -and
+         [uint32]$observed.retailWorldResidencyCycles -eq ($cycle-1)){
        if($observed.status -ne 'Ready' -or $observed.retailWorldPhase -cne 'Root' -or
           !$observed.retailWorldReturned -or !$observed.retailWorldPagePresent -or
           !$observed.retailWorldOriginalOtherViews -or !$observed.retailWorldResidencyEnabled -or
           [uint64]$observed.retailWorldRetirementRequest -eq 0 -or
           [uint64]$observed.retailWorldResidencyTriggerCamera -eq 0 -or
-          [uint32]$observed.retailRecordMeshesAbsent -eq 0 -or
-          [uint32]$observed.retailRecordMeshesPresent + [uint32]$observed.retailRecordMeshesAbsent -ne
+          [uint32]$observed.retailWorldResidencyCycleLimit -ne 3 -or
+          [uint64]$observed.retailWorldResidencyReservedBytes -eq 0 -or
+          [uint64]$observed.retailWorldRetirementAckRequest -ne
+           [uint64]$observed.retailWorldRetirementRequest -or
+          [uint32]$observed.retailWorldLastRetiredMeshes -eq 0 -or
+          [uint32]$observed.retailWorldRetiredFineModels -ne $cycle -or
+          [uint32]$observed.retailWorldCompactedMeshes -ne
+           ($cycle*[uint32]$observed.retailWorldLastRetiredMeshes) -or
+          [uint32]$observed.retailRecordMeshesAbsent -ne 0 -or
+          [uint32]$observed.retailRecordMeshesPresent + [uint32]$observed.retailWorldLastRetiredMeshes -ne
            [uint32]$ready.retailRecordMeshesPresent -or
-          [uint32]$observed.retailRecordModelsPresent -ne 2 -or
-          [uint32]$observed.retailRecordModelsAbsent -ne 1 -or
+          [uint32]$observed.retailRecordModelsPresent -ne 1 -or
+          [uint32]$observed.retailRecordModelsAbsent -ne 0 -or
           $observed.pageLiveJobs -or $observed.pageReservedBytes){
         throw ('RootOnly lacks exact retired Fine ACK: '+($observed|ConvertTo-Json -Depth 4 -Compress))
        }
@@ -423,12 +441,13 @@ class OutroLoose { randomSeed=3; class Intel {}; };
          [uint64]$observed.retailWorldRefillRequest -eq 0){
        $fallback=$observed;$autoTrace.steps.conventionalFallback=$fallback;SaveAuto
       }
-      if($observed.retailWorldResidencyPhase -ceq 'Complete'){
+      if($observed.retailWorldResidencyPhase -in @('Both','Complete') -and
+         [uint32]$observed.retailWorldResidencyCycles -eq $cycle){
        if($observed.status -ne 'Ready' -or
           $observed.retailWorldPhase -cne 'Fine' -or !$observed.retailWorldReturned -or
           !$observed.retailWorldPagePresent -or !$observed.retailWorldOriginalOtherViews -or
           !$observed.retailWorldResidencyEnabled -or
-          [uint32]$observed.retailWorldResidencyCycles -ne 1 -or
+          [uint32]$observed.retailWorldResidencyCycles -ne $cycle -or
           [uint32]$observed.retailWorldSelectedTriangles -ne $expectedFineTriangles -or
           [uint64]$observed.retailWorldFallbackCameraGeneration -le
            [uint64]$rootOnly.retailWorldCameraGeneration -or
@@ -451,11 +470,11 @@ class OutroLoose { randomSeed=3; class Intel {}; };
           [uint64]$observed.retailWorldPageModel -eq [uint64]$rootOnly.retailWorldPageModel -or
           [uint64]$observed.retailWorldOriginalInstance -ne [uint64]$identity.original -or
           [uint32]$observed.retailRecordMeshesPresent -ne [uint32]$ready.retailRecordMeshesPresent -or
-          [uint32]$observed.retailRecordMeshesAbsent -ne [uint32]$rootOnly.retailRecordMeshesAbsent -or
-          [uint32]$observed.retailRecordModelsPresent -ne 3 -or
-          [uint32]$observed.retailRecordModelsAbsent -ne 1 -or
+          [uint32]$observed.retailRecordMeshesAbsent -ne 0 -or
+          [uint32]$observed.retailRecordModelsPresent -ne $initialModelCount -or
+          [uint32]$observed.retailRecordModelsAbsent -ne 0 -or
           [uint32]$observed.retailRecordFreshIds -lt
-           ([uint32]$ready.retailRecordFreshIds + [uint32]$rootOnly.retailRecordMeshesAbsent + 1) -or
+           ($cycleStartIds + [uint32]$rootOnly.retailWorldLastRetiredMeshes + 1) -or
           $observed.pageLiveJobs -or $observed.pageReservedBytes){
         throw ('Completed residency lacks fresh Fine takeover/record ACK: '+
           ($observed|ConvertTo-Json -Depth 4 -Compress))
@@ -484,7 +503,14 @@ class OutroLoose { randomSeed=3; class Intel {}; };
               [uint64]$completed.retailWorldFallbackInstanceEpoch){
       throw 'Sampled conventional fallback differs from retained Restore ACK'
      }
-     $autoTrace.steps.freshFine=$completed;SaveAuto
+     $autoTrace.steps.freshFine=$completed
+     $autoTrace.cycles+=@{cycle=$cycle;rootOnly=$rootOnly;freshFine=$completed;
+       conventionalFallback=$autoTrace.steps.conventionalFallback};SaveAuto
+     $cycleStartIds=[uint32]$completed.retailRecordFreshIds
+     $fine=$completed
+     $identity=@{original=[uint64]$completed.retailWorldOriginalInstance;page=[uint64]$completed.retailWorldPageInstance;
+       birth=[uint64]$completed.retailWorldPageBirth;renderer=[uint64]$completed.retailWorldPageRenderer}
+     }
      $visibleTrace.images.pageFreshFine=CaptureVisible 'world-page-fresh-fine.png';SaveVisible
      $autoTrace.passed=$true;SaveAuto
     }else{
@@ -554,7 +580,7 @@ class OutroLoose { randomSeed=3; class Intel {}; };
       [uint32]$released.retailRecordMeshesAbsent -eq 0 -or
       [uint32]$released.retailRecordMeshesPresent + [uint32]$released.retailRecordMeshesAbsent -ne
        [uint32]$ready.retailRecordMeshesPresent -or
-      [uint32]$released.retailRecordModelsPresent -ne 2 -or
+      [uint32]$released.retailRecordModelsPresent -ne (1+$referenceCount) -or
       [uint32]$released.retailRecordModelsAbsent -ne 1){throw 'World record release mismatch'}
    $stillRoot=WorldAction 'pollRetailWorldVisible'
    if($stillRoot.status -ne 'Ready' -or $stillRoot.retailWorldPhase -cne 'Root' -or
@@ -566,7 +592,7 @@ class OutroLoose { randomSeed=3; class Intel {}; };
    $refilled=WaitRecord (RecordAction 'refillRetailRecords') 'pollRetailRecords'
    if([uint32]$refilled.retailRecordMeshesPresent -ne [uint32]$ready.retailRecordMeshesPresent -or
       [uint32]$refilled.retailRecordMeshesAbsent -ne [uint32]$released.retailRecordMeshesAbsent -or
-      [uint32]$refilled.retailRecordModelsPresent -ne 3 -or
+      [uint32]$refilled.retailRecordModelsPresent -ne $initialModelCount -or
       [uint32]$refilled.retailRecordModelsAbsent -ne 1 -or
       [uint32]$refilled.retailRecordFreshIds -lt
        ([uint32]$ready.retailRecordFreshIds + [uint32]$released.retailRecordMeshesAbsent + 1)){
@@ -621,12 +647,12 @@ class OutroLoose { randomSeed=3; class Intel {}; };
       [uint32]$released.retailRecordMeshesAbsent -eq 0 -or
       [uint32]$released.retailRecordMeshesPresent + [uint32]$released.retailRecordMeshesAbsent -ne
        [uint32]$ready.retailRecordMeshesPresent -or
-      [uint32]$released.retailRecordModelsPresent -ne 2 -or
+      [uint32]$released.retailRecordModelsPresent -ne (1+$referenceCount) -or
       [uint32]$released.retailRecordModelsAbsent -ne 1){throw 'World record release mismatch'}
    $refilled=WaitRecord (RecordAction 'refillRetailRecords') 'pollRetailRecords'
    if([uint32]$refilled.retailRecordMeshesPresent -ne [uint32]$ready.retailRecordMeshesPresent -or
       [uint32]$refilled.retailRecordMeshesAbsent -ne [uint32]$released.retailRecordMeshesAbsent -or
-      [uint32]$refilled.retailRecordModelsPresent -ne 3 -or
+      [uint32]$refilled.retailRecordModelsPresent -ne $initialModelCount -or
       [uint32]$refilled.retailRecordModelsAbsent -ne 1 -or
       [uint32]$refilled.retailRecordFreshIds -lt
        ([uint32]$ready.retailRecordFreshIds + [uint32]$released.retailRecordMeshesAbsent + 1)){

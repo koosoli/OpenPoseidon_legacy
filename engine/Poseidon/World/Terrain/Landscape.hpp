@@ -820,9 +820,12 @@ class Landscape : public SerializeClass
         // Optional second phase. Only the parent shape's authored NormalMap stages are
         // touched here; registration and all proxy models remain complete at handoff.
         bool stageParentNormals = false;
+        bool stageParentMaterials = false;
         bool parentNormalsDone = true;
         int normalLevel = 0;
         int normalSection = 0;
+        std::vector<std::string> materialRoleNames; // one translated section at a time
+        size_t materialRoleNext = 0;
         uint32_t normalSections = 0;
         uint32_t normalAttempts = 0;
         uint32_t normalUploads = 0;

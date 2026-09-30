@@ -213,6 +213,11 @@ class EngineWgpu : public EngineDummy
     bool StageWorldShapeParentNormalMap(const LODShapeWithShadow* shape, int level, int section,
                                        uint64_t remainingBytes, bool& attempted, bool& uploaded,
                                        uint64_t& chargedBytes, std::string& uploadedName) override;
+    bool ListWorldShapeParentMaterialRoles(const LODShapeWithShadow* shape, int level, int section,
+                                           std::vector<std::string>& names) const override;
+    bool StageWorldShapeParentMaterialRole(const char* name, uint64_t remainingBytes,
+                                           bool& attempted, bool& uploaded,
+                                           uint64_t& chargedBytes) override;
     uint32_t CountWorldShapeCapturedTextures(const LODShapeWithShadow* shape,
                                              const std::vector<std::string>& names) const override;
     void SuppressWorldObjects(bool suppress) override;

@@ -26,6 +26,7 @@ param(
     [switch]$DayZShapeSplit,
     [switch]$DayZOwnerPrimaryStage,
     [switch]$DayZOwnerNormalStage,
+    [switch]$DayZOwnerMaterialStage,
     [switch]$HotSourceProofRetirement,
     [switch]$WeakCacheProof,
     [switch]$WarmTextureProvenance,
@@ -64,6 +65,7 @@ if ($WarmEarlySlice -or $WarmPublishedReuse) { $WarmTextureProvenance = $true }
 if ($WarmTextureProvenance) { $WarmTextureJobs = $true; $WarmProfile = $true }
 if ($RequireHotSourceProofRetirement) { $HotSourceProofRetirement = $true }
 if ($HotSourceProofRetirement) { $WarmTextureJobs = $true; $WarmProfile = $true }
+if ($DayZOwnerMaterialStage) { $DayZOwnerPrimaryStage=$true; $WarmTextureJobs=$true; $DayZTextureTrace=$true }
 if ($WarmTextureJobs) { $ArchiveSourceBindings = $true }
 if ($RegistrationQuota -and $AdmissionMode -ne 'Counted') { throw 'Registration quota requires counted admission' }
 if ($PaaPreparationDiagnostics -or $PaaPreparationInflight) { $PackedTextures = $true }
@@ -99,6 +101,7 @@ if (!$env:LOCK_OWNER) {
         if ($DayZShapeSplit) { $argv += '-DayZShapeSplit' }
         if ($DayZOwnerPrimaryStage) { $argv += '-DayZOwnerPrimaryStage' }
         if ($DayZOwnerNormalStage) { $argv += '-DayZOwnerNormalStage' }
+        if ($DayZOwnerMaterialStage) { $argv += '-DayZOwnerMaterialStage' }
         if ($HotSourceProofRetirement) { $argv += '-HotSourceProofRetirement' }
         if ($WeakCacheProof) { $argv += '-WeakCacheProof' }
         if ($WarmTextureProvenance) { $argv += '-WarmTextureProvenance' }
@@ -177,6 +180,7 @@ $environment = @{
     WGR_OBJECT_STREAM_DAYZ_SHAPE_SPLIT = $(if ($DayZShapeSplit) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_OWNER_PRIMARY_STAGE = $(if ($DayZOwnerPrimaryStage) { '1' } else { '0' })
     WGR_OBJECT_STREAM_DAYZ_OWNER_NORMAL_STAGE = $(if ($DayZOwnerNormalStage) { '1' } else { '0' })
+    WGR_OBJECT_STREAM_DAYZ_OWNER_MATERIAL_STAGE = $(if ($DayZOwnerMaterialStage) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WEAK_CACHE_PROOF = $(if ($WeakCacheProof) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WARM_TEXTURE_TRACE = $(if ($WarmTextureProvenance) { '1' } else { '0' })
     WGR_OBJECT_STREAM_WARM_EARLY_SLICE = $(if ($WarmEarlySlice) { '1' } else { '0' })
@@ -240,6 +244,7 @@ try {
         dayZShapeSplit = [bool]$DayZShapeSplit
         dayZOwnerPrimaryStage = [bool]$DayZOwnerPrimaryStage
         dayZOwnerNormalStage = [bool]$DayZOwnerNormalStage
+        dayZOwnerMaterialStage = [bool]$DayZOwnerMaterialStage
         hotSourceProofRetirement = [bool]$HotSourceProofRetirement
         weakCacheProof = [bool]$WeakCacheProof; warmTextureProvenance = [bool]$WarmTextureProvenance
         warmEarlySlice = [bool]$WarmEarlySlice
@@ -365,7 +370,7 @@ try {
     # exact physical-member upload witness below. It need not run the warm queue.
     $warmJobsProven = !$WarmTextureJobs -or $RapBuildingPilot -or $RapBuildingMultistage -or ($warmStoreProven -and $warmQueueProven)
     $warmJobProof.positive=[bool]$warmJobsProven
-    $warmJobProof.required=[bool]($WarmTextureJobs -and !$TextureBirthObserver)
+    $warmJobProof.required=[bool]($WarmTextureJobs -and !$TextureBirthObserver -and !$DayZOwnerMaterialStage)
     $warmJobProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'warm-texture-job-proof.json')
     $archiveBindings = Send @{cmd = 'archive_source_bindings'}
     if ($archiveBindings.enabled -ne [bool]$ArchiveSourceBindings -or
@@ -651,6 +656,18 @@ try {
         uploads=@($normalStageUploads | ForEach-Object { $_.Line }); handoffs=@($normalStageHandoffs | ForEach-Object { $_.Line })
         scope='Exact parent NormalMap staging with a completed-model captured-binding witness; no proxy or performance acceptance.'}
     $normalStageProof | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out 'dayz-owner-normal-stage-proof.json')
+    $materialStageRows=@(Select-String -LiteralPath $log -Pattern 'DayZ owner material stage: modelIndex=\d+ lod=\d+ section=\d+ role=.* attempted=(true|false) uploaded=(true|false) failed=(true|false) done=(true|false) roles=\d+ uploads=\d+ bytes=\d+ stepMs=[0-9.]+ maxStepMs=[0-9.]+ row=\d+ limit=128 scope=parent-declarations-partial')
+    $materialStageHandoffs=@(Select-String -LiteralPath $log -Pattern 'DayZ owner material stage: handoff modelIndex=\d+ done=(true|false) fallback=(true|false) reason=.* sections=\d+ roleAttempts=\d+ uploads=\d+ stagedDistinct=\d+ bytes=\d+ stepMs=[0-9.]+ maxStepMs=[0-9.]+ admitted=true scope=parent-declarations-partial-final-registration-ordinary')
+    $materialStageFinal=@(Select-String -LiteralPath $log -Pattern 'DayZ owner material stage: final-registration remainingUploads=\d+ stagedParentUploads=\d+ scope=includes-proxies-and-other-uncovered-roles-not-completeness')
+    $materialStageProven= !$DayZOwnerMaterialStage -or ($materialStageRows.Count -gt 0 -and
+        $materialStageRows.Count -le 128 -and @($materialStageRows | Where-Object {$_.Line -match ' uploaded=true '}).Count -gt 0 -and
+        $materialStageHandoffs.Count -eq 1 -and $materialStageFinal.Count -eq 1)
+    if(!$DayZOwnerMaterialStage -and ($materialStageRows.Count -or $materialStageHandoffs.Count -or $materialStageFinal.Count)){throw 'Parent material stage unexpectedly active in OFF control'}
+    $materialStageProof=@{requested=[bool]$DayZOwnerMaterialStage;positive=[bool]$materialStageProven;
+        rows=@($materialStageRows|ForEach-Object {$_.Line});handoffs=@($materialStageHandoffs|ForEach-Object {$_.Line});
+        final=@($materialStageFinal|ForEach-Object {$_.Line});
+        scope='Partial current-source parent material-role staging only; final registration remains ordinary and may upload proxy/uncovered dependencies; no complete readiness or performance acceptance'}
+    $materialStageProof|ConvertTo-Json -Depth 5|Set-Content (Join-Path $out 'dayz-owner-material-stage-proof.json')
     # Separate warm-preflight proof still uses its own bound-upload witness.
     # The physical building pilot above uses its explicit Init/mount/layout witness.
     $preflightRawRows = @(Select-String -LiteralPath $log -Pattern 'Warm material source preflight: source=')
@@ -874,7 +891,7 @@ try {
     }
     if($TextureBirthObserver -and !$birthPositive){throw 'NotExercised: no captured physical source births remained current and resident through selected registration'}
     $birthProof=@{requested=[bool]$TextureBirthObserver;positive=$birthPositive;rows=@($birthRows|ForEach-Object {$_.Line});scope='Selected owner before-Ensure unique texture refs and Init archive leases; unknown births remain partial, no exhaustive roles or paced registration/performance claim'}
-    @{passed = [bool](($warmJobsProven -or $TextureBirthObserver) -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven -and $buildingPilotProven -and $multiStageProven -and $physicalPrefetchProven -and $proxyPrefetchProven -and $textureTraceProven -and $shapeSplitProven -and $ownerStageProven -and $normalStageProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings; framePaceTrace = [bool]$FramePaceTrace
+    @{passed = [bool](($warmJobsProven -or $TextureBirthObserver -or $DayZOwnerMaterialStage) -and $warmStageFamilyProven -and $warmPreflightProven -and $hotRetirementProven -and $coldAlphaProven -and $coldStartupProven -and $earlyProven -and $promotionProven -and $buildingPilotProven -and $multiStageProven -and $physicalPrefetchProven -and $proxyPrefetchProven -and $textureTraceProven -and $shapeSplitProven -and $ownerStageProven -and $normalStageProven -and $materialStageProven); mode = $Mode; admissionMode = $AdmissionMode; parkedTextureRefill = [bool]$ParkedTextureRefill; lazyTextureGroups = [bool]$LazyTextureGroups; warmProfile = [bool]$WarmProfile; screeningOnly = $true; performanceAccepted = $false; terrainPageTimings = [bool]$TerrainPageTimings; framePaceTrace = [bool]$FramePaceTrace
         frameCount = $count; dropped = $dropped; enginePhaseTiming = $phases; baseline = $baseline; returned = $returned
         routeSamples = $routeSamples; postExitHashes = $finalHashes
         renderCallCpuTimings = [bool]$TerrainPageTimings; renderCallCpuTimingProof = $callCpuProof
@@ -908,7 +925,9 @@ try {
         dayZOwnerPrimaryStage = [bool]$DayZOwnerPrimaryStage
         dayZOwnerPrimaryStageProof = $ownerStageProof
         dayZOwnerNormalStage = [bool]$DayZOwnerNormalStage
+        dayZOwnerMaterialStage = [bool]$DayZOwnerMaterialStage
         dayZOwnerNormalStageProof = $normalStageProof
+        dayZOwnerMaterialStageProof = $materialStageProof
         warmTextureJobs = [bool]$WarmTextureJobs; warmTextureJobProof = $warmJobProof
         requireWarmMaterialStageUpload = [bool]$RequireWarmMaterialStageUpload; warmMaterialStageFamilyProof = $warmStageFamilyProof
         coldPaaHandoff = [bool]$ColdPaaHandoff; requireColdAlphaPeek = [bool]$RequireColdAlphaPeek; coldPaaHandoffProof = $coldPaaProof
@@ -928,7 +947,7 @@ try {
     # Its positive witness is current physical births, not a new worker upload.
     # Keep the independent warm-upload result visible; explicit Require* checks
     # below still require their respective upload witnesses.
-    if (!$warmJobsProven -and !$TextureBirthObserver) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
+    if (!$warmJobsProven -and !$TextureBirthObserver -and !$DayZOwnerMaterialStage) { throw 'Warm preparation did not demonstrate an actual source-validated GPU upload; evidence retained' }
     if (!$buildingPilotProven) { throw 'NotExercised: no same-stage building physical capture and validated upload; evidence retained' }
     if (!$multiStageProven) { throw 'NotExercised: no same-stage tenement multistage physical capture and validated upload; evidence retained' }
     if (!$physicalPrefetchProven) { throw 'NotExercised: no bounded parent raP stage capture and source-validated physical Take/upload for exact tenement; evidence retained' }
@@ -936,6 +955,7 @@ try {
     if (!$textureTraceProven) { throw 'NotExercised: selected DayZ building texture trace incomplete; evidence retained' }
     if (!$shapeSplitProven) { throw 'NotExercised: selected DayZ shape install split absent; evidence retained' }
     if (!$ownerStageProven) { throw 'NotExercised: selected DayZ owner primary stage incomplete; evidence retained' }
+    if (!$materialStageProven) { throw 'NotExercised: parent material stage did not produce a current upload and ordinary final-registration handoff; evidence retained' }
     if (!$normalStageProven) { throw 'NotExercised: selected DayZ owner normal stage lacks a captured completed-model NormalMap; evidence retained' }
     if (!$warmStageFamilyProven) { throw 'Required bound worker normal/specular filename-family upload not exercised; evidence retained, no material-slot proof claimed' }
 } catch {
