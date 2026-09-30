@@ -202,12 +202,23 @@ inline MudField& GMud()
 {
     static MudField mud = [] {
         MudField field;
-        if (const char* text = std::getenv("POSEIDON_MUD_LAYER_DEPTH"))
+#ifdef _WIN32
+        char* text = nullptr;
+        size_t length = 0;
+        const bool available = _dupenv_s(&text, &length, "POSEIDON_MUD_LAYER_DEPTH") == 0;
+#else
+        const char* text = std::getenv("POSEIDON_MUD_LAYER_DEPTH");
+        const bool available = true;
+#endif
+        if (available && text)
         {
             char* end = nullptr;
             const float depth = std::strtof(text, &end);
             if (end != text && end && *end == '\0') field.SetLayerDepth(depth);
         }
+#ifdef _WIN32
+        std::free(text);
+#endif
         return field;
     }();
     return mud;
