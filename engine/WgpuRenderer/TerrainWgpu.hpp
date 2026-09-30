@@ -131,6 +131,7 @@ class TerrainWgpu : public ITerrainRenderer
     void RefreshGeographyIfChanged(const Landscape& land);
     uint32_t _geographyRevisionUploaded = 0;
     float _snowUploadTime = -1.0f;
+    double _snowUploadWallTime = -1.0;
     bool _snowWasEnabled = false;
     TerrainPuddles::Wetness _puddleWetness;
     double _geographyRefreshLastMs = 0.0;

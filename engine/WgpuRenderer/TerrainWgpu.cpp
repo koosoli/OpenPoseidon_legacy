@@ -3220,13 +3220,19 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     }
     _engine.QueueTerrainParams(_params); // REN-THR-013: queued, applied before wgr_render_frame
     const auto& snow = GSnow();
+    // The GPU window is presentation state. Paused freefly, deposit commands
+    // and roof edits must still refresh it without advancing retained snow.
+    const double snowWallTime = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
     if (camera && (snow.CoverActive() || _snowWasEnabled || uploaded) &&
-        (snow.CoverActive() != _snowWasEnabled || uploaded || _params.time < _snowUploadTime || _params.time - _snowUploadTime >= 0.1f))
+        (snow.CoverActive() != _snowWasEnabled || uploaded || _params.time < _snowUploadTime ||
+         _params.time - _snowUploadTime >= 0.1f || snowWallTime - _snowUploadWallTime >= 0.1))
     {
         auto snapshot = snow.Snapshot(camera->Position().X(), camera->Position().Z());
         MaskSnowShelters(land, snapshot);
         _engine.QueueSnow(snapshot);
         _snowUploadTime = _params.time;
+        _snowUploadWallTime = snowWallTime;
         _snowWasEnabled = snow.CoverActive();
     }
 
