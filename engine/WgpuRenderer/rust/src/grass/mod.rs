@@ -362,6 +362,9 @@ struct GrassParams {
     photo_layer_means: [f32; 128],
     wind_advection: [f32; 4],
     wind_flutter: [f32; 4],
+    // Eight source-opacity-weighted linear means of blade_tex, not tuft_tex.
+    // Renderer-private; w=0 leaves empty/unavailable layers on the sampled path.
+    blade_layer_means: [f32; 32],
 }
 
 /// Owner's fallback for photo-card coverage where the map's own clutter density
@@ -812,6 +815,7 @@ impl Grass {
             photo_layer_means: default_layer_means(),
             wind_advection: [0.0; 4],
             wind_flutter: [0.0; 4],
+            blade_layer_means: [0.0; 32],
         };
         queue.write_buffer(&grass_params, 0, bytemuck::bytes_of(&params));
 
@@ -1789,6 +1793,11 @@ impl Grass {
         };
         self.blade_view = view;
         self.have_blade_atlas = true;
+        let means = blade_atlas::blade_layer_means(width, height, layers, rgba);
+        for (layer, mean) in means.iter().enumerate() {
+            self.last_params.blade_layer_means[layer * 4..layer * 4 + 4].copy_from_slice(mean);
+        }
+        queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&self.last_params));
         let rebuild = |instances: &wgpu::Buffer, count: &wgpu::Buffer| {
             make_data_bind(
                 device,
@@ -2097,6 +2106,7 @@ impl Grass {
             photo_layer_means: self.tuft_means,
             wind_advection: self.last_params.wind_advection,
             wind_flutter: self.last_params.wind_flutter,
+            blade_layer_means: self.last_params.blade_layer_means,
         };
         self.near_grid_dim = near_grid_dim;
         self.mid_grid_dim = mid_grid_dim;
@@ -2801,6 +2811,7 @@ mod tests {
                 ("layer_bounds", std::mem::offset_of!(GrassParams, photo_layer_bounds)),
                 ("layer_means", std::mem::offset_of!(GrassParams, photo_layer_means)),
                 ("wind_advection", std::mem::offset_of!(GrassParams, wind_advection)),
+                ("blade_layer_means", std::mem::offset_of!(GrassParams, blade_layer_means)),
                 ("wind_flutter", std::mem::offset_of!(GrassParams, wind_flutter)),
             ] {
                 let field = members.iter().find(|m| m.name.as_deref() == Some(name)).unwrap();
@@ -3119,6 +3130,33 @@ mod tests {
         p.photo_alpha_cutoff = 0.5;
         p.photo_force_layer = -1.0;
         p
+    }
+
+    // Blade and photographed-tuft textures are independent resources. A later
+    // tuft upload or parameter re-derivation must not erase valid blade means.
+    #[test]
+    fn blade_means_follow_upload_and_survive_tuft_and_parameter_updates() {
+        let Some((device, queue)) = headless() else { return; };
+        let camera_layout = crate::gfx3d::camera_layout_for_tests(&device);
+        let shadow_layout = shadow_pass_layout(&device);
+        let mut composer = crate::shaders::build_composer();
+        let mut grass = Grass::new(&device, &queue, &camera_layout, &shadow_layout,
+            crate::HDR_FORMAT, 1, &mut composer);
+        assert_eq!(grass.last_params.blade_layer_means, [0.0; 32]);
+        let mut rgba = Vec::new();
+        for layer in 0..8u8 { rgba.extend_from_slice(&[32 + layer * 16, 128, 64, 128]); }
+        let expected = blade_atlas::blade_layer_means(1, 1, 8, &rgba);
+        grass.set_blade_atlas(&device, &queue, 1, 1, 8, &rgba);
+        let want: Vec<f32> = expected.into_iter().flatten().collect();
+        assert_eq!(grass.last_params.blade_layer_means.as_slice(), want.as_slice());
+        grass.set_params(&queue, params(0.05, 41.0, 1.0));
+        grass.set_tufts(&device, &queue, 1, 1, 1, &[255; 4]);
+        assert_eq!(grass.last_params.blade_layer_means.as_slice(), want.as_slice());
+        assert_ne!(&grass.last_params.photo_layer_means[..32], want.as_slice());
+        // Failed atlas replacement retains the previous valid atlas and means.
+        grass.set_blade_atlas(&device, &queue, 0, 1, 8, &[]);
+        assert_eq!(grass.last_params.blade_layer_means.as_slice(), want.as_slice());
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }
 
     // Builds every grass pipeline on a real device at 4x (alpha-to-coverage

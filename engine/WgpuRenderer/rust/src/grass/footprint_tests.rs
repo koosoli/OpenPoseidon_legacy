@@ -73,6 +73,27 @@ fn production_footprint_moments_preserve_taper_weighted_colour_dry_tips_and_ao()
         }
     }
     source.push_str("}\n");
+    let actual = gpu_probe(&device, &queue, source, references.len() * 3);
+    for (case, reference) in references.iter().enumerate() {
+        for row in 0..3 {
+            for channel in 0..4 {
+                let observed = actual[case * 3 + row][channel] as f64;
+                assert!(
+                    (observed - reference[row][channel]).abs() < 0.00005,
+                    "case={case} row={row} channel={channel}: GPU={observed}, integral={}",
+                    reference[row][channel]
+                );
+            }
+        }
+    }
+}
+
+fn gpu_probe(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    source: String,
+    rows: usize,
+) -> Vec<[f32; 4]> {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("grass production footprint moment probe"),
         source: wgpu::ShaderSource::Wgsl(Cow::Owned(source)),
@@ -85,7 +106,7 @@ fn production_footprint_moments_preserve_taper_weighted_colour_dry_tips_and_ao()
         compilation_options: Default::default(),
         cache: None,
     });
-    let size = (references.len() * 3 * 16) as u64;
+    let size = (rows * 16) as u64;
     let output = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("grass footprint output"),
         size,
@@ -122,21 +143,56 @@ fn production_footprint_moments_preserve_taper_weighted_colour_dry_tips_and_ao()
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
     let bytes = readback.slice(..).get_mapped_range();
-    let actual: &[[f32; 4]] = bytemuck::cast_slice(&bytes);
-    for (case, reference) in references.iter().enumerate() {
-        for row in 0..3 {
-            for channel in 0..4 {
-                let observed = actual[case * 3 + row][channel] as f64;
-                assert!(
-                    (observed - reference[row][channel]).abs() < 0.00005,
-                    "case={case} row={row} channel={channel}: GPU={observed}, integral={}",
-                    reference[row][channel]
-                );
-            }
-        }
-    }
+    let actual = bytemuck::cast_slice::<u8, [f32; 4]>(&bytes).to_vec();
     drop(bytes);
     readback.unmap();
+    actual
+}
+
+#[test]
+fn native_filter_preserves_close_colour_and_empty_layers_and_converges_to_the_source_mean() {
+    let Some((device, queue)) = headless() else {
+        eprintln!("No headless grass adapter; native filtering GPU probe unavailable");
+        return;
+    };
+    // Real CPU upload measurement: two soft/opaque coloured texels, with bright
+    // hidden RGB in a transparent margin. Do not substitute the tuft_tex means.
+    let mut rgba = vec![0u8; 3 * 4 * super::blade_atlas::LAYERS as usize];
+    rgba[0..4].copy_from_slice(&[128, 64, 32, 255]);
+    rgba[4..8].copy_from_slice(&[192, 128, 64, 128]);
+    rgba[8..12].copy_from_slice(&[255, 255, 255, 0]);
+    let mean = super::blade_atlas::blade_layer_means(3, 1, 8, &rgba)[0];
+    let sample = [0.9f32, 0.6, 0.3];
+    let start = SHADER.find("fn native_blade_colour(").unwrap();
+    let end = start + SHADER[start..].find('}').unwrap() + 1;
+    let mut source = SHADER[start..end].to_owned();
+    source.push_str("\n@group(0) @binding(0) var<storage, read_write> results: array<vec4<f32>>;\n@compute @workgroup_size(1) fn probe() {\n");
+    let mut expected = Vec::new();
+    for valid in [true, false] {
+        for detail in [0.0f32, 0.25, 1.0] {
+            source.push_str(&format!("results[{}] = vec4<f32>(native_blade_colour(vec3<f32>(0.9, 0.6, 0.3), vec4<f32>({:.9}, {:.9}, {:.9}, {}.0), {detail:.9}), 1.0);\n",
+                expected.len(), mean[0], mean[1], mean[2], u8::from(valid)));
+            expected.push(std::array::from_fn::<_, 3, _>(|c| {
+                if valid {
+                    mean[c] * (1.0 - detail) + sample[c] * detail
+                } else {
+                    sample[c]
+                }
+            }));
+        }
+    }
+    source.push_str("}\n");
+    let actual = gpu_probe(&device, &queue, source, expected.len());
+    for (observed, want) in actual.iter().zip(expected) {
+        for c in 0..3 {
+            assert!((observed[c] - want[c]).abs() < 1e-6);
+        }
+    }
+    // The shader applies the same ground-luminance recolouring to this filtered
+    // RGB as to the resolved atlas; alpha is still the original sampled alpha.
+    assert!(SHADER.contains("dot(blade_colour, luma)"));
+    assert!(SHADER.contains("mix(blade_colour, recoloured, clamp(grass.native2.x"));
+    assert!(SHADER.contains("grass.blade_layer_means[min(u32(in.blade_uv.z), 7u)]"));
 }
 
 #[test]

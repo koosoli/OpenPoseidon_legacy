@@ -43,6 +43,7 @@ struct GrassParams {
     layer_means: array<vec4<f32>, 32>,
     wind_advection: vec4<f32>,
     wind_flutter: vec4<f32>,
+    blade_layer_means: array<vec4<f32>, 8>,
 };
 // Must mirror grass.wgsl's 32-byte layout exactly: both shaders bind the same
 // instance buffer through the shared `data_layout`.

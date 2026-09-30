@@ -754,7 +754,41 @@ pub fn create(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::TextureView {
     })
 }
 
-/// Upload authored, opaque blade-surface images as the species array used by
+/// Mean linear colour of each uploaded blade layer, weighted by source opacity.
+/// Native PlantMat uploads contain cropped BCR RGB and OpacityMap alpha; zero
+/// alpha margins must not pull an unresolved leaf towards black (or its hidden
+/// RGB). These are NOT the separate photographed tuft atlas's measured means.
+/// Scan once on upload, using a 256-entry sRGB table and every source texel so
+/// thin stems cannot fall between a sampling stride. W=0 means no valid colour.
+pub fn blade_layer_means(width: u32, height: u32, layers: u32, rgba: &[u8]) -> [[f32; 4]; LAYERS as usize] {
+    let mut out = [[0.0; 4]; LAYERS as usize];
+    let Some(layer_bytes) = (width as usize).checked_mul(height as usize).and_then(|n| n.checked_mul(4)) else {
+        return out;
+    };
+    if layer_bytes == 0 || layers != LAYERS || layer_bytes.checked_mul(layers as usize) != Some(rgba.len()) {
+        return out;
+    }
+    let lut: [f64; 256] = std::array::from_fn(|i| {
+        let c = i as f64 / 255.0;
+        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    });
+    for (layer, mean) in rgba.chunks_exact(layer_bytes).zip(out.iter_mut()) {
+        let mut colour = [0.0f64; 3];
+        let mut opacity = 0.0f64;
+        for pixel in layer.chunks_exact(4) {
+            let weight = pixel[3] as f64;
+            if weight == 0.0 { continue; }
+            for c in 0..3 { colour[c] += lut[pixel[c] as usize] * weight; }
+            opacity += weight;
+        }
+        if opacity > 0.0 {
+            *mean = [(colour[0] / opacity) as f32, (colour[1] / opacity) as f32, (colour[2] / opacity) as f32, 1.0];
+        }
+    }
+    out
+}
+
+/// Upload authored blade-surface images as the species array used by
 /// the near LOD. The geometry remains responsible for each blade's silhouette,
 /// so this deliberately uses plain colour mips and never enables alpha tests.
 pub fn create_from_images(
@@ -834,6 +868,39 @@ pub fn create_from_images(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blade_source_means_use_all_texels_linear_colour_and_soft_opacity() {
+        let mut rgba = vec![0u8; 2 * 2 * 4 * LAYERS as usize];
+        // Thin opaque red falls between the tuft mean's stride-4 samples.
+        // Hidden green is deliberately bright but transparent; soft blue counts.
+        rgba[4..8].copy_from_slice(&[255, 0, 0, 255]);
+        rgba[8..12].copy_from_slice(&[0, 0, 255, 128]);
+        rgba[12..16].copy_from_slice(&[0, 255, 0, 0]);
+        rgba[16..20].copy_from_slice(&[0, 128, 0, 255]);
+        rgba[32..36].copy_from_slice(&[0, 0, 0, 64]); // covered black remains valid
+        let means = blade_layer_means(2, 2, LAYERS, &rgba);
+        assert!((means[0][0] - 255.0 / 383.0).abs() < 1e-6);
+        assert!((means[0][2] - 128.0 / 383.0).abs() < 1e-6);
+        assert_eq!(means[0][1], 0.0);
+        assert_eq!(means[0][3], 1.0);
+        let mid_linear = ((128.0f64 / 255.0 + 0.055) / 1.055).powf(2.4) as f32;
+        assert_eq!(means[1], [0.0, mid_linear, 0.0, 1.0]);
+        assert_eq!(means[2], [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(means[3], [0.0; 4]);
+        // Changing only fully transparent RGB cannot change a layer's colour.
+        rgba[0..4].copy_from_slice(&[255, 255, 255, 0]);
+        assert_eq!(means, blade_layer_means(2, 2, LAYERS, &rgba));
+    }
+
+    #[test]
+    fn blade_source_means_reject_empty_or_incomplete_atlases() {
+        let invalid = [[0.0; 4]; LAYERS as usize];
+        assert_eq!(blade_layer_means(0, 2, LAYERS, &[]), invalid);
+        assert_eq!(blade_layer_means(2, 2, LAYERS, &[255; 15]), invalid);
+        assert_eq!(blade_layer_means(1, 1, 1, &[255; 4]), invalid);
+        assert_eq!(blade_layer_means(1, 1, LAYERS, &[0; 32]), invalid);
+    }
 
     // The shader indexes layers by the species byte in packed.w; a mismatch
     // here would sample a nonexistent layer.

@@ -126,6 +126,8 @@ struct GrassParams {
     // change alters velocity without multiplying it by elapsed mission time.
     wind_advection: vec4<f32>,
     wind_flutter: vec4<f32>,
+    // Separate blade_tex means, linear and source-opacity weighted; w=0 invalid.
+    blade_layer_means: array<vec4<f32>, 8>,
 };
 
 // 32 bytes. `pos_seed` stays f32 for world precision; everything the compute
@@ -1534,6 +1536,12 @@ fn blade_height_ao_mean(taper: f32) -> f32 {
     return clamp(3.0 * (m2 - tail2) / (0.85 * 0.85)
         - 2.0 * (m3 - tail3) / (0.85 * 0.85 * 0.85) + tail, 0.0, 1.0);
 }
+// Preserve the authored species palette on an unresolved native ribbon. Its
+// opacity-weighted CPU mean excludes transparent margins; sampled alpha still
+// belongs to coverage and is never altered here. Empty layers retain the sample.
+fn native_blade_colour(sampled: vec3<f32>, mean: vec4<f32>, detail: f32) -> vec3<f32> {
+    return select(sampled, mix(mean.rgb, sampled, detail), mean.w > 0.0);
+}
 // End pure footprint moments.
 
 fn grass_shade(in: VsOut) -> vec4<f32> {
@@ -1562,6 +1570,11 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // positive mip bias stabilises that fine detail while keeping it readable
     // at the close ranges where this near-LOD texture is actually visible.
     let blade = textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), frame.renscale.x);
+    var blade_colour = blade.rgb;
+    if (grass.native.x > 0.0) {
+        blade_colour = native_blade_colour(blade.rgb,
+            grass.blade_layer_means[min(u32(in.blade_uv.z), 7u)], shading_detail);
+    }
     // Alpha cut-out cards: the silhouette comes from the texture, not the quad,
     // which is what buys shape variety without more geometry. It costs the early-Z
     // the solid path enjoys, so it is a toggle and not the default -- measure
@@ -1571,7 +1584,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // read as one pale wash (the owner's "grass looks flat"). Re-apply 75% of
     // the procedural root shade on top, so the Blade root shade slider governs
     // the textured near field too instead of going inert inside 35 m.
-    var textured = blade.rgb * variation * gust_highlight * mix(1.0, root, 0.75);
+    var textured = blade_colour * variation * gust_highlight * mix(1.0, root, 0.75);
     if (grass.native.x > 0.0 && grass.native2.x > 0.0) {
         // RFG-091: Reforger's blade layer is authored grey-green and takes its colour from
         // the satellite map (`SatMapLerp 0.8`). With no satellite pages on the native path,
@@ -1579,9 +1592,9 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
         // ground lends its hue and saturation.
         let luma = vec3<f32>(0.2126, 0.7152, 0.0722);
         let ground = grass.native.yzw;
-        let recoloured = ground * (dot(blade.rgb, luma) / max(dot(ground, luma), 0.02));
+        let recoloured = ground * (dot(blade_colour, luma) / max(dot(ground, luma), 0.02));
         // No root shade: the atlas tuft carries its own base darkening.
-        textured = mix(blade.rgb, recoloured, clamp(grass.native2.x, 0.0, 1.0)) * variation * gust_highlight;
+        textured = mix(blade_colour, recoloured, clamp(grass.native2.x, 0.0, 1.0)) * variation * gust_highlight;
     }
     // shape_mix.w scales the photo texture globally on top of the distance fade
     // already in blade_uv.w, so the detail can be dialled back without deleting
