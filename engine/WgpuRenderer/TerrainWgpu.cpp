@@ -601,8 +601,8 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
         }
         else if (static_cast<size_t>(i) < _enfusionGround.size())
         {
-            // Native BCRMap's source leaf was classified during material loading.
-            // Its CreateDynamic texture has no useful source name.
+            // Native palette .emat semantic identity was classified while loading;
+            // a generic inherited BCRMap must never promote grass/unknown to mud.
             if (_enfusionGround[static_cast<size_t>(i)].puddleEligible)
                 material.puddle_flags = 1u;
         }

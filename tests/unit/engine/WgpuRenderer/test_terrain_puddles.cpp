@@ -17,6 +17,23 @@ int main()
           "dirt/mystery.paa", "forest_soil_01", "mud_glass_bcr.edds", "brick_dirt_01", "clay_pebbles_01"})
         assert(!EligibleSurface(name));
 
+    // Native semantic palette identity overrides any inherited render texture.
+    // The installed integration fixture exposed BeachGrass_01 backed by dirt BCR.
+    for (const auto semantic :
+         {"Terrains/Common/Surfaces/Dirt_01.emat", "Dirt_02.emat", "Dirt_03.emat", "MudWet_01.emat", "WetMud_01.emat",
+          "SoilDark_01.emat", "Clay_01_Base.emat", "Grass/Forest/Beach/Mud_01.emat"})
+        assert(EligibleNativeSurface(semantic));
+    for (const auto semantic :
+         {"Terrains/Common/Surfaces/BeachGrass_01.emat", "Grass_03.emat", "GrassWild_01.emat",
+          "ForestConiferous_01_Base.emat", "ForestDeciduous_02.emat", "Pebbles_02.emat", "SeaBed_01.emat",
+          "mud/Unknown_01.emat", "beachgrass_mud_01.emat", "MudGrass_01.emat", "DirtAndRock.emat", "SandySoil_01.emat",
+          "RoadDirt_01.emat", "TrailDirt_01.emat", "DirtPath_01.emat", "mud/Soiled_01.emat"})
+        assert(!EligibleNativeSurface(semantic));
+    // A generic inherited BCR has no native admission authority.
+    assert(EligibleSurface("Dirt_01_BCR.edds"));
+    assert(!EligibleNativeSurface("BeachGrass_01.emat"));
+    assert(!EligibleNativeSurface("Unknown_01.emat"));
+
     Wetness wet;
     assert(wet.Update(0.0f, 1.0f) == 0.0f);
     const float filled = wet.Update(30.0f, 1.0f);

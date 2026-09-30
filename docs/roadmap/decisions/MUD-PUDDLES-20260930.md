@@ -11,8 +11,10 @@ acceptance. This decision records source implementation and CPU/shader checks on
 - Cosmetic standing-water patches on source materials explicitly identifiable as mud,
   dirt, soil or clay. Eligibility reads the **leaf**, not parent folders or pixel color.
   Hard/grass/sandy/forest/unknown mixtures are rejected. Native Enfusion eligibility is
-  recorded from the inherited BCRMap source while the material is parsed; its generated
-  GPU texture is anonymous and cannot identify the surface.
+  recorded from the semantic palette **.emat leaf**, including CamelCase mud variants,
+  while the material is parsed. Semantic hard/grass/forest/beach compounds veto admission
+  without depending on separators or casing. An inherited generic Dirt BCRMap cannot
+  override BeachGrass/Forest/unknown identity; the generated GPU texture is anonymous.
 - Legacy CfgSurfaces requires all four preblended quadrants to be eligible. Mixed and
   unknown tiles stay dry. Authored Arma terrain slot bits use the existing per-pixel LCA
   weights, normalised over **all selected source slots**, including unknown/unbound
@@ -72,6 +74,15 @@ zero-overhead or byte-identical-frame claim follows from source inspection.
   The source helper counts all six mask slots independently of residency; no change
   to the existing color denominator. A roof test also covers raw admission independently
   of zero ambient strength/high ambient floors. The terrain subset now has 18 passing tests.
+- Native identity follow-up: the integration-owned installed fixture log
+  `build/terrain-puddles/native-fixture-20260930-100657/engine.log` reported 3/22 eligible
+  entries and selected `BeachGrass_01.emat`. This invalidated the inherited-BCR admission
+  assumption; that candidate is a negative control, not accepted mud. Native eligibility
+  now requires explicit palette Mud/Dirt/Soil/Clay semantics and rejects compound beach,
+  grass, forest, rock, sand, road/path/trail identities despite inherited dirt textures.
+  Standalone tests cover this actual BeachGrass case, native Dirt_01/02/03 identities,
+  other loaded Grass/Forest/Pebbles/SeaBed leaves, unknown identity, CamelCase wet-mud
+  variants and directory-name isolation. A new installed fixture is still required.
 - `git diff --check`: clean. Cargo regenerated an unrelated two-entry CLI dependency
   lockfile difference; that file is not part of this change.
 
@@ -84,7 +95,8 @@ Existing native data is at
 `tests/perf/missions/perf_field.eden` (existing native harness).
 
 1. Enable `WGR_TERRAIN_PUDDLE_FIXTURE=1` on one load. The CPU logs material count and a
-   flat, inland, native-road-free 3x3 eligible patch as an exact freefly candidate.
+   every native semantic .emat/BCR/admission decision and a flat, inland,
+   native-road-free 3x3 eligible patch as an exact freefly candidate.
    This does not teleport the owner or assert the selected site is visually suitable.
    A roof/building can still make a logged candidate unsuitable; inspect before accepting.
 2. Reuse that exact candidate pose/light/native render settings with process-only

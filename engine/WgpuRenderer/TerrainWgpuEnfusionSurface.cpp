@@ -230,6 +230,8 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
     const bool tintOn = MiddleColorEnabled();
     const char* normalEnv = std::getenv("WGR_ENFUSION_GROUND_NORMALS");
     const bool normalsOn = normalEnv == nullptr || normalEnv[0] != '0';
+    const char* puddleFixtureEnv = std::getenv("WGR_TERRAIN_PUDDLE_FIXTURE");
+    const bool puddleFixtureLog = puddleFixtureEnv != nullptr && puddleFixtureEnv[0] == '1';
     for (int i = 0; i < layerCount; ++i)
     {
         const std::string ematPath = land.GetEnfusionSurface(i);
@@ -277,10 +279,14 @@ bool TerrainWgpu::BuildEnfusionGroundMaterials(const Landscape& land)
             ++satmap;
 
         Texture* detail = load(colour, kDetailMaxEdge);
+        const bool semanticMud = TerrainPuddles::EligibleNativeSurface(ematPath);
+        if (puddleFixtureLog)
+            LOG_INFO(Graphics, "Wgpu terrain puddle native eligibility: material={} semantic={} BCR={} eligible={}",
+                     i, ematPath, colour, semanticMud && detail != nullptr);
         if (detail == nullptr)
             continue;
         out.detail = detail;
-        out.puddleEligible = TerrainPuddles::EligibleSurface(colour);
+        out.puddleEligible = semanticMud;
         // No ScaleUV means the material never named one, and the only defensible
         // reading of that is the corpus median rather than the 12.5 m cell: 36 of the 51
         // shipped surfaces declare a scale and 20 of those declare exactly 4.
