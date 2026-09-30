@@ -105,6 +105,13 @@ wait for the authored death pose to settle, capture/compare, inspect installed
 views, clear, recapture/expire, hide/delete/save and verify fallback. Candidate
 source review and diff checks do not substitute for that installed run.
 
+Root completed the committed `77299a74` PoseidonGame/PoseidonTests build and
+deployed the matched EXE/DLL via the locked deployment script. Native
+`[corpse-pose]` tests pass **228 assertions in four cases**, with no skips.
+The rebuilt game passes normal-exit grass startup at Oliver's exact Everon
+camera. Explicit stock corpse capture and lifetime acceptance remain pending
+the isolated installed harness; this is not a completed ragdoll feature.
+
 ## Next actual articulation step
 
 After exact shared-pose equivalence is accepted, retain this same owned affine

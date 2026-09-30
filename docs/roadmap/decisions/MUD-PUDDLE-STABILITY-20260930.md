@@ -119,6 +119,35 @@ capture was run by this subagent.
 
 ## Real roof fixture still needed
 
+### Root installed camera-return diagnosis
+
+All three campaigns below use the clean installed `2a15d74e` pair, normal TCP
+exits and unchanged binary hashes. The original gates remain unchanged; failed
+campaigns remain failed in their retained `result.json`.
+
+- `zenith-return-20260930-120204-26e7e6`: Dirt return IoU 0.99894 and
+  overhead return IoU 0.97797 pass, but master-off and negative controls fail.
+- `isolated-return-20260930-121118-ae5923`: excluding grass and pinning wind,
+  cloud coverage and LOD range makes both return IoUs 1.0. Master-off and
+  negative controls still fail. Bare-ground ROIs also show process differences.
+- `fixed-uv-return-20260930-123228-02e4e3`: disabling diagnostic terrain UV
+  displacement removes the remaining master-off mismatch (mean 0.252786 versus
+  limit 0.750143). Geography seeds its terrain offsets from wall-clock RNG;
+  fixing simulation time alone does not fix those detail-texture coordinates.
+  Dirt and overhead return masks both have IoU **1.0**, with 58,862 and 44,722
+  nonempty response pixels. Static mean difference is 0.000143; Dirt return
+  mean is 0.002722; overhead return mean is zero. Dirt response is 17.7415%.
+  The negative mean passes, but its changed fraction **1.2792%** exceeds 0.5%.
+
+The negative image contains animated ocean/shore foam. Master-off changes are
+confined to sea/shore rows 144..253. Wet/dry also includes a blue ground patch
+under a bush (912 changed pixels), so ocean motion alone does not explain every
+pixel. Runtime marks BeachGrass ineligible, but the image includes adjacent
+source interpolation. A steeper, ground-only camera and source identity check
+are needed before treating that image as a pure BeachGrass exclusion test.
+No production RNG, texture detail, admission threshold or acceptance tolerance
+was changed to make the controls pass.
+
 Source inspection found no existing validated native roof-over-eligible-dirt
 fixture in the available scripts or mission evidence. The prior lighting plan's
 synthetic room validates its model-space sky bake, not these terrain pixels.

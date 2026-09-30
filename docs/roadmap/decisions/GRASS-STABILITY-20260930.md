@@ -129,6 +129,31 @@ reducing the campaign to its cheapest frame.
 
 ## Improved execution order
 
+### Native authored blade follow-up and rebuilt game
+
+The native upload now computes eight opacity-weighted linear RGB layer means
+from the actual cropped PlantMat BCR/opacity images. Fully transparent colour
+does not contribute; invalid or empty layers keep the original sampled colour.
+Only unresolved shading blends toward these means, before the existing ground
+tint and gust treatment. Coverage and geometry are unchanged. All **31** grass
+tests pass, including actual GPU helper checks and 1x/4x pipeline creation.
+
+Clean installed `2a15d74e` captures retain visible close blades at
+`9514.25 2994.25 211.72 90 -18` and populated aerial grass at
+`9514.25 2994.25 244.72 90 -86`. The latter uses wind `12 90 0.7`.
+The native ON view is darker and more coherent than OFF, while close blades
+retain their shape. Scheduled deltas do not establish a native shimmer benefit:
+the aerial >48 fractions are 1.013% ON / 0.783% OFF, including legitimate gust
+motion and different startup phases. The switch also controls unresolved normal
+lighting, so these images do not isolate the new albedo means. Retain the
+mathematically checked source change provisionally and use a frozen, zero-wind
+comparison before changing source colours in response to displayed brightness.
+
+The full rebuilt game and renderer `77299a74` pass the exact owner camera again
+(`corpse-build-regression-OwnerEveron-1-20260930-124148`): normal exit, unchanged
+pair, >48 scheduled changes 0.0781%, mean delta 2.811, mean luma 105.930.
+The native follow-up therefore preserves the demonstrated OFP aerial fix.
+
 1. Finish installed grass A/B and close-view regression checks; retain only
    demonstrated improvements. Extend to native photo grass and live varying wind.
 2. Mud puddles: independently implement a bounded terrain-material/weather
