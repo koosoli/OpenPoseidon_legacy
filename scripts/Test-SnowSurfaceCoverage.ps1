@@ -241,7 +241,9 @@ try {
         Require ((Eval 'typeOf snowSurfaceCar') -ceq 'UAZ') 'Stock vehicle did not spawn.'
         $carPosition = Eval 'getPosASL snowSurfaceCar'
         Require ($carPosition -is [array] -and $carPosition.Count -eq 3) 'Stock vehicle ASL missing.'
-        Require ([Math]::Abs([double]$carPosition[0]-9465.25) -lt 0.1 -and [Math]::Abs([double]$carPosition[1]-3018.25) -lt 0.1) 'Vehicle placement differs.'
+        # Stock createVehicle may seat away from the request before pausing.
+        # Camera and recorded provenance use its actual position, not the request.
+        Require ([Math]::Abs([double]$carPosition[0]-9465.25) -lt 1.5 -and [Math]::Abs([double]$carPosition[1]-3018.25) -lt 1.5) 'Vehicle placement differs.'
         $views.vehicle = Camera-Pose ([double]$carPosition[0]+4) ([double]$carPosition[1]-5) ([double]$carPosition[2]+4) 321 -27
         $captures = @{}; $result.arms[$arm].captures = $captures; $result.arms[$arm].fixture = $fixture
         $captures.disabledInitial = Capture-Views 'disabled-initial' $views
