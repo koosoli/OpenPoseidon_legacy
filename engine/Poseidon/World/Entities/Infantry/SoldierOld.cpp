@@ -3,6 +3,8 @@
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <limits.h>
 #include <utility>
+#include <cstdio>
+#include <cstring>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Containers/BankArray.hpp>
@@ -719,7 +721,262 @@ Man::Man(VehicleType* name, bool fullCreate)
     ScanNVG();
 }
 
-Man::~Man() {}
+Man::~Man() { ClearCorpsePose(); }
+
+namespace
+{
+// Weak entity identity only. The actual phase copies belong exclusively to Man.
+OLink<Man> g_corpsePoseOwner;
+}
+
+void Man::ClearCorpsePose() const
+{
+    _corpsePoseLease = {};
+    _corpsePosePrimary.Clear();
+    _corpsePoseSecondary.Clear();
+    _corpsePoseModel = nullptr;
+    _corpsePoseSkeleton = nullptr;
+    _corpsePoseWeights = nullptr;
+    _corpsePosePrimaryAnimation = nullptr;
+    _corpsePoseSecondaryAnimation = nullptr;
+}
+
+const char* Man::CorpsePoseRefusal() const
+{
+    if (!GWorld || GWorld->GetMode() != GModeArcade) return "local-single-player-required";
+    if (!_isDead || !IsDead() || !ShadowPoseFrozen()) return "settled-death-pose-required";
+    if (!_landContact || _waterContact || _waterBuoyancyContact || _waterDepth > 0 || _hydroWaterDepth > 0)
+        return "dry-ground-contact-required";
+    if (_hideBody != 0 || _hideBodyWanted != 0) return "hidden-or-hiding";
+    if (_ladderBuilding || GetHierachyParent()) return "attached-or-on-ladder";
+    if (!IsInLandscape() || ToDelete() || ToMoveOut()) return "removed-or-deleting";
+    if (!_shape || _primaryMove.id == MoveIdNone) return "model-or-move-unavailable";
+    return nullptr;
+}
+
+bool Man::UseCorpsePose() const
+{
+    if (!_corpsePoseLease.world || _corpsePoseBypass) return false;
+    Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
+    if (CorpsePoseRefusal() || !skeleton || _corpsePoseWeights.GetRef() != &Type()->GetWeights() ||
+        !_corpsePoseLease.Matches(GWorld, _shape.GetRef(), skeleton, skeleton->NBones(),
+                                  int(_primaryMove.id), int(_secondaryMove.id), _primaryFactor, Glob.time.toInt()) ||
+        (_corpsePosePrimary.Valid() && Type()->GetAnimation(_primaryMove.id) != _corpsePosePrimaryAnimation.GetRef()) ||
+        (_corpsePoseSecondary.Valid() && Type()->GetAnimation(_secondaryMove.id) != _corpsePoseSecondaryAnimation.GetRef()))
+    {
+        ClearCorpsePose();
+        return false;
+    }
+    return true;
+}
+
+bool Man::CaptureCorpsePose(RString& refusal)
+{
+    if (const char* reason = CorpsePoseRefusal()) { refusal = reason; return false; }
+    refusal = "blend-or-skeleton-admission";
+    if (!std::isfinite(_primaryFactor) || _primaryFactor < 0 || _primaryFactor > 1) return false;
+    Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
+    if (!skeleton || skeleton->NBones() <= 0 || skeleton->NBones() > 128) return false;
+    AffinePhasePose primary, secondary;
+    AnimationRT* primaryAnim = nullptr;
+    AnimationRT* secondaryAnim = nullptr;
+    if (_primaryFactor > 0.01f)
+    {
+        refusal = "primary-phase-admission";
+        primaryAnim = Type()->GetAnimation(_primaryMove.id);
+        if (!primaryAnim || primaryAnim->GetSkeleton() != skeleton || !primaryAnim->CapturePhasePose(primary, _primaryTime))
+            return false;
+    }
+    if (_primaryFactor < 0.99f)
+    {
+        refusal = "secondary-phase-admission";
+        secondaryAnim = Type()->GetAnimation(_secondaryMove.id);
+        if (!secondaryAnim || secondaryAnim->GetSkeleton() != skeleton || !secondaryAnim->CapturePhasePose(secondary, _secondaryTime))
+            return false;
+    }
+    const WeightInfo& weights = Type()->GetWeights();
+    int memory = _shape->FindMemoryLevel();
+    refusal = "weight-admission";
+    // Admit every special point queried in tree. Palette/proxy tails retain their
+    // existing identity fallback, while Point has no such fallback for face bones.
+    for (int level = 0; level < _shape->NLevels(); ++level)
+    {
+        Shape* shape = _shape->Level(level);
+        if (!shape) continue;
+        for (int p = 0; p < shape->NPos(); ++p)
+        {
+            const AnimationRTWeight& weight = weights[level][p];
+            for (int w = 0; w < weight.Size(); ++w)
+                if (weight[w].GetSel() < 0 || weight[w].GetSel() >= skeleton->NBones()) return false;
+            if (level == memory || shape->NPos() == 1)
+                if ((primary.Valid() && !primary.SupportsPoint(weight)) ||
+                    (secondary.Valid() && !secondary.SupportsPoint(weight)))
+                {
+                    char detail[192];
+                    std::snprintf(detail, sizeof(detail), "point-phase-range level=%d point=%d primaryMatrices=%d secondaryMatrices=%d",
+                                  level, p, primary.PhaseMatrices(), secondary.PhaseMatrices());
+                    refusal = detail;
+                    return false;
+                }
+        }
+    }
+    if (g_corpsePoseOwner && g_corpsePoseOwner.GetLink() != this) g_corpsePoseOwner->ClearCorpsePose();
+    ClearCorpsePose();
+    _corpsePosePrimary = std::move(primary);
+    _corpsePoseSecondary = std::move(secondary);
+    _corpsePoseModel = _shape;
+    _corpsePoseSkeleton = skeleton;
+    _corpsePoseWeights = &Type()->GetWeights();
+    _corpsePosePrimaryAnimation = primaryAnim;
+    _corpsePoseSecondaryAnimation = secondaryAnim;
+    _corpsePoseLease = {GWorld, _shape.GetRef(), skeleton, skeleton->NBones(),
+                        int(_primaryMove.id), int(_secondaryMove.id), Glob.time.toInt(), _primaryFactor};
+    g_corpsePoseOwner = this;
+    refusal = "";
+    return true;
+}
+
+void Man::PrepareBasePose(Matrix4Array& matrices) const
+{
+    const bool held = UseCorpsePose();
+    if (_primaryFactor > 0.01f)
+    {
+        AnimationRT* anim = Type()->GetAnimation(_primaryMove.id);
+        if (anim)
+        {
+            if (held) _corpsePosePrimary.PrepareMatrices(matrices, _primaryFactor);
+            else anim->PrepareMatrices(matrices, _primaryTime, _primaryFactor);
+        }
+    }
+    if (_primaryFactor < 0.99f)
+    {
+        AnimationRT* anim = Type()->GetAnimation(_secondaryMove.id);
+        if (anim)
+        {
+            if (held) _corpsePoseSecondary.PrepareMatrices(matrices, 1 - _primaryFactor);
+            else anim->PrepareMatrices(matrices, _secondaryTime, 1 - _primaryFactor);
+        }
+    }
+}
+
+RString Man::CompareCorpsePose() const
+{
+    if (!UseCorpsePose()) return "REFUSED corpse-compare no-valid-hold";
+    // Run the actual Man consumers twice in one main-thread command. No simulation,
+    // root transform, shared mesh animation or solver steps occur between them.
+    struct BypassReset { bool& flag; ~BypassReset() { flag = false; } } reset{_corpsePoseBypass};
+    MATRIX_4_ARRAY(authored, 128);
+    MATRIX_4_ARRAY(held, 128);
+    _corpsePoseBypass = true;
+    PrepareBasePose(authored);
+    _corpsePoseBypass = false;
+    PrepareBasePose(held);
+    bool paletteEqual = authored.Size() == held.Size();
+    for (int i = 0; i < authored.Size() && paletteEqual; ++i)
+        paletteEqual = std::memcmp(&authored[i], &held[i], sizeof(Matrix4)) == 0;
+    int points = 0, skipped = 0, proxies = 0, pointMismatch = 0, proxyMismatch = 0;
+    float maxPointError = 0;
+    const WeightInfo& weights = Type()->GetWeights();
+    for (int level = 0; level < _shape->NLevels(); ++level)
+    {
+        Shape* shape = _shape->Level(level);
+        if (!shape) continue;
+        int samples = std::min(64, shape->NPos());
+        for (int sample = 0; sample < samples; ++sample)
+        {
+            int index = sample * shape->NPos() / samples;
+            if ((_corpsePosePrimary.Valid() && !_corpsePosePrimary.SupportsPoint(weights[level][index])) ||
+                (_corpsePoseSecondary.Valid() && !_corpsePoseSecondary.SupportsPoint(weights[level][index])))
+            { ++skipped; continue; }
+            _corpsePoseBypass = true;
+            Vector3 a = AnimatePoint(level, index);
+            _corpsePoseBypass = false;
+            Vector3 b = AnimatePoint(level, index);
+            ++points;
+            if (a.X() != b.X() || a.Y() != b.Y() || a.Z() != b.Z()) ++pointMismatch;
+            maxPointError = std::max(maxPointError, (a - b).Size());
+        }
+        for (int i = 0; i < shape->NProxies(); ++i)
+        {
+            const ProxyObject& proxy = shape->Proxy(i);
+            if (proxy.selection < 0 || proxy.selection >= shape->NNamedSel() ||
+                shape->NamedSel(proxy.selection).Size() <= 0) continue;
+            const AnimationRTWeight& w = GetProxyWeights(level, proxy);
+            if (w.Size() <= 0) continue; // AnimateMatrix(selection) requires w[0].
+            _corpsePoseBypass = true;
+            Matrix4 a = AnimateProxyMatrix(level, proxy);
+            _corpsePoseBypass = false;
+            Matrix4 b = AnimateProxyMatrix(level, proxy);
+            ++proxies;
+            if (std::memcmp(&a, &b, sizeof(Matrix4)) != 0) ++proxyMismatch;
+        }
+    }
+    char result[768];
+    std::snprintf(result, sizeof(result),
+        "%s corpse-compare entity=%p model=%s paletteMatrices=%d paletteEqual=%d points=%d pointMismatch=%d "
+        "maxPointError=%.9g skippedPointTails=%d proxies=%d proxyMismatch=%d holdValid=%d",
+        paletteEqual && pointMismatch == 0 && proxyMismatch == 0 && UseCorpsePose() ? "OK" : "MISMATCH",
+        static_cast<const void*>(this), _shape->Name(), held.Size(), int(paletteEqual), points, pointMismatch,
+        maxPointError, skipped, proxies, proxyMismatch, int(UseCorpsePose()));
+    return result;
+}
+
+RString Man::CorpsePoseProbe(const char* command)
+{
+    if (!command) return "REFUSED corpse-command missing";
+    if (std::strcmp(command, "corpse-clear") == 0)
+    {
+        bool held = g_corpsePoseOwner && g_corpsePoseOwner->_corpsePoseLease.world;
+        if (g_corpsePoseOwner) g_corpsePoseOwner->ClearCorpsePose();
+        g_corpsePoseOwner = nullptr;
+        return held ? "OK corpse-clear cleared=1" : "OK corpse-clear cleared=0";
+    }
+    if (std::strcmp(command, "corpse-status") == 0 || std::strcmp(command, "corpse-compare") == 0)
+    {
+        Man* man = g_corpsePoseOwner.GetLink();
+        if (!man || !man->UseCorpsePose()) return "REFUSED corpse-status no-valid-hold";
+        if (std::strcmp(command, "corpse-compare") == 0) return man->CompareCorpsePose();
+        char result[768];
+        std::snprintf(result, sizeof(result),
+            "OK corpse-status entity=%p model=%s bones=%d primaryMatrices=%d secondaryMatrices=%d remainingMs=%d",
+            static_cast<void*>(man), man->_shape->Name(), man->_corpsePoseLease.bones,
+            man->_corpsePosePrimary.PhaseMatrices(), man->_corpsePoseSecondary.PhaseMatrices(),
+            30000 - (Glob.time.toInt() - man->_corpsePoseLease.capturedMs));
+        return result;
+    }
+    if (std::strcmp(command, "corpse-capture") != 0) return "REFUSED corpse-command unknown";
+    if (!GWorld || GWorld->GetMode() != GModeArcade || !GScene || !GScene->GetCamera())
+        return "REFUSED corpse-capture local-single-player-camera-required";
+    Man* nearest = nullptr;
+    float nearestDistance = 50 * 50;
+    int corpses = 0, eligible = 0;
+    const char* lastRefusal = "no-nearby-corpse";
+    Vector3 eye = GScene->GetCamera()->Position();
+    for (int i = 0; i < GWorld->NVehicles(); ++i)
+    {
+        Man* man = dyn_cast<Man>(GWorld->GetVehicle(i));
+        if (!man || !man->_isDead || (man->Position() - eye).SquareSize() > 50 * 50) continue;
+        ++corpses;
+        if (const char* reason = man->CorpsePoseRefusal()) { lastRefusal = reason; continue; }
+        ++eligible;
+        float distance = (man->Position() - eye).SquareSize();
+        if (distance < nearestDistance) { nearest = man; nearestDistance = distance; }
+    }
+    char result[768];
+    RString captureRefusal;
+    if (!nearest || !nearest->CaptureCorpsePose(captureRefusal))
+    {
+        std::snprintf(result, sizeof(result), "REFUSED corpse-capture entity=%p nearbyCorpses=%d eligible=%d reason=%s",
+                      static_cast<void*>(nearest), corpses, eligible, nearest ? static_cast<const char*>(captureRefusal) : lastRefusal);
+        return result;
+    }
+    std::snprintf(result, sizeof(result),
+        "OK corpse-capture entity=%p model=%s distance=%.3f nearbyCorpses=%d eligible=%d bones=%d "
+        "primaryMatrices=%d secondaryMatrices=%d expiresMs=30000 solver=none rootMotion=authored",
+        static_cast<void*>(nearest), nearest->_shape->Name(), std::sqrt(nearestDistance), corpses, eligible,
+        nearest->_corpsePoseLease.bones, nearest->_corpsePosePrimary.PhaseMatrices(), nearest->_corpsePoseSecondary.PhaseMatrices());
+    return result;
+}
 
 int Man::InsideLOD(CameraType camType) const
 {
@@ -741,6 +998,13 @@ void Man::BlendMatrix(Matrix4& mat, const Matrix4& trans, float factor) const
 
 void Man::AnimateMatrix(Matrix4& mat, const AnimationRTWeight& wgt) const
 {
+    bool held = UseCorpsePose();
+    if (held && ((_corpsePosePrimary.Valid() && !_corpsePosePrimary.SupportsMatrix(wgt)) ||
+                 (_corpsePoseSecondary.Valid() && !_corpsePoseSecondary.SupportsMatrix(wgt))))
+    {
+        ClearCorpsePose();
+        held = false;
+    }
     const ManType* type = Type();
     Matrix4 res = MZero;
     if (_primaryFactor > 0.01f)
@@ -749,7 +1013,8 @@ void Man::AnimateMatrix(Matrix4& mat, const AnimationRTWeight& wgt) const
         AnimationRT* anim = type->GetAnimation(_primaryMove.id);
         if (anim)
         {
-            anim->Matrix(res, _primaryTime, wgt);
+            if (held) _corpsePosePrimary.Matrix(res, wgt);
+            else anim->Matrix(res, _primaryTime, wgt);
         }
         res = res * _primaryFactor;
     }
@@ -759,7 +1024,8 @@ void Man::AnimateMatrix(Matrix4& mat, const AnimationRTWeight& wgt) const
         Matrix4 temp = mat;
         if (anim)
         {
-            anim->Matrix(temp, _secondaryTime, wgt);
+            if (held) _corpsePoseSecondary.Matrix(temp, wgt);
+            else anim->Matrix(temp, _secondaryTime, wgt);
         }
         res += temp * (1 - _primaryFactor);
     }
@@ -838,15 +1104,32 @@ Vector3 Man::COMPosition() const
 
 Vector3 Man::AnimatePoint(int level, int index) const
 {
+    bool held = UseCorpsePose();
     const ManType* type = Type();
     Vector3 res = VZero;
     const WeightInfo& rtw = type->GetWeights();
+    if (held && index >= 0 &&
+        ((_corpsePosePrimary.Valid() && !_corpsePosePrimary.SupportsPoint(rtw[level][index])) ||
+         (_corpsePoseSecondary.Valid() && !_corpsePoseSecondary.SupportsPoint(rtw[level][index]))))
+    {
+        ClearCorpsePose();
+        held = false;
+    }
+    auto point = [&](const AffinePhasePose& pose, AnimationRT* anim, float time)
+    {
+        if (!held) return anim->Point(rtw, _shape, level, time, index);
+        if (index < 0) return Vector3(VZero);
+        Shape* shape = _shape->LevelOpaque(level);
+        if (rtw[level][index].Size() <= 0) return Vector3(shape->Pos(index));
+        shape->SaveOriginalPos();
+        return pose.Point(rtw[level][index], shape->OrigPos(index), shape->Pos(index));
+    };
     if (_primaryFactor > 0.01f)
     {
         AnimationRT* anim = type->GetAnimation(_primaryMove.id);
         if (anim)
         {
-            res = anim->Point(rtw, _shape, level, _primaryTime, index) * _primaryFactor;
+            res = point(_corpsePosePrimary, anim, _primaryTime) * _primaryFactor;
         }
     }
     if (_primaryFactor < 0.99f)
@@ -854,7 +1137,7 @@ Vector3 Man::AnimatePoint(int level, int index) const
         AnimationRT* anim = type->GetAnimation(_secondaryMove.id);
         if (anim)
         {
-            res += anim->Point(rtw, _shape, level, _secondaryTime, index) * (1 - _primaryFactor);
+            res += point(_corpsePoseSecondary, anim, _secondaryTime) * (1 - _primaryFactor);
         }
     }
 

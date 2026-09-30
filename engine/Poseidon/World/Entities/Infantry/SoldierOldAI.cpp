@@ -3104,6 +3104,8 @@ void Man::RestoreCargoStateAfterLoad()
 
 LSError Man::Serialize(ParamArchive& ar)
 {
+    // The diagnostic hold has no savegame or network representation.
+    ClearCorpsePose();
     if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst)
     {
         _combatLaneWait.Clear();

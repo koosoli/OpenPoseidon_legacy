@@ -10,6 +10,7 @@
 #include <Poseidon/Core/DynEnum.hpp>
 
 #include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
+#include <Poseidon/World/Simulation/Animation/CorpsePose.hpp>
 #include <Poseidon/World/Simulation/EnvTracker.hpp>
 #include <Poseidon/World/Entities/Infantry/ManActs.hpp>
 #include <Poseidon/World/Entities/Infantry/Wounds.hpp>
@@ -623,6 +624,20 @@ class Man: public Person
 	float _primaryFactor; // blend weight between primary and secondary animation
 	float _primaryTime,_secondaryTime;
 
+    // PHY-040 dev proof. Owned by this corpse; absent during ordinary gameplay.
+    mutable AffinePhasePose _corpsePosePrimary, _corpsePoseSecondary;
+    mutable CorpsePoseLease _corpsePoseLease;
+    mutable Ref<LODShapeWithShadow> _corpsePoseModel;
+    mutable Ref<Skeleton> _corpsePoseSkeleton;
+    mutable Ref<WeightInfo> _corpsePoseWeights;
+    mutable Ref<AnimationRT> _corpsePosePrimaryAnimation, _corpsePoseSecondaryAnimation;
+    mutable bool _corpsePoseBypass = false;
+    const char* CorpsePoseRefusal() const;
+    bool CaptureCorpsePose(RString& refusal);
+    bool UseCorpsePose() const;
+    void PrepareBasePose(Matrix4Array& matrices) const;
+    RString CompareCorpsePose() const;
+
 	void SetPrimaryMove(MotionPathItem item);
 	bool ChangeMoveQueue(MotionPathItem item);
 	bool SetMoveQueue(MotionPathItem item, bool enableVariants);
@@ -653,6 +668,9 @@ class Man: public Person
 	Man(VehicleType *name, bool fullCreate=true);
 	~Man() override;
 
+    void ClearCorpsePose() const;
+    static RString CorpsePoseProbe(const char* command);
+
 	
 	const ManType *Type() const
 	{
@@ -674,7 +692,7 @@ class Man: public Person
 	void SetRandomLip(bool set = true) override; 
 	float GetSpeaking() const override;
 
-	void HideBody() override {_hideBodyWanted = 1;}
+	void HideBody() override {ClearCorpsePose(); _hideBodyWanted = 1;}
 	void ScanNVG();
 
 	void AddDefaultWeapons() override;

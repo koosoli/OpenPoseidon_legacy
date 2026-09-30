@@ -11,6 +11,7 @@
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
 #include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/World/Physics/LooseObjects.hpp>
 #include <Poseidon/World/Scene/MapThings.hpp>
 #include <Poseidon/World/Entities/Weapons/Penetration.hpp>
@@ -69,6 +70,16 @@ void PollHotkeys(PhysicsProbeSettings& s)
 
 void DrawPhysicsTab()
 {
+    ImGui::SeparatorText("Corpse affine pose proof (dev only)");
+    ImGui::TextDisabled("Nearest settled dry corpse within 50 m; one hold, 30 simulation seconds. No solver.");
+    static RString corpseResult = "No capture requested.";
+    if (ImGui::Button("Capture corpse pose")) corpseResult = Man::CorpsePoseProbe("corpse-capture");
+    ImGui::SameLine();
+    if (ImGui::Button("Compare authored pose")) corpseResult = Man::CorpsePoseProbe("corpse-compare");
+    ImGui::SameLine();
+    if (ImGui::Button("Clear corpse pose")) corpseResult = Man::CorpsePoseProbe("corpse-clear");
+    if (ImGui::Button("Corpse pose status")) corpseResult = Man::CorpsePoseProbe("corpse-status");
+    ImGui::TextWrapped("%s", static_cast<const char*>(corpseResult));
     ImGui::TextDisabled("Terrain painting has moved to the Map Editor tab.");
     Physics::PhysicsWorld* world = Physics::GetPhysicsWorld();
     const bool             live = world && world->IsCreated();

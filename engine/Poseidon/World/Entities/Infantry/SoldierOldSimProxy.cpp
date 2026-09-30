@@ -875,6 +875,8 @@ void Man::SetUnitPosition(UnitPosition status)
 
 void Man::ApplyAnimation(int level, RStringB move, float time)
 {
+    // An explicitly requested authored pose supersedes the diagnostic hold.
+    if (_corpsePoseLease.world) ClearCorpsePose();
     const ManType* type = Type();
     WeightInfo& weights = type->GetWeights();
     MoveId moveId = type->GetMoveId(move);
@@ -987,22 +989,7 @@ void Man::Animate(int level)
     }
     MATRIX_4_ARRAY(matrix, 128);
 
-    if (_primaryFactor > 0.01f)
-    {
-        AnimationRT* anim = type->GetAnimation(_primaryMove.id);
-        if (anim)
-        {
-            anim->PrepareMatrices(matrix, _primaryTime, _primaryFactor);
-        }
-    }
-    if (_primaryFactor < 0.99f)
-    {
-        AnimationRT* anim = type->GetAnimation(_secondaryMove.id);
-        if (anim)
-        {
-            anim->PrepareMatrices(matrix, _secondaryTime, 1 - _primaryFactor);
-        }
-    }
+    PrepareBasePose(matrix);
 
     if (matrix.Size() > 0)
     {

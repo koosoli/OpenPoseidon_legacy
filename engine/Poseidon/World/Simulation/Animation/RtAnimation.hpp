@@ -68,6 +68,7 @@ class AnimationRTWeights
 };
 
 class Skeleton;
+class AffinePhasePose;
 
 } // namespace Poseidon
 namespace Poseidon { namespace Asset { namespace Formats { struct RTMPhase; struct RTMAnimation; } } }
@@ -233,6 +234,8 @@ class AnimationRT: public RefCount, public CLDLink
 	public:
 	AnimationRT();
 	AnimationRT( const AnimationRTName &name, bool reversed=true );
+	// Dev corpse proof: copies the actual loaded phase pair, without changing playback.
+	bool CapturePhasePose(AffinePhasePose &pose, float time) const;
 	~AnimationRT() override;
 
 	void AddPreloadCount();

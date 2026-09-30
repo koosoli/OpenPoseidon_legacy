@@ -330,6 +330,8 @@ void Man::OnPositionChanged()
 
 void Man::Simulate(float deltaT, SimulationImportance prec)
 {
+    // Expiry/revival/hiding/world/model changes restore the authored path.
+    if (_corpsePoseLease.world) UseCorpsePose();
     RestoreCargoStateAfterLoad();
     if (_ladderBuilding && _ladderIndex >= 0)
     {

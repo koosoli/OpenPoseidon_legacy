@@ -8,6 +8,7 @@
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Dev/Diag/TerrainBrush.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
 #include <cstdio>
@@ -25,6 +26,7 @@ GameValue TriFreeFlyPose(const GameState*, GameValuePar arg)
 GameValue TriPhysicsShowcase(const GameState*, GameValuePar arg)
 {
     const GameStringType command = static_cast<GameStringType>(arg);
+    if (std::strncmp(command, "corpse-", 7) == 0) return GameValue(Man::CorpsePoseProbe(command));
     return GameValue(PhysicsShowcaseCommand(command) ? "OK" : "REFUSED");
 }
 

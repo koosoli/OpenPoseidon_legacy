@@ -1,5 +1,6 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
+#include <Poseidon/World/Simulation/Animation/CorpsePose.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Entities/Infantry/Head.hpp>
 #include <Poseidon/Asset/Formats/RTM/RTMReader.hpp>
@@ -1172,6 +1173,24 @@ void AnimationRT::Apply(const WeightInfo& lWeights, LODShape* lShape, int level,
     PrepareMatrices(matrix, time, 1);
 
     ApplyMatrices(lWeights, lShape, level, matrix);
+}
+
+bool AnimationRT::CapturePhasePose(AffinePhasePose& pose, float time) const
+{
+    pose.Clear();
+    if (_nPhases <= 0 || !_name.skeleton || !std::isfinite(time)) return false;
+    ScopeLock<AnimationRT> load(*this);
+    GAnimationRTCache.Load(const_cast<AnimationRT*>(this));
+    int nextIndex, prevIndex;
+    Find(nextIndex, prevIndex, time);
+    const auto& previous = _phases[prevIndex]._matrix;
+    const auto& next = _phases[nextIndex]._matrix;
+    if (previous.Size() != next.Size()) return false;
+    float nextTime = _phaseTimes[nextIndex], prevTime = _phaseTimes[prevIndex];
+    if (nextTime <= time) nextTime += 1;
+    if (prevTime > time) prevTime -= 1;
+    float interpolation = nextTime > prevTime ? (time - prevTime) / (nextTime - prevTime) : 1;
+    return pose.Capture(previous.Data(), next.Data(), previous.Size(), _name.skeleton->NBones(), interpolation);
 }
 
 void AnimationRT::PrepareMatrices(Matrix4Array& matrix, float time, float factor) const
