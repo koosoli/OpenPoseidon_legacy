@@ -32,9 +32,10 @@ tiles, any Enfusion surface table and authored A3 terrain materials fail closed.
 The pure helper is available to root's renderer source-mask publication; native
 coverage should be extended only with real per-point source masks.
 
-Contact additionally rejects submerged terrain (ground <= sea+2cm), snow cover
-above 2mm, nonfinite or steep support gradient (>0.7), boot height disagreement
-above 25cm, road objects and support above terrain+5cm. A roof alone does not
+All nine support probes additionally reject submerged terrain (ground <=
+sea+2cm), snow cover above 2mm, road objects and support above terrain+5cm.
+The centre rejects nonfinite or steep support gradient (>0.7) and boot height
+disagreement above25cm. A roof alone does not
 exclude dry sand; a raised floor does. No collision or gameplay friction is
 changed by this producer. The current sand wetness history is global cosmetic
 rain accumulation, not a spatial shelter/shore saturation simulation.

@@ -35,6 +35,16 @@ bool StampSandFootstep(const Landscape& land, Object& actor,
             const int id = land.GetTexture(cz, cx);
             if (land.GetA3TerrainMaterial(id) != nullptr ||
                 !SandSourceInterior(east / grid - cx, north / grid - cz)) return false;
+            // The raised rim and bilinear support also belong to sand. Do not
+            // stamp across a road, snow edge or submerged shore merely because
+            // the centre of the boot still has admissible support.
+            const float supportGround = land.SurfaceY(east, north);
+            if (!std::isfinite(supportGround) || supportGround <= land.GetSeaLevel() + 0.02f ||
+                GSnow().BaseDepthAt(east, north) > 0.002f) return false;
+            Object* supportRoadway = nullptr;
+            const float roadHeight = land.RoadSurfaceY(Vector3(east, supportGround + 0.5f, north),
+                nullptr, nullptr, nullptr, &supportRoadway);
+            if (supportRoadway != nullptr || !std::isfinite(roadHeight) || roadHeight > supportGround + 0.05f) return false;
             bool alreadyChecked = false;
             for (int i = 0; i < checked; ++i)
                 if (checkedX[i] == cx && checkedZ[i] == cz) alreadyChecked = true;
@@ -55,9 +65,6 @@ bool StampSandFootstep(const Landscape& land, Object& actor,
     if (!std::isfinite(ground) || ground <= land.GetSeaLevel() + 0.02f ||
         !std::isfinite(dx) || !std::isfinite(dz) || std::hypot(dx, dz) > 0.7f ||
         std::abs(foot.Y() - ground) > 0.25f || GSnow().BaseDepthAt(foot.X(), foot.Z()) > 0.002f) return false;
-    Object* roadway = nullptr;
-    const float support = land.RoadSurfaceY(foot + Vector3(0, 0.5f, 0), nullptr, nullptr, nullptr, &roadway);
-    if (roadway != nullptr || !std::isfinite(support) || support > ground + 0.05f) return false;
     const bool changed = sand.StampBoot(foot.X(), foot.Z(), direction.X(), direction.Z(),
                                        sand.ContactDepth(), sand.ContactRim());
     static const bool trace = [] {
