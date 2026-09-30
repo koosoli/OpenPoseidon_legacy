@@ -446,13 +446,18 @@ TEST_CASE("Model DDC: FileServer bytes, not a different mounted member, determin
 
     redirect->selected = selectedModel;
     ModelCache firstCache;
-    auto first = firstCache.load(virtualPath);
+    std::shared_ptr<const ModelCompressedSourceBirth> parserBirth;
+    auto first = firstCache.load(virtualPath, &parserBirth);
     REQUIRE(first);
+    REQUIRE_FALSE(parserBirth); // a same-named bank is not the selected parser buffer's birth
     REQUIRE(ModelDerivedCache::Instance().GetStats().misses == 1);
     redirect->selected = bankModel;
     ModelCache secondCache;
-    auto second = secondCache.load(virtualPath);
+    auto second = secondCache.load(virtualPath, &parserBirth);
     REQUIRE(second);
+    REQUIRE_FALSE(parserBirth);
+    REQUIRE(secondCache.load(virtualPath, &parserBirth) == second);
+    REQUIRE_FALSE(parserBirth); // in-memory hits never mint source authority
     REQUIRE(ModelDerivedCache::Instance().GetStats().hits == 0);
     REQUIRE(ModelDerivedCache::Instance().GetStats().misses == 2);
     REQUIRE(ModelBlob::Serialize(*first) != ModelBlob::Serialize(*second));

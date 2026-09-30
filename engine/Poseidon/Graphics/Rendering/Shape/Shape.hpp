@@ -27,6 +27,8 @@ namespace Poseidon { namespace Model { struct Model; namespace ShapeAdapter {
 namespace Poseidon
 {
 
+class ModelCompressedSourceBirth;
+
 #ifdef _MSC_VER
 	#pragma warning( disable: 4355 )
 #endif
@@ -1139,6 +1141,10 @@ class LODShapeWithShadow: public LODShape
 {
 	private:
 	friend class ShapeBank;
+	// Optional exact cold parser birth. Cached/prepared/legacy Shapes never gain
+	// one retrospectively; the live Shape owns its physical archive lease.
+	std::shared_ptr<const ModelCompressedSourceBirth> _compressedModelSourceBirth;
+	uint64_t _compressedModelSourceBirthId = 0;
 	enum class LogicalVisualState : uint8_t { None, Deferred, Promoting };
 	LogicalVisualState _logicalVisualState = LogicalVisualState::None;
 	bool _logicalWorldModel = false;
@@ -1149,6 +1155,10 @@ class LODShapeWithShadow: public LODShape
 	Ref<LODShape> _destroyedShadow;
 
 	public:
+	const std::shared_ptr<const ModelCompressedSourceBirth>& GetCompressedModelSourceBirth() const noexcept
+	{ return _compressedModelSourceBirth; }
+	uint64_t GetCompressedModelSourceBirthId() const noexcept
+	{ return _compressedModelSourceBirthId; }
 	bool DeferredVisualRendering() const { return _logicalVisualState != LogicalVisualState::None; }
 	LODShapeWithShadow();
 	LODShapeWithShadow

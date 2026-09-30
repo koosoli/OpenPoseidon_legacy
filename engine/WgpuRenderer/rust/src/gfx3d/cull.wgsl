@@ -61,6 +61,7 @@ struct Instance {
 };
 
 const INST_MAIN_CAMERA_ONLY: u32 = 32u; // WGR_INSTANCE_MAIN_CAMERA_ONLY
+const INST_OTHER_VIEWS_ONLY: u32 = 64u; // WGR_INSTANCE_OTHER_VIEWS_ONLY
 const CULL_VIEW_MAIN_CAMERA: u32 = 2u;  // only main prepass/color setters grant this
 
 struct Model {
@@ -174,6 +175,13 @@ fn classify(idx: u32) -> CullResult {
     // COUNT and SCATTER both pass through classify, so they exclude it alike.
     if ((inst.flags & INST_MAIN_CAMERA_ONLY) != 0u &&
         (cull.debug_flags & CULL_VIEW_MAIN_CAMERA) == 0u) {
+        return res;
+    }
+    // The original remains in every view without positive main-camera
+    // authority, including future/unknown views. Conflicting 32|64 bits
+    // fail closed because one of these two predicates rejects every view.
+    if ((inst.flags & INST_OTHER_VIEWS_ONLY) != 0u &&
+        (cull.debug_flags & CULL_VIEW_MAIN_CAMERA) != 0u) {
         return res;
     }
     // Removed static slots are marked model = 0xFFFFFFFF (a free-list hole); this also

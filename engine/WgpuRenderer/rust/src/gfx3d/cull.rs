@@ -13,6 +13,7 @@ use std::sync::mpsc;
 use std::cell::{Cell, RefCell};
 
 const INSTANCE_MAIN_CAMERA_ONLY: u32 = 32; // WGR_INSTANCE_MAIN_CAMERA_ONLY
+const INSTANCE_OTHER_VIEWS_ONLY: u32 = 64; // WGR_INSTANCE_OTHER_VIEWS_ONLY
 const CULL_VIEW_MAIN_CAMERA: u32 = 2; // positive authority, never inferred from an unknown view
 
 // --- GPU buffer layouts (the CPU side of the structs in cull.wgsl) ---
@@ -5724,6 +5725,7 @@ pub(crate) mod tests {
         let lods = [LodGpu { resolution: 0.0, section_base: 0, section_count: 1, is_decal: 0 }];
         let materials = [SectionMaterialGpu::zeroed()];
         let page_model = cull.register_model(1.0, &lods, &sections, &materials);
+        let source_model = cull.register_model(1.0, &lods, &sections, &materials);
         let control_model = cull.register_model(1.0, &lods, &sections, &materials);
         let make = |model, flags| InstanceGpu {
             world: Mat4::IDENTITY.to_cols_array(), center: [0.0, 0.0, 0.0, 1.0],
@@ -5731,8 +5733,11 @@ pub(crate) mod tests {
             conform0: [0.0; 4], conform1: [0.0; 4], conform2: [0.0; 4],
         };
         let page = raw_slot(cull.instance_add(make(page_model, INSTANCE_MAIN_CAMERA_ONLY)));
+        let source = raw_slot(cull.instance_add(make(source_model, INSTANCE_OTHER_VIEWS_ONLY)));
         let control = raw_slot(cull.instance_add(make(control_model, 0)));
-        let mut params = CullParamsGpu::zeroed(); // zero planes include both instances
+        let conflicting = raw_slot(cull.instance_add(make(page_model,
+            INSTANCE_MAIN_CAMERA_ONLY | INSTANCE_OTHER_VIEWS_ONLY)));
+        let mut params = CullParamsGpu::zeroed(); // zero planes include every instance
         params.objects_z2 = 100.0;
         params.lod_scale = 1.0;
         params.lod_inv_width = 1.0;
@@ -5756,6 +5761,8 @@ pub(crate) mod tests {
         assert_eq!(cull.shadow_views[0].params.debug_flags & CULL_VIEW_MAIN_CAMERA, 0);
         assert_eq!(cull.reflection_view.as_ref().unwrap().params.debug_flags & CULL_VIEW_MAIN_CAMERA, 0);
         assert_eq!(cull.sky_views[gi].params.debug_flags & CULL_VIEW_MAIN_CAMERA, 0);
+        // A view without positive main-camera authority is also the fail-closed
+        // answer for a future/unknown view: source remains, page does not.
 
         let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         cull.begin_frame_stats(&mut enc);
@@ -5789,8 +5796,8 @@ pub(crate) mod tests {
         for (name, args, records, counters, main) in views {
             let counts = read_u32s(&device, &queue, counters, target_word as u64 + 1);
             assert_eq!(counts[target_word], u32::from(main), "{name} page COUNT");
-            assert_eq!(counts[STAT_BASE_WORD as usize], if main { 2 } else { 1 },
-                "{name} must still dispatch and retain the control instance");
+            assert_eq!(counts[STAT_BASE_WORD as usize], 2,
+                "{name} must retain the control and exactly one complementary instance");
             let args = read_u32s(&device, &queue, args, slots * ARG_WORDS);
             let records = read_u32s(&device, &queue, records, slots * 2);
             let mut visible = Vec::new();
@@ -5801,9 +5808,10 @@ pub(crate) mod tests {
                 }
             }
             visible.sort_unstable();
-            let mut expected = if main { vec![control, page] } else { vec![control] };
+            let mut expected = if main { vec![control, page] } else { vec![control, source] };
             expected.sort_unstable();
             assert_eq!(visible, expected, "{name} emitted instance records");
+            assert!(!visible.contains(&conflicting), "{name} conflicting bits must exclude all views");
         }
     }
 

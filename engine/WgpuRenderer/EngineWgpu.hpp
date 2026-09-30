@@ -45,6 +45,7 @@ namespace render { class GeometryOwnerLedger; class GeometrySourceRevisions; str
 namespace GeometryPages { class AuthoredPageWorker; }
 class TextureBankWgpu;
 class TextureWgpu;
+class ArchiveSourceBinding;
 class TerrainWgpu;
 class WaterWgpu;
 class ITerrainRenderer;
@@ -1305,6 +1306,20 @@ class EngineWgpu : public EngineDummy
     void EnqueueInstanceAddAt(uint32_t handle, const WgrInstance&, std::shared_ptr<render::RetailPageInstanceObservation>);
     void ReleaseRetailInstanceHandle(uint32_t handle);
     uint64_t _nextRetailVisibleBirth = 1;
+    // One explicit cold-world source observation, never a default takeover.
+    // Holds the SAME bank-owned primary texture and actual installed Shape.
+    struct RetailWorldSource {
+        Ref<LODShapeWithShadow> shape;
+        Ref<Texture> texture;
+        std::shared_ptr<const ArchiveSourceBinding> textureBirth;
+        uint64_t shapeBirth = 0, textureHandle = 0;
+        uint32_t textureSlot = 0, placements = 0;
+        std::string rawSha256, uploadedSha256;
+    };
+    std::unique_ptr<RetailWorldSource> _retailWorldSource;
+    uint32_t _retailWorldSourceAttempts = 0;
+    void PrepareRetailWorldSource(LODShapeWithShadow*);
+    void ObserveRetailWorldPlacement(Object*, const WgrInstance&, uint32_t);
     std::shared_ptr<render::RetailPageInstanceObservation> _retailInstanceReturn;
     uint64_t _retailInstanceFrameAttempt = 0;
     uint64_t _retailInstanceCameraBefore = 0;

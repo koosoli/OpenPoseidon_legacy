@@ -1549,3 +1549,49 @@ checks passed195 assertions/8 cases, including oriented parity rejection cases.
 The visible runner now records repeated source-Fine/Fine/source-Fine images with
 jitter/upscaling and grass/cloud/planar ablations isolated to this test process.
 No image registration or quality acceptance is inferred from the triangle proof.
+
+### 30 September — actual Fine/material comparison and cold-world seam
+
+Exact05cdceed installed startup selected matching EXE/DLL and Tidewater Native.
+`retail-fine-material05cd-20260930-043441-420afb` passed normally/exit0,
+including sourceFine250/root/Fine/sourceFine/root/release/refill/remove and fresh
+returned camera generations146..338. Images now show the actual PAC texture:
+the ordinary no-surface material tail fixed the private black-albedo defect.
+Initial repeated images drifted with autoexposure (source-repeat MAE7.977,
+source/Fine13.296, source-again16.028 on fixed450x550 rock-interior ROI); no
+pixel acceptance was inferred from that run.
+
+Supported `WGR_AUTO_EXPOSURE=0` is now isolated to RetailVisible captures.
+Same installed05cd source `retail-fixed-exposure05cd-20260930-044420-eed96d`
+passed normally/exit0; no registration/alignment applied. Fixed ROI[400,100,
+850,650] source-repeat MAE0.001313, Fine-repeat0.010661, source/Fine0.012983,
+source-again0.039506; every comparison maximum absolute channel difference1
+(8-bit). This is narrow same-placement source-Fine/paged-Fine material/geometry
+image consistency, not world takeover/all-view/coarse-quality/performance proof.
+
+Complementary OTHER_VIEWS_ONLY bit64 is source-implemented, default unused.
+Actual-GPU COUNT/indirect-record test passed1 case for page32, original64,
+ordinary0 and conflicting32|64 across main/color and solar/local/reflection/sky/GI.
+Unknown main authority preserves original64; conflict is invisible in all views.
+No CPU coverage/shadow LOD policy is changed or certified by this flag alone.
+
+Next source captures one selected physical Cprs read through the actual
+FileServer parser buffer and cold canonical Shape creation, with one-shot
+read-scope claim and a nonwrapping Shape birth. Cached/preparsed/pre-adapted,
+DDC-only, deferred, reversed and unbound loads remain Unknown. Exact selected
+cold DDC bypass is private/default-off; ordinary cache policy unchanged.
+The actual bank-owned primary PAC is prepared/uploaded before retained model
+registration only if cold Init/layout/source proof exists. Already warm/unbound
+textures refuse the private observation and retain normal world behavior.
+Actual world placement telemetry is queued producer evidence only: no renderer
+return, replacement, shadow/material closure or generic Nanite authority.
+Build/runtime validation of this next seam is pending. Whole plan remains
+OPEN/defaultReady=false/performanceAccepted=false.
+
+Cold-world source build passed after correcting one log-helper namespace name;
+initial failed build retained. Actual Cprs/one-shot/changed-member/cap checks
+passed160 assertions/4 cases; Model DDC checks3568/12 and logical Shape checks199/12
+passed. Two initial test invocations matched no cases and were corrected to the
+actual target/tag; no zero-test result counted as validation. Normal scene/world
+hooks freeze the launch gate once, adding no per-object getenv/query/IO in OFF
+mode. Actual cold-world installed runtime is still pending.

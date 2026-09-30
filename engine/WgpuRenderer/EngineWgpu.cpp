@@ -33,6 +33,7 @@
 #include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/World/Terrain/WarmMaterialStagePreflightPolicy.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/IO/Streams/ModelCompressedSourceBirth.hpp>
 #include <Poseidon/Graphics/Textures/DeferredProceduralAdmission.hpp>
 #include <Poseidon/Graphics/Rendering/RigidOdol7OwnerCapture.hpp>
 #include "RetailPagePilotAdmission.hpp"
@@ -15320,6 +15321,9 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
         }
     }
     _gpuInstances[obj] = GpuInstance{model, slot, shape, obj->Transform().Position(), cp.mode, cov};
+    static const bool coldWorldSource = ModelCompressedSourceBirth::ReadScope::Enabled();
+    if (coldWorldSource)
+        ObserveRetailWorldPlacement(obj, inst, slot);
     if (DayzDependencyCensusEnabled())
         ReportDayzDependencyCensus(obj, shape, firstSight, allProxiesGpu, cov);
     // Mirror the coverage onto the Object so GpuDrivenCoverage() is an O(1) field read (see there).
@@ -15629,6 +15633,80 @@ void EngineWgpu::SceneObjectProxiesChanged(Object* obj)
 // vertex buffers OptimizeRendering builds find their level in _retainedMeshOfLevel and share
 // the retained mesh (RFG-088) instead of uploading a private copy. Only world models arrive
 // here (ShapeBank::WorldModelScope); animated shapes never take the retained path anyway.
+void EngineWgpu::PrepareRetailWorldSource(LODShapeWithShadow* shape)
+{
+    if (!Foundation::IsMainThread() || !shape || _retailWorldSource ||
+        _retailWorldSourceAttempts >= 8) return;
+    const auto& source = shape->GetCompressedModelSourceBirth();
+    if (!source || !source->Valid() || !shape->GetCompressedModelSourceBirthId()) return;
+    ++_retailWorldSourceAttempts;
+    const char* reason = "SourceCurrent";
+    try {
+        QFBank* bank = QIFStreamB::AutoBank(source->logicalName.c_str());
+        if (!bank || !bank->MatchesMountedCompressedMember(source->lease->CanonicalMember().c_str(), *source->lease))
+            throw reason;
+        reason = "ActualFinalSections";
+        Ref<Texture> primary;
+        unsigned visual = 0;
+        for (int level = 0; level < shape->NLevels(); ++level) {
+            if (!shape->IsNormalLevel(level)) continue;
+            const Shape* lod = shape->Level(level);
+            if (!lod || lod->NSections() != 1 || lod->NProxies()) throw reason;
+            const auto& section = lod->GetSection(0);
+            if (section.surfMat || section.material || !section.properties.GetTexture()) throw reason;
+            if (!primary) primary = section.properties.GetTexture();
+            if (primary.GetRef() != section.properties.GetTexture()) throw reason;
+            ++visual;
+        }
+        if (visual != 4 || !primary) throw reason;
+        auto* texture = static_cast<TextureWgpu*>(primary.GetRef());
+        reason = "ActualPrimaryInitUnknownOrWarm";
+        render::ColdPaaRead read;
+        if (!texture->CaptureRetailPacRead(read)) throw reason;
+        reason = "PreparedPrimaryRefused";
+        auto prepared = render::RetailPacPrepared::Prepare(std::move(read));
+        if (!prepared) throw reason;
+        auto held = std::make_unique<RetailWorldSource>();
+        held->shape = shape; held->shapeBirth = shape->GetCompressedModelSourceBirthId();
+        held->texture = primary;
+        TextureWgpu::RetailPacUploadWitness witness;
+        reason = "ActualPrimaryUploadRefused";
+        const uint64_t handle = texture->UploadRetailPacPrepared(*prepared, witness);
+        if (!handle || !witness.currentInit || !witness.layoutMatched || !witness.created ||
+            !witness.postMountMatched || witness.retiredAfterMismatch || !witness.birth ||
+            texture->GpuHandle() != handle || texture->SlotLease() != witness.slotLease) throw reason;
+        held->textureBirth = witness.birth; held->textureHandle = handle; held->textureSlot = witness.slotLease;
+        held->rawSha256 = witness.rawSha256; held->uploadedSha256 = witness.uploadedSha256;
+        _retailWorldSource = std::move(held);
+        LOG_INFO(Graphics, "Retail actual-world source: shapeBirth={} sourceSha256={} decodedBytes={} visualLevels={} primaryHandle={} primarySlot={} rawSha256={} uploadedSha256={} scope=actual-cold-Shape-and-bank-primary-no-world-takeover",
+            _retailWorldSource->shapeBirth, PageHashHex(source->decodedSha256), source->decodedBytes,
+            visual, handle, witness.slotLease, witness.rawSha256, witness.uploadedSha256);
+    } catch (const char*) {
+        LOG_INFO(Graphics, "Retail actual-world source refused: reason={} shapeBirth={} scope=ordinary-world-kept", reason, shape->GetCompressedModelSourceBirthId());
+    } catch (...) {
+        LOG_INFO(Graphics, "Retail actual-world source refused: reason=AllocationOrPreparation shapeBirth={} scope=ordinary-world-kept", shape->GetCompressedModelSourceBirthId());
+    }
+}
+
+void EngineWgpu::ObserveRetailWorldPlacement(Object* obj, const WgrInstance& row, uint32_t slot)
+{
+    auto* held = _retailWorldSource.get();
+    if (!Foundation::IsMainThread() || !obj || !held || held->shape.GetRef() != obj->GetShape() ||
+        held->placements >= 16) return;
+    ++held->placements;
+    const auto& source = held->shape->GetCompressedModelSourceBirth();
+    auto* texture = static_cast<TextureWgpu*>(held->texture.GetRef());
+    QFBank* bank = source ? QIFStreamB::AutoBank(source->logicalName.c_str()) : nullptr;
+    auto currentTexture = texture->CurrentArchiveSourceBinding();
+    const bool current = source && source->Valid() && bank &&
+        held->shapeBirth == held->shape->GetCompressedModelSourceBirthId() &&
+        bank->MatchesMountedCompressedMember(source->lease->CanonicalMember().c_str(), *source->lease) &&
+        currentTexture && currentTexture->Request().SameArchiveMember(held->textureBirth->Request()) &&
+        texture->GpuHandle() == held->textureHandle && texture->SlotLease() == held->textureSlot;
+    LOG_INFO(Graphics, "Retail actual-world placement queued: shapeBirth={} placementObservation={} producerInstance={} producerModel={} sourceCurrent={} static={} intact={} flags={} scope=ordinary-instance-queued-not-returned-or-taken-over",
+        held->shapeBirth, held->placements, slot, row.model, current, obj->Static(), !obj->IsDestroyed(), row.flags);
+}
+
 void EngineWgpu::WorldShapeLoaded(LODShapeWithShadow* shape)
 {
     if (!_gpuDriven || !_renderer || !shape || shape->GetAllowAnimation())
@@ -15639,6 +15717,9 @@ void EngineWgpu::WorldShapeLoaded(LODShapeWithShadow* shape)
     {
         return;
     }
+    static const bool coldWorldSource = ModelCompressedSourceBirth::ReadScope::Enabled();
+    if (coldWorldSource)
+        PrepareRetailWorldSource(shape);
     RegisterGpuModel(shape);
 }
 

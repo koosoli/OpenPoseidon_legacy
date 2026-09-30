@@ -16,6 +16,7 @@
 namespace Poseidon
 {
 class ArchiveSourceBinding;
+class ModelCompressedSourceBirth;
 struct BankReadMemberIdentity;
 using ::Poseidon::Foundation::AutoArray;
 using ::Poseidon::Foundation::Buffer;
@@ -346,6 +347,11 @@ class IFileBuffer : public RefCount
     // Appended owner-only completion for the exact buffer parsed by Init. Empty means
     // failed/unretained Init; no names, bytes, mounting or native IO are consulted.
     virtual bool CompleteArchiveSourceInit(const std::shared_ptr<const ArchiveSourceBinding>&) { return false; }
+    // Optional actual Cprs decoded-buffer birth; not a raw archive/PAC binding.
+    virtual std::shared_ptr<const ModelCompressedSourceBirth> GetCompressedModelSourceBirth() const { return {}; }
+    // Owner-only, one-shot claim during the SAME cold Open read scope. A later
+    // FileCache hit cannot retrofit its old buffer into a new parser birth.
+    virtual std::shared_ptr<const ModelCompressedSourceBirth> TakeCompressedModelSourceBirthForParse() { return {}; }
 };
 
 class FileBufferMemory : public IFileBuffer

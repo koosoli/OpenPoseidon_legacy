@@ -1,5 +1,6 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
+#include <Poseidon/IO/Streams/ModelCompressedSourceBirth.hpp>
 #include <Poseidon/IO/Streams/PatnikArchiveReason.hpp>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Core/ModSystem.hpp>
@@ -1716,6 +1717,30 @@ public:
 };
 }
 
+namespace
+{
+class CompressedModelBoundBuffer final : public IFileBuffer
+{
+    Ref<IFileBuffer> _buffer;
+    std::shared_ptr<const ModelCompressedSourceBirth> _birth;
+    std::atomic<bool> _claimed{false};
+public:
+    CompressedModelBoundBuffer(Ref<IFileBuffer> buffer,std::shared_ptr<const ModelCompressedSourceBirth> birth)
+        :_buffer(std::move(buffer)),_birth(std::move(birth)){}
+    bool GetError() const override{return _buffer->GetError();}
+    const char* GetData() const override{return _buffer->GetData();}
+    int GetSize() const override{return _buffer->GetSize();}
+    bool IsFromBank(QFBank* bank) const override{return _buffer->IsFromBank(bank);}
+    bool IsReady() const override{return _buffer->IsReady();}
+    std::shared_ptr<const ModelCompressedSourceBirth> GetCompressedModelSourceBirth() const override{return _birth;}
+    std::shared_ptr<const ModelCompressedSourceBirth> TakeCompressedModelSourceBirthForParse() override
+    {
+        if(!_birth||!_birth->Valid()||!ModelCompressedSourceBirth::ReadScope::Active()||
+           ModelCompressedSourceBirth::ReadScope::Token()!=_birth->readScopeToken||_claimed.exchange(true))return {};
+        return _birth;
+    }
+};
+}
 Ref<IFileBuffer> QFBank::Read(const char* name) const
 {
     const bool targeted = PatnikArchiveReason::Enabled() &&
@@ -1768,6 +1793,16 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
     if (info.compressedMagic == CompMagic) // some compression
     {
         reason("compressedMember", false);
+        std::optional<BankCompressedReadRequest> coldSource;
+        if(ModelCompressedSourceBirth::ReadScope::Active()&&name) {
+            try {
+                const std::string prefix((const char*)GetPrefix());
+                size_t nameBytes=0;while(nameBytes<128&&name[nameBytes])++nameBytes;
+                if(prefix.size()<128&&nameBytes<128&&
+                   ModelCompressedSourceBirth::ReadScope::MatchesLogicalName((prefix+name).c_str()))
+                    coldSource=CaptureCompressedReadRequest(name);
+            }catch(...){} // Optional provenance cannot change ordinary reads.
+        }
         Seek(info.startOffset);
         QIStream inBuf;
         // read compressed data into temporary buffer
@@ -1781,6 +1816,16 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
         {
             RptF("Error decoding %s from %s", name, (const char*)_prefix);
             return nullptr;
+        }
+        if(coldSource&&!inBuf.fail()&&inBuf.rest()==0&&data->GetSize()>0&&
+           uint32_t(data->GetSize())<=BankCompressedReadRequest::MaxDecodedBytes) {
+            try {
+                if(MatchesMountedCompressedMember(name,*coldSource)) {
+                    auto birth=ModelCompressedSourceBirth::Capture(std::move(*coldSource),
+                        std::span<const char>(data->GetData(),size_t(data->GetSize())));
+                    if(birth)return new CompressedModelBoundBuffer(data.GetRef(),std::move(birth));
+                }
+            }catch(...){} // Fail unknown; the exact original decoded bytes still return.
         }
         return (IFileBuffer*)data;
     }

@@ -524,7 +524,12 @@ enum WgrInstanceFlags : uint32_t
     WGR_INSTANCE_FAR_AUTHORED = 16,
     /* Private visible-page pilot: only the main camera's prepass/color culls
      * may emit this instance. The original object remains in other passes. */
-    WGR_INSTANCE_MAIN_CAMERA_ONLY = 32
+    WGR_INSTANCE_MAIN_CAMERA_ONLY = 32,
+    /* Original object complement for a private main-camera page: exclude this
+     * instance only when the cull carries positive main-camera authority.
+     * Unknown and other views retain the original. Both view bits together
+     * are invalid and conservatively exclude the instance from every view. */
+    WGR_INSTANCE_OTHER_VIEWS_ONLY = 64
 };
 
 struct WgrInstance

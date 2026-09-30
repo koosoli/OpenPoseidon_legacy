@@ -116,6 +116,8 @@ TEST_CASE("Logical ShapeBank load retains collision geometry without registering
         ShapeBank::CpuOnlyLoadScope logical;
         shape = bank.NewFromModel("logical_box.p3d", false, true, BoxModel(), nullptr);
         REQUIRE(shape->DeferredVisualRendering());
+        REQUIRE_FALSE(shape->GetCompressedModelSourceBirth());
+        REQUIRE(shape->GetCompressedModelSourceBirthId() == 0);
         RequireCollisionGeometry(*shape);
         REQUIRE(engine.worldLoads.empty());
         REQUIRE(engine.vertexBufferCalls == 0);
@@ -128,6 +130,8 @@ TEST_CASE("Logical ShapeBank load retains collision geometry without registering
 
     REQUIRE(bank.New("logical_box.p3d", false, true) == shape.GetRef());
     REQUIRE_FALSE(shape->DeferredVisualRendering());
+    REQUIRE_FALSE(shape->GetCompressedModelSourceBirth()); // cache promotion cannot retrofit a birth
+    REQUIRE(shape->GetCompressedModelSourceBirthId() == 0);
     REQUIRE(engine.worldLoads == std::vector<LODShapeWithShadow*>{shape.GetRef()});
     REQUIRE(engine.vertexBufferCalls > 0);
     RequireCollisionGeometry(*shape);
@@ -293,6 +297,8 @@ TEST_CASE("Ordinary late shape loads retain their rendering ownership behaviour"
     ShapeBank::CpuOnlyLoadScope disabled(false);
     Ref<LODShapeWithShadow> shape = bank.NewFromModel("visual_box.p3d", false, true, BoxModel(), nullptr);
     REQUIRE_FALSE(shape->DeferredVisualRendering());
+    REQUIRE_FALSE(shape->GetCompressedModelSourceBirth()); // caller-supplied IR has no selected read
+    REQUIRE(shape->GetCompressedModelSourceBirthId() == 0);
     REQUIRE(engine.worldLoads.size() == 1);
     REQUIRE(engine.vertexBufferCalls > 0);
     const int calls = engine.vertexBufferCalls;

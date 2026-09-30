@@ -10,6 +10,8 @@
 #include <Poseidon/Asset/Formats/P3D/MLODLoader.hpp>
 #include <Poseidon/Asset/Addon/VirtualPath.hpp>
 #include <Poseidon/IO/FileServer.hpp>
+#include <Poseidon/IO/Streams/ModelCompressedSourceBirth.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/World/Model/ModelDerivedCache.hpp>
 #include <algorithm>
 #include <cctype>
@@ -34,8 +36,11 @@ std::string ModelCache::normalizePath(const std::string& path) const
     return Asset::VirtualPath::Parse(path).canonical();
 }
 
-std::shared_ptr<Poseidon::Model::Model> ModelCache::load(const std::string& filePath)
+std::shared_ptr<Poseidon::Model::Model> ModelCache::load(
+    const std::string& filePath,
+    std::shared_ptr<const ModelCompressedSourceBirth>* sourceBirth)
 {
+    if (sourceBirth) sourceBirth->reset();
     _stats.totalLoads++;
 
     std::string key = normalizePath(filePath);
@@ -49,7 +54,7 @@ std::shared_ptr<Poseidon::Model::Model> ModelCache::load(const std::string& file
 
     _stats.cacheMisses++;
 
-    auto model = loadFromFile(filePath);
+    auto model = loadFromFile(filePath, sourceBirth);
     if (!model)
     {
         _stats.loadFailures++;
@@ -63,6 +68,16 @@ std::shared_ptr<Poseidon::Model::Model> ModelCache::load(const std::string& file
 
 namespace
 {
+
+bool SameSha256(const std::string& hex, const std::array<uint8_t, 32>& raw)
+{
+    if (hex.size() != raw.size() * 2) return false;
+    constexpr char digits[] = "0123456789abcdef";
+    for (size_t i = 0; i < raw.size(); ++i)
+        if (hex[i * 2] != digits[raw[i] >> 4] || hex[i * 2 + 1] != digits[raw[i] & 15])
+            return false;
+    return true;
+}
 
 // AST-004 -- the one seam where the derived data cache sits.
 //
@@ -78,10 +93,10 @@ namespace
 // hit this design exists to prevent.
 std::shared_ptr<Poseidon::Model::Model> DeriveOrHit(const char* data, int size, const std::string& sourcePath,
                                                     const std::string& signature, const std::string& contentSha,
-                                                    std::string& lastError)
+                                                    std::string& lastError, bool bypassCache = false)
 {
     ModelDerivedCache&            cache   = ModelDerivedCache::Instance();
-    const bool                    useCache = cache.Enabled() && !contentSha.empty();
+    const bool                    useCache = !bypassCache && cache.Enabled() && !contentSha.empty();
     Asset::Cache::DerivedAssetKey key;
     if (useCache)
     {
@@ -237,7 +252,9 @@ bool EndsWithNoCase(const std::string& s, const char* suffix)
 void ModelCache::SetExternalLoader(ExternalLoader loader) { g_externalLoader = loader; }
 ModelCache::ExternalLoader ModelCache::GetExternalLoader() { return g_externalLoader; }
 
-std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFile(const std::string& filePath)
+std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFile(
+    const std::string& filePath,
+    std::shared_ptr<const ModelCompressedSourceBirth>* sourceBirth)
 {
     // Same sequence as before the split: loose file first, PBO banks only when the loose
     // open itself fails (a loose file that fails to PARSE is a failure, not a fallback).
@@ -258,7 +275,7 @@ std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFile(const std::stri
         // Fallback to PBO archives
         if (GFileServer)
         {
-            return loadFromFileServer(filePath);
+            return loadFromFileServer(filePath, sourceBirth);
         }
         _lastError = "cannot open file";
         return nullptr;
@@ -266,8 +283,13 @@ std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFile(const std::stri
     return model;
 }
 
-std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFileServer(const std::string& filePath)
+std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFileServer(
+    const std::string& filePath,
+    std::shared_ptr<const ModelCompressedSourceBirth>* sourceBirth)
 {
+    // A fresh owner scope stamps the bank's actual compressed read. Returning a
+    // pre-existing FileCache buffer cannot claim its earlier token for parsing.
+    ModelCompressedSourceBirth::ReadScope coldRead(sourceBirth ? filePath.c_str() : nullptr);
     QIFStream f;
     GFileServer->Open(f, filePath.c_str());
     if (f.fail())
@@ -282,13 +304,34 @@ std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFileServer(const std
     memcpy(sig, data, 4);
     std::string signature(sig);
 
+    std::shared_ptr<const ModelCompressedSourceBirth> selectedBirth;
+    if (sourceBirth && coldRead.Active() &&
+        ModelCompressedSourceBirth::ReadScope::MatchesLogicalName(filePath.c_str()) &&
+        signature == "ODOL" && f.GetBuffer())
+        selectedBirth = f.GetBuffer()->TakeCompressedModelSourceBirthForParse();
+
     // FileServer selected these bytes. AutoBank/GetContentHash may instead read
     // a different mount (or return its earlier memo) for the same virtual path;
     // that hash must never key a derivation from this stream's buffer.
-    const std::string sha = ModelDerivedCache::Instance().Enabled()
+    const std::string sha = (ModelDerivedCache::Instance().Enabled() || selectedBirth)
         ? ModelDerivedCache::HashBytes(data, static_cast<size_t>(dataSize)) : std::string();
+    if (selectedBirth && (!selectedBirth->Valid() ||
+        selectedBirth->logicalName != filePath ||
+        selectedBirth->decodedBytes != static_cast<uint32_t>(dataSize) ||
+        !SameSha256(sha, selectedBirth->decodedSha256)))
+        selectedBirth.reset();
 
-    return DeriveOrHit(data, dataSize, filePath, signature, sha, _lastError);
+    // A source birth means this exact owned buffer must execute the canonical
+    // parser and compiler. A derived-cache hit carries no parser-executed birth.
+    auto model = DeriveOrHit(data, dataSize, filePath, signature, sha, _lastError,
+                             bool(selectedBirth));
+    if (model && selectedBirth && sourceBirth)
+    {
+        *sourceBirth = std::move(selectedBirth);
+        LOG_INFO(Core, "Retail cold model parser birth: source={} bytes={} scope=exact-owned-buffer",
+                 filePath, dataSize);
+    }
+    return model;
 }
 
 bool ModelCache::isLoaded(const std::string& filePath) const

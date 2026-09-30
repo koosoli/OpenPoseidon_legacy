@@ -7,6 +7,8 @@
 
 namespace Poseidon {
 
+class ModelCompressedSourceBirth;
+
 namespace Model {
     struct Model;
 }
@@ -19,7 +21,12 @@ public:
     ModelCache(const ModelCache&) = delete;
     ModelCache& operator=(const ModelCache&) = delete;
 
-    std::shared_ptr<Model::Model> load(const std::string& filePath);
+    // Optional receipt is published only for a selected cold FileServer buffer
+    // that carried its own one-shot compressed archive birth through a fresh
+    // parser run. Cache hits, loose files and ordinary model loads leave it empty.
+    std::shared_ptr<Model::Model> load(
+        const std::string& filePath,
+        std::shared_ptr<const ModelCompressedSourceBirth>* sourceBirth = nullptr);
 
     // Read, parse and compile ONE LOOSE FILE (std::ifstream on `filePath` as given), and
     // nothing else: no ModelCache instance, no GFileServer, no PBO banks, no engine globals.
@@ -83,9 +90,13 @@ public:
 private:
     std::string normalizePath(const std::string& path) const;
 
-    std::shared_ptr<Model::Model> loadFromFile(const std::string& filePath);
+    std::shared_ptr<Model::Model> loadFromFile(
+        const std::string& filePath,
+        std::shared_ptr<const ModelCompressedSourceBirth>* sourceBirth);
 
-    std::shared_ptr<Model::Model> loadFromFileServer(const std::string& filePath);
+    std::shared_ptr<Model::Model> loadFromFileServer(
+        const std::string& filePath,
+        std::shared_ptr<const ModelCompressedSourceBirth>* sourceBirth);
 
     std::map<std::string, std::shared_ptr<Model::Model>> _cache;
     mutable Stats _stats;

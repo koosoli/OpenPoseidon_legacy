@@ -11,6 +11,7 @@ endif()
 
 set(POSEIDON_CORE_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Graphics/test_retail_page_instance_observation.cpp
+    ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_compressed_model_source_birth.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Support/test_stubs.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Asset/Addon/test_config_replace.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Asset/Formats/Common/test_format_detector.cpp

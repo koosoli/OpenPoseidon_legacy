@@ -10,6 +10,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Pass1Submit.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
@@ -970,6 +971,8 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
     // both recognised P3D encodings through that path keeps test-model (and
     // normal-map smoke tests) from silently producing an empty mesh.
     LODShapeWithShadow* shape = nullptr;
+    std::shared_ptr<const ModelCompressedSourceBirth> parsedSourceBirth;
+    bool freshCanonicalAdapter = false;
     if (preadapted)
     {
         // Stage 3 of the async admission: a preparer worker already ran the tables-mode
@@ -998,7 +1001,7 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
         if (!arrivedPreparsed)
         {
             Poseidon::ModelCache cache;
-            model = cache.load(lowName);
+            model = cache.load(lowName, &parsedSourceBirth);
         }
         if (timing)
         {
@@ -1017,9 +1020,21 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
             // same call order the worker-side conversion will use, so this path
             // and that one cannot drift apart.
             Poseidon::Model::ShapeAdapter::AdapterBankTables tables;
-            Poseidon::Model::ShapeAdapter::BuildAdapterBankTables(*model, tables);
-            shape = Poseidon::Model::ShapeAdapter::convertToLODShape(*model, reversed, &tables);
+            if (parsedSourceBirth && model->sourceFormat == "ODOL" &&
+                !CpuOnlyLoadActive() && !reversed && shadow)
+            {
+                ArchiveSourceBinding::RetailPacReadScope primarySource(lowName);
+                Poseidon::Model::ShapeAdapter::BuildAdapterBankTables(*model, tables);
+                shape = Poseidon::Model::ShapeAdapter::convertToLODShape(*model, reversed, &tables);
+            }
+            else
+            {
+                Poseidon::Model::ShapeAdapter::BuildAdapterBankTables(*model, tables);
+                shape = Poseidon::Model::ShapeAdapter::convertToLODShape(*model, reversed, &tables);
+            }
             ownedShape.reset(shape);
+            freshCanonicalAdapter = shape && parsedSourceBirth && !arrivedPreparsed &&
+                model->sourceFormat == "ODOL";
             if (timing)
                 timing->canonical = true;
         }
@@ -1048,6 +1063,17 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
     {
         shape->_logicalVisualState = LODShapeWithShadow::LogicalVisualState::Deferred;
         shape->_logicalWorldModel = _worldModelScope || _worldModelDepth != 0;
+    }
+    if (freshCanonicalAdapter && !CpuOnlyLoadActive() && !reversed && shadow)
+    {
+        // First publication of this freshly adapted Shape. A cached or
+        // worker-prepared Shape cannot acquire source authority here.
+        static uint64_t nextCompressedBirthId = 1;
+        if (nextCompressedBirthId && nextCompressedBirthId != UINT64_MAX)
+        {
+            shape->_compressedModelSourceBirth = std::move(parsedSourceBirth);
+            shape->_compressedModelSourceBirthId = nextCompressedBirthId++;
+        }
     }
     _cache.Insert(cacheKey, Link<LODShapeWithShadow>(shape));
 
