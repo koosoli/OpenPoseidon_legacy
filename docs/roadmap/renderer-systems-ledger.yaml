@@ -800,6 +800,19 @@ unbuilt_candidates: >-
       film does not implement them. Muzzle lighting and land rotor dust/sand/snow
       are also authorised. Existing water rotor downwash is owner-accepted and
       must remain unchanged. See WEATHER-OWNER-REGRESSIONS-20260930.md.
+      Matching7e2f1df7 installed standard-US controlled-player checks now pass
+      ordinary keyboard sand/mud movement4.880m/4.877m, actual contact creation,
+      visible first/third-person return, real rain0.97132 and player wetness>0.3.
+      Root inspected darker cloth and resolved directional puddle reflection/
+      rain rings. Other maps and close depression appearance remain open.
+      Physical runoff world integration88de8e3c and mission generationdba0072c
+      pass conservative CPU hollow/spill/downhill/mass/drain/sun/pause checks.
+      New production builddba0072c passes; deployment was refused by the game
+      lock because an external game started00:22 on2026-10-01. Installed7e2f1df7
+      does not include runoff, muzzle lighting or land rotor particles.
+      Linked muzzle tests pass998 assertions/6 cases; rotor policy tests pass.
+      Installed night/interior illumination, dry/snow hover and real terrain
+      runoff/standing-water walking/drainage are still pending.
       MUD-VOLUMETRIC-CONTACT-20260930.md and NOGOVA-SOFT-MUD-CONTACT-20260930.md.
 
       Historical September 30 owner-priority mud puddle slice: rain-fed cosmetic wetness,
@@ -1356,8 +1369,16 @@ unbuilt_candidates: >-
     owner: codex/streaming-residency
     audited: 2026-09-30
     completeness: >-
-      SOURCE INTEGRATED; NEW INSTALLED ACCEPTANCE PENDING. Baseline c9024bb4
-      retained the earlier snow/contact layer and installed 8b3ae13c. Shared
+      SOURCE INTEGRATED; NEW INSTALLED ACCEPTANCE PENDING.
+      Latest185ccebd source admission covers25 stock/O-family models and84 raw
+      visual LODs with actual compacted loaded LOD identity. CPU223 foliage/
+      50 bark-or-skeleton negatives and64 actual-helper GPU cases pass.
+      Powder and textured tree frost are installed7e2f1df7; the expanded forest
+      families remain uninstalled. Owner-like forest top/side views and corrected
+      roof near/far handoff require installed acceptance; build alone does not
+      establish their appearance.
+      Baseline c9024bb4 retained the earlier snow/contact layer and installed
+      8b3ae13c. Shared
       Powder d538b383 introduced projected-footprint filtering. Installed
       6a388c62 exposed diagonal sine ridges; cc43fffb replaces them with three
       rotated world-cell value-noise bands and analytic gradients, with no
@@ -1488,11 +1509,18 @@ unbuilt_candidates: >-
   - id: RSYS-UNIFORM-WETNESS
     title: Actual rain history and stock cloth-only wet uniform shading
     plan: docs/roadmap/decisions/UNIFORM-WETNESS-STOCK-FIXTURE-20260930.md
-    status: SHIPPED
+    status: PARTIAL
     owner: codex/streaming-residency
     audited: 2026-09-30
     completeness: >-
-      SHIPPED FOR BOUNDED STOCK SOLDIERWB LIFECYCLE AND DELEGATED APPEARANCE.
+      BOUNDED STOCK SOLDIERWB LIFECYCLE PRESENT; OWNER FOLLOW-UP QUALITY OPEN.
+      Stronger cloth absorption9aca3983 and actual player source traces are
+      installed7e2f1df7. Actual keyboard-controlled standard US SoldierWB in
+      original Noe real rain reaches wetness>0.3 and retains visible third-person
+      body and face detail; root inspects clearly darker cloth. Actual-helper GPU
+      hue/skin/cloth controls pass. Broader original maps, wet highlights and
+      owner visual acceptance remain open; earlier subtle-cloth acceptance below
+      is historical and does not close the owner's reported failed appearance.
       a4b234c2 (agent dcdea4e0), 750395a9 and 3454b689 add normalized cosmetic
       Person water retention from actual GLandscape rain, an upward 30m
       self-ignored shelter probe refreshed at most once per simulation second,
