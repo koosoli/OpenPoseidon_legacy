@@ -137,6 +137,39 @@ the material, identity, transform and removal controls before a roof claim.
 
 ## Reproducible CPU evidence
 
+### Relocation after the empty-pattern runtime control
+
+The first installed roof campaign at centre `(9481.25,3006.25)` identified the
+retained stock model, but its absent dry/wet images had zero changed pixels at
+the existing threshold. That is an invalid positive control for pixel shelter
+acceptance. Reproducing the production integer hash and smooth world noise
+gives a field of approximately 0.383 there, below the full-wet 0.64 threshold.
+
+`New-TerrainPuddleStockRoof` now accepts finite `-X` / `-Z` centre coordinates
+and optional `-ControlX` / `-ControlZ` open control centre coordinates. Defaults
+preserve the original centre and 12 metre east control. Every camera still
+queries its own runtime terrain height; covered and open cameras sit 1.5 metres
+south of their respective centres, at local ground +1 metre. Class, model,
+minimum model Y, heading, actual ASL placement checks and removal are unchanged.
+
+Next **candidate**, requiring actual material, flatness and visible-pixel checks:
+
+```powershell
+$fixture = New-TerrainPuddleStockRoof -SendCommand {param($request) Send $request} `
+    -X 9486 -Z 3006 -ControlX 9475.25 -ControlZ 3018.25
+```
+
+The roof centre's field is approximately 0.775. The independent open centre
+has field 0.901 and is 16.3 metres from the roof centre, outside the audited
+4.59 by 5.30 metre half-extents. Its camera looks north from Z3016.75 toward
+field values around 0.81–0.88. These are CPU candidate predictions, not shader
+pixel acceptance: height slope, material mixture, shelter coverage and actual
+camera pixels still need the absent/present/removed controls.
+
+Mock checks cover a relocated centre, explicit independently positioned open
+control, different queried camera heights, and rejection of nonfinite centre
+or control coordinates before any runtime request.
+
 `scripts/Inspect-TerrainPuddleStockRoof.py` reads the bounded first visual LOD,
 verifies BIS compressed-array checksums and reports actual rays, the conservative
 continuous floor check, bounds and source hash. It is an audit, not a general
