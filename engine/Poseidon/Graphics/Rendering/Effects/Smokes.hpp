@@ -776,6 +776,7 @@ protected:
 	float _invTotalTimeToLight;
 	float _lightIntensity;
 	bool _lightMGun;
+	bool _muzzlePulse = false;
 	Ref<LightPoint> _light;
 
 private:
@@ -784,6 +785,7 @@ private:
 public:
 	WeaponLightSource();
 	void Start(float time, float intensity, bool mGun);
+	void StartMuzzle(Vector3Par actualMuzzlePosition);
 	bool Active() const;
 	void Simulate(Vector3Par pos, float deltaT);
 	virtual LSError Serialize(ParamArchive &ar);

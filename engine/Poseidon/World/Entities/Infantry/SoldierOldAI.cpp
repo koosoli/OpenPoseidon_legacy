@@ -1702,7 +1702,10 @@ void Soldier::FireWeaponEffects(int weapon, const Magazine* magazine, EntityAI* 
         {
             _mGunFireWeapon = slot._weapon;
             _mGunClouds.Start(0.1f);
-            _mGunFire.Start(0.05f, 0.004f, true);
+            const Vector3 muzzleModel = GetWeaponPoint(weapon);
+            const Vector3 muzzleWorld = GetHierachyParent() ? WorldTransform().FastTransform(muzzleModel)
+                                                          : PositionModelToWorld(muzzleModel);
+            _mGunFire.StartMuzzle(muzzleWorld);
             _mGunFireFrames = 1;
             _mGunFireTime = Glob.uiTime;
             int newPhase;

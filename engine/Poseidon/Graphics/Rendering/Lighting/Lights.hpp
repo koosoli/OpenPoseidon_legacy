@@ -3,6 +3,7 @@
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Core/Visual.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/MuzzleFlashPulse.hpp>
 
 
 namespace Poseidon
@@ -126,7 +127,7 @@ protected:
 	Light();
 	~Light() override;
 
-	bool IsOn() const {return _on;}
+	virtual bool IsOn() const {return _on;}
 	void Switch(bool on = true) {_on = on;}
 
 	// By default a local light is scaled by the sun's NightEffect and dropped
@@ -322,6 +323,21 @@ class LightPoint: public LightPositionedColored
 	void ToDraw( ClipFlags clipFlags=ClipAll, bool dimmed=false ) override;
 
 	void Load(const ParamEntry &cls);
+};
+
+// The same actual point-light description/local-light renderer as ordinary
+// lights, with simulation-clock expiry even between low-frequency AI ticks.
+class MuzzleFlashLight final: public LightPoint
+{
+    MuzzleFlashPulse _pulse;
+public:
+    MuzzleFlashLight();
+    void Trigger(Vector3Par position, float strength = 1.0f);
+    bool IsOn() const override;
+    void GetDescription(LightDescription& desc) const override;
+    Color Apply(Vector3Par point, Vector3Par normal) override;
+    float FlareIntensity(Vector3Par camPos, Vector3Par camDir) const override;
+    Color GetObjectColor() const override;
 };
 
 class LightPointVisible: public LightPoint

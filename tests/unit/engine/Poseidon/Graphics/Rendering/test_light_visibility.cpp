@@ -5,8 +5,95 @@
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <limits>
+#include <Poseidon/Core/Global.hpp>
+#include <catch2/catch_approx.hpp>
 
 using namespace Poseidon;
+
+TEST_CASE("Muzzle pulse is bounded and independent of simulation partition", "[Graphics][muzzle-light]")
+{
+    MuzzleFlashPulse pulse;
+    REQUIRE(pulse.Energy(1000) == 0);
+    pulse.Trigger(1000);
+    REQUIRE(pulse.Energy(999) == 0); // a pre-birth world clock fails closed
+    REQUIRE(pulse.Energy(1000) == 1);
+    REQUIRE(pulse.Energy(1020) == 1);
+    float previous = 1;
+    for (int age = 0; age <= 300; ++age)
+    {
+        const float energy = pulse.Energy(1000 + age);
+        REQUIRE(energy >= 0);
+        REQUIRE(energy <= previous);
+        previous = energy;
+    }
+    REQUIRE(pulse.Energy(1110) == 0);
+    pulse.Trigger(1040, 100); // burst retrigger cannot accumulate energy
+    REQUIRE(pulse.Energy(1040) == 1);
+    REQUIRE(pulse.Energy(1150) == 0);
+    pulse.Trigger(1040, std::numeric_limits<float>::quiet_NaN());
+    REQUIRE(pulse.Energy(1040) == 0);
+    pulse.Trigger(1040, -1);
+    REQUIRE(pulse.Energy(1040) == 0);
+    pulse.Trigger(std::numeric_limits<std::int64_t>::min());
+    REQUIRE(pulse.Energy(std::numeric_limits<std::int64_t>::max()) == 0);
+    REQUIRE(MuzzleFlashPulse::CoreMetres * MuzzleFlashPulse::EndScale == Catch::Approx(8.4));
+}
+
+TEST_CASE("Actual muzzle point light expires through base dispatch without an AI tick", "[Graphics][muzzle-light]")
+{
+    struct RestoreClock
+    {
+        Foundation::Time saved = Glob.time;
+        ~RestoreClock() { Glob.time = saved; }
+    } restore;
+    Glob.time = Foundation::Time(1000);
+    MuzzleFlashLight muzzle;
+    Light* light = &muzzle;
+    REQUIRE_FALSE(light->IsOn());
+    muzzle.Trigger(Vector3(5, 2, 7));
+    REQUIRE(light->IsOn());
+    REQUIRE(light->IsDaylightVisible());
+    LightDescription peak{}, faded{}, expired{};
+    light->GetDescription(peak);
+    REQUIRE(peak.type == LTPoint);
+    REQUIRE(peak.pos.X() == 5);
+    REQUIRE(peak.pos.Y() == 2);
+    REQUIRE(peak.pos.Z() == 7);
+    REQUIRE(peak.startAtten == Catch::Approx(0.7));
+    REQUIRE(peak.endAttenScale == 12);
+    REQUIRE(peak.diffuse.R() > peak.diffuse.G());
+    REQUIRE(peak.diffuse.G() > peak.diffuse.B());
+    Glob.time = Foundation::Time(1060);
+    REQUIRE(light->IsOn());
+    light->GetDescription(faded);
+    REQUIRE(faded.diffuse.R() < peak.diffuse.R());
+    REQUIRE(faded.diffuse.R() > 0);
+    LightDescription paused{};
+    light->GetDescription(paused);
+    REQUIRE(paused.diffuse.R() == faded.diffuse.R()); // rendering does not advance history
+    Glob.time = Foundation::Time(1110); // no WeaponLightSource::Simulate call
+    REQUIRE_FALSE(light->IsOn());
+    light->GetDescription(expired);
+    REQUIRE(expired.diffuse.R() == 0);
+    REQUIRE(expired.ambient.R() == 0);
+    muzzle.Trigger(Vector3(-1, 3, 8));
+    REQUIRE(light->IsOn());
+    light->GetDescription(peak);
+    REQUIRE(peak.pos.X() == -1);
+    REQUIRE(peak.diffuse.R() == 2); // no burst accumulation or new light instance
+    light->Switch(false);
+    REQUIRE_FALSE(light->IsOn());
+    light->GetDescription(expired);
+    REQUIRE(expired.diffuse.R() == 0);
+    muzzle.Trigger(Vector3(std::numeric_limits<float>::quiet_NaN(), 0, 0));
+    REQUIRE_FALSE(light->IsOn());
+    light->GetDescription(expired);
+    REQUIRE(expired.diffuse.R() == 0);
+    LightPoint ordinary(HWhite, HBlack);
+    Light* unchanged = &ordinary;
+    REQUIRE(unchanged->IsOn());
+    REQUIRE_FALSE(unchanged->IsDaylightVisible());
+}
 
 TEST_CASE("Explicit reflector cone reaches renderer without changing legacy constructors", "[Graphics][LightVisibility]")
 {

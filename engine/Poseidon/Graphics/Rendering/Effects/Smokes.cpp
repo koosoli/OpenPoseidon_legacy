@@ -1569,15 +1569,58 @@ WeaponLightSource::WeaponLightSource()
 void WeaponLightSource::Init()
 {
     _timeToLight = -1;
+    _invTotalTimeToLight = 0;
+    _lightIntensity = 0;
+    _lightMGun = false;
+    _muzzlePulse = false;
 }
 
 void WeaponLightSource::Start(float time, float intensity, bool mGun)
 {
+    if (_muzzlePulse) _light.Free(); // switching source kind never reuses the pulse subclass
+    _muzzlePulse = false;
     float lightTime = time * 3;
     _timeToLight = lightTime;
     _invTotalTimeToLight = 1 / lightTime;
     _lightIntensity = intensity;
     _lightMGun = mGun;
+}
+
+void WeaponLightSource::StartMuzzle(Vector3Par actualMuzzlePosition)
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("POSEIDON_MUZZLE_LIGHT");
+        return !(value && value[0] == '0');
+    }();
+    if (!enabled)
+    {
+        Start(0.05f, 0.004f, true); // exact previous light; sprite/smoke/shot stay unchanged
+        return;
+    }
+    if (!_muzzlePulse) _light.Free();
+    _muzzlePulse = true;
+    // Preserve the legacy infantry housekeeping/random-call schedule. Visible
+    // energy expires independently after 110ms inside the actual point light.
+    _timeToLight = 0.05f * 3.0f;
+    _invTotalTimeToLight = 1.0f / _timeToLight;
+    _lightIntensity = 0.004f;
+    _lightMGun = true;
+    if (!(ENGINE_CONFIG.lights & LIGHT_EXPLO) || !GLOB_SCENE) return;
+    if (!_light)
+    {
+        _light = new MuzzleFlashLight();
+        GLOB_SCENE->AddLight(_light);
+    }
+    static_cast<MuzzleFlashLight*>(_light.GetRef())->Trigger(actualMuzzlePosition);
+    static const bool trace = [] {
+        const char* value = std::getenv("POSEIDON_MUZZLE_LIGHT_TRACE");
+        return value && value[0] == '1';
+    }();
+    if (trace)
+        LOG_INFO(Graphics, "MUZZLE_LIGHT event=bullet timeMs={} pos={:.3f},{:.3f},{:.3f} lifeMs={} core={:.2f} reach={:.2f} daylight=true immediate=true active={}",
+                 Glob.time.toInt(), actualMuzzlePosition.X(), actualMuzzlePosition.Y(), actualMuzzlePosition.Z(),
+                 MuzzleFlashPulse::LifetimeMs, MuzzleFlashPulse::CoreMetres,
+                 MuzzleFlashPulse::CoreMetres * MuzzleFlashPulse::EndScale, _light->IsOn());
 }
 
 bool WeaponLightSource::Active() const
@@ -1587,6 +1630,25 @@ bool WeaponLightSource::Active() const
 
 void WeaponLightSource::Simulate(Vector3Par pos, float deltaT)
 {
+    if (_muzzlePulse)
+    {
+        if (_timeToLight < 0)
+            _light.Free();
+        else
+        {
+            _timeToLight -= deltaT;
+            if (ENGINE_CONFIG.lights & LIGHT_EXPLO)
+            {
+                // Keep exactly the legacy cosmetic RNG draw so firing/recoil's
+                // shared random stream does not shift when illumination changes.
+                (void)GRandGen.PlusMinus(0.8, 0.2);
+                // The pulse belongs to the actual fired muzzle/pose, not a
+                // weapon selected after the shot or a later AI simulation pose.
+            }
+            else _light.Free();
+        }
+        return;
+    }
     if (_timeToLight < 0)
     {
         _light.Free();
@@ -1625,9 +1687,22 @@ void WeaponLightSource::Simulate(Vector3Par pos, float deltaT)
 
 LSError WeaponLightSource::Serialize(ParamArchive& ar)
 {
-    PARAM_CHECK(ar.Serialize("timeToLight", _timeToLight, 1))
-    PARAM_CHECK(ar.Serialize("invTotalTimeToLight", _invTotalTimeToLight, 1))
-    PARAM_CHECK(ar.Serialize("lightIntensity", _lightIntensity, 1))
+    // A transient muzzle flash must not become a long-range legacy light after
+    // load. Keep the existing archive fields, saving this cosmetic pulse inactive.
+    float time = _muzzlePulse ? -1.0f : _timeToLight;
+    float inverse = _muzzlePulse ? 0.0f : _invTotalTimeToLight;
+    float intensity = _muzzlePulse ? 0.0f : _lightIntensity;
+    PARAM_CHECK(ar.Serialize("timeToLight", time, 1))
+    PARAM_CHECK(ar.Serialize("invTotalTimeToLight", inverse, 1))
+    PARAM_CHECK(ar.Serialize("lightIntensity", intensity, 1))
+    if (ar.IsLoading())
+    {
+        _light.Free();
+        _muzzlePulse = false;
+        _timeToLight = time;
+        _invTotalTimeToLight = inverse;
+        _lightIntensity = intensity;
+    }
 
     return LSOK;
 }

@@ -967,6 +967,57 @@ void LightPoint::GetDescription(LightDescription& desc) const
     desc.endAttenScale = _endAttenScale; // LGT-014
 }
 
+MuzzleFlashLight::MuzzleFlashLight() : LightPoint(Color(2.0f, 1.55f, 0.9f), Color(0.12f, 0.085f, 0.035f))
+{
+    SetBrightness(MuzzleFlashPulse::CoreMetres / 50.0f);
+    SetEndAttenScale(MuzzleFlashPulse::EndScale);
+    SetDaylightVisible(true); // indoor daytime and night use the same actual flame
+}
+
+void MuzzleFlashLight::Trigger(Vector3Par position, float strength)
+{
+    if (!std::isfinite(position.X()) || !std::isfinite(position.Y()) || !std::isfinite(position.Z()))
+    {
+        _pulse.Trigger(Glob.time.toInt(), 0);
+        Switch(false);
+        return;
+    }
+    SetPosition(position);
+    _pulse.Trigger(Glob.time.toInt(), strength);
+    Switch();
+}
+
+bool MuzzleFlashLight::IsOn() const
+{
+    return LightPoint::IsOn() && _pulse.Energy(Glob.time.toInt()) > 0;
+}
+
+void MuzzleFlashLight::GetDescription(LightDescription& desc) const
+{
+    LightPoint::GetDescription(desc);
+    const float energy = LightPoint::IsOn() ? _pulse.Energy(Glob.time.toInt()) : 0;
+    desc.diffuse = desc.diffuse * energy;
+    desc.ambient = desc.ambient * energy;
+}
+
+Color MuzzleFlashLight::Apply(Vector3Par point, Vector3Par normal)
+{
+    if (!IsOn()) return Color(HBlack);
+    return LightPoint::Apply(point, normal) * _pulse.Energy(Glob.time.toInt());
+}
+
+float MuzzleFlashLight::FlareIntensity(Vector3Par camPos, Vector3Par camDir) const
+{
+    if (!IsOn()) return 0;
+    return LightPoint::FlareIntensity(camPos, camDir) * _pulse.Energy(Glob.time.toInt());
+}
+
+Color MuzzleFlashLight::GetObjectColor() const
+{
+    if (!IsOn()) return Color(HBlack);
+    return LightPoint::GetObjectColor() * _pulse.Energy(Glob.time.toInt());
+}
+
 LightReflector::LightReflector(LODShapeWithShadow* shape, ColorVal color, ColorVal ambient, float angle, float size)
     : _shape(shape), base(color, ambient), _angle(angle), _startAtten(200), _size(size)
 {
