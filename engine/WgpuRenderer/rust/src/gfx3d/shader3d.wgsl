@@ -30,22 +30,35 @@ fn uniform_cloth_mask(uv: vec2<f32>, encoded: f32, footprint: vec2<f32>) -> f32 
     let pad = max(footprint * 2.0, vec2<f32>(2.0 / 1024.0));
     // Verified 1024px stock merged atlases mix cloth with skin/boots/helmets
     // and baked whole-body far LODs. Only the main cloth islands receive wetness.
-    // West photographed hands: x=256..768,y=220..344; East: x=512..1024,
-    // y=250..344. Expand exclusions as minification increases, never select skin
+    // West hand-photo islands: x=256..304,456..560,720..772,y=220..344;
+    // East: x=508..564,712..820,972..1024,y=246..350.
+    // Expand exclusions as minification increases, never select skin
     // by colour. Articulated hands/faces bind separate xicht_a, never admitted.
     var mask = uniform_cloth_rect(uv, vec2<f32>(0.0), vec2<f32>(1.0, 0.50), pad);
     if (encoded < 4.0) {
-        let hands = uniform_cloth_rect(uv, vec2<f32>(0.245, 0.210) - pad * 2.0,
-                                      vec2<f32>(0.755, 0.340) + pad * 2.0, pad);
+        let hand_a = uniform_cloth_rect(uv, vec2<f32>(0.245, 0.210) - pad * 2.0,
+                                       vec2<f32>(0.300, 0.340) + pad * 2.0, pad);
+        let hand_b = uniform_cloth_rect(uv, vec2<f32>(0.440, 0.210) - pad * 2.0,
+                                       vec2<f32>(0.550, 0.340) + pad * 2.0, pad);
+        let hand_c = uniform_cloth_rect(uv, vec2<f32>(0.700, 0.210) - pad * 2.0,
+                                       vec2<f32>(0.760, 0.340) + pad * 2.0, pad);
+        let hands = max(hand_a, max(hand_b, hand_c));
         let helmet = uniform_cloth_rect(uv, vec2<f32>(0.750, 0.375) - pad * 2.0,
                                        vec2<f32>(1.0, 0.50) + pad * 2.0, pad);
         mask *= (1.0 - hands) * (1.0 - helmet);
     } else {
-        let hands = uniform_cloth_rect(uv, vec2<f32>(0.495, 0.240) - pad * 2.0,
-                                      vec2<f32>(1.0, 0.340) + pad * 2.0, pad);
+        let hand_a = uniform_cloth_rect(uv, vec2<f32>(0.490, 0.235) - pad * 2.0,
+                                       vec2<f32>(0.555, 0.345) + pad * 2.0, pad);
+        let hand_b = uniform_cloth_rect(uv, vec2<f32>(0.685, 0.235) - pad * 2.0,
+                                       vec2<f32>(0.810, 0.345) + pad * 2.0, pad);
+        let hand_c = uniform_cloth_rect(uv, vec2<f32>(0.945, 0.235) - pad * 2.0,
+                                       vec2<f32>(1.0, 0.345) + pad * 2.0, pad);
+        let hands = max(hand_a, max(hand_b, hand_c));
         let boots = uniform_cloth_rect(uv, vec2<f32>(0.25, 0.375) - pad * 2.0,
                                       vec2<f32>(0.50, 0.50) + pad * 2.0, pad);
-        mask *= (1.0 - hands) * (1.0 - boots);
+        let boot_tops = uniform_cloth_rect(uv, vec2<f32>(0.50, 0.460) - pad * 2.0,
+                                          vec2<f32>(1.0, 0.50) + pad * 2.0, pad);
+        mask *= (1.0 - hands) * (1.0 - max(boots, boot_tops));
     }
     return mask;
 }
