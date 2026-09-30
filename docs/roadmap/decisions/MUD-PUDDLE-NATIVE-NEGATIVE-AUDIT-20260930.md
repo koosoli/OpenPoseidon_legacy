@@ -30,6 +30,27 @@ Read-only pixel localisation distinguishes two effects:
 Do not change production admission or relax the gate to fit these images.
 Use a steep, height-queried view confined to an ineligible cell interior.
 
+### CPU localisation of the blue patch
+
+Intersecting camera rays with the actual native 6.25 metre bilinear heightfield
+strongly supports neighbouring Dirt admission. Use camera X/Z 2756.25/2369.25,
+Y 10.44, downward elevation 18 degrees, cLeft 0.933333 / cTop 0.525 and the recorded
+1280x720 image. Convert pixel coordinates to normalized screen coordinates,
+rotate ray `(screenX*cLeft,screenY*cTop,1)` by the recorded camera elevation,
+then bisect its intersection with the source-derived native heightfield.
+
+| Pixel X/Y | Estimated ground X/Z | Interpolated mud |
+|---|---|---:|
+| (510,313) | (2752.327,2389.368) | 0.999989 |
+| (559,314) | (2753.816,2389.274) | 0.997871 |
+| (474,304) | (2750.978,2390.513) | 0.855588 |
+| (645,324) | (2756.393,2388.162) | 0.753901 |
+
+The first ray resolves almost entirely to Dirt_01 cell `(220,191)`.
+These values exceed the production 0.65 admission start. This is CPU geometric
+inference, not a GPU depth/material readback, but it explains the observed small
+blue film through legitimate Dirt source flags. No classifier change is warranted.
+
 ## Bounded stock-data audit
 
 Read only `addons/data/worlds.pak` directory metadata, then three entries. No
