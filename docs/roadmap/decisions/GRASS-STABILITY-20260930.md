@@ -154,6 +154,31 @@ The full rebuilt game and renderer `77299a74` pass the exact owner camera again
 pair, >48 scheduled changes 0.0781%, mean delta 2.811, mean luma 105.930.
 The native follow-up therefore preserves the demonstrated OFP aerial fix.
 
+### Frozen native appearance judgement
+
+Clean installed `77299a74` campaign
+`corrected-stream-static-20260930-131306-6e832d` compares OFF/ON under identical
+paused time 100, date/hour, zero wind, fixed exposure, clouds/terrain UV jitter/
+temporal effects off and native PlantMat blades. Both arms exit normally and
+confirm the requested filter mode. Startup placement witnesses agree at
+20,939 near / 6,227 mid; the harness has no per-pose population query, so these
+are not invented close/aerial counters. Static repeats and camera returns in
+both arms differ by at most one display level, with means at most 0.000004.
+
+Root's delegated judgement retains the filter: foreground blade shapes remain
+visible and the aerial view stays textured, without a conspicuous dark sheet.
+Middle-distance grass is darker/more coherent. Central image mean RGB channels
+are close OFF 114.141 / ON 104.805, aerial OFF 133.397 / ON 132.292; these include
+terrain/objects and are not opacity-weighted grass photometry. The whole filter
+changes normals and albedo jointly. This accepts the bounded current look for
+continued building, with later owner tuning; it does not prove native shimmer
+improvement from static images or every gusting rendered frame.
+
+The preceding `native-static-20260930-125901-098f8e` remains failed: its script
+redirected stderr alone, causing Windows bootstrap to reconnect both CRT streams
+to the console and lose mandatory mode proof. Redirecting both streams matches
+the working benchmark harness; no rendering change or weakened proof was used.
+
 1. Finish installed grass A/B and close-view regression checks; retain only
    demonstrated improvements. Extend to native photo grass and live varying wind.
 2. Mud puddles: independently implement a bounded terrain-material/weather

@@ -21,6 +21,16 @@ September 30 owner priorities and execution order:
 Use the verified `codex/streaming-residency` baseline, preserve intervening work,
 and finish installed visual acceptance before claiming these improvements complete.
 
+September 30 continuation: grass owner-pose stability and native frozen appearance
+have bounded installed evidence; real dirt camera returns, source-confirmed
+BeachGrass exclusion and an actual floor-free roof pass controlled checks.
+Oliver delegated current appearance judgement and deferred his own fine tuning.
+The stock corpse shared affine pose/lifetime prerequisite passes installed checks;
+uncalibrated joints and collider envelopes still prevent promoting a solver.
+Original CWA cultivated-soil admission is now narrowly implemented from verified
+surface metadata and awaits the fresh installed build. Parked architecture work
+and previously rejected defaults remain parked.
+
 September 12 small-change follow-through:
 [camera upload batching and same-size terrain resource reuse](decisions/LOW-RISK-PERF-20260912.md).
 Camera CPU preparation is reduced; a sustained FPS gain is NOT established.

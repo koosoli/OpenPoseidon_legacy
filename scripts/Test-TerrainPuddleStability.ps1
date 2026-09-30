@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$Camera = '9481.25 2994.25 209.72 0 -18',
+    [ValidateRange(0,30)][double]$CameraGroundClearance = 0,
+    [ValidateRange(0,50)][double]$BoundaryGroundClearance = 0,
     [ValidateRange(0,30)][double]$NegativeGroundClearance = 0,
     [string]$NegativeCamera = '2756.25 2369.25 10.44 0 -18',
     [string]$BoundaryCamera = '9481.25 3006.25 249.72 0 -85',
@@ -11,6 +13,7 @@ param(
     [ValidateRange(1,64)][int]$MaskThreshold = 8,
     [ValidateRange(0.5,1)][double]$MinimumReturnIoU = 0.95,
     [switch]$RequireNumericGates,
+    [switch]$LegacyCwa,
     [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label = 'native-stability',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
     [string]$NativeAddons = 'C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons'
@@ -40,7 +43,7 @@ if (!$roofEnabled -and ($RoofExposedControlCamera -or $RoofFixtureEvidence)) { t
 if ($roofEnabled) { $roof = @(Camera-Numbers $RoofCamera); $roofControl = @(Camera-Numbers $RoofExposedControlCamera) }
 $root = Split-Path -Parent $PSScriptRoot
 $mission = Join-Path $root 'tests/perf/missions/perf_field.eden'
-foreach ($path in @($mission, $NativeAddons)) {
+foreach ($path in $(if ($LegacyCwa) { @($mission) } else { @($mission, $NativeAddons) })) {
     if (!(Test-Path -LiteralPath $path)) { throw "Required native fixture path missing: $path" }
 }
 function Installed-State {
@@ -71,7 +74,9 @@ foreach ($key in $keys) { $savedEnv[$key] = [Environment]::GetEnvironmentVariabl
 @{ scriptSha256 = (Get-FileHash -LiteralPath $PSCommandPath).Hash;
    metricsSha256 = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'TerrainPuddleMetrics.cs')).Hash;
    sourceHead = (& git -C $root rev-parse HEAD); installed = $before; mission = $mission;
-   nativeAddons = $NativeAddons; camera = $Camera; negativeCamera = $NegativeCamera; negativeGroundClearance = $NegativeGroundClearance; boundaryCamera = $BoundaryCamera;
+   nativeAddons = $(if ($LegacyCwa) { $null } else { $NativeAddons }); legacyCwa = [bool]$LegacyCwa;
+   camera = $Camera; cameraGroundClearance = $CameraGroundClearance; boundaryGroundClearance = $BoundaryGroundClearance;
+   negativeCamera = $NegativeCamera; negativeGroundClearance = $NegativeGroundClearance; boundaryCamera = $BoundaryCamera;
    roofCamera = $RoofCamera; roofControl = $RoofExposedControlCamera; roofEvidence = $RoofFixtureEvidence;
    lockOwner = $env:LOCK_OWNER; fixedSimTime = 100; fixedDate = @(1985,6,21,16,0); fixedExposure = 1; roi = 'central 60% of width and height';
    maskThreshold = $MaskThreshold; minimumReturnIoU = $MinimumReturnIoU; requireNumericGates = [bool]$RequireNumericGates;
@@ -170,7 +175,13 @@ function Close-Owned {
 }
 function Pair-Metrics($a,$b) { return [TerrainPuddleMetrics]::Compare($a.path,$b.path,$MaskThreshold) }
 try {
-    $env:POSEIDON_REFORGER_WORLD = 'worlds/eden'; $env:POSEIDON_REFORGER_OBJECTS = '1'; $env:POSEIDON_REFORGER_STREAM = '1'
+    if ($LegacyCwa) {
+        foreach ($key in @('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM')) {
+            Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
+        }
+    } else {
+        $env:POSEIDON_REFORGER_WORLD = 'worlds/eden'; $env:POSEIDON_REFORGER_OBJECTS = '1'; $env:POSEIDON_REFORGER_STREAM = '1'
+    }
     Remove-Item Env:POSEIDON_TEST_RAIN -ErrorAction SilentlyContinue
     $env:WGR_TERRAIN_PUDDLE_FIXTURE = '1'; $env:WGR_TEMPORAL = '0'
     $env:WGR_AUTO_EXPOSURE = '0'; $env:WGR_EXPOSURE = '1'; $env:WGR_INTERIOR_SKY = '1'
@@ -198,8 +209,9 @@ try {
         $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
         $listener.Start(); $port = $listener.LocalEndpoint.Port; $listener.Stop()
         $arguments = @('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000',
-            '--harness',"$port",'--test-mission',('"'+$mission+'"'),'--test-world',('"'+$NativeAddons+'"'),
-            '--test-world-hour','16','--test-world-freefly') + $numbers + @('--log-file',('"'+$log+'"'))
+            '--harness',"$port",'--test-mission',('"'+$mission+'"'))
+        if (!$LegacyCwa) { $arguments += @('--test-world',('"'+$NativeAddons+'"')) }
+        $arguments += @('--test-world-hour','16','--test-world-freefly') + $numbers + @('--log-file',('"'+$log+'"'))
         $p = Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $arguments
         $null = $p.Handle
         $until = [DateTime]::UtcNow.AddSeconds(120)
@@ -223,10 +235,17 @@ try {
             $reply = Send @{ cmd = 'eval'; code = $expression }
             if ($reply.result -notmatch 'OK') { throw "Deterministic setup refused: $expression" }
         }
-        if ($NegativeGroundClearance -gt 0) {
+        $perf = Send @{ cmd = 'eval'; code = 'triPerfStats 0' }
+        $result.arms[$arm] = @{ perfStats = $perf.result }
+        if ($CameraGroundClearance -gt 0 -or $BoundaryGroundClearance -gt 0 -or $NegativeGroundClearance -gt 0) {
             . "$PSScriptRoot/TerrainPuddleStockRoof.ps1"
-            $ground = Get-TerrainPuddleFixtureHeight -SendCommand { param($request) Send $request } -X ([double]::Parse($negative[0],$culture)) -Z ([double]::Parse($negative[1],$culture))
-            $negative[2] = ($ground+$NegativeGroundClearance).ToString('R',$culture)
+            foreach ($spec in @(@{tokens=$numbers; clearance=$CameraGroundClearance},
+                                 @{tokens=$boundary; clearance=$BoundaryGroundClearance},
+                                 @{tokens=$negative; clearance=$NegativeGroundClearance})) {
+                if ($spec.clearance -le 0) { continue }
+                $ground = Get-TerrainPuddleFixtureHeight -SendCommand { param($request) Send $request } -X ([double]::Parse($spec.tokens[0],$culture)) -Z ([double]::Parse($spec.tokens[1],$culture))
+                $spec.tokens[2] = ($ground+$spec.clearance).ToString('R',$culture)
+            }
         }
         $captures = @{}
         if ($arm -ne 'raw-sky') {
@@ -254,7 +273,8 @@ try {
             throw 'Interior sky geometry map was not enabled in the installed renderer.'
         }
         $result.arms[$arm] = @{ pid = $p.Id; captures = $captures; actualWeather = $weather; log = $log;
-            wetnessOverride = $env:WGR_TERRAIN_PUDDLE_WETNESS; master = $env:WGR_TERRAIN_PUDDLES; uploadedWetness = $uploaded }
+            wetnessOverride = $env:WGR_TERRAIN_PUDDLE_WETNESS; master = $env:WGR_TERRAIN_PUDDLES; uploadedWetness = $uploaded;
+            perfStats = $perf.result }
         Close-Owned
         if (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet) { throw 'Runtime failure invalidates captures.' }
     }

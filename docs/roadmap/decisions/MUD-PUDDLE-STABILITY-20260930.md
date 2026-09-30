@@ -159,6 +159,16 @@ BeachGrass itself is wet. A source-backed ineligible cell and queried height
 are the next negative fixture; passing this mixed image is not a material
 segmentation claim.
 
+`pure-beachgrass-return-20260930-130805-79d16b` passes every unchanged gate on
+`77299a74`. The source-backed camera uses 2781.25/2381.25, queried height
+5.5625 +5 metres, elevation -85. Its central ROI is inside the audited zero-mud
+interior; root inspection confirms visible ground, with a bush partly covering
+the upper region and no ocean. Negative changed fraction is **zero**, mean
+0.000091; master-off mean is 0.000601. Dirt/overhead masks still return with
+IoU 1.0 and nonempty responses. This independently accepts exclusion at that
+known BeachGrass cell, without relabelling the old failed shoreline images.
+Source/camera bounds are in [the native audit](MUD-PUDDLE-NATIVE-NEGATIVE-AUDIT-20260930.md).
+
 Source inspection found no existing validated native roof-over-eligible-dirt
 fixture in the available scripts or mission evidence. The prior lighting plan's
 synthetic room validates its model-space sky bake, not these terrain pixels.
