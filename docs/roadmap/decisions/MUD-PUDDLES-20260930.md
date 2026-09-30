@@ -15,7 +15,10 @@ acceptance. This decision records source implementation and CPU/shader checks on
   GPU texture is anonymous and cannot identify the surface.
 - Legacy CfgSurfaces requires all four preblended quadrants to be eligible. Mixed and
   unknown tiles stay dry. Authored Arma terrain slot bits use the existing per-pixel LCA
-  weights, normalised over resolved surface slots. No extra LCA fetch or color heuristic.
+  weights, normalised over **all selected source slots**, including unknown/unbound
+  slots. Dropping a rock color texture cannot promote a minor mud share into full mud;
+  color/normal composition retains its separate resolved-slot normalization. No extra
+  LCA fetch or color heuristic.
 - Rain uses the existing captured landscape/effective rain density and simulation clock.
   The single cosmetic saturation value fills with a 30-second time constant in full
   rain and dries with a 180-second time constant. Exact exponential integration makes
@@ -29,9 +32,11 @@ acceptance. This decision records source implementation and CPU/shader checks on
 - Near-flat terrain only: geometric normal Y fades from 0.995 to 0.9995 (about 5.7 to
   1.8 degrees). All ground below sea level +3.5 m is excluded, fading to eligibility at
   +4.5 m, preserving Tidewater's existing coastal wet sand/residue domain. Snow excludes
-  the film. Existing interior sky visibility suppresses darkening and reflection under
-  shelter; with that system disabled/unavailable, this is not an independent rain-roof
-  collision solution.
+  the film. Raw geometric interior sky reach suppresses darkening and reflection under
+  shelter, independently of artistic ambient strength/floor sliders; existing ambient
+  shading still uses those controls. The extra raw map query runs only at wet eligible
+  puddle pixels. With that system disabled/unavailable, this is not an independent
+  rain-roof collision solution.
 - Puddle albedo darkens locally. Flat water-normal Fresnel reflects the existing broad
   SH sky and a broad sun lobe, with terrain/object/cloud shadows retained. No textured
   glitter normal, planar reflection, SSR, new render pass, texture allocation, water body,
@@ -62,6 +67,11 @@ zero-overhead or byte-identical-frame claim follows from source inspection.
   offsets, source-mask and weather/slope/shore/snow/footprint contracts, existing sky
   visibility checks. One existing source assertion was updated for the new internal
   `AuthoredCell` mud member; native shading behavior remains covered.
+- Admission review follow-up: an explicit 80% rock/unknown +20% mud source mixture is
+  rejected with both color slots resident and with the rock/unknown image missing.
+  The source helper counts all six mask slots independently of residency; no change
+  to the existing color denominator. A roof test also covers raw admission independently
+  of zero ambient strength/high ambient floors. The terrain subset now has 18 passing tests.
 - `git diff --check`: clean. Cargo regenerated an unrelated two-entry CLI dependency
   lockfile difference; that file is not part of this change.
 

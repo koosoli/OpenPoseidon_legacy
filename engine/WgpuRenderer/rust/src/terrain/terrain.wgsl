@@ -611,6 +611,21 @@ fn decode_mask(mask: vec4<f32>) -> array<f32, 6> {
                          group * mask.b, level_four, level_five);
 }
 
+// Admission is a property of the SOURCE mask, not the subset of color textures
+// currently bound. An unknown/unbound selected slot still occupies its source
+// share, so dropping 80% rock cannot turn the remaining 20% mud into 100% mud.
+fn source_mud_fraction(weights: array<f32, 6>, flags: u32) -> f32 {
+    var selected = 0.0;
+    var mud = 0.0;
+    for (var i = 0u; i < TERRAIN_SURFACE_SLOTS; i = i + 1u) {
+        selected += weights[i];
+        if ((flags & (1u << (8u + i))) != 0u) {
+            mud += weights[i];
+        }
+    }
+    return clamp(mud / max(selected, 1e-6), 0.0, 1.0);
+}
+
 // `world_pos` is ABSOLUTE (the TexGens are authored in world space); `view_pos` is
 // the same point camera-relative, and is the only thing distance and the view
 // vector may be taken from. Passing the absolute position for both -- which is
@@ -814,7 +829,6 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     var surface = vec3<f32>(0.0);
     var normal_ts = vec3<f32>(0.0);
     var bound_weight = 0.0;
-    var mud_weight = 0.0;
     for (var i = 0u; i < min(material.surface_count, TERRAIN_SURFACE_SLOTS); i = i + 1u) {
         let colour_tex = material.surfaces[i];
         if (colour_tex == 0u || weights[i] <= 0.0) {
@@ -843,9 +857,6 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                                     &slot_normal_ts) * slot_gain * weights[i];
         normal_ts += slot_normal_ts * weights[i];
         bound_weight += weights[i];
-        if ((material.puddle_flags & (1u << (8u + i))) != 0u) {
-            mud_weight += weights[i];
-        }
     }
     if (bound_weight <= 0.0) {
         // Every slot the mask selected here is a hole. The satellite is still the
@@ -910,7 +921,7 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     // different bands and must not share a distance ramp.
     return AuthoredCell(satellite * gain,
                         blend_normal_ts(normalize(mix(vec3<f32>(0.0, 0.0, 1.0), normal_ts, normal_blend)),
-                                        tile_normal), 1.0, mud_weight / bound_weight);
+                                        tile_normal), 1.0, source_mud_fraction(weights, material.puddle_flags));
 }
 
 struct VsOut {
@@ -1338,7 +1349,14 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // bare 4% dielectric reallocation — an invisible result for a per-pixel reflect() plus a
     // second SH evaluation on the single most fill-heavy surface in the frame.
     let local_sky_visibility = interior_sky_ao(in.world_pos + frame.cam_pos.xyz, n);
-    rain_puddle *= smoothstep(0.6, 0.95, local_sky_visibility);
+    if (rain_puddle > 0.0 && frame.skyvis.x >= 0.5) {
+        // Physical admission uses RAW geometric sky reach. Ambient-light strength
+        // and floor sliders must never invent rain beneath an opaque roof. This
+        // extra map query is confined to wet eligible puddle pixels. Without an
+        // active map there is no independent roof/rain-collision proof.
+        let rain_sky_reach = interior_sky_reach(in.world_pos + frame.cam_pos.xyz);
+        rain_puddle *= smoothstep(0.6, 0.95, rain_sky_reach);
+    }
     rgb *= 1.0 - rain_puddle * 0.38;
     sun_ambient *= sky_vis_ao(in.world_xz)
         * gtao_ao(in.clip.xy)
@@ -1369,8 +1387,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         let sun_lobe = pow(max(dot(water_n, half_vector), 0.0), 48.0);
         reflected += sun_diffuse * sun_lobe * (1.0 - shadow) * cloud_sun_shadow(in.world_xz)
             * local_sky_visibility;
-        // Covered terrain suppresses both the film and its reflected sky where
-        // the existing sky-visibility system supplies shelter information.
+        // Raw roof admission above suppresses both the film and its reflected sky.
         rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel, rain_puddle);
     }
 
