@@ -86,3 +86,18 @@ No engine/game build, GPU launch, deployment or installed appearance/collision
 check was run by this agent. Required next controls include real source-positive
 stock soil steps, visible geometry/profile and physical height agreement,
 hard/road/roof/snow negatives, pause and camera return, reset and bounded cost.
+
+## Signed geometry integration (source pending installed acceptance)
+
+The terrain and conform shaders now sample the independent signed mud view in
+vertices and matching terrain normals. A 64m camera window uses a 3m border fade;
+near boots reuse snow's 12.5cm CDLOD refinement within 8m when the camera is less
+than 15m above ground. Camera movement uploads another window without deleting
+CPU tracks. Far tracks are retained but do not claim resolved volumetric detail.
+The conservative terrain bounds include the 6cm downward displacement.
+
+Landscape SurfaceY, its derivatives, BumpySurfaceY and local SurfacePlane now
+include the same CPU depression. Existing roads/structure support remains separate.
+This does not change manual ballistic terrain triangle intersections. Empty stores
+return immediately. Shader composition passes; physical walking and installed
+geometry/profile acceptance remain pending the combined game build and smoke test.

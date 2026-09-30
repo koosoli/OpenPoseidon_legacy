@@ -89,7 +89,7 @@ public:
     // A renderer should copy it exactly, not sample offsets as a colour decal.
     float HeightOffsetAt(float x, float z) const
     {
-        if (!enabled || !FinitePosition(x, z)) return 0.0f;
+        if (!enabled || _chunks.empty() || !FinitePosition(x, z)) return 0.0f;
         const float tx = x / CellSize - 0.5f, tz = z / CellSize - 0.5f;
         const int ix = int(std::floor(tx)), iz = int(std::floor(tz));
         const float fx = tx - ix, fz = tz - iz;
@@ -99,7 +99,7 @@ public:
     }
     std::array<float, 2> HeightGradientAt(float x, float z) const
     {
-        if (!enabled || !FinitePosition(x, z)) return {};
+        if (!enabled || _chunks.empty() || !FinitePosition(x, z)) return {};
         const float tx = x / CellSize - 0.5f, tz = z / CellSize - 0.5f;
         const int ix = int(std::floor(tx)), iz = int(std::floor(tz));
         const float fx = tx - ix, fz = tz - iz;

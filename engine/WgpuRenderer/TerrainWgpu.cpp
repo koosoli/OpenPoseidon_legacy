@@ -1,6 +1,7 @@
 #include "TerrainWgpu.hpp"
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/SnowShelter.hpp>
+#include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
 #include <Poseidon/World/Terrain/TerrainSatmap.hpp>
 
@@ -3240,6 +3241,20 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         _snowWasEnabled = snow.CoverActive();
     }
 
+    const auto& mud = GMud();
+    if (camera && std::isfinite(camera->Position().X()) && std::isfinite(camera->Position().Z()))
+    {
+        // Chunk-aligned camera residency changes only the displayed window, never the store.
+        const int mx = int(std::floor(camera->Position().X() / 2.0f));
+        const int mz = int(std::floor(camera->Position().Z() / 2.0f));
+        if (!_mudUploaded || uploaded || _mudRevision != mud.Revision() || mx != _mudWindowX || mz != _mudWindowZ)
+        {
+            auto snapshot = mud.Snapshot(camera->Position().X(), camera->Position().Z());
+            if (mud.Chunks() == 0) snapshot[3] = 0.0f;
+            _engine.QueueMud(std::move(snapshot));
+            _mudRevision = mud.Revision(); _mudWindowX = mx; _mudWindowZ = mz; _mudUploaded = true;
+        }
+    }
     if (camera == nullptr)
     {
         return;
@@ -3283,9 +3298,11 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     const float snowEffDepth = std::max(snow.Depth(), snow.AltitudeDepthAt(snowCamera.X(), snowCamera.Z()));
     const bool refineSnow = snow.CoverActive() && snow.detailedGeometry && snowEffDepth > 0.002f &&
         std::abs(snowCamera.Y() - land.SurfaceY(snowCamera.X(), snowCamera.Z())) < 15.0f;
+    const bool refineMud = mud.enabled && mud.Chunks() > 0 &&
+        std::abs(snowCamera.Y() - land.SurfaceY(snowCamera.X(), snowCamera.Z())) < 15.0f;
     auto emit = [&](const CdlodSelection& s)
     {
-        if (refineSnow)
+        if (refineSnow || refineMud)
             RefineCdlodSnow(s, snowCamera.X(), snowCamera.Z(), 8.0f, emitNode);
         else
             emitNode(s);
@@ -3301,7 +3318,8 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     // extent so seabed always underlies the ocean.)
     SelectVisibleCdlod(
         _tree, _rootIndex, _numLevels, _ranges, _morphRegion, *camera, rx0, rz0, rx1, rz1,
-        [](const CdlodNode&) { return true; }, emit, snow.CoverActive() ? snowEffDepth : 0.0f);
+        [](const CdlodNode&) { return true; }, emit,
+        (snow.CoverActive() ? snowEffDepth : 0.0f) + (mud.enabled && mud.Chunks() > 0 ? MudField::MaxDepth : 0.0f));
 
     _engine.SubmitTerrain(_selected);
     // The procedural path must remain available on maps that use the modern GPU

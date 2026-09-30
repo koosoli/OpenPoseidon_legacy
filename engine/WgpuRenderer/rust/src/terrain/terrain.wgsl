@@ -275,6 +275,29 @@ fn hm_load(ix: i32, iz: i32) -> f32 {
 
 // World height at a world-xz, matching Landscape::SurfaceY's per-cell triangle
 // interpolation (not bilinear) so surface decals stay coplanar with the mesh.
+fn mud_height_offset(world_xz: vec2<f32>) -> f32 {
+    if (arrayLength(&snow.deficits) < 524292u) { return 0.0; }
+    let origin = vec2<f32>(snow.deficits[262144u], snow.deficits[262145u]);
+    let cell = snow.deficits[262146u];
+    let limit = snow.deficits[262147u];
+    if (limit <= 0.0 || cell != 0.125) { return 0.0; }
+    let t = (world_xz - origin) / cell - vec2<f32>(0.5);
+    if (any(t < vec2<f32>(0.0)) || any(t >= vec2<f32>(511.0))) { return 0.0; }
+    let b = vec2<u32>(floor(t));
+    let f = fract(t);
+    let i = 262148u + b.y * 512u + b.x;
+    let offset = mix(mix(snow.deficits[i], snow.deficits[i + 1u], f.x),
+                     mix(snow.deficits[i + 512u], snow.deficits[i + 513u], f.x), f.y);
+    let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
+    return clamp(offset, -limit, 0.0) * smoothstep(0.0, 24.0, edge);
+}
+
+fn mud_height_gradient(world_xz: vec2<f32>, footprint: f32) -> vec2<f32> {
+    let h = max(0.125, footprint);
+    return vec2<f32>(mud_height_offset(world_xz + vec2<f32>(h, 0.0)) - mud_height_offset(world_xz - vec2<f32>(h, 0.0)),
+        mud_height_offset(world_xz + vec2<f32>(0.0, h)) - mud_height_offset(world_xz - vec2<f32>(0.0, h))) / (2.0 * h);
+}
+
 fn sample_height(world_xz: vec2<f32>) -> f32 {
     let t = (world_xz - tp.world_origin) / tp.terrain_grid;
     let base = floor(t);
@@ -287,9 +310,9 @@ fn sample_height(world_xz: vec2<f32>) -> f32 {
     let y11 = hm_load(ix + 1, iz + 1);
     if (f.x <= 1.0 - f.y)
     {
-        return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x;
+        return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x + mud_height_offset(world_xz);
     }
-    return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y;
+    return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y + mud_height_offset(world_xz);
 }
 
 // Central-difference normal at a fixed heightmap step. Taken per-fragment (not
@@ -303,6 +326,14 @@ fn sample_normal(world_xz: vec2<f32>, step: f32) -> vec3<f32> {
     let hz0 = sample_height(world_xz - vec2<f32>(0.0, step));
     let hz1 = sample_height(world_xz + vec2<f32>(0.0, step));
     return normalize(vec3<f32>(-(hx1 - hx0), 2.0 * step, -(hz1 - hz0)));
+}
+
+// Resolve small mud relief against the actual pixel footprint, preserving the
+// broad terrain normal and fading subpixel impressions instead of shimmering.
+fn sample_mud_normal(world_xz: vec2<f32>, step: f32, footprint: f32) -> vec3<f32> {
+    let base = sample_normal(world_xz, step);
+    let delta = mud_height_gradient(world_xz, footprint) - mud_height_gradient(world_xz, step);
+    return normalize(vec3<f32>(base.x - delta.x * base.y, base.y, base.z - delta.y * base.y));
 }
 
 // Index-map entry for a land cell, clamped to the map (row = z, column = x;
@@ -1154,7 +1185,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     }
 
     // Per-pixel normal at a fixed heightmap step (independent of patch LOD/morph).
-    let geometric_n = sample_normal(in.world_xz, tp.terrain_grid);
+    let geometric_n = sample_mud_normal(in.world_xz, tp.terrain_grid, snow_footprint);
     // Apply the authored surfaces' own normal on top of the heightfield's. The terrain
     // frame is world-aligned by construction -- T = +X, B = +Z -- so this needs no tangent
     // stream, and a flat (0,0,1) from an unauthored cell leaves the geometric normal
@@ -1409,7 +1440,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_terrain_prepass(in: VsOut) -> @location(0) vec2<f32> {
     let footprint = max(length(dpdx(in.world_pos)), length(dpdy(in.world_pos)));
-    var n = sample_normal(in.world_xz, tp.terrain_grid);
+    var n = sample_mud_normal(in.world_xz, tp.terrain_grid, footprint);
     let py = sample_height(in.world_xz);
     if (snow.info.w > 0.0 || snowline_depth(in.world_xz, py) > 0.0) {
         let dry = smoothstep(tp.sea_level, tp.sea_level + 0.25, py);
