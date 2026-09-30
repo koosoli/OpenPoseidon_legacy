@@ -123,8 +123,11 @@ function Place([double]$x,[double]$z,[double]$height) {
 }
 function AwaitHover([double]$x,[double]$z) {
     $first=LineCount;$until=[DateTime]::UtcNow.AddSeconds(60);Exec 'setAccTime 1'
+    $result.gates.hoverWait=@()
     do {
-        Start-Sleep -Milliseconds 250;Health;$rows=@(Rows $first | Where-Object {
+        Start-Sleep -Milliseconds 500;Health
+        $result.gates.hoverWait+=@{time=(Eval 'time');position=(Eval 'getPosASL rotorHeli');engineOn=(Eval 'isEngineOn rotorHeli')}
+        $rows=@(Rows $first | Where-Object {
             [Math]::Abs($_.x-$x) -le 8 -and [Math]::Abs($_.z-$z) -le 8 -and $_.height -ge 8 -and $_.height -lt 28 -and $_.rpm -ge .65})
         Require ([DateTime]::UtcNow -lt $until) 'Stock UH60 did not establish an actual bounded hover; no synthetic pinning fallback.'
     } while ($rows.Count -lt 2)
@@ -161,7 +164,7 @@ try {
     $ground=Height $SandX $SandZ;$xz=(Number $SandX)+','+(Number $SandZ)
     Exec ('rotorHeli="UH60" createVehicle ['+$xz+',0]; rotorHeli allowDamage false; rotorHeli setFuel 0; rotorHeli engineOn false; rotorGroup=createGroup west; "SoldierWB" createUnit [['+$xz+',0],rotorGroup,"rotorPilot=this; this allowDamage false; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE"""]; rotorPilot moveInDriver rotorHeli; rotorHeli setPos ['+$xz+',0]; doStop rotorPilot; rotorHeli engineOn false')
     Require ((Eval 'typeOf rotorHeli') -ceq 'UH60' -and (Eval 'typeOf driver rotorHeli') -ceq 'SoldierWB') 'Real stock helicopter/crew identity missing.'
-    $result.gates.object=Eval 'rotorHeli';View $SandX $SandZ $ground
+    $result.gates.object=Eval 'format ["%1",rotorHeli]';View $SandX $SandZ $ground
     $rows=@(Observe 'engine-off' $SandX $SandZ $false);Require (!$result.gates['engine-off'].engineOn -and $rows.Count -eq 0) 'Stopped rotor emitted land puffs.'
     Exec 'rotorHeli setFuel 1; rotorHeli engineOn true';$ground=Place $SandX $SandZ $HoverHeight
     $result.gates.actualHover=AwaitHover $SandX $SandZ
