@@ -34,9 +34,9 @@ acceptance. This decision records source checks and the bounded installed result
 - Near-flat terrain only: geometric normal Y fades from 0.995 to 0.9995 (about 5.7 to
   1.8 degrees). All ground below sea level +3.5 m is excluded, fading to eligibility at
   +4.5 m, preserving Tidewater's existing coastal wet sand/residue domain. Snow excludes
-  the film. Raw geometric interior sky reach suppresses darkening and reflection under
+  the film. Raw geometric zenith rain reach suppresses darkening and reflection under
   shelter, independently of artistic ambient strength/floor sliders; existing ambient
-  shading still uses those controls. The extra raw map query runs only at wet eligible
+  shading still uses those controls. The extra one-layer raw map query runs only at wet eligible
   puddle pixels. With that system disabled/unavailable, this is not an independent
   rain-roof collision solution.
 - Puddle albedo darkens locally. Flat water-normal Fresnel reflects the existing broad
@@ -163,6 +163,24 @@ setter, while wetness reached 0.7007. The corrected runner admits varying real
 rain and retains its actual telemetry; no fixed-rain override was added to make
 the test pass.
 
-Pending: Oliver's preferred puddle contrast and grass appearance, repeated settled
-GPU measurements, camera-motion/shoreline/roof fixtures and map-generation breadth.
+### Rain-cover correction
+
+`0d3cd4d5` corrects a source-policy counterexample: five-direction diffuse sky
+reach can be about 0.72 beneath a small canopy with open sides, enough to admit
+some puddle film. Puddles now query the existing vertical/zenith depth layer,
+independently of tilted windows and artistic ambient controls. Two focused
+tests compose the production helper with real frame bindings and execute it
+on a GPU with synthetic directional depth maps. Covered zenith/open sides
+rejects film, open zenith/blocked sides admits it, and zero ambient strength
+or a high ambient floor cannot invent rain. These tests require an adapter;
+absence is a failure, not a skipped acceptance result.
+
+No-map, depth-outside and feathered-map-border open fallbacks remain explicit.
+This is a bounded cosmetic rain-cover query, not terrain-wide rain collision.
+Actual native roof-over-dirt acceptance remains separate from this directional
+GPU falsifier. Oliver has deferred his appearance tuning and asked us to use
+our own judgement and continue building.
+
+Pending: later owner tuning, repeated settled GPU measurements,
+camera-motion/shoreline/roof fixtures and map-generation breadth.
 Do not mark the broader wet-surface/hydrology roadmap complete from this slice.

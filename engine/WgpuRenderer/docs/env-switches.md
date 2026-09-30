@@ -35,7 +35,7 @@ have been.
 | `WGR_GRASS_TUFT` | C++ bridge | |
 | `WGR_SW_ZBIAS_MULT` | C++ bridge | |
 | `WGR_GRASS` | Rust | |
-| `WGR_GRASS_FILTER_SUBPIXEL` | Rust grass fragment pipelines | Default `1`: footprint-filtered normals/photo contour relief and taper-averaged procedural colour, dry tips and height AO. `0` restores unfiltered shading for a same-binary A/B. Density and coverage are unchanged; native authored blade albedo is retained. |
+| `WGR_GRASS_FILTER_SUBPIXEL` | Rust grass fragment pipelines | Default `1`: footprint-filtered normals/photo contour relief, taper-averaged procedural colour/dry tips/height AO, and opacity-weighted source blade colour means for unresolved native ribbons. `0` restores unfiltered shading for a same-binary A/B. Resolved native albedo, density and coverage are unchanged. |
 | `WGR_GRASS_DENSITY` | Rust | |
 | `WGR_GRASS_DISTANCE` | Rust | |
 | `WGR_FOLIAGE_A2C` | Rust | Alpha-to-coverage for foliage. |
@@ -50,7 +50,7 @@ have been.
 | `WGR_TERRAIN_SHADOW_STEPS` | Rust | |
 | `WGR_TERRAIN_SHADOW_PENUMBRA` | Rust | |
 | `WGR_TERRAIN_SKIRT_K` | Rust | |
-| `WGR_TERRAIN_PUDDLES` | C++ terrain bridge | `0` disables cosmetic rain puddles for this process; default `1`. Source mud/soil eligibility, slope, snow and shore exclusions always apply. |
+| `WGR_TERRAIN_PUDDLES` | C++ terrain bridge | `0` disables cosmetic rain puddles for this process; default `1`. Source mud/soil eligibility, slope, snow and shore exclusions always apply. Active interior-sky geometry uses its zenith layer for rain cover, independent of artistic AO; absent/outside/feathered map coverage retains open fallback. |
 | `WGR_TERRAIN_PUDDLE_WETNESS` | C++ terrain bridge | `0..1` pins cosmetic wetness for a dry/wet appearance A/B. Unset or negative follows accumulated captured rain; no profile or gameplay-weather mutation. |
 | `WGR_TERRAIN_PUDDLE_FIXTURE` | C++ terrain bridge | `1` logs native semantic material/BCR admission, a CPU-selected flat inland 3x3 mud patch and freefly pose, plus captured rain/accumulated/uploaded wetness every five simulation seconds. Excludes native road cells. Candidate only: the camera/site still needs runtime inspection. |
 | `WGR_WATER_SKIRT_K` | Rust | |
