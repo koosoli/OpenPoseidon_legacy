@@ -151,15 +151,17 @@ try {
         & "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $profile -DlssMode 0 -MsaaSamples 4
         [Environment]::SetEnvironmentVariable('POSEIDON_USER_DIR',$profile,'Process')
         [Environment]::SetEnvironmentVariable('WGR_GRASS_FILTER_SUBPIXEL',$filter,'Process')
-        $log=Join-Path $armDir 'engine.log'; $stderr=Join-Path $armDir 'stderr.txt'
+        $log=Join-Path $armDir 'engine.log'; $stderr=Join-Path $armDir 'stderr.txt'; $stdout=Join-Path $armDir 'stdout.txt'
         $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
         $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
         $arguments=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000',
             '--harness',"$port",'--test-mission',('"'+$mission+'"'),'--test-world',('"'+$NativeAddons+'"'),
             '--test-world-hour','16','--test-world-freefly')+$close+@('--log-file',('"'+$log+'"'))
-        $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $arguments -RedirectStandardError $stderr
+        # GUI bootstrap recognizes redirected stdout, then reopens BOTH CRT
+        # streams. Redirecting stderr alone can lose Rust's filter-mode witness.
+        $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $arguments -RedirectStandardOutput $stdout -RedirectStandardError $stderr
         $null=$p.Handle
-        $armResult=@{pid=$p.Id;filter=$filter;arguments=$arguments;log=$log;stderr=$stderr;captures=@{};normalShutdown=$false}
+        $armResult=@{pid=$p.Id;filter=$filter;arguments=$arguments;log=$log;stdout=$stdout;stderr=$stderr;captures=@{};normalShutdown=$false}
         $result.arms[$filter]=$armResult
         $until=[DateTime]::UtcNow.AddSeconds(120)
         do {
