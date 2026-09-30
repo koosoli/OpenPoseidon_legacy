@@ -6,7 +6,7 @@ actors: exposed at 9475.25/3018.25 and covered beneath the audited floor-free
 CampEastC tent at 9486/3006. The shared stock roof helper verifies actual runtime
 terrain heights, stock class/model, ASL placement and deletion. Each soldier is
 placed explicitly, stopped, movement/target AI disabled and put in the existing
-`EffectStandStill` fixture pose, facing 180 degrees. Every sample verifies alive,
+`civil` fixture pose, facing 180 degrees. Every sample verifies alive,
 actual ASL within 2 cm, heading and `getMove`; cameras derive from actual ASL.
 This checks authored state and world transform, not a live affine-palette proof.
 

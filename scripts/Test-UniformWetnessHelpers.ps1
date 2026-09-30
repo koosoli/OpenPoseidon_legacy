@@ -23,11 +23,11 @@ Assert-Weather ([pscustomobject]@{rain=0.01;fog=0}) 0 0.02; ++$script:checks
 foreach ($weather in @(@{rain=0.2;fog=0},@{rain=1.1;fog=0},@{rain=0.8;fog=0.02},@{fog=0},@{rain=[double]::NaN;fog=0})) {
     Refuses { Assert-Weather $weather 0.3 1 }
 }
-Assert-Stationary $position $position 180 'EffectStandStill'; ++$script:checks
-Refuses { Assert-Stationary @($position[0]+0.1,$position[1],$position[2]) $position 180 'EffectStandStill' }
-Refuses { Assert-Stationary $position $position 0 'EffectStandStill' }
+Assert-Stationary $position $position 180 'civil'; ++$script:checks
+Refuses { Assert-Stationary @($position[0]+0.1,$position[1],$position[2]) $position 180 'civil' }
+Refuses { Assert-Stationary $position $position 0 'civil' }
 Refuses { Assert-Stationary $position $position 180 'Stand' }
-Refuses { Assert-Stationary @($position[0],[double]::NaN,$position[2]) $position 180 'EffectStandStill' }
+Refuses { Assert-Stationary @($position[0],[double]::NaN,$position[2]) $position 180 'civil' }
 $oldCulture=[Threading.Thread]::CurrentThread.CurrentCulture
 try {
     [Threading.Thread]::CurrentThread.CurrentCulture=[Globalization.CultureInfo]::GetCultureInfo('de-DE')
