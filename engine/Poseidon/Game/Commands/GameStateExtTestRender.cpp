@@ -413,7 +413,7 @@ GameValue TriTextInputActive(const GameState* /*state*/)
 }
 
 /// triPerfStats — frame-phase profiler rolling stats as a machine-readable
-/// string: "fps=F frame=avg/p95/max setup=avg/p95 draw=... calls=N frames=N".
+/// string: "fps=F frame=avg/p95/max setup=avg/p95 draw=... sim:step=avg/p95 ... calls=N frames=N".
 GameValue TriPerfStats(const GameState* /*state*/, GameValuePar /*arg*/)
 {
     Dev::FrameProfiler& perf = Dev::GFrameProfiler();
@@ -425,6 +425,11 @@ GameValue TriPerfStats(const GameState* /*state*/, GameValuePar /*arg*/)
     int off = snprintf(buf, sizeof(buf), "fps=%.1f frame=%.2f/%.2f/%.2f setup=%.2f/%.2f draw=%.2f/%.2f", perf.AvgFps(),
                        total.avgMs, total.p95Ms, total.maxMs, perf.Stats(Dev::FrameProfiler::PhaseSetup).avgMs,
                        perf.Stats(Dev::FrameProfiler::PhaseSetup).p95Ms, draw.avgMs, draw.p95Ms);
+    // Keep the existing prefix intact; the fixed-step loop is a separate cost,
+    // outside both setup and the draw aggregate and absent from the ranges below.
+    const auto sim = perf.Stats(Dev::FrameProfiler::PhaseSimStep);
+    off += snprintf(buf + off, sizeof(buf) - off, " %s=%.2f/%.2f",
+                    Dev::FrameProfiler::PhaseName(Dev::FrameProfiler::PhaseSimStep), sim.avgMs, sim.p95Ms);
     for (int p = Dev::FrameProfiler::PhaseHud; p < Dev::FrameProfiler::PhaseCount; p++)
     {
         const auto s = perf.Stats(static_cast<Dev::FrameProfiler::Phase>(p));
