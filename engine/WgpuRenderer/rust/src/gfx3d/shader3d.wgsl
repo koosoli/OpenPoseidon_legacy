@@ -19,6 +19,52 @@
 // surface_grad tilts conformed veg normals to follow the ground slope (color pass only).
 #import conform::{surface_y, surface_grad, surface_y_raster, hm_params, snow_depth}
 
+// BEGIN_UNIFORM_CLOTH_HELPERS (also exercised directly by the shader probe)
+fn uniform_cloth_rect(uv: vec2<f32>, lo: vec2<f32>, hi: vec2<f32>, pad: vec2<f32>) -> f32 {
+    let edge = min(uv - lo, hi - uv) / max(pad, vec2<f32>(0.000001));
+    return clamp(min(edge.x, edge.y), 0.0, 1.0);
+}
+
+fn uniform_cloth_mask(uv: vec2<f32>, encoded: f32, footprint: vec2<f32>) -> f32 {
+    if (encoded <= 1.0) { return 1.0; }
+    let pad = max(footprint * 2.0, vec2<f32>(2.0 / 1024.0));
+    // Verified 1024px stock merged atlases mix cloth with skin/boots/helmets
+    // and baked whole-body far LODs. Only the main cloth islands receive wetness.
+    // West photographed hands: x=256..768,y=220..344; East: x=512..1024,
+    // y=250..344. Expand exclusions as minification increases, never select skin
+    // by colour. Articulated hands/faces bind separate xicht_a, never admitted.
+    var mask = uniform_cloth_rect(uv, vec2<f32>(0.0), vec2<f32>(1.0, 0.50), pad);
+    if (encoded < 4.0) {
+        let hands = uniform_cloth_rect(uv, vec2<f32>(0.245, 0.210) - pad * 2.0,
+                                      vec2<f32>(0.755, 0.340) + pad * 2.0, pad);
+        let helmet = uniform_cloth_rect(uv, vec2<f32>(0.750, 0.375) - pad * 2.0,
+                                       vec2<f32>(1.0, 0.50) + pad * 2.0, pad);
+        mask *= (1.0 - hands) * (1.0 - helmet);
+    } else {
+        let hands = uniform_cloth_rect(uv, vec2<f32>(0.495, 0.240) - pad * 2.0,
+                                      vec2<f32>(1.0, 0.340) + pad * 2.0, pad);
+        let boots = uniform_cloth_rect(uv, vec2<f32>(0.25, 0.375) - pad * 2.0,
+                                      vec2<f32>(0.50, 0.50) + pad * 2.0, pad);
+        mask *= (1.0 - hands) * (1.0 - boots);
+    }
+    return mask;
+}
+
+fn uniform_cloth_color(rgb: vec3<f32>, encoded: f32, uv: vec2<f32>, footprint: vec2<f32>) -> vec3<f32> {
+    if (!(encoded > 0.0)) { return rgb; }
+    var wetness = encoded;
+    if (encoded >= 4.0) { wetness -= 4.0; }
+    else if (encoded >= 2.0) { wetness -= 2.0; }
+    let wet = clamp(wetness, 0.0, 1.0) * uniform_cloth_mask(uv, encoded, footprint);
+    if (wet <= 0.0) { return rgb; }
+    // 22% less reflected linear light when saturated, preserving cloth hue.
+    // Absorption only: no new plastic/specular highlight or procedural noise.
+    let c = srgb_to_linear(rgb) * (1.0 - 0.22 * wet);
+    return select(1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - 0.055, c * 12.92,
+                  c <= vec3<f32>(0.0031308));
+}
+// END_UNIFORM_CLOTH_HELPERS
+
 struct Object {
     world: mat4x4<f32>,
     // Terrain-conform plane, published per instance by the CPU (ForestPlain).
@@ -49,7 +95,7 @@ struct Material {
     // z = Stage1 enabled. NOHQ is decoded strictly as X=A, Y=G, Z reconstructed.
     // w retains the small BITFIELD (see MATFLAG_* below), not a bool.
     normal_map: vec4<f32>,
-    local_specular: vec4<f32>,
+    local_specular: vec4<f32>, // w = admitted uniform wetness/mask category (0..1, 2..3, 4..5)
 };
 
 // Material.normal_map.w bits.
@@ -829,6 +875,9 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
 
     // REN-TEMP-001D: material samples take the render-scale mip bias (0 at native scale).
     var base = textureSampleBias(textures[packed >> 3u], samplers[packed & 7u], uv, frame.renscale.x);
+    // Uniform derivatives before cutout discard. RGB only: depth, alpha,
+    // shadow coverage and the prepass retain their authored values.
+    base = vec4<f32>(uniform_cloth_color(base.rgb, material.local_specular.w, in.uv, fwidth(in.uv)), base.a);
     if ((material_flags(material) & 32u) != 0u && linear > 0.5) {
         let dims = vec2<f32>(textureDimensions(monitor_scene));
         let screen_uv = in.clip.xy / dims;

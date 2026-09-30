@@ -2,6 +2,11 @@
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
+#include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
+#include <cstdlib>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/Network/NetworkCustomAssets.hpp>
@@ -138,6 +143,32 @@ void Person::DrawNVOptics() {}
 void Person::Simulate(float deltaT, SimulationImportance prec)
 {
     base::Simulate(deltaT, prec);
+    if (GLandscape == nullptr || !std::isfinite(deltaT) || deltaT <= 0.0f)
+        return;
+    const float rain = GLandscape->GetRainDensity();
+    _uniformWetnessProbeDue -= deltaT;
+    if (rain > 0.0f && _uniformWetnessProbeDue <= 0.0f)
+    {
+        // The smoke rain query does not ignore its emitter. Ignore this actor
+        // explicitly, otherwise its own skin/helmet can act as a permanent roof.
+        CollisionBuffer hits;
+        const Vector3 origin = AimingPosition() + Vector3(0.0f, 0.15f, 0.0f);
+        GLandscape->ObjectCollision(hits, nullptr, this, origin, origin + Vector3(0.0f, 30.0f, 0.0f),
+                                   0.05f, ObjIntersectFire);
+        _uniformRainSheltered = hits.Size() > 0;
+        _uniformWetnessProbeDue = 1.0f;
+    }
+    if (!(rain > 0.0f))
+        _uniformWetnessProbeDue = 0.0f; // first returning rain samples shelter immediately
+    _uniformWetness = AdvanceUniformWetness(_uniformWetness, rain, _uniformRainSheltered, deltaT);
+    static const bool trace = [] {
+        const char* value = std::getenv("POSEIDON_UNIFORM_WET_TRACE");
+        return value && value[0] == '1';
+    }();
+    if (trace && _uniformWetnessProbeDue == 1.0f)
+        LOG_INFO(Graphics, "UNIFORM_WET model={} rain={:.3f} sheltered={} wet={:.4f}",
+                 GetShape() ? static_cast<const char*>(GetShape()->GetName()) : "", rain,
+                 _uniformRainSheltered, _uniformWetness);
 }
 
 TargetSide Person::GetTargetSide() const
@@ -175,6 +206,9 @@ void Person::SetGlasses(RString name) {}
 void Person::ResetStatus()
 {
     _sensorRowID = SensorRowID(-1);
+    _uniformWetness = 0.0f;
+    _uniformWetnessProbeDue = 0.0f;
+    _uniformRainSheltered = false;
     base::ResetStatus();
 }
 
@@ -397,6 +431,14 @@ bool Person::IsOnLadder(Building* obj, int ladder) const
 
 LSError Person::Serialize(ParamArchive& ar)
 {
+    // Cosmetic mission-local history has no save/network field. A load can
+    // reuse a Person, so clear that history on the existing first load pass.
+    if (ar.IsLoading() && ar.GetPass() == ParamArchive::PassFirst && !IS_UNIT_STATUS_BRANCH(ar.GetArVersion()))
+    {
+        _uniformWetness = 0.0f;
+        _uniformWetnessProbeDue = 0.0f;
+        _uniformRainSheltered = false;
+    }
     PARAM_CHECK(base::Serialize(ar))
     if (IS_UNIT_STATUS_BRANCH(ar.GetArVersion()))
     {

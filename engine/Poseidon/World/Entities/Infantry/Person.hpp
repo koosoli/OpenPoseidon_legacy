@@ -33,6 +33,9 @@ class Person: public VehicleSupply
 	AIUnitInfo _info;
 	SensorRowID _sensorRowID;
 	int _remotePlayer; // multiplayer ID; 1 == AI
+	float _uniformWetness = 0.0f;
+	float _uniformWetnessProbeDue = 0.0f;
+	bool _uniformRainSheltered = false;
 
 	public:
 	Person(VehicleType *name, bool fullCreate=true);
@@ -82,6 +85,7 @@ class Person: public VehicleSupply
 	);
 
 	void Simulate( float deltaT, SimulationImportance prec ) override;
+	float GetUniformWetness() const {return _uniformWetness;}
 
 	virtual void ResetMovement(float speed, int action = -1)= 0;
 	virtual bool PlayAction(ManAction action, ActionContextBase *context=nullptr);

@@ -65,6 +65,8 @@
 #include <Poseidon/Graphics/Rendering/Primitives/MeshBuild.hpp>
 #include <Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp>
 #include <Poseidon/Graphics/Rendering/AsciiSearch.hpp>
+#include <Poseidon/Graphics/Rendering/UniformClothAdmission.hpp>
+#include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Scene/Pass1Submit.hpp>
 #include <Poseidon/World/Entities/Infantry/Head.hpp> // FACE-001 diagnostics
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
@@ -8440,6 +8442,52 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     d.mat_specular = {specCol.R() * specEn, specCol.G() * specEn, specCol.B() * specEn, specPow};
     const Color& localSpec = _curMaterial.specular;
     d.mat_local_specular = {localSpec.R(), localSpec.G(), localSpec.B(), 0.0f};
+    if (const auto* person = dyn_cast<const Person>(static_cast<const Object*>(GetDrawObject())))
+    {
+        const auto* ownerShape = person->GetShape();
+        const int level = sMesh.GetLevel();
+        // A proxy can inherit the Person draw owner, so require exact primary
+        // mesh identity as well as positive stock clothing texture admission.
+        if (ownerShape && level >= 0 && level < ownerShape->NLevels() && ownerShape->Level(level) == &sMesh)
+        {
+            const Texture* texture = sMesh.GetSection(beg).properties.GetTexture();
+            const auto cloth = render::AdmitUniformCloth(static_cast<const char*>(ownerShape->GetName()),
+                                                        texture ? texture->Name() : "");
+            // A combined draw must contain ONLY the same admitted material.
+            bool sameCloth = true;
+            for (int section = beg + 1; section < end; ++section)
+            {
+                const Texture* next = sMesh.GetSection(section).properties.GetTexture();
+                if (render::AdmitUniformCloth(static_cast<const char*>(ownerShape->GetName()),
+                                             next ? next->Name() : "") != cloth)
+                    sameCloth = false;
+            }
+            static const bool uniformWetEnabled = [] {
+                const char* value = std::getenv("WGR_UNIFORM_WET");
+                return !(value && value[0] == '0');
+            }();
+            if (sameCloth && uniformWetEnabled)
+                d.mat_local_specular.w = render::EncodeUniformWetness(cloth, person->GetUniformWetness());
+            static const bool trace = [] {
+                const char* value = std::getenv("POSEIDON_UNIFORM_WET_TRACE");
+                return value && value[0] == '1';
+            }();
+            if (trace && cloth != render::UniformCloth::None)
+            {
+                static std::unordered_map<std::string, int> lastBand;
+                const std::string key = std::string(static_cast<const char*>(ownerShape->GetName())) + ":" + texture->Name();
+                const int band = int(person->GetUniformWetness() * 10.0f);
+                const auto found = lastBand.find(key);
+                if (found == lastBand.end() || found->second != band)
+                {
+                    lastBand[key] = band;
+                    LOG_INFO(Graphics, "UNIFORM_CLOTH model={} texture={} kind={} enabled={} wet={:.4f} encoded={:.4f}",
+                             static_cast<const char*>(ownerShape->GetName()), texture->Name(), int(cloth),
+                             uniformWetEnabled, person->GetUniformWetness(), d.mat_local_specular.w);
+                }
+            }
+        }
+    }
     // Foliage class for the direct WGPU path: only real plants get the leaf look, and the vertex
     // shader receives tree vs bush so it can use the matching radial-crown normal. This rides the
     // otherwise unused .w lane; fs_main treats any positive value as vegetation.

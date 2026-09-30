@@ -702,6 +702,7 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # Simulation tests (rest batch)
     World/Simulation/test_cloth.cpp
+    World/Simulation/test_uniform_wetness.cpp
     World/Simulation/test_remote_interp.cpp
 
     # Tools shared library tests
