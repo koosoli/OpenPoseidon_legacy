@@ -62,5 +62,10 @@ int main() {
     for(int i=0;i<240;++i) partitioned.Advance(1.0f/60,1,.7f);
     assert(single.Revision()==partitioned.Revision());
     assert(std::abs(single.Volume()-partitioned.Volume())<1e-7);
+    const auto generation=single.Generation();
     single.Reset(); assert(!single.At(0,0).valid && single.Volume()==0);
+    assert(single.Generation()>generation);
+    const auto resetGeneration=single.Generation();
+    assert(single.Configure(5,5,2,std::vector<float>(25,10)));
+    assert(single.Generation()>resetGeneration && single.Revision()==0);
 }

@@ -35,7 +35,11 @@ public:
         _delta.resize(_bed.size()); _flowX.resize(_bed.size()); _flowZ.resize(_bed.size());
         return true;
     }
-    void Reset() { *this = RainWaterField{}; }
+    void Reset() {
+        const uint64_t nextGeneration = _generation + 1;
+        *this = RainWaterField{};
+        _generation = nextGeneration;
+    }
     // Terrain editing changes bed elevation while preserving water volume.
     bool SetBed(int x, int z, float height)
     {
@@ -78,6 +82,7 @@ public:
     }
     const Budget& WaterBudget() const { return _budget; }
     uint64_t Revision() const { return _revision; }
+    uint64_t Generation() const { return _generation; }
     int Width() const { return _width; }
     int Height() const { return _height; }
     float Spacing() const { return _spacing; }
@@ -162,7 +167,7 @@ private:
     int _width=0,_height=0;
     float _spacing=1,_originX=0,_originZ=0,_seaLevel=0;
     double _pending=0;
-    uint64_t _revision=0;
+    uint64_t _revision=0, _generation=0;
     Budget _budget;
     std::vector<float> _bed,_depth,_out,_delta,_flowX,_flowZ;
 };
