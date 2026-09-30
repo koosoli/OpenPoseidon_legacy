@@ -23,3 +23,20 @@ The internal presentation snapshot captures whether effective rain particles are
 Standalone `scripts/Test-TerrainPuddles.ps1` passes the CPU receiver/soft-soil separation, liquid-rain versus snowflake accumulation, pause/reset and frame-rate checks. `git diff --check` passes. The new actual-helper GPU test contains 64 probes for film growth, dry/far exact removal, liquid-rain movement, bounded unit normals and slope/ocean/snow exclusions; the real terrain composition/source-contract tests are updated for the universal policy. These new Rust/GPU tests must be run by the root in its serial test window, followed by the combined game build and installed smoke. They were authored here but have not been run here.
 
 Runtime acceptance still needs Nogova dry/rain/paused/drying controls, native grass and pavement/road controls, close moving-ripple versus far/aerial no-glitter controls, and the established floorless roof absent/present/removed fixture. Keep fixed-view controls, master-off equivalence, provenance and ownership rules. Neither changed source eligibility counts nor still screenshots alone prove appearance, temporal stability or road continuity. The earlier mud-only captures remain historical evidence for film placement and shelter behavior, not acceptance of this broader scope.
+
+Root integration now applies the same world mask and filtered ripple response to
+actual ground-pinned OnSurface road/decal fragments, before fog and without
+changing alpha, base discard, sample coverage or depth ownership. Rigid bridges,
+wall/object and retained fragments do not gain this ground authority. The private
+Frame ground-weather lane carries retained wetness, liquid rain, sea level and
+simulation time. Dry roads skip the physical roof query. Both terrain and roads
+undo the lighting map's OPEN border fallback before physical rain admission;
+known sheltered border pixels therefore cannot acquire a wet rim.
+
+Root build/weather-combined-final-tests-2.log records 596 passed, zero failed and
+two existing ignored tests, including actual mud/grass/puddle/tree/object GPU
+probes and shader composition. This predates the new shared border helper, whose
+focused proof is still required. Installed 6a388c62 remains the historical pair
+until the final build/deploy; none of these source checks establishes new map
+appearance acceptance. Disabling the interior-sky map still removes independent
+physical rain proof and therefore suppresses these cosmetic films.

@@ -37,6 +37,13 @@ fn ground_puddle_land_factor(normal_up: f32, height: f32, sea_level: f32, snow_d
         * (1.0 - smoothstep(0.002, 0.02, snow_depth));
 }
 
+fn ground_puddle_rain_factor(reach: f32, coverage: f32) -> f32 {
+    if (coverage <= 0.0) { return 0.0; }
+    // Undo the lighting map's open border fallback before admitting liquid rain.
+    let raw_reach = clamp((reach - (1.0 - coverage)) / max(coverage, 1e-5), 0.0, 1.0);
+    return coverage * smoothstep(0.6, 0.95, raw_reach);
+}
+
 fn ground_puddle_ripple_normal(world_xz: vec2<f32>, time: f32, rain: f32, footprint: f32) -> vec3<f32> {
     // Each world-fixed 0.8m cell contains one bounded drop packet. Its centre
     // stays at least .36m from the boundary; the packet radius never reaches

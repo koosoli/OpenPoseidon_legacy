@@ -3247,12 +3247,12 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         // Chunk-aligned camera residency changes only the displayed window, never the store.
         const int mx = int(std::floor(camera->Position().X() / 2.0f));
         const int mz = int(std::floor(camera->Position().Z() / 2.0f));
-        if (!_mudUploaded || uploaded || _mudRevision != mud.Revision() || mx != _mudWindowX || mz != _mudWindowZ)
+        if (!_mudUploaded || uploaded || _mudWasEnabled != mud.enabled || _mudRevision != mud.Revision() || mx != _mudWindowX || mz != _mudWindowZ)
         {
             auto snapshot = mud.Snapshot(camera->Position().X(), camera->Position().Z());
             if (mud.Chunks() == 0) snapshot[3] = 0.0f;
             _engine.QueueMud(std::move(snapshot));
-            _mudRevision = mud.Revision(); _mudWindowX = mx; _mudWindowZ = mz; _mudUploaded = true;
+            _mudRevision = mud.Revision(); _mudWindowX = mx; _mudWindowZ = mz; _mudUploaded = true; _mudWasEnabled = mud.enabled;
         }
     }
     if (camera == nullptr)

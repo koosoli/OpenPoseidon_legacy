@@ -653,6 +653,10 @@ systems:
         Three alternating owner-pose timing pairs observe grass colour snapshots
         3.738 ms off / 4.018 ms on; retain the filter for stability with its cost.
         Oliver delegated current visual judgement; owner tuning is deferred.
+      Owner medium-distance follow-up 1b5f8cd1 restores resolved blade-height
+      contrast independently of width, suppresses the extra ramp in aerial
+      views and adds a bounded broad sun sheen. Combined actual GPU tests pass;
+      new installed owner-pose and medium ON/OFF acceptance remains pending.
       Evidence and acceptance scope: decisions/GRASS-STABILITY-20260930.md.
     known_gap: >-
       GRS-GATE-1 unpassed: assets/ is gitignored, so the authored texture path is dead on
@@ -732,7 +736,20 @@ unbuilt_candidates: >-
       not evidence of a material-sampling bottleneck. No cache speedup is claimed.
       See decisions/TERRAIN-SATMAP-ASSESSMENT-20260909.md for scope and revisit gates.
 
-      September 30 owner-priority mud puddle slice: rain-fed cosmetic wetness,
+      Owner clarification supersedes the historical mud-only whitelist below.
+      Universal actual terrain film and filtered liquid-rain ripples are source
+      integrated, including actual ground-pinned road/decal shading. Nogova's
+      installed 6a388c62 reported zero admitted materials under the old policy.
+      New original-map growth, road, shelter and moving-ripple acceptance is
+      pending. See decisions/ALL-GROUND-PUDDLES-20260930.md. Persistent signed
+      boot depressions also now displace close terrain and physical SurfaceY,
+      BumpySurfaceY and local tangent planes on admitted soft soil. Exact Noe
+      cultivated-soil sources are admitted conservatively; arbitrary brown
+      ground is not soil proof. GPU geometry tests pass; actual walking and
+      physical/visible depression acceptance remains pending. See decisions/
+      MUD-VOLUMETRIC-CONTACT-20260930.md and NOGOVA-SOFT-MUD-CONTACT-20260930.md.
+
+      Historical September 30 owner-priority mud puddle slice: rain-fed cosmetic wetness,
       explicitly eligible material sources, fixed metre-scale patches, flatness,
       coast/snow/roof admission and broad sky reflection. Public byte layouts are
       unchanged but padding semantics require a matched executable and DLL.
@@ -1408,6 +1425,11 @@ unbuilt_candidates: >-
       exact constant-exposure integration and gradual drying. Initial value
       is zero, nonpositive/invalid simulation delta does not advance it, and
       accelerated time changes duration rather than the integration result.
+      Density correction 5ce75bf2 uses the finite/clamped maximum of actual
+      weather rain and effective liquid particle overrides; snowflakes alone
+      do not wet clothing. CPU source checks pass, while Nogova override
+      runtime controls are pending. Existing installed lifecycle below is
+      historical acceptance of natural rain rather than this newer correction.
       No setter is added; the readonly triUniformWetness object query returns
       -1 for invalid/non-Person objects. State is cosmetic/mission-local, not
       a saved/networked garment or gameplay wetness system.

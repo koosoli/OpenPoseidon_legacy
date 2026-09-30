@@ -13,7 +13,7 @@
 #import lighting::lights_material_contrib
 #import color::srgb_to_linear
 #import frame::{interior_rain_reach, interior_rain_coverage}
-#import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_ripple_normal}
+#import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
 #import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage}
 
 // Cosmetic coating uses the actual raised surface, never terrain snow_depth / ground shelter
@@ -287,12 +287,13 @@ fn shade(
     let world_abs = world_pos + frame.cam_pos.xyz;
     let ground_footprint = max(length(dwx.xz), length(dwy.xz));
     var rain_puddle = 0.0;
-    if (ground_surface && linear > 0.5 && !is_foliage && !is_cockpit && snow_cover == 0.0) {
+    if (ground_surface && frame.ground_weather.x > 0.18 && linear > 0.5 && !is_foliage && !is_cockpit && snow_cover == 0.0) {
         rain_puddle = ground_puddle_mask(world_abs.xz, ground_footprint, frame.ground_weather.x)
             * ground_puddle_land_factor(surface_normal(geo_normal, world_pos, dwx, dwy).y,
-                world_abs.y, frame.ground_weather.z, ground_snow_depth)
-            * interior_rain_coverage(world_abs)
-            * smoothstep(0.6, 0.95, interior_rain_reach(world_abs));
+                world_abs.y, frame.ground_weather.z, ground_snow_depth);
+        if (rain_puddle > 0.0) {
+            rain_puddle *= ground_puddle_rain_factor(interior_rain_reach(world_abs), interior_rain_coverage(world_abs));
+        }
         albedo *= 1.0 - rain_puddle * 0.38;
     }
     let terrain_s = terrain_sun_shadow(world_abs.xz, world_abs.y);

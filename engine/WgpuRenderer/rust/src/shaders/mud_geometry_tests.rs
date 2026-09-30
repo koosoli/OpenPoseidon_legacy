@@ -306,8 +306,8 @@ fn mud_geometry_gpu_samples_signed_depression_without_corrupting_snow() {
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[&output_layout, &resource_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&output_layout), Some(&resource_layout)],
+            immediate_size: 0,
         });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("mud_actual_geometry_compute"),

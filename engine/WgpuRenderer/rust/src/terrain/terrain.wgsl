@@ -8,7 +8,7 @@
 // pipeline via the frame module, so terrain receives the same CSM shadows and
 // sun lighting.
 #import frame::{frame, reverse_z, fog_factor, apply_fog, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_rain_coverage, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
-#import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_ripple_normal}
+#import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
 #import shadow::shadow_strength
 #import lighting::lights_contrib
 #import color::srgb_to_linear
@@ -1366,8 +1366,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         // pixels pay this one-layer query. Missing map coverage remains unproven.
         let rain_reach = interior_rain_reach(in.world_pos + frame.cam_pos.xyz);
         // Unknown physical coverage cannot prove an exposed ground surface.
-        rain_puddle *= interior_rain_coverage(in.world_pos + frame.cam_pos.xyz)
-            * smoothstep(0.6, 0.95, rain_reach);
+        rain_puddle *= ground_puddle_rain_factor(rain_reach, interior_rain_coverage(in.world_pos + frame.cam_pos.xyz));
     }
     rgb *= 1.0 - rain_puddle * 0.38;
     sun_ambient *= sky_vis_ao(in.world_xz)

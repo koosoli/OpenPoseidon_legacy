@@ -2,12 +2,15 @@
 [CmdletBinding()]
 param(
     [ValidateSet('0','1')][string]$Filter = '1',
+    [ValidateSet('0','1')][string]$MediumLighting = '1',
     [ValidateSet('Aerial','Close','OwnerEveron')][string]$View = 'Aerial',
     [string]$Tag = 'grass',
     [int]$Msaa = 4,
-    [float]$Altitude = -1
+    [float]$Altitude = -1,
+    [ValidateRange(-90,90)][float]$Elevation = 0
 )
 $ErrorActionPreference = 'Stop'
+if (!$env:LOCK_OWNER) { throw 'Run through scripts/with-game-lock.sh.' }
 $root = Split-Path $PSScriptRoot -Parent
 $game = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 if (Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue) { throw 'Game already running' }
@@ -16,6 +19,7 @@ $profile = Join-Path $out 'user'
 New-Item -ItemType Directory -Force $profile | Out-Null
 $env:POSEIDON_USER_DIR = $profile
 $env:WGR_GRASS_FILTER_SUBPIXEL = $Filter
+$env:WGR_GRASS_MEDIUM_LIGHTING = $MediumLighting
 [IO.File]::WriteAllText((Join-Path $profile 'graphics.cfg'), "qualityPreset=3;`nmsaaSamples=$Msaa;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
 $exe = Join-Path $game 'OpenPoseidon.exe'
 $dll = Join-Path $game 'wgpu_renderer.dll'
@@ -26,6 +30,7 @@ $metrics = Join-Path $out 'metrics.json'
 $pose = if ($View -eq 'Aerial') { @('5058.75','3902.55','110','0','-80') } else { @('5058.75','3902.55','73','0','-18') }
 if ($View -eq 'OwnerEveron') { $pose = @('5018.51','4087.66','117.58','220.8','-86.0') }
 if ($Altitude -ge 0) { $pose[2] = $Altitude.ToString([Globalization.CultureInfo]::InvariantCulture) }
+if ($PSBoundParameters.ContainsKey('Elevation')) { $pose[4] = $Elevation.ToString([Globalization.CultureInfo]::InvariantCulture) }
 $shots = @(300..305 | ForEach-Object { Join-Path $out ("frame-$_.png") })
 $spec = (0..5 | ForEach-Object { "$($_ + 300):$($shots[$_])" }) -join ','
 $argv = @('--check','--render=wgpu','--window','--width=1280','--height=720','--dev',
@@ -36,7 +41,7 @@ $argv = @('--check','--render=wgpu','--window','--width=1280','--height=720','--
     '--log-file',('"' + $log + '"'))
 $hashes = @(Get-FileHash -LiteralPath $exe,$dll)
 @{head=(& git -C $root rev-parse HEAD);installed=(Get-Content (Join-Path $game 'DEPLOYED-FROM.txt'));
-    hashes=$hashes;argv=$argv;filter=$Filter;view=$View;msaa=$Msaa;
+    hashes=$hashes;argv=$argv;filter=$Filter;mediumLighting=$MediumLighting;view=$View;msaa=$Msaa;
     scope='Adjacent scheduled captures, not a guarantee of adjacent rendered frames; native resolution, isolated profile.'
 } | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $out 'provenance.json')
 $p = $null
