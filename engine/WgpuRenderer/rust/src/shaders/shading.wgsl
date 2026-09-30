@@ -32,8 +32,8 @@ fn object_snow_coverage(world_pos: vec3<f32>, geo_normal: vec3<f32>, eligible: b
     let world_abs = world_pos + frame.cam_pos.xyz;
     var depth = frame.snow_surface.x;
     if (frame.snow_surface.y >= 0.0 && frame.snow_surface.z > 0.0) {
-        depth = max(depth, clamp((world_abs.y - frame.snow_surface.y) / frame.snow_surface.z,
-                                0.0, 1.0) * frame.snow_surface.w);
+        depth = max(depth, smoothstep(frame.snow_surface.y,
+            frame.snow_surface.y + frame.snow_surface.z, world_abs.y) * frame.snow_surface.w);
     }
     let validity = interior_rain_coverage(world_abs);
     var exposed = baked_exposure;

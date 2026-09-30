@@ -69,7 +69,6 @@
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Scene/Pass1Submit.hpp>
 #include <Poseidon/World/Entities/Infantry/Head.hpp> // FACE-001 diagnostics
-#include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Scene/Thing.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>

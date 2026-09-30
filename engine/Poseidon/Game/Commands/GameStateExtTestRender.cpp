@@ -77,6 +77,7 @@ using namespace Poseidon::Dev;
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/Path/ArcadeWaypoint.hpp>
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
+#include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/Game/Commands/GameStateExtCommon.hpp>
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 
@@ -410,6 +411,13 @@ GameValue TriSetVsync(const GameState* /*state*/, GameValuePar arg)
 GameValue TriTextInputActive(const GameState* /*state*/)
 {
     return GameValue((GEngine && GEngine->IsTextInputActive()) ? 1.0f : 0.0f);
+}
+
+/// Read-only cosmetic clothing state. Invalid/non-person objects return -1.
+GameValue TriUniformWetness(const GameState* /*state*/, GameValuePar arg)
+{
+    const Person* person = dyn_cast<Person>(GetObject(arg));
+    return GameValue(person ? person->GetUniformWetness() : -1.0f);
 }
 
 /// triPerfStats — frame-phase profiler rolling stats as a machine-readable

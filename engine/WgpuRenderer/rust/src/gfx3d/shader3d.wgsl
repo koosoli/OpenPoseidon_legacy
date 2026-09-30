@@ -791,6 +791,7 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
     // Derivatives must run in uniform control flow — before the discard.
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
+    let uniform_uv_footprint = fwidth(in.uv);
     // The reflected camera carries an absolute-world water clip plane in Frame.
     // Terrain already honours it; apply the same plane to retained/skinned objects
     // so submerged geometry cannot leak into or occlude the planar reflection.
@@ -901,7 +902,7 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
     var base = textureSampleBias(textures[packed >> 3u], samplers[packed & 7u], uv, frame.renscale.x);
     // Uniform derivatives before cutout discard. RGB only: depth, alpha,
     // shadow coverage and the prepass retain their authored values.
-    base = vec4<f32>(uniform_cloth_color(base.rgb, material.local_specular.w, in.uv, fwidth(in.uv)), base.a);
+    base = vec4<f32>(uniform_cloth_color(base.rgb, material.local_specular.w, in.uv, uniform_uv_footprint), base.a);
     if ((material_flags(material) & 32u) != 0u && linear > 0.5) {
         let dims = vec2<f32>(textureDimensions(monitor_scene));
         let screen_uv = in.clip.xy / dims;
