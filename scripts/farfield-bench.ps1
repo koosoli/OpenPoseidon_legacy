@@ -694,7 +694,14 @@ try {
 }
 finally {
     foreach ($key in $savedEnv.Keys) {
-        [Environment]::SetEnvironmentVariable($key, $savedEnv[$key], 'Process')
+        # PowerShell converts a null method argument to an empty string. On
+        # .NET 9+ empty environment values are retained rather than deleted,
+        # so use the provider to restore an originally absent variable.
+        if ($null -eq $savedEnv[$key]) {
+            Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue
+        } else {
+            [Environment]::SetEnvironmentVariable($key, $savedEnv[$key], 'Process')
+        }
     }
     foreach ($ownedPid in @($ownedPids.Keys)) {
         # Retain the original process handle rather than rediscovering a PID:
