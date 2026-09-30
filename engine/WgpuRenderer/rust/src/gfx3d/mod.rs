@@ -2168,7 +2168,7 @@ impl ConformGroup {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
@@ -2202,8 +2202,8 @@ impl ConformGroup {
             view_formats: &[],
         });
         let dummy_view = dummy.create_view(&wgpu::TextureViewDescriptor::default());
-        // GPU-driven draws never draw roads and already use eight fragment
-        // storage slots. Preserve their original layout and device requirement.
+        // Retained vertex conform reads signed mud geometry. Keep this storage
+        // binding invisible to fragments, which already use eight slots.
         let gpu_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_gpu_conform_layout"),
             entries: &[
@@ -2227,9 +2227,18 @@ impl ConformGroup {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
-        let gpu_bind = Self::make_gpu_bind(device, &gpu_layout, &dummy_view, &params_buf);
         // Zero depth exits before the variable-length deficit array is sampled.
         let dummy_snow = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_3d_conform_dummy_snow"),
@@ -2237,6 +2246,7 @@ impl ConformGroup {
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
+        let gpu_bind = Self::make_gpu_bind(device, &gpu_layout, &dummy_view, &params_buf, &dummy_snow);
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wgr_3d_conform_bind_dummy"),
             layout: &layout,
@@ -2266,13 +2276,14 @@ impl ConformGroup {
     }
 
     fn make_gpu_bind(device: &wgpu::Device, layout: &wgpu::BindGroupLayout,
-                     heightmap: &wgpu::TextureView, params: &wgpu::Buffer) -> wgpu::BindGroup {
+                     heightmap: &wgpu::TextureView, params: &wgpu::Buffer, snow: &wgpu::Buffer) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wgr_gpu_conform_bind"),
             layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(heightmap) },
                 wgpu::BindGroupEntry { binding: 1, resource: params.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: snow.as_entire_binding() },
             ],
         })
     }
@@ -2290,7 +2301,7 @@ impl ConformGroup {
     ) {
         queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(params));
         if self.bind.is_none() || self.bound_gen != generation {
-            self.gpu_bind = Some(Self::make_gpu_bind(device, &self.gpu_layout, heightmap_view, &self.params_buf));
+            self.gpu_bind = Some(Self::make_gpu_bind(device, &self.gpu_layout, heightmap_view, &self.params_buf, snow));
             self.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("wgr_3d_conform_bind"),
                 layout: &self.layout,

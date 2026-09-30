@@ -447,7 +447,8 @@ mod tests {
         let gfx = include_str!("../gfx3d/mod.rs");
         let start = gfx.find("label: Some(\"wgr_gpu_conform_layout\")").unwrap();
         let layout = gfx[start..].split("let gpu_bind =").next().unwrap();
-        assert!(!layout.contains("BufferBindingType::Storage"));
+        assert_eq!(layout.matches("BufferBindingType::Storage").count(), 1);
+        assert!(layout.contains("visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE"));
         let start = gfx.find("let gpu_velocity_pipeline = cull::build_gpu_velocity_pipeline(").unwrap();
         let pipelines = gfx[start..].split("let cull_debug_layout").next().unwrap();
         assert_eq!(pipelines.matches("&conform.gpu_layout").count(), 6);

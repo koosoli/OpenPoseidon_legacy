@@ -101,3 +101,11 @@ include the same CPU depression. Existing roads/structure support remains separa
 This does not change manual ballistic terrain triangle intersections. Empty stores
 return immediately. Shader composition passes; physical walking and installed
 geometry/profile acceptance remain pending the combined game build and smoke test.
+
+The first combined installed startup (5644755a) exposed a missing conform storage
+binding in actual retained velocity and other pipelines. Pure sampler/composition
+checks did not instantiate those complete pipelines. Root adds vertex/compute mud
+storage to retained conform and vertex/compute visibility to direct conform,
+while leaving retained fragment storage invisible to preserve its eight-slot
+budget. The failed run was rejected and its owned process cleaned up; it is not
+snow or mud appearance evidence. Corrected locked startup must still pass.
