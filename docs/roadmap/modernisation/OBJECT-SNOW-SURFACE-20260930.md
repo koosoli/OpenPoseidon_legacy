@@ -207,3 +207,38 @@ equations, direct pinned weight exclusion and retained selector gate. Parent
 must run shader composition/renderer tests and repeat matched roof dry/coat-on/
 master-off pixel controls. No game, GPU, full build or deployment was run by
 this agent. The real tent coverage result remains pending that installed test.
+
+## Remaining stock tent gate diagnostic
+
+Root's matched `2ac545ef` Keep campaign still reports no stock tent receiver
+and visibly bare fabric under actual deposit 0.1800. The Keep correction alone
+does not establish successful roof coverage. The follow-up adds only opt-in
+source diagnostics under `WGR_SNOW_SURFACE_FIXTURE=1`, scoped to actual loaded
+`stan_eastc` and UAZ model identities; production admission policy is unchanged.
+
+`Wgpu object snow direct gates:` reports section range and actual texture,
+source eligibility, rigid proof attempted/pass, buffer dynamic/skin/CPU-pose,
+pose-copy, palette/pass kind, owner/mesh ownership and destroyed-animation
+gate, blend/depth/alpha reference, vegetation/material flags, conform mode and
+Keep/On source hints, original position/normal validity and source/buffer
+vertex/normal counts, with actual enabled deposit. `rigidAttempted=false` means
+an earlier source gate prevented scanning; it must not be interpreted as a
+failed vertex comparison. Static-buffer `rigidPassed=true` is existing policy,
+not a newly executed original-data proof. Zero and positive deposit are separate
+dedup states; at most 128 unique rows per matching model can be emitted.
+
+The direct `denied` bitmask is: owner 1, foreign mesh 2, destroyed animation 4,
+skin 8, CPU posed 16, pose copy 32, palette 64, nonstandard pass 128, blend 256,
+depth 512, alpha reference 1024, conform 2048, vegetation 4096, prohibited
+material flags 8192, attempted-but-failed rigid proof 16384. Actual individual
+values remain printed so the reason can be checked independently.
+
+`Wgpu object snow retained gates:` reports static/owner/destroyed/allow-animation
+eligibility, conform result, visual/missing LOD counts and aggregate Keep/On
+hints. It is capped at 64 unique rows. These registration values may precede
+deposit activation; retained admission is independent of deposit, which is
+uploaded through its separate effective snow parameter telemetry.
+
+The standalone CPU policy runner and `git diff --check` passed. Root owns full
+compilation and the next focused deposit-only installed run; this agent ran no
+game, GPU, full build or deployment and claims no roof appearance acceptance.

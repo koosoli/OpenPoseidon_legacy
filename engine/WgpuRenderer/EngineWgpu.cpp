@@ -7395,21 +7395,98 @@ static bool CurrentSnowSectionRigid(const Object& obj, const Shape& mesh,
         });
 }
 
-static void TraceObjectSnowReceiver(const Object& obj, bool eligible, const char* path)
+static const char* ObjectSnowFixtureModel(const Object& obj)
 {
     static const bool fixture = [] {
         const char* value = std::getenv("WGR_SNOW_SURFACE_FIXTURE");
         return value && std::strcmp(value, "1") == 0;
     }();
-    if (!fixture || !obj.GetShape()) return;
+    if (!fixture || !obj.GetShape()) return nullptr;
     const char* name = obj.GetShape()->Name();
-    if (!name || (!ContainsNoCase(name, "stan_eastc") && !ContainsNoCase(name, "uaz"))) return;
+    if (!name || (!ContainsNoCase(name, "stan_eastc") && !ContainsNoCase(name, "uaz"))) return nullptr;
+    return name;
+}
+
+static void TraceObjectSnowReceiver(const Object& obj, bool eligible, const char* path)
+{
+    const char* name = ObjectSnowFixtureModel(obj);
+    if (!name) return;
     static std::unordered_set<std::string> reported;
     if (reported.size() >= 32) return;
     const std::string key = std::string(name) + path + (eligible ? "1" : "0");
     if (reported.insert(key).second)
         LOG_INFO(Graphics, "Wgpu object snow receiver: model={} path={} eligible={} static={} type={} scope=source-owner-material-and-facing-gates-remain",
                  name, path, eligible, obj.Static(), int(obj.GetType()));
+}
+
+static void TraceObjectSnowDirectGates(const Object& obj, const Shape& mesh,
+    const VertexBufferWgpu& buffer, const WgrDraw3D& draw, int begin, int end,
+    int passKind, bool cpuPose, bool sourceEligible, bool rigidAttempted, bool rigidPassed)
+{
+    const char* name = ObjectSnowFixtureModel(obj);
+    if (!name) return;
+    const auto& snow = GSnow();
+    const bool keep = (mesh.GetOrHints() & ClipLandKeep) != 0;
+    const bool pinned = (mesh.GetOrHints() & ClipLandOn) != 0;
+    const bool conform = ObjectSnowSurface::ConformAllowed(draw.conform2.z, keep, pinned);
+    const bool ownsMesh = ObjectOwnsSnowMesh(obj, mesh);
+    const bool animated = obj.GetAnimated(mesh);
+    const bool originals = mesh.OriginalPosValid() && mesh.OriginalNormValid();
+    const uint32_t denied = (!ObjectSnowOwnerEligible(obj) ? 1u : 0u) |
+        (!ownsMesh ? 2u : 0u) | (animated ? 4u : 0u) |
+        (buffer.skinned ? 8u : 0u) | (buffer.cpuPosed ? 16u : 0u) |
+        (cpuPose ? 32u : 0u) | (draw.palette_slot != WGR_NO_PALETTE ? 64u : 0u) |
+        (passKind != int(render::PassKindHint::None) ? 128u : 0u) |
+        (draw.blend != WGR_BLEND_OPAQUE ? 256u : 0u) |
+        (draw.depth != WGR_DEPTH_TEST_WRITE ? 512u : 0u) | (draw.alpha_ref > 0.0f ? 1024u : 0u) |
+        (!conform ? 2048u : 0u) | (GCurrentIsVegetation ? 4096u : 0u) |
+        ((draw.flags & (WGR_DRAW3D_ON_SURFACE | WGR_DRAW3D_REFLECTIVE | WGR_DRAW3D_GLASS |
+                       WGR_DRAW3D_COCKPIT | WGR_DRAW3D_MONITOR)) != 0 ? 8192u : 0u) |
+        (rigidAttempted && !rigidPassed ? 16384u : 0u);
+    // Separate zero-deposit and positive-deposit keys: an early dry denial must
+    // never hide the actual coat-on state. Capped per actual fixture model.
+    static std::unordered_map<std::string, std::unordered_set<std::string>> reported;
+    auto& rows = reported[name];
+    if (rows.size() >= 128) return;
+    const std::string key = std::to_string(begin) + ":" + std::to_string(end) + ":" +
+        std::to_string(mesh.NVertex()) + ":" + std::to_string(denied) + ":" +
+        std::to_string(originals) + ":" + std::to_string(snow.enabled && snow.Depth() > 0.0f);
+    if (!rows.insert(key).second) return;
+    const auto* texture = begin >= 0 && begin < mesh.NSections()
+        ? mesh.GetSection(begin).properties.GetTexture() : nullptr;
+    LOG_INFO(Graphics, "Wgpu object snow direct gates: model={} texture={} sections={}:{} denied=0x{:x} sourceEligible={} rigidAttempted={} rigidPassed={} dynamic={} skinned={} cpuPosed={} poseCopy={} palette={} pass={} ownsMesh={} ownerEligible={} ownerAnimated={} blend={} depth={} alphaRef={} vegetation={} flags=0x{:x} conform={} keep={} pinned={} originalPos={} originalNorm={} vertices={} normals={} bufferVertices={} snowEnabled={} deposit={:.4f}",
+        name, texture ? texture->Name() : "<none>", begin, end, denied, sourceEligible,
+        rigidAttempted, rigidPassed, buffer.isDynamic, buffer.skinned, buffer.cpuPosed, cpuPose,
+        draw.palette_slot, passKind, ownsMesh, ObjectSnowOwnerEligible(obj), animated,
+        int(draw.blend), int(draw.depth), draw.alpha_ref, GCurrentIsVegetation, draw.flags,
+        draw.conform2.z, keep, pinned, mesh.OriginalPosValid(), mesh.OriginalNormValid(),
+        mesh.NVertex(), mesh.NNorm(), buffer.vertexCount, snow.enabled, snow.Depth());
+}
+
+static void TraceObjectSnowRetainedGates(const Object& obj, int mode, bool eligible)
+{
+    const char* name = ObjectSnowFixtureModel(obj);
+    if (!name) return;
+    const auto* shape = obj.GetShape();
+    int visual = 0, missing = 0;
+    ClipFlags hints = ClipNone;
+    for (int level = 0; level < shape->NLevels(); ++level)
+    {
+        if (!shape->IsNormalLevel(level)) continue;
+        ++visual;
+        if (const auto* mesh = shape->Level(level)) hints |= mesh->GetOrHints();
+        else ++missing;
+    }
+    const bool conform = ObjectSnowConformAllowed(*shape, mode);
+    static std::unordered_set<std::string> reported;
+    if (reported.size() >= 64) return;
+    const std::string key = std::string(name) + ":" + std::to_string(mode) + ":" +
+        std::to_string(eligible) + ":" + std::to_string(hints) + ":" + std::to_string(missing);
+    if (!reported.insert(key).second) return;
+    LOG_INFO(Graphics, "Wgpu object snow retained gates: model={} eligible={} static={} ownerEligible={} destroyed={} allowAnimation={} conform={} conformAllowed={} visualLevels={} missingVisual={} keep={} pinned={} hints=0x{:x}",
+        name, eligible, obj.Static(), ObjectSnowOwnerEligible(obj), obj.IsDestroyed(),
+        shape->GetAllowAnimation(), mode, conform, visual, missing,
+        (hints & ClipLandKeep) != 0, (hints & ClipLandOn) != 0, uint32_t(hints));
 }
 
 void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
@@ -8462,7 +8539,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     d.palette_slot = _currentPaletteSlot;
 
     const auto* snowOwner = static_cast<const Object*>(GetDrawObject());
-    const bool snowReceiver = snowOwner && ObjectSnowOwnerEligible(*snowOwner) &&
+    const bool snowSourceEligible = snowOwner && ObjectSnowOwnerEligible(*snowOwner) &&
         !buf->skinned && !buf->cpuPosed && !_currentCpuPose &&
         _currentPaletteSlot == WGR_NO_PALETTE && GetPassKindHint() == render::PassKindHint::None &&
         ObjectOwnsSnowMesh(*snowOwner, sMesh) && !snowOwner->GetAnimated(sMesh) &&
@@ -8470,10 +8547,19 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         ObjectSnowSurface::ConformAllowed(d.conform2.z,
             (sMesh.GetOrHints() & ClipLandKeep) != 0, (sMesh.GetOrHints() & ClipLandOn) != 0) &&
         !GCurrentIsVegetation && (d.flags & (WGR_DRAW3D_ON_SURFACE | WGR_DRAW3D_REFLECTIVE |
-            WGR_DRAW3D_GLASS | WGR_DRAW3D_COCKPIT | WGR_DRAW3D_MONITOR)) == 0 &&
-        (!buf->isDynamic || CurrentSnowSectionRigid(*snowOwner, sMesh, *buf, beg, end));
+            WGR_DRAW3D_GLASS | WGR_DRAW3D_COCKPIT | WGR_DRAW3D_MONITOR)) == 0;
+    const bool snowRigidAttempted = snowSourceEligible && buf->isDynamic;
+    const bool snowRigidPassed = !buf->isDynamic ||
+        (snowRigidAttempted && CurrentSnowSectionRigid(*snowOwner, sMesh, *buf, beg, end));
+    const bool snowReceiver = snowSourceEligible && snowRigidPassed;
     if (snowReceiver) d.flags |= WGR_DRAW3D_SNOW_RECEIVER;
-    if (snowOwner) TraceObjectSnowReceiver(*snowOwner, snowReceiver, "direct");
+    if (snowOwner)
+    {
+        TraceObjectSnowReceiver(*snowOwner, snowReceiver, "direct");
+        TraceObjectSnowDirectGates(*snowOwner, sMesh, *buf, d, beg, end,
+            int(GetPassKindHint()), _currentCpuPose != nullptr, snowSourceEligible,
+            snowRigidAttempted, snowRigidPassed);
+    }
 
     // Per-material sun lighting, folded exactly like GL33's
     // UploadVSMaterialConstants: raw MainLight colour x captured material, with
@@ -9193,6 +9279,7 @@ WgrInstance BuildGpuInstance(const Object& obj, uint32_t model, const ConformPla
         ObjectSnowConformAllowed(*obj.GetShape(), cp.mode);
     if (snowReceiver) inst.flags |= WGR_INSTANCE_SNOW_RECEIVER;
     TraceObjectSnowReceiver(obj, snowReceiver, "retained");
+    TraceObjectSnowRetainedGates(obj, cp.mode, snowReceiver);
     // Terrain-conform plane -> conform0/1/2, matching DrawSectionTL's per-draw fold.
     if (cp.mode == 1)
     {
