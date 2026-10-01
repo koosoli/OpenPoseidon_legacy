@@ -56,6 +56,23 @@ must retain neutral actual auto-hover, strict eight-probe roof suppression,
 continuous conservative canopy clearance, removed-roof positive, actual wet
 ground, engine-off, high-altitude, pause and existing sea-water controls.
 
+The root-owned deb4069c `flat-original-sand-complete-20261001-060950-f32fe0`
+campaign subsequently passed dry/snow/pause/strict roof/removal/high-altitude and
+real-wet no-emission stages, then failed its bounded westward shallow-sea search.
+That is still an overall failed campaign. Its reviewed stills remained too
+faint, so a separately authorized bounded optical candidate is being prepared;
+the original profile evidence below describes the measured baseline.
+
+For the unchanged sea control, supply **`-SeaX 1750 -SeaZ 3100`**. Original Noe
+bed centre is -4.09499979 m. All 25 points at 16 m spacing across the +/-32 m
+square lie between **-7.29179941 and -1.79099985 m**. This satisfies even the
+stronger requirement that every sample be shallow [-8,-.1] m; the actual runner
+requires a shallow centre and all 25 points below -.03 m. The existing bounded
+runtime bathymetry getter must still verify and select the actual footprint.
+An alternate X900/Z4150 is also source-shallow, but its -.1782 m highest corner
+has less shore margin. Exact 25-point values for both are in the evidence JSON.
+No ocean, wave, renderer, water-downwash or helicopter physics change is made.
+
 ## Optical source audit
 
 Actual `CfgScenePreload.CloudletBasic` uses `data3d/cl_basic.p3d`, whose one quad

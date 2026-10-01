@@ -186,6 +186,13 @@ def main():
             meanPass=sum(k*v for k,v in counts.items())/128,failures=dict(failures),
             maxPerimeterHeightDelta=maximum_delta,dustValues=sorted(dusts),
             nearestOwnerCentres=[dict(**o,distance=math.hypot(o['position'][0]-x,o['position'][2]-z)) for o in nearest])
+    sea = []
+    for x,z in ((1750,3100),(900,4150)):
+        points = [[x+dx,z+dz,terrain.height_at(grid,x+dx,z+dz)]
+                  for dz in range(-32,33,16) for dx in range(-32,33,16)]
+        sea.append(dict(x=x,z=z,centreHeight=terrain.height_at(grid,x,z),
+            minHeight=min(v[2] for v in points),maxHeight=max(v[2] for v in points),
+            all25Shallow=all(-8 <= v[2] < -.1 for v in points),samples=points))
     result = dict(status='source-inference-only-runtime-pending',
         provenance={str(path):sha(path) for path in (folder/'noe.rvw4',folder/'noe.rvw4.meta',
             folder/'noe/noe.wrp',folder/'installed-config.json',folder/'noe-config.json',
@@ -195,7 +202,7 @@ def main():
         actualModels=dict(aircraftSha256=hashlib.sha256(aircraft).hexdigest(),
             cloudletSha256=hashlib.sha256(sheet).hexdigest(),authoredAircraftSphere=sphere,
             rotorDiscRadius=sphere*.8,maximumRingAndFootprint=sphere*.8*.95+actual['footprint']),
-        textures=images,actualCpuProfiles=actual['profiles'],
+        textures=images,actualCpuProfiles=actual['profiles'],shallowSeaCandidates=sea,
         sites=[site(2699.62,5149.56),site(2475,5075)],
         flatCandidate=dict(cell=[49,101],cornerHeights=grid[101:103,49:51].flatten().tolist(),
             quadrants=census.quadrants(textures[ids[101*256+49]],definitions),
