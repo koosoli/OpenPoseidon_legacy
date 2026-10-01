@@ -49,6 +49,8 @@ class TerrainWgpu : public ITerrainRenderer
 
     void DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd) override;
     int GrassSurfaceCount() const;
+    // True only for the source receipt emitted after this real heightmap upload.
+    bool RainWaterSourceMatches(const WgrRainWaterSourceKey& key) const;
     // GRS-E: upload the game's photographed grass tuft for the mid LOD.
     // `worldKey` identifies what the atlas content is derived from; the upload is
     // skipped while it is unchanged, and repeated when it is not. See the call
@@ -189,6 +191,7 @@ class TerrainWgpu : public ITerrainRenderer
     const Landscape* _uploaded = nullptr;
     int _uploadedRange = 0;
     uint64_t _uploadedHeightRevision = 0;
+    WgrRainWaterSourceKey _rainWaterSource{};
     std::string _uploadedName;
     bool _detailNoiseTried = false;
     // Keeps the detail texture's GPU handle registered for the renderer's

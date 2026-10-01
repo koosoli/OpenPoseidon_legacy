@@ -4,6 +4,8 @@
 
 #include "CdlodDriver.hpp"
 #include "EngineWgpu.hpp"
+#include "TerrainWgpu.hpp"
+#include "RainWaterPublication.hpp"
 
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -804,8 +806,54 @@ void WaterWgpu::QueueRainWater(bool enabled)
     p.control = {float(field.Width()), float(field.Height()), rain, active ? 1.0f : 0.0f};
     p.generation = field.Generation();
     const std::string world = GLandscape->GetName();
+    if(field.FineActive())
+    {
+        WgrRainWaterPublication publication{};
+        publication.coarse=p;publication.revision=field.Revision();
+        publication.source={uint64_t(reinterpret_cast<uintptr_t>(GLandscape)),field.Generation(),
+            GLandscape->HeightRevision(),uint32_t(GLandscape->GetTerrainRange()),GLandscape->GetTerrainGrid()};
+        const auto* terrain=dynamic_cast<const TerrainWgpu*>(_engine.GetTerrainRenderer());
+        const bool sourceReady=field.SourceReady()&&terrain&&terrain->RainWaterSourceMatches(publication.source);
+        const bool ready=active&&sourceReady;
+        publication.flags=WGR_RAIN_WATER_FINE_BACKEND|(sourceReady?WGR_RAIN_WATER_SOURCE_READY:0u);
+        publication.coarse.control.w=ready?1.f:0.f;
+        std::vector<WgrVec4> coarse;
+        std::vector<WgrRainWaterFineCell> fine;
+        if(ready&&(!_rainWaterEnabled||!_rainWaterFineBackend||_rainWaterRevision!=field.Revision()||
+           _rainWaterGeneration!=field.Generation()||_rainWaterWorld!=world||
+           _rainWaterSourceRevision!=publication.source.height_revision))
+        {
+            const auto snapshot=field.Snapshot();
+            const auto fineSnapshot=field.FineSnapshot();
+            if(fineSnapshot.generation!=publication.source.generation||fineSnapshot.revision!=publication.revision||
+               fineSnapshot.sourceRevision!=publication.source.height_revision||
+               !PackRainWaterFine(fineSnapshot,size_t(field.Width())*field.Height(),fine))
+            {
+                publication.coarse.control.w=0;publication.flags&=~WGR_RAIN_WATER_SOURCE_READY;
+                fine.clear();_rainWaterHasSurface=false;
+                LOG_WARN(Graphics,"RAIN_WATER_FINE_UPLOAD refused incoherent or invalid source publication");
+            }
+            else
+            {
+                coarse.resize(snapshot.size()/4);
+                if(!snapshot.empty())std::memcpy(coarse.data(),snapshot.data(),snapshot.size()*sizeof(float));
+                if(fineSnapshot.valid)publication.flags|=WGR_RAIN_WATER_FINE_READY;
+                _rainWaterHasSurface=std::any_of(coarse.begin(),coarse.end(),[](const auto& c){return c.y>.001f;})||
+                    std::any_of(fine.begin(),fine.end(),[](const auto& c){return c.flow_depth.z>0&&
+                        c.rect.w-std::min({c.corners.x,c.corners.y,c.corners.z,c.corners.w})>.001f;});
+            }
+        }
+        else if(ready&&field.FineTileCount()>0)publication.flags|=WGR_RAIN_WATER_FINE_READY;
+        if(publication.coarse.control.w<.5f)_rainWaterHasSurface=false;
+        _engine.QueueRainWaterPublication(publication,std::move(coarse),std::move(fine));
+        _rainWaterRevision=field.Revision();_rainWaterGeneration=field.Generation();_rainWaterWorld=world;
+        _rainWaterSourceRevision=publication.source.height_revision;_rainWaterFineBackend=true;
+        _rainWaterEnabled=publication.coarse.control.w>=.5f;
+        if(_rainWaterHasSurface)_engine.SubmitRainWaterMarker();
+        return;
+    }
     std::vector<WgrVec4> cells;
-    if (active && (!_rainWaterEnabled || _rainWaterRevision != field.Revision() ||
+    if (active && (!_rainWaterEnabled || _rainWaterFineBackend || _rainWaterRevision != field.Revision() ||
         _rainWaterGeneration != field.Generation() || _rainWaterWorld != world))
     {
         const auto snapshot = field.Snapshot();
@@ -818,6 +866,7 @@ void WaterWgpu::QueueRainWater(bool enabled)
     _engine.QueueRainWater(p, field.Revision(), std::move(cells));
     _rainWaterRevision = field.Revision(); _rainWaterWorld = world; _rainWaterEnabled = active;
     _rainWaterGeneration = field.Generation();
+    _rainWaterFineBackend=false;
     if (_rainWaterHasSurface) _engine.SubmitRainWaterMarker();
 }
 

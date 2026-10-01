@@ -35,7 +35,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 18u // W3g/W4 water sea/effects lanes: 1216-byte params; matched engine/DLL required
+#define WGR_ABI_VERSION 19u // Paired fine rainfall/source receipt entry points; matched engine/DLL required
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -1385,6 +1385,30 @@ struct WgrGrassParams
  * control = integer width/height (as exact floats), liquid rain, enabled.
  * Grid RGBA = physical surface height, water depth, flow X/Z. */
 struct WgrRainWaterParams { WgrVec4 domain; WgrVec4 control; uint64_t generation; uint64_t reserved; };
+/* Fine rainfall publication is paired atomically with its coarse proxies and
+ * an actually uploaded bare-terrain receipt. It never falls through to the old
+ * grid setter. world_token is opaque CPU identity, not a dereferenceable pointer. */
+struct WgrRainWaterSourceKey {
+    uint64_t world_token, generation, height_revision;
+    uint32_t terrain_range;
+    float terrain_spacing;
+};
+struct WgrRainWaterFineCell {
+    WgrVec4 rect; // lower X/Z, side metres, horizontal water head
+    WgrVec4 corners; // actual heights 00, X1, Z1, 11; antidiagonal triangles
+    WgrVec4 flow_depth; // signed flow X/Z, volume/area (NOT local depth), zero
+    uint32_t parent, reserved[3];
+};
+enum : uint32_t {
+    WGR_RAIN_WATER_FINE_BACKEND=1u, WGR_RAIN_WATER_SOURCE_READY=2u,
+    WGR_RAIN_WATER_FINE_READY=4u, WGR_RAIN_WATER_FINE_MAX_CELLS=8192u
+};
+struct WgrRainWaterPublication {
+    WgrRainWaterParams coarse;
+    WgrRainWaterSourceKey source;
+    uint64_t revision;
+    uint32_t flags, reserved;
+};
 
 struct WgrWaterParams
 {
@@ -2307,6 +2331,10 @@ static_assert(sizeof(WgrSmokeVolumeParams) == 96, "WgrSmokeVolumeParams layout m
   static_assert(sizeof(WgrGrassParams) == 4784, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterParams) == 1472, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrRainWaterParams) == 48, "WgrRainWaterParams must match Rust");
+static_assert(sizeof(WgrRainWaterSourceKey)==32 && offsetof(WgrRainWaterSourceKey,terrain_range)==24);
+static_assert(sizeof(WgrRainWaterFineCell)==64 && offsetof(WgrRainWaterFineCell,parent)==48);
+static_assert(sizeof(WgrRainWaterPublication)==96 && offsetof(WgrRainWaterPublication,source)==48 &&
+    offsetof(WgrRainWaterPublication,revision)==80 && offsetof(WgrRainWaterPublication,flags)==88);
 static_assert(sizeof(WgrWaterNode) == 40, "WgrWaterNode layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterBatch) == 16, "WgrWaterBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterInteractionEvent) == 64 && alignof(WgrWaterInteractionEvent) == 16, "WgrWaterInteractionEvent must match Rust");
@@ -2775,6 +2803,13 @@ extern "C"
      * width*height cells. enabled=0 clears presentation, never simulation. */
     WGR_API void wgr_rain_water_set_grid(WgrRenderer* renderer, const WgrRainWaterParams* params,
         const WgrVec4* cells, uint32_t count, uint64_t revision);
+    /* These two additions require the paired fine consumer. Source receipt is
+     * published only after an actual matching heightmap upload. Empty slices
+     * preserve only a complete exact-key publication; disabled/stale clears both.
+     * Fine rectangles exclude coarse proxies at actual world coordinates. */
+    WGR_API void wgr_rain_water_set_source(WgrRenderer* renderer, const WgrRainWaterSourceKey* source);
+    WGR_API void wgr_rain_water_set_publication(WgrRenderer* renderer, const WgrRainWaterPublication* publication,
+        const WgrVec4* coarse, uint32_t coarse_count, const WgrRainWaterFineCell* fine, uint32_t fine_count);
 
     /* Set per-cascade configuration (0..7). Spectrum initialisation regenerates when spectrum parameters change. */
     WGR_API void wgr_water_set_cascade_config(WgrRenderer* renderer, uint32_t index, const WgrWaterCascadeConfig* config);
@@ -3241,6 +3276,9 @@ constexpr uint32_t WgrLayoutHash()
     h = WgrHashSize(h, sizeof(WgrGrassParams));
     h = WgrHashSize(h, sizeof(WgrWaterParams));
     h = WgrHashSize(h, sizeof(WgrRainWaterParams));
+    h = WgrHashSize(h, sizeof(WgrRainWaterSourceKey));
+    h = WgrHashSize(h, sizeof(WgrRainWaterFineCell));
+    h = WgrHashSize(h, sizeof(WgrRainWaterPublication));
     h = WgrHashSize(h, sizeof(WgrWaterNode));
     h = WgrHashSize(h, sizeof(WgrWaterBatch));
     h = WgrHashSize(h, sizeof(WgrWaterInteractionEvent));

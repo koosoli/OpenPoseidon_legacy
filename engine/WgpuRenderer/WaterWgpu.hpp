@@ -32,6 +32,8 @@ class WaterWgpu : public IWaterRenderer
     std::string _rainWaterWorld;
     bool _rainWaterEnabled = false;
     bool _rainWaterHasSurface = false;
+    bool _rainWaterFineBackend = false;
+    uint64_t _rainWaterSourceRevision = UINT64_MAX;
     // (Re)builds the quadtree when the map changes; returns true if it did.
     bool RebuildIfNeeded(const Landscape& land);
     void BuildQuadtree(const Landscape& land);

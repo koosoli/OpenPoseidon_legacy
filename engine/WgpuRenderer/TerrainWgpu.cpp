@@ -8,6 +8,7 @@
 #include <Poseidon/World/Terrain/TerrainSatmap.hpp>
 
 #include "CdlodDriver.hpp"
+#include "RainWaterPublication.hpp"
 #include "EngineWgpu.hpp"
 #include "TextureWgpu.hpp"
 #include "TextureBankWgpu.hpp"
@@ -429,12 +430,26 @@ void TerrainWgpu::BuildQuadtree(const Landscape& land)
     _treeMax = (originTexel + rootTexels) * grid;
 }
 
+bool TerrainWgpu::RainWaterSourceMatches(const WgrRainWaterSourceKey& key) const
+{
+    return _uploaded&&key.world_token==uint64_t(reinterpret_cast<uintptr_t>(_uploaded))&&
+        _uploadedRange==int(key.terrain_range)&&_uploadedHeightRevision==key.height_revision&&
+        _params.terrain_grid==key.terrain_spacing&&SameRainWaterSource(key,_rainWaterSource);
+}
+
 bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
 {
     const int range = land.GetTerrainRange();
     const char* name = land.GetName();
     const bool sameMap = _uploaded == &land && _uploadedRange == range && _uploadedName == name;
-    if (sameMap && _uploadedHeightRevision == land.HeightRevision())
+    const auto& rainWater=GRainWater();
+    const bool fine=rainWater.FineActive();
+    // New fine ownership/lifetime requires a REAL upload before its new source
+    // receipt, even if a reused Landscape happened to retain the numeric key.
+    const WgrRainWaterSourceKey requestedSource{uint64_t(reinterpret_cast<uintptr_t>(&land)),rainWater.Generation(),
+        land.HeightRevision(),uint32_t(range),land.GetTerrainGrid()};
+    const bool fineEpochReady=!fine||SameRainWaterSource(_rainWaterSource,requestedSource);
+    if (sameMap && _uploadedHeightRevision == land.HeightRevision()&&fineEpochReady)
     {
         return false;
     }
@@ -454,6 +469,12 @@ bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
     LOG_INFO(Graphics, "Wgpu heightfield upload: {}x{} grid={}m data={}", range, range,
              land.GetTerrainGrid(), land.HeightmapData() != nullptr);
     _uploadedHeightRevision = land.HeightRevision();
+    if(fine) {
+        _rainWaterSource={uint64_t(reinterpret_cast<uintptr_t>(&land)),rainWater.Generation(),
+            _uploadedHeightRevision,uint32_t(range),land.GetTerrainGrid()};
+        if(!land.HeightmapData())_rainWaterSource={};
+        wgr_rain_water_set_source(_renderer,&_rainWaterSource);
+    }
     if (sameMap)
     {
         // Experimental deformation changes geometry, not the material/grass atlas.

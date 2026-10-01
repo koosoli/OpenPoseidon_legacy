@@ -1284,6 +1284,9 @@ class EngineWgpu : public EngineDummy
         uint64_t rainWaterRevision = 0;
         bool rainWaterDirty = false;
         std::vector<WgrVec4> rainWaterCells;
+        WgrRainWaterPublication rainWaterPublication{};
+        std::vector<WgrRainWaterFineCell> rainWaterFineCells;
+        bool rainWaterPaired = false;
         float planarReflectionPad = 0.0f;
         bool planarPadDirty = false;
         WgrWaterInteractionParams waterInteraction{};
@@ -1709,6 +1712,8 @@ class EngineWgpu : public EngineDummy
     void QueueSand(std::vector<float> data) { _pendingSet.sandData = std::move(data); }
     void QueueWaterParams(const WgrWaterParams& p);
     void QueueRainWater(const WgrRainWaterParams& p, uint64_t revision, std::vector<WgrVec4> cells);
+    void QueueRainWaterPublication(const WgrRainWaterPublication& p,std::vector<WgrVec4> coarse,
+        std::vector<WgrRainWaterFineCell> fine);
     void QueuePlanarReflectionPad(float pad);
     void QueueWaterInteraction(const WgrWaterInteractionParams& p, const WgrWaterInteractionEvent* events,
                                uint32_t count);

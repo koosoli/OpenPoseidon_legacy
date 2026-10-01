@@ -1428,6 +1428,28 @@ pub struct WgrGrassParams {
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct WgrRainWaterParams { pub domain: WgrVec4, pub control: WgrVec4, pub generation:u64, pub reserved:u64 }
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct WgrRainWaterSourceKey {
+    pub world_token:u64, pub generation:u64, pub height_revision:u64,
+    pub terrain_range:u32, pub terrain_spacing:f32,
+}
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct WgrRainWaterFineCell {
+    pub rect:WgrVec4, pub corners:WgrVec4, pub flow_depth:WgrVec4,
+    pub parent:u32, pub reserved:[u32;3],
+}
+pub const WGR_RAIN_WATER_FINE_BACKEND:u32=1;
+pub const WGR_RAIN_WATER_SOURCE_READY:u32=2;
+pub const WGR_RAIN_WATER_FINE_READY:u32=4;
+pub const WGR_RAIN_WATER_FINE_MAX_CELLS:u32=8192;
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct WgrRainWaterPublication {
+    pub coarse:WgrRainWaterParams, pub source:WgrRainWaterSourceKey,
+    pub revision:u64, pub flags:u32, pub reserved:u32,
+}
 
 // Per-map + per-frame water parameters (a small UBO). See wgpu_renderer.hpp.
 #[repr(C)]
@@ -1736,6 +1758,10 @@ const _: () = assert!(std::mem::size_of::<WgrGrassDownwash>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4784);
 const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 1472);
 const _: () = assert!(std::mem::size_of::<WgrRainWaterParams>() == 48);
+const _: () = assert!(std::mem::size_of::<WgrRainWaterSourceKey>()==32 && std::mem::offset_of!(WgrRainWaterSourceKey,terrain_range)==24);
+const _: () = assert!(std::mem::size_of::<WgrRainWaterFineCell>()==64 && std::mem::offset_of!(WgrRainWaterFineCell,parent)==48);
+const _: () = assert!(std::mem::size_of::<WgrRainWaterPublication>()==96 && std::mem::offset_of!(WgrRainWaterPublication,source)==48 &&
+    std::mem::offset_of!(WgrRainWaterPublication,revision)==80 && std::mem::offset_of!(WgrRainWaterPublication,flags)==88);
 const _: () = assert!(std::mem::size_of::<WgrWaterNode>() == 40);
 const _: () = assert!(std::mem::size_of::<WgrWaterBatch>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrWaterInteractionEvent>() == 64);
@@ -1814,6 +1840,9 @@ const fn wgr_layout_hash() -> u32 {
     h = hash_size(h, sz::<WgrGrassParams>());
     h = hash_size(h, sz::<WgrWaterParams>());
     h = hash_size(h, sz::<WgrRainWaterParams>());
+    h = hash_size(h, sz::<WgrRainWaterSourceKey>());
+    h = hash_size(h, sz::<WgrRainWaterFineCell>());
+    h = hash_size(h, sz::<WgrRainWaterPublication>());
     h = hash_size(h, sz::<WgrWaterNode>());
     h = hash_size(h, sz::<WgrWaterBatch>());
     h = hash_size(h, sz::<WgrWaterInteractionEvent>());
@@ -1854,9 +1883,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(18)
+            .unwrap_or(19)
     } else {
-        18
+        19
     }
 }
 
@@ -2162,7 +2191,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 18); // W3g/W4 water sea/effects lanes
+        assert_eq!(super::wgr_abi_version(), 19); // Paired fine rainfall/source receipt
     }
 
     #[test]
@@ -3077,6 +3106,41 @@ pub unsafe extern "C" fn wgr_rain_water_set_grid(renderer:*mut WgrRenderer,
         let renderer=unsafe {&mut *renderer};let params=unsafe {*params};
         let cells=if count==0 {&[]} else {unsafe {std::slice::from_raw_parts(cells,count as usize)}};
         renderer.rain_water_set_grid(params,cells,revision);
+    }));
+}
+
+/// # Safety
+/// Live exclusive renderer and one valid source receipt after the matching
+/// actual bare-heightmap upload. The receipt is copied synchronously.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_rain_water_set_source(renderer:*mut WgrRenderer,source:*const WgrRainWaterSourceKey) {
+    if renderer.is_null()||source.is_null(){return}
+    let _=catch_unwind(AssertUnwindSafe(|| {
+        let renderer=unsafe {&mut *renderer};let source=unsafe {*source};
+        renderer.rain_water_set_source(source);
+    }));
+}
+
+/// # Safety
+/// Live exclusive renderer, valid publication and both consecutive slices.
+/// The paired consumer copies/validates everything before returning; it never
+/// forwards fine ownership to the legacy coarse setter.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_rain_water_set_publication(renderer:*mut WgrRenderer,
+    publication:*const WgrRainWaterPublication,coarse:*const WgrVec4,coarse_count:u32,
+    fine:*const WgrRainWaterFineCell,fine_count:u32) {
+    if renderer.is_null()||publication.is_null(){return}
+    let slices_valid=coarse_count<=1024*1024&&fine_count<=WGR_RAIN_WATER_FINE_MAX_CELLS&&
+        (coarse_count==0||!coarse.is_null())&&(fine_count==0||!fine.is_null());
+    let _=catch_unwind(AssertUnwindSafe(|| {
+        let renderer=unsafe {&mut *renderer};let mut publication=unsafe {*publication};
+        if !slices_valid {
+            publication.coarse.control[3]=0.;publication.flags&=!WGR_RAIN_WATER_SOURCE_READY;
+            renderer.rain_water_set_publication(publication,&[],&[]);return;
+        }
+        let coarse=if coarse_count==0{&[]}else{unsafe {std::slice::from_raw_parts(coarse,coarse_count as usize)}};
+        let fine=if fine_count==0{&[]}else{unsafe {std::slice::from_raw_parts(fine,fine_count as usize)}};
+        renderer.rain_water_set_publication(publication,coarse,fine);
     }));
 }
 

@@ -2,6 +2,7 @@
 #include "ObjectSnowSurface.hpp"
 #include "GroundMeshSurface.hpp"
 #include "TreeSnowSurface.hpp"
+#include "RainWaterPublication.hpp"
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageCameraDemand.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageProjectedDemand.hpp>
@@ -3092,10 +3093,16 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
     }
     if (p.rainWaterDirty)
     {
-        wgr_rain_water_set_grid(_renderer, &p.rainWaterParams,
-            p.rainWaterCells.empty() ? nullptr : p.rainWaterCells.data(),
-            U32(p.rainWaterCells.size()), p.rainWaterRevision);
+        if(p.rainWaterPaired)
+            wgr_rain_water_set_publication(_renderer,&p.rainWaterPublication,
+                p.rainWaterCells.empty()?nullptr:p.rainWaterCells.data(),U32(p.rainWaterCells.size()),
+                p.rainWaterFineCells.empty()?nullptr:p.rainWaterFineCells.data(),U32(p.rainWaterFineCells.size()));
+        else
+            wgr_rain_water_set_grid(_renderer, &p.rainWaterParams,
+                p.rainWaterCells.empty() ? nullptr : p.rainWaterCells.data(),
+                U32(p.rainWaterCells.size()), p.rainWaterRevision);
         p.rainWaterCells.clear();
+        p.rainWaterFineCells.clear();
         p.rainWaterDirty = false;
     }
     if (p.waterInteractionDirty)
@@ -5156,6 +5163,8 @@ void EngineWgpu::QueueWaterParams(const WgrWaterParams& p)
 
 void EngineWgpu::QueueRainWater(const WgrRainWaterParams& p, uint64_t revision, std::vector<WgrVec4> cells)
 {
+    if(_pendingSet.rainWaterPaired){_pendingSet.rainWaterCells.clear();_pendingSet.rainWaterFineCells.clear();}
+    _pendingSet.rainWaterPaired=false;
     // Preserve an already queued changed-grid snapshot if another camera queues
     // only its time/rain parameters before the next overlap-safe drain.
     const bool same = _pendingSet.rainWaterRevision == revision &&
@@ -5169,6 +5178,15 @@ void EngineWgpu::QueueRainWater(const WgrRainWaterParams& p, uint64_t revision, 
     _pendingSet.rainWaterParams = p;
     _pendingSet.rainWaterRevision = revision;
     _pendingSet.rainWaterDirty = true;
+}
+
+void EngineWgpu::QueueRainWaterPublication(const WgrRainWaterPublication& p,std::vector<WgrVec4> coarse,
+    std::vector<WgrRainWaterFineCell> fine)
+{
+    if(!_pendingSet.rainWaterPaired){_pendingSet.rainWaterCells.clear();_pendingSet.rainWaterFineCells.clear();}
+    AccumulateRainWaterPublication(_pendingSet.rainWaterPublication,_pendingSet.rainWaterCells,
+        _pendingSet.rainWaterFineCells,p,std::move(coarse),std::move(fine));
+    _pendingSet.rainWaterPaired=true;_pendingSet.rainWaterDirty=true;
 }
 
 void EngineWgpu::QueuePlanarReflectionPad(float pad)
