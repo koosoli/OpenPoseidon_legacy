@@ -111,11 +111,15 @@ def main():
         code.append("assert(ChurchSnowSurface::FixedVerticesRigid(mask,true,read));assert(ChurchSnowSurface::FixedCornersRigid(mask,int(roof.size()),true,index,read));")
         code.append("p[roof[0]].current[4]+=0.001f;assert(!ChurchSnowSurface::FixedCornersRigid(mask,int(roof.size()),true,index,read));}")
         clock = {v for sel in sels for v in sel}
+        unique_roof = sorted(set(roof))
+        roof_centre = [sum(points[v][axis] for v in unique_roof)/len(unique_roof) for axis in range(3)]
+        clock_centre = [sum(points[v][axis] for v in clock)/len(clock) for axis in range(3)] if clock else None
         facts.append(dict(level=row["level"], resolution=row["resolution"], vertices=len(points),
                           clockVertices=len(clock), roofTexture="data/tasky_tmavsi.pac", roofCorners=len(roof),
                           clockRoofIntersection=len(clock & set(roof)),
                           boundingSpanClockIntersection=len(clock & set(range(min(roof), max(roof)+1))),
-                          minimumRoofNormalUp=min(-normals[v][1] for v in roof)))
+                          minimumRoofNormalUp=min(-normals[v][1] for v in roof),
+                          roofLocalCentre=roof_centre, clockLocalCentre=clock_centre))
     code.append("}")
     args.out.mkdir(parents=True, exist_ok=True)
     cpp, exe = args.out / "actual-stock-helper.cpp", args.out / "actual-stock-helper.exe"
