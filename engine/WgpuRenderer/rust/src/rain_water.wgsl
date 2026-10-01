@@ -11,7 +11,7 @@ struct RainWaterParams {
 @group(1) @binding(0) var grid: texture_2d<f32>;
 @group(1) @binding(1) var<uniform> rainwater: RainWaterParams;
 struct FineTileMask {
-    meta: vec4<u32>,
+    counts: vec4<u32>,
     rects: array<vec4<f32>,8>,
 };
 @group(1) @binding(2) var fine_records: texture_2d<f32>;
@@ -22,7 +22,7 @@ fn fine_record(cell: u32, lane: u32) -> vec4<f32> {
     return textureLoad(fine_records,vec2<i32>(i32(i%1024u),i32(i/1024u)),0);
 }
 fn fine_owned(world_xz: vec2<f32>) -> bool {
-    for (var i=0u;i<min(fine_tiles.meta.x,8u);i+=1u) {
+    for (var i=0u;i<min(fine_tiles.counts.x,8u);i+=1u) {
         let rect=fine_tiles.rects[i];
         if (all(world_xz>=rect.xy) && all(world_xz<rect.zw)) {return true;}
     }
@@ -141,7 +141,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
     var water: vec4<f32>;
     let is_fine=in.fine_cell!=0xffffffffu;
     if (is_fine) {
-        if (in.fine_cell>=fine_tiles.meta.y) {discard;}
+        if (in.fine_cell>=fine_tiles.counts.y) {discard;}
         water=fine_water_at(in.fine_cell,in.world.xz);
     } else {
         if (fine_owned(in.world.xz)) {discard;}

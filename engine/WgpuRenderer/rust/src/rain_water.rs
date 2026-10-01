@@ -1259,7 +1259,7 @@ mod full_draw_tests {
             source:include_str!("rain_water.wgsl"),file_path:"rain_water.wgsl",..Default::default()}).unwrap();
         let (members,span)=module.types.iter().find_map(|(_,ty)|{
             if let naga::TypeInner::Struct{members,span}=&ty.inner {
-                if members.len()==2 && members[0].name.as_deref()==Some("meta") && members[1].name.as_deref()==Some("rects") {return Some((members,*span));}
+                if members.len()==2 && members[0].name.as_deref()==Some("counts") && members[1].name.as_deref()==Some("rects") {return Some((members,*span));}
             }None
         }).expect("Actual fine tile uniform is missing");
         assert_eq!(span as usize,std::mem::size_of::<fine::TileMask>());
