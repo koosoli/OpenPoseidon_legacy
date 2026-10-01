@@ -2,6 +2,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -63,6 +64,50 @@ struct CdlodSelection
     int level;
     float morphStart, morphEnd;
 };
+
+struct CdlodContactFocus { float x, z, radius; };
+
+// A current on-foot target with actual local deformation, never an arbitrary
+// camera/look target or distant spectated object. 20m+8m fits the existing
+// camera-centred 64m signed-height upload; this is presentation only.
+inline bool CdlodContactFocusEligible(float cameraX, float cameraY, float cameraZ,
+    float targetX, float targetY, float targetZ, float groundY,
+    bool normalExternalView, bool livingOnFoot, bool hasLocalDeformation)
+{
+    const float values[]={cameraX,cameraY,cameraZ,targetX,targetY,targetZ,groundY};
+    for (float value:values) if (!std::isfinite(value) || std::abs(value)>1000000.0f) return false;
+    const float dx=targetX-cameraX, dy=targetY-cameraY, dz=targetZ-cameraZ;
+    return normalExternalView && livingOnFoot && hasLocalDeformation &&
+        dx*dx+dy*dy+dz*dz<=20.0f*20.0f && std::abs(targetY-groundY)<=3.0f;
+}
+
+// Bounded union, not two overlapping terrain overlays. Each selected parent
+// is partitioned once. Two <=8m windows imply at most the sum of the original
+// single-focus split counts, independent of overlap. No new world selection.
+template <typename EmitFn>
+void RefineCdlodContactUnion(const CdlodSelection& node,
+    const std::array<CdlodContactFocus,2>& focuses, size_t count, EmitFn&& emit)
+{
+    bool intersects=false;
+    for (size_t i=0;i<std::min(count,focuses.size());++i)
+    {
+        const auto& f=focuses[i];
+        if (!std::isfinite(f.x) || !std::isfinite(f.z) || !std::isfinite(f.radius) ||
+            std::abs(f.x)>1000000.0f || std::abs(f.z)>1000000.0f || f.radius<=0.0f || f.radius>8.0f) continue;
+        intersects |= node.originX<f.x+f.radius && node.originZ<f.z+f.radius &&
+            node.originX+node.size>f.x-f.radius && node.originZ+node.size>f.z-f.radius;
+    }
+    if (node.size<=4.0f || !intersects) {emit(node);return;}
+    for (int child=0;child<4;++child)
+    {
+        auto patch=node;
+        patch.size*=0.5f;
+        patch.originX+=(child&1)*patch.size;
+        patch.originZ+=(child>>1)*patch.size;
+        patch.morphStart=1.0e10f;patch.morphEnd=2.0e10f;
+        RefineCdlodContactUnion(patch,focuses,count,emit);
+    }
+}
 
 // Refine only the close-up snow window, not the entire authored heightfield.
 // Children partition the parent exactly; no overlapping overlay or depth bias.

@@ -5,6 +5,9 @@
 #include <Poseidon/World/Weather/MudGroundAdmission.hpp>
 #include <Poseidon/World/Weather/SandField.hpp>
 #include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
+#include <Poseidon/AI/AIUnit.hpp>
+#include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/TerrainSatmap.hpp>
 
 #include "CdlodDriver.hpp"
@@ -3351,10 +3354,52 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         std::abs(snowCamera.Y() - land.SurfaceY(snowCamera.X(), snowCamera.Z())) < 15.0f;
     const bool refineSand = sand.enabled && sand.Chunks() > 0 &&
         std::abs(snowCamera.Y() - land.SurfaceY(snowCamera.X(), snowCamera.Z())) < 15.0f;
+    std::array<CdlodContactFocus,2> reliefFocus{};
+    size_t reliefFocusCount=0;
+    if (refineSnow || refineMud || refineSand)
+        reliefFocus[reliefFocusCount++]={snowCamera.X(),snowCamera.Z(),8.0f};
+    // Main-thread Landscape::Draw: CameraOn is the actual controlled/spectated
+    // soldier, not the offset external render camera. Keep the view's existing
+    // focus and add only a near on-foot target with local stored contact relief.
+    // Freefly/cutscene effects keep CameraOn on the player: exclude those.
+    if (GWorld && !GWorld->GetCameraEffect() &&
+        (GWorld->GetCameraType()==CamExternal || GWorld->GetCameraType()==CamGroup))
+    {
+        const Man* target=dyn_cast<Man>(GWorld->CameraOn());
+        const bool onFoot=target && !target->IsDead() &&
+            (!target->Brain() || !target->Brain()->GetVehicleIn());
+        if (onFoot)
+        {
+            const Vector3 pos=target->Position();
+            const bool finiteTarget=std::isfinite(pos.X()) && std::isfinite(pos.Y()) && std::isfinite(pos.Z()) &&
+                std::abs(pos.X())<=1000000.0f && std::abs(pos.Y())<=1000000.0f && std::abs(pos.Z())<=1000000.0f;
+            const float ground=finiteTarget ? land.SurfaceY(pos.X(),pos.Z()) : 0.0f;
+            // First apply cheap range/height guards. Persistent stored relief
+            // is the current local-contact proof, including pause/dry-down;
+            // no new producer timestamp, synthetic stamp or field mutation.
+            if (finiteTarget && CdlodContactFocusEligible(snowCamera.X(),snowCamera.Y(),snowCamera.Z(),
+                    pos.X(),pos.Y(),pos.Z(),ground,true,true,true))
+            {
+                bool localRelief=false;
+                for (int z=-4;z<=4 && !localRelief;++z)
+                    for (int x=-4;x<=4 && !localRelief;++x)
+                    {
+                        const float fx=pos.X()+x*0.25f, fz=pos.Z()+z*0.25f;
+                        localRelief=(mud.enabled && mud.Chunks()>0 && mud.HeightOffsetAt(fx,fz)<-0.001f) ||
+                            (sand.enabled && sand.Chunks()>0 && sand.HeightOffsetAt(fx,fz)<-0.001f) ||
+                            (snow.CoverActive() && snow.detailedGeometry && snow.BaseDepthAt(fx,fz)>0.002f &&
+                                snow.DeficitAt(int(std::floor(fx/SnowField::CellSize)),
+                                               int(std::floor(fz/SnowField::CellSize)))>0.001f);
+                    }
+                if (localRelief)
+                    reliefFocus[reliefFocusCount++]={pos.X(),pos.Z(),8.0f};
+            }
+        }
+    }
     auto emit = [&](const CdlodSelection& s)
     {
-        if (refineSnow || refineMud || refineSand)
-            RefineCdlodSnow(s, snowCamera.X(), snowCamera.Z(), 8.0f, emitNode);
+        if (reliefFocusCount>0)
+            RefineCdlodContactUnion(s,reliefFocus,reliefFocusCount,emitNode);
         else
             emitNode(s);
     };
