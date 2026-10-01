@@ -6,11 +6,16 @@ fn body_source() -> &'static str {
     let source = include_str!("shaders/rain_water_body.wgsl");
     &source[source.find("fn rain_water_body_radiance(").unwrap()..]
 }
-fn optics_source() -> &'static str {
+fn optics_source() -> String {
     let source = include_str!("rain_water.wgsl");
     let start = source.find("fn rain_water_optics(").unwrap();
     let end = start + source[start..].find("struct VsOut").unwrap();
-    &source[start..end]
+    format!(
+        "{}\n{}",
+        include_str!("shaders/rain_water_optics.wgsl")
+            .lines().skip(1).collect::<Vec<_>>().join("\n"),
+        &source[start..end]
+    )
 }
 #[test]
 fn actual_body_helper_is_resource_free_and_called_with_physical_sky_by_fragment() {

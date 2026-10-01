@@ -13,6 +13,9 @@ mod fine;
 #[cfg(test)]
 #[path = "rain_water_body_tests.rs"]
 mod body_tests;
+#[cfg(test)]
+#[path = "rain_water_optics_tests.rs"]
+mod optics_tests;
 type PublicationIdentity = (fine::SourceIdentity, u64, [u32; 6], u32);
 fn publication_identity(p: &WgrRainWaterPublication) -> Option<PublicationIdentity> {
     Some((
@@ -1018,18 +1021,23 @@ mod tests {
             .unwrap();
     }
 
-    fn optics_source() -> &'static str {
+    fn optics_source() -> String {
         let source = include_str!("rain_water.wgsl");
         let begin = source.find("fn rain_water_optics(").unwrap();
         let end = source[begin..].find("struct VsOut").unwrap() + begin;
-        &source[begin..end]
+        format!(
+            "{}\n{}",
+            include_str!("shaders/rain_water_optics.wgsl")
+                .lines().skip(1).collect::<Vec<_>>().join("\n"),
+            &source[begin..end]
+        )
     }
 
     #[test]
     fn actual_depth_optics_validates_without_resources_and_is_used_by_fragment() {
         // Validate the actual production helper without GPU/resources, then
         // verify that the composed real fragment calls it, not a test-only copy.
-        let module = naga::front::wgsl::parse_str(optics_source()).unwrap();
+        let module = naga::front::wgsl::parse_str(&optics_source()).unwrap();
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),
@@ -1211,8 +1219,10 @@ fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {{
                     // sky lift, and an HDR clamp even if alpha alone looks valid.
                     let actual =
                         s[channel] as f64 * s[3] as f64 + bed[channel] * (1.0 - s[3] as f64);
-                    let expected = 0.025 * sky[channel]
-                        + 0.975
+                    let t = ((depth - 0.008) / 0.042).clamp(0.0, 1.0);
+                    let reflected_weight = 0.025 * t * t * (3.0 - 2.0 * t);
+                    let expected = reflected_weight * sky[channel]
+                        + (1.0 - reflected_weight)
                             * ((1.0 - transmitted) * body[channel] + transmitted * bed[channel]);
                     assert!(
                         (actual - expected).abs() < 1e-5,
@@ -1243,7 +1253,7 @@ fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {{
             "negative radiance cannot create negative light"
         );
         assert!(
-            (0.025..0.04).contains(&special[23]),
+            (0.005..0.007).contains(&special[23]),
             "2mm water must not restore the old .3 opacity milk floor"
         );
         drop(bytes);

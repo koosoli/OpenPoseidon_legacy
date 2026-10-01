@@ -3,6 +3,7 @@
 #import ground_puddles::{ground_puddle_rain_factor, ground_puddle_ripple_normal}
 #import rain_water_reflections::rain_water_scene_reflection
 #import rain_water_body::rain_water_body_radiance
+#import rain_water_optics::{rain_water_surface_optics, rain_water_standing_fraction}
 
 struct RainWaterParams {
     domain: vec4<f32>, // absolute origin x/z, cell spacing, simulation time
@@ -81,19 +82,7 @@ fn rain_water_support_depth(water: vec4<f32>, bed: f32, sea_level: f32) -> f32 {
 // body tint is scattering radiance, not an arbitrary grade on the terrain.
 fn rain_water_optics(local_depth: f32, view_cosine: f32, reflected: vec3<f32>,
                      body: vec3<f32>, coverage: f32) -> vec4<f32> {
-    if (local_depth <= 0.0 || coverage <= 0.0) { return vec4<f32>(0.0); }
-    let mu = clamp(view_cosine, 0.0, 1.0);
-    let fresnel = 0.025 + 0.975 * pow(1.0 - mu, 5.0);
-    let transmission = exp(-3.0 * min(local_depth, 64.0));
-    let scatter_weight = (1.0 - fresnel) * (1.0 - transmission);
-    let opacity = fresnel + scatter_weight;
-    // Sky and scattering sum to opacity; the remaining energy transmits the
-    // destination bed. Normalisation is essential with straight alpha: blending
-    // an already-premultiplied colour would apply opacity twice. No +.18 sky
-    // lift or fixed .3 alpha floor survives, including with rain stopped.
-    let colour = (max(reflected, vec3<f32>(0.0)) * fresnel
-        + max(body, vec3<f32>(0.0)) * scatter_weight) / opacity;
-    return vec4<f32>(colour, opacity * clamp(coverage, 0.0, 1.0));
+    return rain_water_surface_optics(local_depth,view_cosine,reflected,body,coverage);
 }
 
 struct VsOut {
@@ -171,6 +160,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
             water_at(in.world.xz - vec2<f32>(0,step)).x)/(2.0*step);
     }
     let ripple = ground_puddle_ripple_normal(in.world.xz,rainwater.domain.w,rainwater.control.z,footprint);
+    let standing = rain_water_standing_fraction(local_depth);
     // Long, gentle flow packets advect with the physical field velocity; fade
     // all fine variation before distant pixels can resolve glittering glints.
     let detail = 1.0 - smoothstep(0.15,0.7,footprint);
@@ -178,11 +168,14 @@ fn fs_main(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
     let advected = in.world.xz - flow * rainwater.domain.w;
     let flow_slope = vec2<f32>(sin(advected.x*1.7),cos(advected.y*1.4))
         * min(length(flow),2.0) * 0.016 * detail;
-    let n = normalize(vec3<f32>(-hx + ripple.x + flow_slope.x, 1.0,
-                                -hz + ripple.z + flow_slope.y));
+    let n = normalize(vec3<f32>(-hx + (ripple.x + flow_slope.x)*standing, 1.0,
+                                -hz + (ripple.z + flow_slope.y)*standing));
     let view = normalize(frame.cam_pos.xyz-in.world);
     let normal_variation=max(length(dpdx(n)),length(dpdy(n)));
-    let scene=rain_water_scene_reflection(in.world-frame.cam_pos.xyz,n,normal_variation,footprint);
+    var scene=vec4<f32>(0.0);
+    if (standing > 0.0) {
+        scene=rain_water_scene_reflection(in.world-frame.cam_pos.xyz,n,normal_variation,footprint);
+    }
     let reflected = mix(ground_sky_reflection(reflect(-view,n)),scene.rgb,scene.a);
     var sky_body = vec3<f32>(0.0);
     if (frame.sun_diffuse.w > 0.5) { sky_body = sky_irradiance(n); }
