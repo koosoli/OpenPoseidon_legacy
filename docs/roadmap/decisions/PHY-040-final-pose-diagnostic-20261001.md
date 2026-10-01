@@ -107,9 +107,9 @@ is unchanged. `git diff --check` passes. New Catch2 cases use actual production
 face evaluation and actual animation `CombineTransform`, `TransformPoint` and
 `ApplyMatricesPoint`; they check dead-face output equivalence, lip-pointer/state
 and counter retention, refusal bounds, nonrigid determinant/identity metrics,
-and the real mixed-weight correction discrepancy. Compilation/execution of
-these tests and installed getter/ordinary-death regression checks are pending
-the parent-owned build/runtime window. No GPU, game launch, full build or large
+and the real mixed-weight correction discrepancy. The initial source handoff
+required parent-owned compilation and installed regression checks; their
+subsequent results are recorded below. No GPU, game launch, full build or large
 stock animation corpus was run by this agent.
 
 ## Installed runner candidate
@@ -156,3 +156,45 @@ runtime evidence. Actual installed execution remains pending root ownership:
 $env:LOCK_OWNER='corpse-final-pose'
 bash scripts/with-game-lock.sh pwsh -NoProfile -File scripts/Test-CorpsePoseDiagnostic.ps1
 ```
+
+## First installed diagnostic and exact baseline readiness
+
+The parent-owned combined build passed, including `[corpse-pose]` (257
+assertions in six cases). Installed `e5445111` ran the diagnostic in
+`build/corpse-pose/final-pose-installed-20261001-052726-193320`. It failed the
+exact image gate and exited normally; this record remains a failure, not an
+accepted complete lifecycle proof.
+
+At simulation time 17.374, the repeated held getter replies were identical.
+The stock corpse reported 33 final matrices, identity head/gun/leg corrections,
+and 37 proxies. Existing phase-consumer comparison covered 542 points with
+zero mismatches. Actual graphical final-palette versus point-path discrepancies
+were at most about 6.4e-8 m; special-LOD comparisons were zero. The before/held
+PNGs differed in exactly fifteen scattered pixels, each by one unit in one RGB
+channel, with none on the corpse. Held and cleared PNGs were identical.
+The nine measured anchor separations reached 0.078774 m; anatomical hull
+clearance reached -0.07466 m and the equipment tube -0.22952 m. These remain
+observations with contact and rig admission false.
+
+Source inspection found that `EngineWgpu::UpdateSunGlareExposure` continues
+its render-frame adaptation while simulation is paused. It multiplies manual
+tonemap exposure independently of `WGR_AUTO_EXPOSURE=0`. This is a plausible
+readiness cause, **not a measured attribution of the failed run**. Tonemap and
+GTAO noise have no frame-varying term, and the screenshot path drains a real
+next-frame composited readback.
+
+The diagnostic callback arm now captures up to eight paused baseline PNGs
+before any hold, comparison or final-pose query. It retains every image and
+requires three consecutive exact hashes at the same simulation time. If that
+never occurs, it fails explicitly at baseline readiness. The final selected
+baseline is copied byte-for-byte to `before-held.png`; the existing exact
+before/held/cleared gate is unchanged. The ordinary proof without a callback
+keeps its previous capture behavior. This can establish query-independent
+drift on a repeat without accepting a pixel tolerance. Root runtime must
+still verify the candidate; persistent drift requires a separate measured
+exposure/readiness trace, not a relaxed equality check.
+
+The source-only wrapper test executes the actual host baseline predicate and
+checks empty/two-frame refusal, an eight-frame drifting sequence, three exact
+final matches after drift, rejection of a later changed hash and rejection of
+simulation advancement. No game or GPU was run by this agent.

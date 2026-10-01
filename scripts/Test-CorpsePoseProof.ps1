@@ -128,6 +128,35 @@ function Screenshot([string]$name) {
     if ($bytes.Length -lt 24 -or [BitConverter]::ToString($bytes[0..7]) -ne '89-50-4E-47-0D-0A-1A-0A') { throw "Invalid PNG: $path" }
     return @{ path = $path; sha256 = (Get-FileHash -LiteralPath $path).Hash; bytes = $bytes.Length; simulationTime = Simulation-Time }
 }
+function Test-ExactPausedBaseline([array]$samples) {
+    if ($samples.Count -eq 0) { return $false }
+    foreach ($sample in $samples) {
+        Require ($sample.simulationTime -eq $samples[0].simulationTime) 'Unqueried baseline advanced simulation.'
+    }
+    if ($samples.Count -lt 3) { return $false }
+    $last = $samples.Count - 1
+    return ($samples[$last].sha256 -ceq $samples[$last-1].sha256 -and
+        $samples[$last].sha256 -ceq $samples[$last-2].sha256)
+}
+function Wait-ExactPausedBaseline {
+    # No corpse capture/compare/final-pose query occurs in this sequence. Render
+    # adaptation can still advance while simulation is paused; retain its actual
+    # frames rather than attributing pre-existing image drift to the diagnostic.
+    $record = @{ passed = $false; samples = @(); maxCaptures = 8; exactConsecutiveRequired = 3 }
+    $result.observations.pausedBaseline = $record
+    for ($index = 1; $index -le 8; ++$index) {
+        $record.samples += (Screenshot ('paused-baseline-{0:00}' -f $index))
+        if (Test-ExactPausedBaseline $record.samples) {
+            $record.passed = $true
+            $selected = $record.samples[-1].Clone()
+            $selected.path = Join-Path $output 'before-held.png'
+            Copy-Item -LiteralPath $record.samples[-1].path -Destination $selected.path
+            Require ((Get-FileHash -LiteralPath $selected.path).Hash -ceq $selected.sha256) 'Baseline artifact copy changed PNG bytes.'
+            return $selected
+        }
+    }
+    throw 'Unqueried paused baseline did not produce three exact consecutive PNGs within eight captures.'
+}
 function Position-Camera {
     $position = Eval 'getPosASL poseProofCorpse'
     Require ($position -is [array] -and $position.Count -eq 3) 'Corpse getPosASL did not return three coordinates.'
@@ -239,7 +268,7 @@ try {
     Require ((Query 'corpse-clear') -ceq 'OK corpse-clear cleared=1') 'Readiness capture did not clear.'
     Set-Acceleration 0
     Position-Camera
-    $result.captures.before = Screenshot 'before-held'
+    $result.captures.before = if ($FinalPoseProbe) { Wait-ExactPausedBaseline } else { Screenshot 'before-held' }
     $capture = Wait-Capture
     $status = Query 'corpse-status'
     Require ($status -match '^OK corpse-status .*remainingMs=30000$') "Fresh paused lease status invalid: $status"

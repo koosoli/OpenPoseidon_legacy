@@ -107,8 +107,21 @@ function Assert-Refusal($reply) {
 }
 if($SelfTest) {
     $tokens=$null;$parseErrors=$null
-    $null=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Test-CorpsePoseProof.ps1'),[ref]$tokens,[ref]$parseErrors)
+    $hostAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Test-CorpsePoseProof.ps1'),[ref]$tokens,[ref]$parseErrors)
     Require ($parseErrors.Count -eq 0) 'Callback host runner has PowerShell parse errors.'
+    $baselineFunction=$hostAst.Find({param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Test-ExactPausedBaseline'
+    },$true)
+    Require ($null -ne $baselineFunction) 'Actual baseline policy missing.'
+    . ([scriptblock]::Create($baselineFunction.Extent.Text))
+    $a=@{sha256='A';simulationTime=17.374};$b=@{sha256='B';simulationTime=17.374}
+    Require (!(Test-ExactPausedBaseline @())) 'Empty baseline accepted.'
+    Require (!(Test-ExactPausedBaseline @($a,$a))) 'Only two exact captures accepted.'
+    Require (!(Test-ExactPausedBaseline @($a,$b,$a,$b,$a,$b,$a,$b))) 'Eight drifting captures accepted.'
+    Require (Test-ExactPausedBaseline @($a,$b,$b,$b)) 'Three exact final baseline captures refused.'
+    Require (!(Test-ExactPausedBaseline @($a,$a,$a,$b))) 'Latest drift ignored after earlier stability.'
+    $refused=$false;try {Test-ExactPausedBaseline @($a,$a,@{sha256='A';simulationTime=17.375})} catch {$refused=$true}
+    Require $refused 'Baseline simulation advancement accepted.'
     $identity=@(1,0,0,0,0,1,0,0,0,0,1,0)
     $mock=[ordered]@{ok=$true;readonly=$true;solver=$false;rigAdmitted=$false;contactAdmitted=$false;entity='ABCD';model='data3d\mc vojakw2.p3d';
         capturedMs=1000;measuredMs=1000;headIdentityFlag=$true;gunIdentityFlag=$true;
