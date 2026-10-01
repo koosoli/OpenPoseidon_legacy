@@ -1,0 +1,609 @@
+{
+  "member": "mc vojakw2.p3d",
+  "storedSha256": "f3ca907846587abc8e787fbfeca3d9a2ffe16f4f2025fda67ffbae66c977155c",
+  "decodedSha256": "baf90043df1b561c6099f3c8fec546ed58e43e00853d70f386cfb2f81853d221",
+  "boundingCenter": [
+    -0.4158504009246826,
+    0.25988149642944336,
+    0.3436793088912964
+  ],
+  "autoCenter": true,
+  "lockAutoCenter": false,
+  "roles": {
+    "geometry": {
+      "lod": 6,
+      "components": [
+        {
+          "name": "component01",
+          "vertices": 24,
+          "boundsMin": [
+            0.3629010021686554,
+            -1.3480077981948853,
+            -0.630929708480835
+          ],
+          "boundsMax": [
+            0.6501514911651611,
+            -1.2164908647537231,
+            -0.5224181413650513
+          ],
+          "positiveBoneVertices": {
+            "pchodidlo": 24
+          },
+          "exclusiveFullWeightBone": "pchodidlo"
+        },
+        {
+          "name": "component02",
+          "vertices": 24,
+          "boundsMin": [
+            0.3629010021686554,
+            -1.3480077981948853,
+            -0.14868783950805664
+          ],
+          "boundsMax": [
+            0.6501514911651611,
+            -1.2164908647537231,
+            -0.04017627239227295
+          ],
+          "positiveBoneVertices": {
+            "lchodidlo": 24
+          },
+          "exclusiveFullWeightBone": "lchodidlo"
+        },
+        {
+          "name": "component03",
+          "vertices": 24,
+          "boundsMin": [
+            0.24944981932640076,
+            -0.4489668607711792,
+            -0.542195737361908
+          ],
+          "boundsMax": [
+            0.5598562359809875,
+            0.16177710890769958,
+            -0.13650669157505035
+          ],
+          "positiveBoneVertices": {
+            "zebra": 24
+          },
+          "exclusiveFullWeightBone": "zebra"
+        },
+        {
+          "name": "component04",
+          "vertices": 24,
+          "boundsMin": [
+            0.26466184854507446,
+            0.222507506608963,
+            -0.521051824092865
+          ],
+          "boundsMax": [
+            0.6733248233795166,
+            0.5215545296669006,
+            -0.149577796459198
+          ],
+          "positiveBoneVertices": {
+            "hlava": 24
+          },
+          "exclusiveFullWeightBone": "hlava"
+        },
+        {
+          "name": "component05",
+          "vertices": 24,
+          "boundsMin": [
+            0.2952190339565277,
+            -0.8516207933425903,
+            -0.3308145999908447
+          ],
+          "boundsMax": [
+            0.5264409780502319,
+            -0.40270400047302246,
+            -0.08453559875488281
+          ],
+          "positiveBoneVertices": {
+            "lstehno": 24
+          },
+          "exclusiveFullWeightBone": "lstehno"
+        },
+        {
+          "name": "component06",
+          "vertices": 24,
+          "boundsMin": [
+            0.34282588958740234,
+            -1.252260446548462,
+            -0.2416154146194458
+          ],
+          "boundsMax": [
+            0.5096622109413147,
+            -0.8180581331253052,
+            -0.05673864483833313
+          ],
+          "positiveBoneVertices": {
+            "lholen": 24
+          },
+          "exclusiveFullWeightBone": "lholen"
+        },
+        {
+          "name": "component07",
+          "vertices": 24,
+          "boundsMin": [
+            0.2952190339565277,
+            -0.8516207933425903,
+            -0.5859118700027466
+          ],
+          "boundsMax": [
+            0.5264409780502319,
+            -0.40270400047302246,
+            -0.3396328389644623
+          ],
+          "positiveBoneVertices": {
+            "pstehno": 24
+          },
+          "exclusiveFullWeightBone": "pstehno"
+        },
+        {
+          "name": "component08",
+          "vertices": 24,
+          "boundsMin": [
+            0.34282588958740234,
+            -1.252260446548462,
+            -0.6137087941169739
+          ],
+          "boundsMax": [
+            0.5096622109413147,
+            -0.8180581331253052,
+            -0.4288319945335388
+          ],
+          "positiveBoneVertices": {
+            "pholen": 24
+          },
+          "exclusiveFullWeightBone": "pholen"
+        },
+        {
+          "name": "component09",
+          "vertices": 24,
+          "boundsMin": [
+            0.024259984493255615,
+            -0.6229937076568604,
+            -0.927668035030365
+          ],
+          "boundsMax": [
+            0.3688182830810547,
+            0.374442994594574,
+            -0.4013676047325134
+          ],
+          "positiveBoneVertices": {
+            "zbran": 24
+          },
+          "exclusiveFullWeightBone": "zbran"
+        }
+      ]
+    },
+    "fireGeometry": {
+      "lod": 10,
+      "components": [
+        {
+          "name": "component01",
+          "vertices": 24,
+          "boundsMin": [
+            0.3629010021686554,
+            -1.3480077981948853,
+            -0.630929708480835
+          ],
+          "boundsMax": [
+            0.6501514911651611,
+            -1.2164908647537231,
+            -0.5224181413650513
+          ],
+          "positiveBoneVertices": {
+            "pchodidlo": 24
+          },
+          "exclusiveFullWeightBone": "pchodidlo"
+        },
+        {
+          "name": "component02",
+          "vertices": 24,
+          "boundsMin": [
+            0.3629010021686554,
+            -1.3480077981948853,
+            -0.14868783950805664
+          ],
+          "boundsMax": [
+            0.6501514911651611,
+            -1.2164908647537231,
+            -0.04017627239227295
+          ],
+          "positiveBoneVertices": {
+            "lchodidlo": 24
+          },
+          "exclusiveFullWeightBone": "lchodidlo"
+        },
+        {
+          "name": "component03",
+          "vertices": 24,
+          "boundsMin": [
+            0.27128833532333374,
+            -0.4489668607711792,
+            -0.4938114583492279
+          ],
+          "boundsMax": [
+            0.5380176901817322,
+            0.16177710890769958,
+            -0.17350642383098602
+          ],
+          "positiveBoneVertices": {
+            "zebra": 24
+          },
+          "exclusiveFullWeightBone": "zebra"
+        },
+        {
+          "name": "component04",
+          "vertices": 24,
+          "boundsMin": [
+            0.2681032717227936,
+            0.21046936511993408,
+            -0.4137119650840759
+          ],
+          "boundsMax": [
+            0.5044423341751099,
+            0.46503180265426636,
+            -0.2642814517021179
+          ],
+          "positiveBoneVertices": {
+            "hlava": 24
+          },
+          "exclusiveFullWeightBone": "hlava"
+        },
+        {
+          "name": "component05",
+          "vertices": 24,
+          "boundsMin": [
+            0.30474334955215454,
+            -0.2149026095867157,
+            -0.2749674320220947
+          ],
+          "boundsMax": [
+            0.5125734806060791,
+            0.10965678095817566,
+            -0.1110278069972992
+          ],
+          "positiveBoneVertices": {
+            "lbiceps": 24
+          },
+          "exclusiveFullWeightBone": "lbiceps"
+        },
+        {
+          "name": "component06",
+          "vertices": 24,
+          "boundsMin": [
+            0.394646018743515,
+            -0.5865771174430847,
+            -0.23457364737987518
+          ],
+          "boundsMax": [
+            0.5032954216003418,
+            -0.1891542375087738,
+            -0.07282775640487671
+          ],
+          "positiveBoneVertices": {
+            "lloket": 24
+          },
+          "exclusiveFullWeightBone": "lloket"
+        },
+        {
+          "name": "component07",
+          "vertices": 24,
+          "boundsMin": [
+            0.30474334955215454,
+            -0.23174327611923218,
+            -0.5652638077735901
+          ],
+          "boundsMax": [
+            0.5125734806060791,
+            0.10660463571548462,
+            -0.3738204836845398
+          ],
+          "positiveBoneVertices": {
+            "pbiceps": 24
+          },
+          "exclusiveFullWeightBone": "pbiceps"
+        },
+        {
+          "name": "component08",
+          "vertices": 24,
+          "boundsMin": [
+            0.394646018743515,
+            -0.5900911092758179,
+            -0.6083316206932068
+          ],
+          "boundsMax": [
+            0.5032954216003418,
+            -0.20133742690086365,
+            -0.4454295039176941
+          ],
+          "positiveBoneVertices": {
+            "ploket": 24
+          },
+          "exclusiveFullWeightBone": "ploket"
+        },
+        {
+          "name": "component09",
+          "vertices": 24,
+          "boundsMin": [
+            0.2952190339565277,
+            -0.854900062084198,
+            -0.3308145999908447
+          ],
+          "boundsMax": [
+            0.5264409780502319,
+            -0.40270400047302246,
+            -0.10924217104911804
+          ],
+          "positiveBoneVertices": {
+            "lstehno": 24
+          },
+          "exclusiveFullWeightBone": "lstehno"
+        },
+        {
+          "name": "component10",
+          "vertices": 24,
+          "boundsMin": [
+            0.31637343764305115,
+            -1.252260446548462,
+            -0.26632198691368103
+          ],
+          "boundsMax": [
+            0.4832097291946411,
+            -0.8213374018669128,
+            -0.05673864483833313
+          ],
+          "positiveBoneVertices": {
+            "lholen": 24
+          },
+          "exclusiveFullWeightBone": "lholen"
+        },
+        {
+          "name": "component11",
+          "vertices": 24,
+          "boundsMin": [
+            0.2952190339565277,
+            -0.8516207933425903,
+            -0.56119704246521
+          ],
+          "boundsMax": [
+            0.5264409780502319,
+            -0.40270400047302246,
+            -0.3396328389644623
+          ],
+          "positiveBoneVertices": {
+            "pstehno": 24
+          },
+          "exclusiveFullWeightBone": "pstehno"
+        },
+        {
+          "name": "component12",
+          "vertices": 24,
+          "boundsMin": [
+            0.31637343764305115,
+            -1.252260446548462,
+            -0.6137087941169739
+          ],
+          "boundsMax": [
+            0.4832097291946411,
+            -0.8180581331253052,
+            -0.4041171967983246
+          ],
+          "positiveBoneVertices": {
+            "pholen": 24
+          },
+          "exclusiveFullWeightBone": "pholen"
+        },
+        {
+          "name": "component13",
+          "vertices": 24,
+          "boundsMin": [
+            0.08572825789451599,
+            -0.6229937076568604,
+            -0.8951308727264404
+          ],
+          "boundsMax": [
+            0.3486490249633789,
+            0.3440859317779541,
+            -0.48108428716659546
+          ],
+          "positiveBoneVertices": {
+            "zbran": 24
+          },
+          "exclusiveFullWeightBone": "zbran"
+        },
+        {
+          "name": "component14",
+          "vertices": 20,
+          "boundsMin": [
+            0.18417878448963165,
+            -0.3323251008987427,
+            -0.3474413752555847
+          ],
+          "boundsMax": [
+            0.2817033529281616,
+            0.5592160820960999,
+            -0.11175698041915894
+          ],
+          "positiveBoneVertices": {
+            "roura": 20
+          },
+          "exclusiveFullWeightBone": "roura"
+        }
+      ]
+    },
+    "viewGeometry": {
+      "lod": 6,
+      "components": [
+        {
+          "name": "component01",
+          "vertices": 24,
+          "boundsMin": [
+            0.3629010021686554,
+            -1.3480077981948853,
+            -0.630929708480835
+          ],
+          "boundsMax": [
+            0.6501514911651611,
+            -1.2164908647537231,
+            -0.5224181413650513
+          ],
+          "positiveBoneVertices": {
+            "pchodidlo": 24
+          },
+          "exclusiveFullWeightBone": "pchodidlo"
+        },
+        {
+          "name": "component02",
+          "vertices": 24,
+          "boundsMin": [
+            0.3629010021686554,
+            -1.3480077981948853,
+            -0.14868783950805664
+          ],
+          "boundsMax": [
+            0.6501514911651611,
+            -1.2164908647537231,
+            -0.04017627239227295
+          ],
+          "positiveBoneVertices": {
+            "lchodidlo": 24
+          },
+          "exclusiveFullWeightBone": "lchodidlo"
+        },
+        {
+          "name": "component03",
+          "vertices": 24,
+          "boundsMin": [
+            0.24944981932640076,
+            -0.4489668607711792,
+            -0.542195737361908
+          ],
+          "boundsMax": [
+            0.5598562359809875,
+            0.16177710890769958,
+            -0.13650669157505035
+          ],
+          "positiveBoneVertices": {
+            "zebra": 24
+          },
+          "exclusiveFullWeightBone": "zebra"
+        },
+        {
+          "name": "component04",
+          "vertices": 24,
+          "boundsMin": [
+            0.26466184854507446,
+            0.222507506608963,
+            -0.521051824092865
+          ],
+          "boundsMax": [
+            0.6733248233795166,
+            0.5215545296669006,
+            -0.149577796459198
+          ],
+          "positiveBoneVertices": {
+            "hlava": 24
+          },
+          "exclusiveFullWeightBone": "hlava"
+        },
+        {
+          "name": "component05",
+          "vertices": 24,
+          "boundsMin": [
+            0.2952190339565277,
+            -0.8516207933425903,
+            -0.3308145999908447
+          ],
+          "boundsMax": [
+            0.5264409780502319,
+            -0.40270400047302246,
+            -0.08453559875488281
+          ],
+          "positiveBoneVertices": {
+            "lstehno": 24
+          },
+          "exclusiveFullWeightBone": "lstehno"
+        },
+        {
+          "name": "component06",
+          "vertices": 24,
+          "boundsMin": [
+            0.34282588958740234,
+            -1.252260446548462,
+            -0.2416154146194458
+          ],
+          "boundsMax": [
+            0.5096622109413147,
+            -0.8180581331253052,
+            -0.05673864483833313
+          ],
+          "positiveBoneVertices": {
+            "lholen": 24
+          },
+          "exclusiveFullWeightBone": "lholen"
+        },
+        {
+          "name": "component07",
+          "vertices": 24,
+          "boundsMin": [
+            0.2952190339565277,
+            -0.8516207933425903,
+            -0.5859118700027466
+          ],
+          "boundsMax": [
+            0.5264409780502319,
+            -0.40270400047302246,
+            -0.3396328389644623
+          ],
+          "positiveBoneVertices": {
+            "pstehno": 24
+          },
+          "exclusiveFullWeightBone": "pstehno"
+        },
+        {
+          "name": "component08",
+          "vertices": 24,
+          "boundsMin": [
+            0.34282588958740234,
+            -1.252260446548462,
+            -0.6137087941169739
+          ],
+          "boundsMax": [
+            0.5096622109413147,
+            -0.8180581331253052,
+            -0.4288319945335388
+          ],
+          "positiveBoneVertices": {
+            "pholen": 24
+          },
+          "exclusiveFullWeightBone": "pholen"
+        },
+        {
+          "name": "component09",
+          "vertices": 24,
+          "boundsMin": [
+            0.024259984493255615,
+            -0.6229937076568604,
+            -0.927668035030365
+          ],
+          "boundsMax": [
+            0.3688182830810547,
+            0.374442994594574,
+            -0.4013676047325134
+          ],
+          "positiveBoneVertices": {
+            "zbran": 24
+          },
+          "exclusiveFullWeightBone": "zbran"
+        }
+      ]
+    }
+  },
+  "coordinateSpace": "raw ODOL7 before engine recentering; no animation or world transform",
+  "componentScope": "authored named membership only; convexity/inertia/contact fit not admitted",
+  "jointFrameAdmitted": false,
+  "runtimeRigAdmitted": false
+}
