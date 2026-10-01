@@ -163,6 +163,7 @@ GameValue TriGpadPov(const GameState*, GameValuePar);
 GameValue TriGpadLeft(const GameState*, GameValuePar);
 GameValue TriKeyUp(const GameState*, GameValuePar);
 GameValue TriScreenshot(const GameState*, GameValuePar);
+GameValue TriScreenshotNext(const GameState*, GameValuePar);
 GameValue TriShadowDepthProbe(const GameState*, GameValuePar);
 GameValue TriEnableShadowMaps(const GameState*);
 GameValue TriShadowSceneDump(const GameState*, GameValuePar);
@@ -3206,6 +3207,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameBool, "triGpadPov", TriGpadPov, GameScalar));
     GGameState.NewFunction(GameFunction(GameBool, "triGpadLeft", TriGpadLeft, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triScreenshot", TriScreenshot, GameString));
+    GGameState.NewFunction(GameFunction(GameString, "triScreenshotNext", TriScreenshotNext, GameString));
     GGameState.NewFunction(GameFunction(GameString, "triShadowDepthProbe", TriShadowDepthProbe, GameScalar));
     GGameState.NewNularOp(GameNular(GameString, "triEnableShadowMaps", TriEnableShadowMaps));
     GGameState.NewFunction(GameFunction(GameString, "triShadowSceneDump", TriShadowSceneDump, GameString));

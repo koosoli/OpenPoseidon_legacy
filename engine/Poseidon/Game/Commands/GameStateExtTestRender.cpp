@@ -3,6 +3,7 @@ using namespace Poseidon;
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Core/Global.hpp>
 #include <Poseidon/UI/UITestEngine.hpp>
 #include <Poseidon/UI/UIActiveDisplay.hpp>
 #include <Poseidon/UI/Controls/UIControls.hpp>
@@ -260,6 +261,41 @@ GameValue TriScreenshot(const GameState* state, GameValuePar arg)
     }
 
     return GameValue("OK");
+}
+
+/// Developer-only first-draw capture, usable from an actual Fired handler.
+/// Do not flush here: that can read the preceding frame instead of the shot.
+/// The existing engine Screenshot/NextFrame path owns capture and file writing.
+GameValue TriScreenshotNext(const GameState* /*state*/, GameValuePar arg)
+{
+    const GameStringType label = static_cast<GameStringType>(arg);
+    const std::string name(static_cast<const char*>(label));
+    if (name.empty() || name.size() > 80 ||
+        !std::all_of(name.begin(), name.end(), [](unsigned char c) {
+            return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+        }))
+        return GameValue("FAIL:label_must_be_1_to_80_ASCII_alnum");
+    if (!GEngine)
+        return GameValue("FAIL:no_engine");
+    try
+    {
+        const auto dir = std::filesystem::absolute(GetTriOutputDir()).lexically_normal();
+        std::filesystem::create_directories(dir);
+        // Shared with triScreenshot so these commands cannot reuse a prefix.
+        const auto path = dir / (std::to_string(TriSeqCounter()++) + "_" + name);
+        if (std::filesystem::exists(path.string() + ".png") ||
+            std::filesystem::exists(path.string() + ".bmp"))
+            return GameValue("FAIL:capture_already_exists");
+        const std::string filename = path.generic_string();
+        LOG_INFO(Core, "[tri] triScreenshotNext queued={} uiTime={:.6f}", filename,
+                 static_cast<double>(Glob.uiTime.toFloat()));
+        GEngine->Screenshot(filename.c_str());
+        return GameValue(("OK:" + filename).c_str());
+    }
+    catch (const std::filesystem::filesystem_error&)
+    {
+        return GameValue("FAIL:capture_path");
+    }
 }
 
 /// triShadowDepthProbe <res> — render a known cube caster from the sun into a GL
