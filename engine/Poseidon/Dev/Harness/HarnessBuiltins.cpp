@@ -2481,6 +2481,63 @@ void RegisterSnowProbe(HarnessServer& hs)
                 }
                 cJSON_AddNumberToObject(out,"fineVolume",volume);
                 cJSON_AddNumberToObject(out,"integratedVolume",integrated);
+                // Inspect only the retained bounded snapshot. No promotion,
+                // sampling, clock advance or terrain edit occurs in this query.
+                struct TileFacts {
+                    size_t count=0;double volume=0,integrated=0;
+                    double minBed=INFINITY,maxBed=-INFINITY,minHead=INFINITY,maxHead=-INFINITY;
+                    double minDepth=INFINITY,maxDepth=0;
+                    bool finite=true;std::array<bool,1024> covered{};
+                };
+                std::map<std::pair<int,int>,TileFacts> owners;
+                const bool sourceCurrent=snapshot.valid&&field.SourceReady()&&
+                    snapshot.sourceRevision==GLandscape->HeightRevision()&&
+                    GLandscape->GetTerrainGrid()==6.25f&&field.Spacing()==25&&
+                    field.Width()>0&&snapshot.generation==field.Generation()&&snapshot.revision==field.Revision();
+                for(const auto& surface:snapshot.surfaces) {
+                    const auto& cell=surface.owner;
+                    if(field.Width()<=0)break;
+                    const int tx=int(surface.parent%field.Width())/8,tz=int(surface.parent/field.Width())/8;
+                    const auto key=std::pair{tx,tz};
+                    if(!owners.contains(key)&&owners.size()>=RainWaterField::FineTileLimit)continue;
+                    auto& tile=owners[key];++tile.count;
+                    const double ox=200.0*tx-12.5,oz=200.0*tz-12.5;
+                    const double ix=(cell.x-ox)/6.25,iz=(cell.z-oz)/6.25;
+                    const bool finite=surface.geometry.Finite()&&std::isfinite(cell.x)&&std::isfinite(cell.z)&&
+                        std::isfinite(cell.head)&&std::isfinite(cell.volume)&&cell.volume>=0&&cell.size==6.25&&
+                        ix>=0&&ix<32&&iz>=0&&iz<32&&std::floor(ix)==ix&&std::floor(iz)==iz;
+                    if(!finite){tile.finite=false;continue;}
+                    const size_t index=size_t(iz)*32+size_t(ix);
+                    if(tile.covered[index])tile.finite=false;
+                    tile.covered[index]=true;
+                    const double heldIntegral=surface.geometry.Volume(cell.head,cell.size*cell.size);
+                    if(!std::isfinite(heldIntegral)||heldIntegral<0){tile.finite=false;continue;}
+                    tile.volume+=cell.volume;tile.integrated+=heldIntegral;
+                    tile.minBed=std::min(tile.minBed,surface.geometry.Minimum());
+                    tile.maxBed=std::max(tile.maxBed,surface.geometry.Maximum());
+                    tile.minHead=std::min(tile.minHead,cell.head);tile.maxHead=std::max(tile.maxHead,cell.head);
+                    tile.minDepth=std::min(tile.minDepth,std::max(0.0,cell.head-surface.geometry.Maximum()));
+                    tile.maxDepth=std::max(tile.maxDepth,std::max(0.0,cell.head-surface.geometry.Minimum()));
+                }
+                auto* rows=cJSON_AddArrayToObject(out,"owners");
+                for(const auto& [key,tile]:owners) {
+                    auto* row=cJSON_CreateObject();cJSON_AddItemToArray(rows,row);
+                    const bool complete=tile.finite&&tile.count==1024&&
+                        std::all_of(tile.covered.begin(),tile.covered.end(),[](bool present){return present;});
+                    const double x=200.0*key.first-12.5,z=200.0*key.second-12.5;
+                    const bool bounds=x>=0&&z>=0&&x+200<=(GLandscape->GetTerrainRange()-1)*6.25&&
+                        z+200<=(GLandscape->GetTerrainRange()-1)*6.25;
+                    cJSON_AddNumberToObject(row,"tileX",key.first);cJSON_AddNumberToObject(row,"tileZ",key.second);
+                    cJSON_AddNumberToObject(row,"x",x);cJSON_AddNumberToObject(row,"z",z);cJSON_AddNumberToObject(row,"size",200);
+                    cJSON_AddNumberToObject(row,"cells",double(tile.count));cJSON_AddBoolToObject(row,"finite",tile.finite);
+                    cJSON_AddBoolToObject(row,"complete",complete);cJSON_AddBoolToObject(row,"sourceCurrent",sourceCurrent&&complete&&bounds);
+                    if(complete) {
+                        cJSON_AddNumberToObject(row,"volume",tile.volume);cJSON_AddNumberToObject(row,"integratedVolume",tile.integrated);
+                        cJSON_AddNumberToObject(row,"bedMin",tile.minBed);cJSON_AddNumberToObject(row,"bedMax",tile.maxBed);
+                        cJSON_AddNumberToObject(row,"headMin",tile.minHead);cJSON_AddNumberToObject(row,"headMax",tile.maxHead);
+                        cJSON_AddNumberToObject(row,"minDepth",tile.minDepth);cJSON_AddNumberToObject(row,"maxDepth",tile.maxDepth);
+                    }
+                }
             } else {
                 cJSON_Delete(out); return HarnessProtocol::ErrorResponse("read-only state, fine_state or sample only");
             }
