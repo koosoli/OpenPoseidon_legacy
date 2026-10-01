@@ -80,6 +80,16 @@ function Median($values){
     if($ordered.Count%2){return [double]$ordered[$i]}
     return ([double]$ordered[$i-1]+[double]$ordered[$i])/2
 }
+function Get-StockCameraArguments($pose){
+    Require ($pose.Count -eq 5) 'Stock camera requires X Z Y azimuth elevation.'
+    # Stock Eden must use the mission's legacy world loader. --test-world
+    # substitutes LoadOprwModern, which deliberately refuses original OFP WRP.
+    $arguments=@('--vd','2000','--test-world-hour','16','--test-world-freefly')
+    foreach($component in $pose){
+        $arguments += (Finite $component).ToString('R',[Globalization.CultureInfo]::InvariantCulture)
+    }
+    return $arguments
+}
 function Test-Helpers{
     $metrics=[pscustomobject]@{build=@{render_width=1280;render_height=720;msaa_samples=4;dlss_active=$false};gpu_timestamps_available=$true;
         cpu_frame_phases_ms=@{sampled_frames=256};gpu_timings_ms=@(@{name='GPU frame total';milliseconds=12.5});
@@ -104,7 +114,11 @@ function Test-Helpers{
     try{Restore-Environment $key $null;Require ($null -eq [Environment]::GetEnvironmentVariable($key,'Process')) 'Null restoration retained an empty variable.';$checks++}
     finally{Restore-Environment $key $saved}
     Require ((Median @(1,3,9)) -eq 3 -and (Median @(1,3,5,9)) -eq 4) 'Median calculation failed.'
-    Write-Output "Far weather helper checks passed: $checks rejection/restoration cases plus median. No game/profile/GPU used."
+    $stock=Get-StockCameraArguments @(5025,3725,144.54546,0,-8.53)
+    Require (($stock -join ' ') -ceq '--vd 2000 --test-world-hour 16 --test-world-freefly 5025 3725 144.54546 0 -8.53') 'Stock camera arguments changed or use world substitution.'
+    Refuses {Get-StockCameraArguments @(5025,3725,144.54546,0)};$checks++
+    Refuses {Get-StockCameraArguments @(5025,3725,'NaN',0,-8.53)};$checks++
+    Write-Output "Far weather helper checks passed: $checks rejection/restoration cases plus median and stock-loader camera arguments. No game/profile/GPU used."
 }
 if($SelfTest){Test-Helpers;return}
 Require ([bool]$ExpectedCommit) 'Supply -ExpectedCommit for the installed binary pair.'
@@ -148,7 +162,8 @@ try{
             $block=@{view=$viewName;far=$flag;label=$blockLabel;profile=$profile;profileSha256=(Get-FileHash -LiteralPath $profile).Hash;status='running';runs=@()}
             $result.blocks+=,$block
             $env:POSEIDON_USER_DIR=$user;$env:WGR_WEATHER_COVER_FAR=$flag
-            & "$PSScriptRoot/farfield-bench.ps1" -Label $blockLabel -Mission 'tests/perf/missions/perf_field.eden' -World 'Worlds/eden.wrp' -Freefly $views[$viewName] -WorldHour 16 -Out $campaign -Repeats $Repeats -GameDir $GameDir -Backend wgpu -Width 1280 -Height 720 -Windowed -WarmupSeconds $WarmupSeconds -TimeoutSeconds ($WarmupSeconds+180) -MotionSamples 1 -RequireAll -ExtraArgs @('--vd','2000')
+            $stockArguments=Get-StockCameraArguments $views[$viewName]
+            & "$PSScriptRoot/farfield-bench.ps1" -Label $blockLabel -Mission 'tests/perf/missions/perf_field.eden' -Out $campaign -Repeats $Repeats -GameDir $GameDir -Backend wgpu -Width 1280 -Height 720 -Windowed -WarmupSeconds $WarmupSeconds -TimeoutSeconds ($WarmupSeconds+180) -MotionSamples 1 -RequireAll -ExtraArgs $stockArguments
             Require ($LASTEXITCODE -eq 0) 'farfield-bench rejected a run; inspect retained lifecycle metadata.'
             for($repeat=1;$repeat -le $Repeats;$repeat++){
                 $stem=Join-Path $blockDir ('run-{0:D2}' -f $repeat)

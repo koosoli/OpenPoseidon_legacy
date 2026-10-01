@@ -20,7 +20,11 @@ metrics readback. Multiple scheduled screenshots are unsuitable for timing;
 
 The cameras are `5025 3725 144.54546 0 -8.53` (the audited Eden 500m view) and
 `5025 4220 127.5 0 -86` (top). The stock `perf_field.eden` mission and installed
-`Worlds/eden.wrp` are used. Each block gets a new private profile through
+`Worlds/eden.wrp` are used through the mission's original-map loader. No
+`--test-world` substitution is passed: that route calls `LoadOprwModern`, which
+supports OPRW revisions 18/20/24/25 and refuses original OFP worlds. Camera and
+hour options are passed directly through farfield's `ExtraArgs`; positive
+`WarmupSeconds` still selects its wall-clock timed capture. Each block gets a new private profile through
 `Write-BenchmarkGraphics.ps1`, with brightness 1; the original authored mission
 seed/date are retained and CLI hour is 16. Simulation is not frozen by this
 wrapper, so these are fixed startup conditions and camera poses, not an exact
@@ -81,3 +85,15 @@ Source helper checks passed under Windows PowerShell 5.1 and bundled PowerShell
 GPU timestamps, NaN, missing/incomplete far publications and unexpected OFF-arm
 publication, and check null-safe restoration and summary medians. No game, GPU,
 profile mutation or runtime measurement was used for these helper checks.
+
+The initial installed `6cf9973e` campaign at
+`build/weather-cover-performance/far-cover-cost-20261001-040659-62773a`
+failed. All three first-OFF launches exited normally before the 35-second
+capture, with no PNG/metrics. Their logs explicitly report `Cannot load
+--test-world`, zero registered/visible objects, and the freefly player grounded
+at -98.2m on the failed empty landscape. This is a stock-loader routing bug,
+not a measured far-pass cost or evidence of a too-long warmup. The wrapper now
+uses the same ordinary original-map route as `Test-ForestSnowRuntime.ps1`.
+Argument self-tests preserve the exact camera/hour/VD and reject incomplete or
+nonfinite poses. The failed campaign is retained; corrected installed timing
+remains pending.
