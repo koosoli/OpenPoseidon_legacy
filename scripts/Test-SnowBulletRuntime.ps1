@@ -178,7 +178,9 @@ function View($view) {
 }
 function Unview {Require ((Eval 'triClearView') -ceq 'OK') 'Render-only view did not release.'}
 function Capture([string]$name) {
-    Start-Sleep -Seconds 2;$time=Clock;$path=Join-Path $output ($name+'.png');$null=Send @{cmd='screenshot';path=$path}
+    # Exposure adapts in wall time even while simulation is paused. At tau0.4,
+    # 2.5 seconds leaves under0.2% of the previous camera's exposure history.
+    Start-Sleep -Milliseconds 2500;$time=Clock;$path=Join-Path $output ($name+'.png');$null=Send @{cmd='screenshot';path=$path}
     $until=[DateTime]::UtcNow.AddSeconds(10)
     while (!(Test-Path -LiteralPath $path)) {Health;Require ([DateTime]::UtcNow -lt $until) 'Screenshot missing.';Start-Sleep -Milliseconds 100}
     Require ((Clock) -eq $time) 'Paused simulation advanced during screenshot.'
