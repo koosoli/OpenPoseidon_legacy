@@ -224,8 +224,13 @@ try{
             $trace=Church-Trace (Logs) $fixture.model
             Require ($trace.retained.Count -gt 0) 'Actual fixed church retained source admission absent.'
             Require ($trace.clockDenied.Count -gt 0) 'Near clock negative source trace absent; inspect whether view selected the clock geometry.'
-            Require ($trace.readyMaps.Count -gt 0) 'Ready physical weather map trace absent.'
-            if($objectFlag -eq '1'){Require ($trace.depositUploads.Count -gt 0) 'Actual raised snow upload absent.'}else{Require ($trace.disabledUploads.Count -gt 0 -and $trace.depositUploads.Count -eq 0) 'Object-master-off upload is not actually zero.'}
+            if($objectFlag -eq '1'){
+                Require ($trace.readyMaps.Count -gt 0) 'Ready physical weather map trace absent.'
+                Require ($trace.depositUploads.Count -gt 0) 'Actual raised snow upload absent.'
+            }else{
+                Require ($trace.disabledUploads.Count -gt 0 -and $trace.depositUploads.Count -eq 0) 'Object-master-off upload is not actually zero.'
+                Require ($trace.readyMaps.Count -eq 0) 'Inactive dry object-snow-off arm unexpectedly published weather cover.'
+            }
             $arm.trace=$trace
             $null=Send @{cmd='dev_snow';action='disable'}
             foreach($view in @('distance30','distance200','distance500','top','clock','interiorCandidate')){$arm.captures['disabled-'+$view]=Capture ('disabled-'+$view) $views[$view] $fixture $target $false $snow.chunks}
