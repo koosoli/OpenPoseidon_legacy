@@ -222,6 +222,10 @@ fn snow_receiver_actual_gpu_slopes_subtexels_handoff_and_thin_roof_rejections() 
                 binding: 18,
                 resource: wgpu::BindingResource::TextureView(&far_depth),
             },
+            wgpu::BindGroupEntry {
+                binding: 20,
+                resource: wgpu::BindingResource::TextureView(&far_depth),
+            },
         ],
     });
     let output = device.create_bind_group(&wgpu::BindGroupDescriptor {

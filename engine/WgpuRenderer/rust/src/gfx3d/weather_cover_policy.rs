@@ -53,6 +53,21 @@ pub fn active(enabled: bool, snow: [f32; 4], ground: [f32; 4]) -> bool {
 mod tests {
     use super::*;
     #[test]
+    fn weather_cover_cascades_publish_and_abort_independently() {
+        let id = Identity {frame:7,instance_epoch:12,image:3};
+        let mut near = Publication::default();
+        let mut far = Publication::default();
+        near.plan(id,true); far.plan(id,true);
+        near.cull_recorded(); near.depth_recorded(true); near.submitted();
+        assert!(near.commit(id)); assert!(!far.commit(id));
+        far.cull_recorded(); far.depth_recorded(false); far.submitted();
+        assert!(!far.commit(id),"skipped far source must not borrow near publication");
+        far.depth_recorded(true); assert!(far.commit(id));
+        near.abort(); assert!(!near.commit(id)); assert!(far.commit(id));
+        far.plan(Identity {frame:8,..id},true);
+        assert!(!far.readable(id),"new far frame cannot borrow old depth");
+    }
+    #[test]
     fn weather_cover_current_map_requires_exact_geometry_recording_and_submit() {
         let id = Identity {
             frame: 1,

@@ -57,7 +57,7 @@ fn weather_depth_consumers_compose_and_keep_ordinary_override_off() {
         assert!(source.contains("veg_sway_offset("));
         assert!(source.contains("frame.weather_vp * vec4<f32>"));
     }
-    // The appended private lanes must occupy exactly 96 bytes. This uses the
+    // The appended private lanes must occupy exactly 192 bytes. This uses the
     // actual composed Frame type rather than a duplicate Rust test struct.
     let mut composer = super::build_composer();
     let module = composer
@@ -90,7 +90,10 @@ fn weather_depth_consumers_compose_and_keep_ordinary_override_off() {
     assert_eq!(at("weather_vp"), at("ground_weather") + 16);
     assert_eq!(at("weather_cover"), at("weather_vp") + 64);
     assert_eq!(at("weather_gpu"), at("weather_cover") + 16);
-    assert_eq!(*span, at("weather_vp") + 96);
+    assert_eq!(at("weather_far_vp"), at("weather_gpu") + 16);
+    assert_eq!(at("weather_far_cover"), at("weather_far_vp") + 64);
+    assert_eq!(at("weather_far_gpu"), at("weather_far_cover") + 16);
+    assert_eq!(*span, at("weather_vp") + 192);
 }
 
 #[test]
@@ -156,6 +159,11 @@ fn weather_cover_actual_gpu_far_roof_overhang_hole_underside_and_unknown() {
     // not a duplicate CPU exposure algorithm or extra fragment storage binding.
     let counters = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("weather_cull_counter_fixture"),
+        contents: bytemuck::cast_slice(&[0_u32; 3]),
+        usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+    });
+    let outer_counters = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("weather_far_cull_counter_fixture"),
         contents: bytemuck::cast_slice(&[0_u32; 3]),
         usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
     });
@@ -237,6 +245,10 @@ fn weather_cover_actual_gpu_far_roof_overhang_hole_underside_and_unknown() {
                 binding: 18,
                 resource: wgpu::BindingResource::TextureView(&far_view),
             },
+            wgpu::BindGroupEntry {
+                binding: 20,
+                resource: wgpu::BindingResource::TextureView(&far_view),
+            },
         ],
     });
     let output = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -278,6 +290,8 @@ fn weather_cover_actual_gpu_far_roof_overhang_hole_underside_and_unknown() {
         multiview_mask: None,
         cache: None,
     });
+    let outer_ready = std::cell::Cell::new(0.0_f32);
+    let outer_counts = std::cell::Cell::new([0_u32;4]);
     let mut run = |position: [f32; 3], ready: f32, near_gate: f32, actual_counts: [u32; 3]| {
         put(
             &mut bytes,
@@ -289,6 +303,10 @@ fn weather_cover_actual_gpu_far_roof_overhang_hole_underside_and_unknown() {
             offset("weather_cover"),
             &[ready, 0.08 / 2048.0, 1.5 / 32.0, 1.0],
         );
+        put(&mut bytes, offset("weather_far_vp"),
+            &glam::Mat4::from_diagonal(glam::Vec4::new(1.0/1600.0,1.0/1600.0,1.0,1.0)).to_cols_array());
+        put(&mut bytes, offset("weather_far_cover"), &[outer_ready.get(),0.08/2048.0,1.5/32.0,1.0]);
+
         put(&mut bytes, offset("skyvis"), &[near_gate, 0.0, 0.0, 1.0]); // artistic strength0/floor1
         let near_vp =
             glam::Mat4::from_diagonal(glam::Vec4::new(0.98 / 500.0, 1.0 / 640.0, 1.0, 1.0));
@@ -300,6 +318,9 @@ fn weather_cover_actual_gpu_far_roof_overhang_hole_underside_and_unknown() {
             bytemuck::bytes_of(&8_u32),
         );
         queue.write_buffer(&counters, 0, bytemuck::cast_slice(&actual_counts));
+        queue.write_buffer(&outer_counters,0,bytemuck::cast_slice(&outer_counts.get()[..3]));
+        queue.write_buffer(&uniform,offset("weather_far_gpu") as u64+12,
+            bytemuck::bytes_of(&outer_counts.get()[3]));
         let mut encoder = device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -336,6 +357,7 @@ fn weather_cover_actual_gpu_far_roof_overhang_hole_underside_and_unknown() {
             pass.draw(0..6, 0..1);
         }
         encoder.copy_buffer_to_buffer(&counters, 0, &uniform, offset("weather_gpu") as u64, 12);
+        encoder.copy_buffer_to_buffer(&outer_counters,0,&uniform,offset("weather_far_gpu") as u64,12);
         {
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&pipeline);
@@ -412,4 +434,26 @@ fn weather_cover_actual_gpu_far_roof_overhang_hole_underside_and_unknown() {
         [0.0, 0.0, 0.0, 0.0],
         "vertical bounds unknown stays closed"
     );
+    // Use the actual rasterised roof on binding20. The far VP changes which
+    // world points sample it; no synthetic open result or CPU reach imitation.
+    outer_ready.set(1.0); outer_counts.set([8,8,16,8]);
+    for distance in [800.0,1200.0] {
+        assert_eq!(run([-distance,400.0,0.25],1.0,0.0,[0,0,0]), [1.0,1.0,1.0,0.0]);
+        assert_eq!(run([-distance,400.0,0.2501],1.0,0.0,[0,0,0]), [1.0,0.0,0.0,0.0]);
+        assert_eq!(run([distance,400.0,0.75],1.0,0.0,[0,0,0]), [1.0,1.0,1.0,0.0]);
+        assert_eq!(run([-distance,0.0,0.75],1.0,0.0,[0,0,0]), [1.0,1.0,1.0,0.0]);
+    }
+    assert_eq!(run([-500.0,400.0,0.25],0.0,0.0,[0,0,0]),[0.0;4],
+        "pending near must never borrow ready coarser far coverage");
+    for overflow in [[9,0,0,8],[0,9,0,8],[0,0,17,8]] {
+        outer_counts.set(overflow);
+        assert_eq!(run([-800.0,400.0,0.25],1.0,0.0,[0,0,0]),[0.0;4],
+            "far's own GPU counter overflow fails closed");
+    }
+    outer_counts.set([0,0,0,8]); outer_ready.set(0.0);
+    assert_eq!(run([-800.0,400.0,0.25],1.0,0.0,[0,0,0]),[0.0;4],"far pending fails closed");
+    outer_ready.set(1.0);
+    assert_eq!(run([1599.0,0.0,0.75],1.0,0.0,[0,0,0]),[0.0;4],"far border closed");
+    assert_eq!(run([1800.0,0.0,0.75],1.0,0.0,[0,0,0]),[0.0;4],"far outside closed");
+
 }

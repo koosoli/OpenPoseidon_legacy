@@ -404,6 +404,7 @@ fn finish_vertex(
     out.clip = reverse_z(frame.proj * frame.view * world_pos);
     if (weather_depth > 0.5) {
         out.clip = frame.weather_vp * vec4<f32>(world_pos.xyz + frame.cam_pos.xyz, 1.0);
+        if (weather_depth > 1.5) { out.clip = frame.weather_far_vp * vec4<f32>(world_pos.xyz + frame.cam_pos.xyz, 1.0); }
     }
     // Bias toward the camera (larger reversed depth) so decals/overlays win the
     // depth test against coplanar geometry.

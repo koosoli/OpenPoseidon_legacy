@@ -180,6 +180,10 @@ struct Frame {
     // This physical cull's actual GPU counters: opaque args, cutout args,
     // total record reservations, per-variant argument capacity. No fragment storage.
     weather_gpu: vec4<u32>,
+    // Independent opt-in far physical map: private Rust tail.
+    weather_far_vp: mat4x4<f32>,
+    weather_far_cover: vec4<f32>,
+    weather_far_gpu: vec4<u32>,
 };
 
 // REN-TEMP-001D helpers. Material/albedo/normal/cutout sampling uses `mip_bias()` via
@@ -404,6 +408,7 @@ struct SurfaceRays {
 @group(0) @binding(16) var<uniform> surface_rays: SurfaceRays;
 @group(0) @binding(17) var monitor_scene: texture_2d<f32>;
 @group(0) @binding(18) var weather_depth_map: texture_depth_2d;
+@group(0) @binding(20) var weather_far_depth_map: texture_depth_2d;
 @group(0) @binding(19) var ground_sky_env: texture_2d<f32>;
 
 // Existing atmosphere/cloud radiance, shared with the sea. Its coarse 256x128
@@ -903,26 +908,43 @@ fn near_rain_coverage(world_abs: vec3<f32>) -> f32 {
     return smoothstep(0.0, 0.05, edge);
 }
 
-fn weather_map_coverage(world_abs: vec3<f32>) -> f32 {
-    if (frame.weather_cover.x < 0.5) { return 0.0; }
-    if (frame.weather_gpu.w > 0u && (frame.weather_gpu.x > frame.weather_gpu.w ||
-        frame.weather_gpu.y > frame.weather_gpu.w || frame.weather_gpu.z > 2u * frame.weather_gpu.w)) {
+// The far cascade is only selected outside the planned near footprint.
+// A near map which is pending/overflowed must not fall back to coarser proof.
+fn weather_far_selected(world_abs: vec3<f32>) -> bool {
+    if (frame.weather_cover.w < 0.5 || !all(abs(world_abs) < vec3<f32>(1e20))) { return false; }
+    let clip = frame.weather_vp * vec4<f32>(world_abs, 1.0);
+    let uv = vec2<f32>(clip.x * 0.5 + 0.5, -clip.y * 0.5 + 0.5);
+    let edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+    return clip.z < 0.0 || clip.z > 1.0 || edge < frame.weather_cover.z;
+}
+fn weather_cascade_coverage(world_abs: vec3<f32>, outer: bool) -> f32 {
+    var ctl = frame.weather_cover;
+    var counts = frame.weather_gpu;
+    var vp = frame.weather_vp;
+    if (outer) { ctl = frame.weather_far_cover; counts = frame.weather_far_gpu; vp = frame.weather_far_vp; }
+    if (ctl.x < 0.5 || !all(abs(world_abs) < vec3<f32>(1e20))) { return 0.0; }
+    if (counts.w > 0u && (counts.x > counts.w || counts.y > counts.w || counts.z > 2u * counts.w)) {
         return 0.0; // actual retained output overflow cannot certify physical openness
     }
-    let clip = frame.weather_vp * vec4<f32>(world_abs, 1.0);
+    let clip = vp * vec4<f32>(world_abs, 1.0);
     if (clip.z < 0.0 || clip.z > 1.0) { return 0.0; }
     let uv = vec2<f32>(clip.x * 0.5 + 0.5, -clip.y * 0.5 + 0.5);
     let edge = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
-    // Unknown/outside never becomes open. Keep taps inside the rendered extent.
-    return select(0.0, 1.0, edge >= frame.weather_cover.z);
+    return select(0.0, 1.0, edge >= ctl.z);
 }
-
+fn weather_map_coverage(world_abs: vec3<f32>) -> f32 {
+    return weather_cascade_coverage(world_abs, weather_far_selected(world_abs));
+}
 fn weather_map_reach(world_abs: vec3<f32>) -> f32 {
     if (weather_map_coverage(world_abs) < 0.5) { return 0.0; }
-    let clip = frame.weather_vp * vec4<f32>(world_abs, 1.0);
+    let outer = weather_far_selected(world_abs);
+    var vp = frame.weather_vp;
+    var bias = frame.weather_cover.y;
+    if (outer) { vp = frame.weather_far_vp; bias = frame.weather_far_cover.y; }
+    let clip = vp * vec4<f32>(world_abs, 1.0);
     let uv = vec2<f32>(clip.x * 0.5 + 0.5, -clip.y * 0.5 + 0.5);
-    return textureSampleCompareLevel(weather_depth_map, shadow_samp, uv,
-        clip.z - frame.weather_cover.y);
+    if (outer) { return textureSampleCompareLevel(weather_far_depth_map, shadow_samp, uv, clip.z - bias); }
+    return textureSampleCompareLevel(weather_depth_map, shadow_samp, uv, clip.z - bias);
 }
 
 fn interior_rain_coverage(world_abs: vec3<f32>) -> f32 {
@@ -998,17 +1020,25 @@ fn snow_receiver_four_taps(uv: vec2<f32>, clip_depth: f32, dims: vec2<f32>,
 }
 
 fn snow_receiver_map_reach(world_abs: vec3<f32>, n: vec3<f32>, far: bool) -> f32 {
+    let outer = far && weather_far_selected(world_abs);
     var vp = frame.skyvis_vp[0];
     if (far) { vp = frame.weather_vp; }
+    if (outer) { vp = frame.weather_far_vp; }
     let clip = vp * vec4<f32>(world_abs, 1.0);
     let uv = vec2<f32>(clip.x * 0.5 + 0.5, -clip.y * 0.5 + 0.5);
     var dims = vec2<f32>(textureDimensions(interior_sky_map));
     if (far) { dims = vec2<f32>(textureDimensions(weather_depth_map)); }
+    if (outer) { dims = vec2<f32>(textureDimensions(weather_far_depth_map)); }
     let px = vec2<i32>(floor(uv * dims - vec2<f32>(0.5)));
     // Neither clamping nor an unrendered map border is physical open proof.
     if (any(px < vec2<i32>(0)) || any(px + vec2<i32>(1) >= vec2<i32>(dims))) { return 0.0; }
     var depth: vec4<f32>;
-    if (far) {
+    if (outer) {
+        depth = vec4<f32>(textureLoad(weather_far_depth_map, px, 0),
+            textureLoad(weather_far_depth_map, px + vec2<i32>(1,0), 0),
+            textureLoad(weather_far_depth_map, px + vec2<i32>(0,1), 0),
+            textureLoad(weather_far_depth_map, px + vec2<i32>(1,1), 0));
+    } else if (far) {
         depth = vec4<f32>(textureLoad(weather_depth_map, px, 0),
             textureLoad(weather_depth_map, px + vec2<i32>(1,0), 0),
             textureLoad(weather_depth_map, px + vec2<i32>(0,1), 0),
@@ -1022,7 +1052,8 @@ fn snow_receiver_map_reach(world_abs: vec3<f32>, n: vec3<f32>, far: bool) -> f32
     // Near snow has its OWN tight physical bias, independent of artistic AO's
     // 25cm bias/kernel knobs. Far retains the actual producer's 8cm lane.
     let rz = vec3<f32>(vp[0].z, vp[1].z, vp[2].z);
-    let bias = select(0.08 * length(rz), frame.weather_cover.y, far);
+    var bias = select(0.08 * length(rz), frame.weather_cover.y, far);
+    if (outer) { bias = frame.weather_far_cover.y; }
     return snow_receiver_four_taps(uv, clip.z, dims, depth,
         snow_receiver_depth_gradient(vp, n), bias);
 }

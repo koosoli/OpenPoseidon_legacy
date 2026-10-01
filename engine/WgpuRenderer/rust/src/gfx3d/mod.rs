@@ -1423,6 +1423,7 @@ struct CameraGroup {
     bind: Option<wgpu::BindGroup>,
     weather_bind: Option<wgpu::BindGroup>, // binding18 dummy while writing physical map
     bound_weather_gen: u64,
+    bound_weather_far_gen: u64,
     bound_shadow_gen: u64,
     // Frame-global light storage buffer (binding 3). Fixed capacity, created
     // once, so it stays valid across camera-UBO regrowth / shadow-target swaps.
@@ -1452,6 +1453,7 @@ impl CameraGroup {
         // so the bind size is NOT the raw C-ABI size. Keep the three in sync (see prepare's
         // camera upload + frame.wgsl).
         let bind_size = std::mem::size_of::<WgrCamera>() as u64
+            + 96 // independent far physical VP/readiness/GPU counters
             + 64
             + std::mem::size_of::<crate::ffi::WgrFoliage>() as u64
             + 16
@@ -1701,6 +1703,13 @@ impl CameraGroup {
                         view_dimension: wgpu::TextureViewDimension::D2, multisampled: false},
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 20,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2, multisampled: false},
+                    count: None,
+                },
                 // Borrow Sky's existing disc-free radiance map. Puddles need
                 // directional reflection, not the diffuse SH convolution.
                 wgpu::BindGroupLayoutEntry {
@@ -1776,6 +1785,7 @@ impl CameraGroup {
             bind: None,
             weather_bind: None,
             bound_weather_gen: u64::MAX,
+            bound_weather_far_gen: u64::MAX,
             bound_shadow_gen: u64::MAX,
             lights_buf,
             surface_rays_buf,
@@ -1822,6 +1832,8 @@ impl CameraGroup {
         weather_view: &wgpu::TextureView,
         weather_dummy: &wgpu::TextureView,
         weather_gen: u64,
+        weather_far_view: &wgpu::TextureView,
+        weather_far_gen: u64,
         sky_env_view: &wgpu::TextureView,
     ) {
         let needed = count as u64 * self.stride;
@@ -1848,9 +1860,10 @@ impl CameraGroup {
             || self.bound_interior_sky_gen != interior_sky_gen
             || self.bound_gi_gen != gi_gen
             || self.bound_weather_gen != weather_gen
+            || self.bound_weather_far_gen != weather_far_gen
             || self.bind.is_none()
         {
-            let make_bind = |physical_view: &wgpu::TextureView| device.create_bind_group(&wgpu::BindGroupDescriptor {
+            let make_bind = |physical_view: &wgpu::TextureView, far_view: &wgpu::TextureView| device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("wgr_3d_camera_bind"),
                 layout: &self.layout,
                 entries: &[
@@ -1935,13 +1948,17 @@ impl CameraGroup {
                         resource: wgpu::BindingResource::TextureView(physical_view),
                     },
                     wgpu::BindGroupEntry {
+                        binding: 20,
+                        resource: wgpu::BindingResource::TextureView(far_view),
+                    },
+                    wgpu::BindGroupEntry {
                         binding: 19,
                         resource: wgpu::BindingResource::TextureView(sky_env_view),
                     },
                 ],
             });
-            let main_bind = make_bind(weather_view);
-            let weather_bind = make_bind(weather_dummy);
+            let main_bind = make_bind(weather_view, weather_far_view);
+            let weather_bind = make_bind(weather_dummy, weather_dummy);
             self.bind = Some(main_bind);
             self.weather_bind = Some(weather_bind);
             self.bound_shadow_gen = shadow_gen;
@@ -1950,6 +1967,7 @@ impl CameraGroup {
             self.bound_interior_sky_gen = interior_sky_gen;
             self.bound_gi_gen = gi_gen;
             self.bound_weather_gen = weather_gen;
+            self.bound_weather_far_gen = weather_far_gen;
         }
     }
 
@@ -4379,8 +4397,11 @@ pub struct Gfx3d {
     // Bumped when the target is (re)allocated or dropped, so the camera bind group follows it.
     interior_sky_gen: u64,
     weather_cover: weather_cover::Map,
+    weather_cover_far: weather_cover::Map,
     weather_pipelines: FxHashMap<PrepassKey, wgpu::RenderPipeline>,
+    weather_far_pipelines: FxHashMap<PrepassKey, wgpu::RenderPipeline>,
     weather_gpu_pipeline: wgpu::RenderPipeline,
+    weather_far_gpu_pipeline: wgpu::RenderPipeline,
     // This frame's snapped ortho view, Some only while the feature is live. Also the per-frame
     // gate the shader reads: no view -> reach reads 1 everywhere -> no darkening.
     interior_sky_view: Option<SkyVisView>,
@@ -4985,7 +5006,10 @@ impl Gfx3d {
         );
         let weather_gpu_pipeline = weather_cover::retained_pipeline(device, composer,
             &cameras.layout, &gpu_group1_layout, &textures.bindless_layout,
-            &textures.sampler_array_layout, &conform.gpu_layout);
+            &textures.sampler_array_layout, &conform.gpu_layout, false);
+        let weather_far_gpu_pipeline = weather_cover::retained_pipeline(device, composer,
+            &cameras.layout, &gpu_group1_layout, &textures.bindless_layout,
+            &textures.sampler_array_layout, &conform.gpu_layout, true);
         let gpu_pipeline_early = if object_early_z() {
             Some(
                 cull::build_gpu_pipeline(
@@ -5243,8 +5267,11 @@ impl Gfx3d {
             interior_sky_target: None,
             interior_sky_gen: 0,
             weather_cover: weather_cover::Map::new(device),
+            weather_cover_far: weather_cover::Map::new_cascade(device, true),
             weather_pipelines: FxHashMap::default(),
+            weather_far_pipelines: FxHashMap::default(),
             weather_gpu_pipeline,
+            weather_far_gpu_pipeline,
             interior_sky_view: None,
             interior_sky_views: sky_vis::build_views(glam::Vec3::ZERO, &SkyVisSettings::default()),
             interior_sky_rendered: [None; sky_vis::DIRECTION_COUNT],
@@ -5723,7 +5750,8 @@ impl Gfx3d {
     }
 
     fn ensure_weather_pipeline(&mut self, device: &wgpu::Device, key: PrepassKey) {
-        if self.weather_pipelines.contains_key(&key) {return;}
+        if self.weather_pipelines.contains_key(&key) &&
+            (self.weather_cover_far.view.is_none() || self.weather_far_pipelines.contains_key(&key)) {return;}
         let vertex = wgpu::VertexBufferLayout {array_stride: BAKED_VERT_SIZE,
             step_mode: wgpu::VertexStepMode::Vertex, attributes: &self.vbuf_attrs};
         let skin = wgpu::VertexBufferLayout {array_stride: 8,
@@ -5732,7 +5760,14 @@ impl Gfx3d {
         let pipeline = weather_cover::depth_pipeline(device, &self.shader,
             if key.skinned {&self.skinned_layout} else {&self.plain_layout}, &buffers,
             if key.skinned {"vs_skinned"} else {"vs_main"}, "fs_weather_depth",
-            f32::from_bits(key.alpha_ref_bits));
+            f32::from_bits(key.alpha_ref_bits), false);
+        if self.weather_cover_far.view.is_some() {
+            let far_pipeline = weather_cover::depth_pipeline(device, &self.shader,
+                if key.skinned {&self.skinned_layout} else {&self.plain_layout}, &buffers,
+                if key.skinned {"vs_skinned"} else {"vs_main"}, "fs_weather_depth",
+                f32::from_bits(key.alpha_ref_bits), true);
+            self.weather_far_pipelines.insert(key, far_pipeline);
+        }
         self.weather_pipelines.insert(key, pipeline);
     }
 
@@ -8014,6 +8049,9 @@ impl Gfx3d {
             self.weather_cover.invalidate(self.cameras.buf.as_ref());
             self.weather_cover.view = None;
             self.weather_cover.direct.clear();
+            self.weather_cover_far.invalidate(self.cameras.buf.as_ref());
+            self.weather_cover_far.view = None;
+            self.weather_cover_far.direct.clear();
         }
         if !cameras.is_empty() {
             // Interior sky-visibility map + this frame's snapped ortho view, BEFORE the camera
@@ -8026,6 +8064,9 @@ impl Gfx3d {
             self.weather_cover.prepare(device, queue, sky_cam, self.cull.instance_epoch(),
                 self.snow_surface, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0);
             self.weather_cover.camera_offset = (gtao_camera as u64 * self.cameras.stride) as u32;
+            self.weather_cover_far.prepare(device, queue, sky_cam, self.cull.instance_epoch(),
+                self.snow_surface, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0);
+            self.weather_cover_far.camera_offset = (gtao_camera as u64 * self.cameras.stride) as u32;
             let epoch = self.cull.instance_epoch();
             let gi_retry = self.gi_rsm_publication.as_ref()
                 .is_some_and(|cell| cell.get().needs_retry());
@@ -8081,6 +8122,8 @@ impl Gfx3d {
                 self.weather_cover.target.as_ref().map(|(_,v)|v).unwrap_or(&self.weather_cover.dummy),
                 &self.weather_cover.dummy,
                 self.weather_cover.generation,
+                self.weather_cover_far.target.as_ref().map(|(_,v)|v).unwrap_or(&self.weather_cover.dummy),
+                self.weather_cover_far.generation,
                 env_view,
             );
             let buf = self.cameras.buf.as_ref().unwrap();
@@ -8237,8 +8280,8 @@ impl Gfx3d {
                     gs.basis as f32,
                 ];
                 let gi_origin_lane = [gi_origin.x, gi_origin.y, gi_origin.z, gi_spacing];
-                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 240, bytemuck::cast_slice(&gi_lane));
-                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 224, bytemuck::cast_slice(&gi_origin_lane));
+                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 336, bytemuck::cast_slice(&gi_lane));
+                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 320, bytemuck::cast_slice(&gi_origin_lane));
                 // Material Debug (frame.wgsl `matdbg`). Written unconditionally and derived
                 // from bind_size rather than from the sky offsets above, which live inside a
                 // conditional: the retained shader reads this every frame and a stale lane
@@ -8251,7 +8294,7 @@ impl Gfx3d {
                 ];
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 208,
+                    base + self.cameras.bind_size - 304,
                     bytemuck::cast_slice(&matdbg),
                 );
                 // DZ-005 water surface animation (frame.wgsl `wateranim`).
@@ -8259,7 +8302,7 @@ impl Gfx3d {
                 // water params cannot leave the ripple frozen at a stale time.
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 192,
+                    base + self.cameras.bind_size - 288,
                     bytemuck::cast_slice(&self.water_anim),
                 );
                 // Normal-map relief under ambient light (frame.wgsl `relief`), the LAST lane.
@@ -8273,7 +8316,7 @@ impl Gfx3d {
                 let relief = [normal_cavity(), sky_specular(), 0.0f32, 0.0f32];
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 176,
+                    base + self.cameras.bind_size - 272,
                     bytemuck::cast_slice(&relief),
                 );
                 // Far-fog closure (frame.wgsl `fogfar`). Unconditional for the same reason as
@@ -8281,7 +8324,7 @@ impl Gfx3d {
                 // frame left there.
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 160,
+                    base + self.cameras.bind_size - 256,
                     bytemuck::cast_slice(&self.fog_far),
                 );
                 // REN-TEMP-001D render-scale texture LOD (frame.wgsl `renscale`), the LAST
@@ -8290,27 +8333,37 @@ impl Gfx3d {
                 // the next camera happens to rewrite it.
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 144,
+                    base + self.cameras.bind_size - 240,
                     bytemuck::cast_slice(&self.render_scale_lane),
                 );
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 128,
+                    base + self.cameras.bind_size - 224,
                     bytemuck::cast_slice(&self.snow_surface),
                 );
                 camera_upload.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 112,
+                    base + self.cameras.bind_size - 208,
                     bytemuck::cast_slice(&self.ground_weather),
                 );
                 let weather_vp = self.weather_cover.view.map(|v|v.view_proj)
                     .unwrap_or(glam::Mat4::IDENTITY).to_cols_array();
-                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 96,
+                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 192,
                     bytemuck::cast_slice(&weather_vp));
-                let ready_offset = base + self.cameras.bind_size - 32;
+                let ready_offset = base + self.cameras.bind_size - 128;
                 camera_upload.write_buffer(buf, ready_offset,
                     bytemuck::cast_slice(&self.weather_cover.params(false)));
                 self.weather_cover.ready_offsets.push(ready_offset);
+                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 112,
+                    bytemuck::cast_slice(&[0_u32;4]));
+                let weather_far_vp = self.weather_cover_far.view.map(|v|v.view_proj)
+                    .unwrap_or(glam::Mat4::IDENTITY).to_cols_array();
+                camera_upload.write_buffer(buf, base + self.cameras.bind_size - 96,
+                    bytemuck::cast_slice(&weather_far_vp));
+                let far_ready_offset = base + self.cameras.bind_size - 32;
+                camera_upload.write_buffer(buf, far_ready_offset,
+                    bytemuck::cast_slice(&self.weather_cover_far.params(false)));
+                self.weather_cover_far.ready_offsets.push(far_ready_offset);
                 camera_upload.write_buffer(buf, base + self.cameras.bind_size - 16,
                     bytemuck::cast_slice(&[0_u32;4]));
             }
@@ -8567,16 +8620,17 @@ impl Gfx3d {
                 let d = &draws[index as usize];
                 if d.camera as usize != gtao_camera || !weather_source_draw(d) {continue;}
                 let Some(mesh) = self.meshes.get(KeyData::from_ffi(d.mesh).into()) else {
-                    self.weather_cover.direct_complete = false; continue;
+                    self.weather_cover.direct_complete = false; self.weather_cover_far.direct_complete = false; continue;
                 };
                 if d.index_begin.checked_add(d.index_count).is_none_or(|end|end > mesh.index_count) {
-                    self.weather_cover.direct_complete = false; continue;
+                    self.weather_cover.direct_complete = false; self.weather_cover_far.direct_complete = false; continue;
                 }
                 let baked = if mesh.skin.is_some() {self.baked_draw_base(d.palette_slot,d.mesh)} else {None};
                 let skinned = d.palette_slot != NO_PALETTE && mesh.skin.is_some() && baked.is_none();
                 let key = PrepassKey {skinned,alpha_ref_bits:d.alpha_ref.to_bits()};
                 self.ensure_weather_pipeline(device,key);
                 self.weather_cover.direct.push((*d,slot as u32));
+                if self.weather_cover_far.view.is_some() { self.weather_cover_far.direct.push((*d,slot as u32)); }
             }
         }
     }
@@ -8829,8 +8883,9 @@ impl Gfx3d {
         // the caller can replay a whole segment); the colour pass flips the same set to
         // its write-off variant when the prepass already laid its depth (decision 2/4).
         let pipeline = match mode {
-            Pass3dMode::Weather => {
-                let Some(p) = self.weather_pipelines.get(&PrepassKey {
+            Pass3dMode::Weather | Pass3dMode::WeatherFar => {
+                let pipelines = if matches!(mode, Pass3dMode::WeatherFar) {&self.weather_far_pipelines} else {&self.weather_pipelines};
+                let Some(p) = pipelines.get(&PrepassKey {
                     skinned,alpha_ref_bits:base_key.alpha_ref_bits}) else {return;};
                 p
             }
@@ -8886,7 +8941,7 @@ impl Gfx3d {
         // practice, so this binds once.
         let cam_off = (d.camera as u64 * self.cameras.stride) as u32;
         if st.cam_off != Some(cam_off) {
-            let bind = if matches!(mode,Pass3dMode::Weather) {
+            let bind = if matches!(mode,Pass3dMode::Weather | Pass3dMode::WeatherFar) {
                 let Some(bind) = self.cameras.weather_bind.as_ref() else {return;}; bind
             } else {camera_bind};
             pass.set_bind_group(0, bind, &[cam_off]);
@@ -8983,7 +9038,7 @@ impl Gfx3d {
         // never baked, so pipeline + bind selection is the plain, non-skinned path.
         let base_key = PipelineKey::from_draw(d, false);
         let pipeline = match mode {
-            Pass3dMode::Weather => return, // weather replays exact direct source slots
+            Pass3dMode::Weather | Pass3dMode::WeatherFar => return, // weather replays exact direct source slots
             Pass3dMode::Prepass => {
                 if !base_key.prepassed() {
                     return;
@@ -9863,6 +9918,12 @@ impl Gfx3d {
             let mut p = self.weather_cover.publication.get(); p.cull_recorded();
             self.weather_cover.publication.set(p);
         }
+        if self.weather_cover_far.view.is_some() && self.gpu_driven_enabled &&
+            self.cull.instance_count() > 0 &&
+            self.cull.dispatch_sky(encoder, weather_cover::FAR_CULL_VIEW) {
+            let mut p = self.weather_cover_far.publication.get(); p.cull_recorded();
+            self.weather_cover_far.publication.set(p);
+        }
         if !self.interior_sky_active() {
             return;
         }
@@ -9888,15 +9949,16 @@ impl Gfx3d {
 
     // Separate physical map: current registered retained meshes plus current direct
     // submissions, never the sun-distance-filtered CPU shadow caster list.
-    fn render_weather_cover_pass(&self, encoder: &mut wgpu::CommandEncoder, textures: &SharedTextures) {
-        let weather = &self.weather_cover;
+    fn render_weather_cover_pass(&self, encoder: &mut wgpu::CommandEncoder, textures: &SharedTextures, far: bool) {
+        let weather = if far {&self.weather_cover_far} else {&self.weather_cover};
+        let pipelines = if far {&self.weather_far_pipelines} else {&self.weather_pipelines};
         if weather.view.is_none() {return;}
         let (Some((_,target)),Some(camera_bind),Some(conform),Some(buffer),Some(queue)) =
             (weather.target.as_ref(),self.cameras.weather_bind.as_ref(),
              self.conform.gpu_bind.as_ref(),self.cameras.buf.as_ref(),weather.queue.as_ref())
             else {weather.invalidate(self.cameras.buf.as_ref());return;};
         let retained = self.gpu_driven_enabled && self.cull.instance_count() > 0;
-        let i = weather_cover::CULL_VIEW;
+        let i = if far {weather_cover::FAR_CULL_VIEW} else {weather_cover::CULL_VIEW};
         let group = self.gpu_sky_group1.get(i).and_then(|v|v.as_ref());
         let args = self.cull.sky_out_args(i);
         let counts = self.cull.sky_counter_buf(i);
@@ -9918,7 +9980,7 @@ impl Gfx3d {
                 (baked.is_some() && self.skinned_vbuf.is_none()) ||
                 (skin && (self.group1_skinned_bind.is_none() || self.palette.bind.is_none())) ||
                 (!skin && self.group1_plain_bind.is_none()) || self.conform.bind.is_none() ||
-                !self.weather_pipelines.contains_key(&PrepassKey {skinned:skin,alpha_ref_bits:d.alpha_ref.to_bits()}) {
+                !pipelines.contains_key(&PrepassKey {skinned:skin,alpha_ref_bits:d.alpha_ref.to_bits()}) {
                 weather.invalidate(Some(buffer));return;
             }
         }
@@ -9930,7 +9992,7 @@ impl Gfx3d {
                 stencil_ops: None}), ..Default::default()
         });
         if retained {
-            pass.set_pipeline(&self.weather_gpu_pipeline);
+            pass.set_pipeline(if far {&self.weather_far_gpu_pipeline} else {&self.weather_gpu_pipeline});
             pass.set_bind_group(0,camera_bind,&[weather.camera_offset]);
             pass.set_bind_group(1,group.unwrap(),&[]);
             pass.set_bind_group(2,textures.bindless_bind(),&[]);
@@ -9946,7 +10008,7 @@ impl Gfx3d {
             }
         }
         let mut direct_state = Pass3dState::default();
-        for (d,slot) in &weather.direct {self.draw_one(&mut pass,textures,d,*slot,1,&mut direct_state,Pass3dMode::Weather);}
+        for (d,slot) in &weather.direct {self.draw_one(&mut pass,textures,d,*slot,1,&mut direct_state,if far {Pass3dMode::WeatherFar} else {Pass3dMode::Weather});}
         drop(pass);encoder.pop_debug_group();
         let mut state = weather.publication.get(); state.depth_recorded(true);
         let ready = state.readable(weather.identity); weather.publication.set(state);
@@ -9974,7 +10036,8 @@ impl Gfx3d {
         textures: &SharedTextures,
         timers: &crate::gpu_timers::GpuTimers,
     ) {
-        self.render_weather_cover_pass(encoder, textures);
+        self.render_weather_cover_pass(encoder, textures, false);
+        self.render_weather_cover_pass(encoder, textures, true);
         if !self.interior_sky_active() {
             return;
         }
@@ -10138,6 +10201,11 @@ impl Gfx3d {
             self.weather_cover.publication.get_mut().plan(self.weather_cover.identity,
                 self.cull.instance_count() > 0);
         }
+        if self.weather_cover_far.view.is_some() {
+            self.weather_cover_far.identity.instance_epoch = self.cull.instance_epoch();
+            self.weather_cover_far.publication.get_mut().plan(self.weather_cover_far.identity,
+                self.cull.instance_count() > 0);
+        }
         let view = glam::Mat4::from_cols_array(&cam.view);
         let proj = glam::Mat4::from_cols_array(&cam.proj);
         let cam_pos = glam::Vec3::new(cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]);
@@ -10227,7 +10295,7 @@ impl Gfx3d {
             // REN-GI-002: view DIRECTION_COUNT is the sun proxy's.
             self.cull
                 .set_sky_view_count(device, sky_vis::DIRECTION_COUNT + 1 +
-                    usize::from(self.weather_cover.view.is_some()));
+                    usize::from(self.weather_cover.view.is_some()) + usize::from(self.weather_cover_far.view.is_some()));
             self.shadow_pass_ubo
                 .ensure(device, SKY_UBO_SLOT + sky_vis::DIRECTION_COUNT + 1);
             {
@@ -10271,11 +10339,17 @@ impl Gfx3d {
             }
         } else {
             self.cull.set_sky_view_count(device,
-                if self.weather_cover.view.is_some() {weather_cover::CULL_VIEW+1} else {0});
+                if self.weather_cover_far.view.is_some() {weather_cover::FAR_CULL_VIEW+1}
+                else if self.weather_cover.view.is_some() {weather_cover::CULL_VIEW+1} else {0});
         }
         if let Some(view) = self.weather_cover.view {
             let vp_rel = view.view_proj * glam::Mat4::from_translation(cam_pos);
             self.cull.set_sky_params(weather_cover::CULL_VIEW,
+                cull::params_from_shadow_cascade(vp_rel, cam_pos, self.cull_inputs));
+        }
+        if let Some(view) = self.weather_cover_far.view {
+            let vp_rel = view.view_proj * glam::Mat4::from_translation(cam_pos);
+            self.cull.set_sky_params(weather_cover::FAR_CULL_VIEW,
                 cull::params_from_shadow_cascade(vp_rel, cam_pos, self.cull_inputs));
         }
         // Seed the dummies on the first call so the group-1 layout is satisfiable
@@ -10707,6 +10781,8 @@ impl Gfx3d {
     pub fn interior_publications_submitted(&self) {
         let mut weather = self.weather_cover.publication.get(); weather.submitted();
         self.weather_cover.publication.set(weather);
+        let mut weather = self.weather_cover_far.publication.get(); weather.submitted();
+        self.weather_cover_far.publication.set(weather);
         if let Some(cells) = &self.interior_publications {
             for cell in cells {
                 let mut state = cell.get(); state.final_submit_accepted(); cell.set(state);
@@ -10809,12 +10885,26 @@ impl Gfx3d {
             self.cull.instance_epoch() == id.instance_epoch &&
             self.weather_cover.publication.get().commit(id);
         if !committed {self.weather_cover.invalidate(self.cameras.buf.as_ref());}
-        if self.weather_cover.trace && self.weather_cover.view.is_some() && self.weather_cover.trace_rows.get() < 32 {
+        if self.weather_cover.trace_changed() {
             self.weather_cover.trace_rows.set(self.weather_cover.trace_rows.get()+1);
             eprintln!("[wgr] weather cover map: frame={} instanceEpoch={} image={} resolution={} extent={} retained={} direct={} ready={} submitted={} scope=registered-retained-and-current-direct-no-all-world-dynamic-proof",
                 id.frame,id.instance_epoch,id.image,weather_cover::RESOLUTION,weather_cover::EXTENT,
                 self.cull.instance_count(),self.weather_cover.direct.len(),
                 self.weather_cover.publication.get().readable(id),committed);
+            eprintln!("[wgr] weather cover bounds: cascade=near vp={:?}", self.weather_cover.view.unwrap().view_proj.to_cols_array());
+        }
+        let id = self.weather_cover_far.identity;
+        let committed = self.weather_cover_far.view.is_some() &&
+            self.cull.instance_epoch() == id.instance_epoch &&
+            self.weather_cover_far.publication.get().commit(id);
+        if !committed {self.weather_cover_far.invalidate(self.cameras.buf.as_ref());}
+        if self.weather_cover_far.trace_changed() {
+            self.weather_cover_far.trace_rows.set(self.weather_cover_far.trace_rows.get()+1);
+            eprintln!("[wgr] weather cover far map: frame={} instanceEpoch={} image={} resolution={} extent={} retained={} direct={} ready={} submitted={} scope=registered-retained-and-current-direct-no-all-world-dynamic-proof",
+                id.frame,id.instance_epoch,id.image,weather_cover::RESOLUTION,weather_cover::FAR_EXTENT,
+                self.cull.instance_count(),self.weather_cover_far.direct.len(),
+                self.weather_cover_far.publication.get().readable(id),committed);
+            eprintln!("[wgr] weather cover bounds: cascade=far vp={:?}", self.weather_cover_far.view.unwrap().view_proj.to_cols_array());
         }
         self.interior_count_published_mask = 0;
         let Some(cells) = &self.interior_publications else { return; };
@@ -10850,6 +10940,7 @@ impl Gfx3d {
     }
     pub fn abort_interior_publications(&mut self) {
         self.weather_cover.invalidate(self.cameras.buf.as_ref());
+        self.weather_cover_far.invalidate(self.cameras.buf.as_ref());
         self.interior_count_published_mask = 0;
         if let Some(caches) = &mut self.interior_cached_counts {
             for cache in caches { cache.invalidate(); }
@@ -12115,6 +12206,7 @@ fn late_surface_scattering_is_per_instance_and_excludes_other_segments() {
 pub enum Pass3dMode {
     Prepass,
     Weather,
+    WeatherFar,
     Color { depth_write_off: bool },
 }
 
@@ -12847,17 +12939,18 @@ fn normal_relief_knobs_reach_the_shader_and_the_game_log() {
     // them alone looks right.
     let src = include_str!("mod.rs");
     for (offset, payload) in [
-        ("bind_size - 240", "cast_slice(&gi_lane)"),
-        ("bind_size - 224", "cast_slice(&gi_origin_lane)"),
-        ("bind_size - 208", "cast_slice(&matdbg)"),
-        ("bind_size - 192", "cast_slice(&self.water_anim)"),
-        ("bind_size - 176", "cast_slice(&relief)"),
-        ("bind_size - 160", "cast_slice(&self.fog_far)"),
-        ("bind_size - 144", "cast_slice(&self.render_scale_lane)"),
-        ("bind_size - 128", "cast_slice(&self.snow_surface)"),
-        ("bind_size - 112", "cast_slice(&self.ground_weather)"),
-        ("bind_size - 96", "cast_slice(&weather_vp)"),
-        ("bind_size - 16", "cast_slice(&[0_u32;4])"),
+        ("bind_size - 336", "cast_slice(&gi_lane)"),
+        ("bind_size - 320", "cast_slice(&gi_origin_lane)"),
+        ("bind_size - 304", "cast_slice(&matdbg)"),
+        ("bind_size - 288", "cast_slice(&self.water_anim)"),
+        ("bind_size - 272", "cast_slice(&relief)"),
+        ("bind_size - 256", "cast_slice(&self.fog_far)"),
+        ("bind_size - 240", "cast_slice(&self.render_scale_lane)"),
+        ("bind_size - 224", "cast_slice(&self.snow_surface)"),
+        ("bind_size - 208", "cast_slice(&self.ground_weather)"),
+        ("bind_size - 192", "cast_slice(&weather_vp)"),
+        ("bind_size - 96", "cast_slice(&weather_far_vp)"),
+        ("bind_size - 112", "cast_slice(&[0_u32;4])"),
     ] {
         let at = src
             .find(&format!("{offset},"))

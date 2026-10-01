@@ -688,6 +688,7 @@ fn vs_gpu(
     out.clip = reverse_z(frame.proj * frame.view * vec4<f32>(world_pos, 1.0));
     if (weather_depth > 0.5) {
         out.clip = frame.weather_vp * vec4<f32>(world_pos + frame.cam_pos.xyz, 1.0);
+        if (weather_depth > 1.5) { out.clip = frame.weather_far_vp * vec4<f32>(world_pos + frame.cam_pos.xyz, 1.0); }
     }
     out.uv = uv;
     out.uv1 = uv1;
