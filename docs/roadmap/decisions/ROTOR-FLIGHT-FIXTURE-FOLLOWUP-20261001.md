@@ -14,13 +14,29 @@ position, or the aircraft leaves the eight-metre source footprint. None proves
 that land emission works. The original sand site also has nearby stock geometry;
 the clear-site run used actual source-admitted SandDark at2700/5150.
 
-The optional `-ManualPilot` mode selects the actual stock pilot as player, uses
-the existing AUTOHOVER action, and preserves helicopter control with a scripted
-camera. A short ordinary SDL Q pulse refreshes the keyboard height helper after
+The optional `-ManualPilot` mode boards the actual mission player as pilot, uses
+the existing AUTOHOVER action, and uses ordinary external camera during flight.
+Render-only view overrides apply only to paused screenshots and are then cleared.
+A short ordinary SDL Q pulse refreshes the keyboard height helper after
 each single stage relocation. It does not set rotor RPM, velocity or simulated
 particles, or continuously pin aircraft position. Actual flight position, engine
 state, emission trace, source surface, pause and particle-budget gates still
 apply. Parser verification alone does not accept this new mode; actual flight
 and dust/snow appearance checks remain pending.
+
+The first controlled-pilot attempt used unsupported original OFP `selectPlayer`.
+The game reported a script abort and timed-out harness command. Its failed
+cleanup required terminating only the owned test process; this attempt is a
+failure, with no ordinary-shutdown acceptance. The correction uses the existing
+mission player rather than inventing a replacement command. The subsequent
+`original-pilot-board-20261001-015327-ad03fa` exits normally but still records
+engine-off behavior and no required emission trace. Input/control diagnosis
+remains open; neither attempted manual setup accepts downwash appearance.
+
+Source diagnosis of the second manual attempt found that a scripted camera effect
+sets `World::_playerSuspended`, routing a manual helicopter driver through
+`SuspendedPilot` instead of the keyboard collective path. The revised mode
+requires `triGetCameraEffectActive=0` before actual input. Its installed hover
+acceptance remains pending.
 
 The accepted water downwash producer and renderer are unchanged.

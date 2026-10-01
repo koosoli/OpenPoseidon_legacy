@@ -70,19 +70,24 @@ function Eval([string]$code) {
     return ConvertFrom-Json -InputObject $display -NoEnumerate
 }
 function Capture([string]$stage) {
+    if ($ManualPilot) {
+        $direction=@(-30.0,-19.0,36.0);$length=[Math]::Sqrt(30*30+19*19+36*36)
+        $raw=@(($script:manualViewX+30),($script:manualViewGround+27),($script:manualViewZ-36))+@($direction | ForEach-Object {$_/$length})
+        Require ((Eval ('triSetView ['+(($raw | ForEach-Object {Number $_}) -join ',')+']')) -ceq 'OK') 'Paused render-only rotor view refused.'
+    }
     $path=Join-Path $output ($stage+'.png');$null=Send @{cmd='screenshot';path=$path}
     $until=[DateTime]::UtcNow.AddSeconds(10)
     while (!(Test-Path -LiteralPath $path)) {Health;Require ([DateTime]::UtcNow -lt $until) 'Screenshot missing.';Start-Sleep -Milliseconds 100}
     Require ((Get-Item -LiteralPath $path).Length -gt 100) 'Screenshot empty.'
     $result.captures[$stage]=@{path=$path;sha256=(Get-FileHash -LiteralPath $path).Hash}
+    if ($ManualPilot) {Require ((Eval 'triClearView') -ceq 'OK') 'Paused render-only rotor view did not release.'}
 }
 function Height([double]$x,[double]$z) {Get-TerrainPuddleFixtureHeight {param($request) Send $request} $x $z}
 function View([double]$x,[double]$z,[double]$ground) {
     if ($ManualPilot) {
-        # Scripted camera preserves ordinary helicopter keyboard control.
-        # Camera/target commands use AGL, unlike the stored ASL fixture height.
-        $cameraX=$x+30;$cameraZ=$z-36;$cameraGround=Height $cameraX $cameraZ
-        Exec ('rotorCamera camSetPos ['+(Number $cameraX)+','+(Number $cameraZ)+','+(Number ($ground+27-$cameraGround))+']; rotorCamera camSetTarget ['+(Number $x)+','+(Number $z)+',18]; rotorCamera camCommit 0')
+        $script:manualViewX=$x;$script:manualViewZ=$z;$script:manualViewGround=$ground
+        Exec 'rotorHeli switchCamera "EXTERNAL"'
+        Require ([double](Eval 'triGetCameraEffectActive') -eq 0) 'A camera effect suspends ordinary helicopter controls.'
         return
     }
     $pose=@(($x+30),($z-36),($ground+27),320,-23) | ForEach-Object {Number $_}
@@ -178,10 +183,13 @@ try {
     $null=Send @{cmd='weather_particles';action='set';mode='particle';snowflakes=$false}
     $sand=Send @{cmd='dev_sand';action='sample';x=$SandX;z=$SandZ};Require $sand.sourceEligible 'Requested actual stock source is not sand.';$result.gates.sandSource=$sand
     $ground=Height $SandX $SandZ;$xz=(Number $SandX)+','+(Number $SandZ)
-    Exec ('rotorHeli="UH60" createVehicle ['+$xz+',0]; rotorHeli allowDamage false; rotorHeli setFuel 0; rotorHeli engineOn false; rotorGroup=createGroup west; "SoldierWB" createUnit [['+$xz+',0],rotorGroup,"rotorPilot=this; this allowDamage false; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE"""]; rotorPilot moveInDriver rotorHeli; rotorHeli setPos ['+$xz+',0]; doStop rotorPilot; rotorHeli engineOn false')
+    $crewSetup=if($ManualPilot){'rotorPilot=player; rotorPilot allowDamage false; '}else{'rotorGroup=createGroup west; "SoldierWB" createUnit [['+$xz+',0],rotorGroup,"rotorPilot=this; this allowDamage false; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE"""]; '}
+    Exec ('rotorHeli="UH60" createVehicle ['+$xz+',0]; rotorHeli allowDamage false; rotorHeli setFuel 0; rotorHeli engineOn false; '+$crewSetup+'rotorPilot moveInDriver rotorHeli; rotorHeli setPos ['+$xz+',0]; doStop rotorPilot; rotorHeli engineOn false')
     Require ((Eval 'typeOf rotorHeli') -ceq 'UH60' -and (Eval 'typeOf driver rotorHeli') -ceq 'SoldierWB') 'Real stock helicopter/crew identity missing.'
     if ($ManualPilot) {
-        Exec ('selectPlayer rotorPilot; rotorPilot action ["AUTOHOVER",rotorHeli]; rotorCamera="camera" camCreate ['+$xz+',0]; rotorCamera cameraEffect ["internal","back"]')
+        # Original OFP scripting has no selectPlayer command. Board the actual
+        # mission player rather than trying to replace player authority.
+        Exec 'rotorPilot action ["AUTOHOVER",rotorHeli]; rotorHeli switchCamera "EXTERNAL"'
         Require ((Eval 'format ["%1",player]') -ceq (Eval 'format ["%1",rotorPilot]')) 'Actual controlled pilot identity differs.'
     }
     $result.gates.object=Eval 'format ["%1",rotorHeli]';View $SandX $SandZ $ground

@@ -1,6 +1,7 @@
 # Installed real-player muzzle lighting captures. No synthetic light/shot command.
 [CmdletBinding()]
 param([switch]$SelfTest,
+      [switch]$OriginalFlash,
       [ValidateSet('Both','Night','Roof')][string]$Scenario='Both',
       [ValidateSet('Both','On','Off')][string]$Arm='Both',
       [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='standard-us',
@@ -83,7 +84,7 @@ function Pair {
     return @{stamp=$stamp;exe=(Get-FileHash -LiteralPath (Join-Path $GameDir 'OpenPoseidon.exe')).Hash;dll=(Get-FileHash -LiteralPath (Join-Path $GameDir 'wgpu_renderer.dll')).Hash}
 }
 $result.before=Pair
-$keys=@('POSEIDON_USER_DIR','POSEIDON_MUZZLE_LIGHT','POSEIDON_MUZZLE_LIGHT_TRACE','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_DEPTH','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','POSEIDON_SNOWLINE','WGR_TERRAIN_PUDDLE_WETNESS','WGR_UNIFORM_WET','WGR_OBJECT_SNOW','WGR_TEMPORAL','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_GRASS','WGR_CLOUD_COVERAGE','POSEIDON_WIND_OVERRIDE')
+$keys=@('WGR_MUZZLE_FLASH_APPEARANCE','POSEIDON_MUZZLE_FLASH_TRACE','POSEIDON_USER_DIR','POSEIDON_MUZZLE_LIGHT','POSEIDON_MUZZLE_LIGHT_TRACE','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_DEPTH','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','POSEIDON_SNOWLINE','WGR_TERRAIN_PUDDLE_WETNESS','WGR_UNIFORM_WET','WGR_OBJECT_SNOW','WGR_TEMPORAL','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_GRASS','WGR_CLOUD_COVERAGE','POSEIDON_WIND_OVERRIDE')
 $saved=@{};foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $p=$null;$client=$null;$held=$false;$armResult=$null
 function Health {
@@ -130,6 +131,8 @@ function CloseOwned {
 }
 try {
     foreach($key in $keys){Remove-Item ('Env:'+$key) -ErrorAction SilentlyContinue}
+    $env:WGR_MUZZLE_FLASH_APPEARANCE=if($OriginalFlash){'0'}else{'1'};$env:POSEIDON_MUZZLE_FLASH_TRACE='1'
+    $result.flashAppearance=$env:WGR_MUZZLE_FLASH_APPEARANCE
     $env:POSEIDON_MUZZLE_LIGHT_TRACE='1';$env:WGR_AUTO_EXPOSURE='0';$env:WGR_EXPOSURE='1';$env:WGR_TEMPORAL='0';$env:WGR_GRASS='0';$env:WGR_CLOUD_COVERAGE='0';$env:POSEIDON_WIND_OVERRIDE='0 90 0';$env:WGR_OBJECT_SNOW='0';$env:POSEIDON_SNOWLINE='off';$env:POSEIDON_SNOW_TEST_DEPTH='0'
     $arms=if($Arm -eq 'Both'){@('On','Off')}else{@($Arm)}
     foreach($name in $arms) {
@@ -185,6 +188,10 @@ try {
                 $trace=Parse-MuzzleTrace $traces[-1].Line;$case.shot.trace=$trace;$case.shot.peak=Assert-Peak $trace $now (Eval 'getPosASL player')
             }else{Require ($traces.Count -eq 0) 'Legacy ablation unexpectedly emitted the new pulse.'}
             Capture-Views $case 'peak'
+            if (!$OriginalFlash) {
+                Require (Select-String -LiteralPath $log -Pattern 'MUZZLE_FLASH_SHEET.*enabled=true remapped=true' -Quiet) 'Actual stock flash sheet remap missing.'
+                Require (Select-String -LiteralPath $log -Pattern 'MUZZLE_FLASH_MATERIAL.*enabled=true.*encoded=-1.0' -Quiet) 'Actual stock flash material emission admission missing.'
+            }
             # Advance real simulation beyond both 110ms pulse and old 150ms cleanup.
             Exec 'setAccTime 0.02';$until=[DateTime]::UtcNow.AddSeconds(20)
             do{Start-Sleep -Milliseconds 100;$expired=Clock;Require ([DateTime]::UtcNow -lt $until) 'Actual clock did not advance for expiry.'}while($expired-$now -lt 200)

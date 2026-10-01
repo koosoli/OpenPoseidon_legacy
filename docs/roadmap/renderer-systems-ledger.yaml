@@ -829,6 +829,20 @@ unbuilt_candidates: >-
       policy tests pass998 assertions/6 cases. Land rotor policy tests pass, but
       actual dry/snow hovering and standing-water footstep selection/listening
       remain pending. Existing water downwash remains unchanged.
+      Matchingd99bf434 was installed01:31 with depth/Fresnel transmission,
+      independent nearby scene reflections and an explicit terrain-domain key.
+      New reflection-device suite passes9 tests; combined renderer suite passes
+      627 tests, zero failed, two existing ignored. Actual local-pool appearance,
+      retained samples after rain and standing-water audio still need runtime
+      checks on that pair. RainWaterFine62d5cc6d is a bounded conservative CPU
+      prototype with passing source-triangle crater/ownership/flow tests; no
+      production producer/query/renderer consumes it, so fine crater filling
+      remains unimplemented. Its topology costs29.74MiB coarse/33.75MiB with64
+      tiles before snapshots; integration requires real terrain storage curves
+      and measured cost. Failed rotor AI/manual fixtures are retained in
+      ROTOR-FLIGHT-FIXTURE-FOLLOWUP-20261001.md. One unsupported-script attempt
+      required forced cleanup of only the owned process and remains failed.
+      Corrected manual-input verification is still pending.
       MUD-VOLUMETRIC-CONTACT-20260930.md and NOGOVA-SOFT-MUD-CONTACT-20260930.md.
 
       Historical September 30 owner-priority mud puddle slice: rain-fed cosmetic wetness,
@@ -1399,6 +1413,21 @@ unbuilt_candidates: >-
       adds an opt-in coat-coverage diagnostic preserving actual leaf alpha and
       source-negative bark/skeletons, not yet installed. Corrected roof near/far
       and new bullet-impact holes still require installed acceptance.
+      Sourcef40d397d actual nonexplosive terrain projectile impacts carve bounded
+      additive bowls into the existing retained SnowField, preserving collision,
+      impact FX and network behavior. Actual complete field/policy CPU checks and
+      full game build pass; it is installedd99bf434 but real-shot holes, refill,
+      roofs and dry/water negatives remain pending. The old bare-terrain ballistic
+      collision remains unchanged; this is not snow-shell collision physics.
+      Installed raw final-coat diagnostic campaign raw-coat-diagnostic-20261001-
+      013212 passes source identity, paused state, normal exits and unchanged pair
+      on Eden and Noe. Admitted canopy has widespread coat but remains too green
+      in normal rendering. Actual decoded opaque foliage has median linear
+      luminance0.0096..0.0151; the prior frost gate suppresses most dark leaves.
+      Sourcec41e6687 lifts positively coated leaves to neutral compressed-luminance
+      frost while preserving exact black, atlas/roof authority and alpha. Eight
+      actual tree shader composition/device tests pass and full game buildc0d0196e
+      passes; that stronger material is not yet installed or visually accepted.
       Baseline c9024bb4 retained the earlier snow/contact layer and installed
       8b3ae13c. Shared
       Powder d538b383 introduced projected-footprint filtering. Installed
