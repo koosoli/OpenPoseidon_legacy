@@ -242,7 +242,7 @@ public:
                     if(FineTileCount()>=FineTileLimit){++report.refused;continue;}
                     const auto geometry=ReadTile(x,z,range,sample,true);
                     if(geometry.empty()||!ActivateFine()||!_fine->RefineTileGeometry(x,z,geometry)){++report.refused;continue;}
-                    ++report.admitted;
+                    ++report.admitted;++_generation; // ownership topology changed
                 }
             }
         }

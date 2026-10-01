@@ -80,11 +80,13 @@ int main() {
     // queued simulation time, then successful actual source refresh/restoration.
     const double wetVolume=f.Volume();const auto rev=f.Revision();
     source.Edit(f,82,82,10);
+    const auto unchangedTopology=f.Generation();
     assert(!f.SourceReady()&&!f.At(impact,impact).valid&&f.Revision()>rev);
     const auto stale=f.FineSnapshot();assert(!stale.valid&&stale.surfaces.size()==1024);
     f.Advance(.25f,1);assert(f.Volume()==wetVolume&&f.PendingSeconds()>=.25);
     source.RefreshCoarse(f);const auto restoration=source.Update(f);
     assert(restoration.updated==1&&restoration.valid&&f.SourceReady()&&f.Volume()==wetVolume);
+    assert(f.Generation()==unchangedTopology);
     assert(f.At(impact,impact).valid);
     f.Advance(.25f,1);mass(f,retained);
 
@@ -128,8 +130,10 @@ int main() {
     assert(boundary.Configure(side,side,25,boundarySource.Coarse()));
     boundarySource.Edit(boundary,61,82,9);
     assert(boundarySource.Update(boundary).admitted==1&&boundary.FineTileCount()==1);
+    const auto firstTopology=boundary.Generation();
     boundarySource.Edit(boundary,62,82,9); // true shared source vertex, both tiles
     assert(boundarySource.Update(boundary).admitted==1&&boundary.FineTileCount()==2);
+    assert(boundary.Generation()>firstTopology);
 
     // Domain regrid retains total mass and budget but explicitly redistributes
     // shoreline and retires fine topology. Unsupported source becomes coarse.
