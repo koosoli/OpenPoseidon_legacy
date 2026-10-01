@@ -43,6 +43,32 @@ function Set-ExposurePolicy([bool]$automatic) {
 function Assert-ShotSettled([long]$releaseMs,[long]$pausedMs) {
     Require ($releaseMs -ge 0 -and $pausedMs-$releaseMs -ge 2000) 'Shot image precedes two real simulation seconds after mouse-up.'
 }
+function Unit-Vector($vector) {
+    Require ($vector.Count -eq 3) 'Aiming vector needs three raw engine XYZ lanes.'
+    $length=0.;foreach($value in $vector) {Require (![double]::IsNaN($value) -and ![double]::IsInfinity($value)) 'Nonfinite actual aiming vector.';$length+=$value*$value}
+    $length=[Math]::Sqrt($length);Require ($length -gt .000001 -and ![double]::IsInfinity($length)) 'Zero/unbounded aiming vector.'
+    return ,@(($vector[0]/$length),($vector[1]/$length),($vector[2]/$length))
+}
+function Wrap-Angle([double]$angle) {return [Math]::IEEERemainder($angle,2*[Math]::PI)}
+function Clamp-Number([double]$value,[double]$low,[double]$high) {return [Math]::Max($low,[Math]::Min($high,$value))}
+function Aim-Error($state,$point) {
+    Require ($state.readonly -eq $true -and $state.manual -eq $true -and $state.playerSuspended -eq $false -and $state.cameraEffect -eq $false) 'Actual ordinary controlled-player weapon state unavailable.'
+    foreach($name in @('muzzleX','muzzleY','muzzleZ')) {Require ($null -ne $state.$name -and ![double]::IsNaN($state.$name) -and ![double]::IsInfinity($state.$name)) 'Missing/nonfinite actual muzzle position.'}
+    $actual=Unit-Vector @([double]$state.directionX,[double]$state.directionY,[double]$state.directionZ)
+    $desired=if($null -eq $point) {Unit-Vector @(0,-.274,([Math]::Sqrt(1-.274*.274)))}
+        else {Unit-Vector @(($point[0]-$state.muzzleX),($point[1]-$state.muzzleY),($point[2]-$state.muzzleZ))}
+    Require ($desired[1] -lt -.04) 'Audited aiming target is not below the actual muzzle.'
+    $dot=$actual[0]*$desired[0]+$actual[1]*$desired[1]+$actual[2]*$desired[2]
+    return @{actual=$actual;desired=$desired;
+        yaw=(Wrap-Angle ([Math]::Atan2($desired[0],$desired[2])-[Math]::Atan2($actual[0],$actual[2])));
+        pitch=([Math]::Asin($desired[1])-[Math]::Asin($actual[1]));
+        angle=[Math]::Acos((Clamp-Number $dot -1 1))}
+}
+function Aim-Step($error,[double]$gainX,[double]$gainY) {
+    Require ($gainX -gt 0 -and $gainY -gt 0) 'Invalid measured mouse gain.'
+    return @{dx=[int](Clamp-Number ([Math]::Round($error.yaw/$gainX)) -180 180);
+        dy=[int](Clamp-Number ([Math]::Round(-$error.pitch/$gainY)) -180 180)}
+}
 function Parse-SnowHit([string]$line) {
     $n='[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?'
     $pattern='SNOW_BULLET terrain=1 changed=(true|false) x=('+ $n+') y=('+ $n+') z=('+ $n+') speed=('+ $n+') base=('+ $n+') remaining=('+ $n+') radius=('+ $n+') depth=('+ $n+') before=('+ $n+') after=('+ $n+') roadway=(true|false) sheltered=(true|false) land=(true|false) budget=(true|false) up=('+ $n+') incidence=('+ $n+') supportError=('+ $n+')\s*$'
@@ -91,6 +117,16 @@ function Assert-Hole($hit,$before,$after,[double]$base) {
     return @{changedCells=$changed;centre=$matched[0];rimCells=$rim;unchangedOutsideCells=$outer;maximumDeficit=$peak}
 }
 if ($SelfTest) {
+    $weapon=@{readonly=$true;manual=$true;playerSuspended=$false;cameraEffect=$false;directionX=0;directionY=.16;directionZ=[Math]::Sqrt(1-.16*.16);muzzleX=10;muzzleY=22;muzzleZ=20}
+    $up=Aim-Error $weapon $null;$step=Aim-Step $up .001 .001
+    Require ($up.actual[1] -gt 0 -and $up.desired[1] -lt 0 -and $step.dy -gt 0 -and $step.dx -eq 0) 'Upward actual gun did not require ordinary downward mouse correction.'
+    $weapon.directionY=-.274;$weapon.directionZ=[Math]::Sqrt(1-.274*.274)
+    $exact=Aim-Error $weapon $null;Require ($exact.angle -lt .000001 -and (Aim-Step $exact .001 .001).dy -eq 0) 'Correct actual downward gun was moved unnecessarily.'
+    $target=@(10,20,24);$point=Aim-Error $weapon $target;Require ($point.desired.Count -eq 3 -and [Math]::Abs($point.desired[1]+2/[Math]::Sqrt(20)) -lt .000001) 'Actual muzzle/terrain point arithmetic changed raw XYZ order.'
+    foreach($change in @(@('readonly',$false),@('manual',$false),@('playerSuspended',$true),@('cameraEffect',$true),@('directionY',[double]::NaN),@('muzzleX',[double]::NaN))) {
+        $bad=$weapon.Clone();$bad[$change[0]]=$change[1]
+        $failed=$false;try {$null=Aim-Error $bad $null} catch {$failed=$true};Require $failed 'Unsupported or nonfinite aiming state accepted.'
+    }
     $sample='[info] SNOW_BULLET terrain=1 changed=true x=4975.063 y=20.000 z=4675.063 speed=850.00 base=0.1800 remaining=0.1800 radius=0.2250 depth=0.0840 before=0.0000 after=0.0840 roadway=false sheltered=false land=true budget=true up=1.0000 incidence=-0.7500 supportError=0.0000'
     $hit=Parse-SnowHit $sample
     foreach($bad in @($sample.Replace('after=0.0840','after=0.2000'),$sample.Replace('radius=0.2250','radius=0.4000'),$sample.Replace('roadway=false','roadway=true'),$sample.Replace('speed=850.00','speed=NaN'),$sample.Replace('speed=850.00','speed=1e309'),$sample.Replace('incidence=-0.7500','incidence=0.1000'),($sample+' unknown=1'))) {
@@ -118,7 +154,7 @@ if ($SelfTest) {
         $null=Set-ExposurePolicy $false;Require ($env:WGR_EXPOSURE -ceq '1' -and $env:WGR_AUTO_EXPOSURE -ceq '0') 'Fixed legacy arm changed.'
         Restore-Environment 'WGR_EXPOSURE' $null;Require ($null -eq [Environment]::GetEnvironmentVariable('WGR_EXPOSURE','Process')) 'Previously absent environment variable was retained.'
     } finally {foreach($key in $envKeys) {Restore-Environment $key $prior[$key]}}
-    Write-Host 'PASS actual shot trace, kernel-boundary falsifier, camera/decode, two-second settling, exposure policy and null-safe restoration checks (no game/GPU/profile).';return
+    Write-Host 'PASS actual-state aiming/controller falsifiers, shot trace, kernel-boundary, camera/decode, settling, exposure and restoration checks (no game/GPU/profile).';return
 }
 Require ([bool]$env:LOCK_OWNER) 'Run through scripts/with-game-lock.sh.'
 Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue)) 'Preserve the running game.'
@@ -134,10 +170,10 @@ $profile=Join-Path $output 'user';New-Item -ItemType Directory -Force $profile |
 $log=Join-Path $output 'engine.log';$mission=Join-Path $root 'tests/perf/missions/perf_sand.noe'
 $result=[ordered]@{status='running';before=$before;stages=@{};captures=@{};
     autoExposure=[bool]$AutoExposure;minimumExposureScale=$MinExposure;brightness=1;minimumSettleSimulationMs=2000;
-    limitations=@('Source collision remains bare terrain.','Rim is uncut surrounding powder, not newly heaped mass.','Hard-object/wall/sea branches omit SNOW_BULLET terminal logs; those require a future actual ballistic-terminal query and are not accepted by absence.','Pictures require visual review; source/cell counters do not accept hole appearance.','Two seconds of real simulation reduce transient impact FX; authored persistent decals remain. No effects are deleted.','AutoExposure restores normal time-of-day grading and default adaptive policy, not a forced adaptive exposure enable. Fixed exposure1 controls can still clip snow.')}
+    limitations=@('Source collision remains bare terrain.','Rim is uncut surrounding powder, not newly heaped mass.','Hard-object/wall/sea/expired terminal branches are diagnostic only; absence of a terrain event never accepts the covered control.','Pictures require visual review; source/cell counters do not accept hole appearance.','Two seconds of real simulation reduce transient impact FX; authored persistent decals remain. No effects are deleted.','AutoExposure restores normal time-of-day grading and default adaptive policy, not a forced adaptive exposure enable. Fixed exposure1 controls can still clip snow.')}
 @{sourceHead=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;
   installed=$before;lockOwner=$env:LOCK_OWNER;mission=$mission;player='SoldierWB';weapon='M16';requestedPlayer=@($PlayerX,$PlayerZ);
-  aim='Ordinary relative SDL mouse motion';aimDy=$AimDy;depth=$Depth;refill=[bool]$Refill;autoExposure=[bool]$AutoExposure;brightness=1;
+  aim='Closed-loop actual read-only player_weapon_state; ordinary relative SDL mouse motion before every shot';aimDyInitialGainSeed=$AimDy;aimToleranceRadians=.0025;depth=$Depth;refill=[bool]$Refill;autoExposure=[bool]$AutoExposure;brightness=1;
   firing='SDL mouse button1; Fired event records only; terminal impact + at least2000sim ms after mouse-up before pause';gridSpacing=.125;captureVectors='raw engine XYZ'} |
     ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'provenance.json')
 $keys=@('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN',
@@ -158,6 +194,7 @@ function Exec([string]$code) {$null=Send @{cmd='exec';code=$code}}
 function Eval([string]$code) {return Decode-Eval ([string](Send @{cmd='eval';code=$code}).result)}
 function Clock {$state=Send @{cmd='query';what='play_state'};Require ($state.has_player -and $state.player_active -and $state.player_local) 'Actual local controlled player missing.';return [long]$state.time_ms}
 function HitLines {return @(Select-String -LiteralPath $log -SimpleMatch 'SNOW_BULLET terrain=1' -ErrorAction SilentlyContinue)}
+function TerminalLines {return @(Select-String -LiteralPath $log -SimpleMatch 'SNOW_BULLET_TERMINAL kind=' -ErrorAction SilentlyContinue)}
 function Patch([double]$x,[double]$z) {
     $patch=@{};$cx=[int][Math]::Floor($x/.125);$cz=[int][Math]::Floor($z/.125)
     for($j=-6;$j -le 6;++$j) {for($i=-6;$i -le 6;++$i) {
@@ -188,9 +225,48 @@ function Capture([string]$name) {
     $result.captures[$name]=@{path=$path;sha256=(Get-FileHash -LiteralPath $path).Hash;timeMs=$time;bytes=$bytes.Length;exposureMode=$result.exposureMode;brightness=1}
 }
 function Capture-Views([string]$stage,$views) {foreach($entry in $views.GetEnumerator()) {View $entry.Value;Capture ($stage+'-'+$entry.Key);Unview}}
+$script:aimTarget=$null
+function Wait-InputTicks([int]$milliseconds) {
+    $start=Clock;$until=[DateTime]::UtcNow.AddSeconds(8)
+    do {Start-Sleep -Milliseconds 40;Require ([DateTime]::UtcNow -lt $until) 'Ordinary input did not receive real simulation ticks.'} while ((Clock)-$start -lt $milliseconds)
+}
+function Prepare-Aim([string]$stage) {
+    Unview;Exec 'player switchCamera "INTERNAL"; setAccTime 1'
+    Wait-InputTicks 1000 # release photographic camera before consuming aim input
+    $gainX=Clamp-Number ([Math]::Asin(.274)/$AimDy) .0001 .02;$gainY=$gainX;$history=@();$stable=0;$prior=$null;$previousStep=$null;$lastStateMs=$null
+    $until=[DateTime]::UtcNow.AddSeconds(25)
+    for($iteration=0;$iteration -lt 24;++$iteration) {
+        Require ([DateTime]::UtcNow -lt $until) 'Actual gun-direction calibration exceeded bounded time.'
+        $state=Send @{cmd='player_weapon_state'};$error=Aim-Error $state $script:aimTarget
+        Require ($null -ne $state.timeMs -and ($null -eq $lastStateMs -or $state.timeMs-$lastStateMs -ge 200)) 'Actual aiming samples did not advance simulation.'
+        $lastStateMs=[long]$state.timeMs
+        if($prior -and $previousStep) {
+            $yawChange=Wrap-Angle ([Math]::Atan2($error.actual[0],$error.actual[2])-[Math]::Atan2($prior.actual[0],$prior.actual[2]))
+            $pitchChange=[Math]::Asin($error.actual[1])-[Math]::Asin($prior.actual[1])
+            if([Math]::Abs($previousStep.dx) -ge 2 -and $yawChange*$previousStep.dx -gt 0) {$gainX=Clamp-Number ([Math]::Abs($yawChange/$previousStep.dx)) .0001 .02}
+            if([Math]::Abs($previousStep.dy) -ge 2 -and $pitchChange*$previousStep.dy -lt 0) {$gainY=Clamp-Number ([Math]::Abs($pitchChange/$previousStep.dy)) .0001 .02}
+        }
+        $step=Aim-Step $error $gainX $gainY
+        $history+=@{iteration=$iteration;actualState=$state;target=$script:aimTarget;error=$error;step=$step;gainX=$gainX;gainY=$gainY}
+        $result.stages[$stage+'-aim']=@{samples=$history;status='calibrating';toleranceRadians=.0025;input='ordinary SDL relative mouse; no aim/shot/physics setter'}
+        if($error.angle -le .0025 -and $error.actual[1] -lt -.04) {++$stable} else {$stable=0}
+        if($stable -ge 3) {
+            Exec 'setAccTime 0';Capture ($stage+'-ordinary-ui-before-fire')
+            $ready=Send @{cmd='player_weapon_state'};$check=Aim-Error $ready $script:aimTarget
+            Require ($check.angle -le .0035 -and $check.actual[1] -lt -.04) 'Actual gun no longer matches the downward calibration after UI capture.'
+            $result.stages[$stage+'-aim'].status='actual-downward-ui-captured';$result.stages[$stage+'-aim'].ready=$ready
+            return
+        }
+        if($stable -eq 0 -and ($step.dx -ne 0 -or $step.dy -ne 0)) {$null=Send @{cmd='mouse_motion';dx=$step.dx;dy=$step.dy};$previousStep=$step;$prior=$error}
+        else {$previousStep=$null;$prior=$null}
+        Wait-InputTicks 350
+    }
+    throw 'Ordinary mouse control could not establish the actual bounded downward gun vector.'
+}
 function Shoot([string]$stage) {
-    Unview;Exec 'player switchCamera "INTERNAL"'
+    Prepare-Aim $stage
     $ammo=[double](Eval 'player ammo "M16"');$shots=[int](Eval 'snowShotCount');$hits=@(HitLines).Count
+    $terminalCount=@(TerminalLines).Count
     Require ($ammo -gt 0 -and [double](Eval 'triPlayerCurrentMagazineAmmo') -eq $ammo) 'Actual loaded selected M16 ammunition missing.'
     Exec 'setAccTime 0.05';$null=Send @{cmd='mouse_button';button=1;down=$true};$script:held=$true
     $until=[DateTime]::UtcNow.AddSeconds(20)
@@ -199,6 +275,7 @@ function Shoot([string]$stage) {
     $shotTime=[double](Eval 'snowShotTime');$until=[DateTime]::UtcNow.AddSeconds(15)
     do {
         Start-Sleep -Milliseconds 40;$lines=@(HitLines);$clock=Clock
+        $result.stages[$stage+'-terminal']=@{actualLines=@(TerminalLines | Select-Object -Skip $terminalCount | ForEach-Object {$_.Line});firedTime=$shotTime;mouseUpTimeMs=$releaseMs}
         Require ([DateTime]::UtcNow -lt $until) 'Fired round produced no actual downward terminal terrain event; aim/fixture is unavailable.'
     } while ($lines.Count -le $hits -or $clock -lt $releaseMs+2000)
     Exec 'setAccTime 0';$pausedMs=Clock;Assert-ShotSettled $releaseMs $pausedMs
@@ -235,9 +312,10 @@ try {
     Require ((Eval 'triCheatInfiniteAmmo false') -ceq 'OK' -and [double](Eval 'triCheatInfiniteAmmoActive') -eq 0) 'Infinite ammo must be disabled.'
     Exec ('player allowDamage false; 0 setRain 0; 0 setFog 0; 0 setOvercast 0; removeAllWeapons player; player addMagazine "M16"; player addWeapon "M16"; player selectWeapon "M16"; player setUnitPos "UP"; player setPos ['+(Number $PlayerX)+','+(Number $PlayerZ)+',0]; player setDir 0; player switchCamera "INTERNAL"; snowShotCount=0; snowShotTime=-1; snowShotSource=[]; player addEventHandler ["Fired",{snowShotCount=snowShotCount+1; snowShotTime=time; snowShotSource=[_this select 1,_this select 2,_this select 3,_this select 4]}]; hint ""; setAccTime 1')
     $null=Send @{cmd='weather_particles';action='set';mode='off';density=0;snowflakes=$false}
-    Start-Sleep -Seconds 2;$null=Send @{cmd='mouse_motion';dx=0;dy=$AimDy};Start-Sleep -Milliseconds 700;Exec 'setAccTime 0'
+    Start-Sleep -Seconds 2;Exec 'setAccTime 0'
     $state=Send @{cmd='dev_snow';action='state'};Require ($state.enabled -and !$state.falling -and $state.geometry -and $state.depth -eq 0) 'Enabled zero-depth dry calibration state missing.'
     $dry=Shoot 'no-snow-calibration';Require (!$dry.changed -and $dry.base -eq 0 -and $dry.before -eq 0 -and $dry.after -eq 0) 'Snow-absent real bullet created a cut.'
+    $script:aimTarget=@($dry.x,$dry.y,$dry.z) # bare terminal terrain point, raw engine XYZ
     $ground=Get-TerrainPuddleFixtureHeight ${function:Send} $dry.x $dry.z
     $views=New-HoleViews $dry.x $dry.z $ground $Depth;$result.views=$views
     $null=Send @{cmd='dev_snow';action='deposit';metres=$Depth};$state=Send @{cmd='dev_snow';action='state'}
@@ -249,8 +327,9 @@ try {
     Require ((Clock) -eq $time) 'Paused snow-hole clock advanced.';Compare-Patches $afterPatch (Patch $dry.x $dry.z) 'Paused snow-hole cells changed.'
     $far=New-HoleViews ($dry.x+200) ($dry.z+200) $ground $Depth;View $far.top;Capture 'camera-away';Unview;Capture-Views 'camera-return' $views
     Compare-Patches $afterPatch (Patch $dry.x $dry.z) 'Camera return cleared or changed stored snow holes.'
-    # Keep the real tent's wall hull above the downward projectile path.
-    # At 3 m lift the covered control hit the tent instead of terrain.
+    # Lift the real roof above the calibrated downward projectile path. Earlier
+    # missing terrain logs did NOT establish a wall hit: one actual round expired
+    # high with upward velocity after photographic camera transitions.
     $roof=New-TerrainPuddleStockRoof -SendCommand ${function:Send} -X $dry.x -Z $dry.z -RoofLift 6;$result.roof=$roof
     $coveredBefore=Patch $dry.x $dry.z;$negative=Shoot 'covered-ground'
     Require (!$negative.changed -and $negative.sheltered -and $negative.budget -and $negative.before -eq $negative.after) 'Real covered terrain shot did not prove actual roof exclusion.'
