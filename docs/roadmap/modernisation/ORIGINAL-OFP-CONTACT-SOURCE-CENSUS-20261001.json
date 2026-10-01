@@ -1,0 +1,2833 @@
+{
+  "scope": "Original retail source inference; runtime material/support/contact/body/cloth/pixel evidence still required",
+  "sourceBaseline": "aa33a726",
+  "configSha256": "da9b790900357450d06cb27fd0cdbcf671e6316d6a6d4d0c9982d358aff703ca",
+  "noeArchiveSha256": "c98a6c97f21264e20f91e2e7ee024a068a11821361266041ac0c47de4f05cf72",
+  "maps": {
+    "eden": {
+      "world": "eden",
+      "displayName": "Everon",
+      "wrpSha256": "5a2550b27612fc4c8ccdec55ce2555c1ed23114d46f8b687ce5fb8b273515a79",
+      "exportSha256": "f2c845965034b818620e11d8e5c2de9ecbe67acb141c81c2b1384f755a8179b2",
+      "controls": {
+        "sand": {
+          "eligiblePaletteCells": 42634,
+          "dryLandFlatSourceCandidates": 7,
+          "reference": [
+            6532,
+            6466
+          ],
+          "status": "source-qualified-runtime-pending",
+          "candidates": [
+            {
+              "x": 5975,
+              "z": 3325,
+              "cell": [
+                119,
+                66
+              ],
+              "palette": 2,
+              "texture": "eden\\ps.paa",
+              "quadrants": [
+                {
+                  "code": "ps",
+                  "surfaceClass": "Sand",
+                  "files": "ps??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "ps",
+                  "surfaceClass": "Sand",
+                  "files": "ps??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "ps",
+                  "surfaceClass": "Sand",
+                  "files": "ps??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "ps",
+                  "surfaceClass": "Sand",
+                  "files": "ps??????",
+                  "sound": "sand",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 9.315,
+              "cornerHeights": [
+                7.515,
+                9.405,
+                9.225,
+                8.64
+              ],
+              "rangePer50m": 0.03779999999999999,
+              "nearestSourcePlacement": null,
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  5975,
+                  3325
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            },
+            {
+              "x": 5725,
+              "z": 9775,
+              "cell": [
+                114,
+                195
+              ],
+              "palette": 2,
+              "texture": "eden\\ps.paa",
+              "quadrants": [
+                {
+                  "code": "ps",
+                  "surfaceClass": "Sand",
+                  "files": "ps??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "ps",
+                  "surfaceClass": "Sand",
+                  "files": "ps??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "ps",
+                  "surfaceClass": "Sand",
+                  "files": "ps??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "ps",
+                  "surfaceClass": "Sand",
+                  "files": "ps??????",
+                  "sound": "sand",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 3.2625,
+              "cornerHeights": [
+                3.8249999999999997,
+                3.375,
+                3.15,
+                4.185
+              ],
+              "rangePer50m": 0.020699999999999993,
+              "nearestSourcePlacement": {
+                "id": 29452,
+                "model": "data3d\\ker rakosi.p3d",
+                "position": [
+                  5778.80859375,
+                  6.030031204223633,
+                  9824.7919921875
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  5725,
+                  9775
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            }
+          ]
+        },
+        "mud": {
+          "eligiblePaletteCells": 135,
+          "dryLandFlatSourceCandidates": 30,
+          "reference": [
+            6425,
+            7175
+          ],
+          "status": "source-qualified-runtime-pending",
+          "candidates": [
+            {
+              "x": 6425,
+              "z": 7175,
+              "cell": [
+                128,
+                143
+              ],
+              "palette": 6,
+              "texture": "eden\\pol.paa",
+              "quadrants": [
+                {
+                  "code": "pol",
+                  "surfaceClass": "Field",
+                  "files": "pol",
+                  "sound": "dirt",
+                  "character": ""
+                },
+                {
+                  "code": "pol",
+                  "surfaceClass": "Field",
+                  "files": "pol",
+                  "sound": "dirt",
+                  "character": ""
+                },
+                {
+                  "code": "pol",
+                  "surfaceClass": "Field",
+                  "files": "pol",
+                  "sound": "dirt",
+                  "character": ""
+                },
+                {
+                  "code": "pol",
+                  "surfaceClass": "Field",
+                  "files": "pol",
+                  "sound": "dirt",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 141.885,
+              "cornerHeights": [
+                141.885,
+                141.885,
+                141.885,
+                141.885
+              ],
+              "rangePer50m": 0.0,
+              "nearestSourcePlacement": {
+                "id": 32553,
+                "model": "data3d\\krovi3.p3d",
+                "position": [
+                  6401.04296875,
+                  143.30325317382812,
+                  7167.10693359375
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  6425,
+                  7175
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            },
+            {
+              "x": 6425,
+              "z": 7225,
+              "cell": [
+                128,
+                144
+              ],
+              "palette": 6,
+              "texture": "eden\\pol.paa",
+              "quadrants": [
+                {
+                  "code": "pol",
+                  "surfaceClass": "Field",
+                  "files": "pol",
+                  "sound": "dirt",
+                  "character": ""
+                },
+                {
+                  "code": "pol",
+                  "surfaceClass": "Field",
+                  "files": "pol",
+                  "sound": "dirt",
+                  "character": ""
+                },
+                {
+                  "code": "pol",
+                  "surfaceClass": "Field",
+                  "files": "pol",
+                  "sound": "dirt",
+                  "character": ""
+                },
+                {
+                  "code": "pol",
+                  "surfaceClass": "Field",
+                  "files": "pol",
+                  "sound": "dirt",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 141.885,
+              "cornerHeights": [
+                141.885,
+                141.885,
+                141.885,
+                141.885
+              ],
+              "rangePer50m": 0.0,
+              "nearestSourcePlacement": {
+                "id": 32554,
+                "model": "data3d\\krovi3.p3d",
+                "position": [
+                  6400.6787109375,
+                  143.05770874023438,
+                  7227.71337890625
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  6425,
+                  7225
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            }
+          ]
+        },
+        "uniform": {
+          "eligiblePaletteCells": 65536,
+          "dryLandFlatSourceCandidates": 586,
+          "reference": [
+            6000,
+            6000
+          ],
+          "status": "source-qualified-runtime-pending",
+          "scope": "Any dry/flat source land candidate for cloth/body tests; never soft contact admission",
+          "candidates": [
+            {
+              "x": 6025,
+              "z": 5825,
+              "cell": [
+                120,
+                116
+              ],
+              "palette": 11,
+              "texture": "eden\\tn.paa",
+              "quadrants": [
+                {
+                  "code": "tn",
+                  "surfaceClass": "Grass",
+                  "files": "tn??????",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "tn",
+                  "surfaceClass": "Grass",
+                  "files": "tn??????",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "tn",
+                  "surfaceClass": "Grass",
+                  "files": "tn??????",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "tn",
+                  "surfaceClass": "Grass",
+                  "files": "tn??????",
+                  "sound": "normalExt",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 79.785,
+              "cornerHeights": [
+                79.785,
+                79.785,
+                79.785,
+                79.785
+              ],
+              "rangePer50m": 0.0,
+              "nearestSourcePlacement": {
+                "id": 30614,
+                "model": "data3d\\str buk.p3d",
+                "position": [
+                  6038.68212890625,
+                  87.56482696533203,
+                  5817.57568359375
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  6025,
+                  5825
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            },
+            {
+              "x": 6125,
+              "z": 5775,
+              "cell": [
+                122,
+                115
+              ],
+              "palette": 11,
+              "texture": "eden\\tn.paa",
+              "quadrants": [
+                {
+                  "code": "tn",
+                  "surfaceClass": "Grass",
+                  "files": "tn??????",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "tn",
+                  "surfaceClass": "Grass",
+                  "files": "tn??????",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "tn",
+                  "surfaceClass": "Grass",
+                  "files": "tn??????",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "tn",
+                  "surfaceClass": "Grass",
+                  "files": "tn??????",
+                  "sound": "normalExt",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 77.03999999999999,
+              "cornerHeights": [
+                76.59,
+                76.63499999999999,
+                77.445,
+                77.49
+              ],
+              "rangePer50m": 0.01799999999999983,
+              "nearestSourcePlacement": {
+                "id": 30884,
+                "model": "data3d\\krovi_bigest.p3d",
+                "position": [
+                  6096.345703125,
+                  78.4505386352539,
+                  5780.54345703125
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  6125,
+                  5775
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            }
+          ]
+        }
+      },
+      "usedPaletteCount": 212,
+      "qualifyingPalette": [
+        {
+          "id": 2,
+          "texture": "eden\\ps.paa",
+          "cells": 42634,
+          "classes": [
+            "Sand",
+            "Sand",
+            "Sand",
+            "Sand"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 6,
+          "texture": "eden\\pol.paa",
+          "cells": 135,
+          "classes": [
+            "Field",
+            "Field",
+            "Field",
+            "Field"
+          ],
+          "pureSand": false,
+          "pureMud": true
+        }
+      ],
+      "unknownRepresentativePalette": [
+        {
+          "id": 11,
+          "texture": "eden\\tn.paa",
+          "cells": 9115,
+          "classes": [
+            "Grass",
+            "Grass",
+            "Grass",
+            "Grass"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 13,
+          "texture": "eden\\pl.paa",
+          "cells": 3222,
+          "classes": [
+            "Forest",
+            "Forest",
+            "Forest",
+            "Forest"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 5,
+          "texture": "eden\\sz.paa",
+          "cells": 1500,
+          "classes": [
+            "Rock",
+            "Rock",
+            "Rock",
+            "Rock"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 93,
+          "texture": "eden\\pltnpltn.paa",
+          "cells": 400,
+          "classes": [
+            "Forest",
+            "Grass",
+            "Forest",
+            "Grass"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 83,
+          "texture": "eden\\tnpltnpl.paa",
+          "cells": 396,
+          "classes": [
+            "Grass",
+            "Forest",
+            "Grass",
+            "Forest"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 88,
+          "texture": "eden\\tntnplpl.paa",
+          "cells": 360,
+          "classes": [
+            "Grass",
+            "Grass",
+            "Forest",
+            "Forest"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 89,
+          "texture": "eden\\plpltntn.paa",
+          "cells": 360,
+          "classes": [
+            "Forest",
+            "Forest",
+            "Grass",
+            "Grass"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 28,
+          "texture": "eden\\szpsszps.paa",
+          "cells": 330,
+          "classes": [
+            "Rock",
+            "Sand",
+            "Rock",
+            "Sand"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 21,
+          "texture": "eden\\psszpssz.paa",
+          "cells": 299,
+          "classes": [
+            "Sand",
+            "Rock",
+            "Sand",
+            "Rock"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 24,
+          "texture": "eden\\szszpsps.paa",
+          "cells": 245,
+          "classes": [
+            "Rock",
+            "Rock",
+            "Sand",
+            "Sand"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        }
+      ],
+      "quadrantClassCellCounts": {
+        "('Rock', 'Sand', 'Sand', 'Sand')": 236,
+        "('Grass', 'Sand', 'Forest', 'Sand')": 1,
+        "('Forest', 'Grass', 'Forest', 'Grass')": 400,
+        "('Grass', 'Rock', 'Rock', 'Grass')": 22,
+        "('Sand', 'Rock', 'Grass', 'Grass')": 12,
+        "('Grass', 'Grass', 'Sand', 'Grass')": 30,
+        "('Sand', 'Grass', 'Grass', 'Sand')": 2,
+        "('Rock', 'Grass', 'Sand', 'Rock')": 4,
+        "('Sand', 'Rock', 'Sand', 'Sand')": 191,
+        "('Grass', 'Grass', 'Forest', 'Rock')": 2,
+        "('Rock', 'Grass', 'Grass', 'GrassHigh')": 1,
+        "('GrassHigh', 'GrassHigh', 'GrassHigh', 'GrassHigh')": 37,
+        "('Forest', 'Sand', 'Forest', 'Sand')": 3,
+        "('GrassHigh', 'Grass', 'GrassHigh', 'GrassHigh')": 23,
+        "('Grass', 'Sand', 'Sand', 'Rock')": 1,
+        "('Rock', 'Rock', 'Sand', 'Grass')": 8,
+        "('Runway', 'Runway', 'Runway', 'Runway')": 44,
+        "('Sand', 'Sand', 'Sand', 'Rock')": 243,
+        "('Rock', 'Grass', 'Rock', 'Rock')": 135,
+        "('default', 'default', 'default', 'default')": 66,
+        "('Rock', 'Rock', 'Grass', 'Forest')": 1,
+        "('Grass', 'Sand', 'Sand', 'Sand')": 21,
+        "('Rock', 'Grass', 'Rock', 'Sand')": 6,
+        "('Grass', 'Rock', 'Grass', 'Sand')": 7,
+        "('Rock', 'Forest', 'Rock', 'Forest')": 10,
+        "('Forest', 'Forest', 'Grass', 'Rock')": 5,
+        "('Grass', 'Sand', 'Rock', 'Sand')": 10,
+        "('Field', 'Field', 'Field', 'Field')": 135,
+        "('Rock', 'Rock', 'Forest', 'Forest')": 11,
+        "('Forest', 'Forest', 'Grass', 'Sand')": 1,
+        "('Sand', 'Sand', 'Rock', 'Rock')": 217,
+        "('Grass', 'Forest', 'Forest', 'Grass')": 1,
+        "('Rock', 'Grass', 'Sand', 'Grass')": 6,
+        "('Grass', 'Grass', 'Forest', 'Grass')": 66,
+        "('GrassHigh', 'GrassHigh', 'Grass', 'GrassHigh')": 21,
+        "('Grass', 'Rock', 'Grass', 'Forest')": 3,
+        "('Grass', 'GrassHigh', 'Grass', 'Grass')": 53,
+        "('Rock', 'Grass', 'Grass', 'Forest')": 3,
+        "('Sand', 'Sand', 'Sand', 'Grass')": 45,
+        "('Grass', 'Grass', 'Grass', 'Sand')": 35,
+        "('Rock', 'Sand', 'Sand', 'Rock')": 10,
+        "('Forest', 'Rock', 'Rock', 'Rock')": 3,
+        "('Grass', 'Forest', 'Grass', 'Forest')": 396,
+        "('Forest', 'Forest', 'Forest', 'Forest')": 3222,
+        "('Grass', 'Rock', 'Forest', 'Forest')": 2,
+        "('Sand', 'Grass', 'Grass', 'Rock')": 2,
+        "('Sand', 'Rock', 'Sand', 'Rock')": 299,
+        "('Grass', 'Forest', 'Rock', 'Grass')": 2,
+        "('Rock', 'Sand', 'Rock', 'Rock')": 118,
+        "('Rock', 'Rock', 'Grass', 'Sand')": 1,
+        "('Grass', 'Grass', 'Grass', 'Forest')": 64,
+        "('Rock', 'Rock', 'Rock', 'Forest')": 4,
+        "('Rock', 'Sand', 'Rock', 'Sand')": 330,
+        "('Sand', 'Rock', 'Rock', 'Rock')": 165,
+        "('Sand', 'Sand', 'Rock', 'Grass')": 9,
+        "('Grass', 'GrassHigh', 'GrassHigh', 'Grass')": 4,
+        "('Grass', 'Grass', 'Rock', 'Grass')": 239,
+        "('Sand', 'Rock', 'Rock', 'Sand')": 15,
+        "('Grass', 'Rock', 'Grass', 'Rock')": 280,
+        "('Forest', 'Rock', 'Forest', 'Rock')": 17,
+        "('Grass', 'Sand', 'Rock', 'Rock')": 9,
+        "('Rock', 'Grass', 'Grass', 'Sand')": 2,
+        "('Sand', 'Grass', 'Grass', 'Grass')": 51,
+        "('Rock', 'Forest', 'Grass', 'Forest')": 11,
+        "('Sand', 'Rock', 'Sand', 'Grass')": 12,
+        "('Grass', 'Forest', 'Grass', 'Rock')": 1,
+        "('Grass', 'Rock', 'Forest', 'Rock')": 1,
+        "('Forest', 'Sand', 'Forest', 'Grass')": 1,
+        "('GrassHigh', 'Grass', 'Grass', 'Forest')": 1,
+        "('Sand', 'Grass', 'Rock', 'Rock')": 9,
+        "('Grass', 'Sand', 'Grass', 'Sand')": 63,
+        "('Grass', 'GrassHigh', 'Grass', 'GrassHigh')": 39,
+        "('Sand', 'Sand', 'Grass', 'Sand')": 22,
+        "('Grass', 'Grass', 'Grass', 'Rock')": 322,
+        "('Rock', 'Rock', 'Rock', 'Rock')": 1706,
+        "('Grass', 'Grass', 'GrassHigh', 'Grass')": 56,
+        "('Rock', 'Grass', 'Forest', 'Forest')": 8,
+        "('Rock', 'Grass', 'Rock', 'Grass')": 317,
+        "('Rock', 'Rock', 'Rock', 'Sand')": 170,
+        "('Grass', 'Rock', 'Grass', 'Grass')": 247,
+        "('Forest', 'Rock', 'Forest', 'Grass')": 1,
+        "('Rock', 'Rock', 'Grass', 'Rock')": 148,
+        "('Grass', 'Rock', 'Sand', 'Sand')": 6,
+        "('Forest', 'Forest', 'Grass', 'Grass')": 360,
+        "('Forest', 'Grass', 'Grass', 'Sand')": 1,
+        "('Grass', 'Forest', 'Grass', 'Grass')": 73,
+        "('Forest', 'Forest', 'Rock', 'Rock')": 13,
+        "('Forest', 'Forest', 'Forest', 'Grass')": 29,
+        "('Grass', 'GrassHigh', 'GrassHigh', 'GrassHigh')": 26,
+        "('Rock', 'Sand', 'Grass', 'Sand')": 7,
+        "('Grass', 'Forest', 'Forest', 'Forest')": 32,
+        "('Grass', 'Grass', 'Grass', 'Grass')": 9118,
+        "('Grass', 'Rock', 'Rock', 'Sand')": 3,
+        "('Forest', 'Grass', 'Forest', 'Sand')": 2,
+        "('Rock', 'Grass', 'Grass', 'Rock')": 19,
+        "('Grass', 'Grass', 'Sand', 'Sand')": 38,
+        "('Sand', 'Grass', 'Sand', 'Rock')": 7,
+        "('Forest', 'Rock', 'Rock', 'Grass')": 1,
+        "('Grass', 'Sand', 'Grass', 'Rock')": 12,
+        "('Rock', 'Rock', 'Grass', 'Grass')": 216,
+        "('Sand', 'Sand', 'Grass', 'Rock')": 7,
+        "('Rock', 'Rock', 'Sand', 'Sand')": 245,
+        "('Forest', 'Grass', 'Forest', 'Forest')": 28,
+        "('Sand', 'Grass', 'Sand', 'Sand')": 25,
+        "('Grass', 'Rock', 'Rock', 'Forest')": 1,
+        "('Rock', 'Sand', 'Rock', 'Grass')": 9,
+        "('Forest', 'Forest', 'Rock', 'Grass')": 2,
+        "('Grass', 'Grass', 'GrassHigh', 'GrassHigh')": 27,
+        "('Sand', 'Rock', 'Rock', 'Grass')": 9,
+        "('Rock', 'Rock', 'Forest', 'Grass')": 2,
+        "('GrassHigh', 'Grass', 'Grass', 'Grass')": 59,
+        "('Grass', 'Rock', 'Sand', 'Rock')": 11,
+        "('Forest', 'Sand', 'Grass', 'Sand')": 2,
+        "('Grass', 'Grass', 'Rock', 'Forest')": 1,
+        "('Rock', 'Forest', 'Forest', 'Forest')": 1,
+        "('Rock', 'Grass', 'Grass', 'Grass')": 286,
+        "('GrassHigh', 'GrassHigh', 'GrassHigh', 'Grass')": 23,
+        "('Forest', 'Grass', 'Grass', 'Rock')": 1,
+        "('Forest', 'Rock', 'Grass', 'Rock')": 2,
+        "('Rock', 'Grass', 'Sand', 'Sand')": 7,
+        "('Rock', 'Grass', 'Forest', 'Grass')": 1,
+        "('GrassHigh', 'Grass', 'GrassHigh', 'Grass')": 40,
+        "('Sand', 'Grass', 'Sand', 'Grass')": 58,
+        "('Grass', 'Sand', 'Grass', 'Grass')": 26,
+        "('Sand', 'Sand', 'Grass', 'Grass')": 41,
+        "('Rock', 'Sand', 'Grass', 'Rock')": 3,
+        "('Sand', 'Grass', 'Rock', 'Grass')": 11,
+        "('Sand', 'Sand', 'Sand', 'Sand')": 42634,
+        "('Grass', 'Rock', 'Rock', 'Rock')": 219,
+        "('Forest', 'Grass', 'Forest', 'Rock')": 6,
+        "('Sand', 'Rock', 'Grass', 'Rock')": 5,
+        "('Grass', 'Grass', 'Sand', 'Rock')": 11,
+        "('Grass', 'Grass', 'Forest', 'Forest')": 360,
+        "('Grass', 'Grass', 'Grass', 'GrassHigh')": 62,
+        "('Rock', 'Rock', 'Rock', 'Grass')": 173,
+        "('Grass', 'Rock', 'Sand', 'Grass')": 5,
+        "('Grass', 'GrassHigh', 'Rock', 'Grass')": 1,
+        "('Grass', 'Grass', 'Rock', 'Rock')": 213,
+        "('Rock', 'Rock', 'Sand', 'Rock')": 122,
+        "('GrassHigh', 'GrassHigh', 'Grass', 'Grass')": 32,
+        "('Forest', 'Rock', 'Forest', 'Forest')": 1,
+        "('Forest', 'Grass', 'Grass', 'Grass')": 63,
+        "('Forest', 'Rock', 'Grass', 'Grass')": 1,
+        "('Sand', 'Sand', 'Rock', 'Sand')": 185,
+        "('Grass', 'Grass', 'Rock', 'Sand')": 5,
+        "('Forest', 'Forest', 'Sand', 'Grass')": 1,
+        "('Grass', 'Forest', 'Rock', 'Forest')": 6,
+        "('Forest', 'Forest', 'Grass', 'Forest')": 32,
+        "('Rock', 'Sand', 'Grass', 'Grass')": 11
+      }
+    },
+    "noe": {
+      "world": "noe",
+      "displayName": "Nogova",
+      "wrpSha256": "9b27b11661d3cb30f9f0749a9a4616bfc58d723c4750666d1e674dd4213598d2",
+      "exportSha256": "dbe1f29e300bb60c0b34c5f6467a842857147bed82495ef84f390a0871016a18",
+      "controls": {
+        "sand": {
+          "eligiblePaletteCells": 27867,
+          "dryLandFlatSourceCandidates": 266,
+          "reference": [
+            2675,
+            5125
+          ],
+          "status": "source-qualified-runtime-pending",
+          "candidates": [
+            {
+              "x": 2575,
+              "z": 5125,
+              "cell": [
+                51,
+                102
+              ],
+              "palette": 7,
+              "texture": "o\\pt.paa",
+              "quadrants": [
+                {
+                  "code": "pt",
+                  "surfaceClass": "SandDark",
+                  "files": "pt??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "pt",
+                  "surfaceClass": "SandDark",
+                  "files": "pt??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "pt",
+                  "surfaceClass": "SandDark",
+                  "files": "pt??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "pt",
+                  "surfaceClass": "SandDark",
+                  "files": "pt??????",
+                  "sound": "sand",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 14.985,
+              "cornerHeights": [
+                14.985,
+                14.985,
+                14.985,
+                14.985
+              ],
+              "rangePer50m": 0.0,
+              "nearestSourcePlacement": {
+                "id": 12291,
+                "model": "o\\skal\\skala3_4.p3d",
+                "position": [
+                  2555.7119140625,
+                  15.035077095031738,
+                  5130.14208984375
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  2575,
+                  5125
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            },
+            {
+              "x": 2775,
+              "z": 5125,
+              "cell": [
+                55,
+                102
+              ],
+              "palette": 7,
+              "texture": "o\\pt.paa",
+              "quadrants": [
+                {
+                  "code": "pt",
+                  "surfaceClass": "SandDark",
+                  "files": "pt??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "pt",
+                  "surfaceClass": "SandDark",
+                  "files": "pt??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "pt",
+                  "surfaceClass": "SandDark",
+                  "files": "pt??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "pt",
+                  "surfaceClass": "SandDark",
+                  "files": "pt??????",
+                  "sound": "sand",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 24.479999999999997,
+              "cornerHeights": [
+                24.974999999999998,
+                23.985,
+                24.974999999999998,
+                23.985
+              ],
+              "rangePer50m": 0.01979999999999997,
+              "nearestSourcePlacement": {
+                "id": 14216,
+                "model": "o\\hous\\hlidac_budka.p3d",
+                "position": [
+                  2761.18994140625,
+                  25.81867218017578,
+                  5143.265625
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  2775,
+                  5125
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            }
+          ]
+        },
+        "mud": {
+          "eligiblePaletteCells": 170,
+          "dryLandFlatSourceCandidates": 33,
+          "reference": [
+            4975,
+            4675
+          ],
+          "status": "source-qualified-runtime-pending",
+          "candidates": [
+            {
+              "x": 4975,
+              "z": 4675,
+              "cell": [
+                99,
+                93
+              ],
+              "palette": 12,
+              "texture": "o\\pole2.paa",
+              "quadrants": [
+                {
+                  "code": "pole2",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "pole2",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "pole2",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "pole2",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 21.555,
+              "cornerHeights": [
+                21.599999999999998,
+                21.645,
+                21.465,
+                21.465
+              ],
+              "rangePer50m": 0.0035999999999999943,
+              "nearestSourcePlacement": {
+                "id": 42925,
+                "model": "o\\tree\\dd_bush02d.p3d",
+                "position": [
+                  4999.30419921875,
+                  23.568078994750977,
+                  4676.9794921875
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  4975,
+                  4675
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            },
+            {
+              "x": 4975,
+              "z": 4625,
+              "cell": [
+                99,
+                92
+              ],
+              "palette": 12,
+              "texture": "o\\pole2.paa",
+              "quadrants": [
+                {
+                  "code": "pole2",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "pole2",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "pole2",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "pole2",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 21.735,
+              "cornerHeights": [
+                21.779999999999998,
+                21.869999999999997,
+                21.599999999999998,
+                21.645
+              ],
+              "rangePer50m": 0.005399999999999992,
+              "nearestSourcePlacement": {
+                "id": 42923,
+                "model": "o\\tree\\dd_bush02d.p3d",
+                "position": [
+                  4979.0,
+                  22.7258358001709,
+                  4649.0
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  4975,
+                  4625
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            }
+          ]
+        },
+        "uniform": {
+          "eligiblePaletteCells": 65536,
+          "dryLandFlatSourceCandidates": 1209,
+          "reference": [
+            6000,
+            6000
+          ],
+          "status": "source-qualified-runtime-pending",
+          "scope": "Any dry/flat source land candidate for cloth/body tests; never soft contact admission",
+          "candidates": [
+            {
+              "x": 5725,
+              "z": 6275,
+              "cell": [
+                114,
+                125
+              ],
+              "palette": 30,
+              "texture": "o\\t1.paa",
+              "quadrants": [
+                {
+                  "code": "t1",
+                  "surfaceClass": "GrassGreen",
+                  "files": "t1??????",
+                  "sound": "grass",
+                  "character": ""
+                },
+                {
+                  "code": "t1",
+                  "surfaceClass": "GrassGreen",
+                  "files": "t1??????",
+                  "sound": "grass",
+                  "character": ""
+                },
+                {
+                  "code": "t1",
+                  "surfaceClass": "GrassGreen",
+                  "files": "t1??????",
+                  "sound": "grass",
+                  "character": ""
+                },
+                {
+                  "code": "t1",
+                  "surfaceClass": "GrassGreen",
+                  "files": "t1??????",
+                  "sound": "grass",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 30.3975,
+              "cornerHeights": [
+                30.465,
+                30.689999999999998,
+                30.105,
+                29.25
+              ],
+              "rangePer50m": 0.028799999999999954,
+              "nearestSourcePlacement": {
+                "id": 58629,
+                "model": "o\\tree\\dd_bush02.p3d",
+                "position": [
+                  5742.0,
+                  32.200157165527344,
+                  6251.0
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  5725,
+                  6275
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            },
+            {
+              "x": 5675,
+              "z": 5775,
+              "cell": [
+                113,
+                115
+              ],
+              "palette": 30,
+              "texture": "o\\t1.paa",
+              "quadrants": [
+                {
+                  "code": "t1",
+                  "surfaceClass": "GrassGreen",
+                  "files": "t1??????",
+                  "sound": "grass",
+                  "character": ""
+                },
+                {
+                  "code": "t1",
+                  "surfaceClass": "GrassGreen",
+                  "files": "t1??????",
+                  "sound": "grass",
+                  "character": ""
+                },
+                {
+                  "code": "t1",
+                  "surfaceClass": "GrassGreen",
+                  "files": "t1??????",
+                  "sound": "grass",
+                  "character": ""
+                },
+                {
+                  "code": "t1",
+                  "surfaceClass": "GrassGreen",
+                  "files": "t1??????",
+                  "sound": "grass",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 27.18,
+              "cornerHeights": [
+                27.0,
+                27.314999999999998,
+                27.044999999999998,
+                28.709999999999997
+              ],
+              "rangePer50m": 0.034199999999999946,
+              "nearestSourcePlacement": {
+                "id": 56681,
+                "model": "o\\tree\\dd_bush01c.p3d",
+                "position": [
+                  5626.0,
+                  28.097148895263672,
+                  5786.0
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  5675,
+                  5775
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            }
+          ]
+        }
+      },
+      "preferredSand": {
+        "x": 2675,
+        "z": 5125,
+        "texture": "o\\pt.paa",
+        "quadrants": [
+          {
+            "surfaceClass": "SandDark",
+            "files": "pt??????",
+            "sound": "sand",
+            "character": ""
+          },
+          {
+            "surfaceClass": "SandDark",
+            "files": "pt??????",
+            "sound": "sand",
+            "character": ""
+          },
+          {
+            "surfaceClass": "SandDark",
+            "files": "pt??????",
+            "sound": "sand",
+            "character": ""
+          },
+          {
+            "surfaceClass": "SandDark",
+            "files": "pt??????",
+            "sound": "sand",
+            "character": ""
+          }
+        ],
+        "basis": "Actual controlled SoldierWB SDL W4.88m positive on matched7e2f1df7; candidate must pass current runtime query again"
+      },
+      "usedPaletteCount": 301,
+      "qualifyingPalette": [
+        {
+          "id": 4,
+          "texture": "o\\ps.paa",
+          "cells": 20057,
+          "classes": [
+            "Sand",
+            "Sand",
+            "Sand",
+            "Sand"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 7,
+          "texture": "o\\pt.paa",
+          "cells": 4964,
+          "classes": [
+            "SandDark",
+            "SandDark",
+            "SandDark",
+            "SandDark"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 33,
+          "texture": "o\\psptpspt.pac",
+          "cells": 325,
+          "classes": [
+            "Sand",
+            "SandDark",
+            "Sand",
+            "SandDark"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 35,
+          "texture": "o\\pspsptpt.pac",
+          "cells": 291,
+          "classes": [
+            "Sand",
+            "Sand",
+            "SandDark",
+            "SandDark"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 64,
+          "texture": "o\\ptpsptps.pac",
+          "cells": 270,
+          "classes": [
+            "SandDark",
+            "Sand",
+            "SandDark",
+            "Sand"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 36,
+          "texture": "o\\ptptpsps.pac",
+          "cells": 256,
+          "classes": [
+            "SandDark",
+            "SandDark",
+            "Sand",
+            "Sand"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 32,
+          "texture": "o\\pspspspt.pac",
+          "cells": 254,
+          "classes": [
+            "Sand",
+            "Sand",
+            "Sand",
+            "SandDark"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 37,
+          "texture": "o\\psptptpt.pac",
+          "cells": 228,
+          "classes": [
+            "Sand",
+            "SandDark",
+            "SandDark",
+            "SandDark"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 53,
+          "texture": "o\\pspsptps.pac",
+          "cells": 220,
+          "classes": [
+            "Sand",
+            "Sand",
+            "SandDark",
+            "Sand"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 61,
+          "texture": "o\\ptpspsps.pac",
+          "cells": 196,
+          "classes": [
+            "SandDark",
+            "Sand",
+            "Sand",
+            "Sand"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 47,
+          "texture": "o\\ptpsptpt.pac",
+          "cells": 194,
+          "classes": [
+            "SandDark",
+            "Sand",
+            "SandDark",
+            "SandDark"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 46,
+          "texture": "o\\ptptptps.pac",
+          "cells": 187,
+          "classes": [
+            "SandDark",
+            "SandDark",
+            "SandDark",
+            "Sand"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 34,
+          "texture": "o\\psptpsps.pac",
+          "cells": 175,
+          "classes": [
+            "Sand",
+            "SandDark",
+            "Sand",
+            "Sand"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 38,
+          "texture": "o\\ptptpspt.pac",
+          "cells": 169,
+          "classes": [
+            "SandDark",
+            "SandDark",
+            "Sand",
+            "SandDark"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 12,
+          "texture": "o\\pole2.paa",
+          "cells": 158,
+          "classes": [
+            "default",
+            "default",
+            "default",
+            "default"
+          ],
+          "pureSand": false,
+          "pureMud": true
+        },
+        {
+          "id": 67,
+          "texture": "o\\psptptps.pac",
+          "cells": 41,
+          "classes": [
+            "Sand",
+            "SandDark",
+            "SandDark",
+            "Sand"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 66,
+          "texture": "o\\ptpspspt.pac",
+          "cells": 40,
+          "classes": [
+            "SandDark",
+            "Sand",
+            "Sand",
+            "SandDark"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        },
+        {
+          "id": 8,
+          "texture": "o\\pole1.paa",
+          "cells": 12,
+          "classes": [
+            "default",
+            "default",
+            "default",
+            "default"
+          ],
+          "pureSand": false,
+          "pureMud": true
+        }
+      ],
+      "unknownRepresentativePalette": [
+        {
+          "id": 30,
+          "texture": "o\\t1.paa",
+          "cells": 14838,
+          "classes": [
+            "GrassGreen",
+            "GrassGreen",
+            "GrassGreen",
+            "GrassGreen"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 2,
+          "texture": "o\\b1.paa",
+          "cells": 4783,
+          "classes": [
+            "GrassGrey",
+            "GrassGrey",
+            "GrassGrey",
+            "GrassGrey"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 3,
+          "texture": "o\\s2.paa",
+          "cells": 4756,
+          "classes": [
+            "Rock",
+            "Rock",
+            "Rock",
+            "Rock"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 23,
+          "texture": "o\\j1.paa",
+          "cells": 1591,
+          "classes": [
+            "default",
+            "default",
+            "default",
+            "default"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 20,
+          "texture": "o\\trava2.paa",
+          "cells": 1037,
+          "classes": [
+            "GrassGre",
+            "GrassGre",
+            "GrassGre",
+            "GrassGre"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 24,
+          "texture": "o\\trava3.paa",
+          "cells": 979,
+          "classes": [
+            "GrassDry",
+            "GrassDry",
+            "GrassDry",
+            "GrassDry"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 9,
+          "texture": "o\\blita2.paa",
+          "cells": 307,
+          "classes": [
+            "GrassGreyVar1",
+            "GrassGreyVar1",
+            "GrassGreyVar1",
+            "GrassGreyVar1"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 135,
+          "texture": "o\\b1s2b1s2.pac",
+          "cells": 237,
+          "classes": [
+            "GrassGrey",
+            "Rock",
+            "GrassGrey",
+            "Rock"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 103,
+          "texture": "o\\b1b1s2s2.pac",
+          "cells": 216,
+          "classes": [
+            "GrassGrey",
+            "GrassGrey",
+            "Rock",
+            "Rock"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 170,
+          "texture": "o\\s2b1s2b1.pac",
+          "cells": 197,
+          "classes": [
+            "Rock",
+            "GrassGrey",
+            "Rock",
+            "GrassGrey"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        }
+      ],
+      "quadrantClassCellCounts": {
+        "('SandDark', 'GrassGreen', 'GrassGreen', 'GrassGreen')": 120,
+        "('Rock', 'Sand', 'Sand', 'Sand')": 13,
+        "('Rock', 'SandDark', 'Sand', 'Sand')": 3,
+        "('Rock', 'Rock', 'GrassGrey', 'default')": 5,
+        "('SandDark', 'Rock', 'SandDark', 'Rock')": 54,
+        "('SandDark', 'Sand', 'Rock', 'Sand')": 5,
+        "('Rock', 'default', 'GrassGrey', 'default')": 1,
+        "('Sand', 'GrassGreen', 'SandDark', 'SandDark')": 1,
+        "('Rock', 'GrassGreen', 'GrassGreen', 'GrassGreen')": 89,
+        "('GrassGreen', 'GrassGreen', 'GrassGreen', 'SandDark')": 96,
+        "('Snih', 'Snih', 'Rock', 'Snih')": 6,
+        "('Sand', 'SandDark', 'SandDark', 'SandDark')": 228,
+        "('SandDark', 'Rock', 'SandDark', 'SandDark')": 46,
+        "('Sand', 'Rock', 'Sand', 'Sand')": 6,
+        "('GrassGreen', 'GrassGrey', 'GrassGreen', 'GrassGreen')": 98,
+        "('GrassGreen', 'default', 'GrassGrey', 'GrassGrey')": 2,
+        "('GrassGrey', 'SandDark', 'GrassGrey', 'GrassGrey')": 7,
+        "('SandDark', 'GrassGreen', 'Rock', 'SandDark')": 2,
+        "('GrassGreen', 'Sand', 'Sand', 'Sand')": 1,
+        "('SandDark', 'SandDark', 'Rock', 'Rock')": 41,
+        "('default', 'GrassGreen', 'GrassGreen', 'GrassGreen')": 105,
+        "('GrassGrey', 'GrassGrey', 'GrassGreen', 'GrassGreen')": 104,
+        "('Rock', 'SandDark', 'GrassGreen', 'GrassGreen')": 4,
+        "('GrassGrey', 'default', 'Rock', 'GrassGrey')": 3,
+        "('Sand', 'Sand', 'GrassGreen', 'SandDark')": 1,
+        "('default', 'default', 'default', 'GrassGrey')": 40,
+        "('Rock', 'GrassGreen', 'Rock', 'SandDark')": 1,
+        "('GrassGre', 'GrassGre', 'GrassGre', 'GrassGre')": 1037,
+        "('GrassGrey', 'GrassGrey', 'SandDark', 'SandDark')": 21,
+        "('Rock', 'SandDark', 'Rock', 'Rock')": 16,
+        "('SandDark', 'GrassGrey', 'GrassGrey', 'GrassGrey')": 54,
+        "('GrassGrey', 'GrassGrey', 'Lom', 'GrassGrey')": 3,
+        "('GrassGreen', 'Rock', 'GrassGrey', 'GrassGrey')": 2,
+        "('Sand', 'Sand', 'Sand', 'Rock')": 4,
+        "('default', 'Rock', 'default', 'default')": 1,
+        "('default', 'default', 'default', 'default')": 1783,
+        "('GrassGreen', 'Sand', 'GrassGreen', 'GrassGreen')": 1,
+        "('Rock', 'GrassGrey', 'GrassGrey', 'GrassGrey')": 184,
+        "('SandDark', 'Rock', 'Rock', 'GrassGreen')": 1,
+        "('Sand', 'Sand', 'Sand', 'SandDark')": 254,
+        "('GrassGrey', 'Rock', 'GrassGrey', 'Rock')": 237,
+        "('GrassGreen', 'default', 'default', 'GrassGreen')": 1,
+        "('RunwayRes', 'RunwayRes', 'RunwayRes', 'RunwayRes')": 44,
+        "('GrassGrey', 'Rock', 'GrassGrey', 'SandDark')": 1,
+        "('GrassGrey', 'GrassGreen', 'GrassGrey', 'Rock')": 2,
+        "('GrassGreen', 'GrassGreen', 'GrassGrey', 'default')": 2,
+        "('GrassGrey', 'Lom', 'GrassGrey', 'Lom')": 1,
+        "('default', 'Rock', 'Rock', 'Rock')": 2,
+        "('Rock', 'GrassGrey', 'default', 'GrassGrey')": 2,
+        "('SandDark', 'GrassGreen', 'GrassGreen', 'SandDark')": 1,
+        "('SandDark', 'Sand', 'GrassGreen', 'SandDark')": 19,
+        "('GrassGrey', 'default', 'Rock', 'Rock')": 3,
+        "('Sand', 'Sand', 'Rock', 'Rock')": 18,
+        "('Sand', 'SandDark', 'GrassGreen', 'SandDark')": 1,
+        "('GrassGrey', 'GrassGrey', 'Rock', 'GrassGrey')": 188,
+        "('GrassGreen', 'GrassGrey', 'GrassGreen', 'Rock')": 1,
+        "('GrassGreen', 'GrassGreen', 'default', 'default')": 86,
+        "('GrassGreen', 'Rock', 'GrassGrey', 'Rock')": 4,
+        "('GrassGrey', 'GrassGrey', 'GrassGrey', 'Lom')": 4,
+        "('Rock', 'Rock', 'default', 'Rock')": 1,
+        "('SandDark', 'SandDark', 'Sand', 'Rock')": 2,
+        "('GrassGrey', 'Rock', 'SandDark', 'SandDark')": 1,
+        "('GrassGrey', 'Rock', 'Rock', 'Rock')": 196,
+        "('Rock', 'GrassGrey', 'GrassGrey', 'Rock')": 48,
+        "('GrassGreen', 'GrassGreen', 'Rock', 'GrassGreen')": 80,
+        "('SandDark', 'Sand', 'Sand', 'SandDark')": 40,
+        "('SandDark', 'SandDark', 'Sand', 'SandDark')": 169,
+        "('Rock', 'Rock', 'GrassGrey', 'GrassGrey')": 191,
+        "('Sand', 'SandDark', 'Sand', 'Sand')": 175,
+        "('SandDark', 'Rock', 'Rock', 'Rock')": 39,
+        "('default', 'GrassGrey', 'Rock', 'Rock')": 3,
+        "('default', 'default', 'GrassGrey', 'default')": 51,
+        "('Rock', 'SandDark', 'Sand', 'SandDark')": 4,
+        "('GrassGreen', 'SandDark', 'SandDark', 'Sand')": 5,
+        "('SandDark', 'Rock', 'Sand', 'Sand')": 2,
+        "('Sand', 'Rock', 'Sand', 'Rock')": 5,
+        "('GrassGrey', 'GrassGreen', 'GrassGreen', 'GrassGrey')": 3,
+        "('SandDark', 'SandDark', 'GrassGrey', 'GrassGrey')": 28,
+        "('SandDark', 'Rock', 'Rock', 'SandDark')": 10,
+        "('GrassGreen', 'GrassGrey', 'Rock', 'Rock')": 3,
+        "('GrassGreen', 'Rock', 'GrassGreen', 'GrassGreen')": 71,
+        "('GrassGrey', 'SandDark', 'GrassGrey', 'GrassGreen')": 1,
+        "('GrassGrey', 'default', 'default', 'default')": 58,
+        "('Rock', 'Sand', 'Rock', 'Rock')": 19,
+        "('GrassGrey', 'GrassGreen', 'GrassGreen', 'default')": 1,
+        "('SandDark', 'GrassGreen', 'SandDark', 'GrassGreen')": 123,
+        "('SandDark', 'GrassGrey', 'SandDark', 'SandDark')": 22,
+        "('GrassGreen', 'Rock', 'SandDark', 'SandDark')": 1,
+        "('GrassGreen', 'Rock', 'GrassGreen', 'GrassGrey')": 2,
+        "('default', 'default', 'default', 'GrassGreen')": 76,
+        "('Rock', 'Sand', 'Rock', 'Sand')": 41,
+        "('Sand', 'Rock', 'Rock', 'Rock')": 5,
+        "('Rock', 'Rock', 'Rock', 'GrassGreen')": 30,
+        "('Rock', 'GrassGrey', 'SandDark', 'SandDark')": 1,
+        "('default', 'Rock', 'default', 'GrassGrey')": 4,
+        "('GrassGrey', 'Rock', 'default', 'default')": 3,
+        "('GrassGreen', 'default', 'GrassGreen', 'GrassGrey')": 2,
+        "('Sand', 'SandDark', 'Sand', 'GrassGreen')": 1,
+        "('SandDark', 'SandDark', 'Rock', 'SandDark')": 47,
+        "('Lom', 'Lom', 'GrassGrey', 'Lom')": 2,
+        "('GrassGreen', 'SandDark', 'SandDark', 'GrassGreen')": 1,
+        "('Rock', 'Rock', 'Rock', 'GrassGrey')": 182,
+        "('Snih', 'Rock', 'Rock', 'Rock')": 11,
+        "('SandDark', 'SandDark', 'SandDark', 'GrassGrey')": 60,
+        "('Rock', 'Rock', 'Snih', 'Snih')": 10,
+        "('GrassGrey', 'Rock', 'GrassGreen', 'Rock')": 2,
+        "('Rock', 'GrassGrey', 'GrassGreen', 'GrassGrey')": 1,
+        "('GrassGreen', 'default', 'GrassGreen', 'default')": 109,
+        "('Rock', 'SandDark', 'Rock', 'SandDark')": 67,
+        "('default', 'GrassGrey', 'default', 'default')": 55,
+        "('default', 'default', 'Rock', 'default')": 4,
+        "('Rock', 'Rock', 'GrassGrey', 'Rock')": 177,
+        "('Sand', 'Sand', 'SandDark', 'Sand')": 220,
+        "('GrassGreen', 'GrassGreen', 'GrassGreen', 'default')": 113,
+        "('GrassGreen', 'GrassGreen', 'Rock', 'Rock')": 55,
+        "('Snih', 'Snih', 'Rock', 'Rock')": 8,
+        "('GrassGreen', 'GrassGreen', 'GrassGrey', 'GrassGrey')": 79,
+        "('Rock', 'Rock', 'Rock', 'Snih')": 9,
+        "('default', 'GrassGreen', 'default', 'default')": 77,
+        "('LomVariant', 'LomVariant', 'LomVariant', 'LomVariant')": 8,
+        "('GrassGreen', 'GrassGreen', 'Rock', 'SandDark')": 3,
+        "('GrassGreen', 'GrassGreen', 'default', 'GrassGreen')": 106,
+        "('GrassGreen', 'Rock', 'GrassGreen', 'Rock')": 65,
+        "('GrassGreen', 'GrassGreen', 'SandDark', 'GrassGreen')": 73,
+        "('Rock', 'GrassGrey', 'Rock', 'GrassGrey')": 197,
+        "('Rock', 'Rock', 'SandDark', 'Rock')": 15,
+        "('SandDark', 'GrassGreen', 'SandDark', 'Rock')": 3,
+        "('Rock', 'Rock', 'GrassGreen', 'GrassGreen')": 51,
+        "('default', 'Rock', 'default', 'Rock')": 1,
+        "('GrassGrey', 'SandDark', 'GrassGrey', 'SandDark')": 7,
+        "('Snih', 'Rock', 'Snih', 'Snih')": 6,
+        "('default', 'default', 'GrassGreen', 'GrassGrey')": 3,
+        "('default', 'default', 'default', 'Rock')": 2,
+        "('Rock', 'GrassGrey', 'Rock', 'default')": 1,
+        "('Rock', 'Rock', 'SandDark', 'SandDark')": 48,
+        "('SandDark', 'GrassGreen', 'SandDark', 'SandDark')": 73,
+        "('Rock', 'Rock', 'Rock', 'Rock')": 4756,
+        "('Lom', 'Lom', 'GrassGrey', 'default')": 1,
+        "('Sand', 'SandDark', 'Sand', 'Rock')": 5,
+        "('default', 'default', 'GrassGreen', 'default')": 60,
+        "('GrassGreyVar2', 'GrassGreyVar2', 'GrassGreyVar2', 'GrassGreyVar2')": 6,
+        "('default', 'default', 'GrassGrey', 'GrassGrey')": 96,
+        "('GrassGreyVar1', 'GrassGreyVar1', 'GrassGreyVar1', 'GrassGreyVar1')": 307,
+        "('GrassGrey', 'default', 'GrassGrey', 'default')": 90,
+        "('GrassGreen', 'SandDark', 'GrassGreen', 'GrassGreen')": 99,
+        "('Rock', 'Rock', 'Rock', 'Sand')": 11,
+        "('Sand', 'SandDark', 'Sand', 'SandDark')": 325,
+        "('SandDark', 'SandDark', 'SandDark', 'Sand')": 187,
+        "('GrassGrey', 'GrassGreen', 'GrassGreen', 'GrassGreen')": 118,
+        "('Rock', 'Snih', 'Rock', 'Snih')": 8,
+        "('GrassGreen', 'SandDark', 'SandDark', 'SandDark')": 99,
+        "('GrassGreen', 'SandDark', 'Rock', 'Rock')": 4,
+        "('GrassGrey', 'default', 'default', 'GrassGrey')": 1,
+        "('Rock', 'Sand', 'SandDark', 'Sand')": 6,
+        "('GrassGrey', 'Lom', 'GrassGrey', 'GrassGrey')": 3,
+        "('Rock', 'SandDark', 'SandDark', 'Sand')": 2,
+        "('GrassGrey', 'SandDark', 'SandDark', 'SandDark')": 9,
+        "('default', 'GrassGreen', 'GrassGrey', 'GrassGreen')": 2,
+        "('Rock', 'GrassGreen', 'GrassGrey', 'GrassGrey')": 5,
+        "('SnihVar', 'SnihVar', 'SnihVar', 'SnihVar')": 17,
+        "('Lom', 'Lom', 'Lom', 'Lom')": 10,
+        "('default', 'GrassGreen', 'GrassGrey', 'GrassGrey')": 3,
+        "('GrassGrey', 'Rock', 'default', 'GrassGrey')": 1,
+        "('GrassGreen', 'default', 'GrassGreen', 'GrassGreen')": 86,
+        "('default', 'GrassGrey', 'GrassGrey', 'default')": 1,
+        "('GrassGrey', 'GrassGrey', 'Rock', 'Rock')": 216,
+        "('GrassGrey', 'GrassGrey', 'GrassGrey', 'GrassGrey')": 4783,
+        "('GrassGrey', 'Lom', 'Lom', 'Lom')": 3,
+        "('Rock', 'Snih', 'Rock', 'Rock')": 8,
+        "('SandDark', 'SandDark', 'SandDark', 'GrassGreen')": 107,
+        "('Rock', 'default', 'Rock', 'GrassGrey')": 3,
+        "('GrassGreen', 'GrassGreen', 'SandDark', 'Rock')": 3,
+        "('default', 'GrassGrey', 'default', 'GrassGrey')": 74,
+        "('default', 'default', 'Rock', 'GrassGrey')": 3,
+        "('GrassGrey', 'GrassGrey', 'Rock', 'SandDark')": 1,
+        "('Rock', 'Rock', 'GrassGreen', 'Rock')": 21,
+        "('Lom', 'Lom', 'default', 'default')": 2,
+        "('Rock', 'GrassGreen', 'SandDark', 'GrassGreen')": 2,
+        "('Sand', 'SandDark', 'Rock', 'SandDark')": 1,
+        "('GrassGrey', 'GrassGrey', 'GrassGrey', 'default')": 67,
+        "('GrassGreen', 'GrassGreen', 'GrassGreen', 'GrassGrey')": 121,
+        "('Rock', 'SandDark', 'SandDark', 'GrassGreen')": 5,
+        "('Lom', 'GrassGrey', 'Lom', 'Lom')": 2,
+        "('GrassGreen', 'GrassGrey', 'default', 'GrassGrey')": 2,
+        "('default', 'default', 'GrassGrey', 'Rock')": 3,
+        "('GrassGreen', 'GrassGreen', 'GrassGrey', 'GrassGreen')": 100,
+        "('Rock', 'default', 'Rock', 'default')": 1,
+        "('GrassGrey', 'GrassGreen', 'default', 'default')": 2,
+        "('GrassGreen', 'SandDark', 'GrassGreen', 'Rock')": 2,
+        "('GrassGreen', 'Rock', 'Rock', 'GrassGreen')": 20,
+        "('GrassGrey', 'GrassGrey', 'SandDark', 'GrassGrey')": 16,
+        "('Lom', 'GrassGrey', 'default', 'default')": 1,
+        "('GrassGreen', 'SandDark', 'GrassGreen', 'SandDark')": 135,
+        "('GrassGreen', 'Rock', 'Rock', 'GrassGrey')": 3,
+        "('GrassGrey', 'GrassGrey', 'default', 'default')": 77,
+        "('SandDark', 'SandDark', 'GrassGrey', 'SandDark')": 13,
+        "('Rock', 'Rock', 'Sand', 'Sand')": 126,
+        "('Rock', 'SandDark', 'GrassGrey', 'Rock')": 3,
+        "('GrassGrey', 'Rock', 'default', 'Rock')": 2,
+        "('Rock', 'Rock', 'Snih', 'Rock')": 8,
+        "('default', 'default', 'GrassGreen', 'GrassGreen')": 106,
+        "('GrassGreen', 'Rock', 'GrassGreen', 'SandDark')": 2,
+        "('SandDark', 'Sand', 'SandDark', 'Sand')": 270,
+        "('default', 'default', 'Rock', 'Rock')": 8,
+        "('default', 'GrassGrey', 'default', 'Rock')": 2,
+        "('GrassGrey', 'default', 'GrassGreen', 'default')": 2,
+        "('GrassGrey', 'Rock', 'GrassGrey', 'GrassGrey')": 196,
+        "('GrassGrey', 'default', 'GrassGrey', 'GrassGrey')": 60,
+        "('default', 'default', 'GrassGrey', 'GrassGreen')": 3,
+        "('GrassGreen', 'GrassGreen', 'GrassGreen', 'Rock')": 117,
+        "('SandDark', 'SandDark', 'SandDark', 'Rock')": 69,
+        "('SandDark', 'SandDark', 'GrassGreen', 'GrassGreen')": 85,
+        "('SandDark', 'Sand', 'GrassGreen', 'GrassGreen')": 1,
+        "('GrassGrey', 'GrassGreen', 'Rock', 'Rock')": 3,
+        "('Snih', 'Snih', 'Snih', 'Snih')": 106,
+        "('GrassGrey', 'GrassGreen', 'GrassGrey', 'GrassGrey')": 76,
+        "('Rock', 'Rock', 'Rock', 'SandDark')": 30,
+        "('SandDark', 'SandDark', 'SandDark', 'SandDark')": 4964,
+        "('Rock', 'SandDark', 'SandDark', 'Rock')": 5,
+        "('GrassGrey', 'GrassGreen', 'Rock', 'SandDark')": 1,
+        "('GrassGreen', 'GrassGreen', 'GrassGreen', 'Sand')": 1,
+        "('GrassGreen', 'GrassGreen', 'GrassGrey', 'Rock')": 4,
+        "('Sand', 'SandDark', 'SandDark', 'Sand')": 41,
+        "('SandDark', 'Rock', 'SandDark', 'Sand')": 1,
+        "('Rock', 'GrassGreen', 'Rock', 'Rock')": 28,
+        "('Rock', 'SandDark', 'SandDark', 'SandDark')": 55,
+        "('default', 'GrassGrey', 'GrassGrey', 'GrassGreen')": 1,
+        "('GrassGreen', 'GrassGrey', 'GrassGreen', 'GrassGrey')": 99,
+        "('GrassGreen', 'Rock', 'Rock', 'Rock')": 51,
+        "('default', 'GrassGrey', 'GrassGrey', 'GrassGrey')": 49,
+        "('Snih', 'Rock', 'Snih', 'Rock')": 6,
+        "('GrassGreen', 'GrassGrey', 'GrassGrey', 'GrassGreen')": 3,
+        "('GrassGreen', 'SandDark', 'Rock', 'SandDark')": 1,
+        "('GrassGrey', 'GrassGrey', 'GrassGreen', 'GrassGrey')": 74,
+        "('GrassGrey', 'default', 'Rock', 'default')": 1,
+        "('Rock', 'Rock', 'default', 'GrassGrey')": 1,
+        "('GrassGrey', 'GrassGrey', 'GrassGrey', 'GrassGreen')": 96,
+        "('GrassGreen', 'GrassGrey', 'GrassGreen', 'default')": 1,
+        "('Rock', 'GrassGrey', 'Rock', 'Rock')": 177,
+        "('GrassGreen', 'GrassGrey', 'GrassGrey', 'GrassGrey')": 98,
+        "('GrassGrey', 'Rock', 'Rock', 'GrassGrey')": 37,
+        "('Snih', 'Snih', 'Snih', 'Rock')": 9,
+        "('default', 'GrassGrey', 'default', 'GrassGreen')": 4,
+        "('default', 'GrassGreen', 'GrassGreen', 'default')": 1,
+        "('Rock', 'Rock', 'default', 'default')": 1,
+        "('Sand', 'Sand', 'Sand', 'Sand')": 20057,
+        "('GrassGreen', 'GrassGreen', 'GrassGreen', 'GrassGreen')": 14838,
+        "('Sand', 'SandDark', 'SandDark', 'GrassGreen')": 18,
+        "('Rock', 'GrassGrey', 'GrassGrey', 'default')": 5,
+        "('GrassGrey', 'default', 'GrassGrey', 'Rock')": 2,
+        "('GrassGreen', 'GrassGreen', 'SandDark', 'SandDark')": 95,
+        "('SandDark', 'GrassGreen', 'Rock', 'GrassGreen')": 1,
+        "('default', 'GrassGreen', 'default', 'GrassGreen')": 128,
+        "('GrassGrey', 'GrassGreen', 'default', 'GrassGrey')": 2,
+        "('SandDark', 'GrassGrey', 'SandDark', 'GrassGrey')": 39,
+        "('SandDark', 'GrassGreen', 'GrassGreen', 'Rock')": 3,
+        "('Sand', 'Sand', 'SandDark', 'SandDark')": 291,
+        "('Rock', 'GrassGreen', 'Rock', 'GrassGreen')": 71,
+        "('GrassGrey', 'GrassGrey', 'default', 'GrassGreen')": 1,
+        "('GrassGrey', 'GrassGrey', 'SandDark', 'GrassGreen')": 1,
+        "('Rock', 'GrassGreen', 'GrassGreen', 'Rock')": 7,
+        "('SandDark', 'SandDark', 'GrassGreen', 'SandDark')": 91,
+        "('GrassGreen', 'default', 'default', 'default')": 87,
+        "('RollwayRes', 'RollwayRes', 'RollwayRes', 'RollwayRes')": 17,
+        "('GrassGrey', 'GrassGrey', 'default', 'GrassGrey')": 66,
+        "('SandDark', 'Sand', 'GrassGreen', 'Sand')": 1,
+        "('default', 'GrassGrey', 'GrassGrey', 'Rock')": 4,
+        "('Rock', 'GrassGrey', 'default', 'default')": 5,
+        "('GrassGrey', 'GrassGrey', 'GrassGreen', 'Rock')": 3,
+        "('GrassGrey', 'default', 'GrassGreen', 'GrassGreen')": 1,
+        "('SandDark', 'GrassGreen', 'Sand', 'SandDark')": 4,
+        "('Sand', 'Sand', 'Rock', 'Sand')": 22,
+        "('SandDark', 'Sand', 'SandDark', 'Rock')": 4,
+        "('Rock', 'Snih', 'Snih', 'Snih')": 7,
+        "('GrassGrey', 'GrassGrey', 'GrassGrey', 'Rock')": 192,
+        "('SandDark', 'Sand', 'SandDark', 'SandDark')": 194,
+        "('GrassDry', 'GrassDry', 'GrassDry', 'GrassDry')": 979,
+        "('SandDark', 'Sand', 'Sand', 'Sand')": 196,
+        "('SandDark', 'SandDark', 'Sand', 'Sand')": 256,
+        "('GrassGrey', 'default', 'GrassGrey', 'GrassGreen')": 2,
+        "('GrassGreen', 'GrassGreen', 'Rock', 'GrassGrey')": 5,
+        "('Rock', 'default', 'Rock', 'Rock')": 2,
+        "('SandDark', 'Sand', 'Rock', 'Rock')": 1,
+        "('GrassGrey', 'GrassGreen', 'GrassGrey', 'GrassGreen')": 103,
+        "('GrassGrey', 'GrassGrey', 'GrassGrey', 'SandDark')": 3,
+        "('Lom', 'GrassGrey', 'Lom', 'GrassGrey')": 4
+      }
+    },
+    "abel": {
+      "world": "abel",
+      "displayName": "Malden",
+      "wrpSha256": "1c13aca4d3300db3546583c82ffa132c1149831e42227f2b47019c74040462a5",
+      "exportSha256": "cb736f23615c46564f45177bc0f56543fd19ab2fdd4008a00262bd8e82299e9f",
+      "controls": {
+        "sand": {
+          "eligiblePaletteCells": 43286,
+          "dryLandFlatSourceCandidates": 94,
+          "reference": [
+            7800,
+            10100
+          ],
+          "status": "source-qualified-runtime-pending",
+          "candidates": [
+            {
+              "x": 7575,
+              "z": 10675,
+              "cell": [
+                151,
+                213
+              ],
+              "palette": 11,
+              "texture": "abel\\pi.paa",
+              "quadrants": [
+                {
+                  "code": "pi",
+                  "surfaceClass": "SandAbel",
+                  "files": "pi??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "pi",
+                  "surfaceClass": "SandAbel",
+                  "files": "pi??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "pi",
+                  "surfaceClass": "SandAbel",
+                  "files": "pi??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "pi",
+                  "surfaceClass": "SandAbel",
+                  "files": "pi??????",
+                  "sound": "sand",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 27.765,
+              "cornerHeights": [
+                27.584999999999997,
+                27.45,
+                28.08,
+                28.125
+              ],
+              "rangePer50m": 0.013500000000000014,
+              "nearestSourcePlacement": {
+                "id": 88513,
+                "model": "data3d\\ker rakosi.p3d",
+                "position": [
+                  7552.0,
+                  28.780841827392578,
+                  10631.0
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  7575,
+                  10675
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            },
+            {
+              "x": 7525,
+              "z": 10675,
+              "cell": [
+                150,
+                213
+              ],
+              "palette": 11,
+              "texture": "abel\\pi.paa",
+              "quadrants": [
+                {
+                  "code": "pi",
+                  "surfaceClass": "SandAbel",
+                  "files": "pi??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "pi",
+                  "surfaceClass": "SandAbel",
+                  "files": "pi??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "pi",
+                  "surfaceClass": "SandAbel",
+                  "files": "pi??????",
+                  "sound": "sand",
+                  "character": ""
+                },
+                {
+                  "code": "pi",
+                  "surfaceClass": "SandAbel",
+                  "files": "pi??????",
+                  "sound": "sand",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 27.854999999999997,
+              "cornerHeights": [
+                27.765,
+                27.584999999999997,
+                28.125,
+                28.08
+              ],
+              "rangePer50m": 0.010800000000000054,
+              "nearestSourcePlacement": {
+                "id": 87850,
+                "model": "data3d\\ker rakosi.p3d",
+                "position": [
+                  7539.0078125,
+                  28.707002639770508,
+                  10636.8916015625
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  7525,
+                  10675
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            }
+          ]
+        },
+        "mud": {
+          "eligiblePaletteCells": 0,
+          "dryLandFlatSourceCandidates": 0,
+          "reference": [
+            7800,
+            10100
+          ],
+          "status": "no-source-qualified-stock-candidate",
+          "candidates": []
+        },
+        "uniform": {
+          "eligiblePaletteCells": 65536,
+          "dryLandFlatSourceCandidates": 804,
+          "reference": [
+            6000,
+            6000
+          ],
+          "status": "source-qualified-runtime-pending",
+          "scope": "Any dry/flat source land candidate for cloth/body tests; never soft contact admission",
+          "candidates": [
+            {
+              "x": 5625,
+              "z": 5575,
+              "cell": [
+                112,
+                111
+              ],
+              "palette": 17,
+              "texture": "abel\\tt.paa",
+              "quadrants": [
+                {
+                  "code": "tt",
+                  "surfaceClass": "GrassAbel",
+                  "files": "tt??????",
+                  "sound": "grass",
+                  "character": ""
+                },
+                {
+                  "code": "tt",
+                  "surfaceClass": "GrassAbel",
+                  "files": "tt??????",
+                  "sound": "grass",
+                  "character": ""
+                },
+                {
+                  "code": "tt",
+                  "surfaceClass": "GrassAbel",
+                  "files": "tt??????",
+                  "sound": "grass",
+                  "character": ""
+                },
+                {
+                  "code": "tt",
+                  "surfaceClass": "GrassAbel",
+                  "files": "tt??????",
+                  "sound": "grass",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 354.75749999999994,
+              "cornerHeights": [
+                353.96999999999997,
+                354.59999999999997,
+                354.91499999999996,
+                355.32
+              ],
+              "rangePer50m": 0.027000000000000454,
+              "nearestSourcePlacement": {
+                "id": 55128,
+                "model": "data3d\\str_fikovnik2.p3d",
+                "position": [
+                  5605.0,
+                  359.0473327636719,
+                  5519.0
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  5625,
+                  5575
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            },
+            {
+              "x": 5625,
+              "z": 6925,
+              "cell": [
+                112,
+                138
+              ],
+              "palette": 17,
+              "texture": "abel\\tt.paa",
+              "quadrants": [
+                {
+                  "code": "tt",
+                  "surfaceClass": "GrassAbel",
+                  "files": "tt??????",
+                  "sound": "grass",
+                  "character": ""
+                },
+                {
+                  "code": "tt",
+                  "surfaceClass": "GrassAbel",
+                  "files": "tt??????",
+                  "sound": "grass",
+                  "character": ""
+                },
+                {
+                  "code": "tt",
+                  "surfaceClass": "GrassAbel",
+                  "files": "tt??????",
+                  "sound": "grass",
+                  "character": ""
+                },
+                {
+                  "code": "tt",
+                  "surfaceClass": "GrassAbel",
+                  "files": "tt??????",
+                  "sound": "grass",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 332.46,
+              "cornerHeights": [
+                332.46,
+                332.46,
+                332.46,
+                332.46
+              ],
+              "rangePer50m": 0.0,
+              "nearestSourcePlacement": {
+                "id": 55208,
+                "model": "data3d\\krovi2.p3d",
+                "position": [
+                  5639.0,
+                  333.3746032714844,
+                  6903.0
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  5625,
+                  6925
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            }
+          ]
+        }
+      },
+      "usedPaletteCount": 189,
+      "qualifyingPalette": [
+        {
+          "id": 11,
+          "texture": "abel\\pi.paa",
+          "cells": 43286,
+          "classes": [
+            "SandAbel",
+            "SandAbel",
+            "SandAbel",
+            "SandAbel"
+          ],
+          "pureSand": true,
+          "pureMud": false
+        }
+      ],
+      "unknownRepresentativePalette": [
+        {
+          "id": 17,
+          "texture": "abel\\tt.paa",
+          "cells": 14650,
+          "classes": [
+            "GrassAbel",
+            "GrassAbel",
+            "GrassAbel",
+            "GrassAbel"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 4,
+          "texture": "abel\\sh.paa",
+          "cells": 763,
+          "classes": [
+            "RockAbel",
+            "RockAbel",
+            "RockAbel",
+            "RockAbel"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 2,
+          "texture": "abel\\pb.paa",
+          "cells": 611,
+          "classes": [
+            "default",
+            "default",
+            "default",
+            "default"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 40,
+          "texture": "abel\\ttttttsh.pac",
+          "cells": 201,
+          "classes": [
+            "GrassAbel",
+            "GrassAbel",
+            "GrassAbel",
+            "RockAbel"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 46,
+          "texture": "abel\\ttshtttt.pac",
+          "cells": 195,
+          "classes": [
+            "GrassAbel",
+            "RockAbel",
+            "GrassAbel",
+            "GrassAbel"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 32,
+          "texture": "abel\\shttshtt.pac",
+          "cells": 192,
+          "classes": [
+            "RockAbel",
+            "GrassAbel",
+            "RockAbel",
+            "GrassAbel"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 51,
+          "texture": "abel\\shshtttt.pac",
+          "cells": 184,
+          "classes": [
+            "RockAbel",
+            "RockAbel",
+            "GrassAbel",
+            "GrassAbel"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 33,
+          "texture": "abel\\shtttttt.pac",
+          "cells": 182,
+          "classes": [
+            "RockAbel",
+            "GrassAbel",
+            "GrassAbel",
+            "GrassAbel"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 47,
+          "texture": "abel\\ttttshtt.pac",
+          "cells": 180,
+          "classes": [
+            "GrassAbel",
+            "GrassAbel",
+            "RockAbel",
+            "GrassAbel"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 67,
+          "texture": "abel\\ttttshsh.pac",
+          "cells": 158,
+          "classes": [
+            "GrassAbel",
+            "GrassAbel",
+            "RockAbel",
+            "RockAbel"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        }
+      ],
+      "quadrantClassCellCounts": {
+        "('RockAbel', 'RockAbel', 'SandAbel', 'RockAbel')": 37,
+        "('BetonAbel', 'GrassAbel', 'BetonAbel', 'GrassAbel')": 7,
+        "('GrassAbel', 'RockAbel', 'RockAbel', 'GrassAbel')": 8,
+        "('SandAbel', 'SandAbel', 'GrassAbel', 'RockAbel')": 10,
+        "('RockAbel', 'GrassAbel', 'RockAbel', 'SandAbel')": 4,
+        "('SandAbel', 'GrassAbel', 'RockAbel', 'GrassAbel')": 3,
+        "('SandAbel', 'SandAbel', 'RockAbel', 'RockAbel')": 84,
+        "('RockAbel', 'GrassAbel', 'GrassAbel', 'GrassAbel')": 182,
+        "('GrassAbel', 'BetonAbel', 'GrassAbel', 'GrassAbel')": 10,
+        "('GrassAbel', 'SandAbel', 'SandAbel', 'GrassAbel')": 3,
+        "('GrassHigh', 'GrassHigh', 'GrassHigh', 'GrassHigh')": 57,
+        "('GrassAbel', 'GrassAbel', 'GrassAbel', 'GrassHigh')": 50,
+        "('GrassAbel', 'BetonAbel', 'BetonAbel', 'BetonAbel')": 1,
+        "('RockAbel', 'GrassAbel', 'SandAbel', 'SandAbel')": 4,
+        "('SandAbel', 'GrassAbel', 'SandAbel', 'GrassAbel')": 143,
+        "('Runway', 'Runway', 'Runway', 'Runway')": 68,
+        "('SandAbel', 'SandAbel', 'SandAbel', 'RockAbel')": 72,
+        "('RockAbel', 'SandAbel', 'RockAbel', 'SandAbel')": 72,
+        "('BetonAbel', 'SandAbel', 'BetonAbel', 'SandAbel')": 2,
+        "('BetonAbel', 'SandAbel', 'BetonAbel', 'BetonAbel')": 1,
+        "('default', 'default', 'default', 'default')": 653,
+        "('RockAbel', 'SandAbel', 'GrassAbel', 'GrassAbel')": 6,
+        "('RockAbel', 'SandAbel', 'RockAbel', 'GrassAbel')": 4,
+        "('RockAbel', 'RockAbel', 'RockAbel', 'SandAbel')": 30,
+        "('RockAbel', 'RockAbel', 'GrassAbel', 'GrassAbel')": 184,
+        "('GrassAbel', 'GrassHigh', 'GrassAbel', 'GrassAbel')": 52,
+        "('RockAbel', 'RockAbel', 'RockAbel', 'GrassAbel')": 81,
+        "('RockAbel', 'SandAbel', 'SandAbel', 'SandAbel')": 60,
+        "('SandAbel', 'BetonAbel', 'BetonAbel', 'SandAbel')": 1,
+        "('RockAbel', 'SandAbel', 'SandAbel', 'GrassAbel')": 1,
+        "('RockAbel', 'RockAbel', 'SandAbel', 'SandAbel')": 77,
+        "('SandAbel', 'RockAbel', 'SandAbel', 'GrassAbel')": 3,
+        "('default', 'default', 'GrassAbel', 'GrassAbel')": 144,
+        "('SandAbel', 'SandAbel', 'GrassAbel', 'SandAbel')": 80,
+        "('RockAbel', 'RockAbel', 'SandAbel', 'GrassAbel')": 7,
+        "('GrassAbel', 'default', 'GrassAbel', 'default')": 161,
+        "('SandAbel', 'SandAbel', 'GrassAbel', 'GrassAbel')": 96,
+        "('GrassHigh', 'GrassAbel', 'GrassHigh', 'GrassHigh')": 25,
+        "('SandAbel', 'SandAbel', 'BetonAbel', 'SandAbel')": 4,
+        "('RockAbel', 'Rock', 'RockAbel', 'GrassAbel')": 1,
+        "('SandAbel', 'SandAbel', 'BetonAbel', 'BetonAbel')": 2,
+        "('GrassAbel', 'GrassAbel', 'Rock', 'Rock')": 43,
+        "('GrassAbel', 'GrassAbel', 'GrassAbel', 'RockAbel')": 201,
+        "('GrassAbel', 'default', 'default', 'default')": 31,
+        "('GrassAbel', 'GrassAbel', 'Rock', 'GrassAbel')": 77,
+        "('GrassHigh', 'GrassHigh', 'BetonAbel', 'GrassAbel')": 1,
+        "('SandAbel', 'SandAbel', 'SandAbel', 'SandAbel')": 43286,
+        "('default', 'GrassAbel', 'GrassAbel', 'GrassAbel')": 84,
+        "('GrassAbel', 'SandAbel', 'GrassAbel', 'RockAbel')": 9,
+        "('GrassAbel', 'GrassAbel', 'GrassAbel', 'default')": 83,
+        "('BetonAbel', 'BetonAbel', 'GrassAbel', 'BetonAbel')": 3,
+        "('BetonAbel', 'BetonAbel', 'GrassAbel', 'GrassAbel')": 4,
+        "('GrassAbel', 'RockAbel', 'GrassAbel', 'RockAbel')": 138,
+        "('RockAbel', 'GrassAbel', 'RockAbel', 'GrassAbel')": 192,
+        "('BetonAbel', 'BetonAbel', 'BetonAbel', 'BetonAbel')": 5,
+        "('GrassAbel', 'GrassAbel', 'default', 'default')": 140,
+        "('GrassHigh', 'GrassHigh', 'GrassAbel', 'GrassHigh')": 24,
+        "('RockAbel', 'GrassAbel', 'SandAbel', 'GrassAbel')": 9,
+        "('GrassAbel', 'BetonAbel', 'SandAbel', 'SandAbel')": 1,
+        "('GrassAbel', 'GrassAbel', 'GrassHigh', 'GrassAbel')": 56,
+        "('GrassAbel', 'GrassAbel', 'GrassAbel', 'SandAbel')": 61,
+        "('GrassAbel', 'Rock', 'Rock', 'Rock')": 40,
+        "('GrassAbel', 'GrassAbel', 'GrassAbel', 'BetonAbel')": 8,
+        "('GrassAbel', 'GrassHigh', 'RockAbel', 'GrassAbel')": 1,
+        "('SandAbel', 'RockAbel', 'GrassAbel', 'RockAbel')": 4,
+        "('SandAbel', 'GrassAbel', 'GrassAbel', 'GrassHigh')": 1,
+        "('GrassAbel', 'SandAbel', 'GrassAbel', 'SandAbel')": 140,
+        "('GrassAbel', 'SandAbel', 'GrassAbel', 'BetonAbel')": 1,
+        "('GrassAbel', 'SandAbel', 'BetonAbel', 'SandAbel')": 1,
+        "('SandAbel', 'SandAbel', 'RockAbel', 'SandAbel')": 82,
+        "('GrassAbel', 'RockAbel', 'GrassAbel', 'SandAbel')": 8,
+        "('SandAbel', 'BetonAbel', 'SandAbel', 'SandAbel')": 2,
+        "('SandAbel', 'SandAbel', 'RockAbel', 'GrassAbel')": 4,
+        "('default', 'default', 'default', 'GrassAbel')": 31,
+        "('Rock', 'Rock', 'Rock', 'Rock')": 64,
+        "('Rock', 'Rock', 'Rock', 'GrassAbel')": 24,
+        "('GrassHigh', 'BetonAbel', 'BetonAbel', 'BetonAbel')": 1,
+        "('GrassAbel', 'GrassAbel', 'RockAbel', 'RockAbel')": 158,
+        "('BetonAbel', 'GrassAbel', 'GrassAbel', 'GrassAbel')": 7,
+        "('Village', 'Village', 'Village', 'Village')": 11,
+        "('SandAbel', 'SandAbel', 'SandAbel', 'BetonAbel')": 2,
+        "('GrassAbel', 'GrassHigh', 'GrassHigh', 'GrassHigh')": 19,
+        "('GrassAbel', 'GrassHigh', 'GrassAbel', 'GrassHigh')": 29,
+        "('SandAbel', 'SandAbel', 'SandAbel', 'GrassAbel')": 63,
+        "('Rock', 'GrassAbel', 'Rock', 'Rock')": 28,
+        "('Rock', 'GrassAbel', 'Rock', 'GrassAbel')": 61,
+        "('GrassAbel', 'GrassAbel', 'SandAbel', 'RockAbel')": 2,
+        "('GrassAbel', 'SandAbel', 'RockAbel', 'RockAbel')": 3,
+        "('GrassAbel', 'default', 'GrassAbel', 'GrassAbel')": 84,
+        "('default', 'GrassAbel', 'default', 'GrassAbel')": 157,
+        "('GrassAbel', 'RockAbel', 'RockAbel', 'RockAbel')": 103,
+        "('SandAbel', 'GrassAbel', 'RockAbel', 'RockAbel')": 10,
+        "('RockAbel', 'GrassAbel', 'GrassAbel', 'RockAbel')": 7,
+        "('GrassAbel', 'RockAbel', 'SandAbel', 'RockAbel')": 2,
+        "('SandAbel', 'GrassAbel', 'SandAbel', 'RockAbel')": 5,
+        "('GrassAbel', 'GrassAbel', 'GrassAbel', 'Rock')": 83,
+        "('GrassAbel', 'GrassAbel', 'RockAbel', 'SandAbel')": 1,
+        "('GrassHigh', 'GrassHigh', 'GrassHigh', 'GrassAbel')": 13,
+        "('GrassAbel', 'GrassAbel', 'GrassAbel', 'GrassAbel')": 14650,
+        "('BetonAbel', 'SandAbel', 'SandAbel', 'SandAbel')": 5,
+        "('RockAbel', 'SandAbel', 'GrassAbel', 'RockAbel')": 2,
+        "('RockAbel', 'GrassAbel', 'GrassAbel', 'default')": 1,
+        "('GrassAbel', 'GrassAbel', 'BetonAbel', 'BetonAbel')": 4,
+        "('SandAbel', 'RockAbel', 'RockAbel', 'RockAbel')": 40,
+        "('RockAbel', 'RockAbel', 'GrassAbel', 'RockAbel')": 87,
+        "('GrassAbel', 'GrassAbel', 'SandAbel', 'SandAbel')": 136,
+        "('GrassAbel', 'GrassAbel', 'default', 'GrassAbel')": 88,
+        "('GrassAbel', 'SandAbel', 'RockAbel', 'SandAbel')": 3,
+        "('GrassAbel', 'SandAbel', 'GrassAbel', 'GrassAbel')": 79,
+        "('Rock', 'Rock', 'SandAbel', 'SandAbel')": 1,
+        "('SandAbel', 'RockAbel', 'SandAbel', 'RockAbel')": 88,
+        "('BetonAbel', 'GrassAbel', 'BetonAbel', 'BetonAbel')": 1,
+        "('SandAbel', 'BetonAbel', 'SandAbel', 'BetonAbel')": 1,
+        "('GrassAbel', 'GrassHigh', 'SandAbel', 'GrassAbel')": 1,
+        "('SandAbel', 'GrassAbel', 'GrassAbel', 'SandAbel')": 2,
+        "('Rock', 'Rock', 'SandAbel', 'GrassAbel')": 1,
+        "('GrassAbel', 'RockAbel', 'GrassAbel', 'GrassAbel')": 195,
+        "('GrassAbel', 'SandAbel', 'SandAbel', 'SandAbel')": 66,
+        "('SandAbel', 'GrassAbel', 'GrassAbel', 'GrassAbel')": 58,
+        "('GrassAbel', 'BetonAbel', 'GrassAbel', 'SandAbel')": 1,
+        "('GrassAbel', 'GrassAbel', 'GrassHigh', 'GrassHigh')": 41,
+        "('GrassAbel', 'BetonAbel', 'GrassAbel', 'BetonAbel')": 5,
+        "('GrassAbel', 'SandAbel', 'SandAbel', 'BetonAbel')": 1,
+        "('GrassAbel', 'RockAbel', 'SandAbel', 'SandAbel')": 4,
+        "('default', 'default', 'GrassAbel', 'default')": 32,
+        "('SandAbel', 'GrassAbel', 'SandAbel', 'SandAbel')": 70,
+        "('GrassAbel', 'Rock', 'GrassAbel', 'Rock')": 36,
+        "('GrassHigh', 'GrassAbel', 'GrassHigh', 'GrassAbel')": 34,
+        "('GrassHigh', 'GrassAbel', 'GrassAbel', 'GrassAbel')": 44,
+        "('RockAbel', 'SandAbel', 'GrassAbel', 'SandAbel')": 4,
+        "('GrassAbel', 'Rock', 'GrassAbel', 'GrassAbel')": 84,
+        "('SandAbel', 'RockAbel', 'RockAbel', 'SandAbel')": 5,
+        "('GrassAbel', 'GrassHigh', 'GrassHigh', 'BetonAbel')": 1,
+        "('RockAbel', 'RockAbel', 'GrassAbel', 'SandAbel')": 10,
+        "('SandAbel', 'RockAbel', 'GrassAbel', 'GrassAbel')": 5,
+        "('GrassAbel', 'GrassHigh', 'GrassAbel', 'BetonAbel')": 1,
+        "('GrassAbel', 'default', 'default', 'GrassAbel')": 1,
+        "('RockAbel', 'GrassAbel', 'RockAbel', 'RockAbel')": 73,
+        "('SandAbel', 'RockAbel', 'SandAbel', 'SandAbel')": 69,
+        "('BetonAbel', 'BetonAbel', 'SandAbel', 'SandAbel')": 3,
+        "('Rock', 'Rock', 'GrassAbel', 'Rock')": 37,
+        "('Rock', 'Rock', 'GrassAbel', 'GrassAbel')": 48,
+        "('GrassAbel', 'GrassAbel', 'RockAbel', 'Rock')": 1,
+        "('RockAbel', 'GrassAbel', 'SandAbel', 'RockAbel')": 2,
+        "('GrassAbel', 'GrassAbel', 'RockAbel', 'GrassAbel')": 180,
+        "('RockAbel', 'SandAbel', 'RockAbel', 'RockAbel')": 42,
+        "('default', 'GrassAbel', 'default', 'default')": 36,
+        "('GrassHigh', 'GrassHigh', 'GrassAbel', 'GrassAbel')": 47,
+        "('GrassAbel', 'GrassAbel', 'BetonAbel', 'GrassAbel')": 7,
+        "('SandAbel', 'Rock', 'SandAbel', 'SandAbel')": 1,
+        "('RockAbel', 'RockAbel', 'RockAbel', 'RockAbel')": 763,
+        "('Rock', 'GrassAbel', 'GrassAbel', 'Rock')": 4,
+        "('GrassAbel', 'GrassAbel', 'SandAbel', 'Rock')": 1,
+        "('Rock', 'GrassAbel', 'GrassAbel', 'GrassAbel')": 69,
+        "('GrassAbel', 'GrassAbel', 'SandAbel', 'GrassAbel')": 61,
+        "('RockAbel', 'SandAbel', 'SandAbel', 'RockAbel')": 6
+      }
+    },
+    "cain": {
+      "world": "cain",
+      "displayName": "Kolgujev",
+      "wrpSha256": "774c938eb010ffbe24554584fa53c1384687e4888dda762d588bbd29c01d2e1c",
+      "exportSha256": "9c5952de85e3749dff3dfe5d1ec2d8d26957bae4b0abf0e76166c5c5e2a0a303",
+      "controls": {
+        "sand": {
+          "eligiblePaletteCells": 0,
+          "dryLandFlatSourceCandidates": 0,
+          "reference": [
+            6000,
+            6000
+          ],
+          "status": "no-source-qualified-stock-candidate",
+          "candidates": []
+        },
+        "mud": {
+          "eligiblePaletteCells": 0,
+          "dryLandFlatSourceCandidates": 0,
+          "reference": [
+            6000,
+            6000
+          ],
+          "status": "no-source-qualified-stock-candidate",
+          "candidates": []
+        },
+        "uniform": {
+          "eligiblePaletteCells": 65536,
+          "dryLandFlatSourceCandidates": 108,
+          "reference": [
+            6000,
+            6000
+          ],
+          "status": "source-qualified-runtime-pending",
+          "scope": "Any dry/flat source land candidate for cloth/body tests; never soft contact admission",
+          "candidates": [
+            {
+              "x": 5925,
+              "z": 6075,
+              "cell": [
+                118,
+                121
+              ],
+              "palette": 2,
+              "texture": "cain\\t9.paa",
+              "quadrants": [
+                {
+                  "code": "t9",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "t9",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "t9",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "t9",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 415.935,
+              "cornerHeights": [
+                415.935,
+                415.935,
+                415.935,
+                415.935
+              ],
+              "rangePer50m": 0.0,
+              "nearestSourcePlacement": {
+                "id": 34897,
+                "model": "data3d\\str_smrcicicek.p3d",
+                "position": [
+                  5912.0,
+                  417.56341552734375,
+                  6072.0
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  5925,
+                  6075
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            },
+            {
+              "x": 6075,
+              "z": 6075,
+              "cell": [
+                121,
+                121
+              ],
+              "palette": 1,
+              "texture": "cain\\j9.paa",
+              "quadrants": [
+                {
+                  "code": "j9",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "j9",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "j9",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                },
+                {
+                  "code": "j9",
+                  "surfaceClass": "default",
+                  "files": "default",
+                  "sound": "normalExt",
+                  "character": ""
+                }
+              ],
+              "sourceHeight": 415.935,
+              "cornerHeights": [
+                415.935,
+                415.935,
+                415.935,
+                415.935
+              ],
+              "rangePer50m": 0.0,
+              "nearestSourcePlacement": {
+                "id": 36577,
+                "model": "data3d\\ker trs travy.p3d",
+                "position": [
+                  6090.0,
+                  416.72906494140625,
+                  6073.0
+                ]
+              },
+              "placementSearchScope": "Owner centres in the surrounding3x3sourcecells, not model bounds/collision proof",
+              "sourceLane": {
+                "start": [
+                  6075,
+                  6075
+                ],
+                "heading": 90,
+                "forwardMetres": 5,
+                "supportMarginToCellBoundary": 20,
+                "scope": "5m east candidate; W-key direction may include camera-relative drift; runtime support queries required"
+              }
+            }
+          ]
+        }
+      },
+      "usedPaletteCount": 388,
+      "qualifyingPalette": [],
+      "unknownRepresentativePalette": [
+        {
+          "id": 4,
+          "texture": "cain\\l4.paa",
+          "cells": 52209,
+          "classes": [
+            "default",
+            "default",
+            "default",
+            "default"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 1,
+          "texture": "cain\\j9.paa",
+          "cells": 3921,
+          "classes": [
+            "default",
+            "default",
+            "default",
+            "default"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 2,
+          "texture": "cain\\t9.paa",
+          "cells": 1719,
+          "classes": [
+            "default",
+            "default",
+            "default",
+            "default"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 12,
+          "texture": "cain\\u2.paa",
+          "cells": 1156,
+          "classes": [
+            "default",
+            "default",
+            "default",
+            "default"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 6,
+          "texture": "cain\\k5.paa",
+          "cells": 246,
+          "classes": [
+            "default",
+            "default",
+            "default",
+            "default"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 112,
+          "texture": "cain\\j9u2j9u2.paa",
+          "cells": 195,
+          "classes": [
+            "default",
+            "default",
+            "default",
+            "default"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 124,
+          "texture": "cain\\j9j9u2j9.paa",
+          "cells": 188,
+          "classes": [
+            "default",
+            "default",
+            "default",
+            "default"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 139,
+          "texture": "cain\\u2j9u2j9.paa",
+          "cells": 185,
+          "classes": [
+            "default",
+            "default",
+            "default",
+            "default"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 123,
+          "texture": "cain\\j9u2j9j9.paa",
+          "cells": 184,
+          "classes": [
+            "default",
+            "default",
+            "default",
+            "default"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        },
+        {
+          "id": 137,
+          "texture": "cain\\u2j9j9j9.paa",
+          "cells": 184,
+          "classes": [
+            "default",
+            "default",
+            "default",
+            "default"
+          ],
+          "pureSand": false,
+          "pureMud": false
+        }
+      ],
+      "quadrantClassCellCounts": {
+        "('default', 'default', 'default', 'default')": 65536
+      }
+    }
+  }
+}
