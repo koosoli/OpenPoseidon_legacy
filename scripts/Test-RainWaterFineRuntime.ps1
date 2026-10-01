@@ -31,6 +31,20 @@ function Assert-Budget($state) {
     $net=$state.rainVolume-$state.infiltrationVolume-$state.evaporationVolume-$state.outletVolume
     Require ([Math]::Abs($state.volume-$net) -le [Math]::Max(.001,$state.rainVolume*.00001)) 'Actual global water budget does not conserve volume.'
 }
+function Rain-Ready($weather) {
+    foreach($name in @('rain','liquidRain','particleDensity')) {
+        Require ($null -ne $weather.$name -and ![double]::IsNaN($weather.$name) -and ![double]::IsInfinity($weather.$name) -and
+                 $weather.$name -ge 0 -and $weather.$name -le 1) "Missing/nonfinite actual weather $name."
+    }
+    Require ($weather.particleSnowflakes -is [bool] -and !$weather.particleSnowflakes -and $weather.particleDensity -eq 0 -and
+             $weather.rain -eq $weather.liquidRain) 'Rain fixture requires actual natural liquid rain without particle/snow overrides.'
+    return $weather.liquidRain -gt .5
+}
+function Rain-WaitAllowed($weather,[long]$additionalMs) {
+    Require ($additionalMs -ge 0) 'Actual rain-wait clock reversed.'
+    # Reserve ordinary RPC/pause latency inside the hard 60s actual-time gate.
+    return !(Rain-Ready $weather) -and $additionalMs -lt 59000
+}
 function Assert-Fine($fine,$state,[bool]$enabled) {
     foreach($name in @('readonly','sourceReady','fineActive','valid')) {Require ($fine.$name -is [bool]) "Missing/incorrect typed fine $name."}
     Require ($fine.readonly -eq $true -and $fine.sourceReady -eq $true) 'Actual read-only source is not ready.'
@@ -70,6 +84,10 @@ if($SelfTest) {
     $fine.integratedVolume=1;Expect-Failure {Assert-Fine $fine $state $true};$fine.integratedVolume=2
     $fine.cells=1023;Expect-Failure {Assert-Fine $fine $state $true};$fine.cells=1024
     $state.volume=4;Expect-Failure {Assert-Budget $state}
+    $rain=@{rain=.4923645257949829;liquidRain=.4923645257949829;particleDensity=0;particleSnowflakes=$false}
+    Require (!(Rain-Ready $rain) -and (Rain-WaitAllowed $rain 0) -and !(Rain-WaitAllowed $rain 59000)) 'Actual .492 boundary bypassed density threshold or bounded wait.'
+    foreach($value in @(.5,.500001)) {$rain.rain=$value;$rain.liquidRain=$value;Require ((Rain-Ready $rain) -eq ($value -gt .5)) 'Strict natural-rain threshold changed.'}
+    foreach($bad in @(@{rain=.8;liquidRain=.8;particleDensity=.1;particleSnowflakes=$false},@{rain=.8;liquidRain=.8;particleDensity=0;particleSnowflakes=$true},@{rain=.4;liquidRain=.8;particleDensity=0;particleSnowflakes=$false},@{rain=[double]::NaN;liquidRain=.8;particleDensity=0;particleSnowflakes=$false},@{liquidRain=.8})) {Expect-Failure {Rain-Ready $bad}}
     Require ((Decode-Eval '"data3d\mc vojakw2.p3d"') -ceq 'data3d\mc vojakw2.p3d') 'SQF quoted path changed.'
     Write-Host 'Fine runtime helper gates PASS (stale key, rejection, incomplete tiles, source gap, triangle mass, budget, SQF path).';return
 }
@@ -111,6 +129,31 @@ function Wait-Sim([int]$seconds) {
     do {Start-Sleep -Milliseconds 250;Health;Require ([DateTime]::UtcNow -lt $until) 'Actual simulation time failed to advance.'} while((Clock)-$start -lt $seconds*1000)
 }
 function State {return Send @{cmd='dev_rain_water';action='state'}}
+function Await-NaturalRain($weather) {
+    $start=Clock;$initial=State;Assert-Budget $initial
+    $proof=@{hardAdditionalLimitMs=60000;pollCutoffMs=59000;startTimeMs=$start;status='checking-actual-forcing';
+             samples=@(@{additionalMs=0;weather=$weather;field=$initial})}
+    $arm.gates.rainForcingWait=$proof
+    if(!(Rain-Ready $weather)) {
+        Exec 'setAccTime 4';$next=$start+5000;$wallUntil=[DateTime]::UtcNow.AddSeconds(45)
+        while(Rain-WaitAllowed $weather ((Clock)-$start)) {
+            do {
+                Start-Sleep -Milliseconds 100;Health;Require ([DateTime]::UtcNow -lt $wallUntil) 'Natural rain wait exceeded bounded wall time.'
+                $now=Clock
+            } while($now -lt $next -and $now-$start -lt 59000)
+            $weather=Send @{cmd='weather_visibility'};$field=State;Assert-Budget $field
+            $proof.samples+=@{additionalMs=((Clock)-$start);weather=$weather;field=$field}
+            $next=[Math]::Min((Clock)+5000,$start+59000)
+        }
+        Exec 'setAccTime 0'
+    }
+    $proof.actualAdditionalMs=(Clock)-$start
+    Require ($proof.actualAdditionalMs -le 60000) 'Actual natural rain wait exceeded 60 extra simulation seconds.'
+    $weather=Send @{cmd='weather_visibility'};$field=State;Assert-Budget $field
+    $proof.finalWeather=$weather;$proof.finalField=$field;$proof.status='bounded-wait-complete'
+    Require (Rain-Ready $weather) 'Natural liquid rain forcing did not reach >0.5 within the bounded additional wait.'
+    $proof.status='actual-natural-liquid-rain-ready';return $weather
+}
 function Fine {return Send @{cmd='dev_rain_water';action='fine_state';x=$X;z=$Z}}
 function Brush([string]$action='state') {return Send @{cmd='dev_terrain_brush';action=$action;x=$X;z=$Z}}
 function Capture([string]$name) {
@@ -171,7 +214,7 @@ try {
         $dry=State;$dryFine=Fine;Assert-Fine $dryFine $dry $false;Assert-Budget $dry;$arm.gates.dryFine=$dryFine
         Require ($dry.volume -eq 0) 'Dry edit invented water.';Capture 'actual-dry-hollow'
         Exec '0 setOvercast 1; 0 setRain 1; setAccTime 4';Wait-Sim $RainSeconds;Exec 'setAccTime 0'
-        $weather=Send @{cmd='weather_visibility'};$arm.gates.wetWeather=$weather;Require ($weather.liquidRain -gt .5) 'Natural liquid rain forcing did not reach this actual field.'
+        $weather=Await-NaturalRain (Send @{cmd='weather_visibility'});$arm.gates.wetWeather=$weather
         $wet=State;$fine=Fine;Assert-Budget $wet;Assert-Fine $fine $wet $on;$arm.gates.wet=$wet;$arm.gates.wetFine=$fine
         $sample=Send @{cmd='dev_rain_water';action='sample';x=$X;z=$Z};$arm.gates.wetSample=$sample
         Require ($wet.rainVolume -gt 0 -and $wet.volume -gt 0 -and $sample.valid -and $sample.depth -gt .001) 'Actual rain did not fill the native crater point.'

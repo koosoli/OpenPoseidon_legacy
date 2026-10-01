@@ -54,6 +54,8 @@ returned as a decimal string to avoid JSON's 53-bit integer rounding.
   liquid input. Actual `0 setOvercast 1; 0 setRain 1` and `weather_visibility`
   establish natural rain; visible-particle override and artificial wetness are
   cleared. The test waits real simulation time at acceleration 4.
+  If the requested interval ends below the existing strict liquidRain >0.5
+  gate, it permits a bounded additional natural wait, described below.
 - The default-off field must remain coarse. ON must have source-ready valid
   native geometry, 1..8 complete tiles, 1024 cells per tile, exact current
   HeightRevision and field generation/revision, and triangle-integrated fine
@@ -110,3 +112,37 @@ physical roof suppression and no sea overlay. Also measure native edit/source
 upload and steady wet fine CPU/GPU cost. This bounded opt-in fixture does not
 establish all-map micro-hollows, wet-tile eviction policy, complete shelter
 hydrology, swimming/buoyancy or a full-world 6.25 m water grid.
+
+## Installed forcing precondition follow-up
+
+Matched installed 3353770c campaign
+`build/rain-water-fine/native-crater-20261001-041311-51290d` completed the
+default-off genuine native edit, full 2048-grid Box3D registration, eight
+surrounding higher source vertices and dry no-water proof. After the requested
+120 simulation seconds it read actual natural rain=liquidRain
+0.4923645257949829, particleDensity zero and particleSnowflakes false. That
+positive input did not satisfy the existing strict >0.5 fixture precondition.
+The run failed before querying the paused wet budget/crater point, before ON,
+and before fine renderer acceptance. The coarse renderer log shows accepted
+actual grid updates through revision 475, but does not itself measure global
+mass conservation or the local fine hollow. Normal restore/exit completed with
+code zero. Preserve the failed result; it is not fine-path rejection evidence.
+
+The script now records the actual weather plus read-only field/budget before
+that threshold check and every approximately five additional simulation
+seconds during a bounded natural wait at acceleration 4. Sampling stops at
+59 seconds to reserve ordinary RPC/pause latency; the final measured actual
+additional interval must be <=60 seconds. A 45-second wall bound independently
+rejects stalled simulation. The exact paused final weather and budget are
+retained before the unchanged >0.5 gate, native fine queries and exact renderer
+receipts. Wait samples must use natural rain only: zero particle density,
+non-snow typed mode and actual rain equal to liquidRain; missing/nonfinite or
+overridden forcing fails. No weather setter is repeated to force a pass, and
+no water is seeded. Density that remains below the original gate after this
+finite wait still fails honestly with its actual history.
+
+Self-test includes the actual .4923645258 boundary (wait, never ready), exact
+.5 (not ready), .500001 (ready), time cap and overridden/snow/nonfinite/missing
+weather refusals. Existing native edit, mass, source revision, complete tile,
+triangle, pause, drain and matched renderer gates are unchanged. This remains
+a script/source follow-up pending root's new installed OFF/ON campaign.
