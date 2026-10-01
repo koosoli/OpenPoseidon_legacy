@@ -935,7 +935,34 @@ unbuilt_candidates: >-
       Original-map census8f23842e adds actual-player source/cloth/body tests
       for all four maps; source-qualified sand Eden/Noe/Abel and soil Eden/Noe.
       Abel mud and Cain sand/mud remain explicitly unsupported, with no
-      colour-based aliases. Installed actual all-map runner remains pending.
+      colour-based aliases. Matching e5445111 controlled stock US soldier
+      Everon and Nogova runs now pass actual walking, external body draw,
+      wet cloth upload, pause/return and normal exit with stable binary hashes.
+      Everon sand/mud minimum offsets are -9.37/-5.64cm; Nogova -9.35/-5.03cm.
+      Natural rain wets Person to .339/.323 respectively. Root inspected PNGs
+      with visible bodies and wet cloth creases; third-person relief remains
+      visually weak. Bounded camera-plus-boot terrain focus c99b8d17 passes
+      actual helper CPU equivalence/union/upload guards; installed proof is
+      pending. Native 1089-vertex unchanged-source corpora were captured;
+      Nogova uses the exact production tile24/23 origin4787.5/4587.5.
+      Historical Nogova fixture failed only case-sensitive Default/default;
+      f4881226 fixes config-class comparison, preserving exact source tuples.
+      Malden/Kolgujev matching e5445111 runs also exit normally with stable
+      hashes and actual wet-cloth/body evidence. Malden sand walk4.006m has
+      three changed boot contacts; Person wetness .318. Kolgujev wet walk
+      4.799m wets Person to .322; unmapped ground correctly keeps both soft
+      fields at zero chunks. These are functional results, not whole-map
+      material-quality or universal softness acceptance.
+      Natural fine selector55bb360d passes actual CPU reconstruction,
+      unchanged-source Nogova admission, mass transfer, dry retirement and
+      bounded storage checks. Eight owners and both default-OFF flags remain;
+      installed no-edit natural appearance/cost/publication are pending.
+      Thin-film candidate9f2621e5 removes a duplicate mirror coat below8mm,
+      blends standing optics through50mm and preserves deeper pools. Two
+      extracted shader probes initially omitted its pure imported helper;
+      e53543b9 repairs composition without changing physical assertions.
+      All16 focused required-device tests pass. Matching build and actual
+      shallow/standing pool appearance remain pending; fine modes stay OFF.
       MUD-VOLUMETRIC-CONTACT-20260930.md and NOGOVA-SOFT-MUD-CONTACT-20260930.md.
 
       Historical September 30 owner-priority mud puddle slice: rain-fed cosmetic wetness,

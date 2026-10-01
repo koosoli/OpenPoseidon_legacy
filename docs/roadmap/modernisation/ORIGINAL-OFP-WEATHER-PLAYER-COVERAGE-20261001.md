@@ -7,6 +7,24 @@ execution, deployment, appearance inspection and the authoritative ledger.
 
 ## Actual existing player proof
 
+Current matched `e5445111` controlled-player runs now pass functional gates
+on all four original maps. Everon/Nogova/Malden sand walking changed real
+boot cells; Everon/Nogova wet soil walking changed mud cells. Person wetness
+reached .339/.323/.318/.322 on Eden/Noe/Abel/Cain. Every run retained actual
+external body draw and wet stock atlas uploads, paused camera return, stable
+EXE/DLL hashes and normal exit0. Records are under `build/original-weather-player/`
+with labels `original-everon-native-player`, `original-nogova-centred-native-player`,
+`original-malden-player` and `original-kolgujev-player` dated 20261001.
+Root inspected Everon/Nogova bodies and cloth creases; third-person contact
+relief remains weak pending the bounded boot-focus build. These checks do
+not fill the unsupported material families below or accept every appearance.
+
+The first new Nogova run failed its class spelling check (`Default` versus
+`default`), after successful sand walking. `f4881226` uses the engine's
+case-insensitive config-class semantics while keeping texture/files/sound/
+character comparisons exact. The centred rerun passed and retained the
+complete unchanged native tile24/23 at origin4787.5/4587.5, 1089 vertices.
+
 The matched installed `7e2f1df7` run
 `build/weather-player/standard-us-clear-east-20260930-235443` completed normally
 with unchanged EXE/DLL hashes. Its actual controlled **SoldierWB**, using SDL W,
