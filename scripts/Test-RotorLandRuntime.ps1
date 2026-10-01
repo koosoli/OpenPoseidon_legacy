@@ -195,6 +195,19 @@ function Place([double]$x,[double]$z,[double]$height) {
     } else {Exec ('rotorPilot doMove ['+$xz+',0]')}
     View $x $z $ground;$null=Current-RotorState ('place-'+(Number $height)+'-after-view');return $ground
 }
+function AwaitGroundedSpool {
+    # Actual diagnostics proved the prior relocation dropped a stopped rotor
+    # from 18 m and destroyed the airframe. Let its real engine spool on ground.
+    $start=Current-RotorState 'grounded-spool-before'
+    Require (!$start.destroyed -and $start.damage -eq 0 -and $start.clearance -lt 6 -and $start.engineOn) 'Grounded undamaged engine-on spool fixture missing.'
+    $until=[DateTime]::UtcNow.AddSeconds(35);Exec 'setAccTime 1'
+    do {
+        Start-Sleep -Milliseconds 500;$state=Current-RotorState 'grounded-spool-poll'
+        Require (!$state.destroyed -and $state.damage -eq 0 -and $state.engineOn -and $state.clearance -lt 6) 'Real ground spool lost engine or undamaged ground support.'
+        Require ([DateTime]::UtcNow -lt $until) 'Actual grounded rotor failed to reach operating RPM.'
+    } while ($state.rpm -lt .85)
+    Exec 'setAccTime 0';$result.gates.groundedSpool=@{before=$start;after=$state;elapsedMs=$state.timeMs-$start.timeMs}
+}
 function AwaitHover([double]$x,[double]$z) {
     $first=LineCount;$until=[DateTime]::UtcNow.AddSeconds(60);Exec 'setAccTime 1'
     $result.gates.hoverWait=@()
@@ -253,7 +266,9 @@ try {
     $null=Current-RotorState 'startup-after-view'
     $rows=@(Observe 'engine-off' $SandX $SandZ $false);Require (!$result.gates['engine-off'].engineOn -and $rows.Count -eq 0) 'Stopped rotor emitted land puffs.'
     $null=Current-RotorState 'before-engine-start'
-    Exec 'rotorHeli setFuel 1; rotorHeli engineOn true';$null=Current-RotorState 'engine-start-paused';$ground=Place $SandX $SandZ $HoverHeight
+    Exec 'rotorHeli setFuel 1; rotorHeli engineOn true';$null=Current-RotorState 'engine-start-paused'
+    AwaitGroundedSpool
+    $ground=Place $SandX $SandZ $HoverHeight
     $result.gates.actualHover=AwaitHover $SandX $SandZ
     $rows=@(Observe 'dry-sand' $SandX $SandZ);Require (@($rows | Where-Object {$_.emitted -gt 0 -and $_.snow -eq 0 -and $_.rain -lt .05}).Count -gt 0) 'Actual dry sand hover produced no dust positive control.'
     $pauseTime=[double](Eval 'time');$pausePose=Eval 'getPosASL rotorHeli';$from=LineCount;Capture 'paused-a';Start-Sleep -Seconds 5;Capture 'paused-b'
