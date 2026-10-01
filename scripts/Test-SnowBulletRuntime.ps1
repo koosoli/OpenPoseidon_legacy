@@ -226,7 +226,7 @@ try {
     do {Health;$client=[Net.Sockets.TcpClient]::new();try {$client.Connect('127.0.0.1',$port)} catch {$client.Dispose();$client=$null};if (!$client) {Require ([DateTime]::UtcNow -lt $until) 'Harness unavailable.';Start-Sleep -Milliseconds 250}} while (!$client)
     $stream=$client.GetStream();$stream.ReadTimeout=30000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
     Start-Sleep -Seconds 12;Require ((Eval 'triSceneReady') -ceq 'OK' -and (Eval 'typeOf player') -ceq 'SoldierWB') 'Actual standard US player mission not ready.'
-    Require ((Eval 'triSetBrightness 1') -ceq 'OK') 'Controlled brightness refused.'
+    Require ((Eval 'triSetBrightness 1') -ceq 'OK:1.000') 'Controlled brightness refused.'
     Require ((Eval 'triCheatInfiniteAmmo false') -ceq 'OK' -and [double](Eval 'triCheatInfiniteAmmoActive') -eq 0) 'Infinite ammo must be disabled.'
     Exec ('player allowDamage false; 0 setRain 0; 0 setFog 0; 0 setOvercast 0; removeAllWeapons player; player addMagazine "M16"; player addWeapon "M16"; player selectWeapon "M16"; player setUnitPos "UP"; player setPos ['+(Number $PlayerX)+','+(Number $PlayerZ)+',0]; player setDir 0; player switchCamera "INTERNAL"; snowShotCount=0; snowShotTime=-1; snowShotSource=[]; player addEventHandler ["Fired",{snowShotCount=snowShotCount+1; snowShotTime=time; snowShotSource=[_this select 1,_this select 2,_this select 3,_this select 4]}]; hint ""; setAccTime 1')
     $null=Send @{cmd='weather_particles';action='set';mode='off';density=0;snowflakes=$false}
