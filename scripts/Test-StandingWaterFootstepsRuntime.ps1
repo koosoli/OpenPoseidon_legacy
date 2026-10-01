@@ -44,6 +44,13 @@ function Assert-WaterSupport($row) {
     # These are rounded telemetry bounds, not weaker production admission.
     Require ($row.depth -ge .00295 -and $row.height-$row.support -ge .0019 -and [Math]::Abs($row.y-$row.support) -le .2511 -and $row.y -le $row.height+.1211) 'Actual event lacks standing-water/support proof.'
 }
+function Walk-Complete([double]$distance,[double]$minimum,[int]$eventCount) {
+    return $distance -ge $minimum -and $eventCount -gt 0
+}
+function Body-InWindow($position,$window) {
+    if (!$window) {return $true}
+    return $position.Count -eq 3 -and [Math]::Abs($position[0]-$window.x) -le $window.radius -and [Math]::Abs($position[1]-$window.z) -le $window.radius
+}
 function Assert-Positive($rows,[bool]$requirePair=$true) {
     Require ($rows.Count -ge 4) 'Fewer than four actual exposed standing-water events.'
     $variants=@()
@@ -71,6 +78,10 @@ if ($SelfTest) {
     Require (Pool-Supported @{valid=$true;depth=.012;height=20.012;terrainY=20}) 'Supported local pool was refused.'
     foreach($bad in @(@{valid=$false;depth=.012;height=20.012;terrainY=20},@{valid=$true;depth=.001;height=20.001;terrainY=20},@{valid=$true;depth=.012;height=20.012;terrainY=21},@{valid=$true;depth=.2;height=20.2;terrainY=20},@{valid=$true;depth=.012;height=.012;terrainY=0})) {Require (!(Pool-Supported $bad)) 'Dry/deep/raised/sea fixture admitted.'}
     Require ((Decode-Eval 'WEST Alpha:1 (mail)') -ceq 'WEST Alpha:1 (mail)' -and (Decode-Eval '[1,2,3]').Count -eq 3) 'SQF decoder failed.'
+    Require (!(Walk-Complete .7 .7 0) -and !(Walk-Complete .6 .7 1) -and (Walk-Complete .7 .7 1)) 'Movement-only or stationary audio accepted as a contact walk.'
+    $window=@{x=2550;z=5075;radius=.95}
+    Require (Body-InWindow @(2550,5074.25,15) $window) 'Audited initial roof body window refused.'
+    Require (!(Body-InWindow @(2551,5075,15) $window) -and !(Body-InWindow @(2550,5076,15) $window)) 'Walk may leave the central roof while awaiting an event.'
     Write-Host 'PASS actual audio trace/support/age/variant and local-pool falsifiers; no game or audio device used.';return
 }
 Require ([bool]$env:LOCK_OWNER) 'Run through scripts/with-game-lock.sh.'
@@ -100,7 +111,7 @@ $keys=@('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS
   'POSEIDON_SNOW_TEST_DEPTH','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','POSEIDON_SNOWLINE','POSEIDON_WATER_STEP_TRACE',
   'POSEIDON_MUD_TRACE','POSEIDON_SAND_TRACE','POSEIDON_PLAYER_GROUND_TRACE','WGR_TERRAIN_PUDDLE_WETNESS','WGR_RAIN_WATER','WGR_RAIN_WATER_TRACE')
 $saved=@{};foreach($key in $keys) {$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
-$p=$null;$client=$null;$held=$false
+$p=$null;$client=$null;$held=$false;$heldLook=$false
 function Health {
     Require ($p -and !$p.HasExited) 'Owned game exited unexpectedly.'
     if ((Test-Path -LiteralPath $log) -and (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION|Unbekannter Operator|StartAutoTest could not boot' -Quiet)) {throw 'Installed validation/script failure.'}
@@ -114,6 +125,7 @@ function Exec([string]$code) {$null=Send @{cmd='exec';code=$code}}
 function Eval([string]$code) {return Decode-Eval ([string](Send @{cmd='eval';code=$code}).result)}
 function Clock {$state=Send @{cmd='query';what='play_state'};Require ($state.has_player -and $state.player_active -and $state.player_local) 'Actual controlled local player missing.';return [long]$state.time_ms}
 function Step-Lines {return @(Select-String -LiteralPath $log -SimpleMatch 'PUDDLE_STEP model=' -ErrorAction SilentlyContinue)}
+function Boot-Lines {return @(Select-String -LiteralPath $log -SimpleMatch 'PLAYER_GROUND_BOOT time=' -ErrorAction SilentlyContinue)}
 function New-Steps([int]$cursor) {
     $lines=@(Step-Lines);$rows=@();Require ($lines.Count -ge $cursor) 'Actual audio log truncated.'
     for($i=$cursor;$i -lt $lines.Count;++$i) {$rows+=,(Parse-Step ([string]$lines[$i].Line))};return $rows
@@ -121,31 +133,44 @@ function New-Steps([int]$cursor) {
 function Sample([double]$x,[double]$z) {return Send @{cmd='dev_rain_water';action='sample';x=$x;z=$z}}
 function Set-Player([double]$x,[double]$z,[double]$direction) {
     Require ((Eval 'triClearView') -ceq 'OK') 'Render view did not release.'
+    # Ordinary held look-around prevents stale external mouse aim from turning
+    # the body after setDir; it does not force motion or an animation contact.
+    if (!$script:heldLook) {$null=Send @{cmd='key';sc=226;hold=$true};$script:heldLook=$true}
     $y=Get-TerrainPuddleFixtureHeight {param($request) Send $request} $x $z
     Exec ('player setPosASL ['+(Number $x)+','+(Number $z)+','+(Number ($y+.02))+']; player setDir '+(Number $direction)+'; player switchCamera "EXTERNAL"; setAccTime 1')
     Start-Sleep -Seconds 2;Exec 'setAccTime 0';$actual=Eval 'getPosASL player'
     Require ([Math]::Abs($actual[0]-$x) -lt .3 -and [Math]::Abs($actual[1]-$z) -lt .3 -and [Math]::Abs($actual[2]-$y) -lt .3) 'Fixture spawn moved or cannot stand on actual ground.'
-    return @{requested=@($x,$z,$y);actual=$actual;heading=$direction;terrainHeight=$y}
+    return @{requested=@($x,$z,$y);actual=$actual;heading=$direction;actualHeading=(Eval 'getDir player');terrainHeight=$y;lookAround='ordinary held SDL LAlt226'}
 }
-function Manual-Walk([string]$stage,[double]$minimum,[double]$acc=1,[double]$maximum=20) {
+function Manual-Walk([string]$stage,[double]$minimum,[double]$acc=1,[double]$maximum=20,[hashtable]$window=$null,[double]$releaseSeconds=.6) {
     Require ((Eval 'triClearView') -ceq 'OK') 'Render-only view remained active during player input.'
-    $cursor=@(Step-Lines).Count;$start=Eval 'getPosASL player';$startTime=Clock
+    $cursor=@(Step-Lines).Count;$bootCursor=@(Boot-Lines).Count;$start=Eval 'getPosASL player';$startTime=Clock
+    $proof=@{start=$start;startTimeMs=$startTime;window=$window;polls=@();events=@();groundBootRows=@();input='ordinary SDL W and held Alt look-around';accTime=$acc;releaseSeconds=$releaseSeconds;
+        inputContext=(Eval 'triGetInputContext');cameraEffect=(Eval 'triGetCameraEffectActive');status='started'}
+    $result.stages[$stage]=$proof # retain evidence even when the walk fails
+    Require ($proof.inputContext -ceq 'Infantry' -and $proof.cameraEffect -eq 0) 'Player input lacks unsuspended infantry context.'
+    Require (Body-InWindow $start $window) 'Covered body starts outside audited central roof window.'
     Exec ('setAccTime '+(Number $acc));$null=Send @{cmd='key';sc=26;hold=$true};$script:held=$true
     $until=[DateTime]::UtcNow.AddSeconds($maximum)
     do {
         Start-Sleep -Milliseconds 80;$position=Eval 'getPosASL player'
         $distance=[Math]::Sqrt([Math]::Pow($position[0]-$start[0],2)+[Math]::Pow($position[1]-$start[1],2))
-        Require ([DateTime]::UtcNow -lt $until) 'Ordinary SDL walk blocked/timed out; do not infer an audio defect or fabricate contacts.'
-    } while($distance -lt $minimum)
-    $null=Send @{cmd='key_up';sc=26};$script:held=$false;Start-Sleep -Milliseconds ([int](600/$acc));Exec 'setAccTime 0'
+        $proof.events=@(New-Steps $cursor);$boots=@(Boot-Lines)
+        $proof.groundBootRows=@($boots|Select-Object -Skip $bootCursor|ForEach-Object {$_.Line})
+        $proof.polls+=@{position=$position;distance=$distance;audioRows=$proof.events.Count;groundBootRows=$proof.groundBootRows.Count;heading=(Eval 'getDir player')}
+        Require (Body-InWindow $position $window) 'Covered body left audited roof window before a real sound edge; retain fixture-unavailable evidence.'
+        Require ([DateTime]::UtcNow -lt $until) ('Ordinary SDL '+$stage+' walk blocked or produced no audio edge before timeout; no forced contacts.')
+    } while(!(Walk-Complete $distance $minimum $proof.events.Count))
+    $null=Send @{cmd='key_up';sc=26};$script:held=$false;Start-Sleep -Milliseconds ([int](1000*$releaseSeconds/$acc));Exec 'setAccTime 0'
     $end=Eval 'getPosASL player';$endTime=Clock;$rows=@(New-Steps $cursor)
-    Require ((Eval 'alive player') -eq $true -and $endTime -gt $startTime -and $rows.Count -gt 0) 'Actual movement produced no living real animation sound contacts.'
+    $proof.end=$end;$proof.endTimeMs=$endTime;$proof.distance=$distance;$proof.events=$rows;$proof.pose=Eval 'getMove player';$proof.status='observed'
+    Require (Body-InWindow $end $window) 'Covered release/deceleration escaped audited roof window.'
+    Require ((Eval 'alive player') -eq $true -and $endTime -gt $startTime -and $rows.Count -gt 0) ('Actual '+$stage+' movement produced no living real animation sound contacts.')
     foreach($row in $rows) {
         Require ($row.eventMs -ge $startTime -and $row.timeMs -le $endTime -and [Math]::Abs($row.x-$start[0]) -le $minimum+2 -and [Math]::Abs($row.z-$start[1]) -le $minimum+2) 'Audio row does not belong to the controlled local walk.'
         Assert-Fresh $row
     }
-    $proof=@{start=$start;end=$end;distance=$distance;startTimeMs=$startTime;endTimeMs=$endTime;events=$rows;pose=(Eval 'getMove player');input='SDL W hold/release';accTime=$acc}
-    $result.stages[$stage]=$proof;return $rows
+    $proof.status='fresh-contacts';return $rows
 }
 function Capture([string]$name) {
     Start-Sleep -Milliseconds 500;$time=Clock;$path=Join-Path $output ($name+'.png');$null=Send @{cmd='screenshot';path=$path}
@@ -163,12 +188,13 @@ function Pool-Lane([double]$x,[double]$z) {
 }
 function Close-Owned {
     if ($held) {$null=Send @{cmd='key_up';sc=26};$script:held=$false}
+    if ($heldLook) {$null=Send @{cmd='key_up';sc=226};$script:heldLook=$false}
     Exec 'setAccTime 1';$null=Send @{cmd='exit'};Require ($p.WaitForExit(20000)) 'Owned game failed normal quit.'
     Require ($p.ExitCode -eq 0) 'Owned game exit was nonzero.';Require (Select-String -LiteralPath $log -Pattern 'Shutdown complete' -Quiet) 'Normal shutdown proof missing.';$result.exitCode=$p.ExitCode
 }
 try {
     foreach($key in $keys) {[Environment]::SetEnvironmentVariable($key,$null,'Process')}
-    $env:POSEIDON_USER_DIR=$profile;$env:POSEIDON_WATER_STEP_TRACE='1';$env:WGR_RAIN_WATER_TRACE='1';$env:POSEIDON_SNOWLINE='off'
+    $env:POSEIDON_USER_DIR=$profile;$env:POSEIDON_WATER_STEP_TRACE='1';$env:POSEIDON_PLAYER_GROUND_TRACE='1';$env:WGR_RAIN_WATER_TRACE='1';$env:POSEIDON_SNOWLINE='off'
     [IO.File]::WriteAllText((Join-Path $profile 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
     $mission=Join-Path $output 'watersteps.noe';New-Item -ItemType Directory -Force $mission|Out-Null
     Copy-Item -LiteralPath (Join-Path $root 'tests/perf/missions/perf_sand.noe/mission.sqm') -Destination (Join-Path $mission 'mission.sqm')
@@ -212,13 +238,13 @@ try {
     $result.stages.roof=New-TerrainPuddleStockRoof -SendCommand {param($request) Send $request} -X $x -Z $z -RoofLift 3
     $result.stages.coveredPlacement=Set-Player $x ($z-.75) 0
     Require (Pool-Supported (Sample $x ($z-.75))) 'Covered control lost actual water before contact.'
-    $covered=@(Manual-Walk 'covered-walk' .7 .2 25)
+    $covered=@(Manual-Walk 'covered-walk' 1.1 .2 25 @{x=$x;z=$z;radius=.95} .15)
     foreach($row in $covered) {
         Assert-WaterSupport $row
-        Require ($row.reason -ceq 'sheltered' -and $row.env -ine 'water' -and (Variant $row) -eq '' -and [Math]::Abs($row.x-$x) -le 1 -and [Math]::Abs($row.z-$z) -le 1.25) 'Covered actual wet contact did not reject standing-water selection within verified roof.'
+        Require ($row.reason -ceq 'sheltered' -and $row.env -ine 'water' -and (Variant $row) -eq '' -and [Math]::Abs($row.x-$x) -le 1 -and [Math]::Abs($row.z-$z) -le 1) 'Covered actual wet contact did not reject standing-water selection within verified roof.'
     }
     $end=$result.stages['covered-walk'].end
-    Require ([Math]::Abs($end[0]-$x) -le .5 -and [Math]::Abs($end[1]-$z) -le .75) 'Real covered walking escaped bounded floor-free roof region.'
+    Require (Body-InWindow $end @{x=$x;z=$z;radius=.95}) 'Real covered walking escaped bounded floor-free roof region.'
     Capture 'covered-water-real-player';Remove-TerrainPuddleStockRoof {param($request) Send $request}
     $result.stages.removedPlacement=Set-Player $x ($z-3) 0
     $removed=@(Manual-Walk 'roof-removed-walk' 6);$result.stages.removedSelection=Assert-Positive $removed $false;Capture 'roof-removed-real-player'
@@ -229,7 +255,18 @@ try {
     Require ((Clock) -eq $clock -and $again.revision -eq $paused.revision -and $again.generation -eq $paused.generation -and $again.volume -eq $paused.volume -and @(Step-Lines).Count -eq $cursor) 'Paused contact/query/camera advanced water or dispatched another footstep.'
     $result.stages.pause=@{timeMs=$clock;before=$paused;after=$again;audioRows=$cursor}
     Close-Owned;$result.status='actual-water-audio-selection-passed-listening-required'
-} catch {$result.status='failed';$result.error=$_.Exception.Message;throw}
+} catch {
+    $result.status='failed';$result.error=$_.Exception.Message
+    if ($p -and !$p.HasExited -and $client) {
+        try {
+            if ($held) {$null=Send @{cmd='key_up';sc=26};$script:held=$false}
+            Exec 'setAccTime 0'
+            $result.failure=@{position=(Eval 'getPosASL player');heading=(Eval 'getDir player');pose=(Eval 'getMove player');timeMs=(Clock);
+                inputContext=(Eval 'triGetInputContext');cameraEffect=(Eval 'triGetCameraEffectActive');audioRows=@(Step-Lines).Count;groundBootRows=@(Boot-Lines).Count}
+        } catch {$result.failureDiagnosticsError=$_.Exception.Message}
+    }
+    throw
+}
 finally {
     if ($p -and !$p.HasExited) {try {Close-Owned} catch {$result.cleanupError=$_.Exception.Message;if (!$p.HasExited) {$p.Kill();$null=$p.WaitForExit(5000);$result.forcedCleanup=$true}}}
     if ($client) {$client.Dispose()}
