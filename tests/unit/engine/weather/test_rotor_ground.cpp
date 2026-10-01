@@ -55,4 +55,66 @@ int main()
         assert(a != RotorGroundRing(phase+1,spoke,8));
     }
     assert((RotorGroundRing(0,0,std::numeric_limits<float>::infinity()) == std::array<float,2>{}));
+    // A complete broad footprint costs five probes; no partial proof can be
+    // published as an extra puff, and the global bound remains32/quarter second.
+    RotorGroundBudget footprints;
+    int complete = 0, probes = 0;
+    for (int sector=0; sector<8; ++sector) {
+        bool proven = true;
+        for (int point=0; point<5; ++point) {
+            if (!footprints.Take(.1f)) {proven=false;break;}
+            ++probes;
+        }
+        if (proven) ++complete;
+    }
+    assert(complete == 6 && probes == 32);
+    assert(RotorLandFootprint(0) == (std::array<float,2>{0,0}));
+    for (unsigned i=1; i<5; ++i) {
+        const auto edge=RotorLandFootprint(i);
+        assert(std::abs(std::hypot(edge[0],edge[1])-RotorLandProofRadius)<1e-5f);
+    }
+    assert(RotorLandProofRadius >= std::sqrt(2.0f)*RotorLandMaxRadius+RotorLandMaxTravel);
+    // The real cloudlet sheet renderer projects Scale directly. Its authored
+    // sphere only controls culling; these two unit systems must stay separate.
+    for (float sphere : {.125f,.7f,1.0f,2.0f,8.0f}) {
+        const float scale=RotorLandCullScale(3.0f,sphere);
+        assert(std::abs(scale*sphere-std::sqrt(2.0f)*3.0f)<1e-5f);
+    }
+    assert(RotorLandCullScale(3,0)==0 && RotorLandCullScale(3,-1)==0);
+    assert(RotorLandCullScale(3,1e-38f)==0);
+    // A small roof away from every center/perimeter ray still lies within the
+    // broad puff corridor. Conservative bounds must refuse it, not miss it.
+    const std::array<float,3> bottom{0,0,0}, top{0,10,0};
+    assert(RotorLandBoundsBlock(bottom,top,{3,5,3},.5f));
+    assert(RotorLandBoundsBlock(bottom,top,{0,-RotorLandProofRadius,0},0));
+    assert(!RotorLandBoundsBlock(bottom,top,{20,5,0},1));
+    assert(!RotorLandBoundsBlock(bottom,top,{0,30,0},1));
+    assert(RotorLandBoundsBlock(bottom,bottom,{1,0,0},0));
+    assert(RotorLandBoundsBlock(bottom,top,{0,5,0},-1));
+    assert(RotorLandBoundsBlock(bottom,top,{std::numeric_limits<float>::infinity(),0,0},1));
+    for (bool isSnow : {false,true}) {
+        const float life=isSnow?1.7f:1.9f;
+        assert(RotorLandProfile(0,.458f,isSnow).opacity==0);
+        assert(RotorLandProfile(life,.458f,isSnow).radius==0);
+        const auto root=RotorLandProfile(.12f,.458f,isSnow);
+        const auto grown=RotorLandProfile(.9f,.458f,isSnow);
+        assert(root.opacity>.18f && root.radius>1.6f);
+        assert(grown.radius>root.radius && grown.opacity<root.opacity);
+        // Before the final fade, expansion conserves radius^2 * opacity.
+        const float a=root.radius*root.radius*root.opacity;
+        const float b=grown.radius*grown.radius*grown.opacity;
+        assert(std::abs(a-b)<1e-5f);
+        float previousRadius=0;
+        for (int ms=0;ms<int(life*1000);++ms) {
+            const auto p=RotorLandProfile(ms*.001f,1,isSnow);
+            assert(std::isfinite(p.radius) && std::isfinite(p.opacity));
+            assert(p.radius>=previousRadius && p.radius<=RotorLandMaxRadius);
+            assert(p.opacity>=0 && p.opacity<=.35f);
+            previousRadius=p.radius;
+        }
+        assert(RotorLandProfile(-1,1,isSnow).opacity==0);
+        assert(RotorLandProfile(.2f,0,isSnow).radius==0);
+        assert(RotorLandProfile(.2f,std::numeric_limits<float>::infinity(),isSnow).opacity==0);
+        assert(RotorLandProfile(std::numeric_limits<float>::quiet_NaN(),1,isSnow).radius==0);
+    }
 }

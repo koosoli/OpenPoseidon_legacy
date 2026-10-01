@@ -12,6 +12,68 @@ struct RotorGroundEmission
     bool snow = false;
 };
 
+struct RotorLandAppearance
+{
+    float radius = 0; // billboard half-width/half-height in world metres
+    float opacity = 0;
+};
+inline constexpr float RotorLandMaxRadius = 3.1f;
+inline constexpr float RotorLandMaxTravel = 3.5f;
+// The square billboard fits inside sqrt(2)*radius. Reserve its entire future
+// extent and the bounded outward travel before publishing a puff.
+inline constexpr float RotorLandProofRadius = 1.414214f * RotorLandMaxRadius + RotorLandMaxTravel;
+inline std::array<float, 2> RotorLandFootprint(unsigned probe)
+{
+    constexpr std::array<std::array<float, 2>, 5> offsets{{
+        {0,0}, {RotorLandProofRadius,0}, {-RotorLandProofRadius,0},
+        {0,RotorLandProofRadius}, {0,-RotorLandProofRadius}}};
+    return probe < offsets.size() ? offsets[probe] : std::array<float, 2>{};
+}
+inline float RotorLandCullScale(float radius, float shapeSphere)
+{
+    if (!std::isfinite(radius) || !std::isfinite(shapeSphere) || radius <= 0 || shapeSphere <= 0)
+        return 0;
+    const float scale = 1.414214f * radius / shapeSphere;
+    return std::isfinite(scale) && scale <= 10000.0f ? scale : 0;
+}
+// Conservative refusal, not a collision hit: the engine's thin convex ray
+// narrowphase does not actually expand by its radius parameter. Refuse an
+// object's enclosing sphere anywhere in the complete lifetime corridor.
+inline bool RotorLandBoundsBlock(std::array<float,3> from, std::array<float,3> to,
+                                std::array<float,3> centre, float radius)
+{
+    if (!std::isfinite(radius) || radius < 0) return true;
+    float length2=0, dot=0;
+    for (unsigned i=0;i<3;++i) {
+        if (!std::isfinite(from[i]) || !std::isfinite(to[i]) || !std::isfinite(centre[i])) return true;
+        const float d=to[i]-from[i]; length2+=d*d; dot+=(centre[i]-from[i])*d;
+    }
+    if (!std::isfinite(length2) || !std::isfinite(dot)) return true;
+    const float t=length2>0?std::clamp(dot/length2,0.0f,1.0f):0;
+    float distance2=0;
+    for (unsigned i=0;i<3;++i) {
+        const float d=centre[i]-(from[i]+(to[i]-from[i])*t); distance2+=d*d;
+    }
+    const float sum=radius+RotorLandProofRadius;
+    return !std::isfinite(distance2) || !std::isfinite(sum*sum) || distance2<=sum*sum;
+}
+inline RotorLandAppearance RotorLandProfile(float age, float density, bool snow)
+{
+    if (!std::isfinite(age) || !std::isfinite(density) || age < 0 || density <= 0)
+        return {};
+    const float life = snow ? 1.7f : 1.9f;
+    if (age >= life) return {};
+    const auto smooth = [](float t) { t=std::clamp(t,0.0f,1.0f); return t*t*(3-2*t); };
+    const float start = snow ? 1.6f : 1.8f;
+    const float end = snow ? 2.7f : RotorLandMaxRadius;
+    const float radius = start + (end-start)*smooth(age/.65f);
+    // Expansion conserves projected optical mass; the independent final fade
+    // removes entrained material smoothly, rather than leaving an opaque ring.
+    const float opacity = std::min(.35f, (snow ? .50f : .48f)*std::clamp(density,0.0f,1.0f)) *
+        (start*start)/(radius*radius) * smooth(age/.12f) * smooth((life-age)/.65f);
+    return {radius, opacity};
+}
+
 // Across all aircraft: at most 32 support/roof probes per quarter simulation
 // second. Large sheltered fleets cannot spend an unbounded ray budget merely
 // because they emit no particles and therefore never fill the particle cap.

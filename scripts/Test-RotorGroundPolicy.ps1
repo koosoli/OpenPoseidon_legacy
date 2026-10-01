@@ -11,8 +11,10 @@ if ($LASTEXITCODE -ne 0) {throw 'Rotor ground CPU policy compilation failed.'}
 & $exe
 if ($LASTEXITCODE -ne 0) {throw 'Rotor ground CPU policy failed.'}
 $cpp=Get-Content (Join-Path $root 'engine/Poseidon/World/Entities/Vehicles/Air/Helicopter.cpp') -Raw
-foreach ($proof in @('RotorLandPuff::MaxLive','RotorGroundRing(_landRotorPhase','GRainWater().At(x, z)',
-    'GLandscape->SurfaceAt(x, z)','ObjIntersectView','hits.Size()',
+foreach ($proof in @('RotorLandPuff::MaxLive','RotorGroundRing(_landRotorPhase','GRainWater().At(px,pz)',
+    'GLandscape->SurfaceAt(px,pz)','ObjIntersectView','hits.Size()',
+    'RotorLandFootprint(probe)','LandRotorBoundsClear(point,centre,this)',
+    'RotorLandProfile(_age, _density, _snow)','RotorLandCullScale(_radius, _shapeSphere)',
     'EvaluateRotorWash(wash, origin)','GAirflow.Sample(Position())','puff->SetSmokeShadow(false)',
     'EmitLandRotorRing(deltaT, prec)','GSnow().ErodeRotor')) {
     if (!$cpp.Contains($proof)) {throw "Rotor actual emission/support proof missing: $proof"}

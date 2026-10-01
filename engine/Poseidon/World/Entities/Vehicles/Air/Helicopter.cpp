@@ -389,15 +389,41 @@ void Helicopter::SimulateOptimized(float deltaT, SimulationImportance prec)
 
 namespace
 {
+bool LandRotorBoundsClear(Vector3Par origin, Vector3Par aircraft, Object* ignore)
+{
+    int xMin,xMax,zMin,zMax;
+    ObjRadiusRectangle(xMin,xMax,zMin,zMax,origin,aircraft,RotorLandProofRadius);
+    unsigned visited=0;
+    for (int z=zMin;z<=zMax;++z) for (int x=xMin;x<=xMax;++x)
+    {
+        const ObjectList& objects=GLandscape->GetObjects(z,x);
+        for (int i=0;i<objects.Size();++i)
+        {
+            if (++visited>256) return false; // dense/unknown footprint fails closed
+            Object* object=objects[i];
+            if (object==ignore || object->GetType()==Temporary || object->GetType()==TypeTempVehicle) continue;
+            const Vector3 position=object->Position();
+            if (RotorLandBoundsBlock({origin.X(),origin.Y(),origin.Z()},
+                {aircraft.X(),aircraft.Y(),aircraft.Z()},
+                {position.X(),position.Y(),position.Z()},object->GetRadius())) return false;
+        }
+    }
+    return true;
+}
 // A short-lived land puff shares the established cloudlet rendering and room
 // containment, but follows live airflow rather than baking wind at creation.
 // The bound is across all helicopters and resets naturally at world teardown.
 class RotorLandPuff final : public Cloudlet
 {
+    Vector3 _proofCentre;
+    float _age = 0, _density, _shapeSphere, _radius = 0;
+    bool _snow;
 public:
     inline static unsigned Live = 0;
     static constexpr unsigned MaxLive = 128;
-    explicit RotorLandPuff(LODShapeWithShadow* shape) : Cloudlet(shape, 2.0f, 0.65f)
+    RotorLandPuff(LODShapeWithShadow* shape, Vector3Par origin, float density, bool snow)
+        : Cloudlet(shape, 2.0f, 2.0f), _proofCentre(origin), _density(density),
+          _shapeSphere(shape->BoundingSphere()), _snow(snow)
     {
         ++Live;
         SetSimulationPrecision(1.0f / 25.0f);
@@ -405,14 +431,35 @@ public:
     ~RotorLandPuff() override { --Live; }
     void Simulate(float dt, SimulationImportance prec) override
     {
-        if (std::isfinite(dt) && dt > 0)
+        if (!std::isfinite(dt) || dt <= 0) return; // no render/paused-clock ageing
+        _age += dt;
+        const auto appearance = RotorLandProfile(_age, _density, _snow);
+        if (appearance.radius <= 0) { _invisible = true; SetDelete(); return; }
         {
             const Vector3 air = GAirflow.Sample(Position());
+            if (!std::isfinite(air.X()) || !std::isfinite(air.Y()) || !std::isfinite(air.Z()))
+            { _invisible = true; SetDelete(); return; }
             const float blend = 1.0f - std::exp(-1.6f * std::min(dt, 0.25f));
             _speed[0] += (air.X() - _speed.X()) * blend;
             _speed[2] += (air.Z() - _speed.Z()) * blend;
         }
-        Cloudlet::Simulate(dt, prec);
+        Cloudlet::Simulate(std::min(dt, .1f), prec);
+        // The larger sprite never leaves the footprint proven at birth. Airflow
+        // carries it outwards first; the remaining material then disperses there.
+        Vector3 p = Position();
+        if (!std::isfinite(p.X()) || !std::isfinite(p.Y()) || !std::isfinite(p.Z()))
+        { _invisible = true; SetDelete(); return; }
+        Vector3 radial = p - _proofCentre; radial[1] = 0;
+        const float distance = radial.Size();
+        if (distance > RotorLandMaxTravel)
+        {
+            radial *= RotorLandMaxTravel / distance;
+            p[0] = _proofCentre.X() + radial.X(); p[2] = _proofCentre.Z() + radial.Z();
+            SetPosition(p);
+            const Vector3 normal = radial / RotorLandMaxTravel;
+            const float outward = _speed * normal;
+            if (outward > 0) _speed -= normal * outward;
+        }
         if (GLandscape)
         {
             const float floor = GLandscape->SurfaceY(Position().X(), Position().Z()) + 0.08f;
@@ -422,6 +469,59 @@ public:
                 _speed[1] = std::max(_speed.Y(), 0.0f);
             }
         }
+        _radius = appearance.radius;
+        // Override only this puff's generic smoke expansion/thinning. Keep its
+        // weather-lit RGB, sheet animation and containment; no emissive flag.
+        _constantColor = PackedColorRGB(_constantColor, int(appearance.opacity * 255));
+        SetOrientScaleOnly(RotorLandCullScale(_radius, _shapeSphere));
+    }
+    void Draw(int level, ClipFlags, const FrameBase& frame) override
+    {
+        if (level == LOD_INVISIBLE || _radius <= 0 || Invisible()) return;
+        Shape* shape = GetShape()->LevelOpaque(level);
+        if (!shape || shape->NFaces() != 1) return;
+        const Camera& camera = *GScene->GetCamera();
+        Vector3 projected = GScene->ScaledInvTransform() * frame.Position();
+        const float nearest = camera.Near() * 10;
+        if (projected.Z() < nearest) return;
+        Animate(level);
+        const Matrix4& projection = camera.Projection();
+        const float inverseZ = 1 / projected.Z();
+        const float halfX = projection(0,0) * _radius * inverseZ * camera.InvLeft();
+        const float halfY = -projection(1,1) * _radius * inverseZ * camera.InvTop();
+        projected[0] = projection(0,2) + projection(0,0) * projected[0] * inverseZ;
+        projected[1] = projection(1,2) + projection(1,1) * projected[1] * inverseZ;
+        const float inverseNear = 1 / floatMax(projected.Z() - _radius, nearest);
+        projected[2] = projection(2,2) + projection.Position()[2] * inverseNear;
+        // Preserve the established decal's weather/eye lighting rather than
+        // turning the larger sheet into an unlit bright overlay.
+        TLMaterial material;
+        material.ambient = HWhite;
+        material.diffuse = HWhite * .25f;
+        material.emmisive = HBlack;
+        material.forcedDiffuse = HWhite * .25f;
+        material.specFlags = 0;
+        LightSun* sun = GScene->MainLight();
+        sun->SetMaterial(material);
+        Color light = sun->FullResult(.5f);
+        if (sun->NightEffect() > .01f)
+        {
+            const LightList& lights = GScene->ActiveLights();
+            const Matrix4 worldToModel(MTranslation,-frame.Position());
+            for (int i=0;i<lights.Size();++i)
+            {
+                lights[i]->Prepare(worldToModel);
+                lights[i]->SetMaterial(material);
+                light += lights[i]->Apply(VZero,VForward);
+            }
+        }
+        light = light * GEngine->GetAccomodateEye(); light.SetA(1);
+        Color colour = light * (ColorVal)GetConstantColor();
+        colour.SetA(colour.A() * (1 - GScene->Fog8(frame.Position().Distance2(camera.Position())) / 255.0f));
+        const MipInfo mip = GEngine->TextBank()->UseMipmap(shape->FaceIndexed(0).GetTexture(),0,0);
+        if (mip.IsOK()) GEngine->DrawDecal(projected,inverseNear,halfX,halfY,PackedColor(colour),mip,
+            ClampU|ClampV|NoZWrite|IsAlpha|IsAlphaFog|NoShadow|IsColored|IsAlphaOrdered);
+        Deanimate(level);
     }
 };
 
@@ -455,7 +555,7 @@ void Helicopter::EmitLandRotorRing(float dt, SimulationImportance prec)
     if (_landRotorTime < 0.25f) return;
     _landRotorTime -= 0.25f;
     LODShapeWithShadow* shape = GScene->Preloaded(CloudletBasic);
-    if (!shape) return;
+    if (!shape || RotorLandCullScale(RotorLandMaxRadius,shape->BoundingSphere()) <= 0) return;
     static Ref<CloudletTTable> table = [] {
         auto* colours = new CloudletTTable; colours->Add(10000, HWhite); return colours;
     }();
@@ -474,49 +574,69 @@ void Helicopter::EmitLandRotorRing(float dt, SimulationImportance prec)
     unsigned emitted = 0, snowPuffs = 0, blocked = 0;
     for (unsigned spoke = 0; spoke < 8 && RotorLandPuff::Live < RotorLandPuff::MaxLive; ++spoke)
     {
-        if (!probeBudget.Take(Glob.time.toFloat())) break;
-        const auto offset = RotorGroundRing(_landRotorPhase, spoke, wash.discRadius);
+        // Rotate the first sector so the five-probe budget does not privilege
+        // the same six sectors on every clear-ground pulse.
+        const auto offset = RotorGroundRing(_landRotorPhase, (spoke + _landRotorPhase) % 8, wash.discRadius);
         const float x = centre.X() + offset[0], z = centre.Z() + offset[1];
         const float extent = GLandscape->GetLandRange() * GLandscape->GetLandGrid();
         if (!(x >= 0 && z >= 0 && x < extent && z < extent)) continue;
         const float ground = GLandscape->SurfaceY(x, z);
         if (!std::isfinite(ground) || ground <= GLandscape->GetSeaLevel() + 0.03f) continue;
         const Vector3 origin(x, ground + 0.15f, z);
-        Object* roadway = nullptr;
-        const float support = GLandscape->RoadSurfaceY(origin, nullptr, nullptr, nullptr, &roadway);
-        const auto water = GRainWater().At(x, z);
-        const auto& surface = GLandscape->SurfaceAt(x, z);
-        const float remainingSnow = std::max(0.0f, GSnow().BaseDepthAt(x, z) -
-            GSnow().DeficitAt(int(std::floor(x / SnowField::CellSize)), int(std::floor(z / SnowField::CellSize))));
-        auto emission = RotorGroundPolicy(_rotorSpeed, centre.Y() - ground, DirectionUp().Y(),
-            surface._dustness, remainingSnow, std::max(GMud().Wetness(), GSand().Wetness()),
-            rain, water.depth, water.valid, true, false, roadway || !std::isfinite(support) || support > ground + 0.1f);
-        emission.density = std::clamp(emission.density * airflowScale, 0.0f, 1.0f);
-        if (emission.density < 0.025f) continue;
-        // The airflow must actually reach this spoke. Ignore only its own
-        // helicopter, retaining roof/tree/bridge geometry in the physical ray.
-        CollisionBuffer hits;
-        GLandscape->ObjectCollision(hits, nullptr, this, origin, centre, 0.05f, ObjIntersectView);
-        if (hits.Size()) { ++blocked; continue; }
-        auto* puff = new RotorLandPuff(shape);
+        RotorGroundEmission emission;
+        bool proven = true, exhausted = false;
+        for (unsigned probe = 0; probe < 5; ++probe)
+        {
+            if (!probeBudget.Take(Glob.time.toFloat())) { proven = false; exhausted = true; break; }
+            const auto edge = RotorLandFootprint(probe);
+            const float px = x + edge[0], pz = z + edge[1];
+            if (!(px >= 0 && pz >= 0 && px < extent && pz < extent)) { proven = false; break; }
+            const float height = GLandscape->SurfaceY(px,pz);
+            if (!std::isfinite(height) || height <= GLandscape->GetSeaLevel()+.03f ||
+                std::abs(height-ground) > 1.0f) { proven = false; break; }
+            const Vector3 point(px,height+.15f,pz);
+            Object* roadway = nullptr;
+            const float support = GLandscape->RoadSurfaceY(point,nullptr,nullptr,nullptr,&roadway);
+            const auto water = GRainWater().At(px,pz);
+            const auto& surface = GLandscape->SurfaceAt(px,pz);
+            const float remainingSnow = std::max(0.0f,GSnow().BaseDepthAt(px,pz)-
+                GSnow().DeficitAt(int(std::floor(px/SnowField::CellSize)),int(std::floor(pz/SnowField::CellSize))));
+            auto candidate = RotorGroundPolicy(_rotorSpeed,centre.Y()-height,DirectionUp().Y(),
+                surface._dustness,remainingSnow,std::max(GMud().Wetness(),GSand().Wetness()),
+                rain,water.depth,water.valid,true,false,roadway || !std::isfinite(support) || support > height+.1f);
+            candidate.density = std::clamp(candidate.density*airflowScale,0.0f,1.0f);
+            if (candidate.density < .025f || (probe && candidate.snow != emission.snow)) { proven = false; break; }
+            if (!probe) emission = candidate;
+            else emission.density = std::min(emission.density,candidate.density);
+            // Thin ray radius is not a swept narrowphase in Object::Intersect.
+            // A bounded conservative object-sphere refusal closes gaps between
+            // the five physical rays, including a small roof between taps.
+            if (!probe && !LandRotorBoundsClear(point,centre,this)) { ++blocked; proven=false; break; }
+            CollisionBuffer hits;
+            GLandscape->ObjectCollision(hits,nullptr,this,point,centre,.05f,ObjIntersectView);
+            if (hits.Size()) { ++blocked; proven = false; break; }
+        }
+        if (exhausted) break;
+        if (!proven) continue;
+        auto* puff = new RotorLandPuff(shape,origin,emission.density,emission.snow);
         Vector3 velocity = EvaluateRotorWash(wash, origin);
         velocity[1] = emission.snow ? 0.7f : 0.35f;
         puff->SetPosition(origin); puff->SetSpeed(velocity);
         puff->SetSideSpeed(0, 0, 0, 0);
         puff->SetClimbRate(-0.2f, -0.3f, 2.0f);
-        puff->SetFades(0.15f, 0.65f);
-        puff->SetGrowUp(0.25f, emission.snow ? 1.4f : 1.9f);
-        puff->SetAlpha((emission.snow ? 0.3f : 0.24f) * emission.density);
-        puff->SetColor(emission.snow ? Color(0.96f, 0.98f, 1.0f) : Color(0.56f, 0.49f, 0.37f));
-        puff->SetTemperature(0, 0, table); puff->SetShadeOrigin(centre, 1.45f);
+        puff->SetFades(0.12f, 0.65f);
+        puff->SetGrowUp(0.25f, 1.0f); // private profile supplies actual metre radius
+        puff->SetAlpha(.2f);
+        puff->SetColor(emission.snow ? Color(0.90f, 0.94f, 0.98f) : Color(0.62f, 0.53f, 0.39f));
+        puff->SetTemperature(0, 0, table); puff->SetShadeOrigin(Vector3(centre.X(),centreGround,centre.Z()), 1.9f);
         puff->SetSmokeShadow(false);
         GWorld->AddCloudlet(puff); ++emitted; snowPuffs += emission.snow ? 1u : 0u;
     }
     ++_landRotorPhase;
     if (trace && (_landRotorPhase % 8 == 0))
-        LOG_INFO(World, "ROTOR_LAND object={} x={:.2f} y={:.2f} z={:.2f} rpm={:.3f} height={:.2f} emitted={} snow={} sheltered={} live={} rain={:.3f}",
+        LOG_INFO(World, "ROTOR_LAND object={} x={:.2f} y={:.2f} z={:.2f} rpm={:.3f} height={:.2f} emitted={} snow={} sheltered={} live={} rain={:.3f} profile=soft footprint={:.2f}",
             RenderId(), centre.X(), centre.Y(), centre.Z(), _rotorSpeed, centre.Y() - centreGround,
-            emitted, snowPuffs, blocked, RotorLandPuff::Live, rain);
+            emitted, snowPuffs, blocked, RotorLandPuff::Live, rain, RotorLandProofRadius);
 }
 
 void Helicopter::Simulate(float deltaT, SimulationImportance prec)
