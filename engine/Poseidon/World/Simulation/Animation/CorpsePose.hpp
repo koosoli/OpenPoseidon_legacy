@@ -1,11 +1,74 @@
 #pragma once
 
 #include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
+#include <algorithm>
 #include <cmath>
+#include <string>
 #include <vector>
 
 namespace Poseidon
 {
+// Read-only admission measurements, never a solver or a serialized pose.
+struct CorpseLevelDiagnostic
+{
+    int level = -1, points = 0, compared = 0, skippedPointTails = 0, unweighted = 0;
+    std::string role;
+    bool faceEvaluated = false;
+    bool pointOnly = false;
+    float maxPointPaletteError = 0, minAbsDeterminant = 0;
+    Vector3 paletteMin = VZero, paletteMax = VZero;
+    std::vector<Matrix4> palette;
+};
+struct CorpseProxyDiagnostic
+{
+    int level = -1;
+    std::string selection;
+    Matrix4 matrix = MIdentity;
+};
+struct CorpseHullDiagnostic
+{
+    std::string name, bone;
+    int points = 0;
+    bool exclusiveFullWeight = false;
+    Vector3 worldMin = VZero, worldMax = VZero;
+    float minRoadSupportClearance = 0;
+    int externalCenterRayHits = 0;
+};
+struct CorpseAnchorDiagnostic
+{
+    std::string first, second;
+    int sharedVertices = 0;
+    Vector3 modelAnchor = VZero, firstWorld = VZero, secondWorld = VZero;
+    float separation = 0;
+};
+struct CorpsePoseDiagnostic
+{
+    std::string model, entity;
+    int capturedMs = 0, measuredMs = 0;
+    bool headIdentityFlag = false, gunIdentityFlag = false;
+    float headIdentityError = 0, gunIdentityError = 0, legIdentityError = 0;
+    Matrix4 headCorrection = MIdentity, gunCorrection = MIdentity, legCorrection = MIdentity;
+    std::vector<std::string> bones;
+    std::vector<CorpseLevelDiagnostic> levels;
+    std::vector<CorpseProxyDiagnostic> proxies;
+    std::vector<CorpseHullDiagnostic> hulls;
+    std::vector<CorpseAnchorDiagnostic> anchors;
+};
+
+inline float CorpseMatrixIdentityError(Matrix4Val matrix)
+{
+    float error = 0;
+    for (int row = 0; row < 3; ++row)
+        for (int col = 0; col < 4; ++col)
+            error = std::max(error, std::abs(matrix(row, col) - float(row == col)));
+    return error;
+}
+
+inline float CorpseMatrixDeterminant(Matrix4Val matrix)
+{
+    return matrix.DirectionAside() * matrix.DirectionUp().CrossProduct(matrix.Direction());
+}
+
 // Owned phase data, deliberately not a quaternion or an already blended palette.
 // Point, Matrix and PrepareMatrices have different floating-point operation orders.
 // Preserve each one, including authored scale/shear and skeleton-tail identity.

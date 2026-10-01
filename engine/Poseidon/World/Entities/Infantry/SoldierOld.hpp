@@ -638,7 +638,9 @@ class Man: public Person
     bool CaptureCorpsePose(RString& refusal);
     bool UseCorpsePose() const;
     void PrepareBasePose(Matrix4Array& matrices) const;
+    void PrepareCorrectedPose(int level, Matrix4Array& matrices) const;
     RString CompareCorpsePose() const;
+    bool InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal) const;
 
 	void SetPrimaryMove(MotionPathItem item);
 	bool ChangeMoveQueue(MotionPathItem item);
@@ -672,6 +674,7 @@ class Man: public Person
 
     void ClearCorpsePose() const;
     static RString CorpsePoseProbe(const char* command);
+    static bool GetCorpsePoseDiagnostic(CorpsePoseDiagnostic& result, RString& refusal);
 
 	
 	const ManType *Type() const

@@ -923,6 +923,224 @@ RString Man::CompareCorpsePose() const
     return result;
 }
 
+bool Man::GetCorpsePoseDiagnostic(CorpsePoseDiagnostic& result, RString& refusal)
+{
+    result = {};
+    Man* man = g_corpsePoseOwner.GetLink();
+    if (!man || !man->UseCorpsePose()) { refusal = "no-valid-hold"; return false; }
+    return man->InspectCorpsePose(result, refusal);
+}
+
+bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal) const
+{
+    refusal = "stock-western-model-required";
+    std::string model = _shape->Name();
+    std::replace(model.begin(), model.end(), '/', '\\');
+    if (strcmpi(model.c_str(), "data3d\\mc vojakw2.p3d") != 0) return false;
+    refusal = "finite-correction-or-world-transform-required";
+    if (!_headTrans.IsFinite() || !_gunTrans.IsFinite() || !_legTrans.IsFinite() || !Transform().IsFinite()) return false;
+    Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
+    if (!GLandscape || !skeleton || skeleton->NBones() > 128 || _shape->NLevels() > MAX_LOD_LEVELS) return false;
+    CorpsePoseDiagnostic candidate;
+    candidate.model = _shape->Name();
+    char identity[64];
+    std::snprintf(identity, sizeof(identity), "%p", static_cast<const void*>(this));
+    candidate.entity = identity;
+    candidate.capturedMs = _corpsePoseLease.capturedMs;
+    candidate.measuredMs = Glob.time.toInt();
+    candidate.headIdentityFlag = _headTransIdent;
+    candidate.gunIdentityFlag = _gunTransIdent;
+    candidate.headCorrection = _headTrans;
+    candidate.gunCorrection = _gunTrans;
+    candidate.legCorrection = _legTrans;
+    candidate.headIdentityError = CorpseMatrixIdentityError(_headTrans);
+    candidate.gunIdentityError = CorpseMatrixIdentityError(_gunTrans);
+    candidate.legIdentityError = CorpseMatrixIdentityError(_legTrans);
+    for (int bone = 0; bone < skeleton->NBones(); ++bone)
+        candidate.bones.emplace_back(static_cast<const char*>(skeleton->GetBone(bone)));
+    const char* names[] = {"pchodidlo", "lchodidlo", "pprsty", "lprsty", "lholen", "pholen", "pstehno", "lstehno",
+        "pzadek", "lzadek", "bricho", "zebra", "hrudnik", "krk", "prameno", "lrameno", "hlava", "pbiceps",
+        "lbiceps", "ploket", "lloket", "roura", "zbran", "pruka", "lruka"};
+    refusal = "complete-stock-bone-names-required";
+    for (const char* name : names) if (skeleton->FindBone(name) < 0) return false;
+    const WeightInfo& weights = Type()->GetWeights();
+    const int sourceLevels[] = {0, _shape->FindMemoryLevel(), _shape->FindGeometryLevel(),
+        _shape->FindFireGeometryLevel(), _shape->FindViewGeometryLevel(), _shape->FindLandContactLevel()};
+    const char* roles[] = {"graphical0", "memory", "geometry", "fireGeometry", "viewGeometry", "landContact"};
+    for (int role = 0; role < 6; ++role)
+        if (sourceLevels[role] < 0 || sourceLevels[role] >= _shape->NLevels())
+        { refusal = "stock-special-lod-missing"; return false; }
+    for (int level = 0; level < _shape->NLevels(); ++level)
+    {
+        Shape* shape = _shape->Level(level);
+        if (!shape || shape->NPos() <= 0 || shape->NPos() > 4096) { refusal = "bounded-stock-points-required"; return false; }
+        CorpseLevelDiagnostic measured;
+        measured.level = level;
+        measured.role = "other";
+        for (int role = 0; role < 6; ++role)
+            if (sourceLevels[role] == level)
+            {
+                if (measured.role == "other") measured.role = roles[role];
+                else measured.role += std::string("+") + roles[role];
+            }
+        measured.points = shape->NPos();
+        measured.pointOnly = shape->NPos() == 1;
+        MATRIX_4_ARRAY(palette, 128);
+        PrepareCorrectedPose(level, palette);
+        measured.faceEvaluated = _head.EvaluateDeadFaceBones(Type()->_head, weights, level, palette, _isDead);
+        if (palette.Size() != skeleton->NBones()) { refusal = "complete-palette-required"; return false; }
+        for (int bone = 0; bone < palette.Size(); ++bone)
+        {
+            if (!palette[bone].IsFinite()) { refusal = "nonfinite-final-palette"; return false; }
+            const float determinant = std::abs(CorpseMatrixDeterminant(palette[bone]));
+            if (!std::isfinite(determinant)) { refusal = "nonfinite-final-determinant"; return false; }
+            if (bone == 0) measured.minAbsDeterminant = determinant;
+            else measured.minAbsDeterminant = std::min(measured.minAbsDeterminant, determinant);
+            measured.palette.push_back(palette[bone]);
+        }
+        for (int p = 0; p < shape->NPos(); ++p)
+        {
+            const AnimationRTWeight& weight = weights[level][p];
+            for (int w = 0; w < weight.Size(); ++w)
+                if (weight[w].GetSel() < 0 || weight[w].GetSel() >= palette.Size())
+                { refusal = "final-point-weight-range"; return false; }
+            const Vector3 projected = AnimationRT::ApplyMatricesPoint(weights[level], _shape, level, palette, p);
+            if (!projected.IsFinite()) { refusal = "nonfinite-final-point"; return false; }
+            if (p == 0) measured.paletteMin = measured.paletteMax = projected;
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                measured.paletteMin[axis] = std::min(measured.paletteMin[axis], projected[axis]);
+                measured.paletteMax[axis] = std::max(measured.paletteMax[axis], projected[axis]);
+            }
+            if (weight.Size() <= 0) ++measured.unweighted;
+            if ((_corpsePosePrimary.Valid() && !_corpsePosePrimary.SupportsPoint(weight)) ||
+                (_corpsePoseSecondary.Valid() && !_corpsePoseSecondary.SupportsPoint(weight)))
+            { ++measured.skippedPointTails; continue; }
+            const Vector3 actual = AnimatePoint(level, p);
+            if (!actual.IsFinite()) { refusal = "nonfinite-special-point"; return false; }
+            const float error = (actual - projected).Size();
+            if (!std::isfinite(error)) { refusal = "nonfinite-point-discrepancy"; return false; }
+            ++measured.compared;
+            measured.maxPointPaletteError = std::max(measured.maxPointPaletteError, error);
+        }
+        for (int i = 0; i < shape->NProxies(); ++i)
+        {
+            const ProxyObject& proxy = shape->Proxy(i);
+            if (proxy.selection < 0 || proxy.selection >= shape->NNamedSel() ||
+                shape->NamedSel(proxy.selection).Size() <= 0) continue;
+            const int proxyPoint = shape->NamedSel(proxy.selection)[0];
+            if (proxyPoint < 0 || proxyPoint >= shape->NPos()) { refusal = "proxy-point-range"; return false; }
+            if (GetProxyWeights(level, proxy).Size() <= 0) continue;
+            CorpseProxyDiagnostic item;
+            item.level = level;
+            item.selection = shape->NamedSel(proxy.selection).Name();
+            item.matrix = AnimateProxyMatrix(level, proxy);
+            if (!item.matrix.IsFinite()) { refusal = "nonfinite-proxy"; return false; }
+            candidate.proxies.push_back(std::move(item));
+        }
+        if (level == _shape->FindFireGeometryLevel())
+        {
+            // Inspect actual runtime authored membership, not the offline raw PCA.
+            for (int component = 1; component <= 14; ++component)
+            {
+                char name[32];
+                std::snprintf(name, sizeof(name), "component%02d", component);
+                const int selection = shape->FindNamedSel(name);
+                if (selection < 0) { refusal = "stock-fire-component-missing"; return false; }
+                const NamedSelection& selected = shape->NamedSel(selection);
+                if (selected.Size() <= 0 || selected.Size() > 64) { refusal = "bounded-fire-component-required"; return false; }
+                CorpseHullDiagnostic hull;
+                hull.name = name;
+                hull.points = selected.Size();
+                hull.exclusiveFullWeight = true;
+                int bodyBone = -1;
+                Vector3 center = VZero;
+                for (int i = 0; i < selected.Size(); ++i)
+                {
+                    const int p = selected[i];
+                    if (p < 0 || p >= shape->NPos()) { refusal = "fire-component-point-range"; return false; }
+                    const AnimationRTWeight& weight = weights[level][p];
+                    if (weight.Size() != 1 || weight[0].GetWeight() != 1.0f) hull.exclusiveFullWeight = false;
+                    const int bone = weight.Size() == 1 ? weight[0].GetSel() : -1;
+                    if (i == 0) bodyBone = bone;
+                    if (bone != bodyBone) hull.exclusiveFullWeight = false;
+                    const Vector3 world = PositionModelToWorld(AnimatePoint(level, p));
+                    const float support = GLandscape->RoadSurfaceY(world + VUp * 0.5f);
+                    if (!world.IsFinite() || !std::isfinite(support)) { refusal = "nonfinite-hull-support"; return false; }
+                    center += world;
+                    if (i == 0)
+                    {
+                        hull.worldMin = hull.worldMax = world;
+                        hull.minRoadSupportClearance = world.Y() - support;
+                    }
+                    for (int axis = 0; axis < 3; ++axis)
+                    {
+                        hull.worldMin[axis] = std::min(hull.worldMin[axis], world[axis]);
+                        hull.worldMax[axis] = std::max(hull.worldMax[axis], world[axis]);
+                    }
+                    hull.minRoadSupportClearance = std::min(hull.minRoadSupportClearance, world.Y() - support);
+                }
+                if (bodyBone >= 0) hull.bone = candidate.bones[bodyBone];
+                center *= 1.0f / selected.Size();
+                // Two bounded real geometry rays, ignoring the corpse. This is not
+                // a convex-overlap/contact admission: expose that limitation to callers.
+                CollisionBuffer external;
+                GLandscape->ObjectCollision(external, const_cast<Man*>(this), const_cast<Man*>(this),
+                    center - VUp * 0.5f, center + VUp * 0.5f, 0, ObjIntersectGeom);
+                hull.externalCenterRayHits = external.Size();
+                candidate.hulls.push_back(std::move(hull));
+            }
+        }
+        candidate.levels.push_back(std::move(measured));
+    }
+    Shape* graphical = _shape->Level(0);
+    const auto& final = candidate.levels.front().palette;
+    const char* boundaries[][2] = {{"krk", "hlava"}, {"prameno", "pbiceps"}, {"lrameno", "lbiceps"},
+        {"pbiceps", "ploket"}, {"lbiceps", "lloket"}, {"pzadek", "pstehno"}, {"lzadek", "lstehno"},
+        {"pstehno", "pholen"}, {"lstehno", "lholen"}};
+    graphical->SaveOriginalPos();
+    for (const auto& boundary : boundaries)
+    {
+        CorpseAnchorDiagnostic anchor;
+        anchor.first = boundary[0]; anchor.second = boundary[1];
+        int first = graphical->FindNamedSel(boundary[0]), second = graphical->FindNamedSel(boundary[1]);
+        if (first < 0 || second < 0) { refusal = "stock-anchor-selection-missing"; return false; }
+        const NamedSelection& a = graphical->NamedSel(first);
+        const NamedSelection& b = graphical->NamedSel(second);
+        if (a.Size() > 4096 || b.Size() > 4096) { refusal = "bounded-anchor-selection-required"; return false; }
+        float total = 0;
+        for (int i = 0; i < a.Size(); ++i)
+        {
+            if (a[i] < 0 || a[i] >= graphical->NPos()) { refusal = "anchor-point-range"; return false; }
+            const int other = b.Find(a[i]);
+            if (other < 0) continue;
+            float weight = float(std::min(a.Weight(i), b.Weight(other)));
+            if (weight <= 0) continue;
+            bool proxy = false;
+            for (int s = 0; s < graphical->NNamedSel(); ++s)
+                if (std::strncmp(graphical->NamedSel(s).Name(), "proxy:", 6) == 0 &&
+                    graphical->NamedSel(s).IsSelected(a[i])) { proxy = true; break; }
+            if (proxy) continue;
+            anchor.modelAnchor += graphical->OrigPos(a[i]) * weight;
+            total += weight; ++anchor.sharedVertices;
+        }
+        if (total > 0)
+        {
+            anchor.modelAnchor *= 1.0f / total;
+            anchor.firstWorld = PositionModelToWorld(final[skeleton->FindBone(boundary[0])] * anchor.modelAnchor);
+            anchor.secondWorld = PositionModelToWorld(final[skeleton->FindBone(boundary[1])] * anchor.modelAnchor);
+            anchor.separation = (anchor.firstWorld - anchor.secondWorld).Size();
+            if (!anchor.firstWorld.IsFinite() || !anchor.secondWorld.IsFinite() || !std::isfinite(anchor.separation))
+            { refusal = "nonfinite-anchor"; return false; }
+        }
+        candidate.anchors.push_back(std::move(anchor));
+    }
+    if (!UseCorpsePose()) { refusal = "hold-retired-during-measurement"; return false; }
+    result = std::move(candidate);
+    refusal = "";
+    return true;
+}
+
 RString Man::CorpsePoseProbe(const char* command)
 {
     if (!command) return "REFUSED corpse-command missing";

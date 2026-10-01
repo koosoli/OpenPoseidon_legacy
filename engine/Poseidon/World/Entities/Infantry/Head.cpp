@@ -476,10 +476,26 @@ void SetupFaceBoneRig(Skeleton* skeleton, LODShapeWithShadow* lShape, WeightInfo
 }
 } // namespace Poseidon
 
-bool Head::ApplyFaceBones(const HeadType& /*type*/, const WeightInfo& weights, int level, Matrix4Array& matrices,
-                          bool isDead)
+bool Head::ApplyFaceBones(const HeadType& type, const WeightInfo& weights, int level,
+                          Matrix4Array& matrices, bool isDead)
 {
-    _faceBonesActive = false;
+    return ApplyFaceBonesImpl(type, weights, level, matrices, isDead, true);
+}
+
+bool Head::EvaluateDeadFaceBones(const HeadType& type, const WeightInfo& weights, int level,
+                                 Matrix4Array& matrices, bool isDead) const
+{
+    if (!isDead) return false;
+    // The dead/read-only branch neither samples lips nor writes this head or
+    // counters. Do not copy Head: its legacy SRef lip pointer transfers on copy.
+    return const_cast<Head*>(this)->ApplyFaceBonesImpl(type, weights, level, matrices, true, false);
+}
+
+bool Head::ApplyFaceBonesImpl(const HeadType& /*type*/, const WeightInfo& weights, int level, Matrix4Array& matrices,
+                          bool isDead, bool recordState)
+{
+    if (!recordState && !isDead) return false;
+    if (recordState) _faceBonesActive = false;
     const int base = weights._faceBoneBase;
     if (base < 0 || level < 0 || level >= MAX_LOD_LEVELS)
     {
@@ -581,12 +597,12 @@ bool Head::ApplyFaceBones(const HeadType& /*type*/, const WeightInfo& weights, i
         Matrix4 m = matrices[p];
         m.SetPosition(m.Position() + delta[g] * gain);
         matrices[base + g] = m;
-        if (delta[g].SquareSize() > 1e-12f)
+        if (recordState && delta[g].SquareSize() > 1e-12f)
         {
             GFaceDiag().offsets++;
         }
     }
-    _faceBonesActive = true;
+    if (recordState) _faceBonesActive = true;
     return true;
 }
 

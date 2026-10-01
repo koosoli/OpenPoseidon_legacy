@@ -986,26 +986,9 @@ void Man::RequestFaceCpuPose(int level)
     FaceDiagTick("request");
 }
 
-void Man::Animate(int level)
+void Man::PrepareCorrectedPose(int level, Matrix4Array& matrix) const
 {
-    Shape* shape = _shape->Level(level);
-    if (!shape)
-    {
-        return;
-    }
-    RequestFaceCpuPose(level);
     const ManType* type = Type();
-
-    // check for special case: animating one-point level
-    if (shape->NPos() == 1)
-    {
-        // singular case
-        shape->SaveOriginalPos();
-        shape->SetPos(0) = AnimatePoint(level, 0);
-        return;
-    }
-    MATRIX_4_ARRAY(matrix, 128);
-
     PrepareBasePose(matrix);
 
     if (matrix.Size() > 0)
@@ -1040,6 +1023,33 @@ void Man::Animate(int level)
                                           legsRes.Size());
         }
 
+    }
+}
+
+void Man::Animate(int level)
+{
+    Shape* shape = _shape->Level(level);
+    if (!shape)
+    {
+        return;
+    }
+    RequestFaceCpuPose(level);
+    const ManType* type = Type();
+
+    // check for special case: animating one-point level
+    if (shape->NPos() == 1)
+    {
+        // singular case
+        shape->SaveOriginalPos();
+        shape->SetPos(0) = AnimatePoint(level, 0);
+        return;
+    }
+    MATRIX_4_ARRAY(matrix, 128);
+
+    PrepareCorrectedPose(level, matrix);
+
+    if (matrix.Size() > 0)
+    {
         // FACE-002: the face pose rides reserved bones of this object's own palette. It has
         // to be written after the head/aiming/legs CombineTransform above (it reads the
         // parent bone's final orientation) and before ApplyMatrices consumes the array.

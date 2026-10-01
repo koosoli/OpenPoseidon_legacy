@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/World/Simulation/Animation/CorpsePose.hpp>
+#include <Poseidon/World/Entities/Infantry/Head.hpp>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -73,6 +74,91 @@ void SameMatrix(const Matrix4& a, const Matrix4& b)
 {
     REQUIRE(std::memcmp(&a, &b, sizeof(Matrix4)) == 0);
 }
+}
+
+TEST_CASE("Corpse diagnostic dead-face evaluation is production-equivalent without stealing lip state or counters",
+          "[corpse-pose][animation][face-rig]")
+{
+    HeadType type;
+    Head head(type, nullptr);
+    head._lipInfo = new ManLipInfo;
+    ManLipInfo* lip = head._lipInfo;
+    head._mimicPhase = 0.37f;
+    head._lBrowOld = Vector3(0.011f, -0.013f, 0.017f);
+    head._lBrow = Vector3(-0.019f, 0.023f, 0.029f);
+    head._faceBonesActive = true;
+    WeightInfo weights;
+    weights._faceBoneBase = 1;
+    for (int group = 0; group < NFaceGroups; ++group) weights._faceParent[0][group] = 0;
+    MATRIX_4_ARRAY(actual, 128);
+    MATRIX_4_ARRAY(evaluated, 128);
+    actual.Resize(1 + NFaceGroups); evaluated.Resize(1 + NFaceGroups);
+    for (int i = 0; i < actual.Size(); ++i)
+    {
+        actual[i] = Matrix4(MScale, 1.2f, 0.8f, 1.1f);
+        actual[i](0, 1) = 0.21f;
+        actual[i].SetPosition(Vector3(0.31f, -0.57f, 0.73f));
+        evaluated[i] = actual[i];
+    }
+    const auto offsets = GFaceDiag().offsets;
+    REQUIRE(head.EvaluateDeadFaceBones(type, weights, 0, evaluated, true));
+    REQUIRE(head._faceBonesActive);
+    REQUIRE(static_cast<ManLipInfo*>(head._lipInfo) == lip);
+    REQUIRE(GFaceDiag().offsets == offsets);
+    REQUIRE(head.ApplyFaceBones(type, weights, 0, actual, true));
+    for (int i = 0; i < actual.Size(); ++i) SameMatrix(actual[i], evaluated[i]);
+    REQUIRE(static_cast<ManLipInfo*>(head._lipInfo) == lip);
+
+    // Nondead evaluation must never sample GetPhase or mutate the output/state.
+    Matrix4 unchanged = evaluated[0];
+    REQUIRE_FALSE(head.EvaluateDeadFaceBones(type, weights, 0, evaluated, false));
+    SameMatrix(unchanged, evaluated[0]);
+    REQUIRE(static_cast<ManLipInfo*>(head._lipInfo) == lip);
+    weights._faceBoneBase = evaluated.Size();
+    REQUIRE_FALSE(head.EvaluateDeadFaceBones(type, weights, 0, evaluated, true));
+    REQUIRE(head._faceBonesActive);
+    SameMatrix(unchanged, evaluated[0]);
+}
+
+TEST_CASE("Corpse diagnostic measures the actual mixed-weight correction discrepancy rather than assuming final LBS equivalence",
+          "[corpse-pose][animation]")
+{
+    LODShape lod;
+    Shape* shape = new Shape;
+    shape->Init(1);
+    const Vector3 original(0.23f, -0.47f, 0.61f);
+    shape->SetPos(0) = original;
+    SelInfo a[] = {SelInfo(0, 173)}, b[] = {SelInfo(0, 82)};
+    shape->AddNamedSel(NamedSelection("a", a, 1, nullptr, 0));
+    shape->AddNamedSel(NamedSelection("b", b, 1, nullptr, 0));
+    lod.AddShape(shape, 0);
+    WeightInfo weights;
+    weights[0].Init(shape);
+    weights[0].AddSelection(shape, 0, 0);
+    weights[0].AddSelection(shape, 1, 1);
+    weights[0].Normalize();
+    MATRIX_4_ARRAY(base, 128);
+    base.Resize(2);
+    base[0] = Matrix4(MScale, 1.2f, 0.8f, 1.1f);
+    base[0](0, 1) = 0.27f;
+    base[1] = Matrix4(MTranslation, Vector3(0.73f, -0.37f, 0.19f));
+    MATRIX_4_ARRAY(corrected, 128);
+    corrected.Resize(2); corrected[0] = base[0]; corrected[1] = base[1];
+    const Matrix4 correction(MRotationY, 0.43f);
+    BlendAnimInfo blend[2];
+    blend[0].matrixIndex = 0; blend[0].factor = 1;
+    blend[1].matrixIndex = 1; blend[1].factor = 0.23f;
+    Vector3 point = AnimationRT::ApplyMatricesPoint(weights[0], &lod, 0, base, 0);
+    AnimationRT::TransformPoint(point, weights[0], shape, correction, blend, 2, 0);
+    AnimationRT::CombineTransform(weights, &lod, 0, corrected, correction, blend, 2);
+    const Vector3 palettePoint = AnimationRT::ApplyMatricesPoint(weights[0], &lod, 0, corrected, 0);
+    REQUIRE(point.IsFinite()); REQUIRE(palettePoint.IsFinite());
+    REQUIRE((point - palettePoint).Size() > 0.001f);
+    REQUIRE(CorpseMatrixIdentityError(MIdentity) == 0);
+    REQUIRE(CorpseMatrixIdentityError(base[0]) > 0.2f);
+    REQUIRE(CorpseMatrixIdentityError(base[1]) > 0.7f);
+    REQUIRE(CorpseMatrixDeterminant(MIdentity) == 1);
+    REQUIRE(std::abs(CorpseMatrixDeterminant(base[0]) - 1.056f) < 0.000001f);
 }
 
 TEST_CASE("Corpse phase capture preserves actual nonrigid RTM palettes and additive blend order", "[corpse-pose][animation]")

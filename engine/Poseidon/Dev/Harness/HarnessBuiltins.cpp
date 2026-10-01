@@ -2677,6 +2677,100 @@ void RegisterSnowProbe(HarnessServer& hs)
 
 void RegisterPhysicsProbe(HarnessServer& hs)
 {
+    hs.RegisterCommand({"corpse_pose_state", "Read-only complete stock corpse pose admission measurements", {}},
+        [](const std::string&, cJSON*) -> std::string {
+            if (!AppConfig::Instance().DevMode() || !GWorld || GWorld->GetMode() != GModeArcade)
+                return HarnessProtocol::ErrorResponse("corpse pose diagnostic requires --dev and local single player");
+            CorpsePoseDiagnostic measured;
+            RString refusal;
+            if (!Man::GetCorpsePoseDiagnostic(measured, refusal))
+                return HarnessProtocol::ErrorResponse(static_cast<const char*>(refusal));
+            auto vector = [](Vector3Val value) {
+                const double xyz[] = {value.X(), value.Y(), value.Z()};
+                return cJSON_CreateDoubleArray(xyz, 3);
+            };
+            auto matrix = [](Matrix4Val value) {
+                double entries[12];
+                for (int row = 0; row < 3; ++row)
+                    for (int col = 0; col < 4; ++col) entries[row * 4 + col] = value(row, col);
+                return cJSON_CreateDoubleArray(entries, 12);
+            };
+            cJSON* out = cJSON_CreateObject();
+            cJSON_AddBoolToObject(out, "readonly", true);
+            cJSON_AddBoolToObject(out, "solver", false);
+            cJSON_AddBoolToObject(out, "rigAdmitted", false);
+            cJSON_AddBoolToObject(out, "contactAdmitted", false);
+            cJSON_AddStringToObject(out, "contactScope", "road-support clearance and corpse-ignored geometry center ray; not convex overlap");
+            cJSON_AddStringToObject(out, "anchorScope", "shared source selection centroid; paired final-bone endpoints, no calibrated joint frame");
+            cJSON_AddStringToObject(out, "matrixLayout", "row-major 3x4 model-space affine; actual post-head/aim/graphical-leg palette with dead face tail");
+            cJSON_AddStringToObject(out, "entity", measured.entity.c_str());
+            cJSON_AddStringToObject(out, "model", measured.model.c_str());
+            cJSON_AddNumberToObject(out, "capturedMs", measured.capturedMs);
+            cJSON_AddNumberToObject(out, "measuredMs", measured.measuredMs);
+            cJSON_AddBoolToObject(out, "headIdentityFlag", measured.headIdentityFlag);
+            cJSON_AddBoolToObject(out, "gunIdentityFlag", measured.gunIdentityFlag);
+            cJSON_AddNumberToObject(out, "headIdentityError", measured.headIdentityError);
+            cJSON_AddNumberToObject(out, "gunIdentityError", measured.gunIdentityError);
+            cJSON_AddNumberToObject(out, "legIdentityError", measured.legIdentityError);
+            cJSON_AddItemToObject(out, "headCorrection", matrix(measured.headCorrection));
+            cJSON_AddItemToObject(out, "gunCorrection", matrix(measured.gunCorrection));
+            cJSON_AddItemToObject(out, "legCorrection", matrix(measured.legCorrection));
+            auto* bones = cJSON_AddArrayToObject(out, "bones");
+            for (const auto& bone : measured.bones) cJSON_AddItemToArray(bones, cJSON_CreateString(bone.c_str()));
+            auto* levels = cJSON_AddArrayToObject(out, "levels");
+            for (const auto& level : measured.levels)
+            {
+                auto* item = cJSON_CreateObject(); cJSON_AddItemToArray(levels, item);
+                cJSON_AddStringToObject(item, "role", level.role.c_str());
+                cJSON_AddNumberToObject(item, "level", level.level);
+                cJSON_AddNumberToObject(item, "points", level.points);
+                cJSON_AddNumberToObject(item, "compared", level.compared);
+                cJSON_AddNumberToObject(item, "skippedPointTails", level.skippedPointTails);
+                cJSON_AddNumberToObject(item, "unweighted", level.unweighted);
+                cJSON_AddBoolToObject(item, "faceEvaluated", level.faceEvaluated);
+                cJSON_AddBoolToObject(item, "pointOnly", level.pointOnly);
+                cJSON_AddNumberToObject(item, "minAbsDeterminant", level.minAbsDeterminant);
+                cJSON_AddNumberToObject(item, "maxPointPaletteError", level.maxPointPaletteError);
+                cJSON_AddItemToObject(item, "paletteMin", vector(level.paletteMin));
+                cJSON_AddItemToObject(item, "paletteMax", vector(level.paletteMax));
+                auto* palette = cJSON_AddArrayToObject(item, "palette");
+                for (const auto& bone : level.palette) cJSON_AddItemToArray(palette, matrix(bone));
+            }
+            auto* proxies = cJSON_AddArrayToObject(out, "proxies");
+            for (const auto& proxy : measured.proxies)
+            {
+                auto* item = cJSON_CreateObject(); cJSON_AddItemToArray(proxies, item);
+                cJSON_AddNumberToObject(item, "level", proxy.level);
+                cJSON_AddStringToObject(item, "selection", proxy.selection.c_str());
+                cJSON_AddItemToObject(item, "matrix", matrix(proxy.matrix));
+            }
+            auto* hulls = cJSON_AddArrayToObject(out, "hulls");
+            for (const auto& hull : measured.hulls)
+            {
+                auto* item = cJSON_CreateObject(); cJSON_AddItemToArray(hulls, item);
+                cJSON_AddStringToObject(item, "name", hull.name.c_str());
+                cJSON_AddStringToObject(item, "bone", hull.bone.c_str());
+                cJSON_AddNumberToObject(item, "points", hull.points);
+                cJSON_AddBoolToObject(item, "exclusiveFullWeight", hull.exclusiveFullWeight);
+                cJSON_AddItemToObject(item, "worldMin", vector(hull.worldMin));
+                cJSON_AddItemToObject(item, "worldMax", vector(hull.worldMax));
+                cJSON_AddNumberToObject(item, "minRoadSupportClearance", hull.minRoadSupportClearance);
+                cJSON_AddNumberToObject(item, "externalCenterRayHits", hull.externalCenterRayHits);
+            }
+            auto* anchors = cJSON_AddArrayToObject(out, "anchors");
+            for (const auto& anchor : measured.anchors)
+            {
+                auto* item = cJSON_CreateObject(); cJSON_AddItemToArray(anchors, item);
+                cJSON_AddStringToObject(item, "first", anchor.first.c_str());
+                cJSON_AddStringToObject(item, "second", anchor.second.c_str());
+                cJSON_AddNumberToObject(item, "sharedVertices", anchor.sharedVertices);
+                cJSON_AddItemToObject(item, "modelAnchor", vector(anchor.modelAnchor));
+                cJSON_AddItemToObject(item, "firstWorld", vector(anchor.firstWorld));
+                cJSON_AddItemToObject(item, "secondWorld", vector(anchor.secondWorld));
+                cJSON_AddNumberToObject(item, "separation", anchor.separation);
+            }
+            return HarnessProtocol::JsonResponse(out);
+        });
     hs.RegisterCommand({"dev_terrain_brush", "Bounded real single-player terrain edit transaction", {}},
         [](const std::string&,cJSON* root) -> std::string {
             if (!AppConfig::Instance().DevMode() || !GWorld || !GLandscape || GWorld->GetMode()==GModeNetware)

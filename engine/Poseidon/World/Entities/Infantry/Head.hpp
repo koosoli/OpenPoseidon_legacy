@@ -292,11 +292,16 @@ public:
 	// which case Animate/Deanimate must not also offset the shared vertices.
 	bool ApplyFaceBones(const HeadType &type, const WeightInfo &weights, int level,
 	                    Matrix4Array &matrices, bool isDead);
+	// Same dead-face arithmetic without changing this head, lip state or counters.
+	bool EvaluateDeadFaceBones(const HeadType &type, const WeightInfo &weights, int level,
+	                           Matrix4Array &matrices, bool isDead) const;
 
 	// FACE-002: set by ApplyFaceBones; read by Animate/Deanimate to suppress the CPU offsets.
 	bool _faceBonesActive = false;
 
 protected:
+	bool ApplyFaceBonesImpl(const HeadType &type, const WeightInfo &weights, int level,
+	                        Matrix4Array &matrices, bool isDead, bool recordState);
 	void NextRandomLip();
 };
 
