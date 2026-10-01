@@ -2506,7 +2506,7 @@ uint64_t TextureWgpu::EnsureUploaded()
                 return value && value[0] == '1';
             }();
             if (trace)
-                LOG_INFO(Graphics, "MUZZLE_FLASH_SHEET texture={} source={} width={} height={} enabled={} remapped={} alpha=authored-unchanged",
+                LOG_INFO(Graphics, "MUZZLE_FLASH_SHEET texture={} source={} width={} height={} enabled={} remapped={} alpha=authored-bounded",
                          name, SourceName(), width, height, enabled, changed);
         };
         if (render::PreparedTextureStore::Enabled() &&
