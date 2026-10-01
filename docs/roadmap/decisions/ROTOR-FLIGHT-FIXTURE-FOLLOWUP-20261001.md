@@ -40,3 +40,18 @@ requires `triGetCameraEffectActive=0` before actual input. Its installed hover
 acceptance remains pending.
 
 The accepted water downwash producer and renderer are unchanged.
+
+The installed `50db754c` read-only state campaign
+`actual-rotor-authority-20261001-022344-c46f58` resolves the manual fixture's
+engine shutdown. Actual pilot/focus/HeliPilot authority and unsuspended Q input
+are correct. The paused start has zero rotor RPM; after relocation to18m the
+held Q query reports `moveUp=1`, engine on and RPM0.014. The released query
+reports RPM0.016. The aircraft falls, reaches damage1/destroyed, and shuts its
+engine off. This failed campaign exits normally with the installed pair intact;
+it is not a land-particle acceptance.
+
+The runner now lets the actual undamaged aircraft spool on its ground support
+before any hover relocation. It requires engine on, damage0, clearance below6m
+and actual RPM at least0.85, recording the simulated elapsed time. No RPM or
+velocity setter is used. The new gate and sustained hover/particle checks still
+require an installed run.
