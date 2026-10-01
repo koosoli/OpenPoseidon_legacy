@@ -111,3 +111,48 @@ and the real mixed-weight correction discrepancy. Compilation/execution of
 these tests and installed getter/ordinary-death regression checks are pending
 the parent-owned build/runtime window. No GPU, game launch, full build or large
 stock animation corpus was run by this agent.
+
+## Installed runner candidate
+
+`scripts/Test-CorpsePoseDiagnostic.ps1` wraps the proven no-motion installed
+runner through its optional `FinalPoseProbe` callback. Without that callback,
+the original proof's gameplay/lifecycle behavior is unchanged. The wrapper
+uses the same serial game lock, installed pair hashes/stamp, private profile,
+real stock spawn/kill, actual-corpse camera, bounded capture wait and owned
+normal exit. Additional snow depth/rate/flakes/snowline controls are restored
+after the campaign and requested values are retained in provenance.
+
+The callback checks the getter while the initial default has no hold, twice
+under the same paused valid hold, after explicit clear, after actual >30s
+expiry, before and after hiding, on a second stock corpse and after deletion.
+The exact absent-hold error must be `no-valid-hold`; an unknown command or
+missing implementation fails. Raw replies remain in `harness.jsonl`, with
+successful measurements copied in `result.json`. Source line/stack are
+retained on failure. The getter's repeated paused JSON and before/held/cleared
+PNG hashes must be identical; timestamps must remain paused. The normal
+authored-death screenshot is retained as `before-held.png`. No delta setter
+is available or invoked.
+
+Typed finite matrices, correction metrics, complete 25+8 bone coverage, all
+contiguous LODs and required special consumers, actual synthetic face binding,
+proxy matrices, the fourteen measured component mappings and nine paired anchor
+records are required. Mixed-weight discrepancy, anchor gaps and support
+penetration remain recorded evidence; passing this runner still leaves
+`rigAdmitted=false`, `contactAdmitted=false` and `solver=false`.
+
+Source-only validation:
+
+```powershell
+pwsh -NoProfile -File scripts/Test-CorpsePoseDiagnostic.ps1 -SelfTest
+```
+
+The helper test accepts a complete typed mock receipt, then rejects changed
+owner/model, rig admission, nonfinite matrix, lost point coverage, incorrect
+hull mapping, absent face evaluation and expired lease. It also rejects unknown
+and falsely successful refusal replies. These are parser tests, not fabricated
+runtime evidence. Actual installed execution remains pending root ownership:
+
+```powershell
+$env:LOCK_OWNER='corpse-final-pose'
+bash scripts/with-game-lock.sh pwsh -NoProfile -File scripts/Test-CorpsePoseDiagnostic.ps1
+```

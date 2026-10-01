@@ -4,7 +4,9 @@ param(
     [ValidateRange(1,4)][double]$ExpiryAcceleration = 4,
     [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label = 'installed-proof',
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
-    [string]$NativeAddons = 'C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons'
+    [string]$NativeAddons = 'C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons',
+    [scriptblock]$FinalPoseProbe,
+    [string]$FinalPoseProbeSource
 )
 $ErrorActionPreference = 'Stop'
 if (!$env:LOCK_OWNER) { throw 'Run through scripts/with-game-lock.sh.' }
@@ -34,6 +36,7 @@ $log = Join-Path $output 'engine.log'
 $result = [ordered]@{ status = 'running'; scope = 'installed no-motion affine pose and lifecycle proof; no solver or appearance acceptance';
     before = $before; gates = @{}; observations = @{}; captures = @{}; error = $null;
     saveNetwork = 'Not exercised by this runner; no save/network fields were added.' }
+if ($FinalPoseProbe) { $result.scope = 'installed no-motion phase/final-pose measurements and lifecycle proof; no solver, joint or contact admission' }
 $keys = @('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM',
     'POSEIDON_TEST_RAIN','WGR_TEMPORAL','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_GRASS','POSEIDON_WIND_OVERRIDE',
     'WGR_CLOUD_COVERAGE','WGR_LOD_GOVERNOR_RANGE','WGR_TERRAIN_JITTER')
@@ -45,6 +48,8 @@ foreach ($key in $keys) { $savedEnv[$key] = [Environment]::GetEnvironmentVariabl
    camera = 'actual getPosASL corpse, four metres behind and 2.7 metres above';
    fixedDate = @(1985,6,21,16,0); pausedImageComparison = $true; captureDeadlineSeconds = $CaptureDeadlineSeconds;
    expiryAcceleration = $ExpiryAcceleration; temporal = 0; exposure = 1; grass = 0; wind = '0 90 0';
+   finalPoseProbe = if ($FinalPoseProbeSource) { @{ path = $FinalPoseProbeSource; sha256 = (Get-FileHash -LiteralPath $FinalPoseProbeSource).Hash;
+       snowDepth = $env:POSEIDON_SNOW_TEST_DEPTH; snowline = $env:POSEIDON_SNOWLINE; objectSnow = $env:WGR_OBJECT_SNOW } } else { $null };
    gates = @('live-refusal','phase-consumer-equivalence','status-identity','explicit-clear','30-second-expiry','hide-invalidation','delete-invalidation') } |
     ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'provenance.json')
 $p = $null; $client = $null; $writer = $null; $reader = $null
@@ -55,7 +60,7 @@ function Assert-RunHealth {
         throw 'Installed runtime or mission failure; reject this run.'
     }
 }
-function Send($command) {
+function Send($command,[switch]$AllowRefusal) {
     Assert-RunHealth
     $request = $command | ConvertTo-Json -Compress
     $request | Add-Content -LiteralPath (Join-Path $output 'harness.jsonl')
@@ -68,7 +73,7 @@ function Send($command) {
         $line | Add-Content -LiteralPath (Join-Path $output 'harness.jsonl')
         $reply = $line | ConvertFrom-Json
     } while ($null -eq $reply.ok)
-    if (!$reply.ok) { throw $line }
+    if (!$reply.ok -and !$AllowRefusal) { throw $line }
     return $reply
 }
 function Eval([string]$code) {
@@ -167,6 +172,13 @@ function Require-NoHold([string]$name) {
     $status = Query 'corpse-status'
     Require ($status -ceq 'REFUSED corpse-status no-valid-hold') "Hold survived $name`: $status"
     $result.gates[$name] = @{ passed = $true; actual = $status; simulationTime = Simulation-Time }
+    Check-FinalPose $name $false ''
+}
+function Check-FinalPose([string]$phase,[bool]$held,[string]$identity) {
+    if (!$FinalPoseProbe) { return }
+    if (!$result.gates.finalPose) { $result.gates.finalPose = @{} }
+    $sender = { param($command) Send $command -AllowRefusal }
+    $result.gates.finalPose[$phase] = & $FinalPoseProbe $phase $held $identity $sender
 }
 function Close-Owned {
     if ($p -and !$p.HasExited) {
@@ -177,6 +189,8 @@ function Close-Owned {
     }
     if ($client) { $client.Dispose(); $script:client = $null }
     $script:writer = $null; $script:reader = $null
+    if ($p -and $p.HasExited) { $result.ownedExit = @{ pid = $p.Id; exitCode = $p.ExitCode;
+        shutdownMarker = [bool](Select-String -LiteralPath $log -Pattern 'Shutdown complete' -Quiet) } }
 }
 try {
     $env:POSEIDON_USER_DIR = $profile
@@ -233,12 +247,21 @@ try {
     Require ($status -match ('entity=' + [regex]::Escape($identity) + ' ')) "Capture/status owner identity changed: $capture / $status"
     $result.gates.statusIdentity = @{ passed = $true; capture = $capture; status = $status }
     Assert-Compare 'consumerEquivalence'
+    Check-FinalPose 'activeHold' $true $identity
+    Check-FinalPose 'activePausedRepeat' $true $identity
     $result.captures.held = Screenshot 'held'
     Require ($result.captures.before.simulationTime -eq $result.captures.held.simulationTime) 'Before/held screenshots advanced simulation.'
     $clear = Query 'corpse-clear'
     Require ($clear -ceq 'OK corpse-clear cleared=1') "Explicit clear failed: $clear"
     Require-NoHold 'explicitClear'
     $result.captures.cleared = Screenshot 'cleared'
+    if ($FinalPoseProbe) {
+        Require ($result.captures.before.simulationTime -eq $result.captures.cleared.simulationTime) 'Diagnostic screenshots advanced simulation.'
+        Require ($result.captures.before.sha256 -ceq $result.captures.held.sha256 -and
+            $result.captures.before.sha256 -ceq $result.captures.cleared.sha256) 'Read-only final-pose/hold query changed paused authored death pixels.'
+        $result.gates.finalPosePixels = @{ passed = $true; before = $result.captures.before.sha256;
+            held = $result.captures.held.sha256; cleared = $result.captures.cleared.sha256 }
+    }
     $result.observations.expiryCapture = Wait-Capture
     $expiryStart = Simulation-Time
     Set-Acceleration $ExpiryAcceleration
@@ -254,7 +277,9 @@ try {
     Require ($expiryNow - $expiryStart -gt 30) "Hold cleared before its expiry: elapsed=$($expiryNow-$expiryStart), $expiryStatus"
     Set-Acceleration 0
     $result.gates.expiry = @{ passed = $true; start = $expiryStart; end = $expiryNow; actual = $expiryStatus; acceleration = $ExpiryAcceleration }
+    Check-FinalPose 'expiry' $false ''
     $result.observations.hideCapture = Wait-Capture
+    Check-FinalPose 'beforeHide' $true $identity
     $null = Send @{ cmd = 'exec'; code = 'poseProofHidden=poseProofCorpse; player action ["HIDEBODY",poseProofCorpse]; setAccTime 1' }
     $until = [DateTime]::UtcNow.AddSeconds(10)
     do {
@@ -276,6 +301,8 @@ try {
     $null = Send @{ cmd = 'exec'; code = 'poseProofCorpse setDammage 1' }
     $result.observations.deleteCapture = Wait-Capture
     Assert-Compare 'secondCorpseEquivalence'
+    $secondIdentity = [regex]::Match($result.observations.deleteCapture,'entity=(\S+)').Groups[1].Value
+    Check-FinalPose 'secondCorpseHold' $true $secondIdentity
     $null = Send @{ cmd = 'exec'; code = 'deleteVehicle poseProofCorpse' }
     Require-NoHold 'deleteInvalidation'
     $null = Send @{ cmd = 'exec'; code = 'deleteVehicle poseProofHidden' }
@@ -285,6 +312,7 @@ try {
     $result.status = 'passed'
 } catch {
     $result.status = 'failed'; $result.error = $_.Exception.Message
+    $result.errorSource = @{ line = $_.InvocationInfo.ScriptLineNumber; source = $_.InvocationInfo.Line; stack = $_.ScriptStackTrace }
     throw
 } finally {
     if ($p -and !$p.HasExited) {
