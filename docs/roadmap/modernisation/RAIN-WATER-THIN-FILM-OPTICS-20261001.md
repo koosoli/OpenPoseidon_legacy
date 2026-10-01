@@ -66,6 +66,16 @@ interface rather than receiving another full mirror blend.
 
 ## Verification and root runtime gates
 
+Root verification: all16 focused required-device rainwater tests pass after
+`e53543b9` adds the pure optics helper to two extracted sampling probes.
+The initial run failed shader composition in those probes before their
+compute assertions; the actual full raster controls passed. No physical
+assertion or negative control was relaxed. The combined renderer suite
+passes645 tests with zero failures and two pre-existing ignored tests.
+Combined game build and the additional owner-diagnostic rebuild passed;
+matched `deb4069c` was installed at06:03 local on1 October. Actual optical
+appearance remains pending; CPU and renderer fine flags remain default OFF.
+
 Local fast CPU/source checks passed: the 3 mm analytic counterexample,
 8/29/50 mm fraction landmarks, 5000 monotonic depth samples, existing
 coarse/fine ownership, 1 mm support, 15 cm bed mismatch and snow/cover guards.

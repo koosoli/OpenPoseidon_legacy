@@ -8,6 +8,7 @@ param(
  [ValidateRange(30,120)][int]$WetDeadlineSeconds=75,
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [switch]$NativeHeightFixture,
+ [switch]$ContactViews,
  [switch]$SelfTest
 )
 $ErrorActionPreference='Stop';$root=Split-Path -Parent $PSScriptRoot
@@ -171,6 +172,23 @@ function Walk([string]$name,$site,[string]$kind,[bool]$positive){
  if($samples.Count){$returned=@();foreach($s in $samples){$n=Field $kind $s;Require ($n.offset-eq $s.offset -and $n.surfaceY-eq $s.surfaceY -and $n.surfaceDx-eq $s.surfaceDx -and $n.surfaceDz-eq $s.surfaceDz) 'Camera return changed physical geometry samples.';$returned+=$n};$record.returnedSamples=$returned}
  return $record
 }
+function Contact-Views($record,[string]$kind){
+ Require ($record.samples.Count -gt 0) 'No actual walked contact samples to inspect.'
+ $walked=$record.samples|Sort-Object offset|Select-Object -First 1
+ # Rain may legitimately evolve a previously walked field before this final
+ # paused inspection. Compare camera queries to the current actual baseline.
+ $sample=Field $kind $walked;Require ($sample.offset -lt -.001) 'Walked cell no longer retains signed contact relief.'
+ $initial=State;$x=[double]$sample.x;$z=[double]$sample.z;$height=[double]$sample.surfaceY
+ foreach($view in @(@{name='low';pose=@($x-2,$z,$height+.6,90,-16.699244)},@{name='top';pose=@($x+.2,$z,$height+8,270,-88.567904)})){
+  $pose=($view.pose|ForEach-Object{([double]$_).ToString('R',$culture)}) -join ' '
+  Require ((Eval ('triFreeFlyPose "'+$pose+'"')) -ceq 'OK') 'Contact inspection freefly refused.'
+  Capture ($kind+'-actual-contact-'+$view.name)
+  $actual=Field $kind $sample
+  foreach($field in @('offset','surfaceY','surfaceDx','surfaceDz')){Require ($actual.$field -eq $sample.$field) 'Inspection changed actual walked contact geometry.'}
+  Assert-Paused $initial (State)
+ }
+ return @{sample=$sample;scope='Actual previously walked cell, paused low/top inspection; freefly uses existing camera focus, not actor focus'}
+}
 try{
  foreach($key in $clear){Restore-Env $key $null};foreach($key in $settings.Keys){[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
  foreach($map in $Maps){
@@ -210,6 +228,10 @@ try{
   if($soil){$arm.gates.wetSoilWalk=Walk 'mud-wet-third' $soil 'mud' $true}
   else{$arm.gates.unqualifiedWetWalk=Walk 'unqualified-mud-wet-third' $uniform 'mud' $false}
   $a=State;Start-Sleep -Seconds 2;$b=State;Assert-Paused $a $b;$arm.gates.paused=@{before=$a;after=$b}
+  if($ContactViews){
+   if($sand){$arm.gates.sandCloseViews=Contact-Views $arm.gates.sandWalk 'sand'}
+   if($soil){$arm.gates.mudCloseViews=Contact-Views $arm.gates.wetSoilWalk 'mud'}
+  }
   Exec 'setAccTime 1';$null=Send @{cmd='exit'};Require ($p.WaitForExit(20000)-and $p.ExitCode-eq 0) 'Owned normal exit failed.'
   Require ((Lines|Select-String 'Shutdown complete')-and !(Lines|Select-String 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION')) 'Exit/validation proof missing.'
   $arm.lifecycle=@{status='ok';timed_out=$false;contended=$false;exit_code=[int]$p.ExitCode};$meta=Join-Path $armDir 'lifecycle.json';$arm.lifecycle|ConvertTo-Json|Set-Content -LiteralPath $meta
