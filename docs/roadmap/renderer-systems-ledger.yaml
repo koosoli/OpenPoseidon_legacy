@@ -848,20 +848,29 @@ unbuilt_candidates: >-
       and unchanged-pair gates. Local hollows can deepen after rain from uphill
       runoff while total volume drains. The physical-only photographs remain
       bare despite about0.3m query depth: standing-water rendering is NOT
-      accepted. A complete production rasterization falsifier is being added;
-      the pass's default CCW front convention is a concrete suspect because
-      its fragment shader rejects back faces and engine meshes use CW.
+      accepted on that build. Complete production rasterization now confirms
+      the CCW top-face rejection: old flat/slope positives0 pixels, identical
+      clockwise control320. Fix9527c006 is installed03:16; corrected positives
+      draw320/337 pixels and covered/stale/OFF/snow negatives remain0. Full
+      renderer suite633 passes, zero failed, two existing ignored; full build
+      passes. Actual corrected-physical-top-noe-20261001-031636 lifecycle passes
+      and shows water, but angular/sparse coarse coverage remains unaccepted.
       Stronger visible flash4ee9da4a is installed. Actual night/roof lighting
       controls pass, with warm shooter and ground illumination, but the50ms UI
-      flash expires before the old capture; next-Fired-draw sourceac491698 is
-      built and awaits deployment and actual sprite review.
+      flash expires before the old capture. Next-Fired-draw sourceac491698 is
+      installed and actual firstdraw-new/firstdraw-original campaigns pass;
+      root sees hot new sprite plus warm face/cloth/ground. Regular six-petal
+      silhouette motivates a compact uneven texture follow-up, not yet installed.
       Corrected grounded manual rotor spin-up reaches actualRPM0.854 and then
-      emits real dry dust batches of8/live48. Drift fails the full campaign;
-      source-backed neutral mouse-look and zero-wind controls are being tested.
+      emits real dry dust batches of8/live48. Neutral-look-ground-spool actual
+      dry and snow eight-second controls pass4 batches each8/live48 and exact
+      pause. Roof-array physics later moves the helicopter away; the full
+      campaign remains failed. Actual ring appearance and later controls open.
       Fine actual-triangle core84e0138e and default-off actual-edit producer
       12156b8e pass CPU ownership/corner/query/stale/mass tests. Producer supports
       at most eight genuine interior native6.25m tiles. Renderer integration is
-      pending; no visible fine crater-filling claim. Revised prototype storage
+      pending; no visible fine crater-filling claim. See current installed
+      decisions/WEATHER-INSTALLED-CHECKPOINT-20261001-0316.md. Revised prototype storage
       is31.75MiB coarse/40.28MiB with64 tiles before snapshots/allocator.
       MUD-VOLUMETRIC-CONTACT-20260930.md and NOGOVA-SOFT-MUD-CONTACT-20260930.md.
 
