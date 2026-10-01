@@ -68,7 +68,7 @@ function Assert-Local($sample,[bool]$needWater){
 function Assert-Soil($sample,[bool]$audited){
     foreach($key in @('x','z','surfaceY','surfaceDx','surfaceDz','offset','wetness')){$null=Number $sample.$key}
     Require ($sample.sourceEligible -is [bool]) 'Ground source eligibility missing.'
-    if($audited){Require ($sample.world -ieq 'noe' -and ([string]$sample.texture).Replace('\','/').ToLowerInvariant() -ceq 'o/pole2.paa' -and $sample.sourceEligible) 'Audited Noe pole2 mud source is not present.'}
+    if($audited){Require ($sample.world -ieq 'noe\noe.wrp' -and ([string]$sample.texture).Replace('\','/').ToLowerInvariant() -ceq 'o/pole2.paa' -and $sample.sourceEligible) 'Audited Noe pole2 mud source is not present.'}
 }
 function Renderer-Proof($lines,$arm){
     $weather=@();$grids=@();$policies=@();$ssrReady=@()
@@ -109,7 +109,7 @@ function Test-Helpers{
     $sample=[pscustomobject]@{valid=$true;depth=.1;height=20.1;terrainY=20.;flowX=0.;flowZ=0.;revision=2}
     Assert-Local $sample $true;Check $true;$sample.height=21;Refuses {Assert-Local $sample $true};$sample.height=20.1
     $sample.depth=0;$sample.height=20;Assert-Local $sample $false;Check $true;Refuses {Assert-Local $sample $true}
-    $soil=[pscustomobject]@{x=4975.;z=4675.;surfaceY=21.5;surfaceDx=0.;surfaceDz=0.;offset=0.;wetness=.5;world='noe';texture='o\pole2.paa';sourceEligible=$true}
+    $soil=[pscustomobject]@{x=4975.;z=4675.;surfaceY=21.5;surfaceDx=0.;surfaceDz=0.;offset=0.;wetness=.5;world='noe\noe.wrp';texture='o\pole2.paa';sourceEligible=$true}
     Assert-Soil $soil $true;Check $true;$soil.texture='o\sandDark.paa';Refuses {Assert-Soil $soil $true};Assert-Soil $soil $false;Check $true
     $base=@('RAIN_WATER_INIT','Wgpu terrain puddle weather: time=200.000 rain=1.000 accumulated=0.6000 uploaded=0.0000','WGPU_RAIN_WATER_SSR_POLICY enabled=0 receiverRange=60 rayRange=25 steps=24 refine=4 scope=current-screen-world')
     $proof=Renderer-Proof $base $arms[0];Check ($proof.terrainWeather.Count -eq 1)
