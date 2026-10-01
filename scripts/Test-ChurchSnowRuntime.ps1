@@ -68,6 +68,9 @@ function Transform-Point($frame,$point){
     Require ($frame.Count -eq 12 -and $point.Count -eq 3) 'Source point/frame dimensions differ.'
     return @(for($axis=0;$axis -lt 3;++$axis){(Number $frame[9+$axis])+(Number $frame[$axis])*(Number $point[0])+(Number $frame[3+$axis])*(Number $point[1])+(Number $frame[6+$axis])*(Number $point[2])})
 }
+function Clock-Eye($clock,$frame){
+    return @(($clock[0]-18*$frame[6]),($clock[1]+1),($clock[2]-18*$frame[8]))
+}
 function Aim-Pose($eye,$target){
     $dx=$target[0]-$eye[0];$dy=$target[1]-$eye[1];$dz=$target[2]-$eye[2];$horizontal=[Math]::Sqrt($dx*$dx+$dz*$dz)
     Require ($horizontal -gt .001) 'View target directly vertical or degenerate.'
@@ -94,6 +97,7 @@ function Test-Helpers{
     $point=Transform-Point $owner.frame @(0,-7,9);Require ([Math]::Abs($point[1]-25.9) -lt .0001 -and $point[2] -eq 3929) 'Column-major live frame point transform failed.'
     $rotated=Transform-Point @(0,0,-1,0,1,0,1,0,0,10,20,30) @(2,3,4)
     Require (($rotated -join ',') -ceq '14,23,28') 'Rotated live owner frame used an incorrect axis convention.'
+    Require (((Clock-Eye @(14,23,28) @(0,0,-1,0,1,0,1,0,0,10,20,30)) -join ',') -ceq '-4,24,28') 'Clock camera must produce three scalar coordinates for a rotated frame.'
     Require ((Aim-Pose @(5056.6,30,3860) @(5056.6,30,3920)) -ceq '5056.6 3860 30 0 0') 'Heading/height camera order wrong.'
     $line='Wgpu object snow retained gates: model=data3d\kostel3.p3d eligible=true static=true poseAllowed=true'
     Require ((Church-Trace @($line) $fixture.model).retained.Count -eq 1) 'Retained proof parser failed.'
@@ -209,7 +213,7 @@ try{
                     $views['distance'+$distance]=Aim-Pose @($cx,$eye,$cz) $roof
                 }
                 $views.top=Aim-Pose @($roof[0],($target.y+[Math]::Max(60,2*$target.radius)),($roof[2]-3)) $roof
-                $eye=@($clock[0]-18*$target.frame[6],$clock[1]+1,$clock[2]-18*$target.frame[8])
+                $eye=Clock-Eye $clock $target.frame
                 $views.clock=Aim-Pose $eye $clock
                 $underGround=Get-TerrainPuddleFixtureHeight {param($request) Send $request} $roof[0] $roof[2]
                 $views.interiorCandidate=Aim-Pose @($roof[0],($underGround+1),($roof[2]-1)) $roof
