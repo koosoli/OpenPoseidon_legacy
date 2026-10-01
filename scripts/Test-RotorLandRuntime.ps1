@@ -1,6 +1,7 @@
 # Installed land-downwash falsifier. Physics/AI fly the aircraft between samples.
 [CmdletBinding()]
-param([ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='stock-land-ring',
+param([switch]$SelfTest,
+      [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='stock-land-ring',
       [double]$SandX=2675,[double]$SandZ=5125,
       [Nullable[double]]$SeaX,[Nullable[double]]$SeaZ,
       [ValidateRange(0.1,1)][double]$SnowDepth=0.35,
@@ -9,9 +10,6 @@ param([ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='stock-land-ring',
       [switch]$ManualPilot,
       [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
-if (!$env:LOCK_OWNER) {throw 'Run through scripts/with-game-lock.sh.'}
-if (Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue) {throw 'Preserve the running game.'}
-if (($null -eq $SeaX) -ne ($null -eq $SeaZ)) {throw 'Supply both SeaX and SeaZ, or neither.'}
 $root=Split-Path -Parent $PSScriptRoot
 $culture=[Globalization.CultureInfo]::InvariantCulture
 function Require([bool]$condition,[string]$message) {if (!$condition) {throw $message}}
@@ -19,6 +17,41 @@ function Number([double]$value) {
     Require (![double]::IsNaN($value) -and ![double]::IsInfinity($value)) 'Nonfinite fixture number.'
     return $value.ToString('R',$culture)
 }
+function Assert-RotorState($state) {
+    foreach($field in @('timeMs','object','candidates','distanceXZ','x','y','z','groundY','clearance','rpm',
+      'upX','upY','upZ','speedX','speedY','speedZ','fuel','damage','driverState','moveUp','moveDown','unfocusedMoveUp','focusLost','qKey','airflowScale','cameraDistance')) {
+        $property=$state.PSObject.Properties[$field]
+        Require ($null -ne $property -and $null -ne $property.Value -and $property.Value -is [ValueType] -and $property.Value -isnot [bool]) ('Missing/nonnumeric rotor-state field '+$field)
+        $value=[double]$property.Value
+        Require (![double]::IsNaN($value) -and ![double]::IsInfinity($value)) ('Nonfinite rotor-state field '+$field)
+    }
+    foreach($field in @('readonly','engineOn','destroyed','local','airborne','driverPresent','driverBrain','driverLocal','driverAlive','driverIsPlayer','pilotIsPlayer',
+      'focusIsDriver','manual','driverManual','playerManual','playerSuspended','cameraEffect','resolvedHelicopter','airflowEnabled','cameraDistanceValid')) {
+        Require ($state.PSObject.Properties[$field].Value -is [bool]) ('Missing/nonboolean rotor-state field '+$field)
+    }
+    foreach($field in @('class','model','inputContext','resolvedContext','inputSeat')) {
+        Require ($state.PSObject.Properties[$field].Value -is [string]) ('Missing/nonstring rotor-state field '+$field)
+    }
+    Require ($state.readonly -and $state.class -ceq 'UH60' -and $state.candidates -ge 1 -and $state.distanceXZ -le 16.001 -and $state.rpm -ge 0 -and $state.rpm -le 1.001) 'Diagnostic does not identify the bounded actual stock helicopter.'
+    # Wrong authority/engine/input state is evidence, not a new acceptance gate.
+}
+if ($SelfTest) {
+    $sample=[ordered]@{}
+    foreach($field in @('timeMs','object','candidates','distanceXZ','x','y','z','groundY','clearance','rpm','upX','upY','upZ','speedX','speedY','speedZ','fuel','damage','driverState','moveUp','moveDown','unfocusedMoveUp','focusLost','qKey','airflowScale','cameraDistance')) {$sample[$field]=0.0}
+    foreach($field in @('readonly','engineOn','destroyed','local','airborne','driverPresent','driverBrain','driverLocal','driverAlive','driverIsPlayer','pilotIsPlayer','focusIsDriver','manual','driverManual','playerManual','playerSuspended','cameraEffect','resolvedHelicopter','airflowEnabled','cameraDistanceValid')) {$sample[$field]=$false}
+    $sample.readonly=$true;$sample.class='UH60';$sample.model='uh60.p3d';$sample.inputContext='Spectator';$sample.resolvedContext='Spectator';$sample.inputSeat='driver';$sample.candidates=1
+    Assert-RotorState ([pscustomobject]$sample)
+    # A failed engine/authority snapshot must remain inspectable.
+    foreach($bad in @('missing','string','nonfinite','readonly','class','rpm')) {
+        $copy=($sample|ConvertTo-Json|ConvertFrom-Json)
+        switch($bad) {'missing'{$copy.PSObject.Properties.Remove('qKey')};'string'{$copy.moveUp='false'};'nonfinite'{$copy.rpm=[double]::PositiveInfinity};'readonly'{$copy.readonly=$false};'class'{$copy.class='Other'};'rpm'{$copy.rpm=2}}
+        $refused=$false;try {Assert-RotorState $copy} catch {$refused=$true};Require $refused ('Malformed snapshot accepted: '+$bad)
+    }
+    Write-Host 'PASS read-only rotor snapshot schema/falsifiers; failed flight authority remains evidence. No game.';return
+}
+if (!$env:LOCK_OWNER) {throw 'Run through scripts/with-game-lock.sh.'}
+if (Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue) {throw 'Preserve the running game.'}
+if (($null -eq $SeaX) -ne ($null -eq $SeaZ)) {throw 'Supply both SeaX and SeaZ, or neither.'}
 function Pair {
     # Provenance is the first installed file read.
     $stamp=[IO.File]::ReadAllText((Join-Path $GameDir 'DEPLOYED-FROM.txt')).Trim()
@@ -35,21 +68,22 @@ $profile=Join-Path $output 'user';New-Item -ItemType Directory -Force $profile |
 $log=Join-Path $output 'engine.log'
 $mission=Join-Path $root 'tests/perf/missions/perf_sand.noe'
 Require (Test-Path -LiteralPath $mission) 'Stock Noe fixture mission missing.'
-$result=[ordered]@{status='running';before=$before;gates=@{};captures=@{};
+$result=[ordered]@{status='running';before=$before;gates=@{};captures=@{};rotorStates=@();
     limitations='Actual land emission/lifecycle gates only. Stills require visual review; this does not numerically accept pre-existing water downwash or all-map source coverage.'}
 @{sourceHead=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;
   roofHelperSha256=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1')).Hash;
   installed=$before;mission=$mission;lockOwner=$env:LOCK_OWNER;requestedSand=@($SandX,$SandZ);
   helicopter='stock UH60';pilot='stock SoldierWB in independent west group';manualPilot=[bool]$ManualPilot;hoverHeight=$HoverHeight;
   observationSimulationSeconds=$ObserveSeconds;seaLevel=0;seaScope='Stock Noe default sea datum, bounded runtime terrain queries';
-  relocation='One explicit setPosASL between stages; no setVelocity, forced RPM, repeated position pinning, synthetic particle or terrain stamps'} |
+  relocation='One explicit setPosASL between stages; no setVelocity, forced RPM, repeated position pinning, synthetic particle or terrain stamps';
+  diagnostics='Read-only rotor_state snapshots; unchanged initial flight recipe; actual timeMs captures query latency'} |
     ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'provenance.json')
 $keys=@('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM',
     'POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_DEPTH','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES',
     'POSEIDON_SNOWLINE','POSEIDON_ROTOR_LAND','POSEIDON_ROTOR_LAND_TRACE','POSEIDON_WIND_OVERRIDE',
     'WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_RAIN_WATER_TRACE')
 $saved=@{};foreach($key in $keys) {$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
-$p=$null;$client=$null;$writer=$null;$reader=$null;$script:heliId=$null;$script:heldUp=$false
+$p=$null;$client=$null;$writer=$null;$reader=$null;$script:heliId=$null;$script:stateObject=$null;$script:heldUp=$false
 function Health {
     Require ($p -and !$p.HasExited) 'Owned game exited unexpectedly.'
     if ((Test-Path $log) -and (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION|Unbekannter Operator' -Quiet)) {throw 'Installed validation/script failure.'}
@@ -68,6 +102,20 @@ function Eval([string]$code) {
     $display=([string](Send @{cmd='eval';code=$code}).result).Trim()
     if ($display.StartsWith('"')) {return $display.Substring(1,$display.Length-2).Replace('""','"')}
     return ConvertFrom-Json -InputObject $display -NoEnumerate
+}
+function Rotor-State([string]$stage,[double]$x,[double]$z) {
+    $state=Send @{cmd='rotor_state';x=$x;z=$z;radius=16}
+    $entry=@{stage=$stage;wallUtc=[DateTime]::UtcNow.ToString('o');state=$state}
+    $result.rotorStates+=,$entry
+    $entry|ConvertTo-Json -Compress -Depth 6|Add-Content -LiteralPath (Join-Path $output 'rotor-states.jsonl')
+    Assert-RotorState $state
+    if ($null -eq $script:stateObject) {$script:stateObject=$state.object}
+    Require ($state.object -eq $script:stateObject) 'Nearest diagnostic switched aircraft; retain raw snapshot and reject fixture identity.'
+    return $state
+}
+function Current-RotorState([string]$stage) {
+    $actual=Eval 'getPosASL rotorHeli';Require ($actual.Count -eq 3) 'Actual aircraft diagnostic locator missing.'
+    return Rotor-State $stage ([double]$actual[0]) ([double]$actual[1])
 }
 function Capture([string]$stage) {
     if ($ManualPilot) {
@@ -114,44 +162,52 @@ function Rows([int]$from=0) {
 function LineCount {return @(Get-Content -LiteralPath $log).Count}
 function Observe([string]$stage,[double]$x,[double]$z,[bool]$mustTrace=$true) {
     $first=LineCount;$start=[double](Eval 'time');$until=[DateTime]::UtcNow.AddSeconds($ObserveSeconds*3+10)
-    $poses=@();Exec 'setAccTime 1'
+    $poses=@();$nextState=$start;$null=Current-RotorState ($stage+'-before');Exec 'setAccTime 1'
     do {
         Start-Sleep -Milliseconds 250;Health;$position=Eval 'getPosASL rotorHeli'
         Require ($position.Count -eq 3 -and (Eval 'alive rotorHeli')) 'Aircraft lost during actual physics interval.'
         $distance=[Math]::Sqrt([Math]::Pow($position[0]-$x,2)+[Math]::Pow($position[1]-$z,2))
         Require ($distance -le 8) 'Actual AI hover left the bounded source fixture; not an emission defect.'
         $poses+=,@($position);$now=[double](Eval 'time')
+        if ($now -ge $nextState) {$null=Rotor-State ($stage+'-milestone') ([double]$position[0]) ([double]$position[1]);$nextState=$now+2}
         Require ([DateTime]::UtcNow -lt $until) 'Simulation observation timed out.'
     } while ($now-$start -lt $ObserveSeconds)
-    Exec 'setAccTime 0';Start-Sleep -Milliseconds 300;$rows=@(Rows $first)
+    Exec 'setAccTime 0';$null=Current-RotorState ($stage+'-after');Start-Sleep -Milliseconds 300;$rows=@(Rows $first)
     if ($mustTrace) {Require ($rows.Count -ge 3) 'No sustained actual rotor/RPM trace; fixture unavailable, not accepted.'}
     foreach($row in $rows) {Require ([Math]::Sqrt([Math]::Pow($row.x-$x,2)+[Math]::Pow($row.z-$z,2)) -le 8) 'Trace belongs outside requested fixture.'}
     $result.gates[$stage]=@{startTime=$start;endTime=$now;rows=$rows;actualPositions=$poses;engineOn=(Eval 'isEngineOn rotorHeli')}
     Capture $stage;return $rows
 }
 function Place([double]$x,[double]$z,[double]$height) {
+    $null=Current-RotorState ('place-'+(Number $height)+'-before')
     $ground=Height $x $z;$xz=(Number $x)+','+(Number $z)
     Exec ('rotorHeli setPosASL ['+$xz+','+(Number ($ground+$height))+']; rotorHeli flyInHeight '+(Number $height))
+    $null=Rotor-State ('place-'+(Number $height)+'-relocated') $x $z
     if ($ManualPilot) {
         # Ordinary Q input refreshes the keyboard height helper after the one
         # stage relocation. Rotor RPM/velocity/physics remain untouched.
         $null=Send @{cmd='key';sc=20;hold=$true};$script:heldUp=$true
+        $null=Current-RotorState ('place-'+(Number $height)+'-q-pressed-paused')
         Exec 'setAccTime 1';Start-Sleep -Milliseconds 250
+        $null=Current-RotorState ('place-'+(Number $height)+'-q-held-before-release')
         $null=Send @{cmd='key_up';sc=20};$script:heldUp=$false;Exec 'setAccTime 0'
+        $null=Current-RotorState ('place-'+(Number $height)+'-q-released-paused')
     } else {Exec ('rotorPilot doMove ['+$xz+',0]')}
-    View $x $z $ground;return $ground
+    View $x $z $ground;$null=Current-RotorState ('place-'+(Number $height)+'-after-view');return $ground
 }
 function AwaitHover([double]$x,[double]$z) {
     $first=LineCount;$until=[DateTime]::UtcNow.AddSeconds(60);Exec 'setAccTime 1'
     $result.gates.hoverWait=@()
     do {
         Start-Sleep -Milliseconds 500;Health
-        $result.gates.hoverWait+=@{time=(Eval 'time');position=(Eval 'getPosASL rotorHeli');engineOn=(Eval 'isEngineOn rotorHeli')}
+        $position=Eval 'getPosASL rotorHeli'
+        $snapshot=Rotor-State 'await-hover-poll' ([double]$position[0]) ([double]$position[1])
+        $result.gates.hoverWait+=@{time=(Eval 'time');position=$position;engineOn=(Eval 'isEngineOn rotorHeli');rotorState=$snapshot}
         $rows=@(Rows $first | Where-Object {
             [Math]::Abs($_.x-$x) -le 8 -and [Math]::Abs($_.z-$z) -le 8 -and $_.height -ge 8 -and $_.height -lt 28 -and $_.rpm -ge .65})
         Require ([DateTime]::UtcNow -lt $until) 'Stock UH60 did not establish an actual bounded hover; no synthetic pinning fallback.'
     } while ($rows.Count -lt 2)
-    $script:heliId=$rows[-1].object;Exec 'setAccTime 0';return $rows[-1]
+    $script:heliId=$rows[-1].object;Exec 'setAccTime 0';$null=Current-RotorState 'await-hover-completed';return $rows[-1]
 }
 function CloseOwned {
     if ($script:heldUp) {$null=Send @{cmd='key_up';sc=20};$script:heldUp=$false}
@@ -186,6 +242,7 @@ try {
     $crewSetup=if($ManualPilot){'rotorPilot=player; rotorPilot allowDamage false; '}else{'rotorGroup=createGroup west; "SoldierWB" createUnit [['+$xz+',0],rotorGroup,"rotorPilot=this; this allowDamage false; this setBehaviour ""CARELESS""; this setCombatMode ""BLUE"""]; '}
     Exec ('rotorHeli="UH60" createVehicle ['+$xz+',0]; rotorHeli allowDamage false; rotorHeli setFuel 0; rotorHeli engineOn false; '+$crewSetup+'rotorPilot moveInDriver rotorHeli; rotorHeli setPos ['+$xz+',0]; doStop rotorPilot; rotorHeli engineOn false')
     Require ((Eval 'typeOf rotorHeli') -ceq 'UH60' -and (Eval 'typeOf driver rotorHeli') -ceq 'SoldierWB') 'Real stock helicopter/crew identity missing.'
+    $null=Rotor-State 'startup-boarded-engine-off' $SandX $SandZ
     if ($ManualPilot) {
         # Original OFP scripting has no selectPlayer command. Board the actual
         # mission player rather than trying to replace player authority.
@@ -193,8 +250,10 @@ try {
         Require ((Eval 'format ["%1",player]') -ceq (Eval 'format ["%1",rotorPilot]')) 'Actual controlled pilot identity differs.'
     }
     $result.gates.object=Eval 'format ["%1",rotorHeli]';View $SandX $SandZ $ground
+    $null=Current-RotorState 'startup-after-view'
     $rows=@(Observe 'engine-off' $SandX $SandZ $false);Require (!$result.gates['engine-off'].engineOn -and $rows.Count -eq 0) 'Stopped rotor emitted land puffs.'
-    Exec 'rotorHeli setFuel 1; rotorHeli engineOn true';$ground=Place $SandX $SandZ $HoverHeight
+    $null=Current-RotorState 'before-engine-start'
+    Exec 'rotorHeli setFuel 1; rotorHeli engineOn true';$null=Current-RotorState 'engine-start-paused';$ground=Place $SandX $SandZ $HoverHeight
     $result.gates.actualHover=AwaitHover $SandX $SandZ
     $rows=@(Observe 'dry-sand' $SandX $SandZ);Require (@($rows | Where-Object {$_.emitted -gt 0 -and $_.snow -eq 0 -and $_.rain -lt .05}).Count -gt 0) 'Actual dry sand hover produced no dust positive control.'
     $pauseTime=[double](Eval 'time');$pausePose=Eval 'getPosASL rotorHeli';$from=LineCount;Capture 'paused-a';Start-Sleep -Seconds 5;Capture 'paused-b'
