@@ -83,7 +83,7 @@ $keys=@('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS
     'POSEIDON_SNOWLINE','POSEIDON_ROTOR_LAND','POSEIDON_ROTOR_LAND_TRACE','POSEIDON_WIND_OVERRIDE',
     'WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_RAIN_WATER_TRACE')
 $saved=@{};foreach($key in $keys) {$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
-$p=$null;$client=$null;$writer=$null;$reader=$null;$script:heliId=$null;$script:stateObject=$null;$script:heldUp=$false
+$p=$null;$client=$null;$writer=$null;$reader=$null;$script:heliId=$null;$script:stateObject=$null;$script:heldUp=$false;$script:heldLook=$false
 function Health {
     Require ($p -and !$p.HasExited) 'Owned game exited unexpectedly.'
     if ((Test-Path $log) -and (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION|Unbekannter Operator' -Quiet)) {throw 'Installed validation/script failure.'}
@@ -223,6 +223,7 @@ function AwaitHover([double]$x,[double]$z) {
     $script:heliId=$rows[-1].object;Exec 'setAccTime 0';$null=Current-RotorState 'await-hover-completed';return $rows[-1]
 }
 function CloseOwned {
+    if ($script:heldLook) {$null=Send @{cmd='key_up';sc=226};$script:heldLook=$false}
     if ($script:heldUp) {$null=Send @{cmd='key_up';sc=20};$script:heldUp=$false}
     Require ($writer -and $reader) 'Harness not connected for normal shutdown.'
     Exec 'setAccTime 1';$null=Send @{cmd='exit'}
@@ -232,6 +233,7 @@ function CloseOwned {
 }
 try {
     foreach($key in $keys) {Remove-Item ('Env:'+$key) -ErrorAction SilentlyContinue}
+    $env:POSEIDON_WIND_OVERRIDE='0 90 0'
     $env:POSEIDON_USER_DIR=$profile;$env:POSEIDON_ROTOR_LAND='1';$env:POSEIDON_ROTOR_LAND_TRACE='1';$env:POSEIDON_SNOWLINE='off'
     [IO.File]::WriteAllText((Join-Path $profile 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
     . (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1')
@@ -268,6 +270,11 @@ try {
     $null=Current-RotorState 'before-engine-start'
     Exec 'rotorHeli setFuel 1; rotorHeli engineOn true';$null=Current-RotorState 'engine-start-paused'
     AwaitGroundedSpool
+    if ($ManualPilot) {
+        # Ordinary look-around prevents an external-view mouse direction from
+        # requesting reverse speed during stock auto-hover; physics is untouched.
+        $null=Send @{cmd='key';sc=226;hold=$true};$script:heldLook=$true
+    }
     $ground=Place $SandX $SandZ $HoverHeight
     $result.gates.actualHover=AwaitHover $SandX $SandZ
     $rows=@(Observe 'dry-sand' $SandX $SandZ);Require (@($rows | Where-Object {$_.emitted -gt 0 -and $_.snow -eq 0 -and $_.rain -lt .05}).Count -gt 0) 'Actual dry sand hover produced no dust positive control.'
