@@ -470,7 +470,9 @@ mod tests {
         assert!(layout.contains("visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE"));
         let start = gfx.find("let gpu_velocity_pipeline = cull::build_gpu_velocity_pipeline(").unwrap();
         let pipelines = gfx[start..].split("let cull_debug_layout").next().unwrap();
-        assert_eq!(pipelines.matches("&conform.gpu_layout").count(), 7);
+        // The far weather-depth pipeline also uses the vertex/compute-only
+        // conform layout; adding it must not expose storage to fragments.
+        assert_eq!(pipelines.matches("&conform.gpu_layout").count(), 8);
         assert!(!pipelines.contains("&conform.layout"));
         assert_eq!(gfx.matches("self.conform.gpu_bind.as_ref()").count(), 4);
     }
