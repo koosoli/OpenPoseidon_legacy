@@ -2217,6 +2217,43 @@ void RegisterSqf(HarnessServer& hs)
 
 void RegisterSnowProbe(HarnessServer& hs)
 {
+    hs.RegisterCommand({"player_weapon_state", "Read-only real player's selected bullet muzzle and direction", {}},
+        [](const std::string&, cJSON*) -> std::string {
+            if (!GWorld || !GLandscape || GWorld->GetMode() == GModeNetware)
+                return HarnessProtocol::ErrorResponse("singleplayer world required");
+            Man* man = dyn_cast<Man>(GWorld->GetRealPlayer());
+            if (!man || !man->IsLocal() || man->IsDammageDestroyed())
+                return HarnessProtocol::ErrorResponse("living local infantry player required");
+            const int weapon = man->SelectedWeapon();
+            if (weapon < 0 || weapon >= man->NMagazineSlots())
+                return HarnessProtocol::ErrorResponse("selected weapon missing");
+            const auto* mode = man->GetWeaponMode(weapon);
+            if (!mode || !mode->_ammo || mode->_ammo->_simulation != AmmoShotBullet)
+                return HarnessProtocol::ErrorResponse("selected bullet weapon required");
+            const Vector3 position = man->Position();
+            const Vector3 muzzle = man->WorldTransform().FastTransform(man->GetWeaponPoint(weapon));
+            const Vector3 direction = man->GetWeaponDirection(weapon);
+            for (const float value : {position.X(),position.Y(),position.Z(),muzzle.X(),muzzle.Y(),muzzle.Z(),
+                                     direction.X(),direction.Y(),direction.Z()})
+                if (!std::isfinite(value)) return HarnessProtocol::ErrorResponse("nonfinite weapon state");
+            if (direction.SquareSize() < 0.5f || direction.SquareSize() > 1.5f)
+                return HarnessProtocol::ErrorResponse("invalid weapon direction");
+            cJSON* out = cJSON_CreateObject();
+            cJSON_AddBoolToObject(out,"readonly",true);
+            cJSON_AddNumberToObject(out,"timeMs",Glob.time.toInt());
+            cJSON_AddNumberToObject(out,"selectedWeapon",weapon);
+            cJSON_AddStringToObject(out,"model",man->GetShape()->GetName());
+            cJSON_AddNumberToObject(out,"x",position.X()); cJSON_AddNumberToObject(out,"y",position.Y()); cJSON_AddNumberToObject(out,"z",position.Z());
+            cJSON_AddNumberToObject(out,"muzzleX",muzzle.X()); cJSON_AddNumberToObject(out,"muzzleY",muzzle.Y()); cJSON_AddNumberToObject(out,"muzzleZ",muzzle.Z());
+            cJSON_AddNumberToObject(out,"directionX",direction.X()); cJSON_AddNumberToObject(out,"directionY",direction.Y()); cJSON_AddNumberToObject(out,"directionZ",direction.Z());
+            cJSON_AddBoolToObject(out,"manual",GWorld->PlayerManual());
+            cJSON_AddBoolToObject(out,"playerSuspended",GWorld->GetPlayerSuspended());
+            cJSON_AddBoolToObject(out,"cameraEffect",GWorld->GetCameraEffect()!=nullptr);
+            cJSON_AddNumberToObject(out,"cameraType",int(GWorld->GetCameraType()));
+            cJSON_AddBoolToObject(out,"ok",true);
+            char* raw = cJSON_PrintUnformatted(out); std::string result = raw ? raw : "{}";
+            cJSON_free(raw); cJSON_Delete(out); return result;
+        });
     hs.RegisterCommand({"rotor_state", "Read-only nearest helicopter flight/input state; no flight setters",
                         {{"x","float",true},{"z","float",true},{"radius","float",false}}},
         [](const std::string&, cJSON* root) -> std::string {
