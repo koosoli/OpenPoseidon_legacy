@@ -1,0 +1,3571 @@
+{
+  "status": "source-only-identification-unresolved",
+  "cameraXZYaEl": [
+    2592.94,
+    5422.69,
+    75.8,
+    100,
+    6.2
+  ],
+  "wrpSha256": "9b27b11661d3cb30f9f0749a9a4616bfc58d723c4750666d1e674dd4213598d2",
+  "exportSha256": "dbe1f29e300bb60c0b34c5f6467a842857147bed82495ef84f390a0871016a18",
+  "metadataSha256": "ea2bc4b61764062a5779c994d6cca34a7cf9990e72366c3dce96bc17e717bafa",
+  "sourceGridSpacing": 50,
+  "originalObjectCount": 177224,
+  "originalObjectTailOffset": 455222,
+  "originalFullObjectTailVerified": true,
+  "limitations": [
+    "Original coarse grid, not installed subdivided height/cdlod raster",
+    "No object occluders in ray audit",
+    "No screen-FOV assumption or pixel identification",
+    "Predicted legacy placement must be checked against actual stream_identity_probe"
+  ],
+  "objects": [
+    {
+      "id": 107268,
+      "exporterOrdinal": 18103,
+      "originalRecordOffset": 1468990,
+      "originalNameIndex": 168,
+      "model": "o\\misc\\kapl.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "misc\\kapl.p3d",
+        "decodedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22",
+        "storedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22"
+      },
+      "wrpFrame": [
+        [
+          0.07073701918125153,
+          0.0,
+          -0.9974949955940247
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.9974949955940247,
+          -0.0,
+          0.07073701918125153
+        ],
+        [
+          3194.284423828125,
+          124.71012115478516,
+          6900.74072265625
+        ]
+      ],
+      "coarsePredictedPosition": [
+        3194.284423828125,
+        124.66294246829395,
+        6900.74072265625
+      ],
+      "legacyLowering": 0.0471786864912076,
+      "modelBoundingCentre": [
+        -0.22926917672157288,
+        1.0270166397094727,
+        0.04562932252883911
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 1595.6970435561518,
+      "centreTerrain": 123.62435787651684,
+      "visualTopY": 125.6626647106493,
+      "topAzimuth": 22.13893268398315,
+      "topElevation": 1.789807732645313,
+      "azimuthOffset": -77.86106731601686,
+      "elevationOffset": -4.410192267354687,
+      "foundationLods": [
+        {
+          "resolution": 0.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.05104420838654278,
+          "maximumTerrainGap": 0.03460480672137578
+        },
+        {
+          "resolution": 1.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.051119316828120986,
+          "maximumTerrainGap": 0.034718980407774325
+        },
+        {
+          "resolution": 1.5,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.051119316828120986,
+          "maximumTerrainGap": 0.034718980407774325
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": -4.362206422312596,
+      "coarseTopRayWorstPoint": [
+        3188.2709795898436,
+        125.1640380635428,
+        6885.960215429687
+      ],
+      "candidateNearPose": [
+        3134.284423828125,
+        6900.74072265625,
+        120.28224614109843,
+        90.0,
+        6.026120984751712
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        22.13893268398315,
+        1.789807732645313
+      ]
+    },
+    {
+      "id": 53732,
+      "exporterOrdinal": 28160,
+      "originalRecordOffset": 2032182,
+      "originalNameIndex": 168,
+      "model": "o\\misc\\kapl.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "misc\\kapl.p3d",
+        "decodedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22",
+        "storedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22"
+      },
+      "wrpFrame": [
+        [
+          0.040784966200590134,
+          -0.0,
+          0.9991645216941833
+        ],
+        [
+          0.0,
+          0.9999966025352478,
+          0.0
+        ],
+        [
+          -0.9991645216941833,
+          0.0,
+          0.040784966200590134
+        ],
+        [
+          4149.39208984375,
+          125.42882537841797,
+          6793.71044921875
+        ]
+      ],
+      "coarsePredictedPosition": [
+        4149.39208984375,
+        125.00201162457773,
+        6793.71044921875
+      ],
+      "legacyLowering": 0.4268137538402357,
+      "modelBoundingCentre": [
+        -0.22926917672157288,
+        1.0270166397094727,
+        0.04562932252883911
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 2074.184220399664,
+      "centreTerrain": 123.9749984741211,
+      "visualTopY": 126.001730470412,
+      "topAzimuth": 48.624380840691515,
+      "topElevation": 1.3864659672429305,
+      "azimuthOffset": -51.375619159308485,
+      "elevationOffset": -4.81353403275707,
+      "foundationLods": [
+        {
+          "resolution": 0.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.019768170905734905,
+          "maximumTerrainGap": -0.019767813279088386
+        },
+        {
+          "resolution": 1.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.019768170905734905,
+          "maximumTerrainGap": -0.019767813279088386
+        },
+        {
+          "resolution": 1.5,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.019768170905734905,
+          "maximumTerrainGap": -0.019767813279088386
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 0.8740623201985613,
+      "coarseTopRayWorstPoint": [
+        4074.8778859290082,
+        123.59835293919565,
+        6728.073673123302
+      ],
+      "candidateNearPose": [
+        4089.39208984375,
+        6793.71044921875,
+        128.18503464199603,
+        90.0,
+        -1.1742122205000034
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        48.624380840691515,
+        1.3864659672429305
+      ]
+    },
+    {
+      "id": 93945,
+      "exporterOrdinal": 24368,
+      "originalRecordOffset": 1819830,
+      "originalNameIndex": 168,
+      "model": "o\\misc\\kapl.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "misc\\kapl.p3d",
+        "decodedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22",
+        "storedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22"
+      },
+      "wrpFrame": [
+        [
+          -0.009203464724123478,
+          0.0,
+          0.9999542236328125
+        ],
+        [
+          0.0,
+          0.9999966025352478,
+          0.0
+        ],
+        [
+          -0.9999542236328125,
+          0.0,
+          -0.009203464724123478
+        ],
+        [
+          3877.6484375,
+          107.91522979736328,
+          7056.66455078125
+        ]
+      ],
+      "coarsePredictedPosition": [
+        3877.6484375,
+        107.91522979736328,
+        7056.66455078125
+      ],
+      "legacyLowering": 0,
+      "modelBoundingCentre": [
+        -0.22926917672157288,
+        1.0270166397094727,
+        0.04562932252883911
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 2078.544827994932,
+      "centreTerrain": 106.96499633789062,
+      "visualTopY": 108.91494864319755,
+      "topAzimuth": 38.17611191863337,
+      "topElevation": 0.9127473535531508,
+      "azimuthOffset": -61.82388808136663,
+      "elevationOffset": -5.2872526464468494,
+      "foundationLods": [
+        {
+          "resolution": 0.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.09654786188971798,
+          "maximumTerrainGap": -0.09654750426307146
+        },
+        {
+          "resolution": 1.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.09654786188971798,
+          "maximumTerrainGap": -0.09654750426307146
+        },
+        {
+          "resolution": 1.5,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.09654786188971798,
+          "maximumTerrainGap": -0.09654750426307146
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 2.1902490819646374,
+      "coarseTopRayWorstPoint": [
+        3816.261043968373,
+        107.3326126634515,
+        6978.588128270425
+      ],
+      "candidateNearPose": [
+        3817.6484375,
+        7056.66455078125,
+        116.5249612387269,
+        90.0,
+        -6.3306135511908925
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        38.17611191863337,
+        0.9127473535531508
+      ]
+    },
+    {
+      "id": 46570,
+      "exporterOrdinal": 23282,
+      "originalRecordOffset": 1759014,
+      "originalNameIndex": 121,
+      "model": "o\\hous\\kostelin.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "hous\\kostelin.p3d",
+        "decodedSha256": "ac37542303f56aa60a4f328085148ed58bfc1fffb4d7abe00fcdb06891dec568",
+        "storedSha256": "ac37542303f56aa60a4f328085148ed58bfc1fffb4d7abe00fcdb06891dec568"
+      },
+      "wrpFrame": [
+        [
+          0.682221531867981,
+          -0.0,
+          0.7311455607414246
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          -0.7311455607414246,
+          0.0,
+          0.682221531867981
+        ],
+        [
+          3775.581298828125,
+          146.56549072265625,
+          7394.40966796875
+        ]
+      ],
+      "coarsePredictedPosition": [
+        3775.581298828125,
+        146.54391631151327,
+        7394.40966796875
+      ],
+      "legacyLowering": 0.021574411142978533,
+      "modelBoundingCentre": [
+        0.0,
+        7.380304336547852,
+        -0.028205394744873047
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 2299.1996195956267,
+      "centreTerrain": 139.16285729303956,
+      "visualTopY": 156.35053214098104,
+      "topAzimuth": 30.955412043751682,
+      "topElevation": 2.0064889783056947,
+      "azimuthOffset": -69.04458795624832,
+      "elevationOffset": -4.193511021694306,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.61926856073444,
+          "maximumTerrainGap": -2.2073914176198457
+        },
+        {
+          "resolution": 3.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.619008210750252,
+          "maximumTerrainGap": -2.2071334152117856
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.619008210750252,
+          "maximumTerrainGap": -2.2071334152117856
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.619008210750252,
+          "maximumTerrainGap": -2.2071334152117856
+        },
+        {
+          "resolution": 12.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.619008210750252,
+          "maximumTerrainGap": -2.207206904550816
+        },
+        {
+          "resolution": 15.0,
+          "bottomVertices": 42,
+          "minimumTerrainGap": -2.619224656572385,
+          "maximumTerrainGap": -2.2072068982614326
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": -14.139122555802572,
+      "coarseTopRayWorstPoint": [
+        3748.604709724137,
+        154.51313764966062,
+        7349.433840248417
+      ],
+      "candidateNearPose": [
+        3715.581298828125,
+        7394.40966796875,
+        142.11076386094092,
+        90.0,
+        -2.2653094710751422
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        30.955412043751682,
+        2.0064889783056947
+      ]
+    },
+    {
+      "id": 122207,
+      "exporterOrdinal": 23820,
+      "originalRecordOffset": 1789142,
+      "originalNameIndex": 168,
+      "model": "o\\misc\\kapl.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "misc\\kapl.p3d",
+        "decodedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22",
+        "storedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22"
+      },
+      "wrpFrame": [
+        [
+          0.9460422396659851,
+          0.0,
+          -0.32404300570487976
+        ],
+        [
+          0.0,
+          0.9999998807907104,
+          0.0
+        ],
+        [
+          0.32404300570487976,
+          -0.0,
+          0.9460422396659851
+        ],
+        [
+          3817.41552734375,
+          140.25494384765625,
+          7418.14208984375
+        ]
+      ],
+      "coarsePredictedPosition": [
+        3817.41552734375,
+        140.22502333523477,
+        7418.14208984375
+      ],
+      "legacyLowering": 0.029920512421483636,
+      "modelBoundingCentre": [
+        -0.22926917672157288,
+        1.0270166397094727,
+        0.04562932252883911
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 2341.189731723071,
+      "centreTerrain": 139.21042859554288,
+      "visualTopY": 141.22474545841393,
+      "topAzimuth": 31.534657639387433,
+      "topElevation": 1.6007188188716113,
+      "azimuthOffset": -68.46534236061257,
+      "elevationOffset": -4.599281181128389,
+      "foundationLods": [
+        {
+          "resolution": 0.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.0656203668887656,
+          "maximumTerrainGap": 0.0012089403531660992
+        },
+        {
+          "resolution": 1.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.0656811103320365,
+          "maximumTerrainGap": 0.0013012775485208294
+        },
+        {
+          "resolution": 1.5,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.0656811103320365,
+          "maximumTerrainGap": 0.0013012775485208294
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 2.008315631174952,
+      "coarseTopRayWorstPoint": [
+        3748.7611729901173,
+        137.5564862258738,
+        7306.260331643964
+      ],
+      "candidateNearPose": [
+        3757.41552734375,
+        7418.14208984375,
+        143.3292620509863,
+        90.0,
+        -1.0990116435243074
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        31.534657639387433,
+        1.6007188188716113
+      ]
+    },
+    {
+      "id": 16750,
+      "exporterOrdinal": 19047,
+      "originalRecordOffset": 1521854,
+      "originalNameIndex": 121,
+      "model": "o\\hous\\kostelin.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "hous\\kostelin.p3d",
+        "decodedSha256": "ac37542303f56aa60a4f328085148ed58bfc1fffb4d7abe00fcdb06891dec568",
+        "storedSha256": "ac37542303f56aa60a4f328085148ed58bfc1fffb4d7abe00fcdb06891dec568"
+      },
+      "wrpFrame": [
+        [
+          -0.965979278087616,
+          0.0,
+          -0.25861942768096924
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.25861942768096924,
+          0.0,
+          -0.965979278087616
+        ],
+        [
+          3264.459228515625,
+          168.98780822753906,
+          7837.96435546875
+        ]
+      ],
+      "coarsePredictedPosition": [
+        3264.459228515625,
+        168.89604163376487,
+        7837.96435546875
+      ],
+      "legacyLowering": 0.09176659377419583,
+      "modelBoundingCentre": [
+        0.0,
+        7.380304336547852,
+        -0.028205394744873047
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 2506.888167918786,
+      "centreTerrain": 161.51582264341414,
+      "visualTopY": 178.70265746323264,
+      "topAzimuth": 15.537537199859228,
+      "topElevation": 2.350555559508159,
+      "azimuthOffset": -84.46246280014077,
+      "elevationOffset": -3.8494444404918413,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.504703226592312,
+          "maximumTerrainGap": -2.353006457402955
+        },
+        {
+          "resolution": 3.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.504703226592312,
+          "maximumTerrainGap": -2.352760088760192
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.504703226592312,
+          "maximumTerrainGap": -2.352760088760192
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.504703226592312,
+          "maximumTerrainGap": -2.352760088760192
+        },
+        {
+          "resolution": 12.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.504703226592312,
+          "maximumTerrainGap": -2.352761947154846
+        },
+        {
+          "resolution": 15.0,
+          "bottomVertices": 42,
+          "minimumTerrainGap": -2.504703226592312,
+          "maximumTerrainGap": -2.3527648415179385
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": -15.385854546975565,
+      "coarseTopRayWorstPoint": [
+        3253.8033844703173,
+        177.06977098252867,
+        7799.638145636462
+      ],
+      "candidateNearPose": [
+        3204.459228515625,
+        7837.96435546875,
+        160.2491320887953,
+        90.0,
+        1.7568002873192015
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        15.537537199859228,
+        2.350555559508159
+      ]
+    },
+    {
+      "id": 158202,
+      "exporterOrdinal": 31906,
+      "originalRecordOffset": 2241958,
+      "originalNameIndex": 53,
+      "model": "data3d\\kostel.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Dta\\Data3D.pbo",
+        "archiveSha256": "10528ef9b5112896898ad8667e83601ff47f95231652c73409d57b7227a8a00f",
+        "member": "kostel.p3d",
+        "decodedSha256": "196c81981f2d9594a0a5b9642ccecdd626ca9879796494e5cb1d1398dc8eec7e",
+        "storedSha256": "2afe9081a94b9868276277ca2923c24d53faef2c81b23afe0de849507a5f90d8"
+      },
+      "wrpFrame": [
+        [
+          -0.04600180685520172,
+          0.0,
+          -0.9989413619041443
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.9989413619041443,
+          0.0,
+          -0.04600180685520172
+        ],
+        [
+          4374.85986328125,
+          28.165630340576172,
+          3328.826416015625
+        ]
+      ],
+      "coarsePredictedPosition": [
+        4374.85986328125,
+        27.658124923706055,
+        3328.826416015625
+      ],
+      "legacyLowering": 0.5075054168701172,
+      "modelBoundingCentre": [
+        6.575387954711914,
+        7.183126449584961,
+        5.923764228820801
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 2749.455056459763,
+      "centreTerrain": 20.474998474121094,
+      "visualTopY": 36.87350082397461,
+      "topAzimuth": 139.6015508778439,
+      "topElevation": -0.8111335032806061,
+      "azimuthOffset": 39.60155087784389,
+      "elevationOffset": -7.011133503280607,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 68,
+          "minimumTerrainGap": -2.0080642700195312,
+          "maximumTerrainGap": -1.9898624420166016
+        },
+        {
+          "resolution": 2.0,
+          "bottomVertices": 52,
+          "minimumTerrainGap": -2.0059680938720703,
+          "maximumTerrainGap": -1.9889287948608398
+        },
+        {
+          "resolution": 4.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.0279455184936523,
+          "maximumTerrainGap": -1.9889287948608398
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.0322494506835938,
+          "maximumTerrainGap": -1.9889287948608398
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.0322494506835938,
+          "maximumTerrainGap": -1.9889287948608398
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 3.8565072185724603,
+      "coarseTopRayWorstPoint": [
+        3803.5744076598785,
+        49.3533790024304,
+        4000.121369416517
+      ],
+      "candidateNearPose": [
+        4314.85986328125,
+        3328.826416015625,
+        19.303808824466508,
+        90.0,
+        2.0416728391543937
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        139.6015508778439,
+        -0.8111335032806061
+      ]
+    },
+    {
+      "id": 87415,
+      "exporterOrdinal": 72118,
+      "originalRecordOffset": 4493830,
+      "originalNameIndex": 168,
+      "model": "o\\misc\\kapl.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "misc\\kapl.p3d",
+        "decodedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22",
+        "storedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22"
+      },
+      "wrpFrame": [
+        [
+          0.3058169484138489,
+          -0.0,
+          0.952090322971344
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          -0.952090322971344,
+          0.0,
+          0.3058169484138489
+        ],
+        [
+          6400.76171875,
+          145.21102905273438,
+          6300.787109375
+        ]
+      ],
+      "coarsePredictedPosition": [
+        6400.76171875,
+        145.18437327503136,
+        6300.787109375
+      ],
+      "legacyLowering": 0.026655777703012973,
+      "modelBoundingCentre": [
+        -0.22926917672157288,
+        1.0270166397094727,
+        0.04562932252883911
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 3907.756488738383,
+      "centreTerrain": 144.19352663815022,
+      "visualTopY": 146.1840955173867,
+      "topAzimuth": 77.01439775261342,
+      "topElevation": 1.031864608409969,
+      "azimuthOffset": -22.985602247386566,
+      "elevationOffset": -5.168135391590031,
+      "foundationLods": [
+        {
+          "resolution": 0.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.136475809256126,
+          "maximumTerrainGap": 0.024568279847812846
+        },
+        {
+          "resolution": 1.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.13653574205275731,
+          "maximumTerrainGap": 0.02465938476456131
+        },
+        {
+          "resolution": 1.5,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.13653574205275731,
+          "maximumTerrainGap": 0.02465938476456131
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": -7.186736838278648,
+      "coarseTopRayWorstPoint": [
+        6362.6835015625,
+        145.48025456221285,
+        6292.00613828125
+      ],
+      "candidateNearPose": [
+        6340.76171875,
+        6300.787109375,
+        139.71040312528615,
+        90.0,
+        7.056542948279146
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        77.01439775261342,
+        1.031864608409969
+      ]
+    },
+    {
+      "id": 43298,
+      "exporterOrdinal": 73821,
+      "originalRecordOffset": 4589198,
+      "originalNameIndex": 53,
+      "model": "data3d\\kostel.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Dta\\Data3D.pbo",
+        "archiveSha256": "10528ef9b5112896898ad8667e83601ff47f95231652c73409d57b7227a8a00f",
+        "member": "kostel.p3d",
+        "decodedSha256": "196c81981f2d9594a0a5b9642ccecdd626ca9879796494e5cb1d1398dc8eec7e",
+        "storedSha256": "2afe9081a94b9868276277ca2923c24d53faef2c81b23afe0de849507a5f90d8"
+      },
+      "wrpFrame": [
+        [
+          -0.20768101513385773,
+          0.0,
+          0.9781966209411621
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          -0.9781966209411621,
+          0.0,
+          -0.20768101513385773
+        ],
+        [
+          6530.78076171875,
+          117.32623291015625,
+          4221.03271484375
+        ]
+      ],
+      "coarsePredictedPosition": [
+        6530.78076171875,
+        117.16312217712402,
+        4221.03271484375
+      ],
+      "legacyLowering": 0.16311073303222656,
+      "modelBoundingCentre": [
+        6.575387954711914,
+        7.183126449584961,
+        5.923764228820801
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 4117.107005607553,
+      "centreTerrain": 109.97999572753906,
+      "visualTopY": 126.37849807739258,
+      "topAzimuth": 106.96990359320428,
+      "topElevation": 0.7038409974581918,
+      "azimuthOffset": 6.969903593204265,
+      "elevationOffset": -5.496159002541808,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 68,
+          "minimumTerrainGap": -2.0080642700195312,
+          "maximumTerrainGap": -1.9898624420166016
+        },
+        {
+          "resolution": 2.0,
+          "bottomVertices": 52,
+          "minimumTerrainGap": -2.0059680938720703,
+          "maximumTerrainGap": -1.9889287948608398
+        },
+        {
+          "resolution": 4.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.0279455184936523,
+          "maximumTerrainGap": -1.9889287948608398
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.0322494506835938,
+          "maximumTerrainGap": -1.9889287948608398
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.0322494506835938,
+          "maximumTerrainGap": -1.9889287948608398
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": -4.651490183953612,
+      "coarseTopRayWorstPoint": [
+        6247.5720196942875,
+        122.74090232866735,
+        4307.455673177163
+      ],
+      "candidateNearPose": [
+        6470.78076171875,
+        4221.03271484375,
+        113.97999572753906,
+        90.0,
+        -2.8931235587181754
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        106.96990359320428,
+        0.7038409974581918
+      ]
+    },
+    {
+      "id": 169143,
+      "exporterOrdinal": 4605,
+      "originalRecordOffset": 713102,
+      "originalNameIndex": 53,
+      "model": "data3d\\kostel.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Dta\\Data3D.pbo",
+        "archiveSha256": "10528ef9b5112896898ad8667e83601ff47f95231652c73409d57b7227a8a00f",
+        "member": "kostel.p3d",
+        "decodedSha256": "196c81981f2d9594a0a5b9642ccecdd626ca9879796494e5cb1d1398dc8eec7e",
+        "storedSha256": "2afe9081a94b9868276277ca2923c24d53faef2c81b23afe0de849507a5f90d8"
+      },
+      "wrpFrame": [
+        [
+          0.9996405243873596,
+          -0.0,
+          0.026811251416802406
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          -0.026811251416802406,
+          0.0,
+          0.9996405243873596
+        ],
+        [
+          1559.21240234375,
+          44.20387268066406,
+          9410.6416015625
+        ]
+      ],
+      "coarsePredictedPosition": [
+        1559.21240234375,
+        44.17312431335449,
+        9410.6416015625
+      ],
+      "legacyLowering": 0.030748367309570312,
+      "modelBoundingCentre": [
+        6.575387954711914,
+        7.183126449584961,
+        5.923764228820801
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 4119.751293775035,
+      "centreTerrain": 36.98999786376953,
+      "visualTopY": 53.38850021362305,
+      "topAzimuth": 345.4680459891263,
+      "topElevation": -0.3116866995176126,
+      "azimuthOffset": -114.53195401087368,
+      "elevationOffset": -6.511686699517613,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 68,
+          "minimumTerrainGap": -2.0080642700195312,
+          "maximumTerrainGap": -1.9898624420166016
+        },
+        {
+          "resolution": 2.0,
+          "bottomVertices": 52,
+          "minimumTerrainGap": -2.0059680938720703,
+          "maximumTerrainGap": -1.9889287948608398
+        },
+        {
+          "resolution": 4.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.0279455184936523,
+          "maximumTerrainGap": -1.9889287948608398
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.0322494506835938,
+          "maximumTerrainGap": -1.9889287948608398
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.0322494506835938,
+          "maximumTerrainGap": -1.9889287948608398
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 33.9380449724802,
+      "coarseTopRayWorstPoint": [
+        2106.2339163841793,
+        65.24807770082235,
+        7300.322279574062
+      ],
+      "candidateNearPose": [
+        1499.21240234375,
+        9410.6416015625,
+        12.990990292020147,
+        90.0,
+        22.592811779774834
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        345.4680459891263,
+        -0.3116866995176126
+      ]
+    },
+    {
+      "id": 83214,
+      "exporterOrdinal": 68523,
+      "originalRecordOffset": 4292510,
+      "originalNameIndex": 53,
+      "model": "data3d\\kostel.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Dta\\Data3D.pbo",
+        "archiveSha256": "10528ef9b5112896898ad8667e83601ff47f95231652c73409d57b7227a8a00f",
+        "member": "kostel.p3d",
+        "decodedSha256": "196c81981f2d9594a0a5b9642ccecdd626ca9879796494e5cb1d1398dc8eec7e",
+        "storedSha256": "2afe9081a94b9868276277ca2923c24d53faef2c81b23afe0de849507a5f90d8"
+      },
+      "wrpFrame": [
+        [
+          -0.5885008573532104,
+          0.0,
+          0.8084965944290161
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          -0.8084965944290161,
+          0.0,
+          -0.5885008573532104
+        ],
+        [
+          6237.0546875,
+          124.6230239868164,
+          7364.86865234375
+        ]
+      ],
+      "coarsePredictedPosition": [
+        6237.0546875,
+        124.39373870118297,
+        7364.86865234375
+      ],
+      "legacyLowering": 0.22928528563343775,
+      "modelBoundingCentre": [
+        6.575387954711914,
+        7.183126449584961,
+        5.923764228820801
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 4129.361908730331,
+      "centreTerrain": 117.27315663889048,
+      "visualTopY": 133.60911460145152,
+      "topAzimuth": 61.94403086561836,
+      "topElevation": 0.8020614320201207,
+      "azimuthOffset": -38.055969134381655,
+      "elevationOffset": -5.39793856797988,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 68,
+          "minimumTerrainGap": -2.164134219931043,
+          "maximumTerrainGap": -1.7144947314367727
+        },
+        {
+          "resolution": 2.0,
+          "bottomVertices": 52,
+          "minimumTerrainGap": -2.150022924807331,
+          "maximumTerrainGap": -1.7122777969609757
+        },
+        {
+          "resolution": 4.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.150022924807331,
+          "maximumTerrainGap": -1.7122777969609757
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.150022924807331,
+          "maximumTerrainGap": -1.7122777969609757
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.150022924807331,
+          "maximumTerrainGap": -1.7122777969609757
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 1.0893168165681573,
+      "coarseTopRayWorstPoint": [
+        6075.079311026515,
+        131.0395870469846,
+        7278.541753941998
+      ],
+      "candidateNearPose": [
+        6177.0546875,
+        7364.86865234375,
+        122.99268062405284,
+        90.0,
+        -4.587506568282379
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        61.94403086561836,
+        0.8020614320201207
+      ]
+    },
+    {
+      "id": 82455,
+      "exporterOrdinal": 74936,
+      "originalRecordOffset": 4651638,
+      "originalNameIndex": 276,
+      "model": "data3d\\kostel3.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Dta\\Data3D.pbo",
+        "archiveSha256": "10528ef9b5112896898ad8667e83601ff47f95231652c73409d57b7227a8a00f",
+        "member": "kostel3.p3d",
+        "decodedSha256": "14fb625d820383b5e32b1e45d563c4eeace8caaed44c2d699bd0a3f64af9484c",
+        "storedSha256": "75d014882592d85c4dfc9b4105c2d198c07b973c0341a02585d878e6a6064507"
+      },
+      "wrpFrame": [
+        [
+          -0.019202319905161858,
+          0.0,
+          0.999812126159668
+        ],
+        [
+          0.0,
+          0.999996542930603,
+          0.0
+        ],
+        [
+          -0.999812126159668,
+          0.0,
+          -0.019202319905161858
+        ],
+        [
+          6559.3095703125,
+          161.0423126220703,
+          6725.546875
+        ]
+      ],
+      "coarsePredictedPosition": [
+        6559.3095703125,
+        160.79865395551965,
+        6725.546875
+      ],
+      "legacyLowering": 0.24365866655065815,
+      "modelBoundingCentre": [
+        4.76837158203125e-07,
+        15.783462524414062,
+        0.0437469482421875
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 4174.8680943277395,
+      "centreTerrain": 145.0151278924942,
+      "visualTopY": 178.64856783285282,
+      "topAzimuth": 71.81589370858941,
+      "topElevation": 1.4112055931541614,
+      "azimuthOffset": -28.184106291410586,
+      "elevationOffset": -4.788794406845839,
+      "foundationLods": [
+        {
+          "resolution": 2.0,
+          "bottomVertices": 27,
+          "minimumTerrainGap": -2.155325346109265,
+          "maximumTerrainGap": -1.7952273781087058
+        },
+        {
+          "resolution": 4.0,
+          "bottomVertices": 27,
+          "minimumTerrainGap": -2.155325346109265,
+          "maximumTerrainGap": -1.7952273781087058
+        },
+        {
+          "resolution": 7.0,
+          "bottomVertices": 27,
+          "minimumTerrainGap": -2.155325346109265,
+          "maximumTerrainGap": -1.7952273781087058
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 27,
+          "minimumTerrainGap": -2.155325346109265,
+          "maximumTerrainGap": -1.7952273781087058
+        },
+        {
+          "resolution": 12.0,
+          "bottomVertices": 21,
+          "minimumTerrainGap": -2.155325346109265,
+          "maximumTerrainGap": -1.864500959284669
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": -29.35709098200507,
+      "coarseTopRayWorstPoint": [
+        3247.8190045947617,
+        92.78111245873362,
+        5637.801980440647
+      ],
+      "candidateNearPose": [
+        6499.3095703125,
+        6725.546875,
+        147.89187116652727,
+        90.0,
+        -1.8504693226740117
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        71.81589370858941,
+        1.4112055931541614
+      ]
+    },
+    {
+      "id": 3937,
+      "exporterOrdinal": 87557,
+      "originalRecordOffset": 5358414,
+      "originalNameIndex": 168,
+      "model": "o\\misc\\kapl.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "misc\\kapl.p3d",
+        "decodedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22",
+        "storedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22"
+      },
+      "wrpFrame": [
+        [
+          0.26749879121780396,
+          0.0,
+          -0.9635573625564575
+        ],
+        [
+          0.0,
+          0.9999991655349731,
+          0.0
+        ],
+        [
+          0.9635573625564575,
+          -0.0,
+          0.26749879121780396
+        ],
+        [
+          7204.49609375,
+          96.87600708007812,
+          4660.41015625
+        ]
+      ],
+      "coarsePredictedPosition": [
+        7204.49609375,
+        96.82334155805526,
+        4660.41015625
+      ],
+      "legacyLowering": 0.05266552202286334,
+      "modelBoundingCentre": [
+        -0.22926917672157288,
+        1.0270166397094727,
+        0.04562932252883911
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 4674.133092455785,
+      "centreTerrain": 95.83192832231518,
+      "visualTopY": 97.82306296617736,
+      "topAzimuth": 99.38599194539765,
+      "topElevation": 0.2699579146635018,
+      "azimuthOffset": -0.6140080546023512,
+      "elevationOffset": -5.930042085336498,
+      "foundationLods": [
+        {
+          "resolution": 0.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.1409531156982382,
+          "maximumTerrainGap": 0.030158102023946753
+        },
+        {
+          "resolution": 1.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.1410560024356613,
+          "maximumTerrainGap": 0.030314501994951115
+        },
+        {
+          "resolution": 1.5,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.1410560024356613,
+          "maximumTerrainGap": 0.030314501994951115
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 41.379422108095426,
+      "coarseTopRayWorstPoint": [
+        6698.706151304872,
+        95.40759982885915,
+        4744.016095429603
+      ],
+      "candidateNearPose": [
+        7144.49609375,
+        4660.41015625,
+        97.891845626235,
+        90.0,
+        0.8447764384252402
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        99.38599194539765,
+        0.2699579146635018
+      ]
+    },
+    {
+      "id": 16784,
+      "exporterOrdinal": 87578,
+      "originalRecordOffset": 5359590,
+      "originalNameIndex": 168,
+      "model": "o\\misc\\kapl.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "misc\\kapl.p3d",
+        "decodedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22",
+        "storedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22"
+      },
+      "wrpFrame": [
+        [
+          0.7712460160255432,
+          -0.0,
+          0.6365371942520142
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          -0.6365371942520142,
+          0.0,
+          0.7712460160255432
+        ],
+        [
+          7246.42724609375,
+          115.01669311523438,
+          4763.12451171875
+        ]
+      ],
+      "coarsePredictedPosition": [
+        7246.42724609375,
+        114.98644103005887,
+        4763.12451171875
+      ],
+      "legacyLowering": 0.030252085175504817,
+      "modelBoundingCentre": [
+        -0.22926917672157288,
+        1.0270166397094727,
+        0.04562932252883911
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 4699.996827965831,
+      "centreTerrain": 113.94392440915104,
+      "visualTopY": 115.98616327241422,
+      "topAzimuth": 98.06712623519867,
+      "topElevation": 0.48988148878334087,
+      "azimuthOffset": -1.932873764801343,
+      "elevationOffset": -5.71011851121666,
+      "foundationLods": [
+        {
+          "resolution": 0.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.04393940362261617,
+          "maximumTerrainGap": 0.03538580011800718
+        },
+        {
+          "resolution": 1.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.04397290347553451,
+          "maximumTerrainGap": 0.035436723844114226
+        },
+        {
+          "resolution": 1.5,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.04397290347553451,
+          "maximumTerrainGap": 0.035436723844114226
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 14.82335941350945,
+      "coarseTopRayWorstPoint": [
+        6748.221630705246,
+        111.683804386604,
+        4833.738056486496
+      ],
+      "candidateNearPose": [
+        7186.42724609375,
+        4763.12451171875,
+        112.34965183787048,
+        90.0,
+        4.374610741945758
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        98.06712623519867,
+        0.48988148878334087
+      ]
+    },
+    {
+      "id": 3927,
+      "exporterOrdinal": 87525,
+      "originalRecordOffset": 5356622,
+      "originalNameIndex": 168,
+      "model": "o\\misc\\kapl.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "misc\\kapl.p3d",
+        "decodedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22",
+        "storedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22"
+      },
+      "wrpFrame": [
+        [
+          -0.21745198965072632,
+          0.0,
+          0.9760696887969971
+        ],
+        [
+          0.0,
+          0.9999986886978149,
+          0.0
+        ],
+        [
+          -0.9760696887969971,
+          0.0,
+          -0.21745198965072632
+        ],
+        [
+          7239.32861328125,
+          85.25138854980469,
+          4562.115234375
+        ]
+      ],
+      "coarsePredictedPosition": [
+        7239.32861328125,
+        85.14206431448174,
+        4562.115234375
+      ],
+      "legacyLowering": 0.10932423532294422,
+      "modelBoundingCentre": [
+        -0.22926917672157288,
+        1.0270166397094727,
+        0.04562932252883911
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 4725.411735802519,
+      "centreTerrain": 84.0975812222063,
+      "visualTopY": 86.14178524589913,
+      "topAzimuth": 100.49305588423661,
+      "topElevation": 0.12539430092322001,
+      "azimuthOffset": 0.49305588423661106,
+      "elevationOffset": -6.0746056990767805,
+      "foundationLods": [
+        {
+          "resolution": 0.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.062191546875112635,
+          "maximumTerrainGap": 0.05754140196849278
+        },
+        {
+          "resolution": 1.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.062286776175199066,
+          "maximumTerrainGap": 0.057686161731936636
+        },
+        {
+          "resolution": 1.5,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.062286776175199066,
+          "maximumTerrainGap": 0.057686161731936636
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 59.18091278101879,
+      "coarseTopRayWorstPoint": [
+        6701.380064943576,
+        84.94443633187392,
+        4661.7506683506945
+      ],
+      "candidateNearPose": [
+        7179.32861328125,
+        4562.115234375,
+        93.81751288697129,
+        90.0,
+        -6.39260037708702
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        100.49305588423661,
+        0.12539430092322001
+      ]
+    },
+    {
+      "id": 103183,
+      "exporterOrdinal": 22151,
+      "originalRecordOffset": 1695678,
+      "originalNameIndex": 168,
+      "model": "o\\misc\\kapl.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "misc\\kapl.p3d",
+        "decodedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22",
+        "storedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22"
+      },
+      "wrpFrame": [
+        [
+          0.9999749660491943,
+          -0.0,
+          0.0068142469972372055
+        ],
+        [
+          0.0,
+          0.9999982118606567,
+          0.0
+        ],
+        [
+          -0.0068142469972372055,
+          0.0,
+          0.9999749660491943
+        ],
+        [
+          3612.614013671875,
+          154.37669372558594,
+          10051.068359375
+        ]
+      ],
+      "coarsePredictedPosition": [
+        3612.614013671875,
+        154.36958073174534,
+        10051.068359375
+      ],
+      "legacyLowering": 0.0071129938405931625,
+      "modelBoundingCentre": [
+        -0.22926917672157288,
+        1.0270166397094727,
+        0.04562932252883911
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 4739.369296825109,
+      "centreTerrain": 153.29783183395867,
+      "visualTopY": 155.36930118645802,
+      "topAzimuth": 12.424311645039513,
+      "topElevation": 0.9618488401208912,
+      "azimuthOffset": -87.57568835496049,
+      "elevationOffset": -5.238151159879109,
+      "foundationLods": [
+        {
+          "resolution": 0.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.080950254072917,
+          "maximumTerrainGap": 0.13094438591065227
+        },
+        {
+          "resolution": 1.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.08113031748135313,
+          "maximumTerrainGap": 0.13106283949153408
+        },
+        {
+          "resolution": 1.5,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.08113031748135313,
+          "maximumTerrainGap": 0.13106283949153408
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 56.01488664290713,
+      "coarseTopRayWorstPoint": [
+        3299.5730147333065,
+        130.94144169972208,
+        8630.151315635725
+      ],
+      "candidateNearPose": [
+        3552.614013671875,
+        10051.068359375,
+        148.57085683353245,
+        90.0,
+        7.361777151904627
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        12.424311645039513,
+        0.9618488401208912
+      ]
+    },
+    {
+      "id": 3932,
+      "exporterOrdinal": 88416,
+      "originalRecordOffset": 5406518,
+      "originalNameIndex": 168,
+      "model": "o\\misc\\kapl.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "misc\\kapl.p3d",
+        "decodedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22",
+        "storedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22"
+      },
+      "wrpFrame": [
+        [
+          0.4713283181190491,
+          0.0,
+          -0.8819578289985657
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.8819578289985657,
+          -0.0,
+          0.4713283181190491
+        ],
+        [
+          7295.712890625,
+          81.02967071533203,
+          4423.58251953125
+        ]
+      ],
+      "coarsePredictedPosition": [
+        7295.712890625,
+        80.99842646434914,
+        4423.58251953125
+      ],
+      "legacyLowering": 0.031244250982894073,
+      "modelBoundingCentre": [
+        -0.22926917672157288,
+        1.0270166397094727,
+        0.04562932252883911
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 4807.732169986804,
+      "centreTerrain": 79.97742072477935,
+      "visualTopY": 81.99814870670448,
+      "topAzimuth": 101.99419766486963,
+      "topElevation": 0.07386592105928305,
+      "azimuthOffset": 1.9941976648696311,
+      "elevationOffset": -6.1261340789407175,
+      "foundationLods": [
+        {
+          "resolution": 0.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.05065339488666609,
+          "maximumTerrainGap": -0.0008789482938595938
+        },
+        {
+          "resolution": 1.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.0507278970065812,
+          "maximumTerrainGap": -0.0008299375428322264
+        },
+        {
+          "resolution": 1.5,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.0507278970065812,
+          "maximumTerrainGap": -0.0008299375428322264
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 75.05109358321585,
+      "coarseTopRayWorstPoint": [
+        6649.216192830548,
+        81.1460806259108,
+        4560.93120761109
+      ],
+      "candidateNearPose": [
+        7235.712890625,
+        4423.58251953125,
+        92.01882562778893,
+        90.0,
+        -8.593499567014062
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        101.99419766486963,
+        0.07386592105928305
+      ]
+    },
+    {
+      "id": 1328,
+      "exporterOrdinal": 90179,
+      "originalRecordOffset": 5505246,
+      "originalNameIndex": 276,
+      "model": "data3d\\kostel3.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Dta\\Data3D.pbo",
+        "archiveSha256": "10528ef9b5112896898ad8667e83601ff47f95231652c73409d57b7227a8a00f",
+        "member": "kostel3.p3d",
+        "decodedSha256": "14fb625d820383b5e32b1e45d563c4eeace8caaed44c2d699bd0a3f64af9484c",
+        "storedSha256": "75d014882592d85c4dfc9b4105c2d198c07b973c0341a02585d878e6a6064507"
+      },
+      "wrpFrame": [
+        [
+          0.010796229355037212,
+          0.0,
+          -0.9999417066574097
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.9999417066574097,
+          -0.0,
+          0.010796229355037212
+        ],
+        [
+          7362.7109375,
+          134.25579833984375,
+          4772.17578125
+        ]
+      ],
+      "coarsePredictedPosition": [
+        7362.7109375,
+        134.23340709114206,
+        4772.17578125
+      ],
+      "legacyLowering": 0.02239124870169462,
+      "modelBoundingCentre": [
+        4.76837158203125e-07,
+        15.783462524414062,
+        0.0437469482421875
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 4813.926001198559,
+      "centreTerrain": 118.44978156626225,
+      "visualTopY": 152.08338267707956,
+      "topAzimuth": 97.76623810475517,
+      "topElevation": 0.9078556852328569,
+      "azimuthOffset": -2.233761895244811,
+      "elevationOffset": -5.292144314767143,
+      "foundationLods": [
+        {
+          "resolution": 2.0,
+          "bottomVertices": 27,
+          "minimumTerrainGap": -2.381751343694475,
+          "maximumTerrainGap": -1.9481146394954294
+        },
+        {
+          "resolution": 4.0,
+          "bottomVertices": 27,
+          "minimumTerrainGap": -2.381751343694475,
+          "maximumTerrainGap": -1.9481146394954294
+        },
+        {
+          "resolution": 7.0,
+          "bottomVertices": 27,
+          "minimumTerrainGap": -2.381751343694475,
+          "maximumTerrainGap": -1.9481146394954294
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 27,
+          "minimumTerrainGap": -2.381751343694475,
+          "maximumTerrainGap": -1.9481146394954294
+        },
+        {
+          "resolution": 12.0,
+          "bottomVertices": 21,
+          "minimumTerrainGap": -2.381751343694475,
+          "maximumTerrainGap": -1.9501282084863192
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": -17.334584282840595,
+      "coarseTopRayWorstPoint": [
+        6751.367115676974,
+        142.3061050428967,
+        4855.552499723883
+      ],
+      "candidateNearPose": [
+        7302.7109375,
+        4772.17578125,
+        123.89235034585,
+        90.0,
+        -4.293206837993802
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        97.76623810475517,
+        0.9078556852328569
+      ]
+    },
+    {
+      "id": 169020,
+      "exporterOrdinal": 12226,
+      "originalRecordOffset": 1139878,
+      "originalNameIndex": 168,
+      "model": "o\\misc\\kapl.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "misc\\kapl.p3d",
+        "decodedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22",
+        "storedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22"
+      },
+      "wrpFrame": [
+        [
+          0.1699671745300293,
+          -0.0,
+          0.9854497313499451
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          -0.9854497313499451,
+          0.0,
+          0.1699671745300293
+        ],
+        [
+          2502.79638671875,
+          162.54872131347656,
+          10288.46484375
+        ]
+      ],
+      "coarsePredictedPosition": [
+        2502.79638671875,
+        162.54872131347656,
+        10288.46484375
+      ],
+      "legacyLowering": 0,
+      "modelBoundingCentre": [
+        -0.22926917672157288,
+        1.0270166397094727,
+        0.04562932252883911
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 4866.609774893169,
+      "centreTerrain": 161.62401231199505,
+      "visualTopY": 163.5484435558319,
+      "topAzimuth": 358.93865663855445,
+      "topElevation": 1.0329718174192601,
+      "azimuthOffset": -101.06134336144555,
+      "elevationOffset": -5.16702818258074,
+      "foundationLods": [
+        {
+          "resolution": 0.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.13301884822749344,
+          "maximumTerrainGap": -0.1111386714465823
+        },
+        {
+          "resolution": 1.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.1330305993912475,
+          "maximumTerrainGap": -0.11112080829218485
+        },
+        {
+          "resolution": 1.5,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.1330305993912475,
+          "maximumTerrainGap": -0.11112080829218485
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": -2.1831314707833656,
+      "coarseTopRayWorstPoint": [
+        2503.6978228515627,
+        162.6709591202736,
+        10239.807095312499
+      ],
+      "candidateNearPose": [
+        2442.79638671875,
+        10288.46484375,
+        172.07109837636355,
+        90.0,
+        -7.190035811350019
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        358.93865663855445,
+        1.0329718174192601
+      ]
+    },
+    {
+      "id": 2849,
+      "exporterOrdinal": 53105,
+      "originalRecordOffset": 3429102,
+      "originalNameIndex": 121,
+      "model": "o\\hous\\kostelin.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "hous\\kostelin.p3d",
+        "decodedSha256": "ac37542303f56aa60a4f328085148ed58bfc1fffb4d7abe00fcdb06891dec568",
+        "storedSha256": "ac37542303f56aa60a4f328085148ed58bfc1fffb4d7abe00fcdb06891dec568"
+      },
+      "wrpFrame": [
+        [
+          0.9999499917030334,
+          0.0,
+          -0.009999927133321762
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.009999927133321762,
+          -0.0,
+          0.9999499917030334
+        ],
+        [
+          5442.85791015625,
+          152.74850463867188,
+          9485.6494140625
+        ]
+      ],
+      "coarsePredictedPosition": [
+        5442.85791015625,
+        152.73018198888104,
+        9485.6494140625
+      ],
+      "legacyLowering": 0.0183226497908322,
+      "modelBoundingCentre": [
+        0.0,
+        7.380304336547852,
+        -0.028205394744873047
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 4962.82896087992,
+      "centreTerrain": 145.34977281346917,
+      "visualTopY": 162.53679781834882,
+      "topAzimuth": 35.047314816777096,
+      "topElevation": 1.001272978086148,
+      "azimuthOffset": -64.95268518322291,
+      "elevationOffset": -5.198727021913852,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.497565802754764,
+          "maximumTerrainGap": -2.340428029762222
+        },
+        {
+          "resolution": 3.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.497308310689334,
+          "maximumTerrainGap": -2.3401817165389502
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.497308310689334,
+          "maximumTerrainGap": -2.3401817165389502
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.497308310689334,
+          "maximumTerrainGap": -2.3401817165389502
+        },
+        {
+          "resolution": 12.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.497248796568954,
+          "maximumTerrainGap": -2.3401817165389502
+        },
+        {
+          "resolution": 15.0,
+          "bottomVertices": 42,
+          "minimumTerrainGap": -2.4972452411470556,
+          "maximumTerrainGap": -2.3401817165389502
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 121.56398273769543,
+      "coarseTopRayWorstPoint": [
+        5135.62986447872,
+        153.18636116643933,
+        9047.652559486043
+      ],
+      "candidateNearPose": [
+        5382.85791015625,
+        9485.6494140625,
+        156.57911484971658,
+        90.0,
+        -10.07030603962381
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        35.047314816777096,
+        1.001272978086148
+      ]
+    },
+    {
+      "id": 108313,
+      "exporterOrdinal": 5987,
+      "originalRecordOffset": 790494,
+      "originalNameIndex": 121,
+      "model": "o\\hous\\kostelin.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "hous\\kostelin.p3d",
+        "decodedSha256": "ac37542303f56aa60a4f328085148ed58bfc1fffb4d7abe00fcdb06891dec568",
+        "storedSha256": "ac37542303f56aa60a4f328085148ed58bfc1fffb4d7abe00fcdb06891dec568"
+      },
+      "wrpFrame": [
+        [
+          -0.9204393029212952,
+          0.0,
+          0.3908848166465759
+        ],
+        [
+          0.0,
+          0.9999997615814209,
+          0.0
+        ],
+        [
+          -0.3908848166465759,
+          0.0,
+          -0.9204393029212952
+        ],
+        [
+          1724.217041015625,
+          47.38030242919922,
+          11228.7138671875
+        ]
+      ],
+      "coarsePredictedPosition": [
+        1724.217041015625,
+        47.340301661418835,
+        11228.7138671875
+      ],
+      "legacyLowering": 0.040000767780384194,
+      "modelBoundingCentre": [
+        0.0,
+        7.380304336547852,
+        -0.028205394744873047
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 5870.65522116718,
+      "centreTerrain": 39.959999084472656,
+      "visualTopY": 57.146915152807196,
+      "topAzimuth": 351.4902811194503,
+      "topElevation": -0.1820477271958679,
+      "azimuthOffset": -108.50971888054971,
+      "elevationOffset": -6.382047727195868,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.4263109144421833,
+          "maximumTerrainGap": -2.4227537100900918
+        },
+        {
+          "resolution": 3.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.4263109144421833,
+          "maximumTerrainGap": -2.422496218086053
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.4263109144421833,
+          "maximumTerrainGap": -2.422496218086053
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.4263109144421833,
+          "maximumTerrainGap": -2.422496218086053
+        },
+        {
+          "resolution": 12.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.4263109144421833,
+          "maximumTerrainGap": -2.422496218086053
+        },
+        {
+          "resolution": 15.0,
+          "bottomVertices": 42,
+          "minimumTerrainGap": -2.4263109144421833,
+          "maximumTerrainGap": -2.422496218086053
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 261.97111030887197,
+      "coarseTopRayWorstPoint": [
+        1838.7789562711284,
+        59.606770856420816,
+        10463.05065158446
+      ],
+      "candidateNearPose": [
+        1664.217041015625,
+        11228.7138671875,
+        47.12200354319069,
+        90.0,
+        -6.266273657315532
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        351.4902811194503,
+        -0.1820477271958679
+      ]
+    },
+    {
+      "id": 27552,
+      "exporterOrdinal": 109938,
+      "originalRecordOffset": 6611750,
+      "originalNameIndex": 53,
+      "model": "data3d\\kostel.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Dta\\Data3D.pbo",
+        "archiveSha256": "10528ef9b5112896898ad8667e83601ff47f95231652c73409d57b7227a8a00f",
+        "member": "kostel.p3d",
+        "decodedSha256": "196c81981f2d9594a0a5b9642ccecdd626ca9879796494e5cb1d1398dc8eec7e",
+        "storedSha256": "2afe9081a94b9868276277ca2923c24d53faef2c81b23afe0de849507a5f90d8"
+      },
+      "wrpFrame": [
+        [
+          0.3716599941253662,
+          -0.0,
+          0.9283685088157654
+        ],
+        [
+          0.0,
+          0.9999996423721313,
+          0.0
+        ],
+        [
+          -0.9283685088157654,
+          0.0,
+          0.3716599941253662
+        ],
+        [
+          8956.431640625,
+          131.81678771972656,
+          5481.27880859375
+        ]
+      ],
+      "coarsePredictedPosition": [
+        8956.431640625,
+        129.52540891308985,
+        5481.27880859375
+      ],
+      "legacyLowering": 2.2913788066367147,
+      "modelBoundingCentre": [
+        6.575387954711914,
+        7.183126449584961,
+        5.923764228820801
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 6363.7613491390985,
+      "centreTerrain": 122.23832769759,
+      "visualTopY": 138.74078151768316,
+      "topAzimuth": 89.47249139312387,
+      "topElevation": 0.5666654293553176,
+      "azimuthOffset": -10.527508606876125,
+      "elevationOffset": -5.633334570644682,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 68,
+          "minimumTerrainGap": -2.0906601964515943,
+          "maximumTerrainGap": -1.6425718151827482
+        },
+        {
+          "resolution": 2.0,
+          "bottomVertices": 52,
+          "minimumTerrainGap": -2.071524728136282,
+          "maximumTerrainGap": -1.6425718151827482
+        },
+        {
+          "resolution": 4.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.071524728136282,
+          "maximumTerrainGap": -1.6806548780402295
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.071524728136282,
+          "maximumTerrainGap": -1.6849588086909648
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.071524728136282,
+          "maximumTerrainGap": -1.6849588086909648
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": -4.132562836214191,
+      "coarseTopRayWorstPoint": [
+        6848.374952317954,
+        117.89016318755633,
+        5461.869883935547
+      ],
+      "candidateNearPose": [
+        8896.431640625,
+        5481.27880859375,
+        125.567862456441,
+        90.0,
+        -2.1550483178486473
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        89.47249139312387,
+        0.5666654293553176
+      ]
+    },
+    {
+      "id": 70522,
+      "exporterOrdinal": 104701,
+      "originalRecordOffset": 6318478,
+      "originalNameIndex": 121,
+      "model": "o\\hous\\kostelin.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "hous\\kostelin.p3d",
+        "decodedSha256": "ac37542303f56aa60a4f328085148ed58bfc1fffb4d7abe00fcdb06891dec568",
+        "storedSha256": "ac37542303f56aa60a4f328085148ed58bfc1fffb4d7abe00fcdb06891dec568"
+      },
+      "wrpFrame": [
+        [
+          -0.9998306035995483,
+          0.0,
+          -0.018406281247735023
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.018406281247735023,
+          0.0,
+          -0.9998306035995483
+        ],
+        [
+          8631.783203125,
+          199.34207153320312,
+          7568.08984375
+        ]
+      ],
+      "coarsePredictedPosition": [
+        8631.783203125,
+        199.34207153320312,
+        7568.08984375
+      ],
+      "legacyLowering": 0,
+      "modelBoundingCentre": [
+        0.0,
+        7.380304336547852,
+        -0.028205394744873047
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 6408.616677684157,
+      "centreTerrain": 191.97249964773653,
+      "visualTopY": 209.1486873626709,
+      "topAzimuth": 70.4415687045578,
+      "topElevation": 1.192022398382077,
+      "azimuthOffset": -29.558431295442205,
+      "elevationOffset": -5.007977601617923,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.628252966260476,
+          "maximumTerrainGap": -2.4309730529785156
+        },
+        {
+          "resolution": 3.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.627995474195046,
+          "maximumTerrainGap": -2.430715560913086
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.627995474195046,
+          "maximumTerrainGap": -2.430715560913086
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.627995474195046,
+          "maximumTerrainGap": -2.430715560913086
+        },
+        {
+          "resolution": 12.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.6279076470603115,
+          "maximumTerrainGap": -2.430715560913086
+        },
+        {
+          "resolution": 15.0,
+          "bottomVertices": 42,
+          "minimumTerrainGap": -2.627889059369636,
+          "maximumTerrainGap": -2.430715560913086
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": -19.463434978715014,
+      "coarseTopRayWorstPoint": [
+        6497.068630391906,
+        162.0102907206426,
+        6809.696860732582
+      ],
+      "candidateNearPose": [
+        8571.783203125,
+        7568.08984375,
+        189.09444662213315,
+        90.0,
+        3.2823262109139426
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        70.4415687045578,
+        1.192022398382077
+      ]
+    },
+    {
+      "id": 76062,
+      "exporterOrdinal": 108309,
+      "originalRecordOffset": 6520526,
+      "originalNameIndex": 168,
+      "model": "o\\misc\\kapl.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "misc\\kapl.p3d",
+        "decodedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22",
+        "storedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22"
+      },
+      "wrpFrame": [
+        [
+          0.04078500717878342,
+          0.0,
+          -0.9991645216941833
+        ],
+        [
+          0.0,
+          0.9999966025352478,
+          0.0
+        ],
+        [
+          0.9991645216941833,
+          -0.0,
+          0.04078500717878342
+        ],
+        [
+          8867.2119140625,
+          195.02700805664062,
+          7879.359375
+        ]
+      ],
+      "coarsePredictedPosition": [
+        8867.2119140625,
+        195.02200826764414,
+        7879.359375
+      ],
+      "legacyLowering": 0.004999788996485677,
+      "modelBoundingCentre": [
+        -0.22926917672157288,
+        1.0270166397094727,
+        0.04562932252883911
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 6738.079286388399,
+      "centreTerrain": 193.9949951171875,
+      "visualTopY": 196.0217271134784,
+      "topAzimuth": 68.6173454243438,
+      "topElevation": 1.022170633861704,
+      "azimuthOffset": -31.382654575656204,
+      "elevationOffset": -5.177829366138296,
+      "foundationLods": [
+        {
+          "resolution": 0.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.019768170905734905,
+          "maximumTerrainGap": -0.019767813279088386
+        },
+        {
+          "resolution": 1.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.019768170905734905,
+          "maximumTerrainGap": -0.019767813279088386
+        },
+        {
+          "resolution": 1.5,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.019768170905734905,
+          "maximumTerrainGap": -0.019767813279088386
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": -0.8920797807905956,
+      "coarseTopRayWorstPoint": [
+        8799.904394271703,
+        194.73204340390916,
+        7853.005349410728
+      ],
+      "candidateNearPose": [
+        8807.2119140625,
+        7879.359375,
+        197.95873497486116,
+        90.0,
+        -0.9390968829408471
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        68.6173454243438,
+        1.022170633861704
+      ]
+    },
+    {
+      "id": 103164,
+      "exporterOrdinal": 101527,
+      "originalRecordOffset": 6140734,
+      "originalNameIndex": 168,
+      "model": "o\\misc\\kapl.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "misc\\kapl.p3d",
+        "decodedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22",
+        "storedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22"
+      },
+      "wrpFrame": [
+        [
+          0.20923857390880585,
+          0.0,
+          -0.9778646230697632
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.9778646230697632,
+          -0.0,
+          0.20923857390880585
+        ],
+        [
+          8296.0224609375,
+          519.8341064453125,
+          9142.193359375
+        ]
+      ],
+      "coarsePredictedPosition": [
+        8296.0224609375,
+        519.8341064453125,
+        9142.193359375
+      ],
+      "legacyLowering": 0,
+      "modelBoundingCentre": [
+        -0.22926917672157288,
+        1.0270166397094727,
+        0.04562932252883911
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 6808.80714932174,
+      "centreTerrain": 518.9523907870055,
+      "visualTopY": 520.8338286876678,
+      "topAzimuth": 56.887940828487196,
+      "topElevation": 3.7396186062203443,
+      "azimuthOffset": -43.11205917151281,
+      "elevationOffset": -2.460381393779656,
+      "foundationLods": [
+        {
+          "resolution": 0.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.25386559495041183,
+          "maximumTerrainGap": -0.07643410279445106
+        },
+        {
+          "resolution": 1.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.25417495677345414,
+          "maximumTerrainGap": -0.07596383635052462
+        },
+        {
+          "resolution": 1.5,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.25417495677345414,
+          "maximumTerrainGap": -0.07596383635052462
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": -15.271229874515086,
+      "coarseTopRayWorstPoint": [
+        8238.991636328125,
+        516.3834904007912,
+        9104.99832578125
+      ],
+      "candidateNearPose": [
+        8236.0224609375,
+        9142.193359375,
+        509.8158965975045,
+        90.0,
+        11.283692434529717
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        56.887940828487196,
+        3.7396186062203443
+      ]
+    },
+    {
+      "id": 54173,
+      "exporterOrdinal": 100322,
+      "originalRecordOffset": 6073254,
+      "originalNameIndex": 121,
+      "model": "o\\hous\\kostelin.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "hous\\kostelin.p3d",
+        "decodedSha256": "ac37542303f56aa60a4f328085148ed58bfc1fffb4d7abe00fcdb06891dec568",
+        "storedSha256": "ac37542303f56aa60a4f328085148ed58bfc1fffb4d7abe00fcdb06891dec568"
+      },
+      "wrpFrame": [
+        [
+          0.29628095030784607,
+          0.0,
+          -0.9551005959510803
+        ],
+        [
+          0.0,
+          0.9999997615814209,
+          0.0
+        ],
+        [
+          0.9551005959510803,
+          -0.0,
+          0.29628095030784607
+        ],
+        [
+          8125.53173828125,
+          529.1759643554688,
+          9394.185546875
+        ]
+      ],
+      "coarsePredictedPosition": [
+        8125.53173828125,
+        529.0367280356326,
+        9394.185546875
+      ],
+      "legacyLowering": 0.13923631983618634,
+      "modelBoundingCentre": [
+        0.0,
+        7.380304336547852,
+        -0.028205394744873047
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 6810.458737951937,
+      "centreTerrain": 521.6558202016354,
+      "visualTopY": 538.8433415270209,
+      "topAzimuth": 54.32783978693092,
+      "topElevation": 3.8895561927860896,
+      "azimuthOffset": -45.67216021306908,
+      "elevationOffset": -2.3104438072139106,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.591541209527122,
+          "maximumTerrainGap": -2.230258261117342
+        },
+        {
+          "resolution": 3.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.5912814254641034,
+          "maximumTerrainGap": -2.230000359816927
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.5912814254641034,
+          "maximumTerrainGap": -2.230000359816927
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.5912814254641034,
+          "maximumTerrainGap": -2.230000359816927
+        },
+        {
+          "resolution": 12.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.5912814254641034,
+          "maximumTerrainGap": -2.230059298475908
+        },
+        {
+          "resolution": 15.0,
+          "bottomVertices": 42,
+          "minimumTerrainGap": -2.594825941866361,
+          "maximumTerrainGap": -2.230059145891687
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 54.43384675638481,
+      "coarseTopRayWorstPoint": [
+        7823.392110165714,
+        513.5561434779902,
+        9177.29873426372
+      ],
+      "candidateNearPose": [
+        8065.53173828125,
+        9394.185546875,
+        514.3831292194129,
+        90.0,
+        7.451029721269361
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        54.32783978693092,
+        3.8895561927860896
+      ]
+    },
+    {
+      "id": 32589,
+      "exporterOrdinal": 147895,
+      "originalRecordOffset": 8737342,
+      "originalNameIndex": 53,
+      "model": "data3d\\kostel.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Dta\\Data3D.pbo",
+        "archiveSha256": "10528ef9b5112896898ad8667e83601ff47f95231652c73409d57b7227a8a00f",
+        "member": "kostel.p3d",
+        "decodedSha256": "196c81981f2d9594a0a5b9642ccecdd626ca9879796494e5cb1d1398dc8eec7e",
+        "storedSha256": "2afe9081a94b9868276277ca2923c24d53faef2c81b23afe0de849507a5f90d8"
+      },
+      "wrpFrame": [
+        [
+          0.007610686589032412,
+          0.0,
+          -0.9999710321426392
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.9999710321426392,
+          -0.0,
+          0.007610686589032412
+        ],
+        [
+          10450.2353515625,
+          155.71070861816406,
+          4642.79248046875
+        ]
+      ],
+      "coarsePredictedPosition": [
+        10450.2353515625,
+        155.21772718890332,
+        4642.79248046875
+      ],
+      "legacyLowering": 0.4929814292607375,
+      "modelBoundingCentre": [
+        6.575387954711914,
+        7.183126449584961,
+        5.923764228820801
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 7895.905925393024,
+      "centreTerrain": 148.36979823961852,
+      "visualTopY": 164.43310308917188,
+      "topAzimuth": 95.66848377194509,
+      "topElevation": 0.6431294266911662,
+      "azimuthOffset": -4.331516228054909,
+      "elevationOffset": -5.556870573308834,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 68,
+          "minimumTerrainGap": -2.6055134195701157,
+          "maximumTerrainGap": -1.989647839013145
+        },
+        {
+          "resolution": 2.0,
+          "bottomVertices": 52,
+          "minimumTerrainGap": -2.6055134195701157,
+          "maximumTerrainGap": -1.9705123638544535
+        },
+        {
+          "resolution": 4.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.6435964960471665,
+          "maximumTerrainGap": -1.9705123638544535
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.647900428237108,
+          "maximumTerrainGap": -1.9705123638544535
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.647900428237108,
+          "maximumTerrainGap": -1.9705123638544535
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 10.948026343794908,
+      "coarseTopRayWorstPoint": [
+        9123.253115082973,
+        149.46426863648696,
+        4774.505761997185
+      ],
+      "candidateNearPose": [
+        10390.2353515625,
+        4642.79248046875,
+        149.8978115355968,
+        90.0,
+        -0.8550380691047321
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        95.66848377194509,
+        0.6431294266911662
+      ]
+    },
+    {
+      "id": 103185,
+      "exporterOrdinal": 158190,
+      "originalRecordOffset": 9313862,
+      "originalNameIndex": 168,
+      "model": "o\\misc\\kapl.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "misc\\kapl.p3d",
+        "decodedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22",
+        "storedSha256": "ab190aabf63e2a2dff4082a8ad51e8707c09f5256bf18f70166a0e9db0659c22"
+      },
+      "wrpFrame": [
+        [
+          0.000796453794464469,
+          -0.0,
+          0.9999968409538269
+        ],
+        [
+          0.0,
+          0.9999971985816956,
+          0.0
+        ],
+        [
+          -0.9999968409538269,
+          0.0,
+          0.000796453794464469
+        ],
+        [
+          10852.0,
+          141.96487426757812,
+          5900.0
+        ]
+      ],
+      "coarsePredictedPosition": [
+        10852.0,
+        141.9366177363926,
+        5900.0
+      ],
+      "legacyLowering": 0.028256531185519407,
+      "modelBoundingCentre": [
+        -0.22926917672157288,
+        1.0270166397094727,
+        0.04562932252883911
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 8272.840921938485,
+      "centreTerrain": 140.97239562988293,
+      "visualTopY": 142.93633717810775,
+      "topAzimuth": 86.69242473320043,
+      "topElevation": 0.4649605097753976,
+      "azimuthOffset": -13.307575266799574,
+      "elevationOffset": -5.735039490224603,
+      "foundationLods": [
+        {
+          "resolution": 0.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.13971737244716564,
+          "maximumTerrainGap": 0.0970162382124613
+        },
+        {
+          "resolution": 1.0,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.14009979309327036,
+          "maximumTerrainGap": 0.09759707184198874
+        },
+        {
+          "resolution": 1.5,
+          "bottomVertices": 12,
+          "minimumTerrainGap": -0.14009979309327036,
+          "maximumTerrainGap": 0.09759707184198874
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 30.06763796863811,
+      "coarseTopRayWorstPoint": [
+        10001.1270713422,
+        136.01975201779968,
+        5850.826103990326
+      ],
+      "candidateNearPose": [
+        10792.0,
+        5900.0,
+        142.8393896484375,
+        90.0,
+        1.002999708129705
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        86.69242473320043,
+        0.4649605097753976
+      ]
+    },
+    {
+      "id": 17512,
+      "exporterOrdinal": 152663,
+      "originalRecordOffset": 9004350,
+      "originalNameIndex": 276,
+      "model": "data3d\\kostel3.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Dta\\Data3D.pbo",
+        "archiveSha256": "10528ef9b5112896898ad8667e83601ff47f95231652c73409d57b7227a8a00f",
+        "member": "kostel3.p3d",
+        "decodedSha256": "14fb625d820383b5e32b1e45d563c4eeace8caaed44c2d699bd0a3f64af9484c",
+        "storedSha256": "75d014882592d85c4dfc9b4105c2d198c07b973c0341a02585d878e6a6064507"
+      },
+      "wrpFrame": [
+        [
+          0.0007964255637489259,
+          0.0,
+          -0.9999960660934448
+        ],
+        [
+          0.0,
+          0.9999964237213135,
+          0.0
+        ],
+        [
+          0.9999960660934448,
+          -0.0,
+          0.0007964255637489259
+        ],
+        [
+          10692.5673828125,
+          143.77984619140625,
+          3027.11083984375
+        ]
+      ],
+      "coarsePredictedPosition": [
+        10692.5673828125,
+        143.7634018058925,
+        3027.11083984375
+      ],
+      "legacyLowering": 0.016444385513750603,
+      "modelBoundingCentre": [
+        4.76837158203125e-07,
+        15.783462524414062,
+        0.0437469482421875
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 8446.464541628111,
+      "centreTerrain": 127.97999572753906,
+      "visualTopY": 161.61331355534276,
+      "topAzimuth": 106.47632668050714,
+      "topElevation": 0.5820863287910654,
+      "azimuthOffset": 6.476326680507157,
+      "elevationOffset": -5.617913671208935,
+      "foundationLods": [
+        {
+          "resolution": 2.0,
+          "bottomVertices": 27,
+          "minimumTerrainGap": -2.0784761209898335,
+          "maximumTerrainGap": -2.019474436706332
+        },
+        {
+          "resolution": 4.0,
+          "bottomVertices": 27,
+          "minimumTerrainGap": -2.0784761209898335,
+          "maximumTerrainGap": -2.019474436706332
+        },
+        {
+          "resolution": 7.0,
+          "bottomVertices": 27,
+          "minimumTerrainGap": -2.0784761209898335,
+          "maximumTerrainGap": -2.019474436706332
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 27,
+          "minimumTerrainGap": -2.0784761209898335,
+          "maximumTerrainGap": -2.019474436706332
+        },
+        {
+          "resolution": 12.0,
+          "bottomVertices": 21,
+          "minimumTerrainGap": -2.0784761209898335,
+          "maximumTerrainGap": -2.0206379152114096
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 33.01968315858238,
+      "coarseTopRayWorstPoint": [
+        10047.618367587838,
+        154.78025698929298,
+        3217.8636173744867
+      ],
+      "candidateNearPose": [
+        10632.5673828125,
+        3027.11083984375,
+        132.08803853780032,
+        90.0,
+        -3.024218356052765
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        106.47632668050714,
+        0.5820863287910654
+      ]
+    },
+    {
+      "id": 134540,
+      "exporterOrdinal": 163220,
+      "originalRecordOffset": 9595542,
+      "originalNameIndex": 53,
+      "model": "data3d\\kostel.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Dta\\Data3D.pbo",
+        "archiveSha256": "10528ef9b5112896898ad8667e83601ff47f95231652c73409d57b7227a8a00f",
+        "member": "kostel.p3d",
+        "decodedSha256": "196c81981f2d9594a0a5b9642ccecdd626ca9879796494e5cb1d1398dc8eec7e",
+        "storedSha256": "2afe9081a94b9868276277ca2923c24d53faef2c81b23afe0de849507a5f90d8"
+      },
+      "wrpFrame": [
+        [
+          1.0,
+          0.0,
+          -9.964653457927852e-08
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          9.964653457927852e-08,
+          -0.0,
+          1.0
+        ],
+        [
+          11096.9736328125,
+          152.45855712890625,
+          7659.54931640625
+        ]
+      ],
+      "coarsePredictedPosition": [
+        11096.9736328125,
+        152.17311668395996,
+        7659.54931640625
+      ],
+      "legacyLowering": 0.28544044494628906,
+      "modelBoundingCentre": [
+        6.575387954711914,
+        7.183126449584961,
+        5.923764228820801
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 8793.300155766297,
+      "centreTerrain": 144.989990234375,
+      "visualTopY": 161.38849258422852,
+      "topAzimuth": 75.26301743748408,
+      "topElevation": 0.5576637281009279,
+      "azimuthOffset": -24.73698256251592,
+      "elevationOffset": -5.642336271899072,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 68,
+          "minimumTerrainGap": -2.0080642700195312,
+          "maximumTerrainGap": -1.9898624420166016
+        },
+        {
+          "resolution": 2.0,
+          "bottomVertices": 52,
+          "minimumTerrainGap": -2.0059680938720703,
+          "maximumTerrainGap": -1.9889287948608398
+        },
+        {
+          "resolution": 4.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.0279455184936523,
+          "maximumTerrainGap": -1.9889287948608398
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.0322494506835938,
+          "maximumTerrainGap": -1.9889287948608398
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.0322494506835938,
+          "maximumTerrainGap": -1.9889287948608398
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 162.35735485921407,
+      "coarseTopRayWorstPoint": [
+        10063.815781108236,
+        150.99031838278398,
+        7387.792540070614
+      ],
+      "candidateNearPose": [
+        11036.9736328125,
+        7659.54931640625,
+        154.55814911141985,
+        90.0,
+        -8.15722067461802
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        75.26301743748408,
+        0.5576637281009279
+      ]
+    },
+    {
+      "id": 172504,
+      "exporterOrdinal": 153678,
+      "originalRecordOffset": 9061190,
+      "originalNameIndex": 53,
+      "model": "data3d\\kostel.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Dta\\Data3D.pbo",
+        "archiveSha256": "10528ef9b5112896898ad8667e83601ff47f95231652c73409d57b7227a8a00f",
+        "member": "kostel.p3d",
+        "decodedSha256": "196c81981f2d9594a0a5b9642ccecdd626ca9879796494e5cb1d1398dc8eec7e",
+        "storedSha256": "2afe9081a94b9868276277ca2923c24d53faef2c81b23afe0de849507a5f90d8"
+      },
+      "wrpFrame": [
+        [
+          0.9872252941131592,
+          0.0,
+          -0.15931834280490875
+        ],
+        [
+          0.0,
+          0.9999980926513672,
+          0.0
+        ],
+        [
+          0.15931834280490875,
+          -0.0,
+          0.9872252941131592
+        ],
+        [
+          10708.583984375,
+          55.38032913208008,
+          1713.587646484375
+        ]
+      ],
+      "coarsePredictedPosition": [
+        10708.583984375,
+        54.23911208990214,
+        1713.587646484375
+      ],
+      "legacyLowering": 1.141217042177935,
+      "modelBoundingCentre": [
+        6.575387954711914,
+        7.183126449584961,
+        5.923764228820801
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 8923.066600108803,
+      "centreTerrain": 47.042455923929815,
+      "visualTopY": 63.45447041323607,
+      "topAzimuth": 114.56187855086755,
+      "topElevation": -0.07927165867269846,
+      "azimuthOffset": 14.561878550867561,
+      "elevationOffset": -6.279271658672698,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 68,
+          "minimumTerrainGap": -2.1875729294877786,
+          "maximumTerrainGap": -1.7772323497766322
+        },
+        {
+          "resolution": 2.0,
+          "bottomVertices": 52,
+          "minimumTerrainGap": -2.192133391370426,
+          "maximumTerrainGap": -1.7772323497766322
+        },
+        {
+          "resolution": 4.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.192133391370426,
+          "maximumTerrainGap": -1.7974573655096577
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.192133391370426,
+          "maximumTerrainGap": -1.7974573655096577
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.192133391370426,
+          "maximumTerrainGap": -1.7974573655096577
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 32.51321657221216,
+      "coarseTopRayWorstPoint": [
+        6249.528920762682,
+        70.23759154605334,
+        3751.514847670482
+      ],
+      "candidateNearPose": [
+        10648.583984375,
+        1713.587646484375,
+        48.999996185302734,
+        90.0,
+        -0.9321605865995283
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        114.56187855086755,
+        -0.07927165867269846
+      ]
+    },
+    {
+      "id": 172266,
+      "exporterOrdinal": 158640,
+      "originalRecordOffset": 9339062,
+      "originalNameIndex": 336,
+      "model": "data3d\\kostel_trosky.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Dta\\Data3D.pbo",
+        "archiveSha256": "10528ef9b5112896898ad8667e83601ff47f95231652c73409d57b7227a8a00f",
+        "member": "kostel_trosky.p3d",
+        "decodedSha256": "e04e7a7df49378de1a7fa7002765819b860858286489a92a6a894be4e29b667c",
+        "storedSha256": "9ef8c2ecda9983bbe1718941924dfe0776c320d8eae8962cc539df3197da12a8"
+      },
+      "wrpFrame": [
+        [
+          0.09067165106534958,
+          -0.0,
+          0.9958808422088623
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          -0.9958808422088623,
+          0.0,
+          0.09067165106534958
+        ],
+        [
+          10949.26953125,
+          111.6277084350586,
+          2050.2353515625
+        ]
+      ],
+      "coarsePredictedPosition": [
+        10949.26953125,
+        111.6277084350586,
+        2050.2353515625
+      ],
+      "legacyLowering": 0,
+      "modelBoundingCentre": [
+        -0.13933038711547852,
+        6.401200294494629,
+        -4.160408973693848
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 9011.198232788387,
+      "centreTerrain": 105.4998299719393,
+      "visualTopY": 118.32890892028809,
+      "topAzimuth": 111.9780598491193,
+      "topElevation": 0.2704089770995033,
+      "azimuthOffset": 11.97805984911929,
+      "elevationOffset": -5.929591022900497,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 140,
+          "minimumTerrainGap": -1.4056183514533842,
+          "maximumTerrainGap": -0.260251444478385
+        },
+        {
+          "resolution": 2.0,
+          "bottomVertices": 98,
+          "minimumTerrainGap": -1.4056183514533842,
+          "maximumTerrainGap": -0.260251444478385
+        },
+        {
+          "resolution": 4.0,
+          "bottomVertices": 49,
+          "minimumTerrainGap": -1.4056183514533842,
+          "maximumTerrainGap": -0.260251444478385
+        },
+        {
+          "resolution": 7.0,
+          "bottomVertices": 49,
+          "minimumTerrainGap": -1.4056183514533842,
+          "maximumTerrainGap": -0.260251444478385
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 32,
+          "minimumTerrainGap": -1.4056183514533842,
+          "maximumTerrainGap": -0.260251444478385
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 22.61650063989184,
+      "coarseTopRayWorstPoint": [
+        6248.486375962472,
+        94.40462758150005,
+        3947.3814542934065
+      ],
+      "candidateNearPose": [
+        10889.26953125,
+        2050.2353515625,
+        111.1141854935884,
+        90.0,
+        -2.974248177352964
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        111.9780598491193,
+        0.2704089770995033
+      ]
+    },
+    {
+      "id": 171925,
+      "exporterOrdinal": 171625,
+      "originalRecordOffset": 10066222,
+      "originalNameIndex": 53,
+      "model": "data3d\\kostel.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Dta\\Data3D.pbo",
+        "archiveSha256": "10528ef9b5112896898ad8667e83601ff47f95231652c73409d57b7227a8a00f",
+        "member": "kostel.p3d",
+        "decodedSha256": "196c81981f2d9594a0a5b9642ccecdd626ca9879796494e5cb1d1398dc8eec7e",
+        "storedSha256": "2afe9081a94b9868276277ca2923c24d53faef2c81b23afe0de849507a5f90d8"
+      },
+      "wrpFrame": [
+        [
+          0.9992001056671143,
+          0.0,
+          -0.039989519864320755
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.039989519864320755,
+          -0.0,
+          0.9992001056671143
+        ],
+        [
+          11514.029296875,
+          79.55087280273438,
+          2266.88671875
+        ]
+      ],
+      "coarsePredictedPosition": [
+        11514.029296875,
+        79.1528032430729,
+        2266.88671875
+      ],
+      "legacyLowering": 0.3980695596614794,
+      "modelBoundingCentre": [
+        6.575387954711914,
+        7.183126449584961,
+        5.923764228820801
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 9462.818216195741,
+      "centreTerrain": 71.95440513789654,
+      "visualTopY": 88.36817914334145,
+      "topAzimuth": 109.48105025991504,
+      "topElevation": 0.07609817511022708,
+      "azimuthOffset": 9.481050259915037,
+      "elevationOffset": -6.123901824889773,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 68,
+          "minimumTerrainGap": -2.020708912332566,
+          "maximumTerrainGap": -1.9566312154194492
+        },
+        {
+          "resolution": 2.0,
+          "bottomVertices": 52,
+          "minimumTerrainGap": -2.0015734371738745,
+          "maximumTerrainGap": -1.9626119498703645
+        },
+        {
+          "resolution": 4.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.0357159543225833,
+          "maximumTerrainGap": -1.9626119498703645
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.0400198865125247,
+          "maximumTerrainGap": -1.9626119498703645
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 26,
+          "minimumTerrainGap": -2.0400198865125247,
+          "maximumTerrainGap": -1.9626119498703645
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 40.83397068996888,
+      "coarseTopRayWorstPoint": [
+        10999.699264896602,
+        87.64358243036276,
+        2448.8291193413056
+      ],
+      "candidateNearPose": [
+        11454.029296875,
+        2266.88671875,
+        75.52885910391808,
+        90.0,
+        -2.4730980206787145
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        109.48105025991504,
+        0.07609817511022708
+      ]
+    },
+    {
+      "id": 99115,
+      "exporterOrdinal": 163619,
+      "originalRecordOffset": 9617886,
+      "originalNameIndex": 121,
+      "model": "o\\hous\\kostelin.p3d",
+      "source": {
+        "archive": "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\AddOns\\O.pbo",
+        "archiveSha256": "e3111e081afed428b67896ce11f374f591417990d2313f437ebce077b9986e23",
+        "member": "hous\\kostelin.p3d",
+        "decodedSha256": "ac37542303f56aa60a4f328085148ed58bfc1fffb4d7abe00fcdb06891dec568",
+        "storedSha256": "ac37542303f56aa60a4f328085148ed58bfc1fffb4d7abe00fcdb06891dec568"
+      },
+      "wrpFrame": [
+        [
+          -0.7373934388160706,
+          0.0,
+          -0.6754633188247681
+        ],
+        [
+          0.0,
+          0.9999998807907104,
+          0.0
+        ],
+        [
+          0.6754633188247681,
+          0.0,
+          -0.7373934388160706
+        ],
+        [
+          11086.2080078125,
+          58.67910385131836,
+          11558.6943359375
+        ]
+      ],
+      "coarsePredictedPosition": [
+        11086.2080078125,
+        58.33585096786002,
+        11558.6943359375
+      ],
+      "legacyLowering": 0.3432528834583408,
+      "modelBoundingCentre": [
+        0.0,
+        7.380304336547852,
+        -0.028205394744873047
+      ],
+      "autoCenter": true,
+      "lockAutoCenter": false,
+      "planarDistance": 10477.88865483763,
+      "centreTerrain": 50.955581511408084,
+      "visualTopY": 68.14246562828808,
+      "topAzimuth": 54.15358104455178,
+      "topElevation": -0.04187335228652066,
+      "azimuthOffset": -45.84641895544823,
+      "elevationOffset": -6.241873352286521,
+      "foundationLods": [
+        {
+          "resolution": 1.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.5941003378845906,
+          "maximumTerrainGap": -2.3032146521430477
+        },
+        {
+          "resolution": 3.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.5941003378845906,
+          "maximumTerrainGap": -2.3029535153512484
+        },
+        {
+          "resolution": 6.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.5941003378845906,
+          "maximumTerrainGap": -2.3029535153512484
+        },
+        {
+          "resolution": 9.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.5941003378845906,
+          "maximumTerrainGap": -2.3029535153512484
+        },
+        {
+          "resolution": 12.0,
+          "bottomVertices": 46,
+          "minimumTerrainGap": -2.5941003378845906,
+          "maximumTerrainGap": -2.3029551799631918
+        },
+        {
+          "resolution": 15.0,
+          "bottomVertices": 42,
+          "minimumTerrainGap": -2.5941003378845906,
+          "maximumTerrainGap": -2.302957772518738
+        }
+      ],
+      "coarseTopRayMaximumTerrainOverRay": 571.860151492336,
+      "coarseTopRayWorstPoint": [
+        8601.592655092669,
+        70.38259598169671,
+        9763.6714350468
+      ],
+      "candidateNearPose": [
+        11026.2080078125,
+        11558.6943359375,
+        52.95315402060746,
+        90.0,
+        -1.3594860703908487
+      ],
+      "candidateReportedPositionTargetedPose": [
+        2592.94,
+        5422.69,
+        75.8,
+        54.15358104455178,
+        -0.04187335228652066
+      ]
+    }
+  ]
+}
