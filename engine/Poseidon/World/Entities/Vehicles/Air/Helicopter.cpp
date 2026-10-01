@@ -523,7 +523,16 @@ public:
             ClampU|ClampV|NoZWrite|IsAlpha|IsAlphaFog|NoShadow|IsColored|IsAlphaOrdered);
         Deanimate(level);
     }
+    // Cloudlet's fixed-block pool reserves sizeof(Cloudlet). This derived
+    // puff has additional state and must own matching allocation/deallocation.
+    USE_FAST_ALLOCATOR;
 };
+DEFINE_FAST_ALLOCATOR(RotorLandPuff)
+static_assert(sizeof(RotorLandPuff) > sizeof(Cloudlet));
+static_assert(&RotorLandPuff::operator new != &Cloudlet::operator new,
+    "Derived puff must not allocate from the smaller Cloudlet pool");
+static_assert(&RotorLandPuff::operator delete != &Cloudlet::operator delete,
+    "Derived puff must return storage to its own pool");
 
 bool LandRotorFlag(const char* name, bool fallback)
 {

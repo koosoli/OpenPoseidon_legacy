@@ -70,3 +70,20 @@ ring. Root must inspect low/top real hover and wind movement, confirm stopped,
 wet/sea/road/high-altitude/tilt controls and complete covered footprints, and
 check normal exit, pause and live-budget evidence in the matching installed
 build. There is no performance or all-map appearance claim.
+
+
+The first installed soft-profile campaign on `ab442230`,
+`build/rotor-land/soft-profile-dense-canopy-20261001-051017-72f0d6`, crashed at
+its first grounded-spool emission and is failed, not appearance-accepted.
+Source review found a concrete release memory-safety regression: the formerly
+stateless `RotorLandPuff` inherited the `Cloudlet` fixed-block `operator new`,
+while the soft profile added instance state beyond `sizeof(Cloudlet)`. That
+allocator's size check is a debug assertion, so construction could overwrite
+pool storage in release. The puff now declares and defines its own sized pool,
+including matching delete. Compiler assertions require a larger derived size
+and distinct allocation/deallocation functions; the focused source contract
+requires those actual class declarations. The original dump's exact-build PDB
+was unavailable after a later rebuild, so this source diagnosis is not an
+exact instruction attribution of that dump. Root must rebuild the matching
+binary and repeat the same installed first-emission/lifecycle fixture before
+closing the crash or accepting the ring.

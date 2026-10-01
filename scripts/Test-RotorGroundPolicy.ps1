@@ -19,4 +19,16 @@ foreach ($proof in @('RotorLandPuff::MaxLive','RotorGroundRing(_landRotorPhase',
     'EmitLandRotorRing(deltaT, prec)','GSnow().ErodeRotor')) {
     if (!$cpp.Contains($proof)) {throw "Rotor actual emission/support proof missing: $proof"}
 }
-Write-Host 'Rotor land policy/hydrology/annulus CPU tests and production call-site contracts PASS; full build and installed hover proof pending.'
+# Stateful Cloudlet subclasses must not silently inherit its fixed-block pool.
+# The actual class also has compiler-enforced distinct new/delete assertions.
+$puffStart=$cpp.IndexOf('class RotorLandPuff final : public Cloudlet')
+$puffEnd=$cpp.IndexOf('bool LandRotorFlag', $puffStart)
+if ($puffStart -lt 0 -or $puffEnd -le $puffStart) {throw 'Rotor puff class boundary missing.'}
+$puff=$cpp.Substring($puffStart,$puffEnd-$puffStart)
+foreach ($allocatorProof in @('USE_FAST_ALLOCATOR;', 'DEFINE_FAST_ALLOCATOR(RotorLandPuff)',
+    'sizeof(RotorLandPuff) > sizeof(Cloudlet)',
+    '&RotorLandPuff::operator new != &Cloudlet::operator new',
+    '&RotorLandPuff::operator delete != &Cloudlet::operator delete')) {
+    if (!$puff.Contains($allocatorProof)) {throw "Stateful rotor puff allocator contract missing: $allocatorProof"}
+}
+Write-Host 'Rotor land policy/hydrology/annulus CPU tests and dedicated puff allocation contracts PASS; full build and installed hover proof pending.'
