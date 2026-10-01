@@ -2222,7 +2222,7 @@ void RegisterSnowProbe(HarnessServer& hs)
             if (!GWorld || !GLandscape || GWorld->GetMode() == GModeNetware)
                 return HarnessProtocol::ErrorResponse("singleplayer world required");
             Man* man = dyn_cast<Man>(GWorld->GetRealPlayer());
-            if (!man || !man->IsLocal() || man->IsDammageDestroyed())
+            if (!man || !man->GetShape() || !man->IsLocal() || man->IsDammageDestroyed())
                 return HarnessProtocol::ErrorResponse("living local infantry player required");
             const int weapon = man->SelectedWeapon();
             if (weapon < 0 || weapon >= man->NMagazineSlots())
