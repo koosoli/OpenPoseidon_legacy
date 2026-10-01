@@ -12,6 +12,8 @@ param([switch]$SelfTest,
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 $culture=[Globalization.CultureInfo]::InvariantCulture
+# Audited physical ViewGeometry roof width 4.78717685m; 4m pitch overlaps it.
+$canopyOffsets=@(-8,-4,0,4,8)
 function Require([bool]$condition,[string]$message) {if (!$condition) {throw $message}}
 function Number([double]$value) {
     Require (![double]::IsNaN($value) -and ![double]::IsInfinity($value)) 'Nonfinite fixture number.'
@@ -86,6 +88,9 @@ if ($SelfTest) {
     foreach($field in @('pilotWantedX','pilotWantedY','pilotWantedZ','mouseWantedX','mouseWantedY','mouseWantedZ','pilotWantedHeight','pilotWantedHeading','pilotWantedDive')) {$hover|Add-Member -NotePropertyName $field -NotePropertyValue 0.0}
     Assert-RotorState $hover;Assert-NeutralHover $hover
     $hover.pilotWantedZ=.1;$refused=$false;try {Assert-NeutralHover $hover} catch {$refused=$true};Require $refused 'Active pilot request accepted as neutral canopy observation.'
+    Require ($canopyOffsets.Count -eq 5) 'Dense canopy count changed.'
+    for($i=1;$i -lt $canopyOffsets.Count;++$i) {Require (($canopyOffsets[$i]-$canopyOffsets[$i-1]) -lt 4.78717685) 'Physical ViewGeometry roofs leave a known X gap.'}
+    Require (6 -gt 4.78717685) 'Old 6m pitch must remain a source-gap negative control.'
     Write-Host 'PASS read-only rotor snapshot schema/falsifiers; failed flight authority remains evidence. No game.';return
 }
 if (!$env:LOCK_OWNER) {throw 'Run through scripts/with-game-lock.sh.'}
@@ -341,7 +346,8 @@ try {
     $result.gates.snowState=Send @{cmd='dev_snow';action='state'};Require ($result.gates.snowState.depth -ge $SnowDepth-.0001) 'Actual deposited snow is absent.'
     $rows=@(Observe 'deposited-snow' $SandX $SandZ);Require (@($rows | Where-Object {$_.snow -gt 0}).Count -gt 0) 'Snow positive control emitted no actual snow puffs.'
     $null=Send @{cmd='dev_snow';action='disable'}
-    # Twenty-five real audited stock roofs cover the bounded <=11.4m spoke ring.
+    # Twenty-five audited stock roofs form an overlapping physical ViewGeometry
+    # canopy. Source slanted-ray probes justify this candidate, not acceptance.
     # Acceptance still requires actual physical hit counts, not this layout guess.
     Exec 'rotorRoofs=[]';$roofProof=@()
     # A shared centre-ground datum keeps hillside tents from intersecting the
@@ -349,7 +355,7 @@ try {
     # not a proposed placement change for ordinary map objects.
     $canopyGround=Height $SandX $SandZ;$canopyOrigin=$canopyGround+2.8100528717041+.02
     $canopyTop=$canopyOrigin+2.8100528717041
-    foreach($dx in @(-12,-6,0,6,12)) {foreach($dz in @(-12,-6,0,6,12)) {
+    foreach($dx in $canopyOffsets) {foreach($dz in $canopyOffsets) {
         $roof=New-TerrainPuddleStockRoof -SendCommand {param($request) Send $request} -X ($SandX+$dx) -Z ($SandZ+$dz) -RoofLift 0
         $roof.initialPosition=$roof.actualPosition
         Exec ('puddleStockRoof setPosASL ['+(Number ($SandX+$dx))+','+(Number ($SandZ+$dz))+','+(Number $canopyOrigin)+']')
@@ -359,7 +365,7 @@ try {
         Exec 'rotorRoofs=rotorRoofs+[puddleStockRoof]';$roofProof+=,$roof
     }}
     $result.gates.roofObjects=$roofProof;$script:canopyTop=($roofProof|Measure-Object actualTop -Maximum).Maximum
-    $result.gates.canopyGeometry=@{origin=$canopyOrigin;centreGround=$canopyGround;expectedTop=$canopyTop;actualMaxTop=$script:canopyTop;heliModel='data3d\uh-60.p3d';modelMinY=-2.44864;envelopeMinY=-3.00;envelopeHorizontalRadius=13.20;requiredClearance=.35;scope='Bounded static test canopy; outer lower walls may be buried'}
+    $result.gates.canopyGeometry=@{origin=$canopyOrigin;centreGround=$canopyGround;expectedTop=$canopyTop;actualMaxTop=$script:canopyTop;heliModel='data3d\uh-60.p3d';modelMinY=-2.44864;envelopeMinY=-3.00;envelopeHorizontalRadius=13.20;requiredClearance=.35;pitch=4;offsets=$canopyOffsets;physicalViewRoofWidth=4.78717685;viewGeometryLevel=5;scope='Bounded overlapping physical-ViewGeometry test canopy; outer lower walls may be buried'}
     $rows=@(Observe 'roof-covered' $SandX $SandZ)
     Require (@($rows | Where-Object {$_.sheltered -ne 8}).Count -eq 0) 'Roof fixture did not block all eight actual bounded airflow probes in every recorded pulse.'
     Require (@($rows | Where-Object {$_.emitted -gt 0}).Count -eq 0) 'Covered rotor spokes still emitted; retain actual rays and inspect canopy coverage.'
