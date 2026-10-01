@@ -191,7 +191,7 @@ function Capture([string]$name,$pose){
     $post=Field;$localAfter=Local;Assert-Paused $pre $post
     Require ((Number (Eval 'time')) -eq $time) 'Capture advanced paused simulation time.'
     foreach($key in @('valid','depth','height','terrainY','flowX','flowZ','revision')){Require ($localBefore.$key -eq $localAfter.$key) "Camera changed local water: $key"}
-    $arm.captures[$name]=@{path=$path;sha256=(Get-FileHash -LiteralPath $path).Hash;bytes=(Get-Item -LiteralPath $path).Length;camera=$pose;time=$time;date=(Eval 'date');weather=$weather;fieldBefore=$pre;fieldAfter=$post;localBefore=$localBefore;localAfter=$localAfter;localWaterPresent=($localBefore.valid -and $localBefore.depth -gt .001)}
+    $arm.captures[$name]=@{path=$path;sha256=(Get-FileHash -LiteralPath $path).Hash;bytes=(Get-Item -LiteralPath $path).Length;camera=$pose;time=$time;actualDayTime=(Eval 'dayTime');requestedDate=@(1985,6,21,16,0);weather=$weather;fieldBefore=$pre;fieldAfter=$post;localBefore=$localBefore;localAfter=$localAfter;localWaterPresent=($localBefore.valid -and $localBefore.depth -gt .001)}
 }
 function Capture-Stage([string]$stage){
     $soil=Send @{cmd='dev_mud';action='sample';x=$SoilX;z=$SoilZ};Assert-Soil $soil $auditedSoil
