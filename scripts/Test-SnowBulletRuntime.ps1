@@ -59,10 +59,28 @@ function Aim-Error($state,$point) {
         else {Unit-Vector @(($point[0]-$state.muzzleX),($point[1]-$state.muzzleY),($point[2]-$state.muzzleZ))}
     Require ($desired[1] -lt -.04) 'Audited aiming target is not below the actual muzzle.'
     $dot=$actual[0]*$desired[0]+$actual[1]*$desired[1]+$actual[2]*$desired[2]
+    $groundError=$null;$groundDistance=$null
+    if($null -ne $point -and $actual[1] -lt -.04) {
+        # Actual unit ray against the previously hit terrain-height plane.
+        # This is a read-only targeting estimate; the real terminal hit remains required.
+        $groundDistance=($point[1]-$state.muzzleY)/$actual[1]
+        if($groundDistance -gt 0 -and ![double]::IsInfinity($groundDistance)) {
+            $dx=$state.muzzleX+$groundDistance*$actual[0]-$point[0]
+            $dz=$state.muzzleZ+$groundDistance*$actual[2]-$point[2]
+            $groundError=[Math]::Sqrt($dx*$dx+$dz*$dz)
+        }
+    }
     return @{actual=$actual;desired=$desired;
         yaw=(Wrap-Angle ([Math]::Atan2($desired[0],$desired[2])-[Math]::Atan2($actual[0],$actual[2])));
         pitch=([Math]::Asin($desired[1])-[Math]::Asin($actual[1]));
-        angle=[Math]::Acos((Clamp-Number $dot -1 1))}
+        angle=[Math]::Acos((Clamp-Number $dot -1 1));targeted=($null -ne $point);
+        groundErrorMetres=$groundError;groundRayDistance=$groundDistance}
+}
+function Aim-InBound($error,[bool]$afterCapture=$false) {
+    if($error.actual[1] -ge -.04) {return $false}
+    if(!$error.targeted) {return $error.angle -le $(if($afterCapture) {.0035} else {.0025})}
+    return $null -ne $error.groundErrorMetres -and $error.groundRayDistance -gt 0 -and
+        $error.groundErrorMetres -le .05 -and $error.angle -le .01
 }
 function Aim-Step($error,[double]$gainX,[double]$gainY) {
     Require ($gainX -gt 0 -and $gainY -gt 0) 'Invalid measured mouse gain.'
@@ -123,6 +141,19 @@ if ($SelfTest) {
     $weapon.directionY=-.274;$weapon.directionZ=[Math]::Sqrt(1-.274*.274)
     $exact=Aim-Error $weapon $null;Require ($exact.angle -lt .000001 -and (Aim-Step $exact .001 .001).dy -eq 0) 'Correct actual downward gun was moved unnecessarily.'
     $target=@(10,20,24);$point=Aim-Error $weapon $target;Require ($point.desired.Count -eq 3 -and [Math]::Abs($point.desired[1]+2/[Math]::Sqrt(20)) -lt .000001) 'Actual muzzle/terrain point arithmetic changed raw XYZ order.'
+    # Integer mouse steps can straddle the requested pitch. Both nearest rays
+    # fit a five-centimetre physical target while failing false angular precision.
+    foreach($pixelPitch in @(-.0035,.0035)) {
+        $quantized=$weapon.Clone();$pitch=[Math]::Atan2(-2,4)+$pixelPitch
+        $quantized.directionY=[Math]::Sin($pitch);$quantized.directionZ=[Math]::Cos($pitch)
+        $ray=Aim-Error $quantized $target
+        Require ($ray.angle -gt .0025 -and $ray.groundErrorMetres -lt .05 -and (Aim-InBound $ray) -and (Aim-InBound $ray $true)) 'Nearest +/-1px rays lost a physically bounded target.'
+    }
+    foreach($direction in @(@(0,.1,.99),@(0,-.00001,1),@(0,-.447,-.894),@(0,-.6,.8))) {
+        $bad=$weapon.Clone();$bad.directionX=$direction[0];$bad.directionY=$direction[1];$bad.directionZ=$direction[2]
+        Require (!(Aim-InBound (Aim-Error $bad $target))) 'Upward/parallel/behind/off-target ray admitted.'
+    }
+    $above=$false;try {$null=Aim-Error $weapon @(10,23,24)} catch {$above=$true};Require $above 'Target plane behind a downward ray admitted.'
     foreach($change in @(@('readonly',$false),@('manual',$false),@('playerSuspended',$true),@('cameraEffect',$true),@('directionY',[double]::NaN),@('muzzleX',[double]::NaN))) {
         $bad=$weapon.Clone();$bad[$change[0]]=$change[1]
         $failed=$false;try {$null=Aim-Error $bad $null} catch {$failed=$true};Require $failed 'Unsupported or nonfinite aiming state accepted.'
@@ -247,17 +278,20 @@ function Prepare-Aim([string]$stage) {
             if([Math]::Abs($previousStep.dy) -ge 2 -and $pitchChange*$previousStep.dy -lt 0) {$gainY=Clamp-Number ([Math]::Abs($pitchChange/$previousStep.dy)) .0001 .02}
         }
         $step=Aim-Step $error $gainX $gainY
-        $history+=@{iteration=$iteration;actualState=$state;target=$script:aimTarget;error=$error;step=$step;gainX=$gainX;gainY=$gainY}
-        $result.stages[$stage+'-aim']=@{samples=$history;status='calibrating';toleranceRadians=.0025;input='ordinary SDL relative mouse; no aim/shot/physics setter'}
-        if($error.angle -le .0025 -and $error.actual[1] -lt -.04) {++$stable} else {$stable=0}
+        $sample=@{iteration=$iteration;actualState=$state;target=$script:aimTarget;error=$error;step=$step;inputSent=$false;gainX=$gainX;gainY=$gainY}
+        $history+=$sample
+        $result.stages[$stage+'-aim']=@{samples=$history;status='calibrating';initialToleranceRadians=.0025;targetGroundToleranceMetres=.05;targetAngularGuardRadians=.01;input='ordinary SDL relative mouse; no aim/shot/physics setter'}
+        if(Aim-InBound $error) {++$stable} else {$stable=0}
+        $sample.stableSamples=$stable
         if($stable -ge 3) {
             Exec 'setAccTime 0';Capture ($stage+'-ordinary-ui-before-fire')
             $ready=Send @{cmd='player_weapon_state'};$check=Aim-Error $ready $script:aimTarget
-            Require ($check.angle -le .0035 -and $check.actual[1] -lt -.04) 'Actual gun no longer matches the downward calibration after UI capture.'
+            Require (Aim-InBound $check $true) 'Actual gun no longer matches the bounded downward target after UI capture.'
             $result.stages[$stage+'-aim'].status='actual-downward-ui-captured';$result.stages[$stage+'-aim'].ready=$ready
+            $result.stages[$stage+'-aim'].readyError=$check
             return
         }
-        if($stable -eq 0 -and ($step.dx -ne 0 -or $step.dy -ne 0)) {$null=Send @{cmd='mouse_motion';dx=$step.dx;dy=$step.dy};$previousStep=$step;$prior=$error}
+        if($stable -eq 0 -and ($step.dx -ne 0 -or $step.dy -ne 0)) {$null=Send @{cmd='mouse_motion';dx=$step.dx;dy=$step.dy};$sample.inputSent=$true;$previousStep=$step;$prior=$error}
         else {$previousStep=$null;$prior=$null}
         Wait-InputTicks 350
     }

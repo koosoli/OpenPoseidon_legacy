@@ -2,8 +2,9 @@
 
 Status: script/source correction, helper self-test passed. No game, GPU, engine
 build or deployment performed by this agent. Installed acceptance is pending
-the matching read-only `player_weapon_state` command (`4991e4b6`) and root's
-actual run. Script baseline is `9c2a091e`.
+root's actual run. The matching read-only `player_weapon_state` command
+(`4991e4b6`) is installed with the newline fix in `6cf9973e`; this follow-up
+script baseline is `6cf9973e`.
 
 The installed `9527c006` campaign
 `build/snow-bullet/settled-highlight-headroom-20261001-031946-3b3a37` passed its
@@ -42,8 +43,9 @@ errors come from the actual direction; measured finite positive response gains
 adapt the next relative input. `AimDy` now seeds the initial gain (the existing
 default250 is preserved); it is no longer an assumed absolute calibration.
 Motion is capped at180 pixels per axis,24 iterations and25 wall seconds. Three
-samples separated by actual advancing simulation must each be within .0025
-radians and downward. No call sets gun/weapon state, cursor direction, bullet
+samples separated by actual advancing simulation must be downward without new
+input. Initial untargeted dry calibration retains its .0025-radian bound;
+later targeted shots use the spatial criterion below. No call sets gun/weapon state, cursor direction, bullet
 velocity, physics or a snow deficit, and no extra calibration bullets fire.
 
 After convergence the script pauses, captures the ordinary first-person UI,
@@ -72,3 +74,33 @@ controller/helper tests, not evidence of actual engine response. Root must
 compile the query, run the owned locked installed fixture, inspect pre-fire UI
 and actual direction history, and establish the real covered terrain/shelter
 event. Hole visual quality and snowfall refill acceptance remain separate gates.
+
+## Integer mouse precision diagnosed in installed 6cf9973e
+
+`build/snow-bullet/actual-gun-reply-fixed-20261001-035703-90fb9a` recorded the
+real dry terrain hit at 4975.398/21.549/4676.733. Before the snow-positive shot,
+normal input corrected the upward post-photo aim. At iteration 5, actual angle
+error was .000844 radians; natural gun/muzzle movement raised it to .002937 at
+iteration 6. Subsequent +/-1-pixel corrections produced about .008 radians of
+pitch change, exceeding the .0025-radian angular tolerance. The controller then
+oscillated near a legitimate downward target for its remaining 24-iteration
+budget. Those samples' actual ray intersection at the calibrated ground height
+was only about 3..8 cm from the target; this was fixture precision failure,
+not a missing actual query, an accepted covered shot or an upward launch.
+
+Targeted calibration now intersects the actual unit gun ray with the previously
+hit bare-terrain height plane. It requires a forward intersection within 5 cm
+in X/Z, actual direction Y<-.04 and a .01-radian angular sanity guard. Three
+advancing samples must hold that bound without additional mouse events, and
+the same bound is checked after the paused ordinary UI capture. A candidate
+pixel step and `inputSent` are recorded separately so an unexecuted correction
+cannot be mistaken for input. Ground-ray distance/error and the post-capture
+error are retained. This plane query does not assert a physics hit or set aim;
+the later real downward terrain terminal and calibrated <=25 cm impact patch
+remain mandatory, including for the sheltered unchanged-cell negative.
+
+Self-test covers two nearest +/-1-pixel pitch choices that fail the former
+angular bound but satisfy the tighter physical target footprint. Upward,
+near-parallel, behind-target, off-target and above-muzzle target cases fail.
+Installed convergence, actual covered terrain hits and snowfall refill remain
+pending root's real campaign; this source follow-up makes no new runtime claim.
