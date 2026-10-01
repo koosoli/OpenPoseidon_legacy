@@ -6200,6 +6200,60 @@ void EngineWgpu::NextFrame()
         frame.water_nodes = backing.waterNodes;
         frame.water_batches = backing.waterBatches;
         frame.grass_batches = backing.grassBatches;
+        // Opt-in measurement only. Simulation pause does not freeze render-time
+        // adaptation. This blocking readback measures the PREVIOUS completed
+        // renderer frame, before this frame's queues/settings are submitted.
+        // Trace runs deliberately perturb pacing and are not performance evidence.
+        {
+            static const uint32_t traceInterval = [] {
+                const char* value = std::getenv("WGR_EXPOSURE_TRACE");
+                if (!value || *value < '0' || *value > '9') return uint32_t(0);
+                char* end = nullptr;
+                const long interval = std::strtol(value, &end, 10);
+                return end && *end == '\0' && interval >= 1 && interval <= 6000
+                    ? uint32_t(interval) : uint32_t(0);
+            }();
+            static uint64_t traceFrame = 0;
+            if (traceInterval && (++traceFrame % traceInterval) == 0)
+            {
+                const auto readbackStart = std::chrono::steady_clock::now();
+                const float completedScale = GetAutoExposureScale();
+                const double readbackMs = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - readbackStart).count();
+                auto hashBytes = [](uint64_t& hash, const void* pointer, size_t bytes) {
+                    const auto* data = static_cast<const uint8_t*>(pointer);
+                    for (size_t i = 0; i < bytes; ++i) { hash ^= data[i]; hash *= 1099511628211ull; }
+                };
+                uint64_t matrixHash = 14695981039346656037ull;
+                uint64_t positionHash = 14695981039346656037ull;
+                for (const WgrCamera& camera : backing.cameras)
+                {
+                    hashBytes(matrixHash, camera.proj.m, sizeof(camera.proj.m));
+                    hashBytes(matrixHash, camera.view.m, sizeof(camera.view.m));
+                    hashBytes(positionHash, &camera.cam_pos, sizeof(float) * 3); // xyz only; w is local-light count
+                }
+                LOG_INFO(Graphics,
+                    "Exposure trace: snapshot={} traceFrame={} simulationTime={:.9f} timeOfDay={:.9f} "
+                    "hdr={} autoTonemap={} enabled={} key={:.9f} min={:.9f} max={:.9f} "
+                    "rate={:.9f} derivedRate={:.9f} tau={:.9f} manual={:.9f} glare={:.9f} pushed={:.9f} "
+                    "previousCompletedScale={:.9f} blockingReadbackMs={:.3f} screenshotPending={} "
+                    "camera=[{:.9f},{:.9f},{:.9f}] direction=[{:.9f},{:.9f},{:.9f}] "
+                    "cameraCount={} cameraMatrixHash={} cameraPositionHash={} "
+                    "skyLit={} skyEnabled={} night={:.9f} overcast={:.9f} "
+                    "legacySun=[{:.9f},{:.9f},{:.9f}] legacyAmbient=[{:.9f},{:.9f},{:.9f}] "
+                    "pushedSun=[{:.9f},{:.9f},{:.9f}] pushedAmbient=[{:.9f},{:.9f},{:.9f}]",
+                    snap.generation, traceFrame, snap.timeSeconds, snap.timeOfDay,
+                    _hdrEnabled, _tonemapAuto, _exposure.enabled, _exposure.key, _exposure.minScale, _exposure.maxScale,
+                    _exposure.rate, _autoExposureRate, EffectiveAutoExposureTau(), _tonemap.exposure, _sunGlareExposure,
+                    _tonemap.exposure * _sunGlareExposure, completedScale, readbackMs, _pendingScreenshotPath.GetLength() > 0,
+                    snap.cameraPos.X(), snap.cameraPos.Y(), snap.cameraPos.Z(),
+                    snap.cameraDir.X(), snap.cameraDir.Y(), snap.cameraDir.Z(),
+                    backing.cameras.size(), matrixHash, positionHash,
+                    skyLit, _sky.enabled, snap.nightEffect, snap.overcast,
+                    sunDiffuse.R(), sunDiffuse.G(), sunDiffuse.B(), sunAmbient.R(), sunAmbient.G(), sunAmbient.B(),
+                    sunLin[0], sunLin[1], sunLin[2], ambLin[0], ambLin[1], ambLin[2]);
+            }
+        }
         // REN-THR-013: THE CONSUMER BLOCK. Everything from here to PublishRendererStats
         // touches the renderer handle and nothing else does; this is the span a render
         // thread will own, and it is placed here rather than at the top of NextFrame so
