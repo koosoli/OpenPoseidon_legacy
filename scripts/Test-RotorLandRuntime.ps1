@@ -19,26 +19,54 @@ function Number([double]$value) {
 }
 function Assert-RotorState($state) {
     foreach($field in @('timeMs','object','candidates','distanceXZ','x','y','z','groundY','clearance','rpm',
-      'upX','upY','upZ','speedX','speedY','speedZ','fuel','damage','driverState','moveUp','moveDown','unfocusedMoveUp','focusLost','qKey','airflowScale','cameraDistance')) {
+      'upX','upY','upZ','speedX','speedY','speedZ','fuel','damage','driverState','moveUp','moveDown','unfocusedMoveUp','focusLost','qKey','airflowScale','cameraDistance',
+      'altKey','cameraType','moveForward','fastForward','moveBack','turnLeft','turnRight','moveLeft','moveRight','windX','windY','windZ')) {
         $property=$state.PSObject.Properties[$field]
         Require ($null -ne $property -and $null -ne $property.Value -and $property.Value -is [ValueType] -and $property.Value -isnot [bool]) ('Missing/nonnumeric rotor-state field '+$field)
         $value=[double]$property.Value
         Require (![double]::IsNaN($value) -and ![double]::IsInfinity($value)) ('Nonfinite rotor-state field '+$field)
     }
     foreach($field in @('readonly','engineOn','destroyed','local','airborne','driverPresent','driverBrain','driverLocal','driverAlive','driverIsPlayer','pilotIsPlayer',
-      'focusIsDriver','manual','driverManual','playerManual','playerSuspended','cameraEffect','resolvedHelicopter','airflowEnabled','cameraDistanceValid')) {
+      'focusIsDriver','manual','driverManual','playerManual','playerSuspended','cameraEffect','resolvedHelicopter','airflowEnabled','cameraDistanceValid',
+      'mouseTurnActive','lookAroundEnabled','lookAroundToggled','joystickActive','joystickThrustActive','hoverStateAvailable')) {
         Require ($state.PSObject.Properties[$field].Value -is [bool]) ('Missing/nonboolean rotor-state field '+$field)
     }
     foreach($field in @('class','model','inputContext','resolvedContext','inputSeat')) {
         Require ($state.PSObject.Properties[$field].Value -is [string]) ('Missing/nonstring rotor-state field '+$field)
     }
     Require ($state.readonly -and $state.class -ceq 'UH60' -and $state.candidates -ge 1 -and $state.distanceXZ -le 16.001 -and $state.rpm -ge 0 -and $state.rpm -le 1.001) 'Diagnostic does not identify the bounded actual stock helicopter.'
+    if ($state.hoverStateAvailable) {
+        foreach($field in @('hoveringAutopilot','pilotSpeedHelper','pilotHeightHelper','pilotDirectionHelper')) {
+            Require ($state.PSObject.Properties[$field].Value -is [bool]) ('Missing actual hover flag '+$field)
+        }
+        foreach($field in @('pilotWantedX','pilotWantedY','pilotWantedZ','mouseWantedX','mouseWantedY','mouseWantedZ','pilotWantedHeight','pilotWantedHeading','pilotWantedDive')) {
+            $v=$state.PSObject.Properties[$field].Value
+            Require ($v -is [ValueType] -and $v -isnot [bool] -and ![double]::IsNaN([double]$v) -and ![double]::IsInfinity([double]$v)) ('Missing/nonfinite actual hover request '+$field)
+        }
+    }
     # Wrong authority/engine/input state is evidence, not a new acceptance gate.
+}
+function Rotor-CanopyClearance($state,[double]$top) {
+    # Audited stock UH60 Geometry bounds, expanded 10% as Helicopter::Animate.
+    # Rounded outward, allowing any sphere centre within the geometry bounds:
+    # minY=-3.00, horizontal radius=13.20. Unit up direction
+    # gives an orientation-safe vertical envelope for every yaw, including tilt.
+    Require ($state.model -ieq 'data3d\uh-60.p3d') 'Unaudited helicopter model cannot use stock canopy envelope.'
+    $length=[Math]::Sqrt($state.upX*$state.upX+$state.upY*$state.upY+$state.upZ*$state.upZ)
+    Require ($length -ge .999 -and $length -le 1.001 -and $state.upY -gt 0 -and $state.upY -le 1.001) 'Actual aircraft rotation cannot establish canopy clearance.'
+    $up=[Math]::Min(1.0,[double]$state.upY/$length)
+    return [double]$state.y-3.00*$up-13.20*[Math]::Sqrt([Math]::Max(0.0,1.0-$up*$up))-$top
+}
+function Assert-NeutralHover($state) {
+    Require ($state.hoverStateAvailable -and $state.hoveringAutopilot -and $state.playerManual -and !$state.playerSuspended -and !$state.cameraEffect -and $state.lookAroundEnabled) 'Manual canopy observation lacks actual unsuspended stock auto-hover.'
+    foreach($field in @('moveUp','moveDown','moveForward','fastForward','moveBack','turnLeft','turnRight','moveLeft','moveRight','pilotWantedX','pilotWantedY','pilotWantedZ')) {
+        Require ([Math]::Abs([double]$state.$field) -le .001) ('Canopy observation has active pilot request '+$field)
+    }
 }
 if ($SelfTest) {
     $sample=[ordered]@{}
-    foreach($field in @('timeMs','object','candidates','distanceXZ','x','y','z','groundY','clearance','rpm','upX','upY','upZ','speedX','speedY','speedZ','fuel','damage','driverState','moveUp','moveDown','unfocusedMoveUp','focusLost','qKey','airflowScale','cameraDistance')) {$sample[$field]=0.0}
-    foreach($field in @('readonly','engineOn','destroyed','local','airborne','driverPresent','driverBrain','driverLocal','driverAlive','driverIsPlayer','pilotIsPlayer','focusIsDriver','manual','driverManual','playerManual','playerSuspended','cameraEffect','resolvedHelicopter','airflowEnabled','cameraDistanceValid')) {$sample[$field]=$false}
+    foreach($field in @('timeMs','object','candidates','distanceXZ','x','y','z','groundY','clearance','rpm','upX','upY','upZ','speedX','speedY','speedZ','fuel','damage','driverState','moveUp','moveDown','unfocusedMoveUp','focusLost','qKey','airflowScale','cameraDistance','altKey','cameraType','moveForward','fastForward','moveBack','turnLeft','turnRight','moveLeft','moveRight','windX','windY','windZ')) {$sample[$field]=0.0}
+    foreach($field in @('readonly','engineOn','destroyed','local','airborne','driverPresent','driverBrain','driverLocal','driverAlive','driverIsPlayer','pilotIsPlayer','focusIsDriver','manual','driverManual','playerManual','playerSuspended','cameraEffect','resolvedHelicopter','airflowEnabled','cameraDistanceValid','mouseTurnActive','lookAroundEnabled','lookAroundToggled','joystickActive','joystickThrustActive','hoverStateAvailable')) {$sample[$field]=$false}
     $sample.readonly=$true;$sample.class='UH60';$sample.model='uh60.p3d';$sample.inputContext='Spectator';$sample.resolvedContext='Spectator';$sample.inputSeat='driver';$sample.candidates=1
     Assert-RotorState ([pscustomobject]$sample)
     # A failed engine/authority snapshot must remain inspectable.
@@ -47,6 +75,17 @@ if ($SelfTest) {
         switch($bad) {'missing'{$copy.PSObject.Properties.Remove('qKey')};'string'{$copy.moveUp='false'};'nonfinite'{$copy.rpm=[double]::PositiveInfinity};'readonly'{$copy.readonly=$false};'class'{$copy.class='Other'};'rpm'{$copy.rpm=2}}
         $refused=$false;try {Assert-RotorState $copy} catch {$refused=$true};Require $refused ('Malformed snapshot accepted: '+$bad)
     }
+    $geometry=[pscustomobject]@{model='data3d\uh-60.p3d';y=24.7666;upX=0;upY=1;upZ=0}
+    Require ((Rotor-CanopyClearance $geometry 20.62515) -gt .35) 'Lowered actual-stock canopy safe envelope refused.'
+    Require ((Rotor-CanopyClearance $geometry 23.62515) -lt 0) 'Original lifted canopy overlap missed.'
+    $geometry.upX=.3;$geometry.upY=[Math]::Sqrt(1-.3*.3)
+    Require ((Rotor-CanopyClearance $geometry 20.62515) -lt .35) 'Tilted underside excursion missed.'
+    $hover=$sample|ConvertTo-Json|ConvertFrom-Json
+    $hover.hoverStateAvailable=$true;$hover.playerManual=$true;$hover.lookAroundEnabled=$true
+    foreach($field in @('hoveringAutopilot','pilotSpeedHelper','pilotHeightHelper','pilotDirectionHelper')) {$hover|Add-Member -NotePropertyName $field -NotePropertyValue $true}
+    foreach($field in @('pilotWantedX','pilotWantedY','pilotWantedZ','mouseWantedX','mouseWantedY','mouseWantedZ','pilotWantedHeight','pilotWantedHeading','pilotWantedDive')) {$hover|Add-Member -NotePropertyName $field -NotePropertyValue 0.0}
+    Assert-RotorState $hover;Assert-NeutralHover $hover
+    $hover.pilotWantedZ=.1;$refused=$false;try {Assert-NeutralHover $hover} catch {$refused=$true};Require $refused 'Active pilot request accepted as neutral canopy observation.'
     Write-Host 'PASS read-only rotor snapshot schema/falsifiers; failed flight authority remains evidence. No game.';return
 }
 if (!$env:LOCK_OWNER) {throw 'Run through scripts/with-game-lock.sh.'}
@@ -83,7 +122,7 @@ $keys=@('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS
     'POSEIDON_SNOWLINE','POSEIDON_ROTOR_LAND','POSEIDON_ROTOR_LAND_TRACE','POSEIDON_WIND_OVERRIDE',
     'WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_RAIN_WATER_TRACE')
 $saved=@{};foreach($key in $keys) {$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
-$p=$null;$client=$null;$writer=$null;$reader=$null;$script:heliId=$null;$script:stateObject=$null;$script:heldUp=$false;$script:heldLook=$false
+$p=$null;$client=$null;$writer=$null;$reader=$null;$script:heliId=$null;$script:stateObject=$null;$script:heldUp=$false;$script:heldLook=$false;$script:canopyTop=$null
 function Health {
     Require ($p -and !$p.HasExited) 'Owned game exited unexpectedly.'
     if ((Test-Path $log) -and (Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION|Unbekannter Operator' -Quiet)) {throw 'Installed validation/script failure.'}
@@ -162,20 +201,35 @@ function Rows([int]$from=0) {
 function LineCount {return @(Get-Content -LiteralPath $log).Count}
 function Observe([string]$stage,[double]$x,[double]$z,[bool]$mustTrace=$true) {
     $first=LineCount;$start=[double](Eval 'time');$until=[DateTime]::UtcNow.AddSeconds($ObserveSeconds*3+10)
-    $poses=@();$nextState=$start;$null=Current-RotorState ($stage+'-before');Exec 'setAccTime 1'
+    $poses=@();$nextState=$start;$beforeState=Current-RotorState ($stage+'-before')
+    $proof=@{startTime=$start;rows=@();actualPositions=@();canopyChecks=@();status='observing'};$result.gates[$stage]=$proof
+    if ($null -ne $script:canopyTop) {
+        $gap=Rotor-CanopyClearance $beforeState $script:canopyTop;$proof.canopyChecks+=@{state=$beforeState;clearance=$gap;canopyTop=$script:canopyTop}
+        if ($ManualPilot) {Assert-NeutralHover $beforeState}
+        Require ($gap -ge .35) 'Stock roof overlaps conservative actual aircraft envelope before observation.'
+    }
+    Exec 'setAccTime 1'
     do {
         Start-Sleep -Milliseconds 250;Health;$position=Eval 'getPosASL rotorHeli'
         Require ($position.Count -eq 3 -and (Eval 'alive rotorHeli')) 'Aircraft lost during actual physics interval.'
         $distance=[Math]::Sqrt([Math]::Pow($position[0]-$x,2)+[Math]::Pow($position[1]-$z,2))
-        Require ($distance -le 8) 'Actual AI hover left the bounded source fixture; not an emission defect.'
         $poses+=,@($position);$now=[double](Eval 'time')
-        if ($now -ge $nextState) {$null=Rotor-State ($stage+'-milestone') ([double]$position[0]) ([double]$position[1]);$nextState=$now+2}
+        $proof.actualPositions=$poses;$proof.endTime=$now
+        if ($now -ge $nextState -or $null -ne $script:canopyTop) {
+            $state=Rotor-State ($stage+'-milestone') ([double]$position[0]) ([double]$position[1]);$nextState=$now+2
+            if ($null -ne $script:canopyTop) {
+                $gap=Rotor-CanopyClearance $state $script:canopyTop;$proof.canopyChecks+=@{state=$state;clearance=$gap;canopyTop=$script:canopyTop}
+                if ($ManualPilot) {Assert-NeutralHover $state}
+                Require ($gap -ge .35) 'Conservative tilted aircraft envelope approached canopy; fixture unavailable, not emission acceptance.'
+            }
+        }
+        Require ($distance -le 8) 'Actual hover left the bounded source fixture; not an emission defect.'
         Require ([DateTime]::UtcNow -lt $until) 'Simulation observation timed out.'
     } while ($now-$start -lt $ObserveSeconds)
     Exec 'setAccTime 0';$null=Current-RotorState ($stage+'-after');Start-Sleep -Milliseconds 300;$rows=@(Rows $first)
     if ($mustTrace) {Require ($rows.Count -ge 3) 'No sustained actual rotor/RPM trace; fixture unavailable, not accepted.'}
     foreach($row in $rows) {Require ([Math]::Sqrt([Math]::Pow($row.x-$x,2)+[Math]::Pow($row.z-$z,2)) -le 8) 'Trace belongs outside requested fixture.'}
-    $result.gates[$stage]=@{startTime=$start;endTime=$now;rows=$rows;actualPositions=$poses;engineOn=(Eval 'isEngineOn rotorHeli')}
+    $proof.endTime=$now;$proof.rows=$rows;$proof.actualPositions=$poses;$proof.engineOn=Eval 'isEngineOn rotorHeli';$proof.status='observed'
     Capture $stage;return $rows
 }
 function Place([double]$x,[double]$z,[double]$height) {
@@ -290,14 +344,29 @@ try {
     # Twenty-five real audited stock roofs cover the bounded <=11.4m spoke ring.
     # Acceptance still requires actual physical hit counts, not this layout guess.
     Exec 'rotorRoofs=[]';$roofProof=@()
+    # A shared centre-ground datum keeps hillside tents from intersecting the
+    # naturally settled aircraft. Buried outer walls are test-canopy geometry,
+    # not a proposed placement change for ordinary map objects.
+    $canopyGround=Height $SandX $SandZ;$canopyOrigin=$canopyGround+2.8100528717041+.02
+    $canopyTop=$canopyOrigin+2.8100528717041
     foreach($dx in @(-12,-6,0,6,12)) {foreach($dz in @(-12,-6,0,6,12)) {
-        $roof=New-TerrainPuddleStockRoof -SendCommand {param($request) Send $request} -X ($SandX+$dx) -Z ($SandZ+$dz) -RoofLift 3
+        $roof=New-TerrainPuddleStockRoof -SendCommand {param($request) Send $request} -X ($SandX+$dx) -Z ($SandZ+$dz) -RoofLift 0
+        $roof.initialPosition=$roof.actualPosition
+        Exec ('puddleStockRoof setPosASL ['+(Number ($SandX+$dx))+','+(Number ($SandZ+$dz))+','+(Number $canopyOrigin)+']')
+        $actual=Eval 'getPosASL puddleStockRoof'
+        Require ($actual.Count -eq 3 -and [Math]::Abs($actual[0]-($SandX+$dx)) -le .01 -and [Math]::Abs($actual[1]-($SandZ+$dz)) -le .01 -and [Math]::Abs($actual[2]-$canopyOrigin) -le .01) 'Actual stock canopy shared-datum relocation differs.'
+        $roof.actualPosition=$actual;$roof.commonDatumGround=$canopyGround;$roof.actualTop=[double]$actual[2]+2.8100528717041
         Exec 'rotorRoofs=rotorRoofs+[puddleStockRoof]';$roofProof+=,$roof
     }}
-    $result.gates.roofObjects=$roofProof;$rows=@(Observe 'roof-covered' $SandX $SandZ)
-    Require (@($rows | Where-Object {$_.sheltered -gt 0}).Count -gt 0) 'Roof fixture established no actual blocked airflow rays.'
+    $result.gates.roofObjects=$roofProof;$script:canopyTop=($roofProof|Measure-Object actualTop -Maximum).Maximum
+    $result.gates.canopyGeometry=@{origin=$canopyOrigin;centreGround=$canopyGround;expectedTop=$canopyTop;actualMaxTop=$script:canopyTop;heliModel='data3d\uh-60.p3d';modelMinY=-2.44864;envelopeMinY=-3.00;envelopeHorizontalRadius=13.20;requiredClearance=.35;scope='Bounded static test canopy; outer lower walls may be buried'}
+    $rows=@(Observe 'roof-covered' $SandX $SandZ)
+    Require (@($rows | Where-Object {$_.sheltered -ne 8}).Count -eq 0) 'Roof fixture did not block all eight actual bounded airflow probes in every recorded pulse.'
     Require (@($rows | Where-Object {$_.emitted -gt 0}).Count -eq 0) 'Covered rotor spokes still emitted; retain actual rays and inspect canopy coverage.'
-    Exec '{deleteVehicle _x} forEach rotorRoofs';$rows=@(Observe 'roof-removed' $SandX $SandZ)
+    Exec '{deleteVehicle _x} forEach rotorRoofs';$script:canopyTop=$null
+    Exec 'rotorRemovedCount=0; {if (isNull _x) then {rotorRemovedCount=rotorRemovedCount+1}} forEach rotorRoofs'
+    Require ((Eval 'rotorRemovedCount') -eq 25) 'Actual test canopy did not leave the mission.'
+    $rows=@(Observe 'roof-removed' $SandX $SandZ)
     Require (@($rows | Where-Object {$_.emitted -gt 0}).Count -gt 0) 'Removed-roof dust positive control failed.'
     # Elevated active rotor must not emit land puffs. One stage relocation only.
     $ground=Place $SandX $SandZ 48;Exec 'setAccTime 1';Start-Sleep -Seconds 4;Exec 'setAccTime 0'
