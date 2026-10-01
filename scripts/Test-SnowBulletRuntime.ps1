@@ -1,6 +1,6 @@
 # Actual ordinary-player shots, not a synthetic Shot or direct deficit stamp.
 [CmdletBinding()]
-param([switch]$SelfTest,[switch]$Refill,
+param([switch]$SelfTest,[switch]$Refill,[switch]$AutoExposure,
       [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='stock-snow-shot',
       [double]$PlayerX=4975,[double]$PlayerZ=4672.5,
       [ValidateRange(1,1000)][int]$AimDy=250,
@@ -12,12 +12,35 @@ function Require([bool]$condition,[string]$message) {if (!$condition) {throw $me
 function Decode-Eval([string]$display) {
     $display=$display.Trim()
     if ($display.StartsWith('"')) {return $display.Substring(1,$display.Length-2).Replace('""','"')}
-    if ($display.StartsWith('[') -or $display -cmatch '^(true|false|null|-?\d+(\.\d+)?([eE][+-]?\d+)?)$') {return ConvertFrom-Json -InputObject $display -NoEnumerate}
+    if ($display.StartsWith('[')) {
+        # Preserve array shape on both PS5.1 (no NoEnumerate switch) and PS7.
+        $wrapped=ConvertFrom-Json -InputObject ('{"value":'+$display+'}');return ,$wrapped.value
+    }
+    if ($display -cmatch '^(true|false|null|-?\d+(\.\d+)?([eE][+-]?\d+)?)$') {return ConvertFrom-Json -InputObject $display}
     return $display
 }
 function Number([double]$value) {
     Require (![double]::IsNaN($value) -and ![double]::IsInfinity($value)) 'Nonfinite fixture coordinate.'
     return $value.ToString('R',$culture)
+}
+function Restore-Environment([string]$key,$value) {
+    # PowerShell7.6/.NET10 can preserve an empty value when null is bound to SetEnvironmentVariable.
+    if ($null -eq $value) {Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue}
+    else {[Environment]::SetEnvironmentVariable($key,$value,'Process')}
+}
+function Set-ExposurePolicy([bool]$automatic) {
+    # These two overrides independently disable automatic time-of-day grading.
+    Restore-Environment 'WGR_TONEMAP' $null;Restore-Environment 'WGR_HDR_ENCODE' $null
+    Restore-Environment 'WGR_TONEMAP_WHITE' $null;Restore-Environment 'WGR_TONEMAP_DESAT' $null
+    if ($automatic) {
+        Restore-Environment 'WGR_EXPOSURE' $null;Restore-Environment 'WGR_AUTO_EXPOSURE' $null
+        return 'normal-time-of-day-grade-and-default-adaptive-policy'
+    }
+    $env:WGR_AUTO_EXPOSURE='0';$env:WGR_EXPOSURE='1'
+    return 'legacy-fixed-manual-exposure1-adaptive-off; highlight-headroom-not-guaranteed'
+}
+function Assert-ShotSettled([long]$releaseMs,[long]$pausedMs) {
+    Require ($releaseMs -ge 0 -and $pausedMs-$releaseMs -ge 2000) 'Shot image precedes two real simulation seconds after mouse-up.'
 }
 function Parse-SnowHit([string]$line) {
     $n='[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?'
@@ -60,7 +83,7 @@ function Assert-Hole($hit,$before,$after,[double]$base) {
         if ($distance -le .09 -and [Math]::Abs($a.deficit-$hit.after) -le .00011 -and [Math]::Abs($b.deficit-$hit.before) -le .00011) {$matched+=,$a}
     }
     Require ($changed.Count -gt 0 -and $matched.Count -gt 0 -and $outer -gt 0) 'No actual impact-centre/outside correspondence.'
-    $peak=($changed | Measure-Object -Property deficit -Maximum).Maximum
+    $peak=($changed | ForEach-Object {$_.deficit} | Measure-Object -Maximum).Maximum
     $rim=@($changed | Where-Object {
         [Math]::Sqrt([Math]::Pow($_.x-$hit.x,2)+[Math]::Pow($_.z-$hit.z,2)) -gt $hit.radius*.5 -and $_.deficit -lt $peak-.0001})
     Require ($rim.Count -gt 0) 'Actual sampled crater has no shallower radial edge.'
@@ -80,7 +103,21 @@ if ($SelfTest) {
     $null=Assert-Hole $hit $b $a .18;$key=Cell-Key 3 3;$a[$key].deficit=.01
     $failed=$false;try {$null=Assert-Hole $hit $b $a .18} catch {$failed=$true};Require $failed 'Outside mutation accepted.'
     Require ((Decode-Eval 'WEST Alpha:1 (mail)') -ceq 'WEST Alpha:1 (mail)' -and (Decode-Eval '[1,2,3]').Count -eq 3) 'SQF decoder failed.'
-    Write-Host 'PASS actual shot trace, kernel-boundary falsifier, numeric decode and camera helper checks (no game).';return
+    Require ((Decode-Eval '[1]').Count -eq 1 -and (Decode-Eval '[]').Count -eq 0 -and (Decode-Eval 'true') -is [bool]) 'Array/scalar SQF types changed.'
+    Assert-ShotSettled 10000 12000
+    foreach($times in @(@(10000,11999),@(-1,2000),@(10000,9000))) {
+        $failed=$false;try {Assert-ShotSettled $times[0] $times[1]} catch {$failed=$true};Require $failed 'Unsettled shot accepted.'
+    }
+    $envKeys=@('WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE','WGR_TONEMAP_WHITE','WGR_TONEMAP_DESAT');$prior=@{}
+    foreach($key in $envKeys) {$prior[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
+    try {
+        foreach($key in $envKeys) {[Environment]::SetEnvironmentVariable($key,'1','Process')}
+        Require ((Set-ExposurePolicy $true) -ceq 'normal-time-of-day-grade-and-default-adaptive-policy') 'Normal exposure mode mislabeled.'
+        foreach($key in $envKeys) {Require ($null -eq [Environment]::GetEnvironmentVariable($key,'Process')) 'Normal mode retained a grading/adaptive pin.'}
+        $null=Set-ExposurePolicy $false;Require ($env:WGR_EXPOSURE -ceq '1' -and $env:WGR_AUTO_EXPOSURE -ceq '0') 'Fixed legacy arm changed.'
+        Restore-Environment 'WGR_EXPOSURE' $null;Require ($null -eq [Environment]::GetEnvironmentVariable('WGR_EXPOSURE','Process')) 'Previously absent environment variable was retained.'
+    } finally {foreach($key in $envKeys) {Restore-Environment $key $prior[$key]}}
+    Write-Host 'PASS actual shot trace, kernel-boundary falsifier, camera/decode, two-second settling, exposure policy and null-safe restoration checks (no game/GPU/profile).';return
 }
 Require ([bool]$env:LOCK_OWNER) 'Run through scripts/with-game-lock.sh.'
 Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue)) 'Preserve the running game.'
@@ -95,15 +132,16 @@ $output=Join-Path $root ('build/snow-bullet/'+$Label+'-'+(Get-Date -Format yyyyM
 $profile=Join-Path $output 'user';New-Item -ItemType Directory -Force $profile | Out-Null
 $log=Join-Path $output 'engine.log';$mission=Join-Path $root 'tests/perf/missions/perf_sand.noe'
 $result=[ordered]@{status='running';before=$before;stages=@{};captures=@{};
-    limitations=@('Source collision remains bare terrain.','Rim is uncut surrounding powder, not newly heaped mass.','Hard-object/wall/sea branches omit SNOW_BULLET terminal logs; those require a future actual ballistic-terminal query and are not accepted by absence.','Pictures require visual review; source/cell counters do not accept hole appearance.')}
+    autoExposure=[bool]$AutoExposure;brightness=1;minimumSettleSimulationMs=2000;
+    limitations=@('Source collision remains bare terrain.','Rim is uncut surrounding powder, not newly heaped mass.','Hard-object/wall/sea branches omit SNOW_BULLET terminal logs; those require a future actual ballistic-terminal query and are not accepted by absence.','Pictures require visual review; source/cell counters do not accept hole appearance.','Two seconds of real simulation reduce transient impact FX; authored persistent decals remain. No effects are deleted.','AutoExposure restores normal time-of-day grading and default adaptive policy, not a forced adaptive exposure enable. Fixed exposure1 controls can still clip snow.')}
 @{sourceHead=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;
   installed=$before;lockOwner=$env:LOCK_OWNER;mission=$mission;player='SoldierWB';weapon='M16';requestedPlayer=@($PlayerX,$PlayerZ);
-  aim='Ordinary relative SDL mouse motion';aimDy=$AimDy;depth=$Depth;refill=[bool]$Refill;
-  firing='SDL mouse button 1; Fired event records only; projectile travels before pause';gridSpacing=.125;captureVectors='raw engine XYZ'} |
+  aim='Ordinary relative SDL mouse motion';aimDy=$AimDy;depth=$Depth;refill=[bool]$Refill;autoExposure=[bool]$AutoExposure;brightness=1;
+  firing='SDL mouse button1; Fired event records only; terminal impact + at least2000sim ms after mouse-up before pause';gridSpacing=.125;captureVectors='raw engine XYZ'} |
     ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'provenance.json')
 $keys=@('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN',
     'POSEIDON_SNOW_TEST_DEPTH','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','POSEIDON_SNOWLINE','POSEIDON_SNOW_BULLET_TRACE',
-    'WGR_TERRAIN_PUDDLE_WETNESS','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_TEMPORAL','WGR_GRASS','POSEIDON_WIND_OVERRIDE')
+    'WGR_TERRAIN_PUDDLE_WETNESS','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE','WGR_TONEMAP_WHITE','WGR_TONEMAP_DESAT','WGR_TEMPORAL','WGR_GRASS','POSEIDON_WIND_OVERRIDE')
 $saved=@{};foreach($key in $keys) {$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $p=$null;$client=$null;$held=$false
 function Health {
@@ -144,7 +182,7 @@ function Capture([string]$name) {
     while (!(Test-Path -LiteralPath $path)) {Health;Require ([DateTime]::UtcNow -lt $until) 'Screenshot missing.';Start-Sleep -Milliseconds 100}
     Require ((Clock) -eq $time) 'Paused simulation advanced during screenshot.'
     $bytes=[IO.File]::ReadAllBytes($path);Require ($bytes.Length -ge 24 -and [BitConverter]::ToString($bytes[0..7]) -eq '89-50-4E-47-0D-0A-1A-0A') 'Screenshot is not PNG.'
-    $result.captures[$name]=@{path=$path;sha256=(Get-FileHash -LiteralPath $path).Hash;timeMs=$time;bytes=$bytes.Length}
+    $result.captures[$name]=@{path=$path;sha256=(Get-FileHash -LiteralPath $path).Hash;timeMs=$time;bytes=$bytes.Length;exposureMode=$result.exposureMode;brightness=1}
 }
 function Capture-Views([string]$stage,$views) {foreach($entry in $views.GetEnumerator()) {View $entry.Value;Capture ($stage+'-'+$entry.Key);Unview}}
 function Shoot([string]$stage) {
@@ -154,19 +192,20 @@ function Shoot([string]$stage) {
     Exec 'setAccTime 0.05';$null=Send @{cmd='mouse_button';button=1;down=$true};$script:held=$true
     $until=[DateTime]::UtcNow.AddSeconds(20)
     do {Start-Sleep -Milliseconds 30;$now=[int](Eval 'snowShotCount');Require ([DateTime]::UtcNow -lt $until) 'Ordinary click produced no actual Fired event.'} while ($now -eq $shots)
-    $null=Send @{cmd='mouse_button';button=1;down=$false};$script:held=$false;Exec 'setAccTime 1'
+    $null=Send @{cmd='mouse_button';button=1;down=$false};$script:held=$false;$releaseMs=Clock;Exec 'setAccTime 1'
     $shotTime=[double](Eval 'snowShotTime');$until=[DateTime]::UtcNow.AddSeconds(15)
     do {
         Start-Sleep -Milliseconds 40;$lines=@(HitLines);$clock=Clock
         Require ([DateTime]::UtcNow -lt $until) 'Fired round produced no actual downward terminal terrain event; aim/fixture is unavailable.'
-    } while ($lines.Count -le $hits -or $clock -lt $shotTime*1000+200)
-    Exec 'setAccTime 0';$lines=@(HitLines);$now=[int](Eval 'snowShotCount');$afterAmmo=[double](Eval 'player ammo "M16"')
+    } while ($lines.Count -le $hits -or $clock -lt $releaseMs+2000)
+    Exec 'setAccTime 0';$pausedMs=Clock;Assert-ShotSettled $releaseMs $pausedMs
+    $lines=@(HitLines);$now=[int](Eval 'snowShotCount');$afterAmmo=[double](Eval 'player ammo "M16"')
     Require ($now -eq $shots+1 -and $afterAmmo -eq $ammo-1 -and $lines.Count -eq $hits+1) 'Single actual bullet/Fired/ammunition/terrain-event proof differs.'
     $event=Eval 'snowShotSource';Require ($event.Count -eq 4 -and $event[0] -ceq 'M16' -and ![string]::IsNullOrWhiteSpace($event[3])) 'Actual Fired source weapon/ammo missing.'
     $hit=Parse-SnowHit $lines[-1].Line;$position=Eval 'getPosASL player'
     $distance=[Math]::Sqrt([Math]::Pow($hit.x-$position[0],2)+[Math]::Pow($hit.z-$position[1],2))
     Require ($distance -ge 1.4 -and $distance -le 8) 'Actual terminal hit is too close to boot edits or outside the bounded aiming patch.'
-    $result.stages[$stage]=@{hit=$hit;ammoBefore=$ammo;ammoAfter=$afterAmmo;firedBefore=$shots;firedAfter=$now;eventSource=$event;firedTime=$shotTime;pausedTimeMs=(Clock);playerPosition=$position;horizontalHitDistance=$distance;input='SDL left click; Fired handler did not pause; actual projectile terminal event required'}
+    $result.stages[$stage]=@{hit=$hit;ammoBefore=$ammo;ammoAfter=$afterAmmo;firedBefore=$shots;firedAfter=$now;eventSource=$event;firedTime=$shotTime;mouseUpTimeMs=$releaseMs;pausedTimeMs=$pausedMs;settleSimulationMs=($pausedMs-$releaseMs);playerPosition=$position;horizontalHitDistance=$distance;input='SDL left click; Fired handler did not pause; actual projectile terminal event + two seconds of simulation after release required'}
     return $hit
 }
 function CloseOwned {
@@ -177,8 +216,9 @@ function CloseOwned {
 try {
     foreach($key in $keys) {Remove-Item ('Env:'+$key) -ErrorAction SilentlyContinue}
     $env:POSEIDON_USER_DIR=$profile;$env:POSEIDON_SNOW_BULLET_TRACE='1';$env:POSEIDON_SNOWLINE='off';$env:POSEIDON_SNOW_TEST_DEPTH='0'
-    $env:WGR_AUTO_EXPOSURE='0';$env:WGR_EXPOSURE='1';$env:WGR_TEMPORAL='0';$env:WGR_GRASS='0';$env:POSEIDON_WIND_OVERRIDE='0 90 0'
-    [IO.File]::WriteAllText((Join-Path $profile 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
+    $result.exposureMode=Set-ExposurePolicy ([bool]$AutoExposure);$env:WGR_TEMPORAL='0';$env:WGR_GRASS='0';$env:POSEIDON_WIND_OVERRIDE='0 90 0'
+    $result.exposureEnvironment=@{};foreach($key in @('WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE','WGR_TONEMAP_WHITE','WGR_TONEMAP_DESAT')) {$result.exposureEnvironment[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
+    [IO.File]::WriteAllText((Join-Path $profile 'graphics.cfg'),"version=3;`nqualityPreset=3;`nbrightness=1;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
     $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
     $args=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--test-world-hour','16','--log-file',('"'+$log+'"'))
     $p=Start-Process (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList $args -RedirectStandardOutput (Join-Path $output 'stdout.txt') -RedirectStandardError (Join-Path $output 'stderr.txt');$null=$p.Handle
@@ -186,6 +226,7 @@ try {
     do {Health;$client=[Net.Sockets.TcpClient]::new();try {$client.Connect('127.0.0.1',$port)} catch {$client.Dispose();$client=$null};if (!$client) {Require ([DateTime]::UtcNow -lt $until) 'Harness unavailable.';Start-Sleep -Milliseconds 250}} while (!$client)
     $stream=$client.GetStream();$stream.ReadTimeout=30000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
     Start-Sleep -Seconds 12;Require ((Eval 'triSceneReady') -ceq 'OK' -and (Eval 'typeOf player') -ceq 'SoldierWB') 'Actual standard US player mission not ready.'
+    Require ((Eval 'triSetBrightness 1') -ceq 'OK') 'Controlled brightness refused.'
     Require ((Eval 'triCheatInfiniteAmmo false') -ceq 'OK' -and [double](Eval 'triCheatInfiniteAmmoActive') -eq 0) 'Infinite ammo must be disabled.'
     Exec ('player allowDamage false; 0 setRain 0; 0 setFog 0; 0 setOvercast 0; removeAllWeapons player; player addMagazine "M16"; player addWeapon "M16"; player selectWeapon "M16"; player setUnitPos "UP"; player setPos ['+(Number $PlayerX)+','+(Number $PlayerZ)+',0]; player setDir 0; player switchCamera "INTERNAL"; snowShotCount=0; snowShotTime=-1; snowShotSource=[]; player addEventHandler ["Fired",{snowShotCount=snowShotCount+1; snowShotTime=time; snowShotSource=[_this select 1,_this select 2,_this select 3,_this select 4]}]; hint ""; setAccTime 1')
     $null=Send @{cmd='weather_particles';action='set';mode='off';density=0;snowflakes=$false}
@@ -223,7 +264,7 @@ try {
 } catch {$result.status='failed';$result.error=$_.Exception.Message;$result.errorSource=@{line=$_.InvocationInfo.ScriptLineNumber;position=$_.InvocationInfo.PositionMessage;stack=$_.ScriptStackTrace};throw}
 finally {
     if ($p -and !$p.HasExited) {try {CloseOwned} catch {$result.status='failed';$result.cleanupError=$_.Exception.Message;if (!$p.HasExited) {$p.Kill();$null=$p.WaitForExit(5000);$result.forcedCleanup=$true}}}
-    if ($client) {$client.Dispose()};foreach($key in $keys) {[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}
+    if ($client) {$client.Dispose()};foreach($key in $keys) {Restore-Environment $key $saved[$key]}
     try {$result.after=Pair;Require ($before.stamp -ceq $result.after.stamp -and $before.exe -ceq $result.after.exe -and $before.dll -ceq $result.after.dll) 'Installed pair/provenance changed during campaign.'} catch {$result.status='failed';$result.provenanceError=$_.Exception.Message}
     $result | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath (Join-Path $output 'result.json');Write-Host "Actual snow bullet evidence: $output"
     if ($result.status -eq 'failed') {throw ($result.error+' '+$result.cleanupError+' '+$result.provenanceError)}
