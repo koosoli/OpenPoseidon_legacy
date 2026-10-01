@@ -6882,6 +6882,7 @@ impl Renderer {
     }
 
     fn terrain_set_heightmap(&mut self, heights: &[f32], params: WgrTerrainParams) {
+        self.rain_water.invalidate_source();
         self.log.log(log_level::INFO, &format!(
             "Terrain heightfield: {}x{}, device limit {}, samples {}",
             params.hm_width, params.hm_height, self.device.limits().max_texture_dimension_2d, heights.len()));
@@ -6909,6 +6910,34 @@ impl Renderer {
             self.log.log(log_level::INFO, &format!(
                 "Rain water grid: generation={} revision={revision} width={} height={} copied={} enabled={} accepted={accepted} maxDepth={max_depth:.6} independent=1",
                 params.generation, params.control[0], params.control[1], cells.len(), params.control[3]));
+        }
+    }
+
+    fn rain_water_set_source(&mut self, source: ffi::WgrRainWaterSourceKey) {
+        self.rain_water.set_source(source);
+    }
+
+    fn rain_water_set_publication(
+        &mut self,
+        publication: ffi::WgrRainWaterPublication,
+        coarse: &[WgrVec4],
+        fine: &[ffi::WgrRainWaterFineCell],
+    ) {
+        let accepted = self.rain_water.set_publication(
+            &self.device, &self.queue, publication, coarse, fine,
+        );
+        static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let trace = *TRACE.get_or_init(|| std::env::var("WGR_RAIN_WATER_TRACE").as_deref() == Ok("1"));
+        if (trace && (!coarse.is_empty() || !fine.is_empty())) || !accepted {
+            let (cached_coarse, cached_fine, tiles) = self.rain_water.publication_counts();
+            let source = publication.source;
+            self.log.log(log_level::INFO, &format!(
+                "Rain water publication: worldToken={} generation={} heightRevision={} terrainRange={} terrainSpacing={} revision={} flags={} copiedCoarse={} copiedFine={} cachedCoarse={} cachedFine={} tiles={} enabled={} accepted={}",
+                source.world_token, source.generation, source.height_revision,
+                source.terrain_range, source.terrain_spacing, publication.revision,
+                publication.flags, coarse.len(), fine.len(), cached_coarse, cached_fine,
+                tiles, publication.coarse.control[3], accepted,
+            ));
         }
     }
 
