@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param(
     [switch]$CoverageDebug,
+    [switch]$NormalExposure,
     [ValidateSet('All','Eden','Noe')][string]$World='All',
     [ValidatePattern('^[0-9a-fA-F]{8,40}$')][string]$ExpectedCommit='',
     [ValidateRange(0.04,0.5)][double]$Depth=0.18,
@@ -123,7 +124,12 @@ $settings=@{POSEIDON_SNOW_TEST_DEPTH='0';POSEIDON_SNOWLINE='off';WGR_OBJECT_SNOW
     WGR_TEMPORAL='0';WGR_AUTO_EXPOSURE='0';WGR_EXPOSURE='1';WGR_GRASS='0';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_CLOUD_COVERAGE='0';WGR_LOD_GOVERNOR_RANGE='1';WGR_TERRAIN_JITTER='0';
     WGR_INTERIOR_SKY='1';WGR_INTERIOR_SKY_DEBUG='0';WGR_TERRAIN_PUDDLES='0';WGR_GROUND_PUDDLES='0';WGR_WEATHER_COVER='1';WGR_WEATHER_COVER_TRACE='1'}
 $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','POSEIDON_SNOW_SHELTER','POSEIDON_INTERIOR_SKY_PROBE','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE')
+if ($NormalExposure) {
+    $settings.Remove('WGR_EXPOSURE'); $settings.Remove('WGR_AUTO_EXPOSURE')
+    $clear+=@('WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE')
+}
 $keys=@($settings.Keys)+$clear+@('POSEIDON_USER_DIR','WGR_TREE_SNOW');$saved=@{};foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
+$result.exposureMode=$(if($NormalExposure){'normal engine time-of-day grade and default adaptive policy'}else{'manual exposure 1, adaptive off'})
 $result.environment=@{settings=$settings;cleared=$clear;treeArms=@('1','0');inherited=$saved}
 $p=$null;$client=$null;$reader=$null;$writer=$null;$log=$null;$armDir=$null;$armDeadline=$null
 function Live-Lines([string]$path){
