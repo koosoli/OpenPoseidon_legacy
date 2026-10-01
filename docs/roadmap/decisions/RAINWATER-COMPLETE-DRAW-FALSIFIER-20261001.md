@@ -27,6 +27,17 @@ failure or a reason to remove the underside guard.
 
 ## Test ownership and scope
 
+Root ran the required-device baseline at e8a59cb7. Both production positives
+painted zero pixels, while the identical clockwise diagnostic painted320 pixels
+with RGB energy14890. The covered, stale-support, OFF and snow negatives were
+all zero. This confirms the raster convention fault rather than missing uploads.
+
+Changing only the production front face to Cw makes the flat positive paint320
+pixels/14890 energy and triangular sloped positive337 pixels/15482 energy. All
+four negatives remain zero. Logs: build/rainwater-full-draw-baseline.log and
+build/rainwater-full-draw-fixed.log. The underside shader guard is retained.
+Installed appearance, reflections and ripple quality still require new captures.
+
 The isolated candidate starts at 2ce068d6, including the private far-weather
 Frame lane and binding20. Only the test section of `rain_water.rs` and this
 record change; producer, upload API and production WGSL/pipeline code are intact.

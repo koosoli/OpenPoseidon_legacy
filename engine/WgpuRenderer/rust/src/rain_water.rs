@@ -199,6 +199,10 @@ impl RainWater {
                 }],
             },
             primitive: wgpu::PrimitiveState {
+                // World-up cells are clockwise after the engine's LH projection.
+                // fs_main still rejects undersides; cull_mode=None alone cannot
+                // compensate for the wrong front_facing convention.
+                front_face: wgpu::FrontFace::Cw,
                 cull_mode: None,
                 ..Default::default()
             },
