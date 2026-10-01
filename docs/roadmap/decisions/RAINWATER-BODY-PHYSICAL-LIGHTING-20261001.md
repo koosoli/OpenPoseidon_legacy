@@ -63,3 +63,23 @@ with captured rainy ambient/direct vectors and known isotropic SH. Root must exe
 build and inspect the matching installed low/top pool before any nice-water
 claim. A remaining bright pool requires actual SH/reflection/body isolation,
 not another arbitrary palette reduction.
+
+## Matching installed comparison
+
+Focused14 required-device tests and full643 renderer tests passed (zero failed,
+two existing ignored). PoseidonGame built and the pair was installed as
+ab442230 at05:05. Both arms of
+`physical-sky-native-crater-20261001-050526-232b13` completed actual native edit,
+natural rain, pause/return, source receipt, roof capture, sea negative, drainage
+and restoration with normal exits and unchanged installed hashes.
+
+ON rain was .363991618; wet global volume532001.686737m³ drained to
+425087.752020m³ after input stopped. Fine volume493.396258600175m³ agreed with
+native triangle integration493.396258600322m³. The accepted receipt matched
+generation5/height27/revision476 and complete263169+1024 cell arrays.
+Root inspected the matching low/top images: the edited hollow is visibly
+darker and translucent from above, while its low view retains sky reflections.
+This bounded body-lighting improvement is accepted. Bright coarse blankets and
+rectangular boundaries outside the fine tile remain rejected as finished water
+appearance. This does not promote either fine flag, prove every natural hollow,
+or accept all reflections/ripples/materials across maps.
