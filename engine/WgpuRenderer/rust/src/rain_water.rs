@@ -10,6 +10,9 @@ use crate::{
 use wgpu::util::DeviceExt;
 #[path = "rain_water_fine.rs"]
 mod fine;
+#[cfg(test)]
+#[path = "rain_water_body_tests.rs"]
+mod body_tests;
 type PublicationIdentity = (fine::SourceIdentity, u64, [u32; 6], u32);
 fn publication_identity(p: &WgrRainWaterPublication) -> Option<PublicationIdentity> {
     Some((
@@ -1395,6 +1398,16 @@ mod full_draw_tests {
                     wgpu::TextureSampleType::Float { filterable: true },
                 ),
                 samp_entry(8, wgpu::SamplerBindingType::Filtering),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(144),
+                    },
+                    count: None,
+                },
                 tex_entry(
                     12,
                     wgpu::TextureViewDimension::D2Array,
@@ -1500,6 +1513,15 @@ mod full_draw_tests {
             compare: Some(wgpu::CompareFunction::LessEqual),
             ..Default::default()
         });
+        // A required real production binding, even while legacy-lighting cases
+        // do not evaluate SH. Isotropic unit radiance has L00=sqrt(4*pi).
+        let mut sh = [[0.0_f32;4];9];
+        sh[0] = [(4.0*std::f32::consts::PI).sqrt();4];
+        let sky_sh = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("actual_pool_physical_sky_sh"),
+            contents: bytemuck::cast_slice(&sh),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
         let camera_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("actual_pool_camera"),
             layout: &camera_layout,
@@ -1523,6 +1545,10 @@ mod full_draw_tests {
                 wgpu::BindGroupEntry {
                     binding: 8,
                     resource: wgpu::BindingResource::Sampler(&linear),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: sky_sh.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 12,
@@ -1849,6 +1875,12 @@ mod full_draw_tests {
             0.005,0.,0.,0., 0.,0.,0.,0., 0.,0.005,0.,0., -1.5,-1.5,0.5,1.]);
         put(&mut frame,offset("weather_vp"),&weather_vp.to_cols_array());
         put(&mut frame,offset("proj"),&fine_projection.to_cols_array());
+        // Fine cases exercise the real physical-sky fragment and SH binding,
+        // replaying captured rainy ambient/direct inputs with known isotropic
+        // SH. They are not a reconstruction of the mission's unavailable SH.
+        put(&mut frame,offset("sun_ambient"),&[22.1267,24.138218,32.184288,1.35]);
+        put(&mut frame,offset("sun_diffuse"),&[1.0355144,0.9062767,0.60597956,1.]);
+        put(&mut frame,offset("sun_dir_world"),&[0.8081431,-0.58894414,-0.0070375875,0.]);
         let raster=|rain:&RainWater,cover:f32|->Vec<u8>{
             let mut encoder=device.create_command_encoder(&Default::default());
             {let _pass=encoder.begin_render_pass(&wgpu::RenderPassDescriptor{
