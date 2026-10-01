@@ -82,6 +82,23 @@ target was hit. Those controls remain explicitly unexercised here rather than
 being reported as passed. A later source-bounded read-only terminal query can
 make them concrete without changing the firing controller.
 
+The corrected `50db754c` normal-grade settled attempt
+`settled-normal-grade-fixed-20261001-022738-92cdb0` again establishes dry and
+snowy real terrain hits, a7.71cm retained cut and142 unchanged outside cells.
+The lifted6m tent still prevents the third shot from producing a terrain row;
+its actual terminal target is unknown. The run remains failed and exits normally.
+Settled pictures remove the impact plume, but the snow remains very bright and
+the depression has weak visible contrast. Appearance is not accepted by these
+field counters.
+
+An opt-in terminal-site trace now observes ground, water, object and expired
+routes directly, including rounds too short for the per-frame ballistic recorder
+to sample. Under the existing `POSEIDON_SNOW_BULLET_TRACE=1` it logs at most16
+local nonexplosive terminal events per quarter simulation second, with actual
+position, velocity and hit-object identity. It does not alter collision or snow
+policy. Default-off cost is an early flag check. Compilation, deployment and a
+new covered-shot target diagnosis are required before accepting this telemetry.
+
 Pictures still require visual judgment of the hole and retained powder rim.
 
 The first installed attempt on `d99bf434`, retained at

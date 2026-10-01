@@ -68,6 +68,26 @@ bool SnowBulletTraceEnabled()
     return enabled;
 }
 
+// Developer telemetry only: short rifle flights can terminate before the
+// per-frame ballistic recorder sees them. Observe the actual terminal site;
+// a missing snow edit alone cannot distinguish a roof hit from covered ground.
+void SnowBulletTerminalTrace(const char* kind, const Vector3& point,
+    const Vector3& velocity, Object* hit, bool local, bool explosive)
+{
+    if (!SnowBulletTraceEnabled() || !local || explosive) return;
+    const double now = Glob.time.toFloat();
+    if (!std::isfinite(now)) return;
+    static double previousBucket = -1;
+    static unsigned rows = 0;
+    const double bucket = std::floor(now * 4.0);
+    if (bucket != previousBucket) { previousBucket = bucket; rows = 0; }
+    if (rows >= 16) return;
+    ++rows;
+    const RString name = hit ? hit->GetDebugName() : RString("");
+    LOG_INFO(World,"SNOW_BULLET_TERMINAL kind={} time={:.3f} x={:.3f} y={:.3f} z={:.3f} vx={:.3f} vy={:.3f} vz={:.3f} hit=\"{}\"",
+        kind, now, point.X(),point.Y(),point.Z(),velocity.X(),velocity.Y(),velocity.Z(),static_cast<const char*>(name));
+}
+
 void SnowBulletTerrainImpact(Object* projectile, Object* owner, const Vector3& point,
     const Vector3& incoming, float speed, float damage, bool local, bool explosive, bool water)
 {
@@ -916,6 +936,7 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
         _timeToLive -= deltaT;
         if (_timeToLive < 0)
         {
+            SnowBulletTerminalTrace("expired",position,_speed,nullptr,IsLocal(),Type()->explosive);
             // Ballistics diagnostic — inlined around a bool, compiles to a
             // not-taken branch when the dev panel switch is off.
             Poseidon::Dev::Ballistics::NotifyImpact(static_cast<Entity*>(this), position.X(), position.Y(), position.Z(),
@@ -1062,6 +1083,13 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
 
             if (minI >= 0)
             {
+                if (SnowBulletTraceEnabled())
+                {
+                    const auto& terminal = collision[minI];
+                    if (terminal.object)
+                        SnowBulletTerminalTrace("object",terminal.object->PositionModelToTop(terminal.pos),
+                            _speed,terminal.object,IsLocal(),Type()->explosive);
+                }
                 if (Poseidon::Dev::Ballistics::Enabled())
                 {
                     // Ballistics diagnostic — the exact impact point and what was
@@ -1221,6 +1249,8 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                 }
 
                 // Ballistics diagnostic — terrain / sea terminus.
+                SnowBulletTerminalTrace(hitSea || _waterImpactDone ? "water" : "ground",
+                    isect,_speed,nullptr,IsLocal(),Type()->explosive);
                 Poseidon::Dev::Ballistics::NotifyImpact(static_cast<Entity*>(this), position.X(), position.Y(), position.Z(),
                                                         (hitSea || _waterImpactDone)
                                                             ? Poseidon::Dev::BallisticTerminus::HitWater
