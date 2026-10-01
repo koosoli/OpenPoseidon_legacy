@@ -1,7 +1,7 @@
 # Native edited-hollow runtime fixture
 
-Runner follow-up; installed 3353770c has completed OFF and partial ON source
-checks below. Complete ON lifecycle and visual acceptance remain pending.
+Installed 3353770c has now completed OFF and ON lifecycle checks described
+below. Visual acceptance remains open: the photographed pool looked milky.
 This fixture is based on b7debd26 plus
 the atomic ABI-19 handoff 35ad3083. It does not turn the default-off fine
 simulation or renderer on in ordinary missions.
@@ -188,3 +188,24 @@ keys, count mismatch, rejection, disabled/boolean/unknown enabled values and
 unknown trailing fields. The complete retained actual revision-473 receipt is
 also parsed source-only. Root must rerun ON to reach its remaining roof,
 drainage and restoration checks, and inspect the actual captures separately.
+
+## Completed native lifecycle and natural rain threshold
+
+The later natural-wait campaign recorded rain falling from .474674 toward
+.30 despite the requested storm. A >.5 target was an unstable fixture demand,
+not a water-system requirement. Current readiness requires actual natural
+liquid rain >.25, with rain equal to typed liquid input, zero particle override
+and non-snow mode. The bounded additional wait remains. Historical >.5 failures
+above are retained. Source identity, local fill, native geometry, mass,
+pause, drainage and paired renderer gates have not been weakened.
+
+`actual-rain-native-crater-20261001-043607-8b9a63` completed ON with normal exit
+and stable installed hashes. Wet global volume was 576468.783288 m³; after
+60 simulation seconds without input it was 461158.253592 m³, retaining water.
+Fine held volume 522.195118423769 m³ agreed with native triangle integral
+522.1951184239304 m³. Selected depth was .450866457 m. The actual renderer
+receipt matched generation 5, height revision 27, revision 474, flags 7,
+263169 coarse cells and 1024 fine cells with enabled=1 and accepted=true.
+Native restore immediately closed stale fine source. Roof captures do not
+claim CPU shelter hydrology. Root rejected the pale pool appearance; the
+physical-sky body-lighting correction requires a new matched runtime pair.

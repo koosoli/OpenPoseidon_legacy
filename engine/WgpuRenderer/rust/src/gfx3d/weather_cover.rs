@@ -9,8 +9,8 @@ pub const FAR_CULL_VIEW: usize = CULL_VIEW + 1;
 pub const HEIGHT: f32 = 1024.0;
 pub const BIAS_METRES: f32 = 0.08;
 
-fn cascade_enabled(master: Option<&str>, far: bool, opt_in: Option<&str>) -> bool {
-    master != Some("0") && (!far || opt_in == Some("1"))
+fn cascade_enabled(master: Option<&str>, far: bool, override_value: Option<&str>) -> bool {
+    master != Some("0") && (!far || override_value.is_none() || override_value == Some("1"))
 }
 
 fn physical_view(camera: glam::Vec3) -> sky_vis::SkyVisView {
@@ -79,7 +79,7 @@ impl Map {
         if far {
             let on = cascade_enabled(std::env::var("WGR_WEATHER_COVER").ok().as_deref(), true,
                 std::env::var("WGR_WEATHER_COVER_FAR").ok().as_deref());
-            eprintln!("[wgr] weather cover far cascade: enabled={} WGR_WEATHER_COVER_FAR=1 opt-in resolution={} extent={} depthBytes={} scope=registered-retained-and-current-direct",
+            eprintln!("[wgr] weather cover far cascade: enabled={} default-on WGR_WEATHER_COVER_FAR=0 disables resolution={} extent={} depthBytes={} scope=registered-retained-and-current-direct",
                 on, RESOLUTION, FAR_EXTENT, RESOLUTION as u64 * RESOLUTION as u64 * 4);
         }
         let (_, dummy) = texture(device, 1, "wgr_weather_cover_dummy");
@@ -174,13 +174,15 @@ impl Map {
 mod tests {
     use super::*;
     #[test]
-    fn weather_cover_far_requires_exact_opt_in_and_obeys_master_off() {
-        for value in [None,Some("0"),Some("true"),Some("2"),Some("")] {
+    fn weather_cover_far_defaults_on_and_obeys_exact_override_and_master_off() {
+        assert!(cascade_enabled(None,true,None));
+        for value in [Some("0"),Some("true"),Some("2"),Some("")] {
             assert!(!cascade_enabled(None,true,value));
             assert!(cascade_enabled(None,false,value));
         }
         assert!(cascade_enabled(None,true,Some("1")));
         assert!(!cascade_enabled(Some("0"),true,Some("1")));
+        assert!(!cascade_enabled(Some("0"),true,None));
         assert!(!cascade_enabled(Some("0"),false,None));
         assert_eq!(FAR_CULL_VIEW,CULL_VIEW+1);
         assert_eq!(RESOLUTION as u64*RESOLUTION as u64*4,16777216);

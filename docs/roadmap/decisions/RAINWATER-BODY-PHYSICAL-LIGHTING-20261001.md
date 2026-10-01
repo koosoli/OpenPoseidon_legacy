@@ -3,7 +3,7 @@
 This source correction is pending root GPU/full-build and installed visual
 gates. The real fine pool is not accepted as a finished appearance.
 
-Installed `6cf9973e` captures at
+Installed `3353770c` captures at
 `build/rain-water-fine/bounded-rain-native-crater-20261001-042056-ab9f3d`
 show an opaque pale blue/gray hollow from both low and top views. In the fixed
 top ROI `(480,300)..(580,380)`, mean RGB is `(191.90,208.85,215.37)` with fine

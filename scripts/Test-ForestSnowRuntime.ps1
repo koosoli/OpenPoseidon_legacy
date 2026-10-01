@@ -4,6 +4,7 @@ param(
     [switch]$CoverageDebug,
     [switch]$NormalExposure,
     [switch]$FarCover,
+    [switch]$DefaultFarCover,
     [ValidateSet('All','Eden','Noe')][string]$World='All',
     [ValidatePattern('^[0-9a-fA-F]{8,40}$')][string]$ExpectedCommit='',
     [ValidateRange(0.04,0.5)][double]$Depth=0.18,
@@ -107,6 +108,7 @@ function Test-Helpers{
     Write-Host "Forest fixture helper checks passed: $checks. No game/GPU/profile used."
 }
 if($SelfTest){Test-Helpers;return}
+Require (!($FarCover -and $DefaultFarCover)) 'Choose explicit far cover or the engine default policy.'
 Require ([bool]$ExpectedCommit) 'Supply -ExpectedCommit for the installed pair.'
 Require ([bool]$env:LOCK_OWNER) 'Run through scripts/with-game-lock.sh.'
 Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue)) 'Existing game has another owner.'
@@ -122,7 +124,7 @@ $result=[ordered]@{status='running';sourceHead=(& git -C $root rev-parse HEAD);s
     scope='Live original-map owner/frame/normal-buffer proof + loaded registration traces + deposited state + captures. Registration is not selected draw LOD; bounded map startup traces are not per-camera exposure proof. No semantic visual or timing acceptance.'}
 $result.helperSha256=@{};foreach($helper in @('Write-BenchmarkGraphics.ps1','Assert-CaptureLifecycle.ps1','TerrainPuddleStockRoof.ps1')){$result.helperSha256[$helper]=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $helper)).Hash}
 $settings=@{POSEIDON_SNOW_TEST_DEPTH='0';POSEIDON_SNOWLINE='off';WGR_OBJECT_SNOW='1';WGR_TREE_SNOW_TRACE='1';WGR_FOREST_SNOW_ATLAS='1';WGR_SNOW_SURFACE_FIXTURE='1';WGR_GPU_DRIVEN='1';WGR_SNOW_POWDER='1';WGR_FOREST_SNOW_COVER_DEBUG=$(if($CoverageDebug){'1'}else{'0'});
-    WGR_WEATHER_COVER_FAR=$(if($FarCover){'1'}else{'0'});
+    WGR_WEATHER_COVER_FAR=$(if($DefaultFarCover){$null}elseif($FarCover){'1'}else{'0'});
     WGR_TEMPORAL='0';WGR_AUTO_EXPOSURE='0';WGR_EXPOSURE='1';WGR_GRASS='0';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_CLOUD_COVERAGE='0';WGR_LOD_GOVERNOR_RANGE='1';WGR_TERRAIN_JITTER='0';
     WGR_INTERIOR_SKY='1';WGR_INTERIOR_SKY_DEBUG='0';WGR_TERRAIN_PUDDLES='0';WGR_GROUND_PUDDLES='0';WGR_WEATHER_COVER='1';WGR_WEATHER_COVER_TRACE='1'}
 $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','POSEIDON_SNOW_SHELTER','POSEIDON_INTERIOR_SKY_PROBE','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE')
@@ -171,7 +173,7 @@ function Capture([string]$name,[string]$pose,$fixture,$target,[bool]$enabled,$ch
     return @{path=$path;pose=$pose;sha256=(Get-FileHash -LiteralPath $path).Hash;bytes=$bytes.Length;owner=$actual;snow=$state;weather=$weather;trace=(Forest-Trace (Logs) $fixture.model)}
 }
 try{
-    foreach($key in $clear){Restore-Environment $key $null};foreach($key in $settings.Keys){[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
+    foreach($key in $clear){Restore-Environment $key $null};foreach($key in $settings.Keys){Restore-Environment $key $settings[$key]}
     $worlds=if($World -eq 'All'){@('Eden','Noe')}else{@($World)}
     foreach($worldName in $worlds){
         $fixture=$fixtures[$worldName];$paired=$null;$views=$null;$mission=Join-Path $root $fixture.mission;Require (Test-Path -LiteralPath (Join-Path $mission 'mission.sqm')) 'Original-map authored mission missing.'
