@@ -155,7 +155,17 @@ function Capture([string]$name,[string]$pose,$fixture,$target,[bool]$enabled,$ch
     $weather=Send @{cmd='weather_visibility'};foreach($field in @('rain','fog','liquidRain','particleDensity')){Require ($null -ne $weather.$field -and (Number $weather.$field) -le 0.001) "Fixed dry weather differs: $field"}
     Require ($weather.particleSnowflakes -is [bool] -and !$weather.particleSnowflakes) 'Particle snow override present.'
     $path=Join-Path $armDir ($name+'.png');$null=Send @{cmd='screenshot';path=$path};$deadline=[DateTime]::UtcNow.AddSeconds(10)
-    do{Health;if(Test-Path -LiteralPath $path){$bytes=[IO.File]::ReadAllBytes($path);if($bytes.Length -ge 36 -and ($bytes[($bytes.Length-8)..($bytes.Length-5)] -join ',') -eq '73,69,78,68'){break}};Require ([DateTime]::UtcNow -lt $deadline) 'Complete screenshot absent.';Start-Sleep -Milliseconds 100}while($true)
+    do {
+        Health
+        if (Test-Path -LiteralPath $path) {
+            # The renderer can create the path before finishing its write.
+            # Retry a sharing violation until the same bounded PNG deadline.
+            try {$bytes=[IO.File]::ReadAllBytes($path)} catch [IO.IOException] {$bytes=$null}
+            if ($bytes -and $bytes.Length -ge 36 -and ($bytes[($bytes.Length-8)..($bytes.Length-5)] -join ',') -eq '73,69,78,68') {break}
+        }
+        Require ([DateTime]::UtcNow -lt $deadline) 'Complete screenshot absent.'
+        Start-Sleep -Milliseconds 100
+    } while ($true)
     Require ([BitConverter]::ToString($bytes[0..7]) -ceq '89-50-4E-47-0D-0A-1A-0A') 'Invalid PNG.'
     Require (($bytes[16..19] -join ',') -eq '0,0,5,0' -and ($bytes[20..23] -join ',') -eq '0,0,2,208') 'Capture dimensions differ from 1280x720.'
     return @{path=$path;pose=$pose;sha256=(Get-FileHash -LiteralPath $path).Hash;bytes=$bytes.Length;owner=$actual;snow=$state;weather=$weather;trace=(Forest-Trace (Logs) $fixture.model)}
@@ -212,6 +222,13 @@ try{
     $result.status='captured-not-visually-accepted'
 }catch{$result.status='failed';$result.error=$_.Exception.Message;throw}
 finally{
+    if ($p -and !$p.HasExited -and $client -and $writer -and $reader) {
+        try {
+            # Even a failed capture should release its owned session normally.
+            $writer.WriteLine('{"cmd":"exit"}');$null=$reader.ReadLine()
+            $null=$p.WaitForExit(20000)
+        } catch {$result.cleanupError=$_.Exception.Message}
+    }
     if($client){$client.Dispose()}
     if($p -and !$p.HasExited){# Own PID only. A forced exit can never produce accepted lifecycle metadata.
         $result.status='failed';$result.ownedForcedCleanup=$true;Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue;$null=$p.WaitForExit(10000)
