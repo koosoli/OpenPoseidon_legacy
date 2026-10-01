@@ -49,7 +49,18 @@ function Walk-Complete([double]$distance,[double]$minimum,[int]$eventCount) {
 }
 function Body-InWindow($position,$window) {
     if (!$window) {return $true}
-    return $position.Count -eq 3 -and [Math]::Abs($position[0]-$window.x) -le $window.radius -and [Math]::Abs($position[1]-$window.z) -le $window.radius
+    $rx=if($window.ContainsKey('radiusX')) {$window.radiusX} else {$window.radius}
+    $rz=if($window.ContainsKey('radiusZ')) {$window.radiusZ} else {$window.radius}
+    return $position.Count -eq 3 -and [Math]::Abs($position[0]-$window.x) -le $rx -and [Math]::Abs($position[1]-$window.z) -le $rz
+}
+function Variant-Counts($rows) {
+    $counts=@{L=0;R=0;other=0}
+    foreach($row in $rows) {$v=Variant $row;if($v -cin @('L','R')) {$counts[$v]++} else {$counts.other++}}
+    return $counts
+}
+function Collect-Variants($rows,[int]$attempts,[double]$elapsedSeconds) {
+    $counts=Variant-Counts $rows
+    return ($counts.L -eq 0 -or $counts.R -eq 0) -and $attempts -lt 6 -and $elapsedSeconds -lt 45
 }
 function Assert-Positive($rows,[bool]$requirePair=$true) {
     Require ($rows.Count -ge 4) 'Fewer than four actual exposed standing-water events.'
@@ -60,7 +71,7 @@ function Assert-Positive($rows,[bool]$requirePair=$true) {
         $v=Variant $row;Require ($v -cin @('L','R')) 'Selected wave is not an audited authored People water variant.';$variants+=$v
     }
     if ($requirePair) {Require ($variants -ccontains 'L' -and $variants -ccontains 'R') 'Both authored random water alternatives were not observed; no RNG or playback forcing is permitted.'}
-    return @{eventCount=$rows.Count;variants=$variants;events=$rows;selection='Actual random authored variants, not anatomical sole identifiers'}
+    return @{eventCount=$rows.Count;variants=$variants;sourceCounts=(Variant-Counts $rows);events=$rows;selection='Actual random authored variants, not anatomical sole identifiers'}
 }
 function Pool-Supported($sample) {
     if (!$sample.valid) {return $false}
@@ -75,6 +86,10 @@ if ($SelfTest) {
         $failed=$false;try {$b=Parse-Step $bad;$null=Assert-Positive @($b,$r,$l,$r)} catch {$failed=$true};Require $failed 'Malformed/stale/dry/unsupported audio event accepted.'
     }
     $failed=$false;try {$null=Assert-Positive @($l,$l,$l,$l)} catch {$failed=$true};Require $failed 'Missing random alternative accepted as a pair.'
+    $single=Assert-Positive @($l,$l,$l,$l) $false
+    Require ($single.sourceCounts.L -eq 4 -and $single.sourceCounts.R -eq 0) 'Single-variant actual admission evidence lost before functional controls.'
+    Require ((Collect-Variants @($l,$l,$l,$l) 0 0) -and !(Collect-Variants @($l,$r) 0 0) -and
+             !(Collect-Variants @($l) 6 0) -and !(Collect-Variants @($l) 0 45)) 'Natural sample collection ignored pair/attempt/time caps.'
     Require (Pool-Supported @{valid=$true;depth=.012;height=20.012;terrainY=20}) 'Supported local pool was refused.'
     foreach($bad in @(@{valid=$false;depth=.012;height=20.012;terrainY=20},@{valid=$true;depth=.001;height=20.001;terrainY=20},@{valid=$true;depth=.012;height=20.012;terrainY=21},@{valid=$true;depth=.2;height=20.2;terrainY=20},@{valid=$true;depth=.012;height=.012;terrainY=0})) {Require (!(Pool-Supported $bad)) 'Dry/deep/raised/sea fixture admitted.'}
     Require ((Decode-Eval 'WEST Alpha:1 (mail)') -ceq 'WEST Alpha:1 (mail)' -and (Decode-Eval '[1,2,3]').Count -eq 3) 'SQF decoder failed.'
@@ -82,6 +97,9 @@ if ($SelfTest) {
     $window=@{x=2550;z=5075;radius=.95}
     Require (Body-InWindow @(2550,5074.25,15) $window) 'Audited initial roof body window refused.'
     Require (!(Body-InWindow @(2551,5075,15) $window) -and !(Body-InWindow @(2550,5076,15) $window)) 'Walk may leave the central roof while awaiting an event.'
+    $laneWindow=@{x=2550;z=5075;radiusX=.35;radiusZ=3.3}
+    Require ((Body-InWindow @(2550.3,5078,15) $laneWindow) -and !(Body-InWindow @(2550.36,5075,15) $laneWindow) -and
+             !(Body-InWindow @(2550,5078.31,15) $laneWindow)) 'Natural sampler escaped the already depth-audited narrow lane.'
     Write-Host 'PASS actual audio trace/support/age/variant and local-pool falsifiers; no game or audio device used.';return
 }
 Require ([bool]$env:LOCK_OWNER) 'Run through scripts/with-game-lock.sh.'
@@ -149,7 +167,7 @@ function Manual-Walk([string]$stage,[double]$minimum,[double]$acc=1,[double]$max
         inputContext=(Eval 'triGetInputContext');cameraEffect=(Eval 'triGetCameraEffectActive');status='started'}
     $result.stages[$stage]=$proof # retain evidence even when the walk fails
     Require ($proof.inputContext -ceq 'Infantry' -and $proof.cameraEffect -eq 0) 'Player input lacks unsuspended infantry context.'
-    Require (Body-InWindow $start $window) 'Covered body starts outside audited central roof window.'
+    Require (Body-InWindow $start $window) 'Actor starts outside audited contact window.'
     Exec ('setAccTime '+(Number $acc));$null=Send @{cmd='key';sc=26;hold=$true};$script:held=$true
     $until=[DateTime]::UtcNow.AddSeconds($maximum)
     do {
@@ -158,13 +176,13 @@ function Manual-Walk([string]$stage,[double]$minimum,[double]$acc=1,[double]$max
         $proof.events=@(New-Steps $cursor);$boots=@(Boot-Lines)
         $proof.groundBootRows=@($boots|Select-Object -Skip $bootCursor|ForEach-Object {$_.Line})
         $proof.polls+=@{position=$position;distance=$distance;audioRows=$proof.events.Count;groundBootRows=$proof.groundBootRows.Count;heading=(Eval 'getDir player')}
-        Require (Body-InWindow $position $window) 'Covered body left audited roof window before a real sound edge; retain fixture-unavailable evidence.'
+        Require (Body-InWindow $position $window) 'Actor left audited contact window before a real sound edge; retain fixture-unavailable evidence.'
         Require ([DateTime]::UtcNow -lt $until) ('Ordinary SDL '+$stage+' walk blocked or produced no audio edge before timeout; no forced contacts.')
     } while(!(Walk-Complete $distance $minimum $proof.events.Count))
     $null=Send @{cmd='key_up';sc=26};$script:held=$false;Start-Sleep -Milliseconds ([int](1000*$releaseSeconds/$acc));Exec 'setAccTime 0'
     $end=Eval 'getPosASL player';$endTime=Clock;$rows=@(New-Steps $cursor)
     $proof.end=$end;$proof.endTimeMs=$endTime;$proof.distance=$distance;$proof.events=$rows;$proof.pose=Eval 'getMove player';$proof.status='observed'
-    Require (Body-InWindow $end $window) 'Covered release/deceleration escaped audited roof window.'
+    Require (Body-InWindow $end $window) 'Release/deceleration escaped audited contact window.'
     Require ((Eval 'alive player') -eq $true -and $endTime -gt $startTime -and $rows.Count -gt 0) ('Actual '+$stage+' movement produced no living real animation sound contacts.')
     foreach($row in $rows) {
         Require ($row.eventMs -ge $startTime -and $row.timeMs -le $endTime -and [Math]::Abs($row.x-$start[0]) -le $minimum+2 -and [Math]::Abs($row.z-$start[1]) -le $minimum+2) 'Audio row does not belong to the controlled local walk.'
@@ -234,7 +252,9 @@ try {
     if (@($open|ForEach-Object {Variant $_}|Select-Object -Unique).Count -lt 2 -or $open.Count -lt 4) {
         Exec 'player setDir 180';$open+=@(Manual-Walk 'exposed-return-walk' 6)
     }
-    $result.stages.exposedSelection=Assert-Positive $open;Capture 'standing-water-real-player'
+    # Valid real standing-water dispatch is sufficient to reach shelter controls;
+    # independent authored random alternatives remain a strict final gate.
+    $result.stages.exposedSelection=Assert-Positive $open $false;Capture 'standing-water-real-player'
     $result.stages.roof=New-TerrainPuddleStockRoof -SendCommand {param($request) Send $request} -X $x -Z $z -RoofLift 3
     $result.stages.coveredPlacement=Set-Player $x ($z-.75) 0
     Require (Pool-Supported (Sample $x ($z-.75))) 'Covered control lost actual water before contact.'
@@ -248,6 +268,29 @@ try {
     Capture 'covered-water-real-player';Remove-TerrainPuddleStockRoof {param($request) Send $request}
     $result.stages.removedPlacement=Set-Player $x ($z-3) 0
     $removed=@(Manual-Walk 'roof-removed-walk' 6);$result.stages.removedSelection=Assert-Positive $removed $false;Capture 'roof-removed-real-player'
+    $combined=@($open)+@($removed);$samplingStart=[DateTime]::UtcNow;$samplingUntil=$samplingStart.AddSeconds(45);$attempt=0
+    $sampling=@{maxTraversals=6;maxWallSeconds=45;attempts=@();sourceCounts=(Variant-Counts $combined);status='checking-natural-alternatives';
+                policy='Only actual fresh real walking events; no source, RNG, animation or playback setters.'}
+    $result.stages.variantSampling=$sampling
+    while(Collect-Variants $combined $attempt ([DateTime]::UtcNow-$samplingStart).TotalSeconds) {
+        # Keep enough wall time for placement, a real walk and release. Every
+        # pass rechecks the previously audited physical lane at current rain state.
+        if(($samplingUntil-[DateTime]::UtcNow).TotalSeconds -lt 5) {break}
+        $attempt++;$phase=@{attempt=$attempt;sourceCountsBefore=(Variant-Counts $combined);status='validating-real-lane'};$sampling.attempts+=$phase
+        $phase.lane=Pool-Lane $x $z;Require $phase.lane.valid 'Actual standing-water lane changed before natural variant sampling.'
+        $phase.placement=Set-Player $x ($z-2) 0
+        $remaining=($samplingUntil-[DateTime]::UtcNow).TotalSeconds;Require ($remaining -gt 1) 'Natural variant wall-time budget exhausted before real movement.'
+        $extra=@(Manual-Walk ('variant-walk-'+$attempt) 4 1 ([Math]::Min(10,$remaining-.5)) @{x=$x;z=$z;radiusX=.35;radiusZ=3.3} .3)
+        foreach($row in $extra) {
+            Require ([Math]::Abs($row.x-$x) -le .6 -and [Math]::Abs($row.z-$z) -le 3.5) 'Natural extra sole event left the actually sampled wet lane.'
+        }
+        $combined+=@($extra);$phase.selection=Assert-Positive $combined $false;$phase.sourceCountsAfter=Variant-Counts $combined;$phase.status='actual-fresh-water-contacts'
+        $sampling.sourceCounts=Variant-Counts $combined;$sampling.elapsedWallSeconds=([DateTime]::UtcNow-$samplingStart).TotalSeconds
+        Require ($sampling.elapsedWallSeconds -le 45) 'Natural variant collection exceeded its wall-time cap.'
+    }
+    $sampling.elapsedWallSeconds=([DateTime]::UtcNow-$samplingStart).TotalSeconds;$sampling.sourceCounts=Variant-Counts $combined
+    $sampling.status=if((Collect-Variants $combined 0 0)) {'bounded-sampling-exhausted'} else {'actual-both-alternatives-observed'}
+    $result.stages.combinedWaterSelection=Assert-Positive $combined
     # Allow release/deceleration to settle before the stationary/pause cursor.
     Exec 'setAccTime 1';Start-Sleep -Seconds 2;Exec 'setAccTime 0';Start-Sleep -Milliseconds 300
     $cursor=@(Step-Lines).Count;$clock=Clock;$paused=Send @{cmd='dev_rain_water';action='state'}
@@ -257,6 +300,7 @@ try {
     Close-Owned;$result.status='actual-water-audio-selection-passed-listening-required'
 } catch {
     $result.status='failed';$result.error=$_.Exception.Message
+    $result.errorSource=@{line=$_.InvocationInfo.ScriptLineNumber;position=$_.InvocationInfo.PositionMessage;stack=$_.ScriptStackTrace}
     if ($p -and !$p.HasExited -and $client) {
         try {
             if ($held) {$null=Send @{cmd='key_up';sc=26};$script:held=$false}
