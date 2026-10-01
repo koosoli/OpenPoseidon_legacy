@@ -76,9 +76,11 @@ function Aim-Error($state,$point) {
         angle=[Math]::Acos((Clamp-Number $dot -1 1));targeted=($null -ne $point);
         groundErrorMetres=$groundError;groundRayDistance=$groundDistance}
 }
-function Aim-InBound($error,[bool]$afterCapture=$false) {
+function Aim-InBound($error) {
     if($error.actual[1] -ge -.04) {return $false}
-    if(!$error.targeted) {return $error.angle -le $(if($afterCapture) {.0035} else {.0025})}
+    # The first real dry hit establishes the target; no point precision can
+    # precede that actual hit. Use the same finite downward cone before/after UI.
+    if(!$error.targeted) {return $error.angle -le .01}
     return $null -ne $error.groundErrorMetres -and $error.groundRayDistance -gt 0 -and
         $error.groundErrorMetres -le .05 -and $error.angle -le .01
 }
@@ -140,6 +142,17 @@ if ($SelfTest) {
     Require ($up.actual[1] -gt 0 -and $up.desired[1] -lt 0 -and $step.dy -gt 0 -and $step.dx -eq 0) 'Upward actual gun did not require ordinary downward mouse correction.'
     $weapon.directionY=-.274;$weapon.directionZ=[Math]::Sqrt(1-.274*.274)
     $exact=Aim-Error $weapon $null;Require ($exact.angle -lt .000001 -and (Aim-Step $exact .001 .001).dy -eq 0) 'Correct actual downward gun was moved unnecessarily.'
+    foreach($jitter in @(-.0041,.0026,.0041)) {
+        $near=$weapon.Clone();$pitch=[Math]::Asin(-.274)+$jitter
+        $near.directionY=[Math]::Sin($pitch);$near.directionZ=[Math]::Cos($pitch)
+        Require (Aim-InBound (Aim-Error $near $null)) 'Initial measured downward jitter rejected before a real calibration point exists.'
+    }
+    foreach($offset in @(-.011,.011)) {
+        $off=$weapon.Clone();$pitch=[Math]::Asin(-.274)+$offset
+        $off.directionY=[Math]::Sin($pitch);$off.directionZ=[Math]::Cos($pitch)
+        Require (!(Aim-InBound (Aim-Error $off $null))) 'Initial off-cone ray accepted.'
+    }
+    Require (!(Aim-InBound $up)) 'Initial upward ray accepted.'
     $target=@(10,20,24);$point=Aim-Error $weapon $target;Require ($point.desired.Count -eq 3 -and [Math]::Abs($point.desired[1]+2/[Math]::Sqrt(20)) -lt .000001) 'Actual muzzle/terrain point arithmetic changed raw XYZ order.'
     # Integer mouse steps can straddle the requested pitch. Both nearest rays
     # fit a five-centimetre physical target while failing false angular precision.
@@ -147,7 +160,7 @@ if ($SelfTest) {
         $quantized=$weapon.Clone();$pitch=[Math]::Atan2(-2,4)+$pixelPitch
         $quantized.directionY=[Math]::Sin($pitch);$quantized.directionZ=[Math]::Cos($pitch)
         $ray=Aim-Error $quantized $target
-        Require ($ray.angle -gt .0025 -and $ray.groundErrorMetres -lt .05 -and (Aim-InBound $ray) -and (Aim-InBound $ray $true)) 'Nearest +/-1px rays lost a physically bounded target.'
+        Require ($ray.angle -gt .0025 -and $ray.groundErrorMetres -lt .05 -and (Aim-InBound $ray)) 'Nearest +/-1px rays lost a physically bounded target.'
     }
     foreach($direction in @(@(0,.1,.99),@(0,-.00001,1),@(0,-.447,-.894),@(0,-.6,.8))) {
         $bad=$weapon.Clone();$bad.directionX=$direction[0];$bad.directionY=$direction[1];$bad.directionZ=$direction[2]
@@ -204,7 +217,7 @@ $result=[ordered]@{status='running';before=$before;stages=@{};captures=@{};
     limitations=@('Source collision remains bare terrain.','Rim is uncut surrounding powder, not newly heaped mass.','Hard-object/wall/sea/expired terminal branches are diagnostic only; absence of a terrain event never accepts the covered control.','Pictures require visual review; source/cell counters do not accept hole appearance.','Two seconds of real simulation reduce transient impact FX; authored persistent decals remain. No effects are deleted.','AutoExposure restores normal time-of-day grading and default adaptive policy, not a forced adaptive exposure enable. Fixed exposure1 controls can still clip snow.')}
 @{sourceHead=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;
   installed=$before;lockOwner=$env:LOCK_OWNER;mission=$mission;player='SoldierWB';weapon='M16';requestedPlayer=@($PlayerX,$PlayerZ);
-  aim='Closed-loop actual read-only player_weapon_state; ordinary relative SDL mouse motion before every shot';aimDyInitialGainSeed=$AimDy;aimToleranceRadians=.0025;depth=$Depth;refill=[bool]$Refill;autoExposure=[bool]$AutoExposure;brightness=1;
+  aim='Closed-loop actual read-only player_weapon_state; ordinary relative SDL mouse motion before every shot';aimDyInitialGainSeed=$AimDy;initialAimConeRadians=.01;targetGroundToleranceMetres=.05;targetAngularGuardRadians=.01;depth=$Depth;refill=[bool]$Refill;autoExposure=[bool]$AutoExposure;brightness=1;
   firing='SDL mouse button1; Fired event records only; terminal impact + at least2000sim ms after mouse-up before pause';gridSpacing=.125;captureVectors='raw engine XYZ'} |
     ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'provenance.json')
 $keys=@('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN',
@@ -280,13 +293,13 @@ function Prepare-Aim([string]$stage) {
         $step=Aim-Step $error $gainX $gainY
         $sample=@{iteration=$iteration;actualState=$state;target=$script:aimTarget;error=$error;step=$step;inputSent=$false;gainX=$gainX;gainY=$gainY}
         $history+=$sample
-        $result.stages[$stage+'-aim']=@{samples=$history;status='calibrating';initialToleranceRadians=.0025;targetGroundToleranceMetres=.05;targetAngularGuardRadians=.01;input='ordinary SDL relative mouse; no aim/shot/physics setter'}
+        $result.stages[$stage+'-aim']=@{samples=$history;status='calibrating';initialToleranceRadians=.01;targetGroundToleranceMetres=.05;targetAngularGuardRadians=.01;input='ordinary SDL relative mouse; no aim/shot/physics setter'}
         if(Aim-InBound $error) {++$stable} else {$stable=0}
         $sample.stableSamples=$stable
         if($stable -ge 3) {
             Exec 'setAccTime 0';Capture ($stage+'-ordinary-ui-before-fire')
             $ready=Send @{cmd='player_weapon_state'};$check=Aim-Error $ready $script:aimTarget
-            Require (Aim-InBound $check $true) 'Actual gun no longer matches the bounded downward target after UI capture.'
+            Require (Aim-InBound $check) 'Actual gun no longer matches the bounded downward target after UI capture.'
             $result.stages[$stage+'-aim'].status='actual-downward-ui-captured';$result.stages[$stage+'-aim'].ready=$ready
             $result.stages[$stage+'-aim'].readyError=$check
             return

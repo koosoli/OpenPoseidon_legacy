@@ -44,7 +44,7 @@ adapt the next relative input. `AimDy` now seeds the initial gain (the existing
 default250 is preserved); it is no longer an assumed absolute calibration.
 Motion is capped at180 pixels per axis,24 iterations and25 wall seconds. Three
 samples separated by actual advancing simulation must be downward without new
-input. Initial untargeted dry calibration retains its .0025-radian bound;
+input. Initial untargeted dry calibration uses the .01-radian downward cone;
 later targeted shots use the spatial criterion below. No call sets gun/weapon state, cursor direction, bullet
 velocity, physics or a snow deficit, and no extra calibration bullets fire.
 
@@ -104,3 +104,22 @@ angular bound but satisfy the tighter physical target footprint. Upward,
 near-parallel, behind-target, off-target and above-muzzle target cases fail.
 Installed convergence, actual covered terrain hits and snowfall refill remain
 pending root's real campaign; this source follow-up makes no new runtime claim.
+
+The subsequent installed 6cf9973e campaign
+`build/snow-bullet/bounded-ground-ray-20261001-040856-7031d6` stopped in
+`no-snow-calibration-aim` before any round fired. Its initial downward gun
+jittered around .00257..00407 radians while the proposed integer pixel step
+was frequently zero; 24 iterations did not produce three samples under the
+old .0025-radian threshold. There was no known terrain target yet, so the
+targeted five-centimetre criterion cannot legitimately be applied there.
+
+Initial dry calibration now uses the same .01-radian finite downward cone
+before and after UI capture, with three advancing no-input samples and
+direction Y<-.04. Only the subsequent actual terrain hit (still required at
+1.4..8 m with the existing support/source bounds) establishes the baseline
+point. No extra calibration round fires. Repeated positive/covered shots still
+use the stricter actual ray-ground-plane error <=5 cm plus .01-radian guard,
+and their real impact must remain within 25 cm. Self-test accepts the observed
+initial downward jitter and rejects upward/off-cone rays. This correction
+changes fixture precision, not the terminal physics/source/roof tests; new
+installed acceptance remains pending.
