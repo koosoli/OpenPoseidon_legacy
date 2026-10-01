@@ -966,3 +966,573 @@ fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {{
         staging.unmap();
     }
 }
+
+#[cfg(test)]
+mod full_draw_tests {
+    use super::*;
+
+    // This fixture uses the actual composed Frame/Conform and BOTH production
+    // entry points. It deliberately does not replace fs_main with a debug colour
+    // or bypass the front-facing, native-bed or physical-cover discards.
+    #[test]
+    fn actual_gpu_complete_pool_draw_visibility_and_admission() {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            force_fallback_adapter: false,
+            ..Default::default()
+        }))
+        .expect("Complete rainwater draw falsifier requires an actual GPU adapter");
+        let limits = wgpu::Limits {
+            max_bind_groups: 5,
+            ..Default::default()
+        };
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: limits,
+            ..Default::default()
+        }))
+        .expect("Complete rainwater draw requires the production five bind groups");
+        let mut composer = crate::shaders::build_composer();
+        let module = composer
+            .make_naga_module(naga_oil::compose::NagaModuleDescriptor {
+                source: include_str!("rain_water.wgsl"),
+                file_path: "rain_water.wgsl",
+                ..Default::default()
+            })
+            .unwrap_or_else(|error| panic!("{}", error.emit_to_string(&composer)));
+        let (members, span) = module
+            .types
+            .iter()
+            .find_map(|(_, ty)| {
+                if let naga::TypeInner::Struct { members, span } = &ty.inner {
+                    if members
+                        .iter()
+                        .any(|m| m.name.as_deref() == Some("weather_vp"))
+                        && members.iter().any(|m| m.name.as_deref() == Some("proj"))
+                    {
+                        return Some((members.clone(), *span));
+                    }
+                }
+                None
+            })
+            .expect("Actual Frame layout missing");
+        let offset = |name: &str| -> usize {
+            members
+                .iter()
+                .find(|m| m.name.as_deref() == Some(name))
+                .unwrap_or_else(|| panic!("Actual Frame has no {name}"))
+                .offset as usize
+        };
+        let mut frame = vec![0u8; span as usize];
+        let put = |bytes: &mut [u8], at: usize, value: &[f32]| {
+            bytes[at..at + value.len() * 4].copy_from_slice(bytemuck::cast_slice(value));
+        };
+        let camera_pos = glam::Vec3::new(5., 15., -15.);
+        let direction = (glam::Vec3::new(5., 2.3, 5.) - camera_pos).normalize();
+        // Engine convention: camera-relative left-handed forward projection.
+        // Existing mesh front faces are Cw; default Ccw plus fragment !front
+        // must not silently erase this genuinely upward world-space surface.
+        let projection = glam::Mat4::perspective_lh(60_f32.to_radians(), 1., 0.1, 100.);
+        let view = glam::Mat4::look_to_lh(glam::Vec3::ZERO, direction, glam::Vec3::Y);
+        put(&mut frame, offset("proj"), &projection.to_cols_array());
+        put(&mut frame, offset("view"), &view.to_cols_array());
+        put(
+            &mut frame,
+            offset("cam_pos"),
+            &[camera_pos.x, camera_pos.y, camera_pos.z, 1.],
+        );
+        put(&mut frame, offset("sun_ambient"), &[1., 1., 1., 0.]);
+        put(&mut frame, offset("sun_diffuse"), &[1., 1., 1., 0.]);
+        put(&mut frame, offset("ground_weather"), &[0.8, 0., 0., 10.]);
+        // Artistic AO disabled. Independent physical map must still certify
+        // the entire bounded native cell, then reject it under actual cover.
+        let weather_vp = glam::Mat4::from_cols_array(&[
+            0.1, 0., 0., 0., 0., 0., 0., 0., 0., 0.1, 0., 0., -0.5, -0.5, 0.5, 1.,
+        ]);
+        put(
+            &mut frame,
+            offset("weather_vp"),
+            &weather_vp.to_cols_array(),
+        );
+        put(&mut frame, offset("weather_cover"), &[1., 0.001, 0.05, 1.]);
+        let frame_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("actual_pool_frame"),
+            contents: &frame,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let stages = wgpu::ShaderStages::VERTEX_FRAGMENT;
+        let tex_entry = |binding, dimension, sample_type| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: stages,
+            ty: wgpu::BindingType::Texture {
+                sample_type,
+                view_dimension: dimension,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let samp_entry = |binding, kind| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: stages,
+            ty: wgpu::BindingType::Sampler(kind),
+            count: None,
+        };
+        let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("actual_pool_camera_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: stages,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(span as u64),
+                    },
+                    count: None,
+                },
+                samp_entry(2, wgpu::SamplerBindingType::Comparison),
+                samp_entry(5, wgpu::SamplerBindingType::Filtering),
+                tex_entry(
+                    7,
+                    wgpu::TextureViewDimension::D3,
+                    wgpu::TextureSampleType::Float { filterable: true },
+                ),
+                samp_entry(8, wgpu::SamplerBindingType::Filtering),
+                tex_entry(
+                    12,
+                    wgpu::TextureViewDimension::D2Array,
+                    wgpu::TextureSampleType::Depth,
+                ),
+                tex_entry(
+                    18,
+                    wgpu::TextureViewDimension::D2,
+                    wgpu::TextureSampleType::Depth,
+                ),
+                tex_entry(
+                    19,
+                    wgpu::TextureViewDimension::D2,
+                    wgpu::TextureSampleType::Float { filterable: true },
+                ),
+                tex_entry(
+                    20,
+                    wgpu::TextureViewDimension::D2,
+                    wgpu::TextureSampleType::Depth,
+                ),
+            ],
+        });
+        let texture = |label, format, width, height, layers, dimension, usage| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: layers,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension,
+                format,
+                usage,
+                view_formats: &[],
+            })
+        };
+        let weather = texture(
+            "actual_pool_weather",
+            wgpu::TextureFormat::Depth32Float,
+            4,
+            4,
+            1,
+            wgpu::TextureDimension::D2,
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+        );
+        let weather_view = weather.create_view(&Default::default());
+        let near = texture(
+            "actual_pool_near",
+            wgpu::TextureFormat::Depth32Float,
+            4,
+            4,
+            5,
+            wgpu::TextureDimension::D2,
+            wgpu::TextureUsages::TEXTURE_BINDING,
+        );
+        let near_view = near.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        let sky = texture(
+            "actual_pool_directional_sky",
+            wgpu::TextureFormat::Rgba8Unorm,
+            1,
+            1,
+            1,
+            wgpu::TextureDimension::D2,
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        );
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &sky,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[80, 140, 220, 255],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            sky.size(),
+        );
+        let sky_view = sky.create_view(&Default::default());
+        let froxel = texture(
+            "actual_pool_unused_fog",
+            wgpu::TextureFormat::Rgba8Unorm,
+            1,
+            1,
+            1,
+            wgpu::TextureDimension::D3,
+            wgpu::TextureUsages::TEXTURE_BINDING,
+        );
+        let froxel_view = froxel.create_view(&Default::default());
+        let linear = device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let comparison = device.create_sampler(&wgpu::SamplerDescriptor {
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
+        let camera_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("actual_pool_camera"),
+            layout: &camera_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: frame_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&comparison),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(&linear),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(&froxel_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::Sampler(&linear),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: wgpu::BindingResource::TextureView(&near_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 18,
+                    resource: wgpu::BindingResource::TextureView(&weather_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 19,
+                    resource: wgpu::BindingResource::TextureView(&sky_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 20,
+                    resource: wgpu::BindingResource::TextureView(&weather_view),
+                },
+            ],
+        });
+        let mut rain = RainWater::new(
+            &device,
+            &camera_layout,
+            wgpu::TextureFormat::Rgba8Unorm,
+            1,
+            &mut composer,
+        );
+        rain.enabled = true; // independent of ambient process environment in this required-device test
+                             // Counterfactual raster-only control: same production shader, resources,
+                             // geometry, blend and depth policy, changing solely front-face convention.
+        let empty_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[],
+        });
+        let diagnostic_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pool_clockwise_falsifier"),
+            bind_group_layouts: &[
+                Some(&camera_layout),
+                Some(&rain.layout),
+                Some(&rain.reflections.layout),
+                Some(&empty_layout),
+                Some(&rain.terrain_layout),
+            ],
+            immediate_size: 0,
+        });
+        let shader = crate::shaders::make_module(
+            &device,
+            &mut composer,
+            "rain_water_draw_control",
+            include_str!("rain_water.wgsl"),
+            "rain_water.wgsl",
+        );
+        let attributes = [wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Uint32,
+            offset: 0,
+            shader_location: 0,
+        }];
+        let clockwise = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("pool_clockwise_falsifier"),
+            layout: Some(&diagnostic_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: 4,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &attributes,
+                }],
+            },
+            primitive: wgpu::PrimitiveState {
+                front_face: wgpu::FrontFace::Cw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: crate::gfx3d::depth_format(&device),
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let mut clockwise = Some(clockwise);
+        let hm = texture(
+            "actual_pool_native_bed",
+            wgpu::TextureFormat::R32Float,
+            2,
+            2,
+            1,
+            wgpu::TextureDimension::D2,
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        );
+        let hm_view = hm.create_view(&Default::default());
+        let output = texture(
+            "actual_pool_pixels",
+            wgpu::TextureFormat::Rgba8Unorm,
+            64,
+            64,
+            1,
+            wgpu::TextureDimension::D2,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        );
+        let output_view = output.create_view(&Default::default());
+        let depth = texture(
+            "actual_pool_depth",
+            crate::gfx3d::depth_format(&device),
+            64,
+            64,
+            1,
+            wgpu::TextureDimension::D2,
+            wgpu::TextureUsages::RENDER_ATTACHMENT,
+        );
+        let depth_view = depth.create_view(&Default::default());
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("actual_pool_readback"),
+            size: 64 * 64 * 4,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut camera: WgrCamera = bytemuck::Zeroable::zeroed();
+        camera.cam_pos = [camera_pos.x, camera_pos.y, camera_pos.z, 1.];
+        camera.proj = projection.to_cols_array();
+        camera.view = view.to_cols_array();
+        let mut native: TerrainConformParams = bytemuck::Zeroable::zeroed();
+        native.enabled = 1.;
+        native.terrain_grid = 10.;
+        native.hm_width = 2;
+        native.hm_height = 2;
+        let cases = [
+            ("flat positive", [2., 2., 2., 2.], 0., 1., 1., 0.),
+            (
+                "triangular sloped positive",
+                [2., 2.2, 2.4, 3.],
+                0.,
+                1.,
+                1.,
+                0.,
+            ),
+            ("physical roof negative", [2., 2., 2., 2.], 0., 0., 1., 0.),
+            (
+                "stale native support negative",
+                [2., 2., 2., 2.],
+                1.,
+                1.,
+                1.,
+                0.,
+            ),
+            ("explicit master off", [2., 2., 2., 2.], 0., 1., 0., 0.),
+            ("snow hides pool", [2., 2., 2., 2.], 0., 1., 1., 0.18),
+            (
+                "clockwise flat diagnostic",
+                [2., 2., 2., 2.],
+                0.,
+                1.,
+                1.,
+                0.,
+            ),
+        ];
+        let mut counts = Vec::new();
+        for (case_index, (name, bed, stale, cover, enabled, snow)) in cases.iter().enumerate() {
+            if case_index == 6 {
+                rain.pipeline = clockwise.take().unwrap();
+            }
+            put(&mut frame, offset("snow_surface"), &[*snow, 10000., 1., 0.]);
+            queue.write_buffer(&frame_buffer, 0, &frame);
+            let native_bed = bed.map(|b| b + stale);
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &hm,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                bytemuck::cast_slice(&native_bed),
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(8),
+                    rows_per_image: Some(2),
+                },
+                hm.size(),
+            );
+            let cells = bed.map(|b| [b + 0.3, 0.3, 0., 0.]);
+            let params = WgrRainWaterParams {
+                domain: [0., 0., 10., 10.],
+                control: [2., 2., 0., *enabled],
+                generation: 1,
+                reserved: 0,
+            };
+            assert!(rain.set_grid(&device, &queue, params, &cells, case_index as u64));
+            rain.prepare(&device, &queue, &camera, &hm_view, 1, native);
+            assert_eq!(
+                rain.drawable(),
+                *enabled > 0.5,
+                "actual instance selection: {name}"
+            );
+            let mut encoder = device.create_command_encoder(&Default::default());
+            {
+                let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("actual_pool_weather_depth"),
+                    color_attachments: &[],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &weather_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(*cover),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    ..Default::default()
+                });
+            }
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(name),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &output_view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.,
+                                g: 0.,
+                                b: 0.,
+                                a: 0.,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(0.),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    ..Default::default()
+                });
+                rain.draw(&mut pass, &camera_bind, 0);
+            }
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &output,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &readback,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(256),
+                        rows_per_image: Some(64),
+                    },
+                },
+                output.size(),
+            );
+            queue.submit(Some(encoder.finish()));
+            let slice = readback.slice(..);
+            let (tx, rx) = std::sync::mpsc::channel();
+            slice.map_async(wgpu::MapMode::Read, move |result| {
+                let _ = tx.send(result);
+            });
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            rx.recv().unwrap().unwrap();
+            let bytes = slice.get_mapped_range();
+            let count = bytes.chunks_exact(4).filter(|p| p[3] > 0).count();
+            let energy: usize = bytes
+                .chunks_exact(4)
+                .map(|p| p[0] as usize + p[1] as usize + p[2] as usize)
+                .sum();
+            eprintln!("actual rainwater vs_main/fs_main {name}: pixels={count}, RGB energy={energy}, drawable={}",rain.drawable());
+            counts.push((count, energy));
+            drop(bytes);
+            readback.unmap();
+        }
+        assert!(
+            counts[0].0 > 100 && counts[0].1 > 1000,
+            "Actual flat physical pool produced no visible pixels: {counts:?}"
+        );
+        assert!(
+            counts[1].0 > 100 && counts[1].1 > 1000,
+            "Actual triangular physical pool produced no visible pixels: {counts:?}"
+        );
+        assert!(
+            counts[6].0 > 100 && counts[6].1 > 1000,
+            "Clockwise control failed: resources/projection need investigation: {counts:?}"
+        );
+        for (index, (name, ..)) in cases.iter().enumerate().take(6).skip(2) {
+            assert_eq!(
+                counts[index],
+                (0, 0),
+                "Negative pool admission painted pixels: {name}"
+            );
+        }
+    }
+}
