@@ -1,6 +1,7 @@
 # Actual ordinary-player shots, not a synthetic Shot or direct deficit stamp.
 [CmdletBinding()]
 param([switch]$SelfTest,[switch]$Refill,[switch]$AutoExposure,
+      [ValidateRange(.02,1)][double]$MinExposure=.25,
       [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='stock-snow-shot',
       [double]$PlayerX=4975,[double]$PlayerZ=4672.5,
       [ValidateRange(1,1000)][int]$AimDy=250,
@@ -132,7 +133,7 @@ $output=Join-Path $root ('build/snow-bullet/'+$Label+'-'+(Get-Date -Format yyyyM
 $profile=Join-Path $output 'user';New-Item -ItemType Directory -Force $profile | Out-Null
 $log=Join-Path $output 'engine.log';$mission=Join-Path $root 'tests/perf/missions/perf_sand.noe'
 $result=[ordered]@{status='running';before=$before;stages=@{};captures=@{};
-    autoExposure=[bool]$AutoExposure;brightness=1;minimumSettleSimulationMs=2000;
+    autoExposure=[bool]$AutoExposure;minimumExposureScale=$MinExposure;brightness=1;minimumSettleSimulationMs=2000;
     limitations=@('Source collision remains bare terrain.','Rim is uncut surrounding powder, not newly heaped mass.','Hard-object/wall/sea branches omit SNOW_BULLET terminal logs; those require a future actual ballistic-terminal query and are not accepted by absence.','Pictures require visual review; source/cell counters do not accept hole appearance.','Two seconds of real simulation reduce transient impact FX; authored persistent decals remain. No effects are deleted.','AutoExposure restores normal time-of-day grading and default adaptive policy, not a forced adaptive exposure enable. Fixed exposure1 controls can still clip snow.')}
 @{sourceHead=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;
   installed=$before;lockOwner=$env:LOCK_OWNER;mission=$mission;player='SoldierWB';weapon='M16';requestedPlayer=@($PlayerX,$PlayerZ);
@@ -141,7 +142,7 @@ $result=[ordered]@{status='running';before=$before;stages=@{};captures=@{};
     ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'provenance.json')
 $keys=@('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN',
     'POSEIDON_SNOW_TEST_DEPTH','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','POSEIDON_SNOWLINE','POSEIDON_SNOW_BULLET_TRACE',
-    'WGR_TERRAIN_PUDDLE_WETNESS','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE','WGR_TONEMAP_WHITE','WGR_TONEMAP_DESAT','WGR_TEMPORAL','WGR_GRASS','POSEIDON_WIND_OVERRIDE')
+    'WGR_TERRAIN_PUDDLE_WETNESS','WGR_AUTO_EXPOSURE','WGR_AUTO_EXPOSURE_MIN','WGR_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE','WGR_TONEMAP_WHITE','WGR_TONEMAP_DESAT','WGR_TEMPORAL','WGR_GRASS','POSEIDON_WIND_OVERRIDE')
 $saved=@{};foreach($key in $keys) {$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $p=$null;$client=$null;$held=$false
 function Health {
@@ -177,7 +178,7 @@ function View($view) {
 }
 function Unview {Require ((Eval 'triClearView') -ceq 'OK') 'Render-only view did not release.'}
 function Capture([string]$name) {
-    Start-Sleep -Milliseconds 500;$time=Clock;$path=Join-Path $output ($name+'.png');$null=Send @{cmd='screenshot';path=$path}
+    Start-Sleep -Seconds 2;$time=Clock;$path=Join-Path $output ($name+'.png');$null=Send @{cmd='screenshot';path=$path}
     $until=[DateTime]::UtcNow.AddSeconds(10)
     while (!(Test-Path -LiteralPath $path)) {Health;Require ([DateTime]::UtcNow -lt $until) 'Screenshot missing.';Start-Sleep -Milliseconds 100}
     Require ((Clock) -eq $time) 'Paused simulation advanced during screenshot.'
@@ -216,7 +217,9 @@ function CloseOwned {
 try {
     foreach($key in $keys) {Remove-Item ('Env:'+$key) -ErrorAction SilentlyContinue}
     $env:POSEIDON_USER_DIR=$profile;$env:POSEIDON_SNOW_BULLET_TRACE='1';$env:POSEIDON_SNOWLINE='off';$env:POSEIDON_SNOW_TEST_DEPTH='0'
-    $result.exposureMode=Set-ExposurePolicy ([bool]$AutoExposure);$env:WGR_TEMPORAL='0';$env:WGR_GRASS='0';$env:POSEIDON_WIND_OVERRIDE='0 90 0'
+    $result.exposureMode=Set-ExposurePolicy ([bool]$AutoExposure)
+    if ($AutoExposure) {$env:WGR_AUTO_EXPOSURE_MIN=Number $MinExposure}
+    $env:WGR_TEMPORAL='0';$env:WGR_GRASS='0';$env:POSEIDON_WIND_OVERRIDE='0 90 0'
     $result.exposureEnvironment=@{};foreach($key in @('WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE','WGR_TONEMAP_WHITE','WGR_TONEMAP_DESAT')) {$result.exposureEnvironment[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
     [IO.File]::WriteAllText((Join-Path $profile 'graphics.cfg'),"version=3;`nqualityPreset=3;`nbrightness=1;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
     $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
