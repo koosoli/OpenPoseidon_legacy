@@ -2426,7 +2426,7 @@ class Engine : public IGraphicsEngine
         //   1. `rateTau` below makes adaptation framerate-INDEPENDENT, so it no longer runs
         //      twice as fast on a 45 fps world as on a 20 fps one. Tuning against one
         //      world's framerate was the deeper half of the original problem.
-        //   2. The range is still 0.25..4.0 (16:1). Narrowing it is the lever to reach for
+        //   2. Narrowing minScale/maxScale is the lever to reach for
         //      FIRST if pumping is reported — see the Tonemap tab.
         //   3. If it does pump in motion, turn it off here, or narrow minScale/maxScale
         //      toward 0.55..1.10, which measured within 0.2% of the full range on the test
@@ -2434,8 +2434,9 @@ class Engine : public IGraphicsEngine
         bool enabled = true;
         float key = 0.18f;      // target middle-grey luminance (higher = brighter)
         // ASYMMETRIC ON PURPOSE. Darkening is the feature the owner asked for ("looks into the
-        // sun, the iris adjusts and it gets a bit darker"), so minScale keeps its full 4x of
-        // headroom. BRIGHTENING is what caused a regression the moment this went default-on:
+        // sun, the iris adjusts and it gets a bit darker"). Bright snow also needs enough
+        // darkening headroom to retain grain and depression shading. BRIGHTENING is what
+        // caused a regression the moment this went default-on:
         // at night the scene is dark, the iris opened toward the old 4.0 ceiling, and that
         // amplified Arma 2 vegetation's AUTHORED emissive (41 OA rvmats literally contain
         // `emmisive[]={2.6,2.3,2.0}`) until trees self-illuminated and trunks went white.
@@ -2450,7 +2451,10 @@ class Engine : public IGraphicsEngine
         // all of the benefit is in the darkening half, which is exactly the half being kept.
         //
         // Raise this only with a NIGHT capture in hand. A bright-sky pose cannot show what it breaks.
-        float minScale = 0.25f;
+        // Actual settled original Noe snow at hour16: the previous0.25 floor
+        // clipped56..75% of the sampled snow's red channel;0.10 clips none.
+        // Key, adaptation speed and the night-safe brightening ceiling stay fixed.
+        float minScale = 0.10f;
         float maxScale = 1.10f;
         // Per-frame ease, kept for the legacy path and for `rateTau <= 0`. Framerate
         // DEPENDENT, which is why it is no longer the default mechanism.
