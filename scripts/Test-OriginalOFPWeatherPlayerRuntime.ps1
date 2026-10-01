@@ -7,6 +7,7 @@ param(
  [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='original-player',
  [ValidateRange(30,120)][int]$WetDeadlineSeconds=75,
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
+ [switch]$NativeHeightFixture,
  [switch]$SelfTest
 )
 $ErrorActionPreference='Stop';$root=Split-Path -Parent $PSScriptRoot
@@ -98,6 +99,24 @@ function Eval([string]$code){return Decode ([string](Send @{cmd='eval';code=$cod
 function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
 function Field([string]$kind,$site){return Send @{cmd=('dev_'+$kind);action='sample';x=$site.x;z=$site.z}}
 function State{$wet=Number (Eval 'triUniformWetness player');Require ($wet-ge 0 -and $wet-le 1) 'Actual Person wetness is unavailable/outside[0,1].';return @{time=(Number (Eval 'time'));position=(Eval 'getPosASL player');uniform=$wet;sand=(Send @{cmd='dev_sand';action='state'});mud=(Send @{cmd='dev_mud';action='state'});weather=(Send @{cmd='weather_visibility'})}}
+function Native-Heights($site){
+ $initial=State;$originX=[Math]::Floor($site.x/200)*200;$originZ=[Math]::Floor($site.z/200)*200
+ $header=Send @{cmd='dev_terrain_brush';action='state';x=$originX;z=$originZ}
+ Require ($header.readonly -eq $true -and $header.baseline -eq $false -and $header.spacing -eq 6.25 -and $header.range -eq 2048) 'Native fixture requires an unedited actual2048/6.25 source.'
+ Require ($originX -gt 0 -and $originZ -gt 0 -and $originX+200 -lt ($header.range-1)*6.25 -and $originZ+200 -lt ($header.range-1)*6.25) 'Native fixture tile is not complete interior source.'
+ $vertices=@();$until=[DateTime]::UtcNow.AddSeconds(180)
+ for($z=0;$z -le 32;++$z){for($x=0;$x -le 32;++$x){
+  Require ([DateTime]::UtcNow -lt $until) 'Read-only native fixture exceeded bounded180s.'
+  $px=$originX+$x*6.25;$pz=$originZ+$z*6.25;$v=Send @{cmd='dev_terrain_brush';action='state';x=$px;z=$pz}
+  Require ($v.readonly -eq $true -and $v.baseline -eq $false -and $v.range -eq $header.range -and $v.spacing -eq $header.spacing -and $v.heightRevision -eq $header.heightRevision -and $v.seaLevel -eq $header.seaLevel) 'Actual native source identity changed during paused reads.'
+  Require ($v.vertexWorldX -eq $px -and $v.vertexWorldZ -eq $pz -and $v.vertexX -eq $px/6.25 -and $v.vertexZ -eq $pz/6.25) 'Native nearest-vertex query differs from exact requested coordinate.'
+  $h=Number $v.vertexHeight;$vertices+=,@($px,$pz,$h)
+ }}
+ $final=State;Assert-Paused $initial $final
+ $fixture=@{scope='Actual unedited installed native vertices; no resampling, edit, water seed or offline detail reconstruction';map=$map;source=$source;installed=$before;header=$header;origin=@($originX,$originZ);side=33;order='z-major then x';vertices=$vertices;before=$initial;after=$final}
+ $path=Join-Path $armDir 'actual-native-height-tile.json';$fixture|ConvertTo-Json -Depth 15|Set-Content -LiteralPath $path
+ return @{path=$path;sha256=(Get-FileHash -LiteralPath $path).Hash;count=$vertices.Count;header=$header;origin=$fixture.origin}
+}
 function Assert-Paused($a,$b){Require ($a.time -eq $b.time -and $a.uniform -eq $b.uniform) 'Paused clock/Person wetness changed.'
  foreach($kind in @('sand','mud')){foreach($f in @('enabled','wetness','chunks','revision','rejected')){Require ($a.$kind.$f -eq $b.$kind.$f) 'Paused physical store changed.'}}
  for($i=0;$i -lt 3;++$i){Require ($a.position[$i] -eq $b.position[$i]) 'Paused actual player moved.'}
@@ -170,6 +189,7 @@ try{
   Start-Sleep -Seconds 12;Require ((Eval 'triSceneReady')-ceq 'OK') 'Original world mission not ready.'
   Exec 'player allowDamage false;0 setFog 0;0 setOvercast 0;0 setRain 0;setDate [1985,6,21,16,0];setAccTime 0'
   $null=Send @{cmd='dev_snow';action='disable'};$null=Send @{cmd='weather_particles';action='set';mode='off';density=0;snowflakes=$false}
+  if($NativeHeightFixture){$arm.gates.nativeHeightFixture=Native-Heights $uniform}
   if($sand){$null=Place $sand;$arm.gates.sandSource=Source-Lane $sand 'sand';$arm.gates.sandWalk=Walk 'sand-dry-third' $sand 'sand' $true}
   $null=Place $uniform;$arm.gates.uniformSource=Source-Lane $uniform 'uniform'
   # Uniform/body tests need real terrain support, not mud eligibility.
