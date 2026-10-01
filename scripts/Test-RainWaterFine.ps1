@@ -9,3 +9,8 @@ $exe=Join-Path $output 'rain_water_fine_test.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Fine water policy compilation failed.' }
 & $exe
 if ($LASTEXITCODE -ne 0) { throw 'Fine water policy assertions failed.' }
+$geometryExe=Join-Path $output 'rain_water_geometry_test.exe'
+& $Compiler '-std=c++20' '-Wall' '-Wextra' '-Werror' (Join-Path $repo 'tests/unit/engine/weather/test_rain_water_geometry.cpp') '-o' $geometryExe
+if ($LASTEXITCODE -ne 0) { throw 'Fine water geometry compilation failed.' }
+& $geometryExe
+if ($LASTEXITCODE -ne 0) { throw 'Fine water geometry assertions failed.' }

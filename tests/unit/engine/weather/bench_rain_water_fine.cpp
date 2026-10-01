@@ -26,30 +26,40 @@ template<class F> static void measure(F field,const char* scenario,const char* i
     digest=field.Volume();
     std::printf("%s,%s,%d,%.6f,%.6f,%zu,%.9f\n",scenario,implementation,run,stepMs,copyMs,bytes,field.Volume());
 }
-static std::vector<float> actualCraterTile() {
-    constexpr int n=33;std::vector<float> source(n*n,10),out(1024);
+static std::vector<Poseidon::RainWaterCellGeometry> actualCraterTile() {
+    constexpr int n=33;std::vector<float> source(n*n,10);
+    std::vector<Poseidon::RainWaterCellGeometry> out(1024);
     for(int z=0;z<n;++z)for(int x=0;x<n;++x)
         source[z*n+x]-=Poseidon::TerrainCraterDepth(x*6.25f-112.5f,z*6.25f-112.5f,8,1);
     for(int z=0;z<32;++z)for(int x=0;x<32;++x) {
-        const double gx=x+.5,gz=z+.5;const int ix=int(gx),iz=int(gz);
-        const double fx=gx-ix,fz=gz-iz;
-        const double a=source[iz*n+ix],b=source[iz*n+ix+1],c=source[(iz+1)*n+ix],d=source[(iz+1)*n+ix+1];
-        out[z*32+x]=float(fx+fz<=1?a+(b-a)*fx+(c-a)*fz:d+(c-d)*(1-fx)+(b-d)*(1-fz));
+        out[z*32+x]={source[z*n+x],source[z*n+x+1],source[(z+1)*n+x],source[(z+1)*n+x+1]};
     }
     return out;
 }
 int main() {
     std::puts("scenario,implementation,run,advance_ms_per_025simsec,snapshot_ms,snapshot_bytes,final_volume_m3");
-    for(const auto scenario:{"closed-shallow","closed-deep","actual-crater"}) {
+    for(const auto scenario:{"closed-shallow","closed-deep","actual-crater","terrain-slope"}) {
         RainWaterField legacy;RainWaterFine coarse,fine;
-        const std::vector<float> bed(side*side,10),tile(1024,10);
+        std::vector<float> bed(side*side,10);const std::vector<float> tile(1024,10);
+        const bool slope=std::string_view(scenario)=="terrain-slope";
+        if(slope)for(int z=0;z<side;++z)for(int x=0;x<side;++x)bed[z*side+x]=float(10+.01*x*25+.015*z*25);
         if(!legacy.Configure(side,side,25,bed)||!coarse.Configure(side,side,25,bed))return 1;
         if(std::string_view(scenario)=="closed-deep") {
             legacy.AddWater(4,4,2);coarse.AddWater(112.5,112.5,1250);
         }
         fine=coarse;
-        for(int z=0;z<8;++z)for(int x=0;x<8;++x)if(!fine.RefineTile(x,z,tile))return 2;
-        if(std::string_view(scenario)=="actual-crater"&&!fine.RefineTile(0,0,actualCraterTile()))return 3;
+        for(int z=0;z<8;++z)for(int x=0;x<8;++x) {
+            if(slope) {
+                std::vector<Poseidon::RainWaterCellGeometry> geometry(1024);
+                const auto height=[](double a,double b){return float(10+.01*a+.015*b);};
+                for(int cz=0;cz<32;++cz)for(int cx=0;cx<32;++cx) {
+                    const double a=x*200+cx*6.25,b=z*200+cz*6.25;
+                    geometry[cz*32+cx]={height(a,b),height(a+6.25,b),height(a,b+6.25),height(a+6.25,b+6.25)};
+                }
+                if(!fine.RefineTileGeometry(x,z,geometry))return 2;
+            } else if(!fine.RefineTile(x,z,tile))return 2;
+        }
+        if(std::string_view(scenario)=="actual-crater"&&!fine.RefineTileGeometry(0,0,actualCraterTile()))return 3;
         for(int run=1;run<=3;++run) {
             if(run%2) {measure(legacy,scenario,"legacy",run);measure(coarse,scenario,"fine-core-coarse",run);measure(fine,scenario,"fine-core-64tiles",run);}
             else {measure(fine,scenario,"fine-core-64tiles",run);measure(coarse,scenario,"fine-core-coarse",run);measure(legacy,scenario,"legacy",run);}
