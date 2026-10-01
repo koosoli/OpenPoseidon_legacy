@@ -16,6 +16,9 @@ $culture=[Globalization.CultureInfo]::InvariantCulture
 function Require([bool]$ok,[string]$message){if(!$ok){throw $message}}
 function Number($v){$n=[double]::Parse([string]$v,[Globalization.NumberStyles]::Float,$culture);Require (![double]::IsNaN($n)-and ![double]::IsInfinity($n)) 'Nonfinite fixture number.';return $n}
 function Key([string]$v){return $v.Replace('\','/').ToLowerInvariant()}
+function Contact-Poses([double]$x,[double]$z,[double]$height){
+ return @(@{name='low';pose=@(($x-2),$z,($height+.6),90,-16.699244)},@{name='top';pose=@(($x+.2),$z,($height+8),270,-88.567904)})
+}
 function Decode([string]$v){$v=$v.Trim();if($v.StartsWith('"')){Require $v.EndsWith('"') 'Bad SQF string.';return $v.Substring(1,$v.Length-2).Replace('""','"')};return ConvertFrom-Json $v -NoEnumerate}
 function Restore-Env([string]$key,$v){if($null-eq $v){Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue}else{[Environment]::SetEnvironmentVariable($key,$v,'Process')}}
 function Assert-Tuple($s,$expected,[string]$world,[string]$kind){
@@ -61,6 +64,10 @@ function Pair{
 }
 function Same-Pair($a,$b){Require (($a|ConvertTo-Json -Depth 8 -Compress)-ceq ($b|ConvertTo-Json -Depth 8 -Compress)) 'Installed source pair changed.'}
 function Test-Helpers{
+ $views=Contact-Poses 10 20 30
+ Require ($views.Count -eq 2 -and $views[0].pose.Count -eq 5 -and $views[1].pose.Count -eq 5) 'Contact camera tuple arity changed.'
+ Require ($views[0].pose[0] -eq 8 -and $views[0].pose[1] -eq 20 -and $views[0].pose[2] -eq 30.6 -and
+  $views[1].pose[0] -eq 10.2 -and $views[1].pose[1] -eq 20 -and $views[1].pose[2] -eq 38) 'Contact camera scalar offsets changed.'
  $e=@{texture='eden\ps.paa';quadrants=@(@{surfaceClass='Sand';files='ps??????';sound='sand';character=''})}
  $s=@{ok=$true;enabled=$true;world='eden.wrp';texture=$e.texture;surfaceClass='Sand';files='ps??????';sound='sand';character='';sourceEligible=$true;x=1;z=2;offset=0;surfaceY=10;surfaceDx=0;surfaceDz=0}
  Assert-Tuple $s $e 'eden' 'sand';$s.character='grass';$failed=$false;try{Assert-Tuple $s $e 'eden' 'sand'}catch{$failed=$true};Require $failed 'Conflicting clutter metadata admitted.'
@@ -179,7 +186,7 @@ function Contact-Views($record,[string]$kind){
  # paused inspection. Compare camera queries to the current actual baseline.
  $sample=Field $kind $walked;Require ($sample.offset -lt -.001) 'Walked cell no longer retains signed contact relief.'
  $initial=State;$x=[double]$sample.x;$z=[double]$sample.z;$height=[double]$sample.surfaceY
- foreach($view in @(@{name='low';pose=@($x-2,$z,$height+.6,90,-16.699244)},@{name='top';pose=@($x+.2,$z,$height+8,270,-88.567904)})){
+ foreach($view in (Contact-Poses $x $z $height)){
   $pose=($view.pose|ForEach-Object{([double]$_).ToString('R',$culture)}) -join ' '
   Require ((Eval ('triFreeFlyPose "'+$pose+'"')) -ceq 'OK') 'Contact inspection freefly refused.'
   Capture ($kind+'-actual-contact-'+$view.name)
