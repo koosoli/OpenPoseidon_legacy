@@ -2264,10 +2264,27 @@ void RegisterSnowProbe(HarnessServer& hs)
             const float moveUp = input.GetAction(InputContext::HeliPilot,UAMoveUp);
             const float moveDown = input.GetAction(InputContext::HeliPilot,UAMoveDown);
             const float rawMoveUp = input.GetAction(InputContext::HeliPilot,UAMoveUp,false);
+            const float forward = input.GetMoveForward(InputContext::HeliPilot);
+            const float fastForward = input.GetMoveFastForward(InputContext::HeliPilot);
+            const float back = input.GetAction(InputContext::HeliPilot,UAMoveBack);
+            const float turnLeft = input.GetAction(InputContext::HeliPilot,UATurnLeft);
+            const float turnRight = input.GetAction(InputContext::HeliPilot,UATurnRight);
+            const float moveLeft = input.GetAction(InputContext::HeliPilot,UAMoveLeft);
+            const float moveRight = input.GetAction(InputContext::HeliPilot,UAMoveRight);
+            const Vector3 wind = GLandscape->GetWind();
+            HelicopterHoverDiagnostics hover{};
+            const bool hoverAvailable = nearest->ReadHoverDiagnostics(hover);
             const float localScale = GAirflow.LocalScale();
             for (const float value : {p.X(),p.Y(),p.Z(),up.X(),up.Y(),up.Z(),speed.X(),speed.Y(),speed.Z(),
-                                      ground,clearance,rpm,fuel,damage,moveUp,moveDown,rawMoveUp,localScale})
+                                      ground,clearance,rpm,fuel,damage,moveUp,moveDown,rawMoveUp,localScale,
+                                      forward,fastForward,back,turnLeft,turnRight,moveLeft,moveRight,
+                                      wind.X(),wind.Y(),wind.Z()})
                 if (!std::isfinite(value)) return HarnessProtocol::ErrorResponse("nonfinite helicopter/input state");
+            if (hoverAvailable)
+                for (const float value : {hover.wantedSpeed.X(),hover.wantedSpeed.Y(),hover.wantedSpeed.Z(),
+                                          hover.mouseDirection.X(),hover.mouseDirection.Y(),hover.mouseDirection.Z(),
+                                          hover.wantedHeight,hover.wantedHeading,hover.wantedDive})
+                    if (!std::isfinite(value)) return HarnessProtocol::ErrorResponse("nonfinite helicopter hover state");
             Person* driver = nearest->Driver();
             AIUnit* driverBrain = driver ? driver->Brain() : nullptr;
             Person* player = GWorld->PlayerOn();
@@ -2309,6 +2326,34 @@ void RegisterSnowProbe(HarnessServer& hs)
             cJSON_AddNumberToObject(out,"unfocusedMoveUp",rawMoveUp);
             cJSON_AddNumberToObject(out,"focusLost",GInput.gameFocusLost);
             cJSON_AddNumberToObject(out,"qKey",GInput.keyboard.keys[SDL_SCANCODE_Q]);
+            cJSON_AddNumberToObject(out,"altKey",GInput.keyboard.keys[SDL_SCANCODE_LALT]);
+            cJSON_AddNumberToObject(out,"cameraType",int(GWorld->GetCameraType()));
+            cJSON_AddBoolToObject(out,"mouseTurnActive",input.IsMouseTurnActive());
+            cJSON_AddBoolToObject(out,"lookAroundEnabled",input.IsLookAroundEnabled());
+            cJSON_AddBoolToObject(out,"lookAroundToggled",input.IsLookAroundToggled());
+            cJSON_AddBoolToObject(out,"joystickActive",input.IsJoystickActive());
+            cJSON_AddBoolToObject(out,"joystickThrustActive",input.IsJoystickThrustActive());
+            cJSON_AddNumberToObject(out,"moveForward",forward); cJSON_AddNumberToObject(out,"fastForward",fastForward);
+            cJSON_AddNumberToObject(out,"moveBack",back);
+            cJSON_AddNumberToObject(out,"turnLeft",turnLeft); cJSON_AddNumberToObject(out,"turnRight",turnRight);
+            cJSON_AddNumberToObject(out,"moveLeft",moveLeft); cJSON_AddNumberToObject(out,"moveRight",moveRight);
+            cJSON_AddNumberToObject(out,"windX",wind.X()); cJSON_AddNumberToObject(out,"windY",wind.Y()); cJSON_AddNumberToObject(out,"windZ",wind.Z());
+            cJSON_AddBoolToObject(out,"hoverStateAvailable",hoverAvailable);
+            if (hoverAvailable) {
+                cJSON_AddBoolToObject(out,"hoveringAutopilot",hover.hovering);
+                cJSON_AddBoolToObject(out,"pilotSpeedHelper",hover.speedHelper);
+                cJSON_AddBoolToObject(out,"pilotHeightHelper",hover.heightHelper);
+                cJSON_AddBoolToObject(out,"pilotDirectionHelper",hover.directionHelper);
+                cJSON_AddNumberToObject(out,"pilotWantedX",hover.wantedSpeed.X());
+                cJSON_AddNumberToObject(out,"pilotWantedY",hover.wantedSpeed.Y());
+                cJSON_AddNumberToObject(out,"pilotWantedZ",hover.wantedSpeed.Z());
+                cJSON_AddNumberToObject(out,"mouseWantedX",hover.mouseDirection.X());
+                cJSON_AddNumberToObject(out,"mouseWantedY",hover.mouseDirection.Y());
+                cJSON_AddNumberToObject(out,"mouseWantedZ",hover.mouseDirection.Z());
+                cJSON_AddNumberToObject(out,"pilotWantedHeight",hover.wantedHeight);
+                cJSON_AddNumberToObject(out,"pilotWantedHeading",hover.wantedHeading);
+                cJSON_AddNumberToObject(out,"pilotWantedDive",hover.wantedDive);
+            }
             cJSON_AddBoolToObject(out,"airflowEnabled",GAirflow.LocalEnabled()); cJSON_AddNumberToObject(out,"airflowScale",localScale);
             const auto* camera = GScene ? GScene->GetCamera() : nullptr;
             const float distance = camera ? (camera->Position()-p).Size() : -1.0f;

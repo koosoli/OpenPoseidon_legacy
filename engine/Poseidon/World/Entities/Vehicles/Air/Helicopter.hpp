@@ -9,6 +9,15 @@
 
 namespace Poseidon
 {
+// Read-only developer evidence. No flight command or update is performed.
+struct HelicopterHoverDiagnostics
+{
+    Vector3 wantedSpeed;
+    Vector3 mouseDirection;
+    bool hovering, speedHelper, heightHelper, directionHelper;
+    float wantedHeight, wantedHeading, wantedDive;
+};
+
 class HelicopterType: public TransportType
 {
 	typedef TransportType base;
@@ -117,6 +126,8 @@ class Helicopter: public Transport
 	public:
 	Helicopter( VehicleType *name, Person *pilot );
 	~Helicopter() override;
+
+	virtual bool ReadHoverDiagnostics(HelicopterHoverDiagnostics& out) const { (void)out; return false; }
 	
 	const HelicopterType *Type() const
 	{
@@ -242,6 +253,13 @@ class HelicopterAuto: public Helicopter
 	
 	public:
 	HelicopterAuto( VehicleType *name, Person *pilot );
+
+	bool ReadHoverDiagnostics(HelicopterHoverDiagnostics& out) const override
+	{
+		out = {_pilotSpeed, _mouseDirWanted, _hoveringAutopilot, _pilotSpeedHelper,
+			_pilotHeightHelper, _pilotDirHelper, _pilotHeight, _pilotHeading, _pilotDive};
+		return true;
+	}
 
 	void Simulate( float deltaT, SimulationImportance prec ) override;
 	void AvoidGround( float minHeight );
