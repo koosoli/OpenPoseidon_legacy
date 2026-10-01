@@ -1,0 +1,440 @@
+{
+  "status": "source-inference-only-runtime-pending",
+  "provenance": {
+    "C:\\Users\\mail\\.codex\\worktrees\\original-weather-contact-20261001\\build\\map-source-audit-final\\noe.rvw4": "dbe1f29e300bb60c0b34c5f6467a842857147bed82495ef84f390a0871016a18",
+    "C:\\Users\\mail\\.codex\\worktrees\\original-weather-contact-20261001\\build\\map-source-audit-final\\noe.rvw4.meta": "ea2bc4b61764062a5779c994d6cca34a7cf9990e72366c3dce96bc17e717bafa",
+    "C:\\Users\\mail\\.codex\\worktrees\\original-weather-contact-20261001\\build\\map-source-audit-final\\noe\\noe.wrp": "9b27b11661d3cb30f9f0749a9a4616bfc58d723c4750666d1e674dd4213598d2",
+    "C:\\Users\\mail\\.codex\\worktrees\\original-weather-contact-20261001\\build\\map-source-audit-final\\installed-config.json": "4e74a08c76726e1f1c8b8881173e4e7ae17927b2bb04aa9e4b08839de394ffeb",
+    "C:\\Users\\mail\\.codex\\worktrees\\original-weather-contact-20261001\\build\\map-source-audit-final\\noe-config.json": "a7c6a6e8948bdb4ecea2edb4d4f026b4eab7d6861bde65959ba367f8df1836a5",
+    "C:\\Users\\mail\\.codex\\worktrees\\rotor-land-profile-audit-20261001\\engine\\Poseidon\\World\\Weather\\RotorGroundPolicy.hpp": "10e429454cf88c2842a5a28a2435ed47dcfa683f27031d4ca04db30658476d3e",
+    "C:\\Users\\mail\\.codex\\worktrees\\rotor-land-profile-audit-20261001\\engine\\Poseidon\\World\\Entities\\Vehicles\\Air\\Helicopter.cpp": "ad13c30cedec83116ef25f5e2b44153c2dbad9c628c958797623f3b764604276",
+    "C:\\Users\\mail\\.codex\\worktrees\\rotor-land-profile-audit-20261001\\scripts\\physics\\inspect_stock_corpse_rig.py": "d1c5ba4a50574e84992551a14bf9469e672d52b007b9d53d2d559d54c7e69e93",
+    "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\win-x64-clang-rwdi\\apps\\tools\\Tools\\PoseidonTools.exe": "ccdf564a56090e6076abbbec22311c716fdc53cb8156599f32b84171b46d9471",
+    "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Dta\\Data.pbo": "1587f9c052ff38967463d851ca85a03efd2db09d063da183046a9b16181d5e2f",
+    "D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Dta\\Data3D.pbo": "10528ef9b5112896898ad8667e83601ff47f95231652c73409d57b7227a8a00f"
+  },
+  "actualModels": {
+    "aircraftSha256": "a3abdcde4ece7b7260f9ac9dd2f0f0b87ef1545ce8f5196d55b879e3a86dbae7",
+    "cloudletSha256": "daf6924604ae03a1723e590f1d4a45ad8cdd864a95c9b3511c6d76b5f2dc6555",
+    "authoredAircraftSphere": 13.778955459594727,
+    "rotorDiscRadius": 11.023164367675783,
+    "maximumRingAndFootprint": 18.356069389291992
+  },
+  "textures": [
+    {
+      "name": "basic.06.paa",
+      "sha256": "58f10b1140586764c836561381c0ee7bd44375ab3cf0984e785a0d986a454531",
+      "width": 64,
+      "height": 64,
+      "meanAlpha": 0.32396503523284315,
+      "maxAlpha": 0.8666666666666667,
+      "p90Alpha": 0.7490196078431373,
+      "supportedFraction": 0.7197265625
+    },
+    {
+      "name": "basic.07.paa",
+      "sha256": "728176609d9b47212867072c27ea52453a611a6a4b2a6b3e77d49dc4a82f44e9",
+      "width": 64,
+      "height": 64,
+      "meanAlpha": 0.3224839154411765,
+      "maxAlpha": 0.8705882352941177,
+      "p90Alpha": 0.7490196078431373,
+      "supportedFraction": 0.717529296875
+    },
+    {
+      "name": "basic.08.paa",
+      "sha256": "4e17d47ae063235566e51dcaa90e897631c6551de352ad09455e70304c4f427c",
+      "width": 64,
+      "height": 64,
+      "meanAlpha": 0.3210018382352941,
+      "maxAlpha": 0.8745098039215686,
+      "p90Alpha": 0.7490196078431373,
+      "supportedFraction": 0.71826171875
+    },
+    {
+      "name": "basic.09.paa",
+      "sha256": "249b122b5afe77cf8d85422af477782916751bab5b5d55ba67857b2e3869c04f",
+      "width": 64,
+      "height": 64,
+      "meanAlpha": 0.3203125,
+      "maxAlpha": 0.8705882352941177,
+      "p90Alpha": 0.7490196078431373,
+      "supportedFraction": 0.716796875
+    },
+    {
+      "name": "basic.10.paa",
+      "sha256": "74f1441af048651b6f4a8a2f1b1c15b4275c5247f489378f728dd2e54454cf68",
+      "width": 64,
+      "height": 64,
+      "meanAlpha": 0.32112630208333337,
+      "maxAlpha": 0.8666666666666667,
+      "p90Alpha": 0.7490196078431373,
+      "supportedFraction": 0.71484375
+    },
+    {
+      "name": "basic.11.paa",
+      "sha256": "7fb829180fdbc2d4d06ed53633e6a61502622a434fab2d627c5cc8a7ed00a21c",
+      "width": 64,
+      "height": 64,
+      "meanAlpha": 0.3238491881127451,
+      "maxAlpha": 0.8549019607843137,
+      "p90Alpha": 0.7470588235294118,
+      "supportedFraction": 0.717529296875
+    },
+    {
+      "name": "basic.12.paa",
+      "sha256": "edb83a51f9474619e028da1f75d6f96e5bbe00013e3fab1e5339ec3ea2368806",
+      "width": 64,
+      "height": 64,
+      "meanAlpha": 0.3265845205269608,
+      "maxAlpha": 0.8588235294117647,
+      "p90Alpha": 0.7431372549019608,
+      "supportedFraction": 0.71826171875
+    },
+    {
+      "name": "basic.13.paa",
+      "sha256": "846ea47ffa895eef393babf8aeac1b3e1e2c30f7e1cb12dbb32c9d61c647f694",
+      "width": 64,
+      "height": 64,
+      "meanAlpha": 0.3281661688112745,
+      "maxAlpha": 0.8509803921568627,
+      "p90Alpha": 0.7411764705882353,
+      "supportedFraction": 0.7197265625
+    },
+    {
+      "name": "basic.14.paa",
+      "sha256": "715f22664a787e7de9aac99793af9964ced33b87f77ec34a08ddee849a0bb41b",
+      "width": 64,
+      "height": 64,
+      "meanAlpha": 0.32845052083333337,
+      "maxAlpha": 0.8509803921568627,
+      "p90Alpha": 0.7372549019607844,
+      "supportedFraction": 0.722900390625
+    },
+    {
+      "name": "basic.15.paa",
+      "sha256": "a0a73de8a2aeea2fd79b3e77d1c7d4f0914190c0ea992222bd8198ef52d3b8eb",
+      "width": 64,
+      "height": 64,
+      "meanAlpha": 0.32814127604166665,
+      "maxAlpha": 0.8588235294117647,
+      "p90Alpha": 0.7411764705882353,
+      "supportedFraction": 0.723388671875
+    },
+    {
+      "name": "basic.16.paa",
+      "sha256": "e9291e7f8b0a00f7addef9a9adf5c32275bdb19d47fec65203e8997f395cd0be",
+      "width": 64,
+      "height": 64,
+      "meanAlpha": 0.32743853400735295,
+      "maxAlpha": 0.8627450980392157,
+      "p90Alpha": 0.7450980392156863,
+      "supportedFraction": 0.724365234375
+    }
+  ],
+  "actualCpuProfiles": [
+    [
+      0,
+      1.79999995,
+      0,
+      1.60000002,
+      0
+    ],
+    [
+      0.100000001,
+      1.88284016,
+      0.185988113,
+      1.67009556,
+      0.194559842
+    ],
+    [
+      0.200000003,
+      2.09349108,
+      0.162477642,
+      1.84833872,
+      0.171552256
+    ],
+    [
+      0.300000012,
+      2.37514782,
+      0.126227647,
+      2.08666372,
+      0.134602964
+    ],
+    [
+      0.400000006,
+      2.67100596,
+      0.0998127609,
+      2.33700514,
+      0.107310005
+    ],
+    [
+      0.5,
+      2.92426014,
+      0.0832729191,
+      2.55129719,
+      0.0900404155
+    ],
+    [
+      0.600000024,
+      3.0781064,
+      0.0751568452,
+      2.68147469,
+      0.0815102383
+    ],
+    [
+      0.699999988,
+      3.0999999,
+      0.0740990117,
+      2.70000005,
+      0.0803955495
+    ],
+    [
+      0.800000012,
+      3.0999999,
+      0.0740990117,
+      2.70000005,
+      0.0803955495
+    ],
+    [
+      0.900000036,
+      3.0999999,
+      0.0740990117,
+      2.70000005,
+      0.0803955495
+    ],
+    [
+      1,
+      3.0999999,
+      0.0740990117,
+      2.70000005,
+      0.0803955495
+    ],
+    [
+      1.10000002,
+      3.0999999,
+      0.0740990117,
+      2.70000005,
+      0.0790416002
+    ],
+    [
+      1.20000005,
+      3.0999999,
+      0.0740990117,
+      2.70000005,
+      0.069527328
+    ],
+    [
+      1.30000007,
+      3.0999999,
+      0.0728510991,
+      2.70000005,
+      0.0538653806
+    ],
+    [
+      1.39999998,
+      3.0999999,
+      0.0640819818,
+      2.70000005,
+      0.0355687328
+    ],
+    [
+      1.5,
+      3.0999999,
+      0.0496466719,
+      2.70000005,
+      0.0181502998
+    ],
+    [
+      1.60000002,
+      3.0999999,
+      0.0327829905,
+      2.70000005,
+      0.00512306858
+    ],
+    [
+      1.70000005,
+      3.0999999,
+      0.0167287625,
+      0,
+      0
+    ],
+    [
+      1.80000007,
+      3.0999999,
+      0.00472182222,
+      0,
+      0
+    ]
+  ],
+  "sites": [
+    {
+      "x": 2699.62,
+      "z": 5149.56,
+      "source": {
+        "x": 2699.62,
+        "z": 5149.56,
+        "height": 14.984999656677246,
+        "texture": "o\\pt.paa",
+        "quadrant": {
+          "code": "pt",
+          "surfaceClass": "SandDark",
+          "files": "pt??????",
+          "sound": "sand",
+          "character": ""
+        },
+        "dust": 0.62
+      },
+      "passPerPulse": {
+        "2": 64,
+        "1": 64
+      },
+      "meanPass": 1.5,
+      "failures": {
+        "slope": 832
+      },
+      "maxPerimeterHeightDelta": 1.5752372741699219,
+      "dustValues": [
+        0.62
+      ],
+      "nearestOwnerCentres": [
+        {
+          "id": 13281,
+          "model": "o\\hous\\ruiny_3_dvere.p3d",
+          "position": [
+            2674.227783203125,
+            15.369241714477539,
+            5128.75927734375
+          ],
+          "distance": 32.82430101132001
+        },
+        {
+          "id": 13278,
+          "model": "o\\divk\\zed_hr.p3d",
+          "position": [
+            2682.1298828125,
+            15.544432640075684,
+            5118.904296875
+          ],
+          "distance": 35.29414021223124
+        },
+        {
+          "id": 13283,
+          "model": "o\\hous\\ruiny_3_roh.p3d",
+          "position": [
+            2665.637939453125,
+            15.282060623168945,
+            5136.9453125
+          ],
+          "distance": 36.24790724626923
+        }
+      ]
+    },
+    {
+      "x": 2475,
+      "z": 5075,
+      "source": {
+        "x": 2475,
+        "z": 5075,
+        "height": 23.98499870300293,
+        "texture": "o\\pt.paa",
+        "quadrant": {
+          "code": "pt",
+          "surfaceClass": "SandDark",
+          "files": "pt??????",
+          "sound": "sand",
+          "character": ""
+        },
+        "dust": 0.62
+      },
+      "passPerPulse": {
+        "6": 128
+      },
+      "meanPass": 6.0,
+      "failures": {
+        "budget": 128
+      },
+      "maxPerimeterHeightDelta": 0,
+      "dustValues": [
+        0.62
+      ],
+      "nearestOwnerCentres": [
+        {
+          "id": 12291,
+          "model": "o\\skal\\skala3_4.p3d",
+          "position": [
+            2555.7119140625,
+            15.035077095031738,
+            5130.14208984375
+          ],
+          "distance": 97.75000329395688
+        },
+        {
+          "id": 10935,
+          "model": "o\\skal\\skala3_1.p3d",
+          "position": [
+            2428.261474609375,
+            33.09401321411133,
+            4986.89453125
+          ],
+          "distance": 99.73496568078481
+        },
+        {
+          "id": 11517,
+          "model": "o\\skal\\skala3_5.p3d",
+          "position": [
+            2466.0,
+            24.59006690979004,
+            5181.0
+          ],
+          "distance": 106.38138934982942
+        }
+      ]
+    }
+  ],
+  "flatCandidate": {
+    "cell": [
+      49,
+      101
+    ],
+    "cornerHeights": [
+      23.98499870300293,
+      23.98499870300293,
+      23.98499870300293,
+      23.98499870300293
+    ],
+    "quadrants": [
+      {
+        "code": "pt",
+        "surfaceClass": "SandDark",
+        "files": "pt??????",
+        "sound": "sand",
+        "character": ""
+      },
+      {
+        "code": "pt",
+        "surfaceClass": "SandDark",
+        "files": "pt??????",
+        "sound": "sand",
+        "character": ""
+      },
+      {
+        "code": "pt",
+        "surfaceClass": "SandDark",
+        "files": "pt??????",
+        "sound": "sand",
+        "character": ""
+      },
+      {
+        "code": "pt",
+        "surfaceClass": "SandDark",
+        "files": "pt??????",
+        "sound": "sand",
+        "character": ""
+      }
+    ],
+    "cellEdgeMargin": 25,
+    "minimumFootprintToCellEdge": 6.643930610708008
+  },
+  "limitations": "Actual CPU ring/profile; original 50m float triangular bed and authored quadrant dust. Source gate reproduction is an upper bound: no live deformation, installed road/water/object bounds or ray tests, allocation pressure, GPU alpha/depth, flight or appearance acceptance. Owner centres are exporter ordinals, not live IDs; distance does not prove object sphere clearance."
+}
