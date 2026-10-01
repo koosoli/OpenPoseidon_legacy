@@ -2250,9 +2250,7 @@ void RegisterSnowProbe(HarnessServer& hs)
             cJSON_AddBoolToObject(out,"playerSuspended",GWorld->GetPlayerSuspended());
             cJSON_AddBoolToObject(out,"cameraEffect",GWorld->GetCameraEffect()!=nullptr);
             cJSON_AddNumberToObject(out,"cameraType",int(GWorld->GetCameraType()));
-            cJSON_AddBoolToObject(out,"ok",true);
-            char* raw = cJSON_PrintUnformatted(out); std::string result = raw ? raw : "{}";
-            cJSON_free(raw); cJSON_Delete(out); return result;
+            return HarnessProtocol::JsonResponse(out);
         });
     hs.RegisterCommand({"rotor_state", "Read-only nearest helicopter flight/input state; no flight setters",
                         {{"x","float",true},{"z","float",true},{"radius","float",false}}},
