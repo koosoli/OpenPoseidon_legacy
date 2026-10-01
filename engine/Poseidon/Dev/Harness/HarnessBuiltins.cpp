@@ -21,6 +21,9 @@ using namespace Poseidon;
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
+#include <Poseidon/Dev/Diag/TerrainBrush.hpp>
+#include <Poseidon/Foundation/Platform/AppConfig.hpp>
+#include <Poseidon/World/Terrain/TerrainCrater.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/Graphics/Textures/DeferredProceduralAdmission.hpp>
@@ -2428,8 +2431,58 @@ void RegisterSnowProbe(HarnessServer& hs)
                 cJSON_AddNumberToObject(out,"outletVolume",budget.outlet);
                 cJSON_AddNumberToObject(out,"pendingSeconds",field.PendingSeconds());
                 cJSON_AddNumberToObject(out,"generation",static_cast<double>(field.Generation()));
+                cJSON_AddBoolToObject(out,"fineActive",field.FineActive());
+                cJSON_AddBoolToObject(out,"sourceReady",field.SourceReady());
+                cJSON_AddNumberToObject(out,"fineTiles",double(field.FineTileCount()));
+            } else if (std::strcmp(action,"fine_state") == 0) {
+                if (!GLandscape) { cJSON_Delete(out); return HarnessProtocol::ErrorResponse("fine query requires landscape"); }
+                const auto* x=cJSON_GetObjectItemCaseSensitive(root,"x");
+                const auto* z=cJSON_GetObjectItemCaseSensitive(root,"z");
+                const bool selected=x||z;
+                if (selected && (!cJSON_IsNumber(x)||!cJSON_IsNumber(z)||
+                    !std::isfinite(x->valuedouble)||!std::isfinite(z->valuedouble))) {
+                    cJSON_Delete(out); return HarnessProtocol::ErrorResponse("fine selection needs finite world x/z");
+                }
+                // Bounded <=8*1024 cells; this copy/query never advances water.
+                const auto snapshot=field.FineSnapshot();
+                cJSON_AddBoolToObject(out,"readonly",true);
+                cJSON_AddBoolToObject(out,"fineActive",field.FineActive());
+                cJSON_AddBoolToObject(out,"sourceReady",field.SourceReady());
+                cJSON_AddBoolToObject(out,"valid",snapshot.valid);
+                cJSON_AddNumberToObject(out,"tiles",double(field.FineTileCount()));
+                cJSON_AddNumberToObject(out,"cells",double(snapshot.surfaces.size()));
+                cJSON_AddNumberToObject(out,"generation",double(snapshot.generation));
+                cJSON_AddNumberToObject(out,"sourceRevision",double(snapshot.sourceRevision));
+                cJSON_AddNumberToObject(out,"heightRevision",double(GLandscape->HeightRevision()));
+                cJSON_AddNumberToObject(out,"terrainRange",GLandscape->GetTerrainRange());
+                cJSON_AddNumberToObject(out,"terrainSpacing",GLandscape->GetTerrainGrid());
+                cJSON_AddNumberToObject(out,"seaLevel",GLandscape->GetSeaLevel());
+                // Decimal string preserves the opaque owner token beyond JSON's 53-bit integers.
+                cJSON_AddStringToObject(out,"worldToken",std::to_string(reinterpret_cast<uintptr_t>(GLandscape)).c_str());
+                double volume=0,integrated=0;
+                for (const auto& surface:snapshot.surfaces) {
+                    const auto& cell=surface.owner;
+                    volume+=cell.volume;
+                    integrated+=surface.geometry.Volume(cell.head,cell.size*cell.size);
+                    if (selected && x->valuedouble>=cell.x && x->valuedouble<cell.x+cell.size &&
+                        z->valuedouble>=cell.z && z->valuedouble<cell.z+cell.size) {
+                        auto* detail=cJSON_CreateObject();
+                        cJSON_AddNumberToObject(detail,"x",cell.x); cJSON_AddNumberToObject(detail,"z",cell.z);
+                        cJSON_AddNumberToObject(detail,"size",cell.size); cJSON_AddNumberToObject(detail,"head",cell.head);
+                        cJSON_AddNumberToObject(detail,"volume",cell.volume); cJSON_AddNumberToObject(detail,"parent",surface.parent);
+                        const double support=surface.geometry.Height((x->valuedouble-cell.x)/cell.size,(z->valuedouble-cell.z)/cell.size);
+                        cJSON_AddNumberToObject(detail,"supportY",support);
+                        cJSON_AddNumberToObject(detail,"localDepth",std::max(0.0,cell.head-support));
+                        auto* corners=cJSON_CreateArray();
+                        for (const auto h:{surface.geometry.Corner00(),surface.geometry.Corner10(),surface.geometry.Corner01(),surface.geometry.Corner11()})
+                            cJSON_AddItemToArray(corners,cJSON_CreateNumber(h));
+                        cJSON_AddItemToObject(detail,"corners",corners); cJSON_AddItemToObject(out,"selected",detail);
+                    }
+                }
+                cJSON_AddNumberToObject(out,"fineVolume",volume);
+                cJSON_AddNumberToObject(out,"integratedVolume",integrated);
             } else {
-                cJSON_Delete(out); return HarnessProtocol::ErrorResponse("read-only state or sample only");
+                cJSON_Delete(out); return HarnessProtocol::ErrorResponse("read-only state, fine_state or sample only");
             }
             cJSON_AddNumberToObject(out,"revision",double(field.Revision()));
             return HarnessProtocol::JsonResponse(out);
@@ -2624,6 +2677,56 @@ void RegisterSnowProbe(HarnessServer& hs)
 
 void RegisterPhysicsProbe(HarnessServer& hs)
 {
+    hs.RegisterCommand({"dev_terrain_brush", "Bounded real single-player terrain edit transaction", {}},
+        [](const std::string&,cJSON* root) -> std::string {
+            if (!AppConfig::Instance().DevMode() || !GWorld || !GLandscape || GWorld->GetMode()==GModeNetware)
+                return HarnessProtocol::ErrorResponse("terrain brush requires --dev and a single-player world");
+            const char* action=HarnessProtocol::GetString(root,"action");
+            if (!action) return HarnessProtocol::ErrorResponse("terrain brush needs action");
+            const int range=GLandscape->GetTerrainRange(); const float spacing=GLandscape->GetTerrainGrid();
+            if (range<2 || range>2049 || !std::isfinite(spacing) || spacing<=0)
+                return HarnessProtocol::ErrorResponse("unsupported actual terrain grid");
+            const auto* x=cJSON_GetObjectItemCaseSensitive(root,"x");
+            const auto* z=cJSON_GetObjectItemCaseSensitive(root,"z");
+            const bool selected=x||z; const double extent=double(range-1)*spacing;
+            if (selected && (!cJSON_IsNumber(x)||!cJSON_IsNumber(z)||!std::isfinite(x->valuedouble)||
+                !std::isfinite(z->valuedouble)||x->valuedouble<0||z->valuedouble<0||x->valuedouble>extent||z->valuedouble>extent))
+                return HarnessProtocol::ErrorResponse("terrain sample needs finite in-domain x/z");
+            if (std::strcmp(action,"paint")==0) {
+                const auto* radius=cJSON_GetObjectItemCaseSensitive(root,"radius");
+                const auto* delta=cJSON_GetObjectItemCaseSensitive(root,"delta");
+                if (!selected || !cJSON_IsNumber(radius)||!cJSON_IsNumber(delta)||
+                    !std::isfinite(radius->valuedouble)||!std::isfinite(delta->valuedouble)||
+                    radius->valuedouble<=0||radius->valuedouble>100||delta->valuedouble==0||std::abs(delta->valuedouble)>8||
+                    TerrainBrushRadius(float(radius->valuedouble),spacing)>100)
+                    return HarnessProtocol::ErrorResponse("paint needs radius (0,100], nonzero delta [-8,8], finite x/z");
+                if (!PaintTerrain(float(x->valuedouble),float(z->valuedouble),float(radius->valuedouble),float(delta->valuedouble)))
+                    return HarnessProtocol::ErrorResponse("actual terrain/collision edit transaction refused");
+            } else if (std::strcmp(action,"restore")==0) {
+                if (!RestoreEditedTerrain()) return HarnessProtocol::ErrorResponse("actual terrain restore transaction refused");
+            } else if (std::strcmp(action,"state")!=0) return HarnessProtocol::ErrorResponse("state, paint or restore only");
+            auto* out=cJSON_CreateObject();
+            cJSON_AddBoolToObject(out,"readonly",std::strcmp(action,"state")==0);
+            cJSON_AddBoolToObject(out,"baseline",HasTerrainEditBaseline());
+            cJSON_AddBoolToObject(out,"fineSourceReady",GRainWater().SourceReady());
+            cJSON_AddNumberToObject(out,"range",range); cJSON_AddNumberToObject(out,"spacing",spacing);
+            cJSON_AddNumberToObject(out,"heightRevision",double(GLandscape->HeightRevision()));
+            cJSON_AddNumberToObject(out,"seaLevel",GLandscape->GetSeaLevel());
+            if (selected) {
+                const int ix=std::clamp(int(std::round(x->valuedouble/spacing)),0,range-1);
+                const int iz=std::clamp(int(std::round(z->valuedouble/spacing)),0,range-1);
+                cJSON_AddNumberToObject(out,"vertexX",ix); cJSON_AddNumberToObject(out,"vertexZ",iz);
+                cJSON_AddNumberToObject(out,"vertexWorldX",ix*spacing); cJSON_AddNumberToObject(out,"vertexWorldZ",iz*spacing);
+                cJSON_AddNumberToObject(out,"vertexHeight",GLandscape->GetHeight(iz,ix));
+            }
+            if (const auto* world=Physics::GetPhysicsWorld()) {
+                const auto stats=world->GetStats();
+                cJSON_AddBoolToObject(out,"terrainRegistered",stats.terrainRegistered);
+                cJSON_AddNumberToObject(out,"physicsWidth",stats.terrainWidth); cJSON_AddNumberToObject(out,"physicsHeight",stats.terrainHeight);
+                cJSON_AddNumberToObject(out,"physicsSpacing",stats.terrainCellSize);
+            }
+            return HarnessProtocol::JsonResponse(out);
+        });
     hs.RegisterCommand({"dev_physics_probe", "Inspect or launch bounded collision probes (engine XYZ metres)",
                         {{"action", "string", true}}},
         [](const std::string&, cJSON* root) -> std::string {
