@@ -203,7 +203,9 @@ try {
     Require ((Clock) -eq $time) 'Paused snow-hole clock advanced.';Compare-Patches $afterPatch (Patch $dry.x $dry.z) 'Paused snow-hole cells changed.'
     $far=New-HoleViews ($dry.x+200) ($dry.z+200) $ground $Depth;View $far.top;Capture 'camera-away';Unview;Capture-Views 'camera-return' $views
     Compare-Patches $afterPatch (Patch $dry.x $dry.z) 'Camera return cleared or changed stored snow holes.'
-    $roof=New-TerrainPuddleStockRoof -SendCommand ${function:Send} -X $dry.x -Z $dry.z -RoofLift 3;$result.roof=$roof
+    # Keep the real tent's wall hull above the downward projectile path.
+    # At 3 m lift the covered control hit the tent instead of terrain.
+    $roof=New-TerrainPuddleStockRoof -SendCommand ${function:Send} -X $dry.x -Z $dry.z -RoofLift 6;$result.roof=$roof
     $coveredBefore=Patch $dry.x $dry.z;$negative=Shoot 'covered-ground'
     Require (!$negative.changed -and $negative.sheltered -and $negative.budget -and $negative.before -eq $negative.after) 'Real covered terrain shot did not prove actual roof exclusion.'
     Require ([Math]::Sqrt([Math]::Pow($negative.x-$dry.x,2)+[Math]::Pow($negative.z-$dry.z,2)) -le .25) 'Covered shot left the audited central roof patch.'

@@ -47,7 +47,7 @@ away/return. Clock and cell comparisons require persistence; identical image
 bytes are not required or treated as a visual snow mask.
 
 The covered-ground negative spawns the audited real `CampEastC` /
-`stan_eastc.p3d` centred on the measured hit, lifted 3 m to keep its Geometry hull
+`stan_eastc.p3d` centred on the measured hit, lifted 6 m to keep its Geometry hull
 away from the shooter. Another actual terrain event must report `sheltered=true`,
 an admitted query budget, `changed=false` and equal deficits. It must remain in
 the central roof patch and leave the entire sampled grid unchanged. The roof is
@@ -83,6 +83,18 @@ being reported as passed. A later source-bounded read-only terminal query can
 make them concrete without changing the firing controller.
 
 Pictures still require visual judgment of the hole and retained powder rim.
+
+The first installed attempt on `d99bf434`, retained at
+`build/snow-bullet/first-actual-20261001-020422-cac09d`, established a real dry
+terrain hit and then a real snowy hit with a 7.62 cm stored cut, radial edge,
+unchanged outside powder and persistence after pause and camera return. Low
+and top captures show a soft circular depression. The complete campaign failed:
+the third, covered shot produced no terminal terrain event with the tent lifted
+3 m. That absence is not a passing roof exclusion. The fixture now lifts the
+same real tent 6 m to keep its walls clear of the projectile and still requires
+an actual sheltered terrain event. Normal exit and pair hashes passed for the
+failed attempt; the corrected covered control and precipitation refill await
+another installed run.
 This runner does not claim raised displaced mass, projectile collision with
 the snow top, arbitrary-map coverage, multiplayer replication or visual quality
 from deficit counters.
