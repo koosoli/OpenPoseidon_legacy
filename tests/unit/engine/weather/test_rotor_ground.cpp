@@ -99,17 +99,29 @@ int main()
         const auto root=RotorLandProfile(.12f,.458f,isSnow);
         const auto grown=RotorLandProfile(.9f,.458f,isSnow);
         assert(root.opacity>.18f && root.radius>1.6f);
-        assert(grown.radius>root.radius && grown.opacity<root.opacity);
-        // Before the final fade, expansion conserves radius^2 * opacity.
-        const float a=root.radius*root.radius*root.opacity;
-        const float b=grown.radius*grown.radius*grown.opacity;
-        assert(std::abs(a-b)<1e-5f);
+        assert(grown.radius>root.radius && std::abs(grown.opacity-root.opacity)<1e-6f);
+        // The already-soft stock alpha sheet must not suffer another area
+        // attenuation. Before egress its actual density alone sets opacity.
+        const float cap=isSnow?.28f:.35f;
+        const float gain=isSnow?.60f:.70f;
+        assert(std::abs(grown.opacity-std::min(cap,gain*.458f))<1e-6f);
+        assert(RotorLandProfile(.9f,1,isSnow).opacity==cap);
+        assert(RotorLandProfile(.9f,20,isSnow).opacity==cap);
+        float previousOpacity=0;
+        for (int strength=0;strength<=1000;++strength) {
+            const float density=float(strength)*.001f;
+            const auto profile=RotorLandProfile(.9f,density,isSnow);
+            assert(profile.opacity>=previousOpacity && profile.opacity<=cap);
+            assert(std::abs(profile.opacity-std::min(cap,gain*density))<1e-6f);
+            previousOpacity=profile.opacity;
+        }
+        assert(RotorLandProfile(life-.1f,.458f,isSnow).opacity<grown.opacity);
         float previousRadius=0;
         for (int ms=0;ms<int(life*1000);++ms) {
             const auto p=RotorLandProfile(ms*.001f,1,isSnow);
             assert(std::isfinite(p.radius) && std::isfinite(p.opacity));
             assert(p.radius>=previousRadius && p.radius<=RotorLandMaxRadius);
-            assert(p.opacity>=0 && p.opacity<=.35f);
+            assert(p.opacity>=0 && p.opacity<=cap);
             previousRadius=p.radius;
         }
         assert(RotorLandProfile(-1,1,isSnow).opacity==0);
