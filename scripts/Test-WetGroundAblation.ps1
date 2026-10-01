@@ -240,7 +240,7 @@ try{
         $stream=$client.GetStream();$stream.ReadTimeout=30000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
         Start-Sleep -Seconds 12;Require ((Eval 'triSceneReady') -ceq 'OK') 'Mission not ready.'
         Exec 'player allowDamage false; 0 setFog 0; 0 setOvercast 0; 0 setRain 0; setAccTime 0; setDate [1985,6,21,16,0]'
-        Require ((Eval 'triSetSimTime 100') -ceq 'OK') 'Simulation clock setup refused.';Require ((Eval 'triSetBrightness 1') -ceq 'OK') 'Brightness refused.'
+        Require ((Eval 'triSetSimTime 100') -ceq 'OK:100000') 'Simulation clock setup refused.';Require ((Eval 'triSetBrightness 1') -ceq 'OK:1.000') 'Brightness refused.'
         $null=Send @{cmd='dev_snow';action='disable'};$null=Send @{cmd='weather_particles';action='set';mode='off';density=0;snowflakes=$false}
         $initial=Field;Require ($initial.volume -eq 0 -and $initial.rainVolume -eq 0) 'Fresh mission has stale water.';$arm.initial=$initial
         Exec '0 setOvercast 1; 0 setRain 1';$arm.rainAdvance=Advance $RainSimSeconds
