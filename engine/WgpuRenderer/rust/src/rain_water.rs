@@ -768,7 +768,7 @@ mod tests {
         let begin = source.find("struct RainWaterParams").unwrap();
         let end = source.find("struct VsOut").unwrap();
         let probe = format!(
-            "{}\n@group(0) @binding(0) var<storage,read_write> result: array<vec4<f32>>;\n\
+            "{}\n{}\n@group(0) @binding(0) var<storage,read_write> result: array<vec4<f32>>;\n\
             @compute @workgroup_size(1) fn cs_probe() {{\n\
             let water=water_at(vec2<f32>(105.0,205.0)); result[0]=water;\n\
             result[1]=vec4<f32>(rain_water_support_depth(water,2.15,0.0),\n\
@@ -778,6 +778,8 @@ mod tests {
             result[2]=water_at(vec2<f32>(-100.0,-100.0));\n\
             result[3]=water_at(vec2<f32>(102.5,202.5));\n\
             result[4]=water_at(vec2<f32>(107.5,207.5));\n}}",
+            include_str!("shaders/rain_water_optics.wgsl")
+                .lines().skip(1).collect::<Vec<_>>().join("\n"),
             &source[begin..end]
         );
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -1971,12 +1973,14 @@ mod full_draw_tests {
         queue.write_texture(wgpu::TexelCopyTextureInfo{texture:&rain.fine_texture,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},
             bytemuck::cast_slice(&packed),wgpu::TexelCopyBufferLayout{offset:0,bytes_per_row:Some(fine::TEXTURE_WIDTH*16),rows_per_image:Some(fine::TEXTURE_HEIGHT)},rain.fine_texture.size());
         let src=include_str!("rain_water.wgsl");let begin=src.find("struct RainWaterParams").unwrap();let end=src.find("struct VsOut").unwrap();
-        let probe=format!("{}\n@group(0) @binding(0) var<storage,read_write> result:array<vec4<f32>>;\n\
+        let probe=format!("{}\n{}\n@group(0) @binding(0) var<storage,read_write> result:array<vec4<f32>>;\n\
             @compute @workgroup_size(1) fn cs_probe() {{\n\
             result[0]=vec4<f32>(select(0.,1.,fine_owned(vec2<f32>(187.5,187.5))),select(0.,1.,fine_owned(vec2<f32>(387.5,300.))),\n\
                 select(0.,1.,fine_owned(vec2<f32>(187.499,300.))),select(0.,1.,fine_owned(vec2<f32>(387.499,300.))));\n\
             result[1]=fine_water_at(0u,vec2<f32>(189.0625,189.0625));\n\
-            result[2]=fine_water_at(0u,vec2<f32>(192.1875,192.1875)); }}",&src[begin..end]);
+            result[2]=fine_water_at(0u,vec2<f32>(192.1875,192.1875)); }}",
+            include_str!("shaders/rain_water_optics.wgsl").lines().skip(1).collect::<Vec<_>>().join("\n"),
+            &src[begin..end]);
         let shader=device.create_shader_module(wgpu::ShaderModuleDescriptor{label:Some("actual_fine_helpers"),source:wgpu::ShaderSource::Wgsl(probe.into())});
         let result_buffer=device.create_buffer(&wgpu::BufferDescriptor{label:None,size:48,usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_SRC,mapped_at_creation:false});
         let result_layout=device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{label:None,entries:&[wgpu::BindGroupLayoutEntry{binding:0,
