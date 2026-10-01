@@ -70,12 +70,14 @@ by half a cell. At 25 metres, child rectangle bounds then fall on multiples of
 offsets -9.375, -3.125, 3.125 and 9.375 metres from their parent centre.
 
 The old equal-area node domain extends half a cell outside its query rectangle,
-and the last strided terrain sample may be clamped. That is a preexisting
+and the last strided terrain sample may return `YOutsideMap = -100` (sea),
+not a clamped boundary height. This corrects the earlier source assessment.
+That is a preexisting
 boundary approximation, not actual geometry for a fine tile. Initial production
 refinement must reject tiles whose complete rectangles/source halo leave the
 real terrain extent. GPU `bare_surface_valid` remains mandatory. Fully correcting
 world-border control-volume areas is a separate conservative migration, not a
-silent clamped-height proof. Mission initialisation can start the new backend
+silent sentinel-height proof. Mission initialisation can start the new backend
 dry; an optional live backend switch must use the explicit mapping above and
 preserve budget/pending time/generation.
 

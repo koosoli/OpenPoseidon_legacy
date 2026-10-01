@@ -10,7 +10,8 @@
 #include "RainWaterGeometry.hpp"
 
 namespace Poseidon {
-// CPU prototype, not yet used by World or the renderer. Fine corner geometry
+// Conservative CPU core, used by World's default-off fine support gate; the
+// matched fine renderer publication is a separate integration. Corner geometry
 // integrates actual terrain triangles; the old centre overload is flat-cell
 // compatibility only. Disjoint rectangular finite-volume owners are deliberately
 // distinct from RainWaterField's interpolated vertex queries.
@@ -27,6 +28,53 @@ public:
         double Depth() const { return size>0?volume/(size*size):0; }
         double Head() const { return head; }
     };
+    struct Surface { Owner owner;RainWaterCellGeometry geometry;uint32_t parent=0; };
+    bool HasTile(int x,int z) const {return _tiles.contains({x,z});}
+    std::vector<std::pair<int,int>> Tiles() const {
+        std::vector<std::pair<int,int>> result;for(const auto& entry:_tiles)result.push_back(entry.first);return result;
+    }
+    bool SetTileLimit(size_t limit) {
+        if(limit==0||limit>MaxTiles||limit<_tiles.size())return false;
+        _tileLimit=limit;return true;
+    }
+    void SetSeaLevel(double level) {if(std::isfinite(level))_sea=level;}
+    bool IsFineAt(double x,double z) const {const auto i=Find(x,z);return i!=Absent&&_cells[i].child!=Coarse;}
+    bool ImportLegacy(std::span<const float> depths,const Budget& budget,double pending) {
+        if(_tiles.size()!=0||depths.size()!=_children.size()||!std::isfinite(pending)||pending<0||
+           !std::isfinite(budget.rain)||!std::isfinite(budget.infiltration)||!std::isfinite(budget.evaporation)||!std::isfinite(budget.outlet)||
+           budget.rain<0||budget.infiltration<0||budget.evaporation<0||budget.outlet<0||
+           !std::all_of(depths.begin(),depths.end(),[](float d){return std::isfinite(d)&&d>=0;}))return false;
+        const double area=_spacing*_spacing;
+        for(size_t i=0;i<depths.size();++i)_cells[i].volume=double(depths[i])*area;
+        _budget=budget;_pending=pending;RefreshHeads();return true;
+    }
+    void Defer(double seconds) {
+        if(std::isfinite(seconds)&&seconds>0&&std::isfinite(_pending+seconds))_pending+=seconds;
+    }
+    // Existing vertex publication/query proxies remain available outside fine
+    // ownership. Refined parents aggregate child volume, not a second owner.
+    void CoarseState(std::span<float> depth,std::span<float> flowX,std::span<float> flowZ) const {
+        if(depth.size()!=_children.size()||flowX.size()!=depth.size()||flowZ.size()!=depth.size())return;
+        for(size_t p=0;p<_children.size();++p) {
+            double volume=0,x=0,z=0;
+            if(_children[p]==Absent){volume=_cells[p].volume;x=_cells[p].flowX;z=_cells[p].flowZ;}
+            else for(int c=0;c<Ratio*Ratio;++c){const auto& cell=_cells[_children[p]+c];volume+=cell.volume;x+=cell.flowX/(Ratio*Ratio);z+=cell.flowZ/(Ratio*Ratio);}
+            depth[p]=float(volume/(_spacing*_spacing));flowX[p]=float(x);flowZ[p]=float(z);
+        }
+    }
+    std::vector<Surface> FineSnapshot() const {
+        std::vector<Surface> result;result.reserve(_geometry.size());
+        std::vector<uint32_t> parents;parents.reserve(_tiles.size()*TileParents*TileParents);
+        for(const auto& tile:_tiles) {
+            const int x0=tile.first.first*TileParents,z0=tile.first.second*TileParents;
+            for(int z=z0;z<std::min(z0+TileParents,_height);++z)
+                for(int x=x0;x<std::min(x0+TileParents,_width);++x)parents.push_back(uint32_t(z*_width+x));
+        }
+        std::sort(parents.begin(),parents.end()); // stable spatial order, no world scan
+        for(const auto p:parents)
+            for(int c=0;c<Ratio*Ratio;++c){const auto i=_children[p]+c;result.push_back({Describe(i,false),_geometry[i-_children.size()],p});}
+        return result;
+    }
     bool Configure(int width,int height,double spacing,std::span<const float> bed,
                    double originX=0,double originZ=0,double sea=0) {
         if(!ValidDomain(width,height,spacing,bed,originX,originZ,sea)) return false;
@@ -45,7 +93,7 @@ public:
         const int w=std::min(TileParents,_width-x0),h=std::min(TileParents,_height-z0);
         if(bed.size()!=size_t(w*h*Ratio*Ratio)||!FiniteBed(bed)) return false;
         const auto key=std::pair{tx,tz}; const bool existing=_tiles.contains(key);
-        if(!existing&&_tiles.size()>=MaxTiles) return false;
+        if(!existing&&_tiles.size()>=_tileLimit) return false;
         for(int z=0;z<h;++z) for(int x=0;x<w;++x) {
             const auto p=uint32_t((z0+z)*_width+x0+x);
             if(!existing) {
@@ -93,7 +141,7 @@ public:
         if(i==Absent||!std::isfinite(volume)||volume<0) return false;
         const auto owner=Describe(i);const double next=_cells[i].volume+volume;
         if(!std::isfinite(next)||!std::isfinite(Volume()+volume)||!std::isfinite(next/(owner.size*owner.size)+owner.bed)) return false;
-        _cells[i].volume+=volume;++_revision;return true;
+        _cells[i].volume+=volume;_head[i]=CellHead(i);++_revision;return true;
     }
     Owner At(double x,double z) const {
         const auto i=Find(x,z);return i==Absent?Owner{}:Describe(i);
@@ -136,6 +184,35 @@ public:
             }
         }
         return true;
+    }
+    // Developer regrid may alter the legacy equal-area boundary footprint.
+    // Preserve total mass through overlap; volume outside the new footprint is
+    // explicitly redistributed to its nearest boundary owner. Shorelines are
+    // not preserved, and exact curved subcell wet placement is not claimed.
+    bool RegridDomain(int width,int height,double spacing,std::span<const float> bed,double x0,double z0) {
+        if(!ValidDomain(width,height,spacing,bed,x0,z0,_sea)||_width==0||!std::isfinite(_x-x0)||!std::isfinite(_z-z0))return false;
+        const auto old=Snapshot();const auto budget=_budget;const double pending=_pending,sea=_sea;
+        const size_t limit=_tileLimit;
+        if(!Configure(width,height,spacing,bed,x0,z0,sea))return false;
+        _tileLimit=limit;_budget=budget;_pending=pending;
+        const auto bound=[](double value,int maximum){return int(std::clamp(value,0.0,double(maximum)));};
+        for(const auto& source:old) {
+            double transferred=0;
+            const int ax=bound(std::floor((source.x-_x)/spacing),width-1);
+            const int az=bound(std::floor((source.z-_z)/spacing),height-1);
+            const int bx=bound(std::ceil((source.x+source.size-_x)/spacing)-1,width-1);
+            const int bz=bound(std::ceil((source.z+source.size-_z)/spacing)-1,height-1);
+            for(int z=az;z<=bz;++z)for(int x=ax;x<=bx;++x) {
+                const double dx=std::max(0.0,std::min(source.x+source.size,_x+(x+1)*spacing)-std::max(source.x,_x+x*spacing));
+                const double dz=std::max(0.0,std::min(source.z+source.size,_z+(z+1)*spacing)-std::max(source.z,_z+z*spacing));
+                const double amount=source.Depth()*dx*dz;
+                _cells[size_t(z)*width+x].volume+=amount;transferred+=amount;
+            }
+            const int x=bound(std::floor((source.x+source.size*.5-_x)/spacing),width-1);
+            const int z=bound(std::floor((source.z+source.size*.5-_z)/spacing),height-1);
+            _cells[size_t(z)*width+x].volume+=std::max(0.0,source.volume-transferred);
+        }
+        RefreshHeads();return true;
     }
     void Advance(double seconds,double rain,double sun=0,double wind=0) {
         if(_width==0||!std::isfinite(seconds)||seconds<=0||!std::isfinite(rain)) return;
@@ -283,6 +360,7 @@ private:
     }
     int _width=0,_height=0;double _spacing=0,_x=0,_z=0,_sea=0,_pending=0;
     uint64_t _generation=0,_revision=0;size_t _tilesOwnerExtra=0;Budget _budget;
+    size_t _tileLimit=MaxTiles;
     std::vector<Cell> _cells;std::vector<uint32_t> _children;std::vector<Edge> _edges;
     std::vector<double> _out,_delta,_flux,_head;std::vector<RainWaterCellGeometry> _geometry;
     std::map<std::pair<int,int>,bool> _tiles;

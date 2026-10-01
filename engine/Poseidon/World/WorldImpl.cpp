@@ -766,6 +766,12 @@ void World::SimulateCloudlets(float deltaT)
         const float liquidRain = UniformWettingDensity(GLandscape->GetRainDensity(),
             GRain.EffectiveDensity(), GRain.Params().snowflakes);
         auto& runoff = GRainWater();
+        // Opt-in source/query gate only until the matched renderer and installed
+        // tests are accepted. Ordinary missions retain the legacy backend.
+        static const bool fineSupport=[] {
+            const char* value=std::getenv("POSEIDON_RAIN_WATER_FINE");
+            return value&&value[0]=='1'&&value[1]=='\0';
+        }();
         static uint64_t bedRevision = 0;
         const int terrainRange = GLandscape->GetTerrainRange();
         const float extent = (terrainRange - 1) * GLandscape->GetTerrainGrid();
@@ -783,7 +789,13 @@ void World::SimulateCloudlets(float deltaT)
                 std::vector<float> bed(static_cast<size_t>(side) * side);
                 for (int z=0; z<side; ++z) for (int x=0; x<side; ++x)
                     bed[static_cast<size_t>(z)*side+x] = GLandscape->ClippedData(z*grid.stride,x*grid.stride);
-                if (runoff.Width() != 0)
+                bool configured=false;
+                if(runoff.FineActive()) {
+                    configured=runoff.ReconfigureFine(side,side,spacing,bed);
+                    LOG_INFO(Graphics,"RAIN_WATER_FINE_REGRID world={} width={} spacing={:.3f} volume_m3={:.6f} retained={} shoreline=redistributed",
+                        GLandscape->GetName(),side,spacing,runoff.Volume(),configured);
+                }
+                else if (runoff.Width() != 0)
                 {
                     // A runtime setTerrainGrid may change both the number and
                     // area of water cells. The existing equal-area node storage
@@ -793,7 +805,9 @@ void World::SimulateCloudlets(float deltaT)
                         GLandscape->GetName(),runoff.Width(),runoff.Height(),runoff.Spacing(),side,spacing,runoff.Volume());
                     runoff.Reset();
                 }
-                if (runoff.Configure(side,side,spacing,std::move(bed),0,0,GLandscape->GetSeaLevel()))
+                if (!configured&&!runoff.FineActive())
+                    configured=runoff.Configure(side,side,spacing,std::move(bed),0,0,GLandscape->GetSeaLevel());
+                if (configured)
                 {
                     bedRevision = GLandscape->HeightRevision();
                     LOG_INFO(Graphics,"RAIN_WATER_INIT world={} width={} spacing={:.3f}",
@@ -808,6 +822,16 @@ void World::SimulateCloudlets(float deltaT)
                     runoff.SetBed(x,z,GLandscape->ClippedData(z*grid.stride,x*grid.stride));
                 bedRevision = GLandscape->HeightRevision();
             }
+            // A failed domain rebuild retains mass but must not revalidate the
+            // old coordinates against a different terrain-grid identity.
+            const auto fine=runoff.MatchesDomain(side,side,spacing)
+                ? runoff.UpdateTerrainSource(GLandscape,terrainRange,GLandscape->GetTerrainGrid(),
+                    GLandscape->HeightRevision(),fineSupport,[](int x,int z){return GLandscape->GetHeight(z,x);})
+                : Poseidon::RainWaterField::FineUpdate{};
+            if(fine.changed)
+                LOG_INFO(Graphics,"RAIN_WATER_FINE_SOURCE world={} sourceRevision={} native={} admitted={} updated={} refused={} coverageLost={} valid={} tiles={} enabled={} presentation=pending",
+                    GLandscape->GetName(),GLandscape->HeightRevision(),fine.native,fine.admitted,fine.updated,fine.refused,
+                    fine.coverageLost,fine.valid,runoff.FineTileCount(),fineSupport);
             const auto* sun = _scene.MainLight();
             const float overcast = std::clamp(GLandscape->GetOvercast(),0.0f,1.0f);
             const float solar = sun ? std::clamp(sun->SunDirection().Y(),0.0f,1.0f)
@@ -815,6 +839,12 @@ void World::SimulateCloudlets(float deltaT)
             if (runoff.MatchesDomain(side,side,spacing))
             {
                 runoff.SetSeaLevel(GLandscape->GetSeaLevel());
+                runoff.Advance(deltaT,liquidRain,solar,GWind.IsActive() ? GWind.Sample().speed/20.0f : 0);
+            }
+            else if(runoff.FineActive())
+            {
+                // Failed reconfiguration marks the fine source stale; Advance
+                // only retains pending time until actual coordinates recover.
                 runoff.Advance(deltaT,liquidRain,solar,GWind.IsActive() ? GWind.Sample().speed/20.0f : 0);
             }
         }

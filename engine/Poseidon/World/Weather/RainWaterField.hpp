@@ -4,6 +4,9 @@
 #include <cstdint>
 #include <limits>
 #include <vector>
+#include <array>
+#include <optional>
+#include "RainWaterFine.hpp"
 
 namespace Poseidon
 {
@@ -19,6 +22,14 @@ public:
     struct Sample { float depth = 0, height = 0, flowX = 0, flowZ = 0; bool valid = false; };
     struct Budget { double rain = 0, infiltration = 0, evaporation = 0, outlet = 0; };
     struct SourceGrid { int side = 0, stride = 0; float spacing = 0; };
+    static constexpr size_t FineTileLimit=8,FootprintLimit=32;
+    struct EditFootprint {int minX=0,minZ=0,maxX=0,maxZ=0;uint64_t first=0,last=0;};
+    struct FineUpdate {size_t admitted=0,updated=0,refused=0;bool changed=false,coverageLost=false,valid=true,native=false;};
+    struct FinePublication {
+        uint64_t generation=0,revision=0,sourceRevision=0;
+        bool valid=false;
+        std::vector<RainWaterFine::Surface> surfaces;
+    };
     static SourceGrid AlignedSourceGrid(int range, float spacing) {
         if (range < 2 || !std::isfinite(spacing) || spacing <= 0) return {};
         int64_t stride = 1;
@@ -37,7 +48,13 @@ public:
             !std::isfinite(spacing) || spacing <= 0 || !std::isfinite(originX) ||
             !std::isfinite(originZ) || !std::isfinite(seaLevel) ||
             std::any_of(bed.begin(), bed.end(), [](float y) { return !std::isfinite(y); })) return false;
-        Reset();
+        // Explicit mission Reset retires edits; first rain Configure must not
+        // erase genuine same-mission craters recorded while the field was dry.
+        const auto journal=_journal;const auto source=_source;
+        const size_t count=_editCount;const auto latest=_sourceLatest;
+        const bool gap=_sourceGap,dirty=_sourceDirty;
+        Reset();_journal=journal;_source=source;_editCount=count;_sourceLatest=latest;
+        _sourceGap=gap;_sourceDirty=dirty;
         _width = width; _height = height; _spacing = spacing;
         _originX = originX; _originZ = originZ; _seaLevel = seaLevel;
         _bed = std::move(bed);
@@ -54,10 +71,20 @@ public:
     bool SetBed(int x, int z, float height)
     {
         if (x < 0 || z < 0 || x >= _width || z >= _height || !std::isfinite(height)) return false;
-        _bed[Index(x,z)] = height; ++_revision; return true;
+        _bed[Index(x,z)] = height;
+        if(_fine)_fine->SetCoarseBed(x,z,height);
+        ++_revision; return true;
     }
     void Advance(float seconds, float rain, float sunlight = 0, float wind = 0)
     {
+        if(_fine) {
+            if(!std::isfinite(seconds)||seconds<=0||!std::isfinite(rain))return;
+            const auto before=_fine->Revision();
+            if(_sourceDirty||_fineStale)_fine->Defer(seconds);
+            else _fine->Advance(seconds,rain,sunlight,wind);
+            _revision+=_fine->Revision()-before;
+            if(_fine->Revision()!=before)SyncFine();return;
+        }
         if (_bed.empty() || !std::isfinite(seconds) || seconds <= 0 || !std::isfinite(rain)) return;
         rain = std::clamp(rain, 0.0f, 1.0f);
         sunlight = std::isfinite(sunlight) ? std::clamp(sunlight, 0.0f, 1.0f) : 0;
@@ -73,8 +100,13 @@ public:
     Sample At(float x, float z) const
     {
         if (_bed.empty() || !std::isfinite(x) || !std::isfinite(z)) return {};
+        if(_fine&&(_sourceDirty||_fineStale))return {};
         const float gx = (x - _originX) / _spacing, gz = (z - _originZ) / _spacing;
         if (gx < 0 || gz < 0 || gx > _width - 1 || gz > _height - 1) return {};
+        if(_fine&&_fine->IsFineAt(x,z)) {
+            const auto owner=_fine->At(x,z);
+            return {float(_fine->LocalDepth(x,z)),float(owner.Head()),owner.flowX,owner.flowZ,true};
+        }
         const int ix = std::min(static_cast<int>(gx), _width - 2);
         const int iz = std::min(static_cast<int>(gz), _height - 2);
         const float fx = gx - ix, fz = gz - iz;
@@ -93,6 +125,7 @@ public:
         return {depth, bed + depth, interpolate(_flowX), interpolate(_flowZ), true};
     }
     double Volume() const {
+        if(_fine)return _fine->Volume();
         double sum = 0; for (float d : _depth) sum += d;
         return sum * _spacing * _spacing;
     }
@@ -112,7 +145,7 @@ public:
         return !_bed.empty() && _width == width && _height == height &&
                _spacing == spacing && _originX == originX && _originZ == originZ;
     }
-    void SetSeaLevel(float level) { if (std::isfinite(level)) _seaLevel = level; }
+    void SetSeaLevel(float level) { if (std::isfinite(level)){_seaLevel = level;if(_fine)_fine->SetSeaLevel(level);} }
     // Immutable simulation cell data, copied by the main-thread presentation
     // producer. Camera movement does not seed, erase or recompute any water.
     std::vector<float> Snapshot() const {
@@ -123,14 +156,162 @@ public:
         }
         return cells;
     }
-    double PendingSeconds() const { return _pending; }
+    double PendingSeconds() const { return _fine?_fine->PendingSeconds():_pending; }
     // Test/fixture seeding is explicit and finite; ordinary missions start dry.
     bool AddWater(int x, int z, float metres) {
         if (x < 0 || z < 0 || x >= _width || z >= _height ||
             !std::isfinite(metres) || metres < 0) return false;
+        if(_fine) {
+            const bool result=_fine->AddWater(_originX+x*_spacing,_originZ+z*_spacing,double(metres)*_spacing*_spacing);
+            if(result){++_revision;SyncFine();}return result;
+        }
         _depth[Index(x,z)] += metres; ++_revision; return true;
     }
+    bool FineActive() const {return _fine.has_value();}
+    bool SourceReady() const {return !_fine||(!_sourceDirty&&!_fineStale);}
+    size_t FineTileCount() const {return _fine?_fine->TileCount():0;}
+    FinePublication FineSnapshot() const {
+        FinePublication result{_generation,_revision,_sourceApplied,false,{}};
+        result.valid=_fine&&!_sourceDirty&&!_fineStale&&_fine->TileCount()>0;
+        // Ownership rectangles remain available while invalid, so a renderer
+        // can suppress their coarse proxies without drawing stale fine heads.
+        if(_fine)result.surfaces=_fine->FineSnapshot();return result;
+    }
+    // Called only by the actual successful HeightChange publisher. No camera,
+    // terrain noise or synthetically seeded fixture can promote an edit here.
+    void RecordTerrainVertex(const void* owner,int range,float spacing,int x,int z,uint64_t revision) {
+        if(!ObserveTerrainRevision(owner,range,spacing,x,z,revision))return;
+        if(_editCount) {
+            auto& previous=_journal[_editCount-1];
+            if(revision==previous.last+1&&x>=previous.minX-2&&x<=previous.maxX+2&&z>=previous.minZ-2&&z<=previous.maxZ+2) {
+                previous.minX=std::min(previous.minX,x);previous.maxX=std::max(previous.maxX,x);
+                previous.minZ=std::min(previous.minZ,z);previous.maxZ=std::max(previous.maxZ,z);previous.last=revision;return;
+            }
+        }
+        if(_editCount==FootprintLimit){_sourceGap=true;return;}
+        _journal[_editCount++]={x,z,x,z,revision,revision};
+    }
+    // HeightChange also increments the revision for raw-height quantization
+    // no-ops. Proven finite unchanged writes cover that revision, but NEVER
+    // produce a footprint or admit a tile by themselves.
+    void RecordTerrainUnchanged(const void* owner,int range,float spacing,int x,int z,uint64_t revision) {
+        if(ObserveTerrainRevision(owner,range,spacing,x,z,revision)&&_editCount) {
+            auto& previous=_journal[_editCount-1];
+            if(previous.last+1==revision)previous.last=revision;
+        }
+    }
+    // Sampler reads finite bare source vertices (never SurfaceY mud/sand or an
+    // out-of-range sentinel). It is called only after source identity admission.
+    template<class Sampler>
+    FineUpdate UpdateTerrainSource(const void* owner,int range,float sourceSpacing,uint64_t revision,bool enabled,Sampler sample) {
+        FineUpdate report;
+        if(!enabled)return report; // default legacy path has no geometry work
+        const SourceIdentity key{owner,range,sourceSpacing};
+        if(!owner||range<2||!std::isfinite(sourceSpacing)||sourceSpacing<=0){
+            InvalidateFineSource();report.valid=false;report.changed=_fine.has_value();return report;
+        }
+        if(!(key==_source)) {
+            _source=key;_sourceLatest=revision;_sourceApplied=0;_editCount=0;_sourceGap=true;_sourceDirty=true;
+        }
+        if(_width==0)return report; // keep before-rain footprints queued
+        if(_sourceApplied==revision&&!_sourceDirty)return report;
+        report.changed=true;report.coverageLost=_sourceGap||_sourceLatest!=revision;
+        const auto grid=AlignedSourceGrid(range,sourceSpacing);
+        report.native=sourceSpacing==6.25f&&_spacing==25&&grid.stride==4&&
+            _width==grid.side&&_height==grid.side&&_originX==0&&_originZ==0;
+        bool refreshed=true;
+        if(_fine&&!report.native&&_fine->TileCount()) {
+            refreshed=_fine->RegridDomain(_width,_height,_spacing,_bed,_originX-_spacing*.5,_originZ-_spacing*.5);
+            if(refreshed)++_generation;
+        }
+        if(_fine&&report.native)for(const auto& tile:_fine->Tiles()) {
+            const auto geometry=ReadTile(tile.first,tile.second,range,sample,false);
+            if(geometry.empty()||!_fine->RefineTileGeometry(tile.first,tile.second,geometry))refreshed=false;
+            else ++report.updated;
+        }
+        if(report.native&&!report.coverageLost) {
+            size_t candidates=0;
+            for(size_t n=0;n<_editCount;++n) {
+                const auto& e=_journal[n];
+                const int ax=(e.minX+1)/32,az=(e.minZ+1)/32,bx=(e.maxX+2)/32,bz=(e.maxZ+2)/32;
+                const size_t count=size_t(bx-ax+1)*(bz-az+1);
+                if(count>128-candidates){report.refused+=count;continue;}
+                candidates+=count;
+                for(int z=az;z<=bz;++z)for(int x=ax;x<=bx;++x) {
+                    if(_fine&&_fine->HasTile(x,z))continue;
+                    if(FineTileCount()>=FineTileLimit){++report.refused;continue;}
+                    const auto geometry=ReadTile(x,z,range,sample,true);
+                    if(geometry.empty()||!ActivateFine()||!_fine->RefineTileGeometry(x,z,geometry)){++report.refused;continue;}
+                    ++report.admitted;
+                }
+            }
+        }
+        _fineStale=!refreshed;report.valid=refreshed;
+        if(refreshed){_sourceApplied=revision;_sourceLatest=revision;_sourceDirty=false;_sourceGap=false;_editCount=0;}
+        if(_fine){++_revision;SyncFine();}return report;
+    }
+    // Default legacy domain change still uses Configure/reset. An already
+    // enabled fine backend retains total mass through explicit regrid density
+    // redistribution; exact shoreline placement is deliberately not promised.
+    bool ReconfigureFine(int width,int height,float spacing,std::span<const float> bed) {
+        if(!_fine)return false;
+        if(width<2||height<2||size_t(width)*height>RainWaterFine::MaxCoarseCells||
+           !_fine->RegridDomain(width,height,spacing,bed,_originX-spacing*.5,_originZ-spacing*.5)) {
+            InvalidateFineSource();return false;
+        }
+        _width=width;_height=height;_spacing=spacing;_bed.assign(bed.begin(),bed.end());
+        _depth.resize(bed.size());_flowX.resize(bed.size());_flowZ.resize(bed.size());
+        _out.resize(bed.size());_delta.resize(bed.size());++_generation;++_revision;
+        _sourceDirty=true;_fineStale=true;_sourceApplied=0;SyncFine();return true;
+    }
 private:
+    void InvalidateFineSource() {
+        if(!_fine)return;
+        if(!_fineStale||!_sourceDirty)++_revision;
+        _fineStale=true;_sourceDirty=true;
+    }
+    struct SourceIdentity {
+        const void* owner=nullptr;int range=0;float spacing=0;
+        bool operator==(const SourceIdentity&) const=default;
+    };
+    bool ObserveTerrainRevision(const void* owner,int range,float spacing,int x,int z,uint64_t revision) {
+        if(!owner||range<2||!std::isfinite(spacing)||spacing<=0||x<0||z<0||x>=range||z>=range||revision==0)return false;
+        const SourceIdentity key{owner,range,spacing};
+        if(!(key==_source)) {
+            _source=key;_editCount=0;_sourceLatest=revision-1;_sourceApplied=0;_sourceGap=false;
+        }
+        if(revision!=_sourceLatest+1)_sourceGap=true;
+        _sourceLatest=revision;_sourceDirty=true;if(_fine){_fineStale=true;++_revision;}
+        return true;
+    }
+    template<class Sampler>
+    std::vector<RainWaterCellGeometry> ReadTile(int x,int z,int range,Sampler sample,bool inland) const {
+        const int sx=x*32-2,sz=z*32-2;
+        if(x<0||z<0||sx<0||sz<0||sx+32>=range||sz+32>=range||
+           x*8+8>_width||z*8+8>_height)return {};
+        std::array<float,33*33> heights;
+        for(int iz=0;iz<33;++iz)for(int ix=0;ix<33;++ix) {
+            const float h=sample(sx+ix,sz+iz);
+            if(!std::isfinite(h)||(inland&&h<=_seaLevel))return {};
+            heights[iz*33+ix]=h;
+        }
+        std::vector<RainWaterCellGeometry> result;result.reserve(1024);
+        for(int iz=0;iz<32;++iz)for(int ix=0;ix<32;++ix)
+            result.emplace_back(heights[iz*33+ix],heights[iz*33+ix+1],heights[(iz+1)*33+ix],heights[(iz+1)*33+ix+1]);
+        return result;
+    }
+    bool ActivateFine() {
+        if(_fine)return true;
+        RainWaterFine candidate;
+        const RainWaterFine::Budget budget{_budget.rain,_budget.infiltration,_budget.evaporation,_budget.outlet};
+        if(!candidate.Configure(_width,_height,_spacing,_bed,_originX-_spacing*.5,_originZ-_spacing*.5,_seaLevel)||
+           !candidate.SetTileLimit(FineTileLimit)||!candidate.ImportLegacy(_depth,budget,std::max(0.0,_pending)))return false;
+        _fine=std::move(candidate);++_generation;++_revision;return true;
+    }
+    void SyncFine() {
+        _fine->CoarseState(_depth,_flowX,_flowZ);const auto b=_fine->WaterBudget();
+        _budget={b.rain,b.infiltration,b.evaporation,b.outlet};_pending=_fine->PendingSeconds();
+    }
     size_t Index(int x, int z) const { return static_cast<size_t>(z) * _width + x; }
     float Transfer(size_t a, size_t b) const {
         const float head = (_bed[a] + _depth[a]) - (_bed[b] + _depth[b]);
@@ -194,6 +375,12 @@ private:
     uint64_t _revision=0, _generation=0;
     Budget _budget;
     std::vector<float> _bed,_depth,_out,_delta,_flowX,_flowZ;
+    std::optional<RainWaterFine> _fine;
+    SourceIdentity _source;
+    std::array<EditFootprint,FootprintLimit> _journal;
+    size_t _editCount=0;
+    uint64_t _sourceLatest=0,_sourceApplied=0;
+    bool _sourceGap=false,_sourceDirty=false,_fineStale=false;
 };
 inline RainWaterField& GRainWater() { static RainWaterField field; return field; }
 }

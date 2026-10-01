@@ -13,6 +13,7 @@
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/World/Weather/SandField.hpp>
+#include <Poseidon/World/Weather/RainWaterField.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Random/randomGen.hpp>
@@ -1034,8 +1035,17 @@ void Landscape::FillCache(const Frame& pos)
 void Landscape::HeightChange(int x, int z, float y)
 {
     PoseidonAssert(this_TerrainInRange(x, z));
+    const bool inRange=this_TerrainInRange(x,z);
+    const float before=inRange?GetData(x,z):std::numeric_limits<float>::quiet_NaN();
     SetData(x, z, y);
     ++_heightRevision;
+    // Publish only actual committed finite vertex changes. Brush/crater callers
+    // reach this after their successful physics patch, never before it.
+    const float committed=inRange?GetData(x,z):std::numeric_limits<float>::quiet_NaN();
+    if(inRange&&std::isfinite(committed)&&before!=committed)
+        GRainWater().RecordTerrainVertex(this,_terrainRange,_terrainGrid,x,z,_heightRevision);
+    else if(inRange&&std::isfinite(before)&&std::isfinite(committed))
+        GRainWater().RecordTerrainUnchanged(this,_terrainRange,_terrainGrid,x,z,_heightRevision);
     // FlushCache();
 }
 
