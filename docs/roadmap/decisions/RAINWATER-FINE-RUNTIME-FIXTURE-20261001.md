@@ -1,7 +1,8 @@
 # Native edited-hollow runtime fixture
 
-Source candidate; installed execution, complete engine compilation, GPU tests
-and visual acceptance remain pending. This fixture is based on b7debd26 plus
+Runner follow-up; installed 3353770c has completed OFF and partial ON source
+checks below. Complete ON lifecycle and visual acceptance remain pending.
+This fixture is based on b7debd26 plus
 the atomic ABI-19 handoff 35ad3083. It does not turn the default-off fine
 simulation or renderer on in ordinary missions.
 
@@ -71,8 +72,9 @@ returned as a decimal string to avoid JSON's 53-bit integer rounding.
   for ON. Exact grammar is `Rain water publication: worldToken=... generation=...
   heightRevision=... terrainRange=... terrainSpacing=... revision=... flags=...
   copiedCoarse=... copiedFine=... cachedCoarse=... cachedFine=... tiles=...
-  enabled=... accepted=...`. Token, revisions, native source, flags 7 and accepted
-  enabled pair must match the paused CPU snapshot. Coarse counts are Vec4 **cell
+  enabled=... accepted=...`. The actual source prints numeric enabled=0|1;
+  only enabled=1 and accepted=true can pass. Token, revisions, native source,
+  flags 7 and accepted enabled pair must match the paused CPU snapshot. Coarse counts are Vec4 **cell
   counts**, width*height; fine counts are actual FineCell records. Parameter-only
   updates may copy zero records only while the complete matching cached pair
   remains. Unknown grammar, stale receipt, rejection and partial arrays fail.
@@ -146,3 +148,43 @@ Self-test includes the actual .4923645258 boundary (wait, never ready), exact
 weather refusals. Existing native edit, mass, source revision, complete tile,
 triangle, pause, drain and matched renderer gates are unchanged. This remains
 a script/source follow-up pending root's new installed OFF/ON campaign.
+
+## Installed live-log receipt follow-up
+
+Matched installed 3353770c campaign
+`build/rain-water-fine/bounded-rain-native-crater-20261001-042056-ab9f3d`
+completed the entire OFF lifecycle and exited normally. Natural liquid rain
+was .551898 in OFF and .577696 in ON; no extra forcing wait was needed.
+ON proved source-ready generation 5/revision 473/height revision 27, one
+complete tile of 1024 actual native cells. Global water 744295.044332 m³ agreed
+with rain minus losses to about .001263 m³; fine owner volume
+655.591184435206 m³ and actual triangle integral 655.591184435410 m³ agreed.
+The selected cell held a horizontal head 21.352945786 over its native low
+corner 20.812194824, local depth .540751 m. Five queries retained this one
+head with two wet and three dry support points. Pause and camera return passed.
+
+The ON campaign then failed in `File.ReadAllLines` because that read handle's
+sharing mode conflicted with the active engine writer. ON roof, drainage and
+normal restore assertions were not reached; failure cleanup restored the
+actual terrain and exited normally with zero. The failed record remains
+failed, and no visual water quality is inferred from these CPU values.
+
+Live log reading now explicitly opens a read handle with ReadWrite/Delete
+sharing and disposes it deterministically. Only newline-terminated complete
+records enter the exact parser; an unfinished last line is discarded. A
+bounded 10-second retry allows actual writer flush/submission delay or a
+transient I/O sharing failure, retaining attempts, last read/parser error and
+the expected source key. Timeout still fails. It cannot synthesize a receipt,
+accept an unterminated prefix, substitute a stale revision or advance water.
+
+The actual retained revision-473 source receipt prints `enabled=1 accepted=true`
+(control[3] is the producer's binary numeric float). The strict parser now
+matches only this source's enabled=0|1 grammar, requiring literal 1; boolean
+aliases and arbitrary numeric truthiness remain refused. Accepted=true, exact
+source/field revision, flags 7, complete cached counts and line termination
+remain mandatory. Self-test holds a real temporary writer open, rejects its
+partial line, accepts only after a real newline is written, and rejects stale
+keys, count mismatch, rejection, disabled/boolean/unknown enabled values and
+unknown trailing fields. The complete retained actual revision-473 receipt is
+also parsed source-only. Root must rerun ON to reach its remaining roof,
+drainage and restoration checks, and inspect the actual captures separately.

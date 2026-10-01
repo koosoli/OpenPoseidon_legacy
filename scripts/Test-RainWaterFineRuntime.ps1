@@ -58,28 +58,56 @@ function Assert-Fine($fine,$state,[bool]$enabled) {
 }
 function Find-Receipt([string[]]$lines,$fine,$state) {
     # Exact numeric/boolean grammar; unknown output cannot become an acceptance.
-    $pattern='Rain water publication: worldToken=(\d+) generation=(\d+) heightRevision=(\d+) terrainRange=(\d+) terrainSpacing=([0-9.eE+-]+) revision=(\d+) flags=(\d+) copiedCoarse=(\d+) copiedFine=(\d+) cachedCoarse=(\d+) cachedFine=(\d+) tiles=(\d+) enabled=(true|false) accepted=(true|false)'
+    $pattern='Rain water publication: worldToken=(\d+) generation=(\d+) heightRevision=(\d+) terrainRange=(\d+) terrainSpacing=([0-9.eE+-]+) revision=(\d+) flags=(\d+) copiedCoarse=(\d+) copiedFine=(\d+) cachedCoarse=(\d+) cachedFine=(\d+) tiles=(\d+) enabled=(0|1) accepted=(true|false)\s*$'
     $found=$null
     foreach($line in $lines) {if($line -cmatch $pattern) {
         $m=$Matches
         if($m[1] -ceq [string]$fine.worldToken -and [decimal]$m[2] -eq $fine.generation -and [decimal]$m[3] -eq $fine.heightRevision -and
            [int]$m[4] -eq $fine.terrainRange -and [double]::Parse($m[5],$culture) -eq $fine.terrainSpacing -and
            [decimal]$m[6] -eq $fine.revision -and [int]$m[7] -eq 7 -and [int]$m[10] -eq $state.width*$state.height -and
-           [int]$m[11] -eq $fine.cells -and [int]$m[12] -eq $fine.tiles -and $m[13] -ceq 'true' -and $m[14] -ceq 'true') {$found=$line}
+           [int]$m[11] -eq $fine.cells -and [int]$m[12] -eq $fine.tiles -and $m[13] -ceq '1' -and $m[14] -ceq 'true') {$found=$line}
     }}
     Require ($null -ne $found) 'No exact current accepted renderer coarse+fine receipt (unknown/missing grammar fails closed).'
     return $found
+}
+function Complete-LogLines([string]$text) {
+    # A live writer may have emitted only the prefix of its last record.
+    # Never offer that unterminated fragment to the strict receipt parser.
+    $last=$text.LastIndexOf("`n")
+    if($last -lt 0) {return}
+    return $text.Substring(0,$last).Split("`n") | ForEach-Object {$_.TrimEnd("`r")}
+}
+function Read-CompleteLogLines([string]$path) {
+    $stream=$null;$reader=$null
+    try {
+        $stream=[IO.FileStream]::new($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        $reader=[IO.StreamReader]::new($stream,[Text.Encoding]::UTF8,$true)
+        return Complete-LogLines ($reader.ReadToEnd())
+    } finally {if($reader) {$reader.Dispose()} elseif($stream) {$stream.Dispose()}}
 }
 function Expect-Failure([scriptblock]$check) {try {& $check} catch {return};throw 'Negative helper case unexpectedly passed.'}
 if($SelfTest) {
     $state=[pscustomobject]@{width=513;height=513;generation=5;revision=19;volume=3;rainVolume=5;infiltrationVolume=1;evaporationVolume=.5;outletVolume=.5}
     $fine=[pscustomobject]@{readonly=$true;sourceReady=$true;fineActive=$true;valid=$true;generation=5;revision=19;sourceRevision=71;heightRevision=71;worldToken='5729000000000';terrainRange=2048;terrainSpacing=6.25;tiles=1;cells=1024;fineVolume=2;integratedVolume=2;selected=@{size=6.25;corners=@(1,2,3,4)}}
     Assert-Budget $state;Assert-Fine $fine $state $true
-    $line='Rain water publication: worldToken=5729000000000 generation=5 heightRevision=71 terrainRange=2048 terrainSpacing=6.25 revision=19 flags=7 copiedCoarse=0 copiedFine=0 cachedCoarse=263169 cachedFine=1024 tiles=1 enabled=true accepted=true'
+    $line='Rain water publication: worldToken=5729000000000 generation=5 heightRevision=71 terrainRange=2048 terrainSpacing=6.25 revision=19 flags=7 copiedCoarse=0 copiedFine=0 cachedCoarse=263169 cachedFine=1024 tiles=1 enabled=1 accepted=true'
     $null=Find-Receipt @($line) $fine $state
-    foreach($bad in @($line.Replace('revision=19','revision=18'),$line.Replace('accepted=true','accepted=false'),$line.Replace('cachedFine=1024','cachedFine=1023'),$line.Replace('cachedCoarse=263169','cachedCoarse=1052676'),$line.Replace('worldToken=5729000000000','worldToken=5729000000001'),'accepted=true')) {
+    foreach($bad in @($line.Replace('revision=19','revision=18'),$line.Replace('accepted=true','accepted=false'),$line.Replace('enabled=1','enabled=0'),$line.Replace('enabled=1','enabled=true'),$line.Replace('enabled=1','enabled=2'),$line.Replace('cachedFine=1024','cachedFine=1023'),$line.Replace('cachedCoarse=263169','cachedCoarse=1052676'),$line.Replace('worldToken=5729000000000','worldToken=5729000000001'),($line+' extra=1'),'accepted=true')) {
         Expect-Failure {Find-Receipt @($bad) $fine $state}
     }
+    Require (@(Complete-LogLines $line).Count -eq 0) 'Unterminated receipt fragment accepted as a complete record.'
+    $complete=@(Complete-LogLines ($line+"`r`n"+'unfinished receipt'));Require ($complete.Count -eq 1 -and $complete[0] -ceq $line) 'Complete/partial line boundary changed.'
+    $temp=[IO.Path]::GetTempFileName();$live=$null
+    try {
+        $live=[IO.FileStream]::new($temp,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite)
+        $bytes=[Text.Encoding]::UTF8.GetBytes($line);$live.Write($bytes,0,$bytes.Length);$live.Flush()
+        Expect-Failure {Find-Receipt @(Read-CompleteLogLines $temp) $fine $state}
+        $bytes=[Text.Encoding]::UTF8.GetBytes("`r`n"+'unfinished receipt');$live.Write($bytes,0,$bytes.Length);$live.Flush()
+        $null=Find-Receipt @(Read-CompleteLogLines $temp) $fine $state
+        # The complete-but-unmatched or unterminated newer lines cannot weaken
+        # exact current source/revision/count acceptance.
+        Expect-Failure {Find-Receipt @(Read-CompleteLogLines $temp) $fine ([pscustomobject]@{width=512;height=513})}
+    } finally {if($live) {$live.Dispose()};Remove-Item -LiteralPath $temp -ErrorAction SilentlyContinue}
     $fine.sourceReady=$false;Expect-Failure {Assert-Fine $fine $state $true};$fine.sourceReady=$true
     $fine.integratedVolume=1;Expect-Failure {Assert-Fine $fine $state $true};$fine.integratedVolume=2
     $fine.cells=1023;Expect-Failure {Assert-Fine $fine $state $true};$fine.cells=1024
@@ -155,6 +183,25 @@ function Await-NaturalRain($weather) {
     $proof.status='actual-natural-liquid-rain-ready';return $weather
 }
 function Fine {return Send @{cmd='dev_rain_water';action='fine_state';x=$X;z=$Z}}
+function Await-Receipt($fine,$state) {
+    $until=[DateTime]::UtcNow.AddSeconds(10)
+    $proof=@{status='awaiting-exact-live-receipt';attempts=0;wallLimitSeconds=10;
+             worldToken=$fine.worldToken;generation=$fine.generation;heightRevision=$fine.heightRevision;revision=$fine.revision}
+    $arm.gates.rendererReceiptWait=$proof
+    do {
+        Health;$proof.attempts++;$lines=$null
+        try {$lines=@(Read-CompleteLogLines $log)} catch {
+            if($_.Exception.GetBaseException() -isnot [IO.IOException]) {throw}
+            $proof.lastReadError=$_.Exception.Message
+        }
+        if($null -ne $lines) {
+            try {$receipt=Find-Receipt $lines $fine $state;$proof.status='exact-current-receipt-observed';return $receipt}
+            catch {$proof.lastMissingReceipt=$_.Exception.Message}
+        }
+        if([DateTime]::UtcNow -ge $until) {$proof.status='bounded-receipt-wait-exhausted';throw 'No complete exact current renderer receipt within 10 seconds; live log read/missing receipt details retained.'}
+        Start-Sleep -Milliseconds 150
+    } while($true)
+}
 function Brush([string]$action='state') {return Send @{cmd='dev_terrain_brush';action=$action;x=$X;z=$Z}}
 function Capture([string]$name) {
     Start-Sleep -Milliseconds 400;$path=Join-Path $armDir ($name+'.png');$null=Send @{cmd='screenshot';path=$path}
@@ -239,7 +286,7 @@ try {
         $pauseTime=Clock;Start-Sleep -Seconds 2;View ($X+350) ($Z-350) ($paint.vertexHeight+100) 315 -10;Capture 'camera-away'
         View $X ($Z-18) ($paint.vertexHeight+4) 0 -12;Capture 'camera-return'
         $same=State;$sameFine=Fine;Require ((Clock) -eq $pauseTime -and $same.revision -eq $wet.revision -and $same.generation -eq $wet.generation -and $same.volume -eq $wet.volume -and $sameFine.fineVolume -eq $fine.fineVolume) 'Pause or camera/sample reseeded/evicted fine water.'
-        if($on) {$arm.gates.rendererReceipt=Find-Receipt ([IO.File]::ReadAllLines($log)) $fine $wet}
+        if($on) {$arm.gates.rendererReceipt=Await-Receipt $fine $wet}
         # Physical roof exposure is a renderer gate, not CPU whole-owner rainfall exclusion.
         $arm.gates.roof=New-TerrainPuddleStockRoof -SendCommand ${function:Send} -X $X -Z $Z -RoofLift 3;$script:roof=$true
         Capture 'covered-hollow-mask-review';$covered=State;Require ($covered.revision -eq $wet.revision -and $covered.volume -eq $wet.volume) 'Roof creation advanced or deleted paused simulation water.'
