@@ -10,6 +10,35 @@ struct RainWaterParams {
 };
 @group(1) @binding(0) var grid: texture_2d<f32>;
 @group(1) @binding(1) var<uniform> rainwater: RainWaterParams;
+struct FineTileMask {
+    meta: vec4<u32>,
+    rects: array<vec4<f32>,8>,
+};
+@group(1) @binding(2) var fine_records: texture_2d<f32>;
+@group(1) @binding(3) var<uniform> fine_tiles: FineTileMask;
+
+fn fine_record(cell: u32, lane: u32) -> vec4<f32> {
+    let i=cell*3u+lane;
+    return textureLoad(fine_records,vec2<i32>(i32(i%1024u),i32(i/1024u)),0);
+}
+fn fine_owned(world_xz: vec2<f32>) -> bool {
+    for (var i=0u;i<min(fine_tiles.meta.x,8u);i+=1u) {
+        let rect=fine_tiles.rects[i];
+        if (all(world_xz>=rect.xy) && all(world_xz<rect.zw)) {return true;}
+    }
+    return false;
+}
+fn fine_water_at(cell: u32, world_xz: vec2<f32>) -> vec4<f32> {
+    let rect=fine_record(cell,0u);
+    let corners=fine_record(cell,1u);
+    let flow=fine_record(cell,2u);
+    let uv=clamp((world_xz-rect.xy)/rect.z,vec2<f32>(0.0),vec2<f32>(1.0));
+    var bed: f32;
+    if (uv.x+uv.y<=1.0) {bed=corners.x+(corners.y-corners.x)*uv.x+(corners.z-corners.x)*uv.y;}
+    else {bed=corners.w+(corners.z-corners.w)*(1.0-uv.x)+(corners.y-corners.w)*(1.0-uv.y);}
+    // Fine head is horizontal. Average volume/area is never a local-depth proxy.
+    return vec4<f32>(rect.w,max(rect.w-bed,0.0),flow.xy);
+}
 
 fn water_at(world_xz: vec2<f32>) -> vec4<f32> {
     let t = (world_xz - rainwater.domain.xy) / rainwater.domain.z;
@@ -69,6 +98,7 @@ fn rain_water_optics(local_depth: f32, view_cosine: f32, reflected: vec3<f32>,
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) world: vec3<f32>,
+    @location(1) @interpolate(flat) fine_cell: u32,
 };
 
 @vertex
@@ -84,8 +114,22 @@ fn vs_main(@builtin(vertex_index) vertex: u32, @location(0) cell: u32) -> VsOut 
     let world_xz = rainwater.domain.xy + (base + local) * rainwater.domain.z;
     let water = water_at(world_xz);
     var out: VsOut;
+    out.fine_cell=0xffffffffu;
     out.world = vec3<f32>(world_xz.x, water.x, world_xz.y);
     out.clip = reverse_z(frame.proj * frame.view * vec4<f32>(out.world - frame.cam_pos.xyz, 1.0));
+    return out;
+}
+
+@vertex
+fn vs_fine(@builtin(vertex_index) vertex: u32, @location(0) cell: u32) -> VsOut {
+    let corners=array<vec2<f32>,6>(vec2<f32>(0,0),vec2<f32>(0,1),vec2<f32>(1,0),
+        vec2<f32>(1,0),vec2<f32>(0,1),vec2<f32>(1,1));
+    let rect=fine_record(cell,0u);
+    let world_xz=rect.xy+corners[vertex%6u]*rect.z;
+    var out: VsOut;
+    out.fine_cell=cell;
+    out.world=vec3<f32>(world_xz.x,rect.w,world_xz.y);
+    out.clip=reverse_z(frame.proj*frame.view*vec4<f32>(out.world-frame.cam_pos.xyz,1.0));
     return out;
 }
 
@@ -94,7 +138,15 @@ fn fs_main(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
     let dwx = dpdx(in.world);
     let dwy = dpdy(in.world);
     let footprint = max(length(dwx.xz),length(dwy.xz));
-    let water = water_at(in.world.xz);
+    var water: vec4<f32>;
+    let is_fine=in.fine_cell!=0xffffffffu;
+    if (is_fine) {
+        if (in.fine_cell>=fine_tiles.meta.y) {discard;}
+        water=fine_water_at(in.fine_cell,in.world.xz);
+    } else {
+        if (fine_owned(in.world.xz)) {discard;}
+        water=water_at(in.world.xz);
+    }
     if (!front || rainwater.control.w < 0.5 || water.y <= 0.001 ||
         !bare_surface_valid(in.world.xz)) { discard; }
     let bed = bare_surface_y(in.world.xz);
@@ -109,10 +161,14 @@ fn fs_main(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
     if (cover <= 0.0 || snow > 0.002) { discard; }
 
     let step = max(rainwater.domain.z,0.25);
-    let hx = (water_at(in.world.xz + vec2<f32>(step,0)).x -
-              water_at(in.world.xz - vec2<f32>(step,0)).x) / (2.0*step);
-    let hz = (water_at(in.world.xz + vec2<f32>(0,step)).x -
-              water_at(in.world.xz - vec2<f32>(0,step)).x) / (2.0*step);
+    var hx=0.0;
+    var hz=0.0;
+    if (!is_fine) {
+        hx=(water_at(in.world.xz + vec2<f32>(step,0)).x -
+            water_at(in.world.xz - vec2<f32>(step,0)).x)/(2.0*step);
+        hz=(water_at(in.world.xz + vec2<f32>(0,step)).x -
+            water_at(in.world.xz - vec2<f32>(0,step)).x)/(2.0*step);
+    }
     let ripple = ground_puddle_ripple_normal(in.world.xz,rainwater.domain.w,rainwater.control.z,footprint);
     // Long, gentle flow packets advect with the physical field velocity; fade
     // all fine variation before distant pixels can resolve glittering glints.

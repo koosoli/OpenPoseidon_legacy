@@ -1,9 +1,31 @@
 //! Presentation of simulation-owned rainfall runoff; independent of either ocean backend.
 use crate::{
-    ffi::{WgrCamera, WgrRainWaterParams, WgrVec4},
+    ffi::{
+        WGR_RAIN_WATER_FINE_BACKEND, WGR_RAIN_WATER_FINE_READY, WGR_RAIN_WATER_SOURCE_READY,
+        WgrCamera, WgrRainWaterFineCell, WgrRainWaterParams, WgrRainWaterPublication,
+        WgrRainWaterSourceKey, WgrVec4,
+    },
     terrain::TerrainConformParams,
 };
 use wgpu::util::DeviceExt;
+#[path = "rain_water_fine.rs"]
+mod fine;
+type PublicationIdentity = (fine::SourceIdentity, u64, [u32; 6], u32);
+fn publication_identity(p: &WgrRainWaterPublication) -> Option<PublicationIdentity> {
+    Some((
+        fine::source_identity(p.source)?,
+        p.revision,
+        [
+            p.coarse.domain[0].to_bits(),
+            p.coarse.domain[1].to_bits(),
+            p.coarse.domain[2].to_bits(),
+            p.coarse.control[0].to_bits(),
+            p.coarse.control[1].to_bits(),
+            p.coarse.control[3].to_bits(),
+        ],
+        p.flags,
+    ))
+}
 
 const MAX_CELLS: usize = 1024 * 1024;
 const MAX_DRAW_CELLS: usize = 65_536;
@@ -102,6 +124,17 @@ pub struct RainWater {
     params: wgpu::Buffer,
     terrain_params: wgpu::Buffer,
     pipeline: wgpu::RenderPipeline,
+    fine_pipeline: wgpu::RenderPipeline,
+    fine_texture: wgpu::Texture,
+    fine_mask_buffer: wgpu::Buffer,
+    fine_mask: fine::TileMask,
+    fine_grid: Vec<WgrRainWaterFineCell>,
+    fine_instance: wgpu::Buffer,
+    fine_instance_capacity: u64,
+    fine_count: u32,
+    fine_enabled: bool,
+    source: Option<fine::SourceIdentity>,
+    publication: Option<PublicationIdentity>,
     texture: Option<wgpu::Texture>,
     bind: Option<wgpu::BindGroup>,
     terrain_bind: Option<wgpu::BindGroup>,
@@ -146,7 +179,12 @@ impl RainWater {
         };
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("rain_water_grid_layout"),
-            entries: &[texture_entry(0), uniform_entry(1)],
+            entries: &[
+                texture_entry(0),
+                uniform_entry(1),
+                texture_entry(2),
+                uniform_entry(3),
+            ],
         });
         let terrain_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("rain_water_bare_terrain_layout"),
@@ -185,50 +223,79 @@ impl RainWater {
             offset: 0,
             shader_location: 0,
         }];
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("rain_water_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: 4,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &attributes,
-                }],
+        let make_pipeline = |entry| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("rain_water_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: 4,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &attributes,
+                    }],
+                },
+                primitive: wgpu::PrimitiveState {
+                    // World-up cells are clockwise after the engine's LH projection.
+                    // fs_main still rejects undersides; cull_mode=None alone cannot
+                    // compensate for the wrong front_facing convention.
+                    front_face: wgpu::FrontFace::Cw,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: crate::gfx3d::depth_format(device),
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: samples,
+                    ..Default::default()
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let pipeline = make_pipeline("vs_main");
+        let fine_pipeline = make_pipeline("vs_fine");
+        let fine_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("rain_water_fine_records"),
+            size: wgpu::Extent3d {
+                width: fine::TEXTURE_WIDTH,
+                height: fine::TEXTURE_HEIGHT,
+                depth_or_array_layers: 1,
             },
-            primitive: wgpu::PrimitiveState {
-                // World-up cells are clockwise after the engine's LH projection.
-                // fs_main still rejects undersides; cull_mode=None alone cannot
-                // compensate for the wrong front_facing convention.
-                front_face: wgpu::FrontFace::Cw,
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: crate::gfx3d::depth_format(device),
-                depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                count: samples,
-                ..Default::default()
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let fine_mask: fine::TileMask = bytemuck::Zeroable::zeroed();
+        let fine_mask_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("rain_water_fine_tile_mask"),
+            contents: bytemuck::bytes_of(&fine_mask),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let fine_instance = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("rain_water_fine_instances"),
+            contents: bytemuck::cast_slice(&[0u32]),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("rain_water_params"),
@@ -254,6 +321,17 @@ impl RainWater {
             params,
             terrain_params,
             pipeline,
+            fine_pipeline,
+            fine_texture,
+            fine_mask_buffer,
+            fine_mask,
+            fine_grid: vec![],
+            fine_instance,
+            fine_instance_capacity: 4,
+            fine_count: 0,
+            fine_enabled: std::env::var("WGR_RAIN_WATER_FINE").as_deref() == Ok("1"),
+            source: None,
+            publication: None,
             texture: None,
             bind: None,
             terrain_bind: None,
@@ -270,6 +348,126 @@ impl RainWater {
     }
 
     pub fn set_grid(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        p: WgrRainWaterParams,
+        cells: &[WgrVec4],
+        revision: u64,
+    ) -> bool {
+        // Legacy receipts can never keep a prior fine/source ownership lifetime.
+        if self.source.is_some() || self.publication.is_some() || !self.fine_grid.is_empty() {
+            self.clear_pair();
+        }
+        self.source = None;
+        self.fine_count = 0;
+        queue.write_buffer(
+            &self.fine_mask_buffer,
+            0,
+            bytemuck::bytes_of(&self.fine_mask),
+        );
+        self.set_grid_data(device, queue, p, cells, revision)
+    }
+    fn clear_pair(&mut self) {
+        self.count = 0;
+        self.fine_count = 0;
+        self.grid.clear();
+        self.fine_grid.clear();
+        self.uploaded = None;
+        self.publication = None;
+        self.fine_mask = bytemuck::Zeroable::zeroed();
+    }
+    pub fn invalidate_source(&mut self) {
+        self.source = None;
+        self.clear_pair();
+    }
+    pub fn set_source(&mut self, key: WgrRainWaterSourceKey) {
+        let source = fine::source_identity(key);
+        if source != self.source || source.is_none() {
+            self.clear_pair();
+        }
+        self.source = source;
+    }
+    /// Actual retained paired bytes for the root's opt-in publication trace.
+    pub fn publication_counts(&self)->(usize,usize,u32){
+        (self.grid.len(),self.fine_grid.len(),self.fine_mask.meta[0])
+    }
+    pub fn set_publication(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        p: WgrRainWaterPublication,
+        coarse: &[WgrVec4],
+        cells: &[WgrRainWaterFineCell],
+    ) -> bool {
+        let identity = publication_identity(&p);
+        let acceptable = self.enabled
+            && self.fine_enabled
+            && p.flags & WGR_RAIN_WATER_FINE_BACKEND != 0
+            && p.flags & WGR_RAIN_WATER_SOURCE_READY != 0
+            && p.flags & !7 == 0
+            && p.reserved == 0
+            && p.coarse.reserved == 0
+            && p.coarse.control[3] >= 0.5
+            && dimensions(&p.coarse).is_some()
+            && p.coarse.generation == p.source.generation
+            && self.source.is_some()
+            && self.source == fine::source_identity(p.source);
+        if !acceptable {
+            self.clear_pair();
+            return false;
+        }
+        if coarse.is_empty() && cells.is_empty() && identity == self.publication {
+            self.current = p.coarse;
+            queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&p.coarse));
+            return true;
+        }
+        let Some((w, h)) = dimensions(&p.coarse) else {
+            self.clear_pair();
+            return false;
+        };
+        let Some(mask) = fine::validate_tiles(
+            &p.coarse,
+            p.source,
+            cells,
+            p.flags & WGR_RAIN_WATER_FINE_READY != 0,
+        ) else {
+            self.clear_pair();
+            return false;
+        };
+        if !valid_cells(coarse, w, h) {
+            self.clear_pair();
+            return false;
+        }
+        // Validate the complete pair before updating any reusable GPU/CPU state.
+        self.fine_mask = mask;
+        self.fine_grid.clear();
+        self.fine_grid.extend_from_slice(cells);
+        queue.write_buffer(&self.fine_mask_buffer, 0, bytemuck::bytes_of(&mask));
+        let packed = fine::packed_cells(cells);
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.fine_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(&packed),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(fine::TEXTURE_WIDTH * 16),
+                rows_per_image: Some(fine::TEXTURE_HEIGHT),
+            },
+            self.fine_texture.size(),
+        );
+        if !self.set_grid_data(device, queue, p.coarse, coarse, p.revision) {
+            self.clear_pair();
+            return false;
+        }
+        self.publication = identity;
+        true
+    }
+    fn set_grid_data(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -318,6 +516,7 @@ impl RainWater {
                     view_formats: &[],
                 });
                 let view = texture.create_view(&Default::default());
+                let fine_view = self.fine_texture.create_view(&Default::default());
                 self.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("rain_water_grid_bind"),
                     layout: &self.layout,
@@ -329,6 +528,14 @@ impl RainWater {
                         wgpu::BindGroupEntry {
                             binding: 1,
                             resource: self.params.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::TextureView(&fine_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: self.fine_mask_buffer.as_entire_binding(),
                         },
                     ],
                 }));
@@ -392,41 +599,93 @@ impl RainWater {
             self.terrain_generation = generation;
         }
         queue.write_buffer(&self.terrain_params, 0, bytemuck::bytes_of(&terrain));
-        let selected = visible_cells(
+        let mut selected = visible_cells(
             &self.grid,
             &self.current,
             [camera.cam_pos[0], camera.cam_pos[1], camera.cam_pos[2]],
         );
+        // Remove only wholly owned coarse quads. Boundary quads retain their
+        // geometry and the exact fragment rectangle mask; parent indices alone
+        // would erase valid outside portions of the old node-centred grid.
+        if self.fine_mask.meta[0]>0 {
+            let width=self.current.control[0] as u32;
+            let spacing=self.current.domain[2];
+            selected.retain(|&cell|{
+                let x=self.current.domain[0]+(cell%width) as f32*spacing;
+                let z=self.current.domain[1]+(cell/width) as f32*spacing;
+                !self.fine_mask.rects[..self.fine_mask.meta[0] as usize].iter()
+                    .any(|r|x>=r[0] && z>=r[1] && x+spacing<=r[2] && z+spacing<=r[3])
+            });
+        }
+        let mut selected_fine = Vec::new();
+        for (i, cell) in self.fine_grid.iter().enumerate() {
+            let [x, z, size, head] = cell.rect;
+            let dx = camera.cam_pos[0] - camera.cam_pos[0].clamp(x, x + size);
+            let dz = camera.cam_pos[2] - camera.cam_pos[2].clamp(z, z + size);
+            let minimum = cell.corners.iter().copied().fold(f32::INFINITY, f32::min);
+            if dx * dx + dz * dz <= 600.0 * 600.0 && head - minimum > 0.001 {
+                selected_fine.push(i as u32);
+                if self.reflections.enabled() {
+                    self.reflections.offer_box(
+                        camera,
+                        glam::Vec3::new(x, head, z),
+                        glam::Vec3::new(x + size, head, z + size),
+                    );
+                }
+            }
+        }
+        if !selected_fine.is_empty() {
+            let size = selected_fine.len() as u64 * 4;
+            if size > self.fine_instance_capacity {
+                self.fine_instance_capacity = size.next_power_of_two();
+                self.fine_instance = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("rain_water_fine_instances"),
+                    size: self.fine_instance_capacity,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            }
+            queue.write_buffer(&self.fine_instance, 0, bytemuck::cast_slice(&selected_fine));
+            self.fine_count = selected_fine.len() as u32;
+        }
         if selected.is_empty() {
             return;
         }
         // Reuse actual selected simulation cells; no extra global wet-grid scan.
         let width = self.current.control[0] as usize;
         let spacing = self.current.domain[2];
-        if self.reflections.enabled() { for &cell in &selected {
-            if self.reflections.needed() { break; }
-            let i = cell as usize;
-            let x = self.current.domain[0] + (i%width) as f32*spacing;
-            let z = self.current.domain[1] + (i/width) as f32*spacing;
-            let dx = (camera.cam_pos[0]-camera.cam_pos[0].clamp(x,x+spacing)).abs();
-            let dz = (camera.cam_pos[2]-camera.cam_pos[2].clamp(z,z+spacing)).abs();
-            if dx*dx+dz*dz > crate::rain_water_reflections::NEAR_RANGE.powi(2) {continue;}
-            let corners = [i, i+1, i+width, i+width+1];
-            let mut minimum_bed = f32::INFINITY;
-            let mut maximum_bed = f32::NEG_INFINITY;
-            let mut minimum_depth = f32::INFINITY;
-            let mut maximum_depth = 0.0_f32;
-            for index in corners {
-                let c = self.grid[index];
-                minimum_bed = minimum_bed.min(c[0]-c[1]);
-                maximum_bed = maximum_bed.max(c[0]-c[1]);
-                minimum_depth = minimum_depth.min(c[1]);
-                maximum_depth = maximum_depth.max(c[1]);
+        if self.reflections.enabled() {
+            for &cell in &selected {
+                if self.reflections.needed() {
+                    break;
+                }
+                let i = cell as usize;
+                let x = self.current.domain[0] + (i % width) as f32 * spacing;
+                let z = self.current.domain[1] + (i / width) as f32 * spacing;
+                let dx = (camera.cam_pos[0] - camera.cam_pos[0].clamp(x, x + spacing)).abs();
+                let dz = (camera.cam_pos[2] - camera.cam_pos[2].clamp(z, z + spacing)).abs();
+                if dx * dx + dz * dz > crate::rain_water_reflections::NEAR_RANGE.powi(2) {
+                    continue;
+                }
+                let corners = [i, i + 1, i + width, i + width + 1];
+                let mut minimum_bed = f32::INFINITY;
+                let mut maximum_bed = f32::NEG_INFINITY;
+                let mut minimum_depth = f32::INFINITY;
+                let mut maximum_depth = 0.0_f32;
+                for index in corners {
+                    let c = self.grid[index];
+                    minimum_bed = minimum_bed.min(c[0] - c[1]);
+                    maximum_bed = maximum_bed.max(c[0] - c[1]);
+                    minimum_depth = minimum_depth.min(c[1]);
+                    maximum_depth = maximum_depth.max(c[1]);
+                }
+                self.reflections.offer_box(
+                    camera,
+                    glam::Vec3::new(x, minimum_bed + minimum_depth, z),
+                    glam::Vec3::new(x + spacing, maximum_bed + maximum_depth, z + spacing),
+                );
             }
-            self.reflections.offer_box(camera,
-                glam::Vec3::new(x, minimum_bed+minimum_depth, z),
-                glam::Vec3::new(x+spacing, maximum_bed+maximum_depth, z+spacing));
-        }}
+        }
         let size = (selected.len() * 4) as u64;
         if size > self.instance_capacity {
             self.instance_capacity = size.next_power_of_two();
@@ -442,17 +701,30 @@ impl RainWater {
     }
 
     pub fn drawable(&self) -> bool {
-        self.count > 0 && self.bind.is_some() && self.terrain_bind.is_some()
+        (self.count > 0 || self.fine_count > 0)
+            && self.bind.is_some()
+            && self.terrain_bind.is_some()
     }
-    pub fn reflections_needed(&self) -> bool { self.drawable() && self.reflections.needed() }
-    pub fn invalidate_frame(&mut self, queue:&wgpu::Queue) {
-        self.count=0;
+    pub fn reflections_needed(&self) -> bool {
+        self.drawable() && self.reflections.needed()
+    }
+    pub fn invalidate_frame(&mut self, queue: &wgpu::Queue) {
+        self.count = 0;
+        self.fine_count = 0;
         self.reflections.begin_frame(queue);
     }
-    pub fn record_reflections(&mut self, device:&wgpu::Device, queue:&wgpu::Queue,
-        encoder:&mut wgpu::CommandEncoder, source:&wgpu::Texture, view:&wgpu::TextureView,
-        depth:&wgpu::TextureView, generation:u64) {
-        self.reflections.record(device, queue, encoder, source, view, depth, generation);
+    pub fn record_reflections(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &wgpu::Texture,
+        view: &wgpu::TextureView,
+        depth: &wgpu::TextureView,
+        generation: u64,
+    ) {
+        self.reflections
+            .record(device, queue, encoder, source, view, depth, generation);
     }
     pub fn draw<'a>(
         &'a self,
@@ -471,6 +743,11 @@ impl RainWater {
         pass.set_bind_group(4, self.terrain_bind.as_ref().unwrap(), &[]);
         pass.set_vertex_buffer(0, self.instance.slice(..));
         pass.draw(0..24, 0..self.count);
+        if self.fine_count > 0 {
+            pass.set_pipeline(&self.fine_pipeline);
+            pass.set_vertex_buffer(0, self.fine_instance.slice(..));
+            pass.draw(0..6, 0..self.fine_count);
+        }
     }
 }
 
@@ -974,6 +1251,22 @@ fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {{
 #[cfg(test)]
 mod full_draw_tests {
     use super::*;
+
+    #[test]
+    fn fine_actual_composed_uniform_offsets_and_both_vertex_entries(){
+        let mut composer=crate::shaders::build_composer();
+        let module=composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor{
+            source:include_str!("rain_water.wgsl"),file_path:"rain_water.wgsl",..Default::default()}).unwrap();
+        let (members,span)=module.types.iter().find_map(|(_,ty)|{
+            if let naga::TypeInner::Struct{members,span}=&ty.inner {
+                if members.len()==2 && members[0].name.as_deref()==Some("meta") && members[1].name.as_deref()==Some("rects") {return Some((members,*span));}
+            }None
+        }).expect("Actual fine tile uniform is missing");
+        assert_eq!(span as usize,std::mem::size_of::<fine::TileMask>());
+        assert_eq!(members[0].offset as usize,std::mem::offset_of!(fine::TileMask,meta));
+        assert_eq!(members[1].offset as usize,std::mem::offset_of!(fine::TileMask,rects));
+        for name in ["vs_main","vs_fine"] {assert!(module.entry_points.iter().any(|e|e.name==name && e.stage==naga::ShaderStage::Vertex));}
+    }
 
     // This fixture uses the actual composed Frame/Conform and BOTH production
     // entry points. It deliberately does not replace fs_main with a debug colour
@@ -1538,5 +1831,130 @@ mod full_draw_tests {
                 "Negative pool admission painted pixels: {name}"
             );
         }
+
+        // The same actual production fragment now draws complete native fine
+        // ownership, not a shader-only debug mask. Keep the original coarse
+        // flat/sloped/Cw controls above as independent regressions.
+        rain.fine_enabled=true;
+        let (coarse_params,mut source,fine_template)=fine::tests::fixture(1,1);
+        let coarse=vec![[2.3,0.3,0.,0.];129*129];
+        let fine_hm=texture("actual_fine_native",wgpu::TextureFormat::R32Float,512,512,1,
+            wgpu::TextureDimension::D2,wgpu::TextureUsages::TEXTURE_BINDING|wgpu::TextureUsages::COPY_DST);
+        let fine_hm_view=fine_hm.create_view(&Default::default());
+        native.terrain_grid=6.25;native.hm_width=512;native.hm_height=512;
+        let eye=glam::Vec3::new(300.,25.,280.);
+        let aim=glam::Vec3::new(300.,2.3,300.);
+        let fine_projection=glam::Mat4::perspective_lh(45_f32.to_radians(),1.,0.1,80.);
+        let weather_vp=glam::Mat4::from_cols_array(&[
+            0.005,0.,0.,0., 0.,0.,0.,0., 0.,0.005,0.,0., -1.5,-1.5,0.5,1.]);
+        put(&mut frame,offset("weather_vp"),&weather_vp.to_cols_array());
+        put(&mut frame,offset("proj"),&fine_projection.to_cols_array());
+        let raster=|rain:&RainWater,cover:f32|->Vec<u8>{
+            let mut encoder=device.create_command_encoder(&Default::default());
+            {let _pass=encoder.begin_render_pass(&wgpu::RenderPassDescriptor{
+                label:Some("actual_fine_weather"),color_attachments:&[],depth_stencil_attachment:Some(wgpu::RenderPassDepthStencilAttachment{
+                    view:&weather_view,depth_ops:Some(wgpu::Operations{load:wgpu::LoadOp::Clear(cover),store:wgpu::StoreOp::Store}),stencil_ops:None}),..Default::default()});}
+            {let mut pass=encoder.begin_render_pass(&wgpu::RenderPassDescriptor{
+                label:Some("actual_fine_vs_fs"),color_attachments:&[Some(wgpu::RenderPassColorAttachment{
+                    view:&output_view,resolve_target:None,depth_slice:None,ops:wgpu::Operations{load:wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),store:wgpu::StoreOp::Store}})],
+                depth_stencil_attachment:Some(wgpu::RenderPassDepthStencilAttachment{view:&depth_view,
+                    depth_ops:Some(wgpu::Operations{load:wgpu::LoadOp::Clear(0.),store:wgpu::StoreOp::Store}),stencil_ops:None}),..Default::default()});
+                rain.draw(&mut pass,&camera_bind,0);}
+            encoder.copy_texture_to_buffer(wgpu::TexelCopyTextureInfo{texture:&output,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},
+                wgpu::TexelCopyBufferInfo{buffer:&readback,layout:wgpu::TexelCopyBufferLayout{offset:0,bytes_per_row:Some(256),rows_per_image:Some(64)}},output.size());
+            queue.submit(Some(encoder.finish()));let slice=readback.slice(..);let(tx,rx)=std::sync::mpsc::channel();
+            slice.map_async(wgpu::MapMode::Read,move|r|{let _=tx.send(r);});device.poll(wgpu::PollType::wait_indefinitely()).unwrap();rx.recv().unwrap().unwrap();
+            let bytes=slice.get_mapped_range().to_vec();readback.unmap();bytes
+        };
+        let fine_cases=["flat","crater","slope","dry owned coarse exclusion","physical roof","snow","underside","sea"];
+        let mut fine_counts=Vec::new();
+        for (index,name) in fine_cases.iter().enumerate(){
+            let bed_at=|x:f32,z:f32|->f32{match index{
+                1=>{let r=((x-300.).powi(2)+(z-300.).powi(2)).sqrt();4.-2.*(1.-r/12.5).max(0.)},
+                2=>2.+(x-300.)*0.03,
+                _=>2.,
+            }};
+            let native_values:Vec<f32>=(0..512*512).map(|i|bed_at((i%512) as f32*6.25,(i/512) as f32*6.25)).collect();
+            queue.write_texture(wgpu::TexelCopyTextureInfo{texture:&fine_hm,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},
+                bytemuck::cast_slice(&native_values),wgpu::TexelCopyBufferLayout{offset:0,bytes_per_row:Some(512*4),rows_per_image:Some(512)},fine_hm.size());
+            source.height_revision=index as u64+1;
+            let mut cells=fine_template.clone();
+            for c in &mut cells{
+                let [x,z,size,_]=c.rect;
+                c.corners=[bed_at(x,z),bed_at(x+size,z),bed_at(x,z+size),bed_at(x+size,z+size)];
+                if index==3 {c.rect[3]=1.7;}
+                c.flow_depth[2]=(c.rect[3]-c.corners.iter().sum::<f32>()*0.25).max(0.);
+            }
+            let position=if index==6 {glam::Vec3::new(300.,1.,280.)}else{eye};
+            let fine_view=glam::Mat4::look_to_lh(glam::Vec3::ZERO,(aim-position).normalize(),glam::Vec3::Y);
+            camera.cam_pos=[position.x,position.y,position.z,1.];camera.proj=fine_projection.to_cols_array();camera.view=fine_view.to_cols_array();
+            put(&mut frame,offset("cam_pos"),&camera.cam_pos);put(&mut frame,offset("view"),&fine_view.to_cols_array());
+            put(&mut frame,offset("snow_surface"),&[if index==5 {0.18}else{0.},10000.,1.,0.]);
+            put(&mut frame,offset("ground_weather"),&[0.,0.,if index==7 {3.}else{0.},10.]);
+            queue.write_buffer(&frame_buffer,0,&frame);
+            rain.set_source(source);
+            let publication=WgrRainWaterPublication{coarse:coarse_params,source,revision:index as u64+1,flags:7,reserved:0};
+            assert!(rain.set_publication(&device,&queue,publication,&coarse,&cells),"complete source/ownership: {name}");
+            rain.prepare(&device,&queue,&camera,&fine_hm_view,index as u64+10,native);
+            let pixels=raster(&rain,if index==4 {0.}else{1.});
+            let count=pixels.chunks_exact(4).filter(|p|p[3]>0).count();
+            fine_counts.push(count);eprintln!("actual vs_fine/fs_main {name}: pixels={count}");
+            if index==0{
+                let count_coarse=rain.count;rain.count=0;
+                assert_eq!(raster(&rain,1.),pixels,"Owned tile must not blend coarse and fine water twice");rain.count=count_coarse;
+                // Parameter-only camera publication retains BOTH complete
+                // arrays only under the same source/layout/lifetime identity.
+                assert!(rain.set_publication(&device,&queue,publication,&[],&[]));
+                let mut wrong=publication;wrong.source.height_revision+=1;
+                assert!(!rain.set_publication(&device,&queue,wrong,&[],&[]));
+                rain.prepare(&device,&queue,&camera,&fine_hm_view,10,native);
+                assert_eq!(raster(&rain,1.).chunks_exact(4).filter(|p|p[3]>0).count(),0,"Mismatched source cannot retain previous pair");
+                assert!(rain.set_publication(&device,&queue,publication,&coarse,&cells));
+                rain.invalidate_source();assert!(!rain.set_publication(&device,&queue,publication,&[],&[]));
+                rain.set_source(source);rain.fine_enabled=false;
+                assert!(!rain.set_publication(&device,&queue,publication,&coarse,&cells),"Fine opt-out may not draw unmasked coarse proxy");rain.fine_enabled=true;
+            }
+        }
+        assert!(fine_counts[0]>100,"Native horizontal pool must be visible: {fine_counts:?}");
+        assert!(fine_counts[1]>0 && fine_counts[1]<fine_counts[0],"Native crater clips to its actual wet bed: {fine_counts:?}");
+        assert!(fine_counts[2]>100 && fine_counts[2]<fine_counts[0],"Native sloping bed clips shoreline: {fine_counts:?}");
+        assert_eq!(&fine_counts[3..],&[0,0,0,0,0],"Dry ownership, roof, snow, underside and sea remain closed");
+
+        // Execute the exact production fine helpers at physical tile edges and
+        // across a native saddle. No averaged depth or coarse interpolation is
+        // substituted for the local triangle/constant-head result.
+        let mut helper_cells=fine_template;
+        helper_cells[0].rect[3]=3.;helper_cells[0].corners=[2.,2.5,3.,7.];
+        let packed=fine::packed_cells(&helper_cells);
+        queue.write_texture(wgpu::TexelCopyTextureInfo{texture:&rain.fine_texture,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},
+            bytemuck::cast_slice(&packed),wgpu::TexelCopyBufferLayout{offset:0,bytes_per_row:Some(fine::TEXTURE_WIDTH*16),rows_per_image:Some(fine::TEXTURE_HEIGHT)},rain.fine_texture.size());
+        let src=include_str!("rain_water.wgsl");let begin=src.find("struct RainWaterParams").unwrap();let end=src.find("struct VsOut").unwrap();
+        let probe=format!("{}\n@group(0) @binding(0) var<storage,read_write> result:array<vec4<f32>>;\n\
+            @compute @workgroup_size(1) fn cs_probe() {{\n\
+            result[0]=vec4<f32>(select(0.,1.,fine_owned(vec2<f32>(187.5,187.5))),select(0.,1.,fine_owned(vec2<f32>(387.5,300.))),\n\
+                select(0.,1.,fine_owned(vec2<f32>(187.499,300.))),select(0.,1.,fine_owned(vec2<f32>(387.499,300.))));\n\
+            result[1]=fine_water_at(0u,vec2<f32>(189.0625,189.0625));\n\
+            result[2]=fine_water_at(0u,vec2<f32>(192.1875,192.1875)); }}",&src[begin..end]);
+        let shader=device.create_shader_module(wgpu::ShaderModuleDescriptor{label:Some("actual_fine_helpers"),source:wgpu::ShaderSource::Wgsl(probe.into())});
+        let result_buffer=device.create_buffer(&wgpu::BufferDescriptor{label:None,size:48,usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_SRC,mapped_at_creation:false});
+        let result_layout=device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{label:None,entries:&[wgpu::BindGroupLayoutEntry{binding:0,
+            visibility:wgpu::ShaderStages::COMPUTE,ty:wgpu::BindingType::Buffer{ty:wgpu::BufferBindingType::Storage{read_only:false},has_dynamic_offset:false,min_binding_size:None},count:None}]});
+        let helper_layout=device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{label:None,entries:&[
+            wgpu::BindGroupLayoutEntry{binding:2,visibility:wgpu::ShaderStages::COMPUTE,ty:wgpu::BindingType::Texture{sample_type:wgpu::TextureSampleType::Float{filterable:false},view_dimension:wgpu::TextureViewDimension::D2,multisampled:false},count:None},
+            wgpu::BindGroupLayoutEntry{binding:3,visibility:wgpu::ShaderStages::COMPUTE,ty:wgpu::BindingType::Buffer{ty:wgpu::BufferBindingType::Uniform,has_dynamic_offset:false,min_binding_size:None},count:None}]});
+        let result_bind=device.create_bind_group(&wgpu::BindGroupDescriptor{label:None,layout:&result_layout,entries:&[wgpu::BindGroupEntry{binding:0,resource:result_buffer.as_entire_binding()}]});
+        let fine_view=rain.fine_texture.create_view(&Default::default());
+        let helper_bind=device.create_bind_group(&wgpu::BindGroupDescriptor{label:None,layout:&helper_layout,entries:&[
+            wgpu::BindGroupEntry{binding:2,resource:wgpu::BindingResource::TextureView(&fine_view)},wgpu::BindGroupEntry{binding:3,resource:rain.fine_mask_buffer.as_entire_binding()}]});
+        let pipeline_layout=device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{label:None,bind_group_layouts:&[Some(&result_layout),Some(&helper_layout)],immediate_size:0});
+        let pipeline=device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{label:None,layout:Some(&pipeline_layout),module:&shader,entry_point:Some("cs_probe"),compilation_options:Default::default(),cache:None});
+        let mut encoder=device.create_command_encoder(&Default::default());
+        {let mut pass=encoder.begin_compute_pass(&Default::default());pass.set_pipeline(&pipeline);pass.set_bind_group(0,&result_bind,&[]);pass.set_bind_group(1,&helper_bind,&[]);pass.dispatch_workgroups(1,1,1);}
+        encoder.copy_buffer_to_buffer(&result_buffer,0,&readback,0,48);queue.submit(Some(encoder.finish()));
+        let slice=readback.slice(..48);let(tx,rx)=std::sync::mpsc::channel();slice.map_async(wgpu::MapMode::Read,move|r|{let _=tx.send(r);});
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();rx.recv().unwrap().unwrap();let data=slice.get_mapped_range();
+        let actual:&[f32]=bytemuck::cast_slice(&data);assert_eq!(&actual[..4],&[1.,0.,0.,1.]);
+        assert!((actual[4]-3.).abs()<1e-6 && (actual[5]-0.625).abs()<1e-6,"Actual native lower triangle: {actual:?}");
+        assert_eq!(actual[8],3.);assert_eq!(actual[9],0.,"Native upper triangle is above horizontal head");drop(data);readback.unmap();
     }
 }
