@@ -1,12 +1,16 @@
 #include <Poseidon/Dev/Harness/HarnessBuiltins.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
+#include <Poseidon/Input/KeyInput.hpp>
 using namespace Poseidon;
 #include <Poseidon/Dev/Harness/HarnessServer.hpp>
 #include <Poseidon/Dev/Harness/HarnessProtocol.hpp>
 
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/World/WorldInputContext.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/World/Scene/Camera/Camera.hpp>
+#include <Poseidon/World/Weather/AirflowField.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/World/Weather/SandField.hpp>
@@ -51,6 +55,7 @@ using namespace Poseidon;
 #include <Poseidon/Network/MasterServerServiceClient.hpp>
 #include <Poseidon/Network/MasterServerBrowser.hpp>
 #include <Poseidon/Network/HttpTestRewrite.hpp>
+#include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp>
 #include <Poseidon/AI/AIUnit.hpp>
 #include <Poseidon/AI/InfantryCombat.hpp>
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
@@ -82,6 +87,11 @@ using namespace Poseidon;
 #include <cstdlib>
 #include <string>
 #include <thread>
+
+namespace Poseidon
+{
+extern Input GInput;
+}
 
 namespace Poseidon::Dev
 {
@@ -2207,6 +2217,105 @@ void RegisterSqf(HarnessServer& hs)
 
 void RegisterSnowProbe(HarnessServer& hs)
 {
+    hs.RegisterCommand({"rotor_state", "Read-only nearest helicopter flight/input state; no flight setters",
+                        {{"x","float",true},{"z","float",true},{"radius","float",false}}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if (!GWorld || !GLandscape || GWorld->GetMode() == GModeNetware)
+                return HarnessProtocol::ErrorResponse("singleplayer world/landscape required");
+            const auto* x = cJSON_GetObjectItemCaseSensitive(root,"x");
+            const auto* z = cJSON_GetObjectItemCaseSensitive(root,"z");
+            const auto* radiusValue = cJSON_GetObjectItemCaseSensitive(root,"radius");
+            const double extent = double(GLandscape->GetLandRange()) * GLandscape->GetLandGrid();
+            if (!cJSON_IsNumber(x) || !cJSON_IsNumber(z) || !std::isfinite(x->valuedouble) ||
+                !std::isfinite(z->valuedouble) || !std::isfinite(extent) || extent <= 0 ||
+                x->valuedouble < 0 || z->valuedouble < 0 || x->valuedouble >= extent || z->valuedouble >= extent ||
+                x->valuedouble > 1000000 || z->valuedouble > 1000000)
+                return HarnessProtocol::ErrorResponse("finite in-map world x/z required");
+            const double radius = radiusValue ? radiusValue->valuedouble : 16.0;
+            if ((radiusValue && !cJSON_IsNumber(radiusValue)) || !std::isfinite(radius) || radius < 1 || radius > 50)
+                return HarnessProtocol::ErrorResponse("radius must be finite 1..50 metres");
+            const int count = GWorld->NVehicles();
+            if (count < 0 || count > 4096)
+                return HarnessProtocol::ErrorResponse("vehicle census exceeds bounded diagnostic capacity");
+            Helicopter* nearest = nullptr;
+            double nearestSquared = radius * radius;
+            unsigned candidates = 0;
+            for (int i = 0; i < count; ++i) {
+                auto* heli = dyn_cast<Helicopter>(GWorld->GetVehicle(i));
+                if (!heli) continue;
+                const Vector3 p = heli->Position();
+                if (!std::isfinite(p.X()) || !std::isfinite(p.Y()) || !std::isfinite(p.Z())) continue;
+                const double dx = double(p.X())-x->valuedouble, dz = double(p.Z())-z->valuedouble;
+                const double distance = dx*dx+dz*dz;
+                if (distance > radius*radius) continue;
+                ++candidates;
+                if (!nearest || distance < nearestSquared ||
+                    (distance == nearestSquared && heli->RenderId() < nearest->RenderId())) {
+                    nearest = heli; nearestSquared = distance;
+                }
+            }
+            if (!nearest) return HarnessProtocol::ErrorResponse("no finite helicopter within bounded radius");
+            if (!nearest->GetType()) return HarnessProtocol::ErrorResponse("helicopter type unavailable");
+            const Vector3 p = nearest->Position(), up = nearest->DirectionUp(), speed = nearest->Speed();
+            const float ground = GLandscape->SurfaceY(p.X(),p.Z());
+            const float clearance = p.Y()-ground;
+            const float rpm = nearest->RotorSpeed(), fuel = nearest->GetFuel(), damage = nearest->GetTotalDammage();
+            auto& input = InputSubsystem::Instance();
+            const float moveUp = input.GetAction(InputContext::HeliPilot,UAMoveUp);
+            const float moveDown = input.GetAction(InputContext::HeliPilot,UAMoveDown);
+            const float rawMoveUp = input.GetAction(InputContext::HeliPilot,UAMoveUp,false);
+            const float localScale = GAirflow.LocalScale();
+            for (const float value : {p.X(),p.Y(),p.Z(),up.X(),up.Y(),up.Z(),speed.X(),speed.Y(),speed.Z(),
+                                      ground,clearance,rpm,fuel,damage,moveUp,moveDown,rawMoveUp,localScale})
+                if (!std::isfinite(value)) return HarnessProtocol::ErrorResponse("nonfinite helicopter/input state");
+            Person* driver = nearest->Driver();
+            AIUnit* driverBrain = driver ? driver->Brain() : nullptr;
+            Person* player = GWorld->PlayerOn();
+            const auto resolved = GWorld->ResolveInputContextResolution();
+            auto* out = cJSON_CreateObject();
+            cJSON_AddBoolToObject(out,"readonly",true);
+            cJSON_AddNumberToObject(out,"timeMs",Glob.time.toInt());
+            cJSON_AddNumberToObject(out,"object",nearest->RenderId());
+            cJSON_AddStringToObject(out,"class",nearest->GetType()->GetName());
+            cJSON_AddStringToObject(out,"model",nearest->GetShape() ? nearest->GetShape()->Name() : "");
+            cJSON_AddNumberToObject(out,"candidates",candidates);
+            cJSON_AddNumberToObject(out,"distanceXZ",std::sqrt(nearestSquared));
+            cJSON_AddNumberToObject(out,"x",p.X()); cJSON_AddNumberToObject(out,"y",p.Y()); cJSON_AddNumberToObject(out,"z",p.Z());
+            cJSON_AddNumberToObject(out,"groundY",ground); cJSON_AddNumberToObject(out,"clearance",clearance);
+            cJSON_AddNumberToObject(out,"rpm",rpm); cJSON_AddBoolToObject(out,"engineOn",nearest->EngineIsOn());
+            cJSON_AddNumberToObject(out,"upX",up.X()); cJSON_AddNumberToObject(out,"upY",up.Y()); cJSON_AddNumberToObject(out,"upZ",up.Z());
+            cJSON_AddNumberToObject(out,"speedX",speed.X()); cJSON_AddNumberToObject(out,"speedY",speed.Y()); cJSON_AddNumberToObject(out,"speedZ",speed.Z());
+            cJSON_AddNumberToObject(out,"fuel",fuel); cJSON_AddNumberToObject(out,"damage",damage);
+            cJSON_AddBoolToObject(out,"destroyed",nearest->IsDammageDestroyed());
+            cJSON_AddBoolToObject(out,"local",nearest->IsLocal()); cJSON_AddBoolToObject(out,"airborne",nearest->Airborne());
+            cJSON_AddBoolToObject(out,"driverPresent",driver != nullptr);
+            cJSON_AddBoolToObject(out,"driverBrain",driverBrain != nullptr);
+            cJSON_AddBoolToObject(out,"driverLocal",driver && driver->IsLocal());
+            cJSON_AddBoolToObject(out,"driverAlive",driver && !driver->IsDammageDestroyed());
+            cJSON_AddBoolToObject(out,"driverIsPlayer",driver && driver == player);
+            cJSON_AddBoolToObject(out,"pilotIsPlayer",player && nearest->PilotUnit() == player->Brain());
+            cJSON_AddBoolToObject(out,"focusIsDriver",driverBrain && driverBrain == GWorld->FocusOn());
+            cJSON_AddNumberToObject(out,"driverState",driverBrain ? int(driverBrain->GetState()) : -1);
+            cJSON_AddBoolToObject(out,"manual",nearest->QIsManual());
+            cJSON_AddBoolToObject(out,"driverManual",driver && driver->QIsManual());
+            cJSON_AddBoolToObject(out,"playerManual",GWorld->PlayerManual());
+            cJSON_AddBoolToObject(out,"playerSuspended",GWorld->GetPlayerSuspended());
+            cJSON_AddBoolToObject(out,"cameraEffect",GWorld->GetCameraEffect() != nullptr);
+            cJSON_AddStringToObject(out,"inputContext",InputContextName(input.GetContext()));
+            cJSON_AddStringToObject(out,"resolvedContext",InputContextName(resolved.context));
+            cJSON_AddStringToObject(out,"inputSeat",InputSeatContextName(resolved.seat));
+            cJSON_AddBoolToObject(out,"resolvedHelicopter",resolved.transport == nearest);
+            cJSON_AddNumberToObject(out,"moveUp",moveUp); cJSON_AddNumberToObject(out,"moveDown",moveDown);
+            cJSON_AddNumberToObject(out,"unfocusedMoveUp",rawMoveUp);
+            cJSON_AddNumberToObject(out,"focusLost",GInput.gameFocusLost);
+            cJSON_AddNumberToObject(out,"qKey",GInput.keyboard.keys[SDL_SCANCODE_Q]);
+            cJSON_AddBoolToObject(out,"airflowEnabled",GAirflow.LocalEnabled()); cJSON_AddNumberToObject(out,"airflowScale",localScale);
+            const auto* camera = GScene ? GScene->GetCamera() : nullptr;
+            const float distance = camera ? (camera->Position()-p).Size() : -1.0f;
+            cJSON_AddBoolToObject(out,"cameraDistanceValid",camera && std::isfinite(distance));
+            cJSON_AddNumberToObject(out,"cameraDistance",std::isfinite(distance) ? distance : -1.0f);
+            return HarnessProtocol::JsonResponse(out);
+        });
     hs.RegisterCommand({"dev_rain_water", "Read-only simulation runoff cells and water budget", {}},
         [](const std::string&, cJSON* root) -> std::string {
             const char* action = HarnessProtocol::GetString(root,"action");
