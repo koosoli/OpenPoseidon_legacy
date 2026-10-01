@@ -15,6 +15,17 @@ $culture=[Globalization.CultureInfo]::InvariantCulture
 # Audited physical ViewGeometry roof width 4.78717685m; 4m pitch overlaps it.
 $canopyOffsets=@(-8,-4,0,4,8)
 function Require([bool]$condition,[string]$message) {if (!$condition) {throw $message}}
+function Wet-Ready($weather,$soil) {
+    foreach($value in @($weather.liquidRain,$weather.rain,$soil.wetness)) {
+        if($null -eq $value -or $value -isnot [ValueType] -or $value -is [bool] -or
+           [double]::IsNaN([double]$value) -or [double]::IsInfinity([double]$value) -or $value -lt 0 -or $value -gt 1) {return $false}
+    }
+    if($weather.particleSnowflakes -ne $false -or [Math]::Abs($weather.liquidRain-$weather.rain) -gt .00001) {return $false}
+    # Actual policy's largest possible dry density is dry*dry (force<=1).
+    # Reserve margin below its .025 emission floor; do not demand storm=.95.
+    $dry=(1-$soil.wetness)*(1-$weather.liquidRain)
+    return $weather.liquidRain -gt .25 -and $soil.wetness -ge .3 -and $dry*$dry -lt .02
+}
 function Number([double]$value) {
     Require (![double]::IsNaN($value) -and ![double]::IsInfinity($value)) 'Nonfinite fixture number.'
     return $value.ToString('R',$culture)
@@ -91,6 +102,9 @@ if ($SelfTest) {
     Require ($canopyOffsets.Count -eq 5) 'Dense canopy count changed.'
     for($i=1;$i -lt $canopyOffsets.Count;++$i) {Require (($canopyOffsets[$i]-$canopyOffsets[$i-1]) -lt 4.78717685) 'Physical ViewGeometry roofs leave a known X gap.'}
     Require (6 -gt 4.78717685) 'Old 6m pitch must remain a source-gap negative control.'
+    Require (Wet-Ready @{rain=.47823584;liquidRain=.47823584;particleSnowflakes=$false} @{wetness=.81652033}) 'Actual wet-ground suppression-ready forcing refused.'
+    Require (!(Wet-Ready @{rain=.3;liquidRain=.3;particleSnowflakes=$false} @{wetness=.3})) 'Insufficient actual suppression forcing accepted.'
+    Require (!(Wet-Ready @{rain=.9;liquidRain=.9;particleSnowflakes=$true} @{wetness=.9})) 'Snow accepted as natural liquid rain.'
     Write-Host 'PASS read-only rotor snapshot schema/falsifiers; failed flight authority remains evidence. No game.';return
 }
 if (!$env:LOCK_OWNER) {throw 'Run through scripts/with-game-lock.sh.'}
@@ -381,7 +395,7 @@ try {
     foreach($pose in $result.gates['high-altitude'].actualPositions) {Require ($pose[2]-(Height $pose[0] $pose[1]) -gt 35) 'Aircraft fell into the land emission window during high-altitude control.'}
     $ground=Place $SandX $SandZ $HoverHeight;$null=AwaitHover $SandX $SandZ
     Exec '0 setOvercast 1; 0 setRain 1; setAccTime 3';$until=[DateTime]::UtcNow.AddSeconds(90)
-    do {Start-Sleep -Milliseconds 400;$weather=Send @{cmd='weather_visibility'};$soil=Send @{cmd='dev_sand';action='state'};Require ([DateTime]::UtcNow -lt $until) 'Real rain failed to establish wet ground.'} while ($weather.liquidRain -lt .95 -or $soil.wetness -lt .3)
+    do {Start-Sleep -Milliseconds 400;$weather=Send @{cmd='weather_visibility'};$soil=Send @{cmd='dev_sand';action='state'};Require ([DateTime]::UtcNow -lt $until) 'Real rain failed to establish actual wet-ground dust suppression.'} while (!(Wet-Ready $weather $soil))
     Exec 'setAccTime 0';$result.gates.realWet=@{weather=$weather;soil=$soil;water=(Send @{cmd='dev_rain_water';action='sample';x=$SandX;z=$SandZ})}
     $rows=@(Observe 'real-rain-wet' $SandX $SandZ);Require (@($rows | Where-Object {$_.emitted -gt 0}).Count -eq 0) 'Wet actual rainy ground emitted dry dust.'
     # Read-only shallow-sea search; no water material/control setter is used.
