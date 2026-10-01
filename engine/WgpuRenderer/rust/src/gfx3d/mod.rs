@@ -7,6 +7,8 @@ mod allocation_report;
 mod mesh_facts;
 #[cfg(test)]
 mod object_snow_tests;
+#[cfg(test)]
+mod church_snow_tests;
 mod mesh_ack;
 mod palette_content_witness;
 pub(crate) mod main_count_completion;
