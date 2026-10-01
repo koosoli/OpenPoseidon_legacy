@@ -840,6 +840,12 @@ void World::SimulateCloudlets(float deltaT)
             {
                 runoff.SetSeaLevel(GLandscape->GetSeaLevel());
                 runoff.Advance(deltaT,liquidRain,solar,GWind.IsActive() ? GWind.Sample().speed/20.0f : 0);
+                const auto natural=runoff.UpdateNaturalTerrain(GLandscape,terrainRange,GLandscape->GetTerrainGrid(),
+                    GLandscape->HeightRevision(),fineSupport,deltaT,[](int x,int z){return GLandscape->GetHeight(z,x);});
+                if(natural.changed||natural.refused)
+                    LOG_INFO(Graphics,"RAIN_WATER_NATURAL_SOURCE world={} sourceRevision={} admitted={} retired={} refused={} examined={} valid={} tiles={} enabled={} presentation=pending",
+                        GLandscape->GetName(),GLandscape->HeightRevision(),natural.admitted,natural.retired,natural.refused,
+                        natural.examined,natural.valid,runoff.FineTileCount(),fineSupport);
             }
             else if(runoff.FineActive())
             {

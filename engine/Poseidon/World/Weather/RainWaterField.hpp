@@ -6,6 +6,7 @@
 #include <vector>
 #include <array>
 #include <optional>
+#include <map>
 #include "RainWaterFine.hpp"
 
 namespace Poseidon
@@ -25,6 +26,10 @@ public:
     static constexpr size_t FineTileLimit=8,FootprintLimit=32;
     struct EditFootprint {int minX=0,minZ=0,maxX=0,maxZ=0;uint64_t first=0,last=0;};
     struct FineUpdate {size_t admitted=0,updated=0,refused=0;bool changed=false,coverageLost=false,valid=true,native=false;};
+    struct NaturalUpdate {size_t admitted=0,retired=0,refused=0,examined=0;bool changed=false,valid=true;};
+    static constexpr double NaturalInterval=5.0,NaturalDrySeconds=10.0;
+    // Scheduling only: not a physical wet/dry definition or renderer mask.
+    static constexpr double NaturalPeakDepth=.002,NaturalExcessDepth=.001;
     struct FinePublication {
         uint64_t generation=0,revision=0,sourceRevision=0;
         bool valid=false;
@@ -216,13 +221,16 @@ public:
         if(_width==0)return report; // keep before-rain footprints queued
         if(_sourceApplied==revision&&!_sourceDirty)return report;
         report.changed=true;report.coverageLost=_sourceGap||_sourceLatest!=revision;
+        // An unobserved edit might overlap a natural owner: keep that existing
+        // owner pinned rather than retire a potentially authored crater later.
+        if(report.coverageLost)_naturalTiles.clear();
         const auto grid=AlignedSourceGrid(range,sourceSpacing);
         report.native=sourceSpacing==6.25f&&_spacing==25&&grid.stride==4&&
             _width==grid.side&&_height==grid.side&&_originX==0&&_originZ==0;
         bool refreshed=true;
         if(_fine&&!report.native&&_fine->TileCount()) {
             refreshed=_fine->RegridDomain(_width,_height,_spacing,_bed,_originX-_spacing*.5,_originZ-_spacing*.5);
-            if(refreshed)++_generation;
+            if(refreshed){++_generation;_naturalTiles.clear();}
         }
         if(_fine&&report.native)for(const auto& tile:_fine->Tiles()) {
             const auto geometry=ReadTile(tile.first,tile.second,range,sample,false);
@@ -238,7 +246,7 @@ public:
                 if(count>128-candidates){report.refused+=count;continue;}
                 candidates+=count;
                 for(int z=az;z<=bz;++z)for(int x=ax;x<=bx;++x) {
-                    if(_fine&&_fine->HasTile(x,z))continue;
+                    if(_fine&&_fine->HasTile(x,z)){_naturalTiles.erase({x,z});continue;}
                     if(FineTileCount()>=FineTileLimit){++report.refused;continue;}
                     const auto geometry=ReadTile(x,z,range,sample,true);
                     if(geometry.empty()||!ActivateFine()||!_fine->RefineTileGeometry(x,z,geometry)){++report.refused;continue;}
@@ -249,6 +257,82 @@ public:
         _fineStale=!refreshed;report.valid=refreshed;
         if(refreshed){_sourceApplied=revision;_sourceLatest=revision;_sourceDirty=false;_sourceGap=false;_editCount=0;}
         if(_fine){++_revision;SyncFine();}return report;
+    }
+    // Ordinary retained runoff can request native resolution without forging a
+    // HeightChange footprint. Only real simulation time schedules this work;
+    // camera/render queries never promote, retire, or move water.
+    template<class Sampler>
+    NaturalUpdate UpdateNaturalTerrain(const void* owner,int range,float sourceSpacing,uint64_t revision,
+        bool enabled,float seconds,Sampler sample) {
+        NaturalUpdate report;
+        if(!enabled||!std::isfinite(seconds)||seconds<=0||_width==0)return report;
+        const auto grid=AlignedSourceGrid(range,sourceSpacing);
+        if(!owner||!(SourceIdentity{owner,range,sourceSpacing}==_source)||
+           _sourceApplied!=revision||_sourceDirty||_fineStale) {report.valid=false;return report;}
+        // Exact current paired ABI: do not invent an alternative layout for an
+        // unsupported source resolution or partially covered outer tile.
+        if(sourceSpacing!=6.25f||_spacing!=25||grid.stride!=4||
+           _width!=grid.side||_height!=grid.side||_originX!=0||_originZ!=0)return report;
+        for(auto& [tile,dry]:_naturalTiles) {
+            if(_fine->TileVolume(tile.first,tile.second)!=0)dry=-1;
+            // The first observed empty tick starts the quiet interval. Its
+            // elapsed time cannot prove when a formerly wet owner drained.
+            else dry=dry<0?0:dry+seconds;
+        }
+        _naturalPending+=seconds;
+        if(_naturalPending<NaturalInterval)return report;
+        // Coalesce missed scheduling slots; the solver's physical pending time
+        // is separate and retained. A long tick cannot create a scan backlog.
+        _naturalPending=std::fmod(_naturalPending,NaturalInterval);
+        // Retire only exact emptiness after a quiet interval. No residual-volume
+        // threshold, wet eviction, or loss of the global water budget is allowed.
+        for(auto i=_naturalTiles.begin();i!=_naturalTiles.end();) {
+            if(i->second>=NaturalDrySeconds&&_fine->CoarsenDryTile(i->first.first,i->first.second,_bed)) {
+                i=_naturalTiles.erase(i);++report.retired;++_generation;
+            }else ++i;
+        }
+        if(report.retired)SyncFine();
+        const size_t columns=size_t((_width+7)/8),rows=size_t((_height+7)/8);
+        if(_naturalRefusedRevision!=revision||_naturalRefused.size()!=columns*rows) {
+            _naturalRefused.assign(columns*rows,false);_naturalRefusedRevision=revision;
+        }
+        // This bounded coarse scan reads at most 513^2 cached depths every five
+        // sim seconds; native geometry is read only for at most two candidates.
+        double sum=0;size_t inland=0;
+        for(size_t i=0;i<_depth.size();++i)if(_bed[i]>_seaLevel){sum+=_depth[i];++inland;}
+        const double background=inland?sum/inland:0;
+        struct Candidate {int x,z;double excess;};
+        std::vector<Candidate> candidates;
+        if(FineTileCount()<FineTileLimit)for(size_t z=1;z<rows;++z)for(size_t x=1;x<columns;++x) {
+            if((x+1)*8>size_t(_width)||(z+1)*8>size_t(_height)||
+               int(x*32+30)>=range||int(z*32+30)>=range||_naturalRefused[z*columns+x]||
+               (_fine&&_fine->HasTile(int(x),int(z))))continue;
+            double peak=0,excess=0;bool inlandTile=true;
+            for(size_t iz=z*8;iz<(z+1)*8;++iz)for(size_t ix=x*8;ix<(x+1)*8;++ix) {
+                const size_t i=iz*_width+ix;
+                inlandTile&=_bed[i]>_seaLevel;peak=std::max(peak,double(_depth[i]));
+                excess+=std::max(0.0,double(_depth[i])-background)*_spacing*_spacing;
+            }
+            if(inlandTile&&peak>NaturalPeakDepth&&peak>background+NaturalExcessDepth&&excess>0)
+                candidates.push_back({int(x),int(z),excess});
+        }
+        std::sort(candidates.begin(),candidates.end(),[](const auto& a,const auto& b){
+            if(a.excess!=b.excess)return a.excess>b.excess;
+            return std::pair{a.z,a.x}<std::pair{b.z,b.x};
+        });
+        for(const auto& c:candidates) {
+            if(report.examined==2)break;
+            ++report.examined;
+            const auto geometry=ReadTile(c.x,c.z,range,sample,true);
+            if(geometry.empty()) {
+                _naturalRefused[size_t(c.z)*columns+c.x]=true;++report.refused;continue;
+            }
+            if(!ActivateFine()||!_fine->RefineTileGeometry(c.x,c.z,geometry)){++report.refused;break;}
+            _naturalTiles[{c.x,c.z}]=-1;++report.admitted;++_generation;break;
+        }
+        report.changed=report.admitted||report.retired;
+        if(report.changed){++_revision;SyncFine();}
+        return report;
     }
     // Default legacy domain change still uses Configure/reset. An already
     // enabled fine backend retains total mass through explicit regrid density
@@ -262,7 +346,8 @@ public:
         _width=width;_height=height;_spacing=spacing;_bed.assign(bed.begin(),bed.end());
         _depth.resize(bed.size());_flowX.resize(bed.size());_flowZ.resize(bed.size());
         _out.resize(bed.size());_delta.resize(bed.size());++_generation;++_revision;
-        _sourceDirty=true;_fineStale=true;_sourceApplied=0;SyncFine();return true;
+        _sourceDirty=true;_fineStale=true;_sourceApplied=0;_naturalTiles.clear();
+        _naturalPending=0;_naturalRefused.clear();SyncFine();return true;
     }
 private:
     void InvalidateFineSource() {
@@ -381,6 +466,10 @@ private:
     size_t _editCount=0;
     uint64_t _sourceLatest=0,_sourceApplied=0;
     bool _sourceGap=false,_sourceDirty=false,_fineStale=false;
+    std::map<std::pair<int,int>,double> _naturalTiles;
+    std::vector<bool> _naturalRefused;
+    uint64_t _naturalRefusedRevision=0;
+    double _naturalPending=0;
 };
 inline RainWaterField& GRainWater() { static RainWaterField field; return field; }
 }

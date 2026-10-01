@@ -94,15 +94,29 @@ public:
         if(bed.size()!=size_t(w*h*Ratio*Ratio)||!FiniteBed(bed)) return false;
         const auto key=std::pair{tx,tz}; const bool existing=_tiles.contains(key);
         if(!existing&&_tiles.size()>=_tileLimit) return false;
+        uint32_t block=0;
+        if(!existing) {
+            const uint32_t count=uint32_t(w*h*Ratio*Ratio);
+            const auto free=std::find_if(_freeBlocks.begin(),_freeBlocks.end(),[count](const auto& b){return b.second>=count;});
+            if(free!=_freeBlocks.end()) {
+                block=free->first;free->first+=count;free->second-=count;
+                if(!free->second)_freeBlocks.erase(free);
+            } else {
+                block=uint32_t(_cells.size());_cells.resize(_cells.size()+count);
+                _geometry.resize(_cells.size()-_children.size());
+            }
+        }
         for(int z=0;z<h;++z) for(int x=0;x<w;++x) {
             const auto p=uint32_t((z0+z)*_width+x0+x);
             if(!existing) {
-                _children[p]=uint32_t(_cells.size());
+                _children[p]=block+uint32_t((z*w+x)*Ratio*Ratio);
                 const double share=_cells[p].volume/(Ratio*Ratio);
+                const float fx=_cells[p].flowX,fz=_cells[p].flowZ;
                 _cells[p].volume=0;_cells[p].active=false;
                 for(int cz=0;cz<Ratio;++cz) for(int cx=0;cx<Ratio;++cx) {
-                    _cells.push_back({share,0,0,0,p,uint16_t(cz*Ratio+cx),true});
-                    _geometry.push_back(RainWaterCellGeometry::Flat(0));
+                    const auto i=_children[p]+cz*Ratio+cx;
+                    _cells[i]={share,0,fx,fz,p,uint16_t(cz*Ratio+cx),true};
+                    _geometry[i-_children.size()]=RainWaterCellGeometry::Flat(0);
                 }
             }
             for(int cz=0;cz<Ratio;++cz) for(int cx=0;cx<Ratio;++cx) {
@@ -121,15 +135,69 @@ public:
         const int w=std::min(TileParents,_width-x0),h=std::min(TileParents,_height-z0);
         if(geometry.size()!=size_t(w*h*Ratio*Ratio)||
            !std::all_of(geometry.begin(),geometry.end(),[](const auto& g){return g.Finite();})) return false;
+        const bool existing=HasTile(tx,tz);
+        std::vector<double> reconstructed(geometry.size());
+        if(!existing)for(int z=0;z<h;++z)for(int x=0;x<w;++x) {
+            std::array<RainWaterCellGeometry,Ratio*Ratio> parent;
+            std::array<double,Ratio*Ratio> volumes;
+            for(int cz=0;cz<Ratio;++cz)for(int cx=0;cx<Ratio;++cx)
+                parent[cz*Ratio+cx]=geometry[(z*Ratio+cz)*w*Ratio+x*Ratio+cx];
+            const auto p=uint32_t((z0+z)*_width+x0+x);
+            if(!RainWaterReconstruct(parent,_cells[p].volume,(_spacing/Ratio)*(_spacing/Ratio),volumes))return false;
+            for(int cz=0;cz<Ratio;++cz)for(int cx=0;cx<Ratio;++cx)
+                reconstructed[(z*Ratio+cz)*w*Ratio+x*Ratio+cx]=volumes[cz*Ratio+cx];
+        }
         std::vector<float> minima;minima.reserve(geometry.size());
         for(const auto& g:geometry)minima.push_back(float(g.Minimum()));
         if(!RefineTile(tx,tz,minima))return false;
         for(int z=0;z<h;++z)for(int x=0;x<w;++x)for(int cz=0;cz<Ratio;++cz)for(int cx=0;cx<Ratio;++cx) {
             const auto i=Child(uint32_t((z0+z)*_width+x0+x),cx,cz);
-            _geometry[i-_children.size()]=geometry[(z*Ratio+cz)*w*Ratio+x*Ratio+cx];
+            const auto source=(z*Ratio+cz)*w*Ratio+x*Ratio+cx;
+            _geometry[i-_children.size()]=geometry[source];
+            if(!existing)_cells[i].volume=reconstructed[source];
         }
         RefreshHeads();return true;
     }
+    double TileVolume(int tx,int tz) const {
+        if(!HasTile(tx,tz))return 0;
+        const int x0=tx*TileParents,z0=tz*TileParents;
+        double volume=0;
+        for(int z=z0;z<std::min(z0+TileParents,_height);++z)
+            for(int x=x0;x<std::min(x0+TileParents,_width);++x)
+                for(int c=0;c<Ratio*Ratio;++c)volume+=_cells[_children[z*_width+x]+c].volume;
+        return volume;
+    }
+    // Only genuinely empty owners can retire. Wet topology is never evicted by
+    // interest/camera changes, and arbitrarily tiny nonzero volumes are retained.
+    bool CoarsenDryTile(int tx,int tz,std::span<const float> bed) {
+        const auto key=std::pair{tx,tz};
+        if(!HasTile(tx,tz)||bed.size()!=_children.size()||TileVolume(tx,tz)!=0)return false;
+        const int x0=tx*TileParents,z0=tz*TileParents;
+        const int w=std::min(TileParents,_width-x0),h=std::min(TileParents,_height-z0);
+        for(int z=0;z<h;++z)for(int x=0;x<w;++x)
+            if(!std::isfinite(bed[(z0+z)*_width+x0+x]))return false;
+        const uint32_t block=_children[z0*_width+x0];
+        for(int z=0;z<h;++z)for(int x=0;x<w;++x) {
+            const auto p=uint32_t((z0+z)*_width+x0+x);double volume=0;float fx=0,fz=0;
+            for(int c=0;c<Ratio*Ratio;++c) {
+                auto& child=_cells[_children[p]+c];volume+=child.volume;
+                fx+=child.flowX/(Ratio*Ratio);fz+=child.flowZ/(Ratio*Ratio);child.active=false;
+            }
+            _cells[p]={volume,bed[p],fx,fz,p,Coarse,true};_children[p]=Absent;
+        }
+        _tiles.erase(key);_freeBlocks.push_back({block,uint32_t(w*h*Ratio*Ratio)});
+        std::sort(_freeBlocks.begin(),_freeBlocks.end());
+        // Joining adjacent empty blocks also permits a complete tile to reuse
+        // storage formerly occupied by several partial compatibility tiles.
+        for(size_t i=1;i<_freeBlocks.size();) {
+            auto& previous=_freeBlocks[i-1];const auto next=_freeBlocks[i];
+            if(previous.first+previous.second==next.first) {
+                previous.second+=next.second;_freeBlocks.erase(_freeBlocks.begin()+i);
+            }else ++i;
+        }
+        BuildEdges();++_revision;return true;
+    }
+    size_t StorageOwnerSlots() const {return _cells.size();}
     bool SetCoarseBed(int x,int z,float bed) {
         if(x<0||z<0||x>=_width||z>=_height||!std::isfinite(bed)) return false;
         const auto p=uint32_t(z*_width+x);
@@ -364,5 +432,6 @@ private:
     std::vector<Cell> _cells;std::vector<uint32_t> _children;std::vector<Edge> _edges;
     std::vector<double> _out,_delta,_flux,_head;std::vector<RainWaterCellGeometry> _geometry;
     std::map<std::pair<int,int>,bool> _tiles;
+    std::vector<std::pair<uint32_t,uint32_t>> _freeBlocks;
 };
 }

@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <span>
 
 namespace Poseidon {
 // Exact integral of max(head - linear triangle height, 0). Heights are sorted
@@ -99,4 +100,40 @@ public:
         result=head;return true;
     }
 };
+// Conservative within-parent reconstruction: sixteen native triangle cells
+// share an equilibrium head, not an equal depth on unrelated beds. This is a
+// local sub-grid initialization, not recovery of an unknown historic shoreline.
+inline bool RainWaterReconstruct(std::span<const RainWaterCellGeometry> geometry,
+    double volume,double childArea,std::span<double> children) {
+    if(geometry.empty()||children.size()!=geometry.size()||!std::isfinite(volume)||volume<0||
+       !std::isfinite(childArea)||childArea<=0)return false;
+    double low=std::numeric_limits<double>::infinity(),high=-low;
+    for(const auto& g:geometry) {
+        if(!g.Finite())return false;
+        low=std::min(low,g.Minimum());high=std::max(high,g.Maximum());
+    }
+    if(volume==0){std::fill(children.begin(),children.end(),0.0);return true;}
+    high+=volume/(childArea*geometry.size());
+    if(!std::isfinite(high))return false;
+    double head=low;
+    for(int iteration=0;iteration<80;++iteration) {
+        head=low+(high-low)*.5;double sum=0;
+        for(const auto& g:geometry)sum+=g.Volume(head,childArea);
+        if(!std::isfinite(sum))return false;
+        if(std::abs(sum-volume)<=volume*1e-12||std::nextafter(low,high)>=high)break;
+        if(sum>volume)high=head;else low=head;
+    }
+    double sum=0;size_t residual=0;
+    for(size_t i=0;i<geometry.size();++i) {
+        children[i]=geometry[i].Volume(head,childArea);sum+=children[i];
+        if(children[i]>children[residual])residual=i;
+    }
+    // Preserve even sub-ULP water: never delete a tiny source volume merely
+    // because its reconstructed head rounds to the terrain minimum.
+    if(sum==0)for(size_t i=1;i<geometry.size();++i)
+        if(geometry[i].Minimum()<geometry[residual].Minimum())residual=i;
+    children[residual]+=volume-sum;
+    return std::all_of(children.begin(),children.end(),[](double v){return std::isfinite(v)&&v>=0;});
+}
+
 }
