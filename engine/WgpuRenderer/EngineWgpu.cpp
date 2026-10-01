@@ -1,5 +1,6 @@
 #include "MeshRecordClosure.hpp"
 #include "ObjectSnowSurface.hpp"
+#include "ChurchSnowSurface.hpp"
 #include "GroundMeshSurface.hpp"
 #include "TreeSnowSurface.hpp"
 #include "RainWaterPublication.hpp"
@@ -7504,15 +7505,96 @@ static bool ObjectSnowConformAllowed(const LODShapeWithShadow& shape, int mode)
     return ObjectSnowSurface::ConformAllowed(float(mode), hasKeep, hasPinned);
 }
 
+static_assert(ChurchSnowSurface::NoObjectSnow == WGR_MODEL_SECTION_NO_OBJECT_SNOW);
+
+static ChurchSnowSurface::ClockMask ChurchClockMask(const Shape& mesh)
+{
+    std::array<int, ChurchSnowSurface::ClockNames.size()> selections;
+    for (int i = 0; i < int(selections.size()); ++i)
+        selections[i] = mesh.FindNamedSel(ChurchSnowSurface::ClockNames[i].data());
+    return ChurchSnowSurface::BuildMask(mesh.NVertex(), [&](int i) {
+        return selections[i] < 0 ? 0 : mesh.NamedSel(selections[i]).Size();
+    }, [&](int i, int member) { return int(mesh.NamedSel(selections[i])[member]); });
+}
+
+struct ChurchSectionCorners
+{
+    std::array<uint16_t, ObjectSnowSurface::MaxProofVertices> vertices;
+    int count = 0;
+    bool valid = false;
+};
+
+static ChurchSectionCorners ReadChurchSectionCorners(const Shape& mesh, int begin, int end)
+{
+    ChurchSectionCorners result;
+    if (begin < 0 || end <= begin || end > mesh.NSections()) return result;
+    for (int section = begin; section < end; ++section)
+    {
+        const auto& source = mesh.GetSection(section);
+        for (Offset face = source.beg; face < source.end; mesh.NextFace(face))
+        {
+            const Poly& poly = mesh.Face(face);
+            if (poly.N() < 3 || poly.N() > ObjectSnowSurface::MaxProofVertices - result.count) return result;
+            for (int corner = 0; corner < poly.N(); ++corner)
+                result.vertices[result.count++] = poly.GetVertex(corner);
+        }
+    }
+    result.valid = result.count > 0;
+    return result;
+}
+
+static bool ChurchSectionClockDisjoint(const Shape& mesh, int begin, int end)
+{
+    const auto corners = ReadChurchSectionCorners(mesh, begin, end);
+    return corners.valid && ChurchSnowSurface::CornersDisjoint(ChurchClockMask(mesh),
+        corners.count, [&](int corner) { return corners.vertices[corner]; });
+}
+
+static ObjectSnowSurface::PosePair SnowVertexPose(const Shape& mesh, int vertex)
+{
+    const Vector3 pos = mesh.Pos(vertex), normal = mesh.Norm(vertex);
+    const Vector3 originalPos = mesh.OrigPos(vertex), originalNormal = mesh.OrigNorm(vertex);
+    return {{pos.X(), pos.Y(), pos.Z(), normal.X(), normal.Y(), normal.Z()},
+        {originalPos.X(), originalPos.Y(), originalPos.Z(),
+         originalNormal.X(), originalNormal.Y(), originalNormal.Z()}};
+}
+
+static bool ChurchFixedVisualsAllowed(const Object& obj, const LODShapeWithShadow& shape)
+{
+    // Exact built-in procedural owner only: subclasses and configured animations
+    // may transform geometry outside the eight Church clock selections.
+    if (typeid(obj) != typeid(Church) || !obj.Static() || obj.IsDestroyed() ||
+        shape.GetMapType() != MapChurch) return false;
+    const auto* entity = dyn_cast<const Entity>(&obj);
+    if (entity && entity->HasConfiguredGeometryAnimations()) return false;
+    int budget = ObjectSnowSurface::MaxProofVertices;
+    bool sawVisual = false;
+    for (int level = 0; level < shape.NLevels(); ++level)
+    {
+        if (!shape.IsNormalLevel(level)) continue;
+        const Shape* mesh = shape.Level(level);
+        if (!mesh || mesh->IsAnimated() || obj.DeformsSharedShape(level) ||
+            mesh->NVertex() <= 0 || mesh->NVertex() > budget || mesh->NNorm() < mesh->NVertex()) return false;
+        budget -= mesh->NVertex();
+        const auto mask = ChurchClockMask(*mesh);
+        if (!ChurchSnowSurface::FixedVerticesRigid(mask,
+            mesh->OriginalPosValid() && mesh->OriginalNormValid(),
+            [&](int vertex) { return SnowVertexPose(*mesh, vertex); })) return false;
+        sawVisual = true;
+    }
+    return sawVisual;
+}
+
 static bool ObjectSnowRetainedPoseAllowed(const Object& obj, const LODShapeWithShadow& shape)
 {
     const auto* entity = dyn_cast<const Entity>(&obj);
-    // These built-in owners have procedural geometry animations outside the
-    // configured Entity animation array. No reliable retained pose invalidation
-    // is available here; keep their complete models conservatively excluded.
+    // Procedural owners cannot inherit the ordinary whole-model pose proof.
+    // Exact Church fixed geometry has a bounded proof and per-section clock veto;
+    // Fountain and unknown subclasses retain their conservative exclusion.
     // Church/Fountain do not declare their own legacy casting IDs; use real
     // RTTI rather than inheriting Building's ID and rejecting every building.
-    if (dynamic_cast<const Church*>(&obj) || dynamic_cast<const Fountain*>(&obj)) return false;
+    if (dynamic_cast<const Church*>(&obj)) return ChurchFixedVisualsAllowed(obj, shape);
+    if (dynamic_cast<const Fountain*>(&obj)) return false;
     return ObjectSnowSurface::RetainedVisualsRigid(shape.NLevels(), shape.GetAllowAnimation(),
         entity && entity->HasConfiguredGeometryAnimations(), [&](int level) {
             ObjectSnowSurface::VisualPose state;
@@ -7565,6 +7647,29 @@ static bool CurrentSectionGeometryRigid(const Shape& mesh,
                 {originalPos.X(), originalPos.Y(), originalPos.Z(),
                  originalNormal.X(), originalNormal.Y(), originalNormal.Z()}};
         });
+}
+
+static bool ChurchFixedDirectSection(const Object& obj, const Shape& mesh,
+    const VertexBufferWgpu& buffer, int begin, int end)
+{
+    if (typeid(obj) != typeid(Church) || !obj.Static() || obj.IsDestroyed() ||
+        !obj.GetShape() || obj.GetShape()->GetMapType() != MapChurch ||
+        !ObjectOwnsSnowMesh(obj, mesh) || mesh.IsAnimated()) return false;
+    const auto* entity = dyn_cast<const Entity>(&obj);
+    if (entity && entity->HasConfiguredGeometryAnimations()) return false;
+    for (int level = 0; level < obj.GetShape()->NLevels(); ++level)
+        if (obj.GetShape()->Level(level) == &mesh && obj.DeformsSharedShape(level)) return false;
+    if (begin < 0 || end <= begin || end > buffer.sections.Size()) return false;
+    const auto mask = ChurchClockMask(mesh);
+    const auto corners = ReadChurchSectionCorners(mesh, begin, end);
+    if (!corners.valid || buffer.vertexCount != mesh.NVertex() || mesh.NNorm() < mesh.NVertex()) return false;
+    // Clock-only transformations cannot touch these actual corners, even when
+    // their bounding span contains interleaved moving hands. Save once only.
+    mesh.SaveOriginalPos();
+    return ChurchSnowSurface::FixedCornersRigid(mask, corners.count,
+        mesh.OriginalPosValid() && mesh.OriginalNormValid(),
+        [&](int corner) { return corners.vertices[corner]; },
+        [&](int vertex) { return SnowVertexPose(mesh, vertex); });
 }
 
 static bool CurrentSnowSectionRigid(const Object& obj, const Shape& mesh,
@@ -7629,7 +7734,8 @@ static const char* ObjectSnowFixtureModel(const Object& obj)
     }();
     if (!fixture || !obj.GetShape()) return nullptr;
     const char* name = obj.GetShape()->Name();
-    if (!name || (!ContainsNoCase(name, "stan_eastc") && !ContainsNoCase(name, "uaz"))) return nullptr;
+    if (!name || (!ContainsNoCase(name, "stan_eastc") && !ContainsNoCase(name, "uaz") &&
+        !ContainsNoCase(name, "kostel"))) return nullptr;
     return name;
 }
 
@@ -7647,7 +7753,8 @@ static void TraceObjectSnowReceiver(const Object& obj, bool eligible, const char
 
 static void TraceObjectSnowDirectGates(const Object& obj, const Shape& mesh,
     const VertexBufferWgpu& buffer, const WgrDraw3D& draw, int begin, int end,
-    int passKind, bool cpuPose, bool sourceEligible, bool rigidAttempted, bool rigidPassed)
+    int passKind, bool cpuPose, bool sourceEligible, bool rigidAttempted, bool rigidPassed,
+    bool churchFixedSection)
 {
     const char* name = ObjectSnowFixtureModel(obj);
     if (!name) return;
@@ -7659,7 +7766,7 @@ static void TraceObjectSnowDirectGates(const Object& obj, const Shape& mesh,
     const bool animated = obj.GetAnimated(mesh);
     const bool originals = mesh.OriginalPosValid() && mesh.OriginalNormValid();
     const uint32_t denied = (!ObjectSnowOwnerEligible(obj) ? 1u : 0u) |
-        (!ownsMesh ? 2u : 0u) | (animated ? 4u : 0u) |
+        (!ownsMesh ? 2u : 0u) | (animated && !churchFixedSection ? 4u : 0u) |
         (buffer.skinned ? 8u : 0u) | (buffer.cpuPosed ? 16u : 0u) |
         (cpuPose ? 32u : 0u) | (draw.palette_slot != WGR_NO_PALETTE ? 64u : 0u) |
         (passKind != int(render::PassKindHint::None) ? 128u : 0u) |
@@ -7680,13 +7787,13 @@ static void TraceObjectSnowDirectGates(const Object& obj, const Shape& mesh,
     if (!rows.insert(key).second) return;
     const auto* texture = begin >= 0 && begin < mesh.NSections()
         ? mesh.GetSection(begin).properties.GetTexture() : nullptr;
-    LOG_INFO(Graphics, "Wgpu object snow direct gates: model={} texture={} sections={}:{} denied=0x{:x} sourceEligible={} rigidAttempted={} rigidPassed={} dynamic={} skinned={} cpuPosed={} poseCopy={} palette={} pass={} ownsMesh={} ownerEligible={} ownerAnimated={} blend={} depth={} alphaRef={} vegetation={} flags=0x{:x} conform={} keep={} pinned={} originalPos={} originalNorm={} vertices={} normals={} bufferVertices={} snowEnabled={} deposit={:.4f}",
+    LOG_INFO(Graphics, "Wgpu object snow direct gates: model={} texture={} sections={}:{} denied=0x{:x} sourceEligible={} rigidAttempted={} rigidPassed={} dynamic={} skinned={} cpuPosed={} poseCopy={} palette={} pass={} ownsMesh={} ownerEligible={} ownerAnimated={} blend={} depth={} alphaRef={} vegetation={} flags=0x{:x} conform={} keep={} pinned={} originalPos={} originalNorm={} vertices={} normals={} bufferVertices={} snowEnabled={} deposit={:.4f} churchFixedSection={}",
         name, texture ? texture->Name() : "<none>", begin, end, denied, sourceEligible,
         rigidAttempted, rigidPassed, buffer.isDynamic, buffer.skinned, buffer.cpuPosed, cpuPose,
         draw.palette_slot, passKind, ownsMesh, ObjectSnowOwnerEligible(obj), animated,
         int(draw.blend), int(draw.depth), draw.alpha_ref, GCurrentIsVegetation, draw.flags,
         draw.conform2.z, keep, pinned, mesh.OriginalPosValid(), mesh.OriginalNormValid(),
-        mesh.NVertex(), mesh.NNorm(), buffer.vertexCount, snow.enabled, snow.Depth());
+        mesh.NVertex(), mesh.NNorm(), buffer.vertexCount, snow.enabled, snow.Depth(), churchFixedSection);
 }
 
 static void TraceObjectSnowRetainedGates(const Object& obj, int mode, bool eligible)
@@ -8767,17 +8874,25 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     d.palette_slot = _currentPaletteSlot;
 
     const auto* snowOwner = static_cast<const Object*>(GetDrawObject());
+    // Church reports the complete LOD animated even for its unchanged roof.
+    // Only an exact-owner, clock-disjoint, original/current section proof may
+    // override that hint; clock geometry and subclasses never receive this tag.
+    const bool churchFixedSection = snowOwner && typeid(*snowOwner) == typeid(Church) &&
+        !buf->skinned && !buf->cpuPosed && !_currentCpuPose &&
+        _currentPaletteSlot == WGR_NO_PALETTE &&
+        ChurchFixedDirectSection(*snowOwner, sMesh, *buf, beg, end);
     const bool snowSourceEligible = snowOwner && ObjectSnowOwnerEligible(*snowOwner) &&
         !buf->skinned && !buf->cpuPosed && !_currentCpuPose &&
         _currentPaletteSlot == WGR_NO_PALETTE && GetPassKindHint() == render::PassKindHint::None &&
-        ObjectOwnsSnowMesh(*snowOwner, sMesh) && !snowOwner->GetAnimated(sMesh) &&
+        ObjectOwnsSnowMesh(*snowOwner, sMesh) &&
+        (!snowOwner->GetAnimated(sMesh) || churchFixedSection) &&
         d.blend == WGR_BLEND_OPAQUE && d.depth == WGR_DEPTH_TEST_WRITE &&
         ObjectSnowSurface::ConformAllowed(d.conform2.z,
             (sMesh.GetOrHints() & ClipLandKeep) != 0, (sMesh.GetOrHints() & ClipLandOn) != 0) &&
         !GCurrentIsVegetation && (d.flags & (WGR_DRAW3D_ON_SURFACE | WGR_DRAW3D_REFLECTIVE |
             WGR_DRAW3D_GLASS | WGR_DRAW3D_COCKPIT | WGR_DRAW3D_MONITOR)) == 0;
     const bool snowRigidAttempted = snowSourceEligible && buf->isDynamic;
-    const bool snowRigidPassed = !buf->isDynamic ||
+    const bool snowRigidPassed = churchFixedSection || !buf->isDynamic ||
         (snowRigidAttempted && CurrentSnowSectionRigid(*snowOwner, sMesh, *buf, beg, end));
     const bool snowReceiver = snowSourceEligible && snowRigidPassed;
     if (snowReceiver) d.flags |= WGR_DRAW3D_SNOW_RECEIVER;
@@ -8808,7 +8923,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         TraceObjectSnowReceiver(*snowOwner, snowReceiver, "direct");
         TraceObjectSnowDirectGates(*snowOwner, sMesh, *buf, d, beg, end,
             int(GetPassKindHint()), _currentCpuPose != nullptr, snowSourceEligible,
-            snowRigidAttempted, snowRigidPassed);
+            snowRigidAttempted, snowRigidPassed, churchFixedSection);
     }
 
     // Per-material sun lighting, folded exactly like GL33's
@@ -14350,6 +14465,11 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // now from the current (undeformed, ClipLand-clips-intact) geometry. Idempotent.
             s->SaveOriginalPos();
         }
+        // Church snow proves only immutable geometry. Capture source normals and
+        // positions at model registration; clock vertices receive an independent
+        // section veto and are never licensed by this snapshot.
+        if (shape->GetMapType() == MapChurch && s->NVertex() <= ObjectSnowSurface::MaxProofVertices)
+            s->SaveOriginalPos();
         // OWN the geometry: create a DEDICATED pool mesh from the shape's data rather than
         // borrowing the shape's transient `_buffer`. ShapeBank::OptimizeAll releases every
         // shape vertex buffer during world load (after object placement, i.e. after we
@@ -15040,6 +15160,9 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                     LOG_INFO(Graphics, "FOREST_SNOW_ATLAS model={} lod={} resolution={} texture={} category={} alphaRef={} scope=audited-uv-crowns-map-only",
                         shape->Name(), level, shape->Resolution(level), face->SourceName(), uint32_t(atlas), mat.alpha_ref);
             }
+            if (shape->GetMapType() == MapChurch &&
+                !ChurchSectionClockDisjoint(*s, i, i + 1))
+                sec.flags |= WGR_MODEL_SECTION_NO_OBJECT_SNOW;
             ++g_bakedSections;
             g_bakedSectionTris += sec.index_count / 3;
             sections.push_back(sec);

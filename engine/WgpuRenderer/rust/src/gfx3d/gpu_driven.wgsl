@@ -161,6 +161,7 @@ const SECTION_MASK_UV1: u32 = 4u;
 // `_NMO`, both of which keep the (a, g) read.
 const SECTION_NORMAL_RG: u32 = 8u;
 const SECTION_NATIVE_PBR_PREVIEW: u32 = 64u;
+const SECTION_NO_OBJECT_SNOW: u32 = 128u;
 // SectionMaterial.flags bit 5 (WGR_MODEL_SECTION_GLOBALNMO_UV1): the global
 // normal map (`UVSrcGlobNormal "UV set 2"`) is painted in the object's own
 // unwrap, so it is sampled with uv1, unscaled -- the tiling transform belongs
@@ -756,7 +757,7 @@ fn retained_snow_receiver(in: VsOut) -> bool {
     // Retained draws are opaque/cutout. Original base alpha drives their discard
     // and A2C coverage independently of the RGB-only snow material layer.
     return (in.surface_receivers & 1u) != 0u &&
-        (sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER)) == 0u &&
+        (sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER | SECTION_NO_OBJECT_SNOW)) == 0u &&
         dot(sm.emissive.rgb, sm.emissive.rgb) < 1e-8 && dot(in.normal, in.normal) > 1e-8;
 }
 

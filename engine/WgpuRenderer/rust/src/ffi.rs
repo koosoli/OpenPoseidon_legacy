@@ -286,6 +286,8 @@ pub const WGR_MODEL_SECTION_NATIVE_CAVITY: u32 = 16;
 // WgrModelSection::flags bit 5: the global normal map is painted in the
 // object's own unwrap -- sample it with uv1, unscaled.
 pub const WGR_MODEL_SECTION_GLOBALNMO_UV1: u32 = 32;
+// Bounded Church fixed-roof proof excludes every clock-intersecting section.
+pub const WGR_MODEL_SECTION_NO_OBJECT_SNOW: u32 = 128;
 pub const WGR_DRAW3D_NIGHT_EMITTER: u32 = 4;
 // WgrDraw3D::flags bit 3 (MAT-051): classic GLASS -- alpha-blended pane whose texture is
 // continuous partial alpha. The shader floors output alpha so the pane reads head-on.

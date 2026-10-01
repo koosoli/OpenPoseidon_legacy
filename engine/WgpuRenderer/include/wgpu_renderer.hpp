@@ -442,7 +442,10 @@ enum WgrModelSectionFlags : uint32_t
     WGR_MODEL_SECTION_GLOBALNMO_UV1 = 32u,
     /* Experimental native-only PBR channel preview. Never set for legacy,
      * converted, layered, cutout or non-original texture sources. */
-    WGR_MODEL_SECTION_NATIVE_PBR_PREVIEW = 64u
+    WGR_MODEL_SECTION_NATIVE_PBR_PREVIEW = 64u,
+    /* Section intersects a known procedural clock selection or lacks its proof.
+     * Snow colour/normal must both refuse it; existing alpha and draw ownership remain. */
+    WGR_MODEL_SECTION_NO_OBJECT_SNOW = 128u
 };
 
 /* Per-section shading, parallel to a model's sections (one per section). The RAW
