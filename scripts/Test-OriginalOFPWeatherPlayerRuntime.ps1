@@ -24,7 +24,9 @@ function Assert-Tuple($s,$expected,[string]$world,[string]$kind){
  else{Require ($s.offset-ge -.35001 -and $s.offset-le .00001) 'Actual mud geometry exceeds signed contract.'}
  Require ((Key $s.world)-match ('(^|/)'+$world+'\.wrp$')) 'Runtime original world differs from selected mission.'
  Require ((Key $s.texture)-ceq (Key $expected.texture)) 'Actual lane texture differs from audited source.'
- $match=@($expected.quadrants|Where-Object{[string]$_.surfaceClass -ceq [string]$s.surfaceClass -and [string]$_.files -ceq [string]$s.files -and [string]$_.sound -ceq [string]$s.sound -and [string]$_.character -ceq [string]$s.character})
+ # Config class identity is case-insensitive; runtime canonicalizes Default.
+ # Authored file/sound/character values and the exact texture remain strict.
+ $match=@($expected.quadrants|Where-Object{[string]$_.surfaceClass -ieq [string]$s.surfaceClass -and [string]$_.files -ceq [string]$s.files -and [string]$_.sound -ceq [string]$s.sound -and [string]$_.character -ceq [string]$s.character})
  Require ($match.Count -gt 0) 'Actual class/files/sound/character differs from audited source.'
  if($kind -in @('sand','mud')){Require ($s.sourceEligible -is [bool] -and $s.sourceEligible) 'Actual source refuses requested soft contact.'}
 }
@@ -61,6 +63,8 @@ function Test-Helpers{
  $e=@{texture='eden\ps.paa';quadrants=@(@{surfaceClass='Sand';files='ps??????';sound='sand';character=''})}
  $s=@{ok=$true;enabled=$true;world='eden.wrp';texture=$e.texture;surfaceClass='Sand';files='ps??????';sound='sand';character='';sourceEligible=$true;x=1;z=2;offset=0;surfaceY=10;surfaceDx=0;surfaceDz=0}
  Assert-Tuple $s $e 'eden' 'sand';$s.character='grass';$failed=$false;try{Assert-Tuple $s $e 'eden' 'sand'}catch{$failed=$true};Require $failed 'Conflicting clutter metadata admitted.'
+ $s.character='';$s.surfaceClass='sand';Assert-Tuple $s $e 'eden' 'sand'
+ $s.surfaceClass='Other';$failed=$false;try{Assert-Tuple $s $e 'eden' 'sand'}catch{$failed=$true};Require $failed 'Different class admitted as a casing alias.'
  $row='PLAYER_GROUND_BOOT time=2 manual=true side=left model=data3d\mc vojakw2.p3d primary=combat secondary=combat factor=1 x=4 y=5 z=6 ground=5 delta=0 road=5 surface=Sand files=ps?????? sound=sand mudActive=false sandActive=true mudChanged=false sandChanged=true'
  Require (@(Boot-Rows @($row) 'sand').Count -eq 1) 'Actual manual boot grammar not recognized.'
  Require (@(Boot-Rows @($row.Replace('manual=true','manual=false')) 'sand').Count -eq 0) 'AI surrogate accepted as manual proof.'
@@ -100,7 +104,10 @@ function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
 function Field([string]$kind,$site){return Send @{cmd=('dev_'+$kind);action='sample';x=$site.x;z=$site.z}}
 function State{$wet=Number (Eval 'triUniformWetness player');Require ($wet-ge 0 -and $wet-le 1) 'Actual Person wetness is unavailable/outside[0,1].';return @{time=(Number (Eval 'time'));position=(Eval 'getPosASL player');uniform=$wet;sand=(Send @{cmd='dev_sand';action='state'});mud=(Send @{cmd='dev_mud';action='state'});weather=(Send @{cmd='weather_visibility'})}}
 function Native-Heights($site){
- $initial=State;$originX=[Math]::Floor($site.x/200)*200;$originZ=[Math]::Floor($site.z/200)*200
+ $initial=State;$tileX=[Math]::Floor($site.x/200);$tileZ=[Math]::Floor($site.z/200)
+ # Coarse parents are centred at25m; production tile boundaries start half
+ # a coarse cell earlier, at native index32*tile-2.
+ $originX=$tileX*200-12.5;$originZ=$tileZ*200-12.5
  $header=Send @{cmd='dev_terrain_brush';action='state';x=$originX;z=$originZ}
  Require ($header.readonly -eq $true -and $header.baseline -eq $false -and $header.spacing -eq 6.25 -and $header.range -eq 2048) 'Native fixture requires an unedited actual2048/6.25 source.'
  Require ($originX -gt 0 -and $originZ -gt 0 -and $originX+200 -lt ($header.range-1)*6.25 -and $originZ+200 -lt ($header.range-1)*6.25) 'Native fixture tile is not complete interior source.'
@@ -113,7 +120,7 @@ function Native-Heights($site){
   $h=Number $v.vertexHeight;$vertices+=,@($px,$pz,$h)
  }}
  $final=State;Assert-Paused $initial $final
- $fixture=@{scope='Actual unedited installed native vertices; no resampling, edit, water seed or offline detail reconstruction';map=$map;source=$source;installed=$before;header=$header;origin=@($originX,$originZ);side=33;order='z-major then x';vertices=$vertices;before=$initial;after=$final}
+ $fixture=@{scope='Actual unedited installed native vertices; no resampling, edit, water seed or offline detail reconstruction';map=$map;source=$source;installed=$before;header=$header;origin=@($originX,$originZ);tile=@($tileX,$tileZ);originConvention='200*tile-12.5; native index32*tile-2';side=33;order='z-major then x';vertices=$vertices;before=$initial;after=$final}
  $path=Join-Path $armDir 'actual-native-height-tile.json';$fixture|ConvertTo-Json -Depth 15|Set-Content -LiteralPath $path
  return @{path=$path;sha256=(Get-FileHash -LiteralPath $path).Hash;count=$vertices.Count;header=$header;origin=$fixture.origin}
 }
