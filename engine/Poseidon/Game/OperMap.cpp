@@ -889,6 +889,20 @@ float OperMap::GetCost(int xf, int zf, int dir, bool locks, EntityAI* veh, bool 
     return 0;
 }
 
+// A swimmer's water item costs what the soldier says a metre of swimming costs
+// (OperItemGrid of them), whatever the 50 m square around it costs to walk: a
+// shore square is land to the geography, and multiplying its walking cost made
+// the sea look as quick as the beach there and unreachable a square further out.
+static float ItemCost(float baseCost, OperItemType type, EntityAI* veh, bool soldier)
+{
+    float typeCost = veh->GetTypeCost(type);
+    if (soldier && type == OITWater && typeCost < GET_UNACCESSIBLE)
+    {
+        return OperItemGrid * typeCost;
+    }
+    return baseCost * typeCost;
+}
+
 float OperMap::GetFieldCost(int x, int z, bool locks, EntityAI* veh, bool soldier)
 {
     if (x < 0 || x >= OperItemRange * LandRange || z < 0 || z >= OperItemRange * LandRange)
@@ -910,7 +924,7 @@ float OperMap::GetFieldCost(int x, int z, bool locks, EntityAI* veh, bool soldie
             x0 = x - x0 * OperItemRange;
             z0 = z - z0 * OperItemRange;
             OperItemType type = soldier ? _fields[i]->_items[z0][x0]._typeSoldier : _fields[i]->_items[z0][x0]._type;
-            return _fields[i]->_baseCost * veh->GetTypeCost(type);
+            return ItemCost(_fields[i]->_baseCost, type, veh, soldier);
         }
     }
     // field not found
@@ -921,7 +935,7 @@ float OperMap::GetFieldCost(int x, int z, bool locks, EntityAI* veh, bool soldie
     x0 = x - x0 * OperItemRange;
     z0 = z - z0 * OperItemRange;
     OperItemType type = soldier ? field->_items[z0][x0]._typeSoldier : field->_items[z0][x0]._type;
-    return field->_baseCost * veh->GetTypeCost(type);
+    return ItemCost(field->_baseCost, type, veh, soldier);
 #else
     return SET_UNACCESSIBLE;
 #endif
@@ -1586,7 +1600,10 @@ bool OperMap::FindPath(AIUnit* unit, int dir, int xs, int zs, int xe, int ze, bo
     else
     {
         // path not found - try to select alternate goal
-        last = algorithm->GetBestNode();
+        // a soldier heads for the node nearest the goal (what the original search
+        // did); the cheapest open node can lead along a beach, away from a goal
+        // out in the water, once the iterations run out on the land around it
+        last = isSoldier ? algorithm->GetNearestNode() : algorithm->GetBestNode();
         if (!last)
         {
             return false;

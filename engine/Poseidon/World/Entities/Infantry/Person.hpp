@@ -120,6 +120,9 @@ class Person: public VehicleSupply
 	virtual void CatchLadder(Building *obj, int ladder, bool up);
 	virtual void DropLadder(Building *obj, int ladder);
 	virtual bool IsOnLadder(Building *obj, int ladder) const;
+	// floating in deep water (Man with the swim moves); his origin is then
+	// about 1.4 m under the sea surface
+	virtual bool IsSwimming() const {return false;}
 
 	virtual bool IsWoman() const {return false;}
 	

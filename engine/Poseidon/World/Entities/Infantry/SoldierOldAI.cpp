@@ -1769,13 +1769,28 @@ float Soldier::GetFieldCost(const GeographyInfo& info) const
     return cost;
 }
 
+// seconds per metre for a swimmer, see GetCost; OperMap::GetFieldCost also
+// takes it as the absolute cost of a water item (GetTypeCost(OITWater))
+static const float SoldierSwimCost = 1.0f;
+
 float Soldier::GetCost(const GeographyInfo& geogr) const
 {
     if (!(geogr.u.road || geogr.u.track))
     {
-        if (geogr.u.waterDepth >= 2 || geogr.u.full && !geogr.u.forestOuter)
+        if (geogr.u.full && !geogr.u.forestOuter)
         {
             return 1e30f;
+        }
+        if (geogr.u.waterDepth >= 2)
+        {
+            if (!CanSwim())
+            {
+                return 1e30f;
+            }
+            // swimming: the swim cycle makes about 1.35 m/s, so ~0.75 s a metre,
+            // weighted up so that a land route is preferred while it is under
+            // about seven times as long as the swim (a sprint is 0.14 s/m)
+            return geogr.u.waterDepth >= 3 ? SoldierSwimCost * 1.2f : SoldierSwimCost;
         }
     }
     float cost = InvFastRunSpeed;
@@ -1809,9 +1824,14 @@ float Soldier::GetTypeCost(OperItemType type) const
             return 1;
         case OITSpaceBush:
             return 2;
+        case OITWater:
+            // water deeper than 0.5 m: a man who can swim goes through it. This is not
+            // a multiplier like the others: OperMap::GetFieldCost uses it as the cost
+            // per metre on its own, because the 50 m square around the item may be
+            // land (a shore) whose walking cost says nothing about swimming.
+            return CanSwim() ? SoldierSwimCost : SET_UNACCESSIBLE;
         case OITSpaceTree:
         case OITSpace:
-        case OITWater:
         case OITSpaceRoad:
             return SET_UNACCESSIBLE;
         case OITAvoidBush:

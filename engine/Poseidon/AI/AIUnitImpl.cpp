@@ -45,6 +45,7 @@
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <Poseidon/Foundation/platform.hpp>
+#include <Poseidon/World/Entities/Infantry/SwimView.hpp>
 
 using namespace Poseidon;
 ActionContextBase* CreateGetInActionContext(Transport* veh, UIActionType pos);
@@ -1831,6 +1832,35 @@ void AIUnit::OperPath(ThinkImportance prec)
     }
 }
 
+// A soldier's path lies on the ground (PointOnSurface, combat height 0). In water
+// deep enough to swim that is the sea bed, metres under a swimmer, and the path
+// follower measures in 3D (Path::CostAtPos, the distance to Path::End): swimmers
+// braked and trod water 10-30 m short of where they were sent, further out the
+// deeper it got. Put those points where a swimmer's origin is instead: the sea
+// surface less the swim water line (Man::SimSwimMovement, SoldierOldSwim.cpp).
+static void FloatPathOnWater(AIUnit* unit, Path& path)
+{
+    if (!unit->IsFreeSoldier() || !GLandscape)
+    {
+        return;
+    }
+    for (int i = 0; i < path.Size(); i++)
+    {
+        OperInfoResult& info = path[i];
+        if (info._house)
+        {
+            continue;
+        }
+        Vector3& p = info._pos;
+        const float sea = SwimMeanWaterLevel(p.X(), p.Z());
+        if (sea - GLandscape->SurfaceY(p.X(), p.Z()) >= SwimStartDepth)
+        {
+            saturateMax(p[1], sea - SwimWaterLine);
+        }
+    }
+}
+
+
 bool AIUnit::CreateOperativePath()
 {
     EntityAI* veh = GetVehicle();
@@ -1877,6 +1907,7 @@ bool AIUnit::CreateOperativePath()
     {
         // creates path from Position() to _expPosition if none in _planner
         CopyPath(*_planner);
+        FloatPathOnWater(this, _path);
         Verify(SetState(Busy));
         return false;
     }
@@ -1957,6 +1988,7 @@ bool AIUnit::CreateOperativePath()
                 _path[j]._cost = lastCost;
             }
         }
+        FloatPathOnWater(this, _path);
         Verify(SetState(Busy));
         return true;
     }

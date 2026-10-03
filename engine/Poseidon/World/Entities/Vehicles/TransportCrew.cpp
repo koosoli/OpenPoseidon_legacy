@@ -33,6 +33,7 @@
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <Poseidon/Foundation/Types/RemoveLinks.hpp>
+#include <Poseidon/World/Entities/Infantry/SwimView.hpp>
 
 namespace Poseidon
 {
@@ -476,6 +477,15 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
             }
         }
 
+        // a swimmer hangs about 1.4 m under the surface (the swim animations
+        // are placed from the water line): measure his reach from the surface
+        // so a boat can be boarded from the water
+        Vector3 personPos = person->Position();
+        if (person->IsSwimming() && GLandscape)
+        {
+            personPos[1] = SwimWaterSurfaceY(personPos.X(), personPos.Z());
+        }
+
         float maxDist2 = 0;
         float invMaxDist2 = 0;
         if (now)
@@ -501,8 +511,8 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
             {
                 if (now)
                 {
-                    Vector3 pos = GetDriverGetInPos(person, person->Position());
-                    float dist2 = pos.Distance2(person->Position());
+                    Vector3 pos = GetDriverGetInPos(person, personPos);
+                    float dist2 = pos.Distance2(personPos);
                     if (dist2 <= maxDist2)
                     {
                         float priority = 0.900 - 0.3 * dist2 * invMaxDist2;
@@ -518,8 +528,8 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
             {
                 if (now)
                 {
-                    Vector3 pos = GetCommanderGetInPos(person, person->Position());
-                    float dist2 = pos.Distance2(person->Position());
+                    Vector3 pos = GetCommanderGetInPos(person, personPos);
+                    float dist2 = pos.Distance2(personPos);
                     if (dist2 <= maxDist2)
                     {
                         float priority = 0.899 - 0.3 * dist2 * invMaxDist2;
@@ -535,8 +545,8 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
             {
                 if (now)
                 {
-                    Vector3 pos = GetGunnerGetInPos(person, person->Position());
-                    float dist2 = pos.Distance2(person->Position());
+                    Vector3 pos = GetGunnerGetInPos(person, personPos);
+                    float dist2 = pos.Distance2(personPos);
                     if (dist2 <= maxDist2)
                     {
                         float priority = 0.898 - 0.3 * dist2 * invMaxDist2;
@@ -552,8 +562,8 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
             {
                 if (now)
                 {
-                    Vector3 pos = GetCargoGetInPos(person, person->Position());
-                    float dist2 = pos.Distance2(person->Position());
+                    Vector3 pos = GetCargoGetInPos(person, personPos);
+                    float dist2 = pos.Distance2(personPos);
                     if (dist2 <= maxDist2)
                     {
                         float priority = 0.897 - 0.3 * dist2 * invMaxDist2;
@@ -561,8 +571,8 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
                     }
                     else
                     {
-                        Vector3 pos = GetCoDriverGetInPos(person, person->Position());
-                        float dist2 = pos.Distance2(person->Position());
+                        Vector3 pos = GetCoDriverGetInPos(person, personPos);
+                        float dist2 = pos.Distance2(personPos);
                         if (dist2 <= maxDist2)
                         {
                             float priority = 0.897 - 0.3 * dist2 * invMaxDist2;
@@ -581,7 +591,7 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
             if (now)
             {
                 Vector3 pos = GetUnitGetInPos(unit);
-                float dist2 = pos.Distance2(person->Position());
+                float dist2 = pos.Distance2(personPos);
                 if (dist2 > maxDist2)
                 {
                     return;

@@ -35,18 +35,12 @@ namespace Poseidon
 {
 namespace
 {
-// Height of the water line in the swim animations (\swim\*.rtm): the point of the man's animation space
-// held on the water surface. A living swimmer's water line follows his eyes (the "zamerny" memory point,
-// smoothed): they ride SwimEyeAbove over the water whatever the move -- treading holds the head up,
-// the stroke lies flat -- so his face is clear and his body under. A dead man (and a model without the
-// eye point) floats at SwimWaterLine.
-constexpr float SwimWaterLine = 1.42f;
+// A living swimmer's water line (SwimWaterLine, SwimView.hpp) follows his eyes (the "zamerny" memory
+// point, smoothed): they ride SwimEyeAbove over the water whatever the move -- treading holds the head
+// up, the stroke lies flat -- so his face is clear and his body under. A dead man (and a model without
+// the eye point) floats at SwimWaterLine.
 constexpr float SwimEyeAbove = 0.12f;
 constexpr float SwimEyeTime = 0.6f;
-// Water depth (mean surface to bed) at which a wading man starts to swim, and the shallower depth at
-// which a swimmer stands up again.
-constexpr float SwimStartDepth = 1.45f;
-constexpr float SwimStopDepth = 1.2f;
 // Heave: spring (1/s^2) and damping (1/s) pulling the water line onto the surface. A 1.2 s natural
 // period against swell of 6-10 s: the body follows the waves with little lag, but still plunges and
 // bobs back up after a jump in.
@@ -116,6 +110,20 @@ WaterSurfaceSample SwimSurface(float x, float z, float level, float waveScale)
     return sample;
 }
 } // namespace
+
+float SwimMeanWaterLevel(float x, float z)
+{
+    float level, waveScale;
+    SwimWaterLevel(x, z, level, waveScale);
+    return level;
+}
+
+float SwimWaterSurfaceY(float x, float z)
+{
+    float level, waveScale;
+    SwimWaterLevel(x, z, level, waveScale);
+    return SwimSurface(x, z, level, waveScale).height;
+}
 
 bool SwimmerCameraWater(const Object* obj, float x, float z, float& waterY)
 {

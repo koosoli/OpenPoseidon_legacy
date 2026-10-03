@@ -1906,6 +1906,12 @@ void EntityAI::AvoidCollision(float deltaT, float& speedWanted, float& headChang
 
     bool iAmMan = unit->IsSoldier();
     bool iAmHeavy = GetMass() > 5000;
+    // A swimmer has no body collision with other swimmers (Man::SimSwimMovement),
+    // so two that meet can overlap and stay overlapped. Avoiding each other then
+    // never ends: the sideways avoid offset is taken in the man's own frame, so
+    // turning towards it moves it, and both turned on the spot for good. Swimmers
+    // just swim past other men; boats and other vehicles are still avoided.
+    bool iAmSwimming = iAmMan && unit->GetPerson() && unit->GetPerson()->IsSwimming();
 
     AIGroup* myGroup = unit->GetGroup();
     AICenter* myCenter = myGroup ? myGroup->GetCenter() : nullptr;
@@ -1924,6 +1930,14 @@ void EntityAI::AvoidCollision(float deltaT, float& speedWanted, float& headChang
     {
         const VehicleCollision& info = ret[i];
         const EntityAI* who = info.who;
+        if (iAmSwimming)
+        {
+            AIUnit* whoMan = who->CommanderUnit();
+            if (whoMan && whoMan->IsFreeSoldier())
+            {
+                continue;
+            }
+        }
 
         // something is near
         // some vehicle

@@ -954,7 +954,7 @@ class Man: public Person
 	void InitSwimMoves() const;
 	bool CanSwim() const;
 	bool IsSwimMove(MoveId id) const;
-	bool IsSwimming() const {return _swimming;}
+	bool IsSwimming() const override {return _swimming;}
 	bool UpdateSwimming();
 	void SimSwimMovement(float deltaT, SimulationImportance prec);
 	void EmitSwimSplashes(float deltaT);
