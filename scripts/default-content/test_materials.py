@@ -76,6 +76,68 @@ class MaterialTests(unittest.TestCase):
         self.assertGreater(maps["nohq"][:, :, 3].std(), 1.0)
         self.assertEqual(maps["nohq"][:, :, 0].max(), 0)
 
+    def test_original_sand_additions_retain_authored_albedo_and_sources(self):
+        root = Path(__file__).resolve().parents[2]
+        catalog = json.loads((root / "content/default-packs/visual/material-overrides.json").read_text())
+        entries = {entry["source"].lower(): entry for entry in catalog["materials"]}
+        self.assertEqual(len(entries), len(catalog["materials"]))
+        census = json.loads((root / "docs/roadmap/modernisation/ORIGINAL-OFP-CONTACT-SOURCE-CENSUS-20261001.json").read_text())
+        for source, archive, world, surface_class in (
+            ("abel\\pi.paa", "Dta\\Abel.pbo", "abel", "SandAbel"),
+            ("o\\pt.paa", "AddOns\\O.pbo", "noe", "SandDark"),
+            ("o\\ps.paa", "AddOns\\O.pbo", "noe", "Sand"),
+        ):
+            entry = entries[source]
+            self.assertEqual(entry["albedo"], source)
+            self.assertEqual(entry["sourceArchive"], archive)
+            palette = next(p for p in census["maps"][world]["qualifyingPalette"] if p["texture"] == source)
+            self.assertTrue(palette["pureSand"])
+            self.assertFalse(palette["pureMud"])
+            self.assertEqual(palette["classes"], [surface_class] * 4)
+        # Default/unknown, rock and mixed tiles do not acquire a whole-tile override.
+        self.assertFalse(any(source.startswith("cain\\") for source in entries))
+        self.assertNotIn("abel\\pb.paa", entries)
+        self.assertNotIn("o\\psptpspt.pac", entries)
+
+    def test_sand_additions_share_normal_scale_without_new_generated_assets(self):
+        root = Path(__file__).resolve().parents[2]
+        catalog = json.loads((root / "content/default-packs/visual/material-overrides.json").read_text())
+        entries = {entry["source"]: entry for entry in catalog["materials"]}
+        original = entries["eden\\ps.paa"]
+        self.assertEqual(self.specs["sand"]["tileMetres"], [50.0, 50.0])
+        for source in ("abel\\pi.paa", "o\\pt.paa", "o\\ps.paa"):
+            for field in ("normal", "detailNormal", "detailNormalMetres"):
+                self.assertEqual(entries[source][field], original[field])
+            metres = entries[source]["detailNormalMetres"]
+            self.assertEqual(self.specs["sand_detail"]["tileMetres"], [metres, metres])
+            self.assertEqual(50.0 / metres, 100.0)
+        package = (root / "scripts/Build-DefaultContent.ps1").read_text()
+        self.assertIn("@('road_asphalt','sand','gravel')", package)
+        self.assertIn("$expected += 'sand_detail_nohq.paa'", package)
+
+    def test_original_albedo_detail_uses_existing_guarded_loader_contract(self):
+        # Static source contract, not a simulated loader or installed render proof.
+        root = Path(__file__).resolve().parents[2]
+        bank = (root / "engine/WgpuRenderer/TextureBankWgpu.cpp").read_text()
+        resolve = bank.split("TextureBankWgpu::ResolveLegacyMaterial", 1)[1].split("TextureBankWgpu::LegacyNormalPath", 1)[0]
+        self.assertIn("_legacyMaterials.find(MaterialPathKey(name))", resolve)
+        self.assertIn("QIFStreamB::AutoBank(name)", resolve)
+        self.assertIn("original->GetOpenName()", resolve)
+        self.assertIn("MaterialPathKey(actual.generic_string().c_str()) != MaterialPathKey(expected.generic_string().c_str())", resolve)
+        load = bank.split("Ref<Texture> TextureBankWgpu::Load(RStringB name)", 1)[1]
+        self.assertIn("texture->SetName(name)", load)
+        self.assertIn("texture->_sourceName = material->albedo.c_str()", load)
+        self.assertIn("_textureByName.emplace(texture->GetName(), iFree)", load)
+        self.assertIn("if (index >= 0)", load)
+        header = (root / "engine/WgpuRenderer/TextureWgpu.hpp").read_text()
+        self.assertIn("_sourceName.GetLength() ? (const char*)_sourceName : Name()", header)
+        source = (root / "engine/WgpuRenderer/TextureWgpu.cpp").read_text()
+        self.assertIn("factory->Create(SourceName(), _mipmaps, MAX_MIPMAPS)", source)
+        # Missing original albedo cannot leave a normal-only half material bound.
+        self.assertIn("if (!_src && _sourceName.GetLength())", source)
+        self.assertIn("if (loaded >= 0 && !_texture[loaded]->_sourceName.GetLength())", bank)
+        self.assertIn("repeatsPerMetre = 1.0f / material->detailNormalMetres", bank)
+
 
 if __name__ == "__main__":
     unittest.main()

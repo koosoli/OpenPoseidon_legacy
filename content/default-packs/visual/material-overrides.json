@@ -16,6 +16,30 @@
       "detailNormalMetres": 0.5
     },
     {
+      "source": "abel\\pi.paa",
+      "sourceArchive": "Dta\\Abel.pbo",
+      "albedo": "abel\\pi.paa",
+      "normal": "op_ground_materials\\sand_nohq.paa",
+      "detailNormal": "op_ground_materials\\sand_detail_nohq.paa",
+      "detailNormalMetres": 0.5
+    },
+    {
+      "source": "o\\pt.paa",
+      "sourceArchive": "AddOns\\O.pbo",
+      "albedo": "o\\pt.paa",
+      "normal": "op_ground_materials\\sand_nohq.paa",
+      "detailNormal": "op_ground_materials\\sand_detail_nohq.paa",
+      "detailNormalMetres": 0.5
+    },
+    {
+      "source": "o\\ps.paa",
+      "sourceArchive": "AddOns\\O.pbo",
+      "albedo": "o\\ps.paa",
+      "normal": "op_ground_materials\\sand_nohq.paa",
+      "detailNormal": "op_ground_materials\\sand_detail_nohq.paa",
+      "detailNormalMetres": 0.5
+    },
+    {
       "source": "data\\cesta.paa",
       "sourceArchive": "Dta\\Data.pbo",
       "albedo": "op_ground_materials\\gravel_co.paa",
