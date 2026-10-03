@@ -3069,6 +3069,14 @@ void RegisterPhysicsProbe(HarnessServer& hs)
                     return HarnessProtocol::ErrorResponse("create needs x/y/z, heading, width, height, length");
                 if (!CreateEditorCave(x,y,z,heading,width,height,length))
                     return HarnessProtocol::ErrorResponse(EditorCaveStatus());
+            } else if (std::strcmp(action,"trench")==0) {
+                float heading,width,depth,length;
+                if (!point || !number("heading",heading) || !number("width",width) ||
+                    !number("depth",depth) || !number("length",length))
+                    return HarnessProtocol::ErrorResponse("trench needs x/y/z, heading, width, depth, length");
+                const bool tank=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root,"tank"));
+                if (!CreateEditorTrench(x,y,z,heading,width,depth,length,tank))
+                    return HarnessProtocol::ErrorResponse(EditorCaveStatus());
             } else if (std::strcmp(action,"undo")==0) {
                 if (!RemoveLastEditorCave()) return HarnessProtocol::ErrorResponse(EditorCaveStatus());
             } else if (std::strcmp(action,"state")!=0)
@@ -3097,10 +3105,16 @@ void RegisterPhysicsProbe(HarnessServer& hs)
                         return HarnessProtocol::ErrorResponse("ray needs finite unequal heights, <=100m apart");
                     }
                     Vector3 hit;
-                    const float distance=GLandscape->IntersectWithGround(&hit,Vector3(x,fromY,z),
+                    const Vector3 from(x,fromY,z);
+                    const float legacyResult=GLandscape->IntersectWithGround(&hit,from,
                         Vector3(0,toY>fromY ? 1.0f : -1.0f,0),0,std::abs(fromY-toY));
-                    cJSON_AddBoolToObject(out,"terrainRayHit",distance>=0);
-                    if (distance>=0) {
+                    const float distance=(hit-from).Size();
+                    // This legacy API returns maxDist*1.1 and an endpoint beyond
+                    // the segment on MISS; it does not return a negative sentinel.
+                    const bool hitSegment=legacyResult>=0 && distance<=std::abs(fromY-toY)+0.001f;
+                    cJSON_AddBoolToObject(out,"terrainRayHit",hitSegment);
+                    cJSON_AddNumberToObject(out,"legacyRayResult",legacyResult);
+                    if (hitSegment) {
                         cJSON_AddNumberToObject(out,"terrainRayY",hit.Y());
                         cJSON_AddNumberToObject(out,"terrainRayDistance",distance);
                     }

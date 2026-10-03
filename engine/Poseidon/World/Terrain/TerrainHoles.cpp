@@ -230,7 +230,10 @@ bool MakeHoleArea(const Object* obj, const ShapeHolePoly& poly, Landscape::Terra
     for (int v = 0; v < poly.n; v++)
     {
         int u = (v + 1) % poly.n;
-        signedArea += area.x[v] * area.z[u] - area.x[u] * area.z[v];
+        // Subtract an anchor first: world-coordinate products lose centimetre
+        // footprints to cancellation many kilometres from the origin.
+        signedArea += (area.x[v]-area.x[0])*(area.z[u]-area.z[0]) -
+                      (area.x[u]-area.x[0])*(area.z[v]-area.z[0]);
     }
     // Sinkhole W1 (owner report: "the island surface goes black and all objects appear floating" while a mission
     // loads, switches or exits): an object whose transform is momentarily collapsed -- zero scale, not yet placed,

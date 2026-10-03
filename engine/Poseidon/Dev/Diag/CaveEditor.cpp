@@ -1,5 +1,6 @@
 #include <Poseidon/Dev/Diag/CaveEditor.hpp>
 #include <Poseidon/Dev/Diag/CaveMesh.hpp>
+#include <Poseidon/Dev/Diag/TrenchMesh.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -23,6 +24,19 @@ constexpr float Pi = 3.14159265359f;
 }
 CaveEditorSettings& CaveEditor() { return settings; }
 const char* EditorCaveStatus() { return status; }
+const char* ExcavationToolName()
+{
+    return settings.tool==ExcavationTool::Cave ? "CAVE" :
+        settings.tool==ExcavationTool::TankTrench ? "TANK TRENCH" : "INFANTRY TRENCH";
+}
+void SetExcavationTool(ExcavationTool tool)
+{
+    settings.tool=tool;
+    settings.floorOffset=0;
+    if (tool==ExcavationTool::Cave) { settings.width=3; settings.height=2.5f; settings.length=16; }
+    if (tool==ExcavationTool::InfantryTrench) { settings.width=1.5f; settings.height=1.6f; settings.length=12; }
+    if (tool==ExcavationTool::TankTrench) { settings.width=5; settings.height=2; settings.length=24; }
+}
 std::size_t EditorCaveCount() { return owner == GLandscape ? caves.size() : 0; }
 
 void ClearEditorCaves()
@@ -39,7 +53,7 @@ void ResizeEditorCave(float wheelSteps)
     if (!std::isfinite(wheelSteps)) return;
     const float scale = std::pow(1.15f, std::clamp(wheelSteps, -64.0f, 64.0f));
     settings.width = std::clamp(settings.width * scale, 0.1f, 12.0f);
-    settings.height = std::clamp(settings.height * scale, 0.1f, 8.0f);
+    if (settings.tool==ExcavationTool::Cave) settings.height = std::clamp(settings.height * scale, 0.1f, 8.0f);
 }
 bool CreateEditorCave(float x, float y, float z, float heading, float width, float height, float length)
 {
@@ -118,6 +132,63 @@ bool CreateEditorCave(float x, float y, float z, float heading, float width, flo
     status = "Cave placed. Mission-local; reload removes it. Undo removes the last cave.";
     return true;
 }
+bool CreateEditorTrench(float x,float y,float z,float heading,float width,float depth,float length,bool tank)
+{
+    if (!GWorld || !GLandscape || GWorld->GetMode()==GModeNetware ||
+        !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) || !std::isfinite(heading) ||
+        !std::isfinite(width) || !std::isfinite(depth) || !std::isfinite(length) ||
+        width<0.1f || width>12 || depth<0.1f || depth>4 || length>64 ||
+        length<depth*(tank ? 6.0f : 3.0f)+(tank ? 6.0f : 1.0f))
+    {
+        status="Trench refused: invalid dimensions; allow room for its ramp and flat floor.";
+        return false;
+    }
+    if (owner && owner!=GLandscape) ClearEditorCaves();
+    if (caves.size()>=8) { status="Eight excavation limit reached. Undo one first."; return false; }
+    const float extent=(GLandscape->GetTerrainRange()-1)*GLandscape->GetTerrainGrid();
+    const float a=heading*(Pi/180);
+    const Vector3 forward(std::sin(a),0,std::cos(a)), aside(std::cos(a),0,-std::sin(a));
+    for (int along=0;along<=24;++along)
+        for (int side=-1;side<=1;++side)
+        {
+            const Vector3 p=Vector3(x,y,z)+forward*(length*along/24)+aside*(side*(width*0.5f+0.4f));
+            if (p.X()<1 || p.Z()<1 || p.X()>=extent-1 || p.Z()>=extent-1 ||
+                y-depth<=GLandscape->GetSeaLevel()+0.1f)
+            {
+                status="Trench refused: outside land or its floor would be below water.";
+                return false;
+            }
+            if (std::abs(GLandscape->SurfaceY(p.X(),p.Z())-y)>0.25f)
+            {
+                status="Choose gentler ground or a shorter trench: the rim must stay within 25 cm of level.";
+                return false;
+            }
+            if (GLandscape->InTerrainHole(p.X(),p.Z()))
+            {
+                status="Trench refused: overlaps another excavation.";
+                return false;
+            }
+        }
+    TrenchMeshParams params;
+    params.width=width; params.depth=depth; params.length=length;
+    params.rampLength=depth*(tank ? 6.0f : 3.0f);
+    Ref<LODShapeWithShadow> shape=BuildTrenchMesh(params);
+    if (!shape) { status="Trench mesh creation failed."; return false; }
+    Matrix4 transform(MIdentity);
+    transform.SetDirectionAndUp(forward,VUp);
+    transform.SetPosition(Vector3(x,y,z));
+    Object* object=NewObject(shape,-1);
+    if (!object) { status="Trench registration failed."; return false; }
+    object->SetType(Primary); object->SetTransform(transform);
+    GLandscape->AddObject(object);
+    owner=GLandscape; caves.emplace_back(object);
+    Landscape::TerrainHoleArea holes[32];
+    GLandscape->GatherTerrainHoles(Vector3(x,y,z),length+width,holes,32);
+    GLandscape->FlushCache();
+    status=tank ? "Tank trench placed, with access ramp and parking floor. Mission-local." :
+                  "Straight infantry trench placed, with access ramp. Mission-local.";
+    return true;
+}
 bool CreateEditorCaveAtPixel(float x,float y)
 {
     if (!settings.enabled || !GScene || !GScene->GetCamera() || !GLandscape) return false;
@@ -129,13 +200,15 @@ bool CreateEditorCaveAtPixel(float x,float y)
                        camera.DirectionUp()*sy*camera.Top()).Normalized();
     Vector3 hit;
     bool sea=false;
-    if (GLandscape->IntersectWithGroundOrSea(&hit,sea,camera.Position(),direction,0,std::min(camera.Far(),5000.0f))<0 || sea)
+    const float rayLimit=std::min(camera.Far(),5000.0f);
+    GLandscape->IntersectWithGroundOrSea(&hit,sea,camera.Position(),direction,0,rayLimit);
+    if (sea || (hit-camera.Position()).SquareSize()>rayLimit*rayLimit)
     {
         status = "No land hit. Point at the hillside where the entrance should start.";
         return false;
     }
     direction[1]=0;
-    if (direction.SquareSize()<0.1f)
+    if (direction.SquareSize()<(settings.tool==ExcavationTool::Cave ? 0.1f : 1e-6f))
     {
         status = "Look horizontally into a hillside, rather than straight down.";
         return false;
@@ -144,7 +217,11 @@ bool CreateEditorCaveAtPixel(float x,float y)
     // Start just outside the hillside, on its surface, for a walk-in floor.
     const Vector3 entrance=hit-direction*0.5f;
     const float floor=GLandscape->SurfaceY(entrance.X(),entrance.Z())+settings.floorOffset;
-    return CreateEditorCave(entrance.X(),floor,entrance.Z(),std::atan2(direction.X(),direction.Z())*(180/Pi),
+    const float heading=std::atan2(direction.X(),direction.Z())*(180/Pi);
+    if (settings.tool!=ExcavationTool::Cave)
+        return CreateEditorTrench(hit.X(),GLandscape->SurfaceY(hit.X(),hit.Z()),hit.Z(),heading,
+                                  settings.width,settings.height,settings.length,settings.tool==ExcavationTool::TankTrench);
+    return CreateEditorCave(entrance.X(),floor,entrance.Z(),heading,
                             settings.width,settings.height,settings.length);
 }
 bool RemoveLastEditorCave()
@@ -153,13 +230,13 @@ bool RemoveLastEditorCave()
     // Refuse to close a hole on the owner while they are walking inside it.
     if (GWorld->PlayerOn() && GLandscape->InTerrainHoleBelow(GWorld->PlayerOn()->Position(),0.1f))
     {
-        status = "Leave the cave before undoing it.";
+        status = "Leave the excavation before undoing it.";
         return false;
     }
     owner->RemoveObject(caves.back());
     caves.pop_back();
     owner->FlushCache();
-    status = "Last cave removed; original terrain restored.";
+    status = "Last excavation removed; original terrain restored.";
     return true;
 }
 }

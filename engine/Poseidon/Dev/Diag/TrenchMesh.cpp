@@ -125,7 +125,7 @@ bool ValidTrenchMeshParams(const TrenchMeshParams& p)
 
 TrenchMeshParams TankTrenchMeshParams()
 {
-    return {5.0f, 18.0f, 2.0f, 12.0f, 0.4f};
+    return {5.0f, 24.0f, 2.0f, 12.0f, 0.4f};
 }
 
 Model::Model BuildTrenchModel(const TrenchMeshParams& p)

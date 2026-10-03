@@ -46,25 +46,33 @@ MapEditorAction DrawMapEditorTab()
         if (Button("Cancel terrain restore")) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
-    ImGui::SeparatorText("Horizontal holes / caves");
+    ImGui::SeparatorText("Caves and straight trenches");
     auto& cave = CaveEditor();
-    Checkbox("Enable cave placement", &cave.enabled);
+    if (RadioButton("Horizontal cave", cave.tool==ExcavationTool::Cave)) SetExcavationTool(ExcavationTool::Cave);
+    if (RadioButton("Infantry trench", cave.tool==ExcavationTool::InfantryTrench)) SetExcavationTool(ExcavationTool::InfantryTrench);
+    if (RadioButton("Tank trench", cave.tool==ExcavationTool::TankTrench)) SetExcavationTool(ExcavationTool::TankTrench);
+    Checkbox("Enable shaped excavation", &cave.enabled);
     if (cave.enabled) brush.enabled = false;
+    const bool isCave=cave.tool==ExcavationTool::Cave;
     SliderFloat("Opening width", &cave.width, 0.1f, 12.0f, "%.2f m");
-    SliderFloat("Opening height", &cave.height, 0.1f, 8.0f, "%.2f m");
-    SliderFloat("Horizontal depth", &cave.length, 1.0f, 64.0f, "%.1f m");
-    SliderFloat("Entrance floor offset", &cave.floorOffset, -4.0f, 2.0f, "%.2f m");
-    if (Button("Place cave (free-fly)")) action = MapEditorAction::StartCave;
+    SliderFloat(isCave ? "Opening height" : "Trench depth", &cave.height, 0.1f, isCave ? 8.0f : 4.0f, "%.2f m");
+    SliderFloat("Length into ground", &cave.length, 1.0f, 64.0f, "%.1f m");
+    if (isCave) SliderFloat("Entrance floor offset", &cave.floorOffset, -4.0f, 2.0f, "%.2f m");
+    else ImGui::Text("Access ramp: %.1f m, flat floor: %.1f m",
+        cave.height*(cave.tool==ExcavationTool::TankTrench ? 6.0f : 3.0f),
+        std::max(0.0f,cave.length-cave.height*(cave.tool==ExcavationTool::TankTrench ? 6.0f : 3.0f)));
+    if (Button("Place excavation (free-fly)")) action = MapEditorAction::StartCave;
     ImGui::BeginDisabled(EditorCaveCount() == 0);
-    if (Button("Undo last cave")) action = MapEditorAction::UndoCave;
+    if (Button("Undo last excavation")) action = MapEditorAction::UndoCave;
     ImGui::EndDisabled();
-    ImGui::Text("Caves this mission: %zu / 8", EditorCaveCount());
+    ImGui::Text("Excavations this mission: %zu / 8", EditorCaveCount());
     ImGui::TextWrapped("%s", EditorCaveStatus());
-    ImGui::TextWrapped("Point into rising ground and click LEFT MOUSE to create a horizontal cave. "
-        "WHEEL resizes width and height down to 10 cm; SHIFT+WHEEL changes depth. "
-        "The cave has a floor, walls, ceiling and a closed back. Terrain above the ceiling stays intact. "
-        "Very small holes are openings only: a soldier cannot fit through them. "
-        "Mission-local prototype; no save/export or AI cave routing yet.");
+    ImGui::TextWrapped("LEFT MOUSE places the selected shape, pointing along the camera's compass heading. "
+        "WHEEL resizes the opening down to 10 cm; SHIFT+WHEEL changes length. "
+        "Caves need rising ground and preserve terrain above their ceiling. "
+        "Straight trenches need gently sloping ground; their ramps descend to a flat floor. "
+        "Infantry and tank presets have different widths and access ramps. "
+        "Very small openings cannot fit a soldier. Mission-local prototype; no save/export or AI routing yet.");
     ImGui::SeparatorText("How to paint");
     ImGui::TextWrapped("1. Choose Raise or Lower, radius and speed.\n"
         "2. Click Start painting to enter free-fly and close this panel.\n"

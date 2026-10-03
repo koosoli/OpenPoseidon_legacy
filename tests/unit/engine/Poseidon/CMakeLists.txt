@@ -401,6 +401,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Simulation/test_corpse_pose.cpp
     World/Simulation/test_cave_bounds.cpp
     Dev/test_cave_mesh.cpp
+    Dev/test_trench_mesh.cpp
 
     # Rendering tests (batch-06)
     Graphics/Rendering/test_shape.cpp

@@ -1042,8 +1042,8 @@ void DrawZeusInteractionOverlay()
     {
         char text[256];
         const auto& cave = Dev::CaveEditor();
-        std::snprintf(text,sizeof(text),"MAP EDITOR | CAVE %.2f x %.2f m | depth %.1f m | LMB place | Wheel opening | Shift+Wheel depth",
-                      cave.width,cave.height,cave.length);
+        std::snprintf(text,sizeof(text),"MAP EDITOR | %s %.2f x %.2f m | length %.1f m | LMB place | Wheel width | Shift+Wheel length",
+                      Dev::ExcavationToolName(),cave.width,cave.height,cave.length);
         draw->AddRectFilled(ImVec2(12,64),ImVec2(12+ImGui::CalcTextSize(text).x+16,92),IM_COL32(0,0,0,190));
         draw->AddText(ImVec2(20,70),IM_COL32(255,230,150,255),text);
         draw->AddText(ImVec2(20,98),IM_COL32(255,230,150,255),Dev::EditorCaveStatus());
