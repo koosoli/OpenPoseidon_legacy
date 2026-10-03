@@ -455,7 +455,10 @@ private:
             edgeX=0;edgeZ=0;
             Edges([&](size_t a,size_t b,bool alongX) {
                 float f = alongX ? _edgeX[edgeX++] : _edgeZ[edgeZ++]; const size_t donor = f>0?a:b;
-                if (_out[donor]>0) f *= std::min(1.0f,_depth[donor]/_out[donor]);
+                if (_out[donor]>0)
+                    // The clamp is exactly one when outgoing<=depth. Keep the
+                    // multiply and full ratio fallback for limited/nonfinite cases.
+                    f *= _out[donor] <= _depth[donor] ? 1.0f : std::min(1.0f,_depth[donor]/_out[donor]);
                 _delta[a] -= f; _delta[b] += f;
                 auto& flow = alongX ? _flowX : _flowZ;
                 // Signed volume flux converted to a surface-flow speed where wet.

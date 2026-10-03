@@ -103,6 +103,19 @@ int main() {
     assert(a.Volume()==0 && r.Volume()==0);
     advance(a,r,.25f,.8f);
     assert(a.Volume()>0);
+    // Both local clamp branches must remain physical: small spacing needs
+    // partial donor limiting; default coarse spacing retains most donor water.
+    for(const float spacing : {.125f,2.f,25.f}) {
+        auto raised=std::vector<float>(9,10);raised[4]=11;
+        configure(a,r,3,3,spacing,raised);
+        assert(a.AddWater(1,1,.1f) && r.AddWater(1,1,.1f));
+        advance(a,r,.25f,0);
+        const auto cells=a.Snapshot();
+        assert(cells[4*4+1]>=0 && cells[4*4+1]<.1f);
+        if(spacing==.125f)assert(cells[4*4+1]<=1e-7f);
+        if(spacing==25.f)assert(cells[4*4+1]>.08f);
+    }
+    configure(a,r,5,5,2,std::vector<float>(25,10));
     for(int n=0;n<240;++n) advance(a,r,1.f/60,.7f,.3f,.8f);
     // Validate the actual MaxCells bound and cache size without changing it.
     configure(a,r,1024,1024,25,std::vector<float>(Actual::MaxCells,10));
