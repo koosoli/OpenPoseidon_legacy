@@ -1,8 +1,11 @@
 #include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <atomic>
 #include <mutex>
+#include <vector>
 
 namespace Poseidon
 {
@@ -86,6 +89,74 @@ void SetRifleWaterImpactSprayEnabled(bool enabled)
 bool RifleWaterImpactSprayEnabled()
 {
     return rifleWaterImpactSprayEnabled.load(std::memory_order_relaxed);
+}
+
+namespace
+{
+// Sinkhole W3: the drawn surface around the camera (SetDrawnWaterGrid)
+std::mutex drawnMutex;
+std::vector<float> drawnXyz;
+int drawnN = 0;
+float drawnLanes[4] = {};
+} // namespace
+
+void SetDrawnWaterGrid(const float* xyz, int n, const float lanes[4])
+{
+    std::lock_guard<std::mutex> lock(drawnMutex);
+    if (!xyz || n < 2 || !lanes)
+    {
+        drawnN = 0;
+        return;
+    }
+    drawnXyz.assign(xyz, xyz + size_t(n) * n * 3);
+    drawnN = n;
+    for (int i = 0; i < 4; i++)
+    {
+        drawnLanes[i] = lanes[i];
+    }
+}
+
+bool DrawnWaterHeightAt(float x, float z, float& y)
+{
+    std::lock_guard<std::mutex> lock(drawnMutex);
+    const int n = drawnN;
+    const float step = drawnLanes[2];
+    if (n < 2 || step <= 0)
+    {
+        return false;
+    }
+    // texel (row j, column i) is the drawn vertex of lattice point (base x + i step, base z + j step),
+    // displaced sideways as well as up: find the lattice point whose vertex lies over (x, z) (three
+    // fixed-point steps, as the probe shader inverts the displacement), then its height
+    auto sample = [&](float u, float v, int lane)
+    {
+        const int i = std::clamp(int(std::floor(u)), 0, n - 2);
+        const int j = std::clamp(int(std::floor(v)), 0, n - 2);
+        const float fu = std::clamp(u - i, 0.0f, 1.0f);
+        const float fv = std::clamp(v - j, 0.0f, 1.0f);
+        auto at = [&](int ii, int jj) { return drawnXyz[(size_t(jj) * n + ii) * 3 + lane]; };
+        const float a = at(i, j) + (at(i + 1, j) - at(i, j)) * fu;
+        const float b = at(i, j + 1) + (at(i + 1, j + 1) - at(i, j + 1)) * fu;
+        return a + (b - a) * fv;
+    };
+    float u = (x - drawnLanes[0]) / step;
+    float v = (z - drawnLanes[1]) / step;
+    // one texel of margin: the inversion needs the neighbours
+    if (u < 1.0f || v < 1.0f || u > n - 2.0f || v > n - 2.0f)
+    {
+        return false;
+    }
+    for (int k = 0; k < 3; k++)
+    {
+        u += (x - sample(u, v, 0)) / step;
+        v += (z - sample(u, v, 2)) / step;
+    }
+    if (u < 0.0f || v < 0.0f || u > n - 1.0f || v > n - 1.0f)
+    {
+        return false;
+    }
+    y = sample(u, v, 1);
+    return std::isfinite(y);
 }
 
 } // namespace Poseidon

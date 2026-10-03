@@ -10,18 +10,44 @@
 //! * the CPU reads the centre texel back (1-3 frames late, never blocking) for the compositor's
 //!   engage gate and the water material's view side, which Current OP's reference waves decided
 //!   before (they are not the surface drawn in this mode).
-//! Rendering only: nothing here feeds physics or gameplay.
+//! Rendering only: nothing here feeds physics or gameplay -- with one exception (Sinkhole W3): the
+//! whole grid is published ([`drawn_grid`], `wgr_water_drawn_grid`) so the engine can hold a swimmer
+//! near the camera, and the camera following him, on the surface as drawn instead of the CPU wave
+//! predictor, which matches it in scale but not crest for crest. Presentation of the local view only.
 
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
-/// Grid size (texels per side) and step (m): 8 m square, far wider than the lens (the near plane
-/// is centimetres from the eye) and the waterline's neighbourhood.
-pub const N: u32 = 32;
+/// Grid size (texels per side) and step (m): 16 m square, far wider than the lens (the near plane
+/// is centimetres from the eye) and the waterline's neighbourhood; (Sinkhole W3) wide enough to hold
+/// the man a 3rd person camera follows.
+pub const N: u32 = 64;
 pub const STEP: f32 = 0.25;
 const RING: usize = 3;
-/// Texels copied back: the 2 x 2 block around the camera.
-const ROW: u64 = 256;
+/// The whole grid is copied back, one rgba32float row of N texels per row.
+const ROW: u64 = N as u64 * 16;
+
+/// Sinkhole W3: the latest grid read back -- (lanes, displaced vertex x, y, z per texel, when).
+pub struct DrawnGrid {
+    pub lanes: [f32; 4],
+    pub xyz: Vec<[f32; 3]>,
+    pub at: Instant,
+}
+static DRAWN: Mutex<Option<DrawnGrid>> = Mutex::new(None);
+
+/// Copies the latest drawn grid out (any thread): the texel count, or 0 when there is none.
+pub fn drawn_grid(out: &mut [[f32; 3]], lanes: &mut [f32; 4], age_ms: &mut f32) -> usize {
+    let Ok(g) = DRAWN.lock() else { return 0 };
+    let Some(g) = g.as_ref() else { return 0 };
+    if out.len() < g.xyz.len() {
+        return 0;
+    }
+    out[..g.xyz.len()].copy_from_slice(&g.xyz);
+    *lanes = g.lanes;
+    *age_ms = g.at.elapsed().as_secs_f32() * 1000.0;
+    g.xyz.len()
+}
 
 enum Rb {
     Idle,
@@ -32,6 +58,8 @@ enum Rb {
 struct Slot {
     buf: wgpu::Buffer,
     state: Rb,
+    /// the grid's lanes when it was copied
+    lanes: [f32; 4],
 }
 
 pub struct Probe {
@@ -89,11 +117,12 @@ impl Probe {
             .map(|i| Slot {
                 buf: device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some(if i == 0 { "tw_probe_readback_0" } else { "tw_probe_readback" }),
-                    size: ROW * 2,
+                    size: ROW * N as u64,
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 }),
                 state: Rb::Idle,
+                lanes: [0.0; 4],
             })
             .collect();
         Self { view, tex, pipeline, empty, slots, next: 0, height: None, age: u32::MAX, ready: false }
@@ -109,8 +138,8 @@ impl Probe {
     }
 
     /// Encoder side, after the FFT, wakes and shore simulation of the frame: the grid, and a copy of
-    /// its centre block for the CPU.
-    pub fn record(&mut self, encoder: &mut wgpu::CommandEncoder, group1: &wgpu::BindGroup) {
+    /// it for the CPU. `lanes`: this frame's [`Self::lanes`].
+    pub fn record(&mut self, encoder: &mut wgpu::CommandEncoder, group1: &wgpu::BindGroup, lanes: [f32; 4]) {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("tw_probe"),
@@ -137,16 +166,17 @@ impl Probe {
                 wgpu::TexelCopyTextureInfo {
                     texture: &self.tex,
                     mip_level: 0,
-                    origin: wgpu::Origin3d { x: N / 2, y: N / 2, z: 0 },
+                    origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
                     aspect: wgpu::TextureAspect::All,
                 },
                 wgpu::TexelCopyBufferInfo {
                     buffer: &slot.buf,
-                    layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(ROW as u32), rows_per_image: Some(2) },
+                    layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(ROW as u32), rows_per_image: Some(N) },
                 },
-                wgpu::Extent3d { width: 2, height: 2, depth_or_array_layers: 1 },
+                wgpu::Extent3d { width: N, height: N, depth_or_array_layers: 1 },
             );
             slot.state = Rb::Copied;
+            slot.lanes = lanes;
             self.next = (self.next + 1) % RING;
         }
     }
@@ -167,20 +197,31 @@ impl Probe {
                 Rb::Mapping(flag) => match flag.load(Ordering::Acquire) {
                     0 => {}
                     1 => {
-                        let h = {
+                        let (h, xyz) = {
                             let data = slot.buf.slice(..).get_mapped_range();
-                            let texel = |row: usize, col: usize| {
-                                // (W12d) rgba32float vertices: the height is the second lane
-                                let o = row * ROW as usize + col * 16 + 4;
+                            let lane = |row: usize, col: usize, l: usize| {
+                                // (W12d) rgba32float vertices: x, height, z
+                                let o = row * ROW as usize + col * 16 + l * 4;
                                 f32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]])
                             };
+                            let c = N as usize / 2;
                             // the camera sits between the four centre texels
-                            (texel(0, 0) + texel(0, 1) + texel(1, 0) + texel(1, 1)) * 0.25
+                            let h = (lane(c, c, 1) + lane(c, c + 1, 1) + lane(c + 1, c, 1) + lane(c + 1, c + 1, 1)) * 0.25;
+                            let mut xyz = Vec::with_capacity((N * N) as usize);
+                            for row in 0..N as usize {
+                                for col in 0..N as usize {
+                                    xyz.push([lane(row, col, 0), lane(row, col, 1), lane(row, col, 2)]);
+                                }
+                            }
+                            (h, xyz)
                         };
                         slot.buf.unmap();
                         if h.is_finite() {
                             self.height = Some(h);
                             self.age = 0;
+                            if let Ok(mut g) = DRAWN.lock() {
+                                *g = Some(DrawnGrid { lanes: slot.lanes, xyz, at: Instant::now() });
+                            }
                         }
                         slot.state = Rb::Idle;
                     }

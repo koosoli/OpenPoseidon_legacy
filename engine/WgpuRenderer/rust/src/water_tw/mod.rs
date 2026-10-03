@@ -35,7 +35,7 @@
 
 mod boat_spray;
 mod impacts;
-mod probe;
+pub(crate) mod probe;
 mod breakers;
 mod cdlod;
 mod fft;
@@ -476,6 +476,8 @@ pub struct Tidewater {
     impacts: impacts::Impacts,
     // W9a: the surface around the camera, as drawn (underwater composite, view side, gate)
     probe: probe::Probe,
+    // Sinkhole W3: this frame's probe lanes, for the readback
+    probe_lanes: [f32; 4],
     // W5e: the frame's spot lights (the diver's torch is picked from them in prepare)
     spots: Vec<crate::ffi::WgrLight>,
     // W7b: prepare CPU ms: sum, max, station update max, CDLOD selection sum, frames;
@@ -793,6 +795,7 @@ impl Tidewater {
             spots: Vec::new(),
             impacts: Default::default(),
             probe,
+            probe_lanes: [0.0; 4],
             spray,
             uw,
             linear: linear > 0.5,
@@ -1055,6 +1058,7 @@ impl Tidewater {
             // W9a: the drawn surface around the camera (the grid is drawn in `update`, before the
             // composite reads it; until the first one exists the composite uses the FFT alone)
             uwp.probe = if self.probe.ready || !self.bind_dirty { probe::Probe::lanes(cp) } else { [0.0; 4] };
+            self.probe_lanes = probe::Probe::lanes(cp);
             self.uw.set_frame(queue, &uwp);
         }
         self.fft.set_frame(queue, spec, p.tidewater[0][1], p.time, dt);
@@ -1105,7 +1109,7 @@ impl Tidewater {
             }
             // W9a: the surface around the camera, after everything that displaces it
             if !self.bind_dirty {
-                self.probe.record(encoder, &self.bind);
+                self.probe.record(encoder, &self.bind, self.probe_lanes);
             }
         }
     }

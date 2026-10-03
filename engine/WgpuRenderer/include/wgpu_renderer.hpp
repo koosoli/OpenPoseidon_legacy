@@ -2640,6 +2640,11 @@ extern "C"
     WGR_API void wgr_water_set_cascade_config(WgrRenderer* renderer, uint32_t index, const WgrWaterCascadeConfig* config);
     WGR_API void wgr_water_set_interaction_params(WgrRenderer* renderer, const WgrWaterInteractionParams* params);
     WGR_API void wgr_water_submit_interactions(WgrRenderer* renderer, const WgrWaterInteractionEvent* events, uint32_t count);
+    /* Sinkhole W3: the Tidewater water's drawn surface around the camera (the W9a probe grid, read back
+     * 1-3 frames late): up to `cap` displaced vertices (x, y, z) into `xyz`, the grid lanes (first
+     * lattice x, z, step, texels per side) into `lanes[4]`, the readback's age into `age_ms`. Returns
+     * the texel count, 0 when there is none. Any thread. */
+    WGR_API uint32_t wgr_water_drawn_grid(float* xyz, uint32_t cap, float* lanes, float* age_ms);
 
     /* Render + present one frame. Returns 0 on success (incl. transient skipped
      * frames), negative on error. */

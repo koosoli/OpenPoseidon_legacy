@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <vector>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -1315,6 +1316,24 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
             event.direction_depth_flags = {direction.X(), direction.Z(), 0.0f,
                                            static_cast<float>(WGR_WATER_INTERACTION_PENDING_IMPULSE)};
             _lastInteractionDemoPulse = pulse;
+        }
+    }
+    // Sinkhole W3: hand the drawn surface around the camera to the simulation (swimmers near the camera
+    // and the camera following one ride it; SoldierOldSwim.cpp). None when it is stale (another water
+    // mode, a paused renderer).
+    {
+        static std::vector<float> grid(64 * 64 * 3);
+        float lanes[4] = {};
+        float ageMs = 0.0f;
+        const uint32_t n = wgr_water_drawn_grid(grid.data(), uint32_t(grid.size() / 3), lanes, &ageMs);
+        const int side = int(std::lround(lanes[3]));
+        if (n > 0 && ageMs < 250.0f && side * side == int(n))
+        {
+            SetDrawnWaterGrid(grid.data(), side, lanes);
+        }
+        else
+        {
+            SetDrawnWaterGrid(nullptr, 0, nullptr);
         }
     }
     std::array<HydroWaterInteractionEvent, HydroMaxWaterInteractions> submitted{};

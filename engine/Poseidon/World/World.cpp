@@ -42,6 +42,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Graphics/Rendering/Primitives/ClipVert.hpp>
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Entities/Infantry/SwimView.hpp>
 #include <Poseidon/World/Terrain/Visibility.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
@@ -1675,8 +1676,18 @@ void World::Simulate(float deltaT, bool& enableDraw)
             {
                 camFocus = camFocusObj->CameraPosition();
             }
-            float minCamY =
-                _scene.GetLandscape()->CameraFloorY(camPos, camFocusObj ? &camFocus : nullptr, !mayDive);
+            // Sinkhole W3: on a swimmer the floor is the waves, not the flat mean sea -- in first person none
+            // at all (the swim keeps his eyes over the water; a trough lifted the view into his head), in 3rd
+            // person the wave surface under the camera, so it rides over the crests.
+            float swimWaterY = 0;
+            const bool swimView =
+                !mayDive && SwimmerCameraWater(cameraVehicle.GetLink(), camPos.X(), camPos.Z(), swimWaterY);
+            float minCamY = _scene.GetLandscape()->CameraFloorY(camPos, camFocusObj ? &camFocus : nullptr,
+                                                                !mayDive && !swimView);
+            if (swimView && _camType != CamInternal)
+            {
+                minCamY = std::max(minCamY, swimWaterY + 0.15f);
+            }
             minCamY += 0.1;
             if (camPos.Y() < minCamY)
             {

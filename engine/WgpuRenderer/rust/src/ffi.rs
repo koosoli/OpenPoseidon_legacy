@@ -2934,6 +2934,34 @@ pub unsafe extern "C" fn wgr_water_set_interaction_params(
     }));
 }
 
+/// Sinkhole W3: the Tidewater water's drawn surface around the camera (the W9a probe grid, read back
+/// 1-3 frames late): `cap` texels of displaced vertex (x, y, z) into `xyz` (3 floats each), the grid's
+/// lanes (first lattice x, z, step, size) into `lanes` and the readback's age into `age_ms`. Returns the
+/// texel count, or 0 when there is none (another water mode, no frame yet, `cap` too small). Any thread.
+///
+/// # Safety
+/// `xyz` must hold `cap * 3` floats, `lanes` 4 and `age_ms` 1.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_water_drawn_grid(xyz: *mut f32, cap: u32, lanes: *mut f32, age_ms: *mut f32) -> u32 {
+    if xyz.is_null() || lanes.is_null() || age_ms.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let out = unsafe { std::slice::from_raw_parts_mut(xyz as *mut [f32; 3], cap as usize) };
+        let mut l = [0.0f32; 4];
+        let mut age = 0.0f32;
+        let n = crate::water_tw::probe::drawn_grid(out, &mut l, &mut age);
+        if n > 0 {
+            unsafe {
+                std::ptr::copy_nonoverlapping(l.as_ptr(), lanes, 4);
+                *age_ms = age;
+            }
+        }
+        n as u32
+    }))
+    .unwrap_or(0)
+}
+
 /// # Safety
 /// `renderer` must be live; `events` must point to `count` records unless `count` is zero.
 #[unsafe(no_mangle)]

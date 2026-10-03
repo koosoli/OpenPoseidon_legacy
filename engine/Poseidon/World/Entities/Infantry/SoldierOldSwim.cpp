@@ -16,6 +16,7 @@
 // float face down. POSEIDON_SWIM=0 turns swimming off, POSEIDON_SWIM_SPLASH=0 the splashes.
 
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
+#include <Poseidon/World/Entities/Infantry/SwimView.hpp>
 
 #include <Poseidon/AI/AIUnit.hpp>
 #include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
@@ -102,9 +103,32 @@ WaterSurfaceSample SwimSurface(float x, float z, float level, float waveScale)
     {
         return WaterSurfaceSample{level, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     }
-    return QueryWaterSurfaceScaled(x, z, Glob.time.toFloat(), level, waveScale);
+    WaterSurfaceSample sample = QueryWaterSurfaceScaled(x, z, Glob.time.toFloat(), level, waveScale);
+    // near the camera, the surface as the Tidewater water draws it: the predictor matches the drawn sea in
+    // scale, not crest for crest, and the gap (half a metre at times) put the player's eyes under the drawn
+    // crests. POSEIDON_SWIM_DRAWN=0: the predictor everywhere.
+    static const bool drawn = EnvOn("POSEIDON_SWIM_DRAWN");
+    float y;
+    if (drawn && DrawnWaterHeightAt(x, z, y))
+    {
+        sample.height = y;
+    }
+    return sample;
 }
 } // namespace
+
+bool SwimmerCameraWater(const Object* obj, float x, float z, float& waterY)
+{
+    const Man* man = obj ? dyn_cast<const Man>(obj) : nullptr;
+    if (!man || !man->IsSwimming() || !GLandscape)
+    {
+        return false;
+    }
+    float level, waveScale;
+    SwimWaterLevel(x, z, level, waveScale);
+    waterY = SwimSurface(x, z, level, waveScale).height;
+    return true;
+}
 
 void ManType::FindSwimLimbs() const
 {
@@ -341,6 +365,16 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
             LOG_INFO(World, "Swim: level={:.2f} surface={:.2f} c={:.2f} y={:.2f} target={:.2f} vy={:.2f} bed={:.2f} water=({:.2f},{:.2f}) move={} eye-origin={:.2f} eye-surface={:.2f} limbs=({:.2f},{:.2f},{:.2f},{:.2f})",
                      level, surface, c.height, y, target, _swimVy, bed + 0.3f, waterVX, waterVZ,
                      (const char*)Type()->GetMoveName(_primaryMove.id), eyeY - y, eyeY - c.height, _swimLimbRel[0], _swimLimbRel[1], _swimLimbRel[2], _swimLimbRel[3]);
+            if (GScene && GScene->GetCamera())
+            {
+                const Vector3 cd = GScene->GetCamera()->Direction();
+                const Vector3 cp = GScene->GetCamera()->Position();
+                const float pred = QueryWaterSurfaceScaled(pos.X(), pos.Z(), Glob.time.toFloat(), level, waveScale).height;
+                float drawnY = 0;
+                const bool hasDrawn = DrawnWaterHeightAt(pos.X(), pos.Z(), drawnY);
+                LOG_INFO(World, "Swim cam: drawn={} drawn-pred={:.2f} dir=({:.2f},{:.2f},{:.2f}) camY-surface={:.2f} up=({:.2f},{:.2f},{:.2f}) headX={:.2f}", hasDrawn ? 1 : 0, hasDrawn ? drawnY - pred : 0.0f, cd.X(), cd.Y(), cd.Z(),
+                         cp.Y() - c.height, _swimUp.X(), _swimUp.Y(), _swimUp.Z(), _headXRot);
+            }
         }
     }
 

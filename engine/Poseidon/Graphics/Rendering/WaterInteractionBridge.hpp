@@ -70,4 +70,12 @@ bool RifleWaterImpactSprayEnabled();
 // WGR_TW_LEGACY_WATER_FX=1 keeps them; the Current OP water mode is unchanged.
 bool TidewaterWaterBurst(float x, float y, float z);
 
+// Sinkhole W3: the water surface around the camera as the Tidewater water draws it (its W9a probe grid,
+// n x n displaced vertices x, y, z, 1-3 frames late; lanes = first lattice x, z, step, n), handed over
+// by the renderer each frame (n = 0: none). The CPU wave predictor matches the drawn sea in scale, not
+// crest for crest; a swimmer near the camera, and the camera following him, ride this instead.
+// Presentation of the local view only. Safe from any thread.
+void SetDrawnWaterGrid(const float* xyz, int n, const float lanes[4]);
+bool DrawnWaterHeightAt(float x, float z, float& y);
+
 } // namespace Poseidon
