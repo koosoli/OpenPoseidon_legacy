@@ -175,11 +175,22 @@ function Compare-Routes($dry,$rain){
  return $summary
 }
 function Parse-CoarseCosts([string[]]$lines){
- $rows=@();$pending=$null;$phases=@('source-sink','clear','raw-transfer','limited-flux','final-cells')
+ $rows=@();$pending=$null;$phases=@('source-sink','clear','raw-transfer','limited-flux','final-cells','fused-flux')
+ $finish={param($row)
+  Require ($row.phases.Count-eq$row.phaseCount) 'Incomplete final coarse phase receipt.'
+  $fused=if($row.phaseCount-eq6){$row.phases[5].calls}else{0}
+  Require ($row.phases[2].calls-eq$row.phases[3].calls-and$row.phases[2].calls+$fused-eq$row.steps-$row.empty_steps) 'Actual cached/fused/empty phase calls disagree.'
+  $row.fusedFluxCalls=$fused
+  return $row
+ }
  foreach($line in $lines){
   if($line -match 'Rain water coarse cost: advances='){
-   Require ($null -eq $pending) 'Incomplete coarse phase association before next report.'
+   if($null-ne$pending){$rows+=,(& $finish $pending)}
    $pending=@{line=$line;phases=@()}
+   $pending.phaseCount=5 # historical schema has no phase_count field
+   $countFields=[regex]::Matches($line,'(?:^| )phase_count=(\S+)')
+   Require ($countFields.Count-le1) 'Duplicate coarse phase-count field.'
+   if($countFields.Count){Require ($countFields[0].Groups[1].Value-ceq'6') 'Unknown coarse phase-count schema.';$pending.phaseCount=6}
    if($line -match '^\[([^\]]+)\]'){$pending.reportLocal=$Matches[1]}
    foreach($key in @('advances','steps','empty_steps','no_step','multi_step','wall_total_ms','wall_max_ms','cpu_samples','cpu_total_ms','cpu_at_wall_max_ms','steps_at_wall_max','slow_50ms')){
     Require ($line -match ('(?:^| )'+$key+'=(-?[0-9]+(?:\.[0-9]+)?)(?: |$)')) ('Missing coarse receipt '+$key)
@@ -197,14 +208,15 @@ function Parse-CoarseCosts([string[]]$lines){
    $name=$Matches[1];$calls=[int64]$Matches[2];$total=[double]::Parse($Matches[3],$culture);$max=[double]::Parse($Matches[4],$culture)
    Require ([double]::IsFinite($total) -and [double]::IsFinite($max)) 'Nonfinite coarse phase timing.'
    $index=$pending.phases.Count
-   Require ($index -lt 5 -and $name -ceq $phases[$index] -and $total -ge $max -and $max -ge 0 -and ($calls -gt 0 -or ($total -eq 0 -and $max -eq 0))) 'Coarse phase identity/order/timing mismatch.'
-   $expected=if($index -eq 2 -or $index -eq 3){$pending.steps-$pending.empty_steps}else{$pending.steps}
-   Require ($calls -eq $expected) 'Actual coarse steps and empty-pass phase calls disagree.'
+   Require ($index -lt $pending.phaseCount -and $name -ceq $phases[$index] -and $total -ge $max -and $max -ge 0 -and ($calls -gt 0 -or ($total -eq 0 -and $max -eq 0))) 'Coarse phase identity/order/timing mismatch.'
+   if($index-in@(0,1,4)){Require ($calls-eq$pending.steps) 'Actual common-phase steps disagree.'}
+   else{Require ($calls-le$pending.steps-$pending.empty_steps) 'Actual flux phase exceeds nonempty steps.'}
    $pending.phases+=,@{name=$name;calls=$calls;totalMs=$total;maxMs=$max}
-   if($pending.phases.Count -eq 5){$rows+=,$pending;$pending=$null}
+  }elseif($line-match'Rain water coarse phase:'){
+   throw 'Malformed coarse phase report.'
   }
  }
- Require ($null -eq $pending) 'Incomplete final coarse phase receipt.'
+ if($null-ne$pending){$rows+=,(& $finish $pending)}
  return $rows
 }
 if($SelfTest){
@@ -272,6 +284,25 @@ if($SelfTest){
  Refuses {Parse-CoarseCosts ($coarse[0..4])};Refuses {Parse-CoarseCosts ($coarse[1..5])}
  $badCoarse=$coarse.Clone();$badCoarse[3]=$badCoarse[3].Replace('calls=3','calls=4');Refuses {Parse-CoarseCosts $badCoarse}
  $badCoarse=$coarse.Clone();$badCoarse[0]=$badCoarse[0].Replace('steps=4','steps=9999');Refuses {Parse-CoarseCosts $badCoarse}
+ $newCoarse=$coarse.Clone();$newCoarse[0]=$newCoarse[0].Replace(' scope=',' phase_count=6 scope=')
+ $newCoarse[3]=$newCoarse[3].Replace('calls=3','calls=1');$newCoarse[4]=$newCoarse[4].Replace('calls=3','calls=1')
+ $newCoarse+=,'Rain water coarse phase: phase=fused-flux calls=2 total_ms=2.000000 max_ms=1.000000 scope=nested-coarse-step'
+ $parsed=@(Parse-CoarseCosts $newCoarse);Require ($parsed.Count-eq1-and$parsed[0].fusedFluxCalls-eq2) 'Exact mixed cached/fused schema rejected.'
+ Require (@(Parse-CoarseCosts (@($coarse)+@($newCoarse))).Count-eq2) 'Historical/new reports cannot coexist.'
+ Refuses {Parse-CoarseCosts $newCoarse[0..5]} # missing mandatory sixth phase
+ Refuses {Parse-CoarseCosts (@($newCoarse)+@($newCoarse[-1]))}
+ $badCoarse=$newCoarse.Clone();$badCoarse[6]=$badCoarse[6].Replace('calls=2','calls=3');Refuses {Parse-CoarseCosts $badCoarse}
+ $badCoarse=$newCoarse.Clone();$badCoarse[6]=$badCoarse[6].Replace('fused-flux','unknown');Refuses {Parse-CoarseCosts $badCoarse}
+ $badCoarse=$newCoarse.Clone();$badCoarse[0]=$badCoarse[0].Replace('phase_count=6','phase_count=7');Refuses {Parse-CoarseCosts $badCoarse}
+ $badCoarse=$newCoarse.Clone();$badCoarse[0]=$badCoarse[0].Replace('phase_count=6','phase_count=6 phase_count=6');Refuses {Parse-CoarseCosts $badCoarse}
+ $zeroFused=$coarse.Clone();$zeroFused[0]=$zeroFused[0].Replace(' scope=',' phase_count=6 scope=')
+ $zeroFused+=,'Rain water coarse phase: phase=fused-flux calls=0 total_ms=0.000000 max_ms=0.000000 scope=nested-coarse-step'
+ Require (@(Parse-CoarseCosts $zeroFused).Count-eq1) 'Explicit zero fused phase rejected.'
+ $allFused=$zeroFused.Clone()
+ foreach($index in @(3,4)){$allFused[$index]=$allFused[$index].Replace('calls=3','calls=0').Replace('total_ms=2.000000 max_ms=1.000000','total_ms=0.000000 max_ms=0.000000')}
+ $allFused[6]=$allFused[6].Replace('calls=0','calls=3').Replace('total_ms=0.000000 max_ms=0.000000','total_ms=2.000000 max_ms=1.000000')
+ Require (@(Parse-CoarseCosts $allFused)[0].fusedFluxCalls-eq3) 'Fully fused nonempty report rejected.'
+ Refuses {Parse-CoarseCosts (@($allFused)+@('Rain water coarse phase: phase=fused-flux calls=garbage'))}
  Write-Output 'Occupied flight performance pure helpers PASS; no game/profile/GPU used.';return
 }
 Require ([bool]$ExpectedCommit -and [bool]$env:LOCK_OWNER) 'Supply installed ExpectedCommit and invoke with-game-lock.sh.'

@@ -452,7 +452,13 @@ private:
         const float evaporation = (0.000002f + sunlight * 0.000006f + wind * 0.000001f) * StepSeconds;
         const float infiltration = 0.000004f * StepSeconds;
         bool hasWater = false;
+        // Dispatch only: finite caps exclude unsafe head/flux arithmetic.
+        // Four incident faces at speed<=5 and dt=.25 donate at most half a
+        // normal donor depth at spacing>=10, with ample IEEE rounding margin.
+        bool canFuse = _spacing >= 10.0f && _spacing <= 1000000.0f;
         for (size_t i=0; i<_depth.size(); ++i) {
+            // Check sea beds too: their zero depth still enters inland heads.
+            canFuse &= std::abs(_bed[i]) <= 1000000.0f;
             // Sea is a real outlet, not a source of rainwater above dry terrain.
             if (_bed[i] <= _seaLevel) {
                 _budget.outlet += _depth[i] * area; _depth[i] = 0; continue;
@@ -463,6 +469,8 @@ private:
             const float evaporated = std::min(_depth[i], evaporation);
             _depth[i] -= evaporated; _budget.evaporation += evaporated * area;
             hasWater |= _depth[i] > 0;
+            canFuse &= _depth[i] <= 1024.0f &&
+                (_depth[i] == 0.0f || _depth[i] >= std::numeric_limits<float>::min());
         }
         phase.End(RainWaterCost::Phase::SourceSink);
         cost.Step(!hasWater);
@@ -472,32 +480,45 @@ private:
         // Every donor is exactly dry after the unchanged source/sink pass.
         // Transfer then returns +0 on every edge. Preserve the clears, final
         // cell pass, budgets and revision, but avoid two empty edge traversals.
-        // The next nonempty step overwrites every cached transfer before use.
+        // The next cached step overwrites every transfer before reading it.
         if (hasWater) {
-            size_t edgeX=0,edgeZ=0;
-            Edges([&](size_t a,size_t b,bool alongX) {
-                const float f = Transfer(a,b);
-                (alongX ? _edgeX[edgeX++] : _edgeZ[edgeZ++]) = f;
-                _out[f>0?a:b] += std::abs(f);
-            });
-            phase.End(RainWaterCost::Phase::RawTransfer);
-            // Bed/depth do not change between these passes. Reuse only the raw
-            // transfer from this step, in the same interleaved row/axis edge order;
-            // donor normalization, delta and flow writes retain their exact order.
-            edgeX=0;edgeZ=0;
-            Edges([&](size_t a,size_t b,bool alongX) {
-                float f = alongX ? _edgeX[edgeX++] : _edgeZ[edgeZ++]; const size_t donor = f>0?a:b;
-                if (_out[donor]>0)
-                    // The clamp is exactly one when outgoing<=depth. Keep the
-                    // multiply and full ratio fallback for limited/nonfinite cases.
-                    f *= _out[donor] <= _depth[donor] ? 1.0f : std::min(1.0f,_depth[donor]/_out[donor]);
-                _delta[a] -= f; _delta[b] += f;
-                auto& flow = alongX ? _flowX : _flowZ;
-                // Signed volume flux converted to a surface-flow speed where wet.
-                const float velocity = f * _spacing / StepSeconds / std::max(_depth[donor],0.0001f);
-                flow[a] += velocity * 0.5f; flow[b] += velocity * 0.5f;
-            });
-            phase.End(RainWaterCost::Phase::LimitedFlux);
+            if (canFuse) {
+                // The original donor multiplier is exactly one. Keep the
+                // original interleaved edge, delta and flow update order.
+                Edges([&](size_t a,size_t b,bool alongX) {
+                    const float f=Transfer(a,b);const size_t donor=f>0?a:b;
+                    _delta[a]-=f;_delta[b]+=f;
+                    auto& flow=alongX ? _flowX : _flowZ;
+                    const float velocity=f*_spacing/StepSeconds/std::max(_depth[donor],0.0001f);
+                    flow[a]+=velocity*0.5f;flow[b]+=velocity*0.5f;
+                });
+                phase.End(RainWaterCost::Phase::FusedFlux);
+            } else {
+                size_t edgeX=0,edgeZ=0;
+                Edges([&](size_t a,size_t b,bool alongX) {
+                    const float f = Transfer(a,b);
+                    (alongX ? _edgeX[edgeX++] : _edgeZ[edgeZ++]) = f;
+                    _out[f>0?a:b] += std::abs(f);
+                });
+                phase.End(RainWaterCost::Phase::RawTransfer);
+                // Bed/depth do not change between these passes. Reuse only the raw
+                // transfer from this step, in the same interleaved row/axis edge order;
+                // donor normalization, delta and flow writes retain their exact order.
+                edgeX=0;edgeZ=0;
+                Edges([&](size_t a,size_t b,bool alongX) {
+                    float f = alongX ? _edgeX[edgeX++] : _edgeZ[edgeZ++]; const size_t donor = f>0?a:b;
+                    if (_out[donor]>0)
+                        // The clamp is exactly one when outgoing<=depth. Keep the
+                        // multiply and full ratio fallback for limited/nonfinite cases.
+                        f *= _out[donor] <= _depth[donor] ? 1.0f : std::min(1.0f,_depth[donor]/_out[donor]);
+                    _delta[a] -= f; _delta[b] += f;
+                    auto& flow = alongX ? _flowX : _flowZ;
+                    // Signed volume flux converted to a surface-flow speed where wet.
+                    const float velocity = f * _spacing / StepSeconds / std::max(_depth[donor],0.0001f);
+                    flow[a] += velocity * 0.5f; flow[b] += velocity * 0.5f;
+                });
+                phase.End(RainWaterCost::Phase::LimitedFlux);
+            }
         }
         for (size_t i=0; i<_depth.size(); ++i) {
             _depth[i] = std::max(0.0f,_depth[i]+_delta[i]);

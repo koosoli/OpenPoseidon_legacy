@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$BaselineReceipt,[string]$Compiler='clang++',
+param([Parameter(Mandatory)][string]$BaselineReceipt,[string]$Compiler='clang++',[switch]$Production,
  [switch]$Measure,[ValidateRange(2,8)][int]$Rounds=4)
 $ErrorActionPreference='Stop';$root=Split-Path -Parent $PSScriptRoot
 function Require([bool]$ok,[string]$message){if(!$ok){throw $message}}
@@ -13,9 +13,14 @@ $baseDir=Split-Path -Parent $baselinePath
 $output=Join-Path $root ('build/rain-water-coarse-fusion/run-'+[DateTime]::UtcNow.ToString('yyyyMMdd-HHmmssfff'))
 New-Item -ItemType Directory -Force -Path $output|Out-Null
 $weather=Join-Path $root 'engine/Poseidon/World/Weather'
+$currentSourceHashes=[ordered]@{}
 foreach($property in $baseline.sourceSha256.PSObject.Properties){
  $text=[IO.File]::ReadAllText((Join-Path $weather $property.Name)).Replace("`r`n","`n").TrimEnd([char[]]"`n")+"`n"
- Require ((Hash-Text $text)-ceq$property.Value) 'Solver dependency differs from faithful baseline.'
+ $currentSourceHashes[$property.Name]=Hash-Text $text
+ if(!$Production-or$property.Name-notin@('RainWaterField.hpp','RainWaterCost.hpp')){
+  Require ((Hash-Text $text)-ceq$property.Value) 'Solver dependency differs from faithful baseline.'
+ }
+ if($property.Name-ceq'RainWaterField.hpp'){$currentSolver=$text}
 }
 foreach($label in @('A','B')){
  $text=[IO.File]::ReadAllText((Join-Path $baseDir ('RainWaterReplay'+$label+'.hpp')))
@@ -23,6 +28,16 @@ foreach($label in @('A','B')){
  if($label-ceq'A'){$originalA=$text}else{$originalB=$text}
 }
 $candidate=$originalB
+if($Production){
+ Require ($currentSolver.Contains('phase.End(RainWaterCost::Phase::FusedFlux)')) 'Current production does not contain reviewed fused dispatch.'
+ Require (([regex]::Matches($currentSolver,'(?m)^private:$')).Count-eq1) 'Exact production friend seam changed.'
+ $candidate=[regex]::Replace($currentSolver,'\bRainWaterField\b','RainWaterFieldReplayB')
+ $candidate=[regex]::Replace($candidate,'\bGRainWater\b','GRainWaterReplayB')
+ $candidate=$candidate.Replace("private:`n","private:`n    friend struct RainWaterReplayBridge;`n")
+ $candidate=$candidate.Replace("namespace Poseidon`n{","namespace Poseidon`n{`ninline uint64_t ReplayFusionSteps=0,ReplayFallbackSteps=0;")
+ $candidate=$candidate.Replace('phase.End(RainWaterCost::Phase::FusedFlux);','++ReplayFusionSteps; phase.End(RainWaterCost::Phase::FusedFlux);')
+ $candidate=$candidate.Replace('phase.End(RainWaterCost::Phase::RawTransfer);','++ReplayFallbackSteps; phase.End(RainWaterCost::Phase::RawTransfer);')
+}else{
 foreach($seam in @("namespace Poseidon`n{",'bool hasWater = false;',
  '// Sea is a real outlet, not a source of rainwater above dry terrain.','hasWater |= _depth[i] > 0;',
  "if (hasWater) {`n            size_t edgeX=0,edgeZ=0;",
@@ -63,13 +78,26 @@ if (hasWater) {
 '@)
 $candidate=$candidate.Replace("phase.End(RainWaterCost::Phase::LimitedFlux);`n        }`n        for", "phase.End(RainWaterCost::Phase::LimitedFlux);`n            }`n        }`n        for")
 Require ($candidate-cne$originalB-and$candidate.Contains('const float f=Transfer(a,b)')-and$candidate.Contains('++ReplayFallbackSteps;')) 'Prototype insertion seam changed.'
+}
 [IO.File]::WriteAllText((Join-Path $output 'RainWaterReplayA.hpp'),$originalA,[Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllText((Join-Path $output 'RainWaterReplayB.hpp'),$candidate,[Text.UTF8Encoding]::new($false))
-$receipt=@{status='prepared';prototypeOnly=$true;productionMathChanged=$false;performanceAccepted=$false;timingPerformed=$false
+$receipt=@{status='prepared';prototypeOnly=$true;runnerEditsProductionSolver=$false;performanceAccepted=$false;timingPerformed=$false
  baselineReceipt=$baselinePath;baselineReceiptSha256=(Get-FileHash -LiteralPath $baselinePath).Hash
  candidateSha256=(Hash-Text $candidate);scope='Actual-state observable bitwise equivalence plus named synthetic dispatch/fallback controls; unused scratch intentionally differs, no performance acceptance.'
  proofs=@();timings=@();rounds=$Rounds;prototypeScriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash
  prototypeCppSha256=(Get-FileHash -LiteralPath (Join-Path $root 'tests/unit/engine/weather/rain_water_coarse_fusion.cpp')).Hash}
+if($Production){
+ $receipt.prototypeOnly=$false;$receipt.currentProductionHeaderCopied=$true;$receipt.currentSourceSha256=$currentSourceHashes
+ $receipt.scope='Verified captured baseline A versus exact current production B with renamed identifiers/friend and branch witnesses only. Observable state equality, no initial flow history or installed performance claim.'
+ # Reverse only fixture witnesses/identifiers. Production B must round-trip to
+ # the full actual header, rather than quietly replaying the earlier prototype.
+ $roundtrip=$candidate.Replace("inline uint64_t ReplayFusionSteps=0,ReplayFallbackSteps=0;`n",'')
+ $roundtrip=$roundtrip.Replace('++ReplayFusionSteps; ','').Replace('++ReplayFallbackSteps; ','')
+ $roundtrip=$roundtrip.Replace("    friend struct RainWaterReplayBridge;`n",'')
+ $roundtrip=[regex]::Replace($roundtrip,'\bRainWaterFieldReplayB\b','RainWaterField')
+ $roundtrip=[regex]::Replace($roundtrip,'\bGRainWaterReplayB\b','GRainWater')
+ Require ($roundtrip-ceq$currentSolver) 'Current production copy contains fixture algorithm edits.'
+}
 $saved=$env:POSEIDON_RAIN_WATER_COST
 try{
  $env:POSEIDON_RAIN_WATER_COST='0'
@@ -117,7 +145,11 @@ try{
   $receipt.timingPerformed=$true
  }
  $receipt.status='prototype-observable-bitwise-pass-performance-unmeasured'
- if($Measure){$receipt.status='prototype-observable-bitwise-pass-exploratory-abba';$receipt.timingScope='Offline counter-free generated prototype only. Host quietness beyond game absence and installed performance acceptance remain root-owned.'}
+ if($Production){$receipt.status='production-copy-observable-bitwise-pass-performance-unmeasured'}
+ if($Measure){
+  $receipt.status=if($Production){'production-copy-observable-bitwise-pass-exploratory-abba'}else{'prototype-observable-bitwise-pass-exploratory-abba'}
+  $receipt.timingScope=if($Production){'Offline counter-free copy of verified current production header only. Host quietness beyond game absence and installed performance acceptance remain root-owned.'}else{'Offline counter-free generated prototype only. Host quietness beyond game absence and installed performance acceptance remain root-owned.'}
+ }
  $receipt|ConvertTo-Json -Depth 15|Set-Content -LiteralPath (Join-Path $output 'result.json') -Encoding UTF8
  Write-Output ($receipt.status+'; '+(Join-Path $output 'result.json'))
 }finally{$env:POSEIDON_RAIN_WATER_COST=$saved}

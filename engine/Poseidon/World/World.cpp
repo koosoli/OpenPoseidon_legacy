@@ -1236,10 +1236,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 {
                     LOG_INFO(World, "Rain water coarse cost: advances={} steps={} empty_steps={} no_step={} multi_step={} "
                                     "wall_total_ms={:.6f} wall_max_ms={:.6f} cpu_samples={} cpu_total_ms={:.6f} "
-                                    "cpu_at_wall_max_ms={:.6f} steps_at_wall_max={} slow_50ms={} scope=coarse-advance-thread-elapsed",
+                                    "cpu_at_wall_max_ms={:.6f} steps_at_wall_max={} slow_50ms={} phase_count={} scope=coarse-advance-thread-elapsed",
                              water.advances,water.steps,water.emptySteps,water.noStepAdvances,water.multiStepAdvances,
                              water.wallMs,water.maxWallMs,water.cpuSamples,water.cpuMs,
-                             water.cpuAtMaxWallMs,water.stepsAtMaxWall,water.slowAdvances);
+                             water.cpuAtMaxWallMs,water.stepsAtMaxWall,water.slowAdvances,RainWaterCost::PhaseCount);
                     for (size_t i=0;i<RainWaterCost::PhaseCount;++i)
                         LOG_INFO(World, "Rain water coarse phase: phase={} calls={} total_ms={:.6f} max_ms={:.6f} scope=nested-coarse-step",
                                  RainWaterCost::Name(static_cast<RainWaterCost::Phase>(i)),water.phaseCalls[i],

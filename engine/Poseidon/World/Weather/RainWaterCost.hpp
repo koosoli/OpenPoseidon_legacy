@@ -53,10 +53,11 @@ inline CpuTime ThreadCpuTime() {
     return {}; // Unavailable never means zero CPU cost.
 #endif
 }
-enum class Phase : unsigned { SourceSink, Clear, RawTransfer, LimitedFlux, FinalCells, Count };
+// Preserve the historical five indices; fused transfer/flow has its own scope.
+enum class Phase : unsigned { SourceSink, Clear, RawTransfer, LimitedFlux, FinalCells, FusedFlux, Count };
 inline constexpr size_t PhaseCount=static_cast<size_t>(Phase::Count);
 inline const char* Name(Phase p) {
-    constexpr const char* names[] = {"source-sink","clear","raw-transfer","limited-flux","final-cells"};
+    constexpr const char* names[] = {"source-sink","clear","raw-transfer","limited-flux","final-cells","fused-flux"};
     return static_cast<size_t>(p)<PhaseCount ? names[static_cast<size_t>(p)] : "invalid";
 }
 struct Accum {
