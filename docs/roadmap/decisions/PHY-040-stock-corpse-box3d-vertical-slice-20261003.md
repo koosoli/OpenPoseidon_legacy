@@ -145,6 +145,54 @@ forced and no engine contact policy is relaxed. The corrected installed
 deletion campaign remains pending; earlier passing gates are partial evidence,
 not a full lifecycle or visual acceptance result.
 
+The corrected installed campaign
+`isolated-contact-stock-box3d-954cf87-20261003-191443-442e46` now **passes** the
+entire optional articulation runner, using the unchanged matching installed
+`e81744f4` pair. The game exits normally with code zero and shutdown marker;
+before/after deployment provenance is identical. Its motion witness covers
+0.680 simulation seconds, 41 updates, maximum body-origin travel 0.153947 m,
+541 moved points and 37 moved proxies. Clear, expiry, hiding **and deletion**
+all report zero articulated bodies/joints. Staging proves the previous hidden
+fixture was removed, the original player placement/direction was restored, and
+the new live placement/readback was recorded. This accepts the bounded dry
+Western-stock opt-in lifecycle/consumed-pose slice, not automatic deaths or
+general visual/contact support. Held and takeover images show the same visible
+initial pose; moving images show limb changes without an obvious explosion.
+Authored head/body burial is still visible in the baseline. The older ~7.5 cm
+measurements describe Fire hull penetration, not a quantified graphical skin
+penetration maximum.
+
+## Next-stage assessment; no implementation or default enablement
+
+The most useful isolated next physics step is four real knee/elbow hinges.
+Pinned Box3D `954cf87` supplies `b3RevoluteJointDef`: local-Z hinge axis,
+reference target angle and signed angular limits. Our seam currently creates
+ten spherical joints, with distal cone/twist ranges of 0.30/0.20 radians.
+Those conservative prototype ranges do not establish realistic limb flexion.
+
+First measure actual weighted joint boundaries and wrist/ankle endpoints in
+an authored neutral/live pose. Derive anatomical bend planes and signs from
+that geometry, with an actual bilateral body frame for nearly straight limbs;
+reject ambiguous or degenerate frames. Do not infer joints from RTM matrix
+translations. Carry the measured reference frame into the captured affine
+pose, retaining each phase's scale/shear residual in the common point/palette/
+proxy consumers. Signed limits must include the already captured bend, and
+both local joint pivots must still map to the same initial world point. A hinge
+that immediately straightens the captured leg has failed the handoff gate.
+Required checks are actual axial versus lateral torque response, signed limit
+behavior, solver replay, and installed zero-motion/moving consumer evidence.
+
+Graphical burial needs its own skin-support census and recovery decision.
+The inset collision calibration accepts solver clearance; it cannot establish
+visible skin contact. A buried authored pose cannot simultaneously remain
+bitwise identical and instantly become unburied. A separate opt-in recovery
+stage would need continuous measured pose correction and explicit validation
+of its displacement, skin/CPU consumer agreement and collision support before
+changing the current handoff policy. Broad collider enlargement, a guessed
+whole-body height lift or a render-only correction would not establish those
+requirements. No production change or automatic-death promotion follows from
+this read-only assessment.
+
 The existing corpse-ignored vertical center-ray census must also show no external
 object hits. That bounded rejection is not a convex overlap proof; building-floor
 and wall-contact admission remain separate work.
