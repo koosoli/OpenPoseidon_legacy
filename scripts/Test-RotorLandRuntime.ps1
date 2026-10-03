@@ -30,6 +30,17 @@ function Number([double]$value) {
     Require (![double]::IsNaN($value) -and ![double]::IsInfinity($value)) 'Nonfinite fixture number.'
     return $value.ToString('R',$culture)
 }
+function Sea-Candidates([Nullable[double]]$x,[Nullable[double]]$z,[double]$originX,[double]$originZ) {
+    Require (($null -eq $x) -eq ($null -eq $z)) 'Supply both SeaX and SeaZ, or neither.'
+    if ($null -ne $x) {
+        $null=Number ([double]$x);$null=Number ([double]$z)
+        # PowerShell unwraps a singleton nested coordinate array; a named
+        # record keeps both actual bound coordinates together through foreach.
+        return [pscustomobject]@{x=[double]$x;z=[double]$z}
+    }
+    $null=Number $originX;$null=Number $originZ
+    for($i=1;$i -le 10;++$i) {[pscustomobject]@{x=$originX-$i*128;z=$originZ}}
+}
 function Assert-RotorState($state) {
     foreach($field in @('timeMs','object','candidates','distanceXZ','x','y','z','groundY','clearance','rpm',
       'upX','upY','upZ','speedX','speedY','speedZ','fuel','damage','driverState','moveUp','moveDown','unfocusedMoveUp','focusLost','qKey','airflowScale','cameraDistance',
@@ -76,7 +87,20 @@ function Assert-NeutralHover($state) {
         Require ([Math]::Abs([double]$state.$field) -le .001) ('Canopy observation has active pilot request '+$field)
     }
 }
+$seaCandidates=@(Sea-Candidates $SeaX $SeaZ $SandX $SandZ)
 if ($SelfTest) {
+    $bound=@(Sea-Candidates $SeaX $SeaZ $SandX $SandZ)
+    if ($null -ne $SeaX) {
+        Require ($bound.Count -eq 1 -and $bound[0].x -is [double] -and $bound[0].z -is [double] -and $bound[0].x -eq [double]$SeaX -and $bound[0].z -eq [double]$SeaZ) 'Actual script SeaX/SeaZ binding lost a coordinate.'
+    } else {Require ($bound.Count -eq 10 -and $bound[0].x -eq $SandX-128 -and $bound[-1].x -eq $SandX-1280 -and @($bound|Where-Object {$_.z -ne $SandZ}).Count -eq 0) 'Default read-only sea search changed.'}
+    $single=@(Sea-Candidates 1750 3100 2475 5075)
+    Require ($single.Count -eq 1 -and $single[0].x -eq 1750 -and $single[0].z -eq 3100) 'Singleton audited sea pair flattened.'
+    $zero=@(Sea-Candidates 0 0 2475 5075);Require ($zero.Count -eq 1 -and $zero[0].x -eq 0 -and $zero[0].z -eq 0) 'Finite zero sea coordinate was treated as missing.'
+    foreach($bad in @('missingX','missingZ','nanX','infZ')) {
+        $refused=$false
+        try {switch($bad) {'missingX'{$null=Sea-Candidates $null 3100 2475 5075};'missingZ'{$null=Sea-Candidates 1750 $null 2475 5075};'nanX'{$null=Sea-Candidates ([double]::NaN) 3100 2475 5075};'infZ'{$null=Sea-Candidates 1750 ([double]::PositiveInfinity) 2475 5075}}} catch {$refused=$true}
+        Require $refused ('Malformed actual sea binding accepted: '+$bad)
+    }
     $sample=[ordered]@{}
     foreach($field in @('timeMs','object','candidates','distanceXZ','x','y','z','groundY','clearance','rpm','upX','upY','upZ','speedX','speedY','speedZ','fuel','damage','driverState','moveUp','moveDown','unfocusedMoveUp','focusLost','qKey','airflowScale','cameraDistance','altKey','cameraType','moveForward','fastForward','moveBack','turnLeft','turnRight','moveLeft','moveRight','windX','windY','windZ')) {$sample[$field]=0.0}
     foreach($field in @('readonly','engineOn','destroyed','local','airborne','driverPresent','driverBrain','driverLocal','driverAlive','driverIsPlayer','pilotIsPlayer','focusIsDriver','manual','driverManual','playerManual','playerSuspended','cameraEffect','resolvedHelicopter','airflowEnabled','cameraDistanceValid','mouseTurnActive','lookAroundEnabled','lookAroundToggled','joystickActive','joystickThrustActive','hoverStateAvailable')) {$sample[$field]=$false}
@@ -109,7 +133,6 @@ if ($SelfTest) {
 }
 if (!$env:LOCK_OWNER) {throw 'Run through scripts/with-game-lock.sh.'}
 if (Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue) {throw 'Preserve the running game.'}
-if (($null -eq $SeaX) -ne ($null -eq $SeaZ)) {throw 'Supply both SeaX and SeaZ, or neither.'}
 function Pair {
     # Provenance is the first installed file read.
     $stamp=[IO.File]::ReadAllText((Join-Path $GameDir 'DEPLOYED-FROM.txt')).Trim()
@@ -400,11 +423,8 @@ try {
     $rows=@(Observe 'real-rain-wet' $SandX $SandZ);Require (@($rows | Where-Object {$_.emitted -gt 0}).Count -eq 0) 'Wet actual rainy ground emitted dry dust.'
     # Read-only shallow-sea search; no water material/control setter is used.
     $sea=$null
-    if ($null -ne $SeaX) {$candidates=@(@([double]$SeaX,[double]$SeaZ))} else {
-        $candidates=@(for($i=1;$i -le 10;++$i) {,@(($SandX-$i*128),$SandZ)})
-    }
-    foreach($candidate in $candidates) {
-        $bath=Send @{cmd='water_bathymetry';x=$candidate[0];z=$candidate[1]}
+    foreach($candidate in $seaCandidates) {
+        $bath=Send @{cmd='water_bathymetry';x=$candidate.x;z=$candidate.z}
         foreach($point in $bath.samples) {
             if ($point[2] -ge -.1 -or $point[2] -lt -8) {continue}
             $near=@($bath.samples | Where-Object {[Math]::Abs($_[0]-$point[0]) -le 32 -and [Math]::Abs($_[1]-$point[1]) -le 32})
