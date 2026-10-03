@@ -105,6 +105,7 @@ void SnowBulletTerrainImpact(Object* projectile, Object* owner, const Vector3& p
     const Vector3 normal = Vector3(-dx,1.0f,-dz).Normalized();
     auto cut = SnowBulletImpactPolicy(speed,damage,remaining,normal.Y(),incoming*normal,
                                      point.Y()-ground,local,explosive,water,false,false);
+    const auto groove = SnowBulletGroovePolicy(remaining,normal.Y(),incoming*normal,incoming.X(),incoming.Z());
     bool roadway = false, sheltered = false;
     bool changed = false;
     static SnowBulletBudget budget;
@@ -112,8 +113,14 @@ void SnowBulletTerrainImpact(Object* projectile, Object* owner, const Vector3& p
     const bool budgetGranted = cut.depth > 0 && land && budget.Take(Glob.time.toFloat());
     if (budgetGranted)
     {
-        const Vector3 offsets[] = {VZero,Vector3(cut.radius,0,0),Vector3(-cut.radius,0,0),
-                                   Vector3(0,0,cut.radius),Vector3(0,0,-cut.radius)};
+        // Probe the centre and four corners of the complete oriented capsule's
+        // enclosing rectangle, including its upstream snow-entry endpoint.
+        const float halfLength = groove.length * 0.5f;
+        const Vector3 centre(-groove.directionX*halfLength,0,-groove.directionZ*halfLength);
+        const Vector3 along = groove.length > 0 ? Vector3(groove.directionX,0,groove.directionZ) : Vector3(1,0,0);
+        const Vector3 across(-along.Z(),0,along.X());
+        const Vector3 a = along*(cut.radius+halfLength), b = across*cut.radius;
+        const Vector3 offsets[] = {centre,centre+a+b,centre+a-b,centre-a+b,centre-a-b};
         for (const Vector3& offset : offsets)
         {
             const Vector3 sample = point+offset;
@@ -132,11 +139,12 @@ void SnowBulletTerrainImpact(Object* projectile, Object* owner, const Vector3& p
         }
         cut = SnowBulletImpactPolicy(speed,damage,remaining,normal.Y(),incoming*normal,
                                      point.Y()-ground,local,explosive,water,roadway,sheltered);
-        if (cut.depth > 0) changed = GSnow().BulletImpact(x,z,cut.radius,cut.depth);
+        if (cut.depth > 0) changed = GSnow().BulletImpact(x,z,cut.radius,cut.depth,
+            groove.directionX,groove.directionZ,groove.length);
     }
     if (SnowBulletTraceEnabled())
-        LOG_INFO(World, "SNOW_BULLET terrain=1 changed={} x={:.3f} y={:.3f} z={:.3f} speed={:.2f} base={:.4f} remaining={:.4f} radius={:.4f} depth={:.4f} before={:.4f} after={:.4f} roadway={} sheltered={} land={} budget={} up={:.4f} incidence={:.4f} supportError={:.4f}",
-                 changed,x,point.Y(),z,speed,base,remaining,cut.radius,cut.depth,before,GSnow().DeficitAt(ix,iz),roadway,sheltered,land,budgetGranted,normal.Y(),incoming*normal,point.Y()-ground);
+        LOG_INFO(World, "SNOW_BULLET terrain=1 changed={} x={:.3f} y={:.3f} z={:.3f} speed={:.2f} base={:.4f} remaining={:.4f} radius={:.4f} depth={:.4f} before={:.4f} after={:.4f} roadway={} sheltered={} land={} budget={} up={:.4f} incidence={:.4f} supportError={:.4f} directionX={:.5f} directionZ={:.5f} grooveLength={:.5f}",
+                 changed,x,point.Y(),z,speed,base,remaining,cut.radius,cut.depth,before,GSnow().DeficitAt(ix,iz),roadway,sheltered,land,budgetGranted,normal.Y(),incoming*normal,point.Y()-ground,groove.directionX,groove.directionZ,groove.length);
 }
 } // namespace
 }

@@ -31,6 +31,17 @@ int main()
         float p[] = {850,8,.35f,1,-1,0}; p[lane] = nan;
         assert(SnowBulletImpactPolicy(p[0],p[1],p[2],p[3],p[4],p[5],true,false,false,false,false).depth == 0);
     }
+    const auto vertical = SnowBulletGroovePolicy(.35f,1,-1,0,0);
+    assert(vertical.length == 0);
+    const auto oblique = SnowBulletGroovePolicy(.18f,1,-.274f,0,std::sqrt(1-.274f*.274f));
+    assert(oblique.directionX == 0 && oblique.directionZ == 1 && oblique.length > .6f && oblique.length < .64f);
+    assert(SnowBulletGroovePolicy(.35f,1,-.04f,1,0).length == .8f);
+    assert(SnowBulletGroovePolicy(.35f,.49f,-.5f,.8f,0).length == 0);
+    assert(SnowBulletGroovePolicy(.35f,1,-.03f,.8f,0).length == 0);
+    for (int lane=0;lane<5;++lane) {
+        float p[]={.18f,1,-.274f,0,.96f};p[lane]=nan;
+        assert(SnowBulletGroovePolicy(p[0],p[1],p[2],p[3],p[4]).length == 0);
+    }
     SnowBulletBudget budget;
     for (int i=0;i<8;++i) assert(budget.Take(10));
     assert(!budget.Take(10.249f)); assert(budget.Take(10.25f));
@@ -62,5 +73,30 @@ int main()
     snow.Deposit(.10f); assert(std::abs(snow.DeficitAt(0,0)-(saturated-.10f)) < .00001f);
     snow.Deposit(.5f); assert(snow.DeficitAt(0,0) == 0);
     snow.Reset(); assert(snow.Chunks() == 0 && snow.DeficitAt(0,0) == 0);
-    std::cout << "Actual SnowField bullet bowl, persistence/refill, support admission and query budget PASS\n";
+    // Oblique impacts follow the actual incoming horizontal axis upstream.
+    // Rotation/reflection must rotate/refelect stored cells, not the camera.
+    SnowField groove;groove.snowlineEnabled=false;groove.enabled=true;groove.falling=false;groove.Deposit(.18f);
+    assert(groove.BulletImpact(.0625f,.0625f,cut.radius,cut.depth,0,1,oblique.length));
+    assert(groove.DeficitAt(0,-4) == groove.DeficitAt(0,0));
+    assert(groove.DeficitAt(0,-6)>0 && groove.DeficitAt(0,3)==0);
+    assert(groove.DeficitAt(3,-3)==0);
+    SnowField rotated;rotated.snowlineEnabled=false;rotated.enabled=true;rotated.falling=false;rotated.Deposit(.18f);
+    assert(rotated.BulletImpact(.0625f,.0625f,cut.radius,cut.depth,-1,0,oblique.length));
+    float volume=0;
+    for(int iz=-10;iz<=10;++iz)for(int ix=-10;ix<=10;++ix) {
+        assert(std::abs(groove.DeficitAt(ix,iz)-rotated.DeficitAt(-iz,ix))<.000001f);
+        volume+=groove.DeficitAt(ix,iz)*SnowField::CellSize*SnowField::CellSize;
+    }
+    // Positive, bounded removed volume; at maximum depth/width/length the
+    // continuous capsule is under 0.152m3. This representative rifle is <0.03m3.
+    assert(volume>0 && volume<.03f);
+    const float intact=groove.DeficitAt(0,-4);
+    assert(!groove.BulletImpact(0,0,cut.radius,cut.depth,1,0,.801f));
+    assert(!groove.BulletImpact(0,0,cut.radius,cut.depth,2,0,.5f));
+    assert(!groove.BulletImpact(0,0,cut.radius,cut.depth,nan,0,.5f));
+    groove.Advance(1);assert(groove.DeficitAt(0,-4)==intact);
+    auto awayGroove=groove.Snapshot(1000,1000);(void)awayGroove;
+    groove.Snapshot(.0625f,.0625f);assert(groove.DeficitAt(0,-4)==intact);
+    groove.Deposit(.03f);assert(std::abs(groove.DeficitAt(0,-4)-(intact-.03f))<.000001f);
+    std::cout << "Actual SnowField vertical bowls/directional entry grooves, persistence/refill, support admission and query budget PASS\n";
 }

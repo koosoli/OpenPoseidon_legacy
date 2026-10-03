@@ -160,13 +160,20 @@ public:
     {
         ModifyDisc(x, z, radius, strength, false);
     }
-    // Actual projectile terrain impacts remove a bounded bowl of existing
-    // snow. The intact outer powder forms its rim; deficits remain nonnegative,
+    // Actual projectile terrain impacts remove a bounded entry groove in
+    // snow, ending at the terrain hit. Vertical shots retain the round bowl.
+    // The intact outer powder forms its rim; deficits remain nonnegative,
     // preserving the existing geometry/snapshot/precipitation contract.
-    bool BulletImpact(float x, float z, float radius, float depth)
+    bool BulletImpact(float x, float z, float radius, float depth,
+        float directionX = 0, float directionZ = 0, float length = 0)
     {
-        if (!std::isfinite(radius) || radius <= 0 || !std::isfinite(depth) || depth <= 0) return false;
-        return ModifyDisc(x, z, std::clamp(radius, CellSize, 0.35f), std::min(depth, 0.16f), true, true);
+        if (!std::isfinite(radius) || radius <= 0 || !std::isfinite(depth) || depth <= 0 ||
+            !std::isfinite(directionX) || !std::isfinite(directionZ) || !std::isfinite(length) ||
+            length < 0 || length > 0.8f) return false;
+        const float directionLength = std::hypot(directionX, directionZ);
+        if (length > 0 && (!std::isfinite(directionLength) || std::abs(directionLength - 1.0f) > 0.001f)) return false;
+        return ModifyDisc(x, z, std::clamp(radius, CellSize, 0.35f), std::min(depth, 0.16f),
+            true, true, directionX, directionZ, length);
     }
     // Rate-integrated removal, unlike a footprint's absolute compression depth.
     void ErodeRotor(float x, float z, float radius, float rotorSpeed, float height, float seconds)
@@ -180,7 +187,8 @@ public:
     }
 
 private:
-    bool ModifyDisc(float x, float z, float radius, float strength, bool additive, bool bowl = false)
+    bool ModifyDisc(float x, float z, float radius, float strength, bool additive, bool bowl = false,
+        float directionX = 0, float directionZ = 0, float length = 0)
     {
         if (!CoverActive() || !std::isfinite(x) || !std::isfinite(z) ||
             std::abs(x) > 1000000.0f || std::abs(z) > 1000000.0f ||
@@ -192,17 +200,28 @@ private:
         // A manual deposit can fill the store between simulation ticks.
         if (_chunks.size() >= MaxChunks) ReclaimFilledChunks(128);
         radius = std::clamp(radius, CellSize, 15.0f);
-        const int x0 = static_cast<int>(std::floor((x - radius) / CellSize));
-        const int z0 = static_cast<int>(std::floor((z - radius) / CellSize));
-        const int x1 = static_cast<int>(std::floor((x + radius) / CellSize));
-        const int z1 = static_cast<int>(std::floor((z + radius) / CellSize));
+        const float halfLength = length * 0.5f;
+        const float centreX = x - directionX * halfLength, centreZ = z - directionZ * halfLength;
+        const float extentX = radius + std::abs(directionX) * halfLength;
+        const float extentZ = radius + std::abs(directionZ) * halfLength;
+        const int x0 = static_cast<int>(std::floor((centreX - extentX) / CellSize));
+        const int z0 = static_cast<int>(std::floor((centreZ - extentZ) / CellSize));
+        const int x1 = static_cast<int>(std::floor((centreX + extentX) / CellSize));
+        const int z1 = static_cast<int>(std::floor((centreZ + extentZ) / CellSize));
         bool changed = false;
         for (int iz = z0; iz <= z1; ++iz)
             for (int ix = x0; ix <= x1; ++ix)
             {
-                const float dx = (ix + 0.5f) * CellSize - x;
-                const float dz = (iz + 0.5f) * CellSize - z;
-                const float r = std::sqrt(dx * dx + dz * dz) / radius;
+                const float dx = (ix + 0.5f) * CellSize - centreX;
+                const float dz = (iz + 0.5f) * CellSize - centreZ;
+                float r = std::sqrt(dx * dx + dz * dz) / radius;
+                if (length > 0)
+                {
+                    const float along = dx * directionX + dz * directionZ;
+                    const float outside = along - std::clamp(along, -halfLength, halfLength);
+                    const float across = -dx * directionZ + dz * directionX;
+                    r = std::hypot(outside, across) / radius;
+                }
                 if (r >= 1.0f) continue;
                 const int cx = FloorChunk(ix), cz = FloorChunk(iz);
                 const auto key = Key(cx, cz);

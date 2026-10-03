@@ -91,11 +91,11 @@ function Aim-Step($error,[double]$gainX,[double]$gainY) {
 }
 function Parse-SnowHit([string]$line) {
     $n='[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?'
-    $pattern='SNOW_BULLET terrain=1 changed=(true|false) x=('+ $n+') y=('+ $n+') z=('+ $n+') speed=('+ $n+') base=('+ $n+') remaining=('+ $n+') radius=('+ $n+') depth=('+ $n+') before=('+ $n+') after=('+ $n+') roadway=(true|false) sheltered=(true|false) land=(true|false) budget=(true|false) up=('+ $n+') incidence=('+ $n+') supportError=('+ $n+')\s*$'
+    $pattern='SNOW_BULLET terrain=1 changed=(true|false) x=('+ $n+') y=('+ $n+') z=('+ $n+') speed=('+ $n+') base=('+ $n+') remaining=('+ $n+') radius=('+ $n+') depth=('+ $n+') before=('+ $n+') after=('+ $n+') roadway=(true|false) sheltered=(true|false) land=(true|false) budget=(true|false) up=('+ $n+') incidence=('+ $n+') supportError=('+ $n+') directionX=('+ $n+') directionZ=('+ $n+') grooveLength=('+ $n+')\s*$'
     Require ($line -cmatch $pattern) 'Missing or unknown actual terminal snow-impact trace.'
     $m=$Matches.Clone();$r=@{line=$line;changed=$m[1] -ceq 'true';roadway=$m[12] -ceq 'true';sheltered=$m[13] -ceq 'true';land=$m[14] -ceq 'true';budget=$m[15] -ceq 'true'}
-    $keys=@('x','y','z','speed','base','remaining','radius','depth','before','after','up','incidence','supportError')
-    $lanes=@(2,3,4,5,6,7,8,9,10,11,16,17,18)
+    $keys=@('x','y','z','speed','base','remaining','radius','depth','before','after','up','incidence','supportError','directionX','directionZ','grooveLength')
+    $lanes=@(2,3,4,5,6,7,8,9,10,11,16,17,18,19,20,21)
     for($i=0;$i -lt $keys.Count;++$i) {
         $value=[double]::Parse($m[$lanes[$i]],$culture)
         Require (![double]::IsNaN($value) -and ![double]::IsInfinity($value)) 'Nonfinite actual shot trace.';$r[$keys[$i]]=$value
@@ -103,10 +103,21 @@ function Parse-SnowHit([string]$line) {
     Require ([Math]::Abs($r.x) -lt 1000000 -and [Math]::Abs($r.z) -lt 1000000 -and [Math]::Abs($r.y) -lt 1000000) 'Unbounded actual impact position.'
     Require ($r.speed -ge 30 -and $r.speed -le 5000 -and $r.up -ge .5 -and $r.up -le 1.001 -and $r.incidence -le -.04 -and $r.incidence -ge -1.001 -and [Math]::Abs($r.supportError) -le .0801) 'Actual shot did not establish the bounded downward terrain fixture.'
     Require ($r.base -ge 0 -and $r.remaining -ge 0 -and $r.remaining -le $r.base+.0001 -and $r.radius -ge 0 -and $r.radius -le .3501 -and $r.depth -ge 0 -and $r.depth -le .1601 -and $r.before -ge 0 -and $r.after -ge 0 -and $r.after -le $r.base+.0001) 'Actual snow cut exceeds source bounds.'
+    Require ($r.grooveLength -ge 0 -and $r.grooveLength -le .80001) 'Actual entry groove exceeds bounded terrain-plane extrapolation.'
+    $directionLength=[Math]::Sqrt($r.directionX*$r.directionX+$r.directionZ*$r.directionZ)
+    Require ($directionLength -le 1.0001 -and ($r.grooveLength -eq 0 -or [Math]::Abs($directionLength-1) -lt .0001)) 'Actual groove direction is not a normalized horizontal projectile direction.'
     if ($r.changed) {Require ($r.land -and $r.budget -and !$r.roadway -and !$r.sheltered -and $r.after -gt $r.before) 'Changed cut lacks actual source admission.'}
     return $r
 }
 function Cell-Key([int]$x,[int]$z) {return "$x`:$z"}
+function Groove-Distance($hit,[double]$x,[double]$z) {
+    $dx=$x-$hit.x;$dz=$z-$hit.z
+    if($hit.grooveLength -eq 0) {return [Math]::Sqrt($dx*$dx+$dz*$dz)}
+    $along=$dx*$hit.directionX+$dz*$hit.directionZ
+    $outside=$along-(Clamp-Number $along (-$hit.grooveLength) 0)
+    $across=-$dx*$hit.directionZ+$dz*$hit.directionX
+    return [Math]::Sqrt($outside*$outside+$across*$across)
+}
 function New-HoleViews([double]$x,[double]$z,[double]$ground,[double]$snowDepth) {
     return [ordered]@{
         low=@{position=@(($x-1.4),($ground+$snowDepth+.5),($z-1.4));target=@($x,($ground+$snowDepth-.03),$z)}
@@ -118,12 +129,12 @@ function Assert-Hole($hit,$before,$after,[double]$base) {
     $changed=@();$matched=@();$outer=0
     foreach($key in $after.Keys) {
         Require ($before.Contains($key)) 'Before/after cell inventory differs.'
-        $b=$before[$key];$a=$after[$key];$distance=[Math]::Sqrt([Math]::Pow($a.x-$hit.x,2)+[Math]::Pow($a.z-$hit.z,2))
+        $b=$before[$key];$a=$after[$key];$distance=[Math]::Sqrt([Math]::Pow($a.x-$hit.x,2)+[Math]::Pow($a.z-$hit.z,2));$kernelDistance=Groove-Distance $hit $a.x $a.z
         Require ($a.deficit -ge 0 -and $a.deficit -le $base+.0001) 'Actual sampled cut exceeds local snow depth.'
         $delta=$a.deficit-$b.deficit
         Require ($delta -ge -.00001) 'Nonfalling snow unexpectedly refilled during the shot.'
-        if ($delta -gt .00001) {Require ($distance -le $hit.radius+.09) 'Actual changed cell escaped impact kernel.';$changed+=,$a}
-        if ($distance -gt $hit.radius+.13) {Require ([Math]::Abs($delta) -lt .00001) 'Outside powder changed.';++$outer}
+        if ($delta -gt .00001) {Require ($kernelDistance -le $hit.radius+.002) 'Actual changed cell escaped directional impact capsule.';$changed+=,$a}
+        if ($kernelDistance -gt $hit.radius+.002) {Require ([Math]::Abs($delta) -lt .00001) 'Outside powder changed.';++$outer}
         # World trace is rounded to 1 mm; near a cell boundary, either adjoining
         # cell can be selected by the displayed coordinate. Match the actual
         # before/after values on a centre within half the cell diagonal.
@@ -132,9 +143,12 @@ function Assert-Hole($hit,$before,$after,[double]$base) {
     Require ($changed.Count -gt 0 -and $matched.Count -gt 0 -and $outer -gt 0) 'No actual impact-centre/outside correspondence.'
     $peak=($changed | ForEach-Object {$_.deficit} | Measure-Object -Maximum).Maximum
     $rim=@($changed | Where-Object {
-        [Math]::Sqrt([Math]::Pow($_.x-$hit.x,2)+[Math]::Pow($_.z-$hit.z,2)) -gt $hit.radius*.5 -and $_.deficit -lt $peak-.0001})
-    Require ($rim.Count -gt 0) 'Actual sampled crater has no shallower radial edge.'
-    return @{changedCells=$changed;centre=$matched[0];rimCells=$rim;unchangedOutsideCells=$outer;maximumDeficit=$peak}
+        (Groove-Distance $hit $_.x $_.z) -gt $hit.radius*.5 -and $_.deficit -lt $peak-.0001})
+    Require ($rim.Count -gt 0) 'Actual sampled cut has no shallower capsule edge.'
+    $upstream=@($changed | Where-Object {
+        ($_.x-$hit.x)*$hit.directionX+($_.z-$hit.z)*$hit.directionZ -lt -($hit.radius+.09)})
+    if($hit.grooveLength -gt $hit.radius+.18) {Require ($upstream.Count -gt 0) 'Oblique actual bullet made only a round impact indentation.'}
+    return @{changedCells=$changed;centre=$matched[0];rimCells=$rim;upstreamCells=$upstream;unchangedOutsideCells=$outer;maximumDeficit=$peak}
 }
 if ($SelfTest) {
     $weapon=@{readonly=$true;manual=$true;playerSuspended=$false;cameraEffect=$false;directionX=0;directionY=.16;directionZ=[Math]::Sqrt(1-.16*.16);muzzleX=10;muzzleY=22;muzzleZ=20}
@@ -171,9 +185,9 @@ if ($SelfTest) {
         $bad=$weapon.Clone();$bad[$change[0]]=$change[1]
         $failed=$false;try {$null=Aim-Error $bad $null} catch {$failed=$true};Require $failed 'Unsupported or nonfinite aiming state accepted.'
     }
-    $sample='[info] SNOW_BULLET terrain=1 changed=true x=4975.063 y=20.000 z=4675.063 speed=850.00 base=0.1800 remaining=0.1800 radius=0.2250 depth=0.0840 before=0.0000 after=0.0840 roadway=false sheltered=false land=true budget=true up=1.0000 incidence=-0.7500 supportError=0.0000'
+    $sample='[info] SNOW_BULLET terrain=1 changed=true x=4975.063 y=20.000 z=4675.063 speed=850.00 base=0.1800 remaining=0.1800 radius=0.2250 depth=0.0840 before=0.0000 after=0.0840 roadway=false sheltered=false land=true budget=true up=1.0000 incidence=-0.7500 supportError=0.0000 directionX=0.00000 directionZ=0.00000 grooveLength=0.00000'
     $hit=Parse-SnowHit $sample
-    foreach($bad in @($sample.Replace('after=0.0840','after=0.2000'),$sample.Replace('radius=0.2250','radius=0.4000'),$sample.Replace('roadway=false','roadway=true'),$sample.Replace('speed=850.00','speed=NaN'),$sample.Replace('speed=850.00','speed=1e309'),$sample.Replace('incidence=-0.7500','incidence=0.1000'),($sample+' unknown=1'))) {
+    foreach($bad in @($sample.Replace('after=0.0840','after=0.2000'),$sample.Replace('radius=0.2250','radius=0.4000'),$sample.Replace('roadway=false','roadway=true'),$sample.Replace('speed=850.00','speed=NaN'),$sample.Replace('speed=850.00','speed=1e309'),$sample.Replace('incidence=-0.7500','incidence=0.1000'),$sample.Replace('grooveLength=0.00000','grooveLength=0.90000'),$sample.Replace('directionZ=0.00000 grooveLength=0.00000','directionZ=0.30000 grooveLength=0.60000'),($sample+' unknown=1'))) {
         $failed=$false;try {$null=Parse-SnowHit $bad} catch {$failed=$true};Require $failed 'Malformed/unsupported trace accepted.'
     }
     $views=New-HoleViews 10 20 30 .18;Require ($views.low.position.Count -eq 3 -and [Math]::Abs($views.low.position[1]-30.68) -lt .00001 -and [Math]::Abs($views.top.target[1]-30.15) -lt .00001) 'Engine XYZ camera arithmetic failed.'
@@ -183,6 +197,21 @@ if ($SelfTest) {
     }}
     $null=Assert-Hole $hit $b $a .18;$key=Cell-Key 3 3;$a[$key].deficit=.01
     $failed=$false;try {$null=Assert-Hole $hit $b $a .18} catch {$failed=$true};Require $failed 'Outside mutation accepted.'
+    $a[$key].deficit=0
+    $oblique=$hit.Clone();$oblique.directionZ=1;$oblique.grooveLength=.63
+    Require ((Groove-Distance $oblique $oblique.x ($oblique.z-.5)) -lt .000001 -and
+        (Groove-Distance $oblique $oblique.x ($oblique.z+.5)) -gt .49 -and
+        (Groove-Distance $oblique ($oblique.x+.5) ($oblique.z-.5)) -gt .49) 'Directional capsule reversed or widened across firing direction.'
+    $failed=$false;try {$null=Assert-Hole $oblique $b $a .18} catch {$failed=$true};Require $failed 'Round-only footprint accepted for an oblique projectile.'
+    $gb=@{};$ga=@{};for($iz=-10;$iz -le 10;++$iz) {for($ix=-10;$ix -le 10;++$ix) {
+        $key=Cell-Key $ix $iz;$x=$oblique.x+$ix*.125;$z=$oblique.z+$iz*.125
+        $r=(Groove-Distance $oblique $x $z)/$oblique.radius
+        $value=if($r -lt 1){.084*[Math]::Pow(1-$r*$r,2)}else{0}
+        $gb[$key]=@{x=$x;z=$z;deficit=0};$ga[$key]=@{x=$x;z=$z;deficit=$value}
+    }}
+    $proof=Assert-Hole $oblique $gb $ga .18;Require ($proof.upstreamCells.Count -gt 0) 'Directional positive fixture lost its upstream cells.'
+    $key=Cell-Key 0 4;$ga[$key].deficit=.01
+    $failed=$false;try {$null=Assert-Hole $oblique $gb $ga .18} catch {$failed=$true};Require $failed 'Forward-pointing mutation accepted for upstream entry groove.'
     Require ((Decode-Eval 'WEST Alpha:1 (mail)') -ceq 'WEST Alpha:1 (mail)' -and (Decode-Eval '[1,2,3]').Count -eq 3) 'SQF decoder failed.'
     Require ((Decode-Eval '[1]').Count -eq 1 -and (Decode-Eval '[]').Count -eq 0 -and (Decode-Eval 'true') -is [bool]) 'Array/scalar SQF types changed.'
     Assert-ShotSettled 10000 12000
@@ -241,7 +270,9 @@ function HitLines {return @(Select-String -LiteralPath $log -SimpleMatch 'SNOW_B
 function TerminalLines {return @(Select-String -LiteralPath $log -SimpleMatch 'SNOW_BULLET_TERMINAL kind=' -ErrorAction SilentlyContinue)}
 function Patch([double]$x,[double]$z) {
     $patch=@{};$cx=[int][Math]::Floor($x/.125);$cz=[int][Math]::Floor($z/.125)
-    for($j=-6;$j -le 6;++$j) {for($i=-6;$i -le 6;++$i) {
+    # Complete maximum capsule (.8m length+.35m radius) and the permitted
+    # .25m calibration drift fit inside this bounded625-cell inventory.
+    for($j=-12;$j -le 12;++$j) {for($i=-12;$i -le 12;++$i) {
         $ix=$cx+$i;$iz=$cz+$j;$px=($ix+.5)*.125;$pz=($iz+.5)*.125
         $state=Send @{cmd='dev_snow';action='sample';x=$px;z=$pz};$value=[double]$state.deficit
         Require (![double]::IsNaN($value) -and ![double]::IsInfinity($value) -and $value -ge 0) 'Actual snow cell malformed.'

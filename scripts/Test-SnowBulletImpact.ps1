@@ -16,7 +16,9 @@ if ($LASTEXITCODE -ne 0) {throw 'Actual snow field/impact policy compilation fai
 if ($LASTEXITCODE -ne 0) {throw 'Actual snow field/impact policy assertions failed.'}
 $source=Get-Content (Join-Path $root 'engine/Poseidon/World/Entities/Weapons/Shots.cpp') -Raw
 foreach($proof in @('SnowBulletTerrainImpact(this,_parent,isect,lDirNorm','IsLocal(),Type()->explosive,hitSea || _waterImpactDone',
-    'GSnow().BulletImpact(x,z,cut.radius,cut.depth)','RoadSurfaceY(origin','ObjIntersectView','budget.Take(Glob.time.toFloat())')) {
+    'GSnow().BulletImpact(x,z,cut.radius,cut.depth,','groove.directionX,groove.directionZ,groove.length',
+    'SnowBulletGroovePolicy(remaining,normal.Y(),incoming*normal,incoming.X(),incoming.Z())',
+    'centre+a+b,centre+a-b,centre-a+b,centre-a-b','RoadSurfaceY(origin','ObjIntersectView','budget.Take(Glob.time.toFloat())')) {
     if (!$source.Contains($proof)) {throw "Actual projectile impact source contract missing: $proof"}
 }
 $call=$source.IndexOf('SnowBulletTerrainImpact(this,_parent,isect,lDirNorm')
