@@ -118,3 +118,17 @@ From Malprave job 23 (29 Sep), the first and only A/B test of the X-Ray patches:
     them, every grenade recorded or refused.
 * **`knowsAbout` reads 0** even while units clearly react to an enemy, so it is no use as a
   measure.
+
+## 4. Progress
+
+* **2026-10-04, group A (items 1–5): integrated on `dec/ai-malprave-a` (2a46f85e, 0eddd247), ledger
+  `AI-PORT-A01`.**
+  * radioImmediate was hand-ported onto Oli's `QueueGroupCommand`, which already skipped speech for
+    player orders. Every order now acts at once, and a `_replied` flag stops a double reply.
+  * The audio file `Speaker.cpp` was left untouched (owner rule).
+  * Suppression's near-miss check sits on the bullet's tick segment, and
+    `POSEIDON_AI_SUPPRESSION_LOG=1` logs each near miss.
+  * Captured: hearing (leader turns on a hidden shooter 150 m behind) and suppression (57 / 44
+    near misses at 40 / 80 m, men pinned).
+* **Owner report: AI in combat stance take a long time to zero in on their target** → `AI-AIM-001`
+  (to investigate; Oli's `POSEIDON_COMBAT_AUDIT` logs the aim gates).

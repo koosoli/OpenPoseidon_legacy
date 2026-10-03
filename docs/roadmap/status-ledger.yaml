@@ -8347,3 +8347,87 @@ tickets:
     supersedes: []
     evidence:
       - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-PORT-A01
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Malprave AI fixes group A: aiQuickWins, emptyEnemyVehicle, radioImmediate(2), groupLimit, aiSuppression(2)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/ai-malprave-a
+    baseline_commit: 145eeeca
+    verification_commit: 0eddd247
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: [AI-XRAY-001]
+    implementation_commits: [2a46f85e, 0eddd247]
+    production_call_sites:
+      - file: engine/Poseidon/World/Detection/Target.cpp
+        symbol: gunfire hearing (aiQuickWins)
+      - file: engine/Poseidon/AI/AIRadioImpl.cpp
+        symbol: RadioMessageCommand::ExecuteNow
+      - file: engine/Poseidon/AI/AIGroup.cpp
+        symbol: QueueGroupCommand
+      - file: engine/Poseidon/AI/AIUnitImpl.cpp
+        symbol: AIUnit::AddSuppression
+      - file: engine/Poseidon/World/Entities/Weapons/Shots.cpp
+        symbol: ApplyNearMissSuppression
+    test_ids: [ai-a1-hearing-capture, ai-a3-firefight-suppression-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    capability_claims:
+      - capability: AI_HEARS_GUNFIRE
+        status: UNVERIFIED
+        denominator: "Malprave mwai1 on Everon: 12 shots from 150 m behind, out of sight -> leader turns 90 to 277 deg, group COMBAT."
+      - capability: AI_SUPPRESSION
+        status: UNVERIFIED
+        denominator: "Malprave mwai3 4 v 4 at 40 m and 80 m: 57 / 44 near-miss events, men pinned on both sides (POSEIDON_AI_SUPPRESSION_LOG=1)."
+    known_failures:
+      - "Immediate orders, 256 groups and empty enemy vehicles are compiled and run but not separately captured."
+      - "Firefights at 40-80 m end within about 10 s, so prone/pinned behaviour was logged, not watched."
+    fallback: null
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner play-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-AIM-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "AI in combat stance take a long time to zero in on their target (owner report 2026-10-04)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: INVESTIGATE
+    scheduling_state: OPEN
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: 0eddd247
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Not yet measured. Tools: POSEIDON_COMBAT_AUDIT=1 with a unit named auditShooter (Man::GetAimed gates). Check aiSuppression's wider spread for suppressed gunners is not the cause."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
