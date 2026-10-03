@@ -1,5 +1,21 @@
 # Weather owner follow-up, 3 October 2026
 
+Owner wrap-up request: finish the current changes and stop selecting further
+roadmap tasks. Requested interactive prototype handoff is the final action.
+New012baf49 explicit corpse freeze and UI controls are integrated; automatic
+death admission and grenade impulses remain disconnected. Root full native
+regression4993assertions/70cases and focused hinges2302/4 PASS. The initial broad
+run exposed nonfinite terrain spacing entering Box3D; f402548a now refuses
+nonfinite spacing/origins before backend replacement, retaining the live terrain
+and recording all mutation attempts. No generic ragdoll completion is claimed.
+
+Screenshot optics diagnostic51190e99 root six focused checks PASS, including
+actual same-encoder HDR/bloom/meter/scale and stale-source refusal on the device.
+This changes no exposure, snow or mud appearance. Final full build, installed
+explicit-freeze/paired-diagnostic smoke and interactive handoff are pending.
+Sand lighting capture remains unexercised. New church runner71ddfe5e is preserved
+on safety but deliberately not merged/launched during wrap-up.
+
 21:23 installed checkpoint: fcb9ad7b is installed21:07 after full23+13step
 builds, safety push, locked Deploy.ps1/material preflight and matching installed
 EXE/DLL/material/built-PDB archive. Actual quiet Noe flight579dfc passes both
