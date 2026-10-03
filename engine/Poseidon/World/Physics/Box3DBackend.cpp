@@ -273,7 +273,11 @@ public:
             probe.waterObserved = true;
             probe.waterCooldown = std::max(0.0f, probe.waterCooldown - dt);
             const auto bounds = b3Body_ComputeAABB(probe.body);
+#if defined(POSEIDON_BOX3D_PINNED_954CF87)
+            const auto p = b3Body_GetWorldCenter(probe.body);
+#else
             const auto p = b3Body_GetWorldCenterOfMass(probe.body);
+#endif
             ProbeWaterSample water;
             if (!_water.sample(Vector3(p.x, p.y, p.z), water))
             {
@@ -1149,7 +1153,14 @@ public:
         return stats;
     }
 
-    [[nodiscard]] const char* Name() const override { return "box3d 0.1.0"; }
+    [[nodiscard]] const char* Name() const override
+    {
+#if defined(POSEIDON_BOX3D_PINNED_954CF87)
+        return "box3d 0.1.0+954cf87";
+#else
+        return "box3d 0.1.0";
+#endif
+    }
 
     // ---- box3d's own record/replay. SIM-808. ------------------------------
     //
@@ -1216,7 +1227,11 @@ public:
             // instead for one reason: it exposes the diverge FRAME, which is the
             // whole point of the roadmap item. A bool would tell us no more than
             // the whole-run hash SIM-804 already has.
+#if defined(POSEIDON_BOX3D_PINNED_954CF87)
+            if (b3RecPlayer* player = b3CreatePlayer(data, size, workers))
+#else
             if (b3RecPlayer* player = b3RecPlayer_Create(data, size, workers))
+#endif
             {
                 while (b3RecPlayer_StepFrame(player))
                 {
@@ -1229,7 +1244,11 @@ public:
                 audit.diverged = b3RecPlayer_HasDiverged(player);
                 audit.divergentFrame = b3RecPlayer_GetDivergeFrame(player);
                 audit.frameCount = b3RecPlayer_GetFrame(player);
+#if defined(POSEIDON_BOX3D_PINNED_954CF87)
+                b3DestroyPlayer(player);
+#else
                 b3RecPlayer_Destroy(player);
+#endif
             }
         }
 

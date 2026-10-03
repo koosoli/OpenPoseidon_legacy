@@ -129,7 +129,7 @@ function Start-Articulation([string]$phase) {
     Require ($owner -match '^OK corpse-status entity=(\S+) ') "Captured identity unavailable at $phase`: $owner"
     $capturedIdentity=$Matches[1]
     $actual=Query 'corpse-articulate'
-    Require ($actual -match '^OK corpse-articulate entity=(\S+) solver=box3d [\d.]+ bodies=11 joints=10 epoch=\d+ minimumClearance=([\d.eE+-]+) expiresMs=30000 default=off$') "Actual articulated admission refused at $phase`: $actual"
+    Require ($actual -match '^OK corpse-articulate entity=(\S+) solver=box3d [\d.]+(?:\+954cf87)? bodies=11 joints=10 epoch=\d+ minimumClearance=([\d.eE+-]+) expiresMs=30000 default=off$') "Actual articulated admission refused at $phase`: $actual"
     Require ($Matches[1] -ceq $capturedIdentity) "Articulated owner changed at $phase`: $actual"
     $clearance=[double]::Parse($Matches[2],$culture)
     Require (![double]::IsNaN($clearance) -and ![double]::IsInfinity($clearance) -and $clearance -ge .003) "Actual collider clearance is invalid: $actual"
@@ -303,7 +303,7 @@ try {
     Require ($result.captures.before.simulationTime -eq $result.captures.held.simulationTime) 'Before/held screenshots advanced simulation.'
     if ($ArticulationSmoke) {
         $prepared=Query 'corpse-prepare'
-        Require ($prepared -match '^OK corpse-prepare solver=box3d [\d.]+ epoch=\d+ terrain=\d+x\d+ spacing=[\d.eE+-]+ bodies=\d+ models=\d+$') "Actual physics terrain preparation failed: $prepared"
+        Require ($prepared -match '^OK corpse-prepare solver=box3d [\d.]+(?:\+954cf87)? epoch=\d+ terrain=\d+x\d+ spacing=[\d.eE+-]+ bodies=\d+ models=\d+$') "Actual physics terrain preparation failed: $prepared"
         $result.observations.preparedPhysics=$prepared
         Assert-ArticulatedBackend $false 'defaultArticulationInactive'
         Start-Articulation 'initialArticulation'
