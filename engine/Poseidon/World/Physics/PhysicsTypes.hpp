@@ -157,6 +157,10 @@ struct PhysicsStats
     std::uint32_t probes = 0;
     std::uint32_t articulatedBodies = 0;
     std::uint32_t articulatedJoints = 0;
+    // Actual solver totals include terrain and the separately owned kinematic
+    // proxy; tracked slots alone cannot prove an otherwise empty backend.
+    std::uint32_t solverBodies = 0, solverJoints = 0;
+    bool kinematicProxyRegistered = false;
 
     /// Mean wall-clock cost of ONE b3World_Step, in milliseconds, since the last
     /// reset. Multiply by the Fixed Step tab's ticks-per-frame for the per-frame

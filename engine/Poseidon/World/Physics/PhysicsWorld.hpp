@@ -152,6 +152,9 @@ public:
     JointId AddArticulatedJoint(const ArticulatedJointDef&);
     void RemoveJoint(JointId);
     [[nodiscard]] std::uint64_t Generation() const { return _generation; }
+    // Monotonic mutation attempts; a failed backend operation cannot establish
+    // that a previously prepared diagnostic terrain still has its ownership.
+    [[nodiscard]] std::uint64_t TerrainMutationSerial() const { return _terrainMutationSerial; }
     void   SetWind(const WindSettings& wind);
     /// Follows the player so they can shove probes. Physics never moves them back.
     void SetKinematicProxy(Vector3Par position, float radius, float height);
@@ -172,6 +175,7 @@ private:
 
     std::unique_ptr<PhysicsBackend> _backend;
     std::uint64_t _generation = 0;
+    std::uint64_t _terrainMutationSerial = 0;
 
     // Counted HERE and not in the backend, because these are facts about our
     // data rather than about the library: a model with no Geometry LOD and a

@@ -3,6 +3,7 @@
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/World/Physics/PhysicsBackend.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
+#include <Poseidon/World/Physics/CorpseArticulation.hpp>
 #include <Poseidon/World/Weather/RainWaterField.hpp>
 #include <array>
 #include <limits.h>
@@ -35,34 +36,6 @@ ActionContextBase* CreateGetInActionContext(Transport* veh, UIActionType pos)
 }
 namespace Poseidon
 {
-
-// One explicit local corpse; owned body/joint handles never enter saves or model
-// assets. Epoch mismatch must not remove a new world's reused backend handles.
-struct CorpseArticulation
-{
-    Physics::PhysicsWorld* world = nullptr;
-    std::uint64_t epoch = 0;
-    std::array<Physics::BodyId, 11> bodies{};
-    std::array<Physics::JointId, 10> joints{};
-    std::array<Matrix4, 11> initial{};
-    Matrix4 object = MIdentity;
-    std::vector<int> boneParts;
-    float minimumClearance = 0;
-    int updates = 0, hingeCount = 0;
-    float maximumTravel = 0;
-    Vector3 minimum = VZero, maximum = VZero;
-    float radius = 0;
-    bool Ready() const
-    {
-        return world && Physics::GetPhysicsWorld() == world && world->Generation() == epoch;
-    }
-    ~CorpseArticulation()
-    {
-        if (!Ready()) return;
-        for (auto joint : joints) world->RemoveJoint(joint);
-        for (auto body : bodies) world->Remove(body);
-    }
-};
 
 DEFINE_FAST_ALLOCATOR(ActionContextDefault)
 
@@ -759,10 +732,15 @@ namespace
 {
 // Weak entity identity only. The actual phase copies belong exclusively to Man.
 OLink<Man> g_corpsePoseOwner;
+Physics::PhysicsWorld* g_corpsePreparedWorld = nullptr;
+std::uint64_t g_corpsePreparedEpoch = 0, g_corpsePreparedTerrainSerial = 0;
+float g_corpsePreparedOriginX = 0, g_corpsePreparedOriginZ = 0;
 }
 
 void Man::ClearCorpsePose() const
 {
+    if (_corpseArticulation && _corpseArticulation->state == CorpseSolverState::Frozen && GScene)
+        GScene->GetShadowCache().ShadowChanged(const_cast<Man*>(this));
     _corpseArticulation.reset();
     _corpsePoseLease = {};
     _corpsePosePrimary.Clear();
@@ -800,9 +778,18 @@ bool Man::UseCorpsePose() const
     // Reject removal/world changes before touching type-owned animation tables.
     if (_corpsePoseLease.world != GWorld || CorpsePoseRefusal()) { ClearCorpsePose(); return false; }
     Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
+    const bool frozen = _corpseArticulation && _corpseArticulation->state == CorpseSolverState::Frozen;
+    const bool leaseMatches = skeleton && (frozen ?
+        _corpsePoseLease.MatchesIdentity(GWorld,_shape.GetRef(),skeleton,skeleton->NBones(),
+            int(_primaryMove.id),int(_secondaryMove.id),_primaryFactor,Glob.time.toInt()) :
+        _corpsePoseLease.Matches(GWorld,_shape.GetRef(),skeleton,skeleton->NBones(),
+            int(_primaryMove.id),int(_secondaryMove.id),_primaryFactor,Glob.time.toInt()));
+    bool retainedTransform = true;
+    if (frozen)
+        for (int row=0;row<3;++row) for (int col=0;col<4;++col)
+            if (Transform()(row,col) != _corpseArticulation->object(row,col)) retainedTransform = false;
     if (!skeleton || _corpsePoseWeights.GetRef() != &Type()->GetWeights() ||
-        !_corpsePoseLease.Matches(GWorld, _shape.GetRef(), skeleton, skeleton->NBones(),
-                                  int(_primaryMove.id), int(_secondaryMove.id), _primaryFactor, Glob.time.toInt()) ||
+        !leaseMatches || !retainedTransform ||
         (_corpsePosePrimary.Valid() && Type()->GetAnimation(_primaryMove.id) != _corpsePosePrimaryAnimation.GetRef()) ||
         (_corpsePoseSecondary.Valid() && Type()->GetAnimation(_secondaryMove.id) != _corpsePoseSecondaryAnimation.GetRef()))
     {
@@ -982,7 +969,16 @@ bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal, bool
     Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
     if (!GLandscape || !skeleton || skeleton->NBones() > 128 || _shape->NLevels() > MAX_LOD_LEVELS) return false;
     CorpsePoseDiagnostic candidate;
-    candidate.articulated = bool(_corpseArticulation);
+    candidate.articulated = _corpseArticulation && _corpseArticulation->state == CorpseSolverState::Simulating;
+    candidate.frozen = _corpseArticulation && _corpseArticulation->state == CorpseSolverState::Frozen;
+    candidate.object = Transform();
+    if (_corpseArticulation)
+    {
+        candidate.retainedBounds = true;
+        candidate.retainedMinimum = _corpseArticulation->minimum;
+        candidate.retainedMaximum = _corpseArticulation->maximum;
+        candidate.retainedRadius = _corpseArticulation->radius;
+    }
     candidate.model = _shape->Name();
     char identity[64];
     std::snprintf(identity, sizeof(identity), "%p", static_cast<const void*>(this));
@@ -1047,6 +1043,7 @@ bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal, bool
                 { refusal = "final-point-weight-range"; return false; }
             const Vector3 projected = AnimationRT::ApplyMatricesPoint(weights[level], _shape, level, palette, p);
             if (!projected.IsFinite()) { refusal = "nonfinite-final-point"; return false; }
+            measured.palettePoints.push_back(projected);
             if (p == 0) measured.paletteMin = measured.paletteMax = projected;
             for (int axis = 0; axis < 3; ++axis)
             {
@@ -1059,6 +1056,8 @@ bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal, bool
             { ++measured.skippedPointTails; continue; }
             const Vector3 actual = AnimatePoint(level, p);
             if (!actual.IsFinite()) { refusal = "nonfinite-special-point"; return false; }
+            measured.consumerPoints.push_back(actual);
+            measured.consumerPointIndices.push_back(p);
             const float error = (actual - projected).Size();
             if (!std::isfinite(error)) { refusal = "nonfinite-point-discrepancy"; return false; }
             ++measured.compared;
@@ -1469,6 +1468,7 @@ bool Man::UpdateCorpseArticulation() const
 {
     if (!_corpseArticulation || !UseCorpsePose()) return false;
     auto& state = *_corpseArticulation;
+    if (state.state == CorpseSolverState::Frozen) return true; // owned pose, no backend reads
     std::array<Matrix4, 11> parts;
     for (int part = 0; part < 11; ++part)
     {
@@ -1529,6 +1529,58 @@ bool Man::CorpseArticulationBounds(Vector3* minMax, float& radius) const
 RString Man::CorpsePoseProbe(const char* command)
 {
     if (!command) return "REFUSED corpse-command missing";
+    if (std::strcmp(command,"corpse-frozen-world-retire") == 0)
+    {
+        Man* man = g_corpsePoseOwner.GetLink();
+        auto* world = Physics::GetPhysicsWorld();
+        if (!GWorld || GWorld->GetMode() != GModeArcade || GWorld->GetAcceleratedTime() != 0 || !man || !man->IsLocal() ||
+            !man->UseCorpsePose() || !man->_corpseArticulation ||
+            man->_corpseArticulation->state != CorpseSolverState::Frozen ||
+            !world || !world->IsCreated() || world != g_corpsePreparedWorld ||
+            world->Generation() != g_corpsePreparedEpoch ||
+            world->TerrainMutationSerial() != g_corpsePreparedTerrainSerial)
+            return "REFUSED corpse-frozen-world-retire owned-bounded-fixture-required";
+        const auto stats = world->GetStats();
+        if (stats.bodies || stats.probes || stats.modelsRegistered || stats.articulatedBodies || stats.articulatedJoints ||
+            stats.solverBodies != (stats.kinematicProxyRegistered ? 2u : 1u) || stats.solverJoints ||
+            !stats.terrainRegistered || stats.terrainWidth != 129 || stats.terrainHeight != 129 || stats.terrainCellSize != .25f ||
+            stats.terrainOriginX != g_corpsePreparedOriginX || stats.terrainOriginZ != g_corpsePreparedOriginZ)
+            return "REFUSED corpse-frozen-world-retire empty-unchanged-bounded-fixture-required";
+        // A positively identified separately owned test player proxy is the sole
+        // allowable extra body. Remove it while paused, without changing settings.
+        if (stats.kinematicProxyRegistered) world->SetKinematicProxy(VZero,.35f,0);
+        const auto empty = world->GetStats();
+        if (empty.solverBodies != 1 || empty.solverJoints || empty.kinematicProxyRegistered ||
+            empty.bodies || empty.probes || empty.modelsRegistered || empty.articulatedBodies || empty.articulatedJoints)
+            return "REFUSED corpse-frozen-world-retire raw-empty-backend-not-established";
+        const auto before = world->Generation();
+        world->Destroy(); // Change the real epoch; do not clear the owner first.
+        char status[384]; std::snprintf(status,sizeof(status),
+            "OK corpse-frozen-world-retire epochBefore=%llu epochAfter=%llu bodies=0 joints=0 rawBodiesBefore=%u rawBodiesBeforeRetire=1 proxyRemoved=%d fixture=bounded-empty",
+            static_cast<unsigned long long>(before),static_cast<unsigned long long>(world->Generation()),
+            stats.solverBodies,int(stats.kinematicProxyRegistered));
+        return status;
+    }
+    if (std::strcmp(command,"corpse-freeze") == 0 || std::strcmp(command,"corpse-frozen-status") == 0)
+    {
+        Man* man = g_corpsePoseOwner.GetLink();
+        if (!man || !man->UseCorpsePose() || !man->_corpseArticulation)
+            return "REFUSED corpse-freeze no-owned-articulated-pose";
+        auto& state = *man->_corpseArticulation;
+        if (std::strcmp(command,"corpse-freeze") == 0)
+        {
+            // Retain the last fully validated consumed pose exactly as it is.
+            // Do not sample a later physics frame, reblend or reset its deltas.
+            if (!state.Freeze()) return "REFUSED corpse-freeze valid-simulating-pose-required";
+            if (GScene) GScene->GetShadowCache().ShadowChanged(man);
+        }
+        if (state.state != CorpseSolverState::Frozen) return "REFUSED corpse-frozen-status no-frozen-pose";
+        char status[512];
+        std::snprintf(status,sizeof(status),"OK corpse-frozen-status entity=%p bodies=0 joints=0 epoch=%llu updates=%d capturedMs=%d nowMs=%d policy=explicit-owned-pose",
+            static_cast<void*>(man),static_cast<unsigned long long>(state.epoch),state.updates,
+            man->_corpsePoseLease.capturedMs,Glob.time.toInt());
+        return status;
+    }
     if (std::strcmp(command, "corpse-physics-status") == 0)
     {
         auto* world = Physics::GetPhysicsWorld();
@@ -1582,6 +1634,9 @@ RString Man::CorpsePoseProbe(const char* command)
                 world->Destroy();
                 return "REFUSED corpse-prepare physics-terrain-unavailable";
             }
+            g_corpsePreparedWorld = world; g_corpsePreparedEpoch = world->Generation();
+            g_corpsePreparedTerrainSerial = world->TerrainMutationSerial();
+            g_corpsePreparedOriginX = originX; g_corpsePreparedOriginZ = originZ;
             LOG_INFO(World,"CORPSEPREPARE: bounded real terrain {}x{} spacing={} origin=({},{}); source {}x{} spacing={} objectGrid={} objectSpacing={}",
                 grid,grid,spacing,originX,originZ,range,range,sourceSpacing,
                 GLandscape->GetLandRange(),GLandscape->GetLandGrid());
@@ -1597,7 +1652,8 @@ RString Man::CorpsePoseProbe(const char* command)
     if (std::strcmp(command, "corpse-articulation-status") == 0)
     {
         Man* man = g_corpsePoseOwner.GetLink();
-        if (!man || !man->UseCorpsePose() || !man->_corpseArticulation)
+        if (!man || !man->UseCorpsePose() || !man->_corpseArticulation ||
+            man->_corpseArticulation->state != CorpseSolverState::Simulating)
             return "REFUSED corpse-articulation-status no-articulated-corpse";
         auto& state = *man->_corpseArticulation;
         char status[512];
@@ -1611,7 +1667,8 @@ RString Man::CorpsePoseProbe(const char* command)
         if (!man || !man->UseCorpsePose()) return "REFUSED corpse-articulate captured-authored-corpse-required";
         if (std::strcmp(command, "corpse-impulse") == 0)
         {
-            if (!man->_corpseArticulation) return "REFUSED corpse-impulse no-articulated-corpse";
+            if (!man->_corpseArticulation || man->_corpseArticulation->state != CorpseSolverState::Simulating)
+                return "REFUSED corpse-impulse no-articulated-corpse";
             auto& state = *man->_corpseArticulation;
             if (!state.Ready()) return "REFUSED corpse-impulse physics-world-retired";
             state.world->ApplyImpulse(state.bodies[1], state.initial[1].Position(), Vector3(0,12,0));
@@ -1639,6 +1696,8 @@ RString Man::CorpsePoseProbe(const char* command)
         Man* man = g_corpsePoseOwner.GetLink();
         if (!man || !man->UseCorpsePose()) return "REFUSED corpse-status no-valid-hold";
         if (std::strcmp(command, "corpse-compare") == 0) return man->CompareCorpsePose();
+        if (man->_corpseArticulation && man->_corpseArticulation->state == CorpseSolverState::Frozen)
+            return CorpsePoseProbe("corpse-frozen-status");
         char result[768];
         std::snprintf(result, sizeof(result),
             "OK corpse-status entity=%p model=%s bones=%d primaryMatrices=%d secondaryMatrices=%d remainingMs=%d",
@@ -2118,7 +2177,7 @@ bool Man::IsDead() const
 
 bool Man::ShadowPoseFrozen() const
 {
-    if (_corpseArticulation) return false;
+    if (_corpseArticulation) return _corpseArticulation->state == CorpseSolverState::Frozen;
     // Mirror the steady-dead-body test the simulation uses to suspend a
     // corpse: dead pose reached, killed and motionless for 5 s. Any later
     // physics push refreshes _lastMovementTime and un-freezes the shadow.

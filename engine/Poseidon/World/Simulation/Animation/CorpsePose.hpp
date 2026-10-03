@@ -31,6 +31,8 @@ struct CorpseLevelDiagnostic
     float maxPointPaletteError = 0, minAbsDeterminant = 0;
     Vector3 paletteMin = VZero, paletteMax = VZero;
     std::vector<Matrix4> palette;
+    std::vector<Vector3> palettePoints, consumerPoints;
+    std::vector<int> consumerPointIndices;
 };
 struct CorpseProxyDiagnostic
 {
@@ -57,6 +59,10 @@ struct CorpseAnchorDiagnostic
 struct CorpsePoseDiagnostic
 {
     bool articulated = false;
+    bool frozen = false, retainedBounds = false;
+    Vector3 retainedMinimum = VZero, retainedMaximum = VZero;
+    float retainedRadius = 0;
+    Matrix4 object = MIdentity;
     std::string model, entity;
     int capturedMs = 0, measuredMs = 0;
     bool headIdentityFlag = false, gunIdentityFlag = false;
@@ -318,11 +324,14 @@ struct CorpsePoseLease
     const void* skeleton = nullptr;
     int bones = 0, primary = -1, secondary = -1, capturedMs = 0;
     float factor = 0;
-    bool Matches(const void* w, const void* m, const void* s, int b, int p, int q, float f, int nowMs) const
+    bool MatchesIdentity(const void* w, const void* m, const void* s, int b, int p, int q, float f, int nowMs) const
     {
         return world && world == w && model == m && skeleton == s && bones == b &&
-            primary == p && secondary == q && factor == f && nowMs >= capturedMs &&
-            static_cast<long long>(nowMs) - capturedMs <= 30000;
+            primary == p && secondary == q && factor == f && nowMs >= capturedMs;
+    }
+    bool Matches(const void* w, const void* m, const void* s, int b, int p, int q, float f, int nowMs) const
+    {
+        return MatchesIdentity(w,m,s,b,p,q,f,nowMs) && static_cast<long long>(nowMs)-capturedMs <= 30000;
     }
 };
 }

@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/World/Simulation/Animation/CorpsePose.hpp>
 #include <Poseidon/World/Entities/Infantry/Head.hpp>
+#include <Poseidon/World/Physics/CorpseArticulation.hpp>
+#include <Poseidon/World/Physics/PhysicsBackend.hpp>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -278,6 +280,12 @@ TEST_CASE("Corpse lease rejects stale worlds models skeletons moves and clock re
     REQUIRE(valid(&world, &model, &skeleton, 25, 7, 9, 0.37f, 10000));
     REQUIRE(valid(&world, &model, &skeleton, 25, 7, 9, 0.37f, 40000));
     REQUIRE_FALSE(valid(&world, &model, &skeleton, 25, 7, 9, 0.37f, 40001));
+    REQUIRE(lease.MatchesIdentity(&world,&model,&skeleton,25,7,9,.37f,40001));
+    REQUIRE(lease.MatchesIdentity(&world,&model,&skeleton,25,7,9,.37f,1000000));
+    REQUIRE_FALSE(lease.MatchesIdentity(&other,&model,&skeleton,25,7,9,.37f,40001));
+    REQUIRE_FALSE(lease.MatchesIdentity(&world,&other,&skeleton,25,7,9,.37f,40001));
+    REQUIRE_FALSE(lease.MatchesIdentity(&world,&model,&other,25,7,9,.37f,40001));
+    REQUIRE_FALSE(lease.MatchesIdentity(&world,&model,&skeleton,25,7,9,.37f,9999));
     REQUIRE_FALSE(valid(&world, &model, &skeleton, 25, 7, 9, 0.37f, 9999));
     REQUIRE_FALSE(valid(&other, &model, &skeleton, 25, 7, 9, 0.37f, 10001));
     REQUIRE_FALSE(valid(&world, &other, &skeleton, 25, 7, 9, 0.37f, 10001));
@@ -331,6 +339,103 @@ TEST_CASE("Corpse rigid deltas preserve affine residuals and every weighted cons
     REQUIRE(pose.ApplyRigidDeltas(std::vector<Matrix4>(3,MIdentity)));
     MATRIX_4_ARRAY(f,128); pose.PrepareMatrices(f,1);
     for (int i=0;i<3;++i) SameMatrix(a[i],f[i]);
+}
+
+TEST_CASE("Explicit corpse freeze retires real eleven-body ownership and retains both affine phases", "[corpse-pose][articulation][corpse-freeze]")
+{
+    using namespace Poseidon::Physics;
+    auto& world = EnsurePhysicsWorld(); world.Destroy(); REQUIRE(world.Create());
+    struct RetireWorld { PhysicsWorld& world; ~RetireWorld() { world.Destroy(); } } cleanup{world};
+    auto state = std::make_unique<CorpseArticulation>();
+    state->world = &world; state->epoch = world.Generation();
+    const Vector3 vertices[] = {{-.04f,-.08f,-.04f},{.04f,-.08f,-.04f},{-.04f,.08f,-.04f},{.04f,.08f,-.04f},
+        {-.04f,-.08f,.04f},{.04f,-.08f,.04f},{-.04f,.08f,.04f},{.04f,.08f,.04f}};
+    ConvexPiece piece{vertices,8,ColliderFlags::Solid};
+    for (int i=0;i<11;++i)
+    {
+        state->initial[i]=MIdentity; state->initial[i].SetPosition(Vector3(0,5+i*.25f,0));
+        state->bodies[i]=world.SpawnArticulatedPiece(piece,state->initial[i],2);
+        REQUIRE(state->bodies[i].IsValid());
+    }
+    for (int i=0;i<10;++i)
+    {
+        ArticulatedJointDef joint; joint.first=state->bodies[i]; joint.second=state->bodies[i+1];
+        joint.firstFrame.SetPosition(Vector3(0,.125f,0)); joint.secondFrame.SetPosition(Vector3(0,-.125f,0));
+        if (i<4) { joint.kind=ArticulatedJointKind::Hinge; joint.lowerAngle=-.2f; joint.upperAngle=.4f; }
+        state->joints[i]=world.AddArticulatedJoint(joint); REQUIRE(state->joints[i].IsValid());
+    }
+    CHECK(world.GetStats().articulatedBodies==11); CHECK(world.GetStats().articulatedJoints==10);
+    CHECK(world.GetStats().solverBodies==11); CHECK(world.GetStats().solverJoints==10);
+    world.ApplyImpulse(state->bodies[5],state->initial[5].Position(),Vector3(.4f,1,0));
+    for (int i=0;i<12;++i) world.Step(1.0f/60);
+    std::vector<Matrix4> deltas(12,MIdentity);
+    for (int i=0;i<11;++i)
+    {
+        BodyMotion motion; REQUIRE(world.GetBodyMotion(state->bodies[i],motion));
+        Matrix4 current=MIdentity; current.SetDirectionAside(motion.axisX); current.SetDirectionUp(motion.axisY);
+        current.SetDirection(motion.axisZ); current.SetPosition(motion.position);
+        deltas[i]=current*state->initial[i].InverseRotation();
+    }
+    deltas[11]=deltas[2]; // actual synthetic-tail delta belongs to the owned phase
+    CHECK(deltas[5].Position().Size()>.001f);
+    Matrix4 previous[11], next[11];
+    for (int i=0;i<11;++i) { previous[i]=Matrix4(MScale,1.2f,.8f,1.1f); previous[i](0,1)=.13f; next[i]=MIdentity; }
+    AffinePhasePose primary, secondary;
+    REQUIRE(primary.Capture(previous,next,11,12,.37f)); REQUIRE(secondary.Capture(next,previous,11,12,.61f));
+    REQUIRE(primary.ApplyRigidDeltas(deltas)); REQUIRE(secondary.ApplyRigidDeltas(deltas));
+    MATRIX_4_ARRAY(palette,128); MATRIX_4_ARRAY(secondPalette,128);
+    primary.PrepareMatrices(palette,1); secondary.PrepareMatrices(secondPalette,1);
+    AnimationRTWeight weights; weights.Add(AnimationRTPair(5,.65f)); weights.Add(AnimationRTPair(11,.35f));
+    const Vector3 point(.12f,-.07f,.31f); const auto before=primary.Point(weights,point,point);
+    const auto secondBefore=secondary.Point(weights,point,point);
+    Matrix4 proxy=MIdentity, secondProxy=MIdentity; primary.Matrix(proxy,weights); secondary.Matrix(secondProxy,weights);
+    CHECK_FALSE(state->Freeze()); // no validated readback/bounds yet
+    state->updates=12; state->minimum=Vector3(-1,-1,-1); state->maximum=Vector3(1,1,1);
+    state->radius=std::numeric_limits<float>::quiet_NaN(); CHECK_FALSE(state->Freeze());
+    state->radius=1.8f; REQUIRE(state->Freeze()); CHECK(state->state==CorpseSolverState::Frozen);
+    CHECK_FALSE(state->Freeze()); REQUIRE(state->Ready());
+    CHECK(world.GetStats().articulatedBodies==0); CHECK(world.GetStats().articulatedJoints==0);
+    CHECK(world.GetStats().solverBodies==0); CHECK(world.GetStats().solverJoints==0);
+    for (auto body:state->bodies) CHECK_FALSE(body.IsValid());
+    for (auto joint:state->joints) CHECK_FALSE(joint.IsValid());
+    CHECK(state->minimum==Vector3(-1,-1,-1)); CHECK(state->maximum==Vector3(1,1,1)); CHECK(state->radius==1.8f);
+    // A >30 second solver advance cannot mutate already owned phase storage.
+    for (int i=0;i<1861;++i) world.Step(1.0f/60);
+    MATRIX_4_ARRAY(after,128); MATRIX_4_ARRAY(secondAfter,128);
+    primary.PrepareMatrices(after,1); secondary.PrepareMatrices(secondAfter,1);
+    for (int i=0;i<12;++i) { SameMatrix(palette[i],after[i]); SameMatrix(secondPalette[i],secondAfter[i]); }
+    CHECK(primary.Point(weights,point,point)==before); CHECK(secondary.Point(weights,point,point)==secondBefore);
+    Matrix4 afterProxy=MIdentity, afterSecondProxy=MIdentity;
+    primary.Matrix(afterProxy,weights); secondary.Matrix(afterSecondProxy,weights);
+    SameMatrix(proxy,afterProxy); SameMatrix(secondProxy,afterSecondProxy);
+    const auto epoch=world.Generation(); world.Destroy(); REQUIRE(world.Generation()>epoch);
+    CHECK_FALSE(state->Ready()); REQUIRE(world.Create());
+    const auto fresh=world.SpawnArticulatedPiece(piece,MIdentity,2); REQUIRE(fresh.IsValid());
+    state.reset(); // an old owner's destructor must not erase a new backend body
+    BodyMotion motion; CHECK(world.GetBodyMotion(fresh,motion)); CHECK(world.GetStats().solverBodies==1);
+    world.Remove(fresh);
+}
+
+TEST_CASE("Prepared fixture proof distinguishes terrain player proxy and mutation attempts", "[corpse-freeze][physics]")
+{
+    using namespace Poseidon::Physics;
+    PhysicsWorld world; REQUIRE(world.Create());
+    const float heights[9]={}; const auto initial=world.TerrainMutationSerial();
+    REQUIRE(world.SetTerrain(heights,3,3,.25f,0,0)); CHECK(world.TerrainMutationSerial()==initial+1);
+    CHECK(world.GetStats().bodies==0); CHECK(world.GetStats().solverBodies==1);
+    CHECK_FALSE(world.GetStats().kinematicProxyRegistered);
+    world.SetKinematicProxy(Vector3(0,2,0),.35f,1.8f);
+    CHECK(world.GetStats().bodies==0); CHECK(world.GetStats().solverBodies==2);
+    CHECK(world.GetStats().kinematicProxyRegistered); CHECK(world.GetStats().solverJoints==0);
+    world.SetKinematicProxy(VZero,.35f,0);
+    CHECK(world.GetStats().solverBodies==1); CHECK_FALSE(world.GetStats().kinematicProxyRegistered);
+    const auto serial=world.TerrainMutationSerial(); REQUIRE(world.PatchTerrain(0,0,1,1,heights));
+    CHECK(world.TerrainMutationSerial()==serial+1);
+    CHECK_FALSE(world.PatchTerrain(-1,0,1,1,heights)); CHECK(world.TerrainMutationSerial()==serial+2);
+    CHECK_FALSE(world.SetTerrain(heights,3,3,std::numeric_limits<float>::quiet_NaN(),0,0));
+    CHECK(world.TerrainMutationSerial()==serial+3);
+    const auto epoch=world.Generation(); world.Destroy(); CHECK(world.Generation()>epoch);
+    CHECK(world.GetStats().solverBodies==0); CHECK(world.GetStats().solverJoints==0);
 }
 
 TEST_CASE("Actual stock neutral geometry and captured affine palette admit signed anatomical hinges", "[corpse-pose][articulation][corpse-hinge]")

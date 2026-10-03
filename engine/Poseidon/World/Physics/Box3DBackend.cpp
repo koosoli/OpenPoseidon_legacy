@@ -1152,6 +1152,13 @@ public:
         stats.hullFailures = _hullFailures;
         stats.probes = static_cast<std::uint32_t>(_probes.size());
         stats.articulatedBodies = static_cast<std::uint32_t>(_articulatedBodies.size());
+        if (b3World_IsValid(_world))
+        {
+            const auto counters = b3World_GetCounters(_world);
+            stats.solverBodies = static_cast<std::uint32_t>(counters.bodyCount);
+            stats.solverJoints = static_cast<std::uint32_t>(counters.jointCount);
+        }
+        stats.kinematicProxyRegistered = _proxyValid;
         for (const JointSlot& joint : _joints)
             if (joint.generation && b3Joint_IsValid(joint.joint)) ++stats.articulatedJoints;
         stats.terrainRegistered = _heightField != nullptr || !_terrainTiles.empty();

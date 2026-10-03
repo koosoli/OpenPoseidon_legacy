@@ -2959,6 +2959,12 @@ void RegisterPhysicsProbe(HarnessServer& hs)
             cJSON* out = cJSON_CreateObject();
             cJSON_AddBoolToObject(out, "readonly", true);
             cJSON_AddBoolToObject(out, "solver", measured.articulated);
+            cJSON_AddBoolToObject(out, "frozen", measured.frozen);
+            cJSON_AddItemToObject(out, "objectTransform", matrix(measured.object));
+            cJSON_AddBoolToObject(out, "retainedBounds", measured.retainedBounds);
+            cJSON_AddItemToObject(out, "retainedMinimum", vector(measured.retainedMinimum));
+            cJSON_AddItemToObject(out, "retainedMaximum", vector(measured.retainedMaximum));
+            cJSON_AddNumberToObject(out, "retainedRadius", measured.retainedRadius);
             cJSON_AddBoolToObject(out, "rigAdmitted", measured.articulated);
             cJSON_AddBoolToObject(out, "contactAdmitted", false);
             cJSON_AddStringToObject(out, "contactScope", "road-support clearance and corpse-ignored geometry center ray; not convex overlap");
@@ -2996,6 +3002,11 @@ void RegisterPhysicsProbe(HarnessServer& hs)
                 cJSON_AddItemToObject(item, "paletteMax", vector(level.paletteMax));
                 auto* palette = cJSON_AddArrayToObject(item, "palette");
                 for (const auto& bone : level.palette) cJSON_AddItemToArray(palette, matrix(bone));
+                auto* points = cJSON_AddArrayToObject(item, "palettePoints");
+                for (const auto& point : level.palettePoints) cJSON_AddItemToArray(points, vector(point));
+                auto* consumers = cJSON_AddArrayToObject(item, "consumerPoints");
+                for (const auto& point : level.consumerPoints) cJSON_AddItemToArray(consumers, vector(point));
+                cJSON_AddItemToObject(item,"consumerPointIndices",cJSON_CreateIntArray(level.consumerPointIndices.data(),int(level.consumerPointIndices.size())));
             }
             auto* proxies = cJSON_AddArrayToObject(out, "proxies");
             for (const auto& proxy : measured.proxies)

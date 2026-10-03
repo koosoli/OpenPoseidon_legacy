@@ -8,11 +8,13 @@ param(
     [scriptblock]$FinalPoseProbe,
     [string]$FinalPoseProbeSource,
     [switch]$ArticulationSmoke,
-    [switch]$AnatomicalHinges
+    [switch]$AnatomicalHinges,
+    [switch]$FrozenRetirementSmoke
 )
 $ErrorActionPreference = 'Stop'
 if ($ArticulationSmoke -and $FinalPoseProbe) { throw 'Articulation smoke and read-only no-solver diagnostic are separate campaigns.' }
 if ($AnatomicalHinges -and !$ArticulationSmoke) { throw 'Anatomical hinges require the complete articulation smoke campaign.' }
+if ($FrozenRetirementSmoke -and !$ArticulationSmoke) { throw 'Frozen retirement requires the complete articulation smoke campaign.' }
 if (!$env:LOCK_OWNER) { throw 'Run through scripts/with-game-lock.sh.' }
 if (Get-Process OpenPoseidon -ErrorAction SilentlyContinue) { throw 'Game already running; refusing shared ownership.' }
 $culture = [Globalization.CultureInfo]::InvariantCulture
@@ -43,6 +45,7 @@ $result = [ordered]@{ status = 'running'; scope = 'installed no-motion affine po
 if ($FinalPoseProbe) { $result.scope = 'installed no-motion phase/final-pose measurements and lifecycle proof; no solver, joint or contact admission' }
 if ($ArticulationSmoke) { $result.scope = 'installed opt-in stock corpse Box3D articulation, consumed pose and handle cleanup; appearance/contact promotion remains open' }
 if ($AnatomicalHinges) { $result.scope = 'installed separate opt-in stock corpse measured elbow/knee hinges, consumed pose and handle cleanup; defaults and broad admission remain open' }
+if ($FrozenRetirementSmoke) { $result.scope = 'installed explicit owned affine corpse freeze, exact full consumed pose retention and bounded fixture generation invalidation; ordinary deaths and automatic expiry freeze remain disabled' }
 $result.observations.jointPolicy = if ($AnatomicalHinges) { 'measured elbow/knee revolute hinges; six spherical joints' } elseif ($ArticulationSmoke) { 'ten spherical joints' } else { 'solver=none' }
 $keys = @('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM',
     'POSEIDON_TEST_RAIN','WGR_TEMPORAL','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_GRASS','POSEIDON_WIND_OVERRIDE',
@@ -56,6 +59,7 @@ foreach ($key in $keys) { $savedEnv[$key] = [Environment]::GetEnvironmentVariabl
    fixedDate = @(1985,6,21,16,0); pausedImageComparison = $true; captureDeadlineSeconds = $CaptureDeadlineSeconds;
    expiryAcceleration = $ExpiryAcceleration; temporal = 0; exposure = 1; grass = 0; wind = '0 90 0';
    articulationSmoke = [bool]$ArticulationSmoke; anatomicalHinges = [bool]$AnatomicalHinges;
+   frozenRetirementSmoke = [bool]$FrozenRetirementSmoke;
    finalPoseProbe = if ($FinalPoseProbeSource) { @{ path = $FinalPoseProbeSource; sha256 = (Get-FileHash -LiteralPath $FinalPoseProbeSource).Hash;
        snowDepth = $env:POSEIDON_SNOW_TEST_DEPTH; snowline = $env:POSEIDON_SNOWLINE; objectSnow = $env:WGR_OBJECT_SNOW } } else { $null };
    gates = @('live-refusal','phase-consumer-equivalence','status-identity','explicit-clear','30-second-expiry','hide-invalidation','delete-invalidation') } |
@@ -141,6 +145,79 @@ function Start-Articulation([string]$phase) {
     Require (![double]::IsNaN($clearance) -and ![double]::IsInfinity($clearance) -and $clearance -ge .003) "Actual collider clearance is invalid: $actual"
     $result.observations[$phase]=$actual
     Assert-ArticulatedBackend $true ($phase+'Handles')
+}
+function Finite-Vector($values,[int]$length,[string]$name) {
+    Require ($values -is [array] -and $values.Count -eq $length) "Missing full numeric array: $name"
+    foreach ($value in $values) {
+        Require ($null -ne $value -and $value -is [ValueType] -and $value -isnot [bool] -and
+            ![double]::IsNaN([double]$value) -and ![double]::IsInfinity([double]$value)) "Invalid numeric array: $name"
+    }
+}
+function Pose-Snapshot([bool]$frozen) {
+    $actual=Send @{cmd='corpse_pose_state'}
+    Require ($actual.readonly -eq $true -and $actual.frozen -is [bool] -and $actual.frozen -eq $frozen -and
+        $actual.solver -is [bool] -and $actual.solver -eq !$frozen -and $actual.retainedBounds -eq $true) 'Missing owned full pose diagnostic.'
+    Require ($actual.entity -match '^[0-9A-Fa-f]+$' -and $actual.model -ieq 'data3d\mc vojakw2.p3d' -and
+        $actual.bones -is [array] -and $actual.bones.Count -eq 33) 'Actual stock owner/census unavailable.'
+    Finite-Vector $actual.objectTransform 12 'object transform'
+    Finite-Vector $actual.retainedMinimum 3 'retained minimum'; Finite-Vector $actual.retainedMaximum 3 'retained maximum'
+    Finite-Vector @($actual.retainedRadius) 1 'retained radius'
+    Require ($actual.retainedRadius -gt 0) 'Retained culling radius is invalid.'
+    foreach ($correction in @('headCorrection','gunCorrection','legCorrection')) {Finite-Vector $actual.$correction 12 $correction}
+    Require ($actual.levels -is [array] -and $actual.levels.Count -ge 6 -and $actual.levels.Count -le 32 -and $actual.proxies -is [array] -and
+        $actual.proxies.Count -gt 0) 'Actual complete levels/proxies unavailable.'
+    $seenLevels=@()
+    foreach ($level in $actual.levels) {
+        Finite-Vector @($level.level,$level.points,$level.compared,$level.skippedPointTails) 4 'level census'
+        foreach ($count in @($level.level,$level.points,$level.compared,$level.skippedPointTails)) {Require ([double]$count -eq [int]$count) 'Nonintegral level count.'}
+        Require ($level.points -gt 0 -and $level.points -le 4096 -and $level.palette -is [array] -and
+            $level.palette.Count -eq 33 -and $level.palettePoints -is [array] -and $level.palettePoints.Count -eq $level.points -and
+            $level.consumerPoints -is [array] -and $level.consumerPoints.Count -eq $level.compared -and
+            $level.consumerPointIndices -is [array] -and $level.consumerPointIndices.Count -eq $level.compared -and
+            $level.compared+$level.skippedPointTails -eq $level.points) 'Full actual point coverage is unavailable.'
+        Require ($level.level -ge 0 -and $level.level -lt $actual.levels.Count -and $seenLevels -notcontains $level.level -and
+            $level.compared -ge 0 -and $level.skippedPointTails -ge 0) 'Actual level census is incomplete.'
+        $seenLevels+=$level.level
+        foreach ($matrix in $level.palette) {Finite-Vector $matrix 12 'palette matrix'}
+        foreach ($point in $level.palettePoints) {Finite-Vector $point 3 'palette point'}
+        foreach ($point in $level.consumerPoints) {Finite-Vector $point 3 'consumed point'}
+        $last=-1
+        foreach ($index in $level.consumerPointIndices) {
+            Require ($null -ne $index -and $index -is [ValueType] -and $index -isnot [bool] -and [double]$index -eq [int]$index -and $index -gt $last -and $index -lt $level.points) 'Invalid consumed point source index.'
+            $last=[int]$index
+        }
+    }
+    foreach ($proxy in $actual.proxies) {
+        Finite-Vector $proxy.matrix 12 'proxy matrix'
+        Require ($seenLevels -contains $proxy.level -and $proxy.selection -is [string] -and $proxy.selection.Length -gt 0) 'Actual proxy source identity unavailable.'
+    }
+    return $actual
+}
+function Exact-OwnedPose($actual) {
+    # Compare every returned coordinate/matrix, rather than cardinality or hashes
+    # alone. Omit only changing clock and explicit solver/frozen status fields.
+    $levels=@($actual.levels | ForEach-Object {
+        [ordered]@{level=$_.level;role=$_.role;points=$_.points;compared=$_.compared;skippedPointTails=$_.skippedPointTails;
+            palette=$_.palette;palettePoints=$_.palettePoints;consumerPoints=$_.consumerPoints;consumerPointIndices=$_.consumerPointIndices}
+    })
+    return ([ordered]@{entity=$actual.entity;model=$actual.model;bones=$actual.bones;capturedMs=$actual.capturedMs;
+        objectTransform=$actual.objectTransform;minimum=$actual.retainedMinimum;maximum=$actual.retainedMaximum;radius=$actual.retainedRadius;
+        head=$actual.headCorrection;gun=$actual.gunCorrection;leg=$actual.legCorrection;levels=$levels;proxies=$actual.proxies} |
+        ConvertTo-Json -Depth 16 -Compress)
+}
+function Freeze-OwnedPose([string]$phase) {
+    Set-Acceleration 0
+    $beforeFreeze=Pose-Snapshot $false
+    $frozen=Query 'corpse-freeze'
+    Require ($frozen -match '^OK corpse-frozen-status entity=(\S+) bodies=0 joints=0 epoch=\d+ updates=[1-9]\d* capturedMs=\d+ nowMs=\d+ policy=explicit-owned-pose$') "Explicit freeze failed: $frozen"
+    Require ($Matches[1] -ceq $beforeFreeze.entity) 'Freeze changed actual owner.'
+    $afterFreeze=Pose-Snapshot $true
+    Require ((Exact-OwnedPose $beforeFreeze) -ceq (Exact-OwnedPose $afterFreeze)) 'Explicit retirement changed actual palettes, points, proxies, root or retained bounds.'
+    Assert-ArticulatedBackend $false ($phase+'Handles')
+    Require ((Query 'corpse-freeze') -ceq 'REFUSED corpse-freeze valid-simulating-pose-required') 'Repeated freeze was not refused.'
+    Require ((Query 'corpse-impulse') -match '^REFUSED corpse-impulse ') 'Frozen corpse still accepted a solver impulse.'
+    $result.gates[$phase]=@{passed=$true;before=$beforeFreeze;after=$afterFreeze;actual=$frozen}
+    return $afterFreeze
 }
 function Screenshot([string]$name) {
     $path = Join-Path $output ($name + '.png')
@@ -342,6 +419,27 @@ try {
         $result.gates.articulatedMotion=@{passed=$true;start=$motionStart;end=Simulation-Time;actual=$motion;consumer=$consumer}
         Assert-ArticulatedBackend $true 'movingArticulationHandles'
         $result.captures.articulatedMotion=Screenshot 'articulated-motion'
+        if ($FrozenRetirementSmoke) {
+            $activeRetire=Query 'corpse-frozen-world-retire'
+            Require ($activeRetire -ceq 'REFUSED corpse-frozen-world-retire owned-bounded-fixture-required') 'Active solver admitted fixture retirement.'
+            Assert-ArticulatedBackend $true 'activeWorldRetireRefusal'
+            $frozen=Freeze-OwnedPose 'explicitFreeze'
+            $frozenStart=Simulation-Time
+            Set-Acceleration $ExpiryAcceleration
+            $until=[DateTime]::UtcNow.AddSeconds(50)
+            do {
+                Start-Sleep -Milliseconds 500; $frozenNow=Simulation-Time
+                if ([DateTime]::UtcNow -gt $until) {throw 'Frozen persistence clock did not progress.'}
+            } while ($frozenNow-$frozenStart -le 31)
+            Set-Acceleration 0
+            $persistent=Pose-Snapshot $true
+            Require ((Exact-OwnedPose $frozen) -ceq (Exact-OwnedPose $persistent)) 'Frozen owned pose changed after its original 30 second lease.'
+            $persistStatus=Query 'corpse-status'
+            Require ($persistStatus -match '^OK corpse-frozen-status .*policy=explicit-owned-pose$') "Frozen pose expired: $persistStatus"
+            Assert-ArticulatedBackend $false 'frozenPersistenceHandles'
+            $result.gates.frozenPersistence=@{passed=$true;start=$frozenStart;end=$frozenNow;actual=$persistent;status=$persistStatus}
+            $result.captures.frozenPersistent=Screenshot 'frozen-persistent'
+        }
     }
     $clear = Query 'corpse-clear'
     Require ($clear -ceq 'OK corpse-clear cleared=1') "Explicit clear failed: $clear"
@@ -354,6 +452,28 @@ try {
             $result.captures.before.sha256 -ceq $result.captures.cleared.sha256) 'Read-only final-pose/hold query changed paused authored death pixels.'
         $result.gates.finalPosePixels = @{ passed = $true; before = $result.captures.before.sha256;
             held = $result.captures.held.sha256; cleared = $result.captures.cleared.sha256 }
+    }
+    if ($FrozenRetirementSmoke) {
+        # A distinct fresh owner proves the real backend generation transition.
+        # The diagnostic itself must establish exact bounded terrain ownership,
+        # zero tracked handles and raw terrain + optional owned player proxy.
+        $result.observations.worldRetireCapture=Wait-Capture
+        Start-Articulation 'worldRetireArticulation'
+        $null=Freeze-OwnedPose 'worldRetireFreeze'
+        $retired=Query 'corpse-frozen-world-retire'
+        Require ($retired -match '^OK corpse-frozen-world-retire epochBefore=(\d+) epochAfter=(\d+) bodies=0 joints=0 rawBodiesBefore=([12]) rawBodiesBeforeRetire=1 proxyRemoved=([01]) fixture=bounded-empty$') "Bounded empty fixture world retirement refused: $retired"
+        Require ([long]$Matches[2] -gt [long]$Matches[1] -and [int]$Matches[3] -eq 1+[int]$Matches[4]) 'Actual backend generation or raw proxy proof is invalid.'
+        Require-NoHold 'frozenWorldGenerationInvalidation'
+        $getter=Send @{cmd='corpse_pose_state'} -AllowRefusal
+        Require ($getter.ok -eq $false -and $getter.error -ceq 'no-valid-hold') 'Frozen point getter survived backend generation invalidation.'
+        $retiredBackend=Query 'corpse-physics-status'
+        Require ($retiredBackend -ceq 'REFUSED corpse-physics-status no-physics-world' -or
+            $retiredBackend -match '^OK corpse-physics-status epoch=\d+ bodies=0 articulatedBodies=0 articulatedJoints=0$') 'Old articulated handles survived fixture retirement.'
+        $result.gates.frozenWorldGenerationInvalidation.actualRetirement=$retired
+        $result.gates.frozenWorldGenerationInvalidation.backendAfter=$retiredBackend
+        $prepared=Query 'corpse-prepare'
+        Require ($prepared -match '^OK corpse-prepare solver=box3d ') "Bounded fixture recreation failed: $prepared"
+        $result.observations.repreparedPhysics=$prepared
     }
     $result.observations.expiryCapture = Wait-Capture
     if($ArticulationSmoke) {Start-Articulation 'expiryArticulation'}
@@ -375,6 +495,7 @@ try {
     if($ArticulationSmoke) {Assert-ArticulatedBackend $false 'articulatedExpiryCleanup'}
     $result.observations.hideCapture = Wait-Capture
     if($ArticulationSmoke) {Start-Articulation 'hideArticulation'}
+    if($FrozenRetirementSmoke) {$null=Freeze-OwnedPose 'beforeHideFreeze'}
     Check-FinalPose 'beforeHide' $true $identity
     $null = Send @{ cmd = 'exec'; code = 'poseProofHidden=poseProofCorpse; player action ["HIDEBODY",poseProofCorpse]; setAccTime 1' }
     $until = [DateTime]::UtcNow.AddSeconds(10)
@@ -382,7 +503,7 @@ try {
         Start-Sleep -Milliseconds 250
         $hideStatus = Query 'corpse-status'
         if ($hideStatus -ceq 'REFUSED corpse-status no-valid-hold') { break }
-        Require ($hideStatus -match '^OK corpse-status ') "Unexpected hide status: $hideStatus"
+        Require ($hideStatus -match '^OK corpse-(status|frozen-status) ') "Unexpected hide status: $hideStatus"
         if ([DateTime]::UtcNow -gt $until) { throw "HIDEBODY did not invalidate the hold: $hideStatus" }
     } while ($true)
     Set-Acceleration 0
@@ -413,6 +534,7 @@ try {
     $result.observations.deleteCapture = Wait-Capture
     Assert-Compare 'secondCorpseEquivalence'
     if($ArticulationSmoke) {Start-Articulation 'deleteArticulation'}
+    if($FrozenRetirementSmoke) {$null=Freeze-OwnedPose 'beforeDeleteFreeze'}
     $secondIdentity = [regex]::Match($result.observations.deleteCapture,'entity=(\S+)').Groups[1].Value
     Check-FinalPose 'secondCorpseHold' $true $secondIdentity
     $null = Send @{ cmd = 'exec'; code = 'deleteVehicle poseProofCorpse' }
