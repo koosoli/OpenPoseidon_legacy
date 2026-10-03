@@ -6,17 +6,35 @@ param(
  [string]$SourceCensus='',
  [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='original-player',
  [ValidateRange(30,120)][int]$WetDeadlineSeconds=75,
+ [ValidateRange(.3,.95)][double]$MinimumMudWetness=.3,
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [switch]$NativeHeightFixture,
  [switch]$ContactViews,
  [switch]$SandSnapshotTrace,
  [switch]$UniformLightingViews,
+ [switch]$TerrainWetnessTrace,
  [switch]$SelfTest
 )
 $ErrorActionPreference='Stop';$root=Split-Path -Parent $PSScriptRoot
 $culture=[Globalization.CultureInfo]::InvariantCulture
 function Require([bool]$ok,[string]$message){if(!$ok){throw $message}}
 function Number($v){$n=[double]::Parse([string]$v,[Globalization.NumberStyles]::Float,$culture);Require (![double]::IsNaN($n)-and ![double]::IsInfinity($n)) 'Nonfinite fixture number.';return $n}
+function Mud-WetReady($state,[bool]$hasMud,[double]$minimum){
+ $null=Number $minimum;Require ($minimum -ge .3 -and $minimum -le .95) 'Requested natural mud wetness outside[.3,.95].'
+ foreach($value in @($state.uniform,$state.weather.liquidRain)){Require ((Number $value) -ge 0 -and (Number $value) -le 1) 'Invalid actual cloth/liquid wetting state.'}
+ if($hasMud){$mud=Number $state.mud.wetness;Require ($mud -ge 0 -and $mud -le 1) 'Invalid actual GMud wetness.';if($mud -lt $minimum){return $false}}
+ return $state.uniform -ge .3 -and $state.weather.liquidRain -ge .3
+}
+function Terrain-WetnessRows($lines){
+ $rows=@();$grammar='Wgpu terrain puddle weather: time=([-+\d.eE]+) rain=([-+\d.eE]+) accumulated=([-+\d.eE]+) uploaded=([-+\d.eE]+)\r?$'
+ foreach($line in $lines){if($line.Contains('Wgpu terrain puddle weather:')){
+  Require ($line -cmatch $grammar) 'Unknown/incomplete existing terrain weather diagnostic.'
+  $m=$Matches.Clone();$row=@{time=(Number $m[1]);queuedRainStrength=(Number $m[2]);accumulated=(Number $m[3]);queuedPad1=(Number $m[4]);line=$line}
+  Require ($row.time -ge 0) 'Negative terrain presentation clock.'
+  foreach($field in @('queuedRainStrength','accumulated','queuedPad1')){Require ($row[$field] -ge 0 -and $row[$field] -le 1) 'Existing terrain telemetry outside[0,1].'}
+  $rows+=,$row
+ }};return $rows
+}
 function Key([string]$v){return $v.Replace('\','/').ToLowerInvariant()}
 function Contact-Poses([double]$x,[double]$z,[double]$height){
  return @(@{name='low';pose=@(($x-2),$z,($height+.6),90,-16.699244)},@{name='top';pose=@(($x+.2),$z,($height+8),270,-88.567904)})
@@ -101,6 +119,17 @@ function Pair{
 }
 function Same-Pair($a,$b){Require (($a|ConvertTo-Json -Depth 8 -Compress)-ceq ($b|ConvertTo-Json -Depth 8 -Compress)) 'Installed source pair changed.'}
 function Test-Helpers{
+ $wetFixture=@{uniform=.3;weather=@{liquidRain=.3};mud=@{wetness=.3}}
+ Require (Mud-WetReady $wetFixture $true .3) 'Default natural wetting threshold changed.'
+ Require (!(Mud-WetReady $wetFixture $true .8)) 'Intermediate GMud wetness admitted as high wetness.'
+ $wetFixture.mud.wetness=.8;Require (Mud-WetReady $wetFixture $true .8) 'Actual high natural mud wetness refused.'
+ $wetFixture.mud.wetness=0;Require (Mud-WetReady $wetFixture $false .8) 'Unsupported-map cloth control demanded invented mud admission.'
+ $wetFixture.mud.wetness=1;$wetFixture.weather.liquidRain=.2;Require (!(Mud-WetReady $wetFixture $true .8)) 'High retained GMud substituted for actual liquid rain.'
+ foreach($minimum in @(.2,1,[double]::NaN)){$failed=$false;try{Mud-WetReady $wetFixture $true $minimum}catch{$failed=$true};Require $failed 'Invalid natural mud threshold accepted.'}
+ $trace='Wgpu terrain puddle weather: time=35.001 rain=0.500 accumulated=0.4523 uploaded=0.4523'+[char]13
+ $rows=@(Terrain-WetnessRows @($trace));Require ($rows.Count -eq 1 -and $rows[0].accumulated -eq .4523 -and $rows[0].queuedPad1 -eq .4523) 'Existing CRLF queued terrain weather receipt changed.'
+ $rows=@(Terrain-WetnessRows @($trace.Replace('uploaded=0.4523','uploaded=0.0000')));Require ($rows[0].queuedPad1 -eq 0 -and $rows[0].accumulated -gt 0) 'Master-disabled queued coat was fabricated as wet.'
+ foreach($bad in @($trace.Replace('rain=0.500','rain=NaN'),$trace.Replace('uploaded=0.4523','uploaded=1.1000'))){$failed=$false;try{Terrain-WetnessRows @($bad)}catch{$failed=$true};Require $failed 'Malformed/out-of-range queued terrain receipt accepted.'}
  $view=Uniform-View @(10,20,30) 90
  Require ($view.Count -eq 6 -and $view[0] -eq 12.5 -and $view[1] -eq 30.9 -and $view[2] -eq 18.5) 'Uniform camera reordered SQF ASL coordinates.'
  foreach($heading in @(0,52.0466,90,180,270,359.995)){
@@ -151,9 +180,11 @@ $result=[ordered]@{status='running';sourceHead=(& git -C $root rev-parse HEAD);s
 $result.helperSha256=@{};foreach($helper in @('Write-BenchmarkGraphics.ps1','Assert-CaptureLifecycle.ps1')){$result.helperSha256[$helper]=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $helper)).Hash}
 $result.sandSnapshotTrace=[bool]$SandSnapshotTrace
 $result.uniformLightingViews=[bool]$UniformLightingViews
+$result.terrainWetnessTrace=[bool]$TerrainWetnessTrace;$result.minimumMudWetness=$MinimumMudWetness
 if($UniformLightingViews){. (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1');$result.helperSha256['TerrainPuddleStockRoof.ps1']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1')).Hash}
 if($SandSnapshotTrace){$result.helperSha256['Read-SandUploadSnapshot.ps1']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Read-SandUploadSnapshot.ps1')).Hash}
 $settings=@{POSEIDON_PLAYER_GROUND_TRACE='1';POSEIDON_UNIFORM_WET_TRACE='1';POSEIDON_SAND_TRACE='1';POSEIDON_MUD_TRACE='1';WGR_UNIFORM_WET='1';WGR_GRASS='0';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_CLOUD_COVERAGE='0';WGR_TERRAIN_JITTER='0';WGR_TEMPORAL='0';WGR_LOD_GOVERNOR_RANGE='1';POSEIDON_SNOWLINE='off';POSEIDON_SNOW_TEST_DEPTH='0'}
+if($TerrainWetnessTrace){$settings.WGR_TERRAIN_PUDDLE_FIXTURE='1';$result.terrainPuddlesInheritedControl=[Environment]::GetEnvironmentVariable('WGR_TERRAIN_PUDDLES','Process')}
 $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE','WGR_SAND_UPLOAD_TRACE','WGR_SAND_SNAPSHOT_FILE','WGR_SAND_SNAPSHOT_ROOT')
 if($UniformLightingViews){$clear+=@('POSEIDON_HEADLAMP','POSEIDON_LAMP_LIGHTS','POSEIDON_LAMP_RADIUS_SCALE','POSEIDON_LAMP_BRIGHTNESS_SCALE','POSEIDON_LAMP_COLOR','POSEIDON_LAMP_AMBIENT_SCALE','POSEIDON_LAMP_CONE','POSEIDON_LAMP_SPILL','POSEIDON_LAMP_SPILL_RADIUS','POSEIDON_LAMP_SPILL_AMBIENT')}
 $keys=@($settings.Keys)+$clear+@('POSEIDON_USER_DIR');$saved=@{};foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
@@ -170,6 +201,12 @@ function Eval([string]$code){return Decode ([string](Send @{cmd='eval';code=$cod
 function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
 function Field([string]$kind,$site){return Send @{cmd=('dev_'+$kind);action='sample';x=$site.x;z=$site.z}}
 function State{$wet=Number (Eval 'triUniformWetness player');Require ($wet-ge 0 -and $wet-le 1) 'Actual Person wetness is unavailable/outside[0,1].';return @{time=(Number (Eval 'time'));position=(Eval 'getPosASL player');uniform=$wet;sand=(Send @{cmd='dev_sand';action='state'});mud=(Send @{cmd='dev_mud';action='state'});weather=(Send @{cmd='weather_visibility'})}}
+function Terrain-WetnessReceipt($state){
+ $rows=@(Terrain-WetnessRows (Lines));Require ($rows.Count -gt 0) 'Opt-in existing terrain weather diagnostic emitted no complete row.'
+ return @{observationTime=$state.time;actualGMudWetness=$state.mud.wetness;actualLiquidRain=$state.weather.liquidRain;rowCount=$rows.Count;lastQueuedRow=$rows[-1];
+  observedClockMinusLoggedClock=$state.time-$rows[-1].time;
+  scope='Existing C++ presentation accumulator and queued pad1 only, logged every five simulation seconds. GMud geometry wetness is independent. No Rust acceptance, GPU completion, current-frame identity, local shader rain coverage or visible coat witness.'}
+}
 function Native-Heights($site){
  $initial=State;$tileX=[Math]::Floor($site.x/200);$tileZ=[Math]::Floor($site.z/200)
  # Coarse parents are centred at25m; production tile boundaries start half
@@ -277,7 +314,20 @@ function Contact-Views($record,[string]$kind){
   foreach($field in @('offset','surfaceY','surfaceDx','surfaceDz')){Require ($actual.$field -eq $sample.$field) 'Inspection changed actual walked contact geometry.'}
   Assert-Paused $initial (State)
  }
- return @{sample=$sample;scope='Actual previously walked cell, paused low/top inspection; freefly uses existing camera focus, not actor focus'}
+ $resultViews=@{sample=$sample;scope='Actual previously walked cell, paused low/top inspection; freefly uses existing camera focus, not actor focus'}
+ if($TerrainWetnessTrace -and $kind -ceq 'mud'){$resultViews.terrainWetness=Terrain-WetnessReceipt (State)}
+ return $resultViews
+}
+function Terrain-MudCentreViews($site){
+ $sample=Field 'mud' $site;Assert-Tuple $sample $site $map 'mud';$initial=State
+ foreach($view in (Contact-Poses ([double]$sample.x) ([double]$sample.z) ([double]$sample.surfaceY))){
+  $pose=($view.pose|ForEach-Object{([double]$_).ToString('R',$culture)}) -join ' '
+  Require ((Eval ('triFreeFlyPose "'+$pose+'"')) -ceq 'OK') 'Actual admitted mud centre inspection refused.'
+  Capture ('mud-source-centre-'+$view.name);Assert-Paused $initial (State)
+  $after=Field 'mud' $sample
+  foreach($field in @('offset','surfaceY','surfaceDx','surfaceDz')){Require ($after.$field -eq $sample.$field) 'Centre inspection changed actual source ground geometry.'}
+ }
+ return @{sample=$sample;terrainWetness=(Terrain-WetnessReceipt (State));scope='Actual admitted mud source centre and physical height, paused low/top images. Centre may be untouched; walked contact views identify actual compressed cells separately.'}
 }
 function Uniform-Lighting([string]$band){
  $original=State
@@ -390,10 +440,12 @@ try{
   elseif(!$sand){$arm.gates.unqualifiedDryWalk=Walk 'unqualified-dry-third' $uniform 'mud' $false;$null=Place $uniform}
   $dry=State;Require ($dry.uniform-lt .001 -and $dry.weather.liquidRain-lt .001) 'Dry clothing/weather control not initially dry.';Capture 'uniform-dry-third';$arm.gates.dry=$dry
   if($UniformLightingViews){$arm.gates.uniformLightingDry=Uniform-Lighting 'dry'}
+  $arm.gates.wetWait=@{requestedMinimumMudWetness=$MinimumMudWetness;hasAdmittedMudSource=[bool]$soil;wallDeadlineSeconds=$WetDeadlineSeconds;start=State}
   Exec '0 setOvercast 1;0 setRain 1;setAccTime 4';$until=[DateTime]::UtcNow.AddSeconds($WetDeadlineSeconds)
-  do{Start-Sleep -Milliseconds 400;$wet=State;Require ([DateTime]::UtcNow-lt $until) 'Actual rain did not wet the exposed controlled soldier.'}while($wet.uniform-lt .3 -or $wet.weather.liquidRain-lt .3 -or ($soil -and $wet.mud.wetness-lt .3))
+  do{Start-Sleep -Milliseconds 400;$wet=State;$arm.gates.wetWait.lastActual=$wet;Require ([DateTime]::UtcNow-lt $until) 'Natural liquid rain did not reach actual cloth/GMud thresholds within the bounded wetting deadline.'}while(!(Mud-WetReady $wet ([bool]$soil) $MinimumMudWetness))
   Exec 'setAccTime 0';$wet=State;Require (!$wet.weather.particleSnowflakes -and $wet.weather.particleDensity-eq 0) 'Wetting uses snow/particle override instead of actual liquid rain.'
   $arm.gates.wet=$wet;$arm.gates.cloth=Assert-Cloth (Lines);$arm.gates.wetBody=Assert-Body (Lines) ($wet.time-.65);Capture 'uniform-wet-third';$arm.gates.wetReturn=Return-Views 'uniform-wet'
+  if($TerrainWetnessTrace){$arm.gates.terrainWetReady=Terrain-WetnessReceipt $wet}
   if($UniformLightingViews){$arm.gates.uniformLightingWet=Uniform-Lighting 'wet'}
   if($soil){$arm.gates.wetSoilWalk=Walk 'mud-wet-third' $soil 'mud' $true}
   else{$arm.gates.unqualifiedWetWalk=Walk 'unqualified-mud-wet-third' $uniform 'mud' $false}
@@ -401,6 +453,10 @@ try{
   if($ContactViews){
    if($sand){$arm.gates.sandCloseViews=Contact-Views $arm.gates.sandWalk 'sand'}
    if($soil){$arm.gates.mudCloseViews=Contact-Views $arm.gates.wetSoilWalk 'mud'}
+  }
+  if($TerrainWetnessTrace -and $soil){
+   if(!$ContactViews){$arm.gates.mudCloseViews=Contact-Views $arm.gates.wetSoilWalk 'mud'}
+   $arm.gates.mudCentreViews=Terrain-MudCentreViews $soil
   }
   Exec 'setAccTime 1';$null=Send @{cmd='exit'};Require ($p.WaitForExit(20000)-and $p.ExitCode-eq 0) 'Owned normal exit failed.'
   Require ((Lines|Select-String 'Shutdown complete')-and !(Lines|Select-String 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION')) 'Exit/validation proof missing.'
