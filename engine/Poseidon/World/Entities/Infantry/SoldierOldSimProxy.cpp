@@ -924,6 +924,10 @@ Vector3 Man::GetPilotPosition(CameraType camType) const
     int level = _shape->FindMemoryLevel();
 
     int selIndex = type->_pilotPoint;
+    if (selIndex < 0 || level < 0 || !_shape->Level(level))
+    {
+        return VZero;
+    }
     const NamedSelection& sel = _shape->Level(level)->NamedSel(selIndex);
     if (sel.Size() <= 0)
     {
@@ -1461,6 +1465,17 @@ void ManType::InitShape()
 
     _cameraPoint = mem ? mem->PointIndex("zamerny") : -1;
     _pilotPoint = mem ? mem->FindNamedSel("pilot") : -1;
+    // An EMPTY "pilot" selection is no pilot point. Every reader takes sel[0] of it (the camera /
+    // eye position), and community MLODs ship memory selections with no points -- fml_vorhees'
+    // Jason models (loco*.p3d) crashed the game in Man::CalculateCameraPosition on spawn, in a
+    // mission or an editor preview. OFP shrugged these off; the readers already fall back to the
+    // aiming position when this is -1.
+    if (_pilotPoint >= 0 && mem->NamedSel(_pilotPoint).Size() <= 0)
+    {
+        LOG_WARN(Physics, "{}: memory selection 'pilot' has no points; using the aiming position",
+                 (const char*)GetName());
+        _pilotPoint = -1;
+    }
 
     _gunPosIndex = mem ? mem->PointIndex("usti hlavne") : -1;
     _gunEndIndex = mem ? mem->PointIndex("konec hlavne") : -1;
