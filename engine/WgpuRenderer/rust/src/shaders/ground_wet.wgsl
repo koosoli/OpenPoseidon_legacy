@@ -16,6 +16,23 @@ fn soil_wet_amount(soil: f32, wetness: f32, snow_depth: f32) -> f32 {
         * (1.0 - smoothstep(0.002, 0.02, snow_depth));
 }
 
+// x: diffuse substrate multiplier, y: remaining cosmetic smooth-film share.
+// Call only after the existing source, snow and physical rain-proof gates.
+// The ground's procedural mask has no water depth: on proven soft soil it is
+// a moist rough substrate, not another smooth water interface. Actual retained
+// pools are drawn separately from their supported depth and keep their optics.
+fn soil_wet_surface(soil: f32, wet_amount: f32, film: f32) -> vec2<f32> {
+    let wet = clamp(wet_amount, 0.0, 1.0);
+    let source = select(0.0, clamp(soil, 0.0, 1.0), wet > 0.0);
+    let smooth_film = clamp(film, 0.0, 1.0) * (1.0 - source);
+    // Tidewater's accepted damp substrate darkens albedo by 0.58. Reuse that
+    // bounded, channel-preserving response for the admitted wet-soil share;
+    // never exempt a wet substrate because the procedural film mask is high.
+    // Preserve the existing 0.38 film darkening on the remaining hard share.
+    let diffuse = mix(1.0, 0.58, wet) * (1.0 - 0.38 * smooth_film);
+    return vec2<f32>(diffuse, smooth_film);
+}
+
 // Broad, low-energy moist-soil response. Use the geometric normal: authored
 // grit cannot turn sunlight into individual sparkles. No time/position noise.
 fn soil_wet_fresnel(view_cosine: f32) -> f32 {
