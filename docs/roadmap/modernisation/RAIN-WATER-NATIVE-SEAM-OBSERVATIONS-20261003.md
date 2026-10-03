@@ -17,7 +17,22 @@ The comparator verifies the corpus SHA, unchanged original source, complete
 paused clock/field/weather, matching corner/query revision and exact native
 vertex/centre domain. It checks each actual query's height/depth/support against
 the anti-diagonal centre bed within float-query precision. Changed native bed,
-source world/WRP, sea level or domain is rejected.
+source world/WRP or domain is rejected. Each corpus sea level must equal its
+own actual fine snapshot's sea level. Fresh sessions can have different dynamic
+sea controls: that comparison is allowed only for the same complete inland
+owner, with every actual native vertex unchanged and the minimum native bed
+above both sea levels plus the actual 2 cm surface-support margin. Any possibly
+coastal/submerged unequal-sea comparison is rejected.
+
+The full corpus SHA is checked against its own recorded manifest. A separate
+SHA hashes only the native `(x,z,height)` geometry using ordered binary values;
+this excludes installed provenance, clock, dynamic sea and fresh process
+addresses. All overlapping actual native vertices must also match exactly.
+Process world tokens are recorded; source revisions are checked within each
+run. Two fresh process addresses are not a cross-run identity guard.
+Unequal sea explicitly marks the report noncausal: global coastal outlets can
+affect distant retained volume even when the sampled inland owner is safely
+above both sea thresholds.
 
 Each snapshot reports centre-wet adjacent pairs, head-step mean/RMS/p95/max,
 counts over 30/60 mm, the wholly wet native-face subset, velocity jumps and a
@@ -45,6 +60,36 @@ volume, needed when interpreting the observations.
   same-input parser check, not a newer-build result.
 - `git diff --check` passes. No compiler, device, game or visual acceptance run
   is part of this comparator change.
+
+The first actual new-versus-old invocation correctly exposed differing dynamic
+sea controls but originally rejected them too broadly: old `9e5936` sea is
+2.714284181595 m; new `7a5b18` is 2.867092847824 m. The corrected observations
+preserve each sea source and reject any possibly coastal unequal-sea domain.
+Expanded self-tests pass for fresh inland sea, and reject changed WRP/world,
+range/spacing, geometry SHA, individual outer native vertex, low/coastal bed,
+centre bed and a mismatched same-run sea source.
+
+Actual completed new campaign:
+`build/rain-water-natural/stable-native-sunny-owned-pool-20261003-144426-7a5b18`.
+The old/new full corpus SHAs differ, but all 1,089 vertices and 1,024 centres
+match, with geometry SHA
+`49AAA67A5D60A93BD1850E7434E2BB6BCDDF245C25315855E867A40588D83CDD`.
+Minimum native bed 197.8514404297 m clears the higher sea by 194.9843475819 m.
+The report is `matched-native-observations-unequal-sea-noncausal`.
+
+For the same 31 centre pairs wet in both snapshots, old/new head-step means are
+0.04412497244 / 0.01203524682 m, maxima 0.07788085938 / 0.03857421875 m;
+counts over 30 mm are 26 / 3, and over 60 mm 5 / 0. The same 29 wholly wet
+native faces have means 0.04394636483 / 0.01218598464 m. The snapshot-specific
+four-wet-neighbour interior stencil counts are 9 / 6, mean curvature
+0.04254192776 / 0.00376129150 m and extrema 9 / 0; these differently sized
+stencil sets are descriptive observations, not a matched temporal test.
+
+Actual rainy sample conditions differ: liquid rain 0.4692493677 / 0.3204274178,
+owner volume 1131.376113 / 925.938753 m3 and simulation time
+127.738 / 129.064 seconds. This is not an equal-forcing causal ablation or a
+visual/performance acceptance statement. No runtime/source/hydraulic change
+was made to enable this comparison.
 
 ## Remaining optics observations from existing source
 

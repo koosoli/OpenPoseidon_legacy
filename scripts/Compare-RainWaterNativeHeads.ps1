@@ -10,6 +10,20 @@ function Finite($value){
  $n=[double]$value;Require (![double]::IsNaN($n)-and![double]::IsInfinity($n)) 'Nonfinite observation.';return $n
 }
 function Key([double]$x,[double]$z){return $x.ToString('R',$culture)+':'+$z.ToString('R',$culture)}
+function GeometryHash($vertices){
+ # Hash native geometry only. Installed stamp, clock, tide and process address
+ # are legitimate fresh-session differences, not changes to authored vertices.
+ $keys=[string[]]@($vertices.Keys);[Array]::Sort($keys,[StringComparer]::Ordinal)
+ $stream=[IO.MemoryStream]::new();$writer=[IO.BinaryWriter]::new($stream)
+ $sha=[Security.Cryptography.SHA256]::Create()
+ try{foreach($key in $keys){$xy=$key.Split(':');$writer.Write([double]::Parse($xy[0],$culture));$writer.Write([double]::Parse($xy[1],$culture));$writer.Write([single](Finite $vertices[$key]))}
+  $writer.Flush();return [BitConverter]::ToString($sha.ComputeHash($stream.ToArray())).Replace('-','')
+ }finally{$sha.Dispose();$writer.Dispose();$stream.Dispose()}
+}
+function SeaSource($nativeSea,$fieldSea){
+ $a=Finite $nativeSea;$b=Finite $fieldSea
+ Require ($a-eq$b) 'Native corpus sea differs from its actual same-run fine field.'
+}
 function Distribution($values){
  $sorted=@($values|Sort-Object);if(!$sorted.Count){return @{count=0;mean=$null;rms=$null;p95=$null;maximum=$null;over30mm=0;over60mm=0}}
  $sum=0.0;$squares=0.0;$over30=0;$over60=0
@@ -36,6 +50,8 @@ function Edges($cells,$vertices){
 }
 function Summary($cells,$edges){
  $wet=@($edges|Where-Object bothWet);$full=@($edges|Where-Object fullyWet)
+ $flowStats=Distribution @($wet|ForEach-Object flowJump)
+ $flowStats.Remove('over30mm');$flowStats.Remove('over60mm');$flowStats.unit='metres-per-second'
  $curvature=[Collections.Generic.List[double]]::new();$extrema=0
  foreach($p in $cells.Values){
   if($p.depth-le.001){continue};$neighbours=@()
@@ -50,7 +66,7 @@ function Summary($cells,$edges){
  return @{cells=$cells.Count;wetCentres=@($cells.Values|Where-Object{$_.depth-gt.001}).Count;
   wetEdges=(Distribution @($wet|ForEach-Object delta));fullyWetNativeFaces=(Distribution @($full|ForEach-Object delta));
   wetInteriorCurvature=(Distribution $curvature.ToArray());wetInteriorExtrema=$extrema;
-  flowJumps=(Distribution @($wet|ForEach-Object flowJump));
+  flowJumps=$flowStats;
   largestFullyWetSteps=@($full|Sort-Object delta -Descending|Select-Object -First 8)}
 }
 function Frozen($a,$b){
@@ -77,6 +93,7 @@ function ReadSnapshot([string]$path){
   $native.header.range-eq2048-and$native.header.spacing-eq6.25-and$native.source.world-ceq$Map-and
   $native.source.wrpSha256-match'^[a-fA-F0-9]{64}$') 'Native corpus lacks genuine unedited source/domain.'
  Require ($native.installed.stamp-ceq$r.installed.stamp-and$native.header.heightRevision-eq$d.before.source.heightRevision) 'Native source and sample provenance differ.'
+ SeaSource $native.header.seaLevel $arm.gates.wetFine.seaLevel
  Frozen $native.before $native.after
  Require ($native.before.time-eq$d.before.time-and$native.before.field.revision-eq$d.before.field.revision) 'Native corners and water sample are from different states.'
  Require ($native.origin[0]-eq$d.owner.x-and$native.origin[1]-eq$d.owner.z) 'Native corners do not cover the sampled owner.'
@@ -99,15 +116,27 @@ function ReadSnapshot([string]$path){
  }
  $edges=Edges $cells $vertices
  return @{path=(Resolve-Path -LiteralPath $path).Path;sha256=(Get-FileHash -LiteralPath $path).Hash;
-  nativeSha256=$descriptor.sha256;sourceWrp=$native.source.wrpSha256;seaLevel=$native.header.seaLevel;range=2048;spacing=6.25;
+  nativeSha256=$descriptor.sha256;nativeGeometrySha256=(GeometryHash $vertices);minimumNativeBed=($vertices.Values|Measure-Object -Minimum).Minimum;
+  world=$native.source.world;sourceWrp=$native.source.wrpSha256;seaLevel=$native.header.seaLevel;range=2048;spacing=6.25;
+  processWorldToken=$arm.gates.wetFine.worldToken;
   stamp=$r.installed.stamp;state=$d.before;owner=$d.owner;cells=$cells;vertices=$vertices;edges=$edges;summary=(Summary $cells $edges)}
 }
 function Match($a,$b){
- Require ($a.sourceWrp-ceq$b.sourceWrp-and$a.range-eq$b.range-and$a.spacing-eq$b.spacing-and$a.seaLevel-eq$b.seaLevel) 'Different original map/domain/sea source.'
+ Require ($a.world-ceq$b.world-and$a.sourceWrp-ceq$b.sourceWrp-and$a.range-eq$b.range-and$a.spacing-eq$b.spacing) 'Different original map/domain source.'
+ $commonVertices=0;foreach($key in $a.vertices.Keys){if(!$b.vertices.ContainsKey($key)){continue};++$commonVertices;Require ($a.vertices[$key]-eq$b.vertices[$key]) 'Same coordinate has changed native vertex.'}
  $common=0;$becameDry=0;$becameWet=0
  foreach($key in $a.cells.Keys){$old=$a.cells[$key];$new=$b.cells[$key];if($null-eq$new){continue};++$common
   Require ($old.bed-eq$new.bed) 'Same coordinate has changed native bed.'
   if($old.depth-gt.001-and$new.depth-le.001){++$becameDry};if($old.depth-le.001-and$new.depth-gt.001){++$becameWet}
+ }
+ $sameSea=$a.seaLevel-eq$b.seaLevel
+ $higherSea=[Math]::Max([double]$a.seaLevel,[double]$b.seaLevel)
+ $minimumBed=[Math]::Min([double]$a.minimumNativeBed,[double]$b.minimumNativeBed)
+ if(!$sameSea){
+  Require ($common-eq$a.cells.Count-and$common-eq$b.cells.Count-and$common-gt0-and
+   $commonVertices-eq$a.vertices.Count-and$commonVertices-eq$b.vertices.Count-and
+   $a.nativeGeometrySha256-ceq$b.nativeGeometrySha256) 'Unequal sea requires the same complete native owner geometry.'
+  Require ($minimumBed-gt$higherSea+.02) 'Unequal sea could affect coastal/submerged native support.'
  }
  $bEdges=@{};foreach($edge in $b.edges){$bEdges[$edge.key]=$edge}
  $matched=[Collections.Generic.List[object]]::new()
@@ -115,7 +144,9 @@ function Match($a,$b){
   Require ($edge.face0-eq$new.face0-and$edge.face1-eq$new.face1) 'Matched face geometry changed.'
   if($edge.bothWet-and$new.bothWet){$matched.Add(@{x=$edge.x;z=$edge.z;axis=$edge.axis;baseline=$edge.delta;candidate=$new.delta;fullyWetBoth=$edge.fullyWet-and$new.fullyWet})}
  }
- return @{commonNativeCentres=$common;becameDry=$becameDry;becameWet=$becameWet;
+ return @{commonNativeCentres=$common;commonNativeVertices=$commonVertices;becameDry=$becameDry;becameWet=$becameWet;
+  sea=@{equal=$sameSea;baseline=$a.seaLevel;candidate=$b.seaLevel;minimumNativeBed=$minimumBed;clearanceAboveBoth=$minimumBed-$higherSea;
+   scope=if($sameSea){'Equal recorded sea control'}else{'Same complete inland geometry above both actual sea thresholds; observations only, globally noncausal'}};
   matchedWetPairBaseline=(Distribution @($matched|ForEach-Object baseline));matchedWetPairCandidate=(Distribution @($matched|ForEach-Object candidate));
   matchedFullyWetBaseline=(Distribution @($matched|Where-Object fullyWetBoth|ForEach-Object baseline));
   matchedFullyWetCandidate=(Distribution @($matched|Where-Object fullyWetBoth|ForEach-Object candidate));pairs=$matched.ToArray()}
@@ -126,17 +157,25 @@ if($SelfTest){
  for($z=0;$z-lt2;++$z){for($x=0;$x-lt2;++$x){$px=($x+.5)*6.25;$pz=($z+.5)*6.25;$key=Key $px $pz;$h=12+((($x+$z)%2)*2-1)*.04;$cells[$key]=@{key=$key;x=$px;z=$pz;head=$h;depth=$h-10;bed=10;flowX=0;flowZ=0}}}
  $edges=Edges $cells $vertices;$summary=Summary $cells $edges
  Require ($summary.wetEdges.count-eq4-and[Math]::Abs($summary.wetEdges.mean-.08)-lt1e-10-and$summary.fullyWetNativeFaces.count-eq4) 'Checker observation self-test failed.'
- $a=@{sourceWrp='same';range=2048;spacing=6.25;seaLevel=0;cells=$cells;edges=$edges};$b=@{sourceWrp='same';range=2048;spacing=6.25;seaLevel=0;cells=@{};edges=@()}
+ $geometryHash=GeometryHash $vertices
+ $a=@{world='noe';sourceWrp='same';range=2048;spacing=6.25;seaLevel=0;cells=$cells;vertices=$vertices;nativeGeometrySha256=$geometryHash;minimumNativeBed=10;edges=$edges}
+ $b=@{world='noe';sourceWrp='same';range=2048;spacing=6.25;seaLevel=0;cells=@{};vertices=$vertices.Clone();nativeGeometrySha256=$geometryHash;minimumNativeBed=10;edges=@()}
  Require ((Match $a $b).commonNativeCentres-eq0) 'Different owner falsely matched.'
  foreach($p in $cells.Values){$b.cells[$p.key]=$p.Clone();$b.cells[$p.key].head=12;$b.cells[$p.key].depth=2};$b.edges=Edges $b.cells $vertices
  $m=Match $a $b;Require ($m.matchedWetPairBaseline.count-eq4-and$m.matchedWetPairCandidate.maximum-eq0) 'Matched head observations failed.'
+ $b.seaLevel=.15;$m=Match $a $b;Require (!$m.sea.equal-and$m.sea.clearanceAboveBoth-gt9) 'Legitimate inland fresh-session tide rejected.'
+ foreach($change in @(@('world','eden'),@('sourceWrp','different'),@('spacing',12.5),@('range',1024),@('minimumNativeBed',.16),@('nativeGeometrySha256','different'))){
+  $saved=$b[$change[0]];$b[$change[0]]=$change[1];$caught=$false;try{$null=Match $a $b}catch{$caught=$true};Require $caught ('Invalid cross-run control accepted: '+$change[0]);$b[$change[0]]=$saved
+ }
+ $vertex=@($b.vertices.Keys)[0];$b.vertices[$vertex]=10.01;$caught=$false;try{$null=Match $a $b}catch{$caught=$true};Require $caught 'Changed outer/native vertex accepted.';$b.vertices[$vertex]=10
+ SeaSource .15 .15;$caught=$false;try{SeaSource .15 .16}catch{$caught=$true};Require $caught 'Within-run mismatched sea accepted.'
  $first=@($b.cells.Keys)[0];$b.cells[$first].bed=10.01;$caught=$false;try{$null=Match $a $b}catch{$caught=$true};Require $caught 'Changed source bed was accepted.'
  Write-Host 'Native-head observation self-test PASS; no game or compiler used.';return
 }
 Require ([bool]$Baseline-and[bool]$Candidate) 'Provide both completed campaign result paths.'
 $old=ReadSnapshot $Baseline;$new=ReadSnapshot $Candidate;$match=Match $old $new
-$status=if($match.matchedWetPairBaseline.count-gt0){'matched-native-observations'}else{'observations-only-no-common-wet-pairs'}
-function PublicSnapshot($s){return @{path=$s.path;sha256=$s.sha256;nativeSha256=$s.nativeSha256;stamp=$s.stamp;state=$s.state;owner=$s.owner;summary=$s.summary}}
+$status=if($match.matchedWetPairBaseline.count-eq0){'observations-only-no-common-wet-pairs'}elseif(!$match.sea.equal){'matched-native-observations-unequal-sea-noncausal'}else{'matched-native-observations'}
+function PublicSnapshot($s){return @{path=$s.path;sha256=$s.sha256;nativeSha256=$s.nativeSha256;nativeGeometrySha256=$s.nativeGeometrySha256;processWorldToken=$s.processWorldToken;seaLevel=$s.seaLevel;stamp=$s.stamp;state=$s.state;owner=$s.owner;summary=$s.summary}}
 $report=[ordered]@{status=$status;map=$Map;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;
  baseline=(PublicSnapshot $old);candidate=(PublicSnapshot $new);matched=$match;
  sameInput=($old.sha256-ceq$new.sha256);
