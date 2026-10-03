@@ -19,6 +19,13 @@ struct RotorLandAppearance
 };
 inline constexpr float RotorLandMaxRadius = 3.1f;
 inline constexpr float RotorLandMaxTravel = 3.5f;
+inline std::array<float,3> RotorLandTint(bool snow)
+{
+    // The stock AI88 sheet has white RGB: the authored tint supplies all earth
+    // colour. Keep warm mineral dust, slightly darkened against sunlit sand.
+    // This is albedo only; Draw retains ordinary weather/eye light and alpha.
+    return snow ? std::array<float,3>{.90f,.94f,.98f} : std::array<float,3>{.46f,.40f,.30f};
+}
 // The square billboard fits inside sqrt(2)*radius. Reserve its entire future
 // extent and the bounded outward travel before publishing a puff.
 inline constexpr float RotorLandProofRadius = 1.414214f * RotorLandMaxRadius + RotorLandMaxTravel;

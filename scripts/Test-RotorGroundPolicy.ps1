@@ -17,7 +17,7 @@ foreach ($proof in @('RotorLandPuff::MaxLive','RotorGroundRing(_landRotorPhase',
     'RotorLandProfile(_age, _density, _snow)','RotorLandCullScale(_radius, _shapeSphere)',
     'EvaluateRotorWash(wash, origin)','GAirflow.Sample(Position())','puff->SetSmokeShadow(false)',
     'EmitLandRotorRing(deltaT, prec)','GSnow().ErodeRotor',
-    'POSEIDON_ROTOR_LAND_DRAW_TRACE','landDrawReceipt.Record(RotorLandDrawOutcome::DecalCall',
+    'POSEIDON_ROTOR_LAND_DRAW_TRACE','landDrawReceipt.Record(RotorLandDrawOutcome::DecalCall','RotorLandTint(emission.snow)',
     'scope=all-land-puffs-cpu-drawdecal-call-not-gpu-pixels')) {
     if (!$cpp.Contains($proof)) {throw "Rotor actual emission/support proof missing: $proof"}
 }

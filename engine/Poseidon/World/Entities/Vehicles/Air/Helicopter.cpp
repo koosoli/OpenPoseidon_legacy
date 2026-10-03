@@ -677,7 +677,8 @@ void Helicopter::EmitLandRotorRing(float dt, SimulationImportance prec)
         puff->SetFades(0.12f, 0.65f);
         puff->SetGrowUp(0.25f, 1.0f); // private profile supplies actual metre radius
         puff->SetAlpha(.2f);
-        puff->SetColor(emission.snow ? Color(0.90f, 0.94f, 0.98f) : Color(0.62f, 0.53f, 0.39f));
+        const auto tint=RotorLandTint(emission.snow);
+        puff->SetColor(Color(tint[0],tint[1],tint[2]));
         puff->SetTemperature(0, 0, table); puff->SetShadeOrigin(Vector3(centre.X(),centreGround,centre.Z()), 1.9f);
         puff->SetSmokeShadow(false);
         GWorld->AddCloudlet(puff); ++emitted; snowPuffs += emission.snow ? 1u : 0u;

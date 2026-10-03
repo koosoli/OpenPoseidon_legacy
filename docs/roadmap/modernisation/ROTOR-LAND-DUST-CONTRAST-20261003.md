@@ -1,0 +1,19 @@
+# Admitted normal-hover dust contrast
+
+The root agent's installed `normal-hover-land-draw-opacity-20261003-150200-fb33ab` campaign completed all land/source/lifecycle gates including sea, with stable installed hashes and normal exit zero. Its snow foreground puff ring is readable. The dust capture remains visually rejected as barely visible over bright beige sand. Successful CPU draw calls do not accept the final image.
+
+## Actual draw and source evidence
+
+The paused dry view at physical clock 44.370 reports 253 and then 546 successful CPU Decal calls in successive wall windows, with no hidden/shape/near/mip/nonfinite rejections. Packed alpha spans 0.0549–0.1961; pixel half extents 22.27–50.69; physical ages 0.167–1.667 s; camera distances 43.72–65.06 m. The corresponding snow view at clock 52.411 reports 295 calls without those rejections, alpha 0.0235–0.1725 and half extents 17.69–45.61 pixels. Dust's captured submission is larger and more opaque than the readable snow. Raising opacity or removing source guards is not supported by this evidence. Earlier cockpit-following-camera windows have zero calls; those use a different actual frustum than the paused capture.
+
+Bounded read-only stock archive inspection finds `Dta/Data3D.pbo:cl_basic.p3d` (stored SHA256 `ddeb895adecf4ba602837d1b521601f98a194ac45700ed00cee4cb6a858b2758`) referencing `data/basic.06.paa`. `Dta/Data.pbo:basic.06.paa` has stored SHA256 `58f10b1140586764c836561381c0ee7bd44375ab3cf0984e785a0d986a454531`, 6,429 bytes and raw archive storage. The existing built PoseidonTools CPU image decoder identifies AI88, 64×64, six mips, partial-alpha blend. A decoded PNG check finds alpha mean 0.323965 and exactly white RGB for every nonclear texel (alpha-weighted RGB 1/1/1). This verifies the prior approximately .32 alpha estimate for the referenced base frame; it is not a mounted-resource receipt or proof of every animated frame.
+
+## Bounded material correction
+
+The private rotor dust albedo changes from `(0.62,0.53,0.39)` to `(0.46,0.40,0.30)`. Channel ratios are 0.742, 0.755, 0.769; luminance ratio using 0.2126/0.7152/0.0722 weights is approximately 0.748. This retains a warm neutral mineral tint with roughly 25% lower luminance instead of pushing particle opacity above its current cap. White sheet RGB means the dust albedo directly controls material contrast. The existing weather, generic cloudlet shading and eye light still multiply the albedo before packing; no emissive flag or brightness injection is added. Positive unchanged channel lighting therefore preserves the bounded channel darkening, although actual tone mapping, sheet blending and depth fade still require image judgement.
+
+Snow albedo remains `(0.90,0.94,0.98)`. Both media retain opacity curves/caps, radius, lifetime, actual physical density, airflow motion, emission/particle budgets, roof/terrain/wet/high/engine-off gates, stock texture and all existing water paths. The helper is private land-puff appearance policy and does not alter global dust, smoke or terrain materials.
+
+Focused tests verify finite bounded earth channels, moderate per-channel/luminance darkening, warm channel ordering, and monotonic finite lit colour across zero/dim/day/bright positive lighting. Zero lighting remains zero, and existing physical/source/fade/draw-receipt tests remain. Root owns the installed repeated normal-hover image test; dust quality and any night appearance are pending that review. Source receipts and CPU checks alone are not visual acceptance.
+
+Validation: the single focused `Test-RotorGroundPolicy.ps1` native Clang check passed; the installed runner's `-SelfTest -DrawTrace -ManualPilot -SandX 2475 -SandZ 5075 -SeaX 1750 -SeaZ 3100` check passed without a game. Diff whitespace checks passed. Full-build and repeated installed image acceptance remain with the root agent.

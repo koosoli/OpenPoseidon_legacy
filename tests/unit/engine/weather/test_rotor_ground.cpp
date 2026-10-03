@@ -140,6 +140,31 @@ int main()
             assert(low.radius==grown.radius);
         }
     }
+    const auto earth=RotorLandTint(false),flakes=RotorLandTint(true);
+    constexpr std::array<float,3> priorEarth{.62f,.53f,.39f};
+    for(unsigned i=0;i<3;++i) {
+        assert(std::isfinite(earth[i]) && earth[i]>0 && earth[i]<1);
+        // Bounded material correction after an actual admitted-dust capture:
+        // no channel turns into black ash or bright unlit material.
+        assert(earth[i]/priorEarth[i]>.70f && earth[i]/priorEarth[i]<.80f);
+        assert(flakes[i]>=.90f && flakes[i]<1);
+    }
+    assert(earth[0]>earth[1] && earth[1]>earth[2]);
+    const float oldY=.2126f*priorEarth[0]+.7152f*priorEarth[1]+.0722f*priorEarth[2];
+    const float newY=.2126f*earth[0]+.7152f*earth[1]+.0722f*earth[2];
+    assert(newY/oldY>.70f && newY/oldY<.80f);
+    float previousLitY=0;
+    for(const float light : {0.f,.01f,.25f,1.f,4.f}) {
+        const float litY=newY*light;
+        assert(std::isfinite(litY) && litY>=previousLitY);
+        previousLitY=litY;
+        for(unsigned i=0;i<3;++i) {
+            const float lit=earth[i]*light,prior=priorEarth[i]*light;
+            assert(std::isfinite(lit) && lit>=0 && lit<=prior);
+            if(light==0)assert(lit==0); // albedo cannot create an unlit glow
+            else assert(lit/prior>.70f && lit/prior<.80f);
+        }
+    }
     RotorLandDrawReceipt receipt;
     assert(receipt.Calls()==0);
     for(auto outcome : {RotorLandDrawOutcome::Hidden,RotorLandDrawOutcome::Shape,RotorLandDrawOutcome::Near,RotorLandDrawOutcome::Mip})
