@@ -21,11 +21,25 @@ function Key([string]$v){return $v.Replace('\','/').ToLowerInvariant()}
 function Contact-Poses([double]$x,[double]$z,[double]$height){
  return @(@{name='low';pose=@(($x-2),$z,($height+.6),90,-16.699244)},@{name='top';pose=@(($x+.2),$z,($height+8),270,-88.567904)})
 }
-function Uniform-View($position){
+function Uniform-HeadingDifference([double]$actual,[double]$anchor){
+ $null=Number $actual;$null=Number $anchor
+ Require ($actual -ge 0 -and $actual -le 360 -and $anchor -ge 0 -and $anchor -le 360) 'Actual comparison heading outside compass range.'
+ $delta=[Math]::Abs($actual-$anchor)
+ return [Math]::Min($delta,360-$delta)
+}
+function Assert-UniformHeading([double]$actual,[double]$anchor){
+ Require ((Uniform-HeadingDifference $actual $anchor) -lt .01) 'Actual anchored stock comparison heading changed.'
+}
+function Uniform-View($position,[double]$heading){
  Require (@($position).Count -eq 3) 'Uniform ASL position needs three coordinates.'
  $x=Number $position[0];$z=Number $position[1];$y=Number $position[2]
- # Low front-quarter view of the real standing actor facing east. Raw engine X,Y,Z.
- return @(($x+2.5),($y+.9),($z-1.5),-2.5,.35,1.5)
+ $null=Uniform-HeadingDifference $heading $heading
+ # getDir is atan2(Direction.X,Direction.Z): forward=(sin,cos),
+ # right=(cos,-sin). Use the settled dry heading, not an earlier setDir request.
+ # A low front-quarter camera lies 2.5m forward and 1.5m right, raw X,Y,Z.
+ $angle=$heading*[Math]::PI/180;$sin=[Math]::Sin($angle);$cos=[Math]::Cos($angle)
+ $dx=2.5*$sin+1.5*$cos;$dz=2.5*$cos-1.5*$sin
+ return @(($x+$dx),($y+.9),($z+$dz),(-$dx),.35,(-$dz))
 }
 function Assert-UniformSun([double]$hour,[double]$factor,[bool]$night){
  $null=Number $hour;$null=Number $factor
@@ -87,8 +101,18 @@ function Pair{
 }
 function Same-Pair($a,$b){Require (($a|ConvertTo-Json -Depth 8 -Compress)-ceq ($b|ConvertTo-Json -Depth 8 -Compress)) 'Installed source pair changed.'}
 function Test-Helpers{
- $view=Uniform-View @(10,20,30)
+ $view=Uniform-View @(10,20,30) 90
  Require ($view.Count -eq 6 -and $view[0] -eq 12.5 -and $view[1] -eq 30.9 -and $view[2] -eq 18.5) 'Uniform camera reordered SQF ASL coordinates.'
+ foreach($heading in @(0,52.0466,90,180,270,359.995)){
+  $v=Uniform-View @(10,20,30) $heading;$angle=$heading*[Math]::PI/180;$sin=[Math]::Sin($angle);$cos=[Math]::Cos($angle)
+  $dx=$v[0]-10;$dz=$v[2]-20
+  Require ([Math]::Abs($dx*$sin+$dz*$cos-2.5) -lt .0000001 -and [Math]::Abs($dx*$cos-$dz*$sin-1.5) -lt .0000001) 'Camera does not follow actual actor front-quarter heading.'
+  Require ([Math]::Abs($v[0]+$v[3]-10) -lt .0000001 -and [Math]::Abs($v[2]+$v[5]-20) -lt .0000001 -and [Math]::Abs($v[1]+$v[4]-31.25) -lt .0000001) 'Heading-derived raw camera does not aim at the same stock body anchor.'
+ }
+ Assert-UniformHeading 52.0466 52.0466;Assert-UniformHeading 359.999 0
+ foreach($pair in @(@(52.0466,90),@(52.0466,53),@([double]::NaN,90),@(361,1))){
+  $failed=$false;try{Assert-UniformHeading $pair[0] $pair[1]}catch{$failed=$true};Require $failed 'Changed/nonfinite/out-of-range anchored heading accepted.'
+ }
  Assert-UniformSun 16 1 $false;Assert-UniformSun 0 0 $true
  foreach($v in @(@(16,1,$true),@(0,0,$false),@(0,.5,$true),@(16,[double]::NaN,$false))){$failed=$false;try{Assert-UniformSun $v[0] $v[1] $v[2]}catch{$failed=$true};Require $failed 'Incorrect actual day/night lighting accepted.'}
  Require ((Lamp-Live @('LAMP-001: 5 lamp simulations since start, 2 of them switched on, 1 lamp lights live in the scene')) -eq 1) 'Actual lamp scene-count parser failed.'
@@ -258,14 +282,18 @@ function Contact-Views($record,[string]$kind){
 function Uniform-Lighting([string]$band){
  $original=State
  Require ((Eval 'typeOf player') -ceq 'SoldierWB' -and (Eval 'alive player') -eq $true) 'Uniform fixture lost the actual stock soldier.'
- if($band -eq 'dry'){Require ($original.uniform -lt .001) 'Dry uniform comparison is already wet.';$arm.uniformViewAnchor=@($original.position)}
+ $direction=Number (Eval 'getDir player')
+ if($band -eq 'dry'){
+  Require ($original.uniform -lt .001) 'Dry uniform comparison is already wet.'
+  $arm.uniformViewAnchor=@($original.position);$arm.uniformViewDirection=$direction
+ }
  else{Require ($original.uniform -ge .3) 'Wet uniform comparison lacks actual rain history.'}
- $anchor=@($arm.uniformViewAnchor);$view=Uniform-View $anchor
+ Assert-UniformHeading $direction $arm.uniformViewDirection
+ $anchor=@($arm.uniformViewAnchor);$view=Uniform-View $anchor $arm.uniformViewDirection
  for($i=0;$i -lt 3;++$i){Require ([Math]::Abs((Number $original.position[$i])-(Number $anchor[$i])) -le .01) 'Dry/wet actor left the same standing comparison position.'}
- $direction=Number (Eval 'getDir player');Require ([Math]::Abs($direction-90) -lt .01) 'Stock comparison standing direction changed.'
  $actor=Eval 'str player';$body=Assert-Body (Lines) ($original.time-.65)
  if($band -eq 'dry'){$arm.uniformActorDebug=$actor}else{Require ($actor -ceq $arm.uniformActorDebug) 'Dry/wet actual actor differs.'}
- $record=@{before=$original;actor=@{class=(Eval 'typeOf player');debugName=$actor;model='data3d\mc vojakw2.p3d';modelSource=$body;position=$original.position;direction=$direction};camera=@{rawEngineView=$view;command='triSetView';effectActive=(Eval 'triGetCameraEffectActive')};views=@{};scope='Same stock standing actor and render-only camera, matching actual overcast. Rain differs between natural wetting histories. Ordinary idle animation may differ; no pose/bone equivalence or pixelwise equality claim.'}
+ $record=@{before=$original;actor=@{class=(Eval 'typeOf player');debugName=$actor;model='data3d\mc vojakw2.p3d';modelSource=$body;position=$original.position;direction=$direction;anchoredDryDirection=$arm.uniformViewDirection;initialPlacementDirectionRequest=90};camera=@{rawEngineView=$view;derivedFromSettledDryDirection=$arm.uniformViewDirection;command='triSetView';effectActive=(Eval 'triGetCameraEffectActive')};views=@{};scope='Same stock standing actor, anchored actual settled dry heading and render-only camera, matching actual overcast. Rain differs between natural wetting histories. Ordinary idle animation may differ; no pose/bone equivalence or pixelwise equality claim.'}
  $lampOwned=$false;$roofOwned=$false
  try{
   # World::SetWeather applies zero-duration overcast immediately. Unlike rain,
@@ -287,12 +315,14 @@ function Uniform-Lighting([string]$band){
   $snapshot={param([string]$name,[bool]$night,[string]$lampState)
    $hour=Number (Eval 'dayTime');$sun=Number (Eval 'triGetShadowSunFactor');Assert-UniformSun $hour $sun $night
    $stateBefore=State;Assert-Paused $baseline $stateBefore
+   $headingBefore=Number (Eval 'getDir player');Assert-UniformHeading $headingBefore $arm.uniformViewDirection
    Require ((Eval 'typeOf uniformStockLamp') -ceq 'StreetLampWood') 'Actual lamp identity disappeared before capture.'
    $lampNow=Eval 'getPosASL uniformStockLamp';for($i=0;$i -lt 3;++$i){Require ([Math]::Abs((Number $lampNow[$i])-$lampPosition[$i]) -le .01) 'Actual lamp moved between lighting captures.'}
    Require ((Number (Eval 'triGetCameraEffectActive')) -eq 0) 'Paused render-only camera became a gameplay camera.'
    Capture ('uniform-'+$band+'-'+$name);$stateAfter=State;Assert-Paused $stateBefore $stateAfter
+   $headingAfter=Number (Eval 'getDir player');Assert-UniformHeading $headingAfter $headingBefore;Assert-UniformHeading $headingAfter $arm.uniformViewDirection
    Require ((Number (Eval 'dayTime')) -eq $hour -and (Number (Eval 'triGetShadowSunFactor')) -eq $sun) 'Actual lighting changed during paused capture.'
-   $record.views[$name]=@{before=$stateBefore;after=$stateAfter;hour=$hour;shadowSunFactor=$sun;lampStateCommand=$lampState;lampLive=(Lamp-Live (Lines));lampSourceRows=@(Lines|Where-Object{$_ -match 'LAMP-001:|LAMP-003 type StreetLampWood:'}|Select-Object -Last 3);lampClass=(Eval 'typeOf uniformStockLamp');lampPosition=$lampNow;cameraEffectActive=(Eval 'triGetCameraEffectActive');body=(Assert-Body (Lines) ($baseline.time-.65))}
+   $record.views[$name]=@{before=$stateBefore;after=$stateAfter;headingBefore=$headingBefore;headingAfter=$headingAfter;hour=$hour;shadowSunFactor=$sun;lampStateCommand=$lampState;lampLive=(Lamp-Live (Lines));lampSourceRows=@(Lines|Where-Object{$_ -match 'LAMP-001:|LAMP-003 type StreetLampWood:'}|Select-Object -Last 3);lampClass=(Eval 'typeOf uniformStockLamp');lampPosition=$lampNow;cameraEffectActive=(Eval 'triGetCameraEffectActive');body=(Assert-Body (Lines) ($baseline.time-.65))}
   }
   & $snapshot 'day-close' $false 'OFF'
   Exec 'setDate [1985,6,21,0,0];uniformStockLamp switchLight "OFF"';Start-Sleep -Milliseconds 500
@@ -321,7 +351,7 @@ function Uniform-Lighting([string]$band){
  }
  Start-Sleep -Milliseconds 500;$record.after=State;Assert-Paused $original $record.after
  Require ([Math]::Abs((Number $record.after.weather.overcast)-(Number $original.weather.overcast)) -lt .001) 'Original cloud lighting was not restored.'
- Require ([Math]::Abs((Number (Eval 'getDir player'))-$direction) -lt .01) 'Comparison changed actual standing direction.'
+ Assert-UniformHeading (Number (Eval 'getDir player')) $direction
  return $record
 }
 try{
