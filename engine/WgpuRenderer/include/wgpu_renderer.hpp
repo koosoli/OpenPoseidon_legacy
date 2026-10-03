@@ -1067,7 +1067,7 @@ struct WgrTerrainParams
     float snowline_depth;
     float _pad1; // Cosmetic accumulated rain [0,1] at offset 72 (WGSL rain_wetness); old name preserves initialisers.
     float _pad2; // Effective LIQUID rain [0,1], offset 76 (WGSL rain_strength); same byte layout.
-    float _pad3;
+    float _pad3; // Opt-in wet-soil colour diagnostic enum0..4 at offset80; default0, size unchanged.
     float _pad4;
 };
 
@@ -2328,6 +2328,7 @@ static_assert(sizeof(WgrCmd) == 8, "WgrCmd layout must match the Rust #[repr(C)]
 static_assert(sizeof(WgrOverlayVertex) == 20, "WgrOverlayVertex layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrOverlayDraw) == 40, "WgrOverlayDraw layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTerrainParams) == 88, "WgrTerrainParams layout must match the Rust #[repr(C)] struct");
+static_assert(offsetof(WgrTerrainParams, _pad3) == 80, "Wet-soil diagnostic reuses exact terrain padding offset");
 static_assert(sizeof(WgrTerrainNode) == 24, "WgrTerrainNode layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTerrainBatch) == 16, "WgrTerrainBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrGrassBatch) == 16, "WgrGrassBatch layout must match the Rust #[repr(C)] struct");

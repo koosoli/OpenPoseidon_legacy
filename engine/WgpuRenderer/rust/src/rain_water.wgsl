@@ -3,6 +3,7 @@
 #import conform::{bare_surface_y, bare_surface_valid}
 #import ground_puddles::ground_puddle_rain_factor
 #import rain_water_reflections::rain_water_scene_reflection
+#import frame::wet_soil_debug_mode
 #import rain_water_body::rain_water_body_radiance
 #import rain_water_optics::{rain_water_surface_optics, rain_water_standing_fraction, rain_water_impact_normal, rain_water_sun_specular}
 
@@ -221,5 +222,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
     }
     if (frame.params.fog_enabled >= 1.5) { rgb = apply_fog(rgb,in.world-frame.cam_pos.xyz); }
     else { rgb = mix(frame.fog_color.rgb,rgb,fog_factor(length(in.world-frame.cam_pos.xyz))); }
+    // Actual surviving overlay only: retain all source/depth/shelter/snow,
+    // front-face and alpha calculations. No witness replaces a discarded body.
+    if (wet_soil_debug_mode() > 0u) { return vec4<f32>(1.0, 0.0, 1.0, optics.a); }
     return vec4<f32>(rgb,optics.a);
 }

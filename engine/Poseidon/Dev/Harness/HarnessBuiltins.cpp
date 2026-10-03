@@ -1539,6 +1539,42 @@ void RegisterScreenshot(HarnessServer& hs)
             }
             return HarnessProtocol::JsonResponse(result);
         });
+    hs.RegisterCommand({"dev_wet_soil_diagnostic", "Owner-only opt-in actual wet-soil fragment colour modes; no source/history writes", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if (!Foundation::IsMainThread() || !GEngine || !GLandscape || !GScene || !GScene->GetCamera())
+                return HarnessProtocol::ErrorResponse("wet-soil diagnostic needs actual world and main-thread renderer owner");
+            const char* action = HarnessProtocol::GetString(root, "action");
+            const auto* value = cJSON_GetObjectItemCaseSensitive(root, "mode");
+            int mode = -1;
+            if (action && std::strcmp(action, "set") == 0) {
+                if (!cJSON_IsNumber(value) || !std::isfinite(value->valuedouble) ||
+                    value->valuedouble < 0 || value->valuedouble > 4 ||
+                    std::floor(value->valuedouble) != value->valuedouble)
+                    return HarnessProtocol::ErrorResponse("wet-soil diagnostic mode must be an integer 0..4");
+                mode = int(value->valuedouble);
+            } else if (!action || std::strcmp(action, "state") != 0 || value) {
+                return HarnessProtocol::ErrorResponse("wet-soil diagnostic action is state without mode, or set integer 0..4");
+            }
+            const int current = GEngine->ControlWetSoilDiagnostic(mode);
+            if (current < 0) return HarnessProtocol::ErrorResponse("wet-soil diagnostic unavailable: needs owner, wgpu HDR and exact WGR_WET_SOIL_DIAGNOSTIC=1");
+            auto* out = cJSON_CreateObject();
+            cJSON_AddNumberToObject(out, "mode", current);
+            const auto* camera = GScene->GetCamera();
+            auto* pose = cJSON_CreateObject();
+            const auto vector = [&](const char* name, const Vector3& v) {
+                auto* values = cJSON_CreateArray();
+                cJSON_AddItemToArray(values, cJSON_CreateNumber(v.X()));
+                cJSON_AddItemToArray(values, cJSON_CreateNumber(v.Y()));
+                cJSON_AddItemToArray(values, cJSON_CreateNumber(v.Z()));
+                cJSON_AddItemToObject(pose, name, values);
+            };
+            vector("position", camera->Position());
+            vector("direction", camera->Direction());
+            vector("up", camera->DirectionUp());
+            cJSON_AddItemToObject(out, "camera", pose);
+            cJSON_AddStringToObject(out, "scope", "Producer enum queued in existing terrain padding. Colour modes expose actual fragment inputs with actual surviving water overlay and alpha; no forced material/wetness/shelter, GPU completion or numeric screenshot-channel proof.");
+            return HarnessProtocol::JsonResponse(out);
+        });
     hs.RegisterCommand({"weather_visibility", "Read-only weather, terrain and object draw ranges", {}},
         [](const std::string&, cJSON*) -> std::string {
             if (!GScene || !GLandscape) return HarnessProtocol::ErrorResponse("no world");

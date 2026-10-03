@@ -10,6 +10,7 @@
 #import frame::{frame, reverse_z, fog_factor, apply_fog, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_rain_coverage, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
 #import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
 #import frame::ground_sky_reflection
+#import frame::wet_soil_debug_mode
 #import ground_wet::{cultivated_soil_fraction, soil_wet_amount, soil_wet_surface, soil_wet_fresnel, soil_wet_sun_specular}
 #import shadow::shadow_strength
 #import lighting::lights_contrib
@@ -1284,7 +1285,8 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // below and the terrain-shadow test further down (LOD/morph-independent).
     let world_y = sample_height(in.world_xz);
     let line_depth = snowline_depth(in.world_xz, world_y);
-    var soil_wet = soil_wet_amount(mud, tp.rain_wetness, snow_cover(in.world_xz, world_y));
+    let initial_soil_wet = soil_wet_amount(mud, tp.rain_wetness, snow_cover(in.world_xz, world_y));
+    var soil_wet = initial_soil_wet;
     var rain_puddle = 0.0;
     if (tp.rain_wetness > 0.0) {
         rain_puddle = ground_puddle_mask(in.world_xz, puddle_footprint, tp.rain_wetness)
@@ -1431,19 +1433,30 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // bare 4% dielectric reallocation — an invisible result for a per-pixel reflect() plus a
     // second SH evaluation on the single most fill-heavy surface in the frame.
     let local_sky_visibility = interior_sky_ao(in.world_pos + frame.cam_pos.xyz, n);
+    var diagnostic_rain = vec3<f32>(0.0);
+    let procedural_film = rain_puddle;
     if (rain_puddle > 0.0 || soil_wet > 0.0) {
         // Zenith geometry gates vertical rain independently of diffuse sky light
         // entering through windows or around a canopy. Only wet eligible puddle
         // pixels pay this one-layer query. Missing map coverage remains unproven.
         let rain_reach = interior_rain_reach(in.world_pos + frame.cam_pos.xyz);
         // Unknown physical coverage cannot prove an exposed ground surface.
-        let rain_proof = ground_puddle_rain_factor(rain_reach, interior_rain_coverage(in.world_pos + frame.cam_pos.xyz));
+        let rain_coverage = interior_rain_coverage(in.world_pos + frame.cam_pos.xyz);
+        let rain_proof = ground_puddle_rain_factor(rain_reach, rain_coverage);
+        diagnostic_rain = vec3<f32>(rain_coverage, rain_reach, rain_proof);
         rain_puddle *= rain_proof;
         soil_wet *= rain_proof;
     }
     // Proven wet soil absorbs through the authored substrate and uses the
     // rough moist-soil coat below. Keep the smooth film on the hard fraction.
     let wet_surface = soil_wet_surface(mud, soil_wet, rain_puddle);
+    // Render-only classification after actual source/snow/rain admission and
+    // film partition. Water overlay stays present and marks its own survivors.
+    let wet_debug = wet_soil_debug_mode();
+    if (wet_debug == 1u) { return vec4<f32>(mud, initial_soil_wet, tp.rain_wetness, 1.0); }
+    if (wet_debug == 2u) { return vec4<f32>(diagnostic_rain, 1.0); }
+    if (wet_debug == 3u) { return vec4<f32>(soil_wet, wet_surface.y, procedural_film, 1.0); }
+    if (wet_debug == 4u) { return vec4<f32>(0.08, 0.08, 0.08, 1.0); }
     rain_puddle = wet_surface.y;
     rgb *= wet_surface.x;
     sun_ambient *= sky_vis_ao(in.world_xz)

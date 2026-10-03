@@ -1165,7 +1165,7 @@ pub struct WgrTerrainParams {
     pub snowline_depth: f32,
     pub _pad1: f32, // Cosmetic rain wetness [0,1], offset 72; WGSL rain_wetness. Preserve old initialisers.
     pub _pad2: f32, // Effective liquid rain [0,1], offset 76; WGSL rain_strength.
-    pub _pad3: f32,
+    pub _pad3: f32, // Opt-in wet-soil diagnostic enum0..4 at offset80; default0, no layout change.
     pub _pad4: f32,
 }
 

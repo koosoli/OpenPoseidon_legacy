@@ -14,6 +14,7 @@ param(
  [switch]$UniformLightingViews,
  [switch]$TerrainWetnessTrace,
  [switch]$MudLightingViews,
+ [switch]$WetSoilFragmentViews,
  [switch]$SelfTest
 )
 $ErrorActionPreference='Stop';$root=Split-Path -Parent $PSScriptRoot
@@ -46,6 +47,18 @@ function Mud-LightingWetReady($state,$receipt){
   [Math]::Abs($row.accumulated-$row.queuedPad1) -le .00011
 }
 function Mud-LightingPlan{return @(@{name='overcast';overcast=1},@{name='clear';overcast=0})}
+function Wet-SoilModes{return @(
+ @{mode=1;name='source';rgb=@('source soil fraction','initial soil wet amount before shelter','queued terrain wetness')},
+ @{mode=2;name='rain';rgb=@('local coverage','local vertical reach','actual rain proof; zeros if production did not query')},
+ @{mode=3;name='coat';rgb=@('final admitted wet soil','remaining cosmetic film','procedural film before shelter/partition')},
+ @{mode=4;name='water';rgb=@('neutral terrain; magenta actual surviving retained water','actual water alpha preserved','postprocess prevents numeric channel decoding')})
+}
+function Assert-DiagnosticCamera($a,$b){
+ foreach($field in @('position','direction','up')){
+  Require (@($a.$field).Count -eq 3 -and @($b.$field).Count -eq 3) 'Actual diagnostic camera vectors absent.'
+  for($i=0;$i -lt 3;++$i){Require ((Number $a.$field[$i]) -eq (Number $b.$field[$i])) 'Actual diagnostic scene camera changed between modes.'}
+ }
+}
 function Quality-CloudPin([bool]$quality){if(!$quality){return '0'};return $null}
 function Assert-RendererClouds($weather,[double]$overcast){
  Require ($weather.rendererSkyAvailable -is [bool] -and $weather.rendererSkyAvailable) 'Actual producer sky settings are unavailable.'
@@ -175,6 +188,9 @@ function Pair{
 }
 function Same-Pair($a,$b){Require (($a|ConvertTo-Json -Depth 8 -Compress)-ceq ($b|ConvertTo-Json -Depth 8 -Compress)) 'Installed source pair changed.'}
 function Test-Helpers{
+ $modes=@(Wet-SoilModes);Require (($modes.mode -join ',') -ceq '1,2,3,4' -and $modes.Count -eq 4) 'Bounded actual fragment diagnostic recipe changed.'
+ $cam=@{position=@(1,2,3);direction=@(1,0,0);up=@(0,1,0)};Assert-DiagnosticCamera $cam $cam
+ $other=$cam|ConvertTo-Json|ConvertFrom-Json;$other.position[0]=4;$failed=$false;try{Assert-DiagnosticCamera $cam $other}catch{$failed=$true};Require $failed 'Moved actual diagnostic camera accepted.'
  Require ((Quality-CloudPin $false) -ceq '0' -and $null -eq (Quality-CloudPin $true)) 'Default/quality rendered cloud override policy changed.'
  $cloud=@{overcast=1;rendererSkyAvailable=$true;rendererSky=@{enabled=$true;skyLighting=$true;coverageFromWeather=$true;coveragePinned=$false;coverage=.95;clearCoverage=.05;fullCoverage=.95}}
  Assert-RendererClouds $cloud 1
@@ -261,6 +277,7 @@ function Test-Helpers{
  Write-Host 'Original-map tuple/manual-contact/cloth falsifiers PASS. No game/GPU/profile used.'
 }
 if($SelfTest){Test-Helpers;return}
+if($WetSoilFragmentViews){$MudLightingViews=[switch]$true}
 Require ([bool]$ExpectedCommit) 'Supply -ExpectedCommit.';Require ([bool]$env:LOCK_OWNER) 'Use scripts/with-game-lock.sh.'
 Require ($Maps.Count-eq @($Maps|Select-Object -Unique).Count) 'Duplicate map arms would overwrite evidence.'
 Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue)) 'Preserve foreign game ownership.'
@@ -274,15 +291,18 @@ $result.sandSnapshotTrace=[bool]$SandSnapshotTrace
 $result.uniformLightingViews=[bool]$UniformLightingViews
 $result.terrainWetnessTrace=[bool]$TerrainWetnessTrace;$result.minimumMudWetness=$MinimumMudWetness
 $result.mudLightingViews=[bool]$MudLightingViews
+$result.wetSoilFragmentViews=[bool]$WetSoilFragmentViews
 $qualityLighting=[bool]($UniformLightingViews -or $MudLightingViews)
 $result.renderedCloudRecipe=@{qualityLighting=$qualityLighting;inheritedCoveragePin=[Environment]::GetEnvironmentVariable('WGR_CLOUD_COVERAGE','Process');appliedCoveragePin=(Quality-CloudPin $qualityLighting);scope='Quality views clear the coverage pin so ordinary renderer weather-drive settings can apply. Simulation overcast alone is not proof of rendered cloud coverage, GPU acceptance or image lighting.'}
 if($UniformLightingViews){. (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1');$result.helperSha256['TerrainPuddleStockRoof.ps1']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1')).Hash}
 if($SandSnapshotTrace){$result.helperSha256['Read-SandUploadSnapshot.ps1']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Read-SandUploadSnapshot.ps1')).Hash}
 $settings=@{POSEIDON_PLAYER_GROUND_TRACE='1';POSEIDON_UNIFORM_WET_TRACE='1';POSEIDON_SAND_TRACE='1';POSEIDON_MUD_TRACE='1';WGR_UNIFORM_WET='1';WGR_GRASS='0';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_CLOUD_COVERAGE='0';WGR_TERRAIN_JITTER='0';WGR_TEMPORAL='0';WGR_LOD_GOVERNOR_RANGE='1';POSEIDON_SNOWLINE='off';POSEIDON_SNOW_TEST_DEPTH='0'}
 if($qualityLighting){$settings.Remove('WGR_CLOUD_COVERAGE')}
+if($WetSoilFragmentViews){$settings.WGR_WET_SOIL_DIAGNOSTIC='1'}
 if($TerrainWetnessTrace -or $MudLightingViews){$settings.WGR_TERRAIN_PUDDLE_FIXTURE='1';$result.terrainPuddlesInheritedControl=[Environment]::GetEnvironmentVariable('WGR_TERRAIN_PUDDLES','Process')}
 $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE','WGR_SAND_UPLOAD_TRACE','WGR_SAND_SNAPSHOT_FILE','WGR_SAND_SNAPSHOT_ROOT','WGR_CLOUD_COVERAGE')
 if($UniformLightingViews){$clear+=@('POSEIDON_HEADLAMP','POSEIDON_LAMP_LIGHTS','POSEIDON_LAMP_RADIUS_SCALE','POSEIDON_LAMP_BRIGHTNESS_SCALE','POSEIDON_LAMP_COLOR','POSEIDON_LAMP_AMBIENT_SCALE','POSEIDON_LAMP_CONE','POSEIDON_LAMP_SPILL','POSEIDON_LAMP_SPILL_RADIUS','POSEIDON_LAMP_SPILL_AMBIENT')}
+$clear+=@('WGR_WET_SOIL_DIAGNOSTIC')
 $keys=@($settings.Keys)+$clear+@('POSEIDON_USER_DIR');$saved=@{};foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $p=$null;$client=$null;$reader=$null;$writer=$null;$held=$false;$armDir=$null;$log=$null;$deadline=$null
 function Lines{
@@ -434,6 +454,40 @@ function Terrain-MudCentreViews($site){
  }
  return @{sample=$sample;terrainWetness=(Terrain-WetnessReceipt (State));scope='Actual admitted mud source centre and physical height, paused low/top images. Centre may be untouched; walked contact views identify actual compressed cells separately.'}
 }
+function Wet-SoilFragmentViews($baseline,$sample,$site,[double]$overcast,[string]$name){
+ $initial=Send @{cmd='dev_wet_soil_diagnostic';action='state'};Require ($initial.mode -eq 0) 'Actual diagnostic did not begin in normal mode.'
+ $record=@{initial=$initial;views=@{};legend=(Wet-SoilModes);scope='Actual fragment-derived colour channels after production admission; retained water stays drawn and marks actual survivors magenta with its original alpha. Tone mapping/postprocess preclude numeric pixel decoding; overlay can obscure terrain channels. Mode readback is producer queue state, not GPU completion.'}
+ $record.refusedModes=@()
+ foreach($invalid in @(-1,.5,5)){
+  $refused=$false;try{$null=Send @{cmd='dev_wet_soil_diagnostic';action='set';mode=$invalid}}catch{$refused=$true};Require $refused 'Invalid actual diagnostic enum was accepted.'
+  Health;$unchanged=Send @{cmd='dev_wet_soil_diagnostic';action='state'};Require ($unchanged.mode -eq 0) 'Refused enum mutated producer mode.';Assert-DiagnosticCamera $initial.camera $unchanged.camera
+  $record.refusedModes+=@{requested=$invalid;after=$unchanged}
+ }
+ try{
+  foreach($mode in (Wet-SoilModes)){
+   $request=Send @{cmd='dev_wet_soil_diagnostic';action='set';mode=$mode.mode};Require ($request.mode -eq $mode.mode) 'Diagnostic producer request refused.'
+   Assert-DiagnosticCamera $initial.camera $request.camera
+   $before=State;Assert-Paused $baseline $before;Assert-MudSun $before.weather (Number (Eval 'dayTime')) $overcast;Assert-RendererClouds $before.weather $overcast
+   Capture ('mud-fragment-'+$name+'-'+$mode.name)
+   $actualMode=Send @{cmd='dev_wet_soil_diagnostic';action='state'};Require ($actualMode.mode -eq $mode.mode) 'Diagnostic producer enum changed during capture.'
+   Assert-DiagnosticCamera $initial.camera $actualMode.camera
+   $after=State;Assert-Paused $before $after;Assert-MudSun $after.weather (Number (Eval 'dayTime')) $overcast;Assert-RendererClouds $after.weather $overcast
+   Assert-CloudRecipe (Renderer-CloudRecipe $baseline.weather) (Renderer-CloudRecipe $after.weather)
+   $source=Field 'mud' $sample;Assert-Tuple $source $site $map 'mud'
+   foreach($field in @('offset','surfaceY','surfaceDx','surfaceDz')){Require ($source.$field -eq $sample.$field) 'Diagnostic colour mode changed actual source relief.'}
+   $record.views[$mode.name]=@{requested=$request;readback=$actualMode;before=$before;after=$after;actualSourceSample=$source;body=(Assert-Body (Lines) ($baseline.time-.65));terrainWetness=(Terrain-WetnessReceipt $after)}
+  }
+ }finally{
+  $reset=Send @{cmd='dev_wet_soil_diagnostic';action='set';mode=0};Require ($reset.mode -eq 0) 'Diagnostic normal mode did not reset.'
+ }
+ Capture ('mud-fragment-'+$name+'-normal-return')
+ $record.after=State;Assert-Paused $baseline $record.after;$record.reset=Send @{cmd='dev_wet_soil_diagnostic';action='state'}
+ Require ($record.reset.mode -eq 0) 'Diagnostic normal return enum changed.';Assert-DiagnosticCamera $initial.camera $record.reset.camera
+ Assert-MudSun $record.after.weather (Number (Eval 'dayTime')) $overcast;Assert-RendererClouds $record.after.weather $overcast
+ $returned=Field 'mud' $sample;Assert-Tuple $returned $site $map 'mud'
+ foreach($field in @('offset','surfaceY','surfaceDx','surfaceDz')){Require ($returned.$field -eq $sample.$field) 'Diagnostic normal return changed retained source relief.'}
+ return $record
+}
 function Mud-Lighting($walkRecord,$site){
  Require ($walkRecord.samples.Count -gt 0) 'No actual walked mud contact for lighting comparison.'
  $walked=$walkRecord.samples|Sort-Object offset|Select-Object -First 1
@@ -469,6 +523,7 @@ function Mud-Lighting($walkRecord,$site){
      $terrainAfter=Terrain-WetnessReceipt $afterView
      Require ($terrainAfter.lastQueuedRow.line -ceq $terrainBefore.lastQueuedRow.line) 'Paused terrain diagnostic advanced unexpectedly.'
      $record.views[$name]=@{before=$beforeView;after=$afterView;hour=$hour;pose=$view.pose;actualSourceSample=$actual;terrainBefore=$terrainBefore;terrainAfter=$terrainAfter}
+     if($WetSoilFragmentViews -and $view.name -eq 'low'){$record.views[$name].fragmentDiagnostic=Wet-SoilFragmentViews $afterView $sample $site $light.overcast $name}
     }
    }
   }

@@ -340,7 +340,7 @@ struct TerrainShadowMap {
     sky_vis_floor: f32,
     sky_vis_debug: f32,    // 1 = terrain outputs the raw sky-view factor as greyscale
     sky_vis_contrast: f32, // occ = 1 - pow(V, contrast); >1 deepens the AO for near-1 V
-    // naga_oil forbids composable identifiers ending in a digit (see `ctlb` above), so pad_c.
+    // Existing offset44 padding: opt-in wet-soil colour enum0..4, default0.
     pad_c: f32,
     // CLD-020: xy = the cloud transmittance map's snapped world-xz min corner, z = 1/span (m),
     // w = strength (0 = disabled -> fully lit).
@@ -349,6 +349,11 @@ struct TerrainShadowMap {
 @group(0) @binding(4) var terrain_shadow_mask: texture_2d<f32>;
 @group(0) @binding(5) var terrain_shadow_samp: sampler;
 @group(0) @binding(6) var<uniform> terrain_shadow_map: TerrainShadowMap;
+fn wet_soil_debug_mode() -> u32 {
+    let mode = terrain_shadow_map.pad_c;
+    if (!(mode >= 1.0 && mode <= 4.0 && floor(mode) == mode)) { return 0u; }
+    return u32(mode);
+}
 
 // Aerial-perspective froxel volume (filled by cs_froxel in sky.wgsl): XY = screen,
 // Z = distance with a squared distribution. rgb = in-scattered light toward the camera,

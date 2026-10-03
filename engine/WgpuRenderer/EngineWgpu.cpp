@@ -5152,8 +5152,25 @@ bool EngineWgpu::LastMemoryStats(WgrMemoryStats& out)
 
 void EngineWgpu::QueueTerrainParams(const WgrTerrainParams& p)
 {
+    _wetSoilLastTerrainParams = p;
+    _wetSoilHaveTerrainParams = true;
     _pendingSet.terrainParams = p;
+    _pendingSet.terrainParams._pad3 = _hdrEnabled ? float(_wetSoilDiagnosticMode) : 0.0f;
     _pendingSet.terrainParamsDirty = true;
+}
+int EngineWgpu::ControlWetSoilDiagnostic(int mode)
+{
+    if (!Foundation::IsMainThread() || !_renderer || !_hdrEnabled || !_wetSoilHaveTerrainParams) return -2;
+    const char* enabled = std::getenv("WGR_WET_SOIL_DIAGNOSTIC");
+    if (!enabled || std::strcmp(enabled, "1") != 0) return -2;
+    if (mode < -1 || mode > 4) return -3;
+    if (mode >= 0) {
+        _wetSoilDiagnosticMode = mode;
+        // Queues reset after publication. Requeue the complete last producer
+        // terrain input, not a padding-only zeroed record or an in-flight slot.
+        QueueTerrainParams(_wetSoilLastTerrainParams);
+    }
+    return _wetSoilDiagnosticMode;
 }
 
 void EngineWgpu::QueueWaterParams(const WgrWaterParams& p)

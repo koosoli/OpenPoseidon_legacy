@@ -296,6 +296,7 @@ class EngineWgpu : public EngineDummy
     // PushSkyRuntime (both called from NextFrame). See docs/procedural-sky-plan.md.
     bool SupportsSky() const override { return _renderer != nullptr; }
     SkySettings GetSkySettings() const override { return _sky; }
+    int ControlWetSoilDiagnostic(int mode = -1) override;
     void SetSkySettings(const SkySettings& s) override;
     // Second cloud layer (high cirrus at ~7 km): on/off and flat-vs-volumetric. Defined here
     // rather than folded into PushRenderParams because it is its own FFI entry point, not a lane
@@ -657,6 +658,9 @@ class EngineWgpu : public EngineDummy
     // Authored procedural-sky params (atmosphere + look); celestial fields are filled
     // per frame from LightSun in PushSkyRuntime.
     Engine::SkySettings _sky;
+    int _wetSoilDiagnosticMode = 0; // producer/main owner only; queued existing padding
+    WgrTerrainParams _wetSoilLastTerrainParams{}; // full producer copy, pending queues reset each frame
+    bool _wetSoilHaveTerrainParams = false;
     // Road / decal ground conform, pushed live from the dev panel (see SetRoadSettings).
     Engine::RoadSettings _road;
     // Smoothed celestial inputs: LightSun::Recalculate refreshes sun/moon direction,

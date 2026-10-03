@@ -3495,6 +3495,9 @@ class Engine : public IGraphicsEngine
     // Optional bounded weather proof for source-visible individual tree owners.
     // APPENDED to preserve existing vtable slots; other renderers do no work.
     virtual void PrepareVisibleTreeSnow(const Object* /*obj*/) {}
+    // Appended owner-only opt-in colour diagnostic. -1 queries, 0..4 sets;
+    // -2 unavailable/backend/owner, -3 invalid mode. No public renderer ABI grows.
+    virtual int ControlWetSoilDiagnostic(int /*mode*/ = -1) { return -2; }
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy

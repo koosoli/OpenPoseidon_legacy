@@ -10,6 +10,19 @@ mod skyvis;
 mod puddle_tests;
 
 pub use shore_wet::TwWetParams;
+fn wet_soil_debug_mode(mode: f32) -> f32 {
+    if mode.is_finite() && (0.0..=4.0).contains(&mode) && mode.fract() == 0.0 { mode }
+    else { 0.0 }
+}
+#[test]
+fn wet_soil_debug_padding_refuses_non_enum_values_and_resets_normal() {
+    assert_eq!(std::mem::size_of::<WgrTerrainParams>(),88);
+    assert_eq!(std::mem::offset_of!(WgrTerrainParams,_pad3),80);
+    assert_eq!(std::mem::size_of::<TerrainShadowMap>(),64);
+    assert_eq!(std::mem::offset_of!(TerrainShadowMap,_pad2),44);
+    for mode in [0.0,1.0,2.0,3.0,4.0] { assert_eq!(wet_soil_debug_mode(mode),mode); }
+    for mode in [-1.0,0.5,5.0,f32::NAN,f32::INFINITY] { assert_eq!(wet_soil_debug_mode(mode),0.0); }
+}
 
 fn terrain_resource_reuse() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -101,7 +114,8 @@ pub struct TerrainShadowMap {
     // Exaggeration exponent on the occlusion: occ = 1 - pow(V, contrast). 1 = physical/linear; >1
     // deepens the AO for the near-1 V that smooth heightfields produce (so it is actually visible).
     pub sky_vis_contrast: f32,
-    // Pad the struct to 48 bytes (a multiple of 16) for the uniform layout.
+    // Existing offset44 padding now carries opted-in wet-soil diagnostic mode.
+    // Main frame uploads this mapping even when terrain shadows are disabled.
     pub _pad2: f32,
     // CLD-020 cloud sun-transmittance mapping, riding this same shared group(0) uniform for the
     // same reason the sky-visibility controls do: terrain, objects and grass all need it and none
@@ -1402,7 +1416,7 @@ impl Terrain {
             sky_vis_floor: self.sky_vis_floor,
             sky_vis_debug: self.sky_vis_debug,
             sky_vis_contrast: self.sky_vis_contrast,
-            _pad2: 0.0,
+            _pad2: wet_soil_debug_mode(self.params._pad3),
             // Filled by the caller from the Sky pass, which owns the map and its snapping. The
             // terrain has no way to know where the cloud map was placed this frame.
             cloud_shadow: glam::Vec4::new(0.0, 0.0, 1.0, 0.0),
