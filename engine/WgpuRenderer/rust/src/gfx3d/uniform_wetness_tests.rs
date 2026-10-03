@@ -51,9 +51,10 @@ fn actual_wet_textile_helpers_validate_and_paths_keep_source_admission() {
     let shared = include_str!("../shaders/shading.wgsl");
     assert!(shared.contains("if (mat.wet_cloth > 0.0 && linear > 0.5)"));
     assert!(shared.contains("let cloth_n = surface_normal(geo_normal, world_pos, dwx, dwy);"));
-    assert!(shared.contains("* amb_ao * cavity * response.y"));
+    assert!(shared.contains("* frame.sun_ambient.w * amb_ao * cavity;"));
     assert!(shared.contains("* sun_vis;"));
-    assert!(shared.contains("rgb = rgb * (1.0 - response.x * response.y)"));
+    assert!(shared.contains("rgb = wet_textile_composite(rgb, coat_sky, coat_sun, coat_local.specular, response);"));
+    assert!(!shared.contains("coat_sky = sky_irradiance(reflect("));
 }
 
 #[test]
@@ -71,7 +72,8 @@ fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {{
     let back = wet_textile_sun_lobe(v.w, -1.0, r);
     // Unit white substrate under unit uniform sky: reflected share replaces
     // the matching underlying energy exactly, even at the grazing ceiling.
-    let white_sky = (1.0 - r.x * r.y) + r.x * r.y;
+    let white_sky = wet_textile_composite(vec3<f32>(1.0), vec3<f32>(1.0),
+        vec3<f32>(0.0), vec3<f32>(0.0), r).x;
     outputs[id.x * 2u + 1u] = vec4<f32>(lobe, back, white_sky, 1.0 - r.x * r.y);
 }}
 "#, textile_helpers());
@@ -125,14 +127,14 @@ fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {{
         assert!(response.iter().chain(light.iter()).all(|x| x.is_finite()));
         if v[0] <= 0.0 { assert_eq!(response, [0.0;4]); assert_eq!(light[0], 0.0); }
         else {
-            assert!((response[0] - v[0] * (2.0 - v[0])).abs() < 0.00001);
+            assert!((response[0] - 0.125 * v[0] * (2.0 - v[0])).abs() < 0.00001);
             assert!(response[1] >= 0.019999 && response[1] <= 0.120001);
             assert!(response[2] >= 8.0 && response[2] <= 16.0);
             assert!(response[3] > 0.0 && response[3] < 0.015);
         }
         assert_eq!(light[1], 0.0, "backlit cloth must not acquire direct wet sheen");
         assert!((light[2] - 1.0).abs() < 0.000001, "white uniform sky gained energy");
-        assert!(light[3] >= 0.879999 && light[3] <= 1.0);
+        assert!(light[3] >= 0.984999 && light[3] <= 1.0);
         assert!(light[0] >= 0.0 && light[0] < 0.015);
     }
     assert_eq!(actual[4][2], 16.0); assert_eq!(actual[8][2], 8.0);
@@ -151,6 +153,98 @@ fn actual_uniform_helper_preserves_material_tail_layout() {
     assert_eq!(tail.offset as usize,std::mem::offset_of!(super::MaterialUbo,local_specular));
     assert_eq!(tail.offset,112);
     assert_eq!(*span,128); // existing .w at byte124, no public ABI extension
+}
+
+#[test]
+fn production_wet_cloth_layer_preserves_real_camo_contrast_and_light_units_on_gpu() {
+    // Actual stock merged/00007mc_vojakw2.paa texels, decoded by PoseidonTools:
+    // member SHA256 70f0ac74e5c9904d3140ed4b5eed9c72c627c5b714e501d282b948ad447b328d.
+    // Light values below are explicit controls, not captured installed-frame coefficients.
+    let (device, queue) = super::cull::tests::headless().expect("cloth optics needs a real test device");
+    let prelude = probe_source().split("@group(0) @binding(0)").next().unwrap().to_owned();
+    let source = format!(r#"{prelude}
+{}
+struct ClothCase {{ albedo: vec4<f32>, uv_wet: vec4<f32>, sky: vec4<f32>, sun_local: vec4<f32>, angles: vec4<f32> }};
+@group(0) @binding(0) var<storage, read> cases: array<ClothCase>;
+@group(0) @binding(1) var<storage, read_write> results: array<vec4<f32>>;
+@compute @workgroup_size(1)
+fn cs_layer(@builtin(global_invocation_id) id: vec3<u32>) {{
+    let v = cases[id.x];
+    let wetness = uniform_cloth_wetness(v.uv_wet.z, v.uv_wet.xy, vec2<f32>(v.angles.w));
+    let response = wet_textile_response(wetness, v.angles.x, v.angles.w);
+    let wet_albedo = srgb_to_linear(uniform_cloth_color(v.albedo.rgb, v.uv_wet.z,
+        v.uv_wet.xy, vec2<f32>(v.angles.w)));
+    let light_cosine = clamp(v.angles.z, 0.0, 1.0);
+    let illumination = v.sky.rgb + v.sun_local.rgb * light_cosine + vec3<f32>(v.sun_local.w);
+    let substrate = wet_albedo * illumination;
+    let sun = v.sun_local.rgb * wet_textile_sun_lobe(v.angles.y, v.angles.z, response);
+    // Matches the existing local-light Blinn amplitude after attenuation/shadow:
+    // its positive-facing branch precedes this lobe; no new local occlusion model.
+    let local = vec3<f32>(select(0.0, v.sun_local.w * response.w
+        * pow(clamp(v.angles.y, 0.0, 1.0), response.z), v.angles.z > 0.0));
+    let wet = wet_textile_composite(substrate, v.sky.rgb, sun, local, response);
+    results[id.x * 3u] = vec4<f32>(srgb_to_linear(v.albedo.rgb) * illumination, 0.0);
+    results[id.x * 3u + 1u] = vec4<f32>(wet, wetness);
+    results[id.x * 3u + 2u] = response;
+}}
+"#, textile_helpers());
+    let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| panic!("{}",e.emit_to_string(&source)));
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(),naga::valid::Capabilities::empty()).validate(&module).unwrap();
+    let texels = [([8.0,16.0,33.0],[160.0/1024.0,128.0/1024.0]),
+        ([99.0,89.0,82.0],[800.0/1024.0,180.0/1024.0]),
+        ([49.0,36.0,33.0],[389.0/1024.0,102.0/1024.0]),
+        ([57.0,60.0,49.0],[620.0/1024.0,280.0/1024.0])];
+    let mut input: Vec<[[f32;4];5]> = texels.iter().map(|(rgb,uv)|[
+        [rgb[0]/255.0,rgb[1]/255.0,rgb[2]/255.0,1.0], [uv[0],uv[1],3.0,0.0],
+        [1.0,1.0,1.0,0.0], [0.0;4], [0.7,0.95,0.8,0.001]]).collect();
+    input.push(input[2]); input[4][1][2] = 2.38; // ordinary retained dampness
+    input.push(input[2]); input[5][1][2] = 2.0; // exact dry history
+    input.push(input[2]); input[6][1] = [0.28,0.28,3.0,0.0]; // west hand atlas
+    input.push(input[2]); input[7][1] = [0.90,0.65,3.0,0.0]; // boots
+    input.push(input[2]); input[8][1] = [0.10,0.80,3.0,0.0]; // baked far face/body
+    input.push(input[2]); input[9][2] = [0.0;4]; // pitch dark, no source
+    input.push(input[2]); input[10][2] = [0.0002,0.0002,0.0002,0.0]; // dim sky
+    input.push(input[2]); input[11][2] = [20.0,20.0,20.0,0.0]; // HDR linear scaling
+    input.push(input[2]); input[12][2] = [0.0;4]; input[12][3] = [1.0,0.8,0.6,0.0]; // real sun lobe
+    input.push(input[12]); input[13][4][2] = -1.0; // back-facing sun
+    input.push(input[2]); input[14][2] = [0.0;4]; input[14][3] = [0.0,0.0,0.0,1.0]; // local source
+    input.push(input[2]); input[15][0] = [0.0,0.0,0.0,1.0]; // neutral reflection cannot inherit dye
+    input.push(input[2]); input[16][4][0] = 0.0; input[16][4][3] = 0.08; // grazing/distant rough fibre
+    let shader=device.create_shader_module(wgpu::ShaderModuleDescriptor{label:Some("production wet cloth optical layer"),source:wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(module))});
+    let inputs=device.create_buffer_init(&wgpu::util::BufferInitDescriptor{label:None,contents:bytemuck::cast_slice(&input),usage:wgpu::BufferUsages::STORAGE});
+    let bytes=(input.len()*48) as u64;
+    let output=device.create_buffer(&wgpu::BufferDescriptor{label:None,size:bytes,mapped_at_creation:false,usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_SRC});
+    let staging=device.create_buffer(&wgpu::BufferDescriptor{label:None,size:bytes,mapped_at_creation:false,usage:wgpu::BufferUsages::MAP_READ|wgpu::BufferUsages::COPY_DST});
+    let pipeline=device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor{label:None,layout:None,module:&shader,entry_point:Some("cs_layer"),compilation_options:Default::default(),cache:None});
+    let bind=device.create_bind_group(&wgpu::BindGroupDescriptor{label:None,layout:&pipeline.get_bind_group_layout(0),entries:&[
+        wgpu::BindGroupEntry{binding:0,resource:inputs.as_entire_binding()},wgpu::BindGroupEntry{binding:1,resource:output.as_entire_binding()}]});
+    let mut encoder=device.create_command_encoder(&Default::default());
+    {let mut pass=encoder.begin_compute_pass(&Default::default());pass.set_pipeline(&pipeline);pass.set_bind_group(0,&bind,&[]);pass.dispatch_workgroups(input.len() as u32,1,1);}
+    encoder.copy_buffer_to_buffer(&output,0,&staging,0,bytes);queue.submit(Some(encoder.finish()));
+    let (sender,receiver)=std::sync::mpsc::channel();staging.slice(..).map_async(wgpu::MapMode::Read,move|r|{let _=sender.send(r);});
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();receiver.recv().unwrap().unwrap();
+    let data=staging.slice(..).get_mapped_range();let actual:&[[f32;4]]=bytemuck::cast_slice(&data);
+    let dry=|i:usize|actual[i*3]; let wet=|i:usize|actual[i*3+1];
+    let luminance=|v:[f32;4]|v[0]*0.2126+v[1]*0.7152+v[2]*0.0722;
+    assert!(actual.iter().flatten().all(|x|x.is_finite()));
+    assert!(luminance(wet(0)) < luminance(dry(0)),"dark actual camo lost absorption beneath neutral reflection");
+    for i in 1..5 {assert!(luminance(wet(i)) < luminance(dry(i))*0.85,"wet actual camo must darken: case{i}");}
+    let contrast=|a:f32,b:f32|(a-b).abs()/(a+b);
+    let dry_contrast=contrast(luminance(dry(0)),luminance(dry(1)));
+    let wet_contrast=contrast(luminance(wet(0)),luminance(wet(1)));
+    assert!(wet_contrast>dry_contrast*0.85,"neutral film washed out actual camouflage contrast");
+    for i in 5..9 {assert_eq!(&wet(i)[..3],&dry(i)[..3],"dry/skin/boots/far atlas changed at{i}");}
+    assert_eq!(&wet(9)[..3],&[0.0;3],"wet cloth self-lit without sky/sun/local source");
+    for c in 0..3 {
+        assert!((wet(10)[c]-wet(2)[c]*0.0002).abs()<0.00000001);
+        assert!((wet(11)[c]-wet(2)[c]*20.0).abs()<0.000001,"HDR light units lost linearity");
+    }
+    assert!(luminance(wet(12))>0.0); assert_eq!(&wet(13)[..3],&[0.0;3]);
+    assert!(luminance(wet(14))>0.0); assert_eq!(wet(15)[0],wet(15)[1]); assert_eq!(wet(15)[1],wet(15)[2]);
+    assert!(wet(15)[0]>0.0,"neutral dielectric glare must not depend on camouflage albedo");
+    assert!(actual[16*3+2][0]<=0.125 && actual[16*3+2][1]<=0.120001);
+    eprintln!("WET_CLOTH_OPTICS dryContrast={dry_contrast} wetContrast={wet_contrast} texelWet={:?} texelDry={:?} scope=actual-production-absorption-and-composite-controlled-lighting-not-installed-frame",wet(2),dry(2));
+    drop(data);staging.unmap();
 }
 
 #[test]

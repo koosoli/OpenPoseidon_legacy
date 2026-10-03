@@ -67,7 +67,10 @@ fn object_snow_normal(world_pos: vec3<f32>, geo_normal: vec3<f32>, base_n: vec3<
 fn wet_textile_response(wetness: f32, view_cosine: f32, footprint: f32) -> vec4<f32> {
     if (!(wetness > 0.0)) { return vec4<f32>(0.0); }
     let wet = clamp(wetness, 0.0, 1.0);
-    let coating = wet * (2.0 - wet);
+    // Saturation darkens the whole fibre substrate, but pore-held water is not
+    // a continuous plastic sheet. Only one eighth forms an exterior film here.
+    // The water reflection remains neutral and independent of camouflage dye.
+    let coating = wet * (2.0 - wet) * 0.125;
     let grazing = 1.0 - clamp(view_cosine, 0.0, 1.0);
     // Water on rough fibres: restrained Fresnel, never a grazing mirror.
     let fresnel = 0.02 + 0.10 * pow(grazing, 5.0);
@@ -81,6 +84,13 @@ fn wet_textile_sun_lobe(normal_half_cosine: f32, normal_light_cosine: f32, respo
     if (!(response.x > 0.0)) { return 0.0; }
     return response.w * pow(clamp(normal_half_cosine, 0.0, 1.0), response.z)
         * clamp(normal_light_cosine, 0.0, 1.0);
+}
+fn wet_textile_composite(substrate: vec3<f32>, sky_radiance: vec3<f32>, sun_glare: vec3<f32>,
+                         local_glare: vec3<f32>, response: vec4<f32>) -> vec3<f32> {
+    if (!(response.x > 0.0)) { return substrate; }
+    let reflected = max(sky_radiance, vec3<f32>(0.0)) * response.y
+        + max(sun_glare + local_glare, vec3<f32>(0.0));
+    return substrate * (1.0 - response.x * response.y) + response.x * reflected;
 }
 // END_WET_TEXTILE_HELPERS
 
@@ -649,8 +659,24 @@ fn shade(
             max(length(dwx), length(dwy)));
         var coat_sky = vec3<f32>(0.0);
         if (sky_lit && !is_cockpit) {
-            coat_sky = sky_irradiance(reflect(-view, cloth_n)) * frame.sun_ambient.w
-                * amb_ao * cavity * response.y;
+            // Reflect the same actual linear sky/cloud radiance as water, with
+            // a broad rough-fibre kernel. SH irradiance/PI is a diffuse lobe,
+            // not this directional reflection; do not divide radiance by PI.
+            let mirror = reflect(-view, cloth_n);
+            let guide = select(vec3<f32>(0.0,1.0,0.0), vec3<f32>(1.0,0.0,0.0), abs(mirror.y) > 0.95);
+            let tangent = normalize(cross(mirror, guide));
+            let bitangent = cross(mirror, tangent);
+            let spread = sqrt(8.0 / (response.z + 2.0));
+            let directions = array<vec3<f32>,5>(mirror,
+                normalize(mirror + tangent * spread), normalize(mirror - tangent * spread),
+                normalize(mirror + bitangent * spread), normalize(mirror - bitangent * spread));
+            var sky_weight = 0.0;
+            for (var i = 0u; i < 5u; i += 1u) {
+                let weight = select(1.0, 2.0, i == 0u) * max(dot(cloth_n, directions[i]), 0.0);
+                coat_sky += ground_sky_reflection(directions[i]) * weight;
+                sky_weight += weight;
+            }
+            coat_sky = coat_sky / max(sky_weight, 0.0001) * frame.sun_ambient.w * amb_ao * cavity;
         }
         let half_sum = view - frame.sun_dir_world.xyz;
         let half_vector = half_sum / max(length(half_sum), 0.0001);
@@ -663,8 +689,7 @@ fn shade(
             vec3<f32>(0.0), vec3<f32>(response.w), response.z, linear);
         // Reallocate the outgoing reflected share from the underlying layer.
         // Neutral water highlights do not inherit camouflage dye/texture grain.
-        rgb = rgb * (1.0 - response.x * response.y)
-            + response.x * max(coat_sky + coat_sun + coat_local.specular, vec3<f32>(0.0));
+        rgb = wet_textile_composite(rgb, coat_sky, coat_sun, coat_local.specular, response);
     }
     if (rain_puddle > 0.0) {
         let view = normalize(-world_pos);
