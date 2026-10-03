@@ -6821,3 +6821,67 @@ tickets:
     evidence:
       - docs/roadmap/evidence/sinkhole-w0-20261003.json
       - docs/roadmap/decisions/SINKHOLE-00-texture-formats-20261003.md
+
+  - id: WLD-HOLE-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Sinkhole W1: object-cut terrain holes (ported from Malprave) with wgpu terrain/grass discard; MLOD autocenter on any LOD"
+    class: GAMEPLAY
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: ACTIVE
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/sinkhole-w1-terrain-holes
+    baseline_commit: da2bfbda
+    verification_commit: 47453f69
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TEX-FMT-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [3850420f, 0cea4b3b, 0aff777e, 47453f69]
+    production_call_sites:
+      - file: engine/Poseidon/World/Terrain/TerrainHoles.cpp
+        symbol: Landscape::InTerrainHole
+      - file: engine/Poseidon/World/Simulation/Collisions.cpp
+        symbol: Landscape::GroundCollision
+      - file: engine/Poseidon/World/Terrain/LandscapeRender.cpp
+        symbol: Landscape::DrawRect
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: EngineWgpu::SetTerrainHoles
+      - file: engine/Poseidon/World/Model/Model.cpp
+        symbol: Model::compile
+    test_ids: [terrain-hole-shaders-compose, terrain-hole-prepass-colour-discard, terrain-hole-grass-placement, sinkhole-autocenter-geometry-lod, sinkhole-w1-ugcave-harness]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/SINKHOLE-01-terrain-holes-20261003.md
+    capability_claims:
+      - capability: TERRAIN_HOLES_OBJECT_CUT
+        status: UNVERIFIED
+        denominator: >-
+          One harness run on one machine (Malprave's ugcave test cave on Everon, wgpu):
+          the engine registers the model's holes, a man stands and walks on the cave
+          floor 5.000 m under the ground and returns to the surface; AI engaged through
+          the opening; aerial capture shows the two openings cut cleanly and the
+          hidden footprint left drawn. Owner play-test found sun bleeding into the cave
+          and grass shadows flickering on its ceiling (fixed in 0aff777e/47453f69,
+          re-captured dark); owner re-test pending. GL33 fallback captured once.
+      - capability: MLOD_AUTOCENTER_GEOMETRY_LOD
+        status: UNVERIFIED
+        denominator: >-
+          Unit test (fixture box, property on the geometry LOD only) plus the cave
+          check above (floor at exactly -5.000 m after the fix, -2.35 m before).
+    known_failures:
+      - Box3D loose-object heightfield and shell penetration see solid ground over a hole.
+      - Openings in a terrain hole get no sun shafts (the underground sun test uses only the heightmap).
+      - Enfusion CPU clutter (Reforger) not hole-aware.
+      - Malprave limits stand until W2 (25 m discovery radius, 8 holes per model, convex only, no joined AI paths across pieces).
+    fallback: A world with no hole-cutting models is unchanged (lazy discovery; hole buffer empty); GL33 keeps Malprave's UBO path.
+    reviewer: null
+    reviewer_method: Author-run unit and shader tests; harness probe via the .tw watcher (.tw/test-holes.ps1).
+    supersedes: []
+    evidence:
+      - docs/roadmap/evidence/sinkhole-w1-20261003.json
+      - docs/roadmap/decisions/SINKHOLE-01-terrain-holes-20261003.md

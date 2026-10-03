@@ -95,6 +95,7 @@ port is listed here and in its decision record, with what was rewritten for this
 | OpenPoseidon change | Ported from (Malprave patch) |
 | --- | --- |
 | DDS masked uncompressed layouts, DXT2/DXT4, DXT1 punch-through (`DDSConverter.cpp`, `DdsImport.cpp`) | `ddsTextures.patch` |
+| Object-cut terrain holes: `TerrainHoles.cpp` and the collision, LOS, explosion, AI, camera, sound, decal and GL33 hooks (wgpu drawing rewritten) | `terrainHole1`..`terrainHole8.patch` |
 
 ### Tidewater (dgreenheck/tidewater)
 
