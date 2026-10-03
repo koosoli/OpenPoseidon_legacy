@@ -3044,63 +3044,128 @@ void RegisterPhysicsProbe(HarnessServer& hs)
             }
             return HarnessProtocol::JsonResponse(out);
         });
-    hs.RegisterCommand({"dev_cave_editor", "Create/undo bounded mission-local horizontal caves", {}},
-        [](const std::string&, cJSON* root) -> std::string {
-            if (!AppConfig::Instance().DevMode() || !GWorld || !GLandscape || GWorld->GetMode()==GModeNetware)
+    hs.RegisterCommand(
+        {"dev_cave_editor", "Create/undo bounded mission-local horizontal caves", {}},
+        [](const std::string&, cJSON* root) -> std::string
+        {
+            if (!AppConfig::Instance().DevMode() || !GWorld || !GLandscape || GWorld->GetMode() == GModeNetware)
                 return HarnessProtocol::ErrorResponse("requires --dev and a single-player world");
-            const char* action=HarnessProtocol::GetString(root,"action");
-            if (!action) return HarnessProtocol::ErrorResponse("needs state, create or undo");
-            auto number=[&](const char* key, float& value) {
-                const auto* v=cJSON_GetObjectItemCaseSensitive(root,key);
-                if (!cJSON_IsNumber(v) || !std::isfinite(v->valuedouble)) return false;
-                value=float(v->valuedouble); return std::isfinite(value);
+            const char* action = HarnessProtocol::GetString(root, "action");
+            if (!action)
+                return HarnessProtocol::ErrorResponse("needs state, create or undo");
+            auto recordId = SelectedEditorCaveId();
+            if (const auto* id = cJSON_GetObjectItemCaseSensitive(root, "id"))
+            {
+                if (!cJSON_IsNumber(id) || !std::isfinite(id->valuedouble) || id->valuedouble < 1 ||
+                    id->valuedouble > double(std::numeric_limits<std::uint32_t>::max()) ||
+                    std::floor(id->valuedouble) != id->valuedouble)
+                    return HarnessProtocol::ErrorResponse("id must be a positive integral editor ID");
+                recordId = static_cast<std::uint32_t>(id->valuedouble);
+            }
+            auto number = [&](const char* key, float& value)
+            {
+                const auto* v = cJSON_GetObjectItemCaseSensitive(root, key);
+                if (!cJSON_IsNumber(v) || !std::isfinite(v->valuedouble))
+                    return false;
+                value = float(v->valuedouble);
+                return std::isfinite(value);
             };
-            float x=0,y=0,z=0;
-            const bool point=cJSON_HasObjectItem(root,"x") || cJSON_HasObjectItem(root,"y") || cJSON_HasObjectItem(root,"z");
-            if (point && (!number("x",x) || !number("y",y) || !number("z",z)))
+            float x = 0, y = 0, z = 0;
+            const bool point =
+                cJSON_HasObjectItem(root, "x") || cJSON_HasObjectItem(root, "y") || cJSON_HasObjectItem(root, "z");
+            if (point && (!number("x", x) || !number("y", y) || !number("z", z)))
                 return HarnessProtocol::ErrorResponse("point requires finite x/y/z");
-            const float extent=(GLandscape->GetTerrainRange()-1)*GLandscape->GetTerrainGrid();
-            if (point && (x<0 || z<0 || x>=extent || z>=extent))
+            const float extent = (GLandscape->GetTerrainRange() - 1) * GLandscape->GetTerrainGrid();
+            if (point && (x < 0 || z < 0 || x >= extent || z >= extent))
                 return HarnessProtocol::ErrorResponse("point outside terrain");
-            if (std::strcmp(action,"create")==0) {
-                float heading,width,height,length;
-                if (!point || !number("heading",heading) || !number("width",width) ||
-                    !number("height",height) || !number("length",length))
+            if (std::strcmp(action, "create") == 0)
+            {
+                float heading, width, height, length;
+                if (!point || !number("heading", heading) || !number("width", width) || !number("height", height) ||
+                    !number("length", length))
                     return HarnessProtocol::ErrorResponse("create needs x/y/z, heading, width, height, length");
-                if (!CreateEditorCave(x,y,z,heading,width,height,length))
+                if (!CreateEditorCave(x, y, z, heading, width, height, length))
                     return HarnessProtocol::ErrorResponse(EditorCaveStatus());
-            } else if (std::strcmp(action,"trench")==0) {
-                float heading,width,depth,length;
-                if (!point || !number("heading",heading) || !number("width",width) ||
-                    !number("depth",depth) || !number("length",length))
+            }
+            else if (std::strcmp(action, "trench") == 0)
+            {
+                float heading, width, depth, length;
+                if (!point || !number("heading", heading) || !number("width", width) || !number("depth", depth) ||
+                    !number("length", length))
                     return HarnessProtocol::ErrorResponse("trench needs x/y/z, heading, width, depth, length");
-                const bool tank=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root,"tank"));
-                if (!CreateEditorTrench(x,y,z,heading,width,depth,length,tank))
+                const bool tank = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "tank"));
+                if (!CreateEditorTrench(x, y, z, heading, width, depth, length, tank))
                     return HarnessProtocol::ErrorResponse(EditorCaveStatus());
-            } else if (std::strcmp(action,"undo")==0) {
-                if (!RemoveLastEditorCave()) return HarnessProtocol::ErrorResponse(EditorCaveStatus());
-            } else if (std::strcmp(action,"state")!=0)
-                return HarnessProtocol::ErrorResponse("state, create or undo only");
-            auto* out=cJSON_CreateObject();
-            cJSON_AddNumberToObject(out,"count",double(EditorCaveCount()));
-            cJSON_AddStringToObject(out,"status",EditorCaveStatus());
-            cJSON_AddBoolToObject(out,"missionLocal",true);
-            cJSON_AddStringToObject(out,"worldName",GLandscape->GetName());
-            cJSON_AddNumberToObject(out,"grid",GLandscape->GetTerrainGrid());
-            cJSON_AddNumberToObject(out,"heightRevision",double(GLandscape->HeightRevision()));
-            cJSON_AddNumberToObject(out,"brushDefaultRadius",TerrainBrush().radius);
-            if (point) {
-                float floor=0;
-                cJSON_AddBoolToObject(out,"inFootprint",GLandscape->InTerrainHole(x,z,&floor));
+            }
+            else if (std::strcmp(action, "undo") == 0)
+            {
+                if (!RemoveLastEditorCave())
+                    return HarnessProtocol::ErrorResponse(EditorCaveStatus());
+            }
+            else if (std::strcmp(action, "select") == 0)
+            {
+                if (!SelectEditorCave(recordId))
+                    return HarnessProtocol::ErrorResponse(EditorCaveStatus());
+            }
+            else if (std::strcmp(action, "rotate") == 0)
+            {
+                float heading;
+                if (!number("heading", heading))
+                    return HarnessProtocol::ErrorResponse("rotate needs finite heading");
+                if (!RotateEditorCave(recordId, heading))
+                    return HarnessProtocol::ErrorResponse(EditorCaveStatus());
+            }
+            else if (std::strcmp(action, "delete") == 0)
+            {
+                if (!DeleteEditorCave(recordId))
+                    return HarnessProtocol::ErrorResponse(EditorCaveStatus());
+            }
+            else if (std::strcmp(action, "state") != 0)
+                return HarnessProtocol::ErrorResponse("state, create, trench, undo, select, rotate or delete only");
+            auto* out = cJSON_CreateObject();
+            cJSON_AddNumberToObject(out, "count", double(EditorCaveCount()));
+            cJSON_AddNumberToObject(out, "selectedId", SelectedEditorCaveId());
+            auto* records = cJSON_AddArrayToObject(out, "records");
+            for (const auto& r : EditorCaves())
+            {
+                auto* entry = cJSON_CreateObject();
+                cJSON_AddItemToArray(records, entry);
+                cJSON_AddNumberToObject(entry, "id", r.id);
+                cJSON_AddNumberToObject(entry, "objectId", r.objectId);
+                cJSON_AddStringToObject(entry, "sourceName", r.sourceName.c_str());
+                cJSON_AddStringToObject(entry, "kind",
+                                        r.tool == ExcavationTool::Cave         ? "cave"
+                                        : r.tool == ExcavationTool::TankTrench ? "tankTrench"
+                                                                               : "infantryTrench");
+                cJSON_AddNumberToObject(entry, "x", r.x);
+                cJSON_AddNumberToObject(entry, "y", r.y);
+                cJSON_AddNumberToObject(entry, "z", r.z);
+                cJSON_AddNumberToObject(entry, "heading", r.heading);
+                cJSON_AddNumberToObject(entry, "width", r.width);
+                cJSON_AddNumberToObject(entry, "height", r.height);
+                cJSON_AddNumberToObject(entry, "length", r.length);
+            }
+            cJSON_AddStringToObject(out, "status", EditorCaveStatus());
+            cJSON_AddBoolToObject(out, "missionLocal", true);
+            cJSON_AddStringToObject(out, "worldName", GLandscape->GetName());
+            cJSON_AddNumberToObject(out, "grid", GLandscape->GetTerrainGrid());
+            cJSON_AddNumberToObject(out, "heightRevision", double(GLandscape->HeightRevision()));
+            cJSON_AddNumberToObject(out, "brushDefaultRadius", TerrainBrush().radius);
+            if (point)
+            {
+                float floor = 0;
+                cJSON_AddBoolToObject(out, "inFootprint", GLandscape->InTerrainHole(x, z, &floor));
                 cJSON_AddBoolToObject(out,"atHeight",GLandscape->InTerrainHole(x,z,nullptr,y));
                 cJSON_AddNumberToObject(out,"holeFloor",floor);
                 cJSON_AddNumberToObject(out,"terrainY",GLandscape->SurfaceY(x,z));
                 cJSON_AddNumberToObject(out,"roadY",GLandscape->RoadSurfaceY(Vector3(x,y,z)));
                 Vector3 camera(x,y,z);
                 cJSON_AddNumberToObject(out,"cameraFloorY",GLandscape->CameraFloorY(camera,nullptr,false));
-                if (cJSON_HasObjectItem(root,"rayFromY") || cJSON_HasObjectItem(root,"rayToY")) {
+                if (cJSON_HasObjectItem(root,"rayFromY") || cJSON_HasObjectItem(root,"rayToY"))
+                {
                     float fromY,toY;
-                    if (!number("rayFromY",fromY) || !number("rayToY",toY) || fromY==toY || std::abs(fromY-toY)>100) {
+                    if (!number("rayFromY",fromY) || !number("rayToY",toY) || fromY==toY || std::abs(fromY-toY)>100)
+                    {
                         cJSON_Delete(out);
                         return HarnessProtocol::ErrorResponse("ray needs finite unequal heights, <=100m apart");
                     }
@@ -3114,7 +3179,8 @@ void RegisterPhysicsProbe(HarnessServer& hs)
                     const bool hitSegment=legacyResult>=0 && distance<=std::abs(fromY-toY)+0.001f;
                     cJSON_AddBoolToObject(out,"terrainRayHit",hitSegment);
                     cJSON_AddNumberToObject(out,"legacyRayResult",legacyResult);
-                    if (hitSegment) {
+                    if (hitSegment)
+                    {
                         cJSON_AddNumberToObject(out,"terrainRayY",hit.Y());
                         cJSON_AddNumberToObject(out,"terrainRayDistance",distance);
                     }
@@ -3123,7 +3189,8 @@ void RegisterPhysicsProbe(HarnessServer& hs)
                 const int count=GLandscape->TerrainHoleDrawEdges(camera,400,edges,64);
                 cJSON_AddNumberToObject(out,"drawRecords",count);
                 cJSON_AddBoolToObject(out,"boundedHeader",count>0 && edges[3]==2);
-                if (count>0 && edges[3]==2) cJSON_AddNumberToObject(out,"ceilingY",edges[2]);
+                if (count>0 && edges[3]==2)
+                    cJSON_AddNumberToObject(out, "ceilingY", edges[2]);
             }
             return HarnessProtocol::JsonResponse(out);
         });

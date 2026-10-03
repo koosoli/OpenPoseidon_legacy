@@ -7493,6 +7493,27 @@ void DrawMainWindow()
             }
             if (editorAction == Dev::MapEditorAction::UndoCave)
                 Defer([] { Dev::RemoveLastEditorCave(); s_zeusStatus = Dev::EditorCaveStatus(); });
+            if (editorAction == Dev::MapEditorAction::RotateCave)
+            {
+                const auto id = Dev::MapEditorActionId();
+                const float heading = Dev::MapEditorActionHeading();
+                Defer(
+                    [id, heading]
+                    {
+                        Dev::RotateEditorCave(id, heading);
+                        s_zeusStatus = Dev::EditorCaveStatus();
+                    });
+            }
+            if (editorAction == Dev::MapEditorAction::DeleteCave)
+            {
+                const auto id = Dev::MapEditorActionId();
+                Defer(
+                    [id]
+                    {
+                        Dev::DeleteEditorCave(id);
+                        s_zeusStatus = Dev::EditorCaveStatus();
+                    });
+            }
             if (editorAction == Dev::MapEditorAction::StartCave)
             {
                 EnableZeusCamera();
