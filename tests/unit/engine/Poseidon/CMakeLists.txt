@@ -302,6 +302,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Weapons/test_grenade_fuse.cpp
     World/Weapons/test_penetration.cpp
     World/test_physics_world.cpp
+    World/test_box3d_mass_update.cpp
     World/test_collider_flags.cpp
     World/test_physics_determinism.cpp
     World/test_first_divergent_boundary.cpp

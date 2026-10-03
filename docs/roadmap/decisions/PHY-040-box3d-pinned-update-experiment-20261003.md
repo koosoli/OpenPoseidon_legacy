@@ -2,7 +2,7 @@
 
 This is an opt-in dependency experiment, not a shipping update or completed
 ragdoll acceptance. The shipping `vcpkg.json`, package-only registry baseline
-and existing overlay directory are unchanged. Root owns full engine builds,
+were unchanged in the original experiment. Root owns full engine builds,
 installed comparisons and deployment. This candidate changes no renderer or
 gameplay death policy.
 
@@ -144,3 +144,21 @@ comparisons, actual stock contact fitting and multi-body terrain/replay checks.
 The current initial corpse fit refusal precedes body creation and is independent
 of this confirmed impulse defect. Keep automatic deaths disabled while those
 gates remain open.
+
+## Promotion candidate after the experiment
+
+Root requested a separate source promotion after reviewing the confirmed sixfold
+backend impulse defect and the controlled native evidence. The identical pinned
+recipe now also exists in `cmake/vcpkg-overlay-ports/box3d`, selected by the
+ordinary preset's existing overlay setting. The manifest and package registry
+baselines remain unchanged; unrelated dependency versions remain pinned.
+`World/test_box3d_mass_update.cpp` registers both actual backend cases in the
+ordinary `PoseidonTests` target. The released library intentionally fails the
+mass assertion, so a silent fallback cannot pass this regression gate.
+
+This source promotion is **not yet installed or runtime accepted**. Root must
+run the ordinary full build, required native tests and installed comparisons
+before reporting acceptance. Reverting the promotion commit restores the
+release registry recipe and removes its now-inapplicable default regression
+case; the exact API fallback remains supported in `Box3DBackend.cpp`. The
+historical opt-in overlay and comparison fixtures remain available for audit.

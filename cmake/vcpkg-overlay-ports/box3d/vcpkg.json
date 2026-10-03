@@ -1,0 +1,13 @@
+{
+  "name": "box3d",
+  "version-semver": "0.1.0",
+  "port-version": 1,
+  "description": "OpenPoseidon Box3D pinned to upstream 954cf87, before the broad-phase rewrite",
+  "homepage": "https://github.com/erincatto/box3d",
+  "license": "MIT",
+  "supports": "!uwp",
+  "dependencies": [
+    { "name": "vcpkg-cmake", "host": true },
+    { "name": "vcpkg-cmake-config", "host": true }
+  ]
+}
