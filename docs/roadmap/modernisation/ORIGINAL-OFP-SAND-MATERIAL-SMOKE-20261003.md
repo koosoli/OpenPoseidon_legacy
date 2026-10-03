@@ -113,3 +113,59 @@ present in an Original arm. `-PlanOnly` produces all twelve source/view plans
 without a game lock, profile creation, jobs or game launch. PowerShell parser
 and `git diff --check` pass. No device, full build, packaging or game was run
 by the candidate agent. Actual pipeline and visual acceptance remain pending.
+
+## Actual stale-package failure and bounded preflight correction
+
+Root's installed `56549210` NoePt Near Full run at 15:54 on October 3 had a
+normal exit and valid capture, but its source/binding guard failed. Actual
+`dev_sand` reported `o/pt.paa`, SandDark, all-quadrant eligibility, zero offset
+and native height 14.9849997. The requested camera was initialized correctly.
+The material mapping, macro and detail traces were all absent for that source.
+
+Filtered extraction showed the installed visual PBO still had the earlier
+734-byte, three-entry road/Everon/gravel manifest. Its manifest SHA256 was
+`CD448D678CD139836EA7467F8DE7E127684BCC1E25D4057CCB9185DCA6DECBB6`;
+its PBO SHA256 was
+`6B0527CE8A1A320D853198BCBAC2E7A2A8AFC6A3ED26CBAF6E1D75987B6BB558`.
+The root dist PBO had the same hash and a September 26 timestamp. The current
+source manifest already contained the three new identities. This establishes
+stale packaged content, rather than a failed classifier or loader-name lookup.
+
+Direct CMake engine builds do not invoke `Build-DefaultContent.ps1`. Explicitly
+stage owned content after a source manifest change, then use ordinary deploy:
+
+```powershell
+& ./scripts/Build-DefaultContent.ps1 -Preset win-x64-clang-rwdi -Python <Python executable>
+```
+
+Run deployment under the repository's game lock. No extra C++ build is needed
+for a manifest-only staging correction. Deployment does not auto-generate
+assets. A shared `Assert-DefaultMaterialPackage.ps1` now uses existing
+PoseidonTools filtered extraction, the actual loader's 64 KiB/API bounds, and
+an exact SHA256 match against the current source manifest. Packaging copies
+the source JSON verbatim, so exact-byte comparison is the appropriate staging
+contract. Evidence is retained in a unique ignored build directory.
+
+`Deploy.ps1` checks a staged managed visual pack before its first game-folder
+mutation or new provenance stamp. New sand Full/Albedo captures check the
+installed pack before their query job/game launch. Original OFF captures keep
+their original baseline semantics. The capture helper accepts `-ToolsExe`
+when the default root dist PoseidonTools path is unavailable.
+
+Actual tiny private-PBO tests pass current-source content and reject stale
+entries, changed albedo/archive/normal/detail, API mismatch, missing manifest
+and oversized manifest. A replay PBO containing the exact historically
+extracted 734-byte manifest is rejected with its actual old SHA256. Source
+ordering checks guard deployment preflight before its case-correction/removal
+and copy paths. No deployment or installed file was changed by these tests.
+
+Root subsequently staged and deployed `1930ffd6`; read-only preflight observed
+visual PBO SHA256
+`C9CF89719BB000A389D8071CD04AA93416FC28577A82A05290E8E2BC4A5470B5`,
+with actual manifest SHA256
+`544F7F4A5BA8125E0D5265A37CEE92FC116713A8CF01FEBAD459140046E0BC83`
+equal to current source. Root's 16:08 NoePt Near Full run then passed normal
+exit, source, mapping/macro/detail and stable installed hashes. The near
+capture includes the grounded stock player's torso/rifle over much of the
+frame, so this loaded-binding pass does not establish sand visual acceptance.
+An explicit, recorded fixture placement correction is a separate next slice.

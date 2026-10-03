@@ -7,7 +7,8 @@ param([ValidateSet('Original','Albedo','Full')][string]$Arm = 'Full',
       [ValidateSet('EdenPs','AbelPi','NoePt','NoePs')][string]$SandSource = 'EdenPs',
       [ValidateSet('Legacy','Near','Mid','Far')][string]$SandView = 'Legacy',
       [switch]$PlanOnly,
-      [switch]$SelfTest)
+      [switch]$SelfTest,
+      [string]$ToolsExe = '')
 $ErrorActionPreference = 'Stop'
 function Assert-SandSource($source,$site) {
     if ($null-eq $source -or $source.ok -ne $true -or $source.sourceEligible -ne $true -or
@@ -106,6 +107,13 @@ $probeJob = $null
 $proofBefore = @{}
 if ($SandView -ne 'Legacy') {
     $gameDir = 'D:/SteamLibrary/steamapps/common/ARMA Cold War Assault'
+    if ($Arm -ne 'Original') {
+        if (!$ToolsExe) {$ToolsExe=Join-Path $root 'dist/x64-win-rwdi/PoseidonTools.exe'}
+        $plan.installedPackagePreflight = & "$PSScriptRoot/Assert-DefaultMaterialPackage.ps1" `
+            -Archive (Join-Path $gameDir 'Mods/@OP_VisualUpgrade/AddOns/op_ground_materials.pbo') `
+            -ExpectedManifest (Join-Path $root 'content/default-packs/visual/material-overrides.json') `
+            -ToolsExe $ToolsExe -EvidenceDirectory (Join-Path $out 'material-preflight')
+    }
     foreach ($file in @('DEPLOYED-FROM.txt','OpenPoseidon.exe','wgpu_renderer.dll','Mods/@OP_VisualUpgrade/AddOns/op_ground_materials.pbo','BIN/CONFIG.BIN',$site.archive)) {
         $proofBefore[$file] = (Get-FileHash -LiteralPath (Join-Path $gameDir $file) -Algorithm SHA256).Hash
     }

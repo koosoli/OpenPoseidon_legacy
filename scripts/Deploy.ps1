@@ -51,6 +51,17 @@ $repoRoot = Split-Path $PSScriptRoot -Parent
 $suffix   = ($Preset -split '-')[-1]
 $distDir  = Join-Path $repoRoot "dist\x64-win-$suffix"
 
+# A direct CMake engine build does not regenerate the managed visual PBO.
+# Reject stale staged content before any game-folder mutation or new source stamp.
+$visualStage = Join-Path $distDir 'Mods/@OP_VisualUpgrade'
+if (Test-Path -LiteralPath $visualStage) {
+    & "$PSScriptRoot/Assert-DefaultMaterialPackage.ps1" `
+        -Archive (Join-Path $visualStage 'AddOns/op_ground_materials.pbo') `
+        -ExpectedManifest (Join-Path $repoRoot 'content/default-packs/visual/material-overrides.json') `
+        -ToolsExe (Join-Path $distDir 'PoseidonTools.exe') `
+        -EvidenceDirectory (Join-Path $repoRoot 'build/deploy-material-preflight') | Out-Null
+}
+
 # The two files that must move together. Order is deliberate: the DLL lands first, so
 # a half-finished deploy leaves the OLD exe against the NEW dll (which fails loudly at
 # startup) rather than a new exe against an old dll (which can fail much later).
