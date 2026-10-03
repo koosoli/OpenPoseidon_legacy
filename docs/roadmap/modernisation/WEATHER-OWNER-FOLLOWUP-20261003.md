@@ -1,5 +1,31 @@
 # Weather owner follow-up, 3 October 2026
 
+16:20 checkpoint: current matching EXE/DLL are unchanged from56549210;
+ordinary deployment1930ffd6 at16:07 refreshes the separate material archive.
+Its staged/installed SHA256 is C9CF89719BB000A389D8071CD04AA93416FC28577A82A05290E8E2BC4A5470B5.
+Actual NoePt near160804 passes normal exit/stable files/genuine source and
+original-albedo/macro/detail CPU bindings. Close image is partly obstructed
+by the stock actor; appearance is not accepted. New preflight rejects stale
+managed manifests before deployment mutation or sand capture; real-PBO
+positive/negative checks pass. Mid/far and other-source images remain pending.
+
+Actual Eden water-depth8194fd passes normal exit0/stable1930 pair, paused
+water/source/camera/budget retention and all original functional controls.
+Contact sample42.371mm agrees with head projected on original bare bed42.381mm,
+despite the real175.957mm footprint depression. The surrounding nine25m
+lattice beds are flat141.884995m; depths15–78mm and converging flow explain
+the broad standing-water layer. Both pol candidates are flooded42.37/75.64mm;
+the bounded search correctly admits no <=8mm soil view. Fine remainsOFF.
+This establishes local simulated flooding, not a floating-support bug.
+The current maximum input432mm/game-hour motivates a shared coarse/fine
+90mm/game-hour calibration, currently source work only. No visual or drainage
+acceptance is implied before its installed comparison.
+
+Actual land a5b421 passes normal exit0/stable565 files/all existing gates.
+Root sees the snow ring, but still faint overhead dust after its darker tint;
+land dust appearance stays OPEN. Previous successful calls do not prove a
+readable particle ring in every view or map.
+
 16:03 checkpoint: matching56549210 pair deployed15:42 after219step full
 build, archived with matching PDBs under build/installed-symbols/56549210.
 Includes actual fragment diagnostic, darker dust tint and original sand
