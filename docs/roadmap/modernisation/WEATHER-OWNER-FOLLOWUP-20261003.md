@@ -1,5 +1,30 @@
 # Weather owner follow-up, 3 October 2026
 
+17:21 checkpoint: matching94f261c5 deployed16:46 after21step full build;
+actual pair/PDB/material archive and hashes are preserved under
+build/installed-symbols/94f261c5. Shared90mm/game-hour input and exact local
+donor guard are installed. Combined coarse/source/fine/geometry/flux and
+bitwise O0/O2 matched-forcing tests pass, preserving exact-empty edge skip.
+
+Actual Eden3b21d9 passes normal stable exit/all original and supplementary
+source/water/camera/pause controls. At180.54simsec GMud0.802835/uniform0.803324,
+contact water6.638mm/projected6.644mm and actual imprint-175.973mm. Centre
+6.652mm now admits the genuine thin-water pol view; second candidate14.576mm
+does not. Root sees reduced broad mirror, but sunny mud remains too matte.
+Different rain histories/time prevent an exact causal 42→6.6mm comparison.
+New continuously narrowed wet-soil direct GGX coat passes all6 focused GPU
+checks; it remains uninstalled and not visually accepted. Source-qualified
+retained-water muddy medium and separate Box3D corpse prototype are source
+work only; neither is installed or accepted.
+
+Actual occupied flight4137aa passes normal stable arms/drop0/source/route
+controls. Dry mean10.121966/p9512.253ms; rain12.260348/p9519.299/max165.311ms.
+Weighted Advance dry0.098284/rain0.993250ms/tick with max2.4109/154.6936ms.
+The long elapsed Advance matches a155.748ms simulation-step observation;
+other nested subphases remain small. A lagged GPU55.087ms snapshot also has
+44.740ms residual, but has no same-frame identity. Compute versus scheduling
+or paging is undiagnosed. No performance acceptance; quiet repeat in progress.
+
 16:20 checkpoint: current matching EXE/DLL are unchanged from56549210;
 ordinary deployment1930ffd6 at16:07 refreshes the separate material archive.
 Its staged/installed SHA256 is C9CF89719BB000A389D8071CD04AA93416FC28577A82A05290E8E2BC4A5470B5.
@@ -27,7 +52,8 @@ land dust appearance stays OPEN. Previous successful calls do not prove a
 readable particle ring in every view or map.
 
 16:03 checkpoint: matching56549210 pair deployed15:42 after219step full
-build, archived with matching PDBs under build/installed-symbols/56549210.
+build; binary pair and stamp archived under build/installed-symbols/56549210.
+That historical directory has no PDBs; the later94f archive includes them.
 Includes actual fragment diagnostic, darker dust tint and original sand
 manifest additions. Shader suite40 pass plus repaired focused road2 pass;
 the initial remaining failure was a stale source-text assertion.
