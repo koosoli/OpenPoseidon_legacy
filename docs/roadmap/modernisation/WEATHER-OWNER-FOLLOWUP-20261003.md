@@ -1,5 +1,16 @@
 # Weather owner follow-up, 3 October 2026
 
+Final owner handoff: installed a4f2e01c at22:20, matching EXE/DLL hashes,
+visible original-Eden demo PID53236 remains open for Oliver. Receipt
+`build/corpse-demo/20261003-222612/session.json` records 11bodies/10joints,
+4hinges,51updates,0.116226599m maximum travel, then explicit freeze with
+zero handles. Root viewed ready.png showing the retained corpse and targets.
+Initial launcher refused a normal display event; script now skips unsolicited
+events using the existing proof-runner response loop. Retry succeeds, WGPU
+startup confirmed, no panic or optional PostOptics packets. Only launcher/docs
+changed after installed a4; no game behavior change or further deployment.
+Work stops at this requested handoff. All wider acceptance gaps below remain.
+
 Final wrap-up runtime: installed5c0cdd32 passes actual8ea273 explicit freeze
 campaign with normal stable exit0. Consumed supported palettes/points/proxies,
 object transform and retained bounds remain exact across freeze and beyond
@@ -16,7 +27,7 @@ that valid invalidation. Script-only5151bf9e repairs that sequencing; the full
 death, grenade impulse, building-floor, arbitrary-unit or general skin acceptance.
 The requested visible demo provides one retained prototype corpse, two unarmed
 stock targets and explicit Physics-tab controls; grenade throwing keeps normal
-game behavior. Final documentation/demo rebuild and owner handoff follow.
+game behavior. Final documentation/demo rebuild and owner handoff are complete.
 
 Owner wrap-up request: finish the current changes and stop selecting further
 roadmap tasks. Requested interactive prototype handoff is the final action.
@@ -30,7 +41,7 @@ and recording all mutation attempts. No generic ragdoll completion is claimed.
 Screenshot optics diagnostic51190e99 root six focused checks PASS, including
 actual same-encoder HDR/bloom/meter/scale and stale-source refusal on the device.
 This changes no exposure, snow or mud appearance. Final full build, installed
-explicit-freeze/paired-diagnostic smoke and interactive handoff are pending.
+explicit-freeze/paired-diagnostic smoke and interactive handoff are complete.
 Sand lighting capture remains unexercised. New church runner71ddfe5e is preserved
 on safety but deliberately not merged/launched during wrap-up.
 

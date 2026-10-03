@@ -17,8 +17,12 @@ $settings=@{POSEIDON_USER_DIR=$profile;POSEIDON_REFORGER_WORLD='worlds/eden';POS
 $saved=@{};foreach($key in $settings.Keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process');if($null -eq $settings[$key]){Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue}else{[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}}
 $p=$null;$client=$null;$handoff=$false
 function Send($command){
- $writer.WriteLine(($command|ConvertTo-Json -Compress));$line=$reader.ReadLine()
- if(!$line){throw 'Game harness disconnected.'};$reply=$line|ConvertFrom-Json
+ $writer.WriteLine(($command|ConvertTo-Json -Compress));$deadline=[DateTime]::UtcNow.AddSeconds(30)
+ do{
+  if([DateTime]::UtcNow -gt $deadline){throw 'Harness response deadline exceeded.'}
+  $line=$reader.ReadLine()
+  if(!$line){throw 'Game harness disconnected.'};$reply=$line|ConvertFrom-Json
+ }while($null -eq $reply.ok)
  if(!$reply.ok){throw $line};return $reply
 }
 function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
