@@ -1,5 +1,31 @@
 # Weather owner follow-up, 3 October 2026
 
+20:00 source checkpoint: combined wet-cloth and local-ground mud reflection
+fixes pass root device checks: five cloth tests, seven wet-soil tests, one
+explicit actual-edge replay and twenty physical rain-water tests. The recorded
+289 owner edge samples include39 downward reflections and250 available-sky
+controls; the replay preserves bounded energy and removes unavailable sky.
+This uses actual owner slopes with a flat native-plane control, not the game's
+filtered fragment normals or an SSR hit. Cloth controls use decoded stock
+atlas colours and preserve camouflage contrast under controlled lighting.
+Installed appearance acceptance remains pending; the full game build is running.
+
+Actual installed e817 Eden542d35 exits normally0 with stable pair and original
+source/weather/camera/water/clock controls. Root rejects grey washed-out wet
+camouflage and cyan mud edges. Functional wetness is present, but appearance
+remains OPEN. Directional sky GPU probes identify unchanged blue fallback below
+the local horizon even under cloud cover. The source fixes use approximate
+already-lit ground radiance for blocked mud reflections and a porous exterior
+film with broad reflection for cloth, preserving physical source admission.
+
+Installed16d296c6 exact coarse capture c355bb exports the full2,105,440-byte
+native bed/depth file and exits normally0, but the campaign FAILS its strict
+pendingSeconds comparison: cJSON decimal serialization changes one binary64
+ULP. The Rain arm is not run.11fe706c adds exact hexadecimal receipts for all
+five binary64 fields without changing water mathematics or the binary format.
+Root native O0/O2 and receipt rejection/script self-tests pass. This repair is
+source-only until the combined build/deploy; occupied-flight cost remains OPEN.
+
 19:18 checkpoint: actual isolated stock corpse442e46 PASSES all installed
 opt-in lifecycle gates with unchanged e81744f4 pair and normal zero exit. Forty-one
 real solver updates over0.680simsec produce0.153947m maximum body-origin travel;
