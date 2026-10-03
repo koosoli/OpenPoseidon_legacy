@@ -1,4 +1,5 @@
 #define_import_path ground_wet
+#import rain_water_optics::rain_water_sun_specular
 
 // Exact cultivated Noe tiles omit CfgSurfaces. Source identity is carried by
 // bit2; only their unjittered central world-cell region can be soft soil.
@@ -41,4 +42,19 @@ fn soil_wet_fresnel(view_cosine: f32) -> f32 {
 }
 fn soil_wet_sun_lobe(half_cosine: f32) -> f32 {
     return 0.06 * pow(clamp(half_cosine, 0.0, 1.0), 8.0);
+}
+
+// Direct-sun BRDF times N.L, in inverse steradians. The shared Tidewater water
+// interface includes dielectric Fresnel exactly once and normalized GGX/Smith
+// masking. Wet soil has a broad minimum slope width alpha=.4, widened by actual
+// derivatives of the already filtered geometric normal. No grain/time noise.
+// Input wet_amount is the caller's source/snow/physical-rain-admitted fraction;
+// visibility is its actual sun shadow/cloud/sky visibility, never a gloss knob.
+fn soil_wet_sun_specular(ndv: f32, ndl: f32, ndh: f32, vdh: f32,
+                         normal_variation: f32, wet_amount: f32, visibility: f32) -> f32 {
+    if (wet_amount <= 0.0 || visibility <= 0.0) { return 0.0; }
+    // The shared helper adds its .0064 minimum; together these make .16.
+    let variance = sqrt(0.1536 + max(normal_variation, 0.0) * max(normal_variation, 0.0));
+    return rain_water_sun_specular(ndv, ndl, ndh, vdh, variance)
+        * clamp(wet_amount, 0.0, 1.0) * clamp(visibility, 0.0, 1.0);
 }

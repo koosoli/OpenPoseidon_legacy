@@ -1,6 +1,146 @@
 use naga_oil::compose::NagaModuleDescriptor;
 use wgpu::util::DeviceExt;
 
+const SOIL_SUN_PROBE: &str = r#"
+#import ground_wet::{soil_wet_amount, soil_wet_fresnel, soil_wet_sun_specular}
+#import ground_puddles::ground_puddle_rain_factor
+@group(0) @binding(0) var<storage, read_write> result: array<vec4<f32>>;
+@compute @workgroup_size(64)
+fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {
+    let i = id.x;
+    let c = 0.05 + 0.95 * f32(i) / 63.0;
+    let view = vec3<f32>(sqrt(max(1.0 - c*c, 0.0)), c, 0.0);
+    let wet = soil_wet_amount(1.0, 1.0, 0.0);
+    let peak = soil_wet_sun_specular(c, c, 1.0, c, 0.0, wet, 1.0);
+    result[i * 5u] = vec4<f32>(peak,
+        soil_wet_sun_specular(c, c, 1.0, c, 0.5, wet, 1.0),
+        soil_wet_sun_specular(c, c, 1.0, c, 0.0, wet*0.25, 0.4),
+        soil_wet_fresnel(c));
+    result[i * 5u + 1u] = vec4<f32>(
+        soil_wet_sun_specular(c, c, 1.0, c, 0.0, soil_wet_amount(1.0, 0.0, 0.0), 1.0),
+        soil_wet_sun_specular(c, c, 1.0, c, 0.0, soil_wet_amount(0.0, 1.0, 0.0), 1.0),
+        soil_wet_sun_specular(c, c, 1.0, c, 0.0, soil_wet_amount(1.0, 1.0, 0.02), 1.0),
+        soil_wet_sun_specular(c, c, 1.0, c, 0.0, wet, 0.0));
+    result[i * 5u + 2u] = vec4<f32>(
+        soil_wet_sun_specular(c, c, 1.0, c, 0.0, wet*ground_puddle_rain_factor(0.0, 1.0), 1.0),
+        soil_wet_sun_specular(c, c, 1.0, c, 0.0, wet*ground_puddle_rain_factor(1.0, 0.0), 1.0),
+        soil_wet_sun_specular(0.0, c, 1.0, c, 0.0, wet, 1.0),
+        soil_wet_sun_specular(c, 0.0, 1.0, c, 0.0, wet, 1.0));
+    // Independent hemispherical quadrature of actual direct BRDF*N.L. A
+    // uniform incident radiance cannot return more than its incoming energy.
+    var energy = 0.0;
+    var filtered_energy = 0.0;
+    for (var m=0u; m<16u; m+=1u) {
+        let mu = (f32(m)+0.5)/16.0;
+        let radial = sqrt(1.0-mu*mu);
+        for (var p=0u; p<32u; p+=1u) {
+            let az = (f32(p)+0.5)*6.28318530718/32.0;
+            let light = vec3<f32>(radial*cos(az), mu, radial*sin(az));
+            let half_vector = normalize(view+light);
+            let ndh = clamp(half_vector.y, 0.0, 1.0);
+            let vdh = clamp(dot(view, half_vector), 0.0, 1.0);
+            energy += soil_wet_sun_specular(c, mu, ndh, vdh, 0.0, wet, 1.0);
+            filtered_energy += soil_wet_sun_specular(c, mu, ndh, vdh, 0.5, wet, 1.0);
+        }
+    }
+    result[i * 5u + 3u] = vec4<f32>(energy*6.28318530718/512.0,
+        filtered_energy*6.28318530718/512.0,
+        soil_wet_sun_specular(1.0, 1.0, 1.0, 1.0, 0.0, wet, 1.0),
+        soil_wet_sun_specular(1.0, 1.0, 1.0, 1.0, 0.5, wet, 1.0));
+    result[i * 5u + 4u] = vec4<f32>(
+        soil_wet_sun_specular(c, c, 1.0, c, -1.0, wet, 1.0),
+        soil_wet_sun_specular(c, c, 1.0, c, 0.7, wet, 1.0),
+        soil_wet_sun_specular(c, c, 1.0, c, 2.0, wet, 1.0),
+        soil_wet_sun_specular(c, c, 1.0, c, 0.0, 2.0, 2.0));
+}
+"#;
+
+#[test]
+fn wet_soil_sun_coat_composes_and_actual_terrain_uses_one_fresnel_and_filtered_normal() {
+    let mut composer = super::build_composer();
+    composer.make_naga_module(NagaModuleDescriptor {
+        source: SOIL_SUN_PROBE,
+        file_path: "actual_soil_sun_probe.wgsl",
+        ..Default::default()
+    }).unwrap_or_else(|e| panic!("{}", e.emit_to_string(&composer)));
+    let source = include_str!("../terrain/terrain.wgsl");
+    let derivative = source.find("let moist_normal_variation = length(fwidth(geometric_n));").unwrap();
+    let coat = source.find("if (soil_wet > 0.0) {").unwrap();
+    assert!(derivative < coat, "derivatives must be in uniform control flow");
+    assert!(source.contains("let moist_n = geometric_n"));
+    assert!(source.contains("soil_wet *= rain_proof"));
+    assert!(source.contains("soil_wet_amount(mud, tp.rain_wetness, snow_cover("));
+    assert!(source.contains("sun_diffuse * 3.14159265359 * solar_coat"));
+    assert!(source.contains("soil_wet * (1.0 - rain_puddle)"));
+    assert!(!source.contains("reflected += sun_diffuse * soil_wet_sun_lobe"),
+        "solar dielectric Fresnel must not pass through the environment Fresnel mix again");
+    let helper = include_str!("ground_wet.wgsl");
+    assert!(helper.contains("rain_water_sun_specular(ndv, ndl, ndh, vdh, variance)"));
+    assert!(helper.contains("sqrt(0.1536 +"));
+}
+
+#[test]
+fn actual_wet_soil_sun_gpu_is_energy_bounded_broad_filtered_and_physically_gated() {
+    let (device, queue) = crate::gfx3d::cull::tests::headless()
+        .expect("wet soil solar coat requires a real GPU device");
+    let mut composer = super::build_composer();
+    let module = composer.make_naga_module(NagaModuleDescriptor {
+        source: SOIL_SUN_PROBE, file_path: "actual_soil_sun_probe.wgsl", ..Default::default()
+    }).unwrap_or_else(|e| panic!("{}", e.emit_to_string(&composer)));
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("actual_soil_sun"), source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(module)),
+    });
+    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("actual_soil_sun"), layout: None, module: &shader,
+        entry_point: Some("cs_probe"), compilation_options: Default::default(), cache: None,
+    });
+    let initial = [0.0f32; 64 * 20];
+    let output = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("soil_sun_results"), contents: bytemuck::cast_slice(&initial),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    });
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("soil_sun_readback"), size: (initial.len() * 4) as u64,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false,
+    });
+    let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("soil_sun_results"), layout: &pipeline.get_bind_group_layout(0),
+        entries: &[wgpu::BindGroupEntry { binding: 0, resource: output.as_entire_binding() }],
+    });
+    let mut encoder = device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipeline); pass.set_bind_group(0, &bind, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+    encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, (initial.len() * 4) as u64);
+    queue.submit(Some(encoder.finish()));
+    let slice = staging.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |r| { tx.send(r).unwrap(); });
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap(); rx.recv().unwrap().unwrap();
+    let bytes = slice.get_mapped_range();
+    let samples = bytemuck::cast_slice::<u8, f32>(&bytes);
+    let eta = 1.333f32;
+    let f0 = ((eta-1.0)/(eta+1.0)).powi(2);
+    let normal_peak = f0 / (4.0 * std::f32::consts::PI * 0.16);
+    for s in samples.chunks_exact(20) {
+        assert!(s.iter().all(|v| v.is_finite() && *v >= 0.0));
+        assert!(s[0] > 0.0 && s[0] < 1.3 && s[1] < s[0], "resolved broad coat and reduced filtered peak");
+        assert!((s[2] - s[0]*0.1).abs() < 1e-6, "admitted wet and actual visibility remain linear");
+        assert!((0.01999..=0.12001).contains(&s[3]), "rough sky cap is unchanged");
+        assert_eq!(&s[4..12], &[0.0;8], "dry/hard/snow/occluded/sheltered/unproven/backfacing must be inert");
+        assert!(s[12] > 0.0 && s[12] <= 1.0 && s[13] > 0.0 && s[13] <= 1.0,
+            "actual GGX hemispherical energy must be bounded");
+        assert!((s[14]-normal_peak).abs() < 1e-6, "independent dielectric F0/GGX peak oracle");
+        assert!(s[15] < s[14] && s[14] > 0.005 && s[14] < 0.02, "normal-incidence response is broad and finite");
+        assert!((s[16]-s[0]).abs() < 1e-6, "negative derivative input cannot sharpen below the broad floor");
+        assert!((s[17]-s[18]).abs() < 1e-6, "unresolved width remains capped and cannot sparkle");
+        assert!((s[19]-s[0]).abs() < 1e-6, "external weights cannot exceed one");
+    }
+    drop(bytes); staging.unmap();
+}
+
 const SOIL_SURFACE_PROBE: &str = r#"
 #import ground_wet::{soil_wet_amount, soil_wet_surface}
 @group(0) @binding(0) var<storage, read_write> result: array<vec4<f32>>;
