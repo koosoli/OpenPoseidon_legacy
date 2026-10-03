@@ -25,6 +25,7 @@ using namespace Poseidon;
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 #include <Poseidon/Dev/Diag/TerrainBrush.hpp>
+#include <Poseidon/Dev/Diag/CaveEditor.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/World/Terrain/TerrainCrater.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp>
@@ -3040,6 +3041,75 @@ void RegisterPhysicsProbe(HarnessServer& hs)
                 cJSON_AddItemToObject(item, "firstWorld", vector(anchor.firstWorld));
                 cJSON_AddItemToObject(item, "secondWorld", vector(anchor.secondWorld));
                 cJSON_AddNumberToObject(item, "separation", anchor.separation);
+            }
+            return HarnessProtocol::JsonResponse(out);
+        });
+    hs.RegisterCommand({"dev_cave_editor", "Create/undo bounded mission-local horizontal caves", {}},
+        [](const std::string&, cJSON* root) -> std::string {
+            if (!AppConfig::Instance().DevMode() || !GWorld || !GLandscape || GWorld->GetMode()==GModeNetware)
+                return HarnessProtocol::ErrorResponse("requires --dev and a single-player world");
+            const char* action=HarnessProtocol::GetString(root,"action");
+            if (!action) return HarnessProtocol::ErrorResponse("needs state, create or undo");
+            auto number=[&](const char* key, float& value) {
+                const auto* v=cJSON_GetObjectItemCaseSensitive(root,key);
+                if (!cJSON_IsNumber(v) || !std::isfinite(v->valuedouble)) return false;
+                value=float(v->valuedouble); return std::isfinite(value);
+            };
+            float x=0,y=0,z=0;
+            const bool point=cJSON_HasObjectItem(root,"x") || cJSON_HasObjectItem(root,"y") || cJSON_HasObjectItem(root,"z");
+            if (point && (!number("x",x) || !number("y",y) || !number("z",z)))
+                return HarnessProtocol::ErrorResponse("point requires finite x/y/z");
+            const float extent=(GLandscape->GetTerrainRange()-1)*GLandscape->GetTerrainGrid();
+            if (point && (x<0 || z<0 || x>=extent || z>=extent))
+                return HarnessProtocol::ErrorResponse("point outside terrain");
+            if (std::strcmp(action,"create")==0) {
+                float heading,width,height,length;
+                if (!point || !number("heading",heading) || !number("width",width) ||
+                    !number("height",height) || !number("length",length))
+                    return HarnessProtocol::ErrorResponse("create needs x/y/z, heading, width, height, length");
+                if (!CreateEditorCave(x,y,z,heading,width,height,length))
+                    return HarnessProtocol::ErrorResponse(EditorCaveStatus());
+            } else if (std::strcmp(action,"undo")==0) {
+                if (!RemoveLastEditorCave()) return HarnessProtocol::ErrorResponse(EditorCaveStatus());
+            } else if (std::strcmp(action,"state")!=0)
+                return HarnessProtocol::ErrorResponse("state, create or undo only");
+            auto* out=cJSON_CreateObject();
+            cJSON_AddNumberToObject(out,"count",double(EditorCaveCount()));
+            cJSON_AddStringToObject(out,"status",EditorCaveStatus());
+            cJSON_AddBoolToObject(out,"missionLocal",true);
+            cJSON_AddStringToObject(out,"worldName",GLandscape->GetName());
+            cJSON_AddNumberToObject(out,"grid",GLandscape->GetTerrainGrid());
+            cJSON_AddNumberToObject(out,"heightRevision",double(GLandscape->HeightRevision()));
+            cJSON_AddNumberToObject(out,"brushDefaultRadius",TerrainBrush().radius);
+            if (point) {
+                float floor=0;
+                cJSON_AddBoolToObject(out,"inFootprint",GLandscape->InTerrainHole(x,z,&floor));
+                cJSON_AddBoolToObject(out,"atHeight",GLandscape->InTerrainHole(x,z,nullptr,y));
+                cJSON_AddNumberToObject(out,"holeFloor",floor);
+                cJSON_AddNumberToObject(out,"terrainY",GLandscape->SurfaceY(x,z));
+                cJSON_AddNumberToObject(out,"roadY",GLandscape->RoadSurfaceY(Vector3(x,y,z)));
+                Vector3 camera(x,y,z);
+                cJSON_AddNumberToObject(out,"cameraFloorY",GLandscape->CameraFloorY(camera,nullptr,false));
+                if (cJSON_HasObjectItem(root,"rayFromY") || cJSON_HasObjectItem(root,"rayToY")) {
+                    float fromY,toY;
+                    if (!number("rayFromY",fromY) || !number("rayToY",toY) || fromY==toY || std::abs(fromY-toY)>100) {
+                        cJSON_Delete(out);
+                        return HarnessProtocol::ErrorResponse("ray needs finite unequal heights, <=100m apart");
+                    }
+                    Vector3 hit;
+                    const float distance=GLandscape->IntersectWithGround(&hit,Vector3(x,fromY,z),
+                        Vector3(0,toY>fromY ? 1.0f : -1.0f,0),0,std::abs(fromY-toY));
+                    cJSON_AddBoolToObject(out,"terrainRayHit",distance>=0);
+                    if (distance>=0) {
+                        cJSON_AddNumberToObject(out,"terrainRayY",hit.Y());
+                        cJSON_AddNumberToObject(out,"terrainRayDistance",distance);
+                    }
+                }
+                float edges[64*4];
+                const int count=GLandscape->TerrainHoleDrawEdges(camera,400,edges,64);
+                cJSON_AddNumberToObject(out,"drawRecords",count);
+                cJSON_AddBoolToObject(out,"boundedHeader",count>0 && edges[3]==2);
+                if (count>0 && edges[3]==2) cJSON_AddNumberToObject(out,"ceilingY",edges[2]);
             }
             return HarnessProtocol::JsonResponse(out);
         });

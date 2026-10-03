@@ -1,5 +1,6 @@
 #include <Poseidon/Dev/Diag/MapEditorTab.hpp>
 #include <Poseidon/Dev/Diag/TerrainBrush.hpp>
+#include <Poseidon/Dev/Diag/CaveEditor.hpp>
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/TerrainCrater.hpp>
@@ -13,12 +14,12 @@ MapEditorAction DrawMapEditorTab()
 {
     ImGui::SeparatorText("Terrain height painting");
     auto& brush = TerrainBrush();
-    Checkbox("Enable terrain brush", &brush.enabled);
+    if (Checkbox("Enable terrain brush", &brush.enabled) && brush.enabled) CaveEditor().enabled = false;
     Checkbox("Show brush radius at cursor", &brush.showRadius);
     if (RadioButton("Raise / build hills", brush.raise)) brush.raise = true;
     PanelSameLine();
     if (RadioButton("Lower / dig craters", !brush.raise)) brush.raise = false;
-    SliderFloat("Brush radius", &brush.radius, 0.5f, 250.0f, "%.1f m");
+    SliderFloat("Brush radius", &brush.radius, 0.1f, 250.0f, "%.1f m");
     SliderFloat("Height change per second", &brush.metresPerSecond, 0.1f, 32.0f, "%.1f m/s");
     if (GLandscape)
     {
@@ -45,11 +46,30 @@ MapEditorAction DrawMapEditorTab()
         if (Button("Cancel terrain restore")) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
+    ImGui::SeparatorText("Horizontal holes / caves");
+    auto& cave = CaveEditor();
+    Checkbox("Enable cave placement", &cave.enabled);
+    if (cave.enabled) brush.enabled = false;
+    SliderFloat("Opening width", &cave.width, 0.1f, 12.0f, "%.2f m");
+    SliderFloat("Opening height", &cave.height, 0.1f, 8.0f, "%.2f m");
+    SliderFloat("Horizontal depth", &cave.length, 1.0f, 64.0f, "%.1f m");
+    SliderFloat("Entrance floor offset", &cave.floorOffset, -4.0f, 2.0f, "%.2f m");
+    if (Button("Place cave (free-fly)")) action = MapEditorAction::StartCave;
+    ImGui::BeginDisabled(EditorCaveCount() == 0);
+    if (Button("Undo last cave")) action = MapEditorAction::UndoCave;
+    ImGui::EndDisabled();
+    ImGui::Text("Caves this mission: %zu / 8", EditorCaveCount());
+    ImGui::TextWrapped("%s", EditorCaveStatus());
+    ImGui::TextWrapped("Point into rising ground and click LEFT MOUSE to create a horizontal cave. "
+        "WHEEL resizes width and height down to 10 cm; SHIFT+WHEEL changes depth. "
+        "The cave has a floor, walls, ceiling and a closed back. Terrain above the ceiling stays intact. "
+        "Very small holes are openings only: a soldier cannot fit through them. "
+        "Mission-local prototype; no save/export or AI cave routing yet.");
     ImGui::SeparatorText("How to paint");
     ImGui::TextWrapped("1. Choose Raise or Lower, radius and speed.\n"
         "2. Click Start painting to enter free-fly and close this panel.\n"
         "3. Point the cursor at land and HOLD LEFT MOUSE. Longer holds change more height.\n"
-        "4. WHEEL changes radius. Hold LEFT ALT while painting to reverse Raise/Lower temporarily.\n"
+        "4. WHEEL changes radius. Hold SHIFT to dig/raise four times faster; LEFT ALT reverses Raise/Lower.\n"
         "5. Release LEFT MOUSE to stop. Hold RIGHT MOUSE to look; WASD moves, Q/Z moves up/down.\n"
         "6. Ctrl+` / Ctrl+; reopens Dev Tools to change the brush or disable it.");
     ImGui::TextColored(ImVec4(1.0f,0.8f,0.3f,1.0f), "Mission-local only. No save/export yet.");
@@ -59,9 +79,9 @@ MapEditorAction DrawMapEditorTab()
         "Minimum radius is 0.75 grid cells; small brushes move existing vertices, not sub-grid geometry. Water cannot be painted. "
         "Restore terrain removes all edits since the first stroke; reload also restores the mission. "
         "Buildings and AI paths are not updated.");
-    ImGui::TextWrapped("Sideways caves and tunnels are not supported by height painting. "
-        "They need 3D terrain geometry plus matching movement, projectile and physics collision; "
-        "lowering this brush creates an open crater, not a cave with a roof.");
+    ImGui::TextWrapped("Use Horizontal holes / caves for sideways openings. "
+        "Height painting creates open craters; its smallest effective radius depends on the terrain grid. "
+        "Cave openings can be smaller than that grid. Box3D dynamic bodies still use the original terrain heightfield.");
     ImGui::TextWrapped("New maps from scratch, save/export and undo history are not implemented yet. "
         "This tab is the home for those future editor tools, not a finished map authoring pipeline.");
     }

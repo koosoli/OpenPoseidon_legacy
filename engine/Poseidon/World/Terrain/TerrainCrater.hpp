@@ -13,10 +13,10 @@ inline float BallisticCraterScale(float indirectHit)
 }
 inline float TerrainBrushWheelRadius(float requested, float wheelSteps)
 {
-    if (!std::isfinite(requested)) requested = 64.0f;
-    requested = std::clamp(requested, 0.5f, 250.0f);
+    if (!std::isfinite(requested)) requested = 8.0f;
+    requested = std::clamp(requested, 0.1f, 250.0f);
     if (!std::isfinite(wheelSteps)) return requested;
-    return std::clamp(requested * std::pow(1.15f, std::clamp(wheelSteps, -64.0f, 64.0f)), 0.5f, 250.0f);
+    return std::clamp(requested * std::pow(1.15f, std::clamp(wheelSteps, -64.0f, 64.0f)), 0.1f, 250.0f);
 }
 
 inline float TerrainBrushRadius(float requested, float spacing)
@@ -24,7 +24,7 @@ inline float TerrainBrushRadius(float requested, float spacing)
     // The furthest point from a grid vertex is a cell centre: sqrt(0.5) cells.
     // A little support beyond that reaches a vertex everywhere without forcing
     // a three-cell-wide bowl when the user wants a small brush.
-    return std::max(std::clamp(requested, 0.5f, 250.0f), spacing * 0.75f);
+    return std::max(std::clamp(requested, 0.1f, 250.0f), spacing * 0.75f);
 }
 inline bool RocketCraterGroundContact(float impactY, float groundY, float seaY)
 {

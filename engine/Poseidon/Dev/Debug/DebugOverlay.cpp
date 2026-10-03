@@ -52,6 +52,7 @@
 #include <Poseidon/Dev/Diag/FixedStepTab.hpp>
 #include <Poseidon/Dev/Diag/PhysicsTab.hpp>
 #include <Poseidon/Dev/Diag/TerrainBrush.hpp>
+#include <Poseidon/Dev/Diag/CaveEditor.hpp>
 #include <Poseidon/World/Terrain/TerrainCrater.hpp>
 #include <Poseidon/Dev/Diag/MapEditorTab.hpp>
 #include <Poseidon/Dev/Diag/PictureModeTab.hpp>
@@ -1037,12 +1038,22 @@ void DrawZeusInteractionOverlay()
     if (!camera)
         return;
     ImDrawList* draw = ImGui::GetForegroundDrawList();
+    if (Dev::CaveEditor().enabled)
+    {
+        char text[256];
+        const auto& cave = Dev::CaveEditor();
+        std::snprintf(text,sizeof(text),"MAP EDITOR | CAVE %.2f x %.2f m | depth %.1f m | LMB place | Wheel opening | Shift+Wheel depth",
+                      cave.width,cave.height,cave.length);
+        draw->AddRectFilled(ImVec2(12,64),ImVec2(12+ImGui::CalcTextSize(text).x+16,92),IM_COL32(0,0,0,190));
+        draw->AddText(ImVec2(20,70),IM_COL32(255,230,150,255),text);
+        draw->AddText(ImVec2(20,98),IM_COL32(255,230,150,255),Dev::EditorCaveStatus());
+    }
     if (Dev::TerrainBrush().enabled)
     {
         char text[192];
         const auto& brush = Dev::TerrainBrush();
         const bool raise = brush.raise != ((SDL_GetModState() & SDL_KMOD_LALT) != 0);
-        std::snprintf(text, sizeof(text), "MAP EDITOR | %s | radius %.1f m | %.1f m/s | LMB paint | Wheel radius | Left Alt reverse",
+        std::snprintf(text, sizeof(text), "MAP EDITOR | %s | radius %.1f m | %.1f m/s | LMB paint | Wheel radius | Shift faster | Left Alt reverse",
                       raise ? "RAISE" : "LOWER", brush.radius, brush.metresPerSecond);
         draw->AddRectFilled(ImVec2(12, 64), ImVec2(12 + ImGui::CalcTextSize(text).x + 16, 92), IM_COL32(0,0,0,190));
         draw->AddText(ImVec2(20, 70), IM_COL32(255,230,150,255), text);
@@ -7480,11 +7491,24 @@ void DrawMainWindow()
                         "Terrain restore refused: baseline/grid mismatch or collision creation failed.";
                 });
             }
+            if (editorAction == Dev::MapEditorAction::UndoCave)
+                Defer([] { Dev::RemoveLastEditorCave(); s_zeusStatus = Dev::EditorCaveStatus(); });
+            if (editorAction == Dev::MapEditorAction::StartCave)
+            {
+                EnableZeusCamera();
+                if (s_zeusCamera)
+                {
+                    Dev::TerrainBrush().enabled = false;
+                    Dev::CaveEditor().enabled = true;
+                    SetVisible(false);
+                }
+            }
             if (editorAction == Dev::MapEditorAction::StartPainting)
             {
                 EnableZeusCamera();
                 if (s_zeusCamera)
                 {
+                    Dev::CaveEditor().enabled = false;
                     Dev::TerrainBrush().enabled = true;
                     SetVisible(false);
                 }
@@ -7835,7 +7859,16 @@ void ProcessEvent(const SDL_Event& event)
         {
             s_zeusConsumeMouseEvent = true;
             const SDL_Keymod modifiers = SDL_GetModState();
-            if (Dev::TerrainBrush().enabled)
+            if (Dev::CaveEditor().enabled)
+            {
+                const ZeusPoint cursor = ZeusCursorPixel();
+                s_zeusSuppressNextMouseUp = true;
+                Defer([cursor] {
+                    Dev::CreateEditorCaveAtPixel(cursor.x,cursor.y);
+                    s_zeusStatus = Dev::EditorCaveStatus();
+                });
+            }
+            else if (Dev::TerrainBrush().enabled)
             {
                 s_terrainBrushDragging = true;
                 s_terrainBrushTickMs = SDL_GetTicks();
@@ -7920,6 +7953,14 @@ void ProcessEvent(const SDL_Event& event)
         // the free-fly camera vertically and a Zeus binding would fight it.
         // The wheel is only claimed while something is selected, leaving it to
         // the game otherwise.
+        else if (event.type == SDL_EVENT_MOUSE_WHEEL && Dev::CaveEditor().enabled && event.wheel.y != 0.0f)
+        {
+            s_zeusConsumeMouseEvent = true;
+            const float steps = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
+            if ((SDL_GetModState() & SDL_KMOD_SHIFT) != 0)
+                Dev::CaveEditor().length = std::clamp(Dev::CaveEditor().length * std::pow(1.15f,steps),1.0f,64.0f);
+            else Dev::ResizeEditorCave(steps);
+        }
         else if (event.type == SDL_EVENT_MOUSE_WHEEL && Dev::TerrainBrush().enabled && event.wheel.y != 0.0f)
         {
             s_zeusConsumeMouseEvent = true;
@@ -8057,8 +8098,9 @@ void NewFrame()
         s_terrainBrushTickMs = SDL_GetTicks();
         const ZeusPoint cursor = ZeusCursorPixel();
         const bool invert = (SDL_GetModState() & SDL_KMOD_LALT) != 0;
-        Defer([cursor,seconds,invert] {
-            s_zeusStatus = Dev::PaintTerrainAtPixel(cursor.x,cursor.y,seconds,invert)
+        const bool fast = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
+        Defer([cursor,seconds,invert,fast] {
+            s_zeusStatus = Dev::PaintTerrainAtPixel(cursor.x,cursor.y,seconds,invert,fast)
                 ? "Terrain brush: applied (mission-local)." : "Terrain brush: no editable land hit.";
         });
     }

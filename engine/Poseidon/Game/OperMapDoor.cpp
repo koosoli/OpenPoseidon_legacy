@@ -609,7 +609,7 @@ void OperField::CreateField(int mask)
                     item->_typeSoldier = OITWater;
                     item->_type = OITWater;
                 }
-                if (nHoles > 0 && Landscape::InTerrainHoles(holes, nHoles, xt, zt))
+                if (nHoles > 0 && Landscape::TerrainHoleIndex(holes, nHoles, xt, zt, GLandscape->SurfaceY(xt,zt)) >= 0)
                 {
                     item->_typeSoldier = OITSpace; // Malprave terrainHole3b (was OITAvoid)
                     item->_type = OITSpace;
@@ -854,7 +854,7 @@ void OperField::CreateField(int mask)
         }
         float xt = _x * LandGrid + dx * OperItemGrid + OperItemGrid * 0.5f;
         float zt = _z * LandGrid + dz * OperItemGrid + OperItemGrid * 0.5f;
-        if (Landscape::InTerrainHoles(holes, nHoles, xt, zt))
+        if (Landscape::TerrainHoleIndex(holes, nHoles, xt, zt, GLandscape->SurfaceY(xt,zt)) >= 0)
         {
             _items[dz][dx]._type = OITNormal;
             _items[dz][dx]._typeSoldier = OITNormal;

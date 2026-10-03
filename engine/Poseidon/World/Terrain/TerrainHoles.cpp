@@ -39,6 +39,7 @@ struct ShapeHolePoly
     int n = 0;
     float x[16], z[16]; // model XZ, convex, counter-clockwise
     float floorY = 0;   // terrainHole3: lowest roadway point of the model (model Y)
+    float ceilingY = 1e20f;
     bool draw = true;   // terrainHole8: false for terrain_hole_hidden*: the terrain is still drawn there
 };
 
@@ -150,6 +151,17 @@ const std::vector<ShapeHolePoly>& ShapeHolesOf(const LODShape* shape)
     const Shape* mem = shape->MemoryLevel();
     if (mem)
     {
+        // Explicit opt-in; existing footprint point heights remain ignored.
+        float ceilingY = 1e20f;
+        const int ceilingSelection = mem->FindNamedSel("terrain_hole_ceiling");
+        if (ceilingSelection >= 0)
+        {
+            const auto& selection = mem->NamedSel(ceilingSelection);
+            if (selection.Size() != 1 || !std::isfinite(mem->Pos(selection[0]).Y()) ||
+                mem->Pos(selection[0]).Y() <= floorY)
+                return holes.polys;
+            ceilingY = mem->Pos(selection[0]).Y();
+        }
         for (int k = 0; k <= 17; k++)
         {
             // terrainHole8: k 0-8 = drawn holes, 9-17 = hidden ones (terrain_hole_hidden, terrain_hole_hidden1 .. 8)
@@ -179,6 +191,7 @@ const std::vector<ShapeHolePoly>& ShapeHolesOf(const LODShape* shape)
             }
             ShapeHolePoly poly;
             poly.floorY = floorY;
+            poly.ceilingY = ceilingY;
             poly.draw = !hidden;
             if (HullXZ(pts, poly))
             {
@@ -240,6 +253,16 @@ bool MakeHoleArea(const Object* obj, const ShapeHolePoly& poly, Landscape::Terra
     area.minZ = *std::min_element(area.z, area.z + poly.n);
     area.maxZ = *std::max_element(area.z, area.z + poly.n);
     area.floorY = obj->PositionModelToWorld(Vector3(cx / poly.n, poly.floorY, cz / poly.n)).Y();
+    area.ceilingY = 1e20f;
+    if (poly.ceilingY < 1e19f)
+    {
+        // Ceiling metadata is world-horizontal. Refuse pitched/sheared instances,
+        // rather than cutting the wrong half of a mountain.
+        if (std::abs(obj->DirectionAside().Y()) > 1e-4f || std::abs(obj->Direction().Y()) > 1e-4f)
+            return false;
+        area.ceilingY = obj->PositionModelToWorld(Vector3(cx/poly.n,poly.ceilingY,cz/poly.n)).Y();
+        if (!std::isfinite(area.ceilingY) || area.ceilingY <= area.floorY) return false;
+    }
     return true;
 }
 } // namespace
@@ -294,12 +317,13 @@ int Landscape::GatherTerrainHoles(Vector3Par pos, float radius, TerrainHoleArea*
     return n;
 }
 
-int Landscape::TerrainHoleIndex(const TerrainHoleArea* holes, int n, float x, float z)
+int Landscape::TerrainHoleIndex(const TerrainHoleArea* holes, int n, float x, float z, float y)
 {
     for (int h = 0; h < n; h++)
     {
         const TerrainHoleArea& a = holes[h];
-        if (x < a.minX || x > a.maxX || z < a.minZ || z > a.maxZ)
+        if (a.n < 3 || a.n > 16 || !std::isfinite(x) || !std::isfinite(z) || !std::isfinite(y) ||
+            !std::isfinite(a.ceilingY) || y > a.ceilingY || x < a.minX || x > a.maxX || z < a.minZ || z > a.maxZ)
         {
             continue;
         }
@@ -325,7 +349,7 @@ bool Landscape::InTerrainHoles(const TerrainHoleArea* holes, int n, float x, flo
     return TerrainHoleIndex(holes, n, x, z) >= 0;
 }
 
-bool Landscape::InTerrainHole(float x, float z, float* floorY) const
+bool Landscape::InTerrainHole(float x, float z, float* floorY, float y) const
 {
     if (GHoleShapeCount.load(std::memory_order_relaxed) == 0)
     {
@@ -356,8 +380,8 @@ bool Landscape::InTerrainHole(float x, float z, float* floorY) const
         for (const ShapeHolePoly& poly : ShapeHolesOf(shape))
         {
             TerrainHoleArea area;
-            MakeHoleArea(obj, poly, area);
-            if (TerrainHoleIndex(&area, 1, x, z) == 0)
+            if (!MakeHoleArea(obj, poly, area)) continue;
+            if (TerrainHoleIndex(&area, 1, x, z, y) == 0)
             {
                 if (floorY)
                 {
@@ -398,9 +422,17 @@ int Landscape::TerrainHoleDrawEdges(Vector3Par camPos, float radius, float* edge
         {
             continue; // terrainHole8: hidden hole, the terrain stays drawn
         }
-        if (nEdges + a.n > maxEdges)
+        const bool bounded = a.ceilingY < 1e19f;
+        if (nEdges + a.n + (bounded ? 1 : 0) > maxEdges)
         {
             continue; // a smaller, further hole may still fit
+        }
+        if (bounded)
+        {
+            float* header = edges + nEdges++ * 4;
+            header[0] = header[1] = 0;
+            header[2] = a.ceilingY;
+            header[3] = 2; // metadata, not an edge; followed by ordinary 0/1 edges
         }
         for (int v = 0; v < a.n; v++)
         {
@@ -434,13 +466,13 @@ float Landscape::CameraFloorY(Vector3& pos, const Vector3* focus, bool aboveWate
         return groundY; // above the ground, or no hole anywhere
     }
     float floorY;
-    if (InTerrainHole(pos.X(), pos.Z(), &floorY))
+    if (InTerrainHole(pos.X(), pos.Z(), &floorY, pos.Y()))
     {
         return std::min(groundY, floorY);
     }
     // outside every hole: a camera following something in a hole is pulled back into the hole, toward its focus
     if (!focus || pos.Y() >= groundY || focus->Y() >= groundAt(focus->X(), focus->Z()) ||
-        !InTerrainHole(focus->X(), focus->Z(), &floorY))
+        !InTerrainHole(focus->X(), focus->Z(), &floorY, focus->Y()))
     {
         return groundY;
     }
@@ -451,7 +483,7 @@ float Landscape::CameraFloorY(Vector3& pos, const Vector3* focus, bool aboveWate
     {
         const float t = 0.5f * (tIn + tOut);
         const Vector3 p = f + dir * t;
-        if (InTerrainHole(p.X(), p.Z()))
+        if (InTerrainHole(p.X(), p.Z(), nullptr, p.Y()))
         {
             tIn = t;
         }
@@ -462,7 +494,7 @@ float Landscape::CameraFloorY(Vector3& pos, const Vector3* focus, bool aboveWate
     }
     pos = f + dir * tIn;
     float posFloorY = floorY;
-    InTerrainHole(pos.X(), pos.Z(), &posFloorY); // the hole the camera ended up in (the focus's, or one on the way)
+    InTerrainHole(pos.X(), pos.Z(), &posFloorY, pos.Y()); // the hole the camera ended up in (the focus's, or one on the way)
     return std::min(groundAt(pos.X(), pos.Z()), posFloorY);
 }
 
@@ -474,7 +506,7 @@ bool Landscape::InTerrainHoleBelow(Vector3Par p, float depth) const
         return false;
     }
     // the height test first: it is a terrain lookup, the hole test takes the registry lock (called per man per frame)
-    return p.Y() < SurfaceY(p.X(), p.Z()) - depth && InTerrainHole(p.X(), p.Z());
+    return p.Y() < SurfaceY(p.X(), p.Z()) - depth && InTerrainHole(p.X(), p.Z(), nullptr, p.Y());
 }
 
 bool Landscape::LeavesTerrainHoleUnderground(Vector3Par from, Vector3Par to) const
@@ -487,7 +519,7 @@ bool Landscape::LeavesTerrainHoleUnderground(Vector3Par from, Vector3Par to) con
     {
         return false; // no sideways movement
     }
-    return InTerrainHoleBelow(from, 0.5f) && !InTerrainHole(to.X(), to.Z()) && to.Y() < SurfaceY(to.X(), to.Z()) - 0.3f;
+    return InTerrainHoleBelow(from, 0.5f) && !InTerrainHole(to.X(), to.Z(), nullptr, to.Y()) && to.Y() < SurfaceY(to.X(), to.Z()) - 0.3f;
 }
 
 bool Landscape::CutsTerrainHole(const Object* obj)
@@ -511,7 +543,7 @@ float Landscape::DecalSurfaceY(float x, float z, float refY) const
     const float terrainY = SurfaceY(x, z);
     // 5 cm, not more: on the top steps of a stairwell (just under the terrain) a decal must sit on the step, not float
     // at the terrain height over it; a vertex on a roof at the terrain height finds that roof as its roadway anyway
-    if (refY >= terrainY - 0.05f || GHoleShapeCount.load(std::memory_order_relaxed) == 0 || !InTerrainHole(x, z))
+    if (refY >= terrainY - 0.05f || GHoleShapeCount.load(std::memory_order_relaxed) == 0 || !InTerrainHole(x, z, nullptr, refY))
     {
         return terrainY; // the stock fit (on and above the ground, and everywhere outside holes)
     }
@@ -558,8 +590,8 @@ bool Landscape::InTerrainHoleRoom(Vector3Par p) const
         for (const ShapeHolePoly& poly : ShapeHolesOf(shape))
         {
             TerrainHoleArea area;
-            MakeHoleArea(obj, poly, area);
-            if (TerrainHoleIndex(&area, 1, p.X(), p.Z()) != 0)
+            if (!MakeHoleArea(obj, poly, area)) continue;
+            if (TerrainHoleIndex(&area, 1, p.X(), p.Z(), p.Y()) != 0)
             {
                 continue;
             }

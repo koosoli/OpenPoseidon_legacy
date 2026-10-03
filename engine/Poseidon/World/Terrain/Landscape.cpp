@@ -1981,7 +1981,7 @@ float Landscape::RoadSurfaceY(float xC, float zC, float* dX, float* dZ, Texture*
         //_world->GetScene()->DrawCollisionStar(ret);
         // if road is under surface, use normal surface
         // (Malprave terrainHole1: except in a terrain hole, where the ground is cut away and the roadway is the floor)
-        if (ret.Y() >= landY || ((holeChecked = true), inHole = InTerrainHole(xC, zC, &holeFloor)))
+        if (ret.Y() >= landY || ((holeChecked = true), inHole = InTerrainHole(xC, zC, &holeFloor, landY)))
         {
             if (dX)
             {
@@ -1996,7 +1996,7 @@ float Landscape::RoadSurfaceY(float xC, float zC, float* dX, float* dZ, Texture*
     }
     if (!holeChecked)
     {
-        inHole = InTerrainHole(xC, zC, &holeFloor);
+        inHole = InTerrainHole(xC, zC, &holeFloor, landY);
     }
     if (inHole)
     {
@@ -2141,7 +2141,7 @@ float Landscape::RoadSurfaceY(Vector3Par pos, float* dX, float* dZ, Texture** te
         //_world->GetScene()->DrawCollisionStar(ret);
         // if road is under surface, use normal surface
         // (Malprave terrainHole1: except in a terrain hole, where the ground is cut away and the roadway is the floor)
-        if (ret.Y() >= landY || ((holeChecked = true), inHole = InTerrainHole(pos.X(), pos.Z(), &holeFloor)))
+        if (ret.Y() >= landY || ((holeChecked = true), inHole = InTerrainHole(pos.X(), pos.Z(), &holeFloor, pos.Y())))
         {
             if (dX)
             {
@@ -2175,7 +2175,7 @@ float Landscape::RoadSurfaceY(Vector3Par pos, float* dX, float* dZ, Texture** te
     }
     if (!holeChecked)
     {
-        inHole = InTerrainHole(pos.X(), pos.Z(), &holeFloor);
+        inHole = InTerrainHole(pos.X(), pos.Z(), &holeFloor, pos.Y());
     }
     if (inHole)
     {

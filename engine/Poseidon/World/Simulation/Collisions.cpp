@@ -612,7 +612,7 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
         Point3 pos(VFastTransform, withTrans, withShape->Pos(j));
         // terrainHole3: inside a hole the hole's floor (its lowest roadway point, flat) stands in for the ground, so
         // nothing falls through a gap; the roadway entries below (floor, stairs) win wherever they are higher
-        const int hole = nHoles > 0 ? TerrainHoleIndex(holes, nHoles, pos[0], pos[2]) : -1;
+        const int hole = nHoles > 0 ? TerrainHoleIndex(holes, nHoles, pos[0], pos[2], pos[1]) : -1;
         float dX, dZ;
 
         Texture* texture = nullptr;
@@ -1928,11 +1928,11 @@ float Landscape::CheckUnderLand(Vector3Par beg, Vector3Par dir, float tMin, floa
     LOG_DEBUG(Physics, "  Dist {:.3f},{:.3f}", dist1, dist2);
 #endif
     // Sinkhole W1 (Malprave terrainHole2: a line under the terrain inside a terrain hole is not hidden by it
-    if (dist1 > 0 && InTerrainHole(begPoint.X(), begPoint.Z()))
+    if (dist1 > 0 && InTerrainHole(begPoint.X(), begPoint.Z(), nullptr, begPoint.Y()))
     {
         dist1 = 0;
     }
-    if (dist2 > 0 && InTerrainHole(endPoint.X(), endPoint.Z()))
+    if (dist2 > 0 && InTerrainHole(endPoint.X(), endPoint.Z(), nullptr, endPoint.Y()))
     {
         dist2 = 0;
     }
@@ -1971,7 +1971,7 @@ float Landscape::CheckUnderLand(Vector3Par beg, Vector3Par dir, float tMin, floa
             LOG_DEBUG(Physics, "  Diag {:.3f},{:.3f}, sum {:.3f}", diagX, diagZ, diagX + diagZ);
         }
 #endif
-        if (distD1 > 0 && InTerrainHole(diagPoint.X(), diagPoint.Z()))
+        if (distD1 > 0 && InTerrainHole(diagPoint.X(), diagPoint.Z(), nullptr, diagPoint.Y()))
         {
             distD1 = 0; // Sinkhole W1 (Malprave terrainHole2
         }
@@ -2385,7 +2385,7 @@ bool Landscape::CheckIntersection(Vector3Par beg, Vector3Par end, int x, int z, 
     {
         float xIn = beg.X() * _invTerrainGrid - x; // relative 0..1 in square
         float zIn = beg.Z() * _invTerrainGrid - z;
-        if (xIn <= 1 - zIn + inEps && !InTerrainHole(beg.X(), beg.Z()))
+        if (xIn <= 1 - zIn + inEps && !InTerrainHole(beg.X(), beg.Z(), nullptr, beg.Y()))
         {
             tRet = 0;
             return true;
@@ -2396,7 +2396,7 @@ bool Landscape::CheckIntersection(Vector3Par beg, Vector3Par end, int x, int z, 
     {
         float xIn = beg.X() * _invTerrainGrid - x; // relative 0..1 in square
         float zIn = beg.Z() * _invTerrainGrid - z;
-        if (xIn >= 1 - zIn - inEps && !InTerrainHole(beg.X(), beg.Z()))
+        if (xIn >= 1 - zIn - inEps && !InTerrainHole(beg.X(), beg.Z(), nullptr, beg.Y()))
         {
             tRet = 0;
             return true;
@@ -2414,7 +2414,7 @@ bool Landscape::CheckIntersection(Vector3Par beg, Vector3Par end, int x, int z, 
 
             float xIn = nPos.X() * _invTerrainGrid - x; // relative 0..1 in square
             float zIn = nPos.Z() * _invTerrainGrid - z;
-            if (xIn <= 1 - zIn + inEps && !InTerrainHole(nPos.X(), nPos.Z()))
+            if (xIn <= 1 - zIn + inEps && !InTerrainHole(nPos.X(), nPos.Z(), nullptr, nPos.Y()))
             {
                 tRet = t;
                 return true;
@@ -2432,7 +2432,7 @@ bool Landscape::CheckIntersection(Vector3Par beg, Vector3Par end, int x, int z, 
 
             float xIn = nPos.X() * _invTerrainGrid - x; // relative 0..1 in square
             float zIn = nPos.Z() * _invTerrainGrid - z;
-            if (xIn >= 1 - zIn - inEps && !InTerrainHole(nPos.X(), nPos.Z()))
+            if (xIn >= 1 - zIn - inEps && !InTerrainHole(nPos.X(), nPos.Z(), nullptr, nPos.Y()))
             {
                 tRet = t;
                 return true;

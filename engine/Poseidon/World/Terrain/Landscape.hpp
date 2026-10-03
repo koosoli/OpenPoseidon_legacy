@@ -1370,15 +1370,17 @@ class Landscape : public SerializeClass
 		float x[16], z[16]; // world XZ, convex, counter-clockwise
 		float minX = 0, maxX = 0, minZ = 0, maxZ = 0;
 		float floorY = 0;   // terrainHole3: world height of the lowest point of the object's roadway
+		float ceilingY = 1e20f; // optional terrain_hole_ceiling: retain terrain above a horizontal cave
 		bool draw = true;   // terrainHole8: false = hidden hole (terrain_hole_hidden*), the terrain is still drawn there
 	};
 	// holes of the objects near pos (within radius), at most maxOut; returns the count
 	int GatherTerrainHoles(Vector3Par pos, float radius, TerrainHoleArea *out, int maxOut) const;
 	static bool InTerrainHoles(const TerrainHoleArea *holes, int n, float x, float z);
-	static int TerrainHoleIndex(const TerrainHoleArea *holes, int n, float x, float z); // terrainHole3, -1 = none
+	static int TerrainHoleIndex(const TerrainHoleArea *holes, int n, float x, float z, float y = -1e20f); // terrainHole3, -1 = none
 	// terrainHole3: floorY (optional) = the hole's floor, the lowest point of the cutting object's roadway
-	bool InTerrainHole(float x, float z, float *floorY = nullptr) const;
-	// terrainHole2: edges {nx, nz, d, last} of the holes nearest camPos for the terrain shaders; returns the edge count
+	bool InTerrainHole(float x, float z, float *floorY = nullptr, float y = -1e20f) const;
+	// Terrain draw records: edges {nx,nz,d,0/1}; optional {0,0,ceilingY,2} before a bounded polygon.
+	// Returns total records, including metadata; legacy unbounded polygons are unchanged.
 	int TerrainHoleDrawEdges(Vector3Par camPos, float radius, float *edges, int maxEdges) const;
 	// terrainHole4: the lowest height a camera at pos may have: the terrain (aboveWater: or the sea), or inside a hole
 	// the hole's floor. A camera under the terrain outside every hole whose focus (optional) is under the terrain inside a

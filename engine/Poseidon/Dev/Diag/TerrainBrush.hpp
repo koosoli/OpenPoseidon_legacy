@@ -7,7 +7,7 @@ struct TerrainBrushSettings
     bool enabled = false;
     bool raise = false;
     bool showRadius = true;
-    float radius = 64.0f;
+    float radius = 8.0f;
     float metresPerSecond = 4.0f;
 };
 TerrainBrushSettings& TerrainBrush();
@@ -18,7 +18,7 @@ struct TerrainBrushTarget
 };
 bool TerrainBrushTargetAtPixel(float x, float y, TerrainBrushTarget& target);
 bool PaintTerrain(float x, float z, float radius, float delta);
-bool PaintTerrainAtPixel(float x, float y, float seconds, bool invert = false);
+bool PaintTerrainAtPixel(float x, float y, float seconds, bool invert = false, bool fast = false);
 void ResetTerrainBrush();
 bool CaptureTerrainEditBaseline(int x, int z, int width, int height);
 bool HasTerrainEditBaseline();

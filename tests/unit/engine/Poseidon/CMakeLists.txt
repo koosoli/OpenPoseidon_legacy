@@ -399,6 +399,8 @@ list(APPEND POSEIDON_TEST_SOURCES
     # Simulation tests (batch-03)
     World/Simulation/test_animation.cpp
     World/Simulation/test_corpse_pose.cpp
+    World/Simulation/test_cave_bounds.cpp
+    Dev/test_cave_mesh.cpp
 
     # Rendering tests (batch-06)
     Graphics/Rendering/test_shape.cpp
