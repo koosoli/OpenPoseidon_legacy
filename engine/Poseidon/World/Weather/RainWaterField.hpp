@@ -8,6 +8,7 @@
 #include <optional>
 #include <map>
 #include "RainWaterFine.hpp"
+#include "RainWaterForcing.hpp"
 
 namespace Poseidon
 {
@@ -420,7 +421,7 @@ private:
     }
     void Step(float rain, float sunlight, float wind) {
         const double area = static_cast<double>(_spacing) * _spacing;
-        const float input = rain * 0.00012f * StepSeconds;
+        const float input = rain * static_cast<float>(RainWaterMaximumRainMetresPerSecond) * StepSeconds;
         const float evaporation = (0.000002f + sunlight * 0.000006f + wind * 0.000001f) * StepSeconds;
         const float infiltration = 0.000004f * StepSeconds;
         bool hasWater = false;

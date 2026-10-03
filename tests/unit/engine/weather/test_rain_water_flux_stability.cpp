@@ -5,9 +5,10 @@ using Poseidon::RainWaterFine;
 using Poseidon::RainWaterCellGeometry;
 
 // These are actual core updates, not a second implementation of its limiter.
-// Rain .05 balances the unchanged 4um/s infiltration + 2um/s evaporation;
+// Balance the unchanged 4um/s infiltration + 2um/s evaporation independently
+// of the shared rain calibration for the level-lake controls;
 // their individual ledger entries must still be present.
-static constexpr double balancedRain=.05;
+static constexpr double balancedRain=.000006/Poseidon::RainWaterMaximumRainMetresPerSecond;
 static void budget(const RainWaterFine& field,double initial) {
     const auto b=field.WaterBudget();
     const double expected=initial+b.rain-b.infiltration-b.evaporation-b.outlet;
@@ -21,9 +22,25 @@ static bool neighbours(const RainWaterFine::Owner& a,const RainWaterFine::Owner&
         std::max(a.x,b.x)<std::min(a.x+a.size,b.x+b.size);
     return x||z;
 }
-static void midpointBounds(RainWaterFine& field) {
-    const auto before=field.Snapshot();
-    field.Advance(.25,balancedRain);
+static void midpointBounds(RainWaterFine& field,double rain=balancedRain,double sun=0,double wind=0) {
+    auto before=field.Snapshot();
+    const auto geometry=field.FineSnapshot();
+    // The limiter bounds flux against heads AFTER local rain and sinks.
+    // Compute those preflux volumes in their actual order, including dry
+    // exhaustion, then invert the actual native V(H). No solver tolerance or
+    // production update is changed; nonzero net forcing is exercised below.
+    for(auto& o:before) {
+        const double area=o.size*o.size;
+        o.volume+=rain*Poseidon::RainWaterMaximumRainMetresPerSecond*RainWaterFine::StepSeconds*area;
+        o.volume-=std::min(o.volume,.000004*RainWaterFine::StepSeconds*area);
+        o.volume-=std::min(o.volume,(.000002+sun*.000006+wind*.000001)*RainWaterFine::StepSeconds*area);
+        o.head=o.bed+o.volume/area;
+        for(const auto& s:geometry)if(s.owner.x==o.x&&s.owner.z==o.z&&s.owner.size==o.size) {
+            assert(s.geometry.Head(o.volume,area,o.head,s.owner.Head()));
+            break;
+        }
+    }
+    field.Advance(RainWaterFine::StepSeconds,rain,sun,wind);
     for(const auto& o:before) {
         double lo=o.Head(),hi=o.Head();
         for(const auto& n:before)if(neighbours(o,n)) {
@@ -89,6 +106,15 @@ int main() {
     const double shallowInitial=shallow.Volume();
     for(int step=0;step<16;++step)midpointBounds(shallow);
     budget(shallow,shallowInitial);
+    // The same native midpoint bounds hold when forcing is not balanced:
+    // an evaporating shallow field and a raining mixed wet/dry field.
+    auto draining=shallow,filling=shallow;
+    const double forcingInitial=shallow.Volume();
+    for(int step=0;step<8;++step) {
+        midpointBounds(draining,.05,.5,.25);
+        midpointBounds(filling,1,.5,.25);
+    }
+    budget(draining,forcingInitial);budget(filling,forcingInitial);
     auto shallowLake=small(partial);
     for(const auto& s:shallowLake.FineSnapshot()) {
         const double v=s.geometry.Volume(10.25,area);

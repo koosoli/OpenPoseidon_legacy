@@ -6,6 +6,10 @@ using Poseidon::RainWaterFine;
 static constexpr double eps=1e-9;
 static void checkBudget(const RainWaterFine& f,double seed=0) {
     const auto b=f.WaterBudget();
+    if(std::abs(f.Volume()-(seed+b.rain-b.infiltration-b.evaporation-b.outlet))>=eps)
+        std::fprintf(stderr,"Fine budget residual %.12g m3, volume %.12g, seed %.12g, rain %.12g, revision %llu\n",
+            f.Volume()-(seed+b.rain-b.infiltration-b.evaporation-b.outlet),f.Volume(),seed,b.rain,
+            static_cast<unsigned long long>(f.Revision()));
     assert(std::abs(f.Volume()-(seed+b.rain-b.infiltration-b.evaporation-b.outlet))<eps);
     for(const auto& o:f.Snapshot()) assert(o.volume>=0&&std::isfinite(o.Head())&&std::isfinite(o.flowX)&&std::isfinite(o.flowZ));
 }
@@ -26,7 +30,7 @@ int main() {
     assert(sumArea==16*8*625); // exclusive ownership: no overlapped coarse rain
     auto same=f;advance(f,1,1);checkBudget(f,625);
     advance(same,1,0);checkBudget(same,625);
-    assert(std::abs(f.WaterBudget().rain-16*8*625*.00012)<eps);
+    assert(std::abs(f.WaterBudget().rain-16*8*625*Poseidon::RainWaterMaximumRainMetresPerSecond)<eps);
     const double before=f.Volume();const auto rev=f.Revision();
     std::vector<float> changed=fine;changed[16*32+16]=8;
     assert(f.RefineTile(0,0,changed));assert(f.Volume()==before&&f.Revision()>rev);

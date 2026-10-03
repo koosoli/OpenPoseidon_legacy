@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 #include "RainWaterGeometry.hpp"
+#include "RainWaterForcing.hpp"
 
 namespace Poseidon {
 // Conservative CPU core, used by World's default-off fine support gate; the
@@ -393,7 +394,7 @@ private:
             auto& c=_cells[i];const auto o=Describe(i,false);const double area=o.size*o.size;
             c.flowX=c.flowZ=0;
             if(c.bed<=_sea) {_budget.outlet+=c.volume;c.volume=0;continue;}
-            const double input=rain*.00012*StepSeconds*area;
+            const double input=rain*RainWaterMaximumRainMetresPerSecond*StepSeconds*area;
             c.volume+=input;_budget.rain+=input;
             const double infiltration=std::min(c.volume,.000004*StepSeconds*area);
             c.volume-=infiltration;_budget.infiltration+=infiltration;

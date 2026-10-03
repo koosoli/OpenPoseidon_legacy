@@ -7,6 +7,42 @@ static void advance(RainWaterField& f,float duration,float rain,float sun=0) {
     for(int i=0;i<int(duration*4);++i) f.Advance(.25f,rain,sun);
 }
 int main() {
+    // Independently specified slider calibration and unchanged sinks. Exercise
+    // actual coarse and fully refined finite-volume forcing over equal areas,
+    // rather than only checking a shared constant against itself.
+    assert(std::abs(Poseidon::RainWaterMaximumRainMetresPerSecond*3600*1000-90)<1e-12);
+    RainWaterField calibrated;
+    Poseidon::RainWaterFine nativeCalibrated;
+    constexpr double calibrationArea=8*8*25*25;
+    assert(calibrated.Configure(8,8,25,std::vector<float>(64,10)));
+    assert(nativeCalibrated.Configure(8,8,25,std::vector<float>(64,10)));
+    assert(nativeCalibrated.RefineTile(0,0,std::vector<float>(1024,10)));
+    for(int i=0;i<4;++i) {
+        calibrated.Advance(.25f,1,.5f,.25f);
+        nativeCalibrated.Advance(.25,1,.5,.25);
+    }
+    const auto cb=calibrated.WaterBudget();const auto nb=nativeCalibrated.WaterBudget();
+    for(const double rain:{cb.rain,nb.rain})assert(std::abs(rain-calibrationArea*.000025)<1e-6);
+    for(const double infiltration:{cb.infiltration,nb.infiltration})assert(std::abs(infiltration-calibrationArea*.000004)<1e-6);
+    for(const double evaporation:{cb.evaporation,nb.evaporation})assert(std::abs(evaporation-calibrationArea*.00000525)<1e-6);
+    assert(std::abs(calibrated.Volume()-nativeCalibrated.Volume())<1e-6);
+    assert(std::abs(calibrated.Volume()-(cb.rain-cb.infiltration-cb.evaporation-cb.outlet))<1e-6);
+    assert(std::abs(nativeCalibrated.Volume()-(nb.rain-nb.infiltration-nb.evaporation-nb.outlet))<1e-9);
+    const auto cRev=calibrated.Revision(),nRev=nativeCalibrated.Revision();
+    const double cVolume=calibrated.Volume(),nVolume=nativeCalibrated.Volume();
+    calibrated.Advance(0,1,1);nativeCalibrated.Advance(0,1,1);
+    assert(calibrated.Revision()==cRev&&nativeCalibrated.Revision()==nRev);
+    assert(calibrated.Volume()==cVolume&&nativeCalibrated.Volume()==nVolume);
+    calibrated.Advance(.25f,0,1);nativeCalibrated.Advance(.25,0,1);
+    assert(calibrated.WaterBudget().rain==cb.rain&&nativeCalibrated.WaterBudget().rain==nb.rain);
+    assert(calibrated.Volume()<cVolume&&nativeCalibrated.Volume()<nVolume);
+    RainWaterField dry;Poseidon::RainWaterFine dryNative;
+    assert(dry.Configure(8,8,25,std::vector<float>(64,10)));
+    assert(dryNative.Configure(8,8,25,std::vector<float>(64,10)));
+    dry.Advance(.25f,0,1,1);dryNative.Advance(.25,0,1,1);
+    assert(dry.Volume()==0&&dryNative.Volume()==0);
+    assert(dry.WaterBudget().rain==0&&dry.WaterBudget().infiltration==0&&dry.WaterBudget().evaporation==0);
+    assert(dryNative.WaterBudget().rain==0&&dryNative.WaterBudget().infiltration==0&&dryNative.WaterBudget().evaporation==0);
     const auto native=RainWaterField::AlignedSourceGrid(2048,6.25f);
     assert(native.side==513 && native.stride==4 && native.spacing==25);
     const auto stock=RainWaterField::AlignedSourceGrid(256,50);
@@ -25,7 +61,7 @@ int main() {
         float radius=std::hypot(float(x-4),float(z-4));
         assert(bowl.SetBed(x,z,9+std::min(radius/3,1.0f)));
     }
-    advance(bowl,120,1);
+    advance(bowl,600,1); // sustained calibrated rain still fills an actual hollow
     assert(bowl.At(4,4).depth>.08f); // catchment accumulates in the actual hollow
     assert(bowl.At(4,4).depth>bowl.At(0,0).depth*4);
     const auto budget=bowl.WaterBudget();
