@@ -134,6 +134,9 @@ struct RainStats
 {
 	int liveDrops = 0;        ///< drops currently falling
 	int liveSplashes = 0;
+	int volumeCulls = 0;     ///< camera-exited liquid visuals; never ground/shelter impacts
+	int populationCulls = 0; ///< liquid visuals retired when weather/target decreases
+	int populationLimit = 0; ///< current density-scaled liquid visual cap
 	int indoorKills = 0;      ///< drops that entered a room since ResetStats
 	int roofKills = 0;        ///< drops that hit the shell (roofline/wall) since ResetStats
 	int probeKills = 0;       ///< drops killed by the Rooms-mode sky probe since ResetStats

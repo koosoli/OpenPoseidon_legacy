@@ -1,4 +1,5 @@
 #include <Poseidon/World/Weather/RainVolume.hpp>
+#include <Poseidon/World/Weather/RainParticlePolicy.hpp>
 
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -349,7 +350,29 @@ void RainSystem::Spawn(float deltaT)
         }
         _snowTarget = target;
     }
-    else _spawnAccumulator += rate * deltaT;
+    else
+    {
+        // At aircraft height the terrain can be hundreds of metres below the
+        // camera. Keeping every streak until that distant ground hit filled
+        // maxDrops with invisible particles and kept probing their roofs.
+        // Retire camera-exited visuals before any spawn or per-drop world query.
+        _stats.volumeCulls += static_cast<int>(std::erase_if(_drops, [&](const Drop& drop) {
+            return !RainParticleInViewVolume(
+                {drop.position.X(), drop.position.Y(), drop.position.Z()},
+                {camPos.X(), camPos.Y(), camPos.Z()}, _params.areaRadius, _params.spawnHeight);
+        }));
+        const int target = RainParticlePopulationLimit(_params.targetDrops, _params.maxDrops, EffectiveDensity());
+        _stats.populationLimit = target;
+        if (static_cast<int>(_drops.size()) > target)
+        {
+            _stats.populationCulls += static_cast<int>(_drops.size()) - target;
+            _drops.resize(target);
+        }
+        // Do not store spawn debt while the target is full or weather dries.
+        // Retained drops still run the unchanged birth/forward/room/ground tests.
+        _spawnAccumulator = std::min(_spawnAccumulator + rate * deltaT,
+                                     static_cast<float>(target - static_cast<int>(_drops.size())));
+    }
     while (_spawnAccumulator >= 1.0f)
     {
         _spawnAccumulator -= 1.0f;
@@ -865,7 +888,11 @@ void RainSystem::UpdateAndDraw()
     // Opt-in once-per-second trail for POSEIDON_TEST_RAIN, same shape as the
     // SmokeVolume one: alive versus drawn catches projection rejection, the
     // kill split says which occlusion path did the work.
-    static const bool verbose = RainTestHook();
+    // Trace ordinary mission weather without the test hook forcing a downpour.
+    static const bool verbose = RainTestHook() || [] {
+        const char* value = std::getenv("POSEIDON_RAIN_TRACE");
+        return value && std::string(value) == "1";
+    }();
     if (verbose && Glob.time > _nextDiagTime)
     {
         _nextDiagTime = Glob.time + 1.0f;
@@ -877,12 +904,13 @@ void RainSystem::UpdateAndDraw()
             std::atan2(windSpeed * _params.windResponse, std::max(_params.fallSpeed, 0.01f)) * (180.0f / 3.14159265f);
         LOG_INFO(World,
                  "RainVolume: drops={} drawn={} decals={} spawned={} covered={} roof={} indoor={} probe={} ground={} "
-                 "buildings={} sweeps={} wind={:.1f}m/s@{:.0f}deg lean={:.0f}deg spawn={:.0f}us gather={:.0f}us sim={:.0f}us draw={:.0f}us",
+                 "buildings={} sweeps={} wind={:.1f}m/s@{:.0f}deg lean={:.0f}deg spawn={:.0f}us gather={:.0f}us sim={:.0f}us draw={:.0f}us volumeCulls={} capCulls={} limit={}",
                  _stats.liveDrops, _stats.drawnDrops, _stats.streakDecals, _stats.spawned, _stats.spawnKills,
                  _stats.roofKills, _stats.indoorKills, _stats.probeKills, _stats.groundHits, _stats.nearbyBuildings,
                  _stats.occlusionTests, windSpeed,
                  wind ? wind->directionRad * (180.0f / 3.14159265f) : 0.0f, leanDeg, _stats.spawnMicroseconds,
-                 _stats.occlusionMicroseconds, _stats.simulateMicroseconds, _stats.drawMicroseconds);
+                 _stats.occlusionMicroseconds, _stats.simulateMicroseconds, _stats.drawMicroseconds,
+                 _stats.volumeCulls, _stats.populationCulls, _stats.populationLimit);
         ResetStats();
     }
 }
