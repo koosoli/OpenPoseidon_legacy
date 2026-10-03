@@ -1,5 +1,33 @@
 # Weather owner follow-up, 3 October 2026
 
+18:30 checkpoint: matching1510c984 is installed after the14step committed
+bounded-terrain full build, safety push and ordinary deployment. Matching
+installed EXE/DLL/material plus built matching PDBs are archived with hashes
+under build/installed-symbols/1510c984. Earlier25445470 full build and native
+PoseidonTests target pass314 assertions/9 cases; actual water device19,
+source-lifetime4 and wet-soil device6 checks pass after strict fixture repairs
+and a device-confirmed NaN refusal correction. Default gameplay deaths stay
+authored; the installed articulated action remains opt-in and unaccepted.
+
+Actual254 Eden b0e77f exits normally0 with stable pair and original/supplementary
+source/camera/water/clock controls. At115.158simsec GMud0.804362/uniform0.747595,
+contact retains2.845103mm water/projected2.836317mm and actual177.476794mm
+depression. Genuine bare pol selection succeeds. Root sees tan/matte sunny
+ground and dark overcast mud with unwanted cyan footprint rims. Appearance
+remains OPEN; source-qualified muddy medium is installed, not universally
+accepted, and this different history is not a causal depth comparison.
+
+Actual254 corpse891415 crashes on corpse-prepare BEFORE body creation. The old
+map-wide diagnostic corpus requests602,898,916B for actual native land1024
+subdivision12; the engine allocator rejects >=256MiB and global operator new
+forwards nullptr into the STL aligned vector allocation.1510 replaces that
+caller with129x129 real SurfaceY samples at.25m around the held corpse.
+Actual151 a5152c no longer crashes, but safely REFUSES the initial inset-collider
+fit before creation. No actual moving ragdoll acceptance. Source adae1803 adds
+precise part/vertex/support/clearance refusal receipts, pending build/deploy.
+Box3D remains released0.1.0; isolated upstream954cf87 evaluation is underway
+for relevant mass/inertia/contact fixes, with no dependency update installed.
+
 Owner's older-build Zombie-mod report (dense footsteps disturb crawling/aiming)
 received a bounded source audit, per his request. Current mud compression
 saturates at layer capacity instead of accumulating unbounded depth; repeated/
