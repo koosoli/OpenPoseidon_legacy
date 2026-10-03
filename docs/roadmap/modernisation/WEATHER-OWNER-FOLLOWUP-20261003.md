@@ -1,5 +1,23 @@
 # Weather owner follow-up, 3 October 2026
 
+Final wrap-up runtime: installed5c0cdd32 passes actual8ea273 explicit freeze
+campaign with normal stable exit0. Consumed supported palettes/points/proxies,
+object transform and retained bounds remain exact across freeze and beyond
+31simulation seconds with zero physics handles. Clear/hide/delete, original
+30second active expiry and real guarded empty-fixture epoch invalidation pass.
+Root inspected moving and persistent captures without an obvious new tear.
+Seven screenshot requests produce seven actual paired optics packets and no
+probe refusals; fixed-exposure corpse captures do not diagnose sunny snow.
+
+Initial cbbbfb campaign passed freeze/persistence/real epoch invalidation but
+failed fixture recreation because the runner omitted fresh pose capture after
+that valid invalidation. Script-only5151bf9e repairs that sequencing; the full
+8ea273 rerun passes, without weakening the stale-generation checks. No ordinary
+death, grenade impulse, building-floor, arbitrary-unit or general skin acceptance.
+The requested visible demo provides one retained prototype corpse, two unarmed
+stock targets and explicit Physics-tab controls; grenade throwing keeps normal
+game behavior. Final documentation/demo rebuild and owner handoff follow.
+
 Owner wrap-up request: finish the current changes and stop selecting further
 roadmap tasks. Requested interactive prototype handoff is the final action.
 New012baf49 explicit corpse freeze and UI controls are integrated; automatic

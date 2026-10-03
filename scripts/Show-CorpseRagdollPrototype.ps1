@@ -64,6 +64,7 @@ try{
  Exec 'setAccTime 0';$motion=Query 'corpse-articulation-status';$frozen=Query 'corpse-freeze'
  if($frozen -notmatch '^OK '){throw $frozen}
  $physics=Query 'corpse-physics-status';if($physics -notmatch 'articulatedBodies=0 articulatedJoints=0$'){throw $physics}
+ Exec 'ragdollDemoBase=getPos player;"SoldierWB" createUnit [[(ragdollDemoBase select 0)+4,(ragdollDemoBase select 1)+4,0],group player,"removeAllWeapons this;this disableAI ""MOVE"";this setCombatMode ""BLUE"""];"SoldierWB" createUnit [[(ragdollDemoBase select 0)-4,(ragdollDemoBase select 1)+6,0],group player,"removeAllWeapons this;this disableAI ""MOVE"";this setCombatMode ""BLUE"""]'
  Exec 'setAccTime 1'
  $null=Send @{cmd='screenshot';path=(Join-Path $output 'ready.png')}
  @{status='handed-to-owner';pid=$p.Id;installed=$stamp.Trim();motion=$motion;frozen=$frozen;physics=$physics;scope='One controlled stock corpse, small test impulse and retained pose; normal deaths and grenade impulses remain authored.';controls='Ctrl+backtick > Physics: Clear, Capture, Prepare corpse ground, Start jointed corpse, Push, Freeze. Game/freefly throw uses G but is not connected to this rig.'}|ConvertTo-Json -Depth 4|Set-Content -LiteralPath (Join-Path $output 'session.json')
