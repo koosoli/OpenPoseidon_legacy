@@ -173,7 +173,7 @@ fn sand_geometry_actual_helpers_match_and_compose_in_real_terrain() {
     );
     assert!(declaration(CONFORM, "fn surface_y(").contains("bare_surface_y(world_xz)"));
     assert!(declaration(CONFORM, "fn surface_grad(").contains("sand_height_gradient(world_xz"));
-    assert!(declaration(TERRAIN, "fn sample_mud_normal(").contains("sand_height_gradient(world_xz"));
+    assert!(declaration(TERRAIN, "fn sample_mud_normals(").contains("sand_height_gradient(world_xz"));
 }
 
 fn snapshot(case: usize) -> Vec<f32> {
