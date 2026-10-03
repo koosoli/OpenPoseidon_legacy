@@ -1,0 +1,87 @@
+; land.sqs  [squad, boat, beach point, rally point, inland point]
+; The boat's waypoints do the landing: a MOVE on the beach, then a TR UNLOAD there. The AI
+; tends to dither in the surf near a waypoint on land, so for the last 60 m this script cuts
+; the engine and runs the boat straight up onto the beach point; stopped there, the TR UNLOAD
+; puts the squad out (if it has not after 6 s, they are ordered out here - the boat is on the
+; sand by then). Then the squad is sent up into the town. Soldiers in this engine cannot
+; swim, so nobody is ever put out of a boat that is still in deep water, and as a backstop
+; anyone who ends up in water over ~0.8 m deep is walked in toward the beach.
+_g = _this select 0
+_b = _this select 1
+_beach = _this select 2
+_rally = _this select 3
+_inland = _this select 4
+
+#approach
+~0.25
+?("vehicle _x != _x" count units _g) == 0 : goto "ashore"
+_p = getPos _b
+_dx = (_beach select 0) - (_p select 0)
+_dy = (_beach select 1) - (_p select 1)
+?(_dx * _dx + _dy * _dy) > 3600 : goto "approach"
+
+_b setFuel 0
+_n = 0
+#push
+_p = getPos _b
+_dx = (_beach select 0) - (_p select 0)
+_dy = (_beach select 1) - (_p select 1)
+_d = sqrt (_dx * _dx + _dy * _dy)
+?_d < 4 : goto "beached"
+_b setVelocity [5 * _dx / _d, 5 * _dy / _d, 0]
+~0.1
+_n = _n + 1
+?_n < 200 : goto "push"
+
+#beached
+_b setVelocity [0, 0, 0]
+_t = 0
+#unload
+~0.5
+_t = _t + 0.5
+?("vehicle _x != _x" count units _g) == 0 : goto "ashore"
+?_t < 6 : goto "unload"
+; the TR UNLOAD has not fired: order them out, but only if the boat really is at the beach
+_p = getPos _b
+_dx = (_beach select 0) - (_p select 0)
+_dy = (_beach select 1) - (_p select 1)
+?(_dx * _dx + _dy * _dy) > 225 : exit
+_u = units _g
+_i = 0
+#unit
+?_i >= count _u : goto "unload"
+_m = _u select _i
+unassignVehicle _m
+?(vehicle _m) != _m : _m action ["GETOUT", _b]
+_i = _i + 1
+goto "unit"
+
+#ashore
+_b setFuel 0
+_g setBehaviour "AWARE"
+_g setSpeedMode "FULL"
+_g setFormation "LINE"
+_g move _rally
+
+_n = 0
+#wade
+_u = units _g
+_i = 0
+#wadeunit
+?_i >= count _u : goto "wadenext"
+_m = _u select _i
+_p = getPos _m
+_dx = (_beach select 0) - (_p select 0)
+_dy = (_beach select 1) - (_p select 1)
+_d = sqrt (_dx * _dx + _dy * _dy)
+?((_p select 2) < -0.8) and (_d > 3) : _m setPos [(_p select 0) + 2 * _dx / _d, (_p select 1) + 2 * _dy / _d, 0]
+_i = _i + 1
+goto "wadeunit"
+#wadenext
+~0.25
+_n = _n + 1
+?_n < 60 : goto "wade"
+
+~10
+_g move _inland
+exit
