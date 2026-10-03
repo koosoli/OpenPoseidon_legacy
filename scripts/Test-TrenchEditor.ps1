@@ -169,6 +169,14 @@ try{
    $arm.occupiedEditGuard=@{delete=$refusedDelete;rotate=$refusedRotate;unchanged=$true}
   }
   $exit=[ordered]@{};$arm.exit=$exit;Traverse $site $preset $false $exit (Num $arm.start[2])
+  if($SelectionChecks -and !$preset.tank){
+   $outsideActor=$exit.samples[-1];Require ($outsideActor.along -gt -$preset.length -and $outsideActor.along -lt -1) 'Outside actor is not in the proposed reverse-trench footprint.'
+   $beforeSweep=State $null $null
+   $refusedSweep=Send @{cmd='dev_cave_editor';action='rotate';id=$recordId;heading=($site.heading+180)} $true
+   Require (!$refusedSweep.ok) 'Rotation swept a proposed trench into the player outside its old footprint.'
+   $afterSweep=State $null $null;Require (($beforeSweep.records|ConvertTo-Json -Depth 6 -Compress) -ceq ($afterSweep.records|ConvertTo-Json -Depth 6 -Compress)) 'Refused sweep changed trench records.'
+   $arm.outsideSweepGuard=@{actor=$outsideActor;refusal=$refusedSweep;unchanged=$true}
+  }
   if($tankOwned){Exec 'player action ["GETOUT",opTrenchTank]';Exec 'setAccTime 1';Start-Sleep -Seconds 1;Exec 'setAccTime 0';Require (Eval 'vehicle player == player') 'Driver did not leave tank outside trench.';Exec 'deleteVehicle opTrenchTank';Require (Eval 'isNull opTrenchTank') 'Owned tank cleanup failed.';$tankOwned=$false}
   if($SelectionChecks -and !$preset.tank){$undo=Send @{cmd='dev_cave_editor';action='delete';id=$recordId}}
   else{$undo=Send @{cmd='dev_cave_editor';action='undo'}}
