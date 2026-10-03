@@ -216,11 +216,12 @@ fn shade(
     // above. The heightfield is never a shadow caster for objects, and the long-range mask marches OUTWARD from
     // each column and never counts the column's own ground, so a cave roof 0.4 m down read as open sky and the
     // sun lit the inside of every cave (owner report: "the roof of the cave is bleeding light"). Ramped over
-    // 0.2-0.6 m below the surface so a wall foot touching the ground does not alias. Openings in a terrain hole
+    // 0.05-0.25 m below the surface: anything deeper is hidden by the terrain unless a hole cuts it (a cave roof
+    // slab can be 0.4 m thick), so the ramp only has to avoid aliasing at the contact line. Openings in a terrain hole
     // lose their sun shafts too -- the price of a test that needs only the heightmap.
     var underground_s = 0.0;
     if (hm_params.enabled > 0.5) {
-        underground_s = smoothstep(0.2, 0.6, surface_y(world_abs.xz) - world_abs.y);
+        underground_s = smoothstep(0.05, 0.25, surface_y(world_abs.xz) - world_abs.y);
     }
     let terrain_s = max(terrain_sun_shadow(world_abs.xz, world_abs.y), underground_s);
     let sun_occ = select(terrain_s, max(terrain_s, csm_s), sky_lit);

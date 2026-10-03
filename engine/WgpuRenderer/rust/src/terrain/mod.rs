@@ -2185,7 +2185,7 @@ mod terrain_hole_tests {
     #[test]
     fn object_shaders_compose_with_the_underground_sun_test() {
         let src = include_str!("../shaders/shading.wgsl");
-        assert!(src.contains("smoothstep(0.2, 0.6, surface_y(world_abs.xz) - world_abs.y)"));
+        assert!(src.contains("smoothstep(0.05, 0.25, surface_y(world_abs.xz) - world_abs.y)"));
         compose(include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl");
         compose(include_str!("../gfx3d/gpu_driven.wgsl"), "gfx3d/gpu_driven.wgsl");
     }
