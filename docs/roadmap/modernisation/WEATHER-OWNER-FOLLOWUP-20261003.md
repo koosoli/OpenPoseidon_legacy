@@ -1,5 +1,23 @@
 # Weather owner follow-up, 3 October 2026
 
+Latest source checkpoint12:32 local: c9f74c8f combined game build219steps passes;
+renderer run652PASS/1FAIL/2ignored has one stale muzzle-cloth source assertion.
+After moving that assertion to the actual shared decoder both focused muzzle
+tests pass. All39 shaders:: device tests pass with5fc59afb resolved sand normals
+and649f818e/4f57b2de rough wet-soil integration. Existing shader/source guards
+remain strict. These new appearance corrections are not installed yet.
+
+Actual sunny Noe b59f455a campaign626627 exits normally with stable pair and
+unedited native source. Candidate stopped depth4.252554mm→0 over604.316simsec;
+global volume531384.992→319435.577m³ with unchanged rain input786276.713m³.
+Its rainy low/top view has no readable pool at this thin point, so this proves
+local physical drainage, not visible-pool acceptance or sunny acceleration.
+Source audit then proves BOTH histories used the wrong sun-travel direction
+sign. New566be99b shared exposure uses the actual negative astronomical travelY,
+cloud and night gates; coefficient/wind laws unchanged. Actual coarse/fine and
+cosmetic C++ tests pass. Harness adds read-only actual sunlight telemetry; full
+combined build/deploy and sunny matched runtime remain pending.
+
 Latest installed evidence at12:08 local: matching b59f455a pair deployed11:37.
 Actual rain altitude comparison3687fa has26 samples and normal/stable exits in
 each arm. Ground drops1439→1440, high117.58m3995→1800 and300m3999→1800;

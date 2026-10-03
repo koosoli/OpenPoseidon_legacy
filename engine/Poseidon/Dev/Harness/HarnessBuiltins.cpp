@@ -15,6 +15,8 @@ using namespace Poseidon;
 #include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/World/Weather/SandField.hpp>
 #include <Poseidon/World/Weather/RainWaterField.hpp>
+#include <Poseidon/World/Weather/SunlightDrying.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Weather/SandGroundAdmission.hpp>
 #include <Poseidon/World/Weather/MudGroundAdmission.hpp>
 #include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
@@ -1543,6 +1545,14 @@ void RegisterScreenshot(HarnessServer& hs)
             auto* result = cJSON_CreateObject();
             cJSON_AddNumberToObject(result, "rain", GLandscape->GetRainDensity());
             cJSON_AddNumberToObject(result, "overcast", GLandscape->GetOvercast());
+            const auto* sun = GScene->MainLight();
+            cJSON_AddBoolToObject(result, "sunAvailable", sun != nullptr);
+            if (sun) {
+                cJSON_AddNumberToObject(result, "sunTravelY", sun->SunDirection().Y());
+                cJSON_AddNumberToObject(result, "nightEffect", sun->NightEffect());
+                cJSON_AddNumberToObject(result, "solarDrying", SunlightDryingExposure(
+                    sun->SunDirection().Y(), GLandscape->GetOvercast(), sun->NightEffect()));
+            }
             cJSON_AddNumberToObject(result, "particleDensity", GRain.EffectiveDensity());
             cJSON_AddBoolToObject(result, "particleSnowflakes", GRain.Params().snowflakes);
             cJSON_AddNumberToObject(result, "liquidRain", UniformWettingDensity(GLandscape->GetRainDensity(),

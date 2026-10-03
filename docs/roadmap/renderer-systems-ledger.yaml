@@ -730,6 +730,14 @@ unbuilt_candidates: >-
     audited: 2026-10-03
     completeness: >-
       OWNER FOLLOW-UP3OCTOBER supersedes earlier appearance acceptance below.
+      Actual b59f455a Noe626627 drains the same4.252554mm candidate to exact0
+      over604.316simsec with unchanged source/input and normal stable exit.
+      No readable pool at that point, so this is physical local drying only.
+      Solar source audit finds wrong sun-travel sign in both histories;
+      566be99b corrects actual daylight without coefficient changes, with
+      physical/cosmetic C++ tests passing. Combined39 shader device tests pass
+      resolved sand slope5fc59afb and rough-soil649f818e/4f57b2de candidates;
+      new installed pixels and daylight acceleration remain pending.
       Installed b59f455a actual three-altitude rain benchmark passes normal
       stable exits: high-view particle phases about0.2ms cheaper, not whole
       moving helicopter performance proof. Actual Everon1100e9 boot/body and
@@ -1785,6 +1793,10 @@ unbuilt_candidates: >-
       with geometric normals and existing cloth/history masks, sky/sun/local
       shadowing; dry and retained static paths remain zero. Full composer CPU
       validation passes; combined device and actual installed views pending.
+      Full combined run652PASS/1FAIL/2ignored includes all4 cloth device
+      proofs passing; one stale muzzle source assertion is repaired with both
+      focused muzzle tests passing. Combined game219step build passes. New
+      wet-textile installed dry/wet/covered/night lamp views remain pending.
       Earlier actual-functional closure does not establish this new appearance.
       Historical original-map functional evidence follows
       below. Matching e5445111 actual controlled SoldierWB campaigns on Eden,
