@@ -1,5 +1,26 @@
 # Weather owner follow-up, 3 October 2026
 
+16:03 checkpoint: matching56549210 pair deployed15:42 after219step full
+build, archived with matching PDBs under build/installed-symbols/56549210.
+Includes actual fragment diagnostic, darker dust tint and original sand
+manifest additions. Shader suite40 pass plus repaired focused road2 pass;
+the initial remaining failure was a stale source-text assertion.
+
+Actual Eden a41953 diagnostic passes normal exit0/stable pair/source/clock/
+paused controls, with GMud0.802761/uniform0.843448 and contact-0.175884m.
+Root sees retained-water magenta across essentially the entire test field;
+the water obscures underlying source/rain/soil classifications. Appearance
+remains OPEN; read-only contact/centre water-depth receipts are next.
+No terrain-depth self-occlusion conclusion is justified by source audit.
+
+Actual NoePt near material capture has normal exit0/stable pair, valid PNG
+and genuine o/pt SandDark source, but FAILS original mapping admission.
+Installed visual PBO still contains the earlier734-byte, three-entry manifest,
+without abel/pi or o/pt/o/ps. This is stale content despite current EXE/DLL;
+package regeneration/deployment and all-map material smoke remain pending.
+Do not claim the original sand additions installed from the executable stamp.
+Installed darker-dust visual runtime is in progress, not yet accepted.
+
 15:19 checkpoint: matching0a353f97 pair deployed15:01 after21step full
 build; matching pair/PDB archive build/installed-symbols/0a353f97. Includes
 exact-empty coarse edges/shared body sunlight visibility/bounded rotor opacity.
