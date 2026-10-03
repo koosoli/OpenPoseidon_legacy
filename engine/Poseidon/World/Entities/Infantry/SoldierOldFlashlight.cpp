@@ -139,8 +139,12 @@ void Man::UpdateFlashlight()
 
     if (!_flashlight)
     {
+        // No ambient term: a local light's ambient lights every direction with the same inverse-square
+        // falloff as the beam, so even 3% of the colour, 0.1 m from the bulb, turned the holder's own
+        // body glowing white (owner's capture: an AI with his torch on, lit up like a lamp). A torch
+        // lights only where it points.
         _flashlight = new LightReflectorOnVehicle(GScene->Preloaded(HalfLight), kFlashlightColor,
-                                                  kFlashlightColor * 0.03f, this, pos, dir, kFlashlightCone);
+                                                  Color(0, 0, 0, 1), this, pos, dir, kFlashlightCone);
         _flashlight->SetRange(kFlashlightRange);
         // Local lights are scaled by the night factor unless they opt out (PresentationSnapshot), so a torch
         // at noon -- in a cave -- would emit nothing. A flashlight shines whatever the time of day.
