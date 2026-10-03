@@ -99,6 +99,23 @@ and soldiers' feet above; when inside I can see rendering lines and flashing". A
 * GL33 (Malprave's original hole path) renders the same cave evenly dim and enclosed, which is what wgpu now does
   apart from Oli's darker interior ambient.
 
+## Owner play-test round 2 (fixed / measured)
+
+* **"The island surface goes black and all objects appear floating"** while a mission loads, switches or exits.
+  A hole object whose transform is momentarily collapsed maps every hole point to one spot; each zero-length edge
+  test reads 0 >= 0, so the hole contained every point — the terrain draw discarded the whole island and the
+  gameplay queries gave no ground. `MakeHoleArea` drops a footprint under 0.01 m² (or non-finite), and the terrain,
+  grass and GL33 tests treat a zero-length edge normal as outside (`e65e45de`). Captured: deleting the cave object
+  mid-mission leaves the terrain whole and the openings close.
+* **"Soldiers also illuminated and not dark":** the interior-sky term darkens static buildings it has rooms for,
+  not a soldier in a cave. `shade()` scales the sky ambient to 0.12 on the same underground ramp (`e65e45de`);
+  captured dim.
+* **"The cave's stairs seem to be shimmering":** a 4-frame burst at 0.2 s on the stairs from inside, static
+  camera, after the round-1 and round-2 fixes: the only changing pixels are the animated soldier's (mean |Δ| ≤ 0.05
+  of 255 outside him). Not reproduced in the darkened cave; owner re-check pending.
+* Seen on the way, not fixed: a man left inside a hole when its object is deleted stays where he was, under the
+  ground (`LeavesTerrainHoleUnderground` only acts on movement).
+
 ## Not done / not verified
 
 * **Box3D heightfield** (`LooseObjects`, `PhysicsWorld::SetTerrain`) and shell penetration (`ShotShell::TryPenetrate`)
