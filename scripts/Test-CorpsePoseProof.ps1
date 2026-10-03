@@ -471,6 +471,9 @@ try {
             $retiredBackend -match '^OK corpse-physics-status epoch=\d+ bodies=0 articulatedBodies=0 articulatedJoints=0$') 'Old articulated handles survived fixture retirement.'
         $result.gates.frozenWorldGenerationInvalidation.actualRetirement=$retired
         $result.gates.frozenWorldGenerationInvalidation.backendAfter=$retiredBackend
+        # The epoch check correctly invalidates and clears the old pose owner.
+        # Establish a fresh held owner before preparing its bounded fixture.
+        $result.observations.worldReprepareCapture=Wait-Capture
         $prepared=Query 'corpse-prepare'
         Require ($prepared -match '^OK corpse-prepare solver=box3d ') "Bounded fixture recreation failed: $prepared"
         $result.observations.repreparedPhysics=$prepared
