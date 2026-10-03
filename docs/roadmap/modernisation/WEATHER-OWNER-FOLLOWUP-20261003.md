@@ -1,5 +1,22 @@
 # Weather owner follow-up, 3 October 2026
 
+19:18 checkpoint: actual isolated stock corpse442e46 PASSES all installed
+opt-in lifecycle gates with unchanged e81744f4 pair and normal zero exit. Forty-one
+real solver updates over0.680simsec produce0.153947m maximum body-origin travel;
+541 point consumers and37 proxies change. Initial takeover remains exactly
+authored; clear,30s expiry, hide and deletion each release eleven bodies/ten
+joints to zero. The corrected fixture removes the old hidden unit and restores
+the original verified live sites; the external-contact rejection is preserved.
+This accepts the bounded dry Western prototype's solver/pose/lifecycle seam,
+not automatic gameplay deaths, general rig support or visible skin/contact quality.
+
+Actual sky GPU probe3 tests pass with raw HDR readback. At representative cloudy
+coverage0.95, upward/contact rays contain grey clouds; negative-elevation rays
+remain the same blue horizon fallback as cloud-free controls. Increasing the
+env march budget12 to128 does not change that downward source. This identifies
+a real mechanism, not yet a cyan-footprint cause: actual owner edge slopes and
+matched dry/wet uniform captures are running in the installed original Eden map.
+
 19:10 checkpoint: matchinge81744f4 is installed after ordinary preset Box3D
 954cf87 overlay configure,627-step full game build, subsequent55-step bounded
 contact full build, native target and safety push/deploy. Actual native physics,
