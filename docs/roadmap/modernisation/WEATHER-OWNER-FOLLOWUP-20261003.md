@@ -3,7 +3,7 @@
 18:46 checkpoint: matching572b838a is installed after the full committed build,
 safety push and ordinary deployment. Installed EXE/DLL/material and matching
 built PDBs are archived under build/installed-symbols/572b838a. Actual corpse
-108b15 exits normally0 but refuses creation: left forearm ploket vertex0 is
+108b15 exits normally0 but refuses creation: right forearm ploket vertex0 is
 2.792358mm below real terrain; native road and solver agree within0.03mm.
 296 fitted vertices were measured, maximum root distance1.096063m. The3mm
 clearance admission remains intact; no articulated gameplay acceptance.
@@ -14,6 +14,17 @@ candidate passes7/1 mass checks while released control fails the specific
 expected angular-velocity assertion. Dependency promotion remains pending
 full-game build and installed runtime; latest main is not the proposed pin.
 Quiet installed occupied rain-flight phase/thread-CPU measurement is running.
+
+Actual572 quiet occupied a4680c subsequently completes normal zero exits with
+stable installed pair and route/weather/particle controls. In fully contained
+measurement windows: dry1388 advances/93 entirely empty steps cost0.094712ms
+per advance; rain1330 advances/89 nonempty steps cost1.178294ms per advance
+(17.6082ms per actual step), maximum42.5882ms. No multiple-step backlog or
+>=50ms call occurs. Raw transfer800.5081ms plus limited flux529.4307ms comprise
+84.87% of1567.1306ms rain advance elapsed time. Thread CPU is quantized15.625ms;
+it cannot establish an exact scheduling fraction. This is new phase attribution,
+not causal performance acceptance or a claim that the intermittent154ms stall
+is fixed. A bounded implementation audit continues before changing mathematics.
 
 18:30 checkpoint: matching1510c984 is installed after the14step committed
 bounded-terrain full build, safety push and ordinary deployment. Matching
