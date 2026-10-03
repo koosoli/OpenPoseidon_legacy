@@ -47,6 +47,7 @@
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 #include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
+#include <Poseidon/AI/AIHunt.hpp>
 
 extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 
@@ -2508,6 +2509,15 @@ bool EntityAI::FireWeapon(int weapon, TargetType* target)
 
     int burst = mode->_mult;
     saturateMin(burst, magazine->_ammo);
+    // Malprave aiCoverGrenades: squad grenade interval (AIHunt) -- remember when an AI soldier threw one
+    if (mode->_ammo && mode->_ammo->_simulation == AmmoShotShell && type && type->_initSpeed < 30)
+    {
+        AIUnit* thrower = CommanderUnit();
+        if (thrower && !thrower->IsAnyPlayer())
+        {
+            Hunt::OnGrenadeThrown(thrower->GetGroup());
+        }
+    }
     magazine->_ammo -= burst;
     // Infinite ammo cheat — refund the burst we just consumed.  Hook
     // lives here so it covers MGun / shell / missile firing through

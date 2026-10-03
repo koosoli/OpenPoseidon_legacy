@@ -947,6 +947,8 @@ class Man: public Person
 	Matrix4 HeadAimBasis() const;
 	Vector3 GetEyeDirection() const override;
 	// Sinkhole W1b: handheld flashlight (SoldierOldFlashlight.cpp)
+	// Malprave aiExposed (SoldierOldExposed.cpp)
+	float ExposedVisibility(Vector3Par sensorPos, const Object *sensor, float objectSize, int isect) override;
 	void UpdateFlashlight();
 	bool LeftHandFrame(Matrix4& modelSpace) const;
 	// Sinkhole W3: swimming (SoldierOldSwim.cpp)

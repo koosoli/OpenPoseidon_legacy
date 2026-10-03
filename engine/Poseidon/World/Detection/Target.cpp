@@ -28,6 +28,9 @@
 #include <Poseidon/Foundation/Time/Time.hpp>
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
+#include <Poseidon/IO/ParamFileExt.hpp>
+#include <unordered_map>
+#include <Poseidon/AI/AIHunt.hpp>
 
 namespace Poseidon
 {
@@ -159,6 +162,12 @@ Vector3 Target::ExactAimingPosition() const
     {
         if (Glob.time < lastSeen + 1.0f)
         {
+            // aiExposed: only part of him shows (the chest hidden): aim at that part
+            Vector3 part;
+            if (const Person* man = dyn_cast<Person>(exact); man && man->ExposedAimPoint(part))
+            {
+                return part;
+            }
             return exact->AimingPosition();
         }
     }
@@ -242,6 +251,11 @@ Vector3 Target::LandAimingPosition() const
     {
         if (Glob.time < lastSeen + 1.0f)
         {
+            Vector3 part; // aiExposed, as ExactAimingPosition
+            if (const Person* man = dyn_cast<Person>(exact); man && man->ExposedAimPoint(part))
+            {
+                return part;
+            }
             return exact->AimingPosition();
         }
     }
@@ -709,6 +723,123 @@ float EntityAI::CalcVisibility(EntityAI* ai, float dist2, float* audibility, boo
     return vis;
 }
 
+// ---------------------------------------------------------------------------
+// CWR fork: gradual spotting (after X-Ray's visual memory). Seeing someone is no
+// longer a single threshold test: while a unit can see a target, the group's
+// awareness of it builds up at a rate proportional to how visible the target is
+// (distance, light, movement and cover all feed the existing spotability value).
+// Crawling, darkness and foliage therefore buy time; a man running in the open
+// close by is still seen at once. Hearing, radar/laser and mission-start
+// knowledge are unchanged. Tunable (or switched off) through an optional
+//   class CfgAIFork { gradualSpotting = 1; spotBuildTime = 2; spotInstantDist = 10;
+//                     spotFireFactor = 4; spotForgetRate = 0.5; };
+// ---------------------------------------------------------------------------
+namespace GradualSpotting
+{
+struct Settings
+{
+    // Oli: off by default until the X-Ray play-test (AI-XRAY-001); CfgAIFork { gradualSpotting = 1; } turns it on
+    bool enabled = false;
+    float buildTime = 2.0f;   // s to spot a target sitting exactly on the old threshold
+    float instantDist = 10;   // m: closer than this is seen at once
+    float fireFactor = 4;     // a visible muzzle flash spots this much faster
+    float forgetRate = 0.5f;  // awareness lost per second once nobody sees him (after 1 s)
+};
+
+static const Settings& Get()
+{
+    static Settings s;
+    static bool loaded = false;
+    if (!loaded)
+    {
+        loaded = true;
+        if (const ParamEntry* cls = Pars.FindEntry("CfgAIFork"))
+        {
+            auto num = [&](const char* name, float def) -> float
+            {
+                const ParamEntry* e = cls->FindEntry(name);
+                return e ? static_cast<float>(*e) : def;
+            };
+            s.enabled = num("gradualSpotting", 0) != 0;
+            s.buildTime = floatMax(num("spotBuildTime", s.buildTime), 0.05f);
+            s.instantDist = floatMax(num("spotInstantDist", s.instantDist), 0.0f);
+            s.fireFactor = floatMax(num("spotFireFactor", s.fireFactor), 1.0f);
+            s.forgetRate = floatMax(num("spotForgetRate", s.forgetRate), 0.0f);
+        }
+    }
+    return s;
+}
+
+struct Build
+{
+    float value = 0;       // 0..1, spotted at 1
+    float lastAdd = 0;     // last time awareness was added (s)
+    float lastSeen = 0;    // last time anyone in the group could see him (s)
+};
+
+static std::unordered_map<const Target*, Build> s_builds;
+static float s_lastPurge = 0;
+
+//! one observer's view of a not-yet-known target; true once the group has spotted it
+static bool Accumulate(const Target* target, float ratio, bool firing, float period, float dist)
+{
+    const Settings& cfg = Get();
+    const float now = Glob.time.toFloat();
+
+    if (now - s_lastPurge > 30)
+    {
+        s_lastPurge = now;
+        for (auto it = s_builds.begin(); it != s_builds.end();)
+            it = now - it->second.lastSeen > 30 ? s_builds.erase(it) : std::next(it);
+    }
+
+    if (ratio < 0.3f)
+    {
+        return false; // this observer can't see him; others may (awareness fades lazily below)
+    }
+    if (dist < cfg.instantDist)
+    {
+        s_builds.erase(target);
+        return true;
+    }
+
+    auto [it, isNew] = s_builds.try_emplace(target);
+    Build& b = it->second;
+    const float step = floatMin(floatMax(period, 0.05f), 2.0f);
+    if (isNew)
+    {
+        b.lastAdd = now - step;
+        b.lastSeen = now;
+    }
+    // fade while nobody could see him (1 s grace)
+    const float unseen = now - b.lastSeen - 1.0f;
+    if (unseen > 0)
+    {
+        b.value = floatMax(0.0f, b.value - unseen * cfg.forgetRate);
+    }
+    b.lastSeen = now;
+
+    // several observers in the same moment don't multiply real time
+    const float dt = floatMin(step, now - b.lastAdd);
+    if (dt > 0)
+    {
+        float rate = ratio / cfg.buildTime;
+        if (firing)
+        {
+            rate *= cfg.fireFactor;
+        }
+        b.value += dt * rate;
+        b.lastAdd = now;
+    }
+    if (b.value >= 1)
+    {
+        s_builds.erase(target);
+        return true;
+    }
+    return false;
+}
+} // namespace GradualSpotting
+
 void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool initialize, float maxDist,
                             float trackTargetsPeriod)
 {
@@ -1065,12 +1196,14 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
         actSpotabilityEar *= aiAudible * sensitivityEar;
 
         float actSpotability = actSpotabilityEye;
+        bool byEye = !radarContact && !laserContact; // gradual spotting applies to sight only
         if (actSpotability < 1 && actSpotability < actSpotabilityEar)
         {
             spotError = ai->Position().Distance(sensorPosition) * 0.8;
             delayCoef = 2.5f;
             actSpotability = actSpotabilityEar;
             hidden = 1;
+            byEye = false;
         }
         // CWR fork (X-Ray: weapon sounds count 10x): gunfire you can hear makes the
         // shooter known, roughly placed from the sound, even if he can't be seen, so the
@@ -1084,6 +1217,7 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
                 delayCoef = 2.0f;
                 actSpotability = heard;
                 hidden = 1;
+                byEye = false;
             }
         }
 
@@ -1243,7 +1377,15 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
         }
         else
         {
-            if (newSpotability > spotTreshold)
+            bool spotted = newSpotability > spotTreshold;
+            // CWR fork: by sight, AI awareness builds up over time instead of snapping on
+            // (the player's auto-spotting and mission-start knowledge are unchanged)
+            if (byEye && notManual && !initialize && GradualSpotting::Get().enabled)
+            {
+                spotted = GradualSpotting::Accumulate(target, newSpotability / spotTreshold, visibleFire > 0.8f,
+                                                      trackTargetsPeriod, ai->Position().Distance(Position()));
+            }
+            if (spotted)
             {
                 target->posError = Vector3(GRandGen.RandomValue() * spotError * 2 - spotError,
                                            GRandGen.RandomValue() * spotError * 0.2f - spotError * 0.1f,
@@ -1658,6 +1800,25 @@ bool EntityAI::WhatShootResult(FireResult& result, const Target& target, int wea
         LOG_DEBUG(AI, "    x: no ammo.");
 #endif
         return false;
+    }
+
+    // CWR fork (X-Ray squad rules), AI only: no splash weapon where it would catch
+    // a squadmate or his cover, and one hand grenade per group every few seconds
+    if (aInfo->indirectHit > 0 && aInfo->indirectHitRange > 0)
+    {
+        AIUnit* me = CommanderUnit();
+        if (me && !me->IsAnyPlayer())
+        {
+            if (!Hunt::SplashSafe(me, target.AimingPosition(), aInfo->indirectHitRange))
+            {
+                return false;
+            }
+            const bool handGrenade = aInfo->_simulation == AmmoShotShell && ammoInfo->_initSpeed < 30;
+            if (handGrenade && !Hunt::GrenadeAllowed(me->GetGroup()))
+            {
+                return false;
+            }
+        }
     }
 
     if (dist > aInfo->maxRange || dist < aInfo->minRange)

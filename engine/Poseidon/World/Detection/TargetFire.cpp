@@ -22,6 +22,7 @@
 #include <Poseidon/Foundation/Time/Time.hpp>
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
+#include <Poseidon/AI/AIHunt.hpp>
 
 #if _ENABLE_CHEATS
 
@@ -373,6 +374,12 @@ bool EntityAI::AttackThink(FireResult& result, Vector3& pos)
     }
     if (!_attackTarget->IsKnown() || _attackTarget->lastSeen < Glob.time - 20)
     {
+        // CWR fork: a soldier allowed to hunt searches properly (AIHunt) instead
+        // of walking straight to a stale guess; others keep the original behaviour
+        if (Hunt::MayHunt(brain))
+        {
+            return false;
+        }
         pos = _attackTarget->LandAimingPosition();
         return true;
     }
@@ -661,10 +668,12 @@ bool EntityAI::AttackReady()
 bool ObstacleFree(AIUnit* unit, Object* object)
 {
     AIGroup* grp = unit->GetGroup();
-    for (int u = 1; u < MAX_UNITS_PER_GROUP; u++)
+    // CWR fork: the loop skipped the last unit id, and tested the searching unit
+    // instead of the squadmate (so for most soldiers nobody was checked at all)
+    for (int u = 1; u <= MAX_UNITS_PER_GROUP; u++)
     {
         AIUnit* un = grp->UnitWithID(u);
-        if (!un || un == unit || !unit->IsUnit())
+        if (!un || un == unit || !un->IsUnit())
         {
             continue;
         }
@@ -675,7 +684,14 @@ bool ObstacleFree(AIUnit* unit, Object* object)
         {
             return false;
         }
-        if (un->GetVehicle()->GetHideBehind() == object)
+        const Object* theirs = un->GetVehicle()->GetHideBehind();
+        if (theirs == object)
+        {
+            return false;
+        }
+        // CWR fork (X-Ray cover spacing): keep 5 m between squadmates' cover spots,
+        // so two soldiers don't pick trees right next to each other
+        if (theirs && theirs->Position().DistanceXZ2(object->Position()) < Square(5))
         {
             return false;
         }

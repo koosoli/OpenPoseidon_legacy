@@ -34,6 +34,7 @@ using Poseidon::Foundation::MStorage;
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
+#include <Poseidon/World/Entities/Infantry/Person.hpp> // aiExposed
 #include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Random/randomGen.hpp>
@@ -2237,6 +2238,15 @@ float Landscape::Visible(Vector3Par sensorPos, const Object* sensor, const Objec
             if (observer && observer->ImprovedAutonomousCombat())
                 visible = floatMax(visible, Visible(sensorPos,
                     object->CameraPosition() - Vector3(0, 0.08f, 0), 0.08f, sensor, object, isect));
+        }
+        // Malprave aiExposed (optional, CfgAIFork exposedParts = 1): the aiming point mostly hidden -- try other
+        // parts of a man's body (an arm round a door, legs under a truck)
+        if (visible < 0.5f)
+        {
+            if (Person* man = dyn_cast<Person>(const_cast<Object*>(object)))
+            {
+                visible = floatMax(visible, man->ExposedVisibility(sensorPos, sensor, objectSize, (int)isect));
+            }
         }
         return visible;
     }

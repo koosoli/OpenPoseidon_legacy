@@ -56,6 +56,18 @@ class Person: public VehicleSupply
 
 	virtual void KilledBy( EntityAI *owner );
 
+	// aiExposed (optional, class CfgAIFork { exposedParts = 1; }): an observer whose view of this man's aiming point
+	// (the chest) is blocked samples other points of his body (his Hitpoints LOD) and can see - and aim at - a part
+	// that shows (an arm round a door, legs under a truck). After X-Ray's Feel::Vision: a random body point per check,
+	// kept while it stays visible
+	Vector3 _exposedPoint = VZero;       // world
+	Foundation::Time _exposedTime;       // when a hidden-chest observer last saw that point
+	int _exposedIdx = -1;                // its Hitpoints LOD vertex, tried first next time
+	//! visibility of the best sampled body point (already scaled for a part), 0 when off / out of range / not a man
+	virtual float ExposedVisibility(Vector3Par sensorPos, const Object *sensor, float objectSize, int isect) {return 0;}
+	//! a body point seen in the last 0.6 s while the chest was hidden: aim there
+	bool ExposedAimPoint(Vector3 &pos) const; // (Undead.cpp)
+
 	bool QIsManual() const override;
 	void SetRemotePlayer(int player);
 	void ApplyIdentity();

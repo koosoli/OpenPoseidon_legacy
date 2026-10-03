@@ -4,6 +4,7 @@
 #include <Poseidon/AI/AICostAccum.hpp> // PERF-019
 #include <Poseidon/AI/AITuning.hpp>    // PERF-020
 #include <Poseidon/AI/AIRadio.hpp>
+#include <Poseidon/AI/AIHunt.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -2038,6 +2039,8 @@ bool AIUnit::Think(ThinkImportance prec)
     // find attack position if neccessary
 
     SetWatch(); // instrumented inside: unitAttack + unitWatch cover it entirely
+    // Malprave aiHunting: soldier-level hunting of an enemy that has dropped out of sight
+    Hunt::Think(this);
     // some parts of AIUnit::Think may be executed less often
 
     if (Glob.time > _expensiveThinkTime)
