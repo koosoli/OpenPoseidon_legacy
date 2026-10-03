@@ -11,7 +11,7 @@
 #import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
 #import frame::ground_sky_reflection
 #import frame::wet_soil_debug_mode
-#import ground_wet::{cultivated_soil_fraction, soil_wet_amount, soil_wet_surface, soil_wet_fresnel, soil_wet_sun_specular, soil_wet_ground_reflection}
+#import ground_wet::{cultivated_soil_fraction, soil_wet_amount, soil_wet_surface, soil_wet_fresnel, soil_wet_sun_specular, soil_wet_ground_reflection, soil_wet_environment_samples}
 #import shadow::shadow_strength
 #import lighting::lights_contrib
 #import color::srgb_to_linear
@@ -1227,6 +1227,11 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let moist_horizon = dot(reflect(-normalize(-in.world_pos), geometric_n), ground_normals.broad);
     let moist_horizon_width = fwidth(moist_horizon);
     let moist_normal_variation = length(fwidth(geometric_n));
+    // Bound the cone's horizon variation with derivatives in uniform flow.
+    // No derivative operation enters the wet/source-dependent sample loop.
+    let moist_cone_horizon_width = max(moist_horizon_width,
+        2.0*moist_normal_variation + length(fwidth(normalize(-in.world_pos)))
+        + length(fwidth(ground_normals.broad)));
     // Apply the authored surfaces' own normal on top of the heightfield's. The terrain
     // frame is world-aligned by construction -- T = +X, B = +Z -- so this needs no tangent
     // stream, and a flat (0,0,1) from an unauthored cell leaves the geometric normal
@@ -1451,11 +1456,23 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         if (sky_lit) {
             // A wet soil coat reflects directional sky radiance. Diffuse SH
             // irradiance here washes the soil into a pale, cloudless coating.
-            let sky_reflected = ground_sky_reflection(reflect(-view, moist_n)) * frame.sun_ambient.w
-                * sky_vis_ao(in.world_xz) * local_sky_visibility;
-            // Approximate local ground radiance for a ray below the existing
-            // broad terrain plane, preserving the already-lit substrate energy.
-            reflected = soil_wet_ground_reflection(sky_reflected, rgb, moist_horizon, moist_horizon_width);
+            let samples = soil_wet_environment_samples(view, moist_n,
+                soil_wet * (1.0-rain_puddle), moist_normal_variation);
+            let sky_scale = frame.sun_ambient.w * sky_vis_ao(in.world_xz) * local_sky_visibility;
+            var rough_reflected = vec3<f32>(0.0);
+            var reflection_weight = 0.0;
+            for (var i=0u; i<8u; i+=1u) {
+                if (samples[i].w > 0.0) {
+                    let sky_reflected = ground_sky_reflection(samples[i].xyz) * sky_scale;
+                    // Every direction respects the same existing local plane;
+                    // diffuse-ground fallback is approximate, never an SSR hit.
+                    rough_reflected += soil_wet_ground_reflection(sky_reflected, rgb,
+                        dot(samples[i].xyz, ground_normals.broad), moist_cone_horizon_width) * samples[i].w;
+                    reflection_weight += samples[i].w;
+                }
+            }
+            // Back-facing/no-sample geometry has no available reflected sky.
+            reflected = select(rgb, rough_reflected, reflection_weight > 0.0);
         }
         let half_vector = normalize(view - frame.sun_dir_world.xyz + vec3<f32>(0.0, 1e-4, 0.0));
         rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel,

@@ -81,3 +81,50 @@ fn soil_wet_ground_reflection(sky: vec3<f32>, substrate: vec3<f32>,
     // A convex replacement retains HDR energy and the caller's Fresnel split.
     return mix(substrate, sky, soil_wet_sky_fraction(horizon_cosine, pixel_width));
 }
+
+// Eight deterministic importance samples of the same GGX slope distribution
+// as the direct-sun coat. Stratify its radial CDF in four antipodal pairs;
+// normal-space samples have no world-position/time noise or view-axis rotation.
+// The NDF sampling PDF is D*N.H/(4*V.H) in reflected-direction space. Cancelling
+// it against BRDF*N.L gives 4*N.L*V_GGX*V.H/N.H. Fresnel stays in the caller's
+// existing energy partition, so only this nonnegative directional kernel is
+// normalised: this is a bounded radiance convolution, not a new BRDF amplitude.
+fn soil_wet_environment_samples(view: vec3<f32>, n: vec3<f32>, wet_amount: f32,
+                                normal_variation: f32) -> array<vec4<f32>, 8> {
+    var samples: array<vec4<f32>, 8>;
+    let nv = dot(n, view);
+    if (nv <= 0.0) { return samples; }
+    let alpha = soil_wet_sun_alpha(wet_amount);
+    let variance = max(normal_variation, 0.0);
+    let alpha2 = clamp(alpha * alpha + variance * variance, 0.0064, 0.5);
+    // Orthonormal y-up Frisvad basis, continuous on the upper terrain hemisphere.
+    let sign_y = select(-1.0, 1.0, n.y >= 0.0);
+    let a = -1.0 / (sign_y + n.y);
+    let b = n.x * n.z * a;
+    let tangent = vec3<f32>(1.0 + sign_y*n.x*n.x*a, -sign_y*n.x, sign_y*b);
+    let bitangent = vec3<f32>(b, -n.z, sign_y + n.z*n.z*a);
+    var total = 0.0;
+    for (var i=0u; i<8u; i+=1u) {
+        let ring = f32(i/2u);
+        let u = (ring + 0.5) / 4.0;
+        let slope = sqrt(alpha2 * u / (1.0-u));
+        let phi = (ring*0.25 + f32(i%2u)) * 3.14159265359;
+        let h = normalize(n + slope*(tangent*cos(phi) + bitangent*sin(phi)));
+        let vh = dot(view, h);
+        let direction = reflect(-view, h);
+        let nl = dot(n, direction);
+        var weight = 0.0;
+        if (vh > 0.0 && nl > 0.0) {
+            let gv = nl * sqrt(nv*nv*(1.0-alpha2) + alpha2);
+            let gl = nv * sqrt(nl*nl*(1.0-alpha2) + alpha2);
+            let visibility = 0.5 / max(gv+gl, 1e-5);
+            weight = 4.0*nl*visibility*vh / max(dot(n,h), 1e-5);
+        }
+        samples[i] = vec4<f32>(direction, weight);
+        total += weight;
+    }
+    if (total > 0.0) {
+        for (var i=0u; i<8u; i+=1u) { samples[i].w /= total; }
+    }
+    return samples;
+}

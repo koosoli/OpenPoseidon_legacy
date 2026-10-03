@@ -90,7 +90,8 @@ fn wet_soil_sun_coat_composes_and_actual_terrain_uses_one_fresnel_and_filtered_n
     assert!(helper.contains("rain_water_sun_specular(ndv, ndl, ndh, vdh, variance)"));
     assert!(helper.contains("mix(0.4, 0.22, clamp(wet_amount, 0.0, 1.0))"));
     assert!(helper.contains("alpha * alpha - 0.0064"));
-    assert!(source.contains("ground_sky_reflection(reflect(-view, moist_n))"));
+    assert!(source.contains("soil_wet_environment_samples(view, moist_n,"));
+    assert!(source.contains("ground_sky_reflection(samples[i].xyz)"));
 }
 
 #[test]
@@ -220,7 +221,12 @@ fn wet_soil_surface_response_composes_without_new_resources_or_detail_noise() {
         .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&composer)));
     let helper = include_str!("ground_wet.wgsl");
     assert!(!helper.contains("@group") && !helper.contains("texture"));
-    assert!(!helper.contains("sin(") && !helper.contains("fract(") && !helper.contains("hash("));
+    let kernel = helper.find("fn soil_wet_environment_samples(").unwrap();
+    assert!(!helper[..kernel].contains("sin("));
+    assert!(!helper.contains("fract(") && !helper.contains("hash("));
+    // Trigonometry samples a fixed angular quadrature, never detail/time noise.
+    assert!(helper[kernel..].contains("let phi = (ring*0.25 + f32(i%2u)) * 3.14159265359;"));
+    assert!(!helper[kernel..].contains("time") && !helper[kernel..].contains("world"));
     assert!(helper.contains("mix(1.0, 0.58, wet)"));
     assert!(helper.contains("clamp(soil, 0.0, 1.0)"));
     let terrain = include_str!("../terrain/terrain.wgsl");
@@ -474,3 +480,6 @@ fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {
 
 #[path = "ground_wet_reflection_tests.rs"]
 mod reflection_tests;
+
+#[path = "ground_wet_rough_env_tests.rs"]
+mod rough_env_tests;

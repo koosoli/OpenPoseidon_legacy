@@ -57,9 +57,8 @@ fn local_reflection_composes_and_reuses_exact_normal_work() {
     ));
     assert!(terrain.contains("return sample_mud_normals(world_xz, step, footprint).fine;"));
     assert!(terrain.contains("let moist_horizon_width = fwidth(moist_horizon);"));
-    assert!(terrain.contains(
-        "soil_wet_ground_reflection(sky_reflected, rgb, moist_horizon, moist_horizon_width)"
-    ));
+    assert!(terrain.contains("soil_wet_ground_reflection(sky_reflected, rgb,"));
+    assert!(terrain.contains("dot(samples[i].xyz, ground_normals.broad), moist_cone_horizon_width)"));
     assert_eq!(
         terrain.matches("soil_wet_ground_reflection(").count(),
         1,
