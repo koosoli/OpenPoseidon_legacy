@@ -79,14 +79,16 @@ cull/draw names occupy indices 84/85/86/87 respectively.
 The raw harness protocol, state observations, published snapshots, logs, actual
 frame totals, weather/input histories, water budgets and paused route-end screenshot
 are saved beneath build/rain-helicopter/. Query cost and once-per-second trace
-overhead are part of both measured arms. The screenshot and submitted weather-map
-trace are bounded view/publication evidence; neither proves every aircraft pixel
+overhead are part of both measured arms. Moving weather-map and land-rotor traces
+are disabled; fine water owners are explicitly off. Weather draw encode timing
+must be present in rainy samples. It proves recorded work, not image readiness.
+The screenshot is bounded view evidence; it does not prove every aircraft pixel
 or all-map renderer behavior.
 
 ## Optional diagnostic control
 
 -IncludeFarCoverOff adds another fresh Dry/Rain pair using the existing production
-control WGR_WEATHER_COVER_FAR=0. Startup trace must prove OFF and no far-map
+control WGR_WEATHER_COVER_FAR=0. Startup diagnostics must prove OFF and no far-map
 publication. Default arms clear the inherited control and require the default-on
 startup trace. This control is a diagnostic only; it does not change production
 defaults. Its different visibility workload and liquid history are retained.

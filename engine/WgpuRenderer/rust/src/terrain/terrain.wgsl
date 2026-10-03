@@ -10,7 +10,7 @@
 #import frame::{frame, reverse_z, fog_factor, apply_fog, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_rain_coverage, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
 #import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
 #import frame::ground_sky_reflection
-#import ground_wet::{cultivated_soil_fraction, soil_wet_amount, soil_wet_fresnel, soil_wet_sun_lobe}
+#import ground_wet::{cultivated_soil_fraction, soil_wet_amount, soil_wet_surface, soil_wet_fresnel, soil_wet_sun_lobe}
 #import shadow::shadow_strength
 #import lighting::lights_contrib
 #import color::srgb_to_linear
@@ -1439,7 +1439,11 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         rain_puddle *= rain_proof;
         soil_wet *= rain_proof;
     }
-    rgb *= (1.0 - rain_puddle * 0.38) * (1.0 - soil_wet * (1.0 - rain_puddle) * 0.30);
+    // Proven wet soil absorbs through the authored substrate and uses the
+    // rough moist-soil coat below. Keep the smooth film on the hard fraction.
+    let wet_surface = soil_wet_surface(mud, soil_wet, rain_puddle);
+    rain_puddle = wet_surface.y;
+    rgb *= wet_surface.x;
     sun_ambient *= sky_vis_ao(in.world_xz)
         * gtao_ao(in.clip.xy)
         * local_sky_visibility

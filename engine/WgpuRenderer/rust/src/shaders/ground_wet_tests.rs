@@ -40,6 +40,14 @@ fn wet_soil_surface_response_composes_without_new_resources_or_detail_noise() {
     assert!(!helper.contains("sin(") && !helper.contains("fract(") && !helper.contains("hash("));
     assert!(helper.contains("mix(1.0, 0.58, wet)"));
     assert!(helper.contains("clamp(soil, 0.0, 1.0)"));
+    let terrain = include_str!("../terrain/terrain.wgsl");
+    let admission = terrain.find("soil_wet *= rain_proof;").unwrap();
+    let surface = terrain.find("let wet_surface = soil_wet_surface(mud, soil_wet, rain_puddle);").unwrap();
+    let diffuse = terrain.find("rgb *= wet_surface.x;").unwrap();
+    let coat = terrain.find("if (soil_wet > 0.0) {").unwrap();
+    assert!(admission < surface && surface < diffuse && diffuse < coat);
+    assert!(terrain[surface..diffuse].contains("rain_puddle = wet_surface.y;"));
+    assert!(!terrain.contains("soil_wet * (1.0 - rain_puddle) * 0.30"));
 }
 
 #[test]
