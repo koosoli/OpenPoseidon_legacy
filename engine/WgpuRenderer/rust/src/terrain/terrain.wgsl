@@ -11,7 +11,7 @@
 #import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
 #import frame::ground_sky_reflection
 #import frame::wet_soil_debug_mode
-#import ground_wet::{cultivated_soil_fraction, soil_wet_amount, soil_wet_surface, soil_wet_fresnel, soil_wet_sun_specular}
+#import ground_wet::{cultivated_soil_fraction, soil_wet_amount, soil_wet_surface, soil_wet_fresnel, soil_wet_sun_specular, soil_wet_ground_reflection}
 #import shadow::shadow_strength
 #import lighting::lights_contrib
 #import color::srgb_to_linear
@@ -354,11 +354,19 @@ fn sample_normal(world_xz: vec2<f32>, step: f32) -> vec3<f32> {
 
 // Resolve small mud relief against the actual pixel footprint, preserving the
 // broad terrain normal and fading subpixel impressions instead of shimmering.
-fn sample_mud_normal(world_xz: vec2<f32>, step: f32, footprint: f32) -> vec3<f32> {
+struct GroundNormalPair {
+    broad: vec3<f32>,
+    fine: vec3<f32>,
+};
+fn sample_mud_normals(world_xz: vec2<f32>, step: f32, footprint: f32) -> GroundNormalPair {
     let base = sample_normal(world_xz, step);
     let delta = mud_height_gradient(world_xz, footprint) - mud_height_gradient(world_xz, step)
         + sand_height_gradient(world_xz, footprint) - sand_height_gradient(world_xz, step);
-    return normalize(vec3<f32>(base.x - delta.x * base.y, base.y, base.z - delta.y * base.y));
+    let fine = normalize(vec3<f32>(base.x - delta.x * base.y, base.y, base.z - delta.y * base.y));
+    return GroundNormalPair(base, fine);
+}
+fn sample_mud_normal(world_xz: vec2<f32>, step: f32, footprint: f32) -> vec3<f32> {
+    return sample_mud_normals(world_xz, step, footprint).fine;
 }
 
 // Index-map entry for a land cell, clamped to the map (row = z, column = x;
@@ -1212,8 +1220,12 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     }
 
     // Per-pixel normal at a fixed heightmap step (independent of patch LOD/morph).
-    let geometric_n = sample_mud_normal(in.world_xz, tp.terrain_grid, snow_footprint);
-    // Keep derivative filtering outside material/admission branches.
+    let ground_normals = sample_mud_normals(in.world_xz, tp.terrain_grid, snow_footprint);
+    let geometric_n = ground_normals.fine;
+    // Reuse the pre-existing broad normal: no additional height samples.
+    // Keep actual horizon/pixel filtering outside material/admission branches.
+    let moist_horizon = dot(reflect(-normalize(-in.world_pos), geometric_n), ground_normals.broad);
+    let moist_horizon_width = fwidth(moist_horizon);
     let moist_normal_variation = length(fwidth(geometric_n));
     // Apply the authored surfaces' own normal on top of the heightfield's. The terrain
     // frame is world-aligned by construction -- T = +X, B = +Z -- so this needs no tangent
@@ -1439,8 +1451,11 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         if (sky_lit) {
             // A wet soil coat reflects directional sky radiance. Diffuse SH
             // irradiance here washes the soil into a pale, cloudless coating.
-            reflected = ground_sky_reflection(reflect(-view, moist_n)) * frame.sun_ambient.w
+            let sky_reflected = ground_sky_reflection(reflect(-view, moist_n)) * frame.sun_ambient.w
                 * sky_vis_ao(in.world_xz) * local_sky_visibility;
+            // Approximate local ground radiance for a ray below the existing
+            // broad terrain plane, preserving the already-lit substrate energy.
+            reflected = soil_wet_ground_reflection(sky_reflected, rgb, moist_horizon, moist_horizon_width);
         }
         let half_vector = normalize(view - frame.sun_dir_world.xyz + vec3<f32>(0.0, 1e-4, 0.0));
         rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel,

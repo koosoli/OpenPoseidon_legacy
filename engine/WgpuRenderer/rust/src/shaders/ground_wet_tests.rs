@@ -471,3 +471,6 @@ fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     assert_eq!(previous, 1.0, "positive wet soil is exercised");
 }
+
+#[path = "ground_wet_reflection_tests.rs"]
+mod reflection_tests;

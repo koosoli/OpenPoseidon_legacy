@@ -66,3 +66,18 @@ fn soil_wet_sun_specular(ndv: f32, ndl: f32, ndh: f32, vdh: f32,
 fn soil_wet_sun_alpha(wet_amount: f32) -> f32 {
     return mix(0.4, 0.22, clamp(wet_amount, 0.0, 1.0));
 }
+
+// Local tangent-plane sky visibility, filtered by the actual pixel derivative.
+// This is not a terrain ray hit: the existing broad terrain normal defines the
+// approximate horizon. Below it, atmosphere background padding is not sky light.
+fn soil_wet_sky_fraction(horizon_cosine: f32, pixel_width: f32) -> f32 {
+    let width = max(abs(pixel_width), 0.000001);
+    return clamp(0.5 + 0.5 * horizon_cosine / width, 0.0, 1.0);
+}
+fn soil_wet_ground_reflection(sky: vec3<f32>, substrate: vec3<f32>,
+                              horizon_cosine: f32, pixel_width: f32) -> vec3<f32> {
+    // The already-lit/darkened substrate approximates nearby diffuse-ground
+    // radiance for locally blocked rays. No invented hit, tint or extra light.
+    // A convex replacement retains HDR energy and the caller's Fresnel split.
+    return mix(substrate, sky, soil_wet_sky_fraction(horizon_cosine, pixel_width));
+}
