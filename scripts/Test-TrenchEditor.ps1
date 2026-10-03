@@ -106,11 +106,15 @@ try{
  $until=[DateTime]::UtcNow.AddSeconds(120);while((Eval 'triSceneReady')-cne 'OK'){Require ([DateTime]::UtcNow-lt $until) 'Scene-ready deadline.';Start-Sleep -Milliseconds 300}
  Exec 'setAccTime 0;0 setRain 0;0 setOvercast 0';$initial=State $null $null;Require ($initial.count-eq 0) 'Fresh world already contains editor objects.';$result.initial=$initial
  $terrain=Send @{cmd='dev_terrain_brush';action='state'};$result.terrain=$terrain
- $scan=Eval 'private ["_rows","_x","_z"];_rows=[];for "_z" from 4000 to 8000 step 250 do {for "_x" from 4000 to 8000 step 250 do {_rows set [count _rows,[_x,_z,triTerrainHeight [_x,_z]]]}};_rows'
- Require ($scan.Count-eq 289) 'Incomplete flat-site census.';$result.scan=$scan;$lookup=@{}
+ # Include open lowlands/airfields beyond the initial central forest sector.
+ # Actual landscape dimensions bound this read-only census; admission stays strict.
+ $scanStep=500;$scanMin=500;$scanMax=[Math]::Floor((((Num $terrain.range)-1)*(Num $terrain.spacing)-500)/$scanStep)*$scanStep
+ $scanAxisCount=[int](($scanMax-$scanMin)/$scanStep)+1;Require ($scanAxisCount -gt 0 -and $scanAxisCount -le 32) 'Invalid bounded landscape census dimensions.'
+ $scan=Eval ('private ["_rows","_x","_z"];_rows=[];for "_z" from '+(Fmt $scanMin)+' to '+(Fmt $scanMax)+' step '+(Fmt $scanStep)+' do {for "_x" from '+(Fmt $scanMin)+' to '+(Fmt $scanMax)+' step '+(Fmt $scanStep)+' do {_rows set [count _rows,[_x,_z,triTerrainHeight [_x,_z]]]}};_rows')
+ Require ($scan.Count-eq $scanAxisCount*$scanAxisCount) 'Incomplete flat-site census.';$result.scan=$scan;$result.scanBounds=@{min=$scanMin;max=$scanMax;step=$scanStep};$lookup=@{}
  foreach($row in $scan){Require ($row.Count-eq 3) 'Malformed terrain census.';$lookup[([string]$row[0]+':'+[string]$row[1])]=Num $row[2]}
  $candidates=@();foreach($row in $scan){if((Num $row[2])-le (Num $terrain.seaLevel)+.5){continue};$variation=0.;$available=0
-  foreach($dir in @(@{dx=0;dz=250},@{dx=250;dz=0},@{dx=0;dz=-250},@{dx=-250;dz=0})){$key=[string]($row[0]+$dir.dx)+':'+[string]($row[1]+$dir.dz);if($lookup.ContainsKey($key)){$variation+=[Math]::Abs($lookup[$key]-(Num $row[2]));++$available}}
+  foreach($dir in @(@{dx=0;dz=$scanStep},@{dx=$scanStep;dz=0},@{dx=0;dz=-$scanStep},@{dx=-$scanStep;dz=0})){$key=[string]($row[0]+$dir.dx)+':'+[string]($row[1]+$dir.dz);if($lookup.ContainsKey($key)){$variation+=[Math]::Abs($lookup[$key]-(Num $row[2]));++$available}}
   if($available-ge 2){$candidates+=@{x=(Num $row[0]);z=(Num $row[1]);variation=($variation/$available)}}
  }
  $site=$null;$attempts=@();$until=[DateTime]::UtcNow.AddSeconds(180);$result.siteCandidateLimit=64
