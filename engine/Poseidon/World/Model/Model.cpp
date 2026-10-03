@@ -62,10 +62,17 @@ bool Model::compile()
         }
 
         // MLOD only — ODOL vertices are already centered
+        //
+        // `autocenter=0` is honoured on ANY LOD. Oxygen and every OFP-era model keep named properties on the
+        // GEOMETRY LOD (LODShape::PropertyValue reads them there), and only the xob converter writes them on
+        // every LOD. Checking lodLevels[0] alone (the first visual LOD) recentred those models here, and the
+        // adapter -- which does read the geometry LOD -- then recorded no offset, so the shift was baked in:
+        // a model authored with its origin on the ground sat half its height too high (Sinkhole W1: a cave
+        // 5 m deep stood 2.35 m up, its floor 2.6 m under the ground instead of 5).
         bool shouldAutoCenter = true;
-        if (!lodLevels.empty())
+        for (const auto& lod : lodLevels)
         {
-            for (const auto& prop : lodLevels[0].mesh.properties)
+            for (const auto& prop : lod.mesh.properties)
             {
                 if (prop.name == "autocenter" && prop.value == "0")
                 {
@@ -73,6 +80,8 @@ bool Model::compile()
                     break;
                 }
             }
+            if (!shouldAutoCenter)
+                break;
         }
 
         if (shouldAutoCenter && hasAnyGeometry)
