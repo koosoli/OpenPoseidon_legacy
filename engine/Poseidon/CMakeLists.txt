@@ -335,6 +335,10 @@ target_include_directories(Poseidon PRIVATE ${Stb_INCLUDE_DIR})
 find_package(mimalloc CONFIG REQUIRED)
 target_link_libraries(Poseidon PUBLIC mimalloc-static)
 target_compile_definitions(Poseidon PUBLIC MI_STATIC_LIB)
+# DIAG-001: 1 builds Dev/Diag/OpDiag* and its hooks, 0 compiles them out. PUBLIC so the apps
+# and the unit tests see the same value as the library (Man / Script / World declare a few
+# accessors under it).
+target_compile_definitions(Poseidon PUBLIC POSEIDON_DIAG=$<BOOL:${POSEIDON_ENABLE_DIAG}>)
 
 # SDL3 — input + window
 find_package(SDL3 CONFIG REQUIRED)

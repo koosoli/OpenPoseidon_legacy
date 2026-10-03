@@ -96,6 +96,7 @@ port is listed here and in its decision record, with what was rewritten for this
 | --- | --- |
 | DDS masked uncompressed layouts, DXT2/DXT4, DXT1 punch-through (`DDSConverter.cpp`, `DdsImport.cpp`) | `ddsTextures.patch` |
 | Object-cut terrain holes: `TerrainHoles.cpp` and the collision, LOS, explosion, AI, camera, sound, decal and GL33 hooks (wgpu drawing rewritten) | `terrainHole1`..`terrainHole8.patch` |
+| Diagnostics layer: `--diag` event log, `diag_*` harness commands, overlay (`engine/Poseidon/Dev/Diag/OpDiag*`, hooks in World / Shots / Collisions / Dammage / VehicleAICombat / SoldierOldMove / ExpressExt / SoundScene / VehicleTypes / OptionsUI / DebugOverlay / CrashHandler); Cry of Fear parts stripped, pause / step / camera / overlay rewritten for this tree (`docs/roadmap/decisions/DIAG-01-malprave-diagnostics-20261003.md`) | `engine/Poseidon/Dev/Diag/MwDiag.cpp`, `MwDiag2.cpp`, `MwDiag7.cpp`, `MwDiag9.cpp`, `MwDiagHarness.cpp`, `MwDiagHarness2.cpp`, `MwDiagOverlay.cpp` (mwDiag) |
 
 ### Tidewater (dgreenheck/tidewater)
 

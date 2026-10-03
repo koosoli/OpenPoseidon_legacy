@@ -56,6 +56,13 @@ public:
 
 	RString GetDebugName() const {return _name;}
 	void SetName(RString name) {_name=name;}
+#if POSEIDON_DIAG
+	// DIAG-001: diag_scripts
+	int DiagLine() const {return _currentLine;}
+	int DiagNLines() const {return _lines.Size();}
+	const char *DiagStatement(int i) const {return i >= 0 && i < _lines.Size() ? (const char *)_lines[i].statement : "";}
+	float DiagTime() const {return _time;}
+#endif
 
 	LSError Serialize(ParamArchive &ar);
 	static Script *CreateObject(ParamArchive &ar) {return new Script();}

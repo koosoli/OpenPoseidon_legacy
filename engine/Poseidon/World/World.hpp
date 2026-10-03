@@ -458,6 +458,11 @@ class World
 	TitleEffect *GetCutEffect() const {return _cutEffect;}
 
 	void AddScript(Script *script);
+#if POSEIDON_DIAG
+	// DIAG-001: diag_scripts
+	int DiagNScripts() const {return _scripts.Size();}
+	Script *DiagScript(int i) const {return _scripts[i];}
+#endif
 	void TerminateScript(Script *script);
 
 	void AddAttachment( AttachedOnVehicle *attach );

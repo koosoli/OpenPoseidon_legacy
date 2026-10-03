@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
@@ -389,6 +390,9 @@ void EntityAI::ReactToDammage() {}
 
 void EntityAI::Destroy(EntityAI* killer, float overkill, float minExp, float maxExp)
 {
+#if POSEIDON_DIAG
+    Dev::OpDiag::OnDeath(this, killer); // DIAG-001
+#endif
     if (IsLocal())
     {
         OnEvent(EEKilled, killer);

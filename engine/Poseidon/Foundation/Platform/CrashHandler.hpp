@@ -17,4 +17,11 @@ namespace Poseidon::Foundation
 //
 // crashDir: Linux report directory (current directory if empty/null). Ignored on Windows.
 void InstallCrashHandler(const char* crashDir);
+
+//! DIAG-001: called by the Windows crash filter after the minidump and the stack trace are written, with
+//! the exception code, the faulting address, the minidump path and the first frames as one line of text
+//! ("module!symbol+0x.. | ..."). Used by the --diag event log to record a "crash" event and close its files.
+//! nullptr turns it off. A no-op on Linux (the signal handler is async-signal-safe and stays that way).
+using CrashNotifyFn = void (*)(unsigned code, const void* addr, const char* dump, const char* stack);
+void SetCrashNotify(CrashNotifyFn fn);
 } // namespace Poseidon::Foundation

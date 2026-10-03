@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/World/Simulation/CollisionQueryMath.hpp>
 #include <Poseidon/Dev/Diag/TerrainBrush.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
@@ -1267,6 +1268,9 @@ void Landscape::ExplosionDammageEffects(EntityAI* owner, Shot* shot, Object* dir
 void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit, Vector3Par pos, Vector3Par dir,
                                  const AmmoType* type)
 {
+#if POSEIDON_DIAG
+    Dev::OpDiag::OnImpact(owner, shot, directHit, pos, dir, type); // DIAG-001: impact + path
+#endif
     Dev::PhysicsShowcaseExplosion(pos, type->indirectHit, type->indirectHitRange);
     bool enemyDammage = false;
 

@@ -712,6 +712,48 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
         showOption(debugGroup->add_option("--geometry-pages-surface-certificate",_geometrySurfaceCertificate,
             "Actual surface sidecar path and independently expected SHA256")->expected(2),CliHelpVisibility::Dev);
 
+#if POSEIDON_DIAG
+        // DIAG-001: the diagnostics layer ported from Malprave (Dev/Diag/OpDiag.hpp). Not
+        // registered at all in a release build, like --dev.
+        if (!BuildInfo::ReleaseBuild)
+        {
+            showOption(debugGroup->add_option("--diag", _diagDir,
+                                              "Write a diagnostic event log (events.jsonl, and summary.json at exit) "
+                                              "to this folder"),
+                       CliHelpVisibility::Dev);
+            showOption(debugGroup->add_option("--diag-cats", _diagCats,
+                                              "Diagnostic event types, comma separated (boot,addon,script,sound,shot,"
+                                              "hit,death,move,moveall,frame,perf,ai,stuck,trail,mark); default all "
+                                              "but moveall"),
+                       CliHelpVisibility::Dev);
+            showOption(debugGroup->add_flag("--diag-draw", _diagDraw,
+                                            "Draw shot paths, impacts and watched-unit labels over the 3D view "
+                                            "(dev overlay)"),
+                       CliHelpVisibility::Dev);
+            showOption(debugGroup->add_flag("--diag-keep-going", _diagKeepGoing,
+                                            "With --diag in test mode: log script errors instead of ending the mission"),
+                       CliHelpVisibility::Dev);
+            showOption(debugGroup->add_option("--diag-slow-ms", _diagSlowMs,
+                                              "Frame time counted as a slow frame in the diagnostic log (default 40)")
+                           ->check(CLI::Range(1.0f, 10000.0f)),
+                       CliHelpVisibility::Dev);
+            showOption(debugGroup->add_option("--diag-seed", _diagSeed,
+                                              "Seed the engine RNG with N once the test mission has booted")
+                           ->check(CLI::Range(0, 2147483647)),
+                       CliHelpVisibility::Dev);
+            showOption(debugGroup->add_option("--diag-fixed-dt", _diagFixedDt,
+                                              "Pin every frame's delta to S seconds (sets POSEIDON_LOCKSTEP_HZ=1/S "
+                                              "unless it is already set)")
+                           ->check(CLI::Range(0.001f, 1.0f)),
+                       CliHelpVisibility::Dev);
+            showOption(debugGroup->add_option("--diag-stuck-sec", _diagStuckSec,
+                                              "Seconds an AI unit may stand still with somewhere to go before a "
+                                              "'stuck' event (default 5)")
+                           ->check(CLI::Range(0.5f, 600.0f)),
+                       CliHelpVisibility::Dev);
+        }
+#endif
+
         showOption(debugGroup->add_option("--test-mission,--test", _testMissionPath,
                                           "Run mission folder or mission.sqm directly and exit"),
                    CliHelpVisibility::Dev);

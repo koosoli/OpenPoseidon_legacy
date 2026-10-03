@@ -1,0 +1,32 @@
+{
+  "ticket": "DIAG-001",
+  "branch": "dec/diag-w1-malprave-diagnostics",
+  "baseline_commit": "95a9eb1d",
+  "implementation_commit": "909f1f36",
+  "build_preset": "win-x64-clang-rwdi",
+  "runs": [
+    {
+      "command": "cmake --build build/win-x64-clang-rwdi (POSEIDON_ENABLE_DIAG=ON)",
+      "result": "full build, no errors"
+    },
+    {
+      "command": "PoseidonTests.exe \"DIAG-001*\"",
+      "result": "All tests passed (224 assertions in 13 test cases)"
+    },
+    {
+      "command": "PoseidonTests.exe (full suite, option ON)",
+      "result": "test cases: 3634 | 3567 passed | 15 failed | 52 skipped; assertions: 517461 | 517440 passed | 21 failed",
+      "baseline_95a9eb1d": "test cases: 3621 | 3554 passed | 15 failed | 52 skipped",
+      "failures_compared_by_name": "identical 15 on both: Dev panel controls all go through the search filter; I-05: FontSystem shutdown clears FreeType caches before engine destruction; PreviewImage::saveToFile writes BMP/PNG/TGA; PreviewImageRGB::saveToFile writes PNG; World state file format -- 8 cases; every occurrence of a censused witness is classified"
+    },
+    {
+      "command": "cmake --preset win-x64-clang-rwdi -B build/win-x64-clang-rwdi-diagoff -DPOSEIDON_ENABLE_DIAG=OFF; cmake --build ... --target PoseidonGame PoseidonTests PoseidonServer",
+      "result": "builds with no errors"
+    },
+    {
+      "command": "PoseidonTests.exe \"DIAG-001*\" (option OFF)",
+      "result": "All tests passed (149 assertions in 9 test cases)"
+    }
+  ],
+  "not_run": "no in-game run: no game launch, no harness session, no overlay seen; .tw/test-steps.ps1 parsed only"
+}

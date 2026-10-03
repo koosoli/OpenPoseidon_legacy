@@ -110,6 +110,17 @@ See `docs/roadmap/decisions/FIXES-20261003.md`.
 | `POSEIDON_AI_SUPPRESSION_LOG` | Engine (`AIUnitImpl.cpp`) | AI-PORT A. `1` logs every near miss that suppresses an AI soldier (level before/after, shooter, pinned). |
 | `POSEIDON_AI_HUNT_LOG` | Engine (`AIHunt.cpp`) | AI-PORT B. `1` logs hunting phase changes, why a soldier is blocked or idle, and hand grenades thrown or refused by the group interval. |
 
+## Engine switches set by DIAG-001 (outside the renderer)
+
+DIAG-001 (`docs/roadmap/decisions/DIAG-01-malprave-diagnostics-20261003.md`) adds command-line
+flags, not environment switches (`--diag`, `--diag-cats`, `--diag-draw`, `--diag-keep-going`,
+`--diag-slow-ms`, `--diag-seed`, `--diag-fixed-dt`, `--diag-stuck-sec`; see `--help --dev`). One of
+them writes an existing switch:
+
+| Switch | Read by | Notes |
+| --- | --- | --- |
+| `POSEIDON_LOCKSTEP_HZ` | `Core/Game/GameLoop.cpp` (`LockstepDeltaT`) | SIM-815 lockstep pacing, read once. `--diag-fixed-dt <s>` sets it to `1/s` before the world is initialised, unless it is already set (an explicit value wins). |
+
 ## Regenerating
 
 This table is derived, not maintained by hand. Re-scan with:

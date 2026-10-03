@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 
 #include <Poseidon/Audio/SoundScene.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -68,9 +69,15 @@ IWave* SoundScene::Open(const char* filename, bool is3D, bool accom)
 {
     bool prealloc = !is3D && !accom;
     IWave* wave = GSoundsys->CreateWave(filename, is3D, prealloc);
+#if POSEIDON_DIAG
+    Dev::OpDiag::OnSoundOpen(filename, is3D, wave != nullptr); // DIAG-001: sound_play
+#endif
 
     if (!wave)
     {
+#if POSEIDON_DIAG
+        Dev::OpDiag::OnSoundMissing("open", filename);
+#endif
         return wave;
     }
     if (is3D)

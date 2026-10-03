@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
@@ -462,6 +463,11 @@ bool CheckAccess(const ParamEntry& entry)
 {
     if (!GWorld->CheckAddon(entry))
     {
+#if POSEIDON_DIAG
+        // DIAG-001: which class and addon (the stock message names neither in the log)
+        Dev::OpDiag::OnAddonMissing(static_cast<const char*>(entry.GetContext()),
+                                    static_cast<const char*>(entry.GetOwner()));
+#endif
         RString message = LocalizeString(IDS_MSG_ADDON_MISSING);
         bool first = true;
         if (first)

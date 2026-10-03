@@ -57,6 +57,7 @@
 #include <Poseidon/Dev/Diag/PictureModeTab.hpp>
 #include <Poseidon/Dev/Diag/WeatherTab.hpp>
 #include <Poseidon/Dev/Diag/SmokeTab.hpp>
+#include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 3D overlay (--diag-draw)
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/UI/Settings/AspectRatio.hpp>
 #include <Poseidon/UI/Controls/UIControls.hpp>
@@ -8092,6 +8093,9 @@ void Render()
 {
     if (!s_initialized)
         return;
+#if POSEIDON_DIAG
+    Dev::OpDiag::RenderOverlay(); // DIAG-001: shot paths, labels, watched units (--diag-draw)
+#endif
     ImGui::Render();
     if (s_backend == RenderBackend::OpenGL3)
     {

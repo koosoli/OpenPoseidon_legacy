@@ -8646,3 +8646,76 @@ tickets:
     supersedes: []
     evidence:
       - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+
+  - id: DIAG-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Diag W1: the Malprave diagnostics layer -- --diag event log, diag_* harness commands, test-steps runner"
+    class: RUNTIME_INFRA
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: ACTIVE
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/diag-w1-malprave-diagnostics
+    baseline_commit: 95a9eb1d
+    verification_commit: 909f1f36
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [909f1f36]
+    production_call_sites:
+      - file: apps/cwr/Game/GameApplication.cpp
+        symbol: CreateGameHarness
+      - file: apps/cwr/Game/GameApplication.cpp
+        symbol: GameApplication::RunAfterArgumentParsing
+      - file: engine/Poseidon/World/World.cpp
+        symbol: World::Simulate
+      - file: engine/Poseidon/World/WorldImpl.cpp
+        symbol: World::StartIntro
+      - file: engine/Poseidon/World/Entities/Weapons/Shots.cpp
+        symbol: ShotShell::Simulate
+      - file: engine/Poseidon/World/Simulation/Collisions.cpp
+        symbol: Landscape::ExplosionDammage
+      - file: engine/Poseidon/World/Entities/Weapons/Dammage.cpp
+        symbol: Object::LocalDammage
+      - file: engine/Poseidon/AI/VehicleAICombat.cpp
+        symbol: EntityAI::Destroy
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldMove.cpp
+        symbol: Man::AdvanceMoveQueue
+      - file: engine/Poseidon/Game/Scripting/ExpressExt.cpp
+        symbol: GameStateStringtableInfoFunctions::DisplayErrorMessage
+      - file: engine/Poseidon/Audio/SoundScene.cpp
+        symbol: SoundScene::Open
+      - file: engine/Poseidon/Dev/Debug/DebugOverlay.cpp
+        symbol: DebugOverlay::Render
+      - file: engine/Poseidon/Foundation/Platform/CrashHandler.cpp
+        symbol: SetCrashNotify
+    test_ids: [diag-001-json-escaping, diag-001-json-nonfinite-null, diag-001-json-getpos-order, diag-001-json-response, diag-001-stuck-once, diag-001-stuck-no-destination, diag-001-stuck-slow-walker, diag-001-spin-once, diag-001-writer-valid-json, diag-001-writer-categories, diag-001-writer-off, diag-001-step-through-pause]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/DIAG-01-malprave-diagnostics-20261003.md
+    known_failures:
+      - Not run in game -- no events.jsonl from a real mission, no harness command answered, overlay not seen.
+      - .tw/test-steps.ps1 parsed only, never run.
+      - X-ray (diag_xray, diag_camera clear) not ported; diag_render / model / skeleton / vdsweep / config_check left out.
+      - No crash event on Linux (SetCrashNotify is a no-op there).
+    fallback: >-
+      POSEIDON_ENABLE_DIAG=OFF compiles the module and every hook out. With it ON, nothing runs without
+      --diag (one bool test per hook) or --harness (the diag_* commands); release-tagged builds do not
+      register the flags.
+    reviewer: null
+    reviewer_method: >-
+      Author-run unit tests (PoseidonTests "DIAG-001*", 13 cases) and the full PoseidonTests suite on the
+      rwdi build with the option ON (failures identical by name to the 95a9eb1d base), plus a separate
+      POSEIDON_ENABLE_DIAG=OFF build of the game, server and tests. Not checked: any runtime path in a
+      running game; the automated evidence does not cover the engine hooks, the harness commands, the
+      overlay or the PowerShell runner.
+    supersedes: []
+    evidence:
+      - docs/roadmap/evidence/diag-w1-20261003.json
+      - docs/roadmap/decisions/DIAG-01-malprave-diagnostics-20261003.md

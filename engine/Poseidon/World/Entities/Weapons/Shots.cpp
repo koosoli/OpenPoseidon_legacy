@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/World/Scene/CargoSurface.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -969,6 +970,9 @@ static bool ShowcaseContactBeforeScenery(Vector3Par from, Vector3Par to, const C
 void ShotShell::Simulate(float deltaT, SimulationImportance prec)
 {
     Point3 position = Position();
+#if POSEIDON_DIAG
+    Dev::OpDiag::OnShotStep(this); // DIAG-001: flight path
+#endif
 
     // FUSE. Only ammo whose config declares `explosionTime` gets here; for
     // everything else `_fuseArmed` is false and every path below is the one it
@@ -981,6 +985,9 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
             // Wherever it happens to be: in the air, against a wall, or lying on
             // the ground. That is the point of a fuse.
             Detonate(Position(), nullptr, VUp);
+#if POSEIDON_DIAG
+            Dev::OpDiag::OnShotEnd(this, "fuse");
+#endif
             _delete = true;
             return;
         }
@@ -1017,6 +1024,9 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
             // not-taken branch when the dev panel switch is off.
             Poseidon::Dev::Ballistics::NotifyImpact(static_cast<Entity*>(this), position.X(), position.Y(), position.Z(),
                                                     Poseidon::Dev::BallisticTerminus::Expired, nullptr);
+#if POSEIDON_DIAG
+            Dev::OpDiag::OnShotEnd(this, "timeout");
+#endif
             _delete = true;
             return;
         }
@@ -1493,6 +1503,9 @@ void Missile::Deanimate(int level)
 
 void Missile::Simulate(float deltaT, SimulationImportance prec)
 {
+#if POSEIDON_DIAG
+    Dev::OpDiag::OnShotStep(this); // DIAG-001: flight path
+#endif
     Vector3 force(VZero), torque(VZero);
     Vector3 friction(VZero), torqueFriction(VZero);
     Vector3 pForce(VZero), pCenter(VZero);

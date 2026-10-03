@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
@@ -215,6 +216,11 @@ void Object::LocalDammage(Shot* shot, EntityAI* owner, Vector3Par modelPos, floa
     RString name = shot ? shot->Type()->ParClass().GetName() : RString();
     if (IsLocal())
     {
+#if POSEIDON_DIAG
+        // DIAG-001: "hit" event (damage before / after, zones) around the whole damage call
+        Dev::OpDiag::DamageScope diagHit(this, owner, static_cast<const char*>(name), PositionModelToWorld(modelPos), val,
+                                         valRange);
+#endif
         // process dammage
         DoDammage(owner, modelPos, val, valRange, name);
         if (GetNetworkId().creator == 1)

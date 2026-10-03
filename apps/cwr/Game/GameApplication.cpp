@@ -34,6 +34,7 @@
 #include <Poseidon/World/World.hpp>
 #include <Evaluator/express.hpp>
 #include <Poseidon/Dev/Debug/DebugTrap.hpp>
+#include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001: --diag event log, diag_* harness commands
 #include <Poseidon/UI/UITestEngine.hpp>
 #include <Poseidon/UI/GameModule.hpp>
 #include <Poseidon/UI/Missions/MissionsModule.hpp>
@@ -1347,6 +1348,10 @@ static std::unique_ptr<HarnessServer> CreateGameHarness()
     // Multiplayer PTT tests (triHoldKey / triReleaseKey) drive VoN
     // transmission via these commands.
     HarnessBuiltins::RegisterKeyInjection(*hs);
+#if POSEIDON_DIAG
+    // DIAG-001: diag_inspect, diag_pause, diag_step, diag_camera, ... (Dev/Diag/OpDiagHarness.cpp)
+    Poseidon::Dev::OpDiag::RegisterHarness(*hs);
+#endif
 
     hs->RegisterCommand({"query",
                          "Query game state (what: players, mission, ngs, world, master_server_server_detail, "
@@ -1421,6 +1426,12 @@ int GameApplication::RunAfterArgumentParsing()
         watchDog = std::make_unique<Poseidon::WatchDog>(
             std::chrono::milliseconds(static_cast<int64_t>(watchDogLimit * 1000.0f)));
     }
+
+#if POSEIDON_DIAG
+    // DIAG-001: --diag event log. Before the world exists, so --diag-fixed-dt can still set the lockstep
+    // rate the world init reads; a no-op without --diag.
+    Poseidon::Dev::OpDiag::Init();
+#endif
 
     constexpr const char* kStartupErrorTitle = "Cold War Assault - Startup Error";
 
@@ -2667,6 +2678,9 @@ void GameApplication::ShutdownRuntime()
         m_exitCode = 3;
 
     LOG_INFO(Core, "Shutdown: begin (exit code {})", m_exitCode);
+#if POSEIDON_DIAG
+    Poseidon::Dev::OpDiag::Shutdown(); // DIAG-001: summary.json, close events.jsonl
+#endif
 
     extern void CleanupSimulateMission();
     CleanupSimulateMission();

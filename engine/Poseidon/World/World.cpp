@@ -1,4 +1,5 @@
 #include <SDL3/SDL_scancode.h>
+#include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 
 #include <Poseidon/AI/AITimeline.hpp>
 #include <Poseidon/Core/Application.hpp>
@@ -1015,11 +1016,20 @@ void World::Simulate(float deltaT, bool& enableDraw)
     // PERF-012: close the setup bucket here so the fixed-step loop below is its own phase.
     // Everything before this point is the input/network/camera work the name promises.
     perf.Mark(Dev::FrameProfiler::PhaseSetup);
+#if POSEIDON_DIAG
+    // DIAG-001 diag_step: lets exactly one fixed tick through the dev pause this frame (EndStepTick below
+    // engages the pause again before anything else in the frame asks).
+    const bool diagStepTick = Dev::OpDiag::BeginStepTick();
+#endif
     if (IsSimulationEnabled())
     {
         const float fixedDeltaT = static_cast<float>(_simulationSteps.StepSeconds());
         const float fixedNoAccDeltaT = fixedDeltaT / std::max(_acceleratedTime, 0.01f);
+#if POSEIDON_DIAG
+        const std::size_t steps = diagStepTick ? 1 : _simulationSteps.Advance(deltaT);
+#else
         const std::size_t steps = _simulationSteps.Advance(deltaT);
+#endif
         for (std::size_t step = 0; step < steps; ++step)
         {
             // REN-INTERP-001: remember where every moving entity is BEFORE this tick, so the
@@ -1035,6 +1045,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
     {
         _simulationSteps.Reset();
     }
+#if POSEIDON_DIAG
+    Dev::OpDiag::EndStepTick(diagStepTick);
+#endif
     perf.Mark(Dev::FrameProfiler::PhaseSimStep);
     // PERF-013: sim:step is the engine's largest CPU cost (30 ms, 48% of a combat frame).
     // The runner times each stage; this is where the window is closed and reported, once a
@@ -2303,6 +2316,14 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     perf.Mark(Dev::FrameProfiler::PhaseSwap);
     perf.EndFrame(Poseidon::gPerfDrawCalls);
+#if POSEIDON_DIAG
+    {
+        // DIAG-001: frame_slow / perf events, the pollers and diag_camera follow
+        const Dev::FrameProfiler::FrameRecord& fr = perf.Frame(0);
+        Dev::OpDiag::OnFrameEnd(fr.totalMs, fr.ms.data(), Dev::FrameProfiler::PhaseCount, fr.drawCalls,
+                                _scene.GetFogMaxRange());
+    }
+#endif
     if (slowFrameTrace && perf.Frame(0).totalMs >= 100.0f)
     {
         // Individual records, not independent maxima from a rolling window.
