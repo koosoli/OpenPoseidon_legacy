@@ -14,7 +14,7 @@ beige regions around the actual footprints. The top view retains the beige
 agricultural texture. Actual contact samples prove native `worlds/eden.wrp`,
 `eden/pol.paa`, `Field`, sound `dirt`, sourceEligible true. Walking changed
 actual mud offsets by approximately 0.043 to 0.059m below the original surface.
-At capture time 32.538s, retained wetness was 0.491107314825058, actual liquid
+At capture time 32.538s, GMud retained wetness was 0.491107314825058, actual liquid
 rain 0.8995864391326904, mud chunks 4/revision8/rejected0. No actual local
 standing-water depth was queried in this campaign. RainWater initialized, so
 the screenshot alone cannot measure each draw's contribution.
@@ -27,7 +27,11 @@ old substrate multiplier also suppresses soil darkening inside the film:
 `(1 - film*0.38) * (1 - soilWet*(1-film)*0.30)`. Thus slope-gated clear regions
 can read as beige islands rather than equally wet material.
 
-With full soil/source/rain proof at this actual wetness,
+As a conditional illustration, use the measured GMud wetness as input with
+full soil/source/rain proof. The renderer actually uploads the independent
+`TerrainPuddles::Wetness` history, whose sunlight/wind drying differs from
+GMud. This campaign did not record its terrain-upload telemetry; these
+numbers are not a measured shader wet amount. For this illustrative input,
 `soil_wet_amount` is 0.8366280251576669. Outside the procedural film the old
 substrate multiplier is 0.7490115924526999. Inside a full film it is 0.62,
 but the smooth sky interface can dominate its colour at grazing angles.
@@ -48,7 +52,7 @@ share. It must run after the current source, snow and physical rain proof.
   0.58, interpolated by the unchanged physically admitted wet amount. It
   preserves the source albedo's channel ratios and texture detail. No brown
   water colour, scattering floor, emission or replacement texture is added.
-- The actual wet-soil substrate multiplier becomes 0.64861622943378,
+- In that conditional example the wet-soil substrate multiplier is 0.64861622943378,
   independent of whether the procedural mask is high. Thus a mask cannot
   exempt the wet footprint slope from absorption or expose differently wet
   beige islands.

@@ -3,6 +3,7 @@
 #include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/World/Weather/SandField.hpp>
 #include <Poseidon/World/Weather/RainWaterField.hpp>
+#include <Poseidon/World/Weather/SunlightDrying.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
 #include <Poseidon/World/Terrain/TerrainSubdivision.hpp>
@@ -834,8 +835,8 @@ void World::SimulateCloudlets(float deltaT)
                     fine.coverageLost,fine.valid,runoff.FineTileCount(),fineSupport);
             const auto* sun = _scene.MainLight();
             const float overcast = std::clamp(GLandscape->GetOvercast(),0.0f,1.0f);
-            const float solar = sun ? std::clamp(sun->SunDirection().Y(),0.0f,1.0f)
-                * (1-overcast)*(1-overcast) * (1-std::clamp(sun->NightEffect(),0.0f,1.0f)) : 0;
+            const float solar = sun ? SunlightDryingExposure(sun->SunDirection().Y(), overcast,
+                sun->NightEffect()) : 0;
             if (runoff.MatchesDomain(side,side,spacing))
             {
                 runoff.SetSeaLevel(GLandscape->GetSeaLevel());
