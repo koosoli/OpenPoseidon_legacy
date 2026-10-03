@@ -497,6 +497,17 @@ __forceinline float Bilint(float y00, float y01, float y10, float y11, float xf,
     return y0z * (1 - xf) + y1z * xf;
 }
 
+// The ground height the terrain-relative re-seat uses. SurfaceY answers YOutsideMap (-100 m) for any point in the
+// LAST terrain row/column (its +1 neighbour is off the map), so an object standing in that edge strip was
+// re-seated against -100 m on one side of a terrain change and the real ground on the other -- moved by up to
+// height + 100 m. Clamp the lookup into the last full cell instead; both passes use it, so the object keeps
+// exactly its height above the ground it actually stands on.
+static float ReseatSurfaceY(const Landscape& land, float x, float z)
+{
+    const float maxCoord = (land.GetTerrainRange() - 1) * land.GetTerrainGrid() - 0.01f;
+    return land.SurfaceY(std::clamp(x, 0.0f, maxCoord), std::clamp(z, 0.0f, maxCoord));
+}
+
 void Landscape::MakeObjectsTerrainRelative()
 {
     // make Y of all objects relative to terrain level
@@ -519,7 +530,7 @@ void Landscape::MakeObjectsTerrainRelative()
                 LODShape* shape = obj->GetShape();
                 Vector3 pos = obj->Position();
                 Vector3 bcWorld = (shape ? obj->PositionModelToWorld(-shape->BoundingCenter()) : pos);
-                float surfY = SurfaceY(bcWorld.X(), bcWorld.Z());
+                float surfY = ReseatSurfaceY(*this, bcWorld.X(), bcWorld.Z());
                 pos[1] -= surfY;
                 obj->SetPosition(pos);
                 // note: list bounding box may change - we will take care of it later
@@ -559,7 +570,7 @@ void Landscape::MakeObjectsTerrainAbsolute()
                     LODShape* shape = obj->GetShape();
                     Vector3 pos = obj->Position();
                     Vector3 bcWorld = (shape ? obj->PositionModelToWorld(-shape->BoundingCenter()) : pos);
-                    float surfY = SurfaceY(bcWorld.X(), bcWorld.Z());
+                    float surfY = ReseatSurfaceY(*this, bcWorld.X(), bcWorld.Z());
                     pos[1] += surfY;
                     obj->SetPosition(pos);
                     obj->OnTerrainChanged(this);
