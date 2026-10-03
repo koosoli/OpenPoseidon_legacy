@@ -161,9 +161,15 @@ try{
  Exec 'setAccTime 1';$null=Send @{cmd='key';sc=15;hold=$true}
  try{Start-Sleep -Milliseconds 350}finally{$null=Send @{cmd='key_up';sc=15}}
  Start-Sleep -Milliseconds 350;Exec 'setAccTime 0'
+ $keyLightLogged=[bool](Select-String -LiteralPath $log -Pattern 'Flashlight on:.*player=1' -Quiet)
+ if(!$keyLightLogged){
+  # Headlights keyboard actions require window focus. Also exercise the normal
+  # Light on action, which remains available to a soldier in a background smoke.
+  Exec 'player action ["LIGHTON",player];setAccTime 1';Start-Sleep -Milliseconds 700;Exec 'setAccTime 0'
+ }
  Capture 'player-inside-flashlight' $null $null
- Require ([bool](Select-String -LiteralPath $log -Pattern 'Flashlight on:.*player=1' -Quiet)) 'L-key did not activate the player flashlight inside the cave.'
- $result.flashlight=@{input='L / Headlights';daytime=$true;activationLogged=$true}
+ Require ([bool](Select-String -LiteralPath $log -Pattern 'Flashlight on:.*player=1' -Quiet)) 'Neither L nor the ordinary Light on action activated the player flashlight inside the cave.'
+ $result.flashlight=@{input='L / Headlights, ordinary Light on action if keyboard did not activate';daytime=$true;keyActivationLogged=$keyLightLogged;activationLogged=$true}
  Exec 'player switchCamera "EXTERNAL"';Capture 'player-inside-third' $null $null
  # Return through the entrance using ordinary gameplay input before closing it.
  Exec ('player switchCamera "INTERNAL";player setDir '+(Fmt ($site.heading+180))+';setAccTime 0')
