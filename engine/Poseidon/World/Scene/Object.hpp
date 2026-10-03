@@ -772,6 +772,16 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 		Vector3Par beg, Vector3Par end, float radius,
 		ObjIntersect type=ObjIntersectFire
 	) const;
+	// Hook for line intersections: parts that are not in the shape's own
+	// geometry (e.g. the pilot hanging under a parachute). Called by the
+	// line Intersect above before the shape is tested.
+	virtual void IntersectExtra
+	(
+		const FrameBase &pos,
+		CollisionBuffer &result,
+		Vector3Par beg, Vector3Par end, float radius,
+		ObjIntersect type, int hierLevel
+	) const {}
 
 	// Reset all object properties to the default state.
 	virtual void ResetStatus();

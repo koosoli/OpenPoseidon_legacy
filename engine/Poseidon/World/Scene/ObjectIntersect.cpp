@@ -741,6 +741,7 @@ void Object::Intersect(const FrameBase& pos, CollisionBuffer& result, Vector3Par
     {
         return;
     }
+    IntersectExtra(pos, result, beg, end, radius, type, hierLevel);
     // make sure there is well defined geometry LOD
 
     ConvexComponents* cc = nullptr;

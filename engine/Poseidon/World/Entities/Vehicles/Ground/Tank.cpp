@@ -2085,6 +2085,28 @@ void TankWithAI::AIPilot(AIUnit* unit, float deltaT)
 
         saturate(speedWanted, -limitSpeed, +limitSpeed);
         saturate(speedWanted, -limitSpeedC, +limitSpeedC);
+
+        // Slow down for sharp bends early enough to make them. The turn prediction above
+        // looks ~1-2 s ahead and only starts braking at a 22 deg bend; a tank at full
+        // speed (careless/full speed waypoints) cannot shed speed in that distance, so it
+        // ran wide off the road on tight corners. Look further ahead -- more the faster we
+        // go -- and cap the speed by how sharp the path bends there.
+        const float fwd = speed.Z();
+        if (fwd > 5.0f)
+        {
+            const float lookAhead = 2.5f + fwd * 0.15f; // s: ~5 s at 60 km/h
+            Vector3Val farPoint = SteerPoint(lookAhead, GetPredictTurnPlan());
+            Vector3 rel = farPoint - Position();
+            rel[1] = 0;
+            if (rel.SquareSize() > Square(5.0f))
+            {
+                Vector3 dirXZ = Direction();
+                dirXZ[1] = 0;
+                const float farTurn = fabs(AngleDifference(atan2(rel.X(), rel.Z()), atan2(dirXZ.X(), dirXZ.Z())));
+                const float limitFar = Interpolativ(farTurn, H_PI / 8, H_PI / 3, maxSpeed, maxSpeed * 0.35f);
+                saturate(speedWanted, -limitFar, +limitFar);
+            }
+        }
     }
 
     if (fabs(speedWanted) > 0.2f)

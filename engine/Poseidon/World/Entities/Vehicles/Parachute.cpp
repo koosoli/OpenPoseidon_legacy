@@ -6,6 +6,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Simulation/FrameInv.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/AI/AI.hpp>
@@ -491,6 +492,23 @@ void Parachute::Simulate(float deltaT, SimulationImportance prec)
         {
             if (IsLocal())
             {
+                // pilot was killed in the air: leave the body on the ground
+                if (_driver && _driver->IsDammageDestroyed())
+                {
+                    Matrix4 outPos = ProxyWorldTransform(_driver);
+                    Vector3 pos = outPos.Position();
+                    pos[1] = GLandscape->RoadSurfaceYAboveWater(pos[0], pos[2]);
+                    Matrix4 out;
+                    out.SetPosition(pos);
+                    Vector3 dir = Direction();
+                    dir[1] = 0;
+                    if (dir.SquareSize() < 1e-4)
+                    {
+                        dir = VForward;
+                    }
+                    out.SetUpAndDirection(VUp, dir);
+                    GetOutDriver(out, false);
+                }
                 SetDelete();
             }
         }
@@ -511,6 +529,87 @@ void Parachute::Simulate(float deltaT, SimulationImportance prec)
             _openState = 2;
         }
     }
+}
+
+void Parachute::IntersectExtra(const FrameBase& pos, CollisionBuffer& result, Vector3Par beg, Vector3Par end,
+                               float radius, ObjIntersect type, int hierLevel) const
+{
+    if (type != ObjIntersectFire && type != ObjIntersectIFire)
+    {
+        return;
+    }
+    Person* pilot = _driver;
+    if (!pilot || !pilot->GetShape())
+    {
+        return;
+    }
+    LODShape* shape = GetShape();
+    if (!shape)
+    {
+        return;
+    }
+
+    // if the model's fire geometry already carries the pilot proxy, the normal
+    // proxy scan in Object::Intersect tests him - don't count him twice
+    int fireLevel = shape->FindFireGeometryLevel();
+    if (fireLevel >= 0)
+    {
+        ConvexComponents* cc = shape->GetConvexComponents(fireLevel);
+        if (cc && cc->Size() > 0)
+        {
+            int n = GetProxyCount(fireLevel);
+            for (int i = 0; i < n; i++)
+            {
+                LODShapeWithShadow* s = nullptr;
+                Matrix4 trans = pos.Transform();
+                Matrix4 invTrans = trans.InverseScaled();
+                if (GetProxy(s, fireLevel, trans, invTrans, pos, i) == pilot)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    // test the pilot where he is drawn (proxy of the main LOD)
+    int n = GetProxyCount(0);
+    for (int i = 0; i < n; i++)
+    {
+        LODShapeWithShadow* s = nullptr;
+        Matrix4 trans = pos.Transform();
+        Matrix4 invTrans = trans.InverseScaled();
+        if (GetProxy(s, 0, trans, invTrans, pos, i) != pilot)
+        {
+            continue;
+        }
+
+        // quick rejection: line far from the pilot
+        Vector3 c = trans.Position();
+        Vector3 eb = end - beg;
+        float len2 = eb.SquareSize();
+        float t = len2 > 1e-6f ? ((c - beg) * eb) / len2 : 0;
+        saturate(t, 0, 1);
+        Vector3 nearest = beg + eb * t;
+        float maxDist = pilot->GetShape()->BoundingSphere() + radius + 0.5f;
+        if (nearest.Distance2(c) > Square(maxDist))
+        {
+            return;
+        }
+
+        FrameWithInverse pilotFrame(trans, invTrans);
+        pilot->Intersect(pilotFrame, result, beg, end, radius, type, hierLevel + 1);
+        return;
+    }
+}
+
+Vector3 Parachute::AimingPosition() const
+{
+    Person* pilot = _driver;
+    if (pilot && pilot->GetShape() && !pilot->IsDammageDestroyed())
+    {
+        return ProxyWorldTransform(pilot).FastTransform(pilot->GetShape()->AimingCenter());
+    }
+    return base::AimingPosition();
 }
 
 const float FlyLevel = 150;

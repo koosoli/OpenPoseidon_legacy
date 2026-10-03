@@ -782,6 +782,19 @@ void EntityAI::FormationPilot(float& speedWanted, float& headChange, float& turn
             followPos += follow->Speed() * GetFormationTime() * 0.3;
         }
 
+        // Convoy on a road: keep the target ON the road. The point above is the vehicle in
+        // front pushed back along ITS heading and forward along its speed -- both straight
+        // lines, so on any bend it lands beside the road. It was only snapped back to the
+        // road on the cheap-refresh branch below; the regular 2-second replan and the
+        // end-of-path replan used it as it was, so followers planned a path off the road,
+        // drove onto the verge for a few seconds and swung back when the next refresh put
+        // the target on the road again. Snap it every time (the road lookup only accepts a
+        // road within 20 m, so off-road targets are left alone).
+        if (onRoad && GRoadNet)
+        {
+            followPos = GRoadNet->GetNearestRoadPoint(followPos);
+        }
+
         Path& path = unit->GetPath();
         if (onRoad && path.GetOnRoad())
         {
