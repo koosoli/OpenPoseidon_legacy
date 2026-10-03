@@ -13,6 +13,7 @@ param(
  [switch]$SandSnapshotTrace,
  [switch]$UniformLightingViews,
  [switch]$TerrainWetnessTrace,
+ [switch]$MudLightingViews,
  [switch]$SelfTest
 )
 $ErrorActionPreference='Stop';$root=Split-Path -Parent $PSScriptRoot
@@ -34,6 +35,33 @@ function Terrain-WetnessRows($lines){
   foreach($field in @('queuedRainStrength','accumulated','queuedPad1')){Require ($row[$field] -ge 0 -and $row[$field] -le 1) 'Existing terrain telemetry outside[0,1].'}
   $rows+=,$row
  }};return $rows
+}
+function Mud-LightingWetReady($state,$receipt){
+ if(!(Mud-WetReady $state $true .8)){return $false}
+ $row=$receipt.lastQueuedRow
+ foreach($field in @('accumulated','queuedPad1')){$n=Number $row.$field;Require ($n -ge 0 -and $n -le 1) 'Invalid existing queued wet-soil diagnostic.'}
+ # The existing log rounds to four decimals. Reserve half a printed unit,
+ # rather than admitting a real .79996 as >=.8 because it prints .8000.
+ return $row.accumulated -ge .8001 -and $row.queuedPad1 -ge .8001 -and
+  [Math]::Abs($row.accumulated-$row.queuedPad1) -le .00011
+}
+function Mud-LightingPlan{return @(@{name='overcast';overcast=1},@{name='clear';overcast=0})}
+function Assert-MudSun($weather,[double]$hour,[double]$overcast){
+ $null=Number $hour
+ Require ([Math]::Abs($hour-16) -lt .001 -and $weather.sunAvailable -is [bool] -and $weather.sunAvailable) 'Actual 16h mud daylight is absent.'
+ foreach($field in @('sunTravelY','overcast','nightEffect','solarDrying')){$null=Number $weather.$field}
+ Require ($weather.sunTravelY -lt 0 -and $weather.sunTravelY -ge -1 -and $weather.nightEffect -ge 0 -and $weather.nightEffect -le .001 -and [Math]::Abs($weather.overcast-$overcast) -le .001) 'Actual above-horizon sun/cloud/night contract differs.'
+ $expected=(-$weather.sunTravelY)*(1-$weather.overcast)*(1-$weather.overcast)*(1-$weather.nightEffect)
+ Require ([Math]::Abs($weather.solarDrying-$expected) -le .00001) 'Actual solar exposure differs from shared sun-travel/cloud policy.'
+ if($overcast -eq 0){Require ($weather.solarDrying -gt .01) 'Clear mud comparison has no actual daylight exposure.'}
+ else{Require ($weather.solarDrying -le .00001) 'Overcast mud comparison has unexpected direct solar exposure.'}
+}
+function Mud-RestoreDateTuple([double]$hour){
+ $null=Number $hour
+ # This runner owns a fixed 1985-06-21 afternoon mission. No date getter exists.
+ Require ($hour -ge 16 -and $hour -lt 17) 'Actual mud fixture left its owned same-date afternoon interval.'
+ $h=[int][Math]::Floor($hour);$m=[int][Math]::Floor(($hour-$h)*60)
+ return @(1985,6,21,$h,$m)
 }
 function Key([string]$v){return $v.Replace('\','/').ToLowerInvariant()}
 function Contact-Poses([double]$x,[double]$z,[double]$height){
@@ -121,6 +149,21 @@ function Pair{
 }
 function Same-Pair($a,$b){Require (($a|ConvertTo-Json -Depth 8 -Compress)-ceq ($b|ConvertTo-Json -Depth 8 -Compress)) 'Installed source pair changed.'}
 function Test-Helpers{
+ $plan=@(Mud-LightingPlan);Require ($plan.Count -eq 2 -and $plan[0].overcast -eq 1 -and $plan[1].overcast -eq 0) 'Paused mud lighting recipe changed.'
+ $lightWet=@{uniform=.9;weather=@{liquidRain=.6};mud=@{wetness=.85}};$receipt=@{lastQueuedRow=@{accumulated=.85;queuedPad1=.85}}
+ Require (Mud-LightingWetReady $lightWet $receipt) 'Actually accumulated high wetness refused.'
+ $receipt.lastQueuedRow.queuedPad1=0;Require (!(Mud-LightingWetReady $lightWet $receipt)) 'Disabled queued coat admitted as high wetness.'
+ $receipt.lastQueuedRow.queuedPad1=.85;$receipt.lastQueuedRow.accumulated=.4;Require (!(Mud-LightingWetReady $lightWet $receipt)) 'Pinned high upload substituted for natural terrain history.'
+ $receipt.lastQueuedRow.accumulated=.8000;$receipt.lastQueuedRow.queuedPad1=.8000;Require (!(Mud-LightingWetReady $lightWet $receipt)) 'Rounded below-threshold history admitted as actual >=.8.'
+ $sunFixture=@{sunAvailable=$true;sunTravelY=-.6;overcast=0;nightEffect=0;solarDrying=.6};Assert-MudSun $sunFixture 16 0
+ $sunFixture.overcast=1;$sunFixture.solarDrying=0;Assert-MudSun $sunFixture 16 1
+ foreach($bad in @('sun','night','cloud','solar')){
+  $copy=$sunFixture|ConvertTo-Json|ConvertFrom-Json
+  switch($bad){'sun'{$copy.sunTravelY=.6};'night'{$copy.nightEffect=1};'cloud'{$copy.overcast=0};'solar'{$copy.solarDrying=.6}}
+  $failed=$false;try{Assert-MudSun $copy 16 1}catch{$failed=$true};Require $failed 'Incorrect actual mud sunlight accepted.'
+ }
+ Require (((Mud-RestoreDateTuple 16.125) -join ',') -ceq '1985,6,21,16,7') 'Owned date restoration tuple changed.'
+ $failed=$false;try{Mud-RestoreDateTuple 23}catch{$failed=$true};Require $failed 'Unknown date rollover accepted as owned fixture date.'
  $wetFixture=@{uniform=.3;weather=@{liquidRain=.3};mud=@{wetness=.3}}
  Require (Mud-WetReady $wetFixture $true .3) 'Default natural wetting threshold changed.'
  Require (!(Mud-WetReady $wetFixture $true .8)) 'Intermediate GMud wetness admitted as high wetness.'
@@ -186,10 +229,11 @@ $result.helperSha256=@{};foreach($helper in @('Write-BenchmarkGraphics.ps1','Ass
 $result.sandSnapshotTrace=[bool]$SandSnapshotTrace
 $result.uniformLightingViews=[bool]$UniformLightingViews
 $result.terrainWetnessTrace=[bool]$TerrainWetnessTrace;$result.minimumMudWetness=$MinimumMudWetness
+$result.mudLightingViews=[bool]$MudLightingViews
 if($UniformLightingViews){. (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1');$result.helperSha256['TerrainPuddleStockRoof.ps1']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1')).Hash}
 if($SandSnapshotTrace){$result.helperSha256['Read-SandUploadSnapshot.ps1']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Read-SandUploadSnapshot.ps1')).Hash}
 $settings=@{POSEIDON_PLAYER_GROUND_TRACE='1';POSEIDON_UNIFORM_WET_TRACE='1';POSEIDON_SAND_TRACE='1';POSEIDON_MUD_TRACE='1';WGR_UNIFORM_WET='1';WGR_GRASS='0';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_CLOUD_COVERAGE='0';WGR_TERRAIN_JITTER='0';WGR_TEMPORAL='0';WGR_LOD_GOVERNOR_RANGE='1';POSEIDON_SNOWLINE='off';POSEIDON_SNOW_TEST_DEPTH='0'}
-if($TerrainWetnessTrace){$settings.WGR_TERRAIN_PUDDLE_FIXTURE='1';$result.terrainPuddlesInheritedControl=[Environment]::GetEnvironmentVariable('WGR_TERRAIN_PUDDLES','Process')}
+if($TerrainWetnessTrace -or $MudLightingViews){$settings.WGR_TERRAIN_PUDDLE_FIXTURE='1';$result.terrainPuddlesInheritedControl=[Environment]::GetEnvironmentVariable('WGR_TERRAIN_PUDDLES','Process')}
 $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE','WGR_SAND_UPLOAD_TRACE','WGR_SAND_SNAPSHOT_FILE','WGR_SAND_SNAPSHOT_ROOT')
 if($UniformLightingViews){$clear+=@('POSEIDON_HEADLAMP','POSEIDON_LAMP_LIGHTS','POSEIDON_LAMP_RADIUS_SCALE','POSEIDON_LAMP_BRIGHTNESS_SCALE','POSEIDON_LAMP_COLOR','POSEIDON_LAMP_AMBIENT_SCALE','POSEIDON_LAMP_CONE','POSEIDON_LAMP_SPILL','POSEIDON_LAMP_SPILL_RADIUS','POSEIDON_LAMP_SPILL_AMBIENT')}
 $keys=@($settings.Keys)+$clear+@('POSEIDON_USER_DIR');$saved=@{};foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
@@ -334,6 +378,53 @@ function Terrain-MudCentreViews($site){
  }
  return @{sample=$sample;terrainWetness=(Terrain-WetnessReceipt (State));scope='Actual admitted mud source centre and physical height, paused low/top images. Centre may be untouched; walked contact views identify actual compressed cells separately.'}
 }
+function Mud-Lighting($walkRecord,$site){
+ Require ($walkRecord.samples.Count -gt 0) 'No actual walked mud contact for lighting comparison.'
+ $walked=$walkRecord.samples|Sort-Object offset|Select-Object -First 1
+ $contact=Field 'mud' $walked;$centre=Field 'mud' $site
+ foreach($sample in @($contact,$centre)){Assert-Tuple $sample $site $map 'mud'}
+ Require ($contact.offset -lt -.001) 'Actual walked contact lost its retained relief.'
+ $original=State;$originalHour=Number (Eval 'dayTime');$restoreDate=Mud-RestoreDateTuple $originalHour
+ $initialReceipt=Terrain-WetnessReceipt $original
+ Require (Mud-LightingWetReady $original $initialReceipt) 'Retained mud lighting requires genuinely accumulated/queued >=.8 wetness from the preceding real rain wait.'
+ $record=@{before=$original;originalHour=$originalHour;originalKnownFixtureDate=$restoreDate;initialTerrainReceipt=$initialReceipt;contact=$contact;centre=$centre;views=@{};
+  body=(Assert-Body (Lines) ($original.time-.65));scope='Lighting A/B of retained genuinely rain-wet source-qualified soil. Overcast/date are deliberately set while paused. Rain, wetness and source geometry are preserved. Existing C++ queued parameter receipt is not local fragment rain coverage, Rust acceptance or GPU completion proof.'}
+ try{
+  Exec 'setDate [1985,6,21,16,0]'
+  foreach($light in (Mud-LightingPlan)){
+   Exec ('0 setOvercast '+$light.overcast);Start-Sleep -Milliseconds 500
+   foreach($target in @(@{name='contact';sample=$contact},@{name='centre';sample=$centre})){
+    $sample=$target.sample
+    foreach($view in (Contact-Poses ([double]$sample.x) ([double]$sample.z) ([double]$sample.surfaceY))){
+     $pose=($view.pose|ForEach-Object{([double]$_).ToString('R',$culture)}) -join ' '
+     Require ((Eval ('triFreeFlyPose "'+$pose+'"')) -ceq 'OK') 'Paused mud lighting source/contact camera refused.'
+     $beforeView=State;Assert-Paused $original $beforeView;$hour=Number (Eval 'dayTime');Assert-MudSun $beforeView.weather $hour $light.overcast
+     $terrainBefore=Terrain-WetnessReceipt $beforeView;Require (Mud-LightingWetReady $beforeView $terrainBefore) 'Retained genuinely wet queued substrate was lost.'
+     $name=$target.name+'-'+$light.name+'-'+$view.name;Capture ('mud-lighting-'+$name)
+     $afterView=State;Assert-Paused $beforeView $afterView;Assert-MudSun $afterView.weather (Number (Eval 'dayTime')) $light.overcast
+     foreach($field in @('sunTravelY','nightEffect','overcast','solarDrying')){Require ($afterView.weather.$field -eq $beforeView.weather.$field) 'Actual mud lighting changed during paused capture.'}
+     $actual=Field 'mud' $sample;Assert-Tuple $actual $site $map 'mud'
+     foreach($field in @('offset','surfaceY','surfaceDx','surfaceDz')){Require ($actual.$field -eq $sample.$field) 'Mud lighting changed retained source/contact geometry.'}
+     $terrainAfter=Terrain-WetnessReceipt $afterView
+     Require ($terrainAfter.lastQueuedRow.line -ceq $terrainBefore.lastQueuedRow.line) 'Paused terrain diagnostic advanced unexpectedly.'
+     $record.views[$name]=@{before=$beforeView;after=$afterView;hour=$hour;pose=$view.pose;actualSourceSample=$actual;terrainBefore=$terrainBefore;terrainAfter=$terrainAfter}
+    }
+   }
+  }
+ }finally{
+  # setDate accepts integer minutes. Restore the owned calendar date, then
+  # correct ordinary dayTime readback with the registered skipTime operator.
+  Exec ('setDate ['+($restoreDate -join ',')+'];0 setOvercast '+([double]$original.weather.overcast).ToString('R',$culture))
+  for($i=0;$i -lt 3;++$i){
+   $restoredHour=Number (Eval 'dayTime')
+   if($restoredHour -eq $originalHour){break}
+   Exec ('skipTime '+($originalHour-$restoredHour).ToString('R',$culture))
+  }
+ }
+ $record.after=State;Assert-Paused $original $record.after;$record.restoredHour=Number (Eval 'dayTime')
+ Require ($record.restoredHour -eq $originalHour -and [Math]::Abs($record.after.weather.overcast-$original.weather.overcast) -le .001) 'Actual owned date/dayTime or cloud lighting did not restore.'
+ return $record
+}
 function Uniform-Lighting([string]$band){
  $original=State
  Require ((Eval 'typeOf player') -ceq 'SoldierWB' -and (Eval 'alive player') -eq $true) 'Uniform fixture lost the actual stock soldier.'
@@ -445,9 +536,15 @@ try{
   elseif(!$sand){$arm.gates.unqualifiedDryWalk=Walk 'unqualified-dry-third' $uniform 'mud' $false;$null=Place $uniform}
   $dry=State;Require ($dry.uniform-lt .001 -and $dry.weather.liquidRain-lt .001) 'Dry clothing/weather control not initially dry.';Capture 'uniform-dry-third';$arm.gates.dry=$dry
   if($UniformLightingViews){$arm.gates.uniformLightingDry=Uniform-Lighting 'dry'}
-  $arm.gates.wetWait=@{requestedMinimumMudWetness=$MinimumMudWetness;hasAdmittedMudSource=[bool]$soil;wallDeadlineSeconds=$WetDeadlineSeconds;start=State}
+  $effectiveMudMinimum=if($MudLightingViews -and $soil){[Math]::Max(.8,$MinimumMudWetness)}else{$MinimumMudWetness}
+  $arm.gates.wetWait=@{requestedMinimumMudWetness=$MinimumMudWetness;effectiveMinimumMudWetness=$effectiveMudMinimum;hasAdmittedMudSource=[bool]$soil;wallDeadlineSeconds=$WetDeadlineSeconds;start=State}
   Exec '0 setOvercast 1;0 setRain 1;setAccTime 4';$until=[DateTime]::UtcNow.AddSeconds($WetDeadlineSeconds)
-  do{Start-Sleep -Milliseconds 400;$wet=State;$arm.gates.wetWait.lastActual=$wet;Require ([DateTime]::UtcNow-lt $until) 'Natural liquid rain did not reach actual cloth/GMud thresholds within the bounded wetting deadline.'}while(!(Mud-WetReady $wet ([bool]$soil) $MinimumMudWetness))
+  do{
+   Start-Sleep -Milliseconds 400;$wet=State;$arm.gates.wetWait.lastActual=$wet
+   $ready=Mud-WetReady $wet ([bool]$soil) $effectiveMudMinimum
+   if($MudLightingViews -and $soil){$terrain=Terrain-WetnessReceipt $wet;$arm.gates.wetWait.lastTerrainQueued=$terrain;$ready=$ready -and (Mud-LightingWetReady $wet $terrain)}
+   Require ([DateTime]::UtcNow-lt $until) 'Natural liquid rain did not reach actual cloth/GMud/optional queued terrain thresholds within the bounded wetting deadline.'
+  }while(!$ready)
   Exec 'setAccTime 0';$wet=State;Require (!$wet.weather.particleSnowflakes -and $wet.weather.particleDensity-eq 0) 'Wetting uses snow/particle override instead of actual liquid rain.'
   $arm.gates.wet=$wet;$arm.gates.cloth=Assert-Cloth (Lines);$arm.gates.wetBody=Assert-Body (Lines) ($wet.time-.65);Capture 'uniform-wet-third';$arm.gates.wetReturn=Return-Views 'uniform-wet'
   if($TerrainWetnessTrace){$arm.gates.terrainWetReady=Terrain-WetnessReceipt $wet}
@@ -463,6 +560,7 @@ try{
    if(!$ContactViews){$arm.gates.mudCloseViews=Contact-Views $arm.gates.wetSoilWalk 'mud'}
    $arm.gates.mudCentreViews=Terrain-MudCentreViews $soil
   }
+  if($MudLightingViews){if($soil){$arm.gates.mudLighting=Mud-Lighting $arm.gates.wetSoilWalk $soil}else{$arm.gates.mudLightingUnsupported='No admitted mud source on this original map; no soft-soil lighting acceptance inferred.'}}
   Exec 'setAccTime 1';$null=Send @{cmd='exit'};Require ($p.WaitForExit(20000)-and $p.ExitCode-eq 0) 'Owned normal exit failed.'
   Require ((Lines|Select-String 'Shutdown complete')-and !(Lines|Select-String 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION')) 'Exit/validation proof missing.'
   $arm.lifecycle=@{status='ok';timed_out=$false;contended=$false;exit_code=[int]$p.ExitCode};$meta=Join-Path $armDir 'lifecycle.json';$arm.lifecycle|ConvertTo-Json|Set-Content -LiteralPath $meta

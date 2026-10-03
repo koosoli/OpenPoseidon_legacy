@@ -1,6 +1,6 @@
 # Natural wet mud diagnostic
 
-The original-map controlled-player runner has two optional arguments:
+The original-map controlled-player runner has optional arguments:
 
 - -MinimumMudWetness .8 waits for actual GMud wetness at least .8 before the
   wet walk. Its allowed range is .3 to .95; the default remains .3.
@@ -64,3 +64,43 @@ source handling, liquid-rain exclusion, malformed thresholds and strict CRLF
 telemetry grammar. Queued master-disabled zeros remain distinct from accumulated
 history. Source checks alone do not accept installed appearance, local rain
 coverage, deeper mud, GPU publication or performance.
+
+## Paused wet-soil lighting comparison
+
+-MudLightingViews adds eight captures: low/top views of the actual most
+compressed walked mud sample and the admitted source centre, first at overcast
+1 and then at overcast 0. Both use the owned mission's 1985-06-21 16:00 daylight.
+This is deliberately controlled lighting of retained rain-wet soil, rather than
+an observation of unforced natural cloud development. The option defaults off;
+-TerrainWetnessTrace keeps its existing capture recipe.
+
+Before walking, this option waits for actual GMud wetness >=.8 and the existing
+terrain diagnostic's accumulated and queuedPad1 values >=.8001. The latter
+margin accounts for the log's four-decimal rounding: a printed .8000 can
+represent .79996. A requested -MinimumMudWetness above .8 still applies.
+Use -WetDeadlineSeconds 120 for a longer bounded rain wait if needed. The coat's
+master-off zero cannot satisfy the comparison, and the inherited wetness override
+is cleared as in the ordinary runner. The existing diagnostic is enabled before
+launch so its naturally accumulated ready receipt precedes the paused views.
+This receipt proves the existing C++ queue input, not Rust/GPU acceptance or
+per-fragment rain reach and coverage.
+
+Every view retains the actual source tuple, sampled relief and gradients,
+simulation clock, player position, Person wetness, physical store state and
+actual liquid rain. It checks actual sun availability, negative light-travel
+Y for a sun above the horizon, daytime nightEffect, requested overcast and the
+shared solar exposure expression. The clear view needs positive solar exposure;
+the fully overcast view needs zero direct exposure. Terrain receipts are recorded
+alongside those actual lighting fields, and the paused diagnostic row must stay
+unchanged. No manual mud deposition, forced rain history, animation or source
+geometry is introduced.
+
+Finally, the comparison restores its original overcast and the known owned
+calendar date. Since the engine has no date getter and setDate accepts integer
+minutes, the runner bounds the original time to its same-date 16:00–17:00
+interval, restores that minute, then uses registered skipTime to recover the
+reported original dayTime with at most three corrections. Exact dayTime and
+overcast readback are required, together with the paused state guards. Source
+self-tests cover the recipe, rounded/disabled/unaccumulated wetness rejection,
+actual sunlight falsifiers and bounded date restoration. Installed runtime and
+visual acceptance remain a separate root-owned check.
