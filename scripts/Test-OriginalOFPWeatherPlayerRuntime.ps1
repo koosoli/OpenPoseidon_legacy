@@ -83,7 +83,7 @@ function Water-DepthFacts($water,$fine,$soil){
  # The owned recipe disables snow; pure Field has no sand offset. Preserve the
  # physical height and signed offset separately, and identify the derived bare
  # height rather than mislabelling a 25m simulation bed as native terrain.
- $bare=$soil.surfaceY-$soil.offset;$projected=[Math]::Max(0,$water.height-$bare)
+ $bare=[double]$soil.surfaceY-[double]$soil.offset;$projected=[Math]::Max(0.0,([double]$water.height-$bare))
  $facts=@{sampleDepth=$water.depth;waterHead=$water.height;simulationBed=($water.height-$water.depth);actualTerrainY=$water.terrainY;actualMudSurfaceY=$soil.surfaceY;actualMudOffset=$soil.offset;derivedBareY=$bare;projectedNativeDepth=$projected;fineSelected=$false}
  if($null -ne $fine.selected){
   foreach($field in @('head','supportY','localDepth','volume','x','z','size')){$null=Number $fine.selected.$field}
@@ -233,8 +233,16 @@ function Test-Helpers{
  $soilSample=@{ok=$true;x=25;z=25;surfaceY=9.9;offset=-.1;surfaceDx=0;surfaceDz=0;sourceEligible=$true;surfaceClass='Field';files='pol'}
  $depth=Water-DepthFacts $water @{fineActive=$false;valid=$false} $soilSample
  Require ([Math]::Abs($depth.derivedBareY-10) -lt .000001 -and !$depth.fineSelected) 'Coarse water receipt confused signed mud with bare/source height.'
+ Require ([Math]::Abs($depth.projectedNativeDepth-.005) -lt 1e-10) 'Fractional native depth rounded away.'
  $pol=@{texture='eden\pol.paa';quadrants=@(1..4|ForEach-Object{@{surfaceClass='Field';files='pol'}})}
  Require (Thin-PolCandidate $pol $soilSample $depth) 'Genuine <=8mm pol candidate rejected.'
+ $deepSoil=$soilSample.Clone();$deepSoil.offset=-.176;$deepSoil.surfaceY=9.824
+ foreach($metres in @(.007,.009)){
+  $fractional=$water.Clone();$fractional.height=10.0+$metres;$fractional.depth=$metres;$fractional.terrainY=$deepSoil.surfaceY
+  $actualDepth=Water-DepthFacts $fractional @{fineActive=$false;valid=$false} $deepSoil
+  Require ([Math]::Abs($actualDepth.projectedNativeDepth-$metres) -lt 1e-10) 'Actual nonintegral projected depth lost below a signed176mm depression.'
+  Require ((Thin-PolCandidate $pol $deepSoil $actualDepth) -eq ($metres -le .008)) 'Actual7/9mm derived depth misclassified around the8mm threshold.'
+ }
  foreach($changed in @(@{sampleDepth=.009;projectedNativeDepth=.005;fineSelected=$false},@{sampleDepth=.005;projectedNativeDepth=.009;fineSelected=$false},@{sampleDepth=.005;projectedNativeDepth=.005;fineSelected=$true;fineLocalDepth=.009})){
   Require (!(Thin-PolCandidate $pol $soilSample $changed)) 'Deep or coarse/native-inconsistent candidate admitted as bare wet soil.'
  }
