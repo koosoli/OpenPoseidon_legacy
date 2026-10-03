@@ -508,7 +508,9 @@ void PhysicsWorld::Remove(BodyId id)
 bool PhysicsWorld::SetTerrain(const float* heights, int width, int height, float cellSize, float originX,
                               float originZ)
 {
-    if (!_backend || !heights || width <= 1 || height <= 1 || cellSize <= 0.0f)
+    ++_terrainMutationSerial;
+    if (!_backend || !heights || width <= 1 || height <= 1 || cellSize <= 0.0f ||
+        !std::isfinite(cellSize) || !std::isfinite(originX) || !std::isfinite(originZ))
     {
         return false;
     }
@@ -519,7 +521,6 @@ bool PhysicsWorld::SetTerrain(const float* heights, int width, int height, float
     field.cellSize = cellSize;
     field.originX = originX;
     field.originZ = originZ;
-    ++_terrainMutationSerial;
     return _backend->SetTerrain(field);
 }
 

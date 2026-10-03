@@ -434,6 +434,10 @@ TEST_CASE("Prepared fixture proof distinguishes terrain player proxy and mutatio
     CHECK_FALSE(world.PatchTerrain(-1,0,1,1,heights)); CHECK(world.TerrainMutationSerial()==serial+2);
     CHECK_FALSE(world.SetTerrain(heights,3,3,std::numeric_limits<float>::quiet_NaN(),0,0));
     CHECK(world.TerrainMutationSerial()==serial+3);
+    CHECK_FALSE(world.SetTerrain(heights,3,3,.25f,std::numeric_limits<float>::infinity(),0));
+    CHECK_FALSE(world.SetTerrain(heights,3,3,.25f,0,std::numeric_limits<float>::quiet_NaN()));
+    CHECK(world.TerrainMutationSerial()==serial+5);
+    CHECK(world.GetStats().solverBodies==1); // invalid replacements preserve the live terrain
     const auto epoch=world.Generation(); world.Destroy(); CHECK(world.Generation()>epoch);
     CHECK(world.GetStats().solverBodies==0); CHECK(world.GetStats().solverJoints==0);
 }
