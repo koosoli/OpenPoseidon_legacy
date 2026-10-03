@@ -43,6 +43,7 @@ pub struct Exposure {
     reduce_binds: Vec<wgpu::BindGroup>,
     adapt_bind: Option<wgpu::BindGroup>,
     mip_count: usize,
+    probe_source: Option<wgpu::TextureView>,
 }
 
 impl Exposure {
@@ -243,6 +244,7 @@ impl Exposure {
             reduce_binds: Vec::new(),
             adapt_bind: None,
             mip_count: 0,
+            probe_source: None,
         }
     }
 
@@ -338,6 +340,9 @@ impl Exposure {
         self.reduce_binds = reduce_binds;
         self.adapt_bind = Some(adapt_bind);
         self.mip_count = mip_count;
+        if crate::post_optics_probe::enabled() {
+            self.probe_source = Some(scene_view.clone());
+        }
     }
 
     pub fn upload_params(&self, queue: &wgpu::Queue, params: &WgrExposure) {
@@ -348,6 +353,9 @@ impl Exposure {
     pub fn set_source(&mut self, device: &wgpu::Device, scene_view: &wgpu::TextureView) {
         if self.reduce_binds.is_empty() {
             return;
+        }
+        if crate::post_optics_probe::enabled() {
+            self.probe_source = Some(scene_view.clone());
         }
         self.reduce_binds[0] = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wgr_exposure_scene_bind"),
@@ -427,9 +435,23 @@ impl Exposure {
 
     // Reduce the scene to average luminance, ease the exposure scale, and publish it.
     // `upload_params` must have run this frame. No-op until `resize`.
-    pub fn render(&self, encoder: &mut wgpu::CommandEncoder) {
+    pub fn probe_params(&self) -> &wgpu::Buffer {
+        &self.params_buf
+    }
+
+    pub fn probe_source_meter(&self) -> Option<(&wgpu::TextureView, &wgpu::TextureView)> {
+        if self.adapt_bind.is_none()
+            || self.mip_count == 0
+            || self.reduce_binds.len() != self.mip_count
+        {
+            return None;
+        }
+        Some((self.probe_source.as_ref()?, self.mip_views.last()?))
+    }
+
+    pub fn render(&self, encoder: &mut wgpu::CommandEncoder) -> bool {
         let Some(adapt_bind) = self.adapt_bind.as_ref() else {
-            return;
+            return false;
         };
         encoder.push_debug_group("wgr_exposure");
         for i in 0..self.mip_count {
@@ -489,5 +511,6 @@ impl Exposure {
             },
         );
         encoder.pop_debug_group();
+        true
     }
 }

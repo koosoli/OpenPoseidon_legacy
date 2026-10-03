@@ -16,6 +16,7 @@ mod grass;
 mod handles;
 mod log;
 mod main_camera_tuple;
+mod post_optics_probe;
 mod demand_view_snapshot;
 mod planar_mips;
 mod shaders;
@@ -1031,6 +1032,7 @@ pub struct Renderer {
     // synchronous readback completes there and C++ collects the RGBA bytes
     // immediately after presentation.
     screenshot_requested: bool,
+    post_optics_probe: Option<post_optics_probe::State>,
     screenshot_pixels: Option<ScreenshotPixels>,
 }
 
@@ -2083,11 +2085,13 @@ impl Renderer {
             suppress_world_objects: false,
             cull_debug_draw: false,
             screenshot_requested: false,
+            post_optics_probe: post_optics_probe::enabled().then(post_optics_probe::State::new),
             screenshot_pixels: None,
         })
     }
 
     fn request_screenshot(&mut self) {
+        if let Some(probe)=self.post_optics_probe.as_mut(){probe.request(self.screenshot_requested);}
         self.screenshot_requested = true;
         self.screenshot_pixels = None;
     }
@@ -2892,11 +2896,20 @@ impl Renderer {
         // Eye adaptation: reduce the scene to average luminance and ease the exposure
         // scale (the resolve multiplies exposure by it). Always run on the HDR path —
         // when disabled it just eases to 1.0 — the reduction is a few cheap passes.
+        let mut exposure_published=false;
         if let Some(exposure) = self.exposure.as_ref() {
             exposure.upload_params(&self.queue, &self.exposure_params);
             self.gpu_timers.begin(encoder, TimerRegion::ExposureAdapt);
-            exposure.render(encoder);
+            exposure_published=exposure.render(encoder);
             self.gpu_timers.end(encoder, TimerRegion::ExposureAdapt);
+        }
+        if self.screenshot_requested {
+            if let Some(state)=self.post_optics_probe.as_mut(){
+                let result=if !exposure_published{Err("exposure not published this encoder")}else if self.tonemap_params.nv_strength!=0.0{Err("night vision unsupported")}else{
+                    self.tonemap.as_ref().ok_or("missing tonemap").and_then(|tone|self.exposure.as_ref().ok_or("missing exposure").and_then(|exposure|tone.probe(&self.device,encoder,exposure,state,(self.config.width,self.config.height))))
+                };
+                if let Err(reason)=result{state.pending=None;state.valid=false;self.log.log(log_level::WARN,&format!("PostOptics refused: {}",reason));}
+            }
         }
         self.gpu_timers.begin(encoder, TimerRegion::TonemapResolve);
         encoder.push_debug_group("wgr_tonemap");
@@ -3558,6 +3571,7 @@ impl Renderer {
         mut call_timings: Option<&mut crate::gpu_timers::RenderCallCpuTimings>,
         main_count_request: Option<(u64, u32, u64)>,
     ) -> Result<bool, String> {
+        if let Some(probe)=self.post_optics_probe.as_mut(){probe.begin();}
         if let Some(tuple)=self.main_camera_tuple.as_mut(){tuple.begin();} // Failed calls invalidate old completion.
         self.gfx3d.begin_geometry_pass_facts(shadow);
         let setup_t0 = std::time::Instant::now();
@@ -4192,6 +4206,7 @@ impl Renderer {
             self.ensure_underwater_target(rw, rh);
         }
 
+        if let Some(probe)=self.post_optics_probe.as_mut(){probe.capture(cameras.get(main_scene_cam),prepared_cameras.get(main_scene_cam),main_selection.source);}
         let acquire_t0 = std::time::Instant::now();
         let Some(frame) = self.acquire(call_timings.as_deref().map(|facts| facts.call_token))? else {
             if let Some(facts) = call_timings.as_deref_mut() { facts.skip(); }
@@ -6599,9 +6614,16 @@ impl Renderer {
                 });
                 self.log
                     .log(log_level::INFO, "wgpu screenshot readback completed");
+                if let Some(state)=self.post_optics_probe.as_mut(){
+                    if let Some(pending)=state.pending.take(){match pending.finish(&self.device){
+                        Ok(lines)=>for line in lines{self.log.log(log_level::INFO,&line);},
+                        Err(reason)=>self.log.log(log_level::WARN,&format!("PostOptics refused: {}",reason)),
+                    }}else{self.log.log(log_level::WARN,"PostOptics refused: no same-frame float packet");}
+                }
             } else {
                 self.log
                     .log(log_level::ERROR, "wgpu screenshot readback failed");
+                if let Some(state)=self.post_optics_probe.as_mut(){state.pending=None;}
             }
             self.screenshot_requested = false;
         }

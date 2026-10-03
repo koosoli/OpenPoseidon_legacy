@@ -206,3 +206,43 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     color += (ign(in.clip.xy) - 0.5) / 255.0;
     return vec4<f32>(color, 1.0);
 }
+
+// Opt-in screenshot diagnostic entry only. Production fs_main does not use group1.
+struct PostOpticsInput {
+    dims: vec4<u32>, origins: array<vec4<u32>,4>,
+    request: vec4<u32>, frame: vec4<u32>, source: vec4<u32>,
+};
+@group(1) @binding(0) var post_meter: texture_2d<f32>;
+@group(1) @binding(1) var<uniform> post_probe: PostOpticsInput;
+struct PostExposureParams {enabled:f32,key:f32,min_scale:f32,max_scale:f32,rate:f32,sky_weight:f32,pad1:f32,pad2:f32};
+@group(1) @binding(2) var<uniform> post_ep: PostExposureParams;
+@fragment
+fn fs_post_optics_probe(in: VsOut) -> @location(0) vec4<f32> {
+    let pixel=u32(in.clip.x); let row=u32(in.clip.y);
+    if(row<16u){
+        let tile=row/4u; let channel=row%4u;
+        let xy=post_probe.origins[tile].xy+vec2<u32>(pixel%5u,pixel/5u);
+        let uv=(vec2<f32>(xy)+vec2<f32>(0.5))/vec2<f32>(post_probe.dims.xy);
+        let hdr=textureSampleLevel(hdr_tex,hdr_samp,uv,0.0).rgb;
+        let bloom=textureSampleLevel(bloom_tex,bloom_samp,uv,0.0).rgb;
+        let scale=textureLoad(exposure_tex,vec2<i32>(0),0).r;
+        let precurve=white_balance((hdr+bloom*params.bloom_intensity)*params.exposure*scale,params.temperature,params.tint);
+        if(channel==0u){return vec4<f32>(hdr,1.0);}
+        if(channel==1u){return vec4<f32>(bloom,1.0);}
+        if(channel==2u){return vec4<f32>(precurve,1.0);}
+        if(params.mode>0.5){return vec4<f32>(hable(precurve),1.0);}
+        return vec4<f32>(clamp(precurve,vec3<f32>(0),vec3<f32>(1)),1.0);
+    }
+    if(row==16u){return vec4<f32>(textureLoad(post_meter,vec2<i32>(0),0).rg,textureLoad(exposure_tex,vec2<i32>(0),0).r,linear_white);}
+    if(row==17u){return vec4<f32>(params.exposure,params.mode,params.encode,params.temperature);}
+    if(row==18u){return vec4<f32>(params.tint,params.contrast,params.saturation,params.lift);}
+    if(row==19u){return vec4<f32>(params.gain,params.bloom_intensity,params.bloom_threshold,params.bloom_knee);}
+    if(row==20u){return vec4<f32>(params.nv_strength,params.nv_gain,params.nv_noise,params.nv_vignette);}
+    if(row==21u){return vec4<f32>(desat_start,desat_strength,vec2<f32>(textureDimensions(hdr_tex)));}
+    if(row==22u){return vec4<f32>(post_probe.request);}
+    if(row==23u){return vec4<f32>(post_probe.frame);}
+    if(row==24u){return vec4<f32>(post_probe.source);}
+    if(row==25u){return vec4<f32>(post_ep.enabled,post_ep.key,post_ep.min_scale,post_ep.max_scale);}
+    if(row==26u){return vec4<f32>(post_ep.rate,post_ep.sky_weight,post_ep.pad1,post_ep.pad2);}
+    return vec4<f32>(vec2<f32>(textureDimensions(bloom_tex)),vec2<f32>(post_probe.dims.xy));
+}

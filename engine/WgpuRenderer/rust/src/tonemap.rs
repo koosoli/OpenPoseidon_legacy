@@ -15,6 +15,10 @@ pub struct Tonemap {
     params_buf: wgpu::Buffer,
     // Rebuilt whenever the HDR source view is (re)created (allocation / resize).
     bind: Option<wgpu::BindGroup>,
+    probe: Option<crate::post_optics_probe::Gpu>,
+    probe_source: Option<wgpu::TextureView>,
+    probe_scale: Option<wgpu::TextureView>,
+    probe_epoch: u64,
 }
 
 impl Tonemap {
@@ -170,6 +174,8 @@ impl Tonemap {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        let probe = crate::post_optics_probe::enabled()
+            .then(|| crate::post_optics_probe::Gpu::new(device, &shader, &layout, &constants));
         Self {
             pipeline,
             layout,
@@ -177,6 +183,10 @@ impl Tonemap {
             bloom_sampler,
             params_buf,
             bind: None,
+            probe,
+            probe_source: None,
+            probe_scale: None,
+            probe_epoch: 0,
         }
     }
 
@@ -189,6 +199,11 @@ impl Tonemap {
         bloom_view: &wgpu::TextureView,
         exposure_view: &wgpu::TextureView,
     ) {
+        if self.probe.is_some() {
+            self.probe_source = Some(hdr_view.clone());
+            self.probe_scale = Some(exposure_view.clone());
+            self.probe_epoch = self.probe_epoch.checked_add(1).unwrap_or(u64::MAX);
+        }
         self.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wgr_tonemap_bind"),
             layout: &self.layout,
@@ -219,6 +234,54 @@ impl Tonemap {
                 },
             ],
         }));
+    }
+
+    pub fn probe(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        exposure: &crate::exposure::Exposure,
+        state: &mut crate::post_optics_probe::State,
+        size: (u32, u32),
+    ) -> Result<(), &'static str> {
+        if state.attempted {
+            return Err("duplicate tone resolve");
+        }
+        state.attempted = true;
+        if !state.valid {
+            return Err("overlapping/exhausted request");
+        }
+        let cameras = state.cameras.ok_or("invalid main cameras")?;
+        if self.probe_epoch == u64::MAX {
+            return Err("source serial exhausted");
+        }
+        let (source, meter) = exposure
+            .probe_source_meter()
+            .ok_or("missing current meter")?;
+        if self.probe_source.as_ref() != Some(source)
+            || self.probe_scale.as_ref() != Some(exposure.scale_view())
+        {
+            return Err("stale exposure/tone source");
+        }
+        let input = crate::post_optics_probe::input(
+            size,
+            state.request,
+            state.frame,
+            self.probe_epoch,
+            std::env::var("WGR_SCREENSHOT_POST_OPTICS_TILES")
+                .ok()
+                .as_deref(),
+        )?;
+        state.pending = Some(self.probe.as_ref().ok_or("probe disabled")?.encode(
+            device,
+            encoder,
+            self.bind.as_ref().ok_or("missing tone bind")?,
+            meter,
+            exposure.probe_params(),
+            input,
+            cameras,
+        ));
+        Ok(())
     }
 
     pub fn upload_params(&self, queue: &wgpu::Queue, params: &WgrTonemap) {
