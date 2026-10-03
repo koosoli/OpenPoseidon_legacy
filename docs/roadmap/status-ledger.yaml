@@ -6888,3 +6888,303 @@ tickets:
     evidence:
       - docs/roadmap/evidence/sinkhole-w1-20261003.json
       - docs/roadmap/decisions/SINKHOLE-01-terrain-holes-20261003.md
+  - id: FIX-FLASH-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Retained world objects drawn on world-less loading frames (black ground, floating objects on load/exit)"
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/fix-retained-world-flash
+    baseline_commit: 95a9eb1d
+    verification_commit: eadd26d6
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [5d390885]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/lib.rs
+        symbol: render_frame
+      - file: engine/Poseidon/Core/ProgressSystem.cpp
+        symbol: ProgressSystem::Frame
+    test_ids: [fix-flash-menu-editor-exit-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/FIXES-20261003.md
+    capability_claims:
+      - capability: NO_WORLD_FLASH_ON_LOADING_FRAMES
+        status: UNVERIFIED
+        denominator: >-
+          Captured on the menu -> editor -> menu -> exit path and an editor preview exit; owner
+          confirmed the flash was pre-existing.
+    known_failures: []
+    fallback: "None needed; a frame with world draws is unchanged."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner re-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/FIXES-20261003.md
+  - id: FIX-FLOAT-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Floating forests/buildings: terrain-derived object caches survive a heightfield change; subdivision cache v2; edge re-seat clamp"
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/fix-terrain-change-object-caches
+    baseline_commit: 95a9eb1d
+    verification_commit: 1e543a68
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [cd12f617, d9a2c402]
+    production_call_sites:
+      - file: engine/Poseidon/World/Scene/Object.cpp
+        symbol: Object::OnTerrainChanged
+      - file: engine/Poseidon/World/Scene/ObjectClasses.cpp
+        symbol: ForestPlain::OnTerrainChanged
+      - file: engine/Poseidon/World/Terrain/LandSave.cpp
+        symbol: Landscape::MakeObjectsTerrainAbsolute
+      - file: engine/Poseidon/World/Terrain/LandSave.cpp
+        symbol: Landscape::LoadSubdivCache
+    test_ids: [fix-float-everon-setterraingrid-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/FIXES-20261003.md
+    capability_claims:
+      - capability: OBJECTS_FOLLOW_TERRAIN_CHANGES
+        status: UNVERIFIED
+        denominator: >-
+          Everon: v1 subdivision caches rebuilt as v2; forests grounded across setTerrainGrid
+          50/12.5 (flat area only); edge-strip objects no longer at -100 m.
+    known_failures:
+      - "Owner's distant floating buildings not reproduced (needs a location)."
+    fallback: "A stale v1 cache is rebuilt once, then cached as v2."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner re-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/FIXES-20261003.md
+  - id: FIX-PILOT-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Empty 'pilot' memory selection crashed Man init (fml_vorhees spawn / editor preview crash)"
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/fix-empty-memory-selection
+    baseline_commit: 95a9eb1d
+    verification_commit: f13d60a6
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [5811b896]
+    production_call_sites:
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldSimProxy.cpp
+        symbol: ManType::InitShape
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldActions.cpp
+        symbol: Man::CalculateCameraPosition
+    test_ids: [fix-pilot-vorhees-spawn-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/FIXES-20261003.md
+    capability_claims:
+      - capability: EMPTY_MEMORY_SELECTION_TOLERATED
+        status: UNVERIFIED
+        denominator: >-
+          Symbolised crash stack before; after, six Jason variants spawn and stay alive (harness
+          probe).
+    known_failures: []
+    fallback: "Readers fall back to the aiming position, as for a model with no pilot point."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner re-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/FIXES-20261003.md
+  - id: FIX-SP3X-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "OFP SP3X MLODs load through the original LODShape loader again (adapter tore skinned soldiers apart)"
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/fix-sp3x-soft-weights
+    baseline_commit: 95a9eb1d
+    verification_commit: ddc76c8f
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [d35b52ac, 5106f39c, 637f9edd]
+    production_call_sites:
+      - file: engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+        symbol: ShapeBank::NewFromModel
+    test_ids: [fix-sp3x-vorhees-split-capture, fix-sp3x-ugcave-loader-ab-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/FIXES-20261003.md
+    capability_claims:
+      - capability: SP3X_MLOD_ORIGINAL_LOADER
+        status: UNVERIFIED
+        denominator: >-
+          fml_vorhees Jasons correct through the original loader, torn through the adapter (wgpu
+          and GL33); Sinkhole ugcave/ugbasement (SP3X) identical through both.
+    known_failures:
+      - "ShapeAdapter's own SP3X fault is not found (soft-weight decode ruled out)."
+      - "ObjectStreamPreparer (modern worlds) still adapts SP3X."
+    fallback: "POSEIDON_SP3X_ADAPTER=1 sends SP3X through ShapeAdapter again."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner re-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/FIXES-20261003.md
+  - id: MAT-NET-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Netting drawn as a depth-writing cutout by default (camo nets were see-through)"
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/fix-blend-solid-depth
+    baseline_commit: 95a9eb1d
+    verification_commit: 0ee406f1
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [738d7ef9]
+    production_call_sites:
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: EngineWgpu::DrawSectionTL
+      - file: engine/Poseidon/Graphics/Core/Engine.hpp
+        symbol: MaterialDebugSettings::coverageMaskDepth
+    test_ids: [mat-net-fortress-m2-four-sides-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/FIXES-20261003.md
+    capability_claims:
+      - capability: NETTING_OCCLUDES
+        status: UNVERIFIED
+        denominator: >-
+          M2 inside a Fortress1 on Everon, four sides, POSEIDON_NET_DEPTH=0/1 in one binary.
+    known_failures:
+      - "mask_sit_2x1_ridka (49% partial) stays outside the coverage-mask rule."
+    fallback: "POSEIDON_NET_DEPTH=0 restores the blended path."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner re-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/FIXES-20261003.md
+  - id: MAT-053
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Mostly-solid blended sections write depth for their solid texels (see-through floors, with FIX-COCKPIT-001)"
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/fix-blend-solid-depth
+    baseline_commit: 95a9eb1d
+    verification_commit: ac2a9340
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [FIX-COCKPIT-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [585f4546, 53a300f7, 4662013e, 6596c6aa, bacc89ae, c76612d4]
+    production_call_sites:
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: EngineWgpu::DrawSectionTL
+      - file: engine/WgpuRenderer/rust/src/gfx3d/mod.rs
+        symbol: Gfx3d::draw_one
+    test_ids: [solid_blend_prepass_takes_only_blend_pass_sections, mat053-spec-destrb-floor-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/FIXES-20261003.md
+    capability_claims:
+      - capability: MOSTLY_SOLID_BLEND_OCCLUDES
+        status: UNVERIFIED
+        denominator: >-
+          spec_destrb_d big1_r at eye height on each storey: solid with FIX-COCKPIT-001 + MAT-053,
+          ghosted with the cockpit fix alone.
+    known_failures:
+      - "Earlier A/Bs were blind (cockpit-flagged draws are skipped); only the combined state is captured."
+    fallback: "WGR_BLEND_SOLID_DEPTH=0 turns it off."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner re-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/FIXES-20261003.md
+  - id: FIX-COCKPIT-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Only the camera vehicle is a cockpit draw (every building at LOD 0 was routed as a cockpit)"
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/fix-building-cockpit-route
+    baseline_commit: 95a9eb1d
+    verification_commit: 0fd873c2
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [6074cfe8]
+    production_call_sites:
+      - file: engine/Poseidon/World/Scene/SceneDraw.cpp
+        symbol: DrawSortObject
+      - file: engine/Poseidon/World/World.cpp
+        symbol: World::Simulate
+    test_ids: [fix-cockpit-spec-destrb-floor-capture, fix-cockpit-jeep-first-person-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/FIXES-20261003.md
+    capability_claims:
+      - capability: COCKPIT_ROUTING_CAMERA_VEHICLE_ONLY
+        status: UNVERIFIED
+        denominator: >-
+          Instrumented: the ghosting draw carried WGR_DRAW3D_COCKPIT; after, floors solid (with
+          MAT-053) and the jeep's first-person cockpit unchanged.
+    known_failures: []
+    fallback: "None; the camera vehicle routes exactly as before."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner re-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/FIXES-20261003.md

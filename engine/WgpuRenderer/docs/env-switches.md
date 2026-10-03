@@ -85,6 +85,19 @@ Read by the game engine, not by `engine/WgpuRenderer/`, so the scan below does n
 | `POSEIDON_BOAT_DIAG` | `World/Entities/Vehicles/Misc/Ship.cpp` | Once a second per boat: position, forward speed, thrust, brake. Since TW-WATER W11d also a `Boat buoyancy` line: water contact points, their submersion (sum, mean, mean against the flat sea), the planing gain, total buoyancy / weight, height and sea level. Logging only. |
 | `POSEIDON_INFANTRY_DROWN` | `World/Entities/Infantry/SoldierOldSim.cpp` | TW-WATER W12c. `1` restores the legacy drowning damage: AI soldiers standing deeper than 1.2 m (0.6 m prone) lose health until they die (the player was always exempt). Off by default at the owner's request until swimming is added. |
 
+## Switches added or changed by FIXES-20261003 and Sinkhole W1b
+
+See `docs/roadmap/decisions/FIXES-20261003.md`.
+
+| Switch | Read by | Notes |
+| --- | --- | --- |
+| `WGR_BLEND_SOLID_DEPTH` | Rust | MAT-053. `0` turns off the depth-writing first draw of a mostly-solid blend section (texture >= 75% a=255; only its texels at alpha >= 0.98 write depth). On by default. |
+| `WGR_BLEND_PASS_TRACE` | Engine (`SceneDraw.cpp`) + C++ bridge | MAT-051 revisit trace; since MAT-053 also names each texture that gets the `WGR_DRAW3D_BLEND_SECTION` flag. Diagnostic only. |
+| `POSEIDON_NET_DEPTH` | C++ bridge | MAT-NET-001. **Default changed to on** (netting as a depth-writing cutout); `0` restores the blended path. |
+| `POSEIDON_SP3X_ADAPTER` | Engine (`ShapeDraw.cpp`) | FIX-SP3X-001. `1` sends OFP SP3X MLODs through `ShapeAdapter` instead of the original loader (the adapter tears skinned soldiers -- fml_vorhees). |
+| `POSEIDON_FLASHLIGHT` | Engine (`SoldierOldFlashlight.cpp`) | Sinkhole W1b. `0` disables the soldiers' handheld test flashlight. |
+| `POSEIDON_FLASHLIGHT_AI_NIGHT` | Engine (`SoldierOldFlashlight.cpp`) | Sinkhole W1b. `1` lets AI switch the flashlight on at night when not cautious (underground they always do). Off so legacy night missions are unchanged. |
+
 ## Regenerating
 
 This table is derived, not maintained by hand. Re-scan with:
