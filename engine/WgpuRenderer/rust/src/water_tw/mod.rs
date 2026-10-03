@@ -159,6 +159,11 @@ fn rotor_wash_enabled() -> bool {
     *V.get_or_init(|| std::env::var("WGR_TW_ROTOR_WASH").map_or(true, |v| v == "1"))
 }
 
+fn rotor_trace_enabled() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_ROTOR_TRACE").is_ok_and(|v| v == "1"))
+}
+
 /// `WGR_TW_GLOW=<scale>`: overrides the Water tab's water glow (W3j), for A/B captures.
 fn glow_override() -> Option<f32> {
     static V: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
@@ -453,6 +458,7 @@ pub struct Tidewater {
     last_time: Option<f32>,
     rotor: rotor_wash::RotorWash,
     detail_offset: [f32; 2],
+    rotor_trace: rotor_wash::RotorTrace,
     gens: [u64; 4], // depth, env, scene, heightmap
     // W3a shore field
     shore_t_view: wgpu::TextureView,
@@ -791,6 +797,7 @@ impl Tidewater {
             last_time: None,
             rotor: Default::default(),
             detail_offset: [0.0; 2],
+            rotor_trace: Default::default(),
             gens: [u64::MAX; 4],
             shore_t_view,
             shore_dir_view,
@@ -1057,6 +1064,14 @@ impl Tidewater {
         inputs.detail_offset = self.detail_offset;
         let block = surface_block(&p, &inputs);
         queue.write_buffer(&self.surface_ubo, 0, bytemuck::bytes_of(&block));
+        let rotor_count = (block.rotor_control[1] as usize).min(rotor_wash::SOURCES);
+        if rotor_trace_enabled() && self.rotor_trace.observe(block.sea[1],block.rotor_domain,rotor_count) {
+            // Exact copied private UBO lanes, not a proposal or synthetic event.
+            // stderr is captured by the installed runner; no callback/ABI change.
+            eprintln!("TW_ROTOR_UBO {{\"time\":{},\"phaseTime\":{},\"domain\":{:?},\"count\":{},\"sources\":{:?},\"readonly\":true}}",
+                block.sea[1],block.rotor_control[0],block.rotor_domain,rotor_count,
+                &block.rotor_sources[..rotor_count]);
+        }
 
         let spec = fft::SpectrumInputs::from_params(&p);
         {

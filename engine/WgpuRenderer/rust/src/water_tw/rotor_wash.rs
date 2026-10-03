@@ -2,6 +2,20 @@
 pub const ROTOR_FLAG: u32 = 1 << 13;
 pub const SOURCES: usize = 8;
 
+#[derive(Default)]
+pub struct RotorTrace {
+    previous: Option<(f32, [f32; 4], usize)>,
+}
+
+impl RotorTrace {
+    pub fn observe(&mut self, time: f32, domain: [f32; 4], count: usize) -> bool {
+        if !time.is_finite() || !domain.iter().all(|x| x.is_finite()) || count > SOURCES { return false; }
+        let due = self.previous.is_none_or(|(t,d,n)| time < t || time-t >= 1.0 || d != domain || n != count);
+        if due { self.previous = Some((time,domain,count)); }
+        due
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RotorWash {
     pub domain: [f32; 4],
@@ -11,7 +25,9 @@ pub struct RotorWash {
 
 impl RotorWash {
     pub fn frame(&mut self, domain: [f32; 4], time: f32, frozen: bool, enabled: bool) {
-        if !enabled { *self = Self::default(); }
+        // Keep observational domain/clock metadata for an empty ablation
+        // frame; disabled sources still cannot reach the material.
+        if !enabled { self.begin(domain,time); }
         else if !frozen { self.begin(domain,time); }
     }
 
@@ -109,5 +125,16 @@ mod tests {
         let mut switched=RotorWash::default();
         switched.frame(before.domain,26.0,false,true);
         assert_eq!(switched.control[1],0.0); // replay contains params, never rotor events
+    }
+    #[test]
+    fn trace_is_quiet_per_frame_and_reports_real_paused_domain_transitions() {
+        let mut t=RotorTrace::default(); let d=[1620.0,2970.0,256.0,1.0/256.0];
+        assert!(t.observe(20.0,d,1));
+        assert!(!t.observe(20.0,d,1)); assert!(!t.observe(20.9,d,1));
+        assert!(t.observe(21.0,d,1)); assert!(t.observe(21.0,d,0));
+        let mut moved=d;moved[0]+=4.0;
+        assert!(t.observe(21.0,moved,0)); assert!(!t.observe(21.0,moved,0));
+        assert!(!t.observe(f32::NAN,moved,0)); assert!(!t.observe(21.0,moved,9));
+        assert!(t.observe(0.0,d,0));
     }
 }
