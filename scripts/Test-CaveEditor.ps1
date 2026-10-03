@@ -38,8 +38,6 @@ function Send($command,[bool]$allowError=$false){
 function Eval([string]$code){return Decode ([string](Send @{cmd='eval';code=$code}).result)}
 function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
 function CentreLook{
- # Reset only the initial idle aim pose, never a running traversal trajectory.
- if(Eval 'vehicle player == player'){Exec 'player switchMove ""'}
  # KP5 is the fresh profile's ordinary LookCenter action. Unlike setting the
  # screen cursor alone, it resets the retained virtual-camera/UI aim direction.
  $receipt=@{beforeDir=(Num (Eval 'getDir player'));beforeCursor=(Eval 'triCursorPos')}
