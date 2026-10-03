@@ -3,7 +3,8 @@
 param(
  [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{8,40}$')][string]$ExpectedCommit,
  [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='original-everon-trenches',
- [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault'
+ [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
+ [switch]$SelectionChecks
 )
 $ErrorActionPreference='Stop';$taskRoot=Split-Path -Parent $PSScriptRoot;$culture=[Globalization.CultureInfo]::InvariantCulture
 function Require([bool]$ok,[string]$message){if(!$ok){throw $message}}
@@ -23,10 +24,10 @@ $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGE
 $saved=@{};foreach($key in @($settings.Keys)+$clear){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $log=Join-Path $taskOut 'engine.log';$p=$null;$client=$null;$heldKey=$null;$tankOwned=$false
 $result=[ordered]@{passed=$false;installed=$before;expectedCommit=$ExpectedCommit;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;scope='Mission-local infantry and tank trenches on original retail Everon without addon. Actual ramp/floor/support, retained source heights, ordinary W/S traversal and undo. No AI routing, saving, Box3D cavities or complete tank hull contact certification claimed.'}
-function Send($command){
+function Send($command,[bool]$allowError=$false){
  Require (!$p.HasExited) 'Owned game exited unexpectedly.';$wire=$command|ConvertTo-Json -Depth 10 -Compress;$wire|Add-Content -LiteralPath (Join-Path $taskOut 'harness.jsonl');$writer.WriteLine($wire)
  do{$line=$reader.ReadLine();Require ([bool]$line) 'Harness disconnected.';$reply=$line|ConvertFrom-Json}while($null-eq $reply.ok)
- $line|Add-Content -LiteralPath (Join-Path $taskOut 'harness.jsonl');Require $reply.ok $line;return $reply
+ $line|Add-Content -LiteralPath (Join-Path $taskOut 'harness.jsonl');Require ($allowError -or $reply.ok) $line;return $reply
 }
 function Eval([string]$code){return Decode ([string](Send @{cmd='eval';code=$code}).result)}
 function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
@@ -130,6 +131,18 @@ try{
   $baseline=State $point @(($site.rim+1),($floor+.1));Require (!$baseline.inFootprint-and $baseline.terrainRayHit) 'Original trench column lacks actual terrain intersection.';$arm.baseline=$baseline
   Capture ($preset.name+'-baseline-top') @($point.x,($site.rim+10),$point.z) @(0,-1,.01)
   $created=Send @{cmd='dev_cave_editor';action='trench';x=$site.x;y=$site.rim;z=$site.z;heading=$site.heading;width=$preset.width;depth=$preset.depth;length=$preset.length;tank=$preset.tank};Require ($created.count-eq 1) 'Trench owner count differs.';$arm.created=$created
+  if($SelectionChecks){
+   $recordId=Num $created.selectedId;Require ($recordId -gt 0 -and @($created.records).Count -eq 1) 'Missing stable trench selection receipt.'
+   $selected=Send @{cmd='dev_cave_editor';action='select';id=$recordId};Require ($selected.selectedId -eq $recordId) 'Trench selection differs.'
+   $edgePoint=Point $site ($preset.length-2) (-$preset.width*.5+.01) ($site.rim+.2)
+   $edgeBefore=State $edgePoint $null;Require $edgeBefore.inFootprint 'Rotation witness starts outside trench.'
+   $rotated=Send @{cmd='dev_cave_editor';action='rotate';id=$recordId;heading=($site.heading+.1)}
+   Require ($rotated.count -eq 1 -and $rotated.records[0].id -eq $recordId -and $rotated.records[0].objectId -eq $created.records[0].objectId -and $rotated.records[0].sourceName -ceq $created.records[0].sourceName -and [Math]::Abs($rotated.records[0].heading-($site.heading+.1)) -lt .001) 'Trench rotation changed identity or failed to apply.'
+   $edgeRotated=State $edgePoint $null;Require (!$edgeRotated.inFootprint) 'Rotated trench retained its old terrain cut.'
+   $back=Send @{cmd='dev_cave_editor';action='rotate';heading=$site.heading}
+   $edgeReturned=State $edgePoint $null;Require ($edgeReturned.inFootprint -and [Math]::Abs($back.records[0].heading-$site.heading) -lt .001) 'Selected trench did not restore original heading/cut.'
+   $arm.selection=@{selected=$selected;rotated=$rotated;returned=$back;edgeBefore=$edgeBefore;edgeRotated=$edgeRotated;edgeReturned=$edgeReturned}
+  }
   $inside=State $point @(($site.rim+1),($floor+.1));AssertUnchanged $baseline $inside
   Require ($inside.inFootprint-and $inside.atHeight-and !$inside.terrainRayHit-and [Math]::Abs((Num $inside.roadY)-$floor)-lt .1) 'Open trench column or actual roadway floor failed.';$arm.inside=$inside
   $ramp=State (Point $site ($preset.ramp*.5) 0 ($site.rim+.2)) $null;Require ([Math]::Abs((Num $ramp.roadY)-($site.rim-$preset.depth*.5))-lt .12) 'Actual ramp roadway differs from intended midpoint.';$arm.ramp=$ramp
@@ -146,9 +159,19 @@ try{
   $arm.startLook=CentreLook;Exec 'setAccTime 1';Start-Sleep -Milliseconds 800;Exec 'setAccTime 0';$arm.start=Eval 'getPosASL vehicle player';$arm.startDir=Num (Eval 'getDir vehicle player')
   Require ((HeadingError $arm.startDir $site.heading)-lt 5) 'Actor heading drifted during start settle.'
   $descent=[ordered]@{};$arm.descent=$descent;Traverse $site $preset $true $descent (Num $arm.start[2]);Capture ($preset.name+'-actor-inside') $null $null
+  if($SelectionChecks){
+   $beforeEdit=State $null $null
+   $refusedDelete=Send @{cmd='dev_cave_editor';action='delete';id=$recordId} $true
+   $refusedRotate=Send @{cmd='dev_cave_editor';action='rotate';id=$recordId;heading=($site.heading+.1)} $true
+   Require (!$refusedDelete.ok -and !$refusedRotate.ok) 'Occupied trench accepted delete or rotation.'
+   $afterEdit=State $null $null;Require (($beforeEdit.records|ConvertTo-Json -Depth 6 -Compress) -ceq ($afterEdit.records|ConvertTo-Json -Depth 6 -Compress)) 'Refused occupied edits changed trench records.'
+   $arm.occupiedEditGuard=@{delete=$refusedDelete;rotate=$refusedRotate;unchanged=$true}
+  }
   $exit=[ordered]@{};$arm.exit=$exit;Traverse $site $preset $false $exit (Num $arm.start[2])
   if($tankOwned){Exec 'player action ["GETOUT",opTrenchTank]';Exec 'setAccTime 1';Start-Sleep -Seconds 1;Exec 'setAccTime 0';Require (Eval 'vehicle player == player') 'Driver did not leave tank outside trench.';Exec 'deleteVehicle opTrenchTank';Require (Eval 'isNull opTrenchTank') 'Owned tank cleanup failed.';$tankOwned=$false}
-  $undo=Send @{cmd='dev_cave_editor';action='undo'};$restored=State $point @(($site.rim+1),($floor+.1));AssertUnchanged $baseline $restored
+  if($SelectionChecks -and !$preset.tank){$undo=Send @{cmd='dev_cave_editor';action='delete';id=$recordId}}
+  else{$undo=Send @{cmd='dev_cave_editor';action='undo'}}
+  $restored=State $point @(($site.rim+1),($floor+.1));AssertUnchanged $baseline $restored
   Require ($undo.count-eq 0-and !$restored.inFootprint-and $restored.terrainRayHit-and [Math]::Abs((Num $restored.roadY)-(Num $baseline.roadY))-lt .001) 'Trench undo failed actual terrain/support restoration.';$arm.undo=@{owner=$undo;restored=$restored};$arm.passed=$true
   Capture ($preset.name+'-restored-top') @($point.x,($site.rim+10),$point.z) @(0,-1,.01)
  }

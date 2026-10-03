@@ -4,7 +4,8 @@
 param(
  [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{8,40}$')][string]$ExpectedCommit,
  [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='original-everon-cave',
- [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault'
+ [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
+ [switch]$SelectionChecks
 )
 $ErrorActionPreference='Stop'
 $taskRoot=Split-Path -Parent $PSScriptRoot
@@ -28,11 +29,11 @@ $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGE
 $saved=@{};foreach($key in @($settings.Keys)+$clear){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $log=Join-Path $taskOut 'engine.log';$p=$null;$client=$null;$held=$false
 $result=[ordered]@{passed=$false;expectedCommit=$ExpectedCommit;installed=$before;lookPreparations=@();scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;scope='Original retail Everon without addon fixture. Actual bounded cave queries and terrain-only legacy rays, stock W-key traversal, roof controls and sub-grid aperture. Screenshots require runtime owner inspection; no Box3D cavity, AI navigation, persistence or general terrain ray equivalence claimed.'}
-function Send($command){
+function Send($command,[bool]$allowError=$false){
  Require (!$p.HasExited) 'Owned game exited unexpectedly.'
  $wire=$command|ConvertTo-Json -Depth 12 -Compress;$wire|Add-Content -LiteralPath (Join-Path $taskOut 'harness.jsonl');$writer.WriteLine($wire)
  do{$line=$reader.ReadLine();Require ([bool]$line) 'Harness disconnected.';$reply=$line|ConvertFrom-Json}while($null -eq $reply.ok)
- $line|Add-Content -LiteralPath (Join-Path $taskOut 'harness.jsonl');Require $reply.ok $line;return $reply
+ $line|Add-Content -LiteralPath (Join-Path $taskOut 'harness.jsonl');Require ($allowError -or $reply.ok) $line;return $reply
 }
 function Eval([string]$code){return Decode ([string](Send @{cmd='eval';code=$code}).result)}
 function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
@@ -119,6 +120,14 @@ try{
  Capture 'baseline-above' @($centre.x,($baseline.terrainY+6),$centre.z) @(0,-1,.01)
  $normal=Send @{cmd='dev_cave_editor';action='create';x=$site.x;y=$site.floor;z=$site.z;heading=$site.heading;width=3;height=2.5;length=32}
  Require ($normal.count -eq 1) 'Normal cave count differs.'
+ if($SelectionChecks){
+  $normalId=Num $normal.selectedId;Require ($normalId -gt 0 -and @($normal.records).Count -eq 1) 'Missing stable cave selection receipt.'
+  $selected=Send @{cmd='dev_cave_editor';action='select';id=$normalId};Require ($selected.selectedId -eq $normalId) 'Cave selection differs.'
+  $rotated=Send @{cmd='dev_cave_editor';action='rotate';id=$normalId;heading=($site.heading+.1)}
+  Require ($rotated.count -eq 1 -and $rotated.records[0].id -eq $normalId -and $rotated.records[0].objectId -eq $normal.records[0].objectId -and $rotated.records[0].sourceName -ceq $normal.records[0].sourceName -and [Math]::Abs($rotated.records[0].heading-($site.heading+.1)) -lt .001) 'Cave rotation changed identity or failed to apply.'
+  $back=Send @{cmd='dev_cave_editor';action='rotate';heading=$site.heading};Require ([Math]::Abs($back.records[0].heading-$site.heading) -lt .001) 'Selected cave did not rotate back.'
+  $result.selection=@{selected=$selected;rotated=$rotated;returned=$back}
+ }
  $inside=State $centre @(($site.floor+2.1),($site.floor+.2));AssertUnchanged $baseline $inside
  Require ($inside.inFootprint -and $inside.atHeight -and $inside.boundedHeader -and !$inside.terrainRayHit) 'Normal aperture/height/header/legacy intersection proof failed.'
  Require ([Math]::Abs((Num $inside.roadY)-$site.floor) -lt .1 -and [Math]::Abs((Num $inside.cameraFloorY)-$site.floor) -lt .1) 'Inside gameplay/camera floor differs from cave floor.'
@@ -139,6 +148,14 @@ try{
  }while(!$entered -and [DateTime]::UtcNow -lt $until)
  $null=Send @{cmd='key_up';sc=26};$held=$false;Exec 'setAccTime 0'
  $result.traversal=@{start=$start;inputContext=$input;samples=$samples;entered=$entered};Require $entered 'W-key traversal did not enter below retained roof.'
+ if($SelectionChecks){
+  $beforeEdit=State $null $null
+  $refusedDelete=Send @{cmd='dev_cave_editor';action='delete';id=$normalId} $true
+  $refusedRotate=Send @{cmd='dev_cave_editor';action='rotate';id=$normalId;heading=($site.heading+.1)} $true
+  Require (!$refusedDelete.ok -and !$refusedRotate.ok) 'Occupied cave accepted delete or rotation.'
+  $afterEdit=State $null $null;Require (($beforeEdit.records|ConvertTo-Json -Depth 6 -Compress) -ceq ($afterEdit.records|ConvertTo-Json -Depth 6 -Compress)) 'Refused occupied edits changed cave records.'
+  $result.occupiedEditGuard=@{delete=$refusedDelete;rotate=$refusedRotate;unchanged=$true}
+ }
  Capture 'player-inside-first' $null $null
  # Real L/Headlights input enables the soldier's torch even in a daytime cave.
  Exec 'setAccTime 1';$null=Send @{cmd='key';sc=15;hold=$true}
@@ -175,6 +192,19 @@ try{
  Capture 'tiny-above' @($centre.x,($baseline.terrainY+3),$centre.z) @(0,-1,.01)
  $tinyUndo=Send @{cmd='dev_cave_editor';action='undo'};$tinyRestored=State $centre $roofRay;AssertUnchanged $baseline $tinyRestored
  Require ($tinyUndo.count -eq 0 -and !$tinyRestored.inFootprint -and $tinyRestored.terrainRayHit) 'Tiny cave undo failed.';$result.tinyUndo=@{undo=$tinyUndo;restored=$tinyRestored}
+ if($SelectionChecks){
+  $first=Send @{cmd='dev_cave_editor';action='create';x=$site.x;y=$site.floor;z=$site.z;heading=$site.heading;width=.1;height=.1;length=32}
+  $companion=Point $site 0 3 0;$companionFloor=(Heights @($companion))[0]
+  $second=Send @{cmd='dev_cave_editor';action='create';x=$companion.x;y=$companionFloor;z=$companion.z;heading=$site.heading;width=.1;height=.1;length=32}
+  Require ($second.count -eq 2 -and $first.selectedId -ne $second.selectedId) 'Distinct editor records were not created.'
+  $deleted=Send @{cmd='dev_cave_editor';action='delete';id=$first.selectedId}
+  Require ($deleted.count -eq 1 -and $deleted.records[0].id -eq $second.selectedId) 'Deleting a non-last cave removed the wrong record.'
+  $deletedSurface=State $centre $roofRay;Require (!$deletedSurface.inFootprint -and $deletedSurface.terrainRayHit) 'Deleted cave left a stale terrain cut.'
+  $otherCentre=@{x=($companion.x+$site.fx*16);z=($companion.z+$site.fz*16);y=($companionFloor+.05)}
+  $retained=State $otherCentre $null;Require ($retained.inFootprint -and $retained.atHeight) 'Deleting one cave closed its neighbour.'
+  $deletedLast=Send @{cmd='dev_cave_editor';action='delete';id=$second.selectedId};Require ($deletedLast.count -eq 0) 'Selected final cave deletion failed.'
+  $result.selectiveDelete=@{first=$first;second=$second;deleted=$deleted;originalRestored=$deletedSurface;otherRetained=$retained;finalDelete=$deletedLast}
+ }
  Capture 'restored-above' @($centre.x,($baseline.terrainY+6),$centre.z) @(0,-1,.01)
  $null=Send @{cmd='exit'};Require ($p.WaitForExit(30000) -and $p.ExitCode -eq 0) 'Normal game exit failed.'
  $after=Pair;Require (($after|ConvertTo-Json -Depth 6 -Compress) -ceq ($before|ConvertTo-Json -Depth 6 -Compress)) 'Installed pair changed during smoke.'
