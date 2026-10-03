@@ -9,10 +9,19 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
+// Import only the two API contracts used below. windows.h imports GDI's
+// GetObject macro and rewrites Landscape::GetObject in shared-header consumers.
+// SDK API contracts require their architecture macro when windows.h has not
+// initialized it already (including standalone native policy tests).
+#if defined(_M_AMD64) && !defined(_AMD64_)
+#define _AMD64_
+#elif defined(_M_IX86) && !defined(_X86_)
+#define _X86_
+#elif defined(_M_ARM64) && !defined(_ARM64_)
+#define _ARM64_
 #endif
-#include <windows.h>
+#include <processthreadsapi.h>
+#include <processenv.h>
 #endif
 
 namespace Poseidon::RainWaterCost

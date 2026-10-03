@@ -65,6 +65,12 @@ empty steps; source/clear/final calls must equal steps. Phase timings include
 small diagnostic accounting overhead and are elapsed time, not exclusive CPU
 time. They are nested within Advance, so must not be added to its total.
 
+The initial full-game build exposed `windows.h` importing GDI's `GetObject`
+macro into Landscape.cpp through this shared header. The corrected helper
+imports only the SDK process/thread and environment API contract headers,
+which supply the real calls without GDI. A focused consumer test rejects a
+`GetObject` macro and compiles an unchanged `GetObject(int)` member call.
+
 World.cpp reports one summary and five phase rows in the existing once per
 frame-time second reporting block, outside the measured Advance/Step scopes.
 No per-step log is emitted. Reports remain whole windows; report maxima need

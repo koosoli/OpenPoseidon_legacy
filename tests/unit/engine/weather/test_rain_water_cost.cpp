@@ -1,8 +1,13 @@
 #include "../../../../engine/Poseidon/World/Weather/RainWaterField.hpp"
 #include <cassert>
 #include <iostream>
+#ifdef GetObject
+#error The shared runoff diagnostic must not import the GDI GetObject macro
+#endif
+struct LandscapeLookupFixture { int GetObject(int id) const { return id; } };
 using namespace Poseidon;
 int main() {
+    assert(LandscapeLookupFixture{}.GetObject(7)==7);
     // Aggregate wall time never substitutes unavailable/reversed thread time.
     RainWaterCost::Accum a;
     RainWaterCost::RecordAdvance(a,1000000,{10,true},{1000010,true},0);
