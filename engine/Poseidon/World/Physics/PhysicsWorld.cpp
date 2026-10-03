@@ -121,12 +121,14 @@ bool PhysicsWorld::Create()
         return false;
     }
     ResetCounters();
+    ++_generation;
     _backend->SetWaterEnvironment({SampleProbeWater, ProbeWaterImpact});
     return true;
 }
 
 void PhysicsWorld::Destroy()
 {
+    ++_generation;
     if (_backend)
     {
         _backend->Destroy();
@@ -541,6 +543,19 @@ void PhysicsWorld::ClearProbes()
 bool PhysicsWorld::GetBodyMotion(BodyId id, BodyMotion& out) const
 {
     return _backend && _backend->GetBodyMotion(id, out);
+}
+
+BodyId PhysicsWorld::SpawnArticulatedPiece(const ConvexPiece& piece, const Matrix4& frame, float mass)
+{
+    return _backend ? _backend->SpawnArticulatedPiece(piece, frame, mass) : BodyId{};
+}
+JointId PhysicsWorld::AddArticulatedJoint(const ArticulatedJointDef& definition)
+{
+    return _backend ? _backend->AddArticulatedJoint(definition) : JointId{};
+}
+void PhysicsWorld::RemoveJoint(JointId id)
+{
+    if (_backend && id.IsValid()) _backend->RemoveJoint(id);
 }
 
 void PhysicsWorld::GetProbeSamples(std::vector<ProbeSample>& out) const

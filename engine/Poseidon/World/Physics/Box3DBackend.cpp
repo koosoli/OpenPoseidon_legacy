@@ -120,6 +120,15 @@ b3Quat QuatFromOrientation(const Matrix4& m)
 
 b3Vec3 ToB3(Vector3Par v) { return b3Vec3{v[0], v[1], v[2]}; }
 
+bool RigidArticulationFrame(const Matrix4& frame)
+{
+    if (!frame.IsFinite()) return false;
+    const Vector3 x = frame.DirectionAside(), y = frame.DirectionUp(), z = frame.Direction();
+    return std::abs(x.SquareSize()-1) < 1e-4f && std::abs(y.SquareSize()-1) < 1e-4f &&
+        std::abs(z.SquareSize()-1) < 1e-4f && std::abs(x*y) < 1e-4f &&
+        std::abs(y*z) < 1e-4f && std::abs(z*x) < 1e-4f && x*y.CrossProduct(z) > 0.9999f;
+}
+
 /// Cap on hull vertices. A Geometry LOD component is authored small -- a crate, a
 /// wall segment, a wheel arch -- so this is a guard against pathological input
 /// rather than a budget anyone should hit.
@@ -214,6 +223,8 @@ public:
         _proxyValid = false;
         _proxy = b3_nullBodyId;
         _slots.clear();
+        _joints.clear();
+        _articulatedBodies.clear();
         _free.clear();
         _terrainBody = b3_nullBodyId;
         _terrainBodyValid = false;
@@ -421,6 +432,15 @@ public:
         // and the `probes` stat, which counted removals as still present.
         // erase-remove, not std::erase_if: this library is built as C++17.
         const b3BodyId dying = slot->body;
+        _articulatedBodies.erase(std::remove(_articulatedBodies.begin(),_articulatedBodies.end(),id),_articulatedBodies.end());
+        // Articulated constraints are owned independently of probes. Invalidate
+        // their generation BEFORE Box3D destroys attached joints with this body.
+        for (JointSlot& joint : _joints)
+            if (joint.generation && (joint.first == id || joint.second == id))
+            {
+                if (b3Joint_IsValid(joint.joint)) b3DestroyJoint(joint.joint, false);
+                joint.generation = 0;
+            }
         _probes.erase(std::remove_if(_probes.begin(), _probes.end(),
                                      [&](const Probe& probe) {
                                          return probe.body.index1 == dying.index1 &&
@@ -860,6 +880,66 @@ public:
         }
     }
 
+    BodyId SpawnArticulatedPiece(const ConvexPiece& piece, const Matrix4& frame, float mass) override
+    {
+        if (!RigidArticulationFrame(frame) || !std::isfinite(mass) || mass <= 0 ||
+            !piece.points || piece.count < 4 || piece.count > MaxHullVertices) return {};
+        for (int p = 0; p < piece.count; ++p) if (!piece.points[p].IsFinite()) return {};
+        BodyId id = SpawnDynamicPieces(&piece, 1, frame, mass, 0.65f, 0, VZero);
+        Slot* slot = Find(id);
+        if (!slot) return {};
+        const b3BodyId body = slot->body;
+        // A corpse is not a probe: no probe clear, wind or water controller owns
+        // it. Only this bounded corpse's owner destroys these articulated bodies.
+        _probes.erase(std::remove_if(_probes.begin(), _probes.end(), [&](const Probe& probe)
+        { return probe.body.index1 == body.index1 && probe.body.world0 == body.world0; }), _probes.end());
+        std::vector<b3ShapeId> shapes(b3Body_GetShapeCount(body));
+        const int count = b3Body_GetShapes(body, shapes.data(), static_cast<int>(shapes.size()));
+        for (int i = 0; i < count; ++i)
+        {
+            b3Filter filter = b3Shape_GetFilter(shapes[i]);
+            filter.groupIndex = -1; // one admitted corpse; no internal collisions
+            b3Shape_SetFilter(shapes[i], filter, true);
+        }
+        _articulatedBodies.push_back(id);
+        return id;
+    }
+
+    JointId AddArticulatedJoint(const ArticulatedJointDef& definition) override
+    {
+        Slot* first = Find(definition.first); Slot* second = Find(definition.second);
+        if (!first || !second || definition.first == definition.second ||
+            !RigidArticulationFrame(definition.firstFrame) || !RigidArticulationFrame(definition.secondFrame) ||
+            !std::isfinite(definition.coneAngle) || definition.coneAngle <= 0 || definition.coneAngle > 3.1415926f ||
+            !std::isfinite(definition.twistAngle) || definition.twistAngle <= 0 || definition.twistAngle > 3.0f)
+            return {};
+        b3SphericalJointDef def = b3DefaultSphericalJointDef();
+        def.base.bodyIdA = first->body; def.base.bodyIdB = second->body;
+        def.base.localFrameA = {ToB3(definition.firstFrame.Position()), QuatFromOrientation(definition.firstFrame)};
+        def.base.localFrameB = {ToB3(definition.secondFrame.Position()), QuatFromOrientation(definition.secondFrame)};
+        def.base.collideConnected = false;
+        def.enableConeLimit = true; def.coneAngle = definition.coneAngle;
+        def.enableTwistLimit = true;
+        def.lowerTwistAngle = -definition.twistAngle; def.upperTwistAngle = definition.twistAngle;
+        b3JointId joint = b3CreateSphericalJoint(_world, &def);
+        if (!b3Joint_IsValid(joint)) return {};
+        if (++_nextJointGeneration == 0) ++_nextJointGeneration;
+        std::uint32_t index = 0;
+        while (index < _joints.size() && _joints[index].generation) ++index;
+        JointSlot slot{joint, definition.first, definition.second, _nextJointGeneration};
+        if (index == _joints.size()) _joints.push_back(slot); else _joints[index] = slot;
+        return {index, slot.generation};
+    }
+
+    void RemoveJoint(JointId id) override
+    {
+        if (!id.IsValid() || id.index >= _joints.size()) return;
+        JointSlot& slot = _joints[id.index];
+        if (slot.generation != id.generation) return;
+        if (b3Joint_IsValid(slot.joint)) b3DestroyJoint(slot.joint, false);
+        slot.generation = 0;
+    }
+
     BodyId CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint, const QueryFilter& filter) const override
     {
         if (!b3World_IsValid(_world))
@@ -1048,6 +1128,9 @@ public:
         stats.queryOnlyShapes = _queryOnlyShapes;
         stats.hullFailures = _hullFailures;
         stats.probes = static_cast<std::uint32_t>(_probes.size());
+        stats.articulatedBodies = static_cast<std::uint32_t>(_articulatedBodies.size());
+        for (const JointSlot& joint : _joints)
+            if (joint.generation && b3Joint_IsValid(joint.joint)) ++stats.articulatedJoints;
         stats.terrainRegistered = _heightField != nullptr || !_terrainTiles.empty();
         stats.terrainWidth = _terrainWidth;
         stats.terrainHeight = _terrainHeight;
@@ -1243,6 +1326,15 @@ private:
         bool waterObserved = false;
     };
     std::vector<Probe> _probes;
+    struct JointSlot
+    {
+        b3JointId joint;
+        BodyId first, second;
+        std::uint32_t generation;
+    };
+    std::vector<JointSlot> _joints;
+    std::vector<BodyId> _articulatedBodies;
+    std::uint32_t _nextJointGeneration = 0;
     WindSettings       _wind;
     ProbeWaterEnvironment _water;
 

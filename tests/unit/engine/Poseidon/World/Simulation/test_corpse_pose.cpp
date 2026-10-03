@@ -289,3 +289,46 @@ TEST_CASE("Corpse lease rejects stale worlds models skeletons moves and clock re
     lease = {};
     REQUIRE_FALSE(valid(&world, &model, &skeleton, 25, 7, 9, 0.37f, 10001));
 }
+
+TEST_CASE("Corpse rigid deltas preserve affine residuals and every weighted consumer without accumulation", "[corpse-pose][articulation]")
+{
+    Matrix4 previous[2] = {Matrix4(MScale,1.3f,0.7f,1.1f), MIdentity};
+    Matrix4 next[2] = {MIdentity,Matrix4(MScale,0.8f,1.2f,0.9f)};
+    previous[0](0,1) = 0.21f; next[1](1,2) = -0.13f;
+    previous[0].SetPosition(Vector3(.2f,.3f,-.4f)); next[1].SetPosition(Vector3(-.3f,.2f,.5f));
+    AffinePhasePose pose, original;
+    REQUIRE(pose.Capture(previous,next,2,3,.37f)); REQUIRE(original.Capture(previous,next,2,3,.37f));
+    AnimationRTWeight weight;
+    weight.Add(AnimationRTPair(0,.675f)); weight.Add(AnimationRTPair(1,.325f));
+    std::vector<Matrix4> deltas(3,MIdentity);
+    REQUIRE(pose.ApplyRigidDeltas(deltas));
+    MATRIX_4_ARRAY(a,128); MATRIX_4_ARRAY(b,128);
+    original.PrepareMatrices(a,1); pose.PrepareMatrices(b,1);
+    for (int i=0;i<3;++i) SameMatrix(a[i],b[i]);
+    const Vector3 point(.17f,-.29f,.81f);
+    CHECK(pose.Point(weight,point,point) == original.Point(weight,point,point));
+    Matrix4 pa = MIdentity, pb = pa;
+    original.Matrix(pa,weight); pose.Matrix(pb,weight); SameMatrix(pa,pb);
+    deltas[0] = Matrix4(MDirection,Vector3(1,0,0),VUp); deltas[0].SetPosition(Vector3(.1f,.2f,.3f));
+    deltas[1] = Matrix4(MDirection,Vector3(0,.6f,.8f),Vector3(0,.8f,-.6f));
+    deltas[2] = deltas[0];
+    Matrix4 movedPrevious[2], movedNext[2];
+    for (int i=0;i<2;++i) { movedPrevious[i]=deltas[i]*previous[i]; movedNext[i]=deltas[i]*next[i]; }
+    AffinePhasePose expected;
+    REQUIRE(expected.Capture(movedPrevious,movedNext,2,3,.37f));
+    REQUIRE(pose.ApplyRigidDeltas(deltas)); REQUIRE(pose.ApplyRigidDeltas(deltas));
+    MATRIX_4_ARRAY(c,128); MATRIX_4_ARRAY(d,128);
+    pose.PrepareMatrices(c,1); expected.PrepareMatrices(d,1);
+    SameMatrix(c[0],d[0]); SameMatrix(c[1],d[1]); SameMatrix(c[2],deltas[2]);
+    CHECK(pose.Point(weight,point,point) == expected.Point(weight,point,point));
+    pa = pb = MIdentity; pose.Matrix(pa,weight); expected.Matrix(pb,weight); SameMatrix(pa,pb);
+    AnimationRTWeight face; face.Add(AnimationRTPair(2,1));
+    pa = MIdentity; pose.Matrix(pa,face); SameMatrix(pa,deltas[2]);
+    deltas[0](0,0) = std::numeric_limits<float>::quiet_NaN();
+    REQUIRE_FALSE(pose.ApplyRigidDeltas(deltas));
+    MATRIX_4_ARRAY(e,128); pose.PrepareMatrices(e,1);
+    for (int i=0;i<3;++i) SameMatrix(c[i],e[i]);
+    REQUIRE(pose.ApplyRigidDeltas(std::vector<Matrix4>(3,MIdentity)));
+    MATRIX_4_ARRAY(f,128); pose.PrepareMatrices(f,1);
+    for (int i=0;i<3;++i) SameMatrix(a[i],f[i]);
+}

@@ -335,6 +335,14 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
 {
     // Expiry/revival/hiding/world/model changes restore the authored path.
     if (_corpsePoseLease.world) UseCorpsePose();
+    // While explicitly articulated, physics owns limbs and the root stays at
+    // the captured frame. Do not run authored ground alignment against them.
+    if (_corpseArticulation && UpdateCorpseArticulation())
+    {
+        _speed = VZero;
+        base::Simulate(deltaT, prec);
+        return;
+    }
     RestoreCargoStateAfterLoad();
     if (_ladderBuilding && _ladderIndex >= 0)
     {

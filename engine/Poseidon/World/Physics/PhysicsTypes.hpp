@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <Poseidon/Foundation/Math/Math3D.hpp>
 
 // Engine-side vocabulary for the physics layer. NO BACKEND TYPE APPEARS HERE, and
 // none may appear in any header the rest of the engine includes -- that is the
@@ -33,6 +34,21 @@ struct BodyId
         return a.index == b.index && a.generation == b.generation;
     }
     friend bool operator!=(const BodyId& a, const BodyId& b) { return !(a == b); }
+};
+
+struct JointId
+{
+    std::uint32_t index = 0, generation = 0;
+    [[nodiscard]] bool IsValid() const { return generation != 0; }
+};
+
+// Both local frames use their Z axes for the cone/twist axis. The caller fits
+// these to measured model geometry; no RTM translation is a joint location.
+struct ArticulatedJointDef
+{
+    BodyId first, second;
+    Matrix4 firstFrame = MIdentity, secondFrame = MIdentity;
+    float coneAngle = 1.2f, twistAngle = 0.6f;
 };
 
 /// What a collider piece is FOR.
@@ -133,6 +149,8 @@ struct PhysicsStats
 
     /// PHY-020 dev probes currently alive.
     std::uint32_t probes = 0;
+    std::uint32_t articulatedBodies = 0;
+    std::uint32_t articulatedJoints = 0;
 
     /// Mean wall-clock cost of ONE b3World_Step, in milliseconds, since the last
     /// reset. Multiply by the Fixed Step tab's ticks-per-frame for the per-frame

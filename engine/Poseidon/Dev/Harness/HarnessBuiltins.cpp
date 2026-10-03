@@ -2872,8 +2872,8 @@ void RegisterPhysicsProbe(HarnessServer& hs)
             };
             cJSON* out = cJSON_CreateObject();
             cJSON_AddBoolToObject(out, "readonly", true);
-            cJSON_AddBoolToObject(out, "solver", false);
-            cJSON_AddBoolToObject(out, "rigAdmitted", false);
+            cJSON_AddBoolToObject(out, "solver", measured.articulated);
+            cJSON_AddBoolToObject(out, "rigAdmitted", measured.articulated);
             cJSON_AddBoolToObject(out, "contactAdmitted", false);
             cJSON_AddStringToObject(out, "contactScope", "road-support clearance and corpse-ignored geometry center ray; not convex overlap");
             cJSON_AddStringToObject(out, "anchorScope", "shared source selection centroid; paired final-bone endpoints, no calibrated joint frame");

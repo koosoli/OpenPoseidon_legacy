@@ -43,6 +43,7 @@ struct CorpseAnchorDiagnostic
 };
 struct CorpsePoseDiagnostic
 {
+    bool articulated = false;
     std::string model, entity;
     int capturedMs = 0, measuredMs = 0;
     bool headIdentityFlag = false, gunIdentityFlag = false;
@@ -74,12 +75,18 @@ inline float CorpseMatrixDeterminant(Matrix4Val matrix)
 // Preserve each one, including authored scale/shear and skeleton-tail identity.
 class AffinePhasePose
 {
-    std::vector<Matrix4> _previous, _next;
+    std::vector<Matrix4> _previous, _next, _authoredPrevious, _authoredNext;
+    std::vector<Matrix4> _deltas;
     int _bones = 0;
     float _interpolation = 0;
 
 public:
-    void Clear() { std::vector<Matrix4>().swap(_previous); std::vector<Matrix4>().swap(_next); _bones = 0; }
+    void Clear()
+    {
+        std::vector<Matrix4>().swap(_previous); std::vector<Matrix4>().swap(_next);
+        std::vector<Matrix4>().swap(_authoredPrevious); std::vector<Matrix4>().swap(_authoredNext); _bones = 0;
+        std::vector<Matrix4>().swap(_deltas);
+    }
     bool Valid() const { return _bones > 0 && !_previous.empty(); }
     int PhaseMatrices() const { return static_cast<int>(_previous.size()); }
     int Bones() const { return _bones; }
@@ -93,8 +100,34 @@ public:
             if (!previous[i].IsFinite() || !next[i].IsFinite()) return false;
         _previous.assign(previous, previous + count);
         _next.assign(next, next + count);
+        _authoredPrevious = _previous;
+        _authoredNext = _next;
         _bones = bones;
         _interpolation = interpolation;
+        return true;
+    }
+
+    // Left-multiply the ORIGINAL affine phase by the solver's model-space rigid
+    // delta. Never accumulate previous ticks, quaternionize skin deformation or
+    // preblend phases: all three consumers retain their weight arithmetic.
+    bool ApplyRigidDeltas(const std::vector<Matrix4>& deltas)
+    {
+        if (!Valid() || deltas.size() != static_cast<size_t>(_bones)) return false;
+        for (const Matrix4& delta : deltas)
+            if (!delta.IsFinite()) return false;
+        _deltas = deltas;
+        for (int i = 0; i < PhaseMatrices(); ++i)
+        {
+            if (CorpseMatrixIdentityError(deltas[i]) == 0)
+            {
+                _previous[i] = _authoredPrevious[i]; _next[i] = _authoredNext[i];
+            }
+            else
+            {
+                _previous[i] = deltas[i] * _authoredPrevious[i];
+                _next[i] = deltas[i] * _authoredNext[i];
+            }
+        }
         return true;
     }
 
@@ -134,8 +167,9 @@ public:
         }
         for (int i = PhaseMatrices(); i < _bones; ++i)
         {
-            if (first) matrices[i].InlineSetMultiply(MIdentity, factor);
-            else matrices[i].InlineAddMultiply(MIdentity, factor);
+            const Matrix4& tail = _deltas.empty() ? MIdentity : _deltas[i];
+            if (first) matrices[i].InlineSetMultiply(tail, factor);
+            else matrices[i].InlineAddMultiply(tail, factor);
         }
     }
 
@@ -169,7 +203,11 @@ public:
         {
             int i = weight[w].GetSel();
             float weightValue = weight[w].GetWeight();
-            if (i >= PhaseMatrices()) matrix += original * weightValue;
+            if (i >= PhaseMatrices())
+            {
+                if (_deltas.empty() || CorpseMatrixIdentityError(_deltas[i]) == 0) matrix += original * weightValue;
+                else matrix += (_deltas[i] * original) * weightValue;
+            }
             else
             {
                 Matrix4 pm, nm, cm;

@@ -148,6 +148,10 @@ public:
     /// Physics -> gameplay, for a body the caller spawned as dynamic. See
     /// BodyMotion for why this exception to PHY-010's one-way rule exists.
     bool   GetBodyMotion(BodyId id, BodyMotion& out) const;
+    BodyId SpawnArticulatedPiece(const struct ConvexPiece&, const Matrix4&, float mass);
+    JointId AddArticulatedJoint(const ArticulatedJointDef&);
+    void RemoveJoint(JointId);
+    [[nodiscard]] std::uint64_t Generation() const { return _generation; }
     void   SetWind(const WindSettings& wind);
     /// Follows the player so they can shove probes. Physics never moves them back.
     void SetKinematicProxy(Vector3Par position, float radius, float height);
@@ -167,6 +171,7 @@ private:
                        RegisterResult& result);
 
     std::unique_ptr<PhysicsBackend> _backend;
+    std::uint64_t _generation = 0;
 
     // Counted HERE and not in the backend, because these are facts about our
     // data rather than about the library: a model with no Geometry LOD and a

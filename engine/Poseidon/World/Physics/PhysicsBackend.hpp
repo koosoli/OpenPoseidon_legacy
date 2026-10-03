@@ -110,6 +110,9 @@ public:
     virtual BodyId AddStaticBody(const ConvexPiece* pieces, int pieceCount, const Matrix4& transform) = 0;
 
     virtual void RemoveBody(BodyId id) = 0;
+    virtual BodyId SpawnArticulatedPiece(const ConvexPiece&, const Matrix4&, float) { return {}; }
+    virtual JointId AddArticulatedJoint(const ArticulatedJointDef&) { return {}; }
+    virtual void RemoveJoint(JointId) {}
 
     /// Transforms flow IN only (PHY-010). There is deliberately no getter: adding
     /// one is how "physics is a query service" quietly becomes "physics owns the

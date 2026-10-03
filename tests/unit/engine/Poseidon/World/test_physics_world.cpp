@@ -23,6 +23,61 @@
 
 using namespace Poseidon::Physics;
 
+TEST_CASE("Articulated Box3D parts constrain real motion and survive probe and stale joint cleanup", "[physics][articulation]")
+{
+    auto backend = CreatePhysicsBackend(); REQUIRE(backend); REQUIRE(backend->Create());
+    std::vector<Vector3> points;
+    for (int i=0;i<8;++i) points.emplace_back((i&1)?.15f:-.15f,(i&2)?.2f:-.2f,(i&4)?.15f:-.15f);
+    ConvexPiece piece{points.data(),8,ColliderFlags::Solid};
+    Matrix4 first = MIdentity, second = MIdentity;
+    first.SetPosition(Vector3(0,2,0)); second.SetPosition(Vector3(0,3,0));
+    BodyId a=backend->SpawnArticulatedPiece(piece,first,4), b=backend->SpawnArticulatedPiece(piece,second,4);
+    REQUIRE(a.IsValid()); REQUIRE(b.IsValid());
+    ArticulatedJointDef definition; definition.first=a; definition.second=b;
+    definition.firstFrame.SetPosition(Vector3(0,.5f,0)); definition.secondFrame.SetPosition(Vector3(0,-.5f,0));
+    JointId old=backend->AddArticulatedJoint(definition); REQUIRE(old.IsValid());
+    CHECK(backend->GetStats().articulatedBodies == 2);
+    CHECK(backend->GetStats().articulatedJoints == 1);
+    backend->ClearProbes(); CHECK(backend->GetStats().probes == 0);
+    backend->ApplyImpulse(b,second.Position(),Vector3(3,0,0));
+    auto checkMotion = [&] {
+        BodyMotion ma,mb; REQUIRE(backend->GetBodyMotion(a,ma)); REQUIRE(backend->GetBodyMotion(b,mb));
+        Vector3 pivotA=ma.position+ma.axisY*.5f, pivotB=mb.position-mb.axisY*.5f;
+        CHECK((pivotA-pivotB).Size() < .025f);
+    };
+    for (int i=0;i<30;++i) backend->Step(1.0f/60);
+    checkMotion();
+    backend->RemoveBody(a); backend->RemoveJoint(old);
+    CHECK(backend->GetStats().articulatedBodies == 1);
+    CHECK(backend->GetStats().articulatedJoints == 0);
+    a=backend->SpawnArticulatedPiece(piece,first,4); REQUIRE(a.IsValid());
+    backend->SetBodyTransform(b,second);
+    definition.first=a; JointId fresh=backend->AddArticulatedJoint(definition); REQUIRE(fresh.IsValid());
+    CHECK(fresh.generation != old.generation);
+    backend->RemoveJoint(old); // must not destroy the replacement joint
+    backend->ApplyImpulse(b,second.Position(),Vector3(-3,0,0));
+    for (int i=0;i<30;++i) backend->Step(1.0f/60);
+    checkMotion();
+    backend->RemoveJoint(fresh); backend->RemoveBody(a); backend->RemoveBody(b);
+    CHECK(backend->GetStats().bodies == 0);
+    CHECK(backend->GetStats().articulatedBodies == 0);
+    CHECK(backend->GetStats().articulatedJoints == 0);
+    CHECK_FALSE(backend->AddArticulatedJoint(definition).IsValid());
+    CHECK_FALSE(backend->SpawnArticulatedPiece(piece,Matrix4(MScale,2,1,1),4).IsValid());
+    backend->Destroy(); backend->RemoveJoint(fresh);
+    REQUIRE(backend->Create()); backend->RemoveJoint(fresh);
+}
+
+TEST_CASE("Physics world epochs retire articulated ownership across backend recreation", "[physics][articulation]")
+{
+    PhysicsWorld world;
+    auto initial = world.Generation(); REQUIRE(world.Create());
+    auto created = world.Generation(); CHECK(created > initial);
+    REQUIRE(world.Create()); CHECK(world.Generation() == created);
+    world.Destroy(); auto retired = world.Generation(); CHECK(retired > created);
+    REQUIRE(world.Create()); CHECK(world.Generation() > retired);
+}
+
 TEST_CASE("showcase block contacts sweep players and projectiles", "[physics][showcase-contact]")
 {
     ProbeSample box;

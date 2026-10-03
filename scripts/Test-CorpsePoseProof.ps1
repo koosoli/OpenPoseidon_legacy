@@ -6,9 +6,11 @@ param(
     [string]$GameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
     [string]$NativeAddons = 'C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons',
     [scriptblock]$FinalPoseProbe,
-    [string]$FinalPoseProbeSource
+    [string]$FinalPoseProbeSource,
+    [switch]$ArticulationSmoke
 )
 $ErrorActionPreference = 'Stop'
+if ($ArticulationSmoke -and $FinalPoseProbe) { throw 'Articulation smoke and read-only no-solver diagnostic are separate campaigns.' }
 if (!$env:LOCK_OWNER) { throw 'Run through scripts/with-game-lock.sh.' }
 if (Get-Process OpenPoseidon -ErrorAction SilentlyContinue) { throw 'Game already running; refusing shared ownership.' }
 $culture = [Globalization.CultureInfo]::InvariantCulture
@@ -37,6 +39,7 @@ $result = [ordered]@{ status = 'running'; scope = 'installed no-motion affine po
     before = $before; gates = @{}; observations = @{}; captures = @{}; error = $null;
     saveNetwork = 'Not exercised by this runner; no save/network fields were added.' }
 if ($FinalPoseProbe) { $result.scope = 'installed no-motion phase/final-pose measurements and lifecycle proof; no solver, joint or contact admission' }
+if ($ArticulationSmoke) { $result.scope = 'installed opt-in stock corpse Box3D articulation, consumed pose and handle cleanup; appearance/contact promotion remains open' }
 $keys = @('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM',
     'POSEIDON_TEST_RAIN','WGR_TEMPORAL','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_GRASS','POSEIDON_WIND_OVERRIDE',
     'WGR_CLOUD_COVERAGE','WGR_LOD_GOVERNOR_RANGE','WGR_TERRAIN_JITTER')
@@ -114,6 +117,24 @@ function Simulation-Time {
 }
 function Set-Acceleration([double]$value) {
     $null = Send @{ cmd = 'exec'; code = ('setAccTime ' + $value.ToString('R',$culture)) }
+}
+function Assert-ArticulatedBackend([bool]$active,[string]$phase) {
+    $actual=Query 'corpse-physics-status'
+    $expected=if($active) {'articulatedBodies=11 articulatedJoints=10$'} else {'articulatedBodies=0 articulatedJoints=0$'}
+    Require ($actual -match ('^OK corpse-physics-status .*'+$expected)) "Actual articulated handle counts failed at $phase`: $actual"
+    $result.gates[$phase]=@{passed=$true;active=$active;actual=$actual}
+}
+function Start-Articulation([string]$phase) {
+    $owner=Query 'corpse-status'
+    Require ($owner -match '^OK corpse-status entity=(\S+) ') "Captured identity unavailable at $phase`: $owner"
+    $capturedIdentity=$Matches[1]
+    $actual=Query 'corpse-articulate'
+    Require ($actual -match '^OK corpse-articulate entity=(\S+) solver=box3d [\d.]+ bodies=11 joints=10 epoch=\d+ minimumClearance=([\d.eE+-]+) expiresMs=30000 default=off$') "Actual articulated admission refused at $phase`: $actual"
+    Require ($Matches[1] -ceq $capturedIdentity) "Articulated owner changed at $phase`: $actual"
+    $clearance=[double]::Parse($Matches[2],$culture)
+    Require (![double]::IsNaN($clearance) -and ![double]::IsInfinity($clearance) -and $clearance -ge .003) "Actual collider clearance is invalid: $actual"
+    $result.observations[$phase]=$actual
+    Assert-ArticulatedBackend $true ($phase+'Handles')
 }
 function Screenshot([string]$name) {
     $path = Join-Path $output ($name + '.png')
@@ -280,9 +301,38 @@ try {
     Check-FinalPose 'activePausedRepeat' $true $identity
     $result.captures.held = Screenshot 'held'
     Require ($result.captures.before.simulationTime -eq $result.captures.held.simulationTime) 'Before/held screenshots advanced simulation.'
+    if ($ArticulationSmoke) {
+        $prepared=Query 'corpse-prepare'
+        Require ($prepared -match '^OK corpse-prepare solver=box3d [\d.]+ epoch=\d+ terrain=\d+x\d+ spacing=[\d.eE+-]+ bodies=\d+ models=\d+$') "Actual physics terrain preparation failed: $prepared"
+        $result.observations.preparedPhysics=$prepared
+        Assert-ArticulatedBackend $false 'defaultArticulationInactive'
+        Start-Articulation 'initialArticulation'
+        Assert-Compare 'articulatedZeroMotionEquivalence'
+        $result.captures.articulatedAtCapture=Screenshot 'articulated-at-capture'
+        Require ($result.captures.held.simulationTime -eq $result.captures.articulatedAtCapture.simulationTime) 'Articulation takeover advanced simulation.'
+        Require ((Query 'corpse-impulse') -ceq 'OK corpse-impulse chest=1 impulseY=12') 'Actual chest impulse failed.'
+        $motionStart=Simulation-Time; Set-Acceleration 1
+        $motionDeadline=[DateTime]::UtcNow.AddSeconds(15)
+        do {
+            Start-Sleep -Milliseconds 100; $motionNow=Simulation-Time
+            if([DateTime]::UtcNow -gt $motionDeadline) {throw 'Articulated motion clock did not advance.'}
+        } while($motionNow-$motionStart -lt .6)
+        Set-Acceleration 0
+        $motion=Query 'corpse-articulation-status'
+        Require ($motion -match '^OK corpse-articulation-status .*updates=(\d+) maximumTravel=([\d.eE+-]+) minimumClearance=[\d.eE+-]+$') "Actual articulated readback failed: $motion"
+        $updates=[int]$Matches[1];$travel=[double]::Parse($Matches[2],$culture)
+        Require ($motion -match ('entity='+[regex]::Escape($identity)+' ')) "Moving owner changed: $motion"
+        Require ($updates -gt 1 -and $travel -gt .003 -and $travel -le .5) "Bodies did not move within the bounded lease: $motion"
+        $consumer=Query 'corpse-compare'
+        Require ($consumer -match '^MISMATCH corpse-compare .*pointMismatch=[1-9]\d* .*holdValid=1$') "Solver motion did not reach actual Man point consumers: $consumer"
+        $result.gates.articulatedMotion=@{passed=$true;start=$motionStart;end=Simulation-Time;actual=$motion;consumer=$consumer}
+        Assert-ArticulatedBackend $true 'movingArticulationHandles'
+        $result.captures.articulatedMotion=Screenshot 'articulated-motion'
+    }
     $clear = Query 'corpse-clear'
     Require ($clear -ceq 'OK corpse-clear cleared=1') "Explicit clear failed: $clear"
     Require-NoHold 'explicitClear'
+    if($ArticulationSmoke) {Assert-ArticulatedBackend $false 'articulatedClearCleanup'}
     $result.captures.cleared = Screenshot 'cleared'
     if ($FinalPoseProbe) {
         Require ($result.captures.before.simulationTime -eq $result.captures.cleared.simulationTime) 'Diagnostic screenshots advanced simulation.'
@@ -292,6 +342,7 @@ try {
             held = $result.captures.held.sha256; cleared = $result.captures.cleared.sha256 }
     }
     $result.observations.expiryCapture = Wait-Capture
+    if($ArticulationSmoke) {Start-Articulation 'expiryArticulation'}
     $expiryStart = Simulation-Time
     Set-Acceleration $ExpiryAcceleration
     $until = [DateTime]::UtcNow.AddSeconds(50)
@@ -307,7 +358,9 @@ try {
     Set-Acceleration 0
     $result.gates.expiry = @{ passed = $true; start = $expiryStart; end = $expiryNow; actual = $expiryStatus; acceleration = $ExpiryAcceleration }
     Check-FinalPose 'expiry' $false ''
+    if($ArticulationSmoke) {Assert-ArticulatedBackend $false 'articulatedExpiryCleanup'}
     $result.observations.hideCapture = Wait-Capture
+    if($ArticulationSmoke) {Start-Articulation 'hideArticulation'}
     Check-FinalPose 'beforeHide' $true $identity
     $null = Send @{ cmd = 'exec'; code = 'poseProofHidden=poseProofCorpse; player action ["HIDEBODY",poseProofCorpse]; setAccTime 1' }
     $until = [DateTime]::UtcNow.AddSeconds(10)
@@ -320,6 +373,7 @@ try {
     } while ($true)
     Set-Acceleration 0
     Require-NoHold 'hideInvalidation'
+    if($ArticulationSmoke) {Assert-ArticulatedBackend $false 'articulatedHideCleanup'}
     $hideRefusal = Query 'corpse-capture'
     Require ($hideRefusal -match '^REFUSED corpse-capture .*reason=(hidden-or-hiding|no-nearby-corpse|removed-or-deleting)$') "Hidden fixture capture was not explicitly refused: $hideRefusal"
     $result.gates.hideInvalidation.captureRefusal = $hideRefusal
@@ -330,10 +384,12 @@ try {
     $null = Send @{ cmd = 'exec'; code = 'poseProofCorpse setDammage 1' }
     $result.observations.deleteCapture = Wait-Capture
     Assert-Compare 'secondCorpseEquivalence'
+    if($ArticulationSmoke) {Start-Articulation 'deleteArticulation'}
     $secondIdentity = [regex]::Match($result.observations.deleteCapture,'entity=(\S+)').Groups[1].Value
     Check-FinalPose 'secondCorpseHold' $true $secondIdentity
     $null = Send @{ cmd = 'exec'; code = 'deleteVehicle poseProofCorpse' }
     Require-NoHold 'deleteInvalidation'
+    if($ArticulationSmoke) {Assert-ArticulatedBackend $false 'articulatedDeleteCleanup'}
     $null = Send @{ cmd = 'exec'; code = 'deleteVehicle poseProofHidden' }
     Require ((Query 'corpse-clear') -ceq 'OK corpse-clear cleared=0') 'Cleanup found a surviving lease.'
     Require ((Eval 'alive player') -eq $true) 'Runner damaged or deleted the player.'

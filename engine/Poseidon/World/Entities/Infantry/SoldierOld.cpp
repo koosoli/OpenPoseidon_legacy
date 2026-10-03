@@ -1,6 +1,11 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
+#include <Poseidon/World/Physics/PhysicsBackend.hpp>
+#include <Poseidon/World/Physics/PhysicsWorld.hpp>
+#include <Poseidon/World/Weather/RainWaterField.hpp>
+#include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
+#include <array>
 #include <limits.h>
 #include <utility>
 #include <cstdio>
@@ -31,6 +36,34 @@ ActionContextBase* CreateGetInActionContext(Transport* veh, UIActionType pos)
 }
 namespace Poseidon
 {
+
+// One explicit local corpse; owned body/joint handles never enter saves or model
+// assets. Epoch mismatch must not remove a new world's reused backend handles.
+struct CorpseArticulation
+{
+    Physics::PhysicsWorld* world = nullptr;
+    std::uint64_t epoch = 0;
+    std::array<Physics::BodyId, 11> bodies{};
+    std::array<Physics::JointId, 10> joints{};
+    std::array<Matrix4, 11> initial{};
+    Matrix4 object = MIdentity;
+    std::vector<int> boneParts;
+    float minimumClearance = 0;
+    int updates = 0;
+    float maximumTravel = 0;
+    Vector3 minimum = VZero, maximum = VZero;
+    float radius = 0;
+    bool Ready() const
+    {
+        return world && Physics::GetPhysicsWorld() == world && world->Generation() == epoch;
+    }
+    ~CorpseArticulation()
+    {
+        if (!Ready()) return;
+        for (auto joint : joints) world->RemoveJoint(joint);
+        for (auto body : bodies) world->Remove(body);
+    }
+};
 
 DEFINE_FAST_ALLOCATOR(ActionContextDefault)
 
@@ -731,6 +764,7 @@ OLink<Man> g_corpsePoseOwner;
 
 void Man::ClearCorpsePose() const
 {
+    _corpseArticulation.reset();
     _corpsePoseLease = {};
     _corpsePosePrimary.Clear();
     _corpsePoseSecondary.Clear();
@@ -744,19 +778,26 @@ void Man::ClearCorpsePose() const
 const char* Man::CorpsePoseRefusal() const
 {
     if (!GWorld || GWorld->GetMode() != GModeArcade) return "local-single-player-required";
-    if (!_isDead || !IsDead() || !ShadowPoseFrozen()) return "settled-death-pose-required";
+    if (!IsLocal()) return "locally-owned-corpse-required";
+    if (!_isDead || !IsDead() || (!_corpseArticulation && !ShadowPoseFrozen())) return "settled-death-pose-required";
     if (!_landContact || _waterContact || _waterBuoyancyContact || _waterDepth > 0 || _hydroWaterDepth > 0)
         return "dry-ground-contact-required";
     if (_hideBody != 0 || _hideBodyWanted != 0) return "hidden-or-hiding";
     if (_ladderBuilding || GetHierachyParent()) return "attached-or-on-ladder";
     if (!IsInLandscape() || ToDelete() || ToMoveOut()) return "removed-or-deleting";
     if (!_shape || _primaryMove.id == MoveIdNone) return "model-or-move-unavailable";
+    if (_corpseArticulation)
+    {
+        auto water = GRainWater().At(Position().X(), Position().Z());
+        if (water.valid && water.depth > 0.003f) return "articulated-corpse-entered-rain-water";
+    }
     return nullptr;
 }
 
 bool Man::UseCorpsePose() const
 {
     if (!_corpsePoseLease.world || _corpsePoseBypass) return false;
+    if (_corpseArticulation && !_corpseArticulation->Ready()) { ClearCorpsePose(); return false; }
     // Reject removal/world changes before touching type-owned animation tables.
     if (_corpsePoseLease.world != GWorld || CorpsePoseRefusal()) { ClearCorpsePose(); return false; }
     Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
@@ -942,6 +983,7 @@ bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal) cons
     Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
     if (!GLandscape || !skeleton || skeleton->NBones() > 128 || _shape->NLevels() > MAX_LOD_LEVELS) return false;
     CorpsePoseDiagnostic candidate;
+    candidate.articulated = bool(_corpseArticulation);
     candidate.model = _shape->Name();
     char identity[64];
     std::snprintf(identity, sizeof(identity), "%p", static_cast<const void*>(this));
@@ -1141,9 +1183,302 @@ bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal) cons
     return true;
 }
 
+bool Man::StartCorpseArticulation(RString& refusal)
+{
+    if (!UseCorpsePose() || _corpseArticulation) { refusal = "captured-authored-corpse-required"; return false; }
+    if (std::abs(CorpseMatrixDeterminant(Transform())-1) > 1e-4f)
+    { refusal = "unit-scale-world-frame-required"; return false; }
+    std::string sourceModel = _shape->Name(); std::replace(sourceModel.begin(),sourceModel.end(),'/','\\');
+    if (strcmpi(sourceModel.c_str(), "data3d\\mc vojakw2.p3d") != 0)
+    { refusal = "stock-western-model-only"; return false; }
+    if (CorpseMatrixIdentityError(_headTrans) > 1e-6f || CorpseMatrixIdentityError(_gunTrans) > 1e-6f ||
+        CorpseMatrixIdentityError(_legTrans) > 1e-6f)
+    { refusal = "identity-post-animation-corrections-required"; return false; }
+    auto water = GRainWater().At(Position().X(), Position().Z());
+    if (water.valid && water.depth > 0.003f) { refusal = "dry-retained-water-support-required"; return false; }
+    Physics::PhysicsWorld* world = Physics::GetPhysicsWorld();
+    if (!world || !world->IsCreated() || !world->GetStats().terrainRegistered)
+    { refusal = "registered-physics-terrain-required"; return false; }
+    Skeleton* skeleton = _corpsePoseSkeleton.GetRef();
+    if (!skeleton || skeleton->NBones() != 33) { refusal = "complete-stock-33-bone-palette-required"; return false; }
+    const char* names[][6] = {{"pzadek","lzadek","bricho",nullptr},
+        {"zebra","hrudnik","krk","prameno","lrameno",nullptr}, {"hlava",nullptr},
+        {"pbiceps",nullptr}, {"ploket","pruka",nullptr}, {"lbiceps",nullptr}, {"lloket","lruka",nullptr},
+        {"pstehno",nullptr}, {"pholen","pchodidlo","pprsty",nullptr},
+        {"lstehno",nullptr}, {"lholen","lchodidlo","lprsty",nullptr}};
+    auto state = std::make_unique<CorpseArticulation>();
+    state->world = world; state->epoch = world->Generation(); state->object = Transform();
+    state->boneParts.assign(33, -1);
+    for (int part = 0; part < 11; ++part)
+        for (int name = 0; names[part][name]; ++name)
+        {
+            int bone = skeleton->FindBone(names[part][name]);
+            if (bone < 0 || bone >= 25 || state->boneParts[bone] != -1)
+            { refusal = "missing-or-ambiguous-stock-bone"; return false; }
+            state->boneParts[bone] = part;
+        }
+    int rifle = skeleton->FindBone("zbran"), launcher = skeleton->FindBone("roura");
+    if (rifle < 0 || rifle >= 25 || launcher < 0 || launcher >= 25 || rifle == launcher)
+    { refusal = "equipment-bone-binding-required"; return false; }
+    state->boneParts[rifle] = 4; state->boneParts[launcher] = 1;
+    for (int bone = 25; bone < 33; ++bone)
+    {
+        if (std::strncmp(skeleton->GetBone(bone), "%face_", 6) != 0)
+        { refusal = "unsupported-synthetic-bone"; return false; }
+        state->boneParts[bone] = 2;
+    }
+    for (int part : state->boneParts) if (part < 0) { refusal = "unmapped-stock-bone"; return false; }
+
+    CorpsePoseDiagnostic diagnostic;
+    if (!InspectCorpsePose(diagnostic, refusal)) return false;
+    for (const auto& hull : diagnostic.hulls)
+        if (hull.externalCenterRayHits != 0)
+        { refusal = "open-ground-no-external-center-ray-contact-required"; return false; }
+    for (const auto& anchor : diagnostic.anchors)
+        if (anchor.sharedVertices <= 0 || anchor.separation > 0.12f)
+        { refusal = "shared-geometry-anchor-not-admitted"; return false; }
+
+    // The authored Fire hulls are too large to use unchanged: the measured
+    // settled pose already penetrates terrain by up to 7.5 cm. Inset each actual
+    // component about its own centroid, with support checked at EVERY vertex.
+    // Pelvis uses the actual animated graphical anatomical membership, excluding
+    // proxy helpers, rather than an RTM matrix translation or a guessed joint.
+    std::array<std::vector<Vector3>, 11> vertices;
+    const WeightInfo& weights = Type()->GetWeights();
+    int fire = _shape->FindFireGeometryLevel(); Shape* fireShape = _shape->Level(fire);
+    Shape* graphical = _shape->Level(0);
+    if (!fireShape || !graphical) { refusal = "stock-fire-and-graphical-geometry-required"; return false; }
+    for (int component = 1; component <= 12; ++component)
+    {
+        char name[24]; std::snprintf(name, sizeof(name), "component%02d", component);
+        int selection = fireShape->FindNamedSel(name);
+        if (selection < 0) { refusal = "authored-fire-component-missing"; return false; }
+        const NamedSelection& selected = fireShape->NamedSel(selection);
+        for (int vertex = 0; vertex < selected.Size(); ++vertex)
+        {
+            int index = selected[vertex]; const auto& weight = weights[fire][index];
+            if (weight.Size() != 1 || weight[0].GetWeight() != 1 || weight[0].GetSel() >= 25)
+            { refusal = "exclusive-authored-fire-bone-required"; return false; }
+            vertices[state->boneParts[weight[0].GetSel()]].push_back(PositionModelToWorld(AnimatePoint(fire,index)));
+        }
+    }
+    for (int vertex = 0; vertex < graphical->NPos(); ++vertex)
+    {
+        const auto& weight = weights[0][vertex]; bool pelvis = false, proxy = false;
+        for (int w = 0; w < weight.Size(); ++w)
+            if (weight[w].GetSel() < 25 && state->boneParts[weight[w].GetSel()] == 0) pelvis = true;
+        if (!pelvis) continue;
+        for (int s = 0; s < graphical->NNamedSel(); ++s)
+            if (std::strncmp(graphical->NamedSel(s).Name(), "proxy:", 6) == 0 &&
+                graphical->NamedSel(s).IsSelected(vertex)) { proxy = true; break; }
+        if (!proxy) vertices[0].push_back(PositionModelToWorld(AnimatePoint(0,vertex)));
+    }
+    const float masses[] = {12,24,5,3,2,3,2,8,4,8,4};
+    state->minimumClearance = 1000;
+    for (int part = 0; part < 11; ++part)
+    {
+        if (vertices[part].size() < 4) { refusal = "anatomical-part-has-no-volume"; return false; }
+        Vector3 center = VZero, lo = vertices[part][0], hi = lo;
+        for (const auto& point : vertices[part])
+        {
+            center += point;
+            for (int axis = 0; axis < 3; ++axis) { lo[axis] = std::min(lo[axis], point[axis]); hi[axis] = std::max(hi[axis], point[axis]); }
+        }
+        center *= 1.0f / vertices[part].size();
+        if (part == 0)
+        {
+            vertices[0].clear();
+            for (int corner = 0; corner < 8; ++corner)
+                vertices[0].emplace_back((corner&1)?hi.X():lo.X(), (corner&2)?hi.Y():lo.Y(), (corner&4)?hi.Z():lo.Z());
+            center = (lo+hi)*0.5f;
+        }
+        state->initial[part] = MIdentity; state->initial[part].SetPosition(center);
+        for (auto& point : vertices[part])
+        {
+            point = (point-center)*0.40f;
+            const Vector3 supported = center+point;
+            const float clearance = supported.Y()-GLandscape->RoadSurfaceY(supported+VUp*0.5f);
+            state->minimumClearance = std::min(state->minimumClearance, clearance);
+            if (!point.IsFinite() || !std::isfinite(clearance) || clearance < 0.003f || clearance > 0.8f ||
+                (supported-Position()).Size() > 2.5f)
+            { refusal = "inset-collider-contact-or-bounds-not-admitted"; return false; }
+        }
+    }
+    // Check the ACTUAL registered solver floor before creating any dynamic part.
+    // A different heightfield/road support is refused, never silently corrected.
+    for (int part = 0; part < 11; ++part)
+    {
+        const Vector3 center = state->initial[part].Position();
+        for (const auto& point : vertices[part])
+        {
+            const Vector3 supported = center+point, from = supported+VUp*0.8f, to = supported-VUp;
+            Vector3 floor;
+            if (!world->RayHitAnything(from,to,Physics::QueryFilter{Physics::ColliderFlags::Roadway}))
+            { refusal = "solver-terrain-floor-not-present"; return false; }
+            world->CastRay(from,to,floor,Physics::QueryFilter{Physics::ColliderFlags::Roadway});
+            if (!floor.IsFinite() || std::abs(floor.Y()-GLandscape->RoadSurfaceY(supported+VUp*0.5f)) > 0.025f)
+            { refusal = "solver-floor-disagrees-with-authored-contact"; return false; }
+            state->minimumClearance = std::min(state->minimumClearance,supported.Y()-floor.Y());
+            if (supported.Y()-floor.Y() < 0.003f)
+            { refusal = "inset-collider-penetrates-solver-floor"; return false; }
+        }
+    }
+    for (int part = 0; part < 11; ++part)
+    {
+        Physics::ConvexPiece piece{vertices[part].data(), static_cast<int>(vertices[part].size()), Physics::ColliderFlags::Solid};
+        state->bodies[part] = world->SpawnArticulatedPiece(piece, state->initial[part], masses[part]);
+        if (!state->bodies[part].IsValid()) { refusal = "backend-refused-anatomical-hull"; return false; }
+    }
+    const int pairs[][2] = {{0,1},{1,2},{1,3},{3,4},{1,5},{5,6},{0,7},{7,8},{0,9},{9,10}};
+    const int anchors[] = {-1,0,1,3,2,4,5,7,6,8};
+    for (int j = 0; j < 10; ++j)
+    {
+        const int a = pairs[j][0], b = pairs[j][1];
+        Vector3 pivot = (state->initial[a].Position()+state->initial[b].Position())*0.5f;
+        if (anchors[j] >= 0)
+        {
+            const auto& anchor = diagnostic.anchors[anchors[j]];
+            pivot = (anchor.firstWorld+anchor.secondWorld)*0.5f;
+        }
+        Vector3 axis = state->initial[b].Position()-pivot;
+        if (axis.Size() < 0.025f) { refusal = "joint-geometry-axis-degenerate"; return false; }
+        axis.Normalize(); Vector3 up = std::abs(axis*VUp) < 0.95f ? VUp : VAside;
+        Matrix4 joint(MDirection, axis, up); joint.SetPosition(pivot);
+        Physics::ArticulatedJointDef definition;
+        definition.first = state->bodies[a]; definition.second = state->bodies[b];
+        definition.firstFrame = state->initial[a].InverseRotation()*joint;
+        definition.secondFrame = state->initial[b].InverseRotation()*joint;
+        const bool distal = j == 3 || j == 5 || j == 7 || j == 9;
+        definition.coneAngle = distal ? 0.30f : 0.9f;
+        definition.twistAngle = distal ? 0.20f : 0.6f;
+        state->joints[j] = world->AddArticulatedJoint(definition);
+        if (!state->joints[j].IsValid()) { refusal = "backend-refused-anatomical-joint"; return false; }
+    }
+    _corpseArticulation = std::move(state);
+    refusal = "";
+    if (!UpdateCorpseArticulation()) { refusal = "initial-body-readback-refused"; return false; }
+    return true;
+}
+
+bool Man::UpdateCorpseArticulation() const
+{
+    if (!_corpseArticulation || !UseCorpsePose()) return false;
+    auto& state = *_corpseArticulation;
+    std::array<Matrix4, 11> parts;
+    for (int part = 0; part < 11; ++part)
+    {
+        Physics::BodyMotion motion;
+        if (!state.world->GetBodyMotion(state.bodies[part], motion) || !motion.position.IsFinite() ||
+            (motion.position-state.initial[part].Position()).Size() > 0.5f)
+        { ClearCorpsePose(); return false; }
+        state.maximumTravel = std::max(state.maximumTravel,(motion.position-state.initial[part].Position()).Size());
+        if (motion.position == state.initial[part].Position() && motion.axisX == VAside &&
+            motion.axisY == VUp && motion.axisZ == VForward)
+        { parts[part] = MIdentity; continue; }
+        Matrix4 current = MIdentity;
+        current.SetDirectionAside(motion.axisX); current.SetDirectionUp(motion.axisY); current.SetDirection(motion.axisZ);
+        current.SetPosition(motion.position);
+        parts[part] = GetInvTransform()*current*state.initial[part].InverseRotation()*state.object;
+    }
+    std::vector<Matrix4> deltas;
+    deltas.reserve(state.boneParts.size());
+    for (int part : state.boneParts) deltas.push_back(parts[part]);
+    if ((_corpsePosePrimary.Valid() && !_corpsePosePrimary.ApplyRigidDeltas(deltas)) ||
+        (_corpsePoseSecondary.Valid() && !_corpsePoseSecondary.ApplyRigidDeltas(deltas)))
+    { ClearCorpsePose(); return false; }
+    bool firstPoint = true;
+    state.radius = 0;
+    const auto& weights = Type()->GetWeights();
+    for (int level = 0; level < _shape->NLevels(); ++level)
+    {
+        Shape* shape = _shape->Level(level);
+        MATRIX_4_ARRAY(palette,128);
+        PrepareCorrectedPose(level,palette);
+        _head.EvaluateDeadFaceBones(Type()->_head,weights,level,palette,_isDead);
+        if (!_corpseArticulation || palette.Size() != _corpsePoseLease.bones)
+        { ClearCorpsePose(); return false; }
+        for (int p = 0; p < shape->NPos(); ++p)
+        {
+            Vector3 point = AnimationRT::ApplyMatricesPoint(weights[level],_shape,level,palette,p);
+            if (!point.IsFinite() || point.Size() > 3.5f) { ClearCorpsePose(); return false; }
+            if (firstPoint) {state.minimum = state.maximum = point; firstPoint = false;}
+            for (int axis = 0; axis < 3; ++axis)
+            {state.minimum[axis] = std::min(state.minimum[axis],point[axis]);state.maximum[axis] = std::max(state.maximum[axis],point[axis]);}
+            state.radius = std::max(state.radius,point.Size());
+        }
+    }
+    ++state.updates;
+    return true;
+}
+
+bool Man::CorpseArticulationBounds(Vector3* minMax, float& radius) const
+{
+    if (!_corpseArticulation || !UseCorpsePose()) return false;
+    const Vector3 padding(.05f,.05f,.05f);
+    minMax[0] = _corpseArticulation->minimum-padding;
+    minMax[1] = _corpseArticulation->maximum+padding;
+    radius = _corpseArticulation->radius+.09f;
+    return true;
+}
+
 RString Man::CorpsePoseProbe(const char* command)
 {
     if (!command) return "REFUSED corpse-command missing";
+    if (std::strcmp(command, "corpse-physics-status") == 0)
+    {
+        auto* world = Physics::GetPhysicsWorld();
+        if (!world || !world->IsCreated()) return "REFUSED corpse-physics-status no-physics-world";
+        const auto stats = world->GetStats(); char status[512];
+        std::snprintf(status,sizeof(status),"OK corpse-physics-status epoch=%llu bodies=%u articulatedBodies=%u articulatedJoints=%u",
+            static_cast<unsigned long long>(world->Generation()),stats.bodies,stats.articulatedBodies,stats.articulatedJoints);
+        return status;
+    }
+    if (std::strcmp(command, "corpse-prepare") == 0)
+    {
+        if (!GWorld || GWorld->GetMode() != GModeArcade || !GLandscape)
+            return "REFUSED corpse-prepare local-single-player-landscape-required";
+        auto* world = Physics::GetPhysicsWorld();
+        if (!world || !world->IsCreated()) { Dev::RunPhysicsCorpus(); world = Physics::GetPhysicsWorld(); }
+        if (!world || !world->IsCreated() || !world->GetStats().terrainRegistered)
+            return "REFUSED corpse-prepare physics-terrain-unavailable";
+        const auto stats = world->GetStats(); char status[512];
+        std::snprintf(status,sizeof(status),"OK corpse-prepare solver=%s epoch=%llu terrain=%ux%u spacing=%.9g bodies=%u models=%u",
+            world->BackendName(),static_cast<unsigned long long>(world->Generation()),stats.terrainWidth,
+            stats.terrainHeight,stats.terrainCellSize,stats.bodies,stats.modelsRegistered);
+        return status;
+    }
+    if (std::strcmp(command, "corpse-articulation-status") == 0)
+    {
+        Man* man = g_corpsePoseOwner.GetLink();
+        if (!man || !man->UseCorpsePose() || !man->_corpseArticulation)
+            return "REFUSED corpse-articulation-status no-articulated-corpse";
+        auto& state = *man->_corpseArticulation;
+        char status[512];
+        std::snprintf(status,sizeof(status),"OK corpse-articulation-status entity=%p bodies=11 joints=10 epoch=%llu updates=%d maximumTravel=%.9g minimumClearance=%.9g",
+            static_cast<void*>(man),static_cast<unsigned long long>(state.epoch),state.updates,state.maximumTravel,state.minimumClearance);
+        return status;
+    }
+    if (std::strcmp(command, "corpse-articulate") == 0 || std::strcmp(command, "corpse-impulse") == 0)
+    {
+        Man* man = g_corpsePoseOwner.GetLink();
+        if (!man || !man->UseCorpsePose()) return "REFUSED corpse-articulate captured-authored-corpse-required";
+        if (std::strcmp(command, "corpse-impulse") == 0)
+        {
+            if (!man->_corpseArticulation) return "REFUSED corpse-impulse no-articulated-corpse";
+            auto& state = *man->_corpseArticulation;
+            if (!state.Ready()) return "REFUSED corpse-impulse physics-world-retired";
+            state.world->ApplyImpulse(state.bodies[1], state.initial[1].Position(), Vector3(0,12,0));
+            return "OK corpse-impulse chest=1 impulseY=12";
+        }
+        RString reason;
+        if (!man->StartCorpseArticulation(reason)) return RString("REFUSED corpse-articulate ")+reason;
+        char result[512];
+        std::snprintf(result, sizeof(result),
+            "OK corpse-articulate entity=%p solver=%s bodies=11 joints=10 epoch=%llu minimumClearance=%.9g expiresMs=30000 default=off",
+            static_cast<void*>(man), man->_corpseArticulation->world->BackendName(),
+            static_cast<unsigned long long>(man->_corpseArticulation->epoch), man->_corpseArticulation->minimumClearance);
+        return result;
+    }
     if (std::strcmp(command, "corpse-clear") == 0)
     {
         bool held = g_corpsePoseOwner && g_corpsePoseOwner->_corpsePoseLease.world;
@@ -1635,6 +1970,7 @@ bool Man::IsDead() const
 
 bool Man::ShadowPoseFrozen() const
 {
+    if (_corpseArticulation) return false;
     // Mirror the steady-dead-body test the simulation uses to suspend a
     // corpse: dead pose reached, killed and motionless for 5 s. Any later
     // physics push refreshes _lastMovementTime and un-freezes the shadow.

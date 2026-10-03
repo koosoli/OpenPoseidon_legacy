@@ -826,6 +826,9 @@ void Man::BasicAnimation(int level)
         min = bCenter + factor.Modulate(min - bCenter);
         max = bCenter + factor.Modulate(max - bCenter);
         bRadius *= sFactor;
+        Vector3 articulated[2]; float articulatedRadius = 0;
+        if (CorpseArticulationBounds(articulated,articulatedRadius))
+        { min = articulated[0]; max = articulated[1]; bCenter = VZero; bRadius = articulatedRadius; }
         shape->SetMinMax(min, max, bCenter, bRadius);
     }
     base::Animate(level);
@@ -833,6 +836,8 @@ void Man::BasicAnimation(int level)
 
 void Man::AnimatedMinMax(int level, Vector3* minMax)
 {
+    float articulatedRadius = 0;
+    if (CorpseArticulationBounds(minMax,articulatedRadius)) return;
     Shape* shape = _shape->Level(level);
 
     Vector3 min = shape->MinOrig();
