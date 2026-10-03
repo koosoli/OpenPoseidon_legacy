@@ -19,6 +19,19 @@ mod optics_tests;
 #[cfg(test)]
 #[path = "rain_water_medium_tests.rs"]
 mod medium_tests;
+// Physical compute probes exercise the actual production grid/fine/support
+// functions without the separate terrain-material resource interface.
+#[cfg(test)]
+fn physical_helpers_source() -> String {
+    let source = include_str!("rain_water.wgsl");
+    let begin = source.find("struct RainWaterParams").unwrap();
+    let medium_begin = source.find("// Prefix of the EXISTING terrain uniform").unwrap();
+    let medium_end = source.find("fn fine_record").unwrap();
+    let end = source.find("struct VsOut").unwrap();
+    assert!(begin < medium_begin && medium_begin < medium_end && medium_end < end);
+    format!("{}{}", &source[begin..medium_begin], &source[medium_end..end])
+}
+
 type PublicationIdentity = (fine::SourceIdentity, u64, [u32; 6], u32);
 fn publication_identity(p: &WgrRainWaterPublication) -> Option<PublicationIdentity> {
     Some((
@@ -801,9 +814,6 @@ mod tests {
     fn actual_gpu_triangular_bed_bilinear_depth_and_support_policy() {
         let (device, queue) = crate::gfx3d::cull::tests::headless()
             .expect("Rainwater sampling falsifier requires an actual device");
-        let source = include_str!("rain_water.wgsl");
-        let begin = source.find("struct RainWaterParams").unwrap();
-        let end = source.find("struct VsOut").unwrap();
         let probe = format!(
             "{}\n{}\n@group(0) @binding(0) var<storage,read_write> result: array<vec4<f32>>;\n\
             @compute @workgroup_size(1) fn cs_probe() {{\n\
@@ -826,7 +836,7 @@ mod tests {
                 rain_water_raster_support_depth(supported,2.0,3.0,2.3));\n}}",
             include_str!("shaders/rain_water_optics.wgsl")
                 .lines().skip(1).collect::<Vec<_>>().join("\n"),
-            &source[begin..end]
+            physical_helpers_source()
         );
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("actual_rainwater_sampling_probe"),
@@ -2083,7 +2093,6 @@ mod full_draw_tests {
         let packed=fine::packed_cells(&helper_cells);
         queue.write_texture(wgpu::TexelCopyTextureInfo{texture:&rain.fine_texture,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},
             bytemuck::cast_slice(&packed),wgpu::TexelCopyBufferLayout{offset:0,bytes_per_row:Some(fine::TEXTURE_WIDTH*16),rows_per_image:Some(fine::TEXTURE_HEIGHT)},rain.fine_texture.size());
-        let src=include_str!("rain_water.wgsl");let begin=src.find("struct RainWaterParams").unwrap();let end=src.find("struct VsOut").unwrap();
         let probe=format!("{}\n{}\n@group(0) @binding(0) var<storage,read_write> result:array<vec4<f32>>;\n\
             @compute @workgroup_size(1) fn cs_probe() {{\n\
             result[0]=vec4<f32>(select(0.,1.,fine_owned(vec2<f32>(187.5,187.5))),select(0.,1.,fine_owned(vec2<f32>(387.5,300.))),\n\
@@ -2091,7 +2100,7 @@ mod full_draw_tests {
             result[1]=fine_water_at(0u,vec2<f32>(189.0625,189.0625));\n\
             result[2]=fine_water_at(0u,vec2<f32>(192.1875,192.1875)); }}",
             include_str!("shaders/rain_water_optics.wgsl").lines().skip(1).collect::<Vec<_>>().join("\n"),
-            &src[begin..end]);
+            super::physical_helpers_source());
         let shader=device.create_shader_module(wgpu::ShaderModuleDescriptor{label:Some("actual_fine_helpers"),source:wgpu::ShaderSource::Wgsl(probe.into())});
         let result_buffer=device.create_buffer(&wgpu::BufferDescriptor{label:None,size:48,usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_SRC,mapped_at_creation:false});
         let result_layout=device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor{label:None,entries:&[wgpu::BindGroupLayoutEntry{binding:0,

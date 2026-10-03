@@ -117,9 +117,9 @@ fn actual_gpu_medium_source_bounds_energy_and_clear_counterexamples() {
         let data=readback.slice(..).get_mapped_range();let values:&[[f32;4]]=bytemuck::cast_slice(&data);
         for i in 0..16 {
             let soil=values[i*3][0];let depth=values[i*3][1];let result=values[i*3+1];let clear=values[i*3+2];
-            if ready==0 || generation!=3 || [1,2,3,5,6,7,8,9,10].contains(&i) {assert_eq!(soil,0.);}
-            else if i==11 {assert!((soil-0.352).abs()<0.0001);}
-            else {assert_eq!(soil,1.);}
+            if ready==0 || generation!=3 || [1,2,3,5,6,7,8,9,10].contains(&i) {assert_eq!(soil,0.,"Source refusal i={i}, ready={ready}, generation={generation}");}
+            else if i==11 {assert!((soil-0.352).abs()<0.0001,"Cultivated fraction i={i}, ready={ready}, generation={generation}, soil={soil}");}
+            else {assert_eq!(soil,1.,"Pure soil i={i}, ready={ready}, generation={generation}");}
             if soil==0. {assert_eq!(result,clear,"Clear source must be exactly unchanged at {i}");}
             assert!(result.iter().all(|v|v.is_finite()&&*v>=0.));assert!(result[3]<=1.);
             let t=((depth as f64-0.008)/0.042).clamp(0.,1.);let standing=t*t*(3.-2.*t);
