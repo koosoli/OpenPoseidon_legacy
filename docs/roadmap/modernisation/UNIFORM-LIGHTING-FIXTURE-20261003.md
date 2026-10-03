@@ -50,6 +50,14 @@ Midnight and daylight controls must pass their corresponding actual sun gates.
 No forced night effect, synthetic lamp flag, lamp tuning, or custom shader is
 used. The on/off transition must add and remove exactly one scene light in the
 existing `LAMP-001` receipt. The object query records its real stock shape name.
+Object debug names use the registered `format ["%1",object]` operator.
+`StrFormat` calls the object value's `GetText`, which returns its actual
+`Object::GetDebugName`; null objects and missing shapes are rejected. The stock
+player shape, body source rows and dry/wet debug-name equality remain required.
+The 20261003-131800-b7caf7 retry failed because this engine does not register
+the assumed `str` function. That failure aborted script evaluation and required
+owned-process forced cleanup; it provides no lighting acceptance. All three
+optional player/lamp/roof queries now use the source-supported format operator.
 
 The roof uses `TerrainPuddleStockRoof.ps1` and its audited `CampEastC` /
 `stan_eastC.p3d` identity. RoofLift 3 suspends its solid collision hull above the
