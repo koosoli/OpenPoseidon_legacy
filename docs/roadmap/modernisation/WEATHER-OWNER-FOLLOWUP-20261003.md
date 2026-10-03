@@ -1,5 +1,24 @@
 # Weather owner follow-up, 3 October 2026
 
+21:05 source checkpoint: fa592191 promotes the guarded one-pass coarse runoff
+candidate, with unchanged cached fallback and an explicit sixth fused-flux cost
+phase. Root actual-capture production A/B O0/O2 equivalence, full rain-field and
+diagnostic-cost controls, and strict old/new phase-parser self-tests pass. Full
+combined PoseidonGame build23steps passes. Installed flight cost is still pending;
+the offline16.47% result is not an installed FPS claim.
+
+5051ae90 adds a separate measured stock elbow/knee hinge experiment. Root native
+corpse/articulation/physics tests pass4852 assertions/68cases; focused hinge tests
+pass2302/4. These are not installed anatomical-hinge motion/contact acceptance.
+The existing explicit spherical corpse prototype and Box3D954 are installed in
+afffcc53; automatic normal gameplay deaths remain authored/default OFF. The new
+rough-soil reflection, hinge and fused-runoff source is not installed yet.
+
+Read-only sunny-snow assessment records the actual matched camera/exposure
+windows and the separate crossed-card foliage limitation. No exposure-only cause
+or final HDR luminance was measured, and no global exposure/snow-colour change
+was made. See SUNNY-SNOW-OPTICS-ASSESSMENT-20261003.md.
+
 20:36 source/device checkpoint: e5224414 rough moist-soil environment candidate
 passes all9focused root device tests plus the explicit289row recorded-edge
 replay.192 controlled kernel cases cover roughness/derivatives, flat/sloped
