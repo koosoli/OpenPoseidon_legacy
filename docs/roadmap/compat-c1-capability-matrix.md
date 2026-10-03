@@ -91,6 +91,8 @@ corpora*, not about a game.
 | `OBJECTS_FOLLOW_TERRAIN_CHANGES` | `UNVERIFIED` | Everon: v1 subdivision caches rebuilt as v2; forests grounded across setTerrainGrid 50/12.5 (flat area only); edge-strip objects no longer at -100 m. | FIX-FLOAT-001 | `1e543a68` |
 | `EMPTY_MEMORY_SELECTION_TOLERATED` | `UNVERIFIED` | Symbolised crash stack before; after, six Jason variants spawn and stay alive (harness probe). | FIX-PILOT-001 | `f13d60a6` |
 | `SP3X_MLOD_ORIGINAL_LOADER` | `UNVERIFIED` | fml_vorhees Jasons correct through the original loader, torn through the adapter (wgpu and GL33); Sinkhole ugcave/ugbasement (SP3X) identical through both. | FIX-SP3X-001 | `ddc76c8f` |
+| `CAVE_LIGHT_FROM_OPENINGS` | `UNVERIFIED` | One test cave (Malprave's ugcave on Everon), wgpu, one machine: roof near the opening dark, soldiers underground unlit, chamber with campfire and torch dark but readable with the camera eye adaptation (near-black at the old exposure ceiling), surface view unchanged. Owner play-test of W1b pending. | LGT-CAVE-001 | `c4302856` |
+| `SOLDIER_FLASHLIGHT` | `UNVERIFIED` | AI switch it on underground and the player toggles it (LIGHT ON); beam and shadow behind pillars captured in the ugcave chamber. No hold pose. | LGT-CAVE-001 | `c4302856` |
 | `AS_CHANNEL_SEMANTICS` | `VALIDATED` | n=25: R/B/A constant in 25/25; term in G | MAT-020 | `485ad2a` |
 | `NORMAL_CHANNEL_SEMANTICS` | `VALIDATED` | n=40: R constant 0 in 40/40; X in A, Y in G | MAT-020 | `485ad2a` |
 | `SMDI_CHANNEL_SEMANTICS` | `VALIDATED` | n=40: R and A constant in 40/40; G specular, B gloss | MAT-020 | `485ad2a` |

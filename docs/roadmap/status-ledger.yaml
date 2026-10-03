@@ -7903,3 +7903,61 @@ tickets:
       - docs/tw-water-w8-w12-report.md
       - engine/WgpuRenderer/docs/env-switches.md
       - CREDITS.md
+  - id: LGT-CAVE-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Sinkhole W1b: cave lighting from the hole openings (per fragment and per camera); handheld soldier flashlight"
+    class: RENDERER
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: ACTIVE
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/sinkhole-w1b-cave-lighting
+    baseline_commit: 9bec300a
+    verification_commit: c4302856
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [WLD-HOLE-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [fe47ef9a, 17c38f76, c4302856]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/shaders/conform.wgsl
+        symbol: cave_daylight2
+      - file: engine/WgpuRenderer/rust/src/shaders/shading.wgsl
+        symbol: shade
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: EngineWgpu::SetTerrainHoles
+      - file: engine/WgpuRenderer/rust/src/lib.rs
+        symbol: cave_exposure
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldFlashlight.cpp
+        symbol: Man::UpdateFlashlight
+    test_ids: [cave_exposure_only_lifts_the_ceiling_underground, sinkhole-w1b-ugcave-chamber-capture, sinkhole-w1b-night-leak-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/SINKHOLE-01b-cave-lighting-20261003.md
+    capability_claims:
+      - capability: CAVE_LIGHT_FROM_OPENINGS
+        status: UNVERIFIED
+        denominator: >-
+          One test cave (Malprave's ugcave on Everon), wgpu, one machine: roof near the opening
+          dark, soldiers underground unlit, chamber with campfire and torch dark but readable with
+          the camera eye adaptation (near-black at the old exposure ceiling), surface view
+          unchanged. Owner play-test of W1b pending.
+      - capability: SOLDIER_FLASHLIGHT
+        status: UNVERIFIED
+        denominator: >-
+          AI switch it on underground and the player toggles it (LIGHT ON); beam and shadow behind
+          pillars captured in the ugcave chamber. No hold pose.
+    known_failures:
+      - "No off-hand hold pose for the torch."
+      - "Surfaces inside an opening footprint but under a slab get full sun/sky from the per-fragment rule."
+      - "Local lights are not occluded by the terrain heightfield (only by objects in their shadow views)."
+    fallback: "POSEIDON_FLASHLIGHT=0; WGR_CAVE_EXPOSURE_MAX=1.1 approximates the old exposure ceiling; a world without terrain holes is unchanged."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner play-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/SINKHOLE-01b-cave-lighting-20261003.md
