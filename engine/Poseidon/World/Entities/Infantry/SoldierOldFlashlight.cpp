@@ -17,6 +17,7 @@
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/World.hpp>
 
 #include <cstdlib>
 
@@ -45,6 +46,8 @@ bool AiUsesFlashlightAtNight()
 // A small hand torch: warm white, ~20 m reach, a 25 degree half-angle cone.
 constexpr float kFlashlightRange = 20.0f;
 constexpr float kFlashlightCone = 0.45f;
+// The player's beam is aimed at the point this far down his view ray.
+constexpr float kFlashlightAimDistance = 12.0f;
 const Color kFlashlightColor(1.00f, 0.93f, 0.80f, 1.0f);
 } // namespace
 
@@ -115,6 +118,7 @@ void Man::UpdateFlashlight()
         {
             _flashlight->Switch(false);
         }
+        _flashlightLogged = false;
         return;
     }
 
@@ -129,7 +133,22 @@ void Man::UpdateFlashlight()
     {
         pos = PositionWorldToModel(AimingPosition()) + Vector3(-0.25f, -0.25f, 0.25f);
     }
-    Vector3 dir = DirectionWorldToModel(GetEyeDirection());
+    // Aim. When the player's own camera is on him (first or third person), the beam converges on what
+    // he looks at: from the torch to the point 12 m down the view ray. Following the eye direction
+    // (head and gun pose) pointed it into the floor beside his feet with the weapon lowered, and a beam
+    // merely PARALLEL to a slightly pitched first-person view, held at the hip, landed on the ground
+    // two metres ahead (owner: "the light drags on the ground, can the beam be direct?"). AI and
+    // scripted cameras keep the eye direction, which is where an AI is looking.
+    Vector3 eye = GetEyeDirection();
+    if (brain && brain->IsPlayer() && GWorld && GWorld->CameraOn() == this && GScene->GetCamera())
+    {
+        const Camera* cam = GScene->GetCamera();
+        const Vector3 target = cam->Position() + cam->Direction() * kFlashlightAimDistance;
+        const Vector3 torch = PositionModelToWorld(pos);
+        const Vector3 toTarget = target - torch;
+        eye = toTarget.SquareSize() > 1e-4f ? toTarget.Normalized() : cam->Direction();
+    }
+    Vector3 dir = DirectionWorldToModel(eye);
     if (dir.SquareSize() < 1e-6f)
     {
         dir = Vector3(0, 0, 1);
@@ -153,5 +172,14 @@ void Man::UpdateFlashlight()
     }
     _flashlight->SetAttachedPos(pos, dir);
     _flashlight->Switch(true);
+    // One line each time a torch turns on (and its first frame's placement), for captures.
+    if (!_flashlightLogged)
+    {
+        _flashlightLogged = true;
+        const Vector3 w = PositionModelToWorld(pos);
+        LOG_INFO(World, "Flashlight on: {} player={} hand={} world=({:.2f},{:.2f},{:.2f}) dir=({:.2f},{:.2f},{:.2f})",
+                 (const char*)GetDebugName(), brain && brain->IsPlayer() ? 1 : 0, LeftHandFrame(hand) ? 1 : 0, w.X(),
+                 w.Y(), w.Z(), dir.X(), dir.Y(), dir.Z());
+    }
 }
 } // namespace Poseidon

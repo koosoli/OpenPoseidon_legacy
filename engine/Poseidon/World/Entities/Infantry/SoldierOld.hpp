@@ -564,6 +564,7 @@ class Man: public Person
 	bool _waterBuoyancyContact;
 	// Sinkhole W1b: the handheld flashlight (SoldierOldFlashlight.cpp), switched by _pilotLight
 	Ref<LightReflectorOnVehicle> _flashlight;
+	bool _flashlightLogged = false;
 
 	Foundation::Time _whenKilled;
 	Foundation::Time _lastMovementTime;
