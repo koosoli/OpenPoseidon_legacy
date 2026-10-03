@@ -1,5 +1,11 @@
 # Rain-water body direct-light visibility
 
+Executed follow-up: body helper2 device tests and the actual complete-pool
+visibility/admission device test pass. The21step combined game build exits0;
+matching0a353f97 pair deployed15:01. Actual land fb33ab and occupied flight
+163ebd pass normal stable exits. Focused retained-water shadow/open pixel
+review is still required; the soil diagnostic will identify its actual layer.
+
 Source candidate based on `1b002b92c8f5021f5a6df0c55ae20dc7ecf9d2bf`.
 Shader composition, GPU probes, full build and installed runtime are pending
 the main agent's serialized verification. No visual acceptance is claimed.

@@ -1,5 +1,28 @@
 # Weather owner follow-up, 3 October 2026
 
+15:19 checkpoint: matching0a353f97 pair deployed15:01 after21step full
+build; matching pair/PDB archive build/installed-symbols/0a353f97. Includes
+exact-empty coarse edges/shared body sunlight visibility/bounded rotor opacity.
+Body2/full-pool1 device proofs and original coarse/source/reference tests pass.
+Actual occupied flight163ebd passes normal stable arms/drop0/source/weather/
+route: dry Advance0.090416ms/tick/max2.1979 versus cache0.446986/max8.3457,
+rainy0.787774/max14.7137 versus0.774291/max15.0251. Frame means9.286126/
+10.480771ms, p9510.675/14.789. Dry329.011ms max includes swap327.365ms
+versus sim3.276ms; cause undiagnosed, not an all-stutter fix.
+
+Actual native sunny7a5b18 passes normal stable86aae174 lifecycle/source/
+clock/owners/budgets: candidate3.869731mm→0, volume493323.031→280745.255m³,
+rain input737755.683m³ unchanged, solar0.954→0.941. Deep1.920447→2.052916m
+receives runoff. Root sees reduced jagged cell seams/clearer after-rain
+reflection. Same31wet neighbour pairs: mean44.125→12.035mm, max77.881→
+38.574mm, >30mm26→3. All1089native vertices match, but sea/rain/history
+differ; explicitly inland observations-only/noncausal. Fine stays defaultOFF
+pending cost/moving-interest/quality. Actual land fb33ab passes normal zero
+exit/stable0a353f97/all land/sea gates. Snow ring readable; dust faint despite
+253/546 CPU Decal calls/alpha.055–.196/half-extents22–51pixels/no refusals.
+Dust tint follow-up a0aaf666 remains uninstalled. Wet-soil fragment diagnostic
+is being prepared; mirrored bush proves a separate rainwater overlay contributes.
+
 14:52 checkpoint: matching86aae174 pair installed14:33 after21step full
 build includes coarse cache, conservative simultaneous fine flux and CPU sky
 receipt/optional natural-cloud comparisons. Actual flight88be03 and explicit
