@@ -95,6 +95,8 @@ See `docs/roadmap/decisions/FIXES-20261003.md`.
 | `WGR_BLEND_PASS_TRACE` | Engine (`SceneDraw.cpp`) + C++ bridge | MAT-051 revisit trace; since MAT-053 also names each texture that gets the `WGR_DRAW3D_BLEND_SECTION` flag. Diagnostic only. |
 | `POSEIDON_NET_DEPTH` | C++ bridge | MAT-NET-001. **Default changed to on** (netting as a depth-writing cutout); `0` restores the blended path. |
 | `POSEIDON_SP3X_ADAPTER` | Engine (`ShapeDraw.cpp`) | FIX-SP3X-001. `1` sends OFP SP3X MLODs through `ShapeAdapter` instead of the original loader (the adapter tears skinned soldiers -- fml_vorhees). |
+| `WGR_CAVE_EXPOSURE_MAX` | Rust | Sinkhole W1b. Exposure ceiling the eye adapts toward with the camera underground (default 6); above ground the profile's own ceiling. |
+| `WGR_CAVE_DESPECKLE` | Rust | Sinkhole W1b. `0` turns off the underground despeckle in the tonemap (a pixel more than 3x brighter than all eight neighbours takes the brightest neighbour; hides model pinhole cracks). |
 | `POSEIDON_FLASHLIGHT` | Engine (`SoldierOldFlashlight.cpp`) | Sinkhole W1b. `0` disables the soldiers' handheld test flashlight. |
 | `POSEIDON_FLASHLIGHT_AI_NIGHT` | Engine (`SoldierOldFlashlight.cpp`) | Sinkhole W1b. `1` lets AI switch the flashlight on at night when not cautious (underground they always do). Off so legacy night missions are unchanged. |
 

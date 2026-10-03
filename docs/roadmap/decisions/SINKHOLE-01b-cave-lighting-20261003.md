@@ -57,6 +57,19 @@ whatever animation plays.
 | Surface view, same A/B | identical |
 | Night, AI torches in the chamber, surface above | no light on the ground above (weak test: beams were horizontal) |
 
+## Owner play-test round 1 (2026-10-03, evening)
+
+* **Crash on loading UgCaveTest** from the owner's missions folder: FIX-COCKPIT-001's
+  `_drawInsideVehicle` was an `OLink`; constructing it faulted in first-person play (every harness
+  run had used a scripted camera). Now a plain compared-only pointer (28226fb9). A first-person run
+  is part of the cave check from now on.
+* **Soldiers glowing white**: the torch had an ambient term (3% of its colour); at 0.1 m from the
+  bulb that saturated the holder. Ambient is now black (54c74bff).
+* **"Green flashing dots in the corners"**: pinhole cracks in the test model showing the sky,
+  multiplied by the underground exposure. Underground despeckle in the tonemap (2cb65ab4): 27 -> 1
+  dots over ten first-person frames. `WGR_CAVE_DESPECKLE=0` turns it off. Dots the owner saw on the
+  entrance model ABOVE ground are not covered (the despeckle is underground-only).
+
 ## Open
 
 * The stairwell seen from its foot reads very bright -- probably the sunlit opening and correct, but
