@@ -118,6 +118,33 @@ with paired joint pivots within 25 mm after 120 solver steps, and all ownership
 is retired. These source/private native checks do not substitute for the next
 installed admission and consumed-pose test; that result is still pending.
 
+The installed pinned build `e81744f4` campaign
+`bounded-contact-stock-box3d-954cf87-20261003-190432-b3f63f` subsequently admitted
+all 11 bodies/10 joints with minimum clearance 3.250122 mm. Zero-motion takeover
+preserved all 33 palette matrices, 542 production points and 37 proxies exactly.
+During 0.799 simulation seconds, 48 solver-driven updates moved 541 points and
+all 37 proxies, with maximum body-origin travel 0.153947 m. Explicit clear,
+30-second expiry and hide invalidation retired every body/joint. The owned game
+exited normally with shutdown marker and exit code zero.
+
+The campaign still **failed** its final deletion fixture: the second corpse's
+unchanged external-contact admission refused a nonzero center-ray census.
+The receipt does not identify the actual external object, so attributing that
+hit to the player or previous corpse would be inference. Its harness does show
+the retained hiding fixture (`nearbyCorpses=2`) and that the second `createUnit`
+used the player's current position after `HIDEBODY`, producing a different
+live placement: (6532.42,6464.45,160.88), versus the first actual live placement
+(6530.79,6466.02,160.947). These were not equivalent isolated contact fixtures.
+
+The runner now completes every hide gate and screenshot, deletes the previous
+hidden fixture and requires actual `isNull`, restores the recorded original
+player ASL position/direction, and places the second live unit at the recorded
+first live ASL position before its normal death. Requested/readback placements
+and player distance are retained in `deleteFixtureStaging`; no animation is
+forced and no engine contact policy is relaxed. The corrected installed
+deletion campaign remains pending; earlier passing gates are partial evidence,
+not a full lifecycle or visual acceptance result.
+
 The existing corpse-ignored vertical center-ray census must also show no external
 object hits. That bounded rejection is not a convex overlap proof; building-floor
 and wall-contact admission remain separate work.

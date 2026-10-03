@@ -192,12 +192,18 @@ function Position-Camera {
     $result.observations.camera = $tokens -join ' '
     Start-Sleep -Seconds 2
 }
-function Spawn-Stock {
-    $null = Send @{ cmd = 'exec'; code = '"SoldierWB" createUnit [getPos player,group player,"poseProofCorpse=this; removeAllWeapons this; this disableAI ""MOVE""; this setCombatMode ""BLUE"""]; poseProofCorpse setDir 0' }
+function Spawn-Stock([switch]$ReuseInitialSite) {
+    $spawn = '"SoldierWB" createUnit [getPos player,group player,"poseProofCorpse=this; removeAllWeapons this; this disableAI ""MOVE""; this setCombatMode ""BLUE"""]; poseProofCorpse setDir 0'
+    if ($ReuseInitialSite) { $spawn += '; poseProofCorpse setPosASL poseProofFirstLiveASL' }
+    $null = Send @{ cmd = 'exec'; code = $spawn }
     Require ((Eval 'isNull poseProofCorpse') -eq $false) 'Stock createUnit did not assign the fixture.'
     Require ((Eval 'poseProofCorpse == player') -eq $false) 'Fixture identity unexpectedly equals player.'
     Require ((Eval 'typeOf poseProofCorpse') -ceq 'SoldierWB') 'Spawned class is not the stock SoldierWB fixture.'
     Require ((Eval 'alive poseProofCorpse') -eq $true) 'Spawned stock fixture is not alive.'
+    if (!$ReuseInitialSite) {
+        $null = Send @{cmd='exec';code='poseProofFirstLiveASL=getPosASL poseProofCorpse'}
+        $result.observations.firstLiveFixturePosition=Eval 'poseProofFirstLiveASL'
+    }
 }
 function Wait-Capture {
     $until = [DateTime]::UtcNow.AddSeconds($CaptureDeadlineSeconds)
@@ -278,6 +284,8 @@ try {
     Require ((Query 'corpse-clear') -ceq 'OK corpse-clear cleared=0') 'Unexpected default active hold.'
     Require-NoHold 'defaultInactive'
     Require ((Query 'corpse-not-a-command') -ceq 'REFUSED corpse-command unknown') 'Unknown command did not fail explicitly.'
+    $null = Send @{cmd='exec';code='poseProofOriginalPlayerASL=getPosASL player; poseProofOriginalPlayerDir=getDir player'}
+    $result.observations.originalPlayerPlacement=@{position=Eval 'poseProofOriginalPlayerASL';direction=Eval 'poseProofOriginalPlayerDir'}
     Spawn-Stock
     Position-Camera
     $live = Query 'corpse-capture'
@@ -378,8 +386,22 @@ try {
     Require ($hideRefusal -match '^REFUSED corpse-capture .*reason=(hidden-or-hiding|no-nearby-corpse|removed-or-deleting)$') "Hidden fixture capture was not explicitly refused: $hideRefusal"
     $result.gates.hideInvalidation.captureRefusal = $hideRefusal
     $result.captures.hidden = Screenshot 'hide-invalidated'
+    # The hide action and its capture refusal are already proved. Isolate the
+    # next lifecycle fixture: the old unit remains a world object while hiding,
+    # and the action may have moved the player used by createUnit's placement.
+    $staging=@{playerBefore=Eval 'getPosASL player';hiddenBefore=Eval 'getPosASL poseProofHidden';
+        requestedPlayerPosition=Eval 'poseProofOriginalPlayerASL';requestedPlayerDirection=Eval 'poseProofOriginalPlayerDir';
+        requestedLivePosition=Eval 'poseProofFirstLiveASL'}
+    $result.observations.deleteFixtureStaging=$staging
+    $null = Send @{cmd='exec';code='deleteVehicle poseProofHidden; player setPosASL poseProofOriginalPlayerASL; player setDir poseProofOriginalPlayerDir'}
+    $staging.oldFixtureRemoved=Eval 'isNull poseProofHidden'
+    Require ($staging.oldFixtureRemoved -eq $true) 'Old hidden fixture survived delete-case isolation.'
+    $staging.restoredPlayerPosition=Eval 'getPosASL player'
+    $staging.restoredPlayerDirection=Eval 'getDir player'
     Set-Acceleration 1
-    Spawn-Stock
+    Spawn-Stock -ReuseInitialSite
+    $staging.actualLivePosition=Eval 'getPosASL poseProofCorpse'
+    $staging.playerDistance=Eval 'player distance poseProofCorpse'
     Position-Camera
     $null = Send @{ cmd = 'exec'; code = 'poseProofCorpse setDammage 1' }
     $result.observations.deleteCapture = Wait-Capture
