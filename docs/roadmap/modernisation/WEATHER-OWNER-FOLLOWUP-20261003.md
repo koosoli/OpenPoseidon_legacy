@@ -1,5 +1,54 @@
 # Weather owner follow-up, 3 October 2026
 
+20:36 source/device checkpoint: e5224414 rough moist-soil environment candidate
+passes all9focused root device tests plus the explicit289row recorded-edge
+replay.192 controlled kernel cases cover roughness/derivatives, flat/sloped
+planes, view angles, convex/HDR energy and local visibility. No installed
+appearance or cost acceptance yet. Actual afffcc53 sunny Church3e0c79 completes
+both master controls with normal stable zero exits and valid roof/clock/distance
+gates. Roof and distant crowns are white, but root rejects excessive far terrain
+washout. Opt-in exposure readback traces were collected with the normal default
+policy; these blocking traces are not timing evidence. Highlight quality remains
+OPEN; no snow colour or global exposure change is justified yet.
+
+Quiet offline actual-state Rain fusion controls report16.47% lower median solver
+wall cost with separated A/B block ranges and identical output fingerprints.
+Dry ranges overlap, so no dry improvement is claimed. This is not installed
+flight FPS; a guarded production candidate and strict diagnostics are pending
+root review, build and actual runtime. Default gameplay ragdolls remain authored;
+the separate measured anatomical-hinge experiment is being prepared.
+
+20:25 diagnostic checkpoint: d07c93cc adds the faithful offline exact-state
+replay seam without changing production maths. Root O0/O2 controls pass on both
+actual captures: restored binary state and14Advances compare public outputs,
+budgets, identity and scratch bitwise, including cross-optimisation outputs.
+Timing is explicitly skipped while the owner's session40892 (started20:15)
+is running; exploratory agent ABBA control spread is not an optimisation or
+game-performance result. Installed gameplay remains afffcc53. A guarded
+single-pass candidate is being assessed offline; no production change yet.
+
+20:13 installed checkpoint: afffcc53 is installed with matching EXE/DLL/material
+and matching built PDB archive. Ordinary full game builds14+13steps, safety push
+and Deploy.ps1 pass. Actual Eden05a75d passes available source, weather,
+camouflage/shelter/lamp, footprint/water/camera and normal stable exit0 gates.
+Root accepts readable darker stock camouflage and lamp-lit detail for this
+bounded fixture; natural dry/wet animation poses differ, and broader appearance
+acceptance is still open. Mud retains real depressions but remains too pale/
+grey at shallow overcast angles. The local reflection correction is retained;
+the owner's milk-like mud report is NOT closed by this functional pass.
+
+Actual quiet Noe2df864 dry/rain flights pass normal stable zero exits and
+both exact native-state captures, including unchanged one-time-refusal controls.
+Fully contained23report windows per arm: dry1387advances/93empty steps,
+0.089646ms/advance; rain1389advances/93nonempty steps,0.666833ms/advance,
+9.959474ms/step,max11.8415ms,no50ms call. Raw transfer514.389ms plus limited
+flux256.5315ms account for83.23% of926.2311ms advance elapsed. Different runs
+are not causal optimisation proof. Exact native bed bits match across captures;
+tide differs, so coastal arms are not exact parity. Rain median depth0.458mm,
+p99=9.622mm,max107.456mm;1.268% of inland cells reach8mm. These are endpoint
+state observations, not historical flight replay. Faithful CPU replay is being
+prepared before further solver changes; no drainage mathematics changed.
+
 20:00 source checkpoint: combined wet-cloth and local-ground mud reflection
 fixes pass root device checks: five cloth tests, seven wet-soil tests, one
 explicit actual-edge replay and twenty physical rain-water tests. The recorded
