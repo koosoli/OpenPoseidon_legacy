@@ -81,3 +81,39 @@ Rust enum refusal/reset helper. It builds no Cargo dependency or game and opens
 no device. C++/Rust layout assertions preserve the same offsets in the full build.
 Full compilation, installed mode captures, normal reset and visual diagnosis
 remain root-owned; source composition alone supplies no runtime acceptance.
+
+## Read-only water depth receipts and supplementary soil view
+
+Each opted-in low diagnostic now reads existing `dev_rain_water` state, sample
+and fine_state at its actual source point and at nine points on the surrounding
+zero-origin 25m coarse lattice. It preserves the actual mud source tuple and
+`sourceEligible` value; it does not invent renderer material flag bits for
+neighbours or assume their terrain is pol. Every read is bound to the original
+world token, native height revision, water generation/revision, source revision,
+paused simulation clock, exact water budget and actual scene camera. Actual
+terrain height, signed mud surface/offset, sampled head/depth/flow, simulation
+bed and selected native fine support/local depth remain separate in the receipt.
+The snow-off recipe's surface minus signed mud offset is recorded as a derived
+bare-height projection, not mislabelled as the 25m simulation bed or GPU input.
+
+`POSEIDON_RAIN_WATER_FINE` is recorded as inherited, without changing it. Actual
+fine-off runs are supported explicitly: the empty invalid fine publication must
+contain zero cells/tiles and no selected fine owner, and the coarse state/sample
+is recorded without claiming native fine source acceptance. Fine-active receipts
+require a current valid native source. These CPU queries neither promote owners,
+advance/drain water, alter geometry nor establish GPU/fragment completion. Each
+colour capture and normal return checks the retained water/source identity again.
+
+The same opt-in searches at most eight genuine pol/Field entries from the
+existing original-map census, requiring their actual source tuple and real wet
+history. A supplementary `bare` target is admitted only when sampled depth,
+head projected onto the actual derived bare terrain and any selected native fine
+local depth are all at most 8mm. It receives ordinary low/top and fixed-camera
+fragment views under both existing lighting recipes. Water remains present with
+its real alpha; no new actor placement, water suppression, forced wetness or
+synthetic witness is used. The camera intentionally views the selected source
+and is then held exactly within each diagnostic block. The source search itself
+must retain the original camera and physical state. No qualifying entry produces
+an explicit empty selection and no extra views; the tiny existing Eden census
+may legitimately contain no thin-water pol site. Supplementary soil views make
+no claim that the player stays visible or shares the contact pose.

@@ -59,6 +59,47 @@ function Assert-DiagnosticCamera($a,$b){
   for($i=0;$i -lt 3;++$i){Require ((Number $a.$field[$i]) -eq (Number $b.$field[$i])) 'Actual diagnostic scene camera changed between modes.'}
  }
 }
+function Water-Identity($state,$fine){
+ Require ($state.ok -eq $true -and $fine.ok -eq $true -and $fine.readonly -eq $true) 'Read-only water state is unavailable.'
+ foreach($field in @('width','height','spacing','generation','revision','volume','rainVolume','infiltrationVolume','evaporationVolume','outletVolume','pendingSeconds')){$null=Number $state.$field}
+ foreach($field in @('generation','revision','volume','rainVolume','infiltrationVolume','evaporationVolume','outletVolume','pendingSeconds')){Require ($state.$field -ge 0) 'Actual water counter/budget is negative.'}
+ Require ($state.width -gt 1 -and $state.height -gt 1 -and $state.spacing -eq 25) 'Actual original-map coarse water domain differs.'
+ foreach($field in @('generation','revision','sourceRevision','heightRevision','terrainRange','terrainSpacing','seaLevel','cells','tiles')){$null=Number $fine.$field}
+ Require ($fine.worldToken -match '^\d+$' -and $fine.worldToken -ne '0' -and $fine.terrainSpacing -eq 6.25 -and $fine.terrainRange -gt 1) 'Actual water source identity is absent.'
+ foreach($field in @('fineActive','sourceReady')){Require ($state.$field -is [bool] -and $fine.$field -is [bool]) 'Actual water source controls are malformed.'}
+ Require ($fine.valid -is [bool] -and $state.fineActive -eq $fine.fineActive -and $state.sourceReady -eq $fine.sourceReady -and $state.sourceReady) 'Actual water source is stale/unavailable.'
+ Require ($state.generation -eq $fine.generation -and $state.revision -eq $fine.revision) 'Actual water publication changed during read-only query.'
+ if($state.fineActive){Require ($fine.valid -eq $true -and $fine.sourceRevision -eq $fine.heightRevision) 'Actual native fine source is not current.'}
+ else{Require (!$fine.valid -and $fine.cells -eq 0 -and $fine.tiles -eq 0 -and $null -eq $fine.selected) 'Fine-off must remain an explicitly empty fine publication.'}
+ return [ordered]@{state=$state;worldToken=$fine.worldToken;heightRevision=$fine.heightRevision;sourceRevision=$fine.sourceRevision;terrainRange=$fine.terrainRange;terrainSpacing=$fine.terrainSpacing;seaLevel=$fine.seaLevel}
+}
+function Assert-WaterIdentity($a,$b){Require (($a|ConvertTo-Json -Depth 8 -Compress) -ceq ($b|ConvertTo-Json -Depth 8 -Compress)) 'Paused water/source budget or generation/revision changed.'}
+function Water-DepthFacts($water,$fine,$soil){
+ Require ($water.valid -eq $true -and $soil.ok -eq $true) 'Actual water/terrain point is unavailable.'
+ Require ($soil.sourceEligible -is [bool]) 'Actual original source admission flag is unavailable.'
+ foreach($field in @('depth','height','flowX','flowZ','terrainY','revision')){$null=Number $water.$field}
+ foreach($field in @('offset','surfaceY','surfaceDx','surfaceDz','x','z')){$null=Number $soil.$field}
+ Require ($water.depth -ge 0 -and $water.terrainY -eq $soil.surfaceY) 'Water and soil queries disagree on actual physical terrain.'
+ # The owned recipe disables snow; pure Field has no sand offset. Preserve the
+ # physical height and signed offset separately, and identify the derived bare
+ # height rather than mislabelling a 25m simulation bed as native terrain.
+ $bare=$soil.surfaceY-$soil.offset;$projected=[Math]::Max(0,$water.height-$bare)
+ $facts=@{sampleDepth=$water.depth;waterHead=$water.height;simulationBed=($water.height-$water.depth);actualTerrainY=$water.terrainY;actualMudSurfaceY=$soil.surfaceY;actualMudOffset=$soil.offset;derivedBareY=$bare;projectedNativeDepth=$projected;fineSelected=$false}
+ if($null -ne $fine.selected){
+  foreach($field in @('head','supportY','localDepth','volume','x','z','size')){$null=Number $fine.selected.$field}
+  Require ($fine.fineActive -and $fine.valid -and $fine.selected.localDepth -ge 0 -and $soil.x -ge $fine.selected.x -and $soil.x -lt ($fine.selected.x+$fine.selected.size) -and $soil.z -ge $fine.selected.z -and $soil.z -lt ($fine.selected.z+$fine.selected.size)) 'Selected actual fine owner does not contain the source point.'
+  $facts.fineSelected=$true;$facts.fineLocalDepth=$fine.selected.localDepth;$facts.fineSupportY=$fine.selected.supportY;$facts.fineHead=$fine.selected.head
+ }
+ return $facts
+}
+function Thin-PolCandidate($expected,$soil,$depth){
+ foreach($field in @('sampleDepth','projectedNativeDepth')){Require ((Number $depth.$field) -ge 0) 'Invalid actual thin-soil depth.'}
+ if($depth.fineSelected){Require ((Number $depth.fineLocalDepth) -ge 0) 'Invalid selected fine depth.'}
+ $quadrants=@($expected.quadrants)
+ return $quadrants.Count -eq 4 -and @($quadrants|Where-Object{$_.surfaceClass -ine 'Field' -or $_.files -cne 'pol'}).Count -eq 0 -and
+  (Key $expected.texture).EndsWith('/pol.paa') -and $soil.sourceEligible -eq $true -and $soil.surfaceClass -ieq 'Field' -and $soil.files -ceq 'pol' -and
+  $depth.sampleDepth -le .008 -and $depth.projectedNativeDepth -le .008 -and (!$depth.fineSelected -or $depth.fineLocalDepth -le .008)
+}
 function Quality-CloudPin([bool]$quality){if(!$quality){return '0'};return $null}
 function Assert-RendererClouds($weather,[double]$overcast){
  Require ($weather.rendererSkyAvailable -is [bool] -and $weather.rendererSkyAvailable) 'Actual producer sky settings are unavailable.'
@@ -188,6 +229,23 @@ function Pair{
 }
 function Same-Pair($a,$b){Require (($a|ConvertTo-Json -Depth 8 -Compress)-ceq ($b|ConvertTo-Json -Depth 8 -Compress)) 'Installed source pair changed.'}
 function Test-Helpers{
+ $water=@{ok=$true;valid=$true;depth=.005;height=10.005;flowX=0;flowZ=0;terrainY=9.9;revision=7}
+ $soilSample=@{ok=$true;x=25;z=25;surfaceY=9.9;offset=-.1;surfaceDx=0;surfaceDz=0;sourceEligible=$true;surfaceClass='Field';files='pol'}
+ $depth=Water-DepthFacts $water @{fineActive=$false;valid=$false} $soilSample
+ Require ([Math]::Abs($depth.derivedBareY-10) -lt .000001 -and !$depth.fineSelected) 'Coarse water receipt confused signed mud with bare/source height.'
+ $pol=@{texture='eden\pol.paa';quadrants=@(1..4|ForEach-Object{@{surfaceClass='Field';files='pol'}})}
+ Require (Thin-PolCandidate $pol $soilSample $depth) 'Genuine <=8mm pol candidate rejected.'
+ foreach($changed in @(@{sampleDepth=.009;projectedNativeDepth=.005;fineSelected=$false},@{sampleDepth=.005;projectedNativeDepth=.009;fineSelected=$false},@{sampleDepth=.005;projectedNativeDepth=.005;fineSelected=$true;fineLocalDepth=.009})){
+  Require (!(Thin-PolCandidate $pol $soilSample $changed)) 'Deep or coarse/native-inconsistent candidate admitted as bare wet soil.'
+ }
+ $field=@{ok=$true;width=512;height=512;spacing=25;generation=2;revision=7;volume=1;rainVolume=2;infiltrationVolume=1;evaporationVolume=0;outletVolume=0;pendingSeconds=.1;fineActive=$false;sourceReady=$true}
+ $fine=@{ok=$true;readonly=$true;fineActive=$false;sourceReady=$true;valid=$false;cells=0;tiles=0;worldToken='123';generation=2;revision=7;sourceRevision=0;heightRevision=0;terrainRange=2048;terrainSpacing=6.25;seaLevel=0}
+ $identity=Water-Identity $field $fine;Assert-WaterIdentity $identity (Water-Identity $field $fine)
+ $changed=$identity|ConvertTo-Json -Depth 8|ConvertFrom-Json -AsHashtable;$changed.state.revision=8;$failed=$false;try{Assert-WaterIdentity $identity $changed}catch{$failed=$true};Require $failed 'Changed paused water revision accepted.'
+ $badFine=$fine.Clone();$badFine.cells=1;$failed=$false;try{$null=Water-Identity $field $badFine}catch{$failed=$true};Require $failed 'Fine-off receipt accepted a fabricated fine cell.'
+ $fineOn=$fine.Clone();$fineOn.fineActive=$true;$fineOn.valid=$true;$fineOn.sourceRevision=1;$fieldOn=$field.Clone();$fieldOn.fineActive=$true
+ $failed=$false;try{$null=Water-Identity $fieldOn $fineOn}catch{$failed=$true};Require $failed 'Stale actual fine/native source revision accepted.'
+ $hard=$soilSample.Clone();$hard.surfaceClass='Grass';Require (!(Thin-PolCandidate $pol $hard $depth)) 'A non-Field source was relabelled as pol.'
  $modes=@(Wet-SoilModes);Require (($modes.mode -join ',') -ceq '1,2,3,4' -and $modes.Count -eq 4) 'Bounded actual fragment diagnostic recipe changed.'
  $cam=@{position=@(1,2,3);direction=@(1,0,0);up=@(0,1,0)};Assert-DiagnosticCamera $cam $cam
  $other=$cam|ConvertTo-Json|ConvertFrom-Json;$other.position[0]=4;$failed=$false;try{Assert-DiagnosticCamera $cam $other}catch{$failed=$true};Require $failed 'Moved actual diagnostic camera accepted.'
@@ -292,6 +350,7 @@ $result.uniformLightingViews=[bool]$UniformLightingViews
 $result.terrainWetnessTrace=[bool]$TerrainWetnessTrace;$result.minimumMudWetness=$MinimumMudWetness
 $result.mudLightingViews=[bool]$MudLightingViews
 $result.wetSoilFragmentViews=[bool]$WetSoilFragmentViews
+if($WetSoilFragmentViews){$result.rainWaterFineInheritedControl=[Environment]::GetEnvironmentVariable('POSEIDON_RAIN_WATER_FINE','Process')}
 $qualityLighting=[bool]($UniformLightingViews -or $MudLightingViews)
 $result.renderedCloudRecipe=@{qualityLighting=$qualityLighting;inheritedCoveragePin=[Environment]::GetEnvironmentVariable('WGR_CLOUD_COVERAGE','Process');appliedCoveragePin=(Quality-CloudPin $qualityLighting);scope='Quality views clear the coverage pin so ordinary renderer weather-drive settings can apply. Simulation overcast alone is not proof of rendered cloud coverage, GPU acceptance or image lighting.'}
 if($UniformLightingViews){. (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1');$result.helperSha256['TerrainPuddleStockRoof.ps1']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1')).Hash}
@@ -316,6 +375,41 @@ function Send($command){Health;$line=$command|ConvertTo-Json -Compress;$line|Add
 function Eval([string]$code){return Decode ([string](Send @{cmd='eval';code=$code}).result)}
 function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
 function Field([string]$kind,$site){return Send @{cmd=('dev_'+$kind);action='sample';x=$site.x;z=$site.z}}
+function Water-ReadPoint($point,$anchor){
+ $water=Send @{cmd='dev_rain_water';action='sample';x=$point.x;z=$point.z}
+ $fine=Send @{cmd='dev_rain_water';action='fine_state';x=$point.x;z=$point.z}
+ $state=Send @{cmd='dev_rain_water';action='state'};$identity=Water-Identity $state $fine
+ if($anchor){Assert-WaterIdentity $anchor $identity};Require ($water.revision -eq $state.revision) 'Actual water point revision differs from unchanged budget.'
+ $actual=Field 'mud' $point;Require ((Key $actual.world)-match ('(^|/)'+$map+'\.wrp$')) 'Water receipt source world differs from original map.'
+ $depth=Water-DepthFacts $water $fine $actual
+ return @{requested=@{x=$point.x;z=$point.z};water=$water;fine=$fine;identity=$identity;actualSourcePoint=$actual;depths=$depth;
+  scope='Read-only CPU water/source receipt. sourceEligible is the actual published soft-source admission; no renderer flag bits are invented. Fine-off explicitly uses the coarse field, not native fine/GPU proof. Derived bare height removes the signed mud offset in this snow-off Field recipe; physical terrain height remains separately recorded.'}
+}
+function Water-ViewReceipt($baseline,$point){
+ $before=State;Assert-Paused $baseline $before;$camera=(Send @{cmd='dev_wet_soil_diagnostic';action='state'}).camera
+ $primary=Water-ReadPoint $point $null;$anchor=$primary.identity;$near=@()
+ # The audited original-map water producer uses a zero-origin 25m lattice.
+ # Record both requested coordinates and actual source points, including hard
+ # or mixed neighbours; this does not relabel the neighbourhood as pol.
+ $x=[Math]::Round($point.x/25)*25;$z=[Math]::Round($point.z/25)*25
+ foreach($dz in @(-25,0,25)){foreach($dx in @(-25,0,25)){$near+=,(Water-ReadPoint @{x=($x+$dx);z=($z+$dz)} $anchor)}}
+ $returned=Water-ReadPoint $point $anchor;$after=State;Assert-Paused $before $after
+ Assert-DiagnosticCamera $camera (Send @{cmd='dev_wet_soil_diagnostic';action='state'}).camera
+ Require (($primary.actualSourcePoint|ConvertTo-Json -Compress) -ceq ($returned.actualSourcePoint|ConvertTo-Json -Compress)) 'Read-only water inspection changed physical source point.'
+ return @{before=$before;after=$after;camera=$camera;primary=$primary;neighbourhood=$near;returned=$returned;scope='One actual point plus bounded 3x3 25m-lattice neighbourhood, exact paused water/source identity and budget. CPU support projection is not fragment depth or GPU completion proof.'}
+}
+function Select-ThinPolView($baseline,$site){
+ $camera=(Send @{cmd='dev_wet_soil_diagnostic';action='state'}).camera;$points=@();$selected=$null;$anchor=$null
+ $candidates=@($source.controls.mud.candidates|Where-Object{(Key $_.texture).EndsWith('/pol.paa')}|Select-Object -First 8)
+ foreach($candidate in $candidates){
+  $point=Water-ReadPoint $candidate $anchor;if(!$anchor){$anchor=$point.identity}
+  Assert-Tuple $point.actualSourcePoint $candidate $map 'mud';$admit=Thin-PolCandidate $candidate $point.actualSourcePoint $point.depths
+  $points+=@{census=$candidate;receipt=$point;thinSupportedCpuCandidate=$admit}
+  if(!$selected -and $admit){$selected=@{name='bare';sample=$point.actualSourcePoint;site=$candidate}}
+ }
+ $after=State;Assert-Paused $baseline $after;Assert-DiagnosticCamera $camera (Send @{cmd='dev_wet_soil_diagnostic';action='state'}).camera
+ return @{attempts=$points;selected=$selected;after=$after;limit=8;scope='At most eight genuine pol/Field census candidates, read-only while paused. All CPU sample/projected-native/selected-fine depths must be <=8mm; no artificial draining, water suppression, source override or actor movement. No candidate means no supplementary view. Actual fragment modes still determine visible admission/overlay; the supplementary camera intentionally views another source point and is fixed within every mode block.'}
+}
 function State{$wet=Number (Eval 'triUniformWetness player');Require ($wet-ge 0 -and $wet-le 1) 'Actual Person wetness is unavailable/outside[0,1].';return @{time=(Number (Eval 'time'));position=(Eval 'getPosASL player');uniform=$wet;sand=(Send @{cmd='dev_sand';action='state'});mud=(Send @{cmd='dev_mud';action='state'});weather=(Send @{cmd='weather_visibility'})}}
 function Terrain-WetnessReceipt($state){
  $rows=@(Terrain-WetnessRows (Lines));Require ($rows.Count -gt 0) 'Opt-in existing terrain weather diagnostic emitted no complete row.'
@@ -457,6 +551,7 @@ function Terrain-MudCentreViews($site){
 function Wet-SoilFragmentViews($baseline,$sample,$site,[double]$overcast,[string]$name){
  $initial=Send @{cmd='dev_wet_soil_diagnostic';action='state'};Require ($initial.mode -eq 0) 'Actual diagnostic did not begin in normal mode.'
  $record=@{initial=$initial;views=@{};legend=(Wet-SoilModes);scope='Actual fragment-derived colour channels after production admission; retained water stays drawn and marks actual survivors magenta with its original alpha. Tone mapping/postprocess preclude numeric pixel decoding; overlay can obscure terrain channels. Mode readback is producer queue state, not GPU completion.'}
+ $record.waterReceipt=Water-ViewReceipt $baseline $sample;$waterAnchor=$record.waterReceipt.primary.identity
  $record.refusedModes=@()
  foreach($invalid in @(-1,.5,5)){
   $refused=$false;try{$null=Send @{cmd='dev_wet_soil_diagnostic';action='set';mode=$invalid}}catch{$refused=$true};Require $refused 'Invalid actual diagnostic enum was accepted.'
@@ -475,7 +570,8 @@ function Wet-SoilFragmentViews($baseline,$sample,$site,[double]$overcast,[string
    Assert-CloudRecipe (Renderer-CloudRecipe $baseline.weather) (Renderer-CloudRecipe $after.weather)
    $source=Field 'mud' $sample;Assert-Tuple $source $site $map 'mud'
    foreach($field in @('offset','surfaceY','surfaceDx','surfaceDz')){Require ($source.$field -eq $sample.$field) 'Diagnostic colour mode changed actual source relief.'}
-   $record.views[$mode.name]=@{requested=$request;readback=$actualMode;before=$before;after=$after;actualSourceSample=$source;body=(Assert-Body (Lines) ($baseline.time-.65));terrainWetness=(Terrain-WetnessReceipt $after)}
+   $waterAfter=Water-ReadPoint $sample $waterAnchor
+   $record.views[$mode.name]=@{requested=$request;readback=$actualMode;before=$before;after=$after;actualSourceSample=$source;waterAfter=$waterAfter;body=(Assert-Body (Lines) ($baseline.time-.65));terrainWetness=(Terrain-WetnessReceipt $after)}
   }
  }finally{
   $reset=Send @{cmd='dev_wet_soil_diagnostic';action='set';mode=0};Require ($reset.mode -eq 0) 'Diagnostic normal mode did not reset.'
@@ -486,6 +582,7 @@ function Wet-SoilFragmentViews($baseline,$sample,$site,[double]$overcast,[string
  Assert-MudSun $record.after.weather (Number (Eval 'dayTime')) $overcast;Assert-RendererClouds $record.after.weather $overcast
  $returned=Field 'mud' $sample;Assert-Tuple $returned $site $map 'mud'
  foreach($field in @('offset','surfaceY','surfaceDx','surfaceDz')){Require ($returned.$field -eq $sample.$field) 'Diagnostic normal return changed retained source relief.'}
+ $record.waterReturned=Water-ReadPoint $sample $waterAnchor
  return $record
 }
 function Mud-Lighting($walkRecord,$site){
@@ -500,11 +597,13 @@ function Mud-Lighting($walkRecord,$site){
  Assert-RendererClouds $original.weather $original.weather.overcast;$cloudRecipe=Renderer-CloudRecipe $original.weather
  $record=@{before=$original;originalHour=$originalHour;originalKnownFixtureDate=$restoreDate;initialTerrainReceipt=$initialReceipt;contact=$contact;centre=$centre;views=@{};
   body=(Assert-Body (Lines) ($original.time-.65));scope='Lighting A/B of retained genuinely rain-wet source-qualified soil. Overcast/date are deliberately set while paused. Rain, wetness and source geometry are preserved. Existing C++ queued parameter receipt is not local fragment rain coverage, Rust acceptance or GPU completion proof.'}
+ $targets=@(@{name='contact';sample=$contact;site=$site},@{name='centre';sample=$centre;site=$site})
+ if($WetSoilFragmentViews){$record.bareSoilSearch=Select-ThinPolView $original $site;if($record.bareSoilSearch.selected){$targets+=,$record.bareSoilSearch.selected}}
  try{
   Exec 'setDate [1985,6,21,16,0]'
   foreach($light in (Mud-LightingPlan)){
    Exec ('0 setOvercast '+$light.overcast);$null=Wait-QualityClouds $original $light.overcast
-   foreach($target in @(@{name='contact';sample=$contact},@{name='centre';sample=$centre})){
+   foreach($target in $targets){
     $sample=$target.sample
     foreach($view in (Contact-Poses ([double]$sample.x) ([double]$sample.z) ([double]$sample.surfaceY))){
      $pose=($view.pose|ForEach-Object{([double]$_).ToString('R',$culture)}) -join ' '
@@ -518,12 +617,12 @@ function Mud-Lighting($walkRecord,$site){
      Assert-RendererClouds $afterView.weather $light.overcast
      Assert-CloudRecipe $cloudRecipe (Renderer-CloudRecipe $afterView.weather)
      foreach($field in @('sunTravelY','nightEffect','overcast','solarDrying')){Require ($afterView.weather.$field -eq $beforeView.weather.$field) 'Actual mud lighting changed during paused capture.'}
-     $actual=Field 'mud' $sample;Assert-Tuple $actual $site $map 'mud'
+     $actual=Field 'mud' $sample;Assert-Tuple $actual $target.site $map 'mud'
      foreach($field in @('offset','surfaceY','surfaceDx','surfaceDz')){Require ($actual.$field -eq $sample.$field) 'Mud lighting changed retained source/contact geometry.'}
      $terrainAfter=Terrain-WetnessReceipt $afterView
      Require ($terrainAfter.lastQueuedRow.line -ceq $terrainBefore.lastQueuedRow.line) 'Paused terrain diagnostic advanced unexpectedly.'
      $record.views[$name]=@{before=$beforeView;after=$afterView;hour=$hour;pose=$view.pose;actualSourceSample=$actual;terrainBefore=$terrainBefore;terrainAfter=$terrainAfter}
-     if($WetSoilFragmentViews -and $view.name -eq 'low'){$record.views[$name].fragmentDiagnostic=Wet-SoilFragmentViews $afterView $sample $site $light.overcast $name}
+     if($WetSoilFragmentViews -and $view.name -eq 'low'){$record.views[$name].fragmentDiagnostic=Wet-SoilFragmentViews $afterView $sample $target.site $light.overcast $name}
     }
    }
   }
