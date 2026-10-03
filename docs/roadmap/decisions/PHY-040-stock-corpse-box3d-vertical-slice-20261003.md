@@ -8,8 +8,13 @@ and actual-game verification; a passing source compile does not close those gate
 ## Actual consumer and physics connection
 
 `triPhysicsShowcase "corpse-capture"` retains the actual authored affine phases.
-`"corpse-prepare"` brings up the existing physics corpus if no world exists; an
-existing world is preserved, and missing terrain is explicitly refused.
+`"corpse-prepare"` preserves an existing world and its terrain. If no world exists,
+it requires the actual local held corpse and registers a bounded 129x129 height
+field sampled from real `SurfaceY` at 0.25 m spacing around that owner (32 m square).
+The field is clipped to the actual landscape domain; invalid bounds/heights or
+missing terrain are explicitly refused. This is local prototype support, not a
+worldwide contact claim. Its unchanged hull admission still compares every fitted
+vertex with both actual roadway support and the registered solver terrain ray.
 `"corpse-articulate"` fits and creates eleven dynamic Box3D convex bodies and ten
 limited spherical joints. Pelvis, chest, head, upper arms, forearms/hands, thighs
 and shins/feet are distinct bodies. Cone and twist limits are centered on the
@@ -39,6 +44,26 @@ vertex each tick to produce corpse-owned animated/draw bounds, including the
 dead face tail; a point beyond 3.5 m or a nonfinite palette retires the rig.
 
 ## Admission evidence and limits
+
+The first installed articulated campaign on combined source `254` failed before
+creating any bodies: `stock-box3d-articulation-20261003-180700-891415/engine.log`
+ends in `std::_Allocate_manually_vector_aligned` from `RunPhysicsCorpus` immediately
+after backend creation. That map-wide debug corpus uses twelve subdivisions of
+the object grid. The actual native boot receipt at engine.log:5890 records land
+1024x1024 at 12.50 m and terrain 2048x2048 at 6.25 m. The corpus formula consequently
+requests 602,898,916 bytes (12277 squared times four), compared with 37,478,884
+bytes for the classic 256 object grid. `LandGrid` is a dynamic landscape getter,
+so its spacing follows the actual 12.50 m object grid; the fault is allocation
+scale, not a hardcoded 50 m spacing.
+`MemHeap::Alloc` refuses a single block >=256 MiB, while the replaced global
+`operator new` forwards a null failure into STL's aligned-vector bookkeeping.
+This source combination explains the allocation-site crash on a larger grid;
+the general null-returning global-new contract is a separate allocator defect.
+Preparation no longer calls that corpus: its fixed input storage is 66,564 bytes,
+and backend copying/quantization sees only that same bounded real surface.
+The new preparation log records actual source terrain/object grid dimensions and
+spacing, so the next installed receipt can substantiate the failing-map scale.
+No contact threshold was relaxed. Installed rerun remains required.
 
 Admission requires a local single-player dead, settled, visible, unattached corpse
 with the actual `data3d\mc vojakw2.p3d` model, all 25 stock names and eight reserved

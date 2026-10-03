@@ -4,7 +4,6 @@
 #include <Poseidon/World/Physics/PhysicsBackend.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/World/Weather/RainWaterField.hpp>
-#include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 #include <array>
 #include <limits.h>
 #include <utility>
@@ -1437,8 +1436,50 @@ RString Man::CorpsePoseProbe(const char* command)
     {
         if (!GWorld || GWorld->GetMode() != GModeArcade || !GLandscape)
             return "REFUSED corpse-prepare local-single-player-landscape-required";
+        Man* owner = g_corpsePoseOwner.GetLink();
+        if (!owner || !owner->UseCorpsePose() || !owner->IsLocal())
+            return "REFUSED corpse-prepare local-held-corpse-required";
         auto* world = Physics::GetPhysicsWorld();
-        if (!world || !world->IsCreated()) { Dev::RunPhysicsCorpus(); world = Physics::GetPhysicsWorld(); }
+        if (!world || !world->IsCreated())
+        {
+            // The corpus subdivides the entire object grid twelve times. Native
+            // maps can then request gigabytes from the engine's allocator, which
+            // rejects a single allocation >=256 MiB. This bounded prototype only
+            // needs ground around its captured owner (travel is capped at .5 m).
+            // Sample the real rendered surface, never substitute a flat floor.
+            constexpr int grid = 129;
+            constexpr float spacing = .25f;
+            constexpr float halfExtent = (grid-1)*spacing*.5f;
+            const int range = GLandscape->GetTerrainRange();
+            const float sourceSpacing = GLandscape->GetTerrainGrid();
+            const float extent = (static_cast<float>(range)-1)*sourceSpacing;
+            const Vector3 position = owner->Position();
+            if (range < 2 || !std::isfinite(sourceSpacing) || sourceSpacing <= 0 ||
+                !std::isfinite(extent) || extent < halfExtent*2 || extent > 1000000 ||
+                !std::isfinite(position.X()) || !std::isfinite(position.Y()) || !std::isfinite(position.Z()) ||
+                position.X() < 0 || position.Z() < 0 || position.X() > extent || position.Z() > extent)
+                return "REFUSED corpse-prepare terrain-bounds-invalid";
+            const float originX = std::clamp(position.X(),halfExtent,extent-halfExtent)-halfExtent;
+            const float originZ = std::clamp(position.Z(),halfExtent,extent-halfExtent)-halfExtent;
+            std::array<float,grid*grid> heights{};
+            for (int z=0; z<grid; ++z)
+                for (int x=0; x<grid; ++x)
+                {
+                    const float y = GLandscape->SurfaceY(originX+x*spacing,originZ+z*spacing);
+                    if (!std::isfinite(y)) return "REFUSED corpse-prepare terrain-height-invalid";
+                    heights[z*grid+x] = y;
+                }
+            world = &Physics::EnsurePhysicsWorld();
+            if (!world->Create()) return "REFUSED corpse-prepare physics-world-unavailable";
+            if (!world->SetTerrain(heights.data(),grid,grid,spacing,originX,originZ))
+            {
+                world->Destroy();
+                return "REFUSED corpse-prepare physics-terrain-unavailable";
+            }
+            LOG_INFO(World,"CORPSEPREPARE: bounded real terrain {}x{} spacing={} origin=({},{}); source {}x{} spacing={} objectGrid={} objectSpacing={}",
+                grid,grid,spacing,originX,originZ,range,range,sourceSpacing,
+                GLandscape->GetLandRange(),GLandscape->GetLandGrid());
+        }
         if (!world || !world->IsCreated() || !world->GetStats().terrainRegistered)
             return "REFUSED corpse-prepare physics-terrain-unavailable";
         const auto stats = world->GetStats(); char status[512];
