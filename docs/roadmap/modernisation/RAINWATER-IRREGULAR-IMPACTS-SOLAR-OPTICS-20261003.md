@@ -51,3 +51,20 @@ performance comparison. The nine-neighbour work is skipped at unresolved
 distances, but close water fragments and solar shadows still need measured cost.
 Ground film still uses the older ripple helper; sharing the revised effect with
 it is a separate follow-up outside this candidate's file ownership.
+
+## Required-device fixture update
+
+Root's combined device run passes the new64-case impact/solar helper. Two
+pre-existing tests require source-fixture maintenance: the camera source proof
+still names the replaced ripple function, and the full draw camera layout lacks
+the now-used production shadow/cloud bindings. The repaired source proof checks
+the new impact, sun and shadow helpers without changing grid or draw bounds.
+
+The complete draw fixture now binds actual frame slots1/4/6/13, including the
+64-byte terrain/cloud map uniform and independent cloud transmittance texture.
+Its old support/ownership/roof/snow/sea/underside negatives are unchanged. A new
+real fragment counterfactual aligns the sun with the flat pool reflection and
+changes only cloud red transmittance from1 to0. It requires identical alpha,
+lower solar RGB energy and retained non-solar reflection/body in the shadowed
+arm. CPU compilation and the camera/composition test pass. Execution of the
+repaired complete device test remains root-owned and pending.

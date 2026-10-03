@@ -1007,7 +1007,11 @@ mod tests {
             "bare_surface_valid",
             "interior_rain_coverage",
             "ground_sky_reflection",
-            "ground_puddle_ripple_normal",
+            "rain_water_impact_normal",
+            "rain_water_sun_specular",
+            "shadow_strength",
+            "terrain_sun_shadow",
+            "cloud_sun_shadow",
             "flow * rainwater.domain.w",
         ] {
             assert!(source.contains(proof));
@@ -1355,6 +1359,7 @@ mod full_draw_tests {
         );
         put(&mut frame, offset("sun_ambient"), &[1., 1., 1., 0.]);
         put(&mut frame, offset("sun_diffuse"), &[1., 1., 1., 0.]);
+        put(&mut frame, offset("sun_dir_world"), &[0., -1., 0., 0.]);
         put(&mut frame, offset("ground_weather"), &[0.8, 0., 0., 10.]);
         // Artistic AO disabled. Independent physical map must still certify
         // the entire bounded native cell, then reject it under actual cover.
@@ -1402,8 +1407,16 @@ mod full_draw_tests {
                     },
                     count: None,
                 },
+                tex_entry(1, wgpu::TextureViewDimension::D2Array, wgpu::TextureSampleType::Depth),
                 samp_entry(2, wgpu::SamplerBindingType::Comparison),
+                tex_entry(4, wgpu::TextureViewDimension::D2, wgpu::TextureSampleType::Float { filterable: true }),
                 samp_entry(5, wgpu::SamplerBindingType::Filtering),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6, visibility: stages,
+                    ty: wgpu::BindingType::Buffer {ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false, min_binding_size: wgpu::BufferSize::new(64)},
+                    count: None,
+                },
                 tex_entry(
                     7,
                     wgpu::TextureViewDimension::D3,
@@ -1425,6 +1438,7 @@ mod full_draw_tests {
                     wgpu::TextureViewDimension::D2Array,
                     wgpu::TextureSampleType::Depth,
                 ),
+                tex_entry(13, wgpu::TextureViewDimension::D2, wgpu::TextureSampleType::Float { filterable: true }),
                 tex_entry(
                     18,
                     wgpu::TextureViewDimension::D2,
@@ -1506,6 +1520,20 @@ mod full_draw_tests {
             sky.size(),
         );
         let sky_view = sky.create_view(&Default::default());
+        let cloud = texture("actual_pool_cloud_transmittance", wgpu::TextureFormat::Rgba8Unorm,
+            1,1,1,wgpu::TextureDimension::D2,wgpu::TextureUsages::TEXTURE_BINDING|wgpu::TextureUsages::COPY_DST);
+        let cloud_view=cloud.create_view(&Default::default());
+        let write_cloud=|bytes:&[u8]|queue.write_texture(wgpu::TexelCopyTextureInfo{texture:&cloud,mip_level:0,
+            origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},bytes,
+            wgpu::TexelCopyBufferLayout{offset:0,bytes_per_row:Some(4),rows_per_image:Some(1)},cloud.size());
+        write_cloud(&[255,255,255,255]);
+        // Bind the actual shared terrain/cloud mapping ABI, even when the
+        // existing support cases disable terrain and cascade shadow sampling.
+        let mut shadow_map_params=[0.0f32;16];
+        let shadow_map_buffer=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label:Some("actual_pool_terrain_cloud_mapping"), contents:bytemuck::cast_slice(&shadow_map_params),
+            usage:wgpu::BufferUsages::UNIFORM|wgpu::BufferUsages::COPY_DST,
+        });
         let froxel = texture(
             "actual_pool_unused_fog",
             wgpu::TextureFormat::Rgba8Unorm,
@@ -1542,6 +1570,7 @@ mod full_draw_tests {
                     binding: 0,
                     resource: frame_buffer.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::TextureView(&near_view)},
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::Sampler(&comparison),
@@ -1550,6 +1579,8 @@ mod full_draw_tests {
                     binding: 5,
                     resource: wgpu::BindingResource::Sampler(&linear),
                 },
+                wgpu::BindGroupEntry {binding:4,resource:wgpu::BindingResource::TextureView(&sky_view)},
+                wgpu::BindGroupEntry {binding:6,resource:shadow_map_buffer.as_entire_binding()},
                 wgpu::BindGroupEntry {
                     binding: 7,
                     resource: wgpu::BindingResource::TextureView(&froxel_view),
@@ -1566,6 +1597,7 @@ mod full_draw_tests {
                     binding: 12,
                     resource: wgpu::BindingResource::TextureView(&near_view),
                 },
+                wgpu::BindGroupEntry {binding:13,resource:wgpu::BindingResource::TextureView(&cloud_view)},
                 wgpu::BindGroupEntry {
                     binding: 18,
                     resource: wgpu::BindingResource::TextureView(&weather_view),
@@ -1946,6 +1978,28 @@ mod full_draw_tests {
             if index==0{
                 let count_coarse=rain.count;rain.count=0;
                 assert_eq!(raster(&rain,1.),pixels,"Owned tile must not blend coarse and fine water twice");rain.count=count_coarse;
+                // Actual production solar lobe under the same wet geometry:
+                // cloud transmittance may remove sun energy, never pool coverage.
+                // Align the real sun to the flat interface's reflected view.
+                let v=(eye-aim).normalize();
+                put(&mut frame,offset("sun_dir_world"),&[v.x,-v.y,v.z,0.]);
+                queue.write_buffer(&frame_buffer,0,&frame);
+                shadow_map_params[12..16].copy_from_slice(&[200.,200.,0.005,1.]);
+                queue.write_buffer(&shadow_map_buffer,0,bytemuck::cast_slice(&shadow_map_params));
+                let sun_pixels=raster(&rain,1.);
+                write_cloud(&[0,255,255,255]);let shadow_pixels=raster(&rain,1.);
+                assert_eq!(sun_pixels.chunks_exact(4).map(|p|p[3]).collect::<Vec<_>>(),
+                    shadow_pixels.chunks_exact(4).map(|p|p[3]).collect::<Vec<_>>(),
+                    "Actual cloud shadow must not alter water admission/opacity");
+                let energy=|bytes:&[u8]|->usize{bytes.chunks_exact(4).map(|p|p[0] as usize+p[1] as usize+p[2] as usize).sum()};
+                assert!(energy(&sun_pixels)>energy(&shadow_pixels)+100,
+                    "Actual cloud transmittance did not remove direct solar energy: {} vs {}",
+                    energy(&sun_pixels),energy(&shadow_pixels));
+                assert!(energy(&shadow_pixels)>0,"Cloud shadow removed non-solar water reflection/body");
+                write_cloud(&[255,255,255,255]);shadow_map_params=[0.;16];
+                queue.write_buffer(&shadow_map_buffer,0,bytemuck::cast_slice(&shadow_map_params));
+                put(&mut frame,offset("sun_dir_world"),&[0.8081431,-0.58894414,-0.0070375875,0.]);
+                queue.write_buffer(&frame_buffer,0,&frame);
                 // Parameter-only camera publication retains BOTH complete
                 // arrays only under the same source/layout/lifetime identity.
                 assert!(rain.set_publication(&device,&queue,publication,&[],&[]));
