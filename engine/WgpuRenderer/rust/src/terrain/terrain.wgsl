@@ -80,7 +80,9 @@ fn in_terrain_hole(xz: vec2<f32>) -> bool {
     var inside = true;
     for (var i = 0u; i < n; i = i + 1u) {
         let e = holes.edges[i];
-        if (e.x * xz.x + e.y * xz.y + e.z < 0.0) { inside = false; }
+        // A zero-length edge normal can only come from a collapsed outline; treat it as outside so a bad hole
+        // can never swallow the whole terrain (0 >= 0 would read as inside everywhere).
+        if (dot(e.xy, e.xy) < 0.25 || e.x * xz.x + e.y * xz.y + e.z < 0.0) { inside = false; }
         if (e.w > 0.5) {
             if (inside) { return true; }
             inside = true;

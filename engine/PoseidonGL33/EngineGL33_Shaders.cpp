@@ -239,7 +239,7 @@ bool mwInTerrainHole() {
     for (int i = 0; i < 64; ++i) {
         if (i >= n) break;
         vec4 e = holeEdge[i];
-        if (e.x * vWorldRel.x + e.y * vWorldRel.z + e.z < 0.0) inside = false;
+        if (dot(e.xy, e.xy) < 0.25 || e.x * vWorldRel.x + e.y * vWorldRel.z + e.z < 0.0) inside = false;
         if (e.w > 0.5) {
             if (inside) return true;
             inside = true;
@@ -382,7 +382,7 @@ bool mwInTerrainHole() {
     for (int i = 0; i < 64; ++i) {
         if (i >= n) break;
         vec4 e = holeEdge[i];
-        if (e.x * vWorldRel.x + e.y * vWorldRel.z + e.z < 0.0) inside = false;
+        if (dot(e.xy, e.xy) < 0.25 || e.x * vWorldRel.x + e.y * vWorldRel.z + e.z < 0.0) inside = false;
         if (e.w > 0.5) {
             if (inside) return true;
             inside = true;
@@ -522,7 +522,7 @@ bool mwInTerrainHole() {
     for (int i = 0; i < 64; ++i) {
         if (i >= n) break;
         vec4 e = holeEdge[i];
-        if (e.x * vWorldRel.x + e.y * vWorldRel.z + e.z < 0.0) inside = false;
+        if (dot(e.xy, e.xy) < 0.25 || e.x * vWorldRel.x + e.y * vWorldRel.z + e.z < 0.0) inside = false;
         if (e.w > 0.5) {
             if (inside) return true;
             inside = true;

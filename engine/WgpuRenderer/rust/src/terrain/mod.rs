@@ -2186,8 +2186,17 @@ mod terrain_hole_tests {
     fn object_shaders_compose_with_the_underground_sun_test() {
         let src = include_str!("../shaders/shading.wgsl");
         assert!(src.contains("smoothstep(0.05, 0.25, surface_y(world_abs.xz) - world_abs.y)"));
+        assert!(src.contains("* leaf_cavity * underground_amb;"));
         compose(include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl");
         compose(include_str!("../gfx3d/gpu_driven.wgsl"), "gfx3d/gpu_driven.wgsl");
+    }
+
+    // A collapsed outline (zero-length edges) must never read as "inside everywhere".
+    #[test]
+    fn a_zero_length_edge_is_outside() {
+        for src in [include_str!("terrain.wgsl"), include_str!("../grass/grass.wgsl")] {
+            assert!(src.contains("if (dot(e.xy, e.xy) < 0.25 || e.x * xz.x + e.y * xz.y + e.z < 0.0) { inside = false; }"));
+        }
     }
 
     #[test]

@@ -198,8 +198,9 @@ const std::vector<ShapeHolePoly>& ShapeHolesOf(const LODShape* shape)
     }
     return holes.polys;
 }
-// world X/Z footprint (counter-clockwise), bounding box and floor height of one hole of an object
-void MakeHoleArea(const Object* obj, const ShapeHolePoly& poly, Landscape::TerrainHoleArea& area)
+// world X/Z footprint (counter-clockwise), bounding box and floor height of one hole of an object.
+// Returns false for a degenerate footprint, which the caller must drop: see the note on the area check below.
+bool MakeHoleArea(const Object* obj, const ShapeHolePoly& poly, Landscape::TerrainHoleArea& area)
 {
     area.n = poly.n;
     area.draw = poly.draw;
@@ -218,6 +219,16 @@ void MakeHoleArea(const Object* obj, const ShapeHolePoly& poly, Landscape::Terra
         int u = (v + 1) % poly.n;
         signedArea += area.x[v] * area.z[u] - area.x[u] * area.z[v];
     }
+    // Sinkhole W1 (owner report: "the island surface goes black and all objects appear floating" while a mission
+    // loads, switches or exits): an object whose transform is momentarily collapsed -- zero scale, not yet placed,
+    // being torn down -- maps every hole point to one spot. Each edge test of a zero-length edge reads 0 >= 0, so
+    // the hole contained EVERY point: the whole terrain was discarded by the draw and given no ground by the
+    // gameplay queries. A real hole is at least a few square decimetres; anything smaller (or not finite) is no hole.
+    if (!std::isfinite(signedArea) || std::fabs(signedArea) * 0.5f < 0.01f)
+    {
+        area.n = 0;
+        return false;
+    }
     if (signedArea < 0)
     {
         // a mirrored transform turned it clockwise
@@ -229,6 +240,7 @@ void MakeHoleArea(const Object* obj, const ShapeHolePoly& poly, Landscape::Terra
     area.minZ = *std::min_element(area.z, area.z + poly.n);
     area.maxZ = *std::max_element(area.z, area.z + poly.n);
     area.floorY = obj->PositionModelToWorld(Vector3(cx / poly.n, poly.floorY, cz / poly.n)).Y();
+    return true;
 }
 } // namespace
 
@@ -271,8 +283,10 @@ int Landscape::GatherTerrainHoles(Vector3Par pos, float radius, TerrainHoleArea*
                     {
                         return n;
                     }
-                    MakeHoleArea(obj, poly, out[n]);
-                    n++;
+                    if (MakeHoleArea(obj, poly, out[n]))
+                    {
+                        n++;
+                    }
                 }
             }
         }

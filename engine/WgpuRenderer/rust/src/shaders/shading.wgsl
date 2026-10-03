@@ -265,8 +265,12 @@ fn shade(
     let leaf_cavity = select(1.0, mat.native_cavity, is_foliage);
     m_light_diffuse *= leaf_cavity;
     m_light_ambient *= leaf_cavity;
+    // Sinkhole W1: under the terrain the sky ambient goes too, down to a dim floor. The interior-sky term darkens
+    // static buildings it has rooms for; a soldier walking in a cave got the open-sky ambient (owner report:
+    // "soldiers also illuminated and not dark"). The same ramp as the sun test, so a cave is one consistent dark.
+    let underground_amb = mix(1.0, 0.12, underground_s);
     let amb_ao = sky_vis_ao(world_abs.xz) * gtao_t * interior_ao * clamp(baked_sky_vis, 0.0, 1.0)
-        * leaf_cavity;
+        * leaf_cavity * underground_amb;
     // ...and a FOURTH, at a scale none of the three can reach: the normal map's own micro-
     // occlusion. Sky-vis is keyed on the terrain column (km), GTAO marches the depth buffer
     // (~2 m), the interior term answers "is there a roof" (room-sized) — the smallest thing any
