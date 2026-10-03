@@ -1,5 +1,17 @@
 # Weather owner follow-up, 3 October 2026
 
+Owner's older-build Zombie-mod report (dense footsteps disturb crawling/aiming)
+received a bounded source audit, per his request. Current mud compression
+saturates at layer capacity instead of accumulating unbounded depth; repeated/
+overlapping slope and packed-geometry checks pass the existing standalone test.
+Footprint gradients still enter ground/body alignment, so this audit does not
+exclude short-scale tilt or the unknown older-build/mod interaction. No guessed
+movement change or claim of reproduction/fix. Main objectives continue.
+
+Actual NoePs Near Full173513 passes normal exit0/stable94f/package/source/
+actor/camera controls. Root sees unobstructed tan sand grain. This verifies
+another original source mapping, not walking depression or motion acceptance.
+
 17:35 checkpoint: installed pair remains94f261c5. Quiet occupied repeat45e935
 exits normally with stable dry/rain arms. Dry mean13.795/p9526.934/max59.575ms;
 rain12.130/p9518.861/max47.584ms. Actual Advance dry0.173813/rain0.875189ms
