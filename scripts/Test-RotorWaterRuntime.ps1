@@ -13,6 +13,12 @@ $culture=[Globalization.CultureInfo]::InvariantCulture
 function Require([bool]$c,[string]$m) {if(!$c){throw $m}}
 function Finite($v) {return $null -ne $v -and $v -is [ValueType] -and $v -isnot [bool] -and ![double]::IsNaN([double]$v) -and ![double]::IsInfinity([double]$v)}
 function Number([double]$v) {Require (Finite $v) 'Nonfinite fixture coordinate.';return $v.ToString('R',$culture)}
+function Sea-View([double]$x,[double]$z,[double]$sea,[string]$angle) {
+ if($angle -ceq 'top'){$view=@($x,($sea+55),($z-5));$delta=@(0,-55,5)}
+ else{$view=@(($x+28),($sea+10),($z-35));$delta=@(-28,-10,35)}
+ $length=[Math]::Sqrt($delta[0]*$delta[0]+$delta[1]*$delta[1]+$delta[2]*$delta[2])
+ return @{view=$view;pose=($view+@($delta|ForEach-Object {$_/$length}))}
+}
 function Decode-Eval([string]$v) {
  $v=$v.Trim();if($v.StartsWith('"')){return $v.Substring(1,$v.Length-2).Replace('""','"')}
  if($v.StartsWith('[') -or $v -cmatch '^(true|false|null|-?\d+(\.\d+)?([eE][+-]?\d+)?)$'){return ConvertFrom-Json -InputObject $v -NoEnumerate};return $v
@@ -50,6 +56,12 @@ function Receipt-Matches($r,$s,$view,[bool]$positive) {
  return $false
 }
 if($SelfTest){
+ foreach($angle in @('top','close')) {
+  $camera=Sea-View 1750 3100 0 $angle
+  Require ($camera.view.Count -eq 3 -and $camera.pose.Count -eq 6) 'Actual scalar sea camera tuple malformed.'
+  $expected=if($angle -ceq 'top'){@(1750,55,3095)}else{@(1778,10,3065)}
+  for($i=0;$i -lt 3;$i++){Require ($camera.view[$i] -eq $expected[$i]) 'Actual scalar camera offset changed.'}
+ }
  $row='TW_ROTOR_UBO {"time":20,"phaseTime":20,"domain":[1620,2940,256,0.00390625],"count":1,"sources":[[1750,3100,15,1.1]],"readonly":true}'
  $r=Parse-Receipt $row;$s=@{timeMs=20000;x=1750;z=3100;rpm=1};$v=@(1750,55,3070)
  Require (Receipt-Matches $r $s $v $true) 'Actual packet/domain positive refused.'
@@ -104,8 +116,7 @@ function Receipt($state,$view,[bool]$positive){
 }
 function Capture([string]$stage,[string]$angle,[bool]$positive){
  $null=Eval 'triClearView';$beforeState=State ($stage+'-'+$angle+'-before');$time=[double](Eval 'time')
- if($angle -ceq 'top'){$view=@($SeaX,$script:seaLevel+55,$SeaZ-5);$delta=@(0,-55,5)}else{$view=@($SeaX+28,$script:seaLevel+10,$SeaZ-35);$delta=@(-28,-10,35)}
- $length=[Math]::Sqrt($delta[0]*$delta[0]+$delta[1]*$delta[1]+$delta[2]*$delta[2]);$pose=$view+@($delta|ForEach-Object {$_/$length})
+ $camera=Sea-View $SeaX $SeaZ $script:seaLevel $angle;$view=$camera.view;$pose=$camera.pose
  Require ((Eval ('triSetView ['+(($pose|ForEach-Object {Number $_}) -join ',')+']')) -ceq 'OK') 'Render-only sea camera refused.'
  Start-Sleep -Milliseconds 250;$s=State ($stage+'-'+$angle+'-view');$receipt=Receipt $s $view $positive
  $file=Join-Path $armDir ($stage+'-'+$angle+'.png');$null=Send @{cmd='screenshot';path=$file};$deadline=[DateTime]::UtcNow.AddSeconds(10)
