@@ -1,5 +1,20 @@
 # Weather owner follow-up, 3 October 2026
 
+18:46 checkpoint: matching572b838a is installed after the full committed build,
+safety push and ordinary deployment. Installed EXE/DLL/material and matching
+built PDBs are archived under build/installed-symbols/572b838a. Actual corpse
+108b15 exits normally0 but refuses creation: left forearm ploket vertex0 is
+2.792358mm below real terrain; native road and solver agree within0.03mm.
+296 fitted vertices were measured, maximum root distance1.096063m. The3mm
+clearance admission remains intact; no articulated gameplay acceptance.
+An isolated Box3D954cf87 comparison reproduces released0.1.0 stale inverse
+world inertia after mass rescaling and a sixfold wrong off-centre impulse.
+Both controls pass1563 assertions/43 existing backend cases and11/1 replay;
+candidate passes7/1 mass checks while released control fails the specific
+expected angular-velocity assertion. Dependency promotion remains pending
+full-game build and installed runtime; latest main is not the proposed pin.
+Quiet installed occupied rain-flight phase/thread-CPU measurement is running.
+
 18:30 checkpoint: matching1510c984 is installed after the14step committed
 bounded-terrain full build, safety push and ordinary deployment. Matching
 installed EXE/DLL/material plus built matching PDBs are archived with hashes
