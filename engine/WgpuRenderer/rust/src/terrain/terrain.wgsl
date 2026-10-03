@@ -10,7 +10,7 @@
 #import frame::{frame, reverse_z, fog_factor, apply_fog, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_rain_coverage, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
 #import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
 #import frame::ground_sky_reflection
-#import ground_wet::{cultivated_soil_fraction, soil_wet_amount, soil_wet_surface, soil_wet_fresnel, soil_wet_sun_lobe}
+#import ground_wet::{cultivated_soil_fraction, soil_wet_amount, soil_wet_surface, soil_wet_fresnel, soil_wet_sun_specular}
 #import shadow::shadow_strength
 #import lighting::lights_contrib
 #import color::srgb_to_linear
@@ -1254,6 +1254,8 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
 
     // Per-pixel normal at a fixed heightmap step (independent of patch LOD/morph).
     let geometric_n = sample_mud_normal(in.world_xz, tp.terrain_grid, snow_footprint);
+    // Keep derivative filtering outside material/admission branches.
+    let moist_normal_variation = length(fwidth(geometric_n));
     // Apply the authored surfaces' own normal on top of the heightfield's. The terrain
     // frame is world-aligned by construction -- T = +X, B = +Z -- so this needs no tangent
     // stream, and a flat (0,0,1) from an unauthored cell leaves the geometric normal
@@ -1470,10 +1472,18 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
                 * sky_vis_ao(in.world_xz) * local_sky_visibility;
         }
         let half_vector = normalize(view - frame.sun_dir_world.xyz + vec3<f32>(0.0, 1e-4, 0.0));
-        reflected += sun_diffuse * soil_wet_sun_lobe(dot(moist_n, half_vector))
-            * (1.0 - shadow) * cloud_sun_shadow(in.world_xz) * local_sky_visibility;
         rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel,
             soil_wet * (1.0 - rain_puddle));
+        // Direct GGX already contains dielectric Fresnel; add after the sky mix.
+        let solar_visibility = (1.0 - shadow) * cloud_sun_shadow(in.world_xz)
+            * local_sky_visibility;
+        let solar_coat = soil_wet_sun_specular(
+            clamp(dot(moist_n, view), 0.0, 1.0),
+            clamp(dot(moist_n, -frame.sun_dir_world.xyz), 0.0, 1.0),
+            clamp(dot(moist_n, half_vector), 0.0, 1.0),
+            clamp(dot(view, half_vector), 0.0, 1.0),
+            moist_normal_variation, soil_wet * (1.0 - rain_puddle), solar_visibility);
+        rgb += sun_diffuse * 3.14159265359 * solar_coat;
     }
     if (rain_puddle > 0.0) {
         // Reflect actual directional sky/cloud radiance. Diffuse SH erased
