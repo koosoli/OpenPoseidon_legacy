@@ -9,6 +9,7 @@ param([ValidatePattern('^[0-9a-fA-F]{8,40}$')][string]$ExpectedCommit='',
  [switch]$IncludeFarCoverOff,
  [switch]$CloudletCosts,
  [switch]$CoarseCosts,
+ [switch]$CoarseCapture,
  [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='occupied-rain-flight',
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [switch]$SelfTest)
@@ -28,9 +29,11 @@ function Import-Pure([string]$path,[string[]]$names){
 $rainHelper=Join-Path $PSScriptRoot 'Test-RainPopulationPerformance.ps1'
 $rotorHelper=Join-Path $PSScriptRoot 'Test-RotorLandRuntime.ps1'
 $fineHelper=Join-Path $PSScriptRoot 'Test-RainWaterFineRuntime.ps1'
+$coarseCaptureHelper=Join-Path $PSScriptRoot 'RainWaterCoarseCapture.ps1'
 Import-Pure $fineHelper @('Number','Decode-Eval','Restore-Environment','Complete-LogLines','Read-CompleteLogLines','Assert-Budget')
 Import-Pure $rainHelper @('Parse-RainRows')
 Import-Pure $rotorHelper @('Assert-RotorState')
+Import-Pure $coarseCaptureHelper @('Read-RainWaterCoarseCapture','Assert-RainWaterCoarseCapture')
 function Numeric($value){
  Require ($null -ne $value -and $value -is [ValueType] -and $value -isnot [bool]) 'Missing/non-numeric actual field.'
  $n=[double]$value;Require (![double]::IsNaN($n) -and ![double]::IsInfinity($n)) 'Nonfinite actual field.';return $n
@@ -284,10 +287,11 @@ $campaign=Join-Path $root ('build/rain-helicopter/'+$Label+'-'+(Get-Date -Format
 New-Item -ItemType Directory -Force $campaign|Out-Null
 $settings=@{POSEIDON_RAIN_TRACE='1';POSEIDON_SNOW_TEST_DEPTH='0';POSEIDON_SNOWLINE='off';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_TERRAIN_JITTER='0';WGR_TEMPORAL='0';WGR_LOD_GOVERNOR_RANGE='1';POSEIDON_VSYNC='0';POSEIDON_ROTOR_LAND_TRACE='0';WGR_WEATHER_COVER_TRACE='0';POSEIDON_RAIN_WATER_FINE='0';WGR_RAIN_WATER_FINE='0';POSEIDON_SIM_VEHICLE_COST=$(if($CloudletCosts){'1'}else{'0'});POSEIDON_RAIN_WATER_COST=$(if($CoarseCosts){'1'}else{'0'})}
 $clear=@('POSEIDON_TEST_RAIN','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','POSEIDON_SNOW_SHELTER','WGR_CLOUD_COVERAGE','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_TERRAIN_PUDDLE_WETNESS','WGR_WEATHER_COVER','WGR_WEATHER_COVER_FAR')
-$keys=@(@($settings.Keys)+$clear+@('POSEIDON_USER_DIR')|Select-Object -Unique);$saved=@{}
+$settings.POSEIDON_RAIN_WATER_CAPTURE=$(if($CoarseCapture){'1'}else{'0'})
+$keys=@(@($settings.Keys)+$clear+@('POSEIDON_USER_DIR','POSEIDON_RAIN_WATER_CAPTURE_DIR')|Select-Object -Unique);$saved=@{}
 foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $result=[ordered]@{status='running';installed=$before;sourceHead=(& git -C $root rev-parse HEAD);lockOwner=$env:LOCK_OWNER;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;
- helperHashes=@{rain=(Get-FileHash $rainHelper).Hash;rotor=(Get-FileHash $rotorHelper).Hash;fine=(Get-FileHash $fineHelper).Hash};settings=$settings;cleared=$clear;inherited=$saved;
+ helperHashes=@{rain=(Get-FileHash $rainHelper).Hash;rotor=(Get-FileHash $rotorHelper).Hash;fine=(Get-FileHash $fineHelper).Hash;coarseCapture=(Get-FileHash $coarseCaptureHelper).Hash};settings=$settings;cleared=$clear;inherited=$saved;
  recipe=@{x=$X;z=$Z;heightAboveInitialBed=$HeightAboveBed;heading=180;neutralVelocityMax=2;forwardScancode=26;lookScancode=226;measureSimulationSeconds=$MeasureSeconds;warmupSimulationSeconds=$WarmupSeconds};
  scope='Actual occupied manual UH60 route, ordinary external chase camera, stock weather controls and real automatic liquid particles. Dry is a bounded tiny positive noncompleted weather transition with initialized coarse runoff, not a no-water-physics zero control. Completed frame capture is ordered/drop-free. Published GPU/encode regions may lag/duplicate and CPU ring windows overlap: no same-frame completion proof or sum of nested region timings. Requested routes are equal; actual overlap is reported, never exact scene parity.';
  arms=@()}
@@ -329,6 +333,7 @@ try{
   foreach($key in $keys){Restore-Environment $key $null};foreach($key in $settings.Keys){Restore-Environment $key $settings[$key]}
   if($control -ceq 'FarCoverOff'){$env:WGR_WEATHER_COVER_FAR='0'}
   $armDir=Join-Path $campaign ($control+'-'+$weatherName);$profile=Join-Path $armDir 'user';New-Item -ItemType Directory -Force $profile|Out-Null
+  if($CoarseCapture){$env:POSEIDON_RAIN_WATER_CAPTURE_DIR=[IO.Path]::GetFullPath($armDir)}
   & "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $profile -DlssMode 0 -MsaaSamples 4
   $cfg=Join-Path $profile 'graphics.cfg';[IO.File]::WriteAllText($cfg,([IO.File]::ReadAllText($cfg).Replace('brightness=1.6;','brightness=1;')))
   $mission=Join-Path $armDir 'ordinary.noe';New-Item -ItemType Directory -Force $mission|Out-Null
@@ -420,6 +425,24 @@ try{
   if($weatherName -ceq 'Dry'){Require ([Math]::Abs($arm.waterAfter.rainVolume-$arm.waterAtWeatherStart.rainVolume) -le .000001) 'Whole dry physical arm exceeded unchanged rainfall-input budget.'}
   if($weatherName -ceq 'Rain'){Require ($arm.measuredRainInputVolume -gt 0) 'Actual rain simulation did not accumulate real liquid input.'}
   else{Require ([Math]::Abs($arm.measuredRainInputVolume) -le .000001) 'Dry physical arm accumulated liquid rain input.'}
+  if($CoarseCapture){
+   # Frame capture stopped and world paused above; no dump/readback in timing.
+   $frozenTime=Clock;$frozenField=Send @{cmd='dev_rain_water';action='state'}
+   $receipt=Send @{cmd='dev_rain_water';action='coarse_capture'}
+   $expectedCapturePath=Join-Path $armDir 'coarse-runoff.rwcap'
+   $header=Read-RainWaterCoarseCapture $expectedCapturePath
+   $returned=Send @{cmd='dev_rain_water';action='state'}
+   Require ((Clock)-eq$frozenTime) 'Coarse export advanced the actual paused clock.'
+   Assert-RainWaterCoarseCapture $receipt $header $frozenField $returned $expectedCapturePath $frozenTime
+   $captureHash=(Get-FileHash -LiteralPath $expectedCapturePath).Hash
+   $duplicateRefusal=$null
+   try{$null=Send @{cmd='dev_rain_water';action='coarse_capture'}}catch{$duplicateRefusal=$_.Exception.Message}
+   Require ($duplicateRefusal -match 'unused one-time gate') 'Actual duplicate capture did not prove the one-time refusal.'
+   Require ((Get-FileHash -LiteralPath $expectedCapturePath).Hash -ceq $captureHash -and (Clock) -eq $frozenTime) 'Refused duplicate changed file or paused clock.'
+   $duplicateState=Send @{cmd='dev_rain_water';action='state'}
+   Assert-RainWaterCoarseCapture $receipt $header $frozenField $duplicateState $expectedCapturePath $frozenTime
+   $arm.coarseCapture=@{receipt=$receipt;header=$header;before=$frozenField;after=$duplicateState;sha256=$captureHash;duplicateRefusal=$duplicateRefusal;scope='Exact raw bed/depth copied once after completed frame capture, with actual clock paused; no measured-window allocation or state mutation.'}
+  }
   $null=Send @{cmd='screenshot';path=(Join-Path $armDir 'route-end.png')}
   Close-Owned;Same-Pair $before (Pair);$client.Dispose();$client=$null;$p=$null
   $lines=@(Read-CompleteLogLines $log)

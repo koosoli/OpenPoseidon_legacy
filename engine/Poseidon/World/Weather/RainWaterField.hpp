@@ -6,6 +6,7 @@
 #include <vector>
 #include <array>
 #include <optional>
+#include <span>
 #include <map>
 #include "RainWaterFine.hpp"
 #include "RainWaterForcing.hpp"
@@ -140,6 +141,29 @@ public:
         return sum * _spacing * _spacing;
     }
     const Budget& WaterBudget() const { return _budget; }
+    // Explicit paused diagnostic only. Spans remain borrowed from the producer;
+    // no normal-step copy/allocation and no reconstruction from rounded heads.
+    struct CoarseCaptureView {
+        int width=0,height=0;
+        float spacing=0,originX=0,originZ=0,seaLevel=0;
+        double pending=0;
+        uint64_t generation=0,revision=0;
+        Budget budget;
+        std::span<const float> bed,depth;
+    };
+    std::optional<CoarseCaptureView> CoarseCapture() const {
+        constexpr size_t limit=size_t(513)*513;
+        if(_fine||_width<2||_height<2||_width>513||_height>513||
+           _bed.size()!=size_t(_width)*_height||_bed.size()>limit||_depth.size()!=_bed.size()||
+           !std::isfinite(_spacing)||_spacing<=0||!std::isfinite(_originX)||!std::isfinite(_originZ)||
+           !std::isfinite(_seaLevel)||!std::isfinite(_pending)||_pending<0||
+           !std::isfinite(_budget.rain)||!std::isfinite(_budget.infiltration)||
+           !std::isfinite(_budget.evaporation)||!std::isfinite(_budget.outlet)||
+           std::any_of(_bed.begin(),_bed.end(),[](float v){return !std::isfinite(v);})||
+           std::any_of(_depth.begin(),_depth.end(),[](float v){return !std::isfinite(v)||v<0;})) return {};
+        return CoarseCaptureView{_width,_height,_spacing,_originX,_originZ,_seaLevel,_pending,
+            _generation,_revision,_budget,_bed,_depth};
+    }
     uint64_t Revision() const { return _revision; }
     uint64_t Generation() const { return _generation; }
     int Width() const { return _width; }

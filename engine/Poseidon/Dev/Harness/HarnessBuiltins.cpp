@@ -11,6 +11,7 @@ using namespace Poseidon;
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Weather/AirflowField.hpp>
+#include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/World/Weather/SandField.hpp>
@@ -33,6 +34,8 @@ using namespace Poseidon;
 #include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+#include <Poseidon/Dev/Diag/RainWaterCapture.hpp>
+#include <fstream>
 #include <Poseidon/Core/Version.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
@@ -2523,7 +2526,79 @@ void RegisterSnowProbe(HarnessServer& hs)
             if (!GWorld || !action) return HarnessProtocol::ErrorResponse("rainwater query requires world and action");
             const auto& field = GRainWater();
             auto* out = cJSON_CreateObject();
-            if (std::strcmp(action,"sample") == 0) {
+            if (std::strcmp(action,"coarse_capture") == 0) {
+                // Deliberate one-time paused export, never in the measured
+                // solver/renderer path. The caller cannot supply an output path.
+                static bool captured=false;
+                const char* flag=std::getenv("POSEIDON_RAIN_WATER_CAPTURE");
+                const char* directory=std::getenv("POSEIDON_RAIN_WATER_CAPTURE_DIR");
+                const auto refuse=[&](const char* error){cJSON_Delete(out);return HarnessProtocol::ErrorResponse(error);};
+                if(!flag||std::strcmp(flag,"1")!=0||!directory||captured)
+                    return refuse("coarse capture requires exact opt-in, designated directory and unused one-time gate");
+                if(!GLandscape||GWorld->GetAcceleratedTime()!=0)
+                    return refuse("coarse capture requires an actual paused world");
+                const auto view=field.CoarseCapture();
+                const auto grid=RainWaterField::AlignedSourceGrid(GLandscape->GetTerrainRange(),GLandscape->GetTerrainGrid());
+                if(!view||!field.SourceReady()||grid.side<2||!field.MatchesDomain(grid.side,grid.side,grid.spacing)||
+                   view->seaLevel!=GLandscape->GetSeaLevel())
+                    return refuse("coarse capture refuses invalid, fine, stale or mismatched source domain/sea");
+                // Compare the actual raw source bits, not interpolated SurfaceY
+                // or rounded renderer heads. This witnesses current native bed.
+                for(int z=0;z<grid.side;++z)for(int x=0;x<grid.side;++x)
+                    if(std::bit_cast<uint32_t>(view->bed[size_t(z)*grid.side+x])!=
+                       std::bit_cast<uint32_t>(GLandscape->ClippedData(z*grid.stride,x*grid.stride)))
+                        return refuse("coarse capture refuses stale native bed bits");
+                std::error_code ec;
+                const std::filesystem::path requestedDirectory(directory);
+                if(!requestedDirectory.is_absolute())return refuse("coarse capture requires an absolute campaign directory");
+                const auto canonical=std::filesystem::weakly_canonical(requestedDirectory,ec);
+                if(ec||!std::filesystem::is_directory(canonical,ec)||ec)
+                    return refuse("coarse capture directory is unavailable");
+                const auto path=RainWaterCapture::CampaignOutputPath(canonical);
+                if(!path||std::filesystem::exists(*path,ec)||ec)
+                    return refuse("coarse capture must create its designated campaign file exactly once");
+                std::ofstream stream(*path,std::ios::binary);
+                const bool written=stream&&RainWaterCapture::Write(stream,*view);
+                stream.close();
+                if(!written||!stream) {
+                    std::filesystem::remove(*path,ec);
+                    return refuse("coarse capture file write failed");
+                }
+                captured=true;
+                cJSON_AddBoolToObject(out,"readonly",true);cJSON_AddBoolToObject(out,"sourceCurrent",true);
+                cJSON_AddStringToObject(out,"sourceWitness","bit-exact-current-native-coarse-bed");
+                cJSON_AddStringToObject(out,"format",RainWaterCapture::Magic);
+                cJSON_AddStringToObject(out,"floatEncoding","ieee754-binary32-le");
+                cJSON_AddStringToObject(out,"path",path->string().c_str());
+                cJSON_AddStringToObject(out,"world",GLandscape->GetName());
+                cJSON_AddStringToObject(out,"worldToken",std::to_string(reinterpret_cast<uintptr_t>(GLandscape)).c_str());
+                cJSON_AddStringToObject(out,"sourceRevision",std::to_string(GLandscape->HeightRevision()).c_str());
+                cJSON_AddStringToObject(out,"generationExact",std::to_string(view->generation).c_str());
+                cJSON_AddStringToObject(out,"revisionExact",std::to_string(view->revision).c_str());
+                cJSON_AddNumberToObject(out,"timeMs",Glob.time.toInt());
+                cJSON_AddNumberToObject(out,"timeScale",GWorld->GetAcceleratedTime());
+                cJSON_AddNumberToObject(out,"width",view->width);cJSON_AddNumberToObject(out,"height",view->height);
+                cJSON_AddNumberToObject(out,"spacing",view->spacing);cJSON_AddNumberToObject(out,"originX",view->originX);
+                cJSON_AddNumberToObject(out,"originZ",view->originZ);cJSON_AddNumberToObject(out,"seaLevel",view->seaLevel);
+                cJSON_AddNumberToObject(out,"pendingSeconds",view->pending);
+                cJSON_AddNumberToObject(out,"terrainRange",GLandscape->GetTerrainRange());
+                cJSON_AddNumberToObject(out,"terrainSpacing",GLandscape->GetTerrainGrid());
+                cJSON_AddNumberToObject(out,"sourceStride",grid.stride);
+                cJSON_AddNumberToObject(out,"nativeBedBitsMatched",view->bed.size());
+                cJSON_AddNumberToObject(out,"headerBytes",RainWaterCapture::HeaderBytes);
+                cJSON_AddNumberToObject(out,"bytes",RainWaterCapture::HeaderBytes+view->bed.size()*sizeof(float)*2);
+                cJSON_AddNumberToObject(out,"maximumRainMetresPerSecond",RainWaterMaximumRainMetresPerSecond);
+                cJSON_AddNumberToObject(out,"stepSeconds",RainWaterField::StepSeconds);
+                cJSON_AddNumberToObject(out,"weatherRain",GLandscape->GetRainDensity());
+                cJSON_AddNumberToObject(out,"effectiveParticleRain",GRain.EffectiveDensity());
+                cJSON_AddBoolToObject(out,"particleSnowflakes",GRain.Params().snowflakes);
+                cJSON_AddNumberToObject(out,"liquidRain",UniformWettingDensity(GLandscape->GetRainDensity(),
+                    GRain.EffectiveDensity(),GRain.Params().snowflakes));
+                const auto* sun=GScene ? GScene->MainLight() : nullptr;
+                cJSON_AddNumberToObject(out,"solarDrying",sun ? SunlightDryingExposure(
+                    sun->SunDirection().Y(),GLandscape->GetOvercast(),sun->NightEffect()) : 0);
+                cJSON_AddNumberToObject(out,"windInput",GWind.IsActive() ? GWind.Sample().speed/20.0f : 0);
+            } else if (std::strcmp(action,"sample") == 0) {
                 const auto* x = cJSON_GetObjectItemCaseSensitive(root,"x");
                 const auto* z = cJSON_GetObjectItemCaseSensitive(root,"z");
                 if (!cJSON_IsNumber(x) || !cJSON_IsNumber(z) ||
