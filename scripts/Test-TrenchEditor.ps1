@@ -43,6 +43,28 @@ function State($point,$ray){
  $s=Send $query;Require ($s.worldName.Replace('\','/').ToLowerInvariant()-match '(^|/)eden\.wrp$') 'Not the actual original Everon landscape.';Require ((Num $s.grid)-gt 0) 'Missing grid identity.';return $s
 }
 function Heights($points){$terms=@($points|ForEach-Object{'triTerrainHeight ['+(Fmt $_.x)+','+(Fmt $_.z)+']'});$values=Eval ('['+($terms-join ',')+']');Require ($values.Count-eq $points.Count) 'Incomplete height readbacks.';return @($values|ForEach-Object{Num $_})}
+function ObstacleClearance($site){
+ # Use the actual loaded map owners' conservative bounding spheres. Include
+ # the complete tank approach, not merely the newly cut footprint. Visual-only
+ # forest owners are refused too; this is fixture admission, not a collision oracle.
+ $centre=Point $site 5 0 0;$near=Send @{cmd='diag_near';pos=@($centre.x,$centre.z);r=32}
+ Require ($near.count -ge 0 -and @($near.objects).Count -le 200) 'Invalid bounded object census.'
+ $complete=$near.count -eq @($near.objects).Count;$blockers=@();$checked=@()
+ foreach($object in @($near.objects)){
+  if(!$object.static -and (([int]$object.type -band 3) -eq 0)){continue}
+  Require ($object.pos.Count -eq 3) 'Map owner lacks an actual position.'
+  $x=Num $object.pos[0];$z=Num $object.pos[1];$radius=Num $object.radius;Require ($radius -ge 0) 'Invalid map owner radius.'
+  $along=($x-$site.x)*$site.fx+($z-$site.z)*$site.fz;$side=($x-$site.x)*$site.sx+($z-$site.z)*$site.sz
+  $alongGap=0.;if($along -lt -14){$alongGap=-14-$along}elseif($along -gt 24){$alongGap=$along-24}
+  $sideGap=[Math]::Max(0,[Math]::Abs($side)-5)
+  # Position/radius diagnostics are rounded to centimetres; 3cm covers that
+  # receipt rounding. Missing shape/bounds cannot support a clear-site claim.
+  $unknown=![bool]$object.shape -or $radius -le 0
+  $intersects=$unknown -or ($alongGap*$alongGap+$sideGap*$sideGap -le ($radius+.03)*($radius+.03))
+  $entry=@{owner=$object;along=$along;side=$side;unknownBounds=$unknown;overlapsConservativeLane=$intersects};$checked+=,$entry;if($intersects){$blockers+=,$entry}
+ }
+ return @{admitted=($complete -and $blockers.Count -eq 0);complete=$complete;query=$near;checked=$checked;blockers=$blockers;lane=@{alongMin=-14;alongMax=24;halfWidth=5;queryRadius=32};scope='Read-only loaded retail/static owners and conservative projected bounding spheres; truncated/missing receipts refuse. No map object is removed. Real movement remains required.'}
+}
 function AssertUnchanged($baseline,$actual){Require ($actual.heightRevision-eq $baseline.heightRevision-and $actual.worldName-ceq $baseline.worldName-and $actual.grid-eq $baseline.grid) 'Trench changed height identity.';Require ([Math]::Abs((Num $actual.terrainY)-(Num $baseline.terrainY))-lt .0001) 'Raw terrain height changed.'}
 function Capture([string]$name,$position,$direction){
  if($position){Exec ('triSetView ['+((@($position)+@($direction)|ForEach-Object{Fmt $_})-join ',')+']')};Start-Sleep -Milliseconds 400
@@ -89,20 +111,22 @@ try{
   foreach($dir in @(@{dx=0;dz=250},@{dx=250;dz=0},@{dx=0;dz=-250},@{dx=-250;dz=0})){$key=[string]($row[0]+$dir.dx)+':'+[string]($row[1]+$dir.dz);if($lookup.ContainsKey($key)){$variation+=[Math]::Abs($lookup[$key]-(Num $row[2]));++$available}}
   if($available-ge 2){$candidates+=@{x=(Num $row[0]);z=(Num $row[1]);variation=($variation/$available)}}
  }
- $site=$null;$attempts=@();$until=[DateTime]::UtcNow.AddSeconds(120)
- foreach($candidate in @($candidates|Sort-Object variation|Select-Object -First 32)){
+ $site=$null;$attempts=@();$until=[DateTime]::UtcNow.AddSeconds(180);$result.siteCandidateLimit=64
+ foreach($candidate in @($candidates|Sort-Object variation|Select-Object -First 64)){
   Require ([DateTime]::UtcNow-lt $until) 'Bounded flat-site refinement deadline.'
   foreach($heading in @(0,90)){
    $a=$heading*[Math]::PI/180;$candidate.heading=$heading;$candidate.fx=[Math]::Sin($a);$candidate.fz=[Math]::Cos($a);$candidate.sx=[Math]::Cos($a);$candidate.sz=-[Math]::Sin($a)
-   $points=@();for($s=0;$s-le 24;$s+=1){foreach($side in @(-2.9,0,2.9)){$points+=,(Point $candidate $s $side 0)}}
+   $points=@();for($s=-14;$s-le 24;$s+=1){foreach($side in @(-2.9,0,2.9)){$points+=,(Point $candidate $s $side 0)}}
    $heights=Heights $points;$minimum=($heights|Measure-Object -Minimum).Minimum;$maximum=($heights|Measure-Object -Maximum).Maximum;$rim=($minimum+$maximum)*.5
-   $clearance=State (Point $candidate 12 0 $rim) $null;$admitted=$maximum-$minimum-le .4-and $rim-gt (Num $terrain.seaLevel)+2.5-and !$clearance.inFootprint
-   $attempts+=@{candidate=@{}+$candidate;heights=$heights;min=$minimum;max=$maximum;admitted=$admitted}
+   $clearance=State (Point $candidate 12 0 $rim) $null;$flat=$maximum-$minimum-le .4-and $rim-gt (Num $terrain.seaLevel)+2.5-and !$clearance.inFootprint
+   $objects=$null;if($flat){$objects=ObstacleClearance $candidate};$admitted=$flat -and $objects.admitted
+   $attempts+=@{candidate=@{}+$candidate;heights=$heights;min=$minimum;max=$maximum;sourceFlat=$flat;obstacleClearance=$objects;admitted=$admitted}
    if($admitted){$candidate.rim=$rim;$site=@{}+$candidate;break}
   };if($site){break}
  };$result.refinement=$attempts;Require ([bool]$site) 'No flat dry source admitted in bounded Everon census.';$result.site=$site
  foreach($preset in @(@{name='infantry';tank=$false;width=1.5;depth=1.6;length=12;ramp=4.8},@{name='tank';tank=$true;width=5;depth=2;length=24;ramp=12})){
   $arm=[ordered]@{preset=$preset};$result[$preset.name]=$arm;$floor=$site.rim-$preset.depth;$mid=$preset.ramp+2.5;$point=Point $site $mid 0 ($site.rim+.2)
+  $arm.obstacleClearance=ObstacleClearance $site;Require $arm.obstacleClearance.admitted 'Actual retail/static approach is no longer clear before trench creation.'
   $baseline=State $point @(($site.rim+1),($floor+.1));Require (!$baseline.inFootprint-and $baseline.terrainRayHit) 'Original trench column lacks actual terrain intersection.';$arm.baseline=$baseline
   Capture ($preset.name+'-baseline-top') @($point.x,($site.rim+10),$point.z) @(0,-1,.01)
   $created=Send @{cmd='dev_cave_editor';action='trench';x=$site.x;y=$site.rim;z=$site.z;heading=$site.heading;width=$preset.width;depth=$preset.depth;length=$preset.length;tank=$preset.tank};Require ($created.count-eq 1) 'Trench owner count differs.';$arm.created=$created
