@@ -1,5 +1,29 @@
 # Weather owner follow-up, 3 October 2026
 
+14:31 follow-up: installed pair is still e017e028. Actual occupied dry/rain
+flight8ffcd5 passes normal exits, stable pair, zero drops and driver/weather
+guards. Mean frame9.435/10.775ms, p9511.441/15.105ms. Weighted actual CPU
+runoff-advance0.375/0.859ms per simulation tick accounts for nearly all the
+cloudlet increase; this motivates the uninstalled coarse Transfer cache.
+The cache passes bitwise old-solver comparisons at O0/O2 and uses2.004MiB
+at513-square. Fine simultaneous flux limiting also passes native checker,
+midpoint, eight-edge interface, source/sea/mass and partition proofs. Both
+are candidates awaiting full build/deployment/runtime; no FPS claim yet.
+
+Actual Eden c697d3 passes14 cloth and8 mud comparison capture guards with
+uniform0.679185 and GMud0.808575. Appearance remains OPEN: root sees matte
+mud and excessive daytime glare. A rendered-cloud pin0 invalidated the
+overcast appearance comparison despite actual world overcast1. Optional
+quality views now remove/restore this pin and require producer-owned CPU
+weather-driven sky receipts; these do not prove GPU completion or local
+rain-map admission. Pure pol soil supplies the soft-soil material flag.
+
+Land rotor c55a65 reaches actual emission/roof/pause/snow/wet controls and
+normal exit0/stable pair, but final sea query fails z:null from flattened
+PowerShell coordinates. Named-coordinate binding selftests pass; full
+runtime rerun remains pending. Root rejects dry-sand/snow appearance:
+no readable particle ring is visible despite actual emit/live counters.
+
 Installed14:01 checkpoint: matching e017e028 pair deployed13:49 after18step
 combined full game build; broad normalized soil direct sheen is now installed,
 with41 focused shader/device checks passing. CPU attribution is installed and
