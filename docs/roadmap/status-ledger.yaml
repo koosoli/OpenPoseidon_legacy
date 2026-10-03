@@ -8032,3 +8032,318 @@ tickets:
     supersedes: []
     evidence:
       - docs/roadmap/decisions/SINKHOLE-03-swimming-20261004.md
+  - id: AI-PORT-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Port Malprave's AI fixes (aiQuickWins, emptyEnemyVehicle, radioImmediate, groupLimit, aiSuppression, gradualSpotting, aiHunting, aiCoverGrenades, aiExposed, convoys, tankCorners, runways, parachuteDamage)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Owner's pick of the 13 patches pending; see the decision record section 1."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: play-test and fix what is in (grenade interval looks broken; spotting and hunting never measured; tune CfgAIFork)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-PORT-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Malprave job 23: grenade limit failed (4 throws in 1.6 s), spotting/hunting test broken by setPos teleports; knowsAbout reads 0."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-002
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: enemy switch inertia and scoring (mechanism 3)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-XRAY-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Not started in Malprave."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-003
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: hide from grenades"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-XRAY-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Not started in Malprave; CWA AI ignore thrown grenades."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-004
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: typed danger list (mechanism 7)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-XRAY-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Not started in Malprave."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-005
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: squad enemy distribution (mechanism 4)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-XRAY-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Not started in Malprave."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-006
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: look-out (peek) step and cover eviction (mechanisms 5 and 8)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-XRAY-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Spacing and flank cap are in (aiCoverGrenades); eviction, the 3 m enemy rule and the peek are not."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-007
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: precomputed cover points and the Best evaluator (mechanism 6)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-XRAY-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Not started in Malprave; FindHideBehind still scores nearby objects each time."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-008
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: polish -- view range shrinking off the head axis, adaptive hearing threshold, optional HUD visibility meter (mechanisms 1 and 2)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-XRAY-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Gradual spotting, peripheral vision and gunfire hearing are in (AI-PORT-001); these refinements are not."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
