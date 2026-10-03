@@ -164,9 +164,12 @@ impl Tonemap {
             ..Default::default()
         });
 
+        // WgrTonemap followed by one renderer-side vec4 (`cave` in tonemap.wgsl).
+        let mut init = bytemuck::bytes_of(&WgrTonemap::default()).to_vec();
+        init.extend_from_slice(&[0u8; 16]);
         let params_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("wgr_tonemap_params"),
-            contents: bytemuck::bytes_of(&WgrTonemap::default()),
+            contents: &init,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -221,8 +224,13 @@ impl Tonemap {
         }));
     }
 
-    pub fn upload_params(&self, queue: &wgpu::Queue, params: &WgrTonemap) {
+    pub fn upload_params(&self, queue: &wgpu::Queue, params: &WgrTonemap, underground: f32) {
         queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(params));
+        // Sinkhole W1b: despeckle with the camera underground at all (WGR_CAVE_DESPECKLE=0 off).
+        static DESPECKLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let on = *DESPECKLE.get_or_init(|| std::env::var("WGR_CAVE_DESPECKLE").map(|v| v != "0").unwrap_or(true));
+        let cave: [f32; 4] = [if on && underground > 0.05 { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0];
+        queue.write_buffer(&self.params_buf, std::mem::size_of::<WgrTonemap>() as u64, bytemuck::bytes_of(&cave));
     }
 
     // Draw the fullscreen resolve into an already-begun render pass targeting the

@@ -2882,7 +2882,7 @@ impl Renderer {
         self.tonemap
             .as_ref()
             .expect("tonemap")
-            .upload_params(&self.queue, &self.tonemap_params);
+            .upload_params(&self.queue, &self.tonemap_params, self.cam_underground);
         // Build the bloom pyramid from the finished HDR scene (already includes aerial
         // perspective) so the resolve can add it. Skipped when intensity is 0 (the
         // resolve then adds bloom*0, so stale mip contents are harmless).
