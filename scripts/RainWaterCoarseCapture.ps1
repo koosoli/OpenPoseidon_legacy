@@ -24,8 +24,17 @@ function Assert-RainWaterCoarseCapture($Receipt,$Header,$Before,$After,[string]$
  if($Receipt.world-isnot[string]-or!$Receipt.world-or$Receipt.worldToken-notmatch'^\d+$'-or$Receipt.sourceRevision-notmatch'^\d+$'){throw 'Coarse capture world/source identity absent.'}
  if($Before.fineActive-ne$false-or$After.fineActive-ne$false-or$Before.sourceReady-ne$true-or$After.sourceReady-ne$true){throw 'Coarse capture requires actual ready legacy field.'}
  foreach($key in @('width','height','spacing','volume','rainVolume','infiltrationVolume','evaporationVolume','outletVolume','pendingSeconds','generation','revision')){if($null-eq$Before.$key-or$Before.$key-ne$After.$key){throw ('Capture mutated actual field: '+$key)}}
- foreach($key in @('width','height','spacing','pendingSeconds')){if($Header[$key]-ne$Before.$key-or$Receipt.$key-ne$Before.$key){throw ('Coarse capture header/state differs: '+$key)}}
- foreach($key in @('rainVolume','infiltrationVolume','evaporationVolume','outletVolume','generation','revision')){if($Header[$key]-ne$Before.$key){throw ('Coarse capture exact budget/identity differs: '+$key)}}
+ foreach($key in @('width','height','spacing')){if($Header[$key]-ne$Before.$key-or$Receipt.$key-ne$Before.$key){throw ('Coarse capture header/state differs: '+$key)}}
+ if($Receipt.pendingSeconds-ne$Before.pendingSeconds){throw 'Coarse capture JSON pending receipt/state differs.'}
+ # Native binary64 is authoritative. cJSON decimal numbers can lose one ULP;
+ # demand exact canonical bits in all three responses instead of a tolerance.
+ foreach($key in @('pendingSeconds','rainVolume','infiltrationVolume','evaporationVolume','outletVolume')){
+  $bitKey=$key+'Bits';$native=[BitConverter]::DoubleToInt64Bits([double]$Header[$key]).ToString('X16',[Globalization.CultureInfo]::InvariantCulture)
+  foreach($state in @($Receipt,$Before,$After)){
+   if($state.$bitKey-isnot[string]-or$state.$bitKey-cnotmatch'^[0-9A-F]{16}$'-or$state.$bitKey-cne$native){throw ('Coarse capture exact binary64 differs: '+$key)}
+  }
+ }
+ foreach($key in @('generation','revision')){if($Header[$key]-ne$Before.$key){throw ('Coarse capture exact identity differs: '+$key)}}
  if([uint64]::Parse($Receipt.generationExact)-ne$Header.generation-or[uint64]::Parse($Receipt.revisionExact)-ne$Header.revision){throw 'Coarse capture exact integer identities disagree.'}
  foreach($key in @('originX','originZ','seaLevel','headerBytes','bytes')){if($Receipt.$key-ne$Header[$key]){throw ('Coarse capture receipt/header differs: '+$key)}}
  if($Receipt.nativeBedBitsMatched-ne[double]$Header.width*$Header.height-or$Receipt.maximumRainMetresPerSecond-ne.000025-or$Receipt.stepSeconds-ne.25){throw 'Coarse capture native count/forcing policy differs.'}

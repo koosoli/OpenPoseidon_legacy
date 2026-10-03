@@ -5,6 +5,11 @@
 #include <iostream>
 using namespace Poseidon;
 int main(){
+    const auto observed=std::bit_cast<double>(uint64_t{0x3FC555737C000000});
+    assert(std::string(RainWaterCapture::DoubleBits(observed).data())=="3FC555737C000000");
+    assert(std::string(RainWaterCapture::DoubleBits(0.166670260950923).data())=="3FC555737C000001");
+    assert(std::string(RainWaterCapture::DoubleBits(-0.0).data())=="8000000000000000");
+    assert(std::string(RainWaterCapture::DoubleBits(0.1).data())=="3FB999999999999A");
     RainWaterField field;assert(!field.CoarseCapture());
     std::vector<float> bed={-0.f,12345.678f,7,8,9,10};
     assert(field.Configure(3,2,25,bed,0,0,-1));

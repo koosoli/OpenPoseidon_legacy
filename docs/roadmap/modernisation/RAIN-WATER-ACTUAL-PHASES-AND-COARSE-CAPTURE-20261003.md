@@ -109,6 +109,32 @@ does not contribute to the completed frame window or require a GPU readback.
 The runner also asks for a second export and requires the actual one-time-gate
 refusal, unchanged file hash, clock and field state.
 
+## Actual capture precision failure and source repair
+
+Root's `occupied-exact-coarse-scene-20261003-193540-c355bb` ran installed
+`16d296c6` and exited normally with code zero. The campaign remains **FAILED**:
+the first dry capture validator rejected `pendingSeconds` before subsequent
+duplicate-refusal and rainy-arm acceptance. The retained binary is the full
+2,105,440 bytes and its handler witnessed all 263,169 native bed cells.
+These positive observations do not make the capture campaign pass.
+
+The binary pending double is `0.16667026095092297`, IEEE bits
+`3FC555737C000000`. cJSON emitted `0.166670260950923`, whose parsed double
+is `3FC555737C000001`, exactly one ULP higher. This is JSON decimal precision
+loss, not evidence that the field changed during its paused capture.
+
+The source repair adds canonical 16-digit uppercase IEEE binary64 hex strings
+for pending time and all four budgets to the capture receipt and to state
+responses only when the capture flag is exactly `1`. The validator compares
+each native header double's bits against the capture, before-state and
+after-state strings exactly. Missing, mistyped, malformed or one-ULP changed
+strings fail. Existing numeric before/after equality, paused clock, source,
+path, generation/revision and duplicate-export guards stay strict. No numeric
+tolerance, binary format change or solver change is introduced. The regression
+fixture uses this observed non-round-tripping pending value and rejects altered
+bits for each budget and pending field. Root must rebuild and rerun actual
+capture acceptance; the repaired source tests are not an installed pass.
+
 ## Validation and root-owned next run
 
 `scripts/Test-RainWaterCoarseCapture.ps1` passed native O0/O2 IEEE-bit,

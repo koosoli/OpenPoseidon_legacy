@@ -2526,6 +2526,13 @@ void RegisterSnowProbe(HarnessServer& hs)
             if (!GWorld || !action) return HarnessProtocol::ErrorResponse("rainwater query requires world and action");
             const auto& field = GRainWater();
             auto* out = cJSON_CreateObject();
+            const auto addExactDoubles=[&](double pending,const RainWaterField::Budget& budget){
+                cJSON_AddStringToObject(out,"pendingSecondsBits",RainWaterCapture::DoubleBits(pending).data());
+                cJSON_AddStringToObject(out,"rainVolumeBits",RainWaterCapture::DoubleBits(budget.rain).data());
+                cJSON_AddStringToObject(out,"infiltrationVolumeBits",RainWaterCapture::DoubleBits(budget.infiltration).data());
+                cJSON_AddStringToObject(out,"evaporationVolumeBits",RainWaterCapture::DoubleBits(budget.evaporation).data());
+                cJSON_AddStringToObject(out,"outletVolumeBits",RainWaterCapture::DoubleBits(budget.outlet).data());
+            };
             if (std::strcmp(action,"coarse_capture") == 0) {
                 // Deliberate one-time paused export, never in the measured
                 // solver/renderer path. The caller cannot supply an output path.
@@ -2581,6 +2588,7 @@ void RegisterSnowProbe(HarnessServer& hs)
                 cJSON_AddNumberToObject(out,"spacing",view->spacing);cJSON_AddNumberToObject(out,"originX",view->originX);
                 cJSON_AddNumberToObject(out,"originZ",view->originZ);cJSON_AddNumberToObject(out,"seaLevel",view->seaLevel);
                 cJSON_AddNumberToObject(out,"pendingSeconds",view->pending);
+                addExactDoubles(view->pending,view->budget);
                 cJSON_AddNumberToObject(out,"terrainRange",GLandscape->GetTerrainRange());
                 cJSON_AddNumberToObject(out,"terrainSpacing",GLandscape->GetTerrainGrid());
                 cJSON_AddNumberToObject(out,"sourceStride",grid.stride);
@@ -2623,6 +2631,9 @@ void RegisterSnowProbe(HarnessServer& hs)
                 cJSON_AddNumberToObject(out,"evaporationVolume",budget.evaporation);
                 cJSON_AddNumberToObject(out,"outletVolume",budget.outlet);
                 cJSON_AddNumberToObject(out,"pendingSeconds",field.PendingSeconds());
+                const char* captureFlag=std::getenv("POSEIDON_RAIN_WATER_CAPTURE");
+                if(captureFlag&&std::strcmp(captureFlag,"1")==0)
+                    addExactDoubles(field.PendingSeconds(),budget);
                 cJSON_AddNumberToObject(out,"generation",static_cast<double>(field.Generation()));
                 cJSON_AddBoolToObject(out,"fineActive",field.FineActive());
                 cJSON_AddBoolToObject(out,"sourceReady",field.SourceReady());

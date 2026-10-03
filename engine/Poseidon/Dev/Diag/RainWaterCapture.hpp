@@ -1,6 +1,7 @@
 #pragma once
 #include <Poseidon/World/Weather/RainWaterField.hpp>
 #include <bit>
+#include <array>
 #include <filesystem>
 #include <ostream>
 #include <string>
@@ -12,6 +13,18 @@ inline constexpr size_t MaxBytes=HeaderBytes+2*MaxCells*sizeof(float);
 inline constexpr char Magic[]="RWCAP001";
 static_assert(sizeof(float)==4 && sizeof(double)==8 && std::numeric_limits<float>::is_iec559 &&
               std::numeric_limits<double>::is_iec559);
+// JSON decimal formatting need not round-trip a binary64. Carry its native
+// bits as a canonical string, independent of locale/serializer precision.
+inline constexpr std::array<char,17> DoubleBits(double value) {
+    constexpr char hex[]="0123456789ABCDEF";
+    const auto bits=std::bit_cast<uint64_t>(value);
+    std::array<char,17> result{};
+    for(unsigned i=0;i<16;++i)result[i]=hex[(bits>>(4*(15-i)))&15];
+    return result;
+}
+static_assert(DoubleBits(std::bit_cast<double>(uint64_t{0x3FC555737C000000}))[15]=='0');
+static_assert(DoubleBits(0.166670260950923)[15]=='1');
+static_assert(std::bit_cast<uint64_t>(0.166670260950923)==uint64_t{0x3FC555737C000001});
 inline std::optional<std::filesystem::path> CampaignOutputPath(const std::filesystem::path& directory) {
     if(!directory.is_absolute())return {};
     const auto path=directory.lexically_normal();bool designated=false;std::string previous;
