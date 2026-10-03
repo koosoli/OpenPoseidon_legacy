@@ -34,11 +34,17 @@ struct MediumTerrainParams {
 @group(3) @binding(3) var<uniform> medium_control:vec4<u32>;
 
 fn rain_water_actual_soil(world_xz:vec2<f32>)->f32 {
+    // Integer IEEE exponent checks survive driver float fast-math assumptions.
+    // Refuse NaN/Inf before arithmetic or float-to-index conversion can select
+    // a valid material row from an invalid world coordinate.
+    if (any((bitcast<vec2<u32>>(world_xz) & vec2<u32>(0x7f800000u)) ==
+            vec2<u32>(0x7f800000u))) {return 0.0;}
     if (medium_control.x != 1u || any(medium_control.yz != rainwater.identity.xy) ||
         !(medium_terrain.land_grid > 0.0) || medium_terrain.land_grid >= 1000000.0) {return 0.0;}
     let cell=(world_xz-medium_terrain.world_origin)/medium_terrain.land_grid;
     let dimensions=textureDimensions(medium_indices);
-    if (any(cell != cell) || any(cell<vec2<f32>(0.0)) ||
+    if (any((bitcast<vec2<u32>>(cell) & vec2<u32>(0x7f800000u)) ==
+            vec2<u32>(0x7f800000u)) || any(cell<vec2<f32>(0.0)) ||
         any(cell>=vec2<f32>(dimensions)) ||
         any(dimensions != vec2<u32>(medium_terrain.land_range))) {return 0.0;}
     let entry=textureLoad(medium_indices,vec2<i32>(floor(cell)),0).x & 0x7fffu;

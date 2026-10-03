@@ -112,3 +112,15 @@ neighbours. Keep the soil-agent's rough-substrate sheen separate. Check original
 OFP sand/hard and unknown Cain controls, and an actual world replacement. A
 visually darker brown pool is not sufficient proof of correct source admission
 or physical drainage. No visual acceptance is claimed here.
+
+### Invalid-coordinate device counterexample
+
+The first actual GPU source probe admitted the NaN world-x case (quiet NaN
+`0x7fc00000`) as pure soil even though `cell != cell` was intended to refuse it.
+The strict expected refusal remains. The source query now checks the IEEE
+exponent through integer bitcasts before world-coordinate arithmetic and again
+on the computed cell. This excludes NaN and both infinities without relying
+on driver floating-point self-comparison behavior. Ordinary finite bounds,
+source identity, index limits and original material eligibility remain in force.
+Cached CPU composition checks precede the root's actual device rerun; visual
+acceptance of muddy retained water remains pending installed-game testing.

@@ -24,9 +24,15 @@ fn actual_material_row_is_shared_and_medium_keeps_physical_support() {
     for guard in ["rain_water_raster_support_depth(water,bed,frame.ground_weather.z,in.world.y)",
         "if (local_depth <= 0.001)","if (cover <= 0.0 || snow > 0.002)",
         "medium_control.yz != rainwater.identity.xy","entry >= arrayLength(&medium_materials)",
+        "bitcast<vec2<u32>>(world_xz)","bitcast<vec2<u32>>(cell)","0x7f800000u",
         "let soil=rain_water_actual_soil(in.world.xz)","if (soil > 0.0)"] {
         assert!(source.contains(guard),"Missing actual source/support gate {guard}");
     }
+    let finite_guard=source.find("bitcast<vec2<u32>>(world_xz)").unwrap();
+    let cell_arithmetic=source.find("let cell=(world_xz-medium_terrain.world_origin)").unwrap();
+    let source_load=source.find("let entry=textureLoad(medium_indices").unwrap();
+    assert!(finite_guard < cell_arithmetic && cell_arithmetic < source_load,
+        "Invalid world coordinates must be refused before arithmetic and material sampling");
     assert_eq!(source.matches("fn fs_main(").count(),1);
     assert!(!include_str!("shaders/rain_water_medium.wgsl").contains("rain_strength"));
 }
