@@ -1,5 +1,21 @@
 # Weather owner follow-up, 3 October 2026
 
+Installed14:01 checkpoint: matching e017e028 pair deployed13:49 after18step
+combined full game build; broad normalized soil direct sheen is now installed,
+with41 focused shader/device checks passing. CPU attribution is installed and
+defaultOFF; native flag0/1 focused tests pass. Exact pair/PDB archive under
+build/installed-symbols/e017e028, EXE DB8C1FDB63049A74C3266FAC7D311CB3A8C2602F8C8ACB802D377B9ED6EB4220,
+DLL6D3A72621C70CE9174F9839EBA4F5C0A363D37E3799E99D3765F12BD15F90ACC.
+Actual flight827584 fails before measurement after a focus-loss clears held Alt;
+normal exit0/stable pair, no paired timing claim. Ordinary bounded pre-measure
+key re-admission is being repaired without weakening measured-interval guards.
+Actual Eden b2a357 reaches uniform0.705556/GMud0.803062 and captures all seven
+dry stock day/night/lamp/roof views. It fails the wet heading-anchor gate after
+natural actor turn346.873; normal exit0/stable pair. Next fixture explicitly
+stages only world orientation while paused, retaining actual rain histories,
+body/source/position/stores and strict within-capture heading guards. Wet mud
+and wet cloth appearance remain pending, not accepted from source counters.
+
 Actual13:48 native Noe ON sunny9e5936 passes normal exit/stable bd pair,
 unedited native geometry, actual ownership, pause/return and no-input budgets.
 Captured actual solar exposure0.953973→0.935756 with negative daytime travelY,
