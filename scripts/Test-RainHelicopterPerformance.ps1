@@ -7,6 +7,7 @@ param([ValidatePattern('^[0-9a-fA-F]{8,40}$')][string]$ExpectedCommit='',
  [ValidateRange(80,220)][double]$HeightAboveBed=120,
  [double]$X=4975,[double]$Z=4675,
  [switch]$IncludeFarCoverOff,
+ [switch]$CloudletCosts,
  [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='occupied-rain-flight',
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [switch]$SelfTest)
@@ -241,7 +242,7 @@ function Same-Pair($a,$b){Require ($a.stamp -ceq $b.stamp -and $a.exe -ceq $b.ex
 $before=Pair
 $campaign=Join-Path $root ('build/rain-helicopter/'+$Label+'-'+(Get-Date -Format yyyyMMdd-HHmmss)+'-'+[guid]::NewGuid().ToString('N').Substring(0,6))
 New-Item -ItemType Directory -Force $campaign|Out-Null
-$settings=@{POSEIDON_RAIN_TRACE='1';POSEIDON_SNOW_TEST_DEPTH='0';POSEIDON_SNOWLINE='off';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_TERRAIN_JITTER='0';WGR_TEMPORAL='0';WGR_LOD_GOVERNOR_RANGE='1';POSEIDON_VSYNC='0';POSEIDON_ROTOR_LAND_TRACE='0';WGR_WEATHER_COVER_TRACE='0';POSEIDON_RAIN_WATER_FINE='0';WGR_RAIN_WATER_FINE='0'}
+$settings=@{POSEIDON_RAIN_TRACE='1';POSEIDON_SNOW_TEST_DEPTH='0';POSEIDON_SNOWLINE='off';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_TERRAIN_JITTER='0';WGR_TEMPORAL='0';WGR_LOD_GOVERNOR_RANGE='1';POSEIDON_VSYNC='0';POSEIDON_ROTOR_LAND_TRACE='0';WGR_WEATHER_COVER_TRACE='0';POSEIDON_RAIN_WATER_FINE='0';WGR_RAIN_WATER_FINE='0';POSEIDON_SIM_VEHICLE_COST=$(if($CloudletCosts){'1'}else{'0'})}
 $clear=@('POSEIDON_TEST_RAIN','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','POSEIDON_SNOW_SHELTER','WGR_CLOUD_COVERAGE','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_TERRAIN_PUDDLE_WETNESS','WGR_WEATHER_COVER','WGR_WEATHER_COVER_FAR')
 $keys=@(@($settings.Keys)+$clear+@('POSEIDON_USER_DIR')|Select-Object -Unique);$saved=@{}
 foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
@@ -387,6 +388,7 @@ try{
   if($weatherName -ceq 'Rain'){Require ($arm.rainRows.Count -ge 15 -and @($arm.rainRows|Where-Object{$_.drops -gt 0 -and $_.drawn -gt 0}).Count -ge 10) 'Actual live/rendered rain trace absent during flight.'}
   $allLogs=@($lines)+@(Read-CompleteLogLines (Join-Path $armDir 'stdout.txt'))+@(Read-CompleteLogLines (Join-Path $armDir 'stderr.txt'))
   $allLogs=$allLogs -join "`n"
+  if($CloudletCosts){Require ($allLogs -match 'Sim cloudlet cost over \d+ ticks: stage=cloudlets.runoff-advance') 'Requested actual nested runoff CPU accounting is absent.'}
   Require ($allLogs -notmatch 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION|Unbekannter Operator') 'Runtime/script/renderer failure.'
   if($control -ceq 'FarCoverOff'){Require ($allLogs -match 'weather cover far cascade: enabled=false' -and $allLogs -notmatch 'weather cover far map:') 'Production far-cover OFF not proved.'}
   else{Require ($allLogs -match 'weather cover far cascade: enabled=true') 'Production default far-cover not proved.'}

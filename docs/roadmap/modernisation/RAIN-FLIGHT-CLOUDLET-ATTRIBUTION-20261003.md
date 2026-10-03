@@ -2,6 +2,19 @@
 
 ## Evidence and scope
 
+The runner now records and restores `POSEIDON_SIM_VEHICLE_COST` explicitly.
+Use `-CloudletCosts` to request nested native CPU accounting in both arms;
+the default is zero, preventing an inherited process override from silently
+changing this benchmark. Requested accounting must appear in actual complete
+logs. Existing measurement, route, source, weather and exit guards remain.
+Pure helper selftests pass; the explicit-cost runtime follow-up is in progress.
+
+Installed86aae174 actual88be03 passes both normal stable arms and zero drops:
+dry mean9.480935/p9511.456ms, rain mean10.489598/p9513.452ms. This run did
+not enable nested CPU accounting; it cannot prove a measured solver saving.
+Compared with preceding e0178ffcd5, rain mean10.774874/p9515.105ms, the
+bounded independent run is encouraging but not causal FPS isolation.
+
 The installed `bd590703` four-arm campaign completed normally with every arm
 passing its route, weather, source-domain, binary-identity and capture guards:
 `build/rain-helicopter/occupied-matched-rain-weather-20261003-132025-8b38bb/result.json`
