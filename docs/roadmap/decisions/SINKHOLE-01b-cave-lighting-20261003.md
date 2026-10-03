@@ -72,6 +72,11 @@ whatever animation plays.
 
 ## Open
 
+* **Parked by the owner (2026-10-04, "sort the flashlight later")**: torch brightness and aim in play
+  (6b8ac86d now aims the player's beam at the point 12 m down his view; in the harness the player's
+  own torch lit nothing visible in the cave while AI torches did -- unexplained); the left-hand proxy
+  is never found (`hand=0` for every soldier, torch at the chest fallback); the hold pose.
+
 * The stairwell seen from its foot reads very bright -- probably the sunlit opening and correct, but
   surfaces inside an opening's footprint and under a slab do get full sun/sky from the rule. Owner to
   judge in play.
