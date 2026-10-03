@@ -1211,6 +1211,10 @@ class EngineWgpu : public EngineDummy
         WgrTerrainParams terrainParams{};
         bool terrainParamsDirty = false;
         std::vector<float> snowData;
+        // Sinkhole W1: this frame's terrain hole edges (n x {nx, nz, d, last}); applied with the rest so the
+        // landscape draw never touches the renderer itself.
+        std::vector<float> terrainHoles;
+        bool terrainHolesDirty = false;
         std::vector<WgrSmokeShadowBlob> smokeBlobs;
         // SMK-038: the same particles again, uncapped by the ground-shadow gates and
         // with a larger cap, for froxel injection. Collected only while the volumetric

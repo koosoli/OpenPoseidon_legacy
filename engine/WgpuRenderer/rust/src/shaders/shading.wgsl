@@ -12,6 +12,9 @@
 #import shadow::shadow_strength
 #import lighting::lights_material_contrib
 #import color::srgb_to_linear
+// Sinkhole W1: the terrain height at a fragment, for the underground sun test below. Every pipeline that
+// imports `shading` (shader3d, gpu_driven) already binds the conform heightmap group.
+#import conform::{surface_y, hm_params}
 
 // The six material colour terms shade() consumes (raw gamma-space; shade srgb-decodes on
 // the HDR/linear path). sun_ambient/sun_diffuse are the SUN-FOLDED terms (material × sun),
@@ -209,7 +212,17 @@ fn shade(
     // Long-range terrain sun-shadow: removes direct sun (diffuse+specular), keeps ambient/
     // emissive/local, sampled by absolute world position (world_pos is camera-relative).
     let world_abs = world_pos + frame.cam_pos.xyz;
-    let terrain_s = terrain_sun_shadow(world_abs.xz, world_abs.y);
+    // Sinkhole W1: a fragment under the terrain surface (a cave, a cellar, a tunnel) gets no direct sun from
+    // above. The heightfield is never a shadow caster for objects, and the long-range mask marches OUTWARD from
+    // each column and never counts the column's own ground, so a cave roof 0.4 m down read as open sky and the
+    // sun lit the inside of every cave (owner report: "the roof of the cave is bleeding light"). Ramped over
+    // 0.2-0.6 m below the surface so a wall foot touching the ground does not alias. Openings in a terrain hole
+    // lose their sun shafts too -- the price of a test that needs only the heightmap.
+    var underground_s = 0.0;
+    if (hm_params.enabled > 0.5) {
+        underground_s = smoothstep(0.2, 0.6, surface_y(world_abs.xz) - world_abs.y);
+    }
+    let terrain_s = max(terrain_sun_shadow(world_abs.xz, world_abs.y), underground_s);
     let sun_occ = select(terrain_s, max(terrain_s, csm_s), sky_lit);
     // CLD-020: cloud transmittance MULTIPLIES the remaining direct sun rather than joining the
     // max() above. The others are binary occluders answering "is something between me and the

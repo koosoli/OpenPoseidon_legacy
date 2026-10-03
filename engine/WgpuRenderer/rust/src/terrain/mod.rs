@@ -2180,6 +2180,16 @@ mod terrain_hole_tests {
         assert!(src.contains("@group(1) @binding(3) var<storage, read> holes: TerrainHoles;"));
     }
 
+    // The underground sun test lives in the shared `shading` module; both object shaders that import it
+    // must still compose and validate (they bind the conform heightmap group it reads).
+    #[test]
+    fn object_shaders_compose_with_the_underground_sun_test() {
+        let src = include_str!("../shaders/shading.wgsl");
+        assert!(src.contains("smoothstep(0.2, 0.6, surface_y(world_abs.xz) - world_abs.y)"));
+        compose(include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl");
+        compose(include_str!("../gfx3d/gpu_driven.wgsl"), "gfx3d/gpu_driven.wgsl");
+    }
+
     #[test]
     fn the_hole_buffer_matches_the_shader_struct() {
         // vec4 header + 64 vec4 edges

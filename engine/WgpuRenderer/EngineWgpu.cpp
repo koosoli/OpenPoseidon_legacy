@@ -2838,6 +2838,12 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
         wgr_terrain_set_snow(_renderer, p.snowData.data(), static_cast<uint32_t>(p.snowData.size()));
         p.snowData.clear();
     }
+    if (p.terrainHolesDirty)
+    {
+        wgr_terrain_set_holes(_renderer, p.terrainHoles.empty() ? nullptr : p.terrainHoles.data(),
+                              static_cast<uint32_t>(p.terrainHoles.size() / 4));
+        p.terrainHolesDirty = false;
+    }
     if (p.smokeDirty)
     {
         wgr_set_smoke_shadow(_renderer, p.smokeBlobs.empty() ? nullptr : p.smokeBlobs.data(),
@@ -13816,7 +13822,19 @@ void EngineWgpu::SetTerrainHoles(const float* edges, int nEdges)
     // buffer only the terrain and grass passes bind, so the reset is a no-op and the frame's set stands.
     if (!_renderer || !edges)
         return;
-    wgr_terrain_set_holes(_renderer, edges, static_cast<uint32_t>(std::clamp(nEdges, 0, 64)));
+    const int n = std::clamp(nEdges, 0, 64);
+    // One line whenever the hole set's size changes (entering / leaving a hole object's range), so a
+    // capture log shows whether the terrain and grass passes were handed any holes at all.
+    static int s_lastLogged = -1;
+    if (n != s_lastLogged)
+    {
+        s_lastLogged = n;
+        LOG_INFO(Graphics, "Wgpu terrain holes: {} edge(s) handed to the terrain and grass passes", n);
+    }
+    // REN-THR-013: queued like every other producer-side push and applied by the worker before the
+    // frame renders; calling the renderer from the landscape draw here raced the render thread.
+    _pendingSet.terrainHoles.assign(edges, edges + static_cast<size_t>(n) * 4);
+    _pendingSet.terrainHolesDirty = true;
 }
 
 void EngineWgpu::SetGrassParams(float, float, float, float)
