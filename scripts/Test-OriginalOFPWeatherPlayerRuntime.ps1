@@ -76,6 +76,15 @@ function Uniform-HeadingDifference([double]$actual,[double]$anchor){
 function Assert-UniformHeading([double]$actual,[double]$anchor){
  Require ((Uniform-HeadingDifference $actual $anchor) -lt .01) 'Actual anchored stock comparison heading changed.'
 }
+function Uniform-StageCommand([double]$heading){
+ $null=Uniform-HeadingDifference $heading $heading
+ return 'player setDir '+$heading.ToString('R',$culture)
+}
+function Assert-UniformSources($a,$b){
+ foreach($kind in @('sand','mud')){
+  Require (($a[$kind]|ConvertTo-Json -Depth 8 -Compress) -ceq ($b[$kind]|ConvertTo-Json -Depth 8 -Compress)) 'Paused uniform orientation staging changed actual source/geometry.'
+ }
+}
 function Uniform-View($position,[double]$heading){
  Require (@($position).Count -eq 3) 'Uniform ASL position needs three coordinates.'
  $x=Number $position[0];$z=Number $position[1];$y=Number $position[2]
@@ -149,6 +158,13 @@ function Pair{
 }
 function Same-Pair($a,$b){Require (($a|ConvertTo-Json -Depth 8 -Compress)-ceq ($b|ConvertTo-Json -Depth 8 -Compress)) 'Installed source pair changed.'}
 function Test-Helpers{
+ Require ((Uniform-StageCommand 52.0463) -ceq 'player setDir 52.0463') 'Actual settled dry heading staging command changed.'
+ $changedHeading=$false;try{Assert-UniformHeading 346.873 52.0463}catch{$changedHeading=$true};Require $changedHeading 'Real rain-wait heading drift accepted as an aligned capture.'
+ Assert-UniformHeading 52.04631 52.0463
+ $sourcePair=@{sand=@{offset=-.09;world='noe.wrp'};mud=@{offset=-.04;world='noe.wrp'}}
+ Assert-UniformSources $sourcePair $sourcePair
+ $changedSource=$sourcePair|ConvertTo-Json|ConvertFrom-Json -AsHashtable;$changedSource.mud.offset=-.05
+ $failed=$false;try{Assert-UniformSources $sourcePair $changedSource}catch{$failed=$true};Require $failed 'Orientation staging changed physical geometry without rejection.'
  $plan=@(Mud-LightingPlan);Require ($plan.Count -eq 2 -and $plan[0].overcast -eq 1 -and $plan[1].overcast -eq 0) 'Paused mud lighting recipe changed.'
  $lightWet=@{uniform=.9;weather=@{liquidRain=.6};mud=@{wetness=.85}};$receipt=@{lastQueuedRow=@{accumulated=.85;queuedPad1=.85}}
  Require (Mud-LightingWetReady $lightWet $receipt) 'Actually accumulated high wetness refused.'
@@ -434,13 +450,19 @@ function Uniform-Lighting([string]$band){
   $arm.uniformViewAnchor=@($original.position);$arm.uniformViewDirection=$direction
  }
  else{Require ($original.uniform -ge .3) 'Wet uniform comparison lacks actual rain history.'}
- Assert-UniformHeading $direction $arm.uniformViewDirection
  $anchor=@($arm.uniformViewAnchor);$view=Uniform-View $anchor $arm.uniformViewDirection
  for($i=0;$i -lt 3;++$i){Require ([Math]::Abs((Number $original.position[$i])-(Number $anchor[$i])) -le .01) 'Dry/wet actor left the same standing comparison position.'}
+ # Ordinary simulation may turn the soldier during real wetting. Stage only
+ # world orientation once while paused; never force animation or rewrite history.
+ $stageSite=@{x=$original.position[0];z=$original.position[1]};$sourceBefore=@{}
+ foreach($kind in @('sand','mud')){$sourceBefore[$kind]=Field $kind $stageSite}
+ $stageCommand=Uniform-StageCommand $arm.uniformViewDirection;Exec $stageCommand
+ $staged=State;Assert-Paused $original $staged;$stagedHeading=Number (Eval 'getDir player');Assert-UniformHeading $stagedHeading $arm.uniformViewDirection
+ $sourceAfter=@{};foreach($kind in @('sand','mud')){$sourceAfter[$kind]=Field $kind $stageSite};Assert-UniformSources $sourceBefore $sourceAfter
  $actor=Eval 'format ["%1",player]';$body=Assert-Body (Lines) ($original.time-.65)
  Require ($actor -is [string] -and ![string]::IsNullOrWhiteSpace($actor) -and $actor -cne '<nullptr-object>') 'Formatted actual controlled player identity is absent.'
  if($band -eq 'dry'){$arm.uniformActorDebug=$actor}else{Require ($actor -ceq $arm.uniformActorDebug) 'Dry/wet actual actor differs.'}
- $record=@{before=$original;actor=@{class=(Eval 'typeOf player');debugName=$actor;model='data3d\mc vojakw2.p3d';modelSource=$body;position=$original.position;direction=$direction;anchoredDryDirection=$arm.uniformViewDirection;initialPlacementDirectionRequest=90};camera=@{rawEngineView=$view;derivedFromSettledDryDirection=$arm.uniformViewDirection;command='triSetView';effectActive=(Eval 'triGetCameraEffectActive')};views=@{};scope='Same stock standing actor, anchored actual settled dry heading and render-only camera, matching actual overcast. Rain differs between natural wetting histories. Ordinary idle animation may differ; no pose/bone equivalence or pixelwise equality claim.'}
+ $record=@{before=$original;orientationStage=@{beforeHeading=$direction;requestedHeading=$arm.uniformViewDirection;command=$stageCommand;readbackHeading=$stagedHeading;after=$staged;sourceBefore=$sourceBefore;sourceAfter=$sourceAfter};actor=@{class=(Eval 'typeOf player');debugName=$actor;model='data3d\mc vojakw2.p3d';modelSource=$body;position=$original.position;direction=$stagedHeading;anchoredDryDirection=$arm.uniformViewDirection;initialPlacementDirectionRequest=90};camera=@{rawEngineView=$view;derivedFromSettledDryDirection=$arm.uniformViewDirection;command='triSetView';effectActive=(Eval 'triGetCameraEffectActive')};views=@{};scope='Same stock standing actor, world orientation staged once while paused to its actual settled dry heading, and anchored render-only camera with matching actual overcast. Rain differs between natural wetting histories. Natural heading and ordinary idle animation may differ; no pose/bone equivalence or pixelwise equality claim.'}
  $lampOwned=$false;$roofOwned=$false
  try{
   # World::SetWeather applies zero-duration overcast immediately. Unlike rain,
@@ -498,7 +520,7 @@ function Uniform-Lighting([string]$band){
  }
  Start-Sleep -Milliseconds 500;$record.after=State;Assert-Paused $original $record.after
  Require ([Math]::Abs((Number $record.after.weather.overcast)-(Number $original.weather.overcast)) -lt .001) 'Original cloud lighting was not restored.'
- Assert-UniformHeading (Number (Eval 'getDir player')) $direction
+ Assert-UniformHeading (Number (Eval 'getDir player')) $stagedHeading
  return $record
 }
 try{
