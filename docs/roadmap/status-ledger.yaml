@@ -8096,6 +8096,7 @@ tickets:
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
       - "Malprave job 23: grenade limit failed (4 throws in 1.6 s), spotting/hunting test broken by setPos teleports; knowsAbout reads 0."
+      - "Oli 2026-10-04: a standing enemy at 130-150 m on the Everon beach is never noticed (B on or off); with gradual spotting on, ~15 s to notice one at 60 m. Owner: AI in combat stance slow to zero in (AI-AIM-001). Hunting tests must not teleport the enemy (out of the 300 m range); POSEIDON_AI_HUNT_LOG=1 shows the gates."
     fallback: null
     reviewer: null
     reviewer_method: null
@@ -8428,6 +8429,99 @@ tickets:
     fallback: null
     reviewer: null
     reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-PORT-C01
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Malprave vehicle and aircraft AI group C: convoyRoad, convoyOrder, tankCorners, runwayAxis, runwayHeight, parachuteDamage"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/ai-malprave-a
+    baseline_commit: fade1a1c
+    verification_commit: ca182a04
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [ca182a04]
+    production_call_sites:
+      - file: engine/Poseidon/AI/VehicleAIPilot.cpp
+        symbol: convoy follow point on the road
+      - file: engine/Poseidon/AI/AISubgroup.cpp
+        symbol: convoy order
+      - file: engine/Poseidon/World/Entities/Vehicles/Air/Airplane.cpp
+        symbol: runway take-off and landing
+      - file: engine/Poseidon/World/Entities/Vehicles/Parachute.cpp
+        symbol: parachutist hit
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    capability_claims:
+      - capability: AI_CONVOY_ON_ROAD
+        status: UNVERIFIED
+        denominator: "Everon road NW of the bay: 3 Truck5t in column, 1.6 km, 60-72 km/h, in order, on the tarmac, 100 s, undamaged."
+    known_failures:
+      - "Runways (Malprave tested on Sahrani, not in Oli), tank cornering and parachutes compiled and run but not captured."
+      - "One M1A1 left the road near the start and rejoined it."
+    fallback: null
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner play-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-PORT-B01
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Malprave X-Ray infantry AI group B: gradualSpotting, aiHunting, aiCoverGrenades, aiExposed (CfgAIFork, off by default)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/ai-malprave-a
+    baseline_commit: fade1a1c
+    verification_commit: f50c4fa9
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [f50c4fa9]
+    production_call_sites:
+      - file: engine/Poseidon/AI/AIHunt.cpp
+        symbol: Hunt::Think
+      - file: engine/Poseidon/World/Detection/Target.cpp
+        symbol: GradualSpotting
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldExposed.cpp
+        symbol: Man::ExposedVisibility
+      - file: engine/Poseidon/World/Detection/TargetFire.cpp
+        symbol: ObstacleFree
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    capability_claims:
+      - capability: AI_HUNTING
+        status: UNVERIFIED
+        denominator: "Test add-on with CfgAIFork on, enemy seen at 60 m goes prone and crawls 30 m: hold, half-squad flank to points round his last position, back to combat when he shows (POSEIDON_AI_HUNT_LOG=1). Search phase not reached."
+    known_failures:
+      - "B-on firefight and the grenade interval not captured (owner stopped testing); Malprave saw 4 throws in 1.6 s -- suspect the throw is recorded at release, after mates have already decided."
+      - "B-off regression runs not done."
+      - "Gradual spotting took ~15 s to notice a standing enemy at 60 m."
+    fallback: "CfgAIFork keys absent or 0 (the default): gradualSpotting, hunting, grenadeInterval, exposedParts off."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner play-test pending.
     supersedes: []
     evidence:
       - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md

@@ -132,3 +132,18 @@ From Malprave job 23 (29 Sep), the first and only A/B test of the X-Ray patches:
     near misses at 40 / 80 m, men pinned).
 * **Owner report: AI in combat stance take a long time to zero in on their target** → `AI-AIM-001`
   (to investigate; Oli's `POSEIDON_COMBAT_AUDIT` logs the aim gates).
+* **2026-10-04, group C (items 10–13): integrated (ca182a04), `AI-PORT-C01`.**
+  * Captured: a three-truck convoy keeps its order and stays on the winding Everon road for 1.6 km.
+  * Runways, tank cornering and parachutes are built and run but not captured.
+* **2026-10-04, group B (items 6–9): integrated (f50c4fa9), `AI-PORT-B01`, off by default.**
+  * `class CfgAIFork { gradualSpotting = 1; hunting = 1; grenadeInterval = 5; exposedParts = 1; }`
+    gives Malprave's settings.
+  * aiExposed was rewritten into `SoldierOldExposed.cpp` (Malprave had it in the Cry of Fear file).
+  * New `POSEIDON_AI_HUNT_LOG=1` logs hunting phases, the gate that blocks a soldier, and grenades
+    thrown or refused.
+  * Hunting captured working (hold → half-squad flank → back to combat). The B-on firefight, the
+    grenade interval and the B-off regression runs were not done (owner stopped testing).
+  * Findings carried into AI-XRAY-001:
+    * A standing enemy at 130–150 m on the beach is never noticed (with or without B).
+    * Gradual spotting takes ~15 s at 60 m.
+    * Teleported enemies leave the 300 m hunt range.

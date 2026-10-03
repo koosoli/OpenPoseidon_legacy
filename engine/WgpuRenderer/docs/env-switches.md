@@ -103,6 +103,8 @@ See `docs/roadmap/decisions/FIXES-20261003.md`.
 | `POSEIDON_SWIM_SPLASH` | Engine (`SoldierOldSwim.cpp`) | Sinkhole W3. `0` turns off the swimmers' hand and foot splashes (water-interaction kind 6, drawn by the Tidewater water). |
 | `POSEIDON_SWIM_DRAWN` | Engine (`SoldierOldSwim.cpp`) | Sinkhole W3. `0`: swimmers near the camera ride the CPU wave predictor instead of the Tidewater surface as drawn (the probe grid, `wgr_water_drawn_grid`). |
 | `POSEIDON_SWIM_LOG` | Engine (`SoldierOldSwim.cpp`) | Sinkhole W3. Set: logs the player's swim heights (surface, eyes, limbs) and camera four times a second. |
+| `POSEIDON_AI_SUPPRESSION_LOG` | Engine (`AIUnitImpl.cpp`) | AI-PORT A. `1` logs every near miss that suppresses an AI soldier (level before/after, shooter, pinned). |
+| `POSEIDON_AI_HUNT_LOG` | Engine (`AIHunt.cpp`) | AI-PORT B. `1` logs hunting phase changes, why a soldier is blocked or idle, and hand grenades thrown or refused by the group interval. |
 
 ## Regenerating
 
