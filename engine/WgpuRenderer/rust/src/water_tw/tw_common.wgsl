@@ -30,6 +30,9 @@ struct TwSurface {
     wake: array<vec4<f32>, 8>,   // W6: the wake readers' lanes, 4 per slot (tw_wake.wgsl)
     impacts: array<vec4<f32>, 8>, // W8b: explosions in the surface, 2 lanes per slot (tw_impact.wgsl)
     probe: vec4<f32>,             // W9a/W12d: grid origin lattice x, z, step (m), size (tw_probe.wgsl)
+    rotorDomain: vec4<f32>,       // camera interaction domain: min XZ, size, reciprocal
+    rotorControl: vec4<f32>,      // frozen water clock, source count, reserved
+    rotorSources: array<vec4<f32>, 8>, // actual rotor-only world XZ, radius, strength
 };
 
 struct ConformParams {
@@ -80,4 +83,3 @@ fn terrainHeightAt(xz: vec2<f32>) -> f32 {
 
 // (W9b) the ground beyond the map as the water sees it (absolute m; deep open sea)
 const OFF_MAP_GROUND: f32 = -200.0;
-

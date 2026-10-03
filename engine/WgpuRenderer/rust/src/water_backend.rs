@@ -352,6 +352,9 @@ impl WaterBackend {
                 if let Some(p) = params {
                     tw.set_params(queue, p);
                 }
+                if let Some(ip) = interaction {
+                    tw.set_interaction_params(ip);
+                }
                 if let Some((h, tp, generation)) = &self.terrain_heights {
                     tw.set_terrain_heights(h.clone(), *tp, *generation);
                 }
@@ -425,8 +428,10 @@ impl WaterBackend {
 
     pub fn set_interaction_params(&mut self, queue: &wgpu::Queue, params: WgrWaterInteractionParams) {
         self.interaction_params = Some(params);
-        if let Some(op) = self.op_mut() {
-            op.water.set_interaction_params(queue, params);
+        match &mut self.active {
+            Active::CurrentOp(op) => op.water.set_interaction_params(queue, params),
+            Active::Tidewater(tw) => tw.set_interaction_params(params),
+            Active::Empty => {}
         }
     }
 

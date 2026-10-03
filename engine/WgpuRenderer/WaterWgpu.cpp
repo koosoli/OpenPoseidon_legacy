@@ -18,6 +18,7 @@
 #include <Poseidon/World/Terrain/LandscapeShared.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/World/Weather/RainWaterField.hpp>
+#include <Poseidon/World/Weather/RotorWaterPolicy.hpp>
 #include <Poseidon/World/Entities/Infantry/UniformWetness.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/World/World.hpp>
@@ -1382,11 +1383,10 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         {
             const render::frame::PresentationSnapshot::RotorSource& source = rotorSnap.rotorSources[i];
             const float rotorSpeed = source.rotorSpeed;
-            const float altitude = source.y - _params.sea_level;
             // A hovering aircraft can still stir the surface from several metres
             // up, but do not inject ripples from a helicopter high in the sky or
             // parked over dry land.
-            if (altitude < -2.0f || altitude > 30.0f || source.groundY > _params.sea_level + 0.25f)
+            if (!RotorSeaWashEligible(rotorSpeed, source.y, source.groundY, _params.sea_level))
                 continue;
             WgrWaterInteractionEvent& event = events[eventCount++];
             event.position_radius = {source.x, source.z, 3.0f + 12.0f * rotorSpeed, 1.10f * rotorSpeed * rotorSpeed};
@@ -1396,7 +1396,8 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
             // immediately when the RPM reaches zero.
             event.time_life_foam_mass = {now, 0.0f, 0.0f, 0.0f};
             event.direction_depth_flags = {0.0f, 0.0f, 0.0f,
-                                           static_cast<float>(WGR_WATER_INTERACTION_PENDING_IMPULSE)};
+                                           static_cast<float>(WGR_WATER_INTERACTION_PENDING_IMPULSE |
+                                                              WGR_WATER_INTERACTION_ROTOR)};
         }
     }
 

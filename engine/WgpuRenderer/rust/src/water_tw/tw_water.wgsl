@@ -314,6 +314,33 @@ fn rot2(v: vec2<f32>, a: f32) -> vec2<f32> {
 // simIn: how much a simulated region covers the pixel (Tidewater's SIM, which it decides at
 // compile time for its one region; blended here)
 // sf: the SurfFoam inputs; sf.on = the shore simulation runs (Tidewater attaches SurfFoam with it)
+fn rotorWashSlopes(worldXZ: vec2<f32>, footprint: f32) -> vec2<f32> {
+    let count = min(u32(tw.rotorControl.y), 8u);
+    if (count == 0u || tw.rotorDomain.z <= 0.0) { return vec2<f32>(0.0); }
+    let local = worldXZ - tw.rotorDomain.xy;
+    let edge = min(min(local.x, local.y), min(tw.rotorDomain.z-local.x, tw.rotorDomain.z-local.y));
+    if (edge <= 0.0) { return vec2<f32>(0.0); }
+    let domainFade = smoothstep(0.0, 8.0, edge);
+    var slopes = vec2<f32>(0.0);
+    for (var i = 0u; i < count; i += 1u) {
+        let rotor = tw.rotorSources[i];
+        let delta = worldXZ - rotor.xy;
+        let reach = rotor.z * 2.0;
+        if (dot(delta,delta) >= reach*reach) { continue; }
+        // Filtering/trigonometry run only inside the rotor's bounded reach.
+        let fine = exp(-0.5 * pow(max(footprint, 0.0) * 9.0, 2.0));
+        let broad = exp(-0.5 * pow(max(footprint, 0.0) * 5.7, 2.0));
+        let distance = length(delta);
+        let q = distance / rotor.z;
+        let envelope = smoothstep(0.15, 0.35, q) * (1.0-smoothstep(1.25,2.0,q));
+        let phase = dot(rotor.xy,vec2<f32>(0.013,0.017));
+        let wave = sin(distance*9.0-tw.rotorControl.x*23.0+phase)*fine*0.65 +
+                   sin(distance*5.7-tw.rotorControl.x*16.0+phase*1.73)*broad*0.35;
+        slopes += delta/max(distance,0.001) * (wave*envelope*rotor.w*0.14*domainFade);
+    }
+    return slopes * min(1.0,0.32/max(length(slopes),0.001));
+}
+
 fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam: f32, shoreN: vec3<f32>, shoreFoam: f32, extraFoam: f32, surfMask: vec2<f32>, simIn: f32, sf: SurfFoamCtx) -> WaterSurfaceFrag {
     var d = vec4<f32>(0.0);
     var foamSum = 0.0;
@@ -366,6 +393,9 @@ fn waterSurfaceFragment(lagXZ: vec2<f32>, footprint: f32, depth: f32, vertexFoam
         foamSum += im.foam;
         aeration += im.aeration;
     }
+
+    // Rotor-only normals: do not add legacy boat impulses over TW's own wakes.
+    slopes += rotorWashSlopes(lagXZ, footprint);
 
     // base normal: large shoreline waves (per-vertex, can overhang) perturbed by FFT detail
     var normal: vec3<f32>;

@@ -47,6 +47,7 @@ mod underwater;
 mod caustics;
 mod textures;
 mod wake;
+mod rotor_wash;
 
 /// What a region's stations were traced from: centre, terrain generation, sea level in 0.1 m steps.
 type StationKey = ([f32; 2], u64, i32);
@@ -152,6 +153,12 @@ fn boat_spray_enabled() -> bool {
     *V.get_or_init(|| std::env::var("WGR_TW_BOAT_SPRAY").map_or(true, |v| v.trim() != "off"))
 }
 
+/// Narrow rotor-normal ablation; boat wakes and ammunition remain enabled.
+fn rotor_wash_enabled() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var("WGR_TW_ROTOR_WASH").map_or(true, |v| v == "1"))
+}
+
 /// `WGR_TW_GLOW=<scale>`: overrides the Water tab's water glow (W3j), for A/B captures.
 fn glow_override() -> Option<f32> {
     static V: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
@@ -222,9 +229,12 @@ struct TwSurface {
     impacts: [[f32; 4]; impacts::SURFACE_SLOTS * 2],
     // W9a: the camera height probe's grid (tw_probe.wgsl)
     probe: [f32; 4],
+    rotor_domain: [f32; 4],
+    rotor_control: [f32; 4],
+    rotor_sources: [[f32; 4]; rotor_wash::SOURCES],
 }
 
-const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (18 + cdlod::LEVELS + wake::SLOTS * 4 + impacts::SURFACE_SLOTS * 2));
+const _: () = assert!(std::mem::size_of::<TwSurface>() == 16 * (20 + cdlod::LEVELS + wake::SLOTS * 4 + impacts::SURFACE_SLOTS * 2 + rotor_wash::SOURCES));
 
 /// Whether the shore simulation runs (Water tab, and only once the shore waves have a field).
 /// Breaker spray on (W4a): emission gain and sprite intensity above zero (the caller also needs
@@ -294,6 +304,7 @@ struct FrameInputs<'a> {
     // W9a: the probe grid, and the surface height under the camera read back from it
     probe: [f32; 4],
     cam_surface: Option<f32>,
+    rotor: rotor_wash::RotorWash,
 }
 
 fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
@@ -342,6 +353,9 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         wake: f.wake,
         impacts: f.impacts,
         probe: f.probe,
+        rotor_domain: f.rotor.domain,
+        rotor_control: f.rotor.control,
+        rotor_sources: f.rotor.sources,
     }
 }
 
@@ -437,6 +451,7 @@ pub struct Tidewater {
     instance_count: u32,
     last_params: Option<WgrWaterParams>,
     last_time: Option<f32>,
+    rotor: rotor_wash::RotorWash,
     detail_offset: [f32; 2],
     gens: [u64; 4], // depth, env, scene, heightmap
     // W3a shore field
@@ -774,6 +789,7 @@ impl Tidewater {
             instance_count: 0,
             last_params: None,
             last_time: None,
+            rotor: Default::default(),
             detail_offset: [0.0; 2],
             gens: [u64::MAX; 4],
             shore_t_view,
@@ -1033,6 +1049,7 @@ impl Tidewater {
             impacts: self.impacts.lanes(),
             probe: probe::Probe::lanes(cp),
             cam_surface: self.probe.camera_height(),
+            rotor: self.rotor,
         };
         let block0 = surface_block(&p, &inputs);
         self.detail_offset[0] += block0.wind[0] * block0.sea[2] * 0.7 * dt;
@@ -1163,6 +1180,20 @@ impl Tidewater {
     pub fn submit_interactions(&mut self, events: &[crate::ffi::WgrWaterInteractionEvent]) {
         let sea = self.last_params.map_or(0.0, |p| p.sea_level);
         self.impacts.submit(events, sea);
+        let frozen = self.rotor_frozen();
+        self.rotor.submit_frame(events.iter().map(|e| [e.position_radius,e.velocity_kind,
+            e.time_life_foam_mass,e.direction_depth_flags]),frozen,rotor_wash_enabled());
+    }
+
+    fn rotor_frozen(&self) -> bool {
+        self.last_params.is_some_and(|p| p.fft_control[2].to_bits() & (1 << 1) != 0)
+    }
+
+    // Called before events even when their count is zero: a stopped engine
+    // cannot retain the preceding frame's rotor descriptor.
+    pub fn set_interaction_params(&mut self, p: crate::ffi::WgrWaterInteractionParams) {
+        let frozen = self.rotor_frozen();
+        self.rotor.frame(p.domain,p.misc[1],frozen,rotor_wash_enabled());
     }
 
     /// W5e: this frame's lights; the spot lights are kept for the diver's torch (picked in
@@ -1446,7 +1477,10 @@ mod tests {
         assert_eq!(std::mem::offset_of!(TwSurface, impacts), 656);
         // W9a: the probe grid last
         assert_eq!(std::mem::offset_of!(TwSurface, probe), 784);
-        assert_eq!(std::mem::size_of::<TwSurface>(), 800);
+        assert_eq!(std::mem::offset_of!(TwSurface, rotor_domain), 800);
+        assert_eq!(std::mem::offset_of!(TwSurface, rotor_control), 816);
+        assert_eq!(std::mem::offset_of!(TwSurface, rotor_sources), 832);
+        assert_eq!(std::mem::size_of::<TwSurface>(), 960);
     }
 
     #[test]
