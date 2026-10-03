@@ -52,7 +52,9 @@ fn ground_roads_use_physical_cover_only_for_actual_wet_ground_film() {
         "retained objects require explicit ground proof"
     );
     let terrain = compact(TERRAIN);
-    assert!(terrain.contains("ground_puddle_rain_factor(rain_reach,interior_rain_coverage(in.world_pos+frame.cam_pos.xyz))"),
+    assert!(terrain.contains("letrain_reach=interior_rain_reach(in.world_pos+frame.cam_pos.xyz);"));
+    assert!(terrain.contains("letrain_coverage=interior_rain_coverage(in.world_pos+frame.cam_pos.xyz);"));
+    assert!(terrain.contains("ground_puddle_rain_factor(rain_reach,rain_coverage)"),
         "terrain and roads must undo the same open lighting fallback");
     // The complete real entry shader still composes through the common shade
     // signature. This is not proof of road producer/submission or appearance.
