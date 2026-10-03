@@ -7961,3 +7961,74 @@ tickets:
     supersedes: []
     evidence:
       - docs/roadmap/decisions/SINKHOLE-01b-cave-lighting-20261003.md
+  - id: SWIM-W3-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Sinkhole W3: swimming for players and AI, riding the (drawn) waves, limb splashes, AI swim routes and boats"
+    class: GAMEPLAY
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/sinkhole-w3-swimming
+    baseline_commit: 25c2035e
+    verification_commit: 744e1d3e
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [LGT-CAVE-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [406c7642, 3e2d2a4d, 744e1d3e]
+    production_call_sites:
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldSwim.cpp
+        symbol: Man::UpdateSwimming
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldSwim.cpp
+        symbol: Man::SimSwimMovement
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldSwim.cpp
+        symbol: Man::EmitSwimSplashes
+      - file: engine/Poseidon/World/World.cpp
+        symbol: SwimmerCameraWater
+      - file: engine/Poseidon/Graphics/Rendering/WaterInteractionBridge.cpp
+        symbol: DrawnWaterHeightAt
+      - file: engine/WgpuRenderer/rust/src/water_tw/probe.rs
+        symbol: drawn_grid
+      - file: engine/WgpuRenderer/rust/src/water_tw/impacts.rs
+        symbol: Impacts::submit
+      - file: engine/Poseidon/AI/AIUnitImpl.cpp
+        symbol: FloatPathOnWater
+      - file: engine/Poseidon/World/Entities/Vehicles/Misc/Ship.cpp
+        symbol: Ship::PlaceGetInPos
+    test_ids: [a_swimmers_splash_rises_from_the_wave_and_follows_the_limb, sinkhole-w3-swim-stroke-capture, sinkhole-w3-first-person-swell-capture, sinkhole-w3-swimai2-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/SINKHOLE-03-swimming-20261004.md
+    capability_claims:
+      - capability: SWIMMING_RIDES_WAVES
+        status: UNVERIFIED
+        denominator: >-
+          Everon bay, Tidewater water, wgpu, one machine: treading and stroking, eyes 0.06-0.18 m over
+          the water; first person 0.45-0.5 m over the drawn surface through the swell. Owner play-test
+          pending. Swim animations are local content (not committed).
+      - capability: SWIM_LIMB_SPLASHES
+        status: UNVERIFIED
+        denominator: >-
+          Hands and feet splash on strokes and kicks for swimmers near the camera (Tidewater mode only).
+      - capability: AI_SWIM_ROUTES_AND_BOATS
+        status: UNVERIFIED
+        denominator: >-
+          Malprave's swimai2 steps: AI swim to points 70-140 m out, a crew swims to a boat and boards,
+          one swims 130 m on, one leaves the boat into deep water and swims.
+    known_failures:
+      - "No diving, breath or drowning (W4); no weapons in the water."
+      - "Swimmers pass through each other."
+      - "AI geography uses sea-based water classes; lakes are not routed."
+      - "Swimmers outside the camera probe grid ride the CPU predictor (heads can dip under drawn crests at a distance)."
+      - "Swim animations need the local swim addon (provenance); without it men walk the sea bed as before."
+    fallback: "POSEIDON_SWIM=0 (old seabed walk); POSEIDON_SWIM_SPLASH=0; POSEIDON_SWIM_DRAWN=0 (predictor only)."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner play-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/SINKHOLE-03-swimming-20261004.md
