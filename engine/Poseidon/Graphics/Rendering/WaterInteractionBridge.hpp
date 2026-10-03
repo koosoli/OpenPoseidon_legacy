@@ -14,6 +14,10 @@ enum HydroWaterInteractionKind : uint32_t
     HydroWaterInteractionExplosion = 3,
     HydroWaterInteractionFootstep = 4,
     HydroWaterInteractionContinuous = 5,
+    // Sinkhole W3: a swimmer's hand or foot cutting the surface. positionRadius = (x, z, radius, surface y),
+    // velocityKind = (limb vx, vz, vy over the water, kind), timeLifeFoamMass[3] = splash height (m).
+    // Drawn by the Tidewater water (water_tw/impacts.rs); the Current OP water ignores the kind.
+    HydroWaterInteractionSwimSplash = 6,
 };
 
 enum HydroWaterInteractionFlags : uint32_t

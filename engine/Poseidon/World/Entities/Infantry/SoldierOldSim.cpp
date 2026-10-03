@@ -346,6 +346,13 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
         base::Simulate(deltaT, prec);
         return;
     }
+    // Sinkhole W3: in water too deep to stand the man swims (SoldierOldSwim.cpp)
+    if (UpdateSwimming())
+    {
+        SimSwimMovement(deltaT, prec);
+        base::Simulate(deltaT, prec);
+        return;
+    }
 
     float turn, moveX, moveZ;
 

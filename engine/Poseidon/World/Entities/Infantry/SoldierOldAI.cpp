@@ -2572,6 +2572,19 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
 
     _turnWanted += delta;
     saturate(_turnWanted, -5, +5);
+    if (_swimming)
+    {
+        // Sinkhole W3 (Malprave swimTurn): the swim action maps turn at most turnSpeed (1.2 rad/s), but the
+        // request above winds up to 5. Once the heading was right it took a second to wind back down, the
+        // swimmer overshot, was more than 45 deg off again (speed 0 above) and turned again: AI swimmers
+        // spun in place whenever they needed a big turn. Keep the request within what the swim moves can do.
+        const ActionMap* swimMap = Type()->GetActionMap(_primaryMove.id);
+        const float swimTurn = swimMap ? swimMap->GetTurnSpeed() : 0;
+        if (swimTurn > 0)
+        {
+            saturate(_turnWanted, -swimTurn, +swimTurn);
+        }
+    }
 
     ManPos minPos = ManPosLying;
     ManPos maxPos = ManPosStand;
@@ -2946,6 +2959,13 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
             }
             // LOG_DEBUG(Physics, "{}: action ch,   {}->{}",DNAME(),upDegree,_posWanted);
         }
+    }
+    if (_swimming)
+    {
+        // Sinkhole W3 (Malprave swimBoatsAI): no stances or weapon changes in the water -- the swim action
+        // maps turn every such action into treading water, which kept the AI from ever choosing a move.
+        // Always pick by speed instead.
+        selAction = ManActN;
     }
     if (selAction == ManActN)
     {
