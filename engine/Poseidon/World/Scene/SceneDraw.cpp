@@ -1910,8 +1910,13 @@ static void DrawSortObject(SortObject* oi)
         }
         ~DrawObjectGuard() { GEngine->SetDrawObject(prev); }
     } drawObjectGuard(obj);
-    const bool cockpit =
-        GWorld && oi->drawLOD != LOD_INVISIBLE && oi->drawLOD == obj->InsideLOD(GWorld->GetCameraType());
+    // Only the object World::Draw queued at its inside LOD this frame is a cockpit. The LOD
+    // equality alone also matched every BUILDING drawn at LOD 0 -- Building::InsideLOD returns 0
+    // -- so a house up close was routed as the camera vehicle's interior (Cockpit* pass family,
+    // WGR_DRAW3D_COCKPIT): spec_destrb_d's floors drew over the storeys behind them (owner:
+    // "see-through floors").
+    const bool cockpit = GWorld && oi->drawLOD != LOD_INVISIBLE && obj == GWorld->DrawInsideVehicle() &&
+                         oi->drawLOD == obj->InsideLOD(GWorld->GetCameraType());
     // REN-INTERP-001: moving objects draw at their interpolated frame; everything else at
     // its own (RenderFrame returns *obj for those, one branch).
     FrameBase interpFrame;
