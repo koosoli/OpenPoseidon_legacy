@@ -34,7 +34,9 @@ fn declaration<'a>(source: &'a str, start: &str) -> &'a str {
 fn probe_source(terrain: bool) -> String {
     let mut source = String::new();
     if terrain {
-        for name in ["struct TerrainParams", "struct SnowData"] {
+        // The production fine normal now delegates to the shared broad/fine
+        // pair. Extract its exact type and helper; keep every existing probe.
+        for name in ["struct TerrainParams", "struct SnowData", "struct GroundNormalPair"] {
             source.push_str(declaration(TERRAIN, name));
             source.push_str(";\n");
         }
@@ -52,6 +54,7 @@ fn probe_source(terrain: bool) -> String {
         "sand_height_gradient",
             "sample_height",
             "sample_normal",
+            "sample_mud_normals",
             "sample_mud_normal",
             "snow_depth",
             "snow_drift",
@@ -147,12 +150,13 @@ fn mud_geometry_actual_helpers_match_and_compose_in_real_terrain() {
     // sampled functions. A correct isolated helper alone is not enough.
     assert!(TERRAIN.contains("let bare_height = sample_height(world_xz)"));
     assert!(TERRAIN.contains("let height_fine = sample_height(world_xz_fine)"));
-    assert_eq!(
-        TERRAIN
-            .matches("sample_mud_normal(in.world_xz, tp.terrain_grid,")
-            .count(),
-        2
-    );
+    let colour = declaration(TERRAIN, "fn fs_terrain(");
+    let prepass = declaration(TERRAIN, "fn fs_terrain_prepass(");
+    assert!(colour.contains("let ground_normals = sample_mud_normals(in.world_xz, tp.terrain_grid,"));
+    assert!(colour.contains("let geometric_n = ground_normals.fine;"));
+    assert!(prepass.contains("sample_mud_normal(in.world_xz, tp.terrain_grid,"));
+    assert!(declaration(TERRAIN, "fn sample_mud_normal(")
+        .contains("return sample_mud_normals(world_xz, step, footprint).fine;"));
     assert_eq!(
         declaration(TERRAIN, "fn sample_height(")
             .matches("+ mud_height_offset(world_xz)")

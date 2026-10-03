@@ -91,7 +91,8 @@ fn puddle_roof_admission_uses_raw_geometry_not_artistic_ambient_controls() {
         .nth(1).expect("must gate raw roof query on actual puddle work")
         .split('}').next().unwrap();
     assert!(admission.contains("interior_rain_reach(in.world_pos + frame.cam_pos.xyz)"));
-    assert!(admission.contains("ground_puddle_rain_factor(rain_reach, interior_rain_coverage("));
+    assert!(admission.contains("let rain_coverage = interior_rain_coverage("));
+    assert!(admission.contains("ground_puddle_rain_factor(rain_reach, rain_coverage)"));
     assert!(admission.contains("interior_rain_coverage(in.world_pos + frame.cam_pos.xyz)"));
     assert!(admission.contains("rain_puddle *= rain_proof") && admission.contains("soil_wet *= rain_proof"));
     assert!(!admission.contains("interior_sky_reach("));

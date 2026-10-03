@@ -2374,7 +2374,7 @@ mod terrain_hole_tests {
         assert!(conform.contains("fn cave_daylight(world: vec3<f32>) -> f32"));
         assert!(conform.contains("fn cave_daylight2(world: vec3<f32>) -> vec2<f32>"));
         assert!(conform.contains("@group(4) @binding(3) var<uniform> cave_openings: CaveOpenings;"));
-        assert!(src.contains("* leaf_cavity * underground_amb;"));
+        assert!(src.contains("* leaf_cavity * mix(mat.native_ao, 1.0, snow_cover) * underground_amb;"));
         compose(include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl");
         compose(include_str!("../gfx3d/gpu_driven.wgsl"), "gfx3d/gpu_driven.wgsl");
     }

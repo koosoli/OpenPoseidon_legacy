@@ -13070,6 +13070,8 @@ fn both_object_shaders_count_the_atmosphere_by_family() {
             "sm.alpha_ref",
         ),
     ] {
+        // Git may check these shaders out as CRLF; the census contract is identical.
+        let src = src.replace("\r\n", "\n");
         assert!(
             src.contains(&format!("census(select(4u, 5u, {aref} > 0.0));")),
             "{name} must split the with-term count into opaque (4) and cutout (5)"

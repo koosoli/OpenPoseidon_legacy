@@ -5227,7 +5227,15 @@ pub(crate) mod tests {
             force_fallback_adapter: false,
         }))
         .ok()?;
-        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
+        // Actual object shaders include conform resources in group 4, matching
+        // the production device's five-group requirement.
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: wgpu::Limits {
+                max_bind_groups: 5,
+                ..wgpu::Limits::default()
+            },
+            ..Default::default()
+        })).ok()
     }
 
     fn read_u32s(

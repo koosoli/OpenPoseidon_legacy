@@ -37,7 +37,11 @@ fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>) {
 #[test]
 fn actual_edge_probe_contract_and_csv_refusals() {
     let terrain=include_str!("terrain/terrain.wgsl");let water=include_str!("rain_water.wgsl").replace("\r\n","\n");
-    assert!(terrain.contains("ground_sky_reflection(reflect(-view, moist_n))"));
+    // The actual coat now filters a cone around the same disturbed-soil normal;
+    // its directions, rather than one sharp mirror ray, query the sky.
+    assert!(terrain.contains("let moist_n = geometric_n;"));
+    assert!(terrain.contains("soil_wet_environment_samples(view, moist_n,"));
+    assert!(terrain.contains("ground_sky_reflection(samples[i].xyz)"));
     assert!(water.contains("if (standing > 0.0) {\n        scene=rain_water_scene_reflection"));
     let mut composer=crate::shaders::build_composer();
     composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor{source:probe_source(),file_path:"actual_edge_optics.wgsl",..Default::default()})
