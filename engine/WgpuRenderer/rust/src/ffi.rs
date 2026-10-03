@@ -299,8 +299,6 @@ pub const WGR_DRAW3D_MONITOR: u32 = 32;
 pub const WGR_DRAW3D_DOUBLE_SIDED: u32 = 64;
 pub const WGR_DRAW3D_NORMAL_RG: u32 = 128;
 pub const WGR_DRAW3D_NATIVE_CAVITY: u32 = 1024;
-// MAT-053: a translucent object section from the back-to-front blend pass (wgpu_renderer.hpp).
-pub const WGR_DRAW3D_BLEND_SECTION: u32 = 2048;
 
 // Per-section shading, parallel to a model's sections (one per section). The raw material is
 // folded with the frame sun in the GPU-driven fragment shader (matching the per-draw path);
