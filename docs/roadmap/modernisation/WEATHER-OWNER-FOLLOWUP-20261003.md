@@ -1,5 +1,32 @@
 # Weather owner follow-up, 3 October 2026
 
+Latest installed checkpoint13:10 local supersedes pending notes below. Matching
+bd590703 EXE/DLL deployed12:35, after the16step solar/soil/sand combined build.
+The exact installed pair/PDBs are preserved under build/installed-symbols/bd590703.
+Actual Eden core contacts835446 pass normal exit, unchanged installed pair,
+controlled boots/body, wetness0.313608 and exact signed sand publication receipts.
+Sand offset reaches-0.093709m; inspected top view now has four readable pits.
+Mud offset reaches-0.047885m; blue milk-like film is gone, but the inspected wet
+soil looks too matte for the requested slimy mud. Wet-uniform day/night/roof
+quality and satisfactory wet mud remain open.
+
+Actual bd directional rifle campaignea252d passes cross-stage single-shot,
+capsule, pause/return, sheltered/no-snow and snowfall-refill gates with normal
+exit and unchanged pair. Root inspects an elongated trajectory-aligned entry
+groove. Broad hard-object/sea/angle coverage remains open. Nogova water campaign
+834a82 shows a clearly visible existing OP rotor ring and correct high control,
+but fails its final supported-shutdown fixture because the stock height helper
+climbs after the staged landing. Scriptfcb2dff4 now lands through normal Z input;
+the three-arm OP/Tidewater-off/on runtime comparison is in progress.
+
+Occupied flight campaignb0128c exits normally with unchanged installed pair but
+fails before measurement: Default-Dry naturally starts rain under overcast1.
+Its oracle also confuses effective particle density with densityOverride.
+Neither failure is performance evidence. The runner is being corrected against
+actual native weather transitions and automatic-particle state; full flight cost
+remains unmeasured. New solar-sign correction is installed; matched sunny/cloud
+drainage and readable-pool appearance are still pending.
+
 Latest source checkpoint12:32 local: c9f74c8f combined game build219steps passes;
 renderer run652PASS/1FAIL/2ignored has one stale muzzle-cloth source assertion.
 After moving that assertion to the actual shared decoder both focused muzzle
