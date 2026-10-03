@@ -72,7 +72,21 @@ function Frozen($a,$b){
  Require ($a.source.heightRevision -eq $b.source.heightRevision -and !$b.source.baseline) 'Paused terrain source changed/was edited.'
  foreach($name in @('rain','liquidRain','particleDensity','particleSnowflakes')){Require ($a.weather.$name -eq $b.weather.$name) 'Paused actual weather changed.'}
 }
+function Assert-DryingSun($weather,[bool]$sunny){
+ Require ($weather.sunAvailable -is [bool] -and $weather.sunAvailable) 'Actual drying sun source unavailable.'
+ foreach($name in @('sunTravelY','overcast','nightEffect','solarDrying')){$null=Number $weather.$name}
+ $day=[Math]::Min(1.0,[Math]::Max(0.0,-[double]$weather.sunTravelY))
+ $clear=1.0-[Math]::Min(1.0,[Math]::Max(0.0,[double]$weather.overcast))
+ $expected=$day*$clear*$clear*(1.0-[Math]::Min(1.0,[Math]::Max(0.0,[double]$weather.nightEffect)))
+ Require ([Math]::Abs($weather.solarDrying-$expected) -lt .00001) 'Actual solar drying disagrees with native light-travel/cloud/night source.'
+ Require ($weather.sunTravelY -lt 0 -and $weather.nightEffect -eq 0) 'Drainage comparison is not in actual daylight.'
+ if($sunny){Require ($weather.overcast -lt .01 -and $weather.solarDrying -gt .5) 'Sunny drain lacks actual clear positive solar exposure.'}
+ else{Require ($weather.overcast -gt .5 -and $weather.overcast -lt .7 -and $weather.solarDrying -gt 0 -and $weather.solarDrying -lt .25) 'Cloud drain lacks actual reduced daylight exposure.'}
+}
 if($SelfTest){
+ $sun=@{sunAvailable=$true;sunTravelY=-.8;overcast=0;nightEffect=0;solarDrying=.8};Assert-DryingSun $sun $true
+ $cloud=$sun.Clone();$cloud.overcast=.6;$cloud.solarDrying=.128;Assert-DryingSun $cloud $false
+ foreach($change in @(@{sunAvailable=$false},@{sunTravelY=.8},@{solarDrying=0},@{nightEffect=1},@{overcast=1})){$bad=$sun.Clone();foreach($k in $change.Keys){$bad[$k]=$change[$k]};Expect-Failure {Assert-DryingSun $bad $true}}
  foreach($v in @(0,.000001,.007999,.008,.049999,.05,2)){
   $expected=if($v -eq 0){'dry'}elseif($v -lt .008){'thin-film'}elseif($v -lt .05){'transition'}else{'standing-water'}
   Require ((Depth-Class $v) -ceq $expected) 'Physical optical class boundary changed.'
@@ -241,7 +255,7 @@ try{
    }
    $frozen=Snapshot;View ($site.x+350) ($site.z-350) ($original.vertexHeight+100) 315 -10;Capture 'camera-away';View $site.x ($site.z-18) ($original.vertexHeight+4) 0 -12;Capture 'candidate-camera-return';$returned=Snapshot;Frozen $frozen $returned;$arm.gates.cameraReturn=@{before=$frozen;after=$returned}
    $returnedFine=Fine $site.x $site.z;Require (($returnedFine.owners|ConvertTo-Json -Depth 10 -Compress) -ceq ($fine.owners|ConvertTo-Json -Depth 10 -Compress)) 'Camera/sample changed ownership or held water geometry.'
-   if ($SunnyDrain) {Exec '0 setOvercast 0;0 setRain 0;setDate [1985,6,21,12,0];setAccTime 4'} else {Exec '0 setOvercast 0.6;0 setRain 0;setAccTime 4'};Wait-Sim 3;Exec 'setAccTime 0';$stopped=Snapshot;Require ($stopped.weather.liquidRain -eq 0) 'Actual rain did not stop.';$arm.gates.stopped=$stopped
+   if ($SunnyDrain) {Exec '0 setOvercast 0;0 setRain 0;setDate [1985,6,21,12,0];setAccTime 4'} else {Exec '0 setOvercast 0.6;0 setRain 0;setDate [1985,6,21,12,0];setAccTime 4'};Wait-Sim 3;Exec 'setAccTime 0';$stopped=Snapshot;Require ($stopped.weather.liquidRain -eq 0) 'Actual rain did not stop.';Assert-DryingSun $stopped.weather ([bool]$SunnyDrain);$arm.gates.stopped=$stopped
    $localPoints=@(@{name='candidate';x=$site.x;z=$site.z;rainy=$arm.gates.candidateSample})
    if($on){$localPoints+=@{name='owned-focus';x=$focus.x;z=$focus.z;rainy=$focus.sample}}
    $arm.gates.localDrain=@{sunny=[bool]$SunnyDrain;points=@()}
@@ -249,6 +263,7 @@ try{
    Exec 'setAccTime 4';Wait-Sim $DrainSeconds;Exec 'setAccTime 0';$drained=Snapshot;
    foreach($point in $localPoints){$point.drained=Send @{cmd='dev_rain_water';action='sample';x=$point.x;z=$point.z};$point.depthDelta=$point.drained.depth-$point.stopped.depth;$arm.gates.localDrain.points+=$point}
    Assert-Budget $drained.field;Unedited $drained.source
+   Assert-DryingSun $drained.weather ([bool]$SunnyDrain)
    Require ($drained.field.rainVolume -eq $stopped.field.rainVolume -and $drained.field.volume -lt $stopped.field.volume) 'Actual no-input runoff did not drain without mass invention.';$arm.gates.drained=$drained;Capture 'after-rain-drained-candidate'
    $retirement=@{status='not-claimed-wet-retention-is-legitimate';secondsRequested=$RetirementSeconds;states=@()}
    if($on -and $RetirementSeconds -gt 0){
