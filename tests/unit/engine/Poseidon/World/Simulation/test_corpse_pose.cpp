@@ -332,3 +332,73 @@ TEST_CASE("Corpse rigid deltas preserve affine residuals and every weighted cons
     MATRIX_4_ARRAY(f,128); pose.PrepareMatrices(f,1);
     for (int i=0;i<3;++i) SameMatrix(a[i],f[i]);
 }
+
+TEST_CASE("Actual stock neutral geometry and captured affine palette admit signed anatomical hinges", "[corpse-pose][articulation][corpse-hinge]")
+{
+    // ODOL7 mc vojakw2.p3d decoded SHA256 baf90043df1b561c6099f3c8fec546ed58e43e00853d70f386cfb2f81853d221.
+    // Runtime OrigPos X/Z sign conversion is established by all nine measured
+    // shared boundaries; translations cancel in these tangent measurements.
+    // Actual post-correction palette: final-pose-installed-20261001-052726-193320
+    // result.json, gates.finalPose.activeHold.actual.levels[0].palette.
+    const Vector3 forward(-0.997177193f,0.0556384612f,0.0504183212f);
+    const Vector3 endpoints[4][3] = {
+        {{-0.408487626f,0.0955670712f,0.524068727f},{-0.400908136f,-0.212169901f,0.523606247f},{-0.398237315f,-0.431132811f,0.542944739f}},
+        {{-0.406447581f,0.0911346157f,0.167404996f},{-0.400908136f,-0.215609224f,0.152138341f},{-0.398237315f,-0.431132811f,0.136096053f}},
+        {{-0.3915233f,-0.36885282f,0.472260184f},{-0.399644616f,-0.821461531f,0.477296657f},{-0.433392412f,-1.2196249f,0.564433799f}},
+        {{-0.424557763f,-0.352624238f,0.202896609f},{-0.399158677f,-0.81897919f,0.206840143f},{-0.432597316f,-1.22280186f,0.105136569f}},
+    };
+    const float affine[4][2][12] = {
+        {{0.0379340872f,-0.779791594f,0.624887049f,0.264855146f,-0.600917935f,0.481835544f,0.637753069f,-0.130186692f,-0.798405886f,-0.399697632f,-0.450310051f,-0.138869241f},{0.735122621f,-0.388136834f,0.555828393f,0.266513497f,-0.645362198f,-0.149572283f,0.749088883f,-0.125471339f,-0.207606986f,-0.909380138f,-0.36044082f,-0.130773187f}},
+        {{0.387846559f,0.899583399f,0.20081526f,-0.485077262f,-0.177596688f,-0.14084743f,0.973972976f,0.21095714f,0.904447794f,-0.413417876f,0.105135322f,-0.107519351f},{-0.436281502f,0.877980828f,0.19699499f,-0.481219977f,-0.140003383f,-0.2825059f,0.948993206f,0.211839303f,0.888853788f,0.386442512f,0.246173367f,-0.113382034f}},
+        {{0.758001804f,0.413689613f,0.504277945f,0.0609275065f,-0.555642068f,0.00463545276f,0.831408024f,0.124795079f,0.34160763f,-0.910405874f,0.233376622f,0.0768911317f},{0.702856183f,-0.322408736f,0.63406837f,-0.374524385f,-0.43846181f,0.505545199f,0.743086815f,0.420706153f,-0.560127854f,-0.800300241f,0.213957056f,0.146714494f}},
+        {{-0.0677606016f,0.964595199f,0.254872084f,0.0608757213f,-0.223536268f,-0.263644308f,0.93836087f,0.150186226f,0.97233665f,0.00660747616f,0.233484477f,0.183228835f},{0.9324103f,0.33178246f,0.143290922f,-0.321139008f,-0.157056317f,0.0149006508f,0.987476647f,0.315695554f,0.325495392f,-0.943236947f,0.0659987107f,-0.378971606f}},
+    };
+    const float expected[] = {.957975283f,.850857967f,.901439732f,1.16555946f};
+    for (int limb=0;limb<4;++limb)
+    {
+        Matrix4 first=MIdentity,second=MIdentity;
+        for (int row=0;row<3;++row) for (int col=0;col<4;++col)
+        { first(row,col)=affine[limb][0][row*4+col]; second(row,col)=affine[limb][1][row*4+col]; }
+        const Matrix4 originalFirst=first,originalSecond=second;
+        CorpseHingeMeasurement h;
+        REQUIRE(CorpseMeasureHinge(endpoints[limb][0],endpoints[limb][1],endpoints[limb][2],forward,first,second,limb>=2,h));
+        CHECK(std::abs(h.capturedAngle-expected[limb]) < .0001f);
+        CHECK(h.referenceAgreement > .97f);
+        CHECK(std::abs(h.axis*h.proximal) < .00001f);
+        CHECK(std::abs(h.axis*h.distal) < .00001f);
+        CHECK(h.lower < 0); CHECK(h.upper > 0);
+        SameMatrix(first,originalFirst); SameMatrix(second,originalSecond);
+        // Rotate the whole captured world; anatomy follows it, never a world axis.
+        Matrix4 rotate(MDirection,Vector3(1,0,0),VUp);
+        CorpseHingeMeasurement transformed;
+        REQUIRE(CorpseMeasureHinge(endpoints[limb][0],endpoints[limb][1],endpoints[limb][2],forward,rotate*first,rotate*second,limb>=2,transformed));
+        CHECK(std::abs(transformed.capturedAngle-h.capturedAngle) < .0001f);
+        CHECK((transformed.axis-rotate.Rotate(h.axis)).Size() < .00001f);
+        CHECK_FALSE(CorpseMeasureHinge(endpoints[limb][0],endpoints[limb][1],endpoints[limb][2],-forward,first,second,limb>=2,transformed));
+        CHECK(std::string(transformed.refusal) == "captured-bend-outside-policy");
+    }
+}
+
+TEST_CASE("Measured hinges refuse ambiguous planes and retain a straight affine reference", "[corpse-pose][articulation][corpse-hinge]")
+{
+    CorpseHingeMeasurement h;
+    const Vector3 proximal(0,1,0),joint(0,.5f,0),distal(0,0,0),forward(1,0,0);
+    Matrix4 nonrigid(MScale,1.1f,.7f,.9f); nonrigid(0,1)=.12f;
+    REQUIRE(CorpseMeasureHinge(proximal,joint,distal,forward,nonrigid,nonrigid,false,h));
+    CHECK(std::abs(h.capturedAngle) < .00001f);
+    CHECK(std::abs(h.axis*h.proximal) < .00001f);
+    CHECK(h.lower < 0); CHECK(h.upper > 0);
+    CHECK_FALSE(CorpseMeasureHinge(joint,joint,distal,forward,MIdentity,MIdentity,false,h));
+    CHECK(std::string(h.refusal) == "short-transformed-segment");
+    CHECK_FALSE(CorpseMeasureHinge(proximal,joint,distal,VUp,MIdentity,MIdentity,false,h));
+    CHECK(std::string(h.refusal) == "neutral-flexion-plane-degenerate");
+    Matrix4 side(MDirection,Vector3(0,.7f,.7f),Vector3(0,.7f,-.7f));
+    CHECK_FALSE(CorpseMeasureHinge(proximal,joint,distal,forward,MIdentity,side,false,h));
+    CHECK(std::string(h.refusal) == "anatomical-plane-disagreement");
+    side=MIdentity; side(2,2)=0;
+    CHECK_FALSE(CorpseMeasureHinge(proximal,joint,distal,forward,MIdentity,side,false,h));
+    CHECK(std::string(h.refusal) == "singular-affine-frame");
+    side(0,0)=std::numeric_limits<float>::quiet_NaN();
+    CHECK_FALSE(CorpseMeasureHinge(proximal,joint,distal,forward,MIdentity,side,false,h));
+    CHECK(std::string(h.refusal) == "nonfinite-input");
+}

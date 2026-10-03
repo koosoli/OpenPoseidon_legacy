@@ -636,7 +636,7 @@ class Man: public Person
     mutable Ref<AnimationRT> _corpsePosePrimaryAnimation, _corpsePoseSecondaryAnimation;
     mutable bool _corpsePoseBypass = false;
     mutable std::unique_ptr<struct CorpseArticulation> _corpseArticulation;
-    bool StartCorpseArticulation(RString& refusal);
+    bool StartCorpseArticulation(RString& refusal, bool anatomicalHinges = false);
     bool UpdateCorpseArticulation() const;
     bool CorpseArticulationBounds(Vector3* minMax, float& radius) const;
     const char* CorpsePoseRefusal() const;
@@ -645,7 +645,7 @@ class Man: public Person
     void PrepareBasePose(Matrix4Array& matrices) const;
     void PrepareCorrectedPose(int level, Matrix4Array& matrices) const;
     RString CompareCorpsePose() const;
-    bool InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal) const;
+    bool InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal, bool hingeEndpoints = false) const;
 
 	void SetPrimaryMove(MotionPathItem item);
 	bool ChangeMoveQueue(MotionPathItem item);

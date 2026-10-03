@@ -83,6 +83,82 @@ inline float CorpseMatrixDeterminant(Matrix4Val matrix)
     return matrix.DirectionAside() * matrix.DirectionUp().CrossProduct(matrix.Direction());
 }
 
+struct CorpseHingeMeasurement
+{
+    Vector3 proximal = VZero, distal = VZero, reference = VZero, axis = VZero;
+    float capturedAngle = 0, referenceAgreement = 0;
+    float lower = 0, upper = 0;
+    const char* refusal = "nonfinite-input";
+};
+
+// Real neutral shared-selection endpoints and their captured affine transforms.
+// Translations locate neither axis nor angle: only transformed geometry does.
+// The affine matrices are read here, never replaced in the authored skin pose.
+inline bool CorpseMeasureHinge(Vector3Val proximalPoint, Vector3Val jointPoint,
+    Vector3Val distalPoint, Vector3Val neutralForward, Matrix4Val proximalAffine,
+    Matrix4Val distalAffine, bool knee, CorpseHingeMeasurement& result)
+{
+    result = {};
+    if (!proximalPoint.IsFinite() || !jointPoint.IsFinite() || !distalPoint.IsFinite() ||
+        !neutralForward.IsFinite() || !proximalAffine.IsFinite() || !distalAffine.IsFinite()) return false;
+    const float proximalDeterminant = CorpseMatrixDeterminant(proximalAffine);
+    const float distalDeterminant = CorpseMatrixDeterminant(distalAffine);
+    result.refusal = "singular-affine-frame";
+    if (!std::isfinite(proximalDeterminant) || !std::isfinite(distalDeterminant) ||
+        std::abs(proximalDeterminant) < .001f || std::abs(distalDeterminant) < .001f) return false;
+    Vector3 u = proximalAffine.Rotate(jointPoint-proximalPoint);
+    Vector3 v = distalAffine.Rotate(distalPoint-jointPoint);
+    Vector3 forward = proximalAffine.Rotate(neutralForward*(knee ? -1.0f : 1.0f));
+    result.proximal = u; result.distal = v; result.reference = forward;
+    result.refusal = "nonfinite-transformed-segment";
+    if (!u.IsFinite() || !v.IsFinite() || !forward.IsFinite() ||
+        !std::isfinite(u.Size()) || !std::isfinite(v.Size()) || !std::isfinite(forward.Size())) return false;
+    result.refusal = "short-transformed-segment";
+    if (u.Size() < .08f || v.Size() < .08f || forward.Size() < .1f) return false;
+    u.Normalize(); v.Normalize(); forward.Normalize();
+    Vector3 reference = u.CrossProduct(forward);
+    result.refusal = "neutral-flexion-plane-degenerate";
+    if (reference.Size() < .25f) return false;
+    reference.Normalize();
+    Vector3 bend = u.CrossProduct(v);
+    float cosine = std::clamp(u*v, -1.0f, 1.0f);
+    float angle = std::atan2(bend.Size(), cosine);
+    Vector3 axis = reference;
+    float agreement = 1;
+    result.proximal = u; result.distal = v; result.reference = reference; result.capturedAngle = angle;
+    if (angle > .15f)
+    {
+        result.refusal = "folded-plane-degenerate";
+        if (bend.Size() < .02f) return false; // almost folded: plane not determined
+        axis = bend; axis.Normalize();
+        agreement = axis*reference;
+        result.axis = axis; result.referenceAgreement = agreement;
+        result.refusal = "anatomical-plane-disagreement";
+        if (std::abs(agreement) < .7f) return false; // anatomical plane ambiguous
+        if (agreement < 0) { axis *= -1; angle *= -1; }
+    }
+    else
+    {
+        // Straight limbs have no stable cross-product plane. Carry the measured
+        // neutral forward plane with the actual proximal affine instead.
+        result.refusal = "straight-limb-lateral-disagreement";
+        if (std::abs(v*reference) > .15f) return false;
+        angle = std::atan2(reference*bend, cosine);
+    }
+    constexpr float degrees = 3.14159265358979323846f/180;
+    const float extension = -5*degrees, flexion = (knee ? 145 : 150)*degrees;
+    result.capturedAngle = angle;
+    result.refusal = "captured-bend-outside-policy";
+    if (!std::isfinite(angle) || angle < extension || angle > flexion) return false;
+    result.proximal = u; result.distal = v; result.reference = reference; result.axis = axis;
+    result.capturedAngle = angle; result.referenceAgreement = agreement;
+    // Initial solver frames coincide: relative twist is exactly zero. Translate
+    // the anatomical policy to that captured zero without a spring or pose snap.
+    result.lower = extension-angle; result.upper = flexion-angle;
+    result.refusal = "";
+    return result.lower <= 0 && result.upper >= 0;
+}
+
 // Owned phase data, deliberately not a quaternion or an already blended palette.
 // Point, Matrix and PrepareMatrices have different floating-point operation orders.
 // Preserve each one, including authored scale/shear and skeleton-tail identity.

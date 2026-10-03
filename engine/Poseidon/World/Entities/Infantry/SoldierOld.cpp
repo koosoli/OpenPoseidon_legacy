@@ -48,7 +48,7 @@ struct CorpseArticulation
     Matrix4 object = MIdentity;
     std::vector<int> boneParts;
     float minimumClearance = 0;
-    int updates = 0;
+    int updates = 0, hingeCount = 0;
     float maximumTravel = 0;
     Vector3 minimum = VZero, maximum = VZero;
     float radius = 0;
@@ -971,7 +971,7 @@ bool Man::GetCorpsePoseDiagnostic(CorpsePoseDiagnostic& result, RString& refusal
     return man->InspectCorpsePose(result, refusal);
 }
 
-bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal) const
+bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal, bool hingeEndpoints) const
 {
     refusal = "stock-western-model-required";
     std::string model = _shape->Name();
@@ -1138,10 +1138,13 @@ bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal) cons
     const auto& final = candidate.levels.front().palette;
     const char* boundaries[][2] = {{"krk", "hlava"}, {"prameno", "pbiceps"}, {"lrameno", "lbiceps"},
         {"pbiceps", "ploket"}, {"lbiceps", "lloket"}, {"pzadek", "pstehno"}, {"lzadek", "lstehno"},
-        {"pstehno", "pholen"}, {"lstehno", "lholen"}};
+        {"pstehno", "pholen"}, {"lstehno", "lholen"},
+        {"ploket", "pruka"}, {"lloket", "lruka"}, {"pholen", "pchodidlo"}, {"lholen", "lchodidlo"},
+        {"pchodidlo", "pprsty"}, {"lchodidlo", "lprsty"}};
     graphical->SaveOriginalPos();
-    for (const auto& boundary : boundaries)
+    for (int boundaryIndex = 0; boundaryIndex < (hingeEndpoints ? 15 : 9); ++boundaryIndex)
     {
+        const auto& boundary = boundaries[boundaryIndex];
         CorpseAnchorDiagnostic anchor;
         anchor.first = boundary[0]; anchor.second = boundary[1];
         int first = graphical->FindNamedSel(boundary[0]), second = graphical->FindNamedSel(boundary[1]);
@@ -1182,7 +1185,7 @@ bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal) cons
     return true;
 }
 
-bool Man::StartCorpseArticulation(RString& refusal)
+bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
 {
     if (!UseCorpsePose() || _corpseArticulation) { refusal = "captured-authored-corpse-required"; return false; }
     if (std::abs(CorpseMatrixDeterminant(Transform())-1) > 1e-4f)
@@ -1229,13 +1232,56 @@ bool Man::StartCorpseArticulation(RString& refusal)
     for (int part : state->boneParts) if (part < 0) { refusal = "unmapped-stock-bone"; return false; }
 
     CorpsePoseDiagnostic diagnostic;
-    if (!InspectCorpsePose(diagnostic, refusal)) return false;
+    if (!InspectCorpsePose(diagnostic, refusal, anatomicalHinges)) return false;
     for (const auto& hull : diagnostic.hulls)
         if (hull.externalCenterRayHits != 0)
         { refusal = "open-ground-no-external-center-ray-contact-required"; return false; }
     for (const auto& anchor : diagnostic.anchors)
         if (anchor.sharedVertices <= 0 || anchor.separation > 0.12f)
         { refusal = "shared-geometry-anchor-not-admitted"; return false; }
+
+    std::array<CorpseHingeMeasurement, 4> hinges;
+    if (anatomicalHinges)
+    {
+        // Bilateral shoulder/hip and actual ankle/toe boundaries establish the
+        // neutral body's plane and its forward sign. No fixed model/world axis.
+        auto neutral = [&](int index) { return diagnostic.anchors[index].modelAnchor; };
+        Vector3 spine = neutral(0)-(neutral(5)+neutral(6))*.5f;
+        Vector3 lateral = (neutral(2)-neutral(1))+(neutral(6)-neutral(5));
+        Vector3 toes = (neutral(13)-neutral(11))+(neutral(14)-neutral(12));
+        if (spine.Size() < .25f || lateral.Size() < .15f || toes.Size() < .1f)
+        { refusal = "hinge-neutral-body-frame-degenerate"; return false; }
+        spine.Normalize(); lateral -= spine*(spine*lateral);
+        if (lateral.Size() < .15f) { refusal = "hinge-neutral-body-frame-degenerate"; return false; }
+        lateral.Normalize(); Vector3 forward = spine.CrossProduct(lateral); forward.Normalize();
+        const float toeAgreement = forward*toes/toes.Size();
+        if (std::abs(toeAgreement) < .5f) { refusal = "hinge-neutral-forward-sign-ambiguous"; return false; }
+        if (toeAgreement < 0) forward *= -1;
+        const int endpointIndices[][3] = {{1,3,9},{2,4,10},{5,7,11},{6,8,12}};
+        const char* proximalBones[] = {"pbiceps","lbiceps","pstehno","lstehno"};
+        const char* distalBones[] = {"ploket","lloket","pholen","lholen"};
+        const auto& palette = diagnostic.levels.front().palette;
+        auto vectorText = [](Vector3Val vector) {
+            char text[128]; std::snprintf(text,sizeof(text),"(%.9g,%.9g,%.9g)",vector.X(),vector.Y(),vector.Z());
+            return std::string(text);
+        };
+        for (int limb = 0; limb < 4; ++limb)
+        {
+            const auto& endpoints = endpointIndices[limb];
+            const int proximalBone = skeleton->FindBone(proximalBones[limb]);
+            const int distalBone = skeleton->FindBone(distalBones[limb]);
+            if (proximalBone < 0 || distalBone < 0) { refusal = "hinge-bone-binding-required"; return false; }
+            const bool admitted = CorpseMeasureHinge(neutral(endpoints[0]), neutral(endpoints[1]), neutral(endpoints[2]),
+                forward, Transform()*palette[proximalBone], Transform()*palette[distalBone], limb >= 2, hinges[limb]);
+            const auto& h = hinges[limb];
+            LOG_INFO(World,"CORPSEHINGE: limb={} bone={} admitted={} refusal={} neutralProx={} neutralJoint={} neutralDist={} neutralForward={} worldProx={} worldDist={} reference={} axis={} angle={} agreement={} limits=({},{}); shared=({},{},{}) separations=({},{},{})",
+                limb,distalBones[limb],admitted,h.refusal,vectorText(neutral(endpoints[0])),vectorText(neutral(endpoints[1])),vectorText(neutral(endpoints[2])),vectorText(forward),
+                vectorText(h.proximal),vectorText(h.distal),vectorText(h.reference),vectorText(h.axis),h.capturedAngle,h.referenceAgreement,h.lower,h.upper,
+                diagnostic.anchors[endpoints[0]].sharedVertices,diagnostic.anchors[endpoints[1]].sharedVertices,diagnostic.anchors[endpoints[2]].sharedVertices,
+                diagnostic.anchors[endpoints[0]].separation,diagnostic.anchors[endpoints[1]].separation,diagnostic.anchors[endpoints[2]].separation);
+            if (!admitted) { refusal = "measured-anatomical-hinge-frame-not-admitted"; return false; }
+        }
+    }
 
     // The authored Fire hulls are too large to use unchanged: the measured
     // settled pose already penetrates terrain by up to 7.5 cm. Inset each actual
@@ -1394,16 +1440,24 @@ bool Man::StartCorpseArticulation(RString& refusal)
         Vector3 axis = state->initial[b].Position()-pivot;
         if (axis.Size() < 0.025f) { refusal = "joint-geometry-axis-degenerate"; return false; }
         axis.Normalize(); Vector3 up = std::abs(axis*VUp) < 0.95f ? VUp : VAside;
+        const bool distal = j == 3 || j == 5 || j == 7 || j == 9;
+        const int hingeIndex = j == 3 ? 0 : j == 5 ? 1 : j == 7 ? 2 : 3;
+        if (anatomicalHinges && distal) { axis = hinges[hingeIndex].axis; up = hinges[hingeIndex].proximal; }
         Matrix4 joint(MDirection, axis, up); joint.SetPosition(pivot);
         Physics::ArticulatedJointDef definition;
         definition.first = state->bodies[a]; definition.second = state->bodies[b];
         definition.firstFrame = state->initial[a].InverseRotation()*joint;
         definition.secondFrame = state->initial[b].InverseRotation()*joint;
-        const bool distal = j == 3 || j == 5 || j == 7 || j == 9;
         definition.coneAngle = distal ? 0.30f : 0.9f;
         definition.twistAngle = distal ? 0.20f : 0.6f;
+        if (anatomicalHinges && distal)
+        {
+            definition.kind = Physics::ArticulatedJointKind::Hinge;
+            definition.lowerAngle = hinges[hingeIndex].lower; definition.upperAngle = hinges[hingeIndex].upper;
+        }
         state->joints[j] = world->AddArticulatedJoint(definition);
         if (!state->joints[j].IsValid()) { refusal = "backend-refused-anatomical-joint"; return false; }
+        if (definition.kind == Physics::ArticulatedJointKind::Hinge) ++state->hingeCount;
     }
     _corpseArticulation = std::move(state);
     refusal = "";
@@ -1547,11 +1601,11 @@ RString Man::CorpsePoseProbe(const char* command)
             return "REFUSED corpse-articulation-status no-articulated-corpse";
         auto& state = *man->_corpseArticulation;
         char status[512];
-        std::snprintf(status,sizeof(status),"OK corpse-articulation-status entity=%p bodies=11 joints=10 epoch=%llu updates=%d maximumTravel=%.9g minimumClearance=%.9g",
-            static_cast<void*>(man),static_cast<unsigned long long>(state.epoch),state.updates,state.maximumTravel,state.minimumClearance);
+        std::snprintf(status,sizeof(status),"OK corpse-articulation-status entity=%p bodies=11 joints=10 hinges=%d epoch=%llu updates=%d maximumTravel=%.9g minimumClearance=%.9g",
+            static_cast<void*>(man),state.hingeCount,static_cast<unsigned long long>(state.epoch),state.updates,state.maximumTravel,state.minimumClearance);
         return status;
     }
-    if (std::strcmp(command, "corpse-articulate") == 0 || std::strcmp(command, "corpse-impulse") == 0)
+    if (std::strcmp(command, "corpse-articulate") == 0 || std::strcmp(command, "corpse-articulate-hinges") == 0 || std::strcmp(command, "corpse-impulse") == 0)
     {
         Man* man = g_corpsePoseOwner.GetLink();
         if (!man || !man->UseCorpsePose()) return "REFUSED corpse-articulate captured-authored-corpse-required";
@@ -1564,12 +1618,13 @@ RString Man::CorpsePoseProbe(const char* command)
             return "OK corpse-impulse chest=1 impulseY=12";
         }
         RString reason;
-        if (!man->StartCorpseArticulation(reason)) return RString("REFUSED corpse-articulate ")+reason;
+        if (!man->StartCorpseArticulation(reason, std::strcmp(command, "corpse-articulate-hinges") == 0)) return RString("REFUSED corpse-articulate ")+reason;
         char result[512];
         std::snprintf(result, sizeof(result),
-            "OK corpse-articulate entity=%p solver=%s bodies=11 joints=10 epoch=%llu minimumClearance=%.9g expiresMs=30000 default=off",
+            "OK corpse-articulate entity=%p solver=%s bodies=11 joints=10 epoch=%llu minimumClearance=%.9g expiresMs=30000 default=off%s",
             static_cast<void*>(man), man->_corpseArticulation->world->BackendName(),
-            static_cast<unsigned long long>(man->_corpseArticulation->epoch), man->_corpseArticulation->minimumClearance);
+            static_cast<unsigned long long>(man->_corpseArticulation->epoch), man->_corpseArticulation->minimumClearance,
+            man->_corpseArticulation->hingeCount == 4 ? " hinges=4" : "");
         return result;
     }
     if (std::strcmp(command, "corpse-clear") == 0)

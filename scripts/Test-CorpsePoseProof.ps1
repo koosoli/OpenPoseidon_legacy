@@ -7,10 +7,12 @@ param(
     [string]$NativeAddons = 'C:\Program Files (x86)\Steam\steamapps\common\Arma Reforger\addons',
     [scriptblock]$FinalPoseProbe,
     [string]$FinalPoseProbeSource,
-    [switch]$ArticulationSmoke
+    [switch]$ArticulationSmoke,
+    [switch]$AnatomicalHinges
 )
 $ErrorActionPreference = 'Stop'
 if ($ArticulationSmoke -and $FinalPoseProbe) { throw 'Articulation smoke and read-only no-solver diagnostic are separate campaigns.' }
+if ($AnatomicalHinges -and !$ArticulationSmoke) { throw 'Anatomical hinges require the complete articulation smoke campaign.' }
 if (!$env:LOCK_OWNER) { throw 'Run through scripts/with-game-lock.sh.' }
 if (Get-Process OpenPoseidon -ErrorAction SilentlyContinue) { throw 'Game already running; refusing shared ownership.' }
 $culture = [Globalization.CultureInfo]::InvariantCulture
@@ -40,6 +42,8 @@ $result = [ordered]@{ status = 'running'; scope = 'installed no-motion affine po
     saveNetwork = 'Not exercised by this runner; no save/network fields were added.' }
 if ($FinalPoseProbe) { $result.scope = 'installed no-motion phase/final-pose measurements and lifecycle proof; no solver, joint or contact admission' }
 if ($ArticulationSmoke) { $result.scope = 'installed opt-in stock corpse Box3D articulation, consumed pose and handle cleanup; appearance/contact promotion remains open' }
+if ($AnatomicalHinges) { $result.scope = 'installed separate opt-in stock corpse measured elbow/knee hinges, consumed pose and handle cleanup; defaults and broad admission remain open' }
+$result.observations.jointPolicy = if ($AnatomicalHinges) { 'measured elbow/knee revolute hinges; six spherical joints' } elseif ($ArticulationSmoke) { 'ten spherical joints' } else { 'solver=none' }
 $keys = @('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM',
     'POSEIDON_TEST_RAIN','WGR_TEMPORAL','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_GRASS','POSEIDON_WIND_OVERRIDE',
     'WGR_CLOUD_COVERAGE','WGR_LOD_GOVERNOR_RANGE','WGR_TERRAIN_JITTER')
@@ -51,6 +55,7 @@ foreach ($key in $keys) { $savedEnv[$key] = [Environment]::GetEnvironmentVariabl
    camera = 'actual getPosASL corpse, four metres behind and 2.7 metres above';
    fixedDate = @(1985,6,21,16,0); pausedImageComparison = $true; captureDeadlineSeconds = $CaptureDeadlineSeconds;
    expiryAcceleration = $ExpiryAcceleration; temporal = 0; exposure = 1; grass = 0; wind = '0 90 0';
+   articulationSmoke = [bool]$ArticulationSmoke; anatomicalHinges = [bool]$AnatomicalHinges;
    finalPoseProbe = if ($FinalPoseProbeSource) { @{ path = $FinalPoseProbeSource; sha256 = (Get-FileHash -LiteralPath $FinalPoseProbeSource).Hash;
        snowDepth = $env:POSEIDON_SNOW_TEST_DEPTH; snowline = $env:POSEIDON_SNOWLINE; objectSnow = $env:WGR_OBJECT_SNOW } } else { $null };
    gates = @('live-refusal','phase-consumer-equivalence','status-identity','explicit-clear','30-second-expiry','hide-invalidation','delete-invalidation') } |
@@ -128,8 +133,9 @@ function Start-Articulation([string]$phase) {
     $owner=Query 'corpse-status'
     Require ($owner -match '^OK corpse-status entity=(\S+) ') "Captured identity unavailable at $phase`: $owner"
     $capturedIdentity=$Matches[1]
-    $actual=Query 'corpse-articulate'
-    Require ($actual -match '^OK corpse-articulate entity=(\S+) solver=box3d [\d.]+(?:\+954cf87)? bodies=11 joints=10 epoch=\d+ minimumClearance=([\d.eE+-]+) expiresMs=30000 default=off$') "Actual articulated admission refused at $phase`: $actual"
+    $actual=Query $(if ($AnatomicalHinges) { 'corpse-articulate-hinges' } else { 'corpse-articulate' })
+    $hingeSuffix=if ($AnatomicalHinges) { ' hinges=4$' } else { '$' }
+    Require ($actual -match ('^OK corpse-articulate entity=(\S+) solver=box3d [\d.]+(?:\+954cf87)? bodies=11 joints=10 epoch=\d+ minimumClearance=([\d.eE+-]+) expiresMs=30000 default=off'+$hingeSuffix)) "Actual articulated admission refused at $phase`: $actual"
     Require ($Matches[1] -ceq $capturedIdentity) "Articulated owner changed at $phase`: $actual"
     $clearance=[double]::Parse($Matches[2],$culture)
     Require (![double]::IsNaN($clearance) -and ![double]::IsInfinity($clearance) -and $clearance -ge .003) "Actual collider clearance is invalid: $actual"

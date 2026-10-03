@@ -42,13 +42,19 @@ struct JointId
     [[nodiscard]] bool IsValid() const { return generation != 0; }
 };
 
-// Both local frames use their Z axes for the cone/twist axis. The caller fits
+enum class ArticulatedJointKind { Spherical, Hinge };
+
+// Both local frames use their Z axes for the cone/twist or hinge axis. The caller fits
 // these to measured model geometry; no RTM translation is a joint location.
 struct ArticulatedJointDef
 {
     BodyId first, second;
     Matrix4 firstFrame = MIdentity, secondFrame = MIdentity;
     float coneAngle = 1.2f, twistAngle = 0.6f;
+    ArticulatedJointKind kind = ArticulatedJointKind::Spherical;
+    // Signed rotation of secondFrame about firstFrame's Z; radians. These are
+    // frame-relative limits, not a spring target or an anatomical zero angle.
+    float lowerAngle = -0.1f, upperAngle = 2.5f;
 };
 
 /// What a collider piece is FOR.

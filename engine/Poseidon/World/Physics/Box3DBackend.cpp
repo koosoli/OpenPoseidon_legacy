@@ -913,19 +913,38 @@ public:
     {
         Slot* first = Find(definition.first); Slot* second = Find(definition.second);
         if (!first || !second || definition.first == definition.second ||
-            !RigidArticulationFrame(definition.firstFrame) || !RigidArticulationFrame(definition.secondFrame) ||
-            !std::isfinite(definition.coneAngle) || definition.coneAngle <= 0 || definition.coneAngle > 3.1415926f ||
-            !std::isfinite(definition.twistAngle) || definition.twistAngle <= 0 || definition.twistAngle > 3.0f)
+            !RigidArticulationFrame(definition.firstFrame) || !RigidArticulationFrame(definition.secondFrame))
             return {};
-        b3SphericalJointDef def = b3DefaultSphericalJointDef();
-        def.base.bodyIdA = first->body; def.base.bodyIdB = second->body;
-        def.base.localFrameA = {ToB3(definition.firstFrame.Position()), QuatFromOrientation(definition.firstFrame)};
-        def.base.localFrameB = {ToB3(definition.secondFrame.Position()), QuatFromOrientation(definition.secondFrame)};
-        def.base.collideConnected = false;
-        def.enableConeLimit = true; def.coneAngle = definition.coneAngle;
-        def.enableTwistLimit = true;
-        def.lowerTwistAngle = -definition.twistAngle; def.upperTwistAngle = definition.twistAngle;
-        b3JointId joint = b3CreateSphericalJoint(_world, &def);
+        b3JointDef base = b3DefaultSphericalJointDef().base;
+        base.bodyIdA = first->body; base.bodyIdB = second->body;
+        base.localFrameA = {ToB3(definition.firstFrame.Position()), QuatFromOrientation(definition.firstFrame)};
+        base.localFrameB = {ToB3(definition.secondFrame.Position()), QuatFromOrientation(definition.secondFrame)};
+        base.collideConnected = false;
+        b3JointId joint = b3_nullJointId;
+        if (definition.kind == ArticulatedJointKind::Hinge)
+        {
+            constexpr float limit = 0.99f * 3.14159265358979323846f;
+            if (!std::isfinite(definition.lowerAngle) || !std::isfinite(definition.upperAngle) ||
+                definition.lowerAngle < -limit || definition.upperAngle > limit ||
+                definition.lowerAngle >= definition.upperAngle) return {};
+            b3RevoluteJointDef def = b3DefaultRevoluteJointDef();
+            def.base = base; def.enableLimit = true;
+            def.lowerAngle = definition.lowerAngle; def.upperAngle = definition.upperAngle;
+            // Passive body: targetAngle is a spring target, not a limit offset.
+            def.enableSpring = false; def.enableMotor = false;
+            joint = b3CreateRevoluteJoint(_world, &def);
+        }
+        else if (definition.kind == ArticulatedJointKind::Spherical)
+        {
+            if (!std::isfinite(definition.coneAngle) || definition.coneAngle <= 0 || definition.coneAngle > 3.1415926f ||
+                !std::isfinite(definition.twistAngle) || definition.twistAngle <= 0 || definition.twistAngle > 3.0f) return {};
+            b3SphericalJointDef def = b3DefaultSphericalJointDef();
+            def.base = base; def.enableConeLimit = true; def.coneAngle = definition.coneAngle;
+            def.enableTwistLimit = true;
+            def.lowerTwistAngle = -definition.twistAngle; def.upperTwistAngle = definition.twistAngle;
+            joint = b3CreateSphericalJoint(_world, &def);
+        }
+        else return {};
         if (!b3Joint_IsValid(joint)) return {};
         if (++_nextJointGeneration == 0) ++_nextJointGeneration;
         std::uint32_t index = 0;

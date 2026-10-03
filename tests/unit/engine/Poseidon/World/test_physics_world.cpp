@@ -78,6 +78,73 @@ TEST_CASE("Physics world epochs retire articulated ownership across backend recr
     REQUIRE(world.Create()); CHECK(world.Generation() > retired);
 }
 
+TEST_CASE("Real revolute seam permits axial flexion blocks lateral bend and enforces signed limits", "[physics][articulation][corpse-hinge]")
+{
+    for (int drive : {1,-1,0})
+    {
+        auto backend=CreatePhysicsBackend(); REQUIRE(backend); REQUIRE(backend->Create());
+        const Vector3 points[]={{-.05f,-.15f,-.05f},{.05f,-.15f,-.05f},{-.05f,.15f,-.05f},{.05f,.15f,-.05f},
+            {-.05f,-.15f,.05f},{.05f,-.15f,.05f},{-.05f,.15f,.05f},{.05f,.15f,.05f}};
+        ConvexPiece piece{points,8,ColliderFlags::Solid};
+        Matrix4 first=MIdentity,second=MIdentity;
+        first.SetPosition(Vector3(0,3,0)); second.SetPosition(Vector3(0,2.5f,0));
+        BodyId a=backend->AddStaticBody(&piece,1,first),b=backend->SpawnArticulatedPiece(piece,second,2);
+        REQUIRE(a.IsValid()); REQUIRE(b.IsValid());
+        ArticulatedJointDef definition; definition.kind=ArticulatedJointKind::Hinge;
+        definition.first=a; definition.second=b; definition.secondFrame.SetPosition(Vector3(0,.5f,0));
+        definition.lowerAngle=-.18f; definition.upperAngle=.38f;
+        JointId joint=backend->AddArticulatedJoint(definition); REQUIRE(joint.IsValid());
+        BodyMotion initial; REQUIRE(backend->GetBodyMotion(b,initial));
+        CHECK(initial.position == second.Position());
+        CHECK(initial.axisX == VAside); CHECK(initial.axisY == VUp); CHECK(initial.axisZ == VForward);
+        REQUIRE(backend->BeginReplayRecording());
+        float maxAngle=0,minAngle=0,maxLateral=0,maxPivotError=0;
+        for (int step=0;step<180;++step)
+        {
+            BodyMotion motion; REQUIRE(backend->GetBodyMotion(b,motion));
+            // Equal off-center impulse, once each six frames. Its torque points
+            // along hinge Z in one run and perpendicular X in the other.
+            if (step%6 == 0)
+                backend->ApplyImpulse(b,motion.position+motion.axisY*.1f,drive == 0 ? Vector3(0,0,-.5f) : Vector3(drive*.5f,0,0));
+            backend->Step(1.0f/60);
+            REQUIRE(backend->GetBodyMotion(b,motion));
+            const float angle=std::atan2(motion.axisX.Y(),motion.axisX.X());
+            maxAngle=std::max(maxAngle,angle);
+            minAngle=std::min(minAngle,angle);
+            maxLateral=std::max(maxLateral,std::sqrt(motion.axisZ.X()*motion.axisZ.X()+motion.axisZ.Y()*motion.axisZ.Y()));
+            maxPivotError=std::max(maxPivotError,(motion.position+motion.axisY*.5f-first.Position()).Size());
+            CHECK(angle >= definition.lowerAngle-.03f); CHECK(angle <= definition.upperAngle+.03f);
+        }
+        if (drive == 0) { CHECK(maxAngle < .015f); CHECK(minAngle > -.015f); }
+        else if (drive > 0) CHECK(maxAngle > .2f);
+        else CHECK(minAngle < -.13f);
+        CHECK(maxLateral < .02f); CHECK(maxPivotError < .015f);
+        const auto replay=backend->EndReplayRecordingAndValidate(1);
+        REQUIRE(replay.supported); REQUIRE(replay.ran); CHECK_FALSE(replay.diverged); CHECK(replay.frameCount == 180);
+        backend->RemoveJoint(joint); backend->RemoveBody(b); backend->RemoveBody(a);
+        CHECK(backend->GetStats().articulatedJoints == 0); CHECK(backend->GetStats().bodies == 0);
+    }
+}
+
+TEST_CASE("Revolute seam rejects invalid kinds frames and signed limits without leaking handles", "[physics][articulation][corpse-hinge]")
+{
+    auto backend=CreatePhysicsBackend(); REQUIRE(backend->Create());
+    const Vector3 points[]={{.1f,0,0},{-.1f,0,0},{0,.1f,0},{0,-.1f,0},{0,0,.1f},{0,0,-.1f}};
+    ConvexPiece piece{points,6,ColliderFlags::Solid};
+    Matrix4 at=MIdentity; at.SetPosition(Vector3(0,3,0));
+    ArticulatedJointDef d; d.first=backend->SpawnArticulatedPiece(piece,at,2);
+    at.SetPosition(Vector3(0,3.5f,0)); d.second=backend->SpawnArticulatedPiece(piece,at,2);
+    REQUIRE(d.first.IsValid()); REQUIRE(d.second.IsValid()); d.kind=ArticulatedJointKind::Hinge;
+    d.lowerAngle=1; d.upperAngle=-1; CHECK_FALSE(backend->AddArticulatedJoint(d).IsValid());
+    d.lowerAngle=-4; d.upperAngle=1; CHECK_FALSE(backend->AddArticulatedJoint(d).IsValid());
+    d.lowerAngle=-1; d.upperAngle=4; CHECK_FALSE(backend->AddArticulatedJoint(d).IsValid());
+    d.upperAngle=std::numeric_limits<float>::quiet_NaN(); CHECK_FALSE(backend->AddArticulatedJoint(d).IsValid());
+    d.upperAngle=1; d.firstFrame(0,0)=2; CHECK_FALSE(backend->AddArticulatedJoint(d).IsValid());
+    d.firstFrame=MIdentity; d.kind=static_cast<ArticulatedJointKind>(17); CHECK_FALSE(backend->AddArticulatedJoint(d).IsValid());
+    CHECK(backend->GetStats().articulatedJoints == 0);
+    backend->RemoveBody(d.first); backend->RemoveBody(d.second);
+}
+
 TEST_CASE("showcase block contacts sweep players and projectiles", "[physics][showcase-contact]")
 {
     ProbeSample box;
