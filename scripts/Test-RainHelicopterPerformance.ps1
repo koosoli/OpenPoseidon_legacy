@@ -92,6 +92,14 @@ function Assert-Pilot($state,[bool]$moving){
  if($moving){Require ($state.moveForward -gt .01 -or $state.fastForward -gt .01) 'Physically held ordinary forward input is absent.'}
  else{Require ($state.moveForward -lt .001 -and $state.fastForward -lt .001 -and $speed -le 2) 'Initial neutral hover velocity/input differs.'}
 }
+function Initial-LookRearmAllowed($state,[int]$attempts){
+ Require ($attempts -ge 0) 'Invalid initial look rearm count.'
+ foreach($field in @('lookAroundEnabled','lookAroundToggled','joystickActive','joystickThrustActive')){Require ($state.$field -is [bool]) 'Missing actual initial look authority field.'}
+ # Only a lost held Alt during staging is recoverable. Ordinary SDL key input
+ # must prove its effect in a later fresh sample; measurement never rearms it.
+ return ($attempts -lt 2 -and (Numeric $state.altKey) -eq 0 -and !$state.lookAroundEnabled -and !$state.lookAroundToggled -and
+  !$state.joystickActive -and !$state.joystickThrustActive -and (Numeric $state.focusLost) -eq 0)
+}
 $regionNames=@{84='Weather cover: near cull';85='Weather cover: far cull';86='Weather cover: near draw';87='Weather cover: far draw'}
 function Assert-Performance($perf){
  Require ($perf.renderer -is [string] -and $perf.version -is [string] -and $perf.scope -is [string]) 'Published performance metadata absent.'
@@ -188,6 +196,14 @@ if($SelfTest){
  $pilot.cameraEffect=$true;Refuses {Assert-Pilot $pilot $true};$pilot.cameraEffect=$false
  $pilot.moveForward=0;Refuses {Assert-Pilot $pilot $true};$pilot.speedZ=0;Assert-Pilot $pilot $false
  $pilot.speedZ=3;Refuses {Assert-Pilot $pilot $false}
+ $pilot.speedZ=0;$pilot.altKey=0;$pilot.lookAroundEnabled=$false
+ Refuses {Assert-Pilot $pilot $false};Require (Initial-LookRearmAllowed $pilot 0) 'Lost held staging Alt cannot be readmitted.'
+ Require (!(Initial-LookRearmAllowed $pilot 2)) 'Initial Alt repair is unbounded.'
+ foreach($field in @('lookAroundEnabled','lookAroundToggled','joystickActive','joystickThrustActive')){$pilot.$field=$true;Require (!(Initial-LookRearmAllowed $pilot 0)) 'Competing look/input authority accepted.';$pilot.$field=$false}
+ $pilot.focusLost=1;Require (!(Initial-LookRearmAllowed $pilot 0)) 'Active focus settling accepted.';$pilot.focusLost=0
+ $pilot.altKey=1;Require (!(Initial-LookRearmAllowed $pilot 0)) 'An already held Alt was refreshed.';$pilot.altKey=0
+ $pilot.altKey='0';Refuses {Initial-LookRearmAllowed $pilot 0};$pilot.altKey=0
+ $pilot.lookAroundEnabled=$true;Assert-Pilot $pilot $false
  $perf=[pscustomobject]@{renderer='wgpu';version='fixture';scope='laggy';renderWidth=1280;renderHeight=720;outputWidth=1280;outputHeight=720;msaaSamples=4;activeUpscaler=0;gpuTimestampsAvailable=$true;regions=@();completedCpuFrames=256;cpuFrameAverageMs=10;cpuFrameP95Ms=12;cpuFrameMaxMs=20;cpuPhases=@()}
  0..87|ForEach-Object{
   $name=if($regionNames.ContainsKey($_)){$regionNames[$_]}elseif($_ -eq 25){'GPU frame total'}else{'region'+$_}
@@ -257,7 +273,7 @@ function State{
  if($null -eq $script:object){$script:object=$s.object};Require ($script:object -eq $s.object) 'Diagnostic switched aircraft.'
  $s|ConvertTo-Json -Depth 8 -Compress|Add-Content -LiteralPath (Join-Path $armDir 'rotor-states.jsonl');return $s
 }
-function Hold([int]$sc){$null=Send @{cmd='key';sc=$sc;hold=$true};$script:held+=,$sc}
+function Hold([int]$sc){$null=Send @{cmd='key';sc=$sc;hold=$true};if($script:held -notcontains $sc){$script:held+=,$sc}}
 function Release([int]$sc){$null=Send @{cmd='key_up';sc=$sc};$script:held=@($script:held|Where-Object{$_ -ne $sc})}
 function Close-Owned{
  foreach($sc in @($script:held)){Release $sc};$null=Send @{cmd='exit'}
@@ -312,11 +328,18 @@ try{
   Hold 20;Exec 'setAccTime 1';Start-Sleep -Milliseconds 250;Release 20
   $warmStart=Clock
   do{Start-Sleep -Seconds 1;$s=State;$arm.staging+=,$s;Require (!$s.destroyed -and $s.damage -eq 0) 'Physical warmup lost aircraft.'}while((Clock)-$warmStart -lt $WarmupSeconds*1000)
-  $readyStart=Clock
+  $readyStart=Clock;$lookRearms=0;$arm.readiness=@()
   do{
    $w=Send @{cmd='weather_visibility'};$particles=Send @{cmd='weather_particles';action='state'};$s=State;$arm.staging+=,$s;$ready=$false
-   try{Assert-Weather $w $particles ($weatherName -ceq 'Rain');Assert-Pilot $s $false;$ready=$true}catch{}
-   if(!$ready){Require ((Clock)-$readyStart -lt 30000) 'Natural matching weather and neutral occupied hover did not settle.';Start-Sleep -Seconds 1}
+   $attempt=[ordered]@{state=$s;weather=$w;particleParams=$particles;accepted=$false;rejection=$null;lookRearm=$false}
+   try{Assert-Weather $w $particles ($weatherName -ceq 'Rain');Assert-Pilot $s $false;$ready=$true;$attempt.accepted=$true}catch{
+    $attempt.rejection=$_.Exception.Message
+    if($attempt.rejection -ceq 'Unexpected focus/mouse/joystick authority.' -and (Initial-LookRearmAllowed $s $lookRearms)){
+     Hold 226;$lookRearms++;$attempt.lookRearm=$true
+    }
+   }
+   $arm.readiness+=,$attempt
+   if(!$ready){Require ((Clock)-$readyStart -lt 30000) ('Natural matching weather and neutral occupied hover did not settle: '+$attempt.rejection);Start-Sleep -Seconds 1}
   }while(!$ready)
   $arm.initial=$s;$arm.readyWeather=$w;$arm.readyParticleParams=$particles;$arm.warmupActualMs=$s.timeMs-$warmStart
   Require ([Math]::Sqrt([Math]::Pow($s.x-$X,2)+[Math]::Pow($s.z-$Z,2)) -le 8 -and [Math]::Abs($s.y-([double]$bed.vertexHeight+$HeightAboveBed)) -le 15) 'Actual initial hover left requested bounded XZ/altitude recipe.'
