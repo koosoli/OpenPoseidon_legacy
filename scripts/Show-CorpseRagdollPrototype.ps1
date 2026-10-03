@@ -28,6 +28,12 @@ function Eval([string]$code){
  return ConvertFrom-Json -InputObject $text -NoEnumerate
 }
 function Query([string]$command){return Eval ('triPhysicsShowcase "'+$command+'"')}
+function Position-DemoCamera{
+ $position=Eval 'getPosASL ragdollDemoCorpse'
+ $pose=@([double]$position[0],([double]$position[1]-4),([double]$position[2]+2.7),0,-34)
+ $coords=($pose|ForEach-Object{$_.ToString('R',[Globalization.CultureInfo]::InvariantCulture)}) -join ' '
+ if((Eval ('triFreeFlyPose "'+$coords+'"')) -cne 'OK'){throw 'Demo camera refused.'}
+}
 try{
  [IO.File]::WriteAllText((Join-Path $profile 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
  $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
@@ -47,16 +53,14 @@ try{
  if((Eval 'triSceneReady') -cne 'OK'){throw 'Mission is not ready.'}
  Exec 'player allowDamage false;0 setFog 0;0 setOvercast 0;0 setRain 0;setDate [1985,6,21,16,0];setAccTime 1'
  Exec '"SoldierWB" createUnit [getPos player,group player,"ragdollDemoCorpse=this;removeAllWeapons this;this disableAI ""MOVE"";this setCombatMode ""BLUE"""];ragdollDemoCorpse setDir 0;ragdollDemoCorpse setDammage 1'
+ Position-DemoCamera
  $until=[DateTime]::UtcNow.AddSeconds(40)
  do{$capture=Query 'corpse-capture';if($capture -notmatch '^OK corpse-capture '){if($capture -notmatch 'settled-death-pose-required|dry-ground-contact-required|no-nearby-corpse' -or [DateTime]::UtcNow -gt $until){throw $capture};Start-Sleep -Milliseconds 250}}while($capture -notmatch '^OK corpse-capture ')
  Exec 'setAccTime 0'
- $position=Eval 'getPosASL ragdollDemoCorpse'
- $pose=@([double]$position[0],([double]$position[1]-4),([double]$position[2]+2.7),0,-34)
- $coords=($pose|ForEach-Object{$_.ToString('R',[Globalization.CultureInfo]::InvariantCulture)}) -join ' '
- if((Eval ('triFreeFlyPose "'+$coords+'"')) -cne 'OK'){throw 'Demo camera refused.'}
+ Position-DemoCamera
  foreach($command in @('corpse-prepare','corpse-articulate-hinges','corpse-impulse')){$reply=Query $command;if($reply -notmatch '^OK '){throw $reply}}
- Exec 'setAccTime 1';$start=[double](Eval 'time')
- do{Start-Sleep -Milliseconds 100;$now=[double](Eval 'time')}while($now-$start -lt .65)
+ Exec 'setAccTime 1';$start=[double](Eval 'time');$until=[DateTime]::UtcNow.AddSeconds(15)
+ do{Start-Sleep -Milliseconds 100;if($p.HasExited -or [DateTime]::UtcNow -gt $until){throw 'Prototype motion deadline.'};$now=[double](Eval 'time')}while($now-$start -lt .65)
  Exec 'setAccTime 0';$motion=Query 'corpse-articulation-status';$frozen=Query 'corpse-freeze'
  if($frozen -notmatch '^OK '){throw $frozen}
  $physics=Query 'corpse-physics-status';if($physics -notmatch 'articulatedBodies=0 articulatedJoints=0$'){throw $physics}
