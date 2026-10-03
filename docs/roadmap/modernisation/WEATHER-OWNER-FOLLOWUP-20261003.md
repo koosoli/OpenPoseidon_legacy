@@ -1,5 +1,15 @@
 # Weather owner follow-up, 3 October 2026
 
+New13:22 evidence: Nogova water campaign1d2abf passes all three fresh arms,
+normal exits and unchanged pair. Root sees the existing OP white rotor ring
+and a visible Tidewater enabled ripple field versus absent OFF ring. Actual
+copied ON rotor descriptor and zero high/dry/stopped/OFF sources pass; cost
+and other maps remain open. Uniform lightingb7caf7 fails unsupported `str
+player` before the new views; harness abort requires owned forced cleanup, so
+this is not a runtime pass. Source-supported identity repair is in progress.
+Corrected occupied-flight dry weather/automatic-particle fixtureee0f79b6 is
+now running; no performance conclusion yet.
+
 Latest installed checkpoint13:10 local supersedes pending notes below. Matching
 bd590703 EXE/DLL deployed12:35, after the16step solar/soil/sand combined build.
 The exact installed pair/PDBs are preserved under build/installed-symbols/bd590703.

@@ -1,5 +1,22 @@
 # Installed rotor-water comparison and copied-buffer receipts
 
+## Installed bounded result, 3 October
+
+Matching bd590703 campaign `supported-stock-nogova-sea-20261003-131046-1d2abf`
+completes all three arms with normal exit0 and unchanged installed EXE/DLL.
+Actual occupied UH60 physics, native Noe sea support, pause/camera return, high
+and dry controls, and normal Z landing/shutdown gates pass. Tidewater ON low
+hover copies the actual rotor descriptor; OFF, high, dry and stopped sea
+controls copy zero sources with the current clock and camera domain.
+
+Root inspected low top/close PNGs. Existing OP has its clearly visible white
+foam ring over Nogova. Tidewater ON has a visible concentric ripple field in the
+top view; the matching OFF view has no rotor ring. The low close-view disturbance
+is subtler against strong sun glare. This establishes bounded source admission
+and a visible enabled effect over this native sea location, not every map,
+camera angle, multi-aircraft capacity or acceptable cost. No GPU cost was
+measured by this fixture. Source-only pending notes below are historical.
+
 The Tidewater rotor bridge requires an installed runtime comparison. CPU policy
 and WGSL composition checks establish admission, layout and bounded behavior;
 they do not establish a visible ring or its GPU cost. The new runner captures

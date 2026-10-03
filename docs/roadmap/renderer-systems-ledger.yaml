@@ -153,8 +153,15 @@ systems:
     plan: engine/WgpuRenderer/docs/water-rendering-plan.md
     status: PARTIAL
     owner: null
-    audited: 2026-08-06
+    audited: 2026-10-03
     completeness: >-
+      Matching bd590703 Nogova1d2abf actual occupied UH60 comparison passes
+      Current OP/Tidewater OFF/ON with normal exits and unchanged pair. Root
+      sees existing OP foam ring and visible enabled Tidewater top ripple
+      field versus absent OFF ring. Actual copied rotor descriptor and zero
+      high/dry/stopped/OFF controls pass. This bounded native-sea result does
+      not prove every map/camera/multiple-source limit or GPU cost. See
+      modernisation/TIDEWATER-ROTOR-RUNTIME-RECEIPTS-20261003.md.
       Plan is REVISED with stage 1 landed, and was the most recently maintained of the
       renderer plans. The surface itself — FFT cascades, shoaling, foam, interaction,
       planar reflection and SSR — is live and is the default look.
@@ -1807,6 +1814,9 @@ unbuilt_candidates: >-
       exit with actual wetness0.313608 and visible third-person SoldierWB.
       New optional stock day/night/lamp/roof appearance comparison remains
       pending; functional wetness does not establish satisfactory sheen.
+      Actual lightingb7caf7 fails unsupported stock str expression before
+      new lighting views; harness abort requires owned forced cleanup. This
+      is not a runtime pass; source-supported fixture repair is in progress.
       below. Source66b7bec9 adds bounded broad dielectric wet-textile sheen
       with geometric normals and existing cloth/history masks, sky/sun/local
       shadowing; dry and retained static paths remain zero. Full composer CPU
