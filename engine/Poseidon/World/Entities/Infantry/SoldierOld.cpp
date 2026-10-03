@@ -1274,6 +1274,9 @@ bool Man::StartCorpseArticulation(RString& refusal)
     }
     const float masses[] = {12,24,5,3,2,3,2,8,4,8,4};
     state->minimumClearance = 1000;
+    RString fitRefusal;
+    float maximumRootDistance = 0;
+    int fittedVertices = 0;
     for (int part = 0; part < 11; ++part)
     {
         if (vertices[part].size() < 4) { refusal = "anatomical-part-has-no-volume"; return false; }
@@ -1292,16 +1295,46 @@ bool Man::StartCorpseArticulation(RString& refusal)
             center = (lo+hi)*0.5f;
         }
         state->initial[part] = MIdentity; state->initial[part].SetPosition(center);
+        int vertex = 0;
         for (auto& point : vertices[part])
         {
             point = (point-center)*0.40f;
             const Vector3 supported = center+point;
-            const float clearance = supported.Y()-GLandscape->RoadSurfaceY(supported+VUp*0.5f);
-            state->minimumClearance = std::min(state->minimumClearance, clearance);
-            if (!point.IsFinite() || !std::isfinite(clearance) || clearance < 0.003f || clearance > 0.8f ||
-                (supported-Position()).Size() > 2.5f)
-            { refusal = "inset-collider-contact-or-bounds-not-admitted"; return false; }
+            const bool finite = point.IsFinite() && supported.IsFinite() && Position().IsFinite();
+            const float roadY = finite ? GLandscape->RoadSurfaceY(supported+VUp*0.5f) : std::numeric_limits<float>::quiet_NaN();
+            const float clearance = supported.Y()-roadY;
+            const float distance = (supported-Position()).Size();
+            if (std::isfinite(clearance)) state->minimumClearance = std::min(state->minimumClearance,clearance);
+            if (std::isfinite(distance)) maximumRootDistance = std::max(maximumRootDistance,distance);
+            ++fittedVertices;
+            if (!finite || !std::isfinite(clearance) || clearance < 0.003f || clearance > 0.8f || distance > 2.5f)
+            {
+                if (fitRefusal.IsEmpty())
+                {
+                    Vector3 floor = VZero;
+                    const auto filter = Physics::QueryFilter{Physics::ColliderFlags::Roadway};
+                    const bool hit = finite && world->RayHitAnything(supported+VUp*.8f,supported-VUp,filter);
+                    if (hit) world->CastRay(supported+VUp*.8f,supported-VUp,floor,filter);
+                    const float terrainY = finite ? GLandscape->SurfaceY(supported.X(),supported.Z()) : std::numeric_limits<float>::quiet_NaN();
+                    char detail[768];
+                    std::snprintf(detail,sizeof(detail),"part=%d name=%s vertex=%d supported=(%.9g,%.9g,%.9g) center=(%.9g,%.9g,%.9g) terrainY=%.9g roadY=%.9g solverHit=%d solverY=%.9g clearance=%.9g rootDistance=%.9g localFinite=%d worldFinite=%d rootFinite=%d",
+                        part,names[part][0],vertex,supported.X(),supported.Y(),supported.Z(),center.X(),center.Y(),center.Z(),
+                        terrainY,roadY,int(hit),hit?floor.Y():std::numeric_limits<float>::quiet_NaN(),clearance,distance,
+                        int(point.IsFinite()),int(supported.IsFinite()),int(Position().IsFinite()));
+                    fitRefusal = detail;
+                }
+            }
+            ++vertex;
         }
+    }
+    if (!fitRefusal.IsEmpty())
+    {
+        char detail[1024];
+        std::snprintf(detail,sizeof(detail),"inset-collider-contact-or-bounds-not-admitted %s minimumClearance=%.9g maximumRootDistance=%.9g fittedVertices=%d",
+            static_cast<const char*>(fitRefusal),state->minimumClearance,maximumRootDistance,fittedVertices);
+        LOG_WARN(World,"CORPSEFIT: {}",detail);
+        refusal = detail;
+        return false;
     }
     // Check the ACTUAL registered solver floor before creating any dynamic part.
     // A different heightfield/road support is refused, never silently corrected.
