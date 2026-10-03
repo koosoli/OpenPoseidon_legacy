@@ -1,5 +1,19 @@
 # Weather owner follow-up, 3 October 2026
 
+17:35 checkpoint: installed pair remains94f261c5. Quiet occupied repeat45e935
+exits normally with stable dry/rain arms. Dry mean13.795/p9526.934/max59.575ms;
+rain12.130/p9518.861/max47.584ms. Actual Advance dry0.173813/rain0.875189ms
+per tick, maxima7.142/23.004ms. The154ms spike does not recur, but the dry
+control is noisier than rain; no causal performance improvement is accepted.
+Default-off solver phase/step/thread-CPU instrumentation is being prepared.
+Actual AbelPi Near Full173255 has normal stable lifecycle and genuine source/
+material/package/actor/camera guards. Root sees unobstructed grey sand grain;
+this static view does not establish all-distance motion or footprint acceptance.
+The Box3D prototype has focused301-assertion/8-case checks including real
+constrained motion, weighted affine deltas and stale-handle cleanup. It is not
+installed. One explicit stock corpse, dry ground,30s lease and0.5m maximum
+travel are prototype boundaries, not automatic ragdolls for gameplay deaths.
+
 17:21 checkpoint: matching94f261c5 deployed16:46 after21step full build;
 actual pair/PDB/material archive and hashes are preserved under
 build/installed-symbols/94f261c5. Shared90mm/game-hour input and exact local
