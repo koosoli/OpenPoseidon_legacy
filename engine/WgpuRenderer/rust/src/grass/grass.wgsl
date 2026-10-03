@@ -160,25 +160,36 @@ struct WindField {
 // Sinkhole W1 (port of Malprave terrainHole2 to wgpu): terrain holes -- world X/Z convex areas a hole-cutting
 // object (memory-LOD `terrain_hole*` selection + roadway LOD) has cut out of the ground. Written by
 // Engine::SetTerrainHoles via wgr_terrain_set_holes. edges[i] = {nx, nz, d, last}: a point is inside an area when
-// nx*x + nz*z + d >= 0 for every edge of that area; last = 1 closes an area. info.x = edge count (0 = no holes).
+// nx*x + nz*z + d >= 0 for every edge of that area; last = 1 closes an area. info.x = record count (0 = no holes). Optional {0,0,ceilingY,2} precedes a bounded polygon.
 struct TerrainHoles {
     info: vec4<f32>,
     edges: array<vec4<f32>, 64>,
 };
 @group(1) @binding(3) var<storage, read> holes: TerrainHoles;
 
-fn in_terrain_hole(xz: vec2<f32>) -> bool {
+fn in_terrain_hole(world: vec3<f32>) -> bool {
+    let xz = world.xz;
     let n = min(u32(max(holes.info.x, 0.0)), 64u);
     if (n == 0u) { return false; }
     var inside = true;
+    var bounded = false;
+    var ceiling = 0.0;
     for (var i = 0u; i < n; i = i + 1u) {
         let e = holes.edges[i];
-        // A zero-length edge normal can only come from a collapsed outline; treat it as outside so a bad hole
-        // can never swallow the whole terrain (0 >= 0 would read as inside everywhere).
+        // Optional record BEFORE a polygon: {0, 0, world ceiling Y, 2}.
+        // It is metadata, never a zero-length edge or a polygon terminator.
+        if (e.w == 2.0) {
+            bounded = true;
+            ceiling = e.z;
+            continue;
+        }
+        // A collapsed edge must remain outside, never an unbounded whole-world cut.
         if (dot(e.xy, e.xy) < 0.25 || e.x * xz.x + e.y * xz.y + e.z < 0.0) { inside = false; }
         if (e.w > 0.5) {
-            if (inside) { return true; }
+            if (inside && (!bounded || world.y <= ceiling)) { return true; }
             inside = true;
+            bounded = false;
+            ceiling = 0.0;
         }
     }
     return false;
@@ -988,10 +999,10 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     if ((geo & GEO_EXCLUDE_HARD) != 0u) { return; }
     if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
-    if (in_terrain_hole(world_xz)) { return; } // Sinkhole W1: no grass in a terrain hole
     // Cards only: the card coverage (map's own where authored, else card_look.x).
     if (cards_on_near() && card_thinned(cell_id, geo)) { return; }
     let y = sample_height(world_xz);
+    if (in_terrain_hole(vec3<f32>(world_xz.x, y, world_xz.y))) { return; } // preserve ground above a bounded cave mouth
     if (y <= terrain.sea_level + 0.35) { return; }
     let normal = sample_normal(world_xz);
     if (normal.y < 0.70) { return; }
@@ -1058,10 +1069,10 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     if ((geo & 0x80000000u) == 0u || (geo & GEO_EXCLUDE_HARD) != 0u) { return; }
     if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
-    if (in_terrain_hole(world_xz)) { return; } // Sinkhole W1: no grass in a terrain hole
     // Cards only: the card coverage (map's own where authored, else card_look.x).
     if (cards_on_mid() && card_thinned(cell_id, geo)) { return; }
     let y = sample_height(world_xz);
+    if (in_terrain_hole(vec3<f32>(world_xz.x, y, world_xz.y))) { return; } // preserve ground above a bounded cave mouth
     if (y <= terrain.sea_level + 0.35 || sample_normal(world_xz).y < 0.70) { return; }
     let rel = vec3<f32>(world_xz.x, y, world_xz.y) - frame.cam_pos.xyz;
     let clip = frame.proj * frame.view * vec4<f32>(rel, 1.0);
@@ -1143,8 +1154,8 @@ fn cs_place_far(@builtin(global_invocation_id) gid: vec3<u32>) {
     if ((geo & 0x80000000u) == 0u || (geo & GEO_EXCLUDE_HARD) != 0u) { return; }
     if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
-    if (in_terrain_hole(world_xz)) { return; } // Sinkhole W1: no grass in a terrain hole
     let y = sample_height(world_xz);
+    if (in_terrain_hole(vec3<f32>(world_xz.x, y, world_xz.y))) { return; } // preserve ground above a bounded cave mouth
     if (y <= terrain.sea_level + 0.35) { return; }
     let normal = sample_normal(world_xz);
     if (normal.y < 0.70) { return; }

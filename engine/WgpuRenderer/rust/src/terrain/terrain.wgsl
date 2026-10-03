@@ -72,25 +72,36 @@ struct SnowData {
 // Sinkhole W1 (port of Malprave terrainHole2 to wgpu): terrain holes -- world X/Z convex areas a hole-cutting
 // object (memory-LOD `terrain_hole*` selection + roadway LOD) has cut out of the ground. Written by
 // Engine::SetTerrainHoles via wgr_terrain_set_holes. edges[i] = {nx, nz, d, last}: a point is inside an area when
-// nx*x + nz*z + d >= 0 for every edge of that area; last = 1 closes an area. info.x = edge count (0 = no holes).
+// nx*x + nz*z + d >= 0 for every edge of that area; last = 1 closes an area. info.x = record count (0 = no holes). Optional {0,0,ceilingY,2} precedes a bounded polygon.
 struct TerrainHoles {
     info: vec4<f32>,
     edges: array<vec4<f32>, 64>,
 };
 @group(1) @binding(5) var<storage, read> holes: TerrainHoles;
 
-fn in_terrain_hole(xz: vec2<f32>) -> bool {
+fn in_terrain_hole(world: vec3<f32>) -> bool {
+    let xz = world.xz;
     let n = min(u32(max(holes.info.x, 0.0)), 64u);
     if (n == 0u) { return false; }
     var inside = true;
+    var bounded = false;
+    var ceiling = 0.0;
     for (var i = 0u; i < n; i = i + 1u) {
         let e = holes.edges[i];
-        // A zero-length edge normal can only come from a collapsed outline; treat it as outside so a bad hole
-        // can never swallow the whole terrain (0 >= 0 would read as inside everywhere).
+        // Optional record BEFORE a polygon: {0, 0, world ceiling Y, 2}.
+        // It is metadata, never a zero-length edge or a polygon terminator.
+        if (e.w == 2.0) {
+            bounded = true;
+            ceiling = e.z;
+            continue;
+        }
+        // A collapsed edge must remain outside, never an unbounded whole-world cut.
         if (dot(e.xy, e.xy) < 0.25 || e.x * xz.x + e.y * xz.y + e.z < 0.0) { inside = false; }
         if (e.w > 0.5) {
-            if (inside) { return true; }
+            if (inside && (!bounded || world.y <= ceiling)) { return true; }
             inside = true;
+            bounded = false;
+            ceiling = 0.0;
         }
     }
     return false;
@@ -1120,7 +1131,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     }
     // Sinkhole W1: no ground where a hole-cutting object has cut it away. The prepass discards the same
     // pixels, so the colour pass's depth-equal test never sees a prepass depth for them.
-    if (in_terrain_hole(in.world_xz)) {
+    if (in_terrain_hole(in.world_pos + frame.cam_pos.xyz)) {
         discard;
     }
     // Receiver-plane derivatives must run in uniform control flow.
@@ -1578,7 +1589,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
 // space (view translation is zeroed, so the direction transform is a pure rotation).
 @fragment
 fn fs_terrain_prepass(in: VsOut) -> @location(0) vec2<f32> {
-    if (in_terrain_hole(in.world_xz)) {
+    if (in_terrain_hole(in.world_pos + frame.cam_pos.xyz)) {
         discard;
     }
     let footprint = max(length(dpdx(in.world_pos)), length(dpdy(in.world_pos)));

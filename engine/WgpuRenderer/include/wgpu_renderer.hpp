@@ -2643,7 +2643,9 @@ extern "C"
     WGR_API void wgr_terrain_set_sand(WgrRenderer* renderer, const float* data, uint32_t count);
     /* Sinkhole W1: terrain holes for this frame. `edges` = n_edges x {nx, nz, d, last} in world X/Z; a point
      * is inside an area when nx*x + nz*z + d >= 0 for every edge of it, last = 1 closes an area. At most 64
-     * edges are kept; n_edges = 0 clears them. The terrain and grass passes skip the pixels / blades inside. */
+     * records are kept; n_edges = 0 clears them. Optional {0,0,worldCeilingY,2} BEFORE a polygon bounds
+     * its terrain/grass cut to Y <= ceiling; it consumes one record. Legacy polygons remain unbounded.
+     * Bounded horizontal openings are not vertical skylight apertures. */
     WGR_API void wgr_terrain_set_holes(WgrRenderer* renderer, const float* edges, uint32_t n_edges);
     /* Sinkhole W1b: how far underground the camera is, 0 (open air) .. 1 (deep in a cave). Scales the
      * outdoor-air effects (sun shafts, surface scattering) away and lets eye adaptation open up

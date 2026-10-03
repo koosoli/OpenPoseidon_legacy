@@ -31,7 +31,8 @@ struct SnowData {
 
 // Sinkhole W1b: the terrain's OPEN holes (cave mouths, stairwells -- the same edges the terrain pass
 // discards, see terrain.wgsl TerrainHoles): edges[i] = {nx, nz, d, last}, inside an area when
-// nx*x + nz*z + d >= 0 for all its edges. Uniform (the GPU-driven path has no storage slot left).
+// nx*x + nz*z + d >= 0 for all its edges. Optional {0,0,ceilingY,2} makes the following
+// polygon a bounded horizontal mouth, excluded from vertical daylight. Uniform (no additional storage slot).
 struct CaveOpenings {
     info: vec4<f32>, // x = edge count
     edges: array<vec4<f32>, 64>,
@@ -64,19 +65,23 @@ fn cave_daylight2(world: vec3<f32>) -> vec2<f32> {
     var nearest = 1.0e6;
     var outside = -1.0e6;
     var valid = false;
+    var bounded = false;
     let n = min(u32(max(cave_openings.info.x, 0.0)), 64u);
     for (var i = 0u; i < n; i = i + 1u) {
         let e = cave_openings.edges[i];
+        // A bounded hillside mouth is not a vertical sky aperture.
+        if (e.w == 2.0) { bounded = true; continue; }
         if (dot(e.xy, e.xy) >= 0.25) {
             outside = max(outside, -(e.x * world.x + e.y * world.z + e.z));
             valid = true;
         }
         if (e.w > 0.5) {
-            if (valid) {
+            if (valid && !bounded) {
                 nearest = min(nearest, max(outside, 0.0));
             }
             outside = -1.0e6;
             valid = false;
+            bounded = false;
         }
     }
     let under = smoothstep(0.05, 0.25, depth);

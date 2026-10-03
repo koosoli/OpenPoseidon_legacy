@@ -18840,9 +18840,16 @@ void EngineWgpu::SetTerrainHoles(const float* edges, int nEdges)
             float nearest = 1.0e6f;
             float outside = -1.0e6f;
             bool valid = false;
+            bool bounded = false;
             for (int i = 0; i < n; i++)
             {
                 const float* e = edges + i * 4;
+                // A bounded horizontal mouth does not admit vertical skylight.
+                if (e[3] == 2.0f)
+                {
+                    bounded = true;
+                    continue;
+                }
                 if (e[0] * e[0] + e[1] * e[1] >= 0.25f)
                 {
                     outside = std::max(outside, -(e[0] * cam.X() + e[1] * cam.Z() + e[2]));
@@ -18850,10 +18857,11 @@ void EngineWgpu::SetTerrainHoles(const float* edges, int nEdges)
                 }
                 if (e[3] > 0.5f)
                 {
-                    if (valid)
+                    if (valid && !bounded)
                         nearest = std::min(nearest, std::max(outside, 0.0f));
                     outside = -1.0e6f;
                     valid = false;
+                    bounded = false;
                 }
             }
             auto smooth = [](float a, float b, float x)

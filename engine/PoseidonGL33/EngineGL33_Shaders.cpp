@@ -236,13 +236,19 @@ bool mwInTerrainHole() {
     int n = int(holeCtl.x);
     if (n <= 0) return false;
     bool inside = true;
+    bool bounded = false;
+    float ceiling = 0.0;
     for (int i = 0; i < 64; ++i) {
         if (i >= n) break;
         vec4 e = holeEdge[i];
+        // Optional camera-relative ceiling record before a polygon.
+        if (e.w == 2.0) { bounded = true; ceiling = e.z; continue; }
         if (dot(e.xy, e.xy) < 0.25 || e.x * vWorldRel.x + e.y * vWorldRel.z + e.z < 0.0) inside = false;
         if (e.w > 0.5) {
-            if (inside) return true;
+            if (inside && (!bounded || vWorldRel.y <= ceiling)) return true;
             inside = true;
+            bounded = false;
+            ceiling = 0.0;
         }
     }
     return false;
@@ -379,13 +385,19 @@ bool mwInTerrainHole() {
     int n = int(holeCtl.x);
     if (n <= 0) return false;
     bool inside = true;
+    bool bounded = false;
+    float ceiling = 0.0;
     for (int i = 0; i < 64; ++i) {
         if (i >= n) break;
         vec4 e = holeEdge[i];
+        // Optional camera-relative ceiling record before a polygon.
+        if (e.w == 2.0) { bounded = true; ceiling = e.z; continue; }
         if (dot(e.xy, e.xy) < 0.25 || e.x * vWorldRel.x + e.y * vWorldRel.z + e.z < 0.0) inside = false;
         if (e.w > 0.5) {
-            if (inside) return true;
+            if (inside && (!bounded || vWorldRel.y <= ceiling)) return true;
             inside = true;
+            bounded = false;
+            ceiling = 0.0;
         }
     }
     return false;
@@ -519,13 +531,19 @@ bool mwInTerrainHole() {
     int n = int(holeCtl.x);
     if (n <= 0) return false;
     bool inside = true;
+    bool bounded = false;
+    float ceiling = 0.0;
     for (int i = 0; i < 64; ++i) {
         if (i >= n) break;
         vec4 e = holeEdge[i];
+        // Optional camera-relative ceiling record before a polygon.
+        if (e.w == 2.0) { bounded = true; ceiling = e.z; continue; }
         if (dot(e.xy, e.xy) < 0.25 || e.x * vWorldRel.x + e.y * vWorldRel.z + e.z < 0.0) inside = false;
         if (e.w > 0.5) {
-            if (inside) return true;
+            if (inside && (!bounded || vWorldRel.y <= ceiling)) return true;
             inside = true;
+            bounded = false;
+            ceiling = 0.0;
         }
     }
     return false;
@@ -1873,13 +1891,14 @@ void EngineGL33::SetTerrainHoles(const float* edges, int nEdges)
     data[0] = nEdges > 0 ? static_cast<float>(nEdges) : 0.0f;
     const float cx = _frameState.cameraPos[0];
     const float cz = _frameState.cameraPos[2];
+    const float cy = _frameState.cameraPos[1];
     for (int i = 0; i < nEdges; i++)
     {
         const float* e = edges + i * 4;
         float* o = data + (i + 1) * 4;
         o[0] = e[0];
         o[1] = e[1];
-        o[2] = e[2] + e[0] * cx + e[1] * cz; // world -> camera-relative
+        o[2] = e[3] == 2.0f ? e[2] - cy : e[2] + e[0] * cx + e[1] * cz; // ceiling Y or edge d -> camera-relative
         o[3] = e[3];
     }
     glBindBuffer(GL_UNIFORM_BUFFER, s_holeUBO);

@@ -56,7 +56,7 @@ pub enum TerrainPass {
 // Grid mesh resolution: GRID_N quads per axis, (GRID_N+1)^2 vertices, u16 indices.
 const GRID_N: u32 = 32;
 
-/// Sinkhole W1: the terrain hole buffer -- a vec4 header (x = edge count) + 64 vec4 edges, matching
+/// Sinkhole W1: the terrain hole buffer -- a vec4 header (x = record count) + 64 vec4 records, matching
 /// `TerrainHoles` in terrain.wgsl and grass.wgsl and the 64-edge cap of the GL33 path.
 pub const TERRAIN_HOLES_MAX_EDGES: usize = 64;
 pub const TERRAIN_HOLES_FLOATS: usize = 4 + TERRAIN_HOLES_MAX_EDGES * 4;
@@ -1219,8 +1219,8 @@ impl Terrain {
         Some((&source.heights, params))
     }
 
-    /// Sinkhole W1: the terrain hole edges for this frame, `edges` = n x {nx, nz, d, last} in world X/Z
-    /// (Landscape::TerrainHoleDrawEdges). At most TERRAIN_HOLES_MAX_EDGES are kept; an empty slice clears them.
+    /// Sinkhole W1: the terrain hole edges for this frame, `edges` = n float4 records: XZ edges {nx, nz, d, last} and optional {0,0,ceilingY,2}
+    /// (Landscape::TerrainHoleDrawEdges). At most TERRAIN_HOLES_MAX_EDGES records are kept; an empty slice clears them.
     /// Writes only when the set changed, so a world without holes costs one comparison per frame.
     pub fn set_holes(&mut self, queue: &wgpu::Queue, edges: &[f32]) {
         let n = (edges.len() / 4).min(TERRAIN_HOLES_MAX_EDGES);
@@ -2384,15 +2384,15 @@ mod terrain_hole_tests {
         let src = include_str!("terrain.wgsl");
         let colour = src.split("fn fs_terrain(").nth(1).unwrap();
         let prepass = src.split("fn fs_terrain_prepass(").nth(1).unwrap();
-        assert!(colour[..colour.find("dpdx").unwrap()].contains("in_terrain_hole(in.world_xz)"));
-        assert!(prepass[..400].contains("in_terrain_hole(in.world_xz)"));
+        assert!(colour[..colour.find("dpdx").unwrap()].contains("in_terrain_hole(in.world_pos + frame.cam_pos.xyz)"));
+        assert!(prepass[..400].contains("in_terrain_hole(in.world_pos + frame.cam_pos.xyz)"));
         assert!(src.contains("@group(1) @binding(5) var<storage, read> holes: TerrainHoles;"));
     }
 
     #[test]
     fn grass_skips_holes_in_every_placement_pass() {
         let src = include_str!("../grass/grass.wgsl");
-        assert_eq!(src.matches("if (in_terrain_hole(world_xz)) { return; }").count(), 3);
+        assert_eq!(src.matches("if (in_terrain_hole(vec3<f32>(world_xz.x, y, world_xz.y))) { return; }").count(), 3);
         assert!(src.contains("@group(1) @binding(3) var<storage, read> holes: TerrainHoles;"));
     }
 
@@ -2426,3 +2426,6 @@ mod terrain_hole_tests {
         assert_eq!(super::TERRAIN_HOLES_BYTES, (16 + 64 * 16) as u64);
     }
 }
+
+#[cfg(test)]
+mod hole_ceiling_tests;
