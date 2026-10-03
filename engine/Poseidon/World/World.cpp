@@ -1906,6 +1906,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
     }
 
     markInitProbe(beginObjectsMs);
+    _drawInsideVehicle = camInsideVehicle;
     if (camInsideVehicle)
     {
         _scene.SelectActiveLights(camInsideVehicle);
