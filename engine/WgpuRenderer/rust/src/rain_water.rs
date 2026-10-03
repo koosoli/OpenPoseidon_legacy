@@ -32,6 +32,9 @@ fn physical_helpers_source() -> String {
     format!("{}{}", &source[begin..medium_begin], &source[medium_end..end])
 }
 
+#[cfg(test)]
+#[path = "rain_water_edge_optics_tests.rs"]
+mod edge_optics_tests;
 type PublicationIdentity = (fine::SourceIdentity, u64, [u32; 6], u32);
 fn publication_identity(p: &WgrRainWaterPublication) -> Option<PublicationIdentity> {
     Some((

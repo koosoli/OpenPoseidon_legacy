@@ -3615,3 +3615,7 @@ mod cloud_shadow_range_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "reflection_probe_tests.rs"]
+mod reflection_probe_tests;

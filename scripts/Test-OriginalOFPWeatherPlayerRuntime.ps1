@@ -15,6 +15,7 @@ param(
  [switch]$TerrainWetnessTrace,
  [switch]$MudLightingViews,
  [switch]$WetSoilFragmentViews,
+ [switch]$WetSoilReflectionEdgeReads,
  [switch]$SelfTest
 )
 $ErrorActionPreference='Stop';$root=Split-Path -Parent $PSScriptRoot
@@ -228,6 +229,10 @@ function Pair{
  return [ordered]@{stamp=$stamp;files=@(@('OpenPoseidon.exe','wgpu_renderer.dll')|ForEach-Object{$f=Get-Item -LiteralPath (Join-Path $GameDir $_);@{name=$_;bytes=$f.Length;writtenUtc=$f.LastWriteTimeUtc.ToString('o');sha256=(Get-FileHash -LiteralPath $f.FullName).Hash}})}
 }
 function Same-Pair($a,$b){Require (($a|ConvertTo-Json -Depth 8 -Compress)-ceq ($b|ConvertTo-Json -Depth 8 -Compress)) 'Installed source pair changed.'}
+function Reflection-EdgeCoordinates($point){
+ $x=Number $point.x;$z=Number $point.z;Require ([Math]::Abs($x)-lt 1000000 -and [Math]::Abs($z)-lt 1000000) 'Invalid bounded reflection centre.'
+ $points=@();for($iz=-8;$iz -le 8;++$iz){for($ix=-8;$ix -le 8;++$ix){$points+=,@{x=([double][single]($x+$ix*.125));z=([double][single]($z+$iz*.125))}}};return $points
+}
 function Test-Helpers{
  $water=@{ok=$true;valid=$true;depth=.005;height=10.005;flowX=0;flowZ=0;terrainY=9.9;revision=7}
  $soilSample=@{ok=$true;x=25;z=25;surfaceY=9.9;offset=-.1;surfaceDx=0;surfaceDz=0;sourceEligible=$true;surfaceClass='Field';files='pol'}
@@ -340,9 +345,13 @@ function Test-Helpers{
  $failed=$false;try{Assert-Body $body 3}catch{$failed=$true};Require $failed 'Stale pre-weather body draw accepted as current visibility proof.'
  $null=Assert-Cloth @('UNIFORM_CLOTH model=data3d\mc vojakw2.p3d texture=merged\00007mc_vojakw2.paa kind=2 enabled=true wet=0.3000 encoded=2.3000')
  $failed=$false;try{Assert-Cloth @('UNIFORM_CLOTH model=data3d\mc vojakw2.p3d texture=merged\00007mc_vojakw2.paa kind=2 enabled=true wet=0.3000 encoded=0.3000')}catch{$failed=$true};Require $failed 'Wrong actual cloth upload accepted.'
+ $edgePoints=@(Reflection-EdgeCoordinates @{x=123.25;z=456.5});Require ($edgePoints.Count-eq 289 -and $edgePoints[0].x-eq 122.25 -and $edgePoints[-1].z-eq 457.5) 'Reflection grid bounds/count failed.'
+ Require (@($edgePoints|ForEach-Object{[string]$_.x+':'+[string]$_.z}|Select-Object -Unique).Count-eq 289) 'Duplicate reflection queries.'
+ $failed=$false;try{Reflection-EdgeCoordinates @{x=[double]::NaN;z=0}}catch{$failed=$true};Require $failed 'Nonfinite reflection centre accepted.'
  Write-Host 'Original-map tuple/manual-contact/cloth falsifiers PASS. No game/GPU/profile used.'
 }
 if($SelfTest){Test-Helpers;return}
+if($WetSoilReflectionEdgeReads){$WetSoilFragmentViews=[switch]$true}
 if($WetSoilFragmentViews){$MudLightingViews=[switch]$true}
 Require ([bool]$ExpectedCommit) 'Supply -ExpectedCommit.';Require ([bool]$env:LOCK_OWNER) 'Use scripts/with-game-lock.sh.'
 Require ($Maps.Count-eq @($Maps|Select-Object -Unique).Count) 'Duplicate map arms would overwrite evidence.'
@@ -358,6 +367,7 @@ $result.uniformLightingViews=[bool]$UniformLightingViews
 $result.terrainWetnessTrace=[bool]$TerrainWetnessTrace;$result.minimumMudWetness=$MinimumMudWetness
 $result.mudLightingViews=[bool]$MudLightingViews
 $result.wetSoilFragmentViews=[bool]$WetSoilFragmentViews
+$result.wetSoilReflectionEdgeReads=[bool]$WetSoilReflectionEdgeReads
 if($WetSoilFragmentViews){$result.rainWaterFineInheritedControl=[Environment]::GetEnvironmentVariable('POSEIDON_RAIN_WATER_FINE','Process')}
 $qualityLighting=[bool]($UniformLightingViews -or $MudLightingViews)
 $result.renderedCloudRecipe=@{qualityLighting=$qualityLighting;inheritedCoveragePin=[Environment]::GetEnvironmentVariable('WGR_CLOUD_COVERAGE','Process');appliedCoveragePin=(Quality-CloudPin $qualityLighting);scope='Quality views clear the coverage pin so ordinary renderer weather-drive settings can apply. Simulation overcast alone is not proof of rendered cloud coverage, GPU acceptance or image lighting.'}
@@ -393,7 +403,21 @@ function Water-ReadPoint($point,$anchor){
  return @{requested=@{x=$point.x;z=$point.z};water=$water;fine=$fine;identity=$identity;actualSourcePoint=$actual;depths=$depth;
   scope='Read-only CPU water/source receipt. sourceEligible is the actual published soft-source admission; no renderer flag bits are invented. Fine-off explicitly uses the coarse field, not native fine/GPU proof. Derived bare height removes the signed mud offset in this snow-off Field recipe; physical terrain height remains separately recorded.'}
 }
-function Water-ViewReceipt($baseline,$point){
+function Reflection-EdgeReceipt($baseline,$point,$anchor,$camera){
+ $before=State;Assert-Paused $baseline $before;$points=@();$until=[DateTime]::UtcNow.AddSeconds(180)
+ foreach($query in @(Reflection-EdgeCoordinates $point)){
+  Require ([DateTime]::UtcNow -lt $until) 'Read-only reflection edge grid exceeded bounded180s.'
+  $sample=Water-ReadPoint $query $anchor
+  Require ($sample.actualSourcePoint.x-eq $query.x -and $sample.actualSourcePoint.z-eq $query.z) 'Actual edge source point differs from requested coordinate.'
+  foreach($field in @('surfaceY','surfaceDx','surfaceDz','offset')){$null=Number $sample.actualSourcePoint.$field}
+  $points+=,$sample
+ }
+ $after=State;Assert-Paused $before $after;Assert-DiagnosticCamera $camera (Send @{cmd='dev_wet_soil_diagnostic';action='state'}).camera
+ Require ($points.Count-eq 289) 'Incomplete actual reflection edge grid.'
+ return @{before=$before;after=$after;camera=$camera;terrainWetness=(Terrain-WetnessReceipt $before);side=17;spacing=.125;centre=@($point.x,$point.z);order='z-major then x';points=$points;
+  scope='Bounded actual paused 2x2m contact neighbourhood from existing read-only mud/water owners. Source refusals remain recorded; no synthetic stamps, metadata flags, map edits or water seeds. CPU slopes are physical owner samples, not pixel-footprint-filtered GPU normals; projected depths are not raster support/SSR hit proof.'}
+}
+function Water-ViewReceipt($baseline,$point,[string]$viewName){
  $before=State;Assert-Paused $baseline $before;$camera=(Send @{cmd='dev_wet_soil_diagnostic';action='state'}).camera
  $primary=Water-ReadPoint $point $null;$anchor=$primary.identity;$near=@()
  # The audited original-map water producer uses a zero-origin 25m lattice.
@@ -401,10 +425,11 @@ function Water-ViewReceipt($baseline,$point){
  # or mixed neighbours; this does not relabel the neighbourhood as pol.
  $x=[Math]::Round($point.x/25)*25;$z=[Math]::Round($point.z/25)*25
  foreach($dz in @(-25,0,25)){foreach($dx in @(-25,0,25)){$near+=,(Water-ReadPoint @{x=($x+$dx);z=($z+$dz)} $anchor)}}
+ $edge=$null;if($WetSoilReflectionEdgeReads -and $viewName -ceq 'contact-overcast-low'){$edge=Reflection-EdgeReceipt $before $point $anchor $camera}
  $returned=Water-ReadPoint $point $anchor;$after=State;Assert-Paused $before $after
  Assert-DiagnosticCamera $camera (Send @{cmd='dev_wet_soil_diagnostic';action='state'}).camera
  Require (($primary.actualSourcePoint|ConvertTo-Json -Compress) -ceq ($returned.actualSourcePoint|ConvertTo-Json -Compress)) 'Read-only water inspection changed physical source point.'
- return @{before=$before;after=$after;camera=$camera;primary=$primary;neighbourhood=$near;returned=$returned;scope='One actual point plus bounded 3x3 25m-lattice neighbourhood, exact paused water/source identity and budget. CPU support projection is not fragment depth or GPU completion proof.'}
+ return @{before=$before;after=$after;camera=$camera;primary=$primary;neighbourhood=$near;edgeSnapshot=$edge;returned=$returned;scope='One actual point plus bounded 3x3 25m-lattice neighbourhood, exact paused water/source identity and budget. CPU support projection is not fragment depth or GPU completion proof.'}
 }
 function Select-ThinPolView($baseline,$site){
  $camera=(Send @{cmd='dev_wet_soil_diagnostic';action='state'}).camera;$points=@();$selected=$null;$anchor=$null
@@ -559,7 +584,7 @@ function Terrain-MudCentreViews($site){
 function Wet-SoilFragmentViews($baseline,$sample,$site,[double]$overcast,[string]$name){
  $initial=Send @{cmd='dev_wet_soil_diagnostic';action='state'};Require ($initial.mode -eq 0) 'Actual diagnostic did not begin in normal mode.'
  $record=@{initial=$initial;views=@{};legend=(Wet-SoilModes);scope='Actual fragment-derived colour channels after production admission; retained water stays drawn and marks actual survivors magenta with its original alpha. Tone mapping/postprocess preclude numeric pixel decoding; overlay can obscure terrain channels. Mode readback is producer queue state, not GPU completion.'}
- $record.waterReceipt=Water-ViewReceipt $baseline $sample;$waterAnchor=$record.waterReceipt.primary.identity
+ $record.waterReceipt=Water-ViewReceipt $baseline $sample $name;$waterAnchor=$record.waterReceipt.primary.identity
  $record.refusedModes=@()
  foreach($invalid in @(-1,.5,5)){
   $refused=$false;try{$null=Send @{cmd='dev_wet_soil_diagnostic';action='set';mode=$invalid}}catch{$refused=$true};Require $refused 'Invalid actual diagnostic enum was accepted.'
