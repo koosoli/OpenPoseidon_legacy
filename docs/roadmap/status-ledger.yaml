@@ -20,6 +20,17 @@ execution:
       Owner confirms Claude authored the swim animations and authorises inclusion;
       no such animation files were found in available Git history or local assets.
       Optional spotting/hunting/interval/exposure remain off in normal launches.
+  excavation_editor_checkpoint:
+    branch: codex/cave-editor-20261004
+    baseline_commit: ee869c1b
+    source_commit: 3d196ce3
+    state: NATIVE_GPU_CAVE_INSTALLED_CHECKS_PASSED_TRENCH_TRAVERSAL_PENDING
+    evidence: docs/verification/excavation-editor-20261004.md
+    note: >-
+      Owner-authorised horizontal caves, straight infantry/tank trenches,
+      smaller requested height-brush radius, sub-grid shaped apertures and Shift rate.
+      Mission-local single-player prototype; no persistence, AI Paths or Box3D
+      cavity-heightfield acceptance. Author-run tests are not owner validation.
   review_model: OWNER_REVIEW_NO_INDEPENDENT_REVIEWER
   review_model_note: >-
     Preview 0 has no independent reviewer and cannot obtain one: Oliver Kay is
