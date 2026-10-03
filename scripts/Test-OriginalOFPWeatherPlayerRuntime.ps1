@@ -156,7 +156,7 @@ function Capture([string]$name){
    Health;$snapshot=$null
    try {
     $snapshot=Read-SandUploadSnapshot $sandSnapshotFile
-    $queued=@(Lines|Where-Object{$_ -match ('SAND_UPLOAD_QUEUED .*hash='+$snapshot.hash+'$')}|Select-Object -Last 1)
+    $queued=@(Lines|Where-Object{$_ -match ('SAND_UPLOAD_QUEUED .*hash='+$snapshot.hash+'\r?$')}|Select-Object -Last 1)
     $dumped=@(Lines|Where-Object{$_ -match ('SAND_UPLOAD_SNAPSHOT written=true .*hash='+$snapshot.hash+' file=')}|Select-Object -Last 1)
     $received=@(Get-Content -LiteralPath $stderr -ErrorAction SilentlyContinue|Where-Object{$_ -match ('SAND_UPLOAD_RECEIVED accepted=true .*hash='+$snapshot.hash+' ')}|Select-Object -Last 1)
     if($queued.Count -and $dumped.Count -and $received.Count){

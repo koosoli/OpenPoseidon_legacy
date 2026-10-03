@@ -39,6 +39,9 @@ public static class PoseidonSandSnapshot20261001 {
 }
 
 function Assert-SandUploadPublication($snapshot,[string]$queued,[string]$received) {
+ # The runtime shared-file reader splits on LF and preserves the Windows CR.
+ # Normalize only record framing; all receipt fields remain strictly parsed.
+ $queued=$queued.TrimEnd([char[]]"`r`n");$received=$received.TrimEnd([char[]]"`r`n")
  $number='[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?'
  $q='SAND_UPLOAD_QUEUED revision=\d+ enabled=(true|false) chunks=\d+ cameraX=('+ $number+') cameraZ=('+ $number+') originX=('+ $number+') originZ=('+ $number+') cell=('+ $number+') limit=('+ $number+') count=(\d+) finite=(true|false) negative=(\d+) positive=(\d+) min=('+ $number+') max=('+ $number+') minX=('+ $number+') minZ=('+ $number+') hash=([a-f0-9]{16})$'
  if($queued -cnotmatch $q){throw 'Malformed queued sand receipt.'}

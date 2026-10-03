@@ -54,3 +54,22 @@ signed shader indexing, vertex-height sampling and filtered fragment normals.
 The installed contact-union source refines near feet to4m patches with32quads,
 matching the125mm field spacing. Actual GPU sampling and inspected low/top views
 are still required to resolve the reported invisible sand relief.
+
+## Actual CRLF fixture correction
+
+The installed `b59f455a` Everon run
+`wet-soil-optics-signed-sand-20261003-114300-313bdb` exited normally but the fixture
+failed before mud checks. The shared-file log reader split on LF while retaining
+Windows CR, and the queued lookup anchored the hash immediately at end-of-string.
+The exact queued record therefore existed but did not match. This was a record
+framing failure, not an extrema tolerance, payload or material failure.
+
+The queued lookup now permits a final CR. Strict receipt parsing removes only
+terminal CR/LF. All field/hash/allocation requirements remain unchanged. A pure
+read-only replay of that actual saved source log, Rust stderr and snapshot passes:
+hash `5a37dbd0edb795b4`,33negative cells,55positive cells, header
+`[5944,3294,0.125,0.15]`, minimum−0.0998493433m, maximum+0.0140000004m.
+`Test-SandUploadReceipt.ps1 -ActualRuntimeEvidence <saved eden directory>`
+reproduces this check, including the actual CR-preserving reader split. Synthetic
+LF/CRLF and previous receipt/payload falsifiers also pass. The historical failed
+runtime result is preserved; a new installed campaign remains necessary.

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Compiler='clang++',[string]$RustCompiler='rustc')
+param([string]$Compiler='clang++',[string]$RustCompiler='rustc',[string]$ActualRuntimeEvidence='')
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 $out=Join-Path $root 'build/sand-upload-receipt'
@@ -58,6 +58,8 @@ $minimum=$snapshot.minimum.ToString('F8',$culture);$maximum=$snapshot.maximum.To
 $queued='SAND_UPLOAD_QUEUED revision=4 enabled=true chunks=8 cameraX=5973.80420 cameraZ=3325.57300 originX='+$header[0]+' originZ='+$header[1]+' cell='+$header[2]+' limit='+$header[3]+' count=262148 finite=true negative='+$snapshot.negative+' positive='+$snapshot.positive+' min='+$minimum+' max='+$maximum+' minX=5975.81250 minZ=3325.56250 hash='+$snapshot.hash
 $received='SAND_UPLOAD_RECEIVED accepted=true count=262148 header=['+($header -join ', ')+'] negative='+$snapshot.negative+' positive='+$snapshot.positive+' min='+$minimum+' max='+$maximum+' hash='+$snapshot.hash+' byteOffset=2097184 bufferBytes=3145776'
 $null=Assert-SandUploadPublication $snapshot $queued $received
+$null=Assert-SandUploadPublication $snapshot ($queued+"`r") ($received+"`r`n")
+if(($queued+"`r") -notmatch ('SAND_UPLOAD_QUEUED .*hash='+$snapshot.hash+'\r?$')){throw 'CRLF queued receipt lookup failed.'}
 foreach($bad in @($received.Replace('accepted=true','accepted=false'),$received.Replace('count=262148','count=262144'),$received.Replace('byteOffset=2097184','byteOffset=2097168'),$received.Replace(('min='+$minimum),'min=-0.15'),$received.Replace($snapshot.hash,'0000000000000000'))){
  $failed=$false;try{$null=Assert-SandUploadPublication $snapshot $queued $bad}catch{$failed=$true}
  if(!$failed){throw 'Mismatched sand accepted receipt passed.'}
@@ -73,5 +75,16 @@ foreach($value in @([single]::NaN,[single](-.151),[single]0.021)){
  $bad=[byte[]]$bytes.Clone();[Array]::Copy([BitConverter]::GetBytes([single]$value),0,$bad,16,4);[IO.File]::WriteAllBytes($invalid,$bad)
  $failed=$false;try{$null=Read-SandUploadSnapshot $invalid}catch{$failed=$true}
  if(!$failed){throw 'Invalid signed snapshot cell passed.'}
+}
+if($ActualRuntimeEvidence){
+ $actual=Read-SandUploadSnapshot (Join-Path $ActualRuntimeEvidence 'latest-sand-snapshot.f32')
+ $text=[IO.File]::ReadAllText((Join-Path $ActualRuntimeEvidence 'engine.log'));$end=$text.LastIndexOf("`n")
+ if($end -lt 0){throw 'Actual source log has no complete records.'}
+ $rows=$text.Substring(0,$end).Split("`n")
+ $actualQueued=@($rows|Where-Object{$_ -match ('SAND_UPLOAD_QUEUED .*hash='+$actual.hash+'\r?$')}|Select-Object -Last 1)
+ $actualReceived=@(Get-Content -LiteralPath (Join-Path $ActualRuntimeEvidence 'stderr.txt')|Where-Object{$_ -match ('SAND_UPLOAD_RECEIVED accepted=true .*hash='+$actual.hash+' ')}|Select-Object -Last 1)
+ if($actualQueued.Count -ne 1 -or $actualReceived.Count -ne 1){throw 'Actual queued/received source record missing.'}
+ $null=Assert-SandUploadPublication $actual $actualQueued[0] $actualReceived[0]
+ Write-Host ('Saved actual source/Rust/snapshot publication replay PASS hash='+$actual.hash+' negative='+$actual.negative+' positive='+$actual.positive)
 }
 Write-Host 'Sand publication CPU closure PASS; GPU completion and installed appearance remain unproved.'
