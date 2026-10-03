@@ -1772,13 +1772,28 @@ float Soldier::GetFieldCost(const GeographyInfo& info) const
     return cost;
 }
 
+// seconds per metre for a swimmer, see GetCost; OperMap::GetFieldCost also
+// takes it as the absolute cost of a water item (GetTypeCost(OITWater))
+static const float SoldierSwimCost = 1.0f;
+
 float Soldier::GetCost(const GeographyInfo& geogr) const
 {
     if (!(geogr.u.road || geogr.u.track))
     {
-        if (geogr.u.waterDepth >= 2 || geogr.u.full && !geogr.u.forestOuter)
+        if (geogr.u.full && !geogr.u.forestOuter)
         {
             return 1e30f;
+        }
+        if (geogr.u.waterDepth >= 2)
+        {
+            if (!CanSwim())
+            {
+                return 1e30f;
+            }
+            // swimming: the swim cycle makes about 1.35 m/s, so ~0.75 s a metre,
+            // weighted up so that a land route is preferred while it is under
+            // about seven times as long as the swim (a sprint is 0.14 s/m)
+            return geogr.u.waterDepth >= 3 ? SoldierSwimCost * 1.2f : SoldierSwimCost;
         }
     }
     float cost = InvFastRunSpeed;
@@ -1812,9 +1827,14 @@ float Soldier::GetTypeCost(OperItemType type) const
             return 1;
         case OITSpaceBush:
             return 2;
+        case OITWater:
+            // water deeper than 0.5 m: a man who can swim goes through it. This is not
+            // a multiplier like the others: OperMap::GetFieldCost uses it as the cost
+            // per metre on its own, because the 50 m square around the item may be
+            // land (a shore) whose walking cost says nothing about swimming.
+            return CanSwim() ? SoldierSwimCost : SET_UNACCESSIBLE;
         case OITSpaceTree:
         case OITSpace:
-        case OITWater:
         case OITSpaceRoad:
             return SET_UNACCESSIBLE;
         case OITAvoidBush:
@@ -2575,6 +2595,19 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
 
     _turnWanted += delta;
     saturate(_turnWanted, -5, +5);
+    if (_swimming)
+    {
+        // Sinkhole W3 (Malprave swimTurn): the swim action maps turn at most turnSpeed (1.2 rad/s), but the
+        // request above winds up to 5. Once the heading was right it took a second to wind back down, the
+        // swimmer overshot, was more than 45 deg off again (speed 0 above) and turned again: AI swimmers
+        // spun in place whenever they needed a big turn. Keep the request within what the swim moves can do.
+        const ActionMap* swimMap = Type()->GetActionMap(_primaryMove.id);
+        const float swimTurn = swimMap ? swimMap->GetTurnSpeed() : 0;
+        if (swimTurn > 0)
+        {
+            saturate(_turnWanted, -swimTurn, +swimTurn);
+        }
+    }
 
     ManPos minPos = ManPosLying;
     ManPos maxPos = ManPosStand;
@@ -2614,9 +2647,9 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
     }
     else if (_unitPos == UPAuto)
     {
-        if (unit->IsDanger() && !_inBuilding)
+        if ((unit->IsDanger() || unit->IsPinnedDown()) && !_inBuilding)
         {
-            maxPos = ManPosLying; // force lying
+            maxPos = ManPosLying; // force lying (in danger, or pinned down by incoming fire)
         }
         else if (_hideBehind)
         {
@@ -2949,6 +2982,13 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
             }
             // LOG_DEBUG(Physics, "{}: action ch,   {}->{}",DNAME(),upDegree,_posWanted);
         }
+    }
+    if (_swimming)
+    {
+        // Sinkhole W3 (Malprave swimBoatsAI): no stances or weapon changes in the water -- the swim action
+        // maps turn every such action into treading water, which kept the AI from ever choosing a move.
+        // Always pick by speed instead.
+        selAction = ManActN;
     }
     if (selAction == ManActN)
     {

@@ -14,6 +14,10 @@ enum HydroWaterInteractionKind : uint32_t
     HydroWaterInteractionExplosion = 3,
     HydroWaterInteractionFootstep = 4,
     HydroWaterInteractionContinuous = 5,
+    // Sinkhole W3: a swimmer's hand or foot cutting the surface. positionRadius = (x, z, radius, surface y),
+    // velocityKind = (limb vx, vz, vy over the water, kind), timeLifeFoamMass[3] = splash height (m).
+    // Drawn by the Tidewater water (water_tw/impacts.rs); the Current OP water ignores the kind.
+    HydroWaterInteractionSwimSplash = 6,
 };
 
 enum HydroWaterInteractionFlags : uint32_t
@@ -65,5 +69,13 @@ bool RifleWaterImpactSprayEnabled();
 // legacy fireball / smoke Explosion and the CPU droplets are not spawned there.
 // WGR_TW_LEGACY_WATER_FX=1 keeps them; the Current OP water mode is unchanged.
 bool TidewaterWaterBurst(float x, float y, float z);
+
+// Sinkhole W3: the water surface around the camera as the Tidewater water draws it (its W9a probe grid,
+// n x n displaced vertices x, y, z, 1-3 frames late; lanes = first lattice x, z, step, n), handed over
+// by the renderer each frame (n = 0: none). The CPU wave predictor matches the drawn sea in scale, not
+// crest for crest; a swimmer near the camera, and the camera following him, ride this instead.
+// Presentation of the local view only. Safe from any thread.
+void SetDrawnWaterGrid(const float* xyz, int n, const float lanes[4]);
+bool DrawnWaterHeightAt(float x, float z, float& y);
 
 } // namespace Poseidon

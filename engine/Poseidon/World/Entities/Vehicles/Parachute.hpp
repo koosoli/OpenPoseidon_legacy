@@ -93,6 +93,13 @@ class Parachute: public Transport
 	bool IsPossibleToGetIn() const override;
 	bool Airborne() const override;
 
+	// the pilot can be shot even if the model's fire geometry leaves him out
+	void IntersectExtra(const FrameBase &pos, CollisionBuffer &result,
+		Vector3Par beg, Vector3Par end, float radius,
+		ObjIntersect type, int hierLevel) const override;
+	// AI aims at the pilot, not the canopy
+	Vector3 AimingPosition() const override;
+
 	LSError Serialize(ParamArchive &ar) override;
 };
 

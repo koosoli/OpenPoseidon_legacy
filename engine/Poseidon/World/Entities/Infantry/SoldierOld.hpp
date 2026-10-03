@@ -390,6 +390,9 @@ class ManType: public EntityAIType, public MotionType
 	int _rightHandMatIndex;
 
 	int _stepLIndex,_stepRIndex; // index in memory LOD
+	// Sinkhole W3: the bones the swim splashes come from (SoldierOldSwim.cpp): lruka, pruka, lprsty, pprsty.
+	mutable bool _swimLimbsInit = false;
+	mutable int _swimLimbBone[4] = {-1, -1, -1, -1};
 
 	float _minGunElev,_maxGunElev;
 	float _minGunTurn,_maxGunTurn;
@@ -453,6 +456,7 @@ class ManType: public EntityAIType, public MotionType
 	AnimationRT *GetAnimation( MoveId move ) const {return _moveType->GetAnimation(move);}
 	ActionMap *GetActionMap( MoveId move ) const;
 	const MoveInfo *GetMoveInfo( MoveId move ) const {return _moveType->GetMoveInfo(move);}
+	void FindSwimLimbs() const; // Sinkhole W3
 };
 
 
@@ -566,6 +570,24 @@ class Man: public Person
 	float _waterDepth;
 	float _hydroWaterDepth;
 	bool _waterBuoyancyContact;
+	// Sinkhole W1b: the handheld flashlight (SoldierOldFlashlight.cpp), switched by _pilotLight
+	Ref<LightReflectorOnVehicle> _flashlight;
+	bool _flashlightLogged = false;
+	// Sinkhole W3: swimming (SoldierOldSwim.cpp)
+	bool _swimming = false;
+	mutable bool _swimMovesInit = false;
+	mutable MoveId _swimMoves[4]; // Swim, SwimF, SwimFastF, SwimDead
+	mutable MoveId _swimOut;
+	float _swimVy = 0; // vertical speed riding the swell
+	float _swimPrevTarget = 0;
+	bool _swimTargetValid = false;
+	float _swimEye = 0; // the eyes' height in the moves (smoothed)
+	bool _swimEyeValid = false;
+	Vector3 _swimUp = VUp; // the body's (smoothed) up, leaning with the wave face
+	bool _swimLimbValid = false;
+	float _swimLimbRel[4] = {}; // limb height over the water last frame
+	Vector3 _swimLimbPos[4];
+	float _swimLimbCool[4] = {};
 
 	Foundation::Time _whenKilled;
 	Foundation::Time _lastMovementTime;
@@ -953,6 +975,20 @@ class Man: public Person
 	Vector3 GetHeadCenter() const;
 	Matrix4 HeadAimBasis() const;
 	Vector3 GetEyeDirection() const override;
+	// Sinkhole W1b: handheld flashlight (SoldierOldFlashlight.cpp)
+	// Malprave aiExposed (SoldierOldExposed.cpp)
+	float ExposedVisibility(Vector3Par sensorPos, const Object *sensor, float objectSize, int isect) override;
+	void UpdateFlashlight();
+	bool LeftHandFrame(Matrix4& modelSpace) const;
+	// Sinkhole W3: swimming (SoldierOldSwim.cpp)
+	void BlendToMove(MoveId id);
+	void InitSwimMoves() const;
+	bool CanSwim() const;
+	bool IsSwimMove(MoveId id) const;
+	bool IsSwimming() const override {return _swimming;}
+	bool UpdateSwimming();
+	void SimSwimMovement(float deltaT, SimulationImportance prec);
+	void EmitSwimSplashes(float deltaT);
 	Matrix3 GetHeadRelOrientation() const;
 	Vector3 GetWeaponPoint( int weapon ) const override;
 	bool GetWeaponCartridgePos

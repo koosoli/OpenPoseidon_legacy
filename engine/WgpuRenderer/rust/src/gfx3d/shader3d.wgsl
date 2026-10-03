@@ -18,7 +18,7 @@
 #import tree_snow::{tree_snow_height, tree_snow_coverage}
 // Group(4) terrain heightmap + surface_y, shared with the shadow depth pass.
 // surface_grad tilts conformed veg normals to follow the ground slope (color pass only).
-#import conform::{surface_y, surface_grad, surface_y_raster, hm_params, snow_depth, rigid_ground_fragment}
+#import conform::{surface_y, surface_grad, surface_y_raster, hm_params, snow_depth, rigid_ground_fragment, cave_daylight}
 
 // BEGIN_MUZZLE_FLASH_HELPERS (actual helper exercised by the GPU probe)
 fn stock_muzzle_flash_radiance(srgb: vec3<f32>, linear: f32) -> vec3<f32> {
@@ -302,7 +302,9 @@ fn env_reflection(shaded: vec3<f32>, normal: vec3<f32>, world_pos: vec3<f32>, fo
     let n = select(-normal, normal, dot(normal, view_dir) >= 0.0);
     let cos_view_normal = clamp(dot(n, view_dir), 0.0, 1.0);
     let env = sky_env_sample(reflect(-view_dir, n));
-    return mix(shaded, env, env_fresnel(cos_view_normal) * clamp(fog, 0.0, 1.0));
+    // Sinkhole W1b: a cave mirrors no sky -- the reflected environment is daylight, faded like the rest.
+    let daylight = cave_daylight(world_pos + frame.cam_pos.xyz);
+    return mix(shaded, env, env_fresnel(cos_view_normal) * clamp(fog, 0.0, 1.0) * daylight);
 }
 // Bindless object textures + the 8-variant sampler array, bound once for the whole
 // lit-mesh + prepass. Each draw's texture/sampler index is packed per-instance into

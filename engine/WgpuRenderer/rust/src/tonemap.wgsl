@@ -35,6 +35,9 @@ struct Params {
     nv_gain: f32,
     nv_noise: f32,
     nv_vignette: f32,
+    // Sinkhole W1b, renderer-side only (not part of WgrTonemap): x = 1 to despeckle (camera
+    // underground), yzw unused.
+    cave: vec4<f32>,
 };
 
 @group(0) @binding(0) var hdr_tex: texture_2d<f32>;
@@ -128,6 +131,33 @@ fn ign(p: vec2<f32>) -> f32 {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var color = textureSampleLevel(hdr_tex, hdr_samp, in.uv, 0.0).rgb;
+
+    // Sinkhole W1b: underground despeckle. A model's pinhole cracks (T-junctions at corners and
+    // edges) show the sky or a sunlit surface through a dark cave wall as single bright pixels, and
+    // the eye adaptation underground (WGR_CAVE_EXPOSURE_MAX) multiplies them into the owner's
+    // "green flashing dots in the corners". Underground only, a pixel more than 3x as bright as the
+    // brightest of its eight neighbours takes that neighbour's colour; a real highlight or an
+    // opening wider than a pixel has a bright neighbour and is untouched.
+    if (params.cave.x > 0.5) {
+        let dims = vec2<i32>(textureDimensions(hdr_tex));
+        let p = clamp(vec2<i32>(in.uv * vec2<f32>(dims)), vec2<i32>(0), dims - vec2<i32>(1));
+        let w = vec3<f32>(0.2126, 0.7152, 0.0722);
+        let c = textureLoad(hdr_tex, p, 0).rgb;
+        var best = vec3<f32>(0.0);
+        var best_l = -1.0;
+        for (var dy = -1; dy <= 1; dy = dy + 1) {
+            for (var dx = -1; dx <= 1; dx = dx + 1) {
+                if (dx == 0 && dy == 0) { continue; }
+                let q = clamp(p + vec2<i32>(dx, dy), vec2<i32>(0), dims - vec2<i32>(1));
+                let n = textureLoad(hdr_tex, q, 0).rgb;
+                let l = dot(n, w);
+                if (l > best_l) { best_l = l; best = n; }
+            }
+        }
+        if (dot(c, w) > 3.0 * best_l + 1e-4) {
+            color = best;
+        }
+    }
 
     // Add bloom to the linear scene before exposure (bloom is scene-referred light
     // spread by the pyramid; exposure + curve then act on the sum).

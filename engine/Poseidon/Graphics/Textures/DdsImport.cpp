@@ -26,6 +26,27 @@ namespace Poseidon
 namespace
 {
 
+//! SINKHOLE W0, from Malprave's ddsTextures: a DXT1 block in its 3-colour mode
+//! (color0 <= color1) that uses index 3 has transparent texels. Such a texture is a
+//! punch-through cut-out (leaves, fences), so report it as transparent rather than as
+//! the opaque texture DXT1 otherwise is.
+bool Dxt1HasPunchThrough(const std::vector<uint8_t>& blocks)
+{
+    for (size_t b = 0; b + 8 <= blocks.size(); b += 8)
+    {
+        const uint16_t c0 = static_cast<uint16_t>(blocks[b] | (blocks[b + 1] << 8));
+        const uint16_t c1 = static_cast<uint16_t>(blocks[b + 2] | (blocks[b + 3] << 8));
+        if (c0 > c1)
+            continue;
+        const uint32_t idx = static_cast<uint32_t>(blocks[b + 4]) | (static_cast<uint32_t>(blocks[b + 5]) << 8) |
+                             (static_cast<uint32_t>(blocks[b + 6]) << 16) | (static_cast<uint32_t>(blocks[b + 7]) << 24);
+        for (int k = 0; k < 16; ++k)
+            if (((idx >> (k * 2)) & 3) == 3)
+                return true;
+    }
+    return false;
+}
+
 int DecodedMaxEdge()
 {
     const char* value = std::getenv("POSEIDON_DECODED_MAX_EDGE");
@@ -732,7 +753,7 @@ bool TextureSourceDDS::InitFromMemoryWithOptions(const void* data, size_t size, 
     }
     _mipmaps = static_cast<int>(_levels.size());
     _avgColor = AverageOfSmallest(_levels, _format);
-    _isTransparent = false;
+    _isTransparent = _format == PixelFormat::DXT1 && Dxt1HasPunchThrough(_levels[0].data);
     return true;
 }
 

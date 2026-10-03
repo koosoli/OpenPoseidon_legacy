@@ -33,6 +33,7 @@
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <Poseidon/Foundation/Types/RemoveLinks.hpp>
+#include <Poseidon/World/Entities/Infantry/SwimView.hpp>
 
 namespace Poseidon
 {
@@ -451,29 +452,38 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
             }
         }
 
-        if (Commander() && center->IsEnemy(Commander()->GetTargetSide()))
+        if (Commander() && !Commander()->IsDammageDestroyed() && center->IsEnemy(Commander()->GetTargetSide()))
         {
             return;
         }
-        if (Driver() && center->IsEnemy(Driver()->GetTargetSide()))
+        if (Driver() && !Driver()->IsDammageDestroyed() && center->IsEnemy(Driver()->GetTargetSide()))
         {
             return;
         }
-        if (Gunner() && center->IsEnemy(Gunner()->GetTargetSide()))
+        if (Gunner() && !Gunner()->IsDammageDestroyed() && center->IsEnemy(Gunner()->GetTargetSide()))
         {
             return;
         }
         for (int i = 0; i < GetManCargo().Size(); i++)
         {
             Person* man = GetManCargo()[i];
-            if (!man)
+            if (!man || man->IsDammageDestroyed())
             {
-                continue;
+                continue; // CWR fork: dead crew/cargo do not block getting in
             }
             if (center->IsEnemy(man->GetTargetSide()))
             {
                 return;
             }
+        }
+
+        // a swimmer hangs about 1.4 m under the surface (the swim animations
+        // are placed from the water line): measure his reach from the surface
+        // so a boat can be boarded from the water
+        Vector3 personPos = person->Position();
+        if (person->IsSwimming() && GLandscape)
+        {
+            personPos[1] = SwimWaterSurfaceY(personPos.X(), personPos.Z());
         }
 
         float maxDist2 = 0;
@@ -501,8 +511,8 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
             {
                 if (now)
                 {
-                    Vector3 pos = GetDriverGetInPos(person, person->Position());
-                    float dist2 = pos.Distance2(person->Position());
+                    Vector3 pos = GetDriverGetInPos(person, personPos);
+                    float dist2 = pos.Distance2(personPos);
                     if (dist2 <= maxDist2)
                     {
                         float priority = 0.900 - 0.3 * dist2 * invMaxDist2;
@@ -518,8 +528,8 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
             {
                 if (now)
                 {
-                    Vector3 pos = GetCommanderGetInPos(person, person->Position());
-                    float dist2 = pos.Distance2(person->Position());
+                    Vector3 pos = GetCommanderGetInPos(person, personPos);
+                    float dist2 = pos.Distance2(personPos);
                     if (dist2 <= maxDist2)
                     {
                         float priority = 0.899 - 0.3 * dist2 * invMaxDist2;
@@ -535,8 +545,8 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
             {
                 if (now)
                 {
-                    Vector3 pos = GetGunnerGetInPos(person, person->Position());
-                    float dist2 = pos.Distance2(person->Position());
+                    Vector3 pos = GetGunnerGetInPos(person, personPos);
+                    float dist2 = pos.Distance2(personPos);
                     if (dist2 <= maxDist2)
                     {
                         float priority = 0.898 - 0.3 * dist2 * invMaxDist2;
@@ -552,8 +562,8 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
             {
                 if (now)
                 {
-                    Vector3 pos = GetCargoGetInPos(person, person->Position());
-                    float dist2 = pos.Distance2(person->Position());
+                    Vector3 pos = GetCargoGetInPos(person, personPos);
+                    float dist2 = pos.Distance2(personPos);
                     if (dist2 <= maxDist2)
                     {
                         float priority = 0.897 - 0.3 * dist2 * invMaxDist2;
@@ -561,8 +571,8 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
                     }
                     else
                     {
-                        Vector3 pos = GetCoDriverGetInPos(person, person->Position());
-                        float dist2 = pos.Distance2(person->Position());
+                        Vector3 pos = GetCoDriverGetInPos(person, personPos);
+                        float dist2 = pos.Distance2(personPos);
                         if (dist2 <= maxDist2)
                         {
                             float priority = 0.897 - 0.3 * dist2 * invMaxDist2;
@@ -581,7 +591,7 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
             if (now)
             {
                 Vector3 pos = GetUnitGetInPos(unit);
-                float dist2 = pos.Distance2(person->Position());
+                float dist2 = pos.Distance2(personPos);
                 if (dist2 > maxDist2)
                 {
                     return;

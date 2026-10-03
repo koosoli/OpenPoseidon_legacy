@@ -899,9 +899,21 @@ protected:
 	Command _command;
 	bool _toMainSubgroup;
 	bool _transmit;
+	// Order already carried out when it was issued (see ExecuteNow);
+	// the queued voice line is then cosmetic and only triggers the reply.
+	bool _executed = false;
+	OLink<AIUnit> _confirmUnit;
+	// the reply was sent (Oli: the speech bypass for player orders and the radio line finishing
+	// both end in Transmitted; only the first may reply)
+	bool _replied = false;
+
+	//! issue the command to its recipients, return the unit that should reply
+	AIUnit *Apply();
 
 public:
 	RadioMessageCommand(AIGroup *from, PackedBoolArray list, Command &command, bool toMainSubgroup = false, bool transmit = true);
+	//! carry out the order now instead of waiting for the radio queue
+	void ExecuteNow();
 	RadioMessageCommand() {}
 	LSError Serialize(ParamArchive &ar) override;
 	const char *GetPriorityClass() override;

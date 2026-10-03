@@ -6886,3 +6886,1763 @@ tickets:
       - "Installed 349b3410 default-off DayZ route dayz-default-after-normal-sep29-disabled-20260929-190958 PASS/normal831frames/drop0/no stage rows. Ordinary tenement618.4ms/81uploads, texture read434.0ms. Stability screen only; cache/async/admission histories differ, no matched no-regression/FPS proof or reason to enable the primary/normal pilots. GeometryPage and DayZ pilots OFF/defaultReady=false/performanceAccepted=false. See DAYZ-RESIDENCY-FIRST-TOUCH-20260929.md."
       - "Next default-off tenement retained dependency census unions existing parent/GPU-proxy EnsureUploaded captures under256texture/128proxy caps, reports exact capture scope/overflow/CPU complements and conservative RGBA+mip reservations, no new reads/uploads/pointer retention; physical source/material roles/staging readiness remain explicitly unproved. Existing MainCountProbe adds64-row Rust reason transitions for map/epoch/target/supersession, preserving all validity gates. Focused reason test1PASS and paired desktop game/test buildPASS; installed routes pending at checkpoint. WholeplanOPEN/defaultReady=false/performanceAccepted=false."
       - "063f6087 installed dependency census PASS/normal: 78 textures,32 GPU proxies,722492807B conservative RGBA+mips, CPU complement/partial retained coverage; 528.6ms tenement81uploads. COUNT fixture normal but publication FAIL: revision1/1 becomes1/2 with stableepoch4/4; player isolation reproduces, no source attribution. New hierarchy RAM package/runtime root-fine page fixture and bounded parent-only physical prefetch are in validation; flagsOFF/fullplanOPEN/defaultReady=false/performanceAccepted=false."
+
+  - id: TEX-FMT-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Sinkhole W0: native PNG textures; plain DDS masked layouts, DXT2/4 and DXT1 punch-through (from Malprave)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: ACTIVE
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/sinkhole-w0-texture-formats
+    baseline_commit: 95a9eb1d
+    verification_commit: 053ca1b7
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [053ca1b7]
+    production_call_sites:
+      - file: engine/Poseidon/Graphics/Textures/JpgImport.cpp
+        symbol: TextureSourceJPEG::InitFromMemory
+      - file: engine/Poseidon/Graphics/Textures/DDSConverter.cpp
+        symbol: DDSConverter::ReadDDSBuffer
+      - file: engine/Poseidon/Graphics/Textures/DdsImport.cpp
+        symbol: TextureSourceDDS::InitFromMemoryWithOptions
+    test_ids: [sinkhole-png-alpha-classes, sinkhole-dds-masked-layouts, sinkhole-dds-dxt2-dxt4, sinkhole-dds-dxt1-punch-through]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/SINKHOLE-00-texture-formats-20261003.md
+    capability_claims:
+      - capability: PNG_TEXTURE_NATIVE
+        status: UNVERIFIED
+        denominator: >-
+          Unit-tested only (generated 32x32 RGBA blend / cut-out / opaque and RGB
+          fixtures): ARGB8888 source with pixel-classified alpha. Not yet loaded on
+          a model or terrain in game; .png on wgpu loaded as nothing before 053ca1b7.
+      - capability: DDS_UNCOMPRESSED_MASKED_LAYOUTS
+        status: UNVERIFIED
+        denominator: >-
+          Byte-built unit inputs only: A8R8G8B8, R8G8B8, R5G6B5, L8, A8L8, A8 read
+          through their masks; DXT2/DXT4 as DXT3/DXT5; DXT1 punch-through reported
+          transparent. No in-game capture; no DX10-header .dds (BC4/5/7 stay .edds-only).
+    known_failures:
+      - Not seen in game; harness capture pending W5 island content and the .tw watcher.
+      - Large opaque PNGs upload as RGBA8 (no BC compression at load).
+    fallback: PAA/PAC paths unchanged; RGBA-masked DDS files read byte-identically to before.
+    reviewer: null
+    reviewer_method: Author-run unit tests ([sinkhole],[JPG],[DDS],[edds]) on the rwdi build.
+    supersedes: []
+    evidence:
+      - docs/roadmap/evidence/sinkhole-w0-20261003.json
+      - docs/roadmap/decisions/SINKHOLE-00-texture-formats-20261003.md
+
+  - id: WLD-HOLE-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Sinkhole W1: object-cut terrain holes (ported from Malprave) with wgpu terrain/grass discard; MLOD autocenter on any LOD"
+    class: GAMEPLAY
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: ACTIVE
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/sinkhole-w1-terrain-holes
+    baseline_commit: da2bfbda
+    verification_commit: e65e45de
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TEX-FMT-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [3850420f, 0cea4b3b, 0aff777e, 47453f69, e65e45de]
+    production_call_sites:
+      - file: engine/Poseidon/World/Terrain/TerrainHoles.cpp
+        symbol: Landscape::InTerrainHole
+      - file: engine/Poseidon/World/Simulation/Collisions.cpp
+        symbol: Landscape::GroundCollision
+      - file: engine/Poseidon/World/Terrain/LandscapeRender.cpp
+        symbol: Landscape::DrawRect
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: EngineWgpu::SetTerrainHoles
+      - file: engine/Poseidon/World/Model/Model.cpp
+        symbol: Model::compile
+    test_ids: [terrain-hole-shaders-compose, terrain-hole-prepass-colour-discard, terrain-hole-grass-placement, sinkhole-autocenter-geometry-lod, sinkhole-w1-ugcave-harness]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/SINKHOLE-01-terrain-holes-20261003.md
+    capability_claims:
+      - capability: TERRAIN_HOLES_OBJECT_CUT
+        status: UNVERIFIED
+        denominator: >-
+          One harness run on one machine (Malprave's ugcave test cave on Everon, wgpu):
+          the engine registers the model's holes, a man stands and walks on the cave
+          floor 5.000 m under the ground and returns to the surface; AI engaged through
+          the opening; aerial capture shows the two openings cut cleanly and the
+          hidden footprint left drawn. Owner play-test found sun bleeding into the cave
+          and grass shadows flickering on its ceiling (fixed in 0aff777e/47453f69,
+          re-captured dark); round 2 (soldiers lit underground; a collapsed hole outline that
+          would cut the whole terrain -- not the cause of the owner's black-island
+          flash, which is a pre-existing fork bug) fixed in e65e45de; owner
+          re-test pending. GL33 fallback captured once.
+      - capability: MLOD_AUTOCENTER_GEOMETRY_LOD
+        status: UNVERIFIED
+        denominator: >-
+          Unit test (fixture box, property on the geometry LOD only) plus the cave
+          check above (floor at exactly -5.000 m after the fix, -2.35 m before).
+    known_failures:
+      - Box3D loose-object heightfield and shell penetration see solid ground over a hole.
+      - Openings in a terrain hole get no sun shafts (the underground sun test uses only the heightmap).
+      - Enfusion CPU clutter (Reforger) not hole-aware.
+      - Malprave limits stand until W2 (25 m discovery radius, 8 holes per model, convex only, no joined AI paths across pieces).
+    fallback: A world with no hole-cutting models is unchanged (lazy discovery; hole buffer empty); GL33 keeps Malprave's UBO path.
+    reviewer: null
+    reviewer_method: Author-run unit and shader tests; harness probe via the .tw watcher (.tw/test-holes.ps1).
+    supersedes: []
+    evidence:
+      - docs/roadmap/evidence/sinkhole-w1-20261003.json
+      - docs/roadmap/decisions/SINKHOLE-01-terrain-holes-20261003.md
+  - id: FIX-FLASH-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Retained world objects drawn on world-less loading frames (black ground, floating objects on load/exit)"
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/fix-retained-world-flash
+    baseline_commit: 95a9eb1d
+    verification_commit: eadd26d6
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [5d390885]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/lib.rs
+        symbol: render_frame
+      - file: engine/Poseidon/Core/ProgressSystem.cpp
+        symbol: ProgressSystem::Frame
+    test_ids: [fix-flash-menu-editor-exit-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/FIXES-20261003.md
+    capability_claims:
+      - capability: NO_WORLD_FLASH_ON_LOADING_FRAMES
+        status: UNVERIFIED
+        denominator: >-
+          Captured on the menu -> editor -> menu -> exit path and an editor preview exit; owner
+          confirmed the flash was pre-existing.
+    known_failures: []
+    fallback: "None needed; a frame with world draws is unchanged."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner re-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/FIXES-20261003.md
+  - id: FIX-FLOAT-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Floating forests/buildings: terrain-derived object caches survive a heightfield change; subdivision cache v2; edge re-seat clamp"
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/fix-terrain-change-object-caches
+    baseline_commit: 95a9eb1d
+    verification_commit: 1e543a68
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [cd12f617, d9a2c402]
+    production_call_sites:
+      - file: engine/Poseidon/World/Scene/Object.cpp
+        symbol: Object::OnTerrainChanged
+      - file: engine/Poseidon/World/Scene/ObjectClasses.cpp
+        symbol: ForestPlain::OnTerrainChanged
+      - file: engine/Poseidon/World/Terrain/LandSave.cpp
+        symbol: Landscape::MakeObjectsTerrainAbsolute
+      - file: engine/Poseidon/World/Terrain/LandSave.cpp
+        symbol: Landscape::LoadSubdivCache
+    test_ids: [fix-float-everon-setterraingrid-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/FIXES-20261003.md
+    capability_claims:
+      - capability: OBJECTS_FOLLOW_TERRAIN_CHANGES
+        status: UNVERIFIED
+        denominator: >-
+          Everon: v1 subdivision caches rebuilt as v2; forests grounded across setTerrainGrid
+          50/12.5 (flat area only); edge-strip objects no longer at -100 m.
+    known_failures:
+      - "Owner's distant floating buildings not reproduced (needs a location)."
+    fallback: "A stale v1 cache is rebuilt once, then cached as v2."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner re-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/FIXES-20261003.md
+  - id: FIX-PILOT-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Empty 'pilot' memory selection crashed Man init (fml_vorhees spawn / editor preview crash)"
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/fix-empty-memory-selection
+    baseline_commit: 95a9eb1d
+    verification_commit: f13d60a6
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [5811b896]
+    production_call_sites:
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldSimProxy.cpp
+        symbol: ManType::InitShape
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldActions.cpp
+        symbol: Man::CalculateCameraPosition
+    test_ids: [fix-pilot-vorhees-spawn-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/FIXES-20261003.md
+    capability_claims:
+      - capability: EMPTY_MEMORY_SELECTION_TOLERATED
+        status: UNVERIFIED
+        denominator: >-
+          Symbolised crash stack before; after, six Jason variants spawn and stay alive (harness
+          probe).
+    known_failures: []
+    fallback: "Readers fall back to the aiming position, as for a model with no pilot point."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner re-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/FIXES-20261003.md
+  - id: FIX-SP3X-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "OFP SP3X MLODs load through the original LODShape loader again (adapter tore skinned soldiers apart)"
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/fix-sp3x-soft-weights
+    baseline_commit: 95a9eb1d
+    verification_commit: ddc76c8f
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [d35b52ac, 5106f39c, 637f9edd]
+    production_call_sites:
+      - file: engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+        symbol: ShapeBank::NewFromModel
+    test_ids: [fix-sp3x-vorhees-split-capture, fix-sp3x-ugcave-loader-ab-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/FIXES-20261003.md
+    capability_claims:
+      - capability: SP3X_MLOD_ORIGINAL_LOADER
+        status: UNVERIFIED
+        denominator: >-
+          fml_vorhees Jasons correct through the original loader, torn through the adapter (wgpu
+          and GL33); Sinkhole ugcave/ugbasement (SP3X) identical through both.
+    known_failures:
+      - "ShapeAdapter's own SP3X fault is not found (soft-weight decode ruled out)."
+      - "ObjectStreamPreparer (modern worlds) still adapts SP3X."
+    fallback: "POSEIDON_SP3X_ADAPTER=1 sends SP3X through ShapeAdapter again."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner re-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/FIXES-20261003.md
+  - id: MAT-NET-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Netting drawn as a depth-writing cutout by default (camo nets were see-through)"
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/fix-blend-solid-depth
+    baseline_commit: 95a9eb1d
+    verification_commit: 0ee406f1
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [738d7ef9]
+    production_call_sites:
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: EngineWgpu::DrawSectionTL
+      - file: engine/Poseidon/Graphics/Core/Engine.hpp
+        symbol: MaterialDebugSettings::coverageMaskDepth
+    test_ids: [mat-net-fortress-m2-four-sides-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/FIXES-20261003.md
+    capability_claims:
+      - capability: NETTING_OCCLUDES
+        status: UNVERIFIED
+        denominator: >-
+          M2 inside a Fortress1 on Everon, four sides, POSEIDON_NET_DEPTH=0/1 in one binary.
+    known_failures:
+      - "mask_sit_2x1_ridka (49% partial) stays outside the coverage-mask rule."
+    fallback: "POSEIDON_NET_DEPTH=0 restores the blended path."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner re-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/FIXES-20261003.md
+  - id: MAT-053
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Mostly-solid blended sections write depth for their solid texels (see-through floors, with FIX-COCKPIT-001)"
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/fix-blend-solid-depth
+    baseline_commit: 95a9eb1d
+    verification_commit: ac2a9340
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [FIX-COCKPIT-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [585f4546, 53a300f7, 4662013e, 6596c6aa, bacc89ae, c76612d4]
+    production_call_sites:
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: EngineWgpu::DrawSectionTL
+      - file: engine/WgpuRenderer/rust/src/gfx3d/mod.rs
+        symbol: Gfx3d::draw_one
+    test_ids: [solid_blend_prepass_takes_only_blend_pass_sections, mat053-spec-destrb-floor-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/FIXES-20261003.md
+    capability_claims:
+      - capability: MOSTLY_SOLID_BLEND_OCCLUDES
+        status: UNVERIFIED
+        denominator: >-
+          spec_destrb_d big1_r at eye height on each storey: solid with FIX-COCKPIT-001 + MAT-053,
+          ghosted with the cockpit fix alone.
+    known_failures:
+      - "Earlier A/Bs were blind (cockpit-flagged draws are skipped); only the combined state is captured."
+    fallback: "WGR_BLEND_SOLID_DEPTH=0 turns it off."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner re-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/FIXES-20261003.md
+  - id: FIX-COCKPIT-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Only the camera vehicle is a cockpit draw (every building at LOD 0 was routed as a cockpit)"
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/fix-building-cockpit-route
+    baseline_commit: 95a9eb1d
+    verification_commit: 0fd873c2
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [6074cfe8]
+    production_call_sites:
+      - file: engine/Poseidon/World/Scene/SceneDraw.cpp
+        symbol: DrawSortObject
+      - file: engine/Poseidon/World/World.cpp
+        symbol: World::Simulate
+    test_ids: [fix-cockpit-spec-destrb-floor-capture, fix-cockpit-jeep-first-person-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/FIXES-20261003.md
+    capability_claims:
+      - capability: COCKPIT_ROUTING_CAMERA_VEHICLE_ONLY
+        status: UNVERIFIED
+        denominator: >-
+          Instrumented: the ghosting draw carried WGR_DRAW3D_COCKPIT; after, floors solid (with
+          MAT-053) and the jeep's first-person cockpit unchanged.
+    known_failures: []
+    fallback: "None; the camera vehicle routes exactly as before."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner re-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/FIXES-20261003.md
+  - id: TW-WATER-W01
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W1: water backend seam (Current OP unchanged behind WaterBackend; Tidewater slot, WGR_WATER_BACKEND)"
+    class: RENDERER
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w1-backend
+    baseline_commit: 3d720430
+    verification_commit: 9b49f270
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [9b49f270]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_backend.rs
+        symbol: WaterBackend::apply_pending_switch
+      - file: engine/WgpuRenderer/rust/src/water_backend.rs
+        symbol: WaterBackend::surface_product
+      - file: engine/WgpuRenderer/rust/src/water_backend.rs
+        symbol: WaterBackend::render_underwater
+      - file: engine/WgpuRenderer/WaterWgpu.cpp
+        symbol: WaterWgpu::DrawWater
+      - file: engine/Poseidon/Graphics/Core/Engine.hpp
+        symbol: WaterSettings::waterBackend
+    test_ids: [abi_values_map_to_backends_and_unknown_is_the_default, env_override_accepts_only_zero_and_one, backend_selector_is_appended_after_the_body_table]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/TW-WATER-01-20260927.md
+    capability_claims:
+      - capability: WATER_BACKEND_SEAM
+        status: UNVERIFIED
+        denominator: >-
+          Rust tests (water ffi shaders gpu_timers filter) on the RTX 3070 PC: 105
+          passed after W1, 0 failed; WgrWaterParams 1056 -> 1136 bytes with no
+          WGSL-mirrored lane moved (tested). No visual change intended; the Current OP
+          pixel diff and the W0 timing comparison were not run.
+    known_failures:
+      - "Current OP pixel diff before/after on P1/P2/P3 not run; W0 timing baseline not captured."
+      - "Inland bodies (rivers, lakes, ponds) share the Water owner; how Tidewater mode treats them is an open owner decision (TW-WATER-01)."
+    fallback: "WGR_WATER_BACKEND=0 forces Current OP for the session; the Water tab backend selector otherwise."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/TW-WATER-01-20260927.md
+      - engine/WgpuRenderer/docs/env-switches.md
+  - id: TW-WATER-W02
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W2: Tidewater Native open sea (OceanFFT, CDLOD, SeaDetail, water material ported from dgreenheck/tidewater)"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w2-open-sea
+    baseline_commit: 9b49f270
+    verification_commit: a47e58a9
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W01]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [b3f2c3f0, 1ffbe66a, a47e58a9]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_tw/mod.rs
+        symbol: Tidewater::prepare
+      - file: engine/WgpuRenderer/rust/src/water_tw/mod.rs
+        symbol: Tidewater::update
+      - file: engine/WgpuRenderer/rust/src/water_tw/fft.rs
+        symbol: ocean_params
+      - file: engine/WgpuRenderer/rust/src/water_tw/cdlod.rs
+        symbol: Selection::run
+      - file: engine/WgpuRenderer/rust/src/water_tw/textures.rs
+        symbol: create_foam_texture
+    test_ids: [tidewater_fft_kernels_validate, no_kernel_binds_more_than_four_storage_textures, spectrum_packing_matches_tidewater, ranges_and_morph_match_cdlod_js, selection_covers_the_camera_and_is_front_to_back, tidewater_water_shader_composes, default_params_are_tidewaters, mulberry32_matches_the_js_reference]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/TW-WATER-02-20260927.md
+    capability_claims:
+      - capability: TIDEWATER_OPEN_SEA
+        status: UNVERIFIED
+        denominator: >-
+          Rust tests 120 passed after W2, 0 failed (incl. naga composition of
+          tw_water.wgsl and WGSL validation of every FFT kernel); win-x64-clang-rwdi
+          built; 1ffbe66a deployed to the Steam folder and G:\CWA-OLI and run by the
+          owner: active path proven, not visually checked against the Tidewater demo,
+          not measured.
+    known_failures:
+      - "Dec's-branch default: 1ffbe66a sets waterBackend = 1; plan section 9 reserves that flip for the owner, so it must be reverted before anything reaches trunk (still 1 in this tree)."
+      - "Inland lakes and rivers are not drawn in Tidewater mode (interim option 1 of TW-WATER-01)."
+      - "W2's sea ran upwind (wave direction 180 degrees off) until W3a (2e252ac1)."
+      - "The material's view-space sign was inverted from W2 on (SSR never hit, refraction always fell back) until W6i.7 (35c18b71)."
+    fallback: "WGR_WATER_BACKEND=0 (or the Water tab) selects Current OP."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/TW-WATER-02-20260927.md
+      - CREDITS.md
+  - id: TW-WATER-W03
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W3: shoreline waves, shore simulation, surf foam and breaker lips; gameplay sea, colour and sea-state follow-ups (W3a-W3n)"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w3n-sim-foam-fade
+    baseline_commit: a47e58a9
+    verification_commit: 68f3adff
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W02]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [2e252ac1, 182f010a, a35f7c80, 698d1e19, a2b9c135, 9a21b216, a017b952, 01134959, 5e25b9a0, dee7bd9e, b9b008df, 15049991, e85b4e2a, d0144349, b9fa6e45, 68f3adff]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_tw/shore_field.rs
+        symbol: compute
+      - file: engine/WgpuRenderer/rust/src/water_tw/shore_sim.rs
+        symbol: ShoreSim::update_regions
+      - file: engine/WgpuRenderer/rust/src/water_tw/breakers.rs
+        symbol: trace_stations
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_surf_foam.wgsl
+        symbol: surfFoamLight
+      - file: engine/WgpuRenderer/rust/src/terrain/shore_wet.rs
+        symbol: ShoreWet::set
+      - file: engine/Poseidon/World/Terrain/WaterSurfaceQuery.cpp
+        symbol: QueryWaterSurfaceScaled
+    test_ids: [waves_run_up_the_beach_and_face_it, directions_are_turned_so_the_sea_runs_downwind, places_the_nearest_coast_a_region_apart, warm_up_fades_in, lace_64_matches_js, traces_the_waterline_with_normals_toward_the_sea, breaker_kernel_composes, sea_conditions_lane_overrides_wind_fetch_and_foam, blur_keeps_a_constant_and_rounds_a_step, smoothed_depth_is_in_the_direction_texture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/TW-WATER-03-20260927.md
+    capability_claims:
+      - capability: TIDEWATER_SHORE_PORT
+        status: UNVERIFIED
+        denominator: >-
+          W3a-W3d (ShoreField, ShoreWaves, ShoreSim, SurfFoam, Breakers) each recorded
+          as "implemented; not visually checked, not measured" at commit time, with
+          unit tests (lace bit-exact with the JS). Later surf captures from above drove
+          W3k-W3n (region fade over 15%, breaking on a ~20 m smoothed seabed, foam
+          fading over 4-9 m); no before/after numbers recorded.
+      - capability: GAMEPLAY_SEA_FOLLOWS_TIDEWATER
+        status: UNVERIFIED
+        denominator: >-
+          Before W3e on a2b9c135 (showcase, .tw/test-bob.ps1, mission time 4-45 s):
+          PBR height sd 1.29-1.66 m, -5.7/+3.6 m, ~10 m/s vertical, against
+          0.08-0.11 m with WGR_WAVE_BUOYANCY=0. No after-fix figure is recorded.
+      - capability: TIDEWATER_WATER_COLOUR
+        status: UNVERIFIED
+        denominator: >-
+          W3h debug views 20-22 put the pale cyan on the in-scatter term; glow A/B
+          captures at 0 / 0.06 / 0.12 / 0.25, Dec picked 0 (W3j.1). W3f/W3g visual
+          checks and owner acceptance recorded as pending.
+    known_failures:
+      - "The gameplay sea is still the CPU predictor: it matches scale, period and surf-zone fade, not the drawn sea crest for crest; shore waves stay visual only (TW-WATER-07)."
+      - "A multiplayer client in Tidewater mode and one in Current OP mode compute different gameplay seas (TW-WATER-07)."
+      - "Breaker station re-trace ran on the render thread (~11 ms p99 spikes) until W7c (c628fd60)."
+      - "W3 commits interleave with W4a-W4a.3 on the same stack; the baseline..verification range also contains those."
+    fallback: "WGR_WATER_BACKEND=0 selects Current OP; the Water tab's TW shore waves, TW shore simulation and lip opacity (0) switch the parts off; WGR_TW_GLOW overrides the glow."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/TW-WATER-03-20260927.md
+      - docs/roadmap/decisions/TW-WATER-04-20260927.md
+      - docs/roadmap/decisions/TW-WATER-05-20260927.md
+      - docs/roadmap/decisions/TW-WATER-06-20260927.md
+      - docs/roadmap/decisions/TW-WATER-07-20260927.md
+      - docs/roadmap/decisions/TW-WATER-08-20260927.md
+      - docs/roadmap/decisions/TW-WATER-09-20260927.md
+      - docs/roadmap/decisions/TW-WATER-11-20260927.md
+  - id: TW-WATER-W04
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W4: breaker spray (Spray.js + Breakers emitters) and lips/spray in the upscalers' reactive mask"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w4b-reactive
+    baseline_commit: dee7bd9e
+    verification_commit: fe060939
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W03]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [16792028, a1f21d4c, d90db853, 8fd27504, fe060939]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_tw/spray.rs
+        symbol: SprayGpu::set_frame
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_spray_emit.wgsl
+        symbol: breakersEmit
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_spray_update.wgsl
+        symbol: spray_update
+      - file: engine/WgpuRenderer/rust/src/water_tw/mod.rs
+        symbol: Tidewater::draw_reactive
+    test_ids: [params_block_matches_the_wgsl_layout, textures_match_tidewaters_generators, tw-w4a2-spray-ring-counter-log]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/TW-WATER-10-20260927.md
+    capability_claims:
+      - capability: TIDEWATER_BREAKER_SPRAY
+        status: UNVERIFIED
+        denominator: >-
+          W4a.2 ring counters: ~600-4000 particles emitted per second and up to ~3000
+          alive in rough surf; W4a.3 debug dots located them. The sprites themselves
+          drew nothing until the view-space fix in W6i.7 (35c18b71). W7: breakers +
+          spray 0.05-0.06 ms GPU on P1-P3.
+      - capability: REACTIVE_MASK_LIPS_SPRAY
+        status: UNVERIFIED
+        denominator: >-
+          Implemented (fs_lip_mask / fs_spray_mask, max blend into the REN-TEMP-001J
+          mask); runs only with the temporal path. No capture with an upscaler is
+          recorded.
+    known_failures:
+      - "RefractionPass deferred: OP's water falls back to the unrefracted pixel instead (TW-WATER-12); revisit if piers or hulls up close show the step."
+      - "W4a's tw_spray pipeline was invalid (validation error every Tidewater frame) until W4a.1 (a1f21d4c)."
+      - "W7 could not exercise an upscaler: DLSS not compiled into that build and the FSR 1 run did not engage."
+    fallback: "WGR_TW_SPRAY=0,<intensity> sets the breaker spray gain to 0 for the session; the Water tab's TW breaker spray otherwise."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/TW-WATER-10-20260927.md
+      - docs/roadmap/decisions/TW-WATER-12-20260928.md
+  - id: TW-WATER-W05
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W5: underwater composite, caustics and light shafts, cameras under the sea, no clouds from below, diver's torch"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w5e-diver-torch
+    baseline_commit: fe060939
+    verification_commit: da901680
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W04]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [2e136095, a08822eb, 602463e9, 16447853, 50c75b50, da901680]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_tw/underwater.rs
+        symbol: TwUnderwater::render
+      - file: engine/WgpuRenderer/rust/src/water_tw/underwater.rs
+        symbol: pick_torch
+      - file: engine/WgpuRenderer/rust/src/water_tw/caustics.rs
+        symbol: Caustics::dispatch
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_underwater.wgsl
+        symbol: fs_uw
+      - file: engine/Poseidon/World/World.cpp
+        symbol: World::Simulate
+      - file: engine/Poseidon/World/Scene/Camera/CameraHold.cpp
+        symbol: CameraVehicle::Simulate
+    test_ids: [params_block_matches_the_wgsl, underwater_wgsl_validates, layers_match_tidewater, shaders_validate, the_torch_is_the_brightest_spot_at_the_eye, tw-w5-shots-uw-day-night-capture, tw-w5e-shots-w5e-torch-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/TW-WATER-12-20260928.md
+    capability_claims:
+      - capability: TIDEWATER_UNDERWATER
+        status: UNVERIFIED
+        denominator: >-
+          Author captures under water by day and night (.tw/shots-uw-*, .tw/shots-uw3,
+          .tw/shots-w5e-*): clear blue medium with caustics and the torch beam; first
+          captures' solid-blue and lost-hill faults fixed in W5a.1. W7j: underwater
+          composite 0.008 ms mean (0.059 ms worst window) over P2 against Current OP's
+          0.012 / 0.312 ms. One machine.
+      - capability: SCRIPTED_CAMERA_UNDER_SEA
+        status: UNVERIFIED
+        denominator: >-
+          Commit-message description only (camCreate / free camera may go below the
+          sea; player, vehicle and trigger views keep the clamp); no capture named.
+    known_failures:
+      - "From below, the sky's clouds show through Snell's window as white blobs; this is Tidewater's model, softening is the owner's call (W7 report)."
+      - "Tidewater's half-resolution composite and its marine snow are not ported."
+      - "W5e landed after W6l and W7g on the stack; the range includes W6a-W6l and W7a-W7g commits."
+    fallback: "The Water tab's underwater checkbox disengages the composite; WGR_TW_TORCH_BEAM=0 removes the torch beam; WGR_WATER_BACKEND=0 returns to Current OP."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/TW-WATER-12-20260928.md
+      - docs/tw-water-w7-report.md
+  - id: TW-WATER-W06
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W6: wrecks sink, vehicles float on the drawn sea, amphibious cars drive; boat wakes (WakeSim) and bow spray (BoatSpray)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w6l-spray-defaults
+    baseline_commit: 16447853
+    verification_commit: 5b237b28
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W05, TW-WATER-W04]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [98aee494, 47a19db5, 8045c4f9, 6d46cd52, 7be862a6, 3e99fee6, a28b3f03, 09adb3ef, e10f5e74, 6807a089, 519d370a, 2a373d8f, 421c908d, f2a3dedd, 53c5e97c, 92e3457d, c0989c8c, 950fd5d0, 5eeb70dc, 35c18b71, 45669470, 9b84ff8b, aad3e1e6, 6164825f, 5b237b28]
+    production_call_sites:
+      - file: engine/Poseidon/World/Entities/Vehicles/Ground/TrackedWaterResponse.hpp
+        symbol: WreckFloodStep
+      - file: engine/Poseidon/World/Entities/Vehicles/Misc/Ship.cpp
+        symbol: Ship::Simulate
+      - file: engine/Poseidon/World/Entities/Vehicles/Ground/Car.cpp
+        symbol: Car::GetTypeCost
+      - file: engine/Poseidon/World/Simulation/Collisions.cpp
+        symbol: Landscape::GroundCollisionPlane
+      - file: engine/Poseidon/World/Terrain/WaterSurfaceQuery.cpp
+        symbol: TidewaterSeaVarianceScale
+      - file: engine/WgpuRenderer/rust/src/water_tw/wake.rs
+        symbol: WakeGpu::update
+      - file: engine/WgpuRenderer/rust/src/water_tw/boat_spray.rs
+        symbol: BoatSpray::update
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_water.wgsl
+        symbol: twView
+    test_ids: [contacts_run_from_the_stem_to_the_shoulder_on_both_sides, a_boat_under_way_throws_spray_and_a_boat_at_rest_does_not, tw-w6a-twsink-capture, tw-w6h2-twwake-two-pbr-capture, tw-w6l-shots-spray-tune-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/tw-water-w7-report.md
+    capability_claims:
+      - capability: VEHICLES_IN_THE_SEA
+        status: UNVERIFIED
+        denominator: >-
+          Harness missions on Everon's south-east bay (.tw/float/twsink, twboats,
+          twbrdm-water, shots-rough-*): BMP and M113 wrecks flood and settle on the sea
+          bed, the PBR rests on the bottom (was deleted part-way down); a PBR destroyed
+          at 31 km/h no longer coasts ~150 m; a BRDM placed afloat wakes, floats and
+          drives. W6b heave at the mission defaults x0.70 (overcast 0.2) to x1.19
+          (0.95), Storm x3.5 (computed, not captured).
+      - capability: TIDEWATER_BOAT_WAKES_AND_BOW_SPRAY
+        status: UNVERIFIED
+        denominator: >-
+          twwake.eden (two PBRs at 13 m/s) tuning captures for W6h.2 defaults; bow
+          spray drew only after W6i.7; W6l picked arm C of four (.tw/shots-spray-tune
+          A..D) on the Russian patrol boat, checked on both boats in calm and rough
+          seas. Bow spray capped at ~50 particles per 60 Hz frame; wakes 0.04-0.05 ms
+          GPU on the boat runs.
+    known_failures:
+      - "Only the two boats nearest the camera get a wake and bow spray; boats do not feel any wake (physics stays on the CPU predictor)."
+      - "The boats' bow spray draws white dashes across the hulls in Tidewater mode (W8-W12 report, Open)."
+      - "Bow spray is deliberately below Tidewater's level for patrol boats at 13-17 m/s (W6l)."
+      - "Wreck sinking and the amphibian/car fixes have no off switch."
+    fallback: "WGR_TW_WAKE=0 and WGR_TW_BOAT_SPRAY=off turn the wakes and bow spray off; WGR_TW_LEGACY_BOAT_FX=1 keeps the legacy boat sprites; WGR_WAVE_BUOYANCY=0 returns physics to the flat sea."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/tw-water-w7-report.md
+      - engine/WgpuRenderer/docs/env-switches.md
+      - CREDITS.md
+  - id: TW-WATER-W07
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W7: performance pass and parity report (frame stats, off-thread shore stations, early submit, switch soak)"
+    class: RENDERER
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w7k-report-final
+    baseline_commit: 45669470
+    verification_commit: c31600e0
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W06]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [9deb0b02, 3ec8517e, c628fd60, 268a5058, dba3881c, 5fb37a40, 080f076f, 145f123c, d35c18e9, e995a2f5, c31600e0]
+    production_call_sites:
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: EngineWgpu::PublishRendererStats
+      - file: engine/WgpuRenderer/rust/src/lib.rs
+        symbol: tw_early_submit
+      - file: engine/WgpuRenderer/rust/src/water_tw/mod.rs
+        symbol: Tidewater::update_stations
+      - file: engine/WgpuRenderer/rust/src/water_backend.rs
+        symbol: WaterBackend::set_soak
+    test_ids: [tw-w7h-p1-p2-p3-b0-b1-frame-stats, tw-w7h-soak-60x24, tw-w7h-grid-32-64-96, tw-w7e-early-submit-ab, tw-w7j-storm-night-coast2]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/tw-water-w7-report.md
+    capability_claims:
+      - capability: TIDEWATER_FRAME_TIME_PARITY
+        status: UNVERIFIED
+        denominator: >-
+          One run per path and backend on one machine at 1280x720 (W7h build 145f123c,
+          WGR_FRAME_STATS): Tidewater wall p95 below Current OP on P1/P2/P3 (P1 7.96 vs
+          9.25 ms); water GPU 0.67-0.80 vs 2.14-3.60 ms; backend allocations P1 944 vs
+          950 MB. W7e/W7f A/B: P1 wall p50 9.2 -> 6.9 ms. W7c: station update on the
+          render thread max 11.2 -> 0.1 ms. Storm, night and a second coast also run.
+      - capability: BACKEND_SWITCH_SOAK
+        status: UNVERIFIED
+        denominator: >-
+          WGR_WATER_SOAK=60,24 on P1: 24 switches; allocations 927.6 MB (Tidewater) and
+          970.3 MB (Current OP) on every switch with one +4.3 MB step on both sides at
+          switch 9; live handle counts return per backend. Switch cost 324-332 ms to
+          Tidewater, 91-95 ms back.
+    known_failures:
+      - "Upscalers not measured: DLSS not compiled in; the FSR 1 run did not engage (renderScale reset at start-up); MSAA not run."
+      - "FFT layout experiment not done; mesh density judged in stills only; the remaining ~4 ms prepare maximum not attributed."
+      - "Inland water, server, multiplayer and save/load not tested; plan section 9 criteria 1, 3 and 4 not assessed."
+      - "The early submit assumes no early pass reads a later upload; a one-frame lag would show only in motion."
+      - "The wgpu-hal texture counter drifts by -44 per round trip while texture memory stays flat (not investigated)."
+    fallback: "WGR_TW_EARLY_SUBMIT=0 keeps one submission per frame; WGR_FRAME_STATS and WGR_WATER_SOAK are off unless set."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/tw-water-w7-report.md
+      - engine/WgpuRenderer/docs/env-switches.md
+      - CREDITS.md
+  - id: TW-WATER-W08
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W8: explosions on open water feed the water renderer; plume, ring wave and foam sized from the ammo"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w8b-impact-splash
+    baseline_commit: c31600e0
+    verification_commit: c8f1491d
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W07, TW-WATER-W04]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [1f295e49, c8f1491d]
+    production_call_sites:
+      - file: engine/Poseidon/World/Simulation/Collisions.cpp
+        symbol: Landscape::ExplosionDammageEffects
+      - file: engine/Poseidon/World/Simulation/Collisions.cpp
+        symbol: TidewaterWaterBurst
+      - file: engine/WgpuRenderer/rust/src/water_tw/impacts.rs
+        symbol: Impacts::submit
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_impact.wgsl
+        symbol: impactDisplacement
+    test_ids: [plume_sizes_follow_the_ammo, an_explosion_throws_a_plume_and_marks_the_surface, a_bullet_throws_a_small_spout_only, tw-w8-twbeachboom-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/tw-water-w8-w12-report.md
+    capability_claims:
+      - capability: TIDEWATER_WATER_BURSTS
+        status: UNVERIFIED
+        denominator: >-
+          Unit tests on the sizing; plume height ~4 m for 20 mm, ~15 m for 120 mm HE,
+          ~50 m for a bomb (report). Showcase harness run on the W12d build
+          (.tw/shots-showcase-v2): 27 rounds into the water, no damage to anything,
+          all 24 soldiers alive at 112 s. Damage path unchanged by design.
+    known_failures:
+      - "Written for OP, not ported from Tidewater."
+      - "Up to 12 bursts emit; only the 4 nearest write the ring wave / foam lanes."
+      - "Clouds painted over the plumes against the sky until W12a (ad347ecd)."
+    fallback: "WGR_TW_LEGACY_WATER_FX=1 keeps the legacy fireball and droplet sprites in Tidewater mode."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/tw-water-w8-w12-report.md
+      - engine/WgpuRenderer/docs/env-switches.md
+  - id: TW-WATER-W09
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W9: one waterline above and below (probe pass); the sea to the horizon; wind as waves; fixes from high up"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w9g-no-ssr-high
+    baseline_commit: c8f1491d
+    verification_commit: bc2b9915
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W08]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [f2bc233d, eed5c731, 794eb826, 118d8478, bc2b9915]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_tw/probe.rs
+        symbol: Probe::record
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_water.wgsl
+        symbol: twDisplace
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_water.wgsl
+        symbol: scene_rel_at
+      - file: engine/WgpuRenderer/rust/src/water_tw/fft.rs
+        symbol: whitecap_bias
+      - file: engine/WgpuRenderer/WaterWgpu.cpp
+        symbol: TidewaterDrawsWater
+    test_ids: [the_sea_reaches_the_horizon_from_high_up, whitecap_bias_keeps_tidewaters_look_and_bounds_the_foam_in_a_gale, normal_quantile_inverts_the_cdf, tw-w9-8km-15km-altitude-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/tw-water-w8-w12-report.md
+    capability_claims:
+      - capability: TIDEWATER_ONE_WATERLINE
+        status: UNVERIFIED
+        denominator: >-
+          Author captures at the beach and bobbing at the waterline after W9d (the flat
+          blue sheet was the left-handed facing); W9e meniscus capped at +30%. Each fix
+          checked with harness captures on one machine; owner play-test not recorded.
+      - capability: TIDEWATER_SEA_FROM_HIGH_UP
+        status: UNVERIFIED
+        denominator: >-
+          Captures and debug views 6 / 21 from 8 km and 15 km up: CDLOD 16 levels to the
+          horizon, heightmap sea bed beyond ~2 km, SSR fading out 400-1200 m. W9c
+          computed Hs ~4.7 m at 7 m/s, ~7.9 m at 15, ~8.8 m at 30.
+    known_failures:
+      - "The 733 m cascade bounds the sea height above ~20 m/s wind."
+      - "Far-sea back-facing triangles from the beach remained until W10g (178e7e61); the lens strip at the waterline until W12d (3cbe1b52)."
+    fallback: "No dedicated off switch; WGR_WATER_BACKEND=0 returns to Current OP. WGR_TW_WIND only sets the wind for captures."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/tw-water-w8-w12-report.md
+      - engine/WgpuRenderer/docs/env-switches.md
+  - id: TW-WATER-W10
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W10: surf look in OP's light (lip facing, no glare band, backlit exposure, spray veil, textured whitewater, far triangles)"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w10g-far-triangles
+    baseline_commit: bc2b9915
+    verification_commit: 178e7e61
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W09]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [5e4a9eea, 82b06f45, 936e199b, a56a59a3, 7751729b, ce00dd24, 178e7e61]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_lip.wgsl
+        symbol: lipShade
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_spray.wgsl
+        symbol: sprayShade
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_surf_foam.wgsl
+        symbol: surfFoamLight
+      - file: engine/WgpuRenderer/rust/src/water_tw/mod.rs
+        symbol: lip_override
+    test_ids: [tw-w10-everon-west-coast-surf-capture, tw-w10e-12-20ms-surf-capture, tw-w10g-beach-far-sea-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/tw-water-w8-w12-report.md
+    capability_claims:
+      - capability: TIDEWATER_SURF_LOOK_IN_OP_EXPOSURE
+        status: UNVERIFIED
+        denominator: >-
+          Surf captures on Everon's west coast toward the afternoon sun and close
+          captures at 12 and 20 m/s (~16 000 spray particles/s, ~20 000 live): glare
+          band, coloured specks, clipped backlit slabs and the spray wall reduced by the
+          listed caps; owner beach captures drove W10f/W10g. One machine; owner
+          play-test pending.
+    known_failures:
+      - "The surf band at 20 m/s still clips to white (surface whitewater and spray; the scene's exposure)."
+      - "Owner play-tests pending for W10-W12."
+    fallback: "WGR_TW_LIP=0 removes the thrown lips for the session; no switch restores the pre-W10 shading."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/tw-water-w8-w12-report.md
+      - engine/WgpuRenderer/docs/env-switches.md
+  - id: TW-WATER-W11
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W11: wake and bow spray follow the drawn hull; small boats sit at a real draft (planing lift 9-12x, legacy drag kept)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w11e-boat-drag
+    baseline_commit: 178e7e61
+    verification_commit: bccf4b40
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W10]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [fd090c8f, 8fc4a4dd, 01a0bd92, 0ec4f70c, bccf4b40]
+    production_call_sites:
+      - file: engine/Poseidon/Graphics/Rendering/Frame/PresentationSnapshot.cpp
+        symbol: FillPresentationSnapshot
+      - file: engine/Poseidon/World/Entities/Vehicles/Misc/Ship.cpp
+        symbol: Ship::Simulate
+    test_ids: [tw-w11-pbr-patrol-boat-top-speed-24s, tw-w11d-boat-diag-buoyancy-log]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/tw-water-w8-w12-report.md
+    capability_claims:
+      - capability: WAKE_FOLLOWS_RENDERED_HULL
+        status: UNVERIFIED
+        denominator: >-
+          Commit description: the snapshot takes the pose from Object::RenderTransform()
+          (the tick pose ran up to ~0.3 m ahead of the drawn hull at speed). Rendering
+          only; no before/after capture named.
+      - capability: BOAT_DRAFT_PLANING_LIFT
+        status: UNVERIFIED
+        denominator: >-
+          Physics change approved by the owner (2026-09-28): hull ~0.25 m deeper on
+          average; top speed at 24 s PBR 14.7 vs 17.1 m/s legacy, patrol boat 15.8 vs
+          17.2 (W8-W12 report).
+    known_failures:
+      - "Top speed is still ~10-15% lower than legacy above ~9 m/s; the owner parked the boat physics and wants it reworked to match Tidewater later."
+      - "W11b-W11e commits are titled 'Boats:' rather than 'TW-WATER'; they live on the dec/tidewater-w11{b,c,d,e}-* branches."
+    fallback: "POSEIDON_BOAT_LEGACY_PLANING=1 restores the 2001 planing lift (20-120x) and its drag exactly."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/tw-water-w8-w12-report.md
+      - engine/WgpuRenderer/docs/env-switches.md
+  - id: TW-WATER-W12
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W12: spray after the clouds, soldiers no longer drown, mesh-exact waterline on the lens; W8-W12 docs and showcase"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w12e-docs-showcase
+    baseline_commit: bccf4b40
+    verification_commit: 95a9eb1d
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W11]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [ad347ecd, d56f91b3, 28a74e96, 3cbe1b52, 95a9eb1d]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_backend.rs
+        symbol: WaterBackend::draw_spray
+      - file: engine/WgpuRenderer/rust/src/water_tw/mod.rs
+        symbol: Tidewater::draw_spray
+      - file: engine/WgpuRenderer/rust/src/water_tw/probe.rs
+        symbol: Probe::record
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_underwater.wgsl
+        symbol: uwProbeHeight
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldSim.cpp
+        symbol: Man::Simulate
+    test_ids: [grid_is_the_lattice_around_the_camera, tw-w12-shots-showcase-v2, tw-w12c-twwalkin-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/tw-water-w8-w12-report.md
+    capability_claims:
+      - capability: SPRAY_AFTER_CLOUDS
+        status: UNVERIFIED
+        denominator: >-
+          Owner report ("clouds clip through" water explosions); spray moved to its
+          own pass after the cloud, god-ray and smoke composites; WGR_TW_SPRAY_EARLY=1
+          added for side-by-side captures. Harness captures on one machine.
+      - capability: MESH_EXACT_WATERLINE
+        status: UNVERIFIED
+        denominator: >-
+          Owner's chest-deep third-person shot and the W12c walk-in captures showed a
+          strip of unfogged sand at the waterline; the probe now holds the displaced
+          finest CDLOD vertices (rgba32float). Showcase run on the W12d build
+          (.tw/shots-showcase-v2): 27 rounds, no damage, all 24 soldiers alive at 112 s.
+    known_failures:
+      - "The player walks down the sea bed (to -14 m in twwalkin) while the camera stays at the surface (CamEffects.cpp); left for the swimming work."
+      - "Owner play-tests pending for W10-W12."
+      - "W12c (28a74e96) is titled 'Infantry:' rather than 'TW-WATER'; decision notes stop at TW-WATER-12 (W5a), the two reports cover the rest."
+    fallback: "WGR_TW_SPRAY_EARLY=1 restores the pre-W12a spray order; POSEIDON_INFANTRY_DROWN=1 restores drowning damage."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/tw-water-w8-w12-report.md
+      - engine/WgpuRenderer/docs/env-switches.md
+      - CREDITS.md
+  - id: LGT-CAVE-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Sinkhole W1b: cave lighting from the hole openings (per fragment and per camera); handheld soldier flashlight"
+    class: RENDERER
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: ACTIVE
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/sinkhole-w1b-cave-lighting
+    baseline_commit: 9bec300a
+    verification_commit: c4302856
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [WLD-HOLE-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [fe47ef9a, 17c38f76, c4302856]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/shaders/conform.wgsl
+        symbol: cave_daylight2
+      - file: engine/WgpuRenderer/rust/src/shaders/shading.wgsl
+        symbol: shade
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: EngineWgpu::SetTerrainHoles
+      - file: engine/WgpuRenderer/rust/src/lib.rs
+        symbol: cave_exposure
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldFlashlight.cpp
+        symbol: Man::UpdateFlashlight
+    test_ids: [cave_exposure_only_lifts_the_ceiling_underground, sinkhole-w1b-ugcave-chamber-capture, sinkhole-w1b-night-leak-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/SINKHOLE-01b-cave-lighting-20261003.md
+    capability_claims:
+      - capability: CAVE_LIGHT_FROM_OPENINGS
+        status: UNVERIFIED
+        denominator: >-
+          One test cave (Malprave's ugcave on Everon), wgpu, one machine: roof near the opening
+          dark, soldiers underground unlit, chamber with campfire and torch dark but readable with
+          the camera eye adaptation (near-black at the old exposure ceiling), surface view
+          unchanged. Owner play-test of W1b pending.
+      - capability: SOLDIER_FLASHLIGHT
+        status: UNVERIFIED
+        denominator: >-
+          AI switch it on underground and the player toggles it (LIGHT ON); beam and shadow behind
+          pillars captured in the ugcave chamber. No hold pose.
+    known_failures:
+      - "No off-hand hold pose for the torch."
+      - "Surfaces inside an opening footprint but under a slab get full sun/sky from the per-fragment rule."
+      - "Local lights are not occluded by the terrain heightfield (only by objects in their shadow views)."
+    fallback: "POSEIDON_FLASHLIGHT=0; WGR_CAVE_EXPOSURE_MAX=1.1 approximates the old exposure ceiling; a world without terrain holes is unchanged."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner play-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/SINKHOLE-01b-cave-lighting-20261003.md
+  - id: SWIM-W3-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Sinkhole W3: swimming for players and AI, riding the (drawn) waves, limb splashes, AI swim routes and boats"
+    class: GAMEPLAY
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/sinkhole-w3-swimming
+    baseline_commit: 25c2035e
+    verification_commit: 744e1d3e
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [LGT-CAVE-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [406c7642, 3e2d2a4d, 744e1d3e]
+    production_call_sites:
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldSwim.cpp
+        symbol: Man::UpdateSwimming
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldSwim.cpp
+        symbol: Man::SimSwimMovement
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldSwim.cpp
+        symbol: Man::EmitSwimSplashes
+      - file: engine/Poseidon/World/World.cpp
+        symbol: SwimmerCameraWater
+      - file: engine/Poseidon/Graphics/Rendering/WaterInteractionBridge.cpp
+        symbol: DrawnWaterHeightAt
+      - file: engine/WgpuRenderer/rust/src/water_tw/probe.rs
+        symbol: drawn_grid
+      - file: engine/WgpuRenderer/rust/src/water_tw/impacts.rs
+        symbol: Impacts::submit
+      - file: engine/Poseidon/AI/AIUnitImpl.cpp
+        symbol: FloatPathOnWater
+      - file: engine/Poseidon/World/Entities/Vehicles/Misc/Ship.cpp
+        symbol: Ship::PlaceGetInPos
+    test_ids: [a_swimmers_splash_rises_from_the_wave_and_follows_the_limb, sinkhole-w3-swim-stroke-capture, sinkhole-w3-first-person-swell-capture, sinkhole-w3-swimai2-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/SINKHOLE-03-swimming-20261004.md
+    capability_claims:
+      - capability: SWIMMING_RIDES_WAVES
+        status: UNVERIFIED
+        denominator: >-
+          Everon bay, Tidewater water, wgpu, one machine: treading and stroking, eyes 0.06-0.18 m over
+          the water; first person 0.45-0.5 m over the drawn surface through the swell. Owner play-test
+          pending. Swim animations are local content (not committed).
+      - capability: SWIM_LIMB_SPLASHES
+        status: UNVERIFIED
+        denominator: >-
+          Hands and feet splash on strokes and kicks for swimmers near the camera (Tidewater mode only).
+      - capability: AI_SWIM_ROUTES_AND_BOATS
+        status: UNVERIFIED
+        denominator: >-
+          Malprave's swimai2 steps: AI swim to points 70-140 m out, a crew swims to a boat and boards,
+          one swims 130 m on, one leaves the boat into deep water and swims.
+    known_failures:
+      - "No diving, breath or drowning (W4); no weapons in the water."
+      - "Swimmers pass through each other."
+      - "AI geography uses sea-based water classes; lakes are not routed."
+      - "Swimmers outside the camera probe grid ride the CPU predictor (heads can dip under drawn crests at a distance)."
+      - "Swim animations need the local swim addon (provenance); without it men walk the sea bed as before."
+    fallback: "POSEIDON_SWIM=0 (old seabed walk); POSEIDON_SWIM_SPLASH=0; POSEIDON_SWIM_DRAWN=0 (predictor only)."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner play-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/SINKHOLE-03-swimming-20261004.md
+  - id: AI-PORT-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Port Malprave's AI fixes (aiQuickWins, emptyEnemyVehicle, radioImmediate, groupLimit, aiSuppression, gradualSpotting, aiHunting, aiCoverGrenades, aiExposed, convoys, tankCorners, runways, parachuteDamage)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Owner's pick of the 13 patches pending; see the decision record section 1."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: play-test and fix what is in (grenade interval looks broken; spotting and hunting never measured; tune CfgAIFork)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-PORT-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Malprave job 23: grenade limit failed (4 throws in 1.6 s), spotting/hunting test broken by setPos teleports; knowsAbout reads 0."
+      - "Oli 2026-10-04: a standing enemy at 130-150 m on the Everon beach is never noticed (B on or off); with gradual spotting on, ~15 s to notice one at 60 m. Owner: AI in combat stance slow to zero in (AI-AIM-001). Hunting tests must not teleport the enemy (out of the 300 m range); POSEIDON_AI_HUNT_LOG=1 shows the gates."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-002
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: enemy switch inertia and scoring (mechanism 3)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-XRAY-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Not started in Malprave."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-003
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: hide from grenades"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-XRAY-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Not started in Malprave; CWA AI ignore thrown grenades."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-004
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: typed danger list (mechanism 7)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-XRAY-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Not started in Malprave."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-005
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: squad enemy distribution (mechanism 4)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-XRAY-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Not started in Malprave."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-006
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: look-out (peek) step and cover eviction (mechanisms 5 and 8)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-XRAY-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Spacing and flank cap are in (aiCoverGrenades); eviction, the 3 m enemy rule and the peek are not."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-007
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: precomputed cover points and the Best evaluator (mechanism 6)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-XRAY-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Not started in Malprave; FindHideBehind still scores nearby objects each time."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-XRAY-008
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "X-Ray AI: polish -- view range shrinking off the head axis, adaptive hearing threshold, optional HUD visibility meter (mechanisms 1 and 2)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
+    # unfinished, into Oli); not started here.
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: b66d9b97
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [AI-XRAY-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Gradual spotting, peripheral vision and gunfire hearing are in (AI-PORT-001); these refinements are not."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-PORT-A01
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Malprave AI fixes group A: aiQuickWins, emptyEnemyVehicle, radioImmediate(2), groupLimit, aiSuppression(2)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/ai-malprave-a
+    baseline_commit: 145eeeca
+    verification_commit: 0eddd247
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: [AI-XRAY-001]
+    implementation_commits: [2a46f85e, 0eddd247]
+    production_call_sites:
+      - file: engine/Poseidon/World/Detection/Target.cpp
+        symbol: gunfire hearing (aiQuickWins)
+      - file: engine/Poseidon/AI/AIRadioImpl.cpp
+        symbol: RadioMessageCommand::ExecuteNow
+      - file: engine/Poseidon/AI/AIGroup.cpp
+        symbol: QueueGroupCommand
+      - file: engine/Poseidon/AI/AIUnitImpl.cpp
+        symbol: AIUnit::AddSuppression
+      - file: engine/Poseidon/World/Entities/Weapons/Shots.cpp
+        symbol: ApplyNearMissSuppression
+    test_ids: [ai-a1-hearing-capture, ai-a3-firefight-suppression-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    capability_claims:
+      - capability: AI_HEARS_GUNFIRE
+        status: UNVERIFIED
+        denominator: "Malprave mwai1 on Everon: 12 shots from 150 m behind, out of sight -> leader turns 90 to 277 deg, group COMBAT."
+      - capability: AI_SUPPRESSION
+        status: UNVERIFIED
+        denominator: "Malprave mwai3 4 v 4 at 40 m and 80 m: 57 / 44 near-miss events, men pinned on both sides (POSEIDON_AI_SUPPRESSION_LOG=1)."
+    known_failures:
+      - "Immediate orders, 256 groups and empty enemy vehicles are compiled and run but not separately captured."
+      - "Firefights at 40-80 m end within about 10 s, so prone/pinned behaviour was logged, not watched."
+    fallback: null
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner play-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-AIM-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "AI in combat stance take a long time to zero in on their target (owner report 2026-10-04)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: INVESTIGATE
+    scheduling_state: OPEN
+    status: PLANNED
+    outcome: null
+    owner: Dec
+    branch: null
+    baseline_commit: 0eddd247
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    known_failures:
+      - "Not yet measured. Tools: POSEIDON_COMBAT_AUDIT=1 with a unit named auditShooter (Man::GetAimed gates). Check aiSuppression's wider spread for suppressed gunners is not the cause."
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-PORT-C01
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Malprave vehicle and aircraft AI group C: convoyRoad, convoyOrder, tankCorners, runwayAxis, runwayHeight, parachuteDamage"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/ai-malprave-a
+    baseline_commit: fade1a1c
+    verification_commit: ca182a04
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [ca182a04]
+    production_call_sites:
+      - file: engine/Poseidon/AI/VehicleAIPilot.cpp
+        symbol: convoy follow point on the road
+      - file: engine/Poseidon/AI/AISubgroup.cpp
+        symbol: convoy order
+      - file: engine/Poseidon/World/Entities/Vehicles/Air/Airplane.cpp
+        symbol: runway take-off and landing
+      - file: engine/Poseidon/World/Entities/Vehicles/Parachute.cpp
+        symbol: parachutist hit
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    capability_claims:
+      - capability: AI_CONVOY_ON_ROAD
+        status: UNVERIFIED
+        denominator: "Everon road NW of the bay: 3 Truck5t in column, 1.6 km, 60-72 km/h, in order, on the tarmac, 100 s, undamaged."
+    known_failures:
+      - "Runways (Malprave tested on Sahrani, not in Oli), tank cornering and parachutes compiled and run but not captured."
+      - "One M1A1 left the road near the start and rejoined it."
+    fallback: null
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner play-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+  - id: AI-PORT-B01
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Malprave X-Ray infantry AI group B: gradualSpotting, aiHunting, aiCoverGrenades, aiExposed (CfgAIFork, off by default)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/ai-malprave-a
+    baseline_commit: fade1a1c
+    verification_commit: f50c4fa9
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [f50c4fa9]
+    production_call_sites:
+      - file: engine/Poseidon/AI/AIHunt.cpp
+        symbol: Hunt::Think
+      - file: engine/Poseidon/World/Detection/Target.cpp
+        symbol: GradualSpotting
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldExposed.cpp
+        symbol: Man::ExposedVisibility
+      - file: engine/Poseidon/World/Detection/TargetFire.cpp
+        symbol: ObstacleFree
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
+    capability_claims:
+      - capability: AI_HUNTING
+        status: UNVERIFIED
+        denominator: "Test add-on with CfgAIFork on, enemy seen at 60 m goes prone and crawls 30 m: hold, half-squad flank to points round his last position, back to combat when he shows (POSEIDON_AI_HUNT_LOG=1). Search phase not reached."
+    known_failures:
+      - "B-on firefight and the grenade interval not captured (owner stopped testing); Malprave saw 4 throws in 1.6 s -- suspect the throw is recorded at release, after mates have already decided."
+      - "B-off regression runs not done."
+      - "Gradual spotting took ~15 s to notice a standing enemy at 60 m."
+    fallback: "CfgAIFork keys absent or 0 (the default): gradualSpotting, hunting, grenadeInterval, exposedParts off."
+    reviewer: null
+    reviewer_method: Author-run harness captures via the .tw watcher; owner play-test pending.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md

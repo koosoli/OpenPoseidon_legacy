@@ -330,6 +330,10 @@ pub struct GodRays {
     // The low-res march target; (re)allocated when the screen size or the divisor changes.
     lo: Option<(wgpu::Texture, wgpu::TextureView)>,
     lo_size: (u32, u32),
+    // Sinkhole W1b: how far underground the CAMERA is (0 = open air, 1 = deep in a cave), from
+    // wgr_set_camera_underground. Sun shafts are an outdoor-air effect; underground they scale
+    // away with this, in the screen-space march and in the per-surface scattering alike.
+    pub underground: f32,
     settings: GodRaySettings,
 }
 
@@ -574,6 +578,7 @@ impl GodRays {
             compare_sampler,
             lo: None,
             lo_size: (0, 0),
+            underground: 0.0,
             settings: settings_from_env(),
         }
     }
@@ -594,14 +599,19 @@ impl GodRays {
         [
             [sky.sun_dir[0], sky.sun_dir[1], sky.sun_dir[2], sun_elevation_fade(sky.sun_dir[1])],
             [light[0], light[1], light[2], height],
-            [s.intensity, sigma, s.distance, s.steps as f32],
+            [s.intensity * self.open_air(), sigma, s.distance, s.steps as f32],
             [s.g, s.cloud_influence, 0.0, 0.0],
         ]
     }
 
+    /// 1 in the open air, 0 with the camera deep underground (see `underground`).
+    pub fn open_air(&self) -> f32 {
+        1.0 - self.underground.clamp(0.0, 1.0)
+    }
+
     pub fn active(&self, sky: &WgrSky) -> bool {
         self.settings.enabled
-            && self.settings.intensity > 0.0
+            && self.settings.intensity * self.open_air() > 0.001
             && self.settings.density > 0.0
             && sky.control[0] != 0.0
             && sun_elevation_fade(sky.sun_dir[1]) > 0.001
@@ -693,7 +703,7 @@ impl GodRays {
             ],
             // tune0.y is now the SEA-LEVEL aerosol coefficient derived from the atmosphere, not a
             // constant. The shader applies the altitude profile on top of it per sample.
-            tune0: [s.intensity, sigma_sea, s.distance, s.steps as f32],
+            tune0: [s.intensity * self.open_air(), sigma_sea, s.distance, s.steps as f32],
             // Terrain and cascade occlusion are held at full strength: unlike the aerial froxel's
             // "aerial sun shadow" slider they are not a look knob here, they are the difference
             // between a shaft and a wash. The Sky tab exposes cloud influence instead, because

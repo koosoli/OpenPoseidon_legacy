@@ -1516,17 +1516,43 @@ void AirplaneAuto::Simulate(float deltaT, SimulationImportance prec)
                 float landingSpeed = Type()->_landingSpeed;
                 float stallSpeed = Type()->_stallSpeed;
 
+                // The landing pattern was written for runways that run north-south (every
+                // OFP/CWA island): its offsets were +X and its "off the centreline" tests
+                // read the X components. Measure them across the runway instead. For a
+                // north-south runway (ilsDir = 0,y,-1) runwaySide is +X, so those islands
+                // behave exactly as before; an east-west runway (Sahrani's Paraiso) now works.
+                Vector3 runwaySide(-ilsDir.Z(), 0, ilsDir.X());
+                if (runwaySide.SquareSize() > 1e-6f)
+                {
+                    runwaySide.Normalize();
+                }
+                else
+                {
+                    runwaySide = Vector3(1, 0, 0);
+                }
+                const float dirAcrossRunway = Direction() * runwaySide;
+                // The pattern heights (100 m, 92 m on final) are above the ground under the
+                // plane. That only works when the runway sits near sea level: Paraiso is
+                // 140 m up a cliff with its whole approach over the sea, so a plane 100 m
+                // over the water was 200-280 m under the approach points it had to reach
+                // within 200/500 m -- it circled them for ever -- and on final it would
+                // have been below the runway. Hold at least that height above the runway
+                // instead; over ground at runway level this is the same as before.
+                const float runwayAboveGround = ilsPos.Y() - surfaceY;
+                auto patternHeight = [runwayAboveGround](float h) { return floatMax(h, h + runwayAboveGround); };
+
                 bool elevatorSet = false;
                 if (_planeState == Marshall)
                 {
-                    Vector3 approachPos = ilsPos + ilsDir * 3000 + Vector3(650, 0, 0);
+                    Vector3 approachPos = ilsPos + ilsDir * 3000 + runwaySide * 650;
                     Vector3 relPos = approachPos - Position();
                     _pilotHeading = atan2(relPos.X(), relPos.Z());
                     changeHeading = AngleDifference(_pilotHeading, curHeading);
                     Limit(changeHeading, -0.7f, +0.7f);
-                    _pilotHeight = 100;
+                    _pilotHeight = patternHeight(100);
                     _pilotSpeed = landingSpeed * 2;
-                    if (relPos.SquareSize() < Square(500))
+                    // horizontal distance: the height is the height controller's job
+                    if (relPos.SquareSizeXZ() < Square(500))
                     {
                         _planeState = Approach;
                     }
@@ -1535,18 +1561,18 @@ void AirplaneAuto::Simulate(float deltaT, SimulationImportance prec)
                 }
                 else if (_planeState == Approach)
                 {
-                    Vector3 approachPos = ilsPos + ilsDir * 2000 + Vector3(90, 0, 0);
+                    Vector3 approachPos = ilsPos + ilsDir * 2000 + runwaySide * 90;
                     Vector3 relPos = approachPos - Position();
                     _pilotHeading = atan2(relPos.X(), relPos.Z());
                     changeHeading = AngleDifference(_pilotHeading, curHeading);
                     Limit(changeHeading, -0.7f, +0.7f);
-                    _pilotHeight = 100;
+                    _pilotHeight = patternHeight(100);
                     _pilotSpeed = landingSpeed * 1.5f;
-                    if (relPos.SquareSize() < Square(500))
+                    if (relPos.SquareSizeXZ() < Square(500))
                     {
                         _pilotSpeed = landingSpeed * 1.2f;
                     }
-                    if (relPos.SquareSize() < Square(200))
+                    if (relPos.SquareSizeXZ() < Square(200))
                     {
                         _planeState = Final;
                     }
@@ -1560,12 +1586,12 @@ void AirplaneAuto::Simulate(float deltaT, SimulationImportance prec)
                     _pilotHeading = atan2(relPos.X(), relPos.Z());
                     changeHeading = AngleDifference(_pilotHeading, curHeading);
                     Limit(changeHeading, -0.5f, +0.5f);
-                    _pilotHeight = 92;
+                    _pilotHeight = patternHeight(92);
 
                     _pilotSpeed = landingSpeed * 1.0f;
-                    if (relPos.SquareSize() < Square(200))
+                    if (relPos.SquareSizeXZ() < Square(200))
                     {
-                        if (ModelSpeed()[2] < landingSpeed * 1.5f && fabs(Direction().X()) < H_PI / 4)
+                        if (ModelSpeed()[2] < landingSpeed * 1.5f && fabs(dirAcrossRunway) < H_PI / 4)
                         {
                             _planeState = Landing;
                         }
@@ -1612,23 +1638,23 @@ void AirplaneAuto::Simulate(float deltaT, SimulationImportance prec)
                                 _planeState = WaveOff;
                                 LOG_DEBUG(Physics, "WaveOff far: too high {:.1f}", Position().Y() - touchdownY);
                             }
-                            else if (fabs(relPos.X() > 25) || fabs(Direction().X()) > 0.15f)
+                            else if (fabs(relPos * runwaySide > 25) || fabs(dirAcrossRunway) > 0.15f)
                             {
                                 _planeState = WaveOff;
-                                LOG_DEBUG(Physics, "WaveOff far: pos.x {:.1f}, dir.x {:.4f}", relPos.X(),
-                                          Direction().X());
+                                LOG_DEBUG(Physics, "WaveOff far: pos.x {:.1f}, dir.x {:.4f}", relPos * runwaySide,
+                                          dirAcrossRunway);
                             }
                             else if (_planeState != Touchdown && Position().Y() - touchdownY < 15)
                             {
-                                if (fabs(relPos.X() < 13) && fabs(Direction().X()) < 0.06)
+                                if (fabs(relPos * runwaySide < 13) && fabs(dirAcrossRunway) < 0.06)
                                 {
                                     _planeState = Touchdown;
                                 }
                                 else
                                 {
                                     _planeState = WaveOff;
-                                    LOG_DEBUG(Physics, "WaveOff: pos.x {:.1f}, dir.x {:.4f}", relPos.X(),
-                                              Direction().X());
+                                    LOG_DEBUG(Physics, "WaveOff: pos.x {:.1f}, dir.x {:.4f}", relPos * runwaySide,
+                                              dirAcrossRunway);
                                 }
                             }
                         }

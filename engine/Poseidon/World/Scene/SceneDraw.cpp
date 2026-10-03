@@ -1911,7 +1911,8 @@ static void DrawSortObject(SortObject* oi)
         }
         ~DrawObjectGuard() { GEngine->SetDrawObject(prev); }
     } drawObjectGuard(obj);
-    const bool cockpit = GWorld &&
+    // Cockpit identity and explicit inside-view selection must both agree.
+    const bool cockpit = GWorld && obj == GWorld->DrawInsideVehicle() &&
         ExplicitInsideViewDraw(oi->drawLOD, oi->forceDrawLOD, obj->InsideLOD(GWorld->GetCameraType()));
     // REN-INTERP-001: moving objects draw at their interpolated frame; everything else at
     // its own (RenderFrame returns *obj for those, one branch).

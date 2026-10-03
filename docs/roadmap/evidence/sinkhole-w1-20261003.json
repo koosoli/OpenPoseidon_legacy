@@ -1,0 +1,27 @@
+{
+  "ticket": "WLD-HOLE-001",
+  "branch": "dec/sinkhole-w1-terrain-holes",
+  "baseline_commit": "da2bfbda",
+  "implementation_commits": ["3850420f", "0cea4b3b"],
+  "build_preset": "win-x64-clang-rwdi",
+  "unit": {
+    "rust terrain_hole_tests": "4 passed (terrain.wgsl + grass.wgsl compose and validate; colour and prepass discard; 3 grass placements skip; buffer size)",
+    "rust terrain::": "17 passed",
+    "rust grass::": "21 passed, 1 failed (card_spacing_only_engages_with_a_resident_atlas -- pre-existing on the base)",
+    "PoseidonTests [sinkhole]": "9 cases / 52 assertions passed (incl. autocenter on the geometry LOD)",
+    "PoseidonTests full": "3562/3629 passed; the 15 failures are pre-existing on the base (I-05 shutdown audit, asset_preview x4, dev_panel_search, world state file format x8, sim_stage census witness)"
+  },
+  "in_game": {
+    "harness": ".tw/test-holes.ps1 via the .tw watcher, game folder G:/CWA-OLI stamped dec/sinkhole-w1-terrain-holes 0cea4b3b",
+    "content": "Malprave ugcave.pbo (Dec's test cave: 24x18 m chamber 5 m under the ground, stairwell, tunnel) via --mod, mission UgCaveTest.Eden on Everon",
+    "log": "terrainHole: ugcave\\ugcave.p3d cuts 6 hole(s) in the terrain; 0 wgpu validation errors",
+    "probe": "player setPosASL to the chamber: stays at ASL 19.6586 = ground 24.6586 - 5.000 m for 8 s, alive, damage 0, walks on the floor; back on the surface at 24.6586",
+    "found_and_fixed": "Before 0cea4b3b the cave stood 2.35 m too high (Model::compile ignored autocenter=0 on the geometry LOD); the player stood at ground - 2.35 m",
+    "earlier_run": "With Malprave's EAST squad left in the chamber, it engaged the player through the stairwell: line of sight and fire work into and out of the hole"
+  },
+  "not_verified": [
+    "Cave interior renders near-black under Oli's interior-sky lighting; hole edges and cave walls not visually confirmed",
+    "Grass-free hole openings not visually confirmed (tall grass in the capture angle)",
+    "GL33 path not run"
+  ]
+}

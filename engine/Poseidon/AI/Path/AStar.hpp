@@ -77,6 +77,8 @@ public:
 	bool IsFound() const {return _found != nullptr;}
 	const Node *GetLastNode() const {return _found;}
 	const Node *GetBestNode() const;
+	// the node (open or expanded) with the smallest heuristic: nearest the goal
+	const Node *GetNearestNode() const;
 
 	// returns number of iterations really processed
 	int Process(int maxIters, void *context = nullptr);
@@ -109,6 +111,27 @@ const AStarNode<Field> *AStar<ASTAR_ARGS>::GetBestNode() const
 		}
 	}
 	return best;
+}
+
+ASTAR_TEMPLATE
+const AStarNode<Field> *AStar<ASTAR_ARGS>::GetNearestNode() const
+{
+	typedef typename ClosedList::Iterator ClosedIterator;
+
+	// the closed list holds every node created, open ones included
+	const Node *best = nullptr;
+	float heur = FLT_MAX;
+	for (ClosedIterator iterator(_closed); iterator; ++iterator)
+	{
+		const Node *node = *iterator;
+		float h = node->_f - node->_g;
+		if (h < heur)
+		{
+			best = node;
+			heur = h;
+		}
+	}
+	return best ? best : _open.GetFirst();
 }
 
 ASTAR_TEMPLATE

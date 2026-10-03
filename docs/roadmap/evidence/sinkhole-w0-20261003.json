@@ -1,0 +1,22 @@
+{
+  "ticket": "TEX-FMT-001",
+  "branch": "dec/sinkhole-w0-texture-formats",
+  "baseline_commit": "95a9eb1d",
+  "build_preset": "win-x64-clang-rwdi",
+  "runs": [
+    {
+      "command": "PoseidonTests.exe \"[sinkhole]\"",
+      "result": "All tests passed (45 assertions in 8 test cases)"
+    },
+    {
+      "command": "PoseidonTests.exe \"[sinkhole],[JPG],[DDS],[edds],[PNG]\"",
+      "result": "test cases: 68 | 67 passed | 1 skipped; assertions: 3531 | 3531 passed"
+    },
+    {
+      "command": "PoseidonTests.exe \"[Graphics],[graphics]\"",
+      "result": "test cases: 483 | 478 passed | 1 failed | 4 skipped",
+      "unrelated_failure": "I-05: FontSystem shutdown clears FreeType caches before engine destruction (test_shutdown_order_audit.cpp:187) -- source audit of UnloadGameData, not touched by this branch"
+    }
+  ],
+  "not_run": "in-game harness capture (pending W5 island content and the .tw watcher)"
+}

@@ -1,8 +1,10 @@
+#include <cstdlib>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICostAccum.hpp> // PERF-019
 #include <Poseidon/AI/AITuning.hpp>    // PERF-020
 #include <Poseidon/AI/AIRadio.hpp>
+#include <Poseidon/AI/AIHunt.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -45,6 +47,7 @@
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <Poseidon/Foundation/platform.hpp>
+#include <Poseidon/World/Entities/Infantry/SwimView.hpp>
 
 using namespace Poseidon;
 ActionContextBase* CreateGetInActionContext(Transport* veh, UIActionType pos);
@@ -209,6 +212,12 @@ static bool AvoidBeInWith(AICenter* center, Person* person)
 {
     if (!person)
     {
+        return false;
+    }
+    if (person->IsDammageDestroyed())
+    {
+        // CWR fork: a dead enemy crewman is not a reason to refuse - the seat is
+        // free (QCanIGetIn* already treat it as empty) and the body is removed
         return false;
     }
     if (!center->IsEnemy(person->GetTargetSide()))
@@ -1831,6 +1840,35 @@ void AIUnit::OperPath(ThinkImportance prec)
     }
 }
 
+// A soldier's path lies on the ground (PointOnSurface, combat height 0). In water
+// deep enough to swim that is the sea bed, metres under a swimmer, and the path
+// follower measures in 3D (Path::CostAtPos, the distance to Path::End): swimmers
+// braked and trod water 10-30 m short of where they were sent, further out the
+// deeper it got. Put those points where a swimmer's origin is instead: the sea
+// surface less the swim water line (Man::SimSwimMovement, SoldierOldSwim.cpp).
+static void FloatPathOnWater(AIUnit* unit, Path& path)
+{
+    if (!unit->IsFreeSoldier() || !GLandscape)
+    {
+        return;
+    }
+    for (int i = 0; i < path.Size(); i++)
+    {
+        OperInfoResult& info = path[i];
+        if (info._house)
+        {
+            continue;
+        }
+        Vector3& p = info._pos;
+        const float sea = SwimMeanWaterLevel(p.X(), p.Z());
+        if (sea - GLandscape->SurfaceY(p.X(), p.Z()) >= SwimStartDepth)
+        {
+            saturateMax(p[1], sea - SwimWaterLine);
+        }
+    }
+}
+
+
 bool AIUnit::CreateOperativePath()
 {
     EntityAI* veh = GetVehicle();
@@ -1877,6 +1915,7 @@ bool AIUnit::CreateOperativePath()
     {
         // creates path from Position() to _expPosition if none in _planner
         CopyPath(*_planner);
+        FloatPathOnWater(this, _path);
         Verify(SetState(Busy));
         return false;
     }
@@ -1957,6 +1996,7 @@ bool AIUnit::CreateOperativePath()
                 _path[j]._cost = lastCost;
             }
         }
+        FloatPathOnWater(this, _path);
         Verify(SetState(Busy));
         return true;
     }
@@ -1999,6 +2039,8 @@ bool AIUnit::Think(ThinkImportance prec)
     // find attack position if neccessary
 
     SetWatch(); // instrumented inside: unitAttack + unitWatch cover it entirely
+    // Malprave aiHunting: soldier-level hunting of an enemy that has dropped out of sight
+    Hunt::Think(this);
     // some parts of AIUnit::Think may be executed less often
 
     if (Glob.time > _expensiveThinkTime)
@@ -2334,6 +2376,113 @@ void AIUnit::SetDanger(float until)
             }
             break;
             // don't set danger in Combat mode
+    }
+}
+
+// CWR fork: suppression tuning
+namespace SuppressionTuning
+{
+constexpr float Grace = 1.5f;         // seconds suppression holds before recovering
+constexpr float RecoverRate = 0.15f;  // suppression lost per second after that (~6.5 s from full)
+constexpr float DangerLevel = 0.2f;   // unit becomes alert (danger) above this
+constexpr float PinnedLevel = 0.3f;   // unit stays prone above this
+constexpr float ShareLevel = 0.4f;    // squadmates react when one member is this suppressed
+constexpr float ShareRadius = 60.0f;  // ...if they are within this distance
+constexpr float ShareAmount = 0.5f;   // ...and receive this much suppression ("contact - get down!")
+} // namespace SuppressionTuning
+
+bool AIUnit::IsPinnedDown() const
+{
+    return GetSuppression() > SuppressionTuning::PinnedLevel;
+}
+
+void AIUnit::AddSuppressionDirect(float amount)
+{
+    if (amount <= 0 || IsAnyPlayer() || GetLifeState() != LSAlive)
+    {
+        return;
+    }
+    const float now = floatMin(GetSuppression() + amount, 1.0f);
+    if (now > GetSuppression())
+    {
+        _suppression = now;
+        _suppressionTime = Glob.time;
+    }
+    if (now >= SuppressionTuning::DangerLevel)
+    {
+        SetDanger();
+    }
+}
+
+float AIUnit::GetSuppression() const
+{
+    if (_suppression <= 0)
+    {
+        return 0;
+    }
+    const float since = (Glob.time - _suppressionTime) - SuppressionTuning::Grace;
+    if (since <= 0)
+    {
+        return _suppression;
+    }
+    return floatMax(_suppression - since * SuppressionTuning::RecoverRate, 0.0f);
+}
+
+void AIUnit::AddSuppression(float amount, EntityAI* shooter)
+{
+    if (amount <= 0 || IsAnyPlayer() || GetLifeState() != LSAlive)
+    {
+        return;
+    }
+    // experienced soldiers are less affected: skill 1 (best) = x0.5, 5 (worst) = x1.0
+    const float skillCoef = 0.5f + 0.125f * (GetInvAbility() - 1);
+    const float before = GetSuppression();
+    float now = before + amount * skillCoef;
+    saturate(now, 0, 1);
+    _suppression = now;
+    _suppressionTime = Glob.time;
+    // POSEIDON_AI_SUPPRESSION_LOG=1: one line per near miss, for tests
+    static const bool logOn = []
+    {
+        const char* v = std::getenv("POSEIDON_AI_SUPPRESSION_LOG");
+        return v && v[0] == '1';
+    }();
+    if (logOn)
+    {
+        LOG_INFO(World, "Suppression: {} {:.2f} -> {:.2f} from {} pinned={}", (const char*)GetDebugName(), before, now,
+                 shooter ? (const char*)shooter->GetDebugName() : "?", IsPinnedDown() ? 1 : 0);
+    }
+
+    if (now >= SuppressionTuning::DangerLevel)
+    {
+        SetDanger();
+    }
+    // the squad takes cover with a unit that comes under heavy fire
+    if (before < SuppressionTuning::ShareLevel && now >= SuppressionTuning::ShareLevel)
+    {
+        AIGroup* grp = GetGroup();
+        EntityAI* me = GetVehicle();
+        if (grp && me)
+        {
+            for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
+            {
+                AIUnit* mate = grp->UnitWithID(id);
+                if (!mate || mate == this || !mate->IsLocal())
+                {
+                    continue;
+                }
+                EntityAI* mateVeh = mate->GetVehicle();
+                if (!mateVeh || static_cast<EntityAI*>(mate->GetPerson()) != mateVeh)
+                {
+                    continue; // on foot only
+                }
+                if (mateVeh->Position().Distance2(me->Position()) > Square(SuppressionTuning::ShareRadius))
+                {
+                    continue;
+                }
+                mate->AddSuppressionDirect(SuppressionTuning::ShareAmount);
+            }
+        }
     }
 }
 

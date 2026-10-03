@@ -257,6 +257,11 @@ class World
 	Ref<AICenter> _eastCenter,_westCenter,_guerrilaCenter,_civilianCenter,_logicCenter;
 
 	OLink<Object> _cameraOn;
+	// The object queued at its inside (cockpit / first-person) LOD this frame, or null.
+	// Scene's DrawSortObject routes ONLY this object as a cockpit draw. A plain pointer on purpose:
+	// it is only ever COMPARED (never dereferenced) within the frame that set it. Held as an OLink it
+	// crashed in LLink's constructor on the owner's mission (FIX-COCKPIT-001 follow-up).
+	const Object* _drawInsideVehicle = nullptr;
 	OLink<Person> _playerOn;
 	OLink<Person> _realPlayer;
 	OLinkArray<Person> _players;
@@ -575,6 +580,7 @@ class World
 	void BrowseCamera( Object *vehicle );
 
 	Object* CameraOn() const {return _cameraOn;}
+	const Object* DrawInsideVehicle() const {return _drawInsideVehicle;}
 	Person* PlayerOn() const;
 	Person* GetRealPlayer() const;
 	void SetRealPlayer(Person *veh);

@@ -772,6 +772,16 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 		Vector3Par beg, Vector3Par end, float radius,
 		ObjIntersect type=ObjIntersectFire
 	) const;
+	// Hook for line intersections: parts that are not in the shape's own
+	// geometry (e.g. the pilot hanging under a parachute). Called by the
+	// line Intersect above before the shape is tested.
+	virtual void IntersectExtra
+	(
+		const FrameBase &pos,
+		CollisionBuffer &result,
+		Vector3Par beg, Vector3Par end, float radius,
+		ObjIntersect type, int hierLevel
+	) const {}
 
 	// Reset all object properties to the default state.
 	virtual void ResetStatus();
@@ -925,6 +935,10 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 
 	// Call to prepare skew matrix
 	virtual void InitSkew( Landscape *land );
+	// The heightfield under the world changed (subdivide / resample / subdiv cache / setTerrainGrid):
+	// drop every cache that was derived from the old heights. Landscape::MakeObjectsTerrainAbsolute
+	// calls it for every object, forests included.
+	virtual void OnTerrainChanged( Landscape *land );
 
 	USE_CASTING_ROOT
 };

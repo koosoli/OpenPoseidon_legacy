@@ -69,6 +69,33 @@ struct SnowData {
 };
 @group(1) @binding(4) var<storage, read> snow: SnowData;
 
+// Sinkhole W1 (port of Malprave terrainHole2 to wgpu): terrain holes -- world X/Z convex areas a hole-cutting
+// object (memory-LOD `terrain_hole*` selection + roadway LOD) has cut out of the ground. Written by
+// Engine::SetTerrainHoles via wgr_terrain_set_holes. edges[i] = {nx, nz, d, last}: a point is inside an area when
+// nx*x + nz*z + d >= 0 for every edge of that area; last = 1 closes an area. info.x = edge count (0 = no holes).
+struct TerrainHoles {
+    info: vec4<f32>,
+    edges: array<vec4<f32>, 64>,
+};
+@group(1) @binding(5) var<storage, read> holes: TerrainHoles;
+
+fn in_terrain_hole(xz: vec2<f32>) -> bool {
+    let n = min(u32(max(holes.info.x, 0.0)), 64u);
+    if (n == 0u) { return false; }
+    var inside = true;
+    for (var i = 0u; i < n; i = i + 1u) {
+        let e = holes.edges[i];
+        // A zero-length edge normal can only come from a collapsed outline; treat it as outside so a bad hole
+        // can never swallow the whole terrain (0 >= 0 would read as inside everywhere).
+        if (dot(e.xy, e.xy) < 0.25 || e.x * xz.x + e.y * xz.y + e.z < 0.0) { inside = false; }
+        if (e.w > 0.5) {
+            if (inside) { return true; }
+            inside = true;
+        }
+    }
+    return false;
+}
+
 fn snow_depth(world_xz: vec2<f32>) -> f32 {
     if (snow.info.w <= 0.0) { return 0.0; }
     return max(0.0, snow.info.w * snow_drift(world_xz) - snow_deficit(world_xz));
@@ -1091,6 +1118,11 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     if (dot(frame.clip_plane.xyz, in.world_pos + frame.cam_pos.xyz) + frame.clip_plane.w < 0.0) {
         discard;
     }
+    // Sinkhole W1: no ground where a hole-cutting object has cut it away. The prepass discards the same
+    // pixels, so the colour pass's depth-equal test never sees a prepass depth for them.
+    if (in_terrain_hole(in.world_xz)) {
+        discard;
+    }
     // Receiver-plane derivatives must run in uniform control flow.
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
@@ -1546,6 +1578,9 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
 // space (view translation is zeroed, so the direction transform is a pure rotation).
 @fragment
 fn fs_terrain_prepass(in: VsOut) -> @location(0) vec2<f32> {
+    if (in_terrain_hole(in.world_xz)) {
+        discard;
+    }
     let footprint = max(length(dpdx(in.world_pos)), length(dpdy(in.world_pos)));
     var n = sample_mud_normal(in.world_xz, tp.terrain_grid, footprint);
     let py = sample_height(in.world_xz);

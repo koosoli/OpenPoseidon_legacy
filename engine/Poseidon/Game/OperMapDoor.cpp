@@ -578,6 +578,16 @@ void OperField::CreateField(int mask)
     OperItem* item;
     int ix, iz, i;
     const float maxWater = -0.5;
+    // Malprave terrainHole3: items inside a terrain hole are blocked (OITSpace, like a building's walls; terrainHole3b:
+    // terrainHole3 used OITAvoid, which for men is the cheap "near cover" type, not a block); men get in and out
+    // only along the building's house paths (its Paths LOD exits), as for any house
+    Landscape::TerrainHoleArea holes[32];
+    int nHoles = 0;
+    if (mask & MASK_USE_BUFFER)
+    {
+        Vector3 fieldCentre(_x * LandGrid + LandGrid * 0.5f, 0, _z * LandGrid + LandGrid * 0.5f);
+        nHoles = GLandscape->GatherTerrainHoles(fieldCentre, LandGrid * 0.75f, holes, 32);
+    }
     for (iz = 0; iz < OperItemRange; iz++)
     {
         for (ix = 0; ix < OperItemRange; ix++)
@@ -598,6 +608,11 @@ void OperField::CreateField(int mask)
                 {
                     item->_typeSoldier = OITWater;
                     item->_type = OITWater;
+                }
+                if (nHoles > 0 && Landscape::InTerrainHoles(holes, nHoles, xt, zt))
+                {
+                    item->_typeSoldier = OITSpace; // Malprave terrainHole3b (was OITAvoid)
+                    item->_type = OITSpace;
                 }
             }
         }
@@ -826,6 +841,23 @@ void OperField::CreateField(int mask)
                     }
                 }
             }
+        }
+    }
+    // Malprave terrainHole3b: a house exit whose item lies in a terrain hole (a stairwell's top step) stays reachable
+    for (int d = 0; d < _doors.Size() && nHoles > 0; d++)
+    {
+        int dx = _doors[d].x - _x * OperItemRange;
+        int dz = _doors[d].z - _z * OperItemRange;
+        if (dx < 0 || dx >= OperItemRange || dz < 0 || dz >= OperItemRange)
+        {
+            continue;
+        }
+        float xt = _x * LandGrid + dx * OperItemGrid + OperItemGrid * 0.5f;
+        float zt = _z * LandGrid + dz * OperItemGrid + OperItemGrid * 0.5f;
+        if (Landscape::InTerrainHoles(holes, nHoles, xt, zt))
+        {
+            _items[dz][dx]._type = OITNormal;
+            _items[dz][dx]._typeSoldier = OITNormal;
         }
     }
 }

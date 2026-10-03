@@ -303,6 +303,8 @@ pub const WGR_DRAW3D_NORMAL_RG: u32 = 128;
 pub const WGR_DRAW3D_NATIVE_CAVITY: u32 = 1024;
 pub const WGR_DRAW3D_SNOW_RECEIVER: u32 = 2048;
 pub const WGR_DRAW3D_GROUND_RECEIVER: u32 = 4096;
+// MAT-053: a translucent object section from the back-to-front blend pass (wgpu_renderer.hpp).
+pub const WGR_DRAW3D_BLEND_SECTION: u32 = 8192;
 
 // Per-section shading, parallel to a model's sections (one per section). The raw material is
 // folded with the frame sun in the GPU-driven fragment shader (matching the per-draw path);
@@ -1885,9 +1887,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(19)
+            .unwrap_or(20)
     } else {
-        19
+        20
     }
 }
 
@@ -2193,7 +2195,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 19); // Paired fine rainfall/source receipt
+        assert_eq!(super::wgr_abi_version(), 20); // Paired cave/hole/swimmer integration
     }
 
     #[test]
@@ -3179,6 +3181,34 @@ pub unsafe extern "C" fn wgr_water_set_interaction_params(
     }));
 }
 
+/// Sinkhole W3: the Tidewater water's drawn surface around the camera (the W9a probe grid, read back
+/// 1-3 frames late): `cap` texels of displaced vertex (x, y, z) into `xyz` (3 floats each), the grid's
+/// lanes (first lattice x, z, step, size) into `lanes` and the readback's age into `age_ms`. Returns the
+/// texel count, or 0 when there is none (another water mode, no frame yet, `cap` too small). Any thread.
+///
+/// # Safety
+/// `xyz` must hold `cap * 3` floats, `lanes` 4 and `age_ms` 1.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_water_drawn_grid(xyz: *mut f32, cap: u32, lanes: *mut f32, age_ms: *mut f32) -> u32 {
+    if xyz.is_null() || lanes.is_null() || age_ms.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let out = unsafe { std::slice::from_raw_parts_mut(xyz as *mut [f32; 3], cap as usize) };
+        let mut l = [0.0f32; 4];
+        let mut age = 0.0f32;
+        let n = crate::water_tw::probe::drawn_grid(out, &mut l, &mut age);
+        if n > 0 {
+            unsafe {
+                std::ptr::copy_nonoverlapping(l.as_ptr(), lanes, 4);
+                *age_ms = age;
+            }
+        }
+        n as u32
+    }))
+    .unwrap_or(0)
+}
+
 /// # Safety
 /// `renderer` must be live; `events` must point to `count` records unless `count` is zero.
 #[unsafe(no_mangle)]
@@ -3258,6 +3288,36 @@ pub unsafe extern "C" fn wgr_terrain_set_sand(renderer: *mut WgrRenderer, data: 
         let r = unsafe { &mut *renderer };
         let values = unsafe { std::slice::from_raw_parts(data, count as usize) };
         r.terrain.set_sand(&r.queue, values);
+    }));
+}
+
+/// Sinkhole W1: terrain holes, `n_edges` x {nx, nz, d, last} in world X/Z (see wgpu_renderer.hpp).
+/// # Safety
+/// `edges` must address `n_edges * 4` floats (or be null with `n_edges` 0); renderer must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_holes(renderer: *mut WgrRenderer, edges: *const f32, n_edges: u32) {
+    if renderer.is_null() || (edges.is_null() && n_edges != 0) { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        let values: &[f32] = if n_edges == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(edges, n_edges.min(64) as usize * 4) }
+        };
+        r.terrain.set_holes(&r.queue, values);
+    }));
+}
+
+/// Sinkhole W1b: how far underground the camera is, 0 (open air) .. 1 (deep in a cave). Scales
+/// the outdoor-air effects (sun shafts, surface scattering) away and lets eye adaptation open up.
+/// # Safety
+/// renderer must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_camera_underground(renderer: *mut WgrRenderer, underground: f32) {
+    if renderer.is_null() { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        r.set_camera_underground(underground);
     }));
 }
 

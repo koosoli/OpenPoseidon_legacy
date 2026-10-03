@@ -14,12 +14,17 @@
 //! cube root of the charge): ~4 m for a 20 mm round, ~15 m for 120 mm HE, ~50 m for a laser-guided
 //! bomb; `indirectHitRange` widens the column and the foam. A bullet's spout grows with sqrt(hit):
 //! ~0.5 m for 7.62 mm. Visual only: nothing here feeds back into the simulation.
+//!
+//! Sinkhole W3: a swimmer's hand or foot cutting the surface (kind 6, SoldierOldSwim.cpp) is a small
+//! splash of the same kind: drops, a few ligaments and a puff of white water, thrown up from the
+//! wave's own height (the event carries it -- a swimmer rides the crests) and onward with the limb.
 
 use super::spray::EmitRequest;
 use crate::ffi::WgrWaterInteractionEvent;
 
 const KIND_BULLET: f32 = 0.0;
 const KIND_EXPLOSION: f32 = 3.0;
+const KIND_SWIM_SPLASH: f32 = 6.0;
 // spray particle kinds (tw_spray_common.wgsl)
 const DROPLET: f32 = 0.0;
 const MIST: f32 = 1.0;
@@ -28,7 +33,7 @@ const SPRAY: f32 = 3.0;
 const SHEET: f32 = 4.0;
 const GRAVITY: f32 = 9.81;
 /// Splashes being emitted at once (the oldest is dropped).
-pub const MAX_IMPACTS: usize = 12;
+pub const MAX_IMPACTS: usize = 24;
 /// Explosions shown in the water surface (the most recent).
 pub const SURFACE_SLOTS: usize = 4;
 /// How long an explosion stays in the water surface (s).
@@ -61,6 +66,10 @@ struct Impact {
     height: f32,
     radius: f32,
     explosive: bool,
+    /// a swimmer's splash (kind 6)
+    swim: bool,
+    /// horizontal velocity added to every particle (the limb's throw; 0 for shots)
+    throw: [f32; 2],
     age: f32,
     /// sector rotation (rad), from the position
     rot: f32,
@@ -102,13 +111,20 @@ impl Impacts {
         for e in events {
             let kind = e.velocity_kind[3];
             let hit = e.time_life_foam_mass[3];
-            if hit <= 0.0 || !(kind == KIND_EXPLOSION || kind == KIND_BULLET) {
+            if hit <= 0.0 || !(kind == KIND_EXPLOSION || kind == KIND_BULLET || kind == KIND_SWIM_SPLASH) {
                 continue;
             }
             let explosive = kind == KIND_EXPLOSION;
+            let swim = kind == KIND_SWIM_SPLASH;
             let range = e.direction_depth_flags[2].max(0.01);
-            let height = plume_height(explosive, hit, range);
-            let radius = plume_radius(explosive, height, range);
+            let (height, radius, y, throw) = if swim {
+                // the height and radius come with the event, and the surface height: the limb is on a wave
+                let t = [0.35 * e.velocity_kind[0], 0.35 * e.velocity_kind[1]];
+                (hit.clamp(0.05, 1.0), e.position_radius[2].clamp(0.03, 0.4), e.position_radius[3], t)
+            } else {
+                let height = plume_height(explosive, hit, range);
+                (height, plume_radius(explosive, height, range), sea_level, [0.0; 2])
+            };
             let (x, z) = (e.position_radius[0], e.position_radius[1]);
             if self.list.len() >= MAX_IMPACTS {
                 self.list.remove(0);
@@ -116,10 +132,12 @@ impl Impacts {
             self.list.push(Impact {
                 x,
                 z,
-                y: sea_level,
+                y,
                 height,
                 radius,
                 explosive,
+                swim,
+                throw,
                 age: 0.0,
                 rot: (x * 0.37 + z * 0.61).fract() * std::f32::consts::TAU,
                 carry: [0.0; 6],
@@ -204,7 +222,7 @@ fn class(
         out.push(EmitRequest {
             a: [imp.x, imp.y + y0, imp.z],
             b: [imp.x, imp.y + y1, imp.z],
-            vel: [0.0, vy, 0.0],
+            vel: [imp.throw[0], vy, imp.throw[1]],
             count: total,
             size,
             kind,
@@ -231,7 +249,7 @@ fn class(
         out.push(EmitRequest {
             a: [imp.x + rr * a0.cos(), imp.y + 0.05, imp.z + rr * a0.sin()],
             b: [imp.x + rr * a1.cos(), imp.y + 0.05, imp.z + rr * a1.sin()],
-            vel: [vout * am.cos(), vy, vout * am.sin()],
+            vel: [vout * am.cos() + imp.throw[0], vy, vout * am.sin() + imp.throw[1]],
             count: each,
             size,
             kind,
@@ -260,6 +278,10 @@ fn emit(imp: &mut Impact, dt: f32, lod: f32, out: &mut Vec<EmitRequest>, max: us
         let fly = |vy: f32| 2.0 * vy / GRAVITY * 1.05 + 0.5;
         let (lig, drop, white, sheet) = if imp.explosive {
             ((60.0 * h).clamp(20.0, 2400.0), (80.0 * h).clamp(30.0, 3000.0), (16.0 * h).clamp(4.0, 700.0), (4.0 * h).clamp(2.0, 160.0))
+        } else if imp.swim {
+            // a hand slap or a kick: mostly drops, a few strands, a little white water
+            // (white water only from a hard slap: at a hand's scale the puff reads as a lamp)
+            ((8.0 * h).clamp(1.0, 5.0), (60.0 * h).clamp(6.0, 30.0), if h > 0.3 { 1.0 } else { 0.0 }, 0.0)
         } else {
             (6.0, 14.0, 0.0, 0.0)
         };
@@ -358,6 +380,33 @@ mod tests {
             total += out.iter().map(|r| r.count).sum::<u32>();
         }
         assert!((10..30).contains(&total), "{total}");
+        assert_eq!(im.lanes()[0][3], 0.0, "no surface mark");
+    }
+
+    #[test]
+    fn a_swimmers_splash_rises_from_the_wave_and_follows_the_limb() {
+        let mut im = Impacts::default();
+        // a hand slapping in on a crest 2.5 m above the mean sea, moving +x at 2 m/s
+        let e = WgrWaterInteractionEvent {
+            position_radius: [10.0, 20.0, 0.12, 2.5],
+            velocity_kind: [2.0, 0.0, -1.5, KIND_SWIM_SPLASH],
+            time_life_foam_mass: [0.0, 0.0, 0.0, 0.3],
+            direction_depth_flags: [0.0; 4],
+        };
+        im.submit(&[e], 0.0);
+        assert_eq!(im.active(), 1);
+        let mut total = 0;
+        for _ in 0..20 {
+            let mut out = Vec::new();
+            im.update(1.0 / 60.0, [12.0, 4.0, 20.0], &mut out, 64);
+            for r in &out {
+                assert!(r.a[1] >= 2.5 && r.vel[1] > 0.0, "from the crest, upward");
+                assert!(r.vel[0] > -1.0, "thrown on with the hand");
+            }
+            total += out.iter().map(|r| r.count).sum::<u32>();
+        }
+        assert!((8..40).contains(&total), "{total}");
+        assert_eq!(im.active(), 0);
         assert_eq!(im.lanes()[0][3], 0.0, "no surface mark");
     }
 }

@@ -1821,6 +1821,75 @@ static const IPaths* InsideBuilding(Vector3Val pos)
     return nullptr;
 }
 
+// Malprave terrainHole3: script positions are relative to the terrain, so "doMove [x, y, 0]" into a cellar under a
+// terrain hole asks for a point at the terrain height, metres above the cellar floor, and InsideBuilding (path
+// points within 2.5 m in 3D) never matches. For a target inside a terrain hole take the building whose path point
+// is nearest in X/Z (within 10 m: the hole itself says the target is in that building; terrainHole3b, was 2.5 m; a
+// lower floor wins only when about as near) and move the target to that height. The man walks to the house path
+// point nearest the target, so a Paths LOD needs points wherever men should stand.
+static const IPaths* InsideBuildingHole(Vector3& pos)
+{
+    if (!GLandscape->InTerrainHole(pos.X(), pos.Z()))
+    {
+        return nullptr;
+    }
+    int xMin, xMax, zMin, zMax;
+    ObjRadiusRectangle(xMin, xMax, zMin, zMax, pos, pos, 50);
+    const IPaths* best = nullptr;
+    float bestScore = 1e10f;
+    float bestY = pos.Y();
+    for (int x = xMin; x <= xMax; x++)
+    {
+        for (int z = zMin; z <= zMax; z++)
+        {
+            const ObjectList& list = GLandscape->GetObjects(z, x);
+            for (int i = 0; i < list.Size(); i++)
+            {
+                Object* obj = list[i];
+                if (!obj || !obj->GetShape() || obj->GetShape()->FindPaths() < 0)
+                {
+                    continue;
+                }
+                if ((obj->Position() - pos).SquareSizeXZ() > Square(obj->GetShape()->BoundingSphere()))
+                {
+                    continue;
+                }
+                const IPaths* building = obj->GetIPaths();
+                const Shape* pathsLevel = obj->GetShape()->PathsLevel();
+                if (!building || !pathsLevel)
+                {
+                    continue;
+                }
+                for (int p = 0; p < building->NPoints(); p++)
+                {
+                    if (pathsLevel->PointToVertex(p) < 0)
+                    {
+                        continue;
+                    }
+                    Vector3 point = building->GetPosition(p);
+                    float d2 = (point - pos).SquareSizeXZ();
+                    if (d2 > Square(10.0f))
+                    {
+                        continue;
+                    }
+                    float score = d2 + 0.05f * Square(point.Y() - pos.Y());
+                    if (score < bestScore)
+                    {
+                        bestScore = score;
+                        best = building;
+                        bestY = point.Y();
+                    }
+                }
+            }
+        }
+    }
+    if (best)
+    {
+        pos[1] = bestY;
+    }
+    return best;
+}
+
 #define ROAD_DIAGS 0
 #define HOUSE_DIAGS 0
 
@@ -1832,6 +1901,11 @@ bool AIUnit::CreatePath(Vector3Val from, Vector3Val to)
     _path.SetSearchTime(Glob.time);
     const IPaths* fromBuilding = InsideBuilding(from);
     const IPaths* toBuilding = _house ? _house->GetIPaths() : InsideBuilding(to);
+    Vector3 toHole = to; // Malprave terrainHole3: a target in a terrain hole, moved down to the building's path
+    if (!toBuilding && !_house)
+    {
+        toBuilding = InsideBuildingHole(toHole);
+    }
     EntityAI* veh = GetVehicle();
     float combatHeight = veh->GetCombatHeight();
     if (IsFreeSoldier() && (fromBuilding || toBuilding))
@@ -1849,7 +1923,7 @@ bool AIUnit::CreatePath(Vector3Val from, Vector3Val to)
             {
                 return false;
             }
-            int posTo = _house ? toBuilding->GetPos(_housePos) : toBuilding->FindNearestPoint(to, dummy);
+            int posTo = _house ? toBuilding->GetPos(_housePos) : toBuilding->FindNearestPoint(toHole, dummy);
             if (posTo < 0)
             {
                 posTo = toBuilding->GetPos(0);
@@ -1891,7 +1965,7 @@ bool AIUnit::CreatePath(Vector3Val from, Vector3Val to)
         }
         else
         {
-            return CreateNoRoadPath(from, to, fromBuilding, toBuilding);
+            return CreateNoRoadPath(from, toHole, fromBuilding, toBuilding);
         }
     }
     if (!GetVehicle()->IsCautious() && CreateRoadPath(from, to))

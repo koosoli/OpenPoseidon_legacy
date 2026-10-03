@@ -633,7 +633,7 @@ mod tests {
         tp.bloom_intensity = 0.4;
         tp.temperature = 0.3;
         tp.tint = -0.2;
-        tone.upload_params(&queue, &tp);
+        tone.upload_params(&queue, &tp, 0.0);
         let mut s = State::new();
         s.request(false);
         s.begin();

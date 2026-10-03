@@ -43,6 +43,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Graphics/Rendering/Primitives/ClipVert.hpp>
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Entities/Infantry/SwimView.hpp>
 #include <Poseidon/World/Terrain/Visibility.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
@@ -1696,9 +1697,29 @@ void World::Simulate(float deltaT, bool& enableDraw)
             // Every view stays above the ground. Player, vehicle and trigger-effect views also stay
             // above the sea; a scripted or free camera (mayDive, TW-WATER W5c) may go under it -- the
             // renderer's underwater compositor takes over there -- and is held only above the sea bed.
+            //
+            // Sinkhole W1 (Malprave terrainHole4): inside a terrain hole the floor is the hole's floor, and a
+            // 3rd person camera that swung into the earth around a cellar or cave mouth is first pulled back
+            // into the hole, toward what it follows (the camera effect's object, else the camera vehicle).
             Vector3 camPos = transform.Position();
-            float minCamY = mayDive ? _scene.GetLandscape()->SurfaceY(camPos.X(), camPos.Z())
-                                    : _scene.GetLandscape()->SurfaceYAboveWater(camPos.X(), camPos.Z());
+            Object* camFocusObj = _cameraEffect ? _cameraEffect->GetObject() : cameraVehicle.GetLink();
+            Vector3 camFocus;
+            if (camFocusObj)
+            {
+                camFocus = camFocusObj->CameraPosition();
+            }
+            // Sinkhole W3: on a swimmer the floor is the waves, not the flat mean sea -- in first person none
+            // at all (the swim keeps his eyes over the water; a trough lifted the view into his head), in 3rd
+            // person the wave surface under the camera, so it rides over the crests.
+            float swimWaterY = 0;
+            const bool swimView =
+                !mayDive && SwimmerCameraWater(cameraVehicle.GetLink(), camPos.X(), camPos.Z(), swimWaterY);
+            float minCamY = _scene.GetLandscape()->CameraFloorY(camPos, camFocusObj ? &camFocus : nullptr,
+                                                                !mayDive && !swimView);
+            if (swimView && _camType != CamInternal)
+            {
+                minCamY = std::max(minCamY, swimWaterY + 0.15f);
+            }
             minCamY += 0.1;
             if (camPos.Y() < minCamY)
             {
@@ -1938,6 +1959,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
     }
 
     markInitProbe(beginObjectsMs);
+    _drawInsideVehicle = camInsideVehicle;
     if (camInsideVehicle)
     {
         _scene.SelectActiveLights(camInsideVehicle);

@@ -1009,7 +1009,30 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
             timing->parseMs = arrivedPreparsed ? 0.0 : ::Poseidon::Dev::Perf::ElapsedMs(parseStart);
         }
         const auto adaptStart = ::Poseidon::Dev::Perf::Now();
-        if (model && (model->sourceFormat == "ODOL" || model->sourceFormat == "MLOD"))
+        // OFP MLODs (every LOD "SP3X") go through the original loader, as they do in Malprave and
+        // CWA 3.50: the adapter's SP3X conversion was never looked at (AST-018), and it tears
+        // hand-weighted soldiers apart -- the fml_vorhees Jasons drew as a cloud of black spikes
+        // through it, on wgpu and GL33, with any stock or custom moves, and correctly through
+        // this loader. Arma's P3DM is what the adapter route exists for and is unchanged.
+        // POSEIDON_SP3X_ADAPTER=1 sends SP3X through the adapter again.
+        static const bool sp3xAdapter = []
+        {
+            const char* v = std::getenv("POSEIDON_SP3X_ADAPTER");
+            return v && *v == '1';
+        }();
+        bool sp3xOnly = !sp3xAdapter && model && model->sourceFormat == "MLOD" && !model->lodLevels.empty();
+        if (sp3xOnly)
+        {
+            for (const auto& lod : model->lodLevels)
+            {
+                if (lod.sourceEncoding != "SP3X")
+                {
+                    sp3xOnly = false;
+                    break;
+                }
+            }
+        }
+        if (model && (model->sourceFormat == "ODOL" || model->sourceFormat == "MLOD") && !sp3xOnly)
         {
             LOG_INFO(Graphics, "Shape loader: canonical {} adapter for {}{}", model->sourceFormat, lowName,
                      arrivedPreparsed ? " (pre-parsed)" : "");

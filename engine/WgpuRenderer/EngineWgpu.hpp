@@ -374,6 +374,9 @@ class EngineWgpu : public EngineDummy
     // overlays.  The procedural system uses that exact hook as its eligibility
     // signal instead of drawing over every opaque terrain cell.
     void SetGrassParams(float a1, float a2, float a3 = 0, float a4 = 0) override;
+    // Sinkhole W1: hand the terrain hole edges to the renderer (terrain + grass passes only, so the
+    // nullptr reset the landscape sends after its terrain draws is ignored here).
+    void SetTerrainHoles(const float* edges, int nEdges) override;
     void AddGrassImpact(Vector3Par position, float radius) override;
     bool CanGrass() const override { return _renderer != nullptr; }
     GrassSettings GetGrassSettings() const override { return _grass; }
@@ -1269,6 +1272,13 @@ class EngineWgpu : public EngineDummy
         std::vector<float> snowData;
         std::vector<float> mudData;
         std::vector<float> sandData;
+        // Sinkhole W1: this frame's terrain hole edges (n x {nx, nz, d, last}); applied with the rest so the
+        // landscape draw never touches the renderer itself.
+        std::vector<float> terrainHoles;
+        bool terrainHolesDirty = false;
+        // Sinkhole W1b: camera underground factor for the frame (0 open air .. 1 deep in a cave).
+        float cameraUnderground = 0.0f;
+        bool cameraUndergroundDirty = false;
         std::vector<WgrSmokeShadowBlob> smokeBlobs;
         // SMK-038: the same particles again, uncapped by the ground-shadow gates and
         // with a larger cap, for froxel injection. Collected only while the volumetric

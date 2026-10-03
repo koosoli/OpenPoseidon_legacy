@@ -244,7 +244,7 @@ TargetSide Transport::GetTargetSide() const
         }
         for (int i = 0; i < GetManCargo().Size(); i++)
         {
-            if (GetManCargo()[i] && !GetManCargo()[i])
+            if (GetManCargo()[i] && !GetManCargo()[i]->IsDammageDestroyed())
             {
                 goto NotEmpty;
             }

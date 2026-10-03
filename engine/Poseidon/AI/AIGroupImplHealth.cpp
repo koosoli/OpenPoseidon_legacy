@@ -9,6 +9,7 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Random/randomGen.hpp>
+#include <stdio.h>
 
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
@@ -1369,6 +1370,31 @@ void AIGroup::RefreshDisplayName()
     const RString localized = GetLocalizedGroupDisplayName(_letterName, _colorName);
     if (localized.GetLength() > 0)
         _name = localized;
+    if (_nameCycle > 0 && _name.GetLength() > 0)
+    {
+        // more groups than letter x colour names: "Alpha Black 2", "Alpha Black 3", ...
+        char suffix[16];
+        snprintf(suffix, sizeof(suffix), " %d", _nameCycle + 1);
+        _name = _name + RString(suffix);
+    }
+}
+
+// Letter/colour names are handed out in order and wrap once all combinations are
+// used; _nameCycle counts the wraps. Returns false when the name config is missing.
+static bool AutoGroupName(int id, RString& letter, RString& color, int& cycle)
+{
+    const ParamEntry& letters = Pars >> "CfgWorlds" >> "GroupNameList" >> "letters";
+    const ParamEntry& colors = Pars >> "CfgWorlds" >> "GroupColorList" >> "colors";
+    const int nLetters = letters.GetSize();
+    const int pool = nLetters * colors.GetSize();
+    if (id <= 0 || pool <= 0)
+        return false;
+    const int i = id - 1;
+    cycle = i / pool;
+    const int j = i % pool;
+    letter = letters[j % nLetters];
+    color = colors[j / nLetters];
+    return true;
 }
 
 const char* AIGroup::GetName() const
@@ -1379,19 +1405,18 @@ const char* AIGroup::GetName() const
 
 void AIGroup::Init()
 {
-    AI_ERROR(_id > 0 && _id <= MaxGroups);
-    if (_id <= 0 || _id > MaxGroups)
+    AI_ERROR(_id > 0);
+    // ids are never reused within a mission, so they can pass MaxGroups even
+    // when fewer groups exist; names simply wrap with a number suffix
+    RString letter, color;
+    int cycle = 0;
+    if (!AutoGroupName(_id, letter, color, cycle))
     {
         return;
     }
-
-    int i = _id - 1;
-    int names = (Pars >> "CfgWorlds" >> "GroupNameList" >> "letters").GetSize();
-    int color = i / names;
-    int name = i % names;
-
-    _letterName = (Pars >> "CfgWorlds" >> "GroupNameList" >> "letters")[name];
-    _colorName = (Pars >> "CfgWorlds" >> "GroupColorList" >> "colors")[color];
+    _letterName = letter;
+    _colorName = color;
+    _nameCycle = cycle;
     RefreshDisplayName();
 }
 
@@ -1410,6 +1435,16 @@ void AIGroup::SetIdentity(RString name, RString color, RString picture)
 
     _letterName = name;
     _colorName = color;
+    {
+        // keep the "2", "3"... suffix when these are this group's own automatic
+        // names (a loaded save); an explicit setGroupId name has no suffix
+        RString autoLetter, autoColor;
+        int cycle = 0;
+        _nameCycle = (AutoGroupName(_id, autoLetter, autoColor, cycle) && autoLetter == _letterName &&
+                      autoColor == _colorName)
+                         ? cycle
+                         : 0;
+    }
 
     const RString oldName = _name;
     RefreshDisplayName();
@@ -1586,7 +1621,8 @@ void AIGroup::Flee()
 {
     bool forced;
     Vector3 pos = FindFleePoint(this, forced);
-    if (!forced && pos.Distance2(Leader()->Position()) < 50)
+    // CWR fork: squared distance was compared with 50 (about 7 m); 50 m was meant
+    if (!forced && pos.Distance2(Leader()->Position()) < Square(50))
     {
         // if we've got nowhere to flee to, do not flee
         return;

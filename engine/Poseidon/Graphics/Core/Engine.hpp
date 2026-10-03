@@ -670,6 +670,12 @@ class Engine : public IGraphicsEngine
     void SetBias(int value) override = 0;
 
     virtual void SetGrassParams(float a1, float a2, float a3 = 0, float a4 = 0) {}
+    // Sinkhole W1 (from Malprave terrainHole2): terrain pixels inside these world X/Z convex areas are not drawn
+    // (the ground is cut away there by a hole-cutting object). edges: nEdges x {nx, nz, d, last}; inside when
+    // nx*x + nz*z + d >= 0 for every edge of one area, last = 1 on an area's final edge. nEdges = 0 switches it off.
+    // Called with the set before the terrain draws and with nullptr after them; a backend whose hole state is
+    // bound only to its terrain passes (wgpu) may ignore the nullptr reset.
+    virtual void SetTerrainHoles(const float* /*edges*/, int /*nEdges*/) {}
     /// Stamp a local, recovering bend into procedural grass (for explosions and impacts).
     virtual void AddGrassImpact(Vector3Par /*position*/, float /*radius*/) {}
     virtual bool CanGrass() const { return false; }
@@ -1063,7 +1069,12 @@ class Engine : public IGraphicsEngine
         // plausibly look worse. Everon carries no camo net at all; the only ones in the
         // game folder are the Arma 3 Stratis shelters. Until it is looked at through one,
         // this ships off rather than changing something that worked.
-        bool coverageMaskDepth = false;
+        // 2026-10-03, looked at: an M2 inside a Fortress1 on Everon, shot through its camo net
+        // (maskovaci_sit_new) from all four sides. Off, the net renders as scattered flecks and
+        // the gun and anyone behind it read as unobstructed -- the owner's "the AI soldier on
+        // the other side is transparent". On, it is a full camo cover with the gun visible only
+        // through the real gaps. Default ON; POSEIDON_NET_DEPTH=0 restores the old path.
+        bool coverageMaskDepth = true;
         // RFG-047: hand Enfusion's BC7/BC5/BC4 textures to the GPU COMPRESSED instead of
         // decoding them to 32-bit. On by default when the adapter supports it (every
         // D3D12-class GPU does); off restores the RFG-016 decode.

@@ -18,7 +18,7 @@
 // Terrain conform (group 4 heightmap + surface_y/surface_grad), shared with shader3d /
 // shadow_depth. Lets the GPU-driven VS conform ClipLand vegetation/fences to the ground per
 // vertex, matching the per-draw path — so these objects no longer have to stay on the CPU.
-#import conform::{surface_y, surface_grad, surface_y_raster, rigid_ground_fragment}
+#import conform::{surface_y, surface_grad, surface_y_raster, rigid_ground_fragment, cave_daylight}
 
 // Pipeline-overridable constants (kept out of a per-draw binding), same as shader3d.
 override linear: f32 = 0.0;
@@ -314,7 +314,9 @@ fn env_reflection(shaded: vec3<f32>, normal: vec3<f32>, world_pos: vec3<f32>, fo
     let cos_view_normal = clamp(dot(n, view_dir), 0.0, 1.0);
     let reflect_dir = reflect(-view_dir, n);
     let env = sky_env_sample(reflect_dir);
-    return mix(shaded, env, env_fresnel(cos_view_normal) * clamp(fog, 0.0, 1.0));
+    // Sinkhole W1b: a cave mirrors no sky -- the reflected environment is daylight, faded like the rest.
+    let daylight = cave_daylight(world_pos + frame.cam_pos.xyz);
+    return mix(shaded, env, env_fresnel(cos_view_normal) * clamp(fog, 0.0, 1.0) * daylight);
 }
 
 // Volume dimensions. Must match sky_bake::BakeSettings::default().dims — the one place a Rust

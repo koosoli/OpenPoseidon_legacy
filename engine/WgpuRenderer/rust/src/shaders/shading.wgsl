@@ -57,6 +57,9 @@ fn object_snow_normal(world_pos: vec3<f32>, geo_normal: vec3<f32>, base_n: vec3<
     let powder = snow_powder_normal(world_pos + frame.cam_pos.xyz, normalize(geo_normal), footprint);
     return normalize(mix(base_n, powder, coverage));
 }
+// Sinkhole W1: the terrain height at a fragment, for the underground sun test below. Every pipeline that
+// imports `shading` (shader3d, gpu_driven) already binds the conform heightmap group.
+#import conform::cave_daylight2
 
 // The six material colour terms shade() consumes (raw gamma-space; shade srgb-decodes on
 // the HDR/linear path). sun_ambient/sun_diffuse are the SUN-FOLDED terms (material × sun),
@@ -332,7 +335,16 @@ fn shade(
         }
         albedo *= 1.0 - rain_puddle * 0.38;
     }
-    let terrain_s = terrain_sun_shadow(world_abs.xz, world_abs.y);
+    // Sinkhole W1/W1b: a fragment under the terrain surface (a cave, a cellar, a tunnel) is lit only by what
+    // comes in through the terrain's openings. The heightfield is never a shadow caster for objects, and the
+    // long-range mask marches OUTWARD from each column and never counts the column's own ground, so a cave
+    // roof 0.4 m down read as open sky (owner report: "the roof of the cave is bleeding light"). W1 removed
+    // the sun from everything under the ground, which also blacked out stairwells open to the sky; W1b fades
+    // it with the reach from the nearest opening (conform::cave_daylight), DayZ-style.
+    let cave = cave_daylight2(world_abs);
+    let underground_s = 1.0 - cave.x; // direct sun: only through an opening's footprint
+    let underground_amb_s = 1.0 - cave.y; // sky / bounce: fades with the reach from an opening
+    let terrain_s = max(terrain_sun_shadow(world_abs.xz, world_abs.y), underground_s);
     let sun_occ = select(terrain_s, max(terrain_s, csm_s), sky_lit);
     // CLD-020: cloud transmittance MULTIPLIES the remaining direct sun rather than joining the
     // max() above. The others are binary occluders answering "is something between me and the
@@ -374,8 +386,12 @@ fn shade(
     let leaf_cavity = mix(select(1.0, mat.native_cavity, is_foliage), 1.0, snow_cover);
     m_light_diffuse *= leaf_cavity;
     m_light_ambient *= leaf_cavity * mix(mat.native_ao, 1.0, snow_cover);
+    // Sinkhole W1: under the terrain the sky ambient goes too, down to a dim floor. The interior-sky term darkens
+    // static buildings it has rooms for; a soldier walking in a cave got the open-sky ambient (owner report:
+    // "soldiers also illuminated and not dark"). The same ramp as the sun test, so a cave is one consistent dark.
+    let underground_amb = mix(1.0, 0.03, underground_amb_s);
     let amb_ao = sky_vis_ao(world_abs.xz) * gtao_t * interior_ao * clamp(baked_sky_vis, 0.0, 1.0)
-        * leaf_cavity * mix(mat.native_ao, 1.0, snow_cover);
+        * leaf_cavity * mix(mat.native_ao, 1.0, snow_cover) * underground_amb;
     // ...and a FOURTH, at a scale none of the three can reach: the normal map's own micro-
     // occlusion. Sky-vis is keyed on the terrain column (km), GTAO marches the depth buffer
     // (~2 m), the interior term answers "is there a roof" (room-sized) — the smallest thing any
@@ -509,8 +525,10 @@ fn shade(
             (sky_irradiance(amb_n) * sky_spec.w + sky_spec.rgb) * frame.sun_ambient.w * amb_ao * cavity;
         let gi_s = gi_irradiance(world_abs, amb_n);
         if (gi_s.a > 0.0) {
+            // Sinkhole W1b: the probes are lit by the sky too (a probe under the terrain reads the ground it
+            // hits as sunlit), so GI ambient fades underground exactly like the sky ambient above.
             let gi_amb = gi_s.rgb * gtao_t * sky_vis_ao(world_abs.xz)
-                * mix(1.0, interior_ao, frame.gi.z) * clamp(baked_sky_vis, 0.0, 1.0);
+                * mix(1.0, interior_ao, frame.gi.z) * clamp(baked_sky_vis, 0.0, 1.0) * underground_amb;
             let gi_ambient = (gi_amb * sky_spec.w + sky_spec.rgb * amb_ao) * frame.sun_ambient.w * cavity;
             ambient = mix(ambient, gi_ambient, gi_s.a * frame.gi.y);
         }
@@ -700,7 +718,7 @@ fn shade(
         var reflected = m_sun_ambient;
         if (sky_lit) {
             reflected = ground_sky_reflection(reflect(-view, water_n)) * frame.sun_ambient.w
-                * sky_vis_ao(world_abs.xz) * interior_sky_reach(world_abs);
+                * sky_vis_ao(world_abs.xz) * interior_sky_reach(world_abs) * cave.y;
         }
         let half_vector = normalize(view - frame.sun_dir_world.xyz + vec3<f32>(0.0, 1e-4, 0.0));
         reflected += frame.sun_diffuse.rgb * pow(max(dot(water_n, half_vector), 0.0), 96.0) * sun_vis;

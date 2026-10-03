@@ -34,6 +34,7 @@ using Poseidon::Foundation::MStorage;
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
+#include <Poseidon/World/Entities/Infantry/Person.hpp> // aiExposed
 #include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Random/randomGen.hpp>
@@ -601,15 +602,27 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
     int x, z;
     with->Animate(level);
     Matrix4Val withTrans = withPos.Transform();
+    // Sinkhole W1 (Malprave terrainHole1: no terrain (or sea) contact where a building has cut the ground away;
+    // its roadway, checked below, is the ground there
+    TerrainHoleArea holes[32]; // terrainHole3: up to 32 hole areas near the object (was 8)
+    int nHoles = GatherTerrainHoles(wPos, wRad, holes, 32);
     for (int j = 0; j < withShape->NPos(); j++)
     {
         Point3 pos(VFastTransform, withTrans, withShape->Pos(j));
+        // terrainHole3: inside a hole the hole's floor (its lowest roadway point, flat) stands in for the ground, so
+        // nothing falls through a gap; the roadway entries below (floor, stairs) win wherever they are higher
+        const int hole = nHoles > 0 ? TerrainHoleIndex(holes, nHoles, pos[0], pos[2]) : -1;
         float dX, dZ;
 
         Texture* texture = nullptr;
         float surfaceY;
         float bump = 0;
-        if (bumpy > 0)
+        if (hole >= 0)
+        {
+            surfaceY = holes[hole].floorY;
+            dX = dZ = 0;
+        }
+        else if (bumpy > 0)
         {
             surfaceY = BumpySurfaceY(pos[0], pos[2], dX, dZ, texture, bumpy, bump);
         }
@@ -632,7 +645,10 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
             localSeaLevel = body->SurfaceLevelAt(pos[0], pos[2]);
             localWaveScale = body->waveScale;
         }
-        if (surfaceY < localSeaLevel)
+        // Sinkhole W1 (Malprave terrainHole3b): down in a terrain hole there is no sea contact either -- the floor
+        // is the hole's, not the terrain's, and a cellar below sea level is not flooded. (Flooded caves come with W4:
+        // a water body registered over a hole is the place to revisit this.)
+        if (hole < 0 && surfaceY < localSeaLevel)
         {
             // simulate water "bump" waves
             float bumpySea = localSeaLevel;
@@ -1290,6 +1306,12 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
     }
     const float maxRadius = type->indirectHitRange * 4;
     const float hit = type->indirectHit;
+    // terrainHole5: the object hit is normally left out of the shielding test (the explosion sits on its surface).
+    // When it cuts a terrain hole (a cellar roof or floor), it still shields the other side of the ground: a shell on
+    // the roof does not reach the men down in the cellar through it, a grenade on the cellar floor not the men above.
+    const bool holeHit = directHit && CutsTerrainHole(directHit);
+    const bool explosionBelow = holeHit && InTerrainHoleBelow(pos, 0.5f);
+    const Vector3 holeHitFrom = pos + (dir.SquareSize() > 1e-8f ? -dir.Normalized() * 0.3f : VUp * 0.3f);
     int xMin, xMax, zMin, zMax;
     ObjRadiusRectangle(xMin, xMax, zMin, zMax, pos, pos, maxRadius);
     int x, z;
@@ -1329,6 +1351,28 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
                 {
                     float objectSize = obj->VisibleSizeRequired() * 0.8;
                     unshielded = Visible(pos, obj->Position(), objectSize, directHit, obj, ObjIntersectIFire);
+                    if (holeHit && InTerrainHoleBelow(obj->Position(), 0.5f) != explosionBelow)
+                    {
+                        // terrainHole5: lines from just outside the hit surface to the target's feet and chest: the share
+                        // not crossing the hole object's fire geometry (its roof / floor) is open
+                        int open = 0;
+                        const float heights[2] = {0.3f, 1.5f};
+                        for (float h : heights)
+                        {
+                            CollisionBuffer col;
+                            ObjectCollision(col, obj, nullptr, holeHitFrom, obj->Position() + VUp * h, 0, ObjIntersectFire);
+                            bool blocked = false;
+                            for (int c = 0; c < col.Size() && !blocked; c++)
+                            {
+                                blocked = col[c].object == directHit;
+                            }
+                            if (!blocked)
+                            {
+                                open++;
+                            }
+                        }
+                        unshielded *= open * 0.5f;
+                    }
                 }
                 float unshieldedHit = hit * unshielded;
 
@@ -1879,6 +1923,15 @@ float Landscape::CheckUnderLand(Vector3Par beg, Vector3Par dir, float tMin, floa
 #if DIAG_LAND
     LOG_DEBUG(Physics, "  Dist {:.3f},{:.3f}", dist1, dist2);
 #endif
+    // Sinkhole W1 (Malprave terrainHole2: a line under the terrain inside a terrain hole is not hidden by it
+    if (dist1 > 0 && InTerrainHole(begPoint.X(), begPoint.Z()))
+    {
+        dist1 = 0;
+    }
+    if (dist2 > 0 && InTerrainHole(endPoint.X(), endPoint.Z()))
+    {
+        dist2 = 0;
+    }
     float under1 = tMin > 0 && dist1 > 0 ? dist1 / tMin : 0;
     float under2 = tMax > 0 && dist2 > 0 ? dist2 / tMax : 0;
     float under = floatMax(under1, under2);
@@ -1914,6 +1967,10 @@ float Landscape::CheckUnderLand(Vector3Par beg, Vector3Par dir, float tMin, floa
             LOG_DEBUG(Physics, "  Diag {:.3f},{:.3f}, sum {:.3f}", diagX, diagZ, diagX + diagZ);
         }
 #endif
+        if (distD1 > 0 && InTerrainHole(diagPoint.X(), diagPoint.Z()))
+        {
+            distD1 = 0; // Sinkhole W1 (Malprave terrainHole2
+        }
         float underD = diagT > 0 ? distD1 / diagT : 0;
         saturateMax(under, underD);
 #if DIAG_LAND
@@ -2182,6 +2239,15 @@ float Landscape::Visible(Vector3Par sensorPos, const Object* sensor, const Objec
                 visible = floatMax(visible, Visible(sensorPos,
                     object->CameraPosition() - Vector3(0, 0.08f, 0), 0.08f, sensor, object, isect));
         }
+        // Malprave aiExposed (optional, CfgAIFork exposedParts = 1): the aiming point mostly hidden -- try other
+        // parts of a man's body (an arm round a door, legs under a truck)
+        if (visible < 0.5f)
+        {
+            if (Person* man = dyn_cast<Person>(const_cast<Object*>(object)))
+            {
+                visible = floatMax(visible, man->ExposedVisibility(sensorPos, sensor, objectSize, (int)isect));
+            }
+        }
         return visible;
     }
     RptF("Dist %.1f, between %s (%.1f,%.1f,%.1f) and %s (%.1f,%.1f,%.1f)", sqrt(dist2),
@@ -2258,6 +2324,8 @@ float Landscape::VisibleStrategic(Vector3Par from, Vector3Par to) const
 bool Landscape::CheckIntersection(Vector3Par beg, Vector3Par end, int x, int z, float& tRet) const
 {
     // beg and end must be in square (x,z)
+    // Sinkhole W1 (Malprave terrainHole2: a hit inside a terrain hole does not count (the ray goes on into the hole; the building's
+    // own geometry stops it). InTerrainHole costs nothing until a hole-cutting model has been seen.
     float y00, y01, y10, y11;
 #if !USE_SWIZZLED_ARRAYS
     if (!this_TerrainInRange(z, x) || !this_TerrainInRange(z + 1, x + 1))
@@ -2313,7 +2381,7 @@ bool Landscape::CheckIntersection(Vector3Par beg, Vector3Par end, int x, int z, 
     {
         float xIn = beg.X() * _invTerrainGrid - x; // relative 0..1 in square
         float zIn = beg.Z() * _invTerrainGrid - z;
-        if (xIn <= 1 - zIn + inEps)
+        if (xIn <= 1 - zIn + inEps && !InTerrainHole(beg.X(), beg.Z()))
         {
             tRet = 0;
             return true;
@@ -2324,7 +2392,7 @@ bool Landscape::CheckIntersection(Vector3Par beg, Vector3Par end, int x, int z, 
     {
         float xIn = beg.X() * _invTerrainGrid - x; // relative 0..1 in square
         float zIn = beg.Z() * _invTerrainGrid - z;
-        if (xIn >= 1 - zIn - inEps)
+        if (xIn >= 1 - zIn - inEps && !InTerrainHole(beg.X(), beg.Z()))
         {
             tRet = 0;
             return true;
@@ -2342,7 +2410,7 @@ bool Landscape::CheckIntersection(Vector3Par beg, Vector3Par end, int x, int z, 
 
             float xIn = nPos.X() * _invTerrainGrid - x; // relative 0..1 in square
             float zIn = nPos.Z() * _invTerrainGrid - z;
-            if (xIn <= 1 - zIn + inEps)
+            if (xIn <= 1 - zIn + inEps && !InTerrainHole(nPos.X(), nPos.Z()))
             {
                 tRet = t;
                 return true;
@@ -2360,7 +2428,7 @@ bool Landscape::CheckIntersection(Vector3Par beg, Vector3Par end, int x, int z, 
 
             float xIn = nPos.X() * _invTerrainGrid - x; // relative 0..1 in square
             float zIn = nPos.Z() * _invTerrainGrid - z;
-            if (xIn >= 1 - zIn - inEps)
+            if (xIn >= 1 - zIn - inEps && !InTerrainHole(nPos.X(), nPos.Z()))
             {
                 tRet = t;
                 return true;

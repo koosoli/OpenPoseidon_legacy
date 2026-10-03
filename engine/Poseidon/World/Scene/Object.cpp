@@ -632,6 +632,14 @@ bool Object::PublishConformPlane(const Shape* sShape, ConformPlane& saved)
     {
         return false;
     }
+    // Sinkhole W1: a decal-like shape down in a terrain hole (a footprint, crater or track on a cave or
+    // cellar floor) must lie on the hole's roadway, not on the terrain surface overhead. The GPU conform only
+    // knows the terrain, so decline and let the CPU fit (ClipDraw/ShapeLand -> DecalSurfaceY) place it.
+    // InTerrainHoleBelow costs nothing until a hole-cutting model has been seen.
+    if (GLandscape && GLandscape->InTerrainHoleBelow(Position(), 0.3f))
+    {
+        return false;
+    }
     ConformPlane cp;
     cp.active = true;
     cp.mode = 2;
@@ -2231,6 +2239,15 @@ bool Object::IsInside(Vector3Par pos, ObjIntersect type) const
 void Object::DrawDiags() {}
 
 void Object::InitSkew(Landscape* land) {}
+
+void Object::OnTerrainChanged(Landscape* /*land*/)
+{
+    // Only Move() cleared these, and the terrain-relative re-seat moves objects with SetPosition, so a
+    // conformed object kept the ground height it was first drawn on: after a terrain refinement or a
+    // stale subdivision cache, vegetation and fences floated or sank by the height difference.
+    _animBBoxLevel = -1;
+    _bcSurfaceYValid = false;
+}
 
 DEFINE_FAST_ALLOCATOR(ObjectPlain)
 

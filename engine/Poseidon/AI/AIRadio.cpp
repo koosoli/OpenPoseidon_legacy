@@ -1365,6 +1365,7 @@ LSError RadioMessage::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("priority", _priority, 1, 0))
     PARAM_CHECK(ar.Serialize("timeout", _timeOut, 1))
     PARAM_CHECK(ar.Serialize("playerMsg", _playerMsg, 1, false))
+    PARAM_CHECK(ar.Serialize("transmitted", _transmitted, 1, false))
     return LSOK;
 }
 
@@ -1567,7 +1568,7 @@ void RadioChannel::SilentProcess()
     {
         Ref<RadioMessage> msg = _messageQueue[0];
         _messageQueue.Delete(0);
-        if (msg->GetType() != RMTText)
+        if (msg->GetType() != RMTText && !msg->IsTransmitted())
         {
             msg->Transmitted();
         }
@@ -1610,7 +1611,8 @@ void RadioChannel::NextMessage()
     float pauseAfterMessage = 0;
     if ((!sender || sender != GWorld->FocusOn()) && _messageQueue.Size() <= 5)
     {
-        pauseAfterMessage = GRandGen.Gauss(0.1, 1.0, 5.0);
+        // gap between AI radio lines (was Gauss(0.1, 1.0, 5.0), up to 5 s of dead air)
+        pauseAfterMessage = GRandGen.Gauss(0.1, 0.35, 1.5);
     }
 
     if (_audible)

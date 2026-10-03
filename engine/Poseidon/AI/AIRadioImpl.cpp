@@ -1956,6 +1956,8 @@ LSError RadioMessageCommand::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("Command", _command, 1))
     PARAM_CHECK(ar.Serialize("toMainSubgrp", _toMainSubgroup, 1, false))
     PARAM_CHECK(ar.Serialize("transmit", _transmit, 1, true))
+    PARAM_CHECK(ar.Serialize("executed", _executed, 1, false))
+    PARAM_CHECK(ar.SerializeRef("confirmUnit", _confirmUnit, 1))
     return LSOK;
 }
 
@@ -2573,39 +2575,39 @@ const char* RadioMessageCommand::PrepareSentence(SentenceParams& params)
     return sentence;
 }
 
-void RadioMessageCommand::Transmitted()
+AIUnit* RadioMessageCommand::Apply()
 {
     if (!_transmit)
     {
-        return;
+        return nullptr;
     }
     // The serialized flag also guards later audio completion and reentrant confirmations.
     _transmit = false;
 
     if (!_from)
     {
-        return;
+        return nullptr;
     }
     if (!_from->Leader())
     {
-        return;
+        return nullptr;
     }
     if (_from->Leader()->GetLifeState() != AIUnit::LSAlive)
     {
-        return;
+        return nullptr;
     }
 
     if (!_command._target && !_command._targetE &&
         (_command._message == Command::Attack || _command._message == Command::AttackAndFire ||
          _command._message == Command::Fire))
     {
-        return;
+        return nullptr;
     }
     if (!_command._target && (_command._message == Command::GetIn || _command._message == Command::Heal ||
                               _command._message == Command::Repair || _command._message == Command::Refuel ||
                               _command._message == Command::Rearm || _command._message == Command::Support))
     {
-        return;
+        return nullptr;
     }
 
     bool confirm = _command._message != Command::NoCommand && _command._message != Command::Wait &&
@@ -2650,13 +2652,38 @@ void RadioMessageCommand::Transmitted()
         }
     }
 
-    if (unit)
+    return unit;
+}
+
+void RadioMessageCommand::ExecuteNow()
+{
+    if (_executed)
     {
-        if (!unit->IsAnyPlayer())
-        {
-            _from->GetRadio().Transmit(new RadioMessageCommandConfirm(unit, _from, _command),
-                                       _from->GetCenter()->GetLanguage());
-        }
+        return;
+    }
+    _executed = true;
+    _confirmUnit = Apply();
+}
+
+void RadioMessageCommand::Transmitted()
+{
+    // Normally the order was already carried out when it was issued, so the
+    // radio line only has to be followed by the unit's reply.
+    if (_replied)
+    {
+        return;
+    }
+    _replied = true;
+    AIUnit* confirmed = _confirmUnit;
+    AIUnit* unit = _executed ? confirmed : Apply();
+    if (!unit || !_from)
+    {
+        return;
+    }
+    if (!unit->IsAnyPlayer())
+    {
+        _from->GetRadio().Transmit(new RadioMessageCommandConfirm(unit, _from, _command),
+                                   _from->GetCenter()->GetLanguage());
     }
 }
 

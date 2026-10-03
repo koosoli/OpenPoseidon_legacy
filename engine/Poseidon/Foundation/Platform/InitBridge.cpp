@@ -73,6 +73,13 @@ bool InitLanguageAndConfig()
     // Calculate max groups from config
     MaxGroups = (Pars >> "CfgWorlds" >> "GroupNameList" >> "letters").GetSize() *
                 (Pars >> "CfgWorlds" >> "GroupColorList" >> "colors").GetSize();
+    constexpr int kMaxGroupsPerSide = 256;
+    // Group limit per side. The stock limit was letters x colours (9 x 7 = 63),
+    // because every group needed a unique "Alpha Black" style name. Names now
+    // repeat with a number ("Alpha Black 2"), so the limit is set by what the AI
+    // can simulate instead. 256 per side (Arma 3 allows 288).
+    if (MaxGroups > 0 && MaxGroups < kMaxGroupsPerSide)
+        MaxGroups = kMaxGroupsPerSide;
 
     // Initialize statistics system
     GStats.Init();

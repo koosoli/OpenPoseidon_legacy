@@ -56,6 +56,12 @@ pub enum TerrainPass {
 // Grid mesh resolution: GRID_N quads per axis, (GRID_N+1)^2 vertices, u16 indices.
 const GRID_N: u32 = 32;
 
+/// Sinkhole W1: the terrain hole buffer -- a vec4 header (x = edge count) + 64 vec4 edges, matching
+/// `TerrainHoles` in terrain.wgsl and grass.wgsl and the 64-edge cap of the GL33 path.
+pub const TERRAIN_HOLES_MAX_EDGES: usize = 64;
+pub const TERRAIN_HOLES_FLOATS: usize = 4 + TERRAIN_HOLES_MAX_EDGES * 4;
+pub const TERRAIN_HOLES_BYTES: u64 = (TERRAIN_HOLES_FLOATS * 4) as u64;
+
 // Capacity of the ground binding_array (and the device binding-array limit we
 // request). Must match WGR_TERRAIN_MAX_GROUND_LAYERS in wgpu_renderer.hpp.
 pub const TERRAIN_MAX_GROUND_LAYERS: u32 = 4096;
@@ -287,6 +293,11 @@ pub struct Terrain {
     // Actual mission deposit from the accepted snow header. Ground deficits contain tracks
     // and roof shelter and therefore must NEVER be applied to a raised object surface.
     snow_deposit_depth: f32,
+    holes_buffer: wgpu::Buffer,
+    // CPU copy of the hole edges (the grass placement keeps its own GPU copy) and a counter it
+    // watches to know when to refresh it.
+    holes_data: Vec<f32>,
+    holes_gen: u64,
     params: WgrTerrainParams,
     #[allow(dead_code)] // kept alive: group1_bind references its view
     heightmap: wgpu::Texture,
@@ -445,6 +456,18 @@ impl Terrain {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: wgpu::BufferSize::new((4 + 512 * 512) * 4),
+                    },
+                    count: None,
+                },
+                // Sinkhole W1: terrain hole edges (TerrainHoles in terrain.wgsl), read by the fragment
+                // stages only -- the colour, prepass and planar passes discard the same pixels.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(TERRAIN_HOLES_BYTES),
                     },
                     count: None,
                 },
@@ -645,6 +668,15 @@ impl Terrain {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let holes_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_terrain_holes"),
+            size: TERRAIN_HOLES_BYTES,
+            // UNIFORM too (Sinkhole W1b): the object shading reads the openings from the conform
+            // group, and the GPU-driven path has no fragment storage slot left for it.
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            // Zero-initialised by wgpu: info.x = 0, no holes.
+            mapped_at_creation: false,
+        });
         let group1_bind = make_group1(
             device,
             &group1_layout,
@@ -653,6 +685,7 @@ impl Terrain {
             &shadow_mask_view,
             &mask_sampler,
             &snow_buffer,
+            &holes_buffer,
         );
 
         // Sun-shadow sweep: uniform + compute pipeline + bind group. Range cap =
@@ -1053,6 +1086,9 @@ impl Terrain {
             params_ubo,
             snow_buffer,
             snow_deposit_depth: 0.0,
+            holes_buffer,
+            holes_data: vec![0.0; TERRAIN_HOLES_FLOATS],
+            holes_gen: 0,
             params: default_params,
             medium_source: Default::default(),
             heightmap,
@@ -1183,6 +1219,35 @@ impl Terrain {
         Some((&source.heights, params))
     }
 
+    /// Sinkhole W1: the terrain hole edges for this frame, `edges` = n x {nx, nz, d, last} in world X/Z
+    /// (Landscape::TerrainHoleDrawEdges). At most TERRAIN_HOLES_MAX_EDGES are kept; an empty slice clears them.
+    /// Writes only when the set changed, so a world without holes costs one comparison per frame.
+    pub fn set_holes(&mut self, queue: &wgpu::Queue, edges: &[f32]) {
+        let n = (edges.len() / 4).min(TERRAIN_HOLES_MAX_EDGES);
+        let mut data = vec![0.0f32; TERRAIN_HOLES_FLOATS];
+        if edges[..n * 4].iter().all(|v| v.is_finite()) {
+            data[0] = n as f32;
+            data[4..4 + n * 4].copy_from_slice(&edges[..n * 4]);
+        }
+        if data != self.holes_data {
+            queue.write_buffer(&self.holes_buffer, 0, bytemuck::cast_slice(&data));
+            self.holes_data = data;
+            self.holes_gen += 1;
+        }
+    }
+
+    pub fn holes_buffer(&self) -> &wgpu::Buffer {
+        &self.holes_buffer
+    }
+
+    pub fn holes_data(&self) -> &[f32] {
+        &self.holes_data
+    }
+
+    pub fn holes_gen(&self) -> u64 {
+        self.holes_gen
+    }
+
     pub fn set_heightmap(
         &mut self,
         device: &wgpu::Device,
@@ -1245,6 +1310,7 @@ impl Terrain {
             &mask_view,
             &self.mask_sampler,
             &self.snow_buffer,
+            &self.holes_buffer,
         );
         self.shadow_sweep_bind = make_sweep_bind(
             device,
@@ -1375,6 +1441,7 @@ impl Terrain {
                     &mview,
                     &self.mask_sampler,
                     &self.snow_buffer,
+                    &self.holes_buffer,
                 );
                 self.shadow_sweep_bind = make_sweep_bind(
                     device,
@@ -1895,6 +1962,7 @@ fn make_group1(
     mask_view: &wgpu::TextureView,
     mask_sampler: &wgpu::Sampler,
     snow_buffer: &wgpu::Buffer,
+    holes_buffer: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("wgr_terrain_group1_bind"),
@@ -1919,6 +1987,10 @@ fn make_group1(
             wgpu::BindGroupEntry {
                 binding: 4,
                 resource: snow_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: holes_buffer.as_entire_binding(),
             },
         ],
     })
@@ -2242,5 +2314,82 @@ mod enfusion_ground_tests {
         );
         // Zero-initialised, so no world that never sets it can take the branch.
         assert_eq!(std::mem::size_of::<WgrTerrainParams>(), 88);
+    }
+}
+
+#[cfg(test)]
+mod terrain_hole_tests {
+    use naga_oil::compose::NagaModuleDescriptor;
+
+    fn compose(source: &'static str, path: &'static str) {
+        let mut composer = crate::shaders::build_composer();
+        let module = composer.make_naga_module(NagaModuleDescriptor {
+            source,
+            file_path: path,
+            ..Default::default()
+        });
+        let module = match module {
+            Ok(m) => m,
+            Err(error) => panic!("{}", error.emit_to_string(&composer)),
+        };
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+            .validate(&module)
+            .expect("shader validates");
+    }
+
+    // Sinkhole W1: the hole test composes and validates in both shaders that use it.
+    #[test]
+    fn terrain_and_grass_compose_with_the_hole_test() {
+        compose(include_str!("terrain.wgsl"), "terrain/terrain.wgsl");
+        compose(include_str!("../grass/grass.wgsl"), "grass/grass.wgsl");
+    }
+
+    // The colour and prepass fragments must discard the same pixels, or the colour pass's depth-equal test
+    // would draw ground over a hole wherever the prepass wrote depth.
+    #[test]
+    fn colour_and_prepass_both_discard_inside_holes() {
+        let src = include_str!("terrain.wgsl");
+        let colour = src.split("fn fs_terrain(").nth(1).unwrap();
+        let prepass = src.split("fn fs_terrain_prepass(").nth(1).unwrap();
+        assert!(colour[..colour.find("dpdx").unwrap()].contains("in_terrain_hole(in.world_xz)"));
+        assert!(prepass[..400].contains("in_terrain_hole(in.world_xz)"));
+        assert!(src.contains("@group(1) @binding(5) var<storage, read> holes: TerrainHoles;"));
+    }
+
+    #[test]
+    fn grass_skips_holes_in_every_placement_pass() {
+        let src = include_str!("../grass/grass.wgsl");
+        assert_eq!(src.matches("if (in_terrain_hole(world_xz)) { return; }").count(), 3);
+        assert!(src.contains("@group(1) @binding(3) var<storage, read> holes: TerrainHoles;"));
+    }
+
+    // The underground sun test lives in the shared `shading` module; both object shaders that import it
+    // must still compose and validate (they bind the conform heightmap group it reads).
+    #[test]
+    fn object_shaders_compose_with_the_underground_sun_test() {
+        let src = include_str!("../shaders/shading.wgsl");
+        assert!(src.contains("let underground_s = 1.0 - cave.x;"));
+        assert!(src.contains("let underground_amb = mix(1.0, 0.03, underground_amb_s);"));
+        let conform = include_str!("../shaders/conform.wgsl");
+        assert!(conform.contains("fn cave_daylight(world: vec3<f32>) -> f32"));
+        assert!(conform.contains("fn cave_daylight2(world: vec3<f32>) -> vec2<f32>"));
+        assert!(conform.contains("@group(4) @binding(3) var<uniform> cave_openings: CaveOpenings;"));
+        assert!(src.contains("* leaf_cavity * underground_amb;"));
+        compose(include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl");
+        compose(include_str!("../gfx3d/gpu_driven.wgsl"), "gfx3d/gpu_driven.wgsl");
+    }
+
+    // A collapsed outline (zero-length edges) must never read as "inside everywhere".
+    #[test]
+    fn a_zero_length_edge_is_outside() {
+        for src in [include_str!("terrain.wgsl"), include_str!("../grass/grass.wgsl")] {
+            assert!(src.contains("if (dot(e.xy, e.xy) < 0.25 || e.x * xz.x + e.y * xz.y + e.z < 0.0) { inside = false; }"));
+        }
+    }
+
+    #[test]
+    fn the_hole_buffer_matches_the_shader_struct() {
+        // vec4 header + 64 vec4 edges
+        assert_eq!(super::TERRAIN_HOLES_BYTES, (16 + 64 * 16) as u64);
     }
 }

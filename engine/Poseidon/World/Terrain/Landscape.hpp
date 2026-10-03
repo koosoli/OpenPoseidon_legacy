@@ -1251,6 +1251,7 @@ class Landscape : public SerializeClass
 
   private:
     uint64_t _heightRevision = 0;
+    uint64_t _subdivSourceHash = 0; // hash of the heights a subdivision cache was / will be built from
 
   public:
     void TextureChange(int x, int z, int id);
@@ -1359,6 +1360,44 @@ class Landscape : public SerializeClass
     float BumpySurfaceY(float x, float z, float& rdX, float& rdZ, Texture*& texture, float bumpy, float& bump) const;
     float UnderRoadSurface(const Object* obj, Vector3Par pos, float bumpy, float* dX = nullptr, float* dZ = nullptr,
                            Texture** texture = nullptr) const;
+
+	// Sinkhole W1, ported from Malprave terrainHole1 (TerrainHoles.cpp): an object whose memory LOD has a "terrain_hole" (or "terrain_hole1" ..
+	// "terrain_hole8") selection cuts the ground away inside the convex XZ footprint of those points, if it also has a
+	// roadway LOD. Inside a hole the terrain gives no ground and the object's roadway (floor, stairs) is used instead.
+	struct TerrainHoleArea
+	{
+		int n = 0;
+		float x[16], z[16]; // world XZ, convex, counter-clockwise
+		float minX = 0, maxX = 0, minZ = 0, maxZ = 0;
+		float floorY = 0;   // terrainHole3: world height of the lowest point of the object's roadway
+		bool draw = true;   // terrainHole8: false = hidden hole (terrain_hole_hidden*), the terrain is still drawn there
+	};
+	// holes of the objects near pos (within radius), at most maxOut; returns the count
+	int GatherTerrainHoles(Vector3Par pos, float radius, TerrainHoleArea *out, int maxOut) const;
+	static bool InTerrainHoles(const TerrainHoleArea *holes, int n, float x, float z);
+	static int TerrainHoleIndex(const TerrainHoleArea *holes, int n, float x, float z); // terrainHole3, -1 = none
+	// terrainHole3: floorY (optional) = the hole's floor, the lowest point of the cutting object's roadway
+	bool InTerrainHole(float x, float z, float *floorY = nullptr) const;
+	// terrainHole2: edges {nx, nz, d, last} of the holes nearest camPos for the terrain shaders; returns the edge count
+	int TerrainHoleDrawEdges(Vector3Par camPos, float radius, float *edges, int maxEdges) const;
+	// terrainHole4: the lowest height a camera at pos may have: the terrain (aboveWater: or the sea), or inside a hole
+	// the hole's floor. A camera under the terrain outside every hole whose focus (optional) is under the terrain inside a
+	// hole (a 3rd person view swung into the earth around a cellar) is first moved back along the line to the focus.
+	float CameraFloorY(Vector3 &pos, const Vector3 *focus, bool aboveWater) const;
+	// terrainHole5: p is inside a terrain hole and more than depth below the terrain there (down in a cellar / stairwell)
+	bool InTerrainHoleBelow(Vector3Par p, float depth) const;
+	// terrainHole5: moving from -> to leaves a terrain hole sideways under the ground (into the earth)
+	bool LeavesTerrainHoleUnderground(Vector3Par from, Vector3Par to) const;
+	// terrainHole5: obj's model cuts a terrain hole
+	static bool CutsTerrainHole(const Object *obj);
+	// terrainHole6: the height a ground decal (footprint, track, crater, shadow) at x, z is fitted to. refY = the decal's
+	// own height: below the terrain inside a hole it lies on the hole's roadway under refY, otherwise on the terrain
+	float DecalSurfaceY(float x, float z, float refY) const;
+	// terrainHole6: the ground under p for tracks: the topmost roadway as before, or down in a hole the roadway under p
+	float TrackSurfaceY(Vector3Par p) const;
+	// terrainHole7: p is inside the room a hole-cutting object makes: within a hole outline, between the hole's floor
+	// (less 0.5 m) and the top of the object's bounding box (the cellar roof) - also where a roof stands above a slope
+	bool InTerrainHoleRoom(Vector3Par p) const;
 
     void SetSkyTexture(Texture* texture);
 

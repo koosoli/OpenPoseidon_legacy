@@ -182,7 +182,8 @@ class ForestPlain: public Object
 	bool _singleMatrixT1;
 	bool _singleMatrixT2;
 
-	float _skewX,_skewZ,_offsetY;
+	float _skewX = 0, _skewZ = 0, _offsetY = 0;
+	bool _skewApplied = false; // InitSkew appended its skew to the matrix (OnTerrainChanged undoes it)
 
 	// Cached terrain-conform plane (static per level: forest and terrain don't move),
 	// published around Draw so the wgpu backend conforms this forest on the GPU instead
@@ -195,6 +196,7 @@ class ForestPlain: public Object
 	ForestPlain( LODShapeWithShadow *type, int id );
 
 	void InitSkew( Landscape *land ) override; // call to prepare skew matrix
+	void OnTerrainChanged( Landscape *land ) override;
 
 	Matrix4 GetInvTransform() const override;
 

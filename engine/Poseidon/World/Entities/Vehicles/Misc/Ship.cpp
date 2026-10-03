@@ -8,6 +8,8 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
+#include <Poseidon/World/Entities/Infantry/SwimView.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
@@ -1202,36 +1204,92 @@ void Ship::Eject(AIUnit* unit)
     base::Eject(unit);
 }
 
-Vector3 Ship::GetDriverGetInPos(Person* person, Vector3Par upos) const
+// Where a crewman leaves the boat, or where someone climbs aboard. The classic rule
+// takes the model's get-in memory point and, because soldiers could not enter deep
+// water, pushes it to the nearest walkable field: in open water that is often 10 m
+// or more away. Soldiers swim now, so in deep water the point is put just outside
+// the hull instead: beside the door (the memory point) when getting out, and
+// wherever the swimmer is touching the hull when getting in.
+Vector3 Ship::PlaceGetInPos(Person* person, Vector3Par memPos, Vector3Par upos) const
 {
-    Vector3 pos = base::GetDriverGetInPos(person, upos);
+    const float deepWater = SwimStopDepth; // a soldier stands up in anything shallower
+    const float margin = 0.6f;      // a swimmer's shoulders from the hull side
+
+    Man* man = person ? dyn_cast<Man>(person) : nullptr;
+    bool swims = man && man->CanSwim();
+    bool swimming = person && person->IsSwimming();
+    if (swims && GLandscape && _shape)
+    {
+        // a swimmer boards where he is; anyone else leaves by the door
+        Vector3 from = swimming ? Vector3(upos) : Vector3(memPos);
+        float sea = SwimMeanWaterLevel(from.X(), from.Z());
+        if (sea - GLandscape->SurfaceY(from.X(), from.Z()) >= deepWater)
+        {
+            Vector3 m = PositionWorldToModel(from);
+            // the hull outline: the geometry LOD (the whole model's box also holds the
+            // memory points, the get-in points among them, which sit metres off the side)
+            const Shape* geom = _shape->GeometryLevel();
+            Vector3 mn = geom ? geom->Min() : _shape->Min();
+            Vector3 mx = geom ? geom->Max() : _shape->Max();
+            float x = m.X(), z = m.Z();
+            if (x > mn.X() && x < mx.X() && z > mn.Z() && z < mx.Z())
+            {
+                // inside the hull outline: out through the nearest side
+                float dl = x - mn.X(), dr = mx.X() - x, db = z - mn.Z(), df = mx.Z() - z;
+                float d = floatMin(floatMin(dl, dr), floatMin(db, df));
+                if (d == dl) x = mn.X() - margin;
+                else if (d == dr) x = mx.X() + margin;
+                else if (d == db) z = mn.Z() - margin;
+                else z = mx.Z() + margin;
+            }
+            else
+            {
+                // outside: the nearest point of the outline, a shoulder's width off it
+                float cx = floatMax(mn.X(), floatMin(mx.X(), x));
+                float cz = floatMax(mn.Z(), floatMin(mx.Z(), z));
+                float ox = x - cx, oz = z - cz;
+                float len = sqrtf(ox * ox + oz * oz);
+                if (len > margin)
+                {
+                    x = cx + ox * (margin / len);
+                    z = cz + oz * (margin / len);
+                }
+            }
+            Vector3 pos = PositionModelToWorld(Vector3(x, m.Y(), z));
+            float seaHere = SwimMeanWaterLevel(pos.X(), pos.Z());
+            if (seaHere - GLandscape->SurfaceY(pos.X(), pos.Z()) >= deepWater)
+            {
+                pos[1] = GLandscape->RoadSurfaceYAboveWater(pos[0], pos[2]);
+                return pos;
+            }
+            // the hull side is in the shallows: fall through to the walkable rule
+        }
+    }
+
+    Vector3 pos = memPos;
     AIUnit::FindNearestEmpty(pos, true, person);
     pos[1] = GLandscape->RoadSurfaceYAboveWater(pos[0], pos[2]);
     return pos;
+}
+
+Vector3 Ship::GetDriverGetInPos(Person* person, Vector3Par upos) const
+{
+    return PlaceGetInPos(person, base::GetDriverGetInPos(person, upos), upos);
 }
 
 Vector3 Ship::GetCommanderGetInPos(Person* person, Vector3Par upos) const
 {
-    Vector3 pos = base::GetCommanderGetInPos(person, upos);
-    AIUnit::FindNearestEmpty(pos, true, person);
-    pos[1] = GLandscape->RoadSurfaceYAboveWater(pos[0], pos[2]);
-    return pos;
+    return PlaceGetInPos(person, base::GetCommanderGetInPos(person, upos), upos);
 }
 
 Vector3 Ship::GetGunnerGetInPos(Person* person, Vector3Par upos) const
 {
-    Vector3 pos = base::GetGunnerGetInPos(person, upos);
-    AIUnit::FindNearestEmpty(pos, true, person);
-    pos[1] = GLandscape->RoadSurfaceYAboveWater(pos[0], pos[2]);
-    return pos;
+    return PlaceGetInPos(person, base::GetGunnerGetInPos(person, upos), upos);
 }
 
 Vector3 Ship::GetCargoGetInPos(Person* person, Vector3Par upos) const
 {
-    Vector3 pos = base::GetCargoGetInPos(person, upos);
-    AIUnit::FindNearestEmpty(pos, true, person);
-    pos[1] = GLandscape->RoadSurfaceYAboveWater(pos[0], pos[2]);
-    return pos;
+    return PlaceGetInPos(person, base::GetCargoGetInPos(person, upos), upos);
 }
 
 Vector3 Ship::GetCargoGetOutPos(Person* person) const

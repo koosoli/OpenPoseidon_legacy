@@ -125,6 +125,9 @@ protected:
 	float _formPosCoef;
 	CombatMode _combatModeMajor;
 	Foundation::Time _dangerUntil;
+	//! CWR fork: suppression from near misses (0 = none, 1 = pinned down)
+	float _suppression = 0;
+	Foundation::Time _suppressionTime; //!< time of the last near miss
 
 	// random from 0 to 1 - when to perform expensive think
 	int _expensiveThinkFrac; // frac in ms
@@ -258,6 +261,14 @@ public:
 	AIGroup* GetGroup() const;
 	bool IsDanger() const;
 	void SetDanger(float until = -1.0);
+	//! CWR fork: a round passed close by ('amount' already scaled by distance and calibre)
+	void AddSuppression(float amount, EntityAI* shooter);
+	//! Current suppression 0..1 (recovers over time)
+	float GetSuppression() const;
+	//! Suppressed enough to stay prone
+	bool IsPinnedDown() const;
+	//! Raise suppression without passing it on to the squad
+	void AddSuppressionDirect(float amount);
 
 	bool IsAway() const {return _isAway;}
 	void SetAway( bool val=true ) {/*_isAway=val;*/}

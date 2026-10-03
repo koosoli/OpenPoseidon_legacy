@@ -939,6 +939,8 @@ pub struct Renderer {
     // the camera the SKY pass chose, captured at the sky upload and consumed in run_tonemap.
     godrays: Option<GodRays>,
     godrays_frame: Option<GodRayFrame>,
+    // Sinkhole W1b: camera underground factor (0 open air .. 1 deep in a cave), wgr_set_camera_underground.
+    cam_underground: f32,
     // SMK-037 SOFT PARTICLES. The scene-depth snapshot the cloudlet billboards fade against,
     // plus the two live knobs the Smoke tab pushes. `soft_enabled` gates BOTH the snapshot pass
     // and the C++ side's choice of depth mode, so with it off nothing here is recorded, no
@@ -1050,6 +1052,15 @@ impl Drop for Renderer {
 }
 
 impl Renderer {
+    /// Sinkhole W1b: see wgr_set_camera_underground.
+    pub fn set_camera_underground(&mut self, underground: f32) {
+        let u = if underground.is_finite() { underground.clamp(0.0, 1.0) } else { 0.0 };
+        self.cam_underground = u;
+        if let Some(gr) = self.godrays.as_mut() {
+            gr.underground = u;
+        }
+    }
+
     fn new(desc: &ffi::WgrSurfaceDesc, log: LogSink) -> Result<Self, String> {
         let (raw_display_handle, raw_window_handle) = handles::build_handles(desc)?;
 
@@ -2054,6 +2065,7 @@ impl Renderer {
             },
             godrays,
             godrays_frame: None,
+            cam_underground: 0.0,
             smoke_volume,
             smoke_sun_dir: [0.0, 1.0, 0.0],
             smoke_sun_radiance: [1.0, 1.0, 1.0],
@@ -2876,7 +2888,7 @@ impl Renderer {
         self.tonemap
             .as_ref()
             .expect("tonemap")
-            .upload_params(&self.queue, &self.tonemap_params);
+            .upload_params(&self.queue, &self.tonemap_params, self.cam_underground);
         // Build the bloom pyramid from the finished HDR scene (already includes aerial
         // perspective) so the resolve can add it. Skipped when intensity is 0 (the
         // resolve then adds bloom*0, so stale mip contents are harmless).
@@ -2898,14 +2910,14 @@ impl Renderer {
         // when disabled it just eases to 1.0 — the reduction is a few cheap passes.
         let mut exposure_published=false;
         if let Some(exposure) = self.exposure.as_ref() {
-            exposure.upload_params(&self.queue, &self.exposure_params);
+            exposure.upload_params(&self.queue, &cave_exposure(self.exposure_params, self.cam_underground));
             self.gpu_timers.begin(encoder, TimerRegion::ExposureAdapt);
             exposure_published=exposure.render(encoder);
             self.gpu_timers.end(encoder, TimerRegion::ExposureAdapt);
         }
         if self.screenshot_requested {
             if let Some(state)=self.post_optics_probe.as_mut(){
-                let result=if !exposure_published{Err("exposure not published this encoder")}else if self.tonemap_params.nv_strength!=0.0{Err("night vision unsupported")}else{
+                let result=if !exposure_published{Err("exposure not published this encoder")}else if self.cam_underground>0.0{Err("underground tonemap unsupported by optics probe")}else if self.tonemap_params.nv_strength!=0.0{Err("night vision unsupported")}else{
                     self.tonemap.as_ref().ok_or("missing tonemap").and_then(|tone|self.exposure.as_ref().ok_or("missing exposure").and_then(|exposure|tone.probe(&self.device,encoder,exposure,state,(self.config.width,self.config.height))))
                 };
                 if let Err(reason)=result{state.pending=None;state.valid=false;self.log.log(log_level::WARN,&format!("PostOptics refused: {}",reason));}
@@ -3573,6 +3585,13 @@ impl Renderer {
     ) -> Result<bool, String> {
         if let Some(probe)=self.post_optics_probe.as_mut(){probe.begin();}
         if let Some(tuple)=self.main_camera_tuple.as_mut(){tuple.begin();} // Failed calls invalidate old completion.
+        // The GPU-resident (retained / GPU-driven) world objects are drawn by every presented frame unless
+        // suppressed, and the suppress latch is pushed only by World::Simulate. Frames presented from anywhere
+        // else -- the progress splash while a world unloads or switches, the exit path -- inherited the last
+        // world frame's `false` and drew the whole resident set from the stale camera over the black splash
+        // background: the island "goes black and all objects float" for a moment (owner report). A frame that
+        // submitted no terrain and no 3D draws has no world in it, so its resident objects stay hidden too.
+        let suppress_world_objects = self.suppress_world_objects || (terrain_batches.is_empty() && draws3d.is_empty());
         self.gfx3d.begin_geometry_pass_facts(shadow);
         let setup_t0 = std::time::Instant::now();
         // REN-THR-009 — before anything this frame reads `bake_bind_cache` or allocates
@@ -3968,6 +3987,7 @@ impl Renderer {
             heightmap_gen,
             &conform_params,
             self.terrain.snow_buffer(),
+            self.terrain.holes_buffer(),
             self.sky.froxel_view(),
             self.sky.sh_buffer(),
             &skyvis_view,
@@ -4677,7 +4697,7 @@ impl Renderer {
             let offset = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
             // REN-TEMP-001T: remembered for the velocity twin recorded in run_tonemap.
             self.main_cam_off = offset;
-            if !self.suppress_world_objects {
+            if !suppress_world_objects {
                 self.far.dispatch(
                     &self.queue,
                     &mut encoder,
@@ -5440,7 +5460,7 @@ impl Renderer {
                 // GPU-driven opaque set into the SAME depth+normal prepass (reuses this
                 // frame's cull out_args — the cull dispatch already ran before the passes).
                 // Writes depth + view-space normals so the set gets early-Z + SSAO normals.
-                if !self.suppress_world_objects {
+                if !suppress_world_objects {
                     let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
                     self.gfx3d.draw_gpu_driven_prepass(
                         &mut pp,
@@ -5695,7 +5715,7 @@ impl Renderer {
                 // draws (fences, glass) that read the framebuffer colour — those must blend
                 // against the GPU-driven objects behind them, not the background, so the
                 // GPU-driven colour has to be present first (else the sky shows through).
-                if start == 0 && !self.suppress_world_objects {
+                if start == 0 && !suppress_world_objects {
                     let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
                     main_world_draw_recorded = self.gfx3d.draw_gpu_driven(
                         &mut pass,
@@ -5754,7 +5774,7 @@ impl Renderer {
                 // actually show on top. When a post-water sub-pass follows, that one is the last
                 // world draw and they belong there instead.
                 if start == 0
-                    && !self.suppress_world_objects
+                    && !suppress_world_objects
                     && self.cull_debug_draw
                     && !has_post_water_3d
                 {
@@ -6254,7 +6274,7 @@ impl Renderer {
                     self.gpu_timers
                         .end_pass(&mut pass, TimerRegion::OpsPostWater);
                 }
-                if start == 0 && !self.suppress_world_objects && self.cull_debug_draw {
+                if start == 0 && !suppress_world_objects && self.cull_debug_draw {
                     let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
                     self.gfx3d.draw_cull_spheres(&mut pass, cam_off);
                 }
@@ -7226,3 +7246,47 @@ fn water_soak() -> Option<(u64, u32)> {
     })
 }
 static WATER_SOAK_FRAME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+// Sinkhole W1b: eye adaptation underground. The shipped profile keeps auto-exposure on a short
+// leash (a small max scale) so daylight never pumps; in a cave that leash is what keeps a
+// campfire or a flashlight from ever reading. With the camera underground the ceiling rises
+// toward WGR_CAVE_EXPOSURE_MAX (default 6) -- the eye opens in the dark and closes again at the
+// mouth, at the profile's own adaptation rate. Above ground the params are untouched.
+pub(crate) fn cave_exposure_max() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("WGR_CAVE_EXPOSURE_MAX")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or(6.0)
+    })
+}
+
+pub(crate) fn cave_exposure(mut ep: ffi::WgrExposure, underground: f32) -> ffi::WgrExposure {
+    let u = underground.clamp(0.0, 1.0);
+    if u > 0.0 {
+        let cave_max = cave_exposure_max().max(ep.max_scale);
+        ep.max_scale += (cave_max - ep.max_scale) * u;
+    }
+    ep
+}
+
+#[cfg(test)]
+mod cave_exposure_tests {
+    use super::*;
+
+    #[test]
+    fn cave_exposure_only_lifts_the_ceiling_underground() {
+        let mut ep = ffi::WgrExposure::default();
+        ep.max_scale = 1.1;
+        assert_eq!(cave_exposure(ep, 0.0).max_scale, 1.1);
+        let deep = cave_exposure(ep, 1.0).max_scale;
+        assert!((deep - cave_exposure_max().max(1.1)).abs() < 1e-6);
+        let half = cave_exposure(ep, 0.5).max_scale;
+        assert!(half > 1.1 && half < deep);
+        // a profile already above the cave ceiling is never lowered
+        ep.max_scale = 10.0;
+        assert_eq!(cave_exposure(ep, 1.0).max_scale, 10.0);
+    }
+}

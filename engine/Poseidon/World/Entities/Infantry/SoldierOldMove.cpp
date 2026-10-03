@@ -191,7 +191,7 @@ void Man::EmitGroundBootContact(bool left, SimulationImportance prec)
         float ys = GLandscape->SurfaceY(pos.X(), pos.Z());
         float yr = GLandscape->RoadSurfaceYAboveWater(pos);
         bool mudChanged = false, sandChanged = false;
-        if (yr <= ys + 0.2f)
+        if (yr <= ys + 0.2f && !GLandscape->InTerrainHoleBelow(pos, 0.3f))
         {
             mudChanged = StampMudFootstep(*GLandscape, *this, pos, Direction());
             sandChanged = StampSandFootstep(*GLandscape, *this, pos, Direction());

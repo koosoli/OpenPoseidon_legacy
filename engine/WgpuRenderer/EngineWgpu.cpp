@@ -3055,6 +3055,17 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
         wgr_terrain_set_sand(_renderer, p.sandData.data(), static_cast<uint32_t>(p.sandData.size()));
         p.sandData.clear();
     }
+    if (p.terrainHolesDirty)
+    {
+        wgr_terrain_set_holes(_renderer, p.terrainHoles.empty() ? nullptr : p.terrainHoles.data(),
+                              static_cast<uint32_t>(p.terrainHoles.size() / 4));
+        p.terrainHolesDirty = false;
+    }
+    if (p.cameraUndergroundDirty)
+    {
+        wgr_set_camera_underground(_renderer, p.cameraUnderground);
+        p.cameraUndergroundDirty = false;
+    }
     if (p.smokeDirty)
     {
         wgr_set_smoke_shadow(_renderer, p.smokeBlobs.empty() ? nullptr : p.smokeBlobs.data(),
@@ -8864,6 +8875,35 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         std::strstr(texture->Name(), "lldr_monitor.paa") != nullptr)
     {
         d.flags |= WGR_DRAW3D_MONITOR;
+    }
+    // MAT-053: a blended, depth-test-only section whose texture is MOSTLY SOLID. The renderer's
+    // depth prepass then lays depth for its fully solid texels. Two routes reach here: the
+    // back-to-front revisit of an object's blend sections (MAT-048 made it depth-test only), and
+    // a whole-alpha object (passNum 2) whose sections are NoZWrite -- spec_destrb_d's big1_r is
+    // one, every wall and floor on big2c.paa (95.4% a=255), and through it each storey showed the
+    // rooms behind and below it. The texture gate keeps real translucency out: glass is almost all
+    // partial alpha and smoke has no large solid body, so neither has 75% of its texels at 255.
+    const bool mostlySolidTexture = texture && texture->AlphaStatsView().pctOpaque >= 75.0;
+    if (d.blend == WGR_BLEND_ALPHA && d.depth == WGR_DEPTH_TEST &&
+        (render::GBlendSectionDepthReadOnly || mostlySolidTexture) &&
+        desc.surface != render::SurfaceMode::OnSurface)
+    {
+        d.flags |= WGR_DRAW3D_BLEND_SECTION;
+        // WGR_BLEND_PASS_TRACE=1 (the MAT-051 revisit trace) also names the textures MAT-053 flags.
+        static const bool trace = []
+        {
+            const char* v = std::getenv("WGR_BLEND_PASS_TRACE");
+            return v && *v == '1';
+        }();
+        if (trace && texture && texture->Name())
+        {
+            static std::unordered_set<std::string> logged;
+            if (logged.size() < 60 && logged.insert(texture->Name()).second)
+            {
+                LOG_WARN(Graphics, "MAT-053 blend section: tex={} alpha_ref={} offset={}", texture->Name(), d.alpha_ref,
+                         d.flags & (WGR_DRAW3D_ON_SURFACE | WGR_DRAW3D_ZBIAS_MASK));
+            }
+        }
     }
     if (desc.blend != render::BlendMode::Shadow)
     {
@@ -18764,6 +18804,69 @@ void EngineWgpu::SubmitGrass()
     _grassBatches.push_back(batch);
     _cmds.push_back(WgrCmd{WGR_CMD_DRAW_GRASS, U32(_grassBatches.size() - 1)});
     _grassSubmitted = true;
+}
+
+void EngineWgpu::SetTerrainHoles(const float* edges, int nEdges)
+{
+    // The landscape calls this with its set before the terrain draw and with nullptr after it (the GL33
+    // backend's state is global, so it must be switched off for everything else). Here the holes live in a
+    // buffer only the terrain and grass passes bind, so the reset is a no-op and the frame's set stands.
+    if (!_renderer || !edges)
+        return;
+    const int n = std::clamp(nEdges, 0, 64);
+    // One line whenever the hole set's size changes (entering / leaving a hole object's range), so a
+    // capture log shows whether the terrain and grass passes were handed any holes at all.
+    static int s_lastLogged = -1;
+    if (n != s_lastLogged)
+    {
+        s_lastLogged = n;
+        LOG_INFO(Graphics, "Wgpu terrain holes: {} edge(s) handed to the terrain and grass passes", n);
+    }
+    // REN-THR-013: queued like every other producer-side push and applied by the worker before the
+    // frame renders; calling the renderer from the landscape draw here raced the render thread.
+    _pendingSet.terrainHoles.assign(edges, edges + static_cast<size_t>(n) * 4);
+    _pendingSet.terrainHolesDirty = true;
+
+    // Sinkhole W1b: the same reach-from-the-openings rule conform.wgsl's cave_daylight2 applies per
+    // fragment, evaluated once at the camera, for the effects that belong to the camera rather than to a
+    // surface (sun shafts, eye adaptation). 0 above the ground; 1 deep under it.
+    float underground = 0.0f;
+    if (GScene && GLandscape && GScene->GetCamera())
+    {
+        const Vector3 cam = GScene->GetCamera()->Position();
+        const float depth = GLandscape->SurfaceY(cam.X(), cam.Z()) - cam.Y();
+        if (depth > 0.05f)
+        {
+            float nearest = 1.0e6f;
+            float outside = -1.0e6f;
+            bool valid = false;
+            for (int i = 0; i < n; i++)
+            {
+                const float* e = edges + i * 4;
+                if (e[0] * e[0] + e[1] * e[1] >= 0.25f)
+                {
+                    outside = std::max(outside, -(e[0] * cam.X() + e[1] * cam.Z() + e[2]));
+                    valid = true;
+                }
+                if (e[3] > 0.5f)
+                {
+                    if (valid)
+                        nearest = std::min(nearest, std::max(outside, 0.0f));
+                    outside = -1.0e6f;
+                    valid = false;
+                }
+            }
+            auto smooth = [](float a, float b, float x)
+            {
+                const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
+                return t * t * (3.0f - 2.0f * t);
+            };
+            const float ambient = 1.0f - smooth(1.0f, 9.0f, nearest + 0.35f * depth);
+            underground = smooth(0.05f, 0.25f, depth) * (1.0f - ambient);
+        }
+    }
+    _pendingSet.cameraUnderground = underground;
+    _pendingSet.cameraUndergroundDirty = true;
 }
 
 void EngineWgpu::SetGrassParams(float, float, float, float)

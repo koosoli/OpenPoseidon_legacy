@@ -344,6 +344,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
         return;
     }
     RestoreCargoStateAfterLoad();
+    UpdateFlashlight(); // Sinkhole W1b
     if (_ladderBuilding && _ladderIndex >= 0)
     {
         if (IsDammageDestroyed())
@@ -355,6 +356,13 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             SimLadderMovement(deltaT, prec);
         }
 
+        base::Simulate(deltaT, prec);
+        return;
+    }
+    // Sinkhole W3: in water too deep to stand the man swims (SoldierOldSwim.cpp)
+    if (UpdateSwimming())
+    {
+        SimSwimMovement(deltaT, prec);
         base::Simulate(deltaT, prec);
         return;
     }
@@ -546,6 +554,19 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             }
 
             moveTrans.SetPosition(position);
+        }
+
+        // Malprave terrainHole5: a man down in a terrain hole (a cellar) cannot leave it sideways under the ground. AI men
+        // and bodies do not collide with walls, so a dying slide or an explosion's push carried them out into the earth,
+        // where the terrain then lifted them to the surface. Keep the old X/Z (the vertical move still applies).
+        if (GLOB_LAND->LeavesTerrainHoleUnderground(Position(), moveTrans.Position()))
+        {
+            Vector3 held = moveTrans.Position();
+            held[0] = Position().X();
+            held[2] = Position().Z();
+            moveTrans.SetPosition(held);
+            _speed[0] = 0;
+            _speed[2] = 0;
         }
 
         const MoveInfo* priInfo = Type()->GetMoveInfo(_primaryMove.id);

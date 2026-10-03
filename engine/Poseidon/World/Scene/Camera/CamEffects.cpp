@@ -156,7 +156,8 @@ CameraEffectStatic::CameraEffectStatic(Object* object, CamEffectPosition pos, bo
     PoseidonAssert(object);
     _transform.SetOrientation(M3Identity);
     Vector3 position = _object->PositionModelToWorld(BaseDir[pos] * _object->OutsideCameraDistance(CamGroup));
-    float surfaceY = GLandscape->SurfaceYAboveWater(position.X(), position.Z());
+    Vector3 focus = _object->Position();
+    float surfaceY = GLandscape->CameraFloorY(position, &focus, true); // terrainHole4: may be below ground in a hole
     saturateMax(position[1], surfaceY);
     _transform.SetPosition(position);
 }
@@ -463,7 +464,8 @@ void CameraEffectInterpolated::Simulate(float deltaT)
             Vector3 cPosition = _object->Transform() * (camTransform.Position() - obc);
             Vector3 tPosition = _object->Transform() * (tgtTransform.Position() - obc);
 
-            float cSurfaceY = GLandscape->SurfaceYAboveWater(cPosition.X(), cPosition.Z());
+            Vector3 cFocus = _object->Position();
+            float cSurfaceY = GLandscape->CameraFloorY(cPosition, &cFocus, true); // terrainHole4
             saturateMax(cPosition[1], cSurfaceY);
             _transform.SetDirectionAndUp(tPosition - cPosition, VUp);
             _transform.SetPosition(cPosition);

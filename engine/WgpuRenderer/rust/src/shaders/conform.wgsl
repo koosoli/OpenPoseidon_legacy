@@ -29,6 +29,66 @@ struct SnowData {
 };
 @group(4) @binding(2) var<storage, read> snow: SnowData;
 
+// Sinkhole W1b: the terrain's OPEN holes (cave mouths, stairwells -- the same edges the terrain pass
+// discards, see terrain.wgsl TerrainHoles): edges[i] = {nx, nz, d, last}, inside an area when
+// nx*x + nz*z + d >= 0 for all its edges. Uniform (the GPU-driven path has no storage slot left).
+struct CaveOpenings {
+    info: vec4<f32>, // x = edge count
+    edges: array<vec4<f32>, 64>,
+};
+@group(4) @binding(3) var<uniform> cave_openings: CaveOpenings;
+
+// How much daylight reaches a point under the terrain, as (direct sun, sky/bounce ambient):
+// (1, 1) in the open, (0, 0) deep in a cave.
+//
+// Light enters a cave only through its openings. DIRECT sun falls straight through an opening's footprint and
+// nowhere else -- a cave roof a few metres from a stairwell is still under rock, and must not catch the sun
+// (or the shadows of the grass on the ground above it). What spreads from an opening into the cave is the soft
+// sky and bounce light: that fades with how far a point reaches into the cave from the nearest opening --
+// horizontally, and more slowly with depth straight under one. The same idea as DayZ's underground transition
+// triggers, derived from the hole geometry instead of authored per cave. Above the terrain, and in the thin
+// 0.05-0.25 m contact band under it, nothing changes.
+fn cave_daylight2(world: vec3<f32>) -> vec2<f32> {
+    if (hm_params.enabled < 0.5) {
+        return vec2<f32>(1.0, 1.0);
+    }
+    let depth = surface_y(world.xz) - world.y;
+    if (depth <= 0.05) {
+        return vec2<f32>(1.0, 1.0);
+    }
+    // Distance in xz to the nearest opening: for a convex outline, the largest outward edge distance
+    // (0 inside it). A collapsed outline (zero-length normals) is skipped, never "inside everywhere".
+    var nearest = 1.0e6;
+    var outside = -1.0e6;
+    var valid = false;
+    let n = min(u32(max(cave_openings.info.x, 0.0)), 64u);
+    for (var i = 0u; i < n; i = i + 1u) {
+        let e = cave_openings.edges[i];
+        if (dot(e.xy, e.xy) >= 0.25) {
+            outside = max(outside, -(e.x * world.x + e.y * world.z + e.z));
+            valid = true;
+        }
+        if (e.w > 0.5) {
+            if (valid) {
+                nearest = min(nearest, max(outside, 0.0));
+            }
+            outside = -1.0e6;
+            valid = false;
+        }
+    }
+    let under = smoothstep(0.05, 0.25, depth);
+    // direct: inside an opening's footprint (with a 0.3 m soft edge), fading over the first 12 m of depth
+    let direct = (1.0 - smoothstep(0.0, 0.3, nearest)) * (1.0 - smoothstep(4.0, 12.0, depth));
+    // ambient: the reach from the nearest opening
+    let ambient = 1.0 - smoothstep(1.0, 9.0, nearest + 0.35 * depth);
+    return vec2<f32>(mix(1.0, direct, under), mix(1.0, ambient, under));
+}
+
+// The ambient part alone (reflections, GI): see cave_daylight2.
+fn cave_daylight(world: vec3<f32>) -> f32 {
+    return cave_daylight2(world).y;
+}
+
 // Same buffer and evaluation as terrain.wgsl. The source parity test keeps this
 // sampling identical despite the different bind-group locations of both pipelines.
 fn snow_depth(world_xz: vec2<f32>) -> f32 {

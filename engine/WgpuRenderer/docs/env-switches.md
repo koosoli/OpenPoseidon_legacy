@@ -89,6 +89,27 @@ Read by the game engine, not by `engine/WgpuRenderer/`, so the scan below does n
 | `POSEIDON_BOAT_DIAG` | `World/Entities/Vehicles/Misc/Ship.cpp` | Once a second per boat: position, forward speed, thrust, brake. Since TW-WATER W11d also a `Boat buoyancy` line: water contact points, their submersion (sum, mean, mean against the flat sea), the planing gain, total buoyancy / weight, height and sea level. Logging only. |
 | `POSEIDON_INFANTRY_DROWN` | `World/Entities/Infantry/SoldierOldSim.cpp` | TW-WATER W12c. `1` restores the legacy drowning damage: AI soldiers standing deeper than 1.2 m (0.6 m prone) lose health until they die (the player was always exempt). Off by default at the owner's request until swimming is added. |
 
+## Switches added or changed by FIXES-20261003 and Sinkhole W1b / W3
+
+See `docs/roadmap/decisions/FIXES-20261003.md`.
+
+| Switch | Read by | Notes |
+| --- | --- | --- |
+| `WGR_BLEND_SOLID_DEPTH` | Rust | MAT-053. `0` turns off the depth-writing first draw of a mostly-solid blend section (texture >= 75% a=255; only its texels at alpha >= 0.98 write depth). On by default. |
+| `WGR_BLEND_PASS_TRACE` | Engine (`SceneDraw.cpp`) + C++ bridge | MAT-051 revisit trace; since MAT-053 also names each texture that gets the `WGR_DRAW3D_BLEND_SECTION` flag. Diagnostic only. |
+| `POSEIDON_NET_DEPTH` | C++ bridge | MAT-NET-001. **Default changed to on** (netting as a depth-writing cutout); `0` restores the blended path. |
+| `POSEIDON_SP3X_ADAPTER` | Engine (`ShapeDraw.cpp`) | FIX-SP3X-001. `1` sends OFP SP3X MLODs through `ShapeAdapter` instead of the original loader (the adapter tears skinned soldiers -- fml_vorhees). |
+| `WGR_CAVE_EXPOSURE_MAX` | Rust | Sinkhole W1b. Exposure ceiling the eye adapts toward with the camera underground (default 6); above ground the profile's own ceiling. |
+| `WGR_CAVE_DESPECKLE` | Rust | Sinkhole W1b. `0` turns off the underground despeckle in the tonemap (a pixel more than 3x brighter than all eight neighbours takes the brightest neighbour; hides model pinhole cracks). |
+| `POSEIDON_FLASHLIGHT` | Engine (`SoldierOldFlashlight.cpp`) | Sinkhole W1b. `0` disables the soldiers' handheld test flashlight. |
+| `POSEIDON_FLASHLIGHT_AI_NIGHT` | Engine (`SoldierOldFlashlight.cpp`) | Sinkhole W1b. `1` lets AI switch the flashlight on at night when not cautious (underground they always do). Off so legacy night missions are unchanged. |
+| `POSEIDON_SWIM` | Engine (`SoldierOldSwim.cpp`) | Sinkhole W3. `0` turns swimming off (men walk the sea bed as before). Swimming also needs the swim moves in the config (the local swim addon). |
+| `POSEIDON_SWIM_SPLASH` | Engine (`SoldierOldSwim.cpp`) | Sinkhole W3. `0` turns off the swimmers' hand and foot splashes (water-interaction kind 6, drawn by the Tidewater water). |
+| `POSEIDON_SWIM_DRAWN` | Engine (`SoldierOldSwim.cpp`) | Sinkhole W3. `0`: swimmers near the camera ride the CPU wave predictor instead of the Tidewater surface as drawn (the probe grid, `wgr_water_drawn_grid`). |
+| `POSEIDON_SWIM_LOG` | Engine (`SoldierOldSwim.cpp`) | Sinkhole W3. Set: logs the player's swim heights (surface, eyes, limbs) and camera four times a second. |
+| `POSEIDON_AI_SUPPRESSION_LOG` | Engine (`AIUnitImpl.cpp`) | AI-PORT A. `1` logs every near miss that suppresses an AI soldier (level before/after, shooter, pinned). |
+| `POSEIDON_AI_HUNT_LOG` | Engine (`AIHunt.cpp`) | AI-PORT B. `1` logs hunting phase changes, why a soldier is blocked or idle, and hand grenades thrown or refused by the group interval. |
+
 ## Regenerating
 
 This table is derived, not maintained by hand. Re-scan with:

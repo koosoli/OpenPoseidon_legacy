@@ -319,6 +319,36 @@ TEST_CASE("COL-001: MLOD `autocenter=0` is honoured by the adapter, not only by 
     REQUIRE(shape->Mass() >= 10.0f);
 }
 
+TEST_CASE("SINKHOLE W1: MLOD `autocenter=0` on the GEOMETRY LOD only survives Model::compile",
+          "[ShapeAdapter][MLOD][autocenter][sinkhole]")
+{
+    // Oxygen and OFP-era models keep `autocenter=0` on the geometry LOD alone. The game loads MLOD through
+    // ModelCache, which runs Model::compile before the adapter; compile checked only the first LOD, recentred
+    // the vertices, and the adapter (which reads the geometry LOD) recorded no offset -- a shift baked into the
+    // model. The fixture box spans y 0..3; with the property honoured it must stay there.
+    auto model = MLODLoader::load(GET_FIXTURE("mlod/p3dm_geometry_mass.p3d"));
+    bool tagged = false;
+    for (auto& lod : model.lodLevels)
+    {
+        if (lod.purpose != Poseidon::Model::LodPurpose::Geometry)
+            continue;
+        Poseidon::Model::NamedProperty property;
+        property.name = "autocenter";
+        property.value = "0";
+        lod.mesh.properties.push_back(property);
+        tagged = true;
+    }
+    REQUIRE(tagged);
+    REQUIRE(model.compile());
+    std::unique_ptr<LODShapeWithShadow> shape(Poseidon::Model::ShapeAdapter::convertToLODShape(model, false));
+    REQUIRE(shape != nullptr);
+    REQUIRE(shape->BoundingCenter().SquareSize() == Catch::Approx(0.0f).margin(1e-8f));
+    Shape* geom = shape->GeometryLevel();
+    REQUIRE(geom != nullptr);
+    REQUIRE(geom->Min().Y() == Catch::Approx(0.0f).margin(1e-5f));
+    REQUIRE(geom->Max().Y() == Catch::Approx(3.0f).margin(1e-5f));
+}
+
 TEST_CASE("COL-001: a real model from a local corpus collides",
           "[ShapeAdapter][collision][COL-001][corpus]")
 {

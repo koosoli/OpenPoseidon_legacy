@@ -1959,9 +1959,15 @@ static void CheckGetInWalk(AISubgroupContext* context)
         {
             CollisionBuffer collision;
             Vector3 posDExact = GetGetInPoint(leader, vehInto);
-            if ((posL - posDExact).CosAngle(posDExact - vehInto->Position()) > cos(0.25 * H_PI))
+            // a swimmer's origin is under the surface; test from the surface
+            Vector3 posLCheck = posL;
+            if (leader->GetPerson() && leader->GetPerson()->IsSwimming())
             {
-                GLandscape->ObjectCollision(collision, vehicle, nullptr, posL, posDExact, 0, ObjIntersectGeom);
+                posLCheck[1] = posDExact[1];
+            }
+            if ((posLCheck - posDExact).CosAngle(posDExact - vehInto->Position()) > cos(0.25 * H_PI))
+            {
+                GLandscape->ObjectCollision(collision, vehicle, nullptr, posLCheck, posDExact, 0, ObjIntersectGeom);
                 if (collision.Size() == 0)
                 {
                     if (vehInto->QCanIGetInAny(leader->GetPerson()))

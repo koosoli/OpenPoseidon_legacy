@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICostAccum.hpp> // PERF-014
@@ -2044,76 +2045,167 @@ PackedBoolArray AISubgroup::GetUnitsList()
     return result;
 }
 
-AIUnit* AISubgroup::GetFormationPrevious(AIUnit* unit) const
+bool AISubgroup::IsConvoyMember(const AIUnit* u) const
 {
-    // find convoy precedestor
-    AIUnit* maxUnit = nullptr;
+    if (!u || u == Leader() || !u->IsUnit())
+    {
+        return false;
+    }
+    // cautious vehicles follow formation, not convoy
+    EntityAI* veh = u->GetVehicle();
+    return veh && !veh->IsCautious();
+}
+
+// OFP ordered a convoy by group number: unit 2 follows the leader, 3 follows 2, and so on.
+// Vehicles placed in any other order (in the editor, or after one got stuck) first had to
+// sort themselves out -- the front ones stopping, the rear ones overtaking through the
+// verges -- while everybody else crawled, because each vehicle also waits for the one
+// behind it. Order them by where they are instead: nearest the leader goes first.
+//
+// Rebuilt from scratch whenever the set of vehicles changes. Otherwise, every 2 s,
+// neighbours swap only when the rear one is clearly (15 m) nearer the leader, so two
+// vehicles side by side cannot flip-flop.
+void AISubgroup::UpdateConvoyOrder() const
+{
     AIUnit* leader = Leader();
-    int maxID = 0;
+    const float now = Glob.time.toFloat();
+
+    std::vector<AIUnit*> members;
     for (int i = 0; i < NUnits(); i++)
     {
         AIUnit* u = GetUnit(i);
-        if (!unit || u == unit || u == leader)
+        if (IsConvoyMember(u))
         {
-            continue;
-        }
-        if (!u->IsUnit())
-        {
-            continue;
-        }
-        // cautious vehicles follow formation, not convoy
-        EntityAI* veh = u->GetVehicle();
-        if (veh->IsCautious())
-        {
-            continue;
-        }
-        int id = u->ID();
-        if (id > maxID && id < unit->ID())
-        {
-            maxID = u->ID();
-            maxUnit = u;
+            members.push_back(u);
         }
     }
 
-    // if we do not know whom to follow, follow leader
-    if (!maxUnit)
+    auto findUnit = [&](int id) -> AIUnit*
     {
-        maxUnit = Leader();
+        for (AIUnit* u : members)
+        {
+            if (u->ID() == id)
+            {
+                return u;
+            }
+        }
+        return nullptr;
+    };
+    auto distToLeader = [&](AIUnit* u) -> float
+    {
+        if (!leader || !leader->GetVehicle())
+        {
+            return float(u->ID()); // no leader position: keep group-number order
+        }
+        return u->GetVehicle()->Position().DistanceXZ(leader->GetVehicle()->Position());
+    };
+
+    bool sameSet = members.size() == _convoyOrder.size();
+    for (size_t i = 0; sameSet && i < _convoyOrder.size(); i++)
+    {
+        sameSet = findUnit(_convoyOrder[i]) != nullptr;
     }
-    return maxUnit;
+
+    if (!sameSet)
+    {
+        std::vector<std::pair<float, int>> keyed;
+        for (AIUnit* u : members)
+        {
+            keyed.emplace_back(distToLeader(u), u->ID());
+        }
+        std::sort(keyed.begin(), keyed.end());
+        _convoyOrder.clear();
+        for (const auto& k : keyed)
+        {
+            _convoyOrder.push_back(k.second);
+        }
+        _convoyOrderTime = now;
+        return;
+    }
+
+    if (now - _convoyOrderTime < 2.0f)
+    {
+        return;
+    }
+    _convoyOrderTime = now;
+    const float hysteresis = 15.0f;
+    for (size_t i = 0; i + 1 < _convoyOrder.size(); i++)
+    {
+        AIUnit* front = findUnit(_convoyOrder[i]);
+        AIUnit* back = findUnit(_convoyOrder[i + 1]);
+        if (front && back && distToLeader(back) + hysteresis < distToLeader(front))
+        {
+            std::swap(_convoyOrder[i], _convoyOrder[i + 1]);
+        }
+    }
+}
+
+AIUnit* AISubgroup::GetFormationPrevious(AIUnit* unit) const
+{
+    // find convoy predecessor; if we do not know whom to follow, follow leader
+    if (unit && IsConvoyMember(unit))
+    {
+        UpdateConvoyOrder();
+        for (size_t i = 0; i < _convoyOrder.size(); i++)
+        {
+            if (_convoyOrder[i] != unit->ID())
+            {
+                continue;
+            }
+            for (size_t j = i; j-- > 0;)
+            {
+                for (int k = 0; k < NUnits(); k++)
+                {
+                    AIUnit* u = GetUnit(k);
+                    if (u && u->ID() == _convoyOrder[j] && IsConvoyMember(u))
+                    {
+                        return u;
+                    }
+                }
+            }
+            break;
+        }
+    }
+    return Leader();
 }
 
 AIUnit* AISubgroup::GetFormationNext(AIUnit* unit) const
 {
     // find convoy successor
-    AIUnit* minUnit = nullptr;
-    AIUnit* leader = Leader();
-    int minID = INT_MAX;
-    for (int i = 0; i < NUnits(); i++)
+    if (!unit)
     {
-        AIUnit* u = GetUnit(i);
-        if (!unit || u == unit || u == leader)
+        return nullptr;
+    }
+    UpdateConvoyOrder();
+    size_t from = 0;
+    if (unit != Leader())
+    {
+        size_t i = 0;
+        for (; i < _convoyOrder.size(); i++)
         {
-            continue;
+            if (_convoyOrder[i] == unit->ID())
+            {
+                break;
+            }
         }
-        if (!u->IsUnit())
+        if (i == _convoyOrder.size())
         {
-            continue;
+            return nullptr; // not in the convoy (cautious, cargo ...)
         }
-        // cautious vehicles follow formation, not convoy
-        EntityAI* veh = u->GetVehicle();
-        if (veh->IsCautious())
+        from = i + 1;
+    }
+    for (size_t j = from; j < _convoyOrder.size(); j++)
+    {
+        for (int k = 0; k < NUnits(); k++)
         {
-            continue;
-        }
-        int id = u->ID();
-        if (id < minID && id > unit->ID())
-        {
-            minID = u->ID();
-            minUnit = u;
+            AIUnit* u = GetUnit(k);
+            if (u && u->ID() == _convoyOrder[j] && IsConvoyMember(u))
+            {
+                return u;
+            }
         }
     }
-    return minUnit;
+    return nullptr;
 }
 
 void AISubgroup::UpdateFormationPos()

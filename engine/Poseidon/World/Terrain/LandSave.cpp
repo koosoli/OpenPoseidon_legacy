@@ -501,6 +501,17 @@ __forceinline float Bilint(float y00, float y01, float y10, float y11, float xf,
     return y0z * (1 - xf) + y1z * xf;
 }
 
+// The ground height the terrain-relative re-seat uses. SurfaceY answers YOutsideMap (-100 m) for any point in the
+// LAST terrain row/column (its +1 neighbour is off the map), so an object standing in that edge strip was
+// re-seated against -100 m on one side of a terrain change and the real ground on the other -- moved by up to
+// height + 100 m. Clamp the lookup into the last full cell instead; both passes use it, so the object keeps
+// exactly its height above the ground it actually stands on.
+static float ReseatSurfaceY(const Landscape& land, float x, float z)
+{
+    const float maxCoord = (land.GetTerrainRange() - 1) * land.GetTerrainGrid() - 0.01f;
+    return land.SurfaceY(std::clamp(x, 0.0f, maxCoord), std::clamp(z, 0.0f, maxCoord));
+}
+
 void Landscape::MakeObjectsTerrainRelative()
 {
     // make Y of all objects relative to terrain level
@@ -523,7 +534,7 @@ void Landscape::MakeObjectsTerrainRelative()
                 LODShape* shape = obj->GetShape();
                 Vector3 pos = obj->Position();
                 Vector3 bcWorld = (shape ? obj->PositionModelToWorld(-shape->BoundingCenter()) : pos);
-                float surfY = SurfaceY(bcWorld.X(), bcWorld.Z());
+                float surfY = ReseatSurfaceY(*this, bcWorld.X(), bcWorld.Z());
                 pos[1] -= surfY;
                 obj->SetPosition(pos);
                 // note: list bounding box may change - we will take care of it later
@@ -550,14 +561,23 @@ void Landscape::MakeObjectsTerrainAbsolute()
                     }
                     if (dyn_cast<ForestPlain>(obj))
                     {
+                        // Y is not re-seated (a forest square follows the terrain through its conform
+                        // plane / skew), but those were derived from the old heights: rebuild them, and
+                        // let the retained GPU instance pick the new plane up.
+                        obj->OnTerrainChanged(this);
+                        if (GEngine)
+                        {
+                            GEngine->SceneObjectMoved(obj);
+                        }
                         continue;
                     }
                     LODShape* shape = obj->GetShape();
                     Vector3 pos = obj->Position();
                     Vector3 bcWorld = (shape ? obj->PositionModelToWorld(-shape->BoundingCenter()) : pos);
-                    float surfY = SurfaceY(bcWorld.X(), bcWorld.Z());
+                    float surfY = ReseatSurfaceY(*this, bcWorld.X(), bcWorld.Z());
                     pos[1] += surfY;
                     obj->SetPosition(pos);
+                    obj->OnTerrainChanged(this);
                     // note: we will need to recalc. bbox - see StaticChanged()
                     // GPU-driven retained scene: this terrain-relative re-seat is the ONE mover
                     // of static objects that bypasses MoveObject (every heightfield change —
@@ -1045,7 +1065,30 @@ void Landscape::SubdivideTerrain(int subdivStepLog)
 
 // Subdivision cache file format: magic + version + params + raw heightmap data
 static const uint32_t SUBDIV_CACHE_MAGIC = 0x53444356; // "SDCV"
-static const uint32_t SUBDIV_CACHE_VERSION = 1;
+// v2: + a hash of the SOURCE heights the cache was subdivided from, and the level. v1 caches were
+// accepted whenever the land range and grid matched -- which every OFP/CWA island shares -- so a cache
+// built by an older terrain decoder or from another eden.wrp replaced the whole terrain silently, and
+// everything not re-seated (forests, cached conform heights) floated or sank. Bumping the version
+// retires every v1 cache once.
+static const uint32_t SUBDIV_CACHE_VERSION = 2;
+
+// FNV-1a 64 over the raw heights, plus the dimensions
+template <class Data> static uint64_t HashTerrainHeights(const Data& data, int range)
+{
+    uint64_t h = 1469598103934665603ull;
+    auto mix = [&h](const void* p, size_t n)
+    {
+        const unsigned char* b = static_cast<const unsigned char*>(p);
+        for (size_t i = 0; i < n; ++i)
+        {
+            h ^= b[i];
+            h *= 1099511628211ull;
+        }
+    };
+    mix(&range, sizeof(range));
+    mix(data.RawData(), static_cast<size_t>(range) * static_cast<size_t>(range) * sizeof(RawType));
+    return h;
+}
 
 static std::string GetSubdivCachePath(const char* wrpName, int targetSubdivLog)
 {
@@ -1065,6 +1108,12 @@ static std::string GetSubdivCachePath(const char* wrpName, int targetSubdivLog)
 
 bool Landscape::LoadSubdivCache(int targetSubdivLog)
 {
+    // the heights this subdivision starts from: SaveSubdivCache stamps them, a load must match them
+    _subdivSourceHash = HashTerrainHeights(_data, _terrainRange);
+    if (_name.GetLength() == 0)
+    {
+        return false; // an unnamed world has no stable cache key (cwr_subdiv__L*.cache was shared)
+    }
     std::string path = GetSubdivCachePath(_name, targetSubdivLog);
     FILE* f = OpenFileUtf8(path.c_str(), "rb");
     if (!f)
@@ -1079,9 +1128,17 @@ bool Landscape::LoadSubdivCache(int targetSubdivLog)
               fread(&cachedLandRangeLog, 4, 1, f) == 1 && fread(&cachedLandGrid, 4, 1, f) == 1 &&
               fread(&cachedTerrainRange, 4, 1, f) == 1 && fread(&cachedTerrainRangeLog, 4, 1, f) == 1 &&
               fread(&cachedTerrainGrid, 4, 1, f) == 1;
+    uint64_t cachedSourceHash = 0;
+    int32_t cachedLevel = -1;
+    ok = ok && fread(&cachedSourceHash, 8, 1, f) == 1 && fread(&cachedLevel, 4, 1, f) == 1;
 
-    if (!ok || cachedLandRange != _landRange || cachedLandRangeLog != _landRangeLog || cachedLandGrid != _landGrid)
+    if (!ok || cachedLandRange != _landRange || cachedLandRangeLog != _landRangeLog || cachedLandGrid != _landGrid ||
+        cachedSourceHash != _subdivSourceHash || cachedLevel != targetSubdivLog)
     {
+        if (ok)
+        {
+            LOG_INFO(Core, "LOAD: SubdivCache {} is stale (source heights or level differ): rebuilding", path);
+        }
         fclose(f);
         return false;
     }
@@ -1122,6 +1179,10 @@ bool Landscape::LoadSubdivCache(int targetSubdivLog)
 
 void Landscape::SaveSubdivCache(int targetSubdivLog)
 {
+    if (_name.GetLength() == 0)
+    {
+        return;
+    }
     std::string path = GetSubdivCachePath(_name, targetSubdivLog);
     FILE* f = OpenFileUtf8(path.c_str(), "wb");
     if (!f)
@@ -1139,6 +1200,9 @@ void Landscape::SaveSubdivCache(int targetSubdivLog)
     fwrite(&_terrainRange, 4, 1, f);
     fwrite(&_terrainRangeLog, 4, 1, f);
     fwrite(&_terrainGrid, 4, 1, f);
+    const int32_t level = targetSubdivLog;
+    fwrite(&_subdivSourceHash, 8, 1, f); // v2: set by the LoadSubdivCache miss that preceded this save
+    fwrite(&level, 4, 1, f);
 
     size_t dataBytes = _terrainRange * _terrainRange * sizeof(RawType);
     size_t written = fwrite(_data.RawData(), 1, dataBytes, f);

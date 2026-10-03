@@ -35,7 +35,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 19u // Paired fine rainfall/source receipt entry points; matched engine/DLL required
+#define WGR_ABI_VERSION 20u // Paired cave/hole/swimmer APIs and distinct blend-section flag
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -311,7 +311,12 @@ enum WgrDraw3DFlags : uint32_t
     WGR_DRAW3D_SNOW_RECEIVER = 2048,
     /* Static owned rigid ground candidate; fragment must prove bare-terrain proximity
      * and physical rain cover. No change to alpha, geometry or struct layout. */
-    WGR_DRAW3D_GROUND_RECEIVER = 4096
+    WGR_DRAW3D_GROUND_RECEIVER = 4096,
+    /* MAT-053: an object's translucent section drawn in the back-to-front blend pass (MAT-048:
+     * depth-test only). The world depth prepass lays depth for this draw's FULLY SOLID texels
+     * (texture alpha >= 0.98) so a mostly-solid atlas that classified Blend (a floor, a camo net)
+     * still occludes what is behind it; the colour pass keeps blending every texel. */
+    WGR_DRAW3D_BLEND_SECTION = 8192
 };
 
 /* Matrices per palette block (the engine's own bone-palette cap). Each skinned
@@ -2636,6 +2641,14 @@ extern "C"
     WGR_API void wgr_terrain_set_mud(WgrRenderer* renderer, const float* data, uint32_t count);
     // Separate signed sand view; positive loose rims are preserved.
     WGR_API void wgr_terrain_set_sand(WgrRenderer* renderer, const float* data, uint32_t count);
+    /* Sinkhole W1: terrain holes for this frame. `edges` = n_edges x {nx, nz, d, last} in world X/Z; a point
+     * is inside an area when nx*x + nz*z + d >= 0 for every edge of it, last = 1 closes an area. At most 64
+     * edges are kept; n_edges = 0 clears them. The terrain and grass passes skip the pixels / blades inside. */
+    WGR_API void wgr_terrain_set_holes(WgrRenderer* renderer, const float* edges, uint32_t n_edges);
+    /* Sinkhole W1b: how far underground the camera is, 0 (open air) .. 1 (deep in a cave). Scales the
+     * outdoor-air effects (sun shafts, surface scattering) away and lets eye adaptation open up
+     * (WGR_CAVE_EXPOSURE_MAX). */
+    WGR_API void wgr_set_camera_underground(WgrRenderer* renderer, float underground);
 
     /* Set the terrain ground layers: `handles[i]` is the wgr_texture_create
      * handle for Landscape texture index i (0 = the built-in white fallback).
@@ -2823,6 +2836,11 @@ extern "C"
     WGR_API void wgr_water_set_cascade_config(WgrRenderer* renderer, uint32_t index, const WgrWaterCascadeConfig* config);
     WGR_API void wgr_water_set_interaction_params(WgrRenderer* renderer, const WgrWaterInteractionParams* params);
     WGR_API void wgr_water_submit_interactions(WgrRenderer* renderer, const WgrWaterInteractionEvent* events, uint32_t count);
+    /* Sinkhole W3: the Tidewater water's drawn surface around the camera (the W9a probe grid, read back
+     * 1-3 frames late): up to `cap` displaced vertices (x, y, z) into `xyz`, the grid lanes (first
+     * lattice x, z, step, texels per side) into `lanes[4]`, the readback's age into `age_ms`. Returns
+     * the texel count, 0 when there is none. Any thread. */
+    WGR_API uint32_t wgr_water_drawn_grid(float* xyz, uint32_t cap, float* lanes, float* age_ms);
 
     /* Render + present one frame. Returns 0 on success (incl. transient skipped
      * frames), negative on error. */

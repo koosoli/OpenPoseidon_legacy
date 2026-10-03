@@ -1371,9 +1371,20 @@ void World::PerformSound(Entity* inside, float deltaT)
     // (Poseidon/Audio/EnvironmentClassify.hpp) holds the decision so it can be pinned
     // by unit tests without a landscape or a sound device. The branch bodies moved
     // verbatim -- forest/city/mountains/plain are the 2001 sizes and densities.
+    // Sinkhole W1 (Malprave terrainHole4/7): a listener inside the room a hole-cutting object makes -- a cellar,
+    // a cave below its mouth, floor to the object's roof -- hears a room. Not behind POSEIDON_EXPERIMENTAL_EAX:
+    // there is no older behaviour underground to preserve, and an open-air reverb in a cave is plainly wrong.
+    // Same 4 Hz rate as the building probe; InTerrainHoleRoom costs nothing until a hole-cutting model is seen.
+    static float sHoleNextQuery = -1.0f;
+    static bool sHoleRoom = false;
+    if (now >= sHoleNextQuery || now < sHoleNextQuery - 1.0f)
+    {
+        sHoleNextQuery = now + 0.25f;
+        sHoleRoom = GLandscape->InTerrainHoleRoom(pos);
+    }
     Audio::EnvironmentSurroundings surroundings;
-    surroundings.insideRoom = sRoomInside;
-    surroundings.roomSize = sRoomSize;
+    surroundings.insideRoom = sRoomInside || sHoleRoom;
+    surroundings.roomSize = sRoomInside ? sRoomSize : 6.0f; // cave/cellar: a hall-sized decay, within the 2..8 band
     surroundings.forest = geogr.u.forestInner || geogr.u.forestOuter;
     surroundings.hardObjects = geogr.u.howManyHardObjects;
     surroundings.objects = geogr.u.howManyObjects;

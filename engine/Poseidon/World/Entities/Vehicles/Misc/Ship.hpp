@@ -144,6 +144,8 @@ class Ship: public Transport
 	Vector3 GetGunnerGetInPos(Person *person, Vector3Par pos) const override;
 	Vector3 GetCargoGetInPos(Person *person, Vector3Par pos) const override;
 	Vector3 GetCargoGetOutPos(Person *person) const override;
+	// boats in deep water: board / leave right beside the hull (swimmers cannot drown)
+	Vector3 PlaceGetInPos(Person *person, Vector3Par memPos, Vector3Par upos) const;
 
 	void SuspendedPilot(AIUnit *unit, float deltaT ) override;
 	void KeyboardPilot(AIUnit *unit, float deltaT ) override;

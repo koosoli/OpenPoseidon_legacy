@@ -1,5 +1,6 @@
 #pragma once
 #include <Poseidon/AI/AICore.hpp>
+#include <vector>
 
 // Depends on AIUnit.hpp being included first (via AI.hpp)
 
@@ -131,6 +132,15 @@ public:
 	void SetFormationDirection(Vector3Par dir) {_direction = dir;}
 	AIUnit *GetFormationPrevious( AIUnit *unit ) const;
 	AIUnit *GetFormationNext( AIUnit *unit ) const;
+
+	protected:
+	// Convoy order (unit IDs, front to back, leader excluded). Built from where the
+	// vehicles actually are rather than from their group numbers -- see UpdateConvoyOrder.
+	mutable std::vector<int> _convoyOrder;
+	mutable float _convoyOrderTime = -1e10f;
+	void UpdateConvoyOrder() const;
+	bool IsConvoyMember(const AIUnit* u) const;
+	public:
 
 	SpeedMode GetSpeedMode() const {return _speedMode;}
 	void SetSpeedMode(SpeedMode speed) {_speedMode = speed;}
@@ -393,6 +403,8 @@ protected:
 	RString _name;
 	RString _letterName;
 	RString _colorName;
+	//! 0 for the first 63 groups; group 64 reuses "Alpha Black" as "Alpha Black 2", etc.
+	int _nameCycle = 0;
 	RString _pictureName;
 	Ref<Texture> _picture;
 

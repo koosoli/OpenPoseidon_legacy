@@ -551,8 +551,10 @@ int SensorList::SmartUpdateAll()
 {
     CheckPos();
     int sum = 0;
-    const int maxTests = 4;
-    const int maxCalcs = 4;
+    // CWR fork: raised from 4/4 (tuned for 2001 CPUs) so line of sight
+    // refreshes quickly even with hundreds of units
+    const int maxTests = 16;
+    const int maxCalcs = 32;
     for (int maxUpdates = maxCalcs, maxRowCols = maxTests, maxChecks = _rows.Size(); --maxChecks >= 0;)
     {
         if (++_lastUpdateRow >= _rows.Size())
