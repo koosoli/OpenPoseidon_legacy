@@ -139,7 +139,15 @@ try{
  }while(!$entered -and [DateTime]::UtcNow -lt $until)
  $null=Send @{cmd='key_up';sc=26};$held=$false;Exec 'setAccTime 0'
  $result.traversal=@{start=$start;inputContext=$input;samples=$samples;entered=$entered};Require $entered 'W-key traversal did not enter below retained roof.'
- Capture 'player-inside-first' $null $null;Exec 'player switchCamera "EXTERNAL"';Capture 'player-inside-third' $null $null
+ Capture 'player-inside-first' $null $null
+ # Real L/Headlights input enables the soldier's torch even in a daytime cave.
+ Exec 'setAccTime 1';$null=Send @{cmd='key';sc=15;hold=$true}
+ try{Start-Sleep -Milliseconds 350}finally{$null=Send @{cmd='key_up';sc=15}}
+ Start-Sleep -Milliseconds 350;Exec 'setAccTime 0'
+ Capture 'player-inside-flashlight' $null $null
+ Require ([bool](Select-String -LiteralPath $log -Pattern 'Flashlight on:.*player=1' -Quiet)) 'L-key did not activate the player flashlight inside the cave.'
+ $result.flashlight=@{input='L / Headlights';daytime=$true;activationLogged=$true}
+ Exec 'player switchCamera "EXTERNAL"';Capture 'player-inside-third' $null $null
  # Return through the entrance using ordinary gameplay input before closing it.
  Exec ('player switchCamera "INTERNAL";player setDir '+(Fmt ($site.heading+180))+';setAccTime 0')
  $result.exitLook=CentreLook;Require ((HeadingError (Num (Eval 'getDir player')) ($site.heading+180)) -lt 5) 'Exit heading was not aligned before W input.';Exec 'setAccTime 1'
