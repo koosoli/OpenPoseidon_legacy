@@ -47,8 +47,14 @@ enum class Stage : std::uint8_t
     // footprint effect PERF-028 could not locate by reading.
     ManPilot,      // KeyboardPilot / AIPilot / FakePilot / DisabledPilot
     ManBase,       // base::Simulate -- Person, Man, EntityAI, Entity
+    // Nested within Cloudlets, never additive to its existing container.
+    CloudletSoftSurfaces,
+    CloudletRunoffSource,
+    CloudletRunoffAdvance,
+    CloudletRunoffNatural,
+    CloudletRemainingEffects,
 };
-inline constexpr std::size_t kStageCount = 11;
+inline constexpr std::size_t kStageCount = 16;
 
 enum class Kind : std::uint8_t
 {
@@ -80,7 +86,38 @@ struct Accum
     std::array<double, kStageCount>        stageMs{};
     std::array<double, kKindCount>         kindMs{};
     std::array<std::uint64_t, kKindCount>  kindCalls{};
+    std::array<std::uint64_t, kStageCount> substageCalls{};
+    std::array<double, kStageCount>        substageMaxMs{};
     std::uint64_t                          ticks = 0; // SimulateAllVehicles entries
+};
+
+// Pure accounting seam; reject containers to prevent accidental double counting.
+inline bool RecordCloudletStage(Accum& accum, Stage stage, std::uint64_t ns)
+{
+    const auto index = static_cast<std::size_t>(stage);
+    if (index < static_cast<std::size_t>(Stage::CloudletSoftSurfaces) || index >= kStageCount)
+        return false;
+    const double ms = static_cast<double>(ns) * 1.0e-6;
+    accum.stageMs[index] += ms;
+    ++accum.substageCalls[index];
+    if (ms > accum.substageMaxMs[index]) accum.substageMaxMs[index] = ms;
+    return true;
+}
+
+// Default-off instrumentation: no clock reads or accounting when the existing
+// vehicle-cost opt-in is disabled. Stop is idempotent, also used by destruction.
+class ScopedCloudletStage
+{
+public:
+    explicit ScopedCloudletStage(Stage stage);
+    ~ScopedCloudletStage();
+    void Stop();
+    ScopedCloudletStage(const ScopedCloudletStage&) = delete;
+    ScopedCloudletStage& operator=(const ScopedCloudletStage&) = delete;
+private:
+    Stage _stage;
+    bool _enabled;
+    std::uint64_t _startNs;
 };
 
 Accum& Costs();

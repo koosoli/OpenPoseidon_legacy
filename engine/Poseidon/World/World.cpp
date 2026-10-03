@@ -1200,6 +1200,19 @@ void World::Simulate(float deltaT, bool& enableDraw)
                          st(SimVehCost::Stage::SlowMoveOut) * vInv, st(SimVehCost::Stage::SlowVehicles) * vInv,
                          st(SimVehCost::Stage::SlowAnimals) * vInv, st(SimVehCost::Stage::ManPilot) * vInv,
                          st(SimVehCost::Stage::ManBase) * vInv);
+                if (SimVehCost::Enabled())
+                {
+                    for (const auto stage : {SimVehCost::Stage::CloudletSoftSurfaces,
+                            SimVehCost::Stage::CloudletRunoffSource, SimVehCost::Stage::CloudletRunoffAdvance,
+                            SimVehCost::Stage::CloudletRunoffNatural, SimVehCost::Stage::CloudletRemainingEffects})
+                    {
+                        const auto index = static_cast<std::size_t>(stage);
+                        LOG_INFO(World, "Sim cloudlet cost over {} ticks: stage={} calls={} total_ms={:.6f} "
+                                        "ms_per_tick={:.6f} max_call_ms={:.6f} scope=nested-cloudlets",
+                                 veh.ticks, SimVehCost::StageName(stage), veh.substageCalls[index],
+                                 veh.stageMs[index], veh.stageMs[index] * vInv, veh.substageMaxMs[index]);
+                    }
+                }
                 const auto km = [&veh](SimVehCost::Kind k) { return veh.kindMs[static_cast<std::size_t>(k)]; };
                 const auto kc = [&veh](SimVehCost::Kind k) { return veh.kindCalls[static_cast<std::size_t>(k)]; };
                 LOG_INFO(World,

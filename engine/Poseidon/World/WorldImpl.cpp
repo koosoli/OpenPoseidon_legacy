@@ -757,6 +757,7 @@ void World::SimulateFastVehicles(float deltaT, VehicleSimulation simul)
 
 void World::SimulateCloudlets(float deltaT)
 {
+    SimVehCost::ScopedCloudletStage softCost(SimVehCost::Stage::CloudletSoftSurfaces);
     GSnow().Advance(deltaT);
     if (GLandscape)
     {
@@ -764,6 +765,7 @@ void World::SimulateCloudlets(float deltaT)
             GRain.EffectiveDensity(), GRain.Params().snowflakes));
         GSand().Advance(deltaT, UniformWettingDensity(GLandscape->GetRainDensity(),
             GRain.EffectiveDensity(), GRain.Params().snowflakes));
+        softCost.Stop();
         const float liquidRain = UniformWettingDensity(GLandscape->GetRainDensity(),
             GRain.EffectiveDensity(), GRain.Params().snowflakes);
         auto& runoff = GRainWater();
@@ -779,6 +781,7 @@ void World::SimulateCloudlets(float deltaT)
         if (terrainRange >= 2 && std::isfinite(extent) && extent > 0 &&
             (runoff.Width() != 0 || liquidRain > 0))
         {
+            SimVehCost::ScopedCloudletStage sourceCost(SimVehCost::Stage::CloudletRunoffSource);
             // Keep source vertices aligned through native terrain subdivision.
             // The bounded grid uses a power-of-two stride, never a stretched
             // spacing that moves every sample away from the authored triangles.
@@ -833,6 +836,7 @@ void World::SimulateCloudlets(float deltaT)
                 LOG_INFO(Graphics,"RAIN_WATER_FINE_SOURCE world={} sourceRevision={} native={} admitted={} updated={} refused={} coverageLost={} valid={} tiles={} enabled={} presentation=pending",
                     GLandscape->GetName(),GLandscape->HeightRevision(),fine.native,fine.admitted,fine.updated,fine.refused,
                     fine.coverageLost,fine.valid,runoff.FineTileCount(),fineSupport);
+            sourceCost.Stop();
             const auto* sun = _scene.MainLight();
             const float overcast = std::clamp(GLandscape->GetOvercast(),0.0f,1.0f);
             const float solar = sun ? SunlightDryingExposure(sun->SunDirection().Y(), overcast,
@@ -840,22 +844,30 @@ void World::SimulateCloudlets(float deltaT)
             if (runoff.MatchesDomain(side,side,spacing))
             {
                 runoff.SetSeaLevel(GLandscape->GetSeaLevel());
-                runoff.Advance(deltaT,liquidRain,solar,GWind.IsActive() ? GWind.Sample().speed/20.0f : 0);
+                {
+                    SimVehCost::ScopedCloudletStage advanceCost(SimVehCost::Stage::CloudletRunoffAdvance);
+                    runoff.Advance(deltaT,liquidRain,solar,GWind.IsActive() ? GWind.Sample().speed/20.0f : 0);
+                }
+                SimVehCost::ScopedCloudletStage naturalCost(SimVehCost::Stage::CloudletRunoffNatural);
                 const auto natural=runoff.UpdateNaturalTerrain(GLandscape,terrainRange,GLandscape->GetTerrainGrid(),
                     GLandscape->HeightRevision(),fineSupport,deltaT,[](int x,int z){return GLandscape->GetHeight(z,x);});
                 if(natural.changed||natural.refused)
                     LOG_INFO(Graphics,"RAIN_WATER_NATURAL_SOURCE world={} sourceRevision={} admitted={} retired={} refused={} examined={} valid={} tiles={} enabled={} presentation=pending",
                         GLandscape->GetName(),GLandscape->HeightRevision(),natural.admitted,natural.retired,natural.refused,
                         natural.examined,natural.valid,runoff.FineTileCount(),fineSupport);
+                naturalCost.Stop();
             }
             else if(runoff.FineActive())
             {
                 // Failed reconfiguration marks the fine source stale; Advance
                 // only retains pending time until actual coordinates recover.
+                SimVehCost::ScopedCloudletStage advanceCost(SimVehCost::Stage::CloudletRunoffAdvance);
                 runoff.Advance(deltaT,liquidRain,solar,GWind.IsActive() ? GWind.Sample().speed/20.0f : 0);
             }
         }
     }
+    softCost.Stop(); // also closes the no-landscape path; never counts twice
+    SimVehCost::ScopedCloudletStage remainingCost(SimVehCost::Stage::CloudletRemainingEffects);
     SimulationImportance prec = SimulateVisibleFar;
 
     // POSEIDON_TEST_SMOKE=1 drops one new-system plume in front of the camera a

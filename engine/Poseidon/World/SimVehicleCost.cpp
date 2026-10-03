@@ -39,6 +39,11 @@ const char* StageName(Stage stage)
     case Stage::SlowAnimals: return "slow.animals";
     case Stage::ManPilot: return "man.pilot";
     case Stage::ManBase: return "man.base";
+    case Stage::CloudletSoftSurfaces: return "cloudlets.soft-surfaces";
+    case Stage::CloudletRunoffSource: return "cloudlets.runoff-source";
+    case Stage::CloudletRunoffAdvance: return "cloudlets.runoff-advance";
+    case Stage::CloudletRunoffNatural: return "cloudlets.runoff-natural";
+    case Stage::CloudletRemainingEffects: return "cloudlets.remaining-effects";
     }
     return "?";
 }
@@ -75,6 +80,18 @@ ScopedStage::ScopedStage(Stage stage) : _stage(stage), _startNs(NowNs()) {}
 ScopedStage::~ScopedStage()
 {
     g_accum.stageMs[static_cast<std::size_t>(_stage)] += static_cast<double>(NowNs() - _startNs) * 1.0e-6;
+}
+
+ScopedCloudletStage::ScopedCloudletStage(Stage stage)
+    : _stage(stage), _enabled(Enabled()), _startNs(_enabled ? NowNs() : 0) {}
+
+ScopedCloudletStage::~ScopedCloudletStage() { Stop(); }
+
+void ScopedCloudletStage::Stop()
+{
+    if (!_enabled) return;
+    RecordCloudletStage(g_accum, _stage, NowNs() - _startNs);
+    _enabled = false;
 }
 
 void AddKind(Kind kind, std::uint64_t ns)
