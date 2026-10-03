@@ -32,6 +32,9 @@ function Send($command,[bool]$allowError=$false){
 function Eval([string]$code){return Decode ([string](Send @{cmd='eval';code=$code}).result)}
 function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
 function CentreLook{
+ # Initial fixture orientation must not retain the previous mission aim pose.
+ # The ordinary empty switchMove resets head/gun offsets, before any W/S input.
+ if(Eval 'vehicle player == player'){Exec 'player switchMove ""'}
  $receipt=@{beforeDir=(Num (Eval 'getDir vehicle player'));beforeCursor=(Eval 'triCursorPos')}
  Exec 'triClearView;triCursorMove [0,0]';Start-Sleep -Milliseconds 250
  $null=Send @{cmd='key';sc=93;hold=$true};try{Start-Sleep -Milliseconds 350}finally{$null=Send @{cmd='key_up';sc=93}}
