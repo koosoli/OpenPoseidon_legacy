@@ -1,0 +1,240 @@
+{
+  "schemaVersion": 1,
+  "branch": "codex/cave-editor-20261004",
+  "engineSourceCommit": "3d196ce3",
+  "authorRun": true,
+  "ownerValidated": false,
+  "native": {
+    "log": "build/excavation-editor-native-tests-final.log",
+    "passed": true,
+    "assertions": 24339,
+    "cases": 139
+  },
+  "renderer": {
+    "newTestsPassed": 4,
+    "legacyTestsPassed": 7
+  },
+  "cave": {
+    "scriptSha256": "3EC7C1D7662A6F2F28F08BE2E9BC7975E1AC2A60903011C9CF4BE4681E207A23",
+    "entry": {
+      "along": 6.489999999999782,
+      "state": {
+        "count": 1,
+        "status": "Cave placed. Mission-local; reload removes it. Undo removes the last cave.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": true,
+        "atHeight": true,
+        "holeFloor": 43.91999816894531,
+        "terrainY": 47.117496490478516,
+        "roadY": 43.91999816894531,
+        "cameraFloorY": 43.91999816894531,
+        "drawRecords": 5,
+        "boundedHeader": true,
+        "ceilingY": 46.41999816894531,
+        "ok": true
+      },
+      "position": [
+        7243.51,
+        6250,
+        43.9186
+      ],
+      "cursor": "0.0000,0.0000",
+      "side": 1.192193658969908E-15,
+      "dir": 270.0
+    },
+    "tiny": {
+      "count": 1,
+      "status": "Cave placed. Mission-local; reload removes it. Undo removes the last cave.",
+      "missionLocal": true,
+      "worldName": "worlds\\eden.wrp",
+      "grid": 6.25,
+      "heightRevision": 6,
+      "brushDefaultRadius": 8,
+      "inFootprint": true,
+      "atHeight": true,
+      "holeFloor": 43.91999816894531,
+      "terrainY": 50.370975494384766,
+      "roadY": 43.91999816894531,
+      "cameraFloorY": 43.91999816894531,
+      "terrainRayHit": false,
+      "legacyRayResult": 0.0660015121102333,
+      "drawRecords": 5,
+      "boundedHeader": true,
+      "ceilingY": 44.0199966430664,
+      "ok": true
+    },
+    "roof": {
+      "count": 1,
+      "status": "Cave placed. Mission-local; reload removes it. Undo removes the last cave.",
+      "missionLocal": true,
+      "worldName": "worlds\\eden.wrp",
+      "grid": 6.25,
+      "heightRevision": 6,
+      "brushDefaultRadius": 8,
+      "inFootprint": true,
+      "atHeight": false,
+      "holeFloor": 43.91999816894531,
+      "terrainY": 50.370975494384766,
+      "roadY": 50.370975494384766,
+      "cameraFloorY": 50.370975494384766,
+      "terrainRayHit": true,
+      "legacyRayResult": 0.800195336341858,
+      "terrainRayY": 50.370731353759766,
+      "terrainRayDistance": 1.000244140625,
+      "drawRecords": 5,
+      "boundedHeader": true,
+      "ceilingY": 46.41999816894531,
+      "ok": true
+    },
+    "passed": true,
+    "installed": {
+      "stamp": "codex/cave-editor-20261004 3d196ce3+dirty 2026-10-04_00:53 deploy-ps1\r\n",
+      "files": [
+        {
+          "sha256": "04E1A5E34B372DF54C690EB274524E36D89CB3FE76AFC89B9062A5D1EDDBB594",
+          "name": "OpenPoseidon.exe",
+          "bytes": 31416832,
+          "writtenUtc": "2026-10-03T22:52:11.9406632Z"
+        },
+        {
+          "sha256": "000AE2EEEB1EAD9F36F2856656A29303ECF9D15AB3B2C582B0E450F711148D47",
+          "name": "wgpu_renderer.dll",
+          "bytes": 18499072,
+          "writtenUtc": "2026-10-03T22:51:23.915224Z"
+        }
+      ]
+    },
+    "exit": {
+      "along": -2.119999999999891,
+      "dir": 90.0,
+      "cursor": "0.0000,0.0000",
+      "state": {
+        "count": 1,
+        "status": "Cave placed. Mission-local; reload removes it. Undo removes the last cave.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": false,
+        "atHeight": false,
+        "holeFloor": 0,
+        "terrainY": 43.17560958862305,
+        "roadY": 43.17560958862305,
+        "cameraFloorY": 43.17560958862305,
+        "drawRecords": 5,
+        "boundedHeader": true,
+        "ceilingY": 46.41999816894531,
+        "ok": true
+      },
+      "position": [
+        7252.12,
+        6250,
+        43.1616
+      ]
+    },
+    "flashlight": {
+      "activationLogged": true,
+      "daytime": true,
+      "input": "L / Headlights"
+    },
+    "ceiling": 46.41999816894531,
+    "undoPassed": true,
+    "receipt": "build/cave-editor/original-everon-cave-flashlight-20261004-011308/result.json",
+    "site": {
+      "fz": -1.8369701987210297E-16,
+      "gain": 65.78999999999999,
+      "heading": 270,
+      "sz": 1.0,
+      "sx": -1.8369701987210297E-16,
+      "x": 7250.0,
+      "fx": -1.0,
+      "z": 6250.0,
+      "floor": 43.92
+    }
+  },
+  "infantry": {
+    "exit": {
+      "along": -2.380000000000109,
+      "position": [
+        6247.62,
+        5500,
+        71.2827
+      ],
+      "cursor": "0.0000,0.0000",
+      "originDrop": 0.0030999999999892225,
+      "state": {
+        "count": 1,
+        "status": "Straight infantry trench placed, with access ramp. Mission-local.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": false,
+        "atHeight": false,
+        "holeFloor": 0,
+        "terrainY": 71.2842788696289,
+        "roadY": 71.2842788696289,
+        "cameraFloorY": 71.2842788696289,
+        "drawRecords": 4,
+        "boundedHeader": false,
+        "ok": true
+      },
+      "dir": 270.0,
+      "side": -1.457329690985417E-16,
+      "speed": 17.7261
+    },
+    "passed": true,
+    "undoPassed": true,
+    "entry": {
+      "along": 7.050000000000182,
+      "position": [
+        6257.05,
+        5500,
+        69.6866
+      ],
+      "cursor": "0.0000,0.0000",
+      "originDrop": 1.5991999999999962,
+      "state": {
+        "count": 1,
+        "status": "Straight infantry trench placed, with access ramp. Mission-local.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": true,
+        "atHeight": true,
+        "holeFloor": 69.68795013427734,
+        "terrainY": 71.24192810058594,
+        "roadY": 69.68795013427734,
+        "cameraFloorY": 69.68795013427734,
+        "drawRecords": 4,
+        "boundedHeader": false,
+        "ok": true
+      },
+      "dir": 90.0,
+      "side": 4.3168799669945314E-16,
+      "speed": 17.7261
+    },
+    "receipt": "build/trench-editor/original-everon-trenches-20261004-010908/result.json"
+  },
+  "tank": {
+    "failedAttempt": "build/trench-editor/original-everon-trenches-20261004-010908/result.json",
+    "state": "PENDING_CLEAR_GROUND_RERUN",
+    "reason": "Retail trees blocked approach nine metres before entrance; no tank samples entered excavation."
+  },
+  "selection": {
+    "state": "IMPLEMENTATION_AND_INSTALLED_ACCEPTANCE_PENDING"
+  },
+  "boundaries": [
+    "Single-player mission-local generated excavations only",
+    "No persistence, AI Paths, Box3D cavity certification or connected segments",
+    "Cave and earth surfaces are prototypes; player flashlight is dim"
+  ]
+}

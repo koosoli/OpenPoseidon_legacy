@@ -24,11 +24,14 @@ execution:
     branch: codex/cave-editor-20261004
     baseline_commit: ee869c1b
     source_commit: 3d196ce3
-    state: NATIVE_GPU_CAVE_INSTALLED_CHECKS_PASSED_TRENCH_TRAVERSAL_PENDING
+    state: CAVE_INFANTRY_CHECKS_PASSED_TANK_SELECTION_PENDING
     evidence: docs/verification/excavation-editor-20261004.md
+    runtime_receipt: docs/verification/excavation-editor-20261004-runtime.json
     note: >-
       Owner-authorised horizontal caves, straight infantry/tank trenches,
       smaller requested height-brush radius, sub-grid shaped apertures and Shift rate.
+      Placed excavation selection, rotation and deletion additionally authorised;
+      implementation and installed acceptance pending. Daytime soldier flashlight checked.
       Mission-local single-player prototype; no persistence, AI Paths or Box3D
       cavity-heightfield acceptance. Author-run tests are not owner validation.
   review_model: OWNER_REVIEW_NO_INDEPENDENT_REVIEWER

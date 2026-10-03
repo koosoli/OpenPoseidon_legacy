@@ -23,6 +23,10 @@ then select **Map Editor**.
   the smallest openings. The HUD shows dimensions and placement refusals.
 - **Undo last excavation** removes the last cave/trench. Leave the excavation
   first; closing a hole on an underground player is refused.
+- **Soldier flashlight**: press L (the Headlights binding) while on foot.
+  The beam follows your view, reaches about 20 m and remains active in daytime
+  caves. In free-fly, use Dev Tools → Zeus → Head torch →
+  **Head torch (follows the view)** instead.
 
 The ordinary circular height brush remains available for foxholes/craters.
 Its default requested radius is now 8 m instead of 64 m, its wheel/slider minimum
@@ -75,7 +79,20 @@ The centre floor/camera support was 43.92 m; the retained surface above was
 raw terrain heights/revision. The EXE/DLL hashes stayed unchanged and the
 game exited normally without GPU validation errors. Screenshots show a plain,
 box-shaped portal and a dark interior; natural cave surface/lighting polish
-is beyond this prototype. Infantry/tank trench runtime acceptance is pending.
+is beyond this prototype. A second passing run at
+`build/cave-editor/original-everon-cave-flashlight-20261004-011308/result.json`
+also pressed the ordinary L key indoors during daytime: the player flashlight
+activation was logged and its screenshot showed illuminated walls/floor,
+although the beam remains dim. All entry/exit, tiny aperture and undo checks
+passed again.
+
+The first centred trench run verified normal infantry entry/exit and undo,
+but its Abrams approach was blocked by retail trees 9 m before the entrance
+(`build/trench-editor/original-everon-trenches-20261004-010908/result.json`).
+It never entered the trench and is not tank acceptance evidence. The revised
+runner rejects conservative bounds of retail obstacles throughout the approach
+and trench; no trees are deleted for testing. The clear-ground tank rerun and
+the owner-requested selection/rotation/deletion checks are pending.
 
 Installed runners (invoke through `scripts/with-game-lock.sh`):
 

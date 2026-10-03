@@ -89,8 +89,9 @@ function Traverse($site,$preset,[bool]$inward,$arm,[double]$startOriginY){
   Require ([Math]::Abs($side)-lt ($preset.width*.5+1)-and $along-gt -14-and $along-lt ($preset.length-1)) 'Controlled actor escaped bounded trench lane.'
   $sample=State @{x=$position[0];z=$position[1];y=($position[2]+.05)} $null
   $originDrop=$startOriginY-(Num $position[2]);$samples+=@{position=$position;along=$along;side=$side;originDrop=$originDrop;speed=(Num (Eval 'speed vehicle player'));dir=(Num (Eval 'getDir vehicle player'));cursor=(Eval 'triCursorPos');state=$sample}
-  if($inward){$done=$along-ge ($preset.ramp+2)-and $sample.atHeight-and $originDrop-gt ($preset.depth*.6)-and [Math]::Abs((Num $sample.roadY)-($site.rim-$preset.depth))-lt .12}
-  else{$done=$along-lt -1-and !$sample.inFootprint}
+  $flatClearance=2.;$exitClearance=-1.;if($isTank){$flatClearance=5.;$exitClearance=-6.}
+  if($inward){$done=$along-ge ($preset.ramp+$flatClearance)-and $sample.atHeight-and $originDrop-gt ($preset.depth*.6)-and [Math]::Abs((Num $sample.roadY)-($site.rim-$preset.depth))-lt .12}
+  else{$done=$along-lt $exitClearance-and !$sample.inFootprint}
  }while(!$done-and [DateTime]::UtcNow-lt $until)}finally{$null=Send @{cmd='key_up';sc=$key};$script:heldKey=$null;Exec 'setAccTime 0';$arm.samples=$samples;$arm.completed=$done}
  Require $done ('Actual '+$preset.name+' '+$(if($inward){'descent'}else{'exit'})+' did not complete within25s.')
 }
