@@ -71,19 +71,24 @@ fn uniform_cloth_mask(uv: vec2<f32>, encoded: f32, footprint: vec2<f32>) -> f32 
     return mask;
 }
 
-fn uniform_cloth_color(rgb: vec3<f32>, encoded: f32, uv: vec2<f32>, footprint: vec2<f32>) -> vec3<f32> {
-    if (!(encoded > 0.0)) { return rgb; }
+fn uniform_cloth_wetness(encoded: f32, uv: vec2<f32>, footprint: vec2<f32>) -> f32 {
+    if (!(encoded > 0.0)) { return 0.0; }
     var wetness = encoded;
     if (encoded >= 4.0) { wetness -= 4.0; }
     else if (encoded >= 2.0) { wetness -= 2.0; }
-    let wet = clamp(wetness, 0.0, 1.0) * uniform_cloth_mask(uv, encoded, footprint);
+    return clamp(wetness, 0.0, 1.0) * uniform_cloth_mask(uv, encoded, footprint);
+}
+
+fn uniform_cloth_color(rgb: vec3<f32>, encoded: f32, uv: vec2<f32>, footprint: vec2<f32>) -> vec3<f32> {
+    let wet = uniform_cloth_wetness(encoded, uv, footprint);
     if (wet <= 0.0) { return rgb; }
     // A visibly soaked textile retains 45% of its dry linear reflectance.
     // The smooth early absorption response makes accumulated dampness visible
     // before saturation: w=.2 retains .802, w=.38 retains .6614. The original
     // linear22% response at w=.38 changed sRGB by only about4%, easily hidden
     // by ordinary weather/exposure. Hue and authored detail remain unchanged;
-    // no plastic/specular highlight, spatial noise or history setter is added.
+    // The shared lighting adds a separate broad, bounded wet-textile sheen.
+    // This absorption helper preserves authored hue and detail.
     let absorption = wet * (2.0 - wet);
     let c = srgb_to_linear(rgb) * (1.0 - 0.55 * absorption);
     return select(1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - 0.055, c * 12.92,
@@ -1029,6 +1034,9 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // them to the shared shading straight. The GPU-driven path folds raw × frame-sun instead,
     // then calls the same shade(). srgb-decode of albedo + terms happens inside shade().
     var m: ShadeMaterial;
+    // The same filtered source mask drives absorption and the rough wet layer.
+    // Never infer wetness from rainfall, owner type or albedo colour here.
+    m.wet_cloth = uniform_cloth_wetness(material.local_specular.w, in.uv, uniform_uv_footprint);
     m.native_cavity = 1.0;
     m.native_ao = 1.0;
 #ifdef NATIVE_LEAF_CAVITY

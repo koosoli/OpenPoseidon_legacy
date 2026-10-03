@@ -63,6 +63,27 @@ fn object_snow_normal(world_pos: vec3<f32>, geo_normal: vec3<f32>, base_n: vec3<
 // used only on the legacy path; light_diffuse/light_ambient are the raw material terms for
 // the frame-global local lights; specular is the sun-folded highlight colour and spec_power
 // its exponent.
+// BEGIN_WET_TEXTILE_HELPERS (pure production helpers exercised by probes)
+fn wet_textile_response(wetness: f32, view_cosine: f32, footprint: f32) -> vec4<f32> {
+    if (!(wetness > 0.0)) { return vec4<f32>(0.0); }
+    let wet = clamp(wetness, 0.0, 1.0);
+    let coating = wet * (2.0 - wet);
+    let grazing = 1.0 - clamp(view_cosine, 0.0, 1.0);
+    // Water on rough fibres: restrained Fresnel, never a grazing mirror.
+    let fresnel = 0.02 + 0.10 * pow(grazing, 5.0);
+    // Broaden before creases shrink below a pixel. No fine normal-map grain,
+    // time seed, spatial noise or sharp microfacet lobe can glitter here.
+    let power = mix(16.0, 8.0, smoothstep(0.015, 0.08, max(footprint, 0.0)));
+    let normalized_f0 = 0.02 * (power + 2.0) / 25.13274123;
+    return vec4<f32>(coating, fresnel, power, normalized_f0);
+}
+fn wet_textile_sun_lobe(normal_half_cosine: f32, normal_light_cosine: f32, response: vec4<f32>) -> f32 {
+    if (!(response.x > 0.0)) { return 0.0; }
+    return response.w * pow(clamp(normal_half_cosine, 0.0, 1.0), response.z)
+        * clamp(normal_light_cosine, 0.0, 1.0);
+}
+// END_WET_TEXTILE_HELPERS
+
 struct ShadeMaterial {
     emissive: vec3<f32>,
     sun_ambient: vec3<f32>,
@@ -80,6 +101,9 @@ struct ShadeMaterial {
     spec_mask: f32,
     native_cavity: f32,
     native_ao: f32,
+    // Shader-local material value, never a public buffer/ABI field.
+    // Nonzero only after exact primary cloth admission and filtered UV masking.
+    wet_cloth: f32,
 };
 
 // Rotate `v` by the rotation that carries unit vector `src_n` onto unit vector `dst_n`.
@@ -615,6 +639,32 @@ fn shade(
     // direct sun in shadow above, so it must not double-darken here.
     if (!sky_lit) {
         rgb *= mix(1.0, frame.shadow.ctlb.y, csm_s);
+    }
+    if (mat.wet_cloth > 0.0 && linear > 0.5) {
+        // Wet cloth holds water after rain/under a roof: retained person history
+        // controls this layer; the actual lighting controls its visibility.
+        let cloth_n = surface_normal(geo_normal, world_pos, dwx, dwy);
+        let view = -world_pos / max(length(world_pos), 0.0001);
+        let response = wet_textile_response(mat.wet_cloth, dot(cloth_n, view),
+            max(length(dwx), length(dwy)));
+        var coat_sky = vec3<f32>(0.0);
+        if (sky_lit && !is_cockpit) {
+            coat_sky = sky_irradiance(reflect(-view, cloth_n)) * frame.sun_ambient.w
+                * amb_ao * cavity * response.y;
+        }
+        let half_sum = view - frame.sun_dir_world.xyz;
+        let half_vector = half_sum / max(length(half_sum), 0.0001);
+        let sun_radiance = select(m_sun_diffuse, frame.sun_diffuse.rgb, sky_lit);
+        let coat_sun = sun_radiance * wet_textile_sun_lobe(dot(cloth_n, half_vector),
+            dot(cloth_n, -frame.sun_dir_world.xyz), response) * sun_vis;
+        // Reuse the existing bounded point/spot attenuation and physical
+        // spot/cube shadow lookup. Only actual wet-cloth pixels pay this pass.
+        let coat_local = lights_material_contrib(world_pos, cloth_n, vec3<f32>(0.0),
+            vec3<f32>(0.0), vec3<f32>(response.w), response.z, linear);
+        // Reallocate the outgoing reflected share from the underlying layer.
+        // Neutral water highlights do not inherit camouflage dye/texture grain.
+        rgb = rgb * (1.0 - response.x * response.y)
+            + response.x * max(coat_sky + coat_sun + coat_local.specular, vec3<f32>(0.0));
     }
     if (rain_puddle > 0.0) {
         let view = normalize(-world_pos);

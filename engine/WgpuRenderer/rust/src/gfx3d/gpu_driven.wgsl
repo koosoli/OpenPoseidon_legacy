@@ -927,6 +927,9 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // material (local lights), specular = sun_diffuse x material specular. On the sky-lit HDR
     // path shade() ignores sun_*, so the emissive/light/specular terms are what carry.
     var m: ShadeMaterial;
+    // Retained static world materials have no per-person wetness history.
+    // A shared section material must never acquire a global wet-cloth layer.
+    m.wet_cloth = 0.0;
     m.native_cavity = 1.0;
     m.native_ao = 1.0;
     // Imported OFP/A3 materials use the legacy emissive lane for a mixture of
