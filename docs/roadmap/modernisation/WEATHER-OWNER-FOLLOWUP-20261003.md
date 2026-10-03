@@ -1,5 +1,27 @@
 # Weather owner follow-up, 3 October 2026
 
+Latest13:35 source/runtime checkpoint: actual occupied four-arm flight8b38bb
+passes normal exits, stable installed bd pair, zero dropped ordered captures,
+matched clouds/ranges and closely overlapping physical routes. Default dry/rain
+mean10.872→12.830ms and p9515.392→23.992ms; far-cover-off mean10.676→11.830ms
+and p9514.370→22.158ms. Rain intensity differs between independent wet arms,
+so the far-control result is diagnostic, not an exact causal saving. Published
+near cull/draw medians~0.105/0.092ms, far~0.125/0.243ms; these are possibly
+lagged/duplicate snapshots. The whole slowdown is not explained by those rows.
+Actual Cloudlets container costs~0.576→1.171ms/tick in the default pair. Root
+continues CPU subphase attribution, without removing weather coverage.
+
+New normalized broad wet-soil direct coat0065f035/ac2573fb passes all41
+shaders:: checks, including required actual GPU energy/roughness/admission
+probes and actual terrain composition. It preserves the rough sky cap and
+source/snow/shelter/hard controls. This source is not installed; satisfactory
+slimy-mud pixels remain pending. Uniform baseline269677 stops before wetting
+because the fixture mistakes the actual unit debug identity for a model name;
+format now works. Normal exit0/unchanged pair, but no new lighting acceptance.
+The actual body model is proven separately by renderer rows; fixture repair
+and natural high-wetness captures remain in progress. Sunny native owned-pool
+run with installed solar telemetry is now executing.
+
 New13:22 evidence: Nogova water campaign1d2abf passes all three fresh arms,
 normal exits and unchanged pair. Root sees the existing OP white rotor ring
 and a visible Tidewater enabled ripple field versus absent OFF ring. Actual

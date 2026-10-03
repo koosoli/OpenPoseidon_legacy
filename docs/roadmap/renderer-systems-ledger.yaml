@@ -737,6 +737,14 @@ unbuilt_candidates: >-
     audited: 2026-10-03
     completeness: >-
       OWNER FOLLOW-UP3OCTOBER supersedes earlier appearance acceptance below.
+      Actual bd590703 occupied flight8b38bb passes four normal stable arms,
+      zero dropped CPU captures and close route/cloud/range overlap. Default
+      dry/rain mean10.872/12.830ms, p9515.392/23.992ms; far-OFF diagnostic
+      mean10.676/11.830ms, p9514.370/22.158ms. Rain intensities differ between
+      wet arms; no exact causal far-pass saving. Published weather-map GPU
+      medians total~0.565ms; remaining CPU attribution continues. New broad
+      normalized wet-soil direct coat passes41 shader/device checks and keeps
+      source/sky/energy guards; installed slimy-mud acceptance still pending.
       Matching bd590703 installed12:35 after16step combined build. Actual
       Eden835446 core contacts pass normal stable exit and exact signed sand
       receipts; root sees four readable sand pits at-9.37cm. Mud pits reach
@@ -1817,6 +1825,10 @@ unbuilt_candidates: >-
       Actual lightingb7caf7 fails unsupported stock str expression before
       new lighting views; harness abort requires owned forced cleanup. This
       is not a runtime pass; source-supported fixture repair is in progress.
+      Subsequent269677 format query succeeds but falsely expects the unit
+      debug name to be a model; normal exit0 before wetting. Model proof is
+      separately actual renderer body trace. Fixture repair pending; no new
+      optional lighting acceptance claimed.
       below. Source66b7bec9 adds bounded broad dielectric wet-textile sheen
       with geometric normals and existing cloth/history masks, sky/sun/local
       shadowing; dry and retained static paths remain zero. Full composer CPU
