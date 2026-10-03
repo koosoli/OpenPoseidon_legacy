@@ -10,6 +10,7 @@ param(
  [switch]$NativeHeightFixture,
  [switch]$ContactViews,
  [switch]$SandSnapshotTrace,
+ [switch]$UniformLightingViews,
  [switch]$SelfTest
 )
 $ErrorActionPreference='Stop';$root=Split-Path -Parent $PSScriptRoot
@@ -19,6 +20,27 @@ function Number($v){$n=[double]::Parse([string]$v,[Globalization.NumberStyles]::
 function Key([string]$v){return $v.Replace('\','/').ToLowerInvariant()}
 function Contact-Poses([double]$x,[double]$z,[double]$height){
  return @(@{name='low';pose=@(($x-2),$z,($height+.6),90,-16.699244)},@{name='top';pose=@(($x+.2),$z,($height+8),270,-88.567904)})
+}
+function Uniform-View($position){
+ Require (@($position).Count -eq 3) 'Uniform ASL position needs three coordinates.'
+ $x=Number $position[0];$z=Number $position[1];$y=Number $position[2]
+ # Low front-quarter view of the real standing actor facing east. Raw engine X,Y,Z.
+ return @(($x+2.5),($y+.9),($z-1.5),-2.5,.35,1.5)
+}
+function Assert-UniformSun([double]$hour,[double]$factor,[bool]$night){
+ $null=Number $hour;$null=Number $factor
+ if($night){Require ($hour -ge 0 -and $hour -lt .01 -and $factor -le .01 -and $factor -ge 0) 'Actual midnight/sun night lighting is absent.'}
+ else{Require ([Math]::Abs($hour-16) -lt .01 -and $factor -ge .99 -and $factor -le 1) 'Actual daytime/sun daylight lighting is absent.'}
+}
+function Lamp-Live($lines){
+ $rows=@($lines|Where-Object{$_ -match 'LAMP-001: \d+ lamp simulations since start, \d+ of them switched on, (\d+) lamp lights live in the scene'})
+ Require ($rows.Count -gt 0) 'Actual stock lamp scene-light receipt absent.'
+ Require ($rows[-1] -match ', (\d+) lamp lights live in the scene') 'Malformed lamp live-count receipt.'
+ return [int]$Matches[1]
+}
+function Model-Stem([string]$debug){
+ Require ($debug -match '^(?:NOID|\d+:)\s+(.+)$' -and $Matches[1] -notmatch '<no shape>') 'Actual object has no identifiable model shape.'
+ return $Matches[1].ToLowerInvariant()
 }
 function Decode([string]$v){$v=$v.Trim();if($v.StartsWith('"')){Require $v.EndsWith('"') 'Bad SQF string.';return $v.Substring(1,$v.Length-2).Replace('""','"')};return ConvertFrom-Json $v -NoEnumerate}
 function Restore-Env([string]$key,$v){if($null-eq $v){Remove-Item -LiteralPath "Env:$key" -ErrorAction SilentlyContinue}else{[Environment]::SetEnvironmentVariable($key,$v,'Process')}}
@@ -65,6 +87,13 @@ function Pair{
 }
 function Same-Pair($a,$b){Require (($a|ConvertTo-Json -Depth 8 -Compress)-ceq ($b|ConvertTo-Json -Depth 8 -Compress)) 'Installed source pair changed.'}
 function Test-Helpers{
+ $view=Uniform-View @(10,20,30)
+ Require ($view.Count -eq 6 -and $view[0] -eq 12.5 -and $view[1] -eq 30.9 -and $view[2] -eq 18.5) 'Uniform camera reordered SQF ASL coordinates.'
+ Assert-UniformSun 16 1 $false;Assert-UniformSun 0 0 $true
+ foreach($v in @(@(16,1,$true),@(0,0,$false),@(0,.5,$true),@(16,[double]::NaN,$false))){$failed=$false;try{Assert-UniformSun $v[0] $v[1] $v[2]}catch{$failed=$true};Require $failed 'Incorrect actual day/night lighting accepted.'}
+ Require ((Lamp-Live @('LAMP-001: 5 lamp simulations since start, 2 of them switched on, 1 lamp lights live in the scene')) -eq 1) 'Actual lamp scene-count parser failed.'
+ Require ((Model-Stem '42: mc vojakw2') -ceq 'mc vojakw2') 'Actual shape debug-name parser failed.'
+ foreach($v in @('42: <no shape>','objNull','')){$failed=$false;try{Model-Stem $v}catch{$failed=$true};Require $failed 'Missing actual model shape accepted.'}
  $views=Contact-Poses 10 20 30
  Require ($views.Count -eq 2 -and $views[0].pose.Count -eq 5 -and $views[1].pose.Count -eq 5) 'Contact camera tuple arity changed.'
  Require ($views[0].pose[0] -eq 8 -and $views[0].pose[1] -eq 20 -and $views[0].pose[2] -eq 30.6 -and
@@ -97,9 +126,12 @@ $output=Join-Path $root ('build/original-weather-player/'+$Label+'-'+(Get-Date -
 $result=[ordered]@{status='running';sourceHead=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;sourceCensusSha256=(Get-FileHash -LiteralPath $SourceCensus).Hash;installed=$before;lockOwner=$env:LOCK_OWNER;maps=@{};scope='Actual controlled SoldierWB, original maps, source-qualified contacts where available, real wet cloth and external-body source/captures. Unsupported soft sources explicit; appearance requires root inspection.'}
 $result.helperSha256=@{};foreach($helper in @('Write-BenchmarkGraphics.ps1','Assert-CaptureLifecycle.ps1')){$result.helperSha256[$helper]=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $helper)).Hash}
 $result.sandSnapshotTrace=[bool]$SandSnapshotTrace
+$result.uniformLightingViews=[bool]$UniformLightingViews
+if($UniformLightingViews){. (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1');$result.helperSha256['TerrainPuddleStockRoof.ps1']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1')).Hash}
 if($SandSnapshotTrace){$result.helperSha256['Read-SandUploadSnapshot.ps1']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Read-SandUploadSnapshot.ps1')).Hash}
 $settings=@{POSEIDON_PLAYER_GROUND_TRACE='1';POSEIDON_UNIFORM_WET_TRACE='1';POSEIDON_SAND_TRACE='1';POSEIDON_MUD_TRACE='1';WGR_UNIFORM_WET='1';WGR_GRASS='0';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_CLOUD_COVERAGE='0';WGR_TERRAIN_JITTER='0';WGR_TEMPORAL='0';WGR_LOD_GOVERNOR_RANGE='1';POSEIDON_SNOWLINE='off';POSEIDON_SNOW_TEST_DEPTH='0'}
 $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE','WGR_SAND_UPLOAD_TRACE','WGR_SAND_SNAPSHOT_FILE','WGR_SAND_SNAPSHOT_ROOT')
+if($UniformLightingViews){$clear+=@('POSEIDON_HEADLAMP','POSEIDON_LAMP_LIGHTS','POSEIDON_LAMP_RADIUS_SCALE','POSEIDON_LAMP_BRIGHTNESS_SCALE','POSEIDON_LAMP_COLOR','POSEIDON_LAMP_AMBIENT_SCALE','POSEIDON_LAMP_CONE','POSEIDON_LAMP_SPILL','POSEIDON_LAMP_SPILL_RADIUS','POSEIDON_LAMP_SPILL_AMBIENT')}
 $keys=@($settings.Keys)+$clear+@('POSEIDON_USER_DIR');$saved=@{};foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $p=$null;$client=$null;$reader=$null;$writer=$null;$held=$false;$armDir=$null;$log=$null;$deadline=$null
 function Lines{
@@ -223,6 +255,74 @@ function Contact-Views($record,[string]$kind){
  }
  return @{sample=$sample;scope='Actual previously walked cell, paused low/top inspection; freefly uses existing camera focus, not actor focus'}
 }
+function Uniform-Lighting([string]$band){
+ $original=State
+ Require ((Eval 'typeOf player') -ceq 'SoldierWB' -and (Eval 'alive player') -eq $true) 'Uniform fixture lost the actual stock soldier.'
+ if($band -eq 'dry'){Require ($original.uniform -lt .001) 'Dry uniform comparison is already wet.';$arm.uniformViewAnchor=@($original.position)}
+ else{Require ($original.uniform -ge .3) 'Wet uniform comparison lacks actual rain history.'}
+ $anchor=@($arm.uniformViewAnchor);$view=Uniform-View $anchor
+ for($i=0;$i -lt 3;++$i){Require ([Math]::Abs((Number $original.position[$i])-(Number $anchor[$i])) -le .01) 'Dry/wet actor left the same standing comparison position.'}
+ $direction=Number (Eval 'getDir player');Require ([Math]::Abs($direction-90) -lt .01) 'Stock comparison standing direction changed.'
+ $actor=Eval 'player';$body=Assert-Body (Lines) ($original.time-.65)
+ if($band -eq 'dry'){$arm.uniformActorDebug=$actor;$arm.uniformOvercast=Number $original.weather.overcast}else{Require ($actor -ceq $arm.uniformActorDebug -and [Math]::Abs((Number $original.weather.overcast)-$arm.uniformOvercast) -lt .001) 'Dry/wet actual actor or cloud lighting differs.'}
+ Require ((Number $original.weather.overcast) -ge .99) 'Opt-in dry/wet lighting requires the matching actual overcast control.'
+ $record=@{before=$original;actor=@{class=(Eval 'typeOf player');debugName=$actor;model='data3d\mc vojakw2.p3d';modelSource=$body;position=$original.position;direction=$direction};camera=@{rawEngineView=$view;command='triSetView';effectActive=(Eval 'triGetCameraEffectActive')};views=@{};scope='Same stock standing actor and render-only camera, matching actual overcast. Rain differs between natural wetting histories. Ordinary idle animation may differ; no pose/bone equivalence or pixelwise equality claim.'}
+ $lampOwned=$false;$roofOwned=$false
+ try{
+  # Time-of-day jumps recalculate the real sun while simulation remains paused;
+  # they do not fabricate clothing history or attempt to change rain density.
+  Exec 'setDate [1985,6,21,16,0]';$baseline=State;Assert-Paused $original $baseline
+  $pose=($view|ForEach-Object{([double]$_).ToString('R',$culture)}) -join ','
+  Camera 'EXTERNAL';Require ((Eval ('triSetView ['+$pose+']')) -ceq 'OK') 'Uniform render-only view refused.'
+  Require ((Number (Eval 'triGetCameraEffectActive')) -eq 0) 'Uniform render-only view suspended player controls.'
+  $lampX=(Number $anchor[0])+1.5;$lampZ=(Number $anchor[1])+.7
+  $ground=Get-TerrainPuddleFixtureHeight ${function:Send} $lampX $lampZ
+  $lampPosition=@($lampX,$lampZ,$ground);$tuple=($lampPosition|ForEach-Object{([double]$_).ToString('R',$culture)}) -join ','
+  Exec ('uniformStockLamp="StreetLampWood" createVehicle ['+$tuple+'];uniformStockLamp setPosASL ['+$tuple+'];uniformStockLamp allowDamage false;uniformStockLamp switchLight "OFF"');$lampOwned=$true
+  Require ((Eval 'typeOf uniformStockLamp') -ceq 'StreetLampWood' -and (Eval 'isNull uniformStockLamp') -eq $false) 'Real stock lamp failed to spawn.'
+  $lampDebug=Eval 'uniformStockLamp';$lampModel=Model-Stem $lampDebug;$actualLamp=Eval 'getPosASL uniformStockLamp'
+  for($i=0;$i -lt 3;++$i){Require ([Math]::Abs((Number $actualLamp[$i])-$lampPosition[$i]) -le .01) 'Stock lamp placement differs from the matching fixture.'}
+  if($band -eq 'dry'){$arm.uniformLampModel=$lampModel}else{Require ($lampModel -ceq $arm.uniformLampModel) 'Dry/wet stock lamp model differs.'}
+  $record.lamp=@{class=(Eval 'typeOf uniformStockLamp');debugName=$lampDebug;modelStem=$lampModel;position=$actualLamp;requestedPosition=$lampPosition;config='Installed stock class and light parameters; no lamp data overrides'}
+  $snapshot={param([string]$name,[bool]$night,[string]$lampState)
+   $hour=Number (Eval 'dayTime');$sun=Number (Eval 'triGetShadowSunFactor');Assert-UniformSun $hour $sun $night
+   $stateBefore=State;Assert-Paused $baseline $stateBefore
+   Require ((Eval 'typeOf uniformStockLamp') -ceq 'StreetLampWood') 'Actual lamp identity disappeared before capture.'
+   $lampNow=Eval 'getPosASL uniformStockLamp';for($i=0;$i -lt 3;++$i){Require ([Math]::Abs((Number $lampNow[$i])-$lampPosition[$i]) -le .01) 'Actual lamp moved between lighting captures.'}
+   Require ((Number (Eval 'triGetCameraEffectActive')) -eq 0) 'Paused render-only camera became a gameplay camera.'
+   Capture ('uniform-'+$band+'-'+$name);$stateAfter=State;Assert-Paused $stateBefore $stateAfter
+   Require ((Number (Eval 'dayTime')) -eq $hour -and (Number (Eval 'triGetShadowSunFactor')) -eq $sun) 'Actual lighting changed during paused capture.'
+   $record.views[$name]=@{before=$stateBefore;after=$stateAfter;hour=$hour;shadowSunFactor=$sun;lampStateCommand=$lampState;lampLive=(Lamp-Live (Lines));lampSourceRows=@(Lines|Where-Object{$_ -match 'LAMP-001:|LAMP-003 type StreetLampWood:'}|Select-Object -Last 3);lampClass=(Eval 'typeOf uniformStockLamp');lampPosition=$lampNow;cameraEffectActive=(Eval 'triGetCameraEffectActive');body=(Assert-Body (Lines) ($baseline.time-.65))}
+  }
+  & $snapshot 'day-close' $false 'OFF'
+  Exec 'setDate [1985,6,21,0,0];uniformStockLamp switchLight "OFF"';Start-Sleep -Milliseconds 500
+  & $snapshot 'night-lamp-off' $true 'OFF';$off=[int]$record.views['night-lamp-off'].lampLive
+  Exec 'uniformStockLamp switchLight "ON"';Start-Sleep -Milliseconds 500
+  & $snapshot 'night-lamp-on' $true 'ON';Require ($record.views['night-lamp-on'].lampLive -eq $off+1) 'Real stock lamp ON added no exact one scene light.'
+  Exec 'uniformStockLamp switchLight "OFF"';Start-Sleep -Milliseconds 500
+  & $snapshot 'night-lamp-off-return' $true 'OFF';Require ($record.views['night-lamp-off-return'].lampLive -eq $off) 'Real lamp OFF did not remove its scene light.'
+  Exec 'setDate [1985,6,21,16,0]';Start-Sleep -Milliseconds 500
+  & $snapshot 'roof-absent' $false 'OFF'
+  $roof=New-TerrainPuddleStockRoof -SendCommand ${function:Send} -X $anchor[0] -Z $anchor[1] -RoofLift 3;$roofOwned=$true
+  Require ($roof.class -ceq 'CampEastC' -and $roof.model -ceq 'stan_eastC.p3d' -and $roof.roofLift -eq 3) 'Lifted stock roof identity differs.'
+  & $snapshot 'roof-present' $false 'OFF'
+  $record.views['roof-present'].roof=@{class=(Eval 'typeOf puddleStockRoof');debugName=(Eval 'puddleStockRoof');position=(Eval 'getPosASL puddleStockRoof');fixture=$roof}
+  Require ($record.views['roof-present'].roof.class -ceq 'CampEastC' -and (Model-Stem $record.views['roof-present'].roof.debugName) -ceq 'stan_eastc') 'Captured roof model/class differs from its actual master.'
+  for($i=0;$i -lt 3;++$i){Require ([Math]::Abs((Number $record.views['roof-present'].roof.position[$i])-(Number $roof.actualPosition[$i])) -le .01) 'Captured roof master moved.'}
+  Remove-TerrainPuddleStockRoof -SendCommand ${function:Send};$roofOwned=$false
+  & $snapshot 'roof-removed' $false 'OFF';$record.views['roof-removed'].actualRoofRemoved=Eval 'isNull puddleStockRoof'
+  Require ($record.views['roof-removed'].actualRoofRemoved -eq $true) 'Actual roof master removal absent.'
+  $record.pausedRoofRetention=@{before=$record.views['roof-absent'].before.uniform;covered=$record.views['roof-present'].after.uniform;after=$record.views['roof-removed'].after.uniform;scope='Paused retention/lighting only; does not prove shelter stops wetting during live rain'}
+ }finally{
+  if($roofOwned){Remove-TerrainPuddleStockRoof -SendCommand ${function:Send}}
+  if($lampOwned){Exec 'uniformStockLamp switchLight "OFF";deleteVehicle uniformStockLamp';Require ((Eval 'isNull uniformStockLamp') -eq $true) 'Owned comparison lamp deletion failed.'}
+  Require ((Eval 'triClearView') -ceq 'OK') 'Uniform render-only camera did not release.'
+  Exec 'setDate [1985,6,21,16,0]'
+ }
+ Start-Sleep -Milliseconds 500;$record.after=State;Assert-Paused $original $record.after
+ Require ([Math]::Abs((Number (Eval 'getDir player'))-$direction) -lt .01) 'Comparison changed actual standing direction.'
+ return $record
+}
 try{
  foreach($key in $clear){Restore-Env $key $null};foreach($key in $settings.Keys){[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
  foreach($map in $Maps){
@@ -249,6 +349,9 @@ try{
   $stream=$client.GetStream();$stream.ReadTimeout=30000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
   Start-Sleep -Seconds 12;Require ((Eval 'triSceneReady')-ceq 'OK') 'Original world mission not ready.'
   Exec 'player allowDamage false;0 setFog 0;0 setOvercast 0;0 setRain 0;setDate [1985,6,21,16,0];setAccTime 0'
+  # Applied through the normal weather/ordinary placement simulation before
+  # taking either band; rain is still initially zero and wets cloth only later.
+  if($UniformLightingViews){Exec '0 setOvercast 1;0 setRain 0'}
   $null=Send @{cmd='dev_snow';action='disable'};$null=Send @{cmd='weather_particles';action='set';mode='off';density=0;snowflakes=$false}
   if($NativeHeightFixture){$arm.gates.nativeHeightFixture=Native-Heights $uniform}
   if($sand){$null=Place $sand;$arm.gates.sandSource=Source-Lane $sand 'sand';$arm.gates.sandWalk=Walk 'sand-dry-third' $sand 'sand' $true}
@@ -257,10 +360,12 @@ try{
   if($soil){$arm.gates.drySoilWalk=Walk 'soil-dry-third' $soil 'mud' $false;$null=Place $soil}
   elseif(!$sand){$arm.gates.unqualifiedDryWalk=Walk 'unqualified-dry-third' $uniform 'mud' $false;$null=Place $uniform}
   $dry=State;Require ($dry.uniform-lt .001 -and $dry.weather.liquidRain-lt .001) 'Dry clothing/weather control not initially dry.';Capture 'uniform-dry-third';$arm.gates.dry=$dry
+  if($UniformLightingViews){$arm.gates.uniformLightingDry=Uniform-Lighting 'dry'}
   Exec '0 setOvercast 1;0 setRain 1;setAccTime 4';$until=[DateTime]::UtcNow.AddSeconds($WetDeadlineSeconds)
   do{Start-Sleep -Milliseconds 400;$wet=State;Require ([DateTime]::UtcNow-lt $until) 'Actual rain did not wet the exposed controlled soldier.'}while($wet.uniform-lt .3 -or $wet.weather.liquidRain-lt .3 -or ($soil -and $wet.mud.wetness-lt .3))
   Exec 'setAccTime 0';$wet=State;Require (!$wet.weather.particleSnowflakes -and $wet.weather.particleDensity-eq 0) 'Wetting uses snow/particle override instead of actual liquid rain.'
   $arm.gates.wet=$wet;$arm.gates.cloth=Assert-Cloth (Lines);$arm.gates.wetBody=Assert-Body (Lines) ($wet.time-.65);Capture 'uniform-wet-third';$arm.gates.wetReturn=Return-Views 'uniform-wet'
+  if($UniformLightingViews){$arm.gates.uniformLightingWet=Uniform-Lighting 'wet'}
   if($soil){$arm.gates.wetSoilWalk=Walk 'mud-wet-third' $soil 'mud' $true}
   else{$arm.gates.unqualifiedWetWalk=Walk 'unqualified-mud-wet-third' $uniform 'mud' $false}
   $a=State;Start-Sleep -Seconds 2;$b=State;Assert-Paused $a $b;$arm.gates.paused=@{before=$a;after=$b}
