@@ -3904,6 +3904,7 @@ impl Renderer {
             heightmap_gen,
             &conform_params,
             self.terrain.snow_buffer(),
+            self.terrain.holes_buffer(),
             self.sky.froxel_view(),
             self.sky.sh_buffer(),
             &skyvis_view,

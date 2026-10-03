@@ -553,7 +553,9 @@ impl Terrain {
         let holes_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_terrain_holes"),
             size: TERRAIN_HOLES_BYTES,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            // UNIFORM too (Sinkhole W1b): the object shading reads the openings from the conform
+            // group, and the GPU-driven path has no fragment storage slot left for it.
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             // Zero-initialised by wgpu: info.x = 0, no holes.
             mapped_at_creation: false,
         });
@@ -1069,6 +1071,10 @@ impl Terrain {
             self.holes_data = data;
             self.holes_gen += 1;
         }
+    }
+
+    pub fn holes_buffer(&self) -> &wgpu::Buffer {
+        &self.holes_buffer
     }
 
     pub fn holes_data(&self) -> &[f32] {
@@ -2185,7 +2191,10 @@ mod terrain_hole_tests {
     #[test]
     fn object_shaders_compose_with_the_underground_sun_test() {
         let src = include_str!("../shaders/shading.wgsl");
-        assert!(src.contains("smoothstep(0.05, 0.25, surface_y(world_abs.xz) - world_abs.y)"));
+        assert!(src.contains("let underground_s = 1.0 - cave_daylight(world_abs);"));
+        let conform = include_str!("../shaders/conform.wgsl");
+        assert!(conform.contains("fn cave_daylight(world: vec3<f32>) -> f32"));
+        assert!(conform.contains("@group(4) @binding(3) var<uniform> cave_openings: CaveOpenings;"));
         assert!(src.contains("* leaf_cavity * underground_amb;"));
         compose(include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl");
         compose(include_str!("../gfx3d/gpu_driven.wgsl"), "gfx3d/gpu_driven.wgsl");

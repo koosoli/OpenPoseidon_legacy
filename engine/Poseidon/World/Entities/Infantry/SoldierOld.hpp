@@ -562,6 +562,8 @@ class Man: public Person
 	float _waterDepth;
 	float _hydroWaterDepth;
 	bool _waterBuoyancyContact;
+	// Sinkhole W1b: the handheld flashlight (SoldierOldFlashlight.cpp), switched by _pilotLight
+	Ref<LightReflectorOnVehicle> _flashlight;
 
 	Foundation::Time _whenKilled;
 	Foundation::Time _lastMovementTime;
@@ -924,6 +926,9 @@ class Man: public Person
 	Vector3 GetHeadCenter() const;
 	Matrix4 HeadAimBasis() const;
 	Vector3 GetEyeDirection() const override;
+	// Sinkhole W1b: handheld flashlight (SoldierOldFlashlight.cpp)
+	void UpdateFlashlight();
+	bool LeftHandFrame(Matrix4& modelSpace) const;
 	Matrix3 GetHeadRelOrientation() const;
 	Vector3 GetWeaponPoint( int weapon ) const override;
 	bool GetWeaponCartridgePos

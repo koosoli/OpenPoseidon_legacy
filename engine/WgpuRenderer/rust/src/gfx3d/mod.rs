@@ -2047,6 +2047,19 @@ impl ConformGroup {
                     },
                     count: None,
                 },
+                // Sinkhole W1b: the terrain's open holes (cave mouths, stairwells) for the cave
+                // light term in shading.wgsl. Uniform, not storage: the GPU-driven path is at its
+                // fragment storage limit.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(crate::terrain::TERRAIN_HOLES_BYTES),
+                    },
+                    count: None,
+                },
             ],
         });
         let params_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -2098,9 +2111,29 @@ impl ConformGroup {
                     },
                     count: None,
                 },
+                // Sinkhole W1b: the terrain's open holes (cave mouths, stairwells) for the cave
+                // light term in shading.wgsl. Uniform, not storage: the GPU-driven path is at its
+                // fragment storage limit.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(crate::terrain::TERRAIN_HOLES_BYTES),
+                    },
+                    count: None,
+                },
             ],
         });
-        let gpu_bind = Self::make_gpu_bind(device, &gpu_layout, &dummy_view, &params_buf);
+        // Zero-filled: no openings until the terrain hands its buffer over in ensure().
+        let dummy_holes = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_3d_conform_dummy_holes"),
+            size: crate::terrain::TERRAIN_HOLES_BYTES,
+            usage: wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: false,
+        });
+        let gpu_bind = Self::make_gpu_bind(device, &gpu_layout, &dummy_view, &params_buf, &dummy_holes);
         // Zero depth exits before the variable-length deficit array is sampled.
         let dummy_snow = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_3d_conform_dummy_snow"),
@@ -2124,6 +2157,10 @@ impl ConformGroup {
                     binding: 2,
                     resource: dummy_snow.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: dummy_holes.as_entire_binding(),
+                },
             ],
         });
         ConformGroup {
@@ -2137,13 +2174,14 @@ impl ConformGroup {
     }
 
     fn make_gpu_bind(device: &wgpu::Device, layout: &wgpu::BindGroupLayout,
-                     heightmap: &wgpu::TextureView, params: &wgpu::Buffer) -> wgpu::BindGroup {
+                     heightmap: &wgpu::TextureView, params: &wgpu::Buffer, holes: &wgpu::Buffer) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wgr_gpu_conform_bind"),
             layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(heightmap) },
                 wgpu::BindGroupEntry { binding: 1, resource: params.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: holes.as_entire_binding() },
             ],
         })
     }
@@ -2158,10 +2196,11 @@ impl ConformGroup {
         generation: u64,
         params: &crate::terrain::TerrainConformParams,
         snow: &wgpu::Buffer,
+        holes: &wgpu::Buffer,
     ) {
         queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(params));
         if self.bind.is_none() || self.bound_gen != generation {
-            self.gpu_bind = Some(Self::make_gpu_bind(device, &self.gpu_layout, heightmap_view, &self.params_buf));
+            self.gpu_bind = Some(Self::make_gpu_bind(device, &self.gpu_layout, heightmap_view, &self.params_buf, holes));
             self.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("wgr_3d_conform_bind"),
                 layout: &self.layout,
@@ -2177,6 +2216,10 @@ impl ConformGroup {
                     wgpu::BindGroupEntry {
                         binding: 2,
                         resource: snow.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: holes.as_entire_binding(),
                     },
                 ],
             }));
@@ -7420,6 +7463,7 @@ impl Gfx3d {
         heightmap_gen: u64,
         conform_params: &crate::terrain::TerrainConformParams,
         snow: &wgpu::Buffer,
+        holes: &wgpu::Buffer,
         froxel_view: &wgpu::TextureView,
         sky_sh_buf: &wgpu::Buffer,
         skyvis_view: &wgpu::TextureView,
@@ -7439,7 +7483,7 @@ impl Gfx3d {
         // Lend the terrain heightmap + its sampling params to the mesh conform group
         // (group 4) so vs_main can conform ClipLand vegetation to SurfaceY per vertex.
         self.conform
-            .ensure(device, queue, heightmap_view, heightmap_gen, conform_params, snow);
+            .ensure(device, queue, heightmap_view, heightmap_gen, conform_params, snow, holes);
         // DZ-003: take Sky's reflection env map. The env texture is created once and never
         // resized, so gen 0 binds it exactly once and this is a no-op every frame after.
         // Both the per-draw group-1 binds (below) and the GPU-driven group-1 binds

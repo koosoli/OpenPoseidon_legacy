@@ -331,6 +331,7 @@ void Man::OnPositionChanged()
 void Man::Simulate(float deltaT, SimulationImportance prec)
 {
     RestoreCargoStateAfterLoad();
+    UpdateFlashlight(); // Sinkhole W1b
     if (_ladderBuilding && _ladderIndex >= 0)
     {
         if (IsDammageDestroyed())

@@ -29,6 +29,55 @@ struct SnowData {
 };
 @group(4) @binding(2) var<storage, read> snow: SnowData;
 
+// Sinkhole W1b: the terrain's OPEN holes (cave mouths, stairwells -- the same edges the terrain pass
+// discards, see terrain.wgsl TerrainHoles): edges[i] = {nx, nz, d, last}, inside an area when
+// nx*x + nz*z + d >= 0 for all its edges. Uniform (the GPU-driven path has no storage slot left).
+struct CaveOpenings {
+    info: vec4<f32>, // x = edge count
+    edges: array<vec4<f32>, 64>,
+};
+@group(4) @binding(3) var<uniform> cave_openings: CaveOpenings;
+
+// How much daylight reaches a point under the terrain: 1 = open air, 0 = deep in a cave.
+//
+// Light enters a cave only through its openings, so it falls off with how far a point reaches into the
+// cave from the nearest opening -- horizontally, and more slowly with depth straight under one (a
+// stairwell is lit from the sky above it). The same idea as DayZ's underground transition triggers,
+// derived from the hole geometry instead of authored per cave. Above the terrain, and in the thin
+// 0.05-0.25 m contact band under it, nothing changes.
+fn cave_daylight(world: vec3<f32>) -> f32 {
+    if (hm_params.enabled < 0.5) {
+        return 1.0;
+    }
+    let depth = surface_y(world.xz) - world.y;
+    if (depth <= 0.05) {
+        return 1.0;
+    }
+    // Distance in xz to the nearest opening: for a convex outline, the largest outward edge distance
+    // (0 inside it). A collapsed outline (zero-length normals) is skipped, never "inside everywhere".
+    var nearest = 1.0e6;
+    var outside = -1.0e6;
+    var valid = false;
+    let n = min(u32(max(cave_openings.info.x, 0.0)), 64u);
+    for (var i = 0u; i < n; i = i + 1u) {
+        let e = cave_openings.edges[i];
+        if (dot(e.xy, e.xy) >= 0.25) {
+            outside = max(outside, -(e.x * world.x + e.y * world.z + e.z));
+            valid = true;
+        }
+        if (e.w > 0.5) {
+            if (valid) {
+                nearest = min(nearest, max(outside, 0.0));
+            }
+            outside = -1.0e6;
+            valid = false;
+        }
+    }
+    let reach = nearest + 0.35 * depth;
+    let open = 1.0 - smoothstep(1.0, 9.0, reach);
+    return mix(1.0, open, smoothstep(0.05, 0.25, depth));
+}
+
 // Same buffer and evaluation as terrain.wgsl. The source parity test keeps this
 // sampling identical despite the different bind-group locations of both pipelines.
 fn snow_depth(world_xz: vec2<f32>) -> f32 {
