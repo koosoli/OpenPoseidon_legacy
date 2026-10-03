@@ -2321,7 +2321,7 @@ mod enfusion_ground_tests {
 mod terrain_hole_tests {
     use naga_oil::compose::NagaModuleDescriptor;
 
-    fn compose(source: &'static str, path: &'static str) {
+    fn compose(source: &'static str, path: &'static str) -> naga::Module {
         let mut composer = crate::shaders::build_composer();
         let module = composer.make_naga_module(NagaModuleDescriptor {
             source,
@@ -2335,6 +2335,39 @@ mod terrain_hole_tests {
         naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
             .validate(&module)
             .expect("shader validates");
+        module
+    }
+
+    #[test]
+    fn retained_cave_lighting_keeps_soft_ground_storage_out_of_fragments() {
+        let module = compose(include_str!("../gfx3d/gpu_driven.wgsl"), "gfx3d/gpu_driven.wgsl");
+        let info = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+            .validate(&module).expect("actual retained shader validates");
+        let mut fragments = 0;
+        let mut cave_used = false;
+        for (index, entry) in module.entry_points.iter().enumerate() {
+            if entry.stage != naga::ShaderStage::Fragment { continue; }
+            fragments += 1;
+            let usage = info.get_entry_point(index);
+            let mut storage_count = 0;
+            for (handle, global) in module.global_variables.iter() {
+                let used = !usage[handle].is_empty();
+                if matches!(global.space, naga::AddressSpace::Storage { .. }) && used {
+                    storage_count += 1;
+                }
+                if let Some(binding) = &global.binding {
+                    if binding.group == 4 && binding.binding == 2 {
+                        assert!(!used, "soft ground is vertex-only in the retained layout");
+                    }
+                    if binding.group == 4 && binding.binding == 3 && used {
+                        cave_used = true;
+                    }
+                }
+            }
+            assert!(storage_count <= 8, "actual fragment needs {storage_count} storage slots");
+        }
+        assert!(fragments > 0 && cave_used, "must exercise live retained cave lighting");
     }
 
     // Sinkhole W1: the hole test composes and validates in both shaders that use it.

@@ -52,7 +52,10 @@ fn cave_daylight2(world: vec3<f32>) -> vec2<f32> {
     if (hm_params.enabled < 0.5) {
         return vec2<f32>(1.0, 1.0);
     }
-    let depth = surface_y(world.xz) - world.y;
+    // A cave roof is the authored terrain, not the camera-local soft-ground
+    // footprint grid. This also keeps the retained fragment path within its
+    // eight storage bindings; signed snow/mud/sand remains vertex-only there.
+    let depth = bare_surface_y(world.xz) - world.y;
     if (depth <= 0.05) {
         return vec2<f32>(1.0, 1.0);
     }
