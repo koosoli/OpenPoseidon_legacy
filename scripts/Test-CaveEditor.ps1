@@ -27,7 +27,7 @@ $settings=@{POSEIDON_USER_DIR=$profile;WGR_GRASS='0';POSEIDON_SNOWLINE='off';POS
 $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE')
 $saved=@{};foreach($key in @($settings.Keys)+$clear){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $log=Join-Path $taskOut 'engine.log';$p=$null;$client=$null;$held=$false
-$result=[ordered]@{passed=$false;expectedCommit=$ExpectedCommit;installed=$before;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;scope='Original retail Everon without addon fixture. Actual bounded cave queries and terrain-only legacy rays, stock W-key traversal, roof controls and sub-grid aperture. Screenshots require runtime owner inspection; no Box3D cavity, AI navigation, persistence or general terrain ray equivalence claimed.'}
+$result=[ordered]@{passed=$false;expectedCommit=$ExpectedCommit;installed=$before;lookPreparations=@();scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;scope='Original retail Everon without addon fixture. Actual bounded cave queries and terrain-only legacy rays, stock W-key traversal, roof controls and sub-grid aperture. Screenshots require runtime owner inspection; no Box3D cavity, AI navigation, persistence or general terrain ray equivalence claimed.'}
 function Send($command){
  Require (!$p.HasExited) 'Owned game exited unexpectedly.'
  $wire=$command|ConvertTo-Json -Depth 12 -Compress;$wire|Add-Content -LiteralPath (Join-Path $taskOut 'harness.jsonl');$writer.WriteLine($wire)
@@ -36,6 +36,15 @@ function Send($command){
 }
 function Eval([string]$code){return Decode ([string](Send @{cmd='eval';code=$code}).result)}
 function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
+function CentreLook{
+ # KP5 is the fresh profile's ordinary LookCenter action. Unlike setting the
+ # screen cursor alone, it resets the retained virtual-camera/UI aim direction.
+ $receipt=@{beforeDir=(Num (Eval 'getDir player'));beforeCursor=(Eval 'triCursorPos')}
+ Exec 'triClearView;triCursorMove [0,0]';Start-Sleep -Milliseconds 250
+ $null=Send @{cmd='key';sc=93;hold=$true};try{Start-Sleep -Milliseconds 350}finally{$null=Send @{cmd='key_up';sc=93}}
+ Start-Sleep -Milliseconds 250;$receipt.afterDir=Num (Eval 'getDir player');$receipt.afterCursor=Eval 'triCursorPos';return $receipt
+}
+function HeadingError([double]$actual,[double]$wanted){return [Math]::Abs((($actual-$wanted+540)%360)-180)}
 function Point($site,[double]$along,[double]$side,[double]$y){return @{x=($site.x+$site.fx*$along+$site.sx*$side);z=($site.z+$site.fz*$along+$site.sz*$side);y=$y}}
 function State($point,$ray){
  $query=@{cmd='dev_cave_editor';action='state'};if($point){foreach($k in @('x','y','z')){$query[$k]=Num $point[$k]}}
@@ -51,7 +60,10 @@ function Heights($points){
 function PlaceOutside($site){
  $point=Point $site -2 0 $site.floor
  Exec ('triClearView;setAccTime 0;player setPos ['+(Fmt $point.x)+','+(Fmt $point.z)+',0];player setDir '+(Fmt $site.heading)+';player setUnitPos "UP";player switchCamera "INTERNAL"')
+ $look=CentreLook
  Exec 'setAccTime 1';Start-Sleep -Milliseconds 800;Exec 'setAccTime 0'
+ $look.settledDir=Num (Eval 'getDir player');$look.requestedDir=$site.heading;$result.lookPreparations+=,$look
+ Require ((HeadingError $look.settledDir $site.heading) -lt 5) 'Ordinary LookCenter did not align the player before cave traversal.'
  Require ((Eval 'typeOf player') -ceq 'SoldierWB' -and (Eval 'alive player')) 'Stock live US soldier unavailable.'
  Require ((Num (Eval 'triGetCameraEffectActive')) -eq 0) 'Camera effect suspends gameplay input.'
  return Eval 'getPosASL player'
@@ -60,7 +72,7 @@ function Capture([string]$name,$position,$direction){
  if($position){Exec ('triSetView ['+((@($position)+@($direction)|ForEach-Object{Fmt $_}) -join ',')+']')}
  Start-Sleep -Milliseconds 400;$path=Join-Path $taskOut ($name+'.png');$null=Send @{cmd='screenshot';path=$path}
  $until=[DateTime]::UtcNow.AddSeconds(15);while(!(Test-Path -LiteralPath $path)){Require ([DateTime]::UtcNow -lt $until) 'Screenshot not written.';Start-Sleep -Milliseconds 150}
- $result[$name]=@{path=$path;positionXYZ=$position;directionXYZ=$direction}
+$result[$name]=@{path=$path;positionXYZ=$position;directionXYZ=$direction}
  if($position){Exec 'triClearView'}
 }
 function AssertUnchanged($baseline,$actual){
@@ -122,20 +134,21 @@ try{
   Start-Sleep -Milliseconds 180;$position=Eval 'getPosASL player';Require ($position.Count -eq 3 -and (Eval 'alive player')) 'Player disappeared or died during cave traversal.'
   $along=($position[0]-$site.x)*$site.fx+($position[1]-$site.z)*$site.fz;$side=($position[0]-$site.x)*$site.sx+($position[1]-$site.z)*$site.sz
   Require ([Math]::Abs($side) -lt 4 -and $along -gt -8 -and $along -lt 24) 'Controlled player escaped bounded lane.'
-  $probe=State @{x=$position[0];z=$position[1];y=($position[2]+.2)} $null;$samples+=@{position=$position;along=$along;side=$side;state=$probe}
+  $probe=State @{x=$position[0];z=$position[1];y=($position[2]+.2)} $null;$samples+=@{position=$position;along=$along;side=$side;dir=(Num (Eval 'getDir player'));cursor=(Eval 'triCursorPos');state=$probe}
   $entered=$along -ge 6 -and $probe.atHeight -and $position[2]+1 -lt $probe.terrainY
  }while(!$entered -and [DateTime]::UtcNow -lt $until)
  $null=Send @{cmd='key_up';sc=26};$held=$false;Exec 'setAccTime 0'
  $result.traversal=@{start=$start;inputContext=$input;samples=$samples;entered=$entered};Require $entered 'W-key traversal did not enter below retained roof.'
  Capture 'player-inside-first' $null $null;Exec 'player switchCamera "EXTERNAL"';Capture 'player-inside-third' $null $null
  # Return through the entrance using ordinary gameplay input before closing it.
- Exec ('player switchCamera "INTERNAL";player setDir '+(Fmt ($site.heading+180))+';setAccTime 1')
+ Exec ('player switchCamera "INTERNAL";player setDir '+(Fmt ($site.heading+180))+';setAccTime 0')
+ $result.exitLook=CentreLook;Require ((HeadingError (Num (Eval 'getDir player')) ($site.heading+180)) -lt 5) 'Exit heading was not aligned before W input.';Exec 'setAccTime 1'
  $null=Send @{cmd='key';sc=26;hold=$true};$held=$true;$returnSamples=@();$left=$false;$until=[DateTime]::UtcNow.AddSeconds(15)
  do{
   Start-Sleep -Milliseconds 180;$position=Eval 'getPosASL player';Require ((Eval 'alive player') -and $position.Count -eq 3) 'Player unavailable during cave exit.'
   $along=($position[0]-$site.x)*$site.fx+($position[1]-$site.z)*$site.fz;$side=($position[0]-$site.x)*$site.sx+($position[1]-$site.z)*$site.sz
   Require ([Math]::Abs($side) -lt 4 -and $along -gt -8 -and $along -lt 24) 'Exit escaped bounded cave lane.'
-  $probe=State @{x=$position[0];z=$position[1];y=($position[2]+.2)} $null;$returnSamples+=@{position=$position;along=$along;state=$probe};$left=$along -lt -1 -and !$probe.inFootprint
+  $probe=State @{x=$position[0];z=$position[1];y=($position[2]+.2)} $null;$returnSamples+=@{position=$position;along=$along;dir=(Num (Eval 'getDir player'));cursor=(Eval 'triCursorPos');state=$probe};$left=$along -lt -1 -and !$probe.inFootprint
  }while(!$left -and [DateTime]::UtcNow -lt $until)
  $null=Send @{cmd='key_up';sc=26};$held=$false;Exec 'setAccTime 0';$result.exitTraversal=@{left=$left;samples=$returnSamples};Require $left 'W-key traversal did not leave cave before undo.'
  $undone=Send @{cmd='dev_cave_editor';action='undo'};Require ($undone.count -eq 0) 'Normal cave undo did not release owner.'

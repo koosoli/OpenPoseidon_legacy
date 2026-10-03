@@ -30,6 +30,13 @@ function Send($command){
 }
 function Eval([string]$code){return Decode ([string](Send @{cmd='eval';code=$code}).result)}
 function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
+function CentreLook{
+ $receipt=@{beforeDir=(Num (Eval 'getDir vehicle player'));beforeCursor=(Eval 'triCursorPos')}
+ Exec 'triClearView;triCursorMove [0,0]';Start-Sleep -Milliseconds 250
+ $null=Send @{cmd='key';sc=93;hold=$true};try{Start-Sleep -Milliseconds 350}finally{$null=Send @{cmd='key_up';sc=93}}
+ Start-Sleep -Milliseconds 250;$receipt.afterDir=Num (Eval 'getDir vehicle player');$receipt.afterCursor=Eval 'triCursorPos';return $receipt
+}
+function HeadingError([double]$actual,[double]$wanted){return [Math]::Abs((($actual-$wanted+540)%360)-180)}
 function Point($site,[double]$along,[double]$side,[double]$y){return @{x=($site.x+$site.fx*$along+$site.sx*$side);z=($site.z+$site.fz*$along+$site.sz*$side);y=$y}}
 function State($point,$ray){
  $query=@{cmd='dev_cave_editor';action='state'};if($point){foreach($k in @('x','y','z')){$query[$k]=Num $point[$k]}};if($ray){$query.rayFromY=Num $ray[0];$query.rayToY=Num $ray[1]}
@@ -47,6 +54,7 @@ function Traverse($site,$preset,[bool]$inward,$arm,[double]$startOriginY){
  $isTank=$preset.tank;$key=26;if(!$inward-and $isTank){$key=22}
  $heading=$site.heading;if(!$inward-and !$isTank){$heading+=180}
  if(!$isTank){Exec ('player setDir '+(Fmt $heading)+';player switchCamera "INTERNAL"')}
+ $arm.look=CentreLook;Require ((HeadingError (Num (Eval 'getDir vehicle player')) $heading)-lt 5) 'Ordinary LookCenter did not align actor before trench traversal.'
  Require ((Num (Eval 'triGetCameraEffectActive'))-eq 0) 'Camera effect prevents controlled input.'
  $arm.inputContext=Eval 'triGetInputContext';Exec 'setAccTime 1';$null=Send @{cmd='key';sc=$key;hold=$true};$script:heldKey=$key
  $samples=@();$done=$false;$until=[DateTime]::UtcNow.AddSeconds(25)
@@ -57,7 +65,7 @@ function Traverse($site,$preset,[bool]$inward,$arm,[double]$startOriginY){
   $along=($position[0]-$site.x)*$site.fx+($position[1]-$site.z)*$site.fz;$side=($position[0]-$site.x)*$site.sx+($position[1]-$site.z)*$site.sz
   Require ([Math]::Abs($side)-lt ($preset.width*.5+1)-and $along-gt -14-and $along-lt ($preset.length-1)) 'Controlled actor escaped bounded trench lane.'
   $sample=State @{x=$position[0];z=$position[1];y=($position[2]+.05)} $null
-  $originDrop=$startOriginY-(Num $position[2]);$samples+=@{position=$position;along=$along;side=$side;originDrop=$originDrop;speed=(Num (Eval 'speed vehicle player'));state=$sample}
+  $originDrop=$startOriginY-(Num $position[2]);$samples+=@{position=$position;along=$along;side=$side;originDrop=$originDrop;speed=(Num (Eval 'speed vehicle player'));dir=(Num (Eval 'getDir vehicle player'));cursor=(Eval 'triCursorPos');state=$sample}
   if($inward){$done=$along-ge ($preset.ramp+2)-and $sample.atHeight-and $originDrop-gt ($preset.depth*.6)-and [Math]::Abs((Num $sample.roadY)-($site.rim-$preset.depth))-lt .12}
   else{$done=$along-lt -1-and !$sample.inFootprint}
  }while(!$done-and [DateTime]::UtcNow-lt $until)}finally{$null=Send @{cmd='key_up';sc=$key};$script:heldKey=$null;Exec 'setAccTime 0';$arm.samples=$samples;$arm.completed=$done}
@@ -95,10 +103,10 @@ try{
  };$result.refinement=$attempts;Require ([bool]$site) 'No flat dry source admitted in bounded Everon census.';$result.site=$site
  foreach($preset in @(@{name='infantry';tank=$false;width=1.5;depth=1.6;length=12;ramp=4.8},@{name='tank';tank=$true;width=5;depth=2;length=24;ramp=12})){
   $arm=[ordered]@{preset=$preset};$result[$preset.name]=$arm;$floor=$site.rim-$preset.depth;$mid=$preset.ramp+2.5;$point=Point $site $mid 0 ($site.rim+.2)
-  $baseline=State $point @($site.rim+1,$floor+.1);Require (!$baseline.inFootprint-and $baseline.terrainRayHit) 'Original trench column lacks actual terrain intersection.';$arm.baseline=$baseline
+  $baseline=State $point @(($site.rim+1),($floor+.1));Require (!$baseline.inFootprint-and $baseline.terrainRayHit) 'Original trench column lacks actual terrain intersection.';$arm.baseline=$baseline
   Capture ($preset.name+'-baseline-top') @($point.x,($site.rim+10),$point.z) @(0,-1,.01)
   $created=Send @{cmd='dev_cave_editor';action='trench';x=$site.x;y=$site.rim;z=$site.z;heading=$site.heading;width=$preset.width;depth=$preset.depth;length=$preset.length;tank=$preset.tank};Require ($created.count-eq 1) 'Trench owner count differs.';$arm.created=$created
-  $inside=State $point @($site.rim+1,$floor+.1);AssertUnchanged $baseline $inside
+  $inside=State $point @(($site.rim+1),($floor+.1));AssertUnchanged $baseline $inside
   Require ($inside.inFootprint-and $inside.atHeight-and !$inside.terrainRayHit-and [Math]::Abs((Num $inside.roadY)-$floor)-lt .1) 'Open trench column or actual roadway floor failed.';$arm.inside=$inside
   $ramp=State (Point $site ($preset.ramp*.5) 0 ($site.rim+.2)) $null;Require ([Math]::Abs((Num $ramp.roadY)-($site.rim-$preset.depth*.5))-lt .12) 'Actual ramp roadway differs from intended midpoint.';$arm.ramp=$ramp
   $camera=State (Point $site $mid 0 ($floor+.5)) $null;Require ([Math]::Abs((Num $camera.cameraFloorY)-$floor)-lt .1) 'Trench camera floor differs.';$arm.camera=$camera
@@ -111,11 +119,12 @@ try{
    Exec ('opTrenchTank="M1Abrams" createVehicle ['+(Fmt $start.x)+','+(Fmt $start.z)+',0];opTrenchTank setPos ['+(Fmt $start.x)+','+(Fmt $start.z)+',0];opTrenchTank setDir '+(Fmt $site.heading)+';player moveInDriver opTrenchTank;opTrenchTank setFuel 1;opTrenchTank engineOn true;opTrenchTank switchCamera "EXTERNAL"');$tankOwned=$true
    Require (!(Eval 'isNull opTrenchTank')-and (Eval 'typeOf opTrenchTank')-ceq 'M1Abrams'-and (Eval 'driver opTrenchTank == player')) 'Stock Abrams spawn/driver admission failed.'
   }
-  Exec 'setAccTime 1';Start-Sleep -Milliseconds 800;Exec 'setAccTime 0';$arm.start=Eval 'getPosASL vehicle player'
+  $arm.startLook=CentreLook;Exec 'setAccTime 1';Start-Sleep -Milliseconds 800;Exec 'setAccTime 0';$arm.start=Eval 'getPosASL vehicle player';$arm.startDir=Num (Eval 'getDir vehicle player')
+  Require ((HeadingError $arm.startDir $site.heading)-lt 5) 'Actor heading drifted during start settle.'
   $descent=[ordered]@{};$arm.descent=$descent;Traverse $site $preset $true $descent (Num $arm.start[2]);Capture ($preset.name+'-actor-inside') $null $null
   $exit=[ordered]@{};$arm.exit=$exit;Traverse $site $preset $false $exit (Num $arm.start[2])
   if($tankOwned){Exec 'player action ["GETOUT",opTrenchTank]';Exec 'setAccTime 1';Start-Sleep -Seconds 1;Exec 'setAccTime 0';Require (Eval 'vehicle player == player') 'Driver did not leave tank outside trench.';Exec 'deleteVehicle opTrenchTank';Require (Eval 'isNull opTrenchTank') 'Owned tank cleanup failed.';$tankOwned=$false}
-  $undo=Send @{cmd='dev_cave_editor';action='undo'};$restored=State $point @($site.rim+1,$floor+.1);AssertUnchanged $baseline $restored
+  $undo=Send @{cmd='dev_cave_editor';action='undo'};$restored=State $point @(($site.rim+1),($floor+.1));AssertUnchanged $baseline $restored
   Require ($undo.count-eq 0-and !$restored.inFootprint-and $restored.terrainRayHit-and [Math]::Abs((Num $restored.roadY)-(Num $baseline.roadY))-lt .001) 'Trench undo failed actual terrain/support restoration.';$arm.undo=@{owner=$undo;restored=$restored};$arm.passed=$true
   Capture ($preset.name+'-restored-top') @($point.x,($site.rim+10),$point.z) @(0,-1,.01)
  }
