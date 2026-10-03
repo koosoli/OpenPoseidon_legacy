@@ -1488,6 +1488,8 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         rgb = mix(rgb, rgb * (1.0 - fresnel) + reflected * fresnel,
             soil_wet * (1.0 - rain_puddle));
         // Direct GGX already contains dielectric Fresnel; add after the sky mix.
+        // Only the admitted moist fraction smooths its broad slope width;
+        // geometric derivatives still widen it at unresolved pixel footprints.
         let solar_visibility = (1.0 - shadow) * cloud_sun_shadow(in.world_xz)
             * local_sky_visibility;
         let solar_coat = soil_wet_sun_specular(

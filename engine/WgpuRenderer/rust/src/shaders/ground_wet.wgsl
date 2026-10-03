@@ -46,15 +46,23 @@ fn soil_wet_sun_lobe(half_cosine: f32) -> f32 {
 
 // Direct-sun BRDF times N.L, in inverse steradians. The shared Tidewater water
 // interface includes dielectric Fresnel exactly once and normalized GGX/Smith
-// masking. Wet soil has a broad minimum slope width alpha=.4, widened by actual
-// derivatives of the already filtered geometric normal. No grain/time noise.
+// masking. Rain smooths the moist coat continuously from slope width alpha=.4
+// to .22; actual geometric-normal derivatives widen that still-broad minimum.
+// No grain/time noise, artificial gloss gain or added unshadowed light.
 // Input wet_amount is the caller's source/snow/physical-rain-admitted fraction;
 // visibility is its actual sun shadow/cloud/sky visibility, never a gloss knob.
 fn soil_wet_sun_specular(ndv: f32, ndl: f32, ndh: f32, vdh: f32,
                          normal_variation: f32, wet_amount: f32, visibility: f32) -> f32 {
     if (wet_amount <= 0.0 || visibility <= 0.0) { return 0.0; }
-    // The shared helper adds its .0064 minimum; together these make .16.
-    let variance = sqrt(0.1536 + max(normal_variation, 0.0) * max(normal_variation, 0.0));
+    let alpha = soil_wet_sun_alpha(wet_amount);
+    // Remove the shared helper's .0064 floor before adding the real normal
+    // variance, so its final GGX alpha² is alpha² + derivative variance.
+    let variance = sqrt(alpha * alpha - 0.0064
+        + max(normal_variation, 0.0) * max(normal_variation, 0.0));
     return rain_water_sun_specular(ndv, ndl, ndh, vdh, variance)
         * clamp(wet_amount, 0.0, 1.0) * clamp(visibility, 0.0, 1.0);
+}
+
+fn soil_wet_sun_alpha(wet_amount: f32) -> f32 {
+    return mix(0.4, 0.22, clamp(wet_amount, 0.0, 1.0));
 }
