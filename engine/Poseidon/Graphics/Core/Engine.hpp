@@ -668,6 +668,12 @@ class Engine : public IGraphicsEngine
     void SetBias(int value) override = 0;
 
     virtual void SetGrassParams(float a1, float a2, float a3 = 0, float a4 = 0) {}
+    // Sinkhole W1 (from Malprave terrainHole2): terrain pixels inside these world X/Z convex areas are not drawn
+    // (the ground is cut away there by a hole-cutting object). edges: nEdges x {nx, nz, d, last}; inside when
+    // nx*x + nz*z + d >= 0 for every edge of one area, last = 1 on an area's final edge. nEdges = 0 switches it off.
+    // Called with the set before the terrain draws and with nullptr after them; a backend whose hole state is
+    // bound only to its terrain passes (wgpu) may ignore the nullptr reset.
+    virtual void SetTerrainHoles(const float* /*edges*/, int /*nEdges*/) {}
     /// Stamp a local, recovering bend into procedural grass (for explosions and impacts).
     virtual void AddGrassImpact(Vector3Par /*position*/, float /*radius*/) {}
     virtual bool CanGrass() const { return false; }

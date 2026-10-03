@@ -487,6 +487,9 @@ pub struct Grass {
     geography: wgpu::Texture,
     geography_view: wgpu::TextureView,
     terrain_generation: u64,
+    // Sinkhole W1: the placement's own copy of the terrain hole edges, refreshed when the terrain's changes.
+    holes: wgpu::Buffer,
+    holes_gen: u64,
     have_heightmap: bool,
     place_pipeline: wgpu::ComputePipeline,
     mid_place_pipeline: wgpu::ComputePipeline,
@@ -902,7 +905,24 @@ impl Grass {
                     },
                     count: None,
                 },
+                // Sinkhole W1: terrain hole edges (TerrainHoles in grass.wgsl); placement skips holes.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(crate::terrain::TERRAIN_HOLES_BYTES),
+                    },
+                    count: None,
+                },
             ],
+        });
+        let holes = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_grass_terrain_holes"),
+            size: crate::terrain::TERRAIN_HOLES_BYTES,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
         let instances = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_grass_instances"),
@@ -1114,6 +1134,7 @@ impl Grass {
             &terrain_params,
             &heightmap_view,
             &geography_view,
+            &holes,
         );
         let data_bind = make_data_bind(
             device,
@@ -1504,6 +1525,8 @@ impl Grass {
             geography,
             geography_view,
             terrain_generation: u64::MAX,
+            holes,
+            holes_gen: 0,
             have_heightmap: false,
             place_pipeline,
             mid_place_pipeline,
@@ -1832,6 +1855,7 @@ impl Grass {
             &self.terrain_params,
             &self.heightmap_view,
             &self.geography_view,
+            &self.holes,
         );
     }
 
@@ -2142,6 +2166,11 @@ impl Grass {
     ) {
         let params = terrain.params();
         queue.write_buffer(&self.terrain_params, 0, bytemuck::bytes_of(&params));
+        // Sinkhole W1: the placement's copy of the terrain holes follows the terrain's.
+        if self.holes_gen != terrain.holes_gen() {
+            self.holes_gen = terrain.holes_gen();
+            queue.write_buffer(&self.holes, 0, bytemuck::cast_slice(terrain.holes_data()));
+        }
         self.have_heightmap = terrain.has_heightmap();
         if self.terrain_generation != terrain.heightmap_gen() {
             self.terrain_generation = terrain.heightmap_gen();
@@ -2152,6 +2181,7 @@ impl Grass {
                 &self.terrain_params,
                 &self.heightmap_view,
                 &self.geography_view,
+                &self.holes,
             );
         }
     }
@@ -2662,6 +2692,7 @@ fn make_terrain_bind(
     params: &wgpu::Buffer,
     heightmap: &wgpu::TextureView,
     geography: &wgpu::TextureView,
+    holes: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("wgr_grass_terrain_bind"),
@@ -2678,6 +2709,10 @@ fn make_terrain_bind(
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: wgpu::BindingResource::TextureView(geography),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: holes.as_entire_binding(),
             },
         ],
     })

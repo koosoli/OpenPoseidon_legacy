@@ -1707,6 +1707,9 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
     {
         return;
     }
+    // Sinkhole W1 (Malprave terrainHole2): the terrain holes within 400 m of the camera (nearest first, at most 64 edges)
+    float holeEdges[64 * 4];
+    const int nHoleEdges = TerrainHoleDrawEdges(camera.Position(), 400.0f, holeEdges, 64);
 // if cache was reconstructed too often, do not try to use it
 // it would degrade performance
 
@@ -1725,6 +1728,9 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
 
         GEngine->EnableNightEye(nightEye);
 
+        // Sinkhole W1 (Malprave terrainHole2): no terrain pixels where a building has cut the ground away
+        // (SetTerrainHoles flushes the queues itself when the state changes; nothing happens without holes)
+        GEngine->SetTerrainHoles(holeEdges, nHoleEdges);
         GroundLayerInfo opaqueLayer;
         DrawGround(bigRect, scene, opaqueLayer);
     }
@@ -1751,6 +1757,7 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
 #endif
 
     GEngine->FlushQueues();
+    GEngine->SetTerrainHoles(nullptr, 0); // Sinkhole W1 (Malprave terrainHole2): holes only for the terrain
     Dev::GFrameProfiler().Mark(Dev::FrameProfiler::PhaseDrawLandGround);
     GEngine->EnableReorderQueues(true);
     // draw non-alpha objects
@@ -1809,10 +1816,12 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
         const GrassMode& mode = GrassModes[grassMode - 1];
         {
             LandScope scope(GLandStats.grassUs);
+            GEngine->SetTerrainHoles(holeEdges, nHoleEdges); // Sinkhole W1: no grass in the holes either
             for (int i = 0; i < mode.nLayers; i++)
             {
                 DrawGround(grassRect, scene, mode.layers[i]);
             }
+            GEngine->SetTerrainHoles(nullptr, 0);
             if (LandStatsEnabled())
             {
                 GLandStats.grassLayers.fetch_add(static_cast<uint64_t>(mode.nLayers), std::memory_order_relaxed);

@@ -535,6 +535,19 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             moveTrans.SetPosition(position);
         }
 
+        // Malprave terrainHole5: a man down in a terrain hole (a cellar) cannot leave it sideways under the ground. AI men
+        // and bodies do not collide with walls, so a dying slide or an explosion's push carried them out into the earth,
+        // where the terrain then lifted them to the surface. Keep the old X/Z (the vertical move still applies).
+        if (GLOB_LAND->LeavesTerrainHoleUnderground(Position(), moveTrans.Position()))
+        {
+            Vector3 held = moveTrans.Position();
+            held[0] = Position().X();
+            held[2] = Position().Z();
+            moveTrans.SetPosition(held);
+            _speed[0] = 0;
+            _speed[2] = 0;
+        }
+
         const MoveInfo* priInfo = Type()->GetMoveInfo(_primaryMove.id);
         const MoveInfo* secInfo = Type()->GetMoveInfo(_secondaryMove.id);
         float priDuty = priInfo ? priInfo->GetDuty() : 0;

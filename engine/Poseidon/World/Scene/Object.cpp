@@ -632,6 +632,14 @@ bool Object::PublishConformPlane(const Shape* sShape, ConformPlane& saved)
     {
         return false;
     }
+    // Sinkhole W1: a decal-like shape down in a terrain hole (a footprint, crater or track on a cave or
+    // cellar floor) must lie on the hole's roadway, not on the terrain surface overhead. The GPU conform only
+    // knows the terrain, so decline and let the CPU fit (ClipDraw/ShapeLand -> DecalSurfaceY) place it.
+    // InTerrainHoleBelow costs nothing until a hole-cutting model has been seen.
+    if (GLandscape && GLandscape->InTerrainHoleBelow(Position(), 0.3f))
+    {
+        return false;
+    }
     ConformPlane cp;
     cp.active = true;
     cp.mode = 2;

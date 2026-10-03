@@ -13809,6 +13809,16 @@ void EngineWgpu::SubmitGrass()
     _grassSubmitted = true;
 }
 
+void EngineWgpu::SetTerrainHoles(const float* edges, int nEdges)
+{
+    // The landscape calls this with its set before the terrain draw and with nullptr after it (the GL33
+    // backend's state is global, so it must be switched off for everything else). Here the holes live in a
+    // buffer only the terrain and grass passes bind, so the reset is a no-op and the frame's set stands.
+    if (!_renderer || !edges)
+        return;
+    wgr_terrain_set_holes(_renderer, edges, static_cast<uint32_t>(std::clamp(nEdges, 0, 64)));
+}
+
 void EngineWgpu::SetGrassParams(float, float, float, float)
 {
     // Landscape::DrawGround invokes this only for its alpha GrassTexture overlay

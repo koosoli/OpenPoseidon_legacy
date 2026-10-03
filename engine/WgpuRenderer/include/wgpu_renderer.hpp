@@ -2451,6 +2451,10 @@ extern "C"
     WGR_API void wgr_terrain_set_params(WgrRenderer* renderer, const WgrTerrainParams* params);
     /* Experimental snow: four header floats followed by a 512x512 deficit window. */
     WGR_API void wgr_terrain_set_snow(WgrRenderer* renderer, const float* data, uint32_t count);
+    /* Sinkhole W1: terrain holes for this frame. `edges` = n_edges x {nx, nz, d, last} in world X/Z; a point
+     * is inside an area when nx*x + nz*z + d >= 0 for every edge of it, last = 1 closes an area. At most 64
+     * edges are kept; n_edges = 0 clears them. The terrain and grass passes skip the pixels / blades inside. */
+    WGR_API void wgr_terrain_set_holes(WgrRenderer* renderer, const float* edges, uint32_t n_edges);
 
     /* Set the terrain ground layers: `handles[i]` is the wgr_texture_create
      * handle for Landscape texture index i (0 = the built-in white fallback).

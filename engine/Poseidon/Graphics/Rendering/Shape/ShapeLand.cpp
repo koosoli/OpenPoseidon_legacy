@@ -194,7 +194,8 @@ void Shape::SurfaceSplit(const Landscape* land, const Matrix4& toWorld, float y,
         Vector3& pos = SetPos(i);
         Vector3 wPos(VFastTransform, toWorld, pos);
         float oy = y + pos.Y() * useOrigY;
-        wPos[1] = land->SurfaceY(wPos[0], wPos[2]) + oy;
+        // Malprave terrainHole6: down in a terrain hole the surface is the hole's roadway under the object
+        wPos[1] = land->DecalSurfaceY(wPos[0], wPos[2], toWorld.Position().Y()) + oy;
         pos.SetFastTransform(fromWorld, wPos);
     }
 

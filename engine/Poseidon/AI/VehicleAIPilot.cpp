@@ -5,6 +5,7 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Entities/Vehicles/House.hpp> // terrainHole5: IPaths
 #include <Poseidon/World/Terrain/Roads.hpp>
 #include <Poseidon/AI/Path/PathSteer.hpp>
 #include <Poseidon/Game/UiActions.hpp>
@@ -615,6 +616,96 @@ void EntityAI::SwitchToLeader()
     _inFormation = false;
 }
 
+// Malprave terrainHole5: with the subgroup leader down in a terrain hole (a cellar), the formation slots lie outside it
+// (in the earth around it or on the ground above) and the men stood about outside or got stuck (job ug5). Give each
+// member one of the building's positions (Paths LOD "pos" points) that lie down in a hole instead: nearest to the leader
+// first, in subgroup order (the leader left out). Returns false (formation as before) when there is no such position.
+static bool CellarFormationPos(const EntityAI* leaderVeh, const AISubgroup* subgrp, const AIUnit* unit, Vector3& movePos)
+{
+    Vector3Val lPos = leaderVeh->Position();
+    if (!GLandscape->InTerrainHoleBelow(lPos, 1.0f))
+    {
+        return false;
+    }
+    const IPaths* building = nullptr;
+    int xMin, xMax, zMin, zMax;
+    ObjRadiusRectangle(xMin, xMax, zMin, zMax, lPos, lPos, 50);
+    for (int x = xMin; x <= xMax && !building; x++)
+    {
+        for (int z = zMin; z <= zMax && !building; z++)
+        {
+            const ObjectList& list = GLandscape->GetObjects(z, x);
+            for (int i = 0; i < list.Size(); i++)
+            {
+                Object* obj = list[i];
+                if (!obj || !obj->GetShape() || obj->GetShape()->FindPaths() < 0 || !obj->GetIPaths())
+                {
+                    continue;
+                }
+                if ((obj->Position() - lPos).SquareSizeXZ() > Square(obj->GetShape()->BoundingSphere()))
+                {
+                    continue;
+                }
+                if (!Landscape::CutsTerrainHole(obj))
+                {
+                    continue;
+                }
+                building = obj->GetIPaths();
+                break;
+            }
+        }
+    }
+    if (!building)
+    {
+        return false;
+    }
+    Vector3 cand[32];
+    float candD2[32];
+    int n = 0;
+    for (int i = 0; i < building->NPos() && n < 32; i++)
+    {
+        Vector3 p = building->GetPosition(building->GetPos(i));
+        if (!GLandscape->InTerrainHoleBelow(p, 0.5f))
+        {
+            continue;
+        }
+        float d2 = (p - lPos).SquareSizeXZ();
+        if (d2 < Square(1.0f))
+        {
+            continue; // where the leader stands
+        }
+        int k = n++;
+        while (k > 0 && candD2[k - 1] > d2)
+        {
+            cand[k] = cand[k - 1];
+            candD2[k] = candD2[k - 1];
+            k--;
+        }
+        cand[k] = p;
+        candD2[k] = d2;
+    }
+    if (n == 0)
+    {
+        return false;
+    }
+    int rank = 0;
+    for (int i = 0; i < subgrp->NUnits(); i++)
+    {
+        const AIUnit* u = subgrp->GetUnit(i);
+        if (!u || u == subgrp->Leader())
+        {
+            continue;
+        }
+        if (u == unit)
+        {
+            break;
+        }
+        rank++;
+    }
+    movePos = cand[rank % n];
+    return true;
+}
+
 void EntityAI::FormationPilot(float& speedWanted, float& headChange, float& turnPredict)
 {
     if (_userStopped)
@@ -801,6 +892,14 @@ void EntityAI::FormationPilot(float& speedWanted, float& headChange, float& turn
             enableHide = !commander->IsKeepingFormation();
         }
     }
+    // terrainHole5: leader down in a cellar - the members take the building's positions there (see CellarFormationPos)
+    Vector3 cellarPos;
+    // (men on foot only: a vehicle in the group keeps its formation slot)
+    const bool inCellar = commander->IsFreeSoldier() && CellarFormationPos(lVehicle, subgrp, commander, cellarPos);
+    if (inCellar)
+    {
+        enableHide = false;
+    }
 
     // predict leader position
     Vector3 predSpeed = lVehicle->Speed();
@@ -900,6 +999,10 @@ void EntityAI::FormationPilot(float& speedWanted, float& headChange, float& turn
     // check position is combat height
     float height = GetCombatHeight();
     movePos[1] = GLandscape->SurfaceYAboveWater(movePos[0], movePos[2]) + height;
+    if (inCellar)
+    {
+        movePos = cellarPos; // terrainHole5
+    }
 
 #if _ENABLE_CHEATS
     if (CHECK_DIAG(DECombat))
@@ -922,7 +1025,10 @@ void EntityAI::FormationPilot(float& speedWanted, float& headChange, float& turn
     float speedZ = floatMax(formPosRel.Z() / estT + leadSpdRel.Z(), 1);
 
     PositionPilot(speedWanted, headChange, turnPredict, movePos, moveDir, 1e10);
-    saturateMin(speedWanted, speedZ);
+    if (!inCellar)
+    {
+        saturateMin(speedWanted, speedZ); // terrainHole5: no formation speed limit for a cellar position
+    }
 }
 
 void EntityAI::PerformFF(FFEffects& effects)

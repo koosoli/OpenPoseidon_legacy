@@ -257,8 +257,9 @@ TrackStep* TrackDraw::Update(const Frame& pos, bool force)
     float eps = GLOB_ENGINE->ZShadowEpsilon();
     // RoadSurfaceY, not SurfaceY: roads float a few cm above the terrain mesh,
     // so a terrain-height track sits below the road and is depth-rejected.
-    left[1] = GLOB_LAND->RoadSurfaceY(left[0], left[2]) + eps;
-    right[1] = GLOB_LAND->RoadSurfaceY(right[0], right[2]) + eps;
+    // terrainHole6: down in a terrain hole the ground is the roadway under the wheel, not the topmost one (a roof)
+    left[1] = GLOB_LAND->TrackSurfaceY(left) + eps;
+    right[1] = GLOB_LAND->TrackSurfaceY(right) + eps;
     const float vMap = 2.0;
     for (int level = 0; level < TrackLODLevels; level++)
     {
@@ -349,8 +350,9 @@ void TrackDraw::Skip(const Frame& pos)
     float eps = GLOB_ENGINE->ZShadowEpsilon();
     // RoadSurfaceY, not SurfaceY: roads float a few cm above the terrain mesh,
     // so a terrain-height track sits below the road and is depth-rejected.
-    left[1] = GLOB_LAND->RoadSurfaceY(left[0], left[2]) + eps;
-    right[1] = GLOB_LAND->RoadSurfaceY(right[0], right[2]) + eps;
+    // terrainHole6: down in a terrain hole the ground is the roadway under the wheel, not the topmost one (a roof)
+    left[1] = GLOB_LAND->TrackSurfaceY(left) + eps;
+    right[1] = GLOB_LAND->TrackSurfaceY(right) + eps;
     const float vMap = 2.0;
     for (int level = 0; level < TrackLODLevels; level++)
     {

@@ -1664,9 +1664,19 @@ void World::Simulate(float deltaT, bool& enableDraw)
             // Every view stays above the ground. Player, vehicle and trigger-effect views also stay
             // above the sea; a scripted or free camera (mayDive, TW-WATER W5c) may go under it -- the
             // renderer's underwater compositor takes over there -- and is held only above the sea bed.
+            //
+            // Sinkhole W1 (Malprave terrainHole4): inside a terrain hole the floor is the hole's floor, and a
+            // 3rd person camera that swung into the earth around a cellar or cave mouth is first pulled back
+            // into the hole, toward what it follows (the camera effect's object, else the camera vehicle).
             Vector3 camPos = transform.Position();
-            float minCamY = mayDive ? _scene.GetLandscape()->SurfaceY(camPos.X(), camPos.Z())
-                                    : _scene.GetLandscape()->SurfaceYAboveWater(camPos.X(), camPos.Z());
+            Object* camFocusObj = _cameraEffect ? _cameraEffect->GetObject() : cameraVehicle.GetLink();
+            Vector3 camFocus;
+            if (camFocusObj)
+            {
+                camFocus = camFocusObj->CameraPosition();
+            }
+            float minCamY =
+                _scene.GetLandscape()->CameraFloorY(camPos, camFocusObj ? &camFocus : nullptr, !mayDive);
             minCamY += 0.1;
             if (camPos.Y() < minCamY)
             {

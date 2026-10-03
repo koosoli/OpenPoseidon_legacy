@@ -351,6 +351,9 @@ class EngineWgpu : public EngineDummy
     // overlays.  The procedural system uses that exact hook as its eligibility
     // signal instead of drawing over every opaque terrain cell.
     void SetGrassParams(float a1, float a2, float a3 = 0, float a4 = 0) override;
+    // Sinkhole W1: hand the terrain hole edges to the renderer (terrain + grass passes only, so the
+    // nullptr reset the landscape sends after its terrain draws is ignored here).
+    void SetTerrainHoles(const float* edges, int nEdges) override;
     void AddGrassImpact(Vector3Par position, float radius) override;
     bool CanGrass() const override { return _renderer != nullptr; }
     GrassSettings GetGrassSettings() const override { return _grass; }

@@ -445,7 +445,9 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
         // TW-WATER W5c: the free camera flies under the sea too (cut-scene authoring); it is held
         // above the ground / sea bed only. The clipboard export below keeps heights relative to
         // the sea surface, so an underwater shot exports as a negative camSetPos height.
-        float surfY = GLandscape->SurfaceY(position[0], position[2]);
+        // Sinkhole W1 (Malprave terrainHole4): inside a terrain hole it may go down to the hole's floor.
+        Vector3 floorPos = position;
+        float surfY = GLandscape->CameraFloorY(floorPos, nullptr, false);
         saturateMax(position[1], surfY + 0.05);
         Move(position);
 

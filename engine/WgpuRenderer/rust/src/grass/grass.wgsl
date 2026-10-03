@@ -146,6 +146,31 @@ struct WindField {
 @group(1) @binding(0) var<uniform> terrain: TerrainParams;
 @group(1) @binding(1) var heightmap: texture_2d<f32>;
 @group(1) @binding(2) var geography: texture_2d<u32>;
+
+// Sinkhole W1 (port of Malprave terrainHole2 to wgpu): terrain holes -- world X/Z convex areas a hole-cutting
+// object (memory-LOD `terrain_hole*` selection + roadway LOD) has cut out of the ground. Written by
+// Engine::SetTerrainHoles via wgr_terrain_set_holes. edges[i] = {nx, nz, d, last}: a point is inside an area when
+// nx*x + nz*z + d >= 0 for every edge of that area; last = 1 closes an area. info.x = edge count (0 = no holes).
+struct TerrainHoles {
+    info: vec4<f32>,
+    edges: array<vec4<f32>, 64>,
+};
+@group(1) @binding(3) var<storage, read> holes: TerrainHoles;
+
+fn in_terrain_hole(xz: vec2<f32>) -> bool {
+    let n = min(u32(max(holes.info.x, 0.0)), 64u);
+    if (n == 0u) { return false; }
+    var inside = true;
+    for (var i = 0u; i < n; i = i + 1u) {
+        let e = holes.edges[i];
+        if (e.x * xz.x + e.y * xz.y + e.z < 0.0) { inside = false; }
+        if (e.w > 0.5) {
+            if (inside) { return true; }
+            inside = true;
+        }
+    }
+    return false;
+}
 @group(2) @binding(0) var<uniform> grass: GrassParams;
 @group(2) @binding(1) var<storage, read_write> instances: array<GrassInstance>;
 @group(2) @binding(2) var<storage, read_write> placement_count: array<atomic<u32>>;
@@ -951,6 +976,7 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     if ((geo & GEO_EXCLUDE_HARD) != 0u) { return; }
     if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
+    if (in_terrain_hole(world_xz)) { return; } // Sinkhole W1: no grass in a terrain hole
     // Cards only: the card coverage (map's own where authored, else card_look.x).
     if (cards_on_near() && card_thinned(cell_id, geo)) { return; }
     let y = sample_height(world_xz);
@@ -1020,6 +1046,7 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     if ((geo & 0x80000000u) == 0u || (geo & GEO_EXCLUDE_HARD) != 0u) { return; }
     if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
+    if (in_terrain_hole(world_xz)) { return; } // Sinkhole W1: no grass in a terrain hole
     // Cards only: the card coverage (map's own where authored, else card_look.x).
     if (cards_on_mid() && card_thinned(cell_id, geo)) { return; }
     let y = sample_height(world_xz);
@@ -1104,6 +1131,7 @@ fn cs_place_far(@builtin(global_invocation_id) gid: vec3<u32>) {
     if ((geo & 0x80000000u) == 0u || (geo & GEO_EXCLUDE_HARD) != 0u) { return; }
     if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
+    if (in_terrain_hole(world_xz)) { return; } // Sinkhole W1: no grass in a terrain hole
     let y = sample_height(world_xz);
     if (y <= terrain.sea_level + 0.35) { return; }
     let normal = sample_normal(world_xz);

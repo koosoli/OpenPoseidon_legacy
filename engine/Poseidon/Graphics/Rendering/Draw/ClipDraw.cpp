@@ -855,7 +855,8 @@ void PolyVertices::FitToLandscape(TLVertexTable& mesh, Scene& scene, float y)
         ClipFlags clip = mesh.Clip(index);
         Vector3 pos = mesh.TransPosA(index);
         Vector3 tPos(VFastTransform, scene.CamInvTrans(), pos);
-        float tY = scene.GetLandscape()->SurfaceY(tPos[0], tPos[2]);
+        // Malprave terrainHole6: a vertex down in a terrain hole is fitted to the hole's roadway, not the terrain above
+        float tY = scene.GetLandscape()->DecalSurfaceY(tPos[0], tPos[2], tPos[1]);
         ClipFlags landClip = clip & ClipLandMask;
         if (landClip == ClipLandOn)
         {

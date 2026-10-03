@@ -225,7 +225,9 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
                         float timeToLive = markTtl;
                         float ys = GLandscape->SurfaceY(pos.X(), pos.Z());
                         float yr = GLandscape->RoadSurfaceYAboveWater(pos);
-                        if (yr <= ys + 0.2f)
+                        // Sinkhole W1 (Malprave terrainHole6): no footprints down in a terrain hole -- the man
+                        // stands on the hole object's floor there, and the mark would be drawn on the terrain above
+                        if (yr <= ys + 0.2f && !GLandscape->InTerrainHoleBelow(pos, 0.3f))
                         {
                             if (GSnow().CoverActive() && !GSnow().NeedsWalkingChannelAt(pos.X(), pos.Z()) && ys > GLandscape->GetSeaLevel())
                             {

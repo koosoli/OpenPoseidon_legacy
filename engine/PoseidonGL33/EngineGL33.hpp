@@ -689,6 +689,7 @@ class EngineGL33 : public Engine
     int GetBias() override { return _bias; }
 
     void SetGrassParams(float a1, float a2, float a3 = 0, float a4 = 0) override;
+    void SetTerrainHoles(const float* edges, int nEdges) override; // Sinkhole W1 (Malprave terrainHole2)
 
     bool CanZBias() const override;
     bool ZBiasExclusion() const override { return !_hasStencilBuffer; }

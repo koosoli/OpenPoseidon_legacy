@@ -226,6 +226,28 @@ in vec3 vWorldRel;
 
 out vec4 fragColor;
 
+// Sinkhole W1 (Malprave terrainHole2): terrain pixels inside a building's terrain hole are not drawn (UBO binding 3, set by
+// SetTerrainHoles around the terrain draws only). holeEdge = {nx, nz, d, last}, camera-relative X/Z.
+layout(std140) uniform TerrainHoles {
+    vec4 holeCtl;       // x = edge count (0 = off)
+    vec4 holeEdge[64];
+};
+bool mwInTerrainHole() {
+    int n = int(holeCtl.x);
+    if (n <= 0) return false;
+    bool inside = true;
+    for (int i = 0; i < 64; ++i) {
+        if (i >= n) break;
+        vec4 e = holeEdge[i];
+        if (e.x * vWorldRel.x + e.y * vWorldRel.z + e.z < 0.0) inside = false;
+        if (e.w > 0.5) {
+            if (inside) return true;
+            inside = true;
+        }
+    }
+    return false;
+}
+
 void main() {
     // No gl_FragDepth — opaque draws use DepthMode::Normal (stencil
     // ALWAYS+REPLACE 0).  Even if early-Z fires the stencil write
@@ -311,6 +333,7 @@ void main() {
     r0.rgb = mix(vec3(luminance), r0.rgb, nightBlend);
 
     r0.rgb = mix(fogColor.rgb, r0.rgb, vFogTC);
+    if (mwInTerrainHole()) discard; // Sinkhole W1 (Malprave terrainHole2)
     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
 }
 )";
@@ -345,6 +368,28 @@ uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused 
 in vec3 vWorldRel;
 
 out vec4 fragColor;
+
+// Sinkhole W1 (Malprave terrainHole2): terrain pixels inside a building's terrain hole are not drawn (UBO binding 3, set by
+// SetTerrainHoles around the terrain draws only). holeEdge = {nx, nz, d, last}, camera-relative X/Z.
+layout(std140) uniform TerrainHoles {
+    vec4 holeCtl;       // x = edge count (0 = off)
+    vec4 holeEdge[64];
+};
+bool mwInTerrainHole() {
+    int n = int(holeCtl.x);
+    if (n <= 0) return false;
+    bool inside = true;
+    for (int i = 0; i < 64; ++i) {
+        if (i >= n) break;
+        vec4 e = holeEdge[i];
+        if (e.x * vWorldRel.x + e.y * vWorldRel.z + e.z < 0.0) inside = false;
+        if (e.w > 0.5) {
+            if (inside) return true;
+            inside = true;
+        }
+    }
+    return false;
+}
 
 void main() {
     // No gl_FragDepth — see PSNormal.
@@ -428,6 +473,7 @@ void main() {
     r0.rgb = mix(vec3(luminance), r0.rgb, nightBlend);
 
     r0.rgb = mix(fogColor.rgb, r0.rgb, vFogTC);
+    if (mwInTerrainHole()) discard; // Sinkhole W1 (Malprave terrainHole2)
     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
 }
 )";
@@ -462,6 +508,28 @@ uniform sampler2DArray shadowMap; // unit 2 — cascade depth-map array (unused 
 in vec3 vWorldRel;
 
 out vec4 fragColor;
+
+// Sinkhole W1 (Malprave terrainHole2): terrain pixels inside a building's terrain hole are not drawn (UBO binding 3, set by
+// SetTerrainHoles around the terrain draws only). holeEdge = {nx, nz, d, last}, camera-relative X/Z.
+layout(std140) uniform TerrainHoles {
+    vec4 holeCtl;       // x = edge count (0 = off)
+    vec4 holeEdge[64];
+};
+bool mwInTerrainHole() {
+    int n = int(holeCtl.x);
+    if (n <= 0) return false;
+    bool inside = true;
+    for (int i = 0; i < 64; ++i) {
+        if (i >= n) break;
+        vec4 e = holeEdge[i];
+        if (e.x * vWorldRel.x + e.y * vWorldRel.z + e.z < 0.0) inside = false;
+        if (e.w > 0.5) {
+            if (inside) return true;
+            inside = true;
+        }
+    }
+    return false;
+}
 
 void main() {
     // No gl_FragDepth — see PSNormal.
@@ -544,6 +612,7 @@ void main() {
     } else if (r0.a - alphaRef.x * alphaRef.y < 0.0) discard;
 
     r0.rgb = mix(fogColor.rgb, r0.rgb, vFogTC);
+    if (mwInTerrainHole()) discard; // Sinkhole W1 (Malprave terrainHole2)
     fragColor = alphaRef.w > 0.5 ? vec4(1.0, 0.0, 0.0, 1.0) : r0;
 }
 )";
@@ -778,6 +847,8 @@ static float s_psShadow[108] = {}; // 27 vec4 slots — c8-c23 cascadeVP[4], c24
 static GLuint s_vsUBO = 0;
 static GLuint s_worldUBO = 0;
 static GLuint s_psUBO = 0;
+static GLuint s_holeUBO = 0;          // Sinkhole W1 (Malprave terrainHole2) (binding 3)
+static int s_holeEdgesUploaded = 0;     // edge count currently in s_holeUBO
 
 void EngineGL33::FlushVSConstants()
 {
@@ -1535,6 +1606,9 @@ void EngineGL33::InitPixelShaders()
             glUniformBlockBinding(prog, vsBlock, 0);
         if (psBlock != GL_INVALID_INDEX)
             glUniformBlockBinding(prog, psBlock, 1);
+        GLuint holeBlock = glGetUniformBlockIndex(prog, "TerrainHoles"); // Sinkhole W1 (Malprave terrainHole2)
+        if (holeBlock != GL_INVALID_INDEX)
+            glUniformBlockBinding(prog, holeBlock, 3);
         glUseProgram(prog);
         GLint loc0 = glGetUniformLocation(prog, "tex0");
         GLint loc1 = glGetUniformLocation(prog, "tex1");
@@ -1608,6 +1682,15 @@ void EngineGL33::InitPixelShaders()
     glBindBuffer(GL_UNIFORM_BUFFER, s_psUBO);
     glBufferData(GL_UNIFORM_BUFFER, sizeof(s_psShadow), nullptr, GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 1, s_psUBO);
+    // Sinkhole W1 (Malprave terrainHole2): hole edges for the terrain shaders, binding 3, all zero = off
+    glGenBuffers(1, &s_holeUBO);
+    glBindBuffer(GL_UNIFORM_BUFFER, s_holeUBO);
+    {
+        static const float zeros[65 * 4] = {};
+        glBufferData(GL_UNIFORM_BUFFER, sizeof(zeros), zeros, GL_DYNAMIC_DRAW);
+    }
+    glBindBufferBase(GL_UNIFORM_BUFFER, 3, s_holeUBO);
+    s_holeEdgesUploaded = 0;
 
     {
         _psConstants = PSConstants{};
@@ -1767,6 +1850,41 @@ void EngineGL33::DeinitPixelShaders()
         glDeleteBuffers(1, &s_psUBO);
         s_psUBO = 0;
     }
+    if (s_holeUBO)
+    {
+        glDeleteBuffers(1, &s_holeUBO);
+        s_holeUBO = 0;
+        s_holeEdgesUploaded = 0;
+    }
+}
+
+// Sinkhole W1 (Malprave terrainHole2): hole edges for the terrain pixel shaders (PSNormal / PSDetail / PSGrass), made
+// relative to the camera like vWorldRel. Queued draws are flushed first so each draw sees the state it was queued under.
+void EngineGL33::SetTerrainHoles(const float* edges, int nEdges)
+{
+    if (!_glContext || !s_holeUBO)
+        return;
+    if (nEdges <= 0 && s_holeEdgesUploaded == 0)
+        return;
+    FlushQueues();
+    if (nEdges > 64)
+        nEdges = 64;
+    float data[65 * 4] = {};
+    data[0] = nEdges > 0 ? static_cast<float>(nEdges) : 0.0f;
+    const float cx = _frameState.cameraPos[0];
+    const float cz = _frameState.cameraPos[2];
+    for (int i = 0; i < nEdges; i++)
+    {
+        const float* e = edges + i * 4;
+        float* o = data + (i + 1) * 4;
+        o[0] = e[0];
+        o[1] = e[1];
+        o[2] = e[2] + e[0] * cx + e[1] * cz; // world -> camera-relative
+        o[3] = e[3];
+    }
+    glBindBuffer(GL_UNIFORM_BUFFER, s_holeUBO);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, nEdges > 0 ? (nEdges + 1) * 16 : 16, data);
+    s_holeEdgesUploaded = nEdges > 0 ? nEdges : 0;
 }
 
 void EngineGL33::DoSelectPixelShader(PixelShaderID ps, PixelShaderMode mode, PixelShaderSpecular spec)

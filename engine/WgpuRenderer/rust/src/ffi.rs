@@ -2988,6 +2988,23 @@ pub unsafe extern "C" fn wgr_terrain_set_snow(renderer: *mut WgrRenderer, data: 
     }));
 }
 
+/// Sinkhole W1: terrain holes, `n_edges` x {nx, nz, d, last} in world X/Z (see wgpu_renderer.hpp).
+/// # Safety
+/// `edges` must address `n_edges * 4` floats (or be null with `n_edges` 0); renderer must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_holes(renderer: *mut WgrRenderer, edges: *const f32, n_edges: u32) {
+    if renderer.is_null() || (edges.is_null() && n_edges != 0) { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        let values: &[f32] = if n_edges == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(edges, n_edges.min(64) as usize * 4) }
+        };
+        r.terrain.set_holes(&r.queue, values);
+    }));
+}
+
 /// Set the terrain ground layers as a list of wgr_texture_create handles (one
 /// per Landscape texture index). See wgpu_renderer.hpp.
 ///
