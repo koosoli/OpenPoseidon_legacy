@@ -298,7 +298,7 @@ public:
     size_t OwnerCount() const {return _children.size()+_tilesOwnerExtra;}
     size_t StorageBytes() const {
         return _cells.capacity()*sizeof(Cell)+_children.capacity()*sizeof(uint32_t)+
-               _edges.capacity()*sizeof(Edge)+(_out.capacity()+_delta.capacity()+_flux.capacity()+_head.capacity())*sizeof(double)+
+               _edges.capacity()*sizeof(Edge)+(_out.capacity()+_delta.capacity()+_flux.capacity()+_head.capacity()+_incidentLength.capacity())*sizeof(double)+
                _geometry.capacity()*sizeof(RainWaterCellGeometry);
     }
     uint64_t Generation() const {return _generation;}
@@ -327,6 +327,12 @@ private:
         double head=0;const double hint=i<_head.size()?_head[i]:std::numeric_limits<double>::quiet_NaN();
         if(!_geometry[i-_children.size()].Head(c.volume,s*s,head,hint))return std::numeric_limits<double>::quiet_NaN();
         return head;
+    }
+    double CellVolumeAtHead(uint32_t i,double head) const {
+        const auto& c=_cells[i];
+        if(c.child==Coarse)return std::max(0.0,head-c.bed)*_spacing*_spacing;
+        const double size=_spacing/Ratio;
+        return _geometry[i-_children.size()].Volume(head,size*size);
     }
     void RefreshHeads() {for(uint32_t i=0;i<_cells.size();++i)if(_cells[i].active)_head[i]=CellHead(i);}
     Owner Describe(uint32_t i,bool fresh=true) const {
@@ -369,6 +375,10 @@ private:
             if(z+1<_height) Boundary(p,p+_width,false);
         }
         _out.resize(_cells.size());_delta.resize(_cells.size());_flux.resize(_edges.size());
+        _incidentLength.assign(_cells.size(),0);
+        for(const auto& e:_edges) {
+            _incidentLength[e.a]+=e.length;_incidentLength[e.b]+=e.length;
+        }
         _head.resize(_cells.size());RefreshHeads();
     }
     std::pair<double,double> Face(uint32_t i,bool alongX,bool positive) const {
@@ -405,7 +415,20 @@ private:
             if(!fineA&&!fineB)wet=donor.Depth(); // preserve the legacy coarse proposal
             else if((head>0?_cells[e.a]:_cells[e.b]).child==Coarse)wet=std::min(wet,donor.Depth());
             const double equilibrium=std::abs(head)/(1/(a.size*a.size)+1/(b.size*b.size));
-            const double amount=std::min(equilibrium*.5,wet*std::min(5.0,std::sqrt(9.81*std::abs(head)))*StepSeconds*e.length);
+            const auto donorIndex=head>0?e.a:e.b,receiverIndex=head>0?e.b:e.a;
+            const auto receiver=head>0?b:a;
+            const double middle=b.Head()+head*.5;
+            // Bound the simultaneous sweep, not just each isolated edge.
+            // Native V(H) accounts for partially wet triangles; face-length
+            // shares sum to one even when a coarse face has four fine edges.
+            // The outgoing/incoming sums therefore cannot carry a cell past
+            // its midpoint with the lowest/highest incident neighbour head.
+            const double outgoing=std::max(0.0,donor.volume-CellVolumeAtHead(donorIndex,middle))*
+                e.length/_incidentLength[donorIndex];
+            const double incoming=std::max(0.0,CellVolumeAtHead(receiverIndex,middle)-receiver.volume)*
+                e.length/_incidentLength[receiverIndex];
+            const double amount=std::min({equilibrium*.5,
+                wet*std::min(5.0,std::sqrt(9.81*std::abs(head)))*StepSeconds*e.length,outgoing,incoming});
             _flux[i]=std::copysign(amount,head);_out[head>0?e.a:e.b]+=amount;
         }
         for(size_t i=0;i<_edges.size();++i) {
@@ -430,7 +453,7 @@ private:
     uint64_t _generation=0,_revision=0;size_t _tilesOwnerExtra=0;Budget _budget;
     size_t _tileLimit=MaxTiles;
     std::vector<Cell> _cells;std::vector<uint32_t> _children;std::vector<Edge> _edges;
-    std::vector<double> _out,_delta,_flux,_head;std::vector<RainWaterCellGeometry> _geometry;
+    std::vector<double> _out,_delta,_flux,_head,_incidentLength;std::vector<RainWaterCellGeometry> _geometry;
     std::map<std::pair<int,int>,bool> _tiles;
     std::vector<std::pair<uint32_t,uint32_t>> _freeBlocks;
 };

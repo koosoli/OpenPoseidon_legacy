@@ -14,3 +14,8 @@ $geometryExe=Join-Path $output 'rain_water_geometry_test.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Fine water geometry compilation failed.' }
 & $geometryExe
 if ($LASTEXITCODE -ne 0) { throw 'Fine water geometry assertions failed.' }
+$fluxExe=Join-Path $output 'rain_water_flux_stability_test.exe'
+& $Compiler '-std=c++20' '-Wall' '-Wextra' '-Werror' (Join-Path $repo 'tests/unit/engine/weather/test_rain_water_flux_stability.cpp') '-o' $fluxExe
+if ($LASTEXITCODE -ne 0) { throw 'Fine water flux stability compilation failed.' }
+& $fluxExe
+if ($LASTEXITCODE -ne 0) { throw 'Fine water flux stability assertions failed.' }
