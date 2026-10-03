@@ -1545,6 +1545,24 @@ void RegisterScreenshot(HarnessServer& hs)
             auto* result = cJSON_CreateObject();
             cJSON_AddNumberToObject(result, "rain", GLandscape->GetRainDensity());
             cJSON_AddNumberToObject(result, "overcast", GLandscape->GetOvercast());
+            // Sky look is producer-owned: NextFrame/PushRenderParams update it
+            // before queue publication; the consumer uses frame-owned copies.
+            // Never read this plain getter from the harness TCP/worker thread.
+            const bool skyAvailable = Foundation::IsMainThread() && GEngine && GEngine->SupportsSky();
+            cJSON_AddBoolToObject(result, "rendererSkyAvailable", skyAvailable);
+            if (skyAvailable) {
+                const auto sky = GEngine->GetSkySettings();
+                auto* look = cJSON_CreateObject();
+                cJSON_AddBoolToObject(look, "enabled", sky.enabled);
+                cJSON_AddBoolToObject(look, "skyLighting", sky.skyLighting);
+                cJSON_AddBoolToObject(look, "coverageFromWeather", sky.cloudCoverageFromWeather);
+                cJSON_AddBoolToObject(look, "coveragePinned", std::getenv("WGR_CLOUD_COVERAGE") != nullptr);
+                cJSON_AddNumberToObject(look, "coverage", sky.cloudCoverage);
+                cJSON_AddNumberToObject(look, "clearCoverage", sky.cloudCoverageClear);
+                cJSON_AddNumberToObject(look, "fullCoverage", sky.cloudCoverageFull);
+                cJSON_AddStringToObject(look, "scope", "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route.");
+                cJSON_AddItemToObject(result, "rendererSky", look);
+            }
             const auto* sun = GScene->MainLight();
             cJSON_AddBoolToObject(result, "sunAvailable", sun != nullptr);
             if (sun) {

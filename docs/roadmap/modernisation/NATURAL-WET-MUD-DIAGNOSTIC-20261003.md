@@ -134,3 +134,22 @@ not a GPU material readback. The soil coat still multiplies by physical
 receipt cannot establish that local fragment gate. Broad shader roughness or
 gloss changes should not substitute for evidence that these actual inputs reach
 the tested contact pixels.
+
+`weather_visibility.rendererSky` now records the latest producer-owned CPU
+sky look: enabled, skyLighting, coverageFromWeather, coveragePinned, coverage,
+clearCoverage and fullCoverage. The harness checks main-thread ownership before
+calling the existing getter. EngineWgpu updates the look in producer NextFrame /
+PushRenderParams; its render consumer receives frame-owned settings copies and
+does not read or write this mutable look. No new FFI, GPU wait, worker read,
+EngineWgpu publication or ABI field is added.
+
+The quality runner allows up to three wall seconds of paused polling for the
+CPU setting to follow actual world overcast. It requires enabled sky lighting,
+weather drive, an absent process pin, finite distinct endpoints in [0,1], and
+coverage equal to their interpolation at actual overcast. The endpoint recipe
+must remain identical across all quality views; capture before/after and restored
+cloud checks repeat these gates. Pure tests reject disabled/manual/pinned,
+unavailable, nonfinite, stale-coverage and differing-endpoint receipts. This
+latest CPU look may lag and has no frame identity. It is not Rust acceptance,
+GPU completion, active HDR-path, cloud-map or pixel proof. Installed image review
+is still required to judge the resulting wet-soil appearance.

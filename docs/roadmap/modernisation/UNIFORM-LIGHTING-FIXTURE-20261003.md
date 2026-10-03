@@ -111,3 +111,14 @@ lamp/roof and wetness checks do not establish its requested rendered overcast
 lighting. The default contact runner retains its clear pin. Actual renderer
 sky enable/weather-drive settings and image evidence remain necessary; ordinary
 simulation overcast is insufficient proof of rendered cloud fields or pixels.
+
+The new read-only `weather_visibility.rendererSky` receipt uses the existing
+producer-owned getter only on the main thread. It records actual latest CPU sky
+look fields, including coverage drive, pin, current coverage and clear/full
+endpoints. The quality runner waits at most three wall seconds while paused for
+enabled, unpinned weather-driven settings to match actual overcast; it verifies
+them before and after every image and after original cloud restoration. Dry and
+wet bands must keep the same endpoints and enabled/drive/pin recipe. No worker
+look reads, GPU synchronization or FFI fields are added. The receipt may lag
+world weather and establishes no frame identity, active HDR shader route,
+Rust/GPU acceptance, cloud-map or pixel proof; those limits remain in the JSON.

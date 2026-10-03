@@ -47,6 +47,22 @@ function Mud-LightingWetReady($state,$receipt){
 }
 function Mud-LightingPlan{return @(@{name='overcast';overcast=1},@{name='clear';overcast=0})}
 function Quality-CloudPin([bool]$quality){if(!$quality){return '0'};return $null}
+function Assert-RendererClouds($weather,[double]$overcast){
+ Require ($weather.rendererSkyAvailable -is [bool] -and $weather.rendererSkyAvailable) 'Actual producer sky settings are unavailable.'
+ $sky=$weather.rendererSky
+ foreach($field in @('enabled','skyLighting','coverageFromWeather','coveragePinned')){Require ($sky.$field -is [bool]) 'Malformed producer sky setting.'}
+ Require ($sky.enabled -and $sky.skyLighting -and $sky.coverageFromWeather -and !$sky.coveragePinned) 'Quality sky must be enabled, weather-driven and unpinned.'
+ foreach($field in @('coverage','clearCoverage','fullCoverage')){$n=Number $sky.$field;Require ($n -ge 0 -and $n -le 1) 'Actual producer cloud coverage outside[0,1].'}
+ Require ($sky.fullCoverage -gt $sky.clearCoverage) 'Actual sky has no distinct clear/overcast coverage.'
+ $actual=Number $weather.overcast;Require ([Math]::Abs($actual-$overcast) -le .001) 'Actual world cloud command differs.'
+ $expected=$sky.clearCoverage+($sky.fullCoverage-$sky.clearCoverage)*$actual
+ Require ([Math]::Abs($sky.coverage-$expected) -le .001) 'Latest producer cloud setting does not yet follow actual world overcast.'
+}
+function Renderer-CloudRecipe($weather){
+ $sky=$weather.rendererSky
+ return [ordered]@{enabled=$sky.enabled;skyLighting=$sky.skyLighting;coverageFromWeather=$sky.coverageFromWeather;coveragePinned=$sky.coveragePinned;clearCoverage=$sky.clearCoverage;fullCoverage=$sky.fullCoverage}
+}
+function Assert-CloudRecipe($a,$b){Require (($a|ConvertTo-Json -Compress) -ceq ($b|ConvertTo-Json -Compress)) 'Producer cloud recipe changed between quality views.'}
 function Assert-MudSun($weather,[double]$hour,[double]$overcast){
  $null=Number $hour
  Require ([Math]::Abs($hour-16) -lt .001 -and $weather.sunAvailable -is [bool] -and $weather.sunAvailable) 'Actual 16h mud daylight is absent.'
@@ -160,6 +176,16 @@ function Pair{
 function Same-Pair($a,$b){Require (($a|ConvertTo-Json -Depth 8 -Compress)-ceq ($b|ConvertTo-Json -Depth 8 -Compress)) 'Installed source pair changed.'}
 function Test-Helpers{
  Require ((Quality-CloudPin $false) -ceq '0' -and $null -eq (Quality-CloudPin $true)) 'Default/quality rendered cloud override policy changed.'
+ $cloud=@{overcast=1;rendererSkyAvailable=$true;rendererSky=@{enabled=$true;skyLighting=$true;coverageFromWeather=$true;coveragePinned=$false;coverage=.95;clearCoverage=.05;fullCoverage=.95}}
+ Assert-RendererClouds $cloud 1
+ foreach($bad in @('unavailable','disabled','legacy','manual','pin','lag','flat','nan')){
+  $copy=$cloud|ConvertTo-Json|ConvertFrom-Json
+  switch($bad){'unavailable'{$copy.rendererSkyAvailable=$false};'disabled'{$copy.rendererSky.enabled=$false};'legacy'{$copy.rendererSky.skyLighting=$false};'manual'{$copy.rendererSky.coverageFromWeather=$false};'pin'{$copy.rendererSky.coveragePinned=$true};'lag'{$copy.rendererSky.coverage=.05};'flat'{$copy.rendererSky.clearCoverage=.95};'nan'{$copy.rendererSky.coverage='NaN'}}
+  $failed=$false;try{Assert-RendererClouds $copy 1}catch{$failed=$true};Require $failed 'Unavailable/pinned/lagging actual renderer clouds accepted.'
+ }
+ $cloud.overcast=0;$cloud.rendererSky.coverage=.05;Assert-RendererClouds $cloud 0
+ $recipe=Renderer-CloudRecipe $cloud;Assert-CloudRecipe $recipe (Renderer-CloudRecipe $cloud)
+ $cloud.rendererSky.fullCoverage=.9;$failed=$false;try{Assert-CloudRecipe $recipe (Renderer-CloudRecipe $cloud)}catch{$failed=$true};Require $failed 'Different dry/wet cloud endpoints admitted as matching lighting.'
  Require ((Uniform-StageCommand 52.0463) -ceq 'player setDir 52.0463') 'Actual settled dry heading staging command changed.'
  $changedHeading=$false;try{Assert-UniformHeading 346.873 52.0463}catch{$changedHeading=$true};Require $changedHeading 'Real rain-wait heading drift accepted as an aligned capture.'
  Assert-UniformHeading 52.04631 52.0463
@@ -303,6 +329,15 @@ function Assert-Paused($a,$b){Require ($a.time -eq $b.time -and $a.uniform -eq $
  for($i=0;$i -lt 3;++$i){Require ($a.position[$i] -eq $b.position[$i]) 'Paused actual player moved.'}
  foreach($f in @('rain','liquidRain','particleDensity','particleSnowflakes')){Require ($a.weather.$f -eq $b.weather.$f) 'Paused real weather changed.'}
 }
+function Wait-QualityClouds($baseline,[double]$overcast){
+ $until=[DateTime]::UtcNow.AddSeconds(3);$lastFailure=''
+ do{
+  $actual=State;Assert-Paused $baseline $actual
+  try{Assert-RendererClouds $actual.weather $overcast;return $actual}catch{$lastFailure=$_.Exception.Message}
+  Require ([DateTime]::UtcNow -lt $until) ('Bounded producer cloud readback did not settle: '+$lastFailure)
+  Start-Sleep -Milliseconds 100
+ }while($true)
+}
 function Capture([string]$name){
  Start-Sleep -Milliseconds 500;$path=Join-Path $armDir ($name+'.png');$null=Send @{cmd='screenshot';path=$path};$until=[DateTime]::UtcNow.AddSeconds(10)
  do{Health;$bytes=$null;if(Test-Path -LiteralPath $path){try{$bytes=[IO.File]::ReadAllBytes($path)}catch [IO.IOException]{}}
@@ -408,21 +443,26 @@ function Mud-Lighting($walkRecord,$site){
  $original=State;$originalHour=Number (Eval 'dayTime');$restoreDate=Mud-RestoreDateTuple $originalHour
  $initialReceipt=Terrain-WetnessReceipt $original
  Require (Mud-LightingWetReady $original $initialReceipt) 'Retained mud lighting requires genuinely accumulated/queued >=.8 wetness from the preceding real rain wait.'
+ Assert-RendererClouds $original.weather $original.weather.overcast;$cloudRecipe=Renderer-CloudRecipe $original.weather
  $record=@{before=$original;originalHour=$originalHour;originalKnownFixtureDate=$restoreDate;initialTerrainReceipt=$initialReceipt;contact=$contact;centre=$centre;views=@{};
   body=(Assert-Body (Lines) ($original.time-.65));scope='Lighting A/B of retained genuinely rain-wet source-qualified soil. Overcast/date are deliberately set while paused. Rain, wetness and source geometry are preserved. Existing C++ queued parameter receipt is not local fragment rain coverage, Rust acceptance or GPU completion proof.'}
  try{
   Exec 'setDate [1985,6,21,16,0]'
   foreach($light in (Mud-LightingPlan)){
-   Exec ('0 setOvercast '+$light.overcast);Start-Sleep -Milliseconds 500
+   Exec ('0 setOvercast '+$light.overcast);$null=Wait-QualityClouds $original $light.overcast
    foreach($target in @(@{name='contact';sample=$contact},@{name='centre';sample=$centre})){
     $sample=$target.sample
     foreach($view in (Contact-Poses ([double]$sample.x) ([double]$sample.z) ([double]$sample.surfaceY))){
      $pose=($view.pose|ForEach-Object{([double]$_).ToString('R',$culture)}) -join ' '
      Require ((Eval ('triFreeFlyPose "'+$pose+'"')) -ceq 'OK') 'Paused mud lighting source/contact camera refused.'
      $beforeView=State;Assert-Paused $original $beforeView;$hour=Number (Eval 'dayTime');Assert-MudSun $beforeView.weather $hour $light.overcast
+     Assert-RendererClouds $beforeView.weather $light.overcast
+     Assert-CloudRecipe $cloudRecipe (Renderer-CloudRecipe $beforeView.weather)
      $terrainBefore=Terrain-WetnessReceipt $beforeView;Require (Mud-LightingWetReady $beforeView $terrainBefore) 'Retained genuinely wet queued substrate was lost.'
      $name=$target.name+'-'+$light.name+'-'+$view.name;Capture ('mud-lighting-'+$name)
      $afterView=State;Assert-Paused $beforeView $afterView;Assert-MudSun $afterView.weather (Number (Eval 'dayTime')) $light.overcast
+     Assert-RendererClouds $afterView.weather $light.overcast
+     Assert-CloudRecipe $cloudRecipe (Renderer-CloudRecipe $afterView.weather)
      foreach($field in @('sunTravelY','nightEffect','overcast','solarDrying')){Require ($afterView.weather.$field -eq $beforeView.weather.$field) 'Actual mud lighting changed during paused capture.'}
      $actual=Field 'mud' $sample;Assert-Tuple $actual $site $map 'mud'
      foreach($field in @('offset','surfaceY','surfaceDx','surfaceDz')){Require ($actual.$field -eq $sample.$field) 'Mud lighting changed retained source/contact geometry.'}
@@ -442,7 +482,8 @@ function Mud-Lighting($walkRecord,$site){
    Exec ('skipTime '+($originalHour-$restoredHour).ToString('R',$culture))
   }
  }
- $record.after=State;Assert-Paused $original $record.after;$record.restoredHour=Number (Eval 'dayTime')
+ $record.after=Wait-QualityClouds $original $original.weather.overcast;Assert-Paused $original $record.after;$record.restoredHour=Number (Eval 'dayTime')
+ Assert-CloudRecipe $cloudRecipe (Renderer-CloudRecipe $record.after.weather)
  Require ($record.restoredHour -eq $originalHour -and [Math]::Abs($record.after.weather.overcast-$original.weather.overcast) -le .001) 'Actual owned date/dayTime or cloud lighting did not restore.'
  return $record
 }
@@ -472,7 +513,9 @@ function Uniform-Lighting([string]$band){
  try{
   # World::SetWeather applies zero-duration overcast immediately. Unlike rain,
   # changing sky/cloud lighting needs no simulation step. Rain history stays real.
-  Exec '0 setOvercast 1;setDate [1985,6,21,16,0]';$baseline=State;Assert-Paused $original $baseline
+  Exec '0 setOvercast 1;setDate [1985,6,21,16,0]';$baseline=Wait-QualityClouds $original 1
+  if($band -eq 'dry'){$arm.uniformCloudRecipe=Renderer-CloudRecipe $baseline.weather}else{Assert-CloudRecipe $arm.uniformCloudRecipe (Renderer-CloudRecipe $baseline.weather)}
+  $record.producerCloudRecipe=$arm.uniformCloudRecipe
   Require ((Number $baseline.weather.overcast) -ge .99) 'Paused matching stock cloud lighting did not apply.'
   $pose=($view|ForEach-Object{([double]$_).ToString('R',$culture)}) -join ','
   Camera 'EXTERNAL';Require ((Eval ('triSetView ['+$pose+']')) -ceq 'OK') 'Uniform render-only view refused.'
@@ -489,11 +532,15 @@ function Uniform-Lighting([string]$band){
   $snapshot={param([string]$name,[bool]$night,[string]$lampState)
    $hour=Number (Eval 'dayTime');$sun=Number (Eval 'triGetShadowSunFactor');Assert-UniformSun $hour $sun $night
    $stateBefore=State;Assert-Paused $baseline $stateBefore
+   Assert-RendererClouds $stateBefore.weather 1
+   Assert-CloudRecipe $arm.uniformCloudRecipe (Renderer-CloudRecipe $stateBefore.weather)
    $headingBefore=Number (Eval 'getDir player');Assert-UniformHeading $headingBefore $arm.uniformViewDirection
    Require ((Eval 'typeOf uniformStockLamp') -ceq 'StreetLampWood') 'Actual lamp identity disappeared before capture.'
    $lampNow=Eval 'getPosASL uniformStockLamp';for($i=0;$i -lt 3;++$i){Require ([Math]::Abs((Number $lampNow[$i])-$lampPosition[$i]) -le .01) 'Actual lamp moved between lighting captures.'}
    Require ((Number (Eval 'triGetCameraEffectActive')) -eq 0) 'Paused render-only camera became a gameplay camera.'
    Capture ('uniform-'+$band+'-'+$name);$stateAfter=State;Assert-Paused $stateBefore $stateAfter
+   Assert-RendererClouds $stateAfter.weather 1
+   Assert-CloudRecipe $arm.uniformCloudRecipe (Renderer-CloudRecipe $stateAfter.weather)
    $headingAfter=Number (Eval 'getDir player');Assert-UniformHeading $headingAfter $headingBefore;Assert-UniformHeading $headingAfter $arm.uniformViewDirection
    Require ((Number (Eval 'dayTime')) -eq $hour -and (Number (Eval 'triGetShadowSunFactor')) -eq $sun) 'Actual lighting changed during paused capture.'
    $record.views[$name]=@{before=$stateBefore;after=$stateAfter;headingBefore=$headingBefore;headingAfter=$headingAfter;hour=$hour;shadowSunFactor=$sun;lampStateCommand=$lampState;lampLive=(Lamp-Live (Lines));lampSourceRows=@(Lines|Where-Object{$_ -match 'LAMP-001:|LAMP-003 type StreetLampWood:'}|Select-Object -Last 3);lampClass=(Eval 'typeOf uniformStockLamp');lampPosition=$lampNow;cameraEffectActive=(Eval 'triGetCameraEffectActive');body=(Assert-Body (Lines) ($baseline.time-.65))}
@@ -523,7 +570,8 @@ function Uniform-Lighting([string]$band){
   Require ((Eval 'triClearView') -ceq 'OK') 'Uniform render-only camera did not release.'
   Exec ('setDate [1985,6,21,16,0];0 setOvercast '+([double]$original.weather.overcast).ToString('R',$culture))
  }
- Start-Sleep -Milliseconds 500;$record.after=State;Assert-Paused $original $record.after
+ $record.after=Wait-QualityClouds $original $original.weather.overcast;Assert-Paused $original $record.after
+ Assert-CloudRecipe $arm.uniformCloudRecipe (Renderer-CloudRecipe $record.after.weather)
  Require ([Math]::Abs((Number $record.after.weather.overcast)-(Number $original.weather.overcast)) -lt .001) 'Original cloud lighting was not restored.'
  Assert-UniformHeading (Number (Eval 'getDir player')) $stagedHeading
  return $record
