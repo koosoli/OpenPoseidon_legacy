@@ -27,10 +27,11 @@ fn actual_thin_water_helper_is_pure_and_full_fragment_preserves_support_guards()
             ..Default::default()
         })
         .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&composer)));
-    assert!(composed.functions.iter().any(|(_, f)| f
-        .name
-        .as_deref()
-        .is_some_and(|n| n.contains("rain_water_surface_optics"))));
+    assert!(composed.functions.iter().any(|(_, f)| {
+        f.name
+            .as_deref()
+            .is_some_and(|n| n.contains("rain_water_surface_optics"))
+    }));
     let source = include_str!("rain_water.wgsl");
     assert!(source.contains("let local_depth = rain_water_support_depth(water,bed"));
     assert!(source.contains("if (local_depth <= 0.001) { discard; }"));
@@ -38,8 +39,15 @@ fn actual_thin_water_helper_is_pure_and_full_fragment_preserves_support_guards()
     assert!(source.contains("let standing = rain_water_standing_fraction(local_depth)"));
     assert!(source.contains("(ripple.x + flow_slope.x)*standing"));
     assert!(source.contains("if (standing > 0.0)"));
-    assert!(source
-        .contains("rain_water_surface_optics(local_depth,view_cosine,reflected,body,coverage)"));
+    assert!(source.contains("rain_water_impact_normal(in.world.xz,rainwater.domain.w"));
+    assert!(!source.contains("ground_puddle_ripple_normal"));
+    assert!(source.contains("rain_water_sun_specular("));
+    assert!(source.contains("shadow_strength(rel,vec3<f32>(0.0,1.0,0.0),fog,dwx,dwy)"));
+    assert!(source.contains("cloud_sun_shadow(in.world.xz)"));
+    assert!(
+        source
+            .contains("rain_water_surface_optics(local_depth,view_cosine,reflected,body,coverage)")
+    );
     // One helper controls both coarse/fine fs_main: no alternative optical
     // cutoff and no simulation payload/binding added by the material module.
     assert_eq!(source.matches("fn fs_main(").count(), 1);
@@ -49,6 +57,119 @@ fn actual_thin_water_helper_is_pure_and_full_fragment_preserves_support_guards()
             .count(),
         1
     );
+}
+
+#[test]
+fn actual_gpu_irregular_impacts_are_continuous_filtered_and_sun_lobe_is_bounded() {
+    let (device, queue) = crate::gfx3d::cull::tests::headless()
+        .expect("Actual rain impact / sun lobe probe needs a GPU");
+    let source = format!(
+        r#"{}
+@group(0) @binding(0) var<storage,read_write> result:array<vec4<f32>>;
+@compute @workgroup_size(64)
+fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>){{
+ let i=id.x;if(i>=64u){{return;}}
+ let p=vec2<f32>(f32(i%8u)*0.75, f32(i/8u)*0.113-1.1);
+ let n=rain_water_impact_normal(p,1.73,1.0,0.002);
+ result[i*7u]=vec4<f32>(n,length(n));
+ result[i*7u+1u]=vec4<f32>(rain_water_impact_normal(p+vec2<f32>(0.00001,0.0),1.73,1.0,0.002),0.0);
+ result[i*7u+2u]=vec4<f32>(rain_water_impact_normal(p-vec2<f32>(0.00001,0.0),1.73,1.0,0.002),0.0);
+ result[i*7u+3u]=vec4<f32>(rain_water_impact_normal(p,1.73001,1.0,0.002),0.0);
+ result[i*7u+4u]=vec4<f32>(rain_water_impact_normal(p,1.73,0.0,0.002),0.0);
+ result[i*7u+5u]=vec4<f32>(rain_water_impact_normal(p,1.73,1.0,0.16),0.0);
+ let c=f32(i)/63.0;
+ result[i*7u+6u]=vec4<f32>(rain_water_sun_specular(1.0,1.0,c,1.0,0.0),
+ rain_water_sun_specular(1.0,1.0,c,1.0,0.5),
+ rain_water_sun_specular(c,0.0,1.0,c,0.0),
+ rain_water_sun_specular(0.0,c,1.0,c,0.0));
+}}
+"#,
+        production()
+    );
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("actual_irregular_water_impacts_and_sun"),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    });
+    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: None,
+        module: &shader,
+        entry_point: Some("cs_probe"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    let bytes = 64 * 7 * 16;
+    let output = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: None,
+        contents: &vec![0u8; bytes],
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    });
+    let readback = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: bytes as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout: &pipeline.get_bind_group_layout(0),
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: output.as_entire_binding(),
+        }],
+    });
+    let mut encoder = device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+    encoder.copy_buffer_to_buffer(&output, 0, &readback, 0, bytes as u64);
+    queue.submit([encoder.finish()]);
+    let (tx, rx) = std::sync::mpsc::channel();
+    readback
+        .slice(..)
+        .map_async(wgpu::MapMode::Read, move |r| tx.send(r).unwrap());
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    rx.recv().unwrap().unwrap();
+    let mapped = readback.slice(..).get_mapped_range();
+    let rows: Vec<[f32; 4]> = bytemuck::cast_slice(&mapped).to_vec();
+    drop(mapped);
+    readback.unmap();
+    assert!(rows.iter().flatten().all(|v| v.is_finite()));
+    let mut active = 0;
+    for i in 0..64 {
+        let n = rows[i * 7];
+        assert!((n[3] - 1.0).abs() < 0.00001 && n[1] > 0.85);
+        active += usize::from(n[0].abs() + n[2].abs() > 0.0001);
+        for k in [0, 1, 2] {
+            assert!(
+                (rows[i * 7 + 1][k] - rows[i * 7 + 2][k]).abs() < 0.003,
+                "cell seam at {i}/{k}"
+            );
+            assert!(
+                (n[k] - rows[i * 7 + 3][k]).abs() < 0.003,
+                "time jump at {i}/{k}"
+            );
+        }
+        assert_eq!(rows[i * 7 + 4], [0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(rows[i * 7 + 5], [0.0, 1.0, 0.0, 0.0]);
+        let sun = rows[i * 7 + 6];
+        assert!(sun[0] >= 0.0 && sun[1] >= 0.0);
+        assert_eq!(&sun[2..], &[0.0, 0.0]);
+    }
+    assert!(
+        active > 3 && active < 60,
+        "independent events need active and inactive areas: {active}"
+    );
+    // Broad finite normal-incidence sun peak; more unresolved variance lowers
+    // that peak. No forced brighter body, sky multiplier or HDR colour clamp.
+    let peak = rows[63 * 7 + 6];
+    assert!(peak[0] > 0.1 && peak[0] < 1.0 && peak[1] < peak[0]);
+    for i in 1..64 {
+        assert!(rows[i * 7 + 6][0] >= rows[(i - 1) * 7 + 6][0]);
+    }
 }
 
 #[test]

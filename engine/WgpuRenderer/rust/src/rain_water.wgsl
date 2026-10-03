@@ -1,9 +1,10 @@
-#import frame::{frame, reverse_z, fog_factor, apply_fog, ground_sky_reflection, interior_rain_reach, interior_rain_coverage, sky_irradiance}
+#import frame::{frame, reverse_z, fog_factor, apply_fog, ground_sky_reflection, interior_rain_reach, interior_rain_coverage, sky_irradiance, terrain_sun_shadow, cloud_sun_shadow}
+#import shadow::shadow_strength
 #import conform::{bare_surface_y, bare_surface_valid}
-#import ground_puddles::{ground_puddle_rain_factor, ground_puddle_ripple_normal}
+#import ground_puddles::ground_puddle_rain_factor
 #import rain_water_reflections::rain_water_scene_reflection
 #import rain_water_body::rain_water_body_radiance
-#import rain_water_optics::{rain_water_surface_optics, rain_water_standing_fraction}
+#import rain_water_optics::{rain_water_surface_optics, rain_water_standing_fraction, rain_water_impact_normal, rain_water_sun_specular}
 
 struct RainWaterParams {
     domain: vec4<f32>, // absolute origin x/z, cell spacing, simulation time
@@ -159,7 +160,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
         hz=(water_at(in.world.xz + vec2<f32>(0,step)).x -
             water_at(in.world.xz - vec2<f32>(0,step)).x)/(2.0*step);
     }
-    let ripple = ground_puddle_ripple_normal(in.world.xz,rainwater.domain.w,rainwater.control.z,footprint);
+    let ripple = rain_water_impact_normal(in.world.xz,rainwater.domain.w,rainwater.control.z,footprint);
     let standing = rain_water_standing_fraction(local_depth);
     // Long, gentle flow packets advect with the physical field velocity; fade
     // all fine variation before distant pixels can resolve glittering glints.
@@ -184,6 +185,22 @@ fn fs_main(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
     let edge = smoothstep(0.001,0.012,min(water.y,local_depth));
     let optics = rain_water_optics(local_depth, dot(n,view), reflected, body, edge*cover);
     var rgb = optics.rgb;
+    // The shared atmosphere reflection bake excludes the sun disc. As in
+    // Tidewater, add direct sun irradiance through a separately shadowed GGX
+    // interface, not a brighter sky/body tint or a second Fresnel multiplier.
+    let light = normalize(-frame.sun_dir_world.xyz);
+    let half_vector = (light + view) / max(length(light + view), 0.0001);
+    let sun_lobe = rain_water_sun_specular(max(dot(n,view),0.0), max(dot(n,light),0.0),
+        max(dot(n,half_vector),0.0), max(dot(view,half_vector),0.0), normal_variation) * standing;
+    if (sun_lobe > 0.0 && optics.a > 0.0) {
+        let rel = in.world-frame.cam_pos.xyz;
+        let fog = fog_factor(length(rel));
+        let csm = shadow_strength(rel,vec3<f32>(0.0,1.0,0.0),fog,dwx,dwy);
+        let terrain_shadow = terrain_sun_shadow(in.world.xz,in.world.y) * fog;
+        let sun_light = frame.sun_diffuse.rgb * 3.14159265359
+            * (1.0-max(csm,terrain_shadow)) * cloud_sun_shadow(in.world.xz);
+        rgb += sun_light * sun_lobe * edge * cover / max(optics.a,0.000001);
+    }
     if (frame.params.fog_enabled >= 1.5) { rgb = apply_fog(rgb,in.world-frame.cam_pos.xyz); }
     else { rgb = mix(frame.fog_color.rgb,rgb,fog_factor(length(in.world-frame.cam_pos.xyz))); }
     return vec4<f32>(rgb,optics.a);
