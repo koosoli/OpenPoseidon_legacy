@@ -423,6 +423,7 @@ private:
         const float input = rain * 0.00012f * StepSeconds;
         const float evaporation = (0.000002f + sunlight * 0.000006f + wind * 0.000001f) * StepSeconds;
         const float infiltration = 0.000004f * StepSeconds;
+        bool hasWater = false;
         for (size_t i=0; i<_depth.size(); ++i) {
             // Sea is a real outlet, not a source of rainwater above dry terrain.
             if (_bed[i] <= _seaLevel) {
@@ -433,28 +434,35 @@ private:
             _depth[i] -= absorbed; _budget.infiltration += absorbed * area;
             const float evaporated = std::min(_depth[i], evaporation);
             _depth[i] -= evaporated; _budget.evaporation += evaporated * area;
+            hasWater |= _depth[i] > 0;
         }
         std::fill(_out.begin(),_out.end(),0); std::fill(_delta.begin(),_delta.end(),0);
         std::fill(_flowX.begin(),_flowX.end(),0); std::fill(_flowZ.begin(),_flowZ.end(),0);
-        size_t edgeX=0,edgeZ=0;
-        Edges([&](size_t a,size_t b,bool alongX) {
-            const float f = Transfer(a,b);
-            (alongX ? _edgeX[edgeX++] : _edgeZ[edgeZ++]) = f;
-            _out[f>0?a:b] += std::abs(f);
-        });
-        // Bed/depth do not change between these passes. Reuse only the raw
-        // transfer from this step, in the same interleaved row/axis edge order;
-        // donor normalization, delta and flow writes retain their exact order.
-        edgeX=0;edgeZ=0;
-        Edges([&](size_t a,size_t b,bool alongX) {
-            float f = alongX ? _edgeX[edgeX++] : _edgeZ[edgeZ++]; const size_t donor = f>0?a:b;
-            if (_out[donor]>0) f *= std::min(1.0f,_depth[donor]/_out[donor]);
-            _delta[a] -= f; _delta[b] += f;
-            auto& flow = alongX ? _flowX : _flowZ;
-            // Signed volume flux converted to a surface-flow speed where wet.
-            const float velocity = f * _spacing / StepSeconds / std::max(_depth[donor],0.0001f);
-            flow[a] += velocity * 0.5f; flow[b] += velocity * 0.5f;
-        });
+        // Every donor is exactly dry after the unchanged source/sink pass.
+        // Transfer then returns +0 on every edge. Preserve the clears, final
+        // cell pass, budgets and revision, but avoid two empty edge traversals.
+        // The next nonempty step overwrites every cached transfer before use.
+        if (hasWater) {
+            size_t edgeX=0,edgeZ=0;
+            Edges([&](size_t a,size_t b,bool alongX) {
+                const float f = Transfer(a,b);
+                (alongX ? _edgeX[edgeX++] : _edgeZ[edgeZ++]) = f;
+                _out[f>0?a:b] += std::abs(f);
+            });
+            // Bed/depth do not change between these passes. Reuse only the raw
+            // transfer from this step, in the same interleaved row/axis edge order;
+            // donor normalization, delta and flow writes retain their exact order.
+            edgeX=0;edgeZ=0;
+            Edges([&](size_t a,size_t b,bool alongX) {
+                float f = alongX ? _edgeX[edgeX++] : _edgeZ[edgeZ++]; const size_t donor = f>0?a:b;
+                if (_out[donor]>0) f *= std::min(1.0f,_depth[donor]/_out[donor]);
+                _delta[a] -= f; _delta[b] += f;
+                auto& flow = alongX ? _flowX : _flowZ;
+                // Signed volume flux converted to a surface-flow speed where wet.
+                const float velocity = f * _spacing / StepSeconds / std::max(_depth[donor],0.0001f);
+                flow[a] += velocity * 0.5f; flow[b] += velocity * 0.5f;
+            });
+        }
         for (size_t i=0; i<_depth.size(); ++i) {
             _depth[i] = std::max(0.0f,_depth[i]+_delta[i]);
             if (_bed[i] <= _seaLevel) {

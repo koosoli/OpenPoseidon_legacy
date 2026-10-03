@@ -94,6 +94,15 @@ int main() {
         advance(a,r,.001f,0);advance(a,r,.001f,0);
     }
     Actual a;Reference r;configure(a,r,5,5,2,std::vector<float>(25,10));
+    // An exact empty step must ignore stale transfers from an earlier wet
+    // step, retain all real sink budgets/revisions, and overwrite the whole
+    // cache before later water is admitted. Tiny actual rain is fully absorbed.
+    assert(a.AddWater(2,2,.000002f) && r.AddWater(2,2,.000002f));
+    advance(a,r,.25f,0);
+    for(int n=0;n<12;++n) advance(a,r,.25f,6e-16f);
+    assert(a.Volume()==0 && r.Volume()==0);
+    advance(a,r,.25f,.8f);
+    assert(a.Volume()>0);
     for(int n=0;n<240;++n) advance(a,r,1.f/60,.7f,.3f,.8f);
     // Validate the actual MaxCells bound and cache size without changing it.
     configure(a,r,1024,1024,25,std::vector<float>(Actual::MaxCells,10));

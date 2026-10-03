@@ -1,5 +1,30 @@
 # Coarse runoff transfer cache: measured source and equivalence
 
+## Installed follow-up and exact-empty candidate
+
+Installed86aae17414:33 includes the cache. Actual explicit-cost flight85dd9f
+passes both normal stable arms, all source/weather/route guards and zero
+dropped completed frames. Requested timing flag1 is now recorded/restored.
+Within actual first/last state-sample wall windows, dry24 accounting rows/
+1447ticks give Advance0.446986ms/tick (max8.3457ms); rain25rows/1510ticks
+give0.774291ms/tick (max15.0251ms). Previous8ffcd5 gives dry0.375442/rain
+0.859199ms/tick. Rain Advance is about9.9% lower; dry is19.1% higher.
+These are independent native runs, not exact scene/workload parity.
+Completed frame means9.731086/10.838373ms and p9511.729/14.985ms are roughly
+unchanged versus the previous run; no causal FPS improvement is claimed.
+Raw extraction is retained in build/weather-oct3-cached-coarse-cost-summary.jsonl.
+
+The remaining dry overhead motivates an exact-empty candidate. During the
+unchanged per-cell real rain/infiltration/evaporation pass, track whether any
+depth remains strictly positive. If none does, every donor is exactly dry and
+Transfer returns positive zero for every edge. Skip only those two empty edge
+traversals; retain scratch/flow clears, final cell/sea pass, all budgets, time
+and revisions. There is no approximate depth threshold. A later nonempty
+step overwrites every cache entry before use. Native O0/O2 comparisons pass
+against the actual pinned old solver, including a wet→exact-empty→rain pulse
+and tiny native dry-transition input. Full build/runtime remain pending for
+this follow-up, which is not installed in86aae174.
+
 ## Actual installed attribution
 
 The `e017e028` two-arm campaign

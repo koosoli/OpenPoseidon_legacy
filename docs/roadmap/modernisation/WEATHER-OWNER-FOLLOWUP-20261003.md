@@ -1,5 +1,24 @@
 # Weather owner follow-up, 3 October 2026
 
+14:52 checkpoint: matching86aae174 pair installed14:33 after21step full
+build includes coarse cache, conservative simultaneous fine flux and CPU sky
+receipt/optional natural-cloud comparisons. Actual flight88be03 and explicit
+cost85dd9f pass normal stable arms and zero drops. Explicit CPU Advance dry
+0.446986/rain0.774291ms per tick versus earlier0.375442/0.859199; wet about10%
+lower, dry overhead higher. Completed frames roughly unchanged; no causal
+FPS gain claimed. Exact-empty edge skip passes bitwise O0/O2 tests but awaits
+build/runtime. Body sunlight shadow correction likewise remains uninstalled.
+
+Actual natural-cloud Eden3e388c passes normal stable exit and all14cloth/
+8mud capture guards. Actual CPU sky weather-drive is enabled/unpinned with
+distinct clear.05/full.95 coverage. GMud0.802254/uniform0.709251 and walked
+contact depth0.174462m remain actual. Root sees wet dark overcast soil but
+sunny soil still matte, unnaturally flat mirror patches and excessive pale
+farmground under the soldier. Appearance OPEN; local fragment admission
+is not established by CPU source/sky receipts. Current native sunny fine
+7a5b18 has visibly reduced jagged pool cell steps, but drainage/metrics are
+still running and no completed acceptance is claimed.
+
 14:31 follow-up: installed pair is still e017e028. Actual occupied dry/rain
 flight8ffcd5 passes normal exits, stable pair, zero drops and driver/weather
 guards. Mean frame9.435/10.775ms, p9511.441/15.105ms. Weighted actual CPU
