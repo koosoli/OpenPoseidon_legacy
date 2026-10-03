@@ -71,7 +71,9 @@ function Lamp-Live($lines){
  return [int]$Matches[1]
 }
 function Model-Stem([string]$debug){
- Require ($debug -match '^(?:NOID|\d+:)\s+(.+)$' -and $Matches[1] -notmatch '<no shape>') 'Actual object has no identifiable model shape.'
+ # EntityAI without a commander wraps Object's shape name in its pointer and
+ # locality marker. This grammar is for static model proof, never unit IDs.
+ Require ($debug -match '^(?:(?:0[xX])?[0-9A-Fa-f]+# )?(?:NOID|\d+:)\s+(.+?)(?: REMOTE)?$' -and $Matches[1] -notmatch '<no shape>') 'Actual object has no identifiable model shape.'
  return $Matches[1].ToLowerInvariant()
 }
 function Decode([string]$v){$v=$v.Trim();if($v.StartsWith('"')){Require $v.EndsWith('"') 'Bad SQF string.';return $v.Substring(1,$v.Length-2).Replace('""','"')};return ConvertFrom-Json $v -NoEnumerate}
@@ -146,6 +148,9 @@ function Test-Helpers{
  foreach($v in @(@(16,1,$true),@(0,0,$false),@(0,.5,$true),@(16,[double]::NaN,$false))){$failed=$false;try{Assert-UniformSun $v[0] $v[1] $v[2]}catch{$failed=$true};Require $failed 'Incorrect actual day/night lighting accepted.'}
  Require ((Lamp-Live @('LAMP-001: 5 lamp simulations since start, 2 of them switched on, 1 lamp lights live in the scene')) -eq 1) 'Actual lamp scene-count parser failed.'
  Require ((Model-Stem '42: mc vojakw2') -ceq 'mc vojakw2') 'Actual shape debug-name parser failed.'
+ Require ((Model-Stem '000000012345ABCD# NOID stan_eastc') -ceq 'stan_eastc') 'Actual local static EntityAI model name refused.'
+ Require ((Model-Stem '0x1234abcd# 42: stan_eastc REMOTE') -ceq 'stan_eastc') 'Actual remote static EntityAI model name refused.'
+ $failed=$false;try{Model-Stem 'WEST Alpha Schwarz:1 (mail)'}catch{$failed=$true};Require $failed 'Commander unit identity misread as static model shape.'
  foreach($v in @('42: <no shape>','objNull','')){$failed=$false;try{Model-Stem $v}catch{$failed=$true};Require $failed 'Missing actual model shape accepted.'}
  $views=Contact-Poses 10 20 30
  Require ($views.Count -eq 2 -and $views[0].pose.Count -eq 5 -and $views[1].pose.Count -eq 5) 'Contact camera tuple arity changed.'
