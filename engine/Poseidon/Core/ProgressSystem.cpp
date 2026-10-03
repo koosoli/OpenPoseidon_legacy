@@ -342,6 +342,10 @@ void ProgressSystem::Frame()
     }
     if (GEngine->IsAbleToDraw())
     {
+        // The splash draws no world: hide the renderer's GPU-resident world objects, whose suppress latch would
+        // otherwise still hold the last world frame's value while a world unloads, switches or exits (the
+        // black-ground / floating-objects flash). World::Simulate re-latches it on the next world frame.
+        GEngine->SuppressWorldObjects(true);
         GEngine->InitDraw(_clear, ProgressBackground);
     }
     Poseidon::ProcessMessagesNoWait();

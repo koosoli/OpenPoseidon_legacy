@@ -3521,6 +3521,13 @@ impl Renderer {
         water_batches: &[WgrWaterBatch],
         grass_batches: &[WgrGrassBatch],
     ) -> Result<(), String> {
+        // The GPU-resident (retained / GPU-driven) world objects are drawn by every presented frame unless
+        // suppressed, and the suppress latch is pushed only by World::Simulate. Frames presented from anywhere
+        // else -- the progress splash while a world unloads or switches, the exit path -- inherited the last
+        // world frame's `false` and drew the whole resident set from the stale camera over the black splash
+        // background: the island "goes black and all objects float" for a moment (owner report). A frame that
+        // submitted no terrain and no 3D draws has no world in it, so its resident objects stay hidden too.
+        let suppress_world_objects = self.suppress_world_objects || (terrain_batches.is_empty() && draws3d.is_empty());
         self.gfx3d.begin_geometry_pass_facts(shadow);
         let setup_t0 = std::time::Instant::now();
         // REN-THR-009 — before anything this frame reads `bake_bind_cache` or allocates
@@ -4576,7 +4583,7 @@ impl Renderer {
             let offset = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
             // REN-TEMP-001T: remembered for the velocity twin recorded in run_tonemap.
             self.main_cam_off = offset;
-            if !self.suppress_world_objects {
+            if !suppress_world_objects {
                 self.far.dispatch(
                     &self.queue,
                     &mut encoder,
@@ -5336,7 +5343,7 @@ impl Renderer {
                 // GPU-driven opaque set into the SAME depth+normal prepass (reuses this
                 // frame's cull out_args — the cull dispatch already ran before the passes).
                 // Writes depth + view-space normals so the set gets early-Z + SSAO normals.
-                if !self.suppress_world_objects {
+                if !suppress_world_objects {
                     let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
                     self.gfx3d.draw_gpu_driven_prepass(
                         &mut pp,
@@ -5590,7 +5597,7 @@ impl Renderer {
                 // draws (fences, glass) that read the framebuffer colour — those must blend
                 // against the GPU-driven objects behind them, not the background, so the
                 // GPU-driven colour has to be present first (else the sky shows through).
-                if start == 0 && !self.suppress_world_objects {
+                if start == 0 && !suppress_world_objects {
                     let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
                     self.gfx3d.draw_gpu_driven(
                         &mut pass,
@@ -5649,7 +5656,7 @@ impl Renderer {
                 // actually show on top. When a post-water sub-pass follows, that one is the last
                 // world draw and they belong there instead.
                 if start == 0
-                    && !self.suppress_world_objects
+                    && !suppress_world_objects
                     && self.cull_debug_draw
                     && !has_post_water_3d
                 {
@@ -6116,7 +6123,7 @@ impl Renderer {
                     self.gpu_timers
                         .end_pass(&mut pass, TimerRegion::OpsPostWater);
                 }
-                if start == 0 && !self.suppress_world_objects && self.cull_debug_draw {
+                if start == 0 && !suppress_world_objects && self.cull_debug_draw {
                     let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
                     self.gfx3d.draw_cull_spheres(&mut pass, cam_off);
                 }
