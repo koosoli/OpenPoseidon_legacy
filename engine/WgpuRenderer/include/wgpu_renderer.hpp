@@ -303,7 +303,12 @@ enum WgrDraw3DFlags : uint32_t
      * for the draw; every other draw keeps it. */
     WGR_DRAW3D_DOUBLE_SIDED = 64,
     WGR_DRAW3D_NORMAL_RG = 128, // BC5 / compressed Enfusion normal XY, not NOHQ alpha/green
-    WGR_DRAW3D_NATIVE_CAVITY = 1024 // 256/512 belong to Z bias
+    WGR_DRAW3D_NATIVE_CAVITY = 1024, // 256/512 belong to Z bias
+    /* MAT-053: an object's translucent section drawn in the back-to-front blend pass (MAT-048:
+     * depth-test only). The world depth prepass lays depth for this draw's FULLY SOLID texels
+     * (texture alpha >= 0.98) so a mostly-solid atlas that classified Blend (a floor, a camo net)
+     * still occludes what is behind it; the colour pass keeps blending every texel. */
+    WGR_DRAW3D_BLEND_SECTION = 2048
 };
 
 /* Matrices per palette block (the engine's own bone-palette cap). Each skinned

@@ -193,13 +193,73 @@ struct PipelineKey {
 }
 
 // Identifies one depth+normal prepass pipeline variant (docs/depth-prepass-plan.md,
-// decision 3). The prepass only ever draws the opaque set (blend Opaque, offset None,
-// depth TestWrite), so blend/depth/offset are fixed and drop out of the key — only the
-// VS path (skinned) and the cutout threshold (foliage vs pure opaque) vary.
+// decision 3). The prepass draws the opaque set (blend Opaque, offset None, depth
+// TestWrite), so blend/depth/offset are fixed and drop out of the key — only the VS path
+// (skinned) and the cutout threshold (foliage vs pure opaque) vary. `solid_blend` is the
+// MAT-053 variant for blend-pass sections: depth for their fully solid texels only.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct PrepassKey {
     skinned: bool,
     alpha_ref_bits: u32,
+    solid_blend: bool,
+}
+
+// MAT-053: texture alpha at or above this is "solid" for a blend-pass section's prepass.
+// Just under 1 so the 4-bit (ARGB4444) and DXT5 top codes count, nothing partial does.
+const SOLID_BLEND_ALPHA: f32 = 0.98;
+
+// MAT-053 -- see-through floors and camo nets. A texture whose alpha is mostly solid with a
+// few partial texels (spec_destrb_d big2b.paa: 91.7% opaque, 5.3% partial, 3.1% clear; the
+// Fortress camo net) classifies Blend, so every section using it draws in the back-to-front
+// pass with depth-test only (MAT-048). That pass orders OBJECTS, never the triangles of one
+// draw, so a building's far floors paint over its near ones and whatever stands behind a net
+// shows through its solid leaves. The prepass lays depth for the texels the colour pass will
+// draw fully opaque; the colour pass still blends every texel (its GreaterEqual test passes
+// the equal depth), so partial edges and real glass (MAT-051 panes are all partial) are
+// unchanged. WGR_BLEND_SOLID_DEPTH=0 turns it off for A/B in one binary.
+pub(crate) fn draw_solid_blend_prepassed(d: &WgrDraw3D) -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let enabled = *ENABLED.get_or_init(|| std::env::var("WGR_BLEND_SOLID_DEPTH").map(|v| v != "0").unwrap_or(true));
+    enabled && solid_blend_candidate(d)
+}
+
+fn solid_blend_candidate(d: &WgrDraw3D) -> bool {
+    let key = PipelineKey::from_draw(d, false);
+    d.flags & crate::ffi::WGR_DRAW3D_BLEND_SECTION != 0
+        && d.flags & (crate::ffi::WGR_DRAW3D_COCKPIT | crate::ffi::WGR_DRAW3D_MONITOR) == 0
+        && key.blend == WgrBlend::Alpha as u8
+        && key.offset == Offset::None
+        && key.depth == WgrDepthMode::Test as u8
+}
+
+#[test]
+fn solid_blend_prepass_takes_only_blend_pass_sections() {
+    let mut d: WgrDraw3D = unsafe { std::mem::zeroed() };
+    d.blend = WgrBlend::Alpha;
+    d.depth = WgrDepthMode::Test;
+    d.flags = crate::ffi::WGR_DRAW3D_BLEND_SECTION;
+    assert!(solid_blend_candidate(&d));
+    // not from the blend pass (a NoZWrite line, a particle)
+    d.flags = 0;
+    assert!(!solid_blend_candidate(&d));
+    // cockpit glass: later segment, no prepass
+    d.flags = crate::ffi::WGR_DRAW3D_BLEND_SECTION | crate::ffi::WGR_DRAW3D_COCKPIT;
+    assert!(!solid_blend_candidate(&d));
+    // decal offset
+    d.flags = crate::ffi::WGR_DRAW3D_BLEND_SECTION | crate::ffi::DRAW3D_ON_SURFACE;
+    assert!(!solid_blend_candidate(&d));
+    // additive, or legacy depth-writing blend (WGR_COCKPIT_BLEND_LEGACY=1)
+    d.flags = crate::ffi::WGR_DRAW3D_BLEND_SECTION;
+    d.blend = WgrBlend::Additive;
+    assert!(!solid_blend_candidate(&d));
+    d.blend = WgrBlend::Alpha;
+    d.depth = WgrDepthMode::TestWrite;
+    assert!(!solid_blend_candidate(&d));
+    // and the opaque set is unchanged
+    d.blend = WgrBlend::Opaque;
+    d.flags = 0;
+    assert!(PipelineKey::from_draw(&d, false).prepassed());
+    assert!(!solid_blend_candidate(&d));
 }
 
 // Per-level constant depth-bias magnitude for ZBias overlay faces (signs).
@@ -5297,17 +5357,20 @@ impl Gfx3d {
         };
         let alpha_ref = f32::from_bits(key.alpha_ref_bits) as f64;
         // cutout_mip_alpha MUST match the colour pipeline's, or the prepass lays depth for
-        // texels the colour pass discards (gpu_driven.wgsl's prepass_match rationale).
+        // texels the colour pass discards (gpu_driven.wgsl's prepass_match rationale). A
+        // blend-pass section (MAT-053) has no cutout in its colour pass, so no mip lift here.
+        let mip_alpha = if key.solid_blend { 0.0 } else { cutout_mip_alpha() as f64 };
         let constants = [
             ("alpha_ref", alpha_ref),
             ("depth_bias", 0.0),
-            ("cutout_mip_alpha", cutout_mip_alpha() as f64),
+            ("cutout_mip_alpha", mip_alpha),
             ("count_fragments", count_fragments() as f64),
         ];
         // Cutout foliage under MSAA: the A2C prepass twin emits a vec4 whose .a carries coverage,
         // and the pipeline enables alpha_to_coverage so it writes depth to exactly the samples the
-        // colour pass will shade. Pure-opaque prepass (alpha_ref == 0) keeps the vec2 fs_prepass.
-        let a2c = self.foliage_a2c && alpha_ref > 0.0;
+        // colour pass will shade. Pure-opaque prepass (alpha_ref == 0) keeps the vec2 fs_prepass,
+        // and so does MAT-053's hard solid-texel test (its colour pass blends, never covers).
+        let a2c = self.foliage_a2c && alpha_ref > 0.0 && !key.solid_blend;
         let fs_entry = if a2c { "fs_prepass_a2c" } else { "fs_prepass" };
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("wgr_3d_prepass_pipeline"),
@@ -7939,6 +8002,16 @@ impl Gfx3d {
                     PrepassKey {
                         skinned,
                         alpha_ref_bits: key.alpha_ref_bits,
+                        solid_blend: false,
+                    },
+                );
+            } else if draw_solid_blend_prepassed(d) {
+                self.ensure_prepass_pipeline(
+                    device,
+                    PrepassKey {
+                        skinned,
+                        alpha_ref_bits: SOLID_BLEND_ALPHA.to_bits(),
+                        solid_blend: true,
                     },
                 );
             }
@@ -8194,13 +8267,22 @@ impl Gfx3d {
         // its write-off variant when the prepass already laid its depth (decision 2/4).
         let pipeline = match mode {
             Pass3dMode::Prepass => {
-                if !base_key.prepassed() {
+                let pkey = if base_key.prepassed() {
+                    PrepassKey {
+                        skinned,
+                        alpha_ref_bits: base_key.alpha_ref_bits,
+                        solid_blend: false,
+                    }
+                } else if draw_solid_blend_prepassed(d) {
+                    PrepassKey {
+                        skinned,
+                        alpha_ref_bits: SOLID_BLEND_ALPHA.to_bits(),
+                        solid_blend: true,
+                    }
+                } else {
                     return;
-                }
-                let Some(p) = self.prepass_pipelines.get(&PrepassKey {
-                    skinned,
-                    alpha_ref_bits: base_key.alpha_ref_bits,
-                }) else {
+                };
+                let Some(p) = self.prepass_pipelines.get(&pkey) else {
                     return;
                 };
                 p
@@ -8346,6 +8428,7 @@ impl Gfx3d {
                 let Some(p) = self.prepass_pipelines.get(&PrepassKey {
                     skinned: false,
                     alpha_ref_bits: base_key.alpha_ref_bits,
+                    solid_blend: false,
                 }) else {
                     return;
                 };

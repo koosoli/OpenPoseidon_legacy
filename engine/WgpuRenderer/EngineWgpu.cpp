@@ -7282,6 +7282,12 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     {
         d.flags |= WGR_DRAW3D_MONITOR;
     }
+    // MAT-053: a translucent section in the back-to-front object pass (MAT-048 made it depth-test
+    // only). The renderer's depth prepass then lays depth for its fully solid texels.
+    if (render::GBlendSectionDepthReadOnly && d.blend == WGR_BLEND_ALPHA && d.depth == WGR_DEPTH_TEST)
+    {
+        d.flags |= WGR_DRAW3D_BLEND_SECTION;
+    }
     if (desc.blend != render::BlendMode::Shadow)
     {
         if (desc.surface == render::SurfaceMode::OnSurface)
