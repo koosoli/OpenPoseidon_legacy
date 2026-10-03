@@ -671,6 +671,29 @@ Matrix4 ForestPlain::GetInvTransform() const
     return Frame::InverseGeneral();
 }
 
+// Forests are skipped by the terrain-relative re-seat (their Y never moves), so this is the only place a
+// forest learns the ground changed. Without it a non-skewed square kept the conform plane captured from
+// the heights it was first drawn on, and a skewed (t1/t2) square kept the skew baked into its matrix --
+// the floating forests (owner report: "floating forests and buildings ... 100 metres or less in the air").
+void ForestPlain::OnTerrainChanged(Landscape* land)
+{
+    base::OnTerrainChanged(land);
+    _conformValid = false;
+    if ((_singleMatrixT1 || _singleMatrixT2) && land && _skewApplied)
+    {
+        // InitSkew appends its skew to the CURRENT matrix, so take the old skew off first:
+        // S = shear (y += skewX*x + skewZ*z) + offsetY, S^-1 = shear by the negatives - offsetY.
+        Matrix4 unskew = MIdentity;
+        unskew(1, 0) = -_skewX;
+        unskew(1, 2) = -_skewZ;
+        Vector3 p = unskew.Position();
+        p[1] = -_offsetY;
+        unskew.SetPosition(p);
+        SetTransform(Transform() * unskew);
+        InitSkew(land);
+    }
+}
+
 void ForestPlain::InitSkew(Landscape* land)
 {
     if (!_singleMatrixT1 && !_singleMatrixT2)
@@ -747,6 +770,7 @@ void ForestPlain::InitSkew(Landscape* land)
     // append skew matrix to object matrix
     Matrix4 transform = Transform() * skew;
     SetTransform(transform);
+    _skewApplied = true;
 }
 
 const float ForestViewDensity = -0.024079456087; // log(0.3)*0.02

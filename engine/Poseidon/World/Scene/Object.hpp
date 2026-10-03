@@ -925,6 +925,10 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 
 	// Call to prepare skew matrix
 	virtual void InitSkew( Landscape *land );
+	// The heightfield under the world changed (subdivide / resample / subdiv cache / setTerrainGrid):
+	// drop every cache that was derived from the old heights. Landscape::MakeObjectsTerrainAbsolute
+	// calls it for every object, forests included.
+	virtual void OnTerrainChanged( Landscape *land );
 
 	USE_CASTING_ROOT
 };

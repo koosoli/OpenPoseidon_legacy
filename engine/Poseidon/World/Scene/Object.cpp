@@ -2240,6 +2240,15 @@ void Object::DrawDiags() {}
 
 void Object::InitSkew(Landscape* land) {}
 
+void Object::OnTerrainChanged(Landscape* /*land*/)
+{
+    // Only Move() cleared these, and the terrain-relative re-seat moves objects with SetPosition, so a
+    // conformed object kept the ground height it was first drawn on: after a terrain refinement or a
+    // stale subdivision cache, vegetation and fences floated or sank by the height difference.
+    _animBBoxLevel = -1;
+    _bcSurfaceYValid = false;
+}
+
 DEFINE_FAST_ALLOCATOR(ObjectPlain)
 
 ObjectPlain::ObjectPlain(LODShapeWithShadow* shape, int id) : base(shape, id) {}

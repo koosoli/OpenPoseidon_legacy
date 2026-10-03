@@ -1099,6 +1099,9 @@ void Landscape::Dim(int x, int z, int rx, int rz, float landGrid)
     PoseidonAssert((rx % x) == 0 && (rz % z) == 0);
 
     SetLandGrid(landGrid);
+    // A (re)load replaces every height: anything keyed on HeightRevision (TerrainWgpu::UploadIfNeeded,
+    // conform caches) must not mistake the new world -- or the same world reloaded -- for the old one.
+    ++_heightRevision;
 }
 
 void Landscape::SetLandGrid(float grid)
