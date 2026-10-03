@@ -43,6 +43,11 @@ function Set-ExposurePolicy([bool]$automatic) {
 function Assert-ShotSettled([long]$releaseMs,[long]$pausedMs) {
     Require ($releaseMs -ge 0 -and $pausedMs-$releaseMs -ge 2000) 'Shot image precedes two real simulation seconds after mouse-up.'
 }
+function Assert-IdleShotLedger($expected,$actual,[string]$stage) {
+    foreach($lane in @('fired','ammo','terrain','terminal')) {
+        Require ($null -ne $expected[$lane] -and $null -ne $actual[$lane] -and $expected[$lane] -eq $actual[$lane]) ("Unexpected actual weapon activity outside the commanded click ($stage, $lane): expected $($expected[$lane]), actual $($actual[$lane]).")
+    }
+}
 function Unit-Vector($vector) {
     Require ($vector.Count -eq 3) 'Aiming vector needs three raw engine XYZ lanes.'
     $length=0.;foreach($value in $vector) {Require (![double]::IsNaN($value) -and ![double]::IsInfinity($value)) 'Nonfinite actual aiming vector.';$length+=$value*$value}
@@ -151,6 +156,34 @@ function Assert-Hole($hit,$before,$after,[double]$base) {
     return @{changedCells=$changed;centre=$matched[0];rimCells=$rim;upstreamCells=$upstream;unchangedOutsideCells=$outer;maximumDeficit=$peak}
 }
 if ($SelfTest) {
+    $ledger=@{fired=1;ammo=29;terrain=1;terminal=1}
+    Assert-IdleShotLedger $ledger $ledger.Clone() 'unchanged control'
+    foreach($lane in @('fired','ammo','terrain','terminal')) {
+        $changed=$ledger.Clone();$changed[$lane]+=1;$failed=$false
+        try {Assert-IdleShotLedger $ledger $changed 'uncommanded activity'} catch {$failed=$true}
+        Require $failed 'An uncommanded Fired/ammo/terrain/terminal change was accepted.'
+    }
+    # The actual failed campaign admitted a second long entry groove while
+    # resuming aim, then tested the third, shorter groove against pristine cells.
+    $failed=$false;try {Assert-IdleShotLedger $ledger @{fired=2;ammo=28;terrain=2;terminal=2} 'recorded extra round'} catch {$failed=$true}
+    Require $failed 'The recorded pre-click extra round was accepted.'
+    $earlier=@{x=4975.402;z=4676.711;directionX=.00098;directionZ=1.;grooveLength=.63721;radius=.227}
+    $measured=@{x=4975.398;z=4676.711;directionX=-.00027;directionZ=1.;grooveLength=.34754;radius=.227}
+    Require ((Groove-Distance $earlier 4975.4375 4676.0625) -lt .038 -and
+        (Groove-Distance $measured 4975.4375 4676.0625) -gt .303) 'Recorded extra-round capsule counterexample lost its physical bounds.'
+    # Independently use production's centred segment expression. Clamping the
+    # signed half-length is equivalent to the fixture's upstream endpoint form.
+    foreach($shot in @($earlier,$measured)) {
+        for($iz=37401;$iz -le 37425;++$iz) {for($ix=39791;$ix -le 39815;++$ix) {
+            $x=($ix+.5)*.125;$z=($iz+.5)*.125;$half=$shot.grooveLength*.5
+            $dx=$x-($shot.x-$shot.directionX*$half);$dz=$z-($shot.z-$shot.directionZ*$half)
+            $along=$dx*$shot.directionX+$dz*$shot.directionZ
+            $outside=$along-(Clamp-Number $along (-$half) $half)
+            $across=-$dx*$shot.directionZ+$dz*$shot.directionX
+            $centred=[Math]::Sqrt($outside*$outside+$across*$across)
+            Require ([Math]::Abs($centred-(Groove-Distance $shot $x $z)) -lt .000001) 'Fixture capsule differs from production centred-segment geometry.'
+        }}
+    }
     $weapon=@{readonly=$true;manual=$true;playerSuspended=$false;cameraEffect=$false;directionX=0;directionY=.16;directionZ=[Math]::Sqrt(1-.16*.16);muzzleX=10;muzzleY=22;muzzleZ=20}
     $up=Aim-Error $weapon $null;$step=Aim-Step $up .001 .001
     Require ($up.actual[1] -gt 0 -and $up.desired[1] -lt 0 -and $step.dy -gt 0 -and $step.dx -eq 0) 'Upward actual gun did not require ordinary downward mouse correction.'
@@ -268,6 +301,19 @@ function Eval([string]$code) {return Decode-Eval ([string](Send @{cmd='eval';cod
 function Clock {$state=Send @{cmd='query';what='play_state'};Require ($state.has_player -and $state.player_active -and $state.player_local) 'Actual local controlled player missing.';return [long]$state.time_ms}
 function HitLines {return @(Select-String -LiteralPath $log -SimpleMatch 'SNOW_BULLET terrain=1' -ErrorAction SilentlyContinue)}
 function TerminalLines {return @(Select-String -LiteralPath $log -SimpleMatch 'SNOW_BULLET_TERMINAL kind=' -ErrorAction SilentlyContinue)}
+function Shot-Ledger {return @{fired=[int](Eval 'snowShotCount');ammo=[double](Eval 'player ammo "M16"');terrain=@(HitLines).Count;terminal=@(TerminalLines).Count}}
+$script:expectedIdleLedger=$null
+function Assert-IdleInput([string]$stage,$expected) {
+    $actual=Shot-Ledger
+    $result.stages[$stage+'-idle-input']=@{expected=$expected;actual=$actual;guard='No actual Fired/ammo/terrain/terminal change before the commanded ordinary click.'}
+    Assert-IdleShotLedger $expected $actual $stage
+}
+function Release-Click {
+    # Harness acknowledgement means SDL accepted the event, not that the input
+    # frame has consumed it. The normal paused render loop still pumps SDL.
+    $null=Send @{cmd='mouse_button';button=1;down=$false};$script:held=$false
+    Start-Sleep -Milliseconds 100
+}
 function Patch([double]$x,[double]$z) {
     $patch=@{};$cx=[int][Math]::Floor($x/.125);$cz=[int][Math]::Floor($z/.125)
     # Complete maximum capsule (.8m length+.35m radius) and the permitted
@@ -305,13 +351,16 @@ function Wait-InputTicks([int]$milliseconds) {
     $start=Clock;$until=[DateTime]::UtcNow.AddSeconds(8)
     do {Start-Sleep -Milliseconds 40;Require ([DateTime]::UtcNow -lt $until) 'Ordinary input did not receive real simulation ticks.'} while ((Clock)-$start -lt $milliseconds)
 }
-function Prepare-Aim([string]$stage) {
-    Unview;Exec 'player switchCamera "INTERNAL"; setAccTime 1'
+function Prepare-Aim([string]$stage,$expected) {
+    Release-Click;Assert-IdleInput ($stage+'-before-aim') $expected
+    Unview;Release-Click;Exec 'player switchCamera "INTERNAL"; setAccTime 1'
     Wait-InputTicks 1000 # release photographic camera before consuming aim input
+    Assert-IdleInput ($stage+'-camera-release') $expected
     $gainX=Clamp-Number ([Math]::Asin(.274)/$AimDy) .0001 .02;$gainY=$gainX;$history=@();$stable=0;$prior=$null;$previousStep=$null;$lastStateMs=$null
     $until=[DateTime]::UtcNow.AddSeconds(25)
     for($iteration=0;$iteration -lt 24;++$iteration) {
         Require ([DateTime]::UtcNow -lt $until) 'Actual gun-direction calibration exceeded bounded time.'
+        Assert-IdleInput ($stage+'-aim-'+$iteration) $expected
         $state=Send @{cmd='player_weapon_state'};$error=Aim-Error $state $script:aimTarget
         Require ($null -ne $state.timeMs -and ($null -eq $lastStateMs -or $state.timeMs-$lastStateMs -ge 200)) 'Actual aiming samples did not advance simulation.'
         $lastStateMs=[long]$state.timeMs
@@ -330,6 +379,7 @@ function Prepare-Aim([string]$stage) {
         if($stable -ge 3) {
             Exec 'setAccTime 0';Capture ($stage+'-ordinary-ui-before-fire')
             $ready=Send @{cmd='player_weapon_state'};$check=Aim-Error $ready $script:aimTarget
+            Assert-IdleInput ($stage+'-ready') $expected
             Require (Aim-InBound $check) 'Actual gun no longer matches the bounded downward target after UI capture.'
             $result.stages[$stage+'-aim'].status='actual-downward-ui-captured';$result.stages[$stage+'-aim'].ready=$ready
             $result.stages[$stage+'-aim'].readyError=$check
@@ -342,14 +392,15 @@ function Prepare-Aim([string]$stage) {
     throw 'Ordinary mouse control could not establish the actual bounded downward gun vector.'
 }
 function Shoot([string]$stage) {
-    Prepare-Aim $stage
+    $expected=if($null -ne $script:expectedIdleLedger) {$script:expectedIdleLedger} else {Shot-Ledger}
+    Prepare-Aim $stage $expected
     $ammo=[double](Eval 'player ammo "M16"');$shots=[int](Eval 'snowShotCount');$hits=@(HitLines).Count
     $terminalCount=@(TerminalLines).Count
     Require ($ammo -gt 0 -and [double](Eval 'triPlayerCurrentMagazineAmmo') -eq $ammo) 'Actual loaded selected M16 ammunition missing.'
     Exec 'setAccTime 0.05';$null=Send @{cmd='mouse_button';button=1;down=$true};$script:held=$true
     $until=[DateTime]::UtcNow.AddSeconds(20)
     do {Start-Sleep -Milliseconds 30;$now=[int](Eval 'snowShotCount');Require ([DateTime]::UtcNow -lt $until) 'Ordinary click produced no actual Fired event.'} while ($now -eq $shots)
-    $null=Send @{cmd='mouse_button';button=1;down=$false};$script:held=$false;$releaseMs=Clock;Exec 'setAccTime 1'
+    Release-Click;$releaseMs=Clock;Exec 'setAccTime 1'
     $shotTime=[double](Eval 'snowShotTime');$until=[DateTime]::UtcNow.AddSeconds(15)
     do {
         Start-Sleep -Milliseconds 40;$lines=@(HitLines);$clock=Clock
@@ -359,6 +410,8 @@ function Shoot([string]$stage) {
     Exec 'setAccTime 0';$pausedMs=Clock;Assert-ShotSettled $releaseMs $pausedMs
     $lines=@(HitLines);$now=[int](Eval 'snowShotCount');$afterAmmo=[double](Eval 'player ammo "M16"')
     Require ($now -eq $shots+1 -and $afterAmmo -eq $ammo-1 -and $lines.Count -eq $hits+1) 'Single actual bullet/Fired/ammunition/terrain-event proof differs.'
+    $script:expectedIdleLedger=Shot-Ledger
+    Require ($script:expectedIdleLedger.terminal -eq $terminalCount+1) 'Commanded single shot produced a different number of actual terminal events.'
     $event=Eval 'snowShotSource';Require ($event.Count -eq 4 -and $event[0] -ceq 'M16' -and ![string]::IsNullOrWhiteSpace($event[3])) 'Actual Fired source weapon/ammo missing.'
     $hit=Parse-SnowHit $lines[-1].Line;$position=Eval 'getPosASL player'
     $distance=[Math]::Sqrt([Math]::Pow($hit.x-$position[0],2)+[Math]::Pow($hit.z-$position[1],2))
@@ -367,7 +420,7 @@ function Shoot([string]$stage) {
     return $hit
 }
 function CloseOwned {
-    if ($held) {$null=Send @{cmd='mouse_button';button=1;down=$false};$script:held=$false}
+    Release-Click
     Exec 'setAccTime 1';$null=Send @{cmd='exit'};Require ($p.WaitForExit(20000) -and $p.ExitCode -eq 0) 'Owned game failed normal exit zero.'
     Require (Select-String -LiteralPath $log -SimpleMatch 'Shutdown complete' -Quiet) 'Normal shutdown proof missing.';$result.exitCode=$p.ExitCode
 }
@@ -400,7 +453,8 @@ try {
     Require ($state.enabled -and !$state.falling -and $state.geometry -and [Math]::Abs($state.depth-$Depth) -lt .00001) 'Actual fixed deposited snow differs.'
     $beforePatch=Patch $dry.x $dry.z;$result.beforePatch=$beforePatch;Capture-Views 'deposited-before' $views
     $positive=Shoot 'snow-positive';Require ([Math]::Sqrt([Math]::Pow($positive.x-$dry.x,2)+[Math]::Pow($positive.z-$dry.z,2)) -le .25) 'Ordinary aiming/recoil moved the actual positive outside the calibrated before patch.'
-    $afterPatch=Patch $dry.x $dry.z;$result.stages['snow-positive'].shape=Assert-Hole $positive $beforePatch $afterPatch $Depth;$result.afterPatch=$afterPatch
+    $afterPatch=Patch $dry.x $dry.z;$result.afterPatch=$afterPatch
+    $result.stages['snow-positive'].shape=Assert-Hole $positive $beforePatch $afterPatch $Depth
     Capture-Views 'hole-after' $views;$time=Clock;Start-Sleep -Seconds 5
     Require ((Clock) -eq $time) 'Paused snow-hole clock advanced.';Compare-Patches $afterPatch (Patch $dry.x $dry.z) 'Paused snow-hole cells changed.'
     $far=New-HoleViews ($dry.x+200) ($dry.z+200) $ground $Depth;View $far.top;Capture 'camera-away';Unview;Capture-Views 'camera-return' $views
