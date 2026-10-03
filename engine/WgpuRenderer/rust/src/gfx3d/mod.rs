@@ -217,6 +217,19 @@ const SOLID_BLEND_ALPHA: f32 = 0.98;
 // draw fully opaque; the colour pass still blends every texel (its GreaterEqual test passes
 // the equal depth), so partial edges and real glass (MAT-051 panes are all partial) are
 // unchanged. WGR_BLEND_SOLID_DEPTH=0 turns it off for A/B in one binary.
+// MAT-053, colour pass: the same draw as an ordinary blended draw, but depth test + WRITE and
+// discarding every texel under SOLID_BLEND_ALPHA. Issued immediately before the ordinary draw,
+// so a section's solid texels occlude whatever is drawn after them -- including its own
+// farther triangles, which a per-object back-to-front sort never orders -- whichever segment the
+// draw lands in. The ordinary draw then repaints the solid texels identically (alpha ~1, equal
+// depth passes GreaterEqual) and blends the partial ones once.
+fn solid_blend_write_key(mut key: PipelineKey) -> PipelineKey {
+    key.depth = WgrDepthMode::TestWrite as u8;
+    key.alpha_ref_bits = SOLID_BLEND_ALPHA.to_bits();
+    key.depth_write_off = false;
+    key
+}
+
 pub(crate) fn draw_solid_blend_prepassed(d: &WgrDraw3D) -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let enabled = *ENABLED.get_or_init(|| std::env::var("WGR_BLEND_SOLID_DEPTH").map(|v| v != "0").unwrap_or(true));
@@ -8014,6 +8027,7 @@ impl Gfx3d {
                         solid_blend: true,
                     },
                 );
+                self.ensure_pipeline(device, solid_blend_write_key(key));
             }
         }
     }
@@ -8262,6 +8276,9 @@ impl Gfx3d {
         }
         let skinned = d.palette_slot != NO_PALETTE && mesh.skin.is_some() && baked.is_none();
         let base_key = PipelineKey::from_draw(d, skinned);
+        if matches!(mode, Pass3dMode::Color { .. }) && draw_solid_blend_prepassed(d) {
+            self.draw_one(pass, textures, d, base, count, st, Pass3dMode::SolidBlendWrite);
+        }
         // Pipeline by pass mode. Prepass draws ONLY the opaque set (self-filter here so
         // the caller can replay a whole segment); the colour pass flips the same set to
         // its write-off variant when the prepass already laid its depth (decision 2/4).
@@ -8283,6 +8300,12 @@ impl Gfx3d {
                     return;
                 };
                 let Some(p) = self.prepass_pipelines.get(&pkey) else {
+                    return;
+                };
+                p
+            }
+            Pass3dMode::SolidBlendWrite => {
+                let Some(p) = self.pipelines.get(&solid_blend_write_key(base_key)) else {
                     return;
                 };
                 p
@@ -8434,6 +8457,8 @@ impl Gfx3d {
                 };
                 p
             }
+            // indirect buckets are opaque-rigid only
+            Pass3dMode::SolidBlendWrite => return,
             Pass3dMode::Color { depth_write_off } => {
                 let key = if depth_write_off && base_key.prepassed() {
                     base_key.with_write_off()
@@ -10674,6 +10699,10 @@ fn late_surface_scattering_is_per_instance_and_excludes_other_segments() {
 pub enum Pass3dMode {
     Prepass,
     Color { depth_write_off: bool },
+    // MAT-053: the depth-writing first half of a mostly-solid blend section's colour draw
+    // (texels with alpha >= SOLID_BLEND_ALPHA only). draw_one issues it itself, ahead of the
+    // ordinary Color draw of the same section; callers never pass it.
+    SolidBlendWrite,
 }
 
 // Bind/pipeline/buffer state already set on a render pass, so draw_one can skip
