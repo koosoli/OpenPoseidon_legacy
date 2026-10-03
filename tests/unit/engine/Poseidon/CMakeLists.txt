@@ -444,6 +444,9 @@ list(APPEND POSEIDON_TEST_SOURCES
     Dev/Diag/test_streaming_diag.cpp
     Dev/Diag/test_frame_capture.cpp
 
+    # DIAG-001: diagnostics ported from Malprave (JSON helpers, stuck detector, event writer, diag_step)
+    Dev/Diag/test_op_diag.cpp
+
     # Mission introspection
     Game/Mission/test_mission_info.cpp
 

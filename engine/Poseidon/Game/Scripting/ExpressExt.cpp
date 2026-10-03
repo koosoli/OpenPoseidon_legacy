@@ -1,4 +1,5 @@
 #include <Evaluator/express.hpp>
+#include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 
 #include <Poseidon/Core/BuildInfo.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
@@ -148,6 +149,15 @@ void GameStateStringtableInfoFunctions::DisplayErrorMessage(const char* position
     const bool showInGame = std::strcmp(Poseidon::BuildInfo::BuildType, "RelWithDebInfo") == 0 &&
                             Poseidon::Foundation::AppConfig::Instance().DevMode();
     extern bool AutoTest;
+#if POSEIDON_DIAG
+    Poseidon::Dev::OpDiag::OnScriptError(position, error); // DIAG-001
+    if (AutoTest && Poseidon::Dev::OpDiag::KeepGoingOnScriptError())
+    {
+        // --diag-keep-going: record it and let the mission run on
+        LOG_WARN(Script, "Script error at '{}': {} (diag keep-going: mission continues)", position, error);
+        return;
+    }
+#endif
     if (AutoTest)
     {
         // Test mode: surface every SQF/SQS error as a hard failure so the

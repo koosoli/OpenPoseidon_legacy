@@ -167,6 +167,21 @@ if(POSEIDON_ENABLE_WGPU)
     endif()
 endif()
 
+# DIAG-001: the diagnostics layer ported from Malprave (engine/Poseidon/Dev/Diag/OpDiag*):
+# the --diag event log (events.jsonl + summary.json) and the diag_* harness commands.
+# Compiled in like the rest of Dev/ (the dev panel and the harness are in every build and
+# gated at run time); default ON except for the Release build type. The flags are never
+# registered in a release-tagged binary (BuildInfo::ReleaseBuild), and the harness commands
+# exist only when --harness is given. OFF removes the module and every hook (POSEIDON_DIAG=0).
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(_poseidon_diag_default OFF)
+else()
+    set(_poseidon_diag_default ON)
+endif()
+option(POSEIDON_ENABLE_DIAG "Build the --diag event log and the diag_* harness commands (DIAG-001)"
+       ${_poseidon_diag_default})
+message(STATUS "POSEIDON_ENABLE_DIAG: ${POSEIDON_ENABLE_DIAG}")
+
 configure_file(
     ${CMAKE_SOURCE_DIR}/cmake/BuildConfig.h.in
     ${CMAKE_BINARY_DIR}/generated/BuildConfig.h

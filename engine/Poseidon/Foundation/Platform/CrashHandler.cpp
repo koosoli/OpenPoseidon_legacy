@@ -14,6 +14,9 @@ namespace Poseidon::Foundation
 namespace
 {
 char g_crashDir[MAX_PATH] = {}; // where to write the minidump; empty = beside the exe
+CrashNotifyFn g_crashNotify = nullptr; // DIAG-001 (SetCrashNotify)
+char g_crashStack[4096] = {};
+char g_crashDump[MAX_PATH] = {};
 
 LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep)
 {
@@ -80,7 +83,8 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep)
         CloseHandle(f);
         if (written)
         {
-            fprintf(stderr, "  minidump: %s%s\n", dmp, normalDump ? " (without data segments)" : "");
+            snprintf(g_crashDump, sizeof(g_crashDump), "%s", dmp);
+            fprintf(stderr, "  minidump:%s%s\n", dmp, normalDump ? " (without data segments)" : "");
         }
         else
         {
@@ -145,12 +149,26 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep)
                 static_cast<unsigned long long>(frame.AddrPC.Offset));
         LOG_ERROR(Core, "  #{:02} {}!{}+0x{:x}  (0x{:016x})", i, modName, name, static_cast<unsigned long long>(disp),
                   static_cast<unsigned long long>(frame.AddrPC.Offset));
+        if (g_crashNotify && i < 24)
+        {
+            const size_t used = std::strlen(g_crashStack);
+            snprintf(g_crashStack + used, sizeof(g_crashStack) - used, "%s%s!%s+0x%llx", used ? " | " : "", modName,
+                     name, static_cast<unsigned long long>(disp));
+        }
     }
     fflush(stderr);
+
+    if (g_crashNotify)
+        g_crashNotify(static_cast<unsigned>(code), addr, g_crashDump, g_crashStack);
 
     return EXCEPTION_EXECUTE_HANDLER;
 }
 } // namespace
+
+void SetCrashNotify(CrashNotifyFn fn)
+{
+    g_crashNotify = fn;
+}
 
 void InstallCrashHandler(const char* crashDir)
 {
@@ -363,6 +381,8 @@ void captureBuildId()
 #endif // __linux__
 }
 } // namespace
+
+void SetCrashNotify(CrashNotifyFn) {} // DIAG-001: Windows only (see CrashHandler.hpp)
 
 void InstallCrashHandler(const char* crashDir)
 {

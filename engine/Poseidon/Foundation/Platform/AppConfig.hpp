@@ -335,6 +335,20 @@ class AppConfig
     /// TCP harness server port (--harness <port>): -1 = disabled, 0 = auto-assign, >0 = explicit
     int GetHarnessPort() const { return _harnessPort; }
 
+    // DIAG-001 (Dev/Diag/OpDiag.hpp). Registered only when POSEIDON_DIAG and not a release build.
+    /// --diag <dir>: write events.jsonl + summary.json there; empty = diagnostics off
+    const std::string& GetDiagDir() const { return _diagDir; }
+    /// --diag-cats a,b,c: event types to write (empty / "all" = all but the noisy opt-in ones)
+    const std::string& GetDiagCats() const { return _diagCats; }
+    bool DiagDraw() const { return _diagDraw; }
+    bool DiagKeepGoing() const { return _diagKeepGoing; }
+    float DiagSlowMs() const { return _diagSlowMs; }
+    /// --diag-seed N: GRandGen seed applied once the test mission has booted (-1 = engine default)
+    int DiagSeed() const { return _diagSeed; }
+    /// --diag-fixed-dt S: pin the frame delta (sets POSEIDON_LOCKSTEP_HZ = 1/S unless already set)
+    float DiagFixedDt() const { return _diagFixedDt; }
+    float DiagStuckSec() const { return _diagStuckSec; }
+
     // Logging
 
     /// Get log level (trace, debug, info, warn, error, critical, off)
@@ -520,6 +534,15 @@ class AppConfig
     int _screenshotDelay = 10;
     std::string _uiTest;
     int _harnessPort = -1; // -1 = disabled, 0 = auto-assign, >0 = explicit
+    // DIAG-001 diagnostics (--diag ...)
+    std::string _diagDir;
+    std::string _diagCats;
+    bool _diagDraw = false;
+    bool _diagKeepGoing = false;
+    float _diagSlowMs = 0.0f;
+    int _diagSeed = -1;
+    float _diagFixedDt = 0.0f;
+    float _diagStuckSec = 0.0f;
 
     // Logging
     std::string _logLevel = "info";

@@ -1,5 +1,6 @@
 
 #include <Poseidon/UI/Options/OptionsShell.hpp>
+#include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/Game/Mission/MissionPathLoader.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -503,6 +504,9 @@ const ParamEntry* FindSound(RString name, SoundPars& pars)
     // shipping app frame, which is why a bad `say`/sound surfaced only as the
     // file server's context-free "Empty or nullptr name not allowed".)
     LOG_WARN(Audio, "Sound '{}' not found in any CfgSounds — nothing will play", (const char*)name);
+#if POSEIDON_DIAG
+    Dev::OpDiag::OnSoundMissing("CfgSounds", (const char*)name); // DIAG-001
+#endif
     return nullptr;
 }
 

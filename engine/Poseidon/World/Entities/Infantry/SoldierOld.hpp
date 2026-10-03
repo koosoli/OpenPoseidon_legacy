@@ -8,6 +8,7 @@
 #include <Poseidon/World/Entities/Infantry/Head.hpp>
 
 #include <Poseidon/Core/DynEnum.hpp>
+#include <string>
 
 #include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
 #include <Poseidon/World/Simulation/EnvTracker.hpp>
@@ -802,6 +803,13 @@ class Man: public Person
 	public:
 
 	RString GetCurrentMove() const override;
+#if POSEIDON_DIAG
+	// DIAG-001: read by the diag_* harness commands and the --diag log (Dev/Diag/OpDiagHarness.cpp)
+	std::string DiagMoveName() const;
+	void DiagInspect(std::string &json) const;
+	void DiagAnimInfo(std::string &json) const;
+	bool DiagSetPose(const char *move, float time); // diag_pose
+#endif
     RString GetPrimaryMoveName() const;
     RString GetExternalMoveName() const;
 	void PlayMove(RStringB move, ActionContextBase *context=nullptr) override;

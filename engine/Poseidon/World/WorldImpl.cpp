@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Terrain/TerrainSubdivision.hpp>
 #include "SimVehicleCost.hpp" // PERF-023
@@ -2609,7 +2610,14 @@ void World::StartIntro()
             {
                 if (AutoTest)
                 {
-                    if (!StartAutoTest())
+                    const bool autoTestBooted = StartAutoTest();
+#if POSEIDON_DIAG
+                    // DIAG-001: boot result; on failure the error level and the problems recorded while loading
+                    // (classes missing from addOns[], script errors, sounds that failed)
+                    Dev::OpDiag::OnBoot(autoTestBooted, static_cast<const char*>(LoadFile),
+                                        autoTestBooted ? -1 : static_cast<int>(GetMaxError()));
+#endif
+                    if (!autoTestBooted)
                     {
                         LOG_ERROR(Core, "StartAutoTest could not boot '{}'", LoadFile);
                         // The usual cause is InitVehicles' error latch

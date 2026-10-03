@@ -1,4 +1,5 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
+#include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
@@ -139,6 +140,11 @@ void Man::ProcessMoveFunction(ActionContextBase* context)
 
 bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float& moveZ, SimulationImportance prec)
 {
+#if POSEIDON_DIAG
+    // DIAG-001: "move" events when a watched man's primary move changed (or any man with --diag-cats ...,moveall)
+    if (Dev::OpDiag::Enabled())
+        Dev::OpDiag::OnMoveTick(this, static_cast<int>(_primaryMove.id));
+#endif
     bool change = false;
     bool finished = false;
 
