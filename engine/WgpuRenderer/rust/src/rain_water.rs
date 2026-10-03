@@ -797,7 +797,6 @@ impl RainWater {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytemuck::Zeroable;
     #[test]
     fn actual_gpu_triangular_bed_bilinear_depth_and_support_policy() {
         let (device, queue) = crate::gfx3d::cull::tests::headless()
@@ -1676,9 +1675,9 @@ mod full_draw_tests {
         let medium_indices=texture("actual_pool_source_indices",wgpu::TextureFormat::R16Uint,1,1,1,
             wgpu::TextureDimension::D2,wgpu::TextureUsages::TEXTURE_BINDING);
         let medium_materials=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label:None,contents:bytemuck::bytes_of(&crate::ffi::WgrTerrainMaterial::zeroed()),usage:wgpu::BufferUsages::STORAGE});
+            label:None,contents:bytemuck::bytes_of(&<crate::ffi::WgrTerrainMaterial as bytemuck::Zeroable>::zeroed()),usage:wgpu::BufferUsages::STORAGE});
         let medium_params=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label:None,contents:bytemuck::bytes_of(&crate::ffi::WgrTerrainParams::zeroed()),usage:wgpu::BufferUsages::UNIFORM});
+            label:None,contents:bytemuck::bytes_of(&<crate::ffi::WgrTerrainParams as bytemuck::Zeroable>::zeroed()),usage:wgpu::BufferUsages::UNIFORM});
         rain.prepare_medium(&device,&queue,crate::rain_water_medium::Resources {
             params:&medium_params,indices:&medium_indices,materials:&medium_materials,revision:1,control:[0;4]});
         rain.enabled = true; // independent of ambient process environment in this required-device test
