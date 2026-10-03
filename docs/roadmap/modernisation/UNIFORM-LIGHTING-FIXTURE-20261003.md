@@ -101,3 +101,13 @@ Heading-derived cameras are checked at the captured 52.0466 degrees and all four
 cardinal headings. Changed, nonfinite and out-of-range headings are rejected.
 The actual rain-wait drift is also a heading falsifier; source-sample changes
 across orientation staging are rejected by the pure helpers.
+
+Either optional quality-lighting switch now clears `WGR_CLOUD_COVERAGE` before
+launch and records/restores its inherited process value. The previous explicit
+zero pin forced a clear rendered sky even under actual simulation overcast 1;
+that pin is applied after the renderer's ordinary weather drive and also affects
+its directional-light dimming. Consequently c697d3's passing clock, heading,
+lamp/roof and wetness checks do not establish its requested rendered overcast
+lighting. The default contact runner retains its clear pin. Actual renderer
+sky enable/weather-drive settings and image evidence remain necessary; ordinary
+simulation overcast is insufficient proof of rendered cloud fields or pixels.

@@ -104,3 +104,33 @@ overcast readback are required, together with the paused state guards. Source
 self-tests cover the recipe, rounded/disabled/unaccumulated wetness rejection,
 actual sunlight falsifiers and bounded date restoration. Installed runtime and
 visual acceptance remain a separate root-owned check.
+
+## Rendered cloud and actual material limits
+
+The e017 / c697d3 installed campaign passed the paused contact/source and date
+checks with eight mud views. Its ready C++ diagnostic had accumulated/queuedPad1
+.8083, and the actual contact and centre both reported `eden\\pol.paa`,
+Field/pol/dirt with no character. It retained readable relief, but the low views
+were visually matte and near-identical under the two requested cloud values.
+This does not accept wet-soil appearance.
+
+The original recipe forced `WGR_CLOUD_COVERAGE=0`. EngineWgpu applies that pin
+after the ordinary overcast-to-rendered-coverage drive, and its resulting
+`_sky.cloudCoverage` also controls directional beam dimming and ambient boost.
+Simulation overcast/solar checks therefore did not establish a rendered-cloud
+comparison. Either optional quality-lighting switch now clears the process
+coverage pin before launch, records its inherited value, and restores it on exit.
+The default contact runner retains its existing clear pin. Rendering still
+depends on actual sky enable/weather-drive settings; an unpinned environment or
+simulation cloud readback alone is not proof of packed/GPU cloud fields or pixels.
+
+For the actual plain `pol` tile, TextureBank assigns the same resolved surface
+to all four quadrants. TerrainWgpu consequently admits the exact Field/pol/dirt
+source into SoftSoil bit 1 and also GroundReceiver bit 0. The legacy shader
+turns that source bit into mud fraction 1; actual cell cross-fading can blend it
+with neighbors at boundaries. This is a source-derived admission conclusion,
+not a GPU material readback. The soil coat still multiplies by physical
+`interior_rain_reach` / `interior_rain_coverage` admission. The captured queue
+receipt cannot establish that local fragment gate. Broad shader roughness or
+gloss changes should not substitute for evidence that these actual inputs reach
+the tested contact pixels.

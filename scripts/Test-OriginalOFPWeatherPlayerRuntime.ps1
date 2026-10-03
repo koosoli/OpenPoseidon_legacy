@@ -46,6 +46,7 @@ function Mud-LightingWetReady($state,$receipt){
   [Math]::Abs($row.accumulated-$row.queuedPad1) -le .00011
 }
 function Mud-LightingPlan{return @(@{name='overcast';overcast=1},@{name='clear';overcast=0})}
+function Quality-CloudPin([bool]$quality){if(!$quality){return '0'};return $null}
 function Assert-MudSun($weather,[double]$hour,[double]$overcast){
  $null=Number $hour
  Require ([Math]::Abs($hour-16) -lt .001 -and $weather.sunAvailable -is [bool] -and $weather.sunAvailable) 'Actual 16h mud daylight is absent.'
@@ -158,6 +159,7 @@ function Pair{
 }
 function Same-Pair($a,$b){Require (($a|ConvertTo-Json -Depth 8 -Compress)-ceq ($b|ConvertTo-Json -Depth 8 -Compress)) 'Installed source pair changed.'}
 function Test-Helpers{
+ Require ((Quality-CloudPin $false) -ceq '0' -and $null -eq (Quality-CloudPin $true)) 'Default/quality rendered cloud override policy changed.'
  Require ((Uniform-StageCommand 52.0463) -ceq 'player setDir 52.0463') 'Actual settled dry heading staging command changed.'
  $changedHeading=$false;try{Assert-UniformHeading 346.873 52.0463}catch{$changedHeading=$true};Require $changedHeading 'Real rain-wait heading drift accepted as an aligned capture.'
  Assert-UniformHeading 52.04631 52.0463
@@ -246,11 +248,14 @@ $result.sandSnapshotTrace=[bool]$SandSnapshotTrace
 $result.uniformLightingViews=[bool]$UniformLightingViews
 $result.terrainWetnessTrace=[bool]$TerrainWetnessTrace;$result.minimumMudWetness=$MinimumMudWetness
 $result.mudLightingViews=[bool]$MudLightingViews
+$qualityLighting=[bool]($UniformLightingViews -or $MudLightingViews)
+$result.renderedCloudRecipe=@{qualityLighting=$qualityLighting;inheritedCoveragePin=[Environment]::GetEnvironmentVariable('WGR_CLOUD_COVERAGE','Process');appliedCoveragePin=(Quality-CloudPin $qualityLighting);scope='Quality views clear the coverage pin so ordinary renderer weather-drive settings can apply. Simulation overcast alone is not proof of rendered cloud coverage, GPU acceptance or image lighting.'}
 if($UniformLightingViews){. (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1');$result.helperSha256['TerrainPuddleStockRoof.ps1']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1')).Hash}
 if($SandSnapshotTrace){$result.helperSha256['Read-SandUploadSnapshot.ps1']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Read-SandUploadSnapshot.ps1')).Hash}
 $settings=@{POSEIDON_PLAYER_GROUND_TRACE='1';POSEIDON_UNIFORM_WET_TRACE='1';POSEIDON_SAND_TRACE='1';POSEIDON_MUD_TRACE='1';WGR_UNIFORM_WET='1';WGR_GRASS='0';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_CLOUD_COVERAGE='0';WGR_TERRAIN_JITTER='0';WGR_TEMPORAL='0';WGR_LOD_GOVERNOR_RANGE='1';POSEIDON_SNOWLINE='off';POSEIDON_SNOW_TEST_DEPTH='0'}
+if($qualityLighting){$settings.Remove('WGR_CLOUD_COVERAGE')}
 if($TerrainWetnessTrace -or $MudLightingViews){$settings.WGR_TERRAIN_PUDDLE_FIXTURE='1';$result.terrainPuddlesInheritedControl=[Environment]::GetEnvironmentVariable('WGR_TERRAIN_PUDDLES','Process')}
-$clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE','WGR_SAND_UPLOAD_TRACE','WGR_SAND_SNAPSHOT_FILE','WGR_SAND_SNAPSHOT_ROOT')
+$clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE','WGR_SAND_UPLOAD_TRACE','WGR_SAND_SNAPSHOT_FILE','WGR_SAND_SNAPSHOT_ROOT','WGR_CLOUD_COVERAGE')
 if($UniformLightingViews){$clear+=@('POSEIDON_HEADLAMP','POSEIDON_LAMP_LIGHTS','POSEIDON_LAMP_RADIUS_SCALE','POSEIDON_LAMP_BRIGHTNESS_SCALE','POSEIDON_LAMP_COLOR','POSEIDON_LAMP_AMBIENT_SCALE','POSEIDON_LAMP_CONE','POSEIDON_LAMP_SPILL','POSEIDON_LAMP_SPILL_RADIUS','POSEIDON_LAMP_SPILL_AMBIENT')}
 $keys=@($settings.Keys)+$clear+@('POSEIDON_USER_DIR');$saved=@{};foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $p=$null;$client=$null;$reader=$null;$writer=$null;$held=$false;$armDir=$null;$log=$null;$deadline=$null
