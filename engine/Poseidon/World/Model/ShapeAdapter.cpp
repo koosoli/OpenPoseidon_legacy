@@ -1180,6 +1180,16 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
             std::vector<SelInfo> selInfos;
             selInfos.reserve(selection.vertexIndices.size());
             bool hasWeights = !selection.vertexWeights.empty();
+            // OFP MLOD (SP3X) soft selections. The point byte is 0 = not selected, 1 = full, and
+            // anything else a partial weight, which the original loader stores as `-byte`, i.e.
+            // 256 - byte (ShapeSetup.cpp: SelInfo(i, -val)). Read as full membership, every vertex
+            // shared by two bone selections -- the elbow, the knee, the neck of a hand-weighted
+            // soldier -- followed BOTH bones at full strength and was thrown off the body: the
+            // fml_vorhees Jasons rendered as a cloud of black spikes (Malprave routes SP3X through
+            // that loader and draws them correctly). P3DM is left as it was until a soft-weighted
+            // Arma source model is looked at.
+            const bool sp3xSoft = !hasWeights && lodLevel.sourceEncoding == "SP3X" &&
+                                  selection.sourceVertexWeights.size() == selection.vertexIndices.size();
             for (size_t vi = 0; vi < selection.vertexIndices.size(); ++vi)
             {
                 uint32_t vertIdx = selection.vertexIndices[vi];
@@ -1187,6 +1197,8 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                     continue;
                 uint8_t weight =
                     (hasWeights && vi < selection.vertexWeights.size()) ? selection.vertexWeights[vi] : 255;
+                if (sp3xSoft)
+                    weight = static_cast<uint8_t>(256 - selection.sourceVertexWeights[vi]);
                 selInfos.push_back(SelInfo(static_cast<VertexIndex>(vertIdx), weight));
             }
 
