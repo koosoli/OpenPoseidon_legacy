@@ -96,7 +96,8 @@ bool CreateEditorCave(float x, float y, float z, float heading, float width, flo
         status = "Cave mesh creation failed; terrain unchanged.";
         return false;
     }
-    Matrix4 transform(MRotationY,a);
+    Matrix4 transform(MIdentity);
+    transform.SetDirectionAndUp(forward,VUp);
     transform.SetPosition(Vector3(x,y,z));
     Object* object=NewObject(shape,-1);
     if (!object)
