@@ -727,8 +727,24 @@ unbuilt_candidates: >-
     plan:  # NONE — no plan document for terrain rendering exists under engine/WgpuRenderer/docs/ (checked 2026-08-14)
     status: PARTIAL
     owner: null
-    audited: 2026-08-14
+    audited: 2026-10-03
     completeness: >-
+      OWNER FOLLOW-UP3OCTOBER supersedes earlier appearance acceptance below.
+      Installed8aca5c43 is preserved; new candidate rain9e7939a2, water optics
+      7f64ef78, root directional wet-soil sky reflection and stochastic film
+      ripples await combined build/deployment and actual inspection. Rain
+      population CPU tests pass; no flight/FPS improvement claimed yet. Water
+      impact GPU helper passes; full renderer initially644PASS/2FAIL/2ignored
+      on stale shadow/source test fixtures, with41a9b94c repair pending rerun.
+      Actual deb4069c no-edit Noe global runoff loses about30percent volume
+      after120simulation seconds; local visible drying is unproven. New runner
+      re-queries candidate/focus depths and offers clear-midday SunnyDrain.
+      Fine owners remain defaultOFF; floating report is unreproduced, so no
+      placement change is claimed. Actual deb4069c Everon close/top controlled
+      mud has readable boot pits, but sand remains visually unreadable despite
+      actual negative CPU support. Opt-in sand publication d99bcba9 CPU receipts
+      agree exactly; installed publication/GPU/appearance still pending.
+      See modernisation/WEATHER-OWNER-FOLLOWUP-20261003.md.
       PERF-004 OVERRIDE (later on 2026-08-14; supersedes the historical audit
       below). Modern WGPU worlds now preserve their authored coarse land grid
       and fine elevation grid, reducing semantic cells 16x on Sahrani and 64x
@@ -1517,8 +1533,18 @@ unbuilt_candidates: >-
     plan: docs/roadmap/decisions/SNOW-SURFACE-MATERIAL-20260930.md
     status: PARTIAL
     owner: codex/streaming-residency
-    audited: 2026-10-01
+    audited: 2026-10-03
     completeness: >-
+      LATEST3OCTOBER follows owner reopening bullet appearance. Source27222d62
+      carves actual trajectory-aligned upstream entry grooves capped0.8m;
+      vertical impacts stay round. Actual SnowField CPU tests and runner
+      self-test pass; real installed shots and visuals remain pending.
+      Matching deb4069c default distant Eden/Noe forest and fixed Church
+      master controls pass normal exit/stable pairs. Root sees white roofs at
+      500m and bare moving clock faces; sunny Church terrain remains clipped.
+      Exposure diagnostic4fa463eb is installed8aca5c43, not exercised yet.
+      These bounded results do not accept every tree/roof/map or exposure.
+      See modernisation/WEATHER-OWNER-FOLLOWUP-20261003.md.
       LATEST BOUNDED SNOW RESULTS, SUPERSEDING HISTORICAL NOTES BELOW.
       Matching3353770c fixed-church-original-everon-20261001-041540 completes
       both foliage variants with normal exit and stable hashes. Root accepts
@@ -1742,8 +1768,14 @@ unbuilt_candidates: >-
     plan: docs/roadmap/decisions/UNIFORM-WETNESS-STOCK-FIXTURE-20260930.md
     status: PARTIAL
     owner: codex/streaming-residency
-    audited: 2026-09-30
+    audited: 2026-10-03
     completeness: >-
+      LATEST original-map functional evidence supersedes broader-map pending
+      below. Matching e5445111 actual controlled SoldierWB campaigns on Eden,
+      Noe, Abel and Cain pass real movement, visible third-person body, actual
+      wetness above0.3/encoded cloth response, pause/return and normal stable
+      pair exit. Wet highlights and satisfactory owner appearance remain OPEN;
+      actual cloth currently darkens without a new gloss/roughness lobe.
       BOUNDED STOCK SOLDIERWB LIFECYCLE PRESENT; OWNER FOLLOW-UP QUALITY OPEN.
       Stronger cloth absorption9aca3983 and actual player source traces are
       installed7e2f1df7. Actual keyboard-controlled standard US SoldierWB in

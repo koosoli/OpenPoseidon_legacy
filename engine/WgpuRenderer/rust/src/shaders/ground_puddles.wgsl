@@ -1,4 +1,5 @@
 #define_import_path ground_puddles
+#import rain_water_optics::rain_water_impact_normal
 
 // Cosmetic standing-water film on actual ground. No source-language whitelist,
 // camera seed, texture allocation or geometry/collision change. Callers supply
@@ -45,31 +46,12 @@ fn ground_puddle_rain_factor(reach: f32, coverage: f32) -> f32 {
 }
 
 fn ground_puddle_ripple_normal(world_xz: vec2<f32>, time: f32, rain: f32, footprint: f32) -> vec3<f32> {
-    // Each world-fixed 0.8m cell contains one bounded drop packet. Its centre
-    // stays at least .36m from the boundary; the packet radius never reaches
-    // that boundary. This avoids cell seams without a neighbour sample loop.
-    // Full temporal fade at both ends makes the repeating lifetime continuous.
-    if (rain <= 0.0 || footprint >= 0.16) { return vec3<f32>(0.0, 1.0, 0.0); }
-    let cell = floor(world_xz / 0.8);
-    let seed = puddle_hash(cell);
-    let centre = (cell + vec2<f32>(0.45 + seed * 0.1,
-        0.45 + puddle_hash(cell + vec2<f32>(17.0, 31.0)) * 0.1)) * 0.8;
-    let offset = world_xz - centre;
-    let radius = length(offset);
-    let age = fract(time * 1.1 + seed);
-    let ring_radius = mix(0.03, 0.25, age);
-    let width = max(0.035, max(footprint, 0.0) * 1.5);
-    let delta = radius - ring_radius;
-    let pulse = exp(-delta * delta / (width * width));
-    let lifetime = smoothstep(0.0, 0.12, age) * (1.0 - smoothstep(0.72, 1.0, age));
-    let distance_fade = 1.0 - smoothstep(0.035, 0.16, footprint);
-    let radial_fade = 1.0 - smoothstep(0.28, 0.34, radius);
-    // Normal amplitude is bounded, not a high-power glittering microfacet.
-    // No unresolved ripple survives into a distant/top-down film highlight.
-    // Derivative of one broad height packet. Width grows with the footprint,
-    // so a finer sinusoid cannot survive underneath the filtering envelope.
-    let slope = (delta / width) * pulse * lifetime * radial_fade
-        * distance_fade * clamp(rain, 0.0, 1.0) * 0.32;
-    let gradient = offset / max(radius, 0.0001) * slope;
-    return normalize(vec3<f32>(-gradient.x, 1.0, -gradient.y));
+    // Ground film and retained water share world-fixed stochastic rain events.
+    // Each caller retains its existing physical/source/wetness admission.
+    let impact = rain_water_impact_normal(world_xz, time, rain, footprint);
+    var slope = impact.xz / max(impact.y, 0.001);
+    // Thin films keep the old single-packet maximum tilt even when several
+    // independent impacts overlap. Retained pools may show their fuller motion.
+    slope *= min(1.0, 0.135 / max(length(slope), 0.001));
+    return normalize(vec3<f32>(slope.x, 1.0, slope.y));
 }

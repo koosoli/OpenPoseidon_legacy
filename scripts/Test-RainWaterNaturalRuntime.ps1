@@ -7,6 +7,7 @@ param([ValidateSet('noe','eden')][string[]]$Maps=@('noe'),
  [ValidateRange(30,600)][int]$RainSeconds=120,
  [ValidateRange(30,600)][int]$DrainSeconds=120,
  [ValidateRange(0,1800)][int]$RetirementSeconds=0,
+ [switch]$SunnyDrain,
  [string]$SourceCensus='',
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [switch]$SelfTest)
@@ -240,8 +241,14 @@ try{
    }
    $frozen=Snapshot;View ($site.x+350) ($site.z-350) ($original.vertexHeight+100) 315 -10;Capture 'camera-away';View $site.x ($site.z-18) ($original.vertexHeight+4) 0 -12;Capture 'candidate-camera-return';$returned=Snapshot;Frozen $frozen $returned;$arm.gates.cameraReturn=@{before=$frozen;after=$returned}
    $returnedFine=Fine $site.x $site.z;Require (($returnedFine.owners|ConvertTo-Json -Depth 10 -Compress) -ceq ($fine.owners|ConvertTo-Json -Depth 10 -Compress)) 'Camera/sample changed ownership or held water geometry.'
-   Exec '0 setOvercast 0.6;0 setRain 0;setAccTime 4';Wait-Sim 3;Exec 'setAccTime 0';$stopped=Snapshot;Require ($stopped.weather.liquidRain -eq 0) 'Actual rain did not stop.';$arm.gates.stopped=$stopped
-   Exec 'setAccTime 4';Wait-Sim $DrainSeconds;Exec 'setAccTime 0';$drained=Snapshot;Assert-Budget $drained.field;Unedited $drained.source
+   if ($SunnyDrain) {Exec '0 setOvercast 0;0 setRain 0;setDate [1985,6,21,12,0];setAccTime 4'} else {Exec '0 setOvercast 0.6;0 setRain 0;setAccTime 4'};Wait-Sim 3;Exec 'setAccTime 0';$stopped=Snapshot;Require ($stopped.weather.liquidRain -eq 0) 'Actual rain did not stop.';$arm.gates.stopped=$stopped
+   $localPoints=@(@{name='candidate';x=$site.x;z=$site.z;rainy=$arm.gates.candidateSample})
+   if($on){$localPoints+=@{name='owned-focus';x=$focus.x;z=$focus.z;rainy=$focus.sample}}
+   $arm.gates.localDrain=@{sunny=[bool]$SunnyDrain;points=@()}
+   foreach($point in $localPoints){$point.stopped=Send @{cmd='dev_rain_water';action='sample';x=$point.x;z=$point.z}}
+   Exec 'setAccTime 4';Wait-Sim $DrainSeconds;Exec 'setAccTime 0';$drained=Snapshot;
+   foreach($point in $localPoints){$point.drained=Send @{cmd='dev_rain_water';action='sample';x=$point.x;z=$point.z};$point.depthDelta=$point.drained.depth-$point.stopped.depth;$arm.gates.localDrain.points+=$point}
+   Assert-Budget $drained.field;Unedited $drained.source
    Require ($drained.field.rainVolume -eq $stopped.field.rainVolume -and $drained.field.volume -lt $stopped.field.volume) 'Actual no-input runoff did not drain without mass invention.';$arm.gates.drained=$drained;Capture 'after-rain-drained-candidate'
    $retirement=@{status='not-claimed-wet-retention-is-legitimate';secondsRequested=$RetirementSeconds;states=@()}
    if($on -and $RetirementSeconds -gt 0){

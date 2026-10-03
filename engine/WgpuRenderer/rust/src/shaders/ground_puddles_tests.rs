@@ -8,19 +8,22 @@ const PROBE: &str = r#"
 @compute @workgroup_size(64)
 fn cs_probe(@builtin(global_invocation_id) id: vec3<u32>) {
     let i = id.x;
-    let world = vec2<f32>(9486.0 + f32(i % 8u) * 0.09, 3006.0 + f32(i / 8u) * 0.09);
+    let world = vec2<f32>(9486.0 + f32(i % 8u) * 0.43, 3006.0 + f32(i / 8u) * 0.43);
+    // Sparse independent rain events need several cells and times; the old
+    // .63m square sampled a single repeating packet and can now be inactive.
+    let time = 14.5 + f32(i / 8u) * 0.19;
     let mask_world = vec2<f32>(9480.0 + f32(i % 8u) * 0.75, 3000.0 + f32(i / 8u) * 0.75);
     result[i * 4u] = vec4<f32>(ground_puddle_mask(mask_world, 0.01, 0.0),
         ground_puddle_mask(mask_world, 0.01, 0.6), ground_puddle_mask(mask_world, 0.01, 1.0),
         ground_puddle_mask(mask_world, 1.0, 1.0));
-    result[i * 4u + 1u] = vec4<f32>(ground_puddle_ripple_normal(world, 14.5, 1.0, 0.01),
+    result[i * 4u + 1u] = vec4<f32>(ground_puddle_ripple_normal(world, time, 1.0, 0.01),
         ground_puddle_land_factor(1.0, 1.0, 0.0, 0.0));
-    result[i * 4u + 2u] = vec4<f32>(ground_puddle_ripple_normal(world, 14.5, 1.0, 0.16),
+    result[i * 4u + 2u] = vec4<f32>(ground_puddle_ripple_normal(world, time, 1.0, 0.16),
         ground_puddle_land_factor(select(1.0, 0.9, i % 8u == 0u),
             select(1.0, -0.1, i % 8u == 1u), 0.0, select(0.0, 0.03, i % 8u == 2u)));
-    result[i * 4u + 3u] = vec4<f32>(ground_puddle_ripple_normal(world, 14.5, 0.0, 0.01),
-        distance(ground_puddle_ripple_normal(world, 14.5, 1.0, 0.01),
-                 ground_puddle_ripple_normal(world, 14.7, 1.0, 0.01)));
+    result[i * 4u + 3u] = vec4<f32>(ground_puddle_ripple_normal(world, time, 0.0, 0.01),
+        distance(ground_puddle_ripple_normal(world, time, 1.0, 0.01),
+                 ground_puddle_ripple_normal(world, time + 0.2, 1.0, 0.01)));
 }
 "#;
 

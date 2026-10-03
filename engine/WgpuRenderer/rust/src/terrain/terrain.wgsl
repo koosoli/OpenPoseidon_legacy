@@ -1420,7 +1420,9 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
         let fresnel = soil_wet_fresnel(dot(moist_n, view));
         var reflected = sun_ambient;
         if (sky_lit) {
-            reflected = sky_irradiance(reflect(-view, moist_n)) * frame.sun_ambient.w
+            // A wet soil coat reflects directional sky radiance. Diffuse SH
+            // irradiance here washes the soil into a pale, cloudless coating.
+            reflected = ground_sky_reflection(reflect(-view, moist_n)) * frame.sun_ambient.w
                 * sky_vis_ao(in.world_xz) * local_sky_visibility;
         }
         let half_vector = normalize(view - frame.sun_dir_world.xyz + vec3<f32>(0.0, 1e-4, 0.0));

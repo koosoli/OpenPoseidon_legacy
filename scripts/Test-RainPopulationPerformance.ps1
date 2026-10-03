@@ -23,14 +23,15 @@ function Median($values){$v=@($values|Sort-Object);Require ($v.Count -gt 0) 'No 
 function Rain-Comparable($weather){
  foreach($name in @('rain','liquidRain','particleDensity')){Require ($null -ne $weather.$name) ('Missing actual weather '+$name);$n=[double](Number $weather.$name);Require ($n -ge 0 -and $n -le 1) ('Invalid actual weather '+$name)}
  Require ($weather.particleSnowflakes -is [bool] -and !$weather.particleSnowflakes -and
-  $weather.rain -eq $weather.liquidRain -and $weather.liquidRain -ge .95) 'Dense actual liquid rain >=.95 is required; request alone is insufficient.'
+  $weather.liquidRain -eq [Math]::Max($weather.rain,$weather.particleDensity) -and $weather.liquidRain -ge .95) 'Dense actual liquid rain >=.95 is required; request alone is insufficient.'
 }
 function Parse-RainRows([string[]]$lines){
- $grammar='RainVolume: drops=(\d+) drawn=(\d+) decals=(\d+) spawned=(\d+) covered=(\d+) roof=(\d+) indoor=(\d+) probe=(\d+) ground=(\d+) buildings=(\d+) sweeps=(\d+) wind=([0-9.eE+-]+)m/s@([0-9.eE+-]+)deg lean=([0-9.eE+-]+)deg spawn=([0-9.eE+-]+)us gather=([0-9.eE+-]+)us sim=([0-9.eE+-]+)us draw=([0-9.eE+-]+)us\s*$'
+ $grammar='RainVolume: drops=(\d+) drawn=(\d+) decals=(\d+) spawned=(\d+) covered=(\d+) roof=(\d+) indoor=(\d+) probe=(\d+) ground=(\d+) buildings=(\d+) sweeps=(\d+) wind=([0-9.eE+-]+)m/s@([0-9.eE+-]+)deg lean=([0-9.eE+-]+)deg spawn=([0-9.eE+-]+)us gather=([0-9.eE+-]+)us sim=([0-9.eE+-]+)us draw=([0-9.eE+-]+)us(?: volumeCulls=(\d+) capCulls=(\d+) limit=(\d+))?\s*$'
  $rows=@();$fields=@('drops','drawn','decals','spawned','covered','roof','indoor','probe','ground','buildings','sweeps','windSpeed','windDirection','lean','spawnUs','gatherUs','simUs','drawUs')
  foreach($line in $lines){if($line.Contains('RainVolume:')){
   Require ($line -cmatch $grammar) 'Unknown/incomplete RainVolume trace grammar.';$matched=$Matches;$row=[ordered]@{line=$line}
   for($i=0;$i -lt $fields.Count;$i++){$n=[double](Number $matched[$i+1]);Require ($n -ge 0 -or $fields[$i] -in @('windDirection','lean')) 'Negative particle count/time.';$row[$fields[$i]]=$n}
+  foreach($newField in @(@('volumeCulls',19),@('capCulls',20),@('limit',21))){if($matched[$newField[1]]){$row[$newField[0]]=[double](Number $matched[$newField[1]])}}
   Require ($row.drawn -le $row.drops) 'Drawn drops exceed live population.';$rows+=,$row
  }};return $rows
 }
@@ -46,7 +47,7 @@ if($SelfTest){
  $pair=@(Parse-RainRows @($good,$good));Require ($pair.Count -eq 2) 'Trace rows were nested/truncated.'
  function Refuses([scriptblock]$body){$failed=$false;try{& $body|Out-Null}catch{$failed=$true};Require $failed 'Unsafe fixture accepted.'}
  Refuses {Parse-RainRows @($good.Replace('drawn=20','drawn=101'))};Refuses {Parse-RainRows @($good.Replace('sim=9us','sim=NaNus'))};Refuses {Summary @($r[0])}
- $w=@{rain=1;liquidRain=1;particleDensity=1;particleSnowflakes=$false};Rain-Comparable $w;$w.rain=.8;$w.liquidRain=.8;Refuses {Rain-Comparable $w}
+ $w=@{rain=1;liquidRain=1;particleDensity=1;particleSnowflakes=$false};Rain-Comparable $w;$w.rain=.8;$w.liquidRain=1;Rain-Comparable $w;$w.liquidRain=.8;Refuses {Rain-Comparable $w}
  $w.rain=1;$w.liquidRain=1;$w.particleSnowflakes=$true;Refuses {Rain-Comparable $w}
  Require ((Median @(1,3,5,9)) -eq 4) 'Median changed.'
  Write-Output 'Rain population helpers PASS; no game launched.';return
@@ -97,13 +98,19 @@ try{
   $stream=$client.GetStream();$stream.ReadTimeout=30000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
   Start-Sleep -Seconds 12;Require ((Eval 'triSceneReady') -ceq 'OK') 'Stock mission not ready.'
   Exec 'player allowDamage false;setDate [1985,6,21,16,0];0 setFog 0;0 setOvercast 1;0 setRain 1;triSetBrightness 1;setAccTime 0'
+  $null=Send @{cmd='dev_snow';action='disable'}
   $bed=Send @{cmd='dev_terrain_brush';action='state';x=4975;z=4675};$null=Number $bed.vertexHeight;$arm.nativeBed=$bed
   $world=Send @{cmd='dev_mud';action='sample';x=4975;z=4675};Require ($world.world.Replace('\','/').ToLowerInvariant() -match '(^|/)noe\.wrp$') 'Actual stock Nogova not mounted.';$arm.world=$world.world
   $height=if($view -ceq 'Ground'){[double]$bed.vertexHeight+2}elseif($view -ceq 'Altitude117'){117.58}else{300.0}
   Require ((Eval ('triFreeFlyPose "4975 4675 '+(Number $height)+' 0 -12"')) -ceq 'OK') 'Camera pose refused.';$arm.pose=@(4975,4675,$height,0,-12);$arm.heightAboveBed=$height-[double]$bed.vertexHeight
   Exec 'setAccTime 1';$start=Clock
   do{Start-Sleep -Seconds 1;Health}while((Clock)-$start -lt $WarmupSeconds*1000)
-  $weather=Send @{cmd='weather_visibility'};Rain-Comparable $weather
+  $readyStart=Clock;$weather=Send @{cmd='weather_visibility'}
+  while($weather.rain -lt .95 -or $weather.liquidRain -lt .95 -or $weather.particleDensity -lt .95){
+   Require ((Clock)-$readyStart -lt 30000) 'Actual dense liquid weather did not settle within30extra simulation seconds.'
+   Start-Sleep -Seconds 1;Health;$weather=Send @{cmd='weather_visibility'}
+  }
+  Rain-Comparable $weather;$arm.extraWeatherReadyMs=(Clock)-$readyStart;$arm.readyWeather=$weather
   $lines=@(Read-CompleteLogLines $log);$firstRows=@(Parse-RainRows $lines);$arm.traceRowsBefore=$firstRows.Count;$arm.startMs=Clock
   do{Start-Sleep -Seconds 2;Health;$weather=Send @{cmd='weather_visibility'};Rain-Comparable $weather;$arm.weather+=@{timeMs=(Clock);actual=$weather}}while((Clock)-$arm.startMs -lt $MeasureSeconds*1000)
   Exec 'setAccTime 0';$arm.endMs=Clock;Require ($arm.endMs-$arm.startMs -ge $MeasureSeconds*1000) 'Simulation did not advance through requested interval.'
