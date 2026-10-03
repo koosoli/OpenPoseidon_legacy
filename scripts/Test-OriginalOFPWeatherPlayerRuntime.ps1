@@ -14,6 +14,7 @@ param(
  [switch]$UniformLightingViews,
  [switch]$TerrainWetnessTrace,
  [switch]$MudLightingViews,
+ [switch]$SandLightingViews,
  [switch]$WetSoilFragmentViews,
  [switch]$WetSoilReflectionEdgeReads,
  [switch]$SelfTest
@@ -366,10 +367,11 @@ $result.sandSnapshotTrace=[bool]$SandSnapshotTrace
 $result.uniformLightingViews=[bool]$UniformLightingViews
 $result.terrainWetnessTrace=[bool]$TerrainWetnessTrace;$result.minimumMudWetness=$MinimumMudWetness
 $result.mudLightingViews=[bool]$MudLightingViews
+$result.sandLightingViews=[bool]$SandLightingViews
 $result.wetSoilFragmentViews=[bool]$WetSoilFragmentViews
 $result.wetSoilReflectionEdgeReads=[bool]$WetSoilReflectionEdgeReads
 if($WetSoilFragmentViews){$result.rainWaterFineInheritedControl=[Environment]::GetEnvironmentVariable('POSEIDON_RAIN_WATER_FINE','Process')}
-$qualityLighting=[bool]($UniformLightingViews -or $MudLightingViews)
+$qualityLighting=[bool]($UniformLightingViews -or $MudLightingViews -or $SandLightingViews)
 $result.renderedCloudRecipe=@{qualityLighting=$qualityLighting;inheritedCoveragePin=[Environment]::GetEnvironmentVariable('WGR_CLOUD_COVERAGE','Process');appliedCoveragePin=(Quality-CloudPin $qualityLighting);scope='Quality views clear the coverage pin so ordinary renderer weather-drive settings can apply. Simulation overcast alone is not proof of rendered cloud coverage, GPU acceptance or image lighting.'}
 if($UniformLightingViews){. (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1');$result.helperSha256['TerrainPuddleStockRoof.ps1']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1')).Hash}
 if($SandSnapshotTrace){$result.helperSha256['Read-SandUploadSnapshot.ps1']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Read-SandUploadSnapshot.ps1')).Hash}
@@ -674,6 +676,44 @@ function Mud-Lighting($walkRecord,$site){
  Require ($record.restoredHour -eq $originalHour -and [Math]::Abs($record.after.weather.overcast-$original.weather.overcast) -le .001) 'Actual owned date/dayTime or cloud lighting did not restore.'
  return $record
 }
+function Sand-Lighting($walkRecord,$site){
+ Require ($walkRecord.samples.Count -gt 0) 'No actual walked sand contact for lighting comparison.'
+ $walked=$walkRecord.samples|Sort-Object offset|Select-Object -First 1
+ $contact=Field 'sand' $walked;Assert-Tuple $contact $site $map 'sand'
+ Require ($contact.offset -lt -.001) 'Actual walked sand contact lost its retained relief.'
+ $original=State;$originalHour=Number (Eval 'dayTime');$restoreDate=Mud-RestoreDateTuple $originalHour
+ Assert-RendererClouds $original.weather $original.weather.overcast;$cloudRecipe=Renderer-CloudRecipe $original.weather
+ $record=@{before=$original;contact=$contact;originalHour=$originalHour;views=@{};scope='Paused actual walked sand depression under recorded overcast/clear daylight; no stamp, field mutation or visible-relief acceptance inferred from CPU offsets.'}
+ try{
+  Exec 'setDate [1985,6,21,16,0]'
+  foreach($light in (Mud-LightingPlan)){
+   Exec ('0 setOvercast '+$light.overcast);$null=Wait-QualityClouds $original $light.overcast
+   foreach($view in (Contact-Poses ([double]$contact.x) ([double]$contact.z) ([double]$contact.surfaceY))){
+    $pose=($view.pose|ForEach-Object{([double]$_).ToString('R',$culture)}) -join ' '
+    Require ((Eval ('triFreeFlyPose "'+$pose+'"')) -ceq 'OK') 'Actual sand lighting camera refused.'
+    $beforeView=State;Assert-Paused $original $beforeView
+    Assert-MudSun $beforeView.weather (Number (Eval 'dayTime')) $light.overcast
+    Assert-RendererClouds $beforeView.weather $light.overcast
+    Assert-CloudRecipe $cloudRecipe (Renderer-CloudRecipe $beforeView.weather)
+    $name=$light.name+'-'+$view.name;Capture ('sand-lighting-contact-'+$name)
+    $afterView=State;Assert-Paused $beforeView $afterView
+    Assert-MudSun $afterView.weather (Number (Eval 'dayTime')) $light.overcast
+    Assert-RendererClouds $afterView.weather $light.overcast
+    Assert-CloudRecipe $cloudRecipe (Renderer-CloudRecipe $afterView.weather)
+    $actual=Field 'sand' $contact;Assert-Tuple $actual $site $map 'sand'
+    foreach($field in @('offset','surfaceY','surfaceDx','surfaceDz')){Require ($actual.$field -eq $contact.$field) 'Sand lighting changed retained contact geometry.'}
+    $record.views[$name]=@{before=$beforeView;after=$afterView;pose=$view.pose;actualSourceSample=$actual}
+   }
+  }
+ }finally{
+  Exec ('setDate ['+($restoreDate -join ',')+'];0 setOvercast '+([double]$original.weather.overcast).ToString('R',$culture))
+  for($i=0;$i -lt 3;++$i){$restoredHour=Number (Eval 'dayTime');if($restoredHour -eq $originalHour){break};Exec ('skipTime '+($originalHour-$restoredHour).ToString('R',$culture))}
+ }
+ $record.after=Wait-QualityClouds $original $original.weather.overcast;Assert-Paused $original $record.after
+ Assert-CloudRecipe $cloudRecipe (Renderer-CloudRecipe $record.after.weather)
+ Require ((Number (Eval 'dayTime')) -eq $originalHour) 'Sand lighting did not restore actual owned dayTime.'
+ return $record
+}
 function Uniform-Lighting([string]$band){
  $original=State
  Require ((Eval 'typeOf player') -ceq 'SoldierWB' -and (Eval 'alive player') -eq $true) 'Uniform fixture lost the actual stock soldier.'
@@ -823,6 +863,7 @@ try{
    $arm.gates.mudCentreViews=Terrain-MudCentreViews $soil
   }
   if($MudLightingViews){if($soil){$arm.gates.mudLighting=Mud-Lighting $arm.gates.wetSoilWalk $soil}else{$arm.gates.mudLightingUnsupported='No admitted mud source on this original map; no soft-soil lighting acceptance inferred.'}}
+  if($SandLightingViews){if($sand){$arm.gates.sandLighting=Sand-Lighting $arm.gates.sandWalk $sand}else{$arm.gates.sandLightingUnsupported='No admitted sand source on this original map; no visible sand relief acceptance inferred.'}}
   Exec 'setAccTime 1';$null=Send @{cmd='exit'};Require ($p.WaitForExit(20000)-and $p.ExitCode-eq 0) 'Owned normal exit failed.'
   Require ((Lines|Select-String 'Shutdown complete')-and !(Lines|Select-String 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION')) 'Exit/validation proof missing.'
   $arm.lifecycle=@{status='ok';timed_out=$false;contended=$false;exit_code=[int]$p.ExitCode};$meta=Join-Path $armDir 'lifecycle.json';$arm.lifecycle|ConvertTo-Json|Set-Content -LiteralPath $meta

@@ -1,5 +1,38 @@
 # Weather owner follow-up, 3 October 2026
 
+21:23 installed checkpoint: fcb9ad7b is installed21:07 after full23+13step
+builds, safety push, locked Deploy.ps1/material preflight and matching installed
+EXE/DLL/material/built-PDB archive. Actual quiet Noe flight579dfc passes both
+normal stable zero exits, occupied controls, exact native captures/duplicate
+refusal and the six-phase grammar. Rain contained22windows/1328advances/88steps
+uses88fused passes and zero cached raw/limited passes:5.215910ms/step,max8.552ms,
+no50ms call. Prior aff run was9.959474ms/step; new dry1.532122ms/step versus
+1.336983. Rain/tide/retained endpoint states differ. New rain frame average
+10.257763ms versus10.328125,p95=11.960 versus13.238,max33.324 versus32.813;
+this is bounded observational evidence, not causal FPS or global performance
+acceptance. The controlled offline actual-state ABBA result remains separate.
+
+Actual measured-hinge017a07 passes initial33palette/542point/37proxy equivalence,
+11bodies/10joints/4hinges,40updates over.663simulation seconds,maximum body travel
+.0666007921m,minimum clearance.00325012207m and real541point/37proxy motion.
+Clear/30second expiry/hide/delete all release every handle. Root viewed capture
+and motion without an obvious tear/explosion in this pose. General skin/weapon/
+culling/contact and ordinary-death admission remain OPEN/default OFF. An explicit
+frozen-pose transition is being prepared before any ordinary-death hook.
+
+Actual Eden wet-soil/cloth bf15c3 passes available functional/source/camera/water/
+lamp/shelter/footprint gates with normal stable exit0. Root compared old/new low
+overcast and top contact views: rough environment convolution reduces the pale
+sheet and bright rims, retaining dark brown textured ground and real depressions.
+Retain this bounded improvement; all-map/slimy-mud appearance is still OPEN.
+Actual installed Noe eb38c1 also passes normal stable exit0 and available source/
+player/contact/cloth gates. Root views show dark textured wet soil in overcast;
+clear sky still produces excessive bright/purple sheen. Sand CPU contacts reach
+-.0934688747m on admitted SandDark, but low/top overcast images do not establish
+satisfactory visible depressions. These appearance gaps remain OPEN. An opt-in
+same-contact sand clear/overcast capture check is added to the runner; self-test
+passes, actual execution pending. This adds no game geometry/shader change.
+
 21:05 source checkpoint: fa592191 promotes the guarded one-pass coarse runoff
 candidate, with unchanged cached fallback and an explicit sixth fused-flux cost
 phase. Root actual-capture production A/B O0/O2 equivalence, full rain-field and
