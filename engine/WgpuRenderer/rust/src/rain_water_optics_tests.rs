@@ -33,7 +33,7 @@ fn actual_thin_water_helper_is_pure_and_full_fragment_preserves_support_guards()
             .is_some_and(|n| n.contains("rain_water_surface_optics"))
     }));
     let source = include_str!("rain_water.wgsl");
-    assert!(source.contains("let local_depth = rain_water_support_depth(water,bed"));
+    assert!(source.contains("let local_depth = rain_water_raster_support_depth(water,bed,frame.ground_weather.z,in.world.y)"));
     assert!(source.contains("if (local_depth <= 0.001) { discard; }"));
     assert!(source.contains("if (cover <= 0.0 || snow > 0.002) { discard; }"));
     assert!(source.contains("let standing = rain_water_standing_fraction(local_depth)"));

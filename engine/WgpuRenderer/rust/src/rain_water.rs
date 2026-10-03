@@ -777,7 +777,16 @@ mod tests {
                 rain_water_support_depth(vec4<f32>(2.0,0.0,0.0,0.0),2.0,0.0));\n\
             result[2]=water_at(vec2<f32>(-100.0,-100.0));\n\
             result[3]=water_at(vec2<f32>(102.5,202.5));\n\
-            result[4]=water_at(vec2<f32>(107.5,207.5));\n}}",
+            result[4]=water_at(vec2<f32>(107.5,207.5));\n\
+            let supported=vec4<f32>(2.3,0.3,0.0,0.0);\n\
+            result[5]=vec4<f32>(rain_water_raster_support_depth(supported,2.0,0.0,2.33),\n\
+                rain_water_raster_support_depth(supported,2.0,0.0,2.27),\n\
+                rain_water_raster_support_depth(supported,2.0,0.0,2.55),\n\
+                rain_water_raster_support_depth(supported,2.0,0.0,2.05));\n\
+            result[6]=vec4<f32>(rain_water_support_depth(supported,2.0,0.0),\n\
+                rain_water_raster_support_depth(supported,2.0,0.0,2.3),\n\
+                rain_water_raster_support_depth(vec4<f32>(2.02,0.02,0.0,0.0),2.0,0.0,1.995),\n\
+                rain_water_raster_support_depth(supported,2.0,3.0,2.3));\n}}",
             include_str!("shaders/rain_water_optics.wgsl")
                 .lines().skip(1).collect::<Vec<_>>().join("\n"),
             &source[begin..end]
@@ -890,13 +899,13 @@ mod tests {
         });
         let output = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: 80,
+            size: 112,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
         let staging = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: 80,
+            size: 112,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -931,7 +940,7 @@ mod tests {
             pass.set_bind_group(1, &resources, &[]);
             pass.dispatch_workgroups(1, 1, 1);
         }
-        encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, 80);
+        encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, 112);
         queue.submit(Some(encoder.finish()));
         let slice = staging.slice(..);
         let (send, receive) = std::sync::mpsc::channel();
@@ -948,6 +957,10 @@ mod tests {
         }
         assert!((values[4] - 0.175).abs() < 1e-5);
         assert_eq!(&values[5..8], &[0., 0., 0.]);
+        for index in [20,21,24,25] {assert!((values[index]-0.3).abs()<0.00001,
+            "3cm boundary/analytic/fine-horizontal support must remain valid: {index}");}
+        assert_eq!(&values[22..24], &[0.,0.],"Analytically supported +/-25cm raster mismatch must be rejected");
+        assert_eq!(&values[26..28], &[0.,0.],"Raster under bed and sea are independent negatives");
         for (actual, expected) in values[8..12].iter().zip(cells[0]) {
             assert!((actual - expected).abs() < 1e-5);
         }
@@ -1003,7 +1016,7 @@ mod tests {
         assert!(selected.len() <= MAX_DRAW_CELLS && !selected.is_empty());
         let source = include_str!("rain_water.wgsl");
         for proof in [
-            "rain_water_support_depth(water,bed",
+            "rain_water_raster_support_depth(water,bed,frame.ground_weather.z,in.world.y)",
             "bare_surface_valid",
             "interior_rain_coverage",
             "ground_sky_reflection",

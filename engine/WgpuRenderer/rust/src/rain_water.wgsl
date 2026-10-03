@@ -76,6 +76,17 @@ fn rain_water_support_depth(water: vec4<f32>, bed: f32, sea_level: f32) -> f32 {
     return max(0.0,min(water.y,water.x - bed));
 }
 
+fn rain_water_raster_support_depth(water: vec4<f32>, bed: f32, sea_level: f32,
+                                  raster_height: f32) -> f32 {
+    // Coarse depth is bilinear, but the 2x2 subquad mesh is piecewise planar.
+    // Certify the surface actually rasterized, not just a fresh analytic query.
+    // 3cm is a conservative presentation approximation budget; legitimate
+    // high-curvature coarse water can be clipped. Fine native heads are flat
+    // and agree exactly. Never move water or alter conserved simulation mass.
+    if (abs(raster_height-water.x) > 0.03 || raster_height <= bed+0.001) { return 0.0; }
+    return rain_water_support_depth(water,bed,sea_level);
+}
+
 // Return straight-alpha colour for the existing ALPHA_BLENDING pipeline. The
 // destination is the actual already-lit bed, so transmission needs no copied
 // scene texture. A scalar extinction length of 1/3m gives shallow rainwater a
@@ -143,7 +154,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
     let bed = bare_surface_y(in.world.xz);
     // A simulation water surface must actually be above the authored ground,
     // not a lowland plane rendered through a hillside or a stale map.
-    let local_depth = rain_water_support_depth(water,bed,frame.ground_weather.z);
+    let local_depth = rain_water_raster_support_depth(water,bed,frame.ground_weather.z,in.world.y);
     if (local_depth <= 0.001) { discard; }
     let cover = ground_puddle_rain_factor(interior_rain_reach(in.world),interior_rain_coverage(in.world));
     let altitude = smoothstep(frame.snow_surface.y,
