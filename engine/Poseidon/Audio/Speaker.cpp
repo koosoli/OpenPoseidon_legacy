@@ -285,7 +285,10 @@ void RadioChannel::SetAudible(bool audible)
     {
         if (_actualMsg)
         {
-            _actualMsg->Transmitted(); // confirm xmit done
+            if (!_actualMsg->IsTransmitted())
+            {
+                _actualMsg->Transmitted(); // confirm xmit done
+            }
             _actualMsg = nullptr;
             _pauseAfterMessage = 0;
             _pauseAfter = 0;

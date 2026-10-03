@@ -902,6 +902,9 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
         {
             cosEyeAdjusted = -1;
         }
+        // CWR fork: peripheral vision for eyes only, within 150 m
+        const float cosPeripheral = -0.17f; // about 100 deg either side
+        const bool peripheral = (canSee & CanSeeEye) && dist2 < Square(150.0f) && !radarContact && !laserContact;
 
         float nightAccCoef = 1 - night;
         if (radarContact || laserContact)
@@ -919,6 +922,11 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
         else if (cosFiEye > cosEyeAdjusted)
         {
             visibleAccuracy *= GetType()->_sensitivity * 0.5f * nightAccCoef;
+        }
+        else if (peripheral && cosFiEye > cosPeripheral)
+        {
+            // CWR fork: weak peripheral vision (to ~100 deg each side, close range)
+            visibleAccuracy *= GetType()->_sensitivity * 0.15f * nightAccCoef;
         }
         else
         {
@@ -1038,6 +1046,15 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             spotCoef *= hidden;
             delayCoef = 1.5f;
         }
+        else if (peripheral && cosFiEye > cosPeripheral)
+        {
+            // peripheral: mostly catches movement and muzzle flashes, slowly
+            spotCoef = movement * GetType()->_sensitivity * 0.25f;
+            spotCoef *= lightCoef;
+            spotCoef *= hidden;
+            visibleFire *= 0.5f;
+            delayCoef = 2.5f;
+        }
         else
         {
             spotCoef = 0;
@@ -1055,6 +1072,20 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             actSpotability = actSpotabilityEar;
             hidden = 1;
         }
+        // CWR fork (X-Ray: weapon sounds count 10x): gunfire you can hear makes the
+        // shooter known, roughly placed from the sound, even if he can't be seen, so the
+        // unit turns to look for him instead of only going prone
+        if (actSpotability < 1 && audibleFire > 0.8f && notManual)
+        {
+            const float heard = floatMin(audibleFire * 0.6f, 1.2f);
+            if (heard > actSpotability)
+            {
+                spotError = ai->Position().Distance(Position()) * 0.4f; // gunshots are easier to place than footsteps
+                delayCoef = 2.0f;
+                actSpotability = heard;
+                hidden = 1;
+            }
+        }
 
         saturateMin(actSpotability, 4);
         float newSpotability = actSpotability;
@@ -1071,6 +1102,13 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
                 Target* fireTVis = res[index];
                 saturateMax(newSideAccuracy, fireTVis->FadingAccuracy());
                 saturateMax(newSideAccuracy, fireTVis->FadingSideAccuracy());
+            }
+            // CWR fork (X-Ray: gunfire counts as an attack): someone shooting at our
+            // side is hostile, whether or not we can see who he is
+            if (fireTarget && fireTarget != ai && center->IsFriendly(fireTarget->GetTargetSide()) &&
+                !center->IsFriendly(ai->GetTargetSide()))
+            {
+                saturateMax(newSideAccuracy, 1.5f);
             }
             if (unit->GetCombatMode() < CMCombat && group != ai->GetGroup() && !group->IsAnyPlayerGroup())
             {
@@ -1097,7 +1135,12 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             if (side != TSideUnknown)
             {
                 AIUnit* aiUnit = ai->CommanderUnit();
-                if (aiUnit)
+                if (aiUnit && aiUnit->GetLifeState() != AIUnit::LSAlive && ai->GetTargetSide() == TCivilian)
+                {
+                    // CWR fork: vehicle whose whole crew is dead - no longer a threat
+                    side = TCivilian;
+                }
+                else if (aiUnit)
                 {
                     if (aiUnit->GetCaptive())
                     {
@@ -1782,12 +1825,19 @@ bool EntityAI::WhatShootResult(FireResult& result, const Target& target, int wea
     saturateMin(cumChangeDammage, 1.01f - result.dammage);
     float oldDammage = result.dammage;
     result.dammage += cumChangeDammage;
+    bool kills = false;
     if (result.dammage >= 1)
     {
-        result.gain += targetCost * 0.5f;
+        kills = true;
         result.dammage = 1;
     }
     result.gain = (result.dammage - oldDammage) * targetCost * 0.5f;
+    // CWR fork: the kill bonus used to be added before this assignment and so was
+    // always lost; a weapon that can finish the target is now preferred as intended
+    if (kills)
+    {
+        result.gain += targetCost * 0.5f;
+    }
     result.weapon = weapon;
 #if DIAG_SHOOT_RESULT
     LOG_DEBUG(AI, "    probab {:.4f}, inRange {:.2f}, visible {:.3f}, danger {:.2f}, time {:.2f}", hitProbab, inRange,

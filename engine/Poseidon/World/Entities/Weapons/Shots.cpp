@@ -19,6 +19,7 @@
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/AI.hpp>
+#include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
@@ -95,6 +96,73 @@ Shot::Shot(EntityAI* parent, const AmmoType* type) : base(type->GetShape(), type
     _timeToLive = 10.0;
     SetSimulationPrecision(type->simulationStep);
 }
+
+// Malprave aiSuppression: suppression - rounds passing close to infantry pin them down
+namespace SuppressionTuning
+{
+constexpr float Radius = 4.0f;          // metres from the round's path that still counts as a near miss
+constexpr float MinShooterDist = 10.0f; // ignore units right next to the shooter (muzzle blast)
+constexpr float PerRound = 0.35f;       // suppression from one rifle round passing at 0 m
+constexpr float HitRef = 10.0f;         // ammo 'hit' of a normal rifle round (scales bigger calibres up)
+constexpr float MaxPower = 4.0f;        // cap for very heavy rounds
+} // namespace SuppressionTuning
+
+static void ApplyNearMissSuppression(EntityAI* shooter, const AmmoType* type, Vector3Par from, Vector3Par to)
+{
+    using namespace SuppressionTuning;
+    const Vector3 seg = to - from;
+    const float segLen2 = seg.SquareSize();
+    if (segLen2 < 1e-4f)
+    {
+        return;
+    }
+    // quick reject: bounding sphere of the step
+    const Vector3 mid = (from + to) * 0.5f;
+    const float reach2 = Square(sqrt(segLen2) * 0.5f + Radius);
+
+    AIUnit* shooterUnit = shooter ? shooter->CommanderUnit() : nullptr;
+    AIGroup* shooterGroup = shooterUnit ? shooterUnit->GetGroup() : nullptr;
+    float power = type->hit / HitRef;
+    saturate(power, 0.5f, MaxPower);
+
+    for (int i = 0; i < GWorld->NVehicles(); i++)
+    {
+        EntityAI* ai = dyn_cast<EntityAI>(GWorld->GetVehicle(i));
+        if (!ai || ai == shooter)
+        {
+            continue;
+        }
+        const Vector3 p = ai->AimingPosition();
+        if (p.Distance2(mid) > reach2)
+        {
+            continue;
+        }
+        AIUnit* unit = ai->CommanderUnit();
+        // infantry on foot only (crews inside vehicles are protected), local AI only
+        if (!unit || static_cast<EntityAI*>(unit->GetPerson()) != ai || !unit->IsLocal() || unit->IsAnyPlayer())
+        {
+            continue;
+        }
+        if (shooterGroup && unit->GetGroup() == shooterGroup)
+        {
+            continue; // own squad's fire does not pin you down
+        }
+        if (shooter && shooter->Position().Distance2(p) < Square(MinShooterDist))
+        {
+            continue;
+        }
+        float t = ((p - from) * seg) / segLen2;
+        saturate(t, 0, 1);
+        const float d2 = (from + seg * t).Distance2(p);
+        if (d2 > Square(Radius))
+        {
+            continue;
+        }
+        const float d = sqrt(d2);
+        unit->AddSuppression(PerRound * power * (1 - d / Radius), shooter);
+    }
+}
+
 
 void Shot::SetParent(EntityAI* parent)
 {
@@ -858,6 +926,9 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
     {
         const Vector3 segmentStart = position;
         position += _speed * deltaT;
+        // Malprave aiSuppression: rounds passing close to infantry suppress them (checked before any
+        // impact below, so rounds landing near someone count too)
+        ApplyNearMissSuppression(_parent, Type(), segmentStart, position);
         // PHY-020: physics probes are deliberately absent from the 2001 collision
         // world, so ObjectCollision below cannot see them. Query the physics world
         // with THIS TICK'S bullet segment instead of faking the probe into the old

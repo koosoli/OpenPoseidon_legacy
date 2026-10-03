@@ -1599,6 +1599,9 @@ static void QueueGroupCommand(RadioChannel& radio, RadioMessageCommand* message,
 {
     Ref<RadioMessageCommand> keepAlive = message;
     radio.Transmit(message, language);
+    // Malprave radioImmediate: carry the order out now instead of waiting for other radio chatter to
+    // finish; the voice line and the unit's reply stay queued
+    message->ExecuteNow();
     if (PlayerOrderBypassesSpeech(message->GetContext(), GWorld->GetMode() == GModeNetware))
     {
         // Keep the spoken order queued, but do not wait on unrelated chatter.

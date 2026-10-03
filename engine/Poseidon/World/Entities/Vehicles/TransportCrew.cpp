@@ -452,24 +452,24 @@ void Transport::GetActions(UIActions& actions, AIUnit* unit, bool now)
             }
         }
 
-        if (Commander() && center->IsEnemy(Commander()->GetTargetSide()))
+        if (Commander() && !Commander()->IsDammageDestroyed() && center->IsEnemy(Commander()->GetTargetSide()))
         {
             return;
         }
-        if (Driver() && center->IsEnemy(Driver()->GetTargetSide()))
+        if (Driver() && !Driver()->IsDammageDestroyed() && center->IsEnemy(Driver()->GetTargetSide()))
         {
             return;
         }
-        if (Gunner() && center->IsEnemy(Gunner()->GetTargetSide()))
+        if (Gunner() && !Gunner()->IsDammageDestroyed() && center->IsEnemy(Gunner()->GetTargetSide()))
         {
             return;
         }
         for (int i = 0; i < GetManCargo().Size(); i++)
         {
             Person* man = GetManCargo()[i];
-            if (!man)
+            if (!man || man->IsDammageDestroyed())
             {
-                continue;
+                continue; // CWR fork: dead crew/cargo do not block getting in
             }
             if (center->IsEnemy(man->GetTargetSide()))
             {

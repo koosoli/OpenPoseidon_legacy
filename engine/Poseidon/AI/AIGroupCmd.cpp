@@ -308,6 +308,30 @@ void AIGroup::IssueCommand(Command& cmd, PackedBoolArray list)
     }
 }
 
+// Orders take effect when they are issued; the queued radio line is only the voice.
+// ExecuteRadioNow applies a freshly queued message, ApplyStateToUnit applies an
+// already executed state message to a unit that was just added to it.
+static void ExecuteRadioNow(RadioMessage* msg)
+{
+    if (msg && !msg->IsTransmitted())
+    {
+        msg->Transmitted();
+        msg->SetTransmitted();
+    }
+}
+
+static void ApplyStateToUnit(RadioMessageState* msg, AIUnit* unit)
+{
+    if (!msg || !unit || !msg->IsTransmitted())
+    {
+        return;
+    }
+    Ref<RadioMessageState> temp = msg->Clone();
+    temp->ClearTo();
+    temp->AddTo(unit);
+    temp->Transmitted();
+}
+
 void AIGroup::SendFormation(Formation f, AISubgroup* to)
 {
     AI_ERROR(to);
@@ -344,6 +368,10 @@ void AIGroup::SendFormation(Formation f, AISubgroup* to)
             else
             {
                 msgForm->SetFormation(f);
+                if (msgForm->IsTransmitted())
+                {
+                    to->SetFormation(f);
+                }
                 return;
             }
         }
@@ -383,7 +411,11 @@ void AIGroup::SendFormation(Formation f, AISubgroup* to)
     }
 
 TransmitSendFormation:
-    GetRadio().Transmit(new RadioMessageFormation(this, to, f), GetCenter()->GetLanguage());
+    {
+        Ref<RadioMessage> msg = new RadioMessageFormation(this, to, f);
+        GetRadio().Transmit(msg, GetCenter()->GetLanguage());
+        ExecuteRadioNow(msg);
+    }
 }
 
 void AIGroup::SendSemaphore(Semaphore sem, PackedBoolArray list)
@@ -465,6 +497,7 @@ void AIGroup::SendBehaviour(CombatMode mode, PackedBoolArray list)
             else if (msgSem->GetBehaviour() == mode)
             {
                 msgSem->AddTo(unit);
+                ApplyStateToUnit(msgSem, unit);
                 list.Set(i, false);
                 goto SendBehaviourForContinue;
             }
@@ -505,7 +538,11 @@ void AIGroup::SendBehaviour(CombatMode mode, PackedBoolArray list)
 
     if (leader && !list.IsEmpty())
     {
-        GetRadio().Transmit(new RadioMessageBehaviour(this, list, mode), GetCenter()->GetLanguage());
+        {
+            Ref<RadioMessage> msg = new RadioMessageBehaviour(this, list, mode);
+            GetRadio().Transmit(msg, GetCenter()->GetLanguage());
+            ExecuteRadioNow(msg);
+        }
     }
 }
 
@@ -563,6 +600,7 @@ void AIGroup::SendLooseFormation(bool loose, PackedBoolArray list)
             else if (msgSem->IsLooseFormation() == loose)
             {
                 msgSem->AddTo(unit);
+                ApplyStateToUnit(msgSem, unit);
                 list.Set(i, false);
                 goto SendLooseFormationForContinue;
             }
@@ -606,7 +644,11 @@ void AIGroup::SendLooseFormation(bool loose, PackedBoolArray list)
 
     if (leader && !list.IsEmpty())
     {
-        GetRadio().Transmit(new RadioMessageLooseFormation(this, list, loose), GetCenter()->GetLanguage());
+        {
+            Ref<RadioMessage> msg = new RadioMessageLooseFormation(this, list, loose);
+            GetRadio().Transmit(msg, GetCenter()->GetLanguage());
+            ExecuteRadioNow(msg);
+        }
     }
 }
 
@@ -664,6 +706,7 @@ void AIGroup::SendOpenFire(OpenFireState open, PackedBoolArray list)
             else if (msgSem->GetOpenFireState() == open)
             {
                 msgSem->AddTo(unit);
+                ApplyStateToUnit(msgSem, unit);
                 list.Set(i, false);
                 goto SendOpenFireForContinue;
             }
@@ -707,7 +750,11 @@ void AIGroup::SendOpenFire(OpenFireState open, PackedBoolArray list)
 
     if (leader && !list.IsEmpty())
     {
-        GetRadio().Transmit(new RadioMessageOpenFire(this, list, open), GetCenter()->GetLanguage());
+        {
+            Ref<RadioMessage> msg = new RadioMessageOpenFire(this, list, open);
+            GetRadio().Transmit(msg, GetCenter()->GetLanguage());
+            ExecuteRadioNow(msg);
+        }
     }
 }
 
@@ -964,6 +1011,7 @@ void AIGroup::SendTarget(Target* target, bool engage, bool fire, PackedBoolArray
                     {
                         msgTgt->SetEngage(true);
                     }
+                    ApplyStateToUnit(msgTgt, unit);
                     list.Set(i, false);
                     goto SendTargetForContinue;
                 }
@@ -980,6 +1028,7 @@ void AIGroup::SendTarget(Target* target, bool engage, bool fire, PackedBoolArray
                 // some message with same arguments to other unit is on the way
                 // we add unit to address list
                 msgTgt->AddTo(unit);
+                ApplyStateToUnit(msgTgt, unit);
                 list.Set(i, false);
                 goto SendTargetForContinue;
             }
@@ -991,7 +1040,11 @@ void AIGroup::SendTarget(Target* target, bool engage, bool fire, PackedBoolArray
 
     if (!list.IsEmpty())
     {
-        GetRadio().Transmit(new RadioMessageTarget(this, list, target, engage, fire), GetCenter()->GetLanguage());
+        {
+            Ref<RadioMessage> msg = new RadioMessageTarget(this, list, target, engage, fire);
+            GetRadio().Transmit(msg, GetCenter()->GetLanguage());
+            ExecuteRadioNow(msg);
+        }
     }
 }
 
@@ -1027,6 +1080,8 @@ void AIGroup::SendState(RadioMessageState* msg, bool silent)
     if (leader && msg->IsToSomeone())
     {
         GetRadio().Transmit(msg, GetCenter()->GetLanguage());
+        // stance, watch, formation position etc. apply now, not after other chatter
+        ExecuteRadioNow(msg);
     }
 }
 
@@ -1374,12 +1429,15 @@ void AIGroup::SendRadioReport(ReportSubject subject, Target& target)
     // find first unit that is alive
     if (!from)
     {
+        // CWR fork: the test was inverted and only ever picked dead/empty slots,
+        // so reports with no known spotter were never sent
         for (int i = 0; i < MAX_UNITS_PER_GROUP; i++)
         {
             AIUnit* unit = _units[i];
-            if (!unit || unit->GetLifeState() != AIUnit::LSAlive)
+            if (unit && unit->GetLifeState() == AIUnit::LSAlive)
             {
                 from = unit;
+                break;
             }
         }
     }

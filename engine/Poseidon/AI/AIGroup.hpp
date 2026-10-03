@@ -393,6 +393,8 @@ protected:
 	RString _name;
 	RString _letterName;
 	RString _colorName;
+	//! 0 for the first 63 groups; group 64 reuses "Alpha Black" as "Alpha Black 2", etc.
+	int _nameCycle = 0;
 	RString _pictureName;
 	Ref<Texture> _picture;
 

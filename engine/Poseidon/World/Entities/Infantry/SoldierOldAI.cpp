@@ -2644,9 +2644,9 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
     }
     else if (_unitPos == UPAuto)
     {
-        if (unit->IsDanger() && !_inBuilding)
+        if ((unit->IsDanger() || unit->IsPinnedDown()) && !_inBuilding)
         {
-            maxPos = ManPosLying; // force lying
+            maxPos = ManPosLying; // force lying (in danger, or pinned down by incoming fire)
         }
         else if (_hideBehind)
         {

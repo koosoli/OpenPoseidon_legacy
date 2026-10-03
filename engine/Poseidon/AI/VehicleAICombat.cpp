@@ -2073,6 +2073,13 @@ bool EntityAI::FireMGun(int weapon, Vector3Par offset, Vector3Par direction, Tar
     {
         randomX *= info._aiDispersionCoefX;
         randomY *= info._aiDispersionCoefY;
+        // CWR fork: suppressed gunners shoot wider (up to 3x at full suppression)
+        if (AIUnit* gunner = EffectiveGunnerUnit())
+        {
+            const float suppressed = 1 + 2 * gunner->GetSuppression();
+            randomX *= suppressed;
+            randomY *= suppressed;
+        }
     }
     else
     {
