@@ -1,4 +1,5 @@
 #include <Poseidon/World/Weather/RotorGroundPolicy.hpp>
+#include <Poseidon/World/Weather/RotorLandDrawReceipt.hpp>
 #include <Poseidon/World/Weather/RainWaterField.hpp>
 #include <cassert>
 #include <limits>
@@ -101,10 +102,11 @@ int main()
         assert(root.opacity>.18f && root.radius>1.6f);
         assert(grown.radius>root.radius && std::abs(grown.opacity-root.opacity)<1e-6f);
         // The already-soft stock alpha sheet must not suffer another area
-        // attenuation. Before egress its actual density alone sets opacity.
+        // attenuation. Before egress its actual density's bounded optical
+        // mapping sets opacity, with the same near-hover caps.
         const float cap=isSnow?.28f:.35f;
         const float gain=isSnow?.60f:.70f;
-        assert(std::abs(grown.opacity-std::min(cap,gain*.458f))<1e-6f);
+        assert(std::abs(grown.opacity-std::min(cap,gain*std::sqrt(.458f)))<1e-6f);
         assert(RotorLandProfile(.9f,1,isSnow).opacity==cap);
         assert(RotorLandProfile(.9f,20,isSnow).opacity==cap);
         float previousOpacity=0;
@@ -112,7 +114,7 @@ int main()
             const float density=float(strength)*.001f;
             const auto profile=RotorLandProfile(.9f,density,isSnow);
             assert(profile.opacity>=previousOpacity && profile.opacity<=cap);
-            assert(std::abs(profile.opacity-std::min(cap,gain*density))<1e-6f);
+            assert(std::abs(profile.opacity-std::min(cap,gain*std::sqrt(density)))<1e-6f);
             previousOpacity=profile.opacity;
         }
         assert(RotorLandProfile(life-.1f,.458f,isSnow).opacity<grown.opacity);
@@ -128,5 +130,28 @@ int main()
         assert(RotorLandProfile(.2f,0,isSnow).radius==0);
         assert(RotorLandProfile(.2f,std::numeric_limits<float>::infinity(),isSnow).opacity==0);
         assert(RotorLandProfile(std::numeric_limits<float>::quiet_NaN(),1,isSnow).radius==0);
+        // Actual c55a65 hover was 19.45-19.82m. The full-strength policy's
+        // squared height attenuation is ~.115-.124, not the old .458 fixture.
+        for(const float density : {.115f,.124f}) {
+            const auto low=RotorLandProfile(.9f,density,isSnow);
+            const float old=gain*density;
+            assert(low.opacity>2.8f*old && low.opacity<cap);
+            assert(low.opacity*.32f>.06f); // stock-sheet mean cited in existing profile audit
+            assert(low.radius==grown.radius);
+        }
     }
+    RotorLandDrawReceipt receipt;
+    assert(receipt.Calls()==0);
+    for(auto outcome : {RotorLandDrawOutcome::Hidden,RotorLandDrawOutcome::Shape,RotorLandDrawOutcome::Near,RotorLandDrawOutcome::Mip})
+        assert(receipt.Record(outcome));
+    assert(receipt.Calls()==4 && receipt.counts[4]==0);
+    assert(!receipt.Record(RotorLandDrawOutcome::Count));
+    assert(!receipt.Record(RotorLandDrawOutcome::DecalCall,std::numeric_limits<float>::quiet_NaN(),20,10,3,50));
+    assert(receipt.Record(RotorLandDrawOutcome::DecalCall,.24f,20,10,3,50,.9f));
+    assert(receipt.Record(RotorLandDrawOutcome::DecalCall,.20f,30,15,2,40,.1f));
+    assert(receipt.Calls()==7 && receipt.counts[4]==3 && receipt.invalid==1);
+    assert(receipt.alphaMin==.20f && receipt.alphaMax==.24f && receipt.halfXMin==20 && receipt.halfXMax==30);
+    assert(receipt.radiusMin==2 && receipt.radiusMax==3 && receipt.distanceMin==40 && receipt.distanceMax==50);
+    assert(receipt.ageMin==.1f && receipt.ageMax==.9f);
+    receipt={};assert(receipt.Calls()==0 && receipt.invalid==0 && receipt.alphaMax==0);
 }

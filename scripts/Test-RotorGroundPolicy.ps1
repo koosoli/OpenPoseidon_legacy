@@ -16,7 +16,9 @@ foreach ($proof in @('RotorLandPuff::MaxLive','RotorGroundRing(_landRotorPhase',
     'RotorLandFootprint(probe)','LandRotorBoundsClear(point,centre,this)',
     'RotorLandProfile(_age, _density, _snow)','RotorLandCullScale(_radius, _shapeSphere)',
     'EvaluateRotorWash(wash, origin)','GAirflow.Sample(Position())','puff->SetSmokeShadow(false)',
-    'EmitLandRotorRing(deltaT, prec)','GSnow().ErodeRotor')) {
+    'EmitLandRotorRing(deltaT, prec)','GSnow().ErodeRotor',
+    'POSEIDON_ROTOR_LAND_DRAW_TRACE','landDrawReceipt.Record(RotorLandDrawOutcome::DecalCall',
+    'scope=all-land-puffs-cpu-drawdecal-call-not-gpu-pixels')) {
     if (!$cpp.Contains($proof)) {throw "Rotor actual emission/support proof missing: $proof"}
 }
 # Stateful Cloudlet subclasses must not silently inherit its fixed-block pool.

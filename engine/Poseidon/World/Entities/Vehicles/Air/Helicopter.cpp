@@ -12,6 +12,7 @@
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/AirflowField.hpp>
 #include <Poseidon/World/Weather/RotorGroundPolicy.hpp>
+#include <Poseidon/World/Weather/RotorLandDrawReceipt.hpp>
 #include <Poseidon/World/Weather/RainWaterField.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/World/Weather/SandField.hpp>
@@ -410,6 +411,32 @@ bool LandRotorBoundsClear(Vector3Par origin, Vector3Par aircraft, Object* ignore
     }
     return true;
 }
+bool LandRotorFlag(const char* name, bool fallback);
+bool LandRotorDrawTraceEnabled()
+{
+    static const bool enabled=LandRotorFlag("POSEIDON_ROTOR_LAND_DRAW_TRACE",false);
+    return enabled;
+}
+RotorLandDrawReceipt landDrawReceipt;
+void ReportRotorLandDraw(unsigned live)
+{
+    // Opt-in caller only. Wall cadence also observes genuinely frozen paused
+    // views; no simulation time, particle age or renderer readiness is changed.
+    static auto next=std::chrono::steady_clock::time_point{};
+    const auto now=std::chrono::steady_clock::now();
+    if(now<next)return;
+    next=now+std::chrono::seconds(1);
+    const auto& r=landDrawReceipt;
+    const auto* camera=GScene?GScene->GetCamera():nullptr;
+    const Vector3 position=camera?camera->Position():VZero;
+    LOG_INFO(World,"ROTOR_LAND_DRAW clock={:.3f} live={} scene_cloudlets={} calls={} hidden={} shape={} near={} mip={} decal_calls={} invalid={} "
+        "alpha=[{:.4f},{:.4f}] half_x_px=[{:.2f},{:.2f}] half_y_px=[{:.2f},{:.2f}] radius_m=[{:.3f},{:.3f}] distance_m=[{:.2f},{:.2f}] "
+        "age_s=[{:.3f},{:.3f}] camera=[{:.3f},{:.3f},{:.3f}] scope=all-land-puffs-cpu-drawdecal-call-not-gpu-pixels",
+        Glob.time.toFloat(),live,GScene&&GScene->GetCloudlets(),r.Calls(),r.counts[0],r.counts[1],r.counts[2],r.counts[3],r.counts[4],r.invalid,
+        r.alphaMin,r.alphaMax,r.halfXMin,r.halfXMax,r.halfYMin,r.halfYMax,r.radiusMin,r.radiusMax,r.distanceMin,r.distanceMax,
+        r.ageMin,r.ageMax,position.X(),position.Y(),position.Z());
+    landDrawReceipt={};
+}
 // A short-lived land puff shares the established cloudlet rendering and room
 // containment, but follows live airflow rather than baking wind at creation.
 // The bound is across all helicopters and resets naturally at world teardown.
@@ -477,13 +504,15 @@ public:
     }
     void Draw(int level, ClipFlags, const FrameBase& frame) override
     {
-        if (level == LOD_INVISIBLE || _radius <= 0 || Invisible()) return;
+        const bool trace=LandRotorDrawTraceEnabled();
+        const auto refused=[trace](RotorLandDrawOutcome outcome) {if(trace) {landDrawReceipt.Record(outcome);ReportRotorLandDraw(Live);}};
+        if (level == LOD_INVISIBLE || _radius <= 0 || Invisible()) {refused(RotorLandDrawOutcome::Hidden);return;}
         Shape* shape = GetShape()->LevelOpaque(level);
-        if (!shape || shape->NFaces() != 1) return;
+        if (!shape || shape->NFaces() != 1) {refused(RotorLandDrawOutcome::Shape);return;}
         const Camera& camera = *GScene->GetCamera();
         Vector3 projected = GScene->ScaledInvTransform() * frame.Position();
         const float nearest = camera.Near() * 10;
-        if (projected.Z() < nearest) return;
+        if (projected.Z() < nearest) {refused(RotorLandDrawOutcome::Near);return;}
         Animate(level);
         const Matrix4& projection = camera.Projection();
         const float inverseZ = 1 / projected.Z();
@@ -519,8 +548,19 @@ public:
         Color colour = light * (ColorVal)GetConstantColor();
         colour.SetA(colour.A() * (1 - GScene->Fog8(frame.Position().Distance2(camera.Position())) / 255.0f));
         const MipInfo mip = GEngine->TextBank()->UseMipmap(shape->FaceIndexed(0).GetTexture(),0,0);
-        if (mip.IsOK()) GEngine->DrawDecal(projected,inverseNear,halfX,halfY,PackedColor(colour),mip,
-            ClampU|ClampV|NoZWrite|IsAlpha|IsAlphaFog|NoShadow|IsColored|IsAlphaOrdered);
+        if (mip.IsOK())
+        {
+            const PackedColor packed(colour);
+            GEngine->DrawDecal(projected,inverseNear,halfX,halfY,packed,mip,
+                ClampU|ClampV|NoZWrite|IsAlpha|IsAlphaFog|NoShadow|IsColored|IsAlphaOrdered);
+            if(trace)
+            {
+                landDrawReceipt.Record(RotorLandDrawOutcome::DecalCall,packed.A8()/255.0f,halfX,halfY,_radius,
+                    std::sqrt(frame.Position().Distance2(camera.Position())),_age);
+                ReportRotorLandDraw(Live);
+            }
+        }
+        else refused(RotorLandDrawOutcome::Mip);
         Deanimate(level);
     }
     // Cloudlet's fixed-block pool reserves sizeof(Cloudlet). This derived
@@ -551,6 +591,7 @@ void Helicopter::EmitLandRotorRing(float dt, SimulationImportance prec)
 {
     static const bool enabled = LandRotorFlag("POSEIDON_ROTOR_LAND", true);
     static const bool trace = LandRotorFlag("POSEIDON_ROTOR_LAND_TRACE", false);
+    if(LandRotorDrawTraceEnabled())ReportRotorLandDraw(RotorLandPuff::Live);
     const float airflowScale = GAirflow.LocalScale();
     if (!GLandscape || !GWorld || !GScene || !GScene->GetCamera() ||
         !enabled || !GAirflow.LocalEnabled() || !std::isfinite(airflowScale) || airflowScale <= 0 ||

@@ -8,6 +8,7 @@ param([switch]$SelfTest,
       [ValidateRange(6,15)][int]$ObserveSeconds=8,
       [ValidateRange(12,24)][double]$HoverHeight=18,
       [switch]$ManualPilot,
+      [switch]$DrawTrace,
       [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
@@ -154,14 +155,15 @@ $result=[ordered]@{status='running';before=$before;gates=@{};captures=@{};rotorS
 @{sourceHead=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;
   roofHelperSha256=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'TerrainPuddleStockRoof.ps1')).Hash;
   installed=$before;mission=$mission;lockOwner=$env:LOCK_OWNER;requestedSand=@($SandX,$SandZ);
-  helicopter='stock UH60';pilot='stock SoldierWB in independent west group';manualPilot=[bool]$ManualPilot;hoverHeight=$HoverHeight;
+  helicopter='stock UH60';pilot='stock SoldierWB in independent west group';manualPilot=[bool]$ManualPilot;hoverHeight=$HoverHeight;drawTrace=[bool]$DrawTrace;
+  drawTraceScope='Optional all-land-puffs CPU DrawDecal invocation/window; not backend acceptance, GPU pixels or exact screenshot-frame identity';
   observationSimulationSeconds=$ObserveSeconds;seaLevel=0;seaScope='Stock Noe default sea datum, bounded runtime terrain queries';
   relocation='One explicit setPosASL between stages; no setVelocity, forced RPM, repeated position pinning, synthetic particle or terrain stamps';
   diagnostics='Read-only rotor_state snapshots; unchanged initial flight recipe; actual timeMs captures query latency'} |
     ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $output 'provenance.json')
 $keys=@('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM',
     'POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_DEPTH','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES',
-    'POSEIDON_SNOWLINE','POSEIDON_ROTOR_LAND','POSEIDON_ROTOR_LAND_TRACE','POSEIDON_WIND_OVERRIDE',
+    'POSEIDON_SNOWLINE','POSEIDON_ROTOR_LAND','POSEIDON_ROTOR_LAND_TRACE','POSEIDON_ROTOR_LAND_DRAW_TRACE','POSEIDON_WIND_OVERRIDE',
     'WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_RAIN_WATER_TRACE')
 $saved=@{};foreach($key in $keys) {$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $p=$null;$client=$null;$writer=$null;$reader=$null;$script:heliId=$null;$script:stateObject=$null;$script:heldUp=$false;$script:heldLook=$false;$script:canopyTop=$null
@@ -329,6 +331,7 @@ function CloseOwned {
 }
 try {
     foreach($key in $keys) {Remove-Item ('Env:'+$key) -ErrorAction SilentlyContinue}
+    if ($DrawTrace) {$env:POSEIDON_ROTOR_LAND_DRAW_TRACE='1'}
     $env:POSEIDON_WIND_OVERRIDE='0 90 0'
     $env:POSEIDON_USER_DIR=$profile;$env:POSEIDON_ROTOR_LAND='1';$env:POSEIDON_ROTOR_LAND_TRACE='1';$env:POSEIDON_SNOWLINE='off'
     [IO.File]::WriteAllText((Join-Path $profile 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")

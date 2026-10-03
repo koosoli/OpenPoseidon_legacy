@@ -70,11 +70,13 @@ inline RotorLandAppearance RotorLandProfile(float age, float density, bool snow)
     // The stock animated sheet already averages about .32 alpha. Dividing
     // opacity again by expanded area made a normal-height ring barely visible.
     // This is a diffuse optical profile, not a particle-mass simulation: keep
-    // actual thrust/source/wetness density, with bounded dust/snow gains and
-    // no radius-dependent opacity loss. Entry and final fades still remove
+    // actual thrust/source/wetness density. The source policy already squares
+    // height attenuation for entrainment; optical alpha uses its square root
+    // so ordinary 19-20m hover does not vanish into the soft sheet. The same
+    // low-altitude caps and no radius-dependent opacity loss remain. Fades remove
     // material smoothly, and the complete expanded footprint stays proofed.
     const float opacity = std::min(snow ? .28f : .35f,
-        (snow ? .60f : .70f)*std::clamp(density,0.0f,1.0f)) *
+        (snow ? .60f : .70f)*std::sqrt(std::clamp(density,0.0f,1.0f))) *
         smooth(age/.12f) * smooth((life-age)/.65f);
     return {radius, opacity};
 }
