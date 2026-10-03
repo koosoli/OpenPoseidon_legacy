@@ -89,7 +89,8 @@ fn probe_source(terrain: bool) -> String {
         result[2] = vec4<f32>(length(normal), snow_deficit(world),\n\
             sand_height_offset(vec2<f32>(999.0, 2032.125)),\n\
             sand_height_offset(vec2<f32>(1064.0, 2032.125)));\n\
-        result[3] = vec4<f32>(mud_height_offset(world), mud_height_gradient(world, 0.125), 0.0);\n}}\n"
+        result[3] = vec4<f32>(mud_height_offset(world), mud_height_gradient(world, 0.125), 0.0);\n\
+        result[4] = vec4<f32>(sand_height_gradient(world, 0.01), sand_height_gradient(world, 0.09375));\n}}\n"
     ));
     source
 }
@@ -358,13 +359,13 @@ fn sand_geometry_gpu_samples_signed_depression_and_rim_without_corrupting_snow_o
             });
             let output = device.create_buffer(&wgpu::BufferDescriptor {
                 label: None,
-                size: 64,
+                size: 80,
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             });
             let staging = device.create_buffer(&wgpu::BufferDescriptor {
                 label: None,
-                size: 64,
+                size: 80,
                 usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
@@ -402,7 +403,7 @@ fn sand_geometry_gpu_samples_signed_depression_and_rim_without_corrupting_snow_o
                 pass.set_bind_group(1, &resources, &[]);
                 pass.dispatch_workgroups(1, 1, 1);
             }
-            encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, 64);
+            encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, 80);
             queue.submit(Some(encoder.finish()));
             let slice = staging.slice(..);
             let (send, receive) = std::sync::mpsc::channel();
@@ -442,6 +443,14 @@ fn sand_geometry_gpu_samples_signed_depression_and_rim_without_corrupting_snow_o
             );
             if case == 1 || case == 7 || case == 8 {
                 assert!((values[1] + 0.04).abs() < 1e-5 && (values[2] + 0.12).abs() < 1e-5);
+                // Four source values contain a narrow bilinear depression.
+                // Differentiating that actual surface gives (-.16,-.48),
+                // whereas the old compulsory 25cm stencil erased 75% of it.
+                // This checks executed production WGSL, not a slope replica.
+                assert!((values[16] + 0.16).abs() < 1e-5 && (values[17] + 0.48).abs() < 1e-5,
+                    "resolved pixels must preserve the physical bilinear sand derivative");
+                assert!((values[18] + 0.10).abs() < 1e-5 && (values[19] + 0.30).abs() < 1e-5,
+                    "the half-cell transition must smoothly filter the resolved sand slope");
                 assert!(
                     values[5].abs() + values[7].abs() > 0.05,
                     "actual sand relief must change surface normals"
@@ -455,6 +464,8 @@ fn sand_geometry_gpu_samples_signed_depression_and_rim_without_corrupting_snow_o
                 &[0.0, 0.0],
                 "constant Mud must retain its own gradients"
             );
+            assert!(values[16..20].iter().all(|v| v.abs() <= 1.36 + 1e-5),
+                "bounded signed cells cannot create an unbounded resolved slope");
             cases.push(values);
             drop(bytes);
             staging.unmap();

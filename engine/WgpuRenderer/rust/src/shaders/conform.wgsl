@@ -94,9 +94,49 @@ fn sand_height_offset(world_xz: vec2<f32>) -> f32 {
     return clamp(offset, -limit, 0.02) * smoothstep(0.0, 24.0, edge);
 }
 fn sand_height_gradient(world_xz: vec2<f32>, footprint: f32) -> vec2<f32> {
-    let h = max(0.125, footprint);
-    return vec2<f32>(sand_height_offset(world_xz + vec2<f32>(h, 0.0)) - sand_height_offset(world_xz - vec2<f32>(h, 0.0)),
+    // A resolved pixel differentiates the same bilinear signed field as CPU
+    // support. A compulsory two-cell stencil erased narrow boot impressions
+    // even when a pixel covered only millimetres. Keep that filtered stencil
+    // once the footprint reaches one cell, so distant relief cannot glitter.
+    if (footprint >= 0.125) {
+        let h = max(0.125, footprint);
+        return vec2<f32>(sand_height_offset(world_xz + vec2<f32>(h, 0.0)) - sand_height_offset(world_xz - vec2<f32>(h, 0.0)),
+            sand_height_offset(world_xz + vec2<f32>(0.0, h)) - sand_height_offset(world_xz - vec2<f32>(0.0, h))) / (2.0 * h);
+    }
+    if (arrayLength(&snow.deficits) < 786440u) { return vec2<f32>(0.0); }
+    let origin = vec2<f32>(snow.deficits[524292u], snow.deficits[524293u]);
+    let cell = snow.deficits[524294u];
+    let limit = snow.deficits[524295u];
+    if (limit <= 0.0 || cell != 0.125) { return vec2<f32>(0.0); }
+    let t = (world_xz - origin) / cell - vec2<f32>(0.5);
+    if (any(t < vec2<f32>(0.0)) || any(t >= vec2<f32>(511.0))) { return vec2<f32>(0.0); }
+    let b = vec2<u32>(floor(t));
+    let f = fract(t);
+    let i = 524296u + b.y * 512u + b.x;
+    let a = snow.deficits[i];
+    let c = snow.deficits[i + 512u];
+    let d = snow.deficits[i + 513u];
+    let e = snow.deficits[i + 1u];
+    let offset = mix(mix(a, e, f.x), mix(c, d, f.x), f.y);
+    var gradient = vec2<f32>(mix(e - a, d - c, f.y), mix(c - a, d - e, f.x)) / cell;
+    if (offset <= -limit || offset >= 0.02) { gradient = vec2<f32>(0.0); }
+    let edge = min(min(t.x, t.y), min(511.0 - t.x, 511.0 - t.y));
+    var edge_gradient = vec2<f32>(0.0);
+    if (edge > 0.0 && edge < 24.0) {
+        let q = edge / 24.0;
+        let slope = 6.0 * q * (1.0 - q) / (24.0 * cell);
+        if (edge == t.x) { edge_gradient.x = slope; }
+        else if (edge == t.y) { edge_gradient.y = slope; }
+        else if (edge == 511.0 - t.x) { edge_gradient.x = -slope; }
+        else { edge_gradient.y = -slope; }
+    }
+    let resolved = gradient * smoothstep(0.0, 24.0, edge)
+        + clamp(offset, -limit, 0.02) * edge_gradient;
+    if (footprint <= 0.0625) { return resolved; }
+    let h = 0.125;
+    let filtered = vec2<f32>(sand_height_offset(world_xz + vec2<f32>(h, 0.0)) - sand_height_offset(world_xz - vec2<f32>(h, 0.0)),
         sand_height_offset(world_xz + vec2<f32>(0.0, h)) - sand_height_offset(world_xz - vec2<f32>(0.0, h))) / (2.0 * h);
+    return mix(resolved, filtered, smoothstep(0.0625, 0.125, footprint));
 }
 
 fn mud_height_gradient(world_xz: vec2<f32>, footprint: f32) -> vec2<f32> {
