@@ -7287,6 +7287,21 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     if (render::GBlendSectionDepthReadOnly && d.blend == WGR_BLEND_ALPHA && d.depth == WGR_DEPTH_TEST)
     {
         d.flags |= WGR_DRAW3D_BLEND_SECTION;
+        // WGR_BLEND_PASS_TRACE=1 (the MAT-051 revisit trace) also names the textures MAT-053 flags.
+        static const bool trace = []
+        {
+            const char* v = std::getenv("WGR_BLEND_PASS_TRACE");
+            return v && *v == '1';
+        }();
+        if (trace && texture && texture->Name())
+        {
+            static std::unordered_set<std::string> logged;
+            if (logged.size() < 60 && logged.insert(texture->Name()).second)
+            {
+                LOG_WARN(Graphics, "MAT-053 blend section: tex={} alpha_ref={} offset={}", texture->Name(), d.alpha_ref,
+                         d.flags & (WGR_DRAW3D_ON_SURFACE | WGR_DRAW3D_ZBIAS_MASK));
+            }
+        }
     }
     if (desc.blend != render::BlendMode::Shadow)
     {
