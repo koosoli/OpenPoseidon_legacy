@@ -30,6 +30,8 @@ using namespace Poseidon;
 #include <Poseidon/IO/Streams/ArchiveSourceBinding.hpp>
 #include <Poseidon/World/Terrain/WarmTextureProvenance.hpp>
 #include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
+#include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+#include <Poseidon/Core/Version.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <SDL3/SDL_events.h>
@@ -1484,11 +1486,63 @@ void RegisterScreenshot(HarnessServer& hs)
             }
             return HarnessProtocol::JsonResponse(result);
         });
+    hs.RegisterCommand({"frame_performance", "Read-only published renderer timings and completed CPU frame window; never waits for GPU", {}},
+        [](const std::string&, cJSON*) -> std::string {
+            if (!GEngine) return HarnessProtocol::ErrorResponse("no renderer");
+            auto* result = cJSON_CreateObject();
+            cJSON_AddStringToObject(result, "version", GetVersionString().Data());
+            cJSON_AddStringToObject(result, "renderer", GEngine->GetRendererName().Data());
+            cJSON_AddStringToObject(result, "scope", "Latest nonblocking published GPU/CPU encode timings; rows may lag game state and are not same-frame GPU completion proof. CPU window contains at most256 completed main-loop frames. Negative timing is unavailable, never zero cost.");
+            if (GEngine->SupportsTemporalTuning()) {
+                const auto ti = GEngine->GetTemporalInfo();
+                cJSON_AddNumberToObject(result, "renderWidth", ti.renderWidth);
+                cJSON_AddNumberToObject(result, "renderHeight", ti.renderHeight);
+                cJSON_AddNumberToObject(result, "outputWidth", ti.outputWidth);
+                cJSON_AddNumberToObject(result, "outputHeight", ti.outputHeight);
+                cJSON_AddNumberToObject(result, "msaaSamples", ti.msaaSamples);
+                cJSON_AddNumberToObject(result, "activeUpscaler", ti.activeUpscaler);
+            }
+            constexpr int cap = Engine::kGpuRegionEnd;
+            float gpu[cap], cpu[cap];
+            std::fill_n(gpu, cap, -1.f); std::fill_n(cpu, cap, -1.f);
+            const int gpuCount = std::clamp(GEngine->GetWaterGpuTimings(gpu, cap), 0, cap);
+            const int cpuCount = std::clamp(GEngine->GetCpuTimings(cpu, cap), 0, cap);
+            cJSON_AddBoolToObject(result, "gpuTimestampsAvailable", gpuCount > 0);
+            auto* rows = cJSON_AddArrayToObject(result, "regions");
+            for (int i = 0; i < std::max(gpuCount, cpuCount); ++i) {
+                auto* row = cJSON_CreateObject();
+                cJSON_AddNumberToObject(row, "index", i);
+                cJSON_AddStringToObject(row, "name", GEngine->GetWaterGpuTimingName(i));
+                cJSON_AddNumberToObject(row, "gpuMs", i < gpuCount && std::isfinite(gpu[i]) ? gpu[i] : -1.f);
+                cJSON_AddNumberToObject(row, "cpuMs", i < cpuCount && std::isfinite(cpu[i]) ? cpu[i] : -1.f);
+                cJSON_AddNumberToObject(row, "containedBy", Engine::GpuTimerContainedBy(i));
+                cJSON_AddBoolToObject(row, "container", Engine::IsGpuTimerContainer(i));
+                cJSON_AddItemToArray(rows, row);
+            }
+            const auto& profiler = GFrameProfiler();
+            cJSON_AddNumberToObject(result, "completedCpuFrames", profiler.FrameCount());
+            const auto total = profiler.TotalStats();
+            cJSON_AddNumberToObject(result, "cpuFrameAverageMs", total.avgMs);
+            cJSON_AddNumberToObject(result, "cpuFrameP95Ms", total.p95Ms);
+            cJSON_AddNumberToObject(result, "cpuFrameMaxMs", total.maxMs);
+            auto* phases = cJSON_AddArrayToObject(result, "cpuPhases");
+            for (int i = 0; i < FrameProfiler::PhaseCount; ++i) {
+                const auto stats = profiler.Stats(static_cast<FrameProfiler::Phase>(i));
+                auto* row = cJSON_CreateObject();
+                cJSON_AddStringToObject(row, "name", FrameProfiler::PhaseName(i));
+                cJSON_AddNumberToObject(row, "averageMs", stats.avgMs);
+                cJSON_AddNumberToObject(row, "p95Ms", stats.p95Ms);
+                cJSON_AddNumberToObject(row, "maxMs", stats.maxMs);
+                cJSON_AddItemToArray(phases, row);
+            }
+            return HarnessProtocol::JsonResponse(result);
+        });
     hs.RegisterCommand({"weather_visibility", "Read-only weather, terrain and object draw ranges", {}},
         [](const std::string&, cJSON*) -> std::string {
             if (!GScene || !GLandscape) return HarnessProtocol::ErrorResponse("no world");
             auto* result = cJSON_CreateObject();
             cJSON_AddNumberToObject(result, "rain", GLandscape->GetRainDensity());
+            cJSON_AddNumberToObject(result, "overcast", GLandscape->GetOvercast());
             cJSON_AddNumberToObject(result, "particleDensity", GRain.EffectiveDensity());
             cJSON_AddBoolToObject(result, "particleSnowflakes", GRain.Params().snowflakes);
             cJSON_AddNumberToObject(result, "liquidRain", UniformWettingDensity(GLandscape->GetRainDensity(),

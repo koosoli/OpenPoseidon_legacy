@@ -2960,7 +2960,14 @@ class Engine : public IGraphicsEngine
         kTidewaterGpuRegionSpectrum = 78,
         kTidewaterGpuRegionFft = 79,
         kTidewaterGpuRegionShoreSim = 80,
-        kGpuRegionEnd = 81, // + REN-GI + PERF-024 encode rows (WGR_GPU_TIMER_REGION_COUNT)
+        kTidewaterGpuRegionWake = 81,
+        kTidewaterGpuRegionCaustics = 82,
+        kTidewaterGpuRegionBreakers = 83,
+        kWeatherCoverNearCull = 84,
+        kWeatherCoverFarCull = 85,
+        kWeatherCoverNearDraw = 86,
+        kWeatherCoverFarDraw = 87,
+        kGpuRegionEnd = 88, // WGR_GPU_TIMER_REGION_COUNT: append-only shared timing contract
         // Regions that are physically enclosed by another region (see GpuTimerContainedBy).
         kGrassGpuRegionShadow = 24,
         kTerrainGpuRegionColor = 32,

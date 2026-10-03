@@ -1,5 +1,28 @@
 # Weather owner follow-up, 3 October 2026
 
+Latest installed evidence at12:08 local: matching b59f455a pair deployed11:37.
+Actual rain altitude comparison3687fa has26 samples and normal/stable exits in
+each arm. Ground drops1439→1440, high117.58m3995→1800 and300m3999→1800;
+sums of phase medians148.5→161us,412.5→197.5us and400→195.5us respectively.
+This bounds rain particle cost only, not occupied moving flight/FPS or urban
+roof queries. Root now adds separate near/far physical weather-map timings and
+a read-only published frame-performance seam before attributing the remainder.
+
+Actual Everon controlled-contact campaign1100e9 passes normal exit/stable pair,
+real boots/wet cloth/body visibility and exact signed sand publication receipts.
+Inspected mud low/top shows clear pits but uniform blue cosmetic film remains
+unacceptable. Inspected sand low/top still lacks readable depressions despite
+matching negative source/renderer hashes; publication is not visual closure.
+The close sand gradient chain and cosmetic wet-soil optical share are being
+corrected independently. Local sunny puddle drying remains untested.
+
+Actual directional snow campaign4a6327 fails strict capsule inventory after an
+unrequested earlier M16 shot. All9 escaping changed cells lie inside that earlier
+shot's longer capsule. This does not establish a snow-kernel bug. Script7c017a0b
+adds cross-stage shot/ammo/terrain guards and ordinary SDL release; actual rerun
+pending. New66b7bec9 broad wet-textile sheen and6bccc379 actual Tidewater rotor UBO
+receipt are source candidates pending combined device/build/deploy/runtime.
+
 Latest source verification at11:33 local supersedes pending test notes below:
 combined game build43steps passes, followed by supported-water13step build.
 Combined renderer run649PASS/1FAIL/2ignored; the remaining thin-film ripple

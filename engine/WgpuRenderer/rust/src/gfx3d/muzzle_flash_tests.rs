@@ -76,7 +76,9 @@ fn muzzle_actual_helper_retains_material_abi_and_explicit_negative_lane() {
     assert_eq!(*span, 128); // existing scalar byte124; no new public layout
     let source = include_str!("shader3d.wgsl");
     assert!(
-        source.contains("if (!(encoded > 0.0)) { return rgb; }"),
+        source.contains("if (!(encoded > 0.0)) { return 0.0; }") &&
+        source.contains("let wet = uniform_cloth_wetness(encoded, uv, footprint);") &&
+        source.contains("if (wet <= 0.0) { return rgb; }"),
         "negative flash marker must not wet cloth"
     );
     assert!(source.contains("if (material.local_specular.w == -1.0)"));

@@ -17671,6 +17671,10 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Tidewater: boat wakes",           // WGR_GPU_TIMER_TW_WAKE (W6)
         "Tidewater: caustics",             // WGR_GPU_TIMER_TW_CAUSTICS (W7h)
         "Tidewater: breakers + spray",     // WGR_GPU_TIMER_TW_BREAKERS (W7h)
+        "Weather cover: near cull",
+        "Weather cover: far cull",
+        "Weather cover: near draw",
+        "Weather cover: far draw",
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }
@@ -17702,6 +17706,8 @@ constexpr bool NestingTablesAgree()
 static_assert(NestingTablesAgree(),
               "WgrGpuTimerContainedBy (wgpu_renderer.hpp) and Engine::GpuTimerContainedBy "
               "(Engine.hpp) disagree about GPU timer region nesting; a reporter would double-count");
+static_assert(Engine::kGpuRegionEnd == WGR_GPU_TIMER_REGION_COUNT,
+              "Engine timing buffers must include every renderer region");
 } // namespace
 
 // PERF-005 — the periodic object-cost row. Deliberately NOT in WaterWgpu.cpp beside the other

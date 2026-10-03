@@ -9914,17 +9914,23 @@ impl Gfx3d {
         encoder: &mut wgpu::CommandEncoder,
         timers: &crate::gpu_timers::GpuTimers,
     ) {
-        if self.weather_cover.view.is_some() && self.gpu_driven_enabled &&
-            self.cull.instance_count() > 0 &&
-            self.cull.dispatch_sky(encoder, weather_cover::CULL_VIEW) {
-            let mut p = self.weather_cover.publication.get(); p.cull_recorded();
-            self.weather_cover.publication.set(p);
+        // These current-frame physical weather maps are separate from the
+        // directional interior-sky refreshes below. Attribute each cascade once.
+        if self.weather_cover.view.is_some() && self.gpu_driven_enabled && self.cull.instance_count() > 0 {
+            timers.begin(encoder, crate::gpu_timers::Region::WeatherCoverNearCull);
+            if self.cull.dispatch_sky(encoder, weather_cover::CULL_VIEW) {
+                let mut p = self.weather_cover.publication.get(); p.cull_recorded();
+                self.weather_cover.publication.set(p);
+            }
+            timers.end(encoder, crate::gpu_timers::Region::WeatherCoverNearCull);
         }
-        if self.weather_cover_far.view.is_some() && self.gpu_driven_enabled &&
-            self.cull.instance_count() > 0 &&
-            self.cull.dispatch_sky(encoder, weather_cover::FAR_CULL_VIEW) {
-            let mut p = self.weather_cover_far.publication.get(); p.cull_recorded();
-            self.weather_cover_far.publication.set(p);
+        if self.weather_cover_far.view.is_some() && self.gpu_driven_enabled && self.cull.instance_count() > 0 {
+            timers.begin(encoder, crate::gpu_timers::Region::WeatherCoverFarCull);
+            if self.cull.dispatch_sky(encoder, weather_cover::FAR_CULL_VIEW) {
+                let mut p = self.weather_cover_far.publication.get(); p.cull_recorded();
+                self.weather_cover_far.publication.set(p);
+            }
+            timers.end(encoder, crate::gpu_timers::Region::WeatherCoverFarCull);
         }
         if !self.interior_sky_active() {
             return;
@@ -9951,7 +9957,8 @@ impl Gfx3d {
 
     // Separate physical map: current registered retained meshes plus current direct
     // submissions, never the sun-distance-filtered CPU shadow caster list.
-    fn render_weather_cover_pass(&self, encoder: &mut wgpu::CommandEncoder, textures: &SharedTextures, far: bool) {
+    fn render_weather_cover_pass(&self, encoder: &mut wgpu::CommandEncoder, textures: &SharedTextures, far: bool,
+        timers: &crate::gpu_timers::GpuTimers) {
         let weather = if far {&self.weather_cover_far} else {&self.weather_cover};
         let pipelines = if far {&self.weather_far_pipelines} else {&self.weather_pipelines};
         if weather.view.is_none() {return;}
@@ -9986,6 +9993,9 @@ impl Gfx3d {
                 weather.invalidate(Some(buffer));return;
             }
         }
+        let region = if far {crate::gpu_timers::Region::WeatherCoverFarDraw}
+            else {crate::gpu_timers::Region::WeatherCoverNearDraw};
+        timers.begin(encoder, region);
         encoder.push_debug_group("wgr_physical_weather_cover");
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("wgr_physical_weather_cover"), color_attachments: &[],
@@ -10012,6 +10022,7 @@ impl Gfx3d {
         let mut direct_state = Pass3dState::default();
         for (d,slot) in &weather.direct {self.draw_one(&mut pass,textures,d,*slot,1,&mut direct_state,if far {Pass3dMode::WeatherFar} else {Pass3dMode::Weather});}
         drop(pass);encoder.pop_debug_group();
+        timers.end(encoder, region);
         let mut state = weather.publication.get(); state.depth_recorded(true);
         let ready = state.readable(weather.identity); weather.publication.set(state);
         // This write is ordered before the encoder's submission. The recorded map
@@ -10038,8 +10049,8 @@ impl Gfx3d {
         textures: &SharedTextures,
         timers: &crate::gpu_timers::GpuTimers,
     ) {
-        self.render_weather_cover_pass(encoder, textures, false);
-        self.render_weather_cover_pass(encoder, textures, true);
+        self.render_weather_cover_pass(encoder, textures, false, timers);
+        self.render_weather_cover_pass(encoder, textures, true, timers);
         if !self.interior_sky_active() {
             return;
         }

@@ -175,6 +175,10 @@ pub enum Region {
     TwWake = 81,          // TW-WATER W6: the boat wake simulations (every slot that stepped)
     TwCaustics = 82,      // TW-WATER W7h: the caustic photon splats + their mip chains (W5b)
     TwBreakers = 83,      // TW-WATER W7h: crest finder, breaker spray emitters, spray update (W3d/W4a/W6i)
+    WeatherCoverNearCull = 84,
+    WeatherCoverFarCull = 85,
+    WeatherCoverNearDraw = 86,
+    WeatherCoverFarDraw = 87,
     FrameTotal = 25, // all submitted frame work; excludes acquire/present pacing
 }
 
@@ -187,7 +191,7 @@ pub const SHADOW_CASCADE_REGIONS: [Region; 4] = [
 ];
 
 /// Region count — the FFI getter's element contract (WGR_GPU_TIMER_REGION_COUNT).
-pub const REGION_COUNT: usize = 84;
+pub const REGION_COUNT: usize = 88;
 /// Water occupies [0, WATER_REGION_COUNT); grass occupies the remainder. The two
 /// debug tabs slice the shared array with these so neither shows the other's rows.
 /// Consumed on the C++ side (Engine::kWaterGpuRegionEnd) and by the layout test.
@@ -693,7 +697,11 @@ mod tests {
     // count + a few pinned indices catches accidental reordering on either side.
     #[test]
     fn region_indices_stay_ffi_stable() {
-        assert_eq!(REGION_COUNT, 84);
+        assert_eq!(REGION_COUNT, 88);
+        assert_eq!(Region::WeatherCoverNearCull as u32, 84);
+        assert_eq!(Region::WeatherCoverFarCull as u32, 85);
+        assert_eq!(Region::WeatherCoverNearDraw as u32, 86);
+        assert_eq!(Region::WeatherCoverFarDraw as u32, 87);
         assert_eq!(Region::TwCaustics as u32, 82);
         assert_eq!(Region::TwBreakers as u32, 83);
         assert_eq!(Region::TwOceanFft as u32, 79);
