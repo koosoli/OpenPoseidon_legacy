@@ -2844,6 +2844,11 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
                               static_cast<uint32_t>(p.terrainHoles.size() / 4));
         p.terrainHolesDirty = false;
     }
+    if (p.cameraUndergroundDirty)
+    {
+        wgr_set_camera_underground(_renderer, p.cameraUnderground);
+        p.cameraUndergroundDirty = false;
+    }
     if (p.smokeDirty)
     {
         wgr_set_smoke_shadow(_renderer, p.smokeBlobs.empty() ? nullptr : p.smokeBlobs.data(),
@@ -13864,6 +13869,47 @@ void EngineWgpu::SetTerrainHoles(const float* edges, int nEdges)
     // frame renders; calling the renderer from the landscape draw here raced the render thread.
     _pendingSet.terrainHoles.assign(edges, edges + static_cast<size_t>(n) * 4);
     _pendingSet.terrainHolesDirty = true;
+
+    // Sinkhole W1b: the same reach-from-the-openings rule conform.wgsl's cave_daylight2 applies per
+    // fragment, evaluated once at the camera, for the effects that belong to the camera rather than to a
+    // surface (sun shafts, eye adaptation). 0 above the ground; 1 deep under it.
+    float underground = 0.0f;
+    if (GScene && GLandscape && GScene->GetCamera())
+    {
+        const Vector3 cam = GScene->GetCamera()->Position();
+        const float depth = GLandscape->SurfaceY(cam.X(), cam.Z()) - cam.Y();
+        if (depth > 0.05f)
+        {
+            float nearest = 1.0e6f;
+            float outside = -1.0e6f;
+            bool valid = false;
+            for (int i = 0; i < n; i++)
+            {
+                const float* e = edges + i * 4;
+                if (e[0] * e[0] + e[1] * e[1] >= 0.25f)
+                {
+                    outside = std::max(outside, -(e[0] * cam.X() + e[1] * cam.Z() + e[2]));
+                    valid = true;
+                }
+                if (e[3] > 0.5f)
+                {
+                    if (valid)
+                        nearest = std::min(nearest, std::max(outside, 0.0f));
+                    outside = -1.0e6f;
+                    valid = false;
+                }
+            }
+            auto smooth = [](float a, float b, float x)
+            {
+                const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f);
+                return t * t * (3.0f - 2.0f * t);
+            };
+            const float ambient = 1.0f - smooth(1.0f, 9.0f, nearest + 0.35f * depth);
+            underground = smooth(0.05f, 0.25f, depth) * (1.0f - ambient);
+        }
+    }
+    _pendingSet.cameraUnderground = underground;
+    _pendingSet.cameraUndergroundDirty = true;
 }
 
 void EngineWgpu::SetGrassParams(float, float, float, float)

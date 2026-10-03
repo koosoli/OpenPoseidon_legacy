@@ -930,6 +930,8 @@ pub struct Renderer {
     // the camera the SKY pass chose, captured at the sky upload and consumed in run_tonemap.
     godrays: Option<GodRays>,
     godrays_frame: Option<GodRayFrame>,
+    // Sinkhole W1b: camera underground factor (0 open air .. 1 deep in a cave), wgr_set_camera_underground.
+    cam_underground: f32,
     // SMK-037 SOFT PARTICLES. The scene-depth snapshot the cloudlet billboards fade against,
     // plus the two live knobs the Smoke tab pushes. `soft_enabled` gates BOTH the snapshot pass
     // and the C++ side's choice of depth mode, so with it off nothing here is recorded, no
@@ -1040,6 +1042,15 @@ impl Drop for Renderer {
 }
 
 impl Renderer {
+    /// Sinkhole W1b: see wgr_set_camera_underground.
+    pub fn set_camera_underground(&mut self, underground: f32) {
+        let u = if underground.is_finite() { underground.clamp(0.0, 1.0) } else { 0.0 };
+        self.cam_underground = u;
+        if let Some(gr) = self.godrays.as_mut() {
+            gr.underground = u;
+        }
+    }
+
     fn new(desc: &ffi::WgrSurfaceDesc, log: LogSink) -> Result<Self, String> {
         let (raw_display_handle, raw_window_handle) = handles::build_handles(desc)?;
 
@@ -2050,6 +2061,7 @@ impl Renderer {
             },
             godrays,
             godrays_frame: None,
+            cam_underground: 0.0,
             smoke_volume,
             smoke_sun_dir: [0.0, 1.0, 0.0],
             smoke_sun_radiance: [1.0, 1.0, 1.0],
@@ -2891,7 +2903,7 @@ impl Renderer {
         // scale (the resolve multiplies exposure by it). Always run on the HDR path —
         // when disabled it just eases to 1.0 — the reduction is a few cheap passes.
         if let Some(exposure) = self.exposure.as_ref() {
-            exposure.upload_params(&self.queue, &self.exposure_params);
+            exposure.upload_params(&self.queue, &cave_exposure(self.exposure_params, self.cam_underground));
             self.gpu_timers.begin(encoder, TimerRegion::ExposureAdapt);
             exposure.render(encoder);
             self.gpu_timers.end(encoder, TimerRegion::ExposureAdapt);
@@ -6955,3 +6967,47 @@ fn water_soak() -> Option<(u64, u32)> {
     })
 }
 static WATER_SOAK_FRAME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+// Sinkhole W1b: eye adaptation underground. The shipped profile keeps auto-exposure on a short
+// leash (a small max scale) so daylight never pumps; in a cave that leash is what keeps a
+// campfire or a flashlight from ever reading. With the camera underground the ceiling rises
+// toward WGR_CAVE_EXPOSURE_MAX (default 6) -- the eye opens in the dark and closes again at the
+// mouth, at the profile's own adaptation rate. Above ground the params are untouched.
+pub(crate) fn cave_exposure_max() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("WGR_CAVE_EXPOSURE_MAX")
+            .ok()
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or(6.0)
+    })
+}
+
+pub(crate) fn cave_exposure(mut ep: ffi::WgrExposure, underground: f32) -> ffi::WgrExposure {
+    let u = underground.clamp(0.0, 1.0);
+    if u > 0.0 {
+        let cave_max = cave_exposure_max().max(ep.max_scale);
+        ep.max_scale += (cave_max - ep.max_scale) * u;
+    }
+    ep
+}
+
+#[cfg(test)]
+mod cave_exposure_tests {
+    use super::*;
+
+    #[test]
+    fn cave_exposure_only_lifts_the_ceiling_underground() {
+        let mut ep = ffi::WgrExposure::default();
+        ep.max_scale = 1.1;
+        assert_eq!(cave_exposure(ep, 0.0).max_scale, 1.1);
+        let deep = cave_exposure(ep, 1.0).max_scale;
+        assert!((deep - cave_exposure_max().max(1.1)).abs() < 1e-6);
+        let half = cave_exposure(ep, 0.5).max_scale;
+        assert!(half > 1.1 && half < deep);
+        // a profile already above the cave ceiling is never lowered
+        ep.max_scale = 10.0;
+        assert_eq!(cave_exposure(ep, 1.0).max_scale, 10.0);
+    }
+}

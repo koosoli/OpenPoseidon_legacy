@@ -3007,6 +3007,19 @@ pub unsafe extern "C" fn wgr_terrain_set_holes(renderer: *mut WgrRenderer, edges
     }));
 }
 
+/// Sinkhole W1b: how far underground the camera is, 0 (open air) .. 1 (deep in a cave). Scales
+/// the outdoor-air effects (sun shafts, surface scattering) away and lets eye adaptation open up.
+/// # Safety
+/// renderer must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_camera_underground(renderer: *mut WgrRenderer, underground: f32) {
+    if renderer.is_null() { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let r = unsafe { &mut *renderer };
+        r.set_camera_underground(underground);
+    }));
+}
+
 /// Set the terrain ground layers as a list of wgr_texture_create handles (one
 /// per Landscape texture index). See wgpu_renderer.hpp.
 ///

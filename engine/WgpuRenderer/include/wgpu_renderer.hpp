@@ -2460,6 +2460,10 @@ extern "C"
      * is inside an area when nx*x + nz*z + d >= 0 for every edge of it, last = 1 closes an area. At most 64
      * edges are kept; n_edges = 0 clears them. The terrain and grass passes skip the pixels / blades inside. */
     WGR_API void wgr_terrain_set_holes(WgrRenderer* renderer, const float* edges, uint32_t n_edges);
+    /* Sinkhole W1b: how far underground the camera is, 0 (open air) .. 1 (deep in a cave). Scales the
+     * outdoor-air effects (sun shafts, surface scattering) away and lets eye adaptation open up
+     * (WGR_CAVE_EXPOSURE_MAX). */
+    WGR_API void wgr_set_camera_underground(WgrRenderer* renderer, float underground);
 
     /* Set the terrain ground layers: `handles[i]` is the wgr_texture_create
      * handle for Landscape texture index i (0 = the built-in white fallback).
