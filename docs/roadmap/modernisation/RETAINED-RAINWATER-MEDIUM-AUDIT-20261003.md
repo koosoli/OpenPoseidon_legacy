@@ -3,8 +3,9 @@
 Read-only source audit at `94f261c57ce441f4d3dc1f85030e83c75003dfaf`.
 No renderer, forcing, geometry, simulation or material changes accompany this
 document. The installed 90 mm/h rain calibration and its visual judgement are
-pending. Previously reported 42–78 mm retained depths are observations from the
-coordinator's actual wet-field campaign, not a new runtime measurement here.
+pending. The existing installed-game receipt at
+`build/original-weather-player/actual-water-depth-and-bare-soil-20261003-161012-8194fd/result.json`
+was read directly; no new runtime was launched here.
 
 ## Existing improvements remain applicable
 
@@ -37,6 +38,19 @@ Consequently `rain_water_body_radiance` uses the same low reflectance
 `(0.045, 0.060, 0.052)` everywhere and `rain_water_surface_optics` uses scalar
 transmission `exp(-3 * actualLocalDepth)`. Real mud below a pool cannot currently
 make its water medium different from water above sand or hard ground.
+
+The receipt's
+`maps.eden.gates.mudLighting.views.contact-clear-low.fragmentDiagnostic.waterReceipt`
+confirms the primary `[6425.8042, 7175.5742]` source as actual
+`eden\\pol.paa`, `Field/files=pol/sound=dirt/character=""`, eligible, with
+42.370986 mm coarse water depth, bare bed 141.8849875 m and signed mud offset
+-0.1759574 m. The primary head is 141.9273682 m. Eligible neighbouring Field
+points reach 78.471638 mm; actual Grass neighbours are refused by the soft-source
+classifier despite holding 16.547600–41.501991 mm of water. A global muddy pool
+profile would therefore change genuine non-mud ground in this actual scene.
+Fine is OFF in this receipt, and these CPU values are neither fragment-depth nor
+GPU-submission proof. The signed impression is not additional physical rainwater
+depth: retain the existing bare-bed convention in this audit.
 
 The following are direct evaluations of the current source, with complete
 coverage, no fog and a vertical view. Weights multiply the corresponding
@@ -123,6 +137,38 @@ reads as clear water, add a **render-only, source-qualified optical medium**:
    composition change or a validated read of the existing opaque colour/depth
    copy for the actual bed. A muddy body tint alone is not RGB absorption.
    Decide this contract before implementing a stronger coloured extinction.
+
+### Existing-resource transport, without another field scan
+
+`terrain/mod.rs::Terrain` already owns `index_map`, `materials` and `params_ubo`.
+They are uploaded through the existing terrain API; their fields are private
+Rust resources, not missing C++ data. Rainwater group 3 is currently empty. A
+small group-3 layout plus a Terrain accessor/bind constructor could borrow these
+three resources without growing the public ABI or uploading a second semantic
+texture. Access is bounded by land-map dimensions, `CELL_LAYER_MASK`, storage
+row count and current terrain/source readiness. Out-of-domain or invalid rows
+must yield the unchanged clear medium, rather than clamp a distant point into
+an eligible map-edge cell.
+
+The narrow first shader query can use the actual unjittered world land-cell
+index, pure legacy/native `puddle_flags & 2`, and the already shared
+`ground_wet::cultivated_soil_fraction` bit-4 central-cell gate. Refuse authored
+multi-surface rows until their actual mask coverage is available; an "any soft
+slot" bit is insufficient. Do not interpolate soil identity across a hard,
+sand or unknown cell or derive it from ground RGB. Original Cain's unauthored
+Default sources consequently remain unclassified; rainfall does not authorize
+reclassifying them. Boundary appearance must be observed separately rather than
+smoothed by promoting neighbouring sources.
+
+Move the exact WGSL TerrainMaterial row declaration into a shared import if
+implemented, instead of creating a second independently maintained 384-byte
+mirror. Cache binds by an internal **material/index resource generation**:
+`set_index_map` and `set_materials` replace their resources and rebuild terrain
+group 2, but do not increment current `heightmap_gen`/`mask_gen`. Reusing only
+the bare-height generation would leave a stale optical-source bind. World
+replacement must invalidate readiness until both the current map and material
+table are present. This is an internal Rust lifetime change; it need not add
+public ABI fields or perform any per-frame all-grid `SurfaceAt` scan.
 
 Required counterchecks include unchanged unknown/hard/sand/zero-soil output,
 mixed-source nonpromotion, stale source rejection, zero-depth/film continuity,
