@@ -6867,9 +6867,10 @@ tickets:
           the opening; aerial capture shows the two openings cut cleanly and the
           hidden footprint left drawn. Owner play-test found sun bleeding into the cave
           and grass shadows flickering on its ceiling (fixed in 0aff777e/47453f69,
-          re-captured dark); round 2 (whole-island black on load/exit from a collapsed
-          hole outline; soldiers lit underground) fixed in e65e45de; owner re-test
-          pending. GL33 fallback captured once.
+          re-captured dark); round 2 (soldiers lit underground; a collapsed hole outline that
+          would cut the whole terrain -- not the cause of the owner's black-island
+          flash, which is a pre-existing fork bug) fixed in e65e45de; owner
+          re-test pending. GL33 fallback captured once.
       - capability: MLOD_AUTOCENTER_GEOMETRY_LOD
         status: UNVERIFIED
         denominator: >-

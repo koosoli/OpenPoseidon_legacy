@@ -101,12 +101,13 @@ and soldiers' feet above; when inside I can see rendering lines and flashing". A
 
 ## Owner play-test round 2 (fixed / measured)
 
-* **"The island surface goes black and all objects appear floating"** while a mission loads, switches or exits.
-  A hole object whose transform is momentarily collapsed maps every hole point to one spot; each zero-length edge
-  test reads 0 >= 0, so the hole contained every point — the terrain draw discarded the whole island and the
-  gameplay queries gave no ground. `MakeHoleArea` drops a footprint under 0.01 m² (or non-finite), and the terrain,
-  grass and GL33 tests treat a zero-length edge normal as outside (`e65e45de`). Captured: deleting the cave object
-  mid-mission leaves the terrain whole and the openings close.
+* **"The island surface goes black and all objects appear floating"** (a brief flash when leaving the editor,
+  exiting a preview or exiting the game). **Correction:** the owner confirmed this is a pre-existing bug in the
+  fork, not a Sinkhole one, and it is being chased separately. What `e65e45de` does fix is a real but different
+  hazard found while looking: a hole object whose transform is momentarily collapsed maps every hole point to one
+  spot, and each zero-length edge test reads 0 >= 0, so such a hole would contain every point. `MakeHoleArea` now
+  drops a footprint under 0.01 m² (or non-finite), and the terrain, grass and GL33 tests treat a zero-length edge
+  normal as outside. Captured: deleting the cave object mid-mission leaves the terrain whole.
 * **"Soldiers also illuminated and not dark":** the interior-sky term darkens static buildings it has rooms for,
   not a soldier in a cave. `shade()` scales the sky ambient to 0.12 on the same underground ramp (`e65e45de`);
   captured dim.
