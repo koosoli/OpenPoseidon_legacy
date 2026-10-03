@@ -8,6 +8,19 @@
 
 namespace Poseidon
 {
+// Calibrate only an inset contact proxy, never the authored pose or body frame.
+// Larger penetrations require a different fit; they cannot be hidden by lifting.
+inline bool CorpseProxyContactLift(float minimumClearance, float& lift)
+{
+    lift = 0;
+    if (!std::isfinite(minimumClearance)) return false;
+    if (minimumClearance >= 0.003f) return true;
+    const float required = 0.00325f-minimumClearance; // 0.25 mm rounding reserve
+    if (required > 0.010f) return false;
+    lift = required;
+    return true;
+}
+
 // Read-only admission measurements, never a solver or a serialized pose.
 struct CorpseLevelDiagnostic
 {

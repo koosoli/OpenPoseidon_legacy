@@ -88,6 +88,36 @@ and an actual registered Box3D terrain ray. The two support heights must agree
 within 25 mm. Missing, penetrating, nonfinite, overlarge or unsupported fits
 refuse the entire action. Visible skin/contact burial from the authored pose is
 not repaired or accepted by shrinking the solver collider.
+
+The bounded preparation rerun `bounded-stock-box3d-articulation-20261003-182318-a5152c`
+exited normally but refused the contact fit before creating bodies. The precise
+installed receipt `precise-stock-corpse-fit-20261003-184317-108b15/engine.log`
+then established the lowest vertex: part 4 `ploket` (right forearm), at world
+(6530.84277, 160.979828, 6467.77881), actual road/terrain Y 160.98262 and solver
+Y 160.98259. The measured -2.792 mm clearance is a real collider fit issue;
+the two floor providers agree within 30 micrometers. All 296 fitted vertices
+were measured, with maximum root distance 1.096 m.
+
+The next candidate calibrates only each inset collision proxy's vertical local
+offset. If its measured minimum clearance is below 3 mm, it requests enough
+offset for 3.25 mm, including a 0.25 mm floating-point rounding reserve. An
+offset above 10 mm is refused; the original every-vertex 3 mm support, 25 mm
+provider agreement, finite and spatial bounds checks remain mandatory after
+calibration. The original body origin, dimensions, authored skin and shared
+joint anchors remain unchanged. For this measured forearm the requested offset
+is 6.042 mm. This still does not correct visible authored skin burial.
+
+The direct C witness `tests/experiments/box3d_contact_proxy.c` measures local
+mass-center Y 0.00604235847 after custom 2 kg mass assignment while actual world
+transform origin remains exactly unchanged. The actual backend native case
+`[corpse-contact]` passes 69 assertions at the installed receipt's world location:
+every fitted vertex clears the real elevated solver terrain, body-origin
+readback and axes are exact, nonrigid affine weighted points/proxies/palette
+retain zero-motion equality, two real constrained offset pieces remain finite
+with paired joint pivots within 25 mm after 120 solver steps, and all ownership
+is retired. These source/private native checks do not substitute for the next
+installed admission and consumed-pose test; that result is still pending.
+
 The existing corpse-ignored vertical center-ray census must also show no external
 object hits. That bounded rejection is not a convex overlap proof; building-floor
 and wall-contact admission remain separate work.

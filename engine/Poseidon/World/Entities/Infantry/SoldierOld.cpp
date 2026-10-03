@@ -1295,10 +1295,29 @@ bool Man::StartCorpseArticulation(RString& refusal)
             center = (lo+hi)*0.5f;
         }
         state->initial[part] = MIdentity; state->initial[part].SetPosition(center);
+        for (auto& point : vertices[part]) point = (point-center)*0.40f;
+        float proxyClearance = std::numeric_limits<float>::infinity();
+        for (const auto& point : vertices[part])
+        {
+            const Vector3 supported = center+point;
+            if (!supported.IsFinite()) { proxyClearance = std::numeric_limits<float>::quiet_NaN(); break; }
+            const float roadY = GLandscape->RoadSurfaceY(supported+VUp*0.5f);
+            if (!std::isfinite(roadY)) { proxyClearance = std::numeric_limits<float>::quiet_NaN(); break; }
+            proxyClearance = std::min(proxyClearance,supported.Y()-roadY);
+        }
+        float proxyLift = 0;
+        if (CorpseProxyContactLift(proxyClearance,proxyLift) && proxyLift > 0)
+        {
+            // Keep the body origin, skin, joint anchors and proxy dimensions.
+            // This small local collider offset stays inside the inset anatomy;
+            // every original support/admission check below still must pass.
+            for (auto& point : vertices[part]) point += VUp*proxyLift;
+            LOG_INFO(World,"CORPSEFIT: contact-proxy part={} name={} lift={} originalClearance={} bodyOriginUnchanged=1",
+                part,names[part][0],proxyLift,proxyClearance);
+        }
         int vertex = 0;
         for (auto& point : vertices[part])
         {
-            point = (point-center)*0.40f;
             const Vector3 supported = center+point;
             const bool finite = point.IsFinite() && supported.IsFinite() && Position().IsFinite();
             const float roadY = finite ? GLandscape->RoadSurfaceY(supported+VUp*0.5f) : std::numeric_limits<float>::quiet_NaN();
