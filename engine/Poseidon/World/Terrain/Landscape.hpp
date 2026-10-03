@@ -1210,6 +1210,7 @@ class Landscape : public SerializeClass
 
   private:
     uint64_t _heightRevision = 0;
+    uint64_t _subdivSourceHash = 0; // hash of the heights a subdivision cache was / will be built from
 
   public:
     void TextureChange(int x, int z, int id);
