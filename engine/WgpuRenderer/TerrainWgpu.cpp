@@ -12,6 +12,7 @@
 
 #include "CdlodDriver.hpp"
 #include "RainWaterPublication.hpp"
+#include "SandUploadReceipt.hpp"
 #include "EngineWgpu.hpp"
 #include "TextureWgpu.hpp"
 #include "TextureBankWgpu.hpp"
@@ -3302,6 +3303,45 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         {
             auto snapshot = sand.Snapshot(camera->Position().X(), camera->Position().Z());
             if (sand.Chunks() == 0) snapshot[3] = 0.0f;
+            static const bool sandUploadTrace=[] {
+#ifdef _WIN32
+                char* value=nullptr;size_t length=0;
+                _dupenv_s(&value,&length,"WGR_SAND_UPLOAD_TRACE");
+                const bool enabled=SandUploadTraceRequested(value);std::free(value);return enabled;
+#else
+                return SandUploadTraceRequested(std::getenv("WGR_SAND_UPLOAD_TRACE"));
+#endif
+            }();
+            if (sandUploadTrace)
+            {
+                const auto receipt=InspectSandUpload(snapshot);
+                const float minX=snapshot[0]+(float(receipt.minimumIndex%SandField::WindowSize)+.5f)*snapshot[2];
+                const float minZ=snapshot[1]+(float(receipt.minimumIndex/SandField::WindowSize)+.5f)*snapshot[2];
+                LOG_INFO(Graphics,"SAND_UPLOAD_QUEUED revision={} enabled={} chunks={} cameraX={:.5f} cameraZ={:.5f} originX={:.5f} originZ={:.5f} cell={:.5f} limit={:.5f} count={} finite={} negative={} positive={} min={:.8f} max={:.8f} minX={:.5f} minZ={:.5f} hash={:016x}",
+                    sand.Revision(),sand.enabled,sand.Chunks(),camera->Position().X(),camera->Position().Z(),
+                    snapshot[0],snapshot[1],snapshot[2],snapshot[3],snapshot.size(),receipt.finite,
+                    receipt.negative,receipt.positive,receipt.minimum,receipt.maximum,minX,minZ,receipt.hash);
+                static const auto sandSnapshotPaths=[] {
+#ifdef _WIN32
+                    char* fileValue=nullptr;char* rootValue=nullptr;size_t length=0;
+                    _dupenv_s(&fileValue,&length,"WGR_SAND_SNAPSHOT_FILE");
+                    _dupenv_s(&rootValue,&length,"WGR_SAND_SNAPSHOT_ROOT");
+                    const std::array<std::filesystem::path,2> paths{fileValue?fileValue:"",rootValue?rootValue:""};
+                    std::free(fileValue);std::free(rootValue);return paths;
+#else
+                    const char* fileValue=std::getenv("WGR_SAND_SNAPSHOT_FILE");
+                    const char* rootValue=std::getenv("WGR_SAND_SNAPSHOT_ROOT");
+                    return std::array<std::filesystem::path,2>{fileValue?fileValue:"",rootValue?rootValue:""};
+#endif
+                }();
+                const auto& sandSnapshotFile=sandSnapshotPaths[0];
+                if (!sandSnapshotFile.empty())
+                {
+                    const bool written=DumpSandUpload(snapshot,sandSnapshotFile,sandSnapshotPaths[1]);
+                    LOG_INFO(Graphics,"SAND_UPLOAD_SNAPSHOT written={} time={:.5f} revision={} count={} hash={:016x} file={}",
+                        written,_params.time,sand.Revision(),snapshot.size(),receipt.hash,sandSnapshotFile.string());
+                }
+            }
             _engine.QueueSand(std::move(snapshot));
             _sandRevision = sand.Revision(); _sandWindowX = sx; _sandWindowZ = sz;
             _sandUploaded = true; _sandWasEnabled = sand.enabled;

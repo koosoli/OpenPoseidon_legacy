@@ -9,6 +9,7 @@ param(
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [switch]$NativeHeightFixture,
  [switch]$ContactViews,
+ [switch]$SandSnapshotTrace,
  [switch]$SelfTest
 )
 $ErrorActionPreference='Stop';$root=Split-Path -Parent $PSScriptRoot
@@ -95,8 +96,10 @@ $census=Get-Content -LiteralPath $SourceCensus -Raw|ConvertFrom-Json
 $output=Join-Path $root ('build/original-weather-player/'+$Label+'-'+(Get-Date -Format yyyyMMdd-HHmmss)+'-'+[guid]::NewGuid().ToString('N').Substring(0,6));New-Item -ItemType Directory -Force -Path $output|Out-Null
 $result=[ordered]@{status='running';sourceHead=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;sourceCensusSha256=(Get-FileHash -LiteralPath $SourceCensus).Hash;installed=$before;lockOwner=$env:LOCK_OWNER;maps=@{};scope='Actual controlled SoldierWB, original maps, source-qualified contacts where available, real wet cloth and external-body source/captures. Unsupported soft sources explicit; appearance requires root inspection.'}
 $result.helperSha256=@{};foreach($helper in @('Write-BenchmarkGraphics.ps1','Assert-CaptureLifecycle.ps1')){$result.helperSha256[$helper]=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $helper)).Hash}
+$result.sandSnapshotTrace=[bool]$SandSnapshotTrace
+if($SandSnapshotTrace){$result.helperSha256['Read-SandUploadSnapshot.ps1']=(Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Read-SandUploadSnapshot.ps1')).Hash}
 $settings=@{POSEIDON_PLAYER_GROUND_TRACE='1';POSEIDON_UNIFORM_WET_TRACE='1';POSEIDON_SAND_TRACE='1';POSEIDON_MUD_TRACE='1';WGR_UNIFORM_WET='1';WGR_GRASS='0';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_CLOUD_COVERAGE='0';WGR_TERRAIN_JITTER='0';WGR_TEMPORAL='0';WGR_LOD_GOVERNOR_RANGE='1';POSEIDON_SNOWLINE='off';POSEIDON_SNOW_TEST_DEPTH='0'}
-$clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE')
+$clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE','WGR_SAND_UPLOAD_TRACE','WGR_SAND_SNAPSHOT_FILE','WGR_SAND_SNAPSHOT_ROOT')
 $keys=@($settings.Keys)+$clear+@('POSEIDON_USER_DIR');$saved=@{};foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $p=$null;$client=$null;$reader=$null;$writer=$null;$held=$false;$armDir=$null;$log=$null;$deadline=$null
 function Lines{
@@ -145,6 +148,30 @@ function Capture([string]$name){
  Require ([BitConverter]::ToString($bytes[0..7])-ceq '89-50-4E-47-0D-0A-1A-0A') 'Invalid PNG.'
  Require (($bytes[16..19]-join ',') -eq '0,0,5,0' -and ($bytes[20..23]-join ',') -eq '0,0,2,208') 'PNG not1280x720.'
  $arm.captures[$name]=@{path=$path;bytes=$bytes.Length;sha256=(Get-FileHash -LiteralPath $path).Hash;state=(State)}
+ if($SandSnapshotTrace -and $name.StartsWith('sand-')){
+  . (Join-Path $PSScriptRoot 'Read-SandUploadSnapshot.ps1')
+  $captureFile=Join-Path $armDir ($name+'.sand.f32')
+  $snapshotDeadline=[DateTime]::UtcNow.AddSeconds(10)
+  do {
+   Health;$snapshot=$null
+   try {
+    $snapshot=Read-SandUploadSnapshot $sandSnapshotFile
+    $queued=@(Lines|Where-Object{$_ -match ('SAND_UPLOAD_QUEUED .*hash='+$snapshot.hash+'$')}|Select-Object -Last 1)
+    $dumped=@(Lines|Where-Object{$_ -match ('SAND_UPLOAD_SNAPSHOT written=true .*hash='+$snapshot.hash+' file=')}|Select-Object -Last 1)
+    $received=@(Get-Content -LiteralPath $stderr -ErrorAction SilentlyContinue|Where-Object{$_ -match ('SAND_UPLOAD_RECEIVED accepted=true .*hash='+$snapshot.hash+' ')}|Select-Object -Last 1)
+    if($queued.Count -and $dumped.Count -and $received.Count){
+     Copy-Item -LiteralPath $sandSnapshotFile -Destination $captureFile
+     $copied=Read-SandUploadSnapshot $captureFile
+     Require ($copied.hash -ceq $snapshot.hash -and $copied.sha256 -ceq $snapshot.sha256) 'Sand payload changed during capture copy.'
+     $snapshot.publication=Assert-SandUploadPublication $copied $queued[0] $received[0]
+     $snapshot.path=$captureFile;$snapshot.queued=$queued[0];$snapshot.dumped=$dumped[0];$snapshot.received=$received[0]
+     $arm.captures[$name].sandSnapshot=$snapshot;break
+    }
+   } catch [IO.IOException] {}
+   Require ([DateTime]::UtcNow-lt $snapshotDeadline) 'Actual sand snapshot/dump/accepted renderer receipt mismatch or missing.'
+   Start-Sleep -Milliseconds 100
+  }while($true)
+ }
 }
 function Camera([string]$mode){Exec ('player switchCamera "'+$mode+'"');Start-Sleep -Milliseconds 300;Require ((Number (Eval 'triGetCameraEffectActive')) -eq 0) 'Camera effect suspends controlled input.'}
 function Return-Views([string]$name){$a=State;Camera 'INTERNAL';Capture ($name+'-first');Camera 'EXTERNAL';Capture ($name+'-third-return');$b=State;Assert-Paused $a $b;return @{before=$a;after=$b}}
@@ -213,6 +240,8 @@ try{
   Require ($null-ne $uniform) 'No source dry-land candidate for actual cloth/body fixture.'
   $arm=@{status='running';map=$map;source=$source;missionSha256=(Get-FileHash -LiteralPath (Join-Path $mission 'mission.sqm')).Hash;profileSha256=(Get-FileHash -LiteralPath $cfg).Hash;softCoverage=@{sand=([bool]$sand);mud=([bool]$soil);unsupported='Missing admitted families remain unsupported, never inferred as soft from Default/brown appearance'};captures=@{};gates=@{}};$result.maps[$map]=$arm
   $env:POSEIDON_USER_DIR=$profile;$log=Join-Path $armDir 'engine.log';$stdout=Join-Path $armDir 'stdout.txt';$stderr=Join-Path $armDir 'stderr.txt'
+  $sandSnapshotFile=Join-Path $armDir 'latest-sand-snapshot.f32'
+  if($SandSnapshotTrace){$env:WGR_SAND_UPLOAD_TRACE='1';$env:WGR_SAND_SNAPSHOT_FILE=$sandSnapshotFile;$env:WGR_SAND_SNAPSHOT_ROOT=$armDir}
   $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
   $args=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','2000','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--test-world-hour','16','--log-file',('"'+$log+'"'))
   $deadline=[DateTime]::UtcNow.AddSeconds(600);$p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -ArgumentList $args -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr;$null=$p.Handle;$arm.pid=$p.Id

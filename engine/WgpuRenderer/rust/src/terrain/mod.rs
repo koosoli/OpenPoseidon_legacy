@@ -195,6 +195,23 @@ fn valid_sand_view(data: &[f32]) -> bool {
         && data[4..].iter().all(|v| *v >= -data[3] && *v <= if data[3] > 0.0 { 0.02 } else { 0.0 })
 }
 
+fn sand_upload_receipt(data: &[f32]) -> (u64, usize, usize, f32, f32) {
+    let mut hash = 14695981039346656037u64;
+    let (mut negative, mut positive, mut minimum, mut maximum) = (0, 0, 0.0f32, 0.0f32);
+    for (i, value) in data.iter().enumerate() {
+        for byte in value.to_le_bytes() {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(1099511628211);
+        }
+        if i >= 4 && value.is_finite() {
+            negative += usize::from(*value < 0.0);
+            positive += usize::from(*value > 0.0);
+            minimum = minimum.min(*value);
+            maximum = maximum.max(*value);
+        }
+    }
+    (hash, negative, positive, minimum, maximum)
+}
+
 #[test]
 fn sand_upload_accepts_signed_rims_and_rejects_unbounded_or_disabled_geometry() {
     let mut data = vec![0.0; 4 + 512 * 512];
@@ -1116,8 +1133,18 @@ impl Terrain {
     }
 
     pub fn set_sand(&mut self, queue: &wgpu::Queue, data: &[f32]) {
-        if valid_sand_view(data) {
+        let accepted = valid_sand_view(data);
+        if accepted {
             queue.write_buffer(&self.snow_buffer, 2 * (4 + 512 * 512) * 4, bytemuck::cast_slice(data));
+        }
+        static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *TRACE.get_or_init(|| std::env::var("WGR_SAND_UPLOAD_TRACE").is_ok_and(|v| v == "1")) {
+            let (hash, negative, positive, minimum, maximum) = sand_upload_receipt(data);
+            let header = data.get(..4).unwrap_or(&[]);
+            // accepted/write is not a GPU completion receipt. Exact hashes pair
+            // this renderer-owned admission with the queued C++ source window.
+            eprintln!("SAND_UPLOAD_RECEIVED accepted={accepted} count={} header={header:?} negative={negative} positive={positive} min={minimum:.8} max={maximum:.8} hash={hash:016x} byteOffset={} bufferBytes={}",
+                data.len(), 2 * (4 + 512 * 512) * 4, self.snow_buffer.size());
         }
     }
 
