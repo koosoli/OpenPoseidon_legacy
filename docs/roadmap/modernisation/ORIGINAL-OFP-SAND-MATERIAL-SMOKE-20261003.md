@@ -62,12 +62,13 @@ surface classification.
 
 ## What the runner proves
 
-The small owned query job connects to the run's ephemeral local harness port,
+The small owned fixture job connects to the run's ephemeral local harness port,
 waits for the selected original world/source and `triSceneReady`, and performs
 read-only `dev_sand sample` at the view target. It validates the exact original
 texture, actual authored class/files/sound/character, all-four-quadrant source
 eligibility, and the target coordinates. Query time is recorded. This is a
 pre-capture source observation in the same game process, not a per-pixel trace.
+It also performs the explicit bounded stock actor placement described below.
 
 The log guards require the original-albedo mapping and source-specific macro
 and detail normal loading where enabled, and forbid those bindings in their
@@ -169,3 +170,45 @@ exit, source, mapping/macro/detail and stable installed hashes. The near
 capture includes the grounded stock player's torso/rifle over much of the
 frame, so this loaded-binding pass does not establish sand visual acceptance.
 An explicit, recorded fixture placement correction is a separate next slice.
+
+## Bounded stock actor placement fixture correction
+
+Actual inspection of root's 16:08 near PNG confirms the stock soldier's upper
+body and rifle cover much of the right-hand view. Source code explains the
+placement: `--test-world-freefly` deliberately moves the stock player directly
+under the manual camera at native ground plus 1.8 m. A lateral change to that
+startup camera would also move the stock actor under the new position.
+
+For every new Near/Mid/Far arm, including Full/detail-OFF, Albedo and Original,
+the fixture now records actual `typeOf player` and `getPosASL player`, validates
+the native destination 10 m east of the source centre, and issues one ordinary
+`player setPosASL` using that destination's actual surface height plus 1 cm.
+All source centres are the centre of a 50 m cell; this remains in the same
+pure cell. Destination texture/class/files/sound/character and eligibility
+must match the original source. No actor is hidden or deleted, no renderer
+visibility changes, and no wetness, material flag, footprint or depth is forced.
+
+The record includes before/requested/after ASL, the exact placement command,
+actual destination source, target source before/after, actual scene camera
+before/after, horizontal clearances to target and camera, and native ground
+clearance. After 500 ms of normal simulation the actor must remain within
+0.1 m horizontally of that east destination and within 0.25 m of its actual
+ground support, in the same pure source cell. Clearances must be at least
+9.75 m and must agree with the raw ASL/camera coordinates.
+
+The existing `dev_wet_soil_diagnostic action=state` supplies a read-only actual
+GScene camera position/direction/up receipt. Its exact environment opt-in is
+enabled for these fixtures, but mode0 is required; no `set` or colour-mode
+command is issued. All camera vectors must remain exactly equal across the
+actor placement, and actual camera position must match the existing fixed
+plan. The target's physical offset, sand gradients, actual surface height and
+surface gradients must remain exactly equal across placement. This proves
+the sampled target geometry, not an unchanged global sand history or every
+pixel of the wider field. The legacy default cameras/actors remain unchanged.
+
+Additional pure fixture falsifiers reject changed target height/offset/gradient,
+changed camera, active diagnostic colour mode, wrong stock actor, placement
+outside the cell, unsupported height, incorrect clearance and altered placement
+request. Source parser, self-tests, plan-only checks and diff checks pass.
+The new placement has not been run in the game by the candidate agent; root
+must confirm clear near images and then repeat the required same-pose arms.
