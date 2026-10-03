@@ -70,8 +70,9 @@ void PollHotkeys(PhysicsProbeSettings& s)
 
 void DrawPhysicsTab()
 {
-    ImGui::SeparatorText("Corpse affine pose proof (dev only)");
-    ImGui::TextDisabled("Nearest settled dry corpse within 50 m; one hold, 30 simulation seconds. No solver.");
+    ImGui::SeparatorText("Corpse ragdoll prototype (dev only)");
+    ImGui::TextDisabled("Nearest settled dry stock corpse within 50 m; one rig, 30 simulation seconds.");
+    ImGui::TextDisabled("Capture, prepare local ground, start joints, then push. Automatic deaths and grenade impulses are not connected.");
     static RString corpseResult = "No capture requested.";
     if (ImGui::Button("Capture corpse pose")) corpseResult = Man::CorpsePoseProbe("corpse-capture");
     ImGui::SameLine();
@@ -79,6 +80,13 @@ void DrawPhysicsTab()
     ImGui::SameLine();
     if (ImGui::Button("Clear corpse pose")) corpseResult = Man::CorpsePoseProbe("corpse-clear");
     if (ImGui::Button("Corpse pose status")) corpseResult = Man::CorpsePoseProbe("corpse-status");
+    if (ImGui::Button("Prepare corpse ground")) corpseResult = Man::CorpsePoseProbe("corpse-prepare");
+    ImGui::SameLine();
+    if (ImGui::Button("Start jointed corpse")) corpseResult = Man::CorpsePoseProbe("corpse-articulate-hinges");
+    if (ImGui::Button("Push corpse")) corpseResult = Man::CorpsePoseProbe("corpse-impulse");
+    ImGui::SameLine();
+    if (ImGui::Button("Freeze current pose")) corpseResult = Man::CorpsePoseProbe("corpse-freeze");
+    ImGui::TextDisabled("Freeze retains the pose and releases physics bodies. Large flying-body impulses are outside this prototype.");
     ImGui::TextWrapped("%s", static_cast<const char*>(corpseResult));
     ImGui::TextDisabled("Terrain painting has moved to the Map Editor tab.");
     Physics::PhysicsWorld* world = Physics::GetPhysicsWorld();
