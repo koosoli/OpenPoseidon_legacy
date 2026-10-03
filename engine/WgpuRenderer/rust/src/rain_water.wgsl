@@ -189,10 +189,21 @@ fn fs_main(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
         scene=rain_water_scene_reflection(in.world-frame.cam_pos.xyz,n,normal_variation,footprint);
     }
     let reflected = mix(ground_sky_reflection(reflect(-view,n)),scene.rgb,scene.a);
+    let rel = in.world-frame.cam_pos.xyz;
+    // Share actual visibility between direct body illumination and the solar
+    // interface. Do not sample the shadow maps twice or dim the sky/reflection.
+    var sun_visibility = 0.0;
+    if (any(frame.sun_diffuse.rgb > vec3<f32>(0.0)) &&
+        (frame.sun_diffuse.w <= 0.5 || dot(n,-frame.sun_dir_world.xyz) > 0.0)) {
+        let fog = fog_factor(length(rel));
+        let csm = shadow_strength(rel,vec3<f32>(0.0,1.0,0.0),fog,dwx,dwy);
+        let terrain_shadow = terrain_sun_shadow(in.world.xz,in.world.y) * fog;
+        sun_visibility = (1.0-max(csm,terrain_shadow)) * cloud_sun_shadow(in.world.xz);
+    }
     var sky_body = vec3<f32>(0.0);
     if (frame.sun_diffuse.w > 0.5) { sky_body = sky_irradiance(n); }
     let body = rain_water_body_radiance(frame.sun_diffuse.w, sky_body, frame.sun_ambient.w,
-        frame.sun_ambient.rgb, frame.sun_diffuse.rgb, max(dot(n,-frame.sun_dir_world.xyz),0.0));
+        frame.sun_ambient.rgb, frame.sun_diffuse.rgb, max(dot(n,-frame.sun_dir_world.xyz),0.0), sun_visibility);
     let edge = smoothstep(0.001,0.012,min(water.y,local_depth));
     let optics = rain_water_optics(local_depth, dot(n,view), reflected, body, edge*cover);
     var rgb = optics.rgb;
@@ -204,12 +215,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
     let sun_lobe = rain_water_sun_specular(max(dot(n,view),0.0), max(dot(n,light),0.0),
         max(dot(n,half_vector),0.0), max(dot(view,half_vector),0.0), normal_variation) * standing;
     if (sun_lobe > 0.0 && optics.a > 0.0) {
-        let rel = in.world-frame.cam_pos.xyz;
-        let fog = fog_factor(length(rel));
-        let csm = shadow_strength(rel,vec3<f32>(0.0,1.0,0.0),fog,dwx,dwy);
-        let terrain_shadow = terrain_sun_shadow(in.world.xz,in.world.y) * fog;
         let sun_light = frame.sun_diffuse.rgb * 3.14159265359
-            * (1.0-max(csm,terrain_shadow)) * cloud_sun_shadow(in.world.xz);
+            * sun_visibility;
         rgb += sun_light * sun_lobe * edge * cover / max(optics.a,0.000001);
     }
     if (frame.params.fog_enabled >= 1.5) { rgb = apply_fog(rgb,in.world-frame.cam_pos.xyz); }

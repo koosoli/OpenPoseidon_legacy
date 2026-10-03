@@ -64,6 +64,11 @@ fn actual_body_helper_is_resource_free_and_called_with_physical_sky_by_fragment(
             "rain_water_body_radiance(frame.sun_diffuse.w, sky_body, frame.sun_ambient.w"
         )
     );
+    assert!(source.contains("max(dot(n,-frame.sun_dir_world.xyz),0.0), sun_visibility"));
+    assert!(source.contains("sun_visibility = (1.0-max(csm,terrain_shadow)) * cloud_sun_shadow(in.world.xz)"));
+    assert!(source.contains("* sun_visibility;"));
+    assert_eq!(source.matches("shadow_strength(rel,").count(), 1);
+    assert_eq!(source.matches("terrain_sun_shadow(in.world.xz,in.world.y)").count(), 1);
 }
 
 #[test]
@@ -76,7 +81,7 @@ fn actual_gpu_body_lighting_replays_rain_and_excludes_legacy_ambient_on_physical
 @group(0) @binding(0) var<storage,read_write> result: array<vec4<f32>>;
 @compute @workgroup_size(16)
 fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>) {{
-    let i=id.x;if(i>=12u){{return;}}
+    let i=id.x;if(i>=20u){{return;}}
     // Captured physical rain lighting from the installed 6cf9973e campaign.
     var legacy=vec3<f32>(22.1267,24.138218,32.184288);
     var sun=vec3<f32>(1.0355144,0.9062767,0.60597956);
@@ -85,6 +90,7 @@ fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>) {{
     var sky=vec3<f32>(1.0,0.8,0.6);
     var physical=1.0;var cosine=0.0;var mu=1.0;var depth=0.54075;var coverage=1.0;
     var reflected=vec3<f32>(4.0,8.0,16.0);
+    var visibility=1.0;
     if(i==1u){{legacy*=10.0;}}
     if(i==2u){{physical=0.0;}}
     if(i==3u){{physical=0.0;legacy=vec3<f32>(0.0);sun=vec3<f32>(0.0);}}
@@ -96,7 +102,15 @@ fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>) {{
     if(i==9u){{coverage=0.0;}}
     if(i==10u){{sky=vec3<f32>(-1.0);sun=vec3<f32>(-2.0);cosine=-1.0;}}
     if(i==11u){{sky=vec3<f32>(1e30);sun=vec3<f32>(0.0);}}
-    let body=rain_water_body_radiance(physical,sky,1.35,legacy,sun,cosine);
+    if(i==12u){{cosine=0.58894414;visibility=0.0;}}
+    if(i==13u){{cosine=0.58894414;visibility=0.25;}}
+    if(i==14u){{physical=0.0;visibility=0.0;}}
+    if(i==15u){{sky=vec3<f32>(0.0);cosine=1.0;visibility=0.0;}}
+    if(i==16u){{physical=0.0;visibility=0.25;}}
+    if(i==17u){{cosine=0.58894414;visibility=4.0;}}
+    if(i==18u){{cosine=0.58894414;visibility=-1.0;}}
+    if(i==19u){{sky=vec3<f32>(0.0);cosine=1.0;}}
+    let body=rain_water_body_radiance(physical,sky,1.35,legacy,sun,cosine,visibility);
     let optics=rain_water_optics(depth,mu,reflected,body,coverage);
     let bed=vec3<f32>(0.05,0.035,0.02);
     result[i*3u]=vec4<f32>(body,1.0);
@@ -119,7 +133,7 @@ fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>) {{
         compilation_options: Default::default(),
         cache: None,
     });
-    let bytes = 36 * 16;
+    let bytes = 60 * 16;
     let output = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("actual_rain_body_values"),
         contents: &vec![0u8; bytes],
@@ -144,7 +158,7 @@ fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>) {{
         let mut pass = encoder.begin_compute_pass(&Default::default());
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bind, &[]);
-        pass.dispatch_workgroups(1, 1, 1);
+        pass.dispatch_workgroups(2, 1, 1);
     }
     encoder.copy_buffer_to_buffer(&output, 0, &readback, 0, bytes as u64);
     queue.submit([encoder.finish()]);
@@ -184,5 +198,25 @@ fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>) {{
     assert!(rows[22][3] > rows[1][3]);
     for channel in 0..3 {
         assert!(rows[8][channel] > rows[2][channel]);
+    }
+    // Existing clear probes still meet their captured/independent expectations.
+    // A cast/cloud shadow removes direct body light, preserving physical sky
+    // or legacy ambient and preserving optical alpha/reflected radiance.
+    assert_eq!(rows[36], rows[0]);
+    assert_eq!(rows[51], rows[18]);
+    assert_eq!(rows[54], rows[0]);
+    for channel in 0..3 {
+        let direct=rows[18][channel]-rows[0][channel];
+        assert!(direct>0.0);
+        assert!((rows[39][channel]-rows[0][channel]-direct*0.25).abs()<1e-6);
+        let legacy= [22.1267,24.138218,32.184288][channel]*[0.045,0.060,0.052][channel];
+        assert!((rows[42][channel]-legacy).abs()<1e-6);
+        assert!((rows[48][channel]-legacy-(rows[6][channel]-legacy)*0.25).abs()<1e-6);
+        assert_eq!(rows[45][channel],0.0);
+        assert!(rows[47][channel]>0.0,"Shadow removed actual reflected energy");
+        assert!(rows[57][channel]>0.0,"Clear control lost direct body sunlight");
+    }
+    for probe in 12..20 {
+        assert_eq!(rows[probe*3+1][3],rows[1][3],"Lighting altered physical optical opacity");
     }
 }
