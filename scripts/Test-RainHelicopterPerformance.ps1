@@ -46,13 +46,32 @@ function Published-Stats($values){
  # never independent-frame quantiles, FPS or verified freshness.
  return @{snapshotCount=$s.count;snapshotMedian=$s.median;snapshotMin=$s.min;snapshotMax=$s.max}
 }
-function Assert-Weather($weather,[bool]$rain){
+function Dry-WeatherRecipe($range,$spacing){
+ $range=Numeric $range;$spacing=Numeric $spacing
+ Require ($range -ge 2 -and $range -le 16384 -and $range -eq [Math]::Floor($range) -and $spacing -gt 0) 'Invalid native weather-control domain.'
+ # RainWaterField::AlignedSourceGrid, including padded equal-area edge nodes.
+ $stride=1;while([Math]::Ceiling(($range-1)/$stride)+1 -gt 513){$stride*=2}
+ $side=[Math]::Ceiling(($range-1)/$stride)+1;$area=[Math]::Pow($side*$spacing*$stride,2)
+ $seconds=360.0;$target=1e-5;$epsilon=1e-6;$rate=.00012;$margin=10.0
+ $minimum=$area*$rate*$target*$seconds*$seconds*$margin/$epsilon
+ $duration=[Math]::Pow(10,[Math]::Ceiling([Math]::Log10([Math]::Max(1.0,$minimum))))
+ $speed=[double][single]([single]$target/[single]$duration)
+ $peak=$speed*$seconds*1.1 # conservative allowance for native float accumulation
+ $bound=$area*$rate*$peak*($seconds+.25)
+ Require ($duration -le 1e30 -and $speed -gt 0 -and $target-$peak -gt 1e-6 -and $bound -le $epsilon/$margin) 'Finite native dry transition does not satisfy unchanged rainfall-budget bound.'
+ return @{sourceRange=$range;sourceSpacing=$spacing;stride=$stride;side=$side;allNodeArea=$area;target=$target;durationSeconds=$duration;nativeFloatSpeed=$speed;maximumSimulationSeconds=$seconds;rainMetresPerSecond=$rate;rainBudgetTolerance=$epsilon;maximumDensity=$peak;conservativeWholeArmRainVolume=$bound;
+  code=((Number $duration)+' setRain '+(Number $target));scope='Ordinary noncompleted stock weather transition with real automatic particles and tiny positive liquid input; dry coarse physics is initialized, not a no-water-physics zero control'}
+}
+function Assert-Weather($weather,$particles,[bool]$rain){
  foreach($field in @('overcast','rain','liquidRain','particleDensity','fog','terrainRange','objectRange','selectedRange')){
   $n=Numeric $weather.$field;Require ($n -ge 0) ('Invalid actual weather '+$field)
  }
  Require ($weather.overcast -ge .98 -and $weather.overcast -le 1 -and $weather.fog -le .001) 'Actual matching full cloud/zero fog fixture lost.'
- Require ($weather.particleSnowflakes -is [bool] -and !$weather.particleSnowflakes -and $weather.particleDensity -eq 0) 'Natural liquid weather requires automatic particle density (0 diagnostic override).'
- Require ($weather.rain -le 1 -and $weather.liquidRain -eq $weather.rain) 'Actual liquid rain differs from natural rain.'
+ Require ($particles.mode -ceq 'particle' -and (Numeric $particles.densityOverride) -eq -1 -and $particles.snowflakes -is [bool] -and !$particles.snowflakes) 'Actual automatic stock rain particle parameters are absent.'
+ foreach($field in @('weatherRain','effectiveDensity','liquidRain')){Require ((Numeric $particles.$field) -ge 0 -and $particles.$field -le 1) 'Invalid actual particle-state density.'}
+ Require ($particles.weatherRain -eq $particles.effectiveDensity -and $particles.liquidRain -eq $particles.weatherRain) 'Actual particle-state liquid density differs from its native weather source.'
+ Require ($weather.particleSnowflakes -is [bool] -and !$weather.particleSnowflakes -and $weather.particleDensity -eq $weather.rain) 'Actual effective rendered rain differs from its native weather source.'
+ Require ($weather.rain -le 1 -and $weather.liquidRain -eq $weather.rain) 'Actual liquid rain differs from native rain.'
  if($rain){Require ($weather.liquidRain -ge .25) 'Actual rainy arm is not wet.'}
  else{Require ($weather.rain -le .001) 'Dry arm contains actual rain.'}
 }
@@ -120,6 +139,7 @@ function Parse-Capture([string[]]$lines){
  return @{frameCount=$count;dropped=0;rawMs=$raw;summary=(Stats $raw);phases=$phases}
 }
 function Compare-Routes($dry,$rain){
+ foreach($field in @('width','height','spacing')){Require ((Numeric $dry.waterBefore.$field) -eq (Numeric $rain.waterBefore.$field) -and $dry.waterBefore.$field -eq $dry.waterAfter.$field -and $rain.waterBefore.$field -eq $rain.waterAfter.$field) 'Actual dry/rain coarse runoff domains differ or changed during measurement.'}
  Require ($dry.samples.Count -ge 15 -and $rain.samples.Count -ge 15) 'Too few physical route observations.'
  $matches=@()
  foreach($a in $dry.samples){
@@ -143,9 +163,19 @@ function Compare-Routes($dry,$rain){
 }
 if($SelfTest){
  function Refuses([scriptblock]$body){$failed=$false;try{& $body|Out-Null}catch{$failed=$true};Require $failed 'Unsafe fixture accepted.'}
+ $recipe=Dry-WeatherRecipe 2048 6.25
+ Require ($recipe.side -eq 513 -and $recipe.stride -eq 4 -and $recipe.allNodeArea -eq 164480625 -and $recipe.durationSeconds -eq 1e12 -and $recipe.conservativeWholeArmRainVolume -lt 1e-7) 'Actual Noe finite-transition/budget derivation changed.'
+ # Native float recurrence for all 360 seconds at 60 Hz. A completed dry
+ # target would trigger the stochastic branch immediately; this never does.
+ $density=[single]0;$target=[single]$recipe.target;$speed=[single]$recipe.nativeFloatSpeed;$dt=[single](1.0/60)
+ for($i=0;$i -lt 21600;++$i){Require ([Math]::Abs([double]($target-$density)) -ge 1e-6) 'Bounded native float dry transition reached stochastic weather completion.';$density=[single]($density+[single]($speed*$dt))}
+ Require ($density -gt 0 -and $density -le $recipe.maximumDensity) 'Native float accumulation exceeds documented dry control.'
+ Refuses {Dry-WeatherRecipe 1 6.25};Refuses {Dry-WeatherRecipe 2048 0};Refuses {Dry-WeatherRecipe 2048 ([double]::NaN)}
  $w=[pscustomobject]@{overcast=1.0;rain=0.0;liquidRain=0.0;particleDensity=0.0;particleSnowflakes=$false;fog=0.0;terrainRange=2000.0;objectRange=2000.0;selectedRange=2000.0}
- Assert-Weather $w $false;$w.rain=.6;$w.liquidRain=.6;Assert-Weather $w $true
- $w.overcast=.8;Refuses {Assert-Weather $w $true};$w.overcast=1;$w.particleDensity=.6;Refuses {Assert-Weather $w $true}
+ $particles=[pscustomobject]@{mode='particle';densityOverride=-1.0;snowflakes=$false;weatherRain=0.0;effectiveDensity=0.0;liquidRain=0.0}
+ Assert-Weather $w $particles $false;$w.rain=.6;$w.liquidRain=.6;$w.particleDensity=.6;$particles.weatherRain=.6;$particles.effectiveDensity=.6;$particles.liquidRain=.6;Assert-Weather $w $particles $true
+ Refuses {Assert-Weather $w $particles $false};$w.overcast=.8;Refuses {Assert-Weather $w $particles $true};$w.overcast=1;$w.particleDensity=0;Refuses {Assert-Weather $w $particles $true};$w.particleDensity=.6
+ $particles.densityOverride=0;Refuses {Assert-Weather $w $particles $true};$particles.densityOverride=-1;$particles.mode='off';Refuses {Assert-Weather $w $particles $true};$particles.mode='particle';$particles.effectiveDensity=0;Refuses {Assert-Weather $w $particles $true};$particles.effectiveDensity=.6;$particles.snowflakes=$true;Refuses {Assert-Weather $w $particles $true}
  Refuses {Numeric '1'};Refuses {Numeric ([double]::NaN)}
  $pilot=[ordered]@{}
  foreach($name in @('timeMs','object','candidates','distanceXZ','x','y','z','groundY','clearance','rpm','upX','upY','upZ','speedX','speedY','speedZ','fuel','damage','driverState','moveUp','moveDown','unfocusedMoveUp','focusLost','qKey','airflowScale','cameraDistance','altKey','cameraType','moveForward','fastForward','moveBack','turnLeft','turnRight','moveLeft','moveRight','windX','windY','windZ')){$pilot[$name]=0.0}
@@ -175,12 +205,13 @@ if($SelfTest){
  Refuses {Parse-Capture @($v|ForEach-Object{$_.Replace('dropped=0','dropped=1')})}
  Refuses {Parse-Capture @($v|ForEach-Object{$_.Replace('offset=0','offset=1')})}
  Refuses {Parse-Capture @($v|Select-Object -SkipLast 1)}
- $arm=@{startMs=0;samples=@()}
+ $arm=@{startMs=0;samples=@();waterBefore=@{width=513;height=513;spacing=25};waterAfter=@{width=513;height=513;spacing=25}}
  1..20|ForEach-Object{$arm.samples+=@{state=@{timeMs=$_*1000;x=4975.0;y=150.0;z=4675.0+$_*20;speedX=0.0;speedY=0.0;speedZ=20.0};weather=@{overcast=1.0;terrainRange=2000.0;objectRange=2000.0}}}
  $null=Compare-Routes $arm $arm
  $bad=$arm|ConvertTo-Json -Depth 12|ConvertFrom-Json;$bad.samples[0].weather.overcast=.5
  Refuses {Compare-Routes $arm $bad};$bad=$arm|ConvertTo-Json -Depth 12|ConvertFrom-Json;foreach($q in $bad.samples){$q.state.x+=200}
  Refuses {Compare-Routes $arm $bad}
+ $bad=$arm|ConvertTo-Json -Depth 12|ConvertFrom-Json;$bad.waterBefore.spacing=50;Refuses {Compare-Routes $arm $bad}
  Write-Output 'Occupied flight performance pure helpers PASS; no game/profile/GPU used.';return
 }
 Require ([bool]$ExpectedCommit -and [bool]$env:LOCK_OWNER) 'Supply installed ExpectedCommit and invoke with-game-lock.sh.'
@@ -201,7 +232,7 @@ foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'
 $result=[ordered]@{status='running';installed=$before;sourceHead=(& git -C $root rev-parse HEAD);lockOwner=$env:LOCK_OWNER;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;
  helperHashes=@{rain=(Get-FileHash $rainHelper).Hash;rotor=(Get-FileHash $rotorHelper).Hash;fine=(Get-FileHash $fineHelper).Hash};settings=$settings;cleared=$clear;inherited=$saved;
  recipe=@{x=$X;z=$Z;heightAboveInitialBed=$HeightAboveBed;heading=180;neutralVelocityMax=2;forwardScancode=26;lookScancode=226;measureSimulationSeconds=$MeasureSeconds;warmupSimulationSeconds=$WarmupSeconds};
- scope='Actual occupied manual UH60 route, ordinary external chase camera, real natural liquid history. Completed frame capture is ordered/drop-free. Published GPU/encode regions may lag/duplicate and CPU ring windows overlap: no same-frame completion proof or sum of nested region timings. Requested routes are equal; actual overlap is reported, never exact scene parity.';
+ scope='Actual occupied manual UH60 route, ordinary external chase camera, stock weather controls and real automatic liquid particles. Dry is a bounded tiny positive noncompleted weather transition with initialized coarse runoff, not a no-water-physics zero control. Completed frame capture is ordered/drop-free. Published GPU/encode regions may lag/duplicate and CPU ring windows overlap: no same-frame completion proof or sum of nested region timings. Requested routes are equal; actual overlap is reported, never exact scene parity.';
  arms=@()}
 $p=$null;$client=$null;$held=@()
 function Health{
@@ -222,6 +253,7 @@ function Clock{
 function State{
  $pos=Eval 'getPosASL rotorHeli';Require ($pos.Count -eq 3) 'Actual helicopter locator absent.'
  $s=Send @{cmd='rotor_state';x=[double]$pos[0];z=[double]$pos[1];radius=16};Assert-RotorState $s
+ if($null -ne $arm.weatherStartMs){Require ($s.timeMs-$arm.weatherStartMs -ge 0 -and $s.timeMs-$arm.weatherStartMs -le 360000) 'Actual weather control exceeded derived whole-arm360-second simulation bound.'}
  if($null -eq $script:object){$script:object=$s.object};Require ($script:object -eq $s.object) 'Diagnostic switched aircraft.'
  $s|ConvertTo-Json -Depth 8 -Compress|Add-Content -LiteralPath (Join-Path $armDir 'rotor-states.jsonl');return $s
 }
@@ -255,11 +287,18 @@ try{
   do{Health;$client=[Net.Sockets.TcpClient]::new();try{$client.Connect('127.0.0.1',$port)}catch{$client.Dispose();$client=$null};if(!$client){Require ([DateTime]::UtcNow -lt $until) 'Harness startup timeout.';Start-Sleep -Milliseconds 250}}while(!$client)
   $stream=$client.GetStream();$stream.ReadTimeout=10000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
   Start-Sleep -Seconds 12;Require ((Eval 'triSceneReady') -ceq 'OK') 'Stock scene not ready.'
-  Exec ('player allowDamage false;setDate [1985,6,21,16,0];0 setFog 0;0 setOvercast 1;0 setRain '+$(if($weatherName -ceq 'Rain'){'1'}else{'0'})+';triSetBrightness 1;setAccTime 0')
+  Exec ('setAccTime 0;player allowDamage false;setDate [1985,6,21,16,0];0 setFog 0;0 setOvercast 1;0 setRain '+$(if($weatherName -ceq 'Rain'){'1'}else{'0'})+';triSetBrightness 1')
   Require ((Eval 'triClearView') -ceq 'OK') 'Render view override could not release.'
   $null=Send @{cmd='dev_snow';action='disable'}
-  $null=Send @{cmd='weather_particles';action='set';mode='particle';snowflakes=$false}
+  $arm.initialParticleParams=Send @{cmd='weather_particles';action='set';mode='particle';snowflakes=$false}
   $bed=Send @{cmd='dev_terrain_brush';action='state';x=$X;z=$Z};$null=Numeric $bed.vertexHeight;$arm.nativeBed=$bed
+  $policy=Dry-WeatherRecipe $bed.range $bed.spacing;$arm.expectedWaterDomain=@{width=$policy.side;height=$policy.side;spacing=$policy.sourceSpacing*$policy.stride}
+  $arm.weatherStartMs=Clock;$arm.weatherBeforeTransition=Send @{cmd='weather_visibility'}
+  if($weatherName -ceq 'Dry'){
+   Require ($arm.weatherBeforeTransition.rain -eq 0 -and $arm.weatherBeforeTransition.liquidRain -eq 0) 'Dry transition must start from actual native zero rain.'
+   $arm.dryWeatherRecipe=$policy;Exec $arm.dryWeatherRecipe.code
+  }
+  $arm.waterAtWeatherStart=Send @{cmd='dev_rain_water';action='state'};Assert-Budget $arm.waterAtWeatherStart
   $soil=Send @{cmd='dev_mud';action='sample';x=$X;z=$Z};Require ($soil.world.Replace('\','/').ToLowerInvariant() -match '(^|/)noe\.wrp$') 'Actual stock Nogova not mounted.';$arm.world=$soil.world
   $xz=(Number $X)+','+(Number $Z)
   Exec ('rotorHeli="UH60" createVehicle ['+$xz+',0];rotorHeli allowDamage false;rotorPilot=player;rotorPilot moveInDriver rotorHeli;rotorHeli setPos ['+$xz+',0];rotorHeli setDir 180;rotorHeli setFuel 1;rotorHeli engineOn true;rotorPilot action ["AUTOHOVER",rotorHeli];rotorHeli switchCamera "EXTERNAL"')
@@ -275,14 +314,15 @@ try{
   do{Start-Sleep -Seconds 1;$s=State;$arm.staging+=,$s;Require (!$s.destroyed -and $s.damage -eq 0) 'Physical warmup lost aircraft.'}while((Clock)-$warmStart -lt $WarmupSeconds*1000)
   $readyStart=Clock
   do{
-   $w=Send @{cmd='weather_visibility'};$s=State;$arm.staging+=,$s;$ready=$false
-   try{Assert-Weather $w ($weatherName -ceq 'Rain');Assert-Pilot $s $false;$ready=$true}catch{}
+   $w=Send @{cmd='weather_visibility'};$particles=Send @{cmd='weather_particles';action='state'};$s=State;$arm.staging+=,$s;$ready=$false
+   try{Assert-Weather $w $particles ($weatherName -ceq 'Rain');Assert-Pilot $s $false;$ready=$true}catch{}
    if(!$ready){Require ((Clock)-$readyStart -lt 30000) 'Natural matching weather and neutral occupied hover did not settle.';Start-Sleep -Seconds 1}
   }while(!$ready)
-  $arm.initial=$s;$arm.readyWeather=$w;$arm.warmupActualMs=$s.timeMs-$warmStart
+  $arm.initial=$s;$arm.readyWeather=$w;$arm.readyParticleParams=$particles;$arm.warmupActualMs=$s.timeMs-$warmStart
   Require ([Math]::Sqrt([Math]::Pow($s.x-$X,2)+[Math]::Pow($s.z-$Z,2)) -le 8 -and [Math]::Abs($s.y-([double]$bed.vertexHeight+$HeightAboveBed)) -le 15) 'Actual initial hover left requested bounded XZ/altitude recipe.'
   $arm.waterBefore=Send @{cmd='dev_rain_water';action='state'}
   Assert-Budget $arm.waterBefore
+  foreach($field in @('width','height','spacing')){Require ((Numeric $arm.waterBefore.$field) -eq $arm.expectedWaterDomain.$field) 'Actual stable coarse runoff domain differs from the native aligned source.'}
   Hold 26;$leadStart=Clock
   do{Start-Sleep -Seconds 1;$s=State;Assert-Pilot $s $true}while((Clock)-$leadStart -lt 5000)
   $initialPerf=Send @{cmd='frame_performance'};Assert-Performance $initialPerf;$arm.initialPerformance=$initialPerf
@@ -293,7 +333,7 @@ try{
    # Deliberately at most one published-region poll per wall second; no waits
    # for GPU completion or counter readback. Save exact poll/state clocks.
    Start-Sleep -Seconds 1;Health;$queryStart=[DateTime]::UtcNow
-   $s=State;Assert-Pilot $s $true;$w=Send @{cmd='weather_visibility'};Assert-Weather $w ($weatherName -ceq 'Rain')
+   $s=State;Assert-Pilot $s $true;$w=Send @{cmd='weather_visibility'};$particles=Send @{cmd='weather_particles';action='state'};Assert-Weather $w $particles ($weatherName -ceq 'Rain')
    $perf=Send @{cmd='frame_performance'};Assert-Performance $perf
    Require ($perf.version -ceq $initialPerf.version -and $perf.renderer -ceq $initialPerf.renderer -and $perf.gpuTimestampsAvailable -eq $initialPerf.gpuTimestampsAvailable) 'Actual device/version/timestamp capability changed.'
    if($previous){
@@ -301,7 +341,7 @@ try{
     $distance=[Math]::Sqrt([Math]::Pow($s.x-$previous.x,2)+[Math]::Pow($s.y-$previous.y,2)+[Math]::Pow($s.z-$previous.z,2))
     Require ($distance -le 110*$dt+5) 'Physical trajectory discontinuity exceeds bounded velocity.'
    }
-   $entry=@{wallUtc=$queryStart.ToString('o');pollWallMs=([DateTime]::UtcNow-$queryStart).TotalMilliseconds;state=$s;weather=$w;performance=$perf}
+   $entry=@{wallUtc=$queryStart.ToString('o');pollWallMs=([DateTime]::UtcNow-$queryStart).TotalMilliseconds;state=$s;weather=$w;particleParams=$particles;performance=$perf}
    $arm.samples+=,$entry;$entry|ConvertTo-Json -Depth 12 -Compress|Add-Content -LiteralPath (Join-Path $armDir 'samples.jsonl');$previous=$s
   }while($s.timeMs-$arm.startMs -lt $MeasureSeconds*1000)
   Require ((Eval 'triPerfCapture 0') -ceq 'OK') 'Frame capture dropped or incomplete.'
@@ -313,6 +353,7 @@ try{
   $arm.waterAfter=Send @{cmd='dev_rain_water';action='state'}
   Assert-Budget $arm.waterAfter
   $arm.measuredRainInputVolume=$arm.waterAfter.rainVolume-$arm.waterBefore.rainVolume
+  if($weatherName -ceq 'Dry'){Require ([Math]::Abs($arm.waterAfter.rainVolume-$arm.waterAtWeatherStart.rainVolume) -le .000001) 'Whole dry physical arm exceeded unchanged rainfall-input budget.'}
   if($weatherName -ceq 'Rain'){Require ($arm.measuredRainInputVolume -gt 0) 'Actual rain simulation did not accumulate real liquid input.'}
   else{Require ([Math]::Abs($arm.measuredRainInputVolume) -le .000001) 'Dry physical arm accumulated liquid rain input.'}
   $null=Send @{cmd='screenshot';path=(Join-Path $armDir 'route-end.png')}
