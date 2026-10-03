@@ -448,13 +448,13 @@ bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
     const char* name = land.GetName();
     const bool sameMap = _uploaded == &land && _uploadedRange == range && _uploadedName == name;
     const auto& rainWater=GRainWater();
-    const bool fine=rainWater.FineActive();
     // New fine ownership/lifetime requires a REAL upload before its new source
     // receipt, even if a reused Landscape happened to retain the numeric key.
     const WgrRainWaterSourceKey requestedSource{uint64_t(reinterpret_cast<uintptr_t>(&land)),rainWater.Generation(),
         land.HeightRevision(),uint32_t(range),land.GetTerrainGrid()};
-    const bool fineEpochReady=!fine||SameRainWaterSource(_rainWaterSource,requestedSource);
-    if (sameMap && _uploadedHeightRevision == land.HeightRevision()&&fineEpochReady)
+    // Coarse optics also require the actual world source, independently of fine ownership.
+    const bool sourceEpochReady=SameRainWaterSource(_rainWaterSource,requestedSource);
+    if (sameMap && _uploadedHeightRevision == land.HeightRevision()&&sourceEpochReady)
     {
         return false;
     }
@@ -468,13 +468,15 @@ bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
     _params.land_range = static_cast<uint32_t>(land.GetLandRange());
     _params.data_scale = 1.0f;
     EngineWgpu::AcquireProducerWindow("terrain heightmap");
+    // A proven new map invalidates source resources even if Landscape storage is reused.
+    if (!sameMap) { const WgrRainWaterSourceKey emptySource{}; wgr_rain_water_set_source(_renderer,&emptySource); }
     // The FFI consumes/copies this slice synchronously. Borrowing the existing
     // heightfield avoids a 256 MiB temporary (plus STL alignment) on 8192 grids.
     wgr_terrain_set_heightmap(_renderer, land.HeightmapData(), &_params);
     LOG_INFO(Graphics, "Wgpu heightfield upload: {}x{} grid={}m data={}", range, range,
              land.GetTerrainGrid(), land.HeightmapData() != nullptr);
     _uploadedHeightRevision = land.HeightRevision();
-    if(fine) {
+    {
         _rainWaterSource={uint64_t(reinterpret_cast<uintptr_t>(&land)),rainWater.Generation(),
             _uploadedHeightRevision,uint32_t(range),land.GetTerrainGrid()};
         if(!land.HeightmapData())_rainWaterSource={};

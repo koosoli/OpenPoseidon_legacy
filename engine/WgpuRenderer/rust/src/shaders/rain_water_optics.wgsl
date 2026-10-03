@@ -77,6 +77,11 @@ fn rain_water_standing_fraction(local_depth: f32) -> f32 {
 
 fn rain_water_surface_optics(local_depth: f32, view_cosine: f32, reflected: vec3<f32>,
                              body: vec3<f32>, coverage: f32) -> vec4<f32> {
+    return rain_water_surface_optics_extinction(local_depth,view_cosine,reflected,body,coverage,3.0);
+}
+
+fn rain_water_surface_optics_extinction(local_depth: f32, view_cosine: f32, reflected: vec3<f32>,
+                             body: vec3<f32>, coverage: f32, extinction: f32) -> vec4<f32> {
     if (local_depth <= 0.0 || coverage <= 0.0) { return vec4<f32>(0.0); }
     let mu = clamp(view_cosine, 0.0, 1.0);
     // The bed has already received its broad rough wet-soil/puddle shading.
@@ -84,7 +89,7 @@ fn rain_water_surface_optics(local_depth: f32, view_cosine: f32, reflected: vec3
     // Continuous depth handoff replaces that response with pooled reflection.
     let fresnel = rain_water_standing_fraction(local_depth)
         * (0.025 + 0.975 * pow(1.0 - mu, 5.0));
-    let transmission = exp(-3.0 * min(local_depth, 64.0));
+    let transmission = exp(-max(extinction,0.0) * min(local_depth, 64.0));
     let scatter_weight = (1.0 - fresnel) * (1.0 - transmission);
     let opacity = fresnel + scatter_weight;
     if (opacity <= 0.0) { return vec4<f32>(0.0); }

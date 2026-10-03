@@ -32,6 +32,7 @@ mod upscaler;
 mod uploader;
 mod water;
 mod rain_water;
+mod rain_water_medium;
 mod rain_water_reflections;
 // TW-WATER W1 — the selectable water backend (Current OP / Tidewater Native).
 mod water_backend;
@@ -3675,6 +3676,7 @@ impl Renderer {
             water_batches.first().map(|b| b.camera as usize), grass_batches.first().map(|b| b.camera as usize));
         let main_scene_cam = main_selection.index; // Same existing front-entry priority, not a new camera policy.
         if let Some(camera) = cameras.get(main_scene_cam) {
+            self.rain_water.prepare_medium(&self.device,&self.queue,self.terrain.rain_water_medium_resources());
             self.rain_water.prepare(&self.device, &self.queue, camera, &self.terrain.heightmap_view(),
                 self.terrain.heightmap_gen(), self.terrain.conform_params());
         } else {
@@ -6914,6 +6916,7 @@ impl Renderer {
     }
 
     fn rain_water_set_source(&mut self, source: ffi::WgrRainWaterSourceKey) {
+        self.terrain.set_rain_water_medium_source(source);
         self.rain_water.set_source(source);
     }
 

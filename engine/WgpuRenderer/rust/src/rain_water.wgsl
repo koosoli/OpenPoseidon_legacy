@@ -5,6 +5,8 @@
 #import rain_water_reflections::rain_water_scene_reflection
 #import frame::wet_soil_debug_mode
 #import rain_water_body::rain_water_body_radiance
+#import terrain_material::TerrainMaterial
+#import rain_water_medium::{rain_water_soil_fraction, rain_water_medium_optics}
 #import rain_water_optics::{rain_water_surface_optics, rain_water_standing_fraction, rain_water_impact_normal, rain_water_sun_specular}
 
 struct RainWaterParams {
@@ -20,6 +22,30 @@ struct FineTileMask {
 };
 @group(1) @binding(2) var fine_records: texture_2d<f32>;
 @group(1) @binding(3) var<uniform> fine_tiles: FineTileMask;
+
+// Prefix of the EXISTING terrain uniform, borrowed without a new public ABI.
+struct MediumTerrainParams {
+    world_origin:vec2<f32>,land_grid:f32,terrain_grid:f32,
+    hm_width:u32,hm_height:u32,land_range:u32,data_scale:f32,
+};
+@group(3) @binding(0) var<uniform> medium_terrain:MediumTerrainParams;
+@group(3) @binding(1) var medium_indices:texture_2d<u32>;
+@group(3) @binding(2) var<storage,read> medium_materials:array<TerrainMaterial>;
+@group(3) @binding(3) var<uniform> medium_control:vec4<u32>;
+
+fn rain_water_actual_soil(world_xz:vec2<f32>)->f32 {
+    if (medium_control.x != 1u || any(medium_control.yz != rainwater.identity.xy) ||
+        !(medium_terrain.land_grid > 0.0) || medium_terrain.land_grid >= 1000000.0) {return 0.0;}
+    let cell=(world_xz-medium_terrain.world_origin)/medium_terrain.land_grid;
+    let dimensions=textureDimensions(medium_indices);
+    if (any(cell != cell) || any(cell<vec2<f32>(0.0)) ||
+        any(cell>=vec2<f32>(dimensions)) ||
+        any(dimensions != vec2<u32>(medium_terrain.land_range))) {return 0.0;}
+    let entry=textureLoad(medium_indices,vec2<i32>(floor(cell)),0).x & 0x7fffu;
+    if (entry >= arrayLength(&medium_materials)) {return 0.0;}
+    let material=medium_materials[entry];
+    return rain_water_soil_fraction(material.surface_count,material.puddle_flags,fract(cell));
+}
 
 fn fine_record(cell: u32, lane: u32) -> vec4<f32> {
     let i=cell*3u+lane;
@@ -206,7 +232,11 @@ fn fs_main(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f
     let body = rain_water_body_radiance(frame.sun_diffuse.w, sky_body, frame.sun_ambient.w,
         frame.sun_ambient.rgb, frame.sun_diffuse.rgb, max(dot(n,-frame.sun_dir_world.xyz),0.0), sun_visibility);
     let edge = smoothstep(0.001,0.012,min(water.y,local_depth));
-    let optics = rain_water_optics(local_depth, dot(n,view), reflected, body, edge*cover);
+    var optics = rain_water_optics(local_depth, dot(n,view), reflected, body, edge*cover);
+    let soil=rain_water_actual_soil(in.world.xz);
+    if (soil > 0.0) {
+        optics=rain_water_medium_optics(local_depth,dot(n,view),reflected,body,edge*cover,soil);
+    }
     var rgb = optics.rgb;
     // The shared atmosphere reflection bake excludes the sun disc. As in
     // Tidewater, add direct sun irradiance through a separately shadowed GGX

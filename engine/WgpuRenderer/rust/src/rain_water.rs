@@ -16,6 +16,9 @@ mod body_tests;
 #[cfg(test)]
 #[path = "rain_water_optics_tests.rs"]
 mod optics_tests;
+#[cfg(test)]
+#[path = "rain_water_medium_tests.rs"]
+mod medium_tests;
 type PublicationIdentity = (fine::SourceIdentity, u64, [u32; 6], u32);
 fn publication_identity(p: &WgrRainWaterPublication) -> Option<PublicationIdentity> {
     Some((
@@ -126,7 +129,11 @@ fn visible_cells(cells: &[WgrVec4], p: &WgrRainWaterParams, camera: [f32; 3]) ->
 pub struct RainWater {
     layout: wgpu::BindGroupLayout,
     terrain_layout: wgpu::BindGroupLayout,
-    empty_bind: wgpu::BindGroup,
+    medium_layout: wgpu::BindGroupLayout,
+    medium_control: wgpu::Buffer,
+    medium_bind: Option<wgpu::BindGroup>,
+    medium_generation: Option<u64>,
+    medium_uploaded_control: [u32;4],
     params: wgpu::Buffer,
     terrain_params: wgpu::Buffer,
     pipeline: wgpu::RenderPipeline,
@@ -196,14 +203,22 @@ impl RainWater {
             label: Some("rain_water_bare_terrain_layout"),
             entries: &[texture_entry(0), uniform_entry(1)],
         });
-        let empty = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("rain_water_empty"),
-            entries: &[],
+        let medium_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("rain_water_actual_medium_sources"),
+            entries: &[
+                uniform_entry(0),
+                wgpu::BindGroupLayoutEntry {binding:1,visibility:wgpu::ShaderStages::FRAGMENT,
+                    ty:wgpu::BindingType::Texture{sample_type:wgpu::TextureSampleType::Uint,
+                        view_dimension:wgpu::TextureViewDimension::D2,multisampled:false},count:None},
+                wgpu::BindGroupLayoutEntry {binding:2,visibility:wgpu::ShaderStages::FRAGMENT,
+                    ty:wgpu::BindingType::Buffer{ty:wgpu::BufferBindingType::Storage{read_only:true},
+                        has_dynamic_offset:false,min_binding_size:None},count:None},
+                uniform_entry(3),
+            ],
         });
-        let empty_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("rain_water_empty"),
-            layout: &empty,
-            entries: &[],
+        let medium_control=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label:Some("rain_water_medium_readiness"),contents:bytemuck::cast_slice(&[0u32;4]),
+            usage:wgpu::BufferUsages::UNIFORM|wgpu::BufferUsages::COPY_DST,
         });
         let reflections = crate::rain_water_reflections::Reflections::new(device, format);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -212,7 +227,7 @@ impl RainWater {
                 Some(camera),
                 Some(&layout),
                 Some(&reflections.layout),
-                Some(&empty),
+                Some(&medium_layout),
                 Some(&terrain_layout),
             ],
             immediate_size: 0,
@@ -323,7 +338,7 @@ impl RainWater {
         Self {
             layout,
             terrain_layout,
-            empty_bind,
+            medium_layout, medium_control, medium_bind:None, medium_generation:None, medium_uploaded_control:[0;4],
             params,
             terrain_params,
             pipeline,
@@ -574,6 +589,27 @@ impl RainWater {
         true
     }
 
+    pub fn prepare_medium(&mut self,device:&wgpu::Device,queue:&wgpu::Queue,
+        resources:crate::rain_water_medium::Resources<'_>) {
+        if self.medium_generation != Some(resources.revision) || self.medium_bind.is_none() {
+            self.medium_bind=Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label:Some("rain_water_current_material_sources"),layout:&self.medium_layout,
+                entries:&[
+                    wgpu::BindGroupEntry{binding:0,resource:resources.params.as_entire_binding()},
+                    wgpu::BindGroupEntry{binding:1,resource:wgpu::BindingResource::TextureView(
+                        &resources.indices.create_view(&Default::default()))},
+                    wgpu::BindGroupEntry{binding:2,resource:resources.materials.as_entire_binding()},
+                    wgpu::BindGroupEntry{binding:3,resource:self.medium_control.as_entire_binding()},
+                ],
+            }));
+            self.medium_generation=Some(resources.revision);
+        }
+        if self.medium_uploaded_control != resources.control {
+            queue.write_buffer(&self.medium_control,0,bytemuck::cast_slice(&resources.control));
+            self.medium_uploaded_control=resources.control;
+        }
+    }
+
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -710,6 +746,7 @@ impl RainWater {
         (self.count > 0 || self.fine_count > 0)
             && self.bind.is_some()
             && self.terrain_bind.is_some()
+            && self.medium_bind.is_some()
     }
     pub fn reflections_needed(&self) -> bool {
         self.drawable() && self.reflections.needed()
@@ -745,7 +782,7 @@ impl RainWater {
         pass.set_bind_group(0, camera, &[offset]);
         pass.set_bind_group(1, self.bind.as_ref().unwrap(), &[]);
         pass.set_bind_group(2, &self.reflections.bind, &[]);
-        pass.set_bind_group(3, &self.empty_bind, &[]);
+        pass.set_bind_group(3, self.medium_bind.as_ref().unwrap(), &[]);
         pass.set_bind_group(4, self.terrain_bind.as_ref().unwrap(), &[]);
         pass.set_vertex_buffer(0, self.instance.slice(..));
         pass.draw(0..24, 0..self.count);
@@ -760,6 +797,7 @@ impl RainWater {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytemuck::Zeroable;
     #[test]
     fn actual_gpu_triangular_bed_bilinear_depth_and_support_policy() {
         let (device, queue) = crate::gfx3d::cull::tests::headless()
@@ -1632,20 +1670,27 @@ mod full_draw_tests {
             1,
             &mut composer,
         );
+        // The production medium layout is populated with actual resources even
+        // when the fixture has no authored terrain material/source receipt.
+        // Readiness zero leaves its existing clear-water raster tests unchanged.
+        let medium_indices=texture("actual_pool_source_indices",wgpu::TextureFormat::R16Uint,1,1,1,
+            wgpu::TextureDimension::D2,wgpu::TextureUsages::TEXTURE_BINDING);
+        let medium_materials=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label:None,contents:bytemuck::bytes_of(&crate::ffi::WgrTerrainMaterial::zeroed()),usage:wgpu::BufferUsages::STORAGE});
+        let medium_params=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label:None,contents:bytemuck::bytes_of(&crate::ffi::WgrTerrainParams::zeroed()),usage:wgpu::BufferUsages::UNIFORM});
+        rain.prepare_medium(&device,&queue,crate::rain_water_medium::Resources {
+            params:&medium_params,indices:&medium_indices,materials:&medium_materials,revision:1,control:[0;4]});
         rain.enabled = true; // independent of ambient process environment in this required-device test
                              // Counterfactual raster-only control: same production shader, resources,
                              // geometry, blend and depth policy, changing solely front-face convention.
-        let empty_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[],
-        });
         let diagnostic_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pool_clockwise_falsifier"),
             bind_group_layouts: &[
                 Some(&camera_layout),
                 Some(&rain.layout),
                 Some(&rain.reflections.layout),
-                Some(&empty_layout),
+                Some(&rain.medium_layout),
                 Some(&rain.terrain_layout),
             ],
             immediate_size: 0,

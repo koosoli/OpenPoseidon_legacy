@@ -49,7 +49,7 @@ fn actual_thin_water_helper_is_pure_and_full_fragment_preserves_support_guards()
             .contains("rain_water_surface_optics(local_depth,view_cosine,reflected,body,coverage)")
     );
     // One helper controls both coarse/fine fs_main: no alternative optical
-    // cutoff and no simulation payload/binding added by the material module.
+    // cutoff. Medium metadata is a separate render resource, not simulation payload.
     assert_eq!(source.matches("fn fs_main(").count(), 1);
     assert_eq!(
         source

@@ -136,49 +136,7 @@ fn terrain_snow_normal(xz: vec2<f32>, world_y: f32, geometric: vec3<f32>,
 @group(2) @binding(3) var detail: texture_2d<f32>;
 @group(2) @binding(4) var ground_clamp_samp: sampler;
 @group(2) @binding(5) var jitter_map: texture_2d<f32>;
-struct TerrainUv {
-    u: vec4<f32>,
-    v: vec4<f32>,
-};
-// Mirrors WgrTerrainMaterial (wgpu_renderer.hpp / ffi.rs), 368 bytes. The two
-// pad words are load-bearing: they carry the header to the 16-byte boundary the
-// TerrainUv rows need, and a skew here renders as the wrong ground, not as an
-// error. Both sides carry a size assert; keep all three in step. 368 bytes since
-// RFG-065 appended the native Enfusion block at the end.
-const TERRAIN_SURFACE_SLOTS: u32 = 6u;
-struct TerrainMaterial {
-    legacy: u32,
-    satellite: u32,
-    mask: u32,
-    tile_normal: u32,
-    // Surface colours BY SLOT: slot k is the source's Stage(4 + 2k). 0 is a hole
-    // the source left empty, not a surface -- slot 0 of the bindless array is the
-    // white fallback, so every one of these is tested before it is sampled.
-    surfaces: array<u32, 6>,
-    surface_normals: array<u32, 6>,
-    surface_count: u32,
-    uv_source_mask: u32,
-    pad0: u32,
-    legacy_detail_normal: u32,
-    satellite_uv: TerrainUv,
-    mask_uv: TerrainUv,
-    surface_uvs: array<TerrainUv, 6>,
-    // RFG-065 -- the native Enfusion surface block. `surface_count` is 0 on those
-    // materials (an `.emat` has no LCA mask and no satellite), so these ride the
-    // LEGACY branch, not the authored one.
-    enfusion: u32,
-    detail_scale: f32,
-    middle: u32,
-    middle_scale: f32,
-    middle_blend: f32,
-    detail_max: f32,
-    detail_fade: f32,
-    legacy_detail_scale: f32,
-    // MiddleColor: a LINEAR multiplier on the middle map's texel (1,1,1 when the
-    // material names none). Own 16-byte row; puddle_flags closes it to 384 bytes.
-    middle_color: vec3<f32>,
-    puddle_flags: u32, // former padding: ground bit 0; legacy/native soft soil bit 1; authored soft slots bits 8..13
-};
+#import terrain_material::{TerrainUv, TerrainMaterial, TERRAIN_SURFACE_SLOTS}
 @group(2) @binding(6) var<storage, read> terrain_materials: array<TerrainMaterial>;
 
 // TW-WATER W3b — Tidewater Native's wet sand (bind group 3, see shore_wet.rs). In Tidewater mode
@@ -820,7 +778,7 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     // path while the authored composition is evaluated and compared.
     // This also avoids applying an unavailable texgen to legacy descriptors.
     if (material.surface_count == 0u || authored_weight == 0.0) {
-        if (material.pad0 == 1u && material.satellite != 0u) {
+        if (material.legacy_satellite_generated == 1u && material.satellite != 0u) {
             let far = smoothstep(800.0, 2400.0, length(view_pos));
             if (far <= 0.0) {
                 return AuthoredCell(sample_cell(material.legacy,cell,tile_uv,ddx,ddy),

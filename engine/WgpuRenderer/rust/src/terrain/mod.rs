@@ -282,6 +282,7 @@ pub struct Terrain {
     group2_layout: wgpu::BindGroupLayout,
 
     params_ubo: wgpu::Buffer,
+    medium_source: crate::rain_water_medium::SourceLifetime,
     snow_buffer: wgpu::Buffer,
     // Actual mission deposit from the accepted snow header. Ground deficits contain tracks
     // and roof shelter and therefore must NEVER be applied to a raised object surface.
@@ -1053,6 +1054,7 @@ impl Terrain {
             snow_buffer,
             snow_deposit_depth: 0.0,
             params: default_params,
+            medium_source: Default::default(),
             heightmap,
             heightmap_view,
             group1_bind,
@@ -1190,6 +1192,8 @@ impl Terrain {
     ) {
         self.params = params;
         let (w, h) = (params.hm_width, params.hm_height);
+        self.medium_source.begin_height(&params,w>0 && h>0 && w<=self.max_dim && h<=self.max_dim
+            && heights.len()>=(w as usize*h as usize));
         if w == 0 || h == 0 || w > self.max_dim || h > self.max_dim {
             return;
         }
@@ -1569,6 +1573,14 @@ impl Terrain {
         }
     }
 
+    pub fn set_rain_water_medium_source(&mut self,source:crate::ffi::WgrRainWaterSourceKey) {
+        self.medium_source.set_source(source);
+    }
+    pub(crate) fn rain_water_medium_resources(&self)->crate::rain_water_medium::Resources<'_> {
+        crate::rain_water_medium::Resources {params:&self.params_ubo,indices:&self.index_map,
+            materials:&self.materials,revision:self.medium_source.revision(),control:self.medium_source.control()}
+    }
+
     pub fn params(&self) -> WgrTerrainParams {
         self.params
     }
@@ -1597,6 +1609,8 @@ impl Terrain {
         height: u32,
         indices: &[u16],
     ) {
+        self.medium_source.replace_index(width,height,width>0 && height>0 && width<=self.max_dim && height<=self.max_dim
+            && indices.len()>=(width as usize*height as usize));
         if width == 0 || height == 0 || width > self.max_dim || height > self.max_dim {
             return;
         }
@@ -1628,6 +1642,7 @@ impl Terrain {
         queue: &wgpu::Queue,
         materials: &[WgrTerrainMaterial],
     ) {
+        self.medium_source.replace_materials(!materials.is_empty());
         let upload = if materials.is_empty() {
             &[WgrTerrainMaterial::zeroed()][..]
         } else {
@@ -2144,7 +2159,8 @@ mod enfusion_ground_tests {
     // assert exists to catch and cannot catch on its own. So pin the tail order too.
     #[test]
     fn the_shader_carries_the_enfusion_block_in_the_abi_order() {
-        let src = include_str!("terrain.wgsl");
+        assert!(include_str!("terrain.wgsl").contains("#import terrain_material::{TerrainUv, TerrainMaterial, TERRAIN_SURFACE_SLOTS}"));
+        let src = include_str!("../shaders/terrain_material.wgsl");
         let tail = src
             .split("surface_uvs: array<TerrainUv, 6>,")
             .nth(1)
