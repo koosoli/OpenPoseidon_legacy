@@ -8,6 +8,7 @@ param([ValidatePattern('^[0-9a-fA-F]{8,40}$')][string]$ExpectedCommit='',
  [double]$X=4975,[double]$Z=4675,
  [switch]$IncludeFarCoverOff,
  [switch]$CloudletCosts,
+ [switch]$CoarseCosts,
  [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='occupied-rain-flight',
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [switch]$SelfTest)
@@ -170,6 +171,39 @@ function Compare-Routes($dry,$rain){
  Require (($matches.overcastDifference|Measure-Object -Maximum).Maximum -le .01) 'Actual overcast differs between arms; causal comparison refused.'
  return $summary
 }
+function Parse-CoarseCosts([string[]]$lines){
+ $rows=@();$pending=$null;$phases=@('source-sink','clear','raw-transfer','limited-flux','final-cells')
+ foreach($line in $lines){
+  if($line -match 'Rain water coarse cost: advances='){
+   Require ($null -eq $pending) 'Incomplete coarse phase association before next report.'
+   $pending=@{line=$line;phases=@()}
+   if($line -match '^\[([^\]]+)\]'){$pending.reportLocal=$Matches[1]}
+   foreach($key in @('advances','steps','empty_steps','no_step','multi_step','wall_total_ms','wall_max_ms','cpu_samples','cpu_total_ms','cpu_at_wall_max_ms','steps_at_wall_max','slow_50ms')){
+    Require ($line -match ('(?:^| )'+$key+'=(-?[0-9]+(?:\.[0-9]+)?)(?: |$)')) ('Missing coarse receipt '+$key)
+    $pending[$key]=[double]::Parse($Matches[1],$culture)
+    Require ([double]::IsFinite($pending[$key])) 'Nonfinite coarse receipt.'
+   }
+   Require ($line -match 'scope=coarse-advance-thread-elapsed') 'Wrong coarse timing scope.'
+   foreach($key in @('advances','steps','empty_steps','no_step','multi_step','cpu_samples','steps_at_wall_max','slow_50ms')){Require ($pending[$key] -ge 0 -and $pending[$key]%1 -eq 0) 'Invalid coarse integer count.'}
+   Require ($pending.advances -gt 0 -and $pending.steps -le 16*$pending.advances -and $pending.empty_steps -le $pending.steps -and $pending.no_step+$pending.multi_step -le $pending.advances -and $pending.cpu_samples -le $pending.advances -and $pending.steps_at_wall_max -le 16 -and $pending.slow_50ms -le $pending.advances) 'Impossible actual coarse counts.'
+   Require ($pending.steps -ge $pending.advances-$pending.no_step+$pending.multi_step -and $pending.steps -le $pending.advances-$pending.no_step+15*$pending.multi_step) 'Actual zero/multiple step counts do not bound total steps.'
+   Require ($pending.wall_total_ms -ge $pending.wall_max_ms -and $pending.wall_max_ms -ge 0 -and $pending.cpu_total_ms -ge 0 -and ($pending.cpu_at_wall_max_ms -eq -1 -or $pending.cpu_at_wall_max_ms -ge 0)) 'Invalid coarse elapsed/thread timing.'
+   Require ($pending.cpu_samples -gt 0 -or ($pending.cpu_total_ms -eq 0 -and $pending.cpu_at_wall_max_ms -eq -1)) 'Unavailable thread samples claimed CPU cost.'
+  }elseif($line -match 'Rain water coarse phase: phase=(\S+) calls=(\d+) total_ms=([0-9.]+) max_ms=([0-9.]+) scope=nested-coarse-step'){
+   Require ($null -ne $pending) 'Orphan coarse phase report.'
+   $name=$Matches[1];$calls=[int64]$Matches[2];$total=[double]::Parse($Matches[3],$culture);$max=[double]::Parse($Matches[4],$culture)
+   Require ([double]::IsFinite($total) -and [double]::IsFinite($max)) 'Nonfinite coarse phase timing.'
+   $index=$pending.phases.Count
+   Require ($index -lt 5 -and $name -ceq $phases[$index] -and $total -ge $max -and $max -ge 0 -and ($calls -gt 0 -or ($total -eq 0 -and $max -eq 0))) 'Coarse phase identity/order/timing mismatch.'
+   $expected=if($index -eq 2 -or $index -eq 3){$pending.steps-$pending.empty_steps}else{$pending.steps}
+   Require ($calls -eq $expected) 'Actual coarse steps and empty-pass phase calls disagree.'
+   $pending.phases+=,@{name=$name;calls=$calls;totalMs=$total;maxMs=$max}
+   if($pending.phases.Count -eq 5){$rows+=,$pending;$pending=$null}
+  }
+ }
+ Require ($null -eq $pending) 'Incomplete final coarse phase receipt.'
+ return $rows
+}
 if($SelfTest){
  function Refuses([scriptblock]$body){$failed=$false;try{& $body|Out-Null}catch{$failed=$true};Require $failed 'Unsafe fixture accepted.'}
  $recipe=Dry-WeatherRecipe 2048 6.25
@@ -229,6 +263,12 @@ if($SelfTest){
  Refuses {Compare-Routes $arm $bad};$bad=$arm|ConvertTo-Json -Depth 12|ConvertFrom-Json;foreach($q in $bad.samples){$q.state.x+=200}
  Refuses {Compare-Routes $arm $bad}
  $bad=$arm|ConvertTo-Json -Depth 12|ConvertFrom-Json;$bad.waterBefore.spacing=50;Refuses {Compare-Routes $arm $bad}
+ $coarse=@('Rain water coarse cost: advances=60 steps=4 empty_steps=1 no_step=56 multi_step=0 wall_total_ms=42.000000 wall_max_ms=12.000000 cpu_samples=60 cpu_total_ms=31.000000 cpu_at_wall_max_ms=0.000000 steps_at_wall_max=1 slow_50ms=0 scope=coarse-advance-thread-elapsed')
+ foreach($phase in @('source-sink','clear','raw-transfer','limited-flux','final-cells')){$calls=if($phase -match 'transfer|flux'){3}else{4};$coarse+=('Rain water coarse phase: phase='+$phase+' calls='+$calls+' total_ms=2.000000 max_ms=1.000000 scope=nested-coarse-step')}
+ Require (@(Parse-CoarseCosts $coarse).Count -eq 1) 'Complete actual coarse receipt rejected.'
+ Refuses {Parse-CoarseCosts ($coarse[0..4])};Refuses {Parse-CoarseCosts ($coarse[1..5])}
+ $badCoarse=$coarse.Clone();$badCoarse[3]=$badCoarse[3].Replace('calls=3','calls=4');Refuses {Parse-CoarseCosts $badCoarse}
+ $badCoarse=$coarse.Clone();$badCoarse[0]=$badCoarse[0].Replace('steps=4','steps=9999');Refuses {Parse-CoarseCosts $badCoarse}
  Write-Output 'Occupied flight performance pure helpers PASS; no game/profile/GPU used.';return
 }
 Require ([bool]$ExpectedCommit -and [bool]$env:LOCK_OWNER) 'Supply installed ExpectedCommit and invoke with-game-lock.sh.'
@@ -242,7 +282,7 @@ function Same-Pair($a,$b){Require ($a.stamp -ceq $b.stamp -and $a.exe -ceq $b.ex
 $before=Pair
 $campaign=Join-Path $root ('build/rain-helicopter/'+$Label+'-'+(Get-Date -Format yyyyMMdd-HHmmss)+'-'+[guid]::NewGuid().ToString('N').Substring(0,6))
 New-Item -ItemType Directory -Force $campaign|Out-Null
-$settings=@{POSEIDON_RAIN_TRACE='1';POSEIDON_SNOW_TEST_DEPTH='0';POSEIDON_SNOWLINE='off';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_TERRAIN_JITTER='0';WGR_TEMPORAL='0';WGR_LOD_GOVERNOR_RANGE='1';POSEIDON_VSYNC='0';POSEIDON_ROTOR_LAND_TRACE='0';WGR_WEATHER_COVER_TRACE='0';POSEIDON_RAIN_WATER_FINE='0';WGR_RAIN_WATER_FINE='0';POSEIDON_SIM_VEHICLE_COST=$(if($CloudletCosts){'1'}else{'0'})}
+$settings=@{POSEIDON_RAIN_TRACE='1';POSEIDON_SNOW_TEST_DEPTH='0';POSEIDON_SNOWLINE='off';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_TERRAIN_JITTER='0';WGR_TEMPORAL='0';WGR_LOD_GOVERNOR_RANGE='1';POSEIDON_VSYNC='0';POSEIDON_ROTOR_LAND_TRACE='0';WGR_WEATHER_COVER_TRACE='0';POSEIDON_RAIN_WATER_FINE='0';WGR_RAIN_WATER_FINE='0';POSEIDON_SIM_VEHICLE_COST=$(if($CloudletCosts){'1'}else{'0'});POSEIDON_RAIN_WATER_COST=$(if($CoarseCosts){'1'}else{'0'})}
 $clear=@('POSEIDON_TEST_RAIN','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','POSEIDON_SNOW_SHELTER','WGR_CLOUD_COVERAGE','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_TERRAIN_PUDDLE_WETNESS','WGR_WEATHER_COVER','WGR_WEATHER_COVER_FAR')
 $keys=@(@($settings.Keys)+$clear+@('POSEIDON_USER_DIR')|Select-Object -Unique);$saved=@{}
 foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
@@ -389,6 +429,7 @@ try{
   $allLogs=@($lines)+@(Read-CompleteLogLines (Join-Path $armDir 'stdout.txt'))+@(Read-CompleteLogLines (Join-Path $armDir 'stderr.txt'))
   $allLogs=$allLogs -join "`n"
   if($CloudletCosts){Require ($allLogs -match 'Sim cloudlet cost over \d+ ticks: stage=cloudlets.runoff-advance') 'Requested actual nested runoff CPU accounting is absent.'}
+  if($CoarseCosts){$arm.coarseCosts=@(Parse-CoarseCosts $lines);Require ($arm.coarseCosts.Count -ge 15 -and ($arm.coarseCosts.steps|Measure-Object -Sum).Sum -gt 0) 'Requested actual coarse steps/phase receipts absent.'}
   Require ($allLogs -notmatch 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION|Unbekannter Operator') 'Runtime/script/renderer failure.'
   if($control -ceq 'FarCoverOff'){Require ($allLogs -match 'weather cover far cascade: enabled=false' -and $allLogs -notmatch 'weather cover far map:') 'Production far-cover OFF not proved.'}
   else{Require ($allLogs -match 'weather cover far cascade: enabled=true') 'Production default far-cover not proved.'}

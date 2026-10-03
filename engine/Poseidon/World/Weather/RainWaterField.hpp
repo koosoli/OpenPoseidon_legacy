@@ -9,6 +9,7 @@
 #include <map>
 #include "RainWaterFine.hpp"
 #include "RainWaterForcing.hpp"
+#include "RainWaterCost.hpp"
 
 namespace Poseidon
 {
@@ -94,6 +95,7 @@ public:
             if(_fine->Revision()!=before)SyncFine();return;
         }
         if (_bed.empty() || !std::isfinite(seconds) || seconds <= 0 || !std::isfinite(rain)) return;
+        RainWaterCost::AdvanceScope cost;
         rain = std::clamp(rain, 0.0f, 1.0f);
         sunlight = std::isfinite(sunlight) ? std::clamp(sunlight, 0.0f, 1.0f) : 0;
         wind = std::isfinite(wind) ? std::clamp(wind, 0.0f, 1.0f) : 0;
@@ -102,7 +104,7 @@ public:
         // Fixed steps make pause and ordinary frame-rate partitions equivalent.
         int steps = 0;
         while (_pending + 1e-7 >= StepSeconds && steps++ < 16) {
-            Step(rain, sunlight, wind); _pending -= StepSeconds;
+            Step(rain, sunlight, wind, cost); _pending -= StepSeconds;
         }
     }
     Sample At(float x, float z) const
@@ -419,7 +421,8 @@ private:
             if (z+1<_height) visit(a,Index(x,z+1),false);
         }
     }
-    void Step(float rain, float sunlight, float wind) {
+    void Step(float rain, float sunlight, float wind, RainWaterCost::AdvanceScope& cost) {
+        RainWaterCost::PhaseTimer phase(cost.Active());
         const double area = static_cast<double>(_spacing) * _spacing;
         const float input = rain * static_cast<float>(RainWaterMaximumRainMetresPerSecond) * StepSeconds;
         const float evaporation = (0.000002f + sunlight * 0.000006f + wind * 0.000001f) * StepSeconds;
@@ -437,8 +440,11 @@ private:
             _depth[i] -= evaporated; _budget.evaporation += evaporated * area;
             hasWater |= _depth[i] > 0;
         }
+        phase.End(RainWaterCost::Phase::SourceSink);
+        cost.Step(!hasWater);
         std::fill(_out.begin(),_out.end(),0); std::fill(_delta.begin(),_delta.end(),0);
         std::fill(_flowX.begin(),_flowX.end(),0); std::fill(_flowZ.begin(),_flowZ.end(),0);
+        phase.End(RainWaterCost::Phase::Clear);
         // Every donor is exactly dry after the unchanged source/sink pass.
         // Transfer then returns +0 on every edge. Preserve the clears, final
         // cell pass, budgets and revision, but avoid two empty edge traversals.
@@ -450,6 +456,7 @@ private:
                 (alongX ? _edgeX[edgeX++] : _edgeZ[edgeZ++]) = f;
                 _out[f>0?a:b] += std::abs(f);
             });
+            phase.End(RainWaterCost::Phase::RawTransfer);
             // Bed/depth do not change between these passes. Reuse only the raw
             // transfer from this step, in the same interleaved row/axis edge order;
             // donor normalization, delta and flow writes retain their exact order.
@@ -466,6 +473,7 @@ private:
                 const float velocity = f * _spacing / StepSeconds / std::max(_depth[donor],0.0001f);
                 flow[a] += velocity * 0.5f; flow[b] += velocity * 0.5f;
             });
+            phase.End(RainWaterCost::Phase::LimitedFlux);
         }
         for (size_t i=0; i<_depth.size(); ++i) {
             _depth[i] = std::max(0.0f,_depth[i]+_delta[i]);
@@ -474,6 +482,7 @@ private:
             }
         }
         ++_revision;
+        phase.End(RainWaterCost::Phase::FinalCells);
     }
     int _width=0,_height=0;
     float _spacing=1,_originX=0,_originZ=0,_seaLevel=0;

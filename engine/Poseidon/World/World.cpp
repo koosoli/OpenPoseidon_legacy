@@ -15,6 +15,7 @@
 #include <Poseidon/World/SimStageGraph.hpp>
 #include <Poseidon/AI/AICostAccum.hpp> // PERF-014: the AI stage's per-bucket accumulator
 #include "SimVehicleCost.hpp" // PERF-023: the Vehicles stage, by sub-stage and kind
+#include "Weather/RainWaterCost.hpp"
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/WorldChatInput.hpp>
 #include <Poseidon/World/WorldInputContext.hpp>
@@ -1228,6 +1229,24 @@ void World::Simulate(float deltaT, bool& enableDraw)
                          km(SimVehCost::Kind::Other) * vInv, kc(SimVehCost::Kind::Other) * vInv);
             }
             SimVehCost::Reset();
+            if (RainWaterCost::Enabled())
+            {
+                const auto& water=RainWaterCost::Costs();
+                if (water.advances)
+                {
+                    LOG_INFO(World, "Rain water coarse cost: advances={} steps={} empty_steps={} no_step={} multi_step={} "
+                                    "wall_total_ms={:.6f} wall_max_ms={:.6f} cpu_samples={} cpu_total_ms={:.6f} "
+                                    "cpu_at_wall_max_ms={:.6f} steps_at_wall_max={} slow_50ms={} scope=coarse-advance-thread-elapsed",
+                             water.advances,water.steps,water.emptySteps,water.noStepAdvances,water.multiStepAdvances,
+                             water.wallMs,water.maxWallMs,water.cpuSamples,water.cpuMs,
+                             water.cpuAtMaxWallMs,water.stepsAtMaxWall,water.slowAdvances);
+                    for (size_t i=0;i<RainWaterCost::PhaseCount;++i)
+                        LOG_INFO(World, "Rain water coarse phase: phase={} calls={} total_ms={:.6f} max_ms={:.6f} scope=nested-coarse-step",
+                                 RainWaterCost::Name(static_cast<RainWaterCost::Phase>(i)),water.phaseCalls[i],
+                                 water.phaseMs[i],water.phaseMaxMs[i]);
+                }
+                RainWaterCost::Reset();
+            }
         }
     }
     // Read AFTER the loop: Alpha() is the remainder the ticks did not consume, so
