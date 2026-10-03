@@ -11,7 +11,7 @@ CPU rain, actual SnowField, sand publication, TW descriptor policy and script
 self-tests pass. Authoritative ledger validator passes24systems/82callsites.
 
 Actual old installed8aca baseline `old-liquid-altitude-population-20261003-
-111809` (directory has a unique suffix) has three normal zero exits/stable hashes,
+111802-0ce886` has three normal zero exits/stable hashes,
 26 sampled updates per arm and liquid rain1 throughout. Median ground drops1439,
 sim75.5us/draw66us;117.58m drops3995, sim214us/draw193.5us;300m drops3999,
 sim217us/draw179.5us. This confirms the altitude population mechanism in an
