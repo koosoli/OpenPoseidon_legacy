@@ -7282,6 +7282,35 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     {
         d.flags |= WGR_DRAW3D_MONITOR;
     }
+    // MAT-053: a blended, depth-test-only section whose texture is MOSTLY SOLID. The renderer's
+    // depth prepass then lays depth for its fully solid texels. Two routes reach here: the
+    // back-to-front revisit of an object's blend sections (MAT-048 made it depth-test only), and
+    // a whole-alpha object (passNum 2) whose sections are NoZWrite -- spec_destrb_d's big1_r is
+    // one, every wall and floor on big2c.paa (95.4% a=255), and through it each storey showed the
+    // rooms behind and below it. The texture gate keeps real translucency out: glass is almost all
+    // partial alpha and smoke has no large solid body, so neither has 75% of its texels at 255.
+    const bool mostlySolidTexture = texture && texture->AlphaStatsView().pctOpaque >= 75.0;
+    if (d.blend == WGR_BLEND_ALPHA && d.depth == WGR_DEPTH_TEST &&
+        (render::GBlendSectionDepthReadOnly || mostlySolidTexture) &&
+        desc.surface != render::SurfaceMode::OnSurface)
+    {
+        d.flags |= WGR_DRAW3D_BLEND_SECTION;
+        // WGR_BLEND_PASS_TRACE=1 (the MAT-051 revisit trace) also names the textures MAT-053 flags.
+        static const bool trace = []
+        {
+            const char* v = std::getenv("WGR_BLEND_PASS_TRACE");
+            return v && *v == '1';
+        }();
+        if (trace && texture && texture->Name())
+        {
+            static std::unordered_set<std::string> logged;
+            if (logged.size() < 60 && logged.insert(texture->Name()).second)
+            {
+                LOG_WARN(Graphics, "MAT-053 blend section: tex={} alpha_ref={} offset={}", texture->Name(), d.alpha_ref,
+                         d.flags & (WGR_DRAW3D_ON_SURFACE | WGR_DRAW3D_ZBIAS_MASK));
+            }
+        }
+    }
     if (desc.blend != render::BlendMode::Shadow)
     {
         if (desc.surface == render::SurfaceMode::OnSurface)
