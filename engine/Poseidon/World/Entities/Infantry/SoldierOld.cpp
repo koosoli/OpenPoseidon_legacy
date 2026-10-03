@@ -1309,7 +1309,7 @@ bool Man::StartCorpseArticulation(RString& refusal)
             ++fittedVertices;
             if (!finite || !std::isfinite(clearance) || clearance < 0.003f || clearance > 0.8f || distance > 2.5f)
             {
-                if (fitRefusal.IsEmpty())
+                if (fitRefusal.GetLength() == 0)
                 {
                     Vector3 floor = VZero;
                     const auto filter = Physics::QueryFilter{Physics::ColliderFlags::Roadway};
@@ -1327,7 +1327,7 @@ bool Man::StartCorpseArticulation(RString& refusal)
             ++vertex;
         }
     }
-    if (!fitRefusal.IsEmpty())
+    if (fitRefusal.GetLength() != 0)
     {
         char detail[1024];
         std::snprintf(detail,sizeof(detail),"inset-collider-contact-or-bounds-not-admitted %s minimumClearance=%.9g maximumRootDistance=%.9g fittedVertices=%d",
