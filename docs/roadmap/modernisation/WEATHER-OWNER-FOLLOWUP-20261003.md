@@ -1,5 +1,16 @@
 # Weather owner follow-up, 3 October 2026
 
+Actual13:48 native Noe ON sunny9e5936 passes normal exit/stable bd pair,
+unedited native geometry, actual ownership, pause/return and no-input budgets.
+Captured actual solar exposure0.953973→0.935756 with negative daytime travelY,
+night0 and near-clear sky. Shallow stopped candidate5.154078mm→exact0; global
+volume614604.208→352067.985m³ with rain input901958.649m³ unchanged. The deeper
+owned focus2.217543→2.248517m receives continued runoff, so no local-pool drying
+claim is made there. Low view has readable sky/tree SSR, but root rejects the
+visible squared cell boundaries in the top view. Fine owners stay defaultOFF;
+surface reconstruction/cost and broader visible drying remain open. The runner
+now also captures the deeper focus after drainage, preserving exact pause state.
+
 Latest13:35 source/runtime checkpoint: actual occupied four-arm flight8b38bb
 passes normal exits, stable installed bd pair, zero dropped ordered captures,
 matched clouds/ranges and closely overlapping physical routes. Default dry/rain

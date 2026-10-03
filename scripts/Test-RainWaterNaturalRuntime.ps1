@@ -265,6 +265,14 @@ try{
    Assert-Budget $drained.field;Unedited $drained.source
    Assert-DryingSun $drained.weather ([bool]$SunnyDrain)
    Require ($drained.field.rainVolume -eq $stopped.field.rainVolume -and $drained.field.volume -lt $stopped.field.volume) 'Actual no-input runoff did not drain without mass invention.';$arm.gates.drained=$drained;Capture 'after-rain-drained-candidate'
+   # Keep the actual deeper pool visible in the after-rain record too. A
+   # draining catchment may still feed it; do not imply every local depth falls.
+   if($on){
+    $ownedPoint=@($localPoints|Where-Object{$_.name -ceq 'owned-focus'})[0]
+    View $ownedPoint.x ($ownedPoint.z-18) ($ownedPoint.drained.terrainY+4) 0 -12;Capture 'after-rain-owned-water-near'
+    View $ownedPoint.x $ownedPoint.z ($ownedPoint.drained.terrainY+35) 0 -89;Capture 'after-rain-owned-water-top'
+    Frozen $drained (Snapshot)
+   }
    $retirement=@{status='not-claimed-wet-retention-is-legitimate';secondsRequested=$RetirementSeconds;states=@()}
    if($on -and $RetirementSeconds -gt 0){
     $start=Clock
