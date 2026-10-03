@@ -15,11 +15,12 @@ and naturally rain-wet bands:
 - Daytime with the stock roof absent, present, and removed again.
 
 Both bands use the same actual controlled actor, world position, heading, lamp
-position/model, and raw engine camera vector. Normal initial placement simulation
-applies overcast 1 before the dry capture, matching the later wet band's actual
-cloud lighting. Rain remains dry initially and wets the soldier only through the
-existing real rain simulation. Neither rain history nor Person wetness is
-overridden. The rain intensity differs between bands; ordinary idle animation
+position/model, and raw engine camera vector. The normal zero-duration overcast
+command applies cloud lighting 1 while paused for both visual bands and restores
+the original cloud lighting before simulation resumes. It needs no rain or
+simulation-time change (`World::SetWeather`, `Weather::SetOvercast`). Rain wets
+the soldier only through the existing real rain simulation. Neither rain history
+nor Person wetness is overridden. Rain intensity differs between bands; ordinary idle animation
 may differ after elapsed wetting time. These are observational comparisons, not
 claims of exact bone-pose or pixel equality.
 

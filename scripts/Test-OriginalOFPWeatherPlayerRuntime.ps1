@@ -264,14 +264,14 @@ function Uniform-Lighting([string]$band){
  for($i=0;$i -lt 3;++$i){Require ([Math]::Abs((Number $original.position[$i])-(Number $anchor[$i])) -le .01) 'Dry/wet actor left the same standing comparison position.'}
  $direction=Number (Eval 'getDir player');Require ([Math]::Abs($direction-90) -lt .01) 'Stock comparison standing direction changed.'
  $actor=Eval 'str player';$body=Assert-Body (Lines) ($original.time-.65)
- if($band -eq 'dry'){$arm.uniformActorDebug=$actor;$arm.uniformOvercast=Number $original.weather.overcast}else{Require ($actor -ceq $arm.uniformActorDebug -and [Math]::Abs((Number $original.weather.overcast)-$arm.uniformOvercast) -lt .001) 'Dry/wet actual actor or cloud lighting differs.'}
- Require ((Number $original.weather.overcast) -ge .99) 'Opt-in dry/wet lighting requires the matching actual overcast control.'
+ if($band -eq 'dry'){$arm.uniformActorDebug=$actor}else{Require ($actor -ceq $arm.uniformActorDebug) 'Dry/wet actual actor differs.'}
  $record=@{before=$original;actor=@{class=(Eval 'typeOf player');debugName=$actor;model='data3d\mc vojakw2.p3d';modelSource=$body;position=$original.position;direction=$direction};camera=@{rawEngineView=$view;command='triSetView';effectActive=(Eval 'triGetCameraEffectActive')};views=@{};scope='Same stock standing actor and render-only camera, matching actual overcast. Rain differs between natural wetting histories. Ordinary idle animation may differ; no pose/bone equivalence or pixelwise equality claim.'}
  $lampOwned=$false;$roofOwned=$false
  try{
-  # Time-of-day jumps recalculate the real sun while simulation remains paused;
-  # they do not fabricate clothing history or attempt to change rain density.
-  Exec 'setDate [1985,6,21,16,0]';$baseline=State;Assert-Paused $original $baseline
+  # World::SetWeather applies zero-duration overcast immediately. Unlike rain,
+  # changing sky/cloud lighting needs no simulation step. Rain history stays real.
+  Exec '0 setOvercast 1;setDate [1985,6,21,16,0]';$baseline=State;Assert-Paused $original $baseline
+  Require ((Number $baseline.weather.overcast) -ge .99) 'Paused matching stock cloud lighting did not apply.'
   $pose=($view|ForEach-Object{([double]$_).ToString('R',$culture)}) -join ','
   Camera 'EXTERNAL';Require ((Eval ('triSetView ['+$pose+']')) -ceq 'OK') 'Uniform render-only view refused.'
   Require ((Number (Eval 'triGetCameraEffectActive')) -eq 0) 'Uniform render-only view suspended player controls.'
@@ -317,9 +317,10 @@ function Uniform-Lighting([string]$band){
   if($roofOwned){Remove-TerrainPuddleStockRoof -SendCommand ${function:Send}}
   if($lampOwned){Exec 'uniformStockLamp switchLight "OFF";deleteVehicle uniformStockLamp';Require ((Eval 'isNull uniformStockLamp') -eq $true) 'Owned comparison lamp deletion failed.'}
   Require ((Eval 'triClearView') -ceq 'OK') 'Uniform render-only camera did not release.'
-  Exec 'setDate [1985,6,21,16,0]'
+  Exec ('setDate [1985,6,21,16,0];0 setOvercast '+([double]$original.weather.overcast).ToString('R',$culture))
  }
  Start-Sleep -Milliseconds 500;$record.after=State;Assert-Paused $original $record.after
+ Require ([Math]::Abs((Number $record.after.weather.overcast)-(Number $original.weather.overcast)) -lt .001) 'Original cloud lighting was not restored.'
  Require ([Math]::Abs((Number (Eval 'getDir player'))-$direction) -lt .01) 'Comparison changed actual standing direction.'
  return $record
 }
@@ -349,9 +350,6 @@ try{
   $stream=$client.GetStream();$stream.ReadTimeout=30000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
   Start-Sleep -Seconds 12;Require ((Eval 'triSceneReady')-ceq 'OK') 'Original world mission not ready.'
   Exec 'player allowDamage false;0 setFog 0;0 setOvercast 0;0 setRain 0;setDate [1985,6,21,16,0];setAccTime 0'
-  # Applied through the normal weather/ordinary placement simulation before
-  # taking either band; rain is still initially zero and wets cloth only later.
-  if($UniformLightingViews){Exec '0 setOvercast 1;0 setRain 0'}
   $null=Send @{cmd='dev_snow';action='disable'};$null=Send @{cmd='weather_particles';action='set';mode='off';density=0;snowflakes=$false}
   if($NativeHeightFixture){$arm.gates.nativeHeightFixture=Native-Heights $uniform}
   if($sand){$null=Place $sand;$arm.gates.sandSource=Source-Lane $sand 'sand';$arm.gates.sandWalk=Walk 'sand-dry-third' $sand 'sand' $true}
