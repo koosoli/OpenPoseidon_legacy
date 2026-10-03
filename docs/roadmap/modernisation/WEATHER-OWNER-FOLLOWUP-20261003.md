@@ -1,5 +1,29 @@
 # Weather owner follow-up, 3 October 2026
 
+19:10 checkpoint: matchinge81744f4 is installed after ordinary preset Box3D
+954cf87 overlay configure,627-step full game build, subsequent55-step bounded
+contact full build, native target and safety push/deploy. Actual native physics,
+articulation, affine corpse, mass/update-replay and contact tests pass2550
+assertions/64 cases. Installed pair/material and matching built PDB hashes are
+preserved under build/installed-symbols/e81744f4. Unrelated dependency baselines
+and automatic gameplay death policy remain unchanged.
+
+Actual stock b3f63f admits eleven bodies/ten joints with solver witness
+box3d0.1.0+954cf87. Initial33 affine matrices/542 points/37 proxies compare
+exactly. After actual chest impulse and0.799simsec,48 updates/max travel0.153947m
+reach541 changed point consumers and37 proxies; minimum clearance3.250122mm.
+Root inspected actual before/moving captures: visible limb motion, no acceptance
+of general corpse skin/contact quality. Clear,30s expiry and HIDEBODY release
+all handles. Campaign exits normally0 but overall FAIL: subsequent deletion
+fixture refuses external centre-ray contact before creating its new bodies.
+That gate remains intact; exact fixture placement/contact diagnosis continues.
+This establishes installed opt-in solver/consumer motion, not automatic ragdolls
+or completed all-lifecycle acceptance. Actual original Everon pub sphere190832
+passes normal exit0:49,689 static instance registrations plus one real probe,
+four positive wall rays and final projectile travel within the unchanged wall
+bound. This validates one populated native collision world for the pinned
+dependency; it is not all-map/vehicle or cross-version recording acceptance.
+
 18:46 checkpoint: matching572b838a is installed after the full committed build,
 safety push and ordinary deployment. Installed EXE/DLL/material and matching
 built PDBs are archived under build/installed-symbols/572b838a. Actual corpse
