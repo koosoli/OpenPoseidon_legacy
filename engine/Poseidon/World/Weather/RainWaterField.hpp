@@ -65,6 +65,8 @@ public:
         _bed = std::move(bed);
         _depth.resize(_bed.size()); _out.resize(_bed.size());
         _delta.resize(_bed.size()); _flowX.resize(_bed.size()); _flowZ.resize(_bed.size());
+        _edgeX.resize(static_cast<size_t>(width-1)*height);
+        _edgeZ.resize(static_cast<size_t>(width)*(height-1));
         return true;
     }
     void Reset() {
@@ -434,11 +436,18 @@ private:
         }
         std::fill(_out.begin(),_out.end(),0); std::fill(_delta.begin(),_delta.end(),0);
         std::fill(_flowX.begin(),_flowX.end(),0); std::fill(_flowZ.begin(),_flowZ.end(),0);
-        Edges([&](size_t a,size_t b,bool) {
-            const float f = Transfer(a,b); _out[f>0?a:b] += std::abs(f);
-        });
+        size_t edgeX=0,edgeZ=0;
         Edges([&](size_t a,size_t b,bool alongX) {
-            float f = Transfer(a,b); const size_t donor = f>0?a:b;
+            const float f = Transfer(a,b);
+            (alongX ? _edgeX[edgeX++] : _edgeZ[edgeZ++]) = f;
+            _out[f>0?a:b] += std::abs(f);
+        });
+        // Bed/depth do not change between these passes. Reuse only the raw
+        // transfer from this step, in the same interleaved row/axis edge order;
+        // donor normalization, delta and flow writes retain their exact order.
+        edgeX=0;edgeZ=0;
+        Edges([&](size_t a,size_t b,bool alongX) {
+            float f = alongX ? _edgeX[edgeX++] : _edgeZ[edgeZ++]; const size_t donor = f>0?a:b;
             if (_out[donor]>0) f *= std::min(1.0f,_depth[donor]/_out[donor]);
             _delta[a] -= f; _delta[b] += f;
             auto& flow = alongX ? _flowX : _flowZ;
@@ -460,6 +469,9 @@ private:
     uint64_t _revision=0, _generation=0;
     Budget _budget;
     std::vector<float> _bed,_depth,_out,_delta,_flowX,_flowZ;
+    // Configure-sized scratch: every actual edge is overwritten before use.
+    // Each vector has fewer than MaxCells floats; no allocation in Step.
+    std::vector<float> _edgeX,_edgeZ;
     std::optional<RainWaterFine> _fine;
     SourceIdentity _source;
     std::array<EditFootprint,FootprintLimit> _journal;
