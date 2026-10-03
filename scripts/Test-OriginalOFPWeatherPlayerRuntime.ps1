@@ -263,7 +263,7 @@ function Uniform-Lighting([string]$band){
  $anchor=@($arm.uniformViewAnchor);$view=Uniform-View $anchor
  for($i=0;$i -lt 3;++$i){Require ([Math]::Abs((Number $original.position[$i])-(Number $anchor[$i])) -le .01) 'Dry/wet actor left the same standing comparison position.'}
  $direction=Number (Eval 'getDir player');Require ([Math]::Abs($direction-90) -lt .01) 'Stock comparison standing direction changed.'
- $actor=Eval 'player';$body=Assert-Body (Lines) ($original.time-.65)
+ $actor=Eval 'str player';$body=Assert-Body (Lines) ($original.time-.65)
  if($band -eq 'dry'){$arm.uniformActorDebug=$actor;$arm.uniformOvercast=Number $original.weather.overcast}else{Require ($actor -ceq $arm.uniformActorDebug -and [Math]::Abs((Number $original.weather.overcast)-$arm.uniformOvercast) -lt .001) 'Dry/wet actual actor or cloud lighting differs.'}
  Require ((Number $original.weather.overcast) -ge .99) 'Opt-in dry/wet lighting requires the matching actual overcast control.'
  $record=@{before=$original;actor=@{class=(Eval 'typeOf player');debugName=$actor;model='data3d\mc vojakw2.p3d';modelSource=$body;position=$original.position;direction=$direction};camera=@{rawEngineView=$view;command='triSetView';effectActive=(Eval 'triGetCameraEffectActive')};views=@{};scope='Same stock standing actor and render-only camera, matching actual overcast. Rain differs between natural wetting histories. Ordinary idle animation may differ; no pose/bone equivalence or pixelwise equality claim.'}
@@ -280,7 +280,7 @@ function Uniform-Lighting([string]$band){
   $lampPosition=@($lampX,$lampZ,$ground);$tuple=($lampPosition|ForEach-Object{([double]$_).ToString('R',$culture)}) -join ','
   Exec ('uniformStockLamp="StreetLampWood" createVehicle ['+$tuple+'];uniformStockLamp setPosASL ['+$tuple+'];uniformStockLamp allowDamage false;uniformStockLamp switchLight "OFF"');$lampOwned=$true
   Require ((Eval 'typeOf uniformStockLamp') -ceq 'StreetLampWood' -and (Eval 'isNull uniformStockLamp') -eq $false) 'Real stock lamp failed to spawn.'
-  $lampDebug=Eval 'uniformStockLamp';$lampModel=Model-Stem $lampDebug;$actualLamp=Eval 'getPosASL uniformStockLamp'
+  $lampDebug=Eval 'str uniformStockLamp';$lampModel=Model-Stem $lampDebug;$actualLamp=Eval 'getPosASL uniformStockLamp'
   for($i=0;$i -lt 3;++$i){Require ([Math]::Abs((Number $actualLamp[$i])-$lampPosition[$i]) -le .01) 'Stock lamp placement differs from the matching fixture.'}
   if($band -eq 'dry'){$arm.uniformLampModel=$lampModel}else{Require ($lampModel -ceq $arm.uniformLampModel) 'Dry/wet stock lamp model differs.'}
   $record.lamp=@{class=(Eval 'typeOf uniformStockLamp');debugName=$lampDebug;modelStem=$lampModel;position=$actualLamp;requestedPosition=$lampPosition;config='Installed stock class and light parameters; no lamp data overrides'}
@@ -306,7 +306,7 @@ function Uniform-Lighting([string]$band){
   $roof=New-TerrainPuddleStockRoof -SendCommand ${function:Send} -X $anchor[0] -Z $anchor[1] -RoofLift 3;$roofOwned=$true
   Require ($roof.class -ceq 'CampEastC' -and $roof.model -ceq 'stan_eastC.p3d' -and $roof.roofLift -eq 3) 'Lifted stock roof identity differs.'
   & $snapshot 'roof-present' $false 'OFF'
-  $record.views['roof-present'].roof=@{class=(Eval 'typeOf puddleStockRoof');debugName=(Eval 'puddleStockRoof');position=(Eval 'getPosASL puddleStockRoof');fixture=$roof}
+  $record.views['roof-present'].roof=@{class=(Eval 'typeOf puddleStockRoof');debugName=(Eval 'str puddleStockRoof');position=(Eval 'getPosASL puddleStockRoof');fixture=$roof}
   Require ($record.views['roof-present'].roof.class -ceq 'CampEastC' -and (Model-Stem $record.views['roof-present'].roof.debugName) -ceq 'stan_eastc') 'Captured roof model/class differs from its actual master.'
   for($i=0;$i -lt 3;++$i){Require ([Math]::Abs((Number $record.views['roof-present'].roof.position[$i])-(Number $roof.actualPosition[$i])) -le .01) 'Captured roof master moved.'}
   Remove-TerrainPuddleStockRoof -SendCommand ${function:Send};$roofOwned=$false
