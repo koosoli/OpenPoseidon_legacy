@@ -1,0 +1,499 @@
+{
+  "date": "2026-10-03",
+  "base": "31b73f95",
+  "branch": "codex/dec-integration-20261003",
+  "historyIntegrationHead": "43d6a0e595c5237bd152dac14028532a1a526726",
+  "refCount": 98,
+  "refs": [
+    {
+      "branch": "safety/dec/ai-malprave-a",
+      "tip": "8ae908bb4e2cd3b110fff4665091d34dd7d5f304",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/diag-w1-malprave-diagnostics",
+      "tip": "47ec01efa0032aaf462d8b6a29547b2939dfcf6e",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/fix-blend-solid-depth",
+      "tip": "c76612d4d85a955e305bc65670431a113768ac0f",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/fix-building-cockpit-route",
+      "tip": "2c33e286bd701ea8a6e850dbd4ac8e6e2324b28f",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/fix-empty-memory-selection",
+      "tip": "5811b896e146863a70a813f5c9be26ae43c79643",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/fix-retained-world-flash",
+      "tip": "5d390885ae73b5e1fe1597fa64f156b975881332",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/fix-sp3x-soft-weights",
+      "tip": "637f9eddcdc813bd4a644f20da834262d347bfce",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/fix-terrain-change-object-caches",
+      "tip": "d9a2c402b27bc77a950282c9202f04554c034999",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/sinkhole-w0-texture-formats",
+      "tip": "da2bfbda2a5e02938832df3f69a36e6e018da588",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/sinkhole-w1-terrain-holes",
+      "tip": "eadd26d6efaba75c8b767c3fda0fc36206b1442c",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/sinkhole-w1b-cave-lighting",
+      "tip": "25c2035e544d669167d6b6c424999554a95ada1c",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/sinkhole-w3-swimming",
+      "tip": "145eeeca53492c82f91091d61cc26cda9ab46350",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-showcase",
+      "tip": "368bd9783212aa7c7006ac4f7eb36e710f476ec4",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w1-backend",
+      "tip": "9b49f270b3e0aaf01a72d4b8ce360a359d849574",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w10a-lip-facing",
+      "tip": "5e4a9eeacce7b1e2ad93dc6cc3b56c54707ffac4",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w10b-surf-glare",
+      "tip": "82b06f45f37a2465945907b727311e136ddb6774",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w10c-lip-switch",
+      "tip": "936e199b2f734fdb064e262897a36d5191c0f8c0",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w10d-backlit-surf",
+      "tip": "a56a59a3429cb14f06d48cb95320047974719950",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w10e-spray-veil",
+      "tip": "7751729be7ca6accdd816ebd74a460defaae64fd",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w10f-surf-texture",
+      "tip": "ce00dd24982f91c87400a99416a54d988dc2fd61",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w10g-far-triangles",
+      "tip": "178e7e6102c61a0a1644a03b553d33e388c22bf6",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w11a-wake-render-pose",
+      "tip": "fd090c8fd2c1b371d5670ad84edd58bb7201ace9",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w11b-boat-planing",
+      "tip": "8fc4a4ddb962bd32566088a0e279976428acbc69",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w11c-boat-draft",
+      "tip": "01a0bd928e7fbc89ed236614e221d596571677c5",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w11d-buoyancy-diag",
+      "tip": "0ec4f70c27af327ae792336ea33058d794414636",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w11e-boat-drag",
+      "tip": "bccf4b40e2ab079001f8ad3eb77bf52aa653963b",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w12a-spray-after-clouds",
+      "tip": "ad347ecd51b81d7be80ca931c503209ef861984d",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w12b-spray-ab",
+      "tip": "d56f91b355f73f85bf08800252da669590a21d20",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w12c-no-drowning",
+      "tip": "28a74e9610ec690b683eb71f3a6f65fac10a53bd",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w12d-mesh-waterline",
+      "tip": "3cbe1b52d27ceeaf8e194740704515a87ef78ccd",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w12e-docs-showcase",
+      "tip": "95a9eb1d6feb566845b2bed12e503e22410fbc68",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w2-open-sea",
+      "tip": "a47e58a92e88e9792aa0c9da380ca0503b164275",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w3-shore",
+      "tip": "a2b9c13539301ddc2bdb7127628c098ff00595a5",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w3e-boat-sea",
+      "tip": "9a21b21665b14aca9d9df301d6f2f5498ab0192c",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w3f-colour",
+      "tip": "a017b9525eb986519176a70bf49c5cd6fa922966",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w3g-sea",
+      "tip": "01134959d97259182de388c58bd0fa89c61b6aca",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w3h-colour-diag",
+      "tip": "5e25b9a0234b185fce187ae5825a1f358b0b66d9",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w3i-light-log",
+      "tip": "dee7bd9e034104c3c5dee199c70f40ef849296b1",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w3j-glow",
+      "tip": "b9b008df87d6a85b74c4a89db27f3d2fa0aee999",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w3j1-glow-default",
+      "tip": "150499917c94c1253f1933f7d67cb2bf19681cbf",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w3k-sim-fade",
+      "tip": "e85b4e2a31439cc4cfdbeb0dbe78a175b9b1fa3a",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w3l-smooth-surf",
+      "tip": "d01443494b89a3ca2137cd90a474c62cb2dfeffb",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w3m-foam-debug",
+      "tip": "b9fa6e45f1e19bb54c8b30b2ff87399a5c09c9ff",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w3n-sim-foam-fade",
+      "tip": "68f3adffcecf0127b4bcd322d6891a337646307c",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w4a-spray",
+      "tip": "1679202801162587599b455803914b6adc1ecb01",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w4a1-spray-fix",
+      "tip": "a1f21d4c1f6b522422fbe331744811664ad41079",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w4a2-spray-diag",
+      "tip": "d90db853b4f969b56172cbf20cc4db3dffa3984a",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w4a3-spray-dots",
+      "tip": "8fd27504c8c8753473995e39f102403173da72ac",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w4b-reactive",
+      "tip": "fe0609395fc9d83a8b040763796a82a072ea3bf8",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w5a-underwater",
+      "tip": "2e136095d77c124efd59da0c5f4085cacfb1281f",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w5a1-underwater-medium",
+      "tip": "a08822eb5001dbb3a9692079c1701be442282357",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w5b-caustics",
+      "tip": "602463e9229819bf75e9e3550127ac1c1bde3c75",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w5c-underwater-cameras",
+      "tip": "16447853a736b7b4c621444efb82ca113a97cba6",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w5d-no-clouds-underwater",
+      "tip": "50c75b502bdefa2550b9b4733993ce3acb972930",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w5e-diver-torch",
+      "tip": "da90168007e476e938fdb2eb9d7a28b4bc8758bd",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6a-wrecks-sink",
+      "tip": "98aee494861960842b32bf97018f78c427a13a9a",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6a1-wreck-cars",
+      "tip": "47a19db57c54842d745dcf0e5a2d66ff3c139bfc",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6a2-wreck-boats",
+      "tip": "8045c4f9881bfabfc9686d3b7baa4cded626c249",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6b-weather-sea",
+      "tip": "6d46cd52a59c57289355b8896bace963e12a2638",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6c-wreck-fire-craters",
+      "tip": "7be862a6f44b31ed12e1f07da573cea9dc3bad72",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6d-amphib-dev",
+      "tip": "3e99fee6f120dc0be9ba943d5f51356dc889524f",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6e-cars-on-water",
+      "tip": "a28b3f03292f6bc6175073cf542917ab3f62cea3",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6f-plane-waves",
+      "tip": "09adb3ef1bc899457aed384ed3a23ecb5e11b1a8",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6g-car-water-path",
+      "tip": "e10f5e746a565b88c74a3c65a38c1f0c5ab9730e",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6h-boat-wakes",
+      "tip": "6807a089de5d15979dd52ee1e50184ea1f62bae8",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6h1-wake-tune",
+      "tip": "519d370a1703ae35d45818883191e1e7bbc0c7ca",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6h2-wake-defaults",
+      "tip": "2a373d8fc7da77c90dacd350a8b2981b06876199",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6i-bow-spray",
+      "tip": "421c908da5c35bf57871017c6cff500cdf272a12",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6i1-bow-white",
+      "tip": "f2a3dedd5a0e203f56d6721300671e153ede417f",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6i2-fine-bow",
+      "tip": "53c5e97cc387f8b5a2451bcf159224fb4d2e6bf4",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6i3-spray-diag",
+      "tip": "92e3457db3cc0346d2efe357299efcdd6904052e",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6i4-spray-diag",
+      "tip": "c0989c8cba4162f2313c29fe84a48d128b4621b1",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6i5-spray-diag",
+      "tip": "950fd5d0f7bc937ee243ded460aa8531d0509875",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6i6-no-legacy-boat-fx",
+      "tip": "5eeb70dc8f42817f67213100411d47deaadc11f6",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6i7-view-space",
+      "tip": "35c18b71dc64d8dc4c79be5bcb323880198f84d2",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6i8-bow-drops",
+      "tip": "45669470608109bf4f853be3c4d73c27bcab51f9",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6j-spray-diag",
+      "tip": "9b84ff8bd2a22336d51f66b3ab7b44759d7d560a",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6j1-spray-diag-series",
+      "tip": "aad3e1e6115c39c7da4d876a2d1e9e4287289f99",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6k-spray-tune",
+      "tip": "6164825f26fe22d5ea8a8c21ebfd64bd7f02baad",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w6l-spray-defaults",
+      "tip": "5b237b2886a039df114bf751b24b2cd074af34d5",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w7a-frame-stats",
+      "tip": "9deb0b02b8f5e30da9ecb1401898a29f4502bf24",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w7b-cpu-stats",
+      "tip": "3ec8517e25433ac1cd66e123b23d4ab87b57cc90",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w7c-async-stations",
+      "tip": "c628fd603301357cbd960a496c8080858ce4f3b9",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w7d-credits-docs",
+      "tip": "268a50580b065b86e41cf300f01c2ea5b04bb82b",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w7e-early-submit",
+      "tip": "dba3881c8895cc875f1f76847b528f0c8f14ce8c",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w7f-early-submit-default",
+      "tip": "5fb37a404add9a0269e00dbee3d0c694f0fadd9e",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w7g-report",
+      "tip": "080f076fd0d55209ab1e4a02aebd8151d447a4e6",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w7h-measurements",
+      "tip": "145f123c3e573103ec880c4d2c41d07591b041fe",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w7i-report-update",
+      "tip": "d35c18e9169a5af6323341189b8412c3f0d9ffb7",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w7j-underwater-stats",
+      "tip": "e995a2f54f217529bc82a6d08f80919db176a7d2",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w7k-report-final",
+      "tip": "c31600e04e4a275e0f961e7087bc7eeb7ad7ecdc",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w8a-water-burst",
+      "tip": "1f295e495fc5f3832956e50a22f3e4b91ff0d5ce",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w8b-impact-splash",
+      "tip": "c8f1491daf2f901b898caea5e882aabf728e552f",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w9-water-reports",
+      "tip": "f2bc233dcc3ca0a80e6846684c462b3bc59e9709",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w9d-view-side",
+      "tip": "eed5c73149917e2eb747be1baabb2a1c2e327a79",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w9e-meniscus",
+      "tip": "794eb826a812132d124074d6b630722de2a16eff",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w9f-far-bed",
+      "tip": "118d8478cccbedbb3019b56a92cce530c515f3fb",
+      "ancestorOfIntegration": true
+    },
+    {
+      "branch": "safety/dec/tidewater-w9g-no-ssr-high",
+      "tip": "bc2b9915ff76d46029dfe49eef8baa474bcf6699",
+      "ancestorOfIntegration": true
+    }
+  ]
+}

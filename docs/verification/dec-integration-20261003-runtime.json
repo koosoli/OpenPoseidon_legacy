@@ -1,0 +1,192 @@
+{
+  "schema": 1,
+  "branch": "codex/dec-integration-20261003",
+  "baseline": "31b73f95",
+  "installed": "codex/dec-integration-20261003 48fbf279 2026-10-03_23:33 deploy-ps1",
+  "files": [
+    {
+      "bytes": 31336448,
+      "writtenUtc": "2026-10-03T21:31:08.4516613Z",
+      "name": "OpenPoseidon.exe",
+      "sha256": "45738886B36EE3F020BE35DBE64A2174A3DD5BF54E0D057187F4226D06FDDFF4"
+    },
+    {
+      "bytes": 18498048,
+      "writtenUtc": "2026-10-03T21:30:15.3897875Z",
+      "name": "wgpu_renderer.dll",
+      "sha256": "C90D5598F2933F1B3C2205149E9D16630B913457A0C5105EC7BF8AE7EE96BCE4"
+    }
+  ],
+  "rendererSuite": {
+    "passed": 687,
+    "failed": 0,
+    "ignored": 5,
+    "explicitPostOpticsPassed": 1,
+    "log": "build/dec-integration-renderer-tests-final.log"
+  },
+  "native": {
+    "texturesHolesDiagnostics": "276 assertions/22 cases PASS",
+    "corpse": "2794 assertions/14 cases PASS"
+  },
+  "diagnostics": {
+    "passed": true,
+    "eventCount": 48,
+    "stepAdvanceSeconds": 0.08499999999999996,
+    "exit": 0,
+    "source": "build/dec-diagnostics/20261003-233347/result.json"
+  },
+  "optionalAi": {
+    "passed": true,
+    "configuration": {
+      "archiveSha256": "0CFD7E9B0C2C0203118ED3A04E2CA09DC3E0A323FDF0655FCDC31CD9D3303E48",
+      "scope": "Addon mount and hunting/interval config consumption; firefight behavior not exercised",
+      "runtimeReceipt": "[2026-10-03 23:41:43.699] [app-fc80] [INFO] [WORLD]   CfgAIFork (AIHunt): found hunting=1 grenadeInterval=5.0"
+    },
+    "exit": 0,
+    "source": "build/dec-diagnostics/20261003-234122/result.json"
+  },
+  "corpse": {
+    "status": "passed",
+    "scope": "installed explicit owned affine corpse freeze, exact full consumed pose retention and bounded fixture generation invalidation; ordinary deaths and automatic expiry freeze remain disabled",
+    "gates": [
+      {
+        "name": "expiry",
+        "passed": true
+      },
+      {
+        "name": "articulatedHideCleanup",
+        "passed": true
+      },
+      {
+        "name": "beforeHideFreezeHandles",
+        "passed": true
+      },
+      {
+        "name": "liveRefusal",
+        "passed": true
+      },
+      {
+        "name": "defaultArticulationInactive",
+        "passed": true
+      },
+      {
+        "name": "movingArticulationHandles",
+        "passed": true
+      },
+      {
+        "name": "articulatedZeroMotionEquivalence",
+        "passed": true
+      },
+      {
+        "name": "explicitClear",
+        "passed": true
+      },
+      {
+        "name": "activeWorldRetireRefusal",
+        "passed": true
+      },
+      {
+        "name": "frozenPersistenceHandles",
+        "passed": true
+      },
+      {
+        "name": "explicitFreeze",
+        "passed": true
+      },
+      {
+        "name": "articulatedClearCleanup",
+        "passed": true
+      },
+      {
+        "name": "articulatedMotion",
+        "passed": true
+      },
+      {
+        "name": "beforeDeleteFreezeHandles",
+        "passed": true
+      },
+      {
+        "name": "frozenPersistence",
+        "passed": true
+      },
+      {
+        "name": "statusIdentity",
+        "passed": true
+      },
+      {
+        "name": "defaultInactive",
+        "passed": true
+      },
+      {
+        "name": "deleteArticulationHandles",
+        "passed": true
+      },
+      {
+        "name": "secondCorpseEquivalence",
+        "passed": true
+      },
+      {
+        "name": "worldRetireFreeze",
+        "passed": true
+      },
+      {
+        "name": "frozenWorldGenerationInvalidation",
+        "passed": true
+      },
+      {
+        "name": "initialArticulationHandles",
+        "passed": true
+      },
+      {
+        "name": "expiryArticulationHandles",
+        "passed": true
+      },
+      {
+        "name": "articulatedDeleteCleanup",
+        "passed": true
+      },
+      {
+        "name": "articulatedExpiryCleanup",
+        "passed": true
+      },
+      {
+        "name": "beforeHideFreeze",
+        "passed": true
+      },
+      {
+        "name": "deleteInvalidation",
+        "passed": true
+      },
+      {
+        "name": "beforeDeleteFreeze",
+        "passed": true
+      },
+      {
+        "name": "worldRetireArticulationHandles",
+        "passed": true
+      },
+      {
+        "name": "hideArticulationHandles",
+        "passed": true
+      },
+      {
+        "name": "consumerEquivalence",
+        "passed": true
+      },
+      {
+        "name": "explicitFreezeHandles",
+        "passed": true
+      },
+      {
+        "name": "hideInvalidation",
+        "passed": true
+      },
+      {
+        "name": "worldRetireFreezeHandles",
+        "passed": true
+      }
+    ],
+    "source": "build/corpse-pose/dec-integration-20261003-233518-e25b34/result.json",
+    "sourceSha256": "27C09270D06D7F7AB29BD6FEB2E4C38FA76FCBB31C79F435FB816624E98E46A4"
+  }
+}

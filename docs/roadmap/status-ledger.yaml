@@ -5,6 +5,21 @@ execution:
   baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
   integration_owner: Oliver Kay
   activation_state: ACTIVE
+  dec_integration_checkpoint:
+    branch: codex/dec-integration-20261003
+    baseline_commit: 31b73f95
+    source_commit: 48fbf279
+    active_dec_tip_count: 98
+    state: CODE_INTEGRATED_INSTALLED_SMOKES_PASSED_CONTENT_ACCEPTANCE_OPEN
+    evidence: docs/verification/dec-integration-20261003.md
+    feature_tests: docs/verification/dec-feature-test-guide-20261003.md
+    runtime_receipt: docs/verification/dec-integration-20261003-runtime.json
+    note: >-
+      Author-run integrated build and bounded runtime checks, not owner review.
+      Compatible swim animations and authored cave demo content are absent.
+      Owner confirms Claude authored the swim animations and authorises inclusion;
+      no such animation files were found in available Git history or local assets.
+      Optional spotting/hunting/interval/exposure remain off in normal launches.
   review_model: OWNER_REVIEW_NO_INDEPENDENT_REVIEWER
   review_model_note: >-
     Preview 0 has no independent reviewer and cannot obtain one: Oliver Kay is
@@ -8700,7 +8715,7 @@ tickets:
     evidence_hash: null
     decision_record: docs/roadmap/decisions/DIAG-01-malprave-diagnostics-20261003.md
     known_failures:
-      - Not run in game -- no events.jsonl from a real mission, no harness command answered, overlay not seen.
+      - Integrated runtime smoke now covers unit/group inspection, event JSON, marker, pause/step/resume and normal exit; overlay and remaining harness/engine event paths are not comprehensively exercised.
       - .tw/test-steps.ps1 parsed only, never run.
       - X-ray (diag_xray, diag_camera clear) not ported; diag_render / model / skeleton / vdsweep / config_check left out.
       - No crash event on Linux (SetCrashNotify is a no-op there).
@@ -8715,7 +8730,12 @@ tickets:
       POSEIDON_ENABLE_DIAG=OFF build of the game, server and tests. Not checked: any runtime path in a
       running game; the automated evidence does not cover the engine hooks, the harness commands, the
       overlay or the PowerShell runner.
+      Those runtime omissions describe the original upstream port record. The integrated
+      48fbf279 build subsequently passed an author-run installed mission smoke covering
+      diag_inspect, diag_groups, diag_mark, diag_pause/step/resume, event JSON and
+      normal exit; overlay appearance and the other event/command paths remain unverified.
     supersedes: []
     evidence:
       - docs/roadmap/evidence/diag-w1-20261003.json
       - docs/roadmap/decisions/DIAG-01-malprave-diagnostics-20261003.md
+      - docs/verification/dec-integration-20261003.md
