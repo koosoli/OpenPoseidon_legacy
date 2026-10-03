@@ -85,6 +85,17 @@ Read by the game engine, not by `engine/WgpuRenderer/`, so the scan below does n
 | `POSEIDON_BOAT_DIAG` | `World/Entities/Vehicles/Misc/Ship.cpp` | Once a second per boat: position, forward speed, thrust, brake. Since TW-WATER W11d also a `Boat buoyancy` line: water contact points, their submersion (sum, mean, mean against the flat sea), the planing gain, total buoyancy / weight, height and sea level. Logging only. |
 | `POSEIDON_INFANTRY_DROWN` | `World/Entities/Infantry/SoldierOldSim.cpp` | TW-WATER W12c. `1` restores the legacy drowning damage: AI soldiers standing deeper than 1.2 m (0.6 m prone) lose health until they die (the player was always exempt). Off by default at the owner's request until swimming is added. |
 
+## Engine switches set by DIAG-001 (outside the renderer)
+
+DIAG-001 (`docs/roadmap/decisions/DIAG-01-malprave-diagnostics-20261003.md`) adds command-line
+flags, not environment switches (`--diag`, `--diag-cats`, `--diag-draw`, `--diag-keep-going`,
+`--diag-slow-ms`, `--diag-seed`, `--diag-fixed-dt`, `--diag-stuck-sec`; see `--help --dev`). One of
+them writes an existing switch:
+
+| Switch | Read by | Notes |
+| --- | --- | --- |
+| `POSEIDON_LOCKSTEP_HZ` | `Core/Game/GameLoop.cpp` (`LockstepDeltaT`) | SIM-815 lockstep pacing, read once. `--diag-fixed-dt <s>` sets it to `1/s` before the world is initialised, unless it is already set (an explicit value wins). |
+
 ## Regenerating
 
 This table is derived, not maintained by hand. Re-scan with:

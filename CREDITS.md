@@ -86,6 +86,16 @@ informational and does not constitute any grant and/or waiver of rights.*
 
 ## Ported code
 
+### Malprave (Dec's Poseidon fork)
+
+Engine code ported from *Malprave*, Dec's GPL fork of the same Poseidon source, with no shared
+git history. Each port is listed here and in its decision record, with what was rewritten for
+this tree.
+
+| OpenPoseidon change | Ported from (Malprave) |
+| --- | --- |
+| Diagnostics layer: `--diag` event log, `diag_*` harness commands, overlay (`engine/Poseidon/Dev/Diag/OpDiag*`, hooks in World / Shots / Collisions / Dammage / VehicleAICombat / SoldierOldMove / ExpressExt / SoundScene / VehicleTypes / OptionsUI / DebugOverlay / CrashHandler); Cry of Fear parts stripped, pause / step / camera / overlay rewritten for this tree (`docs/roadmap/decisions/DIAG-01-malprave-diagnostics-20261003.md`) | `engine/Poseidon/Dev/Diag/MwDiag.cpp`, `MwDiag2.cpp`, `MwDiag7.cpp`, `MwDiag9.cpp`, `MwDiagHarness.cpp`, `MwDiagHarness2.cpp`, `MwDiagOverlay.cpp` (mwDiag) |
+
 ### Tidewater (dgreenheck/tidewater)
 
 The *Tidewater Native* water backend (`engine/WgpuRenderer/rust/src/water_tw/`) is a
