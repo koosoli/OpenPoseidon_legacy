@@ -86,6 +86,16 @@ informational and does not constitute any grant and/or waiver of rights.*
 
 ## Ported code
 
+### Malprave (Dec's Poseidon fork)
+
+The Sinkhole workstream (`docs/roadmap/decisions/SINKHOLE-*`) ports engine code from
+*Malprave*, Dec's GPL fork of the same Poseidon source, with no shared git history. Each
+port is listed here and in its decision record, with what was rewritten for this tree.
+
+| OpenPoseidon change | Ported from (Malprave patch) |
+| --- | --- |
+| DDS masked uncompressed layouts, DXT2/DXT4, DXT1 punch-through (`DDSConverter.cpp`, `DdsImport.cpp`) | `ddsTextures.patch` |
+
 ### Tidewater (dgreenheck/tidewater)
 
 The *Tidewater Native* water backend (`engine/WgpuRenderer/rust/src/water_tw/`) is a

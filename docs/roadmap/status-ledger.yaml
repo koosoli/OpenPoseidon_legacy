@@ -6765,3 +6765,59 @@ tickets:
       - Sameae allflagsOFF051036PASSclean0 stablehashes871frames39.697796mean23.514median131.467p95333.420p99942.080max; PBOtex-diag-inflightfalse/no defaultnewwork onlycompatibility notno-regression/performanceproof; posecallerprototype notinstalled/fullplanOPEN.
       - 5bdpose build18all5/Rust7PASS0ignored354filtered cleanON052545/OFF052658PASSclean0 actualstartuprevision1to2 samelegacykeyepochlight0 refresh14mask16383 notcommandcausal/unhashedworldproof. Laterfrequent14rendered0cached versusOFF14cached/noobservations, darkimagesnovisualfixacceptance/defaultOFF/noFPS. Retainedskyconcurrentwrites open; defaultDayZpending athistoricalcheckpoint/cargoonlyblockeddesign/fullplanOPEN.
       - Same5bddefaultDayZ052839PASSclean0 stablehashes835framesmean41.499448 median23.189 p95142.363p99391.592max1002.120 return19923req0/no normalpose-trace-newflags; differingallocwork/orderedcache no no-regressionproof/rootlocalPOIvisualno obviousnewcoveragechange notwholemapproof/fullplanOPEN.
+
+  - id: TEX-FMT-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Sinkhole W0: native PNG textures; plain DDS masked layouts, DXT2/4 and DXT1 punch-through (from Malprave)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: ACTIVE
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/sinkhole-w0-texture-formats
+    baseline_commit: 95a9eb1d
+    verification_commit: 053ca1b7
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [053ca1b7]
+    production_call_sites:
+      - file: engine/Poseidon/Graphics/Textures/JpgImport.cpp
+        symbol: TextureSourceJPEG::InitFromMemory
+      - file: engine/Poseidon/Graphics/Textures/DDSConverter.cpp
+        symbol: DDSConverter::ReadDDSBuffer
+      - file: engine/Poseidon/Graphics/Textures/DdsImport.cpp
+        symbol: TextureSourceDDS::InitFromMemoryWithOptions
+    test_ids: [sinkhole-png-alpha-classes, sinkhole-dds-masked-layouts, sinkhole-dds-dxt2-dxt4, sinkhole-dds-dxt1-punch-through]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/SINKHOLE-00-texture-formats-20261003.md
+    capability_claims:
+      - capability: PNG_TEXTURE_NATIVE
+        status: UNVERIFIED
+        denominator: >-
+          Unit-tested only (generated 32x32 RGBA blend / cut-out / opaque and RGB
+          fixtures): ARGB8888 source with pixel-classified alpha. Not yet loaded on
+          a model or terrain in game; .png on wgpu loaded as nothing before 053ca1b7.
+      - capability: DDS_UNCOMPRESSED_MASKED_LAYOUTS
+        status: UNVERIFIED
+        denominator: >-
+          Byte-built unit inputs only: A8R8G8B8, R8G8B8, R5G6B5, L8, A8L8, A8 read
+          through their masks; DXT2/DXT4 as DXT3/DXT5; DXT1 punch-through reported
+          transparent. No in-game capture; no DX10-header .dds (BC4/5/7 stay .edds-only).
+    known_failures:
+      - Not seen in game; harness capture pending W5 island content and the .tw watcher.
+      - Large opaque PNGs upload as RGBA8 (no BC compression at load).
+    fallback: PAA/PAC paths unchanged; RGBA-masked DDS files read byte-identically to before.
+    reviewer: null
+    reviewer_method: Author-run unit tests ([sinkhole],[JPG],[DDS],[edds]) on the rwdi build.
+    supersedes: []
+    evidence:
+      - docs/roadmap/evidence/sinkhole-w0-20261003.json
+      - docs/roadmap/decisions/SINKHOLE-00-texture-formats-20261003.md
