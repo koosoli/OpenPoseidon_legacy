@@ -52,8 +52,11 @@ used. The on/off transition must add and remove exactly one scene light in the
 existing `LAMP-001` receipt. The object query records its real stock shape name.
 Object debug names use the registered `format ["%1",object]` operator.
 `StrFormat` calls the object value's `GetText`, which returns its actual
-`Object::GetDebugName`; null objects and missing shapes are rejected. The stock
-player shape, body source rows and dry/wet debug-name equality remain required.
+the virtual `GetDebugName`; the controlled actor's EntityAI override supplies
+its unit identity, such as `WEST Alpha Schwarz:1 (mail)`, rather than a model
+filename. Its nonempty/non-null identity and dry/wet equality are required.
+The player model is proven separately by actual stock class and body source rows.
+Static lamp/roof shape-name checks keep their separate Object debug-name route.
 The 20261003-131800-b7caf7 retry failed because this engine does not register
 the assumed `str` function. That failure aborted script evaluation and required
 owned-process forced cleanup; it provides no lighting acceptance. All three

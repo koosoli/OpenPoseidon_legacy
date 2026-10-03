@@ -342,7 +342,7 @@ function Uniform-Lighting([string]$band){
  $anchor=@($arm.uniformViewAnchor);$view=Uniform-View $anchor $arm.uniformViewDirection
  for($i=0;$i -lt 3;++$i){Require ([Math]::Abs((Number $original.position[$i])-(Number $anchor[$i])) -le .01) 'Dry/wet actor left the same standing comparison position.'}
  $actor=Eval 'format ["%1",player]';$body=Assert-Body (Lines) ($original.time-.65)
- Require ((Model-Stem $actor) -ceq 'mc vojakw2') 'Formatted actual player debug shape differs from the stock body.'
+ Require ($actor -is [string] -and ![string]::IsNullOrWhiteSpace($actor) -and $actor -cne '<nullptr-object>') 'Formatted actual controlled player identity is absent.'
  if($band -eq 'dry'){$arm.uniformActorDebug=$actor}else{Require ($actor -ceq $arm.uniformActorDebug) 'Dry/wet actual actor differs.'}
  $record=@{before=$original;actor=@{class=(Eval 'typeOf player');debugName=$actor;model='data3d\mc vojakw2.p3d';modelSource=$body;position=$original.position;direction=$direction;anchoredDryDirection=$arm.uniformViewDirection;initialPlacementDirectionRequest=90};camera=@{rawEngineView=$view;derivedFromSettledDryDirection=$arm.uniformViewDirection;command='triSetView';effectActive=(Eval 'triGetCameraEffectActive')};views=@{};scope='Same stock standing actor, anchored actual settled dry heading and render-only camera, matching actual overcast. Rain differs between natural wetting histories. Ordinary idle animation may differ; no pose/bone equivalence or pixelwise equality claim.'}
  $lampOwned=$false;$roofOwned=$false
