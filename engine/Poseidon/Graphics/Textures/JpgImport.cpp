@@ -21,10 +21,15 @@ namespace Poseidon
 
 namespace
 {
-inline uint16_t ConvertRGB8To1555(int r, int g, int b)
+inline uint16_t ConvertRGBA8To1555(int r, int g, int b, int a)
 {
     return static_cast<uint16_t>(((r << (10 - 3)) & (0x1f << 10)) | ((g << (5 - 3)) & (0x1f << 5)) | ((b >> 3) & 0x1f) |
-                                 0x8000);
+                                 (a >= 128 ? 0x8000 : 0));
+}
+
+inline uint16_t ConvertRGBA8To4444(int r, int g, int b, int a)
+{
+    return static_cast<uint16_t>(((a >> 4) << 12) | ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4));
 }
 
 inline uint16_t ConvertRGB8To565(int r, int g, int b)
@@ -136,6 +141,21 @@ bool TextureSourceJPEG::InitFromMemory(const uint8_t* data, size_t size, const c
         --_mipmaps;
 
     _avgColor = ComputeAverage(_rgba0.data(), _w, _h);
+
+    // Classify the alpha that was decoded. stb forces four channels, so a JPEG (or an
+    // RGB PNG) arrives with A=255 everywhere and stays opaque.
+    bool partial = false, zero = false;
+    const size_t n = static_cast<size_t>(_w) * static_cast<size_t>(_h);
+    for (size_t i = 0; i < n && !partial; ++i)
+    {
+        const uint8_t a = _rgba0[i * 4 + 3];
+        if (a == 0)
+            zero = true;
+        else if (a != 255)
+            partial = true;
+    }
+    _isAlpha = partial;
+    _isTransparent = !partial && zero;
     return true;
 }
 
@@ -155,7 +175,7 @@ bool TextureSourceJPEG::Init(const char* name, PacLevelMem* mips, int maxMips)
     {
         mips[i]._w = static_cast<short>(_w >> i);
         mips[i]._h = static_cast<short>(_h >> i);
-        mips[i]._sFormat = PacARGB1555;
+        mips[i]._sFormat = PacARGB8888;
     }
     _mipmaps = count;
     return true;
@@ -165,7 +185,7 @@ bool TextureSourceJPEG::GetMipmapData(void* mem, const PacLevelMem& mip, int lev
 {
     if (level < 0 || level >= _mipmaps)
     {
-        LOG_ERROR(Graphics, "JPG mip level {} out of range ({} mipmaps) for {}", level, _mipmaps,
+        LOG_ERROR(Graphics, "Image mip level {} out of range ({} mipmaps) for {}", level, _mipmaps,
                   static_cast<const char*>(_name));
         return false;
     }
@@ -174,7 +194,7 @@ bool TextureSourceJPEG::GetMipmapData(void* mem, const PacLevelMem& mip, int lev
     int lvlH = _h >> level;
     if (lvlW != mip._w || lvlH != mip._h)
     {
-        LOG_ERROR(Graphics, "JPG mip {} dim mismatch: expected {}x{}, got {}x{} for {}", level, int(mip._w),
+        LOG_ERROR(Graphics, "Image mip {} dim mismatch: expected {}x{}, got {}x{} for {}", level, int(mip._w),
                   int(mip._h), lvlW, lvlH, static_cast<const char*>(_name));
         return false;
     }
@@ -208,8 +228,15 @@ bool TextureSourceJPEG::GetMipmapData(void* mem, const PacLevelMem& mip, int lev
                 int r = src[i * 4 + 0];
                 int g = src[i * 4 + 1];
                 int b = src[i * 4 + 2];
-                dst[i] = ConvertRGB8To1555(r, g, b);
+                dst[i] = ConvertRGBA8To1555(r, g, b, src[i * 4 + 3]);
             }
+            return true;
+        }
+        case PacARGB4444:
+        {
+            auto* dst = static_cast<uint16_t*>(mem);
+            for (int i = 0; i < pixels; ++i)
+                dst[i] = ConvertRGBA8To4444(src[i * 4 + 0], src[i * 4 + 1], src[i * 4 + 2], src[i * 4 + 3]);
             return true;
         }
         case PacRGB565:
@@ -233,12 +260,12 @@ bool TextureSourceJPEG::GetMipmapData(void* mem, const PacLevelMem& mip, int lev
                 dst[i * 4 + 0] = src[i * 4 + 2]; // B
                 dst[i * 4 + 1] = src[i * 4 + 1]; // G
                 dst[i * 4 + 2] = src[i * 4 + 0]; // R
-                dst[i * 4 + 3] = 0xFF;           // A (JPEG is opaque)
+                dst[i * 4 + 3] = src[i * 4 + 3]; // A (255 for JPEG and RGB images)
             }
             return true;
         }
         default:
-            LOG_ERROR(Graphics, "JPG unsupported destination format {} for {}", static_cast<int>(format),
+            LOG_ERROR(Graphics, "Image unsupported destination format {} for {}", static_cast<int>(format),
                       static_cast<const char*>(_name));
             return false;
     }

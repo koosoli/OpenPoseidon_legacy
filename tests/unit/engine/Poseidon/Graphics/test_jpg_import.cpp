@@ -55,8 +55,9 @@ TEST_CASE("JPG: decodes 32x32 checkerboard via Init()", "[Graphics][JPG]")
     REQUIRE(mips[2]._w == 8);
     REQUIRE(mips[3]._w == 4);
 
-    // Source format matches the legacy IJL implementation.
-    REQUIRE(src.GetFormat() == PacARGB1555);
+    // SINKHOLE W0: ARGB8888, the format both renderers upload from a decoded source.
+    // (It was ARGB1555, after the legacy IJL path, which wgpu could not upload at all.)
+    REQUIRE(src.GetFormat() == PacARGB8888);
 
     // Average of 50/50 red+green checker should be roughly (127, 127, 0).
     PackedColor avg = src.GetAverageColor();

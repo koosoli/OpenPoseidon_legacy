@@ -27,6 +27,8 @@ struct DDS_PIXELFORMAT
 static constexpr uint32_t DDPF_ALPHAPIXELS = 0x1;
 static constexpr uint32_t DDPF_FOURCC = 0x4;
 static constexpr uint32_t DDPF_RGB = 0x40;
+static constexpr uint32_t DDPF_ALPHA = 0x2;
+static constexpr uint32_t DDPF_LUMINANCE = 0x20000;
 
 struct DDS_HEADER
 {
@@ -87,12 +89,86 @@ static PixelFormat fourCCToPixelFormat(uint32_t fourCC)
 {
     if (fourCC == makeFourCC('D', 'X', 'T', '1'))
         return PixelFormat::DXT1;
-    if (fourCC == makeFourCC('D', 'X', 'T', '3'))
+    // DXT2/DXT4 are DXT3/DXT5 with premultiplied colour. The block layout is identical,
+    // and the engine never un-premultiplied them anyway (SINKHOLE W0, from Malprave).
+    if (fourCC == makeFourCC('D', 'X', 'T', '3') || fourCC == makeFourCC('D', 'X', 'T', '2'))
         return PixelFormat::DXT3;
-    if (fourCC == makeFourCC('D', 'X', 'T', '5'))
+    if (fourCC == makeFourCC('D', 'X', 'T', '5') || fourCC == makeFourCC('D', 'X', 'T', '4'))
         return PixelFormat::DXT5;
     return PixelFormat::Unknown;
 }
+
+namespace
+{
+//! One channel of a masked uncompressed pixel, scaled to 0..255 (absent mask -> def).
+struct MaskChannel
+{
+    uint32_t mask = 0;
+    int shift = 0;
+    uint32_t max = 0;
+    explicit MaskChannel(uint32_t m) : mask(m)
+    {
+        if (!m)
+            return;
+        while (!((m >> shift) & 1))
+            shift++;
+        max = m >> shift;
+    }
+    uint8_t Get(uint32_t v, uint8_t def) const
+    {
+        if (!mask)
+            return def;
+        const uint32_t x = (v & mask) >> shift;
+        return static_cast<uint8_t>((x * 255u + max / 2) / max);
+    }
+};
+
+//! Read an uncompressed DDS level through its bit masks into R,G,B,A bytes.
+//! SINKHOLE W0, ported from Malprave's ddsTextures: 8/16/24/32-bit RGB(A), luminance
+//! (L8, A8L8) and alpha-only (A8). The old reader accepted 32-bit only and assumed the
+//! bytes were already R,G,B,A -- an A8R8G8B8 file, the common one, came out with red and
+//! blue swapped.
+bool ReadMaskedLevel(const uint8_t* p, const uint8_t* end, int w, int h, const DDS_PIXELFORMAT& pf,
+                     std::vector<uint8_t>& out, size_t& consumed)
+{
+    const int bpp = static_cast<int>(pf.rgbBitCount / 8);
+    const size_t n = static_cast<size_t>(w) * static_cast<size_t>(h);
+    consumed = n * static_cast<size_t>(bpp);
+    if (p + consumed > end)
+        return false;
+    const bool lum = (pf.flags & DDPF_LUMINANCE) != 0;
+    const bool rgb = (pf.flags & DDPF_RGB) != 0;
+    const bool alphaOnly = (pf.flags & DDPF_ALPHA) != 0 && !rgb && !lum;
+    const MaskChannel R(pf.rBitMask), G(pf.gBitMask), B(pf.bBitMask),
+        A((pf.flags & (DDPF_ALPHAPIXELS | DDPF_ALPHA)) ? pf.aBitMask : 0);
+    out.resize(n * 4);
+    for (size_t k = 0; k < n; ++k, p += bpp)
+    {
+        uint32_t v = 0;
+        for (int c = 0; c < bpp; ++c)
+            v |= static_cast<uint32_t>(p[c]) << (8 * c);
+        uint8_t* o = &out[k * 4];
+        if (alphaOnly)
+        {
+            o[0] = o[1] = o[2] = 255;
+            o[3] = A.Get(v, 255);
+        }
+        else if (lum)
+        {
+            o[0] = o[1] = o[2] = R.Get(v, 0);
+            o[3] = A.Get(v, 255);
+        }
+        else
+        {
+            o[0] = R.Get(v, 0);
+            o[1] = G.Get(v, 0);
+            o[2] = B.Get(v, 0);
+            o[3] = A.Get(v, 255);
+        }
+    }
+    return true;
+}
+} // namespace
 
 static DDS_PIXELFORMAT makePixelFormat(PixelFormat fmt)
 {
@@ -153,9 +229,33 @@ DDSFile DDSConverter::ReadDDSBuffer(const void* data, size_t size)
     {
         result.format = fourCCToPixelFormat(hdr.ddspf.fourCC);
     }
-    else if ((hdr.ddspf.flags & DDPF_RGB) && hdr.ddspf.rgbBitCount == 32)
+    else if ((hdr.ddspf.flags & (DDPF_RGB | DDPF_LUMINANCE | DDPF_ALPHA)) &&
+             (hdr.ddspf.rgbBitCount == 8 || hdr.ddspf.rgbBitCount == 16 || hdr.ddspf.rgbBitCount == 24 ||
+              hdr.ddspf.rgbBitCount == 32))
     {
+        // Uncompressed: every layout is normalised to R,G,B,A bytes through its masks.
         result.format = PixelFormat::RGBA8888;
+        const uint8_t* end = static_cast<const uint8_t*>(data) + size;
+        int w = result.width, h = result.height;
+        for (int i = 0; i < mipCount && w >= 1 && h >= 1; ++i)
+        {
+            DDSMipLevel level;
+            level.width = w;
+            level.height = h;
+            size_t consumed = 0;
+            if (!ReadMaskedLevel(ptr, end, w, h, hdr.ddspf, level.data, consumed))
+                break;
+            result.mipmaps.push_back(std::move(level));
+            ptr += consumed;
+            w = std::max(w / 2, 1);
+            h = std::max(h / 2, 1);
+        }
+        if (result.mipmaps.empty())
+        {
+            result.format = PixelFormat::Unknown;
+            result.width = result.height = 0;
+        }
+        return result;
     }
 
     if (result.format == PixelFormat::Unknown)

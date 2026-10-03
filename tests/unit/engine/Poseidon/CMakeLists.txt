@@ -306,6 +306,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Graphics/Textures/test_prepared_textures.cpp
     Graphics/Textures/test_edds_reader.cpp
     Graphics/Textures/test_dds_texture_source.cpp
+    Graphics/Textures/test_sinkhole_texture_formats.cpp
     Graphics/Textures/test_block_compression.cpp
     Asset/Formats/Enfusion/test_pak_archive.cpp
     Asset/Formats/Enfusion/test_ebin_world.cpp
