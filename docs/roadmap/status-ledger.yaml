@@ -6895,7 +6895,7 @@ tickets:
     class: RENDERER
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: DONE
+    scheduling_state: HOLD
     status: INTEGRATED
     outcome: null
     owner: Dec
@@ -6937,7 +6937,7 @@ tickets:
     class: ENGINE
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: DONE
+    scheduling_state: HOLD
     status: INTEGRATED
     outcome: null
     owner: Dec
@@ -6984,7 +6984,7 @@ tickets:
     class: ENGINE
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: DONE
+    scheduling_state: HOLD
     status: INTEGRATED
     outcome: null
     owner: Dec
@@ -7026,7 +7026,7 @@ tickets:
     class: ENGINE
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: DONE
+    scheduling_state: HOLD
     status: INTEGRATED
     outcome: null
     owner: Dec
@@ -7068,7 +7068,7 @@ tickets:
     class: RENDERER
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: DONE
+    scheduling_state: HOLD
     status: INTEGRATED
     outcome: null
     owner: Dec
@@ -7110,7 +7110,7 @@ tickets:
     class: RENDERER
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: DONE
+    scheduling_state: HOLD
     status: INTEGRATED
     outcome: null
     owner: Dec
@@ -7153,7 +7153,7 @@ tickets:
     class: RENDERER
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: DONE
+    scheduling_state: HOLD
     status: INTEGRATED
     outcome: null
     owner: Dec
@@ -7188,3 +7188,718 @@ tickets:
     supersedes: []
     evidence:
       - docs/roadmap/decisions/FIXES-20261003.md
+  - id: TW-WATER-W01
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W1: water backend seam (Current OP unchanged behind WaterBackend; Tidewater slot, WGR_WATER_BACKEND)"
+    class: RENDERER
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w1-backend
+    baseline_commit: 3d720430
+    verification_commit: 9b49f270
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [9b49f270]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_backend.rs
+        symbol: WaterBackend::apply_pending_switch
+      - file: engine/WgpuRenderer/rust/src/water_backend.rs
+        symbol: WaterBackend::surface_product
+      - file: engine/WgpuRenderer/rust/src/water_backend.rs
+        symbol: WaterBackend::render_underwater
+      - file: engine/WgpuRenderer/WaterWgpu.cpp
+        symbol: WaterWgpu::DrawWater
+      - file: engine/Poseidon/Graphics/Core/Engine.hpp
+        symbol: WaterSettings::waterBackend
+    test_ids: [abi_values_map_to_backends_and_unknown_is_the_default, env_override_accepts_only_zero_and_one, backend_selector_is_appended_after_the_body_table]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/TW-WATER-01-20260927.md
+    capability_claims:
+      - capability: WATER_BACKEND_SEAM
+        status: UNVERIFIED
+        denominator: >-
+          Rust tests (water ffi shaders gpu_timers filter) on the RTX 3070 PC: 105
+          passed after W1, 0 failed; WgrWaterParams 1056 -> 1136 bytes with no
+          WGSL-mirrored lane moved (tested). No visual change intended; the Current OP
+          pixel diff and the W0 timing comparison were not run.
+    known_failures:
+      - "Current OP pixel diff before/after on P1/P2/P3 not run; W0 timing baseline not captured."
+      - "Inland bodies (rivers, lakes, ponds) share the Water owner; how Tidewater mode treats them is an open owner decision (TW-WATER-01)."
+    fallback: "WGR_WATER_BACKEND=0 forces Current OP for the session; the Water tab backend selector otherwise."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/TW-WATER-01-20260927.md
+      - engine/WgpuRenderer/docs/env-switches.md
+  - id: TW-WATER-W02
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W2: Tidewater Native open sea (OceanFFT, CDLOD, SeaDetail, water material ported from dgreenheck/tidewater)"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w2-open-sea
+    baseline_commit: 9b49f270
+    verification_commit: a47e58a9
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W01]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [b3f2c3f0, 1ffbe66a, a47e58a9]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_tw/mod.rs
+        symbol: Tidewater::prepare
+      - file: engine/WgpuRenderer/rust/src/water_tw/mod.rs
+        symbol: Tidewater::update
+      - file: engine/WgpuRenderer/rust/src/water_tw/fft.rs
+        symbol: ocean_params
+      - file: engine/WgpuRenderer/rust/src/water_tw/cdlod.rs
+        symbol: Selection::run
+      - file: engine/WgpuRenderer/rust/src/water_tw/textures.rs
+        symbol: create_foam_texture
+    test_ids: [tidewater_fft_kernels_validate, no_kernel_binds_more_than_four_storage_textures, spectrum_packing_matches_tidewater, ranges_and_morph_match_cdlod_js, selection_covers_the_camera_and_is_front_to_back, tidewater_water_shader_composes, default_params_are_tidewaters, mulberry32_matches_the_js_reference]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/TW-WATER-02-20260927.md
+    capability_claims:
+      - capability: TIDEWATER_OPEN_SEA
+        status: UNVERIFIED
+        denominator: >-
+          Rust tests 120 passed after W2, 0 failed (incl. naga composition of
+          tw_water.wgsl and WGSL validation of every FFT kernel); win-x64-clang-rwdi
+          built; 1ffbe66a deployed to the Steam folder and G:\CWA-OLI and run by the
+          owner: active path proven, not visually checked against the Tidewater demo,
+          not measured.
+    known_failures:
+      - "Dec's-branch default: 1ffbe66a sets waterBackend = 1; plan section 9 reserves that flip for the owner, so it must be reverted before anything reaches trunk (still 1 in this tree)."
+      - "Inland lakes and rivers are not drawn in Tidewater mode (interim option 1 of TW-WATER-01)."
+      - "W2's sea ran upwind (wave direction 180 degrees off) until W3a (2e252ac1)."
+      - "The material's view-space sign was inverted from W2 on (SSR never hit, refraction always fell back) until W6i.7 (35c18b71)."
+    fallback: "WGR_WATER_BACKEND=0 (or the Water tab) selects Current OP."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/TW-WATER-02-20260927.md
+      - CREDITS.md
+  - id: TW-WATER-W03
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W3: shoreline waves, shore simulation, surf foam and breaker lips; gameplay sea, colour and sea-state follow-ups (W3a-W3n)"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w3n-sim-foam-fade
+    baseline_commit: a47e58a9
+    verification_commit: 68f3adff
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W02]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [2e252ac1, 182f010a, a35f7c80, 698d1e19, a2b9c135, 9a21b216, a017b952, 01134959, 5e25b9a0, dee7bd9e, b9b008df, 15049991, e85b4e2a, d0144349, b9fa6e45, 68f3adff]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_tw/shore_field.rs
+        symbol: compute
+      - file: engine/WgpuRenderer/rust/src/water_tw/shore_sim.rs
+        symbol: ShoreSim::update_regions
+      - file: engine/WgpuRenderer/rust/src/water_tw/breakers.rs
+        symbol: trace_stations
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_surf_foam.wgsl
+        symbol: surfFoamLight
+      - file: engine/WgpuRenderer/rust/src/terrain/shore_wet.rs
+        symbol: ShoreWet::set
+      - file: engine/Poseidon/World/Terrain/WaterSurfaceQuery.cpp
+        symbol: QueryWaterSurfaceScaled
+    test_ids: [waves_run_up_the_beach_and_face_it, directions_are_turned_so_the_sea_runs_downwind, places_the_nearest_coast_a_region_apart, warm_up_fades_in, lace_64_matches_js, traces_the_waterline_with_normals_toward_the_sea, breaker_kernel_composes, sea_conditions_lane_overrides_wind_fetch_and_foam, blur_keeps_a_constant_and_rounds_a_step, smoothed_depth_is_in_the_direction_texture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/TW-WATER-03-20260927.md
+    capability_claims:
+      - capability: TIDEWATER_SHORE_PORT
+        status: UNVERIFIED
+        denominator: >-
+          W3a-W3d (ShoreField, ShoreWaves, ShoreSim, SurfFoam, Breakers) each recorded
+          as "implemented; not visually checked, not measured" at commit time, with
+          unit tests (lace bit-exact with the JS). Later surf captures from above drove
+          W3k-W3n (region fade over 15%, breaking on a ~20 m smoothed seabed, foam
+          fading over 4-9 m); no before/after numbers recorded.
+      - capability: GAMEPLAY_SEA_FOLLOWS_TIDEWATER
+        status: UNVERIFIED
+        denominator: >-
+          Before W3e on a2b9c135 (showcase, .tw/test-bob.ps1, mission time 4-45 s):
+          PBR height sd 1.29-1.66 m, -5.7/+3.6 m, ~10 m/s vertical, against
+          0.08-0.11 m with WGR_WAVE_BUOYANCY=0. No after-fix figure is recorded.
+      - capability: TIDEWATER_WATER_COLOUR
+        status: UNVERIFIED
+        denominator: >-
+          W3h debug views 20-22 put the pale cyan on the in-scatter term; glow A/B
+          captures at 0 / 0.06 / 0.12 / 0.25, Dec picked 0 (W3j.1). W3f/W3g visual
+          checks and owner acceptance recorded as pending.
+    known_failures:
+      - "The gameplay sea is still the CPU predictor: it matches scale, period and surf-zone fade, not the drawn sea crest for crest; shore waves stay visual only (TW-WATER-07)."
+      - "A multiplayer client in Tidewater mode and one in Current OP mode compute different gameplay seas (TW-WATER-07)."
+      - "Breaker station re-trace ran on the render thread (~11 ms p99 spikes) until W7c (c628fd60)."
+      - "W3 commits interleave with W4a-W4a.3 on the same stack; the baseline..verification range also contains those."
+    fallback: "WGR_WATER_BACKEND=0 selects Current OP; the Water tab's TW shore waves, TW shore simulation and lip opacity (0) switch the parts off; WGR_TW_GLOW overrides the glow."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/TW-WATER-03-20260927.md
+      - docs/roadmap/decisions/TW-WATER-04-20260927.md
+      - docs/roadmap/decisions/TW-WATER-05-20260927.md
+      - docs/roadmap/decisions/TW-WATER-06-20260927.md
+      - docs/roadmap/decisions/TW-WATER-07-20260927.md
+      - docs/roadmap/decisions/TW-WATER-08-20260927.md
+      - docs/roadmap/decisions/TW-WATER-09-20260927.md
+      - docs/roadmap/decisions/TW-WATER-11-20260927.md
+  - id: TW-WATER-W04
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W4: breaker spray (Spray.js + Breakers emitters) and lips/spray in the upscalers' reactive mask"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w4b-reactive
+    baseline_commit: dee7bd9e
+    verification_commit: fe060939
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W03]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [16792028, a1f21d4c, d90db853, 8fd27504, fe060939]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_tw/spray.rs
+        symbol: SprayGpu::set_frame
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_spray_emit.wgsl
+        symbol: breakersEmit
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_spray_update.wgsl
+        symbol: spray_update
+      - file: engine/WgpuRenderer/rust/src/water_tw/mod.rs
+        symbol: Tidewater::draw_reactive
+    test_ids: [params_block_matches_the_wgsl_layout, textures_match_tidewaters_generators, tw-w4a2-spray-ring-counter-log]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/TW-WATER-10-20260927.md
+    capability_claims:
+      - capability: TIDEWATER_BREAKER_SPRAY
+        status: UNVERIFIED
+        denominator: >-
+          W4a.2 ring counters: ~600-4000 particles emitted per second and up to ~3000
+          alive in rough surf; W4a.3 debug dots located them. The sprites themselves
+          drew nothing until the view-space fix in W6i.7 (35c18b71). W7: breakers +
+          spray 0.05-0.06 ms GPU on P1-P3.
+      - capability: REACTIVE_MASK_LIPS_SPRAY
+        status: UNVERIFIED
+        denominator: >-
+          Implemented (fs_lip_mask / fs_spray_mask, max blend into the REN-TEMP-001J
+          mask); runs only with the temporal path. No capture with an upscaler is
+          recorded.
+    known_failures:
+      - "RefractionPass deferred: OP's water falls back to the unrefracted pixel instead (TW-WATER-12); revisit if piers or hulls up close show the step."
+      - "W4a's tw_spray pipeline was invalid (validation error every Tidewater frame) until W4a.1 (a1f21d4c)."
+      - "W7 could not exercise an upscaler: DLSS not compiled into that build and the FSR 1 run did not engage."
+    fallback: "WGR_TW_SPRAY=0,<intensity> sets the breaker spray gain to 0 for the session; the Water tab's TW breaker spray otherwise."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/TW-WATER-10-20260927.md
+      - docs/roadmap/decisions/TW-WATER-12-20260928.md
+  - id: TW-WATER-W05
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W5: underwater composite, caustics and light shafts, cameras under the sea, no clouds from below, diver's torch"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w5e-diver-torch
+    baseline_commit: fe060939
+    verification_commit: da901680
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W04]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [2e136095, a08822eb, 602463e9, 16447853, 50c75b50, da901680]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_tw/underwater.rs
+        symbol: TwUnderwater::render
+      - file: engine/WgpuRenderer/rust/src/water_tw/underwater.rs
+        symbol: pick_torch
+      - file: engine/WgpuRenderer/rust/src/water_tw/caustics.rs
+        symbol: Caustics::dispatch
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_underwater.wgsl
+        symbol: fs_uw
+      - file: engine/Poseidon/World/World.cpp
+        symbol: World::Simulate
+      - file: engine/Poseidon/World/Scene/Camera/CameraHold.cpp
+        symbol: CameraVehicle::Simulate
+    test_ids: [params_block_matches_the_wgsl, underwater_wgsl_validates, layers_match_tidewater, shaders_validate, the_torch_is_the_brightest_spot_at_the_eye, tw-w5-shots-uw-day-night-capture, tw-w5e-shots-w5e-torch-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/TW-WATER-12-20260928.md
+    capability_claims:
+      - capability: TIDEWATER_UNDERWATER
+        status: UNVERIFIED
+        denominator: >-
+          Author captures under water by day and night (.tw/shots-uw-*, .tw/shots-uw3,
+          .tw/shots-w5e-*): clear blue medium with caustics and the torch beam; first
+          captures' solid-blue and lost-hill faults fixed in W5a.1. W7j: underwater
+          composite 0.008 ms mean (0.059 ms worst window) over P2 against Current OP's
+          0.012 / 0.312 ms. One machine.
+      - capability: SCRIPTED_CAMERA_UNDER_SEA
+        status: UNVERIFIED
+        denominator: >-
+          Commit-message description only (camCreate / free camera may go below the
+          sea; player, vehicle and trigger views keep the clamp); no capture named.
+    known_failures:
+      - "From below, the sky's clouds show through Snell's window as white blobs; this is Tidewater's model, softening is the owner's call (W7 report)."
+      - "Tidewater's half-resolution composite and its marine snow are not ported."
+      - "W5e landed after W6l and W7g on the stack; the range includes W6a-W6l and W7a-W7g commits."
+    fallback: "The Water tab's underwater checkbox disengages the composite; WGR_TW_TORCH_BEAM=0 removes the torch beam; WGR_WATER_BACKEND=0 returns to Current OP."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/TW-WATER-12-20260928.md
+      - docs/tw-water-w7-report.md
+  - id: TW-WATER-W06
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W6: wrecks sink, vehicles float on the drawn sea, amphibious cars drive; boat wakes (WakeSim) and bow spray (BoatSpray)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w6l-spray-defaults
+    baseline_commit: 16447853
+    verification_commit: 5b237b28
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W05, TW-WATER-W04]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [98aee494, 47a19db5, 8045c4f9, 6d46cd52, 7be862a6, 3e99fee6, a28b3f03, 09adb3ef, e10f5e74, 6807a089, 519d370a, 2a373d8f, 421c908d, f2a3dedd, 53c5e97c, 92e3457d, c0989c8c, 950fd5d0, 5eeb70dc, 35c18b71, 45669470, 9b84ff8b, aad3e1e6, 6164825f, 5b237b28]
+    production_call_sites:
+      - file: engine/Poseidon/World/Entities/Vehicles/Ground/TrackedWaterResponse.hpp
+        symbol: WreckFloodStep
+      - file: engine/Poseidon/World/Entities/Vehicles/Misc/Ship.cpp
+        symbol: Ship::Simulate
+      - file: engine/Poseidon/World/Entities/Vehicles/Ground/Car.cpp
+        symbol: Car::GetTypeCost
+      - file: engine/Poseidon/World/Simulation/Collisions.cpp
+        symbol: Landscape::GroundCollisionPlane
+      - file: engine/Poseidon/World/Terrain/WaterSurfaceQuery.cpp
+        symbol: TidewaterSeaVarianceScale
+      - file: engine/WgpuRenderer/rust/src/water_tw/wake.rs
+        symbol: WakeGpu::update
+      - file: engine/WgpuRenderer/rust/src/water_tw/boat_spray.rs
+        symbol: BoatSpray::update
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_water.wgsl
+        symbol: twView
+    test_ids: [contacts_run_from_the_stem_to_the_shoulder_on_both_sides, a_boat_under_way_throws_spray_and_a_boat_at_rest_does_not, tw-w6a-twsink-capture, tw-w6h2-twwake-two-pbr-capture, tw-w6l-shots-spray-tune-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/tw-water-w7-report.md
+    capability_claims:
+      - capability: VEHICLES_IN_THE_SEA
+        status: UNVERIFIED
+        denominator: >-
+          Harness missions on Everon's south-east bay (.tw/float/twsink, twboats,
+          twbrdm-water, shots-rough-*): BMP and M113 wrecks flood and settle on the sea
+          bed, the PBR rests on the bottom (was deleted part-way down); a PBR destroyed
+          at 31 km/h no longer coasts ~150 m; a BRDM placed afloat wakes, floats and
+          drives. W6b heave at the mission defaults x0.70 (overcast 0.2) to x1.19
+          (0.95), Storm x3.5 (computed, not captured).
+      - capability: TIDEWATER_BOAT_WAKES_AND_BOW_SPRAY
+        status: UNVERIFIED
+        denominator: >-
+          twwake.eden (two PBRs at 13 m/s) tuning captures for W6h.2 defaults; bow
+          spray drew only after W6i.7; W6l picked arm C of four (.tw/shots-spray-tune
+          A..D) on the Russian patrol boat, checked on both boats in calm and rough
+          seas. Bow spray capped at ~50 particles per 60 Hz frame; wakes 0.04-0.05 ms
+          GPU on the boat runs.
+    known_failures:
+      - "Only the two boats nearest the camera get a wake and bow spray; boats do not feel any wake (physics stays on the CPU predictor)."
+      - "The boats' bow spray draws white dashes across the hulls in Tidewater mode (W8-W12 report, Open)."
+      - "Bow spray is deliberately below Tidewater's level for patrol boats at 13-17 m/s (W6l)."
+      - "Wreck sinking and the amphibian/car fixes have no off switch."
+    fallback: "WGR_TW_WAKE=0 and WGR_TW_BOAT_SPRAY=off turn the wakes and bow spray off; WGR_TW_LEGACY_BOAT_FX=1 keeps the legacy boat sprites; WGR_WAVE_BUOYANCY=0 returns physics to the flat sea."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/tw-water-w7-report.md
+      - engine/WgpuRenderer/docs/env-switches.md
+      - CREDITS.md
+  - id: TW-WATER-W07
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W7: performance pass and parity report (frame stats, off-thread shore stations, early submit, switch soak)"
+    class: RENDERER
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w7k-report-final
+    baseline_commit: 45669470
+    verification_commit: c31600e0
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W06]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [9deb0b02, 3ec8517e, c628fd60, 268a5058, dba3881c, 5fb37a40, 080f076f, 145f123c, d35c18e9, e995a2f5, c31600e0]
+    production_call_sites:
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: EngineWgpu::PublishRendererStats
+      - file: engine/WgpuRenderer/rust/src/lib.rs
+        symbol: tw_early_submit
+      - file: engine/WgpuRenderer/rust/src/water_tw/mod.rs
+        symbol: Tidewater::update_stations
+      - file: engine/WgpuRenderer/rust/src/water_backend.rs
+        symbol: WaterBackend::set_soak
+    test_ids: [tw-w7h-p1-p2-p3-b0-b1-frame-stats, tw-w7h-soak-60x24, tw-w7h-grid-32-64-96, tw-w7e-early-submit-ab, tw-w7j-storm-night-coast2]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/tw-water-w7-report.md
+    capability_claims:
+      - capability: TIDEWATER_FRAME_TIME_PARITY
+        status: UNVERIFIED
+        denominator: >-
+          One run per path and backend on one machine at 1280x720 (W7h build 145f123c,
+          WGR_FRAME_STATS): Tidewater wall p95 below Current OP on P1/P2/P3 (P1 7.96 vs
+          9.25 ms); water GPU 0.67-0.80 vs 2.14-3.60 ms; backend allocations P1 944 vs
+          950 MB. W7e/W7f A/B: P1 wall p50 9.2 -> 6.9 ms. W7c: station update on the
+          render thread max 11.2 -> 0.1 ms. Storm, night and a second coast also run.
+      - capability: BACKEND_SWITCH_SOAK
+        status: UNVERIFIED
+        denominator: >-
+          WGR_WATER_SOAK=60,24 on P1: 24 switches; allocations 927.6 MB (Tidewater) and
+          970.3 MB (Current OP) on every switch with one +4.3 MB step on both sides at
+          switch 9; live handle counts return per backend. Switch cost 324-332 ms to
+          Tidewater, 91-95 ms back.
+    known_failures:
+      - "Upscalers not measured: DLSS not compiled in; the FSR 1 run did not engage (renderScale reset at start-up); MSAA not run."
+      - "FFT layout experiment not done; mesh density judged in stills only; the remaining ~4 ms prepare maximum not attributed."
+      - "Inland water, server, multiplayer and save/load not tested; plan section 9 criteria 1, 3 and 4 not assessed."
+      - "The early submit assumes no early pass reads a later upload; a one-frame lag would show only in motion."
+      - "The wgpu-hal texture counter drifts by -44 per round trip while texture memory stays flat (not investigated)."
+    fallback: "WGR_TW_EARLY_SUBMIT=0 keeps one submission per frame; WGR_FRAME_STATS and WGR_WATER_SOAK are off unless set."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/tw-water-w7-report.md
+      - engine/WgpuRenderer/docs/env-switches.md
+      - CREDITS.md
+  - id: TW-WATER-W08
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W8: explosions on open water feed the water renderer; plume, ring wave and foam sized from the ammo"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w8b-impact-splash
+    baseline_commit: c31600e0
+    verification_commit: c8f1491d
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W07, TW-WATER-W04]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [1f295e49, c8f1491d]
+    production_call_sites:
+      - file: engine/Poseidon/World/Simulation/Collisions.cpp
+        symbol: Landscape::ExplosionDammageEffects
+      - file: engine/Poseidon/World/Simulation/Collisions.cpp
+        symbol: TidewaterWaterBurst
+      - file: engine/WgpuRenderer/rust/src/water_tw/impacts.rs
+        symbol: Impacts::submit
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_impact.wgsl
+        symbol: impactDisplacement
+    test_ids: [plume_sizes_follow_the_ammo, an_explosion_throws_a_plume_and_marks_the_surface, a_bullet_throws_a_small_spout_only, tw-w8-twbeachboom-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/tw-water-w8-w12-report.md
+    capability_claims:
+      - capability: TIDEWATER_WATER_BURSTS
+        status: UNVERIFIED
+        denominator: >-
+          Unit tests on the sizing; plume height ~4 m for 20 mm, ~15 m for 120 mm HE,
+          ~50 m for a bomb (report). Showcase harness run on the W12d build
+          (.tw/shots-showcase-v2): 27 rounds into the water, no damage to anything,
+          all 24 soldiers alive at 112 s. Damage path unchanged by design.
+    known_failures:
+      - "Written for OP, not ported from Tidewater."
+      - "Up to 12 bursts emit; only the 4 nearest write the ring wave / foam lanes."
+      - "Clouds painted over the plumes against the sky until W12a (ad347ecd)."
+    fallback: "WGR_TW_LEGACY_WATER_FX=1 keeps the legacy fireball and droplet sprites in Tidewater mode."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/tw-water-w8-w12-report.md
+      - engine/WgpuRenderer/docs/env-switches.md
+  - id: TW-WATER-W09
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W9: one waterline above and below (probe pass); the sea to the horizon; wind as waves; fixes from high up"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w9g-no-ssr-high
+    baseline_commit: c8f1491d
+    verification_commit: bc2b9915
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W08]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [f2bc233d, eed5c731, 794eb826, 118d8478, bc2b9915]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_tw/probe.rs
+        symbol: Probe::record
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_water.wgsl
+        symbol: twDisplace
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_water.wgsl
+        symbol: scene_rel_at
+      - file: engine/WgpuRenderer/rust/src/water_tw/fft.rs
+        symbol: whitecap_bias
+      - file: engine/WgpuRenderer/WaterWgpu.cpp
+        symbol: TidewaterDrawsWater
+    test_ids: [the_sea_reaches_the_horizon_from_high_up, whitecap_bias_keeps_tidewaters_look_and_bounds_the_foam_in_a_gale, normal_quantile_inverts_the_cdf, tw-w9-8km-15km-altitude-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/tw-water-w8-w12-report.md
+    capability_claims:
+      - capability: TIDEWATER_ONE_WATERLINE
+        status: UNVERIFIED
+        denominator: >-
+          Author captures at the beach and bobbing at the waterline after W9d (the flat
+          blue sheet was the left-handed facing); W9e meniscus capped at +30%. Each fix
+          checked with harness captures on one machine; owner play-test not recorded.
+      - capability: TIDEWATER_SEA_FROM_HIGH_UP
+        status: UNVERIFIED
+        denominator: >-
+          Captures and debug views 6 / 21 from 8 km and 15 km up: CDLOD 16 levels to the
+          horizon, heightmap sea bed beyond ~2 km, SSR fading out 400-1200 m. W9c
+          computed Hs ~4.7 m at 7 m/s, ~7.9 m at 15, ~8.8 m at 30.
+    known_failures:
+      - "The 733 m cascade bounds the sea height above ~20 m/s wind."
+      - "Far-sea back-facing triangles from the beach remained until W10g (178e7e61); the lens strip at the waterline until W12d (3cbe1b52)."
+    fallback: "No dedicated off switch; WGR_WATER_BACKEND=0 returns to Current OP. WGR_TW_WIND only sets the wind for captures."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/tw-water-w8-w12-report.md
+      - engine/WgpuRenderer/docs/env-switches.md
+  - id: TW-WATER-W10
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W10: surf look in OP's light (lip facing, no glare band, backlit exposure, spray veil, textured whitewater, far triangles)"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w10g-far-triangles
+    baseline_commit: bc2b9915
+    verification_commit: 178e7e61
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W09]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [5e4a9eea, 82b06f45, 936e199b, a56a59a3, 7751729b, ce00dd24, 178e7e61]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_lip.wgsl
+        symbol: lipShade
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_spray.wgsl
+        symbol: sprayShade
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_surf_foam.wgsl
+        symbol: surfFoamLight
+      - file: engine/WgpuRenderer/rust/src/water_tw/mod.rs
+        symbol: lip_override
+    test_ids: [tw-w10-everon-west-coast-surf-capture, tw-w10e-12-20ms-surf-capture, tw-w10g-beach-far-sea-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/tw-water-w8-w12-report.md
+    capability_claims:
+      - capability: TIDEWATER_SURF_LOOK_IN_OP_EXPOSURE
+        status: UNVERIFIED
+        denominator: >-
+          Surf captures on Everon's west coast toward the afternoon sun and close
+          captures at 12 and 20 m/s (~16 000 spray particles/s, ~20 000 live): glare
+          band, coloured specks, clipped backlit slabs and the spray wall reduced by the
+          listed caps; owner beach captures drove W10f/W10g. One machine; owner
+          play-test pending.
+    known_failures:
+      - "The surf band at 20 m/s still clips to white (surface whitewater and spray; the scene's exposure)."
+      - "Owner play-tests pending for W10-W12."
+    fallback: "WGR_TW_LIP=0 removes the thrown lips for the session; no switch restores the pre-W10 shading."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/tw-water-w8-w12-report.md
+      - engine/WgpuRenderer/docs/env-switches.md
+  - id: TW-WATER-W11
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W11: wake and bow spray follow the drawn hull; small boats sit at a real draft (planing lift 9-12x, legacy drag kept)"
+    class: ENGINE
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w11e-boat-drag
+    baseline_commit: 178e7e61
+    verification_commit: bccf4b40
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W10]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [fd090c8f, 8fc4a4dd, 01a0bd92, 0ec4f70c, bccf4b40]
+    production_call_sites:
+      - file: engine/Poseidon/Graphics/Rendering/Frame/PresentationSnapshot.cpp
+        symbol: FillPresentationSnapshot
+      - file: engine/Poseidon/World/Entities/Vehicles/Misc/Ship.cpp
+        symbol: Ship::Simulate
+    test_ids: [tw-w11-pbr-patrol-boat-top-speed-24s, tw-w11d-boat-diag-buoyancy-log]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/tw-water-w8-w12-report.md
+    capability_claims:
+      - capability: WAKE_FOLLOWS_RENDERED_HULL
+        status: UNVERIFIED
+        denominator: >-
+          Commit description: the snapshot takes the pose from Object::RenderTransform()
+          (the tick pose ran up to ~0.3 m ahead of the drawn hull at speed). Rendering
+          only; no before/after capture named.
+      - capability: BOAT_DRAFT_PLANING_LIFT
+        status: UNVERIFIED
+        denominator: >-
+          Physics change approved by the owner (2026-09-28): hull ~0.25 m deeper on
+          average; top speed at 24 s PBR 14.7 vs 17.1 m/s legacy, patrol boat 15.8 vs
+          17.2 (W8-W12 report).
+    known_failures:
+      - "Top speed is still ~10-15% lower than legacy above ~9 m/s; the owner parked the boat physics and wants it reworked to match Tidewater later."
+      - "W11b-W11e commits are titled 'Boats:' rather than 'TW-WATER'; they live on the dec/tidewater-w11{b,c,d,e}-* branches."
+    fallback: "POSEIDON_BOAT_LEGACY_PLANING=1 restores the 2001 planing lift (20-120x) and its drag exactly."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/tw-water-w8-w12-report.md
+      - engine/WgpuRenderer/docs/env-switches.md
+  - id: TW-WATER-W12
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: "Tidewater W12: spray after the clouds, soldiers no longer drown, mesh-exact waterline on the lens; W8-W12 docs and showcase"
+    class: WORLD_VISUAL
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: INTEGRATED
+    outcome: null
+    owner: Dec
+    branch: dec/tidewater-w12e-docs-showcase
+    baseline_commit: bccf4b40
+    verification_commit: 95a9eb1d
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: [TW-WATER-W11]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [ad347ecd, d56f91b3, 28a74e96, 3cbe1b52, 95a9eb1d]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water_backend.rs
+        symbol: WaterBackend::draw_spray
+      - file: engine/WgpuRenderer/rust/src/water_tw/mod.rs
+        symbol: Tidewater::draw_spray
+      - file: engine/WgpuRenderer/rust/src/water_tw/probe.rs
+        symbol: Probe::record
+      - file: engine/WgpuRenderer/rust/src/water_tw/tw_underwater.wgsl
+        symbol: uwProbeHeight
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldSim.cpp
+        symbol: Man::Simulate
+    test_ids: [grid_is_the_lattice_around_the_camera, tw-w12-shots-showcase-v2, tw-w12c-twwalkin-capture]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/tw-water-w8-w12-report.md
+    capability_claims:
+      - capability: SPRAY_AFTER_CLOUDS
+        status: UNVERIFIED
+        denominator: >-
+          Owner report ("clouds clip through" water explosions); spray moved to its
+          own pass after the cloud, god-ray and smoke composites; WGR_TW_SPRAY_EARLY=1
+          added for side-by-side captures. Harness captures on one machine.
+      - capability: MESH_EXACT_WATERLINE
+        status: UNVERIFIED
+        denominator: >-
+          Owner's chest-deep third-person shot and the W12c walk-in captures showed a
+          strip of unfogged sand at the waterline; the probe now holds the displaced
+          finest CDLOD vertices (rgba32float). Showcase run on the W12d build
+          (.tw/shots-showcase-v2): 27 rounds, no damage, all 24 soldiers alive at 112 s.
+    known_failures:
+      - "The player walks down the sea bed (to -14 m in twwalkin) while the camera stays at the surface (CamEffects.cpp); left for the swimming work."
+      - "Owner play-tests pending for W10-W12."
+      - "W12c (28a74e96) is titled 'Infantry:' rather than 'TW-WATER'; decision notes stop at TW-WATER-12 (W5a), the two reports cover the rest."
+    fallback: "WGR_TW_SPRAY_EARLY=1 restores the pre-W12a spray order; POSEIDON_INFANTRY_DROWN=1 restores drowning damage."
+    reviewer: null
+    reviewer_method: Backfilled 2026-10-03 from commit messages and docs; author-run captures at the time.
+    supersedes: []
+    evidence:
+      - docs/tw-water-w8-w12-report.md
+      - engine/WgpuRenderer/docs/env-switches.md
+      - CREDITS.md
