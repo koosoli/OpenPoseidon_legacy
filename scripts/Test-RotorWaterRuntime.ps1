@@ -25,9 +25,23 @@ function Decode-Eval([string]$v) {
 }
 function Assert-State($s) {
  foreach($k in @('timeMs','object','x','y','z','groundY','rpm','upY','speedX','speedY','speedZ','damage','cameraDistance')) {Require (Finite $s.$k) ('Missing/nonfinite actual rotor '+$k)}
- foreach($k in @('readonly','engineOn','destroyed','local','driverPresent','driverBrain','driverAlive','driverIsPlayer','playerManual','playerSuspended','cameraEffect','hoverStateAvailable')) {Require ($s.$k -is [bool]) ('Missing actual rotor authority '+$k)}
- if($s.hoverStateAvailable){Require ($s.hoveringAutopilot -is [bool]) 'Missing actual hover helper flag.'}
+ foreach($k in @('readonly','engineOn','destroyed','local','airborne','driverPresent','driverBrain','driverAlive','driverIsPlayer','playerManual','playerSuspended','cameraEffect','hoverStateAvailable')) {Require ($s.$k -is [bool]) ('Missing actual rotor authority '+$k)}
+ if($s.hoverStateAvailable){Require ($s.hoveringAutopilot -is [bool] -and $s.pilotHeightHelper -is [bool] -and (Finite $s.pilotWantedHeight)) 'Missing actual hover helper state.'}
  Require ($s.readonly -and $s.class -ceq 'UH60' -and $s.model -ieq 'data3d\uh-60.p3d' -and $s.rpm -ge 0 -and $s.rpm -le 1.001) 'Unaudited actual helicopter snapshot.'
+}
+function Assert-Pilot($s){
+ Assert-State $s
+ Require (!$s.destroyed -and $s.damage -eq 0 -and $s.local -and $s.driverPresent -and $s.driverBrain -and $s.driverAlive -and $s.driverIsPlayer -and $s.playerManual -and !$s.playerSuspended -and !$s.cameraEffect) 'Actual healthy controlled helicopter authority absent.'
+}
+function Assert-Supported($s,[double]$x,[double]$z,[bool]$heldDown=$false){
+ Assert-Pilot $s
+ Require (!$s.airborne -and $s.y-$s.groundY -ge 0 -and $s.y-$s.groundY -lt 6 -and [Math]::Abs($s.speedY) -le .25 -and [Math]::Abs($s.x-$x) -le 8 -and [Math]::Abs($s.z-$z) -le 8) 'Actual supported landing is absent.'
+ if($heldDown){Require ((Finite $s.moveDown) -and $s.moveDown -gt .5 -and $s.hoverStateAvailable -and $s.pilotHeightHelper -and $s.pilotWantedHeight -le 1.001 -and $s.pilotWantedHeight -ge .999) 'Ordinary collective-down did not reach its actual stock landing target.'}
+}
+function Assert-StoppedSea($s,[double]$x,[double]$z,[double]$sea){
+ Assert-Pilot $s
+ Require (!$s.engineOn -and $s.rpm -le .02 -and (Finite $s.fuel) -and $s.fuel -eq 0 -and $s.upY -ge .85 -and $s.groundY -lt $sea-.03 -and [Math]::Abs($s.x-$x) -le 8 -and [Math]::Abs($s.z-$z) -le 8) 'Engine-off sea control is not a real healthy stopped rotor over water.'
+ Require ($s.y-$sea -ge 8 -and $s.y-$sea -le 28) 'Engine-off sea control is outside the matched low-altitude source window.'
 }
 function Assert-Hover($s,[double]$x,[double]$z,[double]$surface,[bool]$high=$false) {
  Assert-State $s
@@ -56,6 +70,12 @@ function Receipt-Matches($r,$s,$view,[bool]$positive) {
  return $false
 }
 if($SelfTest){
+ $ground=@{readonly=$true;timeMs=20;object=1;class='UH60';model='data3d\uh-60.p3d';x=2475;y=26.4;z=5075;groundY=24;rpm=1;upY=1;speedX=0;speedY=0;speedZ=0;damage=0;cameraDistance=20;engineOn=$true;destroyed=$false;local=$true;airborne=$false;driverPresent=$true;driverBrain=$true;driverAlive=$true;driverIsPlayer=$true;playerManual=$true;playerSuspended=$false;cameraEffect=$false;hoverStateAvailable=$true;hoveringAutopilot=$true;pilotHeightHelper=$true;pilotWantedHeight=1;moveDown=1;fuel=1000}
+ Assert-Supported $ground 2475 5075 $true
+ foreach($change in @(@{airborne=$true},@{y=31},@{speedY=2.14},@{pilotWantedHeight=20.898},@{moveDown=0},@{driverIsPlayer=$false})){$bad=$ground.Clone();foreach($k in $change.Keys){$bad[$k]=$change[$k]};$failed=$false;try{Assert-Supported $bad 2475 5075 $true}catch{$failed=$true};Require $failed 'Unsupported/spinning-climb surrogate accepted as actual landing.'}
+ $stopped=$ground.Clone();$stopped.x=1750;$stopped.z=3100;$stopped.y=18;$stopped.groundY=-2;$stopped.engineOn=$false;$stopped.rpm=0;$stopped.fuel=0;$stopped.airborne=$true
+ Assert-StoppedSea $stopped 1750 3100 0
+ foreach($change in @(@{x=2475;z=5075},@{rpm=.77},@{engineOn=$true},@{groundY=2},@{y=42},@{fuel=1000})){$bad=$stopped.Clone();foreach($k in $change.Keys){$bad[$k]=$change[$k]};$failed=$false;try{Assert-StoppedSea $bad 1750 3100 0}catch{$failed=$true};Require $failed 'Engine-off sea negative admitted a location/altitude/dry/spinning confound.'}
  foreach($angle in @('top','close')) {
   $camera=Sea-View 1750 3100 0 $angle
   Require ($camera.view.Count -eq 3 -and $camera.pose.Count -eq 6) 'Actual scalar sea camera tuple malformed.'
@@ -86,7 +106,7 @@ New-Item -ItemType Directory -Force $output|Out-Null
 $result=[ordered]@{status='running';installed=$before;sourceHead=(& git -C $root rev-parse HEAD);scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;arms=@();limits='One stock occupied UH60, Noe native sea, eight-source/256m renderer domain. OP arm establishes physical admission and captures, not a copied GPU impulse receipt. Appearance/cost require review.'}
 $keys=@('POSEIDON_USER_DIR','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_RAIN_TRACE','POSEIDON_SNOW_TEST_DEPTH','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','POSEIDON_SNOWLINE','POSEIDON_ROTOR_LAND','POSEIDON_ROTOR_LAND_TRACE','POSEIDON_WIND_OVERRIDE','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_WATER_BACKEND','WGR_WATER_SOAK','WGR_TW_ROTOR_WASH','WGR_TW_ROTOR_TRACE','WGR_AUTO_EXPOSURE')
 $saved=@{};foreach($k in $keys){$saved[$k]=[Environment]::GetEnvironmentVariable($k,'Process')}
-$p=$null;$client=$null;$script:heldLook=$false;$script:heldUp=$false;$script:object=$null;$script:lastOwnershipCheck=[DateTime]::MinValue
+$p=$null;$client=$null;$script:heldLook=$false;$script:heldUp=$false;$script:heldDown=$false;$script:object=$null;$script:lastOwnershipCheck=[DateTime]::MinValue
 function Health {
  Require ($p -and !$p.HasExited) 'Owned game exited unexpectedly.'
  if(([DateTime]::UtcNow-$script:lastOwnershipCheck).TotalSeconds -ge 5){
@@ -143,7 +163,25 @@ function Observe([string]$stage,[double]$x,[double]$z,[double]$surface,[bool]$hi
  do{Start-Sleep -Milliseconds 400;$s=State ($stage+'-observed');Assert-Hover $s $x $z $surface $high;$states+=,$s;$now=[double](Eval 'time');Require ([DateTime]::UtcNow -lt $deadline) 'Actual physics observation timed out.'}while($now-$start -lt $ObserveSeconds)
  Exec 'setAccTime 0';$arm.gates[$stage]=@{start=$start;end=$now;states=$states};Backend
 }
+function Land-Owned {
+ Require ((Eval 'triClearView') -ceq 'OK') 'Landing retained a render camera lease.'
+ $start=State 'landing-start';Assert-Hover $start $DryX $DryZ $dry
+ $null=Send @{cmd='key';sc=29;hold=$true};$script:heldDown=$true;Exec 'setAccTime 1'
+ $until=[DateTime]::UtcNow.AddSeconds(60);$settled=0;$states=@()
+ do{
+  Start-Sleep -Milliseconds 250;$s=State 'ordinary-Z-landing';Assert-Pilot $s
+  Require ($s.engineOn -and $s.rpm -ge .65 -and [Math]::Abs($s.x-$DryX) -le 8 -and [Math]::Abs($s.z-$DryZ) -le 8) 'Actual powered landing lost the controlled aircraft.'
+  Require ((Finite $s.moveDown) -and $s.moveDown -gt .5) 'Stock Z did not resolve to actual helicopter collective down.'
+  $good=$true;try{Assert-Supported $s $DryX $DryZ $true}catch{$good=$false}
+  if($good){$settled++}else{$settled=0};$states+=,$s
+  Require ([DateTime]::UtcNow -lt $until) 'Ordinary stock collective-down did not produce supported landing.'
+ }while($settled -lt 3)
+ Exec 'setAccTime 0';$landed=State 'ordinary-Z-landed';Assert-Supported $landed $DryX $DryZ $true
+ $arm.gates.landing=@{start=$start;landed=$landed;states=$states;input='Ordinary SDL Z collective down held through powered supported landing and subsequent spool-down; no ground teleport or helper setter'}
+ return $landed
+}
 function Close-Owned {
+ if($script:heldDown){$null=Send @{cmd='key_up';sc=29};$script:heldDown=$false}
  if($script:heldUp){$null=Send @{cmd='key_up';sc=20};$script:heldUp=$false};if($script:heldLook){$null=Send @{cmd='key_up';sc=226};$script:heldLook=$false}
  Exec 'setAccTime 1';$null=Send @{cmd='exit'};Require ($p.WaitForExit(20000) -and $p.ExitCode -eq 0) 'Owned game failed normal exit zero.'
  Require (Select-String -LiteralPath $log -Pattern 'Shutdown complete' -Quiet) 'Normal shutdown marker absent.';$arm.exitCode=$p.ExitCode
@@ -185,10 +223,22 @@ try{
   $null=Place 'sea-high' $SeaX $SeaZ $script:seaLevel 42 $true;Observe 'sea-high' $SeaX $SeaZ $script:seaLevel $true;Capture 'sea-high' 'close' $false
   $null=Place 'sea-return' $SeaX $SeaZ $script:seaLevel $HoverHeight;Observe 'sea-return' $SeaX $SeaZ $script:seaLevel;Capture 'sea-return' 'close' $positive
   $null=Place 'dry-hover' $DryX $DryZ $dry $HoverHeight;Observe 'dry-hover' $DryX $DryZ $dry;Capture 'dry-hover' 'top' $false
-  # Real engine-off spool-down belongs on supported ground, not a falling sea aircraft.
-  Exec ('rotorHeli setPosASL ['+$xz+','+(Number ($dry+2))+'];rotorHeli engineOn false;rotorHeli setFuel 0');Exec 'setAccTime 1';$until=[DateTime]::UtcNow.AddSeconds(60)
-  do{Start-Sleep -Milliseconds 400;$s=State 'grounded-spool-down';Require (!$s.engineOn -and !$s.destroyed -and $s.damage -eq 0 -and $s.y-$s.groundY -lt 6 -and [Math]::Abs($s.x-$DryX) -le 8 -and [Math]::Abs($s.z-$DryZ) -le 8) 'Grounded actual engine-off control lost support or identity.';Require ([DateTime]::UtcNow -lt $until) 'Actual stopped engine retained spinning rotor.'}while($s.rpm -gt .02)
-  Exec 'setAccTime 0';$arm.gates.finalEngineOff=State 'final-engine-off';Capture 'engine-off-return-sea-view' 'close' $false
+  # Land through the real keyboard collective. A ground teleport leaves the
+  # previous manual height target intact and makes the residual rotor climb.
+  $null=Land-Owned
+  Exec 'rotorHeli engineOn false;rotorHeli setFuel 0;setAccTime 1';$until=[DateTime]::UtcNow.AddSeconds(60)
+  do{Start-Sleep -Milliseconds 400;$s=State 'grounded-spool-down';Assert-Supported $s $DryX $DryZ $true;Require (!$s.engineOn) 'Supported shutdown restarted its engine.';Require ([DateTime]::UtcNow -lt $until) 'Actual stopped engine retained spinning rotor.'}while($s.rpm -gt .02)
+  Exec 'setAccTime 0';$arm.gates.groundedEngineOff=State 'grounded-engine-off-ready'
+  $null=Send @{cmd='key_up';sc=29};$script:heldDown=$false
+  # One relocation, followed by real gravity, isolates engine/RPM off inside
+  # the same sea/altitude/camera domain. This is not an engine-off hover.
+  Exec ('rotorHeli setPosASL ['+(Number $SeaX)+','+(Number $SeaZ)+','+(Number ($script:seaLevel+$HoverHeight))+'];setAccTime 1')
+  $seaStart=State 'engine-off-sea-gravity-start';Assert-StoppedSea $seaStart $SeaX $SeaZ $script:seaLevel
+  Start-Sleep -Milliseconds 400;$falling=State 'engine-off-sea-gravity';Assert-StoppedSea $falling $SeaX $SeaZ $script:seaLevel
+  Require ($falling.timeMs -gt $seaStart.timeMs -and $falling.y -lt $seaStart.y -and $falling.speedY -lt -.1) 'Stopped sea aircraft did not evolve under actual gravity.'
+  Exec 'setAccTime 0';$arm.gates.finalEngineOff=State 'final-engine-off-sea';Assert-StoppedSea $arm.gates.finalEngineOff $SeaX $SeaZ $script:seaLevel
+  $arm.gates.engineOffGravity=@{before=$seaStart;after=$falling;scope='Single low-sea relocation and ordinary gravity; paused for safe source/camera negative, no velocity/RPM pin'}
+  Capture 'engine-off-return-sea-view' 'close' $false
   Close-Owned;Same-Pair $before (Pair);$client.Dispose();$client=$null;$p=$null;$arm.status='physical-source-clock-lifecycle-passed-visual-cost-review-pending'
  }
  $result.status='bounded-comparison-captured-visual-cost-review-pending'
