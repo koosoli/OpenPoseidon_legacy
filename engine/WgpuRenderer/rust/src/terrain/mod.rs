@@ -2191,9 +2191,11 @@ mod terrain_hole_tests {
     #[test]
     fn object_shaders_compose_with_the_underground_sun_test() {
         let src = include_str!("../shaders/shading.wgsl");
-        assert!(src.contains("let underground_s = 1.0 - cave_daylight(world_abs);"));
+        assert!(src.contains("let underground_s = 1.0 - cave.x;"));
+        assert!(src.contains("let underground_amb = mix(1.0, 0.03, underground_amb_s);"));
         let conform = include_str!("../shaders/conform.wgsl");
         assert!(conform.contains("fn cave_daylight(world: vec3<f32>) -> f32"));
+        assert!(conform.contains("fn cave_daylight2(world: vec3<f32>) -> vec2<f32>"));
         assert!(conform.contains("@group(4) @binding(3) var<uniform> cave_openings: CaveOpenings;"));
         assert!(src.contains("* leaf_cavity * underground_amb;"));
         compose(include_str!("../gfx3d/shader3d.wgsl"), "gfx3d/shader3d.wgsl");
