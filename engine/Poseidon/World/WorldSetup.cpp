@@ -495,6 +495,7 @@ void World::MoveOutAndDelete(VehicleList& vehicles, float deltaT, bool applyMove
     // marks expire in large cohorts, turning this maintenance pass quadratic
     // in dense infantry scenes. Compact survivors once while preserving their
     // order, so simulation and deterministic gameplay ordering stay unchanged.
+    const int outCountBefore = _outVehicles.Size();
     const int count = vehicles.Size();
     int write = 0;
     for (int read = 0; read < count; ++read)
@@ -529,7 +530,6 @@ void World::MoveOutAndDelete(VehicleList& vehicles, float deltaT, bool applyMove
             _scene.GetLandscape()->RemoveObject(vehicle);
             RemoveTarget(vehicle);
             RemoveSensor(vehicle);
-            DoAssert(ValidateOutVehicle(vehicle));
         }
         else if (vehicle->ToConvertToObject())
         {
@@ -557,6 +557,14 @@ void World::MoveOutAndDelete(VehicleList& vehicles, float deltaT, bool applyMove
         }
     }
     vehicles.Resize(write);
+
+    // Stable compaction retains removed entries in the untrimmed tail until
+    // Resize. Validate only now, when a newly boarded soldier is absent from
+    // the normal list, as it was after the old per-entry Delete operation.
+    for (int i = outCountBefore; i < _outVehicles.Size(); ++i)
+    {
+        DoAssert(ValidateOutVehicle(_outVehicles[i]));
+    }
 }
 
 void World::MoveOutAndDelete(VehiclesDistributed& list, float deltaT, bool applyMove)
