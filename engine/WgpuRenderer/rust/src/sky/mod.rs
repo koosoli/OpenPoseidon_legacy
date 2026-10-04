@@ -14,6 +14,15 @@ use wgpu::util::DeviceExt;
 
 use crate::ffi::WgrSky;
 
+// Production and offline validation must resolve exactly the same imports.
+// Passing source text directly to wgpu cannot parse naga_oil's #import syntax.
+fn compose_sky(composer:&mut naga_oil::compose::Composer)->naga::Module {
+    composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor {
+        source:include_str!("sky.wgsl"),file_path:"sky/sky.wgsl",
+        shader_defs:crate::shaders::shader_defs(),..Default::default()
+    }).unwrap_or_else(|e|panic!("compose wgr_sky_shader: {}",e.emit_to_string(composer)))
+}
+
 // CPU reference port of the atmosphere math, for objective colour unit tests.
 #[cfg(test)]
 mod reference;
@@ -24,7 +33,8 @@ pub mod starcat;
 // surfaces in CI/tests instead of as a pipeline-creation panic at runtime.
 #[test]
 fn sky_wgsl_validates() {
-    let module = naga::front::wgsl::parse_str(include_str!("sky.wgsl")).expect("sky.wgsl parse");
+    let mut composer=crate::shaders::build_composer();
+    let module=compose_sky(&mut composer);
     naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
         naga::valid::Capabilities::all(),
@@ -1248,7 +1258,7 @@ impl Sky {
         let fog=crate::layered_fog::LayeredFog::new(device,queue,&mut fog_composer,color_format,sample_count);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("wgr_sky_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("sky.wgsl").into()),
+            source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(compose_sky(&mut fog_composer))),
         });
 
         // Bind-group entry templates (binding numbers match sky.wgsl's globals).
