@@ -1,0 +1,4339 @@
+{
+  "pair": [
+    {
+      "sha256": "08075BBF789479E82600205F6EC6951C9DCBF248A51BE00D46BB2670F5DE6C28",
+      "path": "D:/SteamLibrary/steamapps/common/ARMA Cold War Assault/OpenPoseidon.exe"
+    },
+    {
+      "sha256": "E75A2AF161ADD345DBEB5374E9622C801B8E8A01A4CC5EF1D3B706D1BB72B435",
+      "path": "D:/SteamLibrary/steamapps/common/ARMA Cold War Assault/wgpu_renderer.dll"
+    }
+  ],
+  "house": {
+    "scope": "Four actual candidate owners supported; reported floating pixels remain unidentified. No guarantee for all houses/maps.",
+    "reportedPose": [
+      5354.13,
+      3310.21,
+      62.21,
+      8.5,
+      -0.7
+    ],
+    "sampledOwnerIds": [
+      20764,
+      20763,
+      20767,
+      31504
+    ],
+    "largestNativeFoundationGaps": [
+      -1.959877,
+      -1.959877,
+      -1.004462,
+      -1.795013
+    ],
+    "state": "UNRESOLVED_NO_OWNER_PATCH",
+    "privateEvidence": "build/everon-placement/everon-new-house-20261004-234542-8a2816"
+  },
+  "sourceCommits": [
+    "2dc0956a",
+    "2ba7b596"
+  ],
+  "tests": {
+    "fogPassed": 15,
+    "grassPassed": 35,
+    "grassLog": {
+      "sha256": "5EC3B8D31DA85CE199B4A2E438902BABAD9CED6E0D452D1932657D7159BE5098",
+      "path": "build/grass-followup-tests-repaired.log"
+    },
+    "fogLog": {
+      "sha256": "1FE36C7E0B662CB3948C388C80D465E83812FF1BE6C8AC5B2558F78C04F3BFBB",
+      "path": "build/fog-followup-tests.log"
+    }
+  },
+  "grass": {
+    "passed": true,
+    "scope": "Actual SDL/ImGui controls visually read in captures. Default meadow and top view inspected; no universal artistic acceptance or placed-instance count readback.",
+    "privateEvidence": "build/grass-followup-ui/20261005-002023",
+    "midCoverageAfterActualMouseClick": 4.0,
+    "installed": "codex/kolgujev-fog-corpse-fixes-20261004 2ba7b596 2026-10-05_00:20 deploy-ps1",
+    "images": [
+      {
+        "sha256": "0200159486C6D6AAE742416C96160C0AC5AC97D93BD2DF4C5FAD37E79C23A106",
+        "path": "build/grass-followup-ui/20261005-002023/initial.png"
+      },
+      {
+        "sha256": "A09376D2E24292FE8A068218BF8DE40D763609E71B63BAEA61E20B86C2223128",
+        "path": "build/grass-followup-ui/20261005-002023/step1.png"
+      },
+      {
+        "sha256": "EA528AF0CE194C96A3C0193E621AA5646772CD4583F0A75C5EAFD146AA67BE83",
+        "path": "build/grass-followup-ui/20261005-002023/step2.png"
+      },
+      {
+        "sha256": "DAC4A2CA4868909C3CBCD6C2CCC21B32D5835A7541D374AA1A7C0EFC7CDB6CCA",
+        "path": "build/grass-followup-ui/20261005-002023/step3.png"
+      },
+      {
+        "sha256": "7FD4114C4C101E81351DE20758CC8205951A462A5FF6C2F63A38B4F467015D4E",
+        "path": "build/grass-followup-ui/20261005-002023/step4.png"
+      }
+    ],
+    "startupCoverage": 0.5
+  },
+  "installed": "codex/kolgujev-fog-corpse-fixes-20261004 2ba7b596 2026-10-05_00:20 deploy-ps1",
+  "fogFlights": [
+    {
+      "native": {
+        "count": 0,
+        "selectedId": 0,
+        "records": [],
+        "status": "Caves cleared. Terrain heights are unchanged.",
+        "missionLocal": true,
+        "worldName": "worlds\\cain.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": false,
+        "atHeight": false,
+        "holeFloor": 0,
+        "terrainY": 141.02999877929688,
+        "roadY": 141.02999877929688,
+        "cameraFloorY": 141.02999877929688,
+        "drawRecords": 0,
+        "boundedHeader": false,
+        "ok": true
+      },
+      "passed": true,
+      "privateEvidence": "build/fog-flight/edge-baseline-20261005-000419",
+      "transport": {
+        "index": 88,
+        "name": "Layered ASL fog: transport",
+        "gpuMs": 0.7014399766921997,
+        "cpuMs": 0.04399999976158142,
+        "containedBy": -1,
+        "container": false
+      },
+      "performanceScope": "Latest asynchronous region sample only, not a steady benchmark or exact capture-frame cost",
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 626c7c6f 2026-10-04_22:36 deploy-ps1",
+      "views": [
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "69F76F9BB8119F2D24CD1960344ED1240A32AD937BA5048CBE02D3D5B1F1D360",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/coast-00.png"
+          },
+          "step": 0,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5448.72998046875,
+              590.9500122070312,
+              7011.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5448.73,
+            7011.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "799762ABAEC60B6C5784E26B89A666D1529D99E220F672CC53538E9E1FE0DBCA",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/coast-01.png"
+          },
+          "step": 1,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5456.72998046875,
+              590.9500122070312,
+              7016.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5456.73,
+            7016.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "7623DB421A94F557A5A4E3E130D89D43FA5D7CE39783E15FB799E2A44F4184EE",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/coast-02.png"
+          },
+          "step": 2,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5464.72998046875,
+              590.9500122070312,
+              7021.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5464.73,
+            7021.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "DAB94648B590D682359CD55523D05C5CE32A9EABCD9C648A608540BF6183FE80",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/coast-03.png"
+          },
+          "step": 3,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5472.72998046875,
+              590.9500122070312,
+              7026.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5472.73,
+            7026.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "3383168BDD64F6002E4C6CFD826C7CA17E6E5E524F05DD2E75BF7F4190B4AEB2",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/coast-04.png"
+          },
+          "step": 4,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5480.72998046875,
+              590.9500122070312,
+              7031.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5480.73,
+            7031.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "F1D0658636706264BC28D52E4C1FA0C04AEF9C96F7FC834D74CCE44B0DF7566A",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/coast-05.png"
+          },
+          "step": 5,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5488.72998046875,
+              590.9500122070312,
+              7036.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5488.73,
+            7036.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "E4BB920579696FA5360FACC11859CB49170DE61A82E5066C5476094BD157375F",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/coast-06.png"
+          },
+          "step": 6,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5496.72998046875,
+              590.9500122070312,
+              7041.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5496.73,
+            7041.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "2FCD3A1D61C434DA480351A30DA98D4BA5DD9648C1818F7FBDAA90695A0C7252",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/coast-07.png"
+          },
+          "step": 7,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5504.72998046875,
+              590.9500122070312,
+              7046.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5504.73,
+            7046.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "80A1D31D72228EF74F77190F153ABD036D7683AAEA804E0F0F5B711BAA5F1107",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/coast-08.png"
+          },
+          "step": 8,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5512.72998046875,
+              590.9500122070312,
+              7051.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5512.73,
+            7051.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "357A3D60B0E0E8C35D3FF69A33E5A9657C8FE308F716AB2B9C0AF8A0079034CB",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/coast-09.png"
+          },
+          "step": 9,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5520.72998046875,
+              590.9500122070312,
+              7056.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5520.73,
+            7056.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "4B76D748960B7044E25ADAA19D3372E408A290762B107CFE6E4E354F287D2094",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/coast-10.png"
+          },
+          "step": 10,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5528.72998046875,
+              590.9500122070312,
+              7061.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5528.73,
+            7061.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "EAE6AE1C3F61F2C6FB744A6269188844BAA63ECB421276E7577F92ECE7CDE511",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/coast-11.png"
+          },
+          "step": 11,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5536.72998046875,
+              590.9500122070312,
+              7066.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5536.73,
+            7066.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "0DE90C252EA8B4DBFAB68951A64EB5621FCB95CDA0A3BE643A3B2579950543D2",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/coast-12.png"
+          },
+          "step": 12,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5544.72998046875,
+              590.9500122070312,
+              7071.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5544.73,
+            7071.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "8B0F629783FDAF66C63CDD183B46F1D174F339113A8BF4C5419A88F305D118B9",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/ocean-00.png"
+          },
+          "step": 0,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7400,
+              900,
+              8500
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7400,
+            8500,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "85E1BAD8321E162E73E5B70457F71F0944409466CB7EE29B160AE807214DCB27",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/ocean-01.png"
+          },
+          "step": 1,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7408,
+              900,
+              8505
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7408,
+            8505,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "F1FB168B8AC10152FE85B4E7FAB1215C6EC2A6F338E161D66A3F8DED2E2318B2",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/ocean-02.png"
+          },
+          "step": 2,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7416,
+              900,
+              8510
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7416,
+            8510,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "85C9E3E395B62973FBB59932B04515A96811B7291267B3B47957E238FBCF5873",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/ocean-03.png"
+          },
+          "step": 3,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7424,
+              900,
+              8515
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7424,
+            8515,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "9948F3F9E28F2B5E6B7F76C8CF6B3DE2033B65C8718FE363B272A3E92C608DB5",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/ocean-04.png"
+          },
+          "step": 4,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7432,
+              900,
+              8520
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7432,
+            8520,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "D61F8774B2AE778EE19BF775AE3E321276FB301EF2DABE3CCC92D795D55788EB",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/ocean-05.png"
+          },
+          "step": 5,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7440,
+              900,
+              8525
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7440,
+            8525,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "18B027C8AE8F2392D7A36F599D36B4DC234CDDC010F0E597ABA933E96DE3CCCB",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/ocean-06.png"
+          },
+          "step": 6,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7448,
+              900,
+              8530
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7448,
+            8530,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "09F51036BDD2BB57BF060EB98481E1F95D6DC3405875FE1577C92BA0074E3ACA",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/ocean-07.png"
+          },
+          "step": 7,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7456,
+              900,
+              8535
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7456,
+            8535,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "0F9CCD7C419F4CA557BCCBEEE4E67DC2F264FE9E0D829A63274FC3D3942F86BB",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/ocean-08.png"
+          },
+          "step": 8,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7464,
+              900,
+              8540
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7464,
+            8540,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "BA86F73797DC41EAC0FC9AED3449677068084DCF7306435F9046B1A0B4410728",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/ocean-09.png"
+          },
+          "step": 9,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7472,
+              900,
+              8545
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7472,
+            8545,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "E47C25AC4E253DE557191932EA1C450215A7B4BA07334E5D941F0B3DEE94DA26",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/ocean-10.png"
+          },
+          "step": 10,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7480,
+              900,
+              8550
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7480,
+            8550,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "7DF0FC7A627DB1EAFDFEAEA48BF08CFCA6259694292D93B4A66A5FC173286A85",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/ocean-11.png"
+          },
+          "step": 11,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7488,
+              900,
+              8555
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7488,
+            8555,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            30
+          ],
+          "image": {
+            "sha256": "D5E86EB504CA39C5347EF69CFDEA51044EA83CC9A77524D0D7667F2E03790B15",
+            "path": "build/fog-flight/edge-baseline-20261005-000419/ocean-12.png"
+          },
+          "step": 12,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7496,
+              900,
+              8560
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7496,
+            8560,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        }
+      ],
+      "receipt": {
+        "sha256": "B3A10895DB0402180BAD3CBD35B579FBB8C1025BEB8D3365CDAED5B4891DE35B",
+        "path": "build/fog-flight/edge-baseline-20261005-000419/result.json"
+      }
+    },
+    {
+      "native": {
+        "count": 0,
+        "selectedId": 0,
+        "records": [],
+        "status": "Caves cleared. Terrain heights are unchanged.",
+        "missionLocal": true,
+        "worldName": "worlds\\cain.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": false,
+        "atHeight": false,
+        "holeFloor": 0,
+        "terrainY": 141.02999877929688,
+        "roadY": 141.02999877929688,
+        "cameraFloorY": 141.02999877929688,
+        "drawRecords": 0,
+        "boundedHeader": false,
+        "ok": true
+      },
+      "passed": true,
+      "privateEvidence": "build/fog-flight/edge-after-20261005-001138",
+      "transport": {
+        "index": 88,
+        "name": "Layered ASL fog: transport",
+        "gpuMs": 1.3864959478378296,
+        "cpuMs": 0.07840000092983246,
+        "containedBy": -1,
+        "container": false
+      },
+      "performanceScope": "Latest asynchronous region sample only, not a steady benchmark or exact capture-frame cost",
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 2dc0956a 2026-10-05_00:11 deploy-ps1",
+      "views": [
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "F335139605C64091F1387CEB4F4922646DE9D5DD314BABB870F166C66266477B",
+            "path": "build/fog-flight/edge-after-20261005-001138/coast-00.png"
+          },
+          "step": 0,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5448.72998046875,
+              590.9500122070312,
+              7011.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5448.73,
+            7011.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "F3F81255A6AEA52197D3F9DD7AF99D44851A1399C72FEDB335FCC95549B0AB4A",
+            "path": "build/fog-flight/edge-after-20261005-001138/coast-01.png"
+          },
+          "step": 1,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5456.72998046875,
+              590.9500122070312,
+              7016.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5456.73,
+            7016.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "8AE8570EBB85A8CD085563D4101A07C2EA85C8E1F1861329840B1E8EEFE0E076",
+            "path": "build/fog-flight/edge-after-20261005-001138/coast-02.png"
+          },
+          "step": 2,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5464.72998046875,
+              590.9500122070312,
+              7021.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5464.73,
+            7021.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "803C079D1C69CCDEFB909735E7DC84FF40485DB1494AEA8EFF93BD8D4B624DA9",
+            "path": "build/fog-flight/edge-after-20261005-001138/coast-03.png"
+          },
+          "step": 3,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5472.72998046875,
+              590.9500122070312,
+              7026.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5472.73,
+            7026.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "D0F4DA7B227173454CE080A802E7E23FE0F8C166306649F96573D1960066B1D4",
+            "path": "build/fog-flight/edge-after-20261005-001138/coast-04.png"
+          },
+          "step": 4,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5480.72998046875,
+              590.9500122070312,
+              7031.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5480.73,
+            7031.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "1DCB0544C3FB14895E39AFBD7B44E56E849D7BC4540B4D46CCDB4A0E380137BC",
+            "path": "build/fog-flight/edge-after-20261005-001138/coast-05.png"
+          },
+          "step": 5,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5488.72998046875,
+              590.9500122070312,
+              7036.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5488.73,
+            7036.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "5F25251E00109396638F5D1475A95269BD60793499B2B0068FC67420FF3AF7A8",
+            "path": "build/fog-flight/edge-after-20261005-001138/coast-06.png"
+          },
+          "step": 6,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5496.72998046875,
+              590.9500122070312,
+              7041.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5496.73,
+            7041.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "8D2A555E94C6E2330878359F1C5291634902CC14CB8460C697CF22660BFFB899",
+            "path": "build/fog-flight/edge-after-20261005-001138/coast-07.png"
+          },
+          "step": 7,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5504.72998046875,
+              590.9500122070312,
+              7046.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5504.73,
+            7046.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "389F7FD59C9E7DAFA9E96A0768FAD06A54B64444B2A25A0922356B3CE1DD3FA2",
+            "path": "build/fog-flight/edge-after-20261005-001138/coast-08.png"
+          },
+          "step": 8,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5512.72998046875,
+              590.9500122070312,
+              7051.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5512.73,
+            7051.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "A1D625BDC2F7A5E8FB727A3F4F19C7F8BFF5D5EF826537B4808ED95FA9783C84",
+            "path": "build/fog-flight/edge-after-20261005-001138/coast-09.png"
+          },
+          "step": 9,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5520.72998046875,
+              590.9500122070312,
+              7056.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5520.73,
+            7056.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "B4834E03E6512B84C956481111ADA6155500BD6914C70BE6B94B2A39EC49146D",
+            "path": "build/fog-flight/edge-after-20261005-001138/coast-10.png"
+          },
+          "step": 10,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5528.72998046875,
+              590.9500122070312,
+              7061.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5528.73,
+            7061.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "29917E14B0354654F665CB980C9BC0B6C78A9F183D1DD642808A65BE617EFD10",
+            "path": "build/fog-flight/edge-after-20261005-001138/coast-11.png"
+          },
+          "step": 11,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5536.72998046875,
+              590.9500122070312,
+              7066.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5536.73,
+            7066.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "07478DBD6C616978B50B21222C9C6511A9EDB2EA7944919F9099C9CA6E3F8D63",
+            "path": "build/fog-flight/edge-after-20261005-001138/coast-12.png"
+          },
+          "step": 12,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5544.72998046875,
+              590.9500122070312,
+              7071.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            5544.73,
+            7071.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "45340D58EF429D9425A06FB5FE2379FF4E4A12CDFB850B102A36D7AA17F7FF1E",
+            "path": "build/fog-flight/edge-after-20261005-001138/ocean-00.png"
+          },
+          "step": 0,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7400,
+              900,
+              8500
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7400,
+            8500,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "0DD51BC676148454735B497FDAE9DB07BA967E0297FEE8C3107250F2CEB14483",
+            "path": "build/fog-flight/edge-after-20261005-001138/ocean-01.png"
+          },
+          "step": 1,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7408,
+              900,
+              8505
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7408,
+            8505,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "D32B2BBD23B2DC9EF0419E6E2BEA9167746EA1807CA919CB26B64D608243473E",
+            "path": "build/fog-flight/edge-after-20261005-001138/ocean-02.png"
+          },
+          "step": 2,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7416,
+              900,
+              8510
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7416,
+            8510,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "42FF08D65AF5A33E01F6C00AF7F9B96C510CE5EAAEF88215100FC467C91CEDA4",
+            "path": "build/fog-flight/edge-after-20261005-001138/ocean-03.png"
+          },
+          "step": 3,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7424,
+              900,
+              8515
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7424,
+            8515,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "B9660C13D67BEC8FA8C812A40BBF56E695FEC362AECEEA554CDBE2E8A10F6816",
+            "path": "build/fog-flight/edge-after-20261005-001138/ocean-04.png"
+          },
+          "step": 4,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7432,
+              900,
+              8520
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7432,
+            8520,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "47EDA57EE3F834FAE1E29FD8517FDD361B61C131306D083B092200168AB596EE",
+            "path": "build/fog-flight/edge-after-20261005-001138/ocean-05.png"
+          },
+          "step": 5,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7440,
+              900,
+              8525
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7440,
+            8525,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "E732BC36C0EE67DDC39FF9D9C49B47D27328923F763D464B287A5CB75C75A647",
+            "path": "build/fog-flight/edge-after-20261005-001138/ocean-06.png"
+          },
+          "step": 6,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7448,
+              900,
+              8530
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7448,
+            8530,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "FCD0769ACE84C26AF79415964996245ED82A9FC60FA7855873E294A78CB13012",
+            "path": "build/fog-flight/edge-after-20261005-001138/ocean-07.png"
+          },
+          "step": 7,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7456,
+              900,
+              8535
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7456,
+            8535,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "F6BCAB0687DA5A465F867D05F5B39DB1C6B8432B931854D0F635775506009331",
+            "path": "build/fog-flight/edge-after-20261005-001138/ocean-08.png"
+          },
+          "step": 8,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7464,
+              900,
+              8540
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7464,
+            8540,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "6FFC3AEC23B75D9769EAAC17A51F22771F2251C4775B66593648837BE542EB26",
+            "path": "build/fog-flight/edge-after-20261005-001138/ocean-09.png"
+          },
+          "step": 9,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7472,
+              900,
+              8545
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7472,
+            8545,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "BD7E994E79BF318AFB3563BCC573F77AED564BAB404FFA4003F9C43E8C637832",
+            "path": "build/fog-flight/edge-after-20261005-001138/ocean-10.png"
+          },
+          "step": 10,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7480,
+              900,
+              8550
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7480,
+            8550,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "D092AA0DA027008D87AA5A9170A5832C92A651EE860DD60ED298ECD72D6CB1CC",
+            "path": "build/fog-flight/edge-after-20261005-001138/ocean-11.png"
+          },
+          "step": 11,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7488,
+              900,
+              8555
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7488,
+            8555,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "0BA2CFDF4E50E7A6906CEFC46F4122842A4CF3D05C436265400D87DC9A0545E4",
+            "path": "build/fog-flight/edge-after-20261005-001138/ocean-12.png"
+          },
+          "step": 12,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7496,
+              900,
+              8560
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              0,
+              750,
+              5,
+              0.00999999977648258
+            ],
+            [
+              800,
+              900,
+              5,
+              0
+            ]
+          ],
+          "requested": [
+            7496,
+            8560,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.15000000596046448
+        }
+      ],
+      "receipt": {
+        "sha256": "FE0B279F82BCB7D2E59FE65ACB29C4A8DA9A98D1D1A08D949D8A38C64013D457",
+        "path": "build/fog-flight/edge-after-20261005-001138/result.json"
+      }
+    },
+    {
+      "native": {
+        "count": 0,
+        "selectedId": 0,
+        "records": [],
+        "status": "Caves cleared. Terrain heights are unchanged.",
+        "missionLocal": true,
+        "worldName": "worlds\\cain.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": false,
+        "atHeight": false,
+        "holeFloor": 0,
+        "terrainY": 141.02999877929688,
+        "roadY": 141.02999877929688,
+        "cameraFloorY": 141.02999877929688,
+        "drawRecords": 0,
+        "boundedHeader": false,
+        "ok": true
+      },
+      "passed": true,
+      "privateEvidence": "build/fog-flight/compact-temporal-after-20261005-001800",
+      "transport": {
+        "index": 88,
+        "name": "Layered ASL fog: transport",
+        "gpuMs": 0.48230400681495667,
+        "cpuMs": 0.03220000118017197,
+        "containedBy": -1,
+        "container": false
+      },
+      "performanceScope": "Latest asynchronous region sample only, not a steady benchmark or exact capture-frame cost",
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 2dc0956a 2026-10-05_00:11 deploy-ps1",
+      "views": [
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "49B8762BC3016C94133DDF1828071967C151B9970B5AD8C74C04F311C2D1D9FD",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/coast-00.png"
+          },
+          "step": 0,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5448.72998046875,
+              590.9500122070312,
+              7011.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            5448.73,
+            7011.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "9554E6B58487C2530E5A32E4229D58B371BEAC8A9F158551652DEBEFD7850691",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/coast-01.png"
+          },
+          "step": 1,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5456.72998046875,
+              590.9500122070312,
+              7016.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            5456.73,
+            7016.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "A7C47D59323BA1EA107E790CC1996B9A881C8ACA6FEF8F03708BB72820D4CA0C",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/coast-02.png"
+          },
+          "step": 2,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5464.72998046875,
+              590.9500122070312,
+              7021.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            5464.73,
+            7021.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "86E7A4CB43D3B1689BF7238FAB72C471A09E89110489756390C93247825EBF12",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/coast-03.png"
+          },
+          "step": 3,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5472.72998046875,
+              590.9500122070312,
+              7026.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            5472.73,
+            7026.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "2FF3AC4241A5D6F3E7100932CA494155C00A2007CB4BE13B33FF6C7E475CAC6F",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/coast-04.png"
+          },
+          "step": 4,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5480.72998046875,
+              590.9500122070312,
+              7031.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            5480.73,
+            7031.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "AAAB3BE30B36F953C2AB88CB3190CC17E1B19310380CB3CF5E9E5A02679CE5E3",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/coast-05.png"
+          },
+          "step": 5,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5488.72998046875,
+              590.9500122070312,
+              7036.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            5488.73,
+            7036.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "AFE8B94E2071B28B8D96D0C4069AF56C3757238D393E25D4EF9B1DD60FE98849",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/coast-06.png"
+          },
+          "step": 6,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5496.72998046875,
+              590.9500122070312,
+              7041.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            5496.73,
+            7041.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "716B21C0D3FD8039B854BEA5679BEC58C4222F1AC661F5BCDD5A2CF2AD6CF3CD",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/coast-07.png"
+          },
+          "step": 7,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5504.72998046875,
+              590.9500122070312,
+              7046.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            5504.73,
+            7046.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "2514FFCC23E579A06498F24F68E99AEDC22E2D42D4BAAB5E744739D4F24E1B12",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/coast-08.png"
+          },
+          "step": 8,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5512.72998046875,
+              590.9500122070312,
+              7051.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            5512.73,
+            7051.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "2E82F76C575B0355255D62AD664AF90D76EA5813FED04BA75B5C7C567E23B914",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/coast-09.png"
+          },
+          "step": 9,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5520.72998046875,
+              590.9500122070312,
+              7056.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            5520.73,
+            7056.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "4A6B27C3CBE06599FAF5DF8DEF3EBB8C25ED97178B40A023F4819B1ED18596C8",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/coast-10.png"
+          },
+          "step": 10,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5528.72998046875,
+              590.9500122070312,
+              7061.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            5528.73,
+            7061.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "AEF56EBCEEEDC7FAE61ACE26560ABC1D278A99E535FC8BA2C117B616E8D5631B",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/coast-11.png"
+          },
+          "step": 11,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5536.72998046875,
+              590.9500122070312,
+              7066.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            5536.73,
+            7066.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "DD8043AE8AF06A426A3CB7F89DAF81BDE1FC2308DB950A930F1C1658B33BA0CD",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/coast-12.png"
+          },
+          "step": 12,
+          "name": "coast",
+          "actualCamera": {
+            "position": [
+              5544.72998046875,
+              590.9500122070312,
+              7071.85009765625
+            ],
+            "direction": [
+              0.8516318202018738,
+              -0.40833044052124023,
+              -0.3286173641681671
+            ],
+            "up": [
+              0.3809533417224884,
+              0.9128342270851135,
+              -0.14699766039848328
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            5544.73,
+            7071.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "BC2FA4B8B9A091D0B95B7752A60EBCF17A96A5DB4D1DBF02B61ADBA2C5ABEEA2",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/ocean-00.png"
+          },
+          "step": 0,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7400,
+              900,
+              8500
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            7400,
+            8500,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "8FCC3F516B168652FBB3CE55471EAA422D6DC12A29F48800C8FEC83908FBA705",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/ocean-01.png"
+          },
+          "step": 1,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7408,
+              900,
+              8505
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            7408,
+            8505,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "01BF3488DB8FDFD5B8E61E753892FF1C33DA992B628D679E614C452637705DC1",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/ocean-02.png"
+          },
+          "step": 2,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7416,
+              900,
+              8510
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            7416,
+            8510,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "1ED01B72F10DC2D3E51307D7F7E1FDEEEB782B933B2959689F922C9D54661BEA",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/ocean-03.png"
+          },
+          "step": 3,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7424,
+              900,
+              8515
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            7424,
+            8515,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "8029C37B38E9070D6623E4F980033BDDB1725D2E54D105EAAC5FECE67F6137D8",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/ocean-04.png"
+          },
+          "step": 4,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7432,
+              900,
+              8520
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            7432,
+            8520,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "AACD84F96938FEC3360DD74DB3495F0440AF1CE361F85362C038884BE125331C",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/ocean-05.png"
+          },
+          "step": 5,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7440,
+              900,
+              8525
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            7440,
+            8525,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "5317F783780E1B90972FD0828402AA8484D044831EB5CC9D1703F0877643A44F",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/ocean-06.png"
+          },
+          "step": 6,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7448,
+              900,
+              8530
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            7448,
+            8530,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "D36D646A2D3062DDD7B9061A3D60447F6138FB8AAFC49859A13BC5F9F86F27A5",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/ocean-07.png"
+          },
+          "step": 7,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7456,
+              900,
+              8535
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            7456,
+            8535,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "EB23B7DEFEDBDB0A3974A79229CCEAF34F2AD7552831854D9EF2884E6502EEF3",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/ocean-08.png"
+          },
+          "step": 8,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7464,
+              900,
+              8540
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            7464,
+            8540,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "9543816A3CBCEC6425A189DC934A70AD64E04A2BA0F150716AC462313F514AE8",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/ocean-09.png"
+          },
+          "step": 9,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7472,
+              900,
+              8545
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            7472,
+            8545,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "E155AD7DDDF6D60A12FA25F1E070C6822E340A9EC4FD25C6392EA0B48C2BAA52",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/ocean-10.png"
+          },
+          "step": 10,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7480,
+              900,
+              8550
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            7480,
+            8550,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "5BBD53EB1E9D0280B293B9A754F4914E76FCF606687C7DB0DE47A8BDCABF8480",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/ocean-11.png"
+          },
+          "step": 11,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7488,
+              900,
+              8555
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            7488,
+            8555,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.600000023841858
+        },
+        {
+          "patch": [
+            0.449999988079071,
+            250,
+            70,
+            300
+          ],
+          "image": {
+            "sha256": "5DFA0EB5ADEFB14F3BB7CD627779634C4DEF646419B26045C6D45B1A382E34B3",
+            "path": "build/fog-flight/compact-temporal-after-20261005-001800/ocean-12.png"
+          },
+          "step": 12,
+          "name": "ocean",
+          "actualCamera": {
+            "position": [
+              7496,
+              900,
+              8560
+            ],
+            "direction": [
+              0.802964746952057,
+              -0.37460654973983765,
+              -0.463591992855072
+            ],
+            "up": [
+              0.3244187831878662,
+              0.9271838665008545,
+              -0.1873033046722412
+            ]
+          },
+          "layers": [
+            [
+              1,
+              5,
+              0.3499999940395355,
+              0.017999999225139618
+            ],
+            [
+              35,
+              50,
+              3,
+              0
+            ]
+          ],
+          "requested": [
+            7496,
+            8560,
+            900,
+            120,
+            -22
+          ],
+          "weatherFog": 0.600000023841858
+        }
+      ],
+      "receipt": {
+        "sha256": "AEFE09D49E015026B16A0A606DEBB3ECE61901A8C2F758E5F721B7D8BB5F1696",
+        "path": "build/fog-flight/compact-temporal-after-20261005-001800/result.json"
+      }
+    }
+  ]
+}
