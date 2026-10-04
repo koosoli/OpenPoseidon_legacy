@@ -897,7 +897,7 @@ public:
         if (!slot) return {};
         const b3BodyId body = slot->body;
         b3Body_SetAngularVelocity(body,ToB3(motion.angular));
-        // Passive joint/tissue energy loss belongs only to articulated limbs.
+        // Passive rotational energy loss belongs only to articulated limbs.
         // The upstream default is zero damping. Rotating contact/limit loops
         // otherwise persist after the supported torso stops. Preserve initial
         // velocities and immediate impact momentum; no linear damping is added,
