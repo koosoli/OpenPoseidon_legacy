@@ -75,9 +75,8 @@ public:
 	// grass are the three rows that actually do something.
 	Tier      shadowQuality    = TierUltra;
 	Tier      particlesQuality = TierUltra;
-	// Grass / ground clutter.  Ultra is the historical shipped behaviour (the
-	// renderer's "ultra dense" default: full density, 41 m detail ring), kept as
-	// the top of the ladder so an existing install renders exactly as before.
+    // Grass / ground clutter. Ultra uses the shared GrassSettings coverage
+    // default and a 41m detail ring. Lower tiers scale that default down.
 	//
 	// This row exists because grass was measured at 9.55 ms of a 33.40 ms GPU
 	// frame -- 28.6% -- on perf_abel at 1920x1080, and until now there was no way

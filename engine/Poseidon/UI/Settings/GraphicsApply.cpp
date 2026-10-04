@@ -89,10 +89,11 @@ int VsyncToInterval(GraphicsConfig::VsyncMode v)
 // rather than how much it costs, and would also stamp on the dev panel's Grass tab.
 // Hence read-modify-write through GetGrassSettings rather than a fresh struct.
 //
-// Ultra reproduces the historical shipped values exactly (see GrassSettings'
-// in-class initialisers), so an install that never opens this row is unchanged.
+// Anchor the ladder to the shared shipped coverage default. A startup quality
+// preset must not overwrite the owner's new half-coverage meadow default.
 void ApplyGrassTier(GraphicsConfig::Tier tier, Engine::GrassSettings& g)
 {
+    const float defaultCoverage = Engine::GrassSettings{}.density;
     switch (tier)
     {
         case GraphicsConfig::TierOff:
@@ -100,25 +101,25 @@ void ApplyGrassTier(GraphicsConfig::Tier tier, Engine::GrassSettings& g)
             return;
         case GraphicsConfig::TierLow:
             g.enabled = true;
-            g.density = 0.35f;
+            g.density = defaultCoverage * 0.35f;
             g.radius = 15.0f;
             g.castShadows = false;
             return;
         case GraphicsConfig::TierMedium:
             g.enabled = true;
-            g.density = 0.60f;
+            g.density = defaultCoverage * 0.60f;
             g.radius = 25.0f;
             return;
         case GraphicsConfig::TierHigh:
             g.enabled = true;
-            g.density = 0.85f;
+            g.density = defaultCoverage * 0.85f;
             g.radius = 33.0f;
             return;
         case GraphicsConfig::TierUltra:
         case GraphicsConfig::TierExtreme:
         default:
             g.enabled = true;
-            g.density = 1.0f;
+            g.density = defaultCoverage;
             g.radius = 41.0f;
             return;
     }
@@ -260,4 +261,3 @@ std::string DlssRuntimeVersionString()
 #endif
 }
 } // namespace Poseidon
-
