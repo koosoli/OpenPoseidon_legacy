@@ -37,7 +37,9 @@ try{
  Start-Sleep -Seconds 3
  $auto=Eval 'triPhysicsShowcase "corpse-auto-status"';if($auto -notmatch '^OK corpse-auto-status enabled=1'){throw 'Automatic ragdoll disabled'}
  $weather=Send @{cmd='weather_visibility'}
- if([Math]::Abs([double]$weather.fog-.25) -gt .001 -or $weather.rendererSky.layeredFog -ne $true){throw 'Default volumetric fog not enabled'}
+ $weather|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $out 'weather-preflight.json')
+ if([Math]::Abs([double]$weather.fog-.25) -gt .001){throw ('Requested fog has not settled: '+$weather.fog)}
+ if($weather.rendererSky.layeredFog -ne $true){throw ('Default volumetric fog not enabled: '+($weather|ConvertTo-Json -Depth 8 -Compress))}
  if((Eval 'triGetInputContext') -cne 'Infantry' -or [double](Eval 'triGetCameraEffectActive') -ne 0){throw 'Ordinary infantry controls not active'}
  $ammo=[double](Eval 'player ammo "M16"')
  if($ammo -le 0 -or [double](Eval 'triPlayerCurrentMagazineAmmo') -ne $ammo){throw 'Loaded M16 is not selected'}
