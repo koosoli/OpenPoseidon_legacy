@@ -290,6 +290,40 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
   assert!((row[3]-(-0.01*distance).exp()).abs()<0.0007,"actual Beer-Lambert z={z}: {row:?}");
   assert!(row[3]<=previous);previous=row[3];assert_eq!(&row[..3],&[0.;3]);
  }
+ // The night air medium remains even without a directional emitter. Actual
+ // player-style reflector packets light participating fog, not an additive cone.
+ let day_sun=camera.sun_diffuse;let day_direction=camera.sun_dir_world;
+ camera.sun_diffuse=[0.;4];camera.sun_dir_world=[0.;4];settings.control[1]=1.;
+ fog.upload_local_lights(&queue,&[],&camera);
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);assert!(fog.ready);
+ let night=read();assert_eq!(night,positive,"Absent sun must retain the same dark medium and extinction");
+ let torch=crate::ffi::WgrLight {pos:[0.,20.,0.,2.],diffuse:[3.,3.,3.,0.9],ambient:[0.,0.,0.,1.],dir:[0.,0.,1.,1.]};
+ camera.cam_pos[3]=1.;fog.upload_local_lights(&queue,&[torch],&camera);
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);let beam=read();
+ assert!(beam[124]>0.001 && beam.iter().all(|v|v.is_finite()),"Real reflector packet must illuminate night mist");
+ for(a,b)in beam.chunks_exact(4).zip(night.chunks_exact(4)){assert_eq!(a[3],b[3],"Lights cannot change optical depth");}
+ camera.cam_pos[3]=2.;fog.upload_local_lights(&queue,&[torch,torch],&camera);
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);let doubled=read();
+ assert!((doubled[124]-beam[124]*2.).abs()<0.001,"Two actual equal emitters double scene-linear scattering");
+ camera.cam_pos[3]=1.;let mut away=torch;away.dir=[0.,0.,-1.,1.];
+ fog.upload_local_lights(&queue,&[away],&camera);run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
+ assert_eq!(read(),night,"A torch aimed away cannot light the view ray");
+ let mut outside=torch;outside.pos[0]=300.;fog.upload_local_lights(&queue,&[outside],&camera);
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);assert_eq!(read(),night,"Native light range bounds are preserved");
+ // Actual local shadow atlas: slot0, first depth-array layer, a valid
+ // projection into the atlas tile, and an occluding stored depth.
+ let atlas_layer=csm.create_view(&wgpu::TextureViewDescriptor {dimension:Some(wgpu::TextureViewDimension::D2),base_array_layer:0,array_layer_count:Some(1),..Default::default()});
+ let mut enc=device.create_command_encoder(&Default::default());
+ {let _pass=enc.begin_render_pass(&wgpu::RenderPassDescriptor {label:None,color_attachments:&[],depth_stencil_attachment:Some(wgpu::RenderPassDepthStencilAttachment {
+  view:&atlas_layer,depth_ops:Some(wgpu::Operations {load:wgpu::LoadOp::Clear(0.),store:wgpu::StoreOp::Store}),stencil_ops:None}),timestamp_writes:None,occlusion_query_set:None,multiview_mask:None});}
+ queue.submit(Some(enc.finish()));camera.shadow.local_ctl=[1.,1.,0.001,0.];
+ camera.shadow.local_vp[0]=[0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.5,1.];
+ let mut shadowed=torch;shadowed.dir[3]=2.;fog.upload_local_lights(&queue,&[shadowed],&camera);
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);assert_eq!(read(),night,"Actual stored local shadow blocks the beam");
+ camera.shadow=crate::ffi::WgrCameraShadow::zeroed();camera.cam_pos[3]=0.;fog.upload_local_lights(&queue,&[torch],&camera);
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);assert_eq!(read(),night,"Stale light slice excluded by actual camera count");
+ camera.sun_diffuse=day_sun;camera.sun_dir_world=day_direction;settings.control[1]=0.;
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
  // Actual incoming solar T has a different path from camera T.
  let solar=read_solar();let inverse=glam::Mat4::from_cols_array(&camera.proj).inverse();
  let ray=(inverse*glam::Vec4::new(1./32.,-1./32.,0.,1.)).truncate().normalize();

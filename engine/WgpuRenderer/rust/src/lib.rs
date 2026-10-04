@@ -5032,6 +5032,7 @@ impl Renderer {
                 let fog_environment=self.sky.env_view().clone();
                 let fog_clouds=self.sky.cloud_shadow_view().clone();
                 self.gpu_timers.begin(&mut encoder,TimerRegion::LayeredFog);
+                self.sky.fog.upload_local_lights(&self.queue, lights, camera);
                 self.sky.fog.render(&self.device,&self.queue,&mut encoder,&self.layer_fog_settings,
                     self.layer_fog_weather,self.hdr_enabled,self.cam_underground,camera,ivp,
                     &conform_params,&heightmap_view,heightmap_gen,&shadow_mapping,&shadow_mask_view,
