@@ -37,7 +37,7 @@ fn fog_ray_direction(point: vec4<f32>) -> vec3<f32> {
     return normalize(point.xyz / scale) * select(1.0,-1.0,point.w < 0.0);
 }
 // CPU projection is forward-Z; raster depth is reversed by frame::reverse_z.
-// Sky depth0 and an infinite homogeneous point consume the distant fog slice.
+// Sky depth0 and an infinite homogeneous point consume the final fog slice.
 fn fog_depth_distance(inverse: mat4x4<f32>, uv: vec2<f32>, depth: f32, far: f32) -> f32 {
     if (depth <= 0.0) { return far; }
     let ndc = uv * vec2<f32>(2.0,-2.0) + vec2<f32>(-1.0,1.0);
@@ -53,7 +53,7 @@ fn fog_transport(background: vec3<f32>, transport: vec4<f32>) -> vec3<f32> {
 }
 // Legacy far-cover is synthetic sky closure, not radiance emitted at the
 // object's depth. Transport only the admitted foreground locally; the closing
-// sky term uses the same distant volume slice as the background sky pass.
+// sky term uses the same final volume slice as the background sky pass.
 fn fog_legacy_closure(scene: vec3<f32>, airlight: vec3<f32>, amount: f32,
     local: vec4<f32>, distant: vec4<f32>, surface_open: bool) -> vec3<f32> {
     let foreground = select(scene, fog_transport(scene, local), surface_open);

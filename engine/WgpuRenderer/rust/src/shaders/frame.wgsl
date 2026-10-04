@@ -429,7 +429,7 @@ fn ground_sky_reflection(dir: vec3<f32>) -> vec3<f32> {
 
 // Diffuse sky irradiance for a world-space surface normal, from the SH-9 sky projection
 // (Ramamoorthi, "An Efficient Representation for Irradiance Environment Maps"), divided by PI so
-// it is the Lambertian ambient reflectance factor (distant ambient = albedo * sky_irradiance * scale).
+// it is the Lambertian ambient reflectance factor (final ambient = albedo * sky_irradiance * scale).
 // A future sky-visibility (AO) term multiplies this per point by the fraction of sky it can see.
 fn sky_irradiance(n: vec3<f32>) -> vec3<f32> {
     let l00 = sky_sh.c[0].rgb;
