@@ -115,6 +115,20 @@ execution:
       remains open. This finite feedback batch stops pending owner judgement. Older ledger
       source hashes outside reviewed slices remain stale and are not silently
       renewed; Preview validator stops at RND-005A, Compat at AST-011C.
+  stock_character_ragdoll_checkpoint:
+    branch: codex/ofp-character-ragdolls-20261004
+    baseline_commit: 3427b5e2
+    state: OWNER_AUTHORISED_MODEL_EXTENSION_IN_PROGRESS
+    present_stock_model_denominator: 37
+    evidence: docs/verification/stock-ofp-ragdolls-20261004.md
+    note: >-
+      Owner explicitly requests all original OFP characters. Complete local
+      retail census includes35 editor-public models and2 story models. Existing
+      Western-only admission must be replaced with validated per-model anatomy;
+      civilian and story geometry differences are being handled. No claim of
+      installed all-model acceptance until the full denominator passes ordinary
+      death, actual Box3D settlement and real frozen-corpse projectile checks.
+      Four simultaneous and64 retained remain separate performance limits.
   review_model: OWNER_REVIEW_NO_INDEPENDENT_REVIEWER
   local_swim_test_checkpoint:
     state: LOCAL_OPT_IN_ADDON_INSTALLED_PLAYER_RUNTIME_CHECKS_PASSED
