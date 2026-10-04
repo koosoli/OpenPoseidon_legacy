@@ -1659,7 +1659,16 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
             pivot = (anchor.firstWorld+anchor.secondWorld)*0.5f;
         }
         Vector3 axis = state->initial[b].Position()-pivot;
-        if (axis.Size() < 0.025f) { refusal = "joint-geometry-axis-degenerate"; return false; }
+        if (!axis.IsFinite() || axis.Size() < 0.025f)
+        {
+            refusal = "joint-geometry-axis-degenerate";
+            LOG_WARN(World,"AUTORAGDOLL: joint frame refused model={} joint={} firstPart={} secondPart={} anchor={} axisLength={} firstCenter=({},{},{}) secondCenter=({},{},{}) pivot=({},{},{}) hinges={}",
+                _shape->Name(),j,a,b,anchors[j],axis.Size(),
+                state->initial[a].Position().X(),state->initial[a].Position().Y(),state->initial[a].Position().Z(),
+                state->initial[b].Position().X(),state->initial[b].Position().Y(),state->initial[b].Position().Z(),
+                pivot.X(),pivot.Y(),pivot.Z(),anatomicalHinges);
+            return false;
+        }
         axis.Normalize(); Vector3 up = std::abs(axis*VUp) < 0.95f ? VUp : VAside;
         const bool distal = j == 3 || j == 5 || j == 7 || j == 9;
         const int hingeIndex = j == 3 ? 0 : j == 5 ? 1 : j == 7 ? 2 : 3;
