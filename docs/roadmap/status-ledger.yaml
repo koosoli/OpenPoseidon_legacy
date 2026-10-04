@@ -48,11 +48,18 @@ execution:
       - Adapt remaining relevant upstream fixes using owner's audit
     upstream_head: b36cddc7
     upstream_audit_location: docs/roadmap/modernisation/upstream
+    house_state: UNREPRODUCED_PENDING_TARGET_IDENTIFICATION
+    house_evidence: docs/roadmap/modernisation/EVERON-PLACEMENT-DIAGNOSTIC-20261004.md
+    fog_state: IMPLEMENTATION_IN_ISOLATED_WORKTREE
+    ragdoll_state: AUTOMATIC_DEATH_HANDOFF_IMPLEMENTATION_IN_ISOLATED_WORKTREE
+    upstream_state: FIRST_CONFIRMED_PORTS_INTEGRATED_COMBINED_CHECKS_RUNNING
     note: >-
       Backup is the installed-verified cave/trench checkpoint. Follow-up work
       preserves that branch. Fresh upstream main fetched; source patch absence
       is not inferred from ancestry. Root owns all installed deployment/runtime.
-      House placement remains under diagnosis; no unverified global snapping.
+      Exact camera, twelve source-bound foundations and near/far views inspected;
+      reported floating owner not identified. Optional owner detail pending.
+      No unverified global snapping. Continue independent authorised tasks.
   review_model: OWNER_REVIEW_NO_INDEPENDENT_REVIEWER
   review_model_note: >-
     Preview 0 has no independent reviewer and cannot obtain one: Oliver Kay is

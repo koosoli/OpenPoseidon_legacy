@@ -24,3 +24,11 @@ pwsh -NoProfile -File scripts/Test-EveronPlacement.ps1 -SourceOnly -ExpectedComm
 ```
 
 Root runs the ordinary installed arm under `scripts/with-game-lock.sh`, passing the actual installed commit. It uses an isolated profile, clear16h conditions and the stock `parity_field.eden` mission. Results go under `build/everon-placement/`. No production engine change, arbitrary sinking, authored elevation change or bridge snapping is included.
+
+## Installed findings, 4 October
+
+Final diagnostic receipt: `build/everon-placement/everon-foundations-aimed-20261004-024010-087ded/result.json`, against installed `f6e5c1d5` / engine source `fd1e236c`. The normal exit and unchanged matched pair passed. All twelve candidates' sampled visual foundation gaps were negative: maxima range from -0.82 m to -3.41 m against the unchanged native surface. Preferred/tactical/renderer distances were checked, including the explicit 8 km control.
+
+Root inspected the exact reported view, correctly aimed nearby village foundations, chapel and targeted far views. The reported view shows a beach and hills across water. The near village buildings sit on the ground; trees/terrain obscure parts of their far sightline. **The reported floating houses have not been identified or reproduced.** These candidates are not a substitute for the owner's actual target, and their support does not certify every map building. The owner was asked whether the houses were nearby/across water and whether terrain had been edited. Pending that detail, no placement change is justified.
+
+Earlier tracked camera targets contained two fixture bugs: PowerShell member enumeration flattened world-point arrays before selecting Y; roof-target arithmetic also needed parentheses to keep Y and Z distinct. The final runner fixes both, adds falsifiers, and disables grass for foundation inspection. Earlier mis-aimed near/far captures are not visual evidence; their independently captured owner/native bottom samples remain diagnostic observations. The separate temporary pinned-camera close inspection agreed with the final village view.
