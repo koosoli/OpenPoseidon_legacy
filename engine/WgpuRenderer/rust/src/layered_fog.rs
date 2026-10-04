@@ -8,6 +8,7 @@ pub const SIZE: u32 = 32;
 pub struct Consumer {
     pub view: [f32;16], pub proj: [f32;16], pub inv_vp: [[f32;4];4],
     pub camera: [f32;4], pub control: [f32;4],
+    pub solar_domain:[f32;4],pub native:[f32;4],pub native_size:[u32;4],
 }
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -45,12 +46,16 @@ pub fn requested(p: &WgrLayeredFog, weather: f32, hdr: bool, underground:f32) ->
     valid_settings(p) && p.control[0]>=0.5 && weather.is_finite() && weather>0.0 && weather<=1.0
         && hdr && underground==0.0 && p.layers.iter().any(|l|l[3]>0.0)
 }
+fn solar_max_agl(settings:&WgrLayeredFog,native_min:f32)->f32 {
+    let top=settings.layers.iter().filter(|l|l[3]>0.0).map(|l|l[1]+l[2]).fold(f32::MIN,f32::max);
+    (top-settings.terrain[0]*settings.terrain[1]-(1.0-settings.terrain[0])*native_min).max(1.0)
+}
 pub struct LayeredFog {
-    pub view: wgpu::TextureView, pub consumer: wgpu::Buffer,
-    _texture: wgpu::Texture, params: wgpu::Buffer, height: wgpu::Buffer,
+    pub view: wgpu::TextureView, pub solar_view: wgpu::TextureView, pub consumer: wgpu::Buffer,
+    _texture: wgpu::Texture, _solar_texture: wgpu::Texture, params: wgpu::Buffer, height: wgpu::Buffer,
     shadow: wgpu::Buffer, csm: wgpu::Buffer, zero_counts: wgpu::Buffer,
     sampler: wgpu::Sampler, comparison: wgpu::Sampler,
-    layout: wgpu::BindGroupLayout, compute: wgpu::ComputePipeline,
+    layout: wgpu::BindGroupLayout, compute: wgpu::ComputePipeline, solar_compute: wgpu::ComputePipeline,
     background: wgpu::RenderPipeline, background_bind: wgpu::BindGroup,
     ready: bool, trace: bool, frames: u64,
 }
@@ -72,6 +77,11 @@ impl LayeredFog {
             dimension:wgpu::TextureDimension::D3,format:wgpu::TextureFormat::Rgba16Float,
             usage:wgpu::TextureUsages::STORAGE_BINDING|wgpu::TextureUsages::TEXTURE_BINDING,view_formats:&[]});
         let view=texture.create_view(&Default::default());
+        let solar_texture=device.create_texture(&wgpu::TextureDescriptor {label:Some("wgr_layer_fog_solar"),
+            size:wgpu::Extent3d {width:SIZE,height:SIZE,depth_or_array_layers:SIZE},mip_level_count:1,sample_count:1,
+            dimension:wgpu::TextureDimension::D3,format:wgpu::TextureFormat::Rgba16Float,
+            usage:wgpu::TextureUsages::STORAGE_BINDING|wgpu::TextureUsages::TEXTURE_BINDING,view_formats:&[]});
+        let solar_view=solar_texture.create_view(&Default::default());
         let sampler=device.create_sampler(&wgpu::SamplerDescriptor {label:Some("wgr_layer_fog_linear"),
             mag_filter:wgpu::FilterMode::Linear,min_filter:wgpu::FilterMode::Linear,..Default::default()});
         let comparison=device.create_sampler(&wgpu::SamplerDescriptor {label:Some("wgr_layer_fog_depth"),
@@ -92,11 +102,15 @@ impl LayeredFog {
             image(3,d2,float),image(4,d2,float),image(5,d2,float),uniform(6),image(7,wgpu::TextureViewDimension::D2Array,depth),
             wgpu::BindGroupLayoutEntry {binding:8,visibility:wgpu::ShaderStages::COMPUTE,ty:wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),count:None},
             uniform(9),image(10,d2,wgpu::TextureSampleType::Float {filterable:false}),uniform(11),
-            image(12,d2,depth),image(13,d2,depth),storage(14),storage(15)]});
+            image(12,d2,depth),image(13,d2,depth),storage(14),storage(15),
+            wgpu::BindGroupLayoutEntry {binding:16,visibility:wgpu::ShaderStages::COMPUTE,
+                ty:wgpu::BindingType::StorageTexture {access:wgpu::StorageTextureAccess::WriteOnly,format:wgpu::TextureFormat::Rgba16Float,view_dimension:wgpu::TextureViewDimension::D3},count:None}]});
         let module=crate::shaders::make_module(device,composer,"wgr_layer_fog",include_str!("layered_fog.wgsl"),"layered_fog.wgsl");
         let pipeline_layout=device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {label:Some("wgr_layer_fog_compute"),bind_group_layouts:&[Some(&layout)],immediate_size:0});
         let compute=device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {label:Some("wgr_layer_fog_compute"),layout:Some(&pipeline_layout),module:&module,
             entry_point:Some("cs_fog"),compilation_options:Default::default(),cache:None});
+        let solar_compute=device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {label:Some("wgr_layer_fog_solar_compute"),layout:Some(&pipeline_layout),module:&module,
+            entry_point:Some("cs_solar"),compilation_options:Default::default(),cache:None});
         let background_module=crate::shaders::make_module(device,composer,"wgr_layer_fog_background",include_str!("layered_fog_background.wgsl"),"layered_fog_background.wgsl");
         let background=device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {label:Some("wgr_layer_fog_background"),layout:None,
             vertex:wgpu::VertexState {module:&background_module,entry_point:Some("vs_main"),compilation_options:Default::default(),buffers:&[]},
@@ -107,7 +121,7 @@ impl LayeredFog {
             wgpu::BindGroupEntry {binding:0,resource:wgpu::BindingResource::TextureView(&view)},
             wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::Sampler(&sampler)},
             wgpu::BindGroupEntry {binding:2,resource:consumer.as_entire_binding()}]});
-        Self {view,consumer,_texture:texture,params,height,shadow,csm,zero_counts,sampler,comparison,layout,compute,background,background_bind,
+        Self {view,solar_view,consumer,_texture:texture,_solar_texture:solar_texture,params,height,shadow,csm,zero_counts,sampler,comparison,layout,compute,solar_compute,background,background_bind,
             ready:false,trace:std::env::var("WGR_LAYERED_FOG_TRACE").as_deref()==Ok("1"),frames:0}
     }
     pub fn invalidate(&mut self,queue:&wgpu::Queue) {
@@ -119,14 +133,14 @@ impl LayeredFog {
         settings:&WgrLayeredFog,weather:f32,hdr:bool,underground:f32,cam:&WgrCamera,inv_vp:[[f32;4];4],
         height:&TerrainConformParams,height_view:&wgpu::TextureView,height_generation:u64,
         mapping:&TerrainShadowMap,shadow_view:&wgpu::TextureView,csm_view:&wgpu::TextureView,
-        environment:&wgpu::TextureView,clouds:&wgpu::TextureView,cover:WeatherInputs,below_clouds:bool,cloud_limit:[f32;2]) {
+        environment:&wgpu::TextureView,clouds:&wgpu::TextureView,cover:WeatherInputs,below_clouds:bool,cloud_limit:[f32;2],native_bounds:[f32;2]) {
         self.frames=self.frames.wrapping_add(1);
         let far=cam.params.fog_start+if cam.params.fog_inv_range>0.0 {1.0/cam.params.fog_inv_range}else{0.0};
         let finite=cam.view.iter().chain(cam.proj.iter()).chain(cam.cam_pos.iter())
             .chain(inv_vp.iter().flatten()).chain(cam.sun_diffuse.iter()).chain(cam.sun_dir_world.iter()).all(|v|v.is_finite());
         let eligible=requested(settings,weather,hdr,underground) && finite && far.is_finite() && far>0.0
             && cam.sun_diffuse[3]>=0.5 && height.enabled>0.5 && height_generation>0
-            && cloud_limit.iter().all(|v|v.is_finite())
+            && cloud_limit.iter().all(|v|v.is_finite()) && native_bounds.iter().all(|h|h.is_finite()) && native_bounds[0]<=native_bounds[1]
             && (below_clouds || settings.terrain[0]>0.0)
             && cover.controls[0][0]>=0.5;
         if self.trace && (self.frames<=4 || self.frames%120==0) {
@@ -141,7 +155,7 @@ impl LayeredFog {
             light:[direction.x,direction.y,direction.z,0.0],radiance:cam.sun_diffuse,cloud_map:mapping.cloud_shadow.to_array(),
             near_vp:cover.matrices[0],far_vp:cover.matrices[1],near_ctl:cover.controls[0],far_ctl:cover.controls[1],
             capacity:[cover.capacities[0],cover.capacities[1],0,0],terrain:settings.terrain,patch:settings.patch,
-            sky_limit:[cloud_limit[0],cloud_limit[1],0.0,0.0]};
+            sky_limit:[cloud_limit[0],cloud_limit[1],native_bounds[1],native_bounds[0]]};
         queue.write_buffer(&self.params,0,bytemuck::bytes_of(&data));
         queue.write_buffer(&self.height,0,bytemuck::bytes_of(height));
         queue.write_buffer(&self.shadow,0,bytemuck::bytes_of(mapping));
@@ -157,12 +171,16 @@ impl LayeredFog {
             image(3,environment),image(4,clouds),image(5,shadow_view),buffer(6,&self.shadow),image(7,csm_view),
             wgpu::BindGroupEntry {binding:8,resource:wgpu::BindingResource::Sampler(&self.comparison)},buffer(9,&self.csm),
             image(10,height_view),buffer(11,&self.height),image(12,&cover.views[0]),image(13,&cover.views[1]),
-            buffer(14,cover.counts[0].as_ref().unwrap_or(&self.zero_counts)),buffer(15,cover.counts[1].as_ref().unwrap_or(&self.zero_counts))]});
+            buffer(14,cover.counts[0].as_ref().unwrap_or(&self.zero_counts)),buffer(15,cover.counts[1].as_ref().unwrap_or(&self.zero_counts)),image(16,&self.solar_view)]});
         encoder.push_debug_group("wgr_layered_fog_transport");
         {let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {label:Some("wgr_layered_fog_transport"),timestamp_writes:None});
-            pass.set_pipeline(&self.compute);pass.set_bind_group(0,&bind,&[]);pass.dispatch_workgroups(SIZE.div_ceil(8),SIZE.div_ceil(8),1);}
+            pass.set_pipeline(&self.solar_compute);pass.set_bind_group(0,&bind,&[]);pass.dispatch_workgroups(SIZE.div_ceil(8),SIZE.div_ceil(8),SIZE);
+            pass.set_pipeline(&self.compute);pass.dispatch_workgroups(SIZE.div_ceil(8),SIZE.div_ceil(8),1);}
         encoder.pop_debug_group();
-        let consumer=Consumer {view:cam.view,proj:cam.proj,inv_vp,camera:cam.cam_pos,control:[1.0,far,weather,0.0]};
+        let consumer=Consumer {view:cam.view,proj:cam.proj,inv_vp,camera:cam.cam_pos,control:[1.0,far,weather,0.0],
+            solar_domain:[cam.cam_pos[0]-far,cam.cam_pos[2]-far,0.5/far,solar_max_agl(settings,native_bounds[0])],
+            native:[height.origin.x,height.origin.y,height.terrain_grid,height.enabled],
+            native_size:[height.hm_width,height.hm_height,0,0]};
         queue.write_buffer(&self.consumer,0,bytemuck::bytes_of(&consumer));self.ready=true;
     }
     pub fn render_background(&self,pass:&mut wgpu::RenderPass<'_>) {

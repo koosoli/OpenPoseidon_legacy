@@ -343,6 +343,7 @@ pub struct Terrain {
     world_origin: glam::Vec2,
     terrain_grid: f32,
     max_height: f32,
+    min_height: f32,
     hm_width: u32,
     hm_height: u32,
     mask_width: u32,
@@ -1122,6 +1123,7 @@ impl Terrain {
             world_origin: glam::Vec2::ZERO,
             terrain_grid: 1.0,
             max_height: 0.0,
+            min_height: 0.0,
             hm_width: 1,
             hm_height: 1,
             mask_width: 1,
@@ -1341,10 +1343,8 @@ impl Terrain {
         self.terrain_grid = params.terrain_grid;
         // Tallest terrain point: lets the march stop once the ray climbs above all
         // possible occluders (the auto-adapting range in terrain_shadow.wgsl).
-        self.max_height = heights[..(w as usize * h as usize)]
-            .iter()
-            .copied()
-            .fold(f32::MIN, f32::max);
+        (self.min_height,self.max_height) = heights[..(w as usize * h as usize)]
+            .iter().copied().fold((f32::MAX,f32::MIN),|(lo,hi),h|(lo.min(h),hi.max(h)));
         self.hm_width = w;
         self.hm_height = h;
         self.mask_width = mask_w;
@@ -1359,6 +1359,8 @@ impl Terrain {
     // sun moved past SUN_MOVE_COS. `sun_to_light` is the (unit) surface-to-light
     // direction — the negation of frame.sun_dir_world. Records a compute pass into
     // the frame encoder before the render segments sample the mask.
+    pub fn native_height_bounds(&self) -> [f32;2] { [self.min_height,self.max_height] }
+
     pub fn render_shadow_mask(
         &mut self,
         queue: &wgpu::Queue,

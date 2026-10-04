@@ -1501,6 +1501,7 @@ struct CameraGroup {
     weather_bind: Option<wgpu::BindGroup>, // binding18 dummy while writing physical map
     bound_weather_gen: u64,
     bound_weather_far_gen: u64,
+    bound_fog_native_gen: u64,
     bound_shadow_gen: u64,
     // Frame-global light storage buffer (binding 3). Fixed capacity, created
     // once, so it stays valid across camera-UBO regrowth / shadow-target swaps.
@@ -1803,6 +1804,10 @@ impl CameraGroup {
                     ty:wgpu::BindingType::Texture {sample_type:wgpu::TextureSampleType::Float {filterable:true},view_dimension:wgpu::TextureViewDimension::D3,multisampled:false},count:None},
                 wgpu::BindGroupLayoutEntry {binding:22,visibility:wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty:wgpu::BindingType::Buffer {ty:wgpu::BufferBindingType::Uniform,has_dynamic_offset:false,min_binding_size:None},count:None},
+                wgpu::BindGroupLayoutEntry {binding:23,visibility:wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                    ty:wgpu::BindingType::Texture {sample_type:wgpu::TextureSampleType::Float {filterable:true},view_dimension:wgpu::TextureViewDimension::D3,multisampled:false},count:None},
+                wgpu::BindGroupLayoutEntry {binding:24,visibility:wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                    ty:wgpu::BindingType::Texture {sample_type:wgpu::TextureSampleType::Float {filterable:false},view_dimension:wgpu::TextureViewDimension::D2,multisampled:false},count:None},
             ],
         });
         let lights_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1867,6 +1872,7 @@ impl CameraGroup {
             weather_bind: None,
             bound_weather_gen: u64::MAX,
             bound_weather_far_gen: u64::MAX,
+            bound_fog_native_gen: u64::MAX,
             bound_shadow_gen: u64::MAX,
             lights_buf,
             surface_rays_buf,
@@ -1916,7 +1922,7 @@ impl CameraGroup {
         weather_far_view: &wgpu::TextureView,
         weather_far_gen: u64,
         sky_env_view: &wgpu::TextureView,
-        fog_view: &wgpu::TextureView, fog_consumer: &wgpu::Buffer,
+        fog_view: &wgpu::TextureView, fog_consumer: &wgpu::Buffer, fog_solar: &wgpu::TextureView, fog_native: &wgpu::TextureView, fog_native_gen: u64,
     ) {
         let needed = count as u64 * self.stride;
         let grow = self.cap < needed || self.buf.is_none();
@@ -1943,6 +1949,7 @@ impl CameraGroup {
             || self.bound_gi_gen != gi_gen
             || self.bound_weather_gen != weather_gen
             || self.bound_weather_far_gen != weather_far_gen
+            || self.bound_fog_native_gen != fog_native_gen
             || self.bind.is_none()
         {
             let make_bind = |physical_view: &wgpu::TextureView, far_view: &wgpu::TextureView| device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2039,6 +2046,8 @@ impl CameraGroup {
                     },
                     wgpu::BindGroupEntry {binding:21,resource:wgpu::BindingResource::TextureView(fog_view)},
                     wgpu::BindGroupEntry {binding:22,resource:fog_consumer.as_entire_binding()},
+                    wgpu::BindGroupEntry {binding:23,resource:wgpu::BindingResource::TextureView(fog_solar)},
+                    wgpu::BindGroupEntry {binding:24,resource:wgpu::BindingResource::TextureView(fog_native)},
                 ],
             });
             let main_bind = make_bind(weather_view, weather_far_view);
@@ -2052,6 +2061,7 @@ impl CameraGroup {
             self.bound_gi_gen = gi_gen;
             self.bound_weather_gen = weather_gen;
             self.bound_weather_far_gen = weather_far_gen;
+            self.bound_fog_native_gen = fog_native_gen;
         }
     }
 
@@ -8146,7 +8156,7 @@ impl Gfx3d {
         snow: &wgpu::Buffer,
         holes: &wgpu::Buffer,
         froxel_view: &wgpu::TextureView,
-        fog_view: &wgpu::TextureView, fog_consumer: &wgpu::Buffer,
+        fog_view: &wgpu::TextureView, fog_consumer: &wgpu::Buffer, fog_solar: &wgpu::TextureView, fog_native: &wgpu::TextureView,
         sky_sh_buf: &wgpu::Buffer,
         skyvis_view: &wgpu::TextureView,
         // CLD-020 cloud sun-transmittance map, owned by the Sky pass.
@@ -8258,7 +8268,7 @@ impl Gfx3d {
                 self.weather_cover.generation,
                 self.weather_cover_far.target.as_ref().map(|(_,v)|v).unwrap_or(&self.weather_cover.dummy),
                 self.weather_cover_far.generation,
-                env_view, fog_view, fog_consumer,
+                env_view, fog_view, fog_consumer, fog_solar, fog_native, heightmap_gen,
             );
             let buf = self.cameras.buf.as_ref().unwrap();
             let mut camera_upload = camera_upload::CameraUpload::new(

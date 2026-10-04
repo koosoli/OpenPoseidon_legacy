@@ -8,7 +8,7 @@
 
 #define_import_path shading
 
-#import frame::{frame, gi_irradiance, terrain_sun_shadow, apply_fog_receiver, cloud_sun_shadow, sky_irradiance, sky_vis_ao, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, sky_specular_split, spec_power_to_gloss}
+#import frame::{frame, gi_irradiance, terrain_sun_shadow, apply_fog_receiver, fog_sun_reach, cloud_sun_shadow, sky_irradiance, sky_vis_ao, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, sky_specular_split, spec_power_to_gloss}
 #import shadow::shadow_strength
 #import lighting::lights_material_contrib
 #import color::srgb_to_linear
@@ -353,7 +353,7 @@ fn shade(
     // max() above. The others are binary occluders answering "is something between me and the
     // sun"; cloud shadow is a partial transmittance, and a thin deck under a ridge should darken
     // what the ridge already left, not compete with it for the same slot.
-    let sun_vis = (1.0 - sun_occ) * cloud_sun_shadow(world_abs.xz);
+    let sun_vis = (1.0 - sun_occ) * cloud_sun_shadow(world_abs.xz) * fog_sun_reach(world_pos);
     // Ambient occlusion on the ambient term (both paths), orthogonal to sun_occ (direct sun).
     // Two independent occluders, so they MULTIPLY (plan §6): sky-visibility is the baked far /
     // km-scale term keyed on the object's terrain column, GTAO the screen-space near/mid term

@@ -15,7 +15,7 @@ struct FogVolume {
     capacity: vec4<u32>, // actual retained argument capacity, near/far
     terrain: vec4<f32>, // follow fraction, reference ASL, valley gain, radius metres
     patchiness: vec4<f32>, // strength, horizontal/vertical metres, outer coverage feather metres
-    sky_limit: vec4<f32>, // actual cloud enabled, cloud base ASL, reserved
+    sky_limit: vec4<f32>, // actual cloud enabled/base ASL, cached native max/min
 };
 struct FogHeight {
     origin: vec2<f32>, grid: f32, enabled: f32,
@@ -43,7 +43,21 @@ struct FogCsm {
 @group(0) @binding(13) var far_depth: texture_depth_2d;
 @group(0) @binding(14) var<storage, read> near_counts: array<u32>;
 @group(0) @binding(15) var<storage, read> far_counts: array<u32>;
+@group(0) @binding(16) var solar_result: texture_storage_3d<rgba16float, write>;
 
+// Certify coverage separately from depth/shelter: known roofs contain no air
+// medium, while a missing/stale/overflowed source cannot certify sun transport.
+fn fog_weather_source_ready(p:vec3<f32>)->bool {
+    var clip=params.near_vp*vec4<f32>(p,1.0);var ctl=params.near_ctl;var cap=params.capacity.x;
+    let uv0=clip.xy*vec2<f32>(0.5,-0.5)+0.5;
+    let outer=clip.z<0.0 || clip.z>1.0 || min(min(uv0.x,1.0-uv0.x),min(uv0.y,1.0-uv0.y))<ctl.z;
+    if(outer){clip=params.far_vp*vec4<f32>(p,1.0);ctl=params.far_ctl;cap=params.capacity.y;}
+    if(ctl.x<0.5 || clip.z<0.0 || clip.z>1.0){return false;}
+    if(cap>0u){if(outer){if(far_counts[0]>cap || far_counts[1]>cap || far_counts[2]>2u*cap){return false;}}
+        else{if(near_counts[0]>cap || near_counts[1]>cap || near_counts[2]>2u*cap){return false;}}}
+    let uv=clip.xy*vec2<f32>(0.5,-0.5)+0.5;
+    return min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y))>=ctl.z;
+}
 fn fog_weather_weight(p: vec3<f32>) -> f32 {
     let near_clip = params.near_vp * vec4<f32>(p, 1.0);
     let near_uv = near_clip.xy * vec2<f32>(0.5,-0.5) + 0.5;
@@ -137,13 +151,63 @@ fn fog_light_visibility(p: vec3<f32>, rel: vec3<f32>) -> f32 {
     }
     return visible;
 }
-fn fog_solar_transmission(y: f32, shift: f32, density: f32) -> f32 {
-    if (params.light.y <= 0.001) { return 0.0; }
-    var tau = 0.0;
+// Integral for one certified native piecewise-linear segment. This is incoming
+// light transport, independent of camera-path T; clouds are NOT multiplied here.
+fn fog_sun_segment_tau(start: vec3<f32>, end: vec3<f32>, before: vec2<f32>, centre: vec2<f32>, after: vec2<f32>) -> f32 {
+    if (min(min(before.y,centre.y),after.y) <= 0.0) { return 0.0; }
+    let midpoint=(start+end)*0.5;
+    let distance=length(end-start);let half=distance*0.5;
+    let a=start.y-params.terrain.x*(before.x-params.terrain.y);
+    let m=midpoint.y-params.terrain.x*(centre.x-params.terrain.y);
+    let b=end.y-params.terrain.x*(after.x-params.terrain.y);
+    var tau=0.0;
     for (var i=0u;i<2u;i=i+1u) {
         let layer=params.layers[i];
-        let remainder=max(fog_height_primitive(layer.y+layer.z,layer)-fog_height_primitive(y-shift,layer),0.0);
-        tau += remainder*layer.w*params.control.z*density/params.light.y;
+        tau += (fog_segment_density(a,(m-a)/half,half,layer)
+            +fog_segment_density(m,(b-m)/half,half,layer))*layer.w*params.control.z;
+    }
+    if (tau <= 0.0) { return 0.0; }
+    return tau*fog_patch_density(midpoint,params.patchiness)*fog_pooling(midpoint,centre.x)
+        *min(min(before.y,centre.y),after.y);
+}
+fn fog_solar_transmission(p: vec3<f32>) -> f32 {
+    if (params.light.y <= 0.001) { return 0.0; }
+    let ground=fog_native_ground(p.xz);
+    // Unknown/unready source and solid/underground endpoints are neutral for
+    // surface lighting. Existing actual CSM/terrain visibility owns occlusion.
+    let origin=fog_outdoor_sample(p);
+    if (ground.y < 0.5 || origin.y <= 0.0 || !fog_weather_source_ready(p)) { return 1.0; }
+    if (params.terrain.x <= 0.0 && params.terrain.z <= 0.0 && params.patchiness.x <= 0.0 && params.patchiness.w <= 0.0) {
+        var tau=0.0;
+        for (var i=0u;i<2u;i=i+1u) {let layer=params.layers[i];
+            tau += max(fog_height_primitive(layer.y+layer.z,layer)-fog_height_primitive(p.y,layer),0.0)
+                *layer.w*params.control.z/params.light.y;
+        }
+        return fog_transmittance(tau);
+    }
+    // Native maximum is cached at authoritative height upload, not guessed
+    // from camera elevation. Four bounded light-ray intervals retain analytic
+    // thin-layer integration while sampling true terrain and coherent density.
+    var top=-1e10;
+    for (var i=0u;i<2u;i=i+1u) {if(params.layers[i].w>0.0){top=max(top,params.layers[i].y+params.layers[i].z);}}
+    top += params.terrain.x*(params.sky_limit.z-params.terrain.y);
+    if (params.terrain.x > 0.0 && params.sky_limit.x > 0.0) {top=min(top,params.sky_limit.y);}
+    let distance=min(params.camera.w,max((top-p.y)/params.light.y,0.0));
+    if (distance <= 0.001) { return 1.0; }
+    let step=distance*0.25;
+    var tau=0.0;var before=origin;
+    for (var i=0u;i<4u;i=i+1u) {
+        let start=p+params.light.xyz*(f32(i)*step);
+        let middle=start+params.light.xyz*(step*0.5);
+        let end=start+params.light.xyz*step;
+        let mid_ground=fog_native_ground(middle.xz);let end_ground=fog_native_ground(end.xz);
+        if (mid_ground.y < 0.5 || end_ground.y < 0.5 || !fog_weather_source_ready(middle) || !fog_weather_source_ready(end)) { return 1.0; }
+        // Real native obstruction blocks a shaft. No normal bending or fake
+        // mountain reflection/deflection is introduced.
+        if (middle.y <= mid_ground.x+0.05 || end.y <= end_ground.x+0.05) { return 0.0; }
+        let centre=fog_outdoor_sample(middle);let after=fog_outdoor_sample(end);
+        tau += fog_sun_segment_tau(start,end,before,centre,after);
+        before=after;
     }
     return fog_transmittance(tau);
 }
@@ -158,6 +222,7 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
     if (dot(ray,ray) < 0.5) {
         for (var z=0u;z<dims.z;z=z+1u) {
             textureStore(result,vec3<i32>(i32(id.x),i32(id.y),i32(z)),vec4<f32>(0.0,0.0,0.0,1.0));
+
         }
         return;
     }
@@ -213,11 +278,34 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
             if(tau<=0.0) { continue; }
             let segment_trans=fog_transmittance(tau);
             let direct=params.radiance.rgb*fog_phase(dot(ray,params.light.xyz),params.control.y)
-                * fog_light_visibility(p,rel)*fog_solar_transmission(p.y,shift,density);
+                * fog_light_visibility(p,rel)*fog_solar_transmission(p);
             colour += trans*(1.0-segment_trans)*params.control.x*(ambient+direct);
             trans *= segment_trans;
         }
         previous=end_distance;
         textureStore(result,vec3<i32>(i32(id.x),i32(id.y),i32(z)),vec4<f32>(colour,trans));
+
     }
+}
+
+// The separate incoming-light field is parameterized by worldXZ and quadratic
+// AGL, with an exact near-ground slice. Thin1..5m fog cannot disappear between
+// coarse camera-ray samples when viewing ground from an airborne camera.
+@compute @workgroup_size(8,8,1)
+fn cs_solar(@builtin(global_invocation_id) id:vec3<u32>) {
+    let dims=textureDimensions(solar_result);
+    if (any(id>=dims)) {return;}
+    let uv=(vec2<f32>(id.xy)+0.5)/vec2<f32>(dims.xy);
+    let xz=params.camera.xz+(uv*2.0-1.0)*params.camera.w;
+    let native=fog_native_ground(xz);
+    var solar=1.0;
+    if(native.y>=0.5){
+        var top=-1e10;
+        for(var i=0u;i<2u;i=i+1u){if(params.layers[i].w>0.0){top=max(top,params.layers[i].y+params.layers[i].z);}}
+        let max_agl=max(top-params.terrain.x*params.terrain.y-(1.0-params.terrain.x)*params.sky_limit.w,1.0);
+        let w=f32(id.z)/f32(dims.z-1u);
+        let p=vec3<f32>(xz.x,native.x+max(0.1,max_agl*w*w),xz.y);
+        solar=fog_solar_transmission(p);
+    }
+    textureStore(solar_result,vec3<i32>(id),vec4<f32>(solar,0.0,0.0,1.0));
 }

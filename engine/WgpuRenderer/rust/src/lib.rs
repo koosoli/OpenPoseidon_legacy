@@ -4001,7 +4001,7 @@ impl Renderer {
             self.terrain.snow_buffer(),
             self.terrain.holes_buffer(),
             self.sky.froxel_view(),
-            &self.sky.fog.view, &self.sky.fog.consumer,
+            &self.sky.fog.view, &self.sky.fog.consumer, &self.sky.fog.solar_view, &heightmap_view,
             self.sky.sh_buffer(),
             &skyvis_view,
             self.sky.cloud_shadow_view(),
@@ -5035,7 +5035,7 @@ impl Renderer {
                 self.sky.fog.render(&self.device,&self.queue,&mut encoder,&self.layer_fog_settings,
                     self.layer_fog_weather,self.hdr_enabled,self.cam_underground,camera,ivp,
                     &conform_params,&heightmap_view,heightmap_gen,&shadow_mapping,&shadow_mask_view,
-                    self.gfx3d.shadow_sample_view(),&fog_environment,&fog_clouds,cover,below_clouds,[self.sky_params.cloud0[0],self.sky_params.cloud0[2]]);
+                    self.gfx3d.shadow_sample_view(),&fog_environment,&fog_clouds,cover,below_clouds,[self.sky_params.cloud0[0],self.sky_params.cloud0[2]],self.terrain.native_height_bounds());
                 self.gpu_timers.end(&mut encoder,TimerRegion::LayeredFog);
             }
             self.gpu_timers.begin(&mut encoder, TimerRegion::SkyDraw);

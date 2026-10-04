@@ -160,8 +160,9 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
  }
  let native=texture(&device,wgpu::TextureFormat::R32Float,2,2,1,false);
  let native_view=native.create_view(&Default::default());
- let write_native=|y:f32|queue.write_texture(wgpu::TexelCopyTextureInfo {texture:&native,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},
-  bytemuck::cast_slice(&[y;4]),wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(8),rows_per_image:Some(2)},native.size());
+ let native_max=std::cell::Cell::new(0.);let native_min=std::cell::Cell::new(0.);
+ let write_native=|y:f32|{native_max.set(y);native_min.set(y);queue.write_texture(wgpu::TexelCopyTextureInfo {texture:&native,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},
+  bytemuck::cast_slice(&[y;4]),wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(8),rows_per_image:Some(2)},native.size());};
  write_native(0.);
  let env=texture(&device,wgpu::TextureFormat::Rgba8Unorm,1,1,1,false);let env_view=env.create_view(&Default::default());
  let cloud=texture(&device,wgpu::TextureFormat::Rgba8Unorm,1,1,1,false);let cloud_view=cloud.create_view(&Default::default());
@@ -203,7 +204,8 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
  @compute @workgroup_size(1) fn cs_probe(){for(var z=0;z<32;z=z+1){result[z]=textureLoad(volume,vec3<i32>(16,16,z),0);}}
  "#;
  // Borrow the fixed volume handle independently so the closure does not borrow mutable fog.
- let volume_view=fog.view.clone();
+ let volume_view=fog.view.clone();let solar_view=fog.solar_view.clone();
+ let read_solar=||read_probe(&device,&queue,READ_VOLUME,&[wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::TextureView(&solar_view)}],128);
  let read=||read_probe(&device,&queue,READ_VOLUME,&[wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::TextureView(&volume_view)}],128);
  let cloud_limit=std::cell::Cell::new([0.,1000.]);
  let run=|fog:&mut LayeredFog,camera:&WgrCamera,settings:&WgrLayeredFog,weather:f32,cover:WeatherInputs,generation:u64,below:bool| {
@@ -211,7 +213,7 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
   let inverse=(glam::DMat4::from_cols_array(&camera.view.map(f64::from)).inverse()
    *glam::DMat4::from_cols_array(&camera.proj.map(f64::from)).inverse()).as_mat4().to_cols_array_2d();
   fog.render(&device,&queue,&mut enc,settings,weather,true,0.,camera,inverse,&height,&native_view,generation,
-   &mapping,&shadow_view,&csm_view,&env_view,&cloud_view,cover,below,cloud_limit.get());queue.submit(Some(enc.finish()));
+   &mapping,&shadow_view,&csm_view,&env_view,&cloud_view,cover,below,cloud_limit.get(),[native_min.get(),native_max.get()]);queue.submit(Some(enc.finish()));
  };
  run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);assert!(fog.ready);
  let positive=read();let mut previous=1.;
@@ -220,6 +222,70 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
   assert!((row[3]-(-0.01*distance).exp()).abs()<0.0007,"actual Beer-Lambert z={z}: {row:?}");
   assert!(row[3]<=previous);previous=row[3];assert_eq!(&row[..3],&[0.;3]);
  }
+ // Actual incoming solar T has a different path from camera T.
+ let solar=read_solar();let inverse=glam::Mat4::from_cols_array(&camera.proj).inverse();
+ let ray=(inverse*glam::Vec4::new(1./32.,-1./32.,0.,1.)).truncate().normalize();
+ for(z,row)in solar.chunks_exact(4).enumerate(){let y=(41.*(z as f32/31.).powi(2)).max(0.1);let expected=(-0.01*(40.5-y).max(0.)).exp();
+  assert!((row[0]-expected).abs()<0.0007,"incoming light column {z}: {row:?}/{expected}");}
+ assert!((solar[124]-positive[127]).abs()>0.5,"sun T must never reuse camera T");
+ // Replay the exact production surface helper with actual encoded solar texture
+ // and actual consumer buffer. The wrapper only provides fixture weather receipt.
+ let frame_source=include_str!("shaders/frame.wgsl");let helper=&frame_source[frame_source.find("fn fog_sun_reach(").unwrap()..];
+ let receiver_shader=format!(r#"
+ #import layered_fog_optics::{{FogConsumer,fog_camera_matches}}
+ struct ProbeFrame {{view:mat4x4<f32>,proj:mat4x4<f32>,cam_pos:vec4<f32>,guard:vec4<f32>,receiver:vec4<f32>}}
+ @group(0) @binding(0) var<storage,read_write> result:array<vec4<f32>>;
+ @group(0) @binding(1) var<uniform> frame:ProbeFrame;
+ @group(0) @binding(8) var froxel_samp:sampler;
+ @group(0) @binding(22) var<uniform> layer_fog_packet:FogConsumer;
+ @group(0) @binding(23) var layer_fog_solar_tex:texture_3d<f32>;
+ @group(0) @binding(24) var layer_fog_native_tex:texture_2d<f32>;
+ fn weather_map_coverage(p:vec3<f32>)->f32{{return frame.guard.x;}}
+ fn weather_map_reach(p:vec3<f32>)->f32{{return frame.guard.y;}}
+ {helper}
+ @compute @workgroup_size(1) fn cs_probe(){{let t=fog_sun_reach(frame.receiver.xyz);
+ result[0]=vec4<f32>(t,vec3<f32>(8.0,4.0,2.0)*frame.guard.z*t);}}
+ "#);
+ let mut receiver_data=camera.view.to_vec();receiver_data.extend_from_slice(&camera.proj);receiver_data.extend_from_slice(&camera.cam_pos);
+ receiver_data.extend_from_slice(&[1.,1.,0.25,0.]);receiver_data.extend_from_slice(&(ray*20.).extend(0.).to_array());
+ let receiver_buffer=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:None,contents:bytemuck::cast_slice(&receiver_data),usage:wgpu::BufferUsages::UNIFORM|wgpu::BufferUsages::COPY_DST});
+ let receiver_consumer=fog.consumer.clone();let receiver_sampler=fog.sampler.clone();
+ let receiver_read=||read_probe(&device,&queue,&receiver_shader,&[
+  wgpu::BindGroupEntry {binding:1,resource:receiver_buffer.as_entire_binding()},
+  wgpu::BindGroupEntry {binding:8,resource:wgpu::BindingResource::Sampler(&receiver_sampler)},
+  wgpu::BindGroupEntry {binding:22,resource:receiver_consumer.as_entire_binding()},
+  wgpu::BindGroupEntry {binding:23,resource:wgpu::BindingResource::TextureView(&solar_view)},
+  wgpu::BindGroupEntry {binding:24,resource:wgpu::BindingResource::TextureView(&native_view)}],4);
+ let receiver=receiver_read();assert!(receiver[0]>0.7 && receiver[0]<0.9);assert!((receiver[1]-receiver[0]*2.).abs()<1e-6,"one cloud factor, no extra energy");
+ for(i,value)in [(0,0.9),(36,0.),(37,0.)]{let original=receiver_data[i];receiver_data[i]=value;queue.write_buffer(&receiver_buffer,0,bytemuck::cast_slice(&receiver_data));
+  assert_eq!(receiver_read(),vec![1.,2.,1.,0.5],"mismatched camera/unknown coverage/roof endpoint remains neutral");receiver_data[i]=original;}
+ queue.write_buffer(&receiver_buffer,0,bytemuck::cast_slice(&receiver_data));
+ // The incoming ray consumes actual patch density and actual native bowl
+ // curvature, not merely the former midpoint vertical-column approximation.
+ settings.terrain=[1.,0.,0.,0.];run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
+ let flat_solar=read_solar();settings.patch=[0.8,25.,5.,0.];
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);let patch_solar=read_solar();
+ assert!(patch_solar.iter().step_by(4).zip(flat_solar.iter().step_by(4)).any(|(a,b)|(a-b).abs()>0.001),"actual sun ray must consume world patch density");
+ for(a,b)in patch_solar.iter().step_by(4).zip(flat_solar.iter().step_by(4)){
+  assert!(*a>=b.powf(1.8)-0.001 && *a<=b.powf(0.2)+0.001,"bounded incoming density {a}/{b}");}
+ settings.patch=[0.;4];settings.terrain=[1.,0.,1.,150.];
+ queue.write_texture(wgpu::TexelCopyTextureInfo {texture:&native,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},
+  bytemuck::cast_slice(&[20f32,0.,0.,20.]),wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(8),rows_per_image:Some(2)},native.size());native_max.set(20.);
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
+ assert!(read_solar()[0]<flat_solar[0]-0.01,"actual native bowl must attenuate incoming sun more than flat terrain");
+ write_native(0.);settings.terrain=[0.;4];
+ // Regression for the original view-ray counterexample: high camera,
+ // actual native ground and1.8m receivers must retain a1..5m compact band.
+ camera.cam_pos[1]=75.;settings.terrain=[1.,0.,0.,0.];settings.layers=[[1.,5.,0.35,0.018],[10.,20.,1.,0.]];
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
+ receiver_data[33]=75.;receiver_data[40]=0.;receiver_data[42]=150.;
+ for(agl,expected)in [(0f32,(-0.018f32*4.35).exp()),(1.8,(-0.018f32*3.375).exp())]{
+  receiver_data[41]=agl-75.;queue.write_buffer(&receiver_buffer,0,bytemuck::cast_slice(&receiver_data));
+  let observed=receiver_read()[0];println!("COMPACT_SOLAR_FIXED highcamera75 agl={agl} expected={expected} actual={observed}");
+  assert!((observed-expected).abs()<0.002,"actual Compact terrain/body must retain thin incoming extinction");
+ }
+ camera.cam_pos[1]=20.;receiver_data[33]=20.;receiver_data[40..44].copy_from_slice(&(ray*20.).extend(0.).to_array());
+ queue.write_buffer(&receiver_buffer,0,bytemuck::cast_slice(&receiver_data));settings.layers=[[0.,40.,1.,0.01],[70.,100.,1.,0.]];settings.terrain=[0.;4];
  // Actual elevated native terrain must reproduce the same optical depth at
  // equal AGL, independent of camera height. The old ASL path must stay empty.
  write_native(100.);camera.cam_pos[1]=120.;settings.terrain=[1.,0.,0.,0.];
@@ -231,6 +297,16 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
  run(&mut fog,&camera,&settings,1.,cover(1.,100),1,false);assert!(fog.ready);
  for row in read().chunks_exact(4){assert_eq!(row,&[0.,0.,0.,1.],"following medium cannot enter cloud deck");}
  cloud_limit.set([0.,1000.]);settings.terrain=[0.;4];camera.cam_pos[1]=20.;write_native(0.);
+ // Four native-sun intervals see a rising real plane block low-angle sunlight.
+ settings.terrain=[1.,0.,0.,0.];camera.sun_dir_world=[-0.99995,-0.01,0.,0.];
+ queue.write_texture(wgpu::TexelCopyTextureInfo {texture:&native,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},
+  bytemuck::cast_slice(&[-500f32,500.,-500.,500.]),wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(8),rows_per_image:Some(2)},native.size());native_max.set(500.);native_min.set(-500.);
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
+ assert_eq!(read_solar()[124],0.,"actual rising native mountain blocks incoming light");
+ write_native(0.);camera.cam_pos[0]=490.;run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
+ assert_eq!(read_solar()[0],1.,"sun ray leaving native source cannot fabricate attenuation");
+ camera.cam_pos[0]=0.;camera.sun_dir_world=[0.,-1.,0.,0.];settings.terrain=[0.;4];
+
  // Exact production projection family: reversed-Z infinite far point has w=0.
  camera.proj=glam::Mat4::perspective_infinite_reverse_lh(60f32.to_radians(),1.,0.1).to_cols_array();
  let infinite=glam::Mat4::from_cols_array(&camera.proj).inverse()*glam::Vec4::new(0.,0.,0.,1.);
@@ -245,6 +321,7 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
  write_byte(&cloud,0);run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
  let cloudy=read();assert_eq!(&cloudy[124..127],&[0.;3]);assert_eq!(lit[127],cloudy[127]);write_byte(&cloud,255);
  clear_cover(0.);run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
+ for row in read_solar().chunks_exact(4){assert_eq!(row[0],1.,"roof interior sunlight is neutral, not camera opacity");}
  for row in read().chunks_exact(4){assert_eq!(row,&[0.,0.,0.,1.],"actual roof refuses medium");}clear_cover(1.);
  write_native(100.);run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
  for row in read().chunks_exact(4){assert_eq!(row,&[0.,0.,0.,1.],"native underground refuses medium");}write_native(0.);
@@ -255,6 +332,7 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
   run(&mut fog,&camera,&settings,weather,cover(ready,100),generation,below);assert!(!fog.ready);
  }
  settings.control[0]=0.;run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);assert!(!fog.ready);
+ assert_eq!(receiver_read(),vec![1.,2.,1.,0.5],"OFF/stale solar texture is never consumed");
 }
 
 #[test]
@@ -297,7 +375,7 @@ fn settings_are_opt_in_and_refuse_unready_weather_or_interiors() {
  p.layers[0][1]=p.layers[0][0];assert!(!requested(&p,0.5,true,0.));
  p=WgrLayeredFog::default();p.control[0]=1.;p.layers[1][3]=f32::INFINITY;
  assert!(!requested(&p,0.5,true,0.));
- assert_eq!(std::mem::size_of::<Consumer>(),224);assert_eq!(std::mem::size_of::<Volume>(),400);
+ assert_eq!(std::mem::size_of::<Consumer>(),272);assert_eq!(std::mem::size_of::<Volume>(),400);
 }
 
 #[test]
@@ -362,4 +440,46 @@ fn density_controls_refuse_invalid_enabled_scales_and_terrain_source_is_explicit
  assert!(frame.contains("return apply_fog_receiver(rgb, world_pos_rel, false)"));
  let compute=include_str!("layered_fog.wgsl");assert!(compute.contains("if (exposed < 0.999) { return 0.0; }"));
  assert!(compute.contains("p.y <= native.x+0.05") && compute.contains("far_counts[0] > cap"));
+}
+
+#[test]
+fn production_direct_light_uses_only_qualified_incoming_solar_transmission() {
+ let frame=include_str!("shaders/frame.wgsl");let object=include_str!("shaders/shading.wgsl");let terrain=include_str!("terrain/terrain.wgsl");
+ assert!(frame.contains("@group(0) @binding(23) var layer_fog_solar_tex"));
+ assert!(object.contains("cloud_sun_shadow(world_abs.xz) * fog_sun_reach(world_pos)"));
+ assert!(terrain.contains("var sun_diffuse = frame.sun_diffuse.rgb * fog_sun_reach(in.world_pos)"));
+ let helper=&frame[frame.find("fn fog_sun_reach(").unwrap()..];
+ assert!(helper.contains("!fog_camera_matches") && helper.contains("weather_map_coverage(absolute)<0.5 || weather_map_reach(absolute)<0.999"));
+ assert!(helper.contains("textureSampleLevel(layer_fog_solar_tex") && !helper.contains("textureSampleLevel(layer_fog_tex"),"must not use view-ray T for sun-ray T");
+ let volume=include_str!("layered_fog.wgsl");let incoming=&volume[volume.find("fn fog_sun_segment_tau").unwrap()..volume.find("@compute").unwrap()];
+ assert!(incoming.contains("fog_patch_density(midpoint") && incoming.contains("fog_pooling(midpoint") && incoming.contains("fog_native_ground(end.xz)"));
+ assert!(!incoming.contains("textureSampleLevel(clouds") && !incoming.contains("fog_light_visibility("),"cloud/CSM remain exactly once in direct visibility");
+}
+
+#[test]
+fn actual_solar_consumer_layout_resources_and_native_rebinding_are_bounded() {
+ assert_eq!(std::mem::size_of::<Consumer>(),272);
+ assert_eq!(std::mem::offset_of!(Consumer,solar_domain),224);
+ assert_eq!(std::mem::offset_of!(Consumer,native),240);
+ assert_eq!(std::mem::offset_of!(Consumer,native_size),256);
+ let binding=include_str!("gfx3d/mod.rs");
+ assert!(binding.contains("self.bound_fog_native_gen != fog_native_gen") && binding.contains("self.bound_fog_native_gen = fog_native_gen"));
+ assert!(binding.contains("fog_solar, fog_native, heightmap_gen"));
+ let renderer=include_str!("lib.rs").replace("\r\n","\n");assert!(renderer.contains(".max_sampled_textures_per_shader_stage\n                .clamp(16, 64)"),"production requests actual adapter limit, not assumed32");
+ for(source,path)in [(include_str!("terrain/terrain.wgsl"),"terrain.wgsl"),(include_str!("gfx3d/shader3d.wgsl"),"direct.wgsl"),(include_str!("gfx3d/gpu_driven.wgsl"),"retained.wgsl")]{
+  let mut composer=crate::shaders::build_composer();let module=composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor {source,file_path:path,shader_defs:crate::shaders::shader_defs(),..Default::default()}).unwrap();
+  let info=naga::valid::Validator::new(naga::valid::ValidationFlags::all(),naga::valid::Capabilities::all()).validate(&module).unwrap();
+  let mut solar_used=false;let mut native_used=false;
+  for(i,entry)in module.entry_points.iter().enumerate(){if entry.stage!=naga::ShaderStage::Fragment{continue;}
+   let usage=info.get_entry_point(i);let mut sampled=0;let mut arrays=0;
+   for(handle,global)in module.global_variables.iter(){if usage[handle].is_empty(){continue;}
+    match module.types[global.ty].inner {naga::TypeInner::Image {class:naga::ImageClass::Sampled {..}|naga::ImageClass::Depth {..},..}=>sampled+=1,
+     naga::TypeInner::BindingArray {..}=>arrays+=1,_=>{}}
+    if let Some(b)=&global.binding {solar_used|=b.group==0&&b.binding==23;native_used|=b.group==0&&b.binding==24;}
+   }
+   println!("ACTUAL_SOLAR_RESOURCE_CENSUS {path}/{} ordinarySampled={sampled} bindingArrays={arrays}",entry.name);
+   assert!(sampled<=64,"must fit existing production adaptive upper cap; actual hardware must still pass installed pipeline");
+  }
+  assert!(solar_used&&native_used,"both actual surface paths must consume the qualified light field");
+ }
 }

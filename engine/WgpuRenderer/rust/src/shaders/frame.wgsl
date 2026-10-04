@@ -364,6 +364,8 @@ fn wet_soil_debug_mode() -> u32 {
 // clamping sampler is shared with the terrain mask (binding 5).
 @group(0) @binding(21) var layer_fog_tex: texture_3d<f32>;
 @group(0) @binding(22) var<uniform> layer_fog_packet: FogConsumer;
+@group(0) @binding(23) var layer_fog_solar_tex: texture_3d<f32>;
+@group(0) @binding(24) var layer_fog_native_tex: texture_2d<f32>;
 @group(0) @binding(7) var froxel_tex: texture_3d<f32>;
 @group(0) @binding(8) var froxel_samp: sampler;
 
@@ -1336,4 +1338,32 @@ fn gi_irradiance(world_abs: vec3<f32>, n: vec3<f32>) -> vec4<f32> {
         return vec4<f32>(0.0);
     }
     return vec4<f32>(sum / wsum, w);
+}
+
+// Incoming main-light fog attenuation, never camera-path alpha. Solid/interior
+// endpoints and unready/out-of-domain/mismatched cameras remain exactly neutral.
+fn fog_sun_reach(world_pos_rel: vec3<f32>) -> f32 {
+    if (!fog_camera_matches(layer_fog_packet,frame.view,frame.proj,frame.cam_pos.xyz)) { return 1.0; }
+    let absolute=world_pos_rel+frame.cam_pos.xyz;
+    if (weather_map_coverage(absolute)<0.5 || weather_map_reach(absolute)<0.999) { return 1.0; }
+    if(layer_fog_packet.native.w<0.5 || layer_fog_packet.native.z<=0.0
+        || min(layer_fog_packet.native_size.x,layer_fog_packet.native_size.y)<2u) {return 1.0;}
+    if(any(textureDimensions(layer_fog_native_tex)!=layer_fog_packet.native_size.xy)){return 1.0;}
+    let cell=(absolute.xz-layer_fog_packet.native.xy)/layer_fog_packet.native.z;
+    let extent=vec2<f32>(layer_fog_packet.native_size.xy)-1.0;
+    if(any(cell<vec2<f32>(0.0)) || any(cell>=extent)){return 1.0;}
+    let ij=vec2<i32>(floor(cell));let q=fract(cell);
+    let a=textureLoad(layer_fog_native_tex,ij,0).r;let b=textureLoad(layer_fog_native_tex,ij+vec2<i32>(1,0),0).r;
+    let c=textureLoad(layer_fog_native_tex,ij+vec2<i32>(0,1),0).r;let d=textureLoad(layer_fog_native_tex,ij+vec2<i32>(1,1),0).r;
+    let ground=select(b+c-d+(d-c)*q.x+(d-b)*q.y,a+(b-a)*q.x+(c-a)*q.y,q.x+q.y<=1.0);
+    let agl=absolute.y-ground;
+    if(agl < -0.05 || agl>=layer_fog_packet.solar_domain.w){return 1.0;}
+    let uv=(absolute.xz-layer_fog_packet.solar_domain.xy)*layer_fog_packet.solar_domain.z;
+    if(any(uv<vec2<f32>(0.0)) || any(uv>vec2<f32>(1.0))){return 1.0;}
+    let dims=textureDimensions(layer_fog_solar_tex);
+    let w=sqrt(max(agl,0.0)/layer_fog_packet.solar_domain.w);
+    let z=(w*f32(dims.z-1u)+0.5)/f32(dims.z);
+    let transmission=textureSampleLevel(layer_fog_solar_tex,froxel_samp,vec3<f32>(uv,z),0.0).r;
+    if ((bitcast<u32>(transmission)&0x7f800000u)==0x7f800000u) { return 1.0; }
+    return clamp(transmission,0.0,1.0);
 }

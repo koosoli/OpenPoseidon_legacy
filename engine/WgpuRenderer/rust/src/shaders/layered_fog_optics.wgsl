@@ -79,6 +79,9 @@ struct FogConsumer {
     inv_vp: mat4x4<f32>,
     camera: vec4<f32>,
     control: vec4<f32>, // ready, far distance, physical weather fog, reserved
+    solar_domain: vec4<f32>, // world xz origin, inverse width, maximum AGL
+    native: vec4<f32>, // native xz origin, grid, ready
+    native_size: vec4<u32>, // source texture width/height, reserved
 };
 fn fog_camera_matches(packet: FogConsumer, view: mat4x4<f32>, proj: mat4x4<f32>, camera: vec3<f32>) -> bool {
     if (packet.control.x < 0.5 || packet.control.y <= 0.0) { return false; }
