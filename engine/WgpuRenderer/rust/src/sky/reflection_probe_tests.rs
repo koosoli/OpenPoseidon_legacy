@@ -3,6 +3,16 @@
 
 const SAMPLES: [(u32,u32);6] = [(128,1),(128,55),(128,63),(128,64),(128,80),(128,126)];
 
+// Control variants retain production imports/defines; raw WGSL parsing cannot
+// resolve the shared fog optics used by the current real Sky construction.
+fn compose_probe(source:&str)->naga::Module {
+    let mut composer=crate::shaders::build_composer();
+    composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor {
+        source,file_path:"sky/reflection_probe.wgsl",
+        shader_defs:crate::shaders::shader_defs(),..Default::default()
+    }).unwrap_or_else(|e|panic!("reflection control composition: {}",e.emit_to_string(&composer)))
+}
+
 fn control_source(interval: bool) -> String {
     let source=include_str!("sky.wgsl");
     let needle="bg, 12.0, 2, 0.0, 1e12";
@@ -19,9 +29,8 @@ fn control_source(interval: bool) -> String {
 
 #[test]
 fn actual_env_budget_and_interval_controls_parse_and_validate() {
-    for interval in [false,true] {
-        let src=control_source(interval);
-        let module=naga::front::wgsl::parse_str(&src).unwrap();
+    for src in [include_str!("sky.wgsl").to_string(),control_source(false),control_source(true)] {
+        let module=compose_probe(&src);
         naga::valid::Validator::new(naga::valid::ValidationFlags::all(),naga::valid::Capabilities::all())
             .validate(&module).unwrap();
     }
@@ -41,7 +50,7 @@ fn probe_half_decode_retains_linear_subnormal_radiance() {
 }
 
 fn pipeline(device:&wgpu::Device,sky:&super::Sky,source:&str,entry:&str,format:wgpu::TextureFormat)->wgpu::RenderPipeline {
-    let shader=device.create_shader_module(wgpu::ShaderModuleDescriptor{label:Some("actual_sky_env_control"),source:wgpu::ShaderSource::Wgsl(source.into())});
+    let shader=device.create_shader_module(wgpu::ShaderModuleDescriptor{label:Some("actual_sky_env_control"),source:wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(compose_probe(source)))});
     let bind=sky.env_pipeline.get_bind_group_layout(0);
     let layout=device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{label:None,bind_group_layouts:&[Some(&bind)],immediate_size:0});
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor{label:Some(entry),layout:Some(&layout),
