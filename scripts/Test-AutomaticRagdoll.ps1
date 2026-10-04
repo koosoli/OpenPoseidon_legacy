@@ -163,9 +163,14 @@ try{
    if($clearLine){$route=$direction;break}
   };Require ($null-ne $route) 'No bounded clear projectile segment above native floor.'
   $start=@(($target[0]-$route[0]*1.25),$target[1],($target[2]-$route[1]*1.25));$speed=@(($route[0]*800),0,($route[1]*800))
-  Exec ('ragCorpseProjectile="BulletSingleW" createVehicle ['+(Fmt $start[0])+','+(Fmt $start[2])+','+(Fmt $start[1])+'];ragCorpseProjectile setVelocity ['+(Fmt $speed[0])+','+(Fmt $speed[2])+','+(Fmt $speed[1])+']')
+  Exec ('ragShotStartASL=['+(Fmt $start[0])+','+(Fmt $start[2])+','+(Fmt $start[1])+'];ragCorpseProjectile="BulletSingleW" createVehicle ['+(Fmt $start[0])+','+(Fmt $start[2])+',0];ragCorpseProjectile setPosASL ragShotStartASL;ragCorpseProjectile setVelocity ['+(Fmt $speed[0])+','+(Fmt $speed[2])+','+(Fmt $speed[1])+']')
   Require ((Eval '!isNull ragCorpseProjectile')-eq $true-and (Eval 'typeOf ragCorpseProjectile')-ceq 'BulletSingleW') 'Actual stock rifle projectile creation failed.'
-  $result.gates.frozenProjectile=@{passed=$false;scope='Actual stock rifle ammo collision; not player Fired/input proof';beforePose=$beforeHit;beforeHit=$hitBefore;fireHull=$hull;target=$target;start=$start;issuedVelocity=(Eval 'velocity ragCorpseProjectile')}
+  # createVehicle uses AGL. Assert differences INSIDE the engine before its
+  # six-significant-digit SQF formatter rounds large world coordinates.
+  $issuedError=Eval '[abs(((getPosASL ragCorpseProjectile) select 0)-(ragShotStartASL select 0)),abs(((getPosASL ragCorpseProjectile) select 1)-(ragShotStartASL select 1)),abs(((getPosASL ragCorpseProjectile) select 2)-(ragShotStartASL select 2))]'
+  Require ($issuedError.Count-eq 3) 'Actual projectile position witness unavailable.';foreach($error in $issuedError){Require ((Num $error)-le .002) 'Actual projectile ASL differs from measured chest segment.'}
+  $issuedVelocity=Eval 'velocity ragCorpseProjectile';Require ($issuedVelocity.Count-eq 3-and (Num $issuedVelocity[0])-eq $speed[0]-and (Num $issuedVelocity[1])-eq $speed[2]-and (Num $issuedVelocity[2])-eq $speed[1]) 'Actual projectile velocity differs.'
+  $result.gates.frozenProjectile=@{passed=$false;scope='Actual stock rifle ammo collision; not player Fired/input proof';beforePose=$beforeHit;beforeHit=$hitBefore;fireHull=$hull;target=$target;start=$start;issuedPositionASL=(Eval 'getPosASL ragCorpseProjectile');issuedPositionError=$issuedError;issuedVelocity=$issuedVelocity}
   ExactPose $beforeHit (Pose $true);Exec 'setAccTime .2';$until=[DateTime]::UtcNow.AddSeconds(12);$hits=@()
   do{$hit=HitStatus;$hits+=,$hit;$result.gates.frozenProjectile.hitSamples=$hits;Require ([DateTime]::UtcNow-lt $until) 'Issued projectile did not confirm native corpse hit, wake and local transfer.';if($hit.wakes-le $hitBefore.wakes-or $hit.transfers-le $hitBefore.transfers){Start-Sleep -Milliseconds 50}}while($hit.wakes-le $hitBefore.wakes-or $hit.transfers-le $hitBefore.transfers)
   Exec 'setAccTime 0';Require ($hit.received-gt $hitBefore.received-and $hit.lastPart-ge 0-and (AutoCounts).active-eq 1-and (PhysicsCounts).bodies-eq 11) 'Actual frozen native hit or independent solver wake missing.'
@@ -188,9 +193,11 @@ try{
   $null=Spawn 'ragTravelVictim' -14 'UP';Exec 'ragTravelVictim setVelocity [8,0,10];ragTravelVictim setDammage 1;setAccTime .05';$null=WaitOwners 1 4 20;Exec 'setAccTime 0';$null=Query 'corpse-auto-select:4';$result.gates.inheritedTrajectoryInitial=Pose $false;AirborneArm 'ragTravelVictim' 'inherited-blast-trajectory' $true
  }
  if($BlastDeath){
-  $position=Spawn 'ragBlastVictim' -14 'UP';Exec ('ragLiveGrenade="GrenadeHand" createVehicle ['+(Fmt ($position[0]-3))+','+(Fmt $position[1])+','+(Fmt ($position[2]+.15))+'];ragLiveGrenade setVelocity [0,0,0]')
+  $position=Spawn 'ragBlastVictim' -14 'UP';Exec ('ragGrenadeStartASL=['+(Fmt ($position[0]-3))+','+(Fmt $position[1])+','+(Fmt ($position[2]+.15))+'];ragLiveGrenade="GrenadeHand" createVehicle ['+(Fmt ($position[0]-3))+','+(Fmt $position[1])+',0];ragLiveGrenade setPosASL ragGrenadeStartASL;ragLiveGrenade setVelocity [0,0,0]')
   Require ((Eval '!isNull ragLiveGrenade')-eq $true-and (Eval 'typeOf ragLiveGrenade')-ceq 'GrenadeHand') 'Actual GrenadeHand ammo fixture missing.'
-  $result.gates.liveGrenade=@{type=(Eval 'typeOf ragLiveGrenade');position=(Eval 'getPosASL ragLiveGrenade');targetPosition=$position};Exec 'setAccTime 1';$until=[DateTime]::UtcNow.AddSeconds(18);$grenadeSamples=@()
+  $grenadeError=Eval '[abs(((getPosASL ragLiveGrenade) select 0)-(ragGrenadeStartASL select 0)),abs(((getPosASL ragLiveGrenade) select 1)-(ragGrenadeStartASL select 1)),abs(((getPosASL ragLiveGrenade) select 2)-(ragGrenadeStartASL select 2))]'
+  Require ($grenadeError.Count-eq 3) 'Actual grenade position witness unavailable.';foreach($error in $grenadeError){Require ((Num $error)-le .002) 'Actual grenade ASL differs from requested target-relative placement.'}
+  $result.gates.liveGrenade=@{type=(Eval 'typeOf ragLiveGrenade');position=(Eval 'getPosASL ragLiveGrenade');issuedPositionError=$grenadeError;targetPosition=$position};Exec 'setAccTime 1';$until=[DateTime]::UtcNow.AddSeconds(18);$grenadeSamples=@()
   while(Eval 'alive ragBlastVictim'){$grenadeSamples+=,(Eval '[time,getDammage ragBlastVictim,getPosASL ragBlastVictim,isNull ragLiveGrenade]');$result.gates.grenadeDamageWitnesses=$grenadeSamples;Require ([DateTime]::UtcNow-lt $until) 'Actual grenade did not kill stock target within18s.';Start-Sleep -Milliseconds 100}
   Exec 'setAccTime 0';$owners=AutoCounts;Require ($owners.active+$owners.pending+$owners.frozen-eq 5) 'Actual grenade death did not enter admitted automatic ownership; inspect authored-fallback reason.'
   if($owners.pending){Exec 'setAccTime .05';$null=WaitOwners 1 4 20;Exec 'setAccTime 0'};$null=Query 'corpse-auto-select:4';AirborneArm 'ragBlastVictim' 'actual-grenade-death' $false;Exec 'deleteVehicle ragLiveGrenade'

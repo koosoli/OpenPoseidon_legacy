@@ -259,3 +259,15 @@ pair: it sends real stock `BulletSingleW` ammo through measured frozen chest
 Fire geometry, requires confirmed incoming impulse/wake/local transfer, changed
 consumed pose and supported resettlement with zero handles. This is native ammo
 collision coverage, not a player input or `Fired` event acceptance claim.
+
+The first installed frozen-projectile attempt (`d465`,
+`owner-frozen-hit-prepared-blast-20261004-094402`) confirmed earlier terrain
+preparation at 238.877 ms, but had zero incoming hit events. Its fixture passed
+an ASL chest height to `createVehicle`, whose `GetPos` adds native terrain height:
+the projectile was issued above the corpse. The runner now follows the existing
+showcase projectile pattern: create, explicitly `setPosASL`, then set velocity.
+It records actual position and asserts the position difference inside the engine
+before SQF text formatting rounds large world coordinates. The grenade fixture
+gets the same correction and placement witness. No collision/dead-body policy
+has been changed on the basis of that missed projectile; installed retry remains
+required.
