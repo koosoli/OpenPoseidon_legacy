@@ -44,6 +44,20 @@ function Pair{
 }
 function Same-Pair($a,$b){foreach($key in @('stamp','exe','dll')){Require ($a[$key]-ceq$b[$key]) 'Installed matched pair changed.'}}
 function Refuses([scriptblock]$body){$failed=$false;try{&$body|Out-Null}catch{$failed=$true};Require $failed 'Invalid fixture accepted.'}
+function Native-Identity($native){
+ # GetSeaLevel is the tide/wave level, recomputed from current sun/moon in
+ # Landscape::Simulate after date changes. Record it, but do not confuse it
+ # with the immutable native heightfield revision or an authored placement.
+ $null=Number $native.seaLevel
+ foreach($key in @('readonly','baseline','fineSourceReady','ok')){Require ($native.$key-is[bool]) ('Native boolean absent: '+$key)}
+ foreach($key in @('range','spacing','heightRevision')){$null=Number $native.$key}
+ [ordered]@{readonly=$native.readonly;baseline=$native.baseline;fineSourceReady=$native.fineSourceReady;range=$native.range;spacing=$native.spacing;heightRevision=$native.heightRevision;ok=$native.ok}
+}
+function Same-Physical($a,$b){
+ Require ($a.time-eq$b.time) 'Paused simulation clock changed.'
+ Require (((Native-Identity $a.native)|ConvertTo-Json -Compress)-ceq((Native-Identity $b.native)|ConvertTo-Json -Compress)) 'Camera changed native terrain identity/revision.'
+ foreach($key in @('mud','sand','snow')){Require (($a[$key]|ConvertTo-Json -Depth 6 -Compress)-ceq($b[$key]|ConvertTo-Json -Depth 6 -Compress)) ('Camera changed physical source/history: '+$key)}
+}
 if($SelfTest){
  Require ((Pose $reported)-ceq'5805.63 3597.97 46.35 147.8 6.3') 'Camera axis order changed.'
  Require (((Transform @(0,0,-1,0,1,0,1,0,0,10,20,30) @(2,3,4))-join',')-ceq'14,23,28') 'Actual column frame transform changed.'
@@ -57,6 +71,14 @@ if($SelfTest){
  $bad=$owner.Clone();$bad.frame=@($owner.frame);$bad.frame[10]+=.001;Refuses {Assert-Owner $bad $fixture $owner}
  $suspect=$owner.Clone();$suspect.frame=@($owner.frame);$suspect.frame[10]+=3;Assert-Owner $suspect $fixture $null # do not reject suspected floating Y
  Refuses {Number 'NaN'};Refuses {Number $null}
+ $native=@{readonly=$true;baseline=$false;fineSourceReady=$true;range=2048;spacing=6.25;heightRevision=6;seaLevel=2.307034;ok=$true}
+ $physical=@{time=8.636;native=$native;mud=@{revision=2;chunks=0};sand=@{revision=2;chunks=0};snow=@{depth=0;chunks=0}}
+ $changed=$physical.Clone();$changed.native=$native.Clone();$changed.native.seaLevel=2.982092;Same-Physical $physical $changed
+ foreach($key in @('range','spacing','heightRevision')){$bad=$physical.Clone();$bad.native=$native.Clone();$bad.native[$key]+=1;Refuses {Same-Physical $physical $bad}}
+ $bad=$physical.Clone();$bad.native=$native.Clone();$bad.native.baseline=$true;Refuses {Same-Physical $physical $bad}
+ $bad=$physical.Clone();$bad.native=$native.Clone();$bad.native.seaLevel='NaN';Refuses {Same-Physical $physical $bad}
+ $bad=$physical.Clone();$bad.time+=.001;Refuses {Same-Physical $physical $bad}
+ $bad=$physical.Clone();$bad.mud=@{revision=3;chunks=0};Refuses {Same-Physical $physical $bad}
  $parseErrors=$null;$ast=[Management.Automation.Language.Parser]::ParseFile($PSCommandPath,[ref]$null,[ref]$parseErrors);Require ($parseErrors.Count-eq0) 'Fixture has syntax errors.'
  $requests=@($ast.FindAll({param($node) $node-is[Management.Automation.Language.HashtableAst]},$true)|ForEach-Object{$_.Extent.Text}|Where-Object{$_-match"cmd='stream_existing_(move|damage)'"})
  Require ($requests.Count-eq0) 'Runner mutates authored owners.'
@@ -152,7 +174,6 @@ function State{
  $soil=Send @{cmd='dev_wet_soil_diagnostic';action='state'};Require ($soil.mode-eq0) 'Natural fragment path is not mode zero.'
  @{time=(Number (Eval 'time'));camera=$soil.camera;native=(Send @{cmd='dev_terrain_brush';action='state'});mud=(Send @{cmd='dev_mud';action='state'});sand=(Send @{cmd='dev_sand';action='state'});snow=(Send @{cmd='dev_snow';action='state'})}
 }
-function Same-Physical($a,$b){Require ($a.time-eq$b.time) 'Paused simulation clock changed.';foreach($key in @('native','mud','sand','snow')){Require (($a[$key]|ConvertTo-Json -Depth 6 -Compress)-ceq($b[$key]|ConvertTo-Json -Depth 6 -Compress)) ('Camera changed physical source/history: '+$key)}}
 function Capture([string]$name,$pose){
  Require ((Eval ('triFreeFlyPose "'+(Pose $pose)+'"'))-ceq'OK') 'Camera refused.';Start-Sleep -Seconds $SettleSeconds
  $state=State;Same-Physical $result.initialState $state;Assert-Camera $state.camera $pose;$owners=@(Owners);$weather=Send @{cmd='weather_visibility'};$actualView=@{preferred=(Number (Eval 'triGetViewDistance'));tactical=(Number (Eval 'triViewDistance'))}
