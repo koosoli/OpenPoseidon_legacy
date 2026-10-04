@@ -1659,7 +1659,8 @@ void RegisterScreenshot(HarnessServer& hs)
             cJSON_AddBoolToObject(result, "particleSnowflakes", GRain.Params().snowflakes);
             cJSON_AddNumberToObject(result, "liquidRain", UniformWettingDensity(GLandscape->GetRainDensity(),
                 GRain.EffectiveDensity(), GRain.Params().snowflakes));
-            cJSON_AddNumberToObject(result, "fog", GLandscape->GetFog());
+              cJSON_AddNumberToObject(result, "fog", GLandscape->GetFog());
+              cJSON_AddNumberToObject(result, "snowAdjustedFog", GSnow().RenderFog(GLandscape->GetFog()));
             cJSON_AddNumberToObject(result, "terrainRange", GScene->GetFogMaxRange());
             cJSON_AddNumberToObject(result, "baseRange", GScene->GetBaseFogMaxRange());
             cJSON_AddNumberToObject(result, "objectRange", GScene->GetObjectDrawDistance());

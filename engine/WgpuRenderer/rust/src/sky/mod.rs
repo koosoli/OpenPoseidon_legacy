@@ -2472,7 +2472,7 @@ impl Sky {
     // weather and Legacy mode therefore leave both sky and froxels unchanged.
     pub fn update_fog_chroma(&self,queue:&wgpu::Queue,ready:bool,weather:f32) {
         let strength=if ready && weather.is_finite() && (0.0..=1.0).contains(&weather) {
-            0.85*weather
+            0.85*(weather*4.0).min(1.0)
         } else {0.0};
         let offset=std::mem::offset_of!(SkyUniform,night_sky) as u64+12;
         queue.write_buffer(&self.uniform_buf,offset,bytemuck::bytes_of(&strength));

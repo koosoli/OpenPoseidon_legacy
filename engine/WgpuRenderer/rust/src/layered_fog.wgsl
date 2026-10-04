@@ -379,7 +379,7 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
         previous=end_distance;
         // The medium changes chroma only: keep exact extinction, masks and
         // direct surface-light transmission. Never modify the environment map.
-        let fog_colour=fog_neutral_radiance(colour,0.85*params.control.z);
+        let fog_colour=fog_neutral_radiance(colour,0.85*min(params.control.z*4.0,1.0));
         textureStore(result,vec3<i32>(i32(id.x),i32(id.y),i32(z)),vec4<f32>(fog_colour,trans));
 
     }
