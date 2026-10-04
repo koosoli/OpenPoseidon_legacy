@@ -678,6 +678,13 @@ fn apply_fog_receiver(rgb: vec3<f32>, world_pos_rel: vec3<f32>, vegetation: bool
 fn apply_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
     return apply_fog_receiver(rgb, world_pos_rel, false);
 }
+// Only the native terrain pass calls this: canopy rain shelter at its endpoint
+// must not discard outdoor air already certified along the main-camera ray.
+// Actual roof/underground samples remain absent from the encoded volume.
+fn apply_fog_terrain(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
+    return apply_fog_receiver(rgb, world_pos_rel, true);
+}
+
 
 // Occlusion [0,1] of the sun by terrain at world position (xz, y): 0 = lit, 1 =
 // fully in terrain shadow. Zero when the feature is off or the point is off the map

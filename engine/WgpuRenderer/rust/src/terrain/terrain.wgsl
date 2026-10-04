@@ -7,7 +7,7 @@
 // Shares group(0) (the camera UBO + cascade shadow map) with the lit 3D
 // pipeline via the frame module, so terrain receives the same CSM shadows and
 // sun lighting.
-#import frame::{frame, reverse_z, fog_factor, apply_fog, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_rain_coverage, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
+#import frame::{frame, reverse_z, fog_factor, apply_fog_terrain, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_rain_reach, interior_rain_coverage, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
 #import ground_puddles::{ground_puddle_mask, ground_puddle_land_factor, ground_puddle_rain_factor, ground_puddle_ripple_normal}
 #import frame::ground_sky_reflection
 #import frame::wet_soil_debug_mode
@@ -1575,7 +1575,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // legacy flat distance fog; 0 = off. in.fog is still used above for distance-faded
     // shadows regardless.
     if (frame.params.fog_enabled >= 1.5) {
-        rgb = apply_fog(rgb, in.world_pos);
+        rgb = apply_fog_terrain(rgb, in.world_pos);
     } else {
         rgb = mix(fog_color, rgb, in.fog);
     }

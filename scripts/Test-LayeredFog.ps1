@@ -6,7 +6,7 @@ param(
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [double]$X=6532,[double]$Z=6466,[ValidateRange(0.05,0.8)][double]$WeatherFog=0.45,
  [switch]$Measure,[ValidateRange(15,120)][int]$MeasureDeadlineSeconds=90,
- [double]$Exposure,[switch]$SelfTest
+ [double]$Exposure,[switch]$TerrainMode,[switch]$MovingViews,[switch]$SelfTest
 )
 $ErrorActionPreference='Stop';$taskRoot=Split-Path -Parent $PSScriptRoot
 $culture=[Globalization.CultureInfo]::InvariantCulture
@@ -70,11 +70,11 @@ Require ([bool]$ExpectedCommit) 'Supply the installed ExpectedCommit.'
 Require ([bool]$env:LOCK_OWNER) 'Invoke through scripts/with-game-lock.sh.'
 Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue)) 'Existing owner game is preserved.'
 $before=Pair;$taskOut=Join-Path $taskRoot ('build/layered-fog/'+$Label+'-'+(Get-Date -Format 'yyyyMMdd-HHmmss'));New-Item -ItemType Directory -Force $taskOut|Out-Null
-$keys=@('POSEIDON_USER_DIR','WGR_LAYERED_FOG','WGR_LAYERED_FOG_TRACE','WGR_FOG_LAYER0','WGR_FOG_LAYER1','WGR_WEATHER_COVER','WGR_WEATHER_COVER_FAR','WGR_GRASS','WGR_TEMPORAL','POSEIDON_SNOWLINE','POSEIDON_SNOW_TEST_DEPTH','POSEIDON_TEST_RAIN','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_CLOUD_COVERAGE')
+$keys=@('POSEIDON_USER_DIR','WGR_LAYERED_FOG','WGR_LAYERED_FOG_TRACE','WGR_FOG_LAYER0','WGR_FOG_LAYER1','WGR_FOG_TERRAIN','WGR_FOG_PATCH','WGR_WEATHER_COVER','WGR_WEATHER_COVER_FAR','WGR_GRASS','WGR_TEMPORAL','POSEIDON_SNOWLINE','POSEIDON_SNOW_TEST_DEPTH','POSEIDON_TEST_RAIN','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_CLOUD_COVERAGE')
 $saved=@{};foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
-$result=[ordered]@{passed=$false;expectedCommit=$ExpectedCommit;installed=$before;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;measure=[bool]$Measure;measureWarmupRenderedFrames=256;measureDeadlineSeconds=$MeasureDeadlineSeconds;
+$result=[ordered]@{passed=$false;expectedCommit=$ExpectedCommit;installed=$before;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;terrainMode=[bool]$TerrainMode;movingRenderCamera=[bool]$MovingViews;measure=[bool]$Measure;measureWarmupRenderedFrames=256;measureDeadlineSeconds=$MeasureDeadlineSeconds;
  exposureControl=@{supplied=$exposureSupplied;environment=$exposureSettings;scope='Explicit startup environment controls when supplied: fixed base exposure, adaptive exposure OFF, manual Hable time-of-day grade. Otherwise normal defaults. Configuration receipt, not same-frame GPU uniform readback. Bloom remains unchanged.'};
- arms=@();scope='Actual original Everon and authoritative weather, same XYZ camera requests, unchanged native source/ranges at equal weather. Encoded trace is CPU command readiness. Per-view frame_performance receipts contain latest asynchronous published GPU timers, without sampled GPU frame ID or exact screenshot-frame attribution. Frame total is inclusive; fog transport excludes background/consumer/weather-map costs. No timer summation, steady statistical benchmark, uncontended cost certification, visual acceptance or default promotion claimed. Default remains OFF.'}
+ arms=@();scope='Actual original Everon and authoritative weather, same XYZ camera requests, unchanged native source/ranges at equal weather. Encoded trace is CPU command readiness. Per-view frame_performance receipts contain latest asynchronous published GPU timers, without sampled GPU frame ID or exact screenshot-frame attribution. Frame total is inclusive; fog transport excludes background/consumer/weather-map costs. No timer summation, steady statistical benchmark, uncontended cost certification, visual acceptance or default promotion claimed. Terrain mode is an explicit experiment; no quality/cost acceptance is claimed.'}
 $p=$null;$client=$null;$ground=$null;$layerArgs=$null
 function Send($command){
  Require (!$p.HasExited) 'Owned game exited unexpectedly.';$wire=$command|ConvertTo-Json -Depth 8 -Compress;$wire|Add-Content -LiteralPath (Join-Path $armOut 'harness.jsonl');$writer.WriteLine($wire)
@@ -90,6 +90,7 @@ try{
   $armOut=Join-Path $taskOut $arm.name;$profile=Join-Path $armOut 'user';New-Item -ItemType Directory -Force $profile|Out-Null
   foreach($key in $keys){[Environment]::SetEnvironmentVariable($key,$null,'Process')}
   $settings=@{POSEIDON_USER_DIR=$profile;WGR_LAYERED_FOG=$arm.on;WGR_LAYERED_FOG_TRACE='1';WGR_WEATHER_COVER='1';WGR_WEATHER_COVER_FAR='1';WGR_GRASS='0';WGR_TEMPORAL='0';POSEIDON_SNOWLINE='off';POSEIDON_SNOW_TEST_DEPTH='0'}
+  if(!$TerrainMode){$settings.WGR_FOG_TERRAIN='0,0,0,0';$settings.WGR_FOG_PATCH='0,0,0,0'}
   foreach($key in $exposureSettings.Keys){$settings[$key]=$exposureSettings[$key]}
   if($layerArgs){$settings.WGR_FOG_LAYER0=$layerArgs[0];$settings.WGR_FOG_LAYER1=$layerArgs[1]}
   foreach($key in $settings.Keys){[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
@@ -127,12 +128,32 @@ try{
    $lower=(@(($ground-3),($ground+18),3,.008)|ForEach-Object{Fmt $_}) -join ','
    $upper=(@(($ground+35),($ground+50),3,.004)|ForEach-Object{Fmt $_}) -join ','
    $layerArgs=@($lower,$upper)
-   $baselineSource=$source;$baselineWeather=$weather;$result.profile=@{siteXZ=@($X,$Z);nativeY=$ground;layers=$layerArgs;policy='Frozen world-ASL slabs selected once from actual baseline height. They do not follow terrain. OFF scout used built-in profiles; disabled optics are independent of profile.'}
+   if($TerrainMode){$layerArgs=@('-3,18,3,0.008','35,50,3,0.004')}
+   $baselineSource=$source;$baselineWeather=$weather;$result.profile=@{siteXZ=@($X,$Z);nativeY=$ground;layers=$layerArgs;terrainMode=[bool]$TerrainMode;policy='Legacy-density mode explicitly zeros new controls and freezes world-ASL slabs from actual baseline height. Terrain mode uses AGL slabs with actual C++ startup terrain/patch defaults; trace records packed controls. OFF scout used built-in profiles; disabled optics are independent of profile.'}
   }else{Require ([Math]::Abs($actualGround-$ground) -lt .0001 -and $source.worldName -ceq $baselineSource.worldName -and $source.heightRevision -eq $baselineSource.heightRevision -and $source.grid -eq $baselineSource.grid) 'Native source changed between arms.'}
   if($arm.fog -gt 0){foreach($range in @('terrainRange','baseRange','objectRange','tacticalVisibility')){Require ([Math]::Abs((Num $weather.$range)-(Num $baselineWeather.$range)) -lt .001) ('Existing '+$range+' changed at identical weather.')}}
   $receipt=@{name=$arm.name;settings=$settings;weather=$weather;source=$source;nativeY=$actualGround;views=@()};$result.arms+=,$receipt
-  foreach($view in @(@{name='ground';y=($ground+2)},@{name='between';y=($ground+26)},@{name='above';y=($ground+75)})){
-   $pose=@($X,$view.y,$Z,-.65,-.07,-.76);Require ((Eval ('triSetView ['+(($pose|ForEach-Object{Fmt $_}) -join ',')+']')) -ceq 'OK') 'Render-only camera refused.'
+  $views=@(@{name='ground';x=$X;z=$Z;y=($ground+2);nativeY=$ground},@{name='between';x=$X;z=$Z;y=($ground+26);nativeY=$ground},@{name='above';x=$X;z=$Z;y=($ground+75);nativeY=$ground})
+  if($MovingViews){
+   foreach($site in @(@{name='flight-left';x=($X-150);z=$Z;agl=75},@{name='flight-right';x=($X+150);z=($Z+150);agl=75},@{name='flight-high';x=($X+150);z=($Z+150);agl=150})){
+    $native=Num (Eval ('triTerrainHeight ['+(Fmt $site.x)+','+(Fmt $site.z)+']'))
+    $views+=@{name=$site.name;x=$site.x;z=$site.z;y=($native+$site.agl);nativeY=$native}
+   }
+  }
+  $previousPose=$null
+  foreach($view in $views){
+   $pose=@($view.x,$view.y,$view.z,-.65,-.07,-.76)
+   $movement=@()
+   if($MovingViews -and $previousPose){
+    # Bounded render-camera movement only: the simulation remains paused and
+    # there is no physical helicopter, flight-cost or temporal-image assertion.
+    foreach($step in 1..16){$t=$step/16.;$sample=@();foreach($i in 0..2){$sample+=($previousPose[$i]+($pose[$i]-$previousPose[$i])*$t)};$sample+=@(-.65,-.07,-.76)
+     Require ((Eval ('triSetView ['+(($sample|ForEach-Object{Fmt $_}) -join ',')+']')) -ceq 'OK') 'Moving render-camera refused.'
+     $progress=Send @{cmd='query';what='play_state'};$movement+=@{requested=$sample;frame=$progress.frame};Start-Sleep -Milliseconds 60
+    }
+   }
+   $previousPose=$pose
+   Require ((Eval ('triSetView ['+(($pose|ForEach-Object{Fmt $_}) -join ',')+']')) -ceq 'OK') 'Render-only camera refused.'
    $warmupStart=Send @{cmd='query';what='play_state'};$warmupClock=[Diagnostics.Stopwatch]::StartNew()
    Start-Sleep -Seconds 4
    if($Measure){
@@ -144,18 +165,20 @@ try{
    }else{$warmupEnd=Send @{cmd='query';what='play_state'};$advance=Frame-Advance $warmupStart.frame $warmupEnd.frame}
    $warmupClock.Stop()
    $weatherBefore=Send @{cmd='weather_visibility'};Assert-Weather $weatherBefore $arm.fog
-   $sourceBefore=Send @{cmd='dev_cave_editor';action='state';x=$X;z=$Z;y=1000};Assert-Source $sourceBefore $baselineSource
+   $sourceBefore=Send @{cmd='dev_cave_editor';action='state';x=$view.x;z=$view.z;y=1000};Assert-Source $sourceBefore $baselineSource
+   $nativeBefore=Num (Eval ('triTerrainHeight ['+(Fmt $view.x)+','+(Fmt $view.z)+']'));Require ([Math]::Abs($nativeBefore-$view.nativeY) -lt .0001) 'Captured site native height changed.'
    $performanceBefore=Send @{cmd='frame_performance'};$captureBefore=Send @{cmd='query';what='play_state'}
    $path=Join-Path $armOut ($view.name+'.png');$captureStartedUtc=[DateTime]::UtcNow.ToString('o');$null=Send @{cmd='screenshot';path=$path}
    $until=[DateTime]::UtcNow.AddSeconds(15);while(!(Test-Path -LiteralPath $path)){Require ([DateTime]::UtcNow -lt $until) 'Screenshot deadline.';Start-Sleep -Milliseconds 150}
    Require ((Get-Item -LiteralPath $path).Length -gt 4096) 'Capture is empty.'
    $rows=@(Logs|Where-Object{$_ -match '\[wgr\] layered fog:.*camera=\['}|Select-Object -Last 8)
-   $matching=@($rows|Where-Object{$_ -match 'weather=([-0-9.]+).*camera=\[([-0-9.eE+]+), ([-0-9.eE+]+), ([-0-9.eE+]+)' -and [Math]::Abs((Num $Matches[1])-$arm.fog) -lt .001 -and [Math]::Abs((Num $Matches[2])-$X) -lt .03 -and [Math]::Abs((Num $Matches[3])-$view.y) -lt .03 -and [Math]::Abs((Num $Matches[4])-$Z) -lt .03})
+   $matching=@($rows|Where-Object{$_ -match 'weather=([-0-9.]+).*camera=\[([-0-9.eE+]+), ([-0-9.eE+]+), ([-0-9.eE+]+)' -and [Math]::Abs((Num $Matches[1])-$arm.fog) -lt .001 -and [Math]::Abs((Num $Matches[2])-$view.x) -lt .03 -and [Math]::Abs((Num $Matches[3])-$view.y) -lt .03 -and [Math]::Abs((Num $Matches[4])-$view.z) -lt .03})
    Require ($matching.Count -gt 0) 'No actual encoded-camera/weather trace at captured view.'
    if($arm.on -eq '1' -and $arm.fog -gt 0){Require ([bool]($matching|Where-Object{$_ -match 'encoded=true'})) 'Current source/physical coverage never admitted fog.'}else{Require (![bool]($matching|Where-Object{$_ -match 'encoded=true'})) 'Disabled/zero-weather control encoded fog.'}
    $captureAfter=Send @{cmd='query';what='play_state'};$performanceAfter=Send @{cmd='frame_performance'}
    $viewWeather=Send @{cmd='weather_visibility'};Assert-Weather $viewWeather $arm.fog
-   $sourceAfter=Send @{cmd='dev_cave_editor';action='state';x=$X;z=$Z;y=1000};Assert-Source $sourceAfter $baselineSource
+   $sourceAfter=Send @{cmd='dev_cave_editor';action='state';x=$view.x;z=$view.z;y=1000};Assert-Source $sourceAfter $baselineSource
+   $nativeAfter=Num (Eval ('triTerrainHeight ['+(Fmt $view.x)+','+(Fmt $view.z)+']'));Require ([Math]::Abs($nativeAfter-$nativeBefore) -lt .0001) 'Native site changed across screenshot.'
    $timing=Timing-Sample $performanceAfter
    foreach($field in @('renderWidth','renderHeight','outputWidth','outputHeight','msaaSamples','activeUpscaler')){
     Require ($null -ne $performanceAfter.$field -and $performanceBefore.$field -eq $performanceAfter.$field) ('Render configuration changed or unavailable: '+$field)
@@ -170,11 +193,11 @@ try{
    $timingPath=Join-Path $armOut ($view.name+'.frame-performance.json')
    $timingReceipt=@{schema='layered-fog-published-timing-v1';cameraXYZDirectionXYZ=$pose;requestedUtc=$captureStartedUtc;png=$path;pngSha256=(Get-FileHash -LiteralPath $path).Hash;exposureControl=$result.exposureControl;
     renderedWarmup=@{startFrame=$warmupStart.frame;endFrame=$warmupEnd.frame;advance=$advance;seconds=$warmupClock.Elapsed.TotalSeconds;measured=[bool]$Measure};
-    screenshotRequestWindow=@{beforeFrame=$captureBefore.frame;afterFrame=$captureAfter.frame;advance=$captureFrameAdvance};weatherBefore=$weatherBefore;weatherAfter=$viewWeather;sourceBefore=$sourceBefore;sourceAfter=$sourceAfter;
-    timingBefore=$performanceBefore;timingAfter=$performanceAfter;sampledGpu=$timing;trace=$matching;
+    screenshotRequestWindow=@{beforeFrame=$captureBefore.frame;afterFrame=$captureAfter.frame;advance=$captureFrameAdvance};weatherBefore=$weatherBefore;weatherAfter=$viewWeather;sourceBefore=$sourceBefore;sourceAfter=$sourceAfter;nativeBefore=$nativeBefore;nativeAfter=$nativeAfter;
+    timingBefore=$performanceBefore;timingAfter=$performanceAfter;sampledGpu=$timing;trace=$matching;renderCameraMovement=$movement;
     scope='Fresh per-view harness reads, not legacy capture-metrics JSON. GPU sample frame identity unavailable; camera/weather/source are bracket controls and matching CPU encoding trace, not same-frame GPU proof. Rendered frame count is FinishDraw, CPU count is a capped main-loop ring. Single inclusive whole-frame sample and transport-only timer; no sum, statistical distribution, steady CPU-ring ownership or uncontended budget acceptance.'}
    $timingReceipt|ConvertTo-Json -Depth 20|Set-Content -LiteralPath $timingPath
-   $receipt.views+=@{name=$view.name;cameraXYZDirectionXYZ=$pose;path=$path;pngSha256=$timingReceipt.pngSha256;trace=$matching;weather=$viewWeather;renderConfiguration=$renderConfiguration;timingReceipt=$timingPath;timingSha256=(Get-FileHash -LiteralPath $timingPath).Hash;sampledGpu=$timing}
+   $receipt.views+=@{name=$view.name;cameraXYZDirectionXYZ=$pose;renderCameraMovement=$movement;nativeYAtSite=$view.nativeY;path=$path;pngSha256=$timingReceipt.pngSha256;trace=$matching;weather=$viewWeather;renderConfiguration=$renderConfiguration;timingReceipt=$timingPath;timingSha256=(Get-FileHash -LiteralPath $timingPath).Hash;sampledGpu=$timing}
 
   }
   $null=Send @{cmd='exit'};Require ($p.WaitForExit(30000) -and $p.ExitCode -eq 0) 'Normal game exit failed.';$receipt.exit=$p.ExitCode

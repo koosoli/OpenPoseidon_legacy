@@ -205,12 +205,13 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
  // Borrow the fixed volume handle independently so the closure does not borrow mutable fog.
  let volume_view=fog.view.clone();
  let read=||read_probe(&device,&queue,READ_VOLUME,&[wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::TextureView(&volume_view)}],128);
+ let cloud_limit=std::cell::Cell::new([0.,1000.]);
  let run=|fog:&mut LayeredFog,camera:&WgrCamera,settings:&WgrLayeredFog,weather:f32,cover:WeatherInputs,generation:u64,below:bool| {
   fog.invalidate(&queue);let mut enc=device.create_command_encoder(&Default::default());
   let inverse=(glam::DMat4::from_cols_array(&camera.view.map(f64::from)).inverse()
    *glam::DMat4::from_cols_array(&camera.proj.map(f64::from)).inverse()).as_mat4().to_cols_array_2d();
   fog.render(&device,&queue,&mut enc,settings,weather,true,0.,camera,inverse,&height,&native_view,generation,
-   &mapping,&shadow_view,&csm_view,&env_view,&cloud_view,cover,below);queue.submit(Some(enc.finish()));
+   &mapping,&shadow_view,&csm_view,&env_view,&cloud_view,cover,below,cloud_limit.get());queue.submit(Some(enc.finish()));
  };
  run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);assert!(fog.ready);
  let positive=read();let mut previous=1.;
@@ -219,6 +220,17 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
   assert!((row[3]-(-0.01*distance).exp()).abs()<0.0007,"actual Beer-Lambert z={z}: {row:?}");
   assert!(row[3]<=previous);previous=row[3];assert_eq!(&row[..3],&[0.;3]);
  }
+ // Actual elevated native terrain must reproduce the same optical depth at
+ // equal AGL, independent of camera height. The old ASL path must stay empty.
+ write_native(100.);camera.cam_pos[1]=120.;settings.terrain=[1.,0.,0.,0.];
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);let elevated=read();
+ for(a,b)in positive.iter().zip(&elevated){assert!((a-b).abs()<0.0007,"equal AGL {a}/{b}");}
+ settings.terrain[0]=0.;run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
+ for row in read().chunks_exact(4){assert_eq!(row,&[0.,0.,0.,1.],"legacy ASL does not follow mountain");}
+ settings.terrain[0]=1.;cloud_limit.set([1.,110.]);
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,false);assert!(fog.ready);
+ for row in read().chunks_exact(4){assert_eq!(row,&[0.,0.,0.,1.],"following medium cannot enter cloud deck");}
+ cloud_limit.set([0.,1000.]);settings.terrain=[0.;4];camera.cam_pos[1]=20.;write_native(0.);
  // Exact production projection family: reversed-Z infinite far point has w=0.
  camera.proj=glam::Mat4::perspective_infinite_reverse_lh(60f32.to_radians(),1.,0.1).to_cols_array();
  let infinite=glam::Mat4::from_cols_array(&camera.proj).inverse()*glam::Vec4::new(0.,0.,0.,1.);
@@ -285,7 +297,7 @@ fn settings_are_opt_in_and_refuse_unready_weather_or_interiors() {
  p.layers[0][1]=p.layers[0][0];assert!(!requested(&p,0.5,true,0.));
  p=WgrLayeredFog::default();p.control[0]=1.;p.layers[1][3]=f32::INFINITY;
  assert!(!requested(&p,0.5,true,0.));
- assert_eq!(std::mem::size_of::<Consumer>(),224);assert_eq!(std::mem::size_of::<Volume>(),352);
+ assert_eq!(std::mem::size_of::<Consumer>(),224);assert_eq!(std::mem::size_of::<Volume>(),400);
 }
 
 #[test]
@@ -304,4 +316,50 @@ fn production_fog_cloud_and_surface_shaders_compose() {
   naga::valid::Validator::new(naga::valid::ValidationFlags::all(),naga::valid::Capabilities::all())
    .validate(&m).unwrap_or_else(|e|panic!("{path}: {e:?}"));
  }
+}
+
+#[test]
+fn actual_world_fog_density_gpu_is_coherent_bounded_and_terrain_qualified() {
+ let(device,queue)=crate::gfx3d::cull::tests::headless().expect("density requires actual GPU");
+ const PROBE:&str=r#"
+ #import layered_fog_optics::{fog_world_noise,fog_patch_density,fog_valley_density,fog_domain_feather,fog_segment_density}
+ @group(0) @binding(0) var<storage,read_write> result:array<vec4<f32>>;
+ @compute @workgroup_size(1) fn cs_probe(){
+  let p=vec3<f32>(150.0,35.0,-10.0);let patchiness=vec4<f32>(0.95,250.0,70.0,30.0);
+  var lo=10.0;var hi=-10.0;
+  for(var i=0u;i<256u;i=i+1u){let x=vec3<f32>(f32(i)*33.7,f32(i)*1.71,-f32(i)*23.13);
+   let d=fog_patch_density(x,patchiness);lo=min(lo,d);hi=max(hi,d);}
+  result[0]=vec4<f32>(lo,hi,fog_patch_density(p,vec4<f32>(0.0)),fog_patch_density(p,patchiness));
+  result[1]=vec4<f32>(fog_world_noise(vec3<f32>(1.0-1e-5,0.7,-1.2)),fog_world_noise(vec3<f32>(1.0+1e-5,0.7,-1.2)),
+   fog_world_noise(vec3<f32>(-1.0-1e-5,0.7,1.2)),fog_world_noise(vec3<f32>(-1.0+1e-5,0.7,1.2)));
+  result[2]=vec4<f32>(fog_valley_density(100.0,vec4<f32>(100.0),2.0,150.0),
+   fog_valley_density(100.0,vec4<f32>(80.0),2.0,150.0),fog_valley_density(100.0,vec4<f32>(115.0),2.0,150.0),
+   fog_valley_density(100.0,vec4<f32>(150.0),2.0,150.0));
+  result[3]=vec4<f32>(fog_domain_feather(-1.0,30.0),fog_domain_feather(15.0,30.0),fog_domain_feather(30.0,30.0),fog_domain_feather(0.0,0.0));
+  let slab=vec4<f32>(2.0,5.0,1.0,0.01);
+  // Ray and actual native slope rise together: relative altitude stays3m.
+  result[4]=vec4<f32>(fog_segment_density(3.0,0.0,100.0,slab),fog_segment_density(103.0,0.0,100.0,slab),
+   fog_patch_density(p,patchiness),fog_patch_density(p,patchiness));
+ }
+ "#;
+ let r=read_probe(&device,&queue,PROBE,&[],20);assert!(r.iter().all(|v|v.is_finite()));
+ assert!(r[0]>=0.05-1e-5 && r[1]<=1.95+1e-5 && r[1]-r[0]>0.3);assert_eq!(r[2],1.);
+ assert!((r[4]-r[5]).abs()<1e-4 && (r[6]-r[7]).abs()<1e-4,"positive/negative cell seams {r:?}");
+ assert_eq!(&r[8..12],&[1.,1.,3.,3.]);assert_eq!(&r[12..16],&[0.,0.5,1.,1.]);
+ assert_eq!(&r[16..18],&[100.,0.]);assert_eq!(r[18],r[19]);
+}
+
+#[test]
+fn density_controls_refuse_invalid_enabled_scales_and_terrain_source_is_explicit() {
+ let mut p=WgrLayeredFog::default();p.control[0]=1.;assert!(valid_settings(&p));
+ p.terrain=[1.,0.,1.,150.];p.patch=[0.45,250.,70.,30.];assert!(valid_settings(&p));
+ for(i,v)in [(0,-0.1),(0,1.1),(1,f32::NAN),(2,3.1),(3,0.)]{let mut q=p;q.terrain[i]=v;assert!(!valid_settings(&q));}
+ for(i,v)in [(0,0.96),(1,0.),(2,0.),(3,101.),(3,f32::INFINITY)]{let mut q=p;q.patch[i]=v;assert!(!valid_settings(&q));}
+ p.terrain=[0.;4];p.patch=[0.;4];assert!(valid_settings(&p),"dormant scales preserve legacy packet");
+ let terrain=include_str!("terrain/terrain.wgsl");let frame=include_str!("shaders/frame.wgsl");
+ assert!(terrain.contains("rgb = apply_fog_terrain(rgb, in.world_pos)"));
+ assert!(frame.contains("fn apply_fog_terrain") && frame.contains("return apply_fog_receiver(rgb, world_pos_rel, true)"));
+ assert!(frame.contains("return apply_fog_receiver(rgb, world_pos_rel, false)"));
+ let compute=include_str!("layered_fog.wgsl");assert!(compute.contains("if (exposed < 0.999) { return 0.0; }"));
+ assert!(compute.contains("p.y <= native.x+0.05") && compute.contains("far_counts[0] > cap"));
 }

@@ -88,3 +88,39 @@ fn fog_camera_matches(packet: FogConsumer, view: mat4x4<f32>, proj: mat4x4<f32>,
     }
     return true;
 }
+
+// Smooth fixed world-space value noise. No camera position, frame or time enters
+// the field; adjacent cells have matching values and zero boundary derivatives.
+fn fog_noise_hash(cell: vec3<i32>) -> f32 {
+    let c = bitcast<vec3<u32>>(cell);
+    var h = c.x * 1597334677u ^ c.y * 3812015801u ^ c.z * 2798796415u;
+    h = (h ^ (h >> 16u)) * 2246822519u;
+    h = (h ^ (h >> 13u)) * 3266489917u;
+    return f32((h ^ (h >> 16u)) & 0x00ffffffu) / 16777215.0;
+}
+fn fog_world_noise(p: vec3<f32>) -> f32 {
+    let cell = vec3<i32>(floor(p));
+    let q = fract(p); let f = q*q*(vec3<f32>(3.0)-2.0*q);
+    let a = mix(fog_noise_hash(cell),fog_noise_hash(cell+vec3<i32>(1,0,0)),f.x);
+    let b = mix(fog_noise_hash(cell+vec3<i32>(0,1,0)),fog_noise_hash(cell+vec3<i32>(1,1,0)),f.x);
+    let c = mix(fog_noise_hash(cell+vec3<i32>(0,0,1)),fog_noise_hash(cell+vec3<i32>(1,0,1)),f.x);
+    let d = mix(fog_noise_hash(cell+vec3<i32>(0,1,1)),fog_noise_hash(cell+vec3<i32>(1,1,1)),f.x);
+    return mix(mix(a,b,f.y),mix(c,d,f.y),f.z);
+}
+fn fog_patch_density(p: vec3<f32>, patchiness: vec4<f32>) -> f32 {
+    if (patchiness.x <= 0.0) { return 1.0; }
+    let q = p / vec3<f32>(patchiness.y,patchiness.z,patchiness.y);
+    let noise = (2.0*fog_world_noise(q)+fog_world_noise(q*2.0+vec3<f32>(17.0,31.0,43.0)))/3.0;
+    return 1.0 + patchiness.x*(2.0*noise-1.0);
+}
+// Concavity is a bounded pooling proxy, not a fluid simulation. A broad native
+// bowl deepens fog; flat ground and convex ridges do not gain density.
+fn fog_valley_density(ground: f32, neighbours: vec4<f32>, strength: f32, radius: f32) -> f32 {
+    if (strength <= 0.0) { return 1.0; }
+    let concavity = max(dot(neighbours,vec4<f32>(0.25))-ground,0.0);
+    return 1.0 + strength*clamp(concavity/max(radius*0.1,1.0),0.0,1.0);
+}
+fn fog_domain_feather(distance: f32, width: f32) -> f32 {
+    if (width <= 0.0) { return 1.0; }
+    return smoothstep(0.0,width,max(distance,0.0));
+}

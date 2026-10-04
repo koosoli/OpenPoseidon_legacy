@@ -13052,7 +13052,7 @@ fn every_world_geometry_family_takes_the_same_aerial_perspective() {
     // (shader3d and gpu_driven call the same shade()), which is where vegetation lives.
     for (name, src, call) in [
         ("shaders/shading.wgsl", include_str!("../shaders/shading.wgsl"), "apply_fog_receiver("),
-        ("terrain/terrain.wgsl", include_str!("../terrain/terrain.wgsl"), "apply_fog("),
+        ("terrain/terrain.wgsl", include_str!("../terrain/terrain.wgsl"), "apply_fog_terrain("),
         ("grass/grass.wgsl", include_str!("../grass/grass.wgsl"), "apply_fog("),
         ("far/far.wgsl", include_str!("../far/far.wgsl"), "apply_fog("),
     ] {
