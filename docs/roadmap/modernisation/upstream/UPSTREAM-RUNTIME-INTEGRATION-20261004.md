@@ -56,7 +56,7 @@ The confirmed bounded P1/P2 runtime port list is exhausted on this branch. Remai
 - FORTIFY_SOURCE `73302d1d`, stack protector `718ab3c9`, compiler/ccache/Actions and workflow proposals remain platform/CI decisions owned by root. No untested compiler/platform guarantee is implied.
 - Optional UI, marker, scripting, loadout/database/save proposals retain their inherited scope. Closed/unmerged PRs are references only; no new persistence semantics were introduced.
 
-The source license and game-data license remain separate as documented in the repository. This batch adds no retail assets. The marked-PAC fixture is the upstream small synthetic decoder test payload, not an imported game texture. No speculative asset/licence blocker is used to defer these source fixes.
+The source license and game-data license remain separate as documented in the repository. This batch adds no retail assets. The marked-PAC fixture is an original 166-byte synthetic AI88/LZSS test payload authored for this adaptation, not an imported game texture. No speculative asset/licence blocker is used to defer these source fixes.
 
 ## Complete main-commit mapping
 

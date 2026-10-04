@@ -59,7 +59,26 @@ modernisation ledger validates. CORE-005 and AST-011B alone were refreshed.
 
 ## Installed runtime
 
-Pending the serial matching-pair deployment and imported gameplay fixtures.
+The matching executable/renderer was deployed at `e0c9df01` (03:11). Existing
+local Steam Demo data supplies the imported `.Demo` fixtures; the executable
+and renderer come from the stamped retail install. No game data was downloaded
+or committed. At that checkpoint drop-height and fired-nearest-object passed,
+with normal shutdown and unchanged hashes. Receipt:
+`build/upstream-runtime/20261004-031328/result.json`.
+
+The strict Turbo fixture stopped before readiness at WorldSetup.cpp's
+ValidateOutVehicle assertion. Source review proved the same ordering defect in
+the earlier port base: stable compaction retained moved actors in the normal
+list tail until Resize, while validating their absence before Resize. `b979acc9`
+defers the same guard until after compaction, preserving callback and reference
+ownership. Its installed Turbo rerun and notebook fixture remain pending.
+
+Additional decoder preservation: 49 cases passed, 5,784 assertions, two
+explicit opt-in skips. Fresh `WGR_PAA_LZO_REPLAY_CACHE=1`: all five replay
+cases passed, 105 assertions. Shared physics/corpse non-regression after the
+automatic source integration: 72 cases passed, 5,045 assertions, including
+actual articulated mass, contact-family, motion, probe and stale-handle cases.
+
 Layered fog and automatic ragdolls have separate integration/runtime gates.
 The Everon house report remains unreproduced; see the measured placement
 diagnostic, which makes no house-placement fix claim.
