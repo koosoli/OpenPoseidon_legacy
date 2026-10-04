@@ -20,6 +20,7 @@
 #include <Poseidon/Foundation/Memory/CheckMem.hpp>
 #include <algorithm>
 #include <Poseidon/World/Scene/BenchmarkLodFix.hpp>
+#include <Poseidon/World/Scene/ObjectDrawRange.hpp>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -777,8 +778,8 @@ void Scene::ObjectsDrawn()
 // cull adds silhouettes, not detail.
 //
 // WGR_OBJECT_DISTANCE_SCALE is the A/B knob: 1.0 reproduces the legacy cull exactly.
-// The result is clamped into [objectsZ, fogMaxRange] so it can never draw LESS than
-// before, and never past the distance at which fog has fully replaced the object.
+// Keep the legacy minimum only within the terrain reach. Heavy fog may shorten
+// that reach below objectsZ; retaining objectsZ then draws trees beyond the ground.
 float Scene::GetObjectDrawDistance() const
 {
     static const float scale = []() -> float {
@@ -793,19 +794,7 @@ float Scene::GetObjectDrawDistance() const
         return 0.0f; // default: follow the full render range, independently of simulation
     }();
 
-    const float legacy = ENGINE_CONFIG.objectsZ;
-    float d = scale > 0.0f ? legacy * scale : std::max(legacy, _fogMaxRange);
-    // Never past the fog edge (in rain/fog _fogMaxRange shrinks below objectsZ, hence
-    // the floor afterwards rather than a plain min).
-    if (_fogMaxRange > 0.0f && d > _fogMaxRange)
-    {
-        d = _fogMaxRange;
-    }
-    if (d < legacy)
-    {
-        d = legacy;
-    }
-    return d;
+    return ResolveObjectDrawRange(ENGINE_CONFIG.objectsZ, _fogMaxRange, scale);
 }
 
 int Scene::LevelFromDistance2(LODShape* shape, float distance2, float oScale, Vector3Par direction,

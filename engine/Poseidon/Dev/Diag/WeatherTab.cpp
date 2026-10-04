@@ -860,14 +860,9 @@ void DrawFogSection()
 {
     if (GWorld)
     {
-        static float wantedFog = -1.0f;
-        static float transitionSeconds = 0.0f;
-        if (wantedFog < 0.0f) wantedFog = GWorld->GetFog();
-        ImGui::SliderFloat("Fog amount", &wantedFog, 0.0f, 1.0f, "%.2f");
-        ImGui::SetNextItemWidth(120.0f);
-        ImGui::InputFloat("Fog transition (s)", &transitionSeconds, 0.0f, 0.0f, "%.0f");
-        if (ImGui::Button("Apply fog"))
-            GWorld->SetWeather(GWorld->GetOvercast(), wantedFog, std::max(transitionSeconds, 0.0f));
+        float wantedFog = GWorld->GetFog();
+        if (ImGui::SliderFloat("Fog amount", &wantedFog, 0.0f, 1.0f, "%.2f"))
+            GWorld->SetWeather(GWorld->GetOvercast(), wantedFog, 0.0f);
         ImGui::TextDisabled("Actual fog: %.2f", GWorld->GetFog());
     }
     if (!GEngine || !GEngine->SupportsSky())
@@ -883,7 +878,7 @@ void DrawFogSection()
         settings.layeredFog = mode == 1;
         changed = true;
     }
-    ImGui::TextWrapped("Volumetric fog is the default. Weather fog scales its density; zero fog adds no layered volume. Layers use metres above sea level.");
+    ImGui::TextWrapped("Volumetric fog is the default. Weather fog scales its density; zero fog adds no layered volume. Terrain following and patchiness make the mist vary across the landscape.");
     if (settings.layeredFog)
     {
         float ground = 0.0f;
@@ -894,17 +889,22 @@ void DrawFogSection()
         }
         if (ImGui::Button("Low ground fog"))
         {
-            settings.fogLayerBase[0] = ground - 3.0f;
-            settings.fogLayerTop[0] = ground + 12.0f;
+            settings.fogTerrainFollow = 1.0f;
+            settings.fogTerrainReference = 0.0f;
+            settings.fogLayerBase[0] = -3.0f;
+            settings.fogLayerTop[0] = 12.0f;
             settings.fogLayerFeather[0] = 3.0f;
             settings.fogLayerExtinction[0] = 0.008f;
             settings.fogLayerExtinction[1] = 0.0f;
+            settings.fogValleyStrength = 1.0f;
             changed = true;
         }
         ImGui::SameLine();
         if (ImGui::Button("Two layers"))
         {
             const Engine::SkySettings defaults;
+            settings.fogTerrainFollow = defaults.fogTerrainFollow;
+            settings.fogTerrainReference = defaults.fogTerrainReference;
             for (int i = 0; i < 2; ++i)
             {
                 settings.fogLayerBase[i] = defaults.fogLayerBase[i];
@@ -918,26 +918,64 @@ void DrawFogSection()
         if (ImGui::Button("Elevated band"))
         {
             settings.fogLayerExtinction[0] = 0.0f;
+            settings.fogTerrainFollow = 0.0f;
+            settings.fogTerrainReference = 0.0f;
             settings.fogLayerBase[1] = ground + 20.0f;
             settings.fogLayerTop[1] = ground + 60.0f;
             settings.fogLayerFeather[1] = 5.0f;
             settings.fogLayerExtinction[1] = 0.003f;
             changed = true;
         }
-        ImGui::TextDisabled("Ground presets use this location once; their layers stay at that world altitude.");
+        if (ImGui::Button("Valley mist"))
+        {
+            settings.fogTerrainFollow = 0.35f;
+            settings.fogTerrainReference = ground;
+            settings.fogLayerBase[0] = ground - 3.0f;
+            settings.fogLayerTop[0] = ground + 22.0f;
+            settings.fogLayerFeather[0] = 8.0f;
+            settings.fogLayerExtinction[0] = 0.008f;
+            settings.fogLayerExtinction[1] = 0.0f;
+            settings.fogValleyStrength = 2.0f;
+            settings.fogPatchStrength = 0.6f;
+            changed = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Mountain mist"))
+        {
+            settings.fogTerrainFollow = 0.5f;
+            settings.fogTerrainReference = ground;
+            settings.fogLayerBase[0] = ground;
+            settings.fogLayerTop[0] = ground + 60.0f;
+            settings.fogLayerFeather[0] = 15.0f;
+            settings.fogLayerExtinction[0] = 0.006f;
+            settings.fogLayerExtinction[1] = 0.0f;
+            settings.fogValleyStrength = 0.0f;
+            settings.fogPatchStrength = 0.5f;
+            changed = true;
+        }
+        ImGui::TextDisabled("Valley/mountain presets anchor altitude to this location once; terrain and patches vary in world space.");
         if (GWorld && GWorld->GetFog() <= 0.0f)
-            ImGui::TextDisabled("Set Fog amount above zero and Apply fog to see a layer.");
+            ImGui::TextDisabled("Set Fog amount above zero to see a layer.");
     }
     if (settings.layeredFog && ImGui::TreeNode("Fog layers and lighting"))
     {
+        changed |= ImGui::SliderFloat("Follow terrain", &settings.fogTerrainFollow, 0.0f, 1.0f, "%.2f");
+        ImGui::TextWrapped("0 keeps fixed sea-level layers. 1 follows the local ground; with reference altitude 0, layer heights are metres above ground. Intermediate values let mist collect below hills.");
+        changed |= ImGui::SliderFloat("Reference altitude", &settings.fogTerrainReference, -100.0f, 1000.0f, "%.1f m");
+        changed |= ImGui::SliderFloat("Valley density boost", &settings.fogValleyStrength, 0.0f, 3.0f, "%.2f");
+        changed |= ImGui::SliderFloat("Valley width", &settings.fogValleyRadius, 25.0f, 1000.0f, "%.0f m");
+        changed |= ImGui::SliderFloat("Patchiness", &settings.fogPatchStrength, 0.0f, 0.95f, "%.2f");
+        changed |= ImGui::SliderFloat("Patch width", &settings.fogPatchHorizontalScale, 25.0f, 2000.0f, "%.0f m");
+        changed |= ImGui::SliderFloat("Patch height", &settings.fogPatchVerticalScale, 5.0f, 1000.0f, "%.0f m");
+        changed |= ImGui::SliderFloat("Coverage edge softness", &settings.fogCoverageFeather, 0.0f, 100.0f, "%.0f m");
         changed |= ImGui::SliderFloat("Scattering albedo", &settings.fogLayerAlbedo, 0.0f, 1.0f, "%.3f");
         changed |= ImGui::SliderFloat("Forward scattering", &settings.fogLayerG, 0.0f, 0.95f, "%.3f");
         for (int i = 0; i < 2; ++i)
         {
             ImGui::PushID(i);
             ImGui::Text("Layer %d", i + 1);
-            changed |= ImGui::SliderFloat("Base ASL", &settings.fogLayerBase[i], -100.0f, 1000.0f, "%.1f m");
-            changed |= ImGui::SliderFloat("Top ASL", &settings.fogLayerTop[i], -99.0f, 1000.0f, "%.1f m");
+            changed |= ImGui::SliderFloat("Base height", &settings.fogLayerBase[i], -100.0f, 1000.0f, "%.1f m");
+            changed |= ImGui::SliderFloat("Top height", &settings.fogLayerTop[i], -99.0f, 1000.0f, "%.1f m");
             ImGui::TextDisabled("Layer thickness: %.1f m", settings.fogLayerTop[i] - settings.fogLayerBase[i]);
             changed |= ImGui::SliderFloat("Edge feather", &settings.fogLayerFeather[i], 0.1f, 100.0f, "%.1f m");
             changed |= ImGui::SliderFloat("Extinction", &settings.fogLayerExtinction[i], 0.0f, 0.05f, "%.4f /m");
@@ -970,25 +1008,12 @@ void DrawWeatherStateSection()
                           "time of day does not roll new weather underneath your test.");
     }
 
-    // Sliders seeded from the live values every frame: this is a command, not a
-    // bound control. SetWeather drives a transition rather than assigning, so
-    // holding a slider mid-drag would fight the simulation if it were bound.
-    static float wantedOvercast = -1.0f;
-    if (wantedOvercast < 0.0f)
-    {
-        wantedOvercast = GWorld->GetOvercast();
-    }
-
-    ImGui::SliderFloat("Overcast", &wantedOvercast, 0.0f, 1.0f, "%.2f");
-
-    static float transition = 0.0f;
-    ImGui::SetNextItemWidth(120.0f);
-    ImGui::InputFloat("Transition (s)", &transition, 0.0f, 0.0f, "%.0f");
-    ImGui::SameLine();
-    if (ImGui::Button("Apply"))
-    {
-        GWorld->SetWeather(wantedOvercast, GWorld->GetFog(), std::max(transition, 0.0f));
-    }
+    // Read the shared world value each frame, including changes made in Zeus.
+    // A dev slider edits it immediately; it does not keep a stale private target.
+    float wantedOvercast = GWorld->GetOvercast();
+    if (ImGui::SliderFloat("Overcast", &wantedOvercast, 0.0f, 1.0f, "%.2f"))
+        GWorld->SetWeather(wantedOvercast, GWorld->GetFog(), 0.0f);
+    ImGui::TextDisabled("Live weather controls share the same state as Zeus.");
 
     ImGui::TextDisabled("Actual: overcast %.2f, fog %.2f", GWorld->GetOvercast(), GWorld->GetFog());
     ImGui::TextDisabled("Overcast also drives the wind: mean speed and gust envelope");
@@ -1076,7 +1101,7 @@ void DrawWeatherTab()
             ImGui::Text("Snow cells previously skipped at storage limit: %zu", snow.Rejected());
         ImGui::TextWrapped("Mission-local terrain experiment. Tracks do not expire with time or camera movement; only new snowfall fills them. No savegame/network replication or changed ground collision yet.");
     }
-    if (ImGui::CollapsingHeader("Cloud cover and forecast")) DrawWeatherStateSection();
+    if (ImGui::CollapsingHeader("Overcast and forecast", ImGuiTreeNodeFlags_DefaultOpen)) DrawWeatherStateSection();
     if (ImGui::CollapsingHeader("Wind consumers and diagnostics")) DrawConsumerSection();
 }
 

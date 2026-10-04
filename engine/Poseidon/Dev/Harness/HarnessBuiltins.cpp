@@ -1596,6 +1596,13 @@ void RegisterScreenshot(HarnessServer& hs)
                 cJSON_AddBoolToObject(look, "enabled", sky.enabled);
                 cJSON_AddBoolToObject(look, "skyLighting", sky.skyLighting);
                 cJSON_AddBoolToObject(look, "layeredFog", sky.layeredFog);
+                const auto fogFields = [&](const char* name, std::initializer_list<float> values) {
+                    auto* array = cJSON_CreateArray();
+                    for (float value : values) cJSON_AddItemToArray(array, cJSON_CreateNumber(value));
+                    cJSON_AddItemToObject(look, name, array);
+                };
+                fogFields("fogTerrain", {sky.fogTerrainFollow, sky.fogTerrainReference, sky.fogValleyStrength, sky.fogValleyRadius});
+                fogFields("fogPatch", {sky.fogPatchStrength, sky.fogPatchHorizontalScale, sky.fogPatchVerticalScale, sky.fogCoverageFeather});
                 cJSON_AddBoolToObject(look, "coverageFromWeather", sky.cloudCoverageFromWeather);
                 cJSON_AddBoolToObject(look, "coveragePinned", std::getenv("WGR_CLOUD_COVERAGE") != nullptr);
                 cJSON_AddNumberToObject(look, "coverage", sky.cloudCoverage);
