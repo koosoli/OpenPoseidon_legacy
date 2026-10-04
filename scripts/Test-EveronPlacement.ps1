@@ -59,6 +59,11 @@ function Same-Physical($a,$b){
  foreach($key in @('mud','sand','snow')){Require (($a[$key]|ConvertTo-Json -Depth 6 -Compress)-ceq($b[$key]|ConvertTo-Json -Depth 6 -Compress)) ('Camera changed physical source/history: '+$key)}
 }
 if($SelfTest){
+ $bottomRows=@(@{world=@(7000,121,2300)},@{world=@(7001,122,2301)})
+ Require (($bottomRows|ForEach-Object{$_.world[1]}|Measure-Object -Minimum).Minimum-eq121) 'Foundation height extraction flattened world points.'
+ $probeOwner=@{x=7170.;y=126.;z=2370.};$probeFixture=@{visualTopY=132.;coarsePredictedPosition=@(7170.,125.,2370.)}
+ $probeTop=@($probeOwner.x,($probeFixture.visualTopY+($probeOwner.y-$probeFixture.coarsePredictedPosition[1])),$probeOwner.z)
+ Require (($probeTop-join',')-ceq'7170,133,2370') 'Roof target mixed arithmetic and array construction.'
  Require ((Pose $reported)-ceq'5805.63 3597.97 46.35 147.8 6.3') 'Camera axis order changed.'
  Require (((Transform @(0,0,-1,0,1,0,1,0,0,10,20,30) @(2,3,4))-join',')-ceq'14,23,28') 'Actual column frame transform changed.'
  Require ((Aim @(1,2,3) @(1,2,13))-ceq'1 3 2 0 0') 'Aim changed X,Z,Y camera order.'
@@ -157,7 +162,7 @@ if($LASTEXITCODE-ne0){$result.status='failed-source';$result.error='Actual stock
 $result.stockSource=Get-Content (Join-Path $output 'stock-foundation.json') -Raw|ConvertFrom-Json
 $fixtures=@($result.stockSource.objects);Require ($fixtures.Count-eq$candidateIds.Count) 'Complete candidate census absent.'
 if($SourceOnly){Same-Pair $before (Pair);$result.status='source-only-no-runtime';$result|ConvertTo-Json -Depth 18|Set-Content (Join-Path $output 'result.json');Write-Output $output;return}
-$settings=@{WGR_WET_SOIL_DIAGNOSTIC='1';POSEIDON_SNOW_TEST_DEPTH='0';POSEIDON_SNOWLINE='off'}
+$settings=@{WGR_WET_SOIL_DIAGNOSTIC='1';POSEIDON_SNOW_TEST_DEPTH='0';POSEIDON_SNOWLINE='off';WGR_GRASS='0'}
 $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','POSEIDON_SNOW_SHELTER','WGR_CLOUD_COVERAGE','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_HDR_ENCODE','WGR_TERRAIN_PUDDLE_FIXTURE','WGR_TERRAIN_PUDDLE_WETNESS')
 $keys=@($settings.Keys)+$clear+@('POSEIDON_USER_DIR');$saved=@{};foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $result.environment=@{settings=$settings;cleared=$clear;inherited=$saved};$result.requestedInitialViewDistance=$InitialViewDistance;$result.reportedPose=$reported
@@ -211,10 +216,10 @@ try{
   }}
   Require ($samples.Count-ge1-and$samples.Count-le96) 'Foundation sample bounds changed.'
   $result.foundation+=@{id=$fixture.id;model=$fixture.model;actualFrame=$owner.frame;sourcePositionDifferenceY=$owner.y-$fixture.coarsePredictedPosition[1];samples=$samples;minimumGap=($samples.nativeGap|Measure-Object -Minimum).Minimum;maximumGap=($samples.nativeGap|Measure-Object -Maximum).Maximum;scope='Bounded source-LOD bottom points transformed by actual owner frame against native SurfaceY; neither selected-pixel LOD nor rendered distant terrain.'}
-  $min=($samples.world|ForEach-Object{$_[1]}|Measure-Object -Minimum).Minimum;$target=@($owner.x,($min+3.0),$owner.z)
+  $min=($samples|ForEach-Object{$_.world[1]}|Measure-Object -Minimum).Minimum;$target=@($owner.x,($min+3.0),$owner.z)
   $eyeX=$owner.x-60.0;$eyeZ=$owner.z;$ground=Send @{cmd='dev_mud';action='sample';x=$eyeX;z=$eyeZ};$nearEye=@($eyeX,((Number $ground.surfaceY)+4.0),$eyeZ)
   Capture ('owner'+$fixture.id+'-near-native-foundation') (Decode ('['+((Aim $nearEye $target)-replace' ', ',')+']'))
-  $top=@($owner.x,$fixture.visualTopY+($owner.y-$fixture.coarsePredictedPosition[1]),$owner.z)
+  $top=@($owner.x,($fixture.visualTopY+($owner.y-$fixture.coarsePredictedPosition[1])),$owner.z)
   if($fixture.id-in@(6034,6042,6047,7710)){
    $ray=@();for($step=1;$step-le24;$step++){$t=$step/25.0;$px=$reported[0]+$t*($top[0]-$reported[0]);$pz=$reported[1]+$t*($top[2]-$reported[1]);$py=$reported[2]+$t*($top[1]-$reported[2]);$sample=Send @{cmd='dev_mud';action='sample';x=$px;z=$pz};$ray+=@{fraction=$t;world=@($px,$py,$pz);actualGround=$sample;terrainAboveSample=(Number $sample.surfaceY)-$py}}
    $result.foundation[-1].sampledNativeSightline=@{samples=$ray;maximumTerrainOverLine=($ray.terrainAboveSample|Measure-Object -Maximum).Maximum;scope='24 actual native SurfaceY samples along camera-to-predicted-roof line. Not a continuous terrain intersection, object occlusion test, raster height or selected pixel proof.'}
