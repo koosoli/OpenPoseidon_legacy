@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <Poseidon/AI/Path/AITypes.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/WrpReader.hpp>
@@ -30,6 +31,53 @@ Ref<ObjectPlain> AddLandscapeObject(Landscape& landscape, int id)
     return object;
 }
 } // namespace
+
+TEST_CASE("Terrain cache flush preserves live AI lock references", "[World][Terrain][lock-cache]")
+{
+    Landscape landscape(nullptr, nullptr);
+    GlobalLandscapeScope globalLandscape(&landscape);
+    ILockCache* cache = landscape.LockingCache();
+    REQUIRE(cache != nullptr);
+    REQUIRE(cache->IsEmpty());
+
+    // Multiple units can own the same field; each must retain its original
+    // reference through crater/editor cache invalidation and release it once.
+    LockField* field = cache->GetLockField(1, 1);
+    REQUIRE(field != nullptr);
+    for (int unit = 1; unit < 63; ++unit)
+        REQUIRE(cache->GetLockField(1, 1) == field);
+    LockField* neighbor = cache->GetLockField(2, 1);
+    REQUIRE(neighbor != nullptr);
+    field->Lock(0, 0, false, true);
+    neighbor->Lock(1, 0, true, true);
+
+    for (int impact = 0; impact < 4; ++impact)
+    {
+        landscape.FlushCache();
+        // Require identity before touching the fields: old code deleted both.
+        REQUIRE(landscape.LockingCache() == cache);
+        REQUIRE(cache->FindLockField(1, 1) == field);
+        REQUIRE(cache->FindLockField(2, 1) == neighbor);
+        CHECK(field->IsLocked(0, 0, false));
+        CHECK(neighbor->IsLocked(1, 0, false));
+    }
+
+    field->Lock(0, 0, false, false);
+    for (int unit = 1; unit < 63; ++unit)
+    {
+        cache->ReleaseLockField(1, 1);
+        REQUIRE(cache->FindLockField(1, 1) == field);
+    }
+    cache->ReleaseLockField(1, 1);
+    CHECK(cache->FindLockField(1, 1) == nullptr);
+    CHECK_FALSE(cache->IsEmpty());
+    neighbor->Lock(1, 0, true, false);
+    cache->ReleaseLockField(2, 1);
+    CHECK(cache->IsEmpty());
+    landscape.FlushCache();
+    REQUIRE(landscape.LockingCache() != nullptr);
+    CHECK(landscape.LockingCache()->IsEmpty());
+}
 
 TEST_CASE("Landscape upload view preserves row-major float heights", "[World][Terrain][heightmap-view]")
 {

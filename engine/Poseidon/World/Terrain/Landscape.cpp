@@ -1008,9 +1008,15 @@ void Landscape::CreateNearVBuffers(float cx, float cz, float radius)
 
 void Landscape::FlushCache()
 {
-    //  PoseidonAssert( GWorld->NVehicles()==0 );
     _operCache = CreateOperCache(this);
-    _lockCache = CreateLockCache(this);
+    // Craters and editor changes flush caches while units still own LockField
+    // pointers. Deleting those fields here leaves AILocker with dangling
+    // pointers and makes its later release target a new, empty lock cache.
+    // Occupancy is live simulation state, not cached terrain geometry. Retain
+    // it until its owners release it; unloaded worlds have an empty cache and
+    // still recreate it against their current grid dimensions.
+    if (!_lockCache || _lockCache->IsEmpty())
+        _lockCache = CreateLockCache(this);
     _segCache.Clear();
     if (GScene)
     {
