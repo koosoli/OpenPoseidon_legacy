@@ -116,6 +116,20 @@ execution:
       source hashes outside reviewed slices remain stale and are not silently
       renewed; Preview validator stops at RND-005A, Compat at AST-011C.
   review_model: OWNER_REVIEW_NO_INDEPENDENT_REVIEWER
+  local_swim_test_checkpoint:
+    state: LOCAL_OPT_IN_ADDON_INSTALLED_OFFLINE_CHECKS_PASSED_RUNTIME_PENDING
+    origin_commit: f758e9f3b1008b3bfd1052a0fccaf24a6965e3e1
+    installed_engine_commit: f8127fe5
+    animation_count: 19
+    integration_branch_assets_added: false
+    install_directory: C:/Users/mail/AppData/Local/OpenPoseidon/LocalMods/@OP_SwimLocalTest
+    evidence: docs/verification/local-swim-test-20261004.md
+    note: >-
+      Owner explicitly authorised local installation while the asset integration
+      hold remains. Separate external opt-in addon, no active game files replaced.
+      Bay and squad missions included. Source hashes, finite RTM layouts, config
+      parsing, archive roundtrip and installed copy verified. Runtime test awaits
+      restarting owner game PID 5104; no swimming acceptance claimed.
   stress_corpse_cache_checkpoint:
     branch: codex/stress-corpse-cache-20261004
     baseline_commit: 793d7b96
