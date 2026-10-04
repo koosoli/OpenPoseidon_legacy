@@ -19,7 +19,9 @@ function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
 function Eval([string]$code){$v=([string](Send @{cmd='eval';code=$code}).result).Trim();if($v.StartsWith('"')){return $v.Substring(1,$v.Length-2).Replace('""','"')};return ConvertFrom-Json -InputObject $v -NoEnumerate}
 $p=$null;$client=$null;$handoff=$false;$held=$false
 try{
- foreach($key in $clear){[Environment]::SetEnvironmentVariable($key,$null,'Process')};foreach($key in $settings.Keys){[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
+ # Current PowerShell preserves null assignments as empty child variables.
+ # Remove startup overrides entirely: an empty fog/profile override refuses fog.
+ foreach($key in $clear){Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue};foreach($key in $settings.Keys){[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
  [IO.File]::WriteAllText((Join-Path $profile 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
  $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
  $mission=Join-Path $root 'tests/perf/missions/perf_field.eden';$log=Join-Path $out 'engine.log'
@@ -62,5 +64,5 @@ try{
  if($held -and $client){try{$null=Send @{cmd='mouse_button';button=1;down=$false}}catch{}}
  if(!$handoff -and $p -and !$p.HasExited){if($client){try{$null=Send @{cmd='exit'}}catch{}};if(!$p.WaitForExit(15000)){Stop-Process -Id $p.Id -Force}}
  if($client){$client.Dispose()}
- foreach($key in $saved.Keys){[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}
+ foreach($key in $saved.Keys){if($null -eq $saved[$key]){Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue}else{[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}}
 }
