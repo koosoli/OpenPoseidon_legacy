@@ -9065,5 +9065,93 @@
         ]
       }
     }
-  ]
+  ],
+  "ownerHandoff": {
+    "status": "left-open-for-owner",
+    "pid": 3580,
+    "installed": "codex/modernisation-followup-20261004 e6e0c907 2026-10-04_10:13 deploy-ps1",
+    "pair": {
+      "OpenPoseidon.exe": "174D7A91047F312BFBA5D63BB46159CA1418DDD65F7A6AFB1E18762F97A1911C",
+      "wgpu_renderer.dll": "4BC2CF14942E9488DC5E5B15529A79DD81E24846D8CE6FBEF2181368856461B3"
+    },
+    "inputProof": {
+      "selectedAmmoBefore": 30.0,
+      "context": "Infantry",
+      "input": "Actual SDL mouse button 1, no script fire",
+      "cameraEffect": 0,
+      "fired": 1,
+      "selectedAmmoAfter": 29.0
+    },
+    "aimProof": [
+      {
+        "axis": "pitch",
+        "errorRadians": -0.04740154497980241,
+        "gainRadiansPerPixel": -0.005974224745048287,
+        "attempts": 4
+      },
+      {
+        "axis": "yaw",
+        "errorRadians": -0.0035544457334091284,
+        "gainRadiansPerPixel": 0.00295633312202237,
+        "attempts": 4
+      }
+    ],
+    "targets": 6,
+    "playerASL": [
+      5478,
+      9988,
+      19.3936
+    ],
+    "automatic": "OK corpse-auto-status enabled=1 active=0 frozen=0 pending=0 activeBudget=4 retainedBudget=64",
+    "weather": {
+      "rain": 0,
+      "overcast": 0,
+      "rendererSkyAvailable": true,
+      "rendererSky": {
+        "enabled": true,
+        "skyLighting": true,
+        "layeredFog": true,
+        "fogTerrain": [
+          1,
+          0,
+          1,
+          150
+        ],
+        "fogPatch": [
+          0.449999988079071,
+          250,
+          70,
+          30
+        ],
+        "coverageFromWeather": true,
+        "coveragePinned": false,
+        "coverage": 0.05000000074505806,
+        "clearCoverage": 0.05000000074505806,
+        "fullCoverage": 0.949999988079071,
+        "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+      },
+      "sunAvailable": true,
+      "sunTravelY": -0.5908143520355225,
+      "nightEffect": 0,
+      "solarDrying": 0.5908143520355225,
+      "particleDensity": 0,
+      "particleSnowflakes": false,
+      "liquidRain": 0,
+      "fog": 0.25,
+      "terrainRange": 1026.9921875,
+      "baseRange": 1026.9921875,
+      "objectRange": 1026.9921875,
+      "tacticalVisibility": 1026.9921875,
+      "selectedRange": 2000,
+      "ok": true
+    },
+    "scope": "Interactive original Everon smoke scene with actual rifle input preflight; no automatic victim kill or acceptance inference.",
+    "raw": {
+      "path": "build\\owner-ragdoll-fog\\20261004-102125\\session.json",
+      "sha256": "277a0254eca922a60099f68e3e3a3a20ebbb9542c5715f3dbaa768b9a64e8eeb"
+    },
+    "runnerSource": "e1a1e7aa",
+    "appearanceInspected": "Clear target view after bounded actual SDL mouse pitch/yaw alignment; no owner review inferred."
+  },
+  "earlierHandoffCorrection": "101333 input preflight passed but downward aim obscured targets. An unsupported animationState diagnostic expression closed the author-owned session with code2. Final runner uses supported selected-muzzle readback and bounded ordinary mouse input; no engine/collision change."
 }

@@ -3,8 +3,8 @@
 Working branch: `codex/modernisation-followup-20261004`, safety-pushed.
 Backup branch: `codex/backup-excavation-20261004`, immutable source `8b93dec7`.
 The owner checkout and its unrelated changes were preserved.
-Installed matching EXE/renderer acceptance: engine source `921255c3`, 10:06 local
-on 4 October. The current fog/weather/corpse feedback receipts are in
+Installed matching EXE/renderer: source `e6e0c907`, 10:13 local on 4 October
+(metadata/evidence rebuild of the accepted `921255c3` engine changes). The current fog/weather/corpse feedback receipts are in
 `weather-fog-corpse-feedback-20261004.md`; earlier checkpoints below remain
 historical evidence.
 Final twelve-view installed fog comparison passed and the inspected distant

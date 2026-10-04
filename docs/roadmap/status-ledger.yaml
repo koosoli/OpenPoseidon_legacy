@@ -41,8 +41,8 @@ execution:
     backup_branch: codex/backup-excavation-20261004
     backup_commit: 8b93dec7
     state: BOUNDED_EXPERIMENTAL_CHECKPOINT_HOUSE_IDENTIFICATION_OPEN
-    installed_source_commit: 921255c3
-    installed_local_time: 2026-10-04_10:06
+    installed_source_commit: e6e0c907
+    installed_local_time: 2026-10-04_10:13
     weather_corpse_feedback_evidence: docs/verification/weather-fog-corpse-feedback-20261004.md
     weather_corpse_feedback_runtime_receipt: docs/verification/weather-fog-corpse-feedback-20261004-runtime.json
     owner_revision_evidence: docs/verification/fog-ragdoll-owner-revision-20261004.md
@@ -96,6 +96,10 @@ execution:
       Actual stock projectile reawakened a settled runtime corpse, transferred
       to chest, changed consumed pose and resettled handle-free; full installed
       save/toggle/inherited trajectory/real grenade sequence passed at921255c3.
+      Final matching metadata/evidence rebuild15steps PASS, installed e6e0c907
+      at10:13. Corrected owner handoff102125 passed actualSDLshot30to29 rounds,
+      ordinaryInfantry controls, defaultvolumetric fog fields and bounded mouse
+      aim alignment; clear targets visually inspected, gameleftopen.
       Combined native77cases/14487assertions PASS. Floor preparation239.4965ms
       moved before damage, not eliminated; legacy frozen saves lack wake recipes.
       Exact owner fog screenshots unreproduced, broader canopy/streaming quality

@@ -123,3 +123,21 @@ water/excavation contact, multiplayer and broader model/LOD quality remain open.
 
 This closes the finite owner-feedback implementation/checkpoint. Further visual
 tuning is reserved for owner feedback; it does not restart the whole roadmap.
+
+Final clean metadata/evidence build passed 15 steps and matching source
+`e6e0c907` deployed at 10:13 local. No gameplay source changed after the strict
+`921255c3` acceptance. Owner handoff `20261004-102125` (runner `e1a1e7aa`)
+was left open after verified ordinary Infantry controls, actual SDL left-click
+Fired=1 / M16 30->29 rounds and six live targets. Default startup overrides were
+absent; actual producer readback had layeredFog=true, terrain=[1,0,1,150],
+patch=[.45,250,70,30] at world fog .25. This CPU readback is not same-frame GPU
+acceptance. Root inspected its clear target screenshot.
+
+The first handoff preflight fired correctly but inherited downward mouse aim
+obscured the targets. A subsequent unsupported `animationState` diagnostic
+expression closed that author-owned session with code 2. The corrected runner
+calibrates supported selected-muzzle readback against bounded actual SDL mouse
+input to face the first target; it does not pin the render camera. Final pitch
+error was .0474 rad and yaw .00355 rad. Rifle input and alignment passed. No
+engine, ordinary player input or gameplay collision policy was altered for this
+demo correction. The open scene is interactive owner testing, not owner approval.
