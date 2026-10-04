@@ -722,7 +722,7 @@ struct SkyUniform {
     // cloud4.w, so no FFI struct changes size. See sky.wgsl's `night_sky` lane for what it does
     // and why the "stars are added before the cloud composite" arrangement was not enough on its
     // own. SKY-004: y = moonlight gain on the cloud decks, z = the stylistic blue shift on that
-    // light. w reserved (0).
+    // light. w = current admitted weather-fog chroma neutralization (private).
     night_sky: [f32; 4],
 }
 
@@ -2466,6 +2466,17 @@ impl Sky {
 
     // Rebuild the sky uniform for this frame and flag the LUTs dirty if the
     // atmosphere parameters changed.
+    // Called after this frame's LayeredFog::render and before encoder submit.
+    // Queue writes precede the entire encoder, including its earlier froxel
+    // dispatch. upload() resets this lane for every camera; unknown/unencoded
+    // weather and Legacy mode therefore leave both sky and froxels unchanged.
+    pub fn update_fog_chroma(&self,queue:&wgpu::Queue,ready:bool,weather:f32) {
+        let strength=if ready && weather.is_finite() && (0.0..=1.0).contains(&weather) {
+            0.85*weather
+        } else {0.0};
+        let offset=std::mem::offset_of!(SkyUniform,night_sky) as u64+12;
+        queue.write_buffer(&self.uniform_buf,offset,bytemuck::bytes_of(&strength));
+    }
     pub fn upload(
         &mut self,
         queue: &wgpu::Queue,

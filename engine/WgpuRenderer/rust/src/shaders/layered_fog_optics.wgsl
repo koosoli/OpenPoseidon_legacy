@@ -58,6 +58,18 @@ fn fog_phase(cosine: f32, g: f32) -> f32 {
     return (1.0 - gg * gg) / (12.56637061436 * pow(max(1.0 + gg * gg - 2.0 * gg * cosine, 0.0025), 1.5));
 }
 fn fog_transmittance(tau: f32) -> f32 { return exp(-max(tau, 0.0)); }
+// Owner-requested fog chroma policy, applied to radiance in linear light.
+// Preserve luminance/HDR energy and original radiance exactly when dormant.
+fn fog_neutral_radiance(radiance: vec3<f32>, strength: f32) -> vec3<f32> {
+    if (strength <= 0.0) { return radiance; }
+    let luminance = dot(radiance,vec3<f32>(0.2126,0.7152,0.0722));
+    return mix(radiance,vec3<f32>(luminance),clamp(strength,0.0,1.0));
+}
+// Shared by visible horizon atmosphere and its synthetic far-fog closure.
+// Original ray elevation is required, not the horizon-floored march direction.
+fn fog_neutral_horizon(ray_y: f32, strength: f32) -> f32 {
+    return strength * (1.0-smoothstep(0.0,0.30,ray_y));
+}
 // An infinite reversed-Z far point has w=0: its XYZ are a direction.
 // Positive finite w changes magnitude only; negative w reverses direction.
 // Scale before normalization so a tiny finite w cannot overflow a divide.

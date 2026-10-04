@@ -1,4 +1,4 @@
-#import layered_fog_optics::{fog_segment_density, fog_segment_participant, fog_height_density, fog_phase_sample, fog_height_primitive, fog_phase, fog_transmittance, fog_ray_direction, fog_patch_density, fog_valley_density, fog_domain_feather}
+#import layered_fog_optics::{fog_segment_density, fog_segment_participant, fog_height_density, fog_phase_sample, fog_height_primitive, fog_phase, fog_transmittance, fog_ray_direction, fog_patch_density, fog_valley_density, fog_domain_feather, fog_neutral_radiance}
 
 struct FogVolume {
     inv_vp: mat4x4<f32>,
@@ -297,7 +297,10 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
             trans *= segment_trans;
         }
         previous=end_distance;
-        textureStore(result,vec3<i32>(i32(id.x),i32(id.y),i32(z)),vec4<f32>(colour,trans));
+        // The medium changes chroma only: keep exact extinction, masks and
+        // direct surface-light transmission. Never modify the environment map.
+        let fog_colour=fog_neutral_radiance(colour,0.85*params.control.z);
+        textureStore(result,vec3<i32>(i32(id.x),i32(id.y),i32(z)),vec4<f32>(fog_colour,trans));
 
     }
 }

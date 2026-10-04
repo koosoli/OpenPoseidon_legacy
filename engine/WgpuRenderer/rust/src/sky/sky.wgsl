@@ -1,3 +1,4 @@
+#import layered_fog_optics::{fog_neutral_radiance, fog_neutral_horizon}
 // Procedural atmospheric sky — Hillaire-style LUT model (plan Stage 2a). One shader
 // module with a shared atmosphere and three fragment entry points:
 //   fs_transmittance : builds the transmittance LUT   T(r, mu_sun)     (params-only)
@@ -74,7 +75,8 @@ struct Sky {
     // default 0 = physical). Moonlight is REFLECTED SUNLIGHT and is therefore very close to the
     // sun's own colour -- the blue "moonlight" of film is an artefact of human scotopic vision, not
     // of the light -- so the blue is off unless somebody asks for it, and it is a look knob that
-    // says so rather than a number quietly baked into the tint. w reserved (0).
+    // says so rather than a number quietly baked into the tint.
+    // w = actual admitted weather-fog neutral chroma strength, reset per camera.
     night_sky: vec4<f32>,
 };
 
@@ -464,7 +466,8 @@ fn star_radiance(dir: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
 // the star's own radiance, measured). Weight 0 skips star_field entirely, so the cloud pass gets
 // CHEAPER as well as correct — and it never had a valid `g_px_angle` to feed it anyway (the
 // derivative is taken in fs_sky, not in fs_cloud).
-fn sky_radiance_weighted(dir: vec3<f32>, star_weight: f32) -> vec3<f32> {
+struct SkyRadianceLanes { original: vec3<f32>, atmosphere: vec3<f32>, };
+fn sky_radiance_lanes(dir: vec3<f32>, star_weight: f32) -> SkyRadianceLanes {
     let sun = normalize(sky.sun_dir.xyz);
     let planet_r = sky.params.z;
     let top_r = planet_r + sky.params.w;
@@ -495,6 +498,7 @@ fn sky_radiance_weighted(dir: vec3<f32>, star_weight: f32) -> vec3<f32> {
         color = mix(color, fog, clamp(th, 0.0, 1.0));
     }
 
+    let atmosphere=color;
     // Stars. Added with the night floor and BEFORE the cloud composite below, so a cloud deck
     // covers them exactly as it covers the sky behind it -- stars punching through overcast is the
     // giveaway that they were pasted on at the end. Being ahead of the composite is NECESSARY but
@@ -512,7 +516,11 @@ fn sky_radiance_weighted(dir: vec3<f32>, star_weight: f32) -> vec3<f32> {
         color = color + night * sky.night_params.z * night_blend;
     }
 
-    return max(color, vec3<f32>(0.0));
+    return SkyRadianceLanes(max(color,vec3<f32>(0.0)),atmosphere);
+}
+fn sky_radiance_weighted(dir: vec3<f32>, star_weight: f32) -> vec3<f32> {
+    // Reflection/SH/cloud illumination retain their original sky radiance.
+    return sky_radiance_lanes(dir,star_weight).original;
 }
 
 // The sky as the EYE sees it (stars at full weight).
@@ -2100,9 +2108,16 @@ fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
     // night), `color` is what the eye sees. With the default occlusion of 1 exactly one of the two
     // star_field lookups below actually runs, so this costs nothing over the single call it
     // replaces -- and the disc's short cloud march below stops being lit by the star behind it.
-    let bg = sky_radiance_cloud_bg(dir);
+    let lanes=sky_radiance_lanes(dir,clamp(1.0-sky.night_sky.x,0.0,1.0));
+    let bg = lanes.original;
     let star_occl = clamp(sky.night_sky.x, 0.0, 1.0);
     var color = bg;
+    let fog_chroma=fog_neutral_horizon(dir.y,sky.night_sky.w);
+    if(fog_chroma>0.0) {
+        // Modify only fogged horizon atmosphere, before adding visible stars,
+        // sun/moon discs and clouds. bg remains the original cloud light source.
+        color+=fog_neutral_radiance(lanes.atmosphere,fog_chroma)-lanes.atmosphere;
+    }
     if (star_occl > 0.001) {
         color = color + star_radiance(dir, sun) * star_occl;
     }
@@ -2548,7 +2563,9 @@ fn cs_froxel(@builtin(global_invocation_id) gid: vec3<u32>) {
         // Blend the physical airlight toward the full sky over the far half of the volume,
         // so w -> 1 (the draw edge) is the sky and geometry there dissolves seamlessly.
         let farfade = smoothstep(0.5, 1.0, w_center);
-        let col = mix(lum * radiance, sky_full, farfade);
+        let airlight=fog_neutral_radiance(lum*radiance,sky.night_sky.w);
+        let closure=fog_neutral_radiance(sky_full,fog_neutral_horizon(ray.y,sky.night_sky.w));
+        let col = mix(airlight,closure,farfade);
         let t_mono = dot(trans, vec3<f32>(0.2126, 0.7152, 0.0722)) * (1.0 - farfade);
         textureStore(froxel_out, vec3<i32>(i32(gid.x), i32(gid.y), i32(z)), vec4<f32>(col, t_mono));
     }
