@@ -727,6 +727,7 @@ class Man: public Person
 
 	void HideBody() override {ClearCorpsePose(); _hideBodyWanted = 1;}
 	void ScanNVG();
+	int getNvgIdx() const; // First configured or stock night-vision weapon.
 
 	void AddDefaultWeapons() override;
 	void MinimalWeapons() override;
