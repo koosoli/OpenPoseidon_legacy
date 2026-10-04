@@ -1,4 +1,4 @@
-#import layered_fog_optics::{fog_segment_density, fog_height_primitive, fog_phase, fog_transmittance, fog_ray_direction, fog_patch_density, fog_valley_density, fog_domain_feather}
+#import layered_fog_optics::{fog_segment_density, fog_segment_participant, fog_height_density, fog_phase_sample, fog_height_primitive, fog_phase, fog_transmittance, fog_ray_direction, fog_patch_density, fog_valley_density, fog_domain_feather}
 
 struct FogVolume {
     inv_vp: mat4x4<f32>,
@@ -227,16 +227,14 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
     var ambient=vec3<f32>(0.0);
-    // Equal-solid-angle six-point quadrature of the UPWARD hemisphere. The
-    // environment's artificial negative-Y sky floor is deliberately not light.
-    for (var i=0u;i<6u;i=i+1u) {
-        let y=(f32(i)+0.5)/6.0;
-        let angle=f32(i)*2.39996322973;
-        let r=sqrt(max(1.0-y*y,0.0));
-        let dir=vec3<f32>(r*cos(angle),y,r*sin(angle));
+    // Importance sampling removes the unresolved high-g HG peak. Equal weights
+    // are normalized on the full sphere; downward samples contribute ZERO,
+    // never artificial negative-Y sky or a renormalized upper-hemisphere gain.
+    for (var i=0u;i<8u;i=i+1u) {
+        let dir=fog_phase_sample(ray,params.control.y,i);
+        if (dir.y <= 0.0) { continue; }
         let euv=vec2<f32>(atan2(dir.z,dir.x)/6.28318530718+0.5,acos(dir.y)/3.14159265359);
-        ambient += textureSampleLevel(environment,filter_samp,euv,0.0).rgb
-            * fog_phase(dot(ray,dir),params.control.y)*(6.28318530718/6.0);
+        ambient += textureSampleLevel(environment,filter_samp,euv,0.0).rgb * 0.125;
     }
     var colour=vec3<f32>(0.0);
     var trans=1.0;
@@ -254,32 +252,48 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
             let centre=fog_outdoor_sample(p);
             let after=fog_outdoor_sample(params.camera.xyz+ray*(start+step));
             if (min(min(before.y,centre.y),after.y) <= 0.0) { continue; }
-            let density=fog_patch_density(p,params.patchiness)*fog_pooling(p,centre.x);
             let coverage=min(min(before.y,centre.y),after.y);
             let shift=params.terrain.x*(centre.x-params.terrain.y);
             var tau=0.0;
+            var source=vec3<f32>(0.0);
             for(var i=0u;i<2u;i=i+1u) {
-                var integral=0.0;
-                if (params.terrain.x <= 0.0) {
-                    // Exact previous analytic path when terrain-follow is OFF.
-                    integral=fog_segment_density(params.camera.y+ray.y*start,ray.y,step,params.layers[i]);
-                } else {
-                    // Analytically integrate against piecewise linear actual native
-                    // ground; narrow height layers are not lost by midpoint sampling.
-                    let start_y=params.camera.y+ray.y*start-params.terrain.x*(before.x-params.terrain.y);
-                    let middle_y=p.y-shift;
-                    let end_y=params.camera.y+ray.y*(start+step)-params.terrain.x*(after.x-params.terrain.y);
-                    let half=step*0.5;
-                    integral=fog_segment_density(start_y,(middle_y-start_y)/half,half,params.layers[i])
-                        +fog_segment_density(middle_y,(end_y-middle_y)/half,half,params.layers[i]);
+                // Each linear native half has a connected slab intersection.
+                // Sampling their combined centroid could land in a dry gap.
+                let pieces=select(1u,2u,params.terrain.x>0.0);
+                for(var piece=0u;piece<pieces;piece=piece+1u) {
+                    let length=step/f32(pieces);
+                    let offset=f32(piece)*length;
+                    var start_y=params.camera.y+ray.y*start;
+                    var slope=ray.y;
+                    if(params.terrain.x>0.0) {
+                        let first=params.camera.y+ray.y*start-params.terrain.x*(before.x-params.terrain.y);
+                        let middle=p.y-shift;
+                        let last=params.camera.y+ray.y*(start+step)-params.terrain.x*(after.x-params.terrain.y);
+                        start_y=select(first,middle,piece==1u);
+                        slope=(select(middle,last,piece==1u)-start_y)/length;
+                    }
+                    let participant=fog_segment_participant(start_y,slope,length,params.layers[i]);
+                    if(participant.y<=0.0){continue;}
+                    let sample_rel=ray*(start+offset+participant.x);
+                    let sample_pos=params.camera.xyz+sample_rel;
+                    let outdoor=fog_outdoor_sample(sample_pos);
+                    if(outdoor.y<=0.0){continue;}
+                    // Native ground can curve between the three old taps. A
+                    // linear-half estimate must not light an actually empty slab.
+                    let sample_height=sample_pos.y-params.terrain.x*(outdoor.x-params.terrain.y);
+                    if(fog_height_density(sample_height,params.layers[i])<=0.0){continue;}
+                    let density=fog_patch_density(sample_pos,params.patchiness)*fog_pooling(sample_pos,outdoor.x);
+                    let weight=participant.y*params.layers[i].w*params.control.z*density*min(coverage,outdoor.y);
+                    if(weight<=0.0){continue;}
+                    let direct=params.radiance.rgb*fog_phase(dot(ray,params.light.xyz),params.control.y)
+                        *fog_light_visibility(sample_pos,sample_rel)*fog_solar_transmission(sample_pos);
+                    tau+=weight;
+                    source+=weight*(ambient+direct);
                 }
-                tau += integral*params.layers[i].w*params.control.z*density*coverage;
             }
             if(tau<=0.0) { continue; }
             let segment_trans=fog_transmittance(tau);
-            let direct=params.radiance.rgb*fog_phase(dot(ray,params.light.xyz),params.control.y)
-                * fog_light_visibility(p,rel)*fog_solar_transmission(p);
-            colour += trans*(1.0-segment_trans)*params.control.x*(ambient+direct);
+            colour += trans*(1.0-segment_trans)*params.control.x*(source/tau);
             trans *= segment_trans;
         }
         previous=end_distance;

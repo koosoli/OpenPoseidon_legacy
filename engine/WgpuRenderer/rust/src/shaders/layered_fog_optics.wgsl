@@ -20,6 +20,38 @@ fn fog_segment_density(y: f32, ray_y: f32, distance: f32, layer: vec4<f32>) -> f
     if (abs(delta) < 0.001) { return fog_height_density(y + 0.5 * delta, layer) * distance; }
     return max((fog_height_primitive(y + delta, layer) - fog_height_primitive(y, layer)) / ray_y, 0.0);
 }
+// A source sample must lie in the participating part of the analytic slab.
+// .x is local distance; .y retains the same exact extinction integral.
+fn fog_segment_participant(y: f32, ray_y: f32, distance: f32, layer: vec4<f32>) -> vec2<f32> {
+    let integral = fog_segment_density(y, ray_y, distance, layer);
+    if (integral <= 0.0) { return vec2<f32>(0.0); }
+    if (abs(ray_y * distance) < 0.001) { return vec2<f32>(distance * 0.5, integral); }
+    let feather = max(layer.z, 0.001);
+    let a = (layer.x - feather - y) / ray_y;
+    let b = (layer.y + feather - y) / ray_y;
+    let start = clamp(min(a,b), 0.0, distance);
+    let end = clamp(max(a,b), 0.0, distance);
+    return vec2<f32>((start + end) * 0.5, integral);
+}
+// Inverse-CDF samples of the normalized HG density over the FULL sphere.
+// The caller keeps equal weights, including zero for downward sky samples.
+// Pairing azimuths gives antipodal directions in the isotropic limit.
+fn fog_phase_sample(ray: vec3<f32>, g: f32, index: u32) -> vec3<f32> {
+    let gg = clamp(g, -0.95, 0.95);
+    let u = (f32(index) + 0.5) / 8.0;
+    var cosine = 2.0 * u - 1.0;
+    if (abs(gg) >= 0.001) {
+        let q = (1.0 - gg * gg) / (1.0 - gg + 2.0 * gg * u);
+        cosine = clamp((1.0 + gg * gg - q * q) / (2.0 * gg), -1.0, 1.0);
+    }
+    let pair = min(index, 7u - index);
+    let angle = f32(pair) * 2.39996322973 + select(0.0, 3.14159265359, index >= 4u);
+    let axis = select(vec3<f32>(0.0,1.0,0.0), vec3<f32>(1.0,0.0,0.0), abs(ray.y) > 0.99);
+    let tangent = normalize(cross(axis,ray));
+    let bitangent = cross(ray,tangent);
+    let radius = sqrt(max(1.0 - cosine * cosine, 0.0));
+    return normalize(ray * cosine + radius * (tangent * cos(angle) + bitangent * sin(angle)));
+}
 // Unit-solid-angle normalized Henyey-Greenstein, not an unnormalized highlight.
 fn fog_phase(cosine: f32, g: f32) -> f32 {
     let gg = clamp(g, -0.95, 0.95);
