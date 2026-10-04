@@ -877,5 +877,3 @@ TEST_CASE("Actual articulated limb rifle response conserves resolved projectile 
     CHECK((readback.position-transform.Position()).Size()<.0001f);
     backend->RemoveBody(body); CHECK(backend->GetStats().articulatedBodies==0); backend->Destroy();
 }
-
-
