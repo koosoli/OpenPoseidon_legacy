@@ -12,7 +12,18 @@ The candidate is **experimental and OFF by default**. Launch with `--dev`, open
 The switch lasts until restart. Turning it off preserves existing corpses and
 stops new admission. `POSEIDON_AUTOMATIC_RAGDOLL=1` remains the startup option.
 
-## Installed author-run acceptance
+## Current owner feedback follow-up
+
+Runtime-created settled corpses now retain their physical recipe after releasing
+solver handles. Later real hits can recreate the bodies/joints at the retained
+pose and consume the incoming impulse in the same wake call, before normal
+simulation clears it. Existing motion, world/terrain and four-active budget
+guards remain. Legacy frozen saves do not contain this runtime recipe.
+Native floor setup is prepared at enable/first live simulation before combat;
+it still costs about 16 MiB and 239 ms in the measured Everon attempt.
+See [current installed evidence](weather-fog-corpse-feedback-20261004.md).
+
+## Earlier installed author-run acceptance
 
 Current `1418e425` fixes blast corpses freezing at the old 12-metre travel bound.
 Installed inherited-trajectory, actual grenade-death and frozen save/load passed;

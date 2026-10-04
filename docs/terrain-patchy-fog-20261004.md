@@ -1,6 +1,6 @@
 # Terrain-relative, coherent fog density
 
-Source candidate based on 417d0481, with parent-owned ABI 22/80-byte shared packet 8d50f1a9. No installed visual acceptance claimed here.
+Source candidate based on 417d0481, with parent-owned ABI 22/80-byte shared packet 8d50f1a9. Installed bounded comparison is recorded below; no universal visual acceptance is claimed.
 
 The two layer bounds shift by `follow*(actual native triangle height-referenceASL)`. Follow 0 retains ASL density; follow 1/reference 0 makes bounds heights above ground. Each integration step uses the actual certified start/mid/end native heights and analytically integrates two piecewise linear relative-height segments. Thin layers are retained; terrain and solid roofs remain excluded by the actual native and physical weather-map tests. Height source readiness, retained-map overflow, main-camera match, actual zero weather and underground-camera refusals remain unchanged.
 
@@ -15,3 +15,14 @@ Validation: 9 focused Rust/actual GPU tests PASS, including equal AGL on native 
 Runner: existing `Test-LayeredFog.ps1` defaults explicitly zero the new controls for its frozen ASL comparison. `-TerrainMode -MovingViews -Measure -Exposure 0.6` tests parent C++ density defaults using ground-relative layer slabs and adds three native-height-qualified airborne viewpoints with 16-step render-camera interpolation. Simulation stays paused; this is not occupied helicopter flight or a temporal image-quality certification. Retain camera/source/weather/pair/normal-exit guards and truthful asynchronous GPU timing limits. Parent owns the installed campaign.
 
 Remaining: near-tree authored alpha cards can remain visible; unready volume cannot truthfully fill unknown distant air. Blue airborne silhouettes may also involve the independently identified object/terrain draw-range mismatch being fixed by the parent. No global fog hue, exposure, sky or far-closure grade was introduced. Judge final density softness/patch scale and measured GPU cost using installed captures before claiming appearance acceptance.
+
+Installed parent comparison: matched source `108d2d84`, campaign
+`owner-terrain-patch-moving-20261004-093701`, passed 24 original Everon views
+in four normally terminated fog ON/OFF arms. Camera interpolation, source,
+weather and paired controls passed. Fog .6 terrain/object ranges both measured
+387 m; zero fog both measured 1480 m after the parent draw-range correction.
+Inspected ground/airborne images show softer terrain transitions and more
+consistent canopy-ground haze. Owner screenshots lack exact camera coordinates;
+this is a bounded comparison rather than exact reproduction. Transport GPU
+samples .275-.312 ms at 1280x720 exclude coverage and consumer costs.
+See [current feedback verification](verification/weather-fog-corpse-feedback-20261004.md).

@@ -3,8 +3,10 @@
 Working branch: `codex/modernisation-followup-20261004`, safety-pushed.
 Backup branch: `codex/backup-excavation-20261004`, immutable source `8b93dec7`.
 The owner checkout and its unrelated changes were preserved.
-Installed matching EXE/renderer: engine source `1418e425`, 08:49 local on 4 October.
-Later commits revise the handoff runner and evidence only.
+Installed matching EXE/renderer acceptance: engine source `921255c3`, 10:06 local
+on 4 October. The current fog/weather/corpse feedback receipts are in
+`weather-fog-corpse-feedback-20261004.md`; earlier checkpoints below remain
+historical evidence.
 Final twelve-view installed fog comparison passed and the inspected distant
 contour defect is removed. The owner subsequently approved volumetric fog as the
 default; automatic ragdolls remain opt-in. See `fog-ragdoll-owner-revision-20261004.md`.
@@ -45,15 +47,18 @@ Launch installed `OpenPoseidon.exe` with `--dev`.
   automatic ragdolls. Kill stock US infantry on supported dry ground. Turning
   it off preserves existing bodies and stops new admissions.
 - **Ctrl+F8 -> Weather -> Fog** selects Legacy or Volumetric layered fog and
-  sets fog amount/transition. Presets offer low ground fog, two layers and an
-  elevated band. Expand Fog layers and lighting for base/top altitude, feather,
-  extinction, albedo and forward scattering. Presets stay at fixed world altitude.
-  Weather order is Wind, Fog, Rain, Snow, cloud cover/forecast, diagnostics.
+  edits fog amount immediately. Presets offer low ground fog, two layers,
+  an elevated band, valley mist and mountain mist. Expand Fog layers and lighting
+  for terrain following, valley density, patch scales, edge softness, layer heights,
+  extinction, albedo and forward scattering. Overcast edits also apply immediately
+  and share world weather with Zeus. Weather order is Wind, Fog, Rain, Snow,
+  overcast/forecast, diagnostics. See `weather-fog-corpse-feedback-20261004.md`.
 
 ## Explicit remaining limits
 
-Volumetric fog is ON by default; automatic ragdolls remain OFF. The first automatic
-ragdoll floor registration costs about 231-247 ms / 16 MiB on Everon. Unsupported
+Volumetric fog is ON by default; automatic ragdolls remain OFF. Automatic
+ragdoll floor registration costs about 231-247 ms / 16 MiB on Everon; the
+current path prepares it at enable/first live simulation before combat. Unsupported
 models, multiplayer, water, ladders, attached actors, excavation contact, unsafe
 initial contact/speed and exhausted budgets retain authored death behavior.
 Actual crouch/prone pose acceptance is unproved. There was no Box3D dependency

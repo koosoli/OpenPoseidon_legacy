@@ -18,9 +18,11 @@ unchanged by this control; actual weather Fog still controls their existing rule
 ## Configuration and safeguards
 
 In **Ctrl+F8 -> Weather -> Fog**, select Legacy or Volumetric layered fog and
-set fog amount/transition. Low ground fog, Two layers and Elevated band presets
-position fixed-altitude layers. Expand **Fog layers and lighting** to set each
-ASL base/top, boundary feather, extinction, albedo and forward scattering. HDR,
+edit fog amount live. Low ground fog, Two layers, Elevated band, Valley mist and
+Mountain mist presets configure the layers. Expand **Fog layers and lighting**
+for terrain following, valley gain, coherent patches and coverage softness as well
+as base/top, feather, extinction, albedo and forward scattering. Follow terrain 0
+retains fixed ASL layers; 1 with reference 0 uses height above local ground. HDR,
 procedural sky, sky-based lighting and nonzero actual weather Fog are required.
 The built-in profiles are `[0,35,5,.008]` and `[70,100,5,.003]` metres/metre inverse;
 albedo `.95`, HG `g=.6`. Profiles may therefore be below a high hill: that is
