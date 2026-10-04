@@ -7,6 +7,7 @@
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/World/Weather/RainWaterField.hpp>
 #include <array>
+#include <chrono>
 #include <limits.h>
 #include <utility>
 #include <cstdio>
@@ -747,6 +748,7 @@ bool AutomaticRagdollEnabled()
 
 bool AutomaticRagdollTerrain(RString& refusal)
 {
+    const auto began = std::chrono::steady_clock::now();
     if (!GLandscape) return false;
     auto& world = Physics::EnsurePhysicsWorld();
     if (!world.Create()) { refusal = "physics-world-unavailable"; return false; }
@@ -768,8 +770,9 @@ bool AutomaticRagdollTerrain(RString& refusal)
     }
     if (!world.SetTerrain(heights.data(),int(width),int(width),spacing,0,0))
     { refusal = "physics-terrain-registration-refused"; return false; }
-    LOG_INFO(World,"AUTORAGDOLL: registered shared actual terrain width={} spacing={} mapGrid={} bytes={}",
-        width,spacing,grid,heights.size()*sizeof(float));
+    LOG_INFO(World,"AUTORAGDOLL: registered shared actual terrain width={} spacing={} mapGrid={} bytes={} milliseconds={}",
+        width,spacing,grid,heights.size()*sizeof(float),
+        std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count());
     return true;
 }
 }
@@ -1104,7 +1107,10 @@ bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal, bool
                 measured.paletteMax[axis] = std::max(measured.paletteMax[axis], projected[axis]);
             }
             if (weight.Size() <= 0) ++measured.unweighted;
-            if ((_corpsePosePrimary.Valid() && !_corpsePosePrimary.SupportsPoint(weight)) ||
+            bool automaticPaletteOnly = false;
+            if (_automaticCorpsePose) for (int w = 0; w < weight.Size(); ++w)
+                if (weight[w].GetSel() >= 25) automaticPaletteOnly = true;
+            if (automaticPaletteOnly || (_corpsePosePrimary.Valid() && !_corpsePosePrimary.SupportsPoint(weight)) ||
                 (_corpsePoseSecondary.Valid() && !_corpsePoseSecondary.SupportsPoint(weight)))
             { ++measured.skippedPointTails; continue; }
             const Vector3 actual = AnimatePoint(level, p);
@@ -1610,7 +1616,10 @@ bool Man::CaptureCorrectedCorpsePose(RString& refusal)
         for (int point = 0; point < int(captured.points.size()); ++point)
         {
             const auto& weight = weights[level][point];
-            if ((_corpsePosePrimary.Valid() && !_corpsePosePrimary.SupportsPoint(weight)) ||
+            bool automaticPaletteOnly = false;
+            if (_automaticCorpsePose) for (int w = 0; w < weight.Size(); ++w)
+                if (weight[w].GetSel() >= 25) automaticPaletteOnly = true;
+            if (automaticPaletteOnly || (_corpsePosePrimary.Valid() && !_corpsePosePrimary.SupportsPoint(weight)) ||
                 (_corpsePoseSecondary.Valid() && !_corpsePoseSecondary.SupportsPoint(weight))) continue;
             const Vector3 actual = AnimatePoint(level,point);
             exact &= std::memcmp(&actual,&captured.points[point],sizeof(Vector3)) == 0; ++comparedPoints;
