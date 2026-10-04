@@ -1,4 +1,4 @@
-#import layered_fog_optics::{fog_segment_density, fog_height_primitive, fog_phase, fog_transmittance}
+#import layered_fog_optics::{fog_segment_density, fog_height_primitive, fog_phase, fog_transmittance, fog_ray_direction}
 
 struct FogVolume {
     inv_vp: mat4x4<f32>,
@@ -127,7 +127,13 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
     let uv=(vec2<f32>(id.xy)+0.5)/vec2<f32>(dims.xy);
     let ndc=uv*vec2<f32>(2.0,-2.0)+vec2<f32>(-1.0,1.0);
     let wp=params.inv_vp*vec4<f32>(ndc,0.0,1.0);
-    let ray=normalize(wp.xyz/wp.w);
+    let ray=fog_ray_direction(wp);
+    if (dot(ray,ray) < 0.5) {
+        for (var z=0u;z<dims.z;z=z+1u) {
+            textureStore(result,vec3<i32>(i32(id.x),i32(id.y),i32(z)),vec4<f32>(0.0,0.0,0.0,1.0));
+        }
+        return;
+    }
     var ambient=vec3<f32>(0.0);
     // Equal-solid-angle six-point quadrature of the UPWARD hemisphere. The
     // environment's artificial negative-Y sky floor is deliberately not light.

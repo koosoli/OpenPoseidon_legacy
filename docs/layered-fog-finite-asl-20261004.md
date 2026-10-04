@@ -78,12 +78,27 @@ position** of both layout-hash lists. The shared frame UBO size and existing
 weather/source/physics structs are unchanged. Both binaries must be rebuilt and
 deployed together by the root runtime owner.
 
+## Camera-depth convention
+
+The CPU camera projection is forward-Z; geometry applies `frame::reverse_z`
+in vertex shaders. The fog ray helper normalizes the homogeneous XYZ without
+first dividing by W, supporting finite, forward-infinite and reversed-infinite
+rays, including W=0. Zero/nonfinite rays write vacuum. Cloud correction unprojects
+resolved reversed depth with `1-depth`, matching the existing cloud march, and
+refuses an infinite/nonfinite divide. The actual GPU regression checks both
+production forward projection families and a reversed-infinite direction case;
+near/off-axis known world points recover their actual radial distance. A finite
+far plane has expected f32 inverse conditioning error, checked against an
+independently evaluated homogeneous far reference instead of an exact-distance
+claim. The existing global sky shader is unchanged.
+
 ## Verification and installed runner
 
 Source commit `7e66d0e5` passed cached whole-library Rust type checking and full
 actual Naga composition for the fog compute, background, cloud composite,
 terrain, direct/retained object and grass shaders. Focused device batch passed:
 
+- `layered_fog::tests::actual_fog_depth_gpu_unprojects_renderer_reversed_depth_with_forward_projection`
 - `layered_fog::tests::actual_fog_profile_gpu_integrates_thin_slabs_phase_energy_and_camera_refusals`
 - `layered_fog::tests::actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gates`
 - `sky::sky_device_tests::sky_pipelines_build_on_a_real_device`

@@ -2,7 +2,7 @@ use super::*;
 use wgpu::util::DeviceExt;
 
 const PROFILE_PROBE:&str=r#"
-#import layered_fog_optics::{fog_segment_density, fog_phase, fog_transmittance, fog_transport, FogConsumer, fog_camera_matches}
+#import layered_fog_optics::{fog_segment_density, fog_phase, fog_transmittance, fog_transport, FogConsumer, fog_camera_matches, fog_ray_direction}
 @group(0) @binding(0) var<storage, read_write> result:array<vec4<f32>>;
 @compute @workgroup_size(1)
 fn cs_probe() {
@@ -29,6 +29,11 @@ fn cs_probe() {
   f32(fog_camera_matches(packet,changed,identity,packet.camera.xyz)),
   f32(fog_camera_matches(packet,identity,identity,vec3<f32>(1.0,2.0,3.1))),0.0);
  packet.control.x=0.0;result[5].w=f32(fog_camera_matches(packet,identity,identity,packet.camera.xyz));
+ result[6]=vec4<f32>(fog_ray_direction(vec4<f32>(0.0,0.0,10.0,0.0)),length(fog_ray_direction(vec4<f32>(0.0))));
+ result[7]=vec4<f32>(fog_ray_direction(vec4<f32>(0.0,0.0,10.0,1.0)).z,
+  fog_ray_direction(vec4<f32>(0.0,0.0,10.0,-1.0)).z,
+  fog_ray_direction(vec4<f32>(0.0,0.0,10.0,1e-30)).z,
+  length(fog_ray_direction(vec4<f32>(bitcast<f32>(0x7fc00000u),0.0,10.0,1.0))));
 }
 "#;
 
@@ -54,7 +59,7 @@ fn read_probe(device:&wgpu::Device,queue:&wgpu::Queue,shader:&str,entries:&[wgpu
 #[test]
 fn actual_fog_profile_gpu_integrates_thin_slabs_phase_energy_and_camera_refusals() {
  let(device,queue)=crate::gfx3d::cull::tests::headless().expect("actual fog GPU proof requires device");
- let samples=read_probe(&device,&queue,PROFILE_PROBE,&[],24);
+ let samples=read_probe(&device,&queue,PROFILE_PROBE,&[],32);
  assert!(samples.iter().all(|v|v.is_finite()));
  for(i,wanted)in [100.,12.,12.,12.].iter().enumerate(){assert!((samples[i]-wanted).abs()<2e-4);}
  assert!((samples[4]-0.06).abs()<1e-4 && (samples[5]-0.06).abs()<1e-4 && samples[6]==0.);
@@ -62,6 +67,7 @@ fn actual_fog_profile_gpu_integrates_thin_slabs_phase_energy_and_camera_refusals
  for s in &samples[8..11]{assert!((*s-1.).abs()<5e-4,"normalized phase {s}");}
  assert_eq!(&samples[12..16],&[4.,3.5,3.75,1.]);assert_eq!(&samples[16..20],&[12.,6.,3.,1.]);
  assert_eq!(&samples[20..24],&[1.,0.,0.,0.]);
+ assert_eq!(&samples[24..28],&[0.,0.,1.,0.]);assert_eq!(&samples[28..32],&[1.,-1.,1.,0.]);
 }
 
 #[test]
@@ -106,7 +112,6 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
  camera.params.fog_enabled=1.;camera.params.fog_inv_range=1./200.;
  camera.view=glam::Mat4::IDENTITY.to_cols_array();
  camera.proj=glam::Mat4::perspective_lh(60f32.to_radians(),1.,0.1,200.).to_cols_array();
- let inverse=glam::Mat4::from_cols_array(&camera.proj).inverse().to_cols_array_2d();
  // Actual orthographic world-xz footprint and forward depth (top at +2000m).
  let cover_matrix=[[0.001,0.,0.,0.],[0.,0.,-0.00025,0.],[0.,-0.001,0.,0.],[0.,0.,0.5,1.]];
  let counts=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:None,contents:bytemuck::cast_slice(&[0u32;4]),
@@ -124,6 +129,8 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
  let read=||read_probe(&device,&queue,READ_VOLUME,&[wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::TextureView(&volume_view)}],128);
  let run=|fog:&mut LayeredFog,camera:&WgrCamera,settings:&WgrLayeredFog,weather:f32,cover:WeatherInputs,generation:u64,below:bool| {
   fog.invalidate(&queue);let mut enc=device.create_command_encoder(&Default::default());
+  let inverse=(glam::DMat4::from_cols_array(&camera.view.map(f64::from)).inverse()
+   *glam::DMat4::from_cols_array(&camera.proj.map(f64::from)).inverse()).as_mat4().to_cols_array_2d();
   fog.render(&device,&queue,&mut enc,settings,weather,true,0.,camera,inverse,&height,&native_view,generation,
    &mapping,&shadow_view,&csm_view,&env_view,&cloud_view,cover,below);queue.submit(Some(enc.finish()));
  };
@@ -134,6 +141,15 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
   assert!((row[3]-(-0.01*distance).exp()).abs()<0.0007,"actual Beer-Lambert z={z}: {row:?}");
   assert!(row[3]<=previous);previous=row[3];assert_eq!(&row[..3],&[0.;3]);
  }
+ // Exact production projection family: reversed-Z infinite far point has w=0.
+ camera.proj=glam::Mat4::perspective_infinite_reverse_lh(60f32.to_radians(),1.,0.1).to_cols_array();
+ let infinite=glam::Mat4::from_cols_array(&camera.proj).inverse()*glam::Vec4::new(0.,0.,0.,1.);
+ assert_eq!(infinite.w,0.);
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);let reverse=read();
+ for (a,b) in positive.iter().zip(&reverse){assert!(b.is_finite() && (a-b).abs()<0.0007,"finite/infinite projection {a}/{b}");}
+ camera.proj=glam::Mat4::perspective_infinite_lh(60f32.to_radians(),1.,0.1).to_cols_array();
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);let forward_infinite=read();
+ for (a,b) in positive.iter().zip(&forward_infinite){assert!(b.is_finite() && (a-b).abs()<0.0007,"finite/forward-infinite projection {a}/{b}");}
  settings.control[1]=0.95;
  run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);let lit=read();assert!(lit[124]>0.);
  write_byte(&cloud,0);run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
@@ -149,6 +165,37 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
   run(&mut fog,&camera,&settings,weather,cover(ready,100),generation,below);assert!(!fog.ready);
  }
  settings.control[0]=0.;run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);assert!(!fog.ready);
+}
+
+#[test]
+fn actual_fog_depth_gpu_unprojects_renderer_reversed_depth_with_forward_projection() {
+ let(device,queue)=crate::gfx3d::cull::tests::headless().expect("actual fog depth proof requires GPU");
+ const PROBE:&str=r#"
+ #import layered_fog_optics::fog_depth_distance
+ struct Input { inverse:mat4x4<f32>, uv_depth_far:vec4<f32>, }
+ @group(0) @binding(0) var<storage,read_write> result:array<vec4<f32>>;
+ @group(0) @binding(1) var<uniform> input:Input;
+ @compute @workgroup_size(1) fn cs_probe(){let p=input.uv_depth_far;
+  result[0]=vec4<f32>(fog_depth_distance(input.inverse,p.xy,p.z,p.w),
+   fog_depth_distance(input.inverse,p.xy,0.0,p.w),fog_depth_distance(input.inverse,p.xy,1e-30,p.w),0.0);}
+ "#;
+ for projection in [glam::Mat4::perspective_lh(1.,1.,0.1,200.),glam::Mat4::perspective_infinite_lh(1.,1.,0.1)] {
+  for point in [glam::Vec3::new(0.,0.,40.),glam::Vec3::new(10.,5.,80.)] {
+   let clip=projection*point.extend(1.);let depth=1.-clip.z/clip.w;
+   let uv=glam::Vec2::new(clip.x/clip.w*0.5+0.5,-clip.y/clip.w*0.5+0.5);
+   let mut data=projection.inverse().to_cols_array().to_vec();data.extend_from_slice(&[uv.x,uv.y,depth,200.]);
+   let input=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:None,contents:bytemuck::cast_slice(&data),usage:wgpu::BufferUsages::UNIFORM});
+   let result=read_probe(&device,&queue,PROBE,&[wgpu::BindGroupEntry {binding:1,resource:input.as_entire_binding()}],4);
+   assert!(result.iter().all(|v|v.is_finite()));assert!((result[0]-point.length()).abs()<0.01,"actual forward projection / reversed raster depth {result:?} vs {point:?}");
+   assert_eq!(result[1],200.,"sky clear depth consumes exact final slice");
+   // A finite projection's far plane is ill-conditioned after f32 inversion.
+   // Its independently evaluated homogeneous far point may be slightly inside
+   // radial fogFar; an infinite far point must still refuse the divide.
+   let p=projection.inverse()*glam::Vec4::new(uv.x*2.-1.,1.-uv.y*2.,1.,1.);
+   let far_reference=if p.w.abs()<=1e-20 {200.}else{(p.truncate()/p.w).length().min(200.)};
+   assert!((result[2]-far_reference).abs()<0.01,"finite/infinite far reference {result:?}/{far_reference}");
+  }
+ }
 }
 
 #[test]

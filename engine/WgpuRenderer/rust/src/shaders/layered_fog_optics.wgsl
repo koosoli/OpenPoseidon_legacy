@@ -26,6 +26,28 @@ fn fog_phase(cosine: f32, g: f32) -> f32 {
     return (1.0 - gg * gg) / (12.56637061436 * pow(max(1.0 + gg * gg - 2.0 * gg * cosine, 0.0025), 1.5));
 }
 fn fog_transmittance(tau: f32) -> f32 { return exp(-max(tau, 0.0)); }
+// An infinite reversed-Z far point has w=0: its XYZ are a direction.
+// Positive finite w changes magnitude only; negative w reverses direction.
+// Scale before normalization so a tiny finite w cannot overflow a divide.
+fn fog_ray_direction(point: vec4<f32>) -> vec3<f32> {
+    let exponent = vec4<u32>(0x7f800000u);
+    if (any((bitcast<vec4<u32>>(point) & exponent) == exponent)) { return vec3<f32>(0.0); }
+    let scale = max(max(abs(point.x),abs(point.y)),abs(point.z));
+    if (scale <= 1e-20) { return vec3<f32>(0.0); }
+    return normalize(point.xyz / scale) * select(1.0,-1.0,point.w < 0.0);
+}
+// CPU projection is forward-Z; raster depth is reversed by frame::reverse_z.
+// Sky depth0 and an infinite homogeneous point consume the final fog slice.
+fn fog_depth_distance(inverse: mat4x4<f32>, uv: vec2<f32>, depth: f32, far: f32) -> f32 {
+    if (depth <= 0.0) { return far; }
+    let ndc = uv * vec2<f32>(2.0,-2.0) + vec2<f32>(-1.0,1.0);
+    let point = inverse * vec4<f32>(ndc,1.0-depth,1.0);
+    let exponent = vec4<u32>(0x7f800000u);
+    if (any((bitcast<vec4<u32>>(point) & exponent) == exponent) || abs(point.w) <= 1e-20) { return far; }
+    // This conservative component bound avoids an overflowing length/divide.
+    if (max(max(abs(point.x),abs(point.y)),abs(point.z)) > far*abs(point.w)) { return far; }
+    return min(length(point.xyz / point.w),far);
+}
 fn fog_transport(background: vec3<f32>, transport: vec4<f32>) -> vec3<f32> {
     return background * transport.a + transport.rgb;
 }
