@@ -62,13 +62,11 @@ fn fog_legacy_closure(scene: vec3<f32>, airlight: vec3<f32>, amount: f32,
     if (amount <= 0.0) { return foreground; }
     return mix(foreground, fog_transport(airlight, distant), amount);
 }
-// Rain access at the endpoint is not access to the intervening outdoor air.
-// Genuine plant sections (including trunks) are commonly sheltered by their
-// own canopy. Their ray transport already excludes roof/native samples.
-// Keep unknown/out-of-domain coverage closed and preserve the reach guard
-// for non-vegetation receivers; this does not alter alpha coverage.
-fn fog_surface_open(coverage: f32, reach: f32, vegetation: bool) -> bool {
-    return coverage >= 0.5 && (vegetation || reach >= 0.999);
+// Rain access at a wall, rock or canopy is not access to intervening air.
+// Roof/native exclusion belongs to the encoded ray, not its opaque endpoint.
+// Unknown coverage and explicitly excluded cockpit/interior consumers stay closed.
+fn fog_surface_open(coverage: f32, receiver: bool) -> bool {
+    return coverage >= 0.5 && receiver;
 }
 
 // Shared packet layout. Camera matching prevents a cockpit/reflection camera from

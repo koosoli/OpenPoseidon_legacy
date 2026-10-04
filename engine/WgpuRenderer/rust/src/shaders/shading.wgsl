@@ -744,7 +744,7 @@ fn shade(
     // fog_enabled: >=2 = aerial-perspective froxel (per-fragment); 1 = legacy flat fog; 0 =
     // off (fog == 1, mix is a no-op).
     if (frame.params.fog_enabled >= 1.5) {
-        rgb = apply_fog_receiver(rgb, world_pos, is_vegetation && !is_cockpit && cave.y >= 0.999);
+        rgb = apply_fog_receiver(rgb, world_pos, !is_cockpit && cave.y >= 0.999);
     } else {
         rgb = mix(fog_color, rgb, fog);
     }
