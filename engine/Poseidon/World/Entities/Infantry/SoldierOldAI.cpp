@@ -301,6 +301,9 @@ const float GrenadeAtan2 = atan2(GrenadeDir.Y(), GrenadeDir.SizeXZ());
 
 void Man::AimWeaponAI(int weapon, Vector3Par direction, float deltaT)
 {
+    if (weapon < 0 || weapon >= NMagazineSlots())
+        return;
+
     AimHeadAI(direction, deltaT);
 
     SelectWeapon(weapon);
@@ -2464,7 +2467,8 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
     {
         speedWanted = 0;
     }
-    else if (_fire._fireMode >= 0 && (!_fire._firePrepareOnly || !unit->IsKeepingFormation()) &&
+    else if (_fire._fireMode >= 0 && _fire._fireMode < NMagazineSlots() &&
+             (!_fire._firePrepareOnly || !unit->IsKeepingFormation()) &&
              _fireState != FireDone && _fire._fireTarget && _fire._fireTarget->IsKnownBy(unit) &&
              _fire._fireTarget->idExact && // ???
              unit->IsFireEnabled(_fire._fireTarget) && GetMagazineSlot(_fire._fireMode)._magazine &&

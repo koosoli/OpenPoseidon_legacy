@@ -73,7 +73,7 @@ Object* Man::GetProxy(LODShapeWithShadow*& shape, int level, Matrix4& transform,
         {
             weapon = GetWeaponSystem(index);
             pshape = weapon->_model;
-            if (_currentWeapon >= 0)
+            if (_currentWeapon >= 0 && _currentWeapon < NMagazineSlots())
             {
                 const MagazineSlot& slot = GetMagazineSlot(_currentWeapon);
                 if (slot._weapon == weapon && slot._magazine && slot._magazine->_ammo > 0)
@@ -100,7 +100,7 @@ Object* Man::GetProxy(LODShapeWithShadow*& shape, int level, Matrix4& transform,
         {
             weapon = GetWeaponSystem(index);
             pshape = weapon->_model;
-            if (_currentWeapon >= 0)
+            if (_currentWeapon >= 0 && _currentWeapon < NMagazineSlots())
             {
                 const MagazineSlot& slot = GetMagazineSlot(_currentWeapon);
                 if (slot._weapon == weapon && slot._magazine && slot._magazine->_ammo > 0)
@@ -227,7 +227,7 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
                 weapon = GetWeaponSystem(index);
                 pshape = weapon->_model;
                 animFire = &weapon->_animFire;
-                if (_currentWeapon >= 0)
+                if (_currentWeapon >= 0 && _currentWeapon < NMagazineSlots())
                 {
                     const MagazineSlot& slot = GetMagazineSlot(_currentWeapon);
                     if (slot._weapon == weapon && slot._magazine && slot._magazine->_ammo > 0)
@@ -256,7 +256,7 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
                 weapon = GetWeaponSystem(index);
                 pshape = weapon->_model;
                 animFire = &weapon->_animFire;
-                if (_currentWeapon >= 0)
+                if (_currentWeapon >= 0 && _currentWeapon < NMagazineSlots())
                 {
                     const MagazineSlot& slot = GetMagazineSlot(_currentWeapon);
                     if (slot._weapon == weapon && slot._magazine && slot._magazine->_ammo > 0)
@@ -306,7 +306,7 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
                 {
                     pshape = weapon->_model;
                     animFire = &weapon->_animFire;
-                    if (_currentWeapon >= 0)
+                    if (_currentWeapon >= 0 && _currentWeapon < NMagazineSlots())
                     {
                         const MagazineSlot& slot = GetMagazineSlot(_currentWeapon);
                         if (slot._weapon == weapon && slot._magazine && slot._magazine->_ammo > 0)
@@ -551,7 +551,7 @@ void Man::Draw(int level, ClipFlags clipFlags, const FrameBase& pos)
 #endif
     if (GWorld->GetCameraType() == CamGunner && GWorld->CameraOn() == this)
     {
-        if (_currentWeapon >= 0)
+        if (_currentWeapon >= 0 && _currentWeapon < NMagazineSlots())
         {
             WeaponType* weapon = GetMagazineSlot(_currentWeapon)._weapon;
             MuzzleType* muzzle = GetMagazineSlot(_currentWeapon)._muzzle;
