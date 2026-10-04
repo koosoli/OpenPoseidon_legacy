@@ -156,8 +156,11 @@ fn sky_sh_wgsl_validates() {
 // Offline guard for the over-scene cloud composite shader (separate module, own binding namespace).
 #[test]
 fn cloud_composite_wgsl_validates() {
-    let module = naga::front::wgsl::parse_str(include_str!("cloud_composite.wgsl"))
-        .expect("cloud_composite.wgsl parse");
+    let mut composer=crate::shaders::build_composer();
+    let module=composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor {
+        source:include_str!("cloud_composite.wgsl"),file_path:"cloud_composite.wgsl",
+        shader_defs:crate::shaders::shader_defs(),..Default::default()
+    }).unwrap_or_else(|e|panic!("{}",e.emit_to_string(&composer)));
     naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
         naga::valid::Capabilities::all(),
@@ -1073,6 +1076,7 @@ fn moon_cloud_blue_from_env() -> f32 {
 }
 
 pub struct Sky {
+    pub fog: crate::layered_fog::LayeredFog,
     // Main fullscreen sky pipeline (targets the scene format).
     sky_pipeline: wgpu::RenderPipeline,
     // Single-sample twin for the resolution-scaled planar reflection.
@@ -1207,6 +1211,7 @@ pub struct Sky {
     cloud_composite_layout: wgpu::BindGroupLayout,
     cloud_composite_bind: Option<wgpu::BindGroup>,
     cloud_composite_sampler: wgpu::Sampler,
+    fog_cloud_controls: [wgpu::Buffer;2],
     // 1 = scene target is the linear HDR texture (tonemap resolves later); 0 =
     // LDR-direct, so the sky self-tonemaps. Fixed at construction with the format.
     linear: f32,
@@ -1223,6 +1228,7 @@ struct CloudLoTarget {
     // The depth view the two cached binds below were built against; identity-compared so a
     // resize (which is the only thing that replaces it) rebuilds them and nothing else does.
     depth_src: Option<wgpu::TextureView>,
+    layer_fog: bool,
     composite_bind: Option<wgpu::BindGroup>,
     depth_bind: Option<wgpu::BindGroup>,
 }
@@ -1238,6 +1244,8 @@ impl Sky {
         color_format: wgpu::TextureFormat,
         sample_count: u32,
     ) -> Self {
+        let mut fog_composer=crate::shaders::build_composer();
+        let fog=crate::layered_fog::LayeredFog::new(device,queue,&mut fog_composer,color_format,sample_count);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("wgr_sky_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("sky.wgsl").into()),
@@ -2100,10 +2108,11 @@ impl Sky {
         drop(build_cloud_pipeline);
 
         // cloud_composite: upsample the low-res buffer + premultiplied blend over the MSAA scene.
-        let composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("wgr_cloud_composite_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("cloud_composite.wgsl").into()),
-        });
+        let composite_shader = crate::shaders::make_module(device,&mut fog_composer,
+            "wgr_cloud_composite_shader",include_str!("cloud_composite.wgsl"),"cloud_composite.wgsl");
+        let fog_cloud_controls = [0.0f32,1.0].map(|on|device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label:Some("wgr_cloud_layer_fog_control"),contents:bytemuck::cast_slice(&[on,0.0,0.0,0.0]),
+            usage:wgpu::BufferUsages::UNIFORM }));
         let cloud_composite_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("wgr_cloud_composite_layout"),
@@ -2135,6 +2144,12 @@ impl Sky {
                         },
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry { binding:3,visibility:wgpu::ShaderStages::FRAGMENT,
+                        ty:wgpu::BindingType::Texture {sample_type:wgpu::TextureSampleType::Float {filterable:true},view_dimension:wgpu::TextureViewDimension::D3,multisampled:false},count:None },
+                    wgpu::BindGroupLayoutEntry { binding:4,visibility:wgpu::ShaderStages::FRAGMENT,
+                        ty:wgpu::BindingType::Buffer {ty:wgpu::BufferBindingType::Uniform,has_dynamic_offset:false,min_binding_size:None},count:None },
+                    wgpu::BindGroupLayoutEntry { binding:5,visibility:wgpu::ShaderStages::FRAGMENT,
+                        ty:wgpu::BindingType::Buffer {ty:wgpu::BufferBindingType::Uniform,has_dynamic_offset:false,min_binding_size:None},count:None },
                 ],
             });
         let cloud_composite_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -2206,6 +2221,7 @@ impl Sky {
         let soft_env = cirrus_soft_from_env();
 
         Self {
+            fog,
             sky_pipeline,
             planar_sky_pipeline,
             sky_bind,
@@ -2223,6 +2239,7 @@ impl Sky {
             cloud_composite_layout,
             cloud_composite_bind: None,
             cloud_composite_sampler,
+            fog_cloud_controls,
             sh_pipeline,
             sh_bind,
             sh_buf,
@@ -2659,6 +2676,7 @@ impl Sky {
         width: u32,
         height: u32,
         reflection: bool,
+        layer_fog: bool,
     ) {
         let lo = (width.div_ceil(2).max(1), height.div_ceil(2).max(1));
         // Find-or-create in the size-keyed cache (see the field comment): the planar and the
@@ -2692,6 +2710,7 @@ impl Sky {
                     _tex: tex,
                     view,
                     depth_src: None,
+                    layer_fog: false,
                     composite_bind: None,
                     depth_bind: None,
                 });
@@ -2707,7 +2726,7 @@ impl Sky {
         // pass two different depth views.
         {
             let target = &mut self.cloud_lo[slot];
-            if target.depth_src.as_ref() != Some(depth_view) || target.composite_bind.is_none() {
+            if target.depth_src.as_ref() != Some(depth_view) || target.composite_bind.is_none() || target.layer_fog != layer_fog {
                 target.composite_bind =
                     Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                         label: Some("wgr_cloud_composite_bind"),
@@ -2727,6 +2746,9 @@ impl Sky {
                                 binding: 2,
                                 resource: wgpu::BindingResource::TextureView(depth_view),
                             },
+                            wgpu::BindGroupEntry {binding:3,resource:wgpu::BindingResource::TextureView(&self.fog.view)},
+                            wgpu::BindGroupEntry {binding:4,resource:self.fog.consumer.as_entire_binding()},
+                            wgpu::BindGroupEntry {binding:5,resource:self.fog_cloud_controls[layer_fog as usize].as_entire_binding()},
                         ],
                     }));
                 target.depth_bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2738,6 +2760,7 @@ impl Sky {
                     }],
                 }));
                 target.depth_src = Some(depth_view.clone());
+                target.layer_fog = layer_fog;
             }
         }
         // `composite_cloud` runs later in the frame against whichever target this call filled.

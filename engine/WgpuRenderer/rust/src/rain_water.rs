@@ -1517,6 +1517,10 @@ mod full_draw_tests {
                     wgpu::TextureViewDimension::D2,
                     wgpu::TextureSampleType::Depth,
                 ),
+                tex_entry(21,wgpu::TextureViewDimension::D3,wgpu::TextureSampleType::Float {filterable:true}),
+                wgpu::BindGroupLayoutEntry {binding:22,visibility:wgpu::ShaderStages::FRAGMENT,
+                    ty:wgpu::BindingType::Buffer {ty:wgpu::BufferBindingType::Uniform,has_dynamic_offset:false,
+                        min_binding_size:wgpu::BufferSize::new(std::mem::size_of::<crate::layered_fog::Consumer>() as u64)},count:None},
             ],
         });
         let texture = |label, format, width, height, layers, dimension, usage| {
@@ -1625,6 +1629,9 @@ mod full_draw_tests {
             contents: bytemuck::cast_slice(&sh),
             usage: wgpu::BufferUsages::UNIFORM,
         });
+        let layer_fog_packet=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label:Some("actual_pool_disabled_layer_fog"),contents:bytemuck::bytes_of(&<crate::layered_fog::Consumer as bytemuck::Zeroable>::zeroed()),
+            usage:wgpu::BufferUsages::UNIFORM});
         let camera_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("actual_pool_camera"),
             layout: &camera_layout,
@@ -1673,6 +1680,8 @@ mod full_draw_tests {
                     binding: 20,
                     resource: wgpu::BindingResource::TextureView(&weather_view),
                 },
+                wgpu::BindGroupEntry {binding:21,resource:wgpu::BindingResource::TextureView(&froxel_view)},
+                wgpu::BindGroupEntry {binding:22,resource:layer_fog_packet.as_entire_binding()},
             ],
         });
         let mut rain = RainWater::new(
@@ -2127,3 +2136,4 @@ mod full_draw_tests {
         assert_eq!(actual[8],3.);assert_eq!(actual[9],0.,"Native upper triangle is above horizontal head");drop(data);readback.unmap();
     }
 }
+

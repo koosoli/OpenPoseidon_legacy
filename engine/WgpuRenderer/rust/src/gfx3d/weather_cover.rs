@@ -116,6 +116,7 @@ impl Map {
         snow: [f32; 4],
         ground: [f32; 4],
         retained: bool,
+        layer_fog: bool,
     ) {
         self.frame = self.frame.wrapping_add(1);
         self.ready_offsets.clear();
@@ -123,7 +124,7 @@ impl Map {
         self.direct_complete = true;
         let enabled = cascade_enabled(std::env::var("WGR_WEATHER_COVER").ok().as_deref(), self.far,
             std::env::var("WGR_WEATHER_COVER_FAR").ok().as_deref());
-        if !policy::active(enabled, snow, ground) || !camera.is_finite() {
+        if !(policy::active(enabled, snow, ground) || (enabled && layer_fog)) || !camera.is_finite() {
             if self.target.take().is_some() {
                 self.generation = self.generation.wrapping_add(1);
             }

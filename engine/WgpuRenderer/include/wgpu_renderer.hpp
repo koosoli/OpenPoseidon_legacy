@@ -35,7 +35,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 20u // Paired cave/hole/swimmer APIs and distinct blend-section flag
+#define WGR_ABI_VERSION 21u // Explicit layered-fog config and authoritative weather packet
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -729,6 +729,7 @@ struct WgrSkyRuntime
      * per-frame source the renderer folds into those UBO lanes. */
     WgrVec4 moon_params;
     WgrVec4 moon_sun;
+    WgrVec4 layer_fog_weather; // captured fog, landscape-ready, camera-ready, reserved
 };
 
 /* Long-distance terrain sun-shadow sweep (was wgr_terrain_set_sun_shadow's args). */
@@ -883,6 +884,11 @@ struct WgrDepthOfField
 
 /* Every imgui-tweakable render parameter that crosses the FFI as a setter, in one block.
  * Append future look knobs here; do not add new FFI setters. */
+struct WgrLayeredFog
+{
+    WgrVec4 control; // enabled, scattering albedo, HG anisotropy, reserved
+    WgrVec4 layers[2]; // base/top ASL metres, linear boundary feather metres, extinction 1/m
+};
 struct WgrRenderParams
 {
     WgrTonemap          tonemap;
@@ -895,6 +901,7 @@ struct WgrRenderParams
     WgrSkyVis           interior_sky;
     WgrDepthOfField     depth_of_field;
     WgrGi               gi;
+    WgrLayeredFog       layered_fog;
 };
 
 /* Frame-global scalars carried in the camera UBO so the 3D shader can read them
@@ -1772,7 +1779,8 @@ enum WgrGpuTimerRegion : uint32_t
     WGR_GPU_TIMER_WEATHER_COVER_FAR_CULL = 85,
     WGR_GPU_TIMER_WEATHER_COVER_NEAR_DRAW = 86,
     WGR_GPU_TIMER_WEATHER_COVER_FAR_DRAW = 87,
-    WGR_GPU_TIMER_REGION_COUNT = 88,
+    WGR_GPU_TIMER_LAYERED_FOG = 88,
+    WGR_GPU_TIMER_REGION_COUNT = 89,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.
@@ -2312,14 +2320,16 @@ static_assert(sizeof(WgrSkyLook) == 192, "WgrSkyLook layout must match the Rust 
  * This assert and sky/mod.rs's rust_and_wgsl_sky_structs_declare_the_same_fields_in_the_same_order
  * are the ONLY things standing between a lane added on one side of the FFI and silent garbage
  * in the shader — keep them in step. */
-static_assert(sizeof(WgrSkyRuntime) == 112, "WgrSkyRuntime layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrSkyRuntime) == 128, "WgrSkyRuntime layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTerrainSunShadow) == 16, "WgrTerrainSunShadow layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSkyVisibility) == 32, "WgrSkyVisibility layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrFoliage) == 80, "WgrFoliage layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrGtao) == 52, "WgrGtao layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSkyVis) == 48, "WgrSkyVis layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrDepthOfField) == 52, "WgrDepthOfField layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrRenderParams) == 636, "WgrRenderParams layout must match the Rust #[repr(C)] struct"); // REN-GI-010 WgrGi 64->68, sky-vis probe 44->48
+static_assert(sizeof(WgrLayeredFog) == 48, "WgrLayeredFog must match Rust");
+static_assert(offsetof(WgrRenderParams, layered_fog) == 636);
+static_assert(sizeof(WgrRenderParams) == 684, "WgrRenderParams layout must match the Rust #[repr(C)] struct"); // REN-GI-010 WgrGi 64->68, sky-vis probe 44->48
 static_assert(sizeof(WgrFrameParams) == 16, "WgrFrameParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCameraShadow) == 352 + 24 * 64 + 16,
               "WgrCameraShadow layout must match the Rust #[repr(C)] struct");

@@ -6018,6 +6018,27 @@ void DrawSkyTab()
 
     Dev::PanelSeparator();
     Dev::PanelHeading("Scene lighting (experimental, HDR only)");
+    if (ImGui::CollapsingHeader("Layered low fog (experimental)"))
+    {
+        changed |= Dev::Checkbox("Physical ASL fog layers", &s.layeredFog);
+        ImGui::TextWrapped("Opt-in, HDR and sky-based lighting required. Actual weather Fog scales density; "
+                           "Fog zero is unchanged. Current physical roof coverage is required. "
+                           "ASL layers are not terrain-following mist; covered/underground samples are excluded.");
+        changed |= Dev::SliderFloat("Fog scattering albedo", &s.fogLayerAlbedo, 0.0f, 1.0f, "%.3f");
+        changed |= Dev::SliderFloat("Fog forward scattering", &s.fogLayerG, 0.0f, 0.95f, "%.3f");
+        for (int i = 0; i < 2; ++i)
+        {
+            ImGui::PushID(i);
+            ImGui::Text("Layer %d (metres above sea level)", i + 1);
+            changed |= Dev::SliderFloat("Layer base ASL", &s.fogLayerBase[i], -100.0f, 1000.0f, "%.1f m");
+            changed |= Dev::SliderFloat("Layer top ASL", &s.fogLayerTop[i], -99.0f, 1000.0f, "%.1f m");
+            changed |= Dev::SliderFloat("Layer edge feather", &s.fogLayerFeather[i], 0.1f, 100.0f, "%.1f m");
+            changed |= Dev::SliderFloat("Layer extinction", &s.fogLayerExtinction[i], 0.0f, 0.05f, "%.4f /m");
+            ImGui::PopID();
+        }
+        ImGui::TextWrapped("Invalid base/top intervals refuse the effect. Fog layers overlapping the cloud deck "
+                           "also refuse it. No changes to tactical visibility or draw distance.");
+    }
     changed |= Dev::Checkbox("Sky-based lighting", &s.skyLighting);
     Dev::PanelTooltip("Light terrain + objects FROM the atmosphere: sun = sunIntensity*exposure*transmittance "
                       "(reddens at dusk, fades below the horizon), on the physical scale. Off = legacy GL33 sun. "

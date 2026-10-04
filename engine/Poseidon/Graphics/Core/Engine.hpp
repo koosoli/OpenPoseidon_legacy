@@ -2097,6 +2097,13 @@ class Engine : public IGraphicsEngine
         // This is a DIFFERENT question from fogFalloff below: that shapes how fast the ramp
         // climbs, so using it to thicken the far field also thickens the near and mid field.
         float fogFarClose = 0.85f;
+        bool layeredFog = false; // Opt-in: finite ASL transport; weather fog zero is unchanged.
+        float fogLayerBase[2] = {0.0f, 70.0f};
+        float fogLayerTop[2] = {35.0f, 100.0f};
+        float fogLayerFeather[2] = {5.0f, 5.0f};
+        float fogLayerExtinction[2] = {0.008f, 0.003f}; // 1/metre at weather fog 1
+        float fogLayerAlbedo = 0.95f;
+        float fogLayerG = 0.6f;
         float fogFalloff = 3.0f;                             // aerial fog distance-ramp exponent (pow(dist/drawDist, k)). High = clear near/mid, fog only at the edge; low (~1) = dense fog throughout, which reveals the volumetric terrain shadowing / god rays. Pushed via camera fog_color.w
 
         // Authored night-sky floor: a deep-blue radiance blended in by sun elevation so
@@ -2978,7 +2985,8 @@ class Engine : public IGraphicsEngine
         kWeatherCoverFarCull = 85,
         kWeatherCoverNearDraw = 86,
         kWeatherCoverFarDraw = 87,
-        kGpuRegionEnd = 88, // WGR_GPU_TIMER_REGION_COUNT: append-only shared timing contract
+        kLayeredFog = 88,
+        kGpuRegionEnd = 89, // WGR_GPU_TIMER_REGION_COUNT: append-only shared timing contract
         // Regions that are physically enclosed by another region (see GpuTimerContainedBy).
         kGrassGpuRegionShadow = 24,
         kTerrainGpuRegionColor = 32,

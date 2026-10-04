@@ -17732,6 +17732,7 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Weather cover: far cull",
         "Weather cover: near draw",
         "Weather cover: far draw",
+        "Layered ASL fog: transport",
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }
@@ -19814,6 +19815,10 @@ void EngineWgpu::PushRenderParams()
     // Authored sky look (no celestial/runtime — that rides WgrSkyRuntime in PushSkyRuntime).
     const float haze = GScene ? _sky.horizonHaze : 0.0f;
     const float deg2rad = 3.14159265f / 180.0f;
+    p.layered_fog.control = {_sky.layeredFog ? 1.0f : 0.0f, _sky.fogLayerAlbedo, _sky.fogLayerG, 0.0f};
+    for (int i = 0; i < 2; ++i)
+        p.layered_fog.layers[i] = {_sky.fogLayerBase[i], _sky.fogLayerTop[i],
+                                 _sky.fogLayerFeather[i], _sky.fogLayerExtinction[i]};
     p.sky.rayleigh = {_sky.rayleigh[0], _sky.rayleigh[1], _sky.rayleigh[2], _sky.rayleighHeight};
     p.sky.mie = {_sky.mie, _sky.mieG, _sky.mieHeight, _sky.turbidity};
     p.sky.ground_sun = {_sky.ground[0], _sky.ground[1], _sky.ground[2], _sky.sunIntensity};
@@ -20380,6 +20385,8 @@ void EngineWgpu::PushSkyRuntime()
     const double windX = _cloudOffsetX;
     const double windZ = _cloudOffsetZ;
     rt.misc = {_skyNight, camAlt, static_cast<float>(windX), static_cast<float>(windZ)};
+    rt.layer_fog_weather = {skySnap.weatherFog, skySnap.hasLandscape ? 1.0f : 0.0f,
+                            skySnap.hasCamera ? 1.0f : 0.0f, 0.0f};
     // Cloud EVOLUTION offsets, on the same clock and the same wrap as the wind above (so they
     // freeze together under the Water tab's freeze switches). Wind translates the field; these
     // walk it through the noise volume's third axis, which is what makes clouds form and dissolve

@@ -179,6 +179,7 @@ pub enum Region {
     WeatherCoverFarCull = 85,
     WeatherCoverNearDraw = 86,
     WeatherCoverFarDraw = 87,
+    LayeredFog = 88, // opt-in finite ASL transport compute, separate from atmospheric froxels
     FrameTotal = 25, // all submitted frame work; excludes acquire/present pacing
 }
 
@@ -191,7 +192,7 @@ pub const SHADOW_CASCADE_REGIONS: [Region; 4] = [
 ];
 
 /// Region count — the FFI getter's element contract (WGR_GPU_TIMER_REGION_COUNT).
-pub const REGION_COUNT: usize = 88;
+pub const REGION_COUNT: usize = 89;
 /// Water occupies [0, WATER_REGION_COUNT); grass occupies the remainder. The two
 /// debug tabs slice the shared array with these so neither shows the other's rows.
 /// Consumed on the C++ side (Engine::kWaterGpuRegionEnd) and by the layout test.
@@ -697,7 +698,7 @@ mod tests {
     // count + a few pinned indices catches accidental reordering on either side.
     #[test]
     fn region_indices_stay_ffi_stable() {
-        assert_eq!(REGION_COUNT, 88);
+        assert_eq!(REGION_COUNT, 89);
         assert_eq!(Region::WeatherCoverNearCull as u32, 84);
         assert_eq!(Region::WeatherCoverFarCull as u32, 85);
         assert_eq!(Region::WeatherCoverNearDraw as u32, 86);

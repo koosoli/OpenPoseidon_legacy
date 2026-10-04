@@ -1,4 +1,5 @@
 #define_import_path frame
+#import layered_fog_optics::{FogConsumer, fog_camera_matches, fog_transport}
 
 // Shared group(0): the per-frame camera/environment UBO plus the cascade shadow
 // map + comparison sampler. Every 3D pipeline (lit meshes, terrain) binds this
@@ -361,6 +362,8 @@ fn wet_soil_debug_mode() -> u32 {
 // ONE trilinear tap here — every fragment fogs by its OWN distance, so transparents and
 // foliage are correct and 2D (which never samples this) is simply never fogged. The
 // clamping sampler is shared with the terrain mask (binding 5).
+@group(0) @binding(21) var layer_fog_tex: texture_3d<f32>;
+@group(0) @binding(22) var<uniform> layer_fog_packet: FogConsumer;
 @group(0) @binding(7) var froxel_tex: texture_3d<f32>;
 @group(0) @binding(8) var froxel_samp: sampler;
 
@@ -661,7 +664,14 @@ fn apply_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
     let uv = (clip.xy / clip.w) * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
     let inscat = textureSampleLevel(froxel_tex, froxel_samp, vec3<f32>(uv, sqrt(u)), 0.0).rgb;
     g_atmo_amount = amount; // REN-ATM-001 census witness; see g_atmo_amount.
-    return mix(rgb, inscat, amount);
+    let background = mix(rgb, inscat, amount);
+    if (!fog_camera_matches(layer_fog_packet, frame.view, frame.proj, frame.cam_pos.xyz)) { return background; }
+    let absolute = world_pos_rel + frame.cam_pos.xyz;
+    // Current physical coverage, independent of artistic indoor AO. No inferred OPEN.
+    if (weather_map_coverage(absolute) < 0.5 || weather_map_reach(absolute) < 0.999) { return background; }
+    let local = textureSampleLevel(layer_fog_tex, froxel_samp,
+        vec3<f32>(uv, sqrt(clamp(dist / layer_fog_packet.control.y, 0.0, 1.0))), 0.0);
+    return fog_transport(background, local);
 }
 
 // Occlusion [0,1] of the sun by terrain at world position (xz, y): 0 = lit, 1 =

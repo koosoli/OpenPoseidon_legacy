@@ -23,6 +23,7 @@ mod shaders;
 mod smoke_volume;
 mod soft_particles;
 mod sky;
+mod layered_fog;
 mod temporal;
 mod terrain;
 mod textures;
@@ -982,6 +983,8 @@ pub struct Renderer {
     // drawn into the scene target before geometry. Params pushed via wgr_set_sky
     // (celestial per frame, authored on edit); skipped when control.x (enabled) = 0.
     sky: Sky,
+    layer_fog_settings: ffi::WgrLayeredFog,
+    layer_fog_weather: f32,
     sky_params: ffi::WgrSky,
     /// REN-SKY-004: does the planar water reflection record its own low-step cloud pipeline?
     /// Pushed from the host (sky look `night_params.w`) so the dev panel can turn it off.
@@ -2082,6 +2085,8 @@ impl Renderer {
             exposure_params: ffi::WgrExposure::default(),
             tonemap_params,
             sky,
+            layer_fog_settings: layered_fog::settings(Default::default()),
+            layer_fog_weather: 0.0,
             sky_params: ffi::WgrSky::default(),
             cloud_reflection_cheap: true,
             last_sun_shadow: None,
@@ -2230,6 +2235,7 @@ impl Renderer {
         sv.enabled &= !ablate.skyvis;
         self.gfx3d.set_interior_sky_settings(sv);
         self.gfx3d.set_gi_settings(&p.gi); // REN-GI-001
+        self.layer_fog_settings = layered_fog::settings(p.layered_fog);
     }
 
     // Per-frame sky runtime (wgr_set_sky_runtime): the celestial + camera fields, written into
@@ -2320,6 +2326,9 @@ impl Renderer {
         s.cloud4 = rt.cloud_evolve; // shape / detail / weather drift offsets (m, CPU-wrapped)
         s.moon_params = rt.moon_params; // radius / illuminated fraction / radiance / draw
         s.moon_sun = rt.moon_sun; // sub-solar direction + earthshine
+        self.layer_fog_weather = if rt.layer_fog_weather[1] >= 0.5 && rt.layer_fog_weather[2] >= 0.5
+            && rt.layer_fog_weather[0].is_finite() && (0.0..=1.0).contains(&rt.layer_fog_weather[0])
+            { rt.layer_fog_weather[0] } else { 0.0 };
     }
 
     // Debug readback of the current auto-exposure scale (blocking; dev panel only).
@@ -3969,6 +3978,9 @@ impl Renderer {
                     late_surface_slots.iter().filter(|v| **v).count(), surface_rays[2][0]));
             }
         }
+        self.sky.fog.invalidate(&self.queue);
+        self.gfx3d.set_layer_fog_requested(layered_fog::requested(&self.layer_fog_settings,
+            self.layer_fog_weather,self.hdr_enabled,self.cam_underground));
         self.gfx3d.begin_lod_demand(); // before model-table upload; disabled/no request is a no-op
         self.gfx3d.prepare(
             &self.device,
@@ -3989,6 +4001,7 @@ impl Renderer {
             self.terrain.snow_buffer(),
             self.terrain.holes_buffer(),
             self.sky.froxel_view(),
+            &self.sky.fog.view, &self.sky.fog.consumer,
             self.sky.sh_buffer(),
             &skyvis_view,
             self.sky.cloud_shadow_view(),
@@ -4532,6 +4545,7 @@ impl Renderer {
                         planar.size.0,
                         planar.size.1,
                         self.cloud_reflection_cheap,
+                        false,
                     );
                     let mut cloud_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("wgr_planar_reflection_cloud_composite"),
@@ -5009,6 +5023,21 @@ impl Renderer {
             self.gpu_timers.begin(&mut encoder, TimerRegion::SkySh);
             self.sky.render_sh(&mut encoder);
             self.gpu_timers.end(&mut encoder, TimerRegion::SkySh);
+            let fog_cam=terrain_batches.first().map(|b|b.camera as usize)
+                .or_else(||draws3d.first().map(|d|d.camera as usize)).unwrap_or(main_scene_cam);
+            if let Some(camera)=prepared_cameras.get(fog_cam) {
+                let below_clouds=self.layer_fog_settings.layers.iter().all(|l|
+                    l[1]+l[2]<self.sky_params.cloud0[2]) || self.sky_params.cloud0[0]<=0.0;
+                let cover=self.gfx3d.layer_fog_weather_inputs();
+                let fog_environment=self.sky.env_view().clone();
+                let fog_clouds=self.sky.cloud_shadow_view().clone();
+                self.gpu_timers.begin(&mut encoder,TimerRegion::LayeredFog);
+                self.sky.fog.render(&self.device,&self.queue,&mut encoder,&self.layer_fog_settings,
+                    self.layer_fog_weather,self.hdr_enabled,self.cam_underground,camera,ivp,
+                    &conform_params,&heightmap_view,heightmap_gen,&shadow_mapping,&shadow_mask_view,
+                    self.gfx3d.shadow_sample_view(),&fog_environment,&fog_clouds,cover,below_clouds);
+                self.gpu_timers.end(&mut encoder,TimerRegion::LayeredFog);
+            }
             self.gpu_timers.begin(&mut encoder, TimerRegion::SkyDraw);
             encoder.push_debug_group("wgr_sky");
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -5033,6 +5062,7 @@ impl Renderer {
                 multiview_mask: None,
             });
             self.sky.render(&mut pass);
+            self.sky.fog.render_background(&mut pass);
             drop(pass);
             encoder.pop_debug_group();
             self.gpu_timers.end(&mut encoder, TimerRegion::SkyDraw);
@@ -6027,6 +6057,7 @@ impl Renderer {
                         self.render_size().0,
                         self.render_size().1,
                         false,
+                        true,
                     );
                     self.gpu_timers.end(&mut encoder, TimerRegion::CloudMarch);
                     self.gpu_timers

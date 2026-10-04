@@ -1799,6 +1799,10 @@ impl CameraGroup {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {binding:21,visibility:wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                    ty:wgpu::BindingType::Texture {sample_type:wgpu::TextureSampleType::Float {filterable:true},view_dimension:wgpu::TextureViewDimension::D3,multisampled:false},count:None},
+                wgpu::BindGroupLayoutEntry {binding:22,visibility:wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                    ty:wgpu::BindingType::Buffer {ty:wgpu::BufferBindingType::Uniform,has_dynamic_offset:false,min_binding_size:None},count:None},
             ],
         });
         let lights_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1912,6 +1916,7 @@ impl CameraGroup {
         weather_far_view: &wgpu::TextureView,
         weather_far_gen: u64,
         sky_env_view: &wgpu::TextureView,
+        fog_view: &wgpu::TextureView, fog_consumer: &wgpu::Buffer,
     ) {
         let needed = count as u64 * self.stride;
         let grow = self.cap < needed || self.buf.is_none();
@@ -2032,6 +2037,8 @@ impl CameraGroup {
                         binding: 19,
                         resource: wgpu::BindingResource::TextureView(sky_env_view),
                     },
+                    wgpu::BindGroupEntry {binding:21,resource:wgpu::BindingResource::TextureView(fog_view)},
+                    wgpu::BindGroupEntry {binding:22,resource:fog_consumer.as_entire_binding()},
                 ],
             });
             let main_bind = make_bind(weather_view, weather_far_view);
@@ -4323,6 +4330,7 @@ pub struct Gfx3d {
     render_scale_lane: [f32; 4],
     snow_surface: [f32; 4],
     ground_weather: [f32; 4],
+    layer_fog_requested: bool,
     object_snow_enabled: bool,
     snow_surface_trace: bool,
     snow_surface_trace_rows: u8,
@@ -5280,6 +5288,7 @@ impl Gfx3d {
             render_scale_lane: [0.0; 4],
             snow_surface: [0.0, -1.0, 0.0, 0.0],
             ground_weather: [0.0; 4],
+            layer_fog_requested: false,
             object_snow_enabled: std::env::var("WGR_OBJECT_SNOW").as_deref() != Ok("0"),
             snow_surface_trace: std::env::var("WGR_SNOW_SURFACE_FIXTURE").as_deref() == Ok("1"),
             snow_surface_trace_rows: 0,
@@ -8137,6 +8146,7 @@ impl Gfx3d {
         snow: &wgpu::Buffer,
         holes: &wgpu::Buffer,
         froxel_view: &wgpu::TextureView,
+        fog_view: &wgpu::TextureView, fog_consumer: &wgpu::Buffer,
         sky_sh_buf: &wgpu::Buffer,
         skyvis_view: &wgpu::TextureView,
         // CLD-020 cloud sun-transmittance map, owned by the Sky pass.
@@ -8186,10 +8196,10 @@ impl Gfx3d {
             let sky_cam = glam::Vec3::new(main.cam_pos[0], main.cam_pos[1], main.cam_pos[2]);
             self.prepare_interior_sky(device, sky_cam);
             self.weather_cover.prepare(device, queue, sky_cam, self.cull.instance_epoch(),
-                self.snow_surface, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0);
+                self.snow_surface, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0, self.layer_fog_requested);
             self.weather_cover.camera_offset = (gtao_camera as u64 * self.cameras.stride) as u32;
             self.weather_cover_far.prepare(device, queue, sky_cam, self.cull.instance_epoch(),
-                self.snow_surface, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0);
+                self.snow_surface, self.ground_weather, self.gpu_driven_enabled && self.cull.instance_count() > 0, self.layer_fog_requested);
             self.weather_cover_far.camera_offset = (gtao_camera as u64 * self.cameras.stride) as u32;
             let epoch = self.cull.instance_epoch();
             let gi_retry = self.gi_rsm_publication.as_ref()
@@ -8248,7 +8258,7 @@ impl Gfx3d {
                 self.weather_cover.generation,
                 self.weather_cover_far.target.as_ref().map(|(_,v)|v).unwrap_or(&self.weather_cover.dummy),
                 self.weather_cover_far.generation,
-                env_view,
+                env_view, fog_view, fog_consumer,
             );
             let buf = self.cameras.buf.as_ref().unwrap();
             let mut camera_upload = camera_upload::CameraUpload::new(
@@ -11697,6 +11707,20 @@ impl Gfx3d {
         } else { None }
     }
 
+    pub fn set_layer_fog_requested(&mut self, active:bool) {self.layer_fog_requested=active;}
+    // Exact current encoder publication, not yesterday's committed map. Overflow
+    // remains a GPU refusal through the real COUNT/EMIT buffers.
+    pub fn layer_fog_weather_inputs(&self)->crate::layered_fog::WeatherInputs {
+        let maps=[&self.weather_cover,&self.weather_cover_far];
+        let retained=self.gpu_driven_enabled && self.cull.instance_count()>0;
+        crate::layered_fog::WeatherInputs {
+            views:std::array::from_fn(|i|maps[i].target.as_ref().map(|(_,v)|v).unwrap_or(&maps[i].dummy).clone()),
+            matrices:std::array::from_fn(|i|maps[i].view.map(|v|v.view_proj.to_cols_array_2d()).unwrap_or([[0.0;4];4])),
+            controls:std::array::from_fn(|i|maps[i].params(maps[i].publication.get().readable(maps[i].identity))),
+            counts:std::array::from_fn(|i|if retained {self.cull.sky_counter_buf(if i==0 {weather_cover::CULL_VIEW}else{weather_cover::FAR_CULL_VIEW}).cloned()}else{None}),
+            capacities:[if retained {self.cull.variant_capacity()}else{0};2],
+        }
+    }
     pub fn set_ground_weather(&mut self, params: [f32; 4]) {
         self.ground_weather = params;
     }

@@ -1,3 +1,4 @@
+#import layered_fog_optics::FogConsumer
 // Over-scene cloud composite (plan Phase 1). Upsamples the low-res cloud buffer produced by
 // fs_cloud (sky.wgsl) — (inscatter.rgb, transmittance.a) — and outputs it PREMULTIPLIED so a
 // fixed-function blend does `out = inscatter + scene*transmittance` over the lit HDR scene:
@@ -16,6 +17,10 @@
 @group(0) @binding(1) var cloud_samp: sampler;
 // Full-res resolved prepass depth (reversed-Z: 0 = far/sky). Same view fs_cloud bounded its march to.
 @group(0) @binding(2) var scene_depth: texture_depth_2d;
+
+@group(0) @binding(3) var layer_fog: texture_3d<f32>;
+@group(0) @binding(4) var<uniform> layer_packet: FogConsumer;
+@group(0) @binding(5) var<uniform> layer_control: vec4<f32>;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -76,5 +81,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         wsum += w;
     }
     let c = acc / max(wsum, 1e-6);
-    return vec4<f32>(c.rgb, c.a); // rgb = premultiplied inscatter, a = transmittance
+    if (layer_control.x < 0.5 || layer_packet.control.x < 0.5) { return c; }
+    // The finite layers are certified below the cloud deck. The background
+    // already contains their L/T; transport cloud radiance through them once.
+    var distance = layer_packet.control.y;
+    if (d_ref > 0.0) {
+        let ndc = in.uv * vec2<f32>(2.0,-2.0) + vec2<f32>(-1.0,1.0);
+        let position = layer_packet.inv_vp * vec4<f32>(ndc,d_ref,1.0);
+        distance = length(position.xyz / position.w);
+    }
+    let local = textureSampleLevel(layer_fog,cloud_samp,
+        vec3<f32>(in.uv,sqrt(clamp(distance/layer_packet.control.y,0.0,1.0))),0.0);
+    return vec4<f32>(c.rgb * local.a + local.rgb * (1.0-c.a),c.a);
 }

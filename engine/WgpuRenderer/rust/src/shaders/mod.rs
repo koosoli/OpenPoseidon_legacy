@@ -67,7 +67,7 @@ pub fn early_depth_supported() -> bool {
     *EARLY_DEPTH_SUPPORTED.get().unwrap_or(&false)
 }
 
-fn shader_defs() -> std::collections::HashMap<String, naga_oil::compose::ShaderDefValue> {
+pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compose::ShaderDefValue> {
     let mut defs = std::collections::HashMap::new();
     if std::env::var("WGR_TREE_SNOW").as_deref() == Ok("0") {
         defs.insert("DISABLE_TREE_SNOW".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
@@ -137,6 +137,7 @@ pub fn build_composer() -> Composer {
             "water/water_optics.wgsl",
         ),
         (include_str!("gbuffer.wgsl"), "gbuffer.wgsl"),
+        (include_str!("layered_fog_optics.wgsl"), "layered_fog_optics.wgsl"),
         (include_str!("frame.wgsl"), "frame.wgsl"),
         (include_str!("rain_water_body.wgsl"), "rain_water_body.wgsl"),
         (include_str!("rain_water_optics.wgsl"), "rain_water_optics.wgsl"),

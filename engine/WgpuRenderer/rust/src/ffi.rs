@@ -682,6 +682,7 @@ pub struct WgrSkyRuntime {
     pub moon_params: WgrVec4,
     // xyz = unit dir TO the sun as seen from the moon; w = earthshine floor.
     pub moon_sun: WgrVec4,
+    pub layer_fog_weather: WgrVec4, // captured fog amount, landscape-ready, camera-ready, reserved
 }
 
 // Long-distance terrain sun-shadow sweep (was wgr_terrain_set_sun_shadow's args).
@@ -902,6 +903,12 @@ impl Default for WgrDepthOfField {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct WgrLayeredFog { pub control: [f32;4], pub layers: [[f32;4];2], }
+impl Default for WgrLayeredFog {
+    fn default()->Self {Self {control:[0.0,0.95,0.6,0.0],layers:[[0.0,35.0,5.0,0.008],[70.0,100.0,5.0,0.003]]}}
+}
+#[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct WgrRenderParams {
     pub tonemap: WgrTonemap,
@@ -914,6 +921,7 @@ pub struct WgrRenderParams {
     pub interior_sky: WgrSkyVis,
     pub depth_of_field: WgrDepthOfField,
     pub gi: WgrGi,
+    pub layered_fog: WgrLayeredFog,
 }
 
 // REN-GI-001 -- the irradiance probe volume's parameters (see gfx3d/gi.rs). 64 bytes.
@@ -1724,7 +1732,7 @@ const _: () = assert!(std::mem::size_of::<WgrTonemap>() == 64);
 // has to move together — any one of them left behind is silent garbage in the shader.
 const _: () = assert!(std::mem::size_of::<WgrSky>() == 288);
 const _: () = assert!(std::mem::size_of::<WgrSkyLook>() == 192);
-const _: () = assert!(std::mem::size_of::<WgrSkyRuntime>() == 112);
+const _: () = assert!(std::mem::size_of::<WgrSkyRuntime>() == 128);
 const _: () = assert!(std::mem::size_of::<WgrTerrainSunShadow>() == 16);
 // 20 header words, then satellite/mask UVs and six per-slot UVs of two vec4
 // each. The WGSL `TerrainMaterial` in terrain.wgsl mirrors this byte for byte.
@@ -1735,7 +1743,9 @@ const _: () = assert!(std::mem::size_of::<WgrFoliage>() == 80);
 const _: () = assert!(std::mem::size_of::<WgrGtao>() == 52);
 const _: () = assert!(std::mem::size_of::<WgrSkyVis>() == 48); // + probe counter
 const _: () = assert!(std::mem::size_of::<WgrDepthOfField>() == 52);
-const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 636); // NV-001: WgrTonemap 48 -> 64 // REN-GI-010 WgrGi 64->68, sky-vis probe 44->48
+const _: () = assert!(std::mem::size_of::<WgrLayeredFog>() == 48);
+const _: () = assert!(std::mem::offset_of!(WgrRenderParams, layered_fog) == 636);
+const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 684); // NV-001: WgrTonemap 48 -> 64 // REN-GI-010 WgrGi 64->68, sky-vis probe 44->48
 const _: () = assert!(std::mem::size_of::<WgrFrameParams>() == 16);
 // LGT-010 grew this by four mat4 (local_vp) and one vec4 (local_ctl): 352 + 256 + 16.
 // LGT-015 took local_vp from four to sixteen (+768): a point light needs six of them.
@@ -1887,9 +1897,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(20)
+            .unwrap_or(21)
     } else {
-        20
+        21
     }
 }
 
@@ -2195,7 +2205,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 20); // Paired cave/hole/swimmer integration
+        assert_eq!(super::wgr_abi_version(), 21); // Paired cave/hole/swimmer integration
     }
 
     #[test]
