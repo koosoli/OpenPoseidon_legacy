@@ -5038,6 +5038,7 @@ impl Renderer {
                     self.gfx3d.shadow_sample_view(),&fog_environment,&fog_clouds,cover,below_clouds,[self.sky_params.cloud0[0],self.sky_params.cloud0[2]],self.terrain.native_height_bounds());
                 self.gpu_timers.end(&mut encoder,TimerRegion::LayeredFog);
             }
+            self.sky.update_fog_chroma(&self.queue,self.sky.fog.is_ready(),self.layer_fog_weather);
             self.gpu_timers.begin(&mut encoder, TimerRegion::SkyDraw);
             encoder.push_debug_group("wgr_sky");
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

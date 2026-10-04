@@ -111,6 +111,34 @@ fn actual_fog_light_quadrature_gpu_stays_in_thin_air_and_conserves_sky_energy() 
 }
 
 #[test]
+fn actual_fog_neutral_chroma_gpu_matches_far_sky_and_preserves_luminance() {
+ let(device,queue)=crate::gfx3d::cull::tests::headless().expect("fog chroma proof requires device");
+ const PROBE:&str=r#"
+ #import layered_fog_optics::{fog_neutral_radiance,fog_neutral_horizon,fog_legacy_closure,fog_transport}
+ @group(0) @binding(0) var<storage,read_write> result:array<vec4<f32>>;
+ @compute @workgroup_size(1) fn cs_probe(){
+  let blue=vec3<f32>(1.0,2.0,8.0);let y=dot(blue,vec3<f32>(0.2126,0.7152,0.0722));
+  result[0]=vec4<f32>(fog_neutral_radiance(blue,0.0),y);
+  result[1]=vec4<f32>(fog_neutral_radiance(blue,0.85),y);
+  for(var i=0u;i<5u;i=i+1u){let ry=f32(i)*0.15-0.15;
+   let sky=fog_neutral_radiance(blue,fog_neutral_horizon(ry,0.85));
+   let local=vec4<f32>(0.2,0.2,0.2,0.4);let far=vec4<f32>(0.4,0.4,0.4,0.25);
+   let surface=fog_legacy_closure(vec3<f32>(0.1),sky,1.0,local,far,true);
+   let background=fog_transport(sky,far);
+   result[2u+i]=vec4<f32>(surface-background,fog_neutral_horizon(ry,0.85));
+  }
+ }
+ "#;
+ let samples=read_probe(&device,&queue,PROBE,&[],28);
+ assert_eq!(&samples[0..3],&[1.,2.,8.],"Fog OFF must be exact identity");
+ let neutral=&samples[4..7];let y=neutral[0]*0.2126+neutral[1]*0.7152+neutral[2]*0.0722;
+ assert!((y-samples[7]).abs()<1e-5,"No luminance/exposure gain from fog chroma");
+ assert!(((neutral[2]-neutral[0])-7.*0.15).abs()<1e-5,"Blue chroma reduced without altering material radiance");
+ for row in samples[8..].chunks_exact(4){assert_eq!(&row[..3],&[0.;3],"Distant surface and fog horizon must match");}
+ assert_eq!(samples[11],0.85);assert_eq!(samples[27],0.,"Zenith outside mist horizon remains unchanged");
+}
+
+#[test]
 fn actual_fog_far_closure_gpu_preserves_sky_and_gated_foreground() {
  let(device,queue)=crate::gfx3d::cull::tests::headless().expect("actual fog closure proof requires device");
  const PROBE:&str=r#"

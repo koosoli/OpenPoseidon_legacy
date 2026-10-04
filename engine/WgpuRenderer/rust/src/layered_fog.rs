@@ -60,6 +60,7 @@ pub struct LayeredFog {
     ready: bool, trace: bool, frames: u64,
 }
 impl LayeredFog {
+    pub fn is_ready(&self)->bool { self.ready }
     pub fn new(device:&wgpu::Device, queue:&wgpu::Queue, composer:&mut naga_oil::compose::Composer,
                format:wgpu::TextureFormat, samples:u32)->Self {
         let buffer=|name,size| device.create_buffer(&wgpu::BufferDescriptor {label:Some(name),size,
