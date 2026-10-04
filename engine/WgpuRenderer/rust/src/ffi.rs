@@ -904,9 +904,9 @@ impl Default for WgrDepthOfField {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct WgrLayeredFog { pub control: [f32;4], pub layers: [[f32;4];2], }
+pub struct WgrLayeredFog { pub control: [f32;4], pub layers: [[f32;4];2], pub terrain: [f32;4], pub patch: [f32;4], }
 impl Default for WgrLayeredFog {
-    fn default()->Self {Self {control:[0.0,0.95,0.6,0.0],layers:[[0.0,35.0,5.0,0.008],[70.0,100.0,5.0,0.003]]}}
+    fn default()->Self {Self {control:[0.0,0.95,0.6,0.0],layers:[[0.0,35.0,5.0,0.008],[70.0,100.0,5.0,0.003]],terrain:[0.0;4],patch:[0.0;4]}}
 }
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -1743,9 +1743,9 @@ const _: () = assert!(std::mem::size_of::<WgrFoliage>() == 80);
 const _: () = assert!(std::mem::size_of::<WgrGtao>() == 52);
 const _: () = assert!(std::mem::size_of::<WgrSkyVis>() == 48); // + probe counter
 const _: () = assert!(std::mem::size_of::<WgrDepthOfField>() == 52);
-const _: () = assert!(std::mem::size_of::<WgrLayeredFog>() == 48);
+const _: () = assert!(std::mem::size_of::<WgrLayeredFog>() == 80);
 const _: () = assert!(std::mem::offset_of!(WgrRenderParams, layered_fog) == 636);
-const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 684); // NV-001: WgrTonemap 48 -> 64 // REN-GI-010 WgrGi 64->68, sky-vis probe 44->48
+const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 716);
 const _: () = assert!(std::mem::size_of::<WgrFrameParams>() == 16);
 // LGT-010 grew this by four mat4 (local_vp) and one vec4 (local_ctl): 352 + 256 + 16.
 // LGT-015 took local_vp from four to sixteen (+768): a point light needs six of them.

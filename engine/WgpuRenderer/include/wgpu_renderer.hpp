@@ -35,7 +35,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 21u // Explicit layered-fog config and authoritative weather packet
+#define WGR_ABI_VERSION 22u // Terrain-following fog and coherent density modulation
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -888,6 +888,8 @@ struct WgrLayeredFog
 {
     WgrVec4 control; // enabled, scattering albedo, HG anisotropy, reserved
     WgrVec4 layers[2]; // base/top ASL metres, linear boundary feather metres, extinction 1/m
+    WgrVec4 terrain; // follow, reference ASL, valley strength, valley radius metres
+    WgrVec4 patch; // strength, horizontal scale metres, vertical scale metres, coverage feather metres
 };
 struct WgrRenderParams
 {
@@ -2327,9 +2329,9 @@ static_assert(sizeof(WgrFoliage) == 80, "WgrFoliage layout must match the Rust #
 static_assert(sizeof(WgrGtao) == 52, "WgrGtao layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSkyVis) == 48, "WgrSkyVis layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrDepthOfField) == 52, "WgrDepthOfField layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrLayeredFog) == 48, "WgrLayeredFog must match Rust");
+static_assert(sizeof(WgrLayeredFog) == 80, "WgrLayeredFog must match Rust");
 static_assert(offsetof(WgrRenderParams, layered_fog) == 636);
-static_assert(sizeof(WgrRenderParams) == 684, "WgrRenderParams layout must match the Rust #[repr(C)] struct"); // REN-GI-010 WgrGi 64->68, sky-vis probe 44->48
+static_assert(sizeof(WgrRenderParams) == 716, "WgrRenderParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrFrameParams) == 16, "WgrFrameParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCameraShadow) == 352 + 24 * 64 + 16,
               "WgrCameraShadow layout must match the Rust #[repr(C)] struct");

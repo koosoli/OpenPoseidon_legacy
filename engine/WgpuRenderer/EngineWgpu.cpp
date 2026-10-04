@@ -1471,6 +1471,28 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
         _sky.fogLayerFeather[i] = feather;
         _sky.fogLayerExtinction[i] = extinction;
     }
+    for (int i = 0; i < 2; ++i)
+    {
+        const char* name = i == 0 ? "WGR_FOG_TERRAIN" : "WGR_FOG_PATCH";
+        const char* profile = std::getenv(name);
+        if (!profile) continue;
+        float a, b, c, d; char extra;
+        if (std::sscanf(profile, "%f,%f,%f,%f %c", &a, &b, &c, &d, &extra) != 4)
+        {
+            _sky.layeredFog = false;
+            continue;
+        }
+        if (i == 0)
+        {
+            _sky.fogTerrainFollow = a; _sky.fogTerrainReference = b;
+            _sky.fogValleyStrength = c; _sky.fogValleyRadius = d;
+        }
+        else
+        {
+            _sky.fogPatchStrength = a; _sky.fogPatchHorizontalScale = b;
+            _sky.fogPatchVerticalScale = c; _sky.fogCoverageFeather = d;
+        }
+    }
 
     const char* sourceProbe = std::getenv("WGR_GEOMETRY_MAIN_COUNT_PROBE");
     if (sourceProbe && std::strcmp(sourceProbe, "1") == 0)
@@ -19837,6 +19859,8 @@ void EngineWgpu::PushRenderParams()
     const float haze = GScene ? _sky.horizonHaze : 0.0f;
     const float deg2rad = 3.14159265f / 180.0f;
     p.layered_fog.control = {_sky.layeredFog ? 1.0f : 0.0f, _sky.fogLayerAlbedo, _sky.fogLayerG, 0.0f};
+    p.layered_fog.terrain = {_sky.fogTerrainFollow, _sky.fogTerrainReference, _sky.fogValleyStrength, _sky.fogValleyRadius};
+    p.layered_fog.patch = {_sky.fogPatchStrength, _sky.fogPatchHorizontalScale, _sky.fogPatchVerticalScale, _sky.fogCoverageFeather};
     for (int i = 0; i < 2; ++i)
         p.layered_fog.layers[i] = {_sky.fogLayerBase[i], _sky.fogLayerTop[i],
                                  _sky.fogLayerFeather[i], _sky.fogLayerExtinction[i]};

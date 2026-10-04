@@ -2104,6 +2104,14 @@ class Engine : public IGraphicsEngine
         float fogLayerExtinction[2] = {0.008f, 0.003f}; // 1/metre at weather fog 1
         float fogLayerAlbedo = 0.95f;
         float fogLayerG = 0.6f;
+        float fogTerrainFollow = 1.0f; // 0: fixed ASL; 1: layer height above local ground
+        float fogTerrainReference = 0.0f;
+        float fogValleyStrength = 1.0f;
+        float fogValleyRadius = 150.0f;
+        float fogPatchStrength = 0.45f;
+        float fogPatchHorizontalScale = 250.0f;
+        float fogPatchVerticalScale = 70.0f;
+        float fogCoverageFeather = 30.0f;
         float fogFalloff = 3.0f;                             // aerial fog distance-ramp exponent (pow(dist/drawDist, k)). High = clear near/mid, fog only at the edge; low (~1) = dense fog throughout, which reveals the volumetric terrain shadowing / god rays. Pushed via camera fog_color.w
 
         // Authored night-sky floor: a deep-blue radiance blended in by sun elevation so
