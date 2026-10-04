@@ -41,6 +41,7 @@
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 
 #include <Poseidon/AI/Path/AIDefs.hpp>
+#include <Poseidon/AI/Path/SimplePathAdmission.hpp>
 #pragma warning(disable : 4355)
 
 namespace Poseidon
@@ -1644,6 +1645,10 @@ Vector3 AIUnit::GetFormationAbsolute() const
 
 bool AIUnit::IsSimplePath(Vector3Val from, Vector3Val pos)
 {
+    if (!SimplePathEndpointsAdmitted({from.X(), from.Y(), from.Z()},
+                                     {pos.X(), pos.Y(), pos.Z()}, InvOperItemGrid))
+        return false;
+
     const float maxDist = 300;
     float dist2 = (from - pos).SquareSizeXZ();
     if (dist2 > Square(maxDist))
