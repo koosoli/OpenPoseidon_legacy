@@ -7410,6 +7410,7 @@ void DrawMainWindow()
         ImGui::BulletText("Picture Mode / depth of field");
         ImGui::BulletText("Street lamps, bulb glow, local shadows and beam shape");
         ImGui::BulletText("Sky, water and road appearance");
+        ImGui::BulletText("Fog appearance and amount (snow's automatic fog still applies)");
         ImGui::BulletText("Snow settings (existing cover and tracks are retained)");
         ImGui::Separator();
         ImGui::TextDisabled("Everything else is untouched. A tab is reset only where it says\n"

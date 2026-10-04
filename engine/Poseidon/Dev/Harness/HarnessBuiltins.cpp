@@ -1639,6 +1639,9 @@ void RegisterScreenshot(HarnessServer& hs)
                 };
                 fogFields("fogTerrain", {sky.fogTerrainFollow, sky.fogTerrainReference, sky.fogValleyStrength, sky.fogValleyRadius});
                 fogFields("fogPatch", {sky.fogPatchStrength, sky.fogPatchHorizontalScale, sky.fogPatchVerticalScale, sky.fogCoverageFeather});
+                fogFields("fogLayer0", {sky.fogLayerBase[0], sky.fogLayerTop[0], sky.fogLayerFeather[0], sky.fogLayerExtinction[0]});
+                fogFields("fogLayer1", {sky.fogLayerBase[1], sky.fogLayerTop[1], sky.fogLayerFeather[1], sky.fogLayerExtinction[1]});
+                fogFields("fogOptics", {sky.fogLayerAlbedo, sky.fogLayerG, sky.fogFarClose, sky.fogFalloff});
                 cJSON_AddBoolToObject(look, "coverageFromWeather", sky.cloudCoverageFromWeather);
                 cJSON_AddBoolToObject(look, "coveragePinned", std::getenv("WGR_CLOUD_COVERAGE") != nullptr);
                 cJSON_AddNumberToObject(look, "coverage", sky.cloudCoverage);

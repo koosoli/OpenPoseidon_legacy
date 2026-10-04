@@ -24,6 +24,7 @@
 #include <imgui.h>
 
 #include <Poseidon/Dev/Diag/WeatherTab.hpp>
+#include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -858,6 +859,10 @@ void DrawRainSection()
 
 void DrawFogSection()
 {
+    if (ImGui::Button("Reset fog settings")) ResetFogSettings();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Restore volumetric fog, both layers, terrain/patch controls and light scattering.\n"
+                          "Fog amount returns to zero; snow's automatic fog still applies.");
     if (GWorld)
     {
         float wantedFog = GWorld->GetFog();

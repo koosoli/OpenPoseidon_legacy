@@ -29,6 +29,7 @@
 #include <Poseidon/World/Physics/LooseObjects.hpp>
 #include <Poseidon/World/Entities/Weapons/Penetration.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/World.hpp>
 
 #include <map>
 
@@ -193,6 +194,38 @@ void DrawPanelSearch()
     ImGui::Separator();
 }
 
+void ResetFogSettings()
+{
+    if (GEngine && GEngine->SupportsSky())
+    {
+        auto settings = GEngine->GetSkySettings();
+        const Engine::SkySettings defaults;
+        settings.layeredFog = defaults.layeredFog;
+        settings.fogFarClose = defaults.fogFarClose;
+        settings.fogFalloff = defaults.fogFalloff;
+        for (int i = 0; i < 2; ++i)
+        {
+            settings.fogLayerBase[i] = defaults.fogLayerBase[i];
+            settings.fogLayerTop[i] = defaults.fogLayerTop[i];
+            settings.fogLayerFeather[i] = defaults.fogLayerFeather[i];
+            settings.fogLayerExtinction[i] = defaults.fogLayerExtinction[i];
+        }
+        settings.fogLayerAlbedo = defaults.fogLayerAlbedo;
+        settings.fogLayerG = defaults.fogLayerG;
+        settings.fogTerrainFollow = defaults.fogTerrainFollow;
+        settings.fogTerrainReference = defaults.fogTerrainReference;
+        settings.fogValleyStrength = defaults.fogValleyStrength;
+        settings.fogValleyRadius = defaults.fogValleyRadius;
+        settings.fogPatchStrength = defaults.fogPatchStrength;
+        settings.fogPatchHorizontalScale = defaults.fogPatchHorizontalScale;
+        settings.fogPatchVerticalScale = defaults.fogPatchVerticalScale;
+        settings.fogCoverageFeather = defaults.fogCoverageFeather;
+        GEngine->SetSkySettings(settings);
+    }
+    if (GWorld && GLandscape)
+        GWorld->SetWeather(GWorld->GetOvercast(), 0.0f, 0.0f);
+}
+
 void ResetPanelSettings()
 {
     // Explicit list. A tab that wants resetting says so here; anything not named
@@ -234,6 +267,7 @@ void ResetPanelSettings()
             GEngine->SetWaterSettings(Engine::WaterSettings{});
         }
     }
+    ResetFogSettings();
     // Ballistics recorder
     Ballistics::SetEnabled(false);
     Ballistics::SetDrawTrails(true);

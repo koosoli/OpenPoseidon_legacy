@@ -44,6 +44,9 @@ bool PanelSearchPreseeded();
 /// corrupt anything.
 void ResetPanelSettings();
 
+/// Restores fog appearance and zero authored fog amount; snow's automatic fog still applies.
+void ResetFogSettings();
+
 /// Draw the search box. Call ONCE per frame, above the tab bar.
 ///
 /// This also resets the per-frame attribution state, which is why it must come
