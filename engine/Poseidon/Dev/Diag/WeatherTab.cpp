@@ -1025,7 +1025,7 @@ void DrawFogSection()
         if (GWorld && GWorld->GetFog() <= 0.0f)
             ImGui::TextDisabled("Set Fog amount above zero to see a layer.");
     }
-    if (settings.layeredFog && ImGui::TreeNode("Fog layers and lighting"))
+    if (settings.layeredFog && ImGui::TreeNode("Fog terrain, patches and lighting"))
     {
         changed |= ImGui::SliderFloat("Follow terrain", &settings.fogTerrainFollow, 0.0f, 1.0f, "%.2f");
         ImGui::TextWrapped("0 keeps fixed sea-level layers. 1 follows the local ground; with reference altitude 0, layer heights are metres above ground. Intermediate values let mist collect below hills.");
@@ -1036,8 +1036,9 @@ void DrawFogSection()
         changed |= ImGui::SliderFloat("Patch width", &settings.fogPatchHorizontalScale, 25.0f, 2000.0f, "%.0f m");
         changed |= ImGui::SliderFloat("Patch height", &settings.fogPatchVerticalScale, 5.0f, 1000.0f, "%.0f m");
         changed |= ImGui::SliderFloat("Coverage edge softness", &settings.fogCoverageFeather, 0.0f, 100.0f, "%.0f m");
-        changed |= ImGui::SliderFloat("Scattering albedo", &settings.fogLayerAlbedo, 0.0f, 1.0f, "%.3f");
-        changed |= ImGui::SliderFloat("Forward scattering", &settings.fogLayerG, 0.0f, 0.95f, "%.3f");
+        changed |= ImGui::SliderFloat("Light scattering", &settings.fogLayerAlbedo, 0.0f, 1.0f, "%.3f");
+        changed |= ImGui::SliderFloat("Sun-ray focus", &settings.fogLayerG, 0.0f, 0.95f, "%.3f");
+        ImGui::TextWrapped("Light scattering controls the fog's brightness. Sun-ray focus makes sunlight shafts more prominent when looking toward the sun; terrain, buildings and clouds control where light reaches the mist.");
         ImGui::TextWrapped("Physical sky lighting and current terrain/roof coverage are required. Covered ray segments are excluded. Invalid intervals or overlap with the cloud deck refuse the layer effect.");
         ImGui::TreePop();
     }
