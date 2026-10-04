@@ -17,6 +17,31 @@ $saved=@{};foreach($key in @($settings.Keys)+$clear){$saved[$key]=[Environment]:
 function Send($command){$writer.WriteLine(($command|ConvertTo-Json -Depth 8 -Compress));do{$line=$reader.ReadLine();if(!$line){throw 'Harness disconnected'};$reply=$line|ConvertFrom-Json}while($null -eq $reply.ok);if(!$reply.ok){throw $line};return $reply}
 function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
 function Eval([string]$code){$v=([string](Send @{cmd='eval';code=$code}).result).Trim();if($v.StartsWith('"')){return $v.Substring(1,$v.Length-2).Replace('""','"')};return ConvertFrom-Json -InputObject $v -NoEnumerate}
+function AimTarget([double]$targetX,[double]$targetY,[double]$targetZ){
+ # Reset inherited mouse look through ordinary SDL input, never pin the camera.
+ # Read the actual selected muzzle and calibrate each axis before bounded correction.
+ $proof=@();foreach($axis in @('pitch','yaw')){
+  $first=Send @{cmd='player_weapon_state'}
+  $firstAngle=if($axis -eq 'pitch'){[Math]::Asin([Math]::Clamp([double]$first.directionY,-1,1))}else{[Math]::Atan2([double]$first.directionX,[double]$first.directionZ)}
+  $null=Send @{cmd='mouse_motion';dx=$(if($axis -eq 'yaw'){8}else{0});dy=$(if($axis -eq 'pitch'){8}else{0})};Start-Sleep -Milliseconds 250
+  $next=Send @{cmd='player_weapon_state'}
+  $nextAngle=if($axis -eq 'pitch'){[Math]::Asin([Math]::Clamp([double]$next.directionY,-1,1))}else{[Math]::Atan2([double]$next.directionX,[double]$next.directionZ)}
+  $change=[Math]::Atan2([Math]::Sin($nextAngle-$firstAngle),[Math]::Cos($nextAngle-$firstAngle));$gain=$change/8
+  if([Math]::Abs($gain) -lt .00005 -or [Math]::Abs($gain) -gt .1){throw ('Mouse '+$axis+' calibration unavailable: '+$gain)}
+  $aligned=$false
+  for($attempt=0;$attempt -lt 16;$attempt++){
+   $current=Send @{cmd='player_weapon_state'};$rx=$targetX-[double]$current.muzzleX;$ry=$targetY-[double]$current.muzzleY;$rz=$targetZ-[double]$current.muzzleZ
+   $angle=if($axis -eq 'pitch'){[Math]::Asin([Math]::Clamp([double]$current.directionY,-1,1))}else{[Math]::Atan2([double]$current.directionX,[double]$current.directionZ)}
+   $wanted=if($axis -eq 'pitch'){[Math]::Atan2($ry,[Math]::Sqrt($rx*$rx+$rz*$rz))}else{[Math]::Atan2($rx,$rz)}
+   $difference=[Math]::Atan2([Math]::Sin($wanted-$angle),[Math]::Cos($wanted-$angle))
+   if([Math]::Abs($difference) -le .05){$aligned=$true;$proof+=@{axis=$axis;errorRadians=$difference;gainRadiansPerPixel=$gain;attempts=$attempt};break}
+   $pixels=[int][Math]::Clamp([Math]::Round($difference/$gain),-120,120)
+   $null=Send @{cmd='mouse_motion';dx=$(if($axis -eq 'yaw'){$pixels}else{0});dy=$(if($axis -eq 'pitch'){$pixels}else{0})};Start-Sleep -Milliseconds 250
+  }
+  if(!$aligned){throw ('Bounded ordinary mouse '+$axis+' alignment failed')}
+ }
+ return $proof
+}
 $p=$null;$client=$null;$handoff=$false;$held=$false
 try{
  # Current PowerShell preserves null assignments as empty child variables.
@@ -55,10 +80,11 @@ try{
  $inputProof=@{context='Infantry';cameraEffect=0;selectedAmmoBefore=$ammo;selectedAmmoAfter=$after;fired=$shots;input='Actual SDL mouse button 1, no script fire'}
  Exec 'smokeProbe=false;player setDir 60;setAccTime 1'
  Start-Sleep -Seconds 4
+ $target=Eval 'getPosASL smokeTarget0';$aimProof=AimTarget ([double]$target[0]) ([double]$target[2]+1.15) ([double]$target[1])
  $pose=Eval 'getPosASL player'
  $null=Send @{cmd='screenshot';path=(Join-Path $out 'ready.png')}
  if($p.HasExited){throw 'Game exited before handoff'}
- @{status='left-open-for-owner';pid=$p.Id;installed=$stamp.Trim();pair=$pair;inputProof=$inputProof;targets=6;playerASL=$pose;automatic=$auto;weather=$weather;environment=$settings;log=$log;scope='Interactive original Everon smoke scene with actual rifle input preflight; no automatic victim kill or acceptance inference.'}|ConvertTo-Json -Depth 12|Set-Content -LiteralPath (Join-Path $out 'session.json')
+ @{status='left-open-for-owner';pid=$p.Id;installed=$stamp.Trim();pair=$pair;inputProof=$inputProof;aimProof=$aimProof;targets=6;playerASL=$pose;automatic=$auto;weather=$weather;environment=$settings;log=$log;scope='Interactive original Everon smoke scene with actual rifle input preflight; no automatic victim kill or acceptance inference.'}|ConvertTo-Json -Depth 12|Set-Content -LiteralPath (Join-Path $out 'session.json')
  $handoff=$true;Write-Output "Game left open: PID $($p.Id); $out"
 }finally{
  if($held -and $client){try{$null=Send @{cmd='mouse_button';button=1;down=$false}}catch{}}
