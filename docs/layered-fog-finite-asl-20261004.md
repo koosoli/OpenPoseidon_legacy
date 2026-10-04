@@ -179,3 +179,44 @@ the capped main-loop CPU ring, so the warmup does not certify that every CPU-rin
 entry belongs to the view. One finite campaign gives descriptive samples, not a
 steady statistical or uncontended performance benchmark. No cost threshold or
 default promotion is manufactured from this receipt.
+
+## Installed quality decision: experimental, OFF
+
+The installed `original-everon-fog-cost-20261004-035205` functional campaign passed
+all four normal exits, source/weather/camera/range and timing gates. Its default
+midday road and horizon were clipped white, preventing meaningful visual judgement.
+The controlled `original-everon-fog-fixed-exposure-20261004-040242` campaign,
+installed pair `3de356cb`, also passed with exposure `.15`, adaptation OFF and
+manual Hable. Actual source height was `148.592 m`; frozen ASL profiles were
+`145.592..166.592` and `183.592..198.592 m`, both with 3 m feathers. Positive
+weather fog `.45` retained the same `515.25 m` scene range in OFF and ON; both
+physical weather maps were ready in ON. Cameras were at source height +2/+26/+75 m.
+
+Direct inspection of the fixed-exposure OFF/ON ground and above PNGs rejects
+visual acceptance: ground ON shows a horizontal grey horizon band; above ON
+reveals a sharp distant hill contour and leaf-shaped holes where OFF smoothly
+closes into the sky. A feature following actual terrain/leaf geometry cannot be
+accepted as merely the intended feathered ASL slab boundary. Default remains OFF.
+
+Source review identifies a concrete closure inconsistency, without claiming
+unavailable per-pixel attribution. `shaders/frame.wgsl::apply_fog` first computes
+legacy `background = mix(rgb, inscat, amount)`, whose far `amount=1` deliberately
+dissolves culled geometry into sky. It then applies **local-distance** layer
+transport, conditional on physical coverage/reach at the surface. Separately,
+`layered_fog_background.wgsl` applies the **final-distance** transport to sky.
+Even when geometry has completely dissolved, `inscat*T_local+L_local` need not
+equal `sky*T_final+L_final`; a surface gate refusal further leaves one path
+untransported. The previous far-closure guarantee therefore no longer holds.
+This source-level counterexample fits the new geometry-shaped contour, but the
+capture has no per-pixel amount, gate or transport readback proving the dominant
+mechanism. Native/roof segment refusals and finite froxel interpolation remain
+possible contributors; current readiness traces do not quantify them.
+
+A bounded subsequent investigation should replay the actual contour's local
+and final `L/T`, legacy closing amount and gate. A candidate should preserve
+physical source/interior guards while making the fully closed **artistic
+far-cover** converge to the same final fogged-sky term as the background. It must
+retain OFF exact equivalence and prove sky/fully-closed-surface continuity,
+partial closing and interior negatives on the real composed shaders. No grade,
+layer-density, global sky or production composition change was made from this
+assessment; the finite candidate is functional but **quality unaccepted**.
