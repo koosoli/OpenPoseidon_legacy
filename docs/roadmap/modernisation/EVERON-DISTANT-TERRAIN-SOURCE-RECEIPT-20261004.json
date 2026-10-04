@@ -1,0 +1,609 @@
+{
+  "scope": "Read-only cached-source lattice endpoint analysis; cache source FNV and WRP SHA bind original source, all actual foundation SurfaceY samples agree. No actual submitted CDLOD node/morph, selected owner/LOD/pixel or GPU render-height readback; no current frame or visual defect proof. Hypothetical steps include deliberately coarser controls beyond likely nearby selection. No live game/source edits.",
+  "receipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\everon-placement\\everon-foundations-aimed-20261004-024010-087ded\\result.json",
+  "receiptSha256": "3716eef39ae267238db32470a47e231906c7ea7ff10f91ebe4d8977e0c218924",
+  "installed": {
+    "dll": "33908847E4C77C08A28E3FE76F17A47DF9CB77262E3B9D905DDED04E1527D320",
+    "exe": "C0D6DE857AFF565324AF12F1539F216DE15F850FC28572486BFA3C395859F3FA",
+    "stamp": "codex/cave-editor-20261004 f6e5c1d5 2026-10-04_02:13 deploy-ps1"
+  },
+  "cache": "C:\\Users\\mail\\AppData\\Local\\CWR\\cwr_subdiv_worlds_eden.wrp_L3.cache",
+  "cacheSha256": "44305432f87727a597f6ad8c8b7fbc57f8827613a97808587c10d9ec5efa1730",
+  "sourceFnv64": "b51e4eb1781b046c",
+  "sourceWrpSha256": "5a2550b27612fc4c8ccdec55ce2555c1ed23114d46f8b687ce5fb8b273515a79",
+  "nativeSpacing": 6.25,
+  "nativeRange": 2048,
+  "comparedSampleCount": 198,
+  "maxNativeErrorM": 4.659116271454877e-05,
+  "defaultCdlodRanges": [
+    800,
+    1600,
+    3200,
+    6400,
+    12800
+  ],
+  "defaultLatticeSpacingM": [
+    6.25,
+    12.5,
+    25,
+    50,
+    100,
+    200
+  ],
+  "environmentCdlodOverridesRecorded": false,
+  "candidates": [
+    {
+      "id": 6034,
+      "nativeMaximumGap": -1.941767692565847,
+      "sampleCount": 15,
+      "cacheVsActualNativeMaxErrorM": 0.0,
+      "hypotheticalLatticeMaximumGapM": {
+        "1": -1.9417676925659464,
+        "2": -1.9417676925659464,
+        "4": -1.9417676925659464,
+        "8": -1.9417676925659464,
+        "16": -1.9417676925659464,
+        "32": -3.9063458874455677
+      },
+      "hypotheticalLatticeMinusFineRangeM": {
+        "2": [
+          0.0,
+          0.0
+        ],
+        "4": [
+          0.0,
+          0.0
+        ],
+        "8": [
+          0.0,
+          0.0
+        ],
+        "16": [
+          0.0,
+          0.0
+        ],
+        "32": [
+          1.9482479527226388,
+          3.2408160998964632
+        ]
+      }
+    },
+    {
+      "id": 6035,
+      "nativeMaximumGap": -1.941767692565847,
+      "sampleCount": 15,
+      "cacheVsActualNativeMaxErrorM": 5.08248805886069e-06,
+      "hypotheticalLatticeMaximumGapM": {
+        "1": -1.9417676925659464,
+        "2": -1.9417676925659464,
+        "4": -1.9417676925659464,
+        "8": -1.9417676925659464,
+        "16": -1.9417676925659464,
+        "32": -1.8836082161014218
+      },
+      "hypotheticalLatticeMinusFineRangeM": {
+        "2": [
+          -3.597031792423877e-07,
+          0.0
+        ],
+        "4": [
+          -1.798515967266212e-07,
+          0.0
+        ],
+        "8": [
+          -8.992580546873796e-08,
+          0.0
+        ],
+        "16": [
+          0.0,
+          0.035537009977133494
+        ],
+        "32": [
+          -0.13293027244436928,
+          0.6071159970106521
+        ]
+      }
+    },
+    {
+      "id": 6036,
+      "nativeMaximumGap": -1.9417698421821683,
+      "sampleCount": 15,
+      "cacheVsActualNativeMaxErrorM": 4.355311389758754e-06,
+      "hypotheticalLatticeMaximumGapM": {
+        "1": -1.9417698421822678,
+        "2": -1.9417698421822678,
+        "4": -1.9417698421822678,
+        "8": -1.9417698421822678,
+        "16": -1.9417698421822678,
+        "32": -1.6885573611940714
+      },
+      "hypotheticalLatticeMinusFineRangeM": {
+        "2": [
+          -1.4676505344368707e-06,
+          0.0
+        ],
+        "4": [
+          -7.33825260113008e-07,
+          0.0
+        ],
+        "8": [
+          -3.66912630056504e-07,
+          0.0
+        ],
+        "16": [
+          0.0,
+          0.14499708545284307
+        ],
+        "32": [
+          -0.26536095880172184,
+          0.7577025233045447
+        ]
+      }
+    },
+    {
+      "id": 6037,
+      "nativeMaximumGap": -1.941764039380061,
+      "sampleCount": 15,
+      "cacheVsActualNativeMaxErrorM": 0.0,
+      "hypotheticalLatticeMaximumGapM": {
+        "1": -1.9417640393801605,
+        "2": -1.9417640393801605,
+        "4": -1.9417640393801605,
+        "8": -1.9417640393801605,
+        "16": -1.9417640393801605,
+        "32": -1.8917640584440676
+      },
+      "hypotheticalLatticeMinusFineRangeM": {
+        "2": [
+          0.0,
+          0.0
+        ],
+        "4": [
+          0.0,
+          0.0
+        ],
+        "8": [
+          0.0,
+          0.0
+        ],
+        "16": [
+          0.0,
+          0.0
+        ],
+        "32": [
+          -0.1234263093700747,
+          0.6694069439475356
+        ]
+      }
+    },
+    {
+      "id": 6042,
+      "nativeMaximumGap": -1.9598808288570666,
+      "sampleCount": 15,
+      "cacheVsActualNativeMaxErrorM": 0.0,
+      "hypotheticalLatticeMaximumGapM": {
+        "1": -1.959880828857166,
+        "2": -1.959880828857166,
+        "4": -1.959880828857166,
+        "8": -1.959880828857166,
+        "16": -1.959880828857166,
+        "32": -3.913105621759314
+      },
+      "hypotheticalLatticeMinusFineRangeM": {
+        "2": [
+          0.0,
+          0.0
+        ],
+        "4": [
+          0.0,
+          0.0
+        ],
+        "8": [
+          0.0,
+          0.0
+        ],
+        "16": [
+          0.0,
+          0.0
+        ],
+        "32": [
+          1.953224792902148,
+          2.599301609761355
+        ]
+      }
+    },
+    {
+      "id": 6043,
+      "nativeMaximumGap": -1.9598791323224845,
+      "sampleCount": 15,
+      "cacheVsActualNativeMaxErrorM": 0.0,
+      "hypotheticalLatticeMaximumGapM": {
+        "1": -1.959879132322584,
+        "2": -1.959879132322584,
+        "4": -1.959879132322584,
+        "8": -1.959879132322584,
+        "16": -1.959879132322584,
+        "32": -1.6483022683139836
+      },
+      "hypotheticalLatticeMinusFineRangeM": {
+        "2": [
+          0.0,
+          0.0
+        ],
+        "4": [
+          0.0,
+          0.0
+        ],
+        "8": [
+          0.0,
+          0.0
+        ],
+        "16": [
+          0.0,
+          0.0
+        ],
+        "32": [
+          -0.3115768640086003,
+          0.3338027971983166
+        ]
+      }
+    },
+    {
+      "id": 6044,
+      "nativeMaximumGap": -1.9598802633455392,
+      "sampleCount": 15,
+      "cacheVsActualNativeMaxErrorM": 0.0,
+      "hypotheticalLatticeMaximumGapM": {
+        "1": -1.9598802633456387,
+        "2": -1.9598802633456387,
+        "4": -1.9598802633456387,
+        "8": -1.9598802633456387,
+        "16": -1.9598802633456387,
+        "32": -3.5311113086105763
+      },
+      "hypotheticalLatticeMinusFineRangeM": {
+        "2": [
+          0.0,
+          0.0
+        ],
+        "4": [
+          0.0,
+          0.0
+        ],
+        "8": [
+          0.0,
+          0.0
+        ],
+        "16": [
+          0.0,
+          0.0
+        ],
+        "32": [
+          1.5712310452649376,
+          2.220173682367701
+        ]
+      }
+    },
+    {
+      "id": 6045,
+      "nativeMaximumGap": -1.9598754564975565,
+      "sampleCount": 15,
+      "cacheVsActualNativeMaxErrorM": 0.0,
+      "hypotheticalLatticeMaximumGapM": {
+        "1": -1.959875456497656,
+        "2": -1.959875456497656,
+        "4": -1.959875456497656,
+        "8": -1.959875456497656,
+        "16": -1.959875456497656,
+        "32": -1.228229873901995
+      },
+      "hypotheticalLatticeMinusFineRangeM": {
+        "2": [
+          0.0,
+          0.0
+        ],
+        "4": [
+          0.0,
+          0.0
+        ],
+        "8": [
+          0.0,
+          0.0
+        ],
+        "16": [
+          0.0,
+          0.0
+        ],
+        "32": [
+          -0.7316455825956609,
+          0.2602941288533458
+        ]
+      }
+    },
+    {
+      "id": 6047,
+      "nativeMaximumGap": -1.0044617629404087,
+      "sampleCount": 23,
+      "cacheVsActualNativeMaxErrorM": 0.0,
+      "hypotheticalLatticeMaximumGapM": {
+        "1": -1.0044617629405082,
+        "2": -1.0044617629405082,
+        "4": -1.0044617629405082,
+        "8": -1.0044617629405082,
+        "16": -0.33207103164400564,
+        "32": -0.17529239154889353
+      },
+      "hypotheticalLatticeMinusFineRangeM": {
+        "2": [
+          0.0,
+          0.0
+        ],
+        "4": [
+          0.0,
+          0.0
+        ],
+        "8": [
+          0.0,
+          0.0
+        ],
+        "16": [
+          -0.7129371195317731,
+          -0.5095704534543586
+        ],
+        "32": [
+          -0.8567525536669223,
+          0.23768853304608228
+        ]
+      }
+    },
+    {
+      "id": 7710,
+      "nativeMaximumGap": -1.5510292053220667,
+      "sampleCount": 15,
+      "cacheVsActualNativeMaxErrorM": 2.637863161680798e-05,
+      "hypotheticalLatticeMaximumGapM": {
+        "1": -1.5510340814458914,
+        "2": -1.5510283857591958,
+        "4": -1.5510236677667137,
+        "8": -1.551026090321642,
+        "16": -2.5454832795057882,
+        "32": -11.591732502845048
+      },
+      "hypotheticalLatticeMinusFineRangeM": {
+        "2": [
+          -5.913336735829944e-06,
+          3.097430862908368e-06
+        ],
+        "4": [
+          -1.0413679177645463e-05,
+          4.368380899677504e-06
+        ],
+        "8": [
+          -7.991124249429049e-06,
+          3.7329058670820814e-06
+        ],
+        "16": [
+          0.6380521514410873,
+          1.4015717842169408
+        ],
+        "32": [
+          9.375346811243986,
+          10.040698421399156
+        ]
+      }
+    },
+    {
+      "id": 31997,
+      "nativeMaximumGap": -3.409140586852658,
+      "sampleCount": 20,
+      "cacheVsActualNativeMaxErrorM": 4.659116271454877e-05,
+      "hypotheticalLatticeMaximumGapM": {
+        "1": -3.409128514045534,
+        "2": -3.4644414220123565,
+        "4": -3.4644418423420404,
+        "8": -3.4644398547678747,
+        "16": -1.1097051714239967,
+        "32": 2.400705064757773
+      },
+      "hypotheticalLatticeMinusFineRangeM": {
+        "2": [
+          -0.520213002585848,
+          0.05531290796682242
+        ],
+        "4": [
+          -0.520213002585848,
+          0.05531332829650637
+        ],
+        "8": [
+          -0.5202125878553545,
+          0.055311340722340674
+        ],
+        "16": [
+          -2.6549237317101415,
+          -1.9157590827961144
+        ],
+        "32": [
+          -6.165333967891911,
+          -2.2882046865409507
+        ]
+      }
+    },
+    {
+      "id": 25191,
+      "nativeMaximumGap": -0.8228826522827823,
+      "sampleCount": 20,
+      "cacheVsActualNativeMaxErrorM": 1.9242763539040197e-05,
+      "hypotheticalLatticeMaximumGapM": {
+        "1": -0.822895023521319,
+        "2": -0.8228946561982085,
+        "4": -0.8228944725366496,
+        "8": -0.8228946488679192,
+        "16": 5.2246170360376745,
+        "32": 8.962376724372287
+      },
+      "hypotheticalLatticeMinusFineRangeM": {
+        "2": [
+          -3.673231105949526e-07,
+          5.839876848767744e-07
+        ],
+        "4": [
+          -8.794775219200801e-07,
+          1.2456681588446372e-06
+        ],
+        "8": [
+          -5.58017323015747e-07,
+          1.2456681588446372e-06
+        ],
+        "16": [
+          -6.158879487776257,
+          -4.350075547736807
+        ],
+        "32": [
+          -9.89663917611087,
+          -7.886613816609366
+        ]
+      }
+    }
+  ],
+  "reviewedRootSource": "b1d87cb19603ba65f7a95b1c7e217830be0f0dd4",
+  "reviewedSourceFiles": {
+    "engine/WgpuRenderer/TerrainWgpu.cpp": "8a75dcc6aa7c80c2848e36eb098f41166cfb99816aed1f096b539e1325c2fc41",
+    "engine/WgpuRenderer/rust/src/terrain/terrain.wgsl": "a65c45b38d63f1761e6a13913c0e9026400204eb9bd0454658625c2ddd83d766",
+    "engine/Poseidon/World/Terrain/TerrainCdlod.hpp": "af4fb059778d47b05590d4d3839eca4bce576eff7a81aa4a896aab4bfd8b550b",
+    "engine/WgpuRenderer/rust/src/shaders/conform.wgsl": "1cda15aed28b6df6af52fd367f54e87777f6db830b64506df6766e65ab4b7d5f",
+    "engine/Poseidon/World/Terrain/LandSave.cpp": "88b447cbda5172845d64431a5517f42e08e4e63f771c48846f4c6df29bc43248"
+  },
+  "reportedCamera": {
+    "positionXYZ": [
+      5805.63,
+      46.35,
+      3597.97
+    ],
+    "az": 147.8,
+    "el": 6.3,
+    "actualRecordedFovAvailable": false
+  },
+  "distantControls": [
+    {
+      "id": 25191,
+      "model": "data3d\\ryb_domek.p3d",
+      "liveFrame": [
+        -0.9869722723960876,
+        0,
+        0.16089048981666565,
+        0,
+        1,
+        0,
+        -0.16089048981666565,
+        0,
+        -0.9869722723960876,
+        10319.6220703125,
+        33.098419189453125,
+        332.7225341796875
+      ],
+      "positionXYZ": [
+        10319.6220703125,
+        33.098419189453125,
+        332.7225341796875
+      ],
+      "visualTopY": 36.153974533081055,
+      "xzDistanceM": 5571.172715316776,
+      "distanceM": 5571.188475386924,
+      "aimAzAtOrigin": 125.88052399920781,
+      "aimElAtOrigin": -0.13628337501424662,
+      "aimElAtVisualRoof": -0.10485917502205978,
+      "azOffsetFromReported": -21.9194760007922,
+      "sourceVisualLodResolutions": [
+        0.75,
+        1.5,
+        2.5,
+        4.0,
+        6.0
+      ],
+      "sourceVisualLodMinimumYs": [
+        -3.0555553436279297,
+        -3.0555553436279297,
+        -3.0555553436279297,
+        -3.0555553436279297,
+        -3.0555553436279297
+      ],
+      "discreteCachedNativeRoofSightline": {
+        "terrainAboveRoofLineM": 259.8103442116817,
+        "nativeCachedY": 299.99174880419577,
+        "linePointXYZ": [
+          8536.595202539062,
+          40.18140459251404,
+          1622.495283178711
+        ],
+        "fraction": 0.605,
+        "testedInteriorPoints": 999,
+        "scope": "Read-only cache source samples of the reported-position-to-source-roof line; discrete obstruction witness, not continuous exact GPU ray, object occlusion or pixel identity."
+      }
+    },
+    {
+      "id": 31997,
+      "model": "data3d\\helfenburk_budova2.p3d",
+      "liveFrame": [
+        -0.8670267462730408,
+        0,
+        0.49826163053512573,
+        0,
+        1,
+        0,
+        -0.49826163053512573,
+        0,
+        -0.8670267462730408,
+        9385.744140625,
+        193.20211791992188,
+        1031.3896484375
+      ],
+      "positionXYZ": [
+        9385.744140625,
+        193.20211791992188,
+        1031.3896484375
+      ],
+      "visualTopY": 199.46609592437744,
+      "xzDistanceM": 4405.059813547345,
+      "distanceM": 4407.50694899819,
+      "aimAzAtOrigin": 125.6367021022393,
+      "aimElAtOrigin": 1.9093705853575695,
+      "aimElAtVisualRoof": 1.9907506064948515,
+      "azOffsetFromReported": -22.163297897760714,
+      "sourceVisualLodResolutions": [
+        1.5,
+        3.0,
+        5.0,
+        7.0,
+        9.0
+      ],
+      "sourceVisualLodMinimumYs": [
+        -6.263978004455566,
+        -6.263978004455566,
+        -6.263978004455566,
+        -6.263978004455566,
+        -6.263978004455566
+      ],
+      "discreteCachedNativeRoofSightline": {
+        "terrainAboveRoofLineM": 141.98546393915413,
+        "nativeCachedY": 305.3161612253785,
+        "linePointXYZ": [
+          8540.8372034375,
+          163.33069728622436,
+          1637.10261140625
+        ],
+        "fraction": 0.764,
+        "testedInteriorPoints": 999,
+        "scope": "Read-only cache source samples of the reported-position-to-source-roof line; discrete obstruction witness, not continuous exact GPU ray, object occlusion or pixel identity."
+      }
+    }
+  ],
+  "decision": "NO_PRODUCTION_FIX; no installed A/B expansion: both distant controls are obstructed from the reported camera. Owner target remains unidentified/unreproduced.",
+  "existingTerrainOnlyControl": {
+    "name": "WGR_TERRAIN_LOD_BASE",
+    "diagnosticValue": "64",
+    "derivedRange0M": 12800,
+    "derivedNonMorphRange0M": 6400,
+    "requiresDefaultRatioAndMorph": "WGR_TERRAIN_LOD_RATIO=2; WGR_TERRAIN_MORPH=.5",
+    "scope": "Existing optional source-derived control; not executed, not production recommendation, no visibility or performance claim."
+  }
+}
