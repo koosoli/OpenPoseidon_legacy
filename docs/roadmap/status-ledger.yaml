@@ -34,6 +34,25 @@ execution:
       stable-ID controls and installed acceptance passed. Daytime soldier flashlight checked.
       Mission-local single-player prototype; no persistence, AI Paths or Box3D
       cavity-heightfield acceptance. Author-run tests are not owner validation.
+  modernisation_followup_checkpoint:
+    branch: codex/modernisation-followup-20261004
+    backup_branch: codex/backup-excavation-20261004
+    backup_commit: 8b93dec7
+    state: ACTIVE
+    authorised_order:
+      - Finish excavation editor and installed acceptance (complete)
+      - Create and push backup branch (complete)
+      - Diagnose/fix reported original Everon floating houses
+      - Implement and verify physically based layered fog
+      - Complete bounded automatic Box3D infantry ragdoll integration
+      - Adapt remaining relevant upstream fixes using owner's audit
+    upstream_head: b36cddc7
+    upstream_audit_location: docs/roadmap/modernisation/upstream
+    note: >-
+      Backup is the installed-verified cave/trench checkpoint. Follow-up work
+      preserves that branch. Fresh upstream main fetched; source patch absence
+      is not inferred from ancestry. Root owns all installed deployment/runtime.
+      House placement remains under diagnosis; no unverified global snapping.
   review_model: OWNER_REVIEW_NO_INDEPENDENT_REVIEWER
   review_model_note: >-
     Preview 0 has no independent reviewer and cannot obtain one: Oliver Kay is
