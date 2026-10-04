@@ -88,7 +88,7 @@ try{
  foreach($arm in @(@{name='off';on='0';fog=$WeatherFog},@{name='on';on='1';fog=$WeatherFog},@{name='on-zero';on='1';fog=0},@{name='off-zero';on='0';fog=0})){
   Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue)) 'Foreign game appeared between arms.'
   $armOut=Join-Path $taskOut $arm.name;$profile=Join-Path $armOut 'user';New-Item -ItemType Directory -Force $profile|Out-Null
-  foreach($key in $keys){[Environment]::SetEnvironmentVariable($key,$null,'Process')}
+  foreach($key in $keys){Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue}
   $settings=@{POSEIDON_USER_DIR=$profile;WGR_LAYERED_FOG=$arm.on;WGR_LAYERED_FOG_TRACE='1';WGR_WEATHER_COVER='1';WGR_WEATHER_COVER_FAR='1';WGR_GRASS='0';WGR_TEMPORAL='0';POSEIDON_SNOWLINE='off';POSEIDON_SNOW_TEST_DEPTH='0'}
   if(!$TerrainMode){$settings.WGR_FOG_TERRAIN='0,0,0,0';$settings.WGR_FOG_PATCH='0,0,0,0'}
   foreach($key in $exposureSettings.Keys){$settings[$key]=$exposureSettings[$key]}
