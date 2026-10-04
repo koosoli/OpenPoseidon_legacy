@@ -87,7 +87,7 @@ pilots require `BISCamel.pbo`; expansion civilians and women require `O.pbo`.
 ## Compatibility facts and limits
 
 All 37 models are present, parse as original ODOL7, and have finite points.
-They have 9–12 LODs and at most 2,074 points in any LOD, below the current 4,096
+They have 9-12 LODs and at most 2,074 points in any LOD, below the current 4,096
 point bound. All 37 have 14 authored FireGeometry components; the first 12
 components each have exclusive full weight to one stock body bone.
 
