@@ -4080,6 +4080,16 @@ std::string AnswerServiceQuery(const char* what, cJSON* root)
     return {};
 }
 
+static SDL_WindowID HarnessInputWindow()
+{
+    if (SDL_Window* window = SDL_GetKeyboardFocus()) return SDL_GetWindowID(window);
+    int count = 0;
+    SDL_Window** windows = SDL_GetWindows(&count);
+    const SDL_WindowID id = windows && count == 1 ? SDL_GetWindowID(windows[0]) : 0;
+    SDL_free(windows);
+    return id;
+}
+
 void RegisterKeyInjection(HarnessServer& hs)
 {
     hs.RegisterCommand({"mouse_motion", "Inject SDL mouse movement; optional window position for ImGui",
@@ -4091,6 +4101,7 @@ void RegisterKeyInjection(HarnessServer& hs)
                 return HarnessProtocol::ErrorResponse("mouse movement out of range");
             SDL_Event event{};
             event.type = SDL_EVENT_MOUSE_MOTION;
+            event.motion.windowID = HarnessInputWindow();
             event.motion.xrel = static_cast<float>(dx);
             event.motion.yrel = static_cast<float>(dy);
             const bool hasX = cJSON_HasObjectItem(root, "x");
@@ -4114,6 +4125,7 @@ void RegisterKeyInjection(HarnessServer& hs)
             if (button < 1 || button > 5) return HarnessProtocol::ErrorResponse("invalid mouse button");
             SDL_Event event{};
             event.button.down = HarnessProtocol::GetBool(root,"down");
+            event.button.windowID = HarnessInputWindow();
             event.type = event.button.down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
             event.button.button = static_cast<Uint8>(button);
             if (!SDL_PushEvent(&event)) return HarnessProtocol::ErrorResponse("mouse event rejected");
