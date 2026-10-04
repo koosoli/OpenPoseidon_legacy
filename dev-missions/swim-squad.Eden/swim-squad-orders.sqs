@@ -1,0 +1,27 @@
+~2
+b2 setPos [9965,1400,0]
+b3 setPos [9975,1405,0]
+~1
+swimFocus = a1
+swimRel = [10,-16,9]
+a1 doMove [9938,1380,0]
+a2 doMove [9930,1440,0]
+a3 doMove [9960,1420,0]
+~5
+b2 assignAsDriver boat1
+b3 assignAsCargo boat1
+c1 assignAsGunner boat1
+[b2,b3,c1] orderGetIn true
+~4
+swimFocus = boat1
+swimRel = [14,-30,24]
+~90
+swimFocus = a1
+swimRel = [0,-20,40]
+a1 doMove [9820,1360,0]
+~18
+swimFocus = b3
+swimRel = [8,-12,6]
+unassignVehicle b3
+[b3] orderGetIn false
+exit

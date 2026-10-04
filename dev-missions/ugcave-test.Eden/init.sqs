@@ -1,0 +1,16 @@
+; UgCaveTest (Claude for Dec, 2 Oct 2026): the ugcave test cave on the flat ground east of the Everon airfield.
+; Cave origin = the ground over the chamber centre (4870, 11305). North stairwell top at (4870, 11325); tunnel exit
+; ramp top in the east at (4885, 11288). Chamber floor 5 m down. The EAST team starts in the chamber, captive.
+; Radio: Alpha = East weapons free, Bravo = East leaves by the tunnel, Charlie = East back into the cave,
+;        Delta = your squad walks into the cave on its own.
+cave = "UgCave" createVehicle [4870, 11305, 0]
+cave setDir 0
+cave setPos [4870, 11305, 0]
+_h = (getPosASL cave) select 2
+e1 setPosASL [4862, 11311, _h - 5]
+e2 setPosASL [4878, 11311, _h - 5]
+e3 setPosASL [4859.5, 11313.5, _h - 4]
+e4 setPosASL [4870, 11300, _h - 5]
+{_x setCaptive true} forEach units group e1
+{_x setDir 0} forEach units group e1
+showCinemaBorder false

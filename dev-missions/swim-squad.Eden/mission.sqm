@@ -1,0 +1,143 @@
+version=11;
+class Mission
+{
+	randomSeed=4812;
+	class Intel
+	{
+		startWeather=0.2;
+		forecastWeather=0.2;
+		startFog=0;
+		forecastFog=0;
+		year=1985;
+		month=6;
+		day=21;
+		hour=12;
+		minute=0;
+	};
+	class Groups
+	{
+		items=3;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=4;
+				class Item0
+				{
+					position[]={9950,0,1525};
+					azimut=180;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.6;
+					init="this setCaptive true";
+				};
+				class Item1
+				{
+					position[]={9944,0,1520};
+					azimut=180;
+					id=1;
+					side="WEST";
+					vehicle="SoldierWB";
+					skill=0.6;
+					text="a1";
+					init="this setCaptive true";
+				};
+				class Item2
+				{
+					position[]={9950,0,1520};
+					azimut=180;
+					id=2;
+					side="WEST";
+					vehicle="SoldierWB";
+					skill=0.6;
+					text="a2";
+					init="this setCaptive true";
+				};
+				class Item3
+				{
+					position[]={9956,0,1520};
+					azimut=180;
+					id=3;
+					side="WEST";
+					vehicle="SoldierWB";
+					skill=0.6;
+					text="a3";
+					init="this setCaptive true";
+				};
+			};
+		};
+		class Item1
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=2;
+				class Item0
+				{
+					position[]={9975,0,1520};
+					azimut=180;
+					id=5;
+					side="WEST";
+					vehicle="SoldierWB";
+					leader=1;
+					skill=0.6;
+					text="b2";
+					init="this setCaptive true";
+				};
+				class Item1
+				{
+					position[]={9980,0,1520};
+					azimut=180;
+					id=6;
+					side="WEST";
+					vehicle="SoldierWB";
+
+					skill=0.6;
+					text="b3";
+					init="this setCaptive true";
+				};
+			};
+		};
+		class Item2
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={9990,0,1520};
+					azimut=180;
+					id=7;
+					side="WEST";
+					vehicle="SoldierWB";
+					leader=1;
+					skill=0.6;
+					text="c1";
+					init="this setCaptive true";
+				};
+			};
+		};
+	};
+	class Vehicles
+	{
+		items=1;
+		class Item0
+		{
+			position[]={9950,0,1462};
+			azimut=90;
+			id=4;
+			side="EMPTY";
+			vehicle="BoatW";
+			skill=0.6;
+			text="boat1";
+		};
+	};
+};
+class Intro { randomSeed=1; class Intel { }; };
+class OutroWin { randomSeed=2; class Intel { }; };
+class OutroLoose { randomSeed=3; class Intel { }; };

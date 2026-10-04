@@ -1,0 +1,15 @@
+; Terrain holes (Sinkhole W1, WLD-HOLE-001): the test basement UgBasement (test addon ugtest) at 9698,1622 on Everon, a
+; 6 x 6 m cellar 3 m down under a roof slab at ground level, with a stair going up to the north (top at y 1630.5).
+; Needs the sinkhole test mod (scripts/Prepare-SinkholeTestMod.ps1). s0 and s1 walk down into the cellar; s2 stays
+; at the stair top. You start at the stair top.
+ub = "UgBasement" createVehicle [9698, 1622, 0]
+ub setDir 0
+ub setPos [9698, 1622, 0]
+player setPos [9698, 1634, 0]
+player setDir 180
+showCinemaBorder false
+~3
+s0 doMove [9698, 1621, 0]
+~4
+s1 doMove [9696, 1623, 0]
+exit

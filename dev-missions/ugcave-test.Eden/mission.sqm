@@ -1,0 +1,184 @@
+version=11;
+class Mission
+{
+	addOns[]={"ugcave"};
+	addOnsAuto[]={"ugcave"};
+	randomSeed=5120;
+	class Intel
+	{
+		resistanceWest=0;
+		resistanceEast=0;
+		startWeather=0.2;
+		forecastWeather=0.2;
+		startFog=0;
+		forecastFog=0;
+		year=1985;
+		month=6;
+		day=21;
+		hour=12;
+		minute=0;
+	};
+	class Groups
+	{
+		items=2;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=4;
+				class Item0
+				{
+					position[]={4870,0,11337};
+					azimut=180;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=0.6;
+					text="pl";
+				};
+				class Item1
+				{
+					position[]={4867,0,11340};
+					azimut=180;
+					id=1;
+					side="WEST";
+					vehicle="SoldierWB";
+					skill=0.6;
+					text="w1";
+				};
+				class Item2
+				{
+					position[]={4873,0,11340};
+					azimut=180;
+					id=2;
+					side="WEST";
+					vehicle="SoldierWMG";
+					skill=0.6;
+					text="w2";
+				};
+				class Item3
+				{
+					position[]={4870,0,11343};
+					azimut=180;
+					id=3;
+					side="WEST";
+					vehicle="SoldierWB";
+					skill=0.6;
+					text="w3";
+				};
+			};
+		};
+		class Item1
+		{
+			side="EAST";
+			class Vehicles
+			{
+				items=4;
+				class Item0
+				{
+					position[]={9000,0,1000};
+					azimut=0;
+					id=4;
+					side="EAST";
+					vehicle="SoldierEB";
+					leader=1;
+					skill=0.6;
+					text="e1";
+				};
+				class Item1
+				{
+					position[]={9003,0,1000};
+					azimut=0;
+					id=5;
+					side="EAST";
+					vehicle="SoldierEB";
+					skill=0.6;
+					text="e2";
+				};
+				class Item2
+				{
+					position[]={9006,0,1000};
+					azimut=0;
+					id=6;
+					side="EAST";
+					vehicle="SoldierEMG";
+					skill=0.6;
+					text="e3";
+				};
+				class Item3
+				{
+					position[]={9009,0,1000};
+					azimut=0;
+					id=7;
+					side="EAST";
+					vehicle="SoldierEB";
+					skill=0.6;
+					text="e4";
+				};
+			};
+		};
+	};
+	class Sensors
+	{
+		items=4;
+		class Item0
+		{
+			position[]={4910,0,11345};
+			a=0;
+			b=0;
+			activationBy="ALPHA";
+			repeating=1;
+			age="UNKNOWN";
+			text="East: weapons free";
+			expActiv="{_x setCaptive false} forEach units group e1";
+			class Effects
+			{
+			};
+		};
+		class Item1
+		{
+			position[]={4910,0,11348};
+			a=0;
+			b=0;
+			activationBy="BRAVO";
+			repeating=1;
+			age="UNKNOWN";
+			text="East: leave by the tunnel";
+			expActiv="(group e1) move [4895, 11288, 0]";
+			class Effects
+			{
+			};
+		};
+		class Item2
+		{
+			position[]={4910,0,11351};
+			a=0;
+			b=0;
+			activationBy="CHARLIE";
+			repeating=1;
+			age="UNKNOWN";
+			text="East: back into the cave";
+			expActiv="(group e1) move [4870, 11305, 0]";
+			class Effects
+			{
+			};
+		};
+		class Item3
+		{
+			position[]={4910,0,11354};
+			a=0;
+			b=0;
+			activationBy="DELTA";
+			repeating=1;
+			age="UNKNOWN";
+			text="My squad: into the cave";
+			expActiv="{_x doMove [4870, 11305, 0]} forEach [w1, w2, w3]";
+			class Effects
+			{
+			};
+		};
+	};
+};

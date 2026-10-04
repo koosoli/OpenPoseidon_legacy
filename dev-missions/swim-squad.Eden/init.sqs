@@ -1,0 +1,16 @@
+; Swimming AI (@OP_Swim, SWIM-W3-001; Malprave's swimai2 steps): three soldiers swim to points in the bay, a crew of
+; three swims out to the boat and boards it, a1 then swims 130 m on, and b3 goes over the side into deep water.
+; This script only keeps a camera on swimFocus; swim-squad-orders.sqs gives the orders.
+setViewDistance 1500
+swimFocus = a2
+swimRel = [10, -14, 8]
+[] exec "swim-squad-orders.sqs"
+_c = "camera" camCreate [9960, 1540, 10]
+_c cameraEffect ["internal", "back"]
+showCinemaBorder false
+#loop
+_c camSetTarget swimFocus
+_c camSetRelPos swimRel
+_c camCommit 0.4
+~0.4
+goto "loop"

@@ -1,0 +1,9 @@
+; Swimming (@OP_Swim, SWIM-W3-001): the player in deep water off the Everon bay beach.
+; W swims (E fast), release to tread water; swim to the beach to stand up again.
+setViewDistance 1500
+player setPos [9950, 1430, 0]
+player setDir 180
+player switchCamera "EXTERNAL"
+~2
+hint "Swimming: W to swim, release to tread water. Head for the beach to stand up."
+exit
