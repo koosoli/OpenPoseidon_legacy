@@ -19,6 +19,7 @@
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
 #include <Poseidon/Foundation/Memory/CheckMem.hpp>
 #include <algorithm>
+#include <Poseidon/World/Scene/BenchmarkLodFix.hpp>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -1248,6 +1249,18 @@ void Scene::AdjustComplexity()
     // every visible object and before the governor moves _lodInvWidth, so the value logged
     // is the one that selected the level. No-op unless the env var is set.
     LodTraceFlush();
+
+    // Opt-in benchmark density shared by CPU draw/shadow selection and the
+    // existing GPU presentation snapshot. Ordinary governor remains unchanged.
+    static const float lodFix = ParseBenchmarkLodFix(std::getenv("POSEIDON_LOD_FIX"));
+    if (lodFix != 0)
+    {
+        _lodInvWidth = lodFix > 0 ? lodFix : _minLodInvWidth;
+        saturate(_lodInvWidth, _minLodInvWidth, _maxLodInvWidth);
+        AdjustComplexity(_drawObjects);
+        AdjustShadowComplexity(_drawObjects);
+        return;
+    }
 
     float oldLodInvWidth = _lodInvWidth;
 

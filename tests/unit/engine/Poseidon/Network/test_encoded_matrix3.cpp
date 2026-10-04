@@ -112,3 +112,14 @@ TEST_CASE("EncodedMatrix3 negative sign preserved", "[network][encoded_matrix3]"
     REQUIRE(decoded.DirectionUp().Y() == Catch::Approx(m.DirectionUp().Y()).margin(kEncTol));
     REQUIRE(decoded.DirectionUp().Z() == Catch::Approx(m.DirectionUp().Z()).margin(kEncTol));
 }
+
+TEST_CASE("EncodedMatrix3 genuinely negative up vector retains hemisphere", "[network][encoded_matrix3][upstream]")
+{
+    Matrix3 matrix;
+    matrix.SetDirectionAndUp(Vector3(1,0,0),Vector3(0,0,-1));
+    EncodedMatrix3 encoded;encoded.Encode(matrix);
+    Matrix3 decoded;encoded.Decode(decoded);
+    REQUIRE(decoded.DirectionUp().Z() < 0);
+    REQUIRE(decoded.DirectionUp().Z() == Catch::Approx(-1.0f).margin(kEncTol));
+    REQUIRE(decoded.Direction().X() == Catch::Approx(1.0f).margin(kEncTol));
+}
