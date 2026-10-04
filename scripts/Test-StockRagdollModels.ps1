@@ -5,7 +5,7 @@
 [CmdletBinding()]
 param(
  [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{8,40}$')][string]$ExpectedCommit,
- [string]$CensusPath,[string[]]$Classes=@(),[string[]]$Models=@(),[switch]$SaveLoad,[switch]$SkipProjectile,[switch]$SelfTest,
+ [string]$CensusPath,[string[]]$Classes=@(),[string[]]$Models=@(),[switch]$SaveLoad,[switch]$SkipProjectile,[switch]$BodyMotionDiagnostics,[switch]$SelfTest,
  [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='original-ofp-stock-models',
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [double]$SiteX=5500,[double]$SiteZ=10000,
@@ -155,7 +155,7 @@ $settings=@{POSEIDON_USER_DIR=$profile;WGR_GRASS='0';POSEIDON_SNOWLINE='off';POS
 $clear=@('POSEIDON_AUTOMATIC_RAGDOLL','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE')
 $saved=@{};foreach($key in @($settings.Keys)+$clear){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $log=Join-Path $taskOut 'engine.log';$p=$null;$client=$null
-$result=[ordered]@{passed=$false;expectedCommit=$ExpectedCommit;installed=$before;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;scope='One owned Everon game, serial normal deaths, actual Box3D11/10 and complete finite consumed poses, supported persistent freeze, actual stock projectile collision when enabled, cleanup and final Physics admission toggle. Geometric contact observations are not calibrated joint/convex-contact or visual acceptance. One representative per model family, not every class/animation/weapon.';completeCensus=([bool]$CensusPath-and $Classes.Count-eq 0-and $Models.Count-eq 0);projectileRequested=(!$SkipProjectile);saveLoadRequested=[bool]$SaveLoad;requested=$targets;denominator=$targets.Count;passedFamilies=0;failedFamilies=0;cases=@();gates=@{}}
+$result=[ordered]@{passed=$false;expectedCommit=$ExpectedCommit;installed=$before;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;scope='One owned Everon game, serial normal deaths, actual Box3D11/10 and complete finite consumed poses, supported persistent freeze, actual stock projectile collision when enabled, cleanup and final Physics admission toggle. Geometric contact observations are not calibrated joint/convex-contact or visual acceptance. One representative per model family, not every class/animation/weapon.';completeCensus=([bool]$CensusPath-and $Classes.Count-eq 0-and $Models.Count-eq 0);projectileRequested=(!$SkipProjectile);saveLoadRequested=[bool]$SaveLoad;bodyMotionDiagnosticsRequested=[bool]$BodyMotionDiagnostics;requested=$targets;denominator=$targets.Count;passedFamilies=0;failedFamilies=0;cases=@();gates=@{}}
 if($CensusPath){$result.census=@{path=[IO.Path]::GetFullPath($CensusPath);sha256=(Get-FileHash -LiteralPath $CensusPath).Hash;sourceCommit=$census.baseCommit;sourceInstalledCommit=$census.installedCommit;editorPublicFamilies=@($census.families|Where-Object spawnable).Count;presentFamilies=@($census.families|Where-Object assetPresent).Count}}
 function Send($command,[bool]$allowError=$false){
  Require (!$p.HasExited) 'Owned game exited unexpectedly.'
@@ -227,6 +227,11 @@ function Motion{
  Require ($raw-match '^OK corpse-auto-motion frozen=(\d) supported=(\d) time=([^ ]+) travel=([^ ]+) root=\(([^,]+),([^,]+),([^\)]+)\) speed=\(([^,]+),([^,]+),([^\)]+)\)$') ('Actual automatic motion unavailable: '+$raw)
  $sample=@{raw=$raw;frozen=([int]$Matches[1]-ne 0);supported=([int]$Matches[2]-ne 0);time=(Num $Matches[3]);travel=(Num $Matches[4]);root=@((Num $Matches[5]),(Num $Matches[6]),(Num $Matches[7]));speed=@((Num $Matches[8]),(Num $Matches[9]),(Num $Matches[10]))}
  $sample.terrainY=Num (Eval ('triTerrainHeight ['+(Fmt $sample.root[0])+','+(Fmt $sample.root[2])+']'))
+ if($BodyMotionDiagnostics){
+  # Observations only: a frozen owner normally refuses the live-body query.
+  try{$sample.bodyMotionRaw=Query 'corpse-auto-bodymotion'}catch{$sample.bodyMotionDiagnosticError=$_.Exception.Message}
+  $sample.bodyMotionScope='Read-only limb motion, not an acceptance gate; frozen-owner refusal is expected.'
+ }
  AssertGroundFreeze $sample
  return $sample
 }
