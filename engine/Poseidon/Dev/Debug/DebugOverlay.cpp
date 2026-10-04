@@ -3718,7 +3718,7 @@ void DrawGrassTab()
                    "before roots, and it uses its own noise field so dry ground does not line up with "
                    "thin ground.");
     changed |= Dev::SliderFloat("Dry patch size", &grass.dryPatchScale, 0.002f, 0.3f, "%.3f");
-    Dev::PanelHelp("Noise frequency in 1/metres: 0.03 gives ~33 m patches, higher values break the field "
+    Dev::PanelHelp("Noise frequency in 1/metres: default 0.006 gives ~167 m patches with broad fades; higher values break the field "
                    "into smaller dry spots.");
     changed |= Dev::SliderFloat("Blade width", &grass.bladeWidth, 0.25f, 6.0f, "%.2fx");
     Dev::PanelHelp("1.00 = the long-standing look. The near-LOD blade texture only becomes visible above "
@@ -4262,7 +4262,7 @@ void DrawGrassTab()
         grass.bladeWidth = 1.0f;
         grass.saturation = 0.78f;
         grass.dryPatches = 0.35f;
-        grass.dryPatchScale = 0.030f;
+        grass.dryPatchScale = 0.006f;
         grass.weedPercent = 0.12f;
         grass.flowerPercent = 0.05f;
         grass.shapeVariety = 1.0f;

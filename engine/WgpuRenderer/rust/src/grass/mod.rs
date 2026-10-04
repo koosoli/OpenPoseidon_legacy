@@ -751,7 +751,7 @@ impl Grass {
             use_photo_tuft: 0.0,
             saturation: 1.0,
             dry_patches: 0.35,
-            dry_patch_scale: 0.030,
+            dry_patch_scale: 0.006,
             mid_radius: 100.0,
             // Shape variety defaults ON: four grass species sharing one
             // silhouette is the defect, not a look worth preserving by default.

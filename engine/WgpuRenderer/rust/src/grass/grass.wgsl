@@ -411,9 +411,9 @@ fn dry_patch(colour: vec3<f32>, world_xz: vec2<f32>, height_t: f32) -> vec3<f32>
     let scale = max(grass.look.z, 0.002);
     let field = clump_noise(world_xz, scale, 0x93b5e1a7u);
     // Only the top of the noise range dries, so this makes PATCHES rather than
-    // washing the whole field. Raising `amount` widens the band that qualifies.
+    // washing the whole field. A broad smooth fade avoids sharply mottled colour islands.
     // Not `patch`: that is a WGSL reserved keyword and fails composition.
-    let patch_mask = smoothstep(1.0 - amount, 1.0 - amount * 0.30, field);
+    let patch_mask = smoothstep(1.0 - amount, 1.0 - amount * 0.05, field);
     // Straw keeps the source's luminance structure so blade detail survives.
     return blade_dry_point(colour, height_t, patch_mask);
 }
@@ -1633,7 +1633,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let tip = vec3<f32>(0.32, 0.43, 0.10);
     // 0.70 root shade = the long-standing mix(0.30, 1.0, t*t).
     let root = mix(1.0 - blade_root_shade(), 1.0, in.height_t * in.height_t);
-    let field_tint = clump_noise(world.xz, 0.16, 0x5e3a91c7u);
+    let field_tint = clump_noise(world.xz, 0.006, 0x5e3a91c7u);
     let blade_tint = mix(in.seed, field_tint, 0.55);
     let variation = mix(1.0, mix(0.78, 1.20, blade_tint), grass.debug_flags.z);
     // A restrained, field-coherent highlight makes gusts readable without
@@ -1684,7 +1684,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let texture_amount = in.blade_uv.w * clamp(grass.shape_mix.w, 0.0, 1.0);
     var dry_colour = dry_patch(mix(procedural, textured, texture_amount), world.xz, in.height_t);
     if (ramp_detail < 1.0 && grass.native.x <= 0.0) {
-        // Seed tint is constant per blade, and field tint is metre-scale; keep
+        // Seed tint is constant per blade, and field tint fades across roughly 167 metres; keep
         // both rather than erasing the meadow's stable colour variation.
         var mean = blade_ramp_mean(base, tip, blade_root_shade(),
             in.wind_gust * clamp(grass.wind_strength, 0.0, 1.5), in.blade_taper);
@@ -1694,15 +1694,15 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
         var patch_mask = 0.0;
         if (amount > 0.001) {
             let field = clump_noise(world.xz, max(grass.look.z, 0.002), 0x93b5e1a7u);
-            patch_mask = smoothstep(1.0 - amount, 1.0 - amount * 0.30, field);
+            patch_mask = smoothstep(1.0 - amount, 1.0 - amount * 0.05, field);
         }
         dry_colour = mix(blade_dry_mean(mean, patch_mask), dry_colour, ramp_detail);
     }
     let graded = grass_saturation(dry_colour);
     // Per-patch hue drift on top of the luminance-only colour variation above:
-    // warm straw one way, cool blue-green the other, on a ~11 m field of its own
+    // warm straw one way, cool blue-green the other, on a smooth ~200 m field of its own
     // so it lines up with neither the dry patches nor the density. 0 = none.
-    let hue_field = clump_noise(world.xz, 0.09, 0x7a1c3e5du);
+    let hue_field = clump_noise(world.xz, 0.005, 0x7a1c3e5du);
     let hue_tint = mix(vec3<f32>(1.10, 1.00, 0.78), vec3<f32>(0.88, 1.00, 1.12), hue_field);
     // The hue drift exists for the procedural blades; on a native atlas it read as lilac.
     let hued = graded * mix(vec3<f32>(1.0), hue_tint, blade_hue_variation() * select(1.0, 0.0, grass.native.x > 0.0));
@@ -1759,7 +1759,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
 @fragment
 fn fs_grass_far(in: VsOut) -> @location(0) vec4<f32> {
     let world = in.world_rel + frame.cam_pos.xyz;
-    let field_noise = clump_noise(world.xz, 0.11, 0x4f93d71bu);
+    let field_noise = clump_noise(world.xz, 0.006, 0x5e3a91c7u);
     // Keep the proxy close to terrain colour: it supplies the distant grassy
     // field, not bright individual blades. The same aerial fog removes it
     // naturally at the horizon.
@@ -1959,7 +1959,7 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     // The photo already carries base-to-tip shading, so only the field-scale
     // tint and gust highlight are applied on top -- re-adding the procedural
     // root darkening would double up what the photograph already shows.
-    let field_tint = clump_noise(world.xz, 0.16, 0x5e3a91c7u);
+    let field_tint = clump_noise(world.xz, 0.006, 0x5e3a91c7u);
     let variation = mix(1.0, mix(0.82, 1.16, mix(in.seed, field_tint, 0.55)), grass.debug_flags.z);
     let gust_highlight = 1.0 + in.wind_gust * clamp(grass.wind_strength, 0.0, 1.5) * 0.05;
     // The authored clump is already the right colour -- measured opaque mean
@@ -2029,7 +2029,7 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     // in the sun term, and applying it to skylight only flattens it again.
     let ambient = sky_irradiance(normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.45))) * sky_vis_ao(world.xz);
     let view_dir = -in.world_rel / max(length(in.world_rel), 0.0001);
-    let broad_field = clump_noise(world.xz, 0.09, 0x7a1c3e5du);
+    let broad_field = clump_noise(world.xz, 0.005, 0x7a1c3e5du);
     let clump_normal = normalize(vec3<f32>((field_tint - 0.5) * 0.24, 1.0, (broad_field - 0.5) * 0.24));
     let half_direction = (light_dir + view_dir) / max(length(light_dir + view_dir), 0.0001);
     let sheen_amount = grass_broad_sun_response(dot(clump_normal, half_direction), height_detail,

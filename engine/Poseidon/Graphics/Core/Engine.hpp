@@ -1345,7 +1345,7 @@ class Engine : public IGraphicsEngine
         // the patch size (noise frequency, 1/metres). Its own noise field, so dry
         // ground does not line up with thin ground.
         float dryPatches = 0.52f;
-        float dryPatchScale = 0.207f;
+        float dryPatchScale = 0.006f;
         float weedPercent = 0.37f;
         float flowerPercent = 0.08f;
         // Blade silhouette variety. The four grass species shared ONE profile,
