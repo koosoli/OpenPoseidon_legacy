@@ -120,7 +120,21 @@ if($SelfTest){
  }
  $refused=$false;try{$null=ProjectileSegment $chestTarget @(1,1)}catch{$refused=$true};Require $refused 'Non-cardinal segment accepted.'
  $tokens=$null;$errors=$null;$null=[Management.Automation.Language.Parser]::ParseFile($PSCommandPath,[ref]$tokens,[ref]$errors);Require ($errors.Count-eq 0) 'Runner parse failure.'
- Write-Host 'Stock model runner SelfTest PASS (census selection, exclusion, invalid/duplicate targets, nested finite values, airborne freeze refusal, unordered/stable pair, aggregate hit acceptance and wake/backend negatives, zero actual proxies and invalid matrix negatives, exact3D bullet segment, parse).';return
+ # Reproduce the real observation race: owners ACTIVE before motion, then FROZEN.
+ $settleAst=[Management.Automation.Language.Parser]::ParseFile($PSCommandPath,[ref]$tokens,[ref]$errors)
+ $settleFunction=$settleAst.Find({param($node)$node-is [Management.Automation.Language.FunctionDefinitionAst]-and $node.Name-eq 'Settle'},$true)
+ & {
+  $case=@{};$SettleDeadlineSeconds=10;$state=@{ownerQueries=0;paused=$false}
+  function Exec([string]$code){if($code-ceq 'setAccTime 0'){$state.paused=$true}}
+  function AutoCounts{$state.ownerQueries++;if($state.ownerQueries-eq 1){return @{active=1;frozen=0;pending=0}};Require $state.paused 'Retirement query did not follow pause.';return @{active=0;frozen=1;pending=0}}
+  function Motion{return @{frozen=$true;supported=$true;root=@(0,.2,0);terrainY=0}}
+  function PhysicsCounts{Require $state.paused 'Backend retirement sampled before pause.';return @{bodies=0;joints=0}}
+  function Pose([bool]$frozen){return @{frozen=$frozen}}
+  function PoseSummary($value){return $value}
+  Invoke-Expression $settleFunction.Extent.Text
+  $null=Settle 'race';Require ($state.ownerQueries-eq 2-and $case.race.pausedOwners.active-eq 0-and $case.race.backend.bodies-eq 0-and $case.race.passed) 'Actual Settle observer used stale pre-freeze owner count.'
+ }
+ Write-Host 'Stock model runner SelfTest PASS (census selection, exclusion, invalid/duplicate targets, nested finite values, airborne freeze refusal, unordered/stable pair, aggregate hit acceptance and wake/backend negatives, zero actual proxies and invalid matrix negatives, exact3D bullet segment, actual Settle observation race, parse).';return
 }
 $census=$null;if($CensusPath){$census=Get-Content -LiteralPath $CensusPath -Raw|ConvertFrom-Json}
 $targets=Targets $census $Classes $Models
@@ -224,8 +238,10 @@ function Settle([string]$stage){
   $sample=Motion;$samples+=,$sample;$case[$stage].samples=$samples
   if($sample.frozen){break};Require ([DateTime]::UtcNow-lt $until) 'Supported freeze deadline exceeded.';Start-Sleep -Milliseconds 100
  }while($true)
- Exec 'setAccTime 0';$backend=PhysicsCounts;Require ($owners.active-eq 0-and $owners.frozen-eq 1-and $owners.pending-eq 0-and $backend.bodies-eq 0-and $backend.joints-eq 0) 'Freeze did not retire actual handles.'
- $pose=Pose $true;$case[$stage].backend=$backend;$case[$stage].pose=PoseSummary $pose;$case[$stage].passed=$true
+ Exec 'setAccTime 0';$pausedOwners=AutoCounts;$backend=PhysicsCounts
+ $case[$stage].pausedOwners=$pausedOwners;$case[$stage].backend=$backend
+ Require ($pausedOwners.active-eq 0-and $pausedOwners.frozen-eq 1-and $pausedOwners.pending-eq 0-and $backend.bodies-eq 0-and $backend.joints-eq 0) 'Freeze did not retire actual handles.'
+ $pose=Pose $true;$case[$stage].pose=PoseSummary $pose;$case[$stage].passed=$true
  return $pose
 }
 function Projectile($beforeHit){
