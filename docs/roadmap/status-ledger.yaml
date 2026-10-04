@@ -50,8 +50,12 @@ execution:
     upstream_audit_location: docs/roadmap/modernisation/upstream
     house_state: UNREPRODUCED_PENDING_TARGET_IDENTIFICATION
     house_evidence: docs/roadmap/modernisation/EVERON-PLACEMENT-DIAGNOSTIC-20261004.md
-    fog_state: SOURCE_INTEGRATED_FOCUSED_GPU_CHECKS_PASSED_INSTALLED_GATE_PENDING
-    ragdoll_state: INSTALLED_STANDING_ADMISSION_REFUSED_NATIVE_FLOOR_MISMATCH_DIAGNOSED
+    fog_state: EXPERIMENTAL_INSTALLED_CONTROLS_AND_GPU_SAMPLES_PASSED_APPEARANCE_OPEN
+    fog_evidence: docs/verification/layered-fog-20261004.md
+    fog_runtime_receipt: docs/verification/layered-fog-20261004-runtime.json
+    ragdoll_state: BOUNDED_STOCK_STANDING_SAVE_AND_RUNTIME_TOGGLE_PASSED_RIFLE_PENDING
+    ragdoll_evidence: docs/verification/automatic-ragdoll-20261004.md
+    ragdoll_runtime_receipt: docs/verification/automatic-ragdoll-20261004-runtime.json
     upstream_state: BOUNDED_PORTS_INTEGRATED_NATIVE_AND_FOUR_INSTALLED_FIXTURES_PASSED
     upstream_evidence: docs/verification/upstream-followup-20261004.md
     upstream_source_receipts: docs/roadmap/modernisation/upstream/UPSTREAM-RUNTIME-INTEGRATION-20261004.md
@@ -62,11 +66,15 @@ execution:
       Exact camera, twelve source-bound foundations and near/far views inspected;
       reported floating owner not identified. Optional owner detail pending.
       No unverified global snapping. Continue independent authorised tasks.
-      Installed drop-height and fired-nearest-object fixtures passed. Strict
-      vehicle startup found an older compaction validation-order defect;
-      narrow repair integrated, installed rerun pending. Fog and automatic
-      ragdolls remain opt-in until installed gates; older ledger source hashes
-      outside reviewed slices remain stale and are not silently renewed.
+      All four installed upstream fixtures passed after the narrow repair of
+      an older compaction validation-order defect. Fog controls and bounded
+      GPU samples passed; hard distant contour and default exposure limit
+      appearance acceptance. Stock ordinary standing ragdolls, retained poses,
+      actual save/load and the shared dev-panel toggle path passed. Rifle
+      fixture repair remains pending; crouch/prone pose is not established.
+      Both candidates remain experimental and OFF by default. Older ledger
+      source hashes outside reviewed slices remain stale and are not silently
+      renewed; Preview validator stops at RND-005A, Compat at AST-011C.
   review_model: OWNER_REVIEW_NO_INDEPENDENT_REVIEWER
   review_model_note: >-
     Preview 0 has no independent reviewer and cannot obtain one: Oliver Kay is
