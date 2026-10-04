@@ -1,7 +1,7 @@
 # Installed original Everon: same-build legacy cutoff / background coverage comparison.
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{8,40}$')][string]$ExpectedCommit,
- [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='everon-terrain-background',[switch]$MapOnly)
+ [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='everon-terrain-background',[switch]$MapOnly,[switch]$OnlyMapExtent)
 $ErrorActionPreference='Stop';$taskRoot=Split-Path -Parent $PSScriptRoot
 $game='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault'
 function Require([bool]$ok,[string]$message){if(!$ok){throw $message}}
@@ -24,6 +24,7 @@ function Eval([string]$code){$v=([string](Send @{cmd='eval';code=$code}).result)
 function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
 try{
  $arms=@(@{name='legacy';background='0';extent='3'},@{name='background';background='1';extent='3'});if($MapOnly){$arms+=@{name='map-only';background='1';extent='1'}}
+ if($OnlyMapExtent){$arms=@(@{name='map-only';background='1';extent='1'})}
  foreach($arm in $arms){
   Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue)) 'Foreign game appeared.'
   $armOut=Join-Path $taskOut $arm.name;$armProfile=Join-Path $armOut 'user';New-Item -ItemType Directory -Force $armProfile|Out-Null
@@ -60,7 +61,9 @@ try{
     Require ($coverage.ready-and $coverage.background-eq ($arm.background-eq '1')-and !$coverage.pagedMaterials) 'Coverage/material control differs.'
     foreach($axis in 0..2){Require ([Math]::Abs([double]$coverage.camera[$axis]-[double]$view.pose[$axis])-lt .03) 'Camera witness differs.'}
     Require ($coverage.heightRevision-eq $source.heightRevision-and $coverage.terrainGrid-gt 0-and $coverage.patches-gt 0) 'Coverage source unavailable.'
-    if($arm.background-eq '1'-and $view.name-in @('upper','moved','high','fogged')){Require ($coverage.outsideLegacyRect-gt 0) 'No distant coverage beyond old cutoff.'}
+    # At 5000m the altitude-expanded legacy rectangle already covers the entire
+    # authored map. Extended seabed still adds background; map-only need not.
+    if($arm.background-eq '1'-and ($view.name-in @('upper','moved','fogged')-or ($view.name-eq 'high'-and $arm.extent-eq '3'))){Require ($coverage.outsideLegacyRect-gt 0) 'No distant coverage beyond old cutoff.'}
    }else{Require ($arm.background-eq '0') 'Default coverage unavailable.'}
    $weatherBefore=Send @{cmd='weather_visibility'};$performanceBefore=Send @{cmd='frame_performance'}
    $path=Join-Path $armOut ($view.name+'.png');$null=Send @{cmd='screenshot';path=$path}
