@@ -63,12 +63,20 @@ fn the_cloud_march_is_not_lit_by_the_stars() {
             && src.contains("if (star_weight > 0.001) {"),
         "sky_radiance must take a star weight and skip star_field when it is zero"
     );
-    // Both cloud callers take the star-free lane...
+    // Cloud/env callers take the star-free lane. The visible sky now extracts
+    // atmosphere from the same weighted source so fog chroma cannot recolour
+    // cloud illumination or add a second sky/star evaluation.
     let cloud_bg = src.matches("let bg = sky_radiance_cloud_bg(dir);").count();
+    let visible = &src[src.find("fn fs_sky(in:").unwrap()
+        ..src.find("fn fs_sky_env(in:").unwrap()];
     assert!(
-        cloud_bg >= 3,
-        "fs_sky, fs_cloud and fs_sky_env must all take the star-free sky as the cloud ambient \
-         (found {cloud_bg} of 3)"
+        cloud_bg >= 2
+            && visible.contains("let lanes=sky_radiance_lanes(dir,clamp(1.0-sky.night_sky.x,0.0,1.0));")
+            && visible.contains("let bg = lanes.original;")
+            && visible.contains("let t = disc_cloud_cover(pos, dir, sun, sky.sun_dir.w * sky.params.y, bg);")
+            && src.contains("return sky_radiance_lanes(dir,star_weight).original;"),
+        "visible sky/cloud/env must retain the original star-controlled illumination lane \
+         (found {cloud_bg} explicit cloud/env callers)"
     );
     // ...and nothing marches clouds against the full sky radiance any more.
     assert!(
