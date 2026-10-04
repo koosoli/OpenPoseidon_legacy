@@ -753,25 +753,30 @@ bool AutomaticRagdollTerrain(RString& refusal)
     auto& world = Physics::EnsurePhysicsWorld();
     if (!world.Create()) { refusal = "physics-world-unavailable"; return false; }
     if (world.GetStats().terrainRegistered) return true;
-    const int range = GLandscape->GetLandRange();
-    const float grid = GLandscape->GetLandGrid();
+    // Elevation belongs to the terrain grid, which the renderer may subdivide
+    // independently of object/texture LAND space. Downsampling land corners
+    // removes real terrain ridges, and is not an admissible ragdoll floor.
+    const int range = GLandscape->GetTerrainRange();
+    const float grid = GLandscape->GetTerrainGrid();
     if (range <= 1 || !std::isfinite(grid) || grid <= 0) return false;
-    int subdiv = 4;
-    while (subdiv > 1 && size_t((range-1)*subdiv+1)*size_t((range-1)*subdiv+1) > 4u*1024u*1024u) --subdiv;
-    const size_t width = size_t(range-1)*subdiv+1;
+    const size_t width = size_t(range);
     if (width*width > 4u*1024u*1024u) { refusal = "bounded-terrain-allocation-refused"; return false; }
-    const float spacing = grid/subdiv;
+    const float spacing = grid;
     std::vector<float> heights(width*width);
     for (size_t z = 0; z < width; ++z) for (size_t x = 0; x < width; ++x)
     {
-        const float y = GLandscape->SurfaceY(float(x)*spacing,float(z)*spacing);
+        // SurfaceY requires an entire cell and returns outside-map sea at the
+        // last row/column. Preserve those real closing vertices explicitly.
+        const float y = (x+1 < width && z+1 < width)
+            ? GLandscape->SurfaceY(float(x)*spacing,float(z)*spacing)
+            : GLandscape->ClippedData(int(z),int(x));
         if (!std::isfinite(y)) { refusal = "nonfinite-map-terrain"; return false; }
         heights[z*width+x] = y;
     }
     if (!world.SetTerrain(heights.data(),int(width),int(width),spacing,0,0))
     { refusal = "physics-terrain-registration-refused"; return false; }
-    LOG_INFO(World,"AUTORAGDOLL: registered shared actual terrain width={} spacing={} mapGrid={} bytes={} milliseconds={}",
-        width,spacing,grid,heights.size()*sizeof(float),
+    LOG_INFO(World,"AUTORAGDOLL: registered shared actual terrain width={} spacing={} mapGrid={} landGrid={} bytes={} milliseconds={}",
+        width,spacing,grid,GLandscape->GetLandGrid(),heights.size()*sizeof(float),
         std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count());
     return true;
 }
@@ -1402,13 +1407,30 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
         state->initial[part] = MIdentity; state->initial[part].SetPosition(center);
         for (auto& point : vertices[part]) point = (point-center)*(_automaticCorpsePose ? .90f : .40f);
         float proxyClearance = std::numeric_limits<float>::infinity();
+        float nativeProxyClearance = std::numeric_limits<float>::infinity();
         for (const auto& point : vertices[part])
         {
             const Vector3 supported = center+point;
             if (!supported.IsFinite()) { proxyClearance = std::numeric_limits<float>::quiet_NaN(); break; }
             const float roadY = GLandscape->RoadSurfaceY(supported+VUp*0.5f);
             if (!std::isfinite(roadY)) { proxyClearance = std::numeric_limits<float>::quiet_NaN(); break; }
+            nativeProxyClearance = std::min(nativeProxyClearance,supported.Y()-roadY);
             proxyClearance = std::min(proxyClearance,supported.Y()-roadY);
+            if (_automaticCorpsePose)
+            {
+                // Heightfields quantise their vertices. Calibrate the same
+                // bounded proxy against BOTH admitted floors, preserving the
+                // authored pose, body origin and 10 mm maximum collider offset.
+                const auto filter = Physics::QueryFilter{Physics::ColliderFlags::Roadway};
+                const Vector3 from = supported+VUp*.8f, to = supported-VUp*3.2f;
+                Vector3 floor;
+                if (!world->RayHitAnything(from,to,filter))
+                { refusal = "solver-terrain-floor-not-present"; return false; }
+                world->CastRay(from,to,floor,filter);
+                if (!floor.IsFinite() || std::abs(floor.Y()-roadY) > .025f)
+                { refusal = "solver-floor-disagrees-with-authored-contact"; return false; }
+                proxyClearance = std::min(proxyClearance,supported.Y()-floor.Y());
+            }
         }
         float proxyLift = 0;
         if (CorpseProxyContactLift(proxyClearance,proxyLift) && proxyLift > 0)
@@ -1417,8 +1439,8 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
             // This small local collider offset stays inside the inset anatomy;
             // every original support/admission check below still must pass.
             for (auto& point : vertices[part]) point += VUp*proxyLift;
-            LOG_INFO(World,"CORPSEFIT: contact-proxy part={} name={} lift={} originalClearance={} bodyOriginUnchanged=1",
-                part,names[part][0],proxyLift,proxyClearance);
+            LOG_INFO(World,"CORPSEFIT: contact-proxy part={} name={} lift={} originalClearance={} nativeClearance={} bodyOriginUnchanged=1",
+                part,names[part][0],proxyLift,proxyClearance,nativeProxyClearance);
         }
         int vertex = 0;
         for (auto& point : vertices[part])

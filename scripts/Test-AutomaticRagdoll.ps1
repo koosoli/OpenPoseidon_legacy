@@ -126,7 +126,7 @@ try{
  }
  Exec 'deleteVehicle ragVictim0;deleteVehicle ragVictim1;deleteVehicle ragVictim2;deleteVehicle ragVictim3;deleteVehicle ragVictim4'
  $cleanup=AutoCounts;$backend=PhysicsCounts;Require ($cleanup.active-eq 0-and $cleanup.frozen-eq 0-and $cleanup.pending-eq 0-and $backend.bodies-eq 0-and $backend.joints-eq 0) 'Delete cleanup left retained owners or solver handles.';$result.gates.cleanup=@{owners=$cleanup;backend=$backend}
- Require ((Select-String -LiteralPath $log -Pattern 'AUTORAGDOLL: actual zero-motion consumers exact=1').Count-ge 4) 'Actual zero-motion consumer proofs missing.'
+ Require ((Select-String -LiteralPath $log -Pattern 'AUTORAGDOLL: actual zero-motion consumers exact=(true|1)\b').Count-ge 4) 'Actual zero-motion consumer proofs missing.'
  $null=Send @{cmd='exit'};Require ($p.WaitForExit(30000)-and $p.ExitCode-eq 0) 'Normal game exit failed.'
  Require (!(Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet)) 'Runtime failure logged.'
  Require ((Pair|ConvertTo-Json -Depth 6 -Compress)-ceq ($before|ConvertTo-Json -Depth 6 -Compress)) 'Installed pair changed.'

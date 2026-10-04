@@ -23,6 +23,41 @@
 
 using namespace Poseidon::Physics;
 
+TEST_CASE("Native terrain-grid corners retain the landscape diagonal under Box3D ray casts", "[physics][articulation][automatic-terrain]")
+{
+    // A nonplanar cell distinguishes the landscape's 01--10 diagonal from
+    // bilinear interpolation or a 00--11 diagonal. The two-metre intermediate
+    // ridge also distinguishes native vertices from coarser LAND sampling.
+    constexpr int N = 3;
+    constexpr float spacing = 6.25f;
+    const float heights[N*N] = {16,18,16,19,25,19,16,18,16};
+    auto backend = CreatePhysicsBackend(); REQUIRE(backend); REQUIRE(backend->Create());
+    TerrainField field; field.heights = heights; field.width = field.height = N;
+    field.cellSize = spacing; field.originX = 5500; field.originZ = 10000;
+    REQUIRE(backend->SetTerrain(field));
+    const QueryFilter roadway{ColliderFlags::Roadway};
+    for (int zCell = 0; zCell < 2; ++zCell) for (int xCell = 0; xCell < 2; ++xCell)
+        for (const auto& fraction : {Vector3(.2f,0,.25f),Vector3(.75f,0,.8f),Vector3(.6f,0,.4f)})
+        {
+            const float x = fraction.X(), z = fraction.Z();
+            const float y00 = heights[zCell*N+xCell], y01 = heights[zCell*N+xCell+1];
+            const float y10 = heights[(zCell+1)*N+xCell], y11 = heights[(zCell+1)*N+xCell+1];
+            const float nativeY = x <= 1-z ? y00+(y10-y00)*z+(y01-y00)*x
+                : y10+(y01-y11)-(y10-y11)*x-(y01-y11)*z;
+            const Vector3 from(field.originX+(xCell+x)*spacing,40,field.originZ+(zCell+z)*spacing);
+            const Vector3 to(from.X(),0,from.Z()); Vector3 hit;
+            REQUIRE(backend->RayHitAnything(from,to,roadway));
+            backend->CastRay(from,to,hit,roadway);
+            CHECK(std::abs(hit.Y()-nativeY) < .002f);
+        }
+    Vector3 ridge;
+    const Vector3 from(field.originX+spacing,40,field.originZ+spacing);
+    REQUIRE(backend->RayHitAnything(from,Vector3(from.X(),0,from.Z()),roadway));
+    backend->CastRay(from,Vector3(from.X(),0,from.Z()),ridge,roadway);
+    CHECK(std::abs(ridge.Y()-25) < .002f);
+    backend->Destroy();
+}
+
 TEST_CASE("Articulated motion is inherited and only limbs of the same corpse ignore contact", "[physics][articulation][automatic-ragdoll]")
 {
     const Vector3 vertices[] = {{-.15f,-.15f,-.15f},{.15f,-.15f,-.15f},{-.15f,.15f,-.15f},{.15f,.15f,-.15f},

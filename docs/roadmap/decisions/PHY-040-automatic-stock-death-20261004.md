@@ -78,3 +78,29 @@ syntax checks. The complete game build, ordinary rifle deaths, source skin conta
 save/load, multiple corpses, near/far culling, lifecycle and performance require
 the matching installed runner and the runtime owner's review. Default promotion
 is explicitly pending those receipts.
+
+### First installed standing admission, 2026-10-04
+
+The matching `cdf0dba3` Everon campaign captured four ordinary stock standing
+deaths with exact actual zero-motion outputs (363 palettes, 6,394 CPU points and
+37 equipment proxies per owner); the fifth death took the budget fallback.
+Admission then refused all four. This is a failed installed campaign, not a
+completed ragdoll feature. The initial caller sampled the 50 m LAND grid at four
+subdivisions (12.5 m) while the actual terrain grid is 6.25 m, losing real vertices
+and causing approximately 0.26--0.29 m solver/native floor disagreement.
+
+The correction registers actual terrain-grid vertices, including the closing
+row/column rather than `SurfaceY`'s outside-map return. The ceiling is exactly
+4,194,304 samples, admitting a 2048 by 2048 map; larger maps refuse instead of
+downsampling. Native backend nonplanar-cell ray tests distinguish the actual
+01--10 diagonal and intermediate ridge from coarse/bilinear approximations.
+The existing 25 mm floor agreement and 3 mm vertex-clearance gates remain.
+Small solver quantisation differences participate in the existing 10 mm maximum
+contact-proxy calibration without moving the original skin, origin or anchors.
+
+Two captured standing owners also showed genuine native lower-leg proxy
+penetrations of 8.53 mm and 16.95 mm at the 90% component fit, independently of
+the incorrect solver floor. Those exceed the calibrated offset budget once
+clearance is included and remain unsupported; the floor correction does not
+claim to fix authored stance or visible skin contact. A matching rerun and
+measured supported-ground/foot-fit evidence remain required.
