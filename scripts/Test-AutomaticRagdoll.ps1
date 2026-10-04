@@ -130,7 +130,16 @@ try{
   $result.gates.saveLoad=@{passed=$true;loaded=$loaded};Capture 'loaded-first' 'ragVictim0'
  }
  if($RifleDeath){
-  $live=Spawn 'ragRifleVictim' -14 'UP';Exec ('ragEnemyGroup=createGroup east;ragFired=0;ragLastWeapon="";"SoldierEB" createUnit [['+(Fmt ($SiteX-14))+','+(Fmt ($SiteZ-12))+',0],ragEnemyGroup,"ragShooter=this;this disableAI ""MOVE"";this setBehaviour ""COMBAT"";this setCombatMode ""RED"""];ragShooter setDir 0;ragShooter setUnitPos "UP";ragShooter setSkill 1;removeAllWeapons ragShooter;ragShooter addMagazine "AK74";ragShooter addMagazine "AK74";ragShooter addWeapon "AK74";ragShooter selectWeapon "AK74";ragShooter addEventHandler ["Fired",{ragFired=ragFired+1;ragLastWeapon=_this select 1}];ragShooter reveal ragRifleVictim;ragShooter doTarget ragRifleVictim;setAccTime 1')
+  $live=Spawn 'ragRifleVictim' -14 'UP'
+  # perf_field contains only a WEST centre. GroupCreate refuses absent sides;
+  # initialise and prove the actual binding BEFORE sampling typed unit values.
+  Exec ('createCenter east;east setFriend [west,0];west setFriend [east,0];ragEnemyGroup=createGroup east;ragShooter=objNull;ragFired=0;ragLastWeapon="";"SoldierEB" createUnit [['+(Fmt ($SiteX-14))+','+(Fmt ($SiteZ-12))+',0],ragEnemyGroup,"ragShooter=this;this disableAI ""MOVE"";this setBehaviour ""COMBAT"";this setCombatMode ""RED"""]')
+  Require ((Eval '!isNull ragShooter')-eq $true) 'AK74 fixture shooter binding missing: original mission requires createCenter east before createGroup east.'
+  Require ((Eval 'alive ragShooter')-eq $true-and (Eval 'typeOf ragShooter')-ceq 'SoldierEB') 'AK74 fixture did not create the actual live stock Eastern soldier.'
+  $shooterPosition=Eval 'getPosASL ragShooter';Require ($shooterPosition.Count-eq 3-and [Math]::Abs((Num $shooterPosition[0])-($SiteX-14))-lt 1-and [Math]::Abs((Num $shooterPosition[1])-($SiteZ-12))-lt 1) 'Actual AK74 shooter placement differs.'
+  Exec 'ragShooter setDir 0;ragShooter setUnitPos "UP";ragShooter setSkill 1;removeAllWeapons ragShooter;ragShooter addMagazine "AK74";ragShooter addMagazine "AK74";ragShooter addWeapon "AK74";ragShooter selectWeapon "AK74";ragShooter addEventHandler ["Fired",{ragFired=ragFired+1;ragLastWeapon=_this select 1}];ragShooter reveal ragRifleVictim;ragShooter doTarget ragRifleVictim;setAccTime 1'
+  Require ((Eval '"AK74" in weapons ragShooter')-eq $true-and (Num (Eval 'ragShooter ammo "AK74"'))-gt 0) 'Actual AK74 weapon or loaded ammunition missing.'
+  $result.gates.rifleFixture=@{shooterType=(Eval 'typeOf ragShooter');shooterPosition=$shooterPosition;targetPosition=$live;weapon='AK74';ammo=(Eval 'ragShooter ammo "AK74"');center='Explicit EAST centre before group/unit creation; hostile fixture sides'}
   Start-Sleep -Milliseconds 1800;$until=[DateTime]::UtcNow.AddSeconds(35);$rifleSamples=@()
   while(Eval 'alive ragRifleVictim'){
    $sample=Eval '[time,ragFired,ragLastWeapon,typeOf ragShooter,getPosASL ragShooter,getDir ragShooter,weapons ragShooter,magazines ragShooter,ragShooter ammo "AK74",canFire ragShooter,ragShooter knowsAbout ragRifleVictim,getPosASL ragRifleVictim,getDammage ragRifleVictim,alive ragRifleVictim]'

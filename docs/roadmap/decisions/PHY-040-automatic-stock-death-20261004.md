@@ -150,4 +150,17 @@ target, gives only an actual AK74, waits for targeting and issues ordinary
 `doTarget`/`doFire` plus the existing script `fire` command. It records actual
 Fired weapon/count, ammo, knowledge, positions and target damage before timeout.
 Only a genuine AK74 projectile death can pass; it never substitutes setDammage.
-Installed rifle and runtime-toggle acceptance remain pending.
+The installed `7d5c1e92` runtime-toggle campaign passes: shared setter activation
+from startup-off, full active/frozen retention on disabling, an authored new
+disabled death while capacity is free, re-enabling and final cleanup. The revised
+rifle fixture still failed before producing any valid shooter witness. Actual
+receipt placeholders and the sole WEST centre exposed the cause: `createGroup
+east` returns null without an EAST centre. The fixture now calls `createCenter
+east` first, initialises the shooter to objNull and independently proves its live
+stock type, position, actual AK74 and ammunition before collecting arrays. Rifle
+acceptance remains pending a genuine projectile kill in the matching build.
+
+The requested MIDDLE campaign is not crouched acceptance: its actual initial CPU
+consumer points match the UP fixture exactly. Requested stance does not prove the
+animation changed. Actual crouch/prone deaths remain unverified; no forced pose or
+additional production change is introduced to close that gap.
