@@ -1125,6 +1125,7 @@ void DrawWeatherTab()
         ImGui::TextWrapped("Snowstorm: dense snowfall and 10 cm/min accumulation. Wind is controlled above; this does not instantly cover the ground.");
         ImGui::Text("Flakes: %d active, %d visible", GSnowFlakes.Stats().liveDrops, GSnowFlakes.Stats().drawnDrops);
         ImGui::TextWrapped("Falling snow adds overcast without forcing rain or thunderstorms; stopping snowfall restores the mission's cloud cover.");
+        ImGui::Text("Snow fog: %.2f (automatic 0.15 to 0.60; stronger Fog settings take priority)", snow.RenderFog(GLandscape ? GLandscape->GetFog() : 0.0f));
         ImGui::SliderFloat("Maximum snow depth (m)", &snow.maxDepth, 0.05f, 1.0f, "%.2f");
         if (ImGui::Button("Add 10 cm of snow")) snow.Deposit(0.1f);
         ImGui::SameLine();

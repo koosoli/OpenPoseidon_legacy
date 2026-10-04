@@ -77,6 +77,33 @@ TEST_CASE("Snowstorm budget is bounded and only falling snow adds cloud cover", 
     CHECK(snow.RenderOvercast(0.2f) == 0.2f);
 }
 
+TEST_CASE("Snow fog rises with precipitation, caps automatic cover and preserves manual weather", "[Snow][Weather][fog]")
+{
+    SnowField snow;
+    CHECK(snow.RenderFog(0.0f) == 0.0f);
+    snow.enabled = true;
+    float previous = 0.15f;
+    for (float rate : {0.0001f, 0.005f, 0.01f, 0.02f, 0.0334f, 0.1f, 1.0f})
+    {
+        snow.metresPerMinute = rate;
+        const float fog = snow.RenderFog(0.0f);
+        CHECK(fog >= previous);
+        CHECK(fog >= 0.15f);
+        CHECK(fog <= 0.6f);
+        CHECK(snow.RenderFog(0.8f) == 0.8f);
+        previous = fog;
+    }
+    CHECK(previous == 0.6f);
+    snow.falling = false;
+    CHECK(snow.RenderFog(0.12f) == 0.12f);
+    snow.falling = true;
+    for (float rate : {0.0f, -1.0f, std::numeric_limits<float>::quiet_NaN()})
+    {
+        snow.metresPerMinute = rate;
+        CHECK(snow.RenderFog(0.12f) == 0.12f);
+    }
+}
+
 TEST_CASE("Snow settings reset preserves accumulated cover and persistent tracks", "[Snow][Weather][reset]")
 {
     SnowField snow;

@@ -250,7 +250,7 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
     {
         snap.hasLandscape = true;
         snap.overcast = GSnow().RenderOvercast(GLandscape->GetOvercast());
-        snap.weatherFog = GLandscape->GetFog();
+        snap.weatherFog = GSnow().RenderFog(GLandscape->GetFog());
         snap.seaLevel = GLandscape->GetSeaLevel();
         snap.landscapeRainDensity = GLandscape->GetRainDensity();
     }

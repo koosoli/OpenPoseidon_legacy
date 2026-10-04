@@ -74,6 +74,13 @@ public:
         // Render-only cover: no mutation of the mission's rain/thunder state.
         return intensity > 0.0f ? std::max(authored, 0.75f + 0.2f * intensity) : authored;
     }
+    float RenderFog(float authored) const
+    {
+        const float intensity = FallingIntensity();
+        // Snow contributes 0.15..0.60. Explicitly denser mission/dev fog wins;
+        // stopping snowfall restores its authored value without overwriting it.
+        return intensity > 0.0f ? std::max(authored, std::min(0.6f, 0.15f + 0.45f * intensity)) : authored;
+    }
 
     void Reset()
     {
