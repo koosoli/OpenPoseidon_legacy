@@ -1,0 +1,5 @@
+; The Forest's island (Sinkhole W5): the player on a beach in the south. Needs the local forestisland add-on
+; (scripts/forest/Build-ForestIsland.ps1); terrain and ground only so far.
+setViewDistance 2000
+player switchCamera "EXTERNAL"
+exit

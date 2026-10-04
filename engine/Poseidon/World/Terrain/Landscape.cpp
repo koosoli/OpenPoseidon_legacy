@@ -266,6 +266,7 @@ void Landscape::Init()
 
     _texture.Clear();
     _a3TerrainMaterials.Clear();
+    _rvmatCellMaterials = false;
     SetTexture(0, "landtext\\mo.pac");
     // empty landscape
     for (x = 0; x < _landRange; x++)

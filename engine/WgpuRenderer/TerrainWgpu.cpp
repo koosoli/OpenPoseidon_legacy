@@ -1168,7 +1168,20 @@ Ref<Texture> TerrainWgpu::BuildAutomaticSatmap(const Landscape& land)
             LOG_WARN(Graphics,"OFP automatic satmap skipped: missing source {}",texture->Name());
             return nullptr;
         }
-        const auto image = DecodePAABuffer(bytes.data(),bytes.size(),!ContainsNoCase(sourceName,".pac"));
+        auto image = DecodePAABuffer(bytes.data(),bytes.size(),!ContainsNoCase(sourceName,".pac"));
+        // Sinkhole W5: a world whose ground textures are loose PNG/JPG (the converted Forest island) decodes them
+        // here too. Only reached when the PAA/PAC decode failed AND the source is a .png/.jpg, so the stock
+        // worlds (all PAA/PAC) bake exactly as before.
+        if (!image.valid() && (ContainsNoCase(sourceName,".png") || ContainsNoCase(sourceName,".jpg")))
+        {
+            int w=0,h=0,channels=0;
+            if (stbi_uc* rgba = stbi_load_from_memory(bytes.data(),static_cast<int>(bytes.size()),&w,&h,&channels,4))
+            {
+                image.width=w; image.height=h;
+                image.rgba.assign(rgba,rgba+static_cast<size_t>(w)*h*4);
+                stbi_image_free(rgba);
+            }
+        }
         if (!image.valid())
         {
             LOG_WARN(Graphics,"OFP automatic satmap skipped: decode failed {}",texture->Name());
@@ -3129,6 +3142,14 @@ void TerrainWgpu::UpdateGroundTexturePages(const Landscape& land, const Camera& 
     constexpr int QuantizeCells = 8;
     centerX = (centerX / QuantizeCells) * QuantizeCells;
     centerZ = (centerZ / QuantizeCells) * QuantizeCells;
+    const int range = land.GetLandRange();
+    // Sinkhole W5: a 4WVR world naming RVMATs (the converted Forest island: 1.7 m cells, 256 materials) keeps the
+    // whole map resident -- a 64-cell window there is ~110 m and every tile past it shows its slot-0 surface. One
+    // fixed window, built once per world, so the camera never re-pages. Every other world: unchanged.
+    const bool wholeMap = land.HasRvmatCellMaterials();
+    const int radius = wholeMap ? range : _terrainPageRadius;
+    if (wholeMap)
+        centerX = centerZ = 0;
     if (!force && centerX == _terrainPageCenterX && centerZ == _terrainPageCenterZ)
         return;
     _terrainPageCenterX = centerX;
@@ -3136,11 +3157,10 @@ void TerrainWgpu::UpdateGroundTexturePages(const Landscape& land, const Camera& 
     const bool timings = TerrainPageTimingsEnabled();
     const auto timingStart = timings ? TerrainPageClock::now() : TerrainPageClock::time_point{};
 
-    const int range = land.GetLandRange();
-    const int x0 = std::clamp(centerX - _terrainPageRadius, 0, range);
-    const int z0 = std::clamp(centerZ - _terrainPageRadius, 0, range);
-    const int x1 = std::clamp(centerX + _terrainPageRadius + 1, 0, range);
-    const int z1 = std::clamp(centerZ + _terrainPageRadius + 1, 0, range);
+    const int x0 = std::clamp(centerX - radius, 0, range);
+    const int z0 = std::clamp(centerZ - radius, 0, range);
+    const int x1 = std::clamp(centerX + radius + 1, 0, range);
+    const int z1 = std::clamp(centerZ + radius + 1, 0, range);
     std::unordered_map<int, uint32_t> nearest;
     for (int z = z0; z < z1; ++z)
     {
@@ -3174,7 +3194,7 @@ void TerrainWgpu::UpdateGroundTexturePages(const Landscape& land, const Camera& 
             centerX, centerZ, static_cast<uint64_t>(x1 - x0) * static_cast<uint64_t>(z1 - z0),
             materials.size(), candidateScanMs, TerrainPageElapsedMs(timingStart));
     LOG_INFO(Graphics, "Wgpu terrain page window: centre=({}, {}) radius={} cells candidateMaterials={}", centerX,
-             centerZ, _terrainPageRadius, materials.size());
+             centerZ, radius, materials.size());
 }
 
 void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)

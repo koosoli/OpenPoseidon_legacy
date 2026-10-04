@@ -1,0 +1,44 @@
+version=11;
+class Mission
+{
+	randomSeed=4900;
+	class Intel
+	{
+		startWeather=0.2;
+		forecastWeather=0.2;
+		startFog=0;
+		forecastFog=0;
+		year=2014;
+		month=6;
+		day=21;
+		hour=10;
+		minute=0;
+	};
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={1859.4,0,1187.7};
+					azimut=0;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=1;
+					init="this setCaptive true";
+				};
+			};
+		};
+	};
+};
+class Intro { randomSeed=1; class Intel { }; };
+class OutroWin { randomSeed=2; class Intel { }; };
+class OutroLoose { randomSeed=3; class Intel { }; };

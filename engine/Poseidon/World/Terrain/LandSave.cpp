@@ -177,11 +177,17 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
     ProgressAdd(f.rest());
     ProgressFrame();
 
+    std::vector<std::pair<int, std::string>> rvmatCells; // Sinkhole W5
     for (i = 0; i < LAND_TEXTURES_MAX; i++)
     {
         char texName[33] = {}; // 32 wire bytes + guaranteed NUL for the strstr / SetTexture C-string use
         f.read(texName, 32);
-        if (*texName)
+        const size_t nameLength = strlen(texName);
+        if (nameLength > 6 && _stricmp(texName + nameLength - 6, ".rvmat") == 0)
+        {
+            rvmatCells.emplace_back(i, texName); // a material, not an image: resolved below
+        }
+        else if (*texName)
         {
             PoseidonAssert(!strstr(texName, "$$")); // SetTexture(i,"landText\\pi.pac");
             SetTexture(i, texName);
@@ -189,6 +195,9 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
         ProgressSetRest(f.rest());
         ProgressRefresh();
     }
+    // Sinkhole W5: cells may name an authored terrain material instead of a plain texture
+    if (!rvmatCells.empty())
+        LoadRvmatTerrainMaterials(rvmatCells);
 
     if (f.fail())
     {
@@ -271,7 +280,10 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
                 isID[so.id] = true;
             }
             PoseidonAssert(so.id >= 0);
-            ObjectCreate(so.id, so.name, ConvertToM(so.matrix));
+            // Sinkhole W5: the converted Forest island's placements are its authored world transforms on this exact
+            // heightfield (rocks half buried, pines pivoted 4 m under the trunk), so they keep their elevation. A
+            // Visitor-made world relies on the legacy drop-to-ground correction and still gets it.
+            ObjectCreate(so.id, so.name, ConvertToM(so.matrix), nullptr, nullptr, false, _rvmatCellMaterials);
         }
 
         ProgressSetRest(f.rest());
@@ -1934,6 +1946,250 @@ static int ObjectStreamPrefetchMaxCells();
 // space; geography, roads, objects, randomisation and material lookup operate in
 // land space. Their world extents remain identical because landGrid is
 // terrainGrid * ratio.
+// One parsed terrain RVMAT -> its A3TerrainMaterial slot and the cell's legacy texture. Shared by the Arma world
+// loader (LoadOprwModern) and, for texture names ending in ".rvmat", the raw 4WVR loader (Sinkhole W5: the converted
+// Forest island authors its ground the same way). Returns true when a legacy texture was resolved.
+bool Landscape::ApplyTerrainMaterialSource(int index, const Poseidon::Asset::Material::RvMaterialSource& material)
+{
+    const size_t i = static_cast<size_t>(index);
+    int resolved = 0;
+    // The terrain families are authored compositions, not generic object
+    // materials: a satellite image, a selector mask, then a stack of
+    // ground surfaces. All three generations are described by one family
+    // record (Asset::Material::FindTerrainFamily) rather than by stage
+    // arithmetic inlined here, because Arma 1 differs from the later two
+    // in four ways at once -- three stages per group instead of two, a
+    // first surface at Stage2 instead of Stage4, a mask that shares the
+    // satellite's `_lco` suffix, and a slot assignment that comes from
+    // the shader id rather than from the stage position.
+    //
+    //   Arma 1       Terrain1..15  Stage2..Stage13 = four surfaces
+    //   Arma 2 / OA  TerrainX      Stage4..Stage14 = six surfaces
+    //   Arma 3       TerrainSNX    Stage4..Stage12 = five surfaces,
+    //                              Stage14 = the whole-tile normal map.
+    //
+    // Preserve the exact references here; TerrainWgpu uploads and
+    // composites them instead of inventing a cell-boundary fade.
+    Poseidon::Asset::Material::TerrainFamily family;
+    const bool isTerrainFamily =
+        Poseidon::Asset::Material::FindTerrainFamily(material.pixelShaderId, family);
+    A3TerrainMaterial& authored = _a3TerrainMaterials[static_cast<int>(i)];
+    const auto uvForStage = [&](const Poseidon::Asset::Material::RvStage& stage)
+    {
+        const auto* transform = &stage.uvTransform;
+        const std::string* uvSource = &stage.uvSource;
+        if (!transform->present && stage.texGen >= 0)
+        {
+            for (const auto& texGen : material.texGens)
+            {
+                if (texGen.index == stage.texGen)
+                {
+                    transform = &texGen.uvTransform;
+                    uvSource = &texGen.uvSource;
+                    break;
+                }
+            }
+        }
+        // `uvTransform` is a basis, not a pair of row vectors: aside/up/dir
+        // are where the source's X/Y/Z axes GO, so the u channel is the
+        // first component of each of the three, not all three components
+        // of `aside`. Transposing it here keeps the shader a plain dot
+        // product.
+        //
+        // Reading it row-wise happens to work for the `tex` stages, whose
+        // matrices are diagonal, and silently destroys every `worldPos`
+        // stage: Stratis's satellite TexGen is aside=(k,0,0) up=(0,0,k)
+        // dir=(0,-k,0), so the row reading takes v from the source's third
+        // component -- the terrain HEIGHT -- instead of from world Z. The
+        // satellite then smears along the slope and the LCA mask, which
+        // shares that TexGen, selects one surface for the whole tile.
+        A3TerrainUv uv;
+        uv.u = {transform->aside[0], transform->up[0], transform->dir[0], transform->pos[0]};
+        uv.v = {transform->aside[1], transform->up[1], transform->dir[1], transform->pos[1]};
+        uv.worldPos = *uvSource == "worldPos";
+        return uv;
+    };
+    // A stage's texture, or an empty string when it is absent, empty or
+    // procedural. Reading by index rather than iterating is what lets the
+    // group layout be data (the family record) instead of control flow.
+    const auto textureOfStage = [&](int index) -> std::string
+    {
+        for (const auto& candidate : material.stages)
+        {
+            if (candidate.index != index)
+                continue;
+            const std::string& text = candidate.texture.raw;
+            if (text.empty() || Poseidon::Asset::Material::RvTextureRef::LooksProcedural(text))
+                return std::string();
+            return text;
+        }
+        return std::string();
+    };
+    const auto stageAt = [&](int index) -> const Poseidon::Asset::Material::RvStage*
+    {
+        for (const auto& candidate : material.stages)
+            if (candidate.index == index)
+                return &candidate;
+        return nullptr;
+    };
+
+    if (isTerrainFamily)
+    {
+        // The satellite is Stage0 by position in all three generations,
+        // and all three name it `s_<x>_<y>_lco.paa`. Position decides,
+        // never the suffix: Arma 1 gives the MASK the same `_lco` suffix,
+        // so a suffix test binds the mask as a second satellite.
+        const std::string satellite = textureOfStage(family.satelliteStage);
+        if (!satellite.empty())
+        {
+            authored.satellite = RStringB(satellite.c_str());
+            if (const auto* stage = stageAt(family.satelliteStage))
+                authored.satelliteUv = uvForStage(*stage);
+        }
+        const std::string mask = textureOfStage(family.maskStage);
+        if (!mask.empty())
+        {
+            authored.mask = RStringB(mask.c_str());
+            if (const auto* stage = stageAt(family.maskStage))
+                authored.maskUv = uvForStage(*stage);
+        }
+        // Arma 3's whole-tile normal. Arma 2 spends the same stage on its
+        // sixth surface and Arma 1 has no such stage at all, so this is
+        // gated on the family rather than on the stage index alone.
+        if (family.tileNormalStage > 0)
+        {
+            const std::string tileNormal = textureOfStage(family.tileNormalStage);
+            if (!tileNormal.empty())
+                authored.tileNormal = RStringB(tileNormal.c_str());
+        }
+
+        // The surface stack. `SlotOfGroup` is the identity for the later
+        // generations -- their groups sit at their own slot's stage and a
+        // hole is an empty stage that keeps its place -- and the set-bit
+        // lookup for Arma 1, whose groups are packed and whose shader id
+        // names the slots they occupy.
+        const int groups = family.GroupCount();
+        for (int group = 0; group < groups; ++group)
+        {
+            const int slot = family.SlotOfGroup(group);
+            if (slot < 0 || static_cast<size_t>(slot) >= authored.surfaces.size())
+                continue;
+            const int base = family.firstSurfaceStage + group * family.stageStride;
+            const std::string colour = textureOfStage(base + family.colourOffset);
+            if (colour.empty())
+                continue;
+            authored.surfaces[static_cast<size_t>(slot)] = RStringB(colour.c_str());
+            const std::string normal = textureOfStage(base + family.normalOffset);
+            if (!normal.empty())
+                authored.surfaceNormals[static_cast<size_t>(slot)] = RStringB(normal.c_str());
+            if (const auto* stage = stageAt(base + family.colourOffset))
+                authored.surfaceUvs[static_cast<size_t>(slot)] = uvForStage(*stage);
+            authored.surfaceCount =
+                std::max(authored.surfaceCount, static_cast<unsigned char>(slot + 1));
+        }
+    }
+
+    // NOT the Stage0 satellite, even though it is now captured in the IR.
+    // The satellite is one low-frequency image per 1024 m tile with its
+    // own worldPos TexGen; the legacy slot is sampled through the land
+    // cell's frame, so binding it here tiles a whole tile's image into
+    // every 50 m cell -- measured on Takistan as a corduroy pattern over
+    // the entire map. It belongs to the authored path, which carries the
+    // TexGen that makes it mean anything.
+    //
+    // The mask is `_lca` and the detail layers are `_nopx`/`_co` pairs.
+    // Taking the first `_co` that is not a detail layer picks a close-range
+    // surface, which is what the legacy cell frame can actually sample.
+    //
+    // Arma 1 needs the family record for this too, and for a reason that
+    // cost a whole world: EVERY Sahrani surface colour is named
+    // `<surface>_detail_co.paa`, so the "not a detail layer" filter -- which
+    // exists to skip Arma 2/3's `_detail_*` helpers -- rejected all four of
+    // them, on all 4,859 tiles. No material resolved a legacy texture and
+    // the terrain drew white. Take slot 0's colour directly from the family
+    // instead of pattern-matching a filename.
+    if (isTerrainFamily && family.slotsFromShaderId)
+    {
+        const int slot0Group = 0;
+        const int base = family.firstSurfaceStage + slot0Group * family.stageStride;
+        const std::string colour = textureOfStage(base + family.colourOffset);
+        if (!colour.empty())
+        {
+            SetTexture(static_cast<int>(i), RStringB(colour.c_str()));
+            ++resolved;
+        }
+    }
+    // The authored pass above already worked out which stage is slot 0's
+    // colour, from the family record. If it found one, that IS the answer --
+    // no filename needs interrogating. Preferring it costs nothing and closes
+    // the failure the `_co.paa` filter below keeps producing on each new
+    // generation: DayZ names every terrain surface colour `_ca.paa`
+    // (`en_grass1_ca.paa`, `en_soil_ca.paa`, ...), so the filter matched
+    // nothing on any of Enoch's 9,432 materials and the legacy slot stayed
+    // null -- white ground on GL33, and on WGPU a silent single point of
+    // failure the moment the authored path is off.
+    //
+    // That is the third generation to break the same way: Sahrani's
+    // `_detail_co` (see above) and now DayZ's `_ca`. The lesson the comment
+    // above draws -- take the colour from the family, not from the name -- is
+    // simply applied to both branches here.
+    else if (authored.surfaceCount > 0 && authored.surfaces[0].GetLength() != 0)
+    {
+        SetTexture(static_cast<int>(i), authored.surfaces[0]);
+        ++resolved;
+    }
+    else
+    {
+        for (const auto& stage : material.stages)
+        {
+            const std::string& texture = stage.texture.raw;
+            if (texture.empty() || Poseidon::Asset::Material::RvTextureRef::LooksProcedural(texture))
+                continue;
+            std::string lower = texture;
+            for (char& c : lower)
+                c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+            if (lower.find("_co.paa") == std::string::npos || lower.find("detail") != std::string::npos)
+                continue;
+            SetTexture(static_cast<int>(i), RStringB(texture.c_str()));
+            ++resolved;
+            break;
+        }
+    }
+    return resolved != 0;
+}
+
+// Sinkhole W5: a raw 4WVR world (the converted Forest island) may name an RVMAT in its cell texture table instead of
+// a texture. Each one is parsed (text or binary) and resolved exactly as an Arma world's terrain material is, so the
+// authored satellite/mask/surface path draws it. Stock OFP/CWA worlds name only .paa/.pac textures: for them this
+// finds nothing and leaves _a3TerrainMaterials empty, as before.
+void Landscape::LoadRvmatTerrainMaterials(const std::vector<std::pair<int, std::string>>& cells)
+{
+    int count = _texture.Size();
+    for (const auto& cell : cells)
+        count = std::max(count, cell.first + 1);
+    if (_texture.Size() < count)
+        _texture.Resize(count);
+    _a3TerrainMaterials.Resize(count);
+    for (int m = 0; m < count; ++m)
+        _a3TerrainMaterials[m] = A3TerrainMaterial{};
+    int resolved = 0;
+    for (const auto& [index, name] : cells)
+    {
+        try
+        {
+            const auto material = Poseidon::Asset::Material::ParseRvMaterialFile(name);
+            resolved += ApplyTerrainMaterialSource(index, material) ? 1 : 0;
+        }
+        catch (const std::exception& e)
+        {
+            LOG_WARN(World, "4WVR terrain material '{}' not loaded: {}", name, e.what());
+        }
+    }
+    _rvmatCellMaterials = resolved > 0;
+    LOG_INFO(World, "4WVR terrain materials: {} RVMAT cell textures, {} resolved to a legacy texture", cells.size(),
+             resolved);
+}
+
 bool Landscape::LoadOprwModern(const char* path)
 {
     namespace Fmt = Poseidon::Asset::Formats;
@@ -2123,208 +2379,7 @@ bool Landscape::LoadOprwModern(const char* path)
                 continue;
             }
 
-            // The terrain families are authored compositions, not generic object
-            // materials: a satellite image, a selector mask, then a stack of
-            // ground surfaces. All three generations are described by one family
-            // record (Asset::Material::FindTerrainFamily) rather than by stage
-            // arithmetic inlined here, because Arma 1 differs from the later two
-            // in four ways at once -- three stages per group instead of two, a
-            // first surface at Stage2 instead of Stage4, a mask that shares the
-            // satellite's `_lco` suffix, and a slot assignment that comes from
-            // the shader id rather than from the stage position.
-            //
-            //   Arma 1       Terrain1..15  Stage2..Stage13 = four surfaces
-            //   Arma 2 / OA  TerrainX      Stage4..Stage14 = six surfaces
-            //   Arma 3       TerrainSNX    Stage4..Stage12 = five surfaces,
-            //                              Stage14 = the whole-tile normal map.
-            //
-            // Preserve the exact references here; TerrainWgpu uploads and
-            // composites them instead of inventing a cell-boundary fade.
-            Poseidon::Asset::Material::TerrainFamily family;
-            const bool isTerrainFamily =
-                Poseidon::Asset::Material::FindTerrainFamily(material.pixelShaderId, family);
-            A3TerrainMaterial& authored = _a3TerrainMaterials[static_cast<int>(i)];
-            const auto uvForStage = [&](const Poseidon::Asset::Material::RvStage& stage)
-            {
-                const auto* transform = &stage.uvTransform;
-                const std::string* uvSource = &stage.uvSource;
-                if (!transform->present && stage.texGen >= 0)
-                {
-                    for (const auto& texGen : material.texGens)
-                    {
-                        if (texGen.index == stage.texGen)
-                        {
-                            transform = &texGen.uvTransform;
-                            uvSource = &texGen.uvSource;
-                            break;
-                        }
-                    }
-                }
-                // `uvTransform` is a basis, not a pair of row vectors: aside/up/dir
-                // are where the source's X/Y/Z axes GO, so the u channel is the
-                // first component of each of the three, not all three components
-                // of `aside`. Transposing it here keeps the shader a plain dot
-                // product.
-                //
-                // Reading it row-wise happens to work for the `tex` stages, whose
-                // matrices are diagonal, and silently destroys every `worldPos`
-                // stage: Stratis's satellite TexGen is aside=(k,0,0) up=(0,0,k)
-                // dir=(0,-k,0), so the row reading takes v from the source's third
-                // component -- the terrain HEIGHT -- instead of from world Z. The
-                // satellite then smears along the slope and the LCA mask, which
-                // shares that TexGen, selects one surface for the whole tile.
-                A3TerrainUv uv;
-                uv.u = {transform->aside[0], transform->up[0], transform->dir[0], transform->pos[0]};
-                uv.v = {transform->aside[1], transform->up[1], transform->dir[1], transform->pos[1]};
-                uv.worldPos = *uvSource == "worldPos";
-                return uv;
-            };
-            // A stage's texture, or an empty string when it is absent, empty or
-            // procedural. Reading by index rather than iterating is what lets the
-            // group layout be data (the family record) instead of control flow.
-            const auto textureOfStage = [&](int index) -> std::string
-            {
-                for (const auto& candidate : material.stages)
-                {
-                    if (candidate.index != index)
-                        continue;
-                    const std::string& text = candidate.texture.raw;
-                    if (text.empty() || Poseidon::Asset::Material::RvTextureRef::LooksProcedural(text))
-                        return std::string();
-                    return text;
-                }
-                return std::string();
-            };
-            const auto stageAt = [&](int index) -> const Poseidon::Asset::Material::RvStage*
-            {
-                for (const auto& candidate : material.stages)
-                    if (candidate.index == index)
-                        return &candidate;
-                return nullptr;
-            };
-
-            if (isTerrainFamily)
-            {
-                // The satellite is Stage0 by position in all three generations,
-                // and all three name it `s_<x>_<y>_lco.paa`. Position decides,
-                // never the suffix: Arma 1 gives the MASK the same `_lco` suffix,
-                // so a suffix test binds the mask as a second satellite.
-                const std::string satellite = textureOfStage(family.satelliteStage);
-                if (!satellite.empty())
-                {
-                    authored.satellite = RStringB(satellite.c_str());
-                    if (const auto* stage = stageAt(family.satelliteStage))
-                        authored.satelliteUv = uvForStage(*stage);
-                }
-                const std::string mask = textureOfStage(family.maskStage);
-                if (!mask.empty())
-                {
-                    authored.mask = RStringB(mask.c_str());
-                    if (const auto* stage = stageAt(family.maskStage))
-                        authored.maskUv = uvForStage(*stage);
-                }
-                // Arma 3's whole-tile normal. Arma 2 spends the same stage on its
-                // sixth surface and Arma 1 has no such stage at all, so this is
-                // gated on the family rather than on the stage index alone.
-                if (family.tileNormalStage > 0)
-                {
-                    const std::string tileNormal = textureOfStage(family.tileNormalStage);
-                    if (!tileNormal.empty())
-                        authored.tileNormal = RStringB(tileNormal.c_str());
-                }
-
-                // The surface stack. `SlotOfGroup` is the identity for the later
-                // generations -- their groups sit at their own slot's stage and a
-                // hole is an empty stage that keeps its place -- and the set-bit
-                // lookup for Arma 1, whose groups are packed and whose shader id
-                // names the slots they occupy.
-                const int groups = family.GroupCount();
-                for (int group = 0; group < groups; ++group)
-                {
-                    const int slot = family.SlotOfGroup(group);
-                    if (slot < 0 || static_cast<size_t>(slot) >= authored.surfaces.size())
-                        continue;
-                    const int base = family.firstSurfaceStage + group * family.stageStride;
-                    const std::string colour = textureOfStage(base + family.colourOffset);
-                    if (colour.empty())
-                        continue;
-                    authored.surfaces[static_cast<size_t>(slot)] = RStringB(colour.c_str());
-                    const std::string normal = textureOfStage(base + family.normalOffset);
-                    if (!normal.empty())
-                        authored.surfaceNormals[static_cast<size_t>(slot)] = RStringB(normal.c_str());
-                    if (const auto* stage = stageAt(base + family.colourOffset))
-                        authored.surfaceUvs[static_cast<size_t>(slot)] = uvForStage(*stage);
-                    authored.surfaceCount =
-                        std::max(authored.surfaceCount, static_cast<unsigned char>(slot + 1));
-                }
-            }
-
-            // NOT the Stage0 satellite, even though it is now captured in the IR.
-            // The satellite is one low-frequency image per 1024 m tile with its
-            // own worldPos TexGen; the legacy slot is sampled through the land
-            // cell's frame, so binding it here tiles a whole tile's image into
-            // every 50 m cell -- measured on Takistan as a corduroy pattern over
-            // the entire map. It belongs to the authored path, which carries the
-            // TexGen that makes it mean anything.
-            //
-            // The mask is `_lca` and the detail layers are `_nopx`/`_co` pairs.
-            // Taking the first `_co` that is not a detail layer picks a close-range
-            // surface, which is what the legacy cell frame can actually sample.
-            //
-            // Arma 1 needs the family record for this too, and for a reason that
-            // cost a whole world: EVERY Sahrani surface colour is named
-            // `<surface>_detail_co.paa`, so the "not a detail layer" filter -- which
-            // exists to skip Arma 2/3's `_detail_*` helpers -- rejected all four of
-            // them, on all 4,859 tiles. No material resolved a legacy texture and
-            // the terrain drew white. Take slot 0's colour directly from the family
-            // instead of pattern-matching a filename.
-            if (isTerrainFamily && family.slotsFromShaderId)
-            {
-                const int slot0Group = 0;
-                const int base = family.firstSurfaceStage + slot0Group * family.stageStride;
-                const std::string colour = textureOfStage(base + family.colourOffset);
-                if (!colour.empty())
-                {
-                    SetTexture(static_cast<int>(i), RStringB(colour.c_str()));
-                    ++resolved;
-                }
-            }
-            // The authored pass above already worked out which stage is slot 0's
-            // colour, from the family record. If it found one, that IS the answer --
-            // no filename needs interrogating. Preferring it costs nothing and closes
-            // the failure the `_co.paa` filter below keeps producing on each new
-            // generation: DayZ names every terrain surface colour `_ca.paa`
-            // (`en_grass1_ca.paa`, `en_soil_ca.paa`, ...), so the filter matched
-            // nothing on any of Enoch's 9,432 materials and the legacy slot stayed
-            // null -- white ground on GL33, and on WGPU a silent single point of
-            // failure the moment the authored path is off.
-            //
-            // That is the third generation to break the same way: Sahrani's
-            // `_detail_co` (see above) and now DayZ's `_ca`. The lesson the comment
-            // above draws -- take the colour from the family, not from the name -- is
-            // simply applied to both branches here.
-            else if (authored.surfaceCount > 0 && authored.surfaces[0].GetLength() != 0)
-            {
-                SetTexture(static_cast<int>(i), authored.surfaces[0]);
-                ++resolved;
-            }
-            else
-            {
-                for (const auto& stage : material.stages)
-                {
-                    const std::string& texture = stage.texture.raw;
-                    if (texture.empty() || Poseidon::Asset::Material::RvTextureRef::LooksProcedural(texture))
-                        continue;
-                    std::string lower = texture;
-                    for (char& c : lower)
-                        c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
-                    if (lower.find("_co.paa") == std::string::npos || lower.find("detail") != std::string::npos)
-                        continue;
-                    SetTexture(static_cast<int>(i), RStringB(texture.c_str()));
-                    ++resolved;
-                    break;
-                }
-            }
+            resolved += ApplyTerrainMaterialSource(static_cast<int>(i), material) ? 1 : 0;
         }
         LOG_DEBUG(World, "LoadOprw25 {}: {} of {} terrain materials resolved to a satellite texture", path, resolved,
                   world.materials.size());

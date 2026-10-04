@@ -11,6 +11,10 @@
 #include <Poseidon/World/Terrain/SimulationResidency.hpp>
 #include <Poseidon/World/Terrain/StaticPlainRouteProbe.hpp>
 
+namespace Poseidon::Asset::Material
+{
+struct RvMaterialSource;
+}
 #include <array>
 #include <chrono>
 #include <list>
@@ -551,6 +555,10 @@ class Landscape : public SerializeClass
     // surface colours. The legacy renderer still uses _texture's satellite
     // entry; the WGPU path consumes this lossless authored description.
     AutoArray<A3TerrainMaterial> _a3TerrainMaterials;
+    // Sinkhole W5: set only by LoadRvmatTerrainMaterials (a raw 4WVR world naming RVMATs -- the converted Forest
+    // island). Its land cells are 1.7 m, so the renderer's cell-count page window would reach ~110 m; such a world
+    // is small enough to keep every material resident instead. False for every stock, Arma and Enfusion world.
+    bool _rvmatCellMaterials = false;
 
     // RFG-062: the Enfusion `.emat` surface path per terrain palette entry, filled ONLY
     // by the native Reforger loader (LandLoadEnfusion.cpp). Every other world leaves it
@@ -1057,6 +1065,10 @@ class Landscape : public SerializeClass
     // Loads modern OPRW worlds while preserving their authored coarse land grid
     // and fine elevation grid. See LandSave.cpp for the ownership split.
     bool LoadOprwModern(const char* path);
+    // One parsed terrain RVMAT into _a3TerrainMaterials[index] (+ the legacy cell texture); see LandSave.cpp.
+    bool ApplyTerrainMaterialSource(int index, const Poseidon::Asset::Material::RvMaterialSource& material);
+    // Sinkhole W5: raw 4WVR worlds whose cell texture names end in ".rvmat" (stock worlds have none).
+    void LoadRvmatTerrainMaterials(const std::vector<std::pair<int, std::string>>& cells);
     /// RFG-005: load an Enfusion (Arma Reforger) world straight out of the installed
     /// game's `.pak` archives -- no conversion, no intermediate file. `addonsDir` is
     /// the game's `addons` directory; `POSEIDON_REFORGER_WORLD` picks the world
@@ -1192,6 +1204,7 @@ class Landscape : public SerializeClass
     {
         return id >= 0 && id < _a3TerrainMaterials.Size() ? &_a3TerrainMaterials[id] : nullptr;
     }
+    bool HasRvmatCellMaterials() const { return _rvmatCellMaterials; }
     // The Enfusion surface `.emat` this palette entry was bound from, or "" -- and 0 on
     // every world that is not a natively loaded Reforger one. See _enfusionSurfaces.
     int GetEnfusionSurfaceCount() const { return _enfusionSurfaces.Size(); }
