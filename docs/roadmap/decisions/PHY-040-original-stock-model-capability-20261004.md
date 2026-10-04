@@ -125,3 +125,29 @@ Native controls include the actual captured Woman1/2 centres, rotated frames,
 coincident/24-mm centres, incorrect midpoint, nonfinite and overflow inputs.
 Capability/consumer controls pass 1,598 assertions in six cases. Final installed
 Woman1/2 and same-build all-model qualification remain pending.
+
+## Fresh rifle-hit momentum correction candidate
+
+The owner reports that fresh editor corpses sometimes fail to react and that a
+rifle hit can launch a reacting body several metres. Source audit establishes
+that mission-editor Preview uses the admitted GModeArcade path. Native player
+rifle bullets and created BulletSingleW use the same collision/damage/impulse
+path; it has no blanket dead-infantry ray exclusion. Fresh admission still needs
+an actual owner/refusal receipt before attributing a missing reaction.
+
+A concrete magnitude mismatch is independent of that admission question:
+ShotBullet::GetMass is a legacy hardcoded 50 g, so an 800 m/s direct hit supplies
+40 N s and a randomized GeometrySphere/6 lever. The existing ballistic resolver
+uses configured bulletMass or its explicitly assumed 4 g fallback. Only an
+actual nonexplosive ShotBullet hitting Man now uses that resolved SI momentum
+and its true hit-point-to-COM lever. Damage/scoring, bullet flight, other vehicles
+and explosive forces keep their existing paths. Man::Rigid remains applied
+once by the existing response. Invalid/nonfinite momentum is refused.
+
+Two registered source/native cases pass 28 assertions, including momentum,
+true lever, translated coordinates, alternate mass and invalid data, plus an
+actual Box3D 2 kg limb: the assumed 4 g round at 800 m/s yields 0.96 m/s and
+3.6 rad/s at a 10 cm lever after the existing 0.6 response coefficient. No solver
+safety limit is changed. Source syntax checks pass; installed player-Fired hit,
+ownership, measured response and safe resettlement remain required. The fallback
+mass is labelled an existing assumption, not a measured mass for every cartridge.

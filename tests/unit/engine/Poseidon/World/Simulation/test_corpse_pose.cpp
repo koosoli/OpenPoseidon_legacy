@@ -2,6 +2,7 @@
 #include <Poseidon/World/Simulation/Animation/CorpsePose.hpp>
 #include <Poseidon/World/Simulation/Animation/CorrectedCorpsePose.hpp>
 #include <Poseidon/World/Simulation/Animation/StockCorpseRig.hpp>
+#include <Poseidon/World/Physics/ProjectileImpulse.hpp>
 #include <Poseidon/World/Entities/Infantry/Head.hpp>
 #include <Poseidon/World/Physics/CorpseArticulation.hpp>
 #include <Poseidon/World/Physics/PhysicsBackend.hpp>
@@ -833,3 +834,48 @@ TEST_CASE("Measured hinges refuse ambiguous planes and retain a straight affine 
     CHECK_FALSE(CorpseMeasureHinge(proximal,joint,distal,forward,MIdentity,side,false,h));
     CHECK(std::string(h.refusal) == "nonfinite-input");
 }
+
+TEST_CASE("Actual rifle momentum uses ballistic mass and the struck point once", "[physics][corpse-pose][corpse-projectile-impulse]")
+{
+    Vector3 force,torque;
+    const Vector3 velocity(800,0,0),center(4,5,6),hit(4,5.1f,6);
+    REQUIRE(RifleProjectileImpulse(velocity,.004f,hit,center,force,torque));
+    CHECK((force-Vector3(3.2f,0,0)).Size()<1e-6f);
+    CHECK((torque-Vector3(0,0,-.32f)).Size()<1e-6f);
+    const Vector3 oldForce=force,oldTorque=torque;
+    const Vector3 translate(5000,10,10000);
+    REQUIRE(RifleProjectileImpulse(velocity,.004f,hit+translate,center+translate,force,torque));
+    CHECK(force==oldForce); CHECK((torque-oldTorque).Size()<.00001f);
+    REQUIRE(RifleProjectileImpulse(velocity,.008f,center,center,force,torque));
+    CHECK((force-Vector3(6.4f,0,0)).Size()<1e-6f); CHECK(torque==VZero);
+    CHECK_FALSE(RifleProjectileImpulse(velocity,-.004f,hit,center,force,torque));
+    CHECK(force==VZero); CHECK(torque==VZero);
+    CHECK_FALSE(RifleProjectileImpulse(velocity,std::numeric_limits<float>::infinity(),hit,center,force,torque));
+    CHECK_FALSE(RifleProjectileImpulse(Vector3(std::numeric_limits<float>::quiet_NaN(),0,0),.004f,hit,center,force,torque));
+    CHECK_FALSE(RifleProjectileImpulse(velocity,.004f,Vector3(0,std::numeric_limits<float>::infinity(),0),center,force,torque));
+    CHECK_FALSE(RifleProjectileImpulse(velocity,.004f,hit,Vector3(std::numeric_limits<float>::quiet_NaN(),0,0),force,torque));
+    CHECK_FALSE(RifleProjectileImpulse(Vector3(3e38f,0,0),1,hit,center,force,torque));
+}
+
+TEST_CASE("Actual articulated limb rifle response conserves resolved projectile momentum", "[physics][articulation][corpse-projectile-impulse]")
+{
+    using namespace Poseidon::Physics;
+    auto backend=CreatePhysicsBackend(); REQUIRE(backend); REQUIRE(backend->Create());
+    const Vector3 vertices[]={{-.2f,-.2f,-.2f},{.2f,-.2f,-.2f},{-.2f,.2f,-.2f},{.2f,.2f,-.2f},
+        {-.2f,-.2f,.2f},{.2f,-.2f,.2f},{-.2f,.2f,.2f},{.2f,.2f,.2f}};
+    ConvexPiece piece{vertices,8,ColliderFlags::Solid}; Matrix4 transform=MIdentity;
+    transform.SetPosition(Vector3(0,100,0));
+    const auto body=backend->SpawnArticulatedPiece(piece,transform,2); REQUIRE(body.IsValid());
+    Vector3 force,torque;
+    const Vector3 hit=transform.Position()+Vector3(0,.1f,0);
+    REQUIRE(RifleProjectileImpulse(Vector3(800,0,0),.004f,hit,transform.Position(),force,torque));
+    backend->ApplyImpulse(body,hit,force*.6f); // existing Man::Rigid applied once
+    BodyMotion readback; REQUIRE(backend->GetBodyMotion(body,readback));
+    CHECK(std::abs(readback.linearVelocity.X()-.96f)<.0001f);
+    CHECK(std::abs(readback.angularVelocity.Z()+3.6f)<.001f);
+    CHECK(readback.linearVelocity.Size()<15); CHECK(readback.angularVelocity.Size()<20);
+    CHECK((readback.position-transform.Position()).Size()<.0001f);
+    backend->RemoveBody(body); CHECK(backend->GetStats().articulatedBodies==0); backend->Destroy();
+}
+
+

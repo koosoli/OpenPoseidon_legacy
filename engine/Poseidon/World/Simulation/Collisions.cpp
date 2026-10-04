@@ -1,6 +1,8 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/World/Simulation/CollisionQueryMath.hpp>
+#include <Poseidon/World/Physics/ProjectileImpulse.hpp>
+#include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 #include <Poseidon/Dev/Diag/TerrainBrush.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -1305,7 +1307,17 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
             {
                 force += relPos.Normalized() * (hitVal * factor * -impulseExplScale);
             }
-            veh->AddImpulseNetAware(force, forcePos.CrossProduct(force));
+            Vector3 torque=forcePos.CrossProduct(force);
+            if (!type->explosive && dyn_cast<ShotBullet>(shot) && dyn_cast<Man>(veh))
+            {
+                // The legacy visual ShotBullet mass is 50 g and its lever is
+                // randomized. Ragdoll limbs need the existing ballistic mass
+                // in kg and the actual struck point, not that recoil effect.
+                const auto projectile=Ballistics::ShellParamsFor(*type);
+                if (!RifleProjectileImpulse(shot->Speed(),projectile.mass,pos,veh->COMPosition(),force,torque))
+                { force=torque=VZero; }
+            }
+            veh->AddImpulseNetAware(force, torque);
         }
     }
     const float maxRadius = type->indirectHitRange * 4;
