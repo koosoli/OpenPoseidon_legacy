@@ -71,6 +71,46 @@ fn actual_fog_profile_gpu_integrates_thin_slabs_phase_energy_and_camera_refusals
 }
 
 #[test]
+fn actual_fog_light_quadrature_gpu_stays_in_thin_air_and_conserves_sky_energy() {
+ let(device,queue)=crate::gfx3d::cull::tests::headless().expect("fog quadrature proof requires device");
+ const PROBE:&str=r#"
+ #import layered_fog_optics::{fog_phase_sample,fog_segment_participant,fog_height_density,fog_phase}
+ @group(0) @binding(0) var<storage,read_write> result:array<vec4<f32>>;
+ @compute @workgroup_size(1) fn cs_probe(){
+  let layer=vec4<f32>(48.0,49.0,0.01,1.0);
+  let forward=fog_segment_participant(0.0,1.0,100.0,layer);
+  let reverse=fog_segment_participant(100.0,-1.0,100.0,layer);
+  result[0]=vec4<f32>(forward,reverse);
+  result[1]=vec4<f32>(fog_height_density(forward.x,layer),fog_height_density(100.0-reverse.x,layer),
+   fog_height_density(50.0,layer),fog_segment_participant(70.0,0.0,100.0,layer).y);
+  for(var j=0u;j<7u;j=j+1u){
+   let g=f32(j)*0.95/6.0;
+   var maximum=0.0;var minimum=1.0;var unit_error=0.0;var old_maximum=0.0;
+   for(var a=0u;a<36u;a=a+1u){for(var b=0u;b<19u;b=b+1u){
+    let az=f32(a)*6.28318530718/36.0;let el=-1.57079632679+f32(b)*3.14159265359/18.0;
+    let ray=vec3<f32>(cos(el)*cos(az),sin(el),cos(el)*sin(az));
+    var energy=0.0;var old=0.0;
+    for(var k=0u;k<8u;k=k+1u){let direction=fog_phase_sample(ray,g,k);
+     unit_error=max(unit_error,abs(length(direction)-1.0));energy+=select(0.0,0.125,direction.y>0.0);}
+    for(var k=0u;k<6u;k=k+1u){let y=(f32(k)+0.5)/6.0;let angle=f32(k)*2.39996322973;
+     let r=sqrt(1.0-y*y);let direction=vec3<f32>(r*cos(angle),y,r*sin(angle));
+     old+=fog_phase(dot(ray,direction),g)*(6.28318530718/6.0);}
+    maximum=max(maximum,energy);minimum=min(minimum,energy);old_maximum=max(old_maximum,old);
+   }}
+   result[j+2u]=vec4<f32>(minimum,maximum,unit_error,old_maximum);
+  }
+ }
+ "#;
+ let samples=read_probe(&device,&queue,PROBE,&[],36);
+ assert!(samples.iter().all(|v|v.is_finite()));
+ assert!((samples[0]-48.5).abs()<1e-4 && (samples[2]-51.5).abs()<1e-4);
+ assert!((samples[1]-1.01).abs()<1e-4 && (samples[3]-1.01).abs()<1e-4);
+ assert_eq!(&samples[4..8],&[1.,1.,0.,0.],"Thin lighting sample must be in participating air, unlike original midpoint");
+ for row in samples[8..].chunks_exact(4){assert!(row[0]>=0. && row[1]<=1. && row[2]<1e-5,"normalized unit sky: {row:?}");}
+ assert!(samples[35]>2.,"Original high-g six-direction alias is a discriminating counterexample");
+}
+
+#[test]
 fn actual_fog_far_closure_gpu_preserves_sky_and_gated_foreground() {
  let(device,queue)=crate::gfx3d::cull::tests::headless().expect("actual fog closure proof requires device");
  const PROBE:&str=r#"
