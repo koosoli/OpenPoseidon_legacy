@@ -5,9 +5,93 @@
 #include <Poseidon/World/Simulation/Animation/CorpsePose.hpp>
 #include <cmath>
 #include <limits>
+#include <cstdio>
 
 using namespace Poseidon::Physics;
 using namespace Poseidon;
+
+TEST_CASE("Bounded native boot overlap resolves through real articulated contacts without initial pose displacement", "[physics][articulation][corpse-contact]")
+{
+    CHECK(CorpseInitialContactAdmitted(true,-.00852966309f));
+    CHECK(CorpseInitialContactAdmitted(true,-.0169487f));
+    CHECK(CorpseInitialContactAdmitted(true,-.025f));
+    CHECK_FALSE(CorpseInitialContactAdmitted(true,-.0251f));
+    CHECK_FALSE(CorpseInitialContactAdmitted(false,-.001f));
+    CHECK_FALSE(CorpseInitialContactAdmitted(false,.0029f));
+    CHECK(CorpseInitialContactAdmitted(false,.003f));
+    CHECK_FALSE(CorpseInitialContactAdmitted(true,std::numeric_limits<float>::quiet_NaN()));
+    // This is a solver contact-response control, not a stock skin/rig visual
+    // proof: two observed native overlaps plus the policy boundary, a boot-sized
+    // distal hull, hinged upper segment and connected torso on real terrain.
+    for (float overlap : {.00852966309f,.0169487f,.025f})
+    {
+        auto backend = CreatePhysicsBackend(); REQUIRE(backend); REQUIRE(backend->Create());
+        float heights[25] = {};
+        TerrainField field; field.heights = heights; field.width = field.height = 5;
+        field.cellSize = 1; field.originX = field.originZ = -2;
+        REQUIRE(backend->SetTerrain(field));
+        const Vector3 extents[] = {{.08f,.173f,.13f},{.12f,.225f,.12f},{.22f,.3f,.13f}};
+        const float centers[] = {.173f,.573f,1.098f};
+        const float masses[] = {4,8,24};
+        BodyId bodies[3]; Matrix4 initial[3]; std::vector<Vector3> hulls[3];
+        ArticulatedInitialMotion inherited; inherited.collisionFamily = -2;
+        for (int part = 0; part < 3; ++part)
+        {
+            for (int c = 0; c < 8; ++c)
+                hulls[part].emplace_back((c&1)?extents[part].X():-extents[part].X(),
+                    (c&2)?extents[part].Y():-extents[part].Y(),(c&4)?extents[part].Z():-extents[part].Z());
+            initial[part] = MIdentity; initial[part].SetPosition(Vector3(0,centers[part]-overlap,0));
+            ConvexPiece piece{hulls[part].data(),8,ColliderFlags::Solid};
+            bodies[part] = backend->SpawnArticulatedPiece(piece,initial[part],masses[part],inherited);
+            REQUIRE(bodies[part].IsValid()); BodyMotion motion;
+            REQUIRE(backend->GetBodyMotion(bodies[part],motion));
+            CHECK(motion.position == initial[part].Position());
+            CHECK(motion.axisX == VAside); CHECK(motion.axisY == VUp); CHECK(motion.axisZ == VForward);
+        }
+        JointId joints[2];
+        for (int j = 0; j < 2; ++j)
+        {
+            const float anchor = j == 0 ? .348f-overlap : .798f-overlap;
+            ArticulatedJointDef def; def.first = bodies[j]; def.second = bodies[j+1];
+            def.firstFrame.SetDirectionAndUp(VAside,VUp); def.secondFrame.SetDirectionAndUp(VAside,VUp);
+            def.firstFrame.SetPosition(Vector3(0,anchor-initial[j].Position().Y(),0));
+            def.secondFrame.SetPosition(Vector3(0,anchor-initial[j+1].Position().Y(),0));
+            if (j == 0) { def.kind = ArticulatedJointKind::Hinge; def.lowerAngle = -.08f; def.upperAngle = 2.4f; }
+            joints[j] = backend->AddArticulatedJoint(def); REQUIRE(joints[j].IsValid());
+        }
+        float maximumSpeed = 0, maximumAnchorError = 0;
+        BodyMotion motion[3];
+        for (int step = 0; step < 240; ++step)
+        {
+            backend->Step(1.0f/60);
+            for (int part = 0; part < 3; ++part)
+            {
+                REQUIRE(backend->GetBodyMotion(bodies[part],motion[part]));
+                REQUIRE(motion[part].position.IsFinite()); REQUIRE(motion[part].linearVelocity.IsFinite());
+                REQUIRE(motion[part].angularVelocity.IsFinite());
+                maximumSpeed = std::max(maximumSpeed,motion[part].linearVelocity.Size());
+            }
+            for (int j = 0; j < 2; ++j)
+            {
+                const float anchor = j == 0 ? .348f-overlap : .798f-overlap;
+                const Vector3 a = motion[j].position+motion[j].axisY*(anchor-initial[j].Position().Y());
+                const Vector3 b = motion[j+1].position+motion[j+1].axisY*(anchor-initial[j+1].Position().Y());
+                maximumAnchorError = std::max(maximumAnchorError,(a-b).Size());
+            }
+        }
+        float bootBottom = 100;
+        for (const auto& p : hulls[0])
+            bootBottom = std::min(bootBottom,(motion[0].position+motion[0].axisX*p.X()+motion[0].axisY*p.Y()+motion[0].axisZ*p.Z()).Y());
+        INFO("overlap=" << overlap << " bootBottom=" << bootBottom << " maximumSpeed=" << maximumSpeed << " maximumAnchorError=" << maximumAnchorError);
+        std::printf("BOOTCONTACT overlap=%.9g finalBottom=%.9g maxSpeed=%.9g maxAnchorError=%.9g\n",
+            overlap,bootBottom,maximumSpeed,maximumAnchorError);
+        CHECK(bootBottom > -.01f); CHECK(maximumSpeed < 8); CHECK(maximumAnchorError < .025f);
+        for (auto joint : joints) backend->RemoveJoint(joint);
+        for (auto body : bodies) backend->RemoveBody(body);
+        CHECK(backend->GetStats().articulatedBodies == 0); CHECK(backend->GetStats().articulatedJoints == 0);
+        backend->Destroy();
+    }
+}
 
 TEST_CASE("Bounded corpse contact proxies preserve actual body origin and affine handoff", "[physics][articulation][corpse-contact]")
 {

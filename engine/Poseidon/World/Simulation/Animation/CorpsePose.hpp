@@ -21,6 +21,14 @@ inline bool CorpseProxyContactLift(float minimumClearance, float& lift)
     return true;
 }
 
+// Ordinary stock stance can embed its boot in the native floor. Permit only a
+// bounded boot contact for the solver to resolve, not a displaced skin pose.
+// The explicit settled diagnostic and every other part retain positive clearance.
+inline bool CorpseInitialContactAdmitted(bool ordinaryStockBoot, float clearance)
+{
+    return std::isfinite(clearance) && clearance >= (ordinaryStockBoot ? -.025f : .003f);
+}
+
 // Read-only admission measurements, never a solver or a serialized pose.
 struct CorpseLevelDiagnostic
 {

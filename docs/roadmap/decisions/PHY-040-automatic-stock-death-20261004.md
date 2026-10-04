@@ -11,8 +11,10 @@ success is not an installed appearance, save/load or gameplay acceptance.
 - Local single player, locally owned `data3d\mc vojakw2.p3d` stock Western
   infantry, alive in the landscape before the new damage transition.
 - Dry, unattached, non-ladder, visible ground contact. Initial vertices must agree
-  with the actual registered Box3D roadway floor within 25 mm and remain at least
-  3 mm above it. Open-ground legacy center rays and measured shared anchors remain
+  with the actual registered Box3D roadway floor within 25 mm. Non-boot parts
+  remain at least 3 mm above it; only stock lower-leg/boot parts 8 and 10 permit
+  up to 25 mm initial overlap for the solver to resolve. Open-ground legacy center
+  rays and measured shared anchors remain
   admission gates. The solver has no certified cave/trench cavity support.
 - Four independently owned active corpses, distinct negative self-collision
   families, up to 64 retained snapshots. Excess, ambiguous or unsupported deaths
@@ -104,3 +106,21 @@ the incorrect solver floor. Those exceed the calibrated offset budget once
 clearance is included and remain unsupported; the floor correction does not
 claim to fix authored stance or visible skin contact. A matching rerun and
 measured supported-ground/foot-fit evidence remain required.
+
+The matching corrected-floor `cdb1977b` rerun registered all 2048 by 2048 native
+vertices at 6.25 m (16,777,216 source bytes) in 246.7666 ms. Owners 0 and 2 entered
+the actual eleven-body/ten-joint/four-hinge solver; owners 1 and 3 still refused
+their native boot contact. This identifies original contact separately from
+floor approximation. The first-death setup hitch is a material default-promotion
+limitation; the caller reuses the shared floor afterwards, but no loading-stage
+preparation or broad-map performance acceptance is claimed here.
+
+The next contact candidate admits only those two stock lower-leg/boot parts with
+at most 25 mm overlap against both agreeing floors. The original captured pose,
+body origins, skin and anchors do not move before stepping. All other parts keep
+3 mm clearance; greater boot penetration and floor disagreement still refuse.
+The actual Box3D contact-response control covers the observed 8.53/16.95 mm starts
+and the 25 mm boundary with a connected hinged chain on real terrain: zero initial
+transform change, finite bounded velocities, recovered distal contact, preserved
+anchors and zero handles after removal. This uses controlled hulls to test solver
+response, not a substitute for the actual stock skin/rig installed campaign.

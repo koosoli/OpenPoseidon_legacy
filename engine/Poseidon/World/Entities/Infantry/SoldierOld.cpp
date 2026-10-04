@@ -1453,7 +1453,8 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
             if (std::isfinite(clearance)) state->minimumClearance = std::min(state->minimumClearance,clearance);
             if (std::isfinite(distance)) maximumRootDistance = std::max(maximumRootDistance,distance);
             ++fittedVertices;
-            if (!finite || !std::isfinite(clearance) || clearance < 0.003f ||
+            const bool ordinaryBoot = _automaticCorpsePose && (part == 8 || part == 10);
+            if (!finite || !CorpseInitialContactAdmitted(ordinaryBoot,clearance) ||
                 clearance > (_automaticCorpsePose ? 2.8f : .8f) || distance > 2.5f)
             {
                 if (fitRefusal.GetLength() == 0)
@@ -1499,10 +1500,14 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
             if (!floor.IsFinite() || std::abs(floor.Y()-GLandscape->RoadSurfaceY(supported+VUp*0.5f)) > 0.025f)
             { refusal = "solver-floor-disagrees-with-authored-contact"; return false; }
             state->minimumClearance = std::min(state->minimumClearance,supported.Y()-floor.Y());
-            if (supported.Y()-floor.Y() < 0.003f)
+            const bool ordinaryBoot = _automaticCorpsePose && (part == 8 || part == 10);
+            if (!CorpseInitialContactAdmitted(ordinaryBoot,supported.Y()-floor.Y()))
             { refusal = "inset-collider-penetrates-solver-floor"; return false; }
         }
     }
+    if (_automaticCorpsePose && state->minimumClearance < .003f)
+        LOG_INFO(World,"AUTORAGDOLL: bounded initial boot contact minimumClearance={} maximumPenetration=0.025 skinAndOriginsUnchanged=1",
+            state->minimumClearance);
     for (int part = 0; part < 11; ++part)
     {
         Physics::ConvexPiece piece{vertices[part].data(), static_cast<int>(vertices[part].size()), Physics::ColliderFlags::Solid};
