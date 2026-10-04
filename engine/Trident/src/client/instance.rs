@@ -6,9 +6,45 @@ use crate::protocol::Event;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::AsyncBufReadExt;
 use tokio::process::{Child, Command};
+
+#[derive(Default)]
+struct LogTapState {
+    lines: Vec<String>,
+    bytes: usize,
+    overflowed: bool,
+}
+
+impl LogTapState {
+    fn push(&mut self, line: String) {
+        if self.overflowed
+            || self.lines.len() >= 65536
+            || self.bytes.saturating_add(line.len()) > 16 * 1024 * 1024
+        {
+            self.overflowed = true;
+            return;
+        }
+        self.bytes += line.len();
+        self.lines.push(line);
+    }
+
+    fn since(&self, mark: usize) -> Result<Vec<String>> {
+        anyhow::ensure!(
+            !self.overflowed,
+            "stdout assertion tap overflowed; complete file remains separate"
+        );
+        Ok(self
+            .lines
+            .get(mark..)
+            .context("stdout assertion mark exceeds captured lines")?
+            .to_vec())
+    }
+}
+
+type LogTap = Arc<Mutex<LogTapState>>;
 
 /// PIDs of live game processes spawned by this tri run.  Consulted by the
 /// Ctrl-C handler in `main` so an interrupted run can reap its children —
@@ -122,9 +158,31 @@ pub struct GameInstance {
     game_binary: PathBuf,
     work_dir: PathBuf,
     config: ClientConfig,
+    log_tap: Option<LogTap>, // Only auto-port instances have a drained stdout pipe.
 }
 
 impl GameInstance {
+    pub fn log_mark(&self) -> Result<usize> {
+        let tap = self
+            .log_tap
+            .as_ref()
+            .context("stdout assertions require an auto-port instance")?;
+        let tap = tap
+            .lock()
+            .map_err(|_| anyhow::anyhow!("stdout assertion tap poisoned"))?;
+        anyhow::ensure!(!tap.overflowed, "stdout assertion tap overflowed");
+        Ok(tap.lines.len())
+    }
+
+    pub fn log_lines_since(&self, mark: usize) -> Result<Vec<String>> {
+        let tap = self
+            .log_tap
+            .as_ref()
+            .context("stdout assertions require an auto-port instance")?;
+        tap.lock()
+            .map_err(|_| anyhow::anyhow!("stdout assertion tap poisoned"))?
+            .since(mark)
+    }
     /// Spawn a game instance with `--harness <port>` and optional extra args.
     /// Uses the provided [`ClientConfig`] for connection timeouts and retry behaviour.
     ///
@@ -255,8 +313,16 @@ impl GameInstance {
             register_pid(pid);
         }
 
+        let log_tap = auto_port.then(|| Arc::new(Mutex::new(LogTapState::default())));
         let actual_port = if auto_port {
-            match read_harness_port(&mut process, stdout_log, config.connect_timeout).await {
+            match read_harness_port(
+                &mut process,
+                stdout_log,
+                log_tap.as_ref().unwrap().clone(),
+                config.connect_timeout,
+            )
+            .await
+            {
                 Ok(p) => p,
                 Err(e) => {
                     // The game is still running (or wedged) — kill it and its
@@ -284,6 +350,7 @@ impl GameInstance {
             game_binary: binary,
             work_dir,
             config: config.clone(),
+            log_tap,
         };
 
         if let Err(e) = instance.connect_with_retry().await {
@@ -525,6 +592,7 @@ pub fn find_game_binary(game_dir: &Path, named: Option<&str>) -> Result<PathBuf>
 async fn read_harness_port(
     process: &mut Child,
     log_file: Option<std::fs::File>,
+    log_tap: LogTap,
     timeout: Duration,
 ) -> Result<u16> {
     let stdout = process
@@ -561,6 +629,9 @@ async fn read_harness_port(
                                     use tokio::io::AsyncWriteExt;
                                     let _ = w.write_all(format!("{l}\n").as_bytes()).await;
                                 }
+                                if let Ok(mut tap) = log_tap.lock() {
+                                    tap.push(l);
+                                }
                             }
                         });
                         return Ok(port);
@@ -578,6 +649,21 @@ async fn read_harness_port(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn log_tap_preserves_order_and_refuses_missing_or_truncated_windows() {
+        let mut tap = LogTapState::default();
+        tap.push("before".to_owned());
+        let mark = tap.lines.len();
+        tap.push("first".to_owned());
+        tap.push("second".to_owned());
+        assert_eq!(tap.since(mark).unwrap(), vec!["first", "second"]);
+        assert!(tap.since(mark + 3).is_err());
+        tap.bytes = 16 * 1024 * 1024;
+        tap.push("cannot retain".to_owned());
+        assert!(tap.overflowed);
+        assert!(tap.since(mark).is_err());
+    }
 
     #[test]
     fn find_binary_not_found() {
