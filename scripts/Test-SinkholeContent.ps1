@@ -63,7 +63,7 @@ function Capture([string]$name,$eye,$dir){
     Exec 'triClearView'
 }
 try {
-    foreach($key in $keys){[Environment]::SetEnvironmentVariable($key,$null,'Process')}
+    foreach($key in $keys){Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue}
     $env:POSEIDON_AUTOMATIC_RAGDOLL='0';$env:POSEIDON_SNOWLINE='off';$env:POSEIDON_SNOW_TEST_DEPTH='0';$env:WGR_GRASS='0';$env:WGR_TEMPORAL='0';$env:WGR_AUTO_EXPOSURE='0';$env:WGR_EXPOSURE='0.6';$env:WGR_TONEMAP='1'
     foreach($fixture in @(
         @{name='cave';mission='ugcave-test.Eden';variable='cave';class='UgCave';shape='ugcave/ugcave.p3d';x=4870.;z=11305.;depth=5.;entranceZ=11324.;entranceY=-0.3},
@@ -129,6 +129,6 @@ finally {
     if($p -and !$p.HasExited -and $writer){try{$writer.WriteLine('{"cmd":"exit"}');$null=$p.WaitForExit(20000)}catch{$result.cleanupError=$_.Exception.Message}}
     if($client){$client.Dispose()}
     if($p -and !$p.HasExited){$result.passed=$false;$result.ownedForcedCleanup=$true;Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
-    foreach($key in $keys){[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}
+    foreach($key in $keys){if($null -eq $saved[$key]){Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue}else{[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}}
     $result|ConvertTo-Json -Depth 24|Set-Content -LiteralPath (Join-Path $out 'result.json');Write-Output $out
 }

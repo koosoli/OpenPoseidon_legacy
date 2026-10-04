@@ -27,6 +27,7 @@ try{
  foreach($arm in $arms){
   Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue)) 'Foreign game appeared.'
   $armOut=Join-Path $taskOut $arm.name;$armProfile=Join-Path $armOut 'user';New-Item -ItemType Directory -Force $armProfile|Out-Null
+  [IO.File]::WriteAllText((Join-Path $armProfile 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
   foreach($key in $keys){Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue}
   $settings=@{POSEIDON_USER_DIR=$armProfile;POSEIDON_AUTOMATIC_RAGDOLL='0';WGR_TERRAIN_BACKGROUND=$arm.background;WGR_TERRAIN_EXTENT=$arm.extent;WGR_GRASS='0';WGR_TEMPORAL='0';WGR_AUTO_EXPOSURE='0';WGR_EXPOSURE='0.6';WGR_TONEMAP='1';POSEIDON_SNOWLINE='off';POSEIDON_SNOW_TEST_DEPTH='0'}
   foreach($key in $settings.Keys){[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
@@ -63,6 +64,7 @@ try{
    }else{Require ($arm.background-eq '0') 'Default coverage unavailable.'}
    $weatherBefore=Send @{cmd='weather_visibility'};$performanceBefore=Send @{cmd='frame_performance'}
    $path=Join-Path $armOut ($view.name+'.png');$null=Send @{cmd='screenshot';path=$path}
+   $until=[DateTime]::UtcNow.AddSeconds(15);while(!(Test-Path -LiteralPath $path)){Require ([DateTime]::UtcNow-lt $until) 'Screenshot write deadline.';Start-Sleep -Milliseconds 100}
    Require ((Get-Item -LiteralPath $path).Length-gt 4096) 'Empty screenshot.'
    $performance=Send @{cmd='frame_performance'};$weatherAfter=Send @{cmd='weather_visibility'}
    Require ([Math]::Abs([double]$weatherAfter.fog-$view.fog)-lt .001-and $weatherAfter.terrainRange-eq $weatherBefore.terrainRange-and $weatherAfter.objectRange-eq $weatherBefore.objectRange) 'Weather/range changed during capture.'
