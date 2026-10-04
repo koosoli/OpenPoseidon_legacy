@@ -168,7 +168,7 @@ try{
   # createVehicle uses AGL. Assert differences INSIDE the engine before its
   # six-significant-digit SQF formatter rounds large world coordinates.
   $issuedError=Eval '[abs(((getPosASL ragCorpseProjectile) select 0)-(ragShotStartASL select 0)),abs(((getPosASL ragCorpseProjectile) select 1)-(ragShotStartASL select 1)),abs(((getPosASL ragCorpseProjectile) select 2)-(ragShotStartASL select 2))]'
-  Require ($issuedError.Count-eq 3) 'Actual projectile position witness unavailable.';foreach($error in $issuedError){Require ((Num $error)-le .002) 'Actual projectile ASL differs from measured chest segment.'}
+  Require ($issuedError.Count-eq 3) 'Actual projectile position witness unavailable.';foreach($positionError in $issuedError){Require ((Num $positionError)-le .002) 'Actual projectile ASL differs from measured chest segment.'}
   $issuedVelocity=Eval 'velocity ragCorpseProjectile';Require ($issuedVelocity.Count-eq 3-and (Num $issuedVelocity[0])-eq $speed[0]-and (Num $issuedVelocity[1])-eq $speed[2]-and (Num $issuedVelocity[2])-eq $speed[1]) 'Actual projectile velocity differs.'
   $result.gates.frozenProjectile=@{passed=$false;scope='Actual stock rifle ammo collision; not player Fired/input proof';beforePose=$beforeHit;beforeHit=$hitBefore;fireHull=$hull;target=$target;start=$start;issuedPositionASL=(Eval 'getPosASL ragCorpseProjectile');issuedPositionError=$issuedError;issuedVelocity=$issuedVelocity}
   ExactPose $beforeHit (Pose $true);Exec 'setAccTime .2';$until=[DateTime]::UtcNow.AddSeconds(12);$hits=@()
@@ -196,7 +196,7 @@ try{
   $position=Spawn 'ragBlastVictim' -14 'UP';Exec ('ragGrenadeStartASL=['+(Fmt ($position[0]-3))+','+(Fmt $position[1])+','+(Fmt ($position[2]+.15))+'];ragLiveGrenade="GrenadeHand" createVehicle ['+(Fmt ($position[0]-3))+','+(Fmt $position[1])+',0];ragLiveGrenade setPosASL ragGrenadeStartASL;ragLiveGrenade setVelocity [0,0,0]')
   Require ((Eval '!isNull ragLiveGrenade')-eq $true-and (Eval 'typeOf ragLiveGrenade')-ceq 'GrenadeHand') 'Actual GrenadeHand ammo fixture missing.'
   $grenadeError=Eval '[abs(((getPosASL ragLiveGrenade) select 0)-(ragGrenadeStartASL select 0)),abs(((getPosASL ragLiveGrenade) select 1)-(ragGrenadeStartASL select 1)),abs(((getPosASL ragLiveGrenade) select 2)-(ragGrenadeStartASL select 2))]'
-  Require ($grenadeError.Count-eq 3) 'Actual grenade position witness unavailable.';foreach($error in $grenadeError){Require ((Num $error)-le .002) 'Actual grenade ASL differs from requested target-relative placement.'}
+  Require ($grenadeError.Count-eq 3) 'Actual grenade position witness unavailable.';foreach($positionError in $grenadeError){Require ((Num $positionError)-le .002) 'Actual grenade ASL differs from requested target-relative placement.'}
   $result.gates.liveGrenade=@{type=(Eval 'typeOf ragLiveGrenade');position=(Eval 'getPosASL ragLiveGrenade');issuedPositionError=$grenadeError;targetPosition=$position};Exec 'setAccTime 1';$until=[DateTime]::UtcNow.AddSeconds(18);$grenadeSamples=@()
   while(Eval 'alive ragBlastVictim'){$grenadeSamples+=,(Eval '[time,getDammage ragBlastVictim,getPosASL ragBlastVictim,isNull ragLiveGrenade]');$result.gates.grenadeDamageWitnesses=$grenadeSamples;Require ([DateTime]::UtcNow-lt $until) 'Actual grenade did not kill stock target within18s.';Start-Sleep -Milliseconds 100}
   Exec 'setAccTime 0';$owners=AutoCounts;Require ($owners.active+$owners.pending+$owners.frozen-eq 5) 'Actual grenade death did not enter admitted automatic ownership; inspect authored-fallback reason.'
