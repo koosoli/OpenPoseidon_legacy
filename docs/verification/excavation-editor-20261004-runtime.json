@@ -1,25 +1,95 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "branch": "codex/cave-editor-20261004",
-  "engineSourceCommit": "3d196ce3",
+  "engineSourceCommit": "fd1e236c",
+  "installed": {
+    "files": [
+      {
+        "bytes": 31444992,
+        "name": "OpenPoseidon.exe",
+        "sha256": "C0D6DE857AFF565324AF12F1539F216DE15F850FC28572486BFA3C395859F3FA",
+        "writtenUtc": "2026-10-04T00:12:32.1361844Z"
+      },
+      {
+        "bytes": 18499072,
+        "name": "wgpu_renderer.dll",
+        "sha256": "33908847E4C77C08A28E3FE76F17A47DF9CB77262E3B9D905DDED04E1527D320",
+        "writtenUtc": "2026-10-04T00:12:00.686413Z"
+      }
+    ],
+    "stamp": "codex/cave-editor-20261004 f6e5c1d5 2026-10-04_02:13 deploy-ps1\r\n"
+  },
   "authorRun": true,
   "ownerValidated": false,
   "native": {
-    "log": "build/excavation-editor-native-tests-final.log",
-    "passed": true,
-    "assertions": 24339,
-    "cases": 139
+    "assertions": 24368,
+    "cases": 143,
+    "log": "build/excavation-earth-native-final.log",
+    "passed": true
   },
   "renderer": {
-    "newTestsPassed": 4,
-    "legacyTestsPassed": 7
+    "legacyTestsPassed": 7,
+    "newTestsPassed": 4
   },
   "cave": {
-    "scriptSha256": "3EC7C1D7662A6F2F28F08BE2E9BC7975E1AC2A60903011C9CF4BE4681E207A23",
-    "entry": {
-      "along": 6.489999999999782,
-      "state": {
+    "selectiveDelete": {
+      "originalRestored": {
         "count": 1,
+        "selectedId": 4,
+        "records": [
+          {
+            "id": 4,
+            "objectId": 57495,
+            "sourceName": "generated\\cave-shell-4.p3d",
+            "kind": "cave",
+            "x": 7250,
+            "y": 43.43949890136719,
+            "z": 6253,
+            "heading": 270,
+            "width": 0.10000000149011612,
+            "height": 0.10000000149011612,
+            "length": 32
+          }
+        ],
+        "status": "Selected generated excavation removed; original terrain restored.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": false,
+        "atHeight": false,
+        "holeFloor": 0,
+        "terrainY": 50.370975494384766,
+        "roadY": 50.370975494384766,
+        "cameraFloorY": 50.370975494384766,
+        "terrainRayHit": true,
+        "legacyRayResult": 0.800195336341858,
+        "terrainRayY": 50.370731353759766,
+        "terrainRayDistance": 1.000244140625,
+        "drawRecords": 5,
+        "boundedHeader": true,
+        "ceilingY": 43.53949737548828,
+        "ok": true
+      },
+      "first": {
+        "count": 1,
+        "selectedId": 3,
+        "records": [
+          {
+            "id": 3,
+            "objectId": 57494,
+            "sourceName": "generated\\cave-shell-3.p3d",
+            "kind": "cave",
+            "x": 7250,
+            "y": 43.91999816894531,
+            "z": 6250,
+            "heading": 270,
+            "width": 0.10000000149011612,
+            "height": 0.10000000149011612,
+            "length": 32
+          }
+        ],
         "status": "Cave placed. Mission-local; reload removes it. Undo removes the last cave.",
         "missionLocal": true,
         "worldName": "worlds\\eden.wrp",
@@ -29,25 +99,236 @@
         "inFootprint": true,
         "atHeight": true,
         "holeFloor": 43.91999816894531,
-        "terrainY": 47.117496490478516,
+        "terrainY": 43.91999816894531,
         "roadY": 43.91999816894531,
         "cameraFloorY": 43.91999816894531,
         "drawRecords": 5,
         "boundedHeader": true,
-        "ceilingY": 46.41999816894531,
+        "ceilingY": 44.0199966430664,
         "ok": true
       },
-      "position": [
-        7243.51,
-        6250,
-        43.9186
-      ],
-      "cursor": "0.0000,0.0000",
-      "side": 1.192193658969908E-15,
-      "dir": 270.0
+      "second": {
+        "count": 2,
+        "selectedId": 4,
+        "records": [
+          {
+            "id": 3,
+            "objectId": 57494,
+            "sourceName": "generated\\cave-shell-3.p3d",
+            "kind": "cave",
+            "x": 7250,
+            "y": 43.91999816894531,
+            "z": 6250,
+            "heading": 270,
+            "width": 0.10000000149011612,
+            "height": 0.10000000149011612,
+            "length": 32
+          },
+          {
+            "id": 4,
+            "objectId": 57495,
+            "sourceName": "generated\\cave-shell-4.p3d",
+            "kind": "cave",
+            "x": 7250,
+            "y": 43.43949890136719,
+            "z": 6253,
+            "heading": 270,
+            "width": 0.10000000149011612,
+            "height": 0.10000000149011612,
+            "length": 32
+          }
+        ],
+        "status": "Cave placed. Mission-local; reload removes it. Undo removes the last cave.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": true,
+        "atHeight": true,
+        "holeFloor": 43.43949890136719,
+        "terrainY": 43.43951416015625,
+        "roadY": 43.43949890136719,
+        "cameraFloorY": 43.43949890136719,
+        "drawRecords": 10,
+        "boundedHeader": true,
+        "ceilingY": 43.53949737548828,
+        "ok": true
+      },
+      "deleted": {
+        "count": 1,
+        "selectedId": 4,
+        "records": [
+          {
+            "id": 4,
+            "objectId": 57495,
+            "sourceName": "generated\\cave-shell-4.p3d",
+            "kind": "cave",
+            "x": 7250,
+            "y": 43.43949890136719,
+            "z": 6253,
+            "heading": 270,
+            "width": 0.10000000149011612,
+            "height": 0.10000000149011612,
+            "length": 32
+          }
+        ],
+        "status": "Selected generated excavation removed; original terrain restored.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "ok": true
+      },
+      "otherRetained": {
+        "count": 1,
+        "selectedId": 4,
+        "records": [
+          {
+            "id": 4,
+            "objectId": 57495,
+            "sourceName": "generated\\cave-shell-4.p3d",
+            "kind": "cave",
+            "x": 7250,
+            "y": 43.43949890136719,
+            "z": 6253,
+            "heading": 270,
+            "width": 0.10000000149011612,
+            "height": 0.10000000149011612,
+            "length": 32
+          }
+        ],
+        "status": "Selected generated excavation removed; original terrain restored.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": true,
+        "atHeight": true,
+        "holeFloor": 43.43949890136719,
+        "terrainY": 50.5813331604004,
+        "roadY": 43.43949890136719,
+        "cameraFloorY": 43.43949890136719,
+        "drawRecords": 5,
+        "boundedHeader": true,
+        "ceilingY": 43.53949737548828,
+        "ok": true
+      },
+      "finalDelete": {
+        "count": 0,
+        "selectedId": 0,
+        "records": [],
+        "status": "Selected generated excavation removed; original terrain restored.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "ok": true
+      }
+    },
+    "scriptSha256": "5FF0475CFC03B31D78F2525C9FCBE904223DBF100DE24348D79F9563291312AA",
+    "exitCode": 0,
+    "selection": {
+      "selected": {
+        "count": 1,
+        "selectedId": 1,
+        "records": [
+          {
+            "id": 1,
+            "objectId": 57492,
+            "sourceName": "generated\\cave-shell-1.p3d",
+            "kind": "cave",
+            "x": 7250,
+            "y": 43.91999816894531,
+            "z": 6250,
+            "heading": 270,
+            "width": 3,
+            "height": 2.5,
+            "length": 32
+          }
+        ],
+        "status": "Cave placed. Mission-local; reload removes it. Undo removes the last cave.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "ok": true
+      },
+      "rotated": {
+        "count": 1,
+        "selectedId": 1,
+        "records": [
+          {
+            "id": 1,
+            "objectId": 57492,
+            "sourceName": "generated\\cave-shell-1.p3d",
+            "kind": "cave",
+            "x": 7250,
+            "y": 43.91999816894531,
+            "z": 6250,
+            "heading": 270.1000061035156,
+            "width": 3,
+            "height": 2.5,
+            "length": 32
+          }
+        ],
+        "status": "Selected excavation rotated; entrance and identity preserved.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "ok": true
+      },
+      "returned": {
+        "count": 1,
+        "selectedId": 1,
+        "records": [
+          {
+            "id": 1,
+            "objectId": 57492,
+            "sourceName": "generated\\cave-shell-1.p3d",
+            "kind": "cave",
+            "x": 7250,
+            "y": 43.91999816894531,
+            "z": 6250,
+            "heading": 270,
+            "width": 3,
+            "height": 2.5,
+            "length": 32
+          }
+        ],
+        "status": "Selected excavation rotated; entrance and identity preserved.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "ok": true
+      }
     },
     "tiny": {
       "count": 1,
+      "selectedId": 2,
+      "records": [
+        {
+          "id": 2,
+          "objectId": 57493,
+          "sourceName": "generated\\cave-shell-2.p3d",
+          "kind": "cave",
+          "x": 7250,
+          "y": 43.91999816894531,
+          "z": 6250,
+          "heading": 270,
+          "width": 0.10000000149011612,
+          "height": 0.10000000149011612,
+          "length": 32
+        }
+      ],
       "status": "Cave placed. Mission-local; reload removes it. Undo removes the last cave.",
       "missionLocal": true,
       "worldName": "worlds\\eden.wrp",
@@ -67,9 +348,144 @@
       "ceilingY": 44.0199966430664,
       "ok": true
     },
+    "flashlight": {
+      "keyActivationLogged": true,
+      "daytime": true,
+      "input": "L / Headlights, ordinary Light on action if keyboard did not activate",
+      "activationLogged": true
+    },
+    "exit": {
+      "along": -5.039999999999964,
+      "cursor": "0.0000,0.0000",
+      "position": [
+        7255.04,
+        6250,
+        42.1387
+      ],
+      "state": {
+        "count": 1,
+        "selectedId": 1,
+        "records": [
+          {
+            "id": 1,
+            "objectId": 57492,
+            "sourceName": "generated\\cave-shell-1.p3d",
+            "kind": "cave",
+            "x": 7250,
+            "y": 43.91999816894531,
+            "z": 6250,
+            "heading": 270,
+            "width": 3,
+            "height": 2.5,
+            "length": 32
+          }
+        ],
+        "status": "Leave the excavation with the player and controlled vehicle before rotating it.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": false,
+        "atHeight": false,
+        "holeFloor": 0,
+        "terrainY": 42.1505012512207,
+        "roadY": 42.1505012512207,
+        "cameraFloorY": 42.1505012512207,
+        "drawRecords": 5,
+        "boundedHeader": true,
+        "ceilingY": 46.41999816894531,
+        "ok": true
+      },
+      "dir": 90.0
+    },
+    "entry": {
+      "position": [
+        7244,
+        6250,
+        43.9186
+      ],
+      "along": 6.0,
+      "state": {
+        "count": 1,
+        "selectedId": 1,
+        "records": [
+          {
+            "id": 1,
+            "objectId": 57492,
+            "sourceName": "generated\\cave-shell-1.p3d",
+            "kind": "cave",
+            "x": 7250,
+            "y": 43.91999816894531,
+            "z": 6250,
+            "heading": 270,
+            "width": 3,
+            "height": 2.5,
+            "length": 32
+          }
+        ],
+        "status": "Selected excavation rotated; entrance and identity preserved.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": true,
+        "atHeight": true,
+        "holeFloor": 43.91999816894531,
+        "terrainY": 46.934654235839844,
+        "roadY": 43.91999816894531,
+        "cameraFloorY": 43.91999816894531,
+        "drawRecords": 5,
+        "boundedHeader": true,
+        "ceilingY": 46.41999816894531,
+        "ok": true
+      },
+      "dir": 270.0,
+      "side": 1.102182119232618E-15,
+      "cursor": "0.0000,0.0000"
+    },
+    "site": {
+      "floor": 43.92,
+      "z": 6250.0,
+      "fx": -1.0,
+      "heading": 270,
+      "fz": -1.8369701987210297E-16,
+      "sz": 1.0,
+      "x": 7250.0,
+      "gain": 65.78999999999999,
+      "sx": -1.8369701987210297E-16
+    },
+    "occupiedEditGuard": {
+      "unchanged": true,
+      "delete": {
+        "ok": false,
+        "error": "Leave the excavation with the player and controlled vehicle before deleting it."
+      },
+      "rotate": {
+        "ok": false,
+        "error": "Leave the excavation with the player and controlled vehicle before rotating it."
+      }
+    },
     "roof": {
       "count": 1,
-      "status": "Cave placed. Mission-local; reload removes it. Undo removes the last cave.",
+      "selectedId": 1,
+      "records": [
+        {
+          "id": 1,
+          "objectId": 57492,
+          "sourceName": "generated\\cave-shell-1.p3d",
+          "kind": "cave",
+          "x": 7250,
+          "y": 43.91999816894531,
+          "z": 6250,
+          "heading": 270,
+          "width": 3,
+          "height": 2.5,
+          "length": 32
+        }
+      ],
+      "status": "Selected excavation rotated; entrance and identity preserved.",
       "missionLocal": true,
       "worldName": "worlds\\eden.wrp",
       "grid": 6.25,
@@ -91,117 +507,54 @@
       "ok": true
     },
     "passed": true,
-    "installed": {
-      "stamp": "codex/cave-editor-20261004 3d196ce3+dirty 2026-10-04_00:53 deploy-ps1\r\n",
-      "files": [
-        {
-          "sha256": "04E1A5E34B372DF54C690EB274524E36D89CB3FE76AFC89B9062A5D1EDDBB594",
-          "name": "OpenPoseidon.exe",
-          "bytes": 31416832,
-          "writtenUtc": "2026-10-03T22:52:11.9406632Z"
-        },
-        {
-          "sha256": "000AE2EEEB1EAD9F36F2856656A29303ECF9D15AB3B2C582B0E450F711148D47",
-          "name": "wgpu_renderer.dll",
-          "bytes": 18499072,
-          "writtenUtc": "2026-10-03T22:51:23.915224Z"
-        }
-      ]
-    },
-    "exit": {
-      "along": -2.119999999999891,
-      "dir": 90.0,
-      "cursor": "0.0000,0.0000",
-      "state": {
-        "count": 1,
-        "status": "Cave placed. Mission-local; reload removes it. Undo removes the last cave.",
-        "missionLocal": true,
-        "worldName": "worlds\\eden.wrp",
-        "grid": 6.25,
-        "heightRevision": 6,
-        "brushDefaultRadius": 8,
-        "inFootprint": false,
-        "atHeight": false,
-        "holeFloor": 0,
-        "terrainY": 43.17560958862305,
-        "roadY": 43.17560958862305,
-        "cameraFloorY": 43.17560958862305,
-        "drawRecords": 5,
-        "boundedHeader": true,
-        "ceilingY": 46.41999816894531,
-        "ok": true
-      },
-      "position": [
-        7252.12,
-        6250,
-        43.1616
-      ]
-    },
-    "flashlight": {
-      "activationLogged": true,
-      "daytime": true,
-      "input": "L / Headlights"
-    },
-    "ceiling": 46.41999816894531,
-    "undoPassed": true,
-    "receipt": "build/cave-editor/original-everon-cave-flashlight-20261004-011308/result.json",
-    "site": {
-      "fz": -1.8369701987210297E-16,
-      "gain": 65.78999999999999,
-      "heading": 270,
-      "sz": 1.0,
-      "sx": -1.8369701987210297E-16,
-      "x": 7250.0,
-      "fx": -1.0,
-      "z": 6250.0,
-      "floor": 43.92
-    }
+    "receipt": "build/cave-editor/original-everon-cave-earth-clear-20261004-021607/result.json"
   },
   "infantry": {
-    "exit": {
-      "along": -2.380000000000109,
-      "position": [
-        6247.62,
-        5500,
-        71.2827
-      ],
-      "cursor": "0.0000,0.0000",
-      "originDrop": 0.0030999999999892225,
-      "state": {
+    "selection": {
+      "selected": {
         "count": 1,
+        "selectedId": 1,
+        "records": [
+          {
+            "id": 1,
+            "objectId": 57492,
+            "sourceName": "generated\\trench-shell-1.p3d",
+            "kind": "infantryTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0,
+            "width": 1.5,
+            "height": 1.600000023841858,
+            "length": 12
+          }
+        ],
         "status": "Straight infantry trench placed, with access ramp. Mission-local.",
         "missionLocal": true,
         "worldName": "worlds\\eden.wrp",
         "grid": 6.25,
         "heightRevision": 6,
         "brushDefaultRadius": 8,
-        "inFootprint": false,
-        "atHeight": false,
-        "holeFloor": 0,
-        "terrainY": 71.2842788696289,
-        "roadY": 71.2842788696289,
-        "cameraFloorY": 71.2842788696289,
-        "drawRecords": 4,
-        "boundedHeader": false,
         "ok": true
       },
-      "dir": 270.0,
-      "side": -1.457329690985417E-16,
-      "speed": 17.7261
-    },
-    "passed": true,
-    "undoPassed": true,
-    "entry": {
-      "along": 7.050000000000182,
-      "position": [
-        6257.05,
-        5500,
-        69.6866
-      ],
-      "cursor": "0.0000,0.0000",
-      "originDrop": 1.5991999999999962,
-      "state": {
+      "edgeBefore": {
         "count": 1,
+        "selectedId": 1,
+        "records": [
+          {
+            "id": 1,
+            "objectId": 57492,
+            "sourceName": "generated\\trench-shell-1.p3d",
+            "kind": "infantryTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0,
+            "width": 1.5,
+            "height": 1.600000023841858,
+            "length": 12
+          }
+        ],
         "status": "Straight infantry trench placed, with access ramp. Mission-local.",
         "missionLocal": true,
         "worldName": "worlds\\eden.wrp",
@@ -210,31 +563,628 @@
         "brushDefaultRadius": 8,
         "inFootprint": true,
         "atHeight": true,
-        "holeFloor": 69.68795013427734,
-        "terrainY": 71.24192810058594,
-        "roadY": 69.68795013427734,
-        "cameraFloorY": 69.68795013427734,
+        "holeFloor": 17.85784912109375,
+        "terrainY": 19.39499855041504,
+        "roadY": 17.85784912109375,
+        "cameraFloorY": 17.85784912109375,
         "drawRecords": 4,
         "boundedHeader": false,
         "ok": true
       },
-      "dir": 90.0,
-      "side": 4.3168799669945314E-16,
-      "speed": 17.7261
+      "edgeReturned": {
+        "count": 1,
+        "selectedId": 1,
+        "records": [
+          {
+            "id": 1,
+            "objectId": 57492,
+            "sourceName": "generated\\trench-shell-1.p3d",
+            "kind": "infantryTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0,
+            "width": 1.5,
+            "height": 1.600000023841858,
+            "length": 12
+          }
+        ],
+        "status": "Selected excavation rotated; entrance and identity preserved.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": true,
+        "atHeight": true,
+        "holeFloor": 17.85784912109375,
+        "terrainY": 19.39499855041504,
+        "roadY": 17.85784912109375,
+        "cameraFloorY": 17.85784912109375,
+        "drawRecords": 4,
+        "boundedHeader": false,
+        "ok": true
+      },
+      "returned": {
+        "count": 1,
+        "selectedId": 1,
+        "records": [
+          {
+            "id": 1,
+            "objectId": 57492,
+            "sourceName": "generated\\trench-shell-1.p3d",
+            "kind": "infantryTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0,
+            "width": 1.5,
+            "height": 1.600000023841858,
+            "length": 12
+          }
+        ],
+        "status": "Selected excavation rotated; entrance and identity preserved.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "ok": true
+      },
+      "edgeRotated": {
+        "count": 1,
+        "selectedId": 1,
+        "records": [
+          {
+            "id": 1,
+            "objectId": 57492,
+            "sourceName": "generated\\trench-shell-1.p3d",
+            "kind": "infantryTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0.09999999403953552,
+            "width": 1.5,
+            "height": 1.600000023841858,
+            "length": 12
+          }
+        ],
+        "status": "Selected excavation rotated; entrance and identity preserved.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": false,
+        "atHeight": false,
+        "holeFloor": 0,
+        "terrainY": 19.39499855041504,
+        "roadY": 19.39499855041504,
+        "cameraFloorY": 19.39499855041504,
+        "drawRecords": 4,
+        "boundedHeader": false,
+        "ok": true
+      },
+      "rotated": {
+        "count": 1,
+        "selectedId": 1,
+        "records": [
+          {
+            "id": 1,
+            "objectId": 57492,
+            "sourceName": "generated\\trench-shell-1.p3d",
+            "kind": "infantryTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0.09999999403953552,
+            "width": 1.5,
+            "height": 1.600000023841858,
+            "length": 12
+          }
+        ],
+        "status": "Selected excavation rotated; entrance and identity preserved.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "ok": true
+      }
     },
-    "receipt": "build/trench-editor/original-everon-trenches-20261004-010908/result.json"
+    "outsideSweepGuard": {
+      "actor": {
+        "dir": 180.0,
+        "position": [
+          5500,
+          9997.9,
+          19.3962
+        ],
+        "state": {
+          "count": 1,
+          "selectedId": 1,
+          "records": [
+            {
+              "id": 1,
+              "objectId": 57492,
+              "sourceName": "generated\\trench-shell-1.p3d",
+              "kind": "infantryTrench",
+              "x": 5500,
+              "y": 19.457849502563477,
+              "z": 10000,
+              "heading": 0,
+              "width": 1.5,
+              "height": 1.600000023841858,
+              "length": 12
+            }
+          ],
+          "status": "Leave the excavation with the player and controlled vehicle before rotating it.",
+          "missionLocal": true,
+          "worldName": "worlds\\eden.wrp",
+          "grid": 6.25,
+          "heightRevision": 6,
+          "brushDefaultRadius": 8,
+          "inFootprint": false,
+          "atHeight": false,
+          "holeFloor": 0,
+          "terrainY": 19.39499855041504,
+          "roadY": 19.39499855041504,
+          "cameraFloorY": 19.39499855041504,
+          "drawRecords": 4,
+          "boundedHeader": false,
+          "ok": true
+        },
+        "along": -2.100000000000364,
+        "speed": 17.7261,
+        "side": 0.0,
+        "originDrop": -0.002600000000001046,
+        "cursor": "0.0000,0.0000"
+      },
+      "unchanged": true,
+      "refusal": {
+        "ok": false,
+        "error": "Move the player and controlled vehicle away from the proposed rotated excavation."
+      }
+    },
+    "occupiedEditGuard": {
+      "rotate": {
+        "ok": false,
+        "error": "Leave the excavation with the player and controlled vehicle before rotating it."
+      },
+      "delete": {
+        "ok": false,
+        "error": "Leave the excavation with the player and controlled vehicle before deleting it."
+      },
+      "unchanged": true
+    },
+    "exit": {
+      "dir": 180.0,
+      "position": [
+        5500,
+        9997.9,
+        19.3962
+      ],
+      "state": {
+        "count": 1,
+        "selectedId": 1,
+        "records": [
+          {
+            "id": 1,
+            "objectId": 57492,
+            "sourceName": "generated\\trench-shell-1.p3d",
+            "kind": "infantryTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0,
+            "width": 1.5,
+            "height": 1.600000023841858,
+            "length": 12
+          }
+        ],
+        "status": "Leave the excavation with the player and controlled vehicle before rotating it.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": false,
+        "atHeight": false,
+        "holeFloor": 0,
+        "terrainY": 19.39499855041504,
+        "roadY": 19.39499855041504,
+        "cameraFloorY": 19.39499855041504,
+        "drawRecords": 4,
+        "boundedHeader": false,
+        "ok": true
+      },
+      "along": -2.100000000000364,
+      "speed": 17.7261,
+      "side": 0.0,
+      "originDrop": -0.002600000000001046,
+      "cursor": "0.0000,0.0000"
+    },
+    "entry": {
+      "dir": 0.0,
+      "position": [
+        5500,
+        10007.3,
+        17.8565
+      ],
+      "state": {
+        "count": 1,
+        "selectedId": 1,
+        "records": [
+          {
+            "id": 1,
+            "objectId": 57492,
+            "sourceName": "generated\\trench-shell-1.p3d",
+            "kind": "infantryTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0,
+            "width": 1.5,
+            "height": 1.600000023841858,
+            "length": 12
+          }
+        ],
+        "status": "Selected excavation rotated; entrance and identity preserved.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": true,
+        "atHeight": true,
+        "holeFloor": 17.85784912109375,
+        "terrainY": 19.39499855041504,
+        "roadY": 17.85784912109375,
+        "cameraFloorY": 17.85784912109375,
+        "drawRecords": 4,
+        "boundedHeader": false,
+        "ok": true
+      },
+      "along": 7.299999999999272,
+      "speed": 17.7261,
+      "side": 0.0,
+      "originDrop": 1.5370999999999988,
+      "cursor": "0.0000,0.0000"
+    },
+    "site": {
+      "sz": 0.0,
+      "fz": 1.0,
+      "rim": 19.45785,
+      "z": 10000.0,
+      "x": 5500.0,
+      "variation": 11.9025,
+      "sx": 1.0,
+      "fx": 0.0,
+      "heading": 0
+    },
+    "passed": true,
+    "receipt": "build/trench-editor/original-everon-trench-earth-final-20261004-021336/result.json"
   },
   "tank": {
-    "failedAttempt": "build/trench-editor/original-everon-trenches-20261004-010908/result.json",
-    "state": "PENDING_CLEAR_GROUND_RERUN",
-    "reason": "Retail trees blocked approach nine metres before entrance; no tank samples entered excavation."
-  },
-  "selection": {
-    "state": "IMPLEMENTATION_AND_INSTALLED_ACCEPTANCE_PENDING"
+    "occupiedEditGuard": {
+      "rotate": {
+        "ok": false,
+        "error": "Leave the excavation with the player and controlled vehicle before rotating it."
+      },
+      "delete": {
+        "ok": false,
+        "error": "Leave the excavation with the player and controlled vehicle before deleting it."
+      },
+      "unchanged": true
+    },
+    "receipt": "build/trench-editor/original-everon-trench-earth-final-20261004-021336/result.json",
+    "exitCode": 0,
+    "entry": {
+      "dir": 359.642,
+      "position": [
+        5499.89,
+        10017.8,
+        19.8938
+      ],
+      "state": {
+        "count": 1,
+        "selectedId": 2,
+        "records": [
+          {
+            "id": 2,
+            "objectId": 57493,
+            "sourceName": "generated\\trench-shell-2.p3d",
+            "kind": "tankTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0,
+            "width": 5,
+            "height": 2,
+            "length": 24
+          }
+        ],
+        "status": "Selected excavation rotated; entrance and identity preserved.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": true,
+        "atHeight": true,
+        "holeFloor": 17.457849502563477,
+        "terrainY": 19.39499855041504,
+        "roadY": 17.457849502563477,
+        "cameraFloorY": 19.39499855041504,
+        "drawRecords": 4,
+        "boundedHeader": false,
+        "ok": true
+      },
+      "along": 17.799999999999272,
+      "speed": 6.94125,
+      "side": -0.10999999999967258,
+      "originDrop": 1.9405999999999999,
+      "cursor": "0.0000,0.0000"
+    },
+    "scriptSha256": "924FCA683FD1F46AD1C88C110FBC328D2A12EC728DFA7A0A6259397ABCEA4916",
+    "passed": true,
+    "selection": {
+      "selected": {
+        "count": 1,
+        "selectedId": 2,
+        "records": [
+          {
+            "id": 2,
+            "objectId": 57493,
+            "sourceName": "generated\\trench-shell-2.p3d",
+            "kind": "tankTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0,
+            "width": 5,
+            "height": 2,
+            "length": 24
+          }
+        ],
+        "status": "Tank trench placed, with access ramp and parking floor. Mission-local.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "ok": true
+      },
+      "edgeBefore": {
+        "count": 1,
+        "selectedId": 2,
+        "records": [
+          {
+            "id": 2,
+            "objectId": 57493,
+            "sourceName": "generated\\trench-shell-2.p3d",
+            "kind": "tankTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0,
+            "width": 5,
+            "height": 2,
+            "length": 24
+          }
+        ],
+        "status": "Tank trench placed, with access ramp and parking floor. Mission-local.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": true,
+        "atHeight": true,
+        "holeFloor": 17.457849502563477,
+        "terrainY": 19.39499855041504,
+        "roadY": 17.457849502563477,
+        "cameraFloorY": 17.457849502563477,
+        "drawRecords": 4,
+        "boundedHeader": false,
+        "ok": true
+      },
+      "edgeReturned": {
+        "count": 1,
+        "selectedId": 2,
+        "records": [
+          {
+            "id": 2,
+            "objectId": 57493,
+            "sourceName": "generated\\trench-shell-2.p3d",
+            "kind": "tankTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0,
+            "width": 5,
+            "height": 2,
+            "length": 24
+          }
+        ],
+        "status": "Selected excavation rotated; entrance and identity preserved.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": true,
+        "atHeight": true,
+        "holeFloor": 17.457849502563477,
+        "terrainY": 19.39499855041504,
+        "roadY": 17.457849502563477,
+        "cameraFloorY": 17.457849502563477,
+        "drawRecords": 4,
+        "boundedHeader": false,
+        "ok": true
+      },
+      "returned": {
+        "count": 1,
+        "selectedId": 2,
+        "records": [
+          {
+            "id": 2,
+            "objectId": 57493,
+            "sourceName": "generated\\trench-shell-2.p3d",
+            "kind": "tankTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0,
+            "width": 5,
+            "height": 2,
+            "length": 24
+          }
+        ],
+        "status": "Selected excavation rotated; entrance and identity preserved.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "ok": true
+      },
+      "edgeRotated": {
+        "count": 1,
+        "selectedId": 2,
+        "records": [
+          {
+            "id": 2,
+            "objectId": 57493,
+            "sourceName": "generated\\trench-shell-2.p3d",
+            "kind": "tankTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0.09999999403953552,
+            "width": 5,
+            "height": 2,
+            "length": 24
+          }
+        ],
+        "status": "Selected excavation rotated; entrance and identity preserved.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": false,
+        "atHeight": false,
+        "holeFloor": 0,
+        "terrainY": 19.39499855041504,
+        "roadY": 19.39499855041504,
+        "cameraFloorY": 19.39499855041504,
+        "drawRecords": 4,
+        "boundedHeader": false,
+        "ok": true
+      },
+      "rotated": {
+        "count": 1,
+        "selectedId": 2,
+        "records": [
+          {
+            "id": 2,
+            "objectId": 57493,
+            "sourceName": "generated\\trench-shell-2.p3d",
+            "kind": "tankTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0.09999999403953552,
+            "width": 5,
+            "height": 2,
+            "length": 24
+          }
+        ],
+        "status": "Selected excavation rotated; entrance and identity preserved.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "ok": true
+      }
+    },
+    "exit": {
+      "dir": 359.396,
+      "position": [
+        5500.17,
+        9991.85,
+        21.8824
+      ],
+      "state": {
+        "count": 1,
+        "selectedId": 2,
+        "records": [
+          {
+            "id": 2,
+            "objectId": 57493,
+            "sourceName": "generated\\trench-shell-2.p3d",
+            "kind": "tankTrench",
+            "x": 5500,
+            "y": 19.457849502563477,
+            "z": 10000,
+            "heading": 0,
+            "width": 5,
+            "height": 2,
+            "length": 24
+          }
+        ],
+        "status": "Leave the excavation with the player and controlled vehicle before rotating it.",
+        "missionLocal": true,
+        "worldName": "worlds\\eden.wrp",
+        "grid": 6.25,
+        "heightRevision": 6,
+        "brushDefaultRadius": 8,
+        "inFootprint": false,
+        "atHeight": false,
+        "holeFloor": 0,
+        "terrainY": 19.390792846679688,
+        "roadY": 19.390792846679688,
+        "cameraFloorY": 19.390792846679688,
+        "drawRecords": 4,
+        "boundedHeader": false,
+        "ok": true
+      },
+      "along": -8.149999999999636,
+      "speed": -24.6819,
+      "side": 0.17000000000007276,
+      "originDrop": -0.04800000000000182,
+      "cursor": "0.0000,0.0000"
+    },
+    "restored": {
+      "count": 0,
+      "selectedId": 0,
+      "records": [],
+      "status": "Selected generated excavation removed; original terrain restored.",
+      "missionLocal": true,
+      "worldName": "worlds\\eden.wrp",
+      "grid": 6.25,
+      "heightRevision": 6,
+      "brushDefaultRadius": 8,
+      "inFootprint": false,
+      "atHeight": false,
+      "holeFloor": 0,
+      "terrainY": 19.39499855041504,
+      "roadY": 19.39499855041504,
+      "cameraFloorY": 19.39499855041504,
+      "terrainRayHit": true,
+      "legacyRayResult": 0.3664977550506592,
+      "terrainRayY": 19.39500617980957,
+      "terrainRayDistance": 1.0628433227539062,
+      "drawRecords": 0,
+      "boundedHeader": false,
+      "ok": true
+    }
   },
   "boundaries": [
     "Single-player mission-local generated excavations only",
     "No persistence, AI Paths, Box3D cavity certification or connected segments",
-    "Cave and earth surfaces are prototypes; player flashlight is dim"
+    "Cave and earth materials remain prototypes; soldier flashlight remains dim"
   ]
 }

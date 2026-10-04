@@ -61,45 +61,45 @@ for these excavations. Direct lateral cave sunlight remains conservative.
 
 ## Verification
 
-Native geometry, admission and terrain checks: 139 cases, 24,339 assertions
-passed with the final tank preset. Four new renderer tests passed, including actual GPU
-ceiling/legacy/overlap/cap checks; seven existing hole renderer tests passed.
+The final engine source is `fd1e236c`; the installed acceptance stamp is
+`f6e5c1d5` (documentation-only successor). Native geometry, admission,
+selection and terrain checks passed: **143 cases, 24,368 assertions**.
+Four new GPU ceiling/legacy/overlap/cap checks and seven existing hole renderer
+tests passed earlier; selection and destruction fixes do not change shaders.
 
-The installed original-Everon cave runner passed against engine source
-`3d196ce3`, using runner revision `739cc40b`. The installed stamp carried
-`+dirty` because the ledger/docs and Cargo's incidental lockfile adjustment
-were uncommitted; no engine/shader changes differed from `3d196ce3`.
-The first runtime test found and corrected a compass-heading sign error.
-The second verified the corrected footprint/floor but exposed a diagnostic
-error: `IntersectWithGround` returns a point beyond the requested segment on
-miss, not a negative sentinel. The witness now checks the actual returned point
-against the requested segment. A third attempt exposed retained camera aim
-in the test setup; using the ordinary LookCenter key before movement corrected
-the steering. Failed attempts are not acceptance evidence.
+Original retail Everon, standard US soldier, no cave addon:
 
-Passing receipt: `build/cave-editor/original-everon-cave-20261004-010300/result.json`.
-The stock SoldierWB walked with normal W input from outside to 6.82 m inside,
-at ASL 43.9186 m beneath terrain at 47.1964 m, then returned outside with W.
-The centre floor/camera support was 43.92 m; the retained surface above was
-50.371 m. A genuine 0.1 m by 0.1 m aperture passed side/ceiling controls on a
-6.25 m terrain grid. Undo restored terrain ray hits/support without changing
-raw terrain heights/revision. The EXE/DLL hashes stayed unchanged and the
-game exited normally without GPU validation errors. Screenshots show a plain,
-box-shaped portal and a dark interior; natural cave surface/lighting polish
-is beyond this prototype. A second passing run at
-`build/cave-editor/original-everon-cave-flashlight-20261004-011308/result.json`
-also pressed the ordinary L key indoors during daytime: the player flashlight
-activation was logged and its screenshot showed illuminated walls/floor,
-although the beam remains dim. All entry/exit, tiny aperture and undo checks
-passed again.
+- Cave acceptance: `build/cave-editor/original-everon-cave-earth-clear-20261004-021607/result.json`.
+  Normal W-key entry beneath the retained roof and W-key exit passed, together
+  with 10 cm aperture side/height controls, stable-ID selection/rotation,
+  occupied edit refusal, non-last deletion preserving the neighbouring cave,
+  final removal and restoration of terrain queries. L activated the soldier
+  flashlight during this final run; screenshots show a dim beam. An ordinary
+  Light on action fallback is also supported by the runner.
+- Trench acceptance: `build/trench-editor/original-everon-trench-earth-final-20261004-021336/result.json`.
+  A read-only whole-island census selected a clear retail lane at
+  x=5500, z=10000. No trees were removed. Infantry walked down/out; the actual
+  M1Abrams drove down to the parking floor and reversed out with normal W/S.
+  Its root dropped 1.94 m at 17.8 m along the trench. Both kinds passed
+  selection/rotation, cut-edge refresh, occupied deletion/rotation refusal and
+  removal/restored terrain checks. Rotation sweeping over an outside soldier
+  was refused too.
 
-The first centred trench run verified normal infantry entry/exit and undo,
-but its Abrams approach was blocked by retail trees 9 m before the entrance
-(`build/trench-editor/original-everon-trenches-20261004-010908/result.json`).
-It never entered the trench and is not tank acceptance evidence. The revised
-runner rejects conservative bounds of retail obstacles throughout the approach
-and trench; no trees are deleted for testing. The clear-ground tank rerun and
-the owner-requested selection/rotation/deletion checks are pending.
+Runtime testing found a production defect: generated earth models with low
+mass were auto-classified as destructible trees. Abrams contact removed the
+terrain cut. Generated cave/trench models now declare `dammage=No`, and the
+native regression constructs a real ObjectPlain to verify DestructNo. The
+final tank run demonstrates that the floor remains through actual contact.
+Earlier tree-obstructed, steering and vanished-cut runs are failed diagnostics,
+not acceptance evidence. The final cave runner walks the whole armed model
+clear of the entrance before asking to delete it.
+
+Both final runs preserved EXE/DLL hashes, exited normally, and contained no
+GPU validation/device-loss/unhandled-exception errors. Visual inspection shows
+functional but plain faceted cave/earth surfaces; material polish and a brighter
+flashlight remain separate improvements. These are author-run receipts, not
+owner visual approval. The curated JSON beside this guide preserves final
+identity, movement and edit evidence without the large diagnostic censuses.
 
 Installed runners (invoke through `scripts/with-game-lock.sh`):
 
