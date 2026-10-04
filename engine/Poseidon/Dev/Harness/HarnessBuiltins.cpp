@@ -1595,6 +1595,7 @@ void RegisterScreenshot(HarnessServer& hs)
                 auto* look = cJSON_CreateObject();
                 cJSON_AddBoolToObject(look, "enabled", sky.enabled);
                 cJSON_AddBoolToObject(look, "skyLighting", sky.skyLighting);
+                cJSON_AddBoolToObject(look, "layeredFog", sky.layeredFog);
                 cJSON_AddBoolToObject(look, "coverageFromWeather", sky.cloudCoverageFromWeather);
                 cJSON_AddBoolToObject(look, "coveragePinned", std::getenv("WGR_CLOUD_COVERAGE") != nullptr);
                 cJSON_AddNumberToObject(look, "coverage", sky.cloudCoverage);

@@ -1,4 +1,4 @@
-//! Opt-in finite ASL fog. The old atmospheric volume and fog closure stay independent.
+//! Finite ASL fog. The old atmospheric volume and fog closure stay independent.
 use crate::{ffi::{WgrCamera, WgrCameraShadow, WgrLayeredFog}, terrain::{TerrainConformParams, TerrainShadowMap}};
 use bytemuck::{Pod, Zeroable};
 
@@ -28,13 +28,8 @@ pub fn valid_settings(p: &WgrLayeredFog) -> bool {
             && l[2]>=0.001 && l[2]<=1000.0 && l[3]>=0.0 && l[3]<=0.05)
 }
 pub fn settings(mut p: WgrLayeredFog) -> WgrLayeredFog {
-    if let Ok(value)=std::env::var("WGR_LAYERED_FOG") { p.control[0]=if value=="1" {1.0}else{0.0}; }
-    for i in 0..2 {
-        if let Ok(value)=std::env::var(format!("WGR_FOG_LAYER{i}")) {
-            let fields=value.split(',').map(str::parse::<f32>).collect::<Result<Vec<_>,_>>();
-            match fields { Ok(v) if v.len()==4=>p.layers[i].copy_from_slice(&v), _=>p.control[0]=0.0 }
-        }
-    }
+    // The C++ shared SkySettings receives startup environment overrides once.
+    // Do not re-pin them here: the live Weather selector must be authoritative.
     if !valid_settings(&p) { p.control[0]=0.0; }
     p
 }

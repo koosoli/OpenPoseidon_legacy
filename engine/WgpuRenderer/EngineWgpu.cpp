@@ -1451,6 +1451,27 @@ public:
 
 EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.useWindow)
 {
+    // Startup overrides seed the shared look once, so Weather controls remain
+    // authoritative when the owner switches fog mode or edits a layer later.
+    if (const char* fogMode = std::getenv("WGR_LAYERED_FOG"))
+        _sky.layeredFog = std::strcmp(fogMode, "1") == 0;
+    for (int i = 0; i < 2; ++i)
+    {
+        const char* profile = std::getenv(i == 0 ? "WGR_FOG_LAYER0" : "WGR_FOG_LAYER1");
+        if (!profile) continue;
+        float base, top, feather, extinction;
+        char extra;
+        if (std::sscanf(profile, "%f,%f,%f,%f %c", &base, &top, &feather, &extinction, &extra) != 4)
+        {
+            _sky.layeredFog = false;
+            continue;
+        }
+        _sky.fogLayerBase[i] = base;
+        _sky.fogLayerTop[i] = top;
+        _sky.fogLayerFeather[i] = feather;
+        _sky.fogLayerExtinction[i] = extinction;
+    }
+
     const char* sourceProbe = std::getenv("WGR_GEOMETRY_MAIN_COUNT_PROBE");
     if (sourceProbe && std::strcmp(sourceProbe, "1") == 0)
     {

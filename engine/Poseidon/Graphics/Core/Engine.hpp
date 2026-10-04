@@ -2097,7 +2097,7 @@ class Engine : public IGraphicsEngine
         // This is a DIFFERENT question from fogFalloff below: that shapes how fast the ramp
         // climbs, so using it to thicken the far field also thickens the near and mid field.
         float fogFarClose = 0.85f;
-        bool layeredFog = false; // Opt-in: finite ASL transport; weather fog zero is unchanged.
+        bool layeredFog = true; // Finite ASL volume by default; weather fog zero is unchanged.
         float fogLayerBase[2] = {0.0f, 70.0f};
         float fogLayerTop[2] = {35.0f, 100.0f};
         float fogLayerFeather[2] = {5.0f, 5.0f};
