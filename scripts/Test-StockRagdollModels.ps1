@@ -26,6 +26,19 @@ function AssertFiniteTree($v){
 function AssertGroundFreeze($sample){
  Require (!$sample.frozen-or ($sample.root[1]-le $sample.terrainY+1-and $sample.root[1]-ge $sample.terrainY-2)) 'Actual frozen corpse is airborne or below native ground.'
 }
+function AssertPair($before,$after){
+ Require ($before.stamp-ceq $after.stamp-and $before.files.Count-eq 2-and $after.files.Count-eq 2) 'Installed source stamp or binary count changed.'
+ foreach($name in @('OpenPoseidon.exe','wgpu_renderer.dll')){
+  $a=@($before.files|Where-Object {$_.name-ceq $name});$b=@($after.files|Where-Object {$_.name-ceq $name})
+  Require ($a.Count-eq 1-and $b.Count-eq 1) 'Installed binary identity missing or duplicated.'
+  Require ($a[0].sha256-match '^[a-fA-F0-9]{64}$'-and $b[0].sha256-match '^[a-fA-F0-9]{64}$'-and $a[0].sha256-ieq $b[0].sha256-and $a[0].bytes-eq $b[0].bytes) ('Installed binary changed: '+$name)
+ }
+}
+function AssertHitReactivation($before,$after,$owners,$backend){
+ Require ($after.received-gt $before.received-and $after.wakes-gt $before.wakes-and $owners.active-eq 1-and $backend.bodies-eq 11-and $backend.joints-eq 10) 'Hit counters did not accompany real solver reactivation.'
+ # A restored unsafe local trial may transfer aggregate impulse with lastPart=-1.
+ # This admission is followed by actual retained-pose change and resettling checks.
+}
 function Decode([string]$v){$v=$v.Trim();if($v.StartsWith('"')){Require $v.EndsWith('"') 'Incomplete SQF result.';return $v.Substring(1,$v.Length-2).Replace('""','"')};return ConvertFrom-Json $v -NoEnumerate}
 function Targets($census,[string[]]$requested,[string[]]$requestedModels=@()){
  $rows=@();$models=@{};$names=@{};$selectedModels=@{};$wantedModels=@($requestedModels|ForEach-Object{ModelKey $_})
@@ -62,8 +75,15 @@ if($SelfTest){
  $fixture.families+=,$fixture.families[0];$refused=$false;try{$null=Targets $fixture @()}catch{$refused=$true};Require $refused 'Duplicate model family accepted.'
  $refused=$false;try{AssertGroundFreeze @{frozen=$true;root=@(0,5,0);terrainY=0}}catch{$refused=$true};Require $refused 'Airborne frozen corpse accepted.'
  AssertGroundFreeze @{frozen=$false;root=@(0,5,0);terrainY=0};AssertGroundFreeze @{frozen=$true;root=@(0,.2,0);terrainY=0}
+ $pairA=@{stamp='branch source time';files=@(@{name='OpenPoseidon.exe';sha256=('A'*64);bytes=10},@{name='wgpu_renderer.dll';sha256=('B'*64);bytes=20})}
+ $pairB=@{files=@(@{bytes=20;sha256=('B'*64);name='wgpu_renderer.dll'},@{bytes=10;sha256=('A'*64);name='OpenPoseidon.exe'});stamp='branch source time'}
+ AssertPair $pairA $pairB;$pairB.files[0].sha256='C'*64;$refused=$false;try{AssertPair $pairA $pairB}catch{$refused=$true};Require $refused 'Changed installed hash accepted.'
+ $hitBefore=@{received=0;wakes=0;transfers=0;lastPart=-1};$hitAfter=@{received=1;wakes=1;transfers=0;lastPart=-1}
+ AssertHitReactivation $hitBefore $hitAfter @{active=1} @{bodies=11;joints=10}
+ $hitAfter.wakes=0;$refused=$false;try{AssertHitReactivation $hitBefore $hitAfter @{active=1} @{bodies=11;joints=10}}catch{$refused=$true};Require $refused 'Unreactivated received-hit counter accepted.'
+ $hitAfter.wakes=1;$refused=$false;try{AssertHitReactivation $hitBefore $hitAfter @{active=1} @{bodies=0;joints=0}}catch{$refused=$true};Require $refused 'Wake without actual solver accepted.'
  $tokens=$null;$errors=$null;$null=[Management.Automation.Language.Parser]::ParseFile($PSCommandPath,[ref]$tokens,[ref]$errors);Require ($errors.Count-eq 0) 'Runner parse failure.'
- Write-Host 'Stock model runner SelfTest PASS (census selection, exclusion, invalid/duplicate targets, nested finite values, airborne freeze refusal, parse).';return
+ Write-Host 'Stock model runner SelfTest PASS (census selection, exclusion, invalid/duplicate targets, nested finite values, airborne freeze refusal, unordered/stable pair, aggregate hit acceptance and wake/backend negatives, parse).';return
 }
 $census=$null;if($CensusPath){$census=Get-Content -LiteralPath $CensusPath -Raw|ConvertFrom-Json}
 $targets=Targets $census $Classes $Models
@@ -190,7 +210,7 @@ function Projectile($beforeHit){
  ExactPose $beforeHit (Pose $true);Exec 'setAccTime .2';$until=[DateTime]::UtcNow.AddSeconds(12)
  do{$hitAfter=HitStatus;if($hitAfter.wakes-gt $hitBefore.wakes){break};Require ([DateTime]::UtcNow-lt $until) 'Actual stock bullet did not wake retained owner.';Start-Sleep -Milliseconds 50}while($true)
  Exec 'setAccTime 0';$case.projectile.after=$hitAfter;$case.projectile.backend=PhysicsCounts
- Require ($hitAfter.received-gt $hitBefore.received-and $hitAfter.lastPart-ge 0-and (AutoCounts).active-eq 1-and $case.projectile.backend.bodies-eq 11-and $case.projectile.backend.joints-eq 10) 'Hit counters did not accompany real solver reactivation.'
+ AssertHitReactivation $hitBefore $hitAfter (AutoCounts) $case.projectile.backend
  # Safe aggregate fallback is valid when a local trial exceeds solver angular limits.
  $case.projectile.mode=if($hitAfter.transfers-gt $hitBefore.transfers){'local-transfer-counter-increased'}else{'no-local-transfer-increase-aggregate-path-possible'}
  $reactivated=Pose $false;$case.projectile.reactivatedPose=PoseSummary $reactivated;Capture 'projectile-reactivated' 'ragVictim'
@@ -206,6 +226,7 @@ try{
  $mission=Join-Path $taskRoot 'tests/perf/missions/perf_field.eden'
  $args=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','1500','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--test-world-hour','16','--log-file',('"'+$log+'"'))
  $p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -ArgumentList $args -PassThru
+ $null=$p.Handle # Cache the owned handle before exit so PS7 retains a reliable ExitCode.
  $until=[DateTime]::UtcNow.AddSeconds(120)
  do{Require (!$p.HasExited) 'Startup exited.';$client=[Net.Sockets.TcpClient]::new();try{$client.Connect('127.0.0.1',$port)}catch{$client.Dispose();$client=$null};if(!$client){Require ([DateTime]::UtcNow-lt $until) 'Startup deadline.';Start-Sleep -Milliseconds 250}}while(!$client)
  $stream=$client.GetStream();$stream.ReadTimeout=30000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
@@ -278,7 +299,7 @@ try{
  if(!$SaveLoad){Require ($result.gates.finalTerrainRegistrations.Count-eq $registrations.Count) 'Serial normal deaths rebuilt shared terrain.'}
  $null=Send @{cmd='exit'};Require ($p.WaitForExit(30000)-and $p.ExitCode-eq 0) 'Normal game exit failed.';$result.exit=$p.ExitCode
  Require (!(Select-String -LiteralPath $log -Pattern 'Validation Error|panicked at|DeviceLost|UNHANDLED EXCEPTION' -Quiet)) 'Actual runtime failure logged.'
- Require ((Pair|ConvertTo-Json -Depth 6 -Compress)-ceq ($before|ConvertTo-Json -Depth 6 -Compress)) 'Installed pair changed during model campaign.'
+ $after=Pair;$result.installedAfter=$after;AssertPair $before $after
  Require ($result.cases.Count-eq $result.denominator-and $result.passedFamilies-eq $result.denominator-and $result.failedFamilies-eq 0) 'One or more requested stock model families failed; inspect case.json evidence.'
  $result.passed=$true;Write-Host "Installed stock model ragdoll PASS $($result.passedFamilies)/$($result.denominator): $taskOut"
 }catch{$result.error=$_.Exception.Message;throw}finally{
