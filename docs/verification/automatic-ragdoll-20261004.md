@@ -32,6 +32,12 @@ retain frozen poses, reject a new death while disabled despite free capacity,
 re-enable and clean up. The tested setter is the one used by the Physics checkbox;
 the harness did not click the ImGui widget.
 
+The repaired installed AK74 fixture also passed at `7d5c1e92`: an actual live
+Eastern soldier with a loaded rifle fired five shots and killed the stock US
+target. The death entered a fifth independent automatic owner, froze and
+returned to zero owners/body/joint handles after deletion. No artificial damage
+command was used in the rifle arm. Root inspected its retained corpse screenshot.
+
 Curated receipts: `automatic-ragdoll-20261004-runtime.json`. Raw actual pose
 arrays remain in ignored `build/automatic-ragdoll/`; hashes, owner bounds, point
 counts, actual backend counts, screenshots and lifecycle observations are retained
@@ -59,9 +65,11 @@ pause and the bounded model/ground domain are reasons to keep the default OFF.
 No Box3D dependency upgrade, asynchronous floor preparation or broad performance
 acceptance is claimed.
 
-The first two rifle fixtures failed before establishing a real shooter/kill.
-Their failures remain in the receipts. Rifle acceptance is still pending the
-repaired fixture. A `MIDDLE` stance-request campaign also passed the script, but
+The earlier rifle fixtures failed before establishing a real shooter/kill.
+Their failures remain in the receipts. Source review found that `createGroup
+east` returns a null group when the mission has no Eastern centre. The repaired
+fixture creates that centre and asserts the real shooter binding, weapon and
+ammunition before the actual firing/kill proof. A `MIDDLE` stance-request campaign also passed the script, but
 its actual initial CPU body points equal the standing control: **crouch/prone
 acceptance is unproved**. Neither result is relabelled as gameplay success.
 

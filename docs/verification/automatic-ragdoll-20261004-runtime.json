@@ -933,6 +933,963 @@
     },
     {
       "passed": true,
+      "expectedCommit": "7d5c1e92",
+      "installed": {
+        "files": [
+          {
+            "bytes": 31525888,
+            "sha256": "FE425CD3D94BDAE57EE1E3B85831AFDEC0B5A0F5520D6BD0ADE33AE74D54900E",
+            "writtenUtc": "2026-10-04T02:11:06.9085265Z",
+            "name": "OpenPoseidon.exe"
+          },
+          {
+            "bytes": 18563072,
+            "sha256": "6FED183F23C289450572BE2D60D48E74F7CA4819CF29497F6C6D7034D633D3C7",
+            "writtenUtc": "2026-10-04T02:10:34.8509854Z",
+            "name": "wgpu_renderer.dll"
+          }
+        ],
+        "stamp": "codex/modernisation-followup-20261004 7d5c1e92 2026-10-04_04:11 deploy-ps1\r\n"
+      },
+      "scriptSha256": "27BBD7623B10CD4A879368DDF884C225B570F86716D27FE2B57B948D9130041D",
+      "scope": "Opt-in original Everon ordinary damage deaths, actual consumed poses, four independent active owners/budget, persistent freeze, cleanup; rifle/save-load only when requested. No appearance or broad default promotion without runtime owner review.",
+      "exit": 0,
+      "rawReceipt": "build\\automatic-ragdoll\\automatic-boot-ak74-center-20261004-042313\\result.json",
+      "rawReceiptSha256": "ab5165af4bae3fabffe5ab738ff93b37dd6154af06058a63f3414f8ee2c697ee",
+      "engineLogSha256": "9a0b66fc8de8b905e097c6150a42fe5eb1ea49051b4efe2e51f18b9c24518eb9",
+      "sourceWorld": {
+        "worldName": "worlds\\eden.wrp",
+        "count": 0,
+        "heightRevision": 6,
+        "grid": 6.25
+      },
+      "placements": [
+        {
+          "stance": "UP",
+          "position": [
+            5500,
+            10000,
+            19.3936
+          ],
+          "name": "ragVictim0"
+        },
+        {
+          "stance": "UP",
+          "position": [
+            5507,
+            10000,
+            19.3513
+          ],
+          "name": "ragVictim1"
+        },
+        {
+          "stance": "UP",
+          "position": [
+            5514,
+            10000,
+            19.7696
+          ],
+          "name": "ragVictim2"
+        },
+        {
+          "stance": "UP",
+          "position": [
+            5521,
+            10000,
+            19.4973
+          ],
+          "name": "ragVictim3"
+        },
+        {
+          "stance": "UP",
+          "position": [
+            5528,
+            10000,
+            19.8726
+          ],
+          "name": "ragVictim4"
+        }
+      ],
+      "gates": {
+        "queued": {
+          "active": 0,
+          "raw": "OK corpse-auto-status enabled=1 active=0 frozen=0 pending=4 activeBudget=4 retainedBudget=64",
+          "frozen": 0,
+          "pending": 4
+        },
+        "active": {
+          "owners": {
+            "active": 4,
+            "raw": "OK corpse-auto-status enabled=1 active=4 frozen=0 pending=0 activeBudget=4 retainedBudget=64",
+            "frozen": 0,
+            "pending": 0
+          },
+          "firstTerrainRegistrationLines": [
+            "[2026-10-04 04:23:32.156] [app-b440] [INFO] [WORLD]   AUTORAGDOLL: registered shared actual terrain width=2048 spacing=6.25 mapGrid=6.25 landGrid=50 bytes=16777216 milliseconds=246.1478"
+          ],
+          "wallMilliseconds": 440.9688,
+          "backend": {
+            "bodies": 44,
+            "joints": 40,
+            "raw": "OK corpse-physics-status epoch=1 bodies=44 articulatedBodies=44 articulatedJoints=40"
+          }
+        },
+        "persistence": {
+          "passed": true,
+          "elapsed": 31.11
+        },
+        "cleanup": {
+          "backend": {
+            "bodies": 0,
+            "joints": 0,
+            "raw": "OK corpse-physics-status epoch=1 bodies=0 articulatedBodies=0 articulatedJoints=0"
+          },
+          "owners": {
+            "active": 0,
+            "raw": "OK corpse-auto-status enabled=1 active=0 frozen=0 pending=0 activeBudget=4 retainedBudget=64",
+            "frozen": 0,
+            "pending": 0
+          }
+        },
+        "rifle": {
+          "passed": true,
+          "alive": false,
+          "damage": 1,
+          "shots": 5
+        },
+        "retirement": {
+          "owners": {
+            "active": 0,
+            "raw": "OK corpse-auto-status enabled=1 active=0 frozen=4 pending=0 activeBudget=4 retainedBudget=64",
+            "frozen": 4,
+            "pending": 0
+          },
+          "backend": {
+            "bodies": 0,
+            "joints": 0,
+            "raw": "OK corpse-physics-status epoch=1 bodies=0 articulatedBodies=0 articulatedJoints=0"
+          },
+          "initial": [
+            {
+              "model": "data3d\\mc vojakw2.p3d",
+              "frozen": false,
+              "solver": true,
+              "objectTransform": [
+                1,
+                0,
+                0,
+                5500,
+                0,
+                1,
+                0,
+                19.393625259399414,
+                0,
+                0,
+                1,
+                10000
+              ],
+              "retainedMinimum": [
+                -2.065742254257202,
+                -0.5390450954437256,
+                -1.086796760559082
+              ],
+              "retainedMaximum": [
+                1.2767486572265625,
+                3.460517406463623,
+                1.1428977251052856
+              ],
+              "retainedRadius": 3.4832921028137207,
+              "bones": 33,
+              "proxies": 37,
+              "levels": [
+                {
+                  "level": 0,
+                  "points": 1757,
+                  "compared": 1715
+                },
+                {
+                  "level": 1,
+                  "points": 939,
+                  "compared": 913
+                },
+                {
+                  "level": 2,
+                  "points": 767,
+                  "compared": 760
+                },
+                {
+                  "level": 3,
+                  "points": 443,
+                  "compared": 442
+                },
+                {
+                  "level": 4,
+                  "points": 185,
+                  "compared": 185
+                },
+                {
+                  "level": 5,
+                  "points": 1799,
+                  "compared": 1799
+                },
+                {
+                  "level": 6,
+                  "points": 216,
+                  "compared": 216
+                },
+                {
+                  "level": 7,
+                  "points": 19,
+                  "compared": 19
+                },
+                {
+                  "level": 8,
+                  "points": 1,
+                  "compared": 1
+                },
+                {
+                  "level": 9,
+                  "points": 12,
+                  "compared": 12
+                },
+                {
+                  "level": 10,
+                  "points": 332,
+                  "compared": 332
+                }
+              ],
+              "fullResponseSha256": "586c1dae0c76bf50ae00984cf67f1c73bb09f46694bd6f7e01a32b800a7f91dd"
+            },
+            {
+              "model": "data3d\\mc vojakw2.p3d",
+              "frozen": false,
+              "solver": true,
+              "objectTransform": [
+                1,
+                0,
+                0,
+                5507,
+                0,
+                1,
+                0,
+                19.351343154907227,
+                0,
+                0,
+                1,
+                10000
+              ],
+              "retainedMinimum": [
+                -2.065742254257202,
+                -0.5390450954437256,
+                -1.086796760559082
+              ],
+              "retainedMaximum": [
+                1.2767486572265625,
+                3.460517406463623,
+                1.1428977251052856
+              ],
+              "retainedRadius": 3.4832921028137207,
+              "bones": 33,
+              "proxies": 37,
+              "levels": [
+                {
+                  "level": 0,
+                  "points": 1757,
+                  "compared": 1715
+                },
+                {
+                  "level": 1,
+                  "points": 939,
+                  "compared": 913
+                },
+                {
+                  "level": 2,
+                  "points": 767,
+                  "compared": 760
+                },
+                {
+                  "level": 3,
+                  "points": 443,
+                  "compared": 442
+                },
+                {
+                  "level": 4,
+                  "points": 185,
+                  "compared": 185
+                },
+                {
+                  "level": 5,
+                  "points": 1799,
+                  "compared": 1799
+                },
+                {
+                  "level": 6,
+                  "points": 216,
+                  "compared": 216
+                },
+                {
+                  "level": 7,
+                  "points": 19,
+                  "compared": 19
+                },
+                {
+                  "level": 8,
+                  "points": 1,
+                  "compared": 1
+                },
+                {
+                  "level": 9,
+                  "points": 12,
+                  "compared": 12
+                },
+                {
+                  "level": 10,
+                  "points": 332,
+                  "compared": 332
+                }
+              ],
+              "fullResponseSha256": "5900b90a1442bccf74978d3a3acaa9ec299f805c008de5eb4b1532b10fcfe25b"
+            },
+            {
+              "model": "data3d\\mc vojakw2.p3d",
+              "frozen": false,
+              "solver": true,
+              "objectTransform": [
+                1,
+                0,
+                0,
+                5514,
+                0,
+                1,
+                0,
+                19.7696475982666,
+                0,
+                0,
+                1,
+                10000
+              ],
+              "retainedMinimum": [
+                -2.065742254257202,
+                -0.5390450954437256,
+                -1.086796760559082
+              ],
+              "retainedMaximum": [
+                1.2767486572265625,
+                3.460517406463623,
+                1.1428977251052856
+              ],
+              "retainedRadius": 3.4832921028137207,
+              "bones": 33,
+              "proxies": 37,
+              "levels": [
+                {
+                  "level": 0,
+                  "points": 1757,
+                  "compared": 1715
+                },
+                {
+                  "level": 1,
+                  "points": 939,
+                  "compared": 913
+                },
+                {
+                  "level": 2,
+                  "points": 767,
+                  "compared": 760
+                },
+                {
+                  "level": 3,
+                  "points": 443,
+                  "compared": 442
+                },
+                {
+                  "level": 4,
+                  "points": 185,
+                  "compared": 185
+                },
+                {
+                  "level": 5,
+                  "points": 1799,
+                  "compared": 1799
+                },
+                {
+                  "level": 6,
+                  "points": 216,
+                  "compared": 216
+                },
+                {
+                  "level": 7,
+                  "points": 19,
+                  "compared": 19
+                },
+                {
+                  "level": 8,
+                  "points": 1,
+                  "compared": 1
+                },
+                {
+                  "level": 9,
+                  "points": 12,
+                  "compared": 12
+                },
+                {
+                  "level": 10,
+                  "points": 332,
+                  "compared": 332
+                }
+              ],
+              "fullResponseSha256": "3b2a66dbfefc81b52c43f803d08fae7bd9ad8d4a860f6a295d46bfde008b4ba7"
+            },
+            {
+              "model": "data3d\\mc vojakw2.p3d",
+              "frozen": false,
+              "solver": true,
+              "objectTransform": [
+                1,
+                0,
+                0,
+                5521,
+                0,
+                1,
+                0,
+                19.49732208251953,
+                0,
+                0,
+                1,
+                10000
+              ],
+              "retainedMinimum": [
+                -2.065742254257202,
+                -0.5390450954437256,
+                -1.086796760559082
+              ],
+              "retainedMaximum": [
+                1.2767486572265625,
+                3.460517406463623,
+                1.1428977251052856
+              ],
+              "retainedRadius": 3.4832921028137207,
+              "bones": 33,
+              "proxies": 37,
+              "levels": [
+                {
+                  "level": 0,
+                  "points": 1757,
+                  "compared": 1715
+                },
+                {
+                  "level": 1,
+                  "points": 939,
+                  "compared": 913
+                },
+                {
+                  "level": 2,
+                  "points": 767,
+                  "compared": 760
+                },
+                {
+                  "level": 3,
+                  "points": 443,
+                  "compared": 442
+                },
+                {
+                  "level": 4,
+                  "points": 185,
+                  "compared": 185
+                },
+                {
+                  "level": 5,
+                  "points": 1799,
+                  "compared": 1799
+                },
+                {
+                  "level": 6,
+                  "points": 216,
+                  "compared": 216
+                },
+                {
+                  "level": 7,
+                  "points": 19,
+                  "compared": 19
+                },
+                {
+                  "level": 8,
+                  "points": 1,
+                  "compared": 1
+                },
+                {
+                  "level": 9,
+                  "points": 12,
+                  "compared": 12
+                },
+                {
+                  "level": 10,
+                  "points": 332,
+                  "compared": 332
+                }
+              ],
+              "fullResponseSha256": "816584d62bdbc2160bc478b6a81b4ad7a4e029fe3c9efca43b843ce22d5396b4"
+            }
+          ],
+          "frozen": [
+            {
+              "model": "data3d\\mc vojakw2.p3d",
+              "frozen": true,
+              "solver": false,
+              "objectTransform": [
+                1,
+                0,
+                0,
+                5500.181640625,
+                0,
+                1,
+                0,
+                18.7544002532959,
+                0,
+                0,
+                1,
+                10000.06640625
+              ],
+              "retainedMinimum": [
+                -1.6969151496887207,
+                -1.2439740896224976,
+                -1.5640684366226196
+              ],
+              "retainedMaximum": [
+                1.5654802322387695,
+                1.8279664516448975,
+                1.3425339460372925
+              ],
+              "retainedRadius": 2.592205762863159,
+              "bones": 33,
+              "proxies": 37,
+              "levels": [
+                {
+                  "level": 0,
+                  "points": 1757,
+                  "compared": 1715
+                },
+                {
+                  "level": 1,
+                  "points": 939,
+                  "compared": 913
+                },
+                {
+                  "level": 2,
+                  "points": 767,
+                  "compared": 760
+                },
+                {
+                  "level": 3,
+                  "points": 443,
+                  "compared": 442
+                },
+                {
+                  "level": 4,
+                  "points": 185,
+                  "compared": 185
+                },
+                {
+                  "level": 5,
+                  "points": 1799,
+                  "compared": 1799
+                },
+                {
+                  "level": 6,
+                  "points": 216,
+                  "compared": 216
+                },
+                {
+                  "level": 7,
+                  "points": 19,
+                  "compared": 19
+                },
+                {
+                  "level": 8,
+                  "points": 1,
+                  "compared": 1
+                },
+                {
+                  "level": 9,
+                  "points": 12,
+                  "compared": 12
+                },
+                {
+                  "level": 10,
+                  "points": 332,
+                  "compared": 332
+                }
+              ],
+              "fullResponseSha256": "bb779cd8c988513b3c7984a7f1d8509aee48e99bdecea8fabb5fd608d28e2f05"
+            },
+            {
+              "model": "data3d\\mc vojakw2.p3d",
+              "frozen": true,
+              "solver": false,
+              "objectTransform": [
+                1,
+                0,
+                0,
+                5506.65478515625,
+                0,
+                1,
+                0,
+                18.58991813659668,
+                0,
+                0,
+                1,
+                10000.048828125
+              ],
+              "retainedMinimum": [
+                -2.562873363494873,
+                -1.1498867273330688,
+                -1.165135383605957
+              ],
+              "retainedMaximum": [
+                1.3840129375457764,
+                2.08306884765625,
+                1.5468943119049072
+              ],
+              "retainedRadius": 2.644599437713623,
+              "bones": 33,
+              "proxies": 37,
+              "levels": [
+                {
+                  "level": 0,
+                  "points": 1757,
+                  "compared": 1715
+                },
+                {
+                  "level": 1,
+                  "points": 939,
+                  "compared": 913
+                },
+                {
+                  "level": 2,
+                  "points": 767,
+                  "compared": 760
+                },
+                {
+                  "level": 3,
+                  "points": 443,
+                  "compared": 442
+                },
+                {
+                  "level": 4,
+                  "points": 185,
+                  "compared": 185
+                },
+                {
+                  "level": 5,
+                  "points": 1799,
+                  "compared": 1799
+                },
+                {
+                  "level": 6,
+                  "points": 216,
+                  "compared": 216
+                },
+                {
+                  "level": 7,
+                  "points": 19,
+                  "compared": 19
+                },
+                {
+                  "level": 8,
+                  "points": 1,
+                  "compared": 1
+                },
+                {
+                  "level": 9,
+                  "points": 12,
+                  "compared": 12
+                },
+                {
+                  "level": 10,
+                  "points": 332,
+                  "compared": 332
+                }
+              ],
+              "fullResponseSha256": "33a55731b2d4c7ba3fa12695fb153c765c7b2c7259393ecc6ef7045a9bc67717"
+            },
+            {
+              "model": "data3d\\mc vojakw2.p3d",
+              "frozen": true,
+              "solver": false,
+              "objectTransform": [
+                1,
+                0,
+                0,
+                5514.96875,
+                0,
+                1,
+                0,
+                18.96666717529297,
+                0,
+                0,
+                1,
+                10000.18359375
+              ],
+              "retainedMinimum": [
+                -1.3650450706481934,
+                -0.3364217877388,
+                -1.0751477479934692
+              ],
+              "retainedMaximum": [
+                1.7685441970825195,
+                2.7209601402282715,
+                1.7510783672332764
+              ],
+              "retainedRadius": 3.003425121307373,
+              "bones": 33,
+              "proxies": 37,
+              "levels": [
+                {
+                  "level": 0,
+                  "points": 1757,
+                  "compared": 1715
+                },
+                {
+                  "level": 1,
+                  "points": 939,
+                  "compared": 913
+                },
+                {
+                  "level": 2,
+                  "points": 767,
+                  "compared": 760
+                },
+                {
+                  "level": 3,
+                  "points": 443,
+                  "compared": 442
+                },
+                {
+                  "level": 4,
+                  "points": 185,
+                  "compared": 185
+                },
+                {
+                  "level": 5,
+                  "points": 1799,
+                  "compared": 1799
+                },
+                {
+                  "level": 6,
+                  "points": 216,
+                  "compared": 216
+                },
+                {
+                  "level": 7,
+                  "points": 19,
+                  "compared": 19
+                },
+                {
+                  "level": 8,
+                  "points": 1,
+                  "compared": 1
+                },
+                {
+                  "level": 9,
+                  "points": 12,
+                  "compared": 12
+                },
+                {
+                  "level": 10,
+                  "points": 332,
+                  "compared": 332
+                }
+              ],
+              "fullResponseSha256": "1dc2eb6df0abc0ca002c9c420f202ff813d4a138631ef672ebac1116558ff364"
+            },
+            {
+              "model": "data3d\\mc vojakw2.p3d",
+              "frozen": true,
+              "solver": false,
+              "objectTransform": [
+                1,
+                0,
+                0,
+                5520.732421875,
+                0,
+                1,
+                0,
+                18.759201049804688,
+                0,
+                0,
+                1,
+                10000.0048828125
+              ],
+              "retainedMinimum": [
+                -2.3509929180145264,
+                -1.1470937728881836,
+                -1.3944576978683472
+              ],
+              "retainedMaximum": [
+                1.2094943523406982,
+                2.1331398487091064,
+                0.778662621974945
+              ],
+              "retainedRadius": 2.7371013164520264,
+              "bones": 33,
+              "proxies": 37,
+              "levels": [
+                {
+                  "level": 0,
+                  "points": 1757,
+                  "compared": 1715
+                },
+                {
+                  "level": 1,
+                  "points": 939,
+                  "compared": 913
+                },
+                {
+                  "level": 2,
+                  "points": 767,
+                  "compared": 760
+                },
+                {
+                  "level": 3,
+                  "points": 443,
+                  "compared": 442
+                },
+                {
+                  "level": 4,
+                  "points": 185,
+                  "compared": 185
+                },
+                {
+                  "level": 5,
+                  "points": 1799,
+                  "compared": 1799
+                },
+                {
+                  "level": 6,
+                  "points": 216,
+                  "compared": 216
+                },
+                {
+                  "level": 7,
+                  "points": 19,
+                  "compared": 19
+                },
+                {
+                  "level": 8,
+                  "points": 1,
+                  "compared": 1
+                },
+                {
+                  "level": 9,
+                  "points": 12,
+                  "compared": 12
+                },
+                {
+                  "level": 10,
+                  "points": 332,
+                  "compared": 332
+                }
+              ],
+              "fullResponseSha256": "ad6dbe6bf9161424ce9781331f684f965e1ee9b1de383b8eaef343435f11a5a4"
+            }
+          ]
+        }
+      },
+      "captures": [
+        {
+          "name": "initial-0",
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\automatic-ragdoll\\automatic-boot-ak74-center-20261004-042313\\initial-0.png",
+          "sha256": "1c805fe29b3870a0797aa6140e3dbbf19526b2b7a1547eba2cae539fa92ae036",
+          "actorASL": [
+            5500,
+            10000,
+            19.3936
+          ]
+        },
+        {
+          "name": "initial-1",
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\automatic-ragdoll\\automatic-boot-ak74-center-20261004-042313\\initial-1.png",
+          "sha256": "d8ae37a951febb754f6e385ed965eee7472873d2d980cfefecf5b7b75907d6f0",
+          "actorASL": [
+            5507,
+            10000,
+            19.3513
+          ]
+        },
+        {
+          "name": "initial-2",
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\automatic-ragdoll\\automatic-boot-ak74-center-20261004-042313\\initial-2.png",
+          "sha256": "e62f122735b42194da7a24c3459adc8aa7cb8e545959c64b76baf0e2bad1a8ce",
+          "actorASL": [
+            5514,
+            10000,
+            19.7696
+          ]
+        },
+        {
+          "name": "initial-3",
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\automatic-ragdoll\\automatic-boot-ak74-center-20261004-042313\\initial-3.png",
+          "sha256": "de27d44505fb4c4e99cf14ce8de9e03adf59fb2756b2d96fcc41d3b136cbc931",
+          "actorASL": [
+            5521,
+            10000,
+            19.4973
+          ]
+        },
+        {
+          "name": "frozen-0",
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\automatic-ragdoll\\automatic-boot-ak74-center-20261004-042313\\frozen-0.png",
+          "sha256": "1356f04f35970cc841162606552a071ee2d56e58aa37f75b75d1e937050286ab",
+          "actorASL": [
+            5500.18,
+            10000.1,
+            18.7544
+          ]
+        },
+        {
+          "name": "frozen-1",
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\automatic-ragdoll\\automatic-boot-ak74-center-20261004-042313\\frozen-1.png",
+          "sha256": "8459c99ac8169ce15b1dc668ca6de39bfaf1f2b2fa75dabfae88e23b4f6afcd7",
+          "actorASL": [
+            5506.65,
+            10000,
+            18.5899
+          ]
+        },
+        {
+          "name": "frozen-2",
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\automatic-ragdoll\\automatic-boot-ak74-center-20261004-042313\\frozen-2.png",
+          "sha256": "e21e8f42477b9a4f632616b93218c03361805c3ff545a469e1b2d6f1ce1f44e5",
+          "actorASL": [
+            5514.97,
+            10000.2,
+            18.9667
+          ]
+        },
+        {
+          "name": "frozen-3",
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\automatic-ragdoll\\automatic-boot-ak74-center-20261004-042313\\frozen-3.png",
+          "sha256": "40202ab3f340bd1ffc7ea049226e8ef746f0bf481d46901b68bb18d2e94c0143",
+          "actorASL": [
+            5520.73,
+            10000,
+            18.7592
+          ]
+        },
+        {
+          "name": "actual-rifle-death",
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\automatic-ragdoll\\automatic-boot-ak74-center-20261004-042313\\actual-rifle-death.png",
+          "sha256": "ddc94735f8cc44e800175904716e140d84cf0836d94de5a3a8e2a400d4be7c27",
+          "actorASL": [
+            5485.71,
+            10000.1,
+            18.7502
+          ]
+        }
+      ]
+    },
+    {
+      "passed": true,
       "expectedCommit": "3de356cb",
       "installed": {
         "files": [

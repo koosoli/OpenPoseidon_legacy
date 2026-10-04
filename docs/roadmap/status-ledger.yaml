@@ -53,7 +53,7 @@ execution:
     fog_state: EXPERIMENTAL_INSTALLED_CONTROLS_AND_GPU_SAMPLES_PASSED_APPEARANCE_OPEN
     fog_evidence: docs/verification/layered-fog-20261004.md
     fog_runtime_receipt: docs/verification/layered-fog-20261004-runtime.json
-    ragdoll_state: BOUNDED_STOCK_STANDING_SAVE_AND_RUNTIME_TOGGLE_PASSED_RIFLE_PENDING
+    ragdoll_state: BOUNDED_STOCK_STANDING_RIFLE_SAVE_AND_RUNTIME_TOGGLE_PASSED
     ragdoll_evidence: docs/verification/automatic-ragdoll-20261004.md
     ragdoll_runtime_receipt: docs/verification/automatic-ragdoll-20261004-runtime.json
     upstream_state: BOUNDED_PORTS_INTEGRATED_NATIVE_AND_FOUR_INSTALLED_FIXTURES_PASSED
@@ -70,8 +70,9 @@ execution:
       an older compaction validation-order defect. Fog controls and bounded
       GPU samples passed; hard distant contour and default exposure limit
       appearance acceptance. Stock ordinary standing ragdolls, retained poses,
-      actual save/load and the shared dev-panel toggle path passed. Rifle
-      fixture repair remains pending; crouch/prone pose is not established.
+      actual save/load, actual AK74 kill and the shared dev-panel toggle path
+      passed. Missing Eastern centre in the rifle fixture was repaired;
+      crouch/prone pose is not established.
       Both candidates remain experimental and OFF by default. Older ledger
       source hashes outside reviewed slices remain stale and are not silently
       renewed; Preview validator stops at RND-005A, Compat at AST-011C.
