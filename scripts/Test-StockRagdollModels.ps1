@@ -67,6 +67,10 @@ if($SelfTest){
 }
 $census=$null;if($CensusPath){$census=Get-Content -LiteralPath $CensusPath -Raw|ConvertFrom-Json}
 $targets=Targets $census $Classes $Models
+if($CensusPath-and $Classes.Count-eq 0-and $Models.Count-eq 0){
+ Require (@($census.families|Where-Object {$_.PSObject.Properties.Name-notcontains 'assetPresent'}).Count-eq 0) 'Full census requires inspected assetPresent evidence for every family; editor spawnable alone excludes story characters.'
+ Require ($targets.Count-eq 37) 'Full original OFP census must include all37 present model families. Use an explicit subset only for debugging.'
+}
 $null=Num $SiteX;$null=Num $SiteZ
 function Pair{
  $stamp=Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw;Require ($stamp-match [regex]::Escape($ExpectedCommit)) 'Installed source differs.'
@@ -211,7 +215,7 @@ try{
  $near=Send @{cmd='diag_near';pos=@($SiteX,$SiteZ);r=40};Require ($near.count-eq @($near.objects).Count) 'Actual obstacle census truncated.'
  $blockers=@($near.objects|Where-Object{($_.static-or (([int]$_.type-band 3)-ne 0))-and $_.shape-and [Math]::Abs((Num $_.pos[0])-$SiteX)-le (5+(Num $_.radius))-and [Math]::Abs((Num $_.pos[1])-$SiteZ)-le (5+(Num $_.radius))})
  $result.obstacles=@{receipt=$near;blockers=$blockers};Require ($blockers.Count-eq 0) 'Retail obstacle overlaps corpse/projectile fixture.'
- $result.gates.defaultOn=Baseline
+ $result.gates.startupAutomaticOverride=[Environment]::GetEnvironmentVariable('POSEIDON_AUTOMATIC_RAGDOLL','Process');$result.gates.defaultOn=Baseline
  $registrations=@(Select-String -LiteralPath $log -Pattern 'AUTORAGDOLL: registered shared actual terrain'|ForEach-Object{$_.Line})
  Require ($registrations.Count-eq 1-and (Select-String -LiteralPath $log -Pattern 'AUTORAGDOLL: mission terrain preparation ready=(true|1)' -Quiet)) 'Shared actual terrain was not prepared before first damage.'
  $result.gates.sharedTerrain=$registrations;$seenActual=@{}
