@@ -103,8 +103,21 @@ try{
   $stream=$client.GetStream();$stream.ReadTimeout=30000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
   $until=[DateTime]::UtcNow.AddSeconds(120);while((Eval 'triSceneReady') -cne 'OK'){Require ([DateTime]::UtcNow -lt $until) 'Scene-ready deadline.';Start-Sleep -Milliseconds 300}
   Exec ('player allowDamage false;0 setRain 0;0 setOvercast 0;0 setFog '+(Fmt $arm.fog)+';setDate [1985,6,21,12,0];setAccTime 1')
-  $until=[DateTime]::UtcNow.AddSeconds(30)
-  do{$weather=Send @{cmd='weather_visibility'};if([Math]::Abs((Num $weather.fog)-$arm.fog) -gt .001 -or (Num $weather.overcast) -gt .001){Require ([DateTime]::UtcNow -lt $until) 'Actual weather did not settle.';Start-Sleep -Milliseconds 300}else{break}}while($true)
+  # Weather setters and visibility-range updates run at distinct engine boundaries.
+  # Observe actual rendered progress and consecutive stable range samples before
+  # freezing; later cross-arm range equality remains mandatory.
+  $settleStart=Send @{cmd='query';what='play_state'}
+  $until=[DateTime]::UtcNow.AddSeconds(30);$priorWeather=$null;$stableWeather=0
+  do{
+   Require ([DateTime]::UtcNow -lt $until) 'Actual weather/ranges did not settle.'
+   $weather=Send @{cmd='weather_visibility'};$settleNow=Send @{cmd='query';what='play_state'}
+   $matches=[Math]::Abs((Num $weather.fog)-$arm.fog) -lt .001 -and (Num $weather.overcast) -lt .001 -and (Num $weather.rain) -lt .001
+   $rangesStable=$null -ne $priorWeather
+   if($rangesStable){foreach($range in @('terrainRange','baseRange','objectRange','tacticalVisibility')){if([Math]::Abs((Num $weather.$range)-(Num $priorWeather.$range)) -ge .001){$rangesStable=$false}}}
+   if($matches -and $rangesStable -and (Frame-Advance $settleStart.frame $settleNow.frame) -ge 30){$stableWeather++}else{$stableWeather=0}
+   $priorWeather=$weather
+   if($stableWeather -ge 3){break};Start-Sleep -Milliseconds 300
+  }while($true)
   Exec 'setAccTime 0'
   $source=Send @{cmd='dev_cave_editor';action='state';x=$X;z=$Z;y=1000}
   Require ($source.worldName.Replace('\','/').ToLowerInvariant() -match '(^|/)eden\.wrp$' -and $source.count -eq 0) 'Not untouched original Everon.'

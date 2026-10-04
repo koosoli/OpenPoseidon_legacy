@@ -158,7 +158,13 @@ receipt placeholders and the sole WEST centre exposed the cause: `createGroup
 east` returns null without an EAST centre. The fixture now calls `createCenter
 east` first, initialises the shooter to objNull and independently proves its live
 stock type, position, actual AK74 and ammunition before collecting arrays. Rifle
-acceptance remains pending a genuine projectile kill in the matching build.
+acceptance was subsequently established in matching installed `7d5c1e92`: the
+verified live Eastern AK74 shooter fired five actual shots, killed the stock
+Western target, and produced the fifth automatic frozen corpse. The runtime
+owner inspected that retained corpse; normal shutdown and deletion cleanup
+passed with zero solver handles. No artificial damage command was used in the
+rifle arm. See `docs/verification/automatic-ragdoll-20261004.md` and its curated
+runtime receipt for the exact author-run evidence.
 
 The requested MIDDLE campaign is not crouched acceptance: its actual initial CPU
 consumer points match the UP fixture exactly. Requested stance does not prove the
