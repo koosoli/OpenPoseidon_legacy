@@ -1494,6 +1494,9 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
             vertices[state->boneParts[weight[0].GetSel()]].push_back(PositionModelToWorld(AnimatePoint(fire,index)));
         }
     }
+    float pelvisFireMinimum=std::numeric_limits<float>::infinity(),pelvisSkinMinimum=pelvisFireMinimum;
+    for (const auto& point:vertices[0])
+        pelvisFireMinimum=std::min(pelvisFireMinimum,point.Y()-GLandscape->RoadSurfaceY(point+VUp*.5f));
     for (int vertex = 0; vertex < graphical->NPos(); ++vertex)
     {
         const auto& weight = weights[0][vertex]; bool pelvis = false, proxy = false;
@@ -1503,7 +1506,12 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
         for (int s = 0; s < graphical->NNamedSel(); ++s)
             if (std::strncmp(graphical->NamedSel(s).Name(), "proxy:", 6) == 0 &&
                 graphical->NamedSel(s).IsSelected(vertex)) { proxy = true; break; }
-        if (!proxy) vertices[0].push_back(PositionModelToWorld(AnimatePoint(0,vertex)));
+        if (!proxy)
+        {
+            const Vector3 point=PositionModelToWorld(AnimatePoint(0,vertex));
+            pelvisSkinMinimum=std::min(pelvisSkinMinimum,point.Y()-GLandscape->RoadSurfaceY(point+VUp*.5f));
+            vertices[0].push_back(point);
+        }
     }
     const float masses[] = {12,24,5,3,2,3,2,8,4,8,4};
     state->minimumClearance = 1000;
@@ -1522,6 +1530,18 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
         center *= 1.0f / vertices[part].size();
         if (part == 0)
         {
+            float actualMinimum=std::numeric_limits<float>::infinity();
+            for (const auto& point:vertices[0])
+                actualMinimum=std::min(actualMinimum,point.Y()-GLandscape->RoadSurfaceY(point+VUp*.5f));
+            float cornersMinimum=std::numeric_limits<float>::infinity();
+            for (int corner=0;corner<8;++corner)
+            {
+                const Vector3 point((corner&1)?hi.X():lo.X(),(corner&2)?hi.Y():lo.Y(),(corner&4)?hi.Z():lo.Z());
+                cornersMinimum=std::min(cornersMinimum,point.Y()-GLandscape->RoadSurfaceY(point+VUp*.5f));
+            }
+            if (_automaticCorpsePose)
+                LOG_INFO(World,"CORPSEFIT: pelvis-source model={} vertices={} actualMinimum={} fireMinimum={} skinMinimum={} generatedAabbMinimum={} rootY={} sourceBoundsY=({},{}) actualPoseUnchanged=1",
+                    _shape->Name(),vertices[0].size(),actualMinimum,pelvisFireMinimum,pelvisSkinMinimum,cornersMinimum,Position().Y(),lo.Y(),hi.Y());
             vertices[0].clear();
             for (int corner = 0; corner < 8; ++corner)
                 vertices[0].emplace_back((corner&1)?hi.X():lo.X(), (corner&2)?hi.Y():lo.Y(), (corner&4)?hi.Z():lo.Z());
@@ -1875,6 +1895,8 @@ void Man::QueueAutomaticRagdoll()
     _automaticCorpsePose->collisionFamily = -slot-2;
     g_automaticCorpses.emplace_back(this);
     g_corpsePoseOwner = this; // diagnostic selection only; previous corpse stays owned
+    LOG_INFO(World,"AUTORAGDOLL: source posture primary={} secondary={} factor={} primaryTime={} upDegree={}",
+        int(_primaryMove.id),int(_secondaryMove.id),_primaryFactor,_primaryTime,GetActUpDegree());
     LOG_INFO(World,"AUTORAGDOLL: captured actual death owner={} family={} levels={} model={} speed=({},{},{}) angular=({},{},{}) corrections=({},{},{})",
         static_cast<const void*>(this),-slot-2,_automaticCorpsePose->levels.size(),_shape->Name(),Speed().X(),Speed().Y(),Speed().Z(),
         AngVelocity().X(),AngVelocity().Y(),AngVelocity().Z(),CorpseMatrixIdentityError(_headTrans),
@@ -1892,7 +1914,16 @@ bool Man::BeginAutomaticRagdoll(RString& refusal)
     if (!_automaticCorpsePose->initialSpeed.IsFinite() || !_automaticCorpsePose->initialAngularVelocity.IsFinite() ||
         _automaticCorpsePose->initialSpeed.Size() > 15 || _automaticCorpsePose->initialAngularVelocity.Size() > 20)
     { refusal = "inherited-death-motion-outside-bounded-admission"; return false; }
-    if (!StartCorpseArticulation(refusal,true)) return false;
+    if (!StartCorpseArticulation(refusal,true))
+    {
+        if (std::strcmp(refusal,"measured-anatomical-hinge-frame-not-admitted")!=0) return false;
+        LOG_INFO(World,"AUTORAGDOLL: model={} jointMode=spherical reason={} actualLivePoseRetained=1 physicalJointAnchorGatesUnchanged=1",
+            _shape->Name(),refusal.Data());
+        // A valid authored stance can lack a safe hinge plane/angle. Retry the
+        // existing constrained spherical control, including ALL source-anchor,
+        // geometry/contact/bounds admission; never expand hinge safety limits.
+        if (!StartCorpseArticulation(refusal,false)) return false;
+    }
     _automaticCorpsePose->pending = false;
     _impulseForce = _impulseTorque = VZero;
     _whenKilled = Glob.time; _lastMovementTime = Glob.time;

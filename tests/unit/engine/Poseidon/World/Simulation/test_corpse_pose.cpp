@@ -877,3 +877,46 @@ TEST_CASE("Actual articulated limb rifle response conserves resolved projectile 
     CHECK((readback.position-transform.Position()).Size()<.0001f);
     backend->RemoveBody(body); CHECK(backend->GetStats().articulatedBodies==0); backend->Destroy();
 }
+
+TEST_CASE("Rejected authored hinge extension retains pose in constrained spherical control", "[physics][articulation][corpse-stance-fallback]")
+{
+    using namespace Poseidon::Physics;
+    const Vector3 proximal(0,.2f,0),joint=VZero,distal(0,-.2f,0),forward(0,0,1);
+    const Matrix4 proximalAffine=MIdentity,distalAffine(MRotationX,-.2427f);
+    const Matrix4 originalDistal=distalAffine;
+    CorpseHingeMeasurement hinge;
+    REQUIRE_FALSE(CorpseMeasureHinge(proximal,joint,distal,forward,proximalAffine,distalAffine,true,hinge));
+    CHECK(std::string_view(hinge.refusal)=="captured-bend-outside-policy");
+    CHECK(std::memcmp(&distalAffine,&originalDistal,sizeof(Matrix4))==0);
+    auto backend=CreatePhysicsBackend(); REQUIRE(backend); REQUIRE(backend->Create());
+    const Vector3 points[]={{-.05f,-.05f,-.05f},{.05f,-.05f,-.05f},{-.05f,.05f,-.05f},{.05f,.05f,-.05f},
+        {-.05f,-.05f,.05f},{.05f,-.05f,.05f},{-.05f,.05f,.05f},{.05f,.05f,.05f}};
+    const ConvexPiece piece{points,8,ColliderFlags::Solid};
+    const Vector3 pivot(0,100,0);
+    Matrix4 parent=MIdentity,child=MIdentity;
+    parent.SetPosition(pivot+proximal); child.SetPosition(pivot+distalAffine.Rotate(distal));
+    const auto first=backend->SpawnArticulatedPiece(piece,parent,2);
+    const auto second=backend->SpawnArticulatedPiece(piece,child,2);
+    REQUIRE(first.IsValid()); REQUIRE(second.IsValid());
+    const Vector3 axis=(child.Position()-pivot).Normalized();
+    Matrix4 frame(MDirection,axis,VAside); frame.SetPosition(pivot);
+    ArticulatedJointDef definition; definition.first=first; definition.second=second;
+    definition.firstFrame=parent.InverseRotation()*frame; definition.secondFrame=child.InverseRotation()*frame;
+    definition.coneAngle=.30f; definition.twistAngle=.20f;
+    const auto constraint=backend->AddArticulatedJoint(definition); REQUIRE(constraint.IsValid());
+    BodyMotion beforeFirst,beforeSecond;
+    REQUIRE(backend->GetBodyMotion(first,beforeFirst)); REQUIRE(backend->GetBodyMotion(second,beforeSecond));
+    CHECK(beforeFirst.position==parent.Position()); CHECK(beforeSecond.position==child.Position());
+    backend->ApplyImpulse(second,child.Position(),Vector3(.2f,0,0));
+    for (int step=0;step<30;++step) backend->Step(1.f/60);
+    BodyMotion afterFirst,afterSecond;
+    REQUIRE(backend->GetBodyMotion(first,afterFirst)); REQUIRE(backend->GetBodyMotion(second,afterSecond));
+    CHECK(afterFirst.position.IsFinite()); CHECK(afterSecond.position.IsFinite());
+    CHECK(afterFirst.linearVelocity.Size()<15); CHECK(afterSecond.linearVelocity.Size()<15);
+    CHECK(afterFirst.angularVelocity.Size()<20); CHECK(afterSecond.angularVelocity.Size()<20);
+    CHECK((afterSecond.position-afterFirst.position).Size()<.6f);
+    CHECK((afterSecond.position-beforeSecond.position).Size()>.01f);
+    backend->RemoveJoint(constraint); backend->RemoveBody(first); backend->RemoveBody(second);
+    CHECK(backend->GetStats().articulatedBodies==0); CHECK(backend->GetStats().articulatedJoints==0);
+    backend->Destroy();
+}

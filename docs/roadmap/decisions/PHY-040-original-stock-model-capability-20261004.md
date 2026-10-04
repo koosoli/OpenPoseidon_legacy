@@ -151,3 +151,26 @@ actual Box3D 2 kg limb: the assumed 4 g round at 800 m/s yields 0.96 m/s and
 safety limit is changed. Source syntax checks pass; installed player-Fired hit,
 ownership, measured response and safe resettlement remain required. The fallback
 mass is labelled an existing assumption, not a measured mass for every cartridge.
+
+## Owner editor posture refusals
+
+Read-only owner logs from 17:17, 17:41 and 17:52 show real fresh-death capture,
+not a model whitelist or missing dead-bullet collision problem. Six Western
+captures in the first session all refused initial terrain overlap; the second
+session's Russian refused pelvis overlap and civilian refused a captured knee
+angle. The Western corpse in that second session did activate and receive 23
+real impulses, including five wakes; later excessive legacy rifle torques were
+refused by the existing motion guard. The source log paths stay local only.
+
+Automatic deaths now retry the existing constrained spherical control only
+when measured anatomical hinge admission fails. Every physical source-anchor,
+geometry, floor/contact, bounds and solver gate is re-run unchanged. The original
+hinge refusal is logged. Explicit diagnostic hinge controls are unchanged. A
+native case refuses a captured extension outside hinge policy, retains that
+capture unchanged and proves actual constrained spherical creation, impulse,
+finite bounded movement and complete cleanup: 24 assertions pass.
+
+New read-only source posture and pelvis measurements distinguish pooled Fire,
+weighted graphical skin and generated world-AABB ground clearances. No collider
+shape, visible root, support depth or whole-pose lift is changed pending actual
+source evidence. Installed stationary editor stance qualification remains open.
