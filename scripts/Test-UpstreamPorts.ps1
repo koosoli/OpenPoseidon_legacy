@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
  [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{8,40}$')][string]$ExpectedCommit,
- [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault'
+ [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
+ [string]$DataDir='D:/SteamLibrary/steamapps/common/Arma Cold War Assault Demo'
 )
 $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
@@ -13,6 +14,7 @@ function Pair {
 }
 Require ([bool]$env:LOCK_OWNER) 'Run through scripts/with-game-lock.sh.'
 Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue)) 'Existing owner session is preserved.'
+Require (Test-Path -LiteralPath (Join-Path $DataDir 'demo/demo.wrp')) 'Imported Demo fixtures require installed Demo data; no data is downloaded.'
 $before=Pair
 $out=Join-Path $root ('build/upstream-runtime/'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
 New-Item -ItemType Directory -Force $out|Out-Null
@@ -24,7 +26,7 @@ $keys=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER
  'POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_DEPTH','POSEIDON_SNOW_TEST_FLAKES',
  'WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','POSEIDON_AUTOMATIC_RAGDOLL','POSEIDON_LOD_FIX')
 $saved=@{};foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
-$result=[ordered]@{passed=$false;installed=$before;scriptSha256=(Get-FileHash $PSCommandPath).Hash;fixtures=@();scope='Serial imported gameplay fixtures on matched installed pair, isolated Trident profiles; no full multiplayer, Linux or all-map certification.'}
+$result=[ordered]@{passed=$false;installed=$before;dataDirectory=$DataDir;scriptSha256=(Get-FileHash $PSCommandPath).Hash;fixtures=@();scope='Serial imported gameplay fixtures on matched installed executable/renderer with existing Demo data, isolated Trident profiles; no full multiplayer, Linux or all-map certification.'}
 $p=$null
 try {
  foreach($key in $keys){[Environment]::SetEnvironmentVariable($key,$null,'Process')}
@@ -35,6 +37,7 @@ try {
   $caseOut=Join-Path $out $name;New-Item -ItemType Directory -Force $caseOut|Out-Null
   $log=Join-Path $caseOut 'engine.log'
   $arguments=@('test',('"'+$fixture+'"'),'--game-dir',('"'+$GameDir+'"'),
+   '--data-dir',('"'+$DataDir+'"'),
    '--render','wgpu','--jobs','1','--retries','0','--output-dir',('"'+$caseOut+'"'),
    '--game-arg','--log-file','--game-arg',('"'+$log+'"'))
   $p=Start-Process (Join-Path $root 'target/debug/tri.exe') -WorkingDirectory $root -WindowStyle Hidden -ArgumentList $arguments -RedirectStandardOutput (Join-Path $caseOut 'tri.stdout') -RedirectStandardError (Join-Path $caseOut 'tri.stderr') -PassThru
