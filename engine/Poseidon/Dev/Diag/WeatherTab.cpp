@@ -879,14 +879,14 @@ void DrawFogSection()
         changed = true;
     }
     ImGui::TextWrapped("Volumetric fog is the default. Weather fog scales its density; zero fog adds no layered volume. Terrain following and patchiness make the mist vary across the landscape.");
+    float ground = 0.0f;
+    if (GScene && GScene->GetCamera() && GLandscape)
+    {
+        const Vector3 camera = GScene->GetCamera()->Position();
+        ground = GLandscape->SurfaceY(camera.X(), camera.Z());
+    }
     if (settings.layeredFog)
     {
-        float ground = 0.0f;
-        if (GScene && GScene->GetCamera() && GLandscape)
-        {
-            const Vector3 camera = GScene->GetCamera()->Position();
-            ground = GLandscape->SurfaceY(camera.X(), camera.Z());
-        }
         if (ImGui::Button("Low ground fog"))
         {
             settings.fogTerrainFollow = 1.0f;
@@ -953,7 +953,75 @@ void DrawFogSection()
             settings.fogPatchStrength = 0.5f;
             changed = true;
         }
+        ImGui::SameLine();
+        if (ImGui::Button("Compact mist band"))
+        {
+            settings.fogTerrainFollow = 1.0f;
+            settings.fogTerrainReference = 0.0f;
+            settings.fogLayerBase[0] = 1.0f;
+            settings.fogLayerTop[0] = 5.0f;
+            settings.fogLayerFeather[0] = 0.35f;
+            settings.fogLayerExtinction[0] = 0.018f;
+            settings.fogLayerExtinction[1] = 0.0f;
+            settings.fogValleyStrength = 1.0f;
+            settings.fogPatchStrength = 0.35f;
+            changed = true;
+        }
         ImGui::TextDisabled("Valley/mountain presets anchor altitude to this location once; terrain and patches vary in world space.");
+        ImGui::SeparatorText("Mist height and thickness");
+        int reference = settings.fogTerrainFollow == 0.0f ? 0 :
+            settings.fogTerrainFollow == 1.0f && settings.fogTerrainReference == 0.0f ? 1 : 2;
+        if (ImGui::Combo("Height reference", &reference, "Sea level (ASL)\0Above local ground\0Terrain blend\0"))
+        {
+            // Keep the visible band at this camera when changing coordinates.
+            const float oldShift = settings.fogTerrainFollow * (ground - settings.fogTerrainReference);
+            settings.fogTerrainFollow = reference == 0 ? 0.0f : reference == 1 ? 1.0f : 0.5f;
+            settings.fogTerrainReference = 0.0f;
+            const float newShift = settings.fogTerrainFollow * ground;
+            for (int i = 0; i < 2; ++i)
+            {
+                settings.fogLayerBase[i] += oldShift - newShift;
+                settings.fogLayerTop[i] += oldShift - newShift;
+            }
+            changed = true;
+        }
+        ImGui::TextWrapped(reference == 1 ? "Bottom/top are metres above the local ground. The band follows hills." :
+            reference == 0 ? "Bottom/top are metres above sea level. Mountains intersect the fixed mist band." :
+            "Heights use the blended terrain reference. This location's actual altitude range is shown below; adjust terrain following in the advanced controls.");
+        for (int i = 0; i < 2; ++i)
+        {
+            ImGui::PushID(i);
+            ImGui::Text("Mist layer %d", i + 1);
+            bool enabled = settings.fogLayerExtinction[i] > 0.0f;
+            if (ImGui::Checkbox("Enabled", &enabled))
+            {
+                settings.fogLayerExtinction[i] = enabled ? (i == 0 ? 0.008f : 0.003f) : 0.0f;
+                changed = true;
+            }
+            bool bandChanged = false;
+            bandChanged |= ImGui::SliderFloat("Bottom height", &settings.fogLayerBase[i], -100.0f, 2500.0f, "%.2f m", ImGuiSliderFlags_AlwaysClamp);
+            bandChanged |= ImGui::SliderFloat("Top height", &settings.fogLayerTop[i], -99.75f, 3000.0f, "%.2f m", ImGuiSliderFlags_AlwaysClamp);
+            if (bandChanged) settings.fogLayerTop[i] = std::max(settings.fogLayerTop[i], settings.fogLayerBase[i] + 0.25f);
+            float thickness = settings.fogLayerTop[i] - settings.fogLayerBase[i];
+            if (ImGui::SliderFloat("Mist thickness", &thickness, 0.25f, 500.0f, "%.2f m", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp))
+            {
+                settings.fogLayerTop[i] = settings.fogLayerBase[i] + thickness;
+                bandChanged = true;
+            }
+            if (bandChanged)
+            {
+                settings.fogLayerFeather[i] = std::min(settings.fogLayerFeather[i], 0.5f * (settings.fogLayerTop[i] - settings.fogLayerBase[i]));
+                changed = true;
+            }
+            changed |= ImGui::SliderFloat("Edge softness", &settings.fogLayerFeather[i], 0.1f,
+                std::max(0.1f, std::min(100.0f, 0.5f * (settings.fogLayerTop[i] - settings.fogLayerBase[i]))), "%.2f m", ImGuiSliderFlags_AlwaysClamp);
+            changed |= ImGui::SliderFloat("Fog density", &settings.fogLayerExtinction[i], 0.0f, 0.05f, "%.4f /m");
+            const float shift = settings.fogTerrainFollow * (ground - settings.fogTerrainReference);
+            ImGui::TextDisabled("Here: %.2f to %.2f m ASL; thickness %.2f m", settings.fogLayerBase[i] + shift,
+                settings.fogLayerTop[i] + shift, settings.fogLayerTop[i] - settings.fogLayerBase[i]);
+            ImGui::PopID();
+        }
+        ImGui::TextWrapped("For a compact bank, disable the second layer, reduce thickness and edge softness, then increase density. Ctrl+click a slider to type a precise height.");
         if (GWorld && GWorld->GetFog() <= 0.0f)
             ImGui::TextDisabled("Set Fog amount above zero to see a layer.");
     }
@@ -970,17 +1038,6 @@ void DrawFogSection()
         changed |= ImGui::SliderFloat("Coverage edge softness", &settings.fogCoverageFeather, 0.0f, 100.0f, "%.0f m");
         changed |= ImGui::SliderFloat("Scattering albedo", &settings.fogLayerAlbedo, 0.0f, 1.0f, "%.3f");
         changed |= ImGui::SliderFloat("Forward scattering", &settings.fogLayerG, 0.0f, 0.95f, "%.3f");
-        for (int i = 0; i < 2; ++i)
-        {
-            ImGui::PushID(i);
-            ImGui::Text("Layer %d", i + 1);
-            changed |= ImGui::SliderFloat("Base height", &settings.fogLayerBase[i], -100.0f, 1000.0f, "%.1f m");
-            changed |= ImGui::SliderFloat("Top height", &settings.fogLayerTop[i], -99.0f, 1000.0f, "%.1f m");
-            ImGui::TextDisabled("Layer thickness: %.1f m", settings.fogLayerTop[i] - settings.fogLayerBase[i]);
-            changed |= ImGui::SliderFloat("Edge feather", &settings.fogLayerFeather[i], 0.1f, 100.0f, "%.1f m");
-            changed |= ImGui::SliderFloat("Extinction", &settings.fogLayerExtinction[i], 0.0f, 0.05f, "%.4f /m");
-            ImGui::PopID();
-        }
         ImGui::TextWrapped("Physical sky lighting and current terrain/roof coverage are required. Covered ray segments are excluded. Invalid intervals or overlap with the cloud deck refuse the layer effect.");
         ImGui::TreePop();
     }
