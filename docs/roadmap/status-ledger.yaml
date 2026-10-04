@@ -116,6 +116,24 @@ execution:
       source hashes outside reviewed slices remain stale and are not silently
       renewed; Preview validator stops at RND-005A, Compat at AST-011C.
   review_model: OWNER_REVIEW_NO_INDEPENDENT_REVIEWER
+  stress_corpse_cache_checkpoint:
+    branch: codex/stress-corpse-cache-20261004
+    baseline_commit: 793d7b96
+    source_commit: 2c396217
+    installed_source_commit: f8127fe5
+    state: BUILT_NATIVE_PASSED_WAITING_FOR_INSTALLED_TEST
+    evidence: docs/verification/stress-corpse-cache-20261004.md
+    cache_source_evidence: docs/verification/lockcache-runtime-flush-20261004.md
+    note: >-
+      Exact mission census708 units:650SoldierEB/57OfficerE/1SoldierWB. Three
+      Western-model gates exclude707 Eastern units; defaultON does not imply
+      general model coverage. Four active/64 retained are separate limits.
+      Eastern rigs audited offline, not admitted or runtime-qualified. Live
+      path-lock lifetime defect fixed: terrain flush retains nonempty occupancy.
+      Combined17-step build/native1200 assertions5cases passed. Source safety
+      pushed; not installed while owner-handoff process5104 remains running.
+      Explicit game-close request pending. Exact installed mission/crater/AI
+      unlock acceptance remains; old sourcef8127fe5 still installed.
   fog_terrain_dec_followup_checkpoint:
     branch: codex/fog-terrain-dec-followup-20261004
     baseline_commit: 8479c6f3
