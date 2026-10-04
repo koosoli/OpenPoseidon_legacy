@@ -88,7 +88,7 @@ bool AIGroup::CommandSent(bool channelCenter)
         AI_ERROR(dynamic_cast<RadioMessageCommand*>(msg));
         RadioMessageCommand* msgCmd = static_cast<RadioMessageCommand*>(msg);
         AI_ERROR(msgCmd);
-        AI_ERROR(msgCmd->GetFrom() == this);
+        ReportForeignRadioCommand(msgCmd->GetFrom() == this, channelCenter);
         if (msgCmd->IsToMainSubgroup())
         {
             return true;
@@ -102,7 +102,7 @@ bool AIGroup::CommandSent(bool channelCenter)
         AI_ERROR(dynamic_cast<RadioMessageCommand*>(msg));
         RadioMessageCommand* msgCmd = static_cast<RadioMessageCommand*>(msg);
         AI_ERROR(msgCmd);
-        AI_ERROR(msgCmd->GetFrom() == this);
+        ReportForeignRadioCommand(msgCmd->GetFrom() == this, channelCenter);
         if (msgCmd->IsToMainSubgroup())
         {
             return true;
@@ -155,7 +155,7 @@ bool AIGroup::CommandSent(Command::Message message, bool channelCenter)
         AI_ERROR(dynamic_cast<RadioMessageCommand*>(msg));
         RadioMessageCommand* msgCmd = static_cast<RadioMessageCommand*>(msg);
         AI_ERROR(msgCmd);
-        AI_ERROR(msgCmd->GetFrom() == this);
+        ReportForeignRadioCommand(msgCmd->GetFrom() == this, channelCenter);
         if (msgCmd->GetCmdMessage() == message)
         {
             return true;
@@ -168,7 +168,7 @@ bool AIGroup::CommandSent(Command::Message message, bool channelCenter)
         AI_ERROR(dynamic_cast<RadioMessageCommand*>(msg));
         RadioMessageCommand* msgCmd = static_cast<RadioMessageCommand*>(msg);
         AI_ERROR(msgCmd);
-        AI_ERROR(msgCmd->GetFrom() == this);
+        ReportForeignRadioCommand(msgCmd->GetFrom() == this, channelCenter);
         if (msgCmd->GetCmdMessage() == message)
         {
             return true;
