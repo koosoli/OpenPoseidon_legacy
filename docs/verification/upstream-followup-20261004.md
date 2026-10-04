@@ -71,7 +71,13 @@ ValidateOutVehicle assertion. Source review proved the same ordering defect in
 the earlier port base: stable compaction retained moved actors in the normal
 list tail until Resize, while validating their absence before Resize. `b979acc9`
 defers the same guard until after compaction, preserving callback and reference
-ownership. Its installed Turbo rerun and notebook fixture remain pending.
+ownership. The installed `cdf0dba3` rerun passed all four fixtures, including
+Turbo and ordered notebook hover audio. Each owned game reported normal
+shutdown, no GPU/unhandled exception, and the executable/renderer hashes stayed
+unchanged. Receipt: `upstream-followup-20261004-runtime.json`, copied from
+`build/upstream-runtime/20261004-034045/result.json`. Existing Demo assets were
+used with the matching retail executable/renderer; no assets were installed or
+downloaded. These bounded fixtures do not certify every port's gameplay domain.
 
 Additional decoder preservation: 49 cases passed, 5,784 assertions, two
 explicit opt-in skips. Fresh `WGR_PAA_LZO_REPLAY_CACHE=1`: all five replay

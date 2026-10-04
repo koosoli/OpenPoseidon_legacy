@@ -1,0 +1,46 @@
+{
+  "passed": true,
+  "installed": {
+    "stamp": "codex/modernisation-followup-20261004 cdf0dba3 2026-10-04_03:38 deploy-ps1\r\n",
+    "exe": "B543271D45A1E13C5D321E041B7F00460076A274976698FA51139421935484F9",
+    "dll": "63DD5DE77CF6C1BEC9C2B6165B0ECF01299C9837E30D4F465B51AA987ACFDE4D"
+  },
+  "dataDirectory": "D:/SteamLibrary/steamapps/common/Arma Cold War Assault Demo",
+  "scriptSha256": "47B9C9BD0C812F0F96EC12D78145C639CB56F155DD61BFF8D089C89D32189351",
+  "fixtures": [
+    {
+      "output": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\upstream-runtime\\20261004-034045\\drop_particle_height.test",
+      "engineLogSha256": "10A6751C2A51AD03D8C24AE5685A146DDACA32F505D6485AB8AB0306B8DB1FD3",
+      "sha256": "0FE0F69C0920DE41306AAFA5548F143D63726E2A8D688A53BE30CD6E54D50885",
+      "exitCode": 0,
+      "path": "tests/integration/scripting/drop_particle_height.test.sqf"
+    },
+    {
+      "output": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\upstream-runtime\\20261004-034045\\fired_nearest_object.test",
+      "engineLogSha256": "BECE6D1722E14A70B68DDF819F8188BCFC05B38D634DDCADEBFF097F9C896502",
+      "sha256": "01D5D573400655384F3CBAC3FADC681B92127A6614C81D9F0B09FA964142FDB9",
+      "exitCode": 0,
+      "path": "tests/integration/scripting/fired_nearest_object.test.sqf"
+    },
+    {
+      "output": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\upstream-runtime\\20261004-034045\\vehicle_turbo.test",
+      "engineLogSha256": "6C0CF4BB643C88233E7FC48BC8FA9D1D93939796316156B204D2376F9A4B3E8B",
+      "sha256": "9004C2C6D314160CD43E87DC5D6135D354DF2BD3177276E884B849377AD8CD2D",
+      "exitCode": 0,
+      "path": "tests/integration/ingame/vehicles/vehicle_turbo.test.sqf"
+    },
+    {
+      "output": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\upstream-runtime\\20261004-034045\\animated_notebook_hover_audio.test",
+      "engineLogSha256": "7E74045B28204CD0E4228ED7E0C073E849A436CDFD0767DB438AA624580DD2D8",
+      "sha256": "7A60ED2D2E94B3A2447A7B3A4B1A833E92745CF9FE15AA3452C28BD6A7322C46",
+      "exitCode": 0,
+      "path": "tests/integration/ui/main_menu/animated_notebook_hover_audio.test.sqf"
+    }
+  ],
+  "scope": "Serial imported gameplay fixtures on matched installed executable/renderer with existing Demo data, isolated Trident profiles; no full multiplayer, Linux or all-map certification.",
+  "after": {
+    "stamp": "codex/modernisation-followup-20261004 cdf0dba3 2026-10-04_03:38 deploy-ps1\r\n",
+    "exe": "B543271D45A1E13C5D321E041B7F00460076A274976698FA51139421935484F9",
+    "dll": "63DD5DE77CF6C1BEC9C2B6165B0ECF01299C9837E30D4F465B51AA987ACFDE4D"
+  }
+}
