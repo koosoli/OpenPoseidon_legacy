@@ -712,6 +712,9 @@ class Man: public Person
 
     void ClearCorpsePose() const;
     static RString CorpsePoseProbe(const char* command);
+    static bool AutomaticInfantryDeathsEnabled();
+    // Controls NEW admission only; existing active/frozen owners retain their pose.
+    static void SetAutomaticInfantryDeathsEnabled(bool enabled);
     static bool GetCorpsePoseDiagnostic(CorpsePoseDiagnostic& result, RString& refusal);
 
 	

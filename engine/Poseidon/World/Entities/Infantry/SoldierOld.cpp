@@ -739,9 +739,11 @@ Physics::PhysicsWorld* g_corpsePreparedWorld = nullptr;
 std::uint64_t g_corpsePreparedEpoch = 0, g_corpsePreparedTerrainSerial = 0;
 float g_corpsePreparedOriginX = 0, g_corpsePreparedOriginZ = 0;
 std::vector<OLink<Man>> g_automaticCorpses;
+int g_automaticInfantryDeathsOverride = -1;
 
 bool AutomaticRagdollEnabled()
 {
+    if (g_automaticInfantryDeathsOverride >= 0) return g_automaticInfantryDeathsOverride != 0;
     const char* enabled = std::getenv("POSEIDON_AUTOMATIC_RAGDOLL");
     return enabled && std::strcmp(enabled,"0") != 0;
 }
@@ -780,6 +782,14 @@ bool AutomaticRagdollTerrain(RString& refusal)
         std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-began).count());
     return true;
 }
+}
+
+bool Man::AutomaticInfantryDeathsEnabled() { return AutomaticRagdollEnabled(); }
+
+void Man::SetAutomaticInfantryDeathsEnabled(bool enabled)
+{
+    g_automaticInfantryDeathsOverride = enabled ? 1 : 0;
+    LOG_INFO(World,"AUTORAGDOLL: runtime new-death admission enabled={} existingOwnersRetained=1",enabled);
 }
 
 void Man::ClearCorpsePose() const
@@ -2068,6 +2078,12 @@ bool Man::CorpseArticulationBounds(Vector3* minMax, float& radius) const
 RString Man::CorpsePoseProbe(const char* command)
 {
     if (!command) return "REFUSED corpse-command missing";
+    if (std::strcmp(command,"corpse-auto-enable") == 0 || std::strcmp(command,"corpse-auto-disable") == 0)
+    {
+        if (!GWorld || GWorld->GetMode() != GModeArcade) return "REFUSED corpse-auto-toggle local-single-player-required";
+        SetAutomaticInfantryDeathsEnabled(std::strcmp(command,"corpse-auto-enable") == 0);
+        return "OK corpse-auto-toggle existing-owners-retained";
+    }
     if (std::strcmp(command,"corpse-auto-status") == 0)
     {
         int active = 0, frozen = 0, pending = 0;

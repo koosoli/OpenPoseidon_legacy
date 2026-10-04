@@ -6,7 +6,7 @@ param(
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [double]$SiteX=5500,[double]$SiteZ=10000,
  [ValidateSet('UP','MIDDLE','DOWN')][string]$Stance='UP',
- [switch]$RifleDeath,[switch]$SaveLoad
+ [switch]$RifleDeath,[switch]$SaveLoad,[switch]$RuntimeToggle
 )
 $ErrorActionPreference='Stop';$taskRoot=Split-Path -Parent $PSScriptRoot
 $culture=[Globalization.CultureInfo]::InvariantCulture
@@ -23,6 +23,7 @@ Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue
 $before=Pair;$taskOut=Join-Path $taskRoot ('build/automatic-ragdoll/'+$Label+'-'+(Get-Date -Format 'yyyyMMdd-HHmmss'))
 $profile=Join-Path $taskOut 'user';New-Item -ItemType Directory -Force $profile|Out-Null
 $settings=@{POSEIDON_USER_DIR=$profile;POSEIDON_AUTOMATIC_RAGDOLL='1';WGR_GRASS='0';POSEIDON_SNOWLINE='off';POSEIDON_SNOW_TEST_DEPTH='0';WGR_TEMPORAL='0';WGR_AUTO_EXPOSURE='0';WGR_EXPOSURE='1'}
+if($RuntimeToggle){$settings.POSEIDON_AUTOMATIC_RAGDOLL='0'}
 $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE')
 $saved=@{};foreach($key in @($settings.Keys)+$clear){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $log=Join-Path $taskOut 'engine.log';$p=$null;$client=$null
@@ -36,9 +37,10 @@ function Send($command,[bool]$allowError=$false){
 function Eval([string]$code){return Decode ([string](Send @{cmd='eval';code=$code}).result)}
 function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
 function Query([string]$command){return Eval ('triPhysicsShowcase "'+$command+'"')}
-function AutoCounts{
- $status=Query 'corpse-auto-status';Require ($status-match '^OK corpse-auto-status enabled=1 active=(\d+) frozen=(\d+) pending=(\d+) activeBudget=4 retainedBudget=64$') ('Automatic status unavailable: '+$status)
- return @{active=[int]$Matches[1];frozen=[int]$Matches[2];pending=[int]$Matches[3];raw=$status}
+function AutoCounts([bool]$enabled=$true){
+ $status=Query 'corpse-auto-status';Require ($status-match '^OK corpse-auto-status enabled=(0|1) active=(\d+) frozen=(\d+) pending=(\d+) activeBudget=4 retainedBudget=64$') ('Automatic status unavailable: '+$status)
+ Require ([int]$Matches[1]-eq [int]$enabled) 'Automatic admission switch differs from requested mode.'
+ return @{active=[int]$Matches[2];frozen=[int]$Matches[3];pending=[int]$Matches[4];raw=$status}
 }
 function PhysicsCounts{
  $status=Query 'corpse-physics-status';Require ($status-match 'articulatedBodies=(\d+) articulatedJoints=(\d+)$') 'Actual Box3D counts unavailable.'
@@ -95,6 +97,7 @@ try{
  $near=Send @{cmd='diag_near';pos=@($SiteX,$SiteZ);r=40};Require ($near.count-eq @($near.objects).Count) 'Obstacle census truncated.'
  $blockers=@($near.objects|Where-Object{($_.static-or (([int]$_.type-band 3)-ne 0))-and $_.shape-and [Math]::Abs((Num $_.pos[0])-$SiteX)-le (35+(Num $_.radius))-and [Math]::Abs((Num $_.pos[1])-$SiteZ)-le (5+(Num $_.radius))})
  $result.obstacles=@{receipt=$near;blockers=$blockers};Require ($blockers.Count-eq 0) 'Retail obstacles overlap the candidate fixture; select another bounded site.'
+ if($RuntimeToggle){$result.gates.defaultOff=AutoCounts $false;Require ((Query 'corpse-auto-enable')-ceq 'OK corpse-auto-toggle existing-owners-retained') 'Runtime new-death admission did not enable.'}
  $result.initial=AutoCounts;Require ($result.initial.active-eq 0-and $result.initial.frozen-eq 0-and $result.initial.pending-eq 0) 'Unexpected pre-existing automatic corpse.'
  $placements=@();for($i=0;$i-lt 5;++$i){$placements+=,@{name=('ragVictim'+$i);stance=$Stance;position=(Spawn ('ragVictim'+$i) ($i*7) $Stance)}}
  $result.placements=$placements
@@ -102,6 +105,7 @@ try{
  $queued=AutoCounts;Require ($queued.pending-eq 4-and $queued.active-eq 0) 'Four actual queued deaths or budget fallback failed.';$result.gates.queued=$queued
  $admissionTimer=[Diagnostics.Stopwatch]::StartNew();Exec 'setAccTime .05';$active=WaitOwners 4 0 20;$admissionTimer.Stop();Exec 'setAccTime 0';$physics=PhysicsCounts;Require ($physics.bodies-eq 44-and $physics.joints-eq 40) 'Four independent Box3D corpses were not created.';$result.gates.active=@{owners=$active;backend=$physics;wallMilliseconds=$admissionTimer.Elapsed.TotalMilliseconds;firstTerrainRegistrationLines=@(Select-String -LiteralPath $log -Pattern 'AUTORAGDOLL: registered shared actual terrain'|ForEach-Object{$_.Line})}
  $initial=@();for($i=0;$i-lt 4;++$i){Require ((Query ('corpse-auto-select:'+$i))-ceq 'OK corpse-auto-select selected') 'Owner selection failed.';$initial+=,(Pose $false);Capture ('initial-'+$i) ('ragVictim'+$i)}
+ if($RuntimeToggle){$null=Query 'corpse-auto-disable';$off=AutoCounts $false;Require ($off.active-eq 4-and (PhysicsCounts).bodies-eq 44-and (PhysicsCounts).joints-eq 40) 'Turning off removed an active owner.';for($i=0;$i-lt 4;++$i){$null=Query ('corpse-auto-select:'+$i);ExactPose $initial[$i] (Pose $false)};$result.gates.activeToggle=$off;$null=Query 'corpse-auto-enable'}
  Exec 'setAccTime 4';$frozen=WaitOwners 0 4 30;Exec 'setAccTime 0';$physics=PhysicsCounts;Require ($physics.bodies-eq 0-and $physics.joints-eq 0) 'Automatic retirement leaked handles.'
  $settled=@();for($i=0;$i-lt 4;++$i){$null=Query ('corpse-auto-select:'+$i);$settled+=,(Pose $true);Require ($initial[$i].entity-ceq $settled[$i].entity) 'Independent owner changed.';Capture ('frozen-'+$i) ('ragVictim'+$i)}
  if($Stance-eq 'UP'){Require ([Math]::Abs((Num $initial[0].objectTransform[7])-(Num $settled[0].objectTransform[7]))-gt .1) 'Standing soldier did not physically fall/rebase.'}
@@ -109,6 +113,13 @@ try{
  $result.gates.retirement=@{owners=$frozen;backend=$physics;initial=$initial;frozen=$settled}
  $start=Num (Eval 'time');Exec 'setAccTime 4';$until=[DateTime]::UtcNow.AddSeconds(20);while((Num (Eval 'time'))-$start-lt 31){Require ([DateTime]::UtcNow-lt $until) 'Persistence clock did not advance.';Start-Sleep -Milliseconds 200};Exec 'setAccTime 0'
  for($i=0;$i-lt 4;++$i){$null=Query ('corpse-auto-select:'+$i);ExactPose $settled[$i] (Pose $true)};$result.gates.persistence=@{passed=$true;elapsed=((Num (Eval 'time'))-$start)}
+ if($RuntimeToggle){
+  $null=Query 'corpse-auto-disable';$off=AutoCounts $false;Require ($off.frozen-eq 4) 'Turning off removed a frozen owner.'
+  $null=Spawn 'ragDisabledVictim' -21 'UP';Exec 'ragDisabledVictim setDammage 1;setAccTime 1';Start-Sleep -Milliseconds 350;Exec 'setAccTime 0'
+  $off=AutoCounts $false;Require (!(Eval 'alive ragDisabledVictim')-and $off.frozen-eq 4-and $off.active-eq 0-and $off.pending-eq 0) 'Disabled new death unexpectedly gained ownership.'
+  Exec 'deleteVehicle ragDisabledVictim';for($i=0;$i-lt 4;++$i){$null=Query ('corpse-auto-select:'+$i);ExactPose $settled[$i] (Pose $true)}
+  $result.gates.frozenToggle=$off;$null=Query 'corpse-auto-enable'
+ }
  if($SaveLoad){
   $stream.ReadTimeout=120000;try{Require ((Eval 'triSaveGame "automatic-corpse"')-ceq 'OK') 'Actual mission save failed.'}finally{$stream.ReadTimeout=30000}
   Exec 'deleteVehicle ragVictim0;deleteVehicle ragVictim1;deleteVehicle ragVictim2;deleteVehicle ragVictim3';Require ((AutoCounts).frozen-eq 0) 'Save mutation control failed.'
@@ -119,9 +130,14 @@ try{
   $result.gates.saveLoad=@{passed=$true;loaded=$loaded};Capture 'loaded-first' 'ragVictim0'
  }
  if($RifleDeath){
-  $live=Spawn 'ragRifleVictim' -14 'UP';Exec ('ragEnemyGroup=createGroup east;ragFired=0;"SoldierEB" createUnit [['+(Fmt ($SiteX-14))+','+(Fmt ($SiteZ-18))+',0],ragEnemyGroup,"ragShooter=this;this disableAI ""MOVE"";this setBehaviour ""COMBAT"";this setCombatMode ""RED"""];ragShooter addEventHandler ["Fired",{ragFired=ragFired+1}];ragShooter reveal ragRifleVictim;ragShooter doTarget ragRifleVictim;ragShooter doFire ragRifleVictim;setAccTime 1')
-  $until=[DateTime]::UtcNow.AddSeconds(45);while(Eval 'alive ragRifleVictim'){Require ([DateTime]::UtcNow-lt $until) 'Actual enemy rifle did not kill the stock soldier.';Start-Sleep -Milliseconds 200};Exec 'setAccTime 0'
-  Require ((Num (Eval 'ragFired'))-gt 0) 'No actual Fired event.';Require ((AutoCounts).active-eq 1-or (AutoCounts).pending-eq 1) 'Actual rifle death did not enter automatic ownership.'
+  $live=Spawn 'ragRifleVictim' -14 'UP';Exec ('ragEnemyGroup=createGroup east;ragFired=0;ragLastWeapon="";"SoldierEB" createUnit [['+(Fmt ($SiteX-14))+','+(Fmt ($SiteZ-12))+',0],ragEnemyGroup,"ragShooter=this;this disableAI ""MOVE"";this setBehaviour ""COMBAT"";this setCombatMode ""RED"""];ragShooter setDir 0;ragShooter setUnitPos "UP";ragShooter setSkill 1;removeAllWeapons ragShooter;ragShooter addMagazine "AK74";ragShooter addMagazine "AK74";ragShooter addWeapon "AK74";ragShooter selectWeapon "AK74";ragShooter addEventHandler ["Fired",{ragFired=ragFired+1;ragLastWeapon=_this select 1}];ragShooter reveal ragRifleVictim;ragShooter doTarget ragRifleVictim;setAccTime 1')
+  Start-Sleep -Milliseconds 1800;$until=[DateTime]::UtcNow.AddSeconds(35);$rifleSamples=@()
+  while(Eval 'alive ragRifleVictim'){
+   $sample=Eval '[time,ragFired,ragLastWeapon,typeOf ragShooter,getPosASL ragShooter,getDir ragShooter,weapons ragShooter,magazines ragShooter,ragShooter ammo "AK74",canFire ragShooter,ragShooter knowsAbout ragRifleVictim,getPosASL ragRifleVictim,getDammage ragRifleVictim,alive ragRifleVictim]'
+   $rifleSamples+=,$sample;$result.gates.rifleDiagnostics=$rifleSamples;Require ([DateTime]::UtcNow-lt $until) 'Actual AK74 fixture did not kill within35s; see rifleDiagnostics for fired/ammo/knowledge/position/damage witnesses.'
+   Exec 'ragShooter doTarget ragRifleVictim;ragShooter doFire ragRifleVictim;ragShooter fire "AK74"';Start-Sleep -Milliseconds 250
+  };Exec 'setAccTime 0'
+  Require ((Num (Eval 'ragFired'))-gt 0-and (Eval 'ragLastWeapon')-ceq 'AK74') 'No actual AK74 Fired event.';$rifleOwners=AutoCounts;Require ($rifleOwners.active+$rifleOwners.pending+$rifleOwners.frozen-eq 5-and $rifleOwners.frozen-ge 4) 'Actual rifle death did not enter independent automatic ownership.'
   Exec 'setAccTime 4';$null=WaitOwners 0 5 30;Exec 'setAccTime 0';$result.gates.rifle=@{passed=$true;shots=(Eval 'ragFired');damage=(Eval 'getDammage ragRifleVictim');alive=(Eval 'alive ragRifleVictim')};Capture 'actual-rifle-death' 'ragRifleVictim';Exec 'deleteVehicle ragRifleVictim;deleteVehicle ragShooter'
  }
  Exec 'deleteVehicle ragVictim0;deleteVehicle ragVictim1;deleteVehicle ragVictim2;deleteVehicle ragVictim3;deleteVehicle ragVictim4'

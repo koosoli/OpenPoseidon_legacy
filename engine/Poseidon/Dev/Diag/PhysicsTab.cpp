@@ -70,9 +70,19 @@ void PollHotkeys(PhysicsProbeSettings& s)
 
 void DrawPhysicsTab()
 {
+    ImGui::SeparatorText("Automatic infantry ragdolls");
+    bool automaticDeaths = Man::AutomaticInfantryDeathsEnabled();
+    if (ImGui::Checkbox("Automatic infantry deaths (experimental)", &automaticDeaths))
+        Man::SetAutomaticInfantryDeathsEnabled(automaticDeaths);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("This switch lasts until the game restarts. First use may pause briefly while terrain collision loads.\n"
+                          "Active corpses settle into a persistent pose; saved games retain that frozen pose.");
+    ImGui::TextDisabled("Local single player, dry supported ground, stock US infantry. Up to four active bodies.");
+    ImGui::TextDisabled("Turning off stops new ragdolls and retains existing bodies. Other cases use authored deaths.");
+
     ImGui::SeparatorText("Corpse ragdoll prototype (dev only)");
     ImGui::TextDisabled("Nearest settled dry stock corpse within 50 m; one rig, 30 simulation seconds.");
-    ImGui::TextDisabled("Capture, prepare local ground, start joints, then push. Automatic deaths and grenade impulses are not connected.");
+    ImGui::TextDisabled("Manual settled-corpse control: capture, prepare local ground, start joints, then push.");
     static RString corpseResult = "No capture requested.";
     if (ImGui::Button("Capture corpse pose")) corpseResult = Man::CorpsePoseProbe("corpse-capture");
     ImGui::SameLine();
@@ -96,8 +106,7 @@ void DrawPhysicsTab()
     if (!live)
     {
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "No physics world yet.");
-        ImGui::TextDisabled("It is created on the first Drop or Throw. Nothing in the game\n"
-                            "uses physics, so the world is not built until asked for.");
+        ImGui::TextDisabled("Created when physical objects or admitted automatic deaths need it.");
     }
     else
     {
@@ -167,8 +176,7 @@ void DrawPhysicsTab()
                           "the map -- about 82,000 bodies on Everon, a second or two.\n"
                           "\n"
                           "Until this is pressed the ball only meets the ground, because\n"
-                          "nothing in the game uses physics yet, and building 82,000 bodies\n"
-                          "for every session that never opens this tab would be rude.\n"
+                          "the full static-map collider corpus is built only on request.\n"
                           "\n"
                           "POSEIDON_PHYSICS_CORPUS=1 does the same at load, for capture runs.\n");
     }

@@ -6,6 +6,15 @@ ordinary damage-death path. It is opt-in with `POSEIDON_AUTOMATIC_RAGDOLL=1` unt
 the runtime owner accepts the installed ordinary-death campaign. Source or CPU
 success is not an installed appearance, save/load or gameplay acceptance.
 
+The developer panel's Physics tab provides **Automatic infantry deaths
+(experimental)**. With developer mode active (`--dev`), Ctrl+F8 opens the panel.
+The checkbox explicitly overrides startup admission until restart. Disabling
+stops new ragdolls and preserves every existing active/frozen owner. The harness
+uses `corpse-auto-enable`/`corpse-auto-disable` through the same setter; the
+`-RuntimeToggle` runner starts disabled, proves activation, checks full active and
+frozen pose retention when disabled, and proves a new disabled death remains
+authored even when active capacity is free. The startup default remains off.
+
 ## Supported candidate boundary
 
 - Local single player, locally owned `data3d\mc vojakw2.p3d` stock Western
@@ -124,3 +133,21 @@ and the 25 mm boundary with a connected hinged chain on real terrain: zero initi
 transform change, finite bounded velocities, recovered distal contact, preserved
 anchors and zero handles after removal. This uses controlled hulls to test solver
 response, not a substitute for the actual stock skin/rig installed campaign.
+
+Matching installed `3de356cb` campaigns now pass four actual standing deaths
+(44 bodies/40 joints), physical falling/root rebase, persistent frozen outputs
+after 31.25 simulated seconds, exact full palettes/CPU points/equipment/bounds and
+delete cleanup with zero handles. A separate mission save/load campaign passes
+validated frozen restoration and zero solver handles. Both exit normally; the
+runtime owner inspected all four visible corpses with contact/shadows and found
+no obvious disappearance or stretched rig in this bounded fixture. This is
+retail Everon stock Western infantry evidence, not broad-model/map coverage.
+
+The first enemy rifle fixture did not kill its target within 45 seconds. That
+campaign therefore fails the rifle gate; it does not demonstrate a ragdoll
+failure. The revised bounded fixture faces a stock Eastern shooter toward the
+target, gives only an actual AK74, waits for targeting and issues ordinary
+`doTarget`/`doFire` plus the existing script `fire` command. It records actual
+Fired weapon/count, ammo, knowledge, positions and target damage before timeout.
+Only a genuine AK74 projectile death can pass; it never substitutes setDammage.
+Installed rifle and runtime-toggle acceptance remain pending.
