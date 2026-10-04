@@ -409,19 +409,19 @@ bool Man::UpdateSwimming()
         BlendToMove(fallenIn && _swimInMove != MoveIdNone ? _swimInMove : swim);
         return true;
     }
-    if (pos.Y() > level + SwimPlacedAbove + 0.5f)
+    const bool liftedClear = pos.Y() > level + SwimPlacedAbove + 0.5f;
+    if (liftedClear || (depth < SwimStopDepth && !IsDead()))
     {
-        // lifted clear of the water (a script's setPos, a pickup by a helicopter): no longer swimming -- he
-        // falls, and comes back in through the fall (the heave would drag him down at any speed)
+        // Both a shallow-water exit and a scripted lift/relocation must leave the
+        // swim action map. Clearing only _swimming leaves its looping move active
+        // on dry land. Above deep water the normal falling path can take over.
         _swimming = false;
         _swimEntrySoft = 0;
-        return false;
-    }
-    if (depth < SwimStopDepth && !IsDead())
-    {
-        // shallow enough to stand: back to the normal moves, upright
-        _swimming = false;
-        BlendToMove(_swimOut != MoveIdNone ? _swimOut : GetDefaultMove());
+        if (IsDead())
+        {
+            return false;
+        }
+        BlendToMove(!liftedClear && _swimOut != MoveIdNone ? _swimOut : GetDefaultMove());
         Matrix3 upright;
         Vector3 dir = Direction();
         dir[1] = 0;
