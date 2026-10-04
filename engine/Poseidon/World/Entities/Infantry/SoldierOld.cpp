@@ -4,6 +4,7 @@
 #include <Poseidon/World/Physics/PhysicsBackend.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/World/Physics/CorpseArticulation.hpp>
+#include <Poseidon/World/Simulation/Animation/StockCorpseRig.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/World/Weather/RainWaterField.hpp>
 #include <array>
@@ -741,6 +742,29 @@ float g_corpsePreparedOriginX = 0, g_corpsePreparedOriginZ = 0;
 std::vector<OLink<Man>> g_automaticCorpses;
 int g_automaticInfantryDeathsOverride = -1;
 
+bool StockCorpseCapability(LODShape* shape, Skeleton* skeleton, RString& refusal)
+{
+    if (!shape) { refusal = "stock-corpse-model-unavailable"; return false; }
+    if (!StockCorpseModelKnown(shape->Name()))
+    { refusal = "original-stock-corpse-model-required"; return false; }
+    if (!skeleton) { refusal = "stock-corpse-skeleton-unavailable"; return false; }
+    const char* rigRefusal = StockCorpseSkeletonRefusal(skeleton->NBones(),
+        [&](int bone, std::string_view expected) { return std::strcmp(skeleton->GetBone(bone), expected.data()) == 0; });
+    if (rigRefusal) { refusal = rigRefusal; return false; }
+    if (shape->NLevels() <= 0 || shape->NLevels() > CorrectedCorpsePose::MaximumLevels)
+    { refusal = "bounded-stock-lod-count-required"; return false; }
+    const int roles[] = {0, shape->FindMemoryLevel(), shape->FindGeometryLevel(),
+        shape->FindFireGeometryLevel(), shape->FindViewGeometryLevel(), shape->FindLandContactLevel()};
+    for (int role : roles)
+        if (role < 0 || role >= shape->NLevels())
+        { refusal = "stock-special-lod-missing"; return false; }
+    for (int level = 0; level < shape->NLevels(); ++level)
+        if (!shape->Level(level) || shape->Level(level)->NPos() <= 0 ||
+            shape->Level(level)->NPos() > CorrectedCorpsePose::MaximumPoints)
+        { refusal = "bounded-stock-points-required"; return false; }
+    return true;
+}
+
 bool AutomaticRagdollEnabled()
 {
     if (g_automaticInfantryDeathsOverride >= 0) return g_automaticInfantryDeathsOverride != 0;
@@ -1051,13 +1075,10 @@ bool Man::GetCorpsePoseDiagnostic(CorpsePoseDiagnostic& result, RString& refusal
 
 bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal, bool hingeEndpoints) const
 {
-    refusal = "stock-western-model-required";
-    std::string model = _shape->Name();
-    std::replace(model.begin(), model.end(), '/', '\\');
-    if (strcmpi(model.c_str(), "data3d\\mc vojakw2.p3d") != 0) return false;
+    Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
+    if (!StockCorpseCapability(_shape, skeleton, refusal)) return false;
     refusal = "finite-correction-or-world-transform-required";
     if (!_headTrans.IsFinite() || !_gunTrans.IsFinite() || !_legTrans.IsFinite() || !Transform().IsFinite()) return false;
-    Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
     if (!GLandscape || !skeleton || skeleton->NBones() > 128 || _shape->NLevels() > MAX_LOD_LEVELS) return false;
     CorpsePoseDiagnostic candidate;
     candidate.articulated = _corpseArticulation && _corpseArticulation->state == CorpseSolverState::Simulating;
@@ -1236,13 +1257,51 @@ bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal, bool
         {"ploket", "pruka"}, {"lloket", "lruka"}, {"pholen", "pchodidlo"}, {"lholen", "lchodidlo"},
         {"pchodidlo", "pprsty"}, {"lchodidlo", "lprsty"}};
     graphical->SaveOriginalPos();
+    auto fireBoundary = [&](CorpseAnchorDiagnostic& anchor) {
+        if (hingeEndpoints || !StockCorpseModelNameEqual(_shape->Name(),"data3d\\angelina.p3d")) return false;
+        const int firstPart=StockCorpseAnatomicalPart(anchor.first), secondPart=StockCorpseAnatomicalPart(anchor.second);
+        if (firstPart<0 || secondPart<0 || firstPart==secondPart) return false;
+        const int level=_shape->FindFireGeometryLevel(); Shape* fireShape=_shape->Level(level);
+        fireShape->SaveOriginalPos();
+        std::vector<Vector3> modelA,modelB,worldA,worldB;
+        for (int component=1;component<=12;++component)
+        {
+            char name[32]; std::snprintf(name,sizeof(name),"component%02d",component);
+            const int selection=fireShape->FindNamedSel(name);
+            if (selection<0) return false;
+            const auto& selected=fireShape->NamedSel(selection);
+            for (int vertex=0;vertex<selected.Size();++vertex)
+            {
+                const int p=selected[vertex];
+                if (p<0 || p>=fireShape->NPos()) return false;
+                const auto& binding=weights[level][p];
+                if (binding.Size()!=1 || binding[0].GetWeight()!=1 || binding[0].GetSel()<0 || binding[0].GetSel()>=25) return false;
+                const int part=StockCorpseAnatomicalPart(static_cast<const char*>(skeleton->GetBone(binding[0].GetSel())));
+                if (part!=firstPart && part!=secondPart) continue;
+                auto& model=part==firstPart?modelA:modelB; auto& world=part==firstPart?worldA:worldB;
+                model.push_back(fireShape->OrigPos(p));
+                // Consume this actual FireLOD's palette/affine pose, including
+                // its own correction; never apply the graphical front palette.
+                world.push_back(PositionModelToWorld(AnimatePoint(level,p)));
+            }
+        }
+        if (!CorpseMeasureFireBoundary(modelA,modelB,worldA,worldB,anchor)) return false;
+        anchor.sourceLevel=level;
+        LOG_INFO(World,"CORPSEANCHOR: model={} first={} second={} source={} sourceLevel={} sourcePairCount={} sharedVertices=0 separation={}",
+            _shape->Name(),anchor.first,anchor.second,anchor.source,level,anchor.sourcePairCount,anchor.separation);
+        return true;
+    };
     for (int boundaryIndex = 0; boundaryIndex < (hingeEndpoints ? 15 : 9); ++boundaryIndex)
     {
         const auto& boundary = boundaries[boundaryIndex];
         CorpseAnchorDiagnostic anchor;
         anchor.first = boundary[0]; anchor.second = boundary[1];
         int first = graphical->FindNamedSel(boundary[0]), second = graphical->FindNamedSel(boundary[1]);
-        if (first < 0 || second < 0) { refusal = "stock-anchor-selection-missing"; return false; }
+        if (first < 0 || second < 0)
+        {
+            if (!fireBoundary(anchor)) { refusal = "stock-anchor-selection-missing"; return false; }
+            candidate.anchors.push_back(std::move(anchor)); continue;
+        }
         const NamedSelection& a = graphical->NamedSel(first);
         const NamedSelection& b = graphical->NamedSel(second);
         if (a.Size() > 4096 || b.Size() > 4096) { refusal = "bounded-anchor-selection-required"; return false; }
@@ -1271,6 +1330,7 @@ bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal, bool
             if (!anchor.firstWorld.IsFinite() || !anchor.secondWorld.IsFinite() || !std::isfinite(anchor.separation))
             { refusal = "nonfinite-anchor"; return false; }
         }
+        else if (!fireBoundary(anchor)) { refusal = "shared-geometry-anchor-not-admitted"; return false; }
         candidate.anchors.push_back(std::move(anchor));
     }
     if (!UseCorpsePose()) { refusal = "hold-retired-during-measurement"; return false; }
@@ -1284,9 +1344,13 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
     if (!UseCorpsePose() || _corpseArticulation) { refusal = "captured-authored-corpse-required"; return false; }
     if (std::abs(CorpseMatrixDeterminant(Transform())-1) > 1e-4f)
     { refusal = "unit-scale-world-frame-required"; return false; }
-    std::string sourceModel = _shape->Name(); std::replace(sourceModel.begin(),sourceModel.end(),'/','\\');
-    if (strcmpi(sourceModel.c_str(), "data3d\\mc vojakw2.p3d") != 0)
-    { refusal = "stock-western-model-only"; return false; }
+    if (!StockCorpseCapability(_shape, _corpsePoseSkeleton.GetRef(), refusal)) return false;
+    if (_automaticCorpsePose && anatomicalHinges && !StockCorpseHasAuthoredHingeEndpoints(_shape->Name()))
+    {
+        anatomicalHinges = false;
+        LOG_INFO(World,"AUTORAGDOLL: model={} jointMode=spherical reason=stock-anatomical-hinge-endpoints-unavailable physicalJointAnchorGatesUnchanged=1",
+            _shape->Name());
+    }
     if (!_automaticCorpsePose && (CorpseMatrixIdentityError(_headTrans) > 1e-6f || CorpseMatrixIdentityError(_gunTrans) > 1e-6f ||
         CorpseMatrixIdentityError(_legTrans) > 1e-6f))
     { refusal = "identity-post-animation-corrections-required"; return false; }
@@ -1332,7 +1396,8 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
         if (hull.externalCenterRayHits != 0)
         { refusal = "open-ground-no-external-center-ray-contact-required"; return false; }
     for (const auto& anchor : diagnostic.anchors)
-        if (anchor.sharedVertices <= 0 || anchor.separation > 0.12f)
+        if ((anchor.sharedVertices <= 0 && !(anchor.source=="authored-fire-boundary-pair" && anchor.sourcePairCount>0 &&
+            !anatomicalHinges && StockCorpseModelNameEqual(_shape->Name(),"data3d\\angelina.p3d"))) || anchor.separation > 0.12f)
         { refusal = "shared-geometry-anchor-not-admitted"; return false; }
 
     std::array<CorpseHingeMeasurement, 4> hinges;
@@ -1602,10 +1667,8 @@ bool Man::CaptureCorrectedCorpsePose(RString& refusal)
     refusal = "stock-corrected-live-pose-required";
     if (!_shape || !_headTrans.IsFinite() || !_gunTrans.IsFinite() || !_legTrans.IsFinite() ||
         std::abs(CorpseMatrixDeterminant(Transform())-1) > 1e-4f || !GLandscape || !GWorld) return false;
-    std::string model = _shape->Name(); std::replace(model.begin(),model.end(),'/','\\');
-    if (strcmpi(model.c_str(),"data3d\\mc vojakw2.p3d") != 0) return false;
     Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
-    if (!skeleton || skeleton->NBones() != 33 || _shape->NLevels() > CorrectedCorpsePose::MaximumLevels) return false;
+    if (!StockCorpseCapability(_shape, skeleton, refusal)) return false;
     AffinePhasePose primary, secondary;
     AnimationRT* pri = Type()->GetAnimation(_primaryMove.id);
     AnimationRT* sec = Type()->GetAnimation(_secondaryMove.id);
@@ -1735,12 +1798,12 @@ void Man::QueueAutomaticRagdoll()
     // never an animation-only request, and retains the existing scoring callback.
     if (IsDammageDestroyed()) _isDead = true;
     if (!CaptureCorrectedCorpsePose(refusal))
-    { LOG_INFO(World,"AUTORAGDOLL: authored fallback reason={}",refusal.Data()); return; }
+    { LOG_INFO(World,"AUTORAGDOLL: authored fallback reason={} model={}",refusal.Data(),_shape ? _shape->Name() : "unavailable"); return; }
     _automaticCorpsePose->collisionFamily = -slot-2;
     g_automaticCorpses.emplace_back(this);
     g_corpsePoseOwner = this; // diagnostic selection only; previous corpse stays owned
-    LOG_INFO(World,"AUTORAGDOLL: captured actual death owner={} family={} levels={} speed=({},{},{}) angular=({},{},{}) corrections=({},{},{})",
-        static_cast<const void*>(this),-slot-2,_automaticCorpsePose->levels.size(),Speed().X(),Speed().Y(),Speed().Z(),
+    LOG_INFO(World,"AUTORAGDOLL: captured actual death owner={} family={} levels={} model={} speed=({},{},{}) angular=({},{},{}) corrections=({},{},{})",
+        static_cast<const void*>(this),-slot-2,_automaticCorpsePose->levels.size(),_shape->Name(),Speed().X(),Speed().Y(),Speed().Z(),
         AngVelocity().X(),AngVelocity().Y(),AngVelocity().Z(),CorpseMatrixIdentityError(_headTrans),
         CorpseMatrixIdentityError(_gunTrans),CorpseMatrixIdentityError(_legTrans));
 }
@@ -1763,8 +1826,8 @@ bool Man::BeginAutomaticRagdoll(RString& refusal)
     IsMoved();
     ActionContextDefault context; context.function = MFDead;
     ProcessMoveFunction(&context);
-    LOG_INFO(World,"AUTORAGDOLL: activated owner={} bodies=11 joints=10 hinges=4 family={} inheritedImpulseConsumed=1 speed=({},{},{}) angular=({},{},{})",
-        static_cast<const void*>(this),_automaticCorpsePose->collisionFamily,
+    LOG_INFO(World,"AUTORAGDOLL: activated owner={} bodies=11 joints=10 hinges={} family={} model={} inheritedImpulseConsumed=1 speed=({},{},{}) angular=({},{},{})",
+        static_cast<const void*>(this),_corpseArticulation->hingeCount,_automaticCorpsePose->collisionFamily,_shape->Name(),
         _automaticCorpsePose->initialSpeed.X(),_automaticCorpsePose->initialSpeed.Y(),_automaticCorpsePose->initialSpeed.Z(),
         _automaticCorpsePose->initialAngularVelocity.X(),_automaticCorpsePose->initialAngularVelocity.Y(),_automaticCorpsePose->initialAngularVelocity.Z());
     return true;
@@ -2002,6 +2065,12 @@ LSError Man::SerializeAutomaticCorpsePose(ParamArchive& ar)
     if (version != 1 || !_shape || !GLandscape || strcmpi(model,_shape->Name()) != 0 ||
         strcmpi(map,GLandscape->GetName()) != 0) return reject();
     Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
+    RString capabilityRefusal;
+    if (!StockCorpseCapability(_shape, skeleton, capabilityRefusal))
+    {
+        LOG_WARN(World,"AUTORAGDOLL: refused frozen model={} reason={}",_shape->Name(),capabilityRefusal.Data());
+        return reject();
+    }
     int bones = ar.IsSaving() ? int(pose.levels[0].palette.size()) : 0;
     PARAM_CHECK(saved.Serialize("bones",bones,1))
     if (!skeleton || bones != 33 || skeleton->NBones() != bones) return reject();

@@ -3,6 +3,7 @@
 #include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -68,9 +69,52 @@ struct CorpseAnchorDiagnostic
 {
     std::string first, second;
     int sharedVertices = 0;
+    std::string source = "shared-graphical-boundary";
+    int sourceLevel = 0, sourcePairCount = 0;
     Vector3 modelAnchor = VZero, firstWorld = VZero, secondWorld = VZero;
     float separation = 0;
 };
+
+// A separate provenance for stock Angelina, whose source skin has no shared
+// neck/shoulder/knee boundary. Use clustered nearest vertices of the two OWN
+// authored single-bone Fire hulls. This never claims a shared skin vertex or a
+// measured hinge, and preserves the actual <=12cm joint separation gate.
+inline bool CorpseMeasureFireBoundary(const std::vector<Vector3>& firstModel,
+    const std::vector<Vector3>& secondModel, const std::vector<Vector3>& firstWorld,
+    const std::vector<Vector3>& secondWorld, CorpseAnchorDiagnostic& anchor)
+{
+    if (firstModel.empty() || secondModel.empty() || firstModel.size()>128 || secondModel.size()>128 ||
+        firstWorld.size()!=firstModel.size() || secondWorld.size()!=secondModel.size()) return false;
+    for (const auto* points : {&firstModel,&secondModel,&firstWorld,&secondWorld})
+        for (const auto& point : *points) if (!point.IsFinite()) return false;
+    for (const auto* points : {&firstModel,&secondModel})
+        for (const auto& point : *points) if (!std::isfinite(point.Size()) || point.Size()>8) return false;
+    float gap=std::numeric_limits<float>::infinity();
+    for (const auto& a:firstModel) for (const auto& b:secondModel) gap=std::min(gap,(a-b).Size());
+    if (!std::isfinite(gap) || gap>.12f) return false;
+    Vector3 first=VZero,second=VZero,worldA=VZero,worldB=VZero;
+    int count=0;
+    for (std::size_t a=0;a<firstModel.size();++a) for (std::size_t b=0;b<secondModel.size();++b)
+        if ((firstModel[a]-secondModel[b]).Size()<=gap+.005f)
+        { first+=firstModel[a]; second+=secondModel[b]; worldA+=firstWorld[a]; worldB+=secondWorld[b]; ++count; }
+    if (!count) return false;
+    first*=1.f/count; second*=1.f/count; worldA*=1.f/count; worldB*=1.f/count;
+    if (!first.IsFinite() || !second.IsFinite() || !worldA.IsFinite() || !worldB.IsFinite()) return false;
+    // Reject a dispersed nearest-pair cluster rather than placing a pivot
+    // between unrelated surfaces. Every contributing point remains bounded.
+    for (std::size_t a=0;a<firstModel.size();++a) for (std::size_t b=0;b<secondModel.size();++b)
+        if ((firstModel[a]-secondModel[b]).Size()<=gap+.005f &&
+            ((firstModel[a]-first).Size()>.25f || (secondModel[b]-second).Size()>.25f ||
+             (firstWorld[a]-worldA).Size()>.25f || (secondWorld[b]-worldB).Size()>.25f)) return false;
+    const float separation=(worldA-worldB).Size();
+    if (!std::isfinite(separation) || separation>.12f || (first-second).Size()>.12f) return false;
+    anchor.sharedVertices=0; anchor.source="authored-fire-boundary-pair"; anchor.sourcePairCount=count;
+    const Vector3 midpoint=first*.5f+second*.5f;
+    if (!midpoint.IsFinite()) return false;
+    anchor.modelAnchor=midpoint; anchor.firstWorld=worldA; anchor.secondWorld=worldB;
+    anchor.separation=separation;
+    return true;
+}
 struct CorpsePoseDiagnostic
 {
     bool articulated = false;

@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/World/Simulation/Animation/CorpsePose.hpp>
 #include <Poseidon/World/Simulation/Animation/CorrectedCorpsePose.hpp>
+#include <Poseidon/World/Simulation/Animation/StockCorpseRig.hpp>
 #include <Poseidon/World/Entities/Infantry/Head.hpp>
 #include <Poseidon/World/Physics/CorpseArticulation.hpp>
 #include <Poseidon/World/Physics/PhysicsBackend.hpp>
@@ -11,6 +12,111 @@
 #include <limits>
 
 using namespace Poseidon;
+
+// STOCK_CORPSE_CAPABILITY_TESTS_BEGIN: these exercise the production admission helper.
+TEST_CASE("Original stock corpse filenames are exact and retain each character family", "[corpse-pose][automatic-ragdoll][stock-corpse-capability]")
+{
+    REQUIRE(StockCorpseModels.size() == 38);
+    for (auto model : StockCorpseModels)
+    {
+        CAPTURE(model);
+        CHECK(StockCorpseModelKnown(model));
+        std::string mixed(model);
+        for (char& c : mixed)
+            if (c == '\\') c = '/';
+            else if (c >= 'a' && c <= 'z') c -= 'a' - 'A';
+        CHECK(StockCorpseModelKnown(mixed));
+        for (auto other : StockCorpseModels)
+            if (model != other) CHECK_FALSE(StockCorpseModelNameEqual(model, other));
+    }
+    for (auto unknown : {"data3d\\vojakw.p3d", "data3d\\mc unknown.p3d", "mod\\mc vojakw2.p3d",
+        "o\\char\\char08.p3d", "o\\char\\civilistka02d.p3d", "data3d\\..\\data3d\\mc vojakw2.p3d",
+        "data3d\\mc vojakw2.p3d.extra", "data3d\\mc vojakw2.p3d ", ""})
+        CHECK_FALSE(StockCorpseModelKnown(unknown));
+    CHECK(StockCorpseHasAuthoredHingeEndpoints("DATA3D/MC VOJAKE2.P3D"));
+    CHECK(StockCorpseHasAuthoredHingeEndpoints("o_wp\\mc_specg.p3d"));
+    for (auto sparse : {"o\\char\\char01.p3d", "o\\char\\civilistka01a.p3d",
+        "biscamel\\biscamelpilot2.p3d", "data3d\\angelina.p3d", "unknown.p3d"})
+        CHECK_FALSE(StockCorpseHasAuthoredHingeEndpoints(sparse));
+}
+
+TEST_CASE("Stock corpse runtime rigs require the complete named body and implemented face ranges", "[corpse-pose][automatic-ragdoll][stock-corpse-capability]")
+{
+    std::array<std::string_view,33> bones;
+    std::copy(StockCorpseBodyBones.begin(), StockCorpseBodyBones.end(), bones.begin());
+    std::copy(StockCorpseFaceBones.begin(), StockCorpseFaceBones.end(), bones.begin()+25);
+    auto check = [&](int count = 33) { return StockCorpseSkeletonRefusal(count,
+        [&](int bone, std::string_view name) { return bones[bone] == name; }); };
+    REQUIRE(check() == nullptr);
+    // Every body ordering is supported through name-based production binding.
+    for (int offset = 0; offset < 25; ++offset)
+    {
+        std::rotate(bones.begin(), bones.begin()+1, bones.begin()+25);
+        CHECK(check() == nullptr);
+    }
+    std::reverse(bones.begin()+25, bones.end());
+    REQUIRE(check() == nullptr);
+    CHECK(std::string_view(check(25)) == "complete-stock-33-bone-palette-required");
+    CHECK(std::string_view(check(34)) == "complete-stock-33-bone-palette-required");
+    auto valid = bones;
+    bones[0] = bones[1];
+    CHECK(std::string_view(check()) == "duplicate-stock-body-bone");
+    bones = valid; bones[0] = "alternate_head";
+    CHECK(std::string_view(check()) == "unknown-stock-body-bone");
+    bones = valid; bones[32] = bones[31];
+    CHECK(std::string_view(check()) == "duplicate-stock-face-bone");
+    bones = valid; bones[32] = "%face_unimplemented";
+    CHECK(std::string_view(check()) == "unsupported-synthetic-bone");
+    bones = valid; std::swap(bones[0],bones[25]);
+    CHECK(std::string_view(check()) == "unknown-stock-body-bone");
+}
+// STOCK_CORPSE_CAPABILITY_TESTS_END
+
+// STOCK_CORPSE_BOUNDARY_TESTS_BEGIN
+TEST_CASE("Stock Fire boundary pivots keep distinct paired provenance and actual pose gap", "[corpse-pose][automatic-ragdoll][stock-corpse-capability]")
+{
+    // Actual decoded Angelina FireGeometry closest chest/head pair. These are
+    // source vertices, not Western anatomy or a shared animation intersection.
+    const Vector3 a(.538017690f,.173850864f,-.129862994f), b(.538136184f,.234581262f,-.049763508f);
+    CorpseAnchorDiagnostic anchor;
+    REQUIRE(CorpseMeasureFireBoundary({a},{b},{a},{b},anchor));
+    CHECK(anchor.sharedVertices == 0);
+    CHECK(anchor.sourcePairCount == 1);
+    CHECK(anchor.source == "authored-fire-boundary-pair");
+    CHECK(std::abs(anchor.separation-.100519266f)<.000001f);
+    CHECK((anchor.modelAnchor-(a+b)*.5f).Size()<.000001f);
+    // Transform each OWN source point through its actual part pose. The helper
+    // preserves both witnesses; it cannot apply one front palette to both.
+    const Vector3 shift(100,25,200);
+    REQUIRE(CorpseMeasureFireBoundary({a},{b},{a+shift},{b+shift},anchor));
+    CHECK((anchor.firstWorld-(a+shift)).Size()<.000001f);
+    CHECK((anchor.secondWorld-(b+shift)).Size()<.000001f);
+    CHECK_FALSE(CorpseMeasureFireBoundary({a},{b},{a},{b+Vector3(0,.2f,0)},anchor));
+    CHECK_FALSE(CorpseMeasureFireBoundary({a},{b+Vector3(0,.2f,0)},{a},{b},anchor));
+    CHECK_FALSE(CorpseMeasureFireBoundary({a},{b},{},{b},anchor));
+    CHECK_FALSE(CorpseMeasureFireBoundary({}, {b},{},{b},anchor));
+    CHECK_FALSE(CorpseMeasureFireBoundary({Vector3(std::numeric_limits<float>::quiet_NaN(),0,0)},{b},{a},{b},anchor));
+    const Vector3 huge(3e38f,0,0);
+    CHECK_FALSE(CorpseMeasureFireBoundary({huge},{huge},{VZero},{VZero},anchor));
+    CHECK_FALSE(CorpseMeasureFireBoundary({a,a},{b,b},{huge,huge},{huge,huge},anchor));
+    // A whole face of tied closest points has a centroid, not whichever vertex
+    // happens to appear first. Dispersed unrelated surfaces are refused.
+    std::vector<Vector3> first={Vector3(-.05f,0,0),Vector3(.05f,0,0)};
+    std::vector<Vector3> second={Vector3(-.05f,.06f,0),Vector3(.05f,.06f,0)};
+    REQUIRE(CorpseMeasureFireBoundary(first,second,first,second,anchor));
+    CHECK(anchor.sourcePairCount==2);
+    CHECK((anchor.modelAnchor-Vector3(0,.03f,0)).Size()<.000001f);
+    std::reverse(first.begin(),first.end());
+    CorpseAnchorDiagnostic reordered;
+    REQUIRE(CorpseMeasureFireBoundary(first,second,first,second,reordered));
+    CHECK((anchor.modelAnchor-reordered.modelAnchor).Size()<.000001f);
+    first={Vector3(-.4f,0,0),Vector3(.4f,0,0)};
+    second={Vector3(-.4f,.06f,0),Vector3(.4f,.06f,0)};
+    CHECK_FALSE(CorpseMeasureFireBoundary(first,second,first,second,anchor));
+    first.assign(129,a);second={b};
+    CHECK_FALSE(CorpseMeasureFireBoundary(first,second,first,second,anchor));
+}
+// STOCK_CORPSE_BOUNDARY_TESTS_END
 
 TEST_CASE("Corrected corpse consumers retain distinct affine point and proxy arithmetic", "[corpse-pose][automatic-ragdoll]")
 {
