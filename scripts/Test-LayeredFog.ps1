@@ -94,7 +94,7 @@ try{
   if(!$TerrainMode){$settings.WGR_FOG_TERRAIN='0,0,0,0';$settings.WGR_FOG_PATCH='0,0,0,0'}
   foreach($key in $exposureSettings.Keys){$settings[$key]=$exposureSettings[$key]}
   if($layerArgs){$settings.WGR_FOG_LAYER0=$layerArgs[0];$settings.WGR_FOG_LAYER1=$layerArgs[1]}
-  if($CompactBand){$settings.WGR_FOG_LAYER0='1,5,0.35,0.018';$settings.WGR_FOG_LAYER1='35,50,3,0';$settings.WGR_FOG_TERRAIN='1,0,1,0';$settings.WGR_FOG_PATCH='0.35,420,0.25,0'}
+  if($CompactBand){$settings.WGR_FOG_LAYER0='1,5,0.35,0.018';$settings.WGR_FOG_LAYER1='35,50,3,0';$settings.WGR_FOG_TERRAIN='1,0,1,150';$settings.WGR_FOG_PATCH='0.35,250,70,30'}
   foreach($key in $settings.Keys){[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
   $log=Join-Path $armOut 'engine.log';$stdout=Join-Path $armOut 'stdout.log';$stderr=Join-Path $armOut 'stderr.log'
   $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
