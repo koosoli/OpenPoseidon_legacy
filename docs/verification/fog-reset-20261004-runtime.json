@@ -1,0 +1,420 @@
+{
+  "checks": [
+    "Actual fog-only UI click and full fog defaults readback",
+    "Actual general Reset settings confirmation and full fog defaults readback",
+    "Fog-only preserves overcast and sampled non-fog sky controls",
+    "Snowstorm stays enabled with effective fog0.60 after authored fog reset0",
+    "Normal exit and clean GPU/runtime log"
+  ],
+  "pair": [
+    {
+      "installedTime": "2026-10-04T22:35:40.3526212+02:00",
+      "name": "OpenPoseidon.exe",
+      "sha256": "E91AD3A0B998E0397FFDD8BC14F01A51F15A4AE7545F9372B992C2E93E38AF50"
+    },
+    {
+      "installedTime": "2026-10-04T22:34:57.1753247+02:00",
+      "name": "wgpu_renderer.dll",
+      "sha256": "6BD6C6E08269C113DA7D31435C5BFA9592D90AFBF81660EAA162CED8765C0E52"
+    }
+  ],
+  "installed": "codex/kolgujev-fog-corpse-fixes-20261004 626c7c6f 2026-10-04_22:36 deploy-ps1",
+  "states": {
+    "step7": {
+      "rain": 0,
+      "overcast": 0.4000000059604645,
+      "rendererSkyAvailable": true,
+      "rendererSky": {
+        "enabled": true,
+        "skyLighting": true,
+        "layeredFog": true,
+        "fogTerrain": [
+          1,
+          0,
+          1,
+          150
+        ],
+        "fogPatch": [
+          0.449999988079071,
+          250,
+          70,
+          30
+        ],
+        "fogLayer0": [
+          0,
+          35,
+          5,
+          0.00800000037997961
+        ],
+        "fogLayer1": [
+          70,
+          100,
+          5,
+          0.003000000026077032
+        ],
+        "fogOptics": [
+          0.949999988079071,
+          0.600000023841858,
+          0.850000023841858,
+          3
+        ],
+        "coverageFromWeather": true,
+        "coveragePinned": false,
+        "coverage": 0.9049999713897705,
+        "clearCoverage": 0.05000000074505806,
+        "fullCoverage": 0.949999988079071,
+        "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+      },
+      "sunAvailable": true,
+      "sunTravelY": -0.9539730548858643,
+      "nightEffect": 0,
+      "solarDrying": 0.3434303402900696,
+      "particleDensity": 0,
+      "particleSnowflakes": false,
+      "liquidRain": 0,
+      "fog": 0,
+      "snowAdjustedFog": 0.600000023841858,
+      "terrainRange": 49980,
+      "baseRange": 49980,
+      "objectRange": 49980,
+      "tacticalVisibility": 50000,
+      "selectedRange": 50000,
+      "ok": true
+    },
+    "step1": {
+      "rain": 0,
+      "overcast": 0.4000000059604645,
+      "rendererSkyAvailable": true,
+      "rendererSky": {
+        "enabled": true,
+        "skyLighting": true,
+        "layeredFog": false,
+        "fogTerrain": [
+          0.25,
+          80,
+          2,
+          450
+        ],
+        "fogPatch": [
+          0.699999988079071,
+          800,
+          200,
+          55
+        ],
+        "fogLayer0": [
+          12,
+          18,
+          1,
+          0.019999999552965164
+        ],
+        "fogLayer1": [
+          120,
+          125,
+          2,
+          0.014999999664723873
+        ],
+        "fogOptics": [
+          0.949999988079071,
+          0.600000023841858,
+          0.4000000059604645,
+          3
+        ],
+        "coverageFromWeather": true,
+        "coveragePinned": false,
+        "coverage": 0.4099999964237213,
+        "clearCoverage": 0.05000000074505806,
+        "fullCoverage": 0.949999988079071,
+        "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+      },
+      "sunAvailable": true,
+      "sunTravelY": -0.9539730548858643,
+      "nightEffect": 0,
+      "solarDrying": 0.3434303402900696,
+      "particleDensity": 0,
+      "particleSnowflakes": false,
+      "liquidRain": 0,
+      "fog": 0.699999988079071,
+      "snowAdjustedFog": 0.699999988079071,
+      "terrainRange": 49980,
+      "baseRange": 49980,
+      "objectRange": 49980,
+      "tacticalVisibility": 50000,
+      "selectedRange": 50000,
+      "ok": true
+    },
+    "step3": {
+      "rain": 0,
+      "overcast": 0.4000000059604645,
+      "rendererSkyAvailable": true,
+      "rendererSky": {
+        "enabled": true,
+        "skyLighting": true,
+        "layeredFog": true,
+        "fogTerrain": [
+          1,
+          0,
+          1,
+          150
+        ],
+        "fogPatch": [
+          0.3499999940395355,
+          250,
+          70,
+          30
+        ],
+        "fogLayer0": [
+          1,
+          5,
+          0.3499999940395355,
+          0.017999999225139618
+        ],
+        "fogLayer1": [
+          70,
+          100,
+          5,
+          0
+        ],
+        "fogOptics": [
+          0.949999988079071,
+          0.600000023841858,
+          0.4000000059604645,
+          3
+        ],
+        "coverageFromWeather": true,
+        "coveragePinned": false,
+        "coverage": 0.4099999964237213,
+        "clearCoverage": 0.05000000074505806,
+        "fullCoverage": 0.949999988079071,
+        "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+      },
+      "sunAvailable": true,
+      "sunTravelY": -0.9539730548858643,
+      "nightEffect": 0,
+      "solarDrying": 0.3434303402900696,
+      "particleDensity": 0,
+      "particleSnowflakes": false,
+      "liquidRain": 0,
+      "fog": 0.800000011920929,
+      "snowAdjustedFog": 0.800000011920929,
+      "terrainRange": 49980,
+      "baseRange": 49980,
+      "objectRange": 49980,
+      "tacticalVisibility": 50000,
+      "selectedRange": 50000,
+      "ok": true
+    },
+    "step5": {
+      "rain": 0,
+      "overcast": 0.4000000059604645,
+      "rendererSkyAvailable": true,
+      "rendererSky": {
+        "enabled": true,
+        "skyLighting": true,
+        "layeredFog": true,
+        "fogTerrain": [
+          1,
+          0,
+          1,
+          150
+        ],
+        "fogPatch": [
+          0.449999988079071,
+          250,
+          70,
+          30
+        ],
+        "fogLayer0": [
+          0,
+          35,
+          5,
+          0.00800000037997961
+        ],
+        "fogLayer1": [
+          70,
+          100,
+          5,
+          0.003000000026077032
+        ],
+        "fogOptics": [
+          0.949999988079071,
+          0.600000023841858,
+          0.850000023841858,
+          3
+        ],
+        "coverageFromWeather": true,
+        "coveragePinned": false,
+        "coverage": 0.4099999964237213,
+        "clearCoverage": 0.05000000074505806,
+        "fullCoverage": 0.949999988079071,
+        "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+      },
+      "sunAvailable": true,
+      "sunTravelY": -0.9539730548858643,
+      "nightEffect": 0,
+      "solarDrying": 0.3434303402900696,
+      "particleDensity": 0,
+      "particleSnowflakes": false,
+      "liquidRain": 0,
+      "fog": 0,
+      "snowAdjustedFog": 0,
+      "terrainRange": 49980,
+      "baseRange": 49980,
+      "objectRange": 49980,
+      "tacticalVisibility": 50000,
+      "selectedRange": 50000,
+      "ok": true
+    },
+    "step6": {
+      "rain": 0,
+      "overcast": 0.4000000059604645,
+      "rendererSkyAvailable": true,
+      "rendererSky": {
+        "enabled": true,
+        "skyLighting": true,
+        "layeredFog": true,
+        "fogTerrain": [
+          1,
+          0,
+          1,
+          150
+        ],
+        "fogPatch": [
+          0.3499999940395355,
+          250,
+          70,
+          30
+        ],
+        "fogLayer0": [
+          1,
+          5,
+          0.3499999940395355,
+          0.017999999225139618
+        ],
+        "fogLayer1": [
+          70,
+          100,
+          5,
+          0
+        ],
+        "fogOptics": [
+          0.949999988079071,
+          0.600000023841858,
+          0.850000023841858,
+          3
+        ],
+        "coverageFromWeather": true,
+        "coveragePinned": false,
+        "coverage": 0.9049999713897705,
+        "clearCoverage": 0.05000000074505806,
+        "fullCoverage": 0.949999988079071,
+        "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+      },
+      "sunAvailable": true,
+      "sunTravelY": -0.9539730548858643,
+      "nightEffect": 0,
+      "solarDrying": 0.3434303402900696,
+      "particleDensity": 0,
+      "particleSnowflakes": false,
+      "liquidRain": 0,
+      "fog": 0.899999976158142,
+      "snowAdjustedFog": 0.899999976158142,
+      "terrainRange": 49980,
+      "baseRange": 49980,
+      "objectRange": 49980,
+      "tacticalVisibility": 50000,
+      "selectedRange": 50000,
+      "ok": true
+    },
+    "step2": {
+      "rain": 0,
+      "overcast": 0.4000000059604645,
+      "rendererSkyAvailable": true,
+      "rendererSky": {
+        "enabled": true,
+        "skyLighting": true,
+        "layeredFog": true,
+        "fogTerrain": [
+          1,
+          0,
+          1,
+          150
+        ],
+        "fogPatch": [
+          0.449999988079071,
+          250,
+          70,
+          30
+        ],
+        "fogLayer0": [
+          0,
+          35,
+          5,
+          0.00800000037997961
+        ],
+        "fogLayer1": [
+          70,
+          100,
+          5,
+          0.003000000026077032
+        ],
+        "fogOptics": [
+          0.949999988079071,
+          0.600000023841858,
+          0.850000023841858,
+          3
+        ],
+        "coverageFromWeather": true,
+        "coveragePinned": false,
+        "coverage": 0.4099999964237213,
+        "clearCoverage": 0.05000000074505806,
+        "fullCoverage": 0.949999988079071,
+        "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+      },
+      "sunAvailable": true,
+      "sunTravelY": -0.9539730548858643,
+      "nightEffect": 0,
+      "solarDrying": 0.3434303402900696,
+      "particleDensity": 0,
+      "particleSnowflakes": false,
+      "liquidRain": 0,
+      "fog": 0,
+      "snowAdjustedFog": 0,
+      "terrainRange": 49980,
+      "baseRange": 49980,
+      "objectRange": 49980,
+      "tacticalVisibility": 50000,
+      "selectedRange": 50000,
+      "ok": true
+    }
+  },
+  "passed": true,
+  "privateRuntimeReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\fog-reset-ui\\20261004-223633\\receipt.json",
+  "privateLogSha256": "7F5CCE5D68EC6BDAACF771DCFA1599F6765CEED22C23FB29DEC13AF6C4E9B489",
+  "captures": [
+    {
+      "sha256": "9E0814D80FF65A7F9321A77A472B9966732B0536435374AD2D2B978AC4227AFC",
+      "step": 1,
+      "privatePath": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\fog-reset-ui\\20261004-223633\\step1.png"
+    },
+    {
+      "sha256": "12A993621F3A20749245F61FB59BC85CE5073982531E459999A28CD6183FB6D9",
+      "step": 2,
+      "privatePath": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\fog-reset-ui\\20261004-223633\\step2.png"
+    },
+    {
+      "sha256": "686F2DEAE7870D6C87387D0E48BA3BC92BD723D4FA50131EF9E65876A02476E2",
+      "step": 4,
+      "privatePath": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\fog-reset-ui\\20261004-223633\\step4.png"
+    },
+    {
+      "sha256": "ECD0BE5CD32A0816F647834CA91CA47E8130A2BBB82D77136AEF27F10F847311",
+      "step": 5,
+      "privatePath": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\fog-reset-ui\\20261004-223633\\step5.png"
+    },
+    {
+      "sha256": "7E7A7622DB71186E55D3339007652EEC80EEBF4B1C85B0ECEE6076CFB520AB1A",
+      "step": 7,
+      "privatePath": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\fog-reset-ui\\20261004-223633\\step7.png"
+    }
+  ]
+}

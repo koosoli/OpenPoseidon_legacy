@@ -5,6 +5,17 @@ execution:
   baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
   integration_owner: Oliver Kay
   activation_state: ACTIVE
+  fog_reset_checkpoint:
+    state: INSTALLED_FOG_AND_GENERAL_RESET_UI_CLICKS_PASSED
+    installed_source_commit: 626c7c6f
+    installed_local_time: 2026-10-04_22:36
+    evidence: docs/verification/fog-reset-20261004.md
+    runtime_receipt: docs/verification/fog-reset-20261004-runtime.json
+    note: >-
+      Weather Fog reset and general Reset settings restore compiled fog appearance
+      and zero authored amount. Actual UI clicks, altered profiles, sampled weather
+      preservation and active snowfall fog floor checked. Existing snow tracks are
+      not erased. Prior fog visual-quality limitations remain unchanged.
   forest_single_missions_local_checkpoint:
     state: LOCAL_INSTALLED_MENU_AND_BOTH_MISSION_LOADS_PASSED
     installed_engine_source_commit: 08ecd9a4
