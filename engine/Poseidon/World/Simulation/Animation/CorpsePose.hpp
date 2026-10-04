@@ -25,9 +25,20 @@ inline bool CorpseProxyContactLift(float minimumClearance, float& lift)
 // Ordinary stock stance can embed its boot in the native floor. Permit only a
 // bounded boot contact for the solver to resolve, not a displaced skin pose.
 // The explicit settled diagnostic and every other part retain positive clearance.
-inline bool CorpseInitialContactAdmitted(bool ordinaryStockBoot, float clearance)
+inline bool CorpseGroundedContactRecoveryAdmitted(bool pendingGroundedAutomatic, float rootClearance)
 {
-    return std::isfinite(clearance) && clearance >= (ordinaryStockBoot ? -.025f : .003f);
+    return pendingGroundedAutomatic && std::isfinite(rootClearance) &&
+        rootClearance >= -.025f && rootClearance <= .3f;
+}
+
+// A grounded automatic handoff may start with authored prone contact. The real
+// solver resolves at most 100 mm only after every body origin and native/solver
+// floor agree. No skin/root displacement, collider resize or retirement change.
+inline bool CorpseInitialContactAdmitted(bool ordinaryStockBoot, float clearance,
+    bool groundedAutomaticRecovery = false)
+{
+    return std::isfinite(clearance) && clearance >=
+        (groundedAutomaticRecovery ? -.1f : ordinaryStockBoot ? -.025f : .003f);
 }
 
 inline bool CorpseAutomaticRetirementAdmitted(bool supported, bool quiet,

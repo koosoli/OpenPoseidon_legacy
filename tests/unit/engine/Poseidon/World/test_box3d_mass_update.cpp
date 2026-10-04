@@ -10,6 +10,103 @@
 using namespace Poseidon::Physics;
 using namespace Poseidon;
 
+TEST_CASE("Connected grounded prone contacts recover bounded initial overlap without a pose jump", "[physics][articulation][corpse-prone-contact]")
+{
+    CHECK(CorpseGroundedContactRecoveryAdmitted(true,0));
+    CHECK(CorpseGroundedContactRecoveryAdmitted(true,-.025f));
+    CHECK(CorpseGroundedContactRecoveryAdmitted(true,.3f));
+    CHECK_FALSE(CorpseGroundedContactRecoveryAdmitted(false,0));
+    CHECK_FALSE(CorpseGroundedContactRecoveryAdmitted(true,-.0251f));
+    CHECK_FALSE(CorpseGroundedContactRecoveryAdmitted(true,.301f));
+    CHECK_FALSE(CorpseGroundedContactRecoveryAdmitted(true,std::numeric_limits<float>::quiet_NaN()));
+    CHECK(CorpseInitialContactAdmitted(false,-.1f,true));
+    CHECK_FALSE(CorpseInitialContactAdmitted(false,-.1001f,true));
+    CHECK_FALSE(CorpseInitialContactAdmitted(false,-.1f,false));
+    CHECK_FALSE(CorpseInitialContactAdmitted(true,-.1f,false));
+    CHECK_FALSE(CorpseInitialContactAdmitted(false,std::numeric_limits<float>::quiet_NaN(),true));
+    // Controlled full solver graph, not a retail skin visual proof. Installed
+    // prone refusals measured 36/90 mm; exercise those and the 100 mm boundary.
+    // All eleven origins begin above the same flat native/solver floor.
+    const Vector3 positions[]={{0,.18f,0},{0,.2f,.35f},{0,.16f,.72f},
+        {.35f,.13f,.35f},{.45f,.11f,.04f},{-.35f,.13f,.35f},{-.45f,.11f,.04f},
+        {.13f,.16f,-.35f},{.13f,.14f,-.8f},{-.13f,.16f,-.35f},{-.13f,.14f,-.8f}};
+    const Vector3 extents[]={{.2f,.18f,.19f},{.22f,.2f,.2f},{.12f,.16f,.14f},
+        {.09f,.13f,.18f},{.075f,.11f,.17f},{.09f,.13f,.18f},{.075f,.11f,.17f},
+        {.11f,.16f,.24f},{.09f,.14f,.25f},{.11f,.16f,.24f},{.09f,.14f,.25f}};
+    const float masses[]={12,24,5,3,2,3,2,8,4,8,4};
+    const int pairs[][2]={{0,1},{1,2},{1,3},{3,4},{1,5},{5,6},{0,7},{7,8},{0,9},{9,10}};
+    for(bool anatomical:{false,true}) for(float overlap:{.0360717773f,.0903778076f,.1f})
+    {
+        auto backend=CreatePhysicsBackend(); REQUIRE(backend); REQUIRE(backend->Create());
+        float heights[81]={}; TerrainField field; field.heights=heights;
+        field.width=field.height=9; field.cellSize=1; field.originX=field.originZ=-4;
+        REQUIRE(backend->SetTerrain(field));
+        BodyId bodies[11]; JointId joints[10]; Matrix4 initial[11];
+        std::vector<Vector3> hulls[11]; BodyMotion motion[11];
+        ArticulatedInitialMotion inherited; inherited.collisionFamily=-2;
+        for(int part=0;part<11;++part)
+        {
+            Vector3 center=positions[part]-VUp*overlap; REQUIRE(center.Y()>0);
+            initial[part]=MIdentity; initial[part].SetPosition(center);
+            for(int c=0;c<8;++c) hulls[part].emplace_back(
+                (c&1)?extents[part].X():-extents[part].X(),
+                (c&2)?extents[part].Y():-extents[part].Y(),
+                (c&4)?extents[part].Z():-extents[part].Z());
+            Vector3 floor;
+            REQUIRE(backend->RayHitAnything(center+VUp,center-VUp,QueryFilter{ColliderFlags::Roadway}));
+            backend->CastRay(center+VUp,center-VUp,floor,QueryFilter{ColliderFlags::Roadway});
+            REQUIRE(std::abs(floor.Y())<.025f);
+            ConvexPiece piece{hulls[part].data(),8,ColliderFlags::Solid};
+            bodies[part]=backend->SpawnArticulatedPiece(piece,initial[part],masses[part],inherited);
+            REQUIRE(bodies[part].IsValid()); REQUIRE(backend->GetBodyMotion(bodies[part],motion[part]));
+            CHECK(motion[part].position==initial[part].Position());
+            CHECK(motion[part].axisX==VAside); CHECK(motion[part].axisY==VUp); CHECK(motion[part].axisZ==VForward);
+        }
+        for(int j=0;j<10;++j)
+        {
+            int a=pairs[j][0],b=pairs[j][1];
+            const Vector3 pivot=(initial[a].Position()+initial[b].Position())*.5f;
+            const bool distal=j==3||j==5||j==7||j==9;
+            Vector3 axis=initial[b].Position()-initial[a].Position(); axis.Normalize();
+            if(anatomical&&distal) axis=VAside;
+            Matrix4 frame(MDirection,axis,VUp); frame.SetPosition(pivot);
+            ArticulatedJointDef def; def.first=bodies[a]; def.second=bodies[b];
+            def.firstFrame=initial[a].InverseRotation()*frame; def.secondFrame=initial[b].InverseRotation()*frame;
+            def.coneAngle=distal?.3f:.9f; def.twistAngle=distal?.2f:.6f;
+            if(anatomical&&distal) { def.kind=ArticulatedJointKind::Hinge; def.lowerAngle=-.08f; def.upperAngle=2.4f; }
+            joints[j]=backend->AddArticulatedJoint(def); REQUIRE(joints[j].IsValid());
+        }
+        float maximumLinear=0,maximumAngular=0,maximumTravel=0,minimumFinal=100,quietSeconds=0;
+        bool recovered=false;
+        for(int step=0;step<900;++step)
+        {
+            backend->Step(1.f/60); bool quiet=true,supported=false;
+            for(int part=0;part<11;++part)
+            {
+                REQUIRE(backend->GetBodyMotion(bodies[part],motion[part]));
+                REQUIRE(motion[part].position.IsFinite()); REQUIRE(motion[part].linearVelocity.IsFinite()); REQUIRE(motion[part].angularVelocity.IsFinite());
+                const float linear=motion[part].linearVelocity.Size(),angular=motion[part].angularVelocity.Size();
+                maximumLinear=std::max(maximumLinear,linear); maximumAngular=std::max(maximumAngular,angular);
+                maximumTravel=std::max(maximumTravel,(motion[part].position-initial[part].Position()).Size());
+                quiet&=linear<.06f&&angular<.12f; Vector3 floor;
+                supported|=backend->GetArticulatedGroundSupport(bodies[part],floor);
+            }
+            quietSeconds=supported&&quiet?quietSeconds+1.f/60:0;
+            if(CorpseAutomaticRetirementAdmitted(supported,quiet,quietSeconds,(step+1)/60.f))
+            { recovered=true; break; }
+        }
+        for(int part=0;part<11;++part) for(const auto& p:hulls[part])
+            minimumFinal=std::min(minimumFinal,(motion[part].position+motion[part].axisX*p.X()+motion[part].axisY*p.Y()+motion[part].axisZ*p.Z()).Y());
+        std::printf("PRONECONTACT hinges=%d overlap=%.9g finalMin=%.9g maxLinear=%.9g maxAngular=%.9g maxTravel=%.9g recovered=%d\n",
+            anatomical?4:0,overlap,minimumFinal,maximumLinear,maximumAngular,maximumTravel,recovered);
+        CHECK(maximumLinear<15); CHECK(maximumAngular<20); CHECK(maximumTravel<2.5f);
+        CHECK(minimumFinal>-.01f); CHECK(recovered);
+        for(auto joint:joints) backend->RemoveJoint(joint);
+        for(auto body:bodies) backend->RemoveBody(body);
+        CHECK(backend->GetStats().articulatedBodies==0); CHECK(backend->GetStats().articulatedJoints==0); backend->Destroy();
+    }
+}
+
 TEST_CASE("Passive articulated angular damping preserves handoff momentum and ballistic gravity", "[physics][articulation][corpse-damping]")
 {
     auto backend=CreatePhysicsBackend(); REQUIRE(backend); REQUIRE(backend->Create());

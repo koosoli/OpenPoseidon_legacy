@@ -1371,6 +1371,9 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
     Physics::PhysicsWorld* world = Physics::GetPhysicsWorld();
     if (!world || !world->IsCreated() || !world->GetStats().terrainRegistered)
     { refusal = "registered-physics-terrain-required"; return false; }
+    const bool groundedContactRecovery = CorpseGroundedContactRecoveryAdmitted(
+        _automaticCorpsePose && _automaticCorpsePose->pending && _automaticDeathEligible && _landContact,
+        Position().Y()-GLandscape->RoadSurfaceY(Position()+VUp*.5f));
     Skeleton* skeleton = _corpsePoseSkeleton.GetRef();
     if (!skeleton || skeleton->NBones() != 33) { refusal = "complete-stock-33-bone-palette-required"; return false; }
     const char* names[][6] = {{"pzadek","lzadek","bricho",nullptr},
@@ -1548,6 +1551,21 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
             center = (lo+hi)*0.5f;
         }
         state->initial[part] = MIdentity; state->initial[part].SetPosition(center);
+        if (groundedContactRecovery)
+        {
+            // Before admitting overlap, every actual body origin must remain
+            // above both positively identified floors. This is not an airborne
+            // capture or an attempt to rescue a body origin buried in terrain.
+            const float roadY=GLandscape->RoadSurfaceY(center+VUp*.5f);
+            const auto filter=Physics::QueryFilter{Physics::ColliderFlags::Roadway};
+            Vector3 floor;
+            if (!center.IsFinite() || !std::isfinite(roadY) || center.Y()<=roadY ||
+                !world->RayHitAnything(center+VUp*.8f,center-VUp*3.2f,filter))
+            { refusal="grounded-contact-recovery-body-origin-not-above-ground"; return false; }
+            world->CastRay(center+VUp*.8f,center-VUp*3.2f,floor,filter);
+            if (!floor.IsFinite() || std::abs(floor.Y()-roadY)>.025f || center.Y()<=floor.Y())
+            { refusal="grounded-contact-recovery-body-origin-floor-disagrees"; return false; }
+        }
         for (auto& point : vertices[part]) point = (point-center)*(_automaticCorpsePose ? .90f : .40f);
         float proxyClearance = std::numeric_limits<float>::infinity();
         float nativeProxyClearance = std::numeric_limits<float>::infinity();
@@ -1597,7 +1615,7 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
             if (std::isfinite(distance)) maximumRootDistance = std::max(maximumRootDistance,distance);
             ++fittedVertices;
             const bool ordinaryBoot = _automaticCorpsePose && (part == 8 || part == 10);
-            if (!finite || !CorpseInitialContactAdmitted(ordinaryBoot,clearance) ||
+            if (!finite || !CorpseInitialContactAdmitted(ordinaryBoot,clearance,groundedContactRecovery) ||
                 clearance > (_automaticCorpsePose ? 2.8f : .8f) || distance > 2.5f)
             {
                 if (fitRefusal.GetLength() == 0)
@@ -1644,13 +1662,13 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
             { refusal = "solver-floor-disagrees-with-authored-contact"; return false; }
             state->minimumClearance = std::min(state->minimumClearance,supported.Y()-floor.Y());
             const bool ordinaryBoot = _automaticCorpsePose && (part == 8 || part == 10);
-            if (!CorpseInitialContactAdmitted(ordinaryBoot,supported.Y()-floor.Y()))
+            if (!CorpseInitialContactAdmitted(ordinaryBoot,supported.Y()-floor.Y(),groundedContactRecovery))
             { refusal = "inset-collider-penetrates-solver-floor"; return false; }
         }
     }
     if (_automaticCorpsePose && state->minimumClearance < .003f)
-        LOG_INFO(World,"AUTORAGDOLL: bounded initial boot contact minimumClearance={} maximumPenetration=0.025 skinAndOriginsUnchanged=1",
-            state->minimumClearance);
+        LOG_INFO(World,"AUTORAGDOLL: bounded initial contact minimumClearance={} maximumPenetration={} groundedRecovery={} skinAndOriginsUnchanged=1",
+            state->minimumClearance,groundedContactRecovery?.1f:.025f,groundedContactRecovery);
     for (int part = 0; part < 11; ++part)
     {
         Physics::ConvexPiece piece{vertices[part].data(), static_cast<int>(vertices[part].size()), Physics::ColliderFlags::Solid};
