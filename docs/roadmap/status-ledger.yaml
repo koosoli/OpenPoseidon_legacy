@@ -382,7 +382,7 @@ tickets:
         verified_commit: null
     test_ids: [ffi-abi-layout-refusal, ffi-abi-version-contract, ffi-separately-built-dll-refusal]
     benchmark_artifacts: []
-    evidence_hash: 7f9bf2c2a59495123c37f4c3491578eab59450fbe9d108a116d33067c610aed0
+    evidence_hash: cb68ae626420c5122423da1e8e83c60dca8a4d1f10d77c057b450c9fd23a0aae
     decision_record: null
     known_failures:
       - >-
@@ -888,7 +888,7 @@ tickets:
         symbol: MLOD::readP3DMFaceTable
     test_ids: [ast-011b]
     benchmark_artifacts: []
-    evidence_hash: 8a8954b9a943983669a16aa0ae6331f690c1da8ad4c6794fb1778ce50408eeb3
+    evidence_hash: 0ebb7a841291e93b67a0343bc0d949bf28458e116f931e8c3c2a4bc05474f99e
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: P3DM_STATIC_GEOMETRY

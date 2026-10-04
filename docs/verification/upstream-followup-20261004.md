@@ -50,12 +50,21 @@ contract. Model loading regressions above and the separately recorded installed
 excavation checks pass. Its hash will be refreshed with that limited scope;
 UNVERIFIED source winding and PARTIAL runtime material coverage stay unchanged.
 
-The full ledger validators are still blocked by older stale source evidence,
-starting at CORE-NEG-002 (its ABI source has changed since the historical
-verification). A full read-only sweep also found stale records outside this
-upstream slice. They are not silently rehashed or promoted: each needs its own
-contract review. This checkpoint therefore does **not** claim that the whole
-modernisation ledger validates. CORE-005 and AST-011B alone were refreshed.
+The full ledger validators remain blocked by older stale source evidence outside
+this slice. A full read-only sweep found those records; they are not silently
+rehashed or promoted. Each needs its own contract review. This checkpoint does
+**not** claim that the whole modernisation ledger validates.
+
+CORE-NEG-002 was subsequently reviewed for the new paired ABI21 boundary: both
+languages assert the enlarged sky/runtime configuration sizes and append the
+new standalone fog configuration at the same position in their layout hash.
+The actual compiled Rust library test executable passed all 13 ABI tests,
+including matching, wrong version/layout, shared-size drift and unsupported
+feature refusal. Its source matches root after line-ending normalization.
+Installed ABI21 game/renderer startup and normal shutdown passed. This does not
+claim a new separately built incompatible-DLL test or owner review; the existing
+same-size reorder limitation and historical amendment stay recorded. Its source
+hash, CORE-005's and AST-011B's alone were refreshed with these limited scopes.
 
 ## Installed runtime
 
