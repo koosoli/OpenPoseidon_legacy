@@ -180,4 +180,3 @@ fn production_fog_cloud_and_surface_shaders_compose() {
    .validate(&m).unwrap_or_else(|e|panic!("{path}: {e:?}"));
  }
 }
-

@@ -170,4 +170,3 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
         textureStore(result,vec3<i32>(i32(id.x),i32(id.y),i32(z)),vec4<f32>(colour,trans));
     }
 }
-

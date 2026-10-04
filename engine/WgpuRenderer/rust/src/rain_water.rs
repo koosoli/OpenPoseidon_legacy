@@ -2136,4 +2136,3 @@ mod full_draw_tests {
         assert_eq!(actual[8],3.);assert_eq!(actual[9],0.,"Native upper triangle is above horizontal head");drop(data);readback.unmap();
     }
 }
-

@@ -3336,6 +3336,7 @@ constexpr uint32_t WgrLayoutHash()
     h = WgrHashSize(h, sizeof(WgrLodDemandRow));
     h = WgrHashSize(h, sizeof(WgrLodDemandReport));
     h = WgrHashSize(h, sizeof(WgrMeshHandleFactSummary));
+    h = WgrHashSize(h, sizeof(WgrLayeredFog)); // ABI21: append-only standalone shared config
     return h;
 }
 

@@ -1877,6 +1877,7 @@ const fn wgr_layout_hash() -> u32 {
     h = hash_size(h, sz::<WgrLodDemandRow>());
     h = hash_size(h, sz::<WgrLodDemandReport>());
     h = hash_size(h, sz::<WgrMeshHandleFactSummary>());
+    h = hash_size(h, sz::<WgrLayeredFog>()); // ABI21: append-only standalone shared config
     h
 }
 
