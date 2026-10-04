@@ -221,7 +221,7 @@ partial closing and interior negatives on the real composed shaders. No grade,
 layer-density, global sky or production composition change was made from this
 assessment; the finite candidate is functional but **quality unaccepted**.
 
-### Bounded closure correction, installed recheck pending
+### Bounded closure correction, installed recheck passed
 
 The subsequent source correction changes only the enabled, camera-matched
 surface combination. Actual admitted foreground is transported at its local
@@ -250,4 +250,10 @@ mixtures and a discriminating old-formula counterexample. The first GPU run
 found a one-ULP `mix` endpoint cancellation; explicit endpoint returns fixed it
 without weakening assertions. Current full shader compositions and existing
 roof/native/overflow/weather/disabled guards also passed. Installed contour and
-timing recheck remains necessary; quality is still unaccepted and default OFF.
+timing recheck subsequently passed in installed `5ee637d7` with the settled
+runner: all four arms/twelve views, equal-weather ranges, source/camera/weather
+controls, owned normal exits and unchanged pair. Root inspected ground/between/
+above ON/OFF: the previous hard distant contour is absent in the corrected
+above-layer view. Broader canopy/card, exposure, interior and cost acceptance
+remain open; default stays OFF. See `docs/verification/layered-fog-20261004.md`
+and its curated receipt, including the retained initial startup range refusal.

@@ -38,7 +38,10 @@ execution:
     branch: codex/modernisation-followup-20261004
     backup_branch: codex/backup-excavation-20261004
     backup_commit: 8b93dec7
-    state: ACTIVE
+    state: BOUNDED_EXPERIMENTAL_CHECKPOINT_HOUSE_IDENTIFICATION_OPEN
+    installed_source_commit: 5ee637d7
+    installed_local_time: 2026-10-04_04:41
+    wrapup_evidence: docs/verification/modernisation-followup-20261004.md
     authorised_order:
       - Finish excavation editor and installed acceptance (complete)
       - Create and push backup branch (complete)
@@ -50,7 +53,7 @@ execution:
     upstream_audit_location: docs/roadmap/modernisation/upstream
     house_state: UNREPRODUCED_PENDING_TARGET_IDENTIFICATION
     house_evidence: docs/roadmap/modernisation/EVERON-PLACEMENT-DIAGNOSTIC-20261004.md
-    fog_state: EXPERIMENTAL_INSTALLED_CONTROLS_AND_GPU_SAMPLES_PASSED_APPEARANCE_OPEN
+    fog_state: EXPERIMENTAL_INSTALLED_CLOSURE_AND_CONTROLS_PASSED_BROAD_APPEARANCE_OPEN
     fog_evidence: docs/verification/layered-fog-20261004.md
     fog_runtime_receipt: docs/verification/layered-fog-20261004-runtime.json
     ragdoll_state: BOUNDED_STOCK_STANDING_RIFLE_SAVE_AND_RUNTIME_TOGGLE_PASSED
@@ -65,11 +68,13 @@ execution:
       is not inferred from ancestry. Root owns all installed deployment/runtime.
       Exact camera, twelve source-bound foundations and near/far views inspected;
       reported floating owner not identified. Optional owner detail pending.
-      No unverified global snapping. Continue independent authorised tasks.
+      No unverified global snapping. Bounded authorised follow-up stops here per
+      owner request to avoid endless work; whole roadmap remains active.
       All four installed upstream fixtures passed after the narrow repair of
       an older compaction validation-order defect. Fog controls and bounded
-      GPU samples passed; hard distant contour and default exposure limit
-      appearance acceptance. Stock ordinary standing ragdolls, retained poses,
+      GPU samples passed. Final closure correction removes the inspected hard
+      distant contour; twelve settled installed views passed. Broader canopy,
+      exposure, interiors and representative cost acceptance remain open. Stock ordinary standing ragdolls, retained poses,
       actual save/load, actual AK74 kill and the shared dev-panel toggle path
       passed. Missing Eastern centre in the rifle fixture was repaired;
       crouch/prone pose is not established.

@@ -52,3 +52,42 @@ interiors/canopies and a quiet representative cost campaign need further work.
 Those limits are preserved rather than treating a passing encoding trace as
 visual acceptance. This is a finite experimental implementation for subsequent
 owner testing, with ordinary launches keeping the existing fog path.
+
+## Final closure repair and installed recheck
+
+Engine source `5ee637d7` fixes the local-versus-final transport mismatch:
+physically admitted foreground uses local transport, while synthetic legacy
+far-cover uses the final-volume transport already used by the sky background.
+Explicit open/closed endpoints avoid a one-ULP GPU mix cancellation. The complete
+Game/Tests build passed; six actual GPU/shader tests passed, including exact
+closure, gated foreground, roof/native/overflow/weather negatives and composed
+production shaders. OFF still returns the original mixture before new reads.
+
+The first installed attempt stopped at the unchanged cross-arm terrain-range
+guard before capturing an ON view. Weather/range updates have distinct engine
+boundaries; the runner now requires 30 actual rendered frames and three stable
+consecutive range readings before freezing. It retains the later exact range
+checks and timeout. No tolerance was weakened. That failed attempt remains in
+the curated receipt, rather than being counted as acceptance.
+
+The settled campaign `original-everon-fog-closure-settled-20261004-044419` passed
+all four arms / twelve views. Equal-weather terrain/base/tactical ranges were
+515.25 m in OFF and ON; zero-weather ranges were 1480 m. Native source, actual
+weather/cameras, current encoding traces, normal owned shutdown and unchanged
+matched-pair hashes passed. Manual Hable exposure stayed 0.15 in every arm.
+Root inspected corrected ON/OFF ground, between and above views alongside the
+previous failed contour screenshot. The previous hard distant terrain contour
+is absent from the corrected above-layer view; the road remains readable and
+additional depth haze is present. Canopy/card fog appearance, broad exposure,
+interior and cost acceptance remain open. **Default remains OFF**; this is a
+bounded correction, not general visual promotion.
+
+Latest transport samples were 0.180-0.207 ms at 1280x720. Inclusive frame samples
+were OFF 4.900-5.063 ms and ON 5.278-5.534 ms. The asynchronous single-sample
+limitations above apply; these are not a statistical overall-cost result.
+
+Installed stamp: `5ee637d7+dirty`, 2026-10-04 04:41 local. The dirty state at
+deployment was only the rifle-acceptance Markdown correction; engine and
+shader source matched the committed tip. Later runner/doc commits do not alter
+that pair. EXE SHA256 `17B0A9F51C75CA6A5E18EE666F6E9567735ECABEC26378134A722C40F6D4712C`;
+renderer SHA256 `40E217CEF85798E1B80E894CB9B733F4AE6826B51AE586C0BC3B14A8E21565FC`.

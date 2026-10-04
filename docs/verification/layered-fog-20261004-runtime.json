@@ -2517,6 +2517,1644 @@
           "nativeY": 148.592
         }
       }
+    },
+    {
+      "rawReceipt": "build\\layered-fog\\original-everon-fog-closure-final-20261004-044144\\result.json",
+      "rawReceiptSha256": "8a38a8b9bbf5ac608afd033a144dc27ce4f68bdf654fe0ed89d5359caceeb0c4",
+      "receipt": {
+        "passed": false,
+        "expectedCommit": "5ee637d7",
+        "installed": {
+          "stamp": "codex/modernisation-followup-20261004 5ee637d7+dirty 2026-10-04_04:41 deploy-ps1\r\n",
+          "files": [
+            {
+              "name": "OpenPoseidon.exe",
+              "bytes": 31525888,
+              "sha256": "17B0A9F51C75CA6A5E18EE666F6E9567735ECABEC26378134A722C40F6D4712C"
+            },
+            {
+              "name": "wgpu_renderer.dll",
+              "bytes": 18564096,
+              "sha256": "40E217CEF85798E1B80E894CB9B733F4AE6826B51AE586C0BC3B14A8E21565FC"
+            }
+          ]
+        },
+        "scriptSha256": "705962DF1DCB2F5B895C48925FE5859DEA8A3A10AD705DFCD854617012D85848",
+        "measure": true,
+        "measureWarmupRenderedFrames": 256,
+        "measureDeadlineSeconds": 90,
+        "exposureControl": {
+          "supplied": true,
+          "scope": "Explicit startup environment controls when supplied: fixed base exposure, adaptive exposure OFF, manual Hable time-of-day grade. Otherwise normal defaults. Configuration receipt, not same-frame GPU uniform readback. Bloom remains unchanged.",
+          "environment": {
+            "WGR_AUTO_EXPOSURE": "0",
+            "WGR_TONEMAP": "1",
+            "WGR_EXPOSURE": "0.15"
+          }
+        },
+        "arms": [
+          {
+            "name": "off",
+            "settings": {
+              "WGR_LAYERED_FOG_TRACE": "1",
+              "WGR_EXPOSURE": "0.15",
+              "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-final-20261004-044144\\off\\user",
+              "WGR_TONEMAP": "1",
+              "WGR_LAYERED_FOG": "0",
+              "POSEIDON_SNOWLINE": "off",
+              "WGR_TEMPORAL": "0",
+              "WGR_GRASS": "0",
+              "WGR_WEATHER_COVER": "1",
+              "WGR_WEATHER_COVER_FAR": "1",
+              "POSEIDON_SNOW_TEST_DEPTH": "0",
+              "WGR_AUTO_EXPOSURE": "0"
+            },
+            "exit": 0,
+            "source": {
+              "count": 0,
+              "selectedId": 0,
+              "records": [],
+              "status": "Caves cleared. Terrain heights are unchanged.",
+              "missionLocal": true,
+              "worldName": "worlds\\eden.wrp",
+              "grid": 6.25,
+              "heightRevision": 6,
+              "brushDefaultRadius": 8,
+              "inFootprint": false,
+              "atHeight": false,
+              "holeFloor": 0,
+              "terrainY": 148.59173583984375,
+              "roadY": 148.59173583984375,
+              "cameraFloorY": 148.59173583984375,
+              "drawRecords": 0,
+              "boundedHeader": false,
+              "ok": true
+            },
+            "weather": {
+              "rain": 0,
+              "overcast": 0,
+              "rendererSkyAvailable": true,
+              "rendererSky": {
+                "enabled": true,
+                "skyLighting": true,
+                "coverageFromWeather": true,
+                "coveragePinned": true,
+                "coverage": 0,
+                "clearCoverage": 0.05000000074505806,
+                "fullCoverage": 0.949999988079071,
+                "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+              },
+              "sunAvailable": true,
+              "sunTravelY": -0.9539730548858643,
+              "nightEffect": 0,
+              "solarDrying": 0.9539730548858643,
+              "particleDensity": 0,
+              "particleSnowflakes": false,
+              "liquidRain": 0,
+              "fog": 0.449999988079071,
+              "terrainRange": 515.25,
+              "baseRange": 515.25,
+              "objectRange": 1000,
+              "tacticalVisibility": 515.25,
+              "selectedRange": 1500,
+              "ok": true
+            },
+            "nativeY": 148.592,
+            "views": [
+              {
+                "cameraXYZDirectionXYZ": [
+                  6532.0,
+                  150.592,
+                  6466.0,
+                  -0.65,
+                  -0.07,
+                  -0.76
+                ],
+                "sampledGpu": {
+                  "fogTransport": {
+                    "available": true,
+                    "cpuMs": 0.0024999999441206455,
+                    "containedBy": -1,
+                    "container": false,
+                    "milliseconds": 0.00102399999741465,
+                    "index": 88
+                  },
+                  "gpuFrame": {
+                    "available": true,
+                    "cpuMs": 2.478800058364868,
+                    "containedBy": 25,
+                    "container": false,
+                    "milliseconds": 4.86399984359741,
+                    "index": 25
+                  },
+                  "completedCpuFrames": 256
+                },
+                "name": "ground",
+                "trace": [
+                  "[wgr] layered fog: frame=120 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=240 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=360 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=480 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]"
+                ],
+                "renderConfiguration": {
+                  "outputWidth": 1280,
+                  "activeUpscaler": 2,
+                  "renderWidth": 858,
+                  "outputHeight": 720,
+                  "renderHeight": 482,
+                  "msaaSamples": 4
+                },
+                "weather": {
+                  "rain": 0,
+                  "overcast": 0,
+                  "rendererSkyAvailable": true,
+                  "rendererSky": {
+                    "enabled": true,
+                    "skyLighting": true,
+                    "coverageFromWeather": true,
+                    "coveragePinned": true,
+                    "coverage": 0,
+                    "clearCoverage": 0.05000000074505806,
+                    "fullCoverage": 0.949999988079071,
+                    "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+                  },
+                  "sunAvailable": true,
+                  "sunTravelY": -0.9539730548858643,
+                  "nightEffect": 0,
+                  "solarDrying": 0.9539730548858643,
+                  "particleDensity": 0,
+                  "particleSnowflakes": false,
+                  "liquidRain": 0,
+                  "fog": 0.449999988079071,
+                  "terrainRange": 515.25,
+                  "baseRange": 515.25,
+                  "objectRange": 1000,
+                  "tacticalVisibility": 515.25,
+                  "selectedRange": 1500,
+                  "ok": true
+                },
+                "timingSha256": "41B05D3A9261B83AE85E64EEFB15A429EE126B7AE05BBB5CFF78A39C2CF2B420",
+                "timingReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-final-20261004-044144\\off\\ground.frame-performance.json",
+                "pngSha256": "512E260B2FCE5C1780E80DA03C3E2C99E3251C18E55B0BA8DC4DF76FBBAD90ED",
+                "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-final-20261004-044144\\off\\ground.png"
+              },
+              {
+                "cameraXYZDirectionXYZ": [
+                  6532.0,
+                  174.592,
+                  6466.0,
+                  -0.65,
+                  -0.07,
+                  -0.76
+                ],
+                "sampledGpu": {
+                  "fogTransport": {
+                    "available": true,
+                    "cpuMs": 0.0019000000320374966,
+                    "containedBy": -1,
+                    "container": false,
+                    "milliseconds": 0.00102399999741465,
+                    "index": 88
+                  },
+                  "gpuFrame": {
+                    "available": true,
+                    "cpuMs": 1.1677000522613525,
+                    "containedBy": 25,
+                    "container": false,
+                    "milliseconds": 5.77638387680054,
+                    "index": 25
+                  },
+                  "completedCpuFrames": 256
+                },
+                "name": "between",
+                "trace": [
+                  "[wgr] layered fog: frame=600 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=720 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=840 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=960 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=1080 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]"
+                ],
+                "renderConfiguration": {
+                  "outputWidth": 1280,
+                  "activeUpscaler": 2,
+                  "renderWidth": 858,
+                  "outputHeight": 720,
+                  "renderHeight": 482,
+                  "msaaSamples": 4
+                },
+                "weather": {
+                  "rain": 0,
+                  "overcast": 0,
+                  "rendererSkyAvailable": true,
+                  "rendererSky": {
+                    "enabled": true,
+                    "skyLighting": true,
+                    "coverageFromWeather": true,
+                    "coveragePinned": true,
+                    "coverage": 0,
+                    "clearCoverage": 0.05000000074505806,
+                    "fullCoverage": 0.949999988079071,
+                    "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+                  },
+                  "sunAvailable": true,
+                  "sunTravelY": -0.9539730548858643,
+                  "nightEffect": 0,
+                  "solarDrying": 0.9539730548858643,
+                  "particleDensity": 0,
+                  "particleSnowflakes": false,
+                  "liquidRain": 0,
+                  "fog": 0.449999988079071,
+                  "terrainRange": 515.25,
+                  "baseRange": 515.25,
+                  "objectRange": 1000,
+                  "tacticalVisibility": 515.25,
+                  "selectedRange": 1500,
+                  "ok": true
+                },
+                "timingSha256": "5217D610CFC378FFA2785988ACBBF2AB125CD5E85556AA499333E07EE4315E30",
+                "timingReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-final-20261004-044144\\off\\between.frame-performance.json",
+                "pngSha256": "9D31C2CC3DBB4EAB8514E9DD83806D1BC5B6CA0D74E64B374737EA5B50A92F69",
+                "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-final-20261004-044144\\off\\between.png"
+              },
+              {
+                "cameraXYZDirectionXYZ": [
+                  6532.0,
+                  223.592,
+                  6466.0,
+                  -0.65,
+                  -0.07,
+                  -0.76
+                ],
+                "sampledGpu": {
+                  "fogTransport": {
+                    "available": true,
+                    "cpuMs": 0.003200000151991844,
+                    "containedBy": -1,
+                    "container": false,
+                    "milliseconds": 0.00102399999741465,
+                    "index": 88
+                  },
+                  "gpuFrame": {
+                    "available": true,
+                    "cpuMs": 1.5215998888015747,
+                    "containedBy": 25,
+                    "container": false,
+                    "milliseconds": 5.02681589126587,
+                    "index": 25
+                  },
+                  "completedCpuFrames": 256
+                },
+                "name": "above",
+                "trace": [
+                  "[wgr] layered fog: frame=1200 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=1320 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=1440 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=1560 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=1680 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]"
+                ],
+                "renderConfiguration": {
+                  "outputWidth": 1280,
+                  "activeUpscaler": 2,
+                  "renderWidth": 858,
+                  "outputHeight": 720,
+                  "renderHeight": 482,
+                  "msaaSamples": 4
+                },
+                "weather": {
+                  "rain": 0,
+                  "overcast": 0,
+                  "rendererSkyAvailable": true,
+                  "rendererSky": {
+                    "enabled": true,
+                    "skyLighting": true,
+                    "coverageFromWeather": true,
+                    "coveragePinned": true,
+                    "coverage": 0,
+                    "clearCoverage": 0.05000000074505806,
+                    "fullCoverage": 0.949999988079071,
+                    "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+                  },
+                  "sunAvailable": true,
+                  "sunTravelY": -0.9539730548858643,
+                  "nightEffect": 0,
+                  "solarDrying": 0.9539730548858643,
+                  "particleDensity": 0,
+                  "particleSnowflakes": false,
+                  "liquidRain": 0,
+                  "fog": 0.449999988079071,
+                  "terrainRange": 515.25,
+                  "baseRange": 515.25,
+                  "objectRange": 1000,
+                  "tacticalVisibility": 515.25,
+                  "selectedRange": 1500,
+                  "ok": true
+                },
+                "timingSha256": "DD6A49068185913F334745A4293340448384D880475A7E232234872C030B1C47",
+                "timingReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-final-20261004-044144\\off\\above.frame-performance.json",
+                "pngSha256": "E00A4215278A543772509A35732206B603E412613A8D96E7EC9AF10CBB5A3A9B",
+                "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-final-20261004-044144\\off\\above.png"
+              }
+            ]
+          }
+        ],
+        "scope": "Actual original Everon and authoritative weather, same XYZ camera requests, unchanged native source/ranges at equal weather. Encoded trace is CPU command readiness. Per-view frame_performance receipts contain latest asynchronous published GPU timers, without sampled GPU frame ID or exact screenshot-frame attribution. Frame total is inclusive; fog transport excludes background/consumer/weather-map costs. No timer summation, steady statistical benchmark, uncontended cost certification, visual acceptance or default promotion claimed. Default remains OFF.",
+        "profile": {
+          "siteXZ": [
+            6532.0,
+            6466.0
+          ],
+          "nativeY": 148.592,
+          "layers": [
+            "145.592,166.592,3,0.008",
+            "183.592,198.592,3,0.004"
+          ],
+          "policy": "Frozen world-ASL slabs selected once from actual baseline height. They do not follow terrain. OFF scout used built-in profiles; disabled optics are independent of profile."
+        },
+        "error": "Existing terrainRange changed at identical weather."
+      }
+    },
+    {
+      "rawReceipt": "build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\result.json",
+      "rawReceiptSha256": "4d5d1fdf03fc213e4bd1907ab89cf5d9beae18c8d74ec82a5558eb938bbe9143",
+      "receipt": {
+        "passed": true,
+        "expectedCommit": "5ee637d7",
+        "installed": {
+          "files": [
+            {
+              "bytes": 31525888,
+              "name": "OpenPoseidon.exe",
+              "sha256": "17B0A9F51C75CA6A5E18EE666F6E9567735ECABEC26378134A722C40F6D4712C"
+            },
+            {
+              "bytes": 18564096,
+              "name": "wgpu_renderer.dll",
+              "sha256": "40E217CEF85798E1B80E894CB9B733F4AE6826B51AE586C0BC3B14A8E21565FC"
+            }
+          ],
+          "stamp": "codex/modernisation-followup-20261004 5ee637d7+dirty 2026-10-04_04:41 deploy-ps1\r\n"
+        },
+        "scriptSha256": "B6C062CB805062EA75D28BE092D2940321AD830F2D9AE0E319E9B8A606451BC5",
+        "measure": true,
+        "measureWarmupRenderedFrames": 256,
+        "measureDeadlineSeconds": 90,
+        "exposureControl": {
+          "environment": {
+            "WGR_TONEMAP": "1",
+            "WGR_EXPOSURE": "0.15",
+            "WGR_AUTO_EXPOSURE": "0"
+          },
+          "supplied": true,
+          "scope": "Explicit startup environment controls when supplied: fixed base exposure, adaptive exposure OFF, manual Hable time-of-day grade. Otherwise normal defaults. Configuration receipt, not same-frame GPU uniform readback. Bloom remains unchanged."
+        },
+        "arms": [
+          {
+            "exit": 0,
+            "weather": {
+              "rain": 0,
+              "overcast": 0,
+              "rendererSkyAvailable": true,
+              "rendererSky": {
+                "enabled": true,
+                "skyLighting": true,
+                "coverageFromWeather": true,
+                "coveragePinned": true,
+                "coverage": 0,
+                "clearCoverage": 0.05000000074505806,
+                "fullCoverage": 0.949999988079071,
+                "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+              },
+              "sunAvailable": true,
+              "sunTravelY": -0.9539730548858643,
+              "nightEffect": 0,
+              "solarDrying": 0.9539730548858643,
+              "particleDensity": 0,
+              "particleSnowflakes": false,
+              "liquidRain": 0,
+              "fog": 0.449999988079071,
+              "terrainRange": 515.25,
+              "baseRange": 515.25,
+              "objectRange": 1000,
+              "tacticalVisibility": 515.25,
+              "selectedRange": 1500,
+              "ok": true
+            },
+            "name": "off",
+            "views": [
+              {
+                "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\off\\ground.png",
+                "pngSha256": "C5E50C73EF679F76596573E60353F44F6C1C1305841692A76D984B8B4E2AB4F9",
+                "timingReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\off\\ground.frame-performance.json",
+                "name": "ground",
+                "renderConfiguration": {
+                  "renderWidth": 858,
+                  "activeUpscaler": 2,
+                  "outputWidth": 1280,
+                  "renderHeight": 482,
+                  "outputHeight": 720,
+                  "msaaSamples": 4
+                },
+                "trace": [
+                  "[wgr] layered fog: frame=240 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=360 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=480 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=600 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=720 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]"
+                ],
+                "weather": {
+                  "rain": 0,
+                  "overcast": 0,
+                  "rendererSkyAvailable": true,
+                  "rendererSky": {
+                    "enabled": true,
+                    "skyLighting": true,
+                    "coverageFromWeather": true,
+                    "coveragePinned": true,
+                    "coverage": 0,
+                    "clearCoverage": 0.05000000074505806,
+                    "fullCoverage": 0.949999988079071,
+                    "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+                  },
+                  "sunAvailable": true,
+                  "sunTravelY": -0.9539730548858643,
+                  "nightEffect": 0,
+                  "solarDrying": 0.9539730548858643,
+                  "particleDensity": 0,
+                  "particleSnowflakes": false,
+                  "liquidRain": 0,
+                  "fog": 0.449999988079071,
+                  "terrainRange": 515.25,
+                  "baseRange": 515.25,
+                  "objectRange": 1000,
+                  "tacticalVisibility": 515.25,
+                  "selectedRange": 1500,
+                  "ok": true
+                },
+                "cameraXYZDirectionXYZ": [
+                  6532.0,
+                  150.592,
+                  6466.0,
+                  -0.65,
+                  -0.07,
+                  -0.76
+                ],
+                "timingSha256": "166366CD2AE7F7C11C0D0D581890634FD19D71BA0659BD657565631C3F82FE9D",
+                "sampledGpu": {
+                  "completedCpuFrames": 256,
+                  "gpuFrame": {
+                    "index": 25,
+                    "containedBy": 25,
+                    "available": true,
+                    "cpuMs": 1.1858999729156494,
+                    "milliseconds": 4.97356796264648,
+                    "container": false
+                  },
+                  "fogTransport": {
+                    "index": 88,
+                    "containedBy": -1,
+                    "available": true,
+                    "cpuMs": 0.0021000001579523087,
+                    "milliseconds": 0.00102399999741465,
+                    "container": false
+                  }
+                }
+              },
+              {
+                "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\off\\between.png",
+                "pngSha256": "398CD4E4381AD5F26B3C5CE058416C410353A9C7E776EF6D87ECBD75A6E9A232",
+                "timingReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\off\\between.frame-performance.json",
+                "name": "between",
+                "renderConfiguration": {
+                  "renderWidth": 858,
+                  "activeUpscaler": 2,
+                  "outputWidth": 1280,
+                  "renderHeight": 482,
+                  "outputHeight": 720,
+                  "msaaSamples": 4
+                },
+                "trace": [
+                  "[wgr] layered fog: frame=840 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=960 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=1080 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=1200 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=1320 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]"
+                ],
+                "weather": {
+                  "rain": 0,
+                  "overcast": 0,
+                  "rendererSkyAvailable": true,
+                  "rendererSky": {
+                    "enabled": true,
+                    "skyLighting": true,
+                    "coverageFromWeather": true,
+                    "coveragePinned": true,
+                    "coverage": 0,
+                    "clearCoverage": 0.05000000074505806,
+                    "fullCoverage": 0.949999988079071,
+                    "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+                  },
+                  "sunAvailable": true,
+                  "sunTravelY": -0.9539730548858643,
+                  "nightEffect": 0,
+                  "solarDrying": 0.9539730548858643,
+                  "particleDensity": 0,
+                  "particleSnowflakes": false,
+                  "liquidRain": 0,
+                  "fog": 0.449999988079071,
+                  "terrainRange": 515.25,
+                  "baseRange": 515.25,
+                  "objectRange": 1000,
+                  "tacticalVisibility": 515.25,
+                  "selectedRange": 1500,
+                  "ok": true
+                },
+                "cameraXYZDirectionXYZ": [
+                  6532.0,
+                  174.592,
+                  6466.0,
+                  -0.65,
+                  -0.07,
+                  -0.76
+                ],
+                "timingSha256": "4F1BDDA5B8C21B29BC0A086504855EA107620A13B76729707C27EE2B74E8C963",
+                "sampledGpu": {
+                  "completedCpuFrames": 256,
+                  "gpuFrame": {
+                    "index": 25,
+                    "containedBy": 25,
+                    "available": true,
+                    "cpuMs": 1.2577999830245972,
+                    "milliseconds": 4.89983987808228,
+                    "container": false
+                  },
+                  "fogTransport": {
+                    "index": 88,
+                    "containedBy": -1,
+                    "available": true,
+                    "cpuMs": 0.0024999999441206455,
+                    "milliseconds": 0.0020479999948293,
+                    "container": false
+                  }
+                }
+              },
+              {
+                "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\off\\above.png",
+                "pngSha256": "E24482CB263DF84FBB7EBD57D05E4DE048DD902C2975C4EC5D17E596A3396EF1",
+                "timingReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\off\\above.frame-performance.json",
+                "name": "above",
+                "renderConfiguration": {
+                  "renderWidth": 858,
+                  "activeUpscaler": 2,
+                  "outputWidth": 1280,
+                  "renderHeight": 482,
+                  "outputHeight": 720,
+                  "msaaSamples": 4
+                },
+                "trace": [
+                  "[wgr] layered fog: frame=1440 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=1560 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=1680 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=1800 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]",
+                  "[wgr] layered fog: frame=1920 requested=false encoded=false weather=0.450000 far=515.250 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[0.0, 35.0, 5.0, 0.008], [70.0, 100.0, 5.0, 0.003]]"
+                ],
+                "weather": {
+                  "rain": 0,
+                  "overcast": 0,
+                  "rendererSkyAvailable": true,
+                  "rendererSky": {
+                    "enabled": true,
+                    "skyLighting": true,
+                    "coverageFromWeather": true,
+                    "coveragePinned": true,
+                    "coverage": 0,
+                    "clearCoverage": 0.05000000074505806,
+                    "fullCoverage": 0.949999988079071,
+                    "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+                  },
+                  "sunAvailable": true,
+                  "sunTravelY": -0.9539730548858643,
+                  "nightEffect": 0,
+                  "solarDrying": 0.9539730548858643,
+                  "particleDensity": 0,
+                  "particleSnowflakes": false,
+                  "liquidRain": 0,
+                  "fog": 0.449999988079071,
+                  "terrainRange": 515.25,
+                  "baseRange": 515.25,
+                  "objectRange": 1000,
+                  "tacticalVisibility": 515.25,
+                  "selectedRange": 1500,
+                  "ok": true
+                },
+                "cameraXYZDirectionXYZ": [
+                  6532.0,
+                  223.592,
+                  6466.0,
+                  -0.65,
+                  -0.07,
+                  -0.76
+                ],
+                "timingSha256": "D92AFE547090DE195B5B6EF29491C1DCD769AF86E7AE30A7E8AF40A1477F2D88",
+                "sampledGpu": {
+                  "completedCpuFrames": 256,
+                  "gpuFrame": {
+                    "index": 25,
+                    "containedBy": 25,
+                    "available": true,
+                    "cpuMs": 1.2156999111175537,
+                    "milliseconds": 5.06265592575073,
+                    "container": false
+                  },
+                  "fogTransport": {
+                    "index": 88,
+                    "containedBy": -1,
+                    "available": true,
+                    "cpuMs": 0.0024999999441206455,
+                    "milliseconds": 0.0020479999948293,
+                    "container": false
+                  }
+                }
+              }
+            ],
+            "settings": {
+              "WGR_LAYERED_FOG_TRACE": "1",
+              "WGR_AUTO_EXPOSURE": "0",
+              "WGR_EXPOSURE": "0.15",
+              "WGR_TEMPORAL": "0",
+              "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\off\\user",
+              "WGR_GRASS": "0",
+              "WGR_WEATHER_COVER": "1",
+              "WGR_TONEMAP": "1",
+              "POSEIDON_SNOW_TEST_DEPTH": "0",
+              "POSEIDON_SNOWLINE": "off",
+              "WGR_WEATHER_COVER_FAR": "1",
+              "WGR_LAYERED_FOG": "0"
+            },
+            "source": {
+              "count": 0,
+              "selectedId": 0,
+              "records": [],
+              "status": "Caves cleared. Terrain heights are unchanged.",
+              "missionLocal": true,
+              "worldName": "worlds\\eden.wrp",
+              "grid": 6.25,
+              "heightRevision": 6,
+              "brushDefaultRadius": 8,
+              "inFootprint": false,
+              "atHeight": false,
+              "holeFloor": 0,
+              "terrainY": 148.59173583984375,
+              "roadY": 148.59173583984375,
+              "cameraFloorY": 148.59173583984375,
+              "drawRecords": 0,
+              "boundedHeader": false,
+              "ok": true
+            },
+            "nativeY": 148.592
+          },
+          {
+            "exit": 0,
+            "weather": {
+              "rain": 0,
+              "overcast": 0,
+              "rendererSkyAvailable": true,
+              "rendererSky": {
+                "enabled": true,
+                "skyLighting": true,
+                "coverageFromWeather": true,
+                "coveragePinned": true,
+                "coverage": 0,
+                "clearCoverage": 0.05000000074505806,
+                "fullCoverage": 0.949999988079071,
+                "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+              },
+              "sunAvailable": true,
+              "sunTravelY": -0.9539730548858643,
+              "nightEffect": 0,
+              "solarDrying": 0.9539730548858643,
+              "particleDensity": 0,
+              "particleSnowflakes": false,
+              "liquidRain": 0,
+              "fog": 0.449999988079071,
+              "terrainRange": 515.25,
+              "baseRange": 515.25,
+              "objectRange": 1000,
+              "tacticalVisibility": 515.25,
+              "selectedRange": 1500,
+              "ok": true
+            },
+            "name": "on",
+            "views": [
+              {
+                "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\on\\ground.png",
+                "pngSha256": "42FE79259EDEDC7614559D19AA35FD1F8DF59CF97633A3A917A41AEB6718F316",
+                "timingReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\on\\ground.frame-performance.json",
+                "name": "ground",
+                "renderConfiguration": {
+                  "renderWidth": 858,
+                  "activeUpscaler": 2,
+                  "outputWidth": 1280,
+                  "renderHeight": 482,
+                  "outputHeight": 720,
+                  "msaaSamples": 4
+                },
+                "trace": [
+                  "[wgr] layered fog: frame=240 requested=true encoded=true weather=0.450000 far=515.250 heightGen=2 nearReady=1 farReady=1 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=360 requested=true encoded=true weather=0.450000 far=515.250 heightGen=2 nearReady=1 farReady=1 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=480 requested=true encoded=true weather=0.450000 far=515.250 heightGen=2 nearReady=1 farReady=1 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=600 requested=true encoded=true weather=0.450000 far=515.250 heightGen=2 nearReady=1 farReady=1 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=720 requested=true encoded=true weather=0.450000 far=515.250 heightGen=2 nearReady=1 farReady=1 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]"
+                ],
+                "weather": {
+                  "rain": 0,
+                  "overcast": 0,
+                  "rendererSkyAvailable": true,
+                  "rendererSky": {
+                    "enabled": true,
+                    "skyLighting": true,
+                    "coverageFromWeather": true,
+                    "coveragePinned": true,
+                    "coverage": 0,
+                    "clearCoverage": 0.05000000074505806,
+                    "fullCoverage": 0.949999988079071,
+                    "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+                  },
+                  "sunAvailable": true,
+                  "sunTravelY": -0.9539730548858643,
+                  "nightEffect": 0,
+                  "solarDrying": 0.9539730548858643,
+                  "particleDensity": 0,
+                  "particleSnowflakes": false,
+                  "liquidRain": 0,
+                  "fog": 0.449999988079071,
+                  "terrainRange": 515.25,
+                  "baseRange": 515.25,
+                  "objectRange": 1000,
+                  "tacticalVisibility": 515.25,
+                  "selectedRange": 1500,
+                  "ok": true
+                },
+                "cameraXYZDirectionXYZ": [
+                  6532.0,
+                  150.592,
+                  6466.0,
+                  -0.65,
+                  -0.07,
+                  -0.76
+                ],
+                "timingSha256": "2E3C7E20869AEA2010FBBCD798F40957380ABD0C72A9B679CF5C78130533BBCD",
+                "sampledGpu": {
+                  "completedCpuFrames": 256,
+                  "gpuFrame": {
+                    "index": 25,
+                    "containedBy": 25,
+                    "available": true,
+                    "cpuMs": 1.649899959564209,
+                    "milliseconds": 5.53369617462158,
+                    "container": false
+                  },
+                  "fogTransport": {
+                    "index": 88,
+                    "containedBy": -1,
+                    "available": true,
+                    "cpuMs": 0.024299999698996544,
+                    "milliseconds": 0.206847995519638,
+                    "container": false
+                  }
+                }
+              },
+              {
+                "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\on\\between.png",
+                "pngSha256": "67FA1DD07B2A02E747DA6AD8EF1EF620B22ED47C77E65DAAA37585FE4E186883",
+                "timingReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\on\\between.frame-performance.json",
+                "name": "between",
+                "renderConfiguration": {
+                  "renderWidth": 858,
+                  "activeUpscaler": 2,
+                  "outputWidth": 1280,
+                  "renderHeight": 482,
+                  "outputHeight": 720,
+                  "msaaSamples": 4
+                },
+                "trace": [
+                  "[wgr] layered fog: frame=840 requested=true encoded=true weather=0.450000 far=515.250 heightGen=2 nearReady=1 farReady=1 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=960 requested=true encoded=true weather=0.450000 far=515.250 heightGen=2 nearReady=1 farReady=1 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1080 requested=true encoded=true weather=0.450000 far=515.250 heightGen=2 nearReady=1 farReady=1 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1200 requested=true encoded=true weather=0.450000 far=515.250 heightGen=2 nearReady=1 farReady=1 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]"
+                ],
+                "weather": {
+                  "rain": 0,
+                  "overcast": 0,
+                  "rendererSkyAvailable": true,
+                  "rendererSky": {
+                    "enabled": true,
+                    "skyLighting": true,
+                    "coverageFromWeather": true,
+                    "coveragePinned": true,
+                    "coverage": 0,
+                    "clearCoverage": 0.05000000074505806,
+                    "fullCoverage": 0.949999988079071,
+                    "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+                  },
+                  "sunAvailable": true,
+                  "sunTravelY": -0.9539730548858643,
+                  "nightEffect": 0,
+                  "solarDrying": 0.9539730548858643,
+                  "particleDensity": 0,
+                  "particleSnowflakes": false,
+                  "liquidRain": 0,
+                  "fog": 0.449999988079071,
+                  "terrainRange": 515.25,
+                  "baseRange": 515.25,
+                  "objectRange": 1000,
+                  "tacticalVisibility": 515.25,
+                  "selectedRange": 1500,
+                  "ok": true
+                },
+                "cameraXYZDirectionXYZ": [
+                  6532.0,
+                  174.592,
+                  6466.0,
+                  -0.65,
+                  -0.07,
+                  -0.76
+                ],
+                "timingSha256": "1DB6C55835EEBC0BF49F78027AEDAAD7797DB8F5CD1372346B8C0E1CE265B769",
+                "sampledGpu": {
+                  "completedCpuFrames": 256,
+                  "gpuFrame": {
+                    "index": 25,
+                    "containedBy": 25,
+                    "available": true,
+                    "cpuMs": 1.777899980545044,
+                    "milliseconds": 5.41183996200562,
+                    "container": false
+                  },
+                  "fogTransport": {
+                    "index": 88,
+                    "containedBy": -1,
+                    "available": true,
+                    "cpuMs": 0.026399999856948853,
+                    "milliseconds": 0.198655992746353,
+                    "container": false
+                  }
+                }
+              },
+              {
+                "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\on\\above.png",
+                "pngSha256": "6A35CA9083B602D6881D193AE10B0C2C9A4FCD2DEEB0134D55229ACAC4451884",
+                "timingReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\on\\above.frame-performance.json",
+                "name": "above",
+                "renderConfiguration": {
+                  "renderWidth": 858,
+                  "activeUpscaler": 2,
+                  "outputWidth": 1280,
+                  "renderHeight": 482,
+                  "outputHeight": 720,
+                  "msaaSamples": 4
+                },
+                "trace": [
+                  "[wgr] layered fog: frame=1440 requested=true encoded=true weather=0.450000 far=515.250 heightGen=2 nearReady=1 farReady=1 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1560 requested=true encoded=true weather=0.450000 far=515.250 heightGen=2 nearReady=1 farReady=1 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1680 requested=true encoded=true weather=0.450000 far=515.250 heightGen=2 nearReady=1 farReady=1 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1800 requested=true encoded=true weather=0.450000 far=515.250 heightGen=2 nearReady=1 farReady=1 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]"
+                ],
+                "weather": {
+                  "rain": 0,
+                  "overcast": 0,
+                  "rendererSkyAvailable": true,
+                  "rendererSky": {
+                    "enabled": true,
+                    "skyLighting": true,
+                    "coverageFromWeather": true,
+                    "coveragePinned": true,
+                    "coverage": 0,
+                    "clearCoverage": 0.05000000074505806,
+                    "fullCoverage": 0.949999988079071,
+                    "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+                  },
+                  "sunAvailable": true,
+                  "sunTravelY": -0.9539730548858643,
+                  "nightEffect": 0,
+                  "solarDrying": 0.9539730548858643,
+                  "particleDensity": 0,
+                  "particleSnowflakes": false,
+                  "liquidRain": 0,
+                  "fog": 0.449999988079071,
+                  "terrainRange": 515.25,
+                  "baseRange": 515.25,
+                  "objectRange": 1000,
+                  "tacticalVisibility": 515.25,
+                  "selectedRange": 1500,
+                  "ok": true
+                },
+                "cameraXYZDirectionXYZ": [
+                  6532.0,
+                  223.592,
+                  6466.0,
+                  -0.65,
+                  -0.07,
+                  -0.76
+                ],
+                "timingSha256": "A825C3ADE6BBA41189F0984E72CF1CD4D008D1EDEFD39444BD50176F8AC3D9CA",
+                "sampledGpu": {
+                  "completedCpuFrames": 256,
+                  "gpuFrame": {
+                    "index": 25,
+                    "containedBy": 25,
+                    "available": true,
+                    "cpuMs": 1.6734000444412231,
+                    "milliseconds": 5.27769613265991,
+                    "container": false
+                  },
+                  "fogTransport": {
+                    "index": 88,
+                    "containedBy": -1,
+                    "available": true,
+                    "cpuMs": 0.023000000044703484,
+                    "milliseconds": 0.180224001407623,
+                    "container": false
+                  }
+                }
+              }
+            ],
+            "settings": {
+              "WGR_WEATHER_COVER_FAR": "1",
+              "WGR_AUTO_EXPOSURE": "0",
+              "WGR_TEMPORAL": "0",
+              "WGR_FOG_LAYER1": "183.592,198.592,3,0.004",
+              "WGR_GRASS": "0",
+              "WGR_TONEMAP": "1",
+              "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\on\\user",
+              "WGR_LAYERED_FOG_TRACE": "1",
+              "POSEIDON_SNOW_TEST_DEPTH": "0",
+              "WGR_WEATHER_COVER": "1",
+              "WGR_FOG_LAYER0": "145.592,166.592,3,0.008",
+              "POSEIDON_SNOWLINE": "off",
+              "WGR_LAYERED_FOG": "1",
+              "WGR_EXPOSURE": "0.15"
+            },
+            "source": {
+              "count": 0,
+              "selectedId": 0,
+              "records": [],
+              "status": "Caves cleared. Terrain heights are unchanged.",
+              "missionLocal": true,
+              "worldName": "worlds\\eden.wrp",
+              "grid": 6.25,
+              "heightRevision": 6,
+              "brushDefaultRadius": 8,
+              "inFootprint": false,
+              "atHeight": false,
+              "holeFloor": 0,
+              "terrainY": 148.59173583984375,
+              "roadY": 148.59173583984375,
+              "cameraFloorY": 148.59173583984375,
+              "drawRecords": 0,
+              "boundedHeader": false,
+              "ok": true
+            },
+            "nativeY": 148.592
+          },
+          {
+            "exit": 0,
+            "weather": {
+              "rain": 0,
+              "overcast": 0,
+              "rendererSkyAvailable": true,
+              "rendererSky": {
+                "enabled": true,
+                "skyLighting": true,
+                "coverageFromWeather": true,
+                "coveragePinned": true,
+                "coverage": 0,
+                "clearCoverage": 0.05000000074505806,
+                "fullCoverage": 0.949999988079071,
+                "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+              },
+              "sunAvailable": true,
+              "sunTravelY": -0.9539730548858643,
+              "nightEffect": 0,
+              "solarDrying": 0.9539730548858643,
+              "particleDensity": 0,
+              "particleSnowflakes": false,
+              "liquidRain": 0,
+              "fog": 0,
+              "terrainRange": 1480,
+              "baseRange": 1480,
+              "objectRange": 1480,
+              "tacticalVisibility": 1500,
+              "selectedRange": 1500,
+              "ok": true
+            },
+            "name": "on-zero",
+            "views": [
+              {
+                "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\on-zero\\ground.png",
+                "pngSha256": "95D413D6D6AE7CA9A940591BBA1D5941E822A37AD7AF9D74D5448228A908BCD1",
+                "timingReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\on-zero\\ground.frame-performance.json",
+                "name": "ground",
+                "renderConfiguration": {
+                  "renderWidth": 858,
+                  "activeUpscaler": 2,
+                  "outputWidth": 1280,
+                  "renderHeight": 482,
+                  "outputHeight": 720,
+                  "msaaSamples": 4
+                },
+                "trace": [
+                  "[wgr] layered fog: frame=240 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=360 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=480 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=600 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]"
+                ],
+                "weather": {
+                  "rain": 0,
+                  "overcast": 0,
+                  "rendererSkyAvailable": true,
+                  "rendererSky": {
+                    "enabled": true,
+                    "skyLighting": true,
+                    "coverageFromWeather": true,
+                    "coveragePinned": true,
+                    "coverage": 0,
+                    "clearCoverage": 0.05000000074505806,
+                    "fullCoverage": 0.949999988079071,
+                    "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+                  },
+                  "sunAvailable": true,
+                  "sunTravelY": -0.9539730548858643,
+                  "nightEffect": 0,
+                  "solarDrying": 0.9539730548858643,
+                  "particleDensity": 0,
+                  "particleSnowflakes": false,
+                  "liquidRain": 0,
+                  "fog": 0,
+                  "terrainRange": 1480,
+                  "baseRange": 1480,
+                  "objectRange": 1480,
+                  "tacticalVisibility": 1500,
+                  "selectedRange": 1500,
+                  "ok": true
+                },
+                "cameraXYZDirectionXYZ": [
+                  6532.0,
+                  150.592,
+                  6466.0,
+                  -0.65,
+                  -0.07,
+                  -0.76
+                ],
+                "timingSha256": "D591E50BF343C373168E68CE3B3A60071EB1D7E71465A300D94989029D367C88",
+                "sampledGpu": {
+                  "completedCpuFrames": 256,
+                  "gpuFrame": {
+                    "index": 25,
+                    "containedBy": 25,
+                    "available": true,
+                    "cpuMs": 1.2087000608444214,
+                    "milliseconds": 5.42719984054565,
+                    "container": false
+                  },
+                  "fogTransport": {
+                    "index": 88,
+                    "containedBy": -1,
+                    "available": true,
+                    "cpuMs": 0.0019000000320374966,
+                    "milliseconds": 0.00102399999741465,
+                    "container": false
+                  }
+                }
+              },
+              {
+                "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\on-zero\\between.png",
+                "pngSha256": "E6E8EA86DD7887030710AE1D24FD0276BAAE02E8FC7D7B8B83A84A3165B58AFE",
+                "timingReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\on-zero\\between.frame-performance.json",
+                "name": "between",
+                "renderConfiguration": {
+                  "renderWidth": 858,
+                  "activeUpscaler": 2,
+                  "outputWidth": 1280,
+                  "renderHeight": 482,
+                  "outputHeight": 720,
+                  "msaaSamples": 4
+                },
+                "trace": [
+                  "[wgr] layered fog: frame=720 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=840 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=960 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1080 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1200 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]"
+                ],
+                "weather": {
+                  "rain": 0,
+                  "overcast": 0,
+                  "rendererSkyAvailable": true,
+                  "rendererSky": {
+                    "enabled": true,
+                    "skyLighting": true,
+                    "coverageFromWeather": true,
+                    "coveragePinned": true,
+                    "coverage": 0,
+                    "clearCoverage": 0.05000000074505806,
+                    "fullCoverage": 0.949999988079071,
+                    "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+                  },
+                  "sunAvailable": true,
+                  "sunTravelY": -0.9539730548858643,
+                  "nightEffect": 0,
+                  "solarDrying": 0.9539730548858643,
+                  "particleDensity": 0,
+                  "particleSnowflakes": false,
+                  "liquidRain": 0,
+                  "fog": 0,
+                  "terrainRange": 1480,
+                  "baseRange": 1480,
+                  "objectRange": 1480,
+                  "tacticalVisibility": 1500,
+                  "selectedRange": 1500,
+                  "ok": true
+                },
+                "cameraXYZDirectionXYZ": [
+                  6532.0,
+                  174.592,
+                  6466.0,
+                  -0.65,
+                  -0.07,
+                  -0.76
+                ],
+                "timingSha256": "8F3DE9702F559B3DAD15D454192DACD0FC469A875A754066F7E3E78086334B14",
+                "sampledGpu": {
+                  "completedCpuFrames": 256,
+                  "gpuFrame": {
+                    "index": 25,
+                    "containedBy": 25,
+                    "available": true,
+                    "cpuMs": 1.2101000547409058,
+                    "milliseconds": 4.98483180999756,
+                    "container": false
+                  },
+                  "fogTransport": {
+                    "index": 88,
+                    "containedBy": -1,
+                    "available": true,
+                    "cpuMs": 0.003000000026077032,
+                    "milliseconds": 0.00102399999741465,
+                    "container": false
+                  }
+                }
+              },
+              {
+                "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\on-zero\\above.png",
+                "pngSha256": "BE2277C8F10BB103C21F603ABAA87E6300D64D5428F142662B99237D63C037FA",
+                "timingReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\on-zero\\above.frame-performance.json",
+                "name": "above",
+                "renderConfiguration": {
+                  "renderWidth": 858,
+                  "activeUpscaler": 2,
+                  "outputWidth": 1280,
+                  "renderHeight": 482,
+                  "outputHeight": 720,
+                  "msaaSamples": 4
+                },
+                "trace": [
+                  "[wgr] layered fog: frame=1320 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1440 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1560 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1680 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1800 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]"
+                ],
+                "weather": {
+                  "rain": 0,
+                  "overcast": 0,
+                  "rendererSkyAvailable": true,
+                  "rendererSky": {
+                    "enabled": true,
+                    "skyLighting": true,
+                    "coverageFromWeather": true,
+                    "coveragePinned": true,
+                    "coverage": 0,
+                    "clearCoverage": 0.05000000074505806,
+                    "fullCoverage": 0.949999988079071,
+                    "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+                  },
+                  "sunAvailable": true,
+                  "sunTravelY": -0.9539730548858643,
+                  "nightEffect": 0,
+                  "solarDrying": 0.9539730548858643,
+                  "particleDensity": 0,
+                  "particleSnowflakes": false,
+                  "liquidRain": 0,
+                  "fog": 0,
+                  "terrainRange": 1480,
+                  "baseRange": 1480,
+                  "objectRange": 1480,
+                  "tacticalVisibility": 1500,
+                  "selectedRange": 1500,
+                  "ok": true
+                },
+                "cameraXYZDirectionXYZ": [
+                  6532.0,
+                  223.592,
+                  6466.0,
+                  -0.65,
+                  -0.07,
+                  -0.76
+                ],
+                "timingSha256": "8E73EBB79B514F79091DFDA93FE21BA9B409B5E4E458163B27535882E7CF2EB5",
+                "sampledGpu": {
+                  "completedCpuFrames": 256,
+                  "gpuFrame": {
+                    "index": 25,
+                    "containedBy": 25,
+                    "available": true,
+                    "cpuMs": 1.5494999885559082,
+                    "milliseconds": 5.61971187591553,
+                    "container": false
+                  },
+                  "fogTransport": {
+                    "index": 88,
+                    "containedBy": -1,
+                    "available": true,
+                    "cpuMs": 0.002199999988079071,
+                    "milliseconds": 0.00102399999741465,
+                    "container": false
+                  }
+                }
+              }
+            ],
+            "settings": {
+              "WGR_WEATHER_COVER_FAR": "1",
+              "WGR_AUTO_EXPOSURE": "0",
+              "WGR_TEMPORAL": "0",
+              "WGR_FOG_LAYER1": "183.592,198.592,3,0.004",
+              "WGR_GRASS": "0",
+              "WGR_TONEMAP": "1",
+              "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\on-zero\\user",
+              "WGR_LAYERED_FOG_TRACE": "1",
+              "POSEIDON_SNOW_TEST_DEPTH": "0",
+              "WGR_WEATHER_COVER": "1",
+              "WGR_FOG_LAYER0": "145.592,166.592,3,0.008",
+              "POSEIDON_SNOWLINE": "off",
+              "WGR_LAYERED_FOG": "1",
+              "WGR_EXPOSURE": "0.15"
+            },
+            "source": {
+              "count": 0,
+              "selectedId": 0,
+              "records": [],
+              "status": "Caves cleared. Terrain heights are unchanged.",
+              "missionLocal": true,
+              "worldName": "worlds\\eden.wrp",
+              "grid": 6.25,
+              "heightRevision": 6,
+              "brushDefaultRadius": 8,
+              "inFootprint": false,
+              "atHeight": false,
+              "holeFloor": 0,
+              "terrainY": 148.59173583984375,
+              "roadY": 148.59173583984375,
+              "cameraFloorY": 148.59173583984375,
+              "drawRecords": 0,
+              "boundedHeader": false,
+              "ok": true
+            },
+            "nativeY": 148.592
+          },
+          {
+            "exit": 0,
+            "weather": {
+              "rain": 0,
+              "overcast": 0,
+              "rendererSkyAvailable": true,
+              "rendererSky": {
+                "enabled": true,
+                "skyLighting": true,
+                "coverageFromWeather": true,
+                "coveragePinned": true,
+                "coverage": 0,
+                "clearCoverage": 0.05000000074505806,
+                "fullCoverage": 0.949999988079071,
+                "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+              },
+              "sunAvailable": true,
+              "sunTravelY": -0.9539730548858643,
+              "nightEffect": 0,
+              "solarDrying": 0.9539730548858643,
+              "particleDensity": 0,
+              "particleSnowflakes": false,
+              "liquidRain": 0,
+              "fog": 0,
+              "terrainRange": 1480,
+              "baseRange": 1480,
+              "objectRange": 1480,
+              "tacticalVisibility": 1500,
+              "selectedRange": 1500,
+              "ok": true
+            },
+            "name": "off-zero",
+            "views": [
+              {
+                "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\off-zero\\ground.png",
+                "pngSha256": "2000C41F71560FB87D280B5C517A095C583544BC001D91CB71A9EF12EAD0165E",
+                "timingReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\off-zero\\ground.frame-performance.json",
+                "name": "ground",
+                "renderConfiguration": {
+                  "renderWidth": 858,
+                  "activeUpscaler": 2,
+                  "outputWidth": 1280,
+                  "renderHeight": 482,
+                  "outputHeight": 720,
+                  "msaaSamples": 4
+                },
+                "trace": [
+                  "[wgr] layered fog: frame=240 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=360 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=480 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=600 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=720 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 150.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]"
+                ],
+                "weather": {
+                  "rain": 0,
+                  "overcast": 0,
+                  "rendererSkyAvailable": true,
+                  "rendererSky": {
+                    "enabled": true,
+                    "skyLighting": true,
+                    "coverageFromWeather": true,
+                    "coveragePinned": true,
+                    "coverage": 0,
+                    "clearCoverage": 0.05000000074505806,
+                    "fullCoverage": 0.949999988079071,
+                    "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+                  },
+                  "sunAvailable": true,
+                  "sunTravelY": -0.9539730548858643,
+                  "nightEffect": 0,
+                  "solarDrying": 0.9539730548858643,
+                  "particleDensity": 0,
+                  "particleSnowflakes": false,
+                  "liquidRain": 0,
+                  "fog": 0,
+                  "terrainRange": 1480,
+                  "baseRange": 1480,
+                  "objectRange": 1480,
+                  "tacticalVisibility": 1500,
+                  "selectedRange": 1500,
+                  "ok": true
+                },
+                "cameraXYZDirectionXYZ": [
+                  6532.0,
+                  150.592,
+                  6466.0,
+                  -0.65,
+                  -0.07,
+                  -0.76
+                ],
+                "timingSha256": "58557A9522710D92B948451AED8481DE95158CCA23A27D9F15470A301A082413",
+                "sampledGpu": {
+                  "completedCpuFrames": 256,
+                  "gpuFrame": {
+                    "index": 25,
+                    "containedBy": 25,
+                    "available": true,
+                    "cpuMs": 1.3870999813079834,
+                    "milliseconds": 6.04057598114014,
+                    "container": false
+                  },
+                  "fogTransport": {
+                    "index": 88,
+                    "containedBy": -1,
+                    "available": true,
+                    "cpuMs": 0.002899999963119626,
+                    "milliseconds": 0.00102399999741465,
+                    "container": false
+                  }
+                }
+              },
+              {
+                "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\off-zero\\between.png",
+                "pngSha256": "D4101BAFF5605706AD156E4D9EE1133FD58742EB8A7216653BDF7674A63849E9",
+                "timingReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\off-zero\\between.frame-performance.json",
+                "name": "between",
+                "renderConfiguration": {
+                  "renderWidth": 858,
+                  "activeUpscaler": 2,
+                  "outputWidth": 1280,
+                  "renderHeight": 482,
+                  "outputHeight": 720,
+                  "msaaSamples": 4
+                },
+                "trace": [
+                  "[wgr] layered fog: frame=840 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=960 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1080 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1200 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 174.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]"
+                ],
+                "weather": {
+                  "rain": 0,
+                  "overcast": 0,
+                  "rendererSkyAvailable": true,
+                  "rendererSky": {
+                    "enabled": true,
+                    "skyLighting": true,
+                    "coverageFromWeather": true,
+                    "coveragePinned": true,
+                    "coverage": 0,
+                    "clearCoverage": 0.05000000074505806,
+                    "fullCoverage": 0.949999988079071,
+                    "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+                  },
+                  "sunAvailable": true,
+                  "sunTravelY": -0.9539730548858643,
+                  "nightEffect": 0,
+                  "solarDrying": 0.9539730548858643,
+                  "particleDensity": 0,
+                  "particleSnowflakes": false,
+                  "liquidRain": 0,
+                  "fog": 0,
+                  "terrainRange": 1480,
+                  "baseRange": 1480,
+                  "objectRange": 1480,
+                  "tacticalVisibility": 1500,
+                  "selectedRange": 1500,
+                  "ok": true
+                },
+                "cameraXYZDirectionXYZ": [
+                  6532.0,
+                  174.592,
+                  6466.0,
+                  -0.65,
+                  -0.07,
+                  -0.76
+                ],
+                "timingSha256": "346AC05816D6290A4DA289285A2705D1156306D996E9D84A86AA426B2FEFFDEE",
+                "sampledGpu": {
+                  "completedCpuFrames": 256,
+                  "gpuFrame": {
+                    "index": 25,
+                    "containedBy": 25,
+                    "available": true,
+                    "cpuMs": 1.4279000759124756,
+                    "milliseconds": 5.85830402374268,
+                    "container": false
+                  },
+                  "fogTransport": {
+                    "index": 88,
+                    "containedBy": -1,
+                    "available": true,
+                    "cpuMs": 0.002899999963119626,
+                    "milliseconds": 0.00102399999741465,
+                    "container": false
+                  }
+                }
+              },
+              {
+                "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\off-zero\\above.png",
+                "pngSha256": "91FB4E7035396FBB51BEE0C4288197866ACAA4A0A665BBD66974800AE352F8E0",
+                "timingReceipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\off-zero\\above.frame-performance.json",
+                "name": "above",
+                "renderConfiguration": {
+                  "renderWidth": 858,
+                  "activeUpscaler": 2,
+                  "outputWidth": 1280,
+                  "renderHeight": 482,
+                  "outputHeight": 720,
+                  "msaaSamples": 4
+                },
+                "trace": [
+                  "[wgr] layered fog: frame=1440 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1560 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1680 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]",
+                  "[wgr] layered fog: frame=1800 requested=false encoded=false weather=0.000000 far=1480.000 heightGen=2 nearReady=0 farReady=0 camera=[6532.0, 223.592, 6466.0, 0.0] layers=[[145.592, 166.592, 3.0, 0.008], [183.592, 198.592, 3.0, 0.004]]"
+                ],
+                "weather": {
+                  "rain": 0,
+                  "overcast": 0,
+                  "rendererSkyAvailable": true,
+                  "rendererSky": {
+                    "enabled": true,
+                    "skyLighting": true,
+                    "coverageFromWeather": true,
+                    "coveragePinned": true,
+                    "coverage": 0,
+                    "clearCoverage": 0.05000000074505806,
+                    "fullCoverage": 0.949999988079071,
+                    "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+                  },
+                  "sunAvailable": true,
+                  "sunTravelY": -0.9539730548858643,
+                  "nightEffect": 0,
+                  "solarDrying": 0.9539730548858643,
+                  "particleDensity": 0,
+                  "particleSnowflakes": false,
+                  "liquidRain": 0,
+                  "fog": 0,
+                  "terrainRange": 1480,
+                  "baseRange": 1480,
+                  "objectRange": 1480,
+                  "tacticalVisibility": 1500,
+                  "selectedRange": 1500,
+                  "ok": true
+                },
+                "cameraXYZDirectionXYZ": [
+                  6532.0,
+                  223.592,
+                  6466.0,
+                  -0.65,
+                  -0.07,
+                  -0.76
+                ],
+                "timingSha256": "CA346064985D5ECA2F6C8CC5289006668203D79DAAEE48E07D14A6B4B2C6997B",
+                "sampledGpu": {
+                  "completedCpuFrames": 256,
+                  "gpuFrame": {
+                    "index": 25,
+                    "containedBy": 25,
+                    "available": true,
+                    "cpuMs": 1.293299913406372,
+                    "milliseconds": 5.7487359046936,
+                    "container": false
+                  },
+                  "fogTransport": {
+                    "index": 88,
+                    "containedBy": -1,
+                    "available": true,
+                    "cpuMs": 0.002400000113993883,
+                    "milliseconds": 0.00102399999741465,
+                    "container": false
+                  }
+                }
+              }
+            ],
+            "settings": {
+              "WGR_WEATHER_COVER_FAR": "1",
+              "WGR_AUTO_EXPOSURE": "0",
+              "WGR_TEMPORAL": "0",
+              "WGR_FOG_LAYER1": "183.592,198.592,3,0.004",
+              "WGR_GRASS": "0",
+              "WGR_TONEMAP": "1",
+              "POSEIDON_USER_DIR": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\layered-fog\\original-everon-fog-closure-settled-20261004-044419\\off-zero\\user",
+              "WGR_LAYERED_FOG_TRACE": "1",
+              "POSEIDON_SNOW_TEST_DEPTH": "0",
+              "WGR_WEATHER_COVER": "1",
+              "WGR_FOG_LAYER0": "145.592,166.592,3,0.008",
+              "POSEIDON_SNOWLINE": "off",
+              "WGR_LAYERED_FOG": "0",
+              "WGR_EXPOSURE": "0.15"
+            },
+            "source": {
+              "count": 0,
+              "selectedId": 0,
+              "records": [],
+              "status": "Caves cleared. Terrain heights are unchanged.",
+              "missionLocal": true,
+              "worldName": "worlds\\eden.wrp",
+              "grid": 6.25,
+              "heightRevision": 6,
+              "brushDefaultRadius": 8,
+              "inFootprint": false,
+              "atHeight": false,
+              "holeFloor": 0,
+              "terrainY": 148.59173583984375,
+              "roadY": 148.59173583984375,
+              "cameraFloorY": 148.59173583984375,
+              "drawRecords": 0,
+              "boundedHeader": false,
+              "ok": true
+            },
+            "nativeY": 148.592
+          }
+        ],
+        "scope": "Actual original Everon and authoritative weather, same XYZ camera requests, unchanged native source/ranges at equal weather. Encoded trace is CPU command readiness. Per-view frame_performance receipts contain latest asynchronous published GPU timers, without sampled GPU frame ID or exact screenshot-frame attribution. Frame total is inclusive; fog transport excludes background/consumer/weather-map costs. No timer summation, steady statistical benchmark, uncontended cost certification, visual acceptance or default promotion claimed. Default remains OFF.",
+        "profile": {
+          "siteXZ": [
+            6532.0,
+            6466.0
+          ],
+          "layers": [
+            "145.592,166.592,3,0.008",
+            "183.592,198.592,3,0.004"
+          ],
+          "policy": "Frozen world-ASL slabs selected once from actual baseline height. They do not follow terrain. OFF scout used built-in profiles; disabled optics are independent of profile.",
+          "nativeY": 148.592
+        }
+      }
     }
-  ]
+  ],
+  "closureCorrectionInspection": {
+    "authorRun": true,
+    "campaign": "original-everon-fog-closure-settled-20261004-044419",
+    "views": [
+      "off/above",
+      "on/above",
+      "off/ground",
+      "on/ground",
+      "off/between",
+      "on/between"
+    ],
+    "result": "Previous hard distant above-layer terrain contour is absent in the inspected corrected view; foreground road readable and additional depth haze retained. Canopy/card fog appearance and broader exposure/interior/cost acceptance remain open.",
+    "generalAppearanceAccepted": false,
+    "defaultEnabled": false
+  }
 }
