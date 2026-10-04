@@ -141,7 +141,7 @@ TEST_CASE("Generated earth does not inherit low-mass tree destruction", "[Trench
     {
         Ref<LODShapeWithShadow> shape = Adapt(p).release();
         REQUIRE(shape);
-        ObjectPlain earth(shape, -1);
-        REQUIRE(earth.GetDestructType() == DestructNo);
+        Poseidon::ObjectPlain earth(shape, -1);
+        REQUIRE(earth.GetDestructType() == Poseidon::DestructNo);
     }
 }
