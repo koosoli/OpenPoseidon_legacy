@@ -7,10 +7,12 @@ the actual corrected skin, CPU points and equipment transforms before the death
 animation advances, then retains the final pose after releasing solver handles.
 The earlier manual settled-corpse prototype remains available independently.
 
-The candidate is **experimental and OFF by default**. Launch with `--dev`, open
-**Ctrl+F8 -> Physics**, and enable **Automatic infantry deaths (experimental)**.
+The feature is **experimental and ON by default**, explicitly authorised by the
+owner after the installed projectile/grenade checks. Launch with `--dev`, open
+**Ctrl+F8 -> Physics**, and toggle **Automatic infantry ragdolls (experimental)**.
 The switch lasts until restart. Turning it off preserves existing corpses and
-stops new admission. `POSEIDON_AUTOMATIC_RAGDOLL=1` remains the startup option.
+stops new admission. `POSEIDON_AUTOMATIC_RAGDOLL=0` disables admission at startup; the Dev toggle can
+override it for the current session.
 
 ## Current owner feedback follow-up
 

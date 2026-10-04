@@ -9,7 +9,7 @@ Installed matching EXE/renderer: source `e6e0c907`, 10:13 local on 4 October
 historical evidence.
 Final twelve-view installed fog comparison passed and the inspected distant
 contour defect is removed. The owner subsequently approved volumetric fog as the
-default; automatic ragdolls remain opt-in. See `fog-ragdoll-owner-revision-20261004.md`.
+default; the owner subsequently approved automatic ragdolls as the default. See `fog-ragdoll-owner-revision-20261004.md`.
 
 ## Completed and installed
 
@@ -43,8 +43,8 @@ Launch installed `OpenPoseidon.exe` with `--dev`.
   Shift+wheel adjusts length. Select an existing excavation and use its heading,
   rotation or deletion controls. Check the occupied guard by standing inside it.
 - **L** toggles the soldier flashlight; the action menu also offers Light on.
-- **Ctrl+F8 -> Physics -> Automatic infantry deaths (experimental)** enables
-  automatic ragdolls. Kill stock US infantry on supported dry ground. Turning
+- **Ctrl+F8 -> Physics -> Automatic infantry ragdolls (experimental)** enables
+  automatic ragdolls (now enabled by default). Kill stock US infantry on supported dry ground. Turning
   it off preserves existing bodies and stops new admissions.
 - **Ctrl+F8 -> Weather -> Fog** selects Legacy or Volumetric layered fog and
   edits fog amount immediately. Presets offer low ground fog, two layers,
@@ -56,7 +56,7 @@ Launch installed `OpenPoseidon.exe` with `--dev`.
 
 ## Explicit remaining limits
 
-Volumetric fog is ON by default; automatic ragdolls remain OFF. Automatic
+Volumetric fog and automatic ragdolls are ON by default by owner request. Automatic
 ragdoll floor registration costs about 231-247 ms / 16 MiB on Everon; the
 current path prepares it at enable/first live simulation before combat. Unsupported
 models, multiplayer, water, ladders, attached actors, excavation contact, unsafe

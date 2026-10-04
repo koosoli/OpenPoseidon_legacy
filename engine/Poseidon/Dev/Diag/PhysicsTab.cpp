@@ -72,12 +72,12 @@ void DrawPhysicsTab()
 {
     ImGui::SeparatorText("Automatic infantry ragdolls");
     bool automaticDeaths = Man::AutomaticInfantryDeathsEnabled();
-    if (ImGui::Checkbox("Automatic infantry deaths (experimental)", &automaticDeaths))
+    if (ImGui::Checkbox("Automatic infantry ragdolls (experimental)", &automaticDeaths))
         Man::SetAutomaticInfantryDeathsEnabled(automaticDeaths);
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("This switch lasts until the game restarts. First use may pause briefly while terrain collision loads.\n"
+        ImGui::SetTooltip("Enabled by default. This switch lasts until the game restarts. Terrain collision is prepared before combat.\n"
                           "Active corpses settle into a persistent pose; saved games retain that frozen pose.");
-    ImGui::TextDisabled("Local single player, dry supported ground, stock US infantry. Up to four active bodies.");
+    ImGui::TextDisabled("Local single player, dry supported ground, stock US infantry. Up to four active ragdolls.");
     ImGui::TextDisabled("Turning off stops new ragdolls and retains existing bodies. Other cases use authored deaths.");
 
     ImGui::SeparatorText("Corpse ragdoll prototype (dev only)");

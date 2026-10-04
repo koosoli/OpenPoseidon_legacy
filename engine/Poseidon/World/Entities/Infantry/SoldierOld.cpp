@@ -745,7 +745,7 @@ bool AutomaticRagdollEnabled()
 {
     if (g_automaticInfantryDeathsOverride >= 0) return g_automaticInfantryDeathsOverride != 0;
     const char* enabled = std::getenv("POSEIDON_AUTOMATIC_RAGDOLL");
-    return enabled && std::strcmp(enabled,"0") != 0;
+    return !enabled || std::strcmp(enabled,"0") != 0;
 }
 
 bool AutomaticRagdollTerrain(RString& refusal)

@@ -62,7 +62,7 @@ execution:
     fog_state: DEFAULT_ON_LIVE_WEATHER_TERRAIN_VALLEY_PATCHES_DRAW_RANGE_AND_24_INSTALLED_VIEWS_PASSED_CARD_QUALITY_OPEN
     fog_evidence: docs/verification/layered-fog-20261004.md
     fog_runtime_receipt: docs/verification/layered-fog-20261004-runtime.json
-    ragdoll_state: BOUNDED_STOCK_FROZEN_PROJECTILE_REWAKE_SAME_CALL_TRANSFER_SAVE_TOGGLE_AND_BLAST_GROUND_RECOVERY_PASSED
+    ragdoll_state: OWNER_AUTHORISED_DEFAULT_ON_BOUNDED_STOCK_FROZEN_PROJECTILE_SAVE_TOGGLE_AND_BLAST_PASSED
     ragdoll_evidence: docs/verification/automatic-ragdoll-20261004.md
     ragdoll_runtime_receipt: docs/verification/automatic-ragdoll-20261004-runtime.json
     upstream_state: BOUNDED_PORTS_INTEGRATED_NATIVE_AND_FOUR_INSTALLED_FIXTURES_PASSED
@@ -86,7 +86,8 @@ execution:
       crouch/prone pose is not established.
       Owner approved default ON volumetric fog with Weather mode/presets/layers;
       installed tree self-shelter comparison passed, nearby gray card band remains.
-      Automatic ragdolls remain OFF by default. Actual installed grenade and
+      Owner explicitly authorised automatic ragdolls ON by default after the
+      installed feedback checkpoint; shared Physics toggle remains available. Actual installed grenade and
       inherited >12m airborne trajectory return to ground; supported low-motion
       contact now gates retirement. Airborne save preserved active handles/pose;
       frozen save/load passed, active airborne load untested. Owner feedback

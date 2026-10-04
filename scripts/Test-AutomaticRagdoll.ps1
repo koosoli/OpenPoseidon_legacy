@@ -6,7 +6,7 @@ param(
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [double]$SiteX=5500,[double]$SiteZ=10000,
  [ValidateSet('UP','MIDDLE','DOWN')][string]$Stance='UP',
- [switch]$RifleDeath,[switch]$SaveLoad,[switch]$RuntimeToggle,[switch]$InheritedBlastTrajectory,[switch]$BlastDeath,[switch]$FrozenProjectile
+ [switch]$RifleDeath,[switch]$SaveLoad,[switch]$RuntimeToggle,[switch]$InheritedBlastTrajectory,[switch]$BlastDeath,[switch]$FrozenProjectile,[switch]$DefaultStartup
 )
 $ErrorActionPreference='Stop';$taskRoot=Split-Path -Parent $PSScriptRoot
 $culture=[Globalization.CultureInfo]::InvariantCulture
@@ -25,9 +25,10 @@ $profile=Join-Path $taskOut 'user';New-Item -ItemType Directory -Force $profile|
 $settings=@{POSEIDON_USER_DIR=$profile;POSEIDON_AUTOMATIC_RAGDOLL='1';WGR_GRASS='0';POSEIDON_SNOWLINE='off';POSEIDON_SNOW_TEST_DEPTH='0';WGR_TEMPORAL='0';WGR_AUTO_EXPOSURE='0';WGR_EXPOSURE='1'}
 if($RuntimeToggle){$settings.POSEIDON_AUTOMATIC_RAGDOLL='0'}
 $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE')
+if($DefaultStartup){$settings.Remove('POSEIDON_AUTOMATIC_RAGDOLL');$clear+='POSEIDON_AUTOMATIC_RAGDOLL'}
 $saved=@{};foreach($key in @($settings.Keys)+$clear){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $log=Join-Path $taskOut 'engine.log';$p=$null;$client=$null
-$result=[ordered]@{passed=$false;expectedCommit=$ExpectedCommit;installed=$before;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;scope='Opt-in original Everon ordinary damage deaths, actual consumed poses, four independent active owners/budget, persistent freeze, cleanup; rifle, save-load, inherited trajectory and actual grenade only when requested. No appearance or broad default promotion without runtime owner review.';arms=@();gates=@{}}
+$result=[ordered]@{passed=$false;expectedCommit=$ExpectedCommit;installed=$before;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;scope='Original Everon ordinary damage deaths (default startup when requested), actual consumed poses, four independent active owners/budget, persistent freeze, cleanup; rifle, save-load, inherited trajectory and actual grenade only when requested. Default promotion explicitly authorised by owner; this runner does not establish broad model or appearance acceptance.';arms=@();gates=@{}}
 function Send($command,[bool]$allowError=$false){
  Require (!$p.HasExited) 'Owned game exited unexpectedly.'
  $wire=$command|ConvertTo-Json -Depth 12 -Compress;$wire|Add-Content -LiteralPath (Join-Path $taskOut 'harness.jsonl');$writer.WriteLine($wire)
@@ -110,7 +111,7 @@ function WaitOwners([int]$active,[int]$frozen,[int]$seconds){
  do{$count=AutoCounts;if($count.active-eq $active-and $count.frozen-eq $frozen-and $count.pending-eq 0){return $count};Require ([DateTime]::UtcNow-lt $until) ('Automatic owner deadline: '+$count.raw);Start-Sleep -Milliseconds 100}while($true)
 }
 try{
- foreach($key in $clear){[Environment]::SetEnvironmentVariable($key,$null,'Process')};foreach($key in $settings.Keys){[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
+ foreach($key in $clear){Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue};foreach($key in $settings.Keys){[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
  $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
  $mission=Join-Path $taskRoot 'tests/perf/missions/perf_field.eden'
  $args=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','1500','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--test-world-hour','16','--log-file',('"'+$log+'"'))
@@ -124,6 +125,7 @@ try{
  $near=Send @{cmd='diag_near';pos=@($SiteX,$SiteZ);r=40};Require ($near.count-eq @($near.objects).Count) 'Obstacle census truncated.'
  $blockers=@($near.objects|Where-Object{($_.static-or (([int]$_.type-band 3)-ne 0))-and $_.shape-and [Math]::Abs((Num $_.pos[0])-$SiteX)-le (35+(Num $_.radius))-and [Math]::Abs((Num $_.pos[1])-$SiteZ)-le (5+(Num $_.radius))})
  $result.obstacles=@{receipt=$near;blockers=$blockers};Require ($blockers.Count-eq 0) 'Retail obstacles overlap the candidate fixture; select another bounded site.'
+ if($DefaultStartup){Require ($null-eq [Environment]::GetEnvironmentVariable('POSEIDON_AUTOMATIC_RAGDOLL','Process')) 'Default startup override must be absent.';$result.gates.defaultOn=AutoCounts;if($RuntimeToggle){$null=Query 'corpse-auto-disable'}}
  if($RuntimeToggle){$result.gates.defaultOff=AutoCounts $false;Require ((Query 'corpse-auto-enable')-ceq 'OK corpse-auto-toggle existing-owners-retained') 'Runtime new-death admission did not enable.'}
  $result.initial=AutoCounts;Require ($result.initial.active-eq 0-and $result.initial.frozen-eq 0-and $result.initial.pending-eq 0) 'Unexpected pre-existing automatic corpse.'
  $prepared=@(Select-String -LiteralPath $log -Pattern 'AUTORAGDOLL: mission terrain preparation ready=true|AUTORAGDOLL: mission terrain preparation ready=1'|ForEach-Object{$_.Line})
@@ -231,6 +233,6 @@ try{
  $result.exit=$p.ExitCode;$result.passed=$true;Write-Host "Installed automatic ragdoll smoke PASS: $taskOut"
 }catch{$result.error=$_.Exception.Message;throw}finally{
  if($p-and !$p.HasExited){try{if($client){$null=Send @{cmd='exit'}}}catch{};if(!$p.WaitForExit(10000)){Stop-Process -Id $p.Id -Force}}
- if($client){$client.Dispose()};foreach($key in $saved.Keys){[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}
+ if($client){$client.Dispose()};foreach($key in $saved.Keys){if($null-eq $saved[$key]){Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue}else{[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}}
  $result|ConvertTo-Json -Depth 24|Set-Content -LiteralPath (Join-Path $taskOut 'result.json')
 }

@@ -11,8 +11,8 @@ if($stamp -notmatch [regex]::Escape($ExpectedCommit)){throw 'Installed source di
 $pair=@{};foreach($name in @('OpenPoseidon.exe','wgpu_renderer.dll')){$pair[$name]=(Get-FileHash -LiteralPath (Join-Path $game $name)).Hash}
 $out=Join-Path $root ('build/owner-ragdoll-fog/'+(Get-Date -Format yyyyMMdd-HHmmss));$profile=Join-Path $out 'user'
 New-Item -ItemType Directory -Force -Path $profile | Out-Null
-$settings=@{POSEIDON_USER_DIR=$profile;POSEIDON_AUTOMATIC_RAGDOLL='1';WGR_LAYERED_FOG_TRACE='1';WGR_WEATHER_COVER='1';WGR_WEATHER_COVER_FAR='1';WGR_AUTO_EXPOSURE='0';WGR_EXPOSURE='0.6';WGR_TONEMAP='1';POSEIDON_SNOWLINE='off';POSEIDON_SNOW_TEST_DEPTH='0'}
-$clear=@('WGR_LAYERED_FOG','WGR_FOG_LAYER0','WGR_FOG_LAYER1','WGR_FOG_TERRAIN','WGR_FOG_PATCH','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE')
+$settings=@{POSEIDON_USER_DIR=$profile;WGR_LAYERED_FOG_TRACE='1';WGR_WEATHER_COVER='1';WGR_WEATHER_COVER_FAR='1';WGR_AUTO_EXPOSURE='0';WGR_EXPOSURE='0.6';WGR_TONEMAP='1';POSEIDON_SNOWLINE='off';POSEIDON_SNOW_TEST_DEPTH='0'}
+$clear=@('POSEIDON_AUTOMATIC_RAGDOLL','WGR_LAYERED_FOG','WGR_FOG_LAYER0','WGR_FOG_LAYER1','WGR_FOG_TERRAIN','WGR_FOG_PATCH','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE')
 $saved=@{};foreach($key in @($settings.Keys)+$clear){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 function Send($command){$writer.WriteLine(($command|ConvertTo-Json -Depth 8 -Compress));do{$line=$reader.ReadLine();if(!$line){throw 'Harness disconnected'};$reply=$line|ConvertFrom-Json}while($null -eq $reply.ok);if(!$reply.ok){throw $line};return $reply}
 function Exec([string]$code){$null=Send @{cmd='exec';code=$code}}
