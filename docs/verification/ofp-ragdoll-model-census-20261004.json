@@ -1,0 +1,5170 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseCommit": "3427b5e2",
+  "installedBuildAtAudit": "bdba184a",
+  "scope": "Read-only installed CWA base config plus all installed AddOns root configs; aggregate facts only. No game runtime certification.",
+  "counts": {
+    "manClasses": 102,
+    "scope2Classes": 77,
+    "scope1Classes": 22,
+    "scope0Classes": 3,
+    "presentModels": 37,
+    "editorPublicModels": 35,
+    "presentModelRigFamilies": 37
+  },
+  "sources": [
+    "AddOns/6G30.pbo",
+    "AddOns/ABox.pbo",
+    "AddOns/Apac.pbo",
+    "AddOns/BISCamel.pbo",
+    "AddOns/BMP2.pbo",
+    "AddOns/Bizon.pbo",
+    "AddOns/Brmd.pbo",
+    "AddOns/Flags.pbo",
+    "AddOns/G36a.pbo",
+    "AddOns/Hunter.pbo",
+    "AddOns/KOLO.PBO",
+    "AddOns/LaserGuided.pbo",
+    "AddOns/M2A2.pbo",
+    "AddOns/MINI.PBO",
+    "AddOns/Mm-1.pbo",
+    "AddOns/Noe.pbo",
+    "AddOns/O.pbo",
+    "AddOns/O_WP.PBO",
+    "AddOns/Steyr.pbo",
+    "AddOns/XMS.pbo",
+    "AddOns/ch47.pbo",
+    "AddOns/humr.pbo",
+    "AddOns/kozl.pbo",
+    "AddOns/oh58.pbo",
+    "AddOns/su25.pbo",
+    "AddOns/trab.pbo",
+    "AddOns/vulcan.pbo",
+    "BIN/CONFIG.BIN"
+  ],
+  "families": [
+    {
+      "model": "biscamel\\biscamelpilot.p3d",
+      "representativeClass": "BISCamelPilot",
+      "spawnable": true,
+      "classes": [
+        "BISCamelPilot"
+      ],
+      "publicClasses": [
+        "BISCamelPilot"
+      ],
+      "sides": [
+        "1"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "AddOns/BISCamel.pbo",
+      "requiredAddon": "BISCamel.pbo",
+      "assetArchive": "AddOns/BISCamel.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "6706747dc92fe61d12471671973c9759b9e62fdff3b703b4a24014ac49444911",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 10,
+      "maximumLodPoints": 1928,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [
+        "pprsty",
+        "lprsty"
+      ],
+      "sharedAnchorCount": 13,
+      "missingSharedAnchors": [
+        "pchodidlo/pprsty",
+        "lchodidlo/lprsty"
+      ],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false,
+      "measuredFootForward": {
+        "spine": [
+          -0.03673757473474031,
+          0.9993234165474062,
+          0.001749212002250112
+        ],
+        "lateral": [
+          0.01647194411380927,
+          -0.0011446086831126885,
+          0.9998636731715349
+        ],
+        "unsignedFrameForward": [
+          0.9991891841186638,
+          0.03676137934003549,
+          -0.016418749321951934
+        ],
+        "endpoints": [
+          {
+            "shin": "pholen",
+            "foot": "pchodidlo",
+            "shinRawBoundsMin": [
+              0.30408117175102234,
+              -1.2879928350448608,
+              -0.6137087941169739
+            ],
+            "shinRawBoundsMax": [
+              0.4709174633026123,
+              -0.8577306270599365,
+              -0.40066373348236084
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.5309342741966248
+            ],
+            "footCentroid": [
+              0.4968772469655521,
+              -1.3532667132815548,
+              -0.5818556637081491
+            ],
+            "footFromDistal": [
+              0.04091587053694795,
+              -0.06527387823669395,
+              -0.05092138951152436
+            ],
+            "planarLength": 0.06373856183450108,
+            "signedForwardOffset": 0.0393192030299787
+          },
+          {
+            "shin": "lholen",
+            "foot": "lchodidlo",
+            "shinRawBoundsMin": [
+              0.30192869901657104,
+              -1.2879928350448608,
+              -0.26450976729393005
+            ],
+            "shinRawBoundsMax": [
+              0.468764990568161,
+              -0.861221969127655,
+              -0.05673864483833313
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.13951317965984344
+            ],
+            "footCentroid": [
+              0.4968772484720856,
+              -1.3532669626173015,
+              -0.10141807568293755
+            ],
+            "footFromDistal": [
+              0.04091587204348146,
+              -0.06527412757244067,
+              0.038095103976905895
+            ],
+            "planarLength": 0.05423686953790723,
+            "signedForwardOffset": 0.037857655877259005
+          }
+        ],
+        "summedSignedForwardOffset": 0.0771768589072377,
+        "bilateralSignedOffsetsAgree": true
+      }
+    },
+    {
+      "model": "biscamel\\biscamelpilot2.p3d",
+      "representativeClass": "BISCamelPilot2",
+      "spawnable": true,
+      "classes": [
+        "BISCamelPilot2"
+      ],
+      "publicClasses": [
+        "BISCamelPilot2"
+      ],
+      "sides": [
+        "0"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "AddOns/BISCamel.pbo",
+      "requiredAddon": "BISCamel.pbo",
+      "assetArchive": "AddOns/BISCamel.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "2ec754a4dea896ac3aed678ecd752b66b75dc7a80c4ff9c9bd26a90d096eadd1",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 10,
+      "maximumLodPoints": 1882,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [
+        "pprsty",
+        "lprsty"
+      ],
+      "sharedAnchorCount": 13,
+      "missingSharedAnchors": [
+        "pchodidlo/pprsty",
+        "lchodidlo/lprsty"
+      ],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false,
+      "measuredFootForward": {
+        "spine": [
+          -0.03673757473474031,
+          0.9993234165474062,
+          0.001749212002250112
+        ],
+        "lateral": [
+          0.01647194411380927,
+          -0.0011446086831126885,
+          0.9998636731715349
+        ],
+        "unsignedFrameForward": [
+          0.9991891841186638,
+          0.03676137934003549,
+          -0.016418749321951934
+        ],
+        "endpoints": [
+          {
+            "shin": "pholen",
+            "foot": "pchodidlo",
+            "shinRawBoundsMin": [
+              0.30408117175102234,
+              -1.2879928350448608,
+              -0.6137087941169739
+            ],
+            "shinRawBoundsMax": [
+              0.4709174633026123,
+              -0.8577306270599365,
+              -0.40066373348236084
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.5309342741966248
+            ],
+            "footCentroid": [
+              0.4968772469655521,
+              -1.3532667132815548,
+              -0.5818556637081491
+            ],
+            "footFromDistal": [
+              0.04091587053694795,
+              -0.06527387823669395,
+              -0.05092138951152436
+            ],
+            "planarLength": 0.06373856183450108,
+            "signedForwardOffset": 0.0393192030299787
+          },
+          {
+            "shin": "lholen",
+            "foot": "lchodidlo",
+            "shinRawBoundsMin": [
+              0.30192869901657104,
+              -1.2879928350448608,
+              -0.26450976729393005
+            ],
+            "shinRawBoundsMax": [
+              0.468764990568161,
+              -0.861221969127655,
+              -0.05673864483833313
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.13951317965984344
+            ],
+            "footCentroid": [
+              0.4968772484720856,
+              -1.3532669626173015,
+              -0.10141807568293755
+            ],
+            "footFromDistal": [
+              0.04091587204348146,
+              -0.06527412757244067,
+              0.038095103976905895
+            ],
+            "planarLength": 0.05423686953790723,
+            "signedForwardOffset": 0.037857655877259005
+          }
+        ],
+        "summedSignedForwardOffset": 0.0771768589072377,
+        "bilateralSignedOffsetsAgree": true
+      }
+    },
+    {
+      "model": "data3d\\angelina.p3d",
+      "representativeClass": "Angelina",
+      "spawnable": false,
+      "classes": [
+        "Angelina"
+      ],
+      "publicClasses": [],
+      "sides": [
+        "0"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 1,
+      "storyOnly": true,
+      "sourceSha256": "07c7f5e5cd7f2a3b4aed22e423125b0907c47731cf6af11d35daa988f0d0232a",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 9,
+      "maximumLodPoints": 1096,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [
+        "prameno",
+        "lrameno"
+      ],
+      "sharedAnchorCount": 10,
+      "missingSharedAnchors": [
+        "krk/hlava",
+        "prameno/pbiceps",
+        "lrameno/lbiceps",
+        "pstehno/pholen",
+        "lstehno/lholen"
+      ],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false,
+      "missingAnchorAlternateGraphicalLods": [
+        {
+          "first": "krk",
+          "second": "hlava",
+          "graphicalLods": [
+            {
+              "lod": 0,
+              "resolution": 0.15000000596046448,
+              "sharedPositiveVertices": 0,
+              "centroid": null
+            },
+            {
+              "lod": 1,
+              "resolution": 0.3499999940395355,
+              "sharedPositiveVertices": 0,
+              "centroid": null
+            },
+            {
+              "lod": 2,
+              "resolution": 1.0,
+              "sharedPositiveVertices": 0,
+              "centroid": null
+            }
+          ]
+        },
+        {
+          "first": "prameno",
+          "second": "pbiceps",
+          "graphicalLods": [
+            {
+              "lod": 0,
+              "resolution": 0.15000000596046448,
+              "sharedPositiveVertices": 0,
+              "centroid": null
+            },
+            {
+              "lod": 1,
+              "resolution": 0.3499999940395355,
+              "sharedPositiveVertices": 0,
+              "centroid": null
+            },
+            {
+              "lod": 2,
+              "resolution": 1.0,
+              "sharedPositiveVertices": 0,
+              "centroid": null
+            }
+          ]
+        },
+        {
+          "first": "lrameno",
+          "second": "lbiceps",
+          "graphicalLods": [
+            {
+              "lod": 0,
+              "resolution": 0.15000000596046448,
+              "sharedPositiveVertices": 0,
+              "centroid": null
+            },
+            {
+              "lod": 1,
+              "resolution": 0.3499999940395355,
+              "sharedPositiveVertices": 0,
+              "centroid": null
+            },
+            {
+              "lod": 2,
+              "resolution": 1.0,
+              "sharedPositiveVertices": 0,
+              "centroid": null
+            }
+          ]
+        },
+        {
+          "first": "pstehno",
+          "second": "pholen",
+          "graphicalLods": [
+            {
+              "lod": 0,
+              "resolution": 0.15000000596046448,
+              "sharedPositiveVertices": 0,
+              "centroid": null
+            },
+            {
+              "lod": 1,
+              "resolution": 0.3499999940395355,
+              "sharedPositiveVertices": 0,
+              "centroid": null
+            },
+            {
+              "lod": 2,
+              "resolution": 1.0,
+              "sharedPositiveVertices": 0,
+              "centroid": null
+            }
+          ]
+        },
+        {
+          "first": "lstehno",
+          "second": "lholen",
+          "graphicalLods": [
+            {
+              "lod": 0,
+              "resolution": 0.15000000596046448,
+              "sharedPositiveVertices": 0,
+              "centroid": null
+            },
+            {
+              "lod": 1,
+              "resolution": 0.3499999940395355,
+              "sharedPositiveVertices": 0,
+              "centroid": null
+            },
+            {
+              "lod": 2,
+              "resolution": 1.0,
+              "sharedPositiveVertices": 0,
+              "centroid": null
+            }
+          ]
+        }
+      ],
+      "neutralFirePairedSurfaceEvidence": {
+        "coordinateSpace": "actual neutral decoded FireGeometry vertices; no animation/world transform or joint admission",
+        "pairs": [
+          {
+            "firstPart": "chest",
+            "secondPart": "head",
+            "firstFireVertex": 63,
+            "secondFireVertex": 75,
+            "firstPoint": [
+              0.5380176901817322,
+              0.1738508641719818,
+              -0.12986299395561218
+            ],
+            "secondPoint": [
+              0.5381361842155457,
+              0.23458126187324524,
+              -0.0497635081410408
+            ],
+            "midpoint": [
+              0.5380769371986389,
+              0.20421606302261353,
+              -0.08981325104832649
+            ],
+            "gap": 0.10051926618090878,
+            "firstPartVertexCount": 24,
+            "secondPartVertexCount": 24,
+            "within012Bound": true
+          },
+          {
+            "firstPart": "chest",
+            "secondPart": "right_upper_arm",
+            "firstFireVertex": 63,
+            "secondFireVertex": 162,
+            "firstPoint": [
+              0.5380176901817322,
+              0.1738508641719818,
+              -0.12986299395561218
+            ],
+            "secondPoint": [
+              0.5125734806060791,
+              0.11867839097976685,
+              -0.13474038243293762
+            ],
+            "midpoint": [
+              0.5252955853939056,
+              0.14626462757587433,
+              -0.1323016881942749
+            ],
+            "gap": 0.060952428314499346,
+            "firstPartVertexCount": 24,
+            "secondPartVertexCount": 24,
+            "within012Bound": true
+          },
+          {
+            "firstPart": "chest",
+            "secondPart": "left_upper_arm",
+            "firstFireVertex": 66,
+            "secondFireVertex": 114,
+            "firstPoint": [
+              0.5380176901817322,
+              0.17041462659835815,
+              0.1904420405626297
+            ],
+            "secondPoint": [
+              0.5125734806060791,
+              0.12173053622245789,
+              0.21523833274841309
+            ],
+            "midpoint": [
+              0.5252955853939056,
+              0.14607258141040802,
+              0.2028401866555214
+            ],
+            "gap": 0.06026943307200859,
+            "firstPartVertexCount": 24,
+            "secondPartVertexCount": 24,
+            "within012Bound": true
+          },
+          {
+            "firstPart": "right_thigh",
+            "secondPart": "right_shin_foot",
+            "firstFireVertex": 240,
+            "secondFireVertex": 276,
+            "firstPoint": [
+              0.3443734049797058,
+              -0.8395470380783081,
+              -0.05856132507324219
+            ],
+            "secondPoint": [
+              0.34282588958740234,
+              -0.8317543268203735,
+              -0.06488354504108429
+            ],
+            "midpoint": [
+              0.3435996472835541,
+              -0.8356506824493408,
+              -0.06172243505716324
+            ],
+            "gap": 0.010153404254767844,
+            "firstPartVertexCount": 24,
+            "secondPartVertexCount": 48,
+            "within012Bound": true
+          },
+          {
+            "firstPart": "left_thigh",
+            "secondPart": "left_shin_foot",
+            "firstFireVertex": 192,
+            "secondFireVertex": 228,
+            "firstPoint": [
+              0.3443734049797058,
+              -0.8395470380783081,
+              0.11601082235574722
+            ],
+            "secondPoint": [
+              0.34282588958740234,
+              -0.8317543268203735,
+              0.12233304232358932
+            ],
+            "midpoint": [
+              0.3435996472835541,
+              -0.8356506824493408,
+              0.11917193233966827
+            ],
+            "gap": 0.010153404254767844,
+            "firstPartVertexCount": 24,
+            "secondPartVertexCount": 48,
+            "within012Bound": true
+          }
+        ]
+      }
+    },
+    {
+      "model": "data3d\\mc civil.p3d",
+      "representativeClass": "Civilian",
+      "spawnable": true,
+      "classes": [
+        "Civilian",
+        "SoldierGFakeC"
+      ],
+      "publicClasses": [
+        "Civilian"
+      ],
+      "sides": [
+        "2",
+        "3"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "34f5f648a11db546714856a4e964ea1c63fb52e64497c5469bb3e605666917b2",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1519,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc civil2.p3d",
+      "representativeClass": "Civilian2",
+      "spawnable": true,
+      "classes": [
+        "Civilian2",
+        "SoldierGFakeC2"
+      ],
+      "publicClasses": [
+        "Civilian2"
+      ],
+      "sides": [
+        "2",
+        "3"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "71cc51fe2d14af0f42b6f4eaafca41f8939da3d2ede7e6e190b868b4ae72acfa",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1522,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc civil3.p3d",
+      "representativeClass": "Civilian3",
+      "spawnable": true,
+      "classes": [
+        "Civilian3"
+      ],
+      "publicClasses": [
+        "Civilian3"
+      ],
+      "sides": [
+        "3"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "fef249f823f1965bf8fed2fb6e234730c8f155af5b5cccf43e69579c79bb746b",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1492,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc crewg.p3d",
+      "representativeClass": "SoldierGCrew",
+      "spawnable": true,
+      "classes": [
+        "SoldierGCrew"
+      ],
+      "publicClasses": [
+        "SoldierGCrew"
+      ],
+      "sides": [
+        "2"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "fc88e4ca5a8f63c71fca3a0b529ccfcbc6e41daf7b19ba002cc0e176606ff9ed",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 2014,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc pilote2.p3d",
+      "representativeClass": "SoldierEPilot",
+      "spawnable": true,
+      "classes": [
+        "SoldierEPilot"
+      ],
+      "publicClasses": [
+        "SoldierEPilot"
+      ],
+      "sides": [
+        "0"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "358e9eb5562afaf13212cfa0e8f5aa6e683418d807ace34a6c8cf6df537a37cd",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1686,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc pilotw2.p3d",
+      "representativeClass": "SoldierWPilot",
+      "spawnable": true,
+      "classes": [
+        "SoldierWPilot",
+        "SoldierWPilotHG"
+      ],
+      "publicClasses": [
+        "SoldierWPilot",
+        "SoldierWPilotHG"
+      ],
+      "sides": [
+        "1"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "6f18fe1c29d4e8b948614ee8d2f063068f7e10b2ea3d55773bfb5ca73f672768",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1686,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc saboteur.p3d",
+      "representativeClass": "SoldierWSaboteur",
+      "spawnable": true,
+      "classes": [
+        "SoldierWSaboteur",
+        "SoldierWSaboteurPipe",
+        "SoldierWSaboteurPipeHG",
+        "SoldierWSaboteurCheat",
+        "SoldierWSaboteurPipeHGS"
+      ],
+      "publicClasses": [
+        "SoldierWSaboteurPipe",
+        "SoldierWSaboteurPipeHG",
+        "SoldierWSaboteurPipeHGS"
+      ],
+      "sides": [
+        "1"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 1,
+      "storyOnly": false,
+      "sourceSha256": "dd9acfef81d1b209e3dd0ce68ef7123f262e1558b3d0b92ea38cef8390af41bb",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1816,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc saboteurday.p3d",
+      "representativeClass": "SoldierWSaboteurDay",
+      "spawnable": true,
+      "classes": [
+        "SoldierWSaboteurDay",
+        "SoldierWSaboteurLaser",
+        "SoldierWSaboteurXMS"
+      ],
+      "publicClasses": [
+        "SoldierWSaboteurDay",
+        "SoldierWSaboteurLaser",
+        "SoldierWSaboteurXMS"
+      ],
+      "sides": [
+        "1"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "ada793b117f34ba82a5349ba48536d7788484a7874a8026986514a92b6cd5e32",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1832,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc snipere2.p3d",
+      "representativeClass": "SoldierESniper",
+      "spawnable": true,
+      "classes": [
+        "SoldierESniper"
+      ],
+      "publicClasses": [
+        "SoldierESniper"
+      ],
+      "sides": [
+        "0"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "9ee676ba9c83fb58eb7577ffd3f9788b9bbf6a579d4f16617e40a724fb0b5f8e",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1991,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc sniperw2.p3d",
+      "representativeClass": "SoldierWSniper",
+      "spawnable": true,
+      "classes": [
+        "SoldierWSniper",
+        "SoldierWLAWSniper"
+      ],
+      "publicClasses": [
+        "SoldierWSniper"
+      ],
+      "sides": [
+        "1"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "5294417d8d3b837198593a9a736f5e2eaf41bc3fc006bf4720db08a13a2f1ed8",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 2074,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc specnas2.p3d",
+      "representativeClass": "SoldierESaboteur",
+      "spawnable": true,
+      "classes": [
+        "SoldierESaboteur",
+        "SoldierESaboteurPipe",
+        "SoldierESaboteurBizon",
+        "SoldierESaboteurPipeHG",
+        "SoldierESaboteurCheat"
+      ],
+      "publicClasses": [
+        "SoldierESaboteurPipe",
+        "SoldierESaboteurBizon",
+        "SoldierESaboteurPipeHG"
+      ],
+      "sides": [
+        "0"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 1,
+      "storyOnly": false,
+      "sourceSha256": "b6f6dc2f5334434058247a40f3ed71951aa212661e974eddf841b44c8c1031ff",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1939,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc tankistae2.p3d",
+      "representativeClass": "SoldierECrew",
+      "spawnable": true,
+      "classes": [
+        "SoldierECrew"
+      ],
+      "publicClasses": [
+        "SoldierECrew"
+      ],
+      "sides": [
+        "0"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "1d5b71603bf90fd0d723677948941ab0f21f4875ffe00b9a25ccc3b0028745a9",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1842,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc tankistaw2.p3d",
+      "representativeClass": "SoldierWCrew",
+      "spawnable": true,
+      "classes": [
+        "SoldierWCrew"
+      ],
+      "publicClasses": [
+        "SoldierWCrew"
+      ],
+      "sides": [
+        "1"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "84e53377b009791edb96bb578411e8fa10aa598ccde493357a29d0b80f24c936",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1703,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc vojake2.p3d",
+      "representativeClass": "SoldierEB",
+      "spawnable": true,
+      "classes": [
+        "SoldierEB",
+        "SoldierWFakeE",
+        "SoldierEG",
+        "SoldierEMedic",
+        "SoldierENOG",
+        "SoldierE",
+        "SoldierEMG",
+        "SoldierELAW",
+        "SoldierEAT",
+        "SoldierEAA",
+        "SoldierEMiner",
+        "SoldierGFakeE",
+        "HeavyGrenadier"
+      ],
+      "publicClasses": [
+        "SoldierEB",
+        "SoldierEG",
+        "SoldierEMedic",
+        "SoldierEMG",
+        "SoldierELAW",
+        "SoldierEAT",
+        "SoldierEAA",
+        "SoldierEMiner",
+        "HeavyGrenadier"
+      ],
+      "sides": [
+        "0",
+        "1",
+        "2"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "5d15e2758d11a12945199809d6b9027f7cd0329660d6a8cae5d5d639ad30c47e",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1959,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc vojake2_guba.p3d",
+      "representativeClass": "GeneralE",
+      "spawnable": false,
+      "classes": [
+        "GeneralE"
+      ],
+      "publicClasses": [],
+      "sides": [
+        "0"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 1,
+      "storyOnly": true,
+      "sourceSha256": "0a3f681f2cff59e568b6e083f5ad539ae4e00523eb0a6088c53edf0bc8f8abd0",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 10,
+      "maximumLodPoints": 1681,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc vojakeo2.p3d",
+      "representativeClass": "OfficerE",
+      "spawnable": true,
+      "classes": [
+        "OfficerE",
+        "OfficerENight",
+        "OfficerEHG",
+        "OfficerECheat"
+      ],
+      "publicClasses": [
+        "OfficerE",
+        "OfficerENight",
+        "OfficerEHG"
+      ],
+      "sides": [
+        "0"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "5fc428f9dc69db453d9f1553c558549501940e172d0b01cde6ac4cbd2f15c70b",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1942,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc vojakg2.p3d",
+      "representativeClass": "SoldierGB",
+      "spawnable": true,
+      "classes": [
+        "SoldierGB",
+        "SoldierGMedic",
+        "SoldierGG",
+        "SoldierGNOG",
+        "SoldierG",
+        "SoldierGLAW",
+        "SoldierGAT",
+        "SoldierGAA",
+        "Hunter",
+        "SoldierGCheat"
+      ],
+      "publicClasses": [
+        "SoldierGB",
+        "SoldierGMedic",
+        "SoldierGG",
+        "SoldierGLAW",
+        "SoldierGAT",
+        "SoldierGAA",
+        "Hunter"
+      ],
+      "sides": [
+        "2"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "2ced70c4963fb9c11bbc9269e7c05f9cc43b7d0ee022dda3b3410d78d1317e53",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1968,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc vojakg3.p3d",
+      "representativeClass": "SoldierGMG",
+      "spawnable": true,
+      "classes": [
+        "SoldierGPilot",
+        "SoldierGMG"
+      ],
+      "publicClasses": [
+        "SoldierGPilot",
+        "SoldierGMG"
+      ],
+      "sides": [
+        "2"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "d91780798aafbe5398dd75b852d4533d9355ecc5e10b1b0a74ab55183a980ec3",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1973,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc vojakgo2.p3d",
+      "representativeClass": "OfficerG",
+      "spawnable": true,
+      "classes": [
+        "OfficerG",
+        "OfficerGNight",
+        "OfficerGHG",
+        "OfficerGCheat"
+      ],
+      "publicClasses": [
+        "OfficerG",
+        "OfficerGNight",
+        "OfficerGHG"
+      ],
+      "sides": [
+        "2"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "1dbaa04fc3017575529f73b94f94fb00679ad8f2c61d15431d58c816a381b3f2",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1955,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc vojakw2.p3d",
+      "representativeClass": "SoldierWB",
+      "spawnable": true,
+      "classes": [
+        "SoldierWB",
+        "SoldierWG",
+        "SoldierWMedic",
+        "SoldierWNOG",
+        "SoldierW",
+        "SoldierWMG",
+        "SoldierWLAW",
+        "SoldierWAT",
+        "SoldierWAA",
+        "SoldierWMortar",
+        "SoldierWMiner",
+        "SoldierWCaptive",
+        "SoldierEFakeW",
+        "SoldierWG36a",
+        "HeavyGW",
+        "SoldierWSteyr",
+        "SoldierWXMS"
+      ],
+      "publicClasses": [
+        "SoldierWB",
+        "SoldierWG",
+        "SoldierWMedic",
+        "SoldierWMG",
+        "SoldierWLAW",
+        "SoldierWAT",
+        "SoldierWAA",
+        "SoldierWMortar",
+        "SoldierWMiner",
+        "SoldierWCaptive",
+        "SoldierWG36a",
+        "HeavyGW",
+        "SoldierWSteyr",
+        "SoldierWXMS"
+      ],
+      "sides": [
+        "0",
+        "1"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "baf90043df1b561c6099f3c8fec546ed58e43e00853d70f386cfb2f81853d221",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1799,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "data3d\\mc vojakwo2.p3d",
+      "representativeClass": "OfficerW",
+      "spawnable": true,
+      "classes": [
+        "OfficerW",
+        "OfficerWNight",
+        "OfficerWHG"
+      ],
+      "publicClasses": [
+        "OfficerW",
+        "OfficerWNight",
+        "OfficerWHG"
+      ],
+      "sides": [
+        "1"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "BIN/CONFIG.BIN",
+      "requiredAddon": null,
+      "assetArchive": "DTA/Data3D.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "36ad3620e902c8e0e13dd7fd3aea3046a2c09cd87cc85536688a12f8d0a56adc",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1842,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    },
+    {
+      "model": "o\\char\\char01.p3d",
+      "representativeClass": "Civilian4",
+      "spawnable": true,
+      "classes": [
+        "Civilian4",
+        "SoldierGFakeC3"
+      ],
+      "publicClasses": [
+        "Civilian4"
+      ],
+      "sides": [
+        "2",
+        "3"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "AddOns/O.pbo",
+      "requiredAddon": "O.pbo",
+      "assetArchive": "AddOns/O.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "7737ac34febb46e5d9679145bb141c09ab491e58376016a3e73c914edf4d44c5",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 10,
+      "maximumLodPoints": 1783,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [
+        "pprsty",
+        "lprsty"
+      ],
+      "sharedAnchorCount": 11,
+      "missingSharedAnchors": [
+        "pholen/pchodidlo",
+        "lholen/lchodidlo",
+        "pchodidlo/pprsty",
+        "lchodidlo/lprsty"
+      ],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false,
+      "measuredFootForward": {
+        "spine": [
+          -0.05662886058813871,
+          0.9983952972048525,
+          -5.165000865109478e-05
+        ],
+        "lateral": [
+          0.012706226267903303,
+          0.000772424451275674,
+          0.9999189743046664
+        ],
+        "unsignedFrameForward": [
+          0.9983144414274083,
+          0.05662361591863694,
+          -0.012729578067661581
+        ],
+        "endpoints": [
+          {
+            "shin": "pholen",
+            "foot": "pchodidlo",
+            "shinRawBoundsMin": [
+              0.30408117175102234,
+              -1.2879928350448608,
+              -0.6136468052864075
+            ],
+            "shinRawBoundsMax": [
+              0.4709174633026123,
+              -0.8577306270599365,
+              -0.40060174465179443
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.5308722853660583
+            ],
+            "footCentroid": [
+              0.4889552785669054,
+              -1.3520491892950874,
+              -0.5877072463716779
+            ],
+            "footFromDistal": [
+              0.03299390213830128,
+              -0.0640563542502266,
+              -0.05683496100561958
+            ],
+            "planarLength": 0.06395218214887095,
+            "signedForwardOffset": 0.030034671656589372
+          },
+          {
+            "shin": "lholen",
+            "foot": "lchodidlo",
+            "shinRawBoundsMin": [
+              0.30192869901657104,
+              -1.2879928350448608,
+              -0.26444777846336365
+            ],
+            "shinRawBoundsMax": [
+              0.468764990568161,
+              -0.861221969127655,
+              -0.056676656007766724
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.13945119082927704
+            ],
+            "footCentroid": [
+              0.4889552843570709,
+              -1.3520491892950874,
+              -0.09954214010919843
+            ],
+            "footFromDistal": [
+              0.03299390792846679,
+              -0.0640563542502266,
+              0.03990905072007861
+            ],
+            "planarLength": 0.04951508537294982,
+            "signedForwardOffset": 0.02880316698715418
+          }
+        ],
+        "summedSignedForwardOffset": 0.05883783864374355,
+        "bilateralSignedOffsetsAgree": true
+      }
+    },
+    {
+      "model": "o\\char\\char02.p3d",
+      "representativeClass": "Civilian5",
+      "spawnable": true,
+      "classes": [
+        "Civilian5"
+      ],
+      "publicClasses": [
+        "Civilian5"
+      ],
+      "sides": [
+        "3"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "AddOns/O.pbo",
+      "requiredAddon": "O.pbo",
+      "assetArchive": "AddOns/O.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "84636428e32e34eaca46c23c1514671c58ad56d8d7aa40e7caef6a2e4c09e4fa",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 10,
+      "maximumLodPoints": 1706,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [
+        "pprsty",
+        "lprsty"
+      ],
+      "sharedAnchorCount": 13,
+      "missingSharedAnchors": [
+        "pchodidlo/pprsty",
+        "lchodidlo/lprsty"
+      ],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false,
+      "measuredFootForward": {
+        "spine": [
+          -0.009914912748824441,
+          0.9999192521403955,
+          0.007948817784765687
+        ],
+        "lateral": [
+          0.006827386244545982,
+          -0.0078813291028361,
+          0.9999456342465027
+        ],
+        "unsignedFrameForward": [
+          0.9999275380257566,
+          0.009968643366326104,
+          -0.006748692257320651
+        ],
+        "endpoints": [
+          {
+            "shin": "pholen",
+            "foot": "pchodidlo",
+            "shinRawBoundsMin": [
+              0.30408117175102234,
+              -1.2879928350448608,
+              -0.6137087941169739
+            ],
+            "shinRawBoundsMax": [
+              0.4709174633026123,
+              -0.8577306270599365,
+              -0.40066373348236084
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.5309342741966248
+            ],
+            "footCentroid": [
+              0.49687723008613716,
+              -1.3532658004649014,
+              -0.5818554571020894
+            ],
+            "footFromDistal": [
+              0.04091585365753303,
+              -0.06527296542004057,
+              -0.05092118290546466
+            ],
+            "planarLength": 0.06450824774102784,
+            "signedForwardOffset": 0.04060585729307195
+          },
+          {
+            "shin": "lholen",
+            "foot": "lchodidlo",
+            "shinRawBoundsMin": [
+              0.30192869901657104,
+              -1.2879928350448608,
+              -0.26450976729393005
+            ],
+            "shinRawBoundsMax": [
+              0.468764990568161,
+              -0.861221969127655,
+              -0.05673864483833313
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.13951317965984344
+            ],
+            "footCentroid": [
+              0.4968772350826579,
+              -1.3532658004649014,
+              -0.10141831395368621
+            ],
+            "footFromDistal": [
+              0.04091585865405378,
+              -0.06527296542004057,
+              0.038094865706157235
+            ],
+            "planarLength": 0.05579046350198552,
+            "signedForwardOffset": 0.04000512037118811
+          }
+        ],
+        "summedSignedForwardOffset": 0.08061097766426006,
+        "bilateralSignedOffsetsAgree": true
+      }
+    },
+    {
+      "model": "o\\char\\char03.p3d",
+      "representativeClass": "Civilian6",
+      "spawnable": true,
+      "classes": [
+        "Civilian6"
+      ],
+      "publicClasses": [
+        "Civilian6"
+      ],
+      "sides": [
+        "3"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "AddOns/O.pbo",
+      "requiredAddon": "O.pbo",
+      "assetArchive": "AddOns/O.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "9fbea7f600d2ecabed521fdf9bca57ce3146946a34ea53d222c65c9bef13a5a2",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 10,
+      "maximumLodPoints": 1756,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [
+        "pprsty",
+        "lprsty"
+      ],
+      "sharedAnchorCount": 13,
+      "missingSharedAnchors": [
+        "pchodidlo/pprsty",
+        "lchodidlo/lprsty"
+      ],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false,
+      "measuredFootForward": {
+        "spine": [
+          -0.03731879947101338,
+          0.9993014790890908,
+          0.001964967276505094
+        ],
+        "lateral": [
+          0.016481687523600196,
+          -0.0013505651846698866,
+          0.9998632556255161
+        ],
+        "unsignedFrameForward": [
+          0.9991674840498047,
+          0.03734608231176869,
+          -0.016419773248918666
+        ],
+        "endpoints": [
+          {
+            "shin": "pholen",
+            "foot": "pchodidlo",
+            "shinRawBoundsMin": [
+              0.30408117175102234,
+              -1.2879928350448608,
+              -0.6137087941169739
+            ],
+            "shinRawBoundsMax": [
+              0.4709174633026123,
+              -0.8577306270599365,
+              -0.40066373348236084
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.5309342741966248
+            ],
+            "footCentroid": [
+              0.4968772469655521,
+              -1.3532667132815548,
+              -0.5818556637081491
+            ],
+            "footFromDistal": [
+              0.04091587053694795,
+              -0.06527387823669395,
+              -0.05092138951152436
+            ],
+            "planarLength": 0.06370359495675339,
+            "signedForwardOffset": 0.039280201461972974
+          },
+          {
+            "shin": "lholen",
+            "foot": "lchodidlo",
+            "shinRawBoundsMin": [
+              0.30192869901657104,
+              -1.2879928350448608,
+              -0.26450976729393005
+            ],
+            "shinRawBoundsMax": [
+              0.468764990568161,
+              -0.861221969127655,
+              -0.05673864483833313
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.13951317965984344
+            ],
+            "footCentroid": [
+              0.4968772484720856,
+              -1.3532669626173015,
+              -0.10141807568293755
+            ],
+            "footFromDistal": [
+              0.04091587204348146,
+              -0.06527412757244067,
+              0.038095103976905895
+            ],
+            "planarLength": 0.054219496522020565,
+            "signedForwardOffset": 0.03781856301704508
+          }
+        ],
+        "summedSignedForwardOffset": 0.07709876447901806,
+        "bilateralSignedOffsetsAgree": true
+      }
+    },
+    {
+      "model": "o\\char\\char04.p3d",
+      "representativeClass": "Civilian8",
+      "spawnable": true,
+      "classes": [
+        "Civilian8",
+        "Civilian11"
+      ],
+      "publicClasses": [
+        "Civilian8",
+        "Civilian11"
+      ],
+      "sides": [
+        "3"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "AddOns/O.pbo",
+      "requiredAddon": "O.pbo",
+      "assetArchive": "AddOns/O.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "e26ff6229c9bf64efb827ea2a57d21f88951f0d57af1783e888d485f75469af3",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 10,
+      "maximumLodPoints": 1713,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [
+        "pprsty",
+        "lprsty"
+      ],
+      "sharedAnchorCount": 13,
+      "missingSharedAnchors": [
+        "pchodidlo/pprsty",
+        "lchodidlo/lprsty"
+      ],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false,
+      "measuredFootForward": {
+        "spine": [
+          -0.009914912748824441,
+          0.9999192521403955,
+          0.007948817784765687
+        ],
+        "lateral": [
+          0.011464765479331012,
+          -0.007835011880497364,
+          0.9999035812223779
+        ],
+        "unsignedFrameForward": [
+          0.9998851202301628,
+          0.010005088096797243,
+          -0.011386156264876554
+        ],
+        "endpoints": [
+          {
+            "shin": "pholen",
+            "foot": "pchodidlo",
+            "shinRawBoundsMin": [
+              0.30408117175102234,
+              -1.2879928350448608,
+              -0.6137087941169739
+            ],
+            "shinRawBoundsMax": [
+              0.4709174633026123,
+              -0.8577306270599365,
+              -0.40066373348236084
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.5309342741966248
+            ],
+            "footCentroid": [
+              0.49687723008613716,
+              -1.3532658004649014,
+              -0.5818554571020894
+            ],
+            "footFromDistal": [
+              0.04091585365753303,
+              -0.06527296542004057,
+              -0.05092118290546466
+            ],
+            "planarLength": 0.06450824774102784,
+            "signedForwardOffset": 0.040837888030069436
+          },
+          {
+            "shin": "lholen",
+            "foot": "lchodidlo",
+            "shinRawBoundsMin": [
+              0.30192869901657104,
+              -1.2879928350448608,
+              -0.26450976729393005
+            ],
+            "shinRawBoundsMax": [
+              0.468764990568161,
+              -0.861221969127655,
+              -0.05673864483833313
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.13951317965984344
+            ],
+            "footCentroid": [
+              0.4968772350826579,
+              -1.3532658004649014,
+              -0.10141831395368621
+            ],
+            "footFromDistal": [
+              0.04091585865405378,
+              -0.06527296542004057,
+              0.038094865706157235
+            ],
+            "planarLength": 0.05579046350198552,
+            "signedForwardOffset": 0.03982434238644242
+          }
+        ],
+        "summedSignedForwardOffset": 0.08066223041651185,
+        "bilateralSignedOffsetsAgree": true
+      }
+    },
+    {
+      "model": "o\\char\\char05.p3d",
+      "representativeClass": "Civilian7",
+      "spawnable": true,
+      "classes": [
+        "Civilian7"
+      ],
+      "publicClasses": [
+        "Civilian7"
+      ],
+      "sides": [
+        "3"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "AddOns/O.pbo",
+      "requiredAddon": "O.pbo",
+      "assetArchive": "AddOns/O.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "1997f5731e3aaf9e138122cf7d0a121358f121d04bc9510e848fb3a0fbba333b",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 10,
+      "maximumLodPoints": 1783,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [
+        "pprsty",
+        "lprsty"
+      ],
+      "sharedAnchorCount": 11,
+      "missingSharedAnchors": [
+        "pholen/pchodidlo",
+        "lholen/lchodidlo",
+        "pchodidlo/pprsty",
+        "lchodidlo/lprsty"
+      ],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false,
+      "measuredFootForward": {
+        "spine": [
+          -0.05662886058813871,
+          0.9983952972048525,
+          -5.165000865109478e-05
+        ],
+        "lateral": [
+          0.012706226267903303,
+          0.000772424451275674,
+          0.9999189743046664
+        ],
+        "unsignedFrameForward": [
+          0.9983144414274083,
+          0.05662361591863694,
+          -0.012729578067661581
+        ],
+        "endpoints": [
+          {
+            "shin": "pholen",
+            "foot": "pchodidlo",
+            "shinRawBoundsMin": [
+              0.30408117175102234,
+              -1.2879928350448608,
+              -0.6137087941169739
+            ],
+            "shinRawBoundsMax": [
+              0.4709174633026123,
+              -0.8577306270599365,
+              -0.40066373348236084
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.5309342741966248
+            ],
+            "footCentroid": [
+              0.4889552785669054,
+              -1.3520491892950874,
+              -0.5877692352022443
+            ],
+            "footFromDistal": [
+              0.03299390213830128,
+              -0.0640563542502266,
+              -0.05683496100561958
+            ],
+            "planarLength": 0.06395218214887095,
+            "signedForwardOffset": 0.030034671656589372
+          },
+          {
+            "shin": "lholen",
+            "foot": "lchodidlo",
+            "shinRawBoundsMin": [
+              0.30192869901657104,
+              -1.2879928350448608,
+              -0.26450976729393005
+            ],
+            "shinRawBoundsMax": [
+              0.468764990568161,
+              -0.861221969127655,
+              -0.05673864483833313
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.13951317965984344
+            ],
+            "footCentroid": [
+              0.4889552843570709,
+              -1.3520491892950874,
+              -0.09960412893976484
+            ],
+            "footFromDistal": [
+              0.03299390792846679,
+              -0.0640563542502266,
+              0.03990905072007861
+            ],
+            "planarLength": 0.04951508537294982,
+            "signedForwardOffset": 0.02880316698715418
+          }
+        ],
+        "summedSignedForwardOffset": 0.05883783864374355,
+        "bilateralSignedOffsetsAgree": true
+      }
+    },
+    {
+      "model": "o\\char\\char06.p3d",
+      "representativeClass": "Civilian9",
+      "spawnable": true,
+      "classes": [
+        "Civilian9"
+      ],
+      "publicClasses": [
+        "Civilian9"
+      ],
+      "sides": [
+        "3"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "AddOns/O.pbo",
+      "requiredAddon": "O.pbo",
+      "assetArchive": "AddOns/O.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "7a99e520d93fb2f4adcf7a305f6255a1689634d56a7a74a91afc4b87714e603b",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 10,
+      "maximumLodPoints": 1812,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [
+        "pprsty",
+        "lprsty"
+      ],
+      "sharedAnchorCount": 11,
+      "missingSharedAnchors": [
+        "pholen/pchodidlo",
+        "lholen/lchodidlo",
+        "pchodidlo/pprsty",
+        "lchodidlo/lprsty"
+      ],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false,
+      "measuredFootForward": {
+        "spine": [
+          -0.05662886058813871,
+          0.9983952972048525,
+          -5.165000865109478e-05
+        ],
+        "lateral": [
+          0.012706226267903303,
+          0.000772424451275674,
+          0.9999189743046664
+        ],
+        "unsignedFrameForward": [
+          0.9983144414274083,
+          0.05662361591863694,
+          -0.012729578067661581
+        ],
+        "endpoints": [
+          {
+            "shin": "pholen",
+            "foot": "pchodidlo",
+            "shinRawBoundsMin": [
+              0.30408117175102234,
+              -1.2879928350448608,
+              -0.6137087941169739
+            ],
+            "shinRawBoundsMax": [
+              0.4709174633026123,
+              -0.8577306270599365,
+              -0.40066373348236084
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.5309342741966248
+            ],
+            "footCentroid": [
+              0.4889552785669054,
+              -1.3520491892950874,
+              -0.5877692352022443
+            ],
+            "footFromDistal": [
+              0.03299390213830128,
+              -0.0640563542502266,
+              -0.05683496100561958
+            ],
+            "planarLength": 0.06395218214887095,
+            "signedForwardOffset": 0.030034671656589372
+          },
+          {
+            "shin": "lholen",
+            "foot": "lchodidlo",
+            "shinRawBoundsMin": [
+              0.30192869901657104,
+              -1.2879928350448608,
+              -0.26450976729393005
+            ],
+            "shinRawBoundsMax": [
+              0.468764990568161,
+              -0.861221969127655,
+              -0.05673864483833313
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.13951317965984344
+            ],
+            "footCentroid": [
+              0.4889552843570709,
+              -1.3520491892950874,
+              -0.09960412893976484
+            ],
+            "footFromDistal": [
+              0.03299390792846679,
+              -0.0640563542502266,
+              0.03990905072007861
+            ],
+            "planarLength": 0.04951508537294982,
+            "signedForwardOffset": 0.02880316698715418
+          }
+        ],
+        "summedSignedForwardOffset": 0.05883783864374355,
+        "bilateralSignedOffsetsAgree": true
+      }
+    },
+    {
+      "model": "o\\char\\char07.p3d",
+      "representativeClass": "Civilian10",
+      "spawnable": true,
+      "classes": [
+        "Civilian10"
+      ],
+      "publicClasses": [
+        "Civilian10"
+      ],
+      "sides": [
+        "3"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "AddOns/O.pbo",
+      "requiredAddon": "O.pbo",
+      "assetArchive": "AddOns/O.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "2e53d7c6b666baed494684652e91430b38b6a078ca50120e10dd780020b3a716",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 10,
+      "maximumLodPoints": 1783,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [
+        "pprsty",
+        "lprsty"
+      ],
+      "sharedAnchorCount": 11,
+      "missingSharedAnchors": [
+        "pholen/pchodidlo",
+        "lholen/lchodidlo",
+        "pchodidlo/pprsty",
+        "lchodidlo/lprsty"
+      ],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false,
+      "measuredFootForward": {
+        "spine": [
+          -0.05662886058813871,
+          0.9983952972048525,
+          -5.165000865109478e-05
+        ],
+        "lateral": [
+          0.012706226267903303,
+          0.000772424451275674,
+          0.9999189743046664
+        ],
+        "unsignedFrameForward": [
+          0.9983144414274083,
+          0.05662361591863694,
+          -0.012729578067661581
+        ],
+        "endpoints": [
+          {
+            "shin": "pholen",
+            "foot": "pchodidlo",
+            "shinRawBoundsMin": [
+              0.30408117175102234,
+              -1.2879928350448608,
+              -0.6137087941169739
+            ],
+            "shinRawBoundsMax": [
+              0.4709174633026123,
+              -0.8577306270599365,
+              -0.40066373348236084
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.5309342741966248
+            ],
+            "footCentroid": [
+              0.4889552785669054,
+              -1.3520491892950874,
+              -0.5877692352022443
+            ],
+            "footFromDistal": [
+              0.03299390213830128,
+              -0.0640563542502266,
+              -0.05683496100561958
+            ],
+            "planarLength": 0.06395218214887095,
+            "signedForwardOffset": 0.030034671656589372
+          },
+          {
+            "shin": "lholen",
+            "foot": "lchodidlo",
+            "shinRawBoundsMin": [
+              0.30192869901657104,
+              -1.2879928350448608,
+              -0.26450976729393005
+            ],
+            "shinRawBoundsMax": [
+              0.468764990568161,
+              -0.861221969127655,
+              -0.05673864483833313
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.4559613764286041,
+              -1.2879928350448608,
+              -0.13951317965984344
+            ],
+            "footCentroid": [
+              0.4889552843570709,
+              -1.3520491892950874,
+              -0.09960412893976484
+            ],
+            "footFromDistal": [
+              0.03299390792846679,
+              -0.0640563542502266,
+              0.03990905072007861
+            ],
+            "planarLength": 0.04951508537294982,
+            "signedForwardOffset": 0.02880316698715418
+          }
+        ],
+        "summedSignedForwardOffset": 0.05883783864374355,
+        "bilateralSignedOffsetsAgree": true
+      }
+    },
+    {
+      "model": "o\\char\\civilistka01a.p3d",
+      "representativeClass": "Woman1",
+      "spawnable": true,
+      "classes": [
+        "Woman1"
+      ],
+      "publicClasses": [
+        "Woman1"
+      ],
+      "sides": [
+        "3"
+      ],
+      "moves": [
+        "CfgMovesMCWoman"
+      ],
+      "modelSource": "AddOns/O.pbo",
+      "requiredAddon": "O.pbo",
+      "assetArchive": "AddOns/O.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "34fa926fecbe81817fa10f12116f7c794bca57288581a03d0d2630a7999eb3ea",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 12,
+      "maximumLodPoints": 1634,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [
+        "pprsty",
+        "lprsty"
+      ],
+      "sharedAnchorCount": 11,
+      "missingSharedAnchors": [
+        "pholen/pchodidlo",
+        "lholen/lchodidlo",
+        "pchodidlo/pprsty",
+        "lchodidlo/lprsty"
+      ],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false,
+      "measuredFootForward": {
+        "spine": [
+          0.08510492714294868,
+          0.996370384822045,
+          -0.0017909845235083064
+        ],
+        "lateral": [
+          0.012914282352434567,
+          0.0006942856676528246,
+          0.9999163661420556
+        ],
+        "unsignedFrameForward": [
+          0.9962882979777065,
+          -0.08512093876938708,
+          -0.01280832134603379
+        ],
+        "endpoints": [
+          {
+            "shin": "pholen",
+            "foot": "pchodidlo",
+            "shinRawBoundsMin": [
+              0.3588310778141022,
+              -1.234665870666504,
+              -0.5551567673683167
+            ],
+            "shinRawBoundsMax": [
+              0.5006334781646729,
+              -0.8004636764526367,
+              -0.39808470010757446
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.3588310778141022,
+              -1.2307312488555908,
+              -0.47238224744796753
+            ],
+            "footCentroid": [
+              0.4768525425025395,
+              -1.3103118235724314,
+              -0.5160909017494747
+            ],
+            "footFromDistal": [
+              0.11802146468843733,
+              -0.07958057471684055,
+              -0.043708654301507166
+            ],
+            "planarLength": 0.13186431264824852,
+            "signedForwardOffset": 0.12491721189688043
+          },
+          {
+            "shin": "lholen",
+            "foot": "lchodidlo",
+            "shinRawBoundsMin": [
+              0.3588310778141022,
+              -1.234665870666504,
+              -0.1569974720478058
+            ],
+            "shinRawBoundsMax": [
+              0.5006334781646729,
+              -0.8004636764526367,
+              0.0018133819103240967
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.3588310778141022,
+              -1.2307312488555908,
+              -0.08096115291118622
+            ],
+            "footCentroid": [
+              0.4768525428431375,
+              -1.3103118235724314,
+              -0.039220848764692035
+            ],
+            "footFromDistal": [
+              0.11802146502903532,
+              -0.07958057471684055,
+              0.041740304146494184
+            ],
+            "planarLength": 0.13114423026808358,
+            "signedForwardOffset": 0.12382275451772834
+          }
+        ],
+        "summedSignedForwardOffset": 0.24873996641460877,
+        "bilateralSignedOffsetsAgree": true
+      }
+    },
+    {
+      "model": "o\\char\\civilistka01b.p3d",
+      "representativeClass": "Woman2",
+      "spawnable": true,
+      "classes": [
+        "Woman2"
+      ],
+      "publicClasses": [
+        "Woman2"
+      ],
+      "sides": [
+        "3"
+      ],
+      "moves": [
+        "CfgMovesMCWoman"
+      ],
+      "modelSource": "AddOns/O.pbo",
+      "requiredAddon": "O.pbo",
+      "assetArchive": "AddOns/O.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "543cb1e550f811f3c753b2bc675ed42c40c3a36ac75df2ffa1af6ac0ca7fb781",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 12,
+      "maximumLodPoints": 1531,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [
+        "pprsty",
+        "lprsty"
+      ],
+      "sharedAnchorCount": 11,
+      "missingSharedAnchors": [
+        "pholen/pchodidlo",
+        "lholen/lchodidlo",
+        "pchodidlo/pprsty",
+        "lchodidlo/lprsty"
+      ],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false,
+      "measuredFootForward": {
+        "spine": [
+          0.11300350933559196,
+          0.9935931758059803,
+          -0.0016756699039409543
+        ],
+        "lateral": [
+          0.023545414867788363,
+          -0.000991864680834776,
+          0.9997222762563405
+        ],
+        "unsignedFrameForward": [
+          0.9933155693517265,
+          -0.11301157992100239,
+          -0.023506647723875545
+        ],
+        "endpoints": [
+          {
+            "shin": "pholen",
+            "foot": "pchodidlo",
+            "shinRawBoundsMin": [
+              0.3588310778141022,
+              -1.234665870666504,
+              -0.5429620146751404
+            ],
+            "shinRawBoundsMax": [
+              0.5006334781646729,
+              -0.8004636764526367,
+              -0.3858899474143982
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.3588310778141022,
+              -1.2307312488555908,
+              -0.46018749475479126
+            ],
+            "footCentroid": [
+              0.4768525425025395,
+              -1.3103118235724314,
+              -0.5038961490562984
+            ],
+            "footFromDistal": [
+              0.11802146468843733,
+              -0.07958057471684055,
+              -0.043708654301507166
+            ],
+            "planarLength": 0.13364603051133583,
+            "signedForwardOffset": 0.1272535288116415
+          },
+          {
+            "shin": "lholen",
+            "foot": "lchodidlo",
+            "shinRawBoundsMin": [
+              0.3588310778141022,
+              -1.234665870666504,
+              -0.14480271935462952
+            ],
+            "shinRawBoundsMax": [
+              0.5006334781646729,
+              -0.8004636764526367,
+              0.014008134603500366
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.3588310778141022,
+              -1.2307312488555908,
+              -0.06876640021800995
+            ],
+            "footCentroid": [
+              0.4768525428431375,
+              -1.3103118235724314,
+              -0.027026096071515765
+            ],
+            "footFromDistal": [
+              0.11802146502903532,
+              -0.07958057471684055,
+              0.041740304146494184
+            ],
+            "planarLength": 0.13294451642422547,
+            "signedForwardOffset": 0.12524491058535359
+          }
+        ],
+        "summedSignedForwardOffset": 0.2524984393969951,
+        "bilateralSignedOffsetsAgree": true
+      }
+    },
+    {
+      "model": "o\\char\\civilistka02a.p3d",
+      "representativeClass": "Woman3",
+      "spawnable": true,
+      "classes": [
+        "Woman3"
+      ],
+      "publicClasses": [
+        "Woman3"
+      ],
+      "sides": [
+        "3"
+      ],
+      "moves": [
+        "CfgMovesMCWoman"
+      ],
+      "modelSource": "AddOns/O.pbo",
+      "requiredAddon": "O.pbo",
+      "assetArchive": "AddOns/O.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "cd2e12b564e1f1c4028f169a7dedb28302b86dcb94a63f0540a5b898434c660c",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 12,
+      "maximumLodPoints": 1566,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [
+        "pprsty",
+        "lprsty"
+      ],
+      "sharedAnchorCount": 11,
+      "missingSharedAnchors": [
+        "pholen/pchodidlo",
+        "lholen/lchodidlo",
+        "pchodidlo/pprsty",
+        "lchodidlo/lprsty"
+      ],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false,
+      "measuredFootForward": {
+        "spine": [
+          0.08344384725839608,
+          0.9964909520674416,
+          0.006550328422379813
+        ],
+        "lateral": [
+          -0.005088003275033296,
+          -0.006147127871331007,
+          0.9999681620139748
+        ],
+        "unsignedFrameForward": [
+          0.9964994915088471,
+          -0.0834745186668188,
+          0.004557209228487017
+        ],
+        "endpoints": [
+          {
+            "shin": "pholen",
+            "foot": "pchodidlo",
+            "shinRawBoundsMin": [
+              0.3588310778141022,
+              -1.234665870666504,
+              -0.5429620146751404
+            ],
+            "shinRawBoundsMax": [
+              0.5006334781646729,
+              -0.8004636764526367,
+              -0.3858899474143982
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.3588310778141022,
+              -1.2307312488555908,
+              -0.46018749475479126
+            ],
+            "footCentroid": [
+              0.46243823718543003,
+              -1.2907453685095815,
+              -0.5045966769408698
+            ],
+            "footFromDistal": [
+              0.10360715937132786,
+              -0.06001411965399073,
+              -0.04440918218607859
+            ],
+            "planarLength": 0.11688160493759524,
+            "signedForwardOffset": 0.10805174944664608
+          },
+          {
+            "shin": "lholen",
+            "foot": "lchodidlo",
+            "shinRawBoundsMin": [
+              0.3588310778141022,
+              -1.234665870666504,
+              -0.14480271935462952
+            ],
+            "shinRawBoundsMax": [
+              0.5006334781646729,
+              -0.8004636764526367,
+              0.014008134603500366
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.3588310778141022,
+              -1.2307312488555908,
+              -0.06876640021800995
+            ],
+            "footCentroid": [
+              0.4665482643488291,
+              -1.2928036032496273,
+              -0.02708409686346312
+            ],
+            "footFromDistal": [
+              0.10771718653472695,
+              -0.062072354394036466,
+              0.041682303354546826
+            ],
+            "planarLength": 0.12011387224925768,
+            "signedForwardOffset": 0.11271153649168936
+          }
+        ],
+        "summedSignedForwardOffset": 0.22076328593833544,
+        "bilateralSignedOffsetsAgree": true
+      }
+    },
+    {
+      "model": "o\\char\\civilistka02b.p3d",
+      "representativeClass": "Woman4",
+      "spawnable": true,
+      "classes": [
+        "Woman4"
+      ],
+      "publicClasses": [
+        "Woman4"
+      ],
+      "sides": [
+        "3"
+      ],
+      "moves": [
+        "CfgMovesMCWoman"
+      ],
+      "modelSource": "AddOns/O.pbo",
+      "requiredAddon": "O.pbo",
+      "assetArchive": "AddOns/O.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "8bbedb5c465f764ae41230b173fe9b09a438bcb1b9494431beb1e7848a2fda3c",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 12,
+      "maximumLodPoints": 1369,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [
+        "pprsty",
+        "lprsty"
+      ],
+      "sharedAnchorCount": 11,
+      "missingSharedAnchors": [
+        "pholen/pchodidlo",
+        "lholen/lchodidlo",
+        "pchodidlo/pprsty",
+        "lchodidlo/lprsty"
+      ],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false,
+      "measuredFootForward": {
+        "spine": [
+          0.08448882830881409,
+          0.9964048095271785,
+          0.006252474878876863
+        ],
+        "lateral": [
+          -0.0029174298574352457,
+          -0.006027514521996102,
+          0.9999775785844971
+        ],
+        "unsignedFrameForward": [
+          0.9964201556040658,
+          -0.08450517510658372,
+          0.0023976835018288574
+        ],
+        "endpoints": [
+          {
+            "shin": "pholen",
+            "foot": "pchodidlo",
+            "shinRawBoundsMin": [
+              0.0469527468085289,
+              -1.7967231273651123,
+              -0.2752586603164673
+            ],
+            "shinRawBoundsMax": [
+              0.18875515460968018,
+              -1.3625209331512451,
+              -0.1181866005063057
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.0469527468085289,
+              -1.7927885055541992,
+              -0.19248412549495697
+            ],
+            "footCentroid": [
+              0.16313625999340198,
+              -1.842454227732449,
+              -0.2313854167374169
+            ],
+            "footFromDistal": [
+              0.11618351318487308,
+              -0.049665722178249716,
+              -0.03890129124245992
+            ],
+            "planarLength": 0.12603753805880483,
+            "signedForwardOffset": 0.11987133185155431
+          },
+          {
+            "shin": "lholen",
+            "foot": "lchodidlo",
+            "shinRawBoundsMin": [
+              0.0469527468085289,
+              -1.7967231273651123,
+              0.12290063500404358
+            ],
+            "shinRawBoundsMax": [
+              0.18875515460968018,
+              -1.3625209331512451,
+              0.28171148896217346
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.0469527468085289,
+              -1.7927885055541992,
+              0.19893695414066315
+            ],
+            "footCentroid": [
+              0.16313626156074973,
+              -1.842454227732449,
+              0.2421173810413698
+            ],
+            "footFromDistal": [
+              0.11618351475222083,
+              -0.049665722178249716,
+              0.04318042690070664
+            ],
+            "planarLength": 0.1275829370273309,
+            "signedForwardOffset": 0.12006813939468483
+          }
+        ],
+        "summedSignedForwardOffset": 0.23993947124623916,
+        "bilateralSignedOffsetsAgree": true
+      }
+    },
+    {
+      "model": "o\\char\\civilistka02c.p3d",
+      "representativeClass": "Woman5",
+      "spawnable": true,
+      "classes": [
+        "Woman5"
+      ],
+      "publicClasses": [
+        "Woman5"
+      ],
+      "sides": [
+        "3"
+      ],
+      "moves": [
+        "CfgMovesMCWoman"
+      ],
+      "modelSource": "AddOns/O.pbo",
+      "requiredAddon": "O.pbo",
+      "assetArchive": "AddOns/O.pbo",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "872bfafe7476c2545c05e6b4b79c548964b45c6482eee0d8b36e589bb5c7b185",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 12,
+      "maximumLodPoints": 1316,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [
+        "pprsty",
+        "lprsty"
+      ],
+      "sharedAnchorCount": 11,
+      "missingSharedAnchors": [
+        "pholen/pchodidlo",
+        "lholen/lchodidlo",
+        "pchodidlo/pprsty",
+        "lchodidlo/lprsty"
+      ],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false,
+      "measuredFootForward": {
+        "spine": [
+          0.09630391969149145,
+          0.9952986054079579,
+          0.010307333555723107
+        ],
+        "lateral": [
+          0.03603102843967537,
+          -0.01383462492845463,
+          0.9992549064891643
+        ],
+        "unsignedFrameForward": [
+          0.9946996129694805,
+          -0.0958607804373778,
+          -0.03719396096549517
+        ],
+        "endpoints": [
+          {
+            "shin": "pholen",
+            "foot": "pchodidlo",
+            "shinRawBoundsMin": [
+              0.3588310778141022,
+              -1.234665870666504,
+              -0.5429620146751404
+            ],
+            "shinRawBoundsMax": [
+              0.5006334781646729,
+              -0.8004636764526367,
+              -0.3858899474143982
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.3588310778141022,
+              -1.2307312488555908,
+              -0.46018749475479126
+            ],
+            "footCentroid": [
+              0.47501457682469994,
+              -1.2803969710338405,
+              -0.49908877000576113
+            ],
+            "footFromDistal": [
+              0.11618349901059777,
+              -0.049665722178249716,
+              -0.03890127525096987
+            ],
+            "planarLength": 0.12643266712743254,
+            "signedForwardOffset": 0.12177556890146717
+          },
+          {
+            "shin": "lholen",
+            "foot": "lchodidlo",
+            "shinRawBoundsMin": [
+              0.3588310778141022,
+              -1.234665870666504,
+              -0.14480271935462952
+            ],
+            "shinRawBoundsMax": [
+              0.5006334781646729,
+              -0.8004636764526367,
+              0.014008134603500366
+            ],
+            "distalExtremeVertexCount": 3,
+            "distalExtremeCentroid": [
+              0.3588310778141022,
+              -1.2307312488555908,
+              -0.06876640021800995
+            ],
+            "footCentroid": [
+              0.4750145770064214,
+              -1.2803969710338405,
+              -0.02558597331730331
+            ],
+            "footFromDistal": [
+              0.11618349919231924,
+              -0.049665722178249716,
+              0.04318042690070664
+            ],
+            "planarLength": 0.12806690861048467,
+            "signedForwardOffset": 0.1187226254564146
+          }
+        ],
+        "summedSignedForwardOffset": 0.24049819435788178,
+        "bilateralSignedOffsetsAgree": true
+      }
+    },
+    {
+      "model": "o_wp\\mc_specg.p3d",
+      "representativeClass": "SoldierGSniper",
+      "spawnable": true,
+      "classes": [
+        "SoldierGSniper"
+      ],
+      "publicClasses": [
+        "SoldierGSniper"
+      ],
+      "sides": [
+        "2"
+      ],
+      "moves": [
+        "CfgMovesMC"
+      ],
+      "modelSource": "AddOns/O_WP.PBO",
+      "requiredAddon": "O_WP.PBO",
+      "assetArchive": "AddOns/O_WP.PBO",
+      "assetPresent": true,
+      "representativeScope": 2,
+      "storyOnly": false,
+      "sourceSha256": "5c45b49d390f9da0a7735bf0706a7dee93a128907e2fedef2b47d2900162fa99",
+      "format": "ODOL",
+      "version": 7,
+      "lodCount": 11,
+      "maximumLodPoints": 1973,
+      "nonfinitePoints": 0,
+      "lod0MissingBodySelections": [],
+      "sharedAnchorCount": 15,
+      "missingSharedAnchors": [],
+      "fireComponentCount": 14,
+      "exclusiveFullWeightFirst12FireComponents": 12,
+      "rawSourceDeclaresSkeleton": false,
+      "runtimeCapabilityCertified": false
+    }
+  ],
+  "classes": [
+    {
+      "class": "Man",
+      "model": "data3d\\vojakw.p3d",
+      "scope": 0,
+      "side": 4,
+      "moves": "NoDefaultMoves",
+      "inheritance": [
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/6G30.pbo",
+        "AddOns/BISCamel.pbo",
+        "AddOns/Bizon.pbo",
+        "AddOns/G36a.pbo",
+        "AddOns/Hunter.pbo",
+        "AddOns/LaserGuided.pbo",
+        "AddOns/Mm-1.pbo",
+        "AddOns/O.pbo",
+        "AddOns/O_WP.PBO",
+        "AddOns/Steyr.pbo",
+        "AddOns/XMS.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "Civilian",
+      "model": "data3d\\mc civil.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "Civilian2",
+      "model": "data3d\\mc civil2.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "Civilian2",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "Civilian3",
+      "model": "data3d\\mc civil3.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "Civilian3",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "Soldier",
+      "model": "data3d\\vojakw.p3d",
+      "scope": 0,
+      "side": 4,
+      "moves": "NoDefaultMoves",
+      "inheritance": [
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/6G30.pbo",
+        "AddOns/BISCamel.pbo",
+        "AddOns/Bizon.pbo",
+        "AddOns/G36a.pbo",
+        "AddOns/Hunter.pbo",
+        "AddOns/LaserGuided.pbo",
+        "AddOns/Mm-1.pbo",
+        "AddOns/O.pbo",
+        "AddOns/O_WP.PBO",
+        "AddOns/Steyr.pbo",
+        "AddOns/XMS.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierLAW",
+      "model": "data3d\\vojakw.p3d",
+      "scope": 0,
+      "side": 4,
+      "moves": "NoDefaultMoves",
+      "inheritance": [
+        "SoldierLAW",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWB",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/BISCamel.pbo",
+        "AddOns/G36a.pbo",
+        "AddOns/LaserGuided.pbo",
+        "AddOns/Mm-1.pbo",
+        "AddOns/O.pbo",
+        "AddOns/O_WP.PBO",
+        "AddOns/Steyr.pbo",
+        "AddOns/XMS.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWG",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWG",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWMedic",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWMedic",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWNOG",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 1,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWNOG",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierW",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 1,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierW",
+        "SoldierWG",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWCrew",
+      "model": "data3d\\mc tankistaw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWCrew",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWPilot",
+      "model": "data3d\\mc pilotw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWPilot",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/BISCamel.pbo",
+        "AddOns/O_WP.PBO"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWMG",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWMG",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWLAW",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWLAW",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWAT",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWAT",
+        "SoldierWLAW",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWAA",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWAA",
+        "SoldierWLAW",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWMortar",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWMortar",
+        "SoldierWG",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWSniper",
+      "model": "data3d\\mc sniperw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWSniper",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWLAWSniper",
+      "model": "data3d\\mc sniperw2.p3d",
+      "scope": 1,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWLAWSniper",
+        "SoldierWSniper",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWSaboteur",
+      "model": "data3d\\mc saboteur.p3d",
+      "scope": 1,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWSaboteur",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/LaserGuided.pbo",
+        "AddOns/O.pbo",
+        "AddOns/O_WP.PBO",
+        "AddOns/XMS.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWSaboteurPipe",
+      "model": "data3d\\mc saboteur.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWSaboteurPipe",
+        "SoldierWSaboteur",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/LaserGuided.pbo",
+        "AddOns/O.pbo",
+        "AddOns/O_WP.PBO",
+        "AddOns/XMS.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWSaboteurDay",
+      "model": "data3d\\mc saboteurday.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWSaboteurDay",
+        "SoldierWSaboteurPipe",
+        "SoldierWSaboteur",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/XMS.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWMiner",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWMiner",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "OfficerW",
+      "model": "data3d\\mc vojakwo2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "OfficerW",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "OfficerWNight",
+      "model": "data3d\\mc vojakwo2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "OfficerWNight",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWCaptive",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWCaptive",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierEB",
+      "model": "data3d\\mc vojake2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/6G30.pbo",
+        "AddOns/Bizon.pbo",
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWFakeE",
+      "model": "data3d\\mc vojake2.p3d",
+      "scope": 1,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWFakeE",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierEG",
+      "model": "data3d\\mc vojake2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierEG",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierEMedic",
+      "model": "data3d\\mc vojake2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierEMedic",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierENOG",
+      "model": "data3d\\mc vojake2.p3d",
+      "scope": 1,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierENOG",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierE",
+      "model": "data3d\\mc vojake2.p3d",
+      "scope": 1,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierE",
+        "SoldierEG",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierECrew",
+      "model": "data3d\\mc tankistae2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierECrew",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierEPilot",
+      "model": "data3d\\mc pilote2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierEPilot",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierEMG",
+      "model": "data3d\\mc vojake2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierEMG",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierELAW",
+      "model": "data3d\\mc vojake2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierELAW",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierEAT",
+      "model": "data3d\\mc vojake2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierEAT",
+        "SoldierELAW",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierEAA",
+      "model": "data3d\\mc vojake2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierEAA",
+        "SoldierELAW",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierEMiner",
+      "model": "data3d\\mc vojake2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierEMiner",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "OfficerE",
+      "model": "data3d\\mc vojakeo2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "OfficerE",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "OfficerENight",
+      "model": "data3d\\mc vojakeo2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "OfficerENight",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "GeneralE",
+      "model": "data3d\\mc vojake2_guba.p3d",
+      "scope": 1,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "GeneralE",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "Angelina",
+      "model": "data3d\\angelina.p3d",
+      "scope": 1,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "Angelina",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierESniper",
+      "model": "data3d\\mc snipere2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierESniper",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierESaboteur",
+      "model": "data3d\\mc specnas2.p3d",
+      "scope": 1,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierESaboteur",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/Bizon.pbo",
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierESaboteurPipe",
+      "model": "data3d\\mc specnas2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierESaboteurPipe",
+        "SoldierESaboteur",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/Bizon.pbo",
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierEFakeW",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 1,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierEFakeW",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierGB",
+      "model": "data3d\\mc vojakg2.p3d",
+      "scope": 2,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/Hunter.pbo",
+        "AddOns/O.pbo",
+        "AddOns/O_WP.PBO"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierGMedic",
+      "model": "data3d\\mc vojakg2.p3d",
+      "scope": 2,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGMedic",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierGCrew",
+      "model": "data3d\\mc crewg.p3d",
+      "scope": 2,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGCrew",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierGPilot",
+      "model": "data3d\\mc vojakg3.p3d",
+      "scope": 2,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGPilot",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierGG",
+      "model": "data3d\\mc vojakg2.p3d",
+      "scope": 2,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGG",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierGNOG",
+      "model": "data3d\\mc vojakg2.p3d",
+      "scope": 1,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGNOG",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierG",
+      "model": "data3d\\mc vojakg2.p3d",
+      "scope": 1,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierG",
+        "SoldierGG",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierGMG",
+      "model": "data3d\\mc vojakg3.p3d",
+      "scope": 2,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGMG",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierGLAW",
+      "model": "data3d\\mc vojakg2.p3d",
+      "scope": 2,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGLAW",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierGAT",
+      "model": "data3d\\mc vojakg2.p3d",
+      "scope": 2,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGAT",
+        "SoldierGLAW",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierGAA",
+      "model": "data3d\\mc vojakg2.p3d",
+      "scope": 2,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGAA",
+        "SoldierGLAW",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "OfficerG",
+      "model": "data3d\\mc vojakgo2.p3d",
+      "scope": 2,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "OfficerG",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "OfficerGNight",
+      "model": "data3d\\mc vojakgo2.p3d",
+      "scope": 2,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "OfficerGNight",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierGFakeE",
+      "model": "data3d\\mc vojake2.p3d",
+      "scope": 1,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGFakeE",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierGFakeC",
+      "model": "data3d\\mc civil.p3d",
+      "scope": 1,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGFakeC",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN",
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierGFakeC2",
+      "model": "data3d\\mc civil2.p3d",
+      "scope": 1,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGFakeC2",
+        "Civilian2",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "BIN/CONFIG.BIN"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "HeavyGrenadier",
+      "model": "data3d\\mc vojake2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "HeavyGrenadier",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/6G30.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "BISCamelPilot",
+      "model": "biscamel\\biscamelpilot.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "BISCamelPilot",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/BISCamel.pbo"
+      ],
+      "modelSource": "AddOns/BISCamel.pbo"
+    },
+    {
+      "class": "BISCamelPilot2",
+      "model": "biscamel\\biscamelpilot2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "BISCamelPilot2",
+        "BISCamelPilot",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/BISCamel.pbo"
+      ],
+      "modelSource": "AddOns/BISCamel.pbo"
+    },
+    {
+      "class": "SoldierESaboteurBizon",
+      "model": "data3d\\mc specnas2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierESaboteurBizon",
+        "SoldierESaboteurPipe",
+        "SoldierESaboteur",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/Bizon.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWG36a",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWG36a",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/G36a.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "Hunter",
+      "model": "data3d\\mc vojakg2.p3d",
+      "scope": 2,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "Hunter",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/Hunter.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWSaboteurLaser",
+      "model": "data3d\\mc saboteurday.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWSaboteurLaser",
+        "SoldierWSaboteurPipe",
+        "SoldierWSaboteur",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/LaserGuided.pbo"
+      ],
+      "modelSource": "AddOns/LaserGuided.pbo"
+    },
+    {
+      "class": "HeavyGW",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "HeavyGW",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/Mm-1.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "OfficerWHG",
+      "model": "data3d\\mc vojakwo2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "OfficerWHG",
+        "OfficerW",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWSaboteurPipeHG",
+      "model": "data3d\\mc saboteur.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWSaboteurPipeHG",
+        "SoldierWSaboteurPipe",
+        "SoldierWSaboteur",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "OfficerEHG",
+      "model": "data3d\\mc vojakeo2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "OfficerEHG",
+        "OfficerE",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierESaboteurPipeHG",
+      "model": "data3d\\mc specnas2.p3d",
+      "scope": 2,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierESaboteurPipeHG",
+        "SoldierESaboteur",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "OfficerGHG",
+      "model": "data3d\\mc vojakgo2.p3d",
+      "scope": 2,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "OfficerGHG",
+        "OfficerG",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "OfficerGCheat",
+      "model": "data3d\\mc vojakgo2.p3d",
+      "scope": 1,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "OfficerGCheat",
+        "OfficerG",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierGCheat",
+      "model": "data3d\\mc vojakg2.p3d",
+      "scope": 1,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGCheat",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "OfficerECheat",
+      "model": "data3d\\mc vojakeo2.p3d",
+      "scope": 1,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "OfficerECheat",
+        "OfficerE",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierESaboteurCheat",
+      "model": "data3d\\mc specnas2.p3d",
+      "scope": 1,
+      "side": 0,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierESaboteurCheat",
+        "SoldierESaboteur",
+        "SoldierEB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWSaboteurCheat",
+      "model": "data3d\\mc saboteur.p3d",
+      "scope": 1,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWSaboteurCheat",
+        "SoldierWSaboteurPipe",
+        "SoldierWSaboteur",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "Civilian4",
+      "model": "o\\char\\char01.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "Civilian4",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "AddOns/O.pbo"
+    },
+    {
+      "class": "Civilian5",
+      "model": "o\\char\\char02.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "Civilian5",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "AddOns/O.pbo"
+    },
+    {
+      "class": "Civilian6",
+      "model": "o\\char\\char03.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "Civilian6",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "AddOns/O.pbo"
+    },
+    {
+      "class": "Civilian7",
+      "model": "o\\char\\char05.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "Civilian7",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "AddOns/O.pbo"
+    },
+    {
+      "class": "Civilian8",
+      "model": "o\\char\\char04.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "Civilian8",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "AddOns/O.pbo"
+    },
+    {
+      "class": "Civilian9",
+      "model": "o\\char\\char06.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "Civilian9",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "AddOns/O.pbo"
+    },
+    {
+      "class": "Civilian10",
+      "model": "o\\char\\char07.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "Civilian10",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "AddOns/O.pbo"
+    },
+    {
+      "class": "Civilian11",
+      "model": "o\\char\\char04.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "Civilian11",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "AddOns/O.pbo"
+    },
+    {
+      "class": "Woman1",
+      "model": "o\\char\\civilistka01a.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMCWoman",
+      "inheritance": [
+        "Woman1",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "AddOns/O.pbo"
+    },
+    {
+      "class": "Woman2",
+      "model": "o\\char\\civilistka01b.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMCWoman",
+      "inheritance": [
+        "Woman2",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "AddOns/O.pbo"
+    },
+    {
+      "class": "Woman3",
+      "model": "o\\char\\civilistka02a.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMCWoman",
+      "inheritance": [
+        "Woman3",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "AddOns/O.pbo"
+    },
+    {
+      "class": "Woman4",
+      "model": "o\\char\\civilistka02b.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMCWoman",
+      "inheritance": [
+        "Woman4",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "AddOns/O.pbo"
+    },
+    {
+      "class": "Woman5",
+      "model": "o\\char\\civilistka02c.p3d",
+      "scope": 2,
+      "side": 3,
+      "moves": "CfgMovesMCWoman",
+      "inheritance": [
+        "Woman5",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "AddOns/O.pbo"
+    },
+    {
+      "class": "SoldierGFakeC3",
+      "model": "o\\char\\char01.p3d",
+      "scope": 1,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGFakeC3",
+        "SoldierGFakeC",
+        "Civilian",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O.pbo"
+      ],
+      "modelSource": "AddOns/O.pbo"
+    },
+    {
+      "class": "SoldierGSniper",
+      "model": "o_wp\\mc_specg.p3d",
+      "scope": 2,
+      "side": 2,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierGSniper",
+        "SoldierGB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O_WP.PBO"
+      ],
+      "modelSource": "AddOns/O_WP.PBO"
+    },
+    {
+      "class": "SoldierWPilotHG",
+      "model": "data3d\\mc pilotw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWPilotHG",
+        "SoldierWPilot",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O_WP.PBO"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWSaboteurPipeHGS",
+      "model": "data3d\\mc saboteur.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWSaboteurPipeHGS",
+        "SoldierWSaboteurPipe",
+        "SoldierWSaboteur",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/O_WP.PBO"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWSteyr",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWSteyr",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/Steyr.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWXMS",
+      "model": "data3d\\mc vojakw2.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWXMS",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/XMS.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    },
+    {
+      "class": "SoldierWSaboteurXMS",
+      "model": "data3d\\mc saboteurday.p3d",
+      "scope": 2,
+      "side": 1,
+      "moves": "CfgMovesMC",
+      "inheritance": [
+        "SoldierWSaboteurXMS",
+        "SoldierWSaboteurDay",
+        "SoldierWSaboteurPipe",
+        "SoldierWSaboteur",
+        "SoldierWB",
+        "Soldier",
+        "Man",
+        "Land",
+        "AllVehicles",
+        "All"
+      ],
+      "sources": [
+        "AddOns/XMS.pbo"
+      ],
+      "modelSource": "BIN/CONFIG.BIN"
+    }
+  ],
+  "excludedTemplates": [
+    {
+      "model": "data3d\\vojakw.p3d",
+      "classes": [
+        "Man",
+        "Soldier",
+        "SoldierLAW"
+      ],
+      "reason": "scope0 templates only; model missing locally; NoDefaultMoves binding"
+    }
+  ],
+  "unreferencedOriginalModels": [
+    {
+      "model": "data3d\\mc civil2stary.p3d",
+      "archive": "DTA/Data3D.pbo",
+      "reason": "Present archive member, but no stock class in the surveyed configs references this model; no representative stock spawn class.",
+      "assetPresent": true,
+      "lodCount": 11,
+      "maximumLodPoints": 1520,
+      "lod0MissingBodySelections": [],
+      "fireComponentCount": 14,
+      "runtimeCapabilityCertified": false
+    }
+  ]
+}
