@@ -1,0 +1,263 @@
+{
+  "source": "f29455a8",
+  "scope": "Owner-authorised default ON; author-run original Everon startup and shared Physics setter admission/preservation checks, not broad model or owner appearance acceptance.",
+  "attempts": [
+    {
+      "passed": true,
+      "expectedCommit": "f29455a8",
+      "installed": {
+        "stamp": "codex/modernisation-followup-20261004 f29455a8 2026-10-04_10:29 deploy-ps1\r\n",
+        "files": [
+          {
+            "bytes": 31552512,
+            "name": "OpenPoseidon.exe",
+            "sha256": "0B74E9212B672D56373C436B5CE7BA9BBB53E2D13439B2B25CFA6A7E4B3EC4B0",
+            "writtenUtc": "2026-10-04T08:28:42.5338135Z"
+          },
+          {
+            "bytes": 18582528,
+            "name": "wgpu_renderer.dll",
+            "sha256": "81F05A30DBA9983A5966EE4B93B7C1FE0C70C8844DAF472752608BB330892919",
+            "writtenUtc": "2026-10-04T08:28:02.0847738Z"
+          }
+        ]
+      },
+      "scriptSha256": "C19182FB53BEAF71060407BED53952DB67D632362DB48C16B731E22CCCE6718D",
+      "exit": 0,
+      "raw": {
+        "path": "build/automatic-ragdoll/owner-default-on-physics-toggle-20261004-103230/result.json",
+        "sha256": "0ba5968fc8fbe041a6786b7ad5f0d4ceda01eae7a950b355c843b1ebc41f9fde"
+      },
+      "gates": {
+        "defaultOn": {
+          "raw": "OK corpse-auto-status enabled=1 active=0 frozen=0 pending=0 activeBudget=4 retainedBudget=64",
+          "active": 0,
+          "frozen": 0,
+          "pending": 0
+        },
+        "defaultOff": {
+          "raw": "OK corpse-auto-status enabled=0 active=0 frozen=0 pending=0 activeBudget=4 retainedBudget=64",
+          "active": 0,
+          "frozen": 0,
+          "pending": 0
+        },
+        "activeToggle": {
+          "raw": "OK corpse-auto-status enabled=0 active=4 frozen=0 pending=0 activeBudget=4 retainedBudget=64",
+          "active": 4,
+          "frozen": 0,
+          "pending": 0
+        },
+        "frozenToggle": {
+          "raw": "OK corpse-auto-status enabled=0 active=0 frozen=4 pending=0 activeBudget=4 retainedBudget=64",
+          "active": 0,
+          "frozen": 4,
+          "pending": 0
+        },
+        "active": {
+          "owners": {
+            "raw": "OK corpse-auto-status enabled=1 active=4 frozen=0 pending=0 activeBudget=4 retainedBudget=64",
+            "active": 4,
+            "frozen": 0,
+            "pending": 0
+          },
+          "firstTerrainRegistrationLines": [
+            "[2026-10-04 10:32:36.229] [app-36d0] [INFO] [WORLD]   AUTORAGDOLL: registered shared actual terrain width=2048 spacing=6.25 mapGrid=6.25 landGrid=50 bytes=16777216 milliseconds=289.4932"
+          ],
+          "wallMilliseconds": 148.3364,
+          "backend": {
+            "raw": "OK corpse-physics-status epoch=1 bodies=44 articulatedBodies=44 articulatedJoints=40",
+            "bodies": 44,
+            "joints": 40
+          }
+        },
+        "cleanup": {
+          "owners": {
+            "raw": "OK corpse-auto-status enabled=1 active=0 frozen=0 pending=0 activeBudget=4 retainedBudget=64",
+            "active": 0,
+            "frozen": 0,
+            "pending": 0
+          },
+          "backend": {
+            "raw": "OK corpse-physics-status epoch=1 bodies=0 articulatedBodies=0 articulatedJoints=0",
+            "bodies": 0,
+            "joints": 0
+          }
+        },
+        "persistence": {
+          "elapsed": 31.262999999999998,
+          "passed": true
+        },
+        "terrainPreparation": {
+          "scope": "Setup cost moved to enable/startup, not removed.",
+          "beforeDamage": true,
+          "preparationLines": [
+            "[2026-10-04 10:32:36.229] [app-36d0] [INFO] [WORLD]   AUTORAGDOLL: mission terrain preparation ready=true reason= beforeDamage=1"
+          ],
+          "registrationLines": [
+            "[2026-10-04 10:32:36.229] [app-36d0] [INFO] [WORLD]   AUTORAGDOLL: registered shared actual terrain width=2048 spacing=6.25 mapGrid=6.25 landGrid=50 bytes=16777216 milliseconds=289.4932"
+          ]
+        }
+      }
+    },
+    {
+      "passed": false,
+      "expectedCommit": "f29455a8",
+      "installed": {
+        "files": [
+          {
+            "writtenUtc": "2026-10-04T08:28:42.5338135Z",
+            "sha256": "0B74E9212B672D56373C436B5CE7BA9BBB53E2D13439B2B25CFA6A7E4B3EC4B0",
+            "bytes": 31552512,
+            "name": "OpenPoseidon.exe"
+          },
+          {
+            "writtenUtc": "2026-10-04T08:28:02.0847738Z",
+            "sha256": "81F05A30DBA9983A5966EE4B93B7C1FE0C70C8844DAF472752608BB330892919",
+            "bytes": 18582528,
+            "name": "wgpu_renderer.dll"
+          }
+        ],
+        "stamp": "codex/modernisation-followup-20261004 f29455a8 2026-10-04_10:29 deploy-ps1\r\n"
+      },
+      "scriptSha256": "C19182FB53BEAF71060407BED53952DB67D632362DB48C16B731E22CCCE6718D",
+      "error": "Issued projectile did not confirm native corpse hit, wake and local transfer.",
+      "raw": {
+        "path": "build/automatic-ragdoll/owner-default-on-ragdoll-toggle-20261004-102951/result.json",
+        "sha256": "c6f08f52aa3f04aba5b8cd51858a87c27b6ebb8360ecd626a19236533d1da673"
+      },
+      "gates": {
+        "defaultOn": {
+          "frozen": 0,
+          "active": 0,
+          "pending": 0,
+          "raw": "OK corpse-auto-status enabled=1 active=0 frozen=0 pending=0 activeBudget=4 retainedBudget=64"
+        },
+        "defaultOff": {
+          "frozen": 0,
+          "active": 0,
+          "pending": 0,
+          "raw": "OK corpse-auto-status enabled=0 active=0 frozen=0 pending=0 activeBudget=4 retainedBudget=64"
+        },
+        "activeToggle": {
+          "frozen": 0,
+          "active": 4,
+          "pending": 0,
+          "raw": "OK corpse-auto-status enabled=0 active=4 frozen=0 pending=0 activeBudget=4 retainedBudget=64"
+        },
+        "frozenToggle": {
+          "frozen": 4,
+          "active": 0,
+          "pending": 0,
+          "raw": "OK corpse-auto-status enabled=0 active=0 frozen=4 pending=0 activeBudget=4 retainedBudget=64"
+        },
+        "active": {
+          "wallMilliseconds": 276.043,
+          "owners": {
+            "frozen": 0,
+            "active": 4,
+            "pending": 0,
+            "raw": "OK corpse-auto-status enabled=1 active=4 frozen=0 pending=0 activeBudget=4 retainedBudget=64"
+          },
+          "firstTerrainRegistrationLines": [
+            "[2026-10-04 10:29:57.408] [app-83d0] [INFO] [WORLD]   AUTORAGDOLL: registered shared actual terrain width=2048 spacing=6.25 mapGrid=6.25 landGrid=50 bytes=16777216 milliseconds=262.8655"
+          ],
+          "backend": {
+            "bodies": 44,
+            "raw": "OK corpse-physics-status epoch=1 bodies=44 articulatedBodies=44 articulatedJoints=40",
+            "joints": 40
+          }
+        },
+        "persistence": {
+          "passed": true,
+          "elapsed": 31.093000000000004
+        },
+        "terrainPreparation": {
+          "registrationLines": [
+            "[2026-10-04 10:29:57.408] [app-83d0] [INFO] [WORLD]   AUTORAGDOLL: registered shared actual terrain width=2048 spacing=6.25 mapGrid=6.25 landGrid=50 bytes=16777216 milliseconds=262.8655"
+          ],
+          "beforeDamage": true,
+          "scope": "Setup cost moved to enable/startup, not removed.",
+          "preparationLines": [
+            "[2026-10-04 10:29:57.409] [app-83d0] [INFO] [WORLD]   AUTORAGDOLL: mission terrain preparation ready=true reason= beforeDamage=1"
+          ]
+        }
+      },
+      "projectile": {
+        "passed": false,
+        "scope": "Actual stock rifle ammo collision; not player Fired/input proof",
+        "beforeHit": {
+          "wakes": 0,
+          "received": 0,
+          "recipe": 1,
+          "raw": "OK corpse-auto-hit-status received=0 wakes=0 transfers=0 lastPart=-1 recipe=1",
+          "transfers": 0,
+          "lastPart": -1
+        },
+        "issuedPositionASL": [
+          5498.78,
+          10000.1,
+          19.7849
+        ],
+        "issuedPositionError": [
+          0,
+          0,
+          0
+        ],
+        "issuedVelocity": [
+          800,
+          0,
+          0
+        ],
+        "lastHit": [
+          {
+            "wakes": 1,
+            "received": 2,
+            "recipe": 1,
+            "raw": "OK corpse-auto-hit-status received=2 wakes=1 transfers=0 lastPart=-1 recipe=1",
+            "transfers": 0,
+            "lastPart": -1
+          }
+        ],
+        "diagnosis": "Local angular readback86.082405 exceeds retained20rad/s guard; local motion restored then bounded aggregate fallback. Strict local acceptance failed; consumed movement/resettlement not established by this attempt."
+      }
+    }
+  ],
+  "ownerHandoff": {
+    "status": "left-open-for-owner",
+    "pid": 10500,
+    "installed": "codex/modernisation-followup-20261004 f29455a8 2026-10-04_10:29 deploy-ps1",
+    "pair": {
+      "wgpu_renderer.dll": "81F05A30DBA9983A5966EE4B93B7C1FE0C70C8844DAF472752608BB330892919",
+      "OpenPoseidon.exe": "0B74E9212B672D56373C436B5CE7BA9BBB53E2D13439B2B25CFA6A7E4B3EC4B0"
+    },
+    "inputProof": {
+      "context": "Infantry",
+      "fired": 1,
+      "selectedAmmoAfter": 29.0,
+      "cameraEffect": 0,
+      "input": "Actual SDL mouse button 1, no script fire",
+      "selectedAmmoBefore": 30.0
+    },
+    "aimProof": [
+      {
+        "gainRadiansPerPixel": -0.0061330143220944405,
+        "attempts": 4,
+        "axis": "pitch",
+        "errorRadians": -0.029213488050247524
+      },
+      {
+        "gainRadiansPerPixel": 0.0029836690590316906,
+        "attempts": 4,
+        "axis": "yaw",
+        "errorRadians": -0.004688089555550112
+      }
+    ],
+    "targets": 6,
+    "automatic": "OK corpse-auto-status enabled=1 active=0 frozen=0 pending=0 activeBudget=4 retainedBudget=64",
+    "startupOverrideAbsent": true,
+    "raw": {
+      "path": "build/owner-ragdoll-fog/20261004-103342/session.json",
+      "sha256": "0cdd93966078531ef74e70154d2c1181e46c45687db77185cb489217d556a49e"
+    }
+  }
+}

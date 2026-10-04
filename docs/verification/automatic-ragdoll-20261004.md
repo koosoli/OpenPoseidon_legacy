@@ -14,6 +14,9 @@ The switch lasts until restart. Turning it off preserves existing corpses and
 stops new admission. `POSEIDON_AUTOMATIC_RAGDOLL=0` disables admission at startup; the Dev toggle can
 override it for the current session.
 
+Current default/startup/toggle evidence and the conservative local impulse limit
+are in [default-on verification](automatic-ragdoll-default-20261004.md).
+
 ## Current owner feedback follow-up
 
 Runtime-created settled corpses now retain their physical recipe after releasing

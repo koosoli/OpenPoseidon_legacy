@@ -3,13 +3,14 @@
 Working branch: `codex/modernisation-followup-20261004`, safety-pushed.
 Backup branch: `codex/backup-excavation-20261004`, immutable source `8b93dec7`.
 The owner checkout and its unrelated changes were preserved.
-Installed matching EXE/renderer: source `e6e0c907`, 10:13 local on 4 October
-(metadata/evidence rebuild of the accepted `921255c3` engine changes). The current fog/weather/corpse feedback receipts are in
+Installed matching EXE/renderer: source `f29455a8`, 10:29 local on 4 October.
+Owner-authorised default ragdolls and current toggle acceptance are recorded in
+`automatic-ragdoll-default-20261004.md`. The current fog/weather/corpse feedback receipts are in
 `weather-fog-corpse-feedback-20261004.md`; earlier checkpoints below remain
 historical evidence.
 Final twelve-view installed fog comparison passed and the inspected distant
 contour defect is removed. The owner subsequently approved volumetric fog as the
-default; the owner subsequently approved automatic ragdolls as the default. See `fog-ragdoll-owner-revision-20261004.md`.
+default; automatic ragdolls are also default ON by owner request. See `fog-ragdoll-owner-revision-20261004.md`.
 
 ## Completed and installed
 
