@@ -6,7 +6,7 @@ param(
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [double]$X=6532,[double]$Z=6466,[ValidateRange(0.05,0.8)][double]$WeatherFog=0.45,
  [switch]$Measure,[ValidateRange(15,120)][int]$MeasureDeadlineSeconds=90,
- [double]$Exposure,[switch]$TerrainMode,[switch]$MovingViews,[switch]$SelfTest
+ [double]$Exposure,[switch]$TerrainMode,[switch]$CompactBand,[switch]$MovingViews,[switch]$SelfTest
 )
 $ErrorActionPreference='Stop';$taskRoot=Split-Path -Parent $PSScriptRoot
 $culture=[Globalization.CultureInfo]::InvariantCulture
@@ -22,6 +22,7 @@ function Exposure-Settings([bool]$supplied,$value){
 }
 $exposureSupplied=$PSBoundParameters.ContainsKey('Exposure')
 $exposureSettings=Exposure-Settings $exposureSupplied $Exposure
+Require (!$CompactBand -or $TerrainMode) 'CompactBand requires TerrainMode.'
 function Decode([string]$value){$value=$value.Trim();if($value.StartsWith('"')){Require $value.EndsWith('"') 'Incomplete string.';return $value.Substring(1,$value.Length-2).Replace('""','"')};return ConvertFrom-Json $value -NoEnumerate}
 function Timing-Sample($sample){
  # Missing/negative counters mean unavailable. A real published zero remains zero.
@@ -93,6 +94,7 @@ try{
   if(!$TerrainMode){$settings.WGR_FOG_TERRAIN='0,0,0,0';$settings.WGR_FOG_PATCH='0,0,0,0'}
   foreach($key in $exposureSettings.Keys){$settings[$key]=$exposureSettings[$key]}
   if($layerArgs){$settings.WGR_FOG_LAYER0=$layerArgs[0];$settings.WGR_FOG_LAYER1=$layerArgs[1]}
+  if($CompactBand){$settings.WGR_FOG_LAYER0='1,5,0.35,0.018';$settings.WGR_FOG_LAYER1='35,50,3,0';$settings.WGR_FOG_TERRAIN='1,0,1,0';$settings.WGR_FOG_PATCH='0.35,420,0.25,0'}
   foreach($key in $settings.Keys){[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
   $log=Join-Path $armOut 'engine.log';$stdout=Join-Path $armOut 'stdout.log';$stderr=Join-Path $armOut 'stderr.log'
   $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
@@ -129,6 +131,7 @@ try{
    $upper=(@(($ground+35),($ground+50),3,.004)|ForEach-Object{Fmt $_}) -join ','
    $layerArgs=@($lower,$upper)
    if($TerrainMode){$layerArgs=@('-3,18,3,0.008','35,50,3,0.004')}
+   if($CompactBand){$layerArgs=@('1,5,0.35,0.018','35,50,3,0')}
    $baselineSource=$source;$baselineWeather=$weather;$result.profile=@{siteXZ=@($X,$Z);nativeY=$ground;layers=$layerArgs;terrainMode=[bool]$TerrainMode;policy='Legacy-density mode explicitly zeros new controls and freezes world-ASL slabs from actual baseline height. Terrain mode uses AGL slabs with actual C++ startup terrain/patch defaults; trace records packed controls. OFF scout used built-in profiles; disabled optics are independent of profile.'}
   }else{Require ([Math]::Abs($actualGround-$ground) -lt .0001 -and $source.worldName -ceq $baselineSource.worldName -and $source.heightRevision -eq $baselineSource.heightRevision -and $source.grid -eq $baselineSource.grid) 'Native source changed between arms.'}
   if($arm.fog -gt 0){foreach($range in @('terrainRange','baseRange','objectRange','tacticalVisibility')){Require ([Math]::Abs((Num $weather.$range)-(Num $baselineWeather.$range)) -lt .001) ('Existing '+$range+' changed at identical weather.')}}
@@ -208,6 +211,6 @@ try{
  $result.passed=$true;Write-Host "Installed layered fog functional controls PASS; image judgement pending: $taskOut"
 }catch{$result.error=$_.Exception.Message;throw}finally{
  if($p -and !$p.HasExited){try{if($client){$null=Send @{cmd='exit'}}}catch{};if(!$p.WaitForExit(10000)){$result.ownedForcedCleanup=$true;Stop-Process -Id $p.Id -Force}}
- if($client){$client.Dispose()};foreach($key in $saved.Keys){[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}
+ if($client){$client.Dispose()};foreach($key in $saved.Keys){if($null -eq $saved[$key]){Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue}else{[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}}
  $result|ConvertTo-Json -Depth 20|Set-Content -LiteralPath (Join-Path $taskOut 'result.json')
 }
