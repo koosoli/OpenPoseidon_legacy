@@ -41,8 +41,10 @@ execution:
     backup_branch: codex/backup-excavation-20261004
     backup_commit: 8b93dec7
     state: BOUNDED_EXPERIMENTAL_CHECKPOINT_HOUSE_IDENTIFICATION_OPEN
-    installed_source_commit: 5ee637d7
-    installed_local_time: 2026-10-04_04:41
+    installed_source_commit: 1418e425
+    installed_local_time: 2026-10-04_08:49
+    owner_revision_evidence: docs/verification/fog-ragdoll-owner-revision-20261004.md
+    owner_revision_runtime_receipt: docs/verification/fog-ragdoll-owner-revision-20261004-runtime.json
     wrapup_evidence: docs/verification/modernisation-followup-20261004.md
     authorised_order:
       - Finish excavation editor and installed acceptance (complete)
@@ -55,10 +57,10 @@ execution:
     upstream_audit_location: docs/roadmap/modernisation/upstream
     house_state: UNREPRODUCED_PENDING_TARGET_IDENTIFICATION
     house_evidence: docs/roadmap/modernisation/EVERON-PLACEMENT-DIAGNOSTIC-20261004.md
-    fog_state: EXPERIMENTAL_INSTALLED_CLOSURE_AND_CONTROLS_PASSED_BROAD_APPEARANCE_OPEN
+    fog_state: OWNER_APPROVED_DEFAULT_ON_WEATHER_CONTROLS_TREE_SELF_SHELTER_PASSED_RESIDUAL_CARD_OPEN
     fog_evidence: docs/verification/layered-fog-20261004.md
     fog_runtime_receipt: docs/verification/layered-fog-20261004-runtime.json
-    ragdoll_state: BOUNDED_STOCK_STANDING_RIFLE_SAVE_AND_RUNTIME_TOGGLE_PASSED
+    ragdoll_state: BOUNDED_STOCK_STANDING_RIFLE_SAVE_TOGGLE_AND_BLAST_GROUND_RECOVERY_PASSED
     ragdoll_evidence: docs/verification/automatic-ragdoll-20261004.md
     ragdoll_runtime_receipt: docs/verification/automatic-ragdoll-20261004-runtime.json
     upstream_state: BOUNDED_PORTS_INTEGRATED_NATIVE_AND_FOUR_INSTALLED_FIXTURES_PASSED
@@ -80,7 +82,12 @@ execution:
       actual save/load, actual AK74 kill and the shared dev-panel toggle path
       passed. Missing Eastern centre in the rifle fixture was repaired;
       crouch/prone pose is not established.
-      Both candidates remain experimental and OFF by default. Older ledger
+      Owner approved default ON volumetric fog with Weather mode/presets/layers;
+      installed tree self-shelter comparison passed, nearby gray card band remains.
+      Automatic ragdolls remain OFF by default. Actual installed grenade and
+      inherited >12m airborne trajectory return to ground; supported low-motion
+      contact now gates retirement. Airborne save preserved active handles/pose;
+      frozen save/load passed, active airborne load untested. Older ledger
       source hashes outside reviewed slices remain stale and are not silently
       renewed; Preview validator stops at RND-005A, Compat at AST-011C.
   review_model: OWNER_REVIEW_NO_INDEPENDENT_REVIEWER

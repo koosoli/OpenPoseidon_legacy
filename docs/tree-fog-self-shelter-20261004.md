@@ -43,8 +43,10 @@ output-alpha expressions. These alpha checks are helper/source evidence, not a
 claim that a stock tree was rasterized in this fixture. Existing actual volume
 roof/native/overflow negatives and final sky-closure tests also pass.
 
-Root must build/deploy the paired candidate and compare the owner's scene with
-Legacy/New at the same camera/weather, inspecting near card bands, crown/trunk
-continuity, distant forest and alpha silhouette. Any residual density/froxel or
-material alpha/depth fault remains open until that installed comparison; no
-visual acceptance is inferred from helper tests or composition.
+Root built/deployed `661cd6d5` and completed the four-arm, twelve-view installed
+original Everon comparison at fixed exposure .6: all source/weather/camera/range,
+pair-stability and normal-exit gates passed. Ground/between/above images show
+more continuous crown/trunk haze. The nearby gray card-shaped band persists;
+material coverage and canopy-volume admission remain distinguishable possible
+contributors, not proven causes. Full tree appearance acceptance remains open.
+See `docs/verification/fog-ragdoll-owner-revision-20261004.md` and its receipt.

@@ -1,4 +1,4 @@
-# Finite ASL fog: opt-in candidate, 4 October 2026
+# Finite ASL fog, 4 October 2026
 
 Two independent, finite world-altitude density layers now transport scene-linear
 radiance with `L + background*T`, with `T=exp(-integrated extinction)`. Density
@@ -12,20 +12,23 @@ forced weather state or terrain-following noise layer.
 The pre-existing distance aerial perspective, atmosphere and ground/weather
 shaders are preserved. This is separate single-scattering finite-medium transport
 composed after that closure, not a full coupled atmospheric multiple-scattering
-solver. The default remains **OFF**. Tactical visibility and culling ranges are
+solver. The owner-approved current default is **ON**. Tactical visibility and culling ranges are
 unchanged by this control; actual weather Fog still controls their existing rules.
 
 ## Configuration and safeguards
 
-In the Sky panel, expand **Layered low fog (experimental)**, enable **Physical ASL
-fog layers**, and set each ASL base/top, boundary feather and extinction. HDR,
+In **Ctrl+F8 -> Weather -> Fog**, select Legacy or Volumetric layered fog and
+set fog amount/transition. Low ground fog, Two layers and Elevated band presets
+position fixed-altitude layers. Expand **Fog layers and lighting** to set each
+ASL base/top, boundary feather, extinction, albedo and forward scattering. HDR,
 procedural sky, sky-based lighting and nonzero actual weather Fog are required.
 The built-in profiles are `[0,35,5,.008]` and `[70,100,5,.003]` metres/metre inverse;
 albedo `.95`, HG `g=.6`. Profiles may therefore be below a high hill: that is
 expected for fixed ASL layers. They are not automatically shifted to the camera.
 
-Exact environment override `WGR_LAYERED_FOG=1` enables the candidate; any other
-present value disables it. Optional `WGR_FOG_LAYER0` / `WGR_FOG_LAYER1` contain
+Exact startup override `WGR_LAYERED_FOG=1` enables the candidate; any other
+present value disables it. These overrides seed shared settings only once;
+Weather controls can then change them. Optional `WGR_FOG_LAYER0` / `WGR_FOG_LAYER1` contain
 four comma-separated finite values `base,top,feather,extinction`. Invalid intervals
 or values refuse the effect. UI settings are session controls, not new persistent
 configuration entries. `WGR_LAYERED_FOG_TRACE=1` emits bounded CPU encoding records.

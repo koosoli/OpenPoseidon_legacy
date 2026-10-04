@@ -1,16 +1,18 @@
 # Finite ASL layered fog checkpoint
 
-The opt-in WGPU candidate implements two fixed world-altitude layers with
+The WGPU candidate implements two fixed world-altitude layers with
 feathered density, Beer-Lambert transmittance and directional single scattering.
 It uses current weather, sky lighting and conservative physical coverage, and
 applies matching transport to sky/clouds and surface consumers. It does not
 change tactical visibility. It is not a complete coupled atmosphere or interior
 multiple-scattering model.
 
-Launch with `--dev`, open **Ctrl+F8 -> Sky -> Layered low fog (experimental)**,
-then enable **Physical ASL fog layers**. The startup option is
-`WGR_LAYERED_FOG=1`; optional layer profiles are documented in
-`docs/layered-fog-finite-asl-20261004.md`. **Default remains OFF.**
+Current owner-approved default is **ON** (`4d71c845`). Launch with `--dev`, open
+**Ctrl+F8 -> Weather -> Fog** for the Legacy/Volumetric selector, fog amount,
+presets and layer controls. Startup environment options seed settings once,
+so subsequent Weather edits remain authoritative. See
+`fog-ragdoll-owner-revision-20261004.md` for the installed tree and blast revision.
+The following older appearance decisions describe the earlier opt-in checkpoints.
 
 ## Installed author-run controls
 

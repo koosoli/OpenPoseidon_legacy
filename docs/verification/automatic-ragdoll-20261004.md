@@ -14,6 +14,11 @@ stops new admission. `POSEIDON_AUTOMATIC_RAGDOLL=1` remains the startup option.
 
 ## Installed author-run acceptance
 
+Current `1418e425` fixes blast corpses freezing at the old 12-metre travel bound.
+Installed inherited-trajectory, actual grenade-death and frozen save/load passed;
+retirement now requires actual supported low-motion ground contact. See
+`fog-ragdoll-owner-revision-20261004.md` for evidence and remaining limits.
+
 Matching source `3de356cb` / original Everon:
 
 - Four ordinary standing deaths created 44 actual bodies and 40 joints with
