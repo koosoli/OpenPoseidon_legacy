@@ -790,6 +790,27 @@ void Man::SetAutomaticInfantryDeathsEnabled(bool enabled)
 {
     g_automaticInfantryDeathsOverride = enabled ? 1 : 0;
     LOG_INFO(World,"AUTORAGDOLL: runtime new-death admission enabled={} existingOwnersRetained=1",enabled);
+    if (enabled) PrepareAutomaticInfantryTerrain();
+}
+
+void Man::PrepareAutomaticInfantryTerrain()
+{
+    if (!AutomaticRagdollEnabled() || !GWorld || !GLandscape || GWorld->GetMode()!=GModeArcade ||
+        GLandscape->GetTerrainRange()<=1) return;
+    auto* world=Physics::GetPhysicsWorld();
+    static const void* attemptedWorld=nullptr;
+    static const void* attemptedLandscape=nullptr;
+    static std::uint64_t attemptedEpoch=~std::uint64_t(0);
+    static std::uint64_t attemptedTerrainSerial=~std::uint64_t(0);
+    const std::uint64_t epoch=world?world->Generation():0;
+    const std::uint64_t serial=world?world->TerrainMutationSerial():0;
+    if (attemptedWorld==GWorld && attemptedLandscape==GLandscape && attemptedEpoch==epoch && attemptedTerrainSerial==serial) return;
+    attemptedWorld=GWorld; attemptedLandscape=GLandscape; attemptedEpoch=epoch; attemptedTerrainSerial=serial;
+    if (world && world->GetStats().terrainRegistered) return;
+    RString refusal; const bool ready=AutomaticRagdollTerrain(refusal);
+    world=Physics::GetPhysicsWorld(); attemptedEpoch=world?world->Generation():0;
+    attemptedTerrainSerial=world?world->TerrainMutationSerial():0;
+    LOG_INFO(World,"AUTORAGDOLL: mission terrain preparation ready={} reason={} beforeDamage=1",ready,refusal.Data());
 }
 
 void Man::ClearCorpsePose() const
@@ -1521,6 +1542,8 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
     for (int part = 0; part < 11; ++part)
     {
         Physics::ConvexPiece piece{vertices[part].data(), static_cast<int>(vertices[part].size()), Physics::ColliderFlags::Solid};
+        if (_automaticCorpsePose)
+        { state->retainedHulls[part]=vertices[part]; state->retainedMasses[part]=masses[part]; }
         Physics::ArticulatedInitialMotion motion;
         if (_automaticCorpsePose)
         {
@@ -1562,9 +1585,12 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
             definition.lowerAngle = hinges[hingeIndex].lower; definition.upperAngle = hinges[hingeIndex].upper;
         }
         state->joints[j] = world->AddArticulatedJoint(definition);
+        if (_automaticCorpsePose) state->retainedJoints[j]=definition;
         if (!state->joints[j].IsValid()) { refusal = "backend-refused-anatomical-joint"; return false; }
         if (definition.kind == Physics::ArticulatedJointKind::Hinge) ++state->hingeCount;
     }
+    if (_automaticCorpsePose)
+    { state->wakeRecipe=true; state->terrainSerial=world->TerrainMutationSerial(); }
     _corpseArticulation = std::move(state);
     refusal = "";
     if (!UpdateCorpseArticulation()) { refusal = "initial-body-readback-refused"; return false; }
@@ -1791,10 +1817,57 @@ bool Man::FreezeAutomaticRagdoll()
     return true;
 }
 
+bool Man::WakeAutomaticRagdoll(RString& refusal)
+{
+    refusal="frozen-runtime-recipe-required";
+    if (!_automaticCorpsePose || !_automaticCorpsePose->frozen || !_corpseArticulation ||
+        !_corpseArticulation->wakeRecipe || !UseCorpsePose()) return false;
+    const Vector3 linear=_impulseForce*(GetInvMass()*Rigid());
+    const Vector3 angular=(Orientation()*InvInertia()*GetInvTransform().Orientation())*(_impulseTorque*Rigid());
+    if(!linear.IsFinite() || !angular.IsFinite() || linear.Size()>15 || angular.Size()>20)
+    { refusal="bounded-hit-motion-required"; return false; }
+    auto& pose=*_automaticCorpsePose; auto& state=*_corpseArticulation;
+    const auto water=GRainWater().At(Position().X(),Position().Z());
+    if (water.valid && water.depth>.003f) { refusal="dry-frozen-support-required"; return false; }
+    bool used[4]={};
+    for(const auto& owner:g_automaticCorpses)
+        if(Man* man=owner.GetLink();man && man!=this && man->_automaticCorpsePose && !man->_automaticCorpsePose->frozen)
+        { const int slot=-man->_automaticCorpsePose->collisionFamily-2; if(slot>=0 && slot<4) used[slot]=true; }
+    int slot=0; while(slot<4 && used[slot]) ++slot;
+    if(slot==4) { refusal="active-corpse-budget"; return false; }
+    // Rebase against the ACTUAL retained consumers; a wake never selects a
+    // standing/authored death animation or changes the visible frozen pose.
+    if(!state.Wake(-slot-2)) { refusal="stale-or-invalid-frozen-solver-recipe"; return false; }
+    for(auto& level:pose.levels)
+    { level.authoredPalette=level.palette; level.authoredPoints=level.points; level.authoredProxies=level.proxies; }
+    pose.capturedRoot=pose.root; pose.pending=false; pose.frozen=false;
+    pose.initialSpeed=pose.initialAngularVelocity=VZero;
+    pose.lastSpeed=pose.lastAngularVelocity=VZero; pose.quietSeconds=pose.simulatedSeconds=0;
+    pose.collisionFamily=state.collisionFamily;
+    ++state.wakeCount;
+    if(GScene) GScene->GetShadowCache().ShadowChanged(this);
+    LOG_INFO(World,"AUTORAGDOLL: awakened owner={} actualFrozenPoseRetained=1 bodies=11 joints=10 family={}",static_cast<const void*>(this),state.collisionFamily);
+    refusal=""; return true;
+}
+
 bool Man::UpdateAutomaticRagdoll(float deltaT)
 {
     if (!_automaticCorpsePose || !_corpseArticulation || !UseCorpsePose()) return false;
-    if (_automaticCorpsePose->frozen) return true;
+    if (_automaticCorpsePose->frozen)
+    {
+        if (_impulseForce.SquareSize()>0 || _impulseTorque.SquareSize()>0)
+        {
+            RString refusal;
+            if (!WakeAutomaticRagdoll(refusal))
+            {
+                LOG_INFO(World,"AUTORAGDOLL: frozen hit retained owner={} reason={}",static_cast<const void*>(this),refusal.Data());
+                _impulseForce=_impulseTorque=VZero;
+            }
+            // The next real solver update consumes the one pending impulse.
+            // Before it, every retained consumer stays exactly unchanged.
+        }
+        return true;
+    }
     auto& state = *_corpseArticulation;
     auto& pose = *_automaticCorpsePose;
     std::array<Physics::BodyMotion,11> motions;
@@ -1808,8 +1881,8 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
             return FallBackAutomaticRagdoll("invalid-body-readback");
         state.maximumTravel = std::max(state.maximumTravel,(motion.position-state.initial[part].Position()).Size());
         quiet &= !motion.awake || (motion.linearVelocity.Size() < .06f && motion.angularVelocity.Size() < .12f);
-        identity &= motion.position == state.initial[part].Position() && motion.axisX == VAside &&
-            motion.axisY == VUp && motion.axisZ == VForward;
+        identity &= motion.position == state.initial[part].Position() && motion.axisX == state.initial[part].DirectionAside() &&
+            motion.axisY == state.initial[part].DirectionUp() && motion.axisZ == state.initial[part].Direction();
     }
     pose.lastSpeed = motions[0].linearVelocity;
     pose.lastAngularVelocity = motions[0].angularVelocity;
@@ -1856,6 +1929,12 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
     if (first) return FallBackAutomaticRagdoll("missing-render-bounds");
     candidate.minimum = lo; candidate.maximum = hi; candidate.radius = radius;
     pose = std::move(candidate); state.minimum = lo; state.maximum = hi; state.radius = radius;
+    if(state.wakeRecipe) for(int part=0;part<11;++part)
+    {
+        auto& retained=state.retainedTransforms[part]; retained=MIdentity;
+        retained.SetDirectionAside(motions[part].axisX); retained.SetDirectionUp(motions[part].axisY);
+        retained.SetDirection(motions[part].axisZ); retained.SetPosition(motions[part].position);
+    }
     state.object = root; ++state.updates;
     if (Transform().Position() != root.Position())
     {
@@ -1872,7 +1951,10 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
     // Distance from the initial corpse is NOT a pose bound: blast translation
     // can exceed 12 m while the rebased skin/joints remain valid. Neither time,
     // travel nor a ballistic apex establishes a safe frozen ground pose.
-    const bool pendingImpulse = _impulseForce.SquareSize() > 0 || _impulseTorque.SquareSize() > 0;
+    // StartCorpseArticulation performs an initial consumer readback while
+    // pending. Its spawn motion already includes this death impulse; only
+    // later independent incoming hits may transfer it here.
+    const bool pendingImpulse = !pose.pending && (_impulseForce.SquareSize() > 0 || _impulseTorque.SquareSize() > 0);
     if (!pendingImpulse && CorpseAutomaticRetirementAdmitted(supported,quiet,pose.quietSeconds,pose.simulatedSeconds))
         return FreezeAutomaticRagdoll();
     // Existing aggregate impulses arriving after activation are consumed once.
@@ -1880,7 +1962,26 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
     {
         const Vector3 linear = _impulseForce*(GetInvMass()*Rigid());
         const Vector3 angular = (Orientation()*InvInertia()*GetInvTransform().Orientation())*(_impulseTorque*Rigid());
-        if (linear.IsFinite() && angular.IsFinite() && linear.Size() <= 15 && angular.Size() <= 20)
+        Vector3 point; const int hitPart=state.ImpactPart(COMPosition(),_impulseForce,_impulseTorque,point);
+        const Vector3 localImpulse=_impulseForce*Rigid();
+        bool local=hitPart>=0 && localImpulse.IsFinite() &&
+            localImpulse.Size()/state.retainedMasses[hitPart]<=15 && linear.IsFinite() && angular.IsFinite() &&
+            linear.Size()<=15 && angular.Size()<=20;
+        if(local)
+        {
+            state.world->ApplyImpulse(state.bodies[hitPart],point,localImpulse);
+            Physics::BodyMotion applied;
+            local=state.world->GetBodyMotion(state.bodies[hitPart],applied) && applied.linearVelocity.IsFinite() &&
+                applied.angularVelocity.IsFinite() && applied.linearVelocity.Size()<=15 && applied.angularVelocity.Size()<=20;
+            if(local)
+            {
+                ++state.localTransfers; state.lastImpactPart=hitPart;
+                LOG_INFO(World,"AUTORAGDOLL: actual hit transfer owner={} part={} impulse=({},{},{}) impact=({},{},{}) local=1",
+                    static_cast<const void*>(this),hitPart,localImpulse.X(),localImpulse.Y(),localImpulse.Z(),point.X(),point.Y(),point.Z());
+            }
+            else state.world->SetArticulatedMotion(state.bodies[hitPart],motions[hitPart].linearVelocity,motions[hitPart].angularVelocity);
+        }
+        if (!local && linear.IsFinite() && angular.IsFinite() && linear.Size() <= 15 && angular.Size() <= 20)
             for (int part = 0; part < 11; ++part)
                 state.world->SetArticulatedMotion(state.bodies[part],motions[part].linearVelocity+linear+
                     angular.CrossProduct(motions[part].position-PositionModelToWorld(_shape->CenterOfMass())),
@@ -2126,6 +2227,17 @@ RString Man::CorpsePoseProbe(const char* command)
         if (!GWorld || GWorld->GetMode() != GModeArcade) return "REFUSED corpse-auto-toggle local-single-player-required";
         SetAutomaticInfantryDeathsEnabled(std::strcmp(command,"corpse-auto-enable") == 0);
         return "OK corpse-auto-toggle existing-owners-retained";
+    }
+    if (std::strcmp(command,"corpse-auto-hit-status") == 0)
+    {
+        Man* man=g_corpsePoseOwner.GetLink();
+        if(!man || !man->_automaticCorpsePose || !man->UseCorpsePose() || !man->_corpseArticulation)
+            return "REFUSED corpse-auto-hit-status no-automatic-owner";
+        const auto& state=*man->_corpseArticulation;
+        char status[256]; std::snprintf(status,sizeof(status),
+            "OK corpse-auto-hit-status received=%u wakes=%u transfers=%u lastPart=%d recipe=%d",
+            state.impulseEvents,state.wakeCount,state.localTransfers,state.lastImpactPart,int(state.wakeRecipe));
+        return status;
     }
     if (std::strcmp(command,"corpse-auto-motion") == 0)
     {

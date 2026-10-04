@@ -665,6 +665,8 @@ class Man: public Person
     bool _automaticDeathEligible = false;
     void QueueAutomaticRagdoll();
     bool BeginAutomaticRagdoll(RString& refusal);
+    bool WakeAutomaticRagdoll(RString& refusal);
+    static void PrepareAutomaticInfantryTerrain();
     bool UpdateAutomaticRagdoll(float deltaT);
     bool CaptureCorrectedCorpsePose(RString& refusal);
     bool FreezeAutomaticRagdoll();
@@ -966,6 +968,7 @@ class Man: public Person
   bool MoveHead(float deltaT);
 	void MoveWeapons( float deltaT, bool forceRecalcMatrix );
 	void OnPositionChanged() override;
+    void OnAddImpulse(Vector3Par force, Vector3Par torque) override;
 
 	float FireAngleInRange( int weapon, Vector3Par rel ) const override;
 

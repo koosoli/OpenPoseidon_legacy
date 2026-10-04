@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
+#include <Poseidon/World/Physics/PhysicsBackend.hpp>
 #include <array>
 #include <cmath>
 #include <vector>
@@ -22,6 +23,15 @@ struct CorpseArticulation
     std::array<Physics::BodyId, 11> bodies{};
     std::array<Physics::JointId, 10> joints{};
     std::array<Matrix4, 11> initial{};
+    // Admitted runtime recipes, never backend handles or a guessed rest pose.
+    std::array<std::vector<Vector3>,11> retainedHulls;
+    std::array<float,11> retainedMasses{};
+    std::array<Matrix4,11> retainedTransforms{};
+    std::array<Physics::ArticulatedJointDef,10> retainedJoints{};
+    std::uint64_t terrainSerial = 0;
+    bool wakeRecipe = false;
+    unsigned impulseEvents = 0, wakeCount = 0, localTransfers = 0;
+    int lastImpactPart = -1;
     Matrix4 object = MIdentity;
     std::vector<int> boneParts;
     float minimumClearance = 0;
@@ -42,6 +52,59 @@ struct CorpseArticulation
             for (auto body : bodies) world->Remove(body);
         }
         joints = {}; bodies = {};
+    }
+    bool Wake(int family)
+    {
+        if (!wakeRecipe || !Ready() || state != CorpseSolverState::Frozen ||
+            family > -2 || family < -5 || terrainSerial != world->TerrainMutationSerial() ||
+            !world->GetStats().terrainRegistered) return false;
+        for (int part=0;part<11;++part)
+        {
+            if (!retainedTransforms[part].IsFinite() || retainedHulls[part].size()<4 ||
+                retainedHulls[part].size()>4096 || !std::isfinite(retainedMasses[part]) || retainedMasses[part]<=0)
+                return false;
+            for (const auto& p:retainedHulls[part]) if (!p.IsFinite() || p.Size()>4) return false;
+        }
+        const int pairs[][2]={{0,1},{1,2},{1,3},{3,4},{1,5},{5,6},{0,7},{7,8},{0,9},{9,10}};
+        auto fail=[&] { ReleaseHandles(); return false; };
+        for (int part=0;part<11;++part)
+        {
+            Physics::ConvexPiece piece{retainedHulls[part].data(),int(retainedHulls[part].size()),Physics::ColliderFlags::Solid};
+            Physics::ArticulatedInitialMotion motion; motion.collisionFamily=family;
+            bodies[part]=world->SpawnArticulatedPiece(piece,retainedTransforms[part],retainedMasses[part],motion);
+            Physics::BodyMotion readback;
+            if (!bodies[part].IsValid() || !world->GetBodyMotion(bodies[part],readback)) return fail();
+            Matrix4 actual=MIdentity; actual.SetDirectionAside(readback.axisX); actual.SetDirectionUp(readback.axisY);
+            actual.SetDirection(readback.axisZ); actual.SetPosition(readback.position);
+            if (!actual.IsFinite() || (actual.Position()-retainedTransforms[part].Position()).Size()>.0001f) return fail();
+            initial[part]=actual;
+        }
+        for (int j=0;j<10;++j)
+        {
+            auto definition=retainedJoints[j];
+            if (!definition.firstFrame.IsFinite() || !definition.secondFrame.IsFinite()) return fail();
+            definition.first=bodies[pairs[j][0]]; definition.second=bodies[pairs[j][1]];
+            joints[j]=world->AddArticulatedJoint(definition);
+            if (!joints[j].IsValid()) return fail();
+        }
+        collisionFamily=family; maximumTravel=0; state=CorpseSolverState::Simulating;
+        return true;
+    }
+    // Aggregate torque identifies an impact LINE (r x F), not its depth along
+    // the projectile. Choose the admitted anatomical body closest to that line.
+    int ImpactPart(Vector3Par center,Vector3Par force,Vector3Par torque,Vector3& point) const
+    {
+        if (!wakeRecipe || !center.IsFinite() || !force.IsFinite() || !torque.IsFinite() || force.SquareSize()<1e-10f) return -1;
+        const Vector3 direction=force.Normalized(), origin=center+force.CrossProduct(torque)/force.SquareSize();
+        float best=4; int result=-1;
+        for(int part=0;part<11;++part)
+        {
+            const Vector3 c=retainedTransforms[part].Position();
+            const Vector3 onLine=origin+direction*((c-origin)*direction);
+            const float distance=(c-onLine).SquareSize();
+            if(std::isfinite(distance) && distance<best) { best=distance; result=part; point=onLine; }
+        }
+        return result;
     }
     bool Freeze()
     {

@@ -3,6 +3,7 @@
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/RainWaterField.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
+#include <Poseidon/World/Physics/CorpseArticulation.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
@@ -331,8 +332,23 @@ void Man::OnPositionChanged()
     RecalcPositions(*this);
 }
 
+void Man::OnAddImpulse(Vector3Par force, Vector3Par torque)
+{
+    base::OnAddImpulse(force,torque);
+    if (_automaticCorpsePose && force.IsFinite() && torque.IsFinite() &&
+        (force.SquareSize()>0 || torque.SquareSize()>0))
+    {
+        // Entity::AddImpulse appends the real impulse immediately after this
+        // hook. Wake it on the simulation thread, never within collision walk.
+        _lastMovementTime=Glob.time;
+        if (_corpseArticulation) ++_corpseArticulation->impulseEvents;
+        IsMoved();
+    }
+}
+
 void Man::Simulate(float deltaT, SimulationImportance prec)
 {
+    if (!_isDead && !IsDammageDestroyed() && IsInLandscape()) PrepareAutomaticInfantryTerrain();
     if (!_isDead && !IsDammageDestroyed() && IsInLandscape()) _automaticDeathEligible = true;
     if (_automaticCorpsePose && _automaticCorpsePose->pending)
     {

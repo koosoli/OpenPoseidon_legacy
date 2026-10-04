@@ -378,6 +378,81 @@ TEST_CASE("Corpse rigid deltas preserve affine residuals and every weighted cons
     for (int i=0;i<3;++i) SameMatrix(a[i],f[i]);
 }
 
+TEST_CASE("Frozen runtime recipes restore eleven bodies at retained transforms and real local impact moves them", "[corpse-pose][articulation][corpse-wake]")
+{
+    using namespace Poseidon::Physics;
+    auto& world=EnsurePhysicsWorld(); world.Destroy(); REQUIRE(world.Create());
+    struct Retire { PhysicsWorld& world; ~Retire(){world.Destroy();} } cleanup{world};
+    std::vector<float> floor(33*33,0); REQUIRE(world.SetTerrain(floor.data(),33,33,.5f,-8,-8));
+    CorpseArticulation state; state.world=&world; state.epoch=world.Generation();
+    state.terrainSerial=world.TerrainMutationSerial(); state.wakeRecipe=true;
+    const Vector3 centers[]={{0,1.1f,0},{0,1.5f,0},{0,1.8f,0},{-.25f,1.45f,0},{-.45f,1.35f,0},
+        {.25f,1.45f,0},{.45f,1.35f,0},{-.12f,.8f,0},{-.12f,.4f,0},{.12f,.8f,0},{.12f,.4f,0}};
+    const Vector3 vertices[]={{-.04f,-.08f,-.04f},{.04f,-.08f,-.04f},{-.04f,.08f,-.04f},{.04f,.08f,-.04f},
+        {-.04f,-.08f,.04f},{.04f,-.08f,.04f},{-.04f,.08f,.04f},{.04f,.08f,.04f}};
+    for(int part=0;part<11;++part)
+    {
+        state.retainedHulls[part].assign(vertices,vertices+8); state.retainedMasses[part]=2;
+        Matrix4 frame; frame.SetRotationY(.3f); frame.SetPosition(centers[part]);
+        state.initial[part]=frame;
+        ConvexPiece piece{vertices,8,ColliderFlags::Solid}; ArticulatedInitialMotion motion; motion.collisionFamily=-2;
+        state.bodies[part]=world.SpawnArticulatedPiece(piece,frame,2,motion); REQUIRE(state.bodies[part].IsValid());
+    }
+    const int pairs[][2]={{0,1},{1,2},{1,3},{3,4},{1,5},{5,6},{0,7},{7,8},{0,9},{9,10}};
+    for(int j=0;j<10;++j)
+    {
+        const int a=pairs[j][0],b=pairs[j][1]; Matrix4 pivot=MIdentity; pivot.SetPosition((centers[a]+centers[b])*.5f);
+        auto& definition=state.retainedJoints[j]; definition.first=state.bodies[a]; definition.second=state.bodies[b];
+        definition.firstFrame=state.initial[a].InverseRotation()*pivot;
+        definition.secondFrame=state.initial[b].InverseRotation()*pivot;
+        if(j==3 || j==5 || j==7 || j==9) { definition.kind=ArticulatedJointKind::Hinge; definition.lowerAngle=-.2f; definition.upperAngle=.4f; }
+        state.joints[j]=world.AddArticulatedJoint(definition); REQUIRE(state.joints[j].IsValid());
+    }
+    for(int i=0;i<20;++i) world.Step(1.f/60);
+    for(int part=0;part<11;++part)
+    {
+        BodyMotion motion; REQUIRE(world.GetBodyMotion(state.bodies[part],motion));
+        auto& frame=state.retainedTransforms[part]; frame=MIdentity; frame.SetDirectionAside(motion.axisX);
+        frame.SetDirectionUp(motion.axisY); frame.SetDirection(motion.axisZ); frame.SetPosition(motion.position);
+    }
+    state.updates=20; state.minimum=Vector3(-1,-1,-1); state.maximum=Vector3(1,1,1); state.radius=1.8f;
+    REQUIRE(state.Freeze()); CHECK(world.GetStats().articulatedBodies==0); CHECK(world.GetStats().articulatedJoints==0);
+    // Corrected consumers are retained independently of solver reconstruction.
+    CorrectedCorpsePose pose; CorrectedCorpseLevel level;
+    level.authoredPalette.assign(11,MIdentity); level.authoredPalette[4]=Matrix4(MScale,1.2f,.8f,1.1f);
+    level.authoredPalette[4](0,1)=.13f; level.palette=level.authoredPalette;
+    level.authoredPoints={Vector3(.1f,-.2f,.3f)}; level.points=level.authoredPoints;
+    level.bindings={CorpsePointBinding{{4,2},{.65f,.35f}}};
+    level.authoredProxies={level.palette[4]}; level.proxies=level.authoredProxies; level.proxySelections={1}; level.proxyBones={4};
+    pose.levels={level}; REQUIRE(pose.Valid());
+    const auto before=pose;
+    REQUIRE_FALSE(state.Wake(-1)); REQUIRE(state.Wake(-3));
+    CHECK(world.GetStats().articulatedBodies==11); CHECK(world.GetStats().articulatedJoints==10);
+    CHECK(pose.levels[0].points==before.levels[0].points);
+    for(int part=0;part<11;++part)
+    {
+        BodyMotion motion; REQUIRE(world.GetBodyMotion(state.bodies[part],motion));
+        CHECK((motion.position-state.retainedTransforms[part].Position()).Size()<.0001f);
+        CHECK((motion.axisX-state.retainedTransforms[part].DirectionAside()).Size()<.0001f);
+        CHECK((motion.axisY-state.retainedTransforms[part].DirectionUp()).Size()<.0001f);
+        CHECK((motion.axisZ-state.retainedTransforms[part].Direction()).Size()<.0001f);
+    }
+    REQUIRE(pose.Apply(std::vector<Matrix4>(11,MIdentity)));
+    for(int bone=0;bone<11;++bone) SameMatrix(pose.levels[0].palette[bone],before.levels[0].palette[bone]);
+    SameMatrix(pose.levels[0].proxies[0],before.levels[0].proxies[0]);
+    Vector3 impact; const Vector3 force(0,0,1),center=VZero;
+    const Vector3 target=state.retainedTransforms[4].Position();
+    REQUIRE(state.ImpactPart(center,force,(target-center).CrossProduct(force),impact)==4);
+    CHECK((impact-target).Size()<.0001f);
+    const auto starting=state.initial[4].Position(); world.ApplyImpulse(state.bodies[4],impact,force);
+    for(int i=0;i<12;++i) world.Step(1.f/60);
+    BodyMotion moved; REQUIRE(world.GetBodyMotion(state.bodies[4],moved)); CHECK((moved.position-starting).Size()>.01f);
+    Vector3 invalid; CHECK(state.ImpactPart(center,VZero,VZero,invalid)==-1);
+    REQUIRE(state.Freeze()); REQUIRE(world.PatchTerrain(0,0,1,1,floor.data()));
+    CHECK_FALSE(state.Wake(-2)); CHECK(world.GetStats().articulatedBodies==0); CHECK(world.GetStats().articulatedJoints==0);
+    world.Destroy(); CHECK_FALSE(state.Wake(-2));
+}
+
 TEST_CASE("Explicit corpse freeze retires real eleven-body ownership and retains both affine phases", "[corpse-pose][articulation][corpse-freeze]")
 {
     using namespace Poseidon::Physics;

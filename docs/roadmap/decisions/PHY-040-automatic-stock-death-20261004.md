@@ -214,3 +214,48 @@ handles. `-BlastDeath` separately requires a real `GrenadeHand` explosion to
 kill an actual stock soldier and records damage/death and ground recovery.
 Neither arm is installed acceptance yet; unsupported airborne save reload is
 also unexercised by this candidate runner.
+
+### Frozen hit reaction and earlier terrain preparation candidate
+
+The frozen update previously returned before consuming real incoming projectile
+or explosion impulses. Each admitted runtime corpse now retains its original
+local convex hulls, masses, joint frames and last validated solver transforms.
+A real pending impulse can rebuild the same eleven bodies and ten joints from
+those transforms, with one available collision family out of the existing four.
+The retained palettes, CPU points, equipment proxies and root remain unchanged
+before the next solver step. Continued deformation starts from that actual
+frozen output, rather than an authored standing/death animation.
+
+Wake refuses changed world generation or terrain serial, missing recipes,
+incompatible entity/model ownership, hidden bodies, wet support and exhausted
+active budgets. Refusal keeps the frozen pose and clears the refused impulse.
+Legacy handle-free loaded snapshots contain no solver recipe and remain frozen;
+this candidate does not silently reinterpret their saved skin as a new rig.
+
+Real aggregate force/torque identifies an impact line. The closest admitted
+anatomical part receives the original impulse scaled only by the existing
+`Rigid()` material response. Actual post-impulse velocity readback enforces the
+existing motion bounds; larger safe impulses use the previous aggregate path.
+No synthetic damage or force amplifier is introduced. Read-only hit counters
+distinguish an issued projectile from actual received impulses, wakes and local
+transfers. The initial pending readback excludes the death impulse already
+included in spawn motion; it cannot apply that same impulse a second time.
+Later independent hits can wake the same supported corpse again.
+
+The existing native terrain registration runs once when enabling the feature,
+or during the first live infantry simulation on an enabled mission. A cached
+world/landscape/generation/terrain-serial identity prevents repeated per-unit
+preparation and repeated attempts after failure. Setup still has its measured
+cost; it moves before combat rather than disappearing. Existing registered
+terrain is preserved. The runner requires preparation before fixture damage
+and proves the first death does not register terrain again.
+
+Focused actual Box3D checks pass 12,295 assertions in 23 cases, including the
+new rotated eleven-body recipe, real local impulse, exact retained affine
+consumer and stale-terrain/world controls. Hinge checks pass 2,302 assertions
+in four cases. Installed acceptance is pending. Run
+`Test-AutomaticRagdoll.ps1 -FrozenProjectile` against the matching installed
+pair: it sends real stock `BulletSingleW` ammo through measured frozen chest
+Fire geometry, requires confirmed incoming impulse/wake/local transfer, changed
+consumed pose and supported resettlement with zero handles. This is native ammo
+collision coverage, not a player input or `Fired` event acceptance claim.

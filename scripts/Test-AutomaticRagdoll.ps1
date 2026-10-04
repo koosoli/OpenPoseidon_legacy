@@ -6,7 +6,7 @@ param(
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [double]$SiteX=5500,[double]$SiteZ=10000,
  [ValidateSet('UP','MIDDLE','DOWN')][string]$Stance='UP',
- [switch]$RifleDeath,[switch]$SaveLoad,[switch]$RuntimeToggle,[switch]$InheritedBlastTrajectory,[switch]$BlastDeath
+ [switch]$RifleDeath,[switch]$SaveLoad,[switch]$RuntimeToggle,[switch]$InheritedBlastTrajectory,[switch]$BlastDeath,[switch]$FrozenProjectile
 )
 $ErrorActionPreference='Stop';$taskRoot=Split-Path -Parent $PSScriptRoot
 $culture=[Globalization.CultureInfo]::InvariantCulture
@@ -45,6 +45,10 @@ function AutoCounts([bool]$enabled=$true){
 function PhysicsCounts{
  $status=Query 'corpse-physics-status';Require ($status-match 'articulatedBodies=(\d+) articulatedJoints=(\d+)$') 'Actual Box3D counts unavailable.'
  return @{bodies=[int]$Matches[1];joints=[int]$Matches[2];raw=$status}
+}
+function HitStatus{
+ $raw=Query 'corpse-auto-hit-status';Require ($raw-match '^OK corpse-auto-hit-status received=(\d+) wakes=(\d+) transfers=(\d+) lastPart=(-?\d+) recipe=(\d)$') ('Actual hit status unavailable: '+$raw)
+ return @{raw=$raw;received=[int]$Matches[1];wakes=[int]$Matches[2];transfers=[int]$Matches[3];lastPart=[int]$Matches[4];recipe=[int]$Matches[5]}
 }
 function Pose([bool]$frozen){
  $actual=Send @{cmd='corpse_pose_state'}
@@ -122,11 +126,16 @@ try{
  $result.obstacles=@{receipt=$near;blockers=$blockers};Require ($blockers.Count-eq 0) 'Retail obstacles overlap the candidate fixture; select another bounded site.'
  if($RuntimeToggle){$result.gates.defaultOff=AutoCounts $false;Require ((Query 'corpse-auto-enable')-ceq 'OK corpse-auto-toggle existing-owners-retained') 'Runtime new-death admission did not enable.'}
  $result.initial=AutoCounts;Require ($result.initial.active-eq 0-and $result.initial.frozen-eq 0-and $result.initial.pending-eq 0) 'Unexpected pre-existing automatic corpse.'
+ $prepared=@(Select-String -LiteralPath $log -Pattern 'AUTORAGDOLL: mission terrain preparation ready=true|AUTORAGDOLL: mission terrain preparation ready=1'|ForEach-Object{$_.Line})
+ $registrationsBefore=@(Select-String -LiteralPath $log -Pattern 'AUTORAGDOLL: registered shared actual terrain'|ForEach-Object{$_.Line})
+ Require ($prepared.Count-gt 0-and $registrationsBefore.Count-eq 1) 'Shared real terrain was not prepared before fixture damage.'
+ $result.gates.terrainPreparation=@{beforeDamage=$true;preparationLines=$prepared;registrationLines=$registrationsBefore;scope='Setup cost moved to enable/startup, not removed.'}
  $placements=@();for($i=0;$i-lt 5;++$i){$placements+=,@{name=('ragVictim'+$i);stance=$Stance;position=(Spawn ('ragVictim'+$i) ($i*7) $Stance)}}
  $result.placements=$placements
  Exec 'setAccTime 0;ragVictim0 setDammage 1;ragVictim1 setDammage 1;ragVictim2 setDammage 1;ragVictim3 setDammage 1;ragVictim4 setDammage 1'
  $queued=AutoCounts;Require ($queued.pending-eq 4-and $queued.active-eq 0) 'Four actual queued deaths or budget fallback failed.';$result.gates.queued=$queued
  $admissionTimer=[Diagnostics.Stopwatch]::StartNew();Exec 'setAccTime .05';$active=WaitOwners 4 0 20;$admissionTimer.Stop();Exec 'setAccTime 0';$physics=PhysicsCounts;Require ($physics.bodies-eq 44-and $physics.joints-eq 40) 'Four independent Box3D corpses were not created.';$result.gates.active=@{owners=$active;backend=$physics;wallMilliseconds=$admissionTimer.Elapsed.TotalMilliseconds;firstTerrainRegistrationLines=@(Select-String -LiteralPath $log -Pattern 'AUTORAGDOLL: registered shared actual terrain'|ForEach-Object{$_.Line})}
+ Require ($result.gates.active.firstTerrainRegistrationLines.Count-eq $registrationsBefore.Count) 'First damage rebuilt the prepared terrain.'
  $initial=@();for($i=0;$i-lt 4;++$i){Require ((Query ('corpse-auto-select:'+$i))-ceq 'OK corpse-auto-select selected') 'Owner selection failed.';$initial+=,(Pose $false);Capture ('initial-'+$i) ('ragVictim'+$i)}
  if($RuntimeToggle){$null=Query 'corpse-auto-disable';$off=AutoCounts $false;Require ($off.active-eq 4-and (PhysicsCounts).bodies-eq 44-and (PhysicsCounts).joints-eq 40) 'Turning off removed an active owner.';for($i=0;$i-lt 4;++$i){$null=Query ('corpse-auto-select:'+$i);ExactPose $initial[$i] (Pose $false)};$result.gates.activeToggle=$off;$null=Query 'corpse-auto-enable'}
  Exec 'setAccTime 4';$frozen=WaitOwners 0 4 30;Exec 'setAccTime 0';$physics=PhysicsCounts;Require ($physics.bodies-eq 0-and $physics.joints-eq 0) 'Automatic retirement leaked handles.'
@@ -142,6 +151,29 @@ try{
   $off=AutoCounts $false;Require (!(Eval 'alive ragDisabledVictim')-and $off.frozen-eq 4-and $off.active-eq 0-and $off.pending-eq 0) 'Disabled new death unexpectedly gained ownership.'
   Exec 'deleteVehicle ragDisabledVictim';for($i=0;$i-lt 4;++$i){$null=Query ('corpse-auto-select:'+$i);ExactPose $settled[$i] (Pose $true)}
   $result.gates.frozenToggle=$off;$null=Query 'corpse-auto-enable'
+ }
+ if($FrozenProjectile){
+  $null=Query 'corpse-auto-select:0';$beforeHit=Pose $true;$hitBefore=HitStatus;Require ($hitBefore.recipe-eq 1) 'Frozen runtime recipe unavailable.'
+  $hulls=@($beforeHit.hulls|Where-Object{$_.bone-match 'zebra|hrudnik' });Require ($hulls.Count-gt 0) 'Actual frozen chest fire hull missing.'
+  $hull=$hulls[0];$target=@();for($axis=0;$axis-lt 3;++$axis){$target+=,(((Num $hull.worldMin[$axis])+(Num $hull.worldMax[$axis]))*.5)}
+  # A native stock rifle projectile crosses the actual frozen Fire geometry.
+  # Do not script damage or inject an impulse; receipt/wake must come from hit.
+  $route=$null;foreach($direction in @(@(1,0),@(-1,0),@(0,1),@(0,-1))){
+   $clearLine=$true;for($sample=1;$sample-le 5;++$sample){$distance=1.25*$sample/5;$x=$target[0]-$direction[0]*$distance;$z=$target[2]-$direction[1]*$distance;$native=Num (Eval ('triTerrainHeight ['+(Fmt $x)+','+(Fmt $z)+']'));if($target[1]-le $native+.01){$clearLine=$false}}
+   if($clearLine){$route=$direction;break}
+  };Require ($null-ne $route) 'No bounded clear projectile segment above native floor.'
+  $start=@(($target[0]-$route[0]*1.25),$target[1],($target[2]-$route[1]*1.25));$speed=@(($route[0]*800),0,($route[1]*800))
+  Exec ('ragCorpseProjectile="BulletSingleW" createVehicle ['+(Fmt $start[0])+','+(Fmt $start[2])+','+(Fmt $start[1])+'];ragCorpseProjectile setVelocity ['+(Fmt $speed[0])+','+(Fmt $speed[2])+','+(Fmt $speed[1])+']')
+  Require ((Eval '!isNull ragCorpseProjectile')-eq $true-and (Eval 'typeOf ragCorpseProjectile')-ceq 'BulletSingleW') 'Actual stock rifle projectile creation failed.'
+  $result.gates.frozenProjectile=@{passed=$false;scope='Actual stock rifle ammo collision; not player Fired/input proof';beforePose=$beforeHit;beforeHit=$hitBefore;fireHull=$hull;target=$target;start=$start;issuedVelocity=(Eval 'velocity ragCorpseProjectile')}
+  ExactPose $beforeHit (Pose $true);Exec 'setAccTime .2';$until=[DateTime]::UtcNow.AddSeconds(12);$hits=@()
+  do{$hit=HitStatus;$hits+=,$hit;$result.gates.frozenProjectile.hitSamples=$hits;Require ([DateTime]::UtcNow-lt $until) 'Issued projectile did not confirm native corpse hit, wake and local transfer.';if($hit.wakes-le $hitBefore.wakes-or $hit.transfers-le $hitBefore.transfers){Start-Sleep -Milliseconds 50}}while($hit.wakes-le $hitBefore.wakes-or $hit.transfers-le $hitBefore.transfers)
+  Exec 'setAccTime 0';Require ($hit.received-gt $hitBefore.received-and $hit.lastPart-ge 0-and (AutoCounts).active-eq 1-and (PhysicsCounts).bodies-eq 11) 'Actual frozen native hit or independent solver wake missing.'
+  $afterHit=Pose $false;$result.gates.frozenProjectile.activePose=$afterHit;Capture 'frozen-projectile-reaction' 'ragVictim0'
+  Exec 'setAccTime 1';$null=WaitOwners 0 4 30;Exec 'setAccTime 0';$settled[0]=Pose $true
+  Require (((VisiblePose $beforeHit)|ConvertTo-Json -Depth 20 -Compress)-cne ((VisiblePose $settled[0])|ConvertTo-Json -Depth 20 -Compress)) 'Actual projectile wake produced no changed consumed pose.'
+  Require ((PhysicsCounts).bodies-eq 0-and (PhysicsCounts).joints-eq 0) 'Projectile resettlement leaked solver handles.'
+  $result.gates.frozenProjectile.finalPose=$settled[0];$result.gates.frozenProjectile.passed=$true;Capture 'frozen-projectile-resettled' 'ragVictim0';Exec 'deleteVehicle ragCorpseProjectile'
  }
  if($SaveLoad){
   $stream.ReadTimeout=120000;try{Require ((Eval 'triSaveGame "automatic-corpse"')-ceq 'OK') 'Actual mission save failed.'}finally{$stream.ReadTimeout=30000}
