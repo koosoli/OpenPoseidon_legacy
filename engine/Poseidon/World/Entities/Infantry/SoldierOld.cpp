@@ -1737,19 +1737,56 @@ bool Man::BeginAutomaticRagdoll(RString& refusal)
     IsMoved();
     ActionContextDefault context; context.function = MFDead;
     ProcessMoveFunction(&context);
-    LOG_INFO(World,"AUTORAGDOLL: activated owner={} bodies=11 joints=10 hinges=4 family={} inheritedImpulseConsumed=1",
-        static_cast<const void*>(this),_automaticCorpsePose->collisionFamily);
+    LOG_INFO(World,"AUTORAGDOLL: activated owner={} bodies=11 joints=10 hinges=4 family={} inheritedImpulseConsumed=1 speed=({},{},{}) angular=({},{},{})",
+        static_cast<const void*>(this),_automaticCorpsePose->collisionFamily,
+        _automaticCorpsePose->initialSpeed.X(),_automaticCorpsePose->initialSpeed.Y(),_automaticCorpsePose->initialSpeed.Z(),
+        _automaticCorpsePose->initialAngularVelocity.X(),_automaticCorpsePose->initialAngularVelocity.Y(),_automaticCorpsePose->initialAngularVelocity.Z());
     return true;
+}
+
+bool Man::AutomaticRagdollSupported() const
+{
+    if (!_automaticCorpsePose || !_corpseArticulation || !_corpseArticulation->Ready() || !GLandscape) return false;
+    for (auto body : _corpseArticulation->bodies)
+    {
+        Vector3 support;
+        if (!_corpseArticulation->world->GetArticulatedGroundSupport(body,support)) continue;
+        const float nativeY = GLandscape->RoadSurfaceY(support+VUp*.5f);
+        if (std::isfinite(nativeY) && std::abs(nativeY-support.Y()) <= .025f) return true;
+    }
+    return false;
+}
+
+bool Man::FallBackAutomaticRagdoll(const char* reason)
+{
+    const Vector3 speed = _automaticCorpsePose ? _automaticCorpsePose->lastSpeed : VZero;
+    const Vector3 angular = _automaticCorpsePose ? _automaticCorpsePose->lastAngularVelocity : VZero;
+    LOG_WARN(World,"AUTORAGDOLL: authored falling fallback owner={} reason={} noAirborneFreeze=1",static_cast<const void*>(this),reason);
+    ClearCorpsePose();
+    _speed = speed.IsFinite() ? speed : VZero;
+    _angVelocity = angular.IsFinite() ? angular : VZero;
+    _landContact = false; _freeFallUntil = Glob.time+.3f; _lastMovementTime = Glob.time;
+    IsMoved();
+    return false;
 }
 
 bool Man::FreezeAutomaticRagdoll()
 {
     if (!_automaticCorpsePose || !_corpseArticulation || !_automaticCorpsePose->Valid()) return false;
+    if (!_automaticCorpsePose->frozen && !AutomaticRagdollSupported()) return false;
+    if (!_automaticCorpsePose->frozen)
+        for (auto body : _corpseArticulation->bodies)
+        {
+            Physics::BodyMotion motion;
+            if (!_corpseArticulation->world->GetBodyMotion(body,motion) || !motion.linearVelocity.IsFinite() ||
+                !motion.angularVelocity.IsFinite() || motion.linearVelocity.Size() > .3f || motion.angularVelocity.Size() > .6f)
+                return false;
+        }
     _corpseArticulation->ReleaseHandles();
     _corpseArticulation->state = CorpseSolverState::Frozen;
     _automaticCorpsePose->pending = false; _automaticCorpsePose->frozen = true;
     if (GScene) GScene->GetShadowCache().ShadowChanged(this);
-    LOG_INFO(World,"AUTORAGDOLL: frozen owner={} simulatedSeconds={} maximumTravel={} handles=0",
+    LOG_INFO(World,"AUTORAGDOLL: frozen owner={} simulatedSeconds={} maximumTravel={} handles=0 supportedGround=1",
         static_cast<const void*>(this),_automaticCorpsePose->simulatedSeconds,_corpseArticulation->maximumTravel);
     return true;
 }
@@ -1767,14 +1804,15 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
         auto& motion = motions[part];
         if (!state.world->GetBodyMotion(state.bodies[part],motion) || !motion.position.IsFinite() ||
             !motion.axisX.IsFinite() || !motion.axisY.IsFinite() || !motion.axisZ.IsFinite() ||
-            !motion.linearVelocity.IsFinite() || !motion.angularVelocity.IsFinite() ||
-            (motion.position-state.initial[part].Position()).Size() > 12)
-            return FreezeAutomaticRagdoll();
+            !motion.linearVelocity.IsFinite() || !motion.angularVelocity.IsFinite())
+            return FallBackAutomaticRagdoll("invalid-body-readback");
         state.maximumTravel = std::max(state.maximumTravel,(motion.position-state.initial[part].Position()).Size());
         quiet &= !motion.awake || (motion.linearVelocity.Size() < .06f && motion.angularVelocity.Size() < .12f);
         identity &= motion.position == state.initial[part].Position() && motion.axisX == VAside &&
             motion.axisY == VUp && motion.axisZ == VForward;
     }
+    pose.lastSpeed = motions[0].linearVelocity;
+    pose.lastAngularVelocity = motions[0].angularVelocity;
     Matrix4 root = pose.capturedRoot;
     if (!identity) root.SetPosition(root.Position()+(motions[0].position-state.initial[0].Position()));
     std::array<Matrix4,11> parts;
@@ -1791,7 +1829,7 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
     for (int part : state.boneParts) deltas.push_back(parts[part]);
     CorrectedCorpsePose candidate = pose;
     candidate.root = root;
-    if (!candidate.Apply(deltas)) return FreezeAutomaticRagdoll();
+    if (!candidate.Apply(deltas)) return FallBackAutomaticRagdoll("invalid-affine-pose");
     bool first = true; float radius = 0;
     Vector3 lo = VZero, hi = VZero;
     const auto& weights = Type()->GetWeights();
@@ -1804,7 +1842,7 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
         for (int p = 0; p < shape->NPos(); ++p)
         {
             const Vector3 point = AnimationRT::ApplyMatricesPoint(weights[level],_shape,level,palette,p);
-            if (!point.IsFinite() || point.Size() > 8) return FreezeAutomaticRagdoll();
+            if (!point.IsFinite() || point.Size() > 8) return FallBackAutomaticRagdoll("invalid-render-bounds");
             if (first) { lo = hi = point; first = false; }
             for (int axis = 0; axis < 3; ++axis)
             { lo[axis] = std::min(lo[axis],point[axis]); hi[axis] = std::max(hi[axis],point[axis]); }
@@ -1815,7 +1853,7 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
             radius = std::max(radius,cpu.Size());
         }
     }
-    if (first) return FreezeAutomaticRagdoll();
+    if (first) return FallBackAutomaticRagdoll("missing-render-bounds");
     candidate.minimum = lo; candidate.maximum = hi; candidate.radius = radius;
     pose = std::move(candidate); state.minimum = lo; state.maximum = hi; state.radius = radius;
     state.object = root; ++state.updates;
@@ -1829,12 +1867,16 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
     IsMoved();
     const float elapsed = std::isfinite(deltaT) ? std::clamp(deltaT,0.0f,.25f) : 0;
     pose.simulatedSeconds += elapsed;
-    pose.quietSeconds = quiet ? pose.quietSeconds+elapsed : 0;
-    // A bounded, validated retirement retains the latest accepted pose even if
-    // perpetual microcontacts prevent sleep. It never returns to authored death.
-    if (pose.quietSeconds >= .75f || pose.simulatedSeconds >= 12) return FreezeAutomaticRagdoll();
+    const bool supported = AutomaticRagdollSupported();
+    pose.quietSeconds = quiet && supported ? pose.quietSeconds+elapsed : 0;
+    // Distance from the initial corpse is NOT a pose bound: blast translation
+    // can exceed 12 m while the rebased skin/joints remain valid. Neither time,
+    // travel nor a ballistic apex establishes a safe frozen ground pose.
+    const bool pendingImpulse = _impulseForce.SquareSize() > 0 || _impulseTorque.SquareSize() > 0;
+    if (!pendingImpulse && CorpseAutomaticRetirementAdmitted(supported,quiet,pose.quietSeconds,pose.simulatedSeconds))
+        return FreezeAutomaticRagdoll();
     // Existing aggregate impulses arriving after activation are consumed once.
-    if (_impulseForce.SquareSize() > 0 || _impulseTorque.SquareSize() > 0)
+    if (pendingImpulse)
     {
         const Vector3 linear = _impulseForce*(GetInvMass()*Rigid());
         const Vector3 angular = (Orientation()*InvInertia()*GetInvTransform().Orientation())*(_impulseTorque*Rigid());
@@ -1844,6 +1886,7 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
                     angular.CrossProduct(motions[part].position-PositionModelToWorld(_shape->CenterOfMass())),
                     motions[part].angularVelocity+angular);
         _impulseForce = _impulseTorque = VZero;
+        pose.quietSeconds = 0;
     }
     return true;
 }
@@ -2084,6 +2127,19 @@ RString Man::CorpsePoseProbe(const char* command)
         SetAutomaticInfantryDeathsEnabled(std::strcmp(command,"corpse-auto-enable") == 0);
         return "OK corpse-auto-toggle existing-owners-retained";
     }
+    if (std::strcmp(command,"corpse-auto-motion") == 0)
+    {
+        Man* man = g_corpsePoseOwner.GetLink();
+        if (!man || !man->_automaticCorpsePose || !man->UseCorpsePose() || !man->_corpseArticulation)
+            return "REFUSED corpse-auto-motion no-automatic-owner";
+        const auto& pose = *man->_automaticCorpsePose;
+        char status[384];
+        std::snprintf(status,sizeof(status),"OK corpse-auto-motion frozen=%d supported=%d time=%.9g travel=%.9g root=(%.9g,%.9g,%.9g) speed=(%.9g,%.9g,%.9g)",
+            int(pose.frozen),int(!pose.frozen && man->AutomaticRagdollSupported()),pose.simulatedSeconds,
+            man->_corpseArticulation->maximumTravel,pose.root.Position().X(),pose.root.Position().Y(),pose.root.Position().Z(),
+            pose.lastSpeed.X(),pose.lastSpeed.Y(),pose.lastSpeed.Z());
+        return status;
+    }
     if (std::strcmp(command,"corpse-auto-status") == 0)
     {
         int active = 0, frozen = 0, pending = 0;
@@ -2150,8 +2206,15 @@ RString Man::CorpsePoseProbe(const char* command)
         {
             // Retain the last fully validated consumed pose exactly as it is.
             // Do not sample a later physics frame, reblend or reset its deltas.
-            if (!state.Freeze()) return "REFUSED corpse-freeze valid-simulating-pose-required";
-            if (GScene) GScene->GetShadowCache().ShadowChanged(man);
+            if (man->_automaticCorpsePose)
+            {
+                if (!man->FreezeAutomaticRagdoll()) return "REFUSED corpse-freeze automatic-supported-low-motion-required";
+            }
+            else
+            {
+                if (!state.Freeze()) return "REFUSED corpse-freeze valid-simulating-pose-required";
+                if (GScene) GScene->GetShadowCache().ShadowChanged(man);
+            }
         }
         if (state.state != CorpseSolverState::Frozen) return "REFUSED corpse-frozen-status no-frozen-pose";
         char status[512];

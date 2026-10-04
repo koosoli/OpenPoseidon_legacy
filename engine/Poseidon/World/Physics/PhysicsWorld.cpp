@@ -549,6 +549,9 @@ bool PhysicsWorld::GetBodyMotion(BodyId id, BodyMotion& out) const
     return _backend && _backend->GetBodyMotion(id, out);
 }
 
+bool PhysicsWorld::GetArticulatedGroundSupport(BodyId id, Vector3& point) const
+{ return _backend && _backend->GetArticulatedGroundSupport(id,point); }
+
 BodyId PhysicsWorld::SpawnArticulatedPiece(const ConvexPiece& piece, const Matrix4& frame, float mass)
 { return SpawnArticulatedPiece(piece,frame,mass,ArticulatedInitialMotion{}); }
 BodyId PhysicsWorld::SpawnArticulatedPiece(const ConvexPiece& piece, const Matrix4& frame, float mass,

@@ -1115,6 +1115,45 @@ public:
         return true;
     }
 
+    bool GetArticulatedGroundSupport(BodyId id, Vector3& point) const override
+    {
+#if !defined(POSEIDON_BOX3D_PINNED_954CF87)
+        (void)id; (void)point;
+        return false; // No certified contact witness on a different dependency.
+#else
+        const Slot* slot = const_cast<Box3DBackend*>(this)->Find(id);
+        if (!slot || std::find(_articulatedBodies.begin(),_articulatedBodies.end(),id) == _articulatedBodies.end()) return false;
+        constexpr int Capacity = 64;
+        if (b3Body_GetContactCapacity(slot->body) > Capacity) return false;
+        b3ContactData contacts[Capacity];
+        const int count = b3Body_GetContactData(slot->body,contacts,Capacity);
+        for (int i = 0; i < count; ++i)
+        {
+            const auto& contact = contacts[i];
+            const bool first = B3_ID_EQUALS(b3Shape_GetBody(contact.shapeIdA),slot->body);
+            const b3ShapeId other = first ? contact.shapeIdB : contact.shapeIdA;
+            if (!b3Shape_IsValid(other) || b3Body_GetType(b3Shape_GetBody(other)) != b3_staticBody ||
+                !(b3Shape_GetFilter(other).categoryBits & static_cast<std::uint64_t>(ColliderFlags::Solid))) continue;
+            const auto center = b3Body_GetWorldCenter(slot->body);
+            for (int m = 0; m < contact.manifoldCount; ++m)
+            {
+                const auto& manifold = contact.manifolds[m];
+                const float up = first ? -manifold.normal.y : manifold.normal.y;
+                if (!std::isfinite(up) || up <= .5f) continue;
+                for (int p = 0; p < manifold.pointCount; ++p)
+                {
+                    const auto& support = manifold.points[p];
+                    if (!std::isfinite(support.separation) || support.separation > .015f) continue;
+                    const b3Vec3 anchor = first ? support.anchorA : support.anchorB;
+                    point = Vector3(center.x+anchor.x,center.y+anchor.y,center.z+anchor.z);
+                    if (point.IsFinite()) return true;
+                }
+            }
+        }
+        return false;
+#endif
+    }
+
     void SetWind(const WindSettings& wind) override { _wind = wind; }
 
     void SetKinematicProxy(Vector3Par position, float radius, float height) override

@@ -3164,6 +3164,14 @@ LSError Man::Serialize(ParamArchive& ar)
         _combatMoveUntil = 0;
         _combatCoverAims.Clear();
     }
+    if (ar.IsSaving() && _automaticCorpsePose && !_automaticCorpsePose->frozen)
+    {
+        // An unsupported airborne corpse cannot be saved as a frozen pose. The
+        // ordinary entity save must retain real falling motion for its authored
+        // load fallback rather than the active controller's bookkeeping zero.
+        _speed = _automaticCorpsePose->lastSpeed;
+        _angVelocity = _automaticCorpsePose->lastAngularVelocity;
+    }
     PARAM_CHECK(base::Serialize(ar))
 
     PARAM_CHECK(SerializeAutomaticCorpsePose(ar))

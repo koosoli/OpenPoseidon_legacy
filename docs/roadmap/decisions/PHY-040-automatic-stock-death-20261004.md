@@ -170,3 +170,47 @@ The requested MIDDLE campaign is not crouched acceptance: its actual initial CPU
 consumer points match the UP fixture exactly. Requested stance does not prove the
 animation changed. Actual crouch/prone deaths remain unverified; no forced pose or
 additional production change is introduced to close that gap.
+
+### Owner airborne blast correction
+
+The owner reported soldiers flying upward and remaining suspended. Source audit
+found an unconditional freeze whenever any part travelled more than 12 m, plus
+an unconditional 12-second retirement and invalid-readback/bounds retirement.
+Those were prototype safety bounds, not evidence of a supported frozen pose.
+They can stop a perfectly finite ballistic body in the air.
+
+Automatic retirement now requires actual Box3D static-solid contact with an
+upward normal above 0.5, a contact separation at most 15 mm and current native
+road/terrain agreement within 25 mm. Side-wall contact is not ground support.
+Travel from the initial world position no longer retires an otherwise valid
+rebased skin/rig. Both quiet and time retirement require low motion and support;
+queued impulses run before retirement. Explicit automatic freeze and save-freeze
+also refuse unsupported or fast bodies. The manual settled-corpse control stays
+on its existing explicit policy.
+
+An invalid body, affine output or bounds now releases its handles and returns to
+authored falling with the last finite pelvis velocity/angular velocity, current
+validated root and ground-contact reset. Saving an unsupported active corpse
+stores its actual ordinary entity falling motion and omits a frozen snapshot;
+the loaded unsupported case uses authored falling. Frozen supported round trips
+retain the previous format. This is not new active-solver save serialization.
+
+The real Box3D regression crosses the old 12 m cutoff while airborne with an
+8 m/s horizontal and 10 m/s upward inherited velocity. It refuses retirement
+even past the old time limit, then recovers actual floor contact and low motion.
+It separately rejects a side wall and stale handles. Existing contact/hinge/
+affine/native-floor checks remain passing; matching installed trajectory, actual
+grenade death and standing/save/control regression remain required. Initial
+motion above the existing 15 m/s or 20 rad/s admission still uses authored
+fallback, and excess active-owner budget remains authored fallback.
+
+Focused current-source native checks passed 12,173 assertions in 22 cases,
+including the actual airborne floor/wall solver regression; the measured hinge
+subset passed 2,302 assertions in four cases. The four modified production
+translation units pass syntax checks with the ordinary preset's arguments.
+`Test-AutomaticRagdoll.ps1 -InheritedBlastTrajectory` records inherited motion,
+the old travel cutoff, explicit freeze refusal and a save that keeps live
+handles. `-BlastDeath` separately requires a real `GrenadeHand` explosion to
+kill an actual stock soldier and records damage/death and ground recovery.
+Neither arm is installed acceptance yet; unsupported airborne save reload is
+also unexercised by this candidate runner.

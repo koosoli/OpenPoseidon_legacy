@@ -29,6 +29,13 @@ inline bool CorpseInitialContactAdmitted(bool ordinaryStockBoot, float clearance
     return std::isfinite(clearance) && clearance >= (ordinaryStockBoot ? -.025f : .003f);
 }
 
+inline bool CorpseAutomaticRetirementAdmitted(bool supported, bool quiet,
+    float quietSeconds, float simulatedSeconds)
+{
+    return supported && quiet && std::isfinite(quietSeconds) && std::isfinite(simulatedSeconds) &&
+        (quietSeconds >= .75f || simulatedSeconds >= 12);
+}
+
 // Read-only admission measurements, never a solver or a serialized pose.
 struct CorpseLevelDiagnostic
 {

@@ -151,6 +151,9 @@ public:
     /// One body's pose and motion. False when the id is stale or the backend has
     /// no such body. See BodyMotion for why reading back is allowed at all.
     virtual bool GetBodyMotion(BodyId id, BodyMotion& out) const = 0;
+    // Actual upward contact with a static solid; a nearby ray or wall contact
+    // does not establish support. False also covers unavailable/stale bodies.
+    virtual bool GetArticulatedGroundSupport(BodyId, Vector3&) const { return false; }
     /// Applied to every probe shape at the start of each step while enabled.
     virtual void SetWind(const WindSettings& wind) = 0;
 

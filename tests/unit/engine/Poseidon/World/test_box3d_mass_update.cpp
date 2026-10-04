@@ -10,6 +10,60 @@
 using namespace Poseidon::Physics;
 using namespace Poseidon;
 
+TEST_CASE("Automatic blast travel keeps falling past twelve metres and retirement requires actual ground support", "[physics][articulation][corpse-airborne]")
+{
+    CHECK_FALSE(CorpseAutomaticRetirementAdmitted(false,true,5,20));
+    CHECK_FALSE(CorpseAutomaticRetirementAdmitted(true,false,5,20));
+    CHECK_FALSE(CorpseAutomaticRetirementAdmitted(true,true,.2f,4));
+    CHECK(CorpseAutomaticRetirementAdmitted(true,true,.8f,4));
+    CHECK(CorpseAutomaticRetirementAdmitted(true,true,.2f,20));
+    auto backend = CreatePhysicsBackend(); REQUIRE(backend); REQUIRE(backend->Create());
+    constexpr int N = 33; std::vector<float> heights(N*N,0);
+    TerrainField floor; floor.heights = heights.data(); floor.width = floor.height = N;
+    floor.cellSize = 2; floor.originX = floor.originZ = -4;
+    REQUIRE(backend->SetTerrain(floor));
+    const Vector3 vertices[] = {{-.2f,-.2f,-.2f},{.2f,-.2f,-.2f},{-.2f,.2f,-.2f},{.2f,.2f,-.2f},
+        {-.2f,-.2f,.2f},{.2f,-.2f,.2f},{-.2f,.2f,.2f},{.2f,.2f,.2f}};
+    ConvexPiece piece{vertices,8,ColliderFlags::Solid}; Matrix4 initial = MIdentity;
+    initial.SetPosition(Vector3(0,.24f,0));
+    ArticulatedInitialMotion blast; blast.linear = Vector3(8,10,0); blast.collisionFamily = -2;
+    auto body = backend->SpawnArticulatedPiece(piece,initial,4,blast); REQUIRE(body.IsValid());
+    float maximumTravel = 0, quietSeconds = 0; bool passedTwelve = false, recovered = false;
+    for (int step = 0; step < 600; ++step)
+    {
+        backend->Step(1.0f/60); BodyMotion motion;
+        REQUIRE(backend->GetBodyMotion(body,motion)); REQUIRE(motion.position.IsFinite());
+        Vector3 support; const bool supported = backend->GetArticulatedGroundSupport(body,support);
+        const bool quiet = motion.linearVelocity.Size() < .06f && motion.angularVelocity.Size() < .12f;
+        quietSeconds = supported && quiet ? quietSeconds+1.0f/60 : 0;
+        maximumTravel = std::max(maximumTravel,(motion.position-initial.Position()).Size());
+        // The exact old travel cutoff must be crossed while still airborne.
+        if (maximumTravel > 12 && motion.position.Y() > 1)
+        {
+            passedTwelve = true; CHECK_FALSE(supported);
+            CHECK_FALSE(CorpseAutomaticRetirementAdmitted(supported,quiet,quietSeconds,20+step/60.0f));
+        }
+        if (CorpseAutomaticRetirementAdmitted(supported,quiet,quietSeconds,20+step/60.0f))
+        { recovered = true; CHECK(std::abs(support.Y()) < .025f); CHECK(motion.position.Y() < .5f); break; }
+    }
+    INFO("actual blast maximumTravel=" << maximumTravel);
+    CHECK(passedTwelve); CHECK(recovered); CHECK(maximumTravel > 12);
+    backend->RemoveBody(body); Vector3 stale;
+    CHECK_FALSE(backend->GetArticulatedGroundSupport(body,stale));
+    CHECK(backend->GetStats().articulatedBodies == 0);
+
+    // A side-wall contact is not a gravity support, even at the old time cap.
+    Vector3 wallPoints[8]; for (int c = 0; c < 8; ++c)
+        wallPoints[c] = Vector3((c&1)?.2f:-.2f,(c&2)?5.f:-5.f,(c&4)?2.f:-2.f);
+    ConvexPiece wallPiece{wallPoints,8,ColliderFlags::Solid}; Matrix4 wall = MIdentity;
+    wall.SetPosition(Vector3(0,4,0)); auto wallBody = backend->AddStaticBody(&wallPiece,1,wall); REQUIRE(wallBody.IsValid());
+    initial.SetPosition(Vector3(.37f,4,0)); blast.linear = VZero;
+    body = backend->SpawnArticulatedPiece(piece,initial,4,blast); REQUIRE(body.IsValid());
+    for (int step = 0; step < 5; ++step)
+    { backend->Step(1.0f/60); Vector3 support; CHECK_FALSE(backend->GetArticulatedGroundSupport(body,support)); }
+    backend->RemoveBody(body); backend->RemoveBody(wallBody); backend->Destroy();
+}
+
 TEST_CASE("Bounded native boot overlap resolves through real articulated contacts without initial pose displacement", "[physics][articulation][corpse-contact]")
 {
     CHECK(CorpseInitialContactAdmitted(true,-.00852966309f));

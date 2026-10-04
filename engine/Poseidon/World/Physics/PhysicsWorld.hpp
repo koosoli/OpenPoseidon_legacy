@@ -148,6 +148,7 @@ public:
     /// Physics -> gameplay, for a body the caller spawned as dynamic. See
     /// BodyMotion for why this exception to PHY-010's one-way rule exists.
     bool   GetBodyMotion(BodyId id, BodyMotion& out) const;
+    bool GetArticulatedGroundSupport(BodyId, Vector3&) const;
     BodyId SpawnArticulatedPiece(const struct ConvexPiece&, const Matrix4&, float mass);
     BodyId SpawnArticulatedPiece(const struct ConvexPiece&, const Matrix4&, float mass,
         const ArticulatedInitialMotion&);

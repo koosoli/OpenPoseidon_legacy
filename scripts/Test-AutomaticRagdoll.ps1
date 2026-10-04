@@ -6,7 +6,7 @@ param(
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [double]$SiteX=5500,[double]$SiteZ=10000,
  [ValidateSet('UP','MIDDLE','DOWN')][string]$Stance='UP',
- [switch]$RifleDeath,[switch]$SaveLoad,[switch]$RuntimeToggle
+ [switch]$RifleDeath,[switch]$SaveLoad,[switch]$RuntimeToggle,[switch]$InheritedBlastTrajectory,[switch]$BlastDeath
 )
 $ErrorActionPreference='Stop';$taskRoot=Split-Path -Parent $PSScriptRoot
 $culture=[Globalization.CultureInfo]::InvariantCulture
@@ -27,7 +27,7 @@ if($RuntimeToggle){$settings.POSEIDON_AUTOMATIC_RAGDOLL='0'}
 $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE')
 $saved=@{};foreach($key in @($settings.Keys)+$clear){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
 $log=Join-Path $taskOut 'engine.log';$p=$null;$client=$null
-$result=[ordered]@{passed=$false;expectedCommit=$ExpectedCommit;installed=$before;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;scope='Opt-in original Everon ordinary damage deaths, actual consumed poses, four independent active owners/budget, persistent freeze, cleanup; rifle/save-load only when requested. No appearance or broad default promotion without runtime owner review.';arms=@();gates=@{}}
+$result=[ordered]@{passed=$false;expectedCommit=$ExpectedCommit;installed=$before;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;scope='Opt-in original Everon ordinary damage deaths, actual consumed poses, four independent active owners/budget, persistent freeze, cleanup; rifle, save-load, inherited trajectory and actual grenade only when requested. No appearance or broad default promotion without runtime owner review.';arms=@();gates=@{}}
 function Send($command,[bool]$allowError=$false){
  Require (!$p.HasExited) 'Owned game exited unexpectedly.'
  $wire=$command|ConvertTo-Json -Depth 12 -Compress;$wire|Add-Content -LiteralPath (Join-Path $taskOut 'harness.jsonl');$writer.WriteLine($wire)
@@ -77,6 +77,29 @@ function Spawn([string]$name,[double]$offset,[string]$stance){
  Exec 'setAccTime 1';Start-Sleep -Milliseconds 1600;Exec 'setAccTime 0'
  Require ((Eval ('alive '+$name))-eq $true-and (Eval ('typeOf '+$name))-ceq 'SoldierWB') 'Actual stock live fixture failed.'
  return Eval ('getPosASL '+$name)
+}
+function AirborneArm([string]$unit,[string]$label,[bool]$requireTwelve){
+ $samples=@();$pastTwelve=$false;$saveChecked=$false;$until=[DateTime]::UtcNow.AddSeconds(35)
+ Exec 'setAccTime 1'
+ do{
+  $owners=AutoCounts;Require ($owners.active+$owners.pending+$owners.frozen-eq 5) 'Airborne death lost independent ownership.'
+  $raw=Query 'corpse-auto-motion';Require ($raw-match '^OK corpse-auto-motion frozen=(\d) supported=(\d) time=([^ ]+) travel=([^ ]+) root=\(([^,]+),([^,]+),([^\)]+)\) speed=\(([^,]+),([^,]+),([^\)]+)\)$') ('Actual automatic motion witness unavailable: '+$raw)
+  $sample=@{raw=$raw;frozen=([int]$Matches[1]-ne 0);supported=([int]$Matches[2]-ne 0);time=(Num $Matches[3]);travel=(Num $Matches[4]);root=@((Num $Matches[5]),(Num $Matches[6]),(Num $Matches[7]));speed=@((Num $Matches[8]),(Num $Matches[9]),(Num $Matches[10]))}
+  $sample.terrainY=Num (Eval ('triTerrainHeight ['+(Fmt $sample.root[0])+','+(Fmt $sample.root[2])+']'));$samples+=,$sample;$result.gates[$label]=@{samples=$samples;pastTwelve=$pastTwelve;saveChecked=$saveChecked}
+  if($sample.root[1]-gt $sample.terrainY+1){Require (!$sample.frozen) 'Automatic corpse froze above its native floor.'}
+  if($sample.travel-gt 12-and $sample.root[1]-gt $sample.terrainY+1){$pastTwelve=$true}
+  if($requireTwelve-and !$saveChecked-and $sample.root[1]-gt $sample.terrainY+2-and !$sample.frozen){
+   Exec 'setAccTime 0';$held=Pose $false
+   Require ((Query 'corpse-freeze')-ceq 'REFUSED corpse-freeze automatic-supported-low-motion-required') 'Explicit freeze accepted an airborne automatic body.'
+   Require ((Eval 'triSaveGame "airborne-corpse"')-ceq 'OK') 'Actual airborne save failed.'
+   Require ((PhysicsCounts).bodies-eq 11-and (PhysicsCounts).joints-eq 10) 'Airborne save retired moving solver bodies.';ExactPose $held (Pose $false);$saveChecked=$true;Exec 'setAccTime 1'
+  }
+  Require ([DateTime]::UtcNow-lt $until) 'Automatic airborne recovery exceeded35s; inspect actual samples.';if(!$sample.frozen){Start-Sleep -Milliseconds 75}
+ }while(!$sample.frozen)
+ Exec 'setAccTime 0';Require ($sample.root[1]-le $sample.terrainY+1-and $sample.root[1]-ge $sample.terrainY-2) 'Frozen body did not return to native ground.'
+ if($requireTwelve){Require ($pastTwelve-and $saveChecked) 'Actual inherited trajectory did not cross old12m cutoff or exercise airborne save/freeze control.'}
+ $result.gates[$label]=@{passed=$true;samples=$samples;pastTwelve=$pastTwelve;saveChecked=$saveChecked;finalPose=(Pose $true)};Capture $label $unit
+ Exec ('deleteVehicle '+$unit);Require ((AutoCounts).frozen-eq 4-and (PhysicsCounts).bodies-eq 0-and (PhysicsCounts).joints-eq 0) 'Airborne arm cleanup failed.'
 }
 function WaitOwners([int]$active,[int]$frozen,[int]$seconds){
  $until=[DateTime]::UtcNow.AddSeconds($seconds)
@@ -128,6 +151,17 @@ try{
   $loaded=@();for($i=0;$i-lt 4;++$i){$null=Query ('corpse-auto-select:'+$i);$loaded+=,(Pose $true)}
   for($i=0;$i-lt 4;++$i){$nearest=@($loaded|Sort-Object {[Math]::Abs((Num $_.objectTransform[3])-(Num $settled[$i].objectTransform[3]))}|Select-Object -First 1);CompareNumeric (VisiblePose $settled[$i]) (VisiblePose $nearest[0]) .002}
   $result.gates.saveLoad=@{passed=$true;loaded=$loaded};Capture 'loaded-first' 'ragVictim0'
+ }
+ if($InheritedBlastTrajectory){
+  $null=Spawn 'ragTravelVictim' -14 'UP';Exec 'ragTravelVictim setVelocity [8,0,10];ragTravelVictim setDammage 1;setAccTime .05';$null=WaitOwners 1 4 20;Exec 'setAccTime 0';$null=Query 'corpse-auto-select:4';$result.gates.inheritedTrajectoryInitial=Pose $false;AirborneArm 'ragTravelVictim' 'inherited-blast-trajectory' $true
+ }
+ if($BlastDeath){
+  $position=Spawn 'ragBlastVictim' -14 'UP';Exec ('ragLiveGrenade="GrenadeHand" createVehicle ['+(Fmt ($position[0]-3))+','+(Fmt $position[1])+','+(Fmt ($position[2]+.15))+'];ragLiveGrenade setVelocity [0,0,0]')
+  Require ((Eval '!isNull ragLiveGrenade')-eq $true-and (Eval 'typeOf ragLiveGrenade')-ceq 'GrenadeHand') 'Actual GrenadeHand ammo fixture missing.'
+  $result.gates.liveGrenade=@{type=(Eval 'typeOf ragLiveGrenade');position=(Eval 'getPosASL ragLiveGrenade');targetPosition=$position};Exec 'setAccTime 1';$until=[DateTime]::UtcNow.AddSeconds(18);$grenadeSamples=@()
+  while(Eval 'alive ragBlastVictim'){$grenadeSamples+=,(Eval '[time,getDammage ragBlastVictim,getPosASL ragBlastVictim,isNull ragLiveGrenade]');$result.gates.grenadeDamageWitnesses=$grenadeSamples;Require ([DateTime]::UtcNow-lt $until) 'Actual grenade did not kill stock target within18s.';Start-Sleep -Milliseconds 100}
+  Exec 'setAccTime 0';$owners=AutoCounts;Require ($owners.active+$owners.pending+$owners.frozen-eq 5) 'Actual grenade death did not enter admitted automatic ownership; inspect authored-fallback reason.'
+  if($owners.pending){Exec 'setAccTime .05';$null=WaitOwners 1 4 20;Exec 'setAccTime 0'};$null=Query 'corpse-auto-select:4';AirborneArm 'ragBlastVictim' 'actual-grenade-death' $false;Exec 'deleteVehicle ragLiveGrenade'
  }
  if($RifleDeath){
   $live=Spawn 'ragRifleVictim' -14 'UP'

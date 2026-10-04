@@ -668,6 +668,8 @@ class Man: public Person
     bool UpdateAutomaticRagdoll(float deltaT);
     bool CaptureCorrectedCorpsePose(RString& refusal);
     bool FreezeAutomaticRagdoll();
+    bool AutomaticRagdollSupported() const;
+    bool FallBackAutomaticRagdoll(const char* reason);
     LSError SerializeAutomaticCorpsePose(ParamArchive& ar);
     bool StartCorpseArticulation(RString& refusal, bool anatomicalHinges = false);
     bool UpdateCorpseArticulation() const;

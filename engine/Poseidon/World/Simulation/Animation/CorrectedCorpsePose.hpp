@@ -25,6 +25,7 @@ struct CorrectedCorpsePose
     std::vector<CorrectedCorpseLevel> levels;
     Matrix4 capturedRoot = MIdentity, root = MIdentity;
     Vector3 initialSpeed = VZero, initialAngularVelocity = VZero;
+    Vector3 lastSpeed = VZero, lastAngularVelocity = VZero;
     Vector3 minimum = VZero, maximum = VZero;
     float radius = 0, quietSeconds = 0, simulatedSeconds = 0;
     bool pending = true, frozen = false;
