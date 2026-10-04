@@ -55,6 +55,20 @@ else()
     add_compile_options(-ffunction-sections -fdata-sections)
 endif()
 
+if(UNIX AND NOT APPLE)
+    # Upstream 73302d1d / 718ab3c9: Windows already enables /GS.
+    add_compile_options(-fstack-protector-strong)
+    if(NOT "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG}" MATCHES "-fsanitize")
+        set(CWR_FORTIFY_SOURCE "2" CACHE STRING "_FORTIFY_SOURCE level for optimized builds; 0 disables")
+        if(NOT CWR_FORTIFY_SOURCE STREQUAL "0")
+            add_compile_options(
+                $<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>
+                $<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=${CWR_FORTIFY_SOURCE}>
+            )
+        endif()
+    endif()
+endif()
+
 # Make __FILE__ repo-root-relative so log/assert lines (Fail(), DoAssert(), LOG_*)
 # read "engine/Poseidon/...:NN" instead of an absolute build-machine path. Affects only
 # the __FILE__ macro string, not debug info.

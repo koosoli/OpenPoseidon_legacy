@@ -521,7 +521,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download demo game data
         uses: ./.github/actions/download-extract
@@ -544,7 +544,7 @@ jobs:
         run: echo "sha_short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Download Game
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ env.CWR_ARTIFACT_PREFIX }}-Game-${{ steps.build_metadata.outputs.sha_short }}
           path: exe
@@ -564,7 +564,7 @@ jobs:
 
       - name: Upload refusal logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wgpu-refusal-${{ steps.build_metadata.outputs.sha_short }}
           path: wgpu-refusal-output
@@ -597,7 +597,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download demo game data
         uses: ./.github/actions/download-extract
@@ -620,7 +620,7 @@ jobs:
         run: echo "sha_short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Download Game
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ env.CWR_ARTIFACT_PREFIX }}-Game-${{ steps.build_metadata.outputs.sha_short }}
           path: exe
@@ -666,7 +666,7 @@ jobs:
 
       - name: Upload probe output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wgpu-start-probe-${{ steps.build_metadata.outputs.sha_short }}
           path: wgpu-start-probe
