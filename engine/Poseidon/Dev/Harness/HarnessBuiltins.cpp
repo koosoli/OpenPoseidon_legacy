@@ -4082,7 +4082,8 @@ std::string AnswerServiceQuery(const char* what, cJSON* root)
 
 void RegisterKeyInjection(HarnessServer& hs)
 {
-    hs.RegisterCommand({"mouse_motion", "Inject relative SDL mouse movement", {{"dx","int",true},{"dy","int",true}}},
+    hs.RegisterCommand({"mouse_motion", "Inject SDL mouse movement; optional window position for ImGui",
+                        {{"dx","int",true},{"dy","int",true},{"x","int",false},{"y","int",false}}},
         [](const std::string&, cJSON* root) -> std::string {
             const int dx = HarnessProtocol::GetInt(root,"dx");
             const int dy = HarnessProtocol::GetInt(root,"dy");
@@ -4092,6 +4093,18 @@ void RegisterKeyInjection(HarnessServer& hs)
             event.type = SDL_EVENT_MOUSE_MOTION;
             event.motion.xrel = static_cast<float>(dx);
             event.motion.yrel = static_cast<float>(dy);
+            const bool hasX = cJSON_HasObjectItem(root, "x");
+            const bool hasY = cJSON_HasObjectItem(root, "y");
+            if (hasX != hasY) return HarnessProtocol::ErrorResponse("window position requires x and y");
+            if (hasX)
+            {
+                const int x = HarnessProtocol::GetInt(root, "x");
+                const int y = HarnessProtocol::GetInt(root, "y");
+                if (!GEngine || x < 0 || y < 0 || x >= GEngine->Width() || y >= GEngine->Height())
+                    return HarnessProtocol::ErrorResponse("window position out of range");
+                event.motion.x = static_cast<float>(x);
+                event.motion.y = static_cast<float>(y);
+            }
             if (!SDL_PushEvent(&event)) return HarnessProtocol::ErrorResponse("mouse event rejected");
             return HarnessProtocol::OkResponse();
         });
