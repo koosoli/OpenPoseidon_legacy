@@ -1,4 +1,5 @@
 #import layered_fog_optics::{fog_segment_density, fog_segment_participant, fog_height_density, fog_phase_sample, fog_height_primitive, fog_phase, fog_transmittance, fog_ray_direction, fog_patch_density, fog_valley_density, fog_domain_feather, fog_neutral_radiance}
+#import color::srgb_to_linear
 
 struct FogVolume {
     inv_vp: mat4x4<f32>,
@@ -12,7 +13,7 @@ struct FogVolume {
     far_vp: mat4x4<f32>,
     near_ctl: vec4<f32>,
     far_ctl: vec4<f32>,
-    capacity: vec4<u32>, // actual retained argument capacity, near/far
+    capacity: vec4<u32>, // actual retained argument capacity near/far, local light count
     terrain: vec4<f32>, // follow fraction, reference ASL, valley gain, radius metres
     patchiness: vec4<f32>, // strength, horizontal/vertical metres, outer coverage feather metres
     sky_limit: vec4<f32>, // actual cloud enabled/base ASL, cached native max/min
@@ -26,7 +27,9 @@ struct FogShadow { lanes: array<vec4<f32>, 4>, };
 struct FogCsm {
     vp: array<mat4x4<f32>,4>, splits: vec4<f32>, radius: vec4<f32>,
     ctl: vec4<f32>, ctlb: vec4<f32>, forward: vec4<f32>, sun: vec4<f32>,
+    local_vp: array<mat4x4<f32>,24>, local_ctl: vec4<f32>,
 };
+struct FogLocalLight { pos:vec4<f32>, diffuse:vec4<f32>, ambient:vec4<f32>, dir:vec4<f32>, };
 @group(0) @binding(0) var<uniform> params: FogVolume;
 @group(0) @binding(1) var result: texture_storage_3d<rgba16float, write>;
 @group(0) @binding(2) var filter_samp: sampler;
@@ -44,6 +47,7 @@ struct FogCsm {
 @group(0) @binding(14) var<storage, read> near_counts: array<u32>;
 @group(0) @binding(15) var<storage, read> far_counts: array<u32>;
 @group(0) @binding(16) var solar_result: texture_storage_3d<rgba16float, write>;
+@group(0) @binding(17) var<storage, read> local_lights:array<FogLocalLight>;
 
 // Certify coverage separately from depth/shelter: known roofs contain no air
 // medium, while a missing/stale/overflowed source cannot certify sun transport.
@@ -211,6 +215,82 @@ fn fog_solar_transmission(p: vec3<f32>) -> f32 {
     }
     return fog_transmittance(tau);
 }
+// Reuse the REAL local depth atlas and its authored slot encoding. Air has no
+// surface normal to offset. A small perspective depth bias absorbs quantization;
+// no shadow is invented for a light without a valid rendered slot.
+fn fog_local_visibility(rel:vec3<f32>, slot:i32)->f32 {
+    if(slot<0 || slot>=24 || !(csm.local_ctl.x>f32(slot)) || !(csm.local_ctl.z>0.0)) {return 1.0;}
+    let clip=csm.local_vp[slot]*vec4<f32>(rel,1.0);
+    if(!(clip.w>0.0) || !all(abs(clip)<vec4<f32>(1e30))) {return 1.0;}
+    let ndc=clip.xyz/clip.w;
+    if(any(abs(ndc.xy)>vec2<f32>(1.0)) || ndc.z<0.0 || ndc.z>1.0) {return 1.0;}
+    let layer=i32(csm.local_ctl.w);
+    if(layer<0 || layer>=i32(textureNumLayers(cascades))) {return 1.0;}
+    let cell=vec2<f32>(f32(slot%8),f32(slot/8))*0.125;
+    let texel=min(csm.local_ctl.z,0.125);
+    let uv_tile=ndc.xy*vec2<f32>(0.5,-0.5)+0.5;
+    let uv=clamp(cell+uv_tile*0.125,cell+texel*0.5,cell+vec2<f32>(0.125-texel*0.5));
+    let visible=textureSampleCompareLevel(cascades,depth_samp,uv,layer,ndc.z-0.0004);
+    return mix(1.0,visible,clamp(csm.local_ctl.y,0.0,1.0));
+}
+fn fog_local_cube_face(from_light:vec3<f32>)->i32 {
+    let a=abs(from_light);
+    if(a.x>=a.y && a.x>=a.z) {return select(1,0,from_light.x>0.0);}
+    if(a.y>=a.z) {return select(3,2,from_light.y>0.0);}
+    return select(5,4,from_light.z>0.0);
+}
+// Bounded source-to-participant optical depth. Certified clear air contributes
+// no fog; actual native ground on the light path blocks transmission. Local
+// building/foliage occlusion belongs to the atlas above, never the sun's CSM.
+fn fog_local_transmission(p:vec3<f32>, light_pos:vec3<f32>)->f32 {
+    let delta=light_pos-p;var tau=0.0;
+    var before=fog_outdoor_sample(p);
+    for(var j=0u;j<4u;j=j+1u) {
+        let start=p+delta*(f32(j)*0.25);
+        let middle=p+delta*((f32(j)+0.5)*0.25);
+        let end=p+delta*((f32(j)+1.0)*0.25);
+        let centre=fog_outdoor_sample(middle);let after=fog_outdoor_sample(end);
+        let mid_ground=fog_native_ground(middle.xz);let end_ground=fog_native_ground(end.xz);
+        if((mid_ground.y>0.5 && middle.y<=mid_ground.x+0.05) || (end_ground.y>0.5 && end.y<=end_ground.x+0.05)) {return 0.0;}
+        tau+=fog_sun_segment_tau(start,end,before,centre,after);before=after;
+    }
+    return fog_transmittance(tau);
+}
+fn fog_local_incident(p:vec3<f32>, rel:vec3<f32>, ray:vec3<f32>)->vec3<f32> {
+    var source=vec3<f32>(0.0);
+    for(var i=0u;i<min(params.capacity.z,16u);i=i+1u) {
+        let light=local_lights[i];let to_light=light.pos.xyz-p;
+        let distance2=dot(to_light,to_light);let core2=light.pos.w*light.pos.w;
+        let reach_multiplier=select(10.0,light.dir.x,light.dir.w<0.5 && light.dir.x>0.0);
+        let end2=core2*reach_multiplier*reach_multiplier;
+        if(distance2>=end2 || distance2<=1e-8 || core2<=0.0) {continue;}
+        let direction=to_light*inverseSqrt(distance2);
+        var cone=1.0;var slot=-1;
+        if(light.dir.w>0.5) {
+            let inside=-dot(direction,light.dir.xyz);
+            if(inside<=0.0) {continue;}
+            let cosine2=inside*inside;
+            let outer2=select(0.95677279,light.diffuse.w,light.diffuse.w>0.0);
+            if(cosine2<outer2) {continue;}
+            let outer=acos(sqrt(clamp(outer2,0.0,1.0)));
+            let angle=acos(clamp(inside,0.0,1.0));
+            let t=clamp((outer-angle)/max(outer,1e-4),0.0,1.0);
+            // Match the existing surface reflector's hot-centre shape exactly.
+            cone=pow(t*t*(3.0-2.0*t),select(1.0,light.ambient.w,light.ambient.w>0.0));
+            if(light.dir.w>1.5) {slot=i32(light.dir.w)-2;}
+        } else if(light.dir.w< -0.5) {slot=i32(-light.dir.w)-1+fog_local_cube_face(-to_light);}
+        if(cone<=0.0) {continue;}
+        let attenuation=min(1.0,core2/max(distance2,1e-8))*(1.0-smoothstep(0.85,1.0,sqrt(distance2/end2)));
+        let visible=fog_local_visibility(rel,slot);
+        if(visible<=0.0) {continue;}
+        // WgrLight carries the same CPU legacy colour packet used by HDR surface
+        // lighting. Decode once here into scene-linear irradiance; no exposure,
+        // additive screen cone, material ambient or artistic brightness gain.
+        source+=srgb_to_linear(light.diffuse.rgb)*attenuation*cone*visible
+            *fog_phase(dot(ray,direction),params.control.y)*fog_local_transmission(p,light.pos.xyz);
+    }
+    return source;
+}
 @compute @workgroup_size(8,8,1)
 fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
     let dims=textureDimensions(result);
@@ -288,7 +368,7 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
                     let direct=params.radiance.rgb*fog_phase(dot(ray,params.light.xyz),params.control.y)
                         *fog_light_visibility(sample_pos,sample_rel)*fog_solar_transmission(sample_pos);
                     tau+=weight;
-                    source+=weight*(ambient+direct);
+                    source+=weight*(ambient+direct+fog_local_incident(sample_pos,sample_rel,ray));
                 }
             }
             if(tau<=0.0) { continue; }

@@ -1,8 +1,38 @@
 //! Finite ASL fog. The old atmospheric volume and fog closure stay independent.
-use crate::{ffi::{WgrCamera, WgrCameraShadow, WgrLayeredFog}, terrain::{TerrainConformParams, TerrainShadowMap}};
+use crate::{ffi::{WgrCamera, WgrCameraShadow, WgrLayeredFog, WgrLight}, terrain::{TerrainConformParams, TerrainShadowMap}};
 use bytemuck::{Pod, Zeroable};
 
 pub const SIZE: u32 = 32;
+const MAX_LOCAL_LIGHTS: usize = 16;
+
+// Keep actual light metadata (including shadow slots) and reject malformed input
+// before it reaches a compute shader. The cap bounds the cost per fog participant;
+// prioritize incident-energy bounds so the nearby player's torch survives a town.
+fn local_lights(lights: &[WgrLight], camera: [f32;4], far: f32) -> Vec<WgrLight> {
+    if !camera.iter().all(|v|v.is_finite()) || !far.is_finite() || far<=0.0 {return Vec::new();}
+    let eye=glam::Vec3::from_array([camera[0],camera[1],camera[2]]);
+    let mut candidates=Vec::new();
+    for (index,input) in lights.iter().enumerate() {
+        if !input.pos.iter().chain(input.diffuse.iter()).chain(input.ambient.iter()).chain(input.dir.iter()).all(|v|v.is_finite()) {continue;}
+        let energy=input.diffuse[..3].iter().copied().fold(0.0f32,f32::max);
+        if input.pos[3]<=0.0 || input.pos[3]>10000.0 || energy<=0.0 || energy>1e6 || input.dir[3].abs()>26.0 || input.diffuse[..3].iter().any(|v|*v<0.0) {continue;}
+        let mut light=*input;
+        let multiplier=if light.dir[3]<0.5 && light.dir[0]>0.0 {light.dir[0]}else{10.0};
+        let reach=light.pos[3]*multiplier;
+        let position=glam::Vec3::from_array([light.pos[0],light.pos[1],light.pos[2]]);
+        let distance=position.distance(eye);
+        if !reach.is_finite() || reach<=0.0 || reach>100000.0 || !distance.is_finite() || distance>far+reach {continue;}
+        if light.dir[3]>0.5 {
+            let direction=glam::Vec3::from_array([light.dir[0],light.dir[1],light.dir[2]]).normalize_or_zero();
+            if direction.length_squared()<0.5 || light.diffuse[3]<0.0 || light.diffuse[3]>1.0 || light.ambient[3]<0.0 {continue;}
+            light.dir[..3].copy_from_slice(&direction.to_array());
+        }
+        let score=energy*(light.pos[3]/distance.max(light.pos[3])).powi(2);
+        candidates.push((index,score,light));
+    }
+    candidates.sort_by(|a,b|b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    candidates.into_iter().take(MAX_LOCAL_LIGHTS).map(|v|v.2).collect()
+}
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct Consumer {
@@ -54,6 +84,7 @@ pub struct LayeredFog {
     pub view: wgpu::TextureView, pub solar_view: wgpu::TextureView, pub consumer: wgpu::Buffer,
     _texture: wgpu::Texture, _solar_texture: wgpu::Texture, params: wgpu::Buffer, height: wgpu::Buffer,
     shadow: wgpu::Buffer, csm: wgpu::Buffer, zero_counts: wgpu::Buffer,
+    local_lights: wgpu::Buffer, local_count: u32,
     sampler: wgpu::Sampler, comparison: wgpu::Sampler,
     layout: wgpu::BindGroupLayout, compute: wgpu::ComputePipeline, solar_compute: wgpu::ComputePipeline,
     background: wgpu::RenderPipeline, background_bind: wgpu::BindGroup,
@@ -73,6 +104,9 @@ impl LayeredFog {
         let csm=buffer("wgr_layer_fog_csm",std::mem::size_of::<WgrCameraShadow>() as u64);
         let zero_counts=device.create_buffer(&wgpu::BufferDescriptor {label:Some("wgr_layer_fog_no_retained_counts"),size:16,
             usage:wgpu::BufferUsages::STORAGE,mapped_at_creation:false});
+        let local_lights=device.create_buffer(&wgpu::BufferDescriptor {label:Some("wgr_layer_fog_local_lights"),
+            size:(MAX_LOCAL_LIGHTS*std::mem::size_of::<WgrLight>()) as u64,
+            usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false});
         let texture=device.create_texture(&wgpu::TextureDescriptor {label:Some("wgr_layer_fog_transport"),
             size:wgpu::Extent3d {width:SIZE,height:SIZE,depth_or_array_layers:SIZE},mip_level_count:1,sample_count:1,
             dimension:wgpu::TextureDimension::D3,format:wgpu::TextureFormat::Rgba16Float,
@@ -104,7 +138,7 @@ impl LayeredFog {
             wgpu::BindGroupLayoutEntry {binding:8,visibility:wgpu::ShaderStages::COMPUTE,ty:wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),count:None},
             uniform(9),image(10,d2,wgpu::TextureSampleType::Float {filterable:false}),uniform(11),
             image(12,d2,depth),image(13,d2,depth),storage(14),storage(15),
-            wgpu::BindGroupLayoutEntry {binding:16,visibility:wgpu::ShaderStages::COMPUTE,
+            storage(17),wgpu::BindGroupLayoutEntry {binding:16,visibility:wgpu::ShaderStages::COMPUTE,
                 ty:wgpu::BindingType::StorageTexture {access:wgpu::StorageTextureAccess::WriteOnly,format:wgpu::TextureFormat::Rgba16Float,view_dimension:wgpu::TextureViewDimension::D3},count:None}]});
         let module=crate::shaders::make_module(device,composer,"wgr_layer_fog",include_str!("layered_fog.wgsl"),"layered_fog.wgsl");
         let pipeline_layout=device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {label:Some("wgr_layer_fog_compute"),bind_group_layouts:&[Some(&layout)],immediate_size:0});
@@ -122,12 +156,22 @@ impl LayeredFog {
             wgpu::BindGroupEntry {binding:0,resource:wgpu::BindingResource::TextureView(&view)},
             wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::Sampler(&sampler)},
             wgpu::BindGroupEntry {binding:2,resource:consumer.as_entire_binding()}]});
-        Self {view,solar_view,consumer,_texture:texture,_solar_texture:solar_texture,params,height,shadow,csm,zero_counts,sampler,comparison,layout,compute,solar_compute,background,background_bind,
+        Self {view,solar_view,consumer,_texture:texture,_solar_texture:solar_texture,params,height,shadow,csm,zero_counts,local_lights,local_count:0,sampler,comparison,layout,compute,solar_compute,background,background_bind,
             ready:false,trace:std::env::var("WGR_LAYERED_FOG_TRACE").as_deref()==Ok("1"),frames:0}
     }
     pub fn invalidate(&mut self,queue:&wgpu::Queue) {
         if self.ready {queue.write_buffer(&self.consumer,0,bytemuck::bytes_of(&Consumer::zeroed()));}
         self.ready=false;
+    }
+    // Call once per frame with the SAME real lighting packet as surface rendering.
+    // An empty packet clears the count; stale lamps cannot survive a scene change.
+    pub fn upload_local_lights(&mut self,queue:&wgpu::Queue,lights:&[WgrLight],cam:&WgrCamera) {
+        let far=cam.params.fog_start+if cam.params.fog_inv_range>0.0 {1.0/cam.params.fog_inv_range}else{0.0};
+        // Surface rendering sees the per-camera count, capped by its 256 slots.
+        let count=if cam.cam_pos[3].is_finite() {cam.cam_pos[3].clamp(0.0,256.0) as usize}else{0};
+        let selected=local_lights(&lights[..lights.len().min(count)],cam.cam_pos,far);
+        self.local_count=selected.len() as u32;
+        if !selected.is_empty() {queue.write_buffer(&self.local_lights,0,bytemuck::cast_slice(&selected));}
     }
     #[allow(clippy::too_many_arguments)]
     pub fn render(&mut self,device:&wgpu::Device,queue:&wgpu::Queue,encoder:&mut wgpu::CommandEncoder,
@@ -140,7 +184,7 @@ impl LayeredFog {
         let finite=cam.view.iter().chain(cam.proj.iter()).chain(cam.cam_pos.iter())
             .chain(inv_vp.iter().flatten()).chain(cam.sun_diffuse.iter()).chain(cam.sun_dir_world.iter()).all(|v|v.is_finite());
         let eligible=requested(settings,weather,hdr,underground) && finite && far.is_finite() && far>0.0
-            && cam.sun_diffuse[3]>=0.5 && height.enabled>0.5 && height_generation>0
+            && height.enabled>0.5 && height_generation>0
             && cloud_limit.iter().all(|v|v.is_finite()) && native_bounds.iter().all(|h|h.is_finite()) && native_bounds[0]<=native_bounds[1]
             && (below_clouds || settings.terrain[0]>0.0)
             && cover.controls[0][0]>=0.5;
@@ -151,11 +195,14 @@ impl LayeredFog {
         }
         if !eligible {return;}
         let direction=glam::Vec3::new(-cam.sun_dir_world[0],-cam.sun_dir_world[1],-cam.sun_dir_world[2]).normalize_or_zero();
+        // A dark/absent directional light does not remove the night air medium.
+        // The incoming solar field alone becomes zero; local lamps remain active.
+        let radiance=if direction.y>0.001 && cam.sun_diffuse[3]>=0.5 {cam.sun_diffuse}else{[0.0;4]};
         let data=Volume {inv_vp,camera:[cam.cam_pos[0],cam.cam_pos[1],cam.cam_pos[2],far],
             control:[settings.control[1],settings.control[2],weather,1.0],layers:settings.layers,
-            light:[direction.x,direction.y,direction.z,0.0],radiance:cam.sun_diffuse,cloud_map:mapping.cloud_shadow.to_array(),
+            light:[direction.x,direction.y,direction.z,0.0],radiance,cloud_map:mapping.cloud_shadow.to_array(),
             near_vp:cover.matrices[0],far_vp:cover.matrices[1],near_ctl:cover.controls[0],far_ctl:cover.controls[1],
-            capacity:[cover.capacities[0],cover.capacities[1],0,0],terrain:settings.terrain,patch:settings.patch,
+            capacity:[cover.capacities[0],cover.capacities[1],self.local_count,0],terrain:settings.terrain,patch:settings.patch,
             sky_limit:[cloud_limit[0],cloud_limit[1],native_bounds[1],native_bounds[0]]};
         queue.write_buffer(&self.params,0,bytemuck::bytes_of(&data));
         queue.write_buffer(&self.height,0,bytemuck::bytes_of(height));
@@ -172,7 +219,7 @@ impl LayeredFog {
             image(3,environment),image(4,clouds),image(5,shadow_view),buffer(6,&self.shadow),image(7,csm_view),
             wgpu::BindGroupEntry {binding:8,resource:wgpu::BindingResource::Sampler(&self.comparison)},buffer(9,&self.csm),
             image(10,height_view),buffer(11,&self.height),image(12,&cover.views[0]),image(13,&cover.views[1]),
-            buffer(14,cover.counts[0].as_ref().unwrap_or(&self.zero_counts)),buffer(15,cover.counts[1].as_ref().unwrap_or(&self.zero_counts)),image(16,&self.solar_view)]});
+            buffer(14,cover.counts[0].as_ref().unwrap_or(&self.zero_counts)),buffer(15,cover.counts[1].as_ref().unwrap_or(&self.zero_counts)),image(16,&self.solar_view),buffer(17,&self.local_lights)]});
         encoder.push_debug_group("wgr_layered_fog_transport");
         {let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {label:Some("wgr_layered_fog_transport"),timestamp_writes:None});
             pass.set_pipeline(&self.solar_compute);pass.set_bind_group(0,&bind,&[]);pass.dispatch_workgroups(SIZE.div_ceil(8),SIZE.div_ceil(8),SIZE);
@@ -192,3 +239,33 @@ impl LayeredFog {
 #[cfg(test)]
 #[path="layered_fog_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod local_light_tests {
+    use super::*;
+    fn point(x:f32)->WgrLight {WgrLight {pos:[x,2.,0.,1.],diffuse:[1.,1.,1.,0.],ambient:[0.;4],dir:[10.,0.,0.,0.]}}
+    #[test]
+    fn actual_light_packet_keeps_shadow_slots_and_rejects_invalid_emitters() {
+        let mut spot=point(2.);spot.dir=[0.,0.,2.,7.];spot.diffuse[3]=0.98;spot.ambient[3]=0.8;
+        let mut cube=point(3.);cube.dir[3]=-7.;
+        let mut invalid=point(1.);invalid.pos[0]=f32::NAN;
+        let mut zero=point(1.);zero.pos[3]=0.;
+        let mut bad_axis=spot;bad_axis.dir[..3].copy_from_slice(&[0.;3]);
+        let lights=local_lights(&[spot,cube,invalid,zero,bad_axis,point(10000.)],[0.;4],100.);
+        assert_eq!(lights.len(),2);assert_eq!(lights[0].dir,[0.,0.,1.,7.]);
+        assert_eq!(lights[0].diffuse,spot.diffuse);assert_eq!(lights[0].ambient,spot.ambient);
+        assert_eq!(lights[1].dir,cube.dir);
+        assert!(local_lights(&[spot],[0.;4],f32::NAN).is_empty());
+        assert!(local_lights(&[],[0.;4],100.).is_empty());
+    }
+    #[test]
+    fn bounded_energy_selection_retains_near_torch_and_native_point_range() {
+        let mut lights:Vec<_>=(0..32).map(|n|point(20.+n as f32)).collect();
+        let mut torch=point(0.);torch.dir=[0.,0.,1.,1.];torch.diffuse[3]=0.98;lights.push(torch);
+        let chosen=local_lights(&lights,[0.;4],100.);assert_eq!(chosen.len(),MAX_LOCAL_LIGHTS);
+        assert_eq!(chosen[0].dir,torch.dir);
+        let mut long_range=point(150.);long_range.dir[0]=100.;
+        assert_eq!(local_lights(&[long_range],[0.;4],100.).len(),1);
+        assert!(local_lights(&[point(150.)],[0.;4],100.).is_empty());
+    }
+}
