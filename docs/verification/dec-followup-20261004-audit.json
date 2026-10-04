@@ -1,0 +1,1436 @@
+{
+  "date": "2026-10-04",
+  "base": "8479c6f3",
+  "branch": "codex/dec-followup-20261004",
+  "sourceHead": "9aabfc2f2989a9e6f1c272c7c9cfcbb1e209fcd8",
+  "remote": "safety",
+  "refCount": 100,
+  "alreadyIntegratedTips": 98,
+  "newTips": [
+    {
+      "ref": "safety/dec/sinkhole-w5-forest-island",
+      "tip": "40e20160ff2ca19fe27d72efb07c093dcabd496e",
+      "presentInPriorInventory": false,
+      "priorTip": null,
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": false
+    },
+    {
+      "ref": "safety/dec/swim-cave-content-20261004",
+      "tip": "f758e9f3b1008b3bfd1052a0fccaf24a6965e3e1",
+      "presentInPriorInventory": false,
+      "priorTip": null,
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": false
+    }
+  ],
+  "refs": [
+    {
+      "ref": "safety/dec/ai-malprave-a",
+      "tip": "8ae908bb4e2cd3b110fff4665091d34dd7d5f304",
+      "presentInPriorInventory": true,
+      "priorTip": "8ae908bb4e2cd3b110fff4665091d34dd7d5f304",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/diag-w1-malprave-diagnostics",
+      "tip": "47ec01efa0032aaf462d8b6a29547b2939dfcf6e",
+      "presentInPriorInventory": true,
+      "priorTip": "47ec01efa0032aaf462d8b6a29547b2939dfcf6e",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/fix-blend-solid-depth",
+      "tip": "c76612d4d85a955e305bc65670431a113768ac0f",
+      "presentInPriorInventory": true,
+      "priorTip": "c76612d4d85a955e305bc65670431a113768ac0f",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/fix-building-cockpit-route",
+      "tip": "2c33e286bd701ea8a6e850dbd4ac8e6e2324b28f",
+      "presentInPriorInventory": true,
+      "priorTip": "2c33e286bd701ea8a6e850dbd4ac8e6e2324b28f",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/fix-empty-memory-selection",
+      "tip": "5811b896e146863a70a813f5c9be26ae43c79643",
+      "presentInPriorInventory": true,
+      "priorTip": "5811b896e146863a70a813f5c9be26ae43c79643",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/fix-retained-world-flash",
+      "tip": "5d390885ae73b5e1fe1597fa64f156b975881332",
+      "presentInPriorInventory": true,
+      "priorTip": "5d390885ae73b5e1fe1597fa64f156b975881332",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/fix-sp3x-soft-weights",
+      "tip": "637f9eddcdc813bd4a644f20da834262d347bfce",
+      "presentInPriorInventory": true,
+      "priorTip": "637f9eddcdc813bd4a644f20da834262d347bfce",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/fix-terrain-change-object-caches",
+      "tip": "d9a2c402b27bc77a950282c9202f04554c034999",
+      "presentInPriorInventory": true,
+      "priorTip": "d9a2c402b27bc77a950282c9202f04554c034999",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/sinkhole-w0-texture-formats",
+      "tip": "da2bfbda2a5e02938832df3f69a36e6e018da588",
+      "presentInPriorInventory": true,
+      "priorTip": "da2bfbda2a5e02938832df3f69a36e6e018da588",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/sinkhole-w1-terrain-holes",
+      "tip": "eadd26d6efaba75c8b767c3fda0fc36206b1442c",
+      "presentInPriorInventory": true,
+      "priorTip": "eadd26d6efaba75c8b767c3fda0fc36206b1442c",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/sinkhole-w1b-cave-lighting",
+      "tip": "25c2035e544d669167d6b6c424999554a95ada1c",
+      "presentInPriorInventory": true,
+      "priorTip": "25c2035e544d669167d6b6c424999554a95ada1c",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/sinkhole-w3-swimming",
+      "tip": "145eeeca53492c82f91091d61cc26cda9ab46350",
+      "presentInPriorInventory": true,
+      "priorTip": "145eeeca53492c82f91091d61cc26cda9ab46350",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/sinkhole-w5-forest-island",
+      "tip": "40e20160ff2ca19fe27d72efb07c093dcabd496e",
+      "presentInPriorInventory": false,
+      "priorTip": null,
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": false
+    },
+    {
+      "ref": "safety/dec/swim-cave-content-20261004",
+      "tip": "f758e9f3b1008b3bfd1052a0fccaf24a6965e3e1",
+      "presentInPriorInventory": false,
+      "priorTip": null,
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": false
+    },
+    {
+      "ref": "safety/dec/tidewater-showcase",
+      "tip": "368bd9783212aa7c7006ac4f7eb36e710f476ec4",
+      "presentInPriorInventory": true,
+      "priorTip": "368bd9783212aa7c7006ac4f7eb36e710f476ec4",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w1-backend",
+      "tip": "9b49f270b3e0aaf01a72d4b8ce360a359d849574",
+      "presentInPriorInventory": true,
+      "priorTip": "9b49f270b3e0aaf01a72d4b8ce360a359d849574",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w10a-lip-facing",
+      "tip": "5e4a9eeacce7b1e2ad93dc6cc3b56c54707ffac4",
+      "presentInPriorInventory": true,
+      "priorTip": "5e4a9eeacce7b1e2ad93dc6cc3b56c54707ffac4",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w10b-surf-glare",
+      "tip": "82b06f45f37a2465945907b727311e136ddb6774",
+      "presentInPriorInventory": true,
+      "priorTip": "82b06f45f37a2465945907b727311e136ddb6774",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w10c-lip-switch",
+      "tip": "936e199b2f734fdb064e262897a36d5191c0f8c0",
+      "presentInPriorInventory": true,
+      "priorTip": "936e199b2f734fdb064e262897a36d5191c0f8c0",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w10d-backlit-surf",
+      "tip": "a56a59a3429cb14f06d48cb95320047974719950",
+      "presentInPriorInventory": true,
+      "priorTip": "a56a59a3429cb14f06d48cb95320047974719950",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w10e-spray-veil",
+      "tip": "7751729be7ca6accdd816ebd74a460defaae64fd",
+      "presentInPriorInventory": true,
+      "priorTip": "7751729be7ca6accdd816ebd74a460defaae64fd",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w10f-surf-texture",
+      "tip": "ce00dd24982f91c87400a99416a54d988dc2fd61",
+      "presentInPriorInventory": true,
+      "priorTip": "ce00dd24982f91c87400a99416a54d988dc2fd61",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w10g-far-triangles",
+      "tip": "178e7e6102c61a0a1644a03b553d33e388c22bf6",
+      "presentInPriorInventory": true,
+      "priorTip": "178e7e6102c61a0a1644a03b553d33e388c22bf6",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w11a-wake-render-pose",
+      "tip": "fd090c8fd2c1b371d5670ad84edd58bb7201ace9",
+      "presentInPriorInventory": true,
+      "priorTip": "fd090c8fd2c1b371d5670ad84edd58bb7201ace9",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w11b-boat-planing",
+      "tip": "8fc4a4ddb962bd32566088a0e279976428acbc69",
+      "presentInPriorInventory": true,
+      "priorTip": "8fc4a4ddb962bd32566088a0e279976428acbc69",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w11c-boat-draft",
+      "tip": "01a0bd928e7fbc89ed236614e221d596571677c5",
+      "presentInPriorInventory": true,
+      "priorTip": "01a0bd928e7fbc89ed236614e221d596571677c5",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w11d-buoyancy-diag",
+      "tip": "0ec4f70c27af327ae792336ea33058d794414636",
+      "presentInPriorInventory": true,
+      "priorTip": "0ec4f70c27af327ae792336ea33058d794414636",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w11e-boat-drag",
+      "tip": "bccf4b40e2ab079001f8ad3eb77bf52aa653963b",
+      "presentInPriorInventory": true,
+      "priorTip": "bccf4b40e2ab079001f8ad3eb77bf52aa653963b",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w12a-spray-after-clouds",
+      "tip": "ad347ecd51b81d7be80ca931c503209ef861984d",
+      "presentInPriorInventory": true,
+      "priorTip": "ad347ecd51b81d7be80ca931c503209ef861984d",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w12b-spray-ab",
+      "tip": "d56f91b355f73f85bf08800252da669590a21d20",
+      "presentInPriorInventory": true,
+      "priorTip": "d56f91b355f73f85bf08800252da669590a21d20",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w12c-no-drowning",
+      "tip": "28a74e9610ec690b683eb71f3a6f65fac10a53bd",
+      "presentInPriorInventory": true,
+      "priorTip": "28a74e9610ec690b683eb71f3a6f65fac10a53bd",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w12d-mesh-waterline",
+      "tip": "3cbe1b52d27ceeaf8e194740704515a87ef78ccd",
+      "presentInPriorInventory": true,
+      "priorTip": "3cbe1b52d27ceeaf8e194740704515a87ef78ccd",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w12e-docs-showcase",
+      "tip": "95a9eb1d6feb566845b2bed12e503e22410fbc68",
+      "presentInPriorInventory": true,
+      "priorTip": "95a9eb1d6feb566845b2bed12e503e22410fbc68",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w2-open-sea",
+      "tip": "a47e58a92e88e9792aa0c9da380ca0503b164275",
+      "presentInPriorInventory": true,
+      "priorTip": "a47e58a92e88e9792aa0c9da380ca0503b164275",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w3-shore",
+      "tip": "a2b9c13539301ddc2bdb7127628c098ff00595a5",
+      "presentInPriorInventory": true,
+      "priorTip": "a2b9c13539301ddc2bdb7127628c098ff00595a5",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w3e-boat-sea",
+      "tip": "9a21b21665b14aca9d9df301d6f2f5498ab0192c",
+      "presentInPriorInventory": true,
+      "priorTip": "9a21b21665b14aca9d9df301d6f2f5498ab0192c",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w3f-colour",
+      "tip": "a017b9525eb986519176a70bf49c5cd6fa922966",
+      "presentInPriorInventory": true,
+      "priorTip": "a017b9525eb986519176a70bf49c5cd6fa922966",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w3g-sea",
+      "tip": "01134959d97259182de388c58bd0fa89c61b6aca",
+      "presentInPriorInventory": true,
+      "priorTip": "01134959d97259182de388c58bd0fa89c61b6aca",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w3h-colour-diag",
+      "tip": "5e25b9a0234b185fce187ae5825a1f358b0b66d9",
+      "presentInPriorInventory": true,
+      "priorTip": "5e25b9a0234b185fce187ae5825a1f358b0b66d9",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w3i-light-log",
+      "tip": "dee7bd9e034104c3c5dee199c70f40ef849296b1",
+      "presentInPriorInventory": true,
+      "priorTip": "dee7bd9e034104c3c5dee199c70f40ef849296b1",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w3j-glow",
+      "tip": "b9b008df87d6a85b74c4a89db27f3d2fa0aee999",
+      "presentInPriorInventory": true,
+      "priorTip": "b9b008df87d6a85b74c4a89db27f3d2fa0aee999",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w3j1-glow-default",
+      "tip": "150499917c94c1253f1933f7d67cb2bf19681cbf",
+      "presentInPriorInventory": true,
+      "priorTip": "150499917c94c1253f1933f7d67cb2bf19681cbf",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w3k-sim-fade",
+      "tip": "e85b4e2a31439cc4cfdbeb0dbe78a175b9b1fa3a",
+      "presentInPriorInventory": true,
+      "priorTip": "e85b4e2a31439cc4cfdbeb0dbe78a175b9b1fa3a",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w3l-smooth-surf",
+      "tip": "d01443494b89a3ca2137cd90a474c62cb2dfeffb",
+      "presentInPriorInventory": true,
+      "priorTip": "d01443494b89a3ca2137cd90a474c62cb2dfeffb",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w3m-foam-debug",
+      "tip": "b9fa6e45f1e19bb54c8b30b2ff87399a5c09c9ff",
+      "presentInPriorInventory": true,
+      "priorTip": "b9fa6e45f1e19bb54c8b30b2ff87399a5c09c9ff",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w3n-sim-foam-fade",
+      "tip": "68f3adffcecf0127b4bcd322d6891a337646307c",
+      "presentInPriorInventory": true,
+      "priorTip": "68f3adffcecf0127b4bcd322d6891a337646307c",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w4a-spray",
+      "tip": "1679202801162587599b455803914b6adc1ecb01",
+      "presentInPriorInventory": true,
+      "priorTip": "1679202801162587599b455803914b6adc1ecb01",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w4a1-spray-fix",
+      "tip": "a1f21d4c1f6b522422fbe331744811664ad41079",
+      "presentInPriorInventory": true,
+      "priorTip": "a1f21d4c1f6b522422fbe331744811664ad41079",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w4a2-spray-diag",
+      "tip": "d90db853b4f969b56172cbf20cc4db3dffa3984a",
+      "presentInPriorInventory": true,
+      "priorTip": "d90db853b4f969b56172cbf20cc4db3dffa3984a",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w4a3-spray-dots",
+      "tip": "8fd27504c8c8753473995e39f102403173da72ac",
+      "presentInPriorInventory": true,
+      "priorTip": "8fd27504c8c8753473995e39f102403173da72ac",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w4b-reactive",
+      "tip": "fe0609395fc9d83a8b040763796a82a072ea3bf8",
+      "presentInPriorInventory": true,
+      "priorTip": "fe0609395fc9d83a8b040763796a82a072ea3bf8",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w5a-underwater",
+      "tip": "2e136095d77c124efd59da0c5f4085cacfb1281f",
+      "presentInPriorInventory": true,
+      "priorTip": "2e136095d77c124efd59da0c5f4085cacfb1281f",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w5a1-underwater-medium",
+      "tip": "a08822eb5001dbb3a9692079c1701be442282357",
+      "presentInPriorInventory": true,
+      "priorTip": "a08822eb5001dbb3a9692079c1701be442282357",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w5b-caustics",
+      "tip": "602463e9229819bf75e9e3550127ac1c1bde3c75",
+      "presentInPriorInventory": true,
+      "priorTip": "602463e9229819bf75e9e3550127ac1c1bde3c75",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w5c-underwater-cameras",
+      "tip": "16447853a736b7b4c621444efb82ca113a97cba6",
+      "presentInPriorInventory": true,
+      "priorTip": "16447853a736b7b4c621444efb82ca113a97cba6",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w5d-no-clouds-underwater",
+      "tip": "50c75b502bdefa2550b9b4733993ce3acb972930",
+      "presentInPriorInventory": true,
+      "priorTip": "50c75b502bdefa2550b9b4733993ce3acb972930",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w5e-diver-torch",
+      "tip": "da90168007e476e938fdb2eb9d7a28b4bc8758bd",
+      "presentInPriorInventory": true,
+      "priorTip": "da90168007e476e938fdb2eb9d7a28b4bc8758bd",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6a-wrecks-sink",
+      "tip": "98aee494861960842b32bf97018f78c427a13a9a",
+      "presentInPriorInventory": true,
+      "priorTip": "98aee494861960842b32bf97018f78c427a13a9a",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6a1-wreck-cars",
+      "tip": "47a19db57c54842d745dcf0e5a2d66ff3c139bfc",
+      "presentInPriorInventory": true,
+      "priorTip": "47a19db57c54842d745dcf0e5a2d66ff3c139bfc",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6a2-wreck-boats",
+      "tip": "8045c4f9881bfabfc9686d3b7baa4cded626c249",
+      "presentInPriorInventory": true,
+      "priorTip": "8045c4f9881bfabfc9686d3b7baa4cded626c249",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6b-weather-sea",
+      "tip": "6d46cd52a59c57289355b8896bace963e12a2638",
+      "presentInPriorInventory": true,
+      "priorTip": "6d46cd52a59c57289355b8896bace963e12a2638",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6c-wreck-fire-craters",
+      "tip": "7be862a6f44b31ed12e1f07da573cea9dc3bad72",
+      "presentInPriorInventory": true,
+      "priorTip": "7be862a6f44b31ed12e1f07da573cea9dc3bad72",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6d-amphib-dev",
+      "tip": "3e99fee6f120dc0be9ba943d5f51356dc889524f",
+      "presentInPriorInventory": true,
+      "priorTip": "3e99fee6f120dc0be9ba943d5f51356dc889524f",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6e-cars-on-water",
+      "tip": "a28b3f03292f6bc6175073cf542917ab3f62cea3",
+      "presentInPriorInventory": true,
+      "priorTip": "a28b3f03292f6bc6175073cf542917ab3f62cea3",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6f-plane-waves",
+      "tip": "09adb3ef1bc899457aed384ed3a23ecb5e11b1a8",
+      "presentInPriorInventory": true,
+      "priorTip": "09adb3ef1bc899457aed384ed3a23ecb5e11b1a8",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6g-car-water-path",
+      "tip": "e10f5e746a565b88c74a3c65a38c1f0c5ab9730e",
+      "presentInPriorInventory": true,
+      "priorTip": "e10f5e746a565b88c74a3c65a38c1f0c5ab9730e",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6h-boat-wakes",
+      "tip": "6807a089de5d15979dd52ee1e50184ea1f62bae8",
+      "presentInPriorInventory": true,
+      "priorTip": "6807a089de5d15979dd52ee1e50184ea1f62bae8",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6h1-wake-tune",
+      "tip": "519d370a1703ae35d45818883191e1e7bbc0c7ca",
+      "presentInPriorInventory": true,
+      "priorTip": "519d370a1703ae35d45818883191e1e7bbc0c7ca",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6h2-wake-defaults",
+      "tip": "2a373d8fc7da77c90dacd350a8b2981b06876199",
+      "presentInPriorInventory": true,
+      "priorTip": "2a373d8fc7da77c90dacd350a8b2981b06876199",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6i-bow-spray",
+      "tip": "421c908da5c35bf57871017c6cff500cdf272a12",
+      "presentInPriorInventory": true,
+      "priorTip": "421c908da5c35bf57871017c6cff500cdf272a12",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6i1-bow-white",
+      "tip": "f2a3dedd5a0e203f56d6721300671e153ede417f",
+      "presentInPriorInventory": true,
+      "priorTip": "f2a3dedd5a0e203f56d6721300671e153ede417f",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6i2-fine-bow",
+      "tip": "53c5e97cc387f8b5a2451bcf159224fb4d2e6bf4",
+      "presentInPriorInventory": true,
+      "priorTip": "53c5e97cc387f8b5a2451bcf159224fb4d2e6bf4",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6i3-spray-diag",
+      "tip": "92e3457db3cc0346d2efe357299efcdd6904052e",
+      "presentInPriorInventory": true,
+      "priorTip": "92e3457db3cc0346d2efe357299efcdd6904052e",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6i4-spray-diag",
+      "tip": "c0989c8cba4162f2313c29fe84a48d128b4621b1",
+      "presentInPriorInventory": true,
+      "priorTip": "c0989c8cba4162f2313c29fe84a48d128b4621b1",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6i5-spray-diag",
+      "tip": "950fd5d0f7bc937ee243ded460aa8531d0509875",
+      "presentInPriorInventory": true,
+      "priorTip": "950fd5d0f7bc937ee243ded460aa8531d0509875",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6i6-no-legacy-boat-fx",
+      "tip": "5eeb70dc8f42817f67213100411d47deaadc11f6",
+      "presentInPriorInventory": true,
+      "priorTip": "5eeb70dc8f42817f67213100411d47deaadc11f6",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6i7-view-space",
+      "tip": "35c18b71dc64d8dc4c79be5bcb323880198f84d2",
+      "presentInPriorInventory": true,
+      "priorTip": "35c18b71dc64d8dc4c79be5bcb323880198f84d2",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6i8-bow-drops",
+      "tip": "45669470608109bf4f853be3c4d73c27bcab51f9",
+      "presentInPriorInventory": true,
+      "priorTip": "45669470608109bf4f853be3c4d73c27bcab51f9",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6j-spray-diag",
+      "tip": "9b84ff8bd2a22336d51f66b3ab7b44759d7d560a",
+      "presentInPriorInventory": true,
+      "priorTip": "9b84ff8bd2a22336d51f66b3ab7b44759d7d560a",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6j1-spray-diag-series",
+      "tip": "aad3e1e6115c39c7da4d876a2d1e9e4287289f99",
+      "presentInPriorInventory": true,
+      "priorTip": "aad3e1e6115c39c7da4d876a2d1e9e4287289f99",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6k-spray-tune",
+      "tip": "6164825f26fe22d5ea8a8c21ebfd64bd7f02baad",
+      "presentInPriorInventory": true,
+      "priorTip": "6164825f26fe22d5ea8a8c21ebfd64bd7f02baad",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w6l-spray-defaults",
+      "tip": "5b237b2886a039df114bf751b24b2cd074af34d5",
+      "presentInPriorInventory": true,
+      "priorTip": "5b237b2886a039df114bf751b24b2cd074af34d5",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w7a-frame-stats",
+      "tip": "9deb0b02b8f5e30da9ecb1401898a29f4502bf24",
+      "presentInPriorInventory": true,
+      "priorTip": "9deb0b02b8f5e30da9ecb1401898a29f4502bf24",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w7b-cpu-stats",
+      "tip": "3ec8517e25433ac1cd66e123b23d4ab87b57cc90",
+      "presentInPriorInventory": true,
+      "priorTip": "3ec8517e25433ac1cd66e123b23d4ab87b57cc90",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w7c-async-stations",
+      "tip": "c628fd603301357cbd960a496c8080858ce4f3b9",
+      "presentInPriorInventory": true,
+      "priorTip": "c628fd603301357cbd960a496c8080858ce4f3b9",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w7d-credits-docs",
+      "tip": "268a50580b065b86e41cf300f01c2ea5b04bb82b",
+      "presentInPriorInventory": true,
+      "priorTip": "268a50580b065b86e41cf300f01c2ea5b04bb82b",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w7e-early-submit",
+      "tip": "dba3881c8895cc875f1f76847b528f0c8f14ce8c",
+      "presentInPriorInventory": true,
+      "priorTip": "dba3881c8895cc875f1f76847b528f0c8f14ce8c",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w7f-early-submit-default",
+      "tip": "5fb37a404add9a0269e00dbee3d0c694f0fadd9e",
+      "presentInPriorInventory": true,
+      "priorTip": "5fb37a404add9a0269e00dbee3d0c694f0fadd9e",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w7g-report",
+      "tip": "080f076fd0d55209ab1e4a02aebd8151d447a4e6",
+      "presentInPriorInventory": true,
+      "priorTip": "080f076fd0d55209ab1e4a02aebd8151d447a4e6",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w7h-measurements",
+      "tip": "145f123c3e573103ec880c4d2c41d07591b041fe",
+      "presentInPriorInventory": true,
+      "priorTip": "145f123c3e573103ec880c4d2c41d07591b041fe",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w7i-report-update",
+      "tip": "d35c18e9169a5af6323341189b8412c3f0d9ffb7",
+      "presentInPriorInventory": true,
+      "priorTip": "d35c18e9169a5af6323341189b8412c3f0d9ffb7",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w7j-underwater-stats",
+      "tip": "e995a2f54f217529bc82a6d08f80919db176a7d2",
+      "presentInPriorInventory": true,
+      "priorTip": "e995a2f54f217529bc82a6d08f80919db176a7d2",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w7k-report-final",
+      "tip": "c31600e04e4a275e0f961e7087bc7eeb7ad7ecdc",
+      "presentInPriorInventory": true,
+      "priorTip": "c31600e04e4a275e0f961e7087bc7eeb7ad7ecdc",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w8a-water-burst",
+      "tip": "1f295e495fc5f3832956e50a22f3e4b91ff0d5ce",
+      "presentInPriorInventory": true,
+      "priorTip": "1f295e495fc5f3832956e50a22f3e4b91ff0d5ce",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w8b-impact-splash",
+      "tip": "c8f1491daf2f901b898caea5e882aabf728e552f",
+      "presentInPriorInventory": true,
+      "priorTip": "c8f1491daf2f901b898caea5e882aabf728e552f",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w9-water-reports",
+      "tip": "f2bc233dcc3ca0a80e6846684c462b3bc59e9709",
+      "presentInPriorInventory": true,
+      "priorTip": "f2bc233dcc3ca0a80e6846684c462b3bc59e9709",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w9d-view-side",
+      "tip": "eed5c73149917e2eb747be1baabb2a1c2e327a79",
+      "presentInPriorInventory": true,
+      "priorTip": "eed5c73149917e2eb747be1baabb2a1c2e327a79",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w9e-meniscus",
+      "tip": "794eb826a812132d124074d6b630722de2a16eff",
+      "presentInPriorInventory": true,
+      "priorTip": "794eb826a812132d124074d6b630722de2a16eff",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w9f-far-bed",
+      "tip": "118d8478cccbedbb3019b56a92cce530c515f3fb",
+      "presentInPriorInventory": true,
+      "priorTip": "118d8478cccbedbb3019b56a92cce530c515f3fb",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    },
+    {
+      "ref": "safety/dec/tidewater-w9g-no-ssr-high",
+      "tip": "bc2b9915ff76d46029dfe49eef8baa474bcf6699",
+      "presentInPriorInventory": true,
+      "priorTip": "bc2b9915ff76d46029dfe49eef8baa474bcf6699",
+      "advancedSincePriorInventory": false,
+      "ancestorOfBase": true
+    }
+  ],
+  "incomingUniqueCommits": [
+    {
+      "commit": "91bc02c503b300fb6474b735673a2c951ab9f474",
+      "subject": "Add the swim moves pack and the underground test content Oli was missing",
+      "changedPaths": [
+        "content/default-packs/README.md",
+        "content/default-packs/swim/README.md",
+        "content/default-packs/swim/config.cpp",
+        "content/default-packs/swim/mod.json",
+        "content/default-packs/swim/rtm/swim.rtm",
+        "content/default-packs/swim/rtm/swimb.rtm",
+        "content/default-packs/swim/rtm/swimdead.rtm",
+        "content/default-packs/swim/rtm/swimdeadf.rtm",
+        "content/default-packs/swim/rtm/swiml.rtm",
+        "content/default-packs/swim/rtm/swimlb.rtm",
+        "content/default-packs/swim/rtm/swimlf.rtm",
+        "content/default-packs/swim/rtm/swimout.rtm",
+        "content/default-packs/swim/rtm/swimr.rtm",
+        "content/default-packs/swim/rtm/swimrb.rtm",
+        "content/default-packs/swim/rtm/swimrf.rtm",
+        "content/default-packs/swim/rtm/swimstart.rtm",
+        "content/default-packs/swim/rtm/swimstop.rtm",
+        "content/default-packs/swim/rtm/swimturnl.rtm",
+        "content/default-packs/swim/rtm/swimturnr.rtm",
+        "content/default-packs/swim/rtm/tread.rtm",
+        "dev-missions/swim-bay.Eden/init.sqs",
+        "dev-missions/swim-bay.Eden/mission.sqm",
+        "dev-missions/swim-squad.Eden/init.sqs",
+        "dev-missions/swim-squad.Eden/mission.sqm",
+        "dev-missions/swim-squad.Eden/swim-squad-orders.sqs",
+        "dev-missions/ugbasement-test.Eden/init.sqs",
+        "dev-missions/ugbasement-test.Eden/mission.sqm",
+        "dev-missions/ugcave-test.Eden/init.sqs",
+        "dev-missions/ugcave-test.Eden/mission.sqm",
+        "engine/Poseidon/Core/ModCollection.cpp",
+        "engine/Poseidon/Foundation/Platform/AppConfig.cpp",
+        "scripts/Build-DefaultContent.ps1",
+        "scripts/Build-Swim.ps1",
+        "scripts/Deploy.ps1",
+        "scripts/Prepare-SinkholeTestMod.ps1",
+        "tests/content/sinkhole/README.md",
+        "tests/content/sinkhole/tools/README.txt",
+        "tests/content/sinkhole/tools/build_cave.py",
+        "tests/content/sinkhole/tools/build_ug.py",
+        "tests/content/sinkhole/tools/make_tex.py",
+        "tests/content/sinkhole/tools/mlod.py",
+        "tests/content/sinkhole/tools/preview.py",
+        "tests/content/sinkhole/tools/wrp2.py",
+        "tests/content/sinkhole/ugcave/cave_ceil.dds",
+        "tests/content/sinkhole/ugcave/cave_floor.dds",
+        "tests/content/sinkhole/ugcave/cave_rock.dds",
+        "tests/content/sinkhole/ugcave/cave_wall.dds",
+        "tests/content/sinkhole/ugcave/config.cpp",
+        "tests/content/sinkhole/ugcave/ugcave.p3d",
+        "tests/content/sinkhole/ugtest/config.cpp",
+        "tests/content/sinkhole/ugtest/ugbasement.p3d",
+        "tests/unit/engine/Poseidon/Core/test_mod_collection.cpp"
+      ]
+    },
+    {
+      "commit": "b7addc5c91ac45e63c9a1037e8e820aa700e4295",
+      "subject": "SINKHOLE W5 step 1: The Forest's island terrain boots in Open Poseidon",
+      "changedPaths": [
+        "dev-missions/forest-beach.TheForest/init.sqs",
+        "dev-missions/forest-beach.TheForest/mission.sqm",
+        "scripts/forest/Build-ForestIsland.ps1",
+        "scripts/forest/forest_terrain.py"
+      ]
+    },
+    {
+      "commit": "23f369ada3388e0543d7cad43f85f706f9d2d06a",
+      "subject": "SINKHOLE W5: the Forest ground through Oli's authored terrain materials (4WVR .rvmat cells)",
+      "changedPaths": [
+        "engine/Poseidon/World/Terrain/LandSave.cpp",
+        "engine/Poseidon/World/Terrain/Landscape.hpp",
+        "engine/WgpuRenderer/TerrainWgpu.cpp",
+        "scripts/forest/forest_terrain.py"
+      ]
+    },
+    {
+      "commit": "2185b7132fd1a571d036e0fa987f9d09ccc7a778",
+      "subject": "Sinkhole W5: Forest ground from its real Relief Terrain Pack textures; keep its materials resident",
+      "changedPaths": [
+        "engine/Poseidon/World/Terrain/LandSave.cpp",
+        "engine/Poseidon/World/Terrain/Landscape.cpp",
+        "engine/Poseidon/World/Terrain/Landscape.hpp",
+        "engine/WgpuRenderer/TerrainWgpu.cpp",
+        "scripts/forest/forest_terrain.py"
+      ]
+    },
+    {
+      "commit": "ba4f2c0ec6237cb1a9b648b741326fb7afd885e6",
+      "subject": "Sinkhole W5 step 2: The Forest's trees, bushes, rocks and cliffs on the island",
+      "changedPaths": [
+        "engine/Poseidon/World/Terrain/LandSave.cpp",
+        "scripts/forest/forest_objects.py",
+        "scripts/forest/forest_terrain.py"
+      ]
+    },
+    {
+      "commit": "48eb536d1bde9681edec20696c219f6549662a42",
+      "subject": "Sinkhole W5 step 2: bake non-uniform mesh scales; one leaf image per cutoff",
+      "changedPaths": [
+        "scripts/forest/forest_objects.py"
+      ]
+    },
+    {
+      "commit": "42316eac65bd5ecdab713a4141900b96bb2ea65e",
+      "subject": "Sinkhole W5 step 2: one model per Unity LODGroup; spawn clear of objects",
+      "changedPaths": [
+        "dev-missions/forest-beach.TheForest/mission.sqm",
+        "scripts/forest/Build-ForestIsland.ps1",
+        "scripts/forest/forest_objects.py",
+        "scripts/forest/forest_terrain.py"
+      ]
+    },
+    {
+      "commit": "902f9ef93e02256c31429758d797069524ec7f8f",
+      "subject": "Swim moves: pointed feet in every phase",
+      "changedPaths": [
+        "content/default-packs/swim/README.md",
+        "content/default-packs/swim/rtm/swim.rtm",
+        "content/default-packs/swim/rtm/swimb.rtm",
+        "content/default-packs/swim/rtm/swimdead.rtm",
+        "content/default-packs/swim/rtm/swimdeadf.rtm",
+        "content/default-packs/swim/rtm/swiml.rtm",
+        "content/default-packs/swim/rtm/swimlb.rtm",
+        "content/default-packs/swim/rtm/swimlf.rtm",
+        "content/default-packs/swim/rtm/swimout.rtm",
+        "content/default-packs/swim/rtm/swimr.rtm",
+        "content/default-packs/swim/rtm/swimrb.rtm",
+        "content/default-packs/swim/rtm/swimrf.rtm",
+        "content/default-packs/swim/rtm/swimstart.rtm",
+        "content/default-packs/swim/rtm/swimstop.rtm",
+        "content/default-packs/swim/rtm/swimturnl.rtm",
+        "content/default-packs/swim/rtm/swimturnr.rtm",
+        "content/default-packs/swim/rtm/tread.rtm",
+        "scripts/swim/fix_swim_rtms.py"
+      ]
+    },
+    {
+      "commit": "b3f5d60aaf267f458be2450cb5db852381b96cd6",
+      "subject": "Swim moves README: the foot repair row describes the pointed-foot rule",
+      "changedPaths": [
+        "content/default-packs/swim/README.md"
+      ]
+    },
+    {
+      "commit": "cb9cc787b8a463b123de52c8762f315ee99a913c",
+      "subject": "Swim moves: untwist the legs -- the real cause of the backwards feet",
+      "changedPaths": [
+        "content/default-packs/swim/README.md",
+        "content/default-packs/swim/rtm/swim.rtm",
+        "content/default-packs/swim/rtm/swimb.rtm",
+        "content/default-packs/swim/rtm/swimdead.rtm",
+        "content/default-packs/swim/rtm/swimdeadf.rtm",
+        "content/default-packs/swim/rtm/swiml.rtm",
+        "content/default-packs/swim/rtm/swimlb.rtm",
+        "content/default-packs/swim/rtm/swimlf.rtm",
+        "content/default-packs/swim/rtm/swimout.rtm",
+        "content/default-packs/swim/rtm/swimr.rtm",
+        "content/default-packs/swim/rtm/swimrb.rtm",
+        "content/default-packs/swim/rtm/swimrf.rtm",
+        "content/default-packs/swim/rtm/swimstart.rtm",
+        "content/default-packs/swim/rtm/swimstop.rtm",
+        "content/default-packs/swim/rtm/swimturnl.rtm",
+        "content/default-packs/swim/rtm/swimturnr.rtm",
+        "content/default-packs/swim/rtm/tread.rtm",
+        "scripts/swim/fix_swim_rtms.py"
+      ]
+    },
+    {
+      "commit": "118c176e489eca0dea044f05543037679045e5dc",
+      "subject": "Swim moves: pointed feet in every phase",
+      "changedPaths": [
+        "content/default-packs/swim/README.md",
+        "content/default-packs/swim/rtm/swim.rtm",
+        "content/default-packs/swim/rtm/swimb.rtm",
+        "content/default-packs/swim/rtm/swimdead.rtm",
+        "content/default-packs/swim/rtm/swimdeadf.rtm",
+        "content/default-packs/swim/rtm/swiml.rtm",
+        "content/default-packs/swim/rtm/swimlb.rtm",
+        "content/default-packs/swim/rtm/swimlf.rtm",
+        "content/default-packs/swim/rtm/swimout.rtm",
+        "content/default-packs/swim/rtm/swimr.rtm",
+        "content/default-packs/swim/rtm/swimrb.rtm",
+        "content/default-packs/swim/rtm/swimrf.rtm",
+        "content/default-packs/swim/rtm/swimstart.rtm",
+        "content/default-packs/swim/rtm/swimstop.rtm",
+        "content/default-packs/swim/rtm/swimturnl.rtm",
+        "content/default-packs/swim/rtm/swimturnr.rtm",
+        "content/default-packs/swim/rtm/tread.rtm",
+        "scripts/swim/fix_swim_rtms.py"
+      ]
+    },
+    {
+      "commit": "84cace1886b5188e3c5e5970a1d27210b6c39fd9",
+      "subject": "Swim moves README: the foot repair row describes the pointed-foot rule",
+      "changedPaths": [
+        "content/default-packs/swim/README.md"
+      ]
+    },
+    {
+      "commit": "1f8f5d96b9dbe25f44b1b694bc02e04f4c15dbcd",
+      "subject": "Swim moves: untwist the legs -- the real cause of the backwards feet",
+      "changedPaths": [
+        "content/default-packs/swim/README.md",
+        "content/default-packs/swim/rtm/swim.rtm",
+        "content/default-packs/swim/rtm/swimb.rtm",
+        "content/default-packs/swim/rtm/swimdead.rtm",
+        "content/default-packs/swim/rtm/swimdeadf.rtm",
+        "content/default-packs/swim/rtm/swiml.rtm",
+        "content/default-packs/swim/rtm/swimlb.rtm",
+        "content/default-packs/swim/rtm/swimlf.rtm",
+        "content/default-packs/swim/rtm/swimout.rtm",
+        "content/default-packs/swim/rtm/swimr.rtm",
+        "content/default-packs/swim/rtm/swimrb.rtm",
+        "content/default-packs/swim/rtm/swimrf.rtm",
+        "content/default-packs/swim/rtm/swimstart.rtm",
+        "content/default-packs/swim/rtm/swimstop.rtm",
+        "content/default-packs/swim/rtm/swimturnl.rtm",
+        "content/default-packs/swim/rtm/swimturnr.rtm",
+        "content/default-packs/swim/rtm/tread.rtm",
+        "scripts/swim/fix_swim_rtms.py"
+      ]
+    },
+    {
+      "commit": "268805390146f16c27021a4906d1d57dfa8cea19",
+      "subject": "Swim moves: author them as soldiers swimming in full gear",
+      "changedPaths": [
+        "content/default-packs/swim/README.md",
+        "content/default-packs/swim/rtm/swim.rtm",
+        "content/default-packs/swim/rtm/swimb.rtm",
+        "content/default-packs/swim/rtm/swimdead.rtm",
+        "content/default-packs/swim/rtm/swimdeadf.rtm",
+        "content/default-packs/swim/rtm/swiml.rtm",
+        "content/default-packs/swim/rtm/swimlb.rtm",
+        "content/default-packs/swim/rtm/swimlf.rtm",
+        "content/default-packs/swim/rtm/swimr.rtm",
+        "content/default-packs/swim/rtm/swimrb.rtm",
+        "content/default-packs/swim/rtm/swimrf.rtm",
+        "content/default-packs/swim/rtm/swimstart.rtm",
+        "content/default-packs/swim/rtm/swimstop.rtm",
+        "content/default-packs/swim/rtm/swimturnl.rtm",
+        "content/default-packs/swim/rtm/swimturnr.rtm",
+        "content/default-packs/swim/rtm/tread.rtm",
+        "scripts/swim/fix_swim_rtms.py",
+        "scripts/swim/make_swim_rtms.py"
+      ]
+    },
+    {
+      "commit": "1aeb1b0d05e414cd233c530387e5a332d12de828",
+      "subject": "Swim moves: author them as soldiers swimming in full gear",
+      "changedPaths": [
+        "content/default-packs/swim/README.md",
+        "content/default-packs/swim/rtm/swim.rtm",
+        "content/default-packs/swim/rtm/swimb.rtm",
+        "content/default-packs/swim/rtm/swimdead.rtm",
+        "content/default-packs/swim/rtm/swimdeadf.rtm",
+        "content/default-packs/swim/rtm/swiml.rtm",
+        "content/default-packs/swim/rtm/swimlb.rtm",
+        "content/default-packs/swim/rtm/swimlf.rtm",
+        "content/default-packs/swim/rtm/swimr.rtm",
+        "content/default-packs/swim/rtm/swimrb.rtm",
+        "content/default-packs/swim/rtm/swimrf.rtm",
+        "content/default-packs/swim/rtm/swimstart.rtm",
+        "content/default-packs/swim/rtm/swimstop.rtm",
+        "content/default-packs/swim/rtm/swimturnl.rtm",
+        "content/default-packs/swim/rtm/swimturnr.rtm",
+        "content/default-packs/swim/rtm/tread.rtm",
+        "scripts/swim/fix_swim_rtms.py",
+        "scripts/swim/make_swim_rtms.py"
+      ]
+    },
+    {
+      "commit": "8bf92788cfd98546b7b4e368804bfaf245abd3d6",
+      "subject": "Swim moves: turn and diagonal headings the right way; deaths go limp face down",
+      "changedPaths": [
+        "content/default-packs/swim/README.md",
+        "content/default-packs/swim/rtm/swimdead.rtm",
+        "content/default-packs/swim/rtm/swimdeadf.rtm",
+        "content/default-packs/swim/rtm/swiml.rtm",
+        "content/default-packs/swim/rtm/swimlb.rtm",
+        "content/default-packs/swim/rtm/swimlf.rtm",
+        "content/default-packs/swim/rtm/swimr.rtm",
+        "content/default-packs/swim/rtm/swimrb.rtm",
+        "content/default-packs/swim/rtm/swimrf.rtm",
+        "content/default-packs/swim/rtm/swimturnl.rtm",
+        "content/default-packs/swim/rtm/swimturnr.rtm",
+        "scripts/swim/make_swim_rtms.py"
+      ]
+    },
+    {
+      "commit": "6c0690fba5f303cfc63a414db87b87fc3b914f67",
+      "subject": "Swim moves: turn and diagonal headings the right way; deaths go limp face down",
+      "changedPaths": [
+        "content/default-packs/swim/README.md",
+        "content/default-packs/swim/rtm/swimdead.rtm",
+        "content/default-packs/swim/rtm/swimdeadf.rtm",
+        "content/default-packs/swim/rtm/swiml.rtm",
+        "content/default-packs/swim/rtm/swimlb.rtm",
+        "content/default-packs/swim/rtm/swimlf.rtm",
+        "content/default-packs/swim/rtm/swimr.rtm",
+        "content/default-packs/swim/rtm/swimrb.rtm",
+        "content/default-packs/swim/rtm/swimrf.rtm",
+        "content/default-packs/swim/rtm/swimturnl.rtm",
+        "content/default-packs/swim/rtm/swimturnr.rtm",
+        "scripts/swim/make_swim_rtms.py"
+      ]
+    },
+    {
+      "commit": "ef3a0b0ace1972b38882a3280efef6cad4e280bd",
+      "subject": "Falling and falling into the water; swim gear load",
+      "changedPaths": [
+        "content/default-packs/swim/README.md",
+        "content/default-packs/swim/config.cpp",
+        "content/default-packs/swim/rtm/fall.rtm",
+        "content/default-packs/swim/rtm/fallland.rtm",
+        "content/default-packs/swim/rtm/swimin.rtm",
+        "content/default-packs/swim/rtm/swimstart.rtm",
+        "content/default-packs/swim/rtm/swimstop.rtm",
+        "engine/Poseidon/World/Entities/Infantry/SoldierOld.hpp",
+        "engine/Poseidon/World/Entities/Infantry/SoldierOldSim.cpp",
+        "engine/Poseidon/World/Entities/Infantry/SoldierOldSwim.cpp",
+        "scripts/Build-Swim.ps1",
+        "scripts/swim/make_swim_rtms.py"
+      ]
+    },
+    {
+      "commit": "32f1e9a82efe23b7b094851e452fdfd68448d597",
+      "subject": "Falling and falling into the water; swim gear load",
+      "changedPaths": [
+        "content/default-packs/swim/README.md",
+        "content/default-packs/swim/config.cpp",
+        "content/default-packs/swim/rtm/fall.rtm",
+        "content/default-packs/swim/rtm/fallland.rtm",
+        "content/default-packs/swim/rtm/swimin.rtm",
+        "content/default-packs/swim/rtm/swimstart.rtm",
+        "content/default-packs/swim/rtm/swimstop.rtm",
+        "engine/Poseidon/World/Entities/Infantry/SoldierOld.hpp",
+        "engine/Poseidon/World/Entities/Infantry/SoldierOldSim.cpp",
+        "engine/Poseidon/World/Entities/Infantry/SoldierOldSwim.cpp",
+        "scripts/Build-Swim.ps1",
+        "scripts/swim/make_swim_rtms.py"
+      ]
+    },
+    {
+      "commit": "71769ec8ebe95ac623f72f625f11df0a56bc4371",
+      "subject": "Fall landing from the game's own jump-down; joint-true pose blends",
+      "changedPaths": [
+        "content/default-packs/swim/rtm/fallland.rtm",
+        "content/default-packs/swim/rtm/swimin.rtm",
+        "scripts/swim/make_swim_rtms.py"
+      ]
+    },
+    {
+      "commit": "1ff9bb15341bdb117f953a1b9d58b5d88b8f590b",
+      "subject": "Fall landing from the game's own jump-down; joint-true pose blends",
+      "changedPaths": [
+        "content/default-packs/swim/rtm/fallland.rtm",
+        "content/default-packs/swim/rtm/swimin.rtm",
+        "scripts/swim/make_swim_rtms.py"
+      ]
+    },
+    {
+      "commit": "0748b09cc72feb4b76faf2c1c797341244a66dd7",
+      "subject": "Swimmers float by the chin; Tidewater debug view 26 for the surface seen from below",
+      "changedPaths": [
+        "engine/Poseidon/World/Entities/Infantry/SoldierOld.hpp",
+        "engine/Poseidon/World/Entities/Infantry/SoldierOldSwim.cpp",
+        "engine/WgpuRenderer/rust/src/water_tw/tw_water.wgsl"
+      ]
+    },
+    {
+      "commit": "f758e9f3b1008b3bfd1052a0fccaf24a6965e3e1",
+      "subject": "Swimmers float by the chin; Tidewater debug view 26 for the surface seen from below",
+      "changedPaths": [
+        "engine/Poseidon/World/Entities/Infantry/SoldierOld.hpp",
+        "engine/Poseidon/World/Entities/Infantry/SoldierOldSwim.cpp",
+        "engine/WgpuRenderer/rust/src/water_tw/tw_water.wgsl"
+      ]
+    },
+    {
+      "commit": "614da87a3402c292c396ddcf068ac40169777a40",
+      "subject": "Sinkhole W5 step 2: Forest collision; objects at their authored height",
+      "changedPaths": [
+        "scripts/forest/forest_collision.py",
+        "scripts/forest/forest_objects.py"
+      ]
+    },
+    {
+      "commit": "e484710132401c161f618ddab799d999e15cd559",
+      "subject": "Build-ForestIsland: note the colliders input; restore the header's line breaks",
+      "changedPaths": [
+        "scripts/forest/Build-ForestIsland.ps1"
+      ]
+    },
+    {
+      "commit": "40e20160ff2ca19fe27d72efb07c093dcabd496e",
+      "subject": "Forest objects: trunks without holes, two-sided leaves, open rocks bedded into the ground",
+      "changedPaths": [
+        "scripts/forest/forest_objects.py",
+        "scripts/forest/forest_terrain.py"
+      ]
+    }
+  ],
+  "portedCommits": [
+    "64118d6f",
+    "4e9c2fa2",
+    "9aabfc2f"
+  ],
+  "heldSwimBlobs": [
+    {
+      "file": "content/default-packs/swim/rtm/fall.rtm",
+      "bytes": 42912,
+      "sha256": "f78ac065f1718174bf6103671a8ec6bdfcc8864c3a75edb803798cdb6cbdb35f",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/fallland.rtm",
+      "bytes": 42912,
+      "sha256": "b3261f069f5ff362b89f161a2c0703210f5f7166b7070b288cf48bea260e8b04",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swim.rtm",
+      "bytes": 82992,
+      "sha256": "5fdfa0acf9672276c10d5461d96f6ca91352f067b19744b34053e11a8a93eb63",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swimb.rtm",
+      "bytes": 82992,
+      "sha256": "0b5ed6ebb0f27b2428c467830dba09add60b1d0dc951673fffad8d00ed3b2fca",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swimdead.rtm",
+      "bytes": 99024,
+      "sha256": "4af51e026976643b4499e45ebaa912233b77f07f2653ada158998c6b00f6cef8",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swimdeadf.rtm",
+      "bytes": 99024,
+      "sha256": "ab906c2abfc5aa355272eb6fcef03c6b02b55b01de9bd9e9cc43d5a97e409e97",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swimin.rtm",
+      "bytes": 42912,
+      "sha256": "1adf77680e83eb31ec951551ebc6ba4eb5562c10f51115144d0cf8b731dad866",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swiml.rtm",
+      "bytes": 82992,
+      "sha256": "919bb79907a57e31edf0969f3bff6242196e1167a7e679ab2d2da7a5d8adc343",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swimlb.rtm",
+      "bytes": 82992,
+      "sha256": "a9df6b0d2bdeedfadb5e8deac5a465e558994167a1d8676f32ab1b21ed20b2b0",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swimlf.rtm",
+      "bytes": 82992,
+      "sha256": "8a7748e23b6287b36924f1da0bdfccd887b37e962d0c994de7fbe5d95e4da178",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swimout.rtm",
+      "bytes": 58944,
+      "sha256": "573cd3b452028e61882a1ee7f6be3e5663e0e21b0650559ab7a193183a9b5276",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swimr.rtm",
+      "bytes": 82992,
+      "sha256": "a38df0fed7bdfdf411eafd1c943d85820059d3fe894005485ee3a1f97f915167",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swimrb.rtm",
+      "bytes": 82992,
+      "sha256": "51727dc8bb5c84c69a3b3c8b3d033a218e108c3e41fd261335f39a258c88b584",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swimrf.rtm",
+      "bytes": 82992,
+      "sha256": "f2537c94460762dc2bc71d5b6e5cc99212c34b50c6ca6e11712d46dfa8777eb4",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swimstart.rtm",
+      "bytes": 66960,
+      "sha256": "3752bae8251bda913af44fed9f7e7c2049e21cd689f1333f6353dfe1d8f30671",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swimstop.rtm",
+      "bytes": 50928,
+      "sha256": "883cc14a247994d5362a66b10d49a947a3bcb15eabc27e8ce09cfbf204998221",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swimturnl.rtm",
+      "bytes": 82992,
+      "sha256": "811f619563cdd02ff45584b4ff84eabc19910c683d4499ac3658156f95689b1c",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/swimturnr.rtm",
+      "bytes": 82992,
+      "sha256": "73611605f27d24a33dd7de202db58dff3351a42b07224b840bb938f314d6a6a7",
+      "signature": "RTM_0101"
+    },
+    {
+      "file": "content/default-packs/swim/rtm/tread.rtm",
+      "bytes": 82992,
+      "sha256": "3a72fc97052b0d0d1d1bbac3533cc0d125acb6094fb08bb5dc4bcd3486ff2ef2",
+      "signature": "RTM_0101"
+    }
+  ],
+  "heldReason": "Conflicting origin claims and owner correction; no asset permission/source evidence sufficient to ship. No legal infringement conclusion. No RTM blob ancestry imported.",
+  "additionalHeldPaths": [
+    "content/default-packs/swim/README.md",
+    "content/default-packs/swim/config.cpp",
+    "content/default-packs/swim/mod.json",
+    "content/default-packs/README.md",
+    "scripts/Build-Swim.ps1",
+    "scripts/Build-DefaultContent.ps1",
+    "scripts/Deploy.ps1",
+    "engine/Poseidon/Core/ModCollection.cpp",
+    "engine/Poseidon/Foundation/Platform/AppConfig.cpp",
+    "tests/unit/engine/Poseidon/Core/test_mod_collection.cpp",
+    "scripts/swim/fix_swim_rtms.py",
+    "scripts/swim/make_swim_rtms.py"
+  ],
+  "proceduralRegeneration": [
+    {
+      "file": "tests\\content\\sinkhole\\ugcave\\ugcave.p3d",
+      "incoming_sha256": "bf8c50c79cac77dbe98cee910af1cddd3af1399388980770acddacea5390f9a6",
+      "regenerated_sha256": "812cfab31949ab6586e301c656cd3a83f8e2f7ca977995b6cf295919f7d19490",
+      "match": false,
+      "bytes": 138168
+    },
+    {
+      "file": "tests\\content\\sinkhole\\ugcave\\cave_wall.dds",
+      "incoming_sha256": "1e0054c642b258b16c60d9ed6e0d6780fb2a5a4378906e3d432ddaf49a685ec8",
+      "regenerated_sha256": "1e0054c642b258b16c60d9ed6e0d6780fb2a5a4378906e3d432ddaf49a685ec8",
+      "match": true,
+      "bytes": 174888
+    },
+    {
+      "file": "tests\\content\\sinkhole\\ugcave\\cave_ceil.dds",
+      "incoming_sha256": "fb05db405fb75227faf1e1cc4a8a799a61edc85047446ee342acf7e0988f4623",
+      "regenerated_sha256": "fb05db405fb75227faf1e1cc4a8a799a61edc85047446ee342acf7e0988f4623",
+      "match": true,
+      "bytes": 174888
+    },
+    {
+      "file": "tests\\content\\sinkhole\\ugcave\\cave_floor.dds",
+      "incoming_sha256": "5bcc1fda6876a9ecdcf51335d36a1a6d865df355c55da950a49cfd1e143b1da6",
+      "regenerated_sha256": "5bcc1fda6876a9ecdcf51335d36a1a6d865df355c55da950a49cfd1e143b1da6",
+      "match": true,
+      "bytes": 174888
+    },
+    {
+      "file": "tests\\content\\sinkhole\\ugcave\\cave_rock.dds",
+      "incoming_sha256": "31342a74cff3893d7f6ee449ecb60e29da0f5a31d9b19d9a78bf9de7a291e499",
+      "regenerated_sha256": "31342a74cff3893d7f6ee449ecb60e29da0f5a31d9b19d9a78bf9de7a291e499",
+      "match": true,
+      "bytes": 43816
+    },
+    {
+      "file": "tests\\content\\sinkhole\\ugtest\\ugbasement.p3d",
+      "incoming_sha256": "ef29e922ce1928d2e68f00d706c6d847057314fc1de7f71cc4f5e50c15b7a164",
+      "regenerated_sha256": "ef29e922ce1928d2e68f00d706c6d847057314fc1de7f71cc4f5e50c15b7a164",
+      "match": true,
+      "bytes": 34376
+    }
+  ],
+  "caveMatchedRegeneratedLods": [
+    "geometry",
+    "roadway",
+    "paths",
+    "fireGeometry"
+  ],
+  "caveDifferingRegeneratedLods": [
+    "visual",
+    "memory"
+  ],
+  "checks": {
+    "PythonSyntax": "PASS: all6cave tools+3Forest converters",
+    "ForestSyntheticCollision": "PASS: cube8vertices12triangles,outward winding,planar refusal,P3DM geometry emit",
+    "PowerShellParse": "PASS: bothnew scripts",
+    "gitDiffCheck": "PASS",
+    "swimReachablePathHistory": "EMPTY",
+    "defaultPackagingRegistrationDiff": "EMPTY",
+    "nativeBuild": "PENDING root combined integration",
+    "GPUComposition": "PENDING root combined integration",
+    "installedSmoke": "PENDING root sole deployment owner"
+  }
+}
