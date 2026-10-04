@@ -48,6 +48,7 @@ class TerrainWgpu : public ITerrainRenderer
     TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer);
 
     void DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd) override;
+    bool GetDrawCoverage(TerrainDrawCoverage& out) const override;
     int GrassSurfaceCount() const;
     // True only for the source receipt emitted after this real heightmap upload.
     bool RainWaterSourceMatches(const WgrRainWaterSourceKey& key) const;
@@ -236,6 +237,8 @@ class TerrainWgpu : public ITerrainRenderer
     float _morphRegion;
     // Land extent past the map as a multiple of the map size (1 = map only).
     float _extentFactor;
+    bool _backgroundCoverage = true;
+    TerrainDrawCoverage _drawCoverage;
 
     std::vector<WgrTerrainNode> _selected;
 

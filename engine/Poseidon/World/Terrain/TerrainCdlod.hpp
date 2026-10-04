@@ -65,6 +65,15 @@ struct CdlodSelection
     float morphStart, morphEnd;
 };
 
+inline bool CdlodIntersectsRect(const CdlodNode& node, float x0, float z0, float x1, float z1)
+{
+    const float values[] = {node.originX, node.originZ, node.size, x0, z0, x1, z1};
+    for (float value : values) if (!std::isfinite(value)) return false;
+    if (node.size <= 0) return false;
+    return x1 > x0 && z1 > z0 && node.originX + node.size > x0 && node.originX < x1 &&
+        node.originZ + node.size > z0 && node.originZ < z1;
+}
+
 struct CdlodContactFocus { float x, z, radius; };
 
 // A current on-foot target with actual local deformation, never an arbitrary

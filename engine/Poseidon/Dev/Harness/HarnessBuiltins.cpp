@@ -6,6 +6,7 @@ using namespace Poseidon;
 #include <Poseidon/Dev/Harness/HarnessProtocol.hpp>
 
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Core/ITerrainRenderer.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/WorldInputContext.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -1577,6 +1578,41 @@ void RegisterScreenshot(HarnessServer& hs)
             vector("up", camera->DirectionUp());
             cJSON_AddItemToObject(out, "camera", pose);
             cJSON_AddStringToObject(out, "scope", "Producer enum queued in existing terrain padding. Colour modes expose actual fragment inputs with actual surviving water overlay and alpha; no forced material/wetness/shelter, GPU completion or numeric screenshot-channel proof.");
+            return HarnessProtocol::JsonResponse(out);
+        });
+    hs.RegisterCommand({"terrain_coverage", "Read-only latest producer terrain selection and heightfield source", {}},
+        [](const std::string&, cJSON*) -> std::string {
+            if (!Foundation::IsMainThread() || !GEngine || !GLandscape)
+                return HarnessProtocol::ErrorResponse("terrain coverage requires current main-thread world");
+            auto* terrain = GEngine->GetTerrainRenderer();
+            TerrainDrawCoverage coverage;
+            if (!terrain || !terrain->GetDrawCoverage(coverage))
+                return HarnessProtocol::ErrorResponse("no current admitted terrain selection");
+            if (coverage.heightRevision != GLandscape->HeightRevision() ||
+                coverage.terrainRange != GLandscape->GetTerrainRange() ||
+                coverage.terrainGrid != GLandscape->GetTerrainGrid())
+                return HarnessProtocol::ErrorResponse("terrain selection source is stale");
+            auto* out = cJSON_CreateObject();
+            cJSON_AddStringToObject(out, "world", GLandscape->GetName());
+            cJSON_AddNumberToObject(out, "frame", static_cast<double>(coverage.frame));
+            cJSON_AddNumberToObject(out, "heightRevision", coverage.heightRevision);
+            cJSON_AddNumberToObject(out, "terrainRange", coverage.terrainRange);
+            cJSON_AddNumberToObject(out, "terrainGrid", coverage.terrainGrid);
+            cJSON_AddBoolToObject(out, "ready", coverage.ready);
+            cJSON_AddBoolToObject(out, "background", coverage.background);
+            cJSON_AddBoolToObject(out, "pagedMaterials", coverage.pagedMaterials);
+            cJSON_AddNumberToObject(out, "patches", coverage.patches);
+            cJSON_AddNumberToObject(out, "outsideLegacyRect", coverage.outsideLegacyRect);
+            cJSON_AddNumberToObject(out, "cameraFar", coverage.cameraFar);
+            cJSON_AddNumberToObject(out, "farthestPatchXZ", coverage.farthestPatch);
+            const auto array = [&](const char* name, const auto& values) {
+                auto* result = cJSON_CreateArray();
+                for (auto value : values) cJSON_AddItemToArray(result, cJSON_CreateNumber(value));
+                cJSON_AddItemToObject(out, name, result);
+            };
+            array("camera", coverage.camera); array("legacyRect", coverage.legacyRect);
+            array("treeBounds", coverage.treeBounds); array("levels", coverage.levels);
+            cJSON_AddStringToObject(out, "scope", "Latest producer-selected patches over the current uploaded heightfield. outsideLegacyRect counts patches wholly outside the old draw rectangle; farthestPatchXZ is horizontal corner reach. No GPU completion, residency completion or pixel proof.");
             return HarnessProtocol::JsonResponse(out);
         });
     hs.RegisterCommand({"weather_visibility", "Read-only weather, terrain and object draw ranges", {}},

@@ -397,6 +397,9 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
     // infinite ocean; 1 = map only. Defaults to match the water extent (WGR_WATER_EXTENT)
     // so seabed underlies the whole transparent ocean with no seam at the old map edge.
     _extentFactor = std::max(1.0f, EnvFloat("WGR_TERRAIN_EXTENT", 3.0f));
+    // Startup-only A/B control. Infinite-far wgpu water already covers this tree;
+    // opaque terrain must remain beneath it and behind visible distant objects.
+    _backgroundCoverage = EnvFloat("WGR_TERRAIN_BACKGROUND", 1.0f) != 0.0f;
     _terrainPageRadius = std::max(8, static_cast<int>(EnvFloat("WGR_TERRAIN_PAGE_RADIUS_CELLS", 64.0f)));
     _terrainPageLayerBudget = static_cast<uint32_t>(std::clamp(
         static_cast<int>(EnvFloat("WGR_TERRAIN_PAGE_LAYERS", 1024.0f)), 64,
@@ -3197,8 +3200,16 @@ void TerrainWgpu::UpdateGroundTexturePages(const Landscape& land, const Camera& 
              centerZ, radius, materials.size());
 }
 
+bool TerrainWgpu::GetDrawCoverage(TerrainDrawCoverage& out) const
+{
+    if (!_uploaded || _uploaded != GLandscape) return false;
+    out = _drawCoverage;
+    return out.ready;
+}
+
 void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
 {
+    _drawCoverage = {};
     if (_renderer == nullptr || GLandscape == nullptr)
     {
         return;
@@ -3373,10 +3384,8 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     {
         return;
     }
-    // The engine's visible rect (xBeg..zEnd) is the camera frustum projected to the
-    // ground out to the far plane — already off-map-extending, not map-clamped. Map-only
-    // clips it to the map (draw distance); extended clips it to the built tree so the
-    // off-map border draws too. Either way frustum + CDLOD ranges + fog bound the result.
+    // Preserve the old fog/view-distance rectangle for the startup A/B and witness.
+    // It is not the infinite-far GPU frustum.
     const float landGrid = land.GetLandGrid();
     const int landRange = land.GetLandRange();
     float rx0, rz0, rx1, rz1;
@@ -3393,6 +3402,17 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         rz0 = std::max(zBeg, 0) * landGrid;
         rx1 = std::min(xEnd, landRange) * landGrid;
         rz1 = std::min(zEnd, landRange) * landGrid;
+    }
+    const std::array<float, 4> legacyRect{rx0, rz0, rx1, rz1};
+    if (_backgroundCoverage)
+    {
+        // One selection partitions the existing tree: no duplicate near/far draw.
+        // Distance still chooses detail; texture residency/fallback stays unchanged.
+        // Water covers this same tree with an infinite-far projection. Clipping
+        // opaque ground to the old rectangle exposes sky through its dry-land mask,
+        // with a hard edge whenever a whole CDLOD patch disappears.
+        rx0 = rz0 = _extended ? _treeMin : std::max(_treeMin, 0.0f);
+        rx1 = rz1 = _extended ? _treeMax : std::min(_treeMax, landRange * landGrid);
     }
 
     auto emitNode = [&](const CdlodSelection& s)
@@ -3478,7 +3498,36 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         _tree, _rootIndex, _numLevels, _ranges, _morphRegion, *camera, rx0, rz0, rx1, rz1,
         [](const CdlodNode&) { return true; }, emit,
         (snow.CoverActive() ? snowEffDepth : 0.0f) + (mud.enabled && mud.Chunks() > 0 ? MudField::MaxDepth : 0.0f)
-            + (sand.enabled && sand.Chunks() > 0 ? SandField::MaxDepth : 0.0f));
+            + (sand.enabled && sand.Chunks() > 0 ? SandField::MaxDepth : 0.0f),
+        _backgroundCoverage);
+
+    _drawCoverage.frame = GEngine ? static_cast<uint64_t>(GEngine->GetFrameCounter()) : 0;
+    _drawCoverage.heightRevision = _uploadedHeightRevision;
+    _drawCoverage.terrainRange = _uploadedRange;
+    _drawCoverage.terrainGrid = land.GetTerrainGrid();
+    _drawCoverage.ready = _uploaded == &land && _uploadedHeightRevision == land.HeightRevision() &&
+        _rootIndex >= 0 && !_selected.empty();
+    _drawCoverage.background = _backgroundCoverage;
+    _drawCoverage.pagedMaterials = _pagedGroundMaterials;
+    _drawCoverage.patches = static_cast<uint32_t>(_selected.size());
+    const auto& cameraPos = camera->Position();
+    _drawCoverage.camera = {cameraPos.X(), cameraPos.Y(), cameraPos.Z()};
+    _drawCoverage.cameraFar = camera->Far();
+    _drawCoverage.legacyRect = legacyRect;
+    _drawCoverage.treeBounds = {_treeMin, _treeMax};
+    for (const auto& patch : _selected)
+    {
+        ++_drawCoverage.levels[std::min<size_t>(patch.lod, _drawCoverage.levels.size() - 1)];
+        CdlodNode node{};
+        node.originX = patch.origin.x; node.originZ = patch.origin.y; node.size = patch.size;
+        if (!CdlodIntersectsRect(node, legacyRect[0], legacyRect[1], legacyRect[2], legacyRect[3]))
+            ++_drawCoverage.outsideLegacyRect;
+        const float dx = std::max(std::abs(node.originX - cameraPos.X()),
+            std::abs(node.originX + node.size - cameraPos.X()));
+        const float dz = std::max(std::abs(node.originZ - cameraPos.Z()),
+            std::abs(node.originZ + node.size - cameraPos.Z()));
+        _drawCoverage.farthestPatch = std::max(_drawCoverage.farthestPatch, std::sqrt(dx * dx + dz * dz));
+    }
 
     _engine.SubmitTerrain(_selected);
     // The procedural path must remain available on maps that use the modern GPU

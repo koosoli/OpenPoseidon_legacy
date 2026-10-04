@@ -29,12 +29,11 @@ inline void SelectVisibleCdlod(const std::vector<CdlodNode>& tree, int rootIndex
         return;
     }
     const Vector3 camPos = camera.Position();
+    if (!std::isfinite(camPos.X()) || !std::isfinite(camPos.Y()) || !std::isfinite(camPos.Z())) return;
 
     auto visible = [&](const CdlodNode& n) -> bool
     {
-        const float maxX = n.originX + n.size;
-        const float maxZ = n.originZ + n.size;
-        if (maxX <= rx0 || n.originX >= rx1 || maxZ <= rz0 || n.originZ >= rz1)
+        if (!CdlodIntersectsRect(n, rx0, rz0, rx1, rz1))
         {
             return false;
         }

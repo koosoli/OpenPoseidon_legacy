@@ -440,6 +440,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Terrain/test_terrain_surface_catalog.cpp
     World/test_terrain_gpu_interp.cpp
     World/test_terrain_cdlod.cpp
+    World/test_terrain_background.cpp
     World/test_object_animated_bounds.cpp
     World/test_face_rig.cpp
     World/test_landscape_object_ids.cpp
