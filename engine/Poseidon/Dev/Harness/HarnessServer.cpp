@@ -49,6 +49,15 @@ static void harness_closesocket(SOCKET_T s)
 }
 #endif
 
+static int harness_send(SOCKET_T socket, const char* bytes, int count)
+{
+#ifdef MSG_NOSIGNAL
+    return static_cast<int>(send(socket, bytes, count, MSG_NOSIGNAL));
+#else
+    return static_cast<int>(send(socket, bytes, count, 0));
+#endif
+}
+
 namespace Poseidon::Dev
 {
 
@@ -317,6 +326,9 @@ void HarnessServer::WorkerLoop()
         // Disable Nagle for low-latency command/response
         int flag = 1;
         setsockopt(clientSock, IPPROTO_TCP, TCP_NODELAY, (const char*)&flag, sizeof(flag));
+#ifdef SO_NOSIGPIPE
+        setsockopt(clientSock, SOL_SOCKET, SO_NOSIGPIPE, (const char*)&flag, sizeof(flag));
+#endif
 
         HandleClient(clientSock);
 
@@ -342,7 +354,7 @@ void HarnessServer::HandleClient(SOCKET_T clientSock)
         auto events = _queue.DrainEvents();
         for (const auto& evt : events)
         {
-            int sent = send(clientSock, evt.json.c_str(), static_cast<int>(evt.json.size()), 0);
+            int sent = harness_send(clientSock, evt.json.c_str(), static_cast<int>(evt.json.size()));
             if (sent == HARNESS_SOCKET_ERROR)
             {
                 LOG_DEBUG(Core, "[Harness] Send event failed, client gone");
@@ -393,7 +405,7 @@ void HarnessServer::HandleClient(SOCKET_T clientSock)
             if (!root)
             {
                 std::string err = HarnessProtocol::ErrorResponse("invalid JSON");
-                send(clientSock, err.c_str(), static_cast<int>(err.size()), 0);
+                harness_send(clientSock, err.c_str(), static_cast<int>(err.size()));
                 continue;
             }
 
@@ -404,7 +416,7 @@ void HarnessServer::HandleClient(SOCKET_T clientSock)
             if (cmdStr.empty())
             {
                 std::string err = HarnessProtocol::ErrorResponse("missing 'cmd' field");
-                send(clientSock, err.c_str(), static_cast<int>(err.size()), 0);
+                harness_send(clientSock, err.c_str(), static_cast<int>(err.size()));
                 continue;
             }
             const char* cmdName = cmdStr.c_str();
@@ -413,21 +425,21 @@ void HarnessServer::HandleClient(SOCKET_T clientSock)
             if (std::strcmp(cmdName, "ping") == 0)
             {
                 std::string resp = HarnessProtocol::OkResponse();
-                send(clientSock, resp.c_str(), static_cast<int>(resp.size()), 0);
+                harness_send(clientSock, resp.c_str(), static_cast<int>(resp.size()));
                 continue;
             }
 
             if (std::strcmp(cmdName, "describe") == 0)
             {
                 std::string resp = HarnessProtocol::DescribeResponse(_commands, _events);
-                send(clientSock, resp.c_str(), static_cast<int>(resp.size()), 0);
+                harness_send(clientSock, resp.c_str(), static_cast<int>(resp.size()));
                 continue;
             }
 
             if (std::strcmp(cmdName, "exit") == 0)
             {
                 std::string resp = HarnessProtocol::OkResponse();
-                send(clientSock, resp.c_str(), static_cast<int>(resp.size()), 0);
+                harness_send(clientSock, resp.c_str(), static_cast<int>(resp.size()));
                 _exitRequested.store(true);
                 return; // close client connection
             }
@@ -459,7 +471,7 @@ void HarnessServer::HandleClient(SOCKET_T clientSock)
                 auto waitEvents = _queue.DrainEvents();
                 for (const auto& evt : waitEvents)
                 {
-                    int sent = send(clientSock, evt.json.c_str(), static_cast<int>(evt.json.size()), 0);
+                    int sent = harness_send(clientSock, evt.json.c_str(), static_cast<int>(evt.json.size()));
                     if (sent == HARNESS_SOCKET_ERROR)
                         return;
                 }
@@ -467,7 +479,7 @@ void HarnessServer::HandleClient(SOCKET_T clientSock)
                 HarnessResponse resp;
                 if (_queue.PopResponse(resp) && resp.id == cmd.id)
                 {
-                    int sent = send(clientSock, resp.json.c_str(), static_cast<int>(resp.json.size()), 0);
+                    int sent = harness_send(clientSock, resp.json.c_str(), static_cast<int>(resp.json.size()));
                     if (sent == HARNESS_SOCKET_ERROR)
                         return;
                     gotResponse = true;
@@ -480,7 +492,7 @@ void HarnessServer::HandleClient(SOCKET_T clientSock)
             if (!gotResponse)
             {
                 std::string err = HarnessProtocol::ErrorResponse("command timed out");
-                send(clientSock, err.c_str(), static_cast<int>(err.size()), 0);
+                harness_send(clientSock, err.c_str(), static_cast<int>(err.size()));
             }
         }
     }
