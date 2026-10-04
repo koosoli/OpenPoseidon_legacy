@@ -70,7 +70,7 @@ TEST_CASE("Generated cave adapter creates solid slabs around an empty walkable c
     REQUIRE(shape->ViewGeometryLevel());
     REQUIRE(shape->RoadwayLevel());
     REQUIRE(shape->MemoryLevel());
-    REQUIRE(shape->GetPropertyDammage() == RStringB("No"));
+    REQUIRE(shape->GetPropertyDammage() == RStringB("no"));
     const auto& components = shape->GetGeomComponents();
     REQUIRE(components.Size() == 5);
     for (int i = 0; i < components.Size(); ++i)
