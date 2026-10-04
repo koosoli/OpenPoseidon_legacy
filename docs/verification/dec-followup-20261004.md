@@ -73,7 +73,11 @@ game:
   generator authors four ordinary hole selections. Full cave regeneration is
   therefore not claimed, and the supplied model is preserved.
 
-Native builds, real GPU composition and installed runtime acceptance are pending
-the parent agent's combined integration and deployment. The isolated source
-checks above do not claim those tests passed or that the converted Forest scene
-is installed on the owner's computer. No public remote is updated.
+Root integrated these safe ports into `codex/fog-terrain-dec-followup-20261004`.
+The combined Game/Tests build, native checks, actual installed renderer pipelines
+and both optional underground fixture model/hole/roadway checks passed at
+installed source `f8127fe5`. See the [root verification and owner test guide](fog-terrain-dec-followup-20261004.md)
+and [curated runtime receipt](fog-terrain-dec-followup-20261004-runtime.json).
+This does not establish compatible swim content, Forest extraction/world,
+whole-map material cost, cave AI routes or Box3D cavity contacts. No public
+remote is updated.

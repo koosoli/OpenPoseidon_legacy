@@ -116,6 +116,33 @@ execution:
       source hashes outside reviewed slices remain stale and are not silently
       renewed; Preview validator stops at RND-005A, Compat at AST-011C.
   review_model: OWNER_REVIEW_NO_INDEPENDENT_REVIEWER
+  fog_terrain_dec_followup_checkpoint:
+    branch: codex/fog-terrain-dec-followup-20261004
+    baseline_commit: 8479c6f3
+    installed_source_commit: f8127fe5
+    installed_local_time: 2026-10-04_11:41
+    state: INSTALLED_BOUNDED_TERRAIN_FOG_CAVE_CHECKS_PASSED_SWIM_CONTENT_HELD
+    evidence: docs/verification/fog-terrain-dec-followup-20261004.md
+    runtime_receipt: docs/verification/fog-terrain-dec-followup-20261004-runtime.json
+    dec_inventory_evidence: docs/verification/dec-followup-20261004.md
+    dec_audit_receipt: docs/verification/dec-followup-20261004-audit.json
+    terrain_source_evidence: docs/roadmap/decisions/original-ofp-terrain-background-20261004.md
+    fog_source_evidence: docs/fog-incoming-light-20261004.md
+    held_content: NINETEEN_SWIM_RTMS_AND_PACK_ACTIVATION_PENDING_PERMISSION_PROVENANCE
+    note: >-
+      Finite owner-authorised fog height/compactness, lighting and original Everon
+      distant terrain follow-up. Safe source and procedural cave fixtures from
+      exactly two new Dec tips ported; raw branch histories and swim asset pack
+      excluded. All 98 previous tips unchanged and ancestral. No Forest assets
+      supplied. Combined build/native and installed full pipeline passed.
+      Eighteen accepted original Everon views remove inspected distant land
+      cutoff; 24 broad and 12 compact fog views pass. Incoming sunlight and
+      terrain obstruction implemented with bounded single scattering, not fluid
+      deflection. Two optional procedural fixture model/hole/roadway checks pass;
+      cave AI/Box3D cavity and Forest asset acceptance remain open. Root sole
+      deployer. Failed runner receipts preserved and explained in evidence.
+      Later commits contain smoke tools/evidence only; game source remains f8127fe5.
+      Finite batch wraps here per owner request, pending owner visual judgement.
   review_model_note: >-
     Preview 0 has no independent reviewer and cannot obtain one: Oliver Kay is
     the only human on the project. Reviews are performed by the integration
