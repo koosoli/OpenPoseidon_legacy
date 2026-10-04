@@ -142,6 +142,41 @@ execution:
       Owner requests wrap-up; finite stock-model batch stops here with those
       failures recorded. Four simultaneous and64 retained remain separate
       performance limits; saved frozen corpses currently lack wake recipes.
+  kolgujev_fog_corpse_feedback_checkpoint:
+    branch: codex/kolgujev-fog-corpse-fixes-20261004
+    baseline_commit: 41ce4191
+    installed_source_commit: 08ecd9a4
+    installed_local_time: 2026-10-04_19:04
+    state: INSTALLED_BOUNDED_CHECKS_PASSED_PRONE_AND_TORCH_VISUAL_ACCEPTANCE_PARTIAL
+    finite_batch_closed_per_owner_request: true
+    evidence: docs/verification/kolgujev-fog-corpse-feedback-20261004.md
+    runtime_receipt: docs/verification/kolgujev-fog-corpse-feedback-20261004-runtime.json
+    actual_player_rifle_classes_passed: 4
+    universal_all_posture_acceptance: false
+    torch_shaft_visual_acceptance: false
+    note: >-
+      Opaque outdoor fog receivers, thin-layer participating light samples,
+      normalized anisotropic ambient, neutral mist/horizon closure, nighttime
+      encoding and actual local-light scattering integrated. Grass colour
+      fields broadened to 167–200 m; snowfall automatically contributes 0.15–0.60
+      render fog while preserving stronger authored/manual fog. Real player SDL
+      rifle shots pass fresh/frozen US, Russian, Resistance, Civilian on original
+      Everon, with actual consumed pose change and native wake evidence.
+      Projectile momentum uses resolved ammunition mass and real impact lever.
+      Native 32435 assertions/91 cases and 15 fog GPU tests pass. Production sky
+      import-loading error in 34959cb9 diagnosed during installed checks and
+      repaired in 08ecd9a4; failed aggregate receipts preserved. Guarded grounded
+      contact recovery does not move initial skin/hulls/origins. Retail prone
+      results remain phase-dependent: shallow overlaps recover and settle;
+      deeper 179–181 mm refuse, and final civilian 105.63 mm exceeds 100 mm allowance.
+      Final Western 39.05 mm supported recovery/toggle/cleanup passed separately.
+      Night runtime, torch input and GPU scattering math pass, but installed
+      images do not establish the requested strong visible torch shafts.
+      Exact owner black-spot view not reproduced pixel-for-pixel; bounded
+      shader counterexamples and original Kolgujev views checked. Existing
+      two-pilot settlement and other stock checkpoint limitations remain.
+      Owner requested a finite wrap-up; no universal completion claim and no
+      unrelated roadmap task is reopened at this checkpoint.
   review_model: OWNER_REVIEW_NO_INDEPENDENT_REVIEWER
   local_swim_test_checkpoint:
     state: LOCAL_OPT_IN_ADDON_INSTALLED_PLAYER_RUNTIME_CHECKS_PASSED

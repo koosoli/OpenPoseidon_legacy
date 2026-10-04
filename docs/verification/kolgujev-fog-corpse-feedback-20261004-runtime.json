@@ -1,0 +1,1397 @@
+{
+  "source_commit": "08ecd9a4",
+  "branch": "codex/kolgujev-fog-corpse-fixes-20261004",
+  "installed": {
+    "stamp": "codex/kolgujev-fog-corpse-fixes-20261004 08ecd9a4 2026-10-04_19:04 deploy-ps1\r\n",
+    "files": [
+      {
+        "bytes": 31604224,
+        "sha256": "C1BD7083DC7758C10D19A0A445013F88D6C32A691CE5EEC79C6EC229740C63D0",
+        "writtenUtc": "2026-10-04T17:03:37.0102572Z",
+        "name": "OpenPoseidon.exe"
+      },
+      {
+        "bytes": 18575872,
+        "sha256": "C4E0DA9BAFC18F8B736E4DC52793C8702F6CC68DEEC7D3DEA9B667BB7EFA7C00",
+        "writtenUtc": "2026-10-04T17:02:59.024615Z",
+        "name": "wgpu_renderer.dll"
+      }
+    ]
+  },
+  "scope": "Finite regression batch, author-run installed checks. Partial prone and torch visual acceptance are explicitly open; no universal all-posture/all-map qualification.",
+  "checks": {
+    "production_sky": {
+      "receipt": {
+        "sha256": "11AB63B375CDC3C97994E49D98ECF0A782B0B7E8A61AB0FF4EA94EAF8DD1009E",
+        "bytes": 19374,
+        "path": "build/kolgujev-production-sky-tests.log"
+      },
+      "tests": 1,
+      "passed": true
+    },
+    "layered_fog": {
+      "receipt": {
+        "sha256": "1E9E325FD05D1077D68BDFF68A5838B58D81FAC1461AD97DED77EE191802D9FD",
+        "bytes": 20806,
+        "path": "build/kolgujev-final-fog-gpu-tests.log"
+      },
+      "tests": 15,
+      "passed": true
+    },
+    "actual_player_rifle": {
+      "receipt": {
+        "sha256": "698C0E9480BE7A5838F1C0A553CB3610A6AEF6441F56060830190F6D64219FD1",
+        "bytes": 3892,
+        "path": "build/player-corpse-rifle/sky-fixed-final-20261004-190835/result.json"
+      },
+      "classes": [
+        {
+          "fresh": {
+            "receivedDelta": 2,
+            "transferDelta": 1,
+            "inputProven": true,
+            "wakeDelta": 0,
+            "nativeTerminal": [
+              "[2026-10-04 19:08:58.432] [app-c670] [INFO] [WORLD]   SNOW_BULLET_TERMINAL kind=object time=3.400 x=5499.784 y=19.618 z=9999.343 vx=-101.752 vy=-159.732 vz=879.848 hit=\"WEST Bravo Schwarz:1\""
+            ],
+            "consumedPoseChanged": true,
+            "passed": true
+          },
+          "class": "SoldierWB",
+          "frozen": {
+            "receivedDelta": 2,
+            "transferDelta": 1,
+            "inputProven": true,
+            "wakeDelta": 1,
+            "nativeTerminal": [
+              "[2026-10-04 19:09:04.058] [app-c670] [INFO] [WORLD]   SNOW_BULLET_TERMINAL kind=object time=7.990 x=5499.784 y=19.615 z=9999.348 vx=-101.811 vy=-159.967 vz=879.798 hit=\"WEST Bravo Schwarz:1\""
+            ],
+            "consumedPoseChanged": true,
+            "passed": true
+          },
+          "passed": true,
+          "caseReceipt": {
+            "sha256": "349518CDEF59B24D68DFF06D99E5DD657558A353C9D7BAD546DE99BDA17288FF",
+            "bytes": 8373316,
+            "path": "build/player-corpse-rifle/sky-fixed-final-20261004-190835/00-SoldierWB/case.json"
+          }
+        },
+        {
+          "fresh": {
+            "receivedDelta": 2,
+            "transferDelta": 1,
+            "inputProven": true,
+            "wakeDelta": 0,
+            "nativeTerminal": [
+              "[2026-10-04 19:09:24.587] [app-c670] [INFO] [WORLD]   SNOW_BULLET_TERMINAL kind=object time=13.940 x=5515.663 y=19.870 z=9999.891 vx=-116.108 vy=-152.928 vz=879.279 hit=\"EAST Alpha Schwarz:1\""
+            ],
+            "consumedPoseChanged": true,
+            "passed": true
+          },
+          "class": "SoldierEB",
+          "frozen": {
+            "receivedDelta": 2,
+            "transferDelta": 1,
+            "inputProven": true,
+            "wakeDelta": 1,
+            "nativeTerminal": [
+              "[2026-10-04 19:09:31.669] [app-c670] [INFO] [WORLD]   SNOW_BULLET_TERMINAL kind=object time=25.534 x=5515.659 y=19.871 z=9999.896 vx=-116.664 vy=-152.755 vz=879.236 hit=\"EAST Alpha Schwarz:1\""
+            ],
+            "consumedPoseChanged": true,
+            "passed": true
+          },
+          "passed": true,
+          "caseReceipt": {
+            "sha256": "001B497BE003C7E6BB171A66FE6873688E076E836C3BD18C9488D430EDEF0C38",
+            "bytes": 8344244,
+            "path": "build/player-corpse-rifle/sky-fixed-final-20261004-190835/01-SoldierEB/case.json"
+          }
+        },
+        {
+          "fresh": {
+            "receivedDelta": 2,
+            "transferDelta": 1,
+            "inputProven": true,
+            "wakeDelta": 0,
+            "nativeTerminal": [
+              "[2026-10-04 19:09:53.513] [app-c670] [INFO] [WORLD]   SNOW_BULLET_TERMINAL kind=object time=31.756 x=5531.382 y=20.224 z=9999.386 vx=-171.928 vy=-95.666 vz=878.230 hit=\"GUER Alpha Schwarz:1\""
+            ],
+            "consumedPoseChanged": true,
+            "passed": true
+          },
+          "class": "SoldierGB",
+          "frozen": {
+            "receivedDelta": 2,
+            "transferDelta": 1,
+            "inputProven": true,
+            "wakeDelta": 1,
+            "nativeTerminal": [
+              "[2026-10-04 19:10:01.772] [app-c670] [INFO] [WORLD]   SNOW_BULLET_TERMINAL kind=object time=46.665 x=5531.376 y=20.210 z=9999.414 vx=-171.967 vy=-97.389 vz=878.033 hit=\"GUER Alpha Schwarz:1\""
+            ],
+            "consumedPoseChanged": true,
+            "passed": true
+          },
+          "passed": true,
+          "caseReceipt": {
+            "sha256": "AF8FC84DFD59550CCBDA5BBB9EC4F497A1D093B6D799D81379F134D7D83DD685",
+            "bytes": 8401381,
+            "path": "build/player-corpse-rifle/sky-fixed-final-20261004-190835/02-SoldierGB/case.json"
+          }
+        },
+        {
+          "fresh": {
+            "receivedDelta": 2,
+            "transferDelta": 1,
+            "inputProven": true,
+            "wakeDelta": 0,
+            "nativeTerminal": [
+              "[2026-10-04 19:10:25.170] [app-c670] [INFO] [WORLD]   SNOW_BULLET_TERMINAL kind=object time=53.193 x=5548.342 y=20.473 z=9998.805 vx=-9.946 vy=-18.027 vz=899.765 hit=\"CIVL Alpha Schwarz:1\""
+            ],
+            "consumedPoseChanged": true,
+            "passed": true
+          },
+          "class": "Civilian",
+          "frozen": {
+            "receivedDelta": 2,
+            "transferDelta": 1,
+            "inputProven": true,
+            "wakeDelta": 1,
+            "nativeTerminal": [
+              "[2026-10-04 19:10:30.598] [app-c670] [INFO] [WORLD]   SNOW_BULLET_TERMINAL kind=object time=57.698 x=5548.345 y=20.472 z=9998.811 vx=-9.302 vy=-18.150 vz=899.769 hit=\"CIVL Alpha Schwarz:1\""
+            ],
+            "consumedPoseChanged": true,
+            "passed": true
+          },
+          "passed": true,
+          "caseReceipt": {
+            "sha256": "60C943542123660CEE004A1AA45874C95F9A517CD859D479ABDB5D4DEC00A232",
+            "bytes": 6732292,
+            "path": "build/player-corpse-rifle/sky-fixed-final-20261004-190835/03-Civilian/case.json"
+          }
+        }
+      ],
+      "passed": true
+    },
+    "native": {
+      "receipt": {
+        "sha256": "575DA0B38A061F559B0BA69E519F3437BE2AB374709388E971B7535AD005B3D2",
+        "bytes": 1521,
+        "path": "build/kolgujev-final-native.log"
+      },
+      "cases": 91,
+      "passed": true,
+      "assertions": 32435
+    },
+    "full_sky": {
+      "testsPassed": 42,
+      "receipt": {
+        "path": "build/kolgujev-full-sky-final-tests.log",
+        "bytes": 22698,
+        "sha256": "CE4D3E482B0201DFF69C49C3D8C91875643171B4DE53AD3301800FA615E1070C"
+      },
+      "testSourceCommit": "89ef58e6",
+      "ignored": 1,
+      "passed": true,
+      "failed": 0
+    }
+  },
+  "galleries": [
+    {
+      "receipt": {
+        "sha256": "08C6633A3F205B35682E6ACCAF753EF968843EFAB0744FDEBE496EB32B8E5963",
+        "bytes": 83220,
+        "path": "build/kolgujev-fog-after/20261004-190630/capture-receipt.json"
+      },
+      "captures": [
+        {
+          "gpuFogMs": 0.0010239999974146485,
+          "profile": {
+            "fog": 0,
+            "layer": "0,750,5,0",
+            "terrain": "0,0,0,150",
+            "name": "clear"
+          },
+          "exposure": ".6",
+          "name": "reported",
+          "sha256": "F706771F9FE7766DDB8FED4587AFF120D3EA1FF2D9EB1707A07D7DC3AB9F3471",
+          "gpuTotalMs": 10.109951972961426,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                0,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.05000000074505806,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": -0.5908143520355225,
+            "nightEffect": 0,
+            "solarDrying": 0.5908143520355225,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0,
+            "snowAdjustedFog": 0,
+            "terrainRange": 6480,
+            "baseRange": 6480,
+            "objectRange": 6480,
+            "tacticalVisibility": 6500,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\kolgujev-fog-after\\20261004-190630\\clear-reported.png",
+          "nativeWorld": "worlds\\cain.wrp",
+          "autoExposure": "0",
+          "requestedPose": [
+            5448.73,
+            590.95,
+            7011.85,
+            0.8516318723590842,
+            -0.40833046038138493,
+            -0.3286173901467884
+          ]
+        },
+        {
+          "gpuFogMs": 0.9861119985580444,
+          "profile": {
+            "fog": 0.15,
+            "layer": "0,750,5,0.01",
+            "terrain": "0,0,0,150",
+            "name": "dense"
+          },
+          "exposure": ".6",
+          "name": "reported",
+          "sha256": "2A4D7F5707558BDC4F9E127D115701255CE9FD9771086EE68F3F2A27D25A8D72",
+          "gpuTotalMs": 11.599871635437012,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                0,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.05000000074505806,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": -0.5908143520355225,
+            "nightEffect": 0,
+            "solarDrying": 0.5908143520355225,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0.15000000596046448,
+            "snowAdjustedFog": 0.15000000596046448,
+            "terrainRange": 3863.037841796875,
+            "baseRange": 3863.037841796875,
+            "objectRange": 3863.037841796875,
+            "tacticalVisibility": 3863.037841796875,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\kolgujev-fog-after\\20261004-190630\\dense-reported.png",
+          "nativeWorld": "worlds\\cain.wrp",
+          "autoExposure": "0",
+          "requestedPose": [
+            5448.73,
+            590.95,
+            7011.85,
+            0.8516318723590842,
+            -0.40833046038138493,
+            -0.3286173901467884
+          ]
+        },
+        {
+          "gpuFogMs": 0.34406399726867676,
+          "profile": {
+            "fog": 0.15,
+            "layer": "300,303,.5,0.05",
+            "terrain": "0,0,0,150",
+            "name": "thin"
+          },
+          "exposure": ".6",
+          "name": "reported",
+          "sha256": "F8482BEE27A224D540861EEA8323361A81FCA634B66C1BA4DB1A94936C2B5AFF",
+          "gpuTotalMs": 10.600447654724121,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                0,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.05000000074505806,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": -0.5908143520355225,
+            "nightEffect": 0,
+            "solarDrying": 0.5908143520355225,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0.15000000596046448,
+            "snowAdjustedFog": 0.15000000596046448,
+            "terrainRange": 3863.037841796875,
+            "baseRange": 3863.037841796875,
+            "objectRange": 3863.037841796875,
+            "tacticalVisibility": 3863.037841796875,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\kolgujev-fog-after\\20261004-190630\\thin-reported.png",
+          "nativeWorld": "worlds\\cain.wrp",
+          "autoExposure": "0",
+          "requestedPose": [
+            5448.73,
+            590.95,
+            7011.85,
+            0.8516318723590842,
+            -0.40833046038138493,
+            -0.3286173901467884
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "receipt": {
+        "sha256": "7EDEC5F4E5C82733B93C4029EC9D5B4688BCABC1929B2F0D3166C0886E9852C2",
+        "bytes": 55426,
+        "path": "build/grass-broad-gallery/20261004-191330/capture-receipt.json"
+      },
+      "captures": [
+        {
+          "gpuFogMs": 0.002047999994829297,
+          "profile": {
+            "fog": 0,
+            "terrain": "0,0,0,150",
+            "layer": "0,750,5,0",
+            "name": "grass"
+          },
+          "exposure": ".6",
+          "name": "top",
+          "sha256": "D87C71D2E31651BB490344ACCBC393EA0EAA2DDD6793615D437679AEAF0CE865",
+          "gpuTotalMs": 14.599167823791504,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                0,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.05000000074505806,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": -0.5908143520355225,
+            "nightEffect": 0,
+            "solarDrying": 0.5908143520355225,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0,
+            "snowAdjustedFog": 0,
+            "terrainRange": 6480,
+            "baseRange": 6480,
+            "objectRange": 6480,
+            "tacticalVisibility": 6500,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\grass-broad-gallery\\20261004-191330\\grass-top.png",
+          "nativeWorld": "worlds\\eden.wrp",
+          "autoExposure": "0",
+          "requestedPose": [
+            5018.51,
+            117.58,
+            4087.66,
+            -0.0456,
+            -0.99756,
+            -0.0528
+          ]
+        },
+        {
+          "gpuFogMs": 0.0010239999974146485,
+          "profile": {
+            "fog": 0,
+            "terrain": "0,0,0,150",
+            "layer": "0,750,5,0",
+            "name": "grass"
+          },
+          "exposure": ".6",
+          "name": "medium",
+          "sha256": "047F64701E2332B31A9A7F8ADFB3403ACEB31B6F4ED1BFAE3DF7B7DF33E56978",
+          "gpuTotalMs": 9.797632217407227,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                0,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.05000000074505806,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": -0.5908143520355225,
+            "nightEffect": 0,
+            "solarDrying": 0.5908143520355225,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0,
+            "snowAdjustedFog": 0,
+            "terrainRange": 6480,
+            "baseRange": 6480,
+            "objectRange": 6480,
+            "tacticalVisibility": 6500,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\grass-broad-gallery\\20261004-191330\\grass-medium.png",
+          "nativeWorld": "worlds\\eden.wrp",
+          "autoExposure": "0",
+          "requestedPose": [
+            5018.51,
+            55,
+            4087.66,
+            -0.557,
+            -0.4226,
+            -0.715
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "receipt": {
+        "sha256": "818B26AF4665941DC9E3A023C21B36C2C2969DB4D9FA9CB20136E85DCFA7BDF7",
+        "bytes": 83239,
+        "path": "build/night-torch-fog/20261004-190439/capture-receipt.json"
+      },
+      "captures": [
+        {
+          "gpuFogMs": 0.0010239999974146485,
+          "profile": {
+            "name": "night-clear",
+            "fog": 0,
+            "layer": "0,45,5,0.015",
+            "terrain": "1,0,0,150"
+          },
+          "exposure": ".6",
+          "name": "torch",
+          "sha256": "4E3B1AC7101A263943CBF2E89F93C264A19C49CCD623EB2733BF88D1DDFB2DE5",
+          "gpuTotalMs": 13.855744361877441,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                1,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.05000000074505806,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": 0.4388008117675781,
+            "nightEffect": 1,
+            "solarDrying": 0,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0,
+            "snowAdjustedFog": 0,
+            "terrainRange": 6480,
+            "baseRange": 6480,
+            "objectRange": 6480,
+            "tacticalVisibility": 4875,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\night-torch-fog\\20261004-190439\\night-clear-torch.png",
+          "nativeWorld": "worlds\\eden.wrp",
+          "autoExposure": "0",
+          "requestedPose": [
+            5500,
+            22.5,
+            9996,
+            0,
+            -0.06,
+            1
+          ]
+        },
+        {
+          "gpuFogMs": 3.40172791481018,
+          "profile": {
+            "name": "night-fog",
+            "fog": 0.3,
+            "layer": "0,45,5,0.015",
+            "terrain": "1,0,0,150"
+          },
+          "exposure": ".6",
+          "name": "torch",
+          "sha256": "614EE2E7A6139F1CDCD190C5FBD6AEAFC232232FC4BD0436C60226163E681D54",
+          "gpuTotalMs": 14.592000007629395,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                1,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.05000000074505806,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": 0.4388008117675781,
+            "nightEffect": 1,
+            "solarDrying": 0,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0.300000011920929,
+            "snowAdjustedFog": 0.300000011920929,
+            "terrainRange": 1460.6112060546875,
+            "baseRange": 1460.6112060546875,
+            "objectRange": 1460.6112060546875,
+            "tacticalVisibility": 1460.6112060546875,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\night-torch-fog\\20261004-190439\\night-fog-torch.png",
+          "nativeWorld": "worlds\\eden.wrp",
+          "autoExposure": "0",
+          "requestedPose": [
+            5500,
+            22.5,
+            9996,
+            0,
+            -0.06,
+            1
+          ]
+        },
+        {
+          "gpuFogMs": 1.8636800050735474,
+          "profile": {
+            "name": "snow-storm",
+            "fog": 0,
+            "layer": "0,45,5,0.015",
+            "terrain": "1,0,0,150"
+          },
+          "exposure": ".6",
+          "name": "torch",
+          "sha256": "5FDEAC8181F9E86E81C9C90CD2DE80526B39F537C458449B4F233465DA53F469",
+          "gpuTotalMs": 14.022656440734863,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                1,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.9049999713897705,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": 0.4388008117675781,
+            "nightEffect": 1,
+            "solarDrying": 0,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0,
+            "snowAdjustedFog": 0.600000023841858,
+            "terrainRange": 6480,
+            "baseRange": 6480,
+            "objectRange": 6480,
+            "tacticalVisibility": 4875,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\night-torch-fog\\20261004-190439\\snow-storm-torch.png",
+          "nativeWorld": "worlds\\eden.wrp",
+          "autoExposure": "0",
+          "requestedPose": [
+            5500,
+            22.5,
+            9996,
+            0,
+            -0.06,
+            1
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "receipt": {
+        "sha256": "D15703A6E8356DE0AEB4031C8FBFC9A6A9F38CEDA7204F1DEFA9A4250DC6061B",
+        "bytes": 83303,
+        "path": "build/night-torch-native-camera/20261004-191058/capture-receipt.json"
+      },
+      "captures": [
+        {
+          "gpuFogMs": 0.0010239999974146485,
+          "profile": {
+            "fog": 0,
+            "layer": "0,45,5,0.015",
+            "terrain": "1,0,0,150",
+            "name": "night-clear"
+          },
+          "exposure": "4",
+          "name": "torch",
+          "sha256": "79CF20DB4ACAD96C88A5FF0C7F3EFE54382EE7234F1E724818AEFF734095C672",
+          "gpuTotalMs": 11.2291841506958,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                1,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.05000000074505806,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": 0.4388008117675781,
+            "nightEffect": 1,
+            "solarDrying": 0,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0,
+            "snowAdjustedFog": 0,
+            "terrainRange": 6480,
+            "baseRange": 6480,
+            "objectRange": 6480,
+            "tacticalVisibility": 4875,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\night-torch-native-camera\\20261004-191058\\night-clear-torch.png",
+          "nativeWorld": "worlds\\eden.wrp",
+          "autoExposure": "0",
+          "requestedPose": [
+            5500,
+            22.5,
+            9996,
+            0,
+            -0.06,
+            1
+          ]
+        },
+        {
+          "gpuFogMs": 3.497983932495117,
+          "profile": {
+            "fog": 0.3,
+            "layer": "0,45,5,0.015",
+            "terrain": "1,0,0,150",
+            "name": "night-fog"
+          },
+          "exposure": "4",
+          "name": "torch",
+          "sha256": "585FFA616C47C4F91EEA0C0890BBEBDD40B3DBFF4C1534DCEE57C895D3D715EC",
+          "gpuTotalMs": 15.185919761657715,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                1,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.05000000074505806,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": 0.4388008117675781,
+            "nightEffect": 1,
+            "solarDrying": 0,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0.300000011920929,
+            "snowAdjustedFog": 0.300000011920929,
+            "terrainRange": 1460.6112060546875,
+            "baseRange": 1460.6112060546875,
+            "objectRange": 1460.6112060546875,
+            "tacticalVisibility": 1460.6112060546875,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\night-torch-native-camera\\20261004-191058\\night-fog-torch.png",
+          "nativeWorld": "worlds\\eden.wrp",
+          "autoExposure": "0",
+          "requestedPose": [
+            5500,
+            22.5,
+            9996,
+            0,
+            -0.06,
+            1
+          ]
+        },
+        {
+          "gpuFogMs": 1.9619840383529663,
+          "profile": {
+            "fog": 0,
+            "layer": "0,45,5,0.015",
+            "terrain": "1,0,0,150",
+            "name": "snow-storm"
+          },
+          "exposure": "4",
+          "name": "torch",
+          "sha256": "CFA8E3FF36AA5F56984915FDB4C05F3C5F90EC39154DCB49610C42A09D2E63B1",
+          "gpuTotalMs": 14.141440391540527,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                1,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.9049999713897705,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": 0.4388008117675781,
+            "nightEffect": 1,
+            "solarDrying": 0,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0,
+            "snowAdjustedFog": 0.600000023841858,
+            "terrainRange": 6480,
+            "baseRange": 6480,
+            "objectRange": 6480,
+            "tacticalVisibility": 4875,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\night-torch-native-camera\\20261004-191058\\snow-storm-torch.png",
+          "nativeWorld": "worlds\\eden.wrp",
+          "autoExposure": "0",
+          "requestedPose": [
+            5500,
+            22.5,
+            9996,
+            0,
+            -0.06,
+            1
+          ]
+        }
+      ],
+      "poseNote": "requestedPose is UNUSED planned fixture metadata; this gallery retained the normal third-person native camera.",
+      "error": null
+    },
+    {
+      "receipt": {
+        "sha256": "C367AB46C5884D93086263F3E9F318370235086FF7FAAAEE053160AECCBE2B27",
+        "bytes": 55714,
+        "path": "build/night-torch-front/20261004-191850/capture-receipt.json"
+      },
+      "captures": [
+        {
+          "gpuFogMs": 0.0010239999974146485,
+          "profile": {
+            "layer": "0,45,5,0.015",
+            "name": "night-clear",
+            "fog": 0,
+            "terrain": "1,0,0,150"
+          },
+          "exposure": ".6",
+          "name": "torch",
+          "sha256": "2A2D030820813174BF9F0FFA5B094672164D2C0B2DF426B68BE6AD0845F843A9",
+          "gpuTotalMs": 13.2608003616333,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                1,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.05000000074505806,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": 0.4388008117675781,
+            "nightEffect": 1,
+            "solarDrying": 0,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0,
+            "snowAdjustedFog": 0,
+            "terrainRange": 6480,
+            "baseRange": 6480,
+            "objectRange": 6480,
+            "tacticalVisibility": 4875,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\night-torch-front\\20261004-191850\\night-clear-torch.png",
+          "nativeWorld": "worlds\\eden.wrp",
+          "autoExposure": "1",
+          "requestedPose": [
+            5508,
+            22,
+            10008,
+            -0.7,
+            -0.1,
+            -0.7
+          ]
+        },
+        {
+          "gpuFogMs": 3.2143359184265137,
+          "profile": {
+            "layer": "0,45,5,0.015",
+            "name": "night-fog",
+            "fog": 0.3,
+            "terrain": "1,0,0,150"
+          },
+          "exposure": ".6",
+          "name": "torch",
+          "sha256": "F0EBF67DA94D2DC7712472065279B5FA583AA44A2FE7143A2421F4FA09601B7B",
+          "gpuTotalMs": 16.097280502319336,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                1,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.05000000074505806,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": 0.4388008117675781,
+            "nightEffect": 1,
+            "solarDrying": 0,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0.300000011920929,
+            "snowAdjustedFog": 0.300000011920929,
+            "terrainRange": 1460.6112060546875,
+            "baseRange": 1460.6112060546875,
+            "objectRange": 1460.6112060546875,
+            "tacticalVisibility": 1460.6112060546875,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\night-torch-front\\20261004-191850\\night-fog-torch.png",
+          "nativeWorld": "worlds\\eden.wrp",
+          "autoExposure": "1",
+          "requestedPose": [
+            5508,
+            22,
+            10008,
+            -0.7,
+            -0.1,
+            -0.7
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "receipt": {
+        "sha256": "50EA7D13B350089E837968D48E76F5B9864AC73EA90451C3C85196C65022E8F7",
+        "bytes": 28134,
+        "path": "build/night-torch-unshadowed/20261004-192525/capture-receipt.json"
+      },
+      "captures": [
+        {
+          "gpuFogMs": 3.497983932495117,
+          "profile": {
+            "terrain": "1,0,0,150",
+            "layer": "0,45,5,0.015",
+            "fog": 0.3,
+            "name": "night-fog"
+          },
+          "exposure": ".6",
+          "name": "torch",
+          "sha256": "ED49710091B45E1729FDCC768466EA7CE675ABA5263EEEF3D52BD23DBB7353E2",
+          "gpuTotalMs": 14.437376022338867,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                1,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.05000000074505806,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": 0.4388008117675781,
+            "nightEffect": 1,
+            "solarDrying": 0,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0.300000011920929,
+            "snowAdjustedFog": 0.300000011920929,
+            "terrainRange": 1460.6112060546875,
+            "baseRange": 1460.6112060546875,
+            "objectRange": 1460.6112060546875,
+            "tacticalVisibility": 1460.6112060546875,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\night-torch-unshadowed\\20261004-192525\\night-fog-torch.png",
+          "nativeWorld": "worlds\\eden.wrp",
+          "autoExposure": "1",
+          "requestedPose": [
+            5508,
+            22,
+            10008,
+            -0.7,
+            -0.1,
+            -0.7
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "receipt": {
+        "sha256": "515E27FD12E938A1E19F3A0AC46367AFEAE5BE37C505A76F71BF41C342B3E5AC",
+        "bytes": 55687,
+        "path": "build/night-torch-beam/20261004-192914/capture-receipt.json"
+      },
+      "captures": [
+        {
+          "gpuFogMs": 0.002047999994829297,
+          "profile": {
+            "layer": "0,45,5,0.015",
+            "terrain": "1,0,0,150",
+            "name": "night-clear",
+            "fog": 0
+          },
+          "exposure": ".6",
+          "name": "torch",
+          "sha256": "F23C17A623152240AE4E686E4B7878D169903EFB0354839EC62A2D7DFB873222",
+          "gpuTotalMs": 11.64799976348877,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                1,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.05000000074505806,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": 0.4388008117675781,
+            "nightEffect": 1,
+            "solarDrying": 0,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0,
+            "snowAdjustedFog": 0,
+            "terrainRange": 6480,
+            "baseRange": 6480,
+            "objectRange": 6480,
+            "tacticalVisibility": 4875,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\night-torch-beam\\20261004-192914\\night-clear-torch.png",
+          "nativeWorld": "worlds\\eden.wrp",
+          "autoExposure": "1",
+          "requestedPose": [
+            5510,
+            22,
+            10015,
+            -1,
+            -0.15,
+            0
+          ]
+        },
+        {
+          "gpuFogMs": 3.69868803024292,
+          "profile": {
+            "layer": "0,45,5,0.015",
+            "terrain": "1,0,0,150",
+            "name": "night-fog",
+            "fog": 0.3
+          },
+          "exposure": ".6",
+          "name": "torch",
+          "sha256": "F28772D83FEB86A92BFCCFFD3780E4B3FA9BDFB3451ADA7DBAE49F27C0C566B2",
+          "gpuTotalMs": 16.672767639160156,
+          "actualWeather": {
+            "rain": 0,
+            "overcast": 0,
+            "rendererSkyAvailable": true,
+            "rendererSky": {
+              "enabled": true,
+              "skyLighting": true,
+              "layeredFog": true,
+              "fogTerrain": [
+                1,
+                0,
+                0,
+                150
+              ],
+              "fogPatch": [
+                0,
+                350,
+                60,
+                60
+              ],
+              "coverageFromWeather": true,
+              "coveragePinned": false,
+              "coverage": 0.05000000074505806,
+              "clearCoverage": 0.05000000074505806,
+              "fullCoverage": 0.949999988079071,
+              "scope": "Latest producer-owned CPU sky settings, updated by render-parameter packing. May lag world weather; no frame identity, Rust acceptance, GPU completion or pixel/cloud-map proof. skyLighting is a look setting, not proof of the active HDR shader route."
+            },
+            "sunAvailable": true,
+            "sunTravelY": 0.4388008117675781,
+            "nightEffect": 1,
+            "solarDrying": 0,
+            "particleDensity": 0,
+            "particleSnowflakes": false,
+            "liquidRain": 0,
+            "fog": 0.300000011920929,
+            "snowAdjustedFog": 0.300000011920929,
+            "terrainRange": 1460.6112060546875,
+            "baseRange": 1460.6112060546875,
+            "objectRange": 1460.6112060546875,
+            "tacticalVisibility": 1460.6112060546875,
+            "selectedRange": 6500,
+            "ok": true
+          },
+          "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\night-torch-beam\\20261004-192914\\night-fog-torch.png",
+          "nativeWorld": "worlds\\eden.wrp",
+          "autoExposure": "1",
+          "requestedPose": [
+            5510,
+            22,
+            10015,
+            -1,
+            -0.15,
+            0
+          ]
+        }
+      ],
+      "error": null
+    }
+  ],
+  "prone": [
+    {
+      "note": "Aggregate invalidated by sky startup shader errors; individual supported physics observations retained separately.",
+      "aggregatePassed": false,
+      "receipt": {
+        "sha256": "50C770C6749685159C964687F03E2FBE7C62CD8C5F87DD7A1DCA97C45560FFE4",
+        "bytes": 10427,
+        "path": "build/stock-ragdoll-models/final-grounded-prone-20261004-185515/result.json"
+      },
+      "source": "34959cb9",
+      "cases": [
+        {
+          "class": "SoldierWB",
+          "passed": false,
+          "error": "Actual model admission deadline."
+        },
+        {
+          "class": "SoldierEB",
+          "passed": false,
+          "error": "Actual model admission deadline."
+        },
+        {
+          "class": "Civilian",
+          "passed": true,
+          "error": null
+        }
+      ],
+      "error": "Actual runtime failure logged."
+    },
+    {
+      "note": "Civilian refused105.63mm; separate Western toggle fixture admitted39.05mm and retained supported pose. Clean graphics log and normal exit.",
+      "aggregatePassed": false,
+      "receipt": {
+        "sha256": "29CACDD605A4933B355A4AD995C7876887DDBFC64AE9AC1CC9D6E94D5304C564",
+        "bytes": 10092,
+        "path": "build/stock-ragdoll-models/sky-fixed-prone-20261004-191536/result.json"
+      },
+      "source": "08ecd9a4",
+      "cases": [
+        {
+          "class": "Civilian",
+          "passed": false,
+          "error": "Actual model admission deadline."
+        }
+      ],
+      "error": "One or more requested stock model families failed; inspect case.json evidence."
+    }
+  ],
+  "remaining": [
+    "Strong visible player-torch shafts not established by the dark installed captures; GPU emitter math, runtime night transport and actual torch input pass separately.",
+    "Deep retail prone skin/terrain overlap still refuses; final Civilian105.63mm exceeds the guarded100mm allowance.",
+    "Earlier stock-model checkpoint has two Camel-pilot post-hit settling failures; no new37-model/posture census.",
+    "Exact owner sky black spots not reproduced pixel-for-pixel; new thin-layer/HG counterexamples and corrected views pass bounded checks."
+  ]
+}
