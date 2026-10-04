@@ -179,7 +179,8 @@ try{
   Start-Sleep -Milliseconds 180;$position=Eval 'getPosASL player';Require ((Eval 'alive player') -and $position.Count -eq 3) 'Player unavailable during cave exit.'
   $along=($position[0]-$site.x)*$site.fx+($position[1]-$site.z)*$site.fz;$side=($position[0]-$site.x)*$site.sx+($position[1]-$site.z)*$site.sz
   Require ([Math]::Abs($side) -lt 4 -and $along -gt -8 -and $along -lt 24) 'Exit escaped bounded cave lane.'
-  $probe=State @{x=$position[0];z=$position[1];y=($position[2]+.2)} $null;$returnSamples+=@{position=$position;along=$along;dir=(Num (Eval 'getDir player'));cursor=(Eval 'triCursorPos');state=$probe};$left=$along -lt -1 -and !$probe.inFootprint
+  # Clear the complete armed model and shell margin, not only its root point.
+  $probe=State @{x=$position[0];z=$position[1];y=($position[2]+.2)} $null;$returnSamples+=@{position=$position;along=$along;dir=(Num (Eval 'getDir player'));cursor=(Eval 'triCursorPos');state=$probe};$left=$along -lt -4 -and !$probe.inFootprint
  }while(!$left -and [DateTime]::UtcNow -lt $until)
  $null=Send @{cmd='key_up';sc=26};$held=$false;Exec 'setAccTime 0';$result.exitTraversal=@{left=$left;samples=$returnSamples};Require $left 'W-key traversal did not leave cave before undo.'
  $undone=Send @{cmd='dev_cave_editor';action='undo'};Require ($undone.count -eq 0) 'Normal cave undo did not release owner.'
