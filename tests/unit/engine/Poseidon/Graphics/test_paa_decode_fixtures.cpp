@@ -4,8 +4,33 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include <fstream>
+#include <iterator>
 
 using namespace Poseidon;
+
+TEST_CASE("Marker-bearing PAC decodes exact AI88 channels from file and memory", "[graphics][decode][upstream]")
+{
+    const auto path = GET_FIXTURE("paa/synthetic_ai88_lzss.pac");
+    std::ifstream in(path, std::ios::binary);
+    REQUIRE(in.good());
+    const std::vector<char> bytes((std::istreambuf_iterator<char>(in)), {});
+    for (auto img : {DecodePAAFile(path), DecodePAABuffer(bytes.data(), bytes.size(), false)})
+    {
+        REQUIRE(img.valid());
+        REQUIRE(img.width == 8);
+        REQUIRE(img.height == 8);
+        for (int y = 0; y < 8; ++y)
+        for (int x = 0; x < 8; ++x)
+        {
+            const auto* pixel = &img.rgba[(y * 8 + x) * 4];
+            CHECK(int(pixel[0]) == x * 32 + 16);
+            CHECK(int(pixel[1]) == x * 32 + 16);
+            CHECK(int(pixel[2]) == x * 32 + 16);
+            CHECK(int(pixel[3]) == y * 32 + 16);
+        }
+    }
+}
 
 // --- DXT1 ---
 

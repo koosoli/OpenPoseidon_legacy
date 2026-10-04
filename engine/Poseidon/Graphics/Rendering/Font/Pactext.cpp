@@ -2040,7 +2040,8 @@ class TextureSourcePac : public ITextureSource
     PacPalette _pal;
     int _mipmaps;      //!< source file mipmap count
     PacFormat _format; //!< source file pixel format
-    bool _isPaa;
+    bool _isPaa; // Suffix-based existing PAA source-proof admission.
+    bool _usesPaaLevelReader; // Independent format-marker decoding decision.
     RStringB _name;
     std::shared_ptr<const ArchiveSourceBinding> _archiveSourceBinding;
     BankReadMemberIdentity _archiveMemberIdentity{};
@@ -2096,6 +2097,7 @@ TextureSourcePac::TextureSourcePac()
 {
     _mipmaps = 0;
     _isPaa = false;
+    _usesPaaLevelReader = false;
 }
 
 TextureSourcePac::~TextureSourcePac() = default;
@@ -2147,11 +2149,13 @@ bool TextureSourcePac::Init(const char* name, PacLevelMem* mips, int maxMips)
     PacFormat format = BasicFormat(name);
 
     _isPaa = format == PacARGB4444;
+    _usesPaaLevelReader = _isPaa;
 
     PacFormat nFormat = PacFormatFromDesc(desc, alpha);
     if (nFormat != PacFormatN)
     {
         format = nFormat;
+        _usesPaaLevelReader = true;
     }
     else
     {
@@ -2327,7 +2331,7 @@ bool TextureSourcePac::GetMipmapChain(const MipmapRead* reads, int count) const
         if (timing.enabled) ++timing.selectedMips;
         const PacLevelMem& mip = *reads[i].mip;
         mip.SeekLevel(in);
-        const int ret = _isPaa ? mip.LoadPaa(in, reads[i].mem, &_pal) : mip.LoadPac(in, reads[i].mem, &_pal);
+        const int ret = _usesPaaLevelReader ? mip.LoadPaa(in, reads[i].mem, &_pal) : mip.LoadPac(in, reads[i].mem, &_pal);
         if (ret != 0)
         {
             return false;

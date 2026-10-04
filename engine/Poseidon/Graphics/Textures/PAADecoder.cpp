@@ -634,6 +634,11 @@ DecodedImage DecodePAABuffer(const void* data, size_t size, bool isPaa)
         in.seekg(-2, QIOS::cur);
         format = isPaa ? PacARGB4444 : PacP8;
     }
+    else
+    {
+        // A format marker selects PAA-style level data regardless of suffix.
+        isPaa = true;
+    }
 
     PacPalette pal;
     int offsets[16];
@@ -825,6 +830,11 @@ DecodedImage DecodePAAFileMip(const std::string& path, int mipLevel)
     {
         in.seekg(-2, QIOS::cur);
         format = isPaa ? PacARGB4444 : PacP8;
+    }
+    else
+    {
+        // A format marker selects PAA-style level data regardless of suffix.
+        isPaa = true;
     }
 
     PacPalette pal;

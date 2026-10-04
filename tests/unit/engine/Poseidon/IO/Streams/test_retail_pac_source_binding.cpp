@@ -13,6 +13,8 @@
 #include <memory>
 #include <vector>
 #include <type_traits>
+#include "../../test_fixtures.hpp"
+#include <iterator>
 
 using namespace Poseidon;
 static_assert(!std::is_copy_constructible_v<ArchiveSourceBinding::RetailPacReadScope>);
@@ -45,13 +47,13 @@ struct RawPacBank
         ("retail-pac-binding-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::path bankBase;
     QFBank bank;
-    explicit RawPacBank(const char* bankDirectory = "DTA", const char* prefix = R"(data\)")
+    explicit RawPacBank(const char* bankDirectory = "DTA", const char* prefix = R"(data\)",
+                        const std::vector<char>& data = PacBytes())
     {
         Foundation::CaptureMainThread();
         REQUIRE(std::filesystem::create_directory(directory));
         REQUIRE(std::filesystem::create_directory(directory / bankDirectory));
         bankBase = directory / bankDirectory / "data";
-        const auto data = PacBytes();
         std::ofstream out(bankBase.string() + ".pbo", std::ios::binary);
         REQUIRE(out.good());
         auto entry = [&](const char* name) {
@@ -111,6 +113,36 @@ std::unique_ptr<ITextureSource> ParsePac()
     auto* factory = SelectTextureSourceFactory(SelectedTexturePath);
     REQUIRE(factory);
     return std::unique_ptr<ITextureSource>(factory->Create(SelectedTexturePath, mips.data(), int(mips.size())));
+}
+
+TEST_CASE("Marker-bearing PAC uses PAA level decoding without ordinary PAA birth admission",
+          "[archive-source-retail-pac][upstream]")
+{
+    std::ifstream in(GET_FIXTURE("paa/synthetic_ai88_lzss.pac"), std::ios::binary);
+    REQUIRE(in.good());
+    const std::vector<char> bytes((std::istreambuf_iterator<char>(in)), {});
+    RawPacBank files("DTA", R"(data\)", bytes);
+    ServerScope server(files.bank);
+    std::array<PacLevelMem, 7> mips;
+    auto* factory = SelectTextureSourceFactory(SelectedTexturePath);
+    REQUIRE(factory);
+    std::unique_ptr<ITextureSource> source(factory->Create(SelectedTexturePath, mips.data(), int(mips.size())));
+    REQUIRE(source);
+    REQUIRE(source->GetFormat() == PacAI88);
+    REQUIRE(source->GetMipmapCount() > 0);
+    BankReadMemberIdentity identity;
+    CHECK_FALSE(source->CopyArchiveMemberIdentity(identity));
+    CHECK_FALSE(source->GetArchiveSourceBinding());
+    mips[0].SetDestFormat(PacAI88, 4);
+    std::vector<unsigned char> output(mips[0].Size(), 0);
+    REQUIRE(source->GetMipmapData(output.data(), mips[0], 0));
+    for (int y = 0; y < 8; ++y)
+    for (int x = 0; x < 8; ++x)
+    {
+        const auto* pixel = output.data() + y * mips[0].Pitch() + x * 2;
+        CHECK(int(pixel[0]) == x * 32 + 16);
+        CHECK(int(pixel[1]) == y * 32 + 16);
+    }
 }
 }
 
