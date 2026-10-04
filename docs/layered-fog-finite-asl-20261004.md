@@ -220,3 +220,34 @@ retain OFF exact equivalence and prove sky/fully-closed-surface continuity,
 partial closing and interior negatives on the real composed shaders. No grade,
 layer-density, global sky or production composition change was made from this
 assessment; the finite candidate is functional but **quality unaccepted**.
+
+### Bounded closure correction, installed recheck pending
+
+The subsequent source correction changes only the enabled, camera-matched
+surface combination. Actual admitted foreground is transported at its local
+distance; rejected roof/interior foreground stays unchanged. Legacy synthetic
+far-cover is transported with the final volume slice, then the existing closing
+amount blends the two terms. At amount 1 the final fogged airlight is returned
+directly, regardless of foreground eligibility; at amount 0 the gated foreground
+is returned directly. OFF/unready/mismatched cameras still return the original
+legacy mixture before all new texture reads.
+
+Both the surface and sky background sample the same layer-volume UV and final
+normalized Z=1 with linear clamp sampling. Surface UV is the existing projected
+screen UV used by legacy froxels; background UV is fullscreen screen UV. At full
+legacy closing, `inscat` already selects the final legacy froxel sky term. Its
+existing finite-resolution approximation of the procedural sky remains intact;
+this correction does not invent a new sky-radiance lookup or claim exact equality
+of those pre-existing radiance discretizations. It fixes the inconsistent layer
+transport applied to their closing terms. A partially closed enabled surface
+adds one final-volume texture lookup; no OFF work, dispatch count, physical
+coverage, layer forcing, cloud composition or default setting changes.
+
+Actual cached-library device tests passed **6/6**, including the real production
+closure helper with differing local/final L/T and both gate states, exact fully
+closed equality, exact open/rejected foreground endpoints, partial convex
+mixtures and a discriminating old-formula counterexample. The first GPU run
+found a one-ULP `mix` endpoint cancellation; explicit endpoint returns fixed it
+without weakening assertions. Current full shader compositions and existing
+roof/native/overflow/weather/disabled guards also passed. Installed contour and
+timing recheck remains necessary; quality is still unaccepted and default OFF.

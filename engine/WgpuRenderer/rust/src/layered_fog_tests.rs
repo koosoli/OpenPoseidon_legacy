@@ -71,6 +71,40 @@ fn actual_fog_profile_gpu_integrates_thin_slabs_phase_energy_and_camera_refusals
 }
 
 #[test]
+fn actual_fog_far_closure_gpu_preserves_sky_and_gated_foreground() {
+ let(device,queue)=crate::gfx3d::cull::tests::headless().expect("actual fog closure proof requires device");
+ const PROBE:&str=r#"
+ #import layered_fog_optics::{fog_legacy_closure,fog_transport}
+ @group(0) @binding(0) var<storage,read_write> result:array<vec4<f32>>;
+ @compute @workgroup_size(1) fn cs_probe(){
+  let scene=vec3<f32>(12.0,6.0,3.0);let air=vec3<f32>(4.0,8.0,16.0);
+  let local=vec4<f32>(1.0,2.0,3.0,0.25);let distant=vec4<f32>(0.5,1.0,2.0,0.1);
+  result[0]=vec4<f32>(fog_legacy_closure(scene,air,1.0,local,distant,true),1.0);
+  result[1]=vec4<f32>(fog_legacy_closure(scene,air,1.0,local,distant,false),1.0);
+  result[2]=vec4<f32>(fog_transport(air,distant),1.0);
+  result[3]=vec4<f32>(fog_legacy_closure(scene,air,0.0,local,distant,true),1.0);
+  result[4]=vec4<f32>(fog_legacy_closure(scene,air,0.0,local,distant,false),1.0);
+  result[5]=vec4<f32>(fog_legacy_closure(scene,air,0.5,local,distant,true),1.0);
+  result[6]=vec4<f32>(fog_legacy_closure(scene,air,0.5,local,distant,false),1.0);
+  result[7]=vec4<f32>(fog_transport(mix(scene,air,1.0),local),1.0);
+ }
+ "#;
+ let samples=read_probe(&device,&queue,PROBE,&[],32);
+ assert!(samples.iter().all(|v|v.is_finite()));
+ assert_eq!(&samples[0..4],&samples[8..12]);assert_eq!(&samples[4..8],&samples[8..12]);
+ assert_eq!(&samples[12..16],&[4.,3.5,3.75,1.]);assert_eq!(&samples[16..20],&[12.,6.,3.,1.]);
+ for i in 0..3 {
+  assert!((samples[20+i]-(samples[12+i]+samples[8+i])*0.5).abs()<1e-6);
+  assert!((samples[24+i]-(samples[16+i]+samples[8+i])*0.5).abs()<1e-6);
+ }
+ assert!((samples[28]-samples[8]).abs()>1.,"Old closure counterexample must remain discriminating");
+ let source=include_str!("shaders/frame.wgsl");
+ let guard=source.find("if (!fog_camera_matches(layer_fog_packet").unwrap();
+ assert!(guard<source.find("let surface_open = weather_map_coverage").unwrap());
+ assert!(source[guard..].contains("{ return background; }"),"OFF retains the exact legacy mix before new sampling");
+}
+
+#[test]
 fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gates() {
  let(device,queue)=crate::gfx3d::cull::tests::headless().expect("actual fog GPU proof requires device");
  let mut composer=crate::shaders::build_composer();
@@ -187,7 +221,7 @@ fn actual_fog_depth_gpu_unprojects_renderer_reversed_depth_with_forward_projecti
    let input=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:None,contents:bytemuck::cast_slice(&data),usage:wgpu::BufferUsages::UNIFORM});
    let result=read_probe(&device,&queue,PROBE,&[wgpu::BindGroupEntry {binding:1,resource:input.as_entire_binding()}],4);
    assert!(result.iter().all(|v|v.is_finite()));assert!((result[0]-point.length()).abs()<0.01,"actual forward projection / reversed raster depth {result:?} vs {point:?}");
-   assert_eq!(result[1],200.,"sky clear depth consumes exact final slice");
+   assert_eq!(result[1],200.,"sky clear depth consumes exact distant slice");
    // A finite projection's far plane is ill-conditioned after f32 inversion.
    // Its independently evaluated homogeneous far point may be slightly inside
    // radial fogFar; an infinite far point must still refuse the divide.

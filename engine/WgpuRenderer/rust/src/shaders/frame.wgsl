@@ -1,5 +1,5 @@
 #define_import_path frame
-#import layered_fog_optics::{FogConsumer, fog_camera_matches, fog_transport}
+#import layered_fog_optics::{FogConsumer, fog_camera_matches, fog_legacy_closure}
 
 // Shared group(0): the per-frame camera/environment UBO plus the cascade shadow
 // map + comparison sampler. Every 3D pipeline (lit meshes, terrain) binds this
@@ -429,7 +429,7 @@ fn ground_sky_reflection(dir: vec3<f32>) -> vec3<f32> {
 
 // Diffuse sky irradiance for a world-space surface normal, from the SH-9 sky projection
 // (Ramamoorthi, "An Efficient Representation for Irradiance Environment Maps"), divided by PI so
-// it is the Lambertian ambient reflectance factor (final ambient = albedo * sky_irradiance * scale).
+// it is the Lambertian ambient reflectance factor (distant ambient = albedo * sky_irradiance * scale).
 // A future sky-visibility (AO) term multiplies this per point by the fraction of sky it can see.
 fn sky_irradiance(n: vec3<f32>) -> vec3<f32> {
     let l00 = sky_sh.c[0].rgb;
@@ -668,10 +668,11 @@ fn apply_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
     if (!fog_camera_matches(layer_fog_packet, frame.view, frame.proj, frame.cam_pos.xyz)) { return background; }
     let absolute = world_pos_rel + frame.cam_pos.xyz;
     // Current physical coverage, independent of artistic indoor AO. No inferred OPEN.
-    if (weather_map_coverage(absolute) < 0.5 || weather_map_reach(absolute) < 0.999) { return background; }
+    let surface_open = weather_map_coverage(absolute) >= 0.5 && weather_map_reach(absolute) >= 0.999;
     let local = textureSampleLevel(layer_fog_tex, froxel_samp,
         vec3<f32>(uv, sqrt(clamp(dist / layer_fog_packet.control.y, 0.0, 1.0))), 0.0);
-    return fog_transport(background, local);
+    let distant = textureSampleLevel(layer_fog_tex, froxel_samp, vec3<f32>(uv, 1.0), 0.0);
+    return fog_legacy_closure(rgb, inscat, amount, local, distant, surface_open);
 }
 
 // Occlusion [0,1] of the sun by terrain at world position (xz, y): 0 = lit, 1 =
