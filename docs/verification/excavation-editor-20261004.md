@@ -23,9 +23,16 @@ then select **Map Editor**.
   the smallest openings. The HUD shows dimensions and placement refusals.
 - **Undo last excavation** removes the last cave/trench. Leave the excavation
   first; closing a hole on an underground player is refused.
+- Use **Placed excavation** to select an existing generated cave or trench.
+  Change **Selected heading**, then click **Apply selected rotation**.
+  Its entrance stays fixed. **Delete selected excavation** removes that item,
+  including older placements. Rotation preserves its stable ID and validates
+  land, ceiling/rim and other holes before changing the scene. Both the old and
+  proposed footprint must be clear of the player/controlled vehicle.
 - **Soldier flashlight**: press L (the Headlights binding) while on foot.
-  The beam follows your view, reaches about 20 m and remains active in daytime
-  caves. In free-fly, use Dev Tools → Zeus → Head torch →
+  The ordinary **Light on** action is another way to activate it. The beam
+  follows your view, reaches about 20 m and remains active in daytime caves.
+  In free-fly, use Dev Tools → Zeus → Head torch →
   **Head torch (follows the view)** instead.
 
 The ordinary circular height brush remains available for foxholes/craters.
