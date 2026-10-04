@@ -444,7 +444,18 @@ TEST_CASE("Frozen runtime recipes restore eleven bodies at retained transforms a
     const Vector3 target=state.retainedTransforms[4].Position();
     REQUIRE(state.ImpactPart(center,force,(target-center).CrossProduct(force),impact)==4);
     CHECK((impact-target).Size()<.0001f);
-    const auto starting=state.initial[4].Position(); world.ApplyImpulse(state.bodies[4],impact,force);
+    const auto starting=state.initial[4].Position(); float appliedLinear,appliedAngular;
+    REQUIRE(state.TransferImpulse(center,force,(target-center).CrossProduct(force),force/22,VZero,1,
+        appliedLinear,appliedAngular)==4);
+    CHECK(state.localTransfers==1); CHECK(state.lastImpactPart==4);
+    CHECK(std::abs(appliedLinear-.5f)<.0001f); CHECK(appliedAngular<.001f);
+    BodyMotion immediate; REQUIRE(world.GetBodyMotion(state.bodies[4],immediate));
+    CHECK(immediate.position==state.initial[4].Position());
+    CHECK(std::abs(immediate.linearVelocity.Z()-.5f)<.0001f);
+    CHECK(pose.levels[0].points==before.levels[0].points);
+    // The same shared production helper refuses unbounded whole-body motion.
+    CHECK(state.TransferImpulse(center,force,VZero,Vector3(16,0,0),VZero,1,appliedLinear,appliedAngular)==-2);
+    CHECK(state.localTransfers==1);
     for(int i=0;i<12;++i) world.Step(1.f/60);
     BodyMotion moved; REQUIRE(world.GetBodyMotion(state.bodies[4],moved)); CHECK((moved.position-starting).Size()>.01f);
     Vector3 invalid; CHECK(state.ImpactPart(center,VZero,VZero,invalid)==-1);

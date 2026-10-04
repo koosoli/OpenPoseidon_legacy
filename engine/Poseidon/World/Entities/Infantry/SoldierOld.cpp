@@ -1863,8 +1863,9 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
                 LOG_INFO(World,"AUTORAGDOLL: frozen hit retained owner={} reason={}",static_cast<const void*>(this),refusal.Data());
                 _impulseForce=_impulseTorque=VZero;
             }
-            // The next real solver update consumes the one pending impulse.
-            // Before it, every retained consumer stays exactly unchanged.
+            else TransferAutomaticRagdollImpulse();
+            // Consume in the SAME wake call before any later base simulation.
+            // Solver velocities change; retained visible consumers do not.
         }
         return true;
     }
@@ -1958,38 +1959,23 @@ bool Man::UpdateAutomaticRagdoll(float deltaT)
     if (!pendingImpulse && CorpseAutomaticRetirementAdmitted(supported,quiet,pose.quietSeconds,pose.simulatedSeconds))
         return FreezeAutomaticRagdoll();
     // Existing aggregate impulses arriving after activation are consumed once.
-    if (pendingImpulse)
-    {
-        const Vector3 linear = _impulseForce*(GetInvMass()*Rigid());
-        const Vector3 angular = (Orientation()*InvInertia()*GetInvTransform().Orientation())*(_impulseTorque*Rigid());
-        Vector3 point; const int hitPart=state.ImpactPart(COMPosition(),_impulseForce,_impulseTorque,point);
-        const Vector3 localImpulse=_impulseForce*Rigid();
-        bool local=hitPart>=0 && localImpulse.IsFinite() &&
-            localImpulse.Size()/state.retainedMasses[hitPart]<=15 && linear.IsFinite() && angular.IsFinite() &&
-            linear.Size()<=15 && angular.Size()<=20;
-        if(local)
-        {
-            state.world->ApplyImpulse(state.bodies[hitPart],point,localImpulse);
-            Physics::BodyMotion applied;
-            local=state.world->GetBodyMotion(state.bodies[hitPart],applied) && applied.linearVelocity.IsFinite() &&
-                applied.angularVelocity.IsFinite() && applied.linearVelocity.Size()<=15 && applied.angularVelocity.Size()<=20;
-            if(local)
-            {
-                ++state.localTransfers; state.lastImpactPart=hitPart;
-                LOG_INFO(World,"AUTORAGDOLL: actual hit transfer owner={} part={} impulse=({},{},{}) impact=({},{},{}) local=1",
-                    static_cast<const void*>(this),hitPart,localImpulse.X(),localImpulse.Y(),localImpulse.Z(),point.X(),point.Y(),point.Z());
-            }
-            else state.world->SetArticulatedMotion(state.bodies[hitPart],motions[hitPart].linearVelocity,motions[hitPart].angularVelocity);
-        }
-        if (!local && linear.IsFinite() && angular.IsFinite() && linear.Size() <= 15 && angular.Size() <= 20)
-            for (int part = 0; part < 11; ++part)
-                state.world->SetArticulatedMotion(state.bodies[part],motions[part].linearVelocity+linear+
-                    angular.CrossProduct(motions[part].position-PositionModelToWorld(_shape->CenterOfMass())),
-                    motions[part].angularVelocity+angular);
-        _impulseForce = _impulseTorque = VZero;
-        pose.quietSeconds = 0;
-    }
+    if (pendingImpulse) TransferAutomaticRagdollImpulse();
     return true;
+}
+
+void Man::TransferAutomaticRagdollImpulse()
+{
+    auto& state=*_corpseArticulation;
+    const Vector3 force=_impulseForce,torque=_impulseTorque;
+    const Vector3 linear=force*(GetInvMass()*Rigid());
+    const Vector3 angular=(Orientation()*InvInertia()*GetInvTransform().Orientation())*(torque*Rigid());
+    float appliedLinear,appliedAngular;
+    const int part=state.TransferImpulse(COMPosition(),force,torque,linear,angular,Rigid(),appliedLinear,appliedAngular);
+    LOG_INFO(World,"AUTORAGDOLL: actual hit transfer owner={} part={} force=({},{},{}) torque=({},{},{}) wholeLinear={} wholeAngular={} localReadback=({},{}) mode={}",
+        static_cast<const void*>(this),part,force.X(),force.Y(),force.Z(),torque.X(),torque.Y(),torque.Z(),
+        linear.Size(),angular.Size(),appliedLinear,appliedAngular,part>=0?"local":part==-1?"aggregate":"refused");
+    _impulseForce=_impulseTorque=VZero;
+    _automaticCorpsePose->quietSeconds=0;
 }
 
 LSError Man::SerializeAutomaticCorpsePose(ParamArchive& ar)

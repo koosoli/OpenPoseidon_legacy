@@ -271,3 +271,16 @@ before SQF text formatting rounds large world coordinates. The grenade fixture
 gets the same correction and placement witness. No collision/dead-body policy
 has been changed on the basis of that missed projectile; installed retry remains
 required.
+
+The positioned installed retry (`owner-frozen-hit-positioned-final-20261004-095353`)
+did confirm two native incoming events and one wake, but local transfer stayed
+zero. It must not be described as another missed shot. The wake path now
+consumes the pending impulse in the same call that restores the bodies, before
+any later base simulation, with the visible retained output still untouched.
+Active and frozen hits share one native transfer helper. Its log names the exact
+force/torque, local or aggregate mode and native local velocity readback so a
+motion-bound fallback cannot be confused with a lost handoff. The focused
+regression invokes that actual shared helper immediately after wake, proves
+0.5 m/s momentum transfer with zero immediate transform/consumer change and
+rejects unbounded input. Current focused native checks pass 12,306 assertions in
+23 cases; installed local transfer and resettlement remain required.

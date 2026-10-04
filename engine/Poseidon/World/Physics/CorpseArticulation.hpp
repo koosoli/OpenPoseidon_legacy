@@ -106,6 +106,35 @@ struct CorpseArticulation
         }
         return result;
     }
+    // Same physical transfer for a just-woken frozen recipe and an active rig.
+    // Return local part, -1 for aggregate safety fallback, -2 for refusal.
+    int TransferImpulse(Vector3Par center,Vector3Par force,Vector3Par torque,
+        Vector3Par linear,Vector3Par angular,float rigid,float& localLinear,float& localAngular)
+    {
+        localLinear=localAngular=-1;
+        if(!Ready() || state!=CorpseSolverState::Simulating || !linear.IsFinite() || !angular.IsFinite() ||
+            linear.Size()>15 || angular.Size()>20 || !std::isfinite(rigid) || rigid<=0) return -2;
+        std::array<Physics::BodyMotion,11> motions;
+        for(int p=0;p<11;++p) if(!world->GetBodyMotion(bodies[p],motions[p])) return -2;
+        Vector3 point; const int part=ImpactPart(center,force,torque,point);
+        const Vector3 impulse=force*rigid;
+        if(part>=0 && impulse.IsFinite() && impulse.Size()/retainedMasses[part]<=15)
+        {
+            world->ApplyImpulse(bodies[part],point,impulse);
+            Physics::BodyMotion applied;
+            if(world->GetBodyMotion(bodies[part],applied) && applied.linearVelocity.IsFinite() && applied.angularVelocity.IsFinite())
+            {
+                localLinear=applied.linearVelocity.Size(); localAngular=applied.angularVelocity.Size();
+                if(localLinear<=15 && localAngular<=20)
+                { ++localTransfers; lastImpactPart=part; return part; }
+            }
+            if(!world->SetArticulatedMotion(bodies[part],motions[part].linearVelocity,motions[part].angularVelocity)) return -2;
+        }
+        for(int p=0;p<11;++p)
+            if(!world->SetArticulatedMotion(bodies[p],motions[p].linearVelocity+linear+
+                angular.CrossProduct(motions[p].position-center),motions[p].angularVelocity+angular)) return -2;
+        return -1;
+    }
     bool Freeze()
     {
         if (!Ready() || state != CorpseSolverState::Simulating || updates <= 0 ||

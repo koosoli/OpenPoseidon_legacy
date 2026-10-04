@@ -666,6 +666,7 @@ class Man: public Person
     void QueueAutomaticRagdoll();
     bool BeginAutomaticRagdoll(RString& refusal);
     bool WakeAutomaticRagdoll(RString& refusal);
+    void TransferAutomaticRagdollImpulse();
     static void PrepareAutomaticInfantryTerrain();
     bool UpdateAutomaticRagdoll(float deltaT);
     bool CaptureCorrectedCorpsePose(RString& refusal);
