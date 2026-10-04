@@ -118,19 +118,30 @@ execution:
   stock_character_ragdoll_checkpoint:
     branch: codex/ofp-character-ragdolls-20261004
     baseline_commit: 3427b5e2
-    source_commit: f74ece43
-    installed_source_commit: f74ece43
-    state: INSTALLED_STOCK_MODEL_QUALIFICATION_IN_PROGRESS
+    source_commit: 41ce4191
+    installed_source_commit: 41ce4191
+    state: STOCK_MODEL_COVERAGE_VERIFIED_WITH_TWO_POST_HIT_SETTLEMENT_FAILURES
     present_stock_model_denominator: 37
+    ordinary_deaths_verified: 37
+    native_projectile_reactivations_verified: 37
+    complete_runtime_sequences_verified: 35
+    full_runtime_acceptance: false
     evidence: docs/verification/stock-ofp-ragdolls-20261004.md
+    runtime_receipt: docs/verification/stock-ofp-ragdolls-20261004-runtime.json
     note: >-
       Owner explicitly requests all original OFP characters. Complete local
-      retail census includes35 editor-public models and2 story models. Existing
-      Western-only admission must be replaced with validated per-model anatomy;
-      civilian and story geometry differences are being handled. No claim of
-      installed all-model acceptance until the full denominator passes ordinary
-      death, actual Box3D settlement and real frozen-corpse projectile checks.
-      Four simultaneous and64 retained remain separate performance limits.
+      retail census includes35 editor-public models and2 story models. All37
+      now pass actual ordinary-death11-body/10-joint Box3D articulation,
+      finite consumed poses, supported initial settlement and native bullet
+      reactivation on one installed source. Native16136 assertions/83 cases
+      PASS. Thirty-five pass post-hit settlement, persistence and save/load.
+      BISCamelPilot and BISCamelPilot2 retain unsafe left-arm motion after
+      hits; bounded actual limb diagnostics confirm this is a real unresolved
+      settlement issue. Full runtime acceptance remains false. DefaultON and
+      shared Physics toggle PASS, unchanged pair and normal game exit0.
+      Owner requests wrap-up; finite stock-model batch stops here with those
+      failures recorded. Four simultaneous and64 retained remain separate
+      performance limits; saved frozen corpses currently lack wake recipes.
   review_model: OWNER_REVIEW_NO_INDEPENDENT_REVIEWER
   local_swim_test_checkpoint:
     state: LOCAL_OPT_IN_ADDON_INSTALLED_PLAYER_RUNTIME_CHECKS_PASSED
