@@ -307,7 +307,7 @@ jobs:
         with:
           name: ${{ env.CWR_ARTIFACT_PREFIX }}-Symbols-${{ steps.build_metadata.outputs.sha_short }}
           path: |
-            ${{ env.CWR_DIST_DIR }}/PoseidonGame.pdb
+            ${{ env.CWR_DIST_DIR }}/OpenPoseidon.pdb
             ${{ env.CWR_DIST_DIR }}/PoseidonGameDemo.pdb
             ${{ env.CWR_DIST_DIR }}/PoseidonServer.pdb
             ${{ env.CWR_DIST_DIR }}/PoseidonTools.pdb

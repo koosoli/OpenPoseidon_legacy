@@ -564,17 +564,27 @@ pub fn find_game_binary(game_dir: &Path, named: Option<&str>) -> Result<PathBuf>
     // An explicit --binary takes priority (it may live in a sibling app dir, e.g.
     // PoseidonServer in apps/Server while game_dir points at apps/Game).
     if let Some(n) = named {
+        // Upstream fixtures retain the old game target name. This fork ships
+        // one canonical client; prefer its local binary over a stale legacy
+        // install or sibling checkout when those fixtures run on Windows.
+        #[cfg(windows)]
+        if matches!(n, "PoseidonGame" | "PoseidonGame.exe") {
+            let current = game_dir.join("OpenPoseidon.exe");
+            if current.is_file() {
+                return Ok(current);
+            }
+        }
         if let Some(found) = locate(&with_ext(n)) {
             return Ok(found);
         }
     }
 
-    let defaults: [&str; 2] = if cfg!(windows) {
-        ["PoseidonGame.exe", "OFPR.exe"]
+    let defaults: &[&str] = if cfg!(windows) {
+        &["OpenPoseidon.exe", "PoseidonGame.exe", "OFPR.exe"]
     } else {
-        ["PoseidonGame", "OFPR"]
+        &["PoseidonGame", "OFPR"]
     };
-    for name in &defaults {
+    for name in defaults {
         if let Some(found) = locate(&with_ext(name)) {
             return Ok(found);
         }
@@ -710,6 +720,24 @@ mod tests {
         std::fs::write(&binary, "").unwrap();
         let result = find_game_binary(dir.path(), None).unwrap();
         assert_eq!(result, binary);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn upstream_client_fixture_uses_current_fork_binary_over_stale_client() {
+        let dir = TempDir::new().unwrap();
+        let current = dir.path().join("OpenPoseidon.exe");
+        std::fs::write(&current, "current fork").unwrap();
+        std::fs::write(dir.path().join("PoseidonGame.exe"), "stale install").unwrap();
+        let server = dir.path().join("PoseidonServer.exe");
+        std::fs::write(&server, "server").unwrap();
+        for name in [None, Some("PoseidonGame"), Some("PoseidonGame.exe")] {
+            assert_eq!(find_game_binary(dir.path(), name).unwrap(), current);
+        }
+        assert_eq!(
+            find_game_binary(dir.path(), Some("PoseidonServer")).unwrap(),
+            server
+        );
     }
 
     #[test]

@@ -135,7 +135,7 @@ tickets:
     production_call_sites: []
     test_ids: [preview0-ledger-validation]
     benchmark_artifacts: []
-    evidence_hash: 44118033414e83c2ab812dcad6d220103dfbd63cc282e657f23a294cd5385be1
+    evidence_hash: ea68330786eb7fd9c8dc4772a34424840f573219bc5712916addbae6c9621b3d
     decision_record: null
     known_failures:
       - No reviewed activation commit exists; the overlay remains PREPARED.
@@ -881,7 +881,7 @@ tickets:
         symbol: MLOD::readP3DMFaceTable
     test_ids: [ast-011b]
     benchmark_artifacts: []
-    evidence_hash: 2d2286941f70ac69b94de2214bbcf1d2762f03d9bf39b8d51e5f41678b407876
+    evidence_hash: 8a8954b9a943983669a16aa0ae6331f690c1da8ad4c6794fb1778ce50408eeb3
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: P3DM_STATIC_GEOMETRY
