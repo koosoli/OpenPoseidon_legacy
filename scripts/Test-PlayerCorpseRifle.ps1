@@ -25,7 +25,14 @@ function AimError($state,$point){
  $range=[Math]::Sqrt($delta[0]*$delta[0]+$delta[1]*$delta[1]+$delta[2]*$delta[2])
  return @{actual=$actual;desired=$desired;range=$range;angle=[Math]::Acos((Clamp $dot -1 1));
   yaw=[Math]::IEEERemainder(([Math]::Atan2($desired[0],$desired[2])-[Math]::Atan2($actual[0],$actual[2])),(2*[Math]::PI));
-  pitch=([Math]::Asin($desired[1])-[Math]::Asin($actual[1]));perpendicularError=($range*[Math]::Sqrt([Math]::Max(0,1-$dot*$dot)))}
+  pitch=([Math]::Asin($desired[1])-[Math]::Asin($actual[1]));perpendicularError=($range*[Math]::Sqrt([Math]::Max(0.0,(1.0-($dot*$dot)))))}
+}
+function AimStep($error){
+ # Gun motion lags SDL input. Fixed conservative feedback avoids interpreting
+ # delayed motion from the preceding input as a new sensitivity measurement.
+ $radiansPerPixel=.006;$damping=.4;$limit=30
+ return @{dx=[int](Clamp ([Math]::Round($damping*$error.yaw/$radiansPerPixel)) (-$limit) $limit);
+  dy=[int](Clamp ([Math]::Round(-$damping*$error.pitch/$radiansPerPixel)) (-$limit) $limit)}
 }
 function ChestTarget($pose){
  $chest=@($pose.hulls|Where-Object {$_.bone-match 'zebra|hrudnik'});Require ($chest.Count-gt 0) 'Actual posed chest Fire hull absent.'
@@ -44,11 +51,14 @@ function MissionText{
 if($SelfTest){
  $s=@{readonly=$true;manual=$true;playerSuspended=$false;cameraEffect=$false;muzzleX=0.;muzzleY=1.;muzzleZ=0.;directionX=0.;directionY=-.1;directionZ=[Math]::Sqrt(.99)}
  $p=@(0.,.5,(5*[Math]::Sqrt(.99)));$e=AimError $s $p;Require ($e.angle-lt .000001-and $e.perpendicularError-lt .000001) 'Raw XYZ aiming geometry failed.'
+ $off=AimError $s @(0.,1.,5.);Require ([Math]::Abs($off.perpendicularError-.5)-lt .000001-and $off.angle-gt .1) 'Nonzero muzzle-ray miss was rounded away.'
+ $step=AimStep @{yaw=.6;pitch=-.6};Require ($step.dx-eq 30-and $step.dy-eq 30) 'Conservative mouse-step bounds failed.'
+ $step=AimStep @{yaw=.03;pitch=.03};Require ($step.dx-eq 2-and $step.dy-eq -2) 'Damped mouse-step signs or gain failed.'
  $target=ChestTarget @{hulls=@(@{bone='hrudnik';worldMin=@(2,3,4);worldMax=@(4,5,6)})};Require ($target.point-is [double[]]-and $target.point.Count-eq 3-and $target.point[0]-eq 3-and $target.point[1]-eq 4-and $target.point[2]-eq 5) 'Scalar chest midpoint failed.'
  $s.cameraEffect=$true;$refused=$false;try{$null=AimError $s $p}catch{$refused=$true};Require $refused 'Camera-effect input accepted.'
  $m=MissionText;foreach($c in $Classes){Require ($m.Contains('vehicle="'+$c+'"')) 'Editor mission target omitted.'}
  $tokens=$null;$errors=$null;$null=[Management.Automation.Language.Parser]::ParseFile($PSCommandPath,[ref]$tokens,[ref]$errors);Require ($errors.Count-eq 0) 'Runner parse failed.'
- Write-Host 'PASS: measured raw XYZ aim, scalar actual-hull midpoint, camera guard, four editor mission classes and parse.';return
+ Write-Host 'PASS: aligned/nonzero raw XYZ aim, damped bounded mouse steps, scalar actual-hull midpoint, camera guard, four editor mission classes and parse.';return
 }
 Require ([bool]$env:LOCK_OWNER) 'Invoke via scripts/with-game-lock.sh.'
 Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue)) 'Existing owner game is preserved.'
@@ -92,9 +102,11 @@ function Ledger{return @{fired=[int](Eval 'rifleShots');ammo=[double](Eval 'play
 function Release{$null=Send @{cmd='mouse_button';button=1;down=$false};$script:held=$false;Start-Sleep -Milliseconds 80}
 function Capture([string]$name){$path=Join-Path $caseOut ($name+'.png');$null=Send @{cmd='screenshot';path=$path};$until=[DateTime]::UtcNow.AddSeconds(10);while(!(Test-Path -LiteralPath $path)){Require ([DateTime]::UtcNow-lt $until) 'Screenshot missing.';Start-Sleep -Milliseconds 80};return @{path=$path;sha256=(Get-FileHash -LiteralPath $path).Hash}}
 function Aim([string]$stage){
- Release;Exec 'triClearView;player switchCamera "INTERNAL";setAccTime .2'
- $idle=Ledger;$history=@();$stable=0;$gainX=.00111;$gainY=.00111;$prior=$null;$previousStep=$null;$until=[DateTime]::UtcNow.AddSeconds(25)
- for($i=0;$i-lt 48;++$i){
+ Release;Exec 'triClearView;player switchCamera "INTERNAL"'
+ if($stage-ceq 'frozen'){Exec 'setAccTime 1'}else{Exec 'setAccTime .2'}
+ $idle=Ledger;$history=@();$stable=0;$until=[DateTime]::UtcNow.AddSeconds(35)
+ Start-Sleep -Milliseconds 500
+ for($i=0;$i-lt 60;++$i){
   Require ([DateTime]::UtcNow-lt $until) 'Bounded normal mouse aiming deadline.'
   $pose=Send @{cmd='corpse_pose_state'} -allowError $true
   if($pose.ok){$target=ChestTarget $pose}else{
@@ -103,19 +115,15 @@ function Aim([string]$stage){
   }
   $state=Send @{cmd='player_weapon_state'};$error=AimError $state $target.point
   Require ($error.range-ge 1.5-and $error.range-le 12) 'Actual muzzle/corpse range outside fixture.'
-  if($prior-and $previousStep){
-   $yawChange=[Math]::IEEERemainder(([Math]::Atan2($error.actual[0],$error.actual[2])-[Math]::Atan2($prior.actual[0],$prior.actual[2])),(2*[Math]::PI));$pitchChange=[Math]::Asin($error.actual[1])-[Math]::Asin($prior.actual[1])
-   if([Math]::Abs($previousStep.dx)-ge 2-and $yawChange*$previousStep.dx-gt 0){$gainX=Clamp ([Math]::Abs($yawChange/$previousStep.dx)) .0001 .02}
-   if([Math]::Abs($previousStep.dy)-ge 2-and $pitchChange*$previousStep.dy-lt 0){$gainY=Clamp ([Math]::Abs($pitchChange/$previousStep.dy)) .0001 .02}
-  }
-  $step=@{dx=[int](Clamp ([Math]::Round($error.yaw/$gainX)) -180 180);dy=[int](Clamp ([Math]::Round(-$error.pitch/$gainY)) -180 180)}
-  $history+=,@{iteration=$i;actualState=$state;target=$target;error=$error;step=$step;gainX=$gainX;gainY=$gainY}
+  $step=AimStep $error
+  $history+=,@{iteration=$i;actualState=$state;target=$target;error=$error;step=$step;radiansPerPixel=.006;damping=.4;inputSettleMilliseconds=500}
   $case[$stage].aim=$history
   $now=Ledger;Require ($now.fired-eq $idle.fired-and $now.ammo-eq $idle.ammo) 'Unexpected rifle activity while aiming.'
   if($error.angle-le .008-and $error.perpendicularError-le .04){$stable++}else{$stable=0}
   if($stable-ge 3){Exec 'setAccTime 0';$case[$stage].ready=Send @{cmd='player_weapon_state'};$case[$stage].target=$target;$case[$stage].capture=Capture ($stage+'-before');return}
-  if($stable-eq 0-and ($step.dx-ne 0-or $step.dy-ne 0)){$null=Send @{cmd='mouse_motion';dx=$step.dx;dy=$step.dy};$prior=$error;$previousStep=$step}else{$prior=$null;$previousStep=$null}
-  Start-Sleep -Milliseconds 300
+  if($stable-eq 0-and ($step.dx-ne 0-or $step.dy-ne 0)){$null=Send @{cmd='mouse_motion';dx=$step.dx;dy=$step.dy}}
+  # Read the actual muzzle only after bounded live simulation has responded.
+  Start-Sleep -Milliseconds 500
  }
  throw 'Normal SDL mouse could not establish the measured chest ray.'
 }
