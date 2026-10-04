@@ -150,6 +150,7 @@ Model::Model BuildCaveModel(const CaveMeshParams& p)
         AddRockVisual(visual, slabs[i], std::min(0.04f, t * 0.1f), i == 3);
     }
     geometry.properties.emplace_back("autocenter", "0");
+    geometry.properties.emplace_back("dammage", "No"); // generated ground is removed only by editor/world teardown
     geometry.properties.emplace_back("map", "rock");
     visual.properties = geometry.properties;
     model.lodLevels.emplace_back(0.0f, visual);

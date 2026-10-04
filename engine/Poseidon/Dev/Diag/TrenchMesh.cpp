@@ -164,6 +164,7 @@ Model::Model BuildTrenchModel(const TrenchMeshParams& p)
     add(Box(-w - t, w + t, -d - t, 0.3f, l, l + t), false);
     geometry.properties.emplace_back("autocenter", "0");
     geometry.properties.emplace_back("map", "rock"); // stationary, no vegetation sway
+    geometry.properties.emplace_back("dammage", "No"); // earth must not fall like a low-mass tree under tracks
     visual.properties = geometry.properties;
     Model::NamedSelection hole("terrain_hole");
     const std::array<IrPoint, 4> footprint = {{{-w, 0, 0}, {w, 0, 0}, {w, 0, l}, {-w, 0, l}}};

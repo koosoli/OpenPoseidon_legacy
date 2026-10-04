@@ -6,6 +6,7 @@
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Material.hpp>
+#include <Poseidon/World/Scene/Object.hpp>
 
 #include <cmath>
 #include <limits>
@@ -132,4 +133,15 @@ TEST_CASE("Ramp-only trenches omit degenerate bed slabs and retain a supported e
     REQUIRE(shape->GetGeomComponents().Size() == 4);
     REQUIRE(shape->RoadwayLevel()->NFaces() == 1);
     RequireRoadHeight(*shape->RoadwayLevel(), p.length, -p.depth, -p.depth / p.rampLength);
+}
+
+TEST_CASE("Generated earth does not inherit low-mass tree destruction", "[TrenchMesh][collision]")
+{
+    for (const auto& p : {Poseidon::Dev::TrenchMeshParams{}, Poseidon::Dev::TankTrenchMeshParams()})
+    {
+        Ref<LODShapeWithShadow> shape = Adapt(p).release();
+        REQUIRE(shape);
+        ObjectPlain earth(shape, -1);
+        REQUIRE(earth.GetDestructType() == DestructNo);
+    }
 }
