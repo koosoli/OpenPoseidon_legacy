@@ -47,6 +47,21 @@ function AssertProxyReceipt($actual){
   foreach($v in $proxy.matrix){Require ($v-is [ValueType]-and $v-isnot [bool]) 'Actual proxy matrix contains a nonnumeric component.';$null=Num $v}
  }
 }
+function ChestTarget($hull){
+ Require ($hull.worldMin-is [array]-and $hull.worldMin.Count-eq 3-and $hull.worldMax-is [array]-and $hull.worldMax.Count-eq 3) 'Actual chest bounds incomplete.'
+ $target=[double[]]::new(3)
+ for($axis=0;$axis-lt 3;++$axis){$lo=Num $hull.worldMin[$axis];$hi=Num $hull.worldMax[$axis];Require ($lo-le $hi) 'Actual chest bounds reversed.';$target[$axis]=.5*($lo+$hi)}
+ return ,$target
+}
+function ProjectileSegment($target,$direction){
+ Require ($target-is [array]-and $target.Count-eq 3-and $direction-is [array]-and $direction.Count-eq 2) 'Projectile segment inputs incomplete.'
+ $dx=Num $direction[0];$dz=Num $direction[1];Require ([Math]::Abs($dx)+[Math]::Abs($dz)-eq 1-and $dx*$dz-eq 0) 'Projectile direction must be one bounded cardinal route.'
+ $start=[double[]]::new(3);$speed=[double[]]::new(3)
+ # Explicit scalar assignments avoid PowerShell comma/operator array precedence.
+ $start[0]=(Num $target[0])-$dx*1.25;$start[1]=Num $target[1];$start[2]=(Num $target[2])-$dz*1.25
+ $speed[0]=$dx*800;$speed[1]=0;$speed[2]=$dz*800
+ return @{start=$start;speed=$speed}
+}
 function Decode([string]$v){$v=$v.Trim();if($v.StartsWith('"')){Require $v.EndsWith('"') 'Incomplete SQF result.';return $v.Substring(1,$v.Length-2).Replace('""','"')};return ConvertFrom-Json $v -NoEnumerate}
 function Targets($census,[string[]]$requested,[string[]]$requestedModels=@()){
  $rows=@();$models=@{};$names=@{};$selectedModels=@{};$wantedModels=@($requestedModels|ForEach-Object{ModelKey $_})
@@ -95,8 +110,17 @@ if($SelfTest){
  $proxyFixture.proxies[0].matrix[2]=[double]::NaN;$refused=$false;try{AssertProxyReceipt $proxyFixture}catch{$refused=$true};Require $refused 'Nonfinite actual proxy matrix accepted.'
  $proxyFixture.proxies[0].matrix=@(1,0,0);$refused=$false;try{AssertProxyReceipt $proxyFixture}catch{$refused=$true};Require $refused 'Truncated actual proxy matrix accepted.'
  $refused=$false;try{AssertProxyReceipt ([pscustomobject]@{levels=@()})}catch{$refused=$true};Require $refused 'Missing proxy field accepted as empty.'
+ $chestFixture=[pscustomobject]@{worldMin=@(5500.125,21.75,9999.9);worldMax=@(5500.375,22.25,10000.1)}
+ $chestTarget=ChestTarget $chestFixture;Require ($chestTarget-is [double[]]-and $chestTarget.Count-eq 3-and $chestTarget[0]-eq 5500.25-and $chestTarget[1]-eq 22-and $chestTarget[2]-eq 10000) 'Actual3D chest midpoint construction failed.'
+ foreach($direction in @(@(1,0),@(-1,0),@(0,1),@(0,-1))){
+  $segment=ProjectileSegment $chestTarget $direction
+  Require ($segment.start-is [double[]]-and $segment.start.Count-eq 3-and $segment.speed-is [double[]]-and $segment.speed.Count-eq 3) 'Segment scalar construction became nested/untyped arrays.'
+  Require ($segment.start[1]-eq 22-and $segment.speed[1]-eq 0-and [Math]::Abs($segment.speed[0])+[Math]::Abs($segment.speed[2])-eq 800) 'EngineXYZ segment/velocity invalid.'
+  for($axis=0;$axis-lt 3;++$axis){Require ([Math]::Abs(($segment.start[$axis]+$segment.speed[$axis]*(1.25/800))-$chestTarget[$axis])-lt .0000001) 'Native projectile segment does not reach actual chest midpoint.'}
+ }
+ $refused=$false;try{$null=ProjectileSegment $chestTarget @(1,1)}catch{$refused=$true};Require $refused 'Non-cardinal segment accepted.'
  $tokens=$null;$errors=$null;$null=[Management.Automation.Language.Parser]::ParseFile($PSCommandPath,[ref]$tokens,[ref]$errors);Require ($errors.Count-eq 0) 'Runner parse failure.'
- Write-Host 'Stock model runner SelfTest PASS (census selection, exclusion, invalid/duplicate targets, nested finite values, airborne freeze refusal, unordered/stable pair, aggregate hit acceptance and wake/backend negatives, zero actual proxies and invalid matrix negatives, parse).';return
+ Write-Host 'Stock model runner SelfTest PASS (census selection, exclusion, invalid/duplicate targets, nested finite values, airborne freeze refusal, unordered/stable pair, aggregate hit acceptance and wake/backend negatives, zero actual proxies and invalid matrix negatives, exact3D bullet segment, parse).';return
 }
 $census=$null;if($CensusPath){$census=Get-Content -LiteralPath $CensusPath -Raw|ConvertFrom-Json}
 $targets=Targets $census $Classes $Models
@@ -207,13 +231,13 @@ function Settle([string]$stage){
 function Projectile($beforeHit){
  $hitBefore=HitStatus;Require ($hitBefore.recipe-eq 1) 'Actual frozen wake recipe absent.';$case.projectile=@{before=$hitBefore;passed=$false}
  $chest=@($beforeHit.hulls|Where-Object {$_.bone-match 'zebra|hrudnik'});Require ($chest.Count-gt 0) 'Actual authored chest Fire hull absent.'
- $target=@();for($axis=0;$axis-lt 3;++$axis){$target+=((Num $chest[0].worldMin[$axis])+(Num $chest[0].worldMax[$axis]))*.5}
+ $target=ChestTarget $chest[0]
  $dir=$null;foreach($candidate in @(@(1,0),@(-1,0),@(0,1),@(0,-1))){
   $clear=$true;for($step=0;$step-le 5;++$step){$t=$step/5.0;$x=$target[0]-$candidate[0]*1.25*(1-$t);$z=$target[2]-$candidate[1]*1.25*(1-$t);$native=Num (Eval ('triTerrainHeight ['+(Fmt $x)+','+(Fmt $z)+']'));if($target[1]-le $native+.01){$clear=$false;break}}
   if($clear){$dir=$candidate;break}
  }
  Require ($null-ne $dir) 'No bounded above-floor native bullet segment reaches actual chest hull.'
- $start=@($target[0]-$dir[0]*1.25,$target[1],$target[2]-$dir[1]*1.25);$speed=@($dir[0]*800,0,$dir[1]*800)
+ $segment=ProjectileSegment $target $dir;$start=$segment.start;$speed=$segment.speed
  Exec ('ragShotStartASL=['+(Fmt $start[0])+','+(Fmt $start[2])+','+(Fmt $start[1])+'];ragCorpseProjectile="BulletSingleW" createVehicle ['+(Fmt $start[0])+','+(Fmt $start[2])+',0];ragCorpseProjectile setPosASL ragShotStartASL;ragCorpseProjectile setVelocity ['+(Fmt $speed[0])+','+(Fmt $speed[2])+','+(Fmt $speed[1])+']')
  Require ((Eval '!isNull ragCorpseProjectile')-eq $true-and (Eval 'typeOf ragCorpseProjectile')-ceq 'BulletSingleW') 'Actual native rifle projectile creation failed.'
  $errors=Eval '[abs((getPosASL ragCorpseProjectile select 0)-(ragShotStartASL select 0)),abs((getPosASL ragCorpseProjectile select 1)-(ragShotStartASL select 1)),abs((getPosASL ragCorpseProjectile select 2)-(ragShotStartASL select 2))]'
@@ -288,8 +312,8 @@ try{
     }finally{$stream.ReadTimeout=30000}
    }
    $case.passed=$true
-  }catch{$case.error=$_.Exception.Message}finally{
-   try{Exec 'setAccTime 0;deleteVehicle ragCorpseProjectile;deleteVehicle ragVictim;triClearView';$case.gates.cleanup=Baseline}catch{$case.passed=$false;$case.cleanupError=$_.Exception.Message}
+  }catch{$case.error=$_.Exception.Message;$case.errorScriptStackTrace=$_.ScriptStackTrace;$case.errorPosition=$_.InvocationInfo.PositionMessage}finally{
+   try{Exec 'setAccTime 0;deleteVehicle ragCorpseProjectile;deleteVehicle ragVictim;triClearView';$case.gates.cleanup=Baseline}catch{$case.passed=$false;$case.cleanupError=$_.Exception.Message;$case.cleanupScriptStackTrace=$_.ScriptStackTrace}
    $case|ConvertTo-Json -Depth 30|Set-Content -LiteralPath $casePath
    $result.cases+=,@{class=$target.class;expectedModel=$target.expectedModel;actualModel=$case.actualModel;passed=$case.passed;error=$case.error;cleanupError=$case.cleanupError;evidence=$casePath}
    if($case.passed){$result.passedFamilies++}else{$result.failedFamilies++}
@@ -315,7 +339,7 @@ try{
  $after=Pair;$result.installedAfter=$after;AssertPair $before $after
  Require ($result.cases.Count-eq $result.denominator-and $result.passedFamilies-eq $result.denominator-and $result.failedFamilies-eq 0) 'One or more requested stock model families failed; inspect case.json evidence.'
  $result.passed=$true;Write-Host "Installed stock model ragdoll PASS $($result.passedFamilies)/$($result.denominator): $taskOut"
-}catch{$result.error=$_.Exception.Message;throw}finally{
+}catch{$result.error=$_.Exception.Message;$result.errorScriptStackTrace=$_.ScriptStackTrace;$result.errorPosition=$_.InvocationInfo.PositionMessage;throw}finally{
  if($p-and !$p.HasExited){try{if($client){$null=Send @{cmd='exit'}}}catch{};if(!$p.WaitForExit(10000)){Stop-Process -Id $p.Id -Force}}
  if($client){$client.Dispose()};foreach($key in $saved.Keys){if($null-eq $saved[$key]){Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue}else{[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}}
  $result|ConvertTo-Json -Depth 30|Set-Content -LiteralPath (Join-Path $taskOut 'result.json')
