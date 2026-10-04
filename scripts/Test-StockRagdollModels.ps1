@@ -39,6 +39,14 @@ function AssertHitReactivation($before,$after,$owners,$backend){
  # A restored unsafe local trial may transfer aggregate impulse with lastPart=-1.
  # This admission is followed by actual retained-pose change and resettling checks.
 }
+function AssertProxyReceipt($actual){
+ Require ($actual.PSObject.Properties.Name-contains 'proxies'-and $actual.proxies-is [array]-and $actual.proxies.Count-le (32*64)) 'Actual proxy field missing, untyped or beyond production per-LOD budget.'
+ foreach($proxy in $actual.proxies){
+  Require ($proxy.level-is [ValueType]-and $proxy.level-isnot [bool]-and $proxy.level-ge 0-and $proxy.level-lt 32-and [Math]::Floor((Num $proxy.level))-eq $proxy.level-and @($actual.levels.level)-contains $proxy.level) 'Actual proxy LOD absent or invalid.'
+  Require ($proxy.selection-is [string]-and $proxy.selection.Length-gt 0-and $proxy.matrix-is [array]-and $proxy.matrix.Count-eq 12) 'Actual proxy source/affine matrix incomplete.'
+  foreach($v in $proxy.matrix){Require ($v-is [ValueType]-and $v-isnot [bool]) 'Actual proxy matrix contains a nonnumeric component.';$null=Num $v}
+ }
+}
 function Decode([string]$v){$v=$v.Trim();if($v.StartsWith('"')){Require $v.EndsWith('"') 'Incomplete SQF result.';return $v.Substring(1,$v.Length-2).Replace('""','"')};return ConvertFrom-Json $v -NoEnumerate}
 function Targets($census,[string[]]$requested,[string[]]$requestedModels=@()){
  $rows=@();$models=@{};$names=@{};$selectedModels=@{};$wantedModels=@($requestedModels|ForEach-Object{ModelKey $_})
@@ -82,8 +90,13 @@ if($SelfTest){
  AssertHitReactivation $hitBefore $hitAfter @{active=1} @{bodies=11;joints=10}
  $hitAfter.wakes=0;$refused=$false;try{AssertHitReactivation $hitBefore $hitAfter @{active=1} @{bodies=11;joints=10}}catch{$refused=$true};Require $refused 'Unreactivated received-hit counter accepted.'
  $hitAfter.wakes=1;$refused=$false;try{AssertHitReactivation $hitBefore $hitAfter @{active=1} @{bodies=0;joints=0}}catch{$refused=$true};Require $refused 'Wake without actual solver accepted.'
+ $proxyFixture=[pscustomobject]@{proxies=@();levels=@([pscustomobject]@{level=0})};AssertProxyReceipt $proxyFixture
+ $proxyFixture.proxies=@([pscustomobject]@{level=0;selection='proxy:actual';matrix=@(1,0,0,0,0,1,0,0,0,0,1,0)});AssertProxyReceipt $proxyFixture
+ $proxyFixture.proxies[0].matrix[2]=[double]::NaN;$refused=$false;try{AssertProxyReceipt $proxyFixture}catch{$refused=$true};Require $refused 'Nonfinite actual proxy matrix accepted.'
+ $proxyFixture.proxies[0].matrix=@(1,0,0);$refused=$false;try{AssertProxyReceipt $proxyFixture}catch{$refused=$true};Require $refused 'Truncated actual proxy matrix accepted.'
+ $refused=$false;try{AssertProxyReceipt ([pscustomobject]@{levels=@()})}catch{$refused=$true};Require $refused 'Missing proxy field accepted as empty.'
  $tokens=$null;$errors=$null;$null=[Management.Automation.Language.Parser]::ParseFile($PSCommandPath,[ref]$tokens,[ref]$errors);Require ($errors.Count-eq 0) 'Runner parse failure.'
- Write-Host 'Stock model runner SelfTest PASS (census selection, exclusion, invalid/duplicate targets, nested finite values, airborne freeze refusal, unordered/stable pair, aggregate hit acceptance and wake/backend negatives, parse).';return
+ Write-Host 'Stock model runner SelfTest PASS (census selection, exclusion, invalid/duplicate targets, nested finite values, airborne freeze refusal, unordered/stable pair, aggregate hit acceptance and wake/backend negatives, zero actual proxies and invalid matrix negatives, parse).';return
 }
 $census=$null;if($CensusPath){$census=Get-Content -LiteralPath $CensusPath -Raw|ConvertFrom-Json}
 $targets=Targets $census $Classes $Models
@@ -130,9 +143,9 @@ function HitStatus{
 }
 function Pose([bool]$frozen){
  $actual=Send @{cmd='corpse_pose_state'}
- Require ($actual.readonly-and $actual.frozen-eq $frozen-and $actual.solver-eq !$frozen-and $actual.retainedBounds-and $actual.bones.Count-eq 33-and $actual.levels.Count-ge 6-and $actual.proxies.Count-gt 0) 'Full consumed stock pose unavailable.'
+ Require ($actual.readonly-and $actual.frozen-eq $frozen-and $actual.solver-eq !$frozen-and $actual.retainedBounds-and $actual.bones.Count-eq 33-and $actual.levels.Count-ge 6-and $actual.levels.Count-le 32) 'Full consumed stock pose unavailable.'
  foreach($level in $actual.levels){Require ($level.palette.Count-eq 33-and $level.palettePoints.Count-eq $level.points-and $level.consumerPoints.Count-eq $level.compared-and $level.consumerPointIndices.Count-eq $level.compared) 'Incomplete actual point/palette arrays.'}
- AssertFiniteTree $actual;Require ($actual.hulls.Count-gt 0) 'Actual authored hulls absent.'
+ AssertProxyReceipt $actual;AssertFiniteTree $actual;Require ($actual.hulls.Count-gt 0) 'Actual authored hulls absent.'
  foreach($level in $actual.levels){Require ($level.points-ge 1-and $level.points-le 4096-and $level.compared+$level.skippedPointTails-eq $level.points) 'Actual point coverage invalid.';foreach($matrix in $level.palette){Require ($matrix.Count-eq 12) 'Affine palette incomplete.'};foreach($point in @($level.palettePoints)+@($level.consumerPoints)){Require ($point.Count-eq 3) 'Actual point incomplete.'}}
  return $actual
 }
