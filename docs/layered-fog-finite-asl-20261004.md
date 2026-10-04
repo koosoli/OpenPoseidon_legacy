@@ -117,6 +117,7 @@ The root owner should use the normal installed lock and provenance workflow:
 
 ```powershell
 scripts/Test-LayeredFog.ps1 -ExpectedCommit <installed-commit> -Label original-everon-layered
+scripts/Test-LayeredFog.ps1 -ExpectedCommit <installed-commit> -Label original-everon-layered-cost -Measure
 ```
 
 The runner executes four normally exiting stock Everon arms: OFF/ON at actual
@@ -136,3 +137,33 @@ before enabling by default. Source-only shader check without a device:
 ```powershell
 scripts/Test-LayeredFogShader.ps1 -DependencyDirectory <matching-cached-deps> -RustCompiler rustc
 ```
+
+Every view also writes `<view>.frame-performance.json` with the existing actual
+`frame_performance` response before/after its screenshot request, current weather
+and native source controls, PNG hash and rendered `play_state.frame` bracket.
+The extracted `sampledGpu.gpuFrame` is the inclusive `GPU frame total`;
+`sampledGpu.fogTransport` is timer 88, `Layered ASL fog: transport`.
+Missing rows, unsupported timestamps and negative regions are explicitly
+unavailable with a null value. A genuine published zero is retained. The timer
+does not include the background draw, surface consumer or extra weather-map cost;
+do not add nested region rows to the inclusive frame total.
+
+`-Measure` waits for at least 256 actual rendered `FinishDraw` frames after each
+camera request (90-second deadline, adjustable with `-MeasureDeadlineSeconds`
+within 15–120 seconds), requires a populated 256-frame CPU profiler ring and an
+available positive GPU frame total, and verifies identical render/upscale/MSAA
+configuration across corresponding arm views. It leaves simulation paused and
+uses the same physical weather/source/range gates as functional testing. The
+non-measure path records timings after its existing four-second warmup without
+claiming settlement. Run `-SelfTest` without a game to verify real/zero/unavailable
+timers and finite, duplicate, frame-reset, weather and source refusals.
+
+These are fresh, bounded published timing receipts, **not** the legacy
+`--capture-metrics` schema: the harness `screenshot` handler does not call that
+writer. The published GPU samples have no sampled frame ID and may lag the
+screenshot; bracketed camera/weather/source and matching command-encoding trace
+do not prove same-frame GPU completion. The rendered counter is distinct from
+the capped main-loop CPU ring, so the warmup does not certify that every CPU-ring
+entry belongs to the view. One finite campaign gives descriptive samples, not a
+steady statistical or uncontended performance benchmark. No cost threshold or
+default promotion is manufactured from this receipt.
