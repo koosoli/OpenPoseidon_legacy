@@ -56,8 +56,9 @@ puddle_optics subagents; the root agent applied and tested the combined changes.
 No additional game-animation assets are imported or distributed.
 The incoming swimming record describes local RTMs retargeted from Arma 1 poses,
 deliberately excluded from Git. That is the author's record, not independently
-verified animation provenance. Oliver subsequently confirmed Claude made them
-and authorised inclusion. No corresponding files were found after checking all
+verified animation provenance. Oliver initially reported original Claude
+authorship and authorised inclusion; on 2026-10-04 he corrected that report to
+Arma 1-based animations. No corresponding files were found after checking all
 632 available refs/history, hidden/ignored source directories and 147 local PBO
 indexes. The remaining blocker is missing files, not refusal of that instruction.
 The original A1 animations found locally have an incompatible skeleton and were

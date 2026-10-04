@@ -79,3 +79,24 @@ Note for Malprave's maintainers: `M:\ForestClaude\malprave-swim-animation-fixes.
   crests at a distance.
 * Splashes are Tidewater only. The legacy Current OP ripples for swimmers are not emitted.
 * The `ValidateOutVehicle` assertion seen when boarding is pre-existing.
+
+## Integration-owner provenance correction, 2026-10-04
+
+Oliver initially reported original Claude authorship during integration. He now
+reports that the swimming animations are based on Arma 1 after all, consistent
+with the original local-content record above. The current integration no longer
+labels that absent pack as original generated animations. This is corrected
+owner-reported provenance; the pack is unavailable for independent examination.
+
+A fresh integration-tip check found no tracked swimming RTMs or swim addon. The
+RTM/swim-PBO pathname history across all available refs contains only the two
+existing `tests/fixtures/rtm/{actor_motion,marker_motion}.rtm` parser fixtures,
+not a swim animation pack. Tracked PBO names are test fixtures. The repair script
+contains transformation algorithms and reads animation phases and skeleton
+joints from external files; it embeds no swimming keyframe payload. The earlier
+broader local/PBO-index search remains recorded in the feature test guide.
+No swim animation assets were committed, copied into the installed game or
+substituted from the local original Arma 1 archive during integration. This
+finding concerns the swimming assets; it is not a licence clearance of every
+file in the repository. The owner's running fog/ragdoll smoke session is left
+untouched; this update changes documentation only.

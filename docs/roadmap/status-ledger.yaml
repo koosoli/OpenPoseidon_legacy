@@ -17,8 +17,10 @@ execution:
     note: >-
       Author-run integrated build and bounded runtime checks, not owner review.
       Compatible swim animations and authored cave demo content are absent.
-      Owner confirms Claude authored the swim animations and authorises inclusion;
-      no such animation files were found in available Git history or local assets.
+      Owner initially reported original Claude authorship and authorised inclusion;
+      on 2026-10-04 corrected the provenance report to Arma 1-based animations.
+      No such animation files were found or added in available Git history;
+      no missing retargeted pack was installed. Engine code and repair tool only.
       Optional spotting/hunting/interval/exposure remain off in normal launches.
   excavation_editor_checkpoint:
     branch: codex/cave-editor-20261004

@@ -10,10 +10,12 @@ this merge. Existing weather, grass, muzzle and corpse work is preserved.
 
 The branch contains swimming engine code, **no swim animation files or addon**.
 Its author's decision record says the local 16 RTMs were retargeted from Arma 1
-poses. Oliver subsequently confirmed Claude made them and authorised their
-inclusion. We accept that instruction; the absent files and creation history
-prevent independent verification of whether they were original or retargeted.
-The earlier attribution should not be treated as a verified finding.
+poses. Oliver initially reported original Claude authorship and authorised
+inclusion, but on 2026-10-04 corrected that information: he has now learned the
+animations are based on Arma 1 after all. The current provenance record therefore
+treats the absent pack as reported Arma 1-derived content, not original generated
+animations. No corresponding animation assets were ever added or installed.
+The missing binaries prevent independent verification of the actual pack.
 
 The search covered all 632 available Git refs, reachable object/path history,
 hidden/ignored local source directories apart from build/cache directories,
