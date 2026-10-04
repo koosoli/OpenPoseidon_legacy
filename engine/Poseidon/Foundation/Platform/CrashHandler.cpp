@@ -18,6 +18,37 @@ CrashNotifyFn g_crashNotify = nullptr; // DIAG-001 (SetCrashNotify)
 char g_crashStack[4096] = {};
 char g_crashDump[MAX_PATH] = {};
 
+// Upstream a13cac07: dbghelp can read every enabled processor state even when
+// the kernel's exception context contains only the state this thread uses.
+// Allocate before any crash, so its extended-state tail remains readable.
+CONTEXT* g_dumpContext = nullptr;
+DWORD g_dumpContextFlags = 0;
+
+void AllocateDumpContext()
+{
+    DWORD flags = CONTEXT_ALL;
+    const DWORD64 features = GetEnabledXStateFeatures();
+    if (features & ~XSTATE_MASK_LEGACY)
+        flags |= CONTEXT_XSTATE;
+
+    DWORD length = 0;
+    InitializeContext(nullptr, flags, nullptr, &length);
+    if (!length)
+        return;
+    void* buffer = VirtualAlloc(nullptr, length, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    CONTEXT* context = nullptr;
+    if (!buffer)
+        return;
+    if (!InitializeContext(buffer, flags, &context, &length) ||
+        ((flags & CONTEXT_XSTATE) == CONTEXT_XSTATE && !SetXStateFeaturesMask(context, features)))
+    {
+        VirtualFree(buffer, 0, MEM_RELEASE);
+        return;
+    }
+    g_dumpContext = context;
+    g_dumpContextFlags = flags;
+}
+
 LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep)
 {
     static bool reentered = false;
@@ -47,44 +78,19 @@ LONG WINAPI CrashFilter(EXCEPTION_POINTERS* ep)
     HANDLE f = CreateFileA(dmp, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
     if (f != INVALID_HANDLE_VALUE)
     {
-        // dbghelp can refuse a write and refuse the smaller dump in the same instant, so the
-        // attempts drop detail and then back off in time.
-        struct DumpAttempt
-        {
-            MINIDUMP_TYPE type;
-            DWORD backoffMs;
-        };
-        static const DumpAttempt attempts[] = {
-            {MiniDumpWithDataSegs, 0}, {MiniDumpNormal, 0}, {MiniDumpNormal, 100}, {MiniDumpNormal, 400}};
+        EXCEPTION_POINTERS dumpPointers = *ep;
+        if (g_dumpContext && CopyContext(g_dumpContext, g_dumpContextFlags, ep->ContextRecord))
+            dumpPointers.ContextRecord = g_dumpContext;
 
-        MINIDUMP_EXCEPTION_INFORMATION mei = {GetCurrentThreadId(), ep, FALSE};
-        BOOL written = FALSE;
-        DWORD error = ERROR_SUCCESS;
-        bool normalDump = false;
-        for (const DumpAttempt& attempt : attempts)
-        {
-            Sleep(attempt.backoffMs);
-
-            LARGE_INTEGER start = {};
-            if (!SetFilePointerEx(f, start, nullptr, FILE_BEGIN) || !SetEndOfFile(f))
-            {
-                error = GetLastError();
-                break;
-            }
-
-            written = MiniDumpWriteDump(proc, GetCurrentProcessId(), f, attempt.type, &mei, nullptr, nullptr);
-            if (written)
-            {
-                normalDump = attempt.type == MiniDumpNormal;
-                break;
-            }
-            error = GetLastError();
-        }
+        MINIDUMP_EXCEPTION_INFORMATION mei = {GetCurrentThreadId(), &dumpPointers, FALSE};
+        const BOOL written = MiniDumpWriteDump(proc, GetCurrentProcessId(), f, MiniDumpWithDataSegs,
+                                               &mei, nullptr, nullptr);
+        const DWORD error = written ? ERROR_SUCCESS : GetLastError();
         CloseHandle(f);
         if (written)
         {
             snprintf(g_crashDump, sizeof(g_crashDump), "%s", dmp);
-            fprintf(stderr, "  minidump:%s%s\n", dmp, normalDump ? " (without data segments)" : "");
+            fprintf(stderr, "  minidump:%s\n", dmp);
         }
         else
         {
@@ -179,6 +185,8 @@ void InstallCrashHandler(const char* crashDir)
         while (len > 0 && (g_crashDir[len - 1] == '\\' || g_crashDir[len - 1] == '/'))
             g_crashDir[--len] = 0;
     }
+    if (!g_dumpContext)
+        AllocateDumpContext();
     SetUnhandledExceptionFilter(CrashFilter);
 }
 } // namespace Poseidon::Foundation
