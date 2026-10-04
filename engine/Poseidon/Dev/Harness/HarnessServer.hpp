@@ -15,6 +15,7 @@
 
 #include <atomic>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -40,6 +41,7 @@ class HarnessServer
     HarnessServer();
     ~HarnessServer();
 
+    /// Start/Stop are serialized by their owning main/test thread.
     /// Start listening on the given port. Returns false on bind/listen failure.
     bool Start(int port);
 
@@ -98,10 +100,13 @@ class HarnessServer
 
     HarnessCommandQueue _queue;
     SOCKET_T _listenSock;
+    SOCKET_T _clientSock;
+    std::mutex _socketMutex; // Publishes/closes the worker-owned client for Stop's shutdown.
     std::atomic<bool> _running{false};
     std::atomic<bool> _stopRequested{false};
     std::atomic<bool> _exitRequested{false};
     Foundation::ThreadId _threadId = {};
+    bool _threadJoinable = false; // Owner-thread lifecycle; _running is not a join token.
     int _port = 0;
     int _nextCmdId = 1;
 

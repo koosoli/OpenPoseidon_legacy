@@ -52,7 +52,7 @@ static void harness_closesocket(SOCKET_T s)
 namespace Poseidon::Dev
 {
 
-HarnessServer::HarnessServer() : _listenSock(HARNESS_INVALID_SOCKET)
+HarnessServer::HarnessServer() : _listenSock(HARNESS_INVALID_SOCKET), _clientSock(HARNESS_INVALID_SOCKET)
 {
     // ping / describe / exit are handled on the TCP thread (see HandleClient)
     // — they need no main-thread dispatch, so no handler is registered.
@@ -72,6 +72,8 @@ HarnessServer::~HarnessServer()
 
 bool HarnessServer::Start(int port)
 {
+    if (_threadJoinable)
+        return false; // Stop must join the previous worker even if it already exited.
 #ifdef _WIN32
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
@@ -141,7 +143,8 @@ bool HarnessServer::Start(int port)
 #endif
     }
 
-    if (!Foundation::poThreadCreate(&_threadId, 0, &HarnessServer::WorkerThread, this))
+    _exitRequested.store(false);
+    if (!Foundation::poThreadCreate(&_threadId, 0, &HarnessServer::WorkerThread, this) || !_threadId)
     {
         LOG_ERROR(Core, "[Harness] Failed to create worker thread");
         harness_closesocket(_listenSock);
@@ -149,6 +152,7 @@ bool HarnessServer::Start(int port)
         _running.store(false);
         return false;
     }
+    _threadJoinable = true;
 
     LOG_INFO(Core, "[Harness] Listening on localhost:{}", port);
     return true;
@@ -156,21 +160,34 @@ bool HarnessServer::Start(int port)
 
 void HarnessServer::Stop()
 {
-    if (!_running.load())
+    if (!_threadJoinable)
         return;
 
     _stopRequested.store(true);
 
-    // Close listen socket to unblock accept()
-    if (_listenSock != HARNESS_INVALID_SOCKET)
+    // Interrupt connected recv/send without closing/reusing its handle while
+    // the worker still uses it. Publication and close share this mutex.
+    // The listen socket stays immutable until join; its select has a 1s timeout.
     {
-        harness_closesocket(_listenSock);
-        _listenSock = HARNESS_INVALID_SOCKET;
+        std::lock_guard<std::mutex> lock(_socketMutex);
+        if (_clientSock != HARNESS_INVALID_SOCKET)
+        {
+#ifdef _WIN32
+            shutdown(_clientSock, SD_BOTH);
+#else
+            shutdown(_clientSock, SHUT_RDWR);
+#endif
+        }
     }
 
-    // Give the thread a moment to exit
-    for (int i = 0; i < 20 && _running.load(); ++i)
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    Foundation::poThreadJoin(_threadId, nullptr);
+#ifdef _WIN32
+    CloseHandle(_threadId);
+#endif
+    _threadId = {};
+    _threadJoinable = false;
+    harness_closesocket(_listenSock);
+    _listenSock = HARNESS_INVALID_SOCKET;
 
     _running.store(false);
     LOG_INFO(Core, "[Harness] Server stopped");
@@ -287,13 +304,27 @@ void HarnessServer::WorkerLoop()
 
         LOG_INFO(Core, "[Harness] Client connected");
 
+        {
+            std::lock_guard<std::mutex> lock(_socketMutex);
+            if (_stopRequested.load())
+            {
+                harness_closesocket(clientSock);
+                break;
+            }
+            _clientSock = clientSock;
+        }
+
         // Disable Nagle for low-latency command/response
         int flag = 1;
         setsockopt(clientSock, IPPROTO_TCP, TCP_NODELAY, (const char*)&flag, sizeof(flag));
 
         HandleClient(clientSock);
 
-        harness_closesocket(clientSock);
+        {
+            std::lock_guard<std::mutex> lock(_socketMutex);
+            _clientSock = HARNESS_INVALID_SOCKET;
+            harness_closesocket(clientSock);
+        }
         LOG_INFO(Core, "[Harness] Client disconnected");
     }
 
