@@ -1234,7 +1234,7 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
             mat3x3<f32>(in.model_rot0, in.model_rot1, in.model_rot2)),
         foliage_shadow_ao,
         // Retained objects are never the first-person cockpit (is_cockpit = false).
-        veg_cutout, false, veg_cutout, false, in.clip.xy,
+        veg_cutout, false, veg_cutout, in.is_veg != 0u, false, in.clip.xy,
         !(veg_cutout && foliage_screen_ao < 0.5),
         retained_snow_receiver(in), retained_snow_exposure(in),
         retained_tree_snow_cover(in),

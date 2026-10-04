@@ -1,5 +1,5 @@
 #define_import_path frame
-#import layered_fog_optics::{FogConsumer, fog_camera_matches, fog_legacy_closure}
+#import layered_fog_optics::{FogConsumer, fog_camera_matches, fog_legacy_closure, fog_surface_open}
 
 // Shared group(0): the per-frame camera/environment UBO plus the cascade shadow
 // map + comparison sampler. Every 3D pipeline (lit meshes, terrain) binds this
@@ -617,7 +617,7 @@ fn atmo_applied() -> bool {
     return g_atmo_amount >= 0.0;
 }
 
-fn apply_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
+fn apply_fog_receiver(rgb: vec3<f32>, world_pos_rel: vec3<f32>, vegetation: bool) -> vec3<f32> {
     if (frame.params.fog_enabled <= 0.5 || frame.params.fog_inv_range <= 0.0) {
         return rgb;
     }
@@ -667,12 +667,16 @@ fn apply_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
     let background = mix(rgb, inscat, amount);
     if (!fog_camera_matches(layer_fog_packet, frame.view, frame.proj, frame.cam_pos.xyz)) { return background; }
     let absolute = world_pos_rel + frame.cam_pos.xyz;
-    // Current physical coverage, independent of artistic indoor AO. No inferred OPEN.
-    let surface_open = weather_map_coverage(absolute) >= 0.5 && weather_map_reach(absolute) >= 0.999;
+    // Canopy shelter must not suppress admitted air in front of genuine
+    // plant sections. Non-vegetation receivers retain endpoint reach.
+    let surface_open = fog_surface_open(weather_map_coverage(absolute), weather_map_reach(absolute), vegetation);
     let local = textureSampleLevel(layer_fog_tex, froxel_samp,
         vec3<f32>(uv, sqrt(clamp(dist / layer_fog_packet.control.y, 0.0, 1.0))), 0.0);
     let distant = textureSampleLevel(layer_fog_tex, froxel_samp, vec3<f32>(uv, 1.0), 0.0);
     return fog_legacy_closure(rgb, inscat, amount, local, distant, surface_open);
+}
+fn apply_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
+    return apply_fog_receiver(rgb, world_pos_rel, false);
 }
 
 // Occlusion [0,1] of the sun by terrain at world position (xz, y): 0 = lit, 1 =

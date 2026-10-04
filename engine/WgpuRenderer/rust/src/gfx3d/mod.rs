@@ -13029,8 +13029,8 @@ fn both_object_shaders_force_full_coverage_on_opaque_sections() {
 // at low sun the landscape loses contrast and the foliage does not, and the trees stand out as
 // hard dark shapes.
 //
-// Here there is exactly ONE aerial-perspective function -- frame.wgsl's apply_fog, which samples
-// the froxel volume -- and every family that draws world geometry calls it. This test is what
+// Here there is exactly ONE aerial-perspective implementation -- frame.wgsl's apply_fog_receiver,
+// with apply_fog as its generic-role wrapper -- and every geometry family calls it. This test is what
 // keeps that true. It is a source audit rather than a render comparison on purpose: "the trees
 // look dark at sunset" is true of a correct renderer too, so a screenshot cannot decide it, and
 // the thing that WOULD decide it is whether the leaf fragments went through the same function.
@@ -13041,8 +13041,8 @@ fn every_world_geometry_family_takes_the_same_aerial_perspective() {
     // air the way the terrain behind it does.
     let frame = include_str!("../shaders/frame.wgsl");
     assert!(
-        frame.contains("fn apply_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {"),
-        "frame.wgsl must own the single aerial-perspective function"
+        frame.contains("fn apply_fog_receiver(rgb: vec3<f32>, world_pos_rel: vec3<f32>, vegetation: bool) -> vec3<f32> {"),
+        "frame.wgsl must own the single role-aware aerial-perspective implementation"
     );
     assert!(
         frame.contains("let inscat = textureSampleLevel(froxel_tex, froxel_samp,"),
@@ -13050,14 +13050,14 @@ fn every_world_geometry_family_takes_the_same_aerial_perspective() {
     );
     // Every family that puts world geometry on screen. shading.wgsl covers BOTH object paths
     // (shader3d and gpu_driven call the same shade()), which is where vegetation lives.
-    for (name, src) in [
-        ("shaders/shading.wgsl", include_str!("../shaders/shading.wgsl")),
-        ("terrain/terrain.wgsl", include_str!("../terrain/terrain.wgsl")),
-        ("grass/grass.wgsl", include_str!("../grass/grass.wgsl")),
-        ("far/far.wgsl", include_str!("../far/far.wgsl")),
+    for (name, src, call) in [
+        ("shaders/shading.wgsl", include_str!("../shaders/shading.wgsl"), "apply_fog_receiver("),
+        ("terrain/terrain.wgsl", include_str!("../terrain/terrain.wgsl"), "apply_fog("),
+        ("grass/grass.wgsl", include_str!("../grass/grass.wgsl"), "apply_fog("),
+        ("far/far.wgsl", include_str!("../far/far.wgsl"), "apply_fog("),
     ] {
         assert!(
-            src.contains("apply_fog(") && src.contains("apply_fog"),
+            src.contains(call),
             "{name} must apply the shared aerial perspective"
         );
     }
@@ -13066,8 +13066,10 @@ fn every_world_geometry_family_takes_the_same_aerial_perspective() {
     // the same atmosphere. Nothing between the leaf lighting and the fog may return early.
     let shading = include_str!("../shaders/shading.wgsl");
     let at = shading
-        .find("rgb = apply_fog(rgb, world_pos);")
-        .expect("shading.wgsl must fog through apply_fog");
+        .find("rgb = apply_fog_receiver(rgb, world_pos, is_vegetation && !is_cockpit && cave.y >= 0.999);")
+        .expect("shading.wgsl must fog all object sections through the shared role-aware implementation");
+    assert!(frame.contains("return apply_fog_receiver(rgb, world_pos_rel, false);"),
+        "Generic geometry must delegate to the same implementation with no plant exception");
     let tail = &shading[at..];
     assert!(
         tail.matches("return rgb;").count() >= 1,

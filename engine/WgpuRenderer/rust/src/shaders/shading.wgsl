@@ -8,7 +8,7 @@
 
 #define_import_path shading
 
-#import frame::{frame, gi_irradiance, terrain_sun_shadow, apply_fog, cloud_sun_shadow, sky_irradiance, sky_vis_ao, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, sky_specular_split, spec_power_to_gloss}
+#import frame::{frame, gi_irradiance, terrain_sun_shadow, apply_fog_receiver, cloud_sun_shadow, sky_irradiance, sky_vis_ao, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, sky_specular_split, spec_power_to_gloss}
 #import shadow::shadow_strength
 #import lighting::lights_material_contrib
 #import color::srgb_to_linear
@@ -204,6 +204,9 @@ fn shade(
     // cards don't split into a lit/near-black pair at harsh sun angles. Knobs ride in
     // frame.foliage / frame.foliageb / frame.foliagec. See docs/foliage-translucency-plan.md.
     is_foliage: bool,
+    // Actual MapType vegetation, including opaque trunks. Used only by fog,
+    // separately from the cutout-only leaf lighting and alpha coverage gates.
+    is_vegetation: bool,
     // First-person cockpit draw (MAT-052 second half): take the LEGACY flat scene ambient
     // instead of the sky-dome irradiance. A cockpit interior is enclosed by the vehicle
     // body, which none of the ambient occluders can see (sky-vis is terrain-keyed, GTAO
@@ -741,7 +744,7 @@ fn shade(
     // fog_enabled: >=2 = aerial-perspective froxel (per-fragment); 1 = legacy flat fog; 0 =
     // off (fog == 1, mix is a no-op).
     if (frame.params.fog_enabled >= 1.5) {
-        rgb = apply_fog(rgb, world_pos);
+        rgb = apply_fog_receiver(rgb, world_pos, is_vegetation && !is_cockpit && cave.y >= 0.999);
     } else {
         rgb = mix(fog_color, rgb, fog);
     }

@@ -1182,6 +1182,7 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         // module no longer references can be eliminated before pipeline creation, and the
         // constant mod.rs supplies for it (gfx3d/mod.rs:4517) then has no target.
         veg_cutout, translucent > 0.5 && (material_flags(material) & MATFLAG_GLASS) != 0u, veg_cutout,
+        material.sun_ambient.w > 0.5,
         (material_flags(material) & MATFLAG_COCKPIT) != 0u, in.clip.xy,
         !(veg_cutout && foliage_screen_ao < 0.5),
         direct_snow_receiver(in), 0.0,

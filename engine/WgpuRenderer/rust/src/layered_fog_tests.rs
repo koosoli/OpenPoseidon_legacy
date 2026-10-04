@@ -100,8 +100,52 @@ fn actual_fog_far_closure_gpu_preserves_sky_and_gated_foreground() {
  assert!((samples[28]-samples[8]).abs()>1.,"Old closure counterexample must remain discriminating");
  let source=include_str!("shaders/frame.wgsl");
  let guard=source.find("if (!fog_camera_matches(layer_fog_packet").unwrap();
- assert!(guard<source.find("let surface_open = weather_map_coverage").unwrap());
+ assert!(guard<source.find("let surface_open = fog_surface_open").unwrap());
  assert!(source[guard..].contains("{ return background; }"),"OFF retains the exact legacy mix before new sampling");
+}
+
+#[test]
+fn actual_fog_vegetation_gpu_keeps_canopy_and_trunk_transport_without_changing_alpha() {
+ let(device,queue)=crate::gfx3d::cull::tests::headless().expect("actual vegetation fog proof requires device");
+ const PROBE:&str=r#"
+ #import layered_fog_optics::{fog_surface_open,fog_legacy_closure}
+ @group(0) @binding(0) var<storage,read_write> result:array<vec4<f32>>;
+ @compute @workgroup_size(1) fn cs_probe(){
+  let scene=vec3<f32>(0.2,0.3,0.1);let sky=vec3<f32>(1.0,1.0,1.0);
+  let local=vec4<f32>(0.4,0.4,0.4,0.5);let distant=vec4<f32>(0.7,0.7,0.7,0.2);
+  // Real MapType vegetation contains cutout canopy AND opaque trunk sections.
+  // A self-sheltered endpoint must not change either section's ray transport.
+  result[0]=vec4<f32>(fog_legacy_closure(scene,sky,0.0,local,distant,fog_surface_open(1.0,1.0,true)),1.0);
+  result[1]=vec4<f32>(fog_legacy_closure(scene,sky,0.0,local,distant,fog_surface_open(1.0,0.0,true)),1.0);
+  result[2]=vec4<f32>(fog_legacy_closure(scene,sky,0.0,local,distant,fog_surface_open(1.0,0.0,false)),1.0);
+  result[3]=vec4<f32>(f32(fog_surface_open(0.0,1.0,true)),f32(fog_surface_open(0.49,1.0,true)),
+   f32(fog_surface_open(0.5,0.0,true)),f32(fog_surface_open(1.0,0.998,false)));
+  result[4]=vec4<f32>(f32(fog_surface_open(1.0,0.999,false)),f32(fog_surface_open(1.0,1.0,false)),0.0,0.0);
+  // Fog touches RGB only. Zero/partial/full authored alpha retain their
+  // coverage; alpha does not participate in the vegetation role decision.
+  result[5]=vec4<f32>(result[1].rgb,0.0);result[6]=vec4<f32>(result[1].rgb,0.35);
+  result[7]=vec4<f32>(result[1].rgb,1.0);
+  // The old gate gives the same eligible tree two different RGBs solely
+  // because its own canopy blocks rainfall at one point.
+  result[8]=vec4<f32>(fog_legacy_closure(scene,sky,0.0,local,distant,fog_surface_open(1.0,1.0,false)),1.0);
+ }
+ "#;
+ let samples=read_probe(&device,&queue,PROBE,&[],36);
+ assert!(samples.iter().all(|v|v.is_finite()));
+ assert_eq!(&samples[0..4],&samples[4..8],"Plant canopy shelter must not split foreground fog");
+ assert_eq!(&samples[8..12],&[0.2,0.3,0.1,1.],"Roofed non-vegetation foreground remains refused");
+ assert_eq!(&samples[12..16],&[0.,0.,1.,0.]);assert_eq!(&samples[16..20],&[1.,1.,0.,0.]);
+ assert_eq!(samples[23],0.);assert_eq!(samples[27],0.35);assert_eq!(samples[31],1.);
+ for row in samples[20..32].chunks_exact(4){assert_eq!(&row[..3],&samples[4..7]);}
+ assert!((samples[32]-samples[8]).abs()>0.2,"Old self-shelter discontinuity remains discriminating");
+ let frame=include_str!("shaders/frame.wgsl");let direct=include_str!("gfx3d/shader3d.wgsl");
+ let retained=include_str!("gfx3d/gpu_driven.wgsl");let shared=include_str!("shaders/shading.wgsl");
+ assert!(frame.contains("return apply_fog_receiver(rgb, world_pos_rel, false)"),"Generic source gates preserved");
+ assert!(direct.contains("material.sun_ambient.w > 0.5,"),"Actual direct MapType role includes trunks");
+ assert!(retained.contains("veg_cutout, false, veg_cutout, in.is_veg != 0u"),"Actual retained MapType role includes trunks");
+ assert!(shared.contains("is_vegetation && !is_cockpit && cave.y >= 0.999"),"Cockpit/native interior cannot take plant exception");
+ assert!(direct.contains("return vec4<f32>(out_rgb, out_a2)"));
+ assert!(retained.contains("return vec4<f32>(out_rgb, out_a)"));
 }
 
 #[test]
