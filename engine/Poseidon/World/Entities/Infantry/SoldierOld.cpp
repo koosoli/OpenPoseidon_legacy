@@ -1659,6 +1659,13 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
             pivot = (anchor.firstWorld+anchor.secondWorld)*0.5f;
         }
         Vector3 axis = state->initial[b].Position()-pivot;
+        // Only the spherical root uses a generated midpoint; its complete
+        // measured body separation provides the same anatomical direction.
+        if (!anatomicalHinges && j==0)
+        {
+            if (!CorpseMeasureSphericalRootAxis(state->initial[a].Position(),state->initial[b].Position(),pivot,axis))
+            { refusal="spherical-root-centre-separation-required"; return false; }
+        }
         if (!axis.IsFinite() || axis.Size() < 0.025f)
         {
             refusal = "joint-geometry-axis-degenerate";

@@ -139,6 +139,30 @@ TEST_CASE("Captured common-part proxy blends keep exact handoff and owned rigid 
     CHECK(std::memcmp(&pose.levels[0].proxies[0],&captured,sizeof(Matrix4))==0);
 }
 
+TEST_CASE("Spherical root frame uses full measured midpoint separation without moving its pivot", "[corpse-pose][automatic-ragdoll][stock-corpse-capability]")
+{
+    // Actual installed Woman1 joint0 body centres, 20261004 06d41 receipt.
+    const Vector3 parent(5500.002f,20.570023f,10000.016f),child(5499.9995f,20.597254f,10000.002f);
+    const Vector3 pivot=(parent+child)*.5f;
+    REQUIRE((child-pivot).Size()<.025f);
+    REQUIRE((child-parent).Size()>=.025f);
+    Vector3 axis;
+    REQUIRE(CorpseMeasureSphericalRootAxis(parent,child,pivot,axis));
+    CHECK((axis-(child-parent).Normalized()).Size()<1e-6f);
+    const Vector3 localParent(0,.5f,0),localChild(0,.47f,0),localPivot(0,.485f,0);
+    REQUIRE(CorpseMeasureSphericalRootAxis(localParent,localChild,localPivot,axis));
+    CHECK((axis-Vector3(0,-1,0)).Size()<1e-6f);
+    Matrix4 rotation(MDirection,Vector3(1,0,0),VUp);
+    REQUIRE(CorpseMeasureSphericalRootAxis(rotation.Rotate(localParent),rotation.Rotate(localChild),rotation.Rotate(localPivot),axis));
+    CHECK((axis-rotation.Rotate(Vector3(0,-1,0))).Size()<1e-6f);
+    CHECK_FALSE(CorpseMeasureSphericalRootAxis(localParent,localParent,localParent,axis));
+    CHECK_FALSE(CorpseMeasureSphericalRootAxis(VZero,Vector3(0,.024f,0),Vector3(0,.012f,0),axis));
+    CHECK_FALSE(CorpseMeasureSphericalRootAxis(localParent,localChild,localPivot+Vector3(.01f,0,0),axis));
+    CHECK_FALSE(CorpseMeasureSphericalRootAxis(Vector3(std::numeric_limits<float>::quiet_NaN(),0,0),localChild,localPivot,axis));
+    CHECK_FALSE(CorpseMeasureSphericalRootAxis(localParent,Vector3(std::numeric_limits<float>::infinity(),0,0),localPivot,axis));
+    CHECK_FALSE(CorpseMeasureSphericalRootAxis(localParent,localChild,Vector3(0,std::numeric_limits<float>::quiet_NaN(),0),axis));
+    CHECK_FALSE(CorpseMeasureSphericalRootAxis(VZero,Vector3(3e38f,0,0),Vector3(1.5e38f,0,0),axis));
+}
 // STOCK_CORPSE_CAPABILITY_TESTS_END
 
 // STOCK_CORPSE_BOUNDARY_TESTS_BEGIN

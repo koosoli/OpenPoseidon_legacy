@@ -37,6 +37,24 @@ inline bool CorpseAutomaticRetirementAdmitted(bool supported, bool quiet,
         (quietSeconds >= .75f || simulatedSeconds >= 12);
 }
 
+// The generated pelvis/chest pivot is their midpoint: measuring only its
+// distal half unnecessarily halves the available orientation evidence. Use
+// the actual complete centre-to-centre direction for that spherical root joint
+// only, preserving its midpoint and requiring 25 mm measured separation.
+inline bool CorpseMeasureSphericalRootAxis(Vector3Val proximalCenter, Vector3Val distalCenter,
+    Vector3Val pivot, Vector3& axis)
+{
+    axis=VZero;
+    if (!proximalCenter.IsFinite() || !distalCenter.IsFinite() || !pivot.IsFinite()) return false;
+    const Vector3 midpoint=proximalCenter*.5f+distalCenter*.5f;
+    if (!midpoint.IsFinite() || (midpoint-pivot).Size() > .001f) return false;
+    const Vector3 direction=distalCenter-proximalCenter;
+    const float length=direction.Size();
+    if (!direction.IsFinite() || !std::isfinite(length) || length < .025f) return false;
+    axis=direction/length;
+    return axis.IsFinite();
+}
+
 // Read-only admission measurements, never a solver or a serialized pose.
 struct CorpseLevelDiagnostic
 {

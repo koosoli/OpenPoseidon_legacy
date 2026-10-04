@@ -107,3 +107,21 @@ zero-motion byte equivalence, common-delta/native-blend equivalence and repeated
 updates against the retained capture. The source translation units pass syntax
 checks. Installed female qualification and a final same-build 37-model campaign
 are still required before claiming complete stock model coverage.
+
+## Sparse spherical root midpoint direction
+
+The next installed build qualified Woman3/4/5, including real native projectile
+reaction and frozen save/load. Woman1/2 both passed exact capture (396 matrices,
+6,191 or 5,882 points, 44 proxies), then refused only spherical joint0. The
+actual pelvis/chest centre separation was 30.61 mm, while the generated midpoint
+left a 15.31 mm half-vector below the 25 mm direction threshold.
+
+Only that spherical root joint now measures its complete actual parent-to-child
+centre direction, preserving both body origins and the generated midpoint.
+The helper verifies the supplied midpoint within 1 mm and retains finite and
+at-least-25-mm centre-separation admission. Every other joint and measured hinge
+keeps its existing axis policy. No general alternate-pivot fallback is added.
+Native controls include the actual captured Woman1/2 centres, rotated frames,
+coincident/24-mm centres, incorrect midpoint, nonfinite and overflow inputs.
+Capability/consumer controls pass 1,598 assertions in six cases. Final installed
+Woman1/2 and same-build all-model qualification remain pending.
