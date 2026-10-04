@@ -1665,8 +1665,19 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
 bool Man::CaptureCorrectedCorpsePose(RString& refusal)
 {
     refusal = "stock-corrected-live-pose-required";
+    const float worldDeterminant=CorpseMatrixDeterminant(Transform());
     if (!_shape || !_headTrans.IsFinite() || !_gunTrans.IsFinite() || !_legTrans.IsFinite() ||
-        std::abs(CorpseMatrixDeterminant(Transform())-1) > 1e-4f || !GLandscape || !GWorld) return false;
+        std::abs(worldDeterminant-1) > 1e-4f || !GLandscape || !GWorld)
+    {
+        refusal=!_shape?"stock-live-model-unavailable":!_headTrans.IsFinite()?"nonfinite-live-head-correction":
+            !_gunTrans.IsFinite()?"nonfinite-live-gun-correction":!_legTrans.IsFinite()?"nonfinite-live-leg-correction":
+            !GLandscape || !GWorld?"stock-live-world-unavailable":"unit-scale-live-world-frame-required";
+        LOG_INFO(World,"AUTORAGDOLL: live capture refused model={} reason={} headFinite={} gunFinite={} legFinite={} rootFinite={} worldDeterminant={} headDeterminant={} gunDeterminant={} legDeterminant={} rootAxisLengths=({},{},{}) rootAxisDots=({},{},{})",
+            _shape?_shape->Name():"unavailable",refusal.Data(),_headTrans.IsFinite(),_gunTrans.IsFinite(),_legTrans.IsFinite(),Transform().IsFinite(),
+            worldDeterminant,CorpseMatrixDeterminant(_headTrans),CorpseMatrixDeterminant(_gunTrans),CorpseMatrixDeterminant(_legTrans),
+            DirectionAside().Size(),DirectionUp().Size(),Direction().Size(),DirectionAside()*DirectionUp(),DirectionUp()*Direction(),Direction()*DirectionAside());
+        return false;
+    }
     Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
     if (!StockCorpseCapability(_shape, skeleton, refusal)) return false;
     AffinePhasePose primary, secondary;
