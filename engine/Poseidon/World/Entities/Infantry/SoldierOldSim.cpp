@@ -398,6 +398,8 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
         base::Simulate(deltaT, prec);
         return;
     }
+    // Sinkhole W3: falling -- the Fall move, held upright; the touchdown (SoldierOldSwim.cpp)
+    UpdateFalling(deltaT);
 
     float turn, moveX, moveZ;
 

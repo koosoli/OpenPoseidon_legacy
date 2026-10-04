@@ -732,6 +732,7 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     var dbgTrans = vec3<f32>(0.0);
     var dbgIn = vec3<f32>(0.0);
     var dbgLight = vec3<f32>(0.0);
+    var dbgUnder = vec3<f32>(0.0);
 
     if (!viewFromBelow) {
         // ================= ABOVE WATER =================
@@ -950,6 +951,7 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let hasObj = posV.z - sceneZ > 0.0 && sceneZ > -1e8;
         let objCol = textureSampleLevel(waterSceneColor, smpLinearClamp, screenUV, 0.0).rgb;
         let transmittedU = select(skyT, objCol, hasObj);
+        dbgUnder = vec3<f32>(select(1.0, 0.0, hasObj), select(0.0, 1.0, hasObj), F);
 
         let foamUnder = (skyIrr + sunLight * 0.5) * 0.25;
         outCol = mix(transmittedU * (1.0 - F) + deepCol * F, foamUnder, sat(foam) * 0.7);
@@ -991,6 +993,10 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     } else if (dbg == 25) {
         // (W3m) r depth / 26 m (the shore waves' reach), g whitecaps (per vertex), b foam coverage
         res = vec3<f32>(sat(vDepth / 26.0), sat(in.foam), sat(surf.coverage));
+    } else if (dbg == 26) {
+        // (Sinkhole) the surface seen from below: r nothing found above it (the sky is shown), g an object
+        // above it (the scene copy is shown), b the Fresnel (mirror) share
+        res = dbgUnder * 2.0;
     } else if (dbg == 23) {
         res = dbgLight * vec3<f32>(0.1, 1.0, 1.0);
     }

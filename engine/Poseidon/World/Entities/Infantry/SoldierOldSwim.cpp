@@ -12,8 +12,18 @@
 // Hands and feet throw a splash where they cut the surface (EmitSwimSplashes), for every swimmer
 // near the camera; the Tidewater water draws them with the impact spray.
 //
-// A config without the swim moves keeps the old behaviour (the man walks the sea bed). Dead men
-// float face down. POSEIDON_SWIM=0 turns swimming off, POSEIDON_SWIM_SPLASH=0 the splashes.
+// Gear: a launcher, or a machine gun (CWA's own rule: it takes the secondary slot too), weighs a swimmer
+// down -- slower strokes and lower in the water (SwimGearLoad).
+//
+// Falling (UpdateFalling, the swim pack's Fall / FallLand / SwimIn moves): a man dropping for a moment plays
+// Fall -- upright, rifle held in both hands -- and is kept upright unless a blast or a hit throws him. On land a
+// hard touchdown crouches (FallLand), then the normal moves; into deep water he plunges with his speed (the
+// heave runs soft for a moment), comes up in SwimIn (the rifle from the hands to slung), and a fall from
+// height hurts. A man put on the water (a mission's placement, getting out of a boat) just starts swimming.
+//
+// A config without the swim moves keeps the old behaviour (the man walks the sea bed), and without the fall
+// moves falling stays the engine's rigid tumble. Dead men float face down. POSEIDON_SWIM=0 turns swimming
+// and the falling off, POSEIDON_SWIM_SPLASH=0 the splashes.
 
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/World/Entities/Infantry/SwimView.hpp>
@@ -35,12 +45,16 @@ namespace Poseidon
 {
 namespace
 {
-// A living swimmer's water line (SwimWaterLine, SwimView.hpp) follows his eyes (the "zamerny" memory
-// point, smoothed): they ride SwimEyeAbove over the water whatever the move -- treading holds the head
-// up, the stroke lies flat -- so his face is clear and his body under. A dead man (and a model without
-// the eye point) floats at SwimWaterLine.
-constexpr float SwimEyeAbove = 0.12f;
-constexpr float SwimEyeTime = 0.6f;
+// A living swimmer's water line (SwimWaterLine, SwimView.hpp) follows his chin -- the head bone's neck joint,
+// SwimHeadRest, smoothed -- whatever the move (treading holds the head up, the stroke leans it forward): the
+// water stands SwimChinAbove under it, so a loaded soldier rides as low as he really does, mouth and eyes
+// clear, shoulders under. (It followed the "zamerny" memory point, taken for the eyes: that point sits at the
+// chest, 1.20 m over the feet against the eyes' ~1.55, and held the water at his waist.) A dead man (and a
+// model without the head bone) floats at SwimWaterLine.
+constexpr float SwimChinAbove = 0.02f;
+constexpr float SwimChinTime = 0.6f;
+// The head bone's neck joint in the men's rest (model) space -- the chin line (the CWA skeleton, as below).
+const Vector3 SwimHeadRest(0.011f, 0.516f, 0.003f);
 // Heave: spring (1/s^2) and damping (1/s) pulling the water line onto the surface. A 1.2 s natural
 // period against swell of 6-10 s: the body follows the waves with little lag, but still plunges and
 // bobs back up after a jump in.
@@ -51,6 +65,27 @@ constexpr float SwimDrift = 0.85f;
 // How far the body leans with the wave face (0 upright .. 1 square to the surface), and how fast (s).
 constexpr float SwimLean = 0.7f;
 constexpr float SwimLeanTime = 0.35f;
+// Gear load (SwimGearLoad): the stroke's travel scales by it, and the chin rides lower by SwimGearSink per unit
+// short of 1 (a launcher: 5 cm, the water at the mouth).
+constexpr float SwimGearMG = 0.9f;
+constexpr float SwimGearLauncher = 0.8f;
+constexpr float SwimGearSink = 0.25f;
+// Falling in: the heave runs this soft (share of the spring) for this long, so the body plunges with its speed
+// and bobs up; water stops hurting below WaterImpactSafe (m/s, ~10 m drop) and kills around +WaterImpactSpan.
+constexpr float SwimEntrySoftTime = 1.2f;
+constexpr float SwimEntrySoftSpring = 0.3f;
+constexpr float WaterImpactSafe = 14.0f;
+constexpr float WaterImpactSpan = 12.0f;
+// Falling: Fall starts after this long in the air dropping faster than this (s, m/s) -- not on a step or a
+// bump; the body rights itself over FallRightTime (s); a touchdown faster than FallLandSpeed (m/s) crouches.
+// A blast or hit (an impulse over 5 g) lets him tumble for FallTumbleTime (s).
+constexpr float FallStartTime = 0.25f;
+constexpr float FallStartSpeed = 3.0f;
+constexpr float FallRightTime = 0.3f;
+constexpr float FallLandSpeed = 4.0f;
+constexpr float FallTumbleTime = 1.5f;
+// Put on the water: a man this close over a deep spot (m) starts swimming with no fall.
+constexpr float SwimPlacedAbove = 1.0f;
 // Splashes: only for swimmers this close to the camera (m).
 constexpr float SwimSplashRange = 150.0f;
 // The finger tips and toe tips in the men's rest (model) space -- the wrist and toe joints of the CWA
@@ -151,6 +186,7 @@ void ManType::FindSwimLimbs() const
     {
         _swimLimbBone[b] = skeleton->FindBone(bones[b]);
     }
+    _swimHeadBone = skeleton ? skeleton->FindBone("hlava") : -1;
 }
 
 void Man::BlendToMove(MoveId id)
@@ -182,6 +218,105 @@ void Man::InitSwimMoves() const
         _swimMoves[i] = Type()->GetMoveId(names[i]);
     }
     _swimOut = Type()->GetMoveId("SwimOut");
+    _fallMove = Type()->GetMoveId("Fall");
+    _fallLandMove = Type()->GetMoveId("FallLand");
+    _swimInMove = Type()->GetMoveId("SwimIn");
+}
+
+float Man::SwimGearLoad() const
+{
+    float load = 1.0f;
+    for (int i = 0; i < NWeaponSystems(); i++)
+    {
+        const WeaponType* weapon = GetWeaponSystem(i);
+        if (weapon && (weapon->_weaponType & MaskSlotSecondary))
+        {
+            load = std::min(load, (weapon->_weaponType & MaskSlotPrimary) ? SwimGearMG : SwimGearLauncher);
+        }
+    }
+    return load;
+}
+
+void Man::UpdateFalling(float deltaT)
+{
+    InitSwimMoves();
+    if (_fallMove == MoveIdNone || !SwimEnabled())
+    {
+        return; // no fall moves (or swimming off): the engine's rigid fall, as before
+    }
+    if (_fallLanding)
+    {
+        if (_primaryMove.id != _fallLandMove || _primaryTime >= 0.98f)
+        {
+            _fallLanding = false;
+            if (_primaryMove.id == _fallLandMove)
+            {
+                BlendToMove(GetDefaultMove());
+            }
+        }
+        return;
+    }
+    AIUnit* unit = Brain();
+    const bool inVehicle = unit && unit->GetVehicleIn();
+    const bool airborne = !_landContact && !_objectContact;
+    if (IsDead() || _ladderBuilding || inVehicle || !airborne)
+    {
+        if (_falling && !IsDead() && !inVehicle)
+        {
+            // touchdown: a hard one crouches, a soft one goes straight back to the normal moves
+            if (_fallSpeed > FallLandSpeed && _fallLandMove != MoveIdNone)
+            {
+                BlendToMove(_fallLandMove);
+                _fallLanding = true;
+            }
+            else
+            {
+                BlendToMove(GetDefaultMove());
+            }
+        }
+        _falling = false;
+        _airTime = 0;
+        _fallSpeed = 0;
+        _fallTumble = 0;
+        return;
+    }
+    _airTime += deltaT;
+    const float vy = Speed().Y();
+    _fallSpeed = std::max(_fallSpeed, -vy);
+    if (_impulseForce.SquareSize() > Square(GetMass() * 5))
+    {
+        _fallTumble = FallTumbleTime;
+    }
+    _fallTumble = std::max(0.0f, _fallTumble - deltaT);
+    if (!_falling)
+    {
+        if (_airTime < FallStartTime || vy > -FallStartSpeed)
+        {
+            return;
+        }
+        _falling = true;
+    }
+    if (_primaryMove.id != _fallMove)
+    {
+        BlendToMove(_fallMove);
+    }
+    if (_fallTumble > 0)
+    {
+        return;
+    }
+    // upright: no spin, the body righted toward vertical, the heading kept
+    _angMomentum = VZero;
+    _angVelocity = VZero;
+    Vector3 dir = Direction();
+    dir[1] = 0;
+    dir = dir.SquareSize() > 1e-4f ? dir.Normalized() : Vector3(VForward);
+    Vector3 up = DirectionUp() + (VUp - DirectionUp()) * std::min(1.0f, deltaT / FallRightTime);
+    up.Normalize();
+    Matrix3 orient;
+    orient.SetUpAndDirection(up, dir);
+    Frame trans = *this;
+    trans.SetOrientation(orient);
+    Move(trans);
 }
 
 bool Man::CanSwim() const
@@ -243,20 +378,44 @@ bool Man::UpdateSwimming()
         }
         // start only when actually in the water (not on a pier or a boat deck above it, not in a
         // terrain hole -- a cellar below sea level is dry) and it is too deep to stand
-        if (IsDead() || _ladderBuilding || depth < SwimStartDepth || level - pos.Y() < SwimStartDepth - 0.1f ||
-            GLandscape->InTerrainHole(pos.X(), pos.Z()))
+        // put on the water (a mission's placement, out of a boat): over a deep spot, close above the surface, not
+        // standing on anything and not already dropping fast -- he swims at once, with no fall
+        const float vy = Speed().Y();
+        const bool placed = !_objectContact && pos.Y() < level + SwimPlacedAbove && vy < 0.5f && vy > -FallStartSpeed;
+        if (IsDead() || _ladderBuilding || depth < SwimStartDepth ||
+            (level - pos.Y() < SwimStartDepth - 0.1f && !placed) || GLandscape->InTerrainHole(pos.X(), pos.Z()))
         {
             return false;
         }
         _swimming = true;
-        _swimVy = Speed().Y();
+        _swimVy = vy;
+        // fallen in: the body plunges with its speed (soft heave) and comes up in SwimIn; a fall from height hurts
+        const bool fallenIn = vy < -FallStartSpeed;
+        _swimEntrySoft = fallenIn ? SwimEntrySoftTime : 0.0f;
+        if (fallenIn && -vy > WaterImpactSafe)
+        {
+            const float hurt = (-vy - WaterImpactSafe) / WaterImpactSpan * GetInvArmor() * 3;
+            LocalDammage(nullptr, this, VZero, std::min(hurt, 5.0f), 1.0f);
+        }
+        _falling = false;
+        _fallLanding = false;
+        _airTime = 0;
+        _fallSpeed = 0;
         _swimTargetValid = false;
-        _swimEyeValid = false;
+        _swimChinValid = false;
         _swimLimbValid = false;
         _swimUp = VUp;
         _waterBuoyancyContact = false;
-        BlendToMove(swim);
+        BlendToMove(fallenIn && _swimInMove != MoveIdNone ? _swimInMove : swim);
         return true;
+    }
+    if (pos.Y() > level + SwimPlacedAbove + 0.5f)
+    {
+        // lifted clear of the water (a script's setPos, a pickup by a helicopter): no longer swimming -- he
+        // falls, and comes back in through the fall (the heave would drag him down at any speed)
+        _swimming = false;
+        _swimEntrySoft = 0;
+        return false;
     }
     if (depth < SwimStopDepth && !IsDead())
     {
@@ -301,8 +460,9 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
     const Vector3 aside(fwd.Z(), 0, -fwd.X());
 
     Vector3 pos = Position();
-    // horizontal travel from the swim cycle, like walking
-    pos += aside * moveX + fwd * moveZ;
+    // horizontal travel from the swim cycle, like walking -- slower under a heavy load
+    const float gear = SwimGearLoad();
+    pos += (aside * moveX + fwd * moveZ) * gear;
 
     // the water under the body: five samples over its length and width, so ripples shorter than a man
     // average out and the slope under him is the swell's
@@ -330,13 +490,18 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
     // heave: the animation's water line onto the surface, a spring-damper that also follows the
     // surface's own rise and fall, so a crest lifts the man rather than washing over him
     float waterLine = SwimWaterLine;
-    const int memory = _shape->FindMemoryLevel();
-    if (!IsDead() && memory >= 0 && Type()->_cameraPoint >= 0)
+    const ManType* type = Type();
+    type->FindSwimLimbs();
+    if (!IsDead() && type->_swimHeadBone >= 0)
     {
-        const float eye = AnimatePoint(memory, Type()->_cameraPoint).Y();
-        _swimEye = _swimEyeValid ? _swimEye + (eye - _swimEye) * std::min(1.0f, deltaT / SwimEyeTime) : eye;
-        _swimEyeValid = true;
-        waterLine = _swimEye - SwimEyeAbove;
+        AnimationRTWeight weight;
+        weight.Add(AnimationRTPair(type->_swimHeadBone, 1.0f));
+        Matrix4 headMat = MIdentity;
+        AnimateMatrix(headMat, weight);
+        const float chin = Vector3(VFastTransform, headMat, SwimHeadRest).Y();
+        _swimChin = _swimChinValid ? _swimChin + (chin - _swimChin) * std::min(1.0f, deltaT / SwimChinTime) : chin;
+        _swimChinValid = true;
+        waterLine = _swimChin - (SwimChinAbove - SwimGearSink * (1.0f - gear)); // a heavy load rides lower
     }
     const float target = surface - waterLine;
     const float targetVy = (_swimTargetValid && deltaT > 0) ? (target - _swimPrevTarget) / deltaT : 0.0f;
@@ -345,11 +510,14 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
     const float y0 = pos.Y();
     float y = y0;
     // sub-step a long frame: the spring stays stable whatever the frame rate
+    _swimEntrySoft = std::max(0.0f, _swimEntrySoft - deltaT);
     const int steps = std::max(1, std::min(8, int(std::ceil(deltaT / 0.02f))));
     const float h = deltaT / steps;
     for (int i = 0; i < steps; i++)
     {
-        const float acc = SwimHeaveSpring * (target - y) + SwimHeaveDamping * (targetVy - _swimVy);
+        // just fallen in: a soft spring lets the body plunge with its speed and bob up
+        const float soft = _swimEntrySoft > 0 ? SwimEntrySoftSpring : 1.0f;
+        const float acc = SwimHeaveSpring * soft * (target - y) + SwimHeaveDamping * std::sqrt(soft) * (targetVy - _swimVy);
         _swimVy += acc * h;
         y += _swimVy * h;
     }
@@ -370,9 +538,10 @@ void Man::SimSwimMovement(float deltaT, SimulationImportance prec)
             next = Glob.time.toFloat() + 0.25f;
             const int mem = _shape->FindMemoryLevel();
             const float eyeY = Type()->_cameraPoint >= 0 && mem >= 0 ? PositionModelToWorld(AnimatePoint(mem, Type()->_cameraPoint)).Y() : 0.0f;
-            LOG_INFO(World, "Swim: level={:.2f} surface={:.2f} c={:.2f} y={:.2f} target={:.2f} vy={:.2f} bed={:.2f} water=({:.2f},{:.2f}) move={} eye-origin={:.2f} eye-surface={:.2f} limbs=({:.2f},{:.2f},{:.2f},{:.2f})",
+            LOG_INFO(World, "Swim: level={:.2f} surface={:.2f} c={:.2f} y={:.2f} target={:.2f} vy={:.2f} bed={:.2f} water=({:.2f},{:.2f}) move={} eye-origin={:.2f} eye-surface={:.2f} chin-surface={:.2f} limbs=({:.2f},{:.2f},{:.2f},{:.2f})",
                      level, surface, c.height, y, target, _swimVy, bed + 0.3f, waterVX, waterVZ,
-                     (const char*)Type()->GetMoveName(_primaryMove.id), eyeY - y, eyeY - c.height, _swimLimbRel[0], _swimLimbRel[1], _swimLimbRel[2], _swimLimbRel[3]);
+                     (const char*)Type()->GetMoveName(_primaryMove.id), eyeY - y, eyeY - c.height,
+                     _swimChinValid ? y + _swimChin - c.height : 0.0f, _swimLimbRel[0], _swimLimbRel[1], _swimLimbRel[2], _swimLimbRel[3]);
             if (GScene && GScene->GetCamera())
             {
                 const Vector3 cd = GScene->GetCamera()->Direction();

@@ -392,9 +392,11 @@ class ManType: public EntityAIType, public MotionType
 	int _rightHandMatIndex;
 
 	int _stepLIndex,_stepRIndex; // index in memory LOD
-	// Sinkhole W3: the bones the swim splashes come from (SoldierOldSwim.cpp): lruka, pruka, lprsty, pprsty.
+	// Sinkhole W3: the bones the swim splashes come from (SoldierOldSwim.cpp): lruka, pruka, lprsty, pprsty;
+	// and the head (hlava), whose chin the swimmer floats by.
 	mutable bool _swimLimbsInit = false;
 	mutable int _swimLimbBone[4] = {-1, -1, -1, -1};
+	mutable int _swimHeadBone = -1;
 
 	float _minGunElev,_maxGunElev;
 	float _minGunTurn,_maxGunTurn;
@@ -583,13 +585,23 @@ class Man: public Person
 	float _swimVy = 0; // vertical speed riding the swell
 	float _swimPrevTarget = 0;
 	bool _swimTargetValid = false;
-	float _swimEye = 0; // the eyes' height in the moves (smoothed)
-	bool _swimEyeValid = false;
+	float _swimChin = 0; // the chin's height in the moves (smoothed)
+	bool _swimChinValid = false;
 	Vector3 _swimUp = VUp; // the body's (smoothed) up, leaning with the wave face
 	bool _swimLimbValid = false;
 	float _swimLimbRel[4] = {}; // limb height over the water last frame
 	Vector3 _swimLimbPos[4];
 	float _swimLimbCool[4] = {};
+	float _swimEntrySoft = 0; // seconds of the soft heave after falling in: the body plunges, then bobs up
+	// Sinkhole W3: falling (SoldierOldSwim.cpp), with the swim pack's Fall / FallLand / SwimIn moves
+	mutable MoveId _fallMove = MoveIdNone;
+	mutable MoveId _fallLandMove = MoveIdNone;
+	mutable MoveId _swimInMove = MoveIdNone;
+	bool _falling = false;     // in the Fall move, held upright
+	bool _fallLanding = false; // playing FallLand
+	float _airTime = 0;        // seconds without ground or object contact
+	float _fallSpeed = 0;      // the fastest drop of this fall (m/s, positive down)
+	float _fallTumble = 0;     // seconds left of free tumbling after a blast or a hit
 
 	Foundation::Time _whenKilled;
 	Foundation::Time _lastMovementTime;
@@ -1017,6 +1029,8 @@ class Man: public Person
 	bool UpdateSwimming();
 	void SimSwimMovement(float deltaT, SimulationImportance prec);
 	void EmitSwimSplashes(float deltaT);
+	void UpdateFalling(float deltaT);
+	float SwimGearLoad() const;
 	Matrix3 GetHeadRelOrientation() const;
 	Vector3 GetWeaponPoint( int weapon ) const override;
 	bool GetWeaponCartridgePos
