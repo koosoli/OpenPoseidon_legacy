@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cmath>
 #include <string_view>
 
 namespace Poseidon
@@ -79,6 +80,35 @@ inline int StockCorpseAnatomicalPart(std::string_view bone)
     if (bone == "lstehno") return 9;
     if (bone == "lholen" || bone == "lchodidlo" || bone == "lprsty") return 10;
     return -1;
+}
+
+// Equipment helper deltas are exactly the already-owned body part deltas.
+// A normalized native proxy blend remains rigid if all influences share one
+// solver part. Keep its captured AnimateProxyMatrix rather than rebuilding it.
+inline int StockCorpseProxyPart(std::string_view bone)
+{
+    if (bone == "roura") return 1;
+    if (bone == "zbran") return 4;
+    return StockCorpseAnatomicalPart(bone);
+}
+
+template<class BoneAt, class WeightAt, class PartForBone>
+int StockCorpseRigidProxyBone(int count, BoneAt boneAt, WeightAt weightAt, PartForBone partForBone)
+{
+    if (count <= 0 || count > 25) return -1;
+    int representative = -1, part = -1;
+    float total = 0;
+    for (int w = 0; w < count; ++w)
+    {
+        const int bone = boneAt(w);
+        const float weight = weightAt(w);
+        if (bone < 0 || bone >= 25 || !std::isfinite(weight) || weight <= 0 || weight > 1) return -1;
+        const int current = partForBone(bone);
+        if (current < 0 || current >= 11 || (part >= 0 && current != part)) return -1;
+        if (representative < 0) { representative = bone; part = current; }
+        total += weight;
+    }
+    return std::isfinite(total) && std::abs(total-1) <= 1e-5f ? representative : -1;
 }
 
 // Names are matched as a set in each range. The RTM corpus contains different

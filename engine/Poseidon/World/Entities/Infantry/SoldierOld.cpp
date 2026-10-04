@@ -742,6 +742,15 @@ float g_corpsePreparedOriginX = 0, g_corpsePreparedOriginZ = 0;
 std::vector<OLink<Man>> g_automaticCorpses;
 int g_automaticInfantryDeathsOverride = -1;
 
+int StockRigidProxyBone(const AnimationRTWeight& weight, Skeleton* skeleton)
+{
+    if (!skeleton || skeleton->NBones()!=33) return -1;
+    return StockCorpseRigidProxyBone(weight.Size(),
+        [&](int w) { return weight[w].GetSel(); },
+        [&](int w) { return weight[w].GetWeight(); },
+        [&](int bone) { return StockCorpseProxyPart(static_cast<const char*>(skeleton->GetBone(bone))); });
+}
+
 bool StockCorpseCapability(LODShape* shape, Skeleton* skeleton, RString& refusal)
 {
     if (!shape) { refusal = "stock-corpse-model-unavailable"; return false; }
@@ -1186,7 +1195,10 @@ bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal, bool
                 shape->NamedSel(proxy.selection).Size() <= 0) continue;
             const int proxyPoint = shape->NamedSel(proxy.selection)[0];
             if (proxyPoint < 0 || proxyPoint >= shape->NPos()) { refusal = "proxy-point-range"; return false; }
-            if (GetProxyWeights(level, proxy).Size() <= 0) continue;
+            const auto& proxyWeights=GetProxyWeights(level, proxy);
+            if (proxyWeights.Size() <= 0) continue;
+            if (_automaticCorpsePose && StockRigidProxyBone(proxyWeights,skeleton)<0)
+            { refusal="single-part-inspected-equipment-proxy-required"; return false; }
             CorpseProxyDiagnostic item;
             item.level = level;
             item.selection = shape->NamedSel(proxy.selection).Name();
@@ -1389,6 +1401,21 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
         state->boneParts[bone] = 2;
     }
     for (int part : state->boneParts) if (part < 0) { refusal = "unmapped-stock-bone"; return false; }
+    if (_automaticCorpsePose)
+        for (int level=0;level<_shape->NLevels();++level)
+        {
+            const auto& captured=_automaticCorpsePose->levels[level];
+            for (size_t p=0;p<captured.proxySelections.size();++p)
+            {
+                const auto& weight=GetSelWeights(level,captured.proxySelections[p]);
+                const int representative=StockCorpseRigidProxyBone(weight.Size(),
+                    [&](int w) { return weight[w].GetSel(); },
+                    [&](int w) { return weight[w].GetWeight(); },
+                    [&](int bone) { return state->boneParts[bone]; });
+                if (representative < 0 || representative != captured.proxyBones[p])
+                { refusal="captured-proxy-solver-part-disagrees"; return false; }
+            }
+        }
 
     CorpsePoseDiagnostic diagnostic;
     if (!InspectCorpsePose(diagnostic, refusal, anatomicalHinges)) return false;
@@ -1733,15 +1760,17 @@ bool Man::CaptureCorrectedCorpsePose(RString& refusal)
                 shape->NamedSel(proxy.selection).Size() <= 0) continue;
             const auto& weight = GetProxyWeights(level,proxy);
             if (weight.Size() <= 0) continue;
-            // Stock equipment helpers must be rigidly attached to one bone.
-            if (weight.Size() != 1 || weight[0].GetWeight() != 1)
+            // Preserve the native proxy blend when every influence receives
+            // exactly the same existing articulated body delta.
+            const int proxyBone=StockRigidProxyBone(weight,skeleton);
+            if (proxyBone < 0)
             {
-                refusal="exclusive-live-equipment-proxy-bone-required";
+                refusal="single-part-live-equipment-proxy-required";
                 LOG_INFO(World,"AUTORAGDOLL: live proxy capture refused model={} level={} proxy={} selection={} weightCount={} firstBone={} firstWeight={}",
                     _shape->Name(),level,p,shape->NamedSel(proxy.selection).Name(),weight.Size(),weight.Size()?weight[0].GetSel():-1,weight.Size()?weight[0].GetWeight():0);
                 return false;
             }
-            captured.proxySelections.push_back(proxy.selection); captured.proxyBones.push_back(weight[0].GetSel());
+            captured.proxySelections.push_back(proxy.selection); captured.proxyBones.push_back(proxyBone);
             captured.authoredProxies.push_back(AnimateProxyMatrix(level,proxy));
         }
         captured.palette = captured.authoredPalette; captured.points = captured.authoredPoints;
@@ -2182,7 +2211,8 @@ LSError Man::SerializeAutomaticCorpsePose(ParamArchive& ar)
             { saved.CloseSubclass(entry); return reject(); }
             if (!actualProxy) { saved.CloseSubclass(entry); return reject(); }
             const auto& weight = GetSelWeights(level,selection);
-            if (weight.Size() != 1 || weight[0].GetSel() != captured.proxyBones[p] || weight[0].GetWeight() != 1)
+            const int proxyBone=StockRigidProxyBone(weight,skeleton);
+            if (proxyBone < 0 || proxyBone != captured.proxyBones[p])
             { saved.CloseSubclass(entry); return reject(); }
         }
         if (ar.IsLoading())

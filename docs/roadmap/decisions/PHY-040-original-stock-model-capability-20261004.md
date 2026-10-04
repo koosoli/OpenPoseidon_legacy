@@ -82,3 +82,28 @@ Women passed the detailed initial transform gate but failed a later capture
 stage. The candidate identifies each later phase, point/palette, Memory weight
 or proxy-weight refusal with actual model/LOD/index/count witnesses. No asset
 or consumer gate is weakened pending that installed diagnosis.
+
+## Same-part stock equipment proxy blends
+
+The installed settlement retry qualified GeneralE and Civilian8 through death,
+31-second frozen persistence, real projectile wake/resettlement, frozen save/load
+and cleanup. Woman1's exact later refusal was its LOD0 RPG proxy: three finite
+native bone influences, rather than one. The source census independently shows
+that all five female variants' graphical RPG helpers blend hrudnik, lrameno and
+roura, which all belong to the existing chest solver part.
+
+The follow-up admits only finite positive normalized proxy weights whose
+contributing body/equipment bones map to exactly one existing solver part.
+It retains the actual captured AnimateProxyMatrix byte-for-byte at handoff,
+then applies that part's common rigid delta. Capture, automatic inspection and
+frozen-load validation share the same rule; articulation creation additionally
+checks it against the actual constructed bone-to-part mapping. Cross-part,
+unmapped, out-of-range, nonfinite or nonnormalized blends still fail admission.
+No collision, support, safety, budget or save-loaded wake policy changes.
+
+The actual production helper plus owned corrected-proxy consumer tests pass
+1,583 assertions in five cases, including finite/weight/mapping refusals,
+zero-motion byte equivalence, common-delta/native-blend equivalence and repeated
+updates against the retained capture. The source translation units pass syntax
+checks. Installed female qualification and a final same-build 37-model campaign
+are still required before claiming complete stock model coverage.

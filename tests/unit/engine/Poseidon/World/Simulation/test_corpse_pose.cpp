@@ -70,6 +70,75 @@ TEST_CASE("Stock corpse runtime rigs require the complete named body and impleme
     bones = valid; std::swap(bones[0],bones[25]);
     CHECK(std::string_view(check()) == "unknown-stock-body-bone");
 }
+TEST_CASE("Stock proxy blends require finite normalized weights on one existing solver part", "[corpse-pose][automatic-ragdoll][stock-corpse-capability]")
+{
+    // Actual original female RPG helper memberships: hrudnik80/lrameno250/roura255.
+    const std::array<std::string_view,3> sourceNames={"hrudnik","lrameno","roura"};
+    std::array<int,3> bones{};
+    for (int i=0;i<3;++i)
+        bones[i]=int(std::find(StockCorpseBodyBones.begin(),StockCorpseBodyBones.end(),sourceNames[i])-StockCorpseBodyBones.begin());
+    std::array<float,3> weights={80.f/585,250.f/585,255.f/585};
+    auto check=[&](int count=3) { return StockCorpseRigidProxyBone(count,
+        [&](int w) { return bones[w]; },[&](int w) { return weights[w]; },
+        [&](int bone) { return StockCorpseProxyPart(StockCorpseBodyBones[bone]); }); };
+    REQUIRE(check()==bones[0]);
+    for (int i=0;i<3;++i) CHECK(StockCorpseProxyPart(sourceNames[i])==1);
+    const auto validBones=bones; const auto validWeights=weights;
+    bones[1]=int(std::find(StockCorpseBodyBones.begin(),StockCorpseBodyBones.end(),"lbiceps")-StockCorpseBodyBones.begin());
+    CHECK(check()==-1); bones=validBones;
+    bones[1]=-1; CHECK(check()==-1); bones[1]=25; CHECK(check()==-1); bones=validBones;
+    weights[1]=std::numeric_limits<float>::quiet_NaN(); CHECK(check()==-1);
+    weights[1]=std::numeric_limits<float>::infinity(); CHECK(check()==-1);
+    weights=validWeights; weights[1]=0; CHECK(check()==-1);
+    weights=validWeights; weights[1]=-.1f; CHECK(check()==-1);
+    weights=validWeights; weights[1]=1.1f; CHECK(check()==-1);
+    weights=validWeights; weights[1]+=.01f; CHECK(check()==-1);
+    weights=validWeights; CHECK(check(0)==-1); CHECK(check(26)==-1);
+    CHECK(StockCorpseRigidProxyBone(1,[](int){return 0;},[](int){return 1.f;},[](int){return -1;})==-1);
+    weights[0]=1; REQUIRE(check(1)==bones[0]);
+}
+
+TEST_CASE("Captured common-part proxy blends keep exact handoff and owned rigid motion", "[corpse-pose][automatic-ragdoll][stock-corpse-capability]")
+{
+    // An authored proxy can already contain a nonrigid weighted native matrix.
+    // Ownership preserves it verbatim, then composes the one common body delta.
+    auto matrixError=[](Matrix4Val a,Matrix4Val b) {
+        float maximum=0;
+        for (int row=0;row<3;++row) for (int col=0;col<4;++col)
+            maximum=std::max(maximum,std::abs(a(row,col)-b(row,col)));
+        return maximum;
+    };
+    const std::array<int,3> bones={1,3,5};
+    const std::array<float,3> weights={.15625f,.48828125f,.35546875f};
+    Matrix4 original=MIdentity; original.SetPosition(Vector3(.2f,.4f,-.1f));
+    Matrix4 source[3]={Matrix4(MScale,1.1f,.9f,1),MIdentity,Matrix4(MScale,.9f,1.1f,1)};
+    source[0].SetPosition(Vector3(.1f,-.2f,.3f)); source[1](0,1)=.2f;
+    source[2].SetPosition(Vector3(-.2f,.1f,.2f));
+    Matrix4 captured=MZero;
+    for (int i=0;i<3;++i) captured+=(source[i]*original)*weights[i];
+    CorrectedCorpsePose pose;
+    CorrectedCorpseLevel level;
+    level.authoredPalette.assign(33,MIdentity); level.palette=level.authoredPalette;
+    level.authoredPoints={Vector3(.2f,.1f,.3f)}; level.points=level.authoredPoints;
+    level.bindings={{{1},{1.f}}};
+    level.proxySelections={0}; level.proxyBones={bones[0]};
+    level.authoredProxies={captured}; level.proxies=level.authoredProxies;
+    pose.levels.push_back(level); REQUIRE(pose.Valid());
+    std::vector<Matrix4> deltas(33,MIdentity); REQUIRE(pose.Apply(deltas));
+    CHECK(std::memcmp(&pose.levels[0].proxies[0],&captured,sizeof(Matrix4))==0);
+    Matrix4 delta(MDirection,Vector3(.6f,0,.8f),VUp); delta.SetPosition(Vector3(.5f,.2f,-.3f));
+    for (int bone : bones) deltas[bone]=delta;
+    REQUIRE(pose.Apply(deltas));
+    CHECK(matrixError(pose.levels[0].proxies[0],delta*captured)==0);
+    Matrix4 nativeMoved=MZero;
+    for (int i=0;i<3;++i) nativeMoved+=(delta*source[i]*original)*weights[i];
+    CHECK(matrixError(pose.levels[0].proxies[0],nativeMoved)<1e-6f);
+    // Repeated updates compose against the retained capture, never last output.
+    REQUIRE(pose.Apply(deltas)); CHECK(matrixError(pose.levels[0].proxies[0],delta*captured)==0);
+    deltas.assign(33,MIdentity); REQUIRE(pose.Apply(deltas));
+    CHECK(std::memcmp(&pose.levels[0].proxies[0],&captured,sizeof(Matrix4))==0);
+}
+
 // STOCK_CORPSE_CAPABILITY_TESTS_END
 
 // STOCK_CORPSE_BOUNDARY_TESTS_BEGIN
