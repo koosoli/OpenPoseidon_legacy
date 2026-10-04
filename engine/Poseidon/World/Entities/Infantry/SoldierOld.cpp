@@ -2307,6 +2307,35 @@ RString Man::CorpsePoseProbe(const char* command)
             pose.lastSpeed.X(),pose.lastSpeed.Y(),pose.lastSpeed.Z());
         return status;
     }
+    if (std::strcmp(command,"corpse-auto-bodymotion") == 0)
+    {
+        Man* man=g_corpsePoseOwner.GetLink();
+        if (!man || !man->_automaticCorpsePose || !man->UseCorpsePose() || !man->_corpseArticulation ||
+            man->_automaticCorpsePose->frozen || !man->_corpseArticulation->Ready())
+            return "REFUSED corpse-auto-bodymotion no-active-automatic-owner";
+        const auto& pose=*man->_automaticCorpsePose; const auto& state=*man->_corpseArticulation;
+        bool quiet=true,safe=true; float maximumLinear=0,maximumAngular=0;
+        std::string parts;
+        for (int part=0;part<11;++part)
+        {
+            Physics::BodyMotion motion;
+            if (!state.world->GetBodyMotion(state.bodies[part],motion) ||
+                !motion.linearVelocity.IsFinite() || !motion.angularVelocity.IsFinite())
+                return "REFUSED corpse-auto-bodymotion invalid-body-readback";
+            const float linear=motion.linearVelocity.Size(),angular=motion.angularVelocity.Size();
+            if (!std::isfinite(linear) || !std::isfinite(angular))
+                return "REFUSED corpse-auto-bodymotion nonfinite-body-speed";
+            quiet &= !motion.awake || (linear<.06f && angular<.12f);
+            safe &= linear<=.3f && angular<=.6f;
+            maximumLinear=std::max(maximumLinear,linear); maximumAngular=std::max(maximumAngular,angular);
+            char item[112]; std::snprintf(item,sizeof(item),"%s(%d,%d,%.9g,%.9g)",part?",":"",part,int(motion.awake),linear,angular);
+            parts+=item;
+        }
+        char prefix[320]; std::snprintf(prefix,sizeof(prefix),
+            "OK corpse-auto-bodymotion supported=%d time=%.9g quietSeconds=%.9g quiet=%d freezeSafe=%d parts=11 maximumLinear=%.9g maximumAngular=%.9g bodies=",
+            int(man->AutomaticRagdollSupported()),pose.simulatedSeconds,pose.quietSeconds,int(quiet),int(safe),maximumLinear,maximumAngular);
+        return RString(prefix)+RString(parts.c_str());
+    }
     if (std::strcmp(command,"corpse-auto-status") == 0)
     {
         int active = 0, frozen = 0, pending = 0;
