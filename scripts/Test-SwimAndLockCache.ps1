@@ -1,4 +1,7 @@
-param([Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{8,40}$')][string]$ExpectedCommit)
+param(
+ [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{8,40}$')][string]$ExpectedCommit,
+ [ValidateSet('swim','stress')][string[]]$Checks=@('swim','stress')
+)
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $game='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault'
@@ -11,7 +14,7 @@ Require ($stamp -match [regex]::Escape($ExpectedCommit)) 'Wrong installed build'
 $pair=@{};foreach($name in @('OpenPoseidon.exe','wgpu_renderer.dll')){$pair[$name]=(Get-FileHash -LiteralPath (Join-Path $game $name)).Hash}
 $out=Join-Path $root ('build/local-swim-stress/'+(Get-Date -Format yyyyMMdd-HHmmss))
 New-Item -ItemType Directory -Path $out -Force | Out-Null
-$result=[ordered]@{passed=$false;installed=$stamp;pair=$pair;scriptSha256=(Get-FileHash $PSCommandPath).Hash;arms=@();scope='Installed optional swim player movement, model/animation readback, shore return, actual stress mission repeated terrain flushes and normal exit; no broad swim animation or Eastern ragdoll qualification.'}
+$result=[ordered]@{passed=$false;installed=$stamp;pair=$pair;scriptSha256=(Get-FileHash $PSCommandPath).Hash;arms=@();scope='Installed optional swim player movement, model/animation readback, dry-land relocation, actual stress mission repeated terrain flushes and normal exit; no continuous swim-to-shore, broad swim animation or Eastern ragdoll qualification.'}
 $saved=@{};$keys=@('POSEIDON_USER_DIR','POSEIDON_SWIM','POSEIDON_SWIM_LOG','POSEIDON_AUTOMATIC_RAGDOLL','POSEIDON_SNOWLINE','POSEIDON_SNOW_TEST_DEPTH','WGR_GRASS','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_TEMPORAL','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE')
 foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process');Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue}
 $p=$null;$client=$null;$writer=$null
@@ -34,6 +37,7 @@ try {
   @{name='swim';mission=(Join-Path $mod 'Missions/OpenPoseidon/swim-bay.Eden');extra=@('--mod',('"'+$mod+'"'))},
   @{name='stress';mission=(Join-Path $game 'Mods/@63units/63MAX.west_ls2');extra=@('--addon-root',('"'+(Join-Path $game 'Mods/@63units')+'"'))}
  )){
+  if($fixture.name -notin $Checks){continue}
   $armOut=Join-Path $out $fixture.name;New-Item -ItemType Directory -Path $armOut -Force | Out-Null
   $profile=Join-Path $armOut 'user';New-Item -ItemType Directory -Path $profile -Force | Out-Null;$env:POSEIDON_USER_DIR=$profile
   [IO.File]::WriteAllText((Join-Path $profile 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
@@ -79,7 +83,9 @@ try {
     $edit=Send @{cmd='dev_terrain_brush';action='paint';x=(10825.+$i*8);z=6955.;radius=32.;delta=-.15}
     Require ($edit.heightRevision -gt $state.heightRevision -and $edit.baseline) 'Real terrain edit did not advance';$state=$edit;$arm.edits+=,$edit;Start-Sleep -Seconds 2
    }
-   Exec 'cacheMover = [10825,6955,0] nearestObject "SoldierEB";cacheMover doMove [10890,7000,0]'
+   Exec 'cacheMover = nearestObject [[10825,6955,0],"SoldierEB"];cacheMover setBehaviour "CARELESS"'
+   $arm.moverBefore=Send @{cmd='diag_inspect';unit='cacheMover'}
+   Exec 'cacheMover doMove [10890,7000,0]'
    Start-Sleep -Seconds 8;$arm.mover=Send @{cmd='diag_inspect';unit='cacheMover'}
    $arm.restored=Send @{cmd='dev_terrain_brush';action='restore';x=10825.;z=6955.};Start-Sleep -Seconds 8
    $arm.groupsAfter=Send @{cmd='diag_groups'};Capture 'stress-after-edits'

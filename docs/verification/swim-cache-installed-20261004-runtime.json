@@ -1,0 +1,621 @@
+{
+  "passed": true,
+  "installed": "codex/stress-corpse-cache-20261004 bdba184a 2026-10-04_12:57 deploy-ps1",
+  "pairedHashes": {
+    "OpenPoseidon.exe": "8F7DA708B37ABC55C392497B51449F6BFC86EE7908D63080E66098E23668214D",
+    "wgpu_renderer.dll": "708A222C2BA5561A0C3D2AFF10ADED3D88414CC08113DC2D75F22F81C25FBF9E"
+  },
+  "acceptanceMethod": "Two completed arms on the identical installed pair; initial combined stress probe failed on unsupported script syntax, corrected stress-only rerun passed.",
+  "sourceReceipts": [
+    {
+      "sha256": "4768AD0B97D5100E355D33B4A8E08335BB227E0B550E76FB74041071AD6B5171",
+      "selectedArm": "swim",
+      "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\local-swim-stress\\20261004-125801\\runtime.json",
+      "wholeRunPassed": false
+    },
+    {
+      "sha256": "B7013D2ECF2EB11DEB5C992AF6481E8282A40FE434E871B7F6845F33F94B3E52",
+      "selectedArm": "stress",
+      "path": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\local-swim-stress\\20261004-130104\\runtime.json",
+      "wholeRunPassed": true
+    }
+  ],
+  "swim": {
+    "land": {
+      "name": "WEST Alpha Schwarz:1 (mail)",
+      "cls": "SoldierWB",
+      "shape": "data3d\\mc vojakw2.p3d",
+      "pos": [
+        9300.02,
+        1899.99,
+        42.03
+      ],
+      "dir": 177.1,
+      "damage": 0.0,
+      "destroyed": false,
+      "speed": 0.0,
+      "watched": false,
+      "side": 1,
+      "zones": {
+        "hlava": 0.0,
+        "telo": 0.0,
+        "ruce": 0.0,
+        "nohy": 0.0
+      },
+      "weapons": [
+        "M16",
+        "Throw",
+        "Put"
+      ],
+      "selected": {
+        "weapon": "M16",
+        "muzzle": "M16",
+        "magazine": true,
+        "ammo": 30,
+        "loaded": true
+      },
+      "magazines": 10,
+      "brain": {
+        "group": "Alpha Schwarz",
+        "groupLeader": true,
+        "state": 0,
+        "life": 0,
+        "combatMode": 3,
+        "semaphore": 3,
+        "planning": 0,
+        "mode": 2,
+        "path": 0
+      },
+      "man": {
+        "move": "combat",
+        "time": 0.0,
+        "factor": 1.0,
+        "secondary": "swim",
+        "external": "",
+        "queue": 0,
+        "down": false,
+        "unitPos": 2
+      },
+      "ok": true
+    },
+    "log": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\local-swim-stress\\20261004-125801\\swim\\engine.log",
+    "returnTread": {
+      "name": "WEST Alpha Schwarz:1 (mail)",
+      "cls": "SoldierWB",
+      "shape": "data3d\\mc vojakw2.p3d",
+      "pos": [
+        9951.05,
+        1424.31,
+        2.73
+      ],
+      "dir": 177.2,
+      "damage": 0.0,
+      "destroyed": false,
+      "speed": 0.51,
+      "watched": false,
+      "side": 1,
+      "zones": {
+        "hlava": 0.0,
+        "telo": 0.0,
+        "ruce": 0.0,
+        "nohy": 0.0
+      },
+      "weapons": [
+        "M16",
+        "Throw",
+        "Put"
+      ],
+      "selected": {
+        "weapon": "M16",
+        "muzzle": "M16",
+        "magazine": true,
+        "ammo": 30,
+        "loaded": true
+      },
+      "magazines": 10,
+      "brain": {
+        "group": "Alpha Schwarz",
+        "groupLeader": true,
+        "state": 0,
+        "life": 0,
+        "combatMode": 3,
+        "semaphore": 3,
+        "planning": 0,
+        "mode": 2,
+        "path": 0
+      },
+      "man": {
+        "move": "swim",
+        "time": 0.134,
+        "factor": 1.0,
+        "secondary": "swimf",
+        "external": "",
+        "queue": 0,
+        "down": false,
+        "unitPos": 2
+      },
+      "ok": true
+    },
+    "captures": {
+      "stroke": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\local-swim-stress\\20261004-125801\\swim\\stroke.png",
+      "tread": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\local-swim-stress\\20261004-125801\\swim\\tread.png",
+      "land": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\local-swim-stress\\20261004-125801\\swim\\land.png"
+    },
+    "stroke": {
+      "name": "WEST Alpha Schwarz:1 (mail)",
+      "cls": "SoldierWB",
+      "shape": "data3d\\mc vojakw2.p3d",
+      "pos": [
+        9950.19,
+        1423.84,
+        2.36
+      ],
+      "dir": 175.5,
+      "damage": 0.0,
+      "destroyed": false,
+      "speed": 1.03,
+      "watched": false,
+      "side": 1,
+      "zones": {
+        "hlava": 0.0,
+        "telo": 0.0,
+        "ruce": 0.0,
+        "nohy": 0.0
+      },
+      "weapons": [
+        "M16",
+        "Throw",
+        "Put"
+      ],
+      "selected": {
+        "weapon": "M16",
+        "muzzle": "M16",
+        "magazine": true,
+        "ammo": 30,
+        "loaded": true
+      },
+      "magazines": 10,
+      "brain": {
+        "group": "Alpha Schwarz",
+        "groupLeader": true,
+        "state": 0,
+        "life": 0,
+        "combatMode": 3,
+        "semaphore": 3,
+        "planning": 0,
+        "mode": 2,
+        "path": 0
+      },
+      "man": {
+        "move": "swimf",
+        "time": 0.856,
+        "factor": 1.0,
+        "secondary": "swim",
+        "external": "",
+        "queue": 0,
+        "down": false,
+        "unitPos": 2
+      },
+      "ok": true
+    },
+    "passed": true,
+    "movement": {
+      "before": [
+        9948,
+        1427.99,
+        2.154
+      ],
+      "input": "Actual SDL W held six seconds",
+      "after": [
+        9950.19,
+        1423.81,
+        2.34256
+      ],
+      "distance": 4.718951154653199
+    },
+    "pid": 59572,
+    "name": "swim",
+    "arguments": [
+      "--render=wgpu",
+      "--window",
+      "--dev",
+      "--width",
+      "1280",
+      "--height",
+      "720",
+      "--vd",
+      "1500",
+      "--harness",
+      "49702",
+      "--test-mission",
+      "\"C:\\Users\\mail\\AppData\\Local\\OpenPoseidon\\LocalMods\\@OP_SwimLocalTest\\Missions\\OpenPoseidon\\swim-bay.Eden\"",
+      "--test-world-hour",
+      "12",
+      "--log-file",
+      "\"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\local-swim-stress\\20261004-125801\\swim\\engine.log\"",
+      "--mod",
+      "\"C:/Users/mail/AppData/Local/OpenPoseidon/LocalMods/@OP_SwimLocalTest\""
+    ],
+    "exitCode": 0,
+    "tread": {
+      "name": "WEST Alpha Schwarz:1 (mail)",
+      "cls": "SoldierWB",
+      "shape": "data3d\\mc vojakw2.p3d",
+      "pos": [
+        9947.83,
+        1427.89,
+        2.12
+      ],
+      "dir": 174.9,
+      "damage": 0.0,
+      "destroyed": false,
+      "speed": 0.78,
+      "watched": false,
+      "side": 1,
+      "zones": {
+        "hlava": 0.0,
+        "telo": 0.0,
+        "ruce": 0.0,
+        "nohy": 0.0
+      },
+      "weapons": [
+        "M16",
+        "Throw",
+        "Put"
+      ],
+      "selected": {
+        "weapon": "M16",
+        "muzzle": "M16",
+        "magazine": true,
+        "ammo": 30,
+        "loaded": true
+      },
+      "magazines": 10,
+      "brain": {
+        "group": "Alpha Schwarz",
+        "groupLeader": true,
+        "state": 0,
+        "life": 0,
+        "combatMode": 3,
+        "semaphore": 3,
+        "planning": 0,
+        "mode": 2,
+        "path": 0
+      },
+      "man": {
+        "move": "swim",
+        "time": 0.557,
+        "factor": 1.0,
+        "secondary": "combat",
+        "external": "",
+        "queue": 0,
+        "down": false,
+        "unitPos": 2
+      },
+      "ok": true
+    },
+    "player": {
+      "name": "WEST Alpha Schwarz:1 (mail)",
+      "cls": "SoldierWB",
+      "shape": "data3d\\mc vojakw2.p3d",
+      "pos": [
+        9947.82,
+        1427.88,
+        2.11
+      ],
+      "dir": 174.9,
+      "damage": 0.0,
+      "destroyed": false,
+      "speed": 0.78,
+      "watched": false,
+      "side": 1,
+      "zones": {
+        "hlava": 0.0,
+        "telo": 0.0,
+        "ruce": 0.0,
+        "nohy": 0.0
+      },
+      "weapons": [
+        "M16",
+        "Throw",
+        "Put"
+      ],
+      "selected": {
+        "weapon": "M16",
+        "muzzle": "M16",
+        "magazine": true,
+        "ammo": 30,
+        "loaded": true
+      },
+      "magazines": 10,
+      "brain": {
+        "group": "Alpha Schwarz",
+        "groupLeader": true,
+        "state": 0,
+        "life": 0,
+        "combatMode": 3,
+        "semaphore": 3,
+        "planning": 0,
+        "mode": 2,
+        "path": 0
+      },
+      "man": {
+        "move": "swim",
+        "time": 0.55,
+        "factor": 1.0,
+        "secondary": "combat",
+        "external": "",
+        "queue": 0,
+        "down": false,
+        "unitPos": 2
+      },
+      "ok": true
+    }
+  },
+  "stress": {
+    "passed": true,
+    "arguments": [
+      "--render=wgpu",
+      "--window",
+      "--dev",
+      "--width",
+      "1280",
+      "--height",
+      "720",
+      "--vd",
+      "1500",
+      "--harness",
+      "53780",
+      "--test-mission",
+      "\"D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Mods\\@63units\\63MAX.west_ls2\"",
+      "--test-world-hour",
+      "12",
+      "--log-file",
+      "\"C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\local-swim-stress\\20261004-130104\\stress\\engine.log\"",
+      "--addon-root",
+      "\"D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\Mods\\@63units\""
+    ],
+    "pid": 8740,
+    "log": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\local-swim-stress\\20261004-130104\\stress\\engine.log",
+    "units": 708.0,
+    "groups": 63,
+    "aliveBefore": 708.0,
+    "aliveAfter": 708.0,
+    "runtimeModelIdentities": [
+      {
+        "count": 1,
+        "identity": "OfficerE, data3d\\mc vojakeo2.p3d"
+      },
+      {
+        "count": 21,
+        "identity": "SoldierEB, data3d\\mc vojake2.p3d"
+      }
+    ],
+    "before": {
+      "readonly": true,
+      "baseline": false,
+      "fineSourceReady": true,
+      "range": 2048,
+      "spacing": 6.25,
+      "heightRevision": 6,
+      "seaLevel": 0.7170138955116272,
+      "vertexX": 1732,
+      "vertexZ": 1113,
+      "vertexWorldX": 10825,
+      "vertexWorldZ": 6956.25,
+      "vertexHeight": 103.97764587402344,
+      "terrainRegistered": true,
+      "physicsWidth": 2048,
+      "physicsHeight": 2048,
+      "physicsSpacing": 6.25,
+      "ok": true
+    },
+    "edits": [
+      {
+        "readonly": false,
+        "baseline": true,
+        "fineSourceReady": true,
+        "range": 2048,
+        "spacing": 6.25,
+        "heightRevision": 88,
+        "seaLevel": 0.7108877897262573,
+        "vertexX": 1733,
+        "vertexZ": 1113,
+        "vertexWorldX": 10831.25,
+        "vertexWorldZ": 6956.25,
+        "vertexHeight": 103.67695617675781,
+        "terrainRegistered": true,
+        "physicsWidth": 2048,
+        "physicsHeight": 2048,
+        "physicsSpacing": 6.25,
+        "ok": true
+      },
+      {
+        "readonly": false,
+        "baseline": true,
+        "fineSourceReady": true,
+        "range": 2048,
+        "spacing": 6.25,
+        "heightRevision": 170,
+        "seaLevel": 0.4999304711818695,
+        "vertexX": 1735,
+        "vertexZ": 1113,
+        "vertexWorldX": 10843.75,
+        "vertexWorldZ": 6956.25,
+        "vertexHeight": 103.7457275390625,
+        "terrainRegistered": true,
+        "physicsWidth": 2048,
+        "physicsHeight": 2048,
+        "physicsSpacing": 6.25,
+        "ok": true
+      },
+      {
+        "readonly": false,
+        "baseline": true,
+        "fineSourceReady": true,
+        "range": 2048,
+        "spacing": 6.25,
+        "heightRevision": 251,
+        "seaLevel": 0.7688929438591003,
+        "vertexX": 1736,
+        "vertexZ": 1113,
+        "vertexWorldX": 10850,
+        "vertexWorldZ": 6956.25,
+        "vertexHeight": 103.13272094726562,
+        "terrainRegistered": true,
+        "physicsWidth": 2048,
+        "physicsHeight": 2048,
+        "physicsSpacing": 6.25,
+        "ok": true
+      },
+      {
+        "readonly": false,
+        "baseline": true,
+        "fineSourceReady": true,
+        "range": 2048,
+        "spacing": 6.25,
+        "heightRevision": 332,
+        "seaLevel": 0.9975947737693787,
+        "vertexX": 1737,
+        "vertexZ": 1113,
+        "vertexWorldX": 10856.25,
+        "vertexWorldZ": 6956.25,
+        "vertexHeight": 102.3421401977539,
+        "terrainRegistered": true,
+        "physicsWidth": 2048,
+        "physicsHeight": 2048,
+        "physicsSpacing": 6.25,
+        "ok": true
+      }
+    ],
+    "restored": {
+      "readonly": false,
+      "baseline": false,
+      "fineSourceReady": true,
+      "range": 2048,
+      "spacing": 6.25,
+      "heightRevision": 452,
+      "seaLevel": 0.907207190990448,
+      "vertexX": 1732,
+      "vertexZ": 1113,
+      "vertexWorldX": 10825,
+      "vertexWorldZ": 6956.25,
+      "vertexHeight": 103.97764587402344,
+      "terrainRegistered": true,
+      "physicsWidth": 2048,
+      "physicsHeight": 2048,
+      "physicsSpacing": 6.25,
+      "ok": true
+    },
+    "moverBefore": {
+      "name": "EAST Echo Rot:10",
+      "cls": "SoldierEB",
+      "shape": "data3d\\mc vojake2.p3d",
+      "pos": [
+        10831.97,
+        6961.25,
+        102.51
+      ],
+      "dir": 179.2,
+      "damage": 0.0,
+      "destroyed": false,
+      "speed": 5.0,
+      "watched": false,
+      "side": 0,
+      "zones": {
+        "hlava": 0.0,
+        "telo": 0.0,
+        "ruce": 0.0,
+        "nohy": 0.0
+      },
+      "weapons": [
+        "AK74",
+        "Throw",
+        "Put"
+      ],
+      "magazines": 10,
+      "brain": {
+        "group": "Echo Rot",
+        "groupLeader": false,
+        "state": 2,
+        "life": 0,
+        "combatMode": 1,
+        "semaphore": 4,
+        "planning": 3,
+        "mode": 3,
+        "path": 2
+      },
+      "man": {
+        "move": "combat",
+        "time": 0.0,
+        "factor": 0.4,
+        "secondary": "combatrunf",
+        "external": "",
+        "queue": 0,
+        "down": false,
+        "unitPos": 0
+      },
+      "ok": true
+    },
+    "moverAfter": {
+      "name": "EAST Echo Rot:10",
+      "cls": "SoldierEB",
+      "shape": "data3d\\mc vojake2.p3d",
+      "pos": [
+        10861.2,
+        6980.64,
+        100.93
+      ],
+      "dir": 56.1,
+      "damage": 0.0,
+      "destroyed": false,
+      "speed": 6.66,
+      "watched": false,
+      "side": 0,
+      "zones": {
+        "hlava": 0.0,
+        "telo": 0.0,
+        "ruce": 0.0,
+        "nohy": 0.0
+      },
+      "weapons": [
+        "AK74",
+        "Throw",
+        "Put"
+      ],
+      "magazines": 10,
+      "brain": {
+        "group": "Echo Rot",
+        "groupLeader": false,
+        "state": 2,
+        "life": 0,
+        "combatMode": 1,
+        "semaphore": 4,
+        "planning": 1,
+        "mode": 3,
+        "path": 2
+      },
+      "man": {
+        "move": "combatsprintf",
+        "time": 0.8,
+        "factor": 1.0,
+        "secondary": "combatrunf",
+        "external": "",
+        "queue": 0,
+        "down": false,
+        "unitPos": 0
+      },
+      "ok": true
+    },
+    "distance": 35.076559124294015,
+    "exitCode": 0,
+    "captures": {
+      "stress-after-edits": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\local-swim-stress\\20261004-130104\\stress\\stress-after-edits.png"
+    }
+  },
+  "limitations": [
+    "Eastern ragdolls not admitted or qualified; no owner corpse shot replay",
+    "No complete swim-to-shore traversal or all-move/AI qualification",
+    "Four terrain edits and restoration bound the stress acceptance"
+  ]
+}

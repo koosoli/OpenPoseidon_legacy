@@ -4,9 +4,10 @@ Owner launch: installed `OpenPoseidon.exe --render=wgpu --dev --addon-root`
 `Mods/@63units --test-mission Mods/@63units/63MAX.west_ls2`.
 Installed source when investigated: **f8127fe5**. Candidate cache repair:
 **2c396217**, branch `codex/stress-corpse-cache-20261004`, based on `793d7b96`.
-The candidate is built/native-tested and safety-pushed, **not installed**.
-Owner-handoff process 5104 remains running; preserve it under CLAUDE.md's
-"Never Stop-Process a game you did not start" rule. Game-close request is pending.
+The candidate is built/native-tested and safety-pushed, now **installed in
+bdba184a at 12:57**. The owner explicitly authorised closing the old demo;
+process 5104 was closed normally before deployment. bdba184a also repairs the
+optional swim pack's animation transition after scripted dry-land relocation.
 
 ## Primary corpse explanation
 
@@ -63,10 +64,29 @@ Root then built the combined committed Game/Tests tree: **17 steps PASS**.
 The rebuilt actual PoseidonTests `[lock-cache],[heightmap-view],[ObjectID]`
 suite passes **1,200 assertions / five cases** (`build/stress-lockcache-native.log`).
 
-Installed acceptance is still pending: run the exact map/mission with matching
-new EXE/DLL, make repeated real terrain crater/edit transactions while AI is
-alive, allow movement/unlock, check warning/panic/access failures and normal
-shutdown. Read actual runtime model identity and supported US control separately
-from Eastern refusal. Do not claim the warning gone from the installed f8127fe5
-build or an Eastern corpse reanimation fix. Pending closure is an external
-runtime constraint, not a passing checkpoint.
+Installed acceptance at bdba184a: the exact original addon root and mission
+loaded **708 units / 63 groups**. Four actual terrain paint transactions near
+the Eastern infantry advanced the native height revision 6 -> 88 -> 170 ->
+251 -> 332. Restoration advanced it to 452 and restored the sampled vertex
+exactly. An actual SoldierEB was commanded to move after the edits and moved
+**35.077 m**. All 708 units remained alive. The engine exited normally with
+code 0 and no invalid-unlock warning, access violation or GPU failure.
+
+Actual nearby shapes include `data3d/mc vojake2.p3d` and
+`data3d/mc vojakeo2.p3d`, confirming the source exclusion applies to this
+runtime. This check does not qualify either Eastern ragdoll, replay the owner's
+corpse shot, or establish every cache owner lifetime under arbitrary missions.
+The separately passing native regression establishes the retained pointer/
+occupancy invariant.
+
+The first stress probe used unsupported binary `nearestObject` syntax and
+the engine's test mode exited with a script error. Corrected the probe to the
+existing unary command and reran only the stress arm. That test defect is not
+reported as a cache/runtime pass. The prior swim arm completed successfully
+and exited normally; the final evidence combines those two independently
+completed arms with the same installed binary hashes.
+
+Reproduce with `scripts/Test-SwimAndLockCache.ps1 -ExpectedCommit bdba184a`,
+under `scripts/with-game-lock.sh`; `-Checks stress` runs only this arm.
+The local swim addon is needed only for the swim arm. Evidence:
+`docs/verification/swim-cache-installed-20261004-runtime.json`.

@@ -117,37 +117,45 @@ execution:
       renewed; Preview validator stops at RND-005A, Compat at AST-011C.
   review_model: OWNER_REVIEW_NO_INDEPENDENT_REVIEWER
   local_swim_test_checkpoint:
-    state: LOCAL_OPT_IN_ADDON_INSTALLED_OFFLINE_CHECKS_PASSED_RUNTIME_PENDING
+    state: LOCAL_OPT_IN_ADDON_INSTALLED_PLAYER_RUNTIME_CHECKS_PASSED
     origin_commit: f758e9f3b1008b3bfd1052a0fccaf24a6965e3e1
-    installed_engine_commit: f8127fe5
+    installed_engine_commit: bdba184a
+    transition_source_commit: bdba184a
     animation_count: 19
     integration_branch_assets_added: false
     install_directory: C:/Users/mail/AppData/Local/OpenPoseidon/LocalMods/@OP_SwimLocalTest
     evidence: docs/verification/local-swim-test-20261004.md
+    runtime_receipt: docs/verification/swim-cache-installed-20261004-runtime.json
     note: >-
       Owner explicitly authorised local installation while the asset integration
       hold remains. Separate external opt-in addon, no active game files replaced.
       Bay and squad missions included. Source hashes, finite RTM layouts, config
-      parsing, archive roundtrip and installed copy verified. Runtime test awaits
-      restarting owner game PID 5104; no swimming acceptance claimed.
+      parsing, archive roundtrip and installed copy verified. Owner authorised
+      closing the old demo. Installed treading, SDL forward movement 4.719m,
+      release and dry-land relocation passed with normal exit at bdba184a.
+      Found and repaired looping swim animation after scripted land relocation.
+      AI, all directions, continuous shore traversal and broad visual acceptance open.
   stress_corpse_cache_checkpoint:
     branch: codex/stress-corpse-cache-20261004
     baseline_commit: 793d7b96
     source_commit: 2c396217
-    installed_source_commit: f8127fe5
-    state: BUILT_NATIVE_PASSED_WAITING_FOR_INSTALLED_TEST
+    installed_source_commit: bdba184a
+    state: INSTALLED_NATIVE_AND_EXACT_STRESS_TERRAIN_FLUSH_CHECKS_PASSED
     evidence: docs/verification/stress-corpse-cache-20261004.md
     cache_source_evidence: docs/verification/lockcache-runtime-flush-20261004.md
+    runtime_receipt: docs/verification/swim-cache-installed-20261004-runtime.json
     note: >-
       Exact mission census708 units:650SoldierEB/57OfficerE/1SoldierWB. Three
       Western-model gates exclude707 Eastern units; defaultON does not imply
       general model coverage. Four active/64 retained are separate limits.
       Eastern rigs audited offline, not admitted or runtime-qualified. Live
       path-lock lifetime defect fixed: terrain flush retains nonempty occupancy.
-      Combined17-step build/native1200 assertions5cases passed. Source safety
-      pushed; not installed while owner-handoff process5104 remains running.
-      Explicit game-close request pending. Exact installed mission/crater/AI
-      unlock acceptance remains; old sourcef8127fe5 still installed.
+      Combined17-step build/native1200 assertions5cases passed. Owner authorised
+      old demo closure; paired build installed. Exact708-unit/63-group mission
+      four real terrain edits and restoration passed, all708 units alive,
+      commanded Eastern infantry moved35.077m. Zero invalid-unlock warnings,
+      GPU/access failures; normal exit. Runtime model identities confirm East
+      and officer exclusion. No Eastern ragdoll admission or corpse shot fix.
   fog_terrain_dec_followup_checkpoint:
     branch: codex/fog-terrain-dec-followup-20261004
     baseline_commit: 8479c6f3

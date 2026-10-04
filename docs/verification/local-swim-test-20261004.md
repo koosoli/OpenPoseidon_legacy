@@ -33,8 +33,27 @@ normal command. Normal launches without this argument keep the addon disabled.
 Bay controls: W forward, E faster, release to tread water; swim back toward the
 beach to stand. Sideways/backward/diagonal strokes and turns are also included.
 
-Runtime swimming acceptance is pending. Owner game PID 5104, started 12:02:58,
-was still running when the installation completed at approximately 12:42.
-It was preserved. Installing the external addon does not change loaded game
-content; restart with the local launcher to activate it. No visual or gameplay
-success is inferred from offline archive checks.
+At installation time the owner demo PID 5104 was preserved. The owner then
+explicitly authorised closing it. Runtime testing used paired installed build
+**bdba184a, deployed 12:57**, with the same local addon archive hash.
+
+Installed checks passed: player treads water; actual SDL W held six seconds
+selected `swimf` and moved **4.719 m**; release returned to `swim`; scripted
+dry-land relocation returned to `combat` at native terrain elevation 42.03 m.
+Normal exit code 0 and no GPU, access or cache-unlock error. Tread/stroke/land
+screenshots were captured; the stroke image was visually inspected.
+
+The first attempt exposed a real source defect: clearing `_swimming` after
+lifting/relocating above the sea left the looping swim action map active.
+bdba184a makes both shallow and lifted exits restore upright land movement;
+lifted exits return to the normal default animation, allowing the existing
+falling path to take over when needed. Animation assets remain local-only.
+
+This is bounded player acceptance, not a test of all 19 moves, first-person
+view, AI boats/squad, gear buoyancy, natural continuous shore traversal or
+full animation appearance. The AI mission is installed but was not run.
+Final receipt: `docs/verification/swim-cache-installed-20261004-runtime.json`.
+The passing swim arm comes from a combined run whose later stress probe
+failed on unsupported script syntax; corrected stress-only rerun passed with
+the identical installed binary hashes. No whole-run success is inferred from
+that partial run. All owned smoke processes were closed normally.
