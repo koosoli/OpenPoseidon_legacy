@@ -12,6 +12,7 @@
 
 #include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
 #include <Poseidon/World/Simulation/Animation/CorpsePose.hpp>
+#include <Poseidon/World/Simulation/Animation/CorrectedCorpsePose.hpp>
 #include <memory>
 #include <Poseidon/World/Simulation/EnvTracker.hpp>
 #include <Poseidon/World/Entities/Infantry/ManActs.hpp>
@@ -659,6 +660,15 @@ class Man: public Person
     mutable Ref<AnimationRT> _corpsePosePrimaryAnimation, _corpsePoseSecondaryAnimation;
     mutable bool _corpsePoseBypass = false;
     mutable std::unique_ptr<struct CorpseArticulation> _corpseArticulation;
+    mutable std::unique_ptr<CorrectedCorpsePose> _automaticCorpsePose;
+    mutable bool _automaticCorpseMoving = false;
+    bool _automaticDeathEligible = false;
+    void QueueAutomaticRagdoll();
+    bool BeginAutomaticRagdoll(RString& refusal);
+    bool UpdateAutomaticRagdoll(float deltaT);
+    bool CaptureCorrectedCorpsePose(RString& refusal);
+    bool FreezeAutomaticRagdoll();
+    LSError SerializeAutomaticCorpsePose(ParamArchive& ar);
     bool StartCorpseArticulation(RString& refusal, bool anatomicalHinges = false);
     bool UpdateCorpseArticulation() const;
     bool CorpseArticulationBounds(Vector3* minMax, float& radius) const;

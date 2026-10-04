@@ -4,6 +4,7 @@
 #include <Poseidon/World/Physics/PhysicsBackend.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/World/Physics/CorpseArticulation.hpp>
+#include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/World/Weather/RainWaterField.hpp>
 #include <array>
 #include <limits.h>
@@ -649,6 +650,7 @@ const float WaitBeforeStandUp = TimeToRun + TimeToCrawl;
 
 int Man::GetActUpDegree() const
 {
+    if (_automaticCorpsePose && UseCorpsePose()) return ManPosDead;
     ActionMap* map = Type()->GetActionMap(_primaryMove.id);
     return map ? map->GetUpDegree() : ManPosStand;
 }
@@ -735,6 +737,41 @@ OLink<Man> g_corpsePoseOwner;
 Physics::PhysicsWorld* g_corpsePreparedWorld = nullptr;
 std::uint64_t g_corpsePreparedEpoch = 0, g_corpsePreparedTerrainSerial = 0;
 float g_corpsePreparedOriginX = 0, g_corpsePreparedOriginZ = 0;
+std::vector<OLink<Man>> g_automaticCorpses;
+
+bool AutomaticRagdollEnabled()
+{
+    const char* enabled = std::getenv("POSEIDON_AUTOMATIC_RAGDOLL");
+    return enabled && std::strcmp(enabled,"0") != 0;
+}
+
+bool AutomaticRagdollTerrain(RString& refusal)
+{
+    if (!GLandscape) return false;
+    auto& world = Physics::EnsurePhysicsWorld();
+    if (!world.Create()) { refusal = "physics-world-unavailable"; return false; }
+    if (world.GetStats().terrainRegistered) return true;
+    const int range = GLandscape->GetLandRange();
+    const float grid = GLandscape->GetLandGrid();
+    if (range <= 1 || !std::isfinite(grid) || grid <= 0) return false;
+    int subdiv = 4;
+    while (subdiv > 1 && size_t((range-1)*subdiv+1)*size_t((range-1)*subdiv+1) > 4u*1024u*1024u) --subdiv;
+    const size_t width = size_t(range-1)*subdiv+1;
+    if (width*width > 4u*1024u*1024u) { refusal = "bounded-terrain-allocation-refused"; return false; }
+    const float spacing = grid/subdiv;
+    std::vector<float> heights(width*width);
+    for (size_t z = 0; z < width; ++z) for (size_t x = 0; x < width; ++x)
+    {
+        const float y = GLandscape->SurfaceY(float(x)*spacing,float(z)*spacing);
+        if (!std::isfinite(y)) { refusal = "nonfinite-map-terrain"; return false; }
+        heights[z*width+x] = y;
+    }
+    if (!world.SetTerrain(heights.data(),int(width),int(width),spacing,0,0))
+    { refusal = "physics-terrain-registration-refused"; return false; }
+    LOG_INFO(World,"AUTORAGDOLL: registered shared actual terrain width={} spacing={} mapGrid={} bytes={}",
+        width,spacing,grid,heights.size()*sizeof(float));
+    return true;
+}
 }
 
 void Man::ClearCorpsePose() const
@@ -742,6 +779,7 @@ void Man::ClearCorpsePose() const
     if (_corpseArticulation && _corpseArticulation->state == CorpseSolverState::Frozen && GScene)
         GScene->GetShadowCache().ShadowChanged(const_cast<Man*>(this));
     _corpseArticulation.reset();
+    _automaticCorpsePose.reset();
     _corpsePoseLease = {};
     _corpsePosePrimary.Clear();
     _corpsePoseSecondary.Clear();
@@ -774,6 +812,19 @@ const char* Man::CorpsePoseRefusal() const
 bool Man::UseCorpsePose() const
 {
     if (!_corpsePoseLease.world || _corpsePoseBypass) return false;
+    if (_automaticCorpsePose)
+    {
+        const bool identity = _corpsePoseLease.world == GWorld && _shape.GetRef() == _corpsePoseModel.GetRef() &&
+            Type()->GetWeights().GetName().skeleton.GetTypeRef() == _corpsePoseSkeleton.GetRef() &&
+            &Type()->GetWeights() == _corpsePoseWeights.GetRef();
+        if (!identity || (!_isDead && !IsDammageDestroyed()) || !IsLocal() || !GWorld ||
+            GWorld->GetMode() != GModeArcade || _hideBody != 0 || _hideBodyWanted != 0 ||
+            GetHierachyParent() || _ladderBuilding || ToDelete() || ToMoveOut() || !IsInLandscape() ||
+            (!_automaticCorpsePose->frozen && !_automaticCorpsePose->pending &&
+                (!_corpseArticulation || !_corpseArticulation->Ready())))
+        { ClearCorpsePose(); return false; }
+        return true;
+    }
     if (_corpseArticulation && !_corpseArticulation->Ready()) { ClearCorpsePose(); return false; }
     // Reject removal/world changes before touching type-owned animation tables.
     if (_corpsePoseLease.world != GWorld || CorpsePoseRefusal()) { ClearCorpsePose(); return false; }
@@ -849,7 +900,8 @@ bool Man::CaptureCorpsePose(RString& refusal)
                 }
         }
     }
-    if (g_corpsePoseOwner && g_corpsePoseOwner.GetLink() != this) g_corpsePoseOwner->ClearCorpsePose();
+    if (g_corpsePoseOwner && g_corpsePoseOwner.GetLink() != this && !g_corpsePoseOwner->_automaticCorpsePose)
+        g_corpsePoseOwner->ClearCorpsePose();
     ClearCorpsePose();
     _corpsePosePrimary = std::move(primary);
     _corpsePoseSecondary = std::move(secondary);
@@ -1024,7 +1076,8 @@ bool Man::InspectCorpsePose(CorpsePoseDiagnostic& result, RString& refusal, bool
         measured.pointOnly = shape->NPos() == 1;
         MATRIX_4_ARRAY(palette, 128);
         PrepareCorrectedPose(level, palette);
-        measured.faceEvaluated = _head.EvaluateDeadFaceBones(Type()->_head, weights, level, palette, _isDead);
+        measured.faceEvaluated = _automaticCorpsePose ? true :
+            _head.EvaluateDeadFaceBones(Type()->_head, weights, level, palette, _isDead);
         if (palette.Size() != skeleton->NBones()) { refusal = "complete-palette-required"; return false; }
         for (int bone = 0; bone < palette.Size(); ++bone)
         {
@@ -1192,8 +1245,8 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
     std::string sourceModel = _shape->Name(); std::replace(sourceModel.begin(),sourceModel.end(),'/','\\');
     if (strcmpi(sourceModel.c_str(), "data3d\\mc vojakw2.p3d") != 0)
     { refusal = "stock-western-model-only"; return false; }
-    if (CorpseMatrixIdentityError(_headTrans) > 1e-6f || CorpseMatrixIdentityError(_gunTrans) > 1e-6f ||
-        CorpseMatrixIdentityError(_legTrans) > 1e-6f)
+    if (!_automaticCorpsePose && (CorpseMatrixIdentityError(_headTrans) > 1e-6f || CorpseMatrixIdentityError(_gunTrans) > 1e-6f ||
+        CorpseMatrixIdentityError(_legTrans) > 1e-6f))
     { refusal = "identity-post-animation-corrections-required"; return false; }
     auto water = GRainWater().At(Position().X(), Position().Z());
     if (water.valid && water.depth > 0.003f) { refusal = "dry-retained-water-support-required"; return false; }
@@ -1209,6 +1262,7 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
         {"lstehno",nullptr}, {"lholen","lchodidlo","lprsty",nullptr}};
     auto state = std::make_unique<CorpseArticulation>();
     state->world = world; state->epoch = world->Generation(); state->object = Transform();
+    if (_automaticCorpsePose) state->collisionFamily = _automaticCorpsePose->collisionFamily;
     state->boneParts.assign(33, -1);
     for (int part = 0; part < 11; ++part)
         for (int name = 0; names[part][name]; ++name)
@@ -1340,7 +1394,7 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
             center = (lo+hi)*0.5f;
         }
         state->initial[part] = MIdentity; state->initial[part].SetPosition(center);
-        for (auto& point : vertices[part]) point = (point-center)*0.40f;
+        for (auto& point : vertices[part]) point = (point-center)*(_automaticCorpsePose ? .90f : .40f);
         float proxyClearance = std::numeric_limits<float>::infinity();
         for (const auto& point : vertices[part])
         {
@@ -1371,7 +1425,8 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
             if (std::isfinite(clearance)) state->minimumClearance = std::min(state->minimumClearance,clearance);
             if (std::isfinite(distance)) maximumRootDistance = std::max(maximumRootDistance,distance);
             ++fittedVertices;
-            if (!finite || !std::isfinite(clearance) || clearance < 0.003f || clearance > 0.8f || distance > 2.5f)
+            if (!finite || !std::isfinite(clearance) || clearance < 0.003f ||
+                clearance > (_automaticCorpsePose ? 2.8f : .8f) || distance > 2.5f)
             {
                 if (fitRefusal.GetLength() == 0)
                 {
@@ -1407,7 +1462,8 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
         const Vector3 center = state->initial[part].Position();
         for (const auto& point : vertices[part])
         {
-            const Vector3 supported = center+point, from = supported+VUp*0.8f, to = supported-VUp;
+            const Vector3 supported = center+point, from = supported+VUp*0.8f,
+                to = supported-VUp*(_automaticCorpsePose ? 3.2f : 1.0f);
             Vector3 floor;
             if (!world->RayHitAnything(from,to,Physics::QueryFilter{Physics::ColliderFlags::Roadway}))
             { refusal = "solver-terrain-floor-not-present"; return false; }
@@ -1422,7 +1478,15 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
     for (int part = 0; part < 11; ++part)
     {
         Physics::ConvexPiece piece{vertices[part].data(), static_cast<int>(vertices[part].size()), Physics::ColliderFlags::Solid};
-        state->bodies[part] = world->SpawnArticulatedPiece(piece, state->initial[part], masses[part]);
+        Physics::ArticulatedInitialMotion motion;
+        if (_automaticCorpsePose)
+        {
+            motion.collisionFamily = state->collisionFamily;
+            motion.angular = _automaticCorpsePose->initialAngularVelocity;
+            motion.linear = _automaticCorpsePose->initialSpeed + motion.angular.CrossProduct(
+                state->initial[part].Position()-PositionModelToWorld(_shape->CenterOfMass()));
+        }
+        state->bodies[part] = world->SpawnArticulatedPiece(piece, state->initial[part], masses[part],motion);
         if (!state->bodies[part].IsValid()) { refusal = "backend-refused-anatomical-hull"; return false; }
     }
     const int pairs[][2] = {{0,1},{1,2},{1,3},{3,4},{1,5},{5,6},{0,7},{7,8},{0,9},{9,10}};
@@ -1464,8 +1528,447 @@ bool Man::StartCorpseArticulation(RString& refusal, bool anatomicalHinges)
     return true;
 }
 
+bool Man::CaptureCorrectedCorpsePose(RString& refusal)
+{
+    refusal = "stock-corrected-live-pose-required";
+    if (!_shape || !_headTrans.IsFinite() || !_gunTrans.IsFinite() || !_legTrans.IsFinite() ||
+        std::abs(CorpseMatrixDeterminant(Transform())-1) > 1e-4f || !GLandscape || !GWorld) return false;
+    std::string model = _shape->Name(); std::replace(model.begin(),model.end(),'/','\\');
+    if (strcmpi(model.c_str(),"data3d\\mc vojakw2.p3d") != 0) return false;
+    Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
+    if (!skeleton || skeleton->NBones() != 33 || _shape->NLevels() > CorrectedCorpsePose::MaximumLevels) return false;
+    AffinePhasePose primary, secondary;
+    AnimationRT* pri = Type()->GetAnimation(_primaryMove.id);
+    AnimationRT* sec = Type()->GetAnimation(_secondaryMove.id);
+    if (!std::isfinite(_primaryFactor) || _primaryFactor < 0 || _primaryFactor > 1 ||
+        (_primaryFactor > .01f && (!pri || !pri->CapturePhasePose(primary,_primaryTime))) ||
+        (_primaryFactor < .99f && (!sec || !sec->CapturePhasePose(secondary,_secondaryTime)))) return false;
+    auto pose = std::make_unique<CorrectedCorpsePose>();
+    pose->capturedRoot = pose->root = Transform();
+    pose->initialSpeed = Speed(); pose->initialAngularVelocity = AngVelocity();
+    if (!pose->initialSpeed.IsFinite() || !pose->initialAngularVelocity.IsFinite()) return false;
+    const auto& weights = Type()->GetWeights();
+    for (int level = 0; level < _shape->NLevels(); ++level)
+    {
+        Shape* shape = _shape->Level(level);
+        if (!shape || shape->NPos() <= 0 || shape->NPos() > CorrectedCorpsePose::MaximumPoints) return false;
+        CorrectedCorpseLevel captured;
+        MATRIX_4_ARRAY(palette,128);
+        PrepareCorrectedPose(level,palette);
+        _head.EvaluateDeadFaceBones(Type()->_head,weights,level,palette,true);
+        if (palette.Size() != 33) return false;
+        for (int bone = 0; bone < palette.Size(); ++bone) captured.authoredPalette.push_back(palette[bone]);
+        for (int point = 0; point < shape->NPos(); ++point)
+        {
+            const auto& weight = weights[level][point];
+            CorpsePointBinding binding;
+            for (int w = 0; w < weight.Size(); ++w)
+            { binding.bones.push_back(weight[w].GetSel()); binding.weights.push_back(weight[w].GetWeight()); }
+            const bool supports = (!primary.Valid() || primary.SupportsPoint(weight)) &&
+                (!secondary.Valid() || secondary.SupportsPoint(weight));
+            if (!supports && (level == _shape->FindMemoryLevel() || shape->NPos() == 1)) return false;
+            // Reserved facial tails are palette-only in the authored path.
+            captured.authoredPoints.push_back(supports ? AnimatePoint(level,point) :
+                AnimationRT::ApplyMatricesPoint(weights[level],_shape,level,palette,point));
+            captured.bindings.push_back(std::move(binding));
+        }
+        for (int p = 0; p < shape->NProxies(); ++p)
+        {
+            const auto& proxy = shape->Proxy(p);
+            if (proxy.selection < 0 || proxy.selection >= shape->NNamedSel() ||
+                shape->NamedSel(proxy.selection).Size() <= 0) continue;
+            const auto& weight = GetProxyWeights(level,proxy);
+            if (weight.Size() <= 0) continue;
+            // Stock equipment helpers must be rigidly attached to one bone.
+            if (weight.Size() != 1 || weight[0].GetWeight() != 1) return false;
+            captured.proxySelections.push_back(proxy.selection); captured.proxyBones.push_back(weight[0].GetSel());
+            captured.authoredProxies.push_back(AnimateProxyMatrix(level,proxy));
+        }
+        captured.palette = captured.authoredPalette; captured.points = captured.authoredPoints;
+        captured.proxies = captured.authoredProxies; pose->levels.push_back(std::move(captured));
+    }
+    if (!pose->Valid()) { refusal = "invalid-corrected-live-pose"; return false; }
+    ClearCorpsePose();
+    _corpsePosePrimary = std::move(primary); _corpsePoseSecondary = std::move(secondary);
+    _corpsePoseModel = _shape; _corpsePoseSkeleton = skeleton; _corpsePoseWeights = &Type()->GetWeights();
+    _corpsePosePrimaryAnimation = pri; _corpsePoseSecondaryAnimation = sec;
+    _corpsePoseLease = {GWorld,_shape.GetRef(),skeleton,33,int(_primaryMove.id),int(_secondaryMove.id),
+        Glob.time.toInt(),_primaryFactor};
+    _automaticCorpsePose = std::move(pose);
+    bool exact = true;
+    int comparedPalettes = 0, comparedPoints = 0, comparedProxies = 0;
+    _corpsePoseBypass = true;
+    for (int level = 0; level < _shape->NLevels(); ++level)
+    {
+        const auto& captured = _automaticCorpsePose->levels[level];
+        MATRIX_4_ARRAY(palette,128);
+        PrepareCorrectedPose(level,palette);
+        _head.EvaluateDeadFaceBones(Type()->_head,weights,level,palette,true);
+        exact &= palette.Size() == int(captured.palette.size());
+        for (int bone = 0; bone < palette.Size(); ++bone)
+        { exact &= std::memcmp(&palette[bone],&captured.palette[bone],sizeof(Matrix4)) == 0; ++comparedPalettes; }
+        for (int point = 0; point < int(captured.points.size()); ++point)
+        {
+            const auto& weight = weights[level][point];
+            if ((_corpsePosePrimary.Valid() && !_corpsePosePrimary.SupportsPoint(weight)) ||
+                (_corpsePoseSecondary.Valid() && !_corpsePoseSecondary.SupportsPoint(weight))) continue;
+            const Vector3 actual = AnimatePoint(level,point);
+            exact &= std::memcmp(&actual,&captured.points[point],sizeof(Vector3)) == 0; ++comparedPoints;
+        }
+        Shape* shape = _shape->Level(level);
+        for (int p = 0; p < shape->NProxies(); ++p)
+        {
+            const auto& proxy = shape->Proxy(p);
+            for (size_t i = 0; i < captured.proxySelections.size(); ++i)
+                if (captured.proxySelections[i] == proxy.selection)
+                {
+                    const Matrix4 actual = AnimateProxyMatrix(level,proxy);
+                    exact &= std::memcmp(&actual,&captured.proxies[i],sizeof(Matrix4)) == 0; ++comparedProxies;
+                }
+        }
+    }
+    _corpsePoseBypass = false;
+    LOG_INFO(World,"AUTORAGDOLL: actual zero-motion consumers exact={} matrices={} points={} proxies={}",
+        exact,comparedPalettes,comparedPoints,comparedProxies);
+    if (!exact) { ClearCorpsePose(); refusal = "corrected-consumer-zero-motion-mismatch"; return false; }
+    refusal = "";
+    return true;
+}
+
+void Man::QueueAutomaticRagdoll()
+{
+    if (!AutomaticRagdollEnabled() || !_automaticDeathEligible || _corpsePoseLease.world ||
+        !GWorld || GWorld->GetMode() != GModeArcade || !IsLocal() ||
+        (!_isDead && !IsDammageDestroyed()) || !_landContact || _waterContact || _waterBuoyancyContact ||
+        _waterDepth > 0 || _hydroWaterDepth > 0 || GetHierachyParent() || _ladderBuilding ||
+        _hideBody != 0 || _hideBodyWanted != 0 || ToDelete() || ToMoveOut() || !IsInLandscape()) return;
+    g_automaticCorpses.erase(std::remove_if(g_automaticCorpses.begin(),g_automaticCorpses.end(),
+        [](const OLink<Man>& owner) { return !owner.GetLink() || !owner->_automaticCorpsePose; }),g_automaticCorpses.end());
+    bool used[4] = {}; int retained = 0;
+    for (const auto& owner : g_automaticCorpses)
+        if (Man* man = owner.GetLink(); man && man->_automaticCorpsePose && man->UseCorpsePose())
+        {
+            ++retained;
+            if (!man->_automaticCorpsePose->frozen)
+            {
+                const int slot = -man->_automaticCorpsePose->collisionFamily-2;
+                if (slot >= 0 && slot < 4) used[slot] = true;
+            }
+        }
+    int slot = 0; while (slot < 4 && used[slot]) ++slot;
+    if (slot == 4 || retained >= 64)
+    { LOG_INFO(World,"AUTORAGDOLL: authored fallback reason=corpse-budget activeSlots={} retained={}",slot,retained); return; }
+    RString refusal;
+    // KilledBy can run before HitBy for script damage. This is a damage death,
+    // never an animation-only request, and retains the existing scoring callback.
+    if (IsDammageDestroyed()) _isDead = true;
+    if (!CaptureCorrectedCorpsePose(refusal))
+    { LOG_INFO(World,"AUTORAGDOLL: authored fallback reason={}",refusal.Data()); return; }
+    _automaticCorpsePose->collisionFamily = -slot-2;
+    g_automaticCorpses.emplace_back(this);
+    g_corpsePoseOwner = this; // diagnostic selection only; previous corpse stays owned
+    LOG_INFO(World,"AUTORAGDOLL: captured actual death owner={} family={} levels={} speed=({},{},{}) angular=({},{},{}) corrections=({},{},{})",
+        static_cast<const void*>(this),-slot-2,_automaticCorpsePose->levels.size(),Speed().X(),Speed().Y(),Speed().Z(),
+        AngVelocity().X(),AngVelocity().Y(),AngVelocity().Z(),CorpseMatrixIdentityError(_headTrans),
+        CorpseMatrixIdentityError(_gunTrans),CorpseMatrixIdentityError(_legTrans));
+}
+
+bool Man::BeginAutomaticRagdoll(RString& refusal)
+{
+    if (!_automaticCorpsePose || !_automaticCorpsePose->pending || !UseCorpsePose()) return false;
+    const auto water = GRainWater().At(Position().X(),Position().Z());
+    if ((water.valid && water.depth > .003f) || !AutomaticRagdollTerrain(refusal)) return false;
+    const Matrix3 inertia = Orientation()*InvInertia()*GetInvTransform().Orientation();
+    _automaticCorpsePose->initialSpeed += _impulseForce*(GetInvMass()*Rigid());
+    _automaticCorpsePose->initialAngularVelocity += inertia*(_impulseTorque*Rigid());
+    if (!_automaticCorpsePose->initialSpeed.IsFinite() || !_automaticCorpsePose->initialAngularVelocity.IsFinite() ||
+        _automaticCorpsePose->initialSpeed.Size() > 15 || _automaticCorpsePose->initialAngularVelocity.Size() > 20)
+    { refusal = "inherited-death-motion-outside-bounded-admission"; return false; }
+    if (!StartCorpseArticulation(refusal,true)) return false;
+    _automaticCorpsePose->pending = false;
+    _impulseForce = _impulseTorque = VZero;
+    _whenKilled = Glob.time; _lastMovementTime = Glob.time;
+    IsMoved();
+    ActionContextDefault context; context.function = MFDead;
+    ProcessMoveFunction(&context);
+    LOG_INFO(World,"AUTORAGDOLL: activated owner={} bodies=11 joints=10 hinges=4 family={} inheritedImpulseConsumed=1",
+        static_cast<const void*>(this),_automaticCorpsePose->collisionFamily);
+    return true;
+}
+
+bool Man::FreezeAutomaticRagdoll()
+{
+    if (!_automaticCorpsePose || !_corpseArticulation || !_automaticCorpsePose->Valid()) return false;
+    _corpseArticulation->ReleaseHandles();
+    _corpseArticulation->state = CorpseSolverState::Frozen;
+    _automaticCorpsePose->pending = false; _automaticCorpsePose->frozen = true;
+    if (GScene) GScene->GetShadowCache().ShadowChanged(this);
+    LOG_INFO(World,"AUTORAGDOLL: frozen owner={} simulatedSeconds={} maximumTravel={} handles=0",
+        static_cast<const void*>(this),_automaticCorpsePose->simulatedSeconds,_corpseArticulation->maximumTravel);
+    return true;
+}
+
+bool Man::UpdateAutomaticRagdoll(float deltaT)
+{
+    if (!_automaticCorpsePose || !_corpseArticulation || !UseCorpsePose()) return false;
+    if (_automaticCorpsePose->frozen) return true;
+    auto& state = *_corpseArticulation;
+    auto& pose = *_automaticCorpsePose;
+    std::array<Physics::BodyMotion,11> motions;
+    bool quiet = true, identity = true;
+    for (int part = 0; part < 11; ++part)
+    {
+        auto& motion = motions[part];
+        if (!state.world->GetBodyMotion(state.bodies[part],motion) || !motion.position.IsFinite() ||
+            !motion.axisX.IsFinite() || !motion.axisY.IsFinite() || !motion.axisZ.IsFinite() ||
+            !motion.linearVelocity.IsFinite() || !motion.angularVelocity.IsFinite() ||
+            (motion.position-state.initial[part].Position()).Size() > 12)
+            return FreezeAutomaticRagdoll();
+        state.maximumTravel = std::max(state.maximumTravel,(motion.position-state.initial[part].Position()).Size());
+        quiet &= !motion.awake || (motion.linearVelocity.Size() < .06f && motion.angularVelocity.Size() < .12f);
+        identity &= motion.position == state.initial[part].Position() && motion.axisX == VAside &&
+            motion.axisY == VUp && motion.axisZ == VForward;
+    }
+    Matrix4 root = pose.capturedRoot;
+    if (!identity) root.SetPosition(root.Position()+(motions[0].position-state.initial[0].Position()));
+    std::array<Matrix4,11> parts;
+    for (int part = 0; part < 11; ++part)
+    {
+        const auto& motion = motions[part];
+        Matrix4 current = MIdentity;
+        current.SetDirectionAside(motion.axisX); current.SetDirectionUp(motion.axisY);
+        current.SetDirection(motion.axisZ); current.SetPosition(motion.position);
+        parts[part] = identity ? MIdentity : root.InverseRotation()*current*
+            state.initial[part].InverseRotation()*pose.capturedRoot;
+    }
+    std::vector<Matrix4> deltas;
+    for (int part : state.boneParts) deltas.push_back(parts[part]);
+    CorrectedCorpsePose candidate = pose;
+    candidate.root = root;
+    if (!candidate.Apply(deltas)) return FreezeAutomaticRagdoll();
+    bool first = true; float radius = 0;
+    Vector3 lo = VZero, hi = VZero;
+    const auto& weights = Type()->GetWeights();
+    for (int level = 0; level < _shape->NLevels(); ++level)
+    {
+        Shape* shape = _shape->Level(level);
+        MATRIX_4_ARRAY(palette,128);
+        palette.Resize(33);
+        for (int bone = 0; bone < 33; ++bone) palette[bone] = candidate.levels[level].palette[bone];
+        for (int p = 0; p < shape->NPos(); ++p)
+        {
+            const Vector3 point = AnimationRT::ApplyMatricesPoint(weights[level],_shape,level,palette,p);
+            if (!point.IsFinite() || point.Size() > 8) return FreezeAutomaticRagdoll();
+            if (first) { lo = hi = point; first = false; }
+            for (int axis = 0; axis < 3; ++axis)
+            { lo[axis] = std::min(lo[axis],point[axis]); hi[axis] = std::max(hi[axis],point[axis]); }
+            radius = std::max(radius,point.Size());
+            const Vector3 cpu = candidate.levels[level].points[p];
+            for (int axis = 0; axis < 3; ++axis)
+            { lo[axis] = std::min(lo[axis],cpu[axis]); hi[axis] = std::max(hi[axis],cpu[axis]); }
+            radius = std::max(radius,cpu.Size());
+        }
+    }
+    if (first) return FreezeAutomaticRagdoll();
+    candidate.minimum = lo; candidate.maximum = hi; candidate.radius = radius;
+    pose = std::move(candidate); state.minimum = lo; state.maximum = hi; state.radius = radius;
+    state.object = root; ++state.updates;
+    if (Transform().Position() != root.Position())
+    {
+        _automaticCorpseMoving = true;
+        Move(root);
+        _automaticCorpseMoving = false;
+    }
+    _lastMovementTime = Glob.time;
+    IsMoved();
+    const float elapsed = std::isfinite(deltaT) ? std::clamp(deltaT,0.0f,.25f) : 0;
+    pose.simulatedSeconds += elapsed;
+    pose.quietSeconds = quiet ? pose.quietSeconds+elapsed : 0;
+    // A bounded, validated retirement retains the latest accepted pose even if
+    // perpetual microcontacts prevent sleep. It never returns to authored death.
+    if (pose.quietSeconds >= .75f || pose.simulatedSeconds >= 12) return FreezeAutomaticRagdoll();
+    // Existing aggregate impulses arriving after activation are consumed once.
+    if (_impulseForce.SquareSize() > 0 || _impulseTorque.SquareSize() > 0)
+    {
+        const Vector3 linear = _impulseForce*(GetInvMass()*Rigid());
+        const Vector3 angular = (Orientation()*InvInertia()*GetInvTransform().Orientation())*(_impulseTorque*Rigid());
+        if (linear.IsFinite() && angular.IsFinite() && linear.Size() <= 15 && angular.Size() <= 20)
+            for (int part = 0; part < 11; ++part)
+                state.world->SetArticulatedMotion(state.bodies[part],motions[part].linearVelocity+linear+
+                    angular.CrossProduct(motions[part].position-PositionModelToWorld(_shape->CenterOfMass())),
+                    motions[part].angularVelocity+angular);
+        _impulseForce = _impulseTorque = VZero;
+    }
+    return true;
+}
+
+LSError Man::SerializeAutomaticCorpsePose(ParamArchive& ar)
+{
+    if (IS_UNIT_STATUS_BRANCH(ar.GetArVersion()) ||
+        (ar.IsLoading() && ar.GetPass() != ParamArchive::PassFirst)) return LSOK;
+    if (ar.IsSaving() && (!_automaticCorpsePose || !_corpseArticulation || !UseCorpsePose())) return LSOK;
+    if (ar.IsSaving() && !_automaticCorpsePose->frozen && !FreezeAutomaticRagdoll()) return LSOK;
+    ParamArchive saved;
+    if (!ar.OpenSubclass("opAutomaticCorpse",saved)) return LSOK;
+    CorrectedCorpsePose loaded;
+    CorrectedCorpsePose& pose = ar.IsSaving() ? *_automaticCorpsePose : loaded;
+    const auto reject = [&]() {
+        ar.CloseSubclass(saved);
+        LOG_WARN(World,"AUTORAGDOLL: refused incompatible frozen save; authored death remains available");
+        return LSOK;
+    };
+    int version = 1;
+    RString model = ar.IsSaving() ? _shape->Name() : "";
+    RString map = ar.IsSaving() && GLandscape ? GLandscape->GetName() : "";
+    PARAM_CHECK(saved.Serialize("version",version,1))
+    PARAM_CHECK(saved.Serialize("model",model,1))
+    PARAM_CHECK(saved.Serialize("map",map,1))
+    if (version != 1 || !_shape || !GLandscape || strcmpi(model,_shape->Name()) != 0 ||
+        strcmpi(map,GLandscape->GetName()) != 0) return reject();
+    Skeleton* skeleton = Type()->GetWeights().GetName().skeleton.GetTypeRef();
+    int bones = ar.IsSaving() ? int(pose.levels[0].palette.size()) : 0;
+    PARAM_CHECK(saved.Serialize("bones",bones,1))
+    if (!skeleton || bones != 33 || skeleton->NBones() != bones) return reject();
+    for (int bone = 0; bone < bones; ++bone)
+    {
+        char key[32]; std::snprintf(key,sizeof(key),"bone%d",bone);
+        RString name = ar.IsSaving() ? skeleton->GetBone(bone) : RString();
+        PARAM_CHECK(saved.Serialize(key,name,1))
+        if (strcmp(name,skeleton->GetBone(bone)) != 0) return reject();
+    }
+    int levels = ar.IsSaving() ? int(pose.levels.size()) : 0;
+    PARAM_CHECK(saved.Serialize("levels",levels,1))
+    PARAM_CHECK(saved.Serialize("root",pose.root,1))
+    PARAM_CHECK(saved.Serialize("minimum",pose.minimum,1))
+    PARAM_CHECK(saved.Serialize("maximum",pose.maximum,1))
+    PARAM_CHECK(saved.Serialize("radius",pose.radius,1))
+    if (levels <= 0 || levels > CorrectedCorpsePose::MaximumLevels || levels != _shape->NLevels() ||
+        !pose.root.IsFinite() || std::abs(CorpseMatrixDeterminant(pose.root)-1) > .0001f ||
+        !pose.minimum.IsFinite() || !pose.maximum.IsFinite() || !std::isfinite(pose.radius) ||
+        pose.radius <= 0 || pose.radius > 8) return reject();
+    if (ar.IsLoading()) pose.levels.resize(levels);
+    const auto& weights = Type()->GetWeights();
+    for (int level = 0; level < levels; ++level)
+    {
+        char key[32]; std::snprintf(key,sizeof(key),"level%d",level);
+        ParamArchive entry;
+        if (!saved.OpenSubclass(key,entry)) return reject();
+        auto& captured = pose.levels[level];
+        Shape* shape = _shape->Level(level);
+        int points = ar.IsSaving() ? int(captured.points.size()) : 0;
+        PARAM_CHECK(entry.Serialize("points",points,1))
+        if (!shape || points <= 0 || points > CorrectedCorpsePose::MaximumPoints || points != shape->NPos())
+        { saved.CloseSubclass(entry); return reject(); }
+        if (ar.IsLoading())
+        { captured.palette.resize(bones); captured.points.resize(points); captured.bindings.resize(points); }
+        for (int bone = 0; bone < bones; ++bone)
+        {
+            std::snprintf(key,sizeof(key),"palette%d",bone);
+            PARAM_CHECK(entry.Serialize(key,captured.palette[bone],1))
+        }
+        for (int point = 0; point < points; ++point)
+        {
+            std::snprintf(key,sizeof(key),"point%d",point);
+            PARAM_CHECK(entry.Serialize(key,captured.points[point],1))
+            if (ar.IsLoading())
+            {
+                const auto& weight = weights[level][point];
+                for (int w = 0; w < weight.Size(); ++w)
+                {
+                    captured.bindings[point].bones.push_back(weight[w].GetSel());
+                    captured.bindings[point].weights.push_back(weight[w].GetWeight());
+                }
+            }
+        }
+        int proxies = ar.IsSaving() ? int(captured.proxies.size()) : 0;
+        PARAM_CHECK(entry.Serialize("proxies",proxies,1))
+        int expectedProxies = 0;
+        for (int p = 0; p < shape->NProxies(); ++p)
+        {
+            const auto& proxy = shape->Proxy(p);
+            if (proxy.selection >= 0 && proxy.selection < shape->NNamedSel() &&
+                shape->NamedSel(proxy.selection).Size() > 0 && GetProxyWeights(level,proxy).Size() > 0) ++expectedProxies;
+        }
+        if (proxies < 0 || proxies > 64 || proxies != expectedProxies)
+        { saved.CloseSubclass(entry); return reject(); }
+        if (ar.IsLoading())
+        { captured.proxies.resize(proxies); captured.proxySelections.resize(proxies); captured.proxyBones.resize(proxies); }
+        for (int p = 0; p < proxies; ++p)
+        {
+            std::snprintf(key,sizeof(key),"proxySelection%d",p);
+            PARAM_CHECK(entry.Serialize(key,captured.proxySelections[p],1))
+            std::snprintf(key,sizeof(key),"proxyBone%d",p);
+            PARAM_CHECK(entry.Serialize(key,captured.proxyBones[p],1))
+            std::snprintf(key,sizeof(key),"proxyMatrix%d",p);
+            PARAM_CHECK(entry.Serialize(key,captured.proxies[p],1))
+            const int selection = captured.proxySelections[p];
+            bool actualProxy = false;
+            for (int i = 0; i < shape->NProxies(); ++i)
+                if (shape->Proxy(i).selection == selection) actualProxy = true;
+            if (selection < 0 || selection >= shape->NNamedSel() || shape->NamedSel(selection).Size() <= 0)
+            { saved.CloseSubclass(entry); return reject(); }
+            if (!actualProxy) { saved.CloseSubclass(entry); return reject(); }
+            const auto& weight = GetSelWeights(level,selection);
+            if (weight.Size() != 1 || weight[0].GetSel() != captured.proxyBones[p] || weight[0].GetWeight() != 1)
+            { saved.CloseSubclass(entry); return reject(); }
+        }
+        if (ar.IsLoading())
+        {
+            captured.authoredPalette = captured.palette; captured.authoredPoints = captured.points;
+            captured.authoredProxies = captured.proxies;
+        }
+        saved.CloseSubclass(entry);
+    }
+    ar.CloseSubclass(saved);
+    if (ar.IsLoading())
+    {
+        pose.capturedRoot = pose.root; pose.pending = false; pose.frozen = true;
+        if (!pose.Valid()) { LOG_WARN(World,"AUTORAGDOLL: nonfinite or unbounded frozen save refused"); return LSOK; }
+        bool first = true; Vector3 lo = VZero, hi = VZero; float radius = 0;
+        for (int level = 0; level < levels; ++level)
+        {
+            MATRIX_4_ARRAY(palette,128); palette.Resize(bones);
+            for (int bone = 0; bone < bones; ++bone) palette[bone] = pose.levels[level].palette[bone];
+            for (int p = 0; p < int(pose.levels[level].points.size()); ++p)
+                for (const Vector3 point : {pose.levels[level].points[p],
+                    AnimationRT::ApplyMatricesPoint(weights[level],_shape,level,palette,p)})
+                {
+                    if (!point.IsFinite() || point.Size() > 8) return LSOK;
+                    if (first) { lo = hi = point; first = false; }
+                    for (int axis = 0; axis < 3; ++axis)
+                    { lo[axis] = std::min(lo[axis],point[axis]); hi[axis] = std::max(hi[axis],point[axis]); }
+                    radius = std::max(radius,point.Size());
+                }
+        }
+        if (first || (lo-pose.minimum).Size() > .002f || (hi-pose.maximum).Size() > .002f ||
+            std::abs(radius-pose.radius) > .002f) return LSOK;
+        pose.minimum = lo; pose.maximum = hi; pose.radius = radius;
+        // Base deserialization owns the object's actual spatial registration.
+        // Refuse a mismatched root rather than moving a half-loaded entity.
+        for (int row = 0; row < 3; ++row) for (int col = 0; col < 4; ++col)
+            if (std::abs(Transform()(row,col)-pose.root(row,col)) > .0001f) return LSOK;
+        _corpsePoseModel = _shape; _corpsePoseSkeleton = skeleton; _corpsePoseWeights = &Type()->GetWeights();
+        _corpsePoseLease = {GWorld,_shape.GetRef(),skeleton,bones,int(_primaryMove.id),int(_secondaryMove.id),
+            Glob.time.toInt(),_primaryFactor};
+        _automaticCorpsePose = std::make_unique<CorrectedCorpsePose>(std::move(pose));
+        _corpseArticulation = std::make_unique<CorpseArticulation>();
+        _corpseArticulation->state = CorpseSolverState::Frozen;
+        _corpseArticulation->object = _automaticCorpsePose->root;
+        _corpseArticulation->minimum = _automaticCorpsePose->minimum;
+        _corpseArticulation->maximum = _automaticCorpsePose->maximum;
+        _corpseArticulation->radius = _automaticCorpsePose->radius;
+        g_automaticCorpses.erase(std::remove_if(g_automaticCorpses.begin(),g_automaticCorpses.end(),
+            [&](const OLink<Man>& owner) { return !owner.GetLink() || owner.GetLink() == this; }),g_automaticCorpses.end());
+        g_automaticCorpses.emplace_back(this); g_corpsePoseOwner = this;
+        if (GScene) GScene->GetShadowCache().ShadowChanged(this);
+        LOG_INFO(World,"AUTORAGDOLL: restored validated frozen owner={} levels={} handles=0",static_cast<const void*>(this),levels);
+    }
+    return LSOK;
+}
+
 bool Man::UpdateCorpseArticulation() const
 {
+    if (_automaticCorpsePose) return const_cast<Man*>(this)->UpdateAutomaticRagdoll(0);
     if (!_corpseArticulation || !UseCorpsePose()) return false;
     auto& state = *_corpseArticulation;
     if (state.state == CorpseSolverState::Frozen) return true; // owned pose, no backend reads
@@ -1529,6 +2032,30 @@ bool Man::CorpseArticulationBounds(Vector3* minMax, float& radius) const
 RString Man::CorpsePoseProbe(const char* command)
 {
     if (!command) return "REFUSED corpse-command missing";
+    if (std::strcmp(command,"corpse-auto-status") == 0)
+    {
+        int active = 0, frozen = 0, pending = 0;
+        for (const auto& owner : g_automaticCorpses)
+            if (Man* man = owner.GetLink(); man && man->_automaticCorpsePose && man->UseCorpsePose())
+            {
+                if (man->_automaticCorpsePose->pending) ++pending;
+                else if (man->_automaticCorpsePose->frozen) ++frozen;
+                else ++active;
+            }
+        char result[192]; std::snprintf(result,sizeof(result),"OK corpse-auto-status enabled=%d active=%d frozen=%d pending=%d activeBudget=4 retainedBudget=64",
+            int(AutomaticRagdollEnabled()),active,frozen,pending);
+        return result;
+    }
+    if (std::strncmp(command,"corpse-auto-select:",19) == 0)
+    {
+        char* end = nullptr; const long index = std::strtol(command+19,&end,10);
+        if (!end || *end || index < 0) return "REFUSED corpse-auto-select invalid-index";
+        long found = 0;
+        for (const auto& owner : g_automaticCorpses)
+            if (Man* man = owner.GetLink(); man && man->_automaticCorpsePose && man->UseCorpsePose())
+                if (found++ == index) { g_corpsePoseOwner = man; return "OK corpse-auto-select selected"; }
+        return "REFUSED corpse-auto-select no-owner";
+    }
     if (std::strcmp(command,"corpse-frozen-world-retire") == 0)
     {
         Man* man = g_corpsePoseOwner.GetLink();
@@ -1816,6 +2343,12 @@ const AnimationRTWeight& Man::GetProxyWeights(int level, const ProxyObject& prox
 
 void Man::AnimateMatrix(Matrix4& mat, int level, int selection) const
 {
+    if (_automaticCorpsePose && UseCorpsePose() && level >= 0 && level < int(_automaticCorpsePose->levels.size()))
+    {
+        const auto& pose = _automaticCorpsePose->levels[level];
+        for (size_t p = 0; p < pose.proxySelections.size(); ++p)
+            if (pose.proxySelections[p] == selection) { mat = pose.proxies[p]; return; }
+    }
     const AnimationRTWeight& wg = GetSelWeights(level, selection);
     AnimateMatrix(mat, wg);
     int matIndex = wg[0].GetSel();
@@ -1866,6 +2399,9 @@ Vector3 Man::COMPosition() const
 
 Vector3 Man::AnimatePoint(int level, int index) const
 {
+    if (_automaticCorpsePose && UseCorpsePose() && level >= 0 && level < int(_automaticCorpsePose->levels.size()) &&
+        index >= 0 && index < int(_automaticCorpsePose->levels[level].points.size()))
+        return _automaticCorpsePose->levels[level].points[index];
     bool held = UseCorpsePose();
     const ManType* type = Type();
     Vector3 res = VZero;

@@ -550,9 +550,14 @@ bool PhysicsWorld::GetBodyMotion(BodyId id, BodyMotion& out) const
 }
 
 BodyId PhysicsWorld::SpawnArticulatedPiece(const ConvexPiece& piece, const Matrix4& frame, float mass)
+{ return SpawnArticulatedPiece(piece,frame,mass,ArticulatedInitialMotion{}); }
+BodyId PhysicsWorld::SpawnArticulatedPiece(const ConvexPiece& piece, const Matrix4& frame, float mass,
+    const ArticulatedInitialMotion& motion)
 {
-    return _backend ? _backend->SpawnArticulatedPiece(piece, frame, mass) : BodyId{};
+    return _backend ? _backend->SpawnArticulatedPiece(piece, frame, mass, motion) : BodyId{};
 }
+bool PhysicsWorld::SetArticulatedMotion(BodyId body, Vector3Par linear, Vector3Par angular)
+{ return _backend && _backend->SetArticulatedMotion(body,linear,angular); }
 JointId PhysicsWorld::AddArticulatedJoint(const ArticulatedJointDef& definition)
 {
     return _backend ? _backend->AddArticulatedJoint(definition) : JointId{};

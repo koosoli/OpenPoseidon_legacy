@@ -149,6 +149,9 @@ public:
     /// BodyMotion for why this exception to PHY-010's one-way rule exists.
     bool   GetBodyMotion(BodyId id, BodyMotion& out) const;
     BodyId SpawnArticulatedPiece(const struct ConvexPiece&, const Matrix4&, float mass);
+    BodyId SpawnArticulatedPiece(const struct ConvexPiece&, const Matrix4&, float mass,
+        const ArticulatedInitialMotion&);
+    bool SetArticulatedMotion(BodyId, Vector3Par linear, Vector3Par angular);
     JointId AddArticulatedJoint(const ArticulatedJointDef&);
     void RemoveJoint(JointId);
     [[nodiscard]] std::uint64_t Generation() const { return _generation; }

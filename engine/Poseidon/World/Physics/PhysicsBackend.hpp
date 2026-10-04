@@ -110,7 +110,9 @@ public:
     virtual BodyId AddStaticBody(const ConvexPiece* pieces, int pieceCount, const Matrix4& transform) = 0;
 
     virtual void RemoveBody(BodyId id) = 0;
-    virtual BodyId SpawnArticulatedPiece(const ConvexPiece&, const Matrix4&, float) { return {}; }
+    virtual BodyId SpawnArticulatedPiece(const ConvexPiece&, const Matrix4&, float,
+        const ArticulatedInitialMotion& = {}) { return {}; }
+    virtual bool SetArticulatedMotion(BodyId, Vector3Par, Vector3Par) { return false; }
     virtual JointId AddArticulatedJoint(const ArticulatedJointDef&) { return {}; }
     virtual void RemoveJoint(JointId) {}
 

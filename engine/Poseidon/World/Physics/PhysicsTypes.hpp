@@ -44,6 +44,14 @@ struct JointId
 
 enum class ArticulatedJointKind { Spherical, Hinge };
 
+struct ArticulatedInitialMotion
+{
+    Vector3 linear = VZero, angular = VZero;
+    // -1 preserves the explicit diagnostic. Production owns one distinct
+    // negative family per active corpse: only its own limbs ignore each other.
+    int collisionFamily = -1;
+};
+
 // Both local frames use their Z axes for the cone/twist or hinge axis. The caller fits
 // these to measured model geometry; no RTM translation is a joint location.
 struct ArticulatedJointDef

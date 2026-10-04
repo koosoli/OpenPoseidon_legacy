@@ -325,7 +325,7 @@ void Man::RecalcPositions(const Frame& moveTrans)
 
 void Man::OnPositionChanged()
 {
-    if (_corpsePoseLease.world) ClearCorpsePose();
+    if (_corpsePoseLease.world && !_automaticCorpseMoving) ClearCorpsePose();
     _landContact = false;
     _objectContact = false;
     RecalcPositions(*this);
@@ -333,6 +333,22 @@ void Man::OnPositionChanged()
 
 void Man::Simulate(float deltaT, SimulationImportance prec)
 {
+    if (!_isDead && !IsDammageDestroyed() && IsInLandscape()) _automaticDeathEligible = true;
+    if (_automaticCorpsePose && _automaticCorpsePose->pending)
+    {
+        RString refusal;
+        if (!BeginAutomaticRagdoll(refusal))
+        {
+            LOG_INFO(World,"AUTORAGDOLL: authored fallback owner={} reason={}",static_cast<const void*>(this),refusal.Data());
+            ClearCorpsePose();
+        }
+    }
+    if (_automaticCorpsePose && UpdateAutomaticRagdoll(deltaT))
+    {
+        _speed = VZero;
+        base::Simulate(deltaT,prec);
+        return;
+    }
     // Expiry/revival/hiding/world/model changes restore the authored path.
     if (_corpsePoseLease.world) UseCorpsePose();
     // While explicitly articulated, physics owns limbs and the root stays at

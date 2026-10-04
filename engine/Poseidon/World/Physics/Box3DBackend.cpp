@@ -884,15 +884,19 @@ public:
         }
     }
 
-    BodyId SpawnArticulatedPiece(const ConvexPiece& piece, const Matrix4& frame, float mass) override
+    BodyId SpawnArticulatedPiece(const ConvexPiece& piece, const Matrix4& frame, float mass,
+        const ArticulatedInitialMotion& motion = {}) override
     {
         if (!RigidArticulationFrame(frame) || !std::isfinite(mass) || mass <= 0 ||
+            !motion.linear.IsFinite() || !motion.angular.IsFinite() ||
+            motion.collisionFamily >= 0 || motion.collisionFamily < -32767 ||
             !piece.points || piece.count < 4 || piece.count > MaxHullVertices) return {};
         for (int p = 0; p < piece.count; ++p) if (!piece.points[p].IsFinite()) return {};
-        BodyId id = SpawnDynamicPieces(&piece, 1, frame, mass, 0.65f, 0, VZero);
+        BodyId id = SpawnDynamicPieces(&piece, 1, frame, mass, 0.65f, 0, motion.linear);
         Slot* slot = Find(id);
         if (!slot) return {};
         const b3BodyId body = slot->body;
+        b3Body_SetAngularVelocity(body,ToB3(motion.angular));
         // A corpse is not a probe: no probe clear, wind or water controller owns
         // it. Only this bounded corpse's owner destroys these articulated bodies.
         _probes.erase(std::remove_if(_probes.begin(), _probes.end(), [&](const Probe& probe)
@@ -902,11 +906,24 @@ public:
         for (int i = 0; i < count; ++i)
         {
             b3Filter filter = b3Shape_GetFilter(shapes[i]);
-            filter.groupIndex = -1; // one admitted corpse; no internal collisions
+            filter.groupIndex = motion.collisionFamily;
             b3Shape_SetFilter(shapes[i], filter, true);
         }
         _articulatedBodies.push_back(id);
         return id;
+    }
+
+    bool SetArticulatedMotion(BodyId id, Vector3Par linear, Vector3Par angular) override
+    {
+        if (!linear.IsFinite() || !angular.IsFinite()) return false;
+        if (std::none_of(_articulatedBodies.begin(),_articulatedBodies.end(),[&](BodyId body) { return body == id; }))
+            return false;
+        Slot* slot = Find(id);
+        if (!slot) return false;
+        b3Body_SetLinearVelocity(slot->body,ToB3(linear));
+        b3Body_SetAngularVelocity(slot->body,ToB3(angular));
+        b3Body_SetAwake(slot->body,true);
+        return true;
     }
 
     JointId AddArticulatedJoint(const ArticulatedJointDef& definition) override

@@ -1,0 +1,80 @@
+# Automatic stock infantry death candidate, 2026-10-04
+
+The existing installed explicit stock-corpse articulation, measured elbow/knee
+hinges and owned freeze remain the control. This candidate adds an independent
+ordinary damage-death path. It is opt-in with `POSEIDON_AUTOMATIC_RAGDOLL=1` until
+the runtime owner accepts the installed ordinary-death campaign. Source or CPU
+success is not an installed appearance, save/load or gameplay acceptance.
+
+## Supported candidate boundary
+
+- Local single player, locally owned `data3d\mc vojakw2.p3d` stock Western
+  infantry, alive in the landscape before the new damage transition.
+- Dry, unattached, non-ladder, visible ground contact. Initial vertices must agree
+  with the actual registered Box3D roadway floor within 25 mm and remain at least
+  3 mm above it. Open-ground legacy center rays and measured shared anchors remain
+  admission gates. The solver has no certified cave/trench cavity support.
+- Four independently owned active corpses, distinct negative self-collision
+  families, up to 64 retained snapshots. Excess, ambiguous or unsupported deaths
+  follow the existing authored death. No earlier corpse is cleared to admit one.
+- Eleven authored component bodies and ten joints, including four measured
+  anatomical hinges. Production uses 90% of each actual component about its
+  centroid, with the existing bounded 10 mm contact-proxy calibration; the
+  explicit settled-corpse control retains its 40% proxy fit.
+- Inherited actual linear/angular motion and the existing queued gameplay
+  impulse are consumed once. Initial speeds above 15 m/s or angular velocities
+  above 20 rad/s refuse this bounded candidate. It is not multiplayer ragdoll
+  replication, dismemberment or a full high-energy blast simulation.
+
+## Consumer and ownership changes
+
+`CorrectedCorpsePose` captures actual post-correction render palettes, CPU points
+and equipment proxy matrices separately. Head/aiming/leg correction arithmetic
+differs between these consumers; raw phases are not substituted for the final
+outputs. Each admitted capture compares all available actual consumers again
+with the owned snapshot bypassed and requires exact zero-motion bytes. Reserved
+palette-only face points retain their palette path. Production moves the
+captured outputs using body deltas without accumulating earlier simulation
+errors; original diagnostic raw affine phases remain unchanged.
+
+The first `ReactToDammage` / `KilledBy` damage death queues capture before authored
+death movement advances. Admission is consumed at the beginning of `Man::Simulate`.
+The entity remains dead for gameplay while its original animation identifiers
+remain frozen. Physics updates the limbs and rebases the object's spatial root
+from pelvis displacement; bounds include actual render and CPU points. Existing
+death callbacks, damage/scoring, the blood callback and mission-script controls
+remain on their existing paths.
+
+The latest validated pose freezes after 0.75 seconds of quiet motion or a bounded
+12 simulated seconds. Joints are released before bodies. Handle-free pose data
+persists beyond the diagnostic's old 30-second lease. Body readback or bounds
+failure retires at the last valid pose. Hide, deletion, revival, external movement,
+world/model or ownership changes invalidate it. This changes no ordinary living
+infantry integration or diagnostic expiry policy.
+
+The automatic path reuses registered shared terrain and never replaces a live
+floor. Only a missing floor is initialized from actual map heights/spacing, with
+at most four million samples; support disagreement still refuses admission.
+Loose objects, probes and their handles remain independently owned.
+
+## Frozen save data
+
+Saving an active admitted corpse freezes its latest validated pose. The optional
+`opAutomaticCorpse` version-1 subclass stores bounded palettes, CPU points,
+equipment matrices, root and bounds, plus exact model/map and bone names. It stores
+no pointers, epochs, body/joint handles or active solver state. Load rebuilds
+bindings from the actual model, validates counts, names, finite data, proxy
+membership, root and recomputed bounds, then restores an owned frozen corpse.
+Unsupported or absent data retains authored fallback. No network representation
+is added. Runtime round-trip remains mandatory before promotion.
+
+## Verification and remaining acceptance
+
+Private actual backend/native checks passed: 2,302 assertions in four measured
+hinge cases and 2,871 assertions in 19 corpse/articulation/mass/replay cases,
+including the new corrected snapshot and collision-family/motion controls.
+Actual changed backend/world/infantry/Sim/SimProxy translation units passed
+syntax checks. The complete game build, ordinary rifle deaths, source skin contact,
+save/load, multiple corpses, near/far culling, lifecycle and performance require
+the matching installed runner and the runtime owner's review. Default promotion
+is explicitly pending those receipts.

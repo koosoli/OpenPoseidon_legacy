@@ -18,6 +18,7 @@ struct CorpseArticulation
     CorpseArticulation& operator=(const CorpseArticulation&) = delete;
     Physics::PhysicsWorld* world = nullptr;
     std::uint64_t epoch = 0;
+    int collisionFamily = -1;
     std::array<Physics::BodyId, 11> bodies{};
     std::array<Physics::JointId, 10> joints{};
     std::array<Matrix4, 11> initial{};

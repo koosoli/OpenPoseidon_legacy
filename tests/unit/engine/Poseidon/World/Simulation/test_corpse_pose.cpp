@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/World/Simulation/Animation/CorpsePose.hpp>
+#include <Poseidon/World/Simulation/Animation/CorrectedCorpsePose.hpp>
 #include <Poseidon/World/Entities/Infantry/Head.hpp>
 #include <Poseidon/World/Physics/CorpseArticulation.hpp>
 #include <Poseidon/World/Physics/PhysicsBackend.hpp>
@@ -10,6 +11,42 @@
 #include <limits>
 
 using namespace Poseidon;
+
+TEST_CASE("Corrected corpse consumers retain distinct affine point and proxy arithmetic", "[corpse-pose][automatic-ragdoll]")
+{
+    CorrectedCorpsePose pose;
+    CorrectedCorpseLevel level;
+    Matrix4 first = MIdentity, second = MIdentity;
+    first(0,1) = .18f; first(1,1) = 1.13f; second(2,0) = -.21f;
+    first.SetPosition(Vector3(.23f,.67f,-.29f)); second.SetPosition(Vector3(-.32f,.81f,.47f));
+    level.authoredPalette = level.palette = {first,second};
+    level.authoredPoints = level.points = {Vector3(.36f,.84f,-.44f),Vector3(.11f,.76f,.38f)};
+    level.bindings = {{{0,1},{.25f,.75f}},{{1},{1}}};
+    level.proxyBones = {1}; level.proxySelections = {7};
+    Matrix4 equipment = MIdentity; equipment.SetPosition(Vector3(.71f,.97f,-.16f));
+    level.authoredProxies = level.proxies = {equipment};
+    pose.levels.push_back(level);
+    REQUIRE(pose.Valid());
+    std::vector<Matrix4> identity(2,MIdentity);
+    REQUIRE(pose.Apply(identity));
+    CHECK(std::memcmp(pose.levels[0].palette.data(),level.palette.data(),2*sizeof(Matrix4)) == 0);
+    CHECK(std::memcmp(pose.levels[0].points.data(),level.points.data(),2*sizeof(Vector3)) == 0);
+    CHECK(std::memcmp(pose.levels[0].proxies.data(),level.proxies.data(),sizeof(Matrix4)) == 0);
+    Matrix4 a(MRotationY,.31f), b(MRotationX,-.27f);
+    a.SetPosition(Vector3(.09f,-.07f,.14f)); b.SetPosition(Vector3(-.11f,-.04f,.17f));
+    REQUIRE(pose.Apply({a,b}));
+    const Vector3 expected = a.FastTransform(level.points[0])*.25f+b.FastTransform(level.points[0])*.75f;
+    CHECK((pose.levels[0].points[0]-expected).Size() < .000001f);
+    const Matrix4 expectedProxy = b*equipment;
+    CHECK(std::memcmp(&pose.levels[0].proxies[0],&expectedProxy,sizeof(Matrix4)) == 0);
+    const auto once = pose.levels[0].points;
+    REQUIRE(pose.Apply({a,b}));
+    CHECK(std::memcmp(once.data(),pose.levels[0].points.data(),2*sizeof(Vector3)) == 0);
+    REQUIRE(pose.Apply(identity));
+    CHECK(std::memcmp(pose.levels[0].points.data(),level.points.data(),2*sizeof(Vector3)) == 0);
+    pose.levels[0].bindings[0].weights[0] = std::numeric_limits<float>::quiet_NaN();
+    CHECK_FALSE(pose.Valid()); CHECK_FALSE(pose.Apply(identity));
+}
 
 namespace
 {

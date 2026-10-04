@@ -998,6 +998,13 @@ void Man::RequestFaceCpuPose(int level)
 
 void Man::PrepareCorrectedPose(int level, Matrix4Array& matrix) const
 {
+    if (_automaticCorpsePose && UseCorpsePose() && level >= 0 && level < int(_automaticCorpsePose->levels.size()))
+    {
+        const auto& palette = _automaticCorpsePose->levels[level].palette;
+        matrix.Resize(int(palette.size()));
+        for (size_t bone = 0; bone < palette.size(); ++bone) matrix[int(bone)] = palette[bone];
+        return;
+    }
     const ManType* type = Type();
     PrepareBasePose(matrix);
 
@@ -1063,7 +1070,8 @@ void Man::Animate(int level)
         // FACE-002: the face pose rides reserved bones of this object's own palette. It has
         // to be written after the head/aiming/legs CombineTransform above (it reads the
         // parent bone's final orientation) and before ApplyMatrices consumes the array.
-        _head.ApplyFaceBones(type->_head, type->GetWeights(), level, matrix, _isDead);
+        if (_automaticCorpsePose && UseCorpsePose()) _head._faceBonesActive = true;
+        else _head.ApplyFaceBones(type->_head, type->GetWeights(), level, matrix, _isDead);
 
         AnimationRT::ApplyMatrices(type->GetWeights(), _shape, level, matrix);
     }

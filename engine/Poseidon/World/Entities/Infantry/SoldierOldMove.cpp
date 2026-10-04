@@ -1162,6 +1162,7 @@ void Man::KilledBy(EntityAI* owner)
     {
         return;
     }
+    QueueAutomaticRagdoll();
     bool player = this == GWorld->GetRealPlayer();
     bool playable = _brain->IsPlayable();
     RespawnMode mode = RespawnNone;
@@ -1439,6 +1440,7 @@ void Man::SetDammage(float dammage)
     base::SetDammage(dammage);
     if (wasDead && !_isDead)
     {
+        ClearCorpsePose();
         AIUnit* unit = Brain();
         if (unit)
         {
@@ -1459,6 +1461,7 @@ void Man::SetDammage(float dammage)
 
 void Man::ReactToDammage()
 {
+    const bool wasDead = _isDead;
     if (!_isDead)
     {
         if (IsDammageDestroyed())
@@ -1478,6 +1481,7 @@ void Man::ReactToDammage()
     {
         _turnWanted = 0;
     }
+    if (!wasDead && _isDead) QueueAutomaticRagdoll();
 }
 
 bool Man::BinocularSelected() const

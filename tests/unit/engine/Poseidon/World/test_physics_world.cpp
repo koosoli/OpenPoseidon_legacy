@@ -23,6 +23,44 @@
 
 using namespace Poseidon::Physics;
 
+TEST_CASE("Articulated motion is inherited and only limbs of the same corpse ignore contact", "[physics][articulation][automatic-ragdoll]")
+{
+    const Vector3 vertices[] = {{-.15f,-.15f,-.15f},{.15f,-.15f,-.15f},{-.15f,.15f,-.15f},{.15f,.15f,-.15f},
+        {-.15f,-.15f,.15f},{.15f,-.15f,.15f},{-.15f,.15f,.15f},{.15f,.15f,.15f}};
+    ConvexPiece piece{vertices,8,ColliderFlags::Solid};
+    for (bool sameCorpse : {true,false})
+    {
+        auto backend = CreatePhysicsBackend(); REQUIRE(backend); REQUIRE(backend->Create());
+        Matrix4 left = MIdentity, right = MIdentity;
+        left.SetPosition(Vector3(-.08f,10,0)); right.SetPosition(Vector3(.08f,10,0));
+        ArticulatedInitialMotion first, second;
+        first.collisionFamily = -2; second.collisionFamily = sameCorpse ? -2 : -3;
+        auto a = backend->SpawnArticulatedPiece(piece,left,3,first);
+        auto b = backend->SpawnArticulatedPiece(piece,right,3,second);
+        REQUIRE(a.IsValid()); REQUIRE(b.IsValid());
+        for (int step = 0; step < 30; ++step) backend->Step(1.0f/60);
+        BodyMotion ma, mb; REQUIRE(backend->GetBodyMotion(a,ma)); REQUIRE(backend->GetBodyMotion(b,mb));
+        if (sameCorpse) CHECK(std::abs(ma.position.X()-mb.position.X()) < .17f);
+        else CHECK((ma.position-mb.position).Size() > .28f);
+        REQUIRE(backend->SetArticulatedMotion(a,Vector3(2,.3f,-1),Vector3(.1f,.2f,.3f)));
+        REQUIRE(backend->GetBodyMotion(a,ma));
+        CHECK((ma.linearVelocity-Vector3(2,.3f,-1)).Size() < .00001f);
+        CHECK((ma.angularVelocity-Vector3(.1f,.2f,.3f)).Size() < .00001f);
+        auto staticBody = backend->AddStaticBody(&piece,1,left);
+        CHECK_FALSE(backend->SetArticulatedMotion(staticBody,VZero,VZero));
+        backend->RemoveBody(a); CHECK_FALSE(backend->SetArticulatedMotion(a,VZero,VZero));
+        first.linear = Vector3(1.7f,.4f,-.6f); first.angular = Vector3(.2f,-.1f,.3f);
+        a = backend->SpawnArticulatedPiece(piece,left,3,first); REQUIRE(a.IsValid());
+        REQUIRE(backend->GetBodyMotion(a,ma));
+        CHECK((ma.linearVelocity-first.linear).Size() < .00001f);
+        CHECK((ma.angularVelocity-first.angular).Size() < .00001f);
+        first.angular[0] = std::numeric_limits<float>::quiet_NaN();
+        CHECK_FALSE(backend->SpawnArticulatedPiece(piece,left,3,first).IsValid());
+        backend->RemoveBody(a); backend->RemoveBody(b); backend->RemoveBody(staticBody);
+        CHECK(backend->GetStats().articulatedBodies == 0);
+    }
+}
+
 TEST_CASE("Articulated Box3D parts constrain real motion and survive probe and stale joint cleanup", "[physics][articulation]")
 {
     auto backend = CreatePhysicsBackend(); REQUIRE(backend); REQUIRE(backend->Create());
