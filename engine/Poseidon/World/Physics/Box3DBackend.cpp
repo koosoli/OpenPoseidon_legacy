@@ -897,6 +897,12 @@ public:
         if (!slot) return {};
         const b3BodyId body = slot->body;
         b3Body_SetAngularVelocity(body,ToB3(motion.angular));
+        // Passive joint/tissue energy loss belongs only to articulated limbs.
+        // The upstream default is zero damping. Rotating contact/limit loops
+        // otherwise persist after the supported torso stops. Preserve initial
+        // velocities and immediate impact momentum; no linear damping is added,
+        // so blast translation and gravity retain their ballistic trajectory.
+        b3Body_SetAngularDamping(body,1.0f);
         // A corpse is not a probe: no probe clear, wind or water controller owns
         // it. Only this bounded corpse's owner destroys these articulated bodies.
         _probes.erase(std::remove_if(_probes.begin(), _probes.end(), [&](const Probe& probe)

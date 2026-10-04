@@ -1683,23 +1683,28 @@ bool Man::CaptureCorrectedCorpsePose(RString& refusal)
     AffinePhasePose primary, secondary;
     AnimationRT* pri = Type()->GetAnimation(_primaryMove.id);
     AnimationRT* sec = Type()->GetAnimation(_secondaryMove.id);
-    if (!std::isfinite(_primaryFactor) || _primaryFactor < 0 || _primaryFactor > 1 ||
-        (_primaryFactor > .01f && (!pri || !pri->CapturePhasePose(primary,_primaryTime))) ||
-        (_primaryFactor < .99f && (!sec || !sec->CapturePhasePose(secondary,_secondaryTime)))) return false;
+    if (!std::isfinite(_primaryFactor) || _primaryFactor < 0 || _primaryFactor > 1)
+    { refusal="finite-live-animation-factor-required"; return false; }
+    if (_primaryFactor > .01f && (!pri || !pri->CapturePhasePose(primary,_primaryTime)))
+    { refusal="actual-live-primary-phase-required"; return false; }
+    if (_primaryFactor < .99f && (!sec || !sec->CapturePhasePose(secondary,_secondaryTime)))
+    { refusal="actual-live-secondary-phase-required"; return false; }
     auto pose = std::make_unique<CorrectedCorpsePose>();
     pose->capturedRoot = pose->root = Transform();
     pose->initialSpeed = Speed(); pose->initialAngularVelocity = AngVelocity();
-    if (!pose->initialSpeed.IsFinite() || !pose->initialAngularVelocity.IsFinite()) return false;
+    if (!pose->initialSpeed.IsFinite() || !pose->initialAngularVelocity.IsFinite())
+    { refusal="finite-live-inherited-motion-required"; return false; }
     const auto& weights = Type()->GetWeights();
     for (int level = 0; level < _shape->NLevels(); ++level)
     {
         Shape* shape = _shape->Level(level);
-        if (!shape || shape->NPos() <= 0 || shape->NPos() > CorrectedCorpsePose::MaximumPoints) return false;
+        if (!shape || shape->NPos() <= 0 || shape->NPos() > CorrectedCorpsePose::MaximumPoints)
+        { refusal="bounded-live-lod-points-required"; return false; }
         CorrectedCorpseLevel captured;
         MATRIX_4_ARRAY(palette,128);
         PrepareCorrectedPose(level,palette);
         _head.EvaluateDeadFaceBones(Type()->_head,weights,level,palette,true);
-        if (palette.Size() != 33) return false;
+        if (palette.Size() != 33) { refusal="complete-live-corrected-palette-required"; return false; }
         for (int bone = 0; bone < palette.Size(); ++bone) captured.authoredPalette.push_back(palette[bone]);
         for (int point = 0; point < shape->NPos(); ++point)
         {
@@ -1709,7 +1714,13 @@ bool Man::CaptureCorrectedCorpsePose(RString& refusal)
             { binding.bones.push_back(weight[w].GetSel()); binding.weights.push_back(weight[w].GetWeight()); }
             const bool supports = (!primary.Valid() || primary.SupportsPoint(weight)) &&
                 (!secondary.Valid() || secondary.SupportsPoint(weight));
-            if (!supports && (level == _shape->FindMemoryLevel() || shape->NPos() == 1)) return false;
+            if (!supports && (level == _shape->FindMemoryLevel() || shape->NPos() == 1))
+            {
+                refusal="actual-phase-bone-required-for-memory-point";
+                LOG_INFO(World,"AUTORAGDOLL: live point capture refused model={} level={} point={} memory={} primaryMatrices={} secondaryMatrices={} weightCount={} firstBone={}",
+                    _shape->Name(),level,point,level==_shape->FindMemoryLevel(),primary.PhaseMatrices(),secondary.PhaseMatrices(),weight.Size(),weight.Size()?weight[0].GetSel():-1);
+                return false;
+            }
             // Reserved facial tails are palette-only in the authored path.
             captured.authoredPoints.push_back(supports ? AnimatePoint(level,point) :
                 AnimationRT::ApplyMatricesPoint(weights[level],_shape,level,palette,point));
@@ -1723,7 +1734,13 @@ bool Man::CaptureCorrectedCorpsePose(RString& refusal)
             const auto& weight = GetProxyWeights(level,proxy);
             if (weight.Size() <= 0) continue;
             // Stock equipment helpers must be rigidly attached to one bone.
-            if (weight.Size() != 1 || weight[0].GetWeight() != 1) return false;
+            if (weight.Size() != 1 || weight[0].GetWeight() != 1)
+            {
+                refusal="exclusive-live-equipment-proxy-bone-required";
+                LOG_INFO(World,"AUTORAGDOLL: live proxy capture refused model={} level={} proxy={} selection={} weightCount={} firstBone={} firstWeight={}",
+                    _shape->Name(),level,p,shape->NamedSel(proxy.selection).Name(),weight.Size(),weight.Size()?weight[0].GetSel():-1,weight.Size()?weight[0].GetWeight():0);
+                return false;
+            }
             captured.proxySelections.push_back(proxy.selection); captured.proxyBones.push_back(weight[0].GetSel());
             captured.authoredProxies.push_back(AnimateProxyMatrix(level,proxy));
         }

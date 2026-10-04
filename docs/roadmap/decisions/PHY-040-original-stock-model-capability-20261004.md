@@ -59,3 +59,26 @@ The existing impact safety policy may restore an excessive local impulse trial
 and distribute the bounded aggregate impulse across the rig. A verified native
 hit, actual pose change and safe resettlement establish a reaction; a local-only
 transfer is not a requirement. The 20 rad/s solver guard is unchanged.
+
+## Articulated energy dissipation and capture diagnosis
+
+The first installed 37-model campaign did not qualify all models. GeneralE
+and Civilian8 retained real head/arm angular motion of roughly 2–6 rad/s after
+60 simulation seconds, above both the quiet retirement and final freeze gates.
+The 2026-10-04 settlement candidate applies Box3D angular damping of 1.0 per
+second only when creating articulated pieces. The pinned upstream body default
+is zero. Initial angular/linear velocity and immediate impulse response are
+unchanged, and no linear damping is added. Ordinary dynamic pieces retain their
+previous behavior. Ground support, 20 rad/s safety and retirement predicates
+remain unchanged; installed resettlement must establish the correction.
+
+An actual changed-backend native control passes 28 assertions: identical
+initial motion, preserved immediate center impulse, angular decay, ordinary
+undamped control and matching translation/gravity over two seconds. Capability
+controls still pass 1,556 assertions in three cases. Source syntax checks pass.
+These are source/native evidence, not installed model qualification.
+
+Women passed the detailed initial transform gate but failed a later capture
+stage. The candidate identifies each later phase, point/palette, Memory weight
+or proxy-weight refusal with actual model/LOD/index/count witnesses. No asset
+or consumer gate is weakened pending that installed diagnosis.

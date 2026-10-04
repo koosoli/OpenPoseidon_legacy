@@ -10,6 +10,48 @@
 using namespace Poseidon::Physics;
 using namespace Poseidon;
 
+TEST_CASE("Passive articulated angular damping preserves handoff momentum and ballistic gravity", "[physics][articulation][corpse-damping]")
+{
+    auto backend=CreatePhysicsBackend(); REQUIRE(backend); REQUIRE(backend->Create());
+    const Vector3 vertices[]={{-.2f,-.2f,-.2f},{.2f,-.2f,-.2f},{-.2f,.2f,-.2f},{.2f,.2f,-.2f},
+        {-.2f,-.2f,.2f},{.2f,-.2f,.2f},{-.2f,.2f,.2f},{.2f,.2f,.2f}};
+    ConvexPiece piece{vertices,8,ColliderFlags::Solid};
+    Matrix4 initial=MIdentity; initial.SetPosition(Vector3(0,100,0));
+    ArticulatedInitialMotion inherited; inherited.linear=Vector3(2,3,0); inherited.angular=Vector3(0,4,0); inherited.collisionFamily=-2;
+    auto limb=backend->SpawnArticulatedPiece(piece,initial,4,inherited); REQUIRE(limb.IsValid());
+    Matrix4 controlFrame=initial; controlFrame.SetPosition(Vector3(4,100,0));
+    auto control=backend->SpawnDynamicPieces(&piece,1,controlFrame,4,.65f,0,inherited.linear); REQUIRE(control.IsValid());
+    // Equal and opposite actual impulses form a pure couple: same initial spin
+    // without changing the ordinary dynamic body's linear momentum.
+    const float impulse=(4.f*(.4f*.4f+.4f*.4f)/12.f)*4.f/.4f;
+    backend->ApplyImpulse(control,controlFrame.Position()+Vector3(.2f,0,0),Vector3(0,0,-impulse));
+    backend->ApplyImpulse(control,controlFrame.Position()-Vector3(.2f,0,0),Vector3(0,0,impulse));
+    BodyMotion a,b; REQUIRE(backend->GetBodyMotion(limb,a)); REQUIRE(backend->GetBodyMotion(control,b));
+    CHECK((a.position-initial.Position()).Size()<.00001f);
+    CHECK(a.axisX==initial.DirectionAside()); CHECK(a.axisY==initial.DirectionUp()); CHECK(a.axisZ==initial.Direction());
+    CHECK((a.linearVelocity-inherited.linear).Size()<.00001f);
+    CHECK((a.angularVelocity-inherited.angular).Size()<.00001f);
+    CHECK((b.linearVelocity-a.linearVelocity).Size()<.00001f);
+    REQUIRE((b.angularVelocity-a.angularVelocity).Size()<.005f);
+    // Momentum transfer is immediate; damping acts only during solver steps.
+    backend->ApplyImpulse(limb,a.position,Vector3(4,0,0));
+    backend->ApplyImpulse(control,b.position,Vector3(4,0,0));
+    REQUIRE(backend->GetBodyMotion(limb,a)); REQUIRE(backend->GetBodyMotion(control,b));
+    CHECK(std::abs(a.linearVelocity.X()-3)<.0001f);
+    CHECK((a.angularVelocity-inherited.angular).Size()<.00001f);
+    for (int step=0;step<120;++step) backend->Step(1.f/60);
+    REQUIRE(backend->GetBodyMotion(limb,a)); REQUIRE(backend->GetBodyMotion(control,b));
+    CHECK(a.angularVelocity.Size()<.6f);
+    CHECK(b.angularVelocity.Size()>3.9f); // ordinary body damping is unchanged
+    CHECK((a.linearVelocity-b.linearVelocity).Size()<.002f);
+    CHECK(std::abs(a.position.Y()-b.position.Y())<.005f);
+    CHECK(a.position.Y()<90); CHECK(a.linearVelocity.Y()<-10); // genuine free fall
+    CHECK(std::abs((a.position.X()-initial.Position().X())-(b.position.X()-controlFrame.Position().X()))<.005f);
+    backend->RemoveBody(limb); backend->RemoveBody(control);
+    CHECK(backend->GetStats().articulatedBodies==0);
+    backend->Destroy();
+}
+
 TEST_CASE("Automatic blast travel keeps falling past twelve metres and retirement requires actual ground support", "[physics][articulation][corpse-airborne]")
 {
     CHECK_FALSE(CorpseAutomaticRetirementAdmitted(false,true,5,20));
