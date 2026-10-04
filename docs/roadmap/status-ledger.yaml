@@ -5,6 +5,18 @@ execution:
   baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
   integration_owner: Oliver Kay
   activation_state: ACTIVE
+  kolgujev_fog_grass_followup_checkpoint:
+    state: SOURCE_GPU_CHECKS_PASSED_INSTALLED_CHECK_PENDING
+    evidence: docs/verification/fog-grass-followup-20261005.md
+    note: >-
+      Kolgujev rectangular fog boundary reproduced on installed 626c7c6f.
+      Foreground ray transport decoupled from endpoint weather coverage; current
+      far source admitted during near rebuild, smoother participant sampling and
+      300m default coverage feather. Fog GPU tests 15 passed; grass tests 35
+      passed. Grass coverage default 0.5, master maximum 2, mid maximum 4,
+      bounded finer placement and subdued approximately 333m colour fields.
+      Everon reported floating house remains unidentified; four actual candidate
+      foundations correctly supported, no blanket owner-position change made.
   fog_reset_checkpoint:
     state: INSTALLED_FOG_AND_GENERAL_RESET_UI_CLICKS_PASSED
     installed_source_commit: 626c7c6f

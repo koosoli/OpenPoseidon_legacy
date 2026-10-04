@@ -1297,9 +1297,9 @@ class Engine : public IGraphicsEngine
     struct GrassSettings
     {
         bool enabled = true;
-        // Ultra dense is the production default.  The outer GPU LOD keeps the
-        // default 60 m field affordable while the inner cards remain detailed.
-        float density = 1.0f;
+        // Half the candidate field by default. Values above one add candidates
+        // on a finer placement grid rather than saturating a probability.
+        float density = 0.5f;
         float spacing = 0.10f;
         // Detail radius: dense near clumps only. Mid reach is independent so a
         // bad far proxy never forces the detailed grass to stop too close.
@@ -1338,14 +1338,13 @@ class Engine : public IGraphicsEngine
         float bladeWidth = 0.35f;
         // Albedo saturation about luma. 1.0 = untouched; lower desaturates the
         // whole field. Brightness is preserved, so this only pulls colour out.
-        // 0.78 is the authored default -- the raw palette reads too vivid
-        // against CWA's muted terrain.
-        float saturation = 1.02f;
+        // Muted green with a little brown, matching CWA's subdued terrain.
+        float saturation = 0.72f;
         // Sun-bleached patches: fraction of the field that dries toward straw, and
         // the patch size (noise frequency, 1/metres). Its own noise field, so dry
         // ground does not line up with thin ground.
-        float dryPatches = 0.52f;
-        float dryPatchScale = 0.006f;
+        float dryPatches = 0.08f;
+        float dryPatchScale = 0.003f;
         float weedPercent = 0.37f;
         float flowerPercent = 0.08f;
         // Blade silhouette variety. The four grass species shared ONE profile,
@@ -1477,7 +1476,7 @@ class Engine : public IGraphicsEngine
         float bladeContrast = 1.30f;
         // Per-patch hue drift (warm straw <-> cool blue-green) on top of the
         // luminance-only colourVariation. 0 = none.
-        float bladeHueVariation = 0.15f;
+        float bladeHueVariation = 0.025f;
         // Root-to-tip darkening. 0.70 = the long-standing mix(0.30, 1.0, t*t).
         float bladeRootShade = 0.78f;
         // CATCH-ALL WORLDS: a world whose terrain arrives as ONE material (a
@@ -1518,8 +1517,7 @@ class Engine : public IGraphicsEngine
         // and they are placed every 0.16 m, so near coverage is the single most
         // effective performance control on that path.
         float nearDensity = 1.0f;
-        // 0.95 was the shader's former hardcoded mid coverage; keeping it as the
-        // default means exposing this control changes nothing on its own.
+        // Up to 4x: below one thins candidates, above one refines their grid.
         float midDensity = 0.95f;
         float farDensity = 1.0f;
         // Albedo tints, applied after the existing colour work and before
@@ -1600,11 +1598,9 @@ class Engine : public IGraphicsEngine
         // Reference-style field variation. These affect deterministic GPU
         // hashes, so they do not make blades swim when the camera moves.
         float clumping = 0.35f;
-        // Raised 0.35 -> 0.50 with the blade-definition pass: per-blade tone
-        // spread is what breaks the uniform wash (each blade +-11% about its
-        // neighbours instead of +-7%). The "Colour variation" slider still
-        // covers 0..1.
-        float colorVariation = 0.50f;
+        // Subtle per-blade tone spread; preserve a coherent meadow palette.
+        // The "Colour variation" slider still covers 0..1.
+        float colorVariation = 0.12f;
         float transmission = 0.10f;
         // These are deliberately grass-only controls: terrain and other
         // world geometry retain the renderer's regular shadow/fog settings.
@@ -2111,7 +2107,7 @@ class Engine : public IGraphicsEngine
         float fogPatchStrength = 0.45f;
         float fogPatchHorizontalScale = 250.0f;
         float fogPatchVerticalScale = 70.0f;
-        float fogCoverageFeather = 30.0f;
+        float fogCoverageFeather = 300.0f;
         float fogFalloff = 3.0f;                             // aerial fog distance-ramp exponent (pow(dist/drawDist, k)). High = clear near/mid, fog only at the edge; low (~1) = dense fog throughout, which reveals the volumetric terrain shadowing / god rays. Pushed via camera fog_color.w
 
         // Authored night-sky floor: a deep-blue radiance blended in by sun elevation so

@@ -1210,7 +1210,7 @@ struct WgrGrassDownwash
 /* Live procedural-grass controls, edited through the developer Grass tab. */
 struct WgrGrassParams
 {
-    float density;  /* retained candidate fraction, 0..1 */
+    float density;  /* 0..1 retained fraction; 1..2 adds near/mid candidates */
     float spacing;  /* grid spacing in metres */
     float near_radius; /* dense-placement radius in metres */
     float enabled;  /* 0 = disabled, nonzero = enabled */

@@ -3659,18 +3659,18 @@ void DrawGrassTab()
     Dev::PanelHelp("Relaxes only the FOREST flags, which some legacy Everon WRPs set across ordinary ground. "
                    "Water, roads, tracks and buildings stay excluded either way -- there is no setting that "
                    "puts grass on a road.");
-    changed |= Dev::SliderFloat("Coverage", &grass.density, 0.05f, 1.0f, "%.2f");
-    Dev::PanelHelp("Retained fraction of procedural candidate blades, applied to every LOD. 1.00 uses every "
-                   "candidate.");
+    changed |= Dev::SliderFloat("Coverage", &grass.density, 0.05f, 2.0f, "%.2f");
+    Dev::PanelHelp("Default 0.50. Up to 1.00 retains more candidates; above 1.00 adds candidates on a finer "
+                   "near/mid grid. Extra density increases GPU cost.");
     changed |= Dev::SliderFloat("Coverage: near", &grass.nearDensity, 0.02f, 1.0f, "%.2f");
     Dev::PanelHelp("Multiplies the master coverage for the near ring only. Procedural blades: the near clump "
                    "count. Photo cards: a plain multiplier on top of the card coverage below (cards place on "
                    "their own 1.11 m clutter grid now, not the 0.16 m blade grid, so this is no longer the "
                    "overdraw lever it was).");
-    changed |= Dev::SliderFloat("Coverage: mid", &grass.midDensity, 0.02f, 1.0f, "%.2f");
+    changed |= Dev::SliderFloat("Coverage: mid", &grass.midDensity, 0.02f, 4.0f, "%.2f");
     changed |= Dev::SliderFloat("Coverage: far", &grass.farDensity, 0.02f, 1.0f, "%.2f");
-    Dev::PanelHelp("0.95 was the mid ring's former built-in coverage, so these defaults change nothing on "
-                   "their own -- they exist to rebalance the rings against each other.");
+    Dev::PanelHelp("Mid coverage above 1.00 adds candidates on a finer grid, up to 4x. Below 1.00 thins "
+                   "the mid ring. Far coverage controls the terrain proxy's retained cells.");
     changed |= Dev::SliderFloat("Density boost", &grass.densityBoost, 1.0f, 64.0f, "%.1fx");
     Dev::PanelHelp("Divides the base spacing by its square root, so this is the coverage multiplier: 4x is the "
                    "old ceiling, 64x is eight times finer placement again. Cost scales with it -- watch the "
@@ -3718,7 +3718,7 @@ void DrawGrassTab()
                    "before roots, and it uses its own noise field so dry ground does not line up with "
                    "thin ground.");
     changed |= Dev::SliderFloat("Dry patch size", &grass.dryPatchScale, 0.002f, 0.3f, "%.3f");
-    Dev::PanelHelp("Noise frequency in 1/metres: default 0.006 gives ~167 m patches with broad fades; higher values break the field "
+    Dev::PanelHelp("Noise frequency in 1/metres: default 0.003 gives ~333 m patches with broad fades; higher values break the field "
                    "into smaller dry spots.");
     changed |= Dev::SliderFloat("Blade width", &grass.bladeWidth, 0.25f, 6.0f, "%.2fx");
     Dev::PanelHelp("1.00 = the long-standing look. The near-LOD blade texture only becomes visible above "
@@ -4001,8 +4001,10 @@ void DrawGrassTab()
         // so it ends in its own dissolve rather than a camera-locked square.
         {
             const float midWanted = std::clamp(grass.midRadius, 8.0f, 1000.0f);
-            const int cells = std::min(static_cast<int>(std::ceil(2.0f * midWanted / g) + 7) / 8 * 8, 2440);
-            const float reach = std::max(cells * 0.5f - 1.0f, 1.0f) * g;
+            const float midGrid = g / std::sqrt(std::clamp(grass.density, 1.0f, 2.0f) *
+                                               std::clamp(grass.midDensity, 1.0f, 4.0f));
+            const int cells = std::min(static_cast<int>(std::ceil(2.0f * midWanted / midGrid) + 7) / 8 * 8, 2440);
+            const float reach = std::max(cells * 0.5f - 1.0f, 1.0f) * midGrid;
             if (reach < midWanted - 0.5f)
             {
                 ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.35f, 1.0f),

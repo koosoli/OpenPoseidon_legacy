@@ -108,9 +108,11 @@ fn fog_legacy_closure(scene: vec3<f32>, airlight: vec3<f32>, amount: f32,
 }
 // Rain access at a wall, rock or canopy is not access to intervening air.
 // Roof/native exclusion belongs to the encoded ray, not its opaque endpoint.
-// Unknown coverage and explicitly excluded cockpit/interior consumers stay closed.
+// The receiver may lie beyond the weather-map rectangle while its camera ray
+// traverses certified air. Endpoint coverage cannot erase that transport.
+// Explicitly excluded cockpit/interior consumers still stay closed.
 fn fog_surface_open(coverage: f32, receiver: bool) -> bool {
-    return coverage >= 0.5 && receiver;
+    return receiver;
 }
 
 // Shared packet layout. Camera matching prevents a cockpit/reflection camera from

@@ -5,13 +5,15 @@ param(
  [ValidateRange(4000,10000)][int]$InitialViewDistance=8000,
  [ValidateRange(1,5)][int]$SettleSeconds=2,
  [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='everon-house-owner',
+ [ValidateCount(5,5)][double[]]$ReportedPose=@(5805.63,3597.97,46.35,147.8,6.3),
+ [ValidateCount(1,24)][int[]]$CandidateIds=@(6034,6035,6036,6037,6042,6043,6044,6045,6047,7710,31997,25191),
+ [ValidateCount(1,4)][int[]]$FarCandidateIds=@(6034,6042,6047,7710),
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [switch]$SourceOnly,[switch]$SelfTest
 )
 $ErrorActionPreference='Stop';$root=Split-Path -Parent $PSScriptRoot
 $culture=[Globalization.CultureInfo]::InvariantCulture
-$reported=@(5805.63,3597.97,46.35,147.8,6.3)
-$candidateIds=@(6034,6035,6036,6037,6042,6043,6044,6045,6047,7710,31997,25191)
+$reported=@($ReportedPose)
 function Require([bool]$ok,[string]$message){if(!$ok){throw $message}}
 function Number($value){Require ($null-ne$value) 'Missing number.';$n=[double]::Parse([string]$value,[Globalization.NumberStyles]::Float,$culture);Require ([double]::IsFinite($n)) 'Nonfinite number.';return $n}
 function Model-Key([string]$value){$value.Replace('\','/').ToLowerInvariant()}
@@ -90,6 +92,10 @@ if($SelfTest){
  Write-Output 'Everon camera/source/frame falsifiers PASS; no game, profile, GPU or compiler.';return
 }
 Require ([bool]$ExpectedCommit) 'Supply installed -ExpectedCommit.'
+foreach($value in $reported){$null=Number $value}
+Require (($CandidateIds | Select-Object -Unique).Count-eq$CandidateIds.Count-and($CandidateIds | Measure-Object -Minimum).Minimum-ge0) 'Candidate IDs must be unique and nonnegative.'
+Require (($FarCandidateIds | Select-Object -Unique).Count-eq$FarCandidateIds.Count) 'Far candidate IDs must be unique.'
+foreach($id in $FarCandidateIds){Require ($id-in$CandidateIds) 'Every far candidate must belong to the source census.'}
 if(!$SourceOnly){Require ([bool]$env:LOCK_OWNER) 'Invoke with scripts/with-game-lock.sh.';Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue)) 'Preserve existing game owner.'}
 $before=Pair
 $output=Join-Path $root ('build/everon-placement/'+$Label+'-'+(Get-Date -Format yyyyMMdd-HHmmss)+'-'+[guid]::NewGuid().ToString('N').Substring(0,6));New-Item -ItemType Directory -Force $output|Out-Null
@@ -100,7 +106,7 @@ $python=@'
 import hashlib, importlib.util, json, math, sys, struct
 from pathlib import Path
 sys.dont_write_bytecode=True
-repo,game,out=map(Path,sys.argv[1:])
+repo,game,out=map(Path,sys.argv[1:4])
 spec=importlib.util.spec_from_file_location('stock',repo/'scripts/physics/inspect_stock_corpse_rig.py')
 stock=importlib.util.module_from_spec(spec);spec.loader.exec_module(stock)
 import numpy as np
@@ -128,7 +134,8 @@ def height(x,z):
     a,b,c,d=grid[iz,ix],grid[iz,ix+1],grid[iz+1,ix],grid[iz+1,ix+1]
     return float(a+u*(b-a)+v*(c-a) if u+v<=1 else d+(1-u)*(c-d)+(1-v)*(b-d))
 archive=game/'Dta/Data3D.pbo';index,_=stock.archive_index(archive);models={};rows=[];fixtures=[]
-ids=[6034,6035,6036,6037,6042,6043,6044,6045,6047,7710,31997,25191]
+ids=[int(v) for v in sys.argv[4].split(',')]
+if not 1<=len(ids)<=24 or len(set(ids))!=len(ids) or min(ids)<0:raise ValueError('invalid bounded candidate IDs')
 for ident in ids:
     matches=[v for v in placements if v[0]==ident]
     if len(matches)!=1:raise ValueError('candidate original ID is ambiguous')
@@ -157,7 +164,7 @@ out.write_text(json.dumps({'wrpSha256':expected,'originalObjectCount':56740,'ori
 
 '@
 [IO.File]::WriteAllText($sourcePy,$python,[Text.UTF8Encoding]::new($false))
-& python $sourcePy $root $GameDir (Join-Path $output 'stock-foundation.json')
+& python $sourcePy $root $GameDir (Join-Path $output 'stock-foundation.json') ($CandidateIds -join ',')
 if($LASTEXITCODE-ne0){$result.status='failed-source';$result.error='Actual stock foundation source audit failed.';$result|ConvertTo-Json -Depth 18|Set-Content (Join-Path $output 'result.json');throw $result.error}
 $result.stockSource=Get-Content (Join-Path $output 'stock-foundation.json') -Raw|ConvertFrom-Json
 $fixtures=@($result.stockSource.objects);Require ($fixtures.Count-eq$candidateIds.Count) 'Complete candidate census absent.'
@@ -220,11 +227,11 @@ try{
   $eyeX=$owner.x-60.0;$eyeZ=$owner.z;$ground=Send @{cmd='dev_mud';action='sample';x=$eyeX;z=$eyeZ};$nearEye=@($eyeX,((Number $ground.surfaceY)+4.0),$eyeZ)
   Capture ('owner'+$fixture.id+'-near-native-foundation') (Decode ('['+((Aim $nearEye $target)-replace' ', ',')+']'))
   $top=@($owner.x,($fixture.visualTopY+($owner.y-$fixture.coarsePredictedPosition[1])),$owner.z)
-  if($fixture.id-in@(6034,6042,6047,7710)){
+  if($fixture.id-in$FarCandidateIds){
    $ray=@();for($step=1;$step-le24;$step++){$t=$step/25.0;$px=$reported[0]+$t*($top[0]-$reported[0]);$pz=$reported[1]+$t*($top[2]-$reported[1]);$py=$reported[2]+$t*($top[1]-$reported[2]);$sample=Send @{cmd='dev_mud';action='sample';x=$px;z=$pz};$ray+=@{fraction=$t;world=@($px,$py,$pz);actualGround=$sample;terrainAboveSample=(Number $sample.surfaceY)-$py}}
    $result.foundation[-1].sampledNativeSightline=@{samples=$ray;maximumTerrainOverLine=($ray.terrainAboveSample|Measure-Object -Maximum).Maximum;scope='24 actual native SurfaceY samples along camera-to-predicted-roof line. Not a continuous terrain intersection, object occlusion test, raster height or selected pixel proof.'}
   }
-  if($fixture.id-in@(6034,6042,6047,7710)){Capture ('owner'+$fixture.id+'-targeted-far') (Decode ('['+((Aim @($reported[0],$reported[2],$reported[1]) $top)-replace' ', ',')+']'))}
+  if($fixture.id-in$FarCandidateIds){Capture ('owner'+$fixture.id+'-targeted-far') (Decode ('['+((Aim @($reported[0],$reported[2],$reported[1]) $top)-replace' ', ',')+']'))}
  }
  Capture 'reported-8000-return' $reported
  $result.finalGeometry=@(foreach($fixture in $fixtures){$g=Send @{cmd='diag_geometry';unit=('object '+$fixture.id);draw=$false};Require ((Model-Key $g.lod.name)-ceq(Model-Key $fixture.model)) 'Final geometry source differs.';@{id=$fixture.id;geometry=$g}})

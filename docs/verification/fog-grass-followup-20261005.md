@@ -1,0 +1,13 @@
+# Kolgujev fog and OFP meadow follow-up
+
+Original Kolgujev's rectangular foreground-fog boundary was reproduced in the installed `626c7c6f` build with a real freefly camera. An opaque receiver beyond the weather-map rectangle discarded the fog already accumulated in front of it. Receivers now retain that camera-ray transport; actual roof/native exclusion still belongs to the volume and cockpit/interior consumers remain excluded.
+
+Current far weather depth can replace a rebuilding near source. Stale/unready sources and retained overflow remain excluded. View-ray integration uses four bounded subdivisions and each analytic participant's actual coverage, rather than dropping a whole interval when one endpoint crosses the coverage/ground boundary. Coverage softness defaults to 300m and is adjustable to 2000m. The separate incoming solar field is unchanged.
+
+OFP procedural grass has a common muted green/brown palette, retaining texture fibres. Weak hue, brightness and dry variation fade over approximately 333m. Native authored clutter colours are preserved. Default master coverage is 0.5; master can reach 2 and mid coverage 4. Above-one values refine CPU/WGSL candidate spacing consistently, while existing dispatch/instance caps and surface exclusions remain.
+
+Source validation: all 15 layered-fog tests and all 35 grass tests pass, including actual GPU transport, translated coverage-edge integration, current-far fallback, roof/native/overflow refusals, local-light/night transport, real 1x/4x grass pipelines and above-one placement grids. Grass test devices now request the production sampled-texture limit needed by existing shared fog resources.
+
+Installed build/runtime verification is pending. Private baseline captures: `build/fog-flight/edge-baseline-20261005-000419`; earlier default-profile flight: `build/fog-flight/baseline-20261004-235335`. `scripts/Test-FogFlight.ps1` records actual moving freefly cameras on original Kolgujev, not merely a detached render view.
+
+Everon house report at `[5354.13,3310.21,62.21]`, az8.5/el-0.7 remains **unresolved**. The exact reported view and four nearby/targeted candidate views were captured; no confidently identifiable floating house was found. Actual foundations of owners20764,20763,20767 and31504 extend 1.0–1.96m into native ground. Owner elevations match source corrections within1.5µm and fine native/source height at sampled foundations within3.91µm. No generic snapping change is justified from those observations. The placement runner now accepts a reported camera and bounded candidate IDs for further identification. Private receipt: `build/everon-placement/everon-new-house-20261004-234542-8a2816`.

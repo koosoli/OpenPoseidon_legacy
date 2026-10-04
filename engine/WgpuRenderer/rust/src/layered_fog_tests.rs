@@ -202,7 +202,7 @@ fn actual_fog_receivers_gpu_keep_intervening_air_without_changing_alpha() {
  assert!(samples.iter().all(|v|v.is_finite()));
  assert_eq!(&samples[0..4],&samples[4..8],"Plant canopy shelter must not split foreground fog");
  assert_eq!(&samples[8..12],&samples[0..4],"Opaque wall/rock endpoint cannot erase admitted foreground mist");
- assert_eq!(&samples[12..16],&[0.,0.,1.,0.]);assert_eq!(&samples[16..20],&[1.,1.,0.,0.]);
+ assert_eq!(&samples[12..16],&[1.,1.,1.,0.]);assert_eq!(&samples[16..20],&[1.,1.,0.,0.]);
  assert_eq!(samples[23],0.);assert_eq!(samples[27],0.35);assert_eq!(samples[31],1.);
  for row in samples[20..32].chunks_exact(4){assert_eq!(&row[..3],&samples[4..7]);}
  assert_eq!(&samples[32..36],&samples[8..12],"Same outdoor path has identical transport at rain-sheltered opaque endpoints");
@@ -290,6 +290,25 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
   assert!((row[3]-(-0.01*distance).exp()).abs()<0.0007,"actual Beer-Lambert z={z}: {row:?}");
   assert!(row[3]<=previous);previous=row[3];assert_eq!(&row[..3],&[0.;3]);
  }
+ // A current far map can replace a rebuilding near source without a whole
+ // frame losing its fog. It still obeys the actual depth and overflow guards.
+ let mut far_only=cover(1.,100);far_only.controls[0][0]=0.;
+ run(&mut fog,&camera,&settings,1.,far_only,1,true);assert!(fog.ready);
+ assert_eq!(read(),positive,"Current far coverage must preserve admitted near air");
+ // Translate a real finite weather-map edge in one-metre increments. A broad
+ // smooth fade must survive ray-bin crossings instead of dropping full bins.
+ settings.patch[3]=50.;
+ let mut last_tau=0.;
+ for edge in 58..=64 {
+  let mut inputs=cover(1.,100);inputs.controls[0][0]=0.;
+  inputs.matrices[1][2][1]=-1./60.;inputs.matrices[1][3][1]=(edge as f32-60.)/60.;
+  run(&mut fog,&camera,&settings,1.,inputs,1,true);
+  let values=read();let tau=-values[127].ln();
+  assert!(tau.is_finite() && tau>0.30 && tau<0.41,"Finite-edge air integration: {edge}/{tau}");
+  if edge>58 {assert!(tau>=last_tau-0.001 && tau-last_tau<0.02,"Moving edge must not delete a ray bin: {last_tau}/{tau}");}
+  last_tau=tau;
+ }
+ settings.patch[3]=0.;
  // The night air medium remains even without a directional emitter. Actual
  // player-style reflector packets light participating fog, not an additive cone.
  let day_sun=camera.sun_diffuse;let day_direction=camera.sun_dir_world;
@@ -534,7 +553,7 @@ fn density_controls_refuse_invalid_enabled_scales_and_terrain_source_is_explicit
  let mut p=WgrLayeredFog::default();p.control[0]=1.;assert!(valid_settings(&p));
  p.terrain=[1.,0.,1.,150.];p.patch=[0.45,250.,70.,30.];assert!(valid_settings(&p));
  for(i,v)in [(0,-0.1),(0,1.1),(1,f32::NAN),(2,3.1),(3,0.)]{let mut q=p;q.terrain[i]=v;assert!(!valid_settings(&q));}
- for(i,v)in [(0,0.96),(1,0.),(2,0.),(3,101.),(3,f32::INFINITY)]{let mut q=p;q.patch[i]=v;assert!(!valid_settings(&q));}
+ for(i,v)in [(0,0.96),(1,0.),(2,0.),(3,2001.),(3,f32::INFINITY)]{let mut q=p;q.patch[i]=v;assert!(!valid_settings(&q));}
  p.terrain=[0.;4];p.patch=[0.;4];assert!(valid_settings(&p),"dormant scales preserve legacy packet");
  let terrain=include_str!("terrain/terrain.wgsl");let frame=include_str!("shaders/frame.wgsl");
  assert!(terrain.contains("rgb = apply_fog_terrain(rgb, in.world_pos)"));

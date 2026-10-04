@@ -61,7 +61,7 @@ pub fn valid_settings(p: &WgrLayeredFog) -> bool {
         && (p.terrain[2]==0.0 || (25.0..=1000.0).contains(&p.terrain[3]))
         && (0.0..=0.95).contains(&p.patch[0])
         && (p.patch[0]==0.0 || ((25.0..=2000.0).contains(&p.patch[1]) && (5.0..=1000.0).contains(&p.patch[2])))
-        && (0.0..=100.0).contains(&p.patch[3])
+        && (0.0..=2000.0).contains(&p.patch[3])
         && (0.0..=1.0).contains(&p.control[1]) && p.control[2].abs()<=0.95
         && p.layers.iter().all(|l| l[0]>=-1000.0 && l[1]<=10000.0 && l[1]>l[0]
             && l[2]>=0.001 && l[2]<=1000.0 && l[3]>=0.0 && l[3]<=0.05)
@@ -187,7 +187,7 @@ impl LayeredFog {
             && height.enabled>0.5 && height_generation>0
             && cloud_limit.iter().all(|v|v.is_finite()) && native_bounds.iter().all(|h|h.is_finite()) && native_bounds[0]<=native_bounds[1]
             && (below_clouds || settings.terrain[0]>0.0)
-            && cover.controls[0][0]>=0.5;
+            && (cover.controls[0][0]>=0.5 || cover.controls[1][0]>=0.5);
         if self.trace && (self.frames<=4 || self.frames%120==0) {
             eprintln!("[wgr] layered fog: frame={} requested={} encoded={} weather={:.6} far={:.3} heightGen={} nearReady={} farReady={} camera={:?} layers={:?} terrain={:?} patch={:?} cloud={:?}",
                 self.frames,requested(settings,weather,hdr,underground),eligible,weather,far,height_generation,

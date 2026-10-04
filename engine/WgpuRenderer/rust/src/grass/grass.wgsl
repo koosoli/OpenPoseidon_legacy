@@ -271,12 +271,15 @@ fn card_placement_spacing() -> f32 {
 // candidates land, the renderer decides how many cells exist.
 fn near_placement_spacing() -> f32 {
     let blade = grass.spacing * select(1.72, 3.20, grass.renderer.x > 0.5);
-    return select(blade, card_placement_spacing(), cards_on_near());
+    return select(blade, card_placement_spacing(), cards_on_near()) / sqrt(max(grass.density, 1.0));
 }
 
 // Must mirror `mid_placement_spacing` in grass/mod.rs.
 fn mid_placement_spacing() -> f32 {
-    return select(MID_PLACEMENT_SPACING, card_placement_spacing(), cards_on_mid());
+    // Above-one coverage is extra plants per square metre; thinning alone
+    // cannot represent it. CPU dispatch sizing uses this same refined spacing.
+    return select(MID_PLACEMENT_SPACING, card_placement_spacing(), cards_on_mid()) /
+        sqrt(max(grass.density, 1.0) * max(grass.lod_density.y, 1.0));
 }
 
 // Geography bits, mirroring GeographyInfo in engine/Poseidon/AI/Path/AITypes.hpp:
@@ -968,7 +971,7 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     let jitter = (hash_cell2(cell_id, 0x19a8b437u) - vec2<f32>(0.5)) * (near_spacing * 1.85);
     let world_xz = cell_world + jitter;
     let delta = world_xz - frame.cam_pos.xz;
-    let coverage = grass.density * clamp(grass.lod_density.x, 0.0, 1.0) * density_field(world_xz);
+    let coverage = min(grass.density, 1.0) * clamp(grass.lod_density.x, 0.0, 1.0) * density_field(world_xz);
     if (seed > coverage) { return; }
     // Dissolve out over the last `band` metres instead of stopping dead on the
     // near radius; cs_place_mid fades in across exactly the same band.
@@ -1046,7 +1049,7 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     let world_xz = cell_world + jitter;
     let delta = world_xz - frame.cam_pos.xz;
     let distance2 = dot(delta, delta);
-    let coverage = grass.density * clamp(grass.lod_density.y, 0.0, 1.0) * density_field(world_xz);
+    let coverage = min(grass.density, 1.0) * clamp(grass.lod_density.y, 0.0, 1.0) * density_field(world_xz);
     // The SAME cap cs_place applies. The two rings are complementary -- near
     // thins out across exactly the band mid thickens in across -- so if only one
     // of them clamped, a short near radius would leave the pair either
@@ -1629,11 +1632,11 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let view_dir = -in.world_rel / max(length(in.world_rel), 0.0001);
     let ramp_detail = grass_ramp_detail(shading_detail, height_detail, view_dir.y, GRASS_MEDIUM_LIGHTING);
     let world = in.world_rel + frame.cam_pos.xyz;
-    let base = vec3<f32>(0.055, 0.16, 0.025);
-    let tip = vec3<f32>(0.32, 0.43, 0.10);
+    let base = vec3<f32>(0.055, 0.095, 0.034);
+    let tip = vec3<f32>(0.18, 0.23, 0.10);
     // 0.70 root shade = the long-standing mix(0.30, 1.0, t*t).
     let root = mix(1.0 - blade_root_shade(), 1.0, in.height_t * in.height_t);
-    let field_tint = clump_noise(world.xz, 0.006, 0x5e3a91c7u);
+    let field_tint = clump_noise(world.xz, 0.003, 0x5e3a91c7u);
     let blade_tint = mix(in.seed, field_tint, 0.55);
     let variation = mix(1.0, mix(0.78, 1.20, blade_tint), grass.debug_flags.z);
     // A restrained, field-coherent highlight makes gusts readable without
@@ -1656,6 +1659,15 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     if (grass.native.x > 0.0) {
         blade_colour = native_blade_colour(blade.rgb,
             grass.blade_layer_means[min(u32(in.blade_uv.z), 7u)], shading_detail);
+    } else {
+        // The procedural atlas has several green, yellow and brown species.
+        // Keep their fibres and luminance relief, but give the OFP meadow one
+        // restrained palette rather than small contrasting colour islands.
+        let luma_weights = vec3<f32>(0.2126, 0.7152, 0.0722);
+        let layer_mean = grass.blade_layer_means[min(u32(in.blade_uv.z), 7u)];
+        let mean_luma = select(0.17, dot(layer_mean.rgb, luma_weights), layer_mean.w > 0.0);
+        let texture_relief = clamp(dot(blade.rgb, luma_weights) / max(mean_luma, 0.02), 0.75, 1.25);
+        blade_colour = mix(base, tip, in.height_t) * texture_relief;
     }
     // Alpha cut-out cards: the silhouette comes from the texture, not the quad,
     // which is what buys shape variety without more geometry. It costs the early-Z
@@ -1684,7 +1696,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let texture_amount = in.blade_uv.w * clamp(grass.shape_mix.w, 0.0, 1.0);
     var dry_colour = dry_patch(mix(procedural, textured, texture_amount), world.xz, in.height_t);
     if (ramp_detail < 1.0 && grass.native.x <= 0.0) {
-        // Seed tint is constant per blade, and field tint fades across roughly 167 metres; keep
+        // Seed tint is constant per blade, and field tint fades across roughly 333 metres; keep
         // both rather than erasing the meadow's stable colour variation.
         var mean = blade_ramp_mean(base, tip, blade_root_shade(),
             in.wind_gust * clamp(grass.wind_strength, 0.0, 1.5), in.blade_taper);
@@ -1700,9 +1712,9 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     }
     let graded = grass_saturation(dry_colour);
     // Per-patch hue drift on top of the luminance-only colour variation above:
-    // warm straw one way, cool blue-green the other, on a smooth ~200 m field of its own
+    // warm straw one way, cool blue-green the other, on a smooth ~333 m field of its own
     // so it lines up with neither the dry patches nor the density. 0 = none.
-    let hue_field = clump_noise(world.xz, 0.005, 0x7a1c3e5du);
+    let hue_field = clump_noise(world.xz, 0.003, 0x7a1c3e5du);
     let hue_tint = mix(vec3<f32>(1.10, 1.00, 0.78), vec3<f32>(0.88, 1.00, 1.12), hue_field);
     // The hue drift exists for the procedural blades; on a native atlas it read as lilac.
     let hued = graded * mix(vec3<f32>(1.0), hue_tint, blade_hue_variation() * select(1.0, 0.0, grass.native.x > 0.0));
@@ -1759,7 +1771,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
 @fragment
 fn fs_grass_far(in: VsOut) -> @location(0) vec4<f32> {
     let world = in.world_rel + frame.cam_pos.xyz;
-    let field_noise = clump_noise(world.xz, 0.006, 0x5e3a91c7u);
+    let field_noise = clump_noise(world.xz, 0.003, 0x5e3a91c7u);
     // Keep the proxy close to terrain colour: it supplies the distant grassy
     // field, not bright individual blades. The same aerial fog removes it
     // naturally at the horizon.
@@ -1782,7 +1794,7 @@ fn fs_grass_far(in: VsOut) -> @location(0) vec4<f32> {
     let photo_base = mix(vec3<f32>(mean_luma), mean_a3, clamp(grass.photo_mix.y, 0.0, 2.0));
     // The procedural blades run root-to-tip base..tip; a ground proxy stands for
     // the whole blade, so it uses the same pair averaged toward the tip.
-    let procedural_base = mix(vec3<f32>(0.055, 0.16, 0.025), vec3<f32>(0.32, 0.43, 0.10), 0.65);
+    let procedural_base = mix(vec3<f32>(0.055, 0.095, 0.034), vec3<f32>(0.18, 0.23, 0.10), 0.65);
     let field_base = select(procedural_base, photo_base, photo_far);
     // Keep the field-scale light/dark mottle the proxy always had, about the
     // chosen base rather than between two constants.

@@ -54,7 +54,7 @@ struct FogLocalLight { pos:vec4<f32>, diffuse:vec4<f32>, ambient:vec4<f32>, dir:
 fn fog_weather_source_ready(p:vec3<f32>)->bool {
     var clip=params.near_vp*vec4<f32>(p,1.0);var ctl=params.near_ctl;var cap=params.capacity.x;
     let uv0=clip.xy*vec2<f32>(0.5,-0.5)+0.5;
-    let outer=clip.z<0.0 || clip.z>1.0 || min(min(uv0.x,1.0-uv0.x),min(uv0.y,1.0-uv0.y))<ctl.z;
+    let outer=ctl.x<0.5 || clip.z<0.0 || clip.z>1.0 || min(min(uv0.x,1.0-uv0.x),min(uv0.y,1.0-uv0.y))<ctl.z;
     if(outer){clip=params.far_vp*vec4<f32>(p,1.0);ctl=params.far_ctl;cap=params.capacity.y;}
     if(ctl.x<0.5 || clip.z<0.0 || clip.z>1.0){return false;}
     if(cap>0u){if(outer){if(far_counts[0]>cap || far_counts[1]>cap || far_counts[2]>2u*cap){return false;}}
@@ -66,8 +66,9 @@ fn fog_weather_weight(p: vec3<f32>) -> f32 {
     let near_clip = params.near_vp * vec4<f32>(p, 1.0);
     let near_uv = near_clip.xy * vec2<f32>(0.5,-0.5) + 0.5;
     let edge = min(min(near_uv.x,1.0-near_uv.x),min(near_uv.y,1.0-near_uv.y));
-    // A pending near map never borrows a far map at the same position.
-    let outer = near_clip.z < 0.0 || near_clip.z > 1.0 || edge < params.near_ctl.z;
+    // Only current-frame sources are admitted. The current far depth map can
+    // cover a near-map rebuild; stale maps and overflow still contribute no air.
+    let outer = params.near_ctl.x < 0.5 || near_clip.z < 0.0 || near_clip.z > 1.0 || edge < params.near_ctl.z;
     var clip = near_clip;
     var ctl = params.near_ctl;
     var cap = params.capacity.x;
@@ -322,8 +323,8 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
     for(var z=0u;z<dims.z;z=z+1u) {
         let w=(f32(z)+0.5)/f32(dims.z);
         let end_distance=params.camera.w*w*w;
-        let step=(end_distance-previous)*0.5;
-        for(var s=0u;s<2u;s=s+1u) {
+        let step=(end_distance-previous)*0.25;
+        for(var s=0u;s<4u;s=s+1u) {
             let start=previous+f32(s)*step;
             let midpoint=start+step*0.5;
             let rel=ray*midpoint;
@@ -331,8 +332,12 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
             let before=fog_outdoor_sample(params.camera.xyz+ray*start);
             let centre=fog_outdoor_sample(p);
             let after=fog_outdoor_sample(params.camera.xyz+ray*(start+step));
-            if (min(min(before.y,centre.y),after.y) <= 0.0) { continue; }
-            let coverage=min(min(before.y,centre.y),after.y);
+            // A ray interval crossing the coverage/ground boundary contains
+            // valid air. Reject only an entirely excluded interval, and weight
+            // each analytic participant at its own certified world position.
+            // Taking the minimum of all three taps deleted complete intervals
+            // as the camera moved, producing bright steps and flicker.
+            if (max(max(before.y,centre.y),after.y) <= 0.0) { continue; }
             let shift=params.terrain.x*(centre.x-params.terrain.y);
             var tau=0.0;
             var source=vec3<f32>(0.0);
@@ -363,7 +368,7 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
                     let sample_height=sample_pos.y-params.terrain.x*(outdoor.x-params.terrain.y);
                     if(fog_height_density(sample_height,params.layers[i])<=0.0){continue;}
                     let density=fog_patch_density(sample_pos,params.patchiness)*fog_pooling(sample_pos,outdoor.x);
-                    let weight=participant.y*params.layers[i].w*params.control.z*density*min(coverage,outdoor.y);
+                    let weight=participant.y*params.layers[i].w*params.control.z*density*outdoor.y;
                     if(weight<=0.0){continue;}
                     let direct=params.radiance.rgb*fog_phase(dot(ray,params.light.xyz),params.control.y)
                         *fog_light_visibility(sample_pos,sample_rel)*fog_solar_transmission(sample_pos);

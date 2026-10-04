@@ -127,6 +127,13 @@ fn mid_placement_spacing(cards: bool, card_spacing: f32) -> f32 {
     }
 }
 
+// Above-one coverage adds candidates instead of saturating a retained fraction.
+// Keep these divisors identical to the two WGSL spacing helpers. Fixed grid and
+// instance caps continue to bound the workload at the densest settings.
+fn coverage_grid_scale(master: f32, ring: f32) -> f32 {
+    (master.clamp(1.0, 2.0) * ring.clamp(1.0, 4.0)).sqrt()
+}
+
 /// Live override of the photo-card placement grid.
 ///
 /// The uniform lane and the dispatch dims are both recomputed per frame from
@@ -671,8 +678,8 @@ impl Grass {
         let density = std::env::var("WGR_GRASS_DENSITY")
             .ok()
             .and_then(|v| v.parse::<f32>().ok())
-            .unwrap_or(0.99)
-            .clamp(0.0, 1.0);
+            .unwrap_or(0.5)
+            .clamp(0.0, 2.0);
         let radius = std::env::var("WGR_GRASS_DISTANCE")
             .ok()
             .and_then(|v| v.parse::<f32>().ok())
@@ -749,9 +756,9 @@ impl Grass {
             flower_percent: 0.05,
             blade_width_scale: 1.0,
             use_photo_tuft: 0.0,
-            saturation: 1.0,
-            dry_patches: 0.35,
-            dry_patch_scale: 0.006,
+            saturation: 0.72,
+            dry_patches: 0.08,
+            dry_patch_scale: 0.003,
             mid_radius: 100.0,
             // Shape variety defaults ON: four grass species sharing one
             // silhouette is the defect, not a look worth preserving by default.
@@ -1662,8 +1669,9 @@ impl Grass {
                 false,
                 self.card_spacing,
             )
-        };
-        let mid_spacing = mid_placement_spacing(key.cards_mid, self.card_spacing);
+        } / coverage_grid_scale(self.last_params.density, 1.0);
+        let mid_spacing = mid_placement_spacing(key.cards_mid, self.card_spacing)
+            / coverage_grid_scale(self.last_params.density, self.last_params.mid_density);
         // How far the mid grid's square actually reaches. On the CARD grid this is
         // the ceiling the requested mid radius is clamped to (mid_ring_end in
         // grass.wgsl): past ~45x card density it is SHORTER than the radius the
@@ -1942,7 +1950,8 @@ impl Grass {
         let cards_near = cards_mid && clump_renderer && params.near_blades_only == 0.0;
         // Must mirror cs_place's `near_spacing` (near_placement_spacing in grass.wgsl).
         let near_spacing =
-            near_placement_spacing(spacing, clump_renderer, cards_near, self.card_spacing);
+            near_placement_spacing(spacing, clump_renderer, cards_near, self.card_spacing)
+                / coverage_grid_scale(params.density, 1.0);
         // The grid has to span the whole disc, so its edge is the diameter. Round
         // up to the workgroup size and cap.
         let want = (2.0 * near_radius / near_spacing).ceil().max(0.0) as u32;
@@ -1994,14 +2003,15 @@ impl Grass {
         .clamp(near_radius + 10.0, MID_RING_MAX);
         // mid_placement_spacing in grass.wgsl: the fixed ribbon spacing, or the
         // card grid when the mid ring draws cards.
-        let mid_spacing = mid_placement_spacing(cards_mid, self.card_spacing);
+        let mid_spacing = mid_placement_spacing(cards_mid, self.card_spacing)
+            / coverage_grid_scale(params.density, params.mid_density);
         let want_mid = (2.0 * mid_end / mid_spacing).ceil().max(0.0) as u32;
         let mid_grid_dim = want_mid
             .div_ceil(8)
             .saturating_mul(8)
             .clamp(MID_GRID_MIN, MID_GRID_MAX);
         let params = GrassParams {
-            density: params.density.clamp(0.0, 1.0),
+            density: params.density.clamp(0.0, 2.0),
             spacing,
             near_radius,
             enabled: if params.enabled != 0.0 && !self.force_off {
@@ -2080,7 +2090,7 @@ impl Grass {
             imprint_depth: params.imprint_depth.clamp(0.0, 0.95),
             photo_layer_weights: params.photo_layer_weights.map(|w| w.clamp(0.0, 1.0)),
             near_density: params.near_density.clamp(0.0, 1.0),
-            mid_density: params.mid_density.clamp(0.0, 1.0),
+            mid_density: params.mid_density.clamp(0.0, 4.0),
             far_density: params.far_density.clamp(0.0, 1.0),
             card_spacing: self.card_spacing,
             tint_procedural: clamp_tint(params.tint_procedural),
@@ -3131,6 +3141,16 @@ mod tests {
         }
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             required_features: wgpu::Features::VERTEX_WRITABLE_STORAGE,
+            // Use the production sampled-texture limit: the shared camera group
+            // includes fog/lighting resources, so a grass pipeline needs 19
+            // sampled textures rather than the headless default of 16.
+            required_limits: wgpu::Limits {
+                max_sampled_textures_per_shader_stage: adapter
+                    .limits()
+                    .max_sampled_textures_per_shader_stage
+                    .clamp(16, 64),
+                ..Default::default()
+            },
             ..Default::default()
         }))
         .ok()
@@ -3171,6 +3191,44 @@ mod tests {
         p.photo_alpha_cutoff = 0.5;
         p.photo_force_layer = -1.0;
         p
+    }
+
+    #[test]
+    fn coverage_above_one_adds_candidates_and_respects_grid_caps() {
+        let Some((device, queue)) = headless() else { return; };
+        let camera_layout = crate::gfx3d::camera_layout_for_tests(&device);
+        let shadow_layout = shadow_pass_layout(&device);
+        let mut composer = crate::shaders::build_composer();
+        let mut grass = Grass::new(&device, &queue, &camera_layout, &shadow_layout,
+            crate::HDR_FORMAT, 1, &mut composer);
+        let mut p = params(0.1, 41.0, 0.0);
+        p.density = 0.5;
+        p.mid_density = 1.0;
+        grass.set_params(&queue, p);
+        let mid_one = grass.mid_grid_dim;
+        let near_one = grass.near_grid_dim;
+        assert_eq!(grass.last_params.density, 0.5);
+        p.mid_density = 2.0;
+        grass.set_params(&queue, p);
+        let mid_two = grass.mid_grid_dim;
+        assert!(mid_two > mid_one);
+        assert_eq!(grass.near_grid_dim, near_one);
+        assert_eq!(grass.last_params.mid_density, 2.0);
+        p.mid_density = 4.0;
+        grass.set_params(&queue, p);
+        assert!(grass.mid_grid_dim > mid_two);
+        assert!((grass.mid_grid_dim as f32 / mid_one as f32 - 2.0).abs() < 0.03);
+        p.density = 2.0;
+        grass.set_params(&queue, p);
+        assert!(grass.near_grid_dim > near_one);
+        assert_eq!(grass.last_params.density, 2.0);
+        p.near_radius = 200.0;
+        p.mid_radius = 1000.0;
+        p.spacing = 0.02;
+        grass.set_params(&queue, p);
+        assert!(grass.near_grid_dim <= NEAR_GRID_MAX);
+        assert!(grass.mid_grid_dim <= MID_GRID_MAX);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }
 
     // Blade and photographed-tuft textures are independent resources. A later
