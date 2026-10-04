@@ -5,13 +5,23 @@ param(
  [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='layered-asl-fog',
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
  [double]$X=6532,[double]$Z=6466,[ValidateRange(0.05,0.8)][double]$WeatherFog=0.45,
- [switch]$Measure,[ValidateRange(15,120)][int]$MeasureDeadlineSeconds=90,[switch]$SelfTest
+ [switch]$Measure,[ValidateRange(15,120)][int]$MeasureDeadlineSeconds=90,
+ [double]$Exposure,[switch]$SelfTest
 )
 $ErrorActionPreference='Stop';$taskRoot=Split-Path -Parent $PSScriptRoot
 $culture=[Globalization.CultureInfo]::InvariantCulture
 function Require([bool]$ok,[string]$message){if(!$ok){throw $message}}
 function Num($v){$n=[double]::Parse([string]$v,[Globalization.NumberStyles]::Float,$culture);Require (![double]::IsNaN($n) -and ![double]::IsInfinity($n)) 'Nonfinite receipt.';return $n}
 function Fmt($v){return (Num $v).ToString('R',$culture)}
+function Exposure-Settings([bool]$supplied,$value){
+ if(!$supplied){return @{}}
+ $fixed=Num $value;Require ($fixed -ge .0001 -and $fixed -le 16) 'Fixed exposure must be finite within 0.0001..16.'
+ # Manual base exposure also disables the automatic time-of-day grade.
+ # Adaptive eye exposure is an independent multiplier and must be disabled too.
+ return @{WGR_EXPOSURE=(Fmt $fixed);WGR_AUTO_EXPOSURE='0';WGR_TONEMAP='1'}
+}
+$exposureSupplied=$PSBoundParameters.ContainsKey('Exposure')
+$exposureSettings=Exposure-Settings $exposureSupplied $Exposure
 function Decode([string]$value){$value=$value.Trim();if($value.StartsWith('"')){Require $value.EndsWith('"') 'Incomplete string.';return $value.Substring(1,$value.Length-2).Replace('""','"')};return ConvertFrom-Json $value -NoEnumerate}
 function Timing-Sample($sample){
  # Missing/negative counters mean unavailable. A real published zero remains zero.
@@ -47,7 +57,10 @@ if($SelfTest){
  $source=@{worldName='eden.wrp';heightRevision=3;grid=256;count=0};Assert-Source $source $source
  Refuses {Assert-Source (@{worldName='noe.wrp';heightRevision=3;grid=256;count=0}) $source}
  Refuses {Assert-Source (@{worldName='eden.wrp';heightRevision=4;grid=256;count=0}) $source}
- Write-Output 'Layered fog timing helper PASS: real/zero/unavailable, nonfinite/duplicate, counter and weather/source refusals. No game or GPU.';return
+ Require ((Exposure-Settings $false .15).Count -eq 0) 'Unset exposure changed default grade.'
+ $fixed=Exposure-Settings $true .15;Require ($fixed.WGR_EXPOSURE -ceq '0.15' -and $fixed.WGR_AUTO_EXPOSURE -ceq '0' -and $fixed.WGR_TONEMAP -ceq '1') 'Fixed Hable/adaptive exposure controls incorrect.'
+ Refuses {Exposure-Settings $true 0};Refuses {Exposure-Settings $true 17};Refuses {Exposure-Settings $true ([double]::NaN)};Refuses {Exposure-Settings $true ([double]::PositiveInfinity)}
+ Write-Output 'Layered fog timing/exposure helper PASS: real/zero/unavailable, nonfinite/duplicate, counter, weather/source and finite fixed-exposure refusals. No game or GPU.';return
 }
 function Pair{
  $stamp=Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw;Require ($stamp -match [regex]::Escape($ExpectedCommit)) 'Installed commit differs.'
@@ -59,7 +72,9 @@ Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue
 $before=Pair;$taskOut=Join-Path $taskRoot ('build/layered-fog/'+$Label+'-'+(Get-Date -Format 'yyyyMMdd-HHmmss'));New-Item -ItemType Directory -Force $taskOut|Out-Null
 $keys=@('POSEIDON_USER_DIR','WGR_LAYERED_FOG','WGR_LAYERED_FOG_TRACE','WGR_FOG_LAYER0','WGR_FOG_LAYER1','WGR_WEATHER_COVER','WGR_WEATHER_COVER_FAR','WGR_GRASS','WGR_TEMPORAL','POSEIDON_SNOWLINE','POSEIDON_SNOW_TEST_DEPTH','POSEIDON_TEST_RAIN','POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','WGR_EXPOSURE','WGR_AUTO_EXPOSURE','WGR_TONEMAP','WGR_CLOUD_COVERAGE')
 $saved=@{};foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
-$result=[ordered]@{passed=$false;expectedCommit=$ExpectedCommit;installed=$before;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;measure=[bool]$Measure;measureWarmupRenderedFrames=256;measureDeadlineSeconds=$MeasureDeadlineSeconds;arms=@();scope='Actual original Everon and authoritative weather, same XYZ camera requests, unchanged native source/ranges at equal weather. Encoded trace is CPU command readiness. Per-view frame_performance receipts contain latest asynchronous published GPU timers, without sampled GPU frame ID or exact screenshot-frame attribution. Frame total is inclusive; fog transport excludes background/consumer/weather-map costs. No timer summation, steady statistical benchmark, uncontended cost certification, visual acceptance or default promotion claimed. Default remains OFF.'}
+$result=[ordered]@{passed=$false;expectedCommit=$ExpectedCommit;installed=$before;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;measure=[bool]$Measure;measureWarmupRenderedFrames=256;measureDeadlineSeconds=$MeasureDeadlineSeconds;
+ exposureControl=@{supplied=$exposureSupplied;environment=$exposureSettings;scope='Explicit startup environment controls when supplied: fixed base exposure, adaptive exposure OFF, manual Hable time-of-day grade. Otherwise normal defaults. Configuration receipt, not same-frame GPU uniform readback. Bloom remains unchanged.'};
+ arms=@();scope='Actual original Everon and authoritative weather, same XYZ camera requests, unchanged native source/ranges at equal weather. Encoded trace is CPU command readiness. Per-view frame_performance receipts contain latest asynchronous published GPU timers, without sampled GPU frame ID or exact screenshot-frame attribution. Frame total is inclusive; fog transport excludes background/consumer/weather-map costs. No timer summation, steady statistical benchmark, uncontended cost certification, visual acceptance or default promotion claimed. Default remains OFF.'}
 $p=$null;$client=$null;$ground=$null;$layerArgs=$null
 function Send($command){
  Require (!$p.HasExited) 'Owned game exited unexpectedly.';$wire=$command|ConvertTo-Json -Depth 8 -Compress;$wire|Add-Content -LiteralPath (Join-Path $armOut 'harness.jsonl');$writer.WriteLine($wire)
@@ -75,6 +90,7 @@ try{
   $armOut=Join-Path $taskOut $arm.name;$profile=Join-Path $armOut 'user';New-Item -ItemType Directory -Force $profile|Out-Null
   foreach($key in $keys){[Environment]::SetEnvironmentVariable($key,$null,'Process')}
   $settings=@{POSEIDON_USER_DIR=$profile;WGR_LAYERED_FOG=$arm.on;WGR_LAYERED_FOG_TRACE='1';WGR_WEATHER_COVER='1';WGR_WEATHER_COVER_FAR='1';WGR_GRASS='0';WGR_TEMPORAL='0';POSEIDON_SNOWLINE='off';POSEIDON_SNOW_TEST_DEPTH='0'}
+  foreach($key in $exposureSettings.Keys){$settings[$key]=$exposureSettings[$key]}
   if($layerArgs){$settings.WGR_FOG_LAYER0=$layerArgs[0];$settings.WGR_FOG_LAYER1=$layerArgs[1]}
   foreach($key in $settings.Keys){[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
   $log=Join-Path $armOut 'engine.log';$stdout=Join-Path $armOut 'stdout.log';$stderr=Join-Path $armOut 'stderr.log'
@@ -139,7 +155,7 @@ try{
    if($Measure){Require ((Num $performanceAfter.completedCpuFrames) -ge 256) 'CPU profiler ring is not populated.';Require ($timing.gpuFrame.available -and $timing.gpuFrame.milliseconds -gt 0) 'Measured GPU frame total unavailable.'}
    $captureFrameAdvance=Frame-Advance $captureBefore.frame $captureAfter.frame
    $timingPath=Join-Path $armOut ($view.name+'.frame-performance.json')
-   $timingReceipt=@{schema='layered-fog-published-timing-v1';cameraXYZDirectionXYZ=$pose;requestedUtc=$captureStartedUtc;png=$path;pngSha256=(Get-FileHash -LiteralPath $path).Hash;
+   $timingReceipt=@{schema='layered-fog-published-timing-v1';cameraXYZDirectionXYZ=$pose;requestedUtc=$captureStartedUtc;png=$path;pngSha256=(Get-FileHash -LiteralPath $path).Hash;exposureControl=$result.exposureControl;
     renderedWarmup=@{startFrame=$warmupStart.frame;endFrame=$warmupEnd.frame;advance=$advance;seconds=$warmupClock.Elapsed.TotalSeconds;measured=[bool]$Measure};
     screenshotRequestWindow=@{beforeFrame=$captureBefore.frame;afterFrame=$captureAfter.frame;advance=$captureFrameAdvance};weatherBefore=$weatherBefore;weatherAfter=$viewWeather;sourceBefore=$sourceBefore;sourceAfter=$sourceAfter;
     timingBefore=$performanceBefore;timingAfter=$performanceAfter;sampledGpu=$timing;trace=$matching;

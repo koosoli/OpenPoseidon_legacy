@@ -118,6 +118,7 @@ The root owner should use the normal installed lock and provenance workflow:
 ```powershell
 scripts/Test-LayeredFog.ps1 -ExpectedCommit <installed-commit> -Label original-everon-layered
 scripts/Test-LayeredFog.ps1 -ExpectedCommit <installed-commit> -Label original-everon-layered-cost -Measure
+scripts/Test-LayeredFog.ps1 -ExpectedCommit <installed-commit> -Label original-everon-layered-fixed -Measure -Exposure 0.15
 ```
 
 The runner executes four normally exiting stock Everon arms: OFF/ON at actual
@@ -126,7 +127,18 @@ weather/ranges, pair hashes, bounded actual encoding trace and ground/between/ab
 camera captures. Profiles for ON are frozen ASL slabs selected once from the
 actual OFF baseline height; the OFF scout's disabled profiles do not affect its
 output. Cameras are render-only and scene simulation is paused after real weather
-settles. No forced texture, snow, wetness, fog colour or exposure is used.
+settles. No forced texture, snow, wetness or fog colour is used. Exposure follows
+normal defaults unless the explicit comparison control below is requested.
+
+Optional `-Exposure` accepts a finite base multiplier within `0.0001..16` and
+applies identical `WGR_EXPOSURE`, `WGR_AUTO_EXPOSURE=0`, `WGR_TONEMAP=1` controls to
+all four arms. This switches from the automatic time-of-day grade to manual Hable
+and disables the independent adaptive exposure multiplier; bloom remains unchanged.
+The campaign and every timing sidecar record these startup controls and their
+limits. They are configuration receipts, not actual per-frame GPU uniform
+readbacks. Unset preserves the previous runner's normal grade behavior and the
+owner's environment is restored on exit. This makes clipped midday comparison
+images interpretable without changing any production exposure defaults.
 
 The runner refuses source/weather/camera mismatches and an ON capture without
 current encoding readiness. Its trace proves CPU command admission, not GPU
