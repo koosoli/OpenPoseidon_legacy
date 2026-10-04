@@ -96,3 +96,16 @@ Earlier unverified floating-house identification and ragdoll local-hit fallback
 are preserved. Whole Preview/Compat ledgers have older stale hashes outside
 this slice; they are not silently renewed or claimed fully green. This finite
 batch ends here rather than starting unrelated roadmap work.
+
+The moved aerial image also shows a thin distant water/extent line. Its source
+is not established here; continuous opaque land is the accepted correction,
+not a claim that every far-water seam is resolved.
+
+Final owner handoff at 12:02:58 leaves installed source f8127fe5 open in the
+ordinary Everon rifle scene (PID 5104 at handoff). Actual SDL firing consumed
+30 to 29 rounds; automatic ragdoll default ON and default layered fog were
+read back. Six clear targets and the ready view were inspected. Local receipt:
+`build/owner-ragdoll-fog/20261004-120258/session.json`. No script-triggered victim
+kill is claimed by this handoff. Later evidence/tool commits do not change the
+installed game source; `git diff f8127fe5 HEAD -- engine apps content tests/unit tests/content`
+is empty.
