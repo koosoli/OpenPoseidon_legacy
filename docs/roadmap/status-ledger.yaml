@@ -5,6 +5,25 @@ execution:
   baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
   integration_owner: Oliver Kay
   activation_state: ACTIVE
+  local_map_editor_checkpoint:
+    state: INSTALLED_STRATIS_AND_REFORGER_EVERON_EDITOR_ROUNDTRIPS_PASSED
+    installed_source_commit: ed1c10a6
+    backup_branch: codex/backup-before-local-map-editor-20261005
+    backup_bundle: C:/Users/mail/.codex/backups/OpenPoseidon-before-local-map-editor-20261005.bundle
+    evidence: docs/verification/local-map-mission-editor-20261005.md
+    stratis_receipt: docs/verification/local-map-editor-stratis-20261005-runtime.json
+    reforger_receipt: docs/verification/local-map-editor-reforger-20261005-runtime.json
+    note: >-
+      Local Content map selection now opens the native OFP 2D mission editor in the
+      same process and window. Place OFP units, save under stable owned OP_Local
+      terrain aliases, reload and Preview on the selected source terrain.
+      Actual Stratis windowed and native Reforger Everon borderless full editor
+      round trips passed, including playable SoldierWB and restored base island list.
+      Deferred asset remounts retain current mods/window/device and rollback on failure.
+      Imported terrain descriptors persist locally; select its source terrain in
+      Local Content before reopening a saved foreign-terrain mission after startup.
+      Reforger material/LOD compatibility remains partial; foreign gameplay configs
+      and missions are not imported. Vehicle browser still uses its existing restart.
   local_content_browser_checkpoint:
     state: INSTALLED_STRATIS_AND_REFORGER_EVERON_RUNTIME_PASSED
     installed_source_commit: d2a9add7

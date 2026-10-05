@@ -1,0 +1,184 @@
+{
+  "savedMission": "C:\\Users\\mail\\.codex\\worktrees\\player-visibility-recovery-20261005\\CWR-CE-paavohuhtalafork-\\build\\local-map-editor\\20261005-232136-609\\content\\missions\\LocalMapEditorSmoke_20261005232136.OP_Local_f12e3293b33133d2\\mission.sqm",
+  "originalWindow": 3282538,
+  "missionRoundTripPassed": true,
+  "descriptor": {
+    "archiveRoots": [],
+    "schema": 1,
+    "game": "Arma Reforger",
+    "name": "Everon",
+    "worldPath": "worlds/eden",
+    "archiveRoot": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Arma Reforger\\addons",
+    "revision": 0,
+    "enfusion": true
+  },
+  "originalIslands": [
+    "Everon",
+    "Malden",
+    "Kolgujev",
+    "Desert Island",
+    "Nogova",
+    "DIAGNOSTIC - 102.4 km sparse world",
+    "OFP Fusion - Five Islands"
+  ],
+  "selected": "Arma Reforger | Everon | native Enfusion preview (preview)",
+  "catalogStatus": "15 maps found. Open in the OFP mission editor in this window. Current format support; place OFP units and use Preview to play.",
+  "passed": true,
+  "phases": [
+    {
+      "mode": "borderless",
+      "pid": 38904,
+      "controls": "[[-1,\"CStatic\",\"\",true],[101,\"CActiveText\",\"CAMPAIGN GAME\",true],[102,\"CActiveText\",\"OPTIONS\",true],[104,\"CActiveText\",\"ALL MISSIONS (FOR DESIGNERS)\",false],[105,\"CActiveText\",\"MULTIPLAYER\",true],[106,\"CActiveText\",\"QUIT GAME\",true],[109,\"CActiveText\",\"PLAYER: mail\",true],[114,\"CActiveText\",\"CONTINUE\",true],[115,\"CActiveText\",\"MISSION EDITOR\",true],[117,\"CActiveText\",\"SINGLE MISSION\",true],[118,\"CStatic\",\"3.05-ed1c10a-dev (x64, WGPU (Rust / wgpu))\",true],[119,\"CActiveText\",\"MODS\",true],[1988,\"CStatic\",\"\\assets\\ui\\openposeidon_logo.paa\",true]]",
+      "window": 3282538,
+      "stage": "00_menu",
+      "display": "0"
+    },
+    {
+      "mode": "borderless",
+      "pid": 38904,
+      "controls": "[]",
+      "window": 3282538,
+      "stage": "01_catalog",
+      "display": "62000"
+    },
+    {
+      "mode": "borderless",
+      "pid": 38904,
+      "controls": "[[-1,\"CStatic\",\"notasA.pac\",true],[2,\"CButton\",\"Exit\",true],[51,\"CStatic\",\"podmapa.pac\",true],[52,\"CStatic\",\"zatazenosl.paa\",true],[53,\"CStatic\",\"\",true],[54,\"CStaticTime\",\"\",true],[55,\"CStatic\",\"Fri, May 10\",true],[101,\"CButton\",\"Load\",true],[102,\"CButton\",\"Save\",true],[103,\"CButton\",\"Clear\",true],[104,\"Control\",\"\",true],[105,\"CActiveText\",\"\",true],[106,\"CButton\",\"Merge\",true],[107,\"CButton\",\"Preview\",false],[108,\"CButton\",\"Continue\",false],[109,\"CCombo\",\"Mission\",true],[110,\"CActiveText\",\"Advanced\",true],[111,\"CButton\",\"Show IDs\",true],[112,\"CButton\",\"Show Textures\",true]]",
+      "window": 3282538,
+      "stage": "02_editor_2d",
+      "display": "26"
+    },
+    {
+      "mode": "borderless",
+      "pid": 38904,
+      "controls": "[[-1,\"CStatic\",\"\",true],[1,\"CButton\",\"OK\",true],[2,\"CButton\",\"Cancel\",true],[101,\"CStatic\",\"Insert unit\",true],[102,\"CCombo\",\"West\",true],[103,\"CCombo\",\"Soldier\",true],[104,\"CCombo\",\"Private\",true],[105,\"CCombo\",\"Player\",true],[107,\"CCombo\",\"Men\",true],[108,\"CSlider\",\"\",true],[109,\"CSlider\",\"\",true],[110,\"CSlider\",\"\",true],[111,\"CEdit\",\"0\",true],[112,\"CCombo\",\"In Formation\",true],[113,\"CCombo\",\"Unknown\",true],[114,\"CStatic\",\"azimut.paa\",true],[115,\"CEdit\",\"0\",true],[116,\"CSlider\",\"\",true],[117,\"CEdit\",\"true\",true],[118,\"CEdit\",\"\",true],[119,\"CCombo\",\"Default\",true],[120,\"CEdit\",\"\",true],[121,\"CSlider\",\"\",true]]",
+      "window": 3282538,
+      "stage": "03_unit_dialog",
+      "display": "27"
+    },
+    {
+      "mode": "borderless",
+      "pid": 38904,
+      "controls": "[[-1,\"CStatic\",\"notasA.pac\",true],[2,\"CButton\",\"Exit\",true],[51,\"CStatic\",\"podmapa.pac\",true],[52,\"CStatic\",\"zatazenosl.paa\",true],[53,\"CStatic\",\"Ej50\",true],[54,\"CStaticTime\",\"\",true],[55,\"CStatic\",\"Fri, May 10\",true],[101,\"CButton\",\"Load\",true],[102,\"CButton\",\"Save\",true],[103,\"CButton\",\"Clear\",true],[104,\"Control\",\"\",true],[105,\"CActiveText\",\"\",true],[106,\"CButton\",\"Merge\",true],[107,\"CButton\",\"Preview\",true],[108,\"CButton\",\"Continue\",false],[109,\"CCombo\",\"Mission\",true],[110,\"CActiveText\",\"Advanced\",true],[111,\"CButton\",\"Show IDs\",true],[112,\"CButton\",\"Show Textures\",true]]",
+      "window": 3282538,
+      "stage": "04_editor_unit",
+      "display": "26"
+    },
+    {
+      "mode": "borderless",
+      "pid": 38904,
+      "controls": "[[-1,\"CStatic\",\"\",true],[1,\"CButton\",\"OK\",true],[2,\"CButton\",\"Cancel\",true],[101,\"CCombo\",\"LocalMapEditorSmoke_20261005232136\",true],[102,\"CStatic\",\"Load mission\",true],[104,\"CCombo\",\"Arma Reforger / Everon\",true]]",
+      "window": 3282538,
+      "stage": "05_saved_mission_list",
+      "display": "30"
+    },
+    {
+      "mode": "borderless",
+      "pid": 38904,
+      "controls": "[[101,\"IControl\",\"\",false],[102,\"IControl\",\"\",false]]",
+      "window": 3282538,
+      "stage": "06_preview",
+      "display": "46"
+    },
+    {
+      "mode": "borderless",
+      "pid": 38904,
+      "controls": "[[-1,\"CStatic\",\"notasA.pac\",true],[2,\"CButton\",\"Exit\",true],[51,\"CStatic\",\"podmapa.pac\",true],[52,\"CStatic\",\"zatazenosl.paa\",true],[53,\"CStatic\",\"Ej50\",true],[54,\"CStaticTime\",\"\",true],[55,\"CStatic\",\"Fri, May 10\",true],[101,\"CButton\",\"Load\",true],[102,\"CButton\",\"Save\",true],[103,\"CButton\",\"Clear\",true],[104,\"Control\",\"\",true],[105,\"CActiveText\",\"\",true],[106,\"CButton\",\"Merge\",true],[107,\"CButton\",\"Preview\",true],[108,\"CButton\",\"Continue\",true],[109,\"CCombo\",\"Mission\",true],[110,\"CActiveText\",\"Advanced\",true],[111,\"CButton\",\"Show IDs\",true],[112,\"CButton\",\"Show Textures\",true]]",
+      "window": 3282538,
+      "stage": "07_returned_editor",
+      "display": "26"
+    },
+    {
+      "mode": "borderless",
+      "pid": 38904,
+      "controls": "[[-1,\"CStatic\",\"\",true],[1,\"CActiveText\",\"OK\",true],[2,\"CActiveText\",\"Cancel\",true],[101,\"Control\",\"\",true],[102,\"IControl\",\"\",true],[103,\"CActiveText\",\"Mission Wizard\",true]]",
+      "window": 3282538,
+      "stage": "09_restored_islands",
+      "display": "51"
+    },
+    {
+      "mode": "borderless",
+      "pid": 38904,
+      "controls": "[[-1,\"CStatic\",\"\",true],[101,\"CActiveText\",\"CAMPAIGN GAME\",true],[102,\"CActiveText\",\"OPTIONS\",true],[104,\"CActiveText\",\"ALL MISSIONS (FOR DESIGNERS)\",false],[105,\"CActiveText\",\"MULTIPLAYER\",true],[106,\"CActiveText\",\"QUIT GAME\",true],[109,\"CActiveText\",\"PLAYER: mail\",true],[114,\"CActiveText\",\"CONTINUE\",true],[115,\"CActiveText\",\"MISSION EDITOR\",true],[117,\"CActiveText\",\"SINGLE MISSION\",true],[118,\"CStatic\",\"3.05-ed1c10a-dev (x64, WGPU (Rust / wgpu))\",true],[119,\"CActiveText\",\"MODS\",true],[1988,\"CStatic\",\"\\assets\\ui\\openposeidon_logo.paa\",true]]",
+      "window": 3282538,
+      "stage": "08_restored_menu",
+      "display": "0"
+    }
+  ],
+  "binaryTimes": {
+    "dll": "2026-10-05T21:09:59.2089131Z",
+    "exe": "2026-10-05T21:10:34.2320315Z"
+  },
+  "worldId": "OP_Local_f12e3293b33133d2",
+  "entryOnly": false,
+  "originalMode": "borderless",
+  "installed": "codex/local-map-mission-editor-20261005 ed1c10a6 2026-10-05_23:11 deploy-ps1",
+  "originalPid": 38904,
+  "preview": {
+    "name": "WEST Alpha Black:1 (mail)",
+    "cls": "SoldierWB",
+    "shape": "data3d\\mc vojakw2.p3d",
+    "pos": [
+      6400.0,
+      6400.0,
+      157.87
+    ],
+    "dir": 0.0,
+    "damage": 0.0,
+    "destroyed": false,
+    "speed": 0.0,
+    "watched": false,
+    "side": 1,
+    "zones": {
+      "hlava": 0.0,
+      "telo": 0.0,
+      "ruce": 0.0,
+      "nohy": 0.0
+    },
+    "weapons": [
+      "M16",
+      "Throw",
+      "Put"
+    ],
+    "selected": {
+      "weapon": "M16",
+      "muzzle": "M16",
+      "magazine": true,
+      "ammo": 30,
+      "loaded": true
+    },
+    "magazines": 10,
+    "brain": {
+      "group": "Alpha Black",
+      "groupLeader": true,
+      "state": 0,
+      "life": 0,
+      "combatMode": 3,
+      "semaphore": 3,
+      "planning": 0,
+      "mode": 2,
+      "path": 0
+    },
+    "man": {
+      "move": "combat",
+      "time": 0.0,
+      "factor": 1.0,
+      "secondary": "combat",
+      "external": "",
+      "queue": 0,
+      "down": false,
+      "unitPos": 2
+    },
+    "ok": true
+  },
+  "restoredIslands": [
+    "Everon",
+    "Malden",
+    "Kolgujev",
+    "Desert Island",
+    "Nogova",
+    "DIAGNOSTIC - 102.4 km sparse world",
+    "OFP Fusion - Five Islands"
+  ]
+}

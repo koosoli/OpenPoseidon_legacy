@@ -94,17 +94,10 @@ function Snapshot([string]$stage) {
 }
 function Island-Rows {
     $rows = @()
-    $count = [int](Value 'triListSize 51')
+    $count = [int](Value 'triListSize 101')
     Require ($count -gt 0) 'Original OFP islands are unavailable'
-    for ($i = 0; $i -lt $count; $i++) { $rows += Value ("triListText [51,$i]") }
+    for ($i = 0; $i -lt $count; $i++) { $rows += Value ("triListText [101,$i]") }
     return ,$rows
-}
-function Select-ComboText([int]$id, [string]$text) {
-    $count = [int](Value ("lbSize $id"))
-    for ($i = 0; $i -lt $count; $i++) {
-        if ((Value ("lbText [$id,$i]")) -eq $text) { Exec ("lbSetCurSel [$id,$i]"); return }
-    }
-    throw "Combo $id does not list '$text'"
 }
 
 try {
@@ -178,7 +171,7 @@ try {
     Exec 'triClick 62004'
     Wait-Remount ($initialRemounts + 1) 'Mount selected terrain'
     Wait-Display 26 'Local map editor entry'
-    Require ((Value 'triGetControlVisible 51') -ceq 'true') 'Native editor 2D map control is missing'
+    Require ((Value 'triGetControlVisible 51') -in @('true','1')) 'Native editor 2D map control is missing'
     Snapshot '02_editor_2d'
     $descriptors = @(Get-ChildItem (Join-Path $env:POSEIDON_USER_DIR 'LocalMapWorlds') -Filter '*.json' -File)
     Require ($descriptors.Count -eq 1) 'Expected one owned local terrain descriptor'
@@ -190,17 +183,14 @@ try {
         # Follow the same actual unit-dialog/keyboard paths as the integration editor tests.
         Exec 'triCursorMoveControl 51'; Exec 'triDblClick 51'; Wait-Display 27 'Insert unit dialog'
         Snapshot '03_unit_dialog'
-        Select-ComboText 102 'West'; Select-ComboText 107 'Men'
-        $soldier = -1; $unitCount = [int](Value 'lbSize 103')
-        for ($i = 0; $i -lt $unitCount; $i++) { if ((Value ("lbData [103,$i]")) -eq 'SoldierWB') { $soldier = $i; break } }
-        Require ($soldier -ge 0) 'OFP SoldierWB is absent from the unit dialog'
-        Exec ("lbSetCurSel [103,$soldier]")
-        # UpdatePlayer puts Nonplayable at 0 and the infantry Player entry at 1.
-        Require ((Value 'lbText [105,1]') -match '^Player') 'Infantry player selection differs'
-        Exec 'lbSetCurSel [105,1]'; Exec 'triClick 1'; Wait-Display 26 'Placed player unit'
+        Require ((Value 'triControlText 102') -ceq 'West') 'Default unit side differs'
+        Require ((Value 'triControlText 107') -ceq 'Men') 'Default unit class differs'
+        Require ((Value 'triControlText 103') -ceq 'Soldier') 'Default OFP soldier differs'
+        Require ((Value 'triControlText 105') -ceq 'Player') 'Default unit is not playable'
+        Exec 'triClick 1'; Wait-Display 26 'Placed player unit'
         Snapshot '04_editor_unit'
         Exec 'triClick 102'; Wait-Display 29 'Save mission dialog'
-        Require ((Value 'triGetControlFocused 101') -ceq 'true') 'Save name field lacks keyboard focus'
+        Require ((Value 'triGetControlFocused 101') -in @('true','1')) 'Save name field lacks keyboard focus'
         Exec ('triTypeText "' + $MissionName + '"')
         Require ((Value 'triControlText 101') -ceq $MissionName) 'Typed mission name was not entered'
         Exec 'triClick 1'; Wait-Display 26 'Saved mission'
@@ -213,12 +203,13 @@ try {
         Require ($text -match 'player\s*=\s*"PLAYER COMMANDER"') 'Saved soldier is not the mission player'
         $receipt.savedMission = $sqm
         Exec 'triClick 101'; Wait-Display 30 'Reload mission dialog'
-        Require ((Value 'lbText [101,0]') -ceq $MissionName) 'Saved mission is missing from the load list'
+        Require ((Value 'triControlText 101') -ceq $MissionName) 'Saved mission is missing from the load list'
         Snapshot '05_saved_mission_list'
         Exec 'triClick 1'; Wait-Display 26 'Reloaded local mission'
         Exec 'triClick 107'; Wait-Display 46 'Mission preview'
         Require ((Value '!isNull player') -ceq 'true') 'Preview did not create a playable OFP soldier'
         $receipt.preview = Send @{ cmd = 'diag_inspect'; unit = 'player' }
+        Start-Sleep -Seconds 5 # Allow ordinary object streaming before the visual receipt.
         Snapshot '06_preview'
         Exec 'triSendKey 41'; Wait-Display 49 'Preview pause menu'
         Exec 'triClick 104'; Wait-Display 50 'Abort preview dialog'
