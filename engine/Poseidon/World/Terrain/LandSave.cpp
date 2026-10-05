@@ -2195,8 +2195,10 @@ bool Landscape::LoadOprwModern(const char* path)
     namespace Fmt = Poseidon::Asset::Formats;
 
     const DWORD oprwStart = Poseidon::Foundation::GlobalTickCount();
-    QIFStream file;
-    file.open(path);
+    // Local map discovery supplies the archive's virtual WRP name. AutoOpen
+    // also accepts loose files, preserving existing converted-world workflows.
+    QIFStreamB file;
+    file.AutoOpen(path);
     if (file.fail())
     {
         RptF("LoadOprwModern: cannot open %s", path);
