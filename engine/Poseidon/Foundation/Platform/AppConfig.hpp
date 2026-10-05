@@ -282,6 +282,7 @@ class AppConfig
     // Exact elevated developer-camera pose for a substituted-world capture:
     // X Z Y azimuth elevation, in the same order the free-fly readout reports.
     const std::vector<float>& GetTestWorldFreeFly() const { return _testWorldFreeFly; }
+    bool GetTestWorldLandStart() const { return _testWorldLandStart; }
     // Optional deterministic time of day for substituted-world captures.
     // Negative means retain the mission's configured date and time.
     float GetTestWorldHour() const { return _testWorldHour; }
@@ -531,6 +532,7 @@ class AppConfig
     float _testWorldYaw = 0.0f;
     std::vector<float> _testWorldLookAt;
     std::vector<float> _testWorldFreeFly;
+    bool _testWorldLandStart = false;
     float _testWorldHour = -1.0f;
     float _testModelDistance = 10.0f;
     float _testModelScale = 1.0f;

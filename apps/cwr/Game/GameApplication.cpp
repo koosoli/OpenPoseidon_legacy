@@ -1,3 +1,4 @@
+#include <Poseidon/World/Terrain/TerrainPreviewStart.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp>
@@ -2082,8 +2083,20 @@ void GameApplication::RunMainLoop()
             }
             else
             {
-                const float x = target[0];
-                const float z = target[1];
+                float x = target[0];
+                float z = target[1];
+                float previewHeight = freeFlyPose ? target[2] : 0.0f;
+                const bool landStart = freeFlyPose && AppConfig::Instance().GetTestWorldLandStart() && GLandscape;
+                if (landStart)
+                {
+                    const float extent = static_cast<float>(GLandscape->GetTerrainRange() - 1) * GLandscape->GetTerrainGrid();
+                    const auto start = Poseidon::ChooseTerrainPreviewStart(extent,
+                        [](float px, float pz) { return GLandscape->SurfaceY(px, pz); });
+                    x = start.x;
+                    z = start.z;
+                    previewHeight = start.height + 120.0f;
+                    LOG_INFO(Core, "Local map preview land start: {}, {}, {}; ground {}", x, previewHeight, z, start.height);
+                }
                 const std::vector<float>& lookAt = AppConfig::Instance().GetTestWorldLookAt();
                 const float yawDegrees = AppConfig::Instance().GetTestWorldYaw();
                 if (freeFlyPose)
@@ -2092,7 +2105,7 @@ void GameApplication::RunMainLoop()
                     // same native CameraVehicle as the developer's free-fly tool:
                     // it is an independent manual camera effect, so it preserves
                     // the captured pose without moving or disturbing the player.
-                    const Vector3 position(x, target[2], z);
+                    const Vector3 position(x, previewHeight, z);
                     Vector3 direction;
                     if (!lookAt.empty())
                     {
@@ -2101,7 +2114,7 @@ void GameApplication::RunMainLoop()
                     else
                     {
                         const float azimuth = target[3] * (H_PI / 180.0f);
-                        const float elevation = target[4] * (H_PI / 180.0f);
+                        const float elevation = (landStart ? -30.0f : target[4]) * (H_PI / 180.0f);
                         const float horizontal = std::cos(elevation);
                         direction = Vector3(horizontal * std::sin(azimuth), std::sin(elevation),
                                             horizontal * std::cos(azimuth));
@@ -2167,7 +2180,7 @@ void GameApplication::RunMainLoop()
                     }
                     LOG_INFO(Core,
                              "--test-world-freefly: camera at {}, {}, {}; azimuth {} elevation {} degrees{}", x,
-                             target[2], z, target[3], target[4],
+                             previewHeight, z, target[3], landStart ? -30.0f : target[4],
                              lookAt.empty() ? "" : " (aimed using --test-world-look-at)");
                 }
                 else

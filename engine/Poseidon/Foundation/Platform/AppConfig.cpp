@@ -805,6 +805,8 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                                     "overrides --test-world-pos and --test-world-yaw")
                        ->expected(5),
                    CliHelpVisibility::Dev);
+        debugGroup->add_flag("--test-world-land-start", _testWorldLandStart,
+                             "Choose a preview camera start over loaded land; preserves view-distance settings");
         showOption(debugGroup
                        ->add_option("--test-world-hour", _testWorldHour,
                                     "Set the substituted-world capture time (0-23.99; preserves mission time when omitted)")

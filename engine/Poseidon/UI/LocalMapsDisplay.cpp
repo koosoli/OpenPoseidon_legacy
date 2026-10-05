@@ -177,7 +177,7 @@ class LocalMapsDisplay : public Display
         }
         if (map)
         {
-            args.insert(args.end(), {"--test-world", map->enfusion ? map->archiveRoot : map->worldPath,
+            args.insert(args.end(), {"--test-world", map->enfusion ? map->archiveRoot : map->worldPath, "--test-world-land-start",
                                      "--test-world-freefly", "1000", "1000", "250", "0", "-15"});
             if (map->enfusion)
             {

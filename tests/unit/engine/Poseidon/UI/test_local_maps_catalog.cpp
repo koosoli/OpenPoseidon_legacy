@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/UI/LocalMapsCatalog.hpp>
+#include <Poseidon/World/Terrain/TerrainPreviewStart.hpp>
+#include <limits>
 #include <filesystem>
 #include <fstream>
 #include <chrono>
@@ -71,4 +73,22 @@ TEST_CASE("Local map scan uses the archive prefix and guards unsupported worlds"
             ++supported;
     }
     REQUIRE(supported == 1);
+}
+
+TEST_CASE("Local map preview finds loaded land with a bounded search", "[local-maps]")
+{
+    int calls = 0;
+    auto flat = Poseidon::ChooseTerrainPreviewStart(1000.0f, [&](float, float) { ++calls; return 12.0f; });
+    REQUIRE(calls == 82);
+    REQUIRE(flat.x == 500.0f);
+    REQUIRE(flat.z == 500.0f);
+    REQUIRE(flat.height == 12.0f);
+    auto island = Poseidon::ChooseTerrainPreviewStart(1000.0f, [](float x, float z) {
+        if (x > 290.0f && x < 310.0f && z > 790.0f && z < 810.0f) return 150.0f;
+        if (x < 200.0f) return std::numeric_limits<float>::quiet_NaN();
+        return 0.0f;
+    });
+    REQUIRE(island.x == 300.0f);
+    REQUIRE(island.z == 800.0f);
+    REQUIRE(island.height == 150.0f);
 }
