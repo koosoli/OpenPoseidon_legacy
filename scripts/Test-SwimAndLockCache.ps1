@@ -1,6 +1,6 @@
 param(
  [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{8,40}$')][string]$ExpectedCommit,
- [ValidateSet('swim','stress')][string[]]$Checks=@('swim','stress')
+ [ValidateSet('swim','stress')][string[]]$Checks=@('swim','stress'),[switch]$NormalLaunch
 )
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
@@ -34,7 +34,7 @@ function Capture([string]$label){
 try {
  $env:POSEIDON_SNOWLINE='off';$env:POSEIDON_SNOW_TEST_DEPTH='0';$env:WGR_GRASS='0';$env:WGR_AUTO_EXPOSURE='0';$env:WGR_EXPOSURE='.6';$env:WGR_TEMPORAL='0'
  foreach($fixture in @(
-  @{name='swim';mission=(Join-Path $mod 'Missions/OpenPoseidon/swim-bay.Eden');extra=@('--mod',('"'+$mod+'"'))},
+  @{name='swim';mission=(Join-Path $mod 'Missions/OpenPoseidon/swim-bay.Eden');extra=$(if($NormalLaunch){@()}else{@('--mod',('"'+$mod+'"'))})},
   @{name='stress';mission=(Join-Path $game 'Mods/@63units/63MAX.west_ls2');extra=@('--addon-root',('"'+(Join-Path $game 'Mods/@63units')+'"'))}
  )){
   if($fixture.name -notin $Checks){continue}

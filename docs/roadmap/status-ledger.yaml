@@ -5,6 +5,16 @@ execution:
   baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
   integration_owner: Oliver Kay
   activation_state: ACTIVE
+  local_swim_normal_launch_checkpoint:
+    state: LOCAL_AUTOMATIC_LOADING_INSTALLED_RUNTIME_PASSED
+    installed_source_commit: c3ee325c
+    evidence: docs/verification/local-swim-autoload-20261005.md
+    note: >-
+      Existing local-only swim archive is also mounted by ordinary game launches.
+      No RTMs or addon configuration added to Git. Actual SDL W six seconds swims
+      5.34m; release and scripted return to land pass with normal exit and no GPU
+      or cache-unlock errors. Third-person land visibility remains OPEN: sixteen
+      scripted orbit views and walking checked; native-camera issue not reproduced.
   normal_options_view_distance_checkpoint:
     state: INSTALLED_NATIVE_MENU_INPUT_AND_PERSISTENCE_PASSED
     installed_source_commit: c3ee325c

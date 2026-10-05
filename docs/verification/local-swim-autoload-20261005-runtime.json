@@ -1,0 +1,342 @@
+{
+  "passed": true,
+  "installed": "codex/kolgujev-fog-corpse-fixes-20261004 c3ee325c 2026-10-05_18:58 deploy-ps1",
+  "pair": {
+    "OpenPoseidon.exe": "5900486900FB34AE6397B40DE216A03A20A60D276A9042AA8D92E2263C4EEB1D",
+    "wgpu_renderer.dll": "49BCB78FC4E5005CFD92366EF5F3DFDB18367D74625A70E5B5BD8012E04B18DB"
+  },
+  "scriptSha256": "D155F3A180E0B21BD9B6C4109465F6C66BE680ED9DD36ED85760B9FCCA839FD8",
+  "arms": [
+    {
+      "name": "swim",
+      "captures": {
+        "stroke": "C:\\Users\\mail\\.codex\\worktrees\\player-visibility-recovery-20261005\\CWR-CE-paavohuhtalafork-\\build\\local-swim-stress\\20261005-194040\\swim\\stroke.png",
+        "land": "C:\\Users\\mail\\.codex\\worktrees\\player-visibility-recovery-20261005\\CWR-CE-paavohuhtalafork-\\build\\local-swim-stress\\20261005-194040\\swim\\land.png",
+        "tread": "C:\\Users\\mail\\.codex\\worktrees\\player-visibility-recovery-20261005\\CWR-CE-paavohuhtalafork-\\build\\local-swim-stress\\20261005-194040\\swim\\tread.png"
+      },
+      "player": {
+        "name": "WEST Alpha Schwarz:1 (mail)",
+        "cls": "SoldierWB",
+        "shape": "data3d\\mc vojakw2.p3d",
+        "pos": [
+          9948.18,
+          1427.96,
+          2.6
+        ],
+        "dir": 181.0,
+        "damage": 0.0,
+        "destroyed": false,
+        "speed": 1.32,
+        "watched": false,
+        "side": 1,
+        "zones": {
+          "hlava": 0.0,
+          "telo": 0.0,
+          "ruce": 0.0,
+          "nohy": 0.0
+        },
+        "weapons": [
+          "M16",
+          "Throw",
+          "Put"
+        ],
+        "selected": {
+          "weapon": "M16",
+          "muzzle": "M16",
+          "magazine": true,
+          "ammo": 30,
+          "loaded": true
+        },
+        "magazines": 10,
+        "brain": {
+          "group": "Alpha Schwarz",
+          "groupLeader": true,
+          "state": 0,
+          "life": 0,
+          "combatMode": 3,
+          "semaphore": 3,
+          "planning": 0,
+          "mode": 2,
+          "path": 0
+        },
+        "man": {
+          "move": "swim",
+          "time": 0.667,
+          "factor": 1.0,
+          "secondary": "combat",
+          "external": "",
+          "queue": 0,
+          "down": false,
+          "unitPos": 2
+        },
+        "ok": true
+      },
+      "returnTread": {
+        "name": "WEST Alpha Schwarz:1 (mail)",
+        "cls": "SoldierWB",
+        "shape": "data3d\\mc vojakw2.p3d",
+        "pos": [
+          9950.3,
+          1422.87,
+          2.64
+        ],
+        "dir": 174.8,
+        "damage": 0.0,
+        "destroyed": false,
+        "speed": 0.3,
+        "watched": false,
+        "side": 1,
+        "zones": {
+          "hlava": 0.0,
+          "telo": 0.0,
+          "ruce": 0.0,
+          "nohy": 0.0
+        },
+        "weapons": [
+          "M16",
+          "Throw",
+          "Put"
+        ],
+        "selected": {
+          "weapon": "M16",
+          "muzzle": "M16",
+          "magazine": true,
+          "ammo": 30,
+          "loaded": true
+        },
+        "magazines": 10,
+        "brain": {
+          "group": "Alpha Schwarz",
+          "groupLeader": true,
+          "state": 0,
+          "life": 0,
+          "combatMode": 3,
+          "semaphore": 3,
+          "planning": 0,
+          "mode": 2,
+          "path": 0
+        },
+        "man": {
+          "move": "swim",
+          "time": 0.889,
+          "factor": 1.0,
+          "secondary": "swimf",
+          "external": "",
+          "queue": 0,
+          "down": false,
+          "unitPos": 2
+        },
+        "ok": true
+      },
+      "log": "C:\\Users\\mail\\.codex\\worktrees\\player-visibility-recovery-20261005\\CWR-CE-paavohuhtalafork-\\build\\local-swim-stress\\20261005-194040\\swim\\engine.log",
+      "movement": {
+        "after": [
+          9949.61,
+          1422.69,
+          2.1861
+        ],
+        "distance": 5.344342803376181,
+        "input": "Actual SDL W held six seconds",
+        "before": [
+          9947.95,
+          1427.77,
+          2.50509
+        ]
+      },
+      "pid": 61964,
+      "passed": true,
+      "tread": {
+        "name": "WEST Alpha Schwarz:1 (mail)",
+        "cls": "SoldierWB",
+        "shape": "data3d\\mc vojakw2.p3d",
+        "pos": [
+          9948.16,
+          1427.95,
+          2.59
+        ],
+        "dir": 181.0,
+        "damage": 0.0,
+        "destroyed": false,
+        "speed": 1.32,
+        "watched": false,
+        "side": 1,
+        "zones": {
+          "hlava": 0.0,
+          "telo": 0.0,
+          "ruce": 0.0,
+          "nohy": 0.0
+        },
+        "weapons": [
+          "M16",
+          "Throw",
+          "Put"
+        ],
+        "selected": {
+          "weapon": "M16",
+          "muzzle": "M16",
+          "magazine": true,
+          "ammo": 30,
+          "loaded": true
+        },
+        "magazines": 10,
+        "brain": {
+          "group": "Alpha Schwarz",
+          "groupLeader": true,
+          "state": 0,
+          "life": 0,
+          "combatMode": 3,
+          "semaphore": 3,
+          "planning": 0,
+          "mode": 2,
+          "path": 0
+        },
+        "man": {
+          "move": "swim",
+          "time": 0.674,
+          "factor": 1.0,
+          "secondary": "combat",
+          "external": "",
+          "queue": 0,
+          "down": false,
+          "unitPos": 2
+        },
+        "ok": true
+      },
+      "land": {
+        "name": "WEST Alpha Schwarz:1 (mail)",
+        "cls": "SoldierWB",
+        "shape": "data3d\\mc vojakw2.p3d",
+        "pos": [
+          9300.0,
+          1900.02,
+          42.03
+        ],
+        "dir": 175.0,
+        "damage": 0.0,
+        "destroyed": false,
+        "speed": 0.0,
+        "watched": false,
+        "side": 1,
+        "zones": {
+          "hlava": 0.0,
+          "telo": 0.0,
+          "ruce": 0.0,
+          "nohy": 0.0
+        },
+        "weapons": [
+          "M16",
+          "Throw",
+          "Put"
+        ],
+        "selected": {
+          "weapon": "M16",
+          "muzzle": "M16",
+          "magazine": true,
+          "ammo": 30,
+          "loaded": true
+        },
+        "magazines": 10,
+        "brain": {
+          "group": "Alpha Schwarz",
+          "groupLeader": true,
+          "state": 0,
+          "life": 0,
+          "combatMode": 3,
+          "semaphore": 3,
+          "planning": 0,
+          "mode": 2,
+          "path": 0
+        },
+        "man": {
+          "move": "combat",
+          "time": 0.0,
+          "factor": 1.0,
+          "secondary": "swim",
+          "external": "",
+          "queue": 0,
+          "down": false,
+          "unitPos": 2
+        },
+        "ok": true
+      },
+      "exitCode": 0,
+      "arguments": [
+        "--render=wgpu",
+        "--window",
+        "--dev",
+        "--width",
+        "1280",
+        "--height",
+        "720",
+        "--vd",
+        "1500",
+        "--harness",
+        "64194",
+        "--test-mission",
+        "\"C:\\Users\\mail\\AppData\\Local\\OpenPoseidon\\LocalMods\\@OP_SwimLocalTest\\Missions\\OpenPoseidon\\swim-bay.Eden\"",
+        "--test-world-hour",
+        "12",
+        "--log-file",
+        "\"C:\\Users\\mail\\.codex\\worktrees\\player-visibility-recovery-20261005\\CWR-CE-paavohuhtalafork-\\build\\local-swim-stress\\20261005-194040\\swim\\engine.log\""
+      ],
+      "stroke": {
+        "name": "WEST Alpha Schwarz:1 (mail)",
+        "cls": "SoldierWB",
+        "shape": "data3d\\mc vojakw2.p3d",
+        "pos": [
+          9949.6,
+          1422.71,
+          2.18
+        ],
+        "dir": 174.6,
+        "damage": 0.0,
+        "destroyed": false,
+        "speed": 0.96,
+        "watched": false,
+        "side": 1,
+        "zones": {
+          "hlava": 0.0,
+          "telo": 0.0,
+          "ruce": 0.0,
+          "nohy": 0.0
+        },
+        "weapons": [
+          "M16",
+          "Throw",
+          "Put"
+        ],
+        "selected": {
+          "weapon": "M16",
+          "muzzle": "M16",
+          "magazine": true,
+          "ammo": 30,
+          "loaded": true
+        },
+        "magazines": 10,
+        "brain": {
+          "group": "Alpha Schwarz",
+          "groupLeader": true,
+          "state": 0,
+          "life": 0,
+          "combatMode": 3,
+          "semaphore": 3,
+          "planning": 0,
+          "mode": 2,
+          "path": 0
+        },
+        "man": {
+          "move": "swimf",
+          "time": 0.984,
+          "factor": 1.0,
+          "secondary": "swim",
+          "external": "",
+          "queue": 0,
+          "down": false,
+          "unitPos": 2
+        },
+        "ok": true
+      }
+    }
+  ],
+  "scope": "Installed optional swim player movement, model/animation readback, dry-land relocation, actual stress mission repeated terrain flushes and normal exit; no continuous swim-to-shore, broad swim animation or Eastern ragdoll qualification."
+}
