@@ -22,7 +22,7 @@ class Intro
                     position[]={2500,0,3500}; azimut=235; id=0;
                     side="WEST"; vehicle="BoatW"; leader=1; skill=0.8;
                     text="opMenuBoat";
-                    init="this allowDamage false; this setCombatMode \"BLUE\"; this setBehaviour \"SAFE\"";
+                    init="this allowDamage false; this setCombatMode ""BLUE""; this setBehaviour ""SAFE""";
                 };
             };
             class Waypoints

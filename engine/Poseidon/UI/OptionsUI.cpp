@@ -2290,6 +2290,8 @@ void StartRandomCutscene(RString world)
         GLOB_WORLD->InitVehicles(GModeIntro, CurrentTemplate);
         if (GEngine)
             GEngine->SetMenuSeaSceneActive(menuSea);
+        if (menuSea)
+            Poseidon::RunInitScript();
         //		GWorld->EnableSimulation(true);
     }
 }

@@ -41,4 +41,4 @@ New-Item -ItemType Directory -Force $menuStage | Out-Null
 foreach ($name in @('mission.sqm','init.sqs')) {
     Copy-Item -LiteralPath (Join-Path $root "content/menu/RoughSea.Intro/$name") -Destination (Join-Path $menuStage $name) -Force
 }
-Write-Host 'Staging alone is not visual/runtime acceptance. No original game archive was modified.' 
+Write-Host 'Staging alone is not visual/runtime acceptance. No original game archive was modified.'

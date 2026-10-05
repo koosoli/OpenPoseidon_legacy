@@ -208,7 +208,7 @@ foreach ($name in @('mission.sqm','init.sqs')) {
     if (!(Test-Path -LiteralPath $source)) { throw "Missing authored menu scene: $source. Run Build.ps1." }
     $contentPayload += @{Source=$source; Relative=$relative}
 }
-$menuLogo = Join-Path $distDir 'assets/ui/openposeidon_logo.paa' 
+$menuLogo = Join-Path $distDir 'assets/ui/openposeidon_logo.paa'
 if (Test-Path -LiteralPath $menuLogo) {
     $contentPayload += @{Source=$menuLogo; Relative='assets/ui/openposeidon_logo.paa'}
 }
