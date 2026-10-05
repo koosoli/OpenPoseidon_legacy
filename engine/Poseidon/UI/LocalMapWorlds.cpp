@@ -241,10 +241,19 @@ void RegisterWorldClass(const std::string& alias, const LocalMap& map)
     cfgWorlds->SetAccessMode(worldAccess);
     if (!cls)
         return;
-    cls->SetBase(eden->GetClassInterface());
+    // Add/AddClass search inherited entries, so write our overrides before attaching
+    // Eden. Otherwise Add("worldName", ...) edits Eden's entry rather than creating
+    // an owned entry and redirects the original OFP terrain too.
+    cls->SetBase(nullptr);
     cls->Add("opLocalMapWorld", 1);
     cls->Add("worldName", RString(sentinel.c_str()));
     cls->Add("description", RString((map.game + " / " + map.name).c_str()));
+    if (ParamClass* names = cls->AddClass("Names"))
+    {
+        names->SetBase(nullptr);
+        names->Clear(); // Eden's towns are not landmarks on the selected foreign terrain.
+    }
+    cls->SetBase(eden->GetClassInterface());
     const ParamAccessMode listAccess = cfgList->GetAccessMode();
     cfgList->SetAccessMode(PAReadAndWrite);
     cfgList->AddClass(alias.c_str());
