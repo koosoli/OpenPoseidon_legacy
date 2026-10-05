@@ -11,6 +11,8 @@
 
 #include <Poseidon/World/Entities/Vehicles/Ground/Car.hpp>
 #include <Poseidon/World/Entities/Vehicles/Ground/TrackedWaterResponse.hpp>
+#include <Poseidon/World/Weather/MudContact.hpp>
+#include <Poseidon/World/Weather/MudField.hpp>
 #include <Poseidon/Game/OperMap.hpp>
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
@@ -612,6 +614,13 @@ bool Car::IsBlocked() const
 
 void Car::Simulate(float deltaT, SimulationImportance prec)
 {
+    // Deliberately limited to the stock unarmed Jeep for runtime evaluation.
+    // Geometry is mission-local; no new network or traction contract is implied.
+    const bool mudPrototype = IsLocal() && strcmp(Type()->GetName(), "Jeep") == 0 &&
+                              GMud().ContactActive() && DirectionUp().Y() >= 0.3f;
+    bool mudGrounded[MaxWheels]{};
+    Vector3 mudContact[MaxWheels];
+    float mudUnder[MaxWheels]{};
     _isUpsideDown = DirectionUp().Y() < 0.3f;
     _isDead = IsDammageDestroyed();
 
@@ -1300,6 +1309,13 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
                         if (wheel < MaxWheels)
                         {
                             saturateMax(damperForces[wheel], info.under * adaptDamper);
+                            if (mudPrototype && info.obj == nullptr &&
+                                (!mudGrounded[wheel] || info.under > mudUnder[wheel]))
+                            {
+                                mudGrounded[wheel] = true;
+                                mudContact[wheel] = info.pos;
+                                mudUnder[wheel] = info.under;
+                            }
                         }
 
                         // some friction is caused by moving the land aside
@@ -1568,6 +1584,24 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
 
     // Resting vehicles must still keep newly deposited snow below their chassis.
     _track.UpdateSnow(*this, !_landContact || DirectionUp().Y() < 0.3f, deltaT);
+
+    // Publish only after all collision forces were evaluated against one field
+    // state. Each wheel carries its own actual support; car-wide contact cannot
+    // stamp airborne wheels. No contacts during stopped simulation means no dig.
+    for (int wheel = 0; wheel < MaxWheels; ++wheel)
+    {
+        if (!mudPrototype || !mudGrounded[wheel] || _waterContact)
+        {
+            _mudWheels[wheel].Reset();
+            continue;
+        }
+        const Vector3& point = mudContact[wheel];
+        _mudWheels[wheel].Update(point.X(), point.Y(), point.Z(),
+            true,
+            [&](float x, float y, float z) {
+                return StampMudWheelContact(*GLOB_LAND, *this, Vector3(x, y, z));
+            });
+    }
 
     if (!CommanderUnit() || CommanderUnit()->IsInCargo())
     {

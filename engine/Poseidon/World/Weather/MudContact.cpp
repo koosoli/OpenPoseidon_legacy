@@ -8,14 +8,11 @@
 
 namespace Poseidon
 {
-bool StampMudFootstep(const Landscape& land, Object& actor,
-                      Vector3Par foot, Vector3Par direction)
+static bool AdmitMudContact(const Landscape& land, Object& actor, Vector3Par foot, float tolerance)
 {
     auto& mud = GMud();
     if (!mud.ContactActive() || !std::isfinite(foot.X()) || !std::isfinite(foot.Y()) ||
-        !std::isfinite(foot.Z()) || !std::isfinite(direction.X()) || !std::isfinite(direction.Z())) return false;
-    const float length = std::hypot(direction.X(), direction.Z());
-    if (length < 0.001f || !std::isfinite(length)) return false;
+        !std::isfinite(foot.Z())) return false;
 
     // Native/A3 masks may mix soft and hard layers inside one palette tile.
     // Until their exact point-mask producer is available, fail closed rather
@@ -51,7 +48,7 @@ bool StampMudFootstep(const Landscape& land, Object& actor,
     dx -= mudGradient[0]; dz -= mudGradient[1];
     if (!std::isfinite(ground) || ground <= land.GetSeaLevel() + 0.15f ||
         !std::isfinite(dx) || !std::isfinite(dz) || std::hypot(dx, dz) > 0.7f ||
-        std::abs(foot.Y() - ground) > 0.25f || GSnow().BaseDepthAt(foot.X(), foot.Z()) > 0.002f) return false;
+        std::abs(foot.Y() - ground) > tolerance || GSnow().BaseDepthAt(foot.X(), foot.Z()) > 0.002f) return false;
     Object* roadway = nullptr;
     const float support = land.RoadSurfaceY(foot + Vector3(0, 0.5f, 0), nullptr, nullptr, nullptr, &roadway);
     if (roadway != nullptr || !std::isfinite(support) || support > ground + 0.05f) return false;
@@ -62,6 +59,37 @@ bool StampMudFootstep(const Landscape& land, Object& actor,
     const Vector3 origin = foot + Vector3(0, 0.2f, 0);
     land.ObjectCollision(hits, nullptr, &actor, origin, origin + Vector3(0, 30, 0), 0.05f, ObjIntersectView);
     if (hits.Size() != 0) return false;
+    return true;
+}
+
+bool StampMudWheelContact(const Landscape& land, Object& actor, Vector3Par point)
+{
+    // The car calls this only for an identified wheel with actual solid-ground
+    // collision. Allow its penetration tolerance; still reject sea/roads/roofs.
+    if (!AdmitMudContact(land, actor, point, 0.5f)) return false;
+    auto& mud = GMud();
+    const float depth = std::min(0.12f, mud.ContactDepth() * 0.5f);
+    const bool changed = mud.Stamp(point.X(), point.Z(), MudField::ContactRadius(depth), depth, 0.8f);
+    static const bool trace = [] {
+        const char* value = std::getenv("POSEIDON_MUD_TRACE");
+        return value && value[0] == '1';
+    }();
+    if (trace && changed)
+        LOG_INFO(Physics, "MUD_WHEEL x={:.3f} z={:.3f} wet={:.4f} capacity={:.4f} stored={:.4f} revision={}",
+                 point.X(), point.Z(), mud.Wetness(), depth,
+                 mud.HeightOffsetAt(point.X(), point.Z()), mud.Revision());
+    // Admission, not mutation: a saturated rut remains a valid trail anchor.
+    return true;
+}
+
+bool StampMudFootstep(const Landscape& land, Object& actor,
+                      Vector3Par foot, Vector3Par direction)
+{
+    if (!std::isfinite(direction.X()) || !std::isfinite(direction.Z())) return false;
+    const float length = std::hypot(direction.X(), direction.Z());
+    if (length < 0.001f || !std::isfinite(length) || !AdmitMudContact(land, actor, foot, 0.25f)) return false;
+    auto& mud = GMud();
+    const float landGrid = land.GetLandGrid();
 
     const Vector3 axis(direction.X() / length, 0, direction.Z() / length);
     const Vector3 toe = foot + axis * 0.075f, heel = foot - axis * 0.075f;

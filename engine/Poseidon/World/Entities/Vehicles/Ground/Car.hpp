@@ -8,6 +8,7 @@
 #include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
 
 #include <Poseidon/World/Entities/Infantry/Wounds.hpp>
+#include <Poseidon/World/Weather/MudWheelTrail.hpp>
 
 namespace Poseidon
 {
@@ -132,6 +133,7 @@ class Car: public TankOrCar
 	
 	float _wheelPhase;
 	float _dampers[MaxWheels];
+	MudWheelTrail _mudWheels[MaxWheels];
 	
 	float _reverseTimeLeft; // force reverse state
 	float _forwardTimeLeft; // force forward state
