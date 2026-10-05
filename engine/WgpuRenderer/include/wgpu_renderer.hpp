@@ -147,7 +147,8 @@ enum WgrBlend : uint32_t
     WGR_BLEND_OPAQUE = 0,
     WGR_BLEND_ALPHA = 1,
     WGR_BLEND_ADDITIVE = 2,
-    WGR_BLEND_SHADOW = 3
+    WGR_BLEND_SHADOW = 3,
+    WGR_BLEND_RELIEF_MULTIPLY = 4 // receiver multiplier + fog airlight compensation; keeps alpha
 };
 
 /* Depth-buffer interaction for a 2D/screen batch. Plain 2D and depth-disabled
@@ -316,7 +317,8 @@ enum WgrDraw3DFlags : uint32_t
      * depth-test only). The world depth prepass lays depth for this draw's FULLY SOLID texels
      * (texture alpha >= 0.98) so a mostly-solid atlas that classified Blend (a floor, a camo net)
      * still occludes what is behind it; the colour pass keeps blending every texel. */
-    WGR_DRAW3D_BLEND_SECTION = 8192
+    WGR_DRAW3D_BLEND_SECTION = 8192,
+    WGR_DRAW3D_BOOT_RELIEF = 16384 // exact authored footstep Mark on deformable soil, opt-in
 };
 
 /* Matrices per palette block (the engine's own bone-palette cap). Each skinned

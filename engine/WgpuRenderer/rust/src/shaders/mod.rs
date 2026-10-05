@@ -124,6 +124,7 @@ pub fn build_composer() -> Composer {
     let mut composer = Composer::default().with_capabilities(capabilities);
     for (source, file_path) in [
         (include_str!("color.wgsl"), "color.wgsl"),
+        (include_str!("boot_relief.wgsl"), "boot_relief.wgsl"),
         (
             include_str!("../water/fft_sampling.wgsl"),
             "water/fft_sampling.wgsl",

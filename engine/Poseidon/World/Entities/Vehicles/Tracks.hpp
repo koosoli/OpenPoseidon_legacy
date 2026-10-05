@@ -90,10 +90,14 @@ class TrackDraw: public RefCount
 class Mark: public Vehicle
 {
 	float _alpha,_alphaSpeed;
+	bool _bootRelief = false;
 
 	public:
 	Mark( LODShapeWithShadow *shape, float alpha=1.0, float timeToLive=10 );
 	~Mark() override;
+	void SetBootRelief(bool enabled) { _bootRelief = enabled; }
+	bool HasBootRelief() const { return _bootRelief; }
+	float BootReliefOpacity() const { return _alpha; }
 
 	void Simulate( float deltaT, SimulationImportance prec ) override;
 

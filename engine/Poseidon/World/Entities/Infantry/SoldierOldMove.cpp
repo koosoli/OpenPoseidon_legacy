@@ -209,6 +209,7 @@ void Man::EmitGroundBootContact(bool left, SimulationImportance prec)
             if (shape)
             {
                 Ref<Mark> mark = new Mark(shape, 0.25f, timeToLive);
+                mark->SetBootRelief(mudChanged || sandChanged);
                 mark->SetDirectionAndUp(Direction(), VUp);
                 mark->SetPosition(pos);
                 GWorld->AddAnimal(mark);

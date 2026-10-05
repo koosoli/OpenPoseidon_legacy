@@ -5,13 +5,14 @@
 // point): the plain pipeline binds `object`, the skinned pipeline binds the
 // bone `palette` (from the skin module). Shadowing is the shared cascade kernel.
 
-#import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_FRESNEL_ENV}
+#import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, apply_fog_terrain, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_FRESNEL_ENV}
 #import shadow::shadow_strength
 #import frame::{surface_rays, cloud_shadow_tex, terrain_shadow_samp, terrain_shadow_map}
 #import frame::monitor_scene
 #import skin::{skin_pos, skin_normal}
 #import lighting::lights_contrib
 #import color::srgb_to_linear
+#import boot_relief::{boot_relief_height, boot_relief_normal, boot_relief_parallax, boot_relief_multiplier, boot_relief_composite}
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
 // Shared fragment shading, also used by the GPU-driven indirect path (gpu_driven.wgsl).
 #import shading::{shade, ShadeMaterial, surface_normal, object_snow_coverage, object_snow_normal}
@@ -150,6 +151,7 @@ const MATFLAG_COCKPIT: u32 = 16u;
 const MATFLAG_NORMAL_RG: u32 = 128u;
 const MATFLAG_SNOW_RECEIVER: u32 = 2048u;
 const MATFLAG_GROUND_RECEIVER: u32 = 4096u;
+const MATFLAG_BOOT_RELIEF: u32 = 16384u;
 
 fn material_flags(m: Material) -> u32 {
     return u32(m.normal_map.w + 0.5);
@@ -843,6 +845,8 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
     let uniform_uv_footprint = fwidth(in.uv);
+    let boot_duv_dx = dpdx(in.uv);
+    let boot_duv_dy = dpdy(in.uv);
     // The reflected camera carries an absolute-world water clip plane in Frame.
     // Terrain already honours it; apply the same plane to retained/skinned objects
     // so submerged geometry cannot leak into or occlude the planar reflection.
@@ -865,6 +869,40 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // residency decision is about; the normal map shares its fate.
     mip_feedback_note(packed >> 3u, dpdx(in.uv), dpdy(in.uv));
 
+    if ((material_flags(material) & MATFLAG_BOOT_RELIEF) != 0u) {
+        let fade = 1.0 - smoothstep(4.0, 12.0, length(in.world_pos));
+        if (fade <= 0.0) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
+        let slot = packed >> 3u;
+        let samp = packed & 7u;
+        let dims = vec2<f32>(textureDimensions(textures[slot], 0));
+        let texel = 1.0 / max(dims, vec2<f32>(1.0));
+        let rho = max(length(boot_duv_dx * dims), length(boot_duv_dy * dims));
+        let lod = max(0.0, log2(max(rho, 1.0)) + frame.renscale.x);
+        let centre = textureSampleLevel(textures[slot], samplers[samp], in.uv, lod);
+        let height = boot_relief_height(centre);
+        let determinant = boot_duv_dx.x * boot_duv_dy.y - boot_duv_dx.y * boot_duv_dy.x;
+        if (abs(determinant) < 0.000000000001) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
+        let tangent = (dwx * boot_duv_dy.y - dwy * boot_duv_dx.y) / determinant;
+        let bitangent = (dwy * boot_duv_dx.x - dwx * boot_duv_dy.x) / determinant;
+        let n = surface_normal(in.normal, in.world_pos, dwx, dwy);
+        let view = -in.world_pos / max(length(in.world_pos), 0.0001);
+        let shifted = clamp(in.uv + boot_relief_parallax(view, n, tangent, bitangent, height) * fade,
+                            texel * 0.5, vec2<f32>(1.0) - texel * 0.5);
+        let mask = textureSampleLevel(textures[slot], samplers[samp], shifted, lod);
+        let hp = boot_relief_height(textureSampleLevel(textures[slot], samplers[samp], shifted + vec2<f32>(texel.x, 0.0), lod));
+        let hm = boot_relief_height(textureSampleLevel(textures[slot], samplers[samp], shifted - vec2<f32>(texel.x, 0.0), lod));
+        let vp = boot_relief_height(textureSampleLevel(textures[slot], samplers[samp], shifted + vec2<f32>(0.0, texel.y), lod));
+        let vm = boot_relief_height(textureSampleLevel(textures[slot], samplers[samp], shifted - vec2<f32>(0.0, texel.y), lod));
+        let gradient = vec2<f32>((hp - hm) / (2.0 * texel.x), (vp - vm) / (2.0 * texel.y));
+        let relieved = boot_relief_normal(n, tangent, bitangent, gradient);
+        let sun = -frame.sun_dir_world.xyz;
+        let light = sun / max(length(sun), 0.0001);
+        let direct = max(frame.sun_diffuse.r, max(frame.sun_diffuse.g, frame.sun_diffuse.b));
+        let multiplier = boot_relief_multiplier(n, relieved, light, boot_relief_height(mask),
+            material.local_specular.w * min(mask.a, centre.a), fade, direct);
+        let airlight = apply_fog_terrain(vec3<f32>(0.0), in.world_pos);
+        return boot_relief_composite(multiplier, airlight);
+    }
     // Parallax occlusion mapping, carried in the normal map's RED channel.
     //
     // R is free and it is free by MEASUREMENT, not by hope: every shipped Arma NOHQ in this

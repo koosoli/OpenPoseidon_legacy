@@ -5,6 +5,7 @@
 #include "TreeSnowSurface.hpp"
 #include "RainWaterPublication.hpp"
 #include <Poseidon/World/Weather/SnowField.hpp>
+#include <Poseidon/World/Entities/Vehicles/Tracks.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageCameraDemand.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPageProjectedDemand.hpp>
 #include <Poseidon/Graphics/Rendering/GeometryPagePrivateAutoFine.hpp>
@@ -9283,6 +9284,30 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                 LOG_INFO(Graphics, "MUZZLE_FLASH_MATERIAL texture={} width={} height={} enabled={} admitted=true animated=true noShadow=true orderedAlpha=true blend=true encoded={:.1f} radiancePeak=1.25 timing=existing-zasleh",
                          source->Name(), source->AWidth(0), source->AHeight(0), enabled,
                          d.mat_local_specular.w);
+        }
+    }
+    static const bool bootReliefOptIn = [] {
+        const char* value = std::getenv("POSEIDON_BOOT_RELIEF_PROTOTYPE");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    const auto* bootMark = bootReliefOptIn && snowOwner && typeid(*snowOwner) == typeid(Mark)
+        ? static_cast<const Mark*>(snowOwner) : nullptr;
+    const bool bootRelief = bootMark && bootMark->HasBootRelief() && GScene &&
+        (bootMark->GetShape() == GScene->Preloaded(FootStepL) ||
+         bootMark->GetShape() == GScene->Preloaded(FootStepR)) &&
+        desc.surface == render::SurfaceMode::OnSurface && d.blend == WGR_BLEND_ALPHA &&
+        d.depth == WGR_DEPTH_TEST && !buf->skinned && _currentPaletteSlot == WGR_NO_PALETTE;
+    if (bootRelief)
+    {
+        d.flags |= WGR_DRAW3D_BOOT_RELIEF;
+        d.blend = WGR_BLEND_RELIEF_MULTIPLY;
+        // Tagged marks use this spare scalar for their exact live TTL fade.
+        d.mat_local_specular.w = std::clamp(bootMark->BootReliefOpacity(), 0.0f, 1.0f);
+        static bool reported = false;
+        if (!reported)
+        {
+            reported = true;
+            LOG_INFO(Graphics, "BOOT_RELIEF_PROTOTYPE admitted=authored-footstep-mark depth=0.003m blend=receiver-multiply normal=texture-gradient parallax=bounded-near ttl=existing");
         }
     }
     // Foliage class for the direct WGPU path: only real plants get the leaf look, and the vertex

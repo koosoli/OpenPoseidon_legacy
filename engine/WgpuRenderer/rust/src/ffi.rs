@@ -105,6 +105,7 @@ pub enum WgrBlend {
     // Per-poly shadow darken: color = dst*(1-srcA). The fragment outputs black
     // with alpha = shadow strength.
     Shadow = 3,
+    ReliefMultiply = 4,
 }
 
 // Mirror of the C++ `Sampler2DFlags` / GL33's `_samplerObjects` index. The bits
@@ -303,6 +304,7 @@ pub const WGR_DRAW3D_NORMAL_RG: u32 = 128;
 pub const WGR_DRAW3D_NATIVE_CAVITY: u32 = 1024;
 pub const WGR_DRAW3D_SNOW_RECEIVER: u32 = 2048;
 pub const WGR_DRAW3D_GROUND_RECEIVER: u32 = 4096;
+pub const WGR_DRAW3D_BOOT_RELIEF: u32 = 16384;
 // MAT-053: a translucent object section from the back-to-front blend pass (wgpu_renderer.hpp).
 pub const WGR_DRAW3D_BLEND_SECTION: u32 = 8192;
 
