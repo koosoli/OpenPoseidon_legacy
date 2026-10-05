@@ -33,6 +33,18 @@ fn fog_segment_participant(y: f32, ray_y: f32, distance: f32, layer: vec4<f32>) 
     let end = clamp(max(a,b), 0.0, distance);
     return vec2<f32>((start + end) * 0.5, integral);
 }
+// Clip a linear native-ground interval to air before choosing its density
+// participant. A camera-ray step straddling the terrain must retain the air
+// above it instead of sampling its buried midpoint and deleting the whole step.
+fn fog_air_interval(agl: f32, slope: f32, distance: f32) -> vec2<f32> {
+    if (distance <= 0.0) { return vec2<f32>(0.0); }
+    if (abs(slope) < 1e-8) {
+        return vec2<f32>(0.0, select(0.0, distance, agl > 0.05));
+    }
+    let crossing = clamp((0.05 - agl) / slope, 0.0, distance);
+    if (slope < 0.0) { return vec2<f32>(0.0, crossing); }
+    return vec2<f32>(crossing, distance - crossing);
+}
 // Inverse-CDF samples of the normalized HG density over the FULL sphere.
 // The caller keeps equal weights, including zero for downward sky samples.
 // Pairing azimuths gives antipodal directions in the isotropic limit.

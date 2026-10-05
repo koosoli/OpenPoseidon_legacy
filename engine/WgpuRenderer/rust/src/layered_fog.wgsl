@@ -1,4 +1,4 @@
-#import layered_fog_optics::{fog_segment_density, fog_segment_participant, fog_height_density, fog_phase_sample, fog_height_primitive, fog_phase, fog_transmittance, fog_ray_direction, fog_patch_density, fog_valley_density, fog_domain_feather, fog_neutral_radiance}
+#import layered_fog_optics::{fog_segment_density, fog_segment_participant, fog_air_interval, fog_height_density, fog_phase_sample, fog_height_primitive, fog_phase, fog_transmittance, fog_ray_direction, fog_patch_density, fog_valley_density, fog_domain_feather, fog_neutral_radiance}
 #import color::srgb_to_linear
 
 struct FogVolume {
@@ -348,28 +348,26 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
             // Taking the minimum of all three taps deleted complete intervals
             // as the camera moved, producing bright steps and flicker.
             if (max(max(before.y,centre.y),after.y) <= 0.0) { continue; }
-            let shift=params.terrain.x*(centre.x-params.terrain.y);
             var tau=0.0;
             var source=vec3<f32>(0.0);
             for(var i=0u;i<2u;i=i+1u) {
                 // Each linear native half has a connected slab intersection.
                 // Sampling their combined centroid could land in a dry gap.
-                let pieces=select(1u,2u,params.terrain.x>0.0);
+                let pieces=2u;
                 for(var piece=0u;piece<pieces;piece=piece+1u) {
                     let length=step/f32(pieces);
                     let offset=f32(piece)*length;
-                    var start_y=params.camera.y+ray.y*start;
-                    var slope=ray.y;
-                    if(params.terrain.x>0.0) {
-                        let first=params.camera.y+ray.y*start-params.terrain.x*(before.x-params.terrain.y);
-                        let middle=p.y-shift;
-                        let last=params.camera.y+ray.y*(start+step)-params.terrain.x*(after.x-params.terrain.y);
-                        start_y=select(first,middle,piece==1u);
-                        slope=(select(middle,last,piece==1u)-start_y)/length;
-                    }
-                    let participant=fog_segment_participant(start_y,slope,length,params.layers[i]);
+                    let native_start=select(before.x,centre.x,piece==1u);
+                    let native_end=select(centre.x,after.x,piece==1u);
+                    let native_slope=(native_end-native_start)/length;
+                    let world_start_y=params.camera.y+ray.y*(start+offset);
+                    let air=fog_air_interval(world_start_y-native_start,ray.y-native_slope,length);
+                    if(air.y<=0.0){continue;}
+                    let slope=ray.y-params.terrain.x*native_slope;
+                    let start_y=world_start_y-params.terrain.x*(native_start-params.terrain.y)+slope*air.x;
+                    let participant=fog_segment_participant(start_y,slope,air.y,params.layers[i]);
                     if(participant.y<=0.0){continue;}
-                    let sample_rel=ray*(start+offset+participant.x);
+                    let sample_rel=ray*(start+offset+air.x+participant.x);
                     let sample_pos=params.camera.xyz+sample_rel;
                     let outdoor=fog_outdoor_sample(sample_pos);
                     if(outdoor.y<=0.0){continue;}

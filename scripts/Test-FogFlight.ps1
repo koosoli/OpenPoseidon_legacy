@@ -1,7 +1,7 @@
 <# Installed original Kolgujev, actual freefly camera movement, isolated profile. #>
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$ExpectedCommit,[string]$Label='fog-flight',[string]$Patch='',[switch]$Compact,[switch]$Wide,
- [switch]$EveronReport,[switch]$EveronRoadReport,[switch]$Valley,[switch]$Temporal,[switch]$TwoLayers,[switch]$Grass)
+ [switch]$EveronReport,[switch]$EveronRoadReport,[switch]$Valley,[switch]$Temporal,[switch]$TwoLayers,[switch]$Grass,[switch]$TopDown,[double]$FogAmount=-1)
 $ErrorActionPreference='Stop'
 if(!$env:LOCK_OWNER){throw 'Game lock required'}
 $root=Split-Path $PSScriptRoot -Parent
@@ -40,10 +40,12 @@ try{
  if($EveronReport -or $EveronRoadReport){Exec '0 setFog .78'}
  if($Valley){Exec '0 setFog .15'}
  if($Wide){Exec '0 setFog .15'}
+ if($FogAmount-ge0){Exec ('0 setFog '+$FogAmount.ToString('R',[Globalization.CultureInfo]::InvariantCulture))}
  Start-Sleep -Seconds 3;Exec 'setAccTime 0'
  $sites=@(@{name='coast';x=5448.73;z=7011.85;y=590.95;az=111.1;el=-24.1},@{name='ocean';x=7400;z=8500;y=900;az=120;el=-22})
  if($EveronReport -or $EveronRoadReport){$sites=@(@{name='everon-report';x=8131.43;z=4086.37;y=191.04;az=229.1;el=-11.3})}
  if($EveronRoadReport){$sites=@(@{name='everon-road';x=9182.32;z=2053.96;y=77.15;az=316.6;el=-11.9})}
+ if($TopDown){foreach($site in $sites){$site.y=250;$site.el=-70}}
  foreach($site in $sites){
   foreach($step in 0..12){
    $x=$site.x+$step*$(if($EveronReport -or $EveronRoadReport){-4}else{8});$z=$site.z+$step*5

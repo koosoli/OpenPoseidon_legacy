@@ -1,8 +1,10 @@
 <# Installed stock Jeep/truck wheel contacts on original Nogova soil; no synthetic stamps. #>
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$ExpectedCommit,
- [ValidateSet('Jeep','Truck5t')][string]$VehicleClass='Jeep',[switch]$Resistance)
+ [ValidateSet('Jeep','Truck5t')][string]$VehicleClass='Jeep',[switch]$Resistance,[switch]$DisableResistance)
 $ErrorActionPreference='Stop'
+if($Resistance -and $DisableResistance){throw 'Choose resistance on or off'}
+$resistanceEnabled=!$DisableResistance
 if(!$env:LOCK_OWNER){throw 'Game lock required'}
 $root=Split-Path $PSScriptRoot -Parent;$game='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault'
 if(Get-Process OpenPoseidon -ErrorAction SilentlyContinue){throw 'Existing game preserved'}
@@ -17,8 +19,9 @@ function Eval($code){$reply=Send @{cmd='eval';code=$code};return ($reply.result|
 try{
  $env:POSEIDON_USER_DIR=Join-Path $out 'user';$null=New-Item -ItemType Directory -Path $env:POSEIDON_USER_DIR
  [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
- $env:POSEIDON_MUD_TRUCK_PROTOTYPE=if($VehicleClass-eq'Truck5t'){'1'}else{'0'}
- $env:POSEIDON_MUD_TRACTION_PROTOTYPE=if($Resistance){'1'}else{'0'}
+ Remove-Item Env:POSEIDON_MUD_TRUCK_PROTOTYPE -ErrorAction SilentlyContinue
+ Remove-Item Env:POSEIDON_MUD_TRACTION_PROTOTYPE -ErrorAction SilentlyContinue
+ if($DisableResistance){$env:POSEIDON_MUD_TRACTION_PROTOTYPE='0'}
  $env:POSEIDON_MUD_TRACE='1';$env:WGR_GRASS='0';$env:WGR_TEMPORAL='0';$env:POSEIDON_SNOWLINE='off'
  $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
  $log=Join-Path $out 'engine.log';$stderr=Join-Path $out 'stderr.log';$mission=Join-Path $root 'tests/perf/missions/perf_mud.noe'
@@ -44,9 +47,9 @@ try{
  $limit=if($VehicleClass-eq'Truck5t'){.16001}else{.12001}
  Require ($min-lt-.015-and$min-ge-$limit) 'No bounded real wheel rut';$receipt.probes=$probes;$receipt.minimumOffset=$min
  $resistanceTrace=@(Select-String -LiteralPath $log -Pattern 'MUD_RESISTANCE' | ForEach-Object {$_.Line})
- if($Resistance){Require ($resistanceTrace.Count-gt0) 'Actual admitted-wheel resistance absent'}
+ if($resistanceEnabled){Require ($resistanceTrace.Count-gt0) 'Actual admitted-wheel resistance absent'}
  else{Require ($resistanceTrace.Count-eq0) 'Opt-out unexpectedly changed physics'}
- $receipt.vehicleClass=$VehicleClass;$receipt.resistance=[bool]$Resistance;$receipt.resistanceTrace=$resistanceTrace
+ $receipt.vehicleClass=$VehicleClass;$receipt.resistance=[bool]$resistanceEnabled;$receipt.resistanceTrace=$resistanceTrace
  $null=Send @{cmd='screenshot';path=(Join-Path $out 'jeep-ruts.png')}
  $near=$probes[$probes.Count-1];$culture=[Globalization.CultureInfo]::InvariantCulture
  $pose=(@(($near.x-2.5),($near.z-3.0),($near.surfaceY+2.8),40,-28)|ForEach-Object{([double]$_).ToString('R',$culture)}) -join ' '

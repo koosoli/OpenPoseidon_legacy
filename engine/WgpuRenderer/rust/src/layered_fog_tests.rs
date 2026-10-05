@@ -291,6 +291,20 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
   assert!(row[3]<=previous);previous=row[3];assert_eq!(&row[..3],&[0.;3]);
  }
  // A current far map can replace a rebuilding near source without a whole
+ // A downward view must integrate the same ground fog while the camera changes
+ // altitude. The old buried-midpoint refusal lost whole straddling intervals,
+ // making their slice boundaries follow the camera as bright stepped rings.
+ let saved_camera=camera;
+ camera.view=glam::Mat4::look_at_lh(glam::Vec3::ZERO,glam::Vec3::NEG_Y,glam::Vec3::Z).to_cols_array();
+ for altitude in [55.,63.,75.,89.,105.,130.] {
+  camera.cam_pos[1]=altitude;
+  run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
+  let tau=-read()[127].ln();
+  // Entire0..40m slab plus its upper1m feather, ending0.05m above ground.
+  assert!((tau-0.4045).abs()<0.002,"Downward ground crossing at altitude{altitude}: tau={tau}");
+ }
+ camera=saved_camera;
+ // A current far map can replace a rebuilding near source without a whole
  // frame losing its fog. It still obeys the actual depth and overflow guards.
  let mut far_only=cover(1.,100);far_only.controls[0][0]=0.;
  run(&mut fog,&camera,&settings,1.,far_only,1,true);assert!(fog.ready);

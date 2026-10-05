@@ -1,6 +1,8 @@
 [CmdletBinding()]
-param([ValidateSet('Jeep','Truck5t')][string]$VehicleClass='Jeep',[switch]$Resistance,[string]$ExpectedCommit='')
+param([ValidateSet('Jeep','Truck5t')][string]$VehicleClass='Jeep',[switch]$Resistance,[switch]$DisableResistance,[string]$ExpectedCommit='')
 $ErrorActionPreference='Stop'
+if($Resistance -and $DisableResistance){throw 'Choose resistance on or off'}
+$resistanceEnabled=!$DisableResistance
 if(!$env:LOCK_OWNER){throw 'Game lock required'}
 $game='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault'
 $root=Split-Path $PSScriptRoot -Parent
@@ -14,8 +16,9 @@ $env:WGR_GRASS='0'
 $env:POSEIDON_SNOWLINE='off'
 $env:POSEIDON_SNOW_TEST_DEPTH='0'
 Remove-Item Env:POSEIDON_TEST_RAIN -ErrorAction SilentlyContinue
-$env:POSEIDON_MUD_TRUCK_PROTOTYPE=if($VehicleClass-eq'Truck5t'){'1'}else{'0'}
-$env:POSEIDON_MUD_TRACTION_PROTOTYPE=if($Resistance){'1'}else{'0'}
+Remove-Item Env:POSEIDON_MUD_TRUCK_PROTOTYPE -ErrorAction SilentlyContinue
+Remove-Item Env:POSEIDON_MUD_TRACTION_PROTOTYPE -ErrorAction SilentlyContinue
+if($DisableResistance){$env:POSEIDON_MUD_TRACTION_PROTOTYPE='0'}
 $env:POSEIDON_MUD_TRACE='1'
 $stamp=(Get-Content (Join-Path $game 'DEPLOYED-FROM.txt') -Raw).Trim()
 if($ExpectedCommit -and !$stamp.Contains($ExpectedCommit)){throw 'Installed build changed'}
@@ -63,7 +66,7 @@ try{
  $driver=Send @{cmd='eval';code='vehicle player == mudJeep'}
  if(([string]$driver.result).Trim('"') -ne 'true'){throw 'Player not in Jeep'}
  $null=Send @{cmd='screenshot';path=(Join-Path $out 'ready.png')}
- @{status='ready';vehicleClass=$VehicleClass;resistance=[bool]$Resistance;pid=$p.Id;installed=$stamp;mission=$mission;wetness=$mud.wetness;driver=$driver.result;output=$out}|ConvertTo-Json|Set-Content (Join-Path $root 'build/mud-vehicle-owner-ready.json')
+ @{status='ready';vehicleClass=$VehicleClass;resistance=[bool]$resistanceEnabled;pid=$p.Id;installed=$stamp;mission=$mission;wetness=$mud.wetness;driver=$driver.result;output=$out}|ConvertTo-Json|Set-Content (Join-Path $root 'build/mud-vehicle-owner-ready.json')
  $ready=$true
  Write-Host "Mud vehicle demo ready: PID $($p.Id), wetness $($mud.wetness), $out"
  $client.Dispose();$client=$null

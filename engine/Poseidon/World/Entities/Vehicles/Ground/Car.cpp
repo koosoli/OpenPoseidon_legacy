@@ -614,17 +614,18 @@ bool Car::IsBlocked() const
 
 void Car::Simulate(float deltaT, SimulationImportance prec)
 {
-    static const bool mudTruckOptIn = [] {
+    static const bool mudTruckEnabled = [] {
         const char* value = std::getenv("POSEIDON_MUD_TRUCK_PROTOTYPE");
-        return value && std::strcmp(value, "1") == 0;
+        return !value || std::strcmp(value, "0") != 0;
     }();
-    static const bool mudTractionOptIn = [] {
+    static const bool mudTractionEnabled = [] {
         const char* value = std::getenv("POSEIDON_MUD_TRACTION_PROTOTYPE");
-        return value && std::strcmp(value, "1") == 0;
+        return !value || std::strcmp(value, "0") != 0;
     }();
     const bool singlePlayer = GWorld && GWorld->GetMode() != GModeNetware;
-    const auto mudProfile = SelectMudWheelProfile(Type()->GetName(), mudTruckOptIn, singlePlayer);
-    // Jeep remains default; the truck and resistance experiments are opt-in SP.
+    const auto mudProfile = SelectMudWheelProfile(Type()->GetName(), mudTruckEnabled, singlePlayer);
+    // Verified stock truck ruts and rolling resistance are default in SP.
+    // Startup overrides set to0 retain the old behavior; MP scope is unchanged.
     const bool mudPrototype = IsLocal() && mudProfile.enabled &&
                               GMud().ContactActive() && DirectionUp().Y() >= 0.3f;
     bool mudGrounded[MaxWheels]{};
@@ -1524,7 +1525,7 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
             }
         }
 
-        if (mudPrototype && mudTractionOptIn && singlePlayer && !_waterContact)
+        if (mudPrototype && mudTractionEnabled && singlePlayer && !_waterContact)
         {
             int admitted = 0;
             for (int wheel = 0; wheel < MaxWheels; ++wheel)
