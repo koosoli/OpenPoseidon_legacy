@@ -72,6 +72,7 @@ struct Volume {
     near_vp: [[f32;4];4], far_vp: [[f32;4];4],
     near_ctl: [f32;4], far_ctl: [f32;4], capacity: [u32;4],
     terrain: [f32;4], patch: [f32;4], sky_limit: [f32;4], solar_domain: [f32;4],
+    ocean: [f32;4],
 }
 pub struct WeatherInputs {
     pub views: [wgpu::TextureView;2], pub matrices: [[[f32;4];4];2],
@@ -208,7 +209,7 @@ impl LayeredFog {
         settings:&WgrLayeredFog,weather:f32,hdr:bool,underground:f32,cam:&WgrCamera,inv_vp:[[f32;4];4],
         height:&TerrainConformParams,height_view:&wgpu::TextureView,height_generation:u64,
         mapping:&TerrainShadowMap,shadow_view:&wgpu::TextureView,csm_view:&wgpu::TextureView,
-        environment:&wgpu::TextureView,sky_sh:&wgpu::Buffer,clouds:&wgpu::TextureView,cover:WeatherInputs,below_clouds:bool,cloud_limit:[f32;2],native_bounds:[f32;2]) {
+        environment:&wgpu::TextureView,sky_sh:&wgpu::Buffer,clouds:&wgpu::TextureView,cover:WeatherInputs,below_clouds:bool,cloud_limit:[f32;2],native_bounds:[f32;2],ocean:Option<f32>) {
         self.frames=self.frames.wrapping_add(1);
         let far=cam.params.fog_start+if cam.params.fog_inv_range>0.0 {1.0/cam.params.fog_inv_range}else{0.0};
         let finite=cam.view.iter().chain(cam.proj.iter()).chain(cam.cam_pos.iter())
@@ -223,7 +224,10 @@ impl LayeredFog {
                 cover.controls[0][0],cover.controls[1][0],cam.cam_pos,settings.layers,settings.terrain,settings.patch,cloud_limit);
         }
         if !eligible {return;}
-        let view_far=view_transport_far(far,cam,settings,height,native_bounds);
+        let ocean=ocean.filter(|v|v.is_finite());
+        // Atmospheric terrain follows the water surface, not its seabed.
+        let air_bounds=match ocean {Some(level)=>[native_bounds[0].max(level),native_bounds[1].max(level)],None=>native_bounds};
+        let view_far=view_transport_far(far,cam,settings,height,air_bounds);
         let direction=glam::Vec3::new(-cam.sun_dir_world[0],-cam.sun_dir_world[1],-cam.sun_dir_world[2]).normalize_or_zero();
         // A dark/absent directional light does not remove the night air medium.
         // The incoming solar field alone becomes zero; local lamps remain active.
@@ -240,7 +244,8 @@ impl LayeredFog {
             light:[direction.x,direction.y,direction.z,0.0],radiance:[radiance[0],radiance[1],radiance[2],far],cloud_map:mapping.cloud_shadow.to_array(),
             near_vp:cover.matrices[0],far_vp:cover.matrices[1],near_ctl:cover.controls[0],far_ctl:cover.controls[1],
             capacity:[cover.capacities[0],cover.capacities[1],self.local_count,0],terrain:settings.terrain,patch:settings.patch,
-            sky_limit:[cloud_limit[0],cloud_limit[1],native_bounds[1],native_bounds[0]],solar_domain};
+            sky_limit:[cloud_limit[0],cloud_limit[1],air_bounds[1],air_bounds[0]],solar_domain,
+            ocean:match ocean.filter(|v|v.is_finite()){Some(level)=>[level,1.,0.,0.],None=>[0.;4]}};
         queue.write_buffer(&self.params,0,bytemuck::bytes_of(&data));
         queue.write_buffer(&self.height,0,bytemuck::bytes_of(height));
         queue.write_buffer(&self.shadow,0,bytemuck::bytes_of(mapping));

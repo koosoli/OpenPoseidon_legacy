@@ -15,7 +15,10 @@ execution:
       the active slabs, smoothly admitted over the upper feather. Ground-camera
       range, scene culling, legacy closure and incoming solar path/grid unchanged.
       Actual GPU downward-column sweep now includes400m altitude above200m geometry
-      fog range; fog tests17 passed. Matched build and final runtime compare pending.
+      fog range; fog tests17 passed. First installed c6384bde compare still has radius.
+      Second candidate admits actual current ocean producer sea level above seabed
+      and off-map ocean; translated plane/absent water/underwater GPU checks pass.
+      Same-scene image and GPU budget acceptance remains pending; fixed steps/resolution.
   fog_boot_truck_checkpoint:
     state: INSTALLED_BOUNDED_RUNTIME_PASSED_VISUAL_PROTOTYPE_JUDGEMENT_PENDING
     implementation_commits: [921ef114, d53f8cbd, 234795e7]

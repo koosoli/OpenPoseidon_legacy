@@ -5032,12 +5032,13 @@ impl Renderer {
                 let fog_environment=self.sky.env_view().clone();
                 let fog_sky_sh=self.sky.sh_buffer().clone();
                 let fog_clouds=self.sky.cloud_shadow_view().clone();
+                let fog_ocean=if water_nodes.iter().any(|n|n.body==0.0){self.water.ocean_level()}else{None};
                 self.gpu_timers.begin(&mut encoder,TimerRegion::LayeredFog);
                 self.sky.fog.upload_local_lights(&self.queue, lights, camera);
                 self.sky.fog.render(&self.device,&self.queue,&mut encoder,&self.layer_fog_settings,
                     self.layer_fog_weather,self.hdr_enabled,self.cam_underground,camera,ivp,
                     &conform_params,&heightmap_view,heightmap_gen,&shadow_mapping,&shadow_mask_view,
-                    self.gfx3d.shadow_sample_view(),&fog_environment,&fog_sky_sh,&fog_clouds,cover,below_clouds,[self.sky_params.cloud0[0],self.sky_params.cloud0[2]],self.terrain.native_height_bounds());
+                    self.gfx3d.shadow_sample_view(),&fog_environment,&fog_sky_sh,&fog_clouds,cover,below_clouds,[self.sky_params.cloud0[0],self.sky_params.cloud0[2]],self.terrain.native_height_bounds(),fog_ocean);
                 self.gpu_timers.end(&mut encoder,TimerRegion::LayeredFog);
             }
             self.sky.update_fog_chroma(&self.queue,self.sky.fog.is_ready(),self.layer_fog_weather);

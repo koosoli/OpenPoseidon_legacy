@@ -18,6 +18,7 @@ struct FogVolume {
     patchiness: vec4<f32>, // strength, horizontal/vertical metres, outer coverage feather metres
     sky_limit: vec4<f32>, // actual cloud enabled/base ASL, cached native max/min
     solar_domain: vec4<f32>, // snapped world XZ, inverse width, max AGL
+    ocean: vec4<f32>, // actual producer sea level, current ocean nodes present
 };
 struct FogHeight {
     origin: vec2<f32>, grid: f32, enabled: f32,
@@ -91,11 +92,21 @@ fn fog_native_ground(xz: vec2<f32>) -> vec3<f32> {
     if (height.enabled < 0.5 || height.grid <= 0.0 || height.width < 2u || height.height < 2u) { return vec3<f32>(0.0); }
     let cell = (xz-height.origin)/height.grid;
     let extent = vec2<f32>(f32(height.width-1u),f32(height.height-1u));
-    if (any(cell < vec2<f32>(0.0)) || any(cell >= extent)) { return vec3<f32>(0.0); }
+    if (any(cell < vec2<f32>(0.0)) || any(cell >= extent)) {
+        // The real water producer draws off-map ocean. Native terrain absence
+        // cannot carve a camera-visible atmospheric hole over that same plane.
+        if(params.ocean.y>0.5){return vec3<f32>(params.ocean.x,1.0,max(params.patchiness.w,1.0));}
+        return vec3<f32>(0.0);
+    }
     let ij=vec2<i32>(floor(cell)); let q=fract(cell);
     let a=textureLoad(native_height,ij,0).r; let b=textureLoad(native_height,ij+vec2<i32>(1,0),0).r;
     let c=textureLoad(native_height,ij+vec2<i32>(0,1),0).r; let d=textureLoad(native_height,ij+vec2<i32>(1,1),0).r;
     let ground=select(b+c-d+(d-c)*q.x+(d-b)*q.y,a+(b-a)*q.x+(c-a)*q.y,q.x+q.y<=1.0);
+    if(params.ocean.y>0.5 && ground<=params.ocean.x){
+        // Mist sits above water, not the buried seabed. No atmospheric fog below
+        // the mean surface; submerged rendering retains its separate transport.
+        return vec3<f32>(params.ocean.x,1.0,max(params.patchiness.w,1.0));
+    }
     return vec3<f32>(ground,1.0,min(min(cell.x,extent.x-cell.x),min(cell.y,extent.y-cell.y))*height.grid);
 }
 fn fog_outdoor_sample(p: vec3<f32>) -> vec2<f32> {

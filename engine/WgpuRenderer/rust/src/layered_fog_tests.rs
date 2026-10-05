@@ -316,12 +316,13 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
  let read_solar=||read_probe(&device,&queue,READ_VOLUME,&[wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::TextureView(&solar_view)}],128);
  let read=||read_probe(&device,&queue,READ_VOLUME,&[wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::TextureView(&volume_view)}],128);
  let cloud_limit=std::cell::Cell::new([0.,1000.]);
+ let ocean=std::cell::Cell::new(None);
  let run=|fog:&mut LayeredFog,camera:&WgrCamera,settings:&WgrLayeredFog,weather:f32,cover:WeatherInputs,generation:u64,below:bool| {
   fog.invalidate(&queue);let mut enc=device.create_command_encoder(&Default::default());
   let inverse=(glam::DMat4::from_cols_array(&camera.view.map(f64::from)).inverse()
    *glam::DMat4::from_cols_array(&camera.proj.map(f64::from)).inverse()).as_mat4().to_cols_array_2d();
   fog.render(&device,&queue,&mut enc,settings,weather,true,0.,camera,inverse,&height,&native_view,generation,
-   &mapping,&shadow_view,&csm_view,&env_view,&sky_sh,&cloud_view,cover,below,cloud_limit.get(),[native_min.get(),native_max.get()]);queue.submit(Some(enc.finish()));
+   &mapping,&shadow_view,&csm_view,&env_view,&sky_sh,&cloud_view,cover,below,cloud_limit.get(),[native_min.get(),native_max.get()],ocean.get());queue.submit(Some(enc.finish()));
  };
  run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);assert!(fog.ready);
  let positive=read();let mut previous=1.;
@@ -359,6 +360,17 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
   assert!((tau-0.4045).abs()<0.002,"Downward ground crossing at altitude{altitude}: tau={tau}");
  }
  camera=saved_camera;
+ // Certified current ocean uses its actual5m datum, not a submerged30m seabed.
+ // It remains admitted beyond the native map, just as actual off-map water does.
+ settings.terrain=[1.,0.,0.,0.];write_native(-30.);camera.cam_pos[1]=25.;ocean.set(Some(5.));
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);assert_eq!(read(),positive,"Actual ocean datum must retain above-water mist");
+ camera.cam_pos[0]=750.;run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
+ assert_eq!(read(),positive,"Off-map actual ocean cannot lose its atmospheric column");
+ ocean.set(None);run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
+ for row in read().chunks_exact(4){assert_eq!(row,&[0.,0.,0.,1.],"No ocean authority must retain native-source refusal");}
+ ocean.set(Some(5.));camera.cam_pos[1]=0.;run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
+ for row in read().chunks_exact(4){assert_eq!(row,&[0.,0.,0.,1.],"Atmospheric mist must not enter ocean below its datum");}
+ ocean.set(None);camera=saved_camera;settings.terrain=[0.;4];write_native(0.);
  // A current far map can replace a rebuilding near source without a whole
  // frame losing its fog. It still obeys the actual depth and overflow guards.
  let mut far_only=cover(1.,100);far_only.controls[0][0]=0.;
@@ -571,7 +583,7 @@ fn settings_are_opt_in_and_refuse_unready_weather_or_interiors() {
  p.layers[0][1]=p.layers[0][0];assert!(!requested(&p,0.5,true,0.));
  p=WgrLayeredFog::default();p.control[0]=1.;p.layers[1][3]=f32::INFINITY;
  assert!(!requested(&p,0.5,true,0.));
- assert_eq!(std::mem::size_of::<Consumer>(),272);assert_eq!(std::mem::size_of::<Volume>(),416);
+ assert_eq!(std::mem::size_of::<Consumer>(),272);assert_eq!(std::mem::size_of::<Volume>(),432);
 }
 
 #[test]
