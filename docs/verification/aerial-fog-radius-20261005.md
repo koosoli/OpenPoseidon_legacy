@@ -76,3 +76,17 @@ actual CSM/cloud/terrain visibility still owns occlusion. No additional passes,
 ray steps, slices or texture resources. Actual encoded equal flat columns inside
 and outside the cache agree within2%; all17 fog GPU tests pass. Final owner-scene
 runtime and budget comparison pending; do not infer full ring removal from tests.
+
+
+Final installed source2f44e267, local deployment17:50, normal exit13-pose compare:
+build/fog-flight/everon-high-final-solar-edge-20261005-175131. Published12 samples:
+fog mean0.5956ms/median0.5949ms versus original0.7380/0.6472ms; GPU total
+9.7306/9.4387ms versus10.1752/10.1878ms. Same scene dimensions/quality/camera.
+Budget passed in this scene; no more expensive volume or resolution was enabled.
+Both first/last images still retain dark distant blotches/radial contrast. The
+reported artistic defect is OPEN, not fixed. Stop this bounded block here rather
+than spend the owner's remaining quota on unbounded hypotheses. Numerical medium,
+ocean authority, grazing-column and cache-continuity corrections are retained;
+further visual isolation requires a separate bounded follow-up. Runtime/timing
+receipt: aerial-fog-radius-20261005-runtime.json. Grass implementation is default
+and passed its separate actual stock-Everon capture. Forest review performed only.

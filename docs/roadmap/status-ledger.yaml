@@ -19,7 +19,9 @@ execution:
     reviewed_tip: 9a754f1948f6a9ca078a955b18fb05f67c20ce47
     evidence: docs/verification/forest-island-branch-review-20261005.md
   aerial_fog_radius_checkpoint:
-    state: CODE_BUILT_GPU_PASSED_INSTALLED_COMPARE_PENDING
+    state: INSTALLED_NUMERICAL_AND_BUDGET_PASSED_VISUAL_RADIUS_OPEN
+    installed_source_commit: 2f44e267
+    runtime_receipt: docs/verification/aerial-fog-radius-20261005-runtime.json
     evidence: docs/verification/aerial-fog-radius-20261005.md
     note: >-
       Owner Everon camera4526.06/3977.46/1197.58 az198.3 el-28.1 fog1.0
@@ -34,7 +36,10 @@ execution:
       Installed a9683298 ray-column compare fog mean0.6883ms vs baseline0.7380ms,
       total10.0402ms vs10.1752ms. Distant spots remain and persist with patchiness0.
       Final analytic solar-cache edge continuation passes17 GPU tests including
-      equal flat-column source energy inside/outside cache; final compare pending.
+      equal flat-column source energy inside/outside cache. Final2f44e267 normal
+      13-pose run fog mean0.5956ms vs baseline0.7380ms, total9.7306ms vs10.1752ms.
+      Distant blotches/radial contrast persist; bounded block ended with visual
+      defect OPEN. No complete ring fix or general performance guarantee claimed.
       No additional passes, samples, slices or textures. Ring is not marked resolved.
   fog_boot_truck_checkpoint:
     state: INSTALLED_BOUNDED_RUNTIME_PASSED_VISUAL_PROTOTYPE_JUDGEMENT_PENDING

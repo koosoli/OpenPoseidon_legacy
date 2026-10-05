@@ -1,0 +1,51 @@
+{
+  "scope": "Installed original Everon owner high camera, fog1, 1280x720/MSAA4, fixed noon, no grass; 13 moving poses,12 nonblocking published GPU samples. Scene-specific budget comparison, not universal speedup.",
+  "cases": [
+    {
+      "evidenceDirectory": "build/fog-flight/everon-high-radius-before-20261005-161432",
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 234795e7 2026-10-05_15:32 deploy-ps1",
+      "runtimePassed": true,
+      "poses": 13,
+      "gpu": {
+        "Layered ASL fog: transport": {
+          "samples": 12,
+          "meanMs": 0.7379626582066218,
+          "medianMs": 0.647167980670929,
+          "minMs": 0.64409601688385,
+          "maxMs": 1.210368037223816
+        },
+        "GPU frame total": {
+          "samples": 12,
+          "meanMs": 10.17523201306661,
+          "medianMs": 10.1877760887146,
+          "minMs": 9.464832305908203,
+          "maxMs": 10.889216423034668
+        }
+      }
+    },
+    {
+      "evidenceDirectory": "build/fog-flight/everon-high-final-solar-edge-20261005-175131",
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 2f44e267 2026-10-05_17:50 deploy-ps1",
+      "runtimePassed": true,
+      "poses": 13,
+      "gpu": {
+        "Layered ASL fog: transport": {
+          "samples": 12,
+          "meanMs": 0.5956266621748606,
+          "medianMs": 0.5949440002441406,
+          "minMs": 0.5939199924468994,
+          "maxMs": 0.6082559823989868
+        },
+        "GPU frame total": {
+          "samples": 12,
+          "meanMs": 9.730559905370075,
+          "medianMs": 9.438719749450684,
+          "minMs": 9.13203239440918,
+          "maxMs": 10.941439628601074
+        }
+      }
+    }
+  ],
+  "visualResolved": false,
+  "visualNote": "Distant dark blotches/radial edge remain; no full visual fix claimed."
+}
