@@ -163,6 +163,9 @@ class AppConfig
 
     /// PBO archive directories from --addon-root, mounted ahead of conventional mods.
     const RString& GetAddonArchivePaths() const { return _addonArchivePaths; }
+    const RString& GetMapArchivePaths() const { return _mapArchivePaths; }
+    uint32_t GetWaitForParent() const { return _waitForParent; }
+    const std::string& GetReforgerWorld() const { return _reforgerWorld; }
 
     /// Resolved absolute --mods-dir, or "" when not given. The mods root the MODS
     /// screen scans for local @<mod> folders (else GamePaths::ModsDir()).
@@ -486,6 +489,9 @@ class AppConfig
     RString _modPaths;
     std::vector<std::string> _defaultContentDiagnostics;
     RString _addonArchivePaths;
+    RString _mapArchivePaths;
+    uint32_t _waitForParent = 0;
+    std::string _reforgerWorld;
     RString _modsDir;     // resolved --mods-dir base ("" if unset)
     RString _workshopDir; // resolved --workshop-dir base ("" if unset)
     std::string _language;

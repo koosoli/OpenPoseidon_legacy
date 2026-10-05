@@ -87,6 +87,8 @@ const char* WantedWorld()
 {
     static const std::string wanted = []
     {
+        const auto& selected = Poseidon::Foundation::AppConfig::Instance().GetReforgerWorld();
+        if (!selected.empty()) return selected;
         const char* v = std::getenv("POSEIDON_REFORGER_WORLD");
         return std::string((v != nullptr && *v != 0) ? v : "worlds/eden");
     }();

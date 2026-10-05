@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -316,6 +317,22 @@ void Globals::Init()
         LoadBanksEx("dta", true);
         LoadBanksEx("addons", true, true);
         LoadBanksEx("Campaigns", false);
+        // Local map previews mount only assets: foreign gameplay/config classes cannot replace CWA units.
+        const std::string mapRoots = AppConfig::Instance().GetMapArchivePaths().Data();
+        size_t mapStart = 0;
+        while (mapStart < mapRoots.size())
+        {
+            const size_t mapEnd = mapRoots.find(';', mapStart);
+            const std::filesystem::path root(mapRoots.substr(mapStart, mapEnd - mapStart));
+            std::error_code ec;
+            for (std::filesystem::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec))
+            {
+                if (it->is_regular_file(ec) && strcmpi(it->path().extension().string().c_str(), ".pbo") == 0)
+                    GFileBanks.Load((root.string() + "\\").c_str(), "", it->path().stem().string().c_str(), true);
+            }
+            if (mapEnd == std::string::npos) break;
+            mapStart = mapEnd + 1;
+        }
         AddonSystem::ParseAllAddonConfigs();
         AddonSystem::ClearAddonConfigs();
         AddonSystem::MarkAllAddonsLockable();

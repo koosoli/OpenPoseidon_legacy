@@ -1,3 +1,4 @@
+#include <Poseidon/UI/LocalMapsDisplay.hpp>
 
 #include <Poseidon/Foundation/Platform/InitBridge.hpp> // IsMenuOverriddenByMod (custom-menu hijack)
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
@@ -276,6 +277,44 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
                 const MainMenuModsPlacement placement = CalculateMainMenuModsPlacement(
                     {quit->X(), quit->Y(), quit->W(), quit->H(), quit->IsVisible()}, foreground);
                 mods->SetPos(placement.x, placement.y, placement.w, placement.h);
+            }
+        }
+    }
+
+    // Local content browser is a normal main-menu entry and does not require --dev.
+    if (Control* quit = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_QUIT)))
+    {
+        ParamEntry* source = Res.FindEntry(mainRsc) ? (Res >> mainRsc).FindEntry("Quit") : nullptr;
+        if (source && source->IsClass())
+        {
+            static ParamFile mapButtonResource;
+            mapButtonResource.Clear();
+            ParamClass* cls = mapButtonResource.AddClass("LocalMapsButton");
+            cls->Add("idc", LocalMapsMenuId);
+            cls->Add("text", RString("Local maps"));
+            cls->SetBase(source->GetClassInterface());
+            LoadControl(*cls);
+            if (Control* button = dynamic_cast<Control*>(GetCtrl(LocalMapsMenuId)))
+            {
+                std::vector<MainMenuControlRect> foreground;
+                for (int i = 0; i < _controlsForeground.Size(); ++i)
+                {
+                    Control* control = _controlsForeground[i];
+                    if (control && control != quit && control != button)
+                        foreground.push_back({control->X(), control->Y(), control->W(), control->H(), control->IsVisible()});
+                }
+                auto pos = CalculateMainMenuModsPlacement(
+                    {quit->X(), quit->Y(), quit->W(), quit->H(), quit->IsVisible()}, foreground);
+                const auto overlaps = [&](float x, float y) {
+                    for (const auto& other : foreground)
+                        if (other.visible && x < other.x + other.w && x + pos.w > other.x &&
+                            y < other.y + other.h && y + pos.h > other.y) return true;
+                    return false;
+                };
+                // Horizontal custom menus may already have Mods beside Quit.
+                for (int row = 0; row < 12 && overlaps(pos.x, pos.y); ++row)
+                    pos.y = 0.08f + row * (pos.h + 0.01f);
+                button->SetPos(pos.x, pos.y, pos.w, pos.h);
             }
         }
     }
@@ -2201,6 +2240,7 @@ void DisplayModDownload::OnSimulate(EntityAI* vehicle)
 
 void DisplayMain::OnButtonClicked(int idc)
 {
+    if (idc == LocalMapsMenuId) { CreateChild(CreateLocalMapsDisplay(this)); return; }
     // Dispatch registered game module buttons via registry
     if (auto* mod = GameModuleRegistry::FindByIDC(idc))
     {

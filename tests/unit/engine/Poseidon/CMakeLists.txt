@@ -687,6 +687,8 @@ list(APPEND POSEIDON_TEST_SOURCES
     UI/Controls/test_cursor_layout.cpp
     UI/test_notebook_theme.cpp
     UI/test_optionsUI.cpp
+    UI/test_local_maps_catalog.cpp
+    UI/test_local_vehicles_catalog.cpp
     UI/test_addon_content.cpp
     UI/test_profile_squad_audit.cpp
     UI/test_press_button_page.cpp

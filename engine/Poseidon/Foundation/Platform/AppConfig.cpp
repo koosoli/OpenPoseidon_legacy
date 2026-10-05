@@ -499,6 +499,11 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                                            "PBO archive directories (semicolon-separated; mounted read-only ahead of mods)"),
                    CliHelpVisibility::Full);
 
+        std::string mapArchiveRootsStr;
+        configGroup->add_option("--map-archive-root", mapArchiveRootsStr, "External terrain archive folders; read-only assets, no foreign configs");
+        configGroup->add_option("--wait-for-parent", _waitForParent, "Wait for the map-browser parent process before starting");
+        configGroup->add_option("--reforger-world", _reforgerWorld, "Native Enfusion world virtual directory");
+
         // Optional base directory for relative --mod names. Lets mods be referenced
         // by name (e.g. --mods-dir packages/mods --mod @fixturemod) so test/CI
         // invocations carry no machine-specific absolute path.
@@ -1138,6 +1143,12 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                     throw std::runtime_error(msg);
                 }
                 _addonArchivePaths = RString(resolvedRoots.mountPath.c_str());
+            }
+            if (!mapArchiveRootsStr.empty())
+            {
+                const auto roots = ResolveAddonArchiveRootList(mapArchiveRootsStr, std::filesystem::current_path().string());
+                if (!roots.Ok()) throw std::runtime_error("Invalid --map-archive-root: archive folders required");
+                _mapArchivePaths = RString(roots.mountPath.c_str());
             }
         }
         catch (const CLI::CallForHelp&)

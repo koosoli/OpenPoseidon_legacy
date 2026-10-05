@@ -1406,6 +1406,19 @@ int GameApplication::Run(int argc, char** argv)
 
 int GameApplication::RunAfterArgumentParsing()
 {
+#ifdef _WIN32
+    if (const uint32_t parentPid = AppConfig::Instance().GetWaitForParent(); parentPid != 0)
+    {
+        if (parentPid == GetCurrentProcessId()) return 1;
+        HANDLE parent = OpenProcess(SYNCHRONIZE, FALSE, parentPid);
+        if (parent)
+        {
+            const DWORD waited = WaitForSingleObject(parent, 120000);
+            CloseHandle(parent);
+            if (waited != WAIT_OBJECT_0) return 1;
+        }
+    }
+#endif
     LOG_INFO(Core, "Game starting: version {}", (const char*)GetVersionString());
 
     // Stall detector, armed here and nowhere else. This is the outermost client scope that
