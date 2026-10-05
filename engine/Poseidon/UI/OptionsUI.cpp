@@ -2280,7 +2280,10 @@ void StartRandomCutscene(RString world)
     }
     SetMission(world, name, subdir);
 
-    ParseIntro();
+    const bool parsed = ParseIntro();
+    LOG_INFO(UI, "Menu scene: world={} name={} dir={} sea={} parsed={} groups={} installed={} asset={}",
+             world.Data(), name.Data(), subdir.Data(), menuSea, parsed, CurrentTemplate.groups.Size(),
+             WorldInstalled("Intro"), QIFStreamB::FileExist("assets\\menu\\RoughSea.Intro\\mission.sqm"));
 
     if (CurrentTemplate.groups.Size() > 0)
     {
