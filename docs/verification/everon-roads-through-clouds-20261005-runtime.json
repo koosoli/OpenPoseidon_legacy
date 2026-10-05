@@ -1,0 +1,93 @@
+{
+  "source": "248df7ad",
+  "scope": "12 latest published nonblocking timings per run, may lag state, not frame matched. No extra passes/samples.",
+  "runs": [
+    {
+      "receipt": "build/fog-flight/everon-cloud-road-before-20261005-181415/result.json",
+      "passed": true,
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 2f44e267 2026-10-05_17:50 deploy-ps1",
+      "views": 13,
+      "firstPose": [
+        6759.2,
+        3483.95,
+        1764.24,
+        330.9,
+        -47.9
+      ],
+      "overcast": 1,
+      "fog": 0,
+      "regions": [
+        {
+          "name": "Sky: cloud march",
+          "meanMs": 0.10274133086204529
+        },
+        {
+          "name": "Sky: cloud composite",
+          "meanMs": 0.09198933467268944
+        },
+        {
+          "name": "GPU frame total",
+          "meanMs": 9.412949403127035
+        }
+      ]
+    },
+    {
+      "receipt": "build/fog-flight/everon-cloud-road-after-20261005-183556/result.json",
+      "passed": true,
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 248df7ad 2026-10-05_18:35 deploy-ps1",
+      "views": 13,
+      "firstPose": [
+        6759.2,
+        3483.95,
+        1764.24,
+        330.9,
+        -47.9
+      ],
+      "overcast": 1,
+      "fog": 0,
+      "regions": [
+        {
+          "name": "Sky: cloud march",
+          "meanMs": 0.10495999827980995
+        },
+        {
+          "name": "Sky: cloud composite",
+          "meanMs": 0.11366400060554345
+        },
+        {
+          "name": "GPU frame total",
+          "meanMs": 9.58404270807902
+        }
+      ]
+    },
+    {
+      "receipt": "build/fog-flight/everon-cloud-road-clear-control-20261005-183705/result.json",
+      "passed": true,
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 248df7ad 2026-10-05_18:35 deploy-ps1",
+      "views": 13,
+      "firstPose": [
+        9182.32,
+        2053.96,
+        77.15,
+        316.6,
+        -11.9
+      ],
+      "overcast": 0.15000000596046448,
+      "fog": 0,
+      "regions": [
+        {
+          "name": "Sky: cloud march",
+          "meanMs": 0.3794773345192273
+        },
+        {
+          "name": "Sky: cloud composite",
+          "meanMs": 0.11298133370776971
+        },
+        {
+          "name": "GPU frame total",
+          "meanMs": 8.345258712768555
+        }
+      ]
+    }
+  ]
+}

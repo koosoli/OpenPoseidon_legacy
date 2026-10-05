@@ -6,14 +6,16 @@ execution:
   integration_owner: Oliver Kay
   activation_state: ACTIVE
   everon_roads_through_clouds_checkpoint:
-    state: SOURCE_AND_REPLAY_TESTS_PASSED_INSTALLED_CHECK_PENDING
+    state: INSTALLED_CLOUD_OCCLUSION_AND_CLEAR_ROAD_CONTROL_PASSED
     evidence: docs/verification/everon-roads-through-clouds-20261005.md
     note: >-
       Owner camera6759.20/3483.95/1764.24 az330.9 el-47.9, overcast1.0.
       Reproduced on installed2f44e267 with actual original Everon and moving camera.
       Proven mode2 ground-conformed world road decals replay once before existing
       water/cloud composites. No extra passes, depth writes or cloud/fog samples.
-      New routing guard test and five replay-related tests passed. Runtime pending.
+      New routing guard test and five replay-related tests passed. Installed248df7ad,
+      thirteen moving cloud captures remove roads over the opaque cloud; thirteen
+      clear-road captures retain roads. Normal shutdown and validation checks passed.
   grass_wind_waves_checkpoint:
     state: INSTALLED_GPU_AND_STOCK_EVERON_RUNTIME_PASSED
     implementation_commit: a9683298
