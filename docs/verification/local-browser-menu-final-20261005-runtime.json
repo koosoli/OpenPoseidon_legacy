@@ -1,0 +1,31 @@
+{
+  "vehicles": [
+    "Arma 1: T-72 (local bridge)",
+    "Arma 2: T-72 (local bridge)",
+    "Arma 3: T-100 Varsuk (local bridge)",
+    "Arma 1: UH-60 (local bridge)",
+    "Arma 2: Mi-35 (local bridge)",
+    "Arma 3: MH-9 (local bridge)"
+  ],
+  "logo": "\\assets\\ui\\openposeidon_logo.paa",
+  "maps": [
+    "Arma 3 | Altis | OPRW 25 (preview)",
+    "Arma 3 | Stratis | OPRW 25 (preview)",
+    "Arma 3 | Tanoa | OPRW 25 (preview)",
+    "Arma 3 | VR | OPRW 25 (preview)",
+    "Arma 3 | enoch | OPRW 25 (preview)",
+    "Arma 3 | malden | OPRW 25 (preview)",
+    "Arma Reforger | Arland | native Enfusion preview (preview)",
+    "Arma Reforger | Cain | native Enfusion preview (preview)",
+    "Arma Reforger | Eden | native Enfusion preview (preview)",
+    "Arma Reforger | Editor | native Enfusion preview (unsupported)",
+    "Arma Reforger | MP | native Enfusion preview (unsupported)",
+    "Arma Reforger | ScenarioFramework | native Enfusion preview (unsupported)",
+    "Arma Reforger | Showcase | native Enfusion preview (unsupported)",
+    "DayZ | ChernarusPlus | OPRW 29 (preview)",
+    "DayZ | enoch | OPRW 29 (preview)"
+  ],
+  "passed": true,
+  "installed": "codex/player-visibility-recovery-20261005 3503946b 2026-10-05_21:58 deploy-ps1",
+  "catalogStatus": "15 maps found. Optional folder above. Open restarts engine. Current format support; original missions/gameplay are not imported."
+}

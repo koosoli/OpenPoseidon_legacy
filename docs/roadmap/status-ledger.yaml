@@ -8,6 +8,8 @@ execution:
   local_content_browser_checkpoint:
     state: INSTALLED_STRATIS_TERRAIN_AND_MENU_RUNTIME_PASSED
     installed_source_commit: d2a9add7
+    final_installed_commit: 3503946b
+    final_menu_receipt: docs/verification/local-browser-menu-final-20261005-runtime.json
     evidence: docs/verification/local-maps-browser-20261005.md
     runtime_receipt: docs/verification/local-maps-browser-20261005-runtime.json
     note: >-

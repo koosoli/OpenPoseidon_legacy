@@ -2,6 +2,8 @@
 
 Integrated and runtime-tested as d2a9add7, 2026-10-05 21:35, using the guarded deployment script. The subsequent 7f479731 correction reports the actual WGPU display mode, rather than the inherited dummy backend's constant Windowed value. The fullscreen vehicle restart retains borderless 3441x1440.
 
+Final clean deployment is 3503946b, 2026-10-05 21:58. Its native main-menu/browser smoke passed with normal exit and no GPU errors. Receipt: docs/verification/local-browser-menu-final-20261005-runtime.json. No game process is left running by the final smoke.
+
 Normal main menu: **Local maps**. The browser searches C:/SteamLibrary, D:/SteamLibrary, the normal Steam installation and libraryfolders.vdf, with an optional extra folder. Discovery runs in a worker and reads archive directories plus eight-byte WRP format headers; no game assets are copied or downloaded.
 
 Arma 1, Arma 2/OA, Arma 3 and DayZ candidates use existing OPRW 18/20/24/25/29 readers. Unsupported/compressed or unrecognised headers remain disabled. Arma Reforger Eden, Arland and Cain use the existing native PAK loader; ambiguous editor/showcase folders remain disabled. These are engine terrain previews, not imports of original missions or all original gameplay features.

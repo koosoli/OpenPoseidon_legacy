@@ -27,7 +27,17 @@ real local pack on October 5. The provider compiled independently with Clang;
 three Catch2 cases passed thirty assertions covering revision and namespace
 checks, compressed/missing/truncated models, incomplete addon packs and safe
 preview mission generation. Native browser interaction and installed-game
-preview verification are still pending integration by the parent session.
+preview verification subsequently passed on installed 7f479731: native browser
+selection creates CWR_T72_A1 with Arma geometry, accepts the driver seat and
+moves 9.58m after three seconds of actual W input (5.61m/s at release). The
+borderless session remains borderless at 3441x1440. Normal parent/child exit and
+GPU error checks passed. The +dirty stamp in this receipt came only from edits
+to verification documents; compiled source was committed. The clean final
+3503946b deployment contains the same runtime changes.
+
+Receipt: docs/verification/local-vehicles-catalog-20261005-runtime.json.
+The first-person driver interior remains black and is not accepted as complete
+cockpit support. Other five rows were metadata-validated, not individually driven.
 
 Existing engine evidence for the bridge is recorded in
 `docs/roadmap/decisions/AST-016B-proxies-and-the-cross-generation-tank-bridge-20260825.md`
