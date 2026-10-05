@@ -134,6 +134,7 @@ class EngineWgpu : public EngineDummy
 
     void HandleEvents() override { _eventWindow.HandleEvents(); }
     bool IsOpen() const override { return _eventWindow.IsOpen(); }
+    WindowMode GetCurrentWindowMode() const override;
     void SetMouseGrab(bool grab) override { _eventWindow.SetMouseGrab(grab); }
     bool IsMouseGrabbed() const override { return _eventWindow.IsMouseGrabbed(); }
 

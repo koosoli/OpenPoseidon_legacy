@@ -2429,6 +2429,20 @@ RString EngineWgpu::GetRendererName() const
     return "WGPU (Rust / wgpu)";
 }
 
+WindowMode EngineWgpu::GetCurrentWindowMode() const
+{
+    if (!_window)
+        return WindowMode::Windowed;
+    const SDL_WindowFlags flags = SDL_GetWindowFlags(_window);
+    if (flags & SDL_WINDOW_FULLSCREEN)
+        return SDL_GetWindowFullscreenMode(_window) ? WindowMode::Exclusive : WindowMode::Borderless;
+    // Windows startup uses a desktop-sized borderless window to avoid SDL's
+    // fullscreen state machine. It still represents our Borderless mode.
+    if (flags & SDL_WINDOW_BORDERLESS)
+        return WindowMode::Borderless;
+    return WindowMode::Windowed;
+}
+
 int EngineWgpu::Width() const
 {
     return _w;
