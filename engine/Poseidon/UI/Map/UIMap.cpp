@@ -1,3 +1,4 @@
+#include <Poseidon/UI/LocalMapWorlds.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Input/CheatCode.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -254,6 +255,11 @@ CStaticMap::CStaticMap(ControlsContainer* parent, int idc, const ParamEntry& cls
     _defaultCenter[2] = (Pars >> "CfgWorlds" >> Glob.header.worldname >> "centerPosition")[1];
 
     float sizeLand = LandGrid * LandRange;
+    if (IsLocalMapWorldIdentifier(Glob.header.worldname))
+    {
+        _defaultCenter[0] = sizeLand * 0.5f;
+        _defaultCenter[2] = sizeLand * 0.5f;
+    }
     saturate(_defaultCenter[0], 0, sizeLand);
     saturate(_defaultCenter[2], 0, sizeLand);
 
