@@ -1,0 +1,61 @@
+{
+  "installed_code_commit": "234795e7",
+  "scope": "Bounded Everon moving fog views, stock Truck5t native real-rain drive, actual Nogova authored boot contacts. Owner exact fog pattern not visually reproduced; boot artistic acceptance pending.",
+  "fog": {
+    "before": "build\\fog-flight\\everon-topdown-density-after-20261005-150423\\result.json",
+    "after": "build\\fog-flight\\everon-topdown-sky-after-20261005-153330\\result.json",
+    "road": "build\\fog-flight\\everon-road-sky-after-20261005-153700\\result.json",
+    "topDownPassed": true,
+    "roadPassed": true,
+    "poses": 26,
+    "timings": {
+      "GPU frame total": {
+        "beforeMs": 6.593023975690206,
+        "afterMs": 7.050069371859233
+      },
+      "Sky: SH irradiance": {
+        "beforeMs": 0.05102933198213577,
+        "afterMs": 0.05794133432209492
+      },
+      "Layered ASL fog: transport": {
+        "beforeMs": 0.4240213284889857,
+        "afterMs": 0.4538879965742429
+      }
+    },
+    "performanceClaim": "No measured overall FPS improvement; the bounded fixture is slightly slower, stability change only."
+  },
+  "truck": {
+    "receipt": "build\\jeep-mud-runtime\\20261005-153501\\result.json",
+    "passed": true,
+    "distanceM": 8.610000000000582,
+    "minimumRutM": -0.14083680510520935,
+    "resistance": true,
+    "resistanceTrace": [
+      "[2026-10-05 15:35:37.630] [app-6abc] [INFO] [PHYSICS] MUD_RESISTANCE class=Truck5t wheels=6/6 speed=0.006 deceleration=0.343",
+      "[2026-10-05 15:35:38.621] [app-6abc] [INFO] [PHYSICS] MUD_RESISTANCE class=Truck5t wheels=6/6 speed=2.595 deceleration=0.924",
+      "[2026-10-05 15:35:39.610] [app-6abc] [INFO] [PHYSICS] MUD_RESISTANCE class=Truck5t wheels=6/6 speed=4.261 deceleration=0.931"
+    ],
+    "scope": "One actual stock vehicle, native cultivated soil, real rain and AI driving; bounded rut/resistance smoke, no tyre-slip or general vehicle validation"
+  },
+  "boot": {
+    "receipt": "build\\mud-footprints\\boot-relief-after-20261005-153811-456efa\\result.json",
+    "status": "physical-contact-state-verified-appearance-pending",
+    "materialAdmission": true,
+    "minimumPhysicalOffsetM": -0.19939680397510529,
+    "normalExit": {
+      "exitCode": 0,
+      "shutdownComplete": true,
+      "pid": 49364
+    },
+    "limitations": "Nogova exact cultivated soil only. Hard road/grass/border and snow installed negatives remain untested; source/CPU exclusion tests are separate. Images are descriptive, not isolated pixel acceptance.",
+    "visual": "Close sole detail present; colour/fog checks require owner judgement. Existing surrounding large wet-surface/puddle transitions remain visible in fog capture, not accepted as polished appearance."
+  },
+  "checks": [
+    "Full Build.ps1 PoseidonGame matched pair passed",
+    "17 actual layered fog GPU/contracts/shader tests passed",
+    "2 actual boot relief GPU/composed-shader integration tests passed",
+    "Agent boot material flags and player-ground contracts passed",
+    "Native real-rain truck default runtime passed",
+    "Actual boot physical-contact state and material admission runtime passed"
+  ]
+}

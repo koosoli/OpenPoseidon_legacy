@@ -12,6 +12,7 @@ param(
     [ValidateRange(1,4)][double]$Acceleration=4,
     [ValidateRange(30,120)][int]$WetDeadlineSeconds=60,
     [ValidateRange(1,8)][int]$SettleSeconds=2,
+    [switch]$BootRelief,
     [ValidatePattern('^[A-Za-z0-9._-]+$')][string]$Label='nogova-boots',
     [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 )
@@ -106,6 +107,7 @@ $result=[ordered]@{status='running';before=$before;gates=@{};samples=@();capture
 $settings=@{POSEIDON_USER_DIR=$profile;POSEIDON_SNOWLINE='off';POSEIDON_MUD_TRACE='1';POSEIDON_UNIFORM_WET_TRACE='1';WGR_GRASS='0';WGR_OBJECT_SNOW='0';
     WGR_TEMPORAL='0';WGR_AUTO_EXPOSURE='0';WGR_EXPOSURE='1';POSEIDON_WIND_OVERRIDE='0 90 0';WGR_CLOUD_COVERAGE='0';
     WGR_TERRAIN_JITTER='0';WGR_LOD_GOVERNOR_RANGE='1';WGR_TERRAIN_PUDDLES='1';WGR_INTERIOR_SKY_DEBUG='0'}
+if($BootRelief){$settings.POSEIDON_BOOT_RELIEF_PROTOTYPE='1';$result.bootReliefPrototype=$true}
 $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN',
     'POSEIDON_SNOW_TEST_DEPTH','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES','WGR_TERRAIN_PUDDLE_WETNESS','WGR_TERRAIN_PUDDLE_FIXTURE','POSEIDON_INTERIOR_SKY_PROBE')
 $keys=@($settings.Keys)+$clear; $savedEnv=@{}
@@ -278,8 +280,16 @@ try {
     $lane=@($trace | Where-Object {$_.x -ge 4974.4 -and $_.x -le 4975.6 -and $_.z -ge 4674 -and $_.z -le 4681 -and $_.texture.Replace('\','/').TrimStart('/').ToLowerInvariant() -ceq 'o/pole2.paa'})
     Require ($lane.Count -gt 0) 'Actual stock-soil boot producer trace missing from the walked lane.';$result.gates.bootTrace=$lane
     $pauseA=State 'pause-a';Capture 'wet-close' $camera;Capture 'wet-away' $away;Capture 'wet-return' $camera;Start-Sleep -Seconds 2;$pauseB=State 'pause-b';Assert-MudPaused $pauseA $pauseB
+    if($BootRelief){
+        Require (Select-String -LiteralPath $log -Pattern 'BOOT_RELIEF_PROTOTYPE admitted=authored-footstep-mark' -Quiet) 'Actual authored boot material route absent.'
+        $result.gates.bootReliefMaterialAdmission=$true
+    }
     $returned=Grid 'camera-return';for ($i=0;$i -lt $after.Count;++$i) { foreach ($field in @('offset','mudDx','mudDz','surfaceY','surfaceDx','surfaceDz','revision','chunks','wetness')) { Require ($after[$i].$field -eq $returned[$i].$field) 'Camera return changed paused physical mud data.' } }
     $result.gates.pause=@{a=$pauseA;b=$pauseB;exactGridReturn=$true}
+    if($BootRelief){
+        $null=Send @{cmd='exec';code='0 setFog .78;setAccTime 1'};Start-Sleep -Seconds 1
+        $null=Send @{cmd='exec';code='setAccTime 0'};Capture 'wet-close-fog' $camera
+    }
     $null=Send @{cmd='exec';code='deleteVehicle mudWalker'};Close-Owned
     $result.status='physical-contact-state-verified-appearance-pending'
 } catch { $result.status='failed';$result.error=$_.Exception.Message;throw }

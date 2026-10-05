@@ -6,8 +6,11 @@ execution:
   integration_owner: Oliver Kay
   activation_state: ACTIVE
   fog_boot_truck_checkpoint:
-    state: CODE_IMPLEMENTED_BUILD_AND_RUNTIME_VERIFICATION_IN_PROGRESS
-    implementation_commits: [921ef114, d53f8cbd]
+    state: INSTALLED_BOUNDED_RUNTIME_PASSED_VISUAL_PROTOTYPE_JUDGEMENT_PENDING
+    implementation_commits: [921ef114, d53f8cbd, 234795e7]
+    installed_source_commit: 234795e7
+    installed_local_time: 2026-10-05_15:32
+    runtime_receipt: docs/verification/fog-boot-truck-20261005-runtime.json
     evidence: docs/verification/fog-boot-truck-20261005.md
     note: >-
       Stock SP Truck5t ruts and admitted-wheel rolling resistance now default,
@@ -18,7 +21,13 @@ execution:
       Actual authored FootStepL/R relief prototype is opt-in, changed mud/sand
       contacts only, inferred3mm sole normal and bounded parallax with receiver
       colour/fog airlight preserved. Tyre parallax/slip/general vehicle rollout
-      remain outside this checkpoint. Installed runtime and timing pending.
+      remain outside this checkpoint. Fog tests17 and boot tests2 passed. Installed
+      original Everon26 moving poses passed. Exact owner pattern not reproduced;
+      no universal flicker-free or speed claim (bounded fog0.424 to0.454ms).
+      Natural-rain default Truck5t drive8.61m/14.1cm rut,6/6 wheel resistance passed.
+      Real Nogova boot contact produced19.9cm physical offset, prototype material
+      admission and dry/roof/paused geometry controls passed. Sole artistic
+      acceptance and surrounding legacy wet-surface/puddle transitions pending.
   fog_road_vehicle_followup_checkpoint:
     state: CODE_BUILT_INSTALLED_BOUNDED_RUNTIME_CHECKS_PASSED
     code_commit: c179034b
