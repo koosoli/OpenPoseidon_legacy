@@ -1,7 +1,23 @@
 # Stock Jeep mud-wheel prototype
 
-Scope: stock class `Jeep`, local physics only. No generic vehicle rollout,
-traction tuning, imported assets, soft-body solver or multiplayer replication.
+Scope: stock class `Jeep`, local physics only. Jeep deformation stays default.
+No generic vehicle rollout, imported assets, soft-body solver or multiplayer
+replication. Two additional experiments are opt-in and single-player only:
+
+- `POSEIDON_MUD_TRUCK_PROTOTYPE=1`: exact stock `Truck5t`, existing six-wheel
+  selection mapping, capacity 65% of the wet layer capped at 0.16 m. This does
+  not activate other truck variants or inherited/mod vehicle classes.
+  Selection evidence: `CarType::InitShape`/`ScanWheels` already map the front,
+  middle and rear left/right Czech wheel selections in the actual contact LOD;
+  only mapped grounded points participate, rather than fabricating six contacts.
+  The stock `Truck5t` is also used by `dev-missions/freefly-lights.eden`.
+- `POSEIDON_MUD_TRACTION_PROTOTYPE=1`: modest longitudinal rolling resistance
+  on admitted wet-soft-soil wheels. Contribution scales with supported wheels,
+  layer softness/depth, caps at 1.2 m/s² and cannot reverse velocity by itself.
+  No lateral-slip/torque/engine tuning or full tyre solver is claimed.
+
+Flags are read at process start. No flags means the already verified baseline.
+Multiplayer ignores both new experiments even if the environment flags are set.
 
 The car collects solid-ground collision points for identified wheels. A car-wide
 land-contact flag cannot stamp unsupported wheels. Roadway-object collision
@@ -23,6 +39,9 @@ each pass. This is a conservative prototype, not a decimetres-deep truck model.
 - `scripts/Test-MudWheelTrail.ps1`: passed dense/sparse simulation schedule
   parity, stationary, airborne, teleport, invalid input, refused intermediate
   anchor and repeated bounded compression assertions.
+- Vehicle policy assertions cover exact-class/opt-in/single-player isolation,
+  dry/no-support/rest refusal, partial support, reverse driving, acceleration
+  cap and dissipative/no-reversal behavior over varied speeds/time steps.
 - `scripts/Test-MudField.ps1`: existing mud geometry/admission-policy assertions
   passed after extracting shared admission.
 - Actual `Car.cpp` and `MudContact.cpp` CMake object targets compiled with the
@@ -33,6 +52,11 @@ open soft ground in Everon after sustained heavy rain; drive one line, inspect
 the four-wheel ruts, reverse along it and check suspension/steering stability.
 Repeat on roads, under roofs, over snow and in dry weather to verify refusal.
 `POSEIDON_MUD_TRACE=1` logs `MUD_WHEEL` for actual field mutations.
+Repeat with the stock 5t truck and truck flag for wheel selection/steering
+validation. For rolling resistance, compare the same wet Jeep driving/coasting
+path with the traction flag absent/present; road/dry behavior should match.
+`POSEIDON_MUD_TRACE=1` additionally records once-per-second `MUD_RESISTANCE`
+with admitted wheel count and actual applied longitudinal deceleration.
 
 ## Contact integration limit
 
@@ -45,7 +69,9 @@ wheel/collision coupling. Runtime testing must establish the driven Jeep's
 behavior before any wider vehicle rollout.
 
 Existing terrain rendering receives the mud field. No new tire-profile texture
-or parallax shader was added. Visible rut shape and vehicle response must be
+or parallax shader was added: directional tyre-profile storage and shared shader
+integration would exceed this bounded follow-up and conflict with fog work.
+Visible rut shape and vehicle response must be
 judged in the installed merged build; the subagent did not deploy or run a game.
 
 ## Installed integration check

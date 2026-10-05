@@ -62,13 +62,18 @@ static bool AdmitMudContact(const Landscape& land, Object& actor, Vector3Par foo
     return true;
 }
 
-bool StampMudWheelContact(const Landscape& land, Object& actor, Vector3Par point)
+bool AdmitMudWheelContact(const Landscape& land, Object& actor, Vector3Par point)
+{
+    return AdmitMudContact(land, actor, point, 0.5f);
+}
+
+bool StampMudWheelContact(const Landscape& land, Object& actor, Vector3Par point, MudWheelProfile profile)
 {
     // The car calls this only for an identified wheel with actual solid-ground
     // collision. Allow its penetration tolerance; still reject sea/roads/roofs.
-    if (!AdmitMudContact(land, actor, point, 0.5f)) return false;
+    if (!profile.enabled || !AdmitMudWheelContact(land, actor, point)) return false;
     auto& mud = GMud();
-    const float depth = std::min(0.12f, mud.ContactDepth() * 0.5f);
+    const float depth = std::min(profile.maxDepth, mud.ContactDepth() * profile.depthScale);
     const bool changed = mud.Stamp(point.X(), point.Z(), MudField::ContactRadius(depth), depth, 0.8f);
     static const bool trace = [] {
         const char* value = std::getenv("POSEIDON_MUD_TRACE");

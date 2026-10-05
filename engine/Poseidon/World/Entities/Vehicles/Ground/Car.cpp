@@ -614,9 +614,18 @@ bool Car::IsBlocked() const
 
 void Car::Simulate(float deltaT, SimulationImportance prec)
 {
-    // Deliberately limited to the stock unarmed Jeep for runtime evaluation.
-    // Geometry is mission-local; no new network or traction contract is implied.
-    const bool mudPrototype = IsLocal() && strcmp(Type()->GetName(), "Jeep") == 0 &&
+    static const bool mudTruckOptIn = [] {
+        const char* value = std::getenv("POSEIDON_MUD_TRUCK_PROTOTYPE");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    static const bool mudTractionOptIn = [] {
+        const char* value = std::getenv("POSEIDON_MUD_TRACTION_PROTOTYPE");
+        return value && std::strcmp(value, "1") == 0;
+    }();
+    const bool singlePlayer = GWorld && GWorld->GetMode() != GModeNetware;
+    const auto mudProfile = SelectMudWheelProfile(Type()->GetName(), mudTruckOptIn, singlePlayer);
+    // Jeep remains default; the truck and resistance experiments are opt-in SP.
+    const bool mudPrototype = IsLocal() && mudProfile.enabled &&
                               GMud().ContactActive() && DirectionUp().Y() >= 0.3f;
     bool mudGrounded[MaxWheels]{};
     Vector3 mudContact[MaxWheels];
@@ -1515,6 +1524,22 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
             }
         }
 
+        if (mudPrototype && mudTractionOptIn && singlePlayer && !_waterContact)
+        {
+            int admitted = 0;
+            for (int wheel = 0; wheel < MaxWheels; ++wheel)
+                if (mudGrounded[wheel] && AdmitMudWheelContact(*GLOB_LAND, *this, mudContact[wheel])) ++admitted;
+            const float deceleration = MudRollingDeceleration(speed.Z(), GMud().ContactDepth(),
+                GMud().Wetness(), deltaT, admitted, mudProfile.wheels);
+            friction += DirectionModelToWorld(Vector3(0, 0, deceleration * GetMass()));
+            static const bool mudTrace = [] {
+                const char* value = std::getenv("POSEIDON_MUD_TRACE");
+                return value && std::strcmp(value, "1") == 0;
+            }();
+            if (mudTrace && deceleration != 0 && std::fmod(Glob.time.toFloat(), 1.0f) < deltaT)
+                LOG_INFO(Physics, "MUD_RESISTANCE class={} wheels={}/{} speed={:.3f} deceleration={:.3f}",
+                         Type()->GetName().Data(), admitted, mudProfile.wheels, speed.Z(), deceleration);
+        }
         ApplyForces(deltaT, force, torque, friction, torqueFriction);
 
         bool stopCondition = false;
@@ -1599,7 +1624,7 @@ void Car::Simulate(float deltaT, SimulationImportance prec)
         _mudWheels[wheel].Update(point.X(), point.Y(), point.Z(),
             true,
             [&](float x, float y, float z) {
-                return StampMudWheelContact(*GLOB_LAND, *this, Vector3(x, y, z));
+                return StampMudWheelContact(*GLOB_LAND, *this, Vector3(x, y, z), mudProfile);
             });
     }
 
