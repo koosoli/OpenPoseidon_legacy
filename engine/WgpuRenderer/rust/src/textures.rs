@@ -944,7 +944,9 @@ pub(crate) fn write_rgba8_mip_chain(
             },
         );
         if mip + 1 < mip_level_count {
-            let (nw, nh) = (lw.div_ceil(2).max(1), lh.div_ceil(2).max(1));
+            // GPU mip extents round down, including odd-sized source images.
+            // Rounding up overran the allocated mip (e.g. 1230 -> 615 -> 307).
+            let (nw, nh) = ((lw / 2).max(1), (lh / 2).max(1));
             level = downsample_rgba8(&level, lw, lh, nw, nh);
             lw = nw;
             lh = nh;
@@ -955,6 +957,31 @@ pub(crate) fn write_rgba8_mip_chain(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn odd_sized_rgba_mips_fit_gpu_texture_extents() {
+        let Some((device, queue)) = crate::gfx3d::cull::tests::headless() else {
+            eprintln!("SKIP odd-sized mip validation: no headless GPU");
+            return;
+        };
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        for (width, height) in [(1230, 1278), (5, 7), (1, 7)] {
+            let levels = mip_chain_len(width, height);
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("odd_sized_menu_picture"),
+                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                mip_level_count: levels,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let pixels = vec![255; (width * height * 4) as usize];
+            write_rgba8_mip_chain(&queue, &texture, 0, width, height, levels, &pixels);
+        }
+        assert!(pollster::block_on(scope.pop()).is_none());
+    }
 
     #[test]
     fn mutation_results_distinguish_success_from_refused_texture_operations() {
