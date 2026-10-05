@@ -4,6 +4,8 @@ Integrated and runtime-tested as d2a9add7, 2026-10-05 21:35, using the guarded d
 
 Final clean deployment is 3503946b, 2026-10-05 21:58. Its native main-menu/browser smoke passed with normal exit and no GPU errors. Receipt: docs/verification/local-browser-menu-final-20261005-runtime.json. No game process is left running by the final smoke.
 
+Everon discovery follow-up: installed 814d8b80 at 22:12. Reforger's internal Worlds/Eden folder was already discovered but misleadingly displayed as Eden. The browser now labels it Everon without changing its world path. The installed menu scan confirms `Arma Reforger | Everon | native Enfusion preview (preview)` and exits normally without runtime/GPU errors. Receipt: docs/verification/local-browser-everon-label-20261005-runtime.json. This verifies discovery and naming; it is not a new Reforger terrain/material acceptance test. The owner requested to perform further checking personally.
+
 Normal main menu: **Local maps**. The browser searches C:/SteamLibrary, D:/SteamLibrary, the normal Steam installation and libraryfolders.vdf, with an optional extra folder. Discovery runs in a worker and reads archive directories plus eight-byte WRP format headers; no game assets are copied or downloaded.
 
 Arma 1, Arma 2/OA, Arma 3 and DayZ candidates use existing OPRW 18/20/24/25/29 readers. Unsupported/compressed or unrecognised headers remain disabled. Arma Reforger Eden, Arland and Cain use the existing native PAK loader; ambiguous editor/showcase folders remain disabled. These are engine terrain previews, not imports of original missions or all original gameplay features.
