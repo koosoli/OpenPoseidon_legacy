@@ -19069,7 +19069,8 @@ void EngineWgpu::SetWaterSettings(const WaterSettings& s)
 void EngineWgpu::SetMenuSeaSceneActive(bool active)
 {
     _menuSeaLook.reset();
-    if (!active) return;
+    if (!active)
+        return;
     SyncWaterLookProfile();
     _menuSeaLook = _waterLook;
     auto& look = *_menuSeaLook;
