@@ -49,6 +49,19 @@ static void harness_closesocket(SOCKET_T s)
 }
 #endif
 
+// Browser restarts launch a child with inherited standard handles. Never let it
+// retain this process's listener or accepted connection: the orphaned listener
+// can accept TCP handshakes after restart without a worker to answer them.
+static bool harness_noinherit(SOCKET_T socket)
+{
+#ifdef _WIN32
+    return SetHandleInformation(reinterpret_cast<HANDLE>(socket), HANDLE_FLAG_INHERIT, 0) != 0;
+#else
+    const int flags = fcntl(socket, F_GETFD);
+    return flags >= 0 && fcntl(socket, F_SETFD, flags | FD_CLOEXEC) == 0;
+#endif
+}
+
 static int harness_send(SOCKET_T socket, const char* bytes, int count)
 {
 #ifdef MSG_NOSIGNAL
@@ -92,10 +105,27 @@ bool HarnessServer::Start(int port)
     }
 #endif
 
+#ifdef _WIN32
+    // Set the flag at creation too, so a concurrent child launch cannot inherit
+    // the socket between its creation and the handle-policy check below.
+    _listenSock = WSASocketW(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0,
+                             WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
+#elif defined(SOCK_CLOEXEC)
+    _listenSock = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_TCP);
+#else
     _listenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+#endif
     if (_listenSock == HARNESS_INVALID_SOCKET)
     {
         LOG_ERROR(Core, "[Harness] Failed to create socket");
+        return false;
+    }
+
+    if (!harness_noinherit(_listenSock))
+    {
+        LOG_ERROR(Core, "[Harness] Failed to disable listener inheritance");
+        harness_closesocket(_listenSock);
+        _listenSock = HARNESS_INVALID_SOCKET;
         return false;
     }
 
@@ -308,6 +338,13 @@ void HarnessServer::WorkerLoop()
         {
             if (!_stopRequested.load())
                 LOG_WARN(Core, "[Harness] accept() failed");
+            continue;
+        }
+
+        if (!harness_noinherit(clientSock))
+        {
+            LOG_WARN(Core, "[Harness] Failed to disable client inheritance");
+            harness_closesocket(clientSock);
             continue;
         }
 
