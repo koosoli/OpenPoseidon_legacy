@@ -1,3 +1,4 @@
+#include <Poseidon/UI/LocalMapEditor.hpp>
 #include <Poseidon/Core/Game/GameLoop.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/Config.hpp>
@@ -356,8 +357,6 @@ void RenderFrame(float deltaT, bool enableDraw)
         Dev::FramePaceTraceMain(row);
     }
 }
-
-#include <Poseidon/UI/LocalMapEditor.hpp>
 
 bool AppIdle()
 {

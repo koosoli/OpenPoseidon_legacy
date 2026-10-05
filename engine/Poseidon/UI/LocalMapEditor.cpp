@@ -12,29 +12,41 @@
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
-namespace Poseidon {
-namespace {
+namespace Poseidon
+{
+namespace
+{
 std::string pendingWorld, originalRoots, originalWorld;
 bool editing = false, restore = false;
-}
+} // namespace
 bool RequestLocalMapEditor(const LocalMap& map, std::string& error)
 {
     if (!GWorld || GWorld->GetMode() != GModeIntro || editing || !pendingWorld.empty())
-    { error = "Return to the main menu before selecting a terrain."; return false; }
+    {
+        error = "Return to the main menu before selecting a terrain.";
+        return false;
+    }
     const auto id = RegisterLocalMapWorld(map, error);
-    if (id.empty()) return false;
+    if (id.empty())
+        return false;
     auto& cfg = Foundation::AppConfig::Instance();
     originalRoots = cfg.GetMapArchivePaths().Data();
     originalWorld = cfg.GetLocalMapWorldId();
     std::string roots;
-    for (const auto& root : map.archiveRoots) { if (!roots.empty()) roots += ';'; roots += root; }
+    for (const auto& root : map.archiveRoots)
+    {
+        if (!roots.empty())
+            roots += ';';
+        roots += root;
+    }
     pendingWorld = id;
     GApp->RequestRemountWithMapArchives(roots, id);
     return true;
 }
 bool CloseLocalMapEditor()
 {
-    if (!editing) return false;
+    if (!editing)
+        return false;
     editing = false;
     restore = true;
     return true;
@@ -49,14 +61,23 @@ bool ServiceLocalMapEditor()
         GApp->RequestRemountWithMapArchives(originalRoots, originalWorld);
         return true;
     }
-    if (pendingWorld.empty()) return false;
-    if (GApp->m_remountFailed) { pendingWorld.clear(); return false; }
-    if (!GWorld || GWorld->GetMode() != GModeIntro || !GWorld->Options()) return false;
+    if (pendingWorld.empty())
+        return false;
+    if (GApp->m_remountFailed)
+    {
+        pendingWorld.clear();
+        return false;
+    }
+    if (!GWorld || GWorld->GetMode() != GModeIntro || !GWorld->Options())
+        return false;
     auto* parent = dynamic_cast<ControlsContainer*>(GWorld->Options());
-    if (!parent) return false;
+    if (!parent)
+        return false;
     const auto world = pendingWorld;
     pendingWorld.clear();
-    CurrentCampaign = ""; CurrentBattle = ""; CurrentMission = "";
+    CurrentCampaign = "";
+    CurrentBattle = "";
+    CurrentMission = "";
     SetBaseDirectory(true, GetUserMissionsBase());
     ::CreateDirectory(BaseDirectory + RString("missions"), nullptr);
     SetMission(world.c_str(), "");
@@ -65,4 +86,4 @@ bool ServiceLocalMapEditor()
     editing = true;
     return true;
 }
-}
+} // namespace Poseidon
