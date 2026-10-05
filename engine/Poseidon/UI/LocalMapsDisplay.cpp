@@ -7,6 +7,7 @@
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
@@ -147,12 +148,19 @@ class LocalMapsDisplay : public Display
                 roots += root;
             }
         std::vector<std::string> args = {std::string(executable.begin(), executable.end()),
-                                         "--render=wgpu",
-                                         "--window",
+                                         "--render=" + Foundation::AppConfig::Instance().GetRenderBackend(),
                                          "--wait-for-parent",
                                          std::to_string(GetCurrentProcessId()),
                                          "--test-mission",
                                          mission.string()};
+        if (GEngine)
+        {
+            const WindowMode mode = GEngine->GetCurrentWindowMode();
+            args.insert(args.end(), {"--display-mode", mode == WindowMode::Windowed ? "windowed" :
+                                     mode == WindowMode::Borderless ? "borderless" : "exclusive",
+                                     "--width", std::to_string(GEngine->Width()),
+                                     "--height", std::to_string(GEngine->Height())});
+        }
         if (Foundation::AppConfig::Instance().DevMode())
             args.push_back("--dev");
         if (const int port = Foundation::AppConfig::Instance().GetHarnessPort(); port > 0)
