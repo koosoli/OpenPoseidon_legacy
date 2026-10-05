@@ -36,4 +36,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Ground material PBO packaging failed' }
 Copy-Item -LiteralPath "$source/mod.json" -Destination "$pack/mod.json" -Force
 Write-Host "Staged road and terrain integration package: $pack"
 & "$PSScriptRoot/Build-VehicleActions.ps1" -Preset $Preset -Python $Python
-Write-Host 'Staging alone is not visual/runtime acceptance. No original game archive was modified.'
+$menuStage = Join-Path $dist 'assets/menu/RoughSea.Intro'
+New-Item -ItemType Directory -Force $menuStage | Out-Null
+foreach ($name in @('mission.sqm','init.sqs')) {
+    Copy-Item -LiteralPath (Join-Path $root "content/menu/RoughSea.Intro/$name") -Destination (Join-Path $menuStage $name) -Force
+}
+Write-Host 'Staging alone is not visual/runtime acceptance. No original game archive was modified.' 

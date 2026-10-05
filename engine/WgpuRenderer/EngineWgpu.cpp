@@ -19057,8 +19057,28 @@ void EngineWgpu::FlushPendingScreenshot()
 
 void EngineWgpu::SetWaterSettings(const WaterSettings& s)
 {
-    _waterLook = s;
-    _waterLookDirty = true;
+    if (_menuSeaLook)
+        _menuSeaLook = s;
+    else
+    {
+        _waterLook = s;
+        _waterLookDirty = true;
+    }
+}
+
+void EngineWgpu::SetMenuSeaSceneActive(bool active)
+{
+    _menuSeaLook.reset();
+    if (!active) return;
+    SyncWaterLookProfile();
+    _menuSeaLook = _waterLook;
+    auto& look = *_menuSeaLook;
+    look.waterBackend = 1;
+    look.tidewater.seaConditions = 4; // Tidewater's authored storm spectrum.
+    look.tidewater.amplitude = 1.65f;
+    look.tidewater.waterGlow = 0.0f;
+    look.tidewater.foamCoverage = 1.1f;
+    look.freeze = {};
 }
 
 void EngineWgpu::SyncWaterLookProfile()
@@ -20160,7 +20180,7 @@ void EngineWgpu::PushRenderParams()
     // same switch — so a deterministic test frame stays deterministic with sway on, and a paused
     // simulation freezes the canopy instead of leaving it stirring over a stopped world.
     const float swayTime =
-        _waterLook.freeze.freezeTime ? _waterLook.freeze.fixedTime : render::frame::GPresentationSnapshot().timeSeconds;
+        WaterLook().freeze.freezeTime ? WaterLook().freeze.fixedTime : render::frame::GPresentationSnapshot().timeSeconds;
 
     // WGR_FOLIAGE_ABLATE=1 zeroes the leaf-lighting model for ONE frame's worth of A/B: the
     // subsurface fill, the terminator wrap, the ambient boost and -- the one that matters most
@@ -20430,8 +20450,8 @@ void EngineWgpu::PushSkyRuntime()
     // fixed time so the cloud shell holds at the same world offset as the test frame (the wind
     // formula is otherwise driven by Glob.time, which freezes in lockstep via the freezeTime bit).
     constexpr double kWindWrap = 100000.0; // m
-    const double cloudT = (_waterLook.freeze.freezeClouds || _waterLook.freeze.freezeTime)
-                              ? static_cast<double>(_waterLook.freeze.fixedTime)
+    const double cloudT = (WaterLook().freeze.freezeClouds || WaterLook().freeze.freezeTime)
+                              ? static_cast<double>(WaterLook().freeze.fixedTime)
                               : static_cast<double>(render::frame::GPresentationSnapshot().timeSeconds);
     // The deck's scroll velocity. Driven by the world's wind authority when
     // cloudWindFromWeather is on, so an overcast front that stiffens the wind

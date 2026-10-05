@@ -1,0 +1,38 @@
+version=11;
+class Intro
+{
+    randomSeed=731;
+    class Intel
+    {
+        startWeather=0.25; forecastWeather=0.25;
+        startFog=0.025; forecastFog=0.025;
+        year=1985; month=9; day=15; hour=16; minute=40;
+    };
+    class Groups
+    {
+        items=1;
+        class Item0
+        {
+            side="WEST";
+            class Vehicles
+            {
+                items=1;
+                class Item0
+                {
+                    position[]={2500,0,3500}; azimut=235; id=0;
+                    side="WEST"; vehicle="BoatW"; leader=1; skill=0.8;
+                    text="opMenuBoat";
+                    init="this allowDamage false; this setCombatMode \"BLUE\"; this setBehaviour \"SAFE\"";
+                };
+            };
+            class Waypoints
+            {
+                items=4;
+                class Item0 { position[]={1800,0,2800}; type="MOVE"; speed="LIMITED"; combatMode="BLUE"; combat="SAFE"; };
+                class Item1 { position[]={3000,0,2200}; type="MOVE"; speed="LIMITED"; };
+                class Item2 { position[]={3300,0,3600}; type="MOVE"; speed="LIMITED"; };
+                class Item3 { position[]={2500,0,3500}; type="CYCLE"; speed="LIMITED"; };
+            };
+        };
+    };
+};

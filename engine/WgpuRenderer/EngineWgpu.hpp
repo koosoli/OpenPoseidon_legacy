@@ -28,6 +28,7 @@
 #include "RetailWorldStableFrameObservation.hpp"
 
 #include <array>
+#include <optional>
 #include <chrono> // steady_clock, for the opt-in auto-exposure time constant (WGR_AUTO_EXPOSURE_TAU)
 #include <list>   // parked GPU model LRU
 #include <memory>
@@ -369,8 +370,9 @@ class EngineWgpu : public EngineDummy
     // GPU water look (ImGui Water tab). Edited here and read live by WaterWgpu, which
     // pushes them into the water UBO each frame. Gated on the water renderer existing.
     bool SupportsWater() const override { return _renderer != nullptr && _water != nullptr; }
-    WaterSettings GetWaterSettings() const override { return _waterLook; }
+    WaterSettings GetWaterSettings() const override { return WaterLook(); }
     void SetWaterSettings(const WaterSettings& s) override;
+    void SetMenuSeaSceneActive(bool active) override;
     // Legacy terrain grass layers call these while submitting their GrassTexture
     // overlays.  The procedural system uses that exact hook as its eligibility
     // signal instead of drawing over every opaque terrain cell.
@@ -393,7 +395,7 @@ class EngineWgpu : public EngineDummy
     bool IsGrassSurfaceEnabled(int index) const override;
     void SetGrassSurfaceEnabled(int index, bool enabled) override;
     // Live look, read by WaterWgpu::DrawWater when building the per-frame water UBO.
-    const WaterSettings& WaterLook() const { return _waterLook; }
+    const WaterSettings& WaterLook() const { return _menuSeaLook ? *_menuSeaLook : _waterLook; }
 
     // WTR-002 — GPU water-pipeline pass timings, read back from wgr_get_gpu_timings
     // (non-blocking; the Rust side harvests asynchronously). Names follow the
@@ -657,6 +659,7 @@ class EngineWgpu : public EngineDummy
     float _sunGlareExposure = 1.0f;
     // Live GPU-water look, edited by the Water tab, read by WaterWgpu each frame.
     Engine::WaterSettings _waterLook;
+    std::optional<WaterSettings> _menuSeaLook;
     std::string _waterLookMap;
     bool _waterLookDirty = false;
     // Authored procedural-sky params (atmosphere + look); celestial fields are filled

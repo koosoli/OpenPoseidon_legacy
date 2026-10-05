@@ -2825,6 +2825,8 @@ class Engine : public IGraphicsEngine
     virtual bool SupportsWater() const { return false; }
     virtual WaterSettings GetWaterSettings() const { return {}; }
     virtual void SetWaterSettings(const WaterSettings& /*s*/) {}
+    // Authored menu sea is transient; it never writes the per-map water profile.
+    virtual void SetMenuSeaSceneActive(bool /*active*/) {}
 
     // GPU-driven cull DEBUG toggles (ImGui Culling tab). drawSpheres = render each retained
     // instance's frustum-cull sphere as a wireframe; disableFrustum = skip the GPU frustum

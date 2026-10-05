@@ -2267,7 +2267,18 @@ void StartRandomCutscene(RString world)
     // A mod that ships Anims/<name>.<world> hosts the cutscene from its own root; else the base
     // anims/ bank. Clear the base dir first so SetMission's own reads resolve from the same place.
     SetBaseDirectory("");
-    SetMission(world, name, ResolveCutsceneAnimsSubdir(world, name));
+    RString subdir = ResolveCutsceneAnimsSubdir(world, name);
+    // Keep a mod's authored intro. Otherwise the shipped, lightweight ocean scene
+    // replaces retail cutscenes without changing the original CfgWorlds or archives.
+    const bool menuSea = subdir == GetAnimsDir() && WorldInstalled("Intro") &&
+                         QIFStreamB::FileExist("assets\\menu\\RoughSea.Intro\\mission.sqm");
+    if (menuSea)
+    {
+        world = "Intro";
+        name = "RoughSea";
+        subdir = "assets\\menu\\";
+    }
+    SetMission(world, name, subdir);
 
     ParseIntro();
 
@@ -2277,6 +2288,8 @@ void StartRandomCutscene(RString world)
         GWorld->ActivateAddons(CurrentTemplate.addOns);
         GLOB_WORLD->InitGeneral(CurrentTemplate.intel);
         GLOB_WORLD->InitVehicles(GModeIntro, CurrentTemplate);
+        if (GEngine)
+            GEngine->SetMenuSeaSceneActive(menuSea);
         //		GWorld->EnableSimulation(true);
     }
 }

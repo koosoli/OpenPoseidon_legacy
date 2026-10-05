@@ -1219,6 +1219,7 @@ void World::CleanUpInit()
 
 void World::CleanUp()
 {
+    if (GEngine) GEngine->SetMenuSeaSceneActive(false);
     CleanUpDeinit();
     CleanUpInit();
 }
