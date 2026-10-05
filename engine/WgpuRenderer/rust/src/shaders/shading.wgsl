@@ -59,7 +59,7 @@ fn object_snow_normal(world_pos: vec3<f32>, geo_normal: vec3<f32>, base_n: vec3<
 }
 // Sinkhole W1: the terrain height at a fragment, for the underground sun test below. Every pipeline that
 // imports `shading` (shader3d, gpu_driven) already binds the conform heightmap group.
-#import conform::cave_daylight2
+#import conform::{cave_daylight2, bare_surface_y}
 
 // The six material colour terms shade() consumes (raw gamma-space; shade srgb-decodes on
 // the HDR/linear path). sun_ambient/sun_diffuse are the SUN-FOLDED terms (material × sun),
@@ -344,7 +344,16 @@ fn shade(
     // roof 0.4 m down read as open sky (owner report: "the roof of the cave is bleeding light"). W1 removed
     // the sun from everything under the ground, which also blacked out stairwells open to the sky; W1b fades
     // it with the reach from the nearest opening (conform::cave_daylight), DayZ-style.
-    let cave = cave_daylight2(world_abs);
+    // OnSurface roads have terrain-seated fragment depth, but their interpolated
+    // vertex chord can still cross below the fine heightfield. Classify the
+    // seated receiver, otherwise entire road tiles become dark, unfogged caves.
+    // Only proven ground receivers qualify; cave meshes and bridges keep their
+    // actual elevation and their underground lighting.
+    var cave_pos = world_abs;
+    if (ground_surface) {
+        cave_pos.y = max(cave_pos.y, bare_surface_y(cave_pos.xz));
+    }
+    let cave = cave_daylight2(cave_pos);
     let underground_s = 1.0 - cave.x; // direct sun: only through an opening's footprint
     let underground_amb_s = 1.0 - cave.y; // sky / bounce: fades with the reach from an opening
     let terrain_s = max(terrain_sun_shadow(world_abs.xz, world_abs.y), underground_s);
