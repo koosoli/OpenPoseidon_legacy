@@ -20,7 +20,9 @@
 @group(0) @binding(0) var env: texture_2d<f32>;
 
 struct Sh {
-    c: array<vec4<f32>, 9>,
+    // First nine remain the existing full-sphere surface radiance. The next
+    // nine project only the upper sky for fog, without inventing ground light.
+    c: array<vec4<f32>, 18>,
 };
 @group(0) @binding(1) var<storage, read_write> sh: Sh;
 
@@ -43,8 +45,10 @@ fn cs_sky_sh(@builtin(local_invocation_index) lane: u32) {
     let dtheta = PI / f32(h);
 
     var c: array<vec3<f32>, 9>;
+    var upper: array<vec3<f32>, 9>;
     for (var i = 0; i < 9; i = i + 1) {
         c[i] = vec3<f32>(0.0);
+        upper[i] = vec3<f32>(0.0);
     }
 
     // Each lane owns a stride of ROWS. The row grid is h/sy steps, which is 64 whenever the env
@@ -79,6 +83,17 @@ fn cs_sky_sh(@builtin(local_invocation_index) lane: u32) {
             c[6] = c[6] + wr * 0.315392 * (3.0 * dir.z * dir.z - 1.0);
             c[7] = c[7] + wr * 1.092548 * dir.x * dir.z;
             c[8] = c[8] + wr * 0.546274 * (dir.x * dir.x - dir.y * dir.y);
+            if (dir.y > 0.0) {
+                upper[0] += wr * 0.282095;
+                upper[1] += wr * 0.488603 * dir.y;
+                upper[2] += wr * 0.488603 * dir.z;
+                upper[3] += wr * 0.488603 * dir.x;
+                upper[4] += wr * 1.092548 * dir.x * dir.y;
+                upper[5] += wr * 1.092548 * dir.y * dir.z;
+                upper[6] += wr * 0.315392 * (3.0 * dir.z * dir.z - 1.0);
+                upper[7] += wr * 1.092548 * dir.x * dir.z;
+                upper[8] += wr * 0.546274 * (dir.x * dir.x - dir.y * dir.y);
+            }
             x = x + sx;
         }
         y = y + i32(LANES) * sy;
@@ -109,5 +124,24 @@ fn cs_sky_sh(@builtin(local_invocation_index) lane: u32) {
         for (var i = 0; i < 9; i = i + 1) {
             sh.c[i] = vec4<f32>(partial[0][i], 0.0);
         }
+    }
+    // Reuse the 9 KiB scratch instead of doubling workgroup memory beyond the
+    // WebGPU 16 KiB guarantee. Both projections share the same environment read.
+    workgroupBarrier();
+    for (var i = 0; i < 9; i = i + 1) { partial[lane][i] = upper[i]; }
+    workgroupBarrier();
+    stride = LANES / 2u;
+    loop {
+        if (stride == 0u) { break; }
+        if (lane < stride) {
+            for (var i = 0; i < 9; i = i + 1) {
+                partial[lane][i] += partial[lane + stride][i];
+            }
+        }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+    if (lane == 0u) {
+        for (var i = 0; i < 9; i = i + 1) { sh.c[i + 9] = vec4<f32>(partial[0][i], 0.0); }
     }
 }

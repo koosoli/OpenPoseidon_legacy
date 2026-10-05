@@ -5,6 +5,20 @@ execution:
   baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
   integration_owner: Oliver Kay
   activation_state: ACTIVE
+  fog_boot_truck_checkpoint:
+    state: CODE_IMPLEMENTED_BUILD_AND_RUNTIME_VERIFICATION_IN_PROGRESS
+    implementation_commits: [921ef114, d53f8cbd]
+    evidence: docs/verification/fog-boot-truck-20261005.md
+    note: >-
+      Stock SP Truck5t ruts and admitted-wheel rolling resistance now default,
+      retaining explicit env opt-out and exact Jeep/Truck5t scope. Downward fog
+      intervals clip to native air instead of losing straddling ground slices.
+      Sky ambient uses upper-hemisphere SH9/HG convolution without camera-relative
+      quadrature or horizon admission jumps; surface SH9 coefficients unchanged.
+      Actual authored FootStepL/R relief prototype is opt-in, changed mud/sand
+      contacts only, inferred3mm sole normal and bounded parallax with receiver
+      colour/fog airlight preserved. Tyre parallax/slip/general vehicle rollout
+      remain outside this checkpoint. Installed runtime and timing pending.
   fog_road_vehicle_followup_checkpoint:
     state: CODE_BUILT_INSTALLED_BOUNDED_RUNTIME_CHECKS_PASSED
     code_commit: c179034b

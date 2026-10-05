@@ -1,4 +1,4 @@
-#import layered_fog_optics::{fog_segment_density, fog_segment_participant, fog_air_interval, fog_height_density, fog_phase_sample, fog_height_primitive, fog_phase, fog_transmittance, fog_ray_direction, fog_patch_density, fog_valley_density, fog_domain_feather, fog_neutral_radiance}
+#import layered_fog_optics::{fog_segment_density, fog_segment_participant, fog_air_interval, fog_height_density, fog_sky_ambient, fog_height_primitive, fog_phase, fog_transmittance, fog_ray_direction, fog_patch_density, fog_valley_density, fog_domain_feather, fog_neutral_radiance}
 #import color::srgb_to_linear
 
 struct FogVolume {
@@ -50,6 +50,8 @@ struct FogLocalLight { pos:vec4<f32>, diffuse:vec4<f32>, ambient:vec4<f32>, dir:
 @group(0) @binding(16) var solar_result: texture_storage_3d<rgba16float, write>;
 @group(0) @binding(17) var<storage, read> local_lights:array<FogLocalLight>;
 @group(0) @binding(18) var solar_read: texture_3d<f32>;
+struct FogSkySh { c: array<vec4<f32>,18>, };
+@group(0) @binding(19) var<storage,read> sky_sh: FogSkySh;
 
 fn fog_weather_weight(p: vec3<f32>) -> f32 {
     // The native height source owns the atmospheric domain. The camera-centred
@@ -317,16 +319,11 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
         }
         return;
     }
-    var ambient=vec3<f32>(0.0);
-    // Importance sampling removes the unresolved high-g HG peak. Equal weights
-    // are normalized on the full sphere; downward samples contribute ZERO,
-    // never artificial negative-Y sky or a renormalized upper-hemisphere gain.
-    for (var i=0u;i<8u;i=i+1u) {
-        let dir=fog_phase_sample(ray,params.control.y,i);
-        if (dir.y <= 0.0) { continue; }
-        let euv=vec2<f32>(atan2(dir.z,dir.x)/6.28318530718+0.5,acos(dir.y)/3.14159265359);
-        ambient += textureSampleLevel(environment,filter_samp,euv,0.0).rgb * 0.125;
-    }
+    var upper:array<vec4<f32>,9>;
+    for(var i=0u;i<9u;i=i+1u) { upper[i]=sky_sh.c[i+9u]; }
+    // Reuse the once-per-frame sky projection. Eight view-relative sky fetches
+    // and their discontinuous hemisphere/basis changes are no longer required.
+    let ambient=fog_sky_ambient(ray,params.control.y,upper);
     var colour=vec3<f32>(0.0);
     var trans=1.0;
     var previous=0.0;

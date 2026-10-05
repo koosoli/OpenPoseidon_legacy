@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidateSet('Jeep','Truck5t')][string]$VehicleClass='Jeep',[switch]$Resistance,[switch]$DisableResistance,[string]$ExpectedCommit='')
+param([ValidateSet('Jeep','Truck5t')][string]$VehicleClass='Jeep',[switch]$Resistance,[switch]$DisableResistance,[switch]$BootRelief,[string]$ExpectedCommit='')
 $ErrorActionPreference='Stop'
 if($Resistance -and $DisableResistance){throw 'Choose resistance on or off'}
 $resistanceEnabled=!$DisableResistance
@@ -19,6 +19,8 @@ Remove-Item Env:POSEIDON_TEST_RAIN -ErrorAction SilentlyContinue
 Remove-Item Env:POSEIDON_MUD_TRUCK_PROTOTYPE -ErrorAction SilentlyContinue
 Remove-Item Env:POSEIDON_MUD_TRACTION_PROTOTYPE -ErrorAction SilentlyContinue
 if($DisableResistance){$env:POSEIDON_MUD_TRACTION_PROTOTYPE='0'}
+Remove-Item Env:POSEIDON_BOOT_RELIEF_PROTOTYPE -ErrorAction SilentlyContinue
+if($BootRelief){$env:POSEIDON_BOOT_RELIEF_PROTOTYPE='1'}
 $env:POSEIDON_MUD_TRACE='1'
 $stamp=(Get-Content (Join-Path $game 'DEPLOYED-FROM.txt') -Raw).Trim()
 if($ExpectedCommit -and !$stamp.Contains($ExpectedCommit)){throw 'Installed build changed'}

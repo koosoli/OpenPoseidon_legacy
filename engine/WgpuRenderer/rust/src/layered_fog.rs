@@ -140,7 +140,7 @@ impl LayeredFog {
             wgpu::BindGroupLayoutEntry {binding:8,visibility:wgpu::ShaderStages::COMPUTE,ty:wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),count:None},
             uniform(9),image(10,d2,wgpu::TextureSampleType::Float {filterable:false}),uniform(11),
             image(12,d2,depth),image(13,d2,depth),storage(14),storage(15),
-            storage(17),wgpu::BindGroupLayoutEntry {binding:16,visibility:wgpu::ShaderStages::COMPUTE,
+            storage(17),storage(19),wgpu::BindGroupLayoutEntry {binding:16,visibility:wgpu::ShaderStages::COMPUTE,
                 ty:wgpu::BindingType::StorageTexture {access:wgpu::StorageTextureAccess::WriteOnly,format:wgpu::TextureFormat::Rgba16Float,view_dimension:wgpu::TextureViewDimension::D3},count:None}];
         let solar_layout=device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {label:Some("wgr_layer_fog_solar_layout"),entries:&entries});
         let mut view_entries:Vec<_>=entries.into_iter().filter(|e|e.binding!=16).collect();
@@ -185,7 +185,7 @@ impl LayeredFog {
         settings:&WgrLayeredFog,weather:f32,hdr:bool,underground:f32,cam:&WgrCamera,inv_vp:[[f32;4];4],
         height:&TerrainConformParams,height_view:&wgpu::TextureView,height_generation:u64,
         mapping:&TerrainShadowMap,shadow_view:&wgpu::TextureView,csm_view:&wgpu::TextureView,
-        environment:&wgpu::TextureView,clouds:&wgpu::TextureView,cover:WeatherInputs,below_clouds:bool,cloud_limit:[f32;2],native_bounds:[f32;2]) {
+        environment:&wgpu::TextureView,sky_sh:&wgpu::Buffer,clouds:&wgpu::TextureView,cover:WeatherInputs,below_clouds:bool,cloud_limit:[f32;2],native_bounds:[f32;2]) {
         self.frames=self.frames.wrapping_add(1);
         let far=cam.params.fog_start+if cam.params.fog_inv_range>0.0 {1.0/cam.params.fog_inv_range}else{0.0};
         let finite=cam.view.iter().chain(cam.proj.iter()).chain(cam.cam_pos.iter())
@@ -232,7 +232,7 @@ impl LayeredFog {
             image(3,environment),image(4,clouds),image(5,shadow_view),buffer(6,&self.shadow),image(7,csm_view),
             wgpu::BindGroupEntry {binding:8,resource:wgpu::BindingResource::Sampler(&self.comparison)},buffer(9,&self.csm),
             image(10,height_view),buffer(11,&self.height),image(12,&cover.views[0]),image(13,&cover.views[1]),
-            buffer(14,cover.counts[0].as_ref().unwrap_or(&self.zero_counts)),buffer(15,cover.counts[1].as_ref().unwrap_or(&self.zero_counts)),image(16,&self.solar_view),buffer(17,&self.local_lights)];
+            buffer(14,cover.counts[0].as_ref().unwrap_or(&self.zero_counts)),buffer(15,cover.counts[1].as_ref().unwrap_or(&self.zero_counts)),image(16,&self.solar_view),buffer(17,&self.local_lights),buffer(19,sky_sh)];
         let solar_bind=device.create_bind_group(&wgpu::BindGroupDescriptor {label:Some("wgr_layer_fog_solar_bind"),layout:&self.solar_layout,entries:&entries});
         let mut view_entries:Vec<_>=entries.into_iter().filter(|e|e.binding!=16).collect();
         view_entries.push(image(18,&self.solar_view));

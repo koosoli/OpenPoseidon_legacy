@@ -1490,7 +1490,7 @@ impl Sky {
         });
         let sh_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("wgr_sky_sh"),
-            contents: &[0u8; 9 * 16],
+            contents: &[0u8; 18 * 16],
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::UNIFORM
                 | wgpu::BufferUsages::COPY_DST,

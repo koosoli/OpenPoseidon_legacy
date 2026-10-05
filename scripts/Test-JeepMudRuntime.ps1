@@ -25,7 +25,7 @@ try{
  $env:POSEIDON_MUD_TRACE='1';$env:WGR_GRASS='0';$env:WGR_TEMPORAL='0';$env:POSEIDON_SNOWLINE='off'
  $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
  $log=Join-Path $out 'engine.log';$stderr=Join-Path $out 'stderr.log';$mission=Join-Path $root 'tests/perf/missions/perf_mud.noe'
- $args=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--test-world-hour','12','--log-file',('"'+$log+'"'))
+ $args=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','800','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--test-world-hour','12','--log-file',('"'+$log+'"'))
  $p=Start-Process (Join-Path $game 'OpenPoseidon.exe') -WorkingDirectory $game -WindowStyle Hidden -ArgumentList $args -RedirectStandardOutput (Join-Path $out 'stdout.log') -RedirectStandardError $stderr -PassThru
  $deadline=[DateTime]::UtcNow.AddSeconds(120)
  do{Require (!$p.HasExited) 'Startup exited';$client=[Net.Sockets.TcpClient]::new();try{$client.Connect('127.0.0.1',$port)}catch{$client.Dispose();$client=$null};if(!$client){Require ([DateTime]::UtcNow-lt$deadline) 'Startup deadline';Start-Sleep -Milliseconds 250}}while(!$client)

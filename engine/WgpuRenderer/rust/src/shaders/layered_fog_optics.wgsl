@@ -69,6 +69,20 @@ fn fog_phase(cosine: f32, g: f32) -> f32 {
     let gg = clamp(g, -0.95, 0.95);
     return (1.0 - gg * gg) / (12.56637061436 * pow(max(1.0 + gg * gg - 2.0 * gg * cosine, 0.0025), 1.5));
 }
+// HG convolution of raw upper-hemisphere sky radiance SH-9. Its degree-l
+// coefficient is g^l, without Lambertian factors or hemisphere renormalization.
+// This is a smooth, band-limited ambient approximation; direct sun/local lamps
+// retain their full HG phase. No camera-relative sampling basis or horizon test.
+fn fog_sky_ambient(ray: vec3<f32>, g: f32, c: array<vec4<f32>, 9>) -> vec3<f32> {
+    let gg = clamp(g, -0.95, 0.95);
+    let x=ray.x; let y=ray.y; let z=ray.z;
+    let l0=c[0].rgb*0.282095;
+    let l1=(c[1].rgb*y+c[2].rgb*z+c[3].rgb*x)*0.488603;
+    let l2=c[4].rgb*(1.092548*x*y)+c[5].rgb*(1.092548*y*z)
+        +c[6].rgb*(0.315392*(3.0*z*z-1.0))+c[7].rgb*(1.092548*x*z)
+        +c[8].rgb*(0.546274*(x*x-y*y));
+    return max(l0+gg*l1+gg*gg*l2,vec3<f32>(0.0));
+}
 fn fog_transmittance(tau: f32) -> f32 { return exp(-max(tau, 0.0)); }
 // Owner-requested fog chroma policy, applied to radiance in linear light.
 // Preserve luminance/HDR energy and original radiance exactly when dormant.

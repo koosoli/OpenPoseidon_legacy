@@ -217,6 +217,45 @@ fn actual_fog_receivers_gpu_keep_intervening_air_without_changing_alpha() {
 }
 
 #[test]
+fn fog_sky_projection_excludes_lower_hemisphere_and_is_camera_continuous() {
+ let(device,queue)=crate::gfx3d::cull::tests::headless().expect("fog sky GPU proof requires device");
+ let env=device.create_texture(&wgpu::TextureDescriptor {label:Some("upper_sky_fixture"),size:wgpu::Extent3d {width:128,height:64,depth_or_array_layers:1},mip_level_count:1,sample_count:1,dimension:wgpu::TextureDimension::D2,format:wgpu::TextureFormat::Rgba32Float,usage:wgpu::TextureUsages::COPY_DST|wgpu::TextureUsages::TEXTURE_BINDING,view_formats:&[]});
+ let mut pixels=vec![0f32;128*64*4];
+ for y in 0..64 { for x in 0..128 {let radiance=if y<32 {1.}else{100.};let i=(y*128+x)*4;pixels[i..i+4].copy_from_slice(&[radiance,radiance,radiance,1.]);}}
+ queue.write_texture(wgpu::TexelCopyTextureInfo {texture:&env,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},bytemuck::cast_slice(&pixels),wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(128*16),rows_per_image:Some(64)},env.size());
+ let coefficients=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("fog_sky_coefficients"),contents:&[0u8;18*16],usage:wgpu::BufferUsages::STORAGE});
+ let module=device.create_shader_module(wgpu::ShaderModuleDescriptor {label:Some("actual_sky_projection"),source:wgpu::ShaderSource::Wgsl(include_str!("sky/sky_sh.wgsl").into())});
+ let pipe=device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {label:None,layout:None,module:&module,entry_point:Some("cs_sky_sh"),compilation_options:Default::default(),cache:None});
+ let view=env.create_view(&Default::default());
+ let bind=device.create_bind_group(&wgpu::BindGroupDescriptor {label:None,layout:&pipe.get_bind_group_layout(0),entries:&[wgpu::BindGroupEntry {binding:0,resource:wgpu::BindingResource::TextureView(&view)},wgpu::BindGroupEntry {binding:1,resource:coefficients.as_entire_binding()}]});
+ let mut enc=device.create_command_encoder(&Default::default());
+ {let mut pass=enc.begin_compute_pass(&Default::default());pass.set_pipeline(&pipe);pass.set_bind_group(0,&bind,&[]);pass.dispatch_workgroups(1,1,1);}
+ queue.submit(Some(enc.finish()));
+ let values=read_probe(&device,&queue,r#"
+ #import layered_fog_optics::fog_sky_ambient
+ struct Sky {c:array<vec4<f32>,18>};
+ @group(0) @binding(0) var<storage,read_write> result:array<vec4<f32>>;
+ @group(0) @binding(1) var<storage,read> sky:Sky;
+ @compute @workgroup_size(1) fn cs_probe(){
+   var c:array<vec4<f32>,9>;
+   for(var i=0u;i<9u;i=i+1u){c[i]=sky.c[i+9u];}
+   result[0]=vec4<f32>(sky.c[0].x,sky.c[9].x,fog_sky_ambient(vec3<f32>(0.0,-1.0,0.0),0.0,c).x,0.0);
+   for(var i=0u;i<256u;i=i+1u){
+     let angle=0.13+f32(i)*0.0001;
+     let ray=vec3<f32>(sin(angle),-cos(angle),0.0);
+     result[i+1u]=vec4<f32>(fog_sky_ambient(ray,0.65,c),0.0);
+   }
+ }
+ "#,&[wgpu::BindGroupEntry {binding:1,resource:coefficients.as_entire_binding()}],257*4);
+ assert!((values[0]-179.016).abs()<0.04,"existing full-sphere coefficients retained: {}",values[0]);
+ assert!((values[1]-1.77245).abs()<0.001,"lower sky cannot enter fog: {}",values[1]);
+ assert!((values[2]-0.5).abs()<0.001,"isotropic upper sky has half-sphere energy");
+ let rows=values[4..].chunks_exact(4).collect::<Vec<_>>();
+ for pair in rows.windows(2){assert!((pair[1][0]-pair[0][0]).abs()<0.0001,"nadir basis threshold must have no camera-following jump: {pair:?}");}
+ assert!(values.iter().all(|v|v.is_finite()&&*v>=0.));
+}
+
+#[test]
 fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gates() {
  let(device,queue)=crate::gfx3d::cull::tests::headless().expect("actual fog GPU proof requires device");
  let mut composer=crate::shaders::build_composer();
@@ -237,6 +276,7 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
  let write_byte=|tex:&wgpu::Texture,byte:u8|queue.write_texture(wgpu::TexelCopyTextureInfo {texture:tex,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},
   &[byte,byte,byte,255],wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(4),rows_per_image:Some(1)},tex.size());
  write_byte(&env,0);write_byte(&cloud,255);
+ let sky_sh=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("fog_sky_sh_fixture"),contents:&[0u8;18*16],usage:wgpu::BufferUsages::STORAGE|wgpu::BufferUsages::COPY_DST});
  let shadow=texture(&device,wgpu::TextureFormat::Rgba8Unorm,1,1,1,false);let shadow_view=shadow.create_view(&Default::default());
  write_byte(&shadow,0);
  let cover_depth=texture(&device,wgpu::TextureFormat::Depth32Float,4,4,1,true);
@@ -281,7 +321,7 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
   let inverse=(glam::DMat4::from_cols_array(&camera.view.map(f64::from)).inverse()
    *glam::DMat4::from_cols_array(&camera.proj.map(f64::from)).inverse()).as_mat4().to_cols_array_2d();
   fog.render(&device,&queue,&mut enc,settings,weather,true,0.,camera,inverse,&height,&native_view,generation,
-   &mapping,&shadow_view,&csm_view,&env_view,&cloud_view,cover,below,cloud_limit.get(),[native_min.get(),native_max.get()]);queue.submit(Some(enc.finish()));
+   &mapping,&shadow_view,&csm_view,&env_view,&sky_sh,&cloud_view,cover,below,cloud_limit.get(),[native_min.get(),native_max.get()]);queue.submit(Some(enc.finish()));
  };
  run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);assert!(fog.ready);
  let positive=read();let mut previous=1.;
@@ -290,7 +330,22 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
   assert!((row[3]-(-0.01*distance).exp()).abs()<0.0007,"actual Beer-Lambert z={z}: {row:?}");
   assert!(row[3]<=previous);previous=row[3];assert_eq!(&row[..3],&[0.;3]);
  }
- // A current far map can replace a rebuilding near source without a whole
+ // Actual bound upper-sky coefficients must reach the encoded volume with
+ // normalized scattering energy. No sun, local lamps or environment texture.
+ let mut ambient_coefficients=[0f32;18*4];ambient_coefficients[36..39].fill(3.5449077);
+ let saved_sun=camera.sun_diffuse;camera.sun_diffuse=[0.;4];
+ queue.write_buffer(&sky_sh,0,bytemuck::cast_slice(&ambient_coefficients));
+ settings.control[1]=1.;
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
+ let ambient_encoded=read();
+ assert!(ambient_encoded[124]>0.8,"upper sky must actually illuminate the volume");
+ for(a,b)in ambient_encoded.chunks_exact(4).zip(positive.chunks_exact(4)){
+  assert!((a[0]-(1.-b[3])*settings.control[1]).abs()<0.001,"actual SH sky transport: {a:?}/{b:?}");
+  assert_eq!(a[3],b[3],"ambient cannot change extinction");
+ }
+ queue.write_buffer(&sky_sh,0,&[0u8;18*16]);
+ settings.control[1]=0.;
+ camera.sun_diffuse=saved_sun;
  // A downward view must integrate the same ground fog while the camera changes
  // altitude. The old buried-midpoint refusal lost whole straddling intervals,
  // making their slice boundaries follow the camera as bright stepped rings.
