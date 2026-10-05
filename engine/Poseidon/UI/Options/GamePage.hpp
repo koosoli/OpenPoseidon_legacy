@@ -15,6 +15,7 @@ class GamePage : public ScrollListPage
 
     static int ViewDistanceToSlider(float value);
     static float SliderToViewDistance(int slider);
+    static int ViewDistanceSliderMax();
 
     void OnReshown(OptionsShell& shell) override;
     void Unmount(OptionsShell& shell) override;

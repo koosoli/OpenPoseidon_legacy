@@ -101,16 +101,13 @@ TEST_CASE("GamePage: view-distance row is a slider with metre text", "[UI][GameP
     TestableGamePage page;
     auto& p = page.Provider();
     CHECK(p.RowKind(2) == OptionsScrollList::KindSlider);
-    // Derived, not hardcoded: the slider is 0..100 across [kMin, kMaxViewDistance], so the
-    // position of a given distance moves whenever the maximum does (it was 16 while the
-    // maximum was 5 km, and is 8 now that it is 10 km -- VD-001). What must NOT move is the
-    // distance itself, which is what the metre text below checks.
+    // Metre steps must survive increases of the supported maximum.
     CHECK(p.RowValue(2) == GamePage::ViewDistanceToSlider(900.0f));
     CHECK(std::string(p.SliderValueText(2)) == "900 m");
 
     p.SetRowValue(2, 0);
     CHECK(GetSelectedPreferredViewDistance() == GameSettingsConfig::kMinViewDistance);
-    p.SetRowValue(2, 100);
+    p.SetRowValue(2, GamePage::ViewDistanceSliderMax());
     CHECK(GetSelectedPreferredViewDistance() == GameSettingsConfig::kMaxViewDistance);
 }
 
@@ -135,12 +132,36 @@ TEST_CASE("GamePage: view-distance helpers clamp and round to the supported rang
 {
     CHECK(GamePage::ViewDistanceToSlider(GameSettingsConfig::kMinViewDistance - 500.0f) == 0);
     CHECK(GamePage::ViewDistanceToSlider(GameSettingsConfig::kMinViewDistance) == 0);
-    CHECK(GamePage::ViewDistanceToSlider(GameSettingsConfig::kMaxViewDistance) == 100);
-    CHECK(GamePage::ViewDistanceToSlider(GameSettingsConfig::kMaxViewDistance + 500.0f) == 100);
+    CHECK(GamePage::ViewDistanceToSlider(GameSettingsConfig::kMaxViewDistance) == GamePage::ViewDistanceSliderMax());
+    CHECK(GamePage::ViewDistanceToSlider(GameSettingsConfig::kMaxViewDistance + 500.0f) == GamePage::ViewDistanceSliderMax());
 
     CHECK(GamePage::SliderToViewDistance(-10) == GameSettingsConfig::kMinViewDistance);
     CHECK(GamePage::SliderToViewDistance(0) == GameSettingsConfig::kMinViewDistance);
-    CHECK(GamePage::SliderToViewDistance(100) == GameSettingsConfig::kMaxViewDistance);
-    CHECK(GamePage::SliderToViewDistance(120) == GameSettingsConfig::kMaxViewDistance);
+    CHECK(GamePage::SliderToViewDistance(GamePage::ViewDistanceSliderMax()) == GameSettingsConfig::kMaxViewDistance);
+    CHECK(GamePage::SliderToViewDistance(GamePage::ViewDistanceSliderMax() + 20) == GameSettingsConfig::kMaxViewDistance);
     CHECK(std::fmod(GamePage::SliderToViewDistance(37), 100.0f) == Catch::Approx(0.0f));
+}
+
+TEST_CASE("GamePage: every hundred metres is reachable including 800m", "[UI][GamePage]")
+{
+    GamePageStateSnapshot snap;
+    TestableGamePage page;
+    auto& p = page.Provider();
+    const auto row = p.RowFor(2); // includes the actual WithCloseRow forwarding.
+    REQUIRE(row.sliderStep == 1);
+    REQUIRE(row.sliderMax == GamePage::ViewDistanceSliderMax());
+    for (int position = 0; position <= row.sliderMax; position += row.sliderStep)
+    {
+        const float metres = GameSettingsConfig::kMinViewDistance + position * 100.0f;
+        p.SetRowValue(2, position);
+        REQUIRE(GetSelectedPreferredViewDistance() == metres);
+        REQUIRE(p.RowValue(2) == position);
+    }
+    p.SetRowValue(2, GamePage::ViewDistanceToSlider(800.0f));
+    CHECK(GetSelectedPreferredViewDistance() == 800.0f);
+    CHECK(std::string(p.SliderValueText(2)) == "800 m");
+    // Unrelated percentage sliders retain their 5% steps and range.
+    const OptionsScrollList::RowDef percentRow{1, nullptr, -1};
+    CHECK(percentRow.sliderMax == 100);
+    CHECK(percentRow.sliderStep == 5);
 }

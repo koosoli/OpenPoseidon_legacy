@@ -90,13 +90,15 @@ public:
 
 	// Per-row shape descriptor.  count encoding:
 	//   > 0 — stepper/toggle, options[] has count strings to cycle
-	//   -1 — slider, value is rowValueIdx as 0..100 percent
+	//   -1 — slider, value is rowValueIdx in 0..sliderMax
 	//   -2 — read-only meter (VU); Provider::TickMeter feeds the bar
 	struct RowDef
 	{
 		int valueIdc;
 		const char* const* options;
 		int count;
+		int sliderMax = 100;
+		int sliderStep = 5;
 	};
 
 	// Row kind drives the slot renderer + keyboard model:

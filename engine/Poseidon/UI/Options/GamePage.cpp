@@ -32,16 +32,13 @@ int CurrentLanguageIndex(const std::string& language)
 int ViewDistanceToSliderImpl(float value)
 {
     float clamped = ClampPreferredViewDistance(value);
-    return (int)std::lround((clamped - GameSettingsConfig::kMinViewDistance) /
-                            (GameSettingsConfig::kMaxViewDistance - GameSettingsConfig::kMinViewDistance) * 100.0f);
+    return (int)std::lround((clamped - GameSettingsConfig::kMinViewDistance) / 100.0f);
 }
 
 float SliderToViewDistanceImpl(int slider)
 {
-    int clamped = std::clamp(slider, 0, 100);
-    float value = GameSettingsConfig::kMinViewDistance +
-                  (clamped / 100.0f) * (GameSettingsConfig::kMaxViewDistance - GameSettingsConfig::kMinViewDistance);
-    return std::round(value / 100.0f) * 100.0f;
+    int clamped = std::clamp(slider, 0, GamePage::ViewDistanceSliderMax());
+    return GameSettingsConfig::kMinViewDistance + clamped * 100.0f;
 }
 } // namespace
 
@@ -58,6 +55,12 @@ int GamePage::ViewDistanceToSlider(float value)
 float GamePage::SliderToViewDistance(int slider)
 {
     return SliderToViewDistanceImpl(slider);
+}
+
+int GamePage::ViewDistanceSliderMax()
+{
+    return (int)std::lround((GameSettingsConfig::kMaxViewDistance -
+                           GameSettingsConfig::kMinViewDistance) / 100.0f);
 }
 
 const char* GamePage::CloseLabel()
@@ -143,7 +146,8 @@ OptionsScrollList::RowDef GamePage::GameProvider::RowFor(int row) const
             return {512, CfgLib::LanguageRegistry::Instance().VoiceDisplayNamePtrs(),
                     CfgLib::LanguageRegistry::Instance().VoiceCount()};
         case kRowViewDistance:
-            return {522, nullptr, -1};
+            // One arrow press is 100m even though the supported range reaches 50km.
+            return {522, nullptr, -1, GamePage::ViewDistanceSliderMax(), 1};
         case kRowRespectMissionViewDistance:
             return {532, m_toggleOptions.data(), 2};
         case kRowBlood:
@@ -202,7 +206,7 @@ void GamePage::GameProvider::SetRowValue(int row, int value)
     }
     else if (row == kRowViewDistance)
     {
-        value = std::clamp(value, 0, 100);
+        value = std::clamp(value, 0, GamePage::ViewDistanceSliderMax());
     }
     else if (row == kRowVoiceLanguage)
     {

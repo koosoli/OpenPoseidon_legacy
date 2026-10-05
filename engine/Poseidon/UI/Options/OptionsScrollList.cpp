@@ -583,7 +583,9 @@ void OptionsScrollList::RenderSlot(int slot, int logicalRow)
     }
     else if (isSlider)
     {
+        RowDef row = m_provider.RowFor(logicalRow);
         int p = m_provider.RowValue(logicalRow);
+        int percent = (int)std::lround(100.0 * p / std::max(1, row.sliderMax));
         const char* sliderText = m_provider.SliderValueText(logicalRow);
         if (sliderText && *sliderText)
         {
@@ -592,10 +594,10 @@ void OptionsScrollList::RenderSlot(int slot, int logicalRow)
         else
         {
             char buf[16];
-            snprintf(buf, sizeof(buf), "%3d%%", p);
+            snprintf(buf, sizeof(buf), "%3d%%", percent);
             SetRowValue(idcValBar, buf);
         }
-        SetSliderBar(idcFill, p, 0.40f, SlotTrackY(slot), 0.018f, 0.40f);
+        SetSliderBar(idcFill, percent, 0.40f, SlotTrackY(slot), 0.018f, 0.40f);
         SetRowValue(idcValStep, "");
     }
     else if (isVU)
@@ -856,7 +858,8 @@ void OptionsScrollList::CycleFocusedRowValue(int direction)
     }
     else if (row.count == -1)
     {
-        m_provider.SetRowValue(m_rowFocus, std::clamp(curr + direction * 5, 0, 100));
+        m_provider.SetRowValue(m_rowFocus,
+            std::clamp(curr + direction * std::max(1, row.sliderStep), 0, std::max(1, row.sliderMax)));
     }
     else
     {
@@ -922,7 +925,9 @@ void OptionsScrollList::PollSliderDrag()
     if (u != u)
         return;
     u = std::clamp(u, 0.0f, 1.0f);
-    int p = std::clamp(int(u * 20.0f + 0.5f) * 5, 0, 100);
+    const int maximum = std::max(1, row.sliderMax);
+    const int step = std::max(1, row.sliderStep);
+    int p = std::clamp((int)std::lround(u * maximum / step) * step, 0, maximum);
     if (m_provider.RowValue(rowIdx) == p)
         return;
     m_rowFocus = rowIdx;
@@ -1338,7 +1343,10 @@ bool OptionsScrollList::OnButtonClicked(int idc)
             if (auto* clickCtrl = dynamic_cast<Control3D*>(m_notebook->GetCtrl(idc)))
             {
                 float u = clickCtrl->GetU();
-                int p = std::clamp(int(u * 20.0f + 0.5f) * 5, 0, 100);
+                const int maximum = std::max(1, row.sliderMax);
+                const int step = std::max(1, row.sliderStep);
+                if (!std::isfinite(u)) return true;
+                int p = std::clamp((int)std::lround(std::clamp(u, 0.0f, 1.0f) * maximum / step) * step, 0, maximum);
                 m_provider.SetRowValue(rowIdx, p);
                 m_marqueeStartMs = GlobalTickCount();
                 RenderPage();
