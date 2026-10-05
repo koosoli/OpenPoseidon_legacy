@@ -7,6 +7,7 @@
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Core/resincl.hpp>
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <SDL3/SDL.h>
@@ -24,6 +25,18 @@ namespace
 {
 constexpr int ListId = 62001, FolderId = 62002, ScanId = 62003, OpenId = 62004, StatusId = 62005, BackId = 62006,
               MapsId = 62008, VehiclesId = 62009;
+class LocalBrowserButton : public CButton
+{
+  public:
+    LocalBrowserButton(ControlsContainer* parent, int id, const ParamEntry& cls) : CButton(parent, id, cls)
+    {
+        _color1 = GetPackedColor(cls >> "colorBackground");
+        _color2 = GetPackedColor(cls >> "colorActive");
+        _color3 = _color1;
+        _color4 = _color2;
+        _color5 = _color1;
+    }
+};
 class LocalMapsDisplay : public Display
 {
     ParamFile _resources;
@@ -43,6 +56,27 @@ class LocalMapsDisplay : public Display
         cls->Add("y", y);
         cls->Add("w", w);
         cls->Add("h", h);
+        cls->Add("sizeEx", id == StatusId ? 0.025f : 0.032f);
+        if (const ParamEntry* inheritedSize = inherited->FindEntry("size"))
+            cls->Add("size", static_cast<float>(*inheritedSize) * 1.6f);
+        cls->Add("rowHeight", 0.033f);
+        const auto color = [&](const char* key, float r, float g, float b, float a)
+        {
+            ParamEntry* values = cls->AddArray(key);
+            for (float value : {r, g, b, a})
+                values->AddValue(value);
+        };
+        color("colorText", 0.94f, 0.95f, 0.97f, 1.0f);
+        color("colorSelect", 1.0f, 1.0f, 1.0f, 1.0f);
+        color("colorActive", 0.24f, 0.38f, 0.49f, 1.0f);
+        const bool button = std::string(base) == "RscButton";
+        color("colorBackground", button ? 0.12f : 0.04f, button ? 0.19f : 0.05f, button ? 0.25f : 0.065f,
+              id == 62010 ? 0.94f : (button || id == FolderId ? 1.0f : 0.0f));
+        if (id == StatusId)
+        {
+            cls->Add("style", ST_MULTI);
+            cls->Add("lineSpacing", 1.0f);
+        }
         cls->SetBase(inherited->GetClassInterface());
         LoadControl(*cls);
     }
@@ -170,18 +204,24 @@ class LocalMapsDisplay : public Display
     explicit LocalMapsDisplay(ControlsContainer* parent) : Display(parent)
     {
         _idd = LocalMapsMenuId;
-        AddControl("RscText", "Title", 62007, "LOCAL MAPS - installed Arma / DayZ / Reforger", 0.06f, 0.05f, 0.9f,
-                   0.06f);
-        AddControl("RscEdit", "Folder", FolderId, "", 0.06f, 0.13f, 0.65f, 0.05f);
-        AddControl("RscButton", "Scan", ScanId, "Search / refresh", 0.73f, 0.13f, 0.21f, 0.05f);
-        AddControl("RscListBox", "Maps", ListId, "", 0.06f, 0.21f, 0.88f, 0.5f);
-        AddControl("RscText", "Status", StatusId, "", 0.06f, 0.72f, 0.88f, 0.1f);
-        AddControl("RscButton", "Open", OpenId, "Open selected", 0.06f, 0.84f, 0.35f, 0.06f);
-        AddControl("RscButton", "Back", BackId, "Back", 0.74f, 0.84f, 0.2f, 0.06f);
+        AddControl("RscText", "Panel", 62010, "", 0.04f, 0.13f, 0.92f, 0.72f);
+        AddControl("RscText", "Title", 62007, "LOCAL CONTENT", 0.06f, 0.15f, 0.40f, 0.05f);
+        AddControl("RscButton", "MapsTab", MapsId, "Maps", 0.51f, 0.15f, 0.20f, 0.05f);
+        AddControl("RscButton", "VehiclesTab", VehiclesId, "Vehicles", 0.73f, 0.15f, 0.21f, 0.05f);
+        AddControl("RscEdit", "Folder", FolderId, "", 0.06f, 0.22f, 0.65f, 0.05f);
+        AddControl("RscButton", "Scan", ScanId, "Search / refresh", 0.73f, 0.22f, 0.21f, 0.05f);
+        AddControl("RscListBox", "Maps", ListId, "", 0.06f, 0.29f, 0.88f, 0.38f);
+        AddControl("RscText", "Status", StatusId, "", 0.06f, 0.69f, 0.88f, 0.08f);
+        AddControl("RscButton", "Open", OpenId, "Open selected", 0.06f, 0.78f, 0.35f, 0.05f);
+        AddControl("RscButton", "Back", BackId, "Back", 0.74f, 0.78f, 0.20f, 0.05f);
         _vehicles = ScanLocalVehicles(std::filesystem::current_path());
-        AddControl("RscButton", "MapsTab", MapsId, "Maps", 0.06f, 0.91f, 0.21f, 0.05f);
-        AddControl("RscButton", "VehiclesTab", VehiclesId, "Vehicles", 0.29f, 0.91f, 0.21f, 0.05f);
         Scan();
+    }
+    Control* OnCreateCtrl(int type, int idc, const ParamEntry& cls) override
+    {
+        if (type == CT_BUTTON)
+            return new LocalBrowserButton(this, idc, cls);
+        return Display::OnCreateCtrl(type, idc, cls);
     }
     void Fill()
     {
