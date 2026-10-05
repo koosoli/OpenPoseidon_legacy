@@ -1,5 +1,5 @@
 #define_import_path frame
-#import layered_fog_optics::{FogConsumer, fog_camera_matches, fog_legacy_closure, fog_surface_open}
+#import layered_fog_optics::{FogConsumer, fog_camera_matches, fog_legacy_closure, fog_surface_open, fog_ray_far}
 
 // Shared group(0): the per-frame camera/environment UBO plus the cascade shadow
 // map + comparison sampler. Every 3D pipeline (lit meshes, terrain) binds this
@@ -671,8 +671,9 @@ fn apply_fog_receiver(rgb: vec3<f32>, world_pos_rel: vec3<f32>, receiver: bool) 
     let absolute = world_pos_rel + frame.cam_pos.xyz;
     // A surface can block rain while outdoor mist still lies in front of it.
     let surface_open = fog_surface_open(weather_map_coverage(absolute), receiver);
+    let ray_far=fog_ray_far(layer_fog_packet.control.y,frame.cam_pos.y,world_pos_rel.y/max(dist,0.00001),layer_fog_packet.camera.w,layer_fog_packet.control.w);
     let local = textureSampleLevel(layer_fog_tex, froxel_samp,
-        vec3<f32>(uv, sqrt(clamp(dist / layer_fog_packet.control.y, 0.0, 1.0))), 0.0);
+        vec3<f32>(uv, sqrt(clamp(dist / ray_far, 0.0, 1.0))), 0.0);
     let distant = textureSampleLevel(layer_fog_tex, froxel_samp, vec3<f32>(uv, 1.0), 0.0);
     return fog_legacy_closure(rgb, inscat, amount, local, distant, surface_open);
 }

@@ -106,6 +106,16 @@ fn fog_ray_direction(point: vec4<f32>) -> vec3<f32> {
     if (scale <= 1e-20) { return vec3<f32>(0.0); }
     return normalize(point.xyz / scale) * select(1.0,-1.0,point.w < 0.0);
 }
+// Above all finite slabs, a downward ray reaches their actual lower world plane.
+// A spherical maximum truncates grazing columns and paints a camera-centred ring.
+// Producer and consumers share this mapping; no extra slices or march samples.
+fn fog_ray_far(base: f32, eye_y: f32, ray_y: f32, floor_y: f32, aerial: f32) -> f32 {
+    if(aerial <= 0.0 || ray_y >= -0.00001){return base;}
+    // The final32-slice texel represents (31.5/32)^2 of the range.
+    // Place its endpoint beyond the lower plane, not3% before the column ends.
+    let complete=max((eye_y-floor_y)/(-ray_y)/0.96899414,base);
+    return mix(base,complete,aerial);
+}
 // CPU projection is forward-Z; raster depth is reversed by frame::reverse_z.
 // Sky depth0 and an infinite homogeneous point consume the final fog slice.
 fn fog_depth_distance(inverse: mat4x4<f32>, uv: vec2<f32>, depth: f32, far: f32) -> f32 {
@@ -147,12 +157,22 @@ struct FogConsumer {
     view: mat4x4<f32>,
     proj: mat4x4<f32>,
     inv_vp: mat4x4<f32>,
-    camera: vec4<f32>,
-    control: vec4<f32>, // ready, far distance, physical weather fog, reserved
+    camera: vec4<f32>, // xyz, lowest certified fog plane ASL
+    control: vec4<f32>, // ready, far distance, physical weather fog, aerial range blend
     solar_domain: vec4<f32>, // world xz origin, inverse width, maximum AGL
     native: vec4<f32>, // native xz origin, grid, ready
     native_size: vec4<u32>, // source texture width/height, reserved
 };
+// Same ray mapping for the cloud compositor, unprojected once per pixel.
+fn fog_depth_fraction(packet: FogConsumer, uv: vec2<f32>, depth: f32) -> f32 {
+    let ndc=uv*vec2<f32>(2.0,-2.0)+vec2<f32>(-1.0,1.0);
+    let point=packet.inv_vp*vec4<f32>(ndc,1.0-max(depth,0.0),1.0);
+    let ray=fog_ray_direction(point);
+    let far=fog_ray_far(packet.control.y,packet.camera.y,ray.y,packet.camera.w,packet.control.w);
+    if(depth<=0.0 || abs(point.w)<=1e-20 || dot(ray,ray)<0.5){return 1.0;}
+    if(max(max(abs(point.x),abs(point.y)),abs(point.z))>far*abs(point.w)){return 1.0;}
+    return clamp(length(point.xyz/point.w)/far,0.0,1.0);
+}
 fn fog_camera_matches(packet: FogConsumer, view: mat4x4<f32>, proj: mat4x4<f32>, camera: vec3<f32>) -> bool {
     if (packet.control.x < 0.5 || packet.control.y <= 0.0) { return false; }
     if (any(packet.camera.xyz != camera)) { return false; }

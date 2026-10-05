@@ -1,4 +1,4 @@
-#import layered_fog_optics::{FogConsumer, fog_depth_distance}
+#import layered_fog_optics::{FogConsumer, fog_depth_fraction}
 // Over-scene cloud composite (plan Phase 1). Upsamples the low-res cloud buffer produced by
 // fs_cloud (sky.wgsl) — (inscatter.rgb, transmittance.a) — and outputs it PREMULTIPLIED so a
 // fixed-function blend does `out = inscatter + scene*transmittance` over the lit HDR scene:
@@ -84,8 +84,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (layer_control.x < 0.5 || layer_packet.control.x < 0.5) { return c; }
     // The finite layers are certified below the cloud deck. The background
     // already contains their L/T; transport cloud radiance through them once.
-    let distance = fog_depth_distance(layer_packet.inv_vp,in.uv,d_ref,layer_packet.control.y);
+    let fraction = fog_depth_fraction(layer_packet,in.uv,d_ref);
     let local = textureSampleLevel(layer_fog,cloud_samp,
-        vec3<f32>(in.uv,sqrt(clamp(distance/layer_packet.control.y,0.0,1.0))),0.0);
+        vec3<f32>(in.uv,sqrt(fraction)),0.0);
     return vec4<f32>(c.rgb * local.a + local.rgb * (1.0-c.a),c.a);
 }

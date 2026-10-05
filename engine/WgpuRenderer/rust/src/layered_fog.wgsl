@@ -1,4 +1,4 @@
-#import layered_fog_optics::{fog_segment_density, fog_segment_participant, fog_air_interval, fog_height_density, fog_sky_ambient, fog_height_primitive, fog_phase, fog_transmittance, fog_ray_direction, fog_patch_density, fog_valley_density, fog_domain_feather, fog_neutral_radiance}
+#import layered_fog_optics::{fog_segment_density, fog_segment_participant, fog_air_interval, fog_height_density, fog_sky_ambient, fog_height_primitive, fog_phase, fog_transmittance, fog_ray_direction, fog_ray_far, fog_patch_density, fog_valley_density, fog_domain_feather, fog_neutral_radiance}
 #import color::srgb_to_linear
 
 struct FogVolume {
@@ -330,6 +330,7 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
         }
         return;
     }
+    let ray_far=fog_ray_far(params.camera.w,params.camera.y,ray.y,params.ocean.w,params.ocean.z);
     var upper:array<vec4<f32>,9>;
     for(var i=0u;i<9u;i=i+1u) { upper[i]=sky_sh.c[i+9u]; }
     // Reuse the once-per-frame sky projection. Eight view-relative sky fetches
@@ -340,7 +341,7 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
     var previous=0.0;
     for(var z=0u;z<dims.z;z=z+1u) {
         let w=(f32(z)+0.5)/f32(dims.z);
-        let end_distance=params.camera.w*w*w;
+        let end_distance=ray_far*w*w;
         let step=(end_distance-previous)*0.25;
         for(var s=0u;s<4u;s=s+1u) {
             let start=previous+f32(s)*step;

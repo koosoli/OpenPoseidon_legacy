@@ -11,22 +11,23 @@ const MAX_LOCAL_LIGHTS: usize = 16;
 // ground slab halfway and stamps that moving circle into synthetic sky closure.
 // Ground-level cameras retain the existing range. Blend across the actual upper
 // slab feather; incoming solar resolution/scene culling retain their own range.
-fn view_transport_far(far:f32,cam:&WgrCamera,settings:&WgrLayeredFog,height:&TerrainConformParams,bounds:[f32;2])->f32 {
-    if height.hm_width<2 || height.hm_height<2 || !height.terrain_grid.is_finite() || height.terrain_grid<=0.0{return far;}
+fn view_transport_domain(far:f32,cam:&WgrCamera,settings:&WgrLayeredFog,height:&TerrainConformParams,bounds:[f32;2])->[f32;3] {
+    if height.hm_width<2 || height.hm_height<2 || !height.terrain_grid.is_finite() || height.terrain_grid<=0.0{return [far,0.,0.];}
     let active=||settings.layers.iter().filter(|l|l[3]>0.0);
-    if active().next().is_none(){return far;}
+    if active().next().is_none(){return [far,0.,0.];}
     let follow=settings.terrain[0];let reference=settings.terrain[1];
     let top=active().map(|l|l[1]+l[2]).fold(f32::NEG_INFINITY,f32::max)+follow*(bounds[1]-reference);
     let bottom=active().map(|l|l[0]-l[2]).fold(f32::INFINITY,f32::min)+follow*(bounds[0]-reference);
     let feather=active().map(|l|l[2]).fold(1.0,f32::max);
     let u=((cam.cam_pos[1]-top)/feather).clamp(0.0,1.0);
-    if u<=0.0{return far;}
+    if u<=0.0{return [far,bottom,0.];}
     let extent=glam::Vec2::new((height.hm_width-1) as f32,(height.hm_height-1) as f32)*height.terrain_grid;
     let eye=glam::Vec2::new(cam.cam_pos[0],cam.cam_pos[2]);
     let a=(eye-height.origin).abs();let b=(eye-height.origin-extent).abs();
     let xz=a.max(b);
     let field_distance=(xz.length_squared()+(cam.cam_pos[1]-bottom).powi(2)).sqrt();
-    far+(field_distance.max(far)-far)*(u*u*(3.0-2.0*u))
+    let blend=u*u*(3.0-2.0*u);
+    [far+(field_distance.max(far)-far)*blend,bottom,blend]
 }
 
 // Keep actual light metadata (including shadow slots) and reject malformed input
@@ -227,7 +228,7 @@ impl LayeredFog {
         let ocean=ocean.filter(|v|v.is_finite());
         // Atmospheric terrain follows the water surface, not its seabed.
         let air_bounds=match ocean {Some(level)=>[native_bounds[0].max(level),native_bounds[1].max(level)],None=>native_bounds};
-        let view_far=view_transport_far(far,cam,settings,height,air_bounds);
+        let [view_far,ray_floor,aerial_blend]=view_transport_domain(far,cam,settings,height,air_bounds);
         let direction=glam::Vec3::new(-cam.sun_dir_world[0],-cam.sun_dir_world[1],-cam.sun_dir_world[2]).normalize_or_zero();
         // A dark/absent directional light does not remove the night air medium.
         // The incoming solar field alone becomes zero; local lamps remain active.
@@ -245,7 +246,7 @@ impl LayeredFog {
             near_vp:cover.matrices[0],far_vp:cover.matrices[1],near_ctl:cover.controls[0],far_ctl:cover.controls[1],
             capacity:[cover.capacities[0],cover.capacities[1],self.local_count,0],terrain:settings.terrain,patch:settings.patch,
             sky_limit:[cloud_limit[0],cloud_limit[1],air_bounds[1],air_bounds[0]],solar_domain,
-            ocean:match ocean.filter(|v|v.is_finite()){Some(level)=>[level,1.,0.,0.],None=>[0.;4]}};
+            ocean:match ocean.filter(|v|v.is_finite()){Some(level)=>[level,1.,aerial_blend,ray_floor],None=>[0.,0.,aerial_blend,ray_floor]}};
         queue.write_buffer(&self.params,0,bytemuck::bytes_of(&data));
         queue.write_buffer(&self.height,0,bytemuck::bytes_of(height));
         queue.write_buffer(&self.shadow,0,bytemuck::bytes_of(mapping));
@@ -272,7 +273,7 @@ impl LayeredFog {
         {let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {label:Some("wgr_layer_fog_view_transport"),timestamp_writes:None});
             pass.set_pipeline(&self.compute);pass.set_bind_group(0,&bind,&[]);pass.dispatch_workgroups(VIEW_SIZE.div_ceil(8),VIEW_SIZE.div_ceil(8),1);}
         encoder.pop_debug_group();
-        let consumer=Consumer {view:cam.view,proj:cam.proj,inv_vp,camera:cam.cam_pos,control:[1.0,view_far,weather,0.0],
+        let consumer=Consumer {view:cam.view,proj:cam.proj,inv_vp,camera:[cam.cam_pos[0],cam.cam_pos[1],cam.cam_pos[2],ray_floor],control:[1.0,view_far,weather,aerial_blend],
             solar_domain,
             native:[height.origin.x,height.origin.y,height.terrain_grid,height.enabled],
             native_size:[height.hm_width,height.hm_height,0,0]};

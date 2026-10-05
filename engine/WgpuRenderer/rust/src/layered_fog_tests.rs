@@ -359,6 +359,19 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
   // Entire0..40m slab plus its upper1m feather, ending0.05m above ground.
   assert!((tau-0.4045).abs()<0.002,"Downward ground crossing at altitude{altitude}: tau={tau}");
  }
+ // Oblique ocean rays complete the same thin column beyond the geometry sphere.
+ ocean.set(Some(0.));
+ for slope in [0.1,0.2,0.45] {
+  camera.cam_pos[1]=400.;
+  camera.view=glam::Mat4::look_at_lh(glam::Vec3::ZERO,glam::Vec3::new(0.,-slope,1.),glam::Vec3::Y).to_cols_array();
+  let inv=(glam::Mat4::from_cols_array(&camera.proj)*glam::Mat4::from_cols_array(&camera.view)).inverse();
+  let point=inv*glam::Vec4::new(1./64.,-1./64.,0.,1.);
+  let ray=(point.truncate()/point.w).normalize();
+  run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
+  let tau=-read()[127].ln();let expected=0.4045/(-ray.y);
+  assert!((tau-expected).abs()<0.02,"Oblique full column slope{slope}: {tau} expected{expected}");
+ }
+ ocean.set(None);
  camera=saved_camera;
  // Certified current ocean uses its actual5m datum, not a submerged30m seabed.
  // It remains admitted beyond the native map, just as actual off-map water does.

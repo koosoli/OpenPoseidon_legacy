@@ -43,3 +43,19 @@ four-step two-half integration, incoming-light grid and texture budgets are unch
 17 actual layered-fog GPU tests pass including translated nonzero water plane,
 submerged native cells, off-map ocean, absent ocean and underwater exclusion.
 Same installed scene image/timing comparison is pending. No performance gain claimed.
+
+
+The installed sea-level candidate50ff8d57 still exposes the finite far-span edge.
+Its12 timing samples: fog median0.6205ms/mean0.6405ms versus original234795e7
+0.6472/0.7380ms; total median10.0163ms/mean10.0044ms versus10.1878/10.1752ms.
+These are nonblocking published GPU timings from1280x720/MSAA4, no grass,
+13 moving-camera poses and fixed noon/overcast0.15/fog1.0. They are scene-specific,
+not a general performance promise. Ring visual acceptance remains pending.
+
+Aerial grazing rays now extend to the certified lowest active fog plane rather
+than another larger sphere. Producer, opaque receivers and clouds share the same
+ray-dependent slice mapping. The final centred32-slice texel is placed beyond the
+full column endpoint. Ground cameras retain their mapping; native/roof admission,
+fixed steps/slices and solar grid remain unchanged. Actual ocean-column GPU tests
+at oblique slopes0.1/0.2/0.45 now verify complete Beer-Lambert extinction beyond the
+geometry range, alongside the17 passing actual shader/resource/receiver tests.
