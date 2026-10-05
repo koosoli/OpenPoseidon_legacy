@@ -202,6 +202,10 @@ if (Test-Path -LiteralPath $stampPath)
 }
 
 $contentPayload = @()
+$menuLogo = Join-Path $distDir 'assets/ui/openposeidon_logo.png'
+if (Test-Path -LiteralPath $menuLogo) {
+    $contentPayload += @{Source=$menuLogo; Relative='assets/ui/openposeidon_logo.png'}
+}
 foreach ($pack in @(
     @{Folder='Mods/@OP_VisualUpgrade'; Archive='op_ground_materials.pbo'},
     @{Folder='Mods/@OP_VehicleActions'; Archive='op_jeep_actions.pbo'})) {

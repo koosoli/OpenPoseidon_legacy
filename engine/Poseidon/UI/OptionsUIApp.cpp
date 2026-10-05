@@ -202,6 +202,19 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
                               ? "RscDisplayMainRemaster"
                               : "RscDisplayMain";
     Load(mainRsc);
+    if (!IsMenuOverriddenByMod() && QIFStreamB::FileExist("assets\\ui\\openposeidon_logo.png"))
+    {
+        for (int i = 0; i < _controlsForeground.Size(); ++i)
+        {
+            CStatic* picture = dynamic_cast<CStatic*>(_controlsForeground[i].GetRef());
+            if (picture && strstr(picture->GetText(), "cwr_logo.paa"))
+            {
+                picture->SetText("assets\\ui\\openposeidon_logo.png");
+                // Preserve the portrait logo's aspect on the menu's canonical 4:3 canvas.
+                picture->SetPos(0.428f, 0.0f, 0.144f, 0.20f);
+            }
+        }
+    }
     //	LoadHeader();
 
     // Hijack a community addon's custom menu that has no Mods entry: clone the Quit
