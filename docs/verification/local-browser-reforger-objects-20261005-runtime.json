@@ -1,0 +1,113 @@
+{
+  "installed": "codex/player-visibility-recovery-20261005 43fbbbb5 2026-10-05_22:30 deploy-ps1",
+  "passed": true,
+  "selected": "Arma Reforger | Everon | native Enfusion preview (preview)",
+  "maps": [
+    "Arma 3 | Altis | OPRW 25 (preview)",
+    "Arma 3 | Stratis | OPRW 25 (preview)",
+    "Arma 3 | Tanoa | OPRW 25 (preview)",
+    "Arma 3 | VR | OPRW 25 (preview)",
+    "Arma 3 | enoch | OPRW 25 (preview)",
+    "Arma 3 | malden | OPRW 25 (preview)",
+    "Arma Reforger | Arland | native Enfusion preview (preview)",
+    "Arma Reforger | Cain | native Enfusion preview (preview)",
+    "Arma Reforger | Editor | native Enfusion preview (unsupported)",
+    "Arma Reforger | Everon | native Enfusion preview (preview)",
+    "Arma Reforger | MP | native Enfusion preview (unsupported)",
+    "Arma Reforger | ScenarioFramework | native Enfusion preview (unsupported)",
+    "Arma Reforger | Showcase | native Enfusion preview (unsupported)",
+    "DayZ | ChernarusPlus | OPRW 29 (preview)",
+    "DayZ | enoch | OPRW 29 (preview)"
+  ],
+  "preview": {
+    "name": "WEST Alpha Black:1 (mail)",
+    "cls": "SoldierWB",
+    "shape": "data3d\\mc vojakw2.p3d",
+    "pos": [
+      10234.78,
+      2558.51,
+      259.75
+    ],
+    "dir": 360.0,
+    "damage": 0.0,
+    "destroyed": false,
+    "speed": 0.68,
+    "watched": false,
+    "side": 1,
+    "zones": {
+      "hlava": 0.0,
+      "telo": 0.0,
+      "ruce": 0.0,
+      "nohy": 0.0
+    },
+    "weapons": [
+      "M16",
+      "Throw",
+      "Put"
+    ],
+    "selected": {
+      "weapon": "M16",
+      "muzzle": "M16",
+      "magazine": true,
+      "ammo": 30,
+      "loaded": true
+    },
+    "magazines": 10,
+    "brain": {
+      "group": "Alpha Black",
+      "groupLeader": true,
+      "state": 0,
+      "life": 0,
+      "combatMode": 3,
+      "semaphore": 3,
+      "planning": 0,
+      "mode": 2,
+      "path": 0
+    },
+    "man": {
+      "move": "fallland",
+      "time": 0.048,
+      "factor": 0.267,
+      "secondary": "fall",
+      "external": "",
+      "queue": 0,
+      "down": false,
+      "unitPos": 2
+    },
+    "ok": true
+  },
+  "objectResidency": "[2026-10-05 22:34:18.709] [app-80c8] [INFO] [GRAPHICS]  Retained admission census: 2616 objects offered, 2513 admitted (96.1%), 2413 distinct shapes",
+  "childPid": 32968,
+  "world": {
+    "count": 0,
+    "selectedId": 0,
+    "records": [],
+    "status": "Caves cleared. Terrain heights are unchanged.",
+    "missionLocal": true,
+    "worldName": "worlds\\eden.wrp",
+    "grid": 6.25,
+    "heightRevision": 5,
+    "brushDefaultRadius": 8,
+    "inFootprint": false,
+    "atHeight": false,
+    "holeFloor": 0,
+    "terrainY": 259.749267578125,
+    "roadY": 259.749267578125,
+    "cameraFloorY": 259.749267578125,
+    "drawRecords": 0,
+    "boundedHeader": false,
+    "ok": true
+  },
+  "catalogStatus": "15 maps found. Optional folder above. Open restarts engine. Current format support; original missions/gameplay are not imported.",
+  "childCommand": "\"D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe\" --render=wgpu --wait-for-parent 55356 --test-mission C:\\Users\\mail\\.codex\\worktrees\\player-visibility-recovery-20261005\\CWR-CE-paavohuhtalafork-\\build\\local-browser\\Map-20261005-223328\\cache/LocalMapBrowser.Eden --display-mode windowed --width 1280 --height 720 --dev --harness 52916 --log-file C:\\Users\\mail\\.codex\\worktrees\\player-visibility-recovery-20261005\\CWR-CE-paavohuhtalafork-\\build\\local-browser\\Map-20261005-223328\\cache\\local-map-browser.log --test-world \"C:\\Program Files (x86)\\Steam\\steamapps\\common\\Arma Reforger\\addons\" --test-world-land-start --test-world-freefly 1000 1000 250 0 -15 --reforger-world worlds/Eden",
+  "vehicles": [
+    "Arma 1: T-72 (local bridge)",
+    "Arma 2: T-72 (local bridge)",
+    "Arma 3: T-100 Varsuk (local bridge)",
+    "Arma 1: UH-60 (local bridge)",
+    "Arma 2: Mi-35 (local bridge)",
+    "Arma 3: MH-9 (local bridge)"
+  ],
+  "objectImport": "[2026-10-05 22:34:09.232] [app-80c8] [INFO] [WORLD]   Enfusion native load: STREAMING -- 1296350 placements binned into 1048576 land cells, 1773 models (290742 terrain-relative), budget 20000 resident, window 64 cells; largest bounding centre of a pre-built shape 0.00 m [POSEIDON_REFORGER_STREAM=0 or the Streaming tab restore the radius at load]",
+  "logo": "\\assets\\ui\\openposeidon_logo.paa"
+}

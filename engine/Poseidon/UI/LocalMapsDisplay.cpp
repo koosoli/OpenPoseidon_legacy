@@ -177,8 +177,13 @@ class LocalMapsDisplay : public Display
         }
         if (map)
         {
-            args.insert(args.end(), {"--test-world", map->enfusion ? map->archiveRoot : map->worldPath, "--test-world-land-start",
-                                     "--test-world-freefly", "1000", "1000", "250", "0", "-15"});
+            args.insert(args.end(), {"--test-world", map->enfusion ? map->archiveRoot : map->worldPath});
+            if (map->enfusion && map->name == "Everon")
+                // Start in the owner's working village view, also centring nearby object import there.
+                args.insert(args.end(), {"--test-world-freefly", "5176", "3985", "20.5", "90", "5"});
+            else
+                args.insert(args.end(), {"--test-world-land-start", "--test-world-freefly",
+                                         "1000", "1000", "250", "0", "-15"});
             if (map->enfusion)
             {
                 args.push_back("--reforger-world");
