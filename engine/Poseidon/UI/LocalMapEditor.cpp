@@ -75,11 +75,12 @@ bool ServiceLocalMapEditor()
         return false;
     const auto world = pendingWorld;
     pendingWorld.clear();
+    CurrentTemplate.Clear();
     CurrentCampaign = "";
     CurrentBattle = "";
     CurrentMission = "";
     SetBaseDirectory(true, GetUserMissionsBase());
-    ::CreateDirectory(BaseDirectory + RString("missions"), nullptr);
+    ::CreateDirectory(GetBaseDirectory() + RString("missions"), nullptr);
     SetMission(world.c_str(), "");
     GWorld->SwitchLandscape(GetWorldName(world.c_str()));
     CreateEditor(parent);
