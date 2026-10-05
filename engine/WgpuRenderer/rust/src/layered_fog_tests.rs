@@ -295,8 +295,8 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
  let mut far_only=cover(1.,100);far_only.controls[0][0]=0.;
  run(&mut fog,&camera,&settings,1.,far_only,1,true);assert!(fog.ready);
  assert_eq!(read(),positive,"Current far coverage must preserve admitted near air");
- // Translate a real finite weather-map edge in one-metre increments. A broad
- // smooth fade must survive ray-bin crossings instead of dropping full bins.
+ // Moving the rain-map footprint cannot move an atmospheric boundary over
+ // certified open native terrain. Its Beer-Lambert integral stays constant.
  settings.patch[3]=50.;
  let mut last_tau=0.;
  for edge in 58..=64 {
@@ -304,8 +304,9 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
   inputs.matrices[1][2][1]=-1./60.;inputs.matrices[1][3][1]=(edge as f32-60.)/60.;
   run(&mut fog,&camera,&settings,1.,inputs,1,true);
   let values=read();let tau=-values[127].ln();
-  assert!(tau.is_finite() && tau>0.30 && tau<0.41,"Finite-edge air integration: {edge}/{tau}");
-  if edge>58 {assert!(tau>=last_tau-0.001 && tau-last_tau<0.02,"Moving edge must not delete a ray bin: {last_tau}/{tau}");}
+  let expected_tau=-positive[127].ln();
+  assert!(tau.is_finite() && (tau-expected_tau).abs()<0.003,"Open native air survives rain-map edge: {edge}/{tau}");
+  if edge>58 {assert!((tau-last_tau).abs()<0.002,"Rain-map motion must not change open-air extinction: {last_tau}/{tau}");}
   last_tau=tau;
  }
  settings.patch[3]=0.;
@@ -379,8 +380,10 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
   wgpu::BindGroupEntry {binding:24,resource:wgpu::BindingResource::TextureView(&native_view)}],4);
  let receiver=receiver_read();assert!(receiver[0]>0.7 && receiver[0]<0.9);
  receiver_data[37]=0.;queue.write_buffer(&receiver_buffer,0,bytemuck::cast_slice(&receiver_data));assert_eq!(receiver_read(),receiver,"Canopy rain shelter must not produce a bright sunlight island");receiver_data[37]=1.;queue.write_buffer(&receiver_buffer,0,bytemuck::cast_slice(&receiver_data));assert!((receiver[1]-receiver[0]*2.).abs()<1e-6,"one cloud factor, no extra energy");
- for(i,value)in [(0,0.9),(36,0.)]{let original=receiver_data[i];receiver_data[i]=value;queue.write_buffer(&receiver_buffer,0,bytemuck::cast_slice(&receiver_data));
-  assert_eq!(receiver_read(),vec![1.,2.,1.,0.5],"mismatched camera/unknown coverage remains neutral");receiver_data[i]=original;}
+ receiver_data[36]=0.;queue.write_buffer(&receiver_buffer,0,bytemuck::cast_slice(&receiver_data));
+ assert_eq!(receiver_read(),receiver,"Rain-map coverage cannot move sunlight attenuation");receiver_data[36]=1.;
+ let original=receiver_data[0];receiver_data[0]=0.9;queue.write_buffer(&receiver_buffer,0,bytemuck::cast_slice(&receiver_data));
+ assert_eq!(receiver_read(),vec![1.,2.,1.,0.5],"mismatched camera remains neutral");receiver_data[0]=original;
  queue.write_buffer(&receiver_buffer,0,bytemuck::cast_slice(&receiver_data));
  // The incoming ray consumes actual patch density and actual native bowl
  // curvature, not merely the former midpoint vertical-column approximation.
@@ -448,9 +451,11 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
  write_native(100.);run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
  for row in read().chunks_exact(4){assert_eq!(row,&[0.,0.,0.,1.],"native underground refuses medium");}write_native(0.);
  queue.write_buffer(&counts,0,bytemuck::cast_slice(&[101u32,0,0,0]));run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
- for row in read().chunks_exact(4){assert_eq!(row,&[0.,0.,0.,1.],"retained overflow refuses medium");}
+ assert_eq!(read(),lit,"Overflowed shelter data cannot erase native outdoor air");
  queue.write_buffer(&counts,0,bytemuck::cast_slice(&[0u32;4]));
- for(weather,generation,below,ready)in [(0.,1,true,1.),(1.,0,true,1.),(1.,1,false,1.),(1.,1,true,0.)]{
+ run(&mut fog,&camera,&settings,1.,cover(0.,100),1,true);assert!(fog.ready);
+ assert_eq!(read(),lit,"Rebuilding rain maps cannot erase native outdoor air");
+ for(weather,generation,below,ready)in [(0.,1,true,1.),(1.,0,true,1.),(1.,1,false,1.)]{
   run(&mut fog,&camera,&settings,weather,cover(ready,100),generation,below);assert!(!fog.ready);
  }
  settings.control[0]=0.;run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);assert!(!fog.ready);
@@ -560,7 +565,7 @@ fn density_controls_refuse_invalid_enabled_scales_and_terrain_source_is_explicit
  assert!(terrain.contains("rgb = apply_fog_terrain(rgb, in.world_pos)"));
  assert!(frame.contains("fn apply_fog_terrain") && frame.contains("return apply_fog_receiver(rgb, world_pos_rel, true)"));
  assert!(frame.contains("return apply_fog_receiver(rgb, world_pos_rel, true)"));
- let compute=include_str!("layered_fog.wgsl");assert!(compute.contains("if (exposed <= 0.0) { return 0.0; }"));
+ let compute=include_str!("layered_fog.wgsl");
  assert!(compute.contains("p.y <= native.x+0.05") && compute.contains("far_counts[0] > cap"));
 }
 
@@ -571,7 +576,7 @@ fn production_direct_light_uses_only_qualified_incoming_solar_transmission() {
  assert!(object.contains("cloud_sun_shadow(world_abs.xz) * fog_sun_reach(world_pos)"));
  assert!(terrain.contains("var sun_diffuse = frame.sun_diffuse.rgb * fog_sun_reach(in.world_pos)"));
  let helper=&frame[frame.find("fn fog_sun_reach(").unwrap()..];
- assert!(helper.contains("!fog_camera_matches") && helper.contains("weather_map_coverage(absolute)<0.5") && !helper.contains("weather_map_reach(absolute)"));
+ assert!(helper.contains("!fog_camera_matches") && helper.contains("layer_fog_packet.native.w<0.5") && !helper.contains("weather_map_coverage(absolute)") && !helper.contains("weather_map_reach(absolute)"));
  assert!(helper.contains("textureSampleLevel(layer_fog_solar_tex") && !helper.contains("textureSampleLevel(layer_fog_tex"),"must not use view-ray T for sun-ray T");
  let volume=include_str!("layered_fog.wgsl");let incoming=&volume[volume.find("fn fog_sun_segment_tau").unwrap()..volume.find("@compute").unwrap()];
  assert!(incoming.contains("fog_patch_density(midpoint") && incoming.contains("fog_pooling(midpoint") && incoming.contains("fog_native_ground(end.xz)"));
@@ -604,4 +609,26 @@ fn actual_solar_consumer_layout_resources_and_native_rebinding_are_bounded() {
   }
   assert!(solar_used&&native_used,"both actual surface paths must consume the qualified light field");
  }
+}
+
+#[test]
+fn projected_shadow_gpu_preserves_foreground_airlight() {
+ let(device,queue)=crate::gfx3d::cull::tests::headless().expect("shadow fog composition requires GPU");
+ const PROBE:&str=r#"
+ #import layered_fog_optics::fog_legacy_closure
+ @group(0) @binding(0) var<storage,read_write> result:array<vec4<f32>>;
+ @compute @workgroup_size(1) fn cs_probe(){
+  let scene=vec3<f32>(12.0,6.0,3.0);let air=vec3<f32>(4.0,5.0,6.0);
+  let local=vec4<f32>(1.0,2.0,3.0,0.25);let distant=vec4<f32>(2.0,3.0,4.0,0.1);
+  for(var i=0u;i<3u;i=i+1u){
+   let amount=f32(i)*0.5;let opacity=0.7;
+   let receiver=fog_legacy_closure(scene,air,amount,local,distant,true);
+   let shadow=fog_legacy_closure(vec3<f32>(0.0),air,amount,local,distant,true);
+   let composited=receiver*(1.0-opacity)+shadow*opacity;
+   let expected=fog_legacy_closure(scene*(1.0-opacity),air,amount,local,distant,true);
+   result[i*2u]=vec4<f32>(composited,1.0);result[i*2u+1u]=vec4<f32>(expected,1.0);
+  }
+ }"#;
+ let actual=read_probe(&device,&queue,PROBE,&[],24);
+ for pair in actual.chunks_exact(8){for channel in 0..3{assert!((pair[channel]-pair[channel+4]).abs()<0.00001,"shadow must darken the receiver, not the intervening fog: {pair:?}");}}
 }

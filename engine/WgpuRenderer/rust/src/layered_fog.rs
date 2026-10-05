@@ -193,8 +193,7 @@ impl LayeredFog {
         let eligible=requested(settings,weather,hdr,underground) && finite && far.is_finite() && far>0.0
             && height.enabled>0.5 && height_generation>0
             && cloud_limit.iter().all(|v|v.is_finite()) && native_bounds.iter().all(|h|h.is_finite()) && native_bounds[0]<=native_bounds[1]
-            && (below_clouds || settings.terrain[0]>0.0)
-            && (cover.controls[0][0]>=0.5 || cover.controls[1][0]>=0.5);
+            && (below_clouds || settings.terrain[0]>0.0);
         if self.trace && (self.frames<=4 || self.frames%120==0) {
             eprintln!("[wgr] layered fog: frame={} requested={} encoded={} weather={:.6} far={:.3} heightGen={} nearReady={} farReady={} camera={:?} layers={:?} terrain={:?} patch={:?} cloud={:?}",
                 self.frames,requested(settings,weather,hdr,underground),eligible,weather,far,height_generation,

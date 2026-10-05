@@ -51,48 +51,38 @@ struct FogLocalLight { pos:vec4<f32>, diffuse:vec4<f32>, ambient:vec4<f32>, dir:
 @group(0) @binding(17) var<storage, read> local_lights:array<FogLocalLight>;
 @group(0) @binding(18) var solar_read: texture_3d<f32>;
 
-// Certify coverage separately from depth/shelter: known roofs contain no air
-// medium, while a missing/stale/overflowed source cannot certify sun transport.
-fn fog_weather_source_ready(p:vec3<f32>)->bool {
-    var clip=params.near_vp*vec4<f32>(p,1.0);var ctl=params.near_ctl;var cap=params.capacity.x;
-    let uv0=clip.xy*vec2<f32>(0.5,-0.5)+0.5;
-    let outer=ctl.x<0.5 || clip.z<0.0 || clip.z>1.0 || min(min(uv0.x,1.0-uv0.x),min(uv0.y,1.0-uv0.y))<ctl.z;
-    if(outer){clip=params.far_vp*vec4<f32>(p,1.0);ctl=params.far_ctl;cap=params.capacity.y;}
-    if(ctl.x<0.5 || clip.z<0.0 || clip.z>1.0){return false;}
-    if(cap>0u){if(outer){if(far_counts[0]>cap || far_counts[1]>cap || far_counts[2]>2u*cap){return false;}}
-        else{if(near_counts[0]>cap || near_counts[1]>cap || near_counts[2]>2u*cap){return false;}}}
-    let uv=clip.xy*vec2<f32>(0.5,-0.5)+0.5;
-    return min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y))>=ctl.z;
-}
 fn fog_weather_weight(p: vec3<f32>) -> f32 {
+    // The native height source owns the atmospheric domain. The camera-centred
+    // rain maps only exclude known shelter; absent/outside/overflowed shelter
+    // data must not carve a moving clear rectangle out of outdoor fog.
     let near_clip = params.near_vp * vec4<f32>(p, 1.0);
     let near_uv = near_clip.xy * vec2<f32>(0.5,-0.5) + 0.5;
     let edge = min(min(near_uv.x,1.0-near_uv.x),min(near_uv.y,1.0-near_uv.y));
-    // Only current-frame sources are admitted. The current far depth map can
-    // cover a near-map rebuild; stale maps and overflow still contribute no air.
+    // Only current-frame shelter depths are sampled. The far depth map can
+    // cover a near-map rebuild; stale/overflowed data never invents shelter.
     let outer = params.near_ctl.x < 0.5 || near_clip.z < 0.0 || near_clip.z > 1.0 || edge < params.near_ctl.z;
     var clip = near_clip;
     var ctl = params.near_ctl;
     var cap = params.capacity.x;
     if (outer) { clip = params.far_vp * vec4<f32>(p,1.0); ctl = params.far_ctl; cap = params.capacity.y; }
-    if (ctl.x < 0.5 || clip.z < 0.0 || clip.z > 1.0) { return 0.0; }
+    if (ctl.x < 0.5 || clip.z < 0.0 || clip.z > 1.0) { return 1.0; }
     if (cap > 0u) {
         if (outer) {
-            if (far_counts[0] > cap || far_counts[1] > cap || far_counts[2] > 2u*cap) { return 0.0; }
+            if (far_counts[0] > cap || far_counts[1] > cap || far_counts[2] > 2u*cap) { return 1.0; }
         } else {
-            if (near_counts[0] > cap || near_counts[1] > cap || near_counts[2] > 2u*cap) { return 0.0; }
+            if (near_counts[0] > cap || near_counts[1] > cap || near_counts[2] > 2u*cap) { return 1.0; }
         }
     }
     let uv = clip.xy * vec2<f32>(0.5,-0.5) + 0.5;
-    if (min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y)) < ctl.z) { return 0.0; }
+    if (min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y)) < ctl.z) { return 1.0; }
     var exposed = 0.0;
     if (outer) { exposed = textureSampleCompareLevel(far_depth,depth_samp,uv,clip.z-ctl.y); }
     else { exposed = textureSampleCompareLevel(near_depth,depth_samp,uv,clip.z-ctl.y); }
-    if (exposed <= 0.0) { return 0.0; }
     if (!outer) { return exposed; } // never feather a near/far handoff
     let map_scale = max(length(vec2<f32>(params.far_vp[0].x,params.far_vp[2].x)),
         length(vec2<f32>(params.far_vp[0].y,params.far_vp[2].y)))*0.5;
-    return exposed*fog_domain_feather((min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y))-ctl.z)/max(map_scale,1e-10),params.patchiness.w);
+    let confidence=fog_domain_feather((min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y))-ctl.z)/max(map_scale,1e-10),params.patchiness.w);
+    return mix(1.0,exposed,confidence);
 }
 // Return actual native triangle height, certified flag and distance inside domain.
 fn fog_native_ground(xz: vec2<f32>) -> vec3<f32> {
@@ -178,11 +168,11 @@ fn fog_sun_segment_tau(start: vec3<f32>, end: vec3<f32>, before: vec2<f32>, cent
         *min(min(before.y,centre.y),after.y);
 }
 // Rain interception by leaves does not remove the air carrying sunlight.
-// Actual terrain and current source certification still bound this medium;
+// Actual native terrain bounds this medium;
 // object/surface CSM owns solid occlusion, view transport retains roof refusal.
 fn fog_solar_air(p: vec3<f32>) -> vec2<f32> {
     let ground=fog_native_ground(p.xz);
-    if(ground.y<0.5 || p.y<=ground.x+0.05 || !fog_weather_source_ready(p)){return vec2<f32>(ground.x,0.0);}
+    if(ground.y<0.5 || p.y<=ground.x+0.05){return vec2<f32>(ground.x,0.0);}
     return vec2<f32>(ground.x,fog_domain_feather(ground.z,params.patchiness.w));
 }
 fn fog_solar_transmission(p: vec3<f32>) -> f32 {
@@ -191,7 +181,7 @@ fn fog_solar_transmission(p: vec3<f32>) -> f32 {
     // Unknown/unready source and solid/underground endpoints are neutral for
     // surface lighting. Existing actual CSM/terrain visibility owns occlusion.
     let origin=fog_solar_air(p);
-    if (ground.y < 0.5 || origin.y <= 0.0 || !fog_weather_source_ready(p)) { return 1.0; }
+    if (ground.y < 0.5 || origin.y <= 0.0) { return 1.0; }
     if (params.terrain.x <= 0.0 && params.terrain.z <= 0.0 && params.patchiness.x <= 0.0 && params.patchiness.w <= 0.0) {
         var tau=0.0;
         for (var i=0u;i<2u;i=i+1u) {let layer=params.layers[i];
@@ -216,7 +206,7 @@ fn fog_solar_transmission(p: vec3<f32>) -> f32 {
         let middle=start+params.light.xyz*(step*0.5);
         let end=start+params.light.xyz*step;
         let mid_ground=fog_native_ground(middle.xz);let end_ground=fog_native_ground(end.xz);
-        if (mid_ground.y < 0.5 || end_ground.y < 0.5 || !fog_weather_source_ready(middle) || !fog_weather_source_ready(end)) { return 1.0; }
+        if (mid_ground.y < 0.5 || end_ground.y < 0.5) { return 1.0; }
         // Real native obstruction blocks a shaft. No normal bending or fake
         // mountain reflection/deflection is introduced.
         if (middle.y <= mid_ground.x+0.05 || end.y <= end_ground.x+0.05) { return 0.0; }

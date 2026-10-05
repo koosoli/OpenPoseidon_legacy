@@ -1024,7 +1024,18 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         return vec4<f32>(1.0, 0.0, 0.0, 1.0);
     }
     if (is_shadow > 0.5) {
-        return vec4<f32>(0.0, 0.0, 0.0, frame.params.shadow_strength * base.a);
+        // An alpha shadow changes the receiver behind the intervening air.
+        // Compositing black after surface fog also blackened that air, exposing
+        // rectangular projected-shadow meshes on distant roads. Transport black
+        // through the same medium so its in-scattering survives the overlay.
+        var shadow_rgb = vec3<f32>(0.0);
+        if (frame.params.fog_enabled >= 1.5) {
+            shadow_rgb = apply_fog(shadow_rgb, in.world_pos);
+        } else if (frame.params.fog_enabled > 0.5) {
+            let air = select(frame.fog_color.rgb, srgb_to_linear(frame.fog_color.rgb), linear > 0.5);
+            shadow_rgb = air * (1.0 - in.fog);
+        }
+        return vec4<f32>(shadow_rgb, frame.params.shadow_strength * base.a);
     }
     // Material debug is global for the Dev Tools path. Keep the old per-draw lane as a fallback
     // for the explicit WGR_MATERIAL_DEBUG_RVMAT selector, so capture fixtures and the live panel

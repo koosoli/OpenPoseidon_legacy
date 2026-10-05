@@ -5499,10 +5499,11 @@ impl Gfx3d {
                 alpha: wgpu::BlendComponent::OVER,
             }),
             b if b == WgrBlend::Shadow as u8 => Some(wgpu::BlendState {
-                // Darken: color = dst*(1-srcA); keep src alpha for the next term.
-                // Matches GL33's glBlendFuncSeparate(GL_ZERO, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO).
+                // Shadow RGB is transported black: zero in clear air, the same
+                // in-scattering as its receiver in fog. Preserve that air when
+                // darkening the receiver; clear-air legacy output is unchanged.
                 color: wgpu::BlendComponent {
-                    src_factor: wgpu::BlendFactor::Zero,
+                    src_factor: wgpu::BlendFactor::SrcAlpha,
                     dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
                     operation: wgpu::BlendOperation::Add,
                 },
