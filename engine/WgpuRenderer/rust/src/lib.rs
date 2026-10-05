@@ -5787,6 +5787,9 @@ impl Renderer {
                 // its depth was prepassed. Draw that subset before transparent water so the sea
                 // covers the submerged hull and leaves a real depth-correct waterline.
                 if water_split.is_some() {
+                    // Also move proven ground-conformed road colour here. Its terrain
+                    // receiver is already in depth, so water/clouds must composite over
+                    // it rather than have the late alpha queue repaint roads in the sky.
                     render_ops(
                         self,
                         &mut pass,
@@ -6029,6 +6032,9 @@ impl Renderer {
             // that a cloud NEARER than a transparent no longer occludes it — which in practice means
             // flying a cloud between the eye and a fence ten metres away, against every near
             // transparent in the game being erased by the sky behind it.
+            // Terrain-conformed road decals are replayed before water above, and
+            // excluded from the late replay: their receiver depth correctly bounds
+            // this march, unlike a foreground glass/fence with no alpha depth.
             if start == 0
                 && !resolved
                 && sky_drawn

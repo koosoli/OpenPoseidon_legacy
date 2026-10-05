@@ -514,8 +514,55 @@ pub(crate) fn draw_replays_before_rays(d: &WgrDraw3D, cutout_only: bool) -> bool
 
 /// Solid colour submitted after the sea still belongs in front of its transparent pass.
 /// Cutouts keep their authored order because their coverage needs separate handling.
+/// Ground-conformed road decals also belong here: replaying their alpha colour after
+/// clouds would paint roads over an opaque cloud bank. Their receiver is the terrain
+/// already in depth; moving colour needs neither an alpha depth write nor another pass.
 pub(crate) fn draw_replays_before_water(d: &WgrDraw3D) -> bool {
-    draw_replays_before_rays(d, false) && d.alpha_ref <= 0.0
+    let ground_decal = d.flags & crate::ffi::DRAW3D_ON_SURFACE != 0
+        && d.flags & (crate::ffi::WGR_DRAW3D_COCKPIT | crate::ffi::WGR_DRAW3D_MONITOR |
+            crate::ffi::WGR_DRAW3D_GLASS) == 0
+        && d.palette_slot == NO_PALETTE
+        && d.conform2[2] == 2.0
+        && matches!(d.depth, WgrDepthMode::Test | WgrDepthMode::TestWrite)
+        && matches!(d.blend, WgrBlend::Alpha | WgrBlend::Opaque);
+    (draw_replays_before_rays(d, false) && d.alpha_ref <= 0.0) || ground_decal
+}
+
+#[test]
+fn ground_road_colour_precedes_clouds_without_moving_glass_or_overlays() {
+    let mut road: WgrDraw3D = unsafe { std::mem::zeroed() };
+    road.flags = crate::ffi::DRAW3D_ON_SURFACE;
+    road.blend = WgrBlend::Alpha;
+    road.depth = WgrDepthMode::Test;
+    road.palette_slot = NO_PALETTE;
+    road.conform2[2] = 2.0;
+    assert!(draw_replays_before_water(&road));
+    assert!(!draw_is_prepassed(&road), "road alpha must not acquire opaque depth");
+    for flag in [crate::ffi::WGR_DRAW3D_COCKPIT, crate::ffi::WGR_DRAW3D_MONITOR,
+        crate::ffi::WGR_DRAW3D_GLASS] {
+        let mut excluded = road;
+        excluded.flags |= flag;
+        assert!(!draw_replays_before_water(&excluded));
+    }
+    for mode in [0.0, 1.0, f32::NAN] {
+        let mut excluded = road;
+        excluded.conform2[2] = mode;
+        assert!(!draw_replays_before_water(&excluded));
+    }
+    let mut excluded = road;
+    excluded.flags = 0;
+    assert!(!draw_replays_before_water(&excluded));
+    excluded = road;
+    excluded.depth = WgrDepthMode::None;
+    assert!(!draw_replays_before_water(&excluded));
+    excluded = road;
+    excluded.palette_slot = 0;
+    assert!(!draw_replays_before_water(&excluded));
+    for blend in [WgrBlend::Shadow, WgrBlend::Additive, WgrBlend::ReliefMultiply] {
+        excluded = road;
+        excluded.blend = blend;
+        assert!(!draw_replays_before_water(&excluded));
+    }
 }
 
 #[test]
