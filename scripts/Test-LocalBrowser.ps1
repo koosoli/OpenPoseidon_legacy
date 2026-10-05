@@ -16,6 +16,10 @@ function Send($cmd){$writer.WriteLine(($cmd|ConvertTo-Json -Depth 10 -Compress))
 function Exec($code){$null=Send @{cmd='exec';code=$code};Start-Sleep -Milliseconds 250}
 function Text($id){return ([string](Send @{cmd='eval';code=('triControlText '+$id)}).result).Trim('"')}
 try{
+ if($Preview -eq 'Map' -and $MapName -eq 'Everon'){
+  # Verify browser defaults rather than accidentally inheriting a manual launch's opt-in.
+  foreach($name in @('POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_MAX_MODELS','POSEIDON_REFORGER_NEAR_RADIUS','POSEIDON_REFORGER_MAX_OBJECTS')){[Environment]::SetEnvironmentVariable($name,$null,'Process')}
+ }
  $env:POSEIDON_CACHE_DIR=Join-Path $out 'cache';$null=New-Item -ItemType Directory -Path $env:POSEIDON_CACHE_DIR
  $env:POSEIDON_USER_DIR=Join-Path $out 'user';$null=New-Item -ItemType Directory -Path $env:POSEIDON_USER_DIR
  [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
@@ -68,6 +72,10 @@ try{
  }
  $null=Send @{cmd='exit'};Require ($p.WaitForExit(20000)-and$p.ExitCode-eq0) 'Normal exit failed'
  $logs=@($log,$stderr);$childLog=Join-Path $env:POSEIDON_CACHE_DIR 'local-map-browser.log';if(Test-Path $childLog){$logs+=$childLog}
+ if($Preview -eq 'Map' -and $receipt.selected -match '^Arma Reforger'){
+  $built=Select-String -Path $childLog -Pattern 'Enfusion native load: built ([1-9][0-9]*) of ([0-9]+) meshes .* placed ([1-9][0-9]*) objects'|Select-Object -Last 1
+  Require ($null-ne$built) 'Reforger preview has no imported objects';$receipt.objectImport=$built.Line.Trim()
+ }
  Require (!(Select-String -Path $logs -Pattern 'UNHANDLED EXCEPTION|Validation Error|DeviceLost|panicked at|wgr_create failed|Cannot load --test-world' -Quiet)) 'Runtime or map-loading error'
  Require ((Get-Content (Join-Path $game 'DEPLOYED-FROM.txt') -Raw).Trim()-ceq$stamp) 'Installed pair changed'
  $receipt.passed=$true;Write-Host ('Evidence: '+$out)

@@ -194,10 +194,39 @@ class LocalMapsDisplay : public Display
         for (const auto& arg : args)
             argv.push_back(arg.c_str());
         argv.push_back(nullptr);
-        SDL_Process* process = SDL_CreateProcess(argv.data(), false);
+        SDL_Process* process = nullptr;
+        std::string launchError;
+        if (map && map->enfusion)
+        {
+            // Object import is opt-in in the native loader. Give this preview a bounded
+            // child-only environment; retain explicit overrides and the session's other settings.
+            SDL_Environment* environment = SDL_CreateEnvironment(true);
+            const SDL_PropertiesID properties = SDL_CreateProperties();
+            const bool configured = environment && properties &&
+                SDL_SetEnvironmentVariable(environment, "POSEIDON_REFORGER_OBJECTS", "1", false) &&
+                SDL_SetEnvironmentVariable(environment, "POSEIDON_REFORGER_MAX_MODELS", "800", false) &&
+                SDL_SetEnvironmentVariable(environment, "POSEIDON_REFORGER_NEAR_RADIUS", "300", false) &&
+                SDL_SetEnvironmentVariable(environment, "POSEIDON_REFORGER_MAX_OBJECTS", "400000", false) &&
+                SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data()) &&
+                SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, environment);
+            if (configured)
+                process = SDL_CreateProcessWithProperties(properties);
+            if (!process)
+                launchError = SDL_GetError();
+            if (properties)
+                SDL_DestroyProperties(properties);
+            if (environment)
+                SDL_DestroyEnvironment(environment);
+        }
+        else
+        {
+            process = SDL_CreateProcess(argv.data(), false);
+            if (!process)
+                launchError = SDL_GetError();
+        }
         if (!process)
         {
-            Status(std::string("Cannot open map: ") + SDL_GetError());
+            Status("Cannot open map: " + launchError);
             return;
         }
         SDL_DestroyProcess(process);
