@@ -165,7 +165,7 @@ class LocalMapsDisplay : public Display
             args.push_back("--dev");
         if (const int port = Foundation::AppConfig::Instance().GetHarnessPort(); port > 0)
         {
-            args.push_back("--harnessport");
+            args.push_back("--harness");
             args.push_back(std::to_string(port));
         }
         args.push_back("--log-file");
