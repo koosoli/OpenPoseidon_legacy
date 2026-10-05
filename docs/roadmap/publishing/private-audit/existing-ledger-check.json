@@ -1,0 +1,16 @@
+{
+  "validator": "validate_preview0_ledger.py",
+  "state": "FAIL_PREEXISTING_AT_PIN",
+  "ticket": "CORE-NEG-002",
+  "recorded_hash": "cb68ae626420c5122423da1e8e83c60dca8a4d1f10d77c057b450c9fd23a0aae",
+  "baseline_actual_hash": "d75577fcd29e10502b08dfa59a9a098b007f19ba41935497b2efa61f8d256897",
+  "same_current_evidence": true,
+  "evidence_files": [
+    "docs/roadmap/evidence/preview0-wgpu-abi-mismatch-check-20260801.log",
+    "docs/roadmap/evidence/preview0-wgpu-automation-check-20260801.log",
+    "engine/WgpuRenderer/docs/ffi-contract.md",
+    "engine/WgpuRenderer/include/wgpu_renderer.hpp",
+    "engine/WgpuRenderer/rust/src/ffi.rs"
+  ],
+  "changed_by_this_preparation": false
+}

@@ -1,0 +1,335 @@
+Windows SDK : 10.0.26100.0
+Repo       : C:\Users\mail\.codex\release-staging\OpenPoseidon-draft-20261006
+Preset     : win-x64-clang-rwdi
+VCPKG_ROOT : C:\vcpkg
+
+Preset CMake variables:
+
+  CMAKE_BUILD_TYPE="RelWithDebInfo"
+  CMAKE_CXX_COMPILER_LAUNCHER="ccache"
+  CMAKE_C_COMPILER_LAUNCHER="ccache"
+  CMAKE_TOOLCHAIN_FILE:FILEPATH="C:\vcpkg/scripts/buildsystems/vcpkg.cmake"
+  VCPKG_CHAINLOAD_TOOLCHAIN_FILE="C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/cmake/toolchains/win-x64-clang.cmake"
+  VCPKG_OVERLAY_PORTS="C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/cmake/vcpkg-overlay-ports"
+  VCPKG_OVERLAY_TRIPLETS="C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/cmake/vcpkg-triplets"
+  VCPKG_TARGET_TRIPLET="x64-windows-clang"
+
+-- Found LLVM compilers (x64): D:/Program Files/LLVM/bin/clang-cl.exe
+-- Running vcpkg install
+Detecting compiler hash for triplet x64-windows...
+Compiler found: D:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe
+Detecting compiler hash for triplet x64-windows-clang...
+Compiler found: D:/Program Files/LLVM/bin/clang-cl.exe
+The following packages will be built and installed:
+    box3d:x64-windows-clang@0.1.0#1 -- C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/cmake/vcpkg-overlay-ports\box3d
+  * brotli:x64-windows-clang@1.2.0
+  * bzip2[core,tool]:x64-windows-clang@1.0.8#6
+    catch2:x64-windows-clang@3.5.2
+    cjson:x64-windows-clang@1.7.19
+    cli11:x64-windows-clang@2.4.0
+    curl[core,non-http,ssl,sspi]:x64-windows-clang@8.20.0#2
+    enkits:x64-windows-clang@1.11#3
+  * fmt:x64-windows-clang@12.1.0
+  * freetype[brotli,bzip2,core,png,zlib]:x64-windows-clang@2.14.3
+    glslang:x64-windows-clang@16.3.0#1
+    imgui[core,freetype,opengl3-binding,sdl3-binding,sdl3-renderer-binding,test-engine]:x64-windows-clang@1.92.8#1
+    libogg:x64-windows-clang@1.3.6#1
+  * libpng:x64-windows-clang@1.6.58
+    libvorbis:x64-windows-clang@1.3.7#4
+    mimalloc:x64-windows-clang@2.2.4
+    openal-soft:x64-windows-clang@1.24.3#3 -- C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/cmake/vcpkg-overlay-ports\openal-soft
+    opus:x64-windows-clang@1.5.2#1
+    sdl3:x64-windows-clang@3.4.10#1
+    spdlog[core,wchar]:x64-windows-clang@1.15.1
+    sse2neon:x64-windows-clang@1.9.1
+    stb:x64-windows-clang@2024-07-29#1
+  * vcpkg-cmake:x64-windows@2024-04-23
+  * vcpkg-cmake-config:x64-windows@2024-05-23
+  * zlib:x64-windows-clang@1.3.2#1
+    zstd:x64-windows-clang@1.5.7
+Additional packages (*) will be modified to complete this operation.
+Restored 26 package(s) from C:\Users\mail\AppData\Local\vcpkg\archives in 1.1 s. Use --debug to see more details.
+Installing 1/26 vcpkg-cmake-config:x64-windows@2024-05-23...
+vcpkg-cmake-config:x64-windows@2024-05-23 package ABI: 98afe6c8a165d2bcaa637117fa765403e148e9bd9f8ce8bbc249dc25b2fbc060
+Elapsed time to handle vcpkg-cmake-config:x64-windows: 72.6 ms
+Installing 2/26 vcpkg-cmake:x64-windows@2024-04-23...
+vcpkg-cmake:x64-windows@2024-04-23 package ABI: ea0531ad9329041f6fa59d287fab396c3970c97d85910a89c61fa3676d6050b9
+Elapsed time to handle vcpkg-cmake:x64-windows: 94.3 ms
+Installing 3/26 box3d:x64-windows-clang@0.1.0#1...
+box3d:x64-windows-clang@0.1.0#1 package ABI: 4e7f8fc4ba1a4e3cc650b6da7d1569d7f074d0c4702d64c275e32eae39fcd5a3
+Elapsed time to handle box3d:x64-windows-clang: 109 ms
+Installing 4/26 catch2:x64-windows-clang@3.5.2...
+catch2:x64-windows-clang@3.5.2 package ABI: 3b81a5231b593bcfea1568786fc9e6a6b53e2509869c366b82d453bd185b8d72
+Elapsed time to handle catch2:x64-windows-clang: 176 ms
+Installing 5/26 cjson:x64-windows-clang@1.7.19...
+cjson:x64-windows-clang@1.7.19 package ABI: 7b00342301f72ac0fbacde8707dedc07abc503daca436f42593ca77aee3ffddb
+Elapsed time to handle cjson:x64-windows-clang: 121 ms
+Installing 6/26 cli11:x64-windows-clang@2.4.0...
+cli11:x64-windows-clang@2.4.0 package ABI: 8cf71c95b565adc3477b70ea359e17c0502fc3fc6225088dca5480152184dece
+Elapsed time to handle cli11:x64-windows-clang: 171 ms
+Installing 7/26 zlib:x64-windows-clang@1.3.2#1...
+zlib:x64-windows-clang@1.3.2#1 package ABI: e3a37cae15de476b9a27c903c9d4e7921ecc3e2d7bf00459c7b6dd2c68887bce
+Elapsed time to handle zlib:x64-windows-clang: 153 ms
+Installing 8/26 curl[core,non-http,ssl,sspi]:x64-windows-clang@8.20.0#2...
+curl[core,non-http,ssl,sspi]:x64-windows-clang@8.20.0#2 package ABI: a3e3bae6340512e7da4711b94fa92a5e5fcbafc4502ce4991c46f716b1075523
+Elapsed time to handle curl:x64-windows-clang: 171 ms
+Installing 9/26 enkits:x64-windows-clang@1.11#3...
+enkits:x64-windows-clang@1.11#3 package ABI: d11a460f2cabd915419799fd1a69fc05dc8a60d31a873279d1bc1c09b2988f17
+Elapsed time to handle enkits:x64-windows-clang: 106 ms
+Installing 10/26 glslang:x64-windows-clang@16.3.0#1...
+glslang:x64-windows-clang@16.3.0#1 package ABI: 503fba4856b5d2b60ae947454955e2ad7e4e273e5e3bcfe6a265f7a623c71ac3
+Elapsed time to handle glslang:x64-windows-clang: 90.6 ms
+Installing 11/26 stb:x64-windows-clang@2024-07-29#1...
+stb:x64-windows-clang@2024-07-29#1 package ABI: f3848c6940ae31b7a2ea89572548470e04c4849334eb2c5d8ca12f2b9018cd5b
+Elapsed time to handle stb:x64-windows-clang: 155 ms
+Installing 12/26 sdl3:x64-windows-clang@3.4.10#1...
+sdl3:x64-windows-clang@3.4.10#1 package ABI: 822adc17aed6027e244d4610a3ec0a823294bf87f6f2cdf98366bc867698a962
+Elapsed time to handle sdl3:x64-windows-clang: 158 ms
+Installing 13/26 libpng:x64-windows-clang@1.6.58...
+libpng:x64-windows-clang@1.6.58 package ABI: 6302b984638c41925ada271e38605c0b09db485cbe586b26d73c3d81035d816e
+Elapsed time to handle libpng:x64-windows-clang: 124 ms
+Installing 14/26 bzip2[core,tool]:x64-windows-clang@1.0.8#6...
+bzip2[core,tool]:x64-windows-clang@1.0.8#6 package ABI: 0a2ea621ba96b4e7488f615246ed36cc82cf2c13d550d4109807b115903d17de
+Elapsed time to handle bzip2:x64-windows-clang: 63.4 ms
+Installing 15/26 brotli:x64-windows-clang@1.2.0...
+brotli:x64-windows-clang@1.2.0 package ABI: ec6275111040eeff28cfd09012e26f8200a25d86bc5d35f7e31bf8c151a16bd3
+Elapsed time to handle brotli:x64-windows-clang: 73.8 ms
+Installing 16/26 freetype[brotli,bzip2,core,png,zlib]:x64-windows-clang@2.14.3...
+freetype[brotli,bzip2,core,png,zlib]:x64-windows-clang@2.14.3 package ABI: 43a5dfbb7aad05798fa70dc5dc4c2e8640c335dfc50021789af55829c9784a51
+Elapsed time to handle freetype:x64-windows-clang: 174 ms
+Installing 17/26 imgui[core,freetype,opengl3-binding,sdl3-binding,sdl3-renderer-binding,test-engine]:x64-windows-clang@1.92.8#1...
+imgui[core,freetype,opengl3-binding,sdl3-binding,sdl3-renderer-binding,test-engine]:x64-windows-clang@1.92.8#1 package ABI: a3e416e3d6ab0f03b7633f182fdff4ed295ef48fca0c3aa6c6b8ed77ec8a046d
+Elapsed time to handle imgui:x64-windows-clang: 169 ms
+Installing 18/26 libogg:x64-windows-clang@1.3.6#1...
+libogg:x64-windows-clang@1.3.6#1 package ABI: 06f364d02247dee1da4e2dff45ff9b4895771c22c41112a0d623947061f2d325
+Elapsed time to handle libogg:x64-windows-clang: 71.7 ms
+Installing 19/26 libvorbis:x64-windows-clang@1.3.7#4...
+libvorbis:x64-windows-clang@1.3.7#4 package ABI: d3c268f97c1087b05dd4ef63833f330560aaeec042adc041522047aba6d75240
+Elapsed time to handle libvorbis:x64-windows-clang: 77.3 ms
+Installing 20/26 mimalloc:x64-windows-clang@2.2.4...
+mimalloc:x64-windows-clang@2.2.4 package ABI: 6878c7040f2023e3d64f5cef36cb6b8d70b50569bd41d29ecb60a24e82fb5830
+Elapsed time to handle mimalloc:x64-windows-clang: 153 ms
+Installing 21/26 fmt:x64-windows-clang@12.1.0...
+fmt:x64-windows-clang@12.1.0 package ABI: 924848aae963d611c09e2e6e7aff73ae0e6e7abb52521bacc2f19b55e680f2cd
+Elapsed time to handle fmt:x64-windows-clang: 156 ms
+Installing 22/26 openal-soft:x64-windows-clang@1.24.3#3...
+openal-soft:x64-windows-clang@1.24.3#3 package ABI: 404c191a63012f75612b9c3def1124d85ce3cee9a56ab209bf834b83c5e34f51
+Elapsed time to handle openal-soft:x64-windows-clang: 93 ms
+Installing 23/26 opus:x64-windows-clang@1.5.2#1...
+opus:x64-windows-clang@1.5.2#1 package ABI: ad0624c20f4114e65191db81d8209e2865787534d8acaaf7a4ca59f34166b41f
+Elapsed time to handle opus:x64-windows-clang: 106 ms
+Installing 24/26 spdlog[core,wchar]:x64-windows-clang@1.15.1...
+spdlog[core,wchar]:x64-windows-clang@1.15.1 package ABI: 8d05e1a836336db411e619cb5b76248d2309efc2bc7a5116f15bcd4ebd99b07f
+Elapsed time to handle spdlog:x64-windows-clang: 157 ms
+Installing 25/26 sse2neon:x64-windows-clang@1.9.1...
+sse2neon:x64-windows-clang@1.9.1 package ABI: b1b6c44867ef7223c0d9f0afa2c6ae3fe081b69578d0df041318802e5389360c
+Elapsed time to handle sse2neon:x64-windows-clang: 12 ms
+Installing 26/26 zstd:x64-windows-clang@1.5.7...
+zstd:x64-windows-clang@1.5.7 package ABI: 554c4edf0e2c091ff73e084ded3f02ea49cd1729a917d1473e946df253c45345
+Elapsed time to handle zstd:x64-windows-clang: 140 ms
+Installed contents are licensed to you by owners. Microsoft is not responsible for, nor does it grant any licenses to, third-party packages.
+Packages installed in this vcpkg installation declare the following licenses:
+(BSD-3-Clause OR GPL-2.0-only)
+(FTL OR GPL-2.0-or-later)
+(MIT OR CC-PDDC)
+Apache-2.0
+BSD-3-Clause
+BSL-1.0
+GPL-3.0-or-later
+ISC
+LGPL-2.0-or-later
+MIT
+Zlib
+bzip2-1.0.6
+curl
+libpng-2.0
+box3d provides CMake targets:
+
+  # this is heuristically generated, and may not be correct
+  find_package(box3d CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE box3d::box3d)
+
+catch2 provides CMake targets:
+
+  # this is heuristically generated, and may not be correct
+  find_package(Catch2 CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE Catch2::Catch2 Catch2::Catch2WithMain)
+
+catch2 provides pkg-config modules:
+
+  # A modern, C++-native test framework for C++14 and above (links in default main)
+  catch2-with-main
+
+  # A modern, C++-native, test framework for C++14 and above
+  catch2
+
+cjson provides CMake targets:
+
+  # this is heuristically generated, and may not be correct
+  find_package(cJSON CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE cjson)
+
+cjson provides pkg-config modules:
+
+  # Ultralightweight JSON parser in ANSI C
+  libcjson
+
+cli11 provides CMake targets:
+
+  # this is heuristically generated, and may not be correct
+  find_package(CLI11 CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE CLI11::CLI11)
+
+cli11 provides pkg-config modules:
+
+  # C++ command line parser
+  CLI11
+
+curl is compatible with built-in CMake targets:
+
+    find_package(CURL REQUIRED)
+    target_link_libraries(main PRIVATE CURL::libcurl)
+
+ enkits provides CMake targets:
+
+    find_package(enkiTS CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE enkiTS::enkiTS)
+
+glslang provides CMake targets:
+
+    find_package(glslang CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE glslang::glslang glslang::glslang-default-resource-limits glslang::SPIRV)
+
+The package stb provides CMake targets:
+
+    find_package(Stb REQUIRED)
+    target_include_directories(main PRIVATE ${Stb_INCLUDE_DIR})
+sdl3 provides CMake targets:
+
+  find_package(SDL3 CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE SDL3::SDL3)
+
+imgui provides CMake targets:
+
+  # this is heuristically generated, and may not be correct
+  find_package(imgui CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE imgui::imgui)
+
+libogg provides CMake targets:
+
+  # this is heuristically generated, and may not be correct
+  find_package(Ogg CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE Ogg::ogg)
+
+libogg provides pkg-config modules:
+
+  # ogg is a library for manipulating ogg bitstreams
+  ogg
+
+The package libvorbis provides CMake targets:
+
+    # Vorbis reference encoder and decoder, low-level API
+    find_package(Vorbis CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE Vorbis::vorbis)
+
+    # Audio stream decoding and basic manipulation, high-level API
+    find_package(Vorbis CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE Vorbis::vorbisfile)
+
+    # Convenience API for setting up an encoding environment
+    find_package(Vorbis CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE Vorbis::vorbisenc)
+
+mimalloc provides CMake targets:
+
+  find_package(mimalloc CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE $<IF:$<TARGET_EXISTS:mimalloc-static>,mimalloc-static,mimalloc>)
+
+To ensure the mimalloc-override.dll is loaded at runtime on Windows with
+dynamic linkage, it is suggested to insert some call to the mimalloc API
+in the main function, eg. `mi_version()`. Cf.
+https://github.com/microsoft/mimalloc/blob/dev/readme.md#dynamic-override-on-windows
+
+openal-soft provides CMake targets:
+
+  # this is heuristically generated, and may not be correct
+  find_package(OpenAL CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE OpenAL::OpenAL)
+
+openal-soft provides pkg-config modules:
+
+  # OpenAL is a cross-platform 3D audio API
+  openal
+
+opus provides CMake targets:
+
+  # this is heuristically generated, and may not be correct
+  find_package(Opus CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE Opus::opus)
+
+opus provides pkg-config modules:
+
+  # Opus IETF audio codec ( build)
+  opus
+
+The package spdlog provides CMake targets:
+
+    find_package(spdlog CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE spdlog::spdlog)
+
+    # Or use the header-only version
+    find_package(spdlog CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE spdlog::spdlog_header_only)
+
+sse2neon is header-only and can be used from CMake via:
+
+  find_path(SSE2NEON_INCLUDE_DIRS "sse2neon/sse2neon.h")
+  target_include_directories(main PRIVATE ${SSE2NEON_INCLUDE_DIRS})
+
+zstd provides CMake targets:
+
+  find_package(zstd CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE zstd::libzstd)
+
+All requested installations completed successfully in: 3.2 s
+-- Running vcpkg install - done
+-- Found LLVM compilers (x64): D:/Program Files/LLVM/bin/clang-cl.exe
+-- The CXX compiler identification is Clang 22.1.0 with MSVC-like command-line
+-- The C compiler identification is Clang 22.1.0 with MSVC-like command-line
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: D:/Program Files/LLVM/bin/clang-cl.exe - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: D:/Program Files/LLVM/bin/clang-cl.exe - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- POSEIDON_ENABLE_DIAG: ON
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed
+-- Looking for pthread_create in pthreads
+-- Looking for pthread_create in pthreads - not found
+-- Looking for pthread_create in pthread
+-- Looking for pthread_create in pthread - not found
+-- Found Threads: TRUE
+-- Found ZLIB: optimized;C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/build/win-x64-clang-rwdi/vcpkg_installed/x64-windows-clang/lib/zs.lib;debug;C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/build/win-x64-clang-rwdi/vcpkg_installed/x64-windows-clang/debug/lib/zsd.lib (found version "1.3.2")
+-- Found ZLIB: optimized;C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/build/win-x64-clang-rwdi/vcpkg_installed/x64-windows-clang/lib/zs.lib;debug;C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/build/win-x64-clang-rwdi/vcpkg_installed/x64-windows-clang/debug/lib/zsd.lib (found suitable version "1.3.2", minimum required is "1")
+-- Found ZLIB: optimized;C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/build/win-x64-clang-rwdi/vcpkg_installed/x64-windows-clang/lib/zs.lib;debug;C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/build/win-x64-clang-rwdi/vcpkg_installed/x64-windows-clang/debug/lib/zsd.lib (found version "1.3.2")
+-- Found BZip2: optimized;C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/build/win-x64-clang-rwdi/vcpkg_installed/x64-windows-clang/lib/bz2.lib;debug;C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/build/win-x64-clang-rwdi/vcpkg_installed/x64-windows-clang/debug/lib/bz2d.lib (found version "1.0.8")
+-- Looking for BZ2_bzCompressInit
+-- Looking for BZ2_bzCompressInit - found
+-- Found PNG: optimized;C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/build/win-x64-clang-rwdi/vcpkg_installed/x64-windows-clang/lib/libpng16.lib;debug;C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/build/win-x64-clang-rwdi/vcpkg_installed/x64-windows-clang/debug/lib/libpng16d.lib (found version "1.6.58")
+-- Found Stb: C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/build/win-x64-clang-rwdi/vcpkg_installed/x64-windows-clang/include
+-- Rust Toolchain: stable-x86_64-pc-windows-msvc
+-- Determining required link libraries for target x86_64-pc-windows-msvc
+-- Required static libs for target x86_64-pc-windows-msvc: kernel32;ntdll;userenv;ws2_32;dbghelp
+-- Required link flags for target x86_64-pc-windows-msvc: 
+-- Found Rust: C:/Users/mail/.rustup/toolchains/stable-x86_64-pc-windows-msvc/bin/rustc.exe (found version "1.96.0")
+-- Remaster game data not found at C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/packages/Remaster; excluding external-data Catch2 tests
+-- Trident integration CTests disabled (set OFPR_REGISTER_TRIDENT_CTESTS=ON to enable)
+-- Configuring done (24.5s)
+-- Generating done (1.2s)
+-- Build files have been written to: C:/Users/mail/.codex/release-staging/OpenPoseidon-draft-20261006/build/win-x64-clang-rwdi
+Configure complete (ConfigureOnly).

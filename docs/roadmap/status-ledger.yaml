@@ -5,6 +5,26 @@ execution:
   baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
   integration_owner: Oliver Kay
   activation_state: ACTIVE
+  private_release_preparation_checkpoint:
+    state: PRIVATE_PREPARED_RELEASE_EXPORT_BLOCKED_NO_TARGET_PUSH
+    source_commit: 19c96f26ddd828a9e2c907621c744ad7960bbdfd
+    preparation_branch: codex/private-release-prep-20261006
+    destination: koosoli/OpenPoseidon
+    repository_id: '1406091033'
+    visibility: private
+    evidence: docs/roadmap/publishing/PRIVATE-RELEASE-PREP-20261006.md
+    receipt: docs/roadmap/publishing/private-audit/review-summary.json
+    note: >-
+      Pinned5315-file Git inventory;1023 internal exclusions and4294 local draft
+      files including curated public docs. All engine code retained unchanged.
+      Ten guard tests and fresh source configure passed with DLSS OFF; no complete
+      release build/runtime acceptance claimed.67 candidate files have findings;
+      288 resources require individual provenance review. Original Malprave AI
+      patch/source-chain evidence remains unavailable. Unreviewed final export
+      rejected before destination creation. Release repo verified empty/private,
+      untouched; no private history transferred. Sponsor organization/USD price
+      unresolved. Installed title-menu build unchanged. Bounded private preparation
+      complete; release continuation requires documented clearance and clean build.
   tidewater_title_menu_checkpoint:
     state: INSTALLED_MENU_AND_MISSION_ROUNDTRIP_PASSED
     installed_source_commit: 59690124

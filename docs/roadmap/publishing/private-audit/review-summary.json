@@ -1,0 +1,31 @@
+{
+  "source_commit": "19c96f26ddd828a9e2c907621c744ad7960bbdfd",
+  "tracked_files": 5315,
+  "classifications": {
+    "EXCLUDE_INTERNAL": 1023,
+    "INCLUDE_UNCHANGED": 4287,
+    "INCLUDE_REWRITTEN": 5
+  },
+  "included_files_with_findings": 67,
+  "finding_types": {
+    "license-source-chain-hold": 3,
+    "personal-build-path": 3,
+    "agent-or-private-document-reference": 73
+  },
+  "final_export_ready": false,
+  "individual_resource_reviews": 288,
+  "manifest_sha256": "02ea1a83913bc5e7b18f2d0282ca91e99ae7a005bfd8159c6d59031f720e4132",
+  "policy_sha256": "847a8d025c3c6b06f2702499e4b9a8cb8f8ec5344b561600b1c1c50204004d97",
+  "draft_files": 4294,
+  "fresh_configure": "PASS on v2 draft; all unchanged source/build/dependency files match final draft byte-for-byte; compile/runtime NOT RUN",
+  "dlss_cache": "POSEIDON_DLSS:BOOL=OFF",
+  "guard_tests": "10 passed",
+  "final_export_rejection": "Unresolved findings or reviews: final export blocked",
+  "target": {
+    "repository": "koosoli/OpenPoseidon",
+    "id": "1406091033",
+    "visibility": "private",
+    "refs": "empty",
+    "modified": false
+  }
+}

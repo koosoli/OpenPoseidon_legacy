@@ -1,0 +1,77 @@
+{
+  "purpose": "PRIVATE_DRAFT_NOT_APPROVED; path rules are candidates, not license clearance",
+  "rewrites": {
+    "README.md": "public-files/README.md",
+    "CONTRIBUTING.md": "public-files/CONTRIBUTING.md",
+    "CREDITS.md": "public-files/CREDITS.md",
+    "THIRD_PARTY_NOTICES.md": "public-files/THIRD_PARTY_NOTICES.md",
+    ".gitignore": "public-files/.gitignore"
+  },
+  "add_files": {
+    "BUILDING.md": "public-files/BUILDING.md",
+    "COMPATIBILITY.md": "public-files/COMPATIBILITY.md"
+  },
+  "include_files": [
+    "LICENSE",
+    "CMakeLists.txt",
+    "CMakePresets.json",
+    "Cargo.toml",
+    "Cargo.lock",
+    "vcpkg.json",
+    "vcpkg-configuration.json",
+    ".clang-format",
+    ".clang-tidy",
+    ".gitattributes",
+    "lsan-suppressions.txt",
+    "tsan-suppressions.txt",
+    "ubsan-suppressions.txt",
+    "valgrind-suppressions.supp"
+  ],
+  "exclude_prefixes": [
+    "docs/",
+    ".agents/",
+    ".tmp-movecam/",
+    ".tmp-shadow/",
+    "screenshots/",
+    "experiments/",
+    ".github/",
+    "scripts/publishing/",
+    "scripts/githooks/"
+  ],
+  "exclude_files": [
+    "CLAUDE.md",
+    "HANDOVER-PARITY-NEXT-AI.md",
+    "HANDOVER-PROMPT.md",
+    "PROVENANCE.md",
+    ".reference-corpora.json.example",
+    ".trident.env.example",
+    "scripts/Use-RepoHooks.ps1",
+    "scripts/package_preview0.ps1",
+    "scripts/merge_ledger_seed.py",
+    "scripts/write_preview0_manifest.py",
+    "scripts/validate_execution_ledger.py",
+    "scripts/validate_preview0_ledger.py",
+    "scripts/validate_renderer_ledger.py",
+    "scripts/validate_compat_c1_ledger.py"
+  ],
+  "include_prefixes": [
+    "engine/",
+    "apps/",
+    "cmake/",
+    "thirdparty/",
+    "mserver/",
+    "tools/",
+    "tests/",
+    "content/",
+    "assets/",
+    "resources/",
+    "scripts/",
+    "docker/",
+    "dev-missions/"
+  ],
+  "license_holds": [
+    "CREDITS.md",
+    "engine/Poseidon/AI/AIHunt.hpp",
+    "engine/Poseidon/AI/AIHunt.cpp"
+  ]
+}
