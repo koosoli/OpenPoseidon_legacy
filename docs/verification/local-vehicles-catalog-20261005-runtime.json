@@ -1,0 +1,661 @@
+{
+  "childCommand": "\"D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe\" --render=wgpu --wait-for-parent 74048 --test-mission C:\\Users\\mail\\.codex\\worktrees\\player-visibility-recovery-20261005\\CWR-CE-paavohuhtalafork-\\build\\local-browser\\Vehicle-20261005-215038\\cache/LocalVehicleBrowser.Eden --display-mode borderless --width 3441 --height 1440 --dev --harness 55628 --log-file C:\\Users\\mail\\.codex\\worktrees\\player-visibility-recovery-20261005\\CWR-CE-paavohuhtalafork-\\build\\local-browser\\Vehicle-20261005-215038\\cache\\local-map-browser.log --mod \"D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\@cwr_t72_a1\"",
+  "installed": "codex/player-visibility-recovery-20261005 7f479731+dirty 2026-10-05_21:48 deploy-ps1",
+  "catalogStatus": "15 maps found. Optional folder above. Open restarts engine. Current format support; original missions/gameplay are not imported.",
+  "tankAfter": {
+    "name": "WEST Alpha Black:1 (mail)",
+    "cls": "CWR_T72_A1",
+    "shape": "ca\\tracked\\t72.p3d",
+    "pos": [
+      6532.18,
+      6485.57,
+      151.18
+    ],
+    "dir": 0.1,
+    "damage": 0.0,
+    "destroyed": false,
+    "speed": 5.61,
+    "watched": false,
+    "side": 1,
+    "zones": {
+      "l svetlo": 0.0,
+      "p svetlo": 0.0,
+      "": 0.0
+    },
+    "weapons": [
+      "Gun120",
+      "MachineGun7_6"
+    ],
+    "selected": {
+      "weapon": "Gun120",
+      "muzzle": "Gun120",
+      "magazine": true,
+      "ammo": 35,
+      "loaded": true
+    },
+    "magazines": 3,
+    "brain": {
+      "group": "Alpha Black",
+      "groupLeader": true,
+      "state": 0,
+      "life": 0,
+      "combatMode": 4,
+      "semaphore": 3,
+      "planning": 0,
+      "mode": 2,
+      "path": 0
+    },
+    "ok": true
+  },
+  "preview": {
+    "name": "WEST Alpha Black:1 (mail)",
+    "cls": "SoldierWB",
+    "shape": "data3d\\mc vojakw2.p3d",
+    "pos": [
+      6532.0,
+      6466.0,
+      148.6
+    ],
+    "dir": 0.0,
+    "damage": 0.0,
+    "destroyed": false,
+    "speed": 0.0,
+    "watched": false,
+    "side": 1,
+    "zones": {
+      "hlava": 0.0,
+      "telo": 0.0,
+      "ruce": 0.0,
+      "nohy": 0.0
+    },
+    "weapons": [
+      "M16",
+      "Throw",
+      "Put"
+    ],
+    "selected": {
+      "weapon": "M16",
+      "muzzle": "M16",
+      "magazine": true,
+      "ammo": 30,
+      "loaded": true
+    },
+    "magazines": 10,
+    "brain": {
+      "group": "Alpha Black",
+      "groupLeader": true,
+      "state": 0,
+      "life": 0,
+      "combatMode": 3,
+      "semaphore": 3,
+      "planning": 0,
+      "mode": 2,
+      "path": 0
+    },
+    "man": {
+      "move": "combat",
+      "time": 0.0,
+      "factor": 1.0,
+      "secondary": "combat",
+      "external": "",
+      "queue": 0,
+      "down": false,
+      "unitPos": 2
+    },
+    "ok": true
+  },
+  "selected": "Arma 1: T-72 (local bridge)",
+  "tankBefore": {
+    "name": "WEST Alpha Black:1 (mail)",
+    "cls": "CWR_T72_A1",
+    "shape": "ca\\tracked\\t72.p3d",
+    "pos": [
+      6532.19,
+      6475.99,
+      150.98
+    ],
+    "dir": 360.0,
+    "damage": 0.0,
+    "destroyed": false,
+    "speed": 0.0,
+    "watched": false,
+    "side": 1,
+    "zones": {
+      "l svetlo": 0.0,
+      "p svetlo": 0.0,
+      "": 0.0
+    },
+    "weapons": [
+      "Gun120",
+      "MachineGun7_6"
+    ],
+    "selected": {
+      "weapon": "Gun120",
+      "muzzle": "Gun120",
+      "magazine": true,
+      "ammo": 35,
+      "loaded": false
+    },
+    "magazines": 3,
+    "brain": {
+      "group": "Alpha Black",
+      "groupLeader": true,
+      "state": 0,
+      "life": 0,
+      "combatMode": 4,
+      "semaphore": 3,
+      "planning": 0,
+      "mode": 2,
+      "path": 0
+    },
+    "ok": true
+  },
+  "near": {
+    "pos": [
+      6532.0,
+      6476.0,
+      148.77
+    ],
+    "r": 35,
+    "count": 26,
+    "objects": [
+      {
+        "name": "000004A6B102D800# NOID t72",
+        "cls": "CWR_T72_A1",
+        "shape": "ca\\tracked\\t72.p3d",
+        "type": 8,
+        "static": false,
+        "pos": [
+          6532.19,
+          6475.99,
+          150.98
+        ],
+        "dist": 2.22,
+        "radius": 6.25,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "54643: krovi_bigest",
+        "cls": "data3d\\krovi_bigest.p3d",
+        "shape": "data3d\\krovi_bigest.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6528.0,
+          6472.0,
+          150.71
+        ],
+        "dist": 5.98,
+        "radius": 4.14,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "WEST Alpha Black:1 (mail)",
+        "cls": "SoldierWB",
+        "shape": "data3d\\mc vojakw2.p3d",
+        "type": 8,
+        "static": false,
+        "pos": [
+          6532.0,
+          6466.0,
+          148.6
+        ],
+        "dist": 10.0,
+        "radius": 2.57,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "54645: krovi_bigest",
+        "cls": "data3d\\krovi_bigest.p3d",
+        "shape": "data3d\\krovi_bigest.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6523.0,
+          6469.0,
+          150.8
+        ],
+        "dist": 11.58,
+        "radius": 3.83,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "9040: asfatlka10 25",
+        "cls": "data3d\\asfatlka10 25.p3d",
+        "shape": "data3d\\asfatlka10 25.p3d",
+        "type": 2,
+        "static": true,
+        "pos": [
+          6533.3,
+          6463.95,
+          148.6
+        ],
+        "dist": 12.12,
+        "radius": 4.42,
+        "damage": 0.0,
+        "geometry": false,
+        "fire": false,
+        "view": false
+      },
+      {
+        "name": "9039: asfatlka10 25",
+        "cls": "data3d\\asfatlka10 25.p3d",
+        "shape": "data3d\\asfatlka10 25.p3d",
+        "type": 2,
+        "static": true,
+        "pos": [
+          6529.0,
+          6463.24,
+          148.83
+        ],
+        "dist": 13.1,
+        "radius": 4.42,
+        "damage": 0.0,
+        "geometry": false,
+        "fire": false,
+        "view": false
+      },
+      {
+        "name": "54644: krovi_bigest",
+        "cls": "data3d\\krovi_bigest.p3d",
+        "shape": "data3d\\krovi_bigest.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6520.0,
+          6471.0,
+          151.04
+        ],
+        "dist": 13.2,
+        "radius": 3.73,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "9041: asfatlka10 25",
+        "cls": "data3d\\asfatlka10 25.p3d",
+        "shape": "data3d\\asfatlka10 25.p3d",
+        "type": 2,
+        "static": true,
+        "pos": [
+          6537.65,
+          6463.89,
+          148.16
+        ],
+        "dist": 13.37,
+        "radius": 4.42,
+        "damage": 0.0,
+        "geometry": false,
+        "fire": false,
+        "view": false
+      },
+      {
+        "name": "9042: asfaltka10 50",
+        "cls": "data3d\\asfaltka10 50.p3d",
+        "shape": "data3d\\asfaltka10 50.p3d",
+        "type": 2,
+        "static": true,
+        "pos": [
+          6543.55,
+          6463.28,
+          146.71
+        ],
+        "dist": 17.31,
+        "radius": 6.04,
+        "damage": 0.0,
+        "geometry": false,
+        "fire": false,
+        "view": false
+      },
+      {
+        "name": "9038: asfaltka12",
+        "cls": "data3d\\asfaltka12.p3d",
+        "shape": "data3d\\asfaltka12.p3d",
+        "type": 2,
+        "static": true,
+        "pos": [
+          6520.75,
+          6460.41,
+          149.14
+        ],
+        "dist": 19.23,
+        "radius": 7.16,
+        "damage": 0.0,
+        "geometry": false,
+        "fire": false,
+        "view": false
+      },
+      {
+        "name": "19657: str smrk ridky",
+        "cls": "data3d\\str smrk ridky.p3d",
+        "shape": "data3d\\str smrk ridky.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6514.0,
+          6490.0,
+          158.04
+        ],
+        "dist": 24.62,
+        "radius": 9.31,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "9043: asfaltka10 75",
+        "cls": "data3d\\asfaltka10 75.p3d",
+        "shape": "data3d\\asfaltka10 75.p3d",
+        "type": 2,
+        "static": true,
+        "pos": [
+          6554.41,
+          6463.41,
+          144.55
+        ],
+        "dist": 26.05,
+        "radius": 7.92,
+        "damage": 0.0,
+        "geometry": false,
+        "fire": false,
+        "view": false
+      },
+      {
+        "name": "40094: krovi",
+        "cls": "data3d\\krovi.p3d",
+        "shape": "data3d\\krovi.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6508.99,
+          6491.47,
+          151.87
+        ],
+        "dist": 27.9,
+        "radius": 2.89,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "54640: krovi_bigest",
+        "cls": "data3d\\krovi_bigest.p3d",
+        "shape": "data3d\\krovi_bigest.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6521.0,
+          6450.0,
+          150.18
+        ],
+        "dist": 28.27,
+        "radius": 3.43,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "54639: krovi_bigest",
+        "cls": "data3d\\krovi_bigest.p3d",
+        "shape": "data3d\\krovi_bigest.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6518.0,
+          6450.0,
+          150.22
+        ],
+        "dist": 29.57,
+        "radius": 3.37,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "22280: str smrk ridky",
+        "cls": "data3d\\str smrk ridky.p3d",
+        "shape": "data3d\\str smrk ridky.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6547.0,
+          6451.0,
+          154.08
+        ],
+        "dist": 29.64,
+        "radius": 8.38,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "22279: str smrk ridky",
+        "cls": "data3d\\str smrk ridky.p3d",
+        "shape": "data3d\\str smrk ridky.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6532.0,
+          6447.0,
+          156.77
+        ],
+        "dist": 30.08,
+        "radius": 10.51,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "54642: krovi_bigest",
+        "cls": "data3d\\krovi_bigest.p3d",
+        "shape": "data3d\\krovi_bigest.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6513.0,
+          6450.0,
+          150.5
+        ],
+        "dist": 32.25,
+        "radius": 3.85,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "54611: krovi_bigest",
+        "cls": "data3d\\krovi_bigest.p3d",
+        "shape": "data3d\\krovi_bigest.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6564.69,
+          6470.9,
+          146.24
+        ],
+        "dist": 33.18,
+        "radius": 3.58,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "54641: krovi_bigest",
+        "cls": "data3d\\krovi_bigest.p3d",
+        "shape": "data3d\\krovi_bigest.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6520.0,
+          6445.0,
+          150.31
+        ],
+        "dist": 33.28,
+        "radius": 3.57,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "8977: asfaltka25",
+        "cls": "data3d\\asfaltka25.p3d",
+        "shape": "data3d\\asfaltka25.p3d",
+        "type": 2,
+        "static": true,
+        "pos": [
+          6503.13,
+          6453.99,
+          148.76
+        ],
+        "dist": 36.3,
+        "radius": 12.98,
+        "damage": 0.0,
+        "geometry": false,
+        "fire": false,
+        "view": false
+      },
+      {
+        "name": "19656: str smrk ridky",
+        "cls": "data3d\\str smrk ridky.p3d",
+        "shape": "data3d\\str smrk ridky.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6542.0,
+          6511.0,
+          155.65
+        ],
+        "dist": 37.05,
+        "radius": 10.86,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "54606: krovi_long",
+        "cls": "data3d\\krovi_long.p3d",
+        "shape": "data3d\\krovi_long.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6569.64,
+          6472.22,
+          145.4
+        ],
+        "dist": 37.97,
+        "radius": 4.39,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "54620: str_liskac",
+        "cls": "data3d\\str_liskac.p3d",
+        "shape": "data3d\\str_liskac.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6566.0,
+          6457.0,
+          148.31
+        ],
+        "dist": 38.95,
+        "radius": 4.68,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      },
+      {
+        "name": "9044: asfatlka10 100",
+        "cls": "data3d\\asfatlka10 100.p3d",
+        "shape": "data3d\\asfatlka10 100.p3d",
+        "type": 2,
+        "static": true,
+        "pos": [
+          6569.36,
+          6466.2,
+          141.35
+        ],
+        "dist": 39.33,
+        "radius": 9.93,
+        "damage": 0.0,
+        "geometry": false,
+        "fire": false,
+        "view": false
+      },
+      {
+        "name": "19658: str smrk ridky",
+        "cls": "data3d\\str smrk ridky.p3d",
+        "shape": "data3d\\str smrk ridky.p3d",
+        "type": 1,
+        "static": true,
+        "pos": [
+          6496.0,
+          6490.0,
+          161.18
+        ],
+        "dist": 40.57,
+        "radius": 11.81,
+        "damage": 0.0,
+        "geometry": true,
+        "fire": true,
+        "view": true
+      }
+    ],
+    "ok": true
+  },
+  "childPid": 79668,
+  "maps": [
+    "Arma 3 | Altis | OPRW 25 (preview)",
+    "Arma 3 | Stratis | OPRW 25 (preview)",
+    "Arma 3 | Tanoa | OPRW 25 (preview)",
+    "Arma 3 | VR | OPRW 25 (preview)",
+    "Arma 3 | enoch | OPRW 25 (preview)",
+    "Arma 3 | malden | OPRW 25 (preview)",
+    "Arma Reforger | Arland | native Enfusion preview (preview)",
+    "Arma Reforger | Cain | native Enfusion preview (preview)",
+    "Arma Reforger | Eden | native Enfusion preview (preview)",
+    "Arma Reforger | Editor | native Enfusion preview (unsupported)",
+    "Arma Reforger | MP | native Enfusion preview (unsupported)",
+    "Arma Reforger | ScenarioFramework | native Enfusion preview (unsupported)",
+    "Arma Reforger | Showcase | native Enfusion preview (unsupported)",
+    "DayZ | ChernarusPlus | OPRW 29 (preview)",
+    "DayZ | enoch | OPRW 29 (preview)"
+  ],
+  "passed": true,
+  "vehicles": [
+    "Arma 1: T-72 (local bridge)",
+    "Arma 2: T-72 (local bridge)",
+    "Arma 3: T-100 Varsuk (local bridge)",
+    "Arma 1: UH-60 (local bridge)",
+    "Arma 2: Mi-35 (local bridge)",
+    "Arma 3: MH-9 (local bridge)"
+  ],
+  "logo": "\\assets\\ui\\openposeidon_logo.paa"
+}

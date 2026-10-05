@@ -1,6 +1,6 @@
 # Local installed map browser, 2026-10-05
 
-Source-only implementation; parent integration session owns full build, deployment and runtime checks.
+Integrated and runtime-tested as d2a9add7, 2026-10-05 21:35, using the guarded deployment script. The subsequent 7f479731 correction reports the actual WGPU display mode, rather than the inherited dummy backend's constant Windowed value. The fullscreen vehicle restart retains borderless 3441x1440.
 
 Normal main menu: **Local maps**. The browser searches C:/SteamLibrary, D:/SteamLibrary, the normal Steam installation and libraryfolders.vdf, with an optional extra folder. Discovery runs in a worker and reads archive directories plus eight-byte WRP format headers; no game assets are copied or downloaded.
 
@@ -10,4 +10,10 @@ Arma 1, Arma 2/OA, Arma 3 and DayZ candidates use existing OPRW 18/20/24/25/29 r
 
 The **Vehicles** list activates only existing locally installed CWA bridge packs validated by LocalVehiclesCatalog, and opens their small controllable test mission. It does not enable arbitrary foreign CfgVehicles or claim universal vehicle compatibility. The prototype has inherited OFP physics and limited original animation support.
 
-Validation: all modified translation units passed clang syntax checks with the configured game compiler flags. Device-free catalog tests passed 50 assertions in 5 cases, covering Steam VDF layouts, terrain revision guards, PBO prefix resolution, malformed archives, complete/incomplete vehicle dependencies and bridge mission generation. Actual installed metadata scan found six Arma 3 WRP maps, two DayZ maps and Reforger terrain entries with zero archive errors; directory scan took approximately seven seconds, outside the render thread. UI and restart still require parent installed-game smoke tests.
+Validation: full PoseidonGame and PoseidonTests builds passed. Catalog/provider/start-position tests passed 57 assertions in six cases. The installed native main menu found 15 terrain entries and six bridge vehicles. Screenshots confirm readable controls and the supplied OpenPoseidon logo.
+
+The owner's ocean-only report was a real loader defect: modern WRP loading used a physical-file stream for a virtual PBO path. cad4da51 uses QIFStreamB.AutoOpen for both banked and loose terrain. 9ab228da adds a bounded once-per-start land search, keeping the saved view distance and placing the camera 120m above actual terrain. The installed Stratis selection loads its PBO terrain and objects; the grounded preview player is at approximately 3273/3273, terrain height 177.39m, grid 8m. The old logical mission world name remains Eden; this is a terrain preview, not a full foreign world configuration import.
+
+The browser preserves the current renderer, display mode and viewport size. Restart instrumentation exposed an inherited Windows socket: SDL passes inheritable handles to children, and the old listener accepted connections with no surviving worker. df3cdf43 prevents listener/client inheritance. d2a9add7 corrects rounded-up generated RGBA mip dimensions, which caused the supplied 1230x1278 logo to disappear with GPU copy validation errors. A real headless GPU regression test covers that image size and 5x7/1x7 textures and passed.
+
+Installed Stratis evidence: docs/verification/local-maps-browser-20261005-runtime.json. Native browser selection, normal parent exit, same windowed mode and dimensions, child harness responses, visible terrain and normal child exit passed without panic/device/validation/load errors. Source archives and installed binary stamp remained unchanged. Local captures are under build/local-browser/Map-20261005-213532. Arma 1/2, other Arma 3 islands, DayZ and Reforger entries were discovered or format-gated; each still needs its own visual compatibility check. Modern materials and distant object LODs are incomplete and are not certified by a successful terrain load.

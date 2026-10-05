@@ -5,6 +5,32 @@ execution:
   baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
   integration_owner: Oliver Kay
   activation_state: ACTIVE
+  local_content_browser_checkpoint:
+    state: INSTALLED_STRATIS_TERRAIN_AND_MENU_RUNTIME_PASSED
+    installed_source_commit: d2a9add7
+    evidence: docs/verification/local-maps-browser-20261005.md
+    runtime_receipt: docs/verification/local-maps-browser-20261005-runtime.json
+    note: >-
+      Native main-menu browser scans installed Steam libraries asynchronously.
+      Fifteen terrain entries and six existing Arma bridge vehicles discovered.
+      Ocean-only banked WRP loading fixed with virtual-file access; native Stratis
+      selection loads terrain/objects and starts above land at ground177.39m.
+      Same windowed renderer/viewport preserved; restarted harness sockets no longer
+      inherited. Supplied logo is visible after odd-sized generated mip correction.
+      Fifty-seven catalog/provider assertions and the real GPU mip test passed.
+      Modern material/distant-LOD compatibility and other islands remain incomplete;
+      this is a terrain preview, not foreign mission/gameplay configuration import.
+  local_vehicle_browser_checkpoint:
+    state: INSTALLED_T72_DRIVING_AND_FULLSCREEN_RESTART_PASSED_INTERIOR_OPEN
+    installed_source_commit: 7f479731
+    evidence: docs/verification/local-vehicles-catalog-20261005.md
+    runtime_receipt: docs/verification/local-vehicles-catalog-20261005-runtime.json
+    note: >-
+      Native browser selects existing local Arma1 T72 bridge, creates geometry and
+      accepts driver, actual W input three seconds moves9.58m. Borderless3441x1440
+      persists across restart. No GPU errors and normal exit. First-person driver
+      interior remains black; other five catalog vehicles are not runtime-certified.
+      Compiled source committed; +dirty stamp came from verification doc edits only.
   local_swim_normal_launch_checkpoint:
     state: LOCAL_AUTOMATIC_LOADING_INSTALLED_RUNTIME_PASSED
     installed_source_commit: c3ee325c

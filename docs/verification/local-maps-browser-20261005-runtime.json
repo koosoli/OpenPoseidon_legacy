@@ -1,0 +1,111 @@
+{
+  "world": {
+    "count": 0,
+    "selectedId": 0,
+    "records": [],
+    "status": "Caves cleared. Terrain heights are unchanged.",
+    "missionLocal": true,
+    "worldName": "worlds\\eden.wrp",
+    "grid": 8,
+    "heightRevision": 6,
+    "brushDefaultRadius": 8,
+    "inFootprint": false,
+    "atHeight": false,
+    "holeFloor": 0,
+    "terrainY": 177.39047241210938,
+    "roadY": 177.39047241210938,
+    "cameraFloorY": 177.39047241210938,
+    "drawRecords": 0,
+    "boundedHeader": false,
+    "ok": true
+  },
+  "maps": [
+    "Arma 3 | Altis | OPRW 25 (preview)",
+    "Arma 3 | Stratis | OPRW 25 (preview)",
+    "Arma 3 | Tanoa | OPRW 25 (preview)",
+    "Arma 3 | VR | OPRW 25 (preview)",
+    "Arma 3 | enoch | OPRW 25 (preview)",
+    "Arma 3 | malden | OPRW 25 (preview)",
+    "Arma Reforger | Arland | native Enfusion preview (preview)",
+    "Arma Reforger | Cain | native Enfusion preview (preview)",
+    "Arma Reforger | Eden | native Enfusion preview (preview)",
+    "Arma Reforger | Editor | native Enfusion preview (unsupported)",
+    "Arma Reforger | MP | native Enfusion preview (unsupported)",
+    "Arma Reforger | ScenarioFramework | native Enfusion preview (unsupported)",
+    "Arma Reforger | Showcase | native Enfusion preview (unsupported)",
+    "DayZ | ChernarusPlus | OPRW 29 (preview)",
+    "DayZ | enoch | OPRW 29 (preview)"
+  ],
+  "childPid": 38812,
+  "selected": "Arma 3 | Stratis | OPRW 25 (preview)",
+  "logo": "\\assets\\ui\\openposeidon_logo.paa",
+  "installed": "codex/player-visibility-recovery-20261005 d2a9add7 2026-10-05_21:35 deploy-ps1",
+  "vehicles": [
+    "Arma 1: T-72 (local bridge)",
+    "Arma 2: T-72 (local bridge)",
+    "Arma 3: T-100 Varsuk (local bridge)",
+    "Arma 1: UH-60 (local bridge)",
+    "Arma 2: Mi-35 (local bridge)",
+    "Arma 3: MH-9 (local bridge)"
+  ],
+  "childCommand": "\"D:\\SteamLibrary\\steamapps\\common\\ARMA Cold War Assault\\OpenPoseidon.exe\" --render=wgpu --wait-for-parent 48448 --test-mission C:\\Users\\mail\\.codex\\worktrees\\player-visibility-recovery-20261005\\CWR-CE-paavohuhtalafork-\\build\\local-browser\\Map-20261005-213532\\cache/LocalMapBrowser.Eden --display-mode windowed --width 1280 --height 720 --dev --harness 63052 --log-file C:\\Users\\mail\\.codex\\worktrees\\player-visibility-recovery-20261005\\CWR-CE-paavohuhtalafork-\\build\\local-browser\\Map-20261005-213532\\cache\\local-map-browser.log --test-world a3\\map_stratis\\Stratis.wrp --test-world-land-start --test-world-freefly 1000 1000 250 0 -15 --map-archive-root \"D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Addons;D:\\SteamLibrary\\steamapps\\common\\Arma 3\\AoW\\Addons;D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Argo\\Addons;D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Contact\\Addons;D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Curator\\Addons;D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Dta;D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Enoch\\Addons;D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Expansion\\Addons;D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Heli\\Addons;D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Jets\\Addons;D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Kart\\Addons;D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Mark\\Addons;D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Orange\\Addons;D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Tacops\\Addons;D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Tank\\Addons\"",
+  "preview": {
+    "name": "WEST Alpha Black:1 (mail)",
+    "cls": "SoldierWB",
+    "shape": "data3d\\mc vojakw2.p3d",
+    "pos": [
+      3273.31,
+      3273.28,
+      177.4
+    ],
+    "dir": 360.0,
+    "damage": 0.0,
+    "destroyed": false,
+    "speed": 0.0,
+    "watched": false,
+    "side": 1,
+    "zones": {
+      "hlava": 0.0,
+      "telo": 0.0,
+      "ruce": 0.0,
+      "nohy": 0.0
+    },
+    "weapons": [
+      "M16",
+      "Throw",
+      "Put"
+    ],
+    "selected": {
+      "weapon": "M16",
+      "muzzle": "M16",
+      "magazine": true,
+      "ammo": 30,
+      "loaded": true
+    },
+    "magazines": 10,
+    "brain": {
+      "group": "Alpha Black",
+      "groupLeader": true,
+      "state": 0,
+      "life": 0,
+      "combatMode": 3,
+      "semaphore": 3,
+      "planning": 0,
+      "mode": 2,
+      "path": 0
+    },
+    "man": {
+      "move": "combat",
+      "time": 0.0,
+      "factor": 1.0,
+      "secondary": "fallland",
+      "external": "",
+      "queue": 0,
+      "down": false,
+      "unitPos": 2
+    },
+    "ok": true
+  },
+  "passed": true,
+  "catalogStatus": "15 maps found. Optional folder above. Open restarts engine. Current format support; original missions/gameplay are not imported."
+}
