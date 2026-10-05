@@ -221,10 +221,12 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
         logo->Add("idc", 1988);
         logo->Add("style", ST_PICTURE);
         logo->Add("text", RString("\\assets\\ui\\openposeidon_logo.paa"));
-        logo->Add("x", 0.428f);
-        logo->Add("y", 0.0f);
-        logo->Add("w", 0.144f);
-        logo->Add("h", 0.20f);
+        // Keep branding within the menu's visible area, below the intro's
+        // cinema border and clear of the right-hand menu entries.
+        logo->Add("x", 0.07f);
+        logo->Add("y", 0.25f);
+        logo->Add("w", 0.20f);
+        logo->Add("h", 0.36f);
         ParamEntry* background = logo->AddArray("colorBackground");
         for (int channel = 0; channel < 4; ++channel)
             background->AddValue(0.0f);
