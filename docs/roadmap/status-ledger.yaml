@@ -5,6 +5,25 @@ execution:
   baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
   integration_owner: Oliver Kay
   activation_state: ACTIVE
+  fog_grass_jeep_checkpoint:
+    state: INSTALLED_BOUNDED_RUNTIME_CHECKS_PASSED
+    installed_source_commit: 488a93e7
+    installed_local_time: 2026-10-05_11:44
+    evidence: docs/verification/fog-grass-jeep-20261005.md
+    runtime_receipt: docs/verification/fog-grass-jeep-20261005-runtime.json
+    note: >-
+      Everon fog0.78 canopy ground discontinuity reproduced and reduced; incoming
+      solar transport reused on a stable world grid, filtered rain shelter edges,
+      higher view-volume resolution, one default layer. Same old two-layer profile
+      fog region mean4.655 to1.100ms on the measured scene. Final Everon13 and
+      Kolgujev compact26 temporal poses passed; not universal flicker-free proof.
+      Fixed-ASL valley preset and movable height ordering; density control avoids
+      shortening legacy visibility. Grass mid4/radius500 default, maximum50 with
+      fixed placement budgets and residual clump widening; neutral daylight fill.
+      Stock Jeep prototype actual native Nogova AI driving8.49m produced about10cm
+      wheel depressions after real rain. No generic traction/softbody/MP rollout.
+      Fog tests15 and grass36 pass; wheel schedule and mud geometry tests pass.
+      Previous unidentified floating-house report remains open.
   kolgujev_fog_grass_followup_checkpoint:
     state: INSTALLED_FOG_EDGE_AND_GRASS_UI_CHECKS_PASSED_HOUSE_UNRESOLVED
     installed_source_commit: 2ba7b596

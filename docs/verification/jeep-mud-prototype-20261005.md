@@ -47,3 +47,7 @@ behavior before any wider vehicle rollout.
 Existing terrain rendering receives the mud field. No new tire-profile texture
 or parallax shader was added. Visible rut shape and vehicle response must be
 judged in the installed merged build; the subagent did not deploy or run a game.
+
+## Installed integration check
+
+Root installed21d85d8c and ran scripts/Test-JeepMudRuntime.ps1 on original Nogova cultivated soil with real rain and AI driving. The stock Jeep moved8.49m, produced actual MUD_WHEEL mutations and roughly10cm negative height offsets. Dry contacts produced no chunks. Close capture checked in root review; tyre-profile polish, re-driving/steering and all refusal surfaces remain outside this bounded runtime smoke. Final488a93e7 changes only fog sampling and test scripts after this Jeep check. See fog-grass-jeep-20261005-runtime.json for source/provenance.

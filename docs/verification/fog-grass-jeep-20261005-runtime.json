@@ -1,0 +1,1382 @@
+{
+  "installed": "codex/kolgujev-fog-corpse-fixes-20261004 488a93e7 2026-10-05_11:44 deploy-ps1",
+  "pair": [
+    {
+      "name": "OpenPoseidon.exe",
+      "sha256": "8353dcfdd1b3a42182cd1a280ef9fdb6f4a2aaf52993c4401b97285718c18770",
+      "bytes": 31614976
+    },
+    {
+      "name": "wgpu_renderer.dll",
+      "sha256": "4fe85951390b020d49f245385ec4c00d0a8c779a868743e615d82e2e1b0d41e2",
+      "bytes": 18602496
+    }
+  ],
+  "cases": {
+    "everon_baseline": {
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 2ba7b596 2026-10-05_00:20 deploy-ps1",
+      "private_receipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\fog-flight\\everon-report-baseline-20261005-111915\\result.json",
+      "views": [
+        {
+          "name": "everon-report",
+          "step": 0,
+          "pose": [
+            8131.43,
+            4086.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "c04dd992a17f9bb64a7d1290a27310663f3a388af568a7bf551a3085c5586d86"
+        },
+        {
+          "name": "everon-report",
+          "step": 1,
+          "pose": [
+            8127.43,
+            4091.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "87be194a93f8a4c0649ac50b08926716f38a05019d3aa73c2eb93e487f2f36b6"
+        },
+        {
+          "name": "everon-report",
+          "step": 2,
+          "pose": [
+            8123.43,
+            4096.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "25d5a685df1ed22f16115763768a01978014b84a98119c1590086bd814e24921"
+        },
+        {
+          "name": "everon-report",
+          "step": 3,
+          "pose": [
+            8119.43,
+            4101.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "c6c8e8eff9c055421dce42a675d83bad2873f2f5085be460522937010bf8e3b1"
+        },
+        {
+          "name": "everon-report",
+          "step": 4,
+          "pose": [
+            8115.43,
+            4106.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "a7a8a657df5f086d13cfd3439bc3bcd92213ffb00fd139d7785f602a3f6fcd90"
+        },
+        {
+          "name": "everon-report",
+          "step": 5,
+          "pose": [
+            8111.43,
+            4111.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "897e2ba0aa95c3ad4c4c342c1a14ba8737fbdb39834cf0dfac9137a9436123d8"
+        },
+        {
+          "name": "everon-report",
+          "step": 6,
+          "pose": [
+            8107.43,
+            4116.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "d153c9e80f9c7e55f42f68f3a3633cf66b04bb4c9679d5f85f8e3f066a44e120"
+        },
+        {
+          "name": "everon-report",
+          "step": 7,
+          "pose": [
+            8103.43,
+            4121.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "5da1610401f724a8df037c373bc64f18ab127ade589576688b351f17c3fb8d26"
+        },
+        {
+          "name": "everon-report",
+          "step": 8,
+          "pose": [
+            8099.43,
+            4126.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "8a96ffa3e0e39dd45441ec7f925a3082f6e34a0f3e2db8e75c7e36233d7f9f1b"
+        },
+        {
+          "name": "everon-report",
+          "step": 9,
+          "pose": [
+            8095.43,
+            4131.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "a1374c6a28b96c0fa8fcfb2451d46f68b364ad096cb4d28a6a1d69bee0151176"
+        },
+        {
+          "name": "everon-report",
+          "step": 10,
+          "pose": [
+            8091.43,
+            4136.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "1613f58449eb3a4105c783124b7528d18f99f2cfd5925a76f9b2d5fff04464de"
+        },
+        {
+          "name": "everon-report",
+          "step": 11,
+          "pose": [
+            8087.43,
+            4141.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "ad016f840579bd956ff114e71b360aee6e8525ca21f81ca97f9f3f0d5dd6645f"
+        },
+        {
+          "name": "everon-report",
+          "step": 12,
+          "pose": [
+            8083.43,
+            4146.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "1b10a466c97c4c88f635816f04b4efd0dcef38df20e08fef30d2aa68eafffae5"
+        }
+      ],
+      "fog_gpu_ms": {
+        "count": 12,
+        "mean": 4.654933373133341,
+        "min": 4.494336128234863,
+        "max": 5.157887935638428
+      }
+    },
+    "everon_two_layers_optimized": {
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 21d85d8c 2026-10-05_11:26 deploy-ps1",
+      "private_receipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\fog-flight\\everon-two-layer-after-20261005-112929\\result.json",
+      "views": [
+        {
+          "name": "everon-report",
+          "step": 0,
+          "pose": [
+            8131.43,
+            4086.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "ab1e5b4ecb6ce33010bb26b2979624334c484add8a1159eef7968b431d3f3025"
+        },
+        {
+          "name": "everon-report",
+          "step": 1,
+          "pose": [
+            8127.43,
+            4091.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "e8ff0b3716491b8c0a72bbc1dbf896782f232cf71cc605e2d322ccbf846851f2"
+        },
+        {
+          "name": "everon-report",
+          "step": 2,
+          "pose": [
+            8123.43,
+            4096.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "98ce425431a51272525d0200715664ed7373e7a47c2f0e1f8291d55ea4c30779"
+        },
+        {
+          "name": "everon-report",
+          "step": 3,
+          "pose": [
+            8119.43,
+            4101.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "0a8c34bef0402e3ff531d33e8bf00de3db79efa9b50e4dd2daa9e0bc66e828ff"
+        },
+        {
+          "name": "everon-report",
+          "step": 4,
+          "pose": [
+            8115.43,
+            4106.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "0ca78916a5b7402a06e83a0d29160f236643a21de22deb1a8a69ca2b88045855"
+        },
+        {
+          "name": "everon-report",
+          "step": 5,
+          "pose": [
+            8111.43,
+            4111.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "8d86d22709be9e38e6e7aa6bbd91ec6315bbd3326280a8c6ab0914044042f24b"
+        },
+        {
+          "name": "everon-report",
+          "step": 6,
+          "pose": [
+            8107.43,
+            4116.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "32efc2621175e396012e3d1ae3bed15ffce161903fab802c303a6e04803779e6"
+        },
+        {
+          "name": "everon-report",
+          "step": 7,
+          "pose": [
+            8103.43,
+            4121.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "adf3bcd13dcfde9df2c77e73e7144ebe2499b3116f918c3219fe8578901a6b26"
+        },
+        {
+          "name": "everon-report",
+          "step": 8,
+          "pose": [
+            8099.43,
+            4126.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "638a21c59526e717cccd3bb31197b6770d2e53c62edb60b855f64e6264b3e959"
+        },
+        {
+          "name": "everon-report",
+          "step": 9,
+          "pose": [
+            8095.43,
+            4131.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "6af7a97e85bc4318787f60a25becaa22f3bcebb23aea7a5ab38705f4b2549845"
+        },
+        {
+          "name": "everon-report",
+          "step": 10,
+          "pose": [
+            8091.43,
+            4136.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "b7cedd6e3ff217a8bf281fd0566c6c4bd5b0c3d9033f3c77d1e4cf63173f3a88"
+        },
+        {
+          "name": "everon-report",
+          "step": 11,
+          "pose": [
+            8087.43,
+            4141.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "e7f34be4da689cee0290eda128b15f83951354dda1759b2373b8889815d99676"
+        },
+        {
+          "name": "everon-report",
+          "step": 12,
+          "pose": [
+            8083.43,
+            4146.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "87b95609df028bfe4d61aa841925614f0a75cf1ab73c0595831735602443cfc4"
+        }
+      ],
+      "fog_gpu_ms": {
+        "count": 12,
+        "mean": 1.1002879937489827,
+        "min": 1.0751999616622925,
+        "max": 1.3025280237197876
+      }
+    },
+    "everon_final": {
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 488a93e7 2026-10-05_11:44 deploy-ps1",
+      "private_receipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\fog-flight\\everon-final-20261005-114440\\result.json",
+      "views": [
+        {
+          "name": "everon-report",
+          "step": 0,
+          "pose": [
+            8131.43,
+            4086.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "b63900a3ddfa631092308f260d1bf5dd28f318600f8150078d0018d4da1eac1b"
+        },
+        {
+          "name": "everon-report",
+          "step": 1,
+          "pose": [
+            8127.43,
+            4091.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "f9e763b31eefed9856b9a168a7e2de2837072ee8661f51bde366763717551cc6"
+        },
+        {
+          "name": "everon-report",
+          "step": 2,
+          "pose": [
+            8123.43,
+            4096.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "29bace6d3d371f8b64c127c920799984a71a8403b79708af047b1b884a0ac310"
+        },
+        {
+          "name": "everon-report",
+          "step": 3,
+          "pose": [
+            8119.43,
+            4101.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "edd1018488ee7ce7161b102c144ea08d0aa28c2d55263b43c756084664126b4b"
+        },
+        {
+          "name": "everon-report",
+          "step": 4,
+          "pose": [
+            8115.43,
+            4106.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "7187022c177441a4fc3993deaf8d38daffb220a2405196d70ff705988b97221d"
+        },
+        {
+          "name": "everon-report",
+          "step": 5,
+          "pose": [
+            8111.43,
+            4111.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "2c1f610653db2f873e97a2e479c4f87825d9ae2eb7c049b5fb433203916d3366"
+        },
+        {
+          "name": "everon-report",
+          "step": 6,
+          "pose": [
+            8107.43,
+            4116.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "b0c1085f130a5cbe372289dbbb98be3c8312bd417c6f4ba7374eda25d89b5f17"
+        },
+        {
+          "name": "everon-report",
+          "step": 7,
+          "pose": [
+            8103.43,
+            4121.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "2ceb25d1673e9e3968a7b2236c113764abdd6b243491adb9ac9994db926b9b54"
+        },
+        {
+          "name": "everon-report",
+          "step": 8,
+          "pose": [
+            8099.43,
+            4126.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "5ccd4c209c2a95d6557b0c318dfe24bb45b66d6300623778ee4ab4b2a7b6b771"
+        },
+        {
+          "name": "everon-report",
+          "step": 9,
+          "pose": [
+            8095.43,
+            4131.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "440a88ab9ff4764a2b1816db2383464c4627e427cead3b639e13922603a57b1e"
+        },
+        {
+          "name": "everon-report",
+          "step": 10,
+          "pose": [
+            8091.43,
+            4136.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "ee0d11151b2ced1a99359242abb441d9e322e8e1325edf7f38b8eebf99aa38e2"
+        },
+        {
+          "name": "everon-report",
+          "step": 11,
+          "pose": [
+            8087.43,
+            4141.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "e8ac557787dc9c1c977a0a2972693f88398cee927594f702d297e81cd259b451"
+        },
+        {
+          "name": "everon-report",
+          "step": 12,
+          "pose": [
+            8083.43,
+            4146.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "c4595733752094722cd5cd13be53001d8f488912b60f656cbc713838fb990eef"
+        }
+      ],
+      "fog_gpu_ms": {
+        "count": 12,
+        "mean": 1.1048106948534648,
+        "min": 1.0854400396347046,
+        "max": 1.294335961341858
+      }
+    },
+    "everon_valley_grass": {
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 21d85d8c 2026-10-05_11:26 deploy-ps1",
+      "private_receipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\fog-flight\\everon-valley-after-20261005-113418\\result.json",
+      "views": [
+        {
+          "name": "everon-report",
+          "step": 0,
+          "pose": [
+            8131.43,
+            4086.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "61584dbd149c012882e6f3994d45c448d75333abb38fa501995e3ddd33417fce"
+        },
+        {
+          "name": "everon-report",
+          "step": 1,
+          "pose": [
+            8127.43,
+            4091.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "3b10f55709404e3323d6a5427ffe19ea19dec2561beff89a6d5303a4f6218d16"
+        },
+        {
+          "name": "everon-report",
+          "step": 2,
+          "pose": [
+            8123.43,
+            4096.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "077a7a4f27b2d5f2de58d5c1f3d924e52e814fb94330c09ffb8db6fab3dd96a0"
+        },
+        {
+          "name": "everon-report",
+          "step": 3,
+          "pose": [
+            8119.43,
+            4101.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "77f1aa5ce4d215694d502575b12cdefcf0baf53bdb690048f44f5282853f330a"
+        },
+        {
+          "name": "everon-report",
+          "step": 4,
+          "pose": [
+            8115.43,
+            4106.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "7fa7627f5f07bc8adb2a3e2e72930b4e7a817a51f10256cfc53a229334bb9ca8"
+        },
+        {
+          "name": "everon-report",
+          "step": 5,
+          "pose": [
+            8111.43,
+            4111.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "b6c9e2fe0bca096d1a09e0b750e8429c16859607abc95c314ea1929af34ff860"
+        },
+        {
+          "name": "everon-report",
+          "step": 6,
+          "pose": [
+            8107.43,
+            4116.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "78bd91fe2d554db9ac8a61ff72271dc4895480553e4ab907121b4b40098d758b"
+        },
+        {
+          "name": "everon-report",
+          "step": 7,
+          "pose": [
+            8103.43,
+            4121.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "dbfffda7684a70075269ec5957a3757597156168c05a0e0aa3962ef4e1e97fe2"
+        },
+        {
+          "name": "everon-report",
+          "step": 8,
+          "pose": [
+            8099.43,
+            4126.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "25237c6c2e734b3f72056392a7c8b32415834e61c13ca94dcba5fa9dc6afe7b8"
+        },
+        {
+          "name": "everon-report",
+          "step": 9,
+          "pose": [
+            8095.43,
+            4131.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "88b8217a64a68672f54ebef99eb345526662079bed461fc4bd91b735c0cb0e3b"
+        },
+        {
+          "name": "everon-report",
+          "step": 10,
+          "pose": [
+            8091.43,
+            4136.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "343d66a7c1953198b14a6bacf66a156676b4d56a2977a808977a8f53c9270f3e"
+        },
+        {
+          "name": "everon-report",
+          "step": 11,
+          "pose": [
+            8087.43,
+            4141.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "b90162d02c46f764f969fec4154b30eb231a6699045a041defba73420107bf7a"
+        },
+        {
+          "name": "everon-report",
+          "step": 12,
+          "pose": [
+            8083.43,
+            4146.37,
+            191.04,
+            229.1,
+            -11.3
+          ],
+          "sha256": "5a89f8829268d1b48d28dbc4989ea25d9cb6a0f2324f7db2425d84967c419ae0"
+        }
+      ],
+      "fog_gpu_ms": {
+        "count": 12,
+        "mean": 0.4573013285795848,
+        "min": 0.3829759955406189,
+        "max": 1.240064024925232
+      }
+    },
+    "kolgujev_valley": {
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 21d85d8c 2026-10-05_11:26 deploy-ps1",
+      "private_receipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\fog-flight\\kolgujev-valley-after-20261005-113855\\result.json",
+      "views": [
+        {
+          "name": "coast",
+          "step": 0,
+          "pose": [
+            5448.73,
+            7011.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "facf004579aa57ce1766ddad7d3f69fd7308a0efbda0ba095780eb3217995e85"
+        },
+        {
+          "name": "coast",
+          "step": 1,
+          "pose": [
+            5456.73,
+            7016.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "d6208be220825a49f76a75f6c5e1dcbaee0568671d77071127b0e3c6460711ca"
+        },
+        {
+          "name": "coast",
+          "step": 2,
+          "pose": [
+            5464.73,
+            7021.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "94f7c6e3d515a25e3b32572ff6637cfb9f4f71590985936d775ca9142a3d54b6"
+        },
+        {
+          "name": "coast",
+          "step": 3,
+          "pose": [
+            5472.73,
+            7026.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "81d61913f8673c0148e19f7009f076b7fc5b8445d41f580100336d1c32fcced0"
+        },
+        {
+          "name": "coast",
+          "step": 4,
+          "pose": [
+            5480.73,
+            7031.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "b09195fb84a780dc76f47ce473d4cfc51cf7dfa64857f2047c3be9f4c0e909f5"
+        },
+        {
+          "name": "coast",
+          "step": 5,
+          "pose": [
+            5488.73,
+            7036.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "185ef57f101349f61812a7b2b2bc5ef868f0353876e37a1c6b26339c970af87c"
+        },
+        {
+          "name": "coast",
+          "step": 6,
+          "pose": [
+            5496.73,
+            7041.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "4b0b7eadf6b341967aff9f55a77b77783edfd9c0cbdf40f018c0f57591effc4f"
+        },
+        {
+          "name": "coast",
+          "step": 7,
+          "pose": [
+            5504.73,
+            7046.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "a8ca8419ea8bd115c847755ad135dc02e8a7607e729171d23eca674aea6b5cd0"
+        },
+        {
+          "name": "coast",
+          "step": 8,
+          "pose": [
+            5512.73,
+            7051.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "7de1638a443096628ebadec87cf9034fde588d86c674f1196620bd29eef8ce09"
+        },
+        {
+          "name": "coast",
+          "step": 9,
+          "pose": [
+            5520.73,
+            7056.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "dc5d4883bbd065413038eb1c5139ee2132e9dc82fbf83e8cef061e8a1e1ce5bd"
+        },
+        {
+          "name": "coast",
+          "step": 10,
+          "pose": [
+            5528.73,
+            7061.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "fc16264e3f79c54351b945a5921a5a2b4a16a429deb6311fd1e75a764a839d12"
+        },
+        {
+          "name": "coast",
+          "step": 11,
+          "pose": [
+            5536.73,
+            7066.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "5b41b810239e38f7603f25a3df1cb4e46209018de5e6df752efa7f2be527b126"
+        },
+        {
+          "name": "coast",
+          "step": 12,
+          "pose": [
+            5544.73,
+            7071.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "affdcef5ee232e975d42c4a15b7108f2e4a81a4ff1e40e5d689380429a16753a"
+        },
+        {
+          "name": "ocean",
+          "step": 0,
+          "pose": [
+            7400,
+            8500,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "7db02125463b1782261c1bf157ee84f5beb43dbbc5d8eae52f5c125b503aa513"
+        },
+        {
+          "name": "ocean",
+          "step": 1,
+          "pose": [
+            7408,
+            8505,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "dc6fff49be1c97592781d7e81ffa04bc468e9d3b17db78446e8e50e80a313968"
+        },
+        {
+          "name": "ocean",
+          "step": 2,
+          "pose": [
+            7416,
+            8510,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "328adea759e6e7ebb375e02aca9ed575089074db6695f92f4c9248b8575a542a"
+        },
+        {
+          "name": "ocean",
+          "step": 3,
+          "pose": [
+            7424,
+            8515,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "aab9a0352830c437136cb4e0599a56911d2dde45358fdbc0c53aeb140cc47652"
+        },
+        {
+          "name": "ocean",
+          "step": 4,
+          "pose": [
+            7432,
+            8520,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "bc2a4b1907c1a7f9f65d1a8e023e64123b80c834383330755e262d3f1254f0ea"
+        },
+        {
+          "name": "ocean",
+          "step": 5,
+          "pose": [
+            7440,
+            8525,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "ae8dd1958ea197bd9a43b6be3950f6af9d44f09d5650a97ed2dd1c6f791572e5"
+        },
+        {
+          "name": "ocean",
+          "step": 6,
+          "pose": [
+            7448,
+            8530,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "110b3c1b1d9d39b6bf649853372d8607f4d7c8ec49619bf2b8efa4c93039e87b"
+        },
+        {
+          "name": "ocean",
+          "step": 7,
+          "pose": [
+            7456,
+            8535,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "38bbf4a28a15a9a1506d5abc2f272ca42896d237041008cfba9d7888c8306c97"
+        },
+        {
+          "name": "ocean",
+          "step": 8,
+          "pose": [
+            7464,
+            8540,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "80e2920056aabefd80ee58e21c6ac1887d34dfae67e2c94f0460e106f54f3ed4"
+        },
+        {
+          "name": "ocean",
+          "step": 9,
+          "pose": [
+            7472,
+            8545,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "8b5069e464a3433dcef3b062e262a881a6b4bc1e3c2f9e5bb0fa165aed8a505c"
+        },
+        {
+          "name": "ocean",
+          "step": 10,
+          "pose": [
+            7480,
+            8550,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "50b235b6fa010175eec83acc516cfca2358c6edf68e8717ded4acc39c92e875d"
+        },
+        {
+          "name": "ocean",
+          "step": 11,
+          "pose": [
+            7488,
+            8555,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "8977eabd2f17e1b5aa10936f46a6a1f6bb19f4297752ed3fbaa49edd399b2d00"
+        },
+        {
+          "name": "ocean",
+          "step": 12,
+          "pose": [
+            7496,
+            8560,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "9d0f8a76df724361030afe0c4fb76def316a2b7be16e9e33907f4ad75550779d"
+        }
+      ],
+      "fog_gpu_ms": {
+        "count": 12,
+        "mean": 0.4251306677858035,
+        "min": 0.3993600010871887,
+        "max": 0.652288019657135
+      }
+    },
+    "kolgujev_compact_final": {
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 488a93e7 2026-10-05_11:44 deploy-ps1",
+      "private_receipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\fog-flight\\kolgujev-compact-final-20261005-114646\\result.json",
+      "views": [
+        {
+          "name": "coast",
+          "step": 0,
+          "pose": [
+            5448.73,
+            7011.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "fdd27899ac165780fcd284a5b4c838a6cdb4635a9ae0194e13f8a2bf65c1d416"
+        },
+        {
+          "name": "coast",
+          "step": 1,
+          "pose": [
+            5456.73,
+            7016.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "924ccca58a64f38bbb2f479c6ed904307c84c79b140c949b8068d242d1e4627c"
+        },
+        {
+          "name": "coast",
+          "step": 2,
+          "pose": [
+            5464.73,
+            7021.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "1d6e83be3eb53904bc1d138643801ff8ae7a1edc72aff599b6a718806691ed7c"
+        },
+        {
+          "name": "coast",
+          "step": 3,
+          "pose": [
+            5472.73,
+            7026.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "e87b1aade1fffd71c1986a4e9b2207198d38084fd30c6f74bdc9a8f627559978"
+        },
+        {
+          "name": "coast",
+          "step": 4,
+          "pose": [
+            5480.73,
+            7031.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "e2d1f8c39601118c71b8762a3e42f624a65400893b9960787f58f1dc993d3ee9"
+        },
+        {
+          "name": "coast",
+          "step": 5,
+          "pose": [
+            5488.73,
+            7036.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "f91c5aad7136bb9cd9593d7cb476f2f7d5aadc03413c416f4f64e239919b5559"
+        },
+        {
+          "name": "coast",
+          "step": 6,
+          "pose": [
+            5496.73,
+            7041.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "d092c411f63e1196d0237925a20c6df3976ed3f56ee7eab6d6c30862faec167c"
+        },
+        {
+          "name": "coast",
+          "step": 7,
+          "pose": [
+            5504.73,
+            7046.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "0bbd6158aeb9af2034df8e4bb15ccf522cea08b0d236f2deaa13f824c8e60f74"
+        },
+        {
+          "name": "coast",
+          "step": 8,
+          "pose": [
+            5512.73,
+            7051.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "d35735e5c0db7a6903a9f4aaccf0f265c42953ad1ff60c21c7f70eb58f21eef2"
+        },
+        {
+          "name": "coast",
+          "step": 9,
+          "pose": [
+            5520.73,
+            7056.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "085b566ceaf125be1912beb660569e1a879f456962d3d6c4aee9033be9e75d9f"
+        },
+        {
+          "name": "coast",
+          "step": 10,
+          "pose": [
+            5528.73,
+            7061.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "19fcecbaec9be38ab64d7be15bfc0a3feb9fde7eb58ce1c02319d73357cbc3af"
+        },
+        {
+          "name": "coast",
+          "step": 11,
+          "pose": [
+            5536.73,
+            7066.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "08fb470d5225079693e859808a070baa81da57bd46dbce45ea3c7e7c831a45bd"
+        },
+        {
+          "name": "coast",
+          "step": 12,
+          "pose": [
+            5544.73,
+            7071.85,
+            590.95,
+            111.1,
+            -24.1
+          ],
+          "sha256": "230da76ad7ad1ce5631799b3393fd734063b075ffcfde40631ec659c469cf687"
+        },
+        {
+          "name": "ocean",
+          "step": 0,
+          "pose": [
+            7400,
+            8500,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "3114a805f3a75bd1b30e356bb91f34ac8dbde81e532ea65ef3c4f08abede584b"
+        },
+        {
+          "name": "ocean",
+          "step": 1,
+          "pose": [
+            7408,
+            8505,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "73a95b5951e19695e41d7fc10e01f2d82303446b18ab7e72943d8576f98f777e"
+        },
+        {
+          "name": "ocean",
+          "step": 2,
+          "pose": [
+            7416,
+            8510,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "1c1815f842aa0b092c24a65281ef63e7243116e41ba57a7ed573d6e2ecf47617"
+        },
+        {
+          "name": "ocean",
+          "step": 3,
+          "pose": [
+            7424,
+            8515,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "c09bbd247df750f76ce7f3ff903e43a0575590874ee6b55da9fab509597cb09d"
+        },
+        {
+          "name": "ocean",
+          "step": 4,
+          "pose": [
+            7432,
+            8520,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "12318f2278eed8c31dd6bafecc43d555c30bda407854e407436e11b79552684b"
+        },
+        {
+          "name": "ocean",
+          "step": 5,
+          "pose": [
+            7440,
+            8525,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "9b22876ceb876af3bc1257d1f3734f65512777ac5210577be1bd1d56768889a8"
+        },
+        {
+          "name": "ocean",
+          "step": 6,
+          "pose": [
+            7448,
+            8530,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "8107136656110a11c1f1ff2265f5190ad7f8a4b1d24c445763e03bc8ad2e96a1"
+        },
+        {
+          "name": "ocean",
+          "step": 7,
+          "pose": [
+            7456,
+            8535,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "507d04740633f4e6004541197219e98417c270dda11309a07674936a5ecd7508"
+        },
+        {
+          "name": "ocean",
+          "step": 8,
+          "pose": [
+            7464,
+            8540,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "c9ad1b116da043e30adf11c6e6b9e4b219046de78e95636cd523d2b04cad9ed3"
+        },
+        {
+          "name": "ocean",
+          "step": 9,
+          "pose": [
+            7472,
+            8545,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "edec7ec0cd9dcaaf6ea784e3cf7507e31f2e411b3bc1841e2feead66ead30f93"
+        },
+        {
+          "name": "ocean",
+          "step": 10,
+          "pose": [
+            7480,
+            8550,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "6d48789c6c4ab8d731514a8b16c48d2a59e467b912f3538c1e8f1f4c1b23f5f5"
+        },
+        {
+          "name": "ocean",
+          "step": 11,
+          "pose": [
+            7488,
+            8555,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "ac25be22a0ad9176c52b03daf9c1e8e01fbda1e45715ef3d4f70461ee346fb32"
+        },
+        {
+          "name": "ocean",
+          "step": 12,
+          "pose": [
+            7496,
+            8560,
+            900,
+            120,
+            -22
+          ],
+          "sha256": "e82d17beb9f09c417f3b75896e300ed317e0a0daa3940df05e20bac4d389104b"
+        }
+      ],
+      "fog_gpu_ms": {
+        "count": 12,
+        "mean": 0.4852053274710973,
+        "min": 0.44441598653793335,
+        "max": 0.9000959992408752
+      }
+    }
+  },
+  "tests": {
+    "layered_fog": 15,
+    "grass": 36,
+    "mud_wheel_trail": "PASS",
+    "mud_field": "PASS"
+  },
+  "jeep": {
+    "installed": "codex/kolgujev-fog-corpse-fixes-20261004 21d85d8c 2026-10-05_11:26 deploy-ps1",
+    "distance": 8.490000000000691,
+    "minimum_offset": -0.0996140018105507,
+    "wheel_mutations": 156,
+    "wetness": 0.8518745303153992,
+    "source": {
+      "enabled": true,
+      "wetness": 0,
+      "chunks": 0,
+      "revision": 2,
+      "rejected": 0,
+      "x": 4975,
+      "z": 4675,
+      "offset": 0,
+      "mudDx": 0,
+      "mudDz": 0,
+      "surfaceY": 21.55499839782715,
+      "surfaceDx": 0,
+      "surfaceDz": -0.0036001584958285093,
+      "world": "noe\\noe.wrp",
+      "texture": "o\\pole2.paa",
+      "surfaceClass": "Default",
+      "files": "default",
+      "sound": "normalExt",
+      "character": "",
+      "sourceEligible": true,
+      "ok": true
+    },
+    "private_receipt": "C:\\Users\\mail\\OneDrive\\Documents\\GitHub\\CWR-CE-paavohuhtalafork-\\.claude\\worktrees\\combat-audit\\build\\jeep-mud-runtime\\20261005-113748\\result.json",
+    "limitation": "AI driving contact/depth smoke only, no steering/traction rollout or tyre-profile appearance acceptance"
+  },
+  "limits": [
+    "Finite camera sample campaign; no every-frame certification of all weather profiles",
+    "GPU timings are asynchronous region samples on this scene/hardware, not universal FPS gains",
+    "Grass density50 uses bounded placement plus broader clumps, not50x independent instances",
+    "Jeep runtime scope: stock Jeep on original Nogova cultivated soil; far support-plane approximation unchanged",
+    "Fog amount still changes legacy visibility distance; Fog density changes the finite bank"
+  ]
+}
