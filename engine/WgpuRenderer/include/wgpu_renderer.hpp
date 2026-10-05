@@ -1341,7 +1341,11 @@ struct WgrGrassParams
     float card_coverage;
     /* Albedo tints applied after the existing colour work and before lighting.
      * `tint_procedural` covers procedural blades, ribbons and the far proxy;
-     * `tint_photo` covers the photographed cards. White = untinted. */
+     * `tint_photo` covers the photographed cards. White RGB = untinted.
+     * Unused alpha input lanes: procedural[3] encodes gust waves (negative = old
+     * gusts; 1 + local variation 0..1; zero = default full variation), photo[3]
+     * is gust front size in metres (10..200; zero = default 45). Alpha does not
+     * affect colour, coverage or blending. Struct layout is unchanged. */
     float tint_procedural[4];
     float tint_photo[4];
     /* 1 = authored cells keep the map's own density, card_coverage elsewhere;

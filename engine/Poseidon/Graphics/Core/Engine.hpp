@@ -1591,6 +1591,11 @@ class Engine : public IGraphicsEngine
         // so fronts travel at the measured wind speed, including when the bend
         // strength slider changes. Turn it off to use the manual scroll slider.
         bool windScrollAuto = true;
+        // Broad travelling fronts with weaker sheltered patches between them.
+        // Field size is along the wind; fronts are three times wider across it.
+        bool windGustWaves = true;
+        float windGustVariation = 1.0f; // 0 = even sway, 1 = full local contrast
+        float windGustSize = 45.0f;     // metres along the wind
         // Reference-style field variation. These affect deterministic GPU
         // hashes, so they do not make blades swim when the camera moves.
         float clumping = 0.35f;

@@ -19499,8 +19499,11 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
         params.tint_procedural[i] = std::clamp(settings.tintProcedural[i], 0.0f, 4.0f);
         params.tint_photo[i] = std::clamp(settings.tintPhoto[i], 0.0f, 4.0f);
     }
-    params.tint_procedural[3] = 1.0f;
-    params.tint_photo[3] = 1.0f;
+    // Only RGB tints shade albedo. The otherwise unused input alpha lanes carry
+    // gust controls without enlarging the C ABI or the grass uniform buffer.
+    // Zero is the untouched-caller default; negative explicitly selects old gusts.
+    params.tint_procedural[3] = settings.windGustWaves ? 1.0f + std::clamp(settings.windGustVariation, 0.0f, 1.0f) : -1.0f;
+    params.tint_photo[3] = std::clamp(settings.windGustSize, 10.0f, 200.0f);
     // Photo-card coverage (fraction of 1.11 m clutter cells that grow a card) and whether the
     // map's own authored density wins where the bake answered. Cards only; blades ignore it.
     params.card_coverage = std::clamp(settings.photoCoverage, 0.01f, 1.0f);

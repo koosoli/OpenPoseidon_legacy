@@ -368,7 +368,7 @@ struct GrassParams {
     // cards are on, and the mid ring's cards begin at the camera; .yzw spare.
     near_blades_only: f32,
     native_tint: [f32; 3],
-    // RFG-091: mirrors `native2` in grass.wgsl: .x = tint lerp, .yzw spare.
+    // RFG-091: `native2`: .x tint lerp; .y gust variation (-1 = old gusts), .z front metres; .w spare.
     native_tint_lerp: f32,
     _native2_pad: [f32; 3],
     // Renderer-derived from the uploaded atlas, never from the caller.
@@ -827,11 +827,11 @@ impl Grass {
             near_blades_only: 0.0,
             native_tint: [0.0; 3],
             native_tint_lerp: 0.0,
-            _native2_pad: [0.0; 3],
+            _native2_pad: [1.0, 45.0, 0.0],
             photo_layer_bounds: default_layer_bounds(),
             photo_layer_means: default_layer_means(),
             wind_advection: [0.0; 4],
-            wind_flutter: [0.0; 4],
+            wind_flutter: [0.0, 0.0, 1.0, 0.0],
             blade_layer_means: [0.0; 32],
         };
         queue.write_buffer(&grass_params, 0, bytemuck::bytes_of(&params));
@@ -2137,7 +2137,16 @@ impl Grass {
             near_blades_only: params.near_blades_only.max(0.0),
             native_tint: params.native_tint,
             native_tint_lerp: params.native_tint_lerp.clamp(0.0, 1.0),
-            _native2_pad: [0.0; 3],
+            _native2_pad: [
+                if params.tint_procedural[3].is_finite() && params.tint_procedural[3] < 0.0 { -1.0 }
+                else if params.tint_procedural[3].is_finite() && params.tint_procedural[3] >= 1.0 {
+                    (params.tint_procedural[3] - 1.0).clamp(0.0, 1.0)
+                } else { 1.0 },
+                if params.tint_photo[3].is_finite() && params.tint_photo[3] >= 10.0 {
+                    params.tint_photo[3].clamp(10.0, 200.0)
+                } else { 45.0 },
+                0.0,
+            ],
             // Always the renderer's own measurement of the loaded atlas.
             photo_layer_bounds: self.tuft_bounds,
             photo_layer_means: self.tuft_means,

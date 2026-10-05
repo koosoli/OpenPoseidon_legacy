@@ -174,8 +174,22 @@ fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> vec4<f32>
     let broad_scroll = grass.wind_advection.xy;
     let gust_scroll = grass.wind_advection.zw;
     let direction_noise = clump_noise(world_xz + broad_scroll, 0.006, 0x0d7e31a5u);
-    let gust_noise = clump_noise(world_xz + gust_scroll, 0.022, 0xa12f7c59u);
-    let gust = mix(0.18, 1.0, pow(smoothstep(0.40, 0.84, gust_noise), 2.0));
+    // Stretch the existing gust sample into coherent fronts perpendicular to
+    // the wind. Integrated phase keeps their location stable when weather or
+    // the camera changes. This replaces a sample; it does not add a noise field.
+    let gust_position = world_xz + gust_scroll;
+    let front_size = max(grass.native2.z, 10.0);
+    // Frozen heading lives in the existing flutter spare lanes. Changing the
+    // wind turns transport velocity, never absolute world-space coordinates.
+    let front_direction = grass.wind_flutter.zw;
+    let cross_direction = vec2<f32>(-front_direction.y, front_direction.x);
+    let front_position = vec2<f32>(dot(gust_position, front_direction),
+                                  dot(gust_position, cross_direction) / 3.0) / front_size;
+    let gust_coordinates = select(gust_position * 0.022, front_position, grass.native2.y >= 0.0);
+    let gust_noise = clump_noise(gust_coordinates, 1.0, 0xa12f7c59u);
+    let gust_pulse = pow(smoothstep(0.40, 0.84, gust_noise), 2.0);
+    let local_gust = mix(0.18, 1.0, gust_pulse);
+    let gust = select(local_gust, mix(0.55, local_gust, clamp(grass.native2.y, 0.0, 1.0)), grass.native2.y >= 0.0);
     let direction_angle = base_angle + (direction_noise - 0.5) * min(strength, 1.5) * 1.10;
     let flutter_scroll = grass.wind_flutter.xy;
     let flutter_noise = clump_noise(world_xz + flutter_scroll + base_direction * (height_t * height_t * 4.0) +

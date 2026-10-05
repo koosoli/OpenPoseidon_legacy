@@ -1397,7 +1397,11 @@ pub struct WgrGrassParams {
     /// Albedo tints, applied after the existing colour work and before lighting.
     /// `tint_procedural` covers procedural blades, ribbons and the far proxy;
     /// `tint_photo` covers the photographed cards. White = untinted.
+    /// RGB albedo tint. Unused input alpha carries gust waves: negative = old
+    /// gusts, 1 + variation 0..1, zero = new default (full local variation).
     pub tint_procedural: [f32; 4],
+    /// RGB albedo tint. Unused input alpha carries gust front size in metres,
+    /// 10..200; zero = new default 45m. Renderer alpha remains pinned to one.
     pub tint_photo: [f32; 4],
     /// 1 = authored cells use the map's own clutter density and `card_coverage`
     /// is the fallback elsewhere; 0 = `card_coverage` multiplies everywhere, on

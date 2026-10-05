@@ -4152,6 +4152,12 @@ void DrawGrassTab()
                       "Why it matters: the scroll speeds in the shader are constants unrelated to the\n"
                       "wind speed, so at 1.00 the gust field crosses the world at ~48 m/s against a\n"
                       "6 m/s wind -- which reads as shivering rather than leaning and releasing.");
+    changed |= Dev::Checkbox("Travelling gust waves", &grass.windGustWaves);
+    changed |= Dev::SliderFloat("Local gust variation", &grass.windGustVariation, 0.0f, 1.0f, "%.2f");
+    changed |= Dev::SliderFloat("Gust front size", &grass.windGustSize, 10.0f, 200.0f, "%.0f m");
+    Dev::PanelHelp("Waves travel with the wind, with stronger and weaker patches across a meadow. "
+                   "Size sets their length along the wind; fronts extend three times farther across it. "
+                   "Variation 0 gives even sway. Disable waves for the previous round gust patches.");
     changed |= Dev::SliderFloat("Field clumping", &grass.clumping, 0.0f, 1.0f, "%.2f");
     changed |= Dev::SliderFloat("Colour variation", &grass.colorVariation, 0.0f, 1.0f, "%.2f");
     changed |= Dev::SliderFloat("Backlight transmission", &grass.transmission, 0.0f, 1.0f, "%.2f");
