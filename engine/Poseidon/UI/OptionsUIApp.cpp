@@ -203,7 +203,7 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
                               ? "RscDisplayMainRemaster"
                               : "RscDisplayMain";
     Load(mainRsc);
-    if (QIFStreamB::FileExist("assets\\ui\\openposeidon_logo.png"))
+    if (QIFStreamB::FileExist("assets\\ui\\openposeidon_logo.paa"))
     {
         for (int i = 0; i < _controlsForeground.Size(); ++i)
         {
@@ -220,7 +220,7 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
         logo->Add("type", CT_STATIC);
         logo->Add("idc", 1988);
         logo->Add("style", ST_PICTURE);
-        logo->Add("text", RString("\\assets\\ui\\openposeidon_logo.png"));
+        logo->Add("text", RString("\\assets\\ui\\openposeidon_logo.paa"));
         logo->Add("x", 0.428f);
         logo->Add("y", 0.0f);
         logo->Add("w", 0.144f);
