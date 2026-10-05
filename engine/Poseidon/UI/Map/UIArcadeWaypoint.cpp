@@ -7,6 +7,7 @@
 #include <Poseidon/UI/Locale/Stringtable/Stringtable.hpp>
 #include <Poseidon/Game/Mission/MissionPathLoader.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/IO/ParamFileExt.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/House.hpp>
 #include <stdint.h>
@@ -497,8 +498,7 @@ Control* DisplayTemplateLoad::OnCreateCtrl(int type, int idc, const ParamEntry& 
             // RString name = (Pars>>"CfgWorlds">>"worlds")[i];
 
             // ADDED - check if wrp file exists
-            RString fullname = GetWorldName(name);
-            if (!QIFStreamB::FileExist(fullname))
+            if (!WorldInstalled(name))
             {
                 continue;
             }

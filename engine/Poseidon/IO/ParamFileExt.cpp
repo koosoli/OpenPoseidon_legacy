@@ -4,6 +4,10 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
+#include <Poseidon/UI/LocalMapWorlds.hpp>
+#include <Poseidon/Foundation/Platform/AppConfig.hpp>
+#include <algorithm>
+#include <string>
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 #include <string.h>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -217,6 +221,16 @@ LSError SoundPars::Serialize(ParamArchive& ar)
 
 RString GetWorldName(RString baseName)
 {
+    if (IsLocalMapWorldIdentifier(baseName.Data()))
+    {
+        // Preserve reserved identities even when their source metadata is missing.
+        // Falling back to initWorld would silently load a saved foreign mission on OFP terrain.
+        std::string alias = baseName.Data();
+        std::replace(alias.begin(), alias.end(), '/', '\\');
+        if (_strnicmp(alias.c_str(), "worlds\\", 7) == 0)
+            return RString(alias.c_str());
+        return RString(("worlds\\" + alias + ".wrp").c_str());
+    }
     const ParamEntry* entry = (Pars >> "CfgWorlds").FindEntry(baseName);
     if (!entry)
     {
@@ -241,6 +255,12 @@ RString SelectMenuInitWorld(RString initWorld, RString demoWorld, bool preferDem
 
 bool WorldInstalled(RString worldClass)
 {
+    if (IsLocalMapWorldIdentifier(worldClass.Data()))
+    {
+        const std::string& active = Foundation::AppConfig::Instance().GetLocalMapWorldId();
+        return !active.empty() && FindLocalMapWorld(active) == FindLocalMapWorld(worldClass.Data()) &&
+               IsLocalMapWorldAvailable(worldClass.Data());
+    }
     if (worldClass.GetLength() == 0)
         return false;
 
