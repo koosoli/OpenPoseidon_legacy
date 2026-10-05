@@ -74,7 +74,15 @@ try{
  $logs=@($log,$stderr);$childLog=Join-Path $env:POSEIDON_CACHE_DIR 'local-map-browser.log';if(Test-Path $childLog){$logs+=$childLog}
  if($Preview -eq 'Map' -and $receipt.selected -match '^Arma Reforger'){
   $built=Select-String -Path $childLog -Pattern 'Enfusion native load: built ([1-9][0-9]*) of ([0-9]+) meshes .* placed ([1-9][0-9]*) objects'|Select-Object -Last 1
-  Require ($null-ne$built) 'Reforger preview has no imported objects';$receipt.objectImport=$built.Line.Trim()
+  if($built){$receipt.objectImport=$built.Line.Trim()}else{
+   # Native streaming defers mesh/placement creation until the viewer is ready.
+   $streamed=Select-String -Path $childLog -Pattern 'Enfusion native load: STREAMING -- ([1-9][0-9]*) placements'|Select-Object -Last 1
+   $roads=Select-String -Path $childLog -Pattern 'Enfusion native load: ([0-9]+) roads built'|Select-Object -Last 1
+   $resident=Select-String -Path $childLog -Pattern 'Retained admission census: ([0-9]+) objects offered, ([0-9]+) admitted'|Select-Object -Last 1
+   Require ($streamed-and$roads-and$resident) 'Reforger streaming evidence missing'
+   Require ([int]$resident.Matches[0].Groups[2].Value -gt ([int]$roads.Matches[0].Groups[1].Value+2)) 'Reforger residency contains only roads'
+   $receipt.objectImport=$streamed.Line.Trim();$receipt.objectResidency=$resident.Line.Trim()
+  }
  }
  Require (!(Select-String -Path $logs -Pattern 'UNHANDLED EXCEPTION|Validation Error|DeviceLost|panicked at|wgr_create failed|Cannot load --test-world' -Quiet)) 'Runtime or map-loading error'
  Require ((Get-Content (Join-Path $game 'DEPLOYED-FROM.txt') -Raw).Trim()-ceq$stamp) 'Installed pair changed'
