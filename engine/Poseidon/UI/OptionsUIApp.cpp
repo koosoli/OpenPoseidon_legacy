@@ -1,4 +1,5 @@
 #include <Poseidon/UI/LocalMapsDisplay.hpp>
+#include <Poseidon/UI/LocalMapEditor.hpp>
 
 #include <Poseidon/Foundation/Platform/InitBridge.hpp> // IsMenuOverriddenByMod (custom-menu hijack)
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
@@ -1120,7 +1121,8 @@ void DisplayMain::OnChildDestroyed(int idd, int exit)
         break;
         case IDD_ARCADE_MAP:
             Display::OnChildDestroyed(idd, exit);
-            StartRandomCutscene(Glob.header.worldname);
+            if (!CloseLocalMapEditor())
+                StartRandomCutscene(Glob.header.worldname);
             break;
         case IDD_OPTIONS:
             Display::OnChildDestroyed(idd, exit);

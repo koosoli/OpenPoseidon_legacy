@@ -357,6 +357,8 @@ void RenderFrame(float deltaT, bool enableDraw)
     }
 }
 
+#include <Poseidon/UI/LocalMapEditor.hpp>
+
 bool AppIdle()
 {
     // Service a deferred re-mount request between frames (set by triRemount / dev panel),
@@ -371,6 +373,9 @@ bool AppIdle()
             GApp->ReloadGameContent();
         return true;
     }
+
+    if (Poseidon::ServiceLocalMapEditor())
+        return true;
 
     // Finish a deferred MP join: after a mod-apply re-mount lands back on the menu,
     // connect to the server stashed before the re-mount.

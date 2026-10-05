@@ -104,6 +104,8 @@ class Application
     bool m_remountRequested = false;
     bool m_remountHasModPath = false; // false → reload with the current mod set
     std::string m_remountModPath;     // explicit mod set when m_remountHasModPath ("" = base game)
+    bool m_remountHasMapArchives = false;
+    std::string m_remountMapArchives, m_remountLocalWorldId;
     bool m_remountFailed = false;     // a Remount rolled back; the menu shows a message + clears this
     std::vector<Poseidon::StagedModInstall> m_remountInstalls;
 
@@ -113,10 +115,19 @@ class Application
     void RequestRemount() // reload with the currently mounted mod set
     {
         m_remountHasModPath = false;
+        m_remountHasMapArchives = false;
         m_remountRequested = true;
+    }
+    void RequestRemountWithMapArchives(const std::string& roots, const std::string& worldId)
+    {
+        RequestRemount();
+        m_remountHasMapArchives = true;
+        m_remountMapArchives = roots;
+        m_remountLocalWorldId = worldId;
     }
     void RequestRemountWithMods(const char* modPath) // modPath = semicolon-separated set, "" = base game
     {
+        m_remountHasMapArchives = false;
         m_remountModPath = modPath ? modPath : "";
         m_remountHasModPath = true;
         m_remountRequested = true;

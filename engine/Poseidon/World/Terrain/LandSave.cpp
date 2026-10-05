@@ -1,3 +1,5 @@
+#include <Poseidon/UI/LocalMapWorlds.hpp>
+#include <Poseidon/UI/LocalMapsCatalog.hpp>
 #include <filesystem>
 #include <Poseidon/Core/Application.hpp>
 
@@ -314,6 +316,21 @@ int Landscape::LoadData(const char* name, float landGrid)
     Log("Load landscape %s", name);
     _name = name; // remmember name
     LSError ret = LSUnknownError;
+
+    if (Poseidon::IsLocalMapWorldIdentifier(name))
+    {
+        const auto* map = Poseidon::FindLocalMapWorld(name);
+        if (!map || !Poseidon::IsLocalMapWorldAvailable(name) ||
+            Poseidon::FindLocalMapWorld(AppConfig::Instance().GetLocalMapWorldId()) != map)
+        {
+            Poseidon::Foundation::ErrorMessage("Select this terrain in Local Content before opening its mission.");
+            return LSUnknownError;
+        }
+        const bool loaded = map->enfusion
+            ? LoadEnfusionNative(map->archiveRoot.c_str(), map->worldPath.c_str(), true)
+            : LoadOprwModern(map->worldPath.c_str());
+        return loaded ? LSOK : LSUnknownError;
+    }
 
     // --test-world substitutes a landscape the mission never asked for. Arma 3
     // worlds are only reachable this way: they are named by CfgWorlds entries

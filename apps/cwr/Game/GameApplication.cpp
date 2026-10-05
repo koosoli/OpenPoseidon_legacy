@@ -1,3 +1,4 @@
+#include <Poseidon/UI/LocalMapWorlds.hpp>
 #include <Poseidon/World/Terrain/TerrainPreviewStart.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
@@ -2836,6 +2837,7 @@ void GameApplication::ConfigureBankMerge()
 
 void GameApplication::OnGlobInitialized()
 {
+    Poseidon::RestoreLocalMapWorldClasses();
     Config::InitDifficulties();
 }
 
@@ -3110,6 +3112,9 @@ bool GameApplication::Remount(const char* newModPath)
     // Mod set to fall back to if the new one fails to load (RStringB is returned
     // by value, so this survives the SetModPath below).
     const auto prevModPath = Poseidon::ModSystem::GetModList();
+    auto& appConfig = Poseidon::Foundation::AppConfig::Instance();
+    const std::string prevMapRoots = appConfig.GetMapArchivePaths().Data();
+    const std::string prevMapId = appConfig.GetLocalMapWorldId();
 
     // Loading screen on the live window — ProgressSystem is Application-owned and
     // survives the teardown below.
@@ -3133,10 +3138,16 @@ bool GameApplication::Remount(const char* newModPath)
         GEngine->ResetForRemount();
     }
 
+    if (GApp->m_remountHasMapArchives)
+    {
+        appConfig.SetLocalMapMount(GApp->m_remountMapArchives, GApp->m_remountLocalWorldId);
+        GApp->m_remountHasMapArchives = false;
+    }
     std::string swapError;
     if (!GApp->m_remountInstalls.empty() && !Poseidon::SwapStagedModInstalls(GApp->m_remountInstalls, &swapError))
     {
         LOG_ERROR(Core, "Re-mount install swap failed: {}", swapError);
+        appConfig.SetLocalMapMount(prevMapRoots, prevMapId);
         Poseidon::ModSystem::SetModPath(prevModPath);
         if (LoadGameData())
         {
@@ -3167,6 +3178,7 @@ bool GameApplication::Remount(const char* newModPath)
             GEngine->ResetForRemount();
         }
         Poseidon::RestoreStagedModInstalls(GApp->m_remountInstalls);
+        appConfig.SetLocalMapMount(prevMapRoots, prevMapId);
         Poseidon::ModSystem::SetModPath(prevModPath);
         if (LoadGameData())
         {

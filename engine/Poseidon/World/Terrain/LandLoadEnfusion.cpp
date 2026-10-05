@@ -83,17 +83,8 @@ std::string LowerCopy(std::string s)
 
 /// Which world to load out of the archives. `POSEIDON_REFORGER_WORLD` overrides it;
 /// the default is Everon, whose internal name is Eden.
-const char* WantedWorld()
-{
-    static const std::string wanted = []
-    {
-        const auto& selected = Poseidon::Foundation::AppConfig::Instance().GetReforgerWorld();
-        if (!selected.empty()) return selected;
-        const char* v = std::getenv("POSEIDON_REFORGER_WORLD");
-        return std::string((v != nullptr && *v != 0) ? v : "worlds/eden");
-    }();
-    return wanted.c_str();
-}
+std::string selectedNativeWorld;
+const char* WantedWorld() { return selectedNativeWorld.c_str(); }
 
 // RFG-008: one palette entry's `.emat` resolved to an uploadable ground texture.
 //
@@ -1784,11 +1775,15 @@ std::shared_ptr<Poseidon::Model::Model> LoadXobModelForCache(const std::string& 
 }
 } // namespace
 
-bool Landscape::LoadEnfusionNative(const char* addonsDir)
+bool Landscape::LoadEnfusionNative(const char* addonsDir, const char* worldDirectory, bool localPreview)
 {
     // RFG-097: from here on a `.xob` name is loadable through the ShapeBank like any
     // other model name, which is what lets the object stream bring native placements
     // into range on its own.
+    const auto& cliWorld = Poseidon::Foundation::AppConfig::Instance().GetReforgerWorld();
+    const char* envWorld = std::getenv("POSEIDON_REFORGER_WORLD");
+    selectedNativeWorld = worldDirectory && *worldDirectory ? worldDirectory :
+        !cliWorld.empty() ? cliWorld : envWorld && *envWorld ? envWorld : "worlds/eden";
     ModelCache::SetExternalLoader(&LoadXobModelForCache);
     if (addonsDir == nullptr || *addonsDir == 0)
         return false;
@@ -1972,7 +1967,7 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
     // still being built -- resolving 1.23 M placements costs seconds and draws
     // nothing yet, so it would be a tax on every load for a log line.
     if (const char* wantObjects = std::getenv("POSEIDON_REFORGER_OBJECTS");
-        wantObjects != nullptr && wantObjects[0] == '1')
+        (wantObjects && *wantObjects) ? wantObjects[0] == '1' : localPreview)
     {
         const DWORD placeStart = Poseidon::Foundation::GlobalTickCount();
         std::vector<std::pair<std::string, size_t>> meshes;
@@ -2006,15 +2001,15 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
             // entirely vegetation and rock, so a village came out as an empty field
             // and the missing houses looked like a placement bug rather than a cap.
             // Both remain overridable for a cheap run.
-            const size_t modelCap = []
+            const size_t modelCap = [localPreview]
             {
                 const char* v = std::getenv("POSEIDON_REFORGER_MAX_MODELS");
-                return static_cast<size_t>((v != nullptr && *v != 0) ? std::atoi(v) : 100000);
+                return static_cast<size_t>((v != nullptr && *v != 0) ? std::atoi(v) : (localPreview ? 800 : 100000));
             }();
-            const size_t objectCap = []
+            const size_t objectCap = [localPreview]
             {
                 const char* v = std::getenv("POSEIDON_REFORGER_MAX_OBJECTS");
-                return static_cast<size_t>((v != nullptr && *v != 0) ? std::atoi(v) : 2000000);
+                return static_cast<size_t>((v != nullptr && *v != 0) ? std::atoi(v) : (localPreview ? 400000 : 2000000));
             }();
 
             // RFG-032: a RADIUS around the viewer decides what is built, not a global
@@ -2042,10 +2037,10 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                     focusZ = freefly[1];
                 }
             }
-            const float nearRadius = []
+            const float nearRadius = [localPreview]
             {
                 const char* v = std::getenv("POSEIDON_REFORGER_NEAR_RADIUS");
-                return (v != nullptr && *v != 0) ? static_cast<float>(std::atof(v)) : 800.0f;
+                return (v != nullptr && *v != 0) ? static_cast<float>(std::atof(v)) : (localPreview ? 300.0f : 800.0f);
             }();
 
             const auto isStructure = [](const std::string& path)

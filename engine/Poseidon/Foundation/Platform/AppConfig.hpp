@@ -164,6 +164,12 @@ class AppConfig
     /// PBO archive directories from --addon-root, mounted ahead of conventional mods.
     const RString& GetAddonArchivePaths() const { return _addonArchivePaths; }
     const RString& GetMapArchivePaths() const { return _mapArchivePaths; }
+    const std::string& GetLocalMapWorldId() const { return _localMapWorldId; }
+    void SetLocalMapMount(const std::string& roots, const std::string& worldId)
+    {
+        _mapArchivePaths = roots.c_str();
+        _localMapWorldId = worldId;
+    }
     uint32_t GetWaitForParent() const { return _waitForParent; }
     const std::string& GetReforgerWorld() const { return _reforgerWorld; }
 
@@ -491,6 +497,7 @@ class AppConfig
     std::vector<std::string> _defaultContentDiagnostics;
     RString _addonArchivePaths;
     RString _mapArchivePaths;
+    std::string _localMapWorldId;
     uint32_t _waitForParent = 0;
     std::string _reforgerWorld;
     RString _modsDir;     // resolved --mods-dir base ("" if unset)

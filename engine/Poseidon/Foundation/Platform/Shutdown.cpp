@@ -1,3 +1,5 @@
+#include <Poseidon/World/Model/ModelCache.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
@@ -138,6 +140,8 @@ void UnloadGameData(bool keepEngine)
     // Deleting GWorld already destroyed that Scene; GScene is not separately heap-allocated, so
     // it must only be cleared here — a delete is a double-free + use-after-free of the World
     // (Scene::~Scene re-runs the landscape teardown and SaveConfig() reads the freed World).
+    ModelCache::SetExternalLoader(nullptr);
+    Poseidon::Asset::Formats::Enfusion::EnfusionMount::Instance().Close();
     GScene = nullptr;
     // The next Scene needs its own preload slots after an in-process remount.
     ScenePreloader::Instance().Shutdown();

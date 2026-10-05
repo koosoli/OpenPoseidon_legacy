@@ -1074,7 +1074,7 @@ class Landscape : public SerializeClass
     /// the game's `addons` directory; `POSEIDON_REFORGER_WORLD` picks the world
     /// (default `worlds/eden`, which is Everon). Terrain only so far; see
     /// LandLoadEnfusion.cpp for what is deliberately absent.
-    bool LoadEnfusionNative(const char* addonsDir);
+    bool LoadEnfusionNative(const char* addonsDir, const char* worldDirectory = nullptr, bool localPreview = false);
     // No-op for legacy worlds. Called by the WGPU terrain path once the live
     // camera exists; reevaluates for center or budget changes, drains pending work.
     void UpdateModernObjectResidency(Vector3Par cameraPosition);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <Poseidon/UI/LocalMapsDisplay.hpp>
 #include <Poseidon/UI/LocalMapsCatalog.hpp>
+#include <Poseidon/UI/LocalMapEditor.hpp>
 #include <Poseidon/UI/LocalVehiclesCatalog.hpp>
 #include <Poseidon/UI/Controls/UIControls.hpp>
 #include <Poseidon/UI/Controls/UIControlsWidgets.hpp>
@@ -107,6 +108,12 @@ class LocalMapsDisplay : public Display
         if ((map && !map->supported) || (vehicle && !vehicle->ready))
         {
             Status("This selected content is not supported or its local bridge is incomplete.");
+            return;
+        }
+        if (map)
+        {
+            std::string error;
+            if (!RequestLocalMapEditor(*map, error)) Status(error);
             return;
         }
 #ifdef _WIN32
@@ -299,8 +306,8 @@ class LocalMapsDisplay : public Display
         Status(_vehicleMode ? "Local vehicle bridges use inherited OFP physics; original animations/features may "
                               "differ. Open restarts engine."
                             : std::to_string(_catalog.maps.size()) +
-                                  " maps found. Optional folder above. Open restarts engine. Current format support; "
-                                  "original missions/gameplay are not imported.");
+                                  " maps found. Open in the OFP mission editor in this window. Current format support; "
+                                  "place OFP units and use Preview to play.");
     }
     void OnButtonClicked(int idc) override
     {
