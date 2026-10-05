@@ -1,5 +1,11 @@
 # Local installed map browser, 2026-10-05
 
+Latest installed browser build: **6fb0177b, 22:38**. Reforger selections now provide child-only defaults for object import (`POSEIDON_REFORGER_OBJECTS=1`, 800 models, 300m nearby priority, 400000 objects). Nonempty caller overrides remain intact; empty inherited variables use the defaults. The parent environment is not changed. Existing native streaming remains enabled and retains its 20000 resident budget; the eager loader's caps do not replace that streaming budget.
+
+Everon starts at the owner's working village camera, `[5176,3985,20.5]`, azimuth90/elevation5. The former `[1000,1000]` priority centre had no placements within300m. The installed browser restart now resolves6351 nearby placements/430 mesh types at the village. Runtime screenshot confirms the church, neighbouring buildings, trees and roads. The early resident census admits2992 objects; more are streamed afterward. Normal child exit, same windowed mode, grounded player and no panic/device/validation/load errors passed. Receipt: docs/verification/local-browser-reforger-objects-20261005-runtime.json. Other Reforger worlds inherit the object-import defaults but have not received individual visual acceptance.
+
+The owner's existing prepared Sahrani/Takistan/Stratis/ChernarusPlus files have supported OPRW20/24/25/29 headers. Arma3 and DayZ browser selections already mount their discovered Steam archive roots through data-only bank access. Those routes are unchanged. The owner's Arma1/2 launch commands continue using their existing compatibility files and external asset roots; no new runtime claim is made for those commands here.
+
 Integrated and runtime-tested as d2a9add7, 2026-10-05 21:35, using the guarded deployment script. The subsequent 7f479731 correction reports the actual WGPU display mode, rather than the inherited dummy backend's constant Windowed value. The fullscreen vehicle restart retains borderless 3441x1440.
 
 Final clean deployment is 3503946b, 2026-10-05 21:58. Its native main-menu/browser smoke passed with normal exit and no GPU errors. Receipt: docs/verification/local-browser-menu-final-20261005-runtime.json. No game process is left running by the final smoke.
