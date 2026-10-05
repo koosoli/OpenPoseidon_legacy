@@ -5,6 +5,19 @@ execution:
   baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
   integration_owner: Oliver Kay
   activation_state: ACTIVE
+  tidewater_title_menu_checkpoint:
+    state: INSTALLED_MENU_AND_MISSION_ROUNDTRIP_PASSED
+    installed_source_commit: 59690124
+    evidence: docs/verification/tidewater-menu-20261005.md
+    runtime_receipt: docs/verification/tidewater-menu-20261005-runtime.json
+    note: >-
+      Standard retail menu follows an AI BoatW through a repeating offshore route
+      in Tidewater Storm swell at September15 16:40, clear of rain. Native captures
+      inspected; boat242.96m travel and no damage. Same-process ordinary editor
+      Preview and restored menu passed. Transient sea override preserves quality
+      budgets and clears on world cleanup; no water-look profile files created.
+      Bounded1280x720 high/MSAA4 observation58.43FPS under60FPS cap; no universal
+      performance claim. Custom mod intro and missing Desert Island fallback retained.
   local_map_editor_checkpoint:
     state: INSTALLED_STRATIS_AND_REFORGER_EVERON_EDITOR_ROUNDTRIPS_PASSED
     installed_source_commit: ed1c10a6

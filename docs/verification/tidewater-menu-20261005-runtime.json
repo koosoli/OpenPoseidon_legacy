@@ -1,0 +1,167 @@
+{
+  "installed": "codex/tidewater-menu-scene-20261005 59690124 2026-10-05_23:55 deploy-ps1",
+  "passed": true,
+  "binaryTimes": {
+    "exe": "2026-10-05T21:54:38.1529558Z",
+    "dll": "2026-10-05T21:54:03.4333874Z"
+  },
+  "originalPid": 71744,
+  "originalWindow": 17371242,
+  "originalMode": "windowed",
+  "boatBefore": {
+    "name": "opMenuBoat",
+    "cls": "BoatW",
+    "shape": "data3d\\pbr.p3d",
+    "pos": [
+      2479.55,
+      3479.62,
+      2.21
+    ],
+    "dir": 224.1,
+    "damage": 0.0,
+    "destroyed": false,
+    "speed": 17.22,
+    "watched": false,
+    "side": 1,
+    "zones": {
+      "": 0.0
+    },
+    "weapons": [
+      "Browning"
+    ],
+    "selected": {
+      "weapon": "Browning",
+      "muzzle": "Browning",
+      "magazine": true,
+      "ammo": 500,
+      "loaded": true
+    },
+    "magazines": 1,
+    "brain": {
+      "group": "Alpha Black",
+      "groupLeader": true,
+      "state": 2,
+      "life": 0,
+      "combatMode": 2,
+      "semaphore": 0,
+      "planning": 1,
+      "mode": 0,
+      "path": 14
+    },
+    "ok": true
+  },
+  "boatAfter": {
+    "name": "opMenuBoat",
+    "cls": "BoatW",
+    "shape": "data3d\\pbr.p3d",
+    "pos": [
+      2315.44,
+      3300.46,
+      3.22
+    ],
+    "dir": 218.9,
+    "damage": 0.0,
+    "destroyed": false,
+    "speed": 25.61,
+    "watched": false,
+    "side": 1,
+    "zones": {
+      "": 0.0
+    },
+    "weapons": [
+      "Browning"
+    ],
+    "selected": {
+      "weapon": "Browning",
+      "muzzle": "Browning",
+      "magazine": true,
+      "ammo": 500,
+      "loaded": true
+    },
+    "magazines": 1,
+    "brain": {
+      "group": "Alpha Black",
+      "groupLeader": true,
+      "state": 2,
+      "life": 0,
+      "combatMode": 2,
+      "semaphore": 0,
+      "planning": 1,
+      "mode": 0,
+      "path": 10
+    },
+    "ok": true
+  },
+  "boatTravelMetres": 242.96172064751266,
+  "renderedFps": 58.42981386655013,
+  "savedWaterProfiles": 0,
+  "menuWaterBefore": {
+    "scale": 0.649999976158142,
+    "amplitude": 1,
+    "warp": 5,
+    "shoreGain": 0.10000000149011612,
+    "preset": 1,
+    "fftResolution": 512,
+    "geometryQuality": 1,
+    "fixedTime": 0,
+    "freezeTime": false,
+    "freezeFoam": false,
+    "ok": true
+  },
+  "missionWater": {
+    "scale": 0.649999976158142,
+    "amplitude": 1,
+    "warp": 5,
+    "shoreGain": 0.10000000149011612,
+    "preset": 1,
+    "fftResolution": 512,
+    "geometryQuality": 1,
+    "fixedTime": 0,
+    "freezeTime": false,
+    "freezeFoam": false,
+    "ok": true
+  },
+  "bathymetryCentre": [
+    2500,
+    3500,
+    -100.03499603271484
+  ],
+  "phases": [
+    {
+      "pid": 71744,
+      "stage": "startup",
+      "window": 17371242,
+      "display": "0",
+      "mode": "windowed"
+    },
+    {
+      "pid": 71744,
+      "stage": "00_menu",
+      "window": 17371242,
+      "display": "0",
+      "mode": "windowed"
+    },
+    {
+      "pid": 71744,
+      "stage": "01_menu_swell",
+      "window": 17371242,
+      "display": "0",
+      "mode": "windowed"
+    },
+    {
+      "pid": 71744,
+      "stage": "02_mission",
+      "window": 17371242,
+      "display": "46",
+      "mode": "windowed"
+    },
+    {
+      "pid": 71744,
+      "stage": "03_restored_menu",
+      "window": 17371242,
+      "display": "0",
+      "mode": "windowed"
+    }
+  ],
+  "captureDirectory": "build/menu-sea/20261005-235528-240"
+}
