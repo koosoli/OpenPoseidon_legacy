@@ -202,18 +202,35 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
                               ? "RscDisplayMainRemaster"
                               : "RscDisplayMain";
     Load(mainRsc);
-    if (!IsMenuOverriddenByMod() && QIFStreamB::FileExist("assets\\ui\\openposeidon_logo.png"))
+    if (QIFStreamB::FileExist("assets\\ui\\openposeidon_logo.png"))
     {
         for (int i = 0; i < _controlsForeground.Size(); ++i)
         {
             CStatic* picture = dynamic_cast<CStatic*>(_controlsForeground[i].GetRef());
             if (picture && strstr(picture->GetText(), "cwr_logo.paa"))
             {
-                picture->SetText("assets\\ui\\openposeidon_logo.png");
-                // Preserve the portrait logo's aspect on the menu's canonical 4:3 canvas.
-                picture->SetPos(0.428f, 0.0f, 0.144f, 0.20f);
+                picture->ShowCtrl(false);
             }
         }
+        // Also supply branding when the retail resource has no logo control.
+        static ParamFile logoConfig;
+        logoConfig.Clear();
+        ParamClass* logo = logoConfig.AddClass("OpenPoseidonLogo");
+        logo->Add("type", CT_STATIC);
+        logo->Add("idc", 1988);
+        logo->Add("style", ST_PICTURE);
+        logo->Add("text", RString("\\assets\\ui\\openposeidon_logo.png"));
+        logo->Add("x", 0.428f);
+        logo->Add("y", 0.0f);
+        logo->Add("w", 0.144f);
+        logo->Add("h", 0.20f);
+        ParamEntry* background = logo->AddArray("colorBackground");
+        for (int channel = 0; channel < 4; ++channel)
+            background->AddValue(0.0f);
+        ParamEntry* foreground = logo->AddArray("colorText");
+        for (int channel = 0; channel < 4; ++channel)
+            foreground->AddValue(1.0f);
+        LoadControl(*logo);
     }
     //	LoadHeader();
 
