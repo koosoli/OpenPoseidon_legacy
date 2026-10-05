@@ -1,7 +1,7 @@
 <# Installed original Kolgujev, actual freefly camera movement, isolated profile. #>
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$ExpectedCommit,[string]$Label='fog-flight',[string]$Patch='',[switch]$Compact,[switch]$Wide,
- [switch]$EveronReport,[switch]$Valley,[switch]$Temporal)
+ [switch]$EveronReport,[switch]$Valley,[switch]$Temporal,[switch]$TwoLayers,[switch]$Grass)
 $ErrorActionPreference='Stop'
 if(!$env:LOCK_OWNER){throw 'Game lock required'}
 $root=Split-Path $PSScriptRoot -Parent
@@ -22,6 +22,8 @@ try{
  [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
  $env:WGR_LAYERED_FOG='1';$env:WGR_LAYERED_FOG_TRACE='1';$env:WGR_WEATHER_COVER_TRACE='1';$env:WGR_GRASS='0';$env:WGR_TEMPORAL='0';$env:WGR_WET_SOIL_DIAGNOSTIC='1'
  if($Temporal){$env:WGR_TEMPORAL='1'}
+ if($Grass){$env:WGR_GRASS='1'}
+ if($TwoLayers){$env:WGR_FOG_LAYER1='70,100,5,0.003'}
  if($Patch){$env:WGR_FOG_PATCH=$Patch}
  if($Compact){$env:WGR_FOG_LAYER0='1,5,0.35,0.018';$env:WGR_FOG_LAYER1='35,50,3,0'}
  if($Wide){$env:WGR_FOG_LAYER0='0,750,5,0.01';$env:WGR_FOG_LAYER1='800,900,5,0';$env:WGR_FOG_TERRAIN='0,0,0,150';$env:WGR_AUTO_EXPOSURE='0';$env:WGR_EXPOSURE='.6';$env:WGR_TONEMAP='1'}
@@ -36,6 +38,7 @@ try{
  while(([string](Send @{cmd='eval';code='triSceneReady'}).result).Trim('"')-cne'OK'){Require ([DateTime]::UtcNow-lt$deadline) 'Scene-ready deadline';Start-Sleep -Milliseconds 300}
  Exec 'player allowDamage false;0 setRain 0;0 setOvercast .15;0 setFog .6;setDate [1985,6,21,12,0];setAccTime 1'
  if($EveronReport){Exec '0 setFog .78'}
+ if($Valley){Exec '0 setFog .15'}
  if($Wide){Exec '0 setFog .15'}
  Start-Sleep -Seconds 3;Exec 'setAccTime 0'
  $sites=@(@{name='coast';x=5448.73;z=7011.85;y=590.95;az=111.1;el=-24.1},@{name='ocean';x=7400;z=8500;y=900;az=120;el=-22})

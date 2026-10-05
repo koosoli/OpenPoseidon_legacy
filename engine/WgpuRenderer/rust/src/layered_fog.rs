@@ -121,7 +121,8 @@ impl LayeredFog {
         let sampler=device.create_sampler(&wgpu::SamplerDescriptor {label:Some("wgr_layer_fog_linear"),
             mag_filter:wgpu::FilterMode::Linear,min_filter:wgpu::FilterMode::Linear,..Default::default()});
         let comparison=device.create_sampler(&wgpu::SamplerDescriptor {label:Some("wgr_layer_fog_depth"),
-            compare:Some(wgpu::CompareFunction::LessEqual),..Default::default()});
+            compare:Some(wgpu::CompareFunction::LessEqual),
+            mag_filter:wgpu::FilterMode::Linear,min_filter:wgpu::FilterMode::Linear,..Default::default()});
         let uniform=|binding|wgpu::BindGroupLayoutEntry {binding,visibility:wgpu::ShaderStages::COMPUTE,
             ty:wgpu::BindingType::Buffer {ty:wgpu::BufferBindingType::Uniform,has_dynamic_offset:false,min_binding_size:None},count:None};
         let image=|binding,dimension,kind|wgpu::BindGroupLayoutEntry {binding,visibility:wgpu::ShaderStages::COMPUTE,

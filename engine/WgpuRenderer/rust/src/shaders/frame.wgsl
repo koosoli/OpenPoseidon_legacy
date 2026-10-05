@@ -1339,8 +1339,9 @@ fn gi_irradiance(world_abs: vec3<f32>, n: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(sum / wsum, w);
 }
 
-// Incoming main-light fog attenuation, never camera-path alpha. Solid/interior
-// endpoints and unready/out-of-domain/mismatched cameras remain exactly neutral.
+// Incoming main-light fog attenuation, never camera-path alpha. Rain shelter
+// cannot erase intervening air. Unknown domains/mismatched cameras stay neutral;
+// actual surface CSM owns solid occlusion.
 fn fog_sun_reach(world_pos_rel: vec3<f32>) -> f32 {
     if (!fog_camera_matches(layer_fog_packet,frame.view,frame.proj,frame.cam_pos.xyz)) { return 1.0; }
     let absolute=world_pos_rel+frame.cam_pos.xyz;
