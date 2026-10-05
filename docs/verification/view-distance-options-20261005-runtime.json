@@ -1,0 +1,8 @@
+{
+  "afterLeft": "800 m",
+  "afterNext": "900 m",
+  "afterRight": "800 m",
+  "savedConfig": "textLanguage=\"English\";\r\nvoiceLanguage=\"English\";\r\nactiveProfile=\"mail\";\r\nblood=1;\r\npreferredViewDistance=800.000000;\r\nrespectMissionViewDistance=0;\r\n",
+  "passed": true,
+  "installed": "codex/kolgujev-fog-corpse-fixes-20261004 c3ee325c 2026-10-05_18:58 deploy-ps1"
+}

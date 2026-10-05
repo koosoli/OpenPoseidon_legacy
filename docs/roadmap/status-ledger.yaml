@@ -5,6 +5,17 @@ execution:
   baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
   integration_owner: Oliver Kay
   activation_state: ACTIVE
+  normal_options_view_distance_checkpoint:
+    state: INSTALLED_NATIVE_MENU_INPUT_AND_PERSISTENCE_PASSED
+    installed_source_commit: c3ee325c
+    evidence: docs/verification/view-distance-options-20261005.md
+    note: >-
+      Normal Options Game visibility slider now uses100m positions across100..50000m
+      and single-position arrows. Existing percentage rows retain100/5 defaults.
+      Installed248df7ad baseline700m jumped to3100m on Right. Installedc3ee325c
+      actual SDL input selects700 to800 to900 to800, saves800m and reopens at800m.
+      Isolated profile, normal shutdown, no validation/device/panic errors.
+      Six GamePage tests1028 assertions passed, including all supported100m values.
   everon_roads_through_clouds_checkpoint:
     state: INSTALLED_CLOUD_OCCLUSION_AND_CLEAR_ROAD_CONTROL_PASSED
     evidence: docs/verification/everon-roads-through-clouds-20261005.md

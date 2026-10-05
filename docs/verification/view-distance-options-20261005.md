@@ -4,7 +4,7 @@ Normal Options -> Game distributed100..50000m over100 slider positions, and
 shared notebook input advanced5 positions per arrow/click and quantized drag
 into20 positions. Thus700m jumps to3100m;800m is unavailable through these steps.
 Actual installed248df7ad reproduction, isolated700m profile and SDL Down/Right
-input: build/view-distance-options/20261005-185418/result.json (expected failure;
+input: build/view-distance-options/20261005-185433/result.json (expected failure;
 recorded afterRight3100m, normal cleanup).
 
 Game view-distance positions now represent100m each (0..499), arrows step one
@@ -17,3 +17,14 @@ actual WithCloseRow provider delegation, range clamps,800m text and unchanged
 percentage defaults. Full game build and installed native-menu persistence
 smoke test pending. scripts/Test-ViewDistanceOptions.ps1 uses actual SDL key
 input to select800m,900m,800m, close/save and reopen the page; isolated user dir.
+
+Installedc3ee325c at18:58 after complete PoseidonGame build and guarded matched
+binary deployment. Native-menu SDL input selects700→800→900→800m. Leaving the
+page saves preferredViewDistance=800.000000; reopening displays800m. The first
+persistence assertion incorrectly required integer serialization; the harness
+now accepts the existing float serialization. No settings implementation fix
+was needed. Final run: build/view-distance-options/20261005-190002, passed=true,
+normal exit, no validation/panic/device-loss exceptions. Actual menu screenshot:
+options-800m.png in that directory. Runtime receipt:
+view-distance-options-20261005-runtime.json. This build retains the installed
+cloud-road fix; previous distant fog-ring artistic defect remains open.

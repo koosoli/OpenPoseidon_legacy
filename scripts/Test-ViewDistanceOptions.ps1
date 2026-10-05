@@ -35,7 +35,7 @@ try{
  Exec 'triSendKey 79';$receipt.afterNext=Text 522;Require ($receipt.afterNext-eq'900 m') 'Next arrow did not select900m'
  Exec 'triSendKey 80';$receipt.afterLeft=Text 522;Require ($receipt.afterLeft-eq'800 m') 'Left arrow did not return800m'
  Exec 'triSendKey 41';$receipt.savedConfig=Get-Content (Join-Path $env:POSEIDON_USER_DIR 'game.cfg') -Raw
- Require ($receipt.savedConfig-match'preferredViewDistance\s*=\s*800\s*;') '800m not persisted'
+ Require ($receipt.savedConfig-match'preferredViewDistance\s*=\s*800(?:\.0+)?\s*;') '800m not persisted'
  Exec 'triClickText "Game"';Require ((Text 522)-eq'800 m') 'Reopened Options lost800m'
  $null=Send @{cmd='exit'};Require ($p.WaitForExit(20000)-and$p.ExitCode-eq0) 'Normal exit failed'
  Require (!(Select-String -Path @($log,$stderr) -Pattern 'UNHANDLED EXCEPTION|Validation Error|DeviceLost|panicked at|wgr_create failed' -Quiet)) 'Runtime error'
