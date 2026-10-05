@@ -3667,10 +3667,11 @@ void DrawGrassTab()
                    "count. Photo cards: a plain multiplier on top of the card coverage below (cards place on "
                    "their own 1.11 m clutter grid now, not the 0.16 m blade grid, so this is no longer the "
                    "overdraw lever it was).");
-    changed |= Dev::SliderFloat("Coverage: mid", &grass.midDensity, 0.02f, 4.0f, "%.2f");
+    changed |= Dev::SliderFloat("Coverage: mid", &grass.midDensity, 0.02f, 50.0f, "%.2f");
     changed |= Dev::SliderFloat("Coverage: far", &grass.farDensity, 0.02f, 1.0f, "%.2f");
-    Dev::PanelHelp("Mid coverage above 1.00 adds candidates on a finer grid, up to 4x. Below 1.00 thins "
-                   "the mid ring. Far coverage controls the terrain proxy's retained cells.");
+    Dev::PanelHelp("Default mid coverage 4.00; up to 50.00. Above 1.00 adds candidates on a finer grid. "
+                   "At the fixed grid budget, extra coverage broadens clumps instead of shortening the ring "
+                   "or growing GPU buffers. Very dense cover increases overdraw. Far coverage retains proxy cells.");
     changed |= Dev::SliderFloat("Density boost", &grass.densityBoost, 1.0f, 64.0f, "%.1fx");
     Dev::PanelHelp("Divides the base spacing by its square root, so this is the coverage multiplier: 4x is the "
                    "old ceiling, 64x is eight times finer placement again. Cost scales with it -- watch the "
@@ -3991,34 +3992,16 @@ void DrawGrassTab()
                                "Cards are %.1fx SPARSER than the procedural near ring. Set density to %.0fx to match.",
                                need, std::max(grass.photoCardDensity, 1.0f) * need);
         }
-        // REACH, not just density. The mid ring's candidate grid is capped at
-        // MID_GRID_MAX (2440) cells, so on the card grid its square reaches only
-        // dim/2 x spacing: at 50x that is 191 m against a 210 m radius, at 300x
-        // it is 78 m. Past that point raising the density makes the FIELD SMALLER
-        // -- which is exactly the "maxed it out and it still is not a meadow"
-        // report, and it is invisible unless the panel says the number. The
-        // renderer now clamps the ring to this reach (mid_ring_end in grass.wgsl)
-        // so it ends in its own dissolve rather than a camera-locked square.
+        // Mirror bounded_mid_spacing: the grid stays finite and the requested
+        // reach is retained. Residual coverage broadens the rendered mid clump.
         {
             const float midWanted = std::clamp(grass.midRadius, 8.0f, 1000.0f);
-            const float midGrid = g / std::sqrt(std::clamp(grass.density, 1.0f, 2.0f) *
-                                               std::clamp(grass.midDensity, 1.0f, 4.0f));
-            const int cells = std::min(static_cast<int>(std::ceil(2.0f * midWanted / midGrid) + 7) / 8 * 8, 2440);
-            const float reach = std::max(cells * 0.5f - 1.0f, 1.0f) * midGrid;
-            if (reach < midWanted - 0.5f)
-            {
-                ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.35f, 1.0f),
-                                   "Mid ring reaches only %.0f m at this density, not the %.0f m asked for: the "
-                                   "2440-cell candidate grid on a %.3f m grid. Denser from here makes the field "
-                                   "SHORTER, not thicker -- lower the density or accept the shorter field.",
-                                   reach, midWanted, g);
-            }
-            else
-            {
-                Dev::PanelHelp("Mid ring reach %.0f m (2440-cell grid ceiling) vs %.0f m asked for -- the "
-                               "density has room before the ring starts shrinking.",
-                               reach, midWanted);
-            }
+            const float requestedGrid = g / std::sqrt(std::clamp(grass.density, 1.0f, 2.0f) *
+                                                     std::clamp(grass.midDensity, 1.0f, 50.0f));
+            const float actualGrid = std::max(requestedGrid, midWanted / 1218.0f);
+            Dev::PanelHelp("Mid placement %.3f m; clump breadth %.2fx at the fixed candidate budget. "
+                           "Requested reach %.0f m is preserved.", actualGrid, actualGrid / requestedGrid,
+                           midWanted);
         }
         Dev::PanelHelp("Cost: above ~8x the old flicker returns (every plate edge shimmers in wind); at "
                        "0.16 m there are ~90 plates over every point of ground, which is what 'far too dense' "

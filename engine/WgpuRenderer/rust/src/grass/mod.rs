@@ -131,7 +131,14 @@ fn mid_placement_spacing(cards: bool, card_spacing: f32) -> f32 {
 // Keep these divisors identical to the two WGSL spacing helpers. Fixed grid and
 // instance caps continue to bound the workload at the densest settings.
 fn coverage_grid_scale(master: f32, ring: f32) -> f32 {
-    (master.clamp(1.0, 2.0) * ring.clamp(1.0, 4.0)).sqrt()
+    (master.clamp(1.0, 2.0) * ring.clamp(1.0, 50.0)).sqrt()
+}
+
+// Preserve the requested disc at the candidate-grid budget. The shader widens
+// clumps for the residual coverage, rather than shrinking the grass radius.
+fn bounded_mid_spacing(base: f32, master: f32, ring: f32, radius: f32) -> f32 {
+    (base / coverage_grid_scale(master, ring))
+        .max(radius / (MID_GRID_MAX as f32 * 0.5 - 2.0))
 }
 
 /// Live override of the photo-card placement grid.
@@ -759,7 +766,7 @@ impl Grass {
             saturation: 0.72,
             dry_patches: 0.08,
             dry_patch_scale: 0.003,
-            mid_radius: 100.0,
+            mid_radius: 500.0,
             // Shape variety defaults ON: four grass species sharing one
             // silhouette is the defect, not a look worth preserving by default.
             // 0 still reproduces it exactly for A/B.
@@ -794,7 +801,7 @@ impl Grass {
             imprint_depth: 0.55,
             photo_layer_weights: [1.0; 8],
             near_density: 1.0,
-            mid_density: 0.95,
+            mid_density: 4.0,
             far_density: 1.0,
             card_spacing,
             tint_procedural: [1.0, 1.0, 1.0, 1.0],
@@ -1670,8 +1677,8 @@ impl Grass {
                 self.card_spacing,
             )
         } / coverage_grid_scale(self.last_params.density, 1.0);
-        let mid_spacing = mid_placement_spacing(key.cards_mid, self.card_spacing)
-            / coverage_grid_scale(self.last_params.density, self.last_params.mid_density);
+        let mid_spacing = bounded_mid_spacing(mid_placement_spacing(key.cards_mid, self.card_spacing),
+            self.last_params.density, self.last_params.mid_density, self.last_params.mid_radius);
         // How far the mid grid's square actually reaches. On the CARD grid this is
         // the ceiling the requested mid radius is clamped to (mid_ring_end in
         // grass.wgsl): past ~45x card density it is SHORTER than the radius the
@@ -1980,19 +1987,9 @@ impl Grass {
         // both now read the same capped `near_radius`, since the shader takes it
         // from these params rather than recomputing it.
         //
-        // The mid grid's cap DOES bite, and only on the card grid. The old note
-        // here read "needs no equivalent cap" because MID_GRID_MAX *
-        // MID_PLACEMENT_SPACING / 2 is 1000.4 m against a MID_RING_MAX of 1000 --
-        // true for the 0.82 m ribbon grid, and false for the card grid, which the
-        // density control drives down to 0.06 m. At 50x card density the reach is
-        // 191 m against a requested 210, at 300x it is 78: the field ended in a
-        // camera-locked SQUARE and got SHORTER the denser it was asked to be.
-        //
-        // mid_ring_end() in grass.wgsl now clamps the radius to that reach, the
-        // same way near_reach does above. This side deliberately sizes the grid
-        // from the UNCAPPED request -- the request is what asks for the cells, and
-        // the clamp above already limits them -- so the two still agree: at the
-        // cap the grid is MID_GRID_MAX and the shader accepts within its reach.
+        // Keep the complete requested mid disc inside the fixed grid budget.
+        // Extra coverage beyond it broadens the rendered clumps, avoiding both
+        // a smaller grass field and an unbounded candidate/instance allocation.
         let mid_radius = params.mid_radius.clamp(8.0, MID_RING_MAX);
         let mid_natural = (near_radius + 10.0).max((near_radius * 2.5).min(MID_RING_MAX));
         let mid_end = if mid_radius > near_radius {
@@ -2003,9 +2000,9 @@ impl Grass {
         .clamp(near_radius + 10.0, MID_RING_MAX);
         // mid_placement_spacing in grass.wgsl: the fixed ribbon spacing, or the
         // card grid when the mid ring draws cards.
-        let mid_spacing = mid_placement_spacing(cards_mid, self.card_spacing)
-            / coverage_grid_scale(params.density, params.mid_density);
-        let want_mid = (2.0 * mid_end / mid_spacing).ceil().max(0.0) as u32;
+        let mid_spacing = bounded_mid_spacing(mid_placement_spacing(cards_mid, self.card_spacing),
+            params.density, params.mid_density, mid_end);
+        let want_mid = (2.0 * (mid_end / mid_spacing + 2.0)).ceil().max(0.0) as u32;
         let mid_grid_dim = want_mid
             .div_ceil(8)
             .saturating_mul(8)
@@ -2090,7 +2087,7 @@ impl Grass {
             imprint_depth: params.imprint_depth.clamp(0.0, 0.95),
             photo_layer_weights: params.photo_layer_weights.map(|w| w.clamp(0.0, 1.0)),
             near_density: params.near_density.clamp(0.0, 1.0),
-            mid_density: params.mid_density.clamp(0.0, 4.0),
+            mid_density: params.mid_density.clamp(0.0, 50.0),
             far_density: params.far_density.clamp(0.0, 1.0),
             card_spacing: self.card_spacing,
             tint_procedural: clamp_tint(params.tint_procedural),
@@ -3218,6 +3215,11 @@ mod tests {
         grass.set_params(&queue, p);
         assert!(grass.mid_grid_dim > mid_two);
         assert!((grass.mid_grid_dim as f32 / mid_one as f32 - 2.0).abs() < 0.03);
+        let mid_four = grass.mid_grid_dim;
+        p.mid_density = 50.0;
+        grass.set_params(&queue, p);
+        assert_eq!(grass.last_params.mid_density, 50.0);
+        assert!(grass.mid_grid_dim > mid_four);
         p.density = 2.0;
         grass.set_params(&queue, p);
         assert!(grass.near_grid_dim > near_one);
@@ -3229,6 +3231,27 @@ mod tests {
         assert!(grass.near_grid_dim <= NEAR_GRID_MAX);
         assert!(grass.mid_grid_dim <= MID_GRID_MAX);
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
+
+    #[test]
+    fn dense_mid_cover_preserves_reach_with_a_fixed_grid_and_instance_budget() {
+        for radius in [100.0_f32, 500.0, 1000.0] {
+            for base in [0.06_f32, MID_PLACEMENT_SPACING, CARD_SPACING_DEFAULT] {
+                for ring in [4.0_f32, 10.0, 50.0] {
+                    let spacing = bounded_mid_spacing(base, 0.5, ring, radius);
+                    let dim = ((2.0 * (radius / spacing + 2.0)).ceil() as u32)
+                        .div_ceil(8).saturating_mul(8).clamp(MID_GRID_MIN, MID_GRID_MAX);
+                    let reach = (dim as f32 * 0.5 - 1.0) * spacing;
+                    assert!(reach >= radius - 0.001, "{radius} m, {ring}x: {reach}");
+                    assert!(dim <= MID_GRID_MAX);
+                    assert!(spacing >= base / coverage_grid_scale(0.5, ring));
+                }
+            }
+        }
+        // At the default reach, 50 really differs from 4 without 50x buffers.
+        let spacing = bounded_mid_spacing(MID_PLACEMENT_SPACING, 0.5, 50.0, 500.0);
+        assert!(spacing / (MID_PLACEMENT_SPACING / 50.0_f32.sqrt()) > 3.0);
+        assert_eq!(MAX_MID_INSTANCES, 1_048_576);
     }
 
     // Blade and photographed-tuft textures are independent resources. A later
@@ -3300,7 +3323,7 @@ mod tests {
             assert_eq!(grass.near_grid_dim, want.max(NEAR_GRID_MIN));
             assert!(grass.near_grid_dim < blade_grid / 4);
             // Mid grid follows the same spacing in card mode.
-            let want_mid = ((2.0 * 210.0 / card).ceil() as u32).div_ceil(8) * 8;
+            let want_mid = ((2.0 * (210.0 / card + 2.0)).ceil() as u32).div_ceil(8) * 8;
             assert_eq!(grass.mid_grid_dim, want_mid.max(MID_GRID_MIN));
             // Turning cards off restores the blade grid exactly.
             grass.set_params(&queue, params(0.05, 41.0, 0.0));

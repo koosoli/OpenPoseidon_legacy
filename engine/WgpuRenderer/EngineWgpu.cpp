@@ -19467,7 +19467,7 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     // and mid rings, so nearDensity is a plain multiplier again. The former "0.15 when cards
     // auto-enable" override would now put the near ring at 0.15 against the mid ring's 0.95.
     params.near_density = std::clamp(settings.nearDensity, 0.0f, 1.0f);
-    params.mid_density = std::clamp(settings.midDensity, 0.0f, 4.0f);
+    params.mid_density = std::clamp(settings.midDensity, 0.0f, 50.0f);
     params.far_density = std::clamp(settings.farDensity, 0.0f, 1.0f);
     for (int i = 0; i < 3; ++i)
     {

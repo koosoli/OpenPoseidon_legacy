@@ -1308,15 +1308,10 @@ class Engine : public IGraphicsEngine
         // backend, which sizes the mid placement grid from this so its spacing --
         // and therefore mid density -- stays fixed all the way out.
         //
-        // NOTE the interaction with photo-card density. The mid candidate grid is
-        // capped at MID_GRID_MAX (2440) cells, so its reach is dim/2 x spacing:
-        // on the card grid a 350 m ring needs a spacing of 0.29 m or wider, which
-        // is card density ~15x. Past that the ring is clamped to what the grid
-        // covers (mid_ring_end in grass.wgsl) and the field is SHORTER than this
-        // number -- the Grass tab turns the reach line orange when it happens.
-        // Raising the cap is a real compute cost (cells are dim^2), not a
-        // one-line change; nobody has measured it.
-        float midRadius = 350.0f;
+        // The mid candidate grid remains capped at 2440 cells per side. Above
+        // that budget, placement spacing preserves this reach and additional
+        // requested coverage broadens the clumps instead of shrinking the ring.
+        float midRadius = 500.0f;
         // Outer terrain-cover ring. 0 = off (the historical behaviour: grass
         // simply ends at the mid ring). When on it MUST stay above the mid
         // ring's reach or the far LOD's accept band is empty, so the mapping
@@ -1517,8 +1512,9 @@ class Engine : public IGraphicsEngine
         // and they are placed every 0.16 m, so near coverage is the single most
         // effective performance control on that path.
         float nearDensity = 1.0f;
-        // Up to 4x: below one thins candidates, above one refines their grid.
-        float midDensity = 0.95f;
+        // Up to 50x: below one thins candidates, above one refines their grid;
+        // excess coverage at the fixed candidate budget broadens mid clumps.
+        float midDensity = 4.0f;
         float farDensity = 1.0f;
         // Albedo tints, applied after the existing colour work and before
         // lighting, so the sun still does what it did. White = untinted.

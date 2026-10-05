@@ -278,8 +278,22 @@ fn near_placement_spacing() -> f32 {
 fn mid_placement_spacing() -> f32 {
     // Above-one coverage is extra plants per square metre; thinning alone
     // cannot represent it. CPU dispatch sizing uses this same refined spacing.
+    let requested = mid_requested_spacing();
+    // Two cells of margin keep the entire requested ring inside the bounded
+    // dispatch even when its centres are jittered. Mirrors bounded_mid_spacing.
+    return max(requested, mid_requested_radius() / 1218.0);
+}
+
+fn mid_requested_spacing() -> f32 {
     return select(MID_PLACEMENT_SPACING, card_placement_spacing(), cards_on_mid()) /
         sqrt(max(grass.density, 1.0) * max(grass.lod_density.y, 1.0));
+}
+
+fn mid_coverage_width_scale(packed: u32) -> f32 {
+    // Bit 11 marks only mid instances: photographed near cards use the same
+    // vertex entry point, and must retain their original size.
+    return select(1.0, mid_placement_spacing() / mid_requested_spacing(),
+        (packed & (1u << 11u)) != 0u);
 }
 
 // Geography bits, mirroring GeographyInfo in engine/Poseidon/AI/Path/AITypes.hpp:
@@ -448,27 +462,14 @@ fn blade_texture_strength(world_rel: vec3<f32>) -> f32 {
 // MID_RING_MAX matches GrassSettings::midRadius' upper bound. It used to be 160
 // here against a 210 m slider, so the top 50 m of that slider did nothing.
 const MID_RING_MAX: f32 = 1000.0;
-fn mid_ring_end() -> f32 {
+fn mid_requested_radius() -> f32 {
     let natural = max(grass.near_radius + 10.0, min(MID_RING_MAX, grass.near_radius * 2.5));
-    let want = clamp(select(natural, grass.look.w, grass.look.w > grass.near_radius), grass.near_radius + 10.0, MID_RING_MAX);
-    // The candidate grid is capped (MID_GRID_MAX, 2440, in grass/mod.rs), and on
-    // the CARD grid that cap bites: the reach is dim/2 * spacing, so 50x card
-    // density asks for 210 m and gets 191, and 300x gets 78. Past the cap the
-    // field was bounded by the grid's SQUARE instead -- a hard camera-locked edge
-    // with no dissolve, and grass that gets SHORTER the denser you ask for, which
-    // is exactly "maxing the density out makes the meadow smaller". This is the
-    // same failure the near ring already fixes with near_reach in grass/mod.rs;
-    // the mid ring never got it because MID_PLACEMENT_SPACING (0.82 m, blades)
-    // always spanned its disc and the card grid does not.
-    //
-    // Cap the radius at what the grid actually covers. The mid ring then ends in
-    // its own circular dissolve strictly inside the square, and cs_place_far --
-    // which starts from this same function -- no longer leaves a bare annulus
-    // between the last card and the far ring.
-    //
-    // One cell of margin: mid candidates jitter by up to +-0.925 of a cell out of
-    // their own square. The lower clamp is kept because cs_place_mid rejects the
-    // whole ring when mid_end <= near_radius.
+    return clamp(select(natural, grass.look.w, grass.look.w > grass.near_radius), grass.near_radius + 10.0, MID_RING_MAX);
+}
+fn mid_ring_end() -> f32 {
+    let want = mid_requested_radius();
+    // Defensive reach guard. Bounded spacing and the two-cell dispatch margin
+    // now preserve the requested disc even at high coverage and card density.
     let reach = max(grass.place.y * 0.5 - 1.0, 1.0) * mid_placement_spacing();
     return clamp(min(want, reach), grass.near_radius + 10.0, MID_RING_MAX);
 }
@@ -920,6 +921,19 @@ fn species_transmission(species: u32) -> vec4<f32> {
     }
 }
 
+// In daylight backlight, blue sky fill used to dominate the shaded grass side.
+// Move that fill towards neutral warm light at unchanged luminance; keep the
+// nighttime sky and the direct/transmitted sunlight untouched.
+fn grass_sky_fill(n: vec3<f32>, view_dir: vec3<f32>, light_dir: vec3<f32>) -> vec3<f32> {
+    let sky = sky_irradiance(n);
+    let luma = dot(sky, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let warm = vec3<f32>(1.02, 1.0, 0.90);
+    let neutral = warm * luma / dot(warm, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let daylight = smoothstep(-0.02, 0.15, light_dir.y);
+    let backlight = smoothstep(0.05, 0.70, dot(view_dir, -light_dir));
+    return mix(sky, neutral, daylight * backlight * 0.65);
+}
+
 // `geo` carries the surface's atlas run in bits 23-30 (see the geography word
 // layout in TerrainWgpu.cpp); it is moved into packed.w bits 3-10 so the vertex
 // shader can read it from the instance it already loads.
@@ -1088,6 +1102,7 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     instances[out_index].pos_seed = vec4<f32>(world_xz.x, y, world_xz.y, seed);
     var packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz), geo);
     packed.z = pack_lod_fade(mid_fade);
+    packed.w |= 1u << 11u;
     instances[out_index].packed = packed;
 }
 
@@ -1293,10 +1308,11 @@ fn vs_grass_mid(@builtin(vertex_index) vertex_index: u32, @builtin(instance_inde
     let base_angle = seed * 6.2831853 + f32(blade) * 1.0471976 + (blade_seed - 0.5) * 0.55;
     let radial = vec3<f32>(cos(base_angle), 0.0, sin(base_angle));
     let blade_axis = vec3<f32>(-sin(base_angle), 0.0, cos(base_angle));
-    let base_offset = radial * mix(0.025, 0.16, blade_seed);
+    let coverage_width = mid_coverage_width_scale(inst_packed.w);
+    let base_offset = radial * mix(0.025, 0.16, blade_seed) * coverage_width;
     let height = mix(0.29, 0.71, hash11(inst.xz + vec2<f32>(f32(blade) * 7.0, f32(blade) * 13.0))) *
         grass.blade_height * shape.y * lod_height_scale(inst_packed.z) * native_blade_height_scale();
-    let width = mix(0.016, 0.038, blade_seed) * shape.x * max(grass.species_mix.z, 0.05);
+    let width = mix(0.016, 0.038, blade_seed) * shape.x * max(grass.species_mix.z, 0.05) * coverage_width;
     let static_bend = radial * mix(0.10, 0.32, hash11(inst.xz + vec2<f32>(f32(blade) * 19.0, 31.0))) * height;
     let depth = imprint_depth();
     let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (depth * crush);
@@ -1378,7 +1394,8 @@ fn vs_grass_mid_tuft(@builtin(vertex_index) vertex_index: u32, @builtin(instance
     let family_width = select(select(select(0.72, 1.00, family == 1u), 1.20, family == 2u), 1.38, family == 3u);
     let height = mix(0.34, 0.78, height_seed) * grass.blade_height * 1.7 * family_height *
         lod_height_scale(inst_packed.z) * photo_card_scale();
-    let half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0)) * family_width;
+    let half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0)) * family_width *
+        mid_coverage_width_scale(inst_packed.w);
 
     let crush_dir = unpack2x16snorm(inst_packed.x);
     let crush_data = unpack2x16unorm(inst_packed.y);
@@ -1749,7 +1766,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
                              grass.native.x > 0.0);
     let direct = frame.sun_diffuse.rgb * mix(ndl, wrap, 0.35) *
         (1.0 - max(terrain_shadow, self_shadow.x)) * cloud_lit;
-    let ambient = sky_irradiance(normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.45))) * sky_vis_ao(world.xz) *
+    let ambient = grass_sky_fill(normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.45)), view_dir, light_dir) * sky_vis_ao(world.xz) *
         self_shadow.y;
     let transmission = species_transmission(u32(in.blade_uv.z));
     let transmission_amount = pow(max(dot(view_dir, -light_dir), 0.0), 1.5) * (1.0 - ndl) *
@@ -2039,8 +2056,8 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
         (1.0 - max(terrain_shadow, clump_shadow)) * cloud_lit;
     // Ambient keeps the softer half-upright normal: the contour detail belongs
     // in the sun term, and applying it to skylight only flattens it again.
-    let ambient = sky_irradiance(normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.45))) * sky_vis_ao(world.xz);
     let view_dir = -in.world_rel / max(length(in.world_rel), 0.0001);
+    let ambient = grass_sky_fill(normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.45)), view_dir, light_dir) * sky_vis_ao(world.xz);
     let broad_field = clump_noise(world.xz, 0.005, 0x7a1c3e5du);
     let clump_normal = normalize(vec3<f32>((field_tint - 0.5) * 0.24, 1.0, (broad_field - 0.5) * 0.24));
     let half_direction = (light_dir + view_dir) / max(length(light_dir + view_dir), 0.0001);
