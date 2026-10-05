@@ -19,3 +19,14 @@ noise coordinates when weather changes. Pause/rewind/gap behaviour stays bounded
 Subagent actual wind.rs rustc tests3/3 passed; shader colour/shadow expression
 parity and unchanged3 noise calls verified. Full renderer GPU/layout checks,
 matched build and installed capture are pending. No universal FPS promise.
+
+
+Actual renderer grass GPU/layout/pipeline tests15 passed, including both shaders,
+4x/1x cards and colour/shadow uniform offsets. Full matched Build.ps1 succeeded.
+Installed a9683298 stock Everon capture at owner field5018.51/4087.66,
+altitude100m/elevation-18, measured wind override8m/s bearing220/gustiness0.7:
+6 spaced captures300/360/420/480/540/600, normal shutdown, populated170835 mid
+instances, no shader validation/device/panic failure. Evidence directory:
+build/grass-stability/gust-fronts-default-OwnerEveron-1-20261005-172817.
+This is bounded runtime/visual capture acceptance; broad artistic tuning across
+all weather speeds/maps remains available through the live controls.

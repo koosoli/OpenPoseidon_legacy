@@ -59,3 +59,20 @@ full column endpoint. Ground cameras retain their mapping; native/roof admission
 fixed steps/slices and solar grid remain unchanged. Actual ocean-column GPU tests
 at oblique slopes0.1/0.2/0.45 now verify complete Beer-Lambert extinction beyond the
 geometry range, alongside the17 passing actual shader/resource/receiver tests.
+
+
+Installed a9683298 complete-ray compare (13 poses) passed runtime and budget:
+fog mean0.6883ms/median0.6118ms; total10.0402/9.7802ms. Distant dark patches
+remain visually present; disabling world patchiness also retains them. Numerical
+column correctness does not establish owner-scene visual acceptance.
+
+Final candidate removes the remaining explicit solar-cache discontinuity:
+fog_cached_solar previously returned1 outside its camera-centred XZ field,
+dropping physical incoming extinction at that boundary. The outer two cache cells
+blend into the analytic certified local column; outside uses that column without
+ray marching. Interior cache hits return immediately with their old sample budget.
+This distant local column approximates terrain variation along the sun path;
+actual CSM/cloud/terrain visibility still owns occlusion. No additional passes,
+ray steps, slices or texture resources. Actual encoded equal flat columns inside
+and outside the cache agree within2%; all17 fog GPU tests pass. Final owner-scene
+runtime and budget comparison pending; do not infer full ring removal from tests.

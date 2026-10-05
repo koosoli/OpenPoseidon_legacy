@@ -5,6 +5,19 @@ execution:
   baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
   integration_owner: Oliver Kay
   activation_state: ACTIVE
+  grass_wind_waves_checkpoint:
+    state: INSTALLED_GPU_AND_STOCK_EVERON_RUNTIME_PASSED
+    implementation_commit: a9683298
+    evidence: docs/verification/grass-wind-waves-20261005.md
+    note: >-
+      Default travelling gust fronts45m by135m, live Grass toggle/variation/size,
+      colour and shadows matched, existing3 noise calls and no extra pass/ABI.
+      GPU grass tests15 and wind tests3 passed; six spaced stock Everon captures,
+      populated170835 mid instances, normal shutdown. Artist tuning available.
+  forest_island_branch_review:
+    state: REVIEW_COMPLETE_NO_MERGE_SELECTIVE_PORTS_RECOMMENDED
+    reviewed_tip: 9a754f1948f6a9ca078a955b18fb05f67c20ce47
+    evidence: docs/verification/forest-island-branch-review-20261005.md
   aerial_fog_radius_checkpoint:
     state: CODE_BUILT_GPU_PASSED_INSTALLED_COMPARE_PENDING
     evidence: docs/verification/aerial-fog-radius-20261005.md
@@ -18,7 +31,11 @@ execution:
       fog range; fog tests17 passed. First installed c6384bde compare still has radius.
       Second candidate admits actual current ocean producer sea level above seabed
       and off-map ocean; translated plane/absent water/underwater GPU checks pass.
-      Same-scene image and GPU budget acceptance remains pending; fixed steps/resolution.
+      Installed a9683298 ray-column compare fog mean0.6883ms vs baseline0.7380ms,
+      total10.0402ms vs10.1752ms. Distant spots remain and persist with patchiness0.
+      Final analytic solar-cache edge continuation passes17 GPU tests including
+      equal flat-column source energy inside/outside cache; final compare pending.
+      No additional passes, samples, slices or textures. Ring is not marked resolved.
   fog_boot_truck_checkpoint:
     state: INSTALLED_BOUNDED_RUNTIME_PASSED_VISUAL_PROTOTYPE_JUDGEMENT_PENDING
     implementation_commits: [921ef114, d53f8cbd, 234795e7]

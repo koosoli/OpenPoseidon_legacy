@@ -307,13 +307,29 @@ fn fog_local_incident(p:vec3<f32>, rel:vec3<f32>, ray:vec3<f32>)->vec3<f32> {
 }
 // Reuse the incoming-light field instead of marching the same sun path
 // for every camera participant. Separate passes prohibit read/write aliasing.
-fn fog_cached_solar(p:vec3<f32>,ground:f32)->f32 {
+fn fog_cached_solar(p:vec3<f32>,ground:f32,density:f32)->f32 {
     let uv=(p.xz-params.solar_domain.xy)*params.solar_domain.z;
     let agl=max(p.y-ground,0.0);
-    if(any(uv<vec2<f32>(0.0)) || any(uv>vec2<f32>(1.0)) || agl>=params.solar_domain.w){return 1.0;}
-    let dims=textureDimensions(solar_read);
-    let z=(sqrt(agl/params.solar_domain.w)*f32(dims.z-1u)+0.5)/f32(dims.z);
-    return clamp(textureSampleLevel(solar_read,filter_samp,vec3<f32>(uv,z),0.0).r,0.0,1.0);
+    var cached=1.0;var confidence=0.0;
+    if(all(uv>=vec2<f32>(0.0)) && all(uv<=vec2<f32>(1.0)) && agl<params.solar_domain.w){
+        let dims=textureDimensions(solar_read);
+        let z=(sqrt(agl/params.solar_domain.w)*f32(dims.z-1u)+0.5)/f32(dims.z);
+        cached=clamp(textureSampleLevel(solar_read,filter_samp,vec3<f32>(uv,z),0.0).r,0.0,1.0);
+        let edge=min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y));
+        confidence=smoothstep(0.0,2.0/f32(dims.x),edge);
+        if(confidence>=1.0){return cached;}
+    }
+    // Leaving the camera-centred cache must not switch solar attenuation off.
+    // The certified local column is an analytic fallback, with no ray samples.
+    // Interior cache hits above keep their original work budget.
+    var local_tau=0.0;
+    let y=p.y-params.terrain.x*(ground-params.terrain.y);
+    for(var i=0u;i<2u;i=i+1u){let layer=params.layers[i];
+        local_tau+=max(fog_height_primitive(layer.y+layer.z,layer)-fog_height_primitive(y,layer),0.0)
+            *layer.w*params.control.z;
+    }
+    let fallback=fog_transmittance(local_tau*density/max(params.light.y,0.001));
+    return mix(fallback,cached,confidence);
 }
 @compute @workgroup_size(8,8,1)
 fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -388,7 +404,7 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
                     let weight=participant.y*params.layers[i].w*params.control.z*density*outdoor.y;
                     if(weight<=0.0){continue;}
                     let direct=params.radiance.rgb*fog_phase(dot(ray,params.light.xyz),params.control.y)
-                        *fog_light_visibility(sample_pos,sample_rel)*fog_cached_solar(sample_pos,outdoor.x);
+                        *fog_light_visibility(sample_pos,sample_rel)*fog_cached_solar(sample_pos,outdoor.x,density);
                     tau+=weight;
                     source+=weight*(ambient+direct+fog_local_incident(sample_pos,sample_rel,ray));
                 }

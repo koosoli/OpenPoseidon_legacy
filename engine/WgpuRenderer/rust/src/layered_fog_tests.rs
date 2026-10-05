@@ -384,6 +384,14 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
  ocean.set(Some(5.));camera.cam_pos[1]=0.;run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
  for row in read().chunks_exact(4){assert_eq!(row,&[0.,0.,0.,1.],"Atmospheric mist must not enter ocean below its datum");}
  ocean.set(None);camera=saved_camera;settings.terrain=[0.;4];write_native(0.);
+ // Equal flat outdoor columns keep their incident energy outside the solar cache.
+ ocean.set(Some(0.));settings.control[1]=1.;
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);let cached_source=read()[124];
+ camera.cam_pos[0]=750.;
+ run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);let distant_source=read()[124];
+ assert!((distant_source-cached_source).abs()<cached_source*0.02,"Solar cache edge cannot switch off extinction: {cached_source}/{distant_source}");
+ ocean.set(None);camera=saved_camera;settings.control[1]=0.;
+
  // A current far map can replace a rebuilding near source without a whole
  // frame losing its fog. It still obeys the actual depth and overflow guards.
  let mut far_only=cover(1.,100);far_only.controls[0][0]=0.;
