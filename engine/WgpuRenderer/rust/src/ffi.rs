@@ -906,7 +906,7 @@ impl Default for WgrDepthOfField {
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct WgrLayeredFog { pub control: [f32;4], pub layers: [[f32;4];2], pub terrain: [f32;4], pub patch: [f32;4], }
 impl Default for WgrLayeredFog {
-    fn default()->Self {Self {control:[0.0,0.95,0.6,0.0],layers:[[0.0,35.0,5.0,0.008],[70.0,100.0,5.0,0.003]],terrain:[0.0;4],patch:[0.0;4]}}
+    fn default()->Self {Self {control:[0.0,0.95,0.6,0.0],layers:[[0.0,35.0,5.0,0.008],[70.0,100.0,5.0,0.0]],terrain:[0.0;4],patch:[0.0;4]}}
 }
 #[repr(C)]
 #[derive(Clone, Copy, Default)]

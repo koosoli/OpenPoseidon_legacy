@@ -1344,7 +1344,7 @@ fn gi_irradiance(world_abs: vec3<f32>, n: vec3<f32>) -> vec4<f32> {
 fn fog_sun_reach(world_pos_rel: vec3<f32>) -> f32 {
     if (!fog_camera_matches(layer_fog_packet,frame.view,frame.proj,frame.cam_pos.xyz)) { return 1.0; }
     let absolute=world_pos_rel+frame.cam_pos.xyz;
-    if (weather_map_coverage(absolute)<0.5 || weather_map_reach(absolute)<0.999) { return 1.0; }
+    if (weather_map_coverage(absolute)<0.5) { return 1.0; }
     if(layer_fog_packet.native.w<0.5 || layer_fog_packet.native.z<=0.0
         || min(layer_fog_packet.native_size.x,layer_fog_packet.native_size.y)<2u) {return 1.0;}
     if(any(textureDimensions(layer_fog_native_tex)!=layer_fog_packet.native_size.xy)){return 1.0;}

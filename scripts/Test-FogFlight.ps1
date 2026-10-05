@@ -1,6 +1,7 @@
 <# Installed original Kolgujev, actual freefly camera movement, isolated profile. #>
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$ExpectedCommit,[string]$Label='fog-flight',[string]$Patch='',[switch]$Compact,[switch]$Wide)
+param([Parameter(Mandatory)][string]$ExpectedCommit,[string]$Label='fog-flight',[string]$Patch='',[switch]$Compact,[switch]$Wide,
+ [switch]$EveronReport,[switch]$Valley,[switch]$Temporal)
 $ErrorActionPreference='Stop'
 if(!$env:LOCK_OWNER){throw 'Game lock required'}
 $root=Split-Path $PSScriptRoot -Parent
@@ -10,7 +11,7 @@ $stamp=(Get-Content (Join-Path $game 'DEPLOYED-FROM.txt') -Raw).Trim()
 if(!$stamp.Contains($ExpectedCommit)){throw 'Installed source differs'}
 $out=Join-Path $root ('build/fog-flight/'+$Label+'-'+(Get-Date -Format yyyyMMdd-HHmmss))
 $null=New-Item -ItemType Directory -Path $out -Force
-$mission=Join-Path $out 'flight.cain';$null=New-Item -ItemType Directory -Path $mission
+$mission=Join-Path $out $(if($EveronReport){'flight.eden'}else{'flight.cain'});$null=New-Item -ItemType Directory -Path $mission
 Copy-Item -LiteralPath (Join-Path $root 'tests/perf/missions/perf_field.eden/mission.sqm') -Destination $mission
 $receipt=@{installed=$stamp;views=@();passed=$false};$p=$null;$client=$null;$writer=$null
 function Require($ok,$message){if(!$ok){throw $message}}
@@ -20,9 +21,11 @@ try{
  $env:POSEIDON_USER_DIR=Join-Path $out 'user';$null=New-Item -ItemType Directory -Path $env:POSEIDON_USER_DIR
  [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
  $env:WGR_LAYERED_FOG='1';$env:WGR_LAYERED_FOG_TRACE='1';$env:WGR_WEATHER_COVER_TRACE='1';$env:WGR_GRASS='0';$env:WGR_TEMPORAL='0';$env:WGR_WET_SOIL_DIAGNOSTIC='1'
+ if($Temporal){$env:WGR_TEMPORAL='1'}
  if($Patch){$env:WGR_FOG_PATCH=$Patch}
  if($Compact){$env:WGR_FOG_LAYER0='1,5,0.35,0.018';$env:WGR_FOG_LAYER1='35,50,3,0'}
  if($Wide){$env:WGR_FOG_LAYER0='0,750,5,0.01';$env:WGR_FOG_LAYER1='800,900,5,0';$env:WGR_FOG_TERRAIN='0,0,0,150';$env:WGR_AUTO_EXPOSURE='0';$env:WGR_EXPOSURE='.6';$env:WGR_TONEMAP='1'}
+ if($Valley){$env:WGR_FOG_LAYER0='-100,100,8,0.008';$env:WGR_FOG_LAYER1='200,250,5,0';$env:WGR_FOG_TERRAIN='0,0,1,150'}
  $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
  $log=Join-Path $out 'engine.log';$stdout=Join-Path $out 'stdout.log';$stderr=Join-Path $out 'stderr.log'
  $args=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','8000','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--test-world-hour','12','--log-file',('"'+$log+'"'))
@@ -32,20 +35,24 @@ try{
  $stream=$client.GetStream();$stream.ReadTimeout=30000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
  while(([string](Send @{cmd='eval';code='triSceneReady'}).result).Trim('"')-cne'OK'){Require ([DateTime]::UtcNow-lt$deadline) 'Scene-ready deadline';Start-Sleep -Milliseconds 300}
  Exec 'player allowDamage false;0 setRain 0;0 setOvercast .15;0 setFog .6;setDate [1985,6,21,12,0];setAccTime 1'
+ if($EveronReport){Exec '0 setFog .78'}
  if($Wide){Exec '0 setFog .15'}
  Start-Sleep -Seconds 3;Exec 'setAccTime 0'
- foreach($site in @(@{name='coast';x=5448.73;z=7011.85;y=590.95;az=111.1;el=-24.1},@{name='ocean';x=7400;z=8500;y=900;az=120;el=-22})){
+ $sites=@(@{name='coast';x=5448.73;z=7011.85;y=590.95;az=111.1;el=-24.1},@{name='ocean';x=7400;z=8500;y=900;az=120;el=-22})
+ if($EveronReport){$sites=@(@{name='everon-report';x=8131.43;z=4086.37;y=191.04;az=229.1;el=-11.3})}
+ foreach($site in $sites){
   foreach($step in 0..12){
-   $x=$site.x+$step*8;$z=$site.z+$step*5
+   $x=$site.x+$step*$(if($EveronReport){-4}else{8});$z=$site.z+$step*5
    Exec ('triFreeFlyPose "'+$x+' '+$z+' '+$site.y+' '+$site.az+' '+$site.el+'"')
-   Start-Sleep -Milliseconds $(if($step-eq0){3000}else{200})
+   Start-Sleep -Milliseconds $(if($step-eq0){3000}else{700})
    $state=Send @{cmd='weather_visibility'};$camera=Send @{cmd='dev_wet_soil_diagnostic';action='state'}
    Require ([Math]::Abs($camera.camera.position[0]-$x)-lt.02 -and [Math]::Abs($camera.camera.position[1]-$site.y)-lt.02 -and [Math]::Abs($camera.camera.position[2]-$z)-lt.02) 'Actual freefly camera differs'
    $path=Join-Path $out ($site.name+'-'+$step.ToString('00')+'.png');$null=Send @{cmd='screenshot';path=$path}
    $receipt.views+=@{name=$site.name;step=$step;requested=@($x,$z,$site.y,$site.az,$site.el);camera=$camera;weather=$state;image=$path}
   }
  }
- $source=Send @{cmd='dev_cave_editor';action='state';x=7400;y=900;z=8500};Require ($source.worldName.Replace('\','/').ToLowerInvariant()-match'(^|/)cain\.wrp$') 'Not original Kolgujev';$receipt.native=$source
+ $source=Send @{cmd='dev_cave_editor';action='state';x=$sites[0].x;y=$sites[0].y;z=$sites[0].z};$worldPattern=if($EveronReport){'(^|/)eden\.wrp$'}else{'(^|/)cain\.wrp$'};Require ($source.worldName.Replace('\','/').ToLowerInvariant()-match$worldPattern) 'Not requested original world';$receipt.native=$source
+ $receipt.timings=@();foreach($sample in 1..12){Start-Sleep -Milliseconds 250;$receipt.timings+=Send @{cmd='frame_performance'}}
  $receipt.performance=Send @{cmd='frame_performance'}
  $null=Send @{cmd='exit'};Require ($p.WaitForExit(20000)-and$p.ExitCode-eq0) 'Normal exit failed'
  Require (!(Select-String -Path @($log,$stderr) -Pattern 'UNHANDLED EXCEPTION|Validation Error|DeviceLost|panicked at|wgr_create failed' -Quiet)) 'Runtime error'

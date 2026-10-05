@@ -2097,7 +2097,7 @@ class Engine : public IGraphicsEngine
         float fogLayerBase[2] = {0.0f, 70.0f};
         float fogLayerTop[2] = {35.0f, 100.0f};
         float fogLayerFeather[2] = {5.0f, 5.0f};
-        float fogLayerExtinction[2] = {0.008f, 0.003f}; // 1/metre at weather fog 1
+        float fogLayerExtinction[2] = {0.008f, 0.0f}; // 1/metre at weather fog 1
         float fogLayerAlbedo = 0.95f;
         float fogLayerG = 0.6f;
         float fogTerrainFollow = 1.0f; // 0: fixed ASL; 1: layer height above local ground

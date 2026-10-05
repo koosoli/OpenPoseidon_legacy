@@ -915,7 +915,7 @@ void DrawFogSection()
                 settings.fogLayerBase[i] = defaults.fogLayerBase[i];
                 settings.fogLayerTop[i] = defaults.fogLayerTop[i];
                 settings.fogLayerFeather[i] = defaults.fogLayerFeather[i];
-                settings.fogLayerExtinction[i] = defaults.fogLayerExtinction[i];
+                settings.fogLayerExtinction[i] = i == 1 ? 0.003f : defaults.fogLayerExtinction[i];
             }
             changed = true;
         }
@@ -933,10 +933,23 @@ void DrawFogSection()
         }
         if (ImGui::Button("Valley mist"))
         {
-            settings.fogTerrainFollow = 0.35f;
-            settings.fogTerrainReference = ground;
-            settings.fogLayerBase[0] = ground - 3.0f;
-            settings.fogLayerTop[0] = ground + 22.0f;
+            // A fixed ASL ceiling is what makes ridges emerge above valley fog.
+            // Ground-following layers climb every mountain instead.
+            float valleyFloor = ground;
+            if (GScene && GScene->GetCamera() && GLandscape)
+            {
+                const Vector3 camera = GScene->GetCamera()->Position();
+                for (int x = -2; x <= 2; ++x)
+                    for (int z = -2; z <= 2; ++z)
+                    {
+                        const float candidate = GLandscape->SurfaceY(camera.X() + x * 400.0f, camera.Z() + z * 400.0f);
+                        if (candidate > 1.0f) valleyFloor = std::min(valleyFloor, candidate);
+                    }
+            }
+            settings.fogTerrainFollow = 0.0f;
+            settings.fogTerrainReference = 0.0f;
+            settings.fogLayerBase[0] = -100.0f;
+            settings.fogLayerTop[0] = valleyFloor + 25.0f;
             settings.fogLayerFeather[0] = 8.0f;
             settings.fogLayerExtinction[0] = 0.008f;
             settings.fogLayerExtinction[1] = 0.0f;
@@ -972,7 +985,7 @@ void DrawFogSection()
             settings.fogPatchStrength = 0.35f;
             changed = true;
         }
-        ImGui::TextDisabled("Valley/mountain presets anchor altitude to this location once; terrain and patches vary in world space.");
+        ImGui::TextDisabled("Valley mist sets a fixed ceiling above nearby low ground. Hills above that ceiling stay outside the mist; Mountain mist anchors to this location.");
         ImGui::SeparatorText("Mist height and thickness");
         int reference = settings.fogTerrainFollow == 0.0f ? 0 :
             settings.fogTerrainFollow == 1.0f && settings.fogTerrainReference == 0.0f ? 1 : 2;
@@ -1004,9 +1017,16 @@ void DrawFogSection()
                 changed = true;
             }
             bool bandChanged = false;
-            bandChanged |= ImGui::SliderFloat("Bottom height", &settings.fogLayerBase[i], -100.0f, 2500.0f, "%.2f m", ImGuiSliderFlags_AlwaysClamp);
-            bandChanged |= ImGui::SliderFloat("Top height", &settings.fogLayerTop[i], -99.75f, 3000.0f, "%.2f m", ImGuiSliderFlags_AlwaysClamp);
-            if (bandChanged) settings.fogLayerTop[i] = std::max(settings.fogLayerTop[i], settings.fogLayerBase[i] + 0.25f);
+            if (ImGui::SliderFloat("Bottom height", &settings.fogLayerBase[i], -100.0f, 2500.0f, "%.2f m", ImGuiSliderFlags_AlwaysClamp))
+            {
+                settings.fogLayerTop[i] = std::max(settings.fogLayerTop[i], settings.fogLayerBase[i] + 0.25f);
+                bandChanged = true;
+            }
+            if (ImGui::SliderFloat("Top height", &settings.fogLayerTop[i], -99.75f, 3000.0f, "%.2f m", ImGuiSliderFlags_AlwaysClamp))
+            {
+                settings.fogLayerBase[i] = std::min(settings.fogLayerBase[i], settings.fogLayerTop[i] - 0.25f);
+                bandChanged = true;
+            }
             float thickness = settings.fogLayerTop[i] - settings.fogLayerBase[i];
             if (ImGui::SliderFloat("Mist thickness", &thickness, 0.25f, 500.0f, "%.2f m", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp))
             {
@@ -1026,7 +1046,7 @@ void DrawFogSection()
                 settings.fogLayerTop[i] + shift, settings.fogLayerTop[i] - settings.fogLayerBase[i]);
             ImGui::PopID();
         }
-        ImGui::TextWrapped("For a compact bank, disable the second layer, reduce thickness and edge softness, then increase density. Ctrl+click a slider to type a precise height.");
+        ImGui::TextWrapped("For valley-only mist use Sea level (ASL), set the top below the hilltops and keep the second layer disabled. Fog amount also shortens the original game visibility range; use Fog density for a thicker bank without closing distant hills. Ctrl+click a height slider for precise metres.");
         if (GWorld && GWorld->GetFog() <= 0.0f)
             ImGui::TextDisabled("Set Fog amount above zero to see a layer.");
     }

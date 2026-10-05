@@ -17,6 +17,7 @@ struct FogVolume {
     terrain: vec4<f32>, // follow fraction, reference ASL, valley gain, radius metres
     patchiness: vec4<f32>, // strength, horizontal/vertical metres, outer coverage feather metres
     sky_limit: vec4<f32>, // actual cloud enabled/base ASL, cached native max/min
+    solar_domain: vec4<f32>, // snapped world XZ, inverse width, max AGL
 };
 struct FogHeight {
     origin: vec2<f32>, grid: f32, enabled: f32,
@@ -48,6 +49,7 @@ struct FogLocalLight { pos:vec4<f32>, diffuse:vec4<f32>, ambient:vec4<f32>, dir:
 @group(0) @binding(15) var<storage, read> far_counts: array<u32>;
 @group(0) @binding(16) var solar_result: texture_storage_3d<rgba16float, write>;
 @group(0) @binding(17) var<storage, read> local_lights:array<FogLocalLight>;
+@group(0) @binding(18) var solar_read: texture_3d<f32>;
 
 // Certify coverage separately from depth/shelter: known roofs contain no air
 // medium, while a missing/stale/overflowed source cannot certify sun transport.
@@ -86,11 +88,11 @@ fn fog_weather_weight(p: vec3<f32>) -> f32 {
     var exposed = 0.0;
     if (outer) { exposed = textureSampleCompareLevel(far_depth,depth_samp,uv,clip.z-ctl.y); }
     else { exposed = textureSampleCompareLevel(near_depth,depth_samp,uv,clip.z-ctl.y); }
-    if (exposed < 0.999) { return 0.0; }
-    if (!outer) { return 1.0; } // never feather a near/far handoff
+    if (exposed <= 0.0) { return 0.0; }
+    if (!outer) { return exposed; } // never feather a near/far handoff
     let map_scale = max(length(vec2<f32>(params.far_vp[0].x,params.far_vp[2].x)),
         length(vec2<f32>(params.far_vp[0].y,params.far_vp[2].y)))*0.5;
-    return fog_domain_feather((min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y))-ctl.z)/max(map_scale,1e-10),params.patchiness.w);
+    return exposed*fog_domain_feather((min(min(uv.x,1.0-uv.x),min(uv.y,1.0-uv.y))-ctl.z)/max(map_scale,1e-10),params.patchiness.w);
 }
 // Return actual native triangle height, certified flag and distance inside domain.
 fn fog_native_ground(xz: vec2<f32>) -> vec3<f32> {
@@ -175,12 +177,20 @@ fn fog_sun_segment_tau(start: vec3<f32>, end: vec3<f32>, before: vec2<f32>, cent
     return tau*fog_patch_density(midpoint,params.patchiness)*fog_pooling(midpoint,centre.x)
         *min(min(before.y,centre.y),after.y);
 }
+// Rain interception by leaves does not remove the air carrying sunlight.
+// Actual terrain and current source certification still bound this medium;
+// object/surface CSM owns solid occlusion, view transport retains roof refusal.
+fn fog_solar_air(p: vec3<f32>) -> vec2<f32> {
+    let ground=fog_native_ground(p.xz);
+    if(ground.y<0.5 || p.y<=ground.x+0.05 || !fog_weather_source_ready(p)){return vec2<f32>(ground.x,0.0);}
+    return vec2<f32>(ground.x,fog_domain_feather(ground.z,params.patchiness.w));
+}
 fn fog_solar_transmission(p: vec3<f32>) -> f32 {
     if (params.light.y <= 0.001) { return 0.0; }
     let ground=fog_native_ground(p.xz);
     // Unknown/unready source and solid/underground endpoints are neutral for
     // surface lighting. Existing actual CSM/terrain visibility owns occlusion.
-    let origin=fog_outdoor_sample(p);
+    let origin=fog_solar_air(p);
     if (ground.y < 0.5 || origin.y <= 0.0 || !fog_weather_source_ready(p)) { return 1.0; }
     if (params.terrain.x <= 0.0 && params.terrain.z <= 0.0 && params.patchiness.x <= 0.0 && params.patchiness.w <= 0.0) {
         var tau=0.0;
@@ -210,7 +220,7 @@ fn fog_solar_transmission(p: vec3<f32>) -> f32 {
         // Real native obstruction blocks a shaft. No normal bending or fake
         // mountain reflection/deflection is introduced.
         if (middle.y <= mid_ground.x+0.05 || end.y <= end_ground.x+0.05) { return 0.0; }
-        let centre=fog_outdoor_sample(middle);let after=fog_outdoor_sample(end);
+        let centre=fog_solar_air(middle);let after=fog_solar_air(end);
         tau += fog_sun_segment_tau(start,end,before,centre,after);
         before=after;
     }
@@ -292,6 +302,16 @@ fn fog_local_incident(p:vec3<f32>, rel:vec3<f32>, ray:vec3<f32>)->vec3<f32> {
     }
     return source;
 }
+// Reuse the incoming-light field instead of marching the same sun path
+// for every camera participant. Separate passes prohibit read/write aliasing.
+fn fog_cached_solar(p:vec3<f32>,ground:f32)->f32 {
+    let uv=(p.xz-params.solar_domain.xy)*params.solar_domain.z;
+    let agl=max(p.y-ground,0.0);
+    if(any(uv<vec2<f32>(0.0)) || any(uv>vec2<f32>(1.0)) || agl>=params.solar_domain.w){return 1.0;}
+    let dims=textureDimensions(solar_read);
+    let z=(sqrt(agl/params.solar_domain.w)*f32(dims.z-1u)+0.5)/f32(dims.z);
+    return clamp(textureSampleLevel(solar_read,filter_samp,vec3<f32>(uv,z),0.0).r,0.0,1.0);
+}
 @compute @workgroup_size(8,8,1)
 fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
     let dims=textureDimensions(result);
@@ -371,7 +391,7 @@ fn cs_fog(@builtin(global_invocation_id) id: vec3<u32>) {
                     let weight=participant.y*params.layers[i].w*params.control.z*density*outdoor.y;
                     if(weight<=0.0){continue;}
                     let direct=params.radiance.rgb*fog_phase(dot(ray,params.light.xyz),params.control.y)
-                        *fog_light_visibility(sample_pos,sample_rel)*fog_solar_transmission(sample_pos);
+                        *fog_light_visibility(sample_pos,sample_rel)*fog_cached_solar(sample_pos,outdoor.x);
                     tau+=weight;
                     source+=weight*(ambient+direct+fog_local_incident(sample_pos,sample_rel,ray));
                 }
@@ -398,7 +418,7 @@ fn cs_solar(@builtin(global_invocation_id) id:vec3<u32>) {
     let dims=textureDimensions(solar_result);
     if (any(id>=dims)) {return;}
     let uv=(vec2<f32>(id.xy)+0.5)/vec2<f32>(dims.xy);
-    let xz=params.camera.xz+(uv*2.0-1.0)*params.camera.w;
+    let xz=params.solar_domain.xy+uv/params.solar_domain.z;
     let native=fog_native_ground(xz);
     var solar=1.0;
     if(native.y>=0.5){
