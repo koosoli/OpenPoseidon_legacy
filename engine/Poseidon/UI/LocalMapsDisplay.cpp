@@ -202,15 +202,27 @@ class LocalMapsDisplay : public Display
             // child-only environment; retain explicit overrides and the session's other settings.
             SDL_Environment* environment = SDL_CreateEnvironment(true);
             const SDL_PropertiesID properties = SDL_CreateProperties();
+            const auto setDefault = [&](const char* name, const char* value)
+            {
+                const char* existing = SDL_GetEnvironmentVariable(environment, name);
+                return (existing && *existing) || SDL_SetEnvironmentVariable(environment, name, value, true);
+            };
             const bool configured = environment && properties &&
-                SDL_SetEnvironmentVariable(environment, "POSEIDON_REFORGER_OBJECTS", "1", false) &&
-                SDL_SetEnvironmentVariable(environment, "POSEIDON_REFORGER_MAX_MODELS", "800", false) &&
-                SDL_SetEnvironmentVariable(environment, "POSEIDON_REFORGER_NEAR_RADIUS", "300", false) &&
-                SDL_SetEnvironmentVariable(environment, "POSEIDON_REFORGER_MAX_OBJECTS", "400000", false) &&
+                setDefault("POSEIDON_REFORGER_OBJECTS", "1") &&
+                setDefault("POSEIDON_REFORGER_MAX_MODELS", "800") &&
+                setDefault("POSEIDON_REFORGER_NEAR_RADIUS", "300") &&
+                setDefault("POSEIDON_REFORGER_MAX_OBJECTS", "400000") &&
                 SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data()) &&
                 SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, environment);
             if (configured)
+            {
+                SDL_Log("Local Reforger preview: objects=%s models=%s nearRadius=%s maxObjects=%s",
+                        SDL_GetEnvironmentVariable(environment, "POSEIDON_REFORGER_OBJECTS"),
+                        SDL_GetEnvironmentVariable(environment, "POSEIDON_REFORGER_MAX_MODELS"),
+                        SDL_GetEnvironmentVariable(environment, "POSEIDON_REFORGER_NEAR_RADIUS"),
+                        SDL_GetEnvironmentVariable(environment, "POSEIDON_REFORGER_MAX_OBJECTS"));
                 process = SDL_CreateProcessWithProperties(properties);
+            }
             if (!process)
                 launchError = SDL_GetError();
             if (properties)
