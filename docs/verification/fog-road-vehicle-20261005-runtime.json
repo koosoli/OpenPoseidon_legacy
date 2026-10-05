@@ -1,0 +1,84 @@
+{
+  "fog": [
+    {
+      "receipt": "build/fog-flight/everon-road-before-20261005-133140/result.json",
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 488a93e7 2026-10-05_11:44 deploy-ps1",
+      "passed": true,
+      "poses": 13
+    },
+    {
+      "receipt": "build/fog-flight/everon-road-after-20261005-135138/result.json",
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 c16bc5ac 2026-10-05_13:50 deploy-ps1",
+      "passed": true,
+      "poses": 13
+    },
+    {
+      "receipt": "build/fog-flight/everon-road-csm-20261005-135432/result.json",
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 c16bc5ac 2026-10-05_13:50 deploy-ps1",
+      "passed": true,
+      "poses": 13
+    },
+    {
+      "receipt": "build/fog-flight/everon-road-seated-20261005-141040/result.json",
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 c179034b+dirty 2026-10-05_14:09 deploy-ps1",
+      "passed": true,
+      "poses": 13
+    },
+    {
+      "receipt": "build/fog-flight/kolgujev-compact-native-domain-20261005-135841/result.json",
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 c16bc5ac 2026-10-05_13:50 deploy-ps1",
+      "passed": true,
+      "poses": 26
+    }
+  ],
+  "limits": "Bounded runtime evidence, not universal visual/performance or vehicle/MP acceptance",
+  "vehicles": [
+    {
+      "resistance": true,
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 c16bc5ac 2026-10-05_13:50 deploy-ps1",
+      "distance": 8.790005688280262,
+      "minimumOffset": -0.14073030650615692,
+      "resistanceTrace": [
+        "[2026-10-05 14:08:26.729] [app-cc8c] [INFO] [PHYSICS] MUD_RESISTANCE class=Truck5t wheels=6/6 speed=0.824 deceleration=0.924",
+        "[2026-10-05 14:08:27.716] [app-cc8c] [INFO] [PHYSICS] MUD_RESISTANCE class=Truck5t wheels=6/6 speed=3.788 deceleration=0.933",
+        "[2026-10-05 14:08:28.688] [app-cc8c] [INFO] [PHYSICS] MUD_RESISTANCE class=Truck5t wheels=6/6 speed=4.184 deceleration=0.941"
+      ],
+      "class": "Truck5t",
+      "receipt": "build/jeep-mud-runtime/20261005-140745/result.json",
+      "passed": true,
+      "traceRows": 241
+    },
+    {
+      "resistance": false,
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 c179034b+dirty 2026-10-05_14:09 deploy-ps1",
+      "distance": 8.660000000000764,
+      "minimumOffset": -0.10004701465368271,
+      "resistanceTrace": [],
+      "class": "Jeep",
+      "receipt": "build/jeep-mud-runtime/20261005-141227/result.json",
+      "passed": true,
+      "traceRows": 160
+    },
+    {
+      "resistance": true,
+      "installed": "codex/kolgujev-fog-corpse-fixes-20261004 c179034b+dirty 2026-10-05_14:09 deploy-ps1",
+      "distance": 9.630005192106706,
+      "minimumOffset": -0.1003766730427742,
+      "resistanceTrace": [
+        "[2026-10-05 14:19:36.128] [app-3838] [INFO] [PHYSICS] MUD_RESISTANCE class=Jeep wheels=4/4 speed=0.130 deceleration=0.910",
+        "[2026-10-05 14:19:37.108] [app-3838] [INFO] [PHYSICS] MUD_RESISTANCE class=Jeep wheels=4/4 speed=2.524 deceleration=0.917",
+        "[2026-10-05 14:19:38.088] [app-3838] [INFO] [PHYSICS] MUD_RESISTANCE class=Jeep wheels=2/4 speed=5.172 deceleration=0.461"
+      ],
+      "class": "Jeep",
+      "receipt": "build/jeep-mud-runtime/20261005-141903/result.json",
+      "passed": true,
+      "traceRows": 184
+    }
+  ],
+  "validation": {
+    "wheelAndVehiclePolicy": "PASS",
+    "completeShaders": "PASS",
+    "fogGpuTests": 14
+  },
+  "codeCommit": "c179034b"
+}

@@ -5,6 +5,25 @@ execution:
   baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
   integration_owner: Oliver Kay
   activation_state: ACTIVE
+  fog_road_vehicle_followup_checkpoint:
+    state: CODE_BUILT_INSTALLED_BOUNDED_RUNTIME_CHECKS_PASSED
+    code_commit: c179034b
+    implementation_commits: [7a79e655, c16bc5ac, c179034b]
+    evidence: docs/verification/fog-road-vehicle-20261005.md
+    runtime_receipt: docs/verification/fog-road-vehicle-20261005-runtime.json
+    note: >-
+      Second fog layer restored to default extinction0.003. Native outdoor fog
+      no longer ends at the moving rain shelter footprint; known roof exclusion
+      retained. Actual GPU fog tests14 passed, complete terrain/grass/direct/retained
+      shaders validated, installed Everon13 and compact Kolgujev26 poses passed.
+      Black road rectangle at owner9182.32/2053.96 reproduced, isolated from
+      projected shadows, then removed by classifying terrain-seated road receivers
+      above the fine heightfield instead of as caves. Projected shadow colour now
+      transports fog airlight. No universal flicker-free or performance acceptance.
+      Default Jeep real-rain drive8.66m produced10cm ruts without added resistance.
+      Opt-in SP Truck5t drive8.79m produced14cm ruts and6/6 admitted wheel resistance;
+      Jeep resistance separately exercised. Sole/tyre-profile parallax, lateral
+      slip, other vehicle classes and MP experiments remain outside this checkpoint.
   fog_grass_jeep_checkpoint:
     state: INSTALLED_BOUNDED_RUNTIME_CHECKS_PASSED
     installed_source_commit: 488a93e7
