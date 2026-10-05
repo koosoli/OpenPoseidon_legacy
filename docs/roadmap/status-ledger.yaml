@@ -5,6 +5,17 @@ execution:
   baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
   integration_owner: Oliver Kay
   activation_state: ACTIVE
+  aerial_fog_radius_checkpoint:
+    state: CODE_BUILT_GPU_PASSED_INSTALLED_COMPARE_PENDING
+    evidence: docs/verification/aerial-fog-radius-20261005.md
+    note: >-
+      Owner Everon camera4526.06/3977.46/1197.58 az198.3 el-28.1 fog1.0
+      dark moving circle reproduced on234795e7 and isolated with legacy control.
+      Aerial view transport now spans certified native world fog field when above
+      the active slabs, smoothly admitted over the upper feather. Ground-camera
+      range, scene culling, legacy closure and incoming solar path/grid unchanged.
+      Actual GPU downward-column sweep now includes400m altitude above200m geometry
+      fog range; fog tests17 passed. Matched build and final runtime compare pending.
   fog_boot_truck_checkpoint:
     state: INSTALLED_BOUNDED_RUNTIME_PASSED_VISUAL_PROTOTYPE_JUDGEMENT_PENDING
     implementation_commits: [921ef114, d53f8cbd, 234795e7]

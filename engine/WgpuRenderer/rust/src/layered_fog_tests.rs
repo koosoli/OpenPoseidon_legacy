@@ -351,7 +351,7 @@ fn actual_fog_volume_gpu_obeys_beer_lambert_native_roof_overflow_and_weather_gat
  // making their slice boundaries follow the camera as bright stepped rings.
  let saved_camera=camera;
  camera.view=glam::Mat4::look_at_lh(glam::Vec3::ZERO,glam::Vec3::NEG_Y,glam::Vec3::Z).to_cols_array();
- for altitude in [55.,63.,75.,89.,105.,130.] {
+ for altitude in [55.,63.,75.,89.,105.,130.,400.] {
   camera.cam_pos[1]=altitude;
   run(&mut fog,&camera,&settings,1.,cover(1.,100),1,true);
   let tau=-read()[127].ln();

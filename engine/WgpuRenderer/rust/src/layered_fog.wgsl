@@ -7,7 +7,7 @@ struct FogVolume {
     control: vec4<f32>, // scattering albedo, HG g, weather amount, ready
     layers: array<vec4<f32>, 2>,
     light: vec4<f32>, // direction toward the actual main directional light
-    radiance: vec4<f32>, // scene-linear directional irradiance
+    radiance: vec4<f32>, // scene-linear directional irradiance, original solar path range
     cloud_map: vec4<f32>,
     near_vp: mat4x4<f32>,
     far_vp: mat4x4<f32>,
@@ -199,7 +199,7 @@ fn fog_solar_transmission(p: vec3<f32>) -> f32 {
     for (var i=0u;i<2u;i=i+1u) {if(params.layers[i].w>0.0){top=max(top,params.layers[i].y+params.layers[i].z);}}
     top += params.terrain.x*(params.sky_limit.z-params.terrain.y);
     if (params.terrain.x > 0.0 && params.sky_limit.x > 0.0) {top=min(top,params.sky_limit.y);}
-    let distance=min(params.camera.w,max((top-p.y)/params.light.y,0.0));
+    let distance=min(params.radiance.w,max((top-p.y)/params.light.y,0.0));
     if (distance <= 0.001) { return 1.0; }
     let step=distance*0.25;
     var tau=0.0;var before=origin;
