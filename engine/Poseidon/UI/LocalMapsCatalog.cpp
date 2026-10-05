@@ -192,6 +192,9 @@ void ScanInstall(const fs::path& install, const std::string& game, LocalMapsCata
             LocalMap map;
             map.game = game;
             map.name = fs::path(world).filename().string();
+            // Reforger calls Everon's asset directory Eden; show the island's name in the browser.
+            if (Lower(world) == "worlds/eden")
+                map.name = "Everon";
             map.worldPath = world;
             map.archiveRoot =
                 fs::is_directory(install / "addons", ec) ? (install / "addons").string() : pak.parent_path().string();
