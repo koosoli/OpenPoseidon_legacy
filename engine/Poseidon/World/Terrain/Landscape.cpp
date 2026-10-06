@@ -1821,6 +1821,11 @@ float Landscape::SurfaceY(float x, float z) const
 
 float Landscape::SurfaceY(float x, float z, float* rdX, float* rdY, Texture** texture) const
 {
+    if (rdX)
+        *rdX = 0;
+    if (rdY)
+        *rdY = 0;
+
     if (EarthStreaming::Enabled())
     {
         if (texture) *texture = nullptr;
