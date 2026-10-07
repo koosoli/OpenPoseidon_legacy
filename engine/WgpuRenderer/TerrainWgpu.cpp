@@ -3242,7 +3242,10 @@ void TerrainWgpu::UploadEarthGlobe()
             if (x<cols && y<rows)
             {
                 const uint32_t a=y*(cols+1)+x,b=a+1,c=a+cols+1,d=c+1;
-                indices.insert(indices.end(),{a,c,b,b,c,d});
+                // Latitude decreases down the image: the outward winding is
+                // opposite to the heightfield's north-increasing rows. Keep
+                // the opaque depth prepass on the near hemisphere.
+                indices.insert(indices.end(),{a,b,c,b,d,c});
             }
         }
     }
