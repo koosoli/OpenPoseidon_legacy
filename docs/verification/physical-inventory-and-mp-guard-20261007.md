@@ -57,11 +57,24 @@ to image generation. Native Windows sprite preparation only trims transparent
 margins/scales for runtime; active runtime payload is about 4.3 MiB. Build stages
 and Deploy verifies all 16 PAAs. Known classic classes use these icons; unknown
 addon classes retain their own configured pictures. Missing artwork falls back
-to installed pictures/labelled tiles independently of item ownership. Final new
-icon runtime verification is pending. Optional metadata/settings use the
+to installed pictures/labelled tiles independently of item ownership. Optional metadata/settings use the
 user directory. Other engine-owned shipped menu/logo/material/vehicle-action
 data and reproducible generators are versioned; the complete staged `Mods` and
 `assets` payload is installed by `Deploy.ps1`. See
 [content delivery](../../content/default-packs/README.md). Save/load, every mod
 class, corpse/squadmate transfers and an exhaustive capacity/failure matrix were
 not runtime-certified by this bounded smoke test.
+
+## Realistic icon acceptance
+
+Committed source dcc40f28 built and deployed as a matched pair at 18:54 local
+on October 7. Installed smoke 20261007-185508-371 passed the same O/K/open/drop/
+pickup/reopen route with all 16 installed PAA hashes matching the versioned
+manifest. Captures 01_open.png and 06_weapon_icons.png were inspected: realistic
+grenades, rifle and magazine display without opaque white boxes. No GPU
+validation error, panic or crash was reported. See
+[the icon receipt](physical-inventory-realistic-icons-20261007-runtime.json).
+The full source-art series was generated from text; category pictures are generic
+equipment illustrations, not exact depictions of every mapped weapon variant.
+The earlier hosted-MP receipt applies to the unchanged developer guards; this
+asset/lookup revision did not repeat a full multiplayer session.

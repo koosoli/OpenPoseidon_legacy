@@ -81,7 +81,7 @@ execution:
   physical_inventory_review_checkpoint:
     date: '2026-10-07'
     state: SELECTIVE_SP_PORT_INSTALLED_SMOKE_PASSED_MP_CLASSIC_GEAR
-    source_commits: [d164ad3b, 15c4bc08]
+    source_commits: [d164ad3b, 15c4bc08, dcc40f28]
     evidence: docs/verification/physical-inventory-and-mp-guard-20261007.md
     source_receipt: docs/roadmap/decisions/PHYSICAL-INVENTORY-SOURCE-20261007.md
     note: >-
@@ -95,7 +95,9 @@ execution:
       rejection passed; modified-client anti-cheat and full MP match not claimed.
       Shipped own content sources/generators versioned. Sixteen original realistic
       text-generated PNG icons and prepared PAAs added with prompts/hashes;
-      Build/Deploy carry the loose runtime folder. Final icon runtime check pending.
+      Build/Deploy carry the loose runtime folder. Installed dcc40f28 icon smoke
+      passed open/drop/pickup/settings/reopen and inspected transparent rifle/
+      magazine/grenade icons; all 16 installed hashes match the manifest.
       Exhaustive transfers/mod classes/save-load remain unverified.
   local_map_editor_checkpoint:
     state: INSTALLED_STRATIS_AND_REFORGER_EVERON_EDITOR_ROUNDTRIPS_PASSED

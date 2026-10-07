@@ -1,0 +1,111 @@
+{
+  "before": "[\"HandGrenade\",\"HandGrenade\"]",
+  "stages": [
+    {
+      "name": "01_open",
+      "display": "62020",
+      "magazines": "[\"HandGrenade\",\"HandGrenade\"]",
+      "weapons": "[]"
+    },
+    {
+      "name": "02_drop",
+      "display": "62020",
+      "magazines": "[\"HandGrenade\"]",
+      "weapons": "[]"
+    },
+    {
+      "name": "03_pickup",
+      "display": "62020",
+      "magazines": "[\"HandGrenade\",\"HandGrenade\"]",
+      "weapons": "[]"
+    },
+    {
+      "name": "04_settings",
+      "display": "62020",
+      "magazines": "[\"HandGrenade\",\"HandGrenade\"]",
+      "weapons": "[]"
+    },
+    {
+      "name": "05_reopen",
+      "display": "62020",
+      "magazines": "[\"HandGrenade\",\"HandGrenade\"]",
+      "weapons": "[]"
+    },
+    {
+      "name": "06_weapon_icons",
+      "display": "62020",
+      "magazines": "[\"M16\",\"M16\"]",
+      "weapons": "[\"M16\"]"
+    }
+  ],
+  "afterDrop": "[\"HandGrenade\"]",
+  "installed": "codex/private-release-prep-20261006 dcc40f28 2026-10-07_18:54 deploy-ps1",
+  "passed": true,
+  "afterPickup": "[\"HandGrenade\",\"HandGrenade\"]",
+  "runtime_icons": [
+    {
+      "category": "rifle",
+      "sha256": "4b1dfacc1b9aa8f452a61f125d47dacc64c7f93f5ea47c1171a4e84331742070"
+    },
+    {
+      "category": "ak_rifle",
+      "sha256": "e707c79f25e303c4aa547c627c5b233e499fa5dd1011dc62de53179033a3406e"
+    },
+    {
+      "category": "scoped_rifle",
+      "sha256": "5fe6b295225879e1321c45960fdbadc16eb09a92a3a1685182fc672be4be8bb7"
+    },
+    {
+      "category": "smg",
+      "sha256": "430d1ebcc39f85d72aee16c3e253f4097a80c350cd75a61f37c5dee4a95a45bf"
+    },
+    {
+      "category": "machinegun",
+      "sha256": "f56dce03f436dd95d73e2fb4d02231ebecc7b4c6f2b748209979f0f9ef56e12b"
+    },
+    {
+      "category": "launcher",
+      "sha256": "2ff1aae2fc149685d8ec8de354c4fb7a800c1812f99b87d46fde1323bd130e0d"
+    },
+    {
+      "category": "pistol",
+      "sha256": "67a170a1a57f5efe8bd396e208438d39f4178e2e78d89e562a125a935166343e"
+    },
+    {
+      "category": "binoculars",
+      "sha256": "b219a86a94da716cc239139b3aa22c66702a2e7341946e88c4fb1f21a417699f"
+    },
+    {
+      "category": "nvg",
+      "sha256": "038bcceea3e49ddd7716a19ae7147b42f8d89391ab1d1426603c8e03848b7606"
+    },
+    {
+      "category": "magazine",
+      "sha256": "db81adb4a802a190d1b402d50da893af2cdeccf5355c8553582fdff8d69cbcdc"
+    },
+    {
+      "category": "curved_magazine",
+      "sha256": "4d8176afc1e8da6f92b2f66f6a3556a96b9ec0d845e82ec99471dc5ca6327012"
+    },
+    {
+      "category": "grenade",
+      "sha256": "e913839aaf52da3008766408aede8344a9b4352b287dbb39d5d5a315abc63f53"
+    },
+    {
+      "category": "smoke",
+      "sha256": "ef3a91d61d18ef6c3fdb76fb5dcbb60a3d686e09925db374b4fad07efaccaeb5"
+    },
+    {
+      "category": "satchel",
+      "sha256": "0f17698f77af6ae21c0208668121f9fdece5b818ef463f1233363c0fd0cb7acf"
+    },
+    {
+      "category": "mine",
+      "sha256": "d9996cb1f7686ea7f56afb7148fc46f58c663d7dc1cd8e44cf56452a4d37f5b1"
+    },
+    {
+      "category": "rocket",
+      "sha256": "b4e73dd8718dc0ad6864b5899868f87b00c13df7f0c0fe915f54ab354f61f4d4"
+    }
+  ]
+}
