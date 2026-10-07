@@ -9,6 +9,9 @@ Cold War Assault engine source. It adds a WGPU renderer, Tidewater ocean renderi
 developer tools and local content compatibility work. This is a source release;
 it is not a complete game or an official Bohemia Interactive product.
 
+This private release candidate is being checked for publication. See
+[RELEASE_STATUS.md](RELEASE_STATUS.md) for the remaining review gates.
+
 ## Engine features
 
 - **Vulkan rendering through WGPU:** Vulkan support on Windows and Linux,
@@ -16,7 +19,9 @@ it is not a complete game or an official Bohemia Interactive product.
   GPU and driver; a separate legacy OpenGL renderer is also available.
 - **Physical inventory (single player):** open with **O** for vicinity cargo,
   drag/drop, equipped slots and weight/volume budgets; **K** opens inventory
-  settings. Includes 17 original realistic equipment icons; addon pictures and
+  settings, including optional bearing callouts, a bearing readout and
+  grenade-launcher ground-range estimates. Includes 17 original realistic
+  equipment icons; addon pictures and
   labelled tiles remain fallbacks.
   Multiplayer keeps classic Gear; Dev Tools and Zeus are disabled in multiplayer.
 - **Box3D physics and articulated ragdolls:** jointed character bodies, death and

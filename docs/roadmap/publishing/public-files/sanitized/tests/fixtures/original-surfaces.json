@@ -1,0 +1,46 @@
+{
+  "scope": "Surface classification expectations; contains no game assets",
+  "maps": {
+    "abel": {
+      "qualifyingPalette": [
+        {
+          "texture": "abel\\pi.paa",
+          "pureSand": true,
+          "pureMud": false,
+          "classes": [
+            "SandAbel",
+            "SandAbel",
+            "SandAbel",
+            "SandAbel"
+          ]
+        }
+      ]
+    },
+    "noe": {
+      "qualifyingPalette": [
+        {
+          "texture": "o\\ps.paa",
+          "pureSand": true,
+          "pureMud": false,
+          "classes": [
+            "Sand",
+            "Sand",
+            "Sand",
+            "Sand"
+          ]
+        },
+        {
+          "texture": "o\\pt.paa",
+          "pureSand": true,
+          "pureMud": false,
+          "classes": [
+            "SandDark",
+            "SandDark",
+            "SandDark",
+            "SandDark"
+          ]
+        }
+      ]
+    }
+  }
+}
