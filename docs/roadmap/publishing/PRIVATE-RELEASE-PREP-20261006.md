@@ -153,3 +153,16 @@ development ancestry to the release repository.
 
 This is the bounded stopping point: reproducible local preparation is complete,
 and external source-chain evidence is required before the release can advance.
+
+## Documentation follow-up — 2026-10-07
+
+The private root README and release-facing README now list the current rendering,
+physics, weather, editing and local-content features, including Box3D ragdolls,
+layered volumetric fog and GTAO, with the recorded limitations. The
+[workflow](DEVELOPMENT-AND-RELEASE-WORKFLOW.md) distinguishes normal private feature
+development from the separate clean release history. A new local draft was
+generated rather than modifying the historical 2026-10-06 export. Its
+[receipt](private-audit/readme-update-20261007.json) records the changed README
+hash and verifies unchanged implementation files and excluded internal folders.
+All original release gates remain open; no game binary or release repository
+was changed by this documentation update.

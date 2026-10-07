@@ -1,9 +1,9 @@
-# PoseidonWGPU
+# OpenPoseidon
 
 [![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/koosoli)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/koosoli)
 
-**PoseidonWGPU** is a modernization-focused fork of the classic Poseidon engine
+**OpenPoseidon** (previously **PoseidonWGPU**) is a modernization-focused fork of the classic Poseidon engine
 behind *Arma: Cold War Assault* / *Operation Flashpoint: Cold War Crisis*.
 Its goal is simple: make this landmark 2001 game feel as modern as possible
 while preserving compatibility with the original assets, data formats, missions,
@@ -18,33 +18,65 @@ and gameplay.
 
 ![PoseidonWGPU in-game screenshot](screenshots/2.png)
 
-## What PoseidonWGPU adds
+## What OpenPoseidon adds
 
-PoseidonWGPU develops a modern [wgpu](https://wgpu.rs/)-based renderer alongside
-the legacy OpenGL renderer. The current work focuses on practical visual upgrades
-that still let the original game content remain at the centre of the experience:
+OpenPoseidon develops a modern [wgpu](https://wgpu.rs/)-based renderer alongside
+the legacy OpenGL renderer, while retaining original OFP content and gameplay.
+The current engine includes:
 
-- Procedural terrain grass with live wind, player and vehicle impressions,
-  helicopter rotor wash, and explosive-impact bending.
-- A GPU-driven water system with FFT ocean simulation, shoreline behaviour,
-  reflections, foam, and projectile/explosion interactions.
-- Consolidated work from another [paavohuhtala/CWR-CE](https://github.com/paavohuhtala/CWR-CE)
-  branch, including its volumetric cloud system.
-- A procedural sky where the clouds cast shadows on the ground: terrain, objects,
-  grass and water all read the same sun-transmittance map, so a passing deck dims
-  the scene together rather than only the ground. Nights have stars (no moon yet).
-- Screen-space ambient occlusion (GTAO): scalar occlusion plus a bent-normal
-  directional ambient term and a hierarchical depth-mip march, on by default with
-  its own developer tab and debug views. Its cost scales with pixel count, so it
-  is worth turning down before anything else on a high-resolution display.
-- A modern, observable rendering path with GPU timing and developer diagnostics
-  for testing and iteration.
-- Zeus mode in the developer tools: a Game Master-style free-fly camera with
-  altitude-scaled movement, Shift speed boost, inverted mouse look, and
-  click-to-place unit and vehicle spawning.
+- **Box3D physics and articulated ragdolls:** jointed character bodies, death and
+  explosion reactions, and bullet reactivation of supported runtime corpses.
+  Automatic ragdolls default to on, with an on/off control in the Physics dev tab.
+- **Layered volumetric fog:** height-bounded layers, density, patchiness and
+  valley/mountain presets; live Weather controls, a legacy mode and reset controls.
+  Participating-light scattering includes night lights and the player's torch.
+- **GTAO ambient occlusion:** screen-space contact shading and bent-normal ambient
+  lighting, with developer controls and diagnostic views.
+- **Volumetric clouds and a procedural sky:** overcast controls shared with Zeus,
+  stars, and cloud shadows affecting terrain, objects, grass and water together.
+- **Tidewater ocean rendering:** FFT waves, shoreline wetness, reflections, foam,
+  wakes, spray, underwater rendering and caustics, plus projectile/explosion and
+  helicopter interactions. Supported boats follow the drawn sea surface.
+- **Procedural grass:** travelling gust fronts and spatial wind variation,
+  configurable coverage, broader colour regions, and player, vehicle, explosion
+  and rotor-wash interactions.
+- **Rain, snow and wet surfaces:** accumulating/draining terrain water, rain
+  ripples, wet ground and clothing shading, surface snow on terrain and objects,
+  and snow/soft-ground contact imprints. Snowfall contributes default weather fog.
+- **Deformable soft ground:** mud/sand/snow contact depressions and wheel ruts.
+  Stock Jeep and Truck5t wet-mud rut/rolling-resistance paths are enabled;
+  boot-sole normal/parallax relief remains an opt-in visual prototype.
+- **Terrain editing:** small terrain cuts, horizontal cave/tunnel excavation,
+  straight trenches and tank trenches, with excavation selection, rotation and
+  deletion controls. These extend terrain holes rather than replacing the world
+  with a general voxel simulation.
+- **Combat and effects:** revised muzzle flashes with local shooter/surrounding
+  illumination, snow projectile marks and helicopter ground downwash particles.
+- **Local content browser:** installed Arma 1/2/3, DayZ and Reforger terrain
+  discovery and partial format compatibility. Select a terrain and use OFP units
+  in the native mission editor without restarting; selected vehicle bridges are
+  also available. Proprietary source content remains local.
+- **Streaming and diagnostics:** geometry/residency work, GPU timing, graphics
+  debug views, test harnesses and live developer controls. Zeus provides freefly
+  movement and click-to-place units and vehicles.
+- **AI and swimming work:** hearing/reporting/suppression and other AI fixes,
+  optional spotting/hunting behavior, swimmer movement and boat-route support.
+  The third-party swimming animation addon is not bundled with the engine.
+- **A new title-menu scene:** a patrol boat navigating large Tidewater swells
+  in late-afternoon light.
 
-The project is deliberately evolutionary rather than a replacement engine:
-existing game data and the established CWR-CE codebase remain the foundation.
+These features are at different stages of acceptance. Dense/aerial fog can still
+show visible patterns; strong torch shafts are not visually accepted. Ragdoll
+tests cover 37 locally present stock models, with two Camel pilot post-hit
+settlement failures and remaining posture/save/network/budget limits. Weather
+materials and modern-game material/LOD conversion still need visual refinement.
+There is no claim of universal addon-rig support or complete modern-game import.
+
+This remains the private development repository, with its history, agent
+instructions and evidence. The separate release README is prepared under
+[`docs/roadmap/publishing/public-files/README.md`](docs/roadmap/publishing/public-files/README.md).
+See the [development/release workflow](docs/roadmap/publishing/DEVELOPMENT-AND-RELEASE-WORKFLOW.md)
+for why the private preparation branch retains files excluded from a release.
 
 ## Project lineage
 

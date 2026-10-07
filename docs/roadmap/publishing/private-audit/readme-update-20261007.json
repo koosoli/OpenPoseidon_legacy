@@ -1,0 +1,20 @@
+{
+  "date": "2026-10-07",
+  "state": "DOCUMENTATION_UPDATED_RELEASE_STILL_BLOCKED",
+  "source_commit": "19c96f26ddd828a9e2c907621c744ad7960bbdfd",
+  "previous_inventory_sha256": "02ea1a83913bc5e7b18f2d0282ca91e99ae7a005bfd8159c6d59031f720e4132",
+  "inventory_sha256": "78a90d652e88fe57f13a7ec7c21583867db1d3589976de91f82be9d82d9e6993",
+  "inventory_path": "build\\publishing\\readme-update-20261007\\inventory.json",
+  "draft": "C:\\Users\\mail\\.codex\\release-staging\\OpenPoseidon-source-draft-20261007",
+  "verified_files": 4294,
+  "changed_export_paths": [
+    "README.md"
+  ],
+  "readme_sha256": "123ceb45b57af809b0a297e70a70a99a4d3f839dff005081f721961bfaa261c2",
+  "unchanged_implementation": true,
+  "internal_folders_absent": true,
+  "public_readme_links": "PASS",
+  "target_repository_modified": false,
+  "game_binary_modified": false,
+  "release_gates": "UNCHANGED_PENDING"
+}
