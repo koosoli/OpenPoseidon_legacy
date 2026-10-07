@@ -15,15 +15,6 @@ Bohemia Interactive product.
 [![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/koosoli)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/koosoli)
 
-## Precompiled builds
-
-Prefer to play without compiling? Official precompiled Windows builds are available
-in our [private downloads repository](https://github.com/OpenPoseidon/OpenPoseidon-Builds/releases).
-For access, we ask for a small monthly contribution through
-[GitHub Sponsors](https://github.com/sponsors/koosoli), helping fund continued
-development, testing and build distribution. You can build the engine yourself
-without a sponsorship; your rights under the software licences remain unchanged.
-
 ## Engine features
 
 - **Vulkan rendering through WGPU:** Vulkan support on Windows and Linux,
@@ -109,6 +100,15 @@ content. Imported maps/assets are not included with the engine source.
 | ![Ambient occlusion and directional light inside a building](screenshots/GTAO.png) | ![Village lights and shadows in rainy night conditions](screenshots/newshadowsystem.png) |
 | **Box3D physics test scene** | **Local Reforger terrain compatibility** |
 | ![Box3D wall and rigid-body test scene](screenshots/box3d.png) | ![Locally loaded Reforger town with buildings and vegetation](screenshots/armareforger.png) |
+
+## Precompiled builds
+
+Prefer to play without compiling? Official precompiled Windows builds are available
+in our [private downloads repository](https://github.com/OpenPoseidon/OpenPoseidon-Builds/releases).
+For access, we ask for a small monthly contribution through
+[GitHub Sponsors](https://github.com/sponsors/koosoli), helping fund continued
+development, testing and build distribution. You can build the engine yourself
+without a sponsorship; your rights under the software licences remain unchanged.
 
 ## Current limitations
 
