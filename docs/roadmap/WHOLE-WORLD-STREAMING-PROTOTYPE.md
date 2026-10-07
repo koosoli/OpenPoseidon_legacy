@@ -97,5 +97,18 @@ Terrarium negative/fractional heights, dateline wrapping, recenter invariance an
 polar/nonfinite rejection. `scripts/Test-EarthStreaming.ps1 -ExpectedCommit <sha>`
 under `scripts/with-game-lock.sh` checks the installed renderer at five camera
 positions, including outside the fixture's finite bounds and return to cached
-terrain, captures frames and records worker/cache receipts. Runtime acceptance
-is pending until its generated `build/earth-streaming/.../result.json` passes.
+terrain, captures frames and records worker/cache receipts.
+
+Installed source `6c0075ee` passed the online run recorded in
+`build/earth-streaming/20261007-225432/result.json`: five camera positions,
+including x=32000 outside the original world, produced new terrain patches and
+returned to the original cached heights. The far patch downloaded two new tiles;
+six tiles were cached overall. Subsequent uploads reused height/shadow resources.
+
+The offline run in `build/earth-streaming/20261007-225607/result.json` also passed:
+all five cached positions loaded with zero downloads. An uncached move to
+x=100000 failed through a deliberately unavailable proxy, retained the last
+complete terrain patch and left the frame-performance harness responsive. These
+checks validate the bounded elevation prototype, not globe gameplay or populated
+geographic content. The installed binary remains `6c0075ee`; this acceptance
+record is documentation only.

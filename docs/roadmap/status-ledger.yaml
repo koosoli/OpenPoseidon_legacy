@@ -7,7 +7,10 @@ execution:
   activation_state: ACTIVE
   whole_world_streaming_checkpoint:
     date: '2026-10-07'
-    state: OPT_IN_TERRAIN_PROTOTYPE_RUNTIME_ACCEPTANCE_PENDING
+    state: FREEFLY_ELEVATION_STREAMING_PROTOTYPE_VALIDATED
+    installed_source_commit: 6c0075ee
+    online_receipt: build/earth-streaming/20261007-225432/result.json
+    offline_receipt: build/earth-streaming/20261007-225607/result.json
     branch: codex/whole-world-streaming-20261007
     backup_branch: codex/backup-before-world-streaming-20261007
     backup_commit: e20c3974de6f91b55b402e3f5bc6defe76c84690
