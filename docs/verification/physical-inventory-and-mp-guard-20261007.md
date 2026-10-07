@@ -78,3 +78,22 @@ The full source-art series was generated from text; category pictures are generi
 equipment illustrations, not exact depictions of every mapped weapon variant.
 The earlier hosted-MP receipt applies to the unchanged developer guards; this
 asset/lookup revision did not repeat a full multiplayer session.
+
+## M16 correction and scope clarification
+
+The initial 16 renders were equipment categories, not individual weapon portraits.
+The M16 previously used a generic rifle illustration and was not recognizable as
+an M16. Commit d1a64b86 adds a dedicated text-generated M16A2 PNG/PAA and exact
+M16 class mapping. Built and installed at 19:07 local October 7; installed smoke
+20261007-190809-198 passes with all 17 runtime icon hashes matching. Native
+06_weapon_icons.png was inspected with the carry-handle M16 visible. Receipt:
+[the M16 test](physical-inventory-m16-20261007-runtime.json).
+
+The inventory enumerates carried weapon/magazine types and public carryable
+arsenal types from the running game configuration. M16GrenadeLauncher and AK
+grenade-launcher variants are recognized but still use generic rifle category
+pictures. These are complete weapon variants, not detachable attachments.
+Binocular/NVG, grenades/smoke, mines/satchel and launcher ammunition have category
+images. Addon/unmapped classes retain installed picture/label fallbacks. Classic
+Gear artwork is unchanged. Complete original/addon item transfer coverage and
+individual portraits for every weapon are not claimed.

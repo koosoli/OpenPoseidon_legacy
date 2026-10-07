@@ -81,7 +81,7 @@ execution:
   physical_inventory_review_checkpoint:
     date: '2026-10-07'
     state: SELECTIVE_SP_PORT_INSTALLED_SMOKE_PASSED_MP_CLASSIC_GEAR
-    source_commits: [d164ad3b, 15c4bc08, dcc40f28]
+    source_commits: [d164ad3b, 15c4bc08, dcc40f28, d1a64b86]
     evidence: docs/verification/physical-inventory-and-mp-guard-20261007.md
     source_receipt: docs/roadmap/decisions/PHYSICAL-INVENTORY-SOURCE-20261007.md
     note: >-
@@ -98,7 +98,10 @@ execution:
       Build/Deploy carry the loose runtime folder. Installed dcc40f28 icon smoke
       passed open/drop/pickup/settings/reopen and inspected transparent rifle/
       magazine/grenade icons; all 16 installed hashes match the manifest.
-      Exhaustive transfers/mod classes/save-load remain unverified.
+      Dedicated M16 image added after generic rifle mismatch; installed d1a64b86
+      smoke passed and all 17 file hashes match. Other weapon variants still share
+      category pictures; classic Gear art is unchanged. Exhaustive transfers/
+      mod classes/save-load remain unverified.
   local_map_editor_checkpoint:
     state: INSTALLED_STRATIS_AND_REFORGER_EVERON_EDITOR_ROUNDTRIPS_PASSED
     installed_source_commit: ed1c10a6
