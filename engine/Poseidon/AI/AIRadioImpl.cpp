@@ -8,6 +8,7 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Core/Config/CombatAssistSettings.hpp>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 
 #include <Poseidon/UI/Locale/Languages.hpp>
@@ -161,20 +162,58 @@ const char* RadioMessageReportTarget::PrepareSentence(SentenceParams& params)
 
     SetPlayerMsg(_from == GWorld->FocusOn());
 
+    const float tgtLeaderDist2 = _to->Leader()->Position().Distance2(tgt->position);
+    const float untLeaderDist2 = _to->Leader()->Position().Distance2(_from->Position());
+    const bool farReport = untLeaderDist2 > Square(100) && untLeaderDist2 > tgtLeaderDist2 * 0.75f;
+
+    // Adapted from the GPL-3.0 donated Physical Inventory fork. Only presentation
+    // changes: retain the reported target position/knowledge and distant grid reports.
+    // A freefly camera is not the listener; bearings and range use the player's unit.
+    if (!farReport && GWorld->GetMode() != GModeNetware && BearingCalloutsEnabled())
+    {
+        AIUnit* listener = GWorld->FocusOn();
+        if (!listener)
+        {
+            listener = _to->Leader();
+        }
+        const Vector3 relative = tgt->position - listener->Position();
+        const float distance = relative.Size();
+        const float degrees = std::atan2(relative.X(), relative.Z()) * (180.0f / H_PI);
+        if (std::isfinite(degrees) && std::isfinite(distance))
+        {
+            const int bearing = static_cast<int>(std::floor(degrees + 360.5f)) % 360;
+            if (tgt->side == TSideUnknown)
+            {
+                params.AddWord("unknown", LocalizeString(IDS_WORD_UNKNOWN));
+            }
+            else if (center->IsEnemy(tgt->side))
+            {
+                params.AddWord("enemy", LocalizeString(IDS_WORD_ENEMY));
+            }
+            else if (center->IsFriendly(tgt->side))
+            {
+                params.AddWord("friendly", LocalizeString(IDS_WORD_FRIENDLY));
+            }
+            else
+            {
+                params.AddWord("neutral", LocalizeString(IDS_WORD_NEUTRAL));
+            }
+            params.AddWord(tgt->type->GetNameSound(), tgt->type->GetDisplayName());
+            // No custom voice asset: AIRadio speaks stock "at" + three stock digits.
+            params.AddWord("bearing", "Bearing");
+            params.Add(bearing);
+            params.AddDistance(distance);
+            return "$BEARING$";
+        }
+    }
+
     const char* sentence = nullptr;
 
     params.Add(_from);
 
     params.AddWord(tgt->type->GetNameSound(), tgt->type->GetDisplayName());
 
-    float tgtLeaderDist2 = _to->Leader()->Position().Distance2(tgt->position);
-    float untLeaderDist2 = _to->Leader()->Position().Distance2(_from->Position());
-
-    if (
-        // tgtLeaderDist2 > Square(400) ||
-        untLeaderDist2 > Square(100) && untLeaderDist2 > tgtLeaderDist2 * 0.75
-
-        ) // far
+    if (farReport)
     {
         // square in map
         char buffer[6];

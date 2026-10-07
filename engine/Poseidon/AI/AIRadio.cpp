@@ -28,6 +28,7 @@
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
 #include <stdio.h>
 #include <string.h>
+#include <string>
 #include <cmath>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
@@ -978,6 +979,39 @@ static void SaySentence(RadioSentence& sentence, int language, const ParamEntry&
     sentence.Add("xmit", 0);
 }
 
+// Adapted from the GPL-3.0 donated Physical Inventory fork. The five parameters
+// are side, target type, bearing label, bearing number and the stock range bucket.
+// Reuse each speaker's installed "at" and digit clips; no extra voice pack is needed.
+static void BuildBearingSentence(RadioSentence& sentence, RString& outText, const SentenceParams& params)
+{
+    std::string text;
+    constexpr float clausePause = 0.11f;
+    for (int i = 0; i < params.Size(); ++i)
+    {
+        const SentenceParam& param = params[i];
+        if (i > 0)
+        {
+            text += (i == 2 || i == 4) ? ", " : " ";
+        }
+        if (param.type == SPTWordText)
+        {
+            const bool bearingLabel = i == 2;
+            sentence.Add(bearingLabel ? RString("at") : param.text,
+                         (bearingLabel || i == 1) ? clausePause : PAUSE_AFTER_WORD);
+            text += static_cast<const char*>(param.text2);
+        }
+        else if (param.type == SPTNumber)
+        {
+            char number[32];
+            snprintf(number, sizeof(number), "%03d", param.number);
+            SayNumber(sentence, param.number, clausePause, "%03d");
+            text += number;
+        }
+    }
+    sentence.Add("xmit", 0);
+    outText = RString(text.c_str());
+}
+
 static RString WriteSentence(RString format, SentenceParams& params)
 {
     int nParams = params.Size();
@@ -1621,13 +1655,23 @@ void RadioChannel::NextMessage()
         const char* sentence = _actualMsg->PrepareSentence(params);
         if (sentence)
         {
-            const ParamEntry& clsSent = Res >> "RadioProtocol" >> sentence;
-            float rnd = GRandGen.RandomValue();
-            RString variant = SelectVariant(clsSent >> "versions", rnd);
-            const ParamEntry& clsVariant = clsSent >> variant;
-
             RadioSentence sent;
-            SaySentence(sent, _actualMsg->GetLanguage(), clsVariant, params, pauseAfterMessage);
+            RString text;
+            // Keep the existing single variant RNG draw even for the fixed bearing
+            // wording, and share the unchanged lockstep/accelerated-time drain below.
+            const float rnd = GRandGen.RandomValue();
+            if (strcmp(sentence, "$BEARING$") == 0)
+            {
+                BuildBearingSentence(sent, text, params);
+            }
+            else
+            {
+                const ParamEntry& clsSent = Res >> "RadioProtocol" >> sentence;
+                RString variant = SelectVariant(clsSent >> "versions", rnd);
+                const ParamEntry& clsVariant = clsSent >> variant;
+                SaySentence(sent, _actualMsg->GetLanguage(), clsVariant, params, pauseAfterMessage);
+                text = WriteSentence(clsVariant >> "text", params);
+            }
             // SIM-815: under lockstep pacing the drain must not wait on the audio device.
             // Two identical runs hear the same contact report end on different TICKS, the
             // follow-up order lands on different ticks, and Transmitted()'s two RNG draws
@@ -1645,7 +1689,6 @@ void RadioChannel::NextMessage()
                 _pauseAfterMessage = _actualMsg->GetDuration();
             }
 
-            RString text = WriteSentence(clsVariant >> "text", params);
             GChatList.Add(_chatChannel, _actualMsg->GetSender(), text, _actualMsg->IsPlayerMsg(), false);
             SendRadioChat(_chatChannel, _actualMsg->GetSender(), _object, text, sent);
         }

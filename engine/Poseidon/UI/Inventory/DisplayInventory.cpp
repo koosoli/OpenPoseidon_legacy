@@ -1,6 +1,7 @@
 // Adapted from the author-supplied CWR-Physical Inventory source donation (2026).
 // Distributed under this project's GPL-3.0-or-later licence and Section 7 terms; see LICENSE.
 #include "DisplayInventory.hpp"
+#include <Poseidon/Core/Config/CombatAssistSettings.hpp>
 #include "../../World/Entities/Weapons/ItemMass.hpp"
 
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
@@ -1891,6 +1892,9 @@ static const EditToggleDef kEditToggles[] = {
     { "Rifles in backpack",   InventoryWeaponsInBackpack, SetInventoryWeaponsInBackpack },
     { "Infinite weight",      InventoryInfiniteWeight,    SetInventoryInfiniteWeight    },
     { "Infinite volume",      InventoryInfiniteVolume,    SetInventoryInfiniteVolume    },
+    { "Bearing callouts",     BearingCalloutsEnabled,     SetBearingCalloutsEnabled     },
+    { "Bearing readout",      BearingReadoutEnabled,      SetBearingReadoutEnabled      },
+    { "Grenade range (SP)",   GrenadeRangeEnabled,        SetGrenadeRangeEnabled        },
 };
 static const int kEditToggleCount = (int)(sizeof(kEditToggles) / sizeof(kEditToggles[0]));
 }
@@ -2079,6 +2083,7 @@ bool DisplayInventory::EditMenuClick(float x, float y)
     if (x >= tx && x <= tx + tw && y >= ty && y <= ty + th)
     {
         ResetInventorySettingsToDefault();
+        ResetCombatAssistSettings();
         SaveInventorySettings();
         Rebuild();
         return true;

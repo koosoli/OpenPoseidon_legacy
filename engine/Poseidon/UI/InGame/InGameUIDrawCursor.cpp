@@ -1,5 +1,10 @@
 
 #include <Poseidon/Core/Config/UserConfig.hpp>
+#include <Poseidon/Core/Config/CombatAssistSettings.hpp>
+#include <Poseidon/UI/InGame/CombatAssistMath.hpp>
+#include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
+#include <Poseidon/World/Weather/WindModel.hpp>
+#include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
@@ -1050,6 +1055,101 @@ void InGameUI::DrawHUDNonAI(const Camera& camera, Entity* vehicle, CameraType ca
     }
 }
 
+// Optional aids from Physical Inventory, using our current ballistics and UI lifetime.
+void InGameUI::DrawCombatAssists(const Camera& camera, EntityAI* vehicle)
+{
+    const auto reset = [&] {
+        _rangeUnit = nullptr;
+        _rangeWeapon = -1;
+        _rangeNextUpdate = 0;
+        _rangeImpact = _rangeMarked = -1;
+        _rangeRevealHeld = false;
+    };
+    auto* man = dyn_cast<Man>(vehicle);
+    if (!man || !GLandscape || GWorld->GetMode() == GModeNetware || GWorld->HasOptions() ||
+        GWorld->HasMap() || man->IsDammageDestroyed() ||
+        camera.Position().Distance2(man->Position()) > Square(25.0f))
+    {
+        reset();
+        return;
+    }
+    const int weapon = man->SelectedWeapon();
+    Vector3 direction = GetCursorDirection();
+    if (weapon >= 0 && weapon < man->NMagazineSlots()) direction = man->GetWeaponDirection(weapon);
+    const PackedColor color(Color(0.90f, 0.94f, 0.90f, 0.95f));
+    if (BearingReadoutEnabled())
+        GEngine->DrawTextF(Point2DFloat(0.455f, 0.59f), 0.020f, _font24, color,
+                          "Bearing %03d", CombatAssists::BearingDegrees(direction.X(), direction.Z()));
+
+    if (!GrenadeRangeEnabled() || weapon < 0 || weapon >= man->NMagazineSlots())
+    {
+        reset();
+        return;
+    }
+    const auto& slot = man->GetMagazineSlot(weapon);
+    const auto* mode = man->GetWeaponMode(weapon);
+    // Underbarrel/specialist infantry launchers, not hand grenades, tank shells or flares.
+    if (!slot._weapon || !(slot._weapon->_weaponType & MaskSlotPrimary) || !mode || !mode->_ammo ||
+        mode->_ammo->_simulation != AmmoShotShell || !mode->_ammo->explosive ||
+        !slot._magazine || !slot._magazine->_type)
+    {
+        reset();
+        return;
+    }
+    if (_rangeUnit != man || _rangeWeapon != weapon)
+    {
+        reset();
+        _rangeUnit = man;
+        _rangeWeapon = weapon;
+    }
+    const float now = Glob.uiTime.toFloat();
+    const bool revealHeld = InputSubsystem::Instance().GetAction(UARevealTarget) > 0;
+    if (now >= _rangeNextUpdate || now + 1.0f < _rangeNextUpdate)
+    {
+        _rangeNextUpdate = now + 0.20f;
+        const Vector3 muzzle = man->WorldTransform().FastTransform(man->GetWeaponPoint(weapon));
+        if (!man->IsActionInProgress(MFReload))
+        {
+            _rangeImpact = -1;
+            const float initialSpeed = slot._magazine->_type->_initSpeed;
+            if (std::isfinite(initialSpeed) && initialSpeed > 0 && initialSpeed <= 1000.0f)
+            {
+                auto shell = Ballistics::ShellParamsFor(*mode->_ammo);
+                const auto& fuse = GrenadeFuse::Get();
+                if (fuse.enabled && mode->_ammo->explosionTime > 0)
+                    shell.timeToLive = std::min(shell.timeToLive, fuse.fuseOverrideSeconds > 0 ?
+                        fuse.fuseOverrideSeconds : mode->_ammo->explosionTime);
+                Vector3 wind(VZero);
+                if (WindModel::BallisticsEnabled())
+                {
+                    const auto& sample = GWind.Sample();
+                    wind = Vector3(sample.velocityX, 0, sample.velocityZ);
+                }
+                float predicted;
+                if (CombatAssists::PredictGroundImpact(shell, muzzle, direction.Normalized() * initialSpeed, wind,
+                    [](float x, float z) { return GLandscape->SurfaceYAboveWater(x, z); }, predicted))
+                    _rangeImpact = predicted;
+            }
+        }
+        // Explicitly ground-only. Marking uses the same horizontal metric as the impact estimate.
+        if (revealHeld)
+        {
+            Vector3 target;
+            const float distance = GLandscape->IntersectWithGroundOrSea(&target, camera.Position(),
+                GetCursorDirection().Normalized(), 0, 1500.0f);
+            _rangeMarked = distance < 1500.0f ? (target - muzzle).SizeXZ() : -1;
+        }
+    }
+    if (revealHeld && !_rangeRevealHeld) _rangeNextUpdate = 0; // sample a new mark on the next frame
+    _rangeRevealHeld = revealHeld;
+    if (_rangeImpact >= 0)
+        GEngine->DrawTextF(Point2DFloat(0.455f, 0.62f), 0.020f, _font24, color, "Impact ~%.0f m", _rangeImpact);
+    else
+        GEngine->DrawText(Point2DFloat(0.455f, 0.62f), 0.020f, _font24, color, "Impact --");
+    if (_rangeMarked >= 0)
+        GEngine->DrawTextF(Point2DFloat(0.455f, 0.65f), 0.020f, _font24, color, "Ground mark %.0f m", _rangeMarked);
+}
+
 void InGameUI::DrawHUD(const Camera& camera, EntityAI* vehicle, CameraType cam)
 {
     // draw overlay - called before FinishDraw
@@ -1082,6 +1182,8 @@ void InGameUI::DrawHUD(const Camera& camera, EntityAI* vehicle, CameraType cam)
     {
         return;
     }
+
+    DrawCombatAssists(camera, vehicle);
 
     bool isMap = GWorld->HasMap();
     AIUnit* commanderUnit = vehicle->CommanderUnit();

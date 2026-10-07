@@ -17,9 +17,47 @@
 #include <catch2/catch_approx.hpp>
 
 #include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
+#include <Poseidon/UI/InGame/CombatAssistMath.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp> // G_CONST
 
 #include <cmath>
+#include <limits>
+
+TEST_CASE("Combat bearing agrees with cardinal directions and wraps north", "[combat-assists]")
+{
+    using Poseidon::CombatAssists::BearingDegrees;
+    CHECK(BearingDegrees(0, 1) == 0);
+    CHECK(BearingDegrees(1, 0) == 90);
+    CHECK(BearingDegrees(0, -1) == 180);
+    CHECK(BearingDegrees(-1, 0) == 270);
+    CHECK(BearingDegrees(-0.001f, 1) == 0);
+    CHECK(BearingDegrees(1, 1) == 45);
+}
+
+TEST_CASE("Grenade ground estimate follows an analytic parabola and hillside", "[combat-assists]")
+{
+    Poseidon::Ballistics::ShellParams shell;
+    shell.timeToLive = 10;
+    float range = -1;
+    const Vector3 origin(0, 1, 0), velocity(50, 25, 0);
+    for (float slope : {0.0f, 0.1f, -0.1f})
+    {
+        INFO("Ground slope " << slope);
+        int queries = 0;
+        const auto ground = [&](float x, float) { ++queries; return slope * x; };
+        REQUIRE(Poseidon::CombatAssists::PredictGroundImpact(shell, origin, velocity, VZero, ground, range));
+        const float relativeVy = 25 - slope * 50;
+        const float time = (relativeVy + std::sqrt(relativeVy * relativeVy + 2 * G_CONST)) / G_CONST;
+        CHECK(std::abs(range - 50 * time) < 1.5f);
+        CHECK(queries <= 501);
+    }
+    shell.timeToLive = 0.1f;
+    CHECK_FALSE(Poseidon::CombatAssists::PredictGroundImpact(shell, origin, velocity, VZero,
+        [](float, float) { return 0.0f; }, range));
+    shell.timeToLive = 10;
+    CHECK_FALSE(Poseidon::CombatAssists::PredictGroundImpact(shell, origin, velocity, VZero,
+        [](float, float) { return std::numeric_limits<float>::quiet_NaN(); }, range));
+}
 
 using Catch::Approx;
 // Vector3 / VZero are global (Math3D.hpp macro-aliases them onto the active precision), not

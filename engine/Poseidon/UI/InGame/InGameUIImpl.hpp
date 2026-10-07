@@ -233,6 +233,14 @@ class InGameUI: public AbstractUI
 	Ref<Font> _font24;
 	Ref<Font> _font36;
 
+    LLink<EntityAI> _rangeUnit;
+    int _rangeWeapon = -1;
+    float _rangeNextUpdate = 0;
+    float _rangeImpact = -1;
+    float _rangeMarked = -1;
+    bool _rangeRevealHeld = false;
+    void DrawCombatAssists(const Camera& camera, EntityAI* vehicle);
+
 	const TargetList *VisibleList() const
 	{
 		AIUnit *unit = GLOB_WORLD->FocusOn();

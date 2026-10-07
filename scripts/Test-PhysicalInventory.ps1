@@ -1,7 +1,7 @@
 <# Installed single-player inventory without a custom invicons asset pack.
    Run under with-game-lock.sh. Uses isolated settings, exits only its own process. #>
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$ExpectedCommit,[switch]$Multiplayer)
+param([Parameter(Mandatory)][string]$ExpectedCommit,[switch]$Multiplayer,[switch]$CombatAssists)
 $ErrorActionPreference = 'Stop'
 if (!$env:LOCK_OWNER) { throw 'Game lock required' }
 $root = Split-Path $PSScriptRoot -Parent
@@ -154,6 +154,33 @@ try {
     Snap '10_capacity_recovered'; Key 41; Display 46
     $receipt.audit=@{removedDuringDragSafe=$true;liveCapacityRefused=$true;refusedItemRecovered=$true}
     $receipt.before=$before; $receipt.afterDrop=$afterDrop; $receipt.afterPickup=$afterPickup
+    if ($CombatAssists) {
+        Exec 'removeAllWeapons player;player addMagazine "M16";player addMagazine "GrenadeLauncher";player addMagazine "GrenadeLauncher";player addWeapon "M16GrenadeLauncher";player selectWeapon "M16Muzzle";player setDir 0'
+        Start-Sleep -Seconds 2
+        Snap '11_bearing_rifle'
+        Exec 'player selectWeapon "M203Muzzle"'
+        Start-Sleep -Seconds 2
+        $receipt.launcher=Value 'currentWeapon player'
+        Require ($receipt.launcher -match 'M203|Grenade') 'Grenade muzzle not selected'
+        Snap '12_grenade_range'
+        $null=Send @{cmd='mouse_button';button=3;down=$true}
+        Start-Sleep -Milliseconds 700
+        Snap '13_grenade_mark'
+        $null=Send @{cmd='mouse_button';button=3;down=$false}
+        Key 18; Display 62020; Key 14; Snap '14_combat_settings'
+        Click 0.335 0.6885; Click 0.335 0.715; Click 0.335 0.7415
+        $assistCfg=Join-Path $env:POSEIDON_USER_DIR 'combat_assists.cfg'
+        $disabled=Get-Content -LiteralPath $assistCfg -Raw
+        Require ($disabled -match 'bearingCallouts=0' -and $disabled -match 'bearingReadout=0' -and $disabled -match 'grenadeRange=0') 'Combat options did not persist'
+        Key 41; Display 46
+        Snap '15_combat_assists_disabled'
+        Key 18; Display 62020
+        Click 0.475 0.781
+        $defaults=Get-Content -LiteralPath $assistCfg -Raw
+        Require ($defaults -match 'bearingCallouts=1' -and $defaults -match 'bearingReadout=1' -and $defaults -match 'grenadeRange=1') 'Combat reset did not restore defaults'
+        Key 41; Display 46; Snap '16_combat_assists_reset'
+        $receipt.combatAssists=@{defaultBearing=$true;selectedGrenadeMuzzle=$receipt.launcher;settingsPersisted=$true;resetPassed=$true;visualReview='pending'}
+    }
     $null=Send @{cmd='exit'}
     Require ($p.WaitForExit(20000) -and $p.ExitCode -eq 0) 'Normal exit failed'
     Require (!(Select-String -Path @($log,$stderr) -Pattern 'UNHANDLED EXCEPTION|Validation Error|DeviceLost|panicked at|wgr_create failed' -Quiet)) 'Runtime error'
