@@ -9,8 +9,8 @@ Cold War Assault engine source. It adds a WGPU renderer, Tidewater ocean renderi
 developer tools and local content compatibility work. This is a source release;
 it is not a complete game or an official Bohemia Interactive product.
 
-This private release candidate is being checked for publication. See
-[RELEASE_STATUS.md](RELEASE_STATUS.md) for the remaining review gates.
+[![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/koosoli)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/koosoli)
 
 ## Engine features
 
@@ -110,7 +110,8 @@ Soft-ground prototypes do not provide general soft-body vehicle physics.
 
 To play Cold War Assault, use your own legally acquired installation. Game
 archives, maps, models, textures, sounds and animation addons are not supplied
-by this source release. Original-game and modern-game compatibility remains
+by this source release. Included project artwork and omitted binary test fixtures
+are documented in [ASSETS.md](ASSETS.md). Original-game and modern-game compatibility remains
 subject to the limitations in [COMPATIBILITY.md](COMPATIBILITY.md).
 
 See [BUILDING.md](BUILDING.md) for the Windows build procedure and

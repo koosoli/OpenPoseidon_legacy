@@ -55,7 +55,9 @@ Generate a new candidate rather than assuming an old folder updates itself.
 The selection policy excludes `.agents/`, `.tmp-movecam/`, `.tmp-shadow/`, the
 private `docs/` tree, old capture material and preparation tooling. Eleven explicitly
 selected documentation images (ten owner-provided captures and the project logo)
-are separate additions, with individual resource/publication review still pending.
+are separate additions, approved for documentation by the owner on 2026-10-07.
+Older binary test/media fixtures without individual provenance are excluded;
+see the release-ready receipt and public ASSETS.md for the retained resource basis.
 The screenshot directory is not copied wholesale. The per-file
 manifest is the authoritative record; merely hiding files with `.gitignore` is
 not an export or a history cleanup.
@@ -66,9 +68,13 @@ On 2026-10-07 Oliver explicitly authorised a cleaned transfer to the still-priva
 release repository. The candidate is now on its independent `main` history.
 See `SOURCE-CANDIDATE-TRANSFER-20261007.md` for source/target pins and verification.
 Privacy findings and the exact clean Windows build/start check have been resolved.
-Malprave source-chain verification and individual fixture/resource/publication
-rights reviews remain open. This private test transfer does not approve a public
-release. `koosoli/OpenPoseidon` must stay private until Oliver explicitly requests
+The owner subsequently confirmed Malprave is GPL under the same licence and
+same upstream, and that the ten screenshots are his own. The release-ready
+follow-up records that confirmation, retains source/component notices and removes
+undocumented binary test/media inputs rather than assert their provenance.
+Parser/integration tests requiring omitted inputs need authored local fixtures.
+The initial candidate records remain historical, superseded by
+private-audit/release-ready-20261007.json for the filtered source release. `koosoli/OpenPoseidon` must stay private until Oliver explicitly requests
 a visibility change.
 
 For the next candidate, refresh every sanitised source replacement from the new
@@ -80,3 +86,22 @@ that exact commit anew. Check the candidate Git tree with
 `scripts/publishing/verify_candidate_git.py`, build it and repeat the relevant
 checks before syncing its reviewed files onto the release repository's existing
 independent history. Never merge private development ancestry into `main`.
+
+
+## Filtered release history
+
+Before filtering the still-private release repository, its exact old main was
+backed up to `codex/backup-clean-release-before-fixture-filter-20261007` on the
+private safety mirror. The reviewed filtered tree becomes an independent root;
+its reachable release history therefore does not retain the omitted fixture
+blobs. Replace only the expected old remote main, using an explicit force-with-lease.
+Keep the backup in the private mirror, never in a branch/tag of the release repo.
+GitHub may retain unreachable objects or cached commit views; rewriting a branch
+is not a claim of server-side object erasure. No real rights infringement has been
+established for the omitted test data; exclusion is a conservative source release
+choice. Do not publish undocumented binary fixtures in future release updates.
+
+This follow-up retains the stable tested development source pin51982. The new
+opt-in Earth elevation streaming experiment is on a separate private feature
+branch and is not silently included in this release. README, sponsor funding,
+resource documentation and test-input exclusions are the only public changes.

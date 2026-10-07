@@ -48,3 +48,18 @@ a source export or release download.
 Release packaging needs a clean build of the exact released source, dependency
 license notices and a separately reviewed file manifest. The historical preview
 packager is not a release distribution procedure.
+
+
+## Fixture availability in this source release
+
+Prebuilt binary test fixtures are deliberately omitted from this release because
+their individual provenance is not fully documented. This includes archived PBOs,
+P3D models, PAA/PAC images, animation, audio, font, world and savegame test files.
+Their omission does not remove runtime engine features or require additional
+files to play: these files are parser and regression-test inputs only.
+
+Test source, textual fixtures and synthetic fixture generators remain included.
+Tests that open omitted files require independently authored local replacements;
+the complete asset-dependent test suite cannot pass on this export alone. Missing
+fixtures are not counted as passing tests. Do not obtain replacements by copying
+retail game data into a public source tree. See [ASSETS.md](ASSETS.md).

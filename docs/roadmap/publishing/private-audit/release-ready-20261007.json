@@ -1,0 +1,1274 @@
+{
+  "state": "REVIEWED_SOURCE_EXPORT_PRIVATE_UNTIL_OWNER_PUBLICATION",
+  "date": "2026-10-07",
+  "source_commit": "51982bdacc6df176ffae9b008761b6061b504acf",
+  "policy_sha256": "8078c912505af517888443dc466313c72948c7addaa579fe4111b9d8cf7fab5f",
+  "manifest_sha256": "110f7f96453d7a137886abe394d069219dead0bdb43114e6c610005ca5b78ba3",
+  "included_files": 4188,
+  "excluded_binary_fixtures": [
+    "apps/tools/Tools/fixtures/check.wav",
+    "tests/fixtures/audio/click.wss",
+    "tests/fixtures/audio/stream_loop.ogg",
+    "tests/fixtures/audio/tone.wav",
+    "tests/fixtures/audio/voice-lang-campaign/dtaExt/sound/test_campaign.Czech.ogg",
+    "tests/fixtures/audio/voice-lang-campaign/dtaExt/sound/test_campaign.ogg",
+    "tests/fixtures/audio/voice-lang-mission/voice_test.demo/sound/test_voice.Czech.lip",
+    "tests/fixtures/audio/voice-lang-mission/voice_test.demo/sound/test_voice.Czech.ogg",
+    "tests/fixtures/audio/voice-lang-mission/voice_test.demo/sound/test_voice.lip",
+    "tests/fixtures/audio/voice-lang-mission/voice_test.demo/sound/test_voice.ogg",
+    "tests/fixtures/audio/voice-lang/intro_line.Czech.lip",
+    "tests/fixtures/audio/voice-lang/intro_line.lip",
+    "tests/fixtures/audio/wave-to-lip/voice_cz.bis.lip",
+    "tests/fixtures/audio/wave-to-lip/voice_cz.wav",
+    "tests/fixtures/audio/wave-to-lip/voice_en.bis.lip",
+    "tests/fixtures/audio/wave-to-lip/voice_en.wav",
+    "tests/fixtures/cfg/binarized_config.bin",
+    "tests/fixtures/font/dummy.ttf",
+    "tests/fixtures/font/legacy-01.paa",
+    "tests/fixtures/font/legacy.fxy",
+    "tests/fixtures/jpg/checker_32x32.jpg",
+    "tests/fixtures/jpg/gradient_128x64.jpg",
+    "tests/fixtures/jpg/gradient_64x64.jpg",
+    "tests/fixtures/jpg/nonpow2_33x33.jpg",
+    "tests/fixtures/mission_linter/unused-synthetic/sound/base.ogg",
+    "tests/fixtures/mission_linter/unused-synthetic/sound/radio.ogg",
+    "tests/fixtures/mission_linter/valid-mission/sound/base.ogg",
+    "tests/fixtures/mission_linter/valid-mission/sound/radio.ogg",
+    "tests/fixtures/mission_smoke/alpha_scenario.cain/overview.paa",
+    "tests/fixtures/mission_smoke/alpha_scenario.cain/sound/line01.Czech.ogg",
+    "tests/fixtures/mission_smoke/alpha_scenario.cain/sound/line01.ogg",
+    "tests/fixtures/mission_smoke/coop_scenario.abel/overview.paa",
+    "tests/fixtures/mission_smoke/coop_scenario.abel/sound/line01.Czech.ogg",
+    "tests/fixtures/mission_smoke/coop_scenario.abel/sound/line01.ogg",
+    "tests/fixtures/mlod/animated_marker_mlod.p3d",
+    "tests/fixtures/mlod/camera_path_a.p3d",
+    "tests/fixtures/mlod/camera_path_b.p3d",
+    "tests/fixtures/mlod/camera_path_c.p3d",
+    "tests/fixtures/mlod/complex_vehicle_mlod.p3d",
+    "tests/fixtures/mlod/fuzz_shape_lod_oob.p3d",
+    "tests/fixtures/mlod/fuzz_shape_serializebin_oob.p3d",
+    "tests/fixtures/mlod/fuzz_tagg_oob.p3d",
+    "tests/fixtures/mlod/p3dm_geometry_mass.p3d",
+    "tests/fixtures/mlod/p3dm_mixed_signatures.p3d",
+    "tests/fixtures/mlod/p3dm_two_lod.p3d",
+    "tests/fixtures/mlod/p3dm_uv_bad_size.p3d",
+    "tests/fixtures/mlod/p3dm_uv_collapse.p3d",
+    "tests/fixtures/mlod/unknown_lod_signature.p3d",
+    "tests/fixtures/mods-badmodel/@badmodel/addons/badmodel.pbo",
+    "tests/fixtures/mods-campaigns/@tricampname/Campaigns/tri_campname.pbo",
+    "tests/fixtures/mods-campaigns/@tridebrief/Campaigns/tri_debrief.pbo",
+    "tests/fixtures/mods-handitem/@handitem/addons/handitem.pbo",
+    "tests/fixtures/mods-manymags/@manymags/addons/manymags.pbo",
+    "tests/fixtures/mods-mp-folders/@mpfolders/addons/fixture_core.pbo",
+    "tests/fixtures/mods-mp-folders/@mpfolders/mpmissions/Coop/Small/tri_nested.demo.pbo",
+    "tests/fixtures/mods-mp-folders/@mpfolders/mpmissions/Coop/tri_in_folder.demo.pbo",
+    "tests/fixtures/mods-mp-folders/@mpfolders/mpmissions/tri_folder_root.demo.pbo",
+    "tests/fixtures/mods-mp-missions/@mpmissionbrowser/addons/fixture_core.pbo",
+    "tests/fixtures/mods-mp-missions/@mpmissionbrowser/mpmissions/addon mission from mod.demo.pbo",
+    "tests/fixtures/mods-mp-missions/@mpmissionbrowser/mpmissions/tri_under_score.demo.pbo",
+    "tests/fixtures/mods-sp-missions/@trisp/Missions/tri_sp_gap1.Demo.pbo",
+    "tests/fixtures/mods-sp-missions/@trisp/Missions/tri_sp_local.Demo.pbo",
+    "tests/fixtures/mods-sp-missions/@trisp/Missions/tri_sp_noaddon.Demo.pbo",
+    "tests/fixtures/mods-sp-missions/@trisp/Missions/tri_sp_noname.Demo.pbo",
+    "tests/fixtures/mods-sp-missions/@trisp/Missions/tri_sp_noworld.trinoworld.pbo",
+    "tests/fixtures/mods/@fixturemod/addons/fixture_core.pbo",
+    "tests/fixtures/p3d/animated_actor.p3d",
+    "tests/fixtures/p3d/animated_morph_odol.p3d",
+    "tests/fixtures/p3d/complex_vehicle.p3d",
+    "tests/fixtures/p3d/crew_proxy.p3d",
+    "tests/fixtures/p3d/empty_shape.p3d",
+    "tests/fixtures/p3d/flat_quad.p3d",
+    "tests/fixtures/p3d/light_disc.p3d",
+    "tests/fixtures/p3d/multi_lod_vehicle.p3d",
+    "tests/fixtures/p3d/proxy_structure.p3d",
+    "tests/fixtures/p3d/simple_proxy.p3d",
+    "tests/fixtures/p3d/simple_tree.p3d",
+    "tests/fixtures/p3d/sky_plane.p3d",
+    "tests/fixtures/paa/fuzz_argb8888_oob.paa",
+    "tests/fixtures/paa/fuzz_dxt_oob.paa",
+    "tests/fixtures/paa/fuzz_lzw_overflow.paa",
+    "tests/fixtures/paa/synthetic_ai88.paa",
+    "tests/fixtures/paa/synthetic_ai88_lzss.pac",
+    "tests/fixtures/paa/synthetic_argb4444.paa",
+    "tests/fixtures/paa/synthetic_dxt1.paa",
+    "tests/fixtures/paa/synthetic_dxt3.paa",
+    "tests/fixtures/paa/synthetic_dxt5.paa",
+    "tests/fixtures/paa/taggs_compressed_mip.paa",
+    "tests/fixtures/paa/taggs_full.paa",
+    "tests/fixtures/paa/taggs_none.paa",
+    "tests/fixtures/paa/taggs_unknown.paa",
+    "tests/fixtures/pac/synthetic_dark.pac",
+    "tests/fixtures/pac/synthetic_default.pac",
+    "tests/fixtures/pbo/addon_fixture.pbo",
+    "tests/fixtures/pbo/addon_fixture.pbo.zst",
+    "tests/fixtures/pbo/mission_fixture.Intro.pbo",
+    "tests/fixtures/pbo/triisl.pbo",
+    "tests/fixtures/pbo/xor1024_cfgpatches.bin",
+    "tests/fixtures/png/rgb_opaque_32x32.png",
+    "tests/fixtures/png/rgba_blend_32x32.png",
+    "tests/fixtures/png/rgba_cutout_32x32.png",
+    "tests/fixtures/png/rgba_opaque_32x32.png",
+    "tests/fixtures/qstream/buffer_large.bin",
+    "tests/fixtures/qstream/buffer_medium.bin",
+    "tests/fixtures/qstream/test_binary.dat",
+    "tests/fixtures/qstream/test_large.bin",
+    "tests/fixtures/rtm/actor_motion.rtm",
+    "tests/fixtures/rtm/marker_motion.rtm",
+    "tests/fixtures/savegame/save.fps",
+    "tests/fixtures/studio/Addons/Vehicle.pbo",
+    "tests/fixtures/studio/Addons/addon_fixture.pbo",
+    "tests/fixtures/studio/Addons/font_fixture.pbo",
+    "tests/fixtures/studio/Addons/mission_fixture.Intro.pbo",
+    "tests/fixtures/studio/ambient.wav",
+    "tests/fixtures/studio/data/synthetic_grid.paa",
+    "tests/fixtures/studio/vehicle.p3d",
+    "tests/fixtures/wrp/test_world.wrp",
+    "tests/integration/ingame/custom_profile_media.test/Sound/tri_profile_ping.wav",
+    "tests/integration/ingame/custom_profile_media.test/face.paa",
+    "tests/integration/missions/sound_preload.Demo/sound/say.wav",
+    "tests/integration/multiplayer/admin_restart.test/jip_basic.Demo.pbo",
+    "tests/integration/multiplayer/classic_lobby_second_join.test/jip_basic.Demo.pbo",
+    "tests/integration/multiplayer/custom_face_hosted_visual.test/face.jpg",
+    "tests/integration/multiplayer/custom_face_restart_respawn.test/face.paa",
+    "tests/integration/multiplayer/custom_face_restart_respawn.test/jip_stress.Demo.pbo",
+    "tests/integration/multiplayer/custom_face_visual.test/client1/face.jpg",
+    "tests/integration/multiplayer/custom_face_visual.test/client2/face.jpg",
+    "tests/integration/multiplayer/custom_media_jip.test/client1/Sound/tri_mp_ping.wav",
+    "tests/integration/multiplayer/custom_media_jip.test/client1/face.jpg",
+    "tests/integration/multiplayer/custom_media_jip.test/client2/Sound/tri_mp_ping.wav",
+    "tests/integration/multiplayer/custom_media_jip.test/client2/face.jpg",
+    "tests/integration/multiplayer/first_play_movement.test/jip_basic.Demo.pbo",
+    "tests/integration/multiplayer/first_play_state_diagnostic.test/jip_basic.Demo.pbo",
+    "tests/integration/multiplayer/full_stack_modded_media_join.test/client1/Sound/tri_mp_ping.wav",
+    "tests/integration/multiplayer/full_stack_modded_media_join.test/client1/face.jpg",
+    "tests/integration/multiplayer/late_joiner_media.test/early/Sound/tri_mp_ping.wav",
+    "tests/integration/multiplayer/late_joiner_media.test/early/face.jpg",
+    "tests/integration/multiplayer/late_joiner_media.test/late/Sound/tri_mp_ping.wav",
+    "tests/integration/multiplayer/late_joiner_media.test/late/face.jpg",
+    "tests/integration/multiplayer/mission_rotation.test/rot_one.Demo.pbo",
+    "tests/integration/multiplayer/mission_rotation.test/rot_two.Demo.pbo",
+    "tests/integration/multiplayer/mission_transfer_progress_ui.test/jip_basic.Demo.pbo",
+    "tests/integration/multiplayer/squad_insignia_https.test/fixtures/synthetic_grid.paa",
+    "tests/integration/multiplayer/von_bidirectional.test/jip_basic.Demo.pbo",
+    "tests/integration/multiplayer/von_dedicated.test/jip_basic.Demo.pbo",
+    "tests/integration/multiplayer/von_lobby.test/jip_basic.Demo.pbo",
+    "tests/integration/multiplayer/von_push_to_talk.test/jip_basic.Demo.pbo",
+    "tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/CoverageSample.Noe/radio.Czech.ogg",
+    "tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/CoverageSample.Noe/radio.Polish.ogg",
+    "tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/CoverageSample.Noe/radio.ogg",
+    "tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/DemoSoundSubdir.Noe/sound/line.Czech.ogg",
+    "tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/DemoSoundSubdir.Noe/sound/line.ogg"
+  ],
+  "owner_decisions": {
+    "malprave": "Owner confirms GPL under same licence and same upstream; source credits retained. This records the owner confirmation, not independent access to unavailable earlier patch files.",
+    "screenshots": "Owner confirms these screenshots are his own and asks that they remain in README. Captures are documentation, not redistribution of their depicted game assets.",
+    "visibility": "Keep repository private until explicit request to make public.",
+    "fixture_filter": "Owner permits removing files with uncertain provenance."
+  },
+  "retained_resources": [
+    {
+      "path": "assets/inventory/ak_rifle.paa",
+      "sha256": "e707c79f25e303c4aa547c627c5b233e499fa5dd1011dc62de53179033a3406e",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/ak_rifle.png",
+      "sha256": "a9fdd6f7e774c2ca74aad1104a126501dd77f5f45c9f2a6448a7af1ae827a96c",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/binoculars.paa",
+      "sha256": "b219a86a94da716cc239139b3aa22c66702a2e7341946e88c4fb1f21a417699f",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/binoculars.png",
+      "sha256": "896517f7c4e7cb5003ec5e687fd0c55623f993a8d05cd5984bf6f4cbf1eb920e",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/curved_magazine.paa",
+      "sha256": "4d8176afc1e8da6f92b2f66f6a3556a96b9ec0d845e82ec99471dc5ca6327012",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/curved_magazine.png",
+      "sha256": "362a79d387e03dfd5e49296f1dcdb80841707a1dbd4e2ad82f89469c5cd7d87e",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/grenade.paa",
+      "sha256": "e913839aaf52da3008766408aede8344a9b4352b287dbb39d5d5a315abc63f53",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/grenade.png",
+      "sha256": "be29ccd6990787fae29aec12a359251b44ca2910e15169c71f97a82a56042ff1",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/launcher.paa",
+      "sha256": "2ff1aae2fc149685d8ec8de354c4fb7a800c1812f99b87d46fde1323bd130e0d",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/launcher.png",
+      "sha256": "76983b5ed0b4f0296186c10235cd1431059ed9c89128fe1617f66c28452c836d",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/m16.paa",
+      "sha256": "71981482c51993bffd828f343a89d88277c202f7f81763260370657e1fb7f5b0",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/m16.png",
+      "sha256": "bc5f4be9039e0a656c5c501fb1b642099a197ec74c669d9b5b745ee253ed41e4",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/machinegun.paa",
+      "sha256": "f56dce03f436dd95d73e2fb4d02231ebecc7b4c6f2b748209979f0f9ef56e12b",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/machinegun.png",
+      "sha256": "16edf0df68dd564eb6bde1fc97724537fc51be67c3357747f83d7a36e7622d57",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/magazine.paa",
+      "sha256": "db81adb4a802a190d1b402d50da893af2cdeccf5355c8553582fdff8d69cbcdc",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/magazine.png",
+      "sha256": "eb218b5bf0220511469e5edbb1692d7a126f6ef76a93db09afb223043d24627e",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/mine.paa",
+      "sha256": "d9996cb1f7686ea7f56afb7148fc46f58c663d7dc1cd8e44cf56452a4d37f5b1",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/mine.png",
+      "sha256": "c177360bc8c9e73e5a0458268edbe2e26f419ea3aec8fdb524ebdefeb8af8c8e",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/nvg.paa",
+      "sha256": "038bcceea3e49ddd7716a19ae7147b42f8d89391ab1d1426603c8e03848b7606",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/nvg.png",
+      "sha256": "3cf503b10a2c039e08bd5591b4a23f2085a95b905889bc39ac844927b1ebb911",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/pistol.paa",
+      "sha256": "67a170a1a57f5efe8bd396e208438d39f4178e2e78d89e562a125a935166343e",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/pistol.png",
+      "sha256": "074c657d8ae00637a7c0c0aa1b83627858cbe0e0ce6522225b97e3aae785bb39",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/rifle.paa",
+      "sha256": "4b1dfacc1b9aa8f452a61f125d47dacc64c7f93f5ea47c1171a4e84331742070",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/rifle.png",
+      "sha256": "fa41b53ac77db8c1e25cd723934d5128b19d8934e2e757ba70c89ff64b58bb03",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/rocket.paa",
+      "sha256": "b4e73dd8718dc0ad6864b5899868f87b00c13df7f0c0fe915f54ab354f61f4d4",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/rocket.png",
+      "sha256": "0ace725f0d72af5243187868a03cd4aa0e5a49112c46b42f7cfdc862daa3b057",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/satchel.paa",
+      "sha256": "0f17698f77af6ae21c0208668121f9fdece5b818ef463f1233363c0fd0cb7acf",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/satchel.png",
+      "sha256": "d8660d78936f25a441c123d15a6b45aa1ce325296d5d72927d0c69abdab7cc16",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/scoped_rifle.paa",
+      "sha256": "5fe6b295225879e1321c45960fdbadc16eb09a92a3a1685182fc672be4be8bb7",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/scoped_rifle.png",
+      "sha256": "14dca4a047bb82a2c54bd2931ee6f9d090b47b4d84606d0d404e8879ea24b4e0",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/smg.paa",
+      "sha256": "430d1ebcc39f85d72aee16c3e253f4097a80c350cd75a61f37c5dee4a95a45bf",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/smg.png",
+      "sha256": "86199b3e2d5d8e45e9d3377020088b63ea3b57a44ab194da29b9a05a0b8899a9",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/smoke.paa",
+      "sha256": "ef3a91d61d18ef6c3fdb76fb5dcbb60a3d686e09925db374b4fad07efaccaeb5",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/inventory/smoke.png",
+      "sha256": "df9f96a453a36586c03a2b1e75dceede19137751ad6de4b45af664ecab8c6e28",
+      "basis": "17 original icon manifest hashes"
+    },
+    {
+      "path": "assets/ui/openposeidon_logo.paa",
+      "sha256": "364cdadad48b980e95a485771c59c0638c3f42cbe7f3d8f60cc06ddce1ba11a0",
+      "basis": "project logo/application icon"
+    },
+    {
+      "path": "assets/ui/openposeidon_logo.png",
+      "sha256": "f6aaf6bb11991c7d3bce0556de18fbf817bfaad1b97ffbcb1061a14780301a55",
+      "basis": "project logo/application icon"
+    },
+    {
+      "path": "resources/icon-demo.ico",
+      "sha256": "272d1ca4a88ac071e2c8039dc7a1412f446384156f5c6a5b7cde46ea6c4209fb",
+      "basis": "project logo/application icon"
+    },
+    {
+      "path": "resources/icon-demo.rc",
+      "sha256": "5ebc09f9484468e315920cd2860e6f75a10ec3f1fb1424277fef9cbb9c65d383",
+      "basis": "project logo/application icon"
+    },
+    {
+      "path": "resources/icon-game.ico",
+      "sha256": "272d1ca4a88ac071e2c8039dc7a1412f446384156f5c6a5b7cde46ea6c4209fb",
+      "basis": "project logo/application icon"
+    },
+    {
+      "path": "resources/icon-game.rc",
+      "sha256": "b96d4606da4f0223f5fe77eec57eb72310580502cd4ad87739c19e9f9cddfddc",
+      "basis": "project logo/application icon"
+    },
+    {
+      "path": "resources/icon-launcher.ico",
+      "sha256": "272d1ca4a88ac071e2c8039dc7a1412f446384156f5c6a5b7cde46ea6c4209fb",
+      "basis": "project logo/application icon"
+    },
+    {
+      "path": "resources/icon-launcher.rc",
+      "sha256": "19187bacedf861aaedefcc8252695baabe5fa49a47382ef284a80ffe3d9260a9",
+      "basis": "project logo/application icon"
+    },
+    {
+      "path": "resources/icon-openposeidon.ico",
+      "sha256": "272d1ca4a88ac071e2c8039dc7a1412f446384156f5c6a5b7cde46ea6c4209fb",
+      "basis": "project logo/application icon"
+    },
+    {
+      "path": "resources/icon-server.ico",
+      "sha256": "272d1ca4a88ac071e2c8039dc7a1412f446384156f5c6a5b7cde46ea6c4209fb",
+      "basis": "project logo/application icon"
+    },
+    {
+      "path": "resources/icon-server.rc",
+      "sha256": "2f5c5985cae4c381404fb54ccc88a43e3257e217787303117a6d627ade0b23cb",
+      "basis": "project logo/application icon"
+    },
+    {
+      "path": "resources/icon-tool.ico",
+      "sha256": "272d1ca4a88ac071e2c8039dc7a1412f446384156f5c6a5b7cde46ea6c4209fb",
+      "basis": "project logo/application icon"
+    },
+    {
+      "path": "resources/icon-tool.rc",
+      "sha256": "9d467e47c090d1516e8580f643556306edd0c5ffce97416b98b4e2a89eff9ed7",
+      "basis": "project logo/application icon"
+    },
+    {
+      "path": "resources/sky/bright_stars.pstar",
+      "sha256": "02f95150f76a9d6e5d1fbc7e3da1a02474aa60940b8cbb5566570876500846ae",
+      "basis": "documented NASA SVS / Yale sources and notices"
+    },
+    {
+      "path": "resources/sky/milkyway.pskytex",
+      "sha256": "56c1f524f72603b5bb686f577ad1f9391a57f10fb78dc2afa78bff162ed492b4",
+      "basis": "documented NASA SVS / Yale sources and notices"
+    },
+    {
+      "path": "tests/fixtures/ASSET_SOURCES.md",
+      "sha256": "aeb2331f9e5e851f587f8735b02c4801ceeb86b351937fd66907a0b12478e967",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/audio/voice-lang-campaign/description.ext",
+      "sha256": "f9e8a79b10284bbebae620b108b1f7d319cb1eb2933cd3fc0e3521b62669178a",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/audio/voice-lang-mission/voice_test.demo/description.ext",
+      "sha256": "5c3be4c9a7421e47a9e9b5e16b9208cd185c9e86b0698811320d7d8ca9f83e62",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/cfg/contextControls_prior.cfg",
+      "sha256": "beffb76c75b0284e3de48c1a1b55e34baebf9d4fd52f71df4bbe3d40e4a3a0e8",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/cfg/contextControls_v1_full.cfg",
+      "sha256": "234866de88f4345154e7567df1f88ebb281bad06fc32582ab231a9f95cd02d63",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/cfg/contextControls_v2_full.cfg",
+      "sha256": "5f9ee4ce56007bbc4d673adb6e1210b2758bca03369936bcc4d716a548940633",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/cfg/contextControls_v3_map_wheel.cfg",
+      "sha256": "12a1da84d925b3cfa4dc1e3b285567543ebb09c5cee4cb2bba4109abf3934855",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/cfg/contextControls_v4_chat.cfg",
+      "sha256": "871728d6075a1e61c1a0f058dd8895aa3e6d10d5d7108cb0801741abc2e6f732",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/cfg/engine_config_test.cfg",
+      "sha256": "67efee53eb58c2f5de5d8974e85db482cdbe20adbbbf17d5b04d6f73a7e58b63",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/cfg/real_game_config.cfg",
+      "sha256": "5f95f3c82e6857911790147d897c6a908698ba23b40cf2afa1373aa26d9be641",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/cfg/user_config_test.cfg",
+      "sha256": "244abc69df162de38e212ee14ed73fcbf3ed520da3412699246ab6cbecbb15c9",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/cfg/user_config_with_fov.cfg",
+      "sha256": "2e1c49ebfe368391724c2b87ed633d0d2d01228dff92e9bf149f211bcaa4aca4",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/config-replace/bin/config-extra.cpp",
+      "sha256": "565f55da58e252d57545c89a3c35641183a7d26f5a6986bc11b36ee541a07067",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/config-replace/bin/config.cpp",
+      "sha256": "2b66471ae20bd733b6f856445aba454c84aca8efa8bd4f2d7f05c2cf7ee23417",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/config-replace/bin/resource.cpp",
+      "sha256": "076ab8eae95d1581ca3975cdc9dc69c5025bd53420d8cd81fb2fd6aecf122488",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/config-replace/mod/bin/config.cpp",
+      "sha256": "fc7d661e8fde78bed7fb63f5221dd227499ac25136c31bea1a55e04663587ba2",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/config-replace/mod/bin/resource.cpp",
+      "sha256": "b693f7cb540859a7a318a36a05898085559f76f6b9b0fb03ab74a0370d00fa64",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/config/addon_config.txt",
+      "sha256": "89cdad4bd80ba8e70367ce9adef67fcce73f3ded969858a85a389b9c37977a86",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/config/arrays.txt",
+      "sha256": "de4fd95ede5dbe1072d486f6cef174c158649018117d86e6528177b8ad10e3b9",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/config/comments.txt",
+      "sha256": "e520597eefeb8fbe1dd02cf8ff271f958f2ea38e77e6d76fc9766e5f2010d857",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/config/config_strings.txt",
+      "sha256": "8fb97801d877f808960f46f16ede3facbb5bf71805e386019df28f88087e819b",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/config/description_ext.txt",
+      "sha256": "132aff682d9a4fca41acff0b6ca8b9c6f3d412b89ae1698015df0a1ae8f0661d",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/config/inheritance.txt",
+      "sha256": "e6624d91ab7644ea5a0796f62a2effbe2b3934a7f93acc6c3b89fe5163cb6db7",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/config/nested.txt",
+      "sha256": "94356b3cba977680581acde0a4f13a9d96f3424bf049a9e709bd804996e9435c",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/config/simple.txt",
+      "sha256": "dc000ba2ccfae64a9e5596538ebadc2a6066bcf41f52bfec5a22a82d7c5ee32a",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/config/vehicle_config.txt",
+      "sha256": "d28f2d6cfc0b769e0d4462ce09148c2e2a8d823e35de4c2363bffdcb481b6d6e",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/config/weapon_config.txt",
+      "sha256": "e730007e98909694c77ab6424ee2876fa8938faf9103e30af84a6019a11ccad4",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/default-content/incompatible-vehicle-mod.json",
+      "sha256": "5ff3211d64870031a0be2b055cfaa12fa37c271976e93028627a6a004987fa02",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/default-content/jeep-user-priority/config.cpp",
+      "sha256": "7491d7222493b8604830f66ecdabf054397223fc889a147124282688c8c27f01",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/clean.sqf",
+      "sha256": "3ebd0ef93be6323319da8dd17f46847cd5367e197a71e33df2af6c73b02c2c04",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/create_units.sqf",
+      "sha256": "c6bc92ba4a7fb985e411e2dc715c779bf16b54673d2ab6b0797ddfd6a3f3ec3b",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/damage_monitor.sqs",
+      "sha256": "d6b6ca310a29a920f13a20d8face6506bccd675e240b05d962f93f5f6e86652a",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/delay.sqs",
+      "sha256": "eedcc30e1627ad9ebd488ba28950574bd3aa8f084f5116c40a37aaf444603bea",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/distance.sqf",
+      "sha256": "339e76766c3785ae4614d4d1fa744b4ad6219b4116cee206deafe1b781d682e1",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/error.sqf",
+      "sha256": "31814d5361ee7535c3b9acbc6ac4ecab56a8b6adc57fd196f24c32943fc01c2f",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/exec_test.sqf",
+      "sha256": "e9c8270d96f1bbb629ace16613788b2f788a9e7f351494a9e82b7a7bf789c739",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/hello.sqf",
+      "sha256": "47be6997c4df71286a575cd5c7872e53bbe4559f5e01b90f1a1c893ea418927b",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/loop.sqs",
+      "sha256": "42107d37dd43a907d72317f0d46c0ddc7d8a58bfe0852a653905e8fd845d6adc",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/mission_init.sqs",
+      "sha256": "2afbb5f79227c7231c399a00349e924336e10e7b015afd9cad53b2c46cb2cc92",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/patrol.sqs",
+      "sha256": "e5436df38ae0595924c67b3987e9ee8ffb28386a72af13d32e993bc0c9865ca9",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/squad_management.sqf",
+      "sha256": "104a388985fbc9b68bb5e863392486144ac249ad6588f330607ff013990a2fb6",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/this_sqs.sqs",
+      "sha256": "6a26b8f8ee4d7f81288acfe6d8bb8617faa4997648e2c0657e1ad01141b87db7",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/this_test.sqf",
+      "sha256": "59923bc0ba675322b4fca6712137dd24f9dd744d3d332f87c2bf03cbe78b99c4",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/utility_functions.sqf",
+      "sha256": "4dbbcfaebce9be71ca0c6e8b72c04ac7111afa7553522ad6b20d23691884528c",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/validate_book/test-chapter.md",
+      "sha256": "7037c78988ff5ebc4524f8c500c8472e7f51ee9641fd0c8cb72e8c9dd69a158a",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/validate_ref/addEventHandler.json",
+      "sha256": "369daac14ed91860180c061a387613ab02569ebb1b427a4772438be838ee90af",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/validate_ref/hint.json",
+      "sha256": "4628efb16dc2b69fb320639b9a21b7fcfd13f8f7fe9d6cc13ede61e2f8e96832",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/evaluator/variables.sqf",
+      "sha256": "4f83b09c4546f0eb24bde5de7be7a18c9d92c6de42e0791bd062ceb3343eed54",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/material/native_prefetch_decoy.emat",
+      "sha256": "ef32e1a8a4b8c2992eec2826b5913f1bea04398e329b8acab19e187582f90c36",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_linter/unused-synthetic/briefing.utf8.html",
+      "sha256": "1f68736780bf9d78162b2d10baf1a4fa903a9b0bc0f0551d1a5aa410a7ddeff5",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_linter/unused-synthetic/description.ext",
+      "sha256": "f9a64262a36777efbaf246bdf076d71624c6d4331693ef99639f972cedf1f658",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_linter/unused-synthetic/init.sqs",
+      "sha256": "74cee824b7a5fe2242d9b8e79b2a542fc293d187dae41f477d83c04ef003d3c6",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_linter/unused-synthetic/mission.sqm",
+      "sha256": "e1395ac00bf8f88eed4501b52efe3abed8be2a4008cf2a19ae6a30e9045223a9",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_linter/unused-synthetic/overview.utf8.html",
+      "sha256": "de44229f5486e873ab49753f7f615c5f2ce682bb88518d8c0f5f49688a4a9019",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_linter/unused-synthetic/stringtable.utf8.csv",
+      "sha256": "0ca88526c614d40638e49b2c81a4fa5bd2a2bf31746eb7f890538b6971eff569",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_linter/valid-mission/briefing.utf8.html",
+      "sha256": "1f68736780bf9d78162b2d10baf1a4fa903a9b0bc0f0551d1a5aa410a7ddeff5",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_linter/valid-mission/description.ext",
+      "sha256": "f9a64262a36777efbaf246bdf076d71624c6d4331693ef99639f972cedf1f658",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_linter/valid-mission/init.sqs",
+      "sha256": "74cee824b7a5fe2242d9b8e79b2a542fc293d187dae41f477d83c04ef003d3c6",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_linter/valid-mission/mission.sqm",
+      "sha256": "1b83a52dcce3766c2d024bd1fd524df92bd97f106d71b7f09dab5e05f598b714",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_linter/valid-mission/overview.utf8.html",
+      "sha256": "de44229f5486e873ab49753f7f615c5f2ce682bb88518d8c0f5f49688a4a9019",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_linter/valid-mission/stringtable.utf8.csv",
+      "sha256": "0ca88526c614d40638e49b2c81a4fa5bd2a2bf31746eb7f890538b6971eff569",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/alpha_scenario.cain/briefing.utf8.html",
+      "sha256": "c365a643dfc83949fc9925cc73e32707a264e293c13348756853ad5b8568e168",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/alpha_scenario.cain/description.ext",
+      "sha256": "7378acd83a4c5a34b7e337abd61c9c593b14e175aadbcb2c4e4d8048e4cc6469",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/alpha_scenario.cain/init.sqs",
+      "sha256": "7c356d283c41a890a346f883e3935957337798c15659a1ca02b4de074632a22f",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/alpha_scenario.cain/mission.sqm",
+      "sha256": "05dfcce32d8d65280caf07626cbdfcab6e35ae67953f670dd7a357904d5facbb",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/alpha_scenario.cain/overview.utf8.html",
+      "sha256": "ec3b52e611e5ef201757ad4d69513333baf1dc6d3a9e665a0cb6994262faaf27",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/alpha_scenario.cain/stringtable.utf8.csv",
+      "sha256": "d4c0e30247bd812a5987ea363a97aa7ebcdfb397a2ae174cdbb26ca5cae404b6",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/bravo_scenario.cain/briefing.utf8.html",
+      "sha256": "c365a643dfc83949fc9925cc73e32707a264e293c13348756853ad5b8568e168",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/bravo_scenario.cain/description.ext",
+      "sha256": "7378acd83a4c5a34b7e337abd61c9c593b14e175aadbcb2c4e4d8048e4cc6469",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/bravo_scenario.cain/init.sqs",
+      "sha256": "7c356d283c41a890a346f883e3935957337798c15659a1ca02b4de074632a22f",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/bravo_scenario.cain/mission.sqm",
+      "sha256": "05dfcce32d8d65280caf07626cbdfcab6e35ae67953f670dd7a357904d5facbb",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/bravo_scenario.cain/overview.utf8.html",
+      "sha256": "ec3b52e611e5ef201757ad4d69513333baf1dc6d3a9e665a0cb6994262faaf27",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/bravo_scenario.cain/stringtable.utf8.csv",
+      "sha256": "d4c0e30247bd812a5987ea363a97aa7ebcdfb397a2ae174cdbb26ca5cae404b6",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/coop_scenario.abel/briefing.utf8.html",
+      "sha256": "c365a643dfc83949fc9925cc73e32707a264e293c13348756853ad5b8568e168",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/coop_scenario.abel/description.ext",
+      "sha256": "7378acd83a4c5a34b7e337abd61c9c593b14e175aadbcb2c4e4d8048e4cc6469",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/coop_scenario.abel/init.sqs",
+      "sha256": "7c356d283c41a890a346f883e3935957337798c15659a1ca02b4de074632a22f",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/coop_scenario.abel/mission.sqm",
+      "sha256": "05dfcce32d8d65280caf07626cbdfcab6e35ae67953f670dd7a357904d5facbb",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/coop_scenario.abel/overview.utf8.html",
+      "sha256": "ec3b52e611e5ef201757ad4d69513333baf1dc6d3a9e665a0cb6994262faaf27",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/coop_scenario.abel/stringtable.utf8.csv",
+      "sha256": "d4c0e30247bd812a5987ea363a97aa7ebcdfb397a2ae174cdbb26ca5cae404b6",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/delta_scenario.cain/briefing.utf8.html",
+      "sha256": "c365a643dfc83949fc9925cc73e32707a264e293c13348756853ad5b8568e168",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/delta_scenario.cain/description.ext",
+      "sha256": "7378acd83a4c5a34b7e337abd61c9c593b14e175aadbcb2c4e4d8048e4cc6469",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/delta_scenario.cain/init.sqs",
+      "sha256": "7c356d283c41a890a346f883e3935957337798c15659a1ca02b4de074632a22f",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/delta_scenario.cain/mission.sqm",
+      "sha256": "05dfcce32d8d65280caf07626cbdfcab6e35ae67953f670dd7a357904d5facbb",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/delta_scenario.cain/overview.utf8.html",
+      "sha256": "ec3b52e611e5ef201757ad4d69513333baf1dc6d3a9e665a0cb6994262faaf27",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/delta_scenario.cain/stringtable.utf8.csv",
+      "sha256": "d4c0e30247bd812a5987ea363a97aa7ebcdfb397a2ae174cdbb26ca5cae404b6",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/direct_quick.eden/init.sqs",
+      "sha256": "7c356d283c41a890a346f883e3935957337798c15659a1ca02b4de074632a22f",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/direct_quick.eden/mission.sqm",
+      "sha256": "05dfcce32d8d65280caf07626cbdfcab6e35ae67953f670dd7a357904d5facbb",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/echo_scenario.cain/briefing.utf8.html",
+      "sha256": "c365a643dfc83949fc9925cc73e32707a264e293c13348756853ad5b8568e168",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/echo_scenario.cain/description.ext",
+      "sha256": "7378acd83a4c5a34b7e337abd61c9c593b14e175aadbcb2c4e4d8048e4cc6469",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/echo_scenario.cain/init.sqs",
+      "sha256": "7c356d283c41a890a346f883e3935957337798c15659a1ca02b4de074632a22f",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/echo_scenario.cain/mission.sqm",
+      "sha256": "05dfcce32d8d65280caf07626cbdfcab6e35ae67953f670dd7a357904d5facbb",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/echo_scenario.cain/overview.utf8.html",
+      "sha256": "ec3b52e611e5ef201757ad4d69513333baf1dc6d3a9e665a0cb6994262faaf27",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/echo_scenario.cain/stringtable.utf8.csv",
+      "sha256": "d4c0e30247bd812a5987ea363a97aa7ebcdfb397a2ae174cdbb26ca5cae404b6",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/mp_direct_quick.eden/description.ext",
+      "sha256": "bdb57d73c377fa2ee2c2f579eb9285477dc1ccf1bdd5efebc964ca80d5eb1d10",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mission_smoke/mp_direct_quick.eden/mission.sqm",
+      "sha256": "8058f02fdfc04d2e1f26d776e44dca076ded92560c3916df740e1b3cd16a18be",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/missions/Tank.Intro/description.ext",
+      "sha256": "10ee64128c705692bc204e08c8c62a8da5a9d144ad7c04d79f3538fe37f2a44e",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/missions/Tank.Intro/mission.sqm",
+      "sha256": "7c0555e4574c2c248a81716ed9847a4499bd69e1ea499091889d6e8ff97e1d41",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mlod/make_p3dm_fixtures.py",
+      "sha256": "c473d2e0c908f5883f57268c4ab3e26149c8f295198ad80e33d24254490b1353",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-badmodel/@badmodel/source/config.cpp",
+      "sha256": "6358587a26f4109c5b374c02ddc9cc245595fce17f511ad2f2b09c0a37aa32d4",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-campaigns/@tricampname/mod.json",
+      "sha256": "b553d57a4a9c52f5950dc0d2cc5bdfdc857efaab7c08cd224bc6c97dc3597685",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-campaigns/@tridebrief/mod.json",
+      "sha256": "263ebf65422523d596f3d136ba8a1b9fd5ca67bdb57fb88f10c65bfdc972794d",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-handitem/@handitem/source/config.cpp",
+      "sha256": "54d3f905c49e64cfd724671697cd46c9d3b3b856d184bc1a275af786fa560e6c",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-intro/@triintro/Anims/intro.Demo/intro.sqs",
+      "sha256": "cf0ce32c55fde7f50586cd1c6e9356f2ff3aecca63aa4deb76c11a5227663214",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-intro/@triintro/Anims/intro.Demo/mission.sqm",
+      "sha256": "ce9bab4404a8169a01e18c7aae8a81ef6271891e445312884163663da17d13db",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-intro/@triintro/Anims/intro.Intro/intro.sqs",
+      "sha256": "cf0ce32c55fde7f50586cd1c6e9356f2ff3aecca63aa4deb76c11a5227663214",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-intro/@triintro/Anims/intro.Intro/mission.sqm",
+      "sha256": "ce9bab4404a8169a01e18c7aae8a81ef6271891e445312884163663da17d13db",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-manymags/@manymags/source/config.cpp",
+      "sha256": "6cd39bb3d0e8bd96c568d7e69726da33998038dbb6eb1463b9cc6faebef19a0e",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-mp-folders/@mpfolders/mod.json",
+      "sha256": "58ba2dafd40ccc392b308467e81b32cb3b848b572380357d2372fa79607fbb86",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-mp-missions/@mpmissionbrowser/mod.json",
+      "sha256": "a545a788a7b506e770a3df7b7682f256ddc443e0b5c474cd759090ab86d1f5b2",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-nordicnames/@nordicnames/bin/config.cpp",
+      "sha256": "891683c95b462d1ec5862d61d3ffcbb96d92243e3f9f79522c893d21b42073d2",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-sp-missions/@trisp/Missions/TriLoose.Demo/mission.sqm",
+      "sha256": "b7a99fe547fdfc14a44198f4034809381d05b578fcc4450414574e8afb0788be",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-sp-missions/@trisp/Missions/mets\u00e4ss\u00e4.Demo.pbo",
+      "sha256": "dcf90be7ef3bdfd7e50de01ed97c4d24636c584e561768cad2ff1050d16321be",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-sp-missions/@trisp/Missions/mise\u0152.Demo/mission.sqm",
+      "sha256": "bbe163c1dc3a2100a6fa68e4d0b5b57c4eb6d3d7091eabd4657d27a06f068ebe",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-sp-missions/@trisp/Missions/\u010csla/tri_sp_accent.Demo.pbo",
+      "sha256": "1ce4c5b75860afe83e02f49f93efd081140434d536032b5cb82bddb89425f7d1",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-sp-missions/@trisp/Missions/\u044226.Demo.pbo",
+      "sha256": "d4bce8fd46117ecf656a1ab35d3f58862d5e5dc3635ce8ec55f2663d40c62382",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods-sp-missions/@trisp/mod.json",
+      "sha256": "37e312ec20614dda85f75f10495a2a691509c1870152caeea068d829173c38fe",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/mods/@fixturemod/mod.json",
+      "sha256": "3ac922742fd8caafbc2d51968a368c1833d205200506cb2215f3ce4aa444376d",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/p3d/generate_animated_morph_odol.py",
+      "sha256": "d48f38afac43e4f82e7ca637024d8d901ef5a22da125a244f492bd35deb174d2",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/paa/make_paa_tagg_fixtures.py",
+      "sha256": "4a2f38d60d749daad004751cd9a24ded8cfabe96ac296ac0c990e8895d6b41aa",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/qstream/buffer_small.txt",
+      "sha256": "6d35a2f037355c777c077d7108c2d377740d3f76deeebeaac78b3a87c6b397ef",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/qstream/test_input.txt",
+      "sha256": "9241ac497187919b903f223f8cd5ff86a3e50bcc896353e0effbc87926fcb82c",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/STRINGTABLE_BRIEFING_TITLE.utf8.csv",
+      "sha256": "335f0694b1b58438c2c49ba878ed15ac5e3ecd7a358956ec761cf32ea13a3c7a",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/STRINGTABLE_MAINMENU.utf8.csv",
+      "sha256": "40b4f2ec3467846665c3da1229911d2ded7dc2452950a4147d9896a8e2b41b02",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/generate_encoding_fixtures.py",
+      "sha256": "e8e05d4a994db1463c91d25a83909ec8e5a8ae1f68c0239e3d655a664f1ccbb1",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/object_names_lang.csv",
+      "sha256": "75fd8d9571a828038ead97765493b948603af9ae80999134a0454d2723706066",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_campaign.csv",
+      "sha256": "68a04b5045e5419c38062810a2589c1be21efdfc8f9d78ae397c03cd4c1c64b6",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_cp1250.csv",
+      "sha256": "45654ebdbfa4a0b78cc88a5215a86fee6d03349d5fa83cc6ac89a8a9e5e4f98e",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_cp1252.csv",
+      "sha256": "1f0b3be9f0cd39bd9423151b7566178a384bfb1d9813916c234e444135fcd756",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_credits_cp1250.csv",
+      "sha256": "a443fa5855675e6625b2193941975e251eb0f957f699112954765b40ce7a931d",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_datefmt.csv",
+      "sha256": "f60c0f56d0d1671a9f6e22bcce8ff2f97f5bc14d147988e865d434fe7e5eea95",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_mission.csv",
+      "sha256": "9fc225aa1f13b3cc27163ab69ff96042737d6c89e70240c51a615bf8e8038473",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_modern.utf8.csv",
+      "sha256": "9fd9d63d72f06b72ee88cd103e89d67cedfb7e48d7ae587f65825c6613bee663",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_mp_version_malformed.csv",
+      "sha256": "7c1e1b2506be74234c6eb9b6ecca0850409593659756a90529bf543f2dc883a8",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_package.csv",
+      "sha256": "5531733755a14fe3ac82ce6fed95361c7bb04be5959f9947aa10041469abbf85",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_package_mainmenu.utf8.csv",
+      "sha256": "85efdfa140ce2e5e5bc7babfbc6cc9ae20cd435712af79b7da1313519950b539",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_pair.csv",
+      "sha256": "3726359dcd8fd5d02e058b2550d9fd0c53c12bc950ccb7e9f9f915f07a6059aa",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_pair.utf8.csv",
+      "sha256": "d31275c40730417040d7e3c185d7d804aa75aa40163033167c2bf353f4e50043",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_ru_cp1251.csv",
+      "sha256": "148c6b03cfa606df6f654d77795cc760c6625477c119293dc313db2ffbb7cfe0",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_shards.csv",
+      "sha256": "7d8d33078933988c1d19b1d63812aa551952bcc5e6154c78f70eefdd736840c4",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_shards_10_legacy.csv",
+      "sha256": "69e775168e19ec6a2ca433d3d4011bfde2b076e7d751df48fb6767aa98b6cda5",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_shards_20_pair.csv",
+      "sha256": "64f0e2714bb4b36bc276eece181111b2f8214e708a5518d89ba4327297b50392",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_shards_20_pair.utf8.csv",
+      "sha256": "3e6e26612e274041717f90af64e47904d2231f61ac07f4bfc9ee820bad4fdc29",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_shards_30_final.csv",
+      "sha256": "2fc3cd489fa15a5d76636e32c0ae2b0c15f22ab13b52150b44a49bb2d3dec458",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_test.csv",
+      "sha256": "3e9ca46e8498efffe41d3790382912521e1ffe592c5ed5d086e6dd32b3feb745",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_utf8_wins_first.utf8.csv",
+      "sha256": "d2c0e1f5d83e1920929b434c10fc2a7947841818ca469f41e59d92b6781351ac",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/stringtable_utf8_wins_later.csv",
+      "sha256": "51c07ba95bcd26b991aaf237d557ce9b5cd61cd662f8805124cfc9785cc756b1",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/stringtable/weapon_modes_lang.csv",
+      "sha256": "f1374931f722b5a8dd4967eb1637c6726f2bffedf30dd948fd85597c738218ec",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/studio/config.cpp",
+      "sha256": "e17cba275e3fcad594605f6d85626bbeee59313fb557e864211873402e520485",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/studio/readme.txt",
+      "sha256": "5f612104c7d7276e6c5b22c5635ef07fddaa96f80ec605c19f005cfa21edfa9e",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/studio/script.sqs",
+      "sha256": "c99a5a169cd48a16e17c3c8401c3740833d79d08be7c8c1d823571d11dfb0ed8",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/workshop/@wsfixture/mod.json",
+      "sha256": "61a19f3282d478fa0be948b243bf74e6c34cf44fdfab2032e4a5a54707d726c5",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/wrp/generate_test_world.py",
+      "sha256": "e1d9e3175b6ec93c4ac83ff5acb1c4a6c5d87c54476190ec20244b7980b4a486",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/xml/squad_incomplete.xml",
+      "sha256": "7399869e4b6ae679204c916f62ebf581c876ade1a3b9afa12ab90a9250a2bfa8",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/xml/squad_minimal.xml",
+      "sha256": "fbd1089f29e1c246eec24c2b077c522ef16e91fdf08e3c218cdbf044e9b60db4",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/xml/squad_multi_members.xml",
+      "sha256": "54934dd3e55b46f7fc497bf6bb16ec3efd2b155fe7c1b29f07b13511ba8e9157",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/xml/squad_special_chars.xml",
+      "sha256": "af3f73c7a0a3065bb1ba1c6b926b405b9a055a424e8545b551f882cbd9d6be99",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "tests/fixtures/xml/squad_valid.xml",
+      "sha256": "9c7f96ac806055538545cd71a7c4a563c821bfb28a88258c6f2952ff9af3a355",
+      "basis": "textual authored test/config fixture"
+    },
+    {
+      "path": "screenshots/OpenPoseidonEngine.png",
+      "sha256": "f6aaf6bb11991c7d3bce0556de18fbf817bfaad1b97ffbcb1061a14780301a55",
+      "basis": "owner screenshot publication confirmation 2026-10-07"
+    },
+    {
+      "path": "screenshots/armareforger.png",
+      "sha256": "7bf21f0390746ca4da5a92cbff4cc2aade367e0c237f453d51a24f6c0579ced2",
+      "basis": "owner screenshot publication confirmation 2026-10-07"
+    },
+    {
+      "path": "screenshots/box3d.png",
+      "sha256": "e45c8c3be1720abdf873deb9233ad740b9c25f62cf1ef12bf18d15399a3361f2",
+      "basis": "owner screenshot publication confirmation 2026-10-07"
+    },
+    {
+      "path": "screenshots/destrucableterrain.jpg",
+      "sha256": "9d99cec286d09f38feb361753c6f223115a2f83bd6fe090ab3b55a44b83bad43",
+      "basis": "owner screenshot publication confirmation 2026-10-07"
+    },
+    {
+      "path": "screenshots/GTAO.png",
+      "sha256": "bca0662e7e555f6e5f0f31eb18c8eb9fc2baf1b63fcb95cf114250e03b29a58f",
+      "basis": "owner screenshot publication confirmation 2026-10-07"
+    },
+    {
+      "path": "screenshots/newgrass.png",
+      "sha256": "0d4426254be09ca46780cc686f24b0964dc1b61c1c5ea79a49e5ba2724c8fa55",
+      "basis": "owner screenshot publication confirmation 2026-10-07"
+    },
+    {
+      "path": "screenshots/newocean.png",
+      "sha256": "5538be71dac6208101ec71804074aa2a966050813b0ddc12c517aa982c0753ff",
+      "basis": "owner screenshot publication confirmation 2026-10-07"
+    },
+    {
+      "path": "screenshots/newshadowsystem.png",
+      "sha256": "ca27321a161a47046272f7adcc2cc831778edd17e705f6bf0ead93c3d479cdb8",
+      "basis": "owner screenshot publication confirmation 2026-10-07"
+    },
+    {
+      "path": "screenshots/puddles.png",
+      "sha256": "77b9d283e259cbdf9788a0b0fd01f260e43e62293591c5ad01db72b42661edf4",
+      "basis": "owner screenshot publication confirmation 2026-10-07"
+    },
+    {
+      "path": "screenshots/volumetricfog.png",
+      "sha256": "b19d0db5caf7e20939d2a754a1a91f5a28378a3f42fbcde49adf93e5776cf4d8",
+      "basis": "owner screenshot publication confirmation 2026-10-07"
+    },
+    {
+      "path": "screenshots/volumetricsnow.png",
+      "sha256": "4172521b34f2347ec8415a880b4984b7a18a7842323683241c603474233b2b36",
+      "basis": "owner screenshot publication confirmation 2026-10-07"
+    },
+    {
+      "path": "tests/fixtures/original-surfaces.json",
+      "sha256": "2860c7c5b1d18462ae4778159e744d4b613b02fdf7e290dc7ab660974a78d1aa",
+      "basis": "textual authored test/config fixture"
+    }
+  ],
+  "cave_provenance": {
+    "source_commit": "77bc0be1",
+    "basement_generator": "BYTE_MATCH",
+    "four_textures": "BYTE_MATCH; supplied generator and prior port verification",
+    "cave": "Original authored port; collision, roadway, paths and fire LODs match generator per port record. Visual/memory edits differ; no full byte reproducibility claim."
+  },
+  "checks": {
+    "export_guard_tests": 13,
+    "inventory_findings": 0,
+    "original_inventory_icon_hashes": 34,
+    "binary_test_inputs_removed": 152
+  },
+  "history_backup": "codex/backup-clean-release-before-fixture-filter-20261007 on private safety mirror",
+  "engine_changes": "None; export remains stable pin51982, separate from new Earth streaming prototype."
+}
