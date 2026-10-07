@@ -35,10 +35,36 @@ Two independent read-only reviews covered transfers and UI/lifetimes.
 
 ## Verification
 
-Implementation pending committed build and installed smoke results. The existing
-native smoke script now also removes a magazine while its ghost is being dragged,
-checks that it cannot be recreated, changes actual load during a ground pickup,
-checks rejection and then recovers the refused item after unloading.
+Source commits bc1862b5 and 83072732 built successfully. Matched EXE/DLL installed
+from 83072732 at 19:45 local October 7. Script-only fixture refinements badd516d
+and d3009a10 did not require rebuilding those unchanged binaries.
+
+Installed native smoke `20261007-195124-710` passed:
+
+- O/K/open/settings/close/reopen, grenade drop and pickup with item conservation.
+- All 17 installed icon hashes match the versioned manifest.
+- Remove the exact magazine while its drag ghost is being drawn; no crash,
+  recreated magazine or duplicated ground item after release/reopen/pickup attempt.
+- While dragging a ground grenade, use ordinary SQF to equip five AT mines,
+  an M16 and a Carl Gustaf (65.1 kg, above the 60 kg limit). Release refuses the
+  pickup, preserves the load, and leaves the grenade recoverable after unloading.
+- Normal process exit; no unhandled exception, GPU validation error, device loss
+  or renderer panic in the checked engine/stderr logs. Captures 07/08/09/10 were
+  inspected. Displayed load remains a periodic snapshot; transfer validation is
+  live even before that display refreshes.
+
+Receipt: [installed SP audit](physical-inventory-code-audit-20261007-runtime.json).
+The two earlier runs stopped at test-fixture assertions: ordinary OFP SQF accepts
+five AT mines, and M60 occupies the secondary slot too. Those setup failures were
+corrected in the test script; they were not product failures or hidden passes.
+Live volume checking and grouped rollback are source-reviewed/compiled; this
+particular runtime regression exercises the weight gate.
+
+Installed private hosted-MP smoke `20261007-195316-618` also passed: after entering
+the network world, developer harness evaluation is rejected, read-only ping and
+clean exit remain available, and the checked logs contain no runtime/GPU failure.
+Receipt: [MP guard](physical-inventory-code-audit-mp-20261007-runtime.json).
+This checks the guard, not a complete multiplayer inventory/mission session.
 
 ## Limits
 

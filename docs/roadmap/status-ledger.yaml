@@ -102,6 +102,23 @@ execution:
       smoke passed and all 17 file hashes match. Other weapon variants still share
       category pictures; classic Gear art is unchanged. Exhaustive transfers/
       mod classes/save-load remain unverified.
+    code_quality_audit:
+      date: '2026-10-07'
+      state: FIXED_BUILT_INSTALLED_SP_REGRESSIONS_AND_MP_GUARD_PASSED
+      source_commits: [bc1862b5, 83072732]
+      installed_source_commit: 83072732
+      evidence: docs/verification/physical-inventory-code-audit-20261007.md
+      runtime_receipt: docs/verification/physical-inventory-code-audit-20261007-runtime.json
+      mp_runtime_receipt: docs/verification/physical-inventory-code-audit-mp-20261007-runtime.json
+      note: >-
+        Snapshot magazine lifetime retained; pickups use live mass/volume;
+        grouped person/cargo transfers preflight/rollback instead of partial
+        drops (classic shell grouping is disabled). Hotkeys preserve reload
+        timers; UI uses real per-instance time; icon preloader advances at its
+        budget boundary. Installed drag-removal, overweight refusal and item
+        recovery regressions pass. Exhaustive addons/save-load and grouped
+        fault injection remain outside this bounded audit. Private hosted-MP
+        harness rejection and clean exit passed on the same installed pair.
   local_map_editor_checkpoint:
     state: INSTALLED_STRATIS_AND_REFORGER_EVERON_EDITOR_ROUNDTRIPS_PASSED
     installed_source_commit: ed1c10a6
