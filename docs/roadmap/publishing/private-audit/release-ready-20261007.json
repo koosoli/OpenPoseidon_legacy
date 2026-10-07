@@ -2,9 +2,9 @@
   "state": "REVIEWED_SOURCE_EXPORT_PRIVATE_UNTIL_OWNER_PUBLICATION",
   "date": "2026-10-07",
   "source_commit": "51982bdacc6df176ffae9b008761b6061b504acf",
-  "policy_sha256": "8078c912505af517888443dc466313c72948c7addaa579fe4111b9d8cf7fab5f",
-  "manifest_sha256": "110f7f96453d7a137886abe394d069219dead0bdb43114e6c610005ca5b78ba3",
-  "included_files": 4188,
+  "policy_sha256": "c4099828a0417ec6eb4c7af2557c53477d0f872b13598539eca5760655ba7599",
+  "manifest_sha256": "7316d5d72da886380feff232f0707cd7a4d8a15259555528fa634e6f96ed2324",
+  "included_files": 4185,
   "excluded_binary_fixtures": [
     "apps/tools/Tools/fixtures/check.wav",
     "tests/fixtures/audio/click.wss",
@@ -157,7 +157,10 @@
     "tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/CoverageSample.Noe/radio.Polish.ogg",
     "tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/CoverageSample.Noe/radio.ogg",
     "tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/DemoSoundSubdir.Noe/sound/line.Czech.ogg",
-    "tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/DemoSoundSubdir.Noe/sound/line.ogg"
+    "tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/DemoSoundSubdir.Noe/sound/line.ogg",
+    "tests/fixtures/mods-sp-missions/@trisp/Missions/mets\u00e4ss\u00e4.Demo.pbo",
+    "tests/fixtures/mods-sp-missions/@trisp/Missions/\u010csla/tri_sp_accent.Demo.pbo",
+    "tests/fixtures/mods-sp-missions/@trisp/Missions/\u044226.Demo.pbo"
   ],
   "owner_decisions": {
     "malprave": "Owner confirms GPL under same licence and same upstream; source credits retained. This records the owner confirmation, not independent access to unavailable earlier patch files.",
@@ -413,7 +416,7 @@
     },
     {
       "path": "tests/fixtures/ASSET_SOURCES.md",
-      "sha256": "aeb2331f9e5e851f587f8735b02c4801ceeb86b351937fd66907a0b12478e967",
+      "sha256": "aac249e98f5386bba70e8b616a25bd9019b7e80ecc3f94d1ea1106c9c9f76d2f",
       "basis": "textual authored test/config fixture"
     },
     {
@@ -967,23 +970,8 @@
       "basis": "textual authored test/config fixture"
     },
     {
-      "path": "tests/fixtures/mods-sp-missions/@trisp/Missions/mets\u00e4ss\u00e4.Demo.pbo",
-      "sha256": "dcf90be7ef3bdfd7e50de01ed97c4d24636c584e561768cad2ff1050d16321be",
-      "basis": "textual authored test/config fixture"
-    },
-    {
       "path": "tests/fixtures/mods-sp-missions/@trisp/Missions/mise\u0152.Demo/mission.sqm",
       "sha256": "bbe163c1dc3a2100a6fa68e4d0b5b57c4eb6d3d7091eabd4657d27a06f068ebe",
-      "basis": "textual authored test/config fixture"
-    },
-    {
-      "path": "tests/fixtures/mods-sp-missions/@trisp/Missions/\u010csla/tri_sp_accent.Demo.pbo",
-      "sha256": "1ce4c5b75860afe83e02f49f93efd081140434d536032b5cb82bddb89425f7d1",
-      "basis": "textual authored test/config fixture"
-    },
-    {
-      "path": "tests/fixtures/mods-sp-missions/@trisp/Missions/\u044226.Demo.pbo",
-      "sha256": "d4bce8fd46117ecf656a1ab35d3f58862d5e5dc3635ce8ec55f2663d40c62382",
       "basis": "textual authored test/config fixture"
     },
     {
@@ -1267,8 +1255,10 @@
     "export_guard_tests": 13,
     "inventory_findings": 0,
     "original_inventory_icon_hashes": 34,
-    "binary_test_inputs_removed": 152
+    "binary_test_inputs_removed": 155
   },
   "history_backup": "codex/backup-clean-release-before-fixture-filter-20261007 on private safety mirror",
-  "engine_changes": "None; export remains stable pin51982, separate from new Earth streaming prototype."
+  "engine_changes": "None; export remains stable pin51982, separate from new Earth streaming prototype.",
+  "manifest": "build/release-ready-final-20261007/inventory.json",
+  "line_endings": "Curated text normalized to LF to match Git attributes; final byte verification required"
 }

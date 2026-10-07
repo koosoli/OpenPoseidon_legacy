@@ -278,7 +278,10 @@
     "tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/CoverageSample.Noe/radio.ogg",
     "tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/DemoSoundSubdir.Noe/sound/line.Czech.ogg",
     "tests/unit/engine/Poseidon/UI/Locale/fixtures/mission_language_detector/DemoSoundSubdir.Noe/sound/line.ogg",
-    "apps/tools/Tools/fixtures/check.wav"
+    "apps/tools/Tools/fixtures/check.wav",
+    "tests/fixtures/mods-sp-missions/@trisp/Missions/mets\u00e4ss\u00e4.Demo.pbo",
+    "tests/fixtures/mods-sp-missions/@trisp/Missions/\u010csla/tri_sp_accent.Demo.pbo",
+    "tests/fixtures/mods-sp-missions/@trisp/Missions/\u044226.Demo.pbo"
   ],
   "include_prefixes": [
     "engine/",
