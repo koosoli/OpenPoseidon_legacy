@@ -102,6 +102,8 @@ bool EarthTerrainStream::Download(const std::string& url, std::vector<unsigned c
     long status = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
     curl_easy_cleanup(curl);
+    if (result != CURLE_OK || status != 200)
+        std::fprintf(stderr, "Earth terrain HTTPS: %s, HTTP %ld (%s)\n", curl_easy_strerror(result), status, url.c_str());
     return result == CURLE_OK && status == 200 && !bytes.empty();
 }
 
@@ -166,7 +168,9 @@ const EarthTerrainStream::Tile& EarthTerrainStream::LoadTile(int x, int y)
         {
             std::filesystem::remove(file, ec);
             std::filesystem::rename(temporary, file, ec);
+            TrimDisk();
         }
+        else std::filesystem::remove(temporary, ec);
     }
     if (_tiles.size() >= 64)
     {

@@ -31,6 +31,7 @@ try{
  do{Require (!$p.HasExited) 'Startup exited';$client=[Net.Sockets.TcpClient]::new();try{$client.Connect('127.0.0.1',$port)}catch{$client.Dispose();$client=$null};if(!$client){Require ([DateTime]::UtcNow-lt$deadline) 'Startup deadline';Start-Sleep -Milliseconds 250}}while(!$client)
  $stream=$client.GetStream();$stream.ReadTimeout=30000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
  while(([string](Send @{cmd='eval';code='triSceneReady'}).result).Trim('"')-cne'OK'){Require ([DateTime]::UtcNow-lt$deadline) 'Scene-ready deadline';Start-Sleep -Milliseconds 250}
+ Require (!(Select-String -Path $log -Pattern 'Cannot load --test-world|Critical error' -Quiet)) 'Test world failed to load'
  $null=Send @{cmd='exec';code='player allowDamage false;0 setRain 0;0 setOvercast .15;0 setFog .02;setDate [1985,6,21,12,0]'}
  foreach($x in @(6400,9600,16000,32000,6400)){
   $before=@(Select-String -Path $log -Pattern 'Earth terrain patch ').Count

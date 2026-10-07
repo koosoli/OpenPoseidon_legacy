@@ -354,6 +354,21 @@ int Landscape::LoadData(const char* name, float landGrid)
                                                override.c_str());
             return LSUnknownError;
         }
+        // --test-world also accepts authored RVW fixtures (and Worldgen output).
+        // The old override routed every file through the modern OPRW reader,
+        // leaving a failed-load scene behind even when the raw world was valid.
+        QIFStreamB raw;
+        raw.AutoOpen(override.c_str());
+        WorldHeader rawHeader{};
+        raw.read(reinterpret_cast<char*>(&rawHeader), sizeof(rawHeader));
+        if (!raw.fail() && (rawHeader.magic == FILE_MAGIC_4 || rawHeader.magic == FILE_MAGIC_3 ||
+                            rawHeader.magic == FILE_MAGIC))
+        {
+            raw.seekg(0, QIOS::beg);
+            const auto result = LoadData(raw, landGrid);
+            if (result == LSOK) _name = override.c_str();
+            return result;
+        }
         if (LoadOprwModern(override.c_str()))
         {
             LOG_DEBUG(World, "Landscape::LoadData time {}", Poseidon::Foundation::GlobalTickCount() - start);
