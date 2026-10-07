@@ -21,6 +21,7 @@ endif()
 
 # FetchContent is corrosion's recommended integration approach
 include(FetchContent)
+find_package(CURL REQUIRED)
 FetchContent_Declare(
     Corrosion
     GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
@@ -64,6 +65,7 @@ add_library(WgpuRenderer STATIC
     EngineWgpuTextInput.cpp
     GraphicsBackendWgpu.cpp
     TerrainWgpu.cpp
+    EarthTerrainStream.cpp
     TerrainWgpuEnfusionClutter.cpp
     TerrainWgpuEnfusionSurface.cpp
     WaterWgpu.cpp
@@ -84,7 +86,7 @@ target_include_directories(WgpuRenderer PUBLIC
 # Pinned local CPU library. Only explicit fixture BeginClod calls it;
 # no default initializer, frame bake, worker or paging policy is enabled.
 include("${CMAKE_SOURCE_DIR}/cmake/MeshoptimizerClod.cmake")
-target_link_libraries(WgpuRenderer PUBLIC Poseidon PRIVATE wgpu_renderer OpenPoseidon::MeshoptimizerClod)
+target_link_libraries(WgpuRenderer PUBLIC Poseidon PRIVATE wgpu_renderer OpenPoseidon::MeshoptimizerClod CURL::libcurl)
 
 set_target_properties(WgpuRenderer PROPERTIES
     CXX_STANDARD 20

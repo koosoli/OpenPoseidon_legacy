@@ -390,6 +390,11 @@ static bool IsTerrainPageTextureName(const char* name)
 
 TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(engine), _renderer(renderer)
 {
+    if (Earth::Enabled())
+    {
+        _earthStream = std::make_unique<EarthTerrainStream>();
+        LOG_INFO(Graphics, "Earth terrain prototype enabled: 25.6km rolling window, 100m samples, freefly only");
+    }
     _baseMult = EnvFloat("WGR_TERRAIN_LOD_BASE", 4.0f);
     _lodRatio = EnvFloat("WGR_TERRAIN_LOD_RATIO", 2.0f);
     _morphRegion = std::clamp(EnvFloat("WGR_TERRAIN_MORPH", 0.50f), 0.05f, 1.0f);
@@ -3207,6 +3212,49 @@ bool TerrainWgpu::GetDrawCoverage(TerrainDrawCoverage& out) const
     return out.ready;
 }
 
+void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape& land)
+{
+    // Classic upload supplies the one owned fixture's material bindings once;
+    // its geometry, grass and finite-world water are not submitted in this mode.
+    if (!_uploaded) UploadIfNeeded(land);
+    _earthStream->Request(camera.Position().X(), camera.Position().Z());
+    if (auto patch = _earthStream->TakeReady())
+    {
+        _earthPatch = std::move(patch);
+        const auto& p = *_earthPatch;
+        _params.world_origin = {p.x, p.z};
+        _params.terrain_grid = Earth::GridMetres;
+        _params.land_grid = Earth::GridMetres;
+        _params.hm_width = _params.hm_height = Earth::GridSamples;
+        _params.land_range = Earth::GridSamples;
+        _params.sea_level = -12000.0f;
+        _params.enfusion_ground = 0;
+        EngineWgpu::AcquireProducerWindow("Earth terrain patch");
+        wgr_terrain_set_heightmap(_renderer, p.heights.data(), &_params);
+        auto bounds = [&](int x, int z, int span, float& mn, float& mx) {
+            CdlodHeightBounds(x,z,span,Earth::GridSamples,false,
+                [&](int row,int col) { return p.heights[row*Earth::GridSamples+col]; },mn,mx);
+        };
+        BuildCdlodTree(Earth::GridSamples-1,0,0,Earth::GridMetres,TerrainGridN,bounds,
+            _tree,_rootIndex,_numLevels,_leafSize);
+        for (auto& node : _tree) { node.originX += p.x; node.originZ += p.z; }
+        ComputeCdlodRanges(_leafSize*_baseMult,_lodRatio,_numLevels,_ranges);
+        const auto extrema = std::minmax_element(p.heights.begin(),p.heights.end());
+        LOG_INFO(Graphics, "Earth terrain patch {}: origin [{},{}], centre [{},{}], height {}..{}m, downloads {}, disk hits {}, worker {}s",
+            p.generation,p.x,p.z,p.latitude,p.longitude,*extrema.first,*extrema.second,p.downloads,p.cacheHits,p.seconds);
+    }
+    if (!_earthPatch) return;
+    _engine.QueueTerrainParams(_params);
+    const auto& patch = *_earthPatch;
+    _selected.clear();
+    SelectVisibleCdlod(_tree,_rootIndex,_numLevels,_ranges,_morphRegion,camera,
+        patch.x,patch.z,patch.x+256*Earth::GridMetres,patch.z+256*Earth::GridMetres,
+        [](const CdlodNode&) { return true; },[&](const CdlodSelection& s) {
+            _selected.push_back({{s.originX,s.originZ},s.size,uint32_t(s.level),s.morphStart,s.morphEnd});
+        },0.0f,true);
+    _engine.SubmitTerrain(_selected);
+}
+
 void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
 {
     _drawCoverage = {};
@@ -3216,6 +3264,11 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     }
     const Landscape& land = *GLandscape;
     Camera* camera = scene.GetCamera();
+    if (_earthStream)
+    {
+        if (camera) DrawEarthTerrain(scene,*camera,land);
+        return;
+    }
     const bool uploaded = UploadIfNeeded(land);
     RefreshGeographyIfChanged(land); // RFG-101: streamed objects densify the geography
     if (camera != nullptr)

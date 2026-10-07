@@ -5,6 +5,19 @@ execution:
   baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
   integration_owner: Oliver Kay
   activation_state: ACTIVE
+  whole_world_streaming_checkpoint:
+    date: '2026-10-07'
+    state: OPT_IN_TERRAIN_PROTOTYPE_RUNTIME_ACCEPTANCE_PENDING
+    branch: codex/whole-world-streaming-20261007
+    backup_branch: codex/backup-before-world-streaming-20261007
+    backup_commit: e20c3974de6f91b55b402e3f5bc6defe76c84690
+    evidence: docs/roadmap/WHOLE-WORLD-STREAMING-PROTOTYPE.md
+    note: >-
+      Geographic Terrarium tiles stream on a worker into a bounded rolling
+      25.6km native terrain window. Opt-in Freefly elevation preview only;
+      no worldwide collision, objects, globe curvature, poles or floating origin.
+      Existing OFP gameplay remains the default. CWR-Worldgen reviewed; no
+      external code or assets vendored. Complete pre-change branch pushed first.
   private_release_preparation_checkpoint:
     state: PRIVATE_CANDIDATE_UPLOADED_PUBLIC_RELEASE_BLOCKED
     source_commit: 51982bdacc6df176ffae9b008761b6061b504acf

@@ -7,6 +7,7 @@
 
 #include <wgpu_renderer.hpp>
 #include "TerrainPuddles.hpp"
+#include "EarthTerrainStream.hpp"
 
 #include <cstdint>
 #include <string>
@@ -117,6 +118,9 @@ class TerrainWgpu : public ITerrainRenderer
     const char* GrassPhotoFamilyName(int index) const;
 
   private:
+    void DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape& land);
+    std::unique_ptr<EarthTerrainStream> _earthStream;
+    std::unique_ptr<EarthTerrainStream::Patch> _earthPatch;
     // (Re)uploads and rebuilds the quadtree when the map changes; returns true if it did.
     bool UploadIfNeeded(const Landscape& land);
     void BuildQuadtree(const Landscape& land);
