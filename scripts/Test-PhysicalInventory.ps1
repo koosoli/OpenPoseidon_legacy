@@ -137,11 +137,12 @@ try {
     Pointer 0.681 0.318; Button $true; Pointer 0.12 0.40; Button $false
     Pointer 0.052 0.218; Button $true; Pointer 0.70 0.40
     # Ordinary SQF addMagazine obeys stock slots (five AT mines, not eight).
-    # 5 * 9.5 kg + M60 10.5 kg + Carl Gustaf 14.2 kg = 72.2 kg, > 60 kg.
-    Exec (('player addMagazine "Mine";' * 5)+'player addWeapon "M60";player addWeapon "CarlGustavLauncher"')
+    # M16 leaves the launcher slot free (the M60 occupies it too).
+    # 5 * 9.5 kg + M16 3.4 kg + Carl Gustaf 14.2 kg = 65.1 kg, > 60 kg.
+    Exec (('player addMagazine "Mine";' * 5)+'player addWeapon "M16";player addWeapon "CarlGustavLauncher"')
     $loaded=Value 'magazines player'
     $loadedWeapons=@((Value 'weapons player')|ConvertFrom-Json)
-    Require ((@($loaded|ConvertFrom-Json)).Count -eq 5 -and $loadedWeapons -contains 'M60' -and $loadedWeapons -contains 'CarlGustavLauncher') 'Overweight fixture not created'
+    Require ((@($loaded|ConvertFrom-Json)).Count -eq 5 -and $loadedWeapons -contains 'M16' -and $loadedWeapons -contains 'CarlGustavLauncher') 'Overweight fixture not created'
     Button $false
     $afterRefused=Value 'magazines player'
     Require ($afterRefused -ceq $loaded) 'Stale capacity allowed overweight pickup'
