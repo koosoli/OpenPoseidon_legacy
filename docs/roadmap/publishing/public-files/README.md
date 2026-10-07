@@ -4,13 +4,25 @@
   <img src="screenshots/OpenPoseidonEngine.png" alt="Open Poseidon Engine logo" width="360">
 </p>
 
-Open Poseidon Engine is a community continuation of the Operation Flashpoint / Arma:
-Cold War Assault engine source. It adds a WGPU renderer, Tidewater ocean rendering,
-developer tools and local content compatibility work. This is a source release;
-it is not a complete game or an official Bohemia Interactive product.
+Open Poseidon Engine brings modern engine features to Operation Flashpoint / Arma:
+Cold War Assault: WGPU/Vulkan rendering, optional DLSS upscaling, multithreading,
+GTAO and probe-based global illumination (GI), volumetric fog, clouds and smoke,
+and Box3D physics with articulated ragdolls. It is a community continuation of
+the original engine, with expanded gameplay, terrain editing and content support.
+It requires your own game data and is not a complete game or an official
+Bohemia Interactive product.
 
 [![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/koosoli)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/koosoli)
+
+## Precompiled builds
+
+Prefer to play without compiling? Official precompiled Windows builds are available
+in our [private downloads repository](https://github.com/OpenPoseidon/OpenPoseidon-Builds/releases).
+For access, we ask for a small monthly contribution through
+[GitHub Sponsors](https://github.com/sponsors/koosoli), helping fund continued
+development, testing and build distribution. You can build the engine yourself
+without a sponsorship; your rights under the software licences remain unchanged.
 
 ## Engine features
 
@@ -32,6 +44,8 @@ it is not a complete game or an official Bohemia Interactive product.
   light scattering supports night lights and the player's torch.
 - **GTAO:** screen-space ambient occlusion and bent-normal ambient shading,
   with live developer controls and diagnostic views.
+- **Global illumination (GI):** a local irradiance probe grid combines indirect
+  sky lighting with coloured sunlight bounced from nearby surfaces.
 - **Lighting and shadows:** dynamic sun/local-light shadows, contact shadows,
   muzzle illumination and atmospheric light scattering.
 - **Volumetric smoke:** buoyancy, wind response, room/portal-aware wall, floor
