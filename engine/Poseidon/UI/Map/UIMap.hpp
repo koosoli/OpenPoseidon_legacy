@@ -792,6 +792,7 @@ public:
 protected:
 	void InitUI();
 	void OpenInterrupt();
+	void OpenInventory();
 	bool RetryMission();
 //	bool RestartMission();
 };

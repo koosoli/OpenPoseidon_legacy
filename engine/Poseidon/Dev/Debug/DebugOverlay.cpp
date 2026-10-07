@@ -138,6 +138,11 @@ SDL_Window* s_window = nullptr;
 bool s_mouseReleasedByPanel = false;
 bool s_savedMouseGrab = false;
 
+bool MultiplayerSession()
+{
+    return GWorld && GWorld->GetMode() == GModeNetware;
+}
+
 // Deferred actions — populated by UI button click handlers, drained
 // AFTER ImGui::Render() returns each frame.  Why deferred:
 //
@@ -162,7 +167,8 @@ std::vector<std::function<void()>> s_pendingActions;
 
 void Defer(std::function<void()> action)
 {
-    s_pendingActions.push_back(std::move(action));
+    if (!MultiplayerSession())
+        s_pendingActions.push_back(std::move(action));
 }
 
 void ApplyDevPanelMouseState();
@@ -231,7 +237,7 @@ constexpr std::array<const char*, 7> kZeusVehiclePresets = {"Jeep", "UAZ", "M1A1
 
 bool ZeusWorldAvailable()
 {
-    return GWorld && GLandscape && GWorld->CameraOn();
+    return !MultiplayerSession() && GWorld && GLandscape && GWorld->CameraOn();
 }
 
 void SetZeusClassFromPreset()
@@ -1399,6 +1405,8 @@ const bool s_zeusThrowSeeded = []
 
 void ZeusThrow()
 {
+    if (MultiplayerSession())
+        return;
     if (!GWorld || !GScene || !GLandscape || GLandscape->GetLandRange() <= 0)
     {
         s_zeusStatus = "Throw needs a loaded world.";
@@ -3296,6 +3304,49 @@ void ApplyDevPanelMouseState()
         SDL_ShowCursor();
     else if (s_zeusCamera)
         SDL_HideCursor();
+}
+
+// Recheck the live session at every input/frame boundary. A panel opened in
+// single player must neither keep its camera nor drain queued cheats after joining MP.
+bool SuspendMultiplayerTools()
+{
+    if (!MultiplayerSession())
+        return false;
+    s_visible = false;
+    s_pendingActions.clear();
+    if (s_zeusCamera)
+    {
+        CameraEffect* effect = GWorld->GetCameraEffect();
+        if (effect && effect->GetObject() == s_zeusCamera.GetLink())
+        {
+            GWorld->SetCameraEffect(nullptr);
+            ShowCinemaBorder(s_zeusPrevCinemaBorder);
+        }
+        s_zeusCamera->SetDelete();
+        s_zeusCamera = nullptr;
+    }
+    s_zeusCursor = nullptr;
+    s_zeusClickPlacement = false;
+    s_zeusRotateDrag = s_zeusMoveDrag = s_zeusLassoDrag = false;
+    s_zeusSuppressNextMouseUp = false;
+    s_zeusConsumeMouseEvent = s_zeusConsumeKeyboardEvent = s_zeusConsumeShortcutKeyUp = false;
+    s_zeusSelection.clear();
+    s_zeusClipboard.clear();
+    s_zeusMoveOffsets.clear();
+    s_terrainBrushDragging = false;
+    Dev::TerrainBrush().enabled = false;
+    Dev::CaveEditor().enabled = false;
+    DebugCheats::Cmd_God::SetActive(false);
+    DebugCheats::Cmd_InfiniteAmmo::SetActive(false);
+    DebugCheats::Cmd_InfiniteFuel::SetActive(false);
+    DebugCheats::Cmd_InfiniteArmor::SetActive(false);
+    DebugCheats::Cmd_ShowAllUnits::SetActive(false);
+    DebugCheats::Cmd_MapTeleport::SetActive(false);
+    s_headlampOn = false;
+    UpdateHeadlamp();
+    if (s_mouseReleasedByPanel)
+        ApplyDevPanelMouseState();
+    return true;
 }
 
 // Resize the window to the largest box of the given aspect ratio that fits
@@ -7856,6 +7907,8 @@ void Shutdown()
 
 void ProcessEvent(const SDL_Event& event)
 {
+    if (SuspendMultiplayerTools())
+        return;
     if (!s_initialized)
         return;
     s_zeusConsumeMouseEvent = false;
@@ -8099,6 +8152,16 @@ void NewFrame()
 {
     if (!s_initialized)
         return;
+    if (SuspendMultiplayerTools())
+    {
+        // Keep ImGui's backend lifecycle balanced without drawing any dev UI.
+        ImGui::GetIO().MouseDrawCursor = false;
+        if (s_backend == RenderBackend::OpenGL3)
+            ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+        return;
+    }
     // LGT-013: the head torch follows the camera every frame, not only while its tab is
     // open. A light that goes out when you close the panel would be a torch you cannot use
     // while looking at anything.
@@ -8150,9 +8213,15 @@ void Render()
     if (!s_initialized)
         return;
 #if POSEIDON_DIAG
-    Dev::OpDiag::RenderOverlay(); // DIAG-001: shot paths, labels, watched units (--diag-draw)
+    if (!MultiplayerSession())
+        Dev::OpDiag::RenderOverlay(); // DIAG-001: shot paths, labels, watched units (--diag-draw)
 #endif
     ImGui::Render();
+    if (MultiplayerSession())
+    {
+        s_pendingActions.clear();
+        return;
+    }
     if (s_backend == RenderBackend::OpenGL3)
     {
         // Make sure we draw to the default framebuffer in case the engine left
@@ -8175,17 +8244,18 @@ void Render()
         auto local = std::move(s_pendingActions);
         s_pendingActions.clear();
         for (auto& fn : local)
-            fn();
+            if (!MultiplayerSession())
+                fn();
     }
 }
 
 bool IsVisible()
 {
-    return s_visible;
+    return !MultiplayerSession() && s_visible;
 }
 void SetVisible(bool v)
 {
-    if (v && !AppConfig::Instance().DevMode())
+    if (v && (!AppConfig::Instance().DevMode() || MultiplayerSession()))
         v = false;
     s_visible = v;
     ApplyDevPanelMouseState();
@@ -8205,6 +8275,8 @@ void SelectMemoryTab()
 
 void RequestDeferredReload(const char* modPath)
 {
+    if (MultiplayerSession())
+        return;
     // Route through the Application's between-frames re-mount request (serviced at the top
     // of AppIdle, before any simulate/draw). Running the reload inside Render()/BackToFront
     // instead — mid-frame, after Simulate — left the rebuilt world's first Simulate touching
@@ -8214,6 +8286,8 @@ void RequestDeferredReload(const char* modPath)
 
 bool WantsKeyboard()
 {
+    if (MultiplayerSession())
+        return false;
     if (!s_initialized || (!s_visible && !s_zeusConsumeKeyboardEvent))
         return false;
     if (s_zeusConsumeKeyboardEvent)
@@ -8230,6 +8304,8 @@ bool WantsKeyboard()
 
 bool WantsMouse()
 {
+    if (MultiplayerSession())
+        return false;
     if (!s_initialized)
         return false;
     if (s_zeusConsumeMouseEvent)
@@ -8247,11 +8323,14 @@ bool WantsMouse()
 
 void AdoptFreeFlyCamera(CameraVehicle* camera)
 {
-    AdoptFreeFlyCameraImpl(camera);
+    if (!camera || !MultiplayerSession())
+        AdoptFreeFlyCameraImpl(camera);
 }
 
 bool SetFreeFlyTestPose(const char* coordinates)
 {
+    if (MultiplayerSession())
+        return false;
     const auto pose = ParseZeusGoto(coordinates);
     if (!coordinates || std::strlen(coordinates) >= sizeof(s_zeusGotoBuf) || pose.count != 5 ||
         !std::isfinite(pose.x) || !std::isfinite(pose.z) || !std::isfinite(pose.altitude) ||

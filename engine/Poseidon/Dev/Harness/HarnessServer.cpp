@@ -2,6 +2,7 @@
 // Protocol: newline-delimited JSON over TCP on localhost.
 
 #include <Poseidon/Dev/Harness/HarnessServer.hpp>
+#include <Poseidon/World/World.hpp>
 
 #include <Poseidon/Network/Legacy/SocketUtil.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
@@ -251,6 +252,13 @@ void HarnessServer::PushEvent(const std::string& json)
 
 void HarnessServer::ProcessCommand(const HarnessCommand& cmd)
 {
+    // This runs on the main thread, so checking the live world here also rejects
+    // commands queued before joining MP. TCP-thread ping/describe/exit stay available.
+    if (GWorld && GWorld->GetMode() == GModeNetware)
+    {
+        PushResponse(cmd.id, HarnessProtocol::ErrorResponse("developer harness disabled in multiplayer"));
+        return;
+    }
     cJSON* root = cJSON_Parse(cmd.raw.c_str());
     if (!root)
     {

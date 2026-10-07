@@ -13,7 +13,8 @@
 //
 // Hidden by default — press Ctrl+` (US) / Ctrl+; (CZ) to toggle.  Bound by
 // physical scancode (SDL_SCANCODE_GRAVE), so the same key works on any
-// layout.  Requires --dev (AppConfig::DevMode()).
+// layout. Requires --dev (AppConfig::DevMode()). Disabled in multiplayer;
+// joining a network session closes the panel and cancels its developer camera/actions.
 
 struct SDL_Window;
 union SDL_Event;

@@ -156,3 +156,12 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## CWR-Physical Inventory
+
+The graphical single-player inventory, grid model, item footprints and carrying-mass
+helpers are adapted from the author-supplied **CWR-Physical Inventory** GPL source
+donation received by the project owner in October 2026. The supplied licence is
+GPL-3.0-or-later with this project's same Section 7 terms. Changes include current
+engine integration, safe transfers, user-directory settings and built-in UI/icon
+fallbacks. No donated binaries or separate game/icon assets are bundled.

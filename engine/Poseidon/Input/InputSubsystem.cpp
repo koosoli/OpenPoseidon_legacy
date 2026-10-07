@@ -7,6 +7,7 @@
 #include <Poseidon/UI/Settings/ContextControlsConfig.hpp>
 #include <Poseidon/UI/Settings/GamepadConfig.hpp>
 #include <Poseidon/UI/Settings/MouseConfig.hpp>
+#include <Poseidon/World/World.hpp>
 #include <SDL3/SDL_scancode.h>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <math.h>
@@ -142,11 +143,15 @@ static bool QueryDoubleTapKeyToDo(Input& in, int dik, bool reset, bool checkFocu
     return ret;
 }
 
+static bool g_suppressRmbActions = false;
+
 static float QueryMouseButton(const Input& in, int index, bool checkFocus)
 {
     if (checkFocus && in.gameFocusLost > 0)
         return 0;
     if (index < 0 || index >= N_MOUSE_BUTTONS)
+        return 0;
+    if (g_suppressRmbActions && index == 1)
         return 0;
     return in.mouse.buttons[index];
 }
@@ -157,6 +162,8 @@ static float QueryDoubleTapMouseButton(const Input& in, int index, bool checkFoc
         return 0;
     if (index < 0 || index >= N_MOUSE_BUTTONS)
         return 0;
+    if (g_suppressRmbActions && index == 1)
+        return 0;
     return in.mouse.buttonsDoubleActive[index] ? in.mouse.buttons[index] : 0.0f;
 }
 
@@ -165,6 +172,8 @@ static bool QueryMouseButtonToDo(Input& in, int index, bool reset, bool checkFoc
     if (checkFocus && in.gameFocusLost > 0)
         return false;
     if (index < 0 || index >= N_MOUSE_BUTTONS)
+        return false;
+    if (g_suppressRmbActions && index == 1)
         return false;
     bool ret = in.mouse.buttonsToDo[index];
     if (reset)
@@ -177,6 +186,8 @@ static bool QueryDoubleTapMouseButtonToDo(Input& in, int index, bool reset, bool
     if (checkFocus && in.gameFocusLost > 0)
         return false;
     if (index < 0 || index >= N_MOUSE_BUTTONS)
+        return false;
+    if (g_suppressRmbActions && index == 1)
         return false;
     bool ret = in.mouse.buttonsDoubleToDo[index];
     if (reset)
@@ -483,16 +494,25 @@ void InputSubsystem::Update()
 
 void InputSubsystem::ComputeMovementState()
 {
+    const bool multiplayer = GWorld && GWorld->GetMode() == GModeNetware;
 #if _ENABLE_CHEATS
     GInput.keyboard.cheat1 = false;
     GInput.keyboard.cheat2 = false;
-    bool cheat1 = GetAction(UACheat1, false) > 0;
-    bool cheat2 = GetAction(UACheat2, false) > 0;
+    bool cheat1 = !multiplayer && GetAction(UACheat1, false) > 0;
+    bool cheat2 = !multiplayer && GetAction(UACheat2, false) > 0;
     GInput.keyboard.cheat1 = cheat1;
     GInput.keyboard.cheat2 = cheat2;
 #endif
 
-    GInput.keyboard.cheatEntryTrigger = GetAction(UACheatEntry, false) > 0.0f;
+    GInput.keyboard.cheatEntryTrigger = !multiplayer && GetAction(UACheatEntry, false) > 0.0f;
+    if (multiplayer)
+    {
+        // Do not carry an armed developer shortcut/typed cheat from a local
+        // session into network play or let it suppress normal gameplay keys.
+        GInput.keyboard.awaitCheat = false;
+        GInput.keyboard.cheatActive = CheatNone;
+        GInput.keyboard.cheatInProgress = RString();
+    }
 
     moveLeft_ = 0;
     moveRight_ = 0;
@@ -677,14 +697,16 @@ bool InputSubsystem::ConsumeDevKeyPress(SDL_Scancode sc)
         return false;
     bool pressed = GInput.keyboard.keysToDo[idx];
     GInput.keyboard.keysToDo[idx] = false;
-    return pressed && AppConfig::Instance().DevMode();
+    return pressed && AppConfig::Instance().DevMode() && !(GWorld && GWorld->GetMode() == GModeNetware);
 }
 
 #if _ENABLE_CHEATS
 bool InputSubsystem::GetCheat1ToDo(SDL_Scancode sc, bool reset)
 {
+    if (GWorld && GWorld->GetMode() == GModeNetware)
+        return false;
     int dik = static_cast<int>(sc);
-    if (!GInput.keyboard.cheat1 || GInput.keyboard.cheat2 || dik < 0)
+    if (!GInput.keyboard.cheat1 || GInput.keyboard.cheat2 || dik < 0 || dik >= SDL_SCANCODE_COUNT)
         return false;
     bool ret = GInput.keyboard.keysToDo[dik];
     if (reset)
@@ -694,8 +716,10 @@ bool InputSubsystem::GetCheat1ToDo(SDL_Scancode sc, bool reset)
 
 bool InputSubsystem::GetCheat2ToDo(SDL_Scancode sc, bool reset)
 {
+    if (GWorld && GWorld->GetMode() == GModeNetware)
+        return false;
     int dik = static_cast<int>(sc);
-    if (GInput.keyboard.cheat1 || !GInput.keyboard.cheat2 || dik < 0)
+    if (GInput.keyboard.cheat1 || !GInput.keyboard.cheat2 || dik < 0 || dik >= SDL_SCANCODE_COUNT)
         return false;
     bool ret = GInput.keyboard.keysToDo[dik];
     if (reset)
@@ -722,6 +746,11 @@ bool InputSubsystem::IsMouseRightDown() const
 bool InputSubsystem::IsMouseMiddleDown() const
 {
     return GInput.mouse.middle;
+}
+
+void InputSubsystem::SetSuppressRightButtonActions(bool suppress)
+{
+    g_suppressRmbActions = suppress;
 }
 
 float InputSubsystem::GetMouseDeltaX() const
@@ -1028,6 +1057,8 @@ bool InputSubsystem::GetKeyToDo(int packedKey, bool reset, bool checkFocus)
 
 int InputSubsystem::CheatActivated() const
 {
+    if (GWorld && GWorld->GetMode() == GModeNetware)
+        return CheatNone;
     return GInput.keyboard.CheatActivated();
 }
 void InputSubsystem::CheatServed()
@@ -1296,6 +1327,8 @@ UserActionDesc* InputSubsystem::GetUserActionDesc()
         UserActionDesc("Cheat1", IDS_USRACT_CHEAT_1, SDL_SCANCODE_RGUI, -1),
         UserActionDesc("Cheat2", IDS_USRACT_CHEAT_2, SDL_SCANCODE_RALT, -1),
 #endif
+        UserActionDesc("Inventory", IDS_USRACT_MAP, SDL_SCANCODE_O, -1),
+        UserActionDesc("InventoryEditMenu", IDS_USRACT_HELP, SDL_SCANCODE_K, -1),
     };
     // The table is indexed by UserAction, and per-action arrays (bindings, KeyList
     // userKeys[UAN]) are sized by UAN. If a new action is added to the enum without
@@ -1311,6 +1344,10 @@ const char* InputSubsystem::GetUserActionLabel(UserAction action)
         return "";
     switch (action)
     {
+        case UAInventory:
+            return LocalizeStringWithFallback("STR_USRACT_INVENTORY", "Physical inventory");
+        case UAInventoryEditToggle:
+            return LocalizeStringWithFallback("STR_USRACT_INVENTORY_SETTINGS", "Inventory settings");
         case UAChatPrevChannel:
             return LocalizeStringWithFallback("STR_USRACT_CHAT_PREV_CHANNEL", "Previous chat channel");
         case UAChatNextChannel:
@@ -1490,15 +1527,19 @@ bool InputSubsystem::ConsumeAxisBigActive(int i)
 #if _ENABLE_CHEATS
 float InputSubsystem::GetCheat1(SDL_Scancode sc) const
 {
+    if (GWorld && GWorld->GetMode() == GModeNetware)
+        return 0;
     int dik = static_cast<int>(sc);
-    if (!GInput.keyboard.cheat1 || GInput.keyboard.cheat2 || dik < 0)
+    if (!GInput.keyboard.cheat1 || GInput.keyboard.cheat2 || dik < 0 || dik >= SDL_SCANCODE_COUNT)
         return 0;
     return GInput.keyboard.keys[dik];
 }
 float InputSubsystem::GetCheat2(SDL_Scancode sc) const
 {
+    if (GWorld && GWorld->GetMode() == GModeNetware)
+        return 0;
     int dik = static_cast<int>(sc);
-    if (GInput.keyboard.cheat1 || !GInput.keyboard.cheat2 || dik < 0)
+    if (GInput.keyboard.cheat1 || !GInput.keyboard.cheat2 || dik < 0 || dik >= SDL_SCANCODE_COUNT)
         return 0;
     return GInput.keyboard.keys[dik];
 }

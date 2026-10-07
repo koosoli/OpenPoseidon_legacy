@@ -15,7 +15,7 @@ namespace Poseidon
 {
 namespace
 {
-constexpr int kContextControlsVersion = 5;
+constexpr int kContextControlsVersion = 6;
 constexpr int kGamepadButtonA = 0;
 constexpr int kGamepadButtonB = 1;
 constexpr int kGamepadButtonX = 2;
@@ -269,8 +269,8 @@ bool ContextControlsConfig::Load(const std::string& path)
     // A file written before newer actions existed has no entries for them. Seed
     // each profile with defaults first so those actions come up bound, then let
     // the file override the actions it does list.
-    const bool seedDefaults = version < kContextControlsVersion;
-    migratedOnLoad = seedDefaults;
+    const bool seedDefaults = version < 5;
+    migratedOnLoad = version < kContextControlsVersion;
 
     UserActionDesc* descs = InputSubsystem::GetUserActionDesc();
     for (int c = 0; c < ContextCount; ++c)
@@ -282,6 +282,13 @@ bool ContextControlsConfig::Load(const std::string& path)
         {
             profile.LoadDefaults();
             ApplyContextDefaults(ctx, profile);
+        }
+        else if (version < 6)
+        {
+            // Add only the new inventory actions to v5 profiles; do not
+            // resurrect other actions the player deliberately left unbound.
+            profile.Bind(UAInventory, InputCode::Key(SDL_SCANCODE_O));
+            profile.Bind(UAInventoryEditToggle, InputCode::Key(SDL_SCANCODE_K));
         }
         for (int a = 0; a < UAN; ++a)
         {

@@ -259,6 +259,7 @@ CMD_RADIO_CUSTOM_0
 #define IDC_MAP_NAME				73
 #define IDC_WARRANT					74
 #define IDC_GPS							75
+#define IDC_INVENTORY_PREVIEW             76
 
 #define IDC_HSLIDER					98
 #define IDC_VSLIDER					99

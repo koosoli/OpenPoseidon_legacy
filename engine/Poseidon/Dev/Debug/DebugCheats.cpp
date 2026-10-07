@@ -64,10 +64,18 @@ namespace Poseidon::Dev
 {
 namespace DebugCheats
 {
+namespace
+{
+bool MultiplayerSession()
+{
+    return GWorld && GWorld->GetMode() == GModeNetware;
+}
+} // namespace
+
 
 // Cmd_God — sticky toggle.  IsActive() is hot-pathed (queried by
 // Object::SetDammage for the real player on every damage event) so
-// it's a plain bool fetch.  SetActive logs the transition.
+// it checks the live session as well as the toggle. SetActive logs the transition.
 namespace Cmd_God
 {
 namespace
@@ -77,16 +85,17 @@ bool s_active = false;
 
 bool Available()
 {
-    return MissionInfo::IsActive();
+    return !MultiplayerSession() && MissionInfo::IsActive();
 }
 
 bool IsActive()
 {
-    return s_active;
+    return s_active && !MultiplayerSession();
 }
 
 void SetActive(bool active)
 {
+    active = active && !MultiplayerSession();
     if (s_active == active)
         return;
     s_active = active;
@@ -95,6 +104,11 @@ void SetActive(bool active)
 
 void Invoke(std::string_view args, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     // Accept "1"/"0"/"on"/"off"/"true"/"false"/"" (the bare command toggles).
     bool target = !s_active;
     if (args == "1" || args == "on" || args == "true")
@@ -122,15 +136,16 @@ bool s_active = false;
 
 bool Available()
 {
-    return MissionInfo::IsActive();
+    return !MultiplayerSession() && MissionInfo::IsActive();
 }
 bool IsActive()
 {
-    return s_active;
+    return s_active && !MultiplayerSession();
 }
 
 void SetActive(bool active)
 {
+    active = active && !MultiplayerSession();
     if (s_active == active)
         return;
     s_active = active;
@@ -139,6 +154,11 @@ void SetActive(bool active)
 
 void Invoke(std::string_view args, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     bool target = !s_active;
     if (args == "1" || args == "on" || args == "true")
         target = true;
@@ -165,15 +185,16 @@ bool s_active = false;
 
 bool Available()
 {
-    return MissionInfo::IsActive();
+    return !MultiplayerSession() && MissionInfo::IsActive();
 }
 bool IsActive()
 {
-    return s_active;
+    return s_active && !MultiplayerSession();
 }
 
 void SetActive(bool active)
 {
+    active = active && !MultiplayerSession();
     if (s_active == active)
         return;
     s_active = active;
@@ -182,6 +203,11 @@ void SetActive(bool active)
 
 void Invoke(std::string_view args, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     bool target = !s_active;
     if (args == "1" || args == "on" || args == "true")
         target = true;
@@ -209,15 +235,16 @@ bool s_active = false;
 
 bool Available()
 {
-    return MissionInfo::IsActive();
+    return !MultiplayerSession() && MissionInfo::IsActive();
 }
 bool IsActive()
 {
-    return s_active;
+    return s_active && !MultiplayerSession();
 }
 
 void SetActive(bool active)
 {
+    active = active && !MultiplayerSession();
     if (s_active == active)
         return;
     s_active = active;
@@ -226,6 +253,11 @@ void SetActive(bool active)
 
 void Invoke(std::string_view args, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     bool target = !s_active;
     if (args == "1" || args == "on" || args == "true")
         target = true;
@@ -253,15 +285,16 @@ bool s_active = false;
 
 bool Available()
 {
-    return MissionInfo::IsActive();
+    return !MultiplayerSession() && MissionInfo::IsActive();
 }
 bool IsActive()
 {
-    return s_active;
+    return s_active && !MultiplayerSession();
 }
 
 void SetActive(bool active)
 {
+    active = active && !MultiplayerSession();
     if (s_active == active)
         return;
     s_active = active;
@@ -270,6 +303,11 @@ void SetActive(bool active)
 
 void Invoke(std::string_view args, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     bool target = !s_active;
     if (args == "1" || args == "on" || args == "true")
         target = true;
@@ -297,15 +335,16 @@ bool s_active = false;
 
 bool Available()
 {
-    return MissionInfo::IsActive();
+    return !MultiplayerSession() && MissionInfo::IsActive();
 }
 bool IsActive()
 {
-    return s_active;
+    return s_active && !MultiplayerSession();
 }
 
 void SetActive(bool active)
 {
+    active = active && !MultiplayerSession();
     if (s_active == active)
         return;
     s_active = active;
@@ -314,6 +353,11 @@ void SetActive(bool active)
 
 void Invoke(std::string_view args, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     bool target = !s_active;
     if (args == "1" || args == "on" || args == "true")
         target = true;
@@ -337,11 +381,16 @@ namespace Cmd_SkipTime
 
 bool Available()
 {
-    return MissionInfo::IsActive();
+    return !MultiplayerSession() && MissionInfo::IsActive();
 }
 
 void InvokeHours(float hours, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     if (!GWorld)
     {
         out = "skiptime: no active world";
@@ -356,6 +405,11 @@ void InvokeHours(float hours, std::string& out)
 
 void Invoke(std::string_view args, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     // Parse a signed float; whitespace already trimmed by Run().
     char tmp[32];
     size_t n = args.size();
@@ -389,11 +443,16 @@ namespace Cmd_SetWeather
 
 bool Available()
 {
-    return MissionInfo::IsActive();
+    return !MultiplayerSession() && MissionInfo::IsActive();
 }
 
 void InvokeOvercast(float overcast, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     if (!GWorld)
     {
         out = "weather: no active world";
@@ -412,6 +471,11 @@ void InvokeOvercast(float overcast, std::string& out)
 
 void Invoke(std::string_view args, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     char tmp[32];
     size_t n = args.size();
     if (n == 0 || n >= sizeof(tmp))
@@ -432,6 +496,11 @@ void Invoke(std::string_view args, std::string& out)
 
 void InvokeWeather(float overcast, float fog, float transitionSeconds, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     if (!GWorld)
     {
         out = "weather: no active world";
@@ -457,11 +526,16 @@ namespace Cmd_SetTimeOfDay
 
 bool Available()
 {
-    return MissionInfo::IsActive();
+    return !MultiplayerSession() && MissionInfo::IsActive();
 }
 
 void InvokeHour(float hour, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     if (!GWorld)
     {
         out = "settime: no active world";
@@ -495,7 +569,7 @@ namespace Cmd_TimeMultiplier
 
 bool Available()
 {
-    return MissionInfo::IsActive();
+    return !MultiplayerSession() && MissionInfo::IsActive();
 }
 
 float Get()
@@ -505,6 +579,11 @@ float Get()
 
 void SetValue(float mult, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     if (!GWorld)
     {
         out = "timemult: no active world";
@@ -519,6 +598,11 @@ void SetValue(float mult, std::string& out)
 
 void Invoke(std::string_view args, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     char tmp[32];
     size_t n = args.size();
     if (n == 0 || n >= sizeof(tmp))
@@ -550,13 +634,18 @@ namespace Cmd_UnlockCampaign
 
 bool Available()
 {
-    // Always available — no display gating.  If no campaigns are
+    // Available outside multiplayer, without display gating. If no campaigns are
     // installed at all the Invoke will fail and report it.
-    return true;
+    return !MultiplayerSession();
 }
 
 void Invoke(std::string_view /*args*/, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     if (DebugUnlockAllCampaigns())
     {
         out = "unlockcampaign: every mission of every campaign marked available";
@@ -579,11 +668,16 @@ namespace Cmd_SaveGame
 
 bool Available()
 {
-    return MissionInfo::IsActive();
+    return !MultiplayerSession() && MissionInfo::IsActive();
 }
 
 void Invoke(std::string_view /*args*/, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     if (!GWorld)
     {
         out = "save: no active world";
@@ -620,11 +714,16 @@ bool Available()
     // Camera is the minimum requirement — exists as soon as the scene
     // is up (including the menu demo loop).  Player is optional and
     // adds a second line of output when present.
-    return GScene != nullptr && GScene->GetCamera() != nullptr;
+    return !MultiplayerSession() && GScene != nullptr && GScene->GetCamera() != nullptr;
 }
 
 void Invoke(std::string_view /*args*/, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     if (!Available())
     {
         out = "storepos: no scene / camera";
@@ -692,11 +791,16 @@ bool Available()
     // when the file is on disk).  Just require a mission running; the
     // Invoke surfaces "no save file" through its status string if
     // LoadBin can't find anything.
-    return MissionInfo::IsActive();
+    return !MultiplayerSession() && MissionInfo::IsActive();
 }
 
 void Invoke(std::string_view /*args*/, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     if (!GWorld)
     {
         out = "load: no active world";
@@ -718,7 +822,7 @@ bool Available()
 {
     // A mission must be active (real player assigned) AND not already
     // ending — clicking End again mid-teardown is at best a no-op.
-    return MissionInfo::IsActive() && GWorld->GetEndMode() == EMContinue;
+    return !MultiplayerSession() && MissionInfo::IsActive() && GWorld->GetEndMode() == EMContinue;
 }
 
 std::vector<std::string> AvailableOutcomes()
@@ -737,6 +841,11 @@ std::vector<std::string> AvailableOutcomes()
 
 void Invoke(std::string_view outcome, std::string& out)
 {
+    if (MultiplayerSession())
+    {
+        out = "developer cheats disabled in multiplayer";
+        return;
+    }
     if (!GWorld)
     {
         out = "no active world";

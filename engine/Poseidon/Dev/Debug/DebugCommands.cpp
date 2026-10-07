@@ -1,5 +1,6 @@
 
 #include <Poseidon/Dev/Debug/DebugCommands.hpp>
+#include <Poseidon/World/World.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 
 #include <algorithm>
@@ -49,6 +50,11 @@ const std::vector<Command>& All()
 
 bool Run(std::string_view line, std::string& out)
 {
+    if (GWorld && GWorld->GetMode() == GModeNetware)
+    {
+        out = "developer console disabled in multiplayer";
+        return false;
+    }
     // Trim leading whitespace
     while (!line.empty() && (line.front() == ' ' || line.front() == '\t'))
         line.remove_prefix(1);

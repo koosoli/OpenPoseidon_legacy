@@ -1,6 +1,6 @@
 # Physical inventory feasibility review — 2026-10-07
 
-State: **SOURCE_REVIEWED / NOT_PORTED / NO_FOREIGN_BINARY_INSTALLED**.
+State: **SELECTIVELY_PORTED / BUILD_PASSED / INSTALLED_ACCEPTANCE_PENDING**.
 
 Reviewed the owner-supplied local folder
 `inspiration/CWR-Physical Inventory/CWR-Physical Inventory` in the main checkout.
@@ -64,3 +64,16 @@ file is absent. Its ghost icons also require that missing pack. Therefore good
 missing-asset behavior must be fixed and tested during the port, not assumed from
 the presence of fallback code alone. Existing `fopen` metadata access is also a
 loose-file path and needs archive-aware reads before metadata is put in a PBO.
+
+## Integration update
+
+The owner subsequently requested implementation. The eight scoped sources are
+now adapted against the current branch, with an engine-owned fallback resource
+instead of the proposed additional PBO. No external inventory icon pack is needed:
+stock gear pictures or labelled tiles remain usable. Settings live in the user
+directory. O/K are configurable with selective v5 profile migration. Multiplayer
+keeps classic Gear because donated direct transfers need networking work.
+The source receipt is [PHYSICAL-INVENTORY-SOURCE-20261007.md](PHYSICAL-INVENTORY-SOURCE-20261007.md).
+Build and 11 controls-profile tests passed; installed transaction acceptance is
+pending. Missing-icon and transfer acceptance must be established in the installed
+game before reporting runtime completion.

@@ -1,3 +1,4 @@
+#include <Poseidon/World/World.hpp>
 #include "WtrTestHarness.hpp"
 #include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
 #include <sstream>
@@ -61,6 +62,8 @@ void WtrTestHarness::SelectPreset(int presetId, Engine::WaterSettings& settings,
 
 void WtrTestHarness::Start(Engine::WaterSettings& settings, int debugView)
 {
+    if (GWorld && GWorld->GetMode() == GModeNetware)
+        return;
     if (!_active)
     {
         _savedSettings = settings;
@@ -191,6 +194,13 @@ void WtrTestHarness::ApplyPresetSettings(int presetId, Engine::WaterSettings& se
 
 bool WtrTestHarness::Update(float frameDt, Engine::WaterSettings& settings, Vector3& camPos, Vector3& camRot)
 {
+    if (GWorld && GWorld->GetMode() == GModeNetware)
+    {
+        // Do not restore single-player renderer settings into a network session.
+        _active = false;
+        _hasSavedState = false;
+        return false;
+    }
     if (!_active)
         return false;
 

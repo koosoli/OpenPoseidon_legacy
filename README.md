@@ -44,6 +44,10 @@ The current engine includes:
   support on Windows and Linux, alongside Direct3D 12 on Windows. The active
   API depends on the platform, GPU and driver; the legacy OpenGL renderer remains
   available separately.
+- **Physical inventory (single player):** open with **O** for vicinity cargo,
+  drag/drop, equipped slots and weight/volume budgets; **K** opens inventory
+  settings. Stock pictures and labelled tiles work without an extra icon pack.
+  Multiplayer keeps classic Gear; Dev Tools and Zeus are disabled in multiplayer.
 - **Box3D physics and articulated ragdolls:** jointed character bodies, death and
   explosion reactions, and bullet reactivation of supported runtime corpses.
   Automatic ragdolls default to on, with an on/off control in the Physics dev tab.

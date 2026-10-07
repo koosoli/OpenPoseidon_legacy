@@ -25,7 +25,8 @@ UAMoveForward, UAMoveBack, UATurnLeft, UATurnRight, UAMoveUp, UAMoveDown, UAMove
 #if _ENABLE_CHEATS
     UACheat1, UACheat2,
 #endif
+    // Append new actions so legacy action indices remain stable.
+    UAInventory, UAInventoryEditToggle,
     UAN // terminator
         DEFINE_ENUM_END(UserAction)
 } // namespace Poseidon
-

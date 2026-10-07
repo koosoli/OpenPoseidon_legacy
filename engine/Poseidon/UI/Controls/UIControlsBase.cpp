@@ -315,7 +315,11 @@ void IControl::DrawTooltip(float x, float y)
     }
 }
 ControlObject::ControlObject(ControlsContainer* parent, int idc, const ParamEntry& cls)
-    : Object(Shapes.New(Poseidon::FindShape(cls >> "model"), false, false), -1), IControl(parent, idc, cls)
+    : Object(RString(cls >> "model").GetLength() > 0
+                 ? Shapes.New(Poseidon::FindShape(cls >> "model"), false, false)
+                 : nullptr,
+             -1),
+      IControl(parent, idc, cls)
 {
     if (_shape && _shape->NLevels() > 0)
     {

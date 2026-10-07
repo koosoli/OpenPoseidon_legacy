@@ -125,7 +125,7 @@ class InputSubsystem
     bool IsKeyPressed(SDL_Scancode sc) const; // edge (ToDo)
     float GetKeyValue(SDL_Scancode sc) const; // analog (time-weighted 0..1)
     bool ConsumeKeyPress(SDL_Scancode sc);    // read + clear edge
-    // Like ConsumeKeyPress, but a no-op when AppConfig::DevMode() is off.
+    // Like ConsumeKeyPress, but reports no action when dev mode is off or in multiplayer.
     // Use for hotkeys gated behind --dev (font tuner, view dump, slot picker)
     // so call sites stay one-line.  When dev mode is off, the edge is still
     // cleared so the press doesn't leak into a later frame's handler.
@@ -141,6 +141,10 @@ class InputSubsystem
     bool IsMouseLeftDown() const;
     bool IsMouseRightDown() const;
     bool IsMouseMiddleDown() const;
+
+    // The inventory consumes right-click itself; do not also trigger gameplay
+    // actions bound to that button. Raw UI mouse queries remain available.
+    void SetSuppressRightButtonActions(bool suppress);
 
     // Mouse movement delta (per-frame, sensitivity pre-applied)
     float GetMouseDeltaX() const;

@@ -25,7 +25,9 @@ const UserAction kOnFoot[] = {
     UALookAround, UALookAroundToggle, UALookCenter, UALookLeft, UALookRight, UALookUp, UALookDown, UALookLeftUp,
     UALookRightUp, UALookLeftDown, UALookRightDown,
     // HUD
-    UABinocular, UANightVision, UAN};
+    UABinocular, UANightVision,
+    // Physical inventory and its layout/settings panel.
+    UAInventory, UAInventoryEditToggle, UAN};
 
 const UserAction kVehicles[] = {UAMoveForward,     UAMoveBack,     UAMoveFastForward,
                                 UAMoveSlowForward, UATurbo,        UATurnLeft,

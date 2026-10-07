@@ -13,6 +13,7 @@
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <Poseidon/UI/Locale/Sentences.hpp>
+#include <Poseidon/UI/Inventory/InventoryModel.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 
 #include <Poseidon/Network/Network.hpp>
@@ -681,6 +682,27 @@ void ResourceSupply::Simulate(float deltaT, SimulationImportance prec)
                 {
                     break;
                 }
+                // Single-player physical inventory uses carried mass instead
+                // of the classic slot masks. AI and network transfers retain
+                // the existing path below. Do not remove cargo until accepted.
+                if (GWorld->GetMode() != GModeNetware && target == GWorld->PlayerOn() && FindWeapon(weapon))
+                {
+                    if (!InventoryCanCarryWeapon(target, weapon) ||
+                        target->AddWeapon(weapon, true, true, false) < 0)
+                    {
+                        _supplying = nullptr;
+                        return;
+                    }
+                    RemoveWeaponCargo(weapon);
+                    target->OnWeaponChanged();
+                    if (GWorld->FocusOn() && GWorld->FocusOn()->GetVehicle() == target)
+                        GWorld->UI()->ResetVehicle(target);
+                    _supplying = nullptr;
+                    if (target == GWorld->CameraOn())
+                        CutScene("TakeWeapon");
+                    UpdateWeaponsInBriefing();
+                    return;
+                }
                 AUTO_STATIC_ARRAY(Ref<const WeaponType>, conflict, 16);
                 if (FindWeapon(weapon) && target->CheckWeapon(weapon, conflict))
                 {
@@ -810,6 +832,21 @@ void ResourceSupply::Simulate(float deltaT, SimulationImportance prec)
                 if (!magazine)
                 {
                     break;
+                }
+                if (GWorld->GetMode() != GModeNetware && target == GWorld->PlayerOn())
+                {
+                    if (!InventoryCanCarryMagazine(target, magazine) ||
+                        target->AddMagazine(const_cast<Magazine*>(magazine.GetRef()), true, true) < 0)
+                    {
+                        _supplying = nullptr;
+                        return;
+                    }
+                    RemoveMagazineCargo(const_cast<Magazine*>(magazine.GetRef()));
+                    _supplying = nullptr;
+                    if (target == GWorld->CameraOn())
+                        CutScene("TakeMagazine");
+                    UpdateWeaponsInBriefing();
+                    return;
                 }
                 AUTO_STATIC_ARRAY(Ref<const Magazine>, conflict, 16);
                 if (target->CheckMagazine(magazine, conflict))

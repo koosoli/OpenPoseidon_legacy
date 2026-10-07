@@ -10,6 +10,7 @@
 
 #include <array>
 #include <filesystem>
+#include <fstream>
 #include <random>
 #include <string>
 
@@ -178,7 +179,7 @@ TEST_CASE("ContextControlsConfig: an older config keeps its bindings and default
 // added since (map zoom, cheat entry, chat navigation). It parses across every context; the actions
 // it lists are kept, the ones it predates are seeded to their defaults, and a save
 // then reload comes up current with the fill persisted.
-TEST_CASE("ContextControlsConfig: a full version-2 config parses and migrates to 5",
+TEST_CASE("ContextControlsConfig: a full version-2 config parses and migrates to current",
           "[Settings][ContextControlsConfig]")
 {
     REQUIRE_FIXTURE("cfg/contextControls_v2_full.cfg");
@@ -281,5 +282,80 @@ TEST_CASE("ContextControlsConfig: version 4 gains chat navigation bindings", "[S
     CHECK_FALSE(reloaded.migratedOnLoad);
     CHECK(reloaded.profiles[(int)InputContext::Chat].HasBinding(UAChatHistoryDown, InputCode::Key(SDL_SCANCODE_F2)));
 
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ContextControlsConfig: version 5 seeds only inventory actions", "[Settings][ContextControlsConfig]")
+{
+    const std::string path = TmpPath("context_controls_v5_inventory.cfg");
+    {
+        std::ofstream file(path);
+        file << "contextControlsVersion=5;\nctxInfantryFire[]={58};\n";
+        REQUIRE(file.good());
+    }
+    ContextControlsConfig migrated;
+    REQUIRE(migrated.Load(path));
+    CHECK(migrated.migratedOnLoad);
+    const auto& infantry = migrated.profiles[(int)InputContext::Infantry];
+    CHECK(infantry.HasBinding(UAFire, InputCode::Key(SDL_SCANCODE_F1)));
+    CHECK(infantry.HasBinding(UAInventory, InputCode::Key(SDL_SCANCODE_O)));
+    CHECK(infantry.HasBinding(UAInventoryEditToggle, InputCode::Key(SDL_SCANCODE_K)));
+    // These absent actions were intentionally unbound in an already-current
+    // profile. An inventory upgrade must not restore all gameplay defaults.
+    CHECK(infantry.BindingCount(UAMoveForward) == 0);
+    CHECK(infantry.BindingCount(UAVoiceOverNetPushToTalk) == 0);
+    CHECK(infantry.BindingCount(UAChatHistoryDown) == 0);
+    CHECK(migrated.profiles[(int)InputContext::CarDriver].HasBinding(UAInventory, InputCode::Key(SDL_SCANCODE_O)));
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ContextControlsConfig: inventory migration keeps custom and explicitly cleared bindings",
+          "[Settings][ContextControlsConfig]")
+{
+    const std::string path = TmpPath("context_controls_v5_inventory_custom.cfg");
+    {
+        std::ofstream file(path);
+        file << "contextControlsVersion=5;\n"
+                "ctxInfantryInventory[]={59};\n"
+                "ctxInfantryInventoryEditMenu[]={0};\n"
+                "ctxCarDriverInventory[]={};\n"
+                "ctxCarDriverInventoryEditMenu[]={60};\n";
+        REQUIRE(file.good());
+    }
+    ContextControlsConfig migrated;
+    REQUIRE(migrated.Load(path));
+    const auto& infantry = migrated.profiles[(int)InputContext::Infantry];
+    CHECK(infantry.HasBinding(UAInventory, InputCode::Key(SDL_SCANCODE_F2)));
+    CHECK_FALSE(infantry.HasBinding(UAInventory, InputCode::Key(SDL_SCANCODE_O)));
+    const auto& cleared = infantry.GetBindingEntries(UAInventoryEditToggle);
+    REQUIRE(cleared.size() == 1);
+    CHECK_FALSE(cleared[0].code.valid());
+    const auto& driver = migrated.profiles[(int)InputContext::CarDriver];
+    CHECK(driver.BindingCount(UAInventory) == 0);
+    CHECK(driver.HasBinding(UAInventoryEditToggle, InputCode::Key(SDL_SCANCODE_F3)));
+    CHECK_FALSE(driver.HasBinding(UAInventoryEditToggle, InputCode::Key(SDL_SCANCODE_K)));
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ContextControlsConfig: current inventory profile roundtrip does not reseed removed defaults",
+          "[Settings][ContextControlsConfig]")
+{
+    const std::string path = TmpPath("context_controls_current_inventory.cfg");
+    ContextControlsConfig source;
+    auto& infantry = source.profiles[(int)InputContext::Infantry];
+    infantry.Bind(UAInventory, InputBinding(InputCode::Key(SDL_SCANCODE_F4), InputCode::Key(SDL_SCANCODE_LSHIFT)));
+    infantry.Bind(UAInventoryEditToggle, InputBinding{});
+    REQUIRE(source.Save(path));
+    ContextControlsConfig reloaded;
+    REQUIRE(reloaded.Load(path));
+    CHECK_FALSE(reloaded.migratedOnLoad);
+    const auto& inventory = reloaded.profiles[(int)InputContext::Infantry].GetBindingEntries(UAInventory);
+    REQUIRE(inventory.size() == 1);
+    CHECK(inventory[0].code == InputCode::Key(SDL_SCANCODE_F4));
+    CHECK(inventory[0].modifier == InputCode::Key(SDL_SCANCODE_LSHIFT));
+    const auto& settings = reloaded.profiles[(int)InputContext::Infantry].GetBindingEntries(UAInventoryEditToggle);
+    REQUIRE(settings.size() == 1);
+    CHECK_FALSE(settings[0].code.valid());
+    CHECK(reloaded.profiles[(int)InputContext::CarDriver].BindingCount(UAInventory) == 0);
     std::filesystem::remove(path);
 }

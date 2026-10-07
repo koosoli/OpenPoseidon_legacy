@@ -13,6 +13,9 @@
 #include <Poseidon/Audio/DynSound.hpp>
 #include <Poseidon/UI/DisplayUI.hpp>
 #include <Poseidon/UI/DisplayUICommon.hpp>
+#include <Poseidon/UI/Inventory/DisplayInventory.hpp>
+#include <Poseidon/UI/Inventory/InventoryModel.hpp>
+#include <Poseidon/UI/Inventory/InventoryResources.hpp>
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 #include <Poseidon/Foundation/Strings/StrFormat.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
@@ -1019,12 +1022,77 @@ void DisplayMission::OnSimulate(EntityAI* vehicle)
     {
         OpenInterrupt();
     }
+
+    // Keep icon work bounded; opening the inventory never needs a blocking
+    // preload of every weapon and magazine in the installed addons.
+    if (GWorld->GetMode() != GModeNetware)
+    {
+        PreloadInventoryIconsStep(6);
+        if (InventoryWeaponsInBackpack())
+        {
+            Person* player = GWorld->PlayerOn();
+            if (!player)
+                player = GWorld->GetRealPlayer();
+            EnforceEquippedPrimaryWeapon(player);
+        }
+    }
+
+    if (GWorld->GetEndMode() == EMContinue && !Child() && !GetMsgBox())
+    {
+        auto& input = InputSubsystem::Instance();
+        if (input.GetActionToDo(UAInventory))
+            OpenInventory();
+        else if (GWorld->GetMode() != GModeNetware && input.GetActionToDo(UAInventoryEditToggle))
+            SetInventoryEditMenuVisible(!InventoryEditMenuVisible());
+        else if (GWorld->GetMode() != GModeNetware)
+        {
+            // Leave squad command number keys alone unless the player has
+            // explicitly assigned that slot in the inventory.
+            static const SDL_Scancode numberKeys[] = {
+                SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_4, SDL_SCANCODE_5,
+                SDL_SCANCODE_6, SDL_SCANCODE_7, SDL_SCANCODE_8, SDL_SCANCODE_9, SDL_SCANCODE_0};
+            for (int slot = 0; slot < 10; ++slot)
+            {
+                if (GetWeaponHotkey(slot).GetLength() == 0 || !input.GetKeyToDo(numberKeys[slot]))
+                    continue;
+                Person* player = GWorld->PlayerOn();
+                if (!player)
+                    player = GWorld->GetRealPlayer();
+                ApplyWeaponHotkey(player, slot);
+                break;
+            }
+        }
+    }
 }
 
 void DisplayMission::OpenInterrupt()
 {
     if (!Child() && !GetMsgBox())
         CreateChild(new DisplayInterrupt(this));
+}
+
+void DisplayMission::OpenInventory()
+{
+    if (Child() || GetMsgBox())
+        return;
+    // The donated transfer path mutates local gear directly. Keep multiplayer
+    // on its existing server-authoritative Gear/action-menu path.
+    if (GWorld->GetMode() == GModeNetware)
+    {
+        ShowHint("Physical inventory is currently available in single player. Use the classic Gear screen in multiplayer.");
+        return;
+    }
+    Person* player = GWorld->PlayerOn();
+    if (!player)
+        player = GWorld->GetRealPlayer();
+    if (!player || player->IsDammageDestroyed())
+        return;
+    if (!InventoryDisplayResource())
+    {
+        ShowHint("Physical inventory UI is unavailable. Use the classic Gear screen.");
+        return;
+    }
+    CreateChild(new DisplayInventory(this, player));
 }
 
 bool DisplayMission::DoControllerUiAction(ControllerUiAction action)
