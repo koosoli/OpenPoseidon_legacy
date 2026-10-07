@@ -102,6 +102,24 @@ execution:
       smoke passed and all 17 file hashes match. Other weapon variants still share
       category pictures; classic Gear art is unchanged. Exhaustive transfers/
       mod classes/save-load remain unverified.
+    additional_features:
+      date: '2026-10-07'
+      state: SELECTIVE_SP_AIDS_INSTALLED_HUD_SETTINGS_PASSED_AUDIO_DELIVERY_UNVERIFIED
+      installed_source_commit: b080696c
+      evidence: docs/verification/physical-inventory-extras-20261007.md
+      review: docs/roadmap/decisions/PHYSICAL-INVENTORY-EXTRAS-20261007.md
+      runtime_receipt: docs/verification/physical-inventory-extras-20261007-runtime.json
+      mp_runtime_receipt: docs/verification/physical-inventory-extras-mp-20261007-runtime.json
+      note: >-
+        Optional near-contact absolute bearing radio, bearing HUD and grenade-launcher
+        ground range/Reveal Target mark default on in SP; independent O/K checkboxes
+        persist in user config and share inventory reset. Existing recoil retained.
+        Bounded prediction uses current ammo drag/gravity and optional wind at 5 Hz.
+        Builds and 17 analytic/wrap assertions pass; installed inventory/HUD/on-off/
+        reset/icon regressions and hosted MP harness guard pass. AI spawn fixture did
+        not elicit contact speech, so audible bearing delivery remains unverified.
+        Donor medical/fuel/fatigue/loadout/optic/recoil changes reviewed and deferred
+        for identified correctness, compatibility and balance risks; no donor art added.
     code_quality_audit:
       date: '2026-10-07'
       state: FIXED_BUILT_INSTALLED_SP_REGRESSIONS_AND_MP_GUARD_PASSED

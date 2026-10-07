@@ -158,10 +158,12 @@ try {
         Exec 'removeAllWeapons player;player addMagazine "M16";player addMagazine "GrenadeLauncher";player addMagazine "GrenadeLauncher";player addWeapon "M16GrenadeLauncher";player selectWeapon "M16Muzzle";player setDir 0'
         Start-Sleep -Seconds 2
         Snap '11_bearing_rifle'
+        Exec 'auditShooter=player'
+        $rifleSlot=(Send @{cmd='ai_combat'}).selected
         Exec 'player selectWeapon "M203Muzzle"'
         Start-Sleep -Seconds 2
-        $receipt.launcher=Value 'currentWeapon player'
-        Require ($receipt.launcher -match 'M203|Grenade') 'Grenade muzzle not selected'
+        $receipt.launcher=(Send @{cmd='ai_combat'}).selected
+        Require ($receipt.launcher -ge 0 -and $receipt.launcher -ne $rifleSlot) 'Grenade muzzle not selected'
         Snap '12_grenade_range'
         $null=Send @{cmd='mouse_button';button=3;down=$true}
         Start-Sleep -Milliseconds 700
@@ -180,6 +182,13 @@ try {
         Require ($defaults -match 'bearingCallouts=1' -and $defaults -match 'bearingReadout=1' -and $defaults -match 'grenadeRange=1') 'Combat reset did not restore defaults'
         Key 41; Display 46; Snap '16_combat_assists_reset'
         $receipt.combatAssists=@{defaultBearing=$true;selectedGrenadeMuzzle=$receipt.launcher;settingsPersisted=$true;resetPassed=$true;visualReview='pending'}
+        Exec 'player setPos [5018,4087,0];group player setCombatMode "BLUE";createCenter east;radioEnemyGroup=createGroup east;radioEnemyGroup setCombatMode "BLUE";"SoldierWB" createUnit [[5023,4087,0],group player,"radioFriend=this",1,"PRIVATE"];radioFriend setBehaviour "AWARE";"SoldierEB" createUnit [[5025,4087,0],radioEnemyGroup,"radioEnemy=this",1,"PRIVATE"]'
+        $receipt.radioWaves=@()
+        for ($sample=0;$sample -lt 16;$sample++) {
+            $receipt.radioWaves+=Value 'triRadioWaveStates'
+            Start-Sleep -Milliseconds 500
+        }
+        Snap '17_contact_report'
     }
     $null=Send @{cmd='exit'}
     Require ($p.WaitForExit(20000) -and $p.ExitCode -eq 0) 'Normal exit failed'
