@@ -108,16 +108,19 @@ try {
     Require ($receipt.originalMode -ceq $expectedMode) 'Requested launch display mode was not applied'
     Start-Sleep -Seconds 8
     Snapshot 'startup'
-    Require ((Value 'isNil "opMenuBoat"') -ceq 'true') 'Menu still creates a boat'
-    $receipt.cameraBefore = Value 'getPos opMenuCamera'
+    Require (!(Select-String -LiteralPath (Join-Path $game 'assets/menu/RoughSea.Intro/mission.sqm') -Pattern 'opMenuBoat|vehicle="Boat' -Quiet)) 'Menu mission still defines a boat'
+    Require ((Value 'isNull opMenuCamera') -ceq 'false') 'Ocean camera is missing'
+    $receipt.cameraBefore = @(Value 'getPos opMenuCamera' | ConvertFrom-Json)
     $receipt.bathymetry = Send @{ cmd = 'water_bathymetry'; x = 2500; z = 3500 }
     $receipt.menuWaterBefore = Send @{ cmd = 'water_probe' }
     Snapshot '00_menu'
     $frameStart = [double](Value 'triFrameCount'); $watch = [Diagnostics.Stopwatch]::StartNew()
     Start-Sleep -Seconds 12
     $receipt.renderedFps = ([double](Value 'triFrameCount') - $frameStart) / $watch.Elapsed.TotalSeconds
-    $receipt.cameraAfter = Value 'getPos opMenuCamera'
-    Require ($receipt.cameraAfter -ceq $receipt.cameraBefore) 'Offshore menu camera moved'
+    $receipt.cameraAfter = @(Value 'getPos opMenuCamera' | ConvertFrom-Json)
+    # getPos height is relative to the moving sea surface; compare horizontal position.
+    Require ([Math]::Abs($receipt.cameraAfter[0] - $receipt.cameraBefore[0]) -lt 0.01 -and
+             [Math]::Abs($receipt.cameraAfter[1] - $receipt.cameraBefore[1]) -lt 0.01) 'Offshore menu camera moved'
     Snapshot '01_menu_swell'
     # Switch to an ordinary editor mission and back in the original window.
     Exec 'triClick 115'; Wait-Display 51 'Island selector'
@@ -134,7 +137,6 @@ try {
     Exec 'triClick 2'; Wait-Display 203 'Editor exit confirmation'
     Exec 'triClick 1'; Wait-Display 0 'Restored title menu'
     Start-Sleep -Seconds 5
-    Require ((Value 'isNil "opMenuBoat"') -ceq 'true') 'Restored menu creates a boat'
     Require ((Value 'isNull opMenuCamera') -ceq 'false') 'Ocean camera did not restart'
     Snapshot '03_restored_menu'
     $null = Send @{ cmd = 'exit' }

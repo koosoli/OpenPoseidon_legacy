@@ -11,6 +11,9 @@ it is not a complete game or an official Bohemia Interactive product.
 
 ## Engine features
 
+- **Vulkan rendering through WGPU:** Vulkan support on Windows and Linux,
+  alongside Direct3D 12 on Windows. The active API depends on the platform,
+  GPU and driver; a separate legacy OpenGL renderer is also available.
 - **Box3D physics and articulated ragdolls:** jointed character bodies, death and
   explosion reactions, and bullet reactivation of supported runtime corpses.
   Automatic ragdolls default to on, with a Physics developer-tab toggle.

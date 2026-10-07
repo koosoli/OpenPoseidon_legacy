@@ -58,6 +58,18 @@ execution:
     installed_source_commit: 59690124
     evidence: docs/verification/tidewater-menu-20261005.md
     runtime_receipt: docs/verification/tidewater-menu-20261005-runtime.json
+    boat_free_followup:
+      date: '2026-10-07'
+      state: INSTALLED_BOAT_FREE_MENU_AND_EDITOR_ROUNDTRIP_PASSED
+      installed_source_commit: a499f636
+      evidence: docs/verification/tidewater-menu-20261007.md
+      runtime_receipt: docs/verification/tidewater-menu-20261007-runtime.json
+      note: >-
+        Owner requested ocean-only menu. Boat/crew/route removed; fixed offshore
+        camera and existing Storm spectrum/quality budgets retained. Installed
+        build, native menu captures and same-window editor Preview/return passed.
+        Both README intro-scene bullets removed; Vulkan/WGPU API support added.
+        Previous release exports are historical and need regeneration for a new pin.
     note: >-
       Standard retail menu follows an AI BoatW through a repeating offshore route
       in Tidewater Storm swell at September15 16:40, clear of rain. Native captures
@@ -66,6 +78,16 @@ execution:
       budgets and clears on world cleanup; no water-look profile files created.
       Bounded1280x720 high/MSAA4 observation58.43FPS under60FPS cap; no universal
       performance claim. Custom mod intro and missing Desert Island fallback retained.
+  physical_inventory_review_checkpoint:
+    date: '2026-10-07'
+    state: SOURCE_REVIEWED_NOT_PORTED
+    evidence: docs/roadmap/decisions/PHYSICAL-INVENTORY-REVIEW-20261007.md
+    note: >-
+      Owner-supplied older CWR snapshot has identical GPL3-or-later/Section7 license.
+      Inventory code can be selectively ported; required UI config and optional
+      transparent icon pack are absent. Proposed managed default-content PBO with
+      stock-icon/labelled-tile and classic-UI fallbacks; existing fallback has a
+      missing-keyed-icon layout defect. No foreign binaries or gameplay imported.
   local_map_editor_checkpoint:
     state: INSTALLED_STRATIS_AND_REFORGER_EVERON_EDITOR_ROUNDTRIPS_PASSED
     installed_source_commit: ed1c10a6

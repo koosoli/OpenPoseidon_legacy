@@ -40,6 +40,10 @@ Open Poseidon Engine develops a modern [wgpu](https://wgpu.rs/)-based renderer a
 the legacy OpenGL renderer, while retaining original OFP content and gameplay.
 The current engine includes:
 
+- **Vulkan rendering through WGPU:** a modern graphics backend with Vulkan
+  support on Windows and Linux, alongside Direct3D 12 on Windows. The active
+  API depends on the platform, GPU and driver; the legacy OpenGL renderer remains
+  available separately.
 - **Box3D physics and articulated ragdolls:** jointed character bodies, death and
   explosion reactions, and bullet reactivation of supported runtime corpses.
   Automatic ragdolls default to on, with an on/off control in the Physics dev tab.
