@@ -113,7 +113,7 @@ content. Imported maps/assets are not included with the engine source.
 ## Current limitations
 
 Features are at different stages of acceptance. Dense/aerial fog can still show
-patterns, and strong visible torch shafts remain unaccepted. Ragdoll tests cover
+patterns. Ragdoll tests cover
 37 locally present stock models; two Camel pilot models retain post-hit settling
 issues. Posture, saved-corpse reactivation, network ownership and physics budgets
 also limit ragdoll admission. Arbitrary addon rigs are not universally supported.
