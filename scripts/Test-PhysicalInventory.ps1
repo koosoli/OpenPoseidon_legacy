@@ -127,6 +127,7 @@ try {
     Key 41; Display 46
     Key 18; Display 62020
     Snap '08_removed_drag_reopen'
+    Click 0.052 0.218
     Require ((Value 'magazines player') -ceq '[]') 'Removed magazine reappeared'
     Key 41; Display 46
     # Hold a ground item while a mission script fills the player's inventory.
@@ -135,9 +136,12 @@ try {
     Key 18; Display 62020
     Pointer 0.681 0.318; Button $true; Pointer 0.12 0.40; Button $false
     Pointer 0.052 0.218; Button $true; Pointer 0.70 0.40
-    Exec (('player addMagazine "Mine";' * 8))
+    # Ordinary SQF addMagazine obeys stock slots (five AT mines, not eight).
+    # 5 * 9.5 kg + M60 10.5 kg + Carl Gustaf 14.2 kg = 72.2 kg, > 60 kg.
+    Exec (('player addMagazine "Mine";' * 5)+'player addWeapon "M60";player addWeapon "CarlGustavLauncher"')
     $loaded=Value 'magazines player'
-    Require ((@($loaded|ConvertFrom-Json)).Count -eq 8) 'Overweight fixture not created'
+    $loadedWeapons=@((Value 'weapons player')|ConvertFrom-Json)
+    Require ((@($loaded|ConvertFrom-Json)).Count -eq 5 -and $loadedWeapons -contains 'M60' -and $loadedWeapons -contains 'CarlGustavLauncher') 'Overweight fixture not created'
     Button $false
     $afterRefused=Value 'magazines player'
     Require ($afterRefused -ceq $loaded) 'Stale capacity allowed overweight pickup'
