@@ -105,3 +105,28 @@ This follow-up retains the stable tested development source pin51982. The new
 opt-in Earth elevation streaming experiment is on a separate private feature
 branch and is not silently included in this release. README, sponsor funding,
 resource documentation and test-input exclusions are the only public changes.
+
+
+## First binary download, 2026-10-08
+
+The owner created private `OpenPoseidon/OpenPoseidon-Builds` and authorised an
+initial download. Clean source commit `12f0ab0ffd39792b2c42a3fad7bd87a43b1ff3ec`
+now also includes the 15 reviewed code/launcher/test paths of the Earth preview
+from private development 51982..6c0075ee, applied as a patch without private
+ancestry. This supersedes the earlier stable-only source note above. The build
+manifest excludes the separately licensed ImGui Test Engine; binary strings
+confirm its removal. Ordinary developer tools remain available.
+
+The first tested 7z includes matched EXE/renderer/audio DLLs, own runtime assets,
+default content packs, exact resolved dependency notices and checksums. The
+owner explicitly chose a source-commit/download link rather than another engine
+source archive: make matching source public before enabling sponsor downloads.
+Neither repository visibility nor sponsorship tiers were changed. Installed
+Earth-preview binaries remain untouched; the new download was tested separately
+against local game data. See private-audit/binary-release-20261008.json.
+
+Future downloads follow a bounded approve/package/test/upload process after a
+local build is judged suitable. Upload archives as Release assets; never commit
+binaries, copy the entire game directory, or silently replace the matched source
+with a link to a different revision. Local asset directories must remain
+allowlisted to avoid collecting imported retail resources or scratch images.

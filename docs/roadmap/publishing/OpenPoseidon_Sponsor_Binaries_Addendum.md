@@ -1,7 +1,7 @@
 # Ergänzung: Sponsor-Zugang zu offiziellen OpenPoseidon-Binaries
 
-**Stand:** 5. Oktober 2026  
-**Status:** Ergänzung zum privaten Veröffentlichungsplan. Noch keine Repositories, Organisationen, Sponsoring-Stufen, Einladungen oder Workflows erstellt oder verändert.
+**Stand:** 8. Oktober 2026  
+**Status:** `OpenPoseidon/OpenPoseidon-Builds` wurde vom Owner erstellt und ist privat. Erster geprüfter Windows-Download vorbereitet/hochgeladen; siehe `private-audit/binary-release-20261008.json`. Sponsoring-Stufen, Preise, Einladungen und Sichtbarkeit wurden nicht geändert.
 
 ## 1. Ziel
 
@@ -61,8 +61,8 @@ Keine fremden Originalspielarchive, Modelle, Texturen, Audio oder nicht freigege
 1. Privaten Quellstand festlegen und gemäß Allowlist prüfen/exportieren.
 2. Bereinigten Veröffentlichungskandidaten ohne private Elterncommits erstellen.
 3. Genau diesen Kandidaten in einer frischen Umgebung bauen und testen.
-4. Vollständigen zugehörigen Source-Stand öffentlich verfügbar machen.
-5. Erst danach die zugehörigen geprüften Binärpakete im privaten Sponsor-Repository veröffentlichen.
+4. Das geprüfte Binärpaket darf zur Vorbereitung privat im Builds-Repository liegen; ohne Sponsorzugang.
+5. Den vollständigen zugehörigen Source-Stand öffentlich verfügbar machen, bevor Download-Zugang an Sponsoren vergeben wird. Der Owner bestätigte am 2026-10-08, dass Quellenveröffentlichung und Sponsorfreigabe zusammen erfolgen; kein zusätzliches Engine-Quellcode-Archiv im Builds-Repository. Ein direkter Link auf den exakt passenden Commit und dessen Download gehört zu jedem Release.
 
 Kein neuer Sponsor-Build aus einem internen privaten Commit, dessen benötigte Änderungen im veröffentlichten Source fehlen. Die öffentliche Hauptbranch allein ist kein ausreichender Source-Verweis; der passende unveränderliche Release-Stand muss verfügbar sein.
 

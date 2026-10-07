@@ -1,0 +1,59 @@
+{
+  "name": "cwr",
+  "version": "1.0",
+  "dependencies": [
+    "box3d",
+    "catch2",
+    "cjson",
+    { "name": "curl", "features": ["ssl"] },
+    "glslang",
+    "cli11",
+    "stb",
+    "mimalloc",
+    "zstd",
+    { "name": "sdl3", "version>=": "3.4.10#1" },
+    "openal-soft",
+    "opus",
+    "libogg",
+    "libvorbis",
+    "enkits",
+    "sse2neon",
+    {
+      "name": "imgui",
+      "features": ["sdl3-binding", "sdl3-renderer-binding", "opengl3-binding", "freetype"]
+    },
+    {
+      "name": "spdlog",
+      "features": ["wchar"],
+      "platform": "windows"
+    },
+    {
+      "name": "spdlog",
+      "platform": "!windows"
+    }
+  ],
+  "builtin-baseline": "170bd3bfb152a1795b67b5c2190ab7d899fc9971",
+  "overrides": [
+    {
+      "name": "imgui",
+      "version": "1.92.8",
+      "port-version": 1
+    },
+    {
+      "name": "catch2",
+      "version": "3.5.2"
+    },
+    {
+      "name": "cli11",
+      "version": "2.4.0"
+    },
+    {
+      "name": "mimalloc",
+      "version": "2.2.4"
+    },
+    {
+      "name": "spdlog",
+      "version": "1.15.1"
+    }
+  ]
+}

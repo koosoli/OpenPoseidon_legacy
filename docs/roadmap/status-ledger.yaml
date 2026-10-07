@@ -21,6 +21,29 @@ execution:
       no worldwide collision, objects, globe curvature, poles or floating origin.
       Existing OFP gameplay remains the default. CWR-Worldgen reviewed; no
       external code or assets vendored. Complete pre-change branch pushed first.
+  binary_download_checkpoint:
+    date: '2026-10-08'
+    state: TESTED_PRIVATE_RELEASE_UPLOADED
+    repository: OpenPoseidon/OpenPoseidon-Builds
+    release_url: https://github.com/OpenPoseidon/OpenPoseidon-Builds/releases/tag/preview-2026.10.08
+    source_commit: 12f0ab0ffd39792b2c42a3fad7bd87a43b1ff3ec
+    format: 7z
+    package_bytes: 38564427
+    package_sha256: 84d54fd7b3175de11a73bf1be0178b757bcdfe4374ca7719293ac1a5481448c6
+    exact_source_build: PASS
+    extracted_package_hashes: 299
+    extracted_wgpu_initialization: PASS
+    github_asset_digest: PASS
+    repository_private: true
+    sponsorship_changes: NONE
+    source_delivery: exact commit/download links; no separate engine source archive at owner request
+    source_access_gate: owner makes matching source public before enabling sponsor downloads
+    receipt: docs/roadmap/publishing/private-audit/binary-release-20261008.json
+    note: >-
+      Includes reviewed Earth streaming code without private ancestry, own runtime
+      assets and generated default packs. Excludes separately licensed ImGui Test
+      Engine and NVIDIA NGX SDK. Full gameplay/mod/multiplayer validation not claimed.
+      Installed private Earth-preview build 6c0075ee preserved; package tested separately.
   filtered_source_release_checkpoint:
     date: '2026-10-07'
     state: SOURCE_RELEASE_READY_REPOSITORY_REMAINS_PRIVATE
