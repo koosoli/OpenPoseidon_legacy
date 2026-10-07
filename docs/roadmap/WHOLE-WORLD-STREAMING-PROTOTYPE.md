@@ -135,3 +135,33 @@ geographic content. The installed binary remains `6c0075ee`; this acceptance
 record is documentation only. The 8 October horizon extension requires new
 installed-game acceptance; the historical receipts above describe the original
 near-window implementation.
+
+## Global overview extension (8 October)
+
+`./scripts/Launch-WholeWorld.ps1 -Globe` starts 18,000 km above the chosen
+geographic origin, looking down at the complete Earth. `-Altitude` now accepts
+500 m to 30,000 km. This is an opt-in rendering preview, not an expanded gameplay
+or collision world. The fixed sphere covers both poles and the far side, while
+near/far elevation streaming retains its tangent-map addressing limits.
+
+The launcher caches NASA Earth Observatory's June 2004 Blue Marble Next
+Generation base map (5400 x 2700 JPEG) outside Git. Source and image-use guidance
+are recorded in DATA-SOURCES.txt beside the cache:
+https://science.nasa.gov/earth/earth-observatory/blue-marble-next-generation/base-map/
+https://www.nasa.gov/nasa-brand-center/images-and-media/
+The image is uploaded once at 4096 x 2048 with mipmaps (about 43 MiB GPU memory).
+This is a global overview texture, not high-resolution streamed ground imagery.
+Without it the sphere uses a plain fallback. No game content is downloaded.
+
+The globe costs 65,536 triangles at any altitude. Above 500 km only this fixed
+mesh is submitted: no new height-tile requests or fullscreen rendering passes.
+Below that altitude the existing near terrain and adaptive coarse horizon resume.
+The Earth material bypasses finite-map cave/shadow/weather receivers; those
+receivers previously misclassified the curved far surface as underground.
+Normal OFP maps retain their existing lighting. Orbit uses a larger camera near
+plane to preserve reversed-Z depth precision at Earth-scale distances.
+
+`Test-EarthStreaming.ps1 -ExpectedCommit <sha> -Horizon -Globe` additionally
+checks the actual orbital camera position, image upload, screenshot and return
+to the near terrain. Coordinate tests check the sphere's origin, antipode,
+unit normals, longitude seam and poles. Installed visual acceptance is pending.

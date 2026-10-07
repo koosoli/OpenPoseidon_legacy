@@ -305,6 +305,7 @@ pub const WGR_DRAW3D_NATIVE_CAVITY: u32 = 1024;
 pub const WGR_DRAW3D_SNOW_RECEIVER: u32 = 2048;
 pub const WGR_DRAW3D_GROUND_RECEIVER: u32 = 4096;
 pub const WGR_DRAW3D_BOOT_RELIEF: u32 = 16384;
+pub const WGR_DRAW3D_EARTH_SURFACE: u32 = 32768;
 // MAT-053: a translucent object section from the back-to-front blend pass (wgpu_renderer.hpp).
 pub const WGR_DRAW3D_BLEND_SECTION: u32 = 8192;
 

@@ -63,6 +63,18 @@ inline int HorizonZoom(double latitude, float radius)
 struct Coordinate { double latitude, longitude; };
 struct Pixel { double x, y; };
 
+struct Direction { double x, y, z; };
+// ECEF unit sphere expressed in the fixed origin's east/up/north basis.
+// Unlike the streaming window's local map this covers the poles and far side.
+inline Direction GlobeNormal(double originLat, double originLon, double lat, double lon)
+{
+    const double p0=originLat*Pi/180.0;
+    const double p=lat*Pi/180.0, dl=(lon-originLon)*Pi/180.0;
+    return {std::cos(p)*std::sin(dl),
+        std::sin(p0)*std::sin(p)+std::cos(p0)*std::cos(p)*std::cos(dl),
+        std::cos(p0)*std::sin(p)-std::sin(p0)*std::cos(p)*std::cos(dl)};
+}
+
 inline double WrapLongitude(double degrees)
 {
     return degrees - 360.0 * std::floor((degrees + 180.0) / 360.0);

@@ -152,6 +152,7 @@ const MATFLAG_NORMAL_RG: u32 = 128u;
 const MATFLAG_SNOW_RECEIVER: u32 = 2048u;
 const MATFLAG_GROUND_RECEIVER: u32 = 4096u;
 const MATFLAG_BOOT_RELIEF: u32 = 16384u;
+const MATFLAG_EARTH_SURFACE: u32 = 32768u;
 
 fn material_flags(m: Material) -> u32 {
     return u32(m.normal_map.w + 0.5);
@@ -868,6 +869,18 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     // the search, not the surface. The albedo alone is reported because it is the slot a
     // residency decision is about; the normal map shares its fate.
     mip_feedback_note(packed >> 3u, dpdx(in.uv), dpdy(in.uv));
+
+    if ((material_flags(material) & MATFLAG_EARTH_SURFACE) != 0u) {
+        // The global sphere is outside the finite landscape heightmap. Sampling
+        // that map's cave, shadow, wetness or GI receivers would turn its curved
+        // surface black below the local datum. Use only global sun and albedo.
+        let albedo = textureSampleGrad(textures[packed >> 3u], samplers[packed & 7u],
+                                      in.uv, boot_duv_dx, boot_duv_dy).rgb;
+        let n = normalize(in.normal);
+        let daylight = max(dot(n, -frame.sun_dir_world.xyz), 0.0);
+        let light = material.sun_ambient.rgb + material.sun_diffuse.rgb * daylight;
+        return vec4<f32>(srgb_to_linear(albedo) * light, 1.0);
+    }
 
     if ((material_flags(material) & MATFLAG_BOOT_RELIEF) != 0u) {
         let fade = 1.0 - smoothstep(4.0, 12.0, length(in.world_pos));

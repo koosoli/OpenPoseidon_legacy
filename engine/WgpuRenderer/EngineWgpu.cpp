@@ -7154,7 +7154,9 @@ void EngineWgpu::PushSceneCamera()
         // and with this GPU's D32F depth it is the precision-optimal form — which also
         // eases distant z-fighting. Forward: z_view=cNear -> ndc.z=0, z_view=inf ->
         // ndc.z=1; the shader's reverse_z() then flips near->1, far->0. (_33=c, _43=d.)
-        const float cNear = static_cast<float>(camera->ClipNear());
+        const float cNear = _terrain && _terrain->IsEarthStreaming()
+            ? std::max(static_cast<float>(camera->ClipNear()), std::clamp(camera->Position().Y()*0.00001f,0.0f,1000.0f))
+            : static_cast<float>(camera->ClipNear());
         entry.proj._33 = 1.0f;
         entry.proj._43 = -cNear;
 
@@ -7316,7 +7318,7 @@ void EngineWgpu::SubmitTerrain(std::span<const WgrTerrainNode> nodes)
     _cmds.push_back(cmd);
 }
 
-void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount)
+void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture)
 {
     if (!_renderer || !mesh || !indexCount) return;
     EnsureCamera();
@@ -7328,7 +7330,8 @@ void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount)
     d.palette_slot = WGR_NO_PALETTE;
     d.depth = WGR_DEPTH_TEST_WRITE;
     d.blend = WGR_BLEND_OPAQUE;
-    d.flags = WGR_DRAW3D_DOUBLE_SIDED; // Includes the narrow seam skirts.
+    d.flags = WGR_DRAW3D_DOUBLE_SIDED | WGR_DRAW3D_EARTH_SURFACE;
+    d.texture_id = texture;
     d.world.m[0] = d.world.m[5] = d.world.m[10] = d.world.m[15] = 1.0f;
     d.world.m[12] = -camera.pos[0];
     d.world.m[13] = -camera.pos[1];
@@ -7338,8 +7341,9 @@ void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount)
     const Color diffuse = light.hasMainLight ? light.sunDiffuse : HWhite;
     // Generic ground colour until geographic imagery/landcover is implemented.
     // Receives the normal frame's sun, sky, atmosphere and depth; no post pass.
-    d.mat_sun_ambient = {ambient.R()*.35f,ambient.G()*.32f,ambient.B()*.26f,1};
-    d.mat_sun_diffuse = {diffuse.R()*.35f,diffuse.G()*.32f,diffuse.B()*.26f,1};
+    const float r = texture ? 1.0f : .35f, g = texture ? 1.0f : .32f, b = texture ? 1.0f : .26f;
+    d.mat_sun_ambient = {ambient.R()*r,ambient.G()*g,ambient.B()*b,0};
+    d.mat_sun_diffuse = {diffuse.R()*r,diffuse.G()*g,diffuse.B()*b,0};
     _draws3d.push_back(d);
     _cmds.push_back(WgrCmd{WGR_CMD_DRAW_3D,U32(_draws3d.size()-1)});
 }

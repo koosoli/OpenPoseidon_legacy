@@ -50,5 +50,17 @@ int main()
         assert(std::isfinite(CurvatureDrop(Anchor+radius,Anchor+radius)));
     }
     assert(ToPixel({0,0},3).x==1024 && WrapPixel(-1,3)==2047);
+    for (double lat : {-90.0,-46.6,0.0,46.6,90.0})
+        for (double lon : {-180.0,8.1,180.0})
+        {
+            const auto n=GlobeNormal(46.6,8.1,lat,lon);
+            assert(std::abs(n.x*n.x+n.y*n.y+n.z*n.z-1.0)<1e-12);
+            const auto wrapped=GlobeNormal(46.6,8.1,lat,lon+360);
+            assert(std::abs(n.x-wrapped.x)+std::abs(n.y-wrapped.y)+std::abs(n.z-wrapped.z)<1e-12);
+        }
+    const auto up=GlobeNormal(46.6,8.1,46.6,8.1);
+    assert(std::abs(up.x)<1e-12 && std::abs(up.y-1)<1e-12 && std::abs(up.z)<1e-12);
+    const auto opposite=GlobeNormal(46.6,8.1,-46.6,188.1);
+    assert(std::abs(opposite.y+1)<1e-12);
     std::cout<<"Earth coordinates: origin, orientation, seams, elevation, polar guards, curved horizon coverage PASS\n";
 }

@@ -3212,6 +3212,61 @@ TerrainWgpu::~TerrainWgpu()
     // EngineWgpu releases TerrainWgpu after stopping its render thread, while
     // the renderer and texture bank are still alive.
     if (_earthHorizonMesh) wgr_mesh_destroy(_renderer,_earthHorizonMesh);
+    if (_earthGlobeMesh) wgr_mesh_destroy(_renderer,_earthGlobeMesh);
+    if (_earthGlobeTexture) wgr_texture_destroy(_renderer,_earthGlobeTexture);
+}
+
+void TerrainWgpu::UploadEarthGlobe()
+{
+    EngineWgpu::AcquireProducerWindow("Earth globe");
+    const auto setting = [](const char* key, double fallback) {
+        const char* value = std::getenv(key);
+        return value ? std::strtod(value,nullptr) : fallback;
+    };
+    const double latitude=setting("POSEIDON_EARTH_LATITUDE",46.6);
+    const double longitude=setting("POSEIDON_EARTH_LONGITUDE",8.1);
+    constexpr int rows=128, cols=256;
+    std::vector<WgrMeshVertex> vertices((rows+1)*(cols+1));
+    std::vector<uint32_t> indices;
+    indices.reserve(rows*cols*6);
+    for (int y=0;y<=rows;++y)
+    {
+        for (int x=0;x<=cols;++x)
+        {
+            const auto n=Earth::GlobeNormal(latitude,longitude,90.0-y*180.0/rows,x*360.0/cols-180.0);
+            auto& v=vertices[y*(cols+1)+x];
+            v.pos={float(Earth::Anchor+Earth::Radius*n.x),float(Earth::Radius*(n.y-1.0)),
+                   float(Earth::Anchor+Earth::Radius*n.z)};
+            v.normal={float(n.x),float(n.y),float(n.z)};
+            v.uv={float(x)/cols,float(y)/rows};
+            if (x<cols && y<rows)
+            {
+                const uint32_t a=y*(cols+1)+x,b=a+1,c=a+cols+1,d=c+1;
+                indices.insert(indices.end(),{a,c,b,b,c,d});
+            }
+        }
+    }
+    _earthGlobeMesh=wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(vertices),WgrSlice<uint32_t>(indices));
+    if (!_earthGlobeMesh) throw std::runtime_error("Earth globe mesh allocation failed");
+    _earthGlobeIndices=uint32_t(indices.size());
+    // An external, optional local cache. Never reads or redistributes game assets.
+    const char* imagePath=std::getenv("POSEIDON_EARTH_IMAGERY");
+    int width=0,height=0,channels=0;
+    if (imagePath && stbi_info(imagePath,&width,&height,&channels) &&
+        width>0 && height>0 && width<=8192 && height<=4096)
+    {
+        if (auto* rgba=stbi_load(imagePath,&width,&height,&channels,4))
+        {
+            constexpr int w=4096,h=2048;
+            std::vector<uint8_t> pixels(w*h*4);
+            stbir_resize_uint8_linear(rgba,width,height,width*4,pixels.data(),w,h,w*4,STBIR_RGBA);
+            stbi_image_free(rgba);
+            _earthGlobeTexture=wgr_texture_create(_renderer,w,h,WGR_TEXTURE_RGBA8,1,
+                WGR_TEXTURE_GEN_MIPS,pixels.data(),uint32_t(pixels.size()));
+        }
+    }
+    LOG_INFO(Graphics,"Earth globe: {} triangles, imagery {} (4096x2048 with mipmaps), origin [{},{}]",
+        _earthGlobeIndices/3,_earthGlobeTexture ? "local NASA Blue Marble" : "unavailable; plain fallback",latitude,longitude);
 }
 
 void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p)
@@ -3234,6 +3289,9 @@ void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p)
                 (Earth::HorizonOffset(hiZ,p.horizonRadius)-Earth::HorizonOffset(loZ,p.horizonRadius));
             const float inv = 1.0f / std::sqrt(dx*dx+dz*dz+1.0f);
             v.normal = {-dx*inv,inv,-dz*inv};
+            const auto geo=Earth::FromLocal(p.latitude,p.longitude,
+                Earth::Anchor+v.pos.x-cx,Earth::Anchor+v.pos.z-cz);
+            v.uv={float((geo.longitude+180.0)/360.0),float((90.0-geo.latitude)/180.0)};
         }
     }
     std::vector<uint32_t> indices;
@@ -3291,6 +3349,11 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
     // Classic upload supplies the one owned fixture's material bindings once;
     // its geometry, grass and finite-world water are not submitted in this mode.
     if (!_uploaded) UploadIfNeeded(land);
+    if (!_earthGlobeMesh) UploadEarthGlobe();
+    _engine.SubmitEarthHorizon(_earthGlobeMesh,_earthGlobeIndices,_earthGlobeTexture);
+    // Orbit needs only the fixed global overview. Do not download finer terrain
+    // that covers less than one pixel at this distance.
+    if (camera.Position().Y()>500000.0f) return;
     _earthStream->Request(camera.Position().X(), camera.Position().Z(),camera.Position().Y());
     if (auto patch = _earthStream->TakeReady())
     {
@@ -3338,7 +3401,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             uint32_t(_numLevels-1),1.0e10f,2.0e10f});
     }
     _engine.SubmitTerrain(_selected);
-    _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices);
+    _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices,_earthGlobeTexture);
 }
 
 void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)

@@ -2,7 +2,7 @@
    returns to the start, validates the upload receipts, captures rendered frames.
    Wrap in scripts/with-game-lock.sh. Stops only the process this script starts. #>
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$ExpectedCommit,[switch]$Offline,[switch]$Horizon)
+param([Parameter(Mandatory)][string]$ExpectedCommit,[switch]$Offline,[switch]$Horizon,[switch]$Globe)
 $ErrorActionPreference='Stop'
 if(!$env:LOCK_OWNER){throw 'Game lock required'}
 $repo=Split-Path -Parent $PSScriptRoot
@@ -16,6 +16,7 @@ $cache=Join-Path $env:LOCALAPPDATA 'OpenPoseidon/world-stream'
 $world=& "$PSScriptRoot/Launch-WholeWorld.ps1" -PrepareOnly -CacheDirectory $cache
 $mission=Join-Path $cache 'fixture/earth-preview.abel'
 $settings=@{POSEIDON_WHOLE_WORLD='1';POSEIDON_EARTH_LATITUDE='46.6';POSEIDON_EARTH_LONGITUDE='8.1';POSEIDON_EARTH_CACHE=$cache;WGR_GRASS='0';WGR_TERRAIN_RESOURCE_REUSE='1';WGR_WET_SOIL_DIAGNOSTIC='1';POSEIDON_USER_DIR=(Join-Path $out 'user')}
+$settings.POSEIDON_EARTH_IMAGERY=Join-Path $cache 'blue-marble-june-5400.jpg'
 if($Offline){$settings.HTTPS_PROXY='http://127.0.0.1:9';$settings.HTTP_PROXY='http://127.0.0.1:9';$settings.ALL_PROXY='http://127.0.0.1:9';$settings.NO_PROXY=''}
 $saved=@{};foreach($key in $settings.Keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process');[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
 $null=New-Item -ItemType Directory -Force -Path $env:POSEIDON_USER_DIR
@@ -70,6 +71,20 @@ try{
    $path=Join-Path $out ('horizon-'+$altitude+'.png');$null=Send @{cmd='screenshot';path=$path}
    $receipt.views+=@{altitude=$altitude;horizon=$rows[-1].Line;screenshot=$path;performance=(Send @{cmd='frame_performance'})}
   }
+ }
+ if($Globe){
+  Require (Test-Path -LiteralPath $settings.POSEIDON_EARTH_IMAGERY) 'Globe imagery cache required; launch preview once online'
+  $null=Send @{cmd='exec';code='0 setOvercast 0;triFreeFlyPose "6400 6400 18000000 0 -90"'}
+  Start-Sleep -Seconds 2
+  $camera=Send @{cmd='dev_wet_soil_diagnostic';action='state'}
+  Require ([Math]::Abs($camera.camera.position[1]-18000000)-lt10) 'Actual orbital camera height differs'
+  Require (Select-String -Path $log -Pattern 'Earth globe: .*imagery local NASA Blue Marble' -Quiet) 'Globe texture not uploaded'
+  $path=Join-Path $out 'globe.png';$null=Send @{cmd='screenshot';path=$path}
+  $receipt.views+=@{altitude=18000000;screenshot=$path;performance=(Send @{cmd='frame_performance'})}
+  $null=Send @{cmd='exec';code='triFreeFlyPose "6400 6400 4500 30 -20"'}
+  Start-Sleep -Seconds 2
+  $path=Join-Path $out 'return-from-orbit.png';$null=Send @{cmd='screenshot';path=$path}
+  $receipt.views+=@{altitude=4500;screenshot=$path;performance=(Send @{cmd='frame_performance'})}
  }
  $receipt.tiles=@(Get-ChildItem $cache -Directory -Filter 'terrarium-z*' | Get-ChildItem -Filter '*.png').Count
  Require ($receipt.tiles-le256) 'Disk cache exceeds its bound'

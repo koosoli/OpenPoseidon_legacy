@@ -318,7 +318,8 @@ enum WgrDraw3DFlags : uint32_t
      * (texture alpha >= 0.98) so a mostly-solid atlas that classified Blend (a floor, a camo net)
      * still occludes what is behind it; the colour pass keeps blending every texel. */
     WGR_DRAW3D_BLEND_SECTION = 8192,
-    WGR_DRAW3D_BOOT_RELIEF = 16384 // exact authored footstep Mark on deformable soil, opt-in
+    WGR_DRAW3D_BOOT_RELIEF = 16384, // exact authored footstep Mark on deformable soil, opt-in
+    WGR_DRAW3D_EARTH_SURFACE = 32768 // globe/far Earth: exempt from finite-world cave lighting
 };
 
 /* Matrices per palette block (the engine's own bone-palette cap). Each skinned
