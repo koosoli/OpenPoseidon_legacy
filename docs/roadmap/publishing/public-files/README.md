@@ -1,6 +1,10 @@
-# OpenPoseidon
+# Open Poseidon Engine
 
-OpenPoseidon is a community continuation of the Operation Flashpoint / Arma:
+<p align="center">
+  <img src="screenshots/OpenPoseidonEngine.png" alt="Open Poseidon Engine logo" width="360">
+</p>
+
+Open Poseidon Engine is a community continuation of the Operation Flashpoint / Arma:
 Cold War Assault engine source. It adds a WGPU renderer, Tidewater ocean rendering,
 developer tools and local content compatibility work. This is a source release;
 it is not a complete game or an official Bohemia Interactive product.
@@ -15,6 +19,11 @@ it is not a complete game or an official Bohemia Interactive product.
   light scattering supports night lights and the player's torch.
 - **GTAO:** screen-space ambient occlusion and bent-normal ambient shading,
   with live developer controls and diagnostic views.
+- **Lighting and shadows:** dynamic sun/local-light shadows, contact shadows,
+  muzzle illumination and atmospheric light scattering.
+- **Volumetric smoke:** buoyancy, wind response, room/portal-aware wall, floor
+  and ceiling containment, doorway flow, self-shadowing and scene shadows.
+  Containment depends on the building geometry/topology available to the engine.
 - **Volumetric clouds and procedural sky:** overcast controls shared with Zeus,
   stars and cloud shadows affecting terrain, objects, grass and water.
 - **Tidewater ocean:** FFT waves, shoreline wetness, reflections, foam, wakes,
@@ -26,19 +35,54 @@ it is not a complete game or an official Bohemia Interactive product.
   wet-ground/clothing shading, surface snow and terrain contact depressions.
   Stock Jeep and Truck5t wet-mud ruts/rolling resistance are enabled; boot-sole
   normal/parallax relief remains an opt-in prototype.
-- **Terrain editor:** small cuts, horizontal caves/tunnels, straight and tank
+- **Snow depth and deformation:** compressed foot/vehicle tracks and projectile
+  marks in depth-bearing ground snow, alongside roof and vegetation snow cover.
+- **Destructible terrain and editor:** explosion craters, brush deformation,
+  small cuts, horizontal caves/tunnels, straight and tank
   trenches, and excavation selection/rotation/deletion. This extends terrain
   holes; it is not a general voxel-world simulation.
 - **Combat effects:** revised muzzle flashes with local illumination, snow
   projectile marks and helicopter ground downwash particles.
+- **Firing from vehicles (FFV):** personal-rifle fire from configured passenger
+  seats, aiming arcs, reload and action-menu Ready/Stow controls. Stock Jeep
+  coverage is validated; other seats, weapon families and multiplayer are limited.
+- **Satellite terrain textures (satmaps):** authored satellite layers and an
+  automatic classic-world far-colour bake incorporating static roofs/vegetation.
+  This is a ground colour representation, not a replacement for live object LODs.
 - **Local content browser and editor:** terrain discovery for installed Arma
   1/2/3, DayZ and Reforger content, partial format conversion and selected vehicle
   bridges. Imported terrain opens in the native OFP mission editor with OFP units.
 - **Streaming and developer tools:** geometry/residency work, GPU timings,
   debug views, test harnesses and Zeus freefly/unit placement.
-- **AI and swimming:** hearing/reporting/suppression fixes, optional
-  spotting/hunting behavior, swimmer movement and boat-route support.
+- **Multithreading:** enkiTS worker jobs for selected terrain/cache, texture
+  conversion and audio work, plus asynchronous streaming. This does not imply
+  that every simulation/rendering operation runs on its own thread.
+- **Upscaling:** AMD FSR 1 and an optional local NVIDIA DLSS integration.
+  The proprietary NGX SDK/runtime is not bundled; distributable builds disable
+  DLSS. Its availability depends on build configuration and compatible hardware.
+- **Improved AI:** gunfire hearing/reporting, immediate orders and near-miss
+  suppression, plus optional gradual spotting and cover/flank/search behavior.
+  Behavior switches are configuration-dependent; this is not a universal new
+  navigation system or complete replacement AI.
+- **Swimming:** swimmer movement and boat-route/boarding support.
 - **Title menu:** a patrol boat navigating large Tidewater swells in afternoon light.
+
+## Development screenshots
+
+These captures illustrate development builds using locally installed game
+content. Imported maps/assets are not included with the engine source.
+
+| Tidewater ocean | Wind-driven procedural grass |
+| --- | --- |
+| ![Tidewater ocean waves and shoreline](screenshots/newocean.png) | ![Procedural grass across a rolling meadow](screenshots/newgrass.png) |
+| **Layered volumetric fog** | **Rainwater and reflective puddles** |
+| ![Low fog layers across island valleys](screenshots/volumetricfog.png) | ![Reflective rainwater across village ground](screenshots/puddles.png) |
+| **Snow depth and vehicle tracks** | **Destructible terrain and craters** |
+| ![Snow cover with compressed vehicle tracks](screenshots/volumetricsnow.png) | ![Deep terrain deformation near a village road](screenshots/destrucableterrain.jpg) |
+| **GTAO and interior shading** | **Night lighting and shadows** |
+| ![Ambient occlusion and directional light inside a building](screenshots/GTAO.png) | ![Village lights and shadows in rainy night conditions](screenshots/newshadowsystem.png) |
+| **Box3D physics test scene** | **Local Reforger terrain compatibility** |
+| ![Box3D wall and rigid-body test scene](screenshots/box3d.png) | ![Locally loaded Reforger town with buildings and vegetation](screenshots/armareforger.png) |
 
 ## Current limitations
 

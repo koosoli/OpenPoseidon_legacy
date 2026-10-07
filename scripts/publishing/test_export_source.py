@@ -94,6 +94,24 @@ class ExportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             subject.replacement_bytes(self.policy, '../repo/private.txt')
 
+    def test_added_capture_cannot_bypass_resource_review(self):
+        (self.base / 'capture.png').write_bytes(b'private capture fixture')
+        policy = json.loads(self.policy.read_bytes())
+        policy['add_files'] = {'screenshots/capture.png': 'capture.png'}
+        self.policy.write_text(json.dumps(policy), encoding='utf-8')
+        reports = self.base / 'capture-reports'
+        subject.inventory(self.repo, self.commit, self.policy, reports)
+        self.manifest = reports / 'inventory.json'
+        manifest = json.loads(self.manifest.read_bytes())
+        for entry in manifest['entries']:
+            entry['review_state'] = 'REVIEWED'
+            if entry['destination_path'] != 'screenshots/capture.png':
+                entry['license_review'] = 'REVIEWED'
+        self.manifest.write_text(json.dumps(manifest), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'final export blocked'):
+            subject.export(self.repo, self.manifest, self.policy, self.output, False)
+        self.assertFalse(self.output.exists())
+
 
 if __name__ == '__main__':
     unittest.main()

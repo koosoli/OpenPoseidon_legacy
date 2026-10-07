@@ -6,6 +6,11 @@ and private evidence. Its normal Git ancestry, `.agents/`, `.tmp-movecam/` and
 `.tmp-shadow/` are expected here. The branch is not the clean release repository.
 Do not delete these folders or rewrite private history merely to prepare a release.
 
+At Oliver's explicit request on 2026-10-07, this branch is also the default branch
+of `koosoli/PoseidonWGPU-private-safety-mirror`. That selects the private landing
+page/default PR base; it does not create a clean release history or change either
+repository's visibility. The separate `koosoli/OpenPoseidon` repository is unchanged.
+
 ## Further improvements
 
 1. Start each feature/fix branch from the latest agreed, tested private development
@@ -48,7 +53,10 @@ Existing exports and audit records are historical snapshots, not live mirrors.
 Generate a new candidate rather than assuming an old folder updates itself.
 
 The selection policy excludes `.agents/`, `.tmp-movecam/`, `.tmp-shadow/`, the
-private `docs/` tree, old capture material and preparation tooling. Its per-file
+private `docs/` tree, old capture material and preparation tooling. Eleven explicitly
+selected documentation images (ten owner-provided captures and the project logo)
+are separate additions, with individual resource/publication review still pending.
+The screenshot directory is not copied wholesale. The per-file
 manifest is the authoritative record; merely hiding files with `.gitignore` is
 not an export or a history cleanup.
 

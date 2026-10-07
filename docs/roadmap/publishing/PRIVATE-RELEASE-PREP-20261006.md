@@ -166,3 +166,25 @@ generated rather than modifying the historical 2026-10-06 export. Its
 hash and verifies unchanged implementation files and excluded internal folders.
 All original release gates remain open; no game binary or release repository
 was changed by this documentation update.
+
+### Feature gallery and owner branding follow-up
+
+The owner then supplied ten named development captures and requested FFV,
+satmaps, improved AI, wall-aware/shadow-casting volumetric smoke, multithreading
+and DLSS coverage. Both README files now describe these with implementation
+limits and include the ten captures. The owner's existing logo is included,
+and the displayed project name is **Open Poseidon Engine**. Technical filenames,
+repository URLs and original copyright/license statements remain intact.
+
+The [new receipt](private-audit/feature-gallery-20261007.json) verifies 4,305 draft
+files, original image bytes, README links and unchanged implementation/build files.
+Eleven resource additions retain mandatory individual review; a new guard test
+confirms a reviewed source set cannot bypass an image's pending rights review.
+Eleven export tests passed. Optional NGX/DLSS code is documented as a local build
+option and remains disabled in distributable builds under current build policy.
+
+On the owner's explicit request, GitHub's private development repository
+`koosoli/PoseidonWGPU-private-safety-mirror` now has default branch
+`codex/private-release-prep-20261006`, replacing `backup-local-2af2843`.
+The API readback verified both the branch and private visibility. The separate
+release repository and installed game were not changed.

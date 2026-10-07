@@ -143,7 +143,9 @@ def inventory(repo, commit, policy_path, reports):
                               git_mode="100644", size=len(data), classification="INCLUDE_REWRITTEN",
                               destination_path=dest, export_sha256=digest(data), rule_id="public-addition",
                               reason="New curated public documentation", findings=scan(data),
-                              review_state="PENDING", license_review="PENDING", build_dependency="NOT_YET_VALIDATED"))
+                              review_state="PENDING", license_review=("INDIVIDUAL_RESOURCE_REVIEW_REQUIRED"
+                              if dest.startswith(("screenshots/", "assets/", "resources/", "tests/fixtures/"))
+                              else "PENDING"), build_dependency="NOT_YET_VALIDATED"))
     manifest = {"schema": 1, "source_commit": sha,
                 "source_tree": run(repo, "rev-parse", sha + "^{tree}").decode().strip(),
                 "policy_sha256": digest(policy_data), "entries": entries + additions,

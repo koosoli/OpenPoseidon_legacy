@@ -1,0 +1,93 @@
+{
+  "date": "2026-10-07",
+  "state": "FEATURE_GALLERY_AND_BRANDING_UPDATED_RELEASE_STILL_BLOCKED",
+  "source_commit": "19c96f26ddd828a9e2c907621c744ad7960bbdfd",
+  "manifest_sha256": "25dc761e538df2c278e6956292c51184c1e830381d54a6f6fdda416808ca72f2",
+  "policy_sha256": "f431cd7c7b254f7566f685b74349881dd229a3e1ae017db46e6206a22c45a34b",
+  "inventory_path": "build\\publishing\\feature-gallery-branding-20261007\\inventory.json",
+  "draft": "C:\\Users\\mail\\.codex\\release-staging\\OpenPoseidon-feature-gallery-20261007",
+  "verified_files": 4305,
+  "engine_build_dependency_files_unchanged": true,
+  "readme_links": "PASS in private checkout and release draft",
+  "branding": "Open Poseidon Engine",
+  "original_images_byte_preserved": true,
+  "images": [
+    {
+      "destination_path": "screenshots/OpenPoseidonEngine.png",
+      "export_sha256": "f6aaf6bb11991c7d3bce0556de18fbf817bfaad1b97ffbcb1061a14780301a55",
+      "license_review": "INDIVIDUAL_RESOURCE_REVIEW_REQUIRED"
+    },
+    {
+      "destination_path": "screenshots/armareforger.png",
+      "export_sha256": "7bf21f0390746ca4da5a92cbff4cc2aade367e0c237f453d51a24f6c0579ced2",
+      "license_review": "INDIVIDUAL_RESOURCE_REVIEW_REQUIRED"
+    },
+    {
+      "destination_path": "screenshots/box3d.png",
+      "export_sha256": "e45c8c3be1720abdf873deb9233ad740b9c25f62cf1ef12bf18d15399a3361f2",
+      "license_review": "INDIVIDUAL_RESOURCE_REVIEW_REQUIRED"
+    },
+    {
+      "destination_path": "screenshots/destrucableterrain.jpg",
+      "export_sha256": "9d99cec286d09f38feb361753c6f223115a2f83bd6fe090ab3b55a44b83bad43",
+      "license_review": "INDIVIDUAL_RESOURCE_REVIEW_REQUIRED"
+    },
+    {
+      "destination_path": "screenshots/GTAO.png",
+      "export_sha256": "bca0662e7e555f6e5f0f31eb18c8eb9fc2baf1b63fcb95cf114250e03b29a58f",
+      "license_review": "INDIVIDUAL_RESOURCE_REVIEW_REQUIRED"
+    },
+    {
+      "destination_path": "screenshots/newgrass.png",
+      "export_sha256": "0d4426254be09ca46780cc686f24b0964dc1b61c1c5ea79a49e5ba2724c8fa55",
+      "license_review": "INDIVIDUAL_RESOURCE_REVIEW_REQUIRED"
+    },
+    {
+      "destination_path": "screenshots/newocean.png",
+      "export_sha256": "5538be71dac6208101ec71804074aa2a966050813b0ddc12c517aa982c0753ff",
+      "license_review": "INDIVIDUAL_RESOURCE_REVIEW_REQUIRED"
+    },
+    {
+      "destination_path": "screenshots/newshadowsystem.png",
+      "export_sha256": "ca27321a161a47046272f7adcc2cc831778edd17e705f6bf0ead93c3d479cdb8",
+      "license_review": "INDIVIDUAL_RESOURCE_REVIEW_REQUIRED"
+    },
+    {
+      "destination_path": "screenshots/puddles.png",
+      "export_sha256": "77b9d283e259cbdf9788a0b0fd01f260e43e62293591c5ad01db72b42661edf4",
+      "license_review": "INDIVIDUAL_RESOURCE_REVIEW_REQUIRED"
+    },
+    {
+      "destination_path": "screenshots/volumetricfog.png",
+      "export_sha256": "b19d0db5caf7e20939d2a754a1a91f5a28378a3f42fbcde49adf93e5776cf4d8",
+      "license_review": "INDIVIDUAL_RESOURCE_REVIEW_REQUIRED"
+    },
+    {
+      "destination_path": "screenshots/volumetricsnow.png",
+      "export_sha256": "4172521b34f2347ec8415a880b4984b7a18a7842323683241c603474233b2b36",
+      "license_review": "INDIVIDUAL_RESOURCE_REVIEW_REQUIRED"
+    }
+  ],
+  "feature_evidence": [
+    "docs/roadmap/decisions/FFV-V6-EXECUTION-20260912.md",
+    "docs/roadmap/decisions/OFP-OBJECT-SATMAP-20260912.md",
+    "engine/Poseidon/World/Effects/SmokeVolume.cpp",
+    "engine/Poseidon/World/Effects/SmokeVolume.hpp",
+    "engine/Poseidon/Core/TaskPool.hpp",
+    "engine/WgpuRenderer/CMakeLists.txt",
+    "docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md"
+  ],
+  "export_guard_tests": "11 passed",
+  "default_branch_change": {
+    "repository": "koosoli/PoseidonWGPU-private-safety-mirror",
+    "id": 1328757595,
+    "previous_default_branch": "backup-local-2af2843",
+    "default_branch": "codex/private-release-prep-20261006",
+    "visibility": "private",
+    "changed_fields": [
+      "default_branch"
+    ]
+  },
+  "release_repository_modified": false,
+  "game_binary_modified": false
+}

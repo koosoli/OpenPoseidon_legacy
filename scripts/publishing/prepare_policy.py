@@ -14,9 +14,10 @@ def prepare(repo, commit, output):
     public.mkdir(parents=True, exist_ok=True)
     credits = original('CREDITS.md')
     credits = credits.replace('*Arma: Cold War Assault Remastered* (engine source, codename **Poseidon** / CWR)',
-                              '*OpenPoseidon* (community engine continuation, codename **Poseidon**)')
+                              '*Open Poseidon Engine* (community engine continuation, codename **Poseidon**)')
     # Replace private document references only; retain attribution, tables and licenses.
     credits = re.sub(r'`docs/roadmap/decisions/[^`]+`', 'the development decision records', credits)
+    credits = credits.replace('OpenPoseidon change', 'Open Poseidon Engine change').replace('OpenPoseidon file', 'Open Poseidon Engine file').replace('Written for OpenPoseidon,', 'Written for Open Poseidon Engine,')
     (public / 'CREDITS.md').write_text(credits, encoding='utf-8')
     notices = original('THIRD_PARTY_NOTICES.md')
     notices = notices.replace('This file reproduces all third-party components used by the project.',
@@ -111,6 +112,12 @@ imgui.ini
                              'tests/', 'content/', 'assets/', 'resources/', 'scripts/', 'docker/', 'dev-missions/'],
         'license_holds': ['CREDITS.md', 'engine/Poseidon/AI/AIHunt.hpp', 'engine/Poseidon/AI/AIHunt.cpp'],
     }
+    # Owner-selected documentation captures only; never copy a screenshot tree.
+    # These remain private review candidates with pending publication rights.
+    for name in ('OpenPoseidonEngine.png', 'armareforger.png', 'box3d.png', 'destrucableterrain.jpg', 'GTAO.png',
+                 'newgrass.png', 'newocean.png', 'newshadowsystem.png', 'puddles.png',
+                 'volumetricfog.png', 'volumetricsnow.png'):
+        policy['add_files'][f'screenshots/{name}'] = f'public-files/screenshots/{name}'
     (output / 'source-policy.json').write_text(json.dumps(policy, indent=2) + '\n', encoding='utf-8')
 
 

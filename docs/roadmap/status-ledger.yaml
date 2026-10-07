@@ -26,6 +26,22 @@ execution:
         features with known limits. Private prep keeps history/internal folders;
         future tested source pins can be exported without merging private ancestry
         into the release repo. Previous inventory/export retained as historical.
+    feature_gallery_update:
+      date: '2026-10-07'
+      branding: Open Poseidon Engine
+      receipt: docs/roadmap/publishing/private-audit/feature-gallery-20261007.json
+      draft: C:/Users/mail/.codex/release-staging/OpenPoseidon-feature-gallery-20261007
+      verified_files: 4305
+      selected_documentation_images: 11
+      exporter_guard_tests: 11
+      private_github_default_branch: codex/private-release-prep-20261006
+      note: >-
+        Both READMEs now cover FFV, satmaps, improved AI, contained/shadowed smoke,
+        multithreading, optional local DLSS and ten screenshot-named features.
+        Owner logo and exact Open Poseidon Engine branding included. Images retain
+        individual resource review; code/build inputs unchanged. GitHub private
+        safety repository default branch changed at explicit owner request and
+        read back private. Release repository and installed game untouched.
     note: >-
       Pinned5315-file Git inventory;1023 internal exclusions and4294 local draft
       files including curated public docs. All engine code retained unchanged.

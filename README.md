@@ -1,9 +1,13 @@
-# OpenPoseidon
+# Open Poseidon Engine
+
+<p align="center">
+  <img src="docs/roadmap/publishing/public-files/screenshots/OpenPoseidonEngine.png" alt="Open Poseidon Engine logo" width="360">
+</p>
 
 [![Sponsor on GitHub](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/koosoli)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-support-ffdd00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/koosoli)
 
-**OpenPoseidon** (previously **PoseidonWGPU**) is a modernization-focused fork of the classic Poseidon engine
+**Open Poseidon Engine** is a modernization-focused fork of the classic Poseidon engine
 behind *Arma: Cold War Assault* / *Operation Flashpoint: Cold War Crisis*.
 Its goal is simple: make this landmark 2001 game feel as modern as possible
 while preserving compatibility with the original assets, data formats, missions,
@@ -14,13 +18,25 @@ and gameplay.
 
 ## Current preview
 
-![PoseidonWGPU in-game screenshot](screenshots/1.png)
+Development captures from Open Poseidon Engine, including original-game and locally
+loaded Reforger content. They show features in progress rather than a promise
+that every map, vehicle or material is fully supported.
 
-![PoseidonWGPU in-game screenshot](screenshots/2.png)
+| Tidewater ocean | Wind-driven procedural grass |
+| --- | --- |
+| ![Tidewater ocean waves and shoreline](docs/roadmap/publishing/public-files/screenshots/newocean.png) | ![Procedural grass across a rolling meadow](docs/roadmap/publishing/public-files/screenshots/newgrass.png) |
+| **Layered volumetric fog** | **Rainwater and reflective puddles** |
+| ![Low fog layers across island valleys](docs/roadmap/publishing/public-files/screenshots/volumetricfog.png) | ![Reflective rainwater across village ground](docs/roadmap/publishing/public-files/screenshots/puddles.png) |
+| **Snow depth and vehicle tracks** | **Destructible terrain and craters** |
+| ![Snow cover with compressed vehicle tracks](docs/roadmap/publishing/public-files/screenshots/volumetricsnow.png) | ![Deep terrain deformation near a village road](docs/roadmap/publishing/public-files/screenshots/destrucableterrain.jpg) |
+| **GTAO and interior shading** | **Night lighting and shadows** |
+| ![Ambient occlusion and directional light inside a building](docs/roadmap/publishing/public-files/screenshots/GTAO.png) | ![Village lights and shadows in rainy night conditions](docs/roadmap/publishing/public-files/screenshots/newshadowsystem.png) |
+| **Box3D physics test scene** | **Local Reforger terrain compatibility** |
+| ![Box3D wall and rigid-body test scene](docs/roadmap/publishing/public-files/screenshots/box3d.png) | ![Locally loaded Reforger town with buildings and vegetation](docs/roadmap/publishing/public-files/screenshots/armareforger.png) |
 
-## What OpenPoseidon adds
+## What Open Poseidon Engine adds
 
-OpenPoseidon develops a modern [wgpu](https://wgpu.rs/)-based renderer alongside
+Open Poseidon Engine develops a modern [wgpu](https://wgpu.rs/)-based renderer alongside
 the legacy OpenGL renderer, while retaining original OFP content and gameplay.
 The current engine includes:
 
@@ -32,6 +48,12 @@ The current engine includes:
   Participating-light scattering includes night lights and the player's torch.
 - **GTAO ambient occlusion:** screen-space contact shading and bent-normal ambient
   lighting, with developer controls and diagnostic views.
+- **Improved lighting and shadows:** dynamic sunlight and local-light shadows,
+  contact shadows, muzzle-light illumination and atmospheric light scattering.
+- **Volumetric smoke:** buoyant, wind-driven plumes with room/portal-aware
+  containment against walls, floors and ceilings, doorway flow, self-shadowing
+  and shadows on the surrounding scene. Containment depends on the available
+  building geometry and topology; arbitrary assets can still need fixes.
 - **Volumetric clouds and a procedural sky:** overcast controls shared with Zeus,
   stars, and cloud shadows affecting terrain, objects, grass and water together.
 - **Tidewater ocean rendering:** FFT waves, shoreline wetness, reflections, foam,
@@ -43,24 +65,45 @@ The current engine includes:
 - **Rain, snow and wet surfaces:** accumulating/draining terrain water, rain
   ripples, wet ground and clothing shading, surface snow on terrain and objects,
   and snow/soft-ground contact imprints. Snowfall contributes default weather fog.
+- **Snow depth and deformation:** depth-bearing ground snow with compressed
+  foot/vehicle tracks and projectile marks, alongside roof and vegetation cover.
 - **Deformable soft ground:** mud/sand/snow contact depressions and wheel ruts.
   Stock Jeep and Truck5t wet-mud rut/rolling-resistance paths are enabled;
   boot-sole normal/parallax relief remains an opt-in visual prototype.
-- **Terrain editing:** small terrain cuts, horizontal cave/tunnel excavation,
+- **Destructible terrain and editing:** explosion craters, brush deformation,
+  small terrain cuts, horizontal cave/tunnel excavation,
   straight trenches and tank trenches, with excavation selection, rotation and
   deletion controls. These extend terrain holes rather than replacing the world
   with a general voxel simulation.
 - **Combat and effects:** revised muzzle flashes with local shooter/surrounding
   illumination, snow projectile marks and helicopter ground downwash particles.
+- **Firing from vehicles (FFV):** use a personal rifle from configured passenger
+  seats, with aiming arcs, reload and action-menu Ready/Stow controls. The stock
+  Jeep is the validated profile; this is not universal support for all cargo
+  seats, weapon families or multiplayer.
+- **Satellite terrain textures (satmaps):** supported authored satellite layers
+  and an automatic classic-world far-colour bake including static roofs and
+  vegetation. This improves distant ground representation without replacing
+  live 3D buildings or object LODs.
 - **Local content browser:** installed Arma 1/2/3, DayZ and Reforger terrain
   discovery and partial format compatibility. Select a terrain and use OFP units
   in the native mission editor without restarting; selected vehicle bridges are
   also available. Proprietary source content remains local.
+- **Multithreading:** an enkiTS worker pool handles selected terrain/cache,
+  texture conversion and audio jobs, alongside asynchronous streaming work.
+  Parallelism is applied to specific workloads; the whole simulation is not
+  claimed to run independently across every CPU core.
+- **Upscaling:** AMD FSR 1 spatial upscaling/sharpening and an optional local
+  NVIDIA DLSS integration. DLSS requires a compatible GPU and a separately
+  supplied NGX SDK/runtime; distributable builds keep the proprietary path off.
 - **Streaming and diagnostics:** geometry/residency work, GPU timing, graphics
   debug views, test harnesses and live developer controls. Zeus provides freefly
   movement and click-to-place units and vehicles.
-- **AI and swimming work:** hearing/reporting/suppression and other AI fixes,
-  optional spotting/hunting behavior, swimmer movement and boat-route support.
+- **Improved AI behavior:** gunfire hearing and reporting fixes, immediate order
+  execution and near-miss suppression, plus optional gradual spotting and
+  cover/flank/search behavior. Optional behavior is configuration-dependent;
+  this is not a completed replacement AI or new universal navigation system.
+- **Swimming:** swimmer movement and boat-route/boarding support.
   The third-party swimming animation addon is not bundled with the engine.
 - **A new title-menu scene:** a patrol boat navigating large Tidewater swells
   in late-afternoon light.
@@ -80,7 +123,7 @@ for why the private preparation branch retains files excluded from a release.
 
 ## Project lineage
 
-PoseidonWGPU is a fork of [paavohuhtala/CWR-CE](https://github.com/paavohuhtala/CWR-CE),
+Open Poseidon Engine is a fork of [paavohuhtala/CWR-CE](https://github.com/paavohuhtala/CWR-CE),
 which is itself a fork of [ofpisnotdead-com/CWR-CE](https://github.com/ofpisnotdead-com/CWR-CE).
 That community project continues Bohemia Interactive's official source release of
 the original Poseidon engine. This fork builds on the work of all of those
@@ -97,7 +140,7 @@ There are installation/build guides for [Linux](docs/build/linux.md) and
 
 Much of this work involves long-running renderer development, testing on legacy
 assets, and AI-assisted code exploration. If you would like to support the work,
-funds go toward API usage and direct development costs for PoseidonWGPU.
+funds go toward API usage and direct development costs for Open Poseidon Engine.
 
 Use the GitHub Sponsors or Buy Me a Coffee buttons above to support the project.
 

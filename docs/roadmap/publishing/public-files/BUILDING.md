@@ -1,4 +1,4 @@
-# Building OpenPoseidon
+# Building Open Poseidon Engine
 
 ## Windows WGPU build
 
@@ -20,7 +20,7 @@ The build helper configures the toolchain, builds the game and required tools,
 and stages generated default content. Outputs are under `dist/x64-win-rwdi`.
 Keep the engine executable and renderer DLL from the same build together.
 The default renderer configuration excludes the optional NVIDIA NGX/DLSS SDK.
-Do not package local SDK libraries as part of an OpenPoseidon release.
+Do not package local SDK libraries as part of an Open Poseidon Engine release.
 
 For a configure-only dependency check:
 

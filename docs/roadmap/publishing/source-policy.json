@@ -9,7 +9,18 @@
   },
   "add_files": {
     "BUILDING.md": "public-files/BUILDING.md",
-    "COMPATIBILITY.md": "public-files/COMPATIBILITY.md"
+    "COMPATIBILITY.md": "public-files/COMPATIBILITY.md",
+    "screenshots/OpenPoseidonEngine.png": "public-files/screenshots/OpenPoseidonEngine.png",
+    "screenshots/armareforger.png": "public-files/screenshots/armareforger.png",
+    "screenshots/box3d.png": "public-files/screenshots/box3d.png",
+    "screenshots/destrucableterrain.jpg": "public-files/screenshots/destrucableterrain.jpg",
+    "screenshots/GTAO.png": "public-files/screenshots/GTAO.png",
+    "screenshots/newgrass.png": "public-files/screenshots/newgrass.png",
+    "screenshots/newocean.png": "public-files/screenshots/newocean.png",
+    "screenshots/newshadowsystem.png": "public-files/screenshots/newshadowsystem.png",
+    "screenshots/puddles.png": "public-files/screenshots/puddles.png",
+    "screenshots/volumetricfog.png": "public-files/screenshots/volumetricfog.png",
+    "screenshots/volumetricsnow.png": "public-files/screenshots/volumetricsnow.png"
   },
   "include_files": [
     "LICENSE",

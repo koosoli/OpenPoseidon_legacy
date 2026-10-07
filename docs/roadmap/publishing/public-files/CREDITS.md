@@ -1,6 +1,6 @@
 # Credits
 
-*OpenPoseidon* (community engine continuation, codename **Poseidon**) exists thanks
+*Open Poseidon Engine* (community engine continuation, codename **Poseidon**) exists thanks
 to the people and projects below.
 
 ## Bohemia Interactive
@@ -92,7 +92,7 @@ The Sinkhole workstream (the development decision records) ports engine code fro
 *Malprave*, Dec's GPL fork of the same Poseidon source, with no shared git history. Each
 port is listed here and in its decision record, with what was rewritten for this tree.
 
-| OpenPoseidon change | Ported from (Malprave patch) |
+| Open Poseidon Engine change | Ported from (Malprave patch) |
 | --- | --- |
 | DDS masked uncompressed layouts, DXT2/DXT4, DXT1 punch-through (`DDSConverter.cpp`, `DdsImport.cpp`) | `ddsTextures.patch` |
 | Object-cut terrain holes: `TerrainHoles.cpp` and the collision, LOS, explosion, AI, camera, sound, decal and GL33 hooks (wgpu drawing rewritten) | `terrainHole1`..`terrainHole8.patch` |
@@ -108,7 +108,7 @@ commit `4811ba48d795197de5621985f404e765c0b7c0ef`, MIT-licensed. Only code was p
 foam and sea-detail textures are generated procedurally, and no Tidewater asset (audio,
 models, textures, cloud noise files) is used.
 
-| OpenPoseidon file | Ported from (Tidewater @ 4811ba48) |
+| Open Poseidon Engine file | Ported from (Tidewater @ 4811ba48) |
 | --- | --- |
 | `water_tw/fft.rs` | `src/ocean/OceanFFT.js` |
 | `water_tw/cdlod.rs` | `src/core/CDLOD.js` |
@@ -127,7 +127,7 @@ models, textures, cloud noise files) is used.
 | `water_tw/wake.rs`, `water_tw/tw_wake_kernel.wgsl`, `water_tw/tw_wake.wgsl` | `src/ocean/WakeSim.js` |
 | `water_tw/boat_spray.rs` (with the boat bodies and CPU-emitted tail in `spray.rs` / `tw_spray_update.wgsl`) | `src/player/BoatSpray.js` — its contact model is noted in the source as being "after threejs-water-pro", a product by the same author; it is used here under Tidewater's MIT grant on the repository owner's decision |
 
-Written for OpenPoseidon, with no Tidewater counterpart (not ported; listed so the table above
+Written for Open Poseidon Engine, with no Tidewater counterpart (not ported; listed so the table above
 reads as complete): `water_tw/impacts.rs` and `water_tw/tw_impact.wgsl` (shells and bullets on
 the water, TW-WATER W8b), `water_tw/probe.rs` and `water_tw/tw_probe.wgsl` (the drawn surface
 around the camera for the underwater split, W9a/W12d), `water_tw/tw_common.wgsl` and the
