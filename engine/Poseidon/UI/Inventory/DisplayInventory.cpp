@@ -19,6 +19,7 @@
 #include <cstdio>   // snprintf
 #include <cstring>  // strcmp
 #include <string>
+#include <algorithm>
 #include "InventoryResources.hpp"
 #include <Poseidon/IO/PackFiles.hpp>
 
@@ -458,16 +459,17 @@ bool PreloadInventoryIconsStep(int budget)
         "assets\\inventory\\smoke.paa", "assets\\inventory\\satchel.paa",
         "assets\\inventory\\mine.paa", "assets\\inventory\\rocket.paa",
     };
-    for (; gi < (int)(sizeof(kGhosts) / sizeof(kGhosts[0])); gi++)
+    for (; gi < (int)(sizeof(kGhosts) / sizeof(kGhosts[0])); )
     {
-        if (QIFStreamB::FileExist(kGhosts[gi]))
-            warm(GlobLoadTexture(RString(kGhosts[gi])));
+        const char *path = kGhosts[gi++];
+        if (QIFStreamB::FileExist(path))
+            warm(GlobLoadTexture(RString(path)));
         if (++n >= budget)
             return false;
     }
-    for (; wi < WeaponTypes.Size(); wi++)
+    for (; wi < WeaponTypes.Size(); )
     {
-        const WeaponType *w = WeaponTypes.Get(wi);
+        const WeaponType *w = WeaponTypes.Get(wi++);
         if (!w)
             continue;
         InvCell c;
@@ -477,9 +479,9 @@ bool PreloadInventoryIconsStep(int budget)
         if (++n >= budget)
             return false;
     }
-    for (; mi < MagazineTypes.Size(); mi++)
+    for (; mi < MagazineTypes.Size(); )
     {
-        const MagazineType *m = MagazineTypes.Get(mi);
+        const MagazineType *m = MagazineTypes.Get(mi++);
         if (!m)
             continue;
         InvCell c;
@@ -1096,6 +1098,10 @@ bool DisplayInventory::OnKeyDown(unsigned nChar, unsigned nRepCnt, unsigned nFla
 void DisplayInventory::OnSimulate(EntityAI *vehicle)
 {
     base::OnSimulate(vehicle);
+    const auto now = Glob.uiTime;
+    const float dt = _uiClockStarted ? std::max(0.0f, now - _lastUiTime) : 0.0f;
+    _lastUiTime = now;
+    _uiClockStarted = true;
 
     // The panes aren't engine controls, so the container's control-routing
     // never delivers pointer events to them. Drive our own handlers from the
@@ -1174,7 +1180,7 @@ void DisplayInventory::OnSimulate(EntityAI *vehicle)
             _bindPendingLabel = t->cell.DisplayName();
             _bindPendingInst = (t->cell.kind == InvItemKind::Weapon)
                                    ? (const void *)t->cell.weapon
-                                   : (const void *)t->cell.magazine;
+                                   : (const void *)t->cell.magazine.GetRef();
             // Guarantee the confirm toast differentiates the Put items - the AP mine
             // (MineE) and AT mine (Mine) both carry the config display name "Mine".
             {
@@ -1330,11 +1336,11 @@ void DisplayInventory::OnSimulate(EntityAI *vehicle)
 
     if (_hovered && !_dragging)
     {
-        _hoverTime += 0.02f;   // VERIFY: use the real frame delta
+        _hoverTime += dt;
     }
     if (_hotkeyToastTime > 0.0f)
     {
-        _hotkeyToastTime -= 0.02f;   // same frame-tick basis as _hoverTime
+        _hotkeyToastTime = std::max(0.0f, _hotkeyToastTime - dt);
     }
 
     // Don't resync mid-gesture - Refresh()+Rebuild() rebuilds the tile arrays,
@@ -1342,11 +1348,10 @@ void DisplayInventory::OnSimulate(EntityAI *vehicle)
     // active drag.
     if (!_dragArmed && !_dragging)
     {
-        static float resync = 0.0f;
-        resync += 0.02f;   // VERIFY: use the real frame delta
-        if (resync > 1.5f)   // less frequent world re-scan -> fewer periodic hitches
+        _resyncTime += dt;
+        if (_resyncTime > 1.5f)
         {
-            resync = 0.0f;
+            _resyncTime = 0.0f;
             _model->Refresh();
             Rebuild();
         }
@@ -1364,7 +1369,7 @@ void DisplayInventory::OnSimulate(EntityAI *vehicle)
         if (h)
         {
             item = (h->cell.kind == InvItemKind::Weapon) ? (const void *)h->cell.weapon
-                                                         : (const void *)h->cell.magazine;
+                                                         : (const void *)h->cell.magazine.GetRef();
         }
         _hovered = h;
         if (item != _hoverItem)
@@ -1406,7 +1411,7 @@ bool DisplayInventory::BindFlash(const InvCell &cell, bool isLoadoutTile, int lo
         return false;
     // Throwables share a class, so only the exact clicked magazine flashes.
     if (cell.kind == InvItemKind::Magazine)
-        return (const void *)cell.magazine == _bindPendingInst;
+        return (const void *)cell.magazine.GetRef() == _bindPendingInst;
     return true;
 }
 
@@ -1424,7 +1429,7 @@ void DisplayInventory::DrawHotkeyBadge(const InvTile &tile, float alpha) const
     {
         const void *inst = (tile.cell.kind == InvItemKind::Weapon)
                                ? (const void *)tile.cell.weapon
-                               : (const void *)tile.cell.magazine;
+                               : (const void *)tile.cell.magazine.GetRef();
         s = WeaponHotkeyBadgeSlot((const char *)IconTuneKey(tile.cell), inst);
     }
     if (s < 0)

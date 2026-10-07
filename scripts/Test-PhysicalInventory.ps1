@@ -115,6 +115,39 @@ try {
     Key 18; Display 62020; Snap '05_reopen'; Key 18; Display 46
     Exec 'removeAllWeapons player;player addMagazine "M16";player addMagazine "M16";player addWeapon "M16"'
     Key 18; Display 62020; Snap '06_weapon_icons'; Key 41; Display 46
+    # A script may remove the exact magazine being dragged. Its tile/ghost must
+    # remain safe to draw, and releasing it must not recreate the removed item.
+    Exec 'removeAllWeapons player;player addMagazine "HandGrenade"'
+    Key 18; Display 62020
+    Pointer 0.681 0.318; Button $true; Pointer 0.12 0.40
+    Exec 'player removeMagazine "HandGrenade"'
+    Snap '07_removed_during_drag'
+    Button $false
+    Require ((@((Value 'magazines player')|ConvertFrom-Json)).Count -eq 0) 'Removed magazine recreated by stale drag'
+    Key 41; Display 46
+    Key 18; Display 62020
+    Snap '08_removed_drag_reopen'
+    Require ((Value 'magazines player') -ceq '[]') 'Removed magazine reappeared'
+    Key 41; Display 46
+    # Hold a ground item while a mission script fills the player's inventory.
+    # Releasing must check current capacity, not the display's pre-drag snapshot.
+    Exec 'player addMagazine "HandGrenade"'
+    Key 18; Display 62020
+    Pointer 0.681 0.318; Button $true; Pointer 0.12 0.40; Button $false
+    Pointer 0.052 0.218; Button $true; Pointer 0.70 0.40
+    Exec (('player addMagazine "Mine";' * 8))
+    $loaded=Value 'magazines player'
+    Require ((@($loaded|ConvertFrom-Json)).Count -eq 8) 'Overweight fixture not created'
+    Button $false
+    $afterRefused=Value 'magazines player'
+    Require ($afterRefused -ceq $loaded) 'Stale capacity allowed overweight pickup'
+    Snap '09_live_capacity_refusal'
+    Key 41; Display 46
+    Exec 'removeAllWeapons player'
+    Key 18; Display 62020; Click 0.052 0.218
+    Require ((@((Value 'magazines player')|ConvertFrom-Json)).Count -eq 1) 'Refused pickup lost ground item'
+    Snap '10_capacity_recovered'; Key 41; Display 46
+    $receipt.audit=@{removedDuringDragSafe=$true;liveCapacityRefused=$true;refusedItemRecovered=$true}
     $receipt.before=$before; $receipt.afterDrop=$afterDrop; $receipt.afterPickup=$afterPickup
     $null=Send @{cmd='exit'}
     Require ($p.WaitForExit(20000) -and $p.ExitCode -eq 0) 'Normal exit failed'

@@ -4,17 +4,9 @@
 
 // Poseidon/UI/Inventory/DisplayInventory.hpp
 //
-// v2 layout:
-//
-//   +-------------+-------------------+---------------------+
-//   |   Ground    |   soldier (3D)    |    My Inventory      |
-//   | (flat list) |   drag to rotate  |  (monolithic grid)   |
-//   +-------------+-------------------+---------------------+
-//                                       23.4 / 32.7 kg  [===  ]
-//
-// "My Inventory" is one grid - no vest/pack/pouch tabs. Tiles vary in size
-// by item footprint (ItemFootprint.hpp) but that's cosmetic; the weight bar
-// is the only thing that actually gates a pickup.
+// Paginated vicinity and storage panes with equipped slots. The built-in UI
+// omits the optional 3D character preview. Pickups use model ownership, slot,
+// weight and volume checks; tile placement is cosmetic.
 
 #include "InventoryModel.hpp"
 
@@ -197,6 +189,9 @@ private:
     const void *_hoverItem = nullptr;   //!< hovered item identity (stable across
                                         //!< Rebuild) so the tooltip timer doesn't reset
     float _hoverTime = 0.0f;
+    Foundation::UITime _lastUiTime;
+    bool _uiClockStarted = false;
+    float _resyncTime = 0.0f;
     static constexpr float TooltipDelay = 0.35f;
 
     // Vicinity is paginated (Reforger-style): Q = previous page, E = next.

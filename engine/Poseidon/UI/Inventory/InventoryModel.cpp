@@ -203,27 +203,19 @@ bool ApplyWeaponHotkey(Person *player, int slot)
     // A throwable (grenade / mine / satchel): the binding is a MAGAZINE class.
     if (!isWpn)
     {
-        // Already the magazine loaded in some Throw/Put slot -> just select it.
-        // Clear any residual reload timers so it reads ready (green) at once and the
-        // placing action isn't gated behind a reload.
+        // Selecting a throwable must preserve ordinary reload/cooldown timing.
         for (int i = 0; i < player->NMagazineSlots(); i++)
         {
             const MagazineSlot &ms = player->GetMagazineSlot(i);
             if (ms._magazine && ms._magazine->_type &&
                 strcmp((const char *)ms._magazine->_type->GetName(), name) == 0)
             {
-                ms._magazine->_reload = 0;
-                ms._magazine->_reloadMagazine = 0;
                 player->SelectWeapon(i, true);
                 return true;
             }
         }
         // Otherwise (e.g. smoke while frag is loaded, or a mine/satchel not yet in
-        // hand): find the carried magazine of that class and the muzzle slot that can
-        // use it, swap it in, then select it. ReloadMagazineTimed(afterAnimation=true)
-        // does an instant magazine swap, but it still primes the per-shot reload timer
-        // (that's the red/amber/green flash and what was blocking the place animation),
-        // so we zero those timers right after to make the item instantly ready.
+        // hand): request the normal timed magazine swap, then select its muzzle.
         for (int m = 0; m < player->NMagazines(); m++)
         {
             Magazine *mag = player->GetMagazine(m);
@@ -235,9 +227,8 @@ bool ApplyWeaponHotkey(Person *player, int slot)
                 const MagazineSlot &ms = player->GetMagazineSlot(i);
                 if (ms._muzzle && ms._muzzle->CanUse(mag->_type))
                 {
-                    player->ReloadMagazineTimed(i, m, true);   // instant magazine swap
-                    mag->_reload = 0;                          // no per-shot reload flash
-                    mag->_reloadMagazine = 0;
+                    if (!player->ReloadMagazineTimed(i, m, false))
+                        continue;
                     player->SelectWeapon(i, true);
                     return true;
                 }
@@ -2098,14 +2089,14 @@ InvTransferResult InventoryModel::CanTransfer(const InvCell &from, InvPane toPan
         }
 
         // Weight gate.
-        const float afterPickup = _carriedMass + from.Mass();
+        const float afterPickup = ItemMass::TotalCarried(_player) + from.Mass();
         if (afterPickup > MaxCarryWeight())
         {
             return InvTransferResult::OverCarryWeight;
         }
         // Volume gate (invisible; per-side capacity). Adding this item must not push
         // the carried packed volume past the side's budget.
-        if (_volumeCapacity > 0.0f && _carriedVolume + CellVolume(from) > _volumeCapacity)
+        if (ItemMass::TotalVolumeCarried(_player) + CellVolume(from) > InvVolumeBudget(_player))
         {
             return InvTransferResult::OverVolume;
         }
@@ -2373,10 +2364,22 @@ InvTransferResult InventoryModel::DropToPerson(const InvCell &from, Person *pers
     }
     else
     {
-        Ref<Magazine> m = const_cast<Magazine *>(from.magazine);
-        if (!m || person->AddMagazine(m, /*force=*/true) < 0)
-            return InvTransferResult::Unavailable;
-        _player->RemoveMagazine(m);
+        AutoArray<Ref<const Magazine>> mags = from.boxMags;
+        if (!from.isBox && from.magazine) mags.Add(from.magazine);
+        if (mags.Size() == 0) return InvTransferResult::Unavailable;
+        // Add the entire box first. Roll back any refused addition before
+        // removing anything from the player.
+        for (int i = 0; i < mags.Size(); ++i)
+        {
+            if (person->AddMagazine(const_cast<Magazine *>(mags[i].GetRef()), true) < 0)
+            {
+                for (int added = 0; added < i; ++added)
+                    person->RemoveMagazine(mags[added]);
+                return InvTransferResult::Unavailable;
+            }
+        }
+        for (int i = 0; i < mags.Size(); ++i)
+            _player->RemoveMagazine(mags[i]);
     }
 
     _player->PlayAction(ManActPutDown);
@@ -2411,13 +2414,13 @@ InvTransferResult InventoryModel::DiscardToArsenal(const InvCell &from)
     {
         for (int i = 0; i < from.boxMags.Size(); i++)
         {
-            Ref<Magazine> m = const_cast<Magazine *>(from.boxMags[i]);
+            Ref<Magazine> m = const_cast<Magazine *>(from.boxMags[i].GetRef());
             _player->RemoveMagazine(m);
         }
     }
     else
     {
-        Ref<Magazine> m = const_cast<Magazine *>(from.magazine);
+        Ref<Magazine> m = const_cast<Magazine *>(from.magazine.GetRef());
         _player->RemoveMagazine(m);
     }
 
@@ -2451,10 +2454,14 @@ InvTransferResult InventoryModel::DropToTarget(const InvCell &from,
     // so a fallback holder only needs creating when there's no container at all.
     VehicleSupply *target = nullptr;
     const InvItemKind kind = from.kind;
-    auto hasRoom = [kind](VehicleSupply *c) {
+    const int magazineCount = from.isBox ? from.boxMags.Size() : 1;
+    auto hasRoom = [kind, magazineCount](VehicleSupply *c) {
         return (kind == InvItemKind::Weapon) ? c->GetFreeWeaponCargo() > 0
-                                             : c->GetFreeMagazineCargo() > 0;
+                                             : c->GetFreeMagazineCargo() >= magazineCount;
     };
+    // An explicit destination must accept the whole item, never a partial box.
+    if (preferred && !hasRoom(preferred))
+        return InvTransferResult::Unavailable;
     if (forceGround)
     {
         // Reuse an existing ground holder with room, so repeated drops don't spawn
@@ -2508,6 +2515,8 @@ InvTransferResult InventoryModel::DropToTarget(const InvCell &from,
         container->PlaceOnSurface(transform);
         container->SetTransform(transform);
         container->Init(transform);
+        if (!hasRoom(container))
+            return InvTransferResult::Unavailable;
         GWorld->AddBuilding(container);
         if (GWorld->GetMode() == GModeNetware)
         {
@@ -2534,8 +2543,7 @@ InvTransferResult InventoryModel::DropToTarget(const InvCell &from,
     }
     else
     {
-        // A shell box drops ALL its shells to the same target; a normal cell drops one
-        // magazine. AddMagazineCargo auto-spawns another holder if `target` fills up.
+        // Reserve capacity for the whole box before making any mutation.
         AutoArray<const Magazine *> mags;
         if (from.isBox)
         {
@@ -2546,12 +2554,21 @@ InvTransferResult InventoryModel::DropToTarget(const InvCell &from,
         {
             mags.Add(from.magazine);
         }
+        if (mags.Size() == 0 || target->GetFreeMagazineCargo() < mags.Size())
+            return InvTransferResult::Unavailable;
         for (int i = 0; i < mags.Size(); i++)
         {
             Ref<Magazine> m = const_cast<Magazine *>(mags[i]);
-            if (target->GetFreeMagazineCargo() < 1 ||
-                target->AddMagazineCargo(m, /*deleteWhenFull=*/true) < 0)
+            if (target->AddMagazineCargo(m, /*deleteWhenFull=*/true) < 0)
+            {
+                for (int added = 0; added < i; ++added)
+                    target->RemoveMagazineCargo(mags[added]);
                 return InvTransferResult::Unavailable;
+            }
+        }
+        for (int i = 0; i < mags.Size(); ++i)
+        {
+            const Magazine *m = mags[i];
             _player->RemoveMagazine(m);
             if (GWorld->GetMode() == GModeNetware)
             {

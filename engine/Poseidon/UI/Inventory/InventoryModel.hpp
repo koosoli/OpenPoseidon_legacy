@@ -4,31 +4,16 @@
 
 // Poseidon/UI/Inventory/InventoryModel.hpp
 //
-// v2: single monolithic grid, weight-gated.
-//
-// Design, per spec:
-//   - ONE flat grid for everything the player carries. No vest/pack/pouch
-//     sub-containers - if it fits in the weight budget, it's "in the
-//     inventory," full stop.
-//   - The grid is VISUAL LAYOUT ONLY. Whether an item can be picked up is
-//     governed purely by CarriedMass() + item mass <= ItemMass::MaxCarryWeight.
-//     Grid position is just where the icon is drawn and where dragging snaps
-//     to - if the visible grid has no free footprint-sized rect for a
-//     weight-legal item, the grid grows another row rather than the pickup
-//     being refused. See FindPlacement.
-//   - This deliberately bypasses OFP's slot-mask system (WEAPON_SLOTS /
-//     MAGAZINE_SLOTS / MaskSlotPrimary etc. - Weapons.hpp:248-254) for the
-//     PLAYER's own inventory only. AI is completely unaffected: AI still
-//     calls the checked AddWeapon/AddMagazine path (force=false), which
-//     still enforces the masks. The player path calls the same functions
-//     with force=true (VehicleAI.cpp:1764 confirms force skips CheckWeapon
-//     entirely), so a player could in principle carry two rifles at once -
-//     that's an intentional consequence of "weight only," not a bug.
+// Single-player inventory: equipped slots plus paginated storage and vicinity.
+// Grid placement is cosmetic. Pickups enforce live ownership, duplicate/slot,
+// weight and volume checks; extra long guns require the explicit backpack option.
+// Direct transfers are not network-authoritative; multiplayer uses classic Gear.
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <Poseidon/Foundation/Types/LLinks.hpp>
+#include <Poseidon/AI/EntityAIType.hpp> // Magazine definition for snapshot references
 
 #include "ItemFootprint.hpp"
 
@@ -159,7 +144,10 @@ struct InvCell
     bool fromBody = false;   //!< source is a dead soldier (read/take via weapon systems)
 
     const WeaponType *weapon = nullptr;
-    const Magazine *magazine = nullptr;
+    // The world continues simulating while the UI is open. Keep displayed and
+    // dragged magazines alive even if their live owner removes them; ownership
+    // is checked again before any mutation.
+    Ref<const Magazine> magazine;
 
     // Arsenal source: an infinite "one of everything" list. Weapons use `weapon`;
     // magazines have no instance yet, so they carry the TYPE and a fresh instance
@@ -176,7 +164,7 @@ struct InvCell
     /// stackCount=1 and boxMags empty.
     bool isBox = false;
     int  stackCount = 1;                   //!< shells in this box (box cells only)
-    AutoArray<const Magazine *> boxMags;   //!< the grouped shell magazines
+    AutoArray<Ref<const Magazine>> boxMags; //!< retained grouped shell magazines
 
     /// Grid-pane only: top-left cell and footprint size, in grid units.
     int gx = 0, gy = 0;
@@ -282,7 +270,7 @@ public:
     /// hover - the loaded magazine isn't listed as a separate grid item.
     bool WeaponLoadedAmmo(const WeaponType *w, int &cur, int &cap) const;
 
-    /// Pure check - weight only. Grid space never blocks a legal pickup.
+    /// Pure live ownership/slot/weight/volume check. Grid space is cosmetic.
     InvTransferResult CanTransfer(const InvCell &from, InvPane toPane) const;
 
     /// Performs the transfer via EntityAI::AddWeapon/AddMagazine(force=true)
