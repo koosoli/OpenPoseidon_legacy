@@ -11,6 +11,7 @@
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/platform.hpp>
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 
 // The PCH pulls in Logging.hpp which #defines DebugLog() as a logging macro.
 // That collides with the method ImGui::DebugLog().  Undef before including
@@ -8335,7 +8336,8 @@ bool SetFreeFlyTestPose(const char* coordinates)
     if (!coordinates || std::strlen(coordinates) >= sizeof(s_zeusGotoBuf) || pose.count != 5 ||
         !std::isfinite(pose.x) || !std::isfinite(pose.z) || !std::isfinite(pose.altitude) ||
         !std::isfinite(pose.azimuth) || !std::isfinite(pose.elevation) ||
-        std::abs(pose.x) > 1000000 || std::abs(pose.z) > 1000000 || std::abs(pose.altitude) > 1000000)
+        std::abs(pose.x) > 1000000 || std::abs(pose.z) > 1000000 ||
+        std::abs(pose.altitude) > (EarthStreaming::Enabled() ? 30000000.0f : 1000000.0f))
         return false;
     snprintf(s_zeusGotoBuf, sizeof(s_zeusGotoBuf), "%s", coordinates);
     GoToZeusCoordinates();

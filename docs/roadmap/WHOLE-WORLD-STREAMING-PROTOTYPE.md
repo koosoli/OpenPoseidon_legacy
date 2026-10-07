@@ -2,7 +2,7 @@
 
 This opt-in Freefly experiment loads real elevation around a geographic origin
 and moves the terrain working set as the camera travels. Normal OFP gameplay is
-unchanged. It is an initial runtime streaming slice, not a completed globe or
+unchanged. It includes a low-detail satellite globe overview; it is not
 a VBS4-equivalent world simulation.
 
 ## Backup and development
@@ -25,6 +25,8 @@ and run from the source checkout:
 ./scripts/Launch-WholeWorld.ps1 -Latitude 36.1 -Longitude -112.1 -Altitude 3000
 # Curved horizon from the stratosphere:
 ./scripts/Launch-WholeWorld.ps1 -Altitude 120000
+# Complete globe from orbit:
+./scripts/Launch-WholeWorld.ps1 -Globe
 ```
 
 The default view starts above the Swiss Alps at latitude 46.6, longitude 8.1,
@@ -51,7 +53,8 @@ comes from the user's installed CWA data.
   window. Near the shared boundary it blends back to zoom-10 heights; edge
   skirts close fine/coarse T junctions. Near and far geometry publish together.
   Both use a stable spherical sagitta about the fixed origin, so the far horizon
-  curves. This is a curved tangent presentation, not a complete orbitable globe.
+  curves. This elevation window uses a curved tangent presentation; the separate
+  global overview sphere covers the rest of Earth.
 - The window recentres in 3.2 km steps. Its 12.8 km margin loads terrain ahead of
   ordinary camera motion without creating an unbounded request queue. Very fast
   jumps can outrun the current window; it stays visible until a replacement is ready.
@@ -93,19 +96,20 @@ approval. Terrain source coverage and quality vary.
 
 The active rendering area moves; the underlying `Landscape`, AI, collision,
 navigation, weather ground sampling and mission editor remain finite. Stay in
-Freefly. There are no worldwide buildings, vegetation, roads, satellite imagery,
-water or terrain-aware spawn points yet. The far terrain uses a generic ground
-colour; no landcover/imagery is implied by that colour. Curved horizon coverage
-is bounded to 2048 km half-width and a supported preview altitude up to 250 km.
+Freefly. There are no worldwide buildings, vegetation, roads, physical oceans or
+terrain-aware spawn points yet. A cached low-detail satellite texture covers the
+globe and far mesh; the near ground still uses the installed CWA material.
+Curved elevation coverage is bounded to 2048 km half-width and altitude up to
+500 km; beyond that the overview sphere remains visible without tile downloads.
 The geographic addressing remains an approximate tangent map, constrained to
 500 km of engine coordinates per axis, and the provider has no coverage above
 85.051 degrees latitude. Different global origins can be selected at launch, but
-one cannot yet circumnavigate the globe in a single session. Far cells beyond
-the provider's latitude coverage are omitted, rather than inventing polar data.
+one cannot yet circumnavigate the globe in a single session. Elevation cells beyond
+the provider's latitude coverage are omitted; the overview sphere covers the poles.
 
-Next stages should be separately measured: geographic imagery/landcover and
+Next stages should be separately measured: detailed imagery/landcover and
 ocean, shared geographic simulation tiles, floating-origin rebasing and full
-globe/polar addressing, then CWR-Worldgen geographic content tiles. Complete
+globe elevation addressing, then CWR-Worldgen geographic content tiles. Complete
 these before presenting this as an entire playable Earth.
 
 ## Validation
@@ -131,10 +135,8 @@ all five cached positions loaded with zero downloads. An uncached move to
 x=100000 failed through a deliberately unavailable proxy, retained the last
 complete terrain patch and left the frame-performance harness responsive. These
 checks validate the bounded elevation prototype, not globe gameplay or populated
-geographic content. The installed binary remains `6c0075ee`; this acceptance
-record is documentation only. The 8 October horizon extension requires new
-installed-game acceptance; the historical receipts above describe the original
-near-window implementation.
+geographic content. These historical receipts describe the original near-window
+implementation; the extension's acceptance is recorded below.
 
 ## Global overview extension (8 October)
 
