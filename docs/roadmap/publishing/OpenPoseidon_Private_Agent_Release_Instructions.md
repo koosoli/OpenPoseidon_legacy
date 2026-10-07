@@ -93,3 +93,17 @@ Abschlussmeldung unterscheidet ausdrücklich:
 `nur privat`, `wartet auf Freigabe`, `Staging geprüft`, `sauberer Kandidat im noch privaten Ziel`, `öffentlich synchronisiert`, `Binaries veröffentlicht` oder `blockiert/teilweise veröffentlicht`.
 
 Ein vorbereiteter Workflow ist nicht aktiv. Ein Push ist kein Build-Pass. Ein Build-Pass ist keine erfolgreiche Veröffentlichung.
+
+## Autorisierter privater Transfertest vom 2026-10-07
+
+Oliver hat ausdrücklich den bereinigten Transfer nach `koosoli/OpenPoseidon`
+zum Testen autorisiert. Dort liegt jetzt ein Kandidat auf einer unabhängigen
+`main`-Historie. Diese konkrete Autorisierung erlaubt den privaten Transfertest
+bei ehrlich dokumentierten offenen Prüfungen; sie erlaubt keine öffentliche
+Freigabe oder Binärveröffentlichung. Keine Review-Gates künstlich auf bestanden
+setzen. Details und Pins stehen in `SOURCE-CANDIDATE-TRANSFER-20261007.md`.
+
+Bei weiteren Exporten alle bereinigten Quelldatei-Ersatztexte aus dem neuen Pin
+erneuern und ihre Diffs prüfen; alte vollständige Ersatzdateien dürfen neuere
+Engine-Änderungen nicht zurücksetzen. Die private Historie niemals in den
+Release-Branch mergen oder pushen. Das Ziel bleibt privat.

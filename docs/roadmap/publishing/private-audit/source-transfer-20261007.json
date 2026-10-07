@@ -1,0 +1,64 @@
+{
+  "state": "PRIVATE_CANDIDATE_UPLOADED_PUBLIC_RELEASE_BLOCKED",
+  "source_commit": "51982bdacc6df176ffae9b008761b6061b504acf",
+  "release_commit": "4168c6eeec4accfb3df56f52393b31ea907ad867",
+  "release_tree": "3fb41fed3fcd841520cfa5b346121cb98eb983ec",
+  "build_tested_release_commit": "266267bd4fb773ecfc4b50780335d7aee389c6c7",
+  "final_diff_from_tested_commit": [
+    "BUILDING.md"
+  ],
+  "repository": "koosoli/OpenPoseidon",
+  "repository_id": 1406091033,
+  "visibility": "private",
+  "default_branch": "main",
+  "commits": 2,
+  "independent_roots": 1,
+  "exported_files": 4339,
+  "excluded_private_files": 1167,
+  "manifest_sha256": "a8ad1d373f6fc100940bd7291026134117ba043d678bf5808e26d20b859494b3",
+  "policy_sha256": "776a6a26ce9774f4f33cbc355b2f16dfee6464d05d8699e5e72f6c73f8825c6b",
+  "scan": {
+    "source_commit": "51982bdacc6df176ffae9b008761b6061b504acf",
+    "tracked_files": 5491,
+    "classifications": {
+      "EXCLUDE_INTERNAL": 1167,
+      "INCLUDE_UNCHANGED": 4270,
+      "INCLUDE_REWRITTEN": 54
+    },
+    "included_files_with_findings": 3,
+    "finding_types": {
+      "license-source-chain-hold": 3
+    },
+    "final_export_ready": false
+  },
+  "checks": {
+    "export_guard_tests": 13,
+    "default_content_tests": 35,
+    "clean_windows_game_tools_build": "PASS",
+    "dlss": false,
+    "wgpu_initialization": "PASS",
+    "remote_clone_blob_and_mode_comparison": "PASS",
+    "full_native_suite": "NOT_RUN",
+    "linux_build": "NOT_RUN",
+    "fresh_gameplay_visual_acceptance": "NOT_RUN"
+  },
+  "binaries": {
+    "OpenPoseidon.exe": "6e41f7d1dc3f75e254eef72461966747e98a3bd53ba40933b348bb860963ed78",
+    "wgpu_renderer.dll": "23cf55017669dd0cd75f8f4f876006490274b30bb3c9a86463b794c6914d24e5"
+  },
+  "logs": {
+    "clean-build.log": "8a29ad2c36a068715c6fc3666b0e3604d6ccbfce7113ce60b87742ea2fc2d979",
+    "committed-build.log": "748a71925010cf0a166903420404b9528edc5010a55ffc3ebbf9ee74f7da13e5",
+    "committed-runtime-check.log": "fefe42b3251f9c3fc519a93aaf3e33932624eec59bb6d9e55b6a4a132a67f500",
+    "default-content-tests.log": "74d86568efe4a29e04abc01870767ed4c314e4ceb8184cf1272f386e0a6b40ff"
+  },
+  "installed_game_stamp": "codex/private-release-prep-20261006 b080696c 2026-10-07_20:56 deploy-ps1",
+  "installed_game_modified": false,
+  "public_visibility_changed": false,
+  "binaries_uploaded": false,
+  "pending": [
+    "Malprave earlier AI source-chain verification",
+    "Individual resource/fixture/screenshot publication rights review",
+    "Exact dependency licences and runtime manifest for a later binary release"
+  ]
+}

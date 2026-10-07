@@ -62,9 +62,21 @@ not an export or a history cleanup.
 
 ## Current release state
 
-The initial 2026-10-06 draft is not approved for upload. Malprave source-chain
-evidence, individual fixture/resource reviews, privacy references and the exact
-clean release build remain open. See `PRIVATE-RELEASE-PREP-20261006.md`.
-The 2026-10-07 README update lists the current engine features and their limits;
-it does not resolve those release gates. `koosoli/OpenPoseidon` must stay private
-until Oliver explicitly asks to change its visibility.
+On 2026-10-07 Oliver explicitly authorised a cleaned transfer to the still-private
+release repository. The candidate is now on its independent `main` history.
+See `SOURCE-CANDIDATE-TRANSFER-20261007.md` for source/target pins and verification.
+Privacy findings and the exact clean Windows build/start check have been resolved.
+Malprave source-chain verification and individual fixture/resource/publication
+rights reviews remain open. This private test transfer does not approve a public
+release. `koosoli/OpenPoseidon` must stay private until Oliver explicitly requests
+a visibility change.
+
+For the next candidate, refresh every sanitised source replacement from the new
+immutable development pin using `scripts/publishing/prepare_clean_candidate.py`.
+Do not reuse old replacement bodies after engine changes: that could silently
+export an older implementation. Review the generated diff and curated feature
+documentation, commit the policy/replacements privately, then inventory/export
+that exact commit anew. Check the candidate Git tree with
+`scripts/publishing/verify_candidate_git.py`, build it and repeat the relevant
+checks before syncing its reviewed files onto the release repository's existing
+independent history. Never merge private development ancestry into `main`.

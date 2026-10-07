@@ -6,14 +6,18 @@ execution:
   integration_owner: Oliver Kay
   activation_state: ACTIVE
   private_release_preparation_checkpoint:
-    state: PRIVATE_PREPARED_RELEASE_EXPORT_BLOCKED_NO_TARGET_PUSH
-    source_commit: 19c96f26ddd828a9e2c907621c744ad7960bbdfd
+    state: PRIVATE_CANDIDATE_UPLOADED_PUBLIC_RELEASE_BLOCKED
+    source_commit: 51982bdacc6df176ffae9b008761b6061b504acf
     preparation_branch: codex/private-release-prep-20261006
     destination: koosoli/OpenPoseidon
     repository_id: '1406091033'
     visibility: private
-    evidence: docs/roadmap/publishing/PRIVATE-RELEASE-PREP-20261006.md
-    receipt: docs/roadmap/publishing/private-audit/review-summary.json
+    evidence: docs/roadmap/publishing/SOURCE-CANDIDATE-TRANSFER-20261007.md
+    receipt: docs/roadmap/publishing/private-audit/source-transfer-20261007.json
+    release_commit: 4168c6eeec4accfb3df56f52393b31ea907ad867
+    clean_build: PASS
+    remote_readback_files: 4339
+    public_release_approved: false
     documentation_update:
       date: '2026-10-07'
       state: FEATURE_READMES_AND_RELEASE_WORKFLOW_UPDATED

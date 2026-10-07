@@ -77,7 +77,8 @@ def prepare(repo, manifest, policy_path):
         if not name or not classify(name, policy)[0].startswith('INCLUDE'):
             continue
         privacy = [f for f in entry['findings'] if f['kind'] != 'license-source-chain-hold']
-        if not privacy or name in ('CREDITS.md',):
+        refresh = policy['rewrites'].get(name, '').startswith('public-files/sanitized/')
+        if (not privacy and not refresh) or name == 'CREDITS.md' or name.endswith('.ico'):
             continue
         original = blob(name)
         if name == 'tests/fixtures/savegame/save.fps':
