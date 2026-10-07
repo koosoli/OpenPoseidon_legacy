@@ -105,8 +105,6 @@ The current engine includes:
   this is not a completed replacement AI or new universal navigation system.
 - **Swimming:** swimmer movement and boat-route/boarding support.
   The third-party swimming animation addon is not bundled with the engine.
-- **A new title-menu scene:** a patrol boat navigating large Tidewater swells
-  in late-afternoon light.
 
 These features are at different stages of acceptance. Dense/aerial fog can still
 show visible patterns; strong torch shafts are not visually accepted. Ragdoll

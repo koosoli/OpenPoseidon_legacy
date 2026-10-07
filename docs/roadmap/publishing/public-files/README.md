@@ -65,7 +65,6 @@ it is not a complete game or an official Bohemia Interactive product.
   Behavior switches are configuration-dependent; this is not a universal new
   navigation system or complete replacement AI.
 - **Swimming:** swimmer movement and boat-route/boarding support.
-- **Title menu:** a patrol boat navigating large Tidewater swells in afternoon light.
 
 ## Development screenshots
 

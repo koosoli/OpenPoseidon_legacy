@@ -1,17 +1,9 @@
-; Authored menu camera. Fixed sea-level height keeps the view steady while the hull rides the swell.
+; A fixed offshore camera shows the storm swells without a boat or follow motion.
 showCinemaBorder false
 0 setRain 0
 opMenuCamera = "camera" camCreate [2510,3518,9]
 opMenuCamera cameraEffect ["internal","back"]
-opMenuCamera camSetTarget opMenuBoat
+opMenuCamera camSetTarget [2250,3050,0]
 opMenuCamera camSetFOV 0.62
 opMenuCamera camSetPos [2510,3518,9]
 opMenuCamera camCommit 0
-~0.2
-#follow
-_p = getPos opMenuBoat
-opMenuCamera camSetTarget opMenuBoat
-opMenuCamera camSetPos [(_p select 0)+10,(_p select 1)+18,9]
-opMenuCamera camCommit 0.4
-~0.25
-goto "follow"

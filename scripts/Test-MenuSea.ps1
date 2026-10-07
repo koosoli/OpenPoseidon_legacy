@@ -1,4 +1,4 @@
-<# Installed main-menu ocean scene: AI boat movement, native captures, ordinary editor preview
+<# Installed main-menu ocean scene: boat-free storm swells, native captures, ordinary editor preview
    and menu restoration in the same process/window. Run under scripts/with-game-lock.sh.
    Uses isolated user/cache/content directories and exits only the owned test process. #>
 [CmdletBinding()]
@@ -108,20 +108,16 @@ try {
     Require ($receipt.originalMode -ceq $expectedMode) 'Requested launch display mode was not applied'
     Start-Sleep -Seconds 8
     Snapshot 'startup'
-    Require ((Value 'isNull opMenuBoat') -ceq 'false') 'Authored menu boat is missing'
-    $receipt.boatBefore = Send @{ cmd = 'diag_inspect'; unit = 'opMenuBoat' }
+    Require ((Value 'isNil "opMenuBoat"') -ceq 'true') 'Menu still creates a boat'
+    $receipt.cameraBefore = Value 'getPos opMenuCamera'
     $receipt.bathymetry = Send @{ cmd = 'water_bathymetry'; x = 2500; z = 3500 }
     $receipt.menuWaterBefore = Send @{ cmd = 'water_probe' }
     Snapshot '00_menu'
     $frameStart = [double](Value 'triFrameCount'); $watch = [Diagnostics.Stopwatch]::StartNew()
     Start-Sleep -Seconds 12
     $receipt.renderedFps = ([double](Value 'triFrameCount') - $frameStart) / $watch.Elapsed.TotalSeconds
-    $receipt.boatAfter = Send @{ cmd = 'diag_inspect'; unit = 'opMenuBoat' }
-    $dx = $receipt.boatAfter.pos[0] - $receipt.boatBefore.pos[0]
-    $dz = $receipt.boatAfter.pos[1] - $receipt.boatBefore.pos[1]
-    $receipt.boatTravelMetres = [Math]::Sqrt($dx*$dx + $dz*$dz)
-    Require ($receipt.boatTravelMetres -gt 20) 'Boat did not drive through the swell'
-    Require (!$receipt.boatAfter.destroyed) 'Menu boat sank'
+    $receipt.cameraAfter = Value 'getPos opMenuCamera'
+    Require ($receipt.cameraAfter -ceq $receipt.cameraBefore) 'Offshore menu camera moved'
     Snapshot '01_menu_swell'
     # Switch to an ordinary editor mission and back in the original window.
     Exec 'triClick 115'; Wait-Display 51 'Island selector'
@@ -138,7 +134,8 @@ try {
     Exec 'triClick 2'; Wait-Display 203 'Editor exit confirmation'
     Exec 'triClick 1'; Wait-Display 0 'Restored title menu'
     Start-Sleep -Seconds 5
-    Require ((Value 'isNull opMenuBoat') -ceq 'false') 'Menu boat did not restart'
+    Require ((Value 'isNil "opMenuBoat"') -ceq 'true') 'Restored menu creates a boat'
+    Require ((Value 'isNull opMenuCamera') -ceq 'false') 'Ocean camera did not restart'
     Snapshot '03_restored_menu'
     $null = Send @{ cmd = 'exit' }
     Require ($p.WaitForExit(20000) -and $p.ExitCode -eq 0) 'Normal game exit failed'
