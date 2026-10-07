@@ -27,5 +27,28 @@ int main()
     rejected=false;
     try { ToPixel({NAN,0}); } catch(const std::out_of_range&) { rejected=true; }
     assert(rejected);
-    std::cout<<"Earth coordinates: origin, orientation, dateline, seams, elevation, polar guards PASS\n";
+    assert(CurvatureDrop(Anchor,Anchor)==0);
+    assert(std::abs(CurvatureDrop(Anchor+100000,Anchor)-784.0)<1.0);
+    assert(CurvatureDrop(Anchor+100,Anchor)>0 && CurvatureDrop(Anchor+100,Anchor)<.001);
+    assert(std::abs(CurvatureDrop(Anchor+100000,Anchor)-CurvatureDrop(Anchor,Anchor-100000))<1e-9);
+    assert(HorizonRadius(NAN)==64000 && HorizonRadius(-100)==64000);
+    assert(HorizonRadius(4500)>HorizonRadius(1000));
+    assert(HorizonRadius(250000)==2048000 && HorizonRadius(1e20f)==2048000);
+    for (float altitude : {500.0f,4500.0f,30000.0f,120000.0f,250000.0f})
+    {
+        const float radius=HorizonRadius(altitude);
+        // Coverage reaches beyond the real geometric horizon, without growing
+        // the per-frame mesh budget with altitude.
+        assert(radius>std::sqrt(double(altitude)*(2*Radius+altitude)));
+        assert(HorizonOffset(0,radius)==-radius);
+        assert(HorizonOffset(HorizonSamples-1,radius)==radius);
+        assert(HorizonOffset(HorizonInnerBegin,radius)==-HalfWindow);
+        assert(HorizonOffset(HorizonInnerEnd,radius)==HalfWindow);
+        for(int i=1;i<HorizonSamples;++i)
+            assert(HorizonOffset(i,radius)>HorizonOffset(i-1,radius));
+        assert(HorizonZoom(46.6,radius)>=3 && HorizonZoom(46.6,radius)<=Zoom);
+        assert(std::isfinite(CurvatureDrop(Anchor+radius,Anchor+radius)));
+    }
+    assert(ToPixel({0,0},3).x==1024 && WrapPixel(-1,3)==2047);
+    std::cout<<"Earth coordinates: origin, orientation, seams, elevation, polar guards, curved horizon coverage PASS\n";
 }

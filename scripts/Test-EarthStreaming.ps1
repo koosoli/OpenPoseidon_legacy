@@ -2,7 +2,7 @@
    returns to the start, validates the upload receipts, captures rendered frames.
    Wrap in scripts/with-game-lock.sh. Stops only the process this script starts. #>
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$ExpectedCommit,[switch]$Offline)
+param([Parameter(Mandatory)][string]$ExpectedCommit,[switch]$Offline,[switch]$Horizon)
 $ErrorActionPreference='Stop'
 if(!$env:LOCK_OWNER){throw 'Game lock required'}
 $repo=Split-Path -Parent $PSScriptRoot
@@ -33,7 +33,7 @@ try{
  $stream=$client.GetStream();$stream.ReadTimeout=30000;$reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
  while(([string](Send @{cmd='eval';code='triSceneReady'}).result).Trim('"')-cne'OK'){Require ([DateTime]::UtcNow-lt$deadline) 'Scene-ready deadline';Start-Sleep -Milliseconds 250}
  Require (!(Select-String -Path $log -Pattern 'Cannot load --test-world|Critical error' -Quiet)) 'Test world failed to load'
- $null=Send @{cmd='exec';code='player allowDamage false;0 setRain 0;0 setOvercast .15;0 setFog .02;setDate [1985,6,21,12,0]'}
+ $null=Send @{cmd='exec';code='player allowDamage false;0 setRain 0;0 setOvercast .15;0 setFog 0;setDate [1985,6,21,12,0]'}
  foreach($x in @(6400,9600,16000,32000,6400)){
   $before=@(Select-String -Path $log -Pattern 'Earth terrain patch ').Count
   $null=Send @{cmd='exec';code=('triFreeFlyPose "'+$x+' 6400 4500 30 -20"')}
@@ -54,7 +54,24 @@ try{
   $path=Join-Path $out ('earth-'+$receipt.views.Count+'.png');$null=Send @{cmd='screenshot';path=$path}
   $receipt.views+=@{x=$x;upload=$last;screenshot=$path;performance=(Send @{cmd='frame_performance'})}
  }
- $receipt.tiles=@(Get-ChildItem (Join-Path $cache 'terrarium-z10') -Filter '*.png').Count
+ if($Horizon){
+  foreach($altitude in @(30000,120000,4500)){
+   $before=@(Select-String -Path $log -Pattern 'Earth horizon: ').Count
+   $null=Send @{cmd='exec';code=('triFreeFlyPose "6400 6400 '+$altitude+' 30 -20"')}
+   $deadline=[DateTime]::UtcNow.AddSeconds(150)
+   do{
+    Require (!$p.HasExited) 'Game exited during altitude change'
+    $rows=@(Select-String -Path $log -Pattern 'Earth horizon: ')
+    if($rows.Count-gt$before){break}
+    Require ([DateTime]::UtcNow-lt$deadline) ('Horizon deadline at altitude='+$altitude)
+    Start-Sleep -Milliseconds 300
+   }while($true)
+   Start-Sleep -Milliseconds 700
+   $path=Join-Path $out ('horizon-'+$altitude+'.png');$null=Send @{cmd='screenshot';path=$path}
+   $receipt.views+=@{altitude=$altitude;horizon=$rows[-1].Line;screenshot=$path;performance=(Send @{cmd='frame_performance'})}
+  }
+ }
+ $receipt.tiles=@(Get-ChildItem $cache -Directory -Filter 'terrarium-z*' | Get-ChildItem -Filter '*.png').Count
  Require ($receipt.tiles-le256) 'Disk cache exceeds its bound'
  if($Offline){
   Require (!(Select-String -Path $log -Pattern 'downloads [1-9]' -Quiet)) 'Offline traversal unexpectedly downloaded data'

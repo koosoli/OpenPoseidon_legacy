@@ -49,7 +49,7 @@ EarthTerrainStream::EarthTerrainStream()
         throw std::invalid_argument("Earth origin outside supported latitude/longitude range");
     const char* path = std::getenv("POSEIDON_EARTH_CACHE");
     if (!path || !*path) throw std::invalid_argument("POSEIDON_EARTH_CACHE must name a writable cache directory");
-    _cache = std::filesystem::u8path(path) / "terrarium-z10";
+    _cache = std::filesystem::u8path(path);
     std::filesystem::create_directories(_cache);
     static std::once_flag curlInit;
     std::call_once(curlInit, [] {
@@ -66,16 +66,17 @@ EarthTerrainStream::~EarthTerrainStream()
     if (_worker.joinable()) _worker.join();
 }
 
-void EarthTerrainStream::Request(float x, float z)
+void EarthTerrainStream::Request(float x, float z, float altitude)
 {
     // Bound this planar prototype before integer conversion; globe rebasing is
     // a subsequent stage. Bad camera positions must not reach indexing/math.
     if (!std::isfinite(x) || !std::isfinite(z) || std::abs(x) > EarthStreaming::CoordinateLimit ||
         std::abs(z) > EarthStreaming::CoordinateLimit) return;
     const int cx = Earth::CenterCell(x), cz = Earth::CenterCell(z);
+    const float radius = Earth::HorizonRadius(altitude);
     std::lock_guard lock(_mutex);
-    if (_requested && cx == _requestX && cz == _requestZ) return;
-    _requestX = cx; _requestZ = cz; _requested = true;
+    if (_requested && cx == _requestX && cz == _requestZ && radius == _requestRadius) return;
+    _requestX = cx; _requestZ = cz; _requestRadius = radius; _requested = true;
     ++_generation;
     _wake.notify_one();
 }
@@ -109,15 +110,17 @@ bool EarthTerrainStream::Download(const std::string& url, std::vector<unsigned c
     return result == CURLE_OK && status == 200 && !bytes.empty();
 }
 
-const EarthTerrainStream::Tile& EarthTerrainStream::LoadTile(int x, int y)
+const EarthTerrainStream::Tile& EarthTerrainStream::LoadTile(int zoom, int x, int y)
 {
-    const auto key = std::make_pair(x,y);
+    const auto key = std::make_tuple(zoom,x,y);
     if (auto it = _tiles.find(key); it != _tiles.end())
     {
         it->second.use = ++_use;
         return it->second;
     }
-    const auto file = _cache / (std::to_string(x) + "-" + std::to_string(y) + ".png");
+    const auto directory = _cache / ("terrarium-z" + std::to_string(zoom));
+    std::filesystem::create_directories(directory);
+    const auto file = directory / (std::to_string(x) + "-" + std::to_string(y) + ".png");
     std::vector<unsigned char> bytes;
     std::error_code ec;
     const auto length = std::filesystem::file_size(file, ec);
@@ -156,7 +159,7 @@ const EarthTerrainStream::Tile& EarthTerrainStream::LoadTile(int x, int y)
     if (!cached)
     {
         const std::string url = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/" +
-            std::to_string(Earth::Zoom) + "/" + std::to_string(x) + "/" + std::to_string(y) + ".png";
+            std::to_string(zoom) + "/" + std::to_string(x) + "/" + std::to_string(y) + ".png";
         if (!Download(url, bytes)) throw std::runtime_error("terrain tile unavailable: " + url);
         tile = decode();
         ++_downloads;
@@ -183,7 +186,7 @@ const EarthTerrainStream::Tile& EarthTerrainStream::LoadTile(int x, int y)
     return _tiles.emplace(key, std::move(tile)).first->second;
 }
 
-float EarthTerrainStream::Sample(double x, double y)
+float EarthTerrainStream::Sample(double x, double y, int zoom)
 {
     // Pixel centres are half a pixel from tile borders; fetching both adjacent
     // tiles before interpolation keeps tile edges continuous, including dateline.
@@ -192,9 +195,9 @@ float EarthTerrainStream::Sample(double x, double y)
     const float fx = float(x - ix), fy = float(y - iy);
     auto at = [&](int px, int py)
     {
-        px = Earth::WrapPixel(px);
-        py = std::clamp(py, 0, Earth::TilePixels * (1 << Earth::Zoom) - 1);
-        const auto& tile = LoadTile(px / Earth::TilePixels, py / Earth::TilePixels);
+        px = Earth::WrapPixel(px, zoom);
+        py = std::clamp(py, 0, Earth::TilePixels * (1 << zoom) - 1);
+        const auto& tile = LoadTile(zoom, px / Earth::TilePixels, py / Earth::TilePixels);
         return tile.heights[(py % Earth::TilePixels) * Earth::TilePixels + px % Earth::TilePixels];
     };
     const float a = at(ix,iy), b = at(ix+1,iy), c = at(ix,iy+1), d = at(ix+1,iy+1);
@@ -204,8 +207,13 @@ float EarthTerrainStream::Sample(double x, double y)
 void EarthTerrainStream::TrimDisk()
 {
     std::vector<std::filesystem::directory_entry> files;
-    for (const auto& item : std::filesystem::directory_iterator(_cache))
-        if (item.is_regular_file() && item.path().extension() == ".png") files.push_back(item);
+    for (int zoom = 3; zoom <= Earth::Zoom; ++zoom)
+    {
+        const auto directory = _cache / ("terrarium-z" + std::to_string(zoom));
+        if (!std::filesystem::exists(directory)) continue;
+        for (const auto& item : std::filesystem::directory_iterator(directory))
+            if (item.is_regular_file() && item.path().extension() == ".png") files.push_back(item);
+    }
     if (files.size() <= 256) return;
     std::sort(files.begin(), files.end(), [](const auto& a, const auto& b) { return a.last_write_time() < b.last_write_time(); });
     std::error_code ec;
@@ -218,12 +226,14 @@ void EarthTerrainStream::Run()
     while (!_stop.load())
     {
         int cx, cz;
+        float radius;
         uint64_t version;
         {
             std::unique_lock lock(_mutex);
             _wake.wait(lock, [&] { return _stop.load() || _generation.load() != handled; });
             if (_stop.load()) return;
             cx = _requestX; cz = _requestZ; version = _generation.load();
+            radius = _requestRadius;
         }
         try
         {
@@ -245,7 +255,46 @@ void EarthTerrainStream::Run()
                 {
                     const auto position = Earth::ToPixel(Earth::FromLocal(_latitude, _longitude,
                         patch->x + x * Earth::GridMetres, patch->z + z * Earth::GridMetres));
-                    patch->heights[z * Earth::GridSamples + x] = Sample(position.x, position.y);
+                    const double wx = patch->x + x * Earth::GridMetres;
+                    const double wz = patch->z + z * Earth::GridMetres;
+                    patch->heights[z * Earth::GridSamples + x] =
+                        Sample(position.x, position.y) - float(Earth::CurvatureDrop(wx,wz));
+                }
+            }
+            if (_generation.load() != version) { handled = version; continue; }
+            patch->horizonRadius = radius;
+            patch->horizonZoom = Earth::HorizonZoom(centre.latitude, radius);
+            patch->horizonHeights.resize(Earth::HorizonSamples * Earth::HorizonSamples);
+            patch->horizonValid.resize(patch->horizonHeights.size(), 1);
+            for (int z = 0; z < Earth::HorizonSamples; ++z)
+            {
+                if (_stop.load()) return;
+                if (_generation.load() != version) break;
+                for (int x = 0; x < Earth::HorizonSamples; ++x)
+                {
+                    const float ox = Earth::HorizonOffset(x,radius), oz = Earth::HorizonOffset(z,radius);
+                    const double wx = cx * Earth::RecenterMetres + ox;
+                    const double wz = cz * Earth::RecenterMetres + oz;
+                    const auto geographic = Earth::FromLocal(_latitude,_longitude,wx,wz);
+                    const size_t index = z * Earth::HorizonSamples + x;
+                    if (std::abs(geographic.latitude) > Earth::MaxLatitude)
+                    {
+                        patch->horizonValid[index] = 0; // Never invent polar source data.
+                        continue;
+                    }
+                    const auto coarse = Earth::ToPixel(geographic,patch->horizonZoom);
+                    float height = Sample(coarse.x,coarse.y,patch->horizonZoom);
+                    // The inner 25.6km square is not drawn by this mesh. Its edge
+                    // shares the near source; blend source resolutions outside
+                    // it instead of making an elevation cliff at the join.
+                    const float edge = std::max(std::abs(ox),std::abs(oz)) - Earth::HalfWindow;
+                    if (edge < 4000.0f)
+                    {
+                        const auto fine = Earth::ToPixel(geographic);
+                        const float weight = std::clamp(edge / 4000.0f,0.0f,1.0f);
+                        height = Sample(fine.x,fine.y) * (1-weight) + height * weight;
+                    }
+                    patch->horizonHeights[index] = height - float(Earth::CurvatureDrop(wx,wz));
                 }
             }
             patch->downloads = _downloads - downloads; patch->cacheHits = _cacheHits - hits;

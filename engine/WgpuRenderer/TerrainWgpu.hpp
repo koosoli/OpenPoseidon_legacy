@@ -47,6 +47,7 @@ class TerrainWgpu : public ITerrainRenderer
 {
   public:
     TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer);
+    ~TerrainWgpu() override;
 
     void DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd) override;
     bool GetDrawCoverage(TerrainDrawCoverage& out) const override;
@@ -121,6 +122,9 @@ class TerrainWgpu : public ITerrainRenderer
     void DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape& land);
     std::unique_ptr<EarthTerrainStream> _earthStream;
     std::unique_ptr<EarthTerrainStream::Patch> _earthPatch;
+    WgrMesh _earthHorizonMesh = 0;
+    uint32_t _earthHorizonIndices = 0;
+    void UploadEarthHorizon(const EarthTerrainStream::Patch& patch);
     // (Re)uploads and rebuilds the quadtree when the map changes; returns true if it did.
     bool UploadIfNeeded(const Landscape& land);
     void BuildQuadtree(const Landscape& land);

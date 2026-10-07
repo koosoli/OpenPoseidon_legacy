@@ -15,6 +15,50 @@ constexpr int GridSamples = 257;
 constexpr float GridMetres = 100.0f;
 constexpr float RecenterMetres = 3200.0f;
 constexpr float Anchor = 6400.0f;
+constexpr float HalfWindow = 128 * GridMetres;
+constexpr int HorizonSamples = 257;
+constexpr int HorizonInnerBegin = 96;
+constexpr int HorizonInnerEnd = 160;
+
+// Stable spherical sagitta, in the fixed origin's tangent frame. The rational
+// form avoids subtracting two Earth-sized numbers near the origin. This is a
+// presentation projection, not a change to the finite simulation landscape.
+inline double CurvatureDrop(double x, double z)
+{
+    const double dx = x - Anchor, dz = z - Anchor;
+    const double r2 = dx * dx + dz * dz;
+    return r2 / (Radius + std::sqrt(std::max(0.0, Radius * Radius - r2)));
+}
+
+inline float HorizonRadius(float altitude)
+{
+    if (!std::isfinite(altitude)) return 64000.0f;
+    const double h = std::clamp(double(altitude), 0.0, 250000.0);
+    const double reach = 1.25 * std::sqrt(h * (2.0 * Radius + h));
+    float radius = 64000.0f;
+    while (radius < reach && radius < 2048000.0f) radius *= 2.0f;
+    return radius;
+}
+
+// A dense inner boundary exactly matches the near window. Quadratically spaced
+// outer samples cover the horizon with a fixed vertex/triangle budget.
+inline float HorizonOffset(int i, float radius)
+{
+    if (i >= HorizonInnerBegin && i <= HorizonInnerEnd)
+        return (i - 128) * (HalfWindow / 32.0f);
+    const bool left = i < HorizonInnerBegin;
+    const float t = float(left ? HorizonInnerBegin - i : i - HorizonInnerEnd) / 96.0f;
+    const float distance = HalfWindow + (radius - HalfWindow) * t * t;
+    return left ? -distance : distance;
+}
+
+inline int HorizonZoom(double latitude, float radius)
+{
+    // Roughly four source tiles span the whole far window. The inner seam still
+    // samples zoom 10; very distant terrain does not download fine source tiles.
+    const double circumference = 2.0 * Pi * Radius * std::cos(latitude * Pi / 180.0);
+    return std::clamp(int(std::floor(std::log2(circumference * 2.0 / radius))), 3, Zoom);
+}
 
 struct Coordinate { double latitude, longitude; };
 struct Pixel { double x, y; };
@@ -34,19 +78,19 @@ inline Coordinate FromLocal(double latitude, double longitude, double x, double 
         (Radius * std::cos(latitude * Pi / 180.0)) * 180.0 / Pi)};
 }
 
-inline Pixel ToPixel(Coordinate c)
+inline Pixel ToPixel(Coordinate c, int zoom = Zoom)
 {
     if (!std::isfinite(c.latitude) || !std::isfinite(c.longitude) || std::abs(c.latitude) > MaxLatitude)
         throw std::out_of_range("Terrain Tiles polar coverage limit (85.051 degrees)");
-    const double size = double(TilePixels * (1 << Zoom));
+    const double size = double(TilePixels * (1 << zoom));
     const double lat = c.latitude * Pi / 180.0;
     return {(WrapLongitude(c.longitude) + 180.0) / 360.0 * size,
         std::clamp((1.0 - std::asinh(std::tan(lat)) / Pi) * 0.5 * size, 0.0, size - 1.0)};
 }
 
-inline int WrapPixel(int pixel)
+inline int WrapPixel(int pixel, int zoom = Zoom)
 {
-    constexpr int size = TilePixels * (1 << Zoom);
+    const int size = TilePixels * (1 << zoom);
     return (pixel % size + size) % size;
 }
 

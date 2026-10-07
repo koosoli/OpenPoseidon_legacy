@@ -394,7 +394,7 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
     if (EarthStreaming::Enabled())
     {
         _earthStream = std::make_unique<EarthTerrainStream>();
-        LOG_INFO(Graphics, "Earth terrain prototype enabled: 25.6km rolling window, 100m samples, freefly only");
+        LOG_INFO(Graphics, "Earth terrain prototype enabled: 25.6km near window plus curved altitude-adaptive horizon, freefly only");
     }
     _baseMult = EnvFloat("WGR_TERRAIN_LOD_BASE", 4.0f);
     _lodRatio = EnvFloat("WGR_TERRAIN_LOD_RATIO", 2.0f);
@@ -3206,6 +3206,79 @@ void TerrainWgpu::UpdateGroundTexturePages(const Landscape& land, const Camera& 
              centerZ, radius, materials.size());
 }
 
+TerrainWgpu::~TerrainWgpu()
+{
+    _earthStream.reset(); // Cancel HTTPS and join before any render-owned state disappears.
+    // EngineWgpu releases TerrainWgpu after stopping its render thread, while
+    // the renderer and texture bank are still alive.
+    if (_earthHorizonMesh) wgr_mesh_destroy(_renderer,_earthHorizonMesh);
+}
+
+void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p)
+{
+    constexpr int n = Earth::HorizonSamples;
+    std::vector<WgrMeshVertex> vertices(n*n);
+    const float cx = p.x + Earth::HalfWindow, cz = p.z + Earth::HalfWindow;
+    for (int z = 0; z < n; ++z)
+    {
+        for (int x = 0; x < n; ++x)
+        {
+            auto& v = vertices[z*n+x];
+            v.pos = {cx + Earth::HorizonOffset(x,p.horizonRadius),p.horizonHeights[z*n+x],
+                     cz + Earth::HorizonOffset(z,p.horizonRadius)};
+            const int loX = std::max(0,x-1), hiX = std::min(n-1,x+1);
+            const int loZ = std::max(0,z-1), hiZ = std::min(n-1,z+1);
+            const float dx = (p.horizonHeights[z*n+hiX] - p.horizonHeights[z*n+loX]) /
+                (Earth::HorizonOffset(hiX,p.horizonRadius)-Earth::HorizonOffset(loX,p.horizonRadius));
+            const float dz = (p.horizonHeights[hiZ*n+x] - p.horizonHeights[loZ*n+x]) /
+                (Earth::HorizonOffset(hiZ,p.horizonRadius)-Earth::HorizonOffset(loZ,p.horizonRadius));
+            const float inv = 1.0f / std::sqrt(dx*dx+dz*dz+1.0f);
+            v.normal = {-dx*inv,inv,-dz*inv};
+        }
+    }
+    std::vector<uint32_t> indices;
+    indices.reserve((n-1)*(n-1)*6);
+    for (int z = 0; z < n-1; ++z)
+    {
+        for (int x = 0; x < n-1; ++x)
+        {
+            // Leave exactly the near terrain's rectangle open. Both regions
+            // are published together and share the boundary's zoom-10 heights.
+            if (x >= Earth::HorizonInnerBegin && x < Earth::HorizonInnerEnd &&
+                z >= Earth::HorizonInnerBegin && z < Earth::HorizonInnerEnd) continue;
+            const uint32_t a = z*n+x, b = a+1, c = a+n, d = c+1;
+            if (!p.horizonValid[a] || !p.horizonValid[b] || !p.horizonValid[c] || !p.horizonValid[d]) continue;
+            indices.insert(indices.end(),{a,c,b,b,c,d});
+        }
+    }
+    // Vertical edge skirts close the fine-grid/coarse-boundary T junctions;
+    // they do not cover or move either region's top surface.
+    auto skirt = [&](int x0,int z0,int x1,int z1) {
+        const uint32_t a = uint32_t(vertices.size());
+        const auto point = [&](int x,int z) {
+            WgrMeshVertex v{};
+            v.pos = {p.x+x*Earth::GridMetres,p.heights[z*Earth::GridSamples+x],p.z+z*Earth::GridMetres};
+            v.normal = {0,1,0};
+            return v;
+        };
+        auto first = point(x0,z0), second = point(x1,z1);
+        vertices.push_back(first); vertices.push_back(second);
+        first.pos.y -= 300.0f; second.pos.y -= 300.0f;
+        vertices.push_back(first); vertices.push_back(second);
+        indices.insert(indices.end(),{a,a+2,a+1,a+1,a+2,a+3});
+    };
+    for (int i=0;i<256;++i)
+    {
+        skirt(i,0,i+1,0); skirt(i,256,i+1,256);
+        skirt(0,i,0,i+1); skirt(256,i,256,i+1);
+    }
+    const WgrMesh replacement = wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(vertices),WgrSlice<uint32_t>(indices));
+    if (!replacement) throw std::runtime_error("Earth horizon mesh allocation failed");
+    if (_earthHorizonMesh) wgr_mesh_destroy(_renderer,_earthHorizonMesh);
+    _earthHorizonMesh = replacement;
+    _earthHorizonIndices = uint32_t(indices.size());
+}
+
 bool TerrainWgpu::GetDrawCoverage(TerrainDrawCoverage& out) const
 {
     if (!_uploaded || _uploaded != GLandscape) return false;
@@ -3218,7 +3291,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
     // Classic upload supplies the one owned fixture's material bindings once;
     // its geometry, grass and finite-world water are not submitted in this mode.
     if (!_uploaded) UploadIfNeeded(land);
-    _earthStream->Request(camera.Position().X(), camera.Position().Z());
+    _earthStream->Request(camera.Position().X(), camera.Position().Z(),camera.Position().Y());
     if (auto patch = _earthStream->TakeReady())
     {
         _earthPatch = std::move(patch);
@@ -3231,6 +3304,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         _params.sea_level = -12000.0f;
         _params.enfusion_ground = 0;
         EngineWgpu::AcquireProducerWindow("Earth terrain patch");
+        UploadEarthHorizon(p);
         wgr_terrain_set_heightmap(_renderer, p.heights.data(), &_params);
         auto bounds = [&](int x, int z, int span, float& mn, float& mx) {
             CdlodHeightBounds(x,z,span,Earth::GridSamples,false,
@@ -3243,6 +3317,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         const auto extrema = std::minmax_element(p.heights.begin(),p.heights.end());
         LOG_INFO(Graphics, "Earth terrain patch {}: origin [{},{}], centre [{},{}], height {}..{}m, downloads {}, disk hits {}, worker {}s",
             p.generation,p.x,p.z,p.latitude,p.longitude,*extrema.first,*extrema.second,p.downloads,p.cacheHits,p.seconds);
+        LOG_INFO(Graphics, "Earth horizon: radius {}km, source zoom {}, {} triangles; curved tangent projection",
+            p.horizonRadius/1000.0f,p.horizonZoom,_earthHorizonIndices/3);
     }
     if (!_earthPatch) return;
     _engine.QueueTerrainParams(_params);
@@ -3253,7 +3329,16 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         [](const CdlodNode&) { return true; },[&](const CdlodSelection& s) {
             _selected.push_back({{s.originX,s.originZ},s.size,uint32_t(s.level),s.morphStart,s.morphEnd});
         },0.0f,true);
+    if (_selected.empty())
+    {
+        // At stratospheric heights even the coarsest ordinary terrain LOD
+        // range is shorter than camera-to-ground distance. Keep the centre
+        // filled instead of opening a square hole in the horizon mesh.
+        _selected.push_back({{patch.x,patch.z},256*Earth::GridMetres,
+            uint32_t(_numLevels-1),1.0e10f,2.0e10f});
+    }
     _engine.SubmitTerrain(_selected);
+    _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices);
 }
 
 void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)

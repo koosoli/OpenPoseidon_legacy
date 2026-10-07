@@ -8,7 +8,7 @@ param(
     [string]$GameDir = 'D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
     [ValidateRange(-84,84)][double]$Latitude = 46.6,
     [ValidateRange(-180,180)][double]$Longitude = 8.1,
-    [ValidateRange(500,15000)][double]$Altitude = 4500,
+    [ValidateRange(500,250000)][double]$Altitude = 4500,
     [string]$CacheDirectory = (Join-Path $env:LOCALAPPDATA 'OpenPoseidon/world-stream'),
     [switch]$Fullscreen,
     [int]$HarnessPort = 0,
@@ -66,14 +66,14 @@ class Intro {randomSeed=1;};class OutroWin {randomSeed=1;};class OutroLoose {ran
 Open Poseidon Engine Earth elevation streaming prototype.
 Downloaded terrain is an external local cache, not bundled engine content.
 Provider: https://registry.opendata.aws/terrain-tiles/
-Format: Mapzen Terrarium, elevation in metres. Zoom 10, 256 pixel PNG tiles.
+Format: Mapzen Terrarium, elevation in metres. Zoom 10 near, adaptive coarse horizon.
 Source URL: https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png
 Terrain Tiles source acknowledgements and individual source terms:
 https://github.com/tilezen/joerd/blob/master/docs/attribution.md
 EU terrain includes Copernicus EU-DEM; worldwide coverage combines multiple sources.
 Retain/check the source acknowledgements before redistributing downloaded data.
 Cache: at most 256 validated PNG tiles (2 MiB each maximum), 64 decoded in memory.
-Only freefly rendering is implemented. No global buildings, collision or globe curvature.
+Only freefly rendering is implemented. Curved tangent horizon, no global buildings or collision.
 '@)
 if ($PrepareOnly) { Write-Output $world; return }
 $settings = @{

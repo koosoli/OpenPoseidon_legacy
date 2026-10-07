@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 namespace Poseidon
@@ -25,19 +26,23 @@ class EarthTerrainStream
         unsigned downloads, cacheHits;
         double seconds;
         std::vector<float> heights;
+        float horizonRadius;
+        int horizonZoom;
+        std::vector<float> horizonHeights;
+        std::vector<uint8_t> horizonValid;
     };
     EarthTerrainStream();
     ~EarthTerrainStream();
     EarthTerrainStream(const EarthTerrainStream&) = delete;
     EarthTerrainStream& operator=(const EarthTerrainStream&) = delete;
-    void Request(float x, float z);
+    void Request(float x, float z, float altitude);
     std::unique_ptr<Patch> TakeReady();
 
   private:
     struct Tile { std::vector<float> heights; uint64_t use; };
     void Run();
-    const Tile& LoadTile(int x, int y);
-    float Sample(double x, double y);
+    const Tile& LoadTile(int zoom, int x, int y);
+    float Sample(double x, double y, int zoom = Earth::Zoom);
     bool Download(const std::string& url, std::vector<unsigned char>& bytes);
     void TrimDisk();
     double _latitude, _longitude;
@@ -48,9 +53,10 @@ class EarthTerrainStream
     std::mutex _mutex;
     std::condition_variable _wake;
     int _requestX = 0, _requestZ = 0;
+    float _requestRadius = 64000.0f;
     bool _requested = false;
     std::unique_ptr<Patch> _ready;
-    std::map<std::pair<int,int>, Tile> _tiles;
+    std::map<std::tuple<int,int,int>, Tile> _tiles;
     uint64_t _use = 0;
     unsigned _downloads = 0, _cacheHits = 0;
 };

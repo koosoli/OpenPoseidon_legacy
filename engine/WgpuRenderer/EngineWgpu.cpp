@@ -2362,6 +2362,7 @@ struct EngineWgpu::SharedMeshFixtureState
 EngineWgpu::~EngineWgpu()
 {
     StopRenderThread();
+    _terrain.reset(); // Its Earth worker/mesh must be gone before wgr_destroy.
     _retailWorldVisible.reset();
     _retailPagePilot.reset(); // release private texture holds while its bank/renderer are alive
     _retailWorldSource.reset();
@@ -7313,6 +7314,34 @@ void EngineWgpu::SubmitTerrain(std::span<const WgrTerrainNode> nodes)
     cmd.kind = WGR_CMD_DRAW_TERRAIN;
     cmd.arg = U32(_terrainBatches.size() - 1);
     _cmds.push_back(cmd);
+}
+
+void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount)
+{
+    if (!_renderer || !mesh || !indexCount) return;
+    EnsureCamera();
+    const auto& camera = _cameras[_currentCamera];
+    WgrDraw3D d{};
+    d.mesh = mesh;
+    d.index_count = indexCount;
+    d.camera = _currentCamera;
+    d.palette_slot = WGR_NO_PALETTE;
+    d.depth = WGR_DEPTH_TEST_WRITE;
+    d.blend = WGR_BLEND_OPAQUE;
+    d.flags = WGR_DRAW3D_DOUBLE_SIDED; // Includes the narrow seam skirts.
+    d.world.m[0] = d.world.m[5] = d.world.m[10] = d.world.m[15] = 1.0f;
+    d.world.m[12] = -camera.pos[0];
+    d.world.m[13] = -camera.pos[1];
+    d.world.m[14] = -camera.pos[2];
+    const auto& light = render::frame::GPresentationSnapshot();
+    const Color ambient = light.hasMainLight ? light.sunAmbient : HWhite;
+    const Color diffuse = light.hasMainLight ? light.sunDiffuse : HWhite;
+    // Generic ground colour until geographic imagery/landcover is implemented.
+    // Receives the normal frame's sun, sky, atmosphere and depth; no post pass.
+    d.mat_sun_ambient = {ambient.R()*.35f,ambient.G()*.32f,ambient.B()*.26f,1};
+    d.mat_sun_diffuse = {diffuse.R()*.35f,diffuse.G()*.32f,diffuse.B()*.26f,1};
+    _draws3d.push_back(d);
+    _cmds.push_back(WgrCmd{WGR_CMD_DRAW_3D,U32(_draws3d.size()-1)});
 }
 
 IWaterRenderer* EngineWgpu::GetWaterRenderer()
