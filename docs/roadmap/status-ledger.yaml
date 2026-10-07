@@ -21,6 +21,31 @@ execution:
       no worldwide collision, objects, globe curvature, poles or floating origin.
       Existing OFP gameplay remains the default. CWR-Worldgen reviewed; no
       external code or assets vendored. Complete pre-change branch pushed first.
+  filtered_source_release_checkpoint:
+    date: '2026-10-07'
+    state: SOURCE_RELEASE_READY_REPOSITORY_REMAINS_PRIVATE
+    repository: koosoli/OpenPoseidon
+    default_branch: main
+    release_commit: d7ec899e0973405fc9c5f06663e6674a85d90380
+    build_tested_release_commit: 250374d46587714f002c90f9c3ff7461b81f8883
+    development_source_pin: 51982bdacc6df176ffae9b008761b6061b504acf
+    preparation_branch: codex/release-ready-20261007
+    previous_release_backup: codex/backup-clean-release-before-fixture-filter-20261007
+    excluded_binary_test_media: 155
+    included_files: 4185
+    screenshots_and_logo: 11
+    clean_windows_build: PASS
+    renderer_initialization: PASS
+    default_content_tests: 35
+    visibility_change_authorized: false
+    receipt: docs/roadmap/publishing/private-audit/release-ready-20261007.json
+    note: >-
+      Owner confirmed Malprave same GPL/upstream and ownership of screenshots.
+      Preserve licences/credits and project runtime art; remove undocumented
+      binary test inputs from the export and reachable release history. Tests
+      requiring omitted fixtures need authored local data; missing tests are not
+      passes. Remove private candidate banner/document, add README sponsorship
+      and FUNDING.yml. Stable source pin remains separate from Earth prototype.
   private_release_preparation_checkpoint:
     state: PRIVATE_CANDIDATE_UPLOADED_PUBLIC_RELEASE_BLOCKED
     source_commit: 51982bdacc6df176ffae9b008761b6061b504acf

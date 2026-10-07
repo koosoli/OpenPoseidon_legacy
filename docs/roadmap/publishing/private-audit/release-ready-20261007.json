@@ -1,9 +1,9 @@
 {
-  "state": "REVIEWED_SOURCE_EXPORT_PRIVATE_UNTIL_OWNER_PUBLICATION",
+  "state": "SOURCE_RELEASE_READY_UPLOADED_REPOSITORY_REMAINS_PRIVATE",
   "date": "2026-10-07",
   "source_commit": "51982bdacc6df176ffae9b008761b6061b504acf",
   "policy_sha256": "c4099828a0417ec6eb4c7af2557c53477d0f872b13598539eca5760655ba7599",
-  "manifest_sha256": "7316d5d72da886380feff232f0707cd7a4d8a15259555528fa634e6f96ed2324",
+  "manifest_sha256": "c8a194ef09bc01e35f0928eee9caa96ad5a4c4cba240f725a6fae51af1c02eca",
   "included_files": 4185,
   "excluded_binary_fixtures": [
     "apps/tools/Tools/fixtures/check.wav",
@@ -166,7 +166,8 @@
     "malprave": "Owner confirms GPL under same licence and same upstream; source credits retained. This records the owner confirmation, not independent access to unavailable earlier patch files.",
     "screenshots": "Owner confirms these screenshots are his own and asks that they remain in README. Captures are documentation, not redistribution of their depicted game assets.",
     "visibility": "Keep repository private until explicit request to make public.",
-    "fixture_filter": "Owner permits removing files with uncertain provenance."
+    "fixture_filter": "Owner permits removing files with uncertain provenance.",
+    "readme_renderer": "Remove legacy OpenGL promotion because GL33 is scheduled for retirement. GL33 engine code itself remains unchanged in this source snapshot."
   },
   "retained_resources": [
     {
@@ -1255,10 +1256,41 @@
     "export_guard_tests": 13,
     "inventory_findings": 0,
     "original_inventory_icon_hashes": 34,
-    "binary_test_inputs_removed": 155
+    "binary_test_inputs_removed": 155,
+    "clean_windows_game_and_tools_build": "PASS",
+    "default_content_tests": 35,
+    "git_blob_and_mode_verification": 4185,
+    "exact_root_wgpu_initialization": "PASS",
+    "full_native_test_suite": "NOT_RUN; omitted fixture-dependent tests need authored local data",
+    "linux_build": "NOT_RUN",
+    "new_gameplay_visual_acceptance": "NOT_RUN; engine code unchanged",
+    "remote_fetched_blob_and_mode_verification": "PASS"
   },
   "history_backup": "codex/backup-clean-release-before-fixture-filter-20261007 on private safety mirror",
   "engine_changes": "None; export remains stable pin51982, separate from new Earth streaming prototype.",
-  "manifest": "build/release-ready-final-20261007/inventory.json",
-  "line_endings": "Curated text normalized to LF to match Git attributes; final byte verification required"
+  "manifest": "build/release-ready-readme-final-20261007/inventory.json",
+  "line_endings": "Curated text normalized to LF to match Git attributes; final byte verification required",
+  "release_commit": "d7ec899e0973405fc9c5f06663e6674a85d90380",
+  "release_tree": "b86dfe08dd17a87c2b7d8caaed8b9c79a55bba2c",
+  "reachable_release_roots": 1,
+  "previous_release_commit": "4168c6eeec4accfb3df56f52393b31ea907ad867",
+  "repository": "koosoli/OpenPoseidon",
+  "visibility": "private",
+  "default_branch": "main",
+  "logs": {
+    "release-final-build-restamp-20261007.log": "9eda1529fdb68b92f02009a76560a3af8c5db82594b9e44d08ae7a6cc36bc4dc",
+    "release-final-runtime-file-check-20261007.log": "caea9fec7afb850ba2bd6c67423363b7ec784cab0513006678e5e2f193d05a78"
+  },
+  "binary_sha256": {
+    "OpenPoseidon.exe": "50903fb855763de9952f2bbcb78beb7fd84501af69ffc11b889568dd8fd8b6d1",
+    "wgpu_renderer.dll": "99042f403b5ab538f9b145526656de3f21df7dc92d9267eab4c0ec0c1c81d6c2"
+  },
+  "installed_game_stamp_unchanged": "codex/whole-world-streaming-20261007 6c0075ee 2026-10-07_22:54 deploy-ps1",
+  "source_export_checks": "Source release only. Binary distribution licence manifest/package not produced or uploaded.",
+  "build_tested_release_commit": "250374d46587714f002c90f9c3ff7461b81f8883",
+  "final_diff_from_build_tested_commit": [
+    "README.md"
+  ],
+  "reachable_release_commits": 2,
+  "remote_readback_files": 4185
 }

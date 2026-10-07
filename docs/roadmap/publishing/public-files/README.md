@@ -16,7 +16,7 @@ it is not a complete game or an official Bohemia Interactive product.
 
 - **Vulkan rendering through WGPU:** Vulkan support on Windows and Linux,
   alongside Direct3D 12 on Windows. The active API depends on the platform,
-  GPU and driver; a separate legacy OpenGL renderer is also available.
+  GPU and driver.
 - **Physical inventory (single player):** open with **O** for vicinity cargo,
   drag/drop, equipped slots and weight/volume budgets; **K** opens inventory
   settings, including optional bearing callouts, a bearing readout and
