@@ -1,0 +1,186 @@
+{
+  "license": "GPL-3.0-or-later; project Section 7 terms",
+  "version": 2,
+  "prompts": "realistic-prompts.json",
+  "icons": [
+    {
+      "runtime_paa": "assets/inventory/rifle.paa",
+      "runtime_dimensions": [
+        512,
+        256
+      ],
+      "source_sha256": "fa41b53ac77db8c1e25cd723934d5128b19d8934e2e757ba70c89ff64b58bb03",
+      "runtime_sha256": "4b1dfacc1b9aa8f452a61f125d47dacc64c7f93f5ea47c1171a4e84331742070",
+      "category": "rifle",
+      "source_png": "assets/inventory/rifle.png"
+    },
+    {
+      "runtime_paa": "assets/inventory/ak_rifle.paa",
+      "runtime_dimensions": [
+        512,
+        256
+      ],
+      "source_sha256": "a9fdd6f7e774c2ca74aad1104a126501dd77f5f45c9f2a6448a7af1ae827a96c",
+      "runtime_sha256": "e707c79f25e303c4aa547c627c5b233e499fa5dd1011dc62de53179033a3406e",
+      "category": "ak_rifle",
+      "source_png": "assets/inventory/ak_rifle.png"
+    },
+    {
+      "runtime_paa": "assets/inventory/scoped_rifle.paa",
+      "runtime_dimensions": [
+        512,
+        256
+      ],
+      "source_sha256": "14dca4a047bb82a2c54bd2931ee6f9d090b47b4d84606d0d404e8879ea24b4e0",
+      "runtime_sha256": "5fe6b295225879e1321c45960fdbadc16eb09a92a3a1685182fc672be4be8bb7",
+      "category": "scoped_rifle",
+      "source_png": "assets/inventory/scoped_rifle.png"
+    },
+    {
+      "runtime_paa": "assets/inventory/smg.paa",
+      "runtime_dimensions": [
+        512,
+        512
+      ],
+      "source_sha256": "86199b3e2d5d8e45e9d3377020088b63ea3b57a44ab194da29b9a05a0b8899a9",
+      "runtime_sha256": "430d1ebcc39f85d72aee16c3e253f4097a80c350cd75a61f37c5dee4a95a45bf",
+      "category": "smg",
+      "source_png": "assets/inventory/smg.png"
+    },
+    {
+      "runtime_paa": "assets/inventory/machinegun.paa",
+      "runtime_dimensions": [
+        512,
+        256
+      ],
+      "source_sha256": "16edf0df68dd564eb6bde1fc97724537fc51be67c3357747f83d7a36e7622d57",
+      "runtime_sha256": "f56dce03f436dd95d73e2fb4d02231ebecc7b4c6f2b748209979f0f9ef56e12b",
+      "category": "machinegun",
+      "source_png": "assets/inventory/machinegun.png"
+    },
+    {
+      "runtime_paa": "assets/inventory/launcher.paa",
+      "runtime_dimensions": [
+        512,
+        256
+      ],
+      "source_sha256": "76983b5ed0b4f0296186c10235cd1431059ed9c89128fe1617f66c28452c836d",
+      "runtime_sha256": "2ff1aae2fc149685d8ec8de354c4fb7a800c1812f99b87d46fde1323bd130e0d",
+      "category": "launcher",
+      "source_png": "assets/inventory/launcher.png"
+    },
+    {
+      "runtime_paa": "assets/inventory/pistol.paa",
+      "runtime_dimensions": [
+        512,
+        512
+      ],
+      "source_sha256": "074c657d8ae00637a7c0c0aa1b83627858cbe0e0ce6522225b97e3aae785bb39",
+      "runtime_sha256": "67a170a1a57f5efe8bd396e208438d39f4178e2e78d89e562a125a935166343e",
+      "category": "pistol",
+      "source_png": "assets/inventory/pistol.png"
+    },
+    {
+      "runtime_paa": "assets/inventory/binoculars.paa",
+      "runtime_dimensions": [
+        512,
+        512
+      ],
+      "source_sha256": "896517f7c4e7cb5003ec5e687fd0c55623f993a8d05cd5984bf6f4cbf1eb920e",
+      "runtime_sha256": "b219a86a94da716cc239139b3aa22c66702a2e7341946e88c4fb1f21a417699f",
+      "category": "binoculars",
+      "source_png": "assets/inventory/binoculars.png"
+    },
+    {
+      "runtime_paa": "assets/inventory/nvg.paa",
+      "runtime_dimensions": [
+        512,
+        512
+      ],
+      "source_sha256": "3cf503b10a2c039e08bd5591b4a23f2085a95b905889bc39ac844927b1ebb911",
+      "runtime_sha256": "038bcceea3e49ddd7716a19ae7147b42f8d89391ab1d1426603c8e03848b7606",
+      "category": "nvg",
+      "source_png": "assets/inventory/nvg.png"
+    },
+    {
+      "runtime_paa": "assets/inventory/magazine.paa",
+      "runtime_dimensions": [
+        512,
+        512
+      ],
+      "source_sha256": "eb218b5bf0220511469e5edbb1692d7a126f6ef76a93db09afb223043d24627e",
+      "runtime_sha256": "db81adb4a802a190d1b402d50da893af2cdeccf5355c8553582fdff8d69cbcdc",
+      "category": "magazine",
+      "source_png": "assets/inventory/magazine.png"
+    },
+    {
+      "runtime_paa": "assets/inventory/curved_magazine.paa",
+      "runtime_dimensions": [
+        512,
+        512
+      ],
+      "source_sha256": "362a79d387e03dfd5e49296f1dcdb80841707a1dbd4e2ad82f89469c5cd7d87e",
+      "runtime_sha256": "4d8176afc1e8da6f92b2f66f6a3556a96b9ec0d845e82ec99471dc5ca6327012",
+      "category": "curved_magazine",
+      "source_png": "assets/inventory/curved_magazine.png"
+    },
+    {
+      "runtime_paa": "assets/inventory/grenade.paa",
+      "runtime_dimensions": [
+        512,
+        512
+      ],
+      "source_sha256": "be29ccd6990787fae29aec12a359251b44ca2910e15169c71f97a82a56042ff1",
+      "runtime_sha256": "e913839aaf52da3008766408aede8344a9b4352b287dbb39d5d5a315abc63f53",
+      "category": "grenade",
+      "source_png": "assets/inventory/grenade.png"
+    },
+    {
+      "runtime_paa": "assets/inventory/smoke.paa",
+      "runtime_dimensions": [
+        512,
+        512
+      ],
+      "source_sha256": "df9f96a453a36586c03a2b1e75dceede19137751ad6de4b45af664ecab8c6e28",
+      "runtime_sha256": "ef3a91d61d18ef6c3fdb76fb5dcbb60a3d686e09925db374b4fad07efaccaeb5",
+      "category": "smoke",
+      "source_png": "assets/inventory/smoke.png"
+    },
+    {
+      "runtime_paa": "assets/inventory/satchel.paa",
+      "runtime_dimensions": [
+        512,
+        512
+      ],
+      "source_sha256": "d8660d78936f25a441c123d15a6b45aa1ce325296d5d72927d0c69abdab7cc16",
+      "runtime_sha256": "0f17698f77af6ae21c0208668121f9fdece5b818ef463f1233363c0fd0cb7acf",
+      "category": "satchel",
+      "source_png": "assets/inventory/satchel.png"
+    },
+    {
+      "runtime_paa": "assets/inventory/mine.paa",
+      "runtime_dimensions": [
+        512,
+        512
+      ],
+      "source_sha256": "c177360bc8c9e73e5a0458268edbe2e26f419ea3aec8fdb524ebdefeb8af8c8e",
+      "runtime_sha256": "d9996cb1f7686ea7f56afb7148fc46f58c663d7dc1cd8e44cf56452a4d37f5b1",
+      "category": "mine",
+      "source_png": "assets/inventory/mine.png"
+    },
+    {
+      "runtime_paa": "assets/inventory/rocket.paa",
+      "runtime_dimensions": [
+        512,
+        128
+      ],
+      "source_sha256": "0ace725f0d72af5243187868a03cd4aa0e5a49112c46b42f7cfdc862daa3b057",
+      "runtime_sha256": "b4e73dd8718dc0ad6864b5899868f87b00c13df7f0c0fe915f54ab354f61f4d4",
+      "category": "rocket",
+      "source_png": "assets/inventory/rocket.png"
+    }
+  ],
+  "tool": "Built-in image_gen",
+  "artwork": "Original AI-generated realistic category illustrations",
+  "image_inputs": []
+}

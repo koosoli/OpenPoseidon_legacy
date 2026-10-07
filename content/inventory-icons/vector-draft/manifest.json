@@ -1,0 +1,187 @@
+{
+  "name": "Open Poseidon Engine inactive vector inventory draft",
+  "version": 1,
+  "active": false,
+  "license": "GPL-3.0-or-later",
+  "additional_terms": "Project LICENSE Section 7 terms apply.",
+  "provenance": "Original geometry authored for Open Poseidon Engine; no external source image or game texture inputs.",
+  "generator": "scripts/default-content/generate_inventory_icons.py",
+  "icons": [
+    {
+      "category": "rifle",
+      "svg": "rifle.svg",
+      "png": "content/inventory-icons/vector-draft/png/rifle.png",
+      "sha256": "dfda11fa018086f30b5a1f9ae8ce74c51a0e29d4de61d2798c50b407919cfd5b",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    },
+    {
+      "category": "ak_rifle",
+      "svg": "ak_rifle.svg",
+      "png": "content/inventory-icons/vector-draft/png/ak_rifle.png",
+      "sha256": "278bd9411b1839799eee0639b3d353a90844e52130cbe2f7d205cedc6a53ce4c",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    },
+    {
+      "category": "scoped_rifle",
+      "svg": "scoped_rifle.svg",
+      "png": "content/inventory-icons/vector-draft/png/scoped_rifle.png",
+      "sha256": "19ca7ba3ae28b5a42c4bf33e087f1384edd5bff5e80060563d5181317d986d1a",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    },
+    {
+      "category": "smg",
+      "svg": "smg.svg",
+      "png": "content/inventory-icons/vector-draft/png/smg.png",
+      "sha256": "1ad8c8bae66d7d6de6685e12d742dd37dc31e8be0a55aab91c7c069b7e9a6428",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    },
+    {
+      "category": "machinegun",
+      "svg": "machinegun.svg",
+      "png": "content/inventory-icons/vector-draft/png/machinegun.png",
+      "sha256": "5356e5f821ce4a6ec36220dd0ca14182c91aa2ccf508f31baa1875e469f90b84",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    },
+    {
+      "category": "launcher",
+      "svg": "launcher.svg",
+      "png": "content/inventory-icons/vector-draft/png/launcher.png",
+      "sha256": "ab63a6834e753ee30fd80d781b098b9f1cb8ef1b4af8b2ee19d98d867c1c552c",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    },
+    {
+      "category": "pistol",
+      "svg": "pistol.svg",
+      "png": "content/inventory-icons/vector-draft/png/pistol.png",
+      "sha256": "47892c84404e1a58768e27e972d67ca3cc4acfb8fbebae562166f9cf872a4a71",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    },
+    {
+      "category": "binoculars",
+      "svg": "binoculars.svg",
+      "png": "content/inventory-icons/vector-draft/png/binoculars.png",
+      "sha256": "c381c941b6c2926d50c0a34f265bc57b6d0f8a269ad65aee6e14d83c52eef927",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    },
+    {
+      "category": "nvg",
+      "svg": "nvg.svg",
+      "png": "content/inventory-icons/vector-draft/png/nvg.png",
+      "sha256": "f9b02756c3976a7836c012e8ad1eb645dc7cbd9b130e929a2543c7c04945c694",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    },
+    {
+      "category": "magazine",
+      "svg": "magazine.svg",
+      "png": "content/inventory-icons/vector-draft/png/magazine.png",
+      "sha256": "d054f4e833259d8980cb557aed42bb6789995aebdc5765d8cc7ff9d8f884e7ca",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    },
+    {
+      "category": "curved_magazine",
+      "svg": "curved_magazine.svg",
+      "png": "content/inventory-icons/vector-draft/png/curved_magazine.png",
+      "sha256": "1542640ce9d9a0d92a46432c25e78c2be753d56963ca53b61225630865f6f260",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    },
+    {
+      "category": "grenade",
+      "svg": "grenade.svg",
+      "png": "content/inventory-icons/vector-draft/png/grenade.png",
+      "sha256": "fe8431a3f995d4128e65cfa659d779e53a283d0fb14ecd781bffe3881c5da855",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    },
+    {
+      "category": "smoke",
+      "svg": "smoke.svg",
+      "png": "content/inventory-icons/vector-draft/png/smoke.png",
+      "sha256": "aa4d2d2355ceb6b9239919dc9dbc0806f0cc87f0074ec49dd8b89efbaf40a276",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    },
+    {
+      "category": "satchel",
+      "svg": "satchel.svg",
+      "png": "content/inventory-icons/vector-draft/png/satchel.png",
+      "sha256": "55fb03d598b0bc3f350625bd169c490116d2f8b3eddda1fe741adeecd7b8f2e6",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    },
+    {
+      "category": "mine",
+      "svg": "mine.svg",
+      "png": "content/inventory-icons/vector-draft/png/mine.png",
+      "sha256": "0715a30f345a14c4e4fc49d656505acc6515d7cc204ea21a6bf39527f4ea7cb3",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    },
+    {
+      "category": "rocket",
+      "svg": "rocket.svg",
+      "png": "content/inventory-icons/vector-draft/png/rocket.png",
+      "sha256": "db7b292e451f9cc46807505f1200c5ec93cf33175f31458a42ff8bb68eb4d42e",
+      "dimensions": [
+        512,
+        512
+      ],
+      "transparency": "RGBA"
+    }
+  ]
+}

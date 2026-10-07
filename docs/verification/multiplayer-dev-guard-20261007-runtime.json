@@ -1,0 +1,12 @@
+{
+  "ping": {
+    "ok": true
+  },
+  "multiplayerRejection": {
+    "ok": false,
+    "error": "developer harness disabled in multiplayer"
+  },
+  "passed": true,
+  "stages": [],
+  "installed": "codex/private-release-prep-20261006 15c4bc08+dirty 2026-10-07_18:15 deploy-ps1"
+}

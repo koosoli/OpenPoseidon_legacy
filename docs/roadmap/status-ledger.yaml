@@ -80,14 +80,23 @@ execution:
       performance claim. Custom mod intro and missing Desert Island fallback retained.
   physical_inventory_review_checkpoint:
     date: '2026-10-07'
-    state: SOURCE_REVIEWED_NOT_PORTED
-    evidence: docs/roadmap/decisions/PHYSICAL-INVENTORY-REVIEW-20261007.md
+    state: SELECTIVE_SP_PORT_INSTALLED_SMOKE_PASSED_MP_CLASSIC_GEAR
+    source_commits: [d164ad3b, 15c4bc08]
+    evidence: docs/verification/physical-inventory-and-mp-guard-20261007.md
+    source_receipt: docs/roadmap/decisions/PHYSICAL-INVENTORY-SOURCE-20261007.md
     note: >-
-      Owner-supplied older CWR snapshot has identical GPL3-or-later/Section7 license.
-      Inventory code can be selectively ported; required UI config and optional
-      transparent icon pack are absent. Proposed managed default-content PBO with
-      stock-icon/labelled-tile and classic-UI fallbacks; existing fallback has a
-      missing-keyed-icon layout defect. No foreign binaries or gameplay imported.
+      Eight donated GPL3/Section7 sources ported; O/K bindings with selective
+      profile migration, built-in UI, stock-icon/label fallback and user settings.
+      Build, 11 profile cases and 6 command cases pass. Installed SP open/drop/
+      pickup/settings/reopen/stock-icon smoke passed with item-count conservation.
+      Optional 3D preview omitted after HDR/UI mismatch. MP keeps classic Gear;
+      developer overlay/Zeus/console/legacy shortcuts/sticky cheats and harness
+      mutations are gated by live network mode. Private hosted Everon harness
+      rejection passed; modified-client anti-cheat and full MP match not claimed.
+      Shipped own content sources/generators versioned. Sixteen original realistic
+      text-generated PNG icons and prepared PAAs added with prompts/hashes;
+      Build/Deploy carry the loose runtime folder. Final icon runtime check pending.
+      Exhaustive transfers/mod classes/save-load remain unverified.
   local_map_editor_checkpoint:
     state: INSTALLED_STRATIS_AND_REFORGER_EVERON_EDITOR_ROUNDTRIPS_PASSED
     installed_source_commit: ed1c10a6

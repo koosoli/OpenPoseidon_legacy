@@ -16,11 +16,31 @@ Python requirement. For an already built tool:
 ./scripts/Build-DefaultContent.ps1
 ```
 
-Output is `dist/x64-win-<configuration>/@OP_VisualUpgrade`, containing mod.json
+Output is `dist/x64-win-<configuration>/Mods/@OP_VisualUpgrade`, containing mod.json
 and AddOns/op_ground_materials.pbo, plus `@OP_VehicleActions` with mod.json and
 AddOns/op_jeep_actions.pbo. Deploy.ps1 copies these own files and verifies
 their SHA256; it does not modify Dta/Data.pbo, LandText.pbo, original models or WRP.
 Source-only roughness/height/soil artifacts are not claimed as bound maps.
+
+All engine-owned runtime content has versioned sources here, under `content/menu`
+or `assets/ui` and `assets/inventory`, plus the generators in `scripts/default-content`. Deploy installs
+the generated PBOs, their mod.json files, menu mission and logo alongside the
+matching executable/DLL. Distribute that complete staged layout; the two binaries
+alone do not include the material/animation packs. Generated PBOs belong in the
+release archive and are reproducible from these sources, rather than requiring
+unversioned files on a developer's machine. Original retail/addon data remains
+the player's separately installed content.
+
+The physical inventory (October 7) has a compiled fallback UI and 16 original
+realistic equipment-category icons. Their source PNGs and prepared runtime PAAs
+are versioned in `assets/inventory`; prompts and hashes are recorded under
+`content/inventory-icons`. Build stages the PAAs in `dist/.../assets/inventory`
+and Deploy installs and verifies every file. Ship this folder alongside the
+exe/DLL. No extra download or AI connection is needed. Missing categories fall
+back to installed game/addon pictures or labelled tiles. Optional `invicons`
+artwork from third parties is not bundled or required.
+Inventory settings and icon tuning are created in the writable user directory;
+these personal files are not release assets and must not be committed.
 VehicleActions includes six reproducible own RTMs and an exact Jeep cargo-0
 mapping using the version-3 personal primary bullet weapon family. Legacy
 version-1/2 profiles retain explicit weapon-name restrictions. Family eligibility

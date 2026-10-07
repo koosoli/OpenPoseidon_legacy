@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 256 256">
+<title>Original Open Poseidon Engine inventory icon</title>
+<metadata>GPL-3.0-or-later; original vector geometry, no game-derived artwork.</metadata>
+<polygon points="20,114 63,111 83,120 74,137 54,135 21,148" fill="#3d4b50" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="26,121 52,120 63,123" fill="none" stroke="#69787d" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="66,137 76,136 73,145 64,146" fill="#20272b" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="81,128 95,130 87,154 77,152" fill="#3d4b50" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="91,133 107,133 108,143 95,143" fill="#69787d" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="96" y="134" width="8" height="5" rx="2" fill="#20272b" stroke="#20272b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="66" y="111" width="73" height="19" rx="3" fill="#69787d" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="73,107 117,107 125,112 70,112" fill="#3d4b50" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="74,115 133,115" fill="none" stroke="#bac8c9" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="103" y="119" width="25" height="5" rx="2" fill="#3d4b50" stroke="#20272b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+<ellipse cx="85.5" cy="120.5" rx="2.5" ry="2.5" fill="#bac8c9" stroke="#20272b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="135" y="113" width="40" height="15" rx="3" fill="#3d4b50" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="142,116 142,124" fill="none" stroke="#69787d" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="150,116 150,124" fill="none" stroke="#69787d" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="158,116 158,124" fill="none" stroke="#69787d" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="166,116 166,124" fill="none" stroke="#69787d" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="175" y="117" width="40" height="5" rx="0" fill="#69787d" stroke="#20272b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="212" y="115" width="13" height="9" rx="0" fill="#3d4b50" stroke="#20272b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="166" y="105" width="5" height="13" rx="0" fill="#3d4b50" stroke="#20272b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="160,106 178,106 170,102" fill="#69787d" stroke="#20272b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="113,129 128,129 124,165 110,164" fill="#3d4b50" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="117,137 115,151" fill="none" stroke="#69787d" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

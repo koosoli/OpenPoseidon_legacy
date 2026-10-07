@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 256 256">
+<title>Original Open Poseidon Engine inventory icon</title>
+<metadata>GPL-3.0-or-later; original vector geometry, no game-derived artwork.</metadata>
+<polygon points="91,119 133,119 122,176 91,174 100,138 77,134" fill="#3d4b50" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="102,142 123,143 116,168 97,167" fill="#6b7652" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="102,149 117,149" fill="none" stroke="#69787d" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="102,156 117,156" fill="none" stroke="#69787d" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="102,163 117,163" fill="none" stroke="#69787d" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="82,96 175,96 177,114 139,116 131,126 84,126" fill="#69787d" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="88" y="93" width="87" height="15" rx="3" fill="#3d4b50" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="96,97 167,97" fill="none" stroke="#bac8c9" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="94,102 94,113" fill="none" stroke="#69787d" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="100,102 100,113" fill="none" stroke="#69787d" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="106,102 106,113" fill="none" stroke="#69787d" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="159" y="88" width="9" height="8" rx="1" fill="#69787d" stroke="#20272b" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="133,121 152,121 150,140 126,140" fill="#69787d" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="135" y="125" width="11" height="10" rx="3" fill="#20272b" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

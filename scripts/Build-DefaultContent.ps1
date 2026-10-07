@@ -36,6 +36,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Ground material PBO packaging failed' }
 Copy-Item -LiteralPath "$source/mod.json" -Destination "$pack/mod.json" -Force
 Write-Host "Staged road and terrain integration package: $pack"
 & "$PSScriptRoot/Build-VehicleActions.ps1" -Preset $Preset -Python $Python
+& "$PSScriptRoot/Build-InventoryIcons.ps1" -Preset $Preset
 $menuStage = Join-Path $dist 'assets/menu/RoughSea.Intro'
 New-Item -ItemType Directory -Force $menuStage | Out-Null
 foreach ($name in @('mission.sqm','init.sqs')) {

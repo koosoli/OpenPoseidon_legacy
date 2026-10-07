@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 256 256">
+<title>Original Open Poseidon Engine inventory icon</title>
+<metadata>GPL-3.0-or-later; original vector geometry, no game-derived artwork.</metadata>
+<ellipse cx="129.0" cy="140.0" rx="40.0" ry="51.0" fill="#6b7652" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="112" y="70" width="34" height="30" rx="6" fill="#3d4b50" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="134,75 168,84 176,155 165,157 157,94 132,87" fill="#69787d" stroke="#20272b" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<ellipse cx="106.0" cy="77.5" rx="15.0" ry="11.5" fill="none" stroke="#bac8c9" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="96,113 154,113" fill="none" stroke="#46533a" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="92,134 154,134" fill="none" stroke="#46533a" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="95,155 154,155" fill="none" stroke="#46533a" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="104,175 154,175" fill="none" stroke="#46533a" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="116,100 111,181" fill="none" stroke="#a8b28a" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

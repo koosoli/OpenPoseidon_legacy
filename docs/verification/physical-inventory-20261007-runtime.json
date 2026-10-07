@@ -1,0 +1,45 @@
+{
+  "stages": [
+    {
+      "name": "01_open",
+      "display": "62020",
+      "magazines": "[\"HandGrenade\",\"HandGrenade\"]",
+      "weapons": "[]"
+    },
+    {
+      "name": "02_drop",
+      "display": "62020",
+      "magazines": "[\"HandGrenade\"]",
+      "weapons": "[]"
+    },
+    {
+      "name": "03_pickup",
+      "display": "62020",
+      "magazines": "[\"HandGrenade\",\"HandGrenade\"]",
+      "weapons": "[]"
+    },
+    {
+      "name": "04_settings",
+      "display": "62020",
+      "magazines": "[\"HandGrenade\",\"HandGrenade\"]",
+      "weapons": "[]"
+    },
+    {
+      "name": "05_reopen",
+      "display": "62020",
+      "magazines": "[\"HandGrenade\",\"HandGrenade\"]",
+      "weapons": "[]"
+    },
+    {
+      "name": "06_stock_weapon_icons",
+      "display": "62020",
+      "magazines": "[\"M16\",\"M16\"]",
+      "weapons": "[\"M16\"]"
+    }
+  ],
+  "afterDrop": "[\"HandGrenade\"]",
+  "installed": "codex/private-release-prep-20261006 15c4bc08+dirty 2026-10-07_18:15 deploy-ps1",
+  "afterPickup": "[\"HandGrenade\",\"HandGrenade\"]",
+  "before": "[\"HandGrenade\",\"HandGrenade\"]",
+  "passed": true
+}

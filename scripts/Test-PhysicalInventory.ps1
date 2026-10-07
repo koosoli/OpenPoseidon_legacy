@@ -1,7 +1,7 @@
 <# Installed single-player inventory without a custom invicons asset pack.
    Run under with-game-lock.sh. Uses isolated settings, exits only its own process. #>
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$ExpectedCommit)
+param([Parameter(Mandatory)][string]$ExpectedCommit,[switch]$Multiplayer)
 $ErrorActionPreference = 'Stop'
 if (!$env:LOCK_OWNER) { throw 'Game lock required' }
 $root = Split-Path $PSScriptRoot -Parent
@@ -14,6 +14,14 @@ $mission = Join-Path $out 'inventory.eden'
 $null = New-Item -ItemType Directory -Path $mission -Force
 Copy-Item -LiteralPath (Join-Path $root 'tests/perf/missions/perf_field.eden/mission.sqm') -Destination $mission
 $receipt = @{installed=$stamp; passed=$false; stages=@()}
+$receipt.runtime_icons=@()
+foreach ($icon in (Get-Content (Join-Path $root 'content/inventory-icons/manifest.json') -Raw | ConvertFrom-Json).icons) {
+    $path=Join-Path $game $icon.runtime_paa
+    if (!(Test-Path -LiteralPath $path) -or (Get-FileHash -LiteralPath $path).Hash.ToLowerInvariant() -cne $icon.runtime_sha256) {
+        throw "Installed original icon differs: $($icon.category)"
+    }
+    $receipt.runtime_icons+=@{category=$icon.category;sha256=$icon.runtime_sha256}
+}
 $old = @{}; $p=$null; $client=$null; $writer=$null
 foreach ($name in @('POSEIDON_USER_DIR','POSEIDON_CACHE_DIR','POSEIDON_USER_CONTENT_DIR')) {
     $old[$name] = [Environment]::GetEnvironmentVariable($name,'Process')
@@ -48,7 +56,8 @@ try {
     [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
     $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0); $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
     $log=Join-Path $out 'engine.log'; $stderr=Join-Path $out 'stderr.log'
-    $args=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--test-world-hour','12','--log-file',('"'+$log+'"'))
+    $args=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--harness',"$port",'--private','--log-file',('"'+$log+'"'))
+    if (!$Multiplayer) { $args+=@('--test-mission',('"'+$mission+'"'),'--test-world-hour','12') }
     $p=Start-Process (Join-Path $game 'OpenPoseidon.exe') -WorkingDirectory $game -WindowStyle Hidden -ArgumentList $args -RedirectStandardOutput (Join-Path $out 'stdout.log') -RedirectStandardError $stderr -PassThru
     $until=[DateTime]::UtcNow.AddSeconds(180)
     do {
@@ -60,6 +69,33 @@ try {
     $stream=$client.GetStream(); $stream.ReadTimeout=30000
     $reader=[IO.StreamReader]::new($stream)
     $writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false)); $writer.AutoFlush=$true
+    if ($Multiplayer) {
+        Display 0; Exec 'triClick 105'; Display 8; Exec 'triClick 104'; Display 17
+        Require ((Value 'triSelectListByData [101,"Eden"]') -ceq 'true') 'Everon server island missing'
+        Exec 'triSelectList [102,1]'; Exec 'triClick 1'; Display 67
+        Exec 'triSendText [103,"InventoryGuardTest"]'; Exec 'triClick 1'; Display 68
+        Exec 'triClick 1'
+        $blocked=$false; $until=[DateTime]::UtcNow.AddSeconds(90)
+        do {
+            $writer.WriteLine('{"cmd":"eval","code":"triDisplay"}')
+            do { $line=$reader.ReadLine(); Require $line 'Harness disconnected'; $probe=$line|ConvertFrom-Json } while ($null -eq $probe.ok)
+            $line|Add-Content (Join-Path $out 'harness.jsonl')
+            if (!$probe.ok -and $line.Contains('developer harness disabled in multiplayer')) { $blocked=$true; break }
+            Require $probe.ok $line
+            $display=([string]$probe.result).Trim('"')
+            if ($display -eq '70') { Exec 'triMpAssignSelfSlot "WEST:1"'; Exec 'triClick 1' }
+            elseif ($display -eq '52') { Exec 'triClick 1' }
+            Start-Sleep -Milliseconds 300
+        } while ([DateTime]::UtcNow -lt $until)
+        Require $blocked 'Developer harness was not rejected in the hosted network world'
+        $receipt.multiplayerRejection=$probe
+        $receipt.ping=Send @{cmd='ping'}
+        $null=Send @{cmd='exit'}
+        Require ($p.WaitForExit(20000) -and $p.ExitCode -eq 0) 'Normal MP exit failed'
+        Require (!(Select-String -Path @($log,$stderr) -Pattern 'UNHANDLED EXCEPTION|Validation Error|DeviceLost|panicked at|wgr_create failed' -Quiet)) 'MP runtime error'
+        Require ((Get-Content (Join-Path $game 'DEPLOYED-FROM.txt') -Raw).Trim() -ceq $stamp) 'Installed MP pair changed'
+        $receipt.passed=$true; Write-Host ('Evidence: '+$out); return
+    }
     while ((Value 'triSceneReady') -cne 'OK') { Require ([DateTime]::UtcNow -lt $until) 'Scene deadline'; Start-Sleep -Milliseconds 250 }
     Exec 'player allowDamage false;removeAllWeapons player;player addMagazine "HandGrenade";player addMagazine "HandGrenade";0 setRain 0;0 setFog 0;setAccTime 1'
     $before=Value 'magazines player'
@@ -77,6 +113,8 @@ try {
     Key 14; Snap '04_settings'; Key 14
     Key 41; Display 46
     Key 18; Display 62020; Snap '05_reopen'; Key 18; Display 46
+    Exec 'removeAllWeapons player;player addMagazine "M16";player addMagazine "M16";player addWeapon "M16"'
+    Key 18; Display 62020; Snap '06_weapon_icons'; Key 41; Display 46
     $receipt.before=$before; $receipt.afterDrop=$afterDrop; $receipt.afterPickup=$afterPickup
     $null=Send @{cmd='exit'}
     Require ($p.WaitForExit(20000) -and $p.ExitCode -eq 0) 'Normal exit failed'

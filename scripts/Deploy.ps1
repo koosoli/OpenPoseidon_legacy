@@ -212,6 +212,14 @@ $menuLogo = Join-Path $distDir 'assets/ui/openposeidon_logo.paa'
 if (Test-Path -LiteralPath $menuLogo) {
     $contentPayload += @{Source=$menuLogo; Relative='assets/ui/openposeidon_logo.paa'}
 }
+foreach ($name in @('rifle','ak_rifle','scoped_rifle','smg','machinegun','launcher','pistol','binoculars','nvg','magazine','curved_magazine','grenade','smoke','satchel','mine','rocket')) {
+    $relative = 'assets/inventory/' + $name + '.paa'
+    $source = Join-Path $distDir $relative
+    if (!(Test-Path -LiteralPath $source) -or (Get-Item -LiteralPath $source).Length -eq 0) {
+        throw "Missing own inventory icon: $source. Run Build.ps1."
+    }
+    $contentPayload += @{Source=$source; Relative=$relative}
+}
 foreach ($pack in @(
     @{Folder='Mods/@OP_VisualUpgrade'; Archive='op_ground_materials.pbo'},
     @{Folder='Mods/@OP_VehicleActions'; Archive='op_jeep_actions.pbo'})) {

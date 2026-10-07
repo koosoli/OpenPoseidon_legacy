@@ -1,6 +1,6 @@
 # Physical inventory feasibility review — 2026-10-07
 
-State: **SELECTIVELY_PORTED / BUILD_PASSED / INSTALLED_ACCEPTANCE_PENDING**.
+State: **SELECTIVELY_PORTED / INSTALLED_SP_SMOKE_PASSED / MP_CLASSIC_GEAR**.
 
 Reviewed the owner-supplied local folder
 `inspiration/CWR-Physical Inventory/CWR-Physical Inventory` in the main checkout.
@@ -74,6 +74,8 @@ stock gear pictures or labelled tiles remain usable. Settings live in the user
 directory. O/K are configurable with selective v5 profile migration. Multiplayer
 keeps classic Gear because donated direct transfers need networking work.
 The source receipt is [PHYSICAL-INVENTORY-SOURCE-20261007.md](PHYSICAL-INVENTORY-SOURCE-20261007.md).
-Build and 11 controls-profile tests passed; installed transaction acceptance is
-pending. Missing-icon and transfer acceptance must be established in the installed
-game before reporting runtime completion.
+Build, 11 controls-profile tests, six developer-command tests and installed SP
+pickup/drop/open/settings/icon smoke tests passed. A private hosted Everon session
+rejects developer harness commands. See [acceptance](../../verification/physical-inventory-and-mp-guard-20261007.md).
+The optional 3D character preview is omitted after exposing an HDR/UI pass mismatch;
+save/load, all mod classes and the full transfer matrix remain unverified.

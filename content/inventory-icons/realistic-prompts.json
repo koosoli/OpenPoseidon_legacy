@@ -1,0 +1,103 @@
+{
+  "generator": "Built-in image_gen tool",
+  "referenced_images": [],
+  "transparent_background": true,
+  "icons": [
+    {
+      "category": "rifle",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one classic late-20th-century military assault rifle, fixed polymer stock, straight box magazine, iron sights, dark parkerized steel and black polymer, exact left side profile muzzle to right. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/rifle.png",
+      "paa": "assets/inventory/rifle.paa"
+    },
+    {
+      "category": "ak_rifle",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one classic wood-furniture military assault rifle with curved steel magazine, dark blued steel, warm worn walnut stock and handguard, exact left side profile muzzle to right. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/ak_rifle.png",
+      "paa": "assets/inventory/ak_rifle.paa"
+    },
+    {
+      "category": "scoped_rifle",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one long military marksman rifle with wooden stock, telescopic optical scope and small box magazine, exact left side profile muzzle to right. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/scoped_rifle.png",
+      "paa": "assets/inventory/scoped_rifle.paa"
+    },
+    {
+      "category": "smg",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one compact black military submachine gun with short barrel, simple collapsible stock and straight magazine, exact left side profile muzzle to right. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/smg.png",
+      "paa": "assets/inventory/smg.paa"
+    },
+    {
+      "category": "machinegun",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one belt-fed general purpose military machine gun with olive ammunition pouch and folded bipod, dark steel and black furniture, exact left side profile muzzle to right. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/machinegun.png",
+      "paa": "assets/inventory/machinegun.paa"
+    },
+    {
+      "category": "launcher",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one olive drab shoulder-fired anti-tank launch tube with small simple sight and black end caps, exact left side profile muzzle to right. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/launcher.png",
+      "paa": "assets/inventory/launcher.paa"
+    },
+    {
+      "category": "pistol",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one simple black steel service pistol with dark rubber grips, exact left side profile muzzle to right. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/pistol.png",
+      "paa": "assets/inventory/pistol.paa"
+    },
+    {
+      "category": "binoculars",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one pair of traditional military field binoculars, olive drab rubber and black metal with realistic coated glass, front three-quarter view showing both lenses. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/binoculars.png",
+      "paa": "assets/inventory/binoculars.paa"
+    },
+    {
+      "category": "nvg",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one pair of military dual tube night vision goggles, olive drab metal and black rubber eyecups with muted green optical glass, front three-quarter view. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/nvg.png",
+      "paa": "assets/inventory/nvg.paa"
+    },
+    {
+      "category": "magazine",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one detached straight steel rifle ammunition box magazine, subtle stamped ribs, dark parkerized steel, slight three-quarter view. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/magazine.png",
+      "paa": "assets/inventory/magazine.paa"
+    },
+    {
+      "category": "curved_magazine",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one detached curved steel assault rifle ammunition magazine, realistic stamped ribs and feed lips, dark blued steel, slight three-quarter view. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/curved_magazine.png",
+      "paa": "assets/inventory/curved_magazine.paa"
+    },
+    {
+      "category": "grenade",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one olive drab military fragmentation hand grenade with steel safety lever and pull ring, upright three-quarter view. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/grenade.png",
+      "paa": "assets/inventory/grenade.paa"
+    },
+    {
+      "category": "smoke",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one plain olive drab cylindrical military smoke grenade with steel lever and pull ring, no printed markings, upright three-quarter view. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/smoke.png",
+      "paa": "assets/inventory/smoke.paa"
+    },
+    {
+      "category": "satchel",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one small olive canvas military demolition satchel with straps, buckles and realistic stitched seams, closed bag, front three-quarter view. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/satchel.png",
+      "paa": "assets/inventory/satchel.paa"
+    },
+    {
+      "category": "mine",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one circular flat olive drab anti-tank mine with central pressure plate, weathered painted steel, three-quarter view. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/mine.png",
+      "paa": "assets/inventory/mine.paa"
+    },
+    {
+      "category": "rocket",
+      "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one single olive drab anti-tank rocket round with conical warhead, slender dark shaft and folded tail fins, horizontal exact side profile tip to right. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
+      "png": "assets/inventory/rocket.png",
+      "paa": "assets/inventory/rocket.paa"
+    }
+  ]
+}
