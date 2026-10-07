@@ -1292,5 +1292,9 @@
     "README.md"
   ],
   "reachable_release_commits": 2,
-  "remote_readback_files": 4185
+  "remote_readback_files": 4185,
+  "remote_readback_revision": "d7ec899e0973405fc9c5f06663e6674a85d90380",
+  "remote_readback_tree": "b86dfe08dd17a87c2b7d8caaed8b9c79a55bba2c",
+  "remote_readback_method": "Completed remote main fetch into separate readback checkout, followed by SHA-256 and Git-mode comparison of all4185 files",
+  "visibility_readback": "GitHub repository metadata reports private and main after upload"
 }
