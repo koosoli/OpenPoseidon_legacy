@@ -370,9 +370,11 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
         {
             // The curve steepens with altitude: precise placement close to the
             // ground, then rapidly increasing travel speed high above the map.
-            float groundY = GLandscape->SurfaceYAboveWater(Position()[0], Position()[2]);
+            const bool earthPreview=EarthStreaming::Enabled();
+            float groundY = earthPreview ? 0.0f : GLandscape->SurfaceYAboveWater(Position()[0], Position()[2]);
             float altitude = fmax(Position()[1] - groundY, 0.0f);
             speedScale = fmin(1.0f + altitude * 0.03f + altitude * altitude * 0.00002f, 64.0f);
+            if (earthPreview) speedScale=std::max(speedScale,std::min(altitude/80.0f,250000.0f));
 
             // Shift is an absolute two-times multiplier for Zeus flight: it
             // accelerates sideways, vertical, and forward movement equally.

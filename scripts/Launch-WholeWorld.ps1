@@ -126,7 +126,7 @@ try {
     $argv = @('--render=wgpu','--dev','--width','1600','--height','900','--vd','20000',
         '--test-mission',$mission,'--test-world',$world,'--test-world-freefly','6400','6400',
         $Altitude.ToString('R',[Globalization.CultureInfo]::InvariantCulture),'30',
-        $(if($Globe){'-90'}else{'-20'}),'--test-world-hour','12')
+        $(if($Globe){'-89.9'}else{'-20'}),'--test-world-hour','12')
     if (!$Fullscreen) { $argv += '--window' }
     if ($HarnessPort) { $argv += @('--harness',"$HarnessPort") }
     if (!$LogFile) { $LogFile = Join-Path $CacheDirectory 'earth-preview.log' }

@@ -8044,6 +8044,18 @@ void ProcessEvent(const SDL_Event& event)
             const float deltaY = event.wheel.y * step;
             Defer([deltaY] { MoveZeusSelectionVertical(deltaY); });
         }
+        else if (event.type == SDL_EVENT_MOUSE_WHEEL && EarthStreaming::Enabled() && event.wheel.y != 0.0f)
+        {
+            s_zeusConsumeMouseEvent = true;
+            const float steps=event.wheel.direction==SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
+            Defer([steps] {
+                if (!s_zeusCamera) return;
+                Vector3 position=s_zeusCamera->Position();
+                position[1]=EarthStreaming::ZoomAltitude(position[1],steps);
+                s_zeusCamera->SetPosition(position);
+                s_zeusCamera->ResetTargets();
+            });
+        }
         else if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat)
         {
             const bool ctrlDown = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
@@ -8337,7 +8349,7 @@ bool SetFreeFlyTestPose(const char* coordinates)
         !std::isfinite(pose.x) || !std::isfinite(pose.z) || !std::isfinite(pose.altitude) ||
         !std::isfinite(pose.azimuth) || !std::isfinite(pose.elevation) ||
         std::abs(pose.x) > 1000000 || std::abs(pose.z) > 1000000 ||
-        std::abs(pose.altitude) > (EarthStreaming::Enabled() ? 30000000.0f : 1000000.0f))
+        std::abs(pose.altitude) > (EarthStreaming::Enabled() ? EarthStreaming::OrbitAltitudeLimit : 1000000.0f))
         return false;
     snprintf(s_zeusGotoBuf, sizeof(s_zeusGotoBuf), "%s", coordinates);
     GoToZeusCoordinates();

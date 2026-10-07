@@ -2,6 +2,8 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
+#include <cmath>
 
 namespace Poseidon::EarthStreaming
 {
@@ -15,4 +17,11 @@ inline bool Enabled()
     return enabled;
 }
 constexpr float CoordinateLimit = 500000.0f;
+constexpr float OrbitAltitudeLimit = 30000000.0f;
+inline float ZoomAltitude(float altitude, float wheelSteps)
+{
+    if (!std::isfinite(altitude) || !std::isfinite(wheelSteps)) return 4500.0f;
+    return std::clamp((altitude+1000.0f)*std::pow(0.72f,std::clamp(wheelSteps,-20.0f,20.0f))-1000.0f,
+        500.0f,OrbitAltitudeLimit);
+}
 }

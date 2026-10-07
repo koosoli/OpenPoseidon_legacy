@@ -1,4 +1,5 @@
 #include "WgpuRenderer/EarthCoordinates.hpp"
+#include "Poseidon/World/Terrain/EarthStreamingMode.hpp"
 #include <cassert>
 #include <iostream>
 
@@ -62,5 +63,10 @@ int main()
     assert(std::abs(up.x)<1e-12 && std::abs(up.y-1)<1e-12 && std::abs(up.z)<1e-12);
     const auto opposite=GlobeNormal(46.6,8.1,-46.6,188.1);
     assert(std::abs(opposite.y+1)<1e-12);
+    using Poseidon::EarthStreaming::ZoomAltitude;
+    assert(ZoomAltitude(18000000,1)<18000000 && ZoomAltitude(4500,-1)>4500);
+    assert(ZoomAltitude(500,1)==500 && ZoomAltitude(30000000,-1)==30000000);
+    assert(ZoomAltitude(NAN,1)==4500 && ZoomAltitude(4500,NAN)==4500);
+    assert(std::abs(ZoomAltitude(ZoomAltitude(4500,1),-1)-4500)<.01f);
     std::cout<<"Earth coordinates: origin, orientation, seams, elevation, polar guards, curved horizon coverage PASS\n";
 }
