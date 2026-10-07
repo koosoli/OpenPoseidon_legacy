@@ -16,6 +16,17 @@ Our thanks to the original Operation Flashpoint / Cold War Crisis team, whose wo
 on the **Poseidon** engine — the foundation of Bohemia's later *Real Virtuality*
 and *Enfusion* technology — is what you are reading here.
 
+## Community engine lineage
+
+Open Poseidon Engine is based on **[paavohuhtala/CWR-CE](https://github.com/paavohuhtala/CWR-CE)**,
+Paavo Huhtala's fork of **[ofpisnotdead-com/CWR-CE](https://github.com/ofpisnotdead-com/CWR-CE)**,
+the community continuation maintained by **Retro** and its contributors. That
+project builds on Bohemia Interactive's original Poseidon/CWR source release.
+
+We thank Paavo Huhtala, Retro and all upstream contributors for the engine work
+on which this fork builds. This lineage credit complements the individual
+ported-code and dependency credits below.
+
 ## The community
 
 Thanks to the *Operation Flashpoint* / *Arma* modding and content-creation
