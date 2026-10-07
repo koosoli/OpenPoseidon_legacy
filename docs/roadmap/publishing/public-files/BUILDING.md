@@ -5,14 +5,14 @@
 Install Git, CMake 3.25 or newer, Ninja, ccache, LLVM with clang-cl, Visual Studio
 C++ build tools and a Windows 10/11 SDK. Install stable Rust supporting the
 minimum version specified in the Cargo manifests. Content generation also uses
-Python 3 and Pillow. Set `VCPKG_ROOT` to a vcpkg checkout; the manifest baseline
+Python 3, Pillow and NumPy. Set `VCPKG_ROOT` to a vcpkg checkout; the manifest baseline
 and repository overlays select the dependencies.
 
 From the source root in PowerShell:
 
 ```powershell
 $env:VCPKG_ROOT = 'C:\dev\vcpkg'
-python -m pip install Pillow
+python -m pip install Pillow numpy
 .\scripts\Build.ps1 -Preset win-x64-clang-rwdi -Target PoseidonGame
 ```
 
