@@ -22,24 +22,10 @@ const ParamEntry* InventoryDisplayResource()
         display->Add("idd", 62020);
         display->Add("movingEnable", 0);
         display->AddArray("controls");
-        ParamClass* objects = display->AddClass("objects");
-        ParamClass* preview = objects->AddClass("SoldierPreview");
-        preview->Add("type", CT_OBJECT);
-        preview->Add("idc", IDC_INVENTORY_PREVIEW);
-        // Start shapeless; CInventoryPreview::SetSubject uses the player's own
-        // shape. Loading that shape here would mark the shared world model as a
-        // cockpit and disable its sun lighting in ControlObject's constructor.
-        preview->Add("model", RString(""));
-        preview->Add("scale", 0.8f);
-        const auto vector = [&](const char* name, float x, float y, float z)
-        {
-            ParamEntry* values = preview->AddArray(name);
-            for (float value : {x, y, z})
-                values->AddValue(value);
-        };
-        vector("position", 0.0f, -0.65f, 1.7f);
-        vector("direction", 0.0f, 0.0f, -1.0f);
-        vector("up", 0.0f, 1.0f, 0.0f);
+        // A live world shape cannot be rendered safely as a legacy ControlObject:
+        // it selects the HDR world pipeline inside the LDR UI pass. Keep the
+        // native scene visible between the panes until a separate preview pass
+        // exists, rather than modifying shared soldier geometry/material flags.
         return display;
     }();
     return resource;
