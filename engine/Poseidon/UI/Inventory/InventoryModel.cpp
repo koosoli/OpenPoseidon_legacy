@@ -2562,7 +2562,7 @@ InvTransferResult InventoryModel::DropToTarget(const InvCell &from,
             if (target->AddMagazineCargo(m, /*deleteWhenFull=*/true) < 0)
             {
                 for (int added = 0; added < i; ++added)
-                    target->RemoveMagazineCargo(mags[added]);
+                    target->RemoveMagazineCargo(const_cast<Magazine *>(mags[added]));
                 return InvTransferResult::Unavailable;
             }
         }
