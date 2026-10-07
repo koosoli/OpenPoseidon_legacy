@@ -10,6 +10,7 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Scene/Camera/AerialRange.hpp>
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/World/World.hpp>
@@ -2139,6 +2140,18 @@ void Landscape::Draw(Scene& scene)
         GEngine->FlushQueues();
 
         camera.SetClipRange(oldNear, oldFar);
+    }
+
+    // Earth preview has its own rolling render window. Do not derive an empty
+    // finite-map rectangle, or create off-map segment/geography cache entries.
+    if (EarthStreaming::Enabled())
+    {
+        if (ITerrainRenderer* terrain = GEngine->GetTerrainRenderer())
+        {
+            GEngine->EnableReorderQueues(true);
+            terrain->DrawTerrain(scene,0,0,GetLandRange(),GetLandRange());
+        }
+        return;
     }
 
     // FAR-001. Arm the coarse ring for this frame, before the rectangle is built.

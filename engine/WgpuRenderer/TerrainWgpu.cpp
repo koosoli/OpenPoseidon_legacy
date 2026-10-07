@@ -10,6 +10,7 @@
 #include <Poseidon/AI/AIUnit.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/TerrainSatmap.hpp>
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 
 #include "CdlodDriver.hpp"
 #include "RainWaterPublication.hpp"
@@ -390,7 +391,7 @@ static bool IsTerrainPageTextureName(const char* name)
 
 TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(engine), _renderer(renderer)
 {
-    if (Earth::Enabled())
+    if (EarthStreaming::Enabled())
     {
         _earthStream = std::make_unique<EarthTerrainStream>();
         LOG_INFO(Graphics, "Earth terrain prototype enabled: 25.6km rolling window, 100m samples, freefly only");

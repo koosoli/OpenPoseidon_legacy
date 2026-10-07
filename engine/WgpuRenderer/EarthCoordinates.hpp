@@ -2,8 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
-#include <cstring>
 #include <stdexcept>
 
 namespace Poseidon::Earth
@@ -17,15 +15,6 @@ constexpr int GridSamples = 257;
 constexpr float GridMetres = 100.0f;
 constexpr float RecenterMetres = 3200.0f;
 constexpr float Anchor = 6400.0f;
-
-inline bool Enabled()
-{
-    static const bool enabled = [] {
-        const char* value = std::getenv("POSEIDON_WHOLE_WORLD");
-        return value && std::strcmp(value, "1") == 0;
-    }();
-    return enabled;
-}
 
 struct Coordinate { double latitude, longitude; };
 struct Pixel { double x, y; };

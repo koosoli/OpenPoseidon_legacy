@@ -1,4 +1,5 @@
 #include "WaterWgpu.hpp"
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/World/Terrain/WaterBodies.hpp>
 #include <sstream>
 
@@ -876,11 +877,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
 {
     // The rolling Earth heightmap is presentation-only. The finite Landscape's
     // ocean/shoreline cannot describe it, so do not draw that unrelated water.
-    static const bool earth = [] {
-        const char* value = std::getenv("POSEIDON_WHOLE_WORLD");
-        return value && std::strcmp(value, "1") == 0;
-    }();
-    if (earth) return;
+    if (EarthStreaming::Enabled()) return;
     OceanCpuSample cpuSample;
     if (_renderer == nullptr || GLandscape == nullptr)
     {

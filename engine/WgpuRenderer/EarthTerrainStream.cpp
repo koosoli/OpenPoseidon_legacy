@@ -1,4 +1,5 @@
 #include "EarthTerrainStream.hpp"
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 
 #include <curl/curl.h>
 #include <stb_image.h>
@@ -69,7 +70,8 @@ void EarthTerrainStream::Request(float x, float z)
 {
     // Bound this planar prototype before integer conversion; globe rebasing is
     // a subsequent stage. Bad camera positions must not reach indexing/math.
-    if (!std::isfinite(x) || !std::isfinite(z) || std::abs(x) > 500000 || std::abs(z) > 500000) return;
+    if (!std::isfinite(x) || !std::isfinite(z) || std::abs(x) > EarthStreaming::CoordinateLimit ||
+        std::abs(z) > EarthStreaming::CoordinateLimit) return;
     const int cx = Earth::CenterCell(x), cz = Earth::CenterCell(z);
     std::lock_guard lock(_mutex);
     if (_requested && cx == _requestX && cz == _requestZ) return;

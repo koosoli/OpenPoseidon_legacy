@@ -46,8 +46,9 @@ $data = [byte[]]::new(12 + 256*256*4 + 512*32 + 128)
 [BitConverter]::GetBytes([uint32]256).CopyTo($data,4)
 [BitConverter]::GetBytes([uint32]256).CopyTo($data,8)
 $low = [BitConverter]::GetBytes([int16]-100)
-for ($i=0;$i -lt 256*256;$i++) { $low.CopyTo($data,12+2*$i) }
+for ($i=0;$i -lt 256*256;$i++) { $low.CopyTo($data,12+2*$i); $data[12+256*256*2+2*$i]=1 }
 [Text.Encoding]::ASCII.GetBytes('landtext\mo.pac').CopyTo($data,12+256*256*4)
+[Text.Encoding]::ASCII.GetBytes('o\pt.paa').CopyTo($data,12+256*256*4+32)
 [IO.File]::WriteAllBytes($world,$data)
 [IO.File]::WriteAllText((Join-Path $mission 'mission.sqm'), @'
 version=11;

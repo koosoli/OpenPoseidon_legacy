@@ -2,7 +2,7 @@
    returns to the start, validates the upload receipts, captures rendered frames.
    Wrap in scripts/with-game-lock.sh. Stops only the process this script starts. #>
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$ExpectedCommit)
+param([Parameter(Mandatory)][string]$ExpectedCommit,[switch]$Offline)
 $ErrorActionPreference='Stop'
 if(!$env:LOCK_OWNER){throw 'Game lock required'}
 $repo=Split-Path -Parent $PSScriptRoot
@@ -15,11 +15,12 @@ $null=New-Item -ItemType Directory -Force -Path $out
 $cache=Join-Path $env:LOCALAPPDATA 'OpenPoseidon/world-stream'
 $world=& "$PSScriptRoot/Launch-WholeWorld.ps1" -PrepareOnly -CacheDirectory $cache
 $mission=Join-Path $cache 'fixture/earth-preview.abel'
-$settings=@{POSEIDON_WHOLE_WORLD='1';POSEIDON_EARTH_LATITUDE='46.6';POSEIDON_EARTH_LONGITUDE='8.1';POSEIDON_EARTH_CACHE=$cache;WGR_GRASS='0';WGR_TERRAIN_RESOURCE_REUSE='1';POSEIDON_USER_DIR=(Join-Path $out 'user')}
+$settings=@{POSEIDON_WHOLE_WORLD='1';POSEIDON_EARTH_LATITUDE='46.6';POSEIDON_EARTH_LONGITUDE='8.1';POSEIDON_EARTH_CACHE=$cache;WGR_GRASS='0';WGR_TERRAIN_RESOURCE_REUSE='1';WGR_WET_SOIL_DIAGNOSTIC='1';POSEIDON_USER_DIR=(Join-Path $out 'user')}
+if($Offline){$settings.HTTPS_PROXY='http://127.0.0.1:9';$settings.HTTP_PROXY='http://127.0.0.1:9';$settings.ALL_PROXY='http://127.0.0.1:9';$settings.NO_PROXY=''}
 $saved=@{};foreach($key in $settings.Keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process');[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
 $null=New-Item -ItemType Directory -Force -Path $env:POSEIDON_USER_DIR
 [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
-$receipt=@{installed=$stamp;views=@();passed=$false};$p=$null;$client=$null;$writer=$null
+$receipt=@{installed=$stamp;offline=[bool]$Offline;views=@();passed=$false};$p=$null;$client=$null;$writer=$null
 function Require($ok,$message){if(!$ok){throw $message}}
 function Send($cmd){$writer.WriteLine(($cmd|ConvertTo-Json -Depth 10 -Compress));do{$line=$reader.ReadLine();Require $line 'Harness disconnected';$reply=$line|ConvertFrom-Json}while($null-eq$reply.ok);Require $reply.ok $line;return $reply}
 try{
@@ -55,6 +56,22 @@ try{
  }
  $receipt.tiles=@(Get-ChildItem (Join-Path $cache 'terrarium-z10') -Filter '*.png').Count
  Require ($receipt.tiles-le256) 'Disk cache exceeds its bound'
+ if($Offline){
+  Require (!(Select-String -Path $log -Pattern 'downloads [1-9]' -Quiet)) 'Offline traversal unexpectedly downloaded data'
+  $rows=@(Select-String -Path $log -Pattern 'Earth terrain patch ').Count
+  $null=Send @{cmd='exec';code='triFreeFlyPose "100000 6400 4500 30 -20"'}
+  $deadline=[DateTime]::UtcNow.AddSeconds(20)
+  do{
+   $failed=Select-String -Path (Join-Path $out 'stderr.log') -Pattern 'retaining last completed patch' -Quiet
+   if($failed){break}
+   Require ([DateTime]::UtcNow-lt$deadline) 'Offline missing-tile failure not observed'
+   Start-Sleep -Milliseconds 250
+  }while($true)
+  Require (@(Select-String -Path $log -Pattern 'Earth terrain patch ').Count-eq$rows) 'Incomplete/offline window was published'
+  $receipt.offlineFailureObserved=$true
+  $receipt.afterFailure=Send @{cmd='frame_performance'}
+ }
+ Require (!(Select-String -Path @($log,(Join-Path $out 'stderr.log')) -Pattern 'UNHANDLED EXCEPTION|Validation Error|DeviceLost|panicked at|wgr_create failed|Critical error' -Quiet)) 'Runtime error'
  Require ((Get-Content (Join-Path $game 'DEPLOYED-FROM.txt') -Raw).Trim()-ceq$stamp) 'Installed build changed'
  $receipt.passed=$true
  Write-Host ('Earth streaming acceptance PASS: '+$out)

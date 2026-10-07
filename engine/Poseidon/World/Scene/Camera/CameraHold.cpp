@@ -14,6 +14,7 @@
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -399,6 +400,7 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
         }
 
         Vector3 position = Position() + _speed * deltaT;
+        const bool earth = EarthStreaming::Enabled();
         if (_altitudeSpeedScaling)
         {
             // Zeus is a map-level camera. Its altitude speed boost makes it
@@ -418,8 +420,10 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
             {
                 const float oldX = position[0];
                 const float oldZ = position[2];
-                saturate(position[0], 0.0f, landSize);
-                saturate(position[2], 0.0f, landSize);
+                const float lower = earth ? -EarthStreaming::CoordinateLimit : 0.0f;
+                const float upper = earth ? EarthStreaming::CoordinateLimit : landSize;
+                saturate(position[0], lower, upper);
+                saturate(position[2], lower, upper);
                 if (position[0] != oldX)
                 {
                     _speed[0] = 0.0f;
@@ -447,7 +451,7 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
         // the sea surface, so an underwater shot exports as a negative camSetPos height.
         // Sinkhole W1 (Malprave terrainHole4): inside a terrain hole it may go down to the hole's floor.
         Vector3 floorPos = position;
-        float surfY = GLandscape->CameraFloorY(floorPos, nullptr, false);
+        float surfY = earth ? -12000.0f : GLandscape->CameraFloorY(floorPos, nullptr, false);
         saturateMax(position[1], surfY + 0.05);
         Move(position);
 
