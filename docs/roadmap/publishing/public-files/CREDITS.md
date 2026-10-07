@@ -166,7 +166,7 @@ GPL-3.0-or-later with this project's same Section 7 terms. Changes include curre
 engine integration, safe transfers, user-directory settings and built-in UI/icon
 fallbacks. No donated binaries or separate game/icon assets are bundled.
 
-The 16 default category icons are original AI-generated equipment illustrations,
+The 17 default inventory icons are original AI-generated equipment illustrations,
 created from written descriptions without donor or retail-game image inputs.
 Source PNGs and runtime PAAs are versioned under assets/inventory; prompts and
 hashes are recorded in content/inventory-icons. They use the project licence.

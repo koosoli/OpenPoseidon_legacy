@@ -44,5 +44,10 @@ python scripts/default-content/generate_inventory_icons.py --check
 These commands regenerate/check only the inactive SVG and PNG vector draft, using
 Pillow. They do not regenerate the active realistic icons.
 
-Categories: rifle, ak_rifle, scoped_rifle, smg, machinegun, launcher, pistol,
+Images: m16 (dedicated M16A2), rifle, ak_rifle, scoped_rifle, smg, machinegun, launcher, pistol,
 binoculars, nvg, magazine, curved_magazine, grenade, smoke, satchel, mine, rocket.
+
+M16 now has its own identifiable image instead of the generic rifle category.
+Other mapped weapons still use category illustrations; this is not a claim of
+individual portraits for every classic or addon weapon. The classic Gear screen
+is unchanged by this inventory icon family.

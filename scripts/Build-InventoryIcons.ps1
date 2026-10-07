@@ -8,11 +8,11 @@ $root=Split-Path $PSScriptRoot -Parent
 $suffix=($Preset -split '-')[-1]
 $source=Join-Path $root 'assets/inventory'
 $stage=Join-Path $root "dist/x64-win-$suffix/assets/inventory"
-$names=@('rifle','ak_rifle','scoped_rifle','smg','machinegun','launcher','pistol','binoculars','nvg','magazine','curved_magazine','grenade','smoke','satchel','mine','rocket')
+$names=@('m16','rifle','ak_rifle','scoped_rifle','smg','machinegun','launcher','pistol','binoculars','nvg','magazine','curved_magazine','grenade','smoke','satchel','mine','rocket')
 $null=New-Item -ItemType Directory -Path $stage -Force
 foreach ($name in $names) {
     $path=Join-Path $source ($name+'.paa')
     if (!(Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -eq 0) { throw "Missing versioned inventory icon: $path" }
     Copy-Item -LiteralPath $path -Destination (Join-Path $stage ($name+'.paa')) -Force
 }
-Write-Host 'Staged 16 original inventory icons; local game/mod pictures remain fallbacks.'
+Write-Host 'Staged 17 original inventory icons; local game/mod pictures remain fallbacks.'

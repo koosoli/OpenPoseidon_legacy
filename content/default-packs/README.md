@@ -31,7 +31,7 @@ release archive and are reproducible from these sources, rather than requiring
 unversioned files on a developer's machine. Original retail/addon data remains
 the player's separately installed content.
 
-The physical inventory (October 7) has a compiled fallback UI and 16 original
+The physical inventory (October 7) has a compiled fallback UI and 17 original
 realistic equipment-category icons. Their source PNGs and prepared runtime PAAs
 are versioned in `assets/inventory`; prompts and hashes are recorded under
 `content/inventory-icons`. Build stages the PAAs in `dist/.../assets/inventory`

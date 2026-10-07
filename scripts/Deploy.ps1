@@ -212,7 +212,7 @@ $menuLogo = Join-Path $distDir 'assets/ui/openposeidon_logo.paa'
 if (Test-Path -LiteralPath $menuLogo) {
     $contentPayload += @{Source=$menuLogo; Relative='assets/ui/openposeidon_logo.paa'}
 }
-foreach ($name in @('rifle','ak_rifle','scoped_rifle','smg','machinegun','launcher','pistol','binoculars','nvg','magazine','curved_magazine','grenade','smoke','satchel','mine','rocket')) {
+foreach ($name in @('m16','rifle','ak_rifle','scoped_rifle','smg','machinegun','launcher','pistol','binoculars','nvg','magazine','curved_magazine','grenade','smoke','satchel','mine','rocket')) {
     $relative = 'assets/inventory/' + $name + '.paa'
     $source = Join-Path $distDir $relative
     if (!(Test-Path -LiteralPath $source) -or (Get-Item -LiteralPath $source).Length -eq 0) {

@@ -46,7 +46,7 @@ The current engine includes:
   available separately.
 - **Physical inventory (single player):** open with **O** for vicinity cargo,
   drag/drop, equipped slots and weight/volume budgets; **K** opens inventory
-  settings. Includes 16 original realistic equipment icons; addon pictures and
+  settings. Includes 17 original realistic equipment icons; addon pictures and
   labelled tiles remain fallbacks.
   Multiplayer keeps classic Gear; Dev Tools and Zeus are disabled in multiplayer.
 - **Box3D physics and articulated ragdolls:** jointed character bodies, death and

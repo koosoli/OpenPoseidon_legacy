@@ -51,7 +51,7 @@ const char* OwnedIconCategory(const InvCell& cell)
             c += 'a' - 'A';
     struct Entry { const char* name; const char* weapon; const char* magazine; };
     static const Entry entries[] = {
-        {"m16", "rifle", "magazine"}, {"m16grenadelauncher", "rifle", "magazine"},
+        {"m16", "m16", "magazine"}, {"m16grenadelauncher", "rifle", "magazine"},
         {"xm177e2", "rifle", "magazine"}, {"m4", "rifle", "magazine"},
         {"g36a", "rifle", "magazine"}, {"steyr", "rifle", "magazine"}, {"fal", "rifle", "magazine"},
         {"ak47", "ak_rifle", "curved_magazine"}, {"ak47cz", "ak_rifle", "curved_magazine"},
@@ -448,6 +448,7 @@ bool PreloadInventoryIconsStep(int budget)
     int n = 0;
     // Empty slots use the same original category assets as occupied tiles.
     static const char* const kGhosts[] = {
+        "assets\\inventory\\m16.paa",
         "assets\\inventory\\rifle.paa", "assets\\inventory\\ak_rifle.paa",
         "assets\\inventory\\scoped_rifle.paa", "assets\\inventory\\smg.paa",
         "assets\\inventory\\machinegun.paa", "assets\\inventory\\launcher.paa",

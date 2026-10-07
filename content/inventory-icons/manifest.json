@@ -178,6 +178,17 @@
       "runtime_sha256": "b4e73dd8718dc0ad6864b5899868f87b00c13df7f0c0fe915f54ab354f61f4d4",
       "category": "rocket",
       "source_png": "assets/inventory/rocket.png"
+    },
+    {
+      "runtime_dimensions": [
+        512,
+        256
+      ],
+      "runtime_paa": "assets/inventory/m16.paa",
+      "category": "m16",
+      "runtime_sha256": "71981482c51993bffd828f343a89d88277c202f7f81763260370657e1fb7f5b0",
+      "source_png": "assets/inventory/m16.png",
+      "source_sha256": "bc5f4be9039e0a656c5c501fb1b642099a197ec74c669d9b5b745ee253ed41e4"
     }
   ],
   "tool": "Built-in image_gen",

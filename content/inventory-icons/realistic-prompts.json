@@ -98,6 +98,12 @@
       "prompt": "Use case: product-mockup. Asset type: realistic military game inventory icon, single isolated item. Subject: one single olive drab anti-tank rocket round with conical warhead, slender dark shaft and folded tail fins, horizontal exact side profile tip to right. Photorealistic studio product render, convincing physical proportions, fine machining, subtle wear and realistic material roughness. Neutral soft key light from upper left plus gentle fill; clear readable silhouette on a dark game inventory panel. Truly transparent alpha background, no floor, no scenery, no cast shadow outside the object. Entire item visible, centered, occupying 82 percent of image width or height with generous transparent padding. No text, no logos, no brands, no UI, no border, no watermarks, no people, no hands, no ammunition firing. Create original artwork from this description only; do not reproduce any videogame artwork. Not a vector, not a drawing, not cartoon, not cel shading. Square image.",
       "png": "assets/inventory/rocket.png",
       "paa": "assets/inventory/rocket.paa"
+    },
+    {
+      "category": "m16",
+      "png": "assets/inventory/m16.png",
+      "paa": "assets/inventory/m16.paa",
+      "prompt": "Use case: product-mockup. Asset type: original photorealistic equipment icon for a dark military game inventory. Subject: one historically accurate M16A2 service rifle, exact flat left side profile, full fixed black polymer buttstock at left and long barrel pointing right, iconic tall integrated carry handle with rear sight above receiver, triangular front sight tower, ribbed round full-length black handguard, pistol grip and a slightly curved aluminum 30-round STANAG magazine inserted. Faithful recognizable M16A2 proportions. Dark gray parkerized metal, black polymer, subtle realistic machining and restrained wear. Soft upper-left studio key light and gentle fill ensure readability on dark panels. Entire rifle fully visible, centered, occupies 88 percent of square image width. Truly transparent alpha background, no ground, no background, no external drop shadow. No text, logo, branding, markings, UI, borders, watermark, people, hands, firing or muzzle flash. Original artwork from text only; no video-game artwork. Photorealistic catalog photograph, not illustration, cartoon or vector."
     }
   ]
 }
