@@ -11,6 +11,11 @@ Far terrain remains presentation only. See the integrated verification ledger
 and Worldgen feature audit for tested limits; full Worldgen functionality has
 not been transferred.
 
+The [Takram reference review](TAKRAM-WHOLE-WORLD-REVIEW-20261008.md) compares
+its atmosphere, geographic frames and shared tile queues with our current
+renderer. It recommends reusing our existing atmospheric LUTs and budgets;
+no Takram runtime or cloud pipeline has been imported.
+
 ## Backup and development
 
 The complete pre-experiment source is preserved in the private safety mirror at

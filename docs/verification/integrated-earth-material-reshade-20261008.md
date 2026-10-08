@@ -253,3 +253,11 @@ near-ocean/overview transition, a dark corner and differing near/far shading;
 worldwide ocean appearance is **not accepted as seamless**. See
 `docs/verification/earth-coast-render-proxy-20261008.md` for the elevation
 heuristic, possible low dry-land misclassification, exact source and receipts.
+
+Takram source review completed at upstream
+`b012ad06d858fc035d88aacfd73f092f93c994e4`; see
+`docs/roadmap/TAKRAM-WHOLE-WORLD-REVIEW-20261008.md`. Useful references are
+atmospheric/geographic frame consistency and shared bounded tile queues.
+Open Poseidon already has dirty-keyed atmosphere LUTs; no duplicate atmosphere,
+upstream runtime, assets or costly cloud reconstruction were added. This is
+documentation-only research, not new installed rendering or visual acceptance.
