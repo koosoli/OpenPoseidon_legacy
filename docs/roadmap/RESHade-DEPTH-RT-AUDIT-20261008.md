@@ -192,6 +192,9 @@ before reporting injection failure. Target shader compilation keeps its separate
 
 ## Selected resource contains cleared depth: bounded follow-up
 
+Historical test rationale below; the completed three-mode result and current
+blocker are recorded in the following section. Do not repeat this mode sweep.
+
 The parent's 09:30 probe on installed `c35727c7` successfully compiled and
 captured the requested effect. With scene overlay zero, its processed image is
 white below the green availability strip. That is consistent with sampled raw
@@ -232,3 +235,71 @@ parameter sweep is provided. `-DepthCopyBeforeClears 0` reproduces the earlier
 end-of-frame configuration. No paid shader, engine edit, build, deployment,
 runtime launch or depth handoff was performed here. DH GI remains gated on
 correct scene-aligned depth; a green availability strip alone never qualifies.
+
+## Installed conclusion: usable scene depth is blocked
+
+The parent completed the bounded preservation tests on the same installed
+`codex/whole-world-horizon-20261008 c35727c7` build, fixed stock Everon camera,
+1600x900 output, one sample and zero scene overlay. All three produced a green
+selected-resource strip and an otherwise entirely white depth diagnostic:
+
+| Preservation | Parent receipt directory under `build/reshade-depth` | Processed capture time | Result |
+|---|---|---|---|
+| 0, official default/end-of-frame | `20261008-093000-Probe` | 09:30:17 | Empty sampled depth |
+| 1, copy before clears | `20261008-093710-Probe` | 09:37:29 | Empty sampled depth |
+| 2, Vulkan during-frame/unbind preservation | `20261008-093912-Probe` | 09:39:30 | Empty sampled depth |
+
+The feature agent inspected all three processed images and read the receipts
+and official runtime logs. Captures succeeded; `visualAccepted` remained false.
+The last receipt records exactly one active requested probe technique, paired
+native/processed capture completion, the expected D32S8/exact-resolution
+filters, and exit code zero. The runtime compiled the actual diagnostic shader.
+These facts establish functioning injection, effect execution and capture, but
+not usable geometry depth. The green strip establishes only a non-null selected
+view. With reversed-Z and overlay zero, uniform white is consistent with raw
+zero everywhere. It cannot distinguish wrong-resource selection, ineffective
+backup copies, and depth invalidation without resource-level evidence.
+
+The renderer's later clears remain a real source finding, but the failed
+preservation tests show that enabling GenericDepth's supported settings does
+not resolve this build's handoff. **Usable scene depth is a reproducible blocker
+for this slice.** No further configuration sweep, DH debug/beauty launch or
+visual GI/RT claim is warranted. No DH before/after images or injected GPU-cost
+measurements have been produced. The optional depth-dependent effects remain
+disabled and unaccepted; the explicit runtime opt-in applied only to the
+isolated test profiles and exited processes. This documentation update changes
+no running process, normal profile or active preset.
+
+### Next bounded renderer handoff, separate implementation slice
+
+1. Add a developer opt-in snapshot of the completed **world** depth before the
+   first ClearDepth/Resolve boundary in `rust/src/lib.rs`. Start with the already
+   tested Vulkan, one-sample, render-scale-1 case. Preserve raw reversed-Z into
+   a dedicated single-sample resource rather than borrowing the mutable depth
+   later reused by UI. Keep ordinary launches unchanged. Publish dimensions,
+   frame/generation, actual near plane and matching camera projection with it.
+2. Prove that snapshot first with bounded numeric readback: nonzero count and
+   min/max plus a small grid at known visible terrain/building/sky locations.
+   A non-null handle or successful copy alone is insufficient. Do not add a
+   full-frame CPU readback to every presentation frame.
+3. Extend the existing versioned optional bridge to consume that snapshot on
+   the same Vulkan device, with explicit ownership, layout/queue synchronization
+   and resize/teardown invalidation. The pinned official API documents resource
+   handles as Vulkan `VkImage` and exposes `update_texture_bindings`; check the
+   exact native-device/resource contract before wiring the Rust/C++ boundary.
+   Use an engine-specific semantic for the first diagnostic so GenericDepth
+   cannot silently overwrite the binding. Keep the engine independent of the
+   optional DLL and never hold a borrowed texture beyond its generation.
+4. Repeat only the fixed raw diagnostic native/processed pair. Acceptance needs
+   visible scene-aligned depth with meaningful foreground/background ordering,
+   sky behavior and no GPU validation errors. Then test one resize and teardown
+   to reject stale resources. The parent remains sole build/deploy/game owner.
+5. Only after that proof, calibrate DH reconstruction against the actual
+   infinite reversed-Z projection and near plane. The common header's finite
+   far-plane defaults do not establish metric correctness. DH debug precedes
+   any GI/AO beauty comparison; external total frame timing is still required
+   because engine GPU timers exclude injected work.
+
+This is a scoped future task, not an implemented handoff. No additional shader,
+executable tooling, renderer change, build, deployment or runtime attempt was
+made for this diagnosis update.
