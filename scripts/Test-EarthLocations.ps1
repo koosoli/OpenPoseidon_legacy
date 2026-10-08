@@ -122,7 +122,10 @@ function Go([string]$name,[double]$latitude,[double]$longitude,[double]$altitude
     Require ($location.revision-eq$previous.revision+1) 'Go did not increment origin revision once'
     Require ([Math]::Abs($location.latitude-$latitude)-lt.0001 -and [Math]::Abs($location.longitude-$expectedLongitude)-lt.0001 -and [Math]::Abs($location.altitude-$altitude)-lt1) 'Origin query differs from requested Go'
     $patch=WaitPatch $location
-    $surface=WaitSurface $location ($name-eq'luxembourg')
+    # Luxembourg can remain inside the Alps' large geographic far window.
+    # That is valid regional imagery, not a stale local tile. Canyon/dateline
+    # still require NASA fallback and check remote/revision safety.
+    $surface=WaitSurface $location ($name-in@('luxembourg','alps'))
     Start-Sleep -Milliseconds 500
     $camera=Camera;CheckCamera $camera $altitude
     CheckNoSuperseded $location
