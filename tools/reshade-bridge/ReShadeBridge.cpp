@@ -34,6 +34,18 @@ void DepthReady(reshade::api::effect_runtime* runtime, bool ready)
     // FX reload invalidates uniform handles: look up the original probe each time.
     const auto uniform = runtime->find_uniform_variable("OpenPoseidonDepthProbe.fx", "DepthReady");
     if (uniform.handle) runtime->set_uniform_value_bool(uniform, &ready, 1);
+    const auto dhReady = runtime->find_uniform_variable("OpenPoseidonDH.fx", "OpSceneReady");
+    if (dhReady.handle) runtime->set_uniform_value_bool(dhReady, &ready, 1);
+    if (ready)
+    {
+        const auto& p = depthState.publication;
+        const float projection[] = {p.projection[0], p.projection[5], p.nearPlane, 0};
+        const float offset[] = {p.projection[8], p.projection[9]};
+        const auto dhProjection = runtime->find_uniform_variable("OpenPoseidonDH.fx", "OpSceneProjection");
+        const auto dhOffset = runtime->find_uniform_variable("OpenPoseidonDH.fx", "OpSceneOffset");
+        if (dhProjection.handle) runtime->set_uniform_value_float(dhProjection, projection, 4);
+        if (dhOffset.handle) runtime->set_uniform_value_float(dhOffset, offset, 2);
+    }
 }
 
 void OnBeginEffects(reshade::api::effect_runtime* runtime, reshade::api::command_list*,
@@ -195,7 +207,8 @@ extern "C" __declspec(dllexport) unsigned OpReShadePublishSceneDepthV1(
         p.gridWidth != 16 || p.gridHeight != 16 || !std::isfinite(p.nearPlane) || p.nearPlane <= 0 ||
         p.generation < depthState.publication.generation ||
         (p.generation == depthState.publication.generation && p.frame <= depthState.publication.frame) ||
-        !std::all_of(std::begin(p.projection), std::end(p.projection), [](float x) { return std::isfinite(x); }))))
+        !std::all_of(std::begin(p.projection), std::end(p.projection), [](float x) { return std::isfinite(x); }) ||
+        p.projection[0] <= 0 || p.projection[5] <= 0)))
         return 0;
     if ((p.flags & 2u) && (p.sampleGeneration != p.generation || !p.sampleFrame || p.sampleFrame > p.frame ||
         p.finiteSamples != 256 || p.nonzeroSamples == 0 || p.nonzeroSamples > 256 ||

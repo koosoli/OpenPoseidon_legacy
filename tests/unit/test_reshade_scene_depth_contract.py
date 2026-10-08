@@ -47,6 +47,7 @@ class Contract(unittest.TestCase):
                         device=11, queue=12, image=13, view=14, width=1600, height=900,
                         samples=1, flags=1, gridWidth=16, gridHeight=16, nearPlane=0.1)
         p.projection[10] = p.projection[11] = 1
+        p.projection[0] = p.projection[5] = 1
         p.projection[14] = -0.1
         return p
 
@@ -58,6 +59,9 @@ class Contract(unittest.TestCase):
         self.assertEqual(self.publish(C.byref(p), 1200, 1), 0)
         self.assertEqual(self.publish(C.byref(p), 1208, 2), 0)
         p.view = 0
+        self.assertEqual(self.publish(C.byref(p), 1208, 1), 0)
+        p.view = 14
+        p.projection[0] = 0
         self.assertEqual(self.publish(C.byref(p), 1208, 1), 0)
 
     def test_publication_is_not_binding_and_rejects_stale_or_invalid_witness(self):

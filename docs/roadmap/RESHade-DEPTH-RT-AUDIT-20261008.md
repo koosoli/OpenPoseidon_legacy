@@ -404,3 +404,82 @@ capture, screenshot acceptance or total injected GPU timing has been performed
 in this implementation worktree. The earlier three failed GenericDepth probes
 remain valid evidence for the old path; this explicit snapshot is unverified
 until the parent runs it.
+
+## Parent runtime confirmation and metric DH adapter
+
+The parent executed the new `SceneProbe` on installed commit `959d1133`.
+`build/reshade-depth/20261008-110657-SceneProbe/result.json` records 256 finite
+bin samples, 227 nonzero, range 0..0.12434253096580505 and actual near plane
+0.0957142934203148 m. Projection p00=1.0714285 and p55=1.904762 came from the
+engine. The parent visually checked aligned terrain/tree silhouettes and weapon
+against the native capture, with white sky in the raw-depth visualization.
+This establishes the explicit handoff for that fixture. It does not validate
+GenericDepth, metric DH reconstruction, GI, resize or other camera paths.
+
+The continued optional slice prepares `OpenPoseidonDH.fx` as a **marked local
+adaptation** of the same pinned GPL-2.0 upstream source. The unmodified upstream
+file and its exact licence remain staged; hashes of the derivative and original
+helper appear in `DEPTH-PROVENANCE.json`. No upstream shader is committed here.
+The new original `OpenPoseidonSceneDepth.fxh` uses MIT with the complete notice,
+so it can accompany the GPL-2.0 derivative without requiring GPL-3-only code in
+that combined shader. Preparation fails on an unknown upstream hash or changed
+patch boundary, never guesses a patch or overwrites a different existing file.
+This slice used the existing offline source cache and made zero downloads.
+
+The adapter reads `OP_SCENE_DEPTH`. The bridge drives its near plane, p00/p55 and
+projection offsets p08/p09 from the current publication immediately before
+ReShade effects, and explicitly clears readiness on invalidation. Metric view z
+is `near/raw`; engine forward projection followed by vertex reversed-Z makes
+that inversion exact. View x/y use the live projection, and inverse projection
+returns the corresponding screen coordinates. DH uses screen-down Y; a matching
+orthonormal reflection preserves distances and angles. Unsupported skew or
+nonpositive projection scales are rejected by the producer rather than silently
+reconstructed. No estimated FOV, near=1 or finite engine far plane is used.
+
+DH retains normalized depth for its existing heuristics. The explicit working
+range is 1000 m, distinct from the engine's infinite far plane. Metric positions
+are recovered by multiplying normalized depth by that range. Raw zero/absent
+bindings use a beyond-range sky sentinel; samples beyond the working range are
+excluded from tracing. Game-specific weapon scaling, multiplier-five and
+roughness-driven position displacement are removed from the local adapter.
+There is no separately projected weapon-depth classification or motion provider.
+Accumulation stays one; SSR and ambient removal are disabled. This preserves
+bounded screen-space limitations: no off-screen/hidden geometry, no hardware RT,
+no validated temporal stability or total injected GPU performance yet.
+
+`SceneDHDebug` selects only `DH_UBER_RT@OpenPoseidonDH.fx`, debug=5. Its original
+adapter visualization uses `log2(1+metres)/log2(1+1000)` grayscale, with blue sky
+or beyond-range samples. `SceneDH` selects the same adapted effect, debug=0,
+with conservative 1/3 rendering scale and two rays. Both explicitly enable the
+same checked engine snapshot under one-sample/HDR/render-scale-1 gates; they do
+not use GenericDepth. Legacy generic DH presets remain separate and unaccepted.
+No preset or persistent preference is automatically activated.
+
+CPU tests evaluate the **actual FX helper arithmetic expressions** against the
+engine forward-projection/reversed-Z pipeline for many known metric positions,
+off-axis offsets, multiple tracing ranges, and sky/unready cases. This checks
+round trips and metres, rather than only matching shader text. Four Rust tests,
+four preparation tests, three reconstruction tests and two built add-on ABI
+checks pass; the add-on rebuild and PowerShell parsing pass. The generated DH
+FX has not yet been compiled by ReShade or visually accepted in this slice.
+
+An optional `-VerifyResize` uses the existing tested `triSendAltEnter` command,
+then returns to windowed mode. It requires changed dimensions, a newer resource
+generation on each transition, matching binding dimensions, fresh-generation
+numeric evidence and exactly one recovered technique. This is opt-in and adds
+no new engine command. Clean exit code zero plus renderer/log checks records
+teardown completion, not an independent GPU race proof. The parent can first
+run this lightweight check with `SceneProbe`, then the DH debug/beauty gates:
+
+```powershell
+./scripts/Test-ReShadeDepthInstalled.ps1 -ExpectedCommit <new-installed-commit> -RuntimeDirectory <fresh-stage> -Mode SceneProbe -VerifyResize
+./scripts/Test-ReShadeDepthInstalled.ps1 -ExpectedCommit <new-installed-commit> -RuntimeDirectory <fresh-stage> -Mode SceneDHDebug
+# Only after the parent accepts the debug reconstruction/alignment:
+./scripts/Test-ReShadeDepthInstalled.ps1 -ExpectedCommit <new-installed-commit> -RuntimeDirectory <fresh-stage> -Mode SceneDH
+```
+
+A complete isolated staging directory is prepared at this worktree's
+`build/scene-dh-stage`, using the already verified official 6.8 core, the newly
+CPU-built add-on, the original helper and pinned GPL/CC0 files. No game launch,
+GPU access, integrated build or deployment occurred here. Parent captures and
+external total-frame timing remain required before any beauty/performance claim.

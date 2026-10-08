@@ -321,6 +321,11 @@ fn supported(size: (u32, u32), output: (u32, u32), samples: u32, p: &[f32; 16]) 
         && size.0 <= 8192
         && size.1 <= 8192
         && p.iter().all(|x| x.is_finite())
+        && p[0] > 0.0
+        && p[5] > 0.0
+        && [1, 2, 3, 4, 6, 7, 12, 13]
+            .iter()
+            .all(|&i| p[i].abs() < 1e-4)
         && -p[14] > 0.0
         && (p[10] - 1.0).abs() < 1e-4
         && (p[11] - 1.0).abs() < 1e-4
@@ -560,12 +565,23 @@ mod tests {
     #[test]
     fn gate_rejects_msaa_scaling_and_nonmatching_projection() {
         let mut p = [0.0; 16];
+        p[0] = 1.0;
+        p[5] = 1.0;
         p[10] = 1.0;
         p[11] = 1.0;
         p[14] = -0.1;
         assert!(supported((1600, 900), (1600, 900), 1, &p));
         assert!(!supported((1600, 900), (1600, 900), 4, &p));
         assert!(!supported((800, 450), (1600, 900), 1, &p));
+        p[8] = 0.025;
+        p[9] = -0.04;
+        assert!(supported((1600, 900), (1600, 900), 1, &p));
+        p[1] = 0.01;
+        assert!(!supported((1600, 900), (1600, 900), 1, &p));
+        p[1] = 0.0;
+        p[0] = 0.0;
+        assert!(!supported((1600, 900), (1600, 900), 1, &p));
+        p[0] = 1.0;
         p[14] = 0.1;
         assert!(!supported((1600, 900), (1600, 900), 1, &p));
     }

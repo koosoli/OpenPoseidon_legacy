@@ -1,6 +1,7 @@
 """Offline integrity/configuration checks; these do not compile or render FX."""
 import importlib.util
 import json
+import hashlib
 from pathlib import Path
 import tempfile
 import unittest
@@ -12,6 +13,42 @@ SPEC.loader.exec_module(DEPTH)
 
 
 class Preparation(unittest.TestCase):
+    def test_generated_adapter_preserves_pinned_input_and_records_derivative(self):
+        source = '#include "Reshade.fxh"\n'
+        for kind, name, args in [('float', 'getDepthMultiplier', ''), ('float', 'isSky', 'float depth'),
+                ('float2', 'getDepth', 'float2 coords'), ('float3', 'getWorldPositionForNormal', 'float2 coords,bool ignoreRoughness'),
+                ('float3', 'getWorldPosition', 'float2 coords,float depth'), ('float3', 'getScreenPosition', 'float3 wp')]:
+            source += f'    {kind} {name}({args}) {{\n        return 42;\n    }}\n'
+        source += '} else if(iDebug==DEBUG_DEPTH) {\n result = 42;\n} else if(iDebug==DEBUG_NORMAL) {\n'
+        data = [b'licence fixture', source.encode(), b'common fixture']
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            files = []
+            for original, content in zip(DEPTH.FILES, data):
+                repo, commit, path, target, _ = original
+                source_path = base / 'offline' / repo / path
+                source_path.parent.mkdir(parents=True, exist_ok=True)
+                source_path.write_bytes(content)
+                files.append((repo, commit, path, target, hashlib.sha256(content).hexdigest()))
+            with patch.object(DEPTH, 'FILES', tuple(files)), patch.object(DEPTH.subprocess, 'run', side_effect=AssertionError('network')):
+                receipt = DEPTH.prepare(base / 'runtime', base / 'offline')
+                DEPTH.prepare(base / 'runtime', base / 'offline')
+                with self.assertRaisesRegex(RuntimeError, 'exact pinned'):
+                    DEPTH.adapt_dh(b'different pin')
+            runtime = base / 'runtime'
+            self.assertEqual((runtime / 'Shaders/dh_uber_rt.fx').read_bytes(), source.encode())
+            adapted = (runtime / 'Shaders/OpenPoseidonDH.fx').read_bytes()
+            self.assertIn(b'OpenPoseidon local adaptation, 2026-10-08', adapted)
+            self.assertIn(b'OpSceneLinearDepth(coords)', adapted)
+            self.assertIn(b'OpSceneViewPosition(coords, depth)', adapted)
+            self.assertIn(b'OpSceneScreenPosition(wp)', adapted)
+            self.assertIn(b'log2(1.0 + depth * OpSceneRange)', adapted)
+            provenance = json.loads(receipt.read_text())['scene_adapter']
+            self.assertEqual(provenance['generated_sha256'], hashlib.sha256(adapted).hexdigest())
+            self.assertEqual(provenance['helper_license'], 'MIT')
+            self.assertIn('OpSceneRange=1000', (runtime / 'Presets/OpenPoseidon-DH-Scene-Debug.ini').read_text())
+            self.assertTrue((runtime / 'Presets/OpenPoseidon-Depth-Off.ini').read_text().startswith('Techniques=\n'))
+
     def test_probe_never_downloads_or_changes_selected_preset(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

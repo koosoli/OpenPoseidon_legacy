@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -30,6 +31,41 @@ def write_preserved(path, data):
     path.write_bytes(data)
 
 
+def adapt_dh(data):
+    """Generate a marked local derivative only from the verified upstream pin.
+
+    Keep the upstream file and licence intact; never guess patches on a new pin.
+    Depth remains normalized by an explicit metric working range for DH's
+    filters, while both view reconstruction and inverse projection use metres.
+    """
+    if sha(data) != FILES[1][4]:
+        raise RuntimeError("DH adapter requires the exact pinned upstream source")
+    source = data.decode().replace("\r\n", "\n")
+    source = '// OpenPoseidon local adaptation, 2026-10-08: checked scene depth and metric projection.\n' + source
+    source = source.replace('#include "Reshade.fxh"', '#include "Reshade.fxh"\n#include "OpenPoseidonSceneDepth.fxh"', 1)
+    # Top-level function bodies have four-space indentation in this exact pin.
+    def body(name, replacement):
+        nonlocal source
+        pattern = rf'(^    (?:float[234]?|bool) {name}\([^\n]*\) \{{\n).*?\n    \}}'
+        source, count = re.subn(pattern, lambda m: m[1] + replacement + '\n    }', source, count=0, flags=re.S | re.M)
+        if count != 1:
+            raise RuntimeError(f"DH adapter function mismatch: {name}, {count}")
+    body('getDepthMultiplier', '        return 1.0; // engine snapshot: no game-specific depth multiplier')
+    body('isSky', '        return depth > 1.0; // sky sentinel or beyond explicit metric working range')
+    body('getDepth', '        return float2(OpSceneLinearDepth(coords), 0.0); // no weapon heuristic')
+    body('getWorldPositionForNormal', '        return OpSceneViewPosition(coords, getDepth(coords).x); // metric normals, no roughness displacement')
+    body('getWorldPosition', '        return OpSceneViewPosition(coords, depth);')
+    body('getScreenPosition', '        return OpSceneScreenPosition(wp);')
+    debug_pattern = r'(\} else if\(iDebug==DEBUG_DEPTH\) \{).*?(\} else if\(iDebug==DEBUG_NORMAL\) \{)'
+    source, count = re.subn(debug_pattern, lambda m: m[1] + '\n            float depth = getDepth(coords).x;\n'
+        '            result = isSky(depth) ? float3(0.2,0.4,1.0) :\n'
+        '                (log2(1.0 + depth * OpSceneRange) / log2(1.0 + OpSceneRange)).xxx;\n'
+        '        ' + m[2], source, flags=re.S)
+    if count != 1:
+        raise RuntimeError('DH depth debug patch mismatch')
+    return source.encode()
+
+
 def prepare(root, local_sources=None, probe_only=False):
     receipt = []
     staged = []
@@ -53,6 +89,12 @@ def prepare(root, local_sources=None, probe_only=False):
         receipt.append({"url": url, "sha256": expected, "bytes": len(data), "target": target})
     own = Path(__file__).resolve().parents[1] / "tools" / "reshade-depth"
     staged.append((root / "Shaders/OpenPoseidonDepthProbe.fx", (own / "OpenPoseidonDepthProbe.fx").read_bytes()))
+    adapter = None
+    if not probe_only:
+        dh = next(data for path, data in staged if path.name == 'dh_uber_rt.fx')
+        adapter = adapt_dh(dh)
+        staged.append((root / 'Shaders/OpenPoseidonDH.fx', adapter))
+        staged.append((root / 'Shaders/OpenPoseidonSceneDepth.fxh', (own / 'OpenPoseidonSceneDepth.fxh').read_bytes()))
     presets = {
         "OpenPoseidon-Depth-Off.ini": "Techniques=\nTechniqueSorting=OpenPoseidonDepthProbe@OpenPoseidonDepthProbe.fx,DH_UBER_RT@dh_uber_rt.fx\n",
         "OpenPoseidon-Depth-Probe.ini": "Techniques=OpenPoseidonDepthProbe@OpenPoseidonDepthProbe.fx\n"
@@ -69,6 +111,13 @@ def prepare(root, local_sources=None, probe_only=False):
         "OpenPoseidon-DH-Depth-Debug.ini": "PreprocessorDefinitions=RESHADE_DEPTH_INPUT_IS_REVERSED=1,RESHADE_DEPTH_INPUT_IS_UPSIDE_DOWN=0\n"
             "Techniques=DH_UBER_RT@dh_uber_rt.fx\nTechniqueSorting=DH_UBER_RT@dh_uber_rt.fx\n"
             "\n[dh_uber_rt.fx]\niDebug=5\nbSSR=0\nbRemoveAmbient=0\niGIFrameAccu=1\niAOFrameAccu=1\n",
+        "OpenPoseidon-DH-Scene-Debug.ini": "Techniques=DH_UBER_RT@OpenPoseidonDH.fx\nTechniqueSorting=DH_UBER_RT@OpenPoseidonDH.fx\n"
+            "\n[OpenPoseidonDH.fx]\niDebug=5\nbSSR=0\nbRemoveAmbient=0\niGIFrameAccu=1\niAOFrameAccu=1\niSSRFrameAccu=1\n"
+            "fGIRenderScale=0.333\niRTMaxRays=2\niRTPrecision=1\nOpSceneRange=1000\nfWeaponDepth=0\nfNormalRoughness=0\n",
+        "OpenPoseidon-DH-Scene-Preview.ini": "Techniques=DH_UBER_RT@OpenPoseidonDH.fx\nTechniqueSorting=DH_UBER_RT@OpenPoseidonDH.fx\n"
+            "\n[OpenPoseidonDH.fx]\niDebug=0\nbSSR=0\nbRemoveAmbient=0\niGIFrameAccu=1\niAOFrameAccu=1\niSSRFrameAccu=1\n"
+            "fGIRenderScale=0.333\niRTMaxRays=2\niRTPrecision=1\nOpSceneRange=1000\nfWeaponDepth=0\nfNormalRoughness=0\n"
+            "fAOMultiplier=0.4\nfGIFinalMerging=0.35\n",
     }
     if probe_only:
         presets = {name: text for name, text in presets.items() if name.startswith("OpenPoseidon-Depth-")}
@@ -81,6 +130,9 @@ def prepare(root, local_sources=None, probe_only=False):
         write_preserved(path, data)
     receipt_path = root / "DEPTH-PROVENANCE.json"
     receipt_path.write_text(json.dumps({"probe_only": probe_only, "files": receipt, "dh_license": "GPL-2.0 (upstream LICENSE)",
+        "scene_adapter": None if adapter is None else {"source_sha256": FILES[1][4], "generated_sha256": sha(adapter),
+            "helper_sha256": sha((own / 'OpenPoseidonSceneDepth.fxh').read_bytes()), "helper_license": "MIT",
+            "projection": "metric z=near/raw; exact p00/p55/offset inverse, screen-down Y; 1000m bounded DH range; sky=2"},
         "common_license": "CC0-1.0 (SPDX in header)", "probe_license": "GPL-3.0-or-later",
         "configuration": "No active preset/config/preference modified; depth availability not established",
         "motion": "No external motion provider; accumulation=1 stationary validation preset only"}, indent=2) + "\n")
