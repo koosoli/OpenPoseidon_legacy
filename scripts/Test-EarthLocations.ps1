@@ -149,6 +149,19 @@ try{
         Require ($pose.StartsWith('OK')) 'Building overview camera refused'
         Start-Sleep -Seconds 1
         $path=Join-Path $out 'luxembourg-buildings.png';$null=Send @{cmd='screenshot';path=$path};WaitCapture $path
+        # Cross east into an uncached centre cell. The previously cached town
+        # remains in the bounded 3x3 neighborhood instead of vanishing.
+        $pose=Eval 'triFreeFlyPose "7500 6400 1000 270 -35"'
+        Require ($pose.StartsWith('OK')) 'Neighbor-cell camera refused'
+        $deadline=[DateTime]::UtcNow.AddSeconds(15)
+        do{
+            $neighbor=@(Select-String -Path $log -Pattern 'Earth cached buildings: cell \[2480,307\], [1-9][0-9]* buildings')
+            if($neighbor.Count){break}
+            Require ([DateTime]::UtcNow-lt$deadline) 'Cached buildings vanished at the adjacent cell boundary'
+            Start-Sleep -Milliseconds 200
+        }while($true)
+        $receipt.neighborBuildings=$neighbor[-1].Line
+        $path=Join-Path $out 'luxembourg-neighbor.png';$null=Send @{cmd='screenshot';path=$path};WaitCapture $path
     }
     $null=Go 'alps' 46.6 8.1 4500
     $null=Go 'grand-canyon' 36.1 -112.1 6000
