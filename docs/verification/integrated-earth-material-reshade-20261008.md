@@ -261,3 +261,31 @@ atmospheric/geographic frame consistency and shared bounded tile queues.
 Open Poseidon already has dirty-keyed atmosphere LUTs; no duplicate atmosphere,
 upstream runtime, assets or costly cloud reconstruction were added. This is
 documentation-only research, not new installed rendering or visual acceptance.
+
+## Curved coastal coverage and independent scene depth — later follow-up
+
+Installed `e5b34ac0` at 10:47 removes the resident elevation rectangle from
+Earth ocean coverage. `build/earth-streaming/20261008-105311/result.json`
+passes the actual 1000m/9000m camera, publication and FFT lifecycle checks.
+Eight production selector tests and all four composed water modules pass.
+The inspected 1000m image has a substantially more continuous wave field,
+but pale water, dark overview land and a dark corner remain visible. This
+is improved coverage, **not acceptance of a seamless coastal appearance**.
+The subsequent Earth-only physical-irradiance correction requires another
+paired installed capture; native OFP lighting and collision heights are unchanged.
+
+Installed `959d1133` at 11:06 adds a separately opt-in world-depth snapshot
+before the UI clears depth. The official GenericDepth probes above remain
+historically empty; the new `OP_SCENE_DEPTH` semantic is independent of them.
+`build/reshade-depth/20261008-110657-SceneProbe/result.json` passes selected
+effect compilation, live off/on, capture and clean exit. Its fresh 16x16
+bin-centre witness has 256 finite / 227 nonzero values, minimum 0, maximum
+0.12434253, and near plane 0.09571429m. The inspected grayscale capture aligns
+terrain, tree silhouettes, the pole and weapon with the native image, while
+sky is white. This establishes usable scene depth for this Vulkan, 1600x900,
+one-sample diagnostic. Resize/rebinding and metric DH reconstruction still
+require verification; it does **not** establish a working GI or RT beauty
+effect, a total GPU cost, or support for other renderer configurations.
+
+The same installed source shows the bearing readout only while the compass
+is open. This UI behavior still needs its own interactive runtime check.
