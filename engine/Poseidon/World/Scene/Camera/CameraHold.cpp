@@ -371,8 +371,8 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
             // The curve steepens with altitude: precise placement close to the
             // ground, then rapidly increasing travel speed high above the map.
             const bool earthPreview=EarthStreaming::Enabled();
-            float groundY = earthPreview ? 0.0f : GLandscape->SurfaceYAboveWater(Position()[0], Position()[2]);
-            float altitude = fmax(Position()[1] - groundY, 0.0f);
+            const float altitude = earthPreview ? float(Earth::CameraAltitude(Position()[0],Position()[1],Position()[2])) :
+                fmax(Position()[1] - GLandscape->SurfaceYAboveWater(Position()[0],Position()[2]),0.0f);
             speedScale = fmin(1.0f + altitude * 0.03f + altitude * altitude * 0.00002f, 64.0f);
             if (earthPreview) speedScale=std::max(speedScale,std::min(altitude/80.0f,250000.0f));
 

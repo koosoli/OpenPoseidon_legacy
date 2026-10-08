@@ -15,6 +15,8 @@ radial altitude. The local position returns to `(6400, altitude, 6400)` and its
 view/up/velocity rotate between the old and new ENU bases. Radius **plus camera
 height** is used here; terrain address inversion instead uses the radius of the
 surface datum. The camera altitude limits remain 500 m to 30,000 km.
+Earth input speed scaling also uses radial altitude, so held input retains the
+same speed after a frame shift instead of reacting to the change in local Y.
 
 A compare-and-set under the location mutex rejects a rebase if an explicit
 geographic Go has intervened. Each successful rebase advances the existing

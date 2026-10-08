@@ -265,6 +265,8 @@ int main()
             const Direction point{RecenterDistance(altitude)+10000,Radius+altitude,-12000};
             const auto next=CameraRebase(frame,Anchor+point.x,altitude,Anchor+point.z);
             assert(next);
+            assert(std::abs(CameraAltitude(Anchor+point.x,altitude,Anchor+point.z)-
+                CameraAltitude(Anchor,next->altitude,Anchor))<1e-9);
             assert(Difference(Ecef(frame,point),Ecef(next->origin,{0,Radius+next->altitude,0}))<1e-7);
             for(Direction v : {Direction{1,0,0},Direction{0,1,0},Direction{0,0,1},Direction{5,-3,8}})
             {
@@ -296,6 +298,8 @@ int main()
         assert(travel.Get().revision==before.revision+1);
     }
     assert(std::abs(WrapLongitude(travel.Get().longitude-179.8))<1e-10);
+    assert(CameraAltitude(Anchor,500,Anchor)==500);
+    assert(CameraAltitude(Anchor+32000,500,Anchor)>580);
     const auto polarRevision=travel.Get().revision;
     assert(!travel.Rebase(polarRevision,85,0,1000) && travel.IsCurrent(polarRevision));
     assert(travel.Set(49.45,-2.55,1000));

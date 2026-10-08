@@ -77,6 +77,13 @@ inline Direction RotateFrame(Coordinate oldOrigin, Coordinate newOrigin, Directi
 }
 
 struct FrameRebase { Coordinate origin; double altitude; };
+inline double CameraAltitude(double x, double y, double z)
+{
+    const double dx = x - Anchor, dz = z - Anchor, up = Radius + y;
+    // Stable near the surface: avoid subtracting Earth-sized radii to recover
+    // a small height. The result is invariant under a camera origin shift.
+    return y + (dx * dx + dz * dz) / (std::hypot(std::hypot(dx, dz), up) + up);
+}
 inline double RecenterDistance(double altitude)
 {
     // Orbital input can travel kilometres per frame. Reuse its local frame for
@@ -92,8 +99,7 @@ inline std::optional<FrameRebase> CameraRebase(Coordinate origin, double x, doub
         dx * dx + dz * dz <= threshold * threshold) return std::nullopt;
     const double up = Radius + y;
     if (up <= 0.0) return std::nullopt;
-    const double radius = std::hypot(std::hypot(dx, dz), up);
-    return FrameRebase{FromDirection(origin.latitude, origin.longitude, {dx, up, dz}), radius - Radius};
+    return FrameRebase{FromDirection(origin.latitude, origin.longitude, {dx, up, dz}), CameraAltitude(x,y,z)};
 }
 
 // Conservative source-rectangle overlap in the spherical projection. Arc
