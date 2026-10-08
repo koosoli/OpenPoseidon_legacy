@@ -541,3 +541,46 @@ shows subtle ground/foliage illumination without the previous fogged pale hills.
 This accepts that bounded fog-free preview scene only; fog-compatible GI and
 general visual parity are not established. ReShade remains optional and off by
 default.
+
+## Installed ground approach and regional assets, 16:48 build
+
+The matched installed pair is `88098b01`, deployed at 16:48. A fresh actual
+SDL ground-approach run passes at
+`build/earth-geodesic-installed/20261008-165632-46be6c/result.json`.
+Z descends from three metres above current resident ground to 0.299987824 m;
+Q ascends again. This removes the old 500-metre freefly floor on covered Earth
+ground. Unknown ground still blocks unsafe descent until support is available.
+The screenshot is a collision-clearance witness, not a ground-detail showcase.
+
+The two-region installed run at
+`build/earth-worldgen-regions-installed/20261008-164932-e254bd/result.json`
+passes source limits, region retirement/reload, retained model registration,
+current ACT surface publication, camera/ground revisions and clean teardown.
+City, Mamer and city-return images were inspected. They show actual stock
+buildings and roads over ACT imagery, but the road quality is **not accepted**:
+many unclassified road pieces still float, with visible detached shadows.
+The near imagery is also visibly blurred. Mamer's source imagery is coarser
+than the city source. These failures are kept separate from the passing
+residency and resource-lifecycle checks.
+
+Conservative explicit road IDs currently fit a five-sample resident ground
+plane, preserving unlisted authored elevated structures. The first classifier
+mistakenly treated minor highways which the generator did not emit as positive
+road competitors. A bounded classifier correction is being checked; unsafe
+bridge/tunnel/layer associations must still veto fitting.
+
+The first installed GlobalMCR preview on this build loads all 20683 instances,
+6295 main instances and 11826164 main triangles, but **does not admit the new
+target material path**. Its log reports tangent producer3 with admission=false
+and global-overlay sourceAdmission=false. Therefore its 54.210 ms frame and
+image are not evidence of the new overlay's cost or visual quality. One actual
+cause is that the texture importer decodes the MCR data alpha into RGBA8,
+preventing the required original linear BC7 admission. This remains under
+diagnosis; synthetic GPU contract tests alone do not establish scene parity.
+
+The normal optional ReShade cache was upgraded with the pinned local addon and
+licensed files. Installed `748de202` then passed the actual normal-cache
+active-fog refusal test at `build/reshade-depth/20261008-163540-SceneDH`.
+The previously accepted fog-free beauty pair records about 2.115 ms median
+for the GI GPU bracket, excluding engine snapshot/overlay costs. ReShade
+remains off by default, and DH GI remains unavailable while native fog is active.
