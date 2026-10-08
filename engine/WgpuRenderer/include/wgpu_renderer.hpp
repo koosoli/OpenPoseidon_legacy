@@ -509,8 +509,9 @@ struct WgrModelMaterial
      * exactly where it was. */
     WgrVec4 crown_ao_p0;
     WgrVec4 crown_ao_p1;
-    /* Optional native opaque PBR preview: roughness/metalness multipliers.
-     * Defaults are identity; z/w reserved. Never used by legacy/cutout shading. */
+    /* Optional native opaque PBR preview: Basic roughness/metalness multipliers.
+     * Multi mask-scale opt-in uses RGB multipliers in xyz and w=1 as its tag.
+     * Defaults keep Basic identity; never used by legacy/cutout shading. */
     WgrVec4 native_pbr_scales{1.0f, 1.0f, 0.0f, 0.0f};
 };
 

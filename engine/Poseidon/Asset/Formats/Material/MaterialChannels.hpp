@@ -202,6 +202,7 @@ struct EmatPbrProvenance
     EmatAuthoredScalar metalnessScale;             // MetalnessScale
     EmatAuthoredScalar roughnessScale2;            // RoughnessScale2 (MatPBR2Layers)
     EmatAuthoredScalar metalnessScale2;            // MetalnessScale2 (MatPBR2Layers)
+    std::array<EmatAuthoredScalar, 3> maskScale{}; // MaskRed/Green/BlueScale (MatPBRMulti)
 };
 
 struct TranslatedMaterial

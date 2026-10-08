@@ -15374,6 +15374,24 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                     {
                         mat.specular_texture_id = baseNmo;
                         sec.flags |= WGR_MODEL_SECTION_NATIVE_PBR_PREVIEW | WGR_MODEL_SECTION_NORMAL_RG;
+                        static const bool maskScalePreview = []
+                        {
+                            const char* value = std::getenv("WGR_REFORGER_MASK_SCALE_PREVIEW");
+                            return value && value[0] == '1' && value[1] == '\0';
+                        }();
+                        if (maskScalePreview)
+                        {
+                            // Multi owns these otherwise unused Basic scale lanes only
+                            // under this separate opt-in. w selects the RGB-mask contract.
+                            const auto scales = Asset::Material::NativePbrMultiMaskScales(found->second);
+                            mat.native_pbr_scales = {scales[0], scales[1], scales[2], 1.0f};
+                            static std::unordered_set<std::string> reportedMaskScales;
+                            if ((scales[0] != 1.0f || scales[1] != 1.0f || scales[2] != 1.0f) &&
+                                reportedMaskScales.size() < 32 &&
+                                reportedMaskScales.insert(path).second)
+                                LOG_INFO(Graphics, "Wgpu Reforger mask-scale preview: material={} RGB={}/{}/{}",
+                                         path, scales[0], scales[1], scales[2]);
+                        }
                         static bool reportedMultiPreview = false;
                         if (!reportedMultiPreview)
                         {

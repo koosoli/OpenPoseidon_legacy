@@ -803,9 +803,18 @@ fn retained_snow_exposure(in: VsOut) -> f32 {
 // The opaque Basic preview uses the authored channel scales before its existing
 // legacy-BRDF approximation. AO is independent; cutout alpha is never an input.
 fn native_pbr_scaled_channels(channels: vec3<f32>, scales: vec4<f32>) -> vec3<f32> {
-    return vec3<f32>(clamp(channels.x * scales.x, 0.08, 1.0),
-                     clamp(channels.y * scales.y, 0.0, 1.0),
+    // Multi's mask tag must never become a Basic roughness/metalness scale.
+    let channel_scales = select(scales, vec4<f32>(1.0, 1.0, 0.0, 0.0), scales.w > 0.5);
+    return vec3<f32>(clamp(channels.x * channel_scales.x, 0.08, 1.0),
+                     clamp(channels.y * channel_scales.y, 0.0, 1.0),
                      clamp(channels.z, 0.0, 1.0));
+}
+
+// Multi's independently opted-in contract. Saturate each authored mask channel
+// before the established missing-layer removal and overpaint normalization.
+fn native_pbr_mask_channels(mask: vec3<f32>, scales: vec4<f32>) -> vec3<f32> {
+    if (scales.w <= 0.5) { return mask; }
+    return clamp(mask * scales.xyz, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 fn fs_gpu_body(in: VsOut) -> vec4<f32> {
@@ -868,6 +877,11 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         // the surface, which blows the building out and drags the whole frame's
         // auto-exposure down with it.
         var lw = mask;
+#ifdef NATIVE_PBR_PREVIEW
+        if ((sm.flags & SECTION_NATIVE_PBR_PREVIEW) != 0u) {
+            lw = native_pbr_mask_channels(lw, sm.native_pbr_scales);
+        }
+#endif
         if (sm.layer_slot[0] == 0u) {
             lw.x = 0.0;
         }

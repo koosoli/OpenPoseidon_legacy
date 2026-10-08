@@ -483,6 +483,22 @@ inline std::array<float, 2> NativePbrBasicScales(const TranslatedMaterial& mater
     return scales;
 }
 
+inline std::array<float, 3> NativePbrMultiMaskScales(const TranslatedMaterial& material)
+{
+    std::array<float, 3> scales{1.0f, 1.0f, 1.0f};
+    if (!material.ematPbr || !material.ematPbr->baseLayerUsesTile ||
+        !material.ematPbr->bcrAlphaIsRoughness[0] ||
+        !EmatMaterial::NameMatches(material.shaderFamily, "MatPBRMulti"))
+        return scales;
+    for (size_t i = 0; i < scales.size(); ++i)
+    {
+        const auto& source = material.ematPbr->maskScale[i];
+        if (source.present && std::isfinite(source.value))
+            scales[i] = std::max(source.value, 0.0f);
+    }
+    return scales;
+}
+
 // Translates an `.emat` into the engine's material form. `family` is carried through from
 // the rvmat that pointed here.
 inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::string& origin, const std::string& family)
@@ -618,6 +634,9 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         pbr->metalnessScale = ReadEmatPbrScalar(emat, "MetalnessScale");
         pbr->roughnessScale2 = ReadEmatPbrScalar(emat, "RoughnessScale2");
         pbr->metalnessScale2 = ReadEmatPbrScalar(emat, "MetalnessScale2");
+        const char* maskKeys[3] = {"MaskRedScale", "MaskGreenScale", "MaskBlueScale"};
+        for (size_t i = 0; i < pbr->maskScale.size(); ++i)
+            pbr->maskScale[i] = ReadEmatPbrScalar(emat, maskKeys[i]);
         out.ematPbr = std::move(pbr);
     }
 

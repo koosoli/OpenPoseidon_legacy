@@ -29,6 +29,47 @@ using Poseidon::Asset::Material::TranslatedMaterial;
 using Poseidon::Asset::Material::TranslatedSlot;
 using Poseidon::Asset::Material::TranslateEmat;
 
+TEST_CASE("Native Multi mask scales preserve identity and authored zero without changing Basic",
+          "[asset][material][emat][arf][mask-scales]")
+{
+    using namespace Poseidon::Asset::Material;
+    TranslatedMaterial material;
+    material.shaderFamily = "MatPBRMulti";
+    REQUIRE(NativePbrMultiMaskScales(material) == std::array<float, 3>{1.0f, 1.0f, 1.0f});
+    auto pbr = std::make_shared<EmatPbrProvenance>();
+    material.ematPbr = pbr;
+    pbr->baseLayerUsesTile = true;
+    pbr->bcrAlphaIsRoughness[0] = true;
+    pbr->maskScale = {{{0.0f, true}, {0.5f, true}, {2.0f, true}}};
+    REQUIRE(NativePbrMultiMaskScales(material) == std::array<float, 3>{0.0f, 0.5f, 2.0f});
+    REQUIRE(NativePbrBasicScales(material) == std::array<float, 2>{1.0f, 1.0f});
+    pbr->maskScale = {{{-1.0f, true}, {std::numeric_limits<float>::quiet_NaN(), true},
+                       {std::numeric_limits<float>::infinity(), true}}};
+    REQUIRE(NativePbrMultiMaskScales(material) == std::array<float, 3>{0.0f, 1.0f, 1.0f});
+    material.shaderFamily = "MatPBRBasic";
+    REQUIRE(NativePbrMultiMaskScales(material) == std::array<float, 3>{1.0f, 1.0f, 1.0f});
+    material.shaderFamily = "MatPBRMulti";
+    pbr->baseLayerUsesTile = false;
+    REQUIRE(NativePbrMultiMaskScales(material) == std::array<float, 3>{1.0f, 1.0f, 1.0f});
+
+    // Owned fixture: RGB scales belong to the mask on UV1, while tile transforms
+    // and the global normal's authored UV source remain independent.
+    const auto translated = TranslateEmat(ParseEmat(
+        "MatPBRMulti {\n MaskRedScale 0\n MaskGreenScale 0.5\n MaskBlueScale 2\n"
+        " UVSrcGlobalMaps \"UV set 2\"\n UVSrcGlobNormal \"UV set 1\"\n"
+        " MaskMap \"{0000000000000001}Assets/Owned_mask.edds\"\n"
+        " BCR_1 \"{0000000000000002}Assets/Owned_BCR.edds\"\n"
+        " UVTransform_1 {\n TilingU 4\n TilingV 3\n }\n}\n"), "Assets/Owned.emat", "");
+    REQUIRE(EmatMaskUsesUvSet2(ParseEmat("MatPBRMulti {\n UVSrcGlobalMaps \"UV set 2\"\n}\n")));
+    REQUIRE_FALSE(translated.globalNormalUv1);
+    REQUIRE(translated.Find(MaterialSlot::BaseColour)->uvTransform.aside[0] == 4.0f);
+    if (EmatPbrProvenanceEnabled())
+    {
+        REQUIRE(translated.ematPbr);
+        REQUIRE(NativePbrMultiMaskScales(translated) == std::array<float, 3>{0.0f, 0.5f, 2.0f});
+    }
+}
+
 TEST_CASE("Opaque native PBR Basic scales preserve zero and leave other material routes alone",
           "[asset][material][emat][arf][pbr-scales]")
 {

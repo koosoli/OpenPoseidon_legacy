@@ -3,23 +3,30 @@ use wgpu::util::DeviceExt;
 
 const PRODUCTION: &str = include_str!("gpu_driven.wgsl");
 
-fn scaled_channels_probe() -> naga::Module {
+fn channels_probe(mask: bool) -> naga::Module {
     // Execute the real production helper, not a Rust copy of the formula.
-    let start = PRODUCTION.find("fn native_pbr_scaled_channels(").unwrap();
+    let helper = if mask {
+        "native_pbr_mask_channels"
+    } else {
+        "native_pbr_scaled_channels"
+    };
+    let start = PRODUCTION.find(&format!("fn {helper}(")).unwrap();
     let end = start + PRODUCTION[start..].find("\n}").unwrap() + 2;
     let mut source = PRODUCTION[start..end].to_owned();
-    source.push_str(
-        r#"
+    let scales = if mask {
+        "vec4<f32>(0.0,0.0,0.0,0.0), vec4<f32>(1.0,1.0,1.0,1.0), vec4<f32>(0.0,0.5,2.0,1.0), vec4<f32>(2.0,3.0,0.0,1.0), vec4<f32>(1.0,1.0,0.0,0.0)"
+    } else {
+        "vec4<f32>(1.0,1.0,0.0,0.0), vec4<f32>(0.5,0.0,0.0,0.0), vec4<f32>(2.0,2.0,0.0,0.0), vec4<f32>(0.0,0.25,0.0,0.0), vec4<f32>(0.0,0.5,2.0,1.0)"
+    };
+    source.push_str(&format!(r#"
 @group(0) @binding(0) var<storage,read_write> output:array<vec4<f32>>;
-@compute @workgroup_size(1) fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>) {
-    let channels = array<vec3<f32>,4>(vec3<f32>(0.8,0.7,0.6), vec3<f32>(0.8,0.7,0.6),
-                                    vec3<f32>(0.8,0.7,0.6), vec3<f32>(0.8,0.7,0.6));
-    let scales = array<vec4<f32>,4>(vec4<f32>(1.0,1.0,0.0,0.0), vec4<f32>(0.5,0.0,0.0,0.0),
-                                  vec4<f32>(2.0,2.0,0.0,0.0), vec4<f32>(0.0,0.25,0.0,0.0));
-    output[id.x] = vec4<f32>(native_pbr_scaled_channels(channels[id.x],scales[id.x]),0.37);
-}
-"#,
-    );
+@compute @workgroup_size(1) fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>) {{
+    let channels = array<vec3<f32>,5>(vec3<f32>(0.8,0.7,0.6), vec3<f32>(0.8,0.7,0.6),
+                                    vec3<f32>(0.8,0.7,0.6), vec3<f32>(0.8,0.7,0.6), vec3<f32>(0.8,0.7,0.6));
+    let scales = array<vec4<f32>,5>({scales});
+    output[id.x] = vec4<f32>({helper}(channels[id.x],scales[id.x]),0.37);
+}}
+"#));
     let module = naga::front::wgsl::parse_str(&source).unwrap();
     naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
@@ -64,22 +71,45 @@ fn native_pbr_basic_scaled_preview_and_legacy_shaders_compose() {
 
 #[test]
 fn native_pbr_basic_actual_gpu_preserves_identity_zero_ao_and_clamps_after_scaling() {
+    let actual = gpu_channels_result(channels_probe(false));
+    let expected = [
+        0.8, 0.7, 0.6, 0.37, 0.4, 0.0, 0.6, 0.37, 1.0, 1.0, 0.6, 0.37, 0.08, 0.175, 0.6, 0.37, 0.8,
+        0.7, 0.6, 0.37,
+    ];
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert!((actual - expected).abs() < 1e-6, "{actual} != {expected}");
+    }
+}
+
+#[test]
+fn native_multi_mask_actual_gpu_preserves_off_identity_zero_and_saturates_each_rgb_channel() {
+    let actual = gpu_channels_result(channels_probe(true));
+    let expected = [
+        0.8, 0.7, 0.6, 0.37, 0.8, 0.7, 0.6, 0.37, 0.0, 0.35, 1.0, 0.37, 1.0, 1.0, 0.0, 0.37, 0.8,
+        0.7, 0.6, 0.37,
+    ];
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert!((actual - expected).abs() < 1e-6, "{actual} != {expected}");
+    }
+}
+
+fn gpu_channels_result(module: naga::Module) -> Vec<f32> {
     let (device, queue) =
         super::cull::tests::headless().expect("native PBR scale proof requires GPU");
     let output = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("native PBR scaled channels"),
-        contents: &[0u8; 64],
+        contents: &[0u8; 80],
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
     });
     let staging = device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
-        size: 64,
+        size: 80,
         mapped_at_creation: false,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
     });
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("production native PBR scale probe"),
-        source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(scaled_channels_probe())),
+        source: wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(module)),
     });
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: None,
@@ -102,9 +132,9 @@ fn native_pbr_basic_actual_gpu_preserves_identity_zero_ao_and_clamps_after_scali
         let mut pass = encoder.begin_compute_pass(&Default::default());
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bind, &[]);
-        pass.dispatch_workgroups(4, 1, 1);
+        pass.dispatch_workgroups(5, 1, 1);
     }
-    encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, 64);
+    encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, 80);
     queue.submit([encoder.finish()]);
     let (tx, rx) = std::sync::mpsc::channel();
     staging.slice(..).map_async(wgpu::MapMode::Read, move |r| {
@@ -113,13 +143,8 @@ fn native_pbr_basic_actual_gpu_preserves_identity_zero_ao_and_clamps_after_scali
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     rx.recv().unwrap().unwrap();
     let data = staging.slice(..).get_mapped_range();
-    let actual: &[f32] = bytemuck::cast_slice(&data);
-    let expected = [
-        0.8, 0.7, 0.6, 0.37, 0.4, 0.0, 0.6, 0.37, 1.0, 1.0, 0.6, 0.37, 0.08, 0.175, 0.6, 0.37,
-    ];
-    for (actual, expected) in actual.iter().zip(expected) {
-        assert!((actual - expected).abs() < 1e-6, "{actual} != {expected}");
-    }
+    let actual = bytemuck::cast_slice::<u8, f32>(&data).to_vec();
     drop(data);
     staging.unmap();
+    actual
 }
