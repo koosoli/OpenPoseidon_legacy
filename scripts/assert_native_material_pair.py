@@ -53,7 +53,8 @@ def binding_counts(log, operation, model):
     return result
 
 
-def validate_pair(off, on, material=MATERIAL, model=MODEL, expected_registered=20683):
+def validate_pair(off, on, material=MATERIAL, model=MODEL, expected_registered=20683,
+                  expected_main=6295, expected_triangles=11826164):
     result = {"status": "pass", "scope": "complete-scene-and-registration-bindings-only", "runs": {}}
     for label, run, enabled in (("off", off, "0"), ("on", on, "1")):
         meta, metrics, log = run["meta"], run["metrics"], run["log"]
@@ -77,6 +78,8 @@ def validate_pair(off, on, material=MATERIAL, model=MODEL, expected_registered=2
                 (1920, 1080, 4, False), f"{label}: unsupported render profile")
         require(objects.get("valid") is True and objects["registered_instances"] == expected_registered and
                 objects["main_instances"] > 0 and objects["main_tris"] > 0, f"{label}: incomplete object scene")
+        require((objects["main_instances"], objects["main_tris"]) == (expected_main, expected_triangles),
+                f"{label}: unexpected fixed-camera object counts")
         preparer = metrics["streaming"]["preparer"]
         require(preparer["queued"] == preparer["ready"] == 0, f"{label}: unsettled object preparation")
         require("Wgpu lazy BCR tint:" in log, f"{label}: no actual lazy BCR")
@@ -85,7 +88,7 @@ def validate_pair(off, on, material=MATERIAL, model=MODEL, expected_registered=2
                 f"{label}: no valid terrain timing")
         target = re.escape(material)
         require(re.search(r"authored UV0 tangent preview: material=[^\r\n]*" + target +
-                          r" admission=true producer=3(?:\s|$)", log, re.I), f"{label}: no target authored tangent V3 admission")
+                          r" admission=true producer=4(?:\s|$)", log, re.I), f"{label}: no target authored tangent V4 admission")
         srgb = binding_counts(log, "native PBR sRGB views", model)
         overlay = []
         if enabled == "1":
@@ -122,10 +125,13 @@ def main():
     parser.add_argument("--material", default=MATERIAL)
     parser.add_argument("--model", default=MODEL)
     parser.add_argument("--expected-registered", type=int, default=20683)
+    parser.add_argument("--expected-main", type=int, default=6295)
+    parser.add_argument("--expected-triangles", type=int, default=11826164)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     try:
-        result = validate_pair(load_run(args.off), load_run(args.on), args.material, args.model, args.expected_registered)
+        result = validate_pair(load_run(args.off), load_run(args.on), args.material, args.model, args.expected_registered,
+                               args.expected_main, args.expected_triangles)
     except (ValueError, KeyError, TypeError, OSError) as error:
         parser.exit(1, f"FAIL: {error}\n")
     output = json.dumps(result, indent=2) + "\n"

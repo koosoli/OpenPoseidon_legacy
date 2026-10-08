@@ -9,7 +9,7 @@ def fixture(enabled):
     for key in ("LAYER_ORDER", "NORMAL", "SRGB"):
         env["WGR_REFORGER_" + key + "_MATERIAL"] = MATERIAL
     log = ("Shutdown complete\nWgpu lazy BCR tint: owned fixture\n"
-           "Wgpu authored UV0 tangent preview: material=Assets/" + MATERIAL + " admission=true producer=3\n"
+           "Wgpu authored UV0 tangent preview: material=Assets/" + MATERIAL + " admission=true producer=4\n"
            "[wgr] native PBR sRGB views: model=assets/pubvillage_e_2l01.xob admittedSections=6/6\n")
     if enabled:
         log += ("Wgpu native global overlay preview: material=Assets/" + MATERIAL +
@@ -50,9 +50,9 @@ class MaterialPairTests(unittest.TestCase):
                 "overlay bindings: model=assets/pubvillage_e_2l01.xob admittedSections=" + counts)), "incomplete target")
 
     def test_old_or_declined_tangent_receipt_declines(self):
-        for replacement in ("admission=false producer=3", "admission=true producer=2"):
+        for replacement in ("admission=false producer=4", "admission=true producer=3"):
             self.assert_declines(lambda off, on: on.update(log=on["log"].replace(
-                "admission=true producer=3", replacement)), "authored tangent V3")
+                "admission=true producer=4", replacement)), "authored tangent V4")
 
     def test_empty_scene_and_unsettled_preparer_decline(self):
         self.assert_declines(lambda off, on: on["metrics"]["objects"].update(main_tris=0), "incomplete object scene")
@@ -62,7 +62,13 @@ class MaterialPairTests(unittest.TestCase):
         self.assert_declines(lambda off, on: on["meta"].update(arguments=on["meta"]["arguments"].replace("1 2 3 4 5", "1 2 3 4 6")), "argument differs")
         self.assert_declines(lambda off, on: on["meta"]["env"].update(WGR_OTHER_SWITCH="1"), "Environment differs")
         self.assert_declines(lambda off, on: on["meta"].update(deployed_from="different-build"), "Different installed builds")
-        self.assert_declines(lambda off, on: on["metrics"]["objects"].update(main_instances=1), "Scene counts differ")
+        self.assert_declines(lambda off, on: on["metrics"]["objects"].update(main_instances=1), "fixed-camera object counts")
+
+    def test_matching_but_incomplete_scene_counts_decline(self):
+        def change(off, on):
+            for run in (off, on):
+                run["metrics"]["objects"].update(main_instances=5000, main_tris=10000000)
+        self.assert_declines(change, "fixed-camera object counts")
 
     def test_validation_error_timeout_and_off_overlay_decline(self):
         self.assert_declines(lambda off, on: on.update(log=on["log"] + "Validation Error"), "validation/panic")
