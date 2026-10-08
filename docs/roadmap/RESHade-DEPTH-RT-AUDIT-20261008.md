@@ -189,3 +189,46 @@ null environment setter creates a present empty entry. The harness now writes
 renderer/harness startup it allows only ten seconds for an isolated runtime log
 before reporting injection failure. Target shader compilation keeps its separate
 90 second bound. The feature agent has not executed the revised game test.
+
+## Selected resource contains cleared depth: bounded follow-up
+
+The parent's 09:30 probe on installed `c35727c7` successfully compiled and
+captured the requested effect. With scene overlay zero, its processed image is
+white below the green availability strip. That is consistent with sampled raw
+depth zero throughout, and does not establish usable scene depth. The captured
+config had no `[DEPTH]` settings; the engine log identifies the main format as
+`Depth32FloatStencil8`.
+
+The pinned [official GenericDepth source](https://github.com/crosire/reshade/blob/18deaa52de0c425a78b329e9cb3c497281cd00ec/examples/09-depth/generic_depth_addon.cpp)
+initializes preservation to zero. Its device setup reads
+`[DEPTH] DepthCopyBeforeClears`; value 1 copies before depth clears, including a
+render pass whose attachment load operation clears. Value 2 also copies when
+depth is unbound on Vulkan/D3D12 and prevents the end-of-frame fallback copy.
+`DepthCopyAtClearIndex=0` keeps the automatic workload-based clear choice.
+The source's aspect enum value 3 filters exact output resolution, and format
+filter value 6 selects D32S8. GenericDepth itself adds Vulkan copy-source usage
+when resources are created, so the engine's missing explicit COPY_SRC flag is
+not sufficient evidence that copies are impossible.
+
+Renderer source inspection provides a concrete reason to try preservation:
+`rust/src/gfx3d/mod.rs::ensure_depth` creates the scene depth; at one sample and
+render scale 1 the UI reuses that same resource. In
+`rust/src/lib.rs`, the first segment's prepass clears depth to zero and stores
+it; the world color pass loads/stores it. Later nonprepassed segments clear
+depth again, including the post-Resolve UI segment even when it contains no
+world geometry. Thus the final resource can be empty while the completed
+world had valid depth earlier. This is a source-based explanation, not a
+captured resource identity proof. Scene passes inspected use Store rather
+than Discard. Shadow buffers are separate and normally fail exact-resolution
+filtering.
+
+The installed harness now writes only its new isolated config with
+`DepthCopyBeforeClears=1`, automatic clear choice, exact resolution, and D32S8
+filter. The receipt records every value and primary source. It requires the
+engine's actual float-stencil format log. The parent can rerun the raw probe
+once with that setting. If preservation still fails, one explicit optional
+`-DepthCopyBeforeClears 2` probe tests Vulkan unbind preservation; no automated
+parameter sweep is provided. `-DepthCopyBeforeClears 0` reproduces the earlier
+end-of-frame configuration. No paid shader, engine edit, build, deployment,
+runtime launch or depth handoff was performed here. DH GI remains gated on
+correct scene-aligned depth; a green availability strip alone never qualifies.

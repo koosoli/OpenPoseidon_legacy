@@ -7,6 +7,9 @@ param(
  [Parameter(Mandatory)][string]$RuntimeDirectory,
  [ValidateSet('Probe','DHDebug','DH')][string]$Mode='Probe',
  [ValidateSet(1,2,4,8)][int]$MsaaSamples=1,
+ # Official GenericDepth 6.8: 0=end-of-frame, 1=before-clears,
+ # 2=before-clears plus Vulkan depth-unbind copies (no end-of-frame fallback).
+ [ValidateSet(0,1,2)][int]$DepthCopyBeforeClears=1,
  [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault')
 $ErrorActionPreference='Stop'
 function Require($ok,[string]$message){if(!$ok){throw $message}}
@@ -65,6 +68,11 @@ TutorialProgress=4
 ShowScreenshotMessage=0
 [SCREENSHOT]
 SavePath=.\Screenshots
+[DEPTH]
+DepthCopyBeforeClears=$DepthCopyBeforeClears
+DepthCopyAtClearIndex=0
+UseAspectRatioHeuristics=3
+FilterFormat=6
 "@ | Set-Content -LiteralPath (Join-Path $runtime 'ReShade.ini') -Encoding UTF8
 @'
 version=11;
@@ -94,6 +102,9 @@ foreach($key in $keys){
 }
 $receipt=@{installed=$stamp;mode=$Mode;selectedTechnique=$technique;selectedPreset=$presetName;
  sourceRuntime=$source;scratch=$scratch;runtime=$runtime;msaaSamples=$MsaaSamples;optionalReShade=1;
+ genericDepth=@{DepthCopyBeforeClears=$DepthCopyBeforeClears;DepthCopyAtClearIndex=0;UseAspectRatioHeuristics=3;FilterFormat=6;
+  scope='Official 6.8 GenericDepth isolated configuration: exact output resolution and D32S8; clear-index selection remains automatic';
+  source='https://github.com/crosire/reshade/blob/18deaa52de0c425a78b329e9cb3c497281cd00ec/examples/09-depth/generic_depth_addon.cpp'};
  captureSucceeded=$false;visualAccepted=$false;depthAvailability='Pending operator inspection of probe/debug image';
  performanceScope='Engine frame_performance timers exclude injected ReShade GPU work; no total GPU cost claim';
  depthHint='Probe top strip: red=no selected DEPTH resource; green=selected resource only. Check scene geometry alignment.';
@@ -144,6 +155,7 @@ try{
  }
  $receipt.runtimeLogCreated=$true
  Require (Select-String -Path $log -Pattern 'Optional ReShade requested for this launch' -Quiet) 'Engine validated ReShade startup opt-in was not evidenced in game.log'
+ Require (Select-String -Path $log -Pattern 'wgpu scene depth: Depth32FloatStencil8' -Quiet) 'D32S8 filter requires the verified float-stencil scene format; inspect engine depth format before another test'
  while(([string](Send @{cmd='eval';code='triSceneReady'}).result).Trim('"')-cne'OK'){
   Require ([DateTime]::UtcNow-lt$deadline) 'Scene startup deadline';Start-Sleep -Milliseconds 250
  }
