@@ -584,3 +584,47 @@ active-fog refusal test at `build/reshade-depth/20261008-163540-SceneDH`.
 The previously accepted fog-free beauty pair records about 2.115 ms median
 for the GI GPU bracket, excluding engine snapshot/overlay costs. ReShade
 remains off by default, and DH GI remains unavailable while native fog is active.
+
+## Follow-up integration, 17:25 build
+
+Installed matched pair `cab9f2d6` contains the road-emission classifier,
+concentrated near atlas and both actual Reforger admission corrections.
+The targeted compiled engine tests pass 1584 assertions (41 cases passed,
+one fixture-dependent case skipped), and the material receipt validator passes
+nine synthetic positive/negative controls.
+
+The corrected external road index is
+`D:/OpenPoseidon-Worldgen-Lab-20261008/worldgen-regions-ground-roads-emission.json`.
+The user launcher selects it. On installed `88098b01`, the runtime receipt at
+`build/earth-worldgen-regions-installed/20261008-171023-420432/result.json`
+passes all three poses with current ACT imagery. Image inspection confirms the
+large detached road-shadow patch at the upper-left city crossing disappears.
+Some other floating or disconnected road pieces remain, and Mamer's inspected
+house appears partially buried; overall road/building placement is not accepted.
+Actual city fitted count rises 92 to 115 at that pose, with 2048 instances
+unchanged. The source classifier preserves nearby elevated/tunnel vetoes.
+CPU reproduction of city886/887 reduces their vertical endpoint gap from
+9.93965 m to 0.05019 m; a roughly 0.303 m horizontal overlap is unchanged.
+
+The new near atlas redistributes the existing 2048-square texture's texels:
+3.125 m linear spacing becomes 0.781 m at centre. No texture, draw or memory
+count is added. The exact inverse CPU chart and analytic shader gradients are
+paired only for an uploaded near texture. The far atlas, globe and NASA fallback
+retain linear coordinates. Actual cached compositions pass with unchanged input
+hashes: 3.812 s cold, 3.003 s warm recenter, 2.631 s Mamer in this CPU observation.
+Mamer's approximately 4.8 m source remains intrinsically coarse. Installed
+appearance and frame-cost comparison are pending.
+
+The actual Reforger tangent failure was independent of texture alpha: XOB
+source and render triangles were ordered differently. Exact oriented-triangle
+correspondence now transports corner frames while preserving source geometry,
+UVs and ordering; duplicates without unique correspondence decline. Producer4
+invalidates prior cached imports. A separate narrow data-role policy preserves
+original linear BC7 MCR alpha under all selected preview gates. Ordinary and
+sRGB textures retain their former behavior.
+
+The first installed `cab9f2d6` ON log now records tangent admission=true,
+producer4, global overlay sourceAdmission=true and actual Rust bindings 6/6
+for the target Pub model. This establishes actual material registration,
+not every LOD's eligibility or final visual fidelity. The fixed-camera OFF/ON
+lifecycle, images and costs are being checked next.
