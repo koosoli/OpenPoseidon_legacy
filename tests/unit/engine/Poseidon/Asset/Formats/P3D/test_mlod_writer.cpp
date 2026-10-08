@@ -577,6 +577,43 @@ TEST_CASE("Authored UV0 tangent sidecar preserves seams winding and cache proven
     auto staleV2=partial;
     staleV2.metadata[Enfusion::kXobTangentProducerKey]="XOB_TSPACE_UV0_V2";
     REQUIRE_FALSE(Enfusion::HasXobAuthoredTangentProducer(staleV2));
+    auto staleV3=partial;
+    staleV3.metadata[Enfusion::kXobTangentProducerKey]="XOB_TSPACE_UV0_V3";
+    REQUIRE_FALSE(Enfusion::HasXobAuthoredTangentProducer(staleV3));
+    // Two triangle streams with different triangle order and cyclic corner order.
+    Enfusion::XobPart reordered;
+    reordered.positions.resize(4);
+    reordered.indices={0,1,2, 0,2,3};
+    reordered.renderSource={0,1,2,0,2,3};
+    reordered.renderIndices={4,5,3, 1,2,0};
+    const auto corners=Enfusion::XobAuthoredRenderCornerMap(reordered);
+    REQUIRE(corners==std::vector<uint32_t>{0,1,2,3,4,5});
+    auto reversed=reordered;
+    std::swap(reversed.renderIndices[0],reversed.renderIndices[1]);
+    REQUIRE(Enfusion::XobAuthoredRenderCornerMap(reversed).empty()); // reversed winding is different
+    auto missing=reordered;
+    missing.renderIndices.resize(3);
+    REQUIRE(Enfusion::XobAuthoredRenderCornerMap(missing).empty());
+    auto duplicate=reordered;
+    duplicate.indices={0,1,2, 0,1,2};
+    duplicate.renderSource={0,1,2,0,1,2};
+    duplicate.renderIndices={0,1,2,3,4,5};
+    duplicate.tangents={{1,0,0},{1,0,0},{1,0,0},{0,1,0},{0,1,0},{0,1,0}};
+    duplicate.bitangents={{0,1,0},{0,1,0},{0,1,0},{1,0,0},{1,0,0},{1,0,0}};
+    const auto ambiguous=Enfusion::XobAuthoredRenderCornerMap(duplicate);
+    REQUIRE(ambiguous.size()==6);
+    for (uint32_t corner : ambiguous) REQUIRE(corner==UINT32_MAX); // cannot assign the seam arbitrarily
+    auto wrongMultiplicity=duplicate;
+    wrongMultiplicity.indices=reordered.indices;
+    REQUIRE(Enfusion::XobAuthoredRenderCornerMap(wrongMultiplicity).empty());
+    auto invalidIndex=reordered;
+    invalidIndex.renderIndices[0]=99;
+    REQUIRE(Enfusion::XobAuthoredRenderCornerMap(invalidIndex).empty());
+    auto degenerate=reordered;
+    degenerate.indices={0,0,1};degenerate.renderSource={0,0,1};degenerate.renderIndices={0,1,2};
+    const auto degenerateCorners=Enfusion::XobAuthoredRenderCornerMap(degenerate);
+    REQUIRE(degenerateCorners.size()==3);
+    for (uint32_t corner : degenerateCorners) REQUIRE(corner==UINT32_MAX);
     source.tangentFrames[0].pop_back();
     auto mismatch=MLODLoader::loadFromBuffer(bytes.data(),int(bytes.size()),"owned.xob",&source.tangentFrames);
     for (const auto& v : mismatch.lodLevels[0].mesh.vertices) REQUIRE_FALSE(v.hasTangentFrame);

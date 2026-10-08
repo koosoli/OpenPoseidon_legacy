@@ -141,7 +141,7 @@ Asset::Cache::DerivedAssetKey ModelDerivedCache::MakeKey(const std::string& virt
     // Opt-in imports retain a different, versioned corner basis. Old blobs lack
     // producer provenance and must not be reused for this configuration.
     if (Asset::Formats::Enfusion::XobAuthoredTangentPreviewEnabled())
-        key.AddOption("authoredUv0TangentProducer", "3");
+        key.AddOption("authoredUv0TangentProducer", "4");
     return key;
 }
 

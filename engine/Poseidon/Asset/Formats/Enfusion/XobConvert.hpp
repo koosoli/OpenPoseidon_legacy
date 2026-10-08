@@ -698,10 +698,15 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
             // position/normal come through renderSource, its UV from the render vertex.
             const bool renderUv = !part.renderUvSets.empty() && part.renderIndices.size() == part.indices.size() &&
                                   part.renderUvSets[0].size() == part.renderSource.size();
+            const auto authoredCorners = preserveTangentFrame && !renderUv && XobRenderUvWord()==0
+                ? XobAuthoredRenderCornerMap(part) : std::vector<uint32_t>{};
             for (size_t t = 0; t + 2 < part.indices.size(); t += 3)
             {
                 uint16_t corner[3] = {part.indices[t], part.indices[t + 1], part.indices[t + 2]};
                 uint16_t rcorner[3] = {part.renderIndices[t], part.renderIndices[t + 1], part.renderIndices[t + 2]};
+                uint32_t tcorner[3] = {UINT32_MAX,UINT32_MAX,UINT32_MAX};
+                if (!authoredCorners.empty())
+                    for (int c=0;c<3;++c) tcorner[c]=authoredCorners[t+c];
                 if (renderUv)
                     for (int c = 0; c < 3; ++c)
                         corner[c] = static_cast<uint16_t>(part.renderSource[rcorner[c]]);
@@ -712,6 +717,7 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                 {
                     std::swap(corner[0], corner[1]);
                     std::swap(rcorner[0], rcorner[1]);
+                    std::swap(tcorner[0], tcorner[1]);
                 }
 
                 {
@@ -765,7 +771,7 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                     // Only the ordinary two-direction packing is supported. Experimental
                     // render-UV word interpretations and skinning must not qualify.
                     for (int c = 0; c < 3; ++c)
-                        frames[c] = XobCornerTangentFrame(part, rcorner[c], corner[c], XobRenderUvWord());
+                        frames[c] = XobCornerTangentFrame(part, tcorner[c], corner[c], XobRenderUvWord());
                     tangentFrames.push_back(frames);
                 }
                 writeLod.faces.push_back(std::move(face));

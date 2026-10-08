@@ -8,6 +8,8 @@
 #include <memory>
 #include <Poseidon/Asset/Formats/Enfusion/XobTangentFrame.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/MeshBuild.hpp>
+#include <Poseidon/Asset/Formats/P3D/MLODLoader.hpp>
+#include <Poseidon/Asset/Formats/P3D/MLODWriter.hpp>
 
 using namespace Poseidon::Model;
 
@@ -229,4 +231,53 @@ TEST_CASE("Authored tangent admission follows section corner references", "[Shap
     REQUIRE(admitted==1);
     REQUIRE_FALSE(Poseidon::render::mesh::HasAuthoredSectionTangentFrame(lod,-1));
     REQUIRE_FALSE(Poseidon::render::mesh::HasAuthoredSectionTangentFrame(lod,lod.NSections()));
+}
+
+TEST_CASE("Reordered authored render corners survive MLOD and runtime section admission",
+          "[ShapeAdapter][tangent][authored][corner-order]")
+{
+    namespace F=Poseidon::Asset::Formats;
+    namespace E=F::Enfusion;
+    E::XobPart part;
+    part.positions={{0,0,0},{1,0,0},{1,1,0},{0,1,0}};
+    part.indices={0,1,2,0,2,3};
+    part.renderSource={0,1,2,0,2,3};
+    part.renderIndices={4,5,3,1,2,0};
+    part.tangents={{1,0,0},{1,0,0},{1,0,0},{0,1,0},{0,1,0},{0,1,0}};
+    part.bitangents={{0,1,0},{0,1,0},{0,1,0},{-1,0,0},{-1,0,0},{-1,0,0}};
+    const auto check=[&](const E::XobPart& input,bool expected) {
+        F::MLOD::WriteModel write;
+        F::MLOD::WriteLod lod;
+        for(const auto& p:input.positions) {lod.points.push_back({{p.x,p.y,p.z},0});lod.normals.push_back({0,0,1});}
+        const auto mapped=E::XobAuthoredRenderCornerMap(input);
+        write.tangentFrames.resize(1);
+        for(size_t t=0;t<input.indices.size();t+=3) {
+            F::MLOD::WriteFace face;face.vertexCount=3;
+            F::MLOD::FaceTangentFrames frames{};
+            for(int c=0;c<3;++c) {
+                face.vertices[c].point=input.indices[t+c];face.vertices[c].normal=input.indices[t+c];
+                if(!mapped.empty()) frames[c]=E::XobCornerTangentFrame(input,mapped[t+c],input.indices[t+c],0);
+            }
+            lod.faces.push_back(face);write.tangentFrames[0].push_back(frames);
+        }
+        write.lods.push_back(lod);
+        const auto bytes=F::MLODWriter::writeToBuffer(write);
+        auto model=F::MLODLoader::loadFromBuffer(bytes.data(),int(bytes.size()),"owned.xob",&write.tangentFrames);
+        E::MarkXobAuthoredTangentProducer(model);
+        REQUIRE(model.compile());
+        Poseidon::Model::ShapeAdapter::AdapterBankTables tables;
+        std::unique_ptr<LODShapeWithShadow> result(ShapeAdapter::convertToLODShape(model,false,&tables));
+        REQUIRE(result);
+        const auto& native=*result->Level(0);
+        REQUIRE(native.NSections()==1);
+        REQUIRE(Poseidon::render::mesh::HasAuthoredSectionTangentFrame(native,0)==expected);
+        if(expected) {
+            REQUIRE(native.NVertex()==6); // authored tangent seams remain distinct
+            for(int v=0;v<native.NVertex();++v) REQUIRE(native.HasAuthoredTangentVertex(v));
+        }
+    };
+    check(part,true);
+    auto reversed=part;std::swap(reversed.renderIndices[0],reversed.renderIndices[1]);check(reversed,false);
+    auto duplicated=part;duplicated.indices={0,1,2,0,1,2};duplicated.renderSource={0,1,2,0,1,2};
+    duplicated.renderIndices={0,1,2,3,4,5};check(duplicated,false);
 }

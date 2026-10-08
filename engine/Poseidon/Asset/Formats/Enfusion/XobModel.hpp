@@ -61,7 +61,8 @@
 //
 // Two vertex STREAMS, not two meshes. Index list A runs over the deduplicated
 // `vertexCount` stream; list B runs over the `renderVertexCount` stream, and mapping
-// every B index through its source index reproduces list A's triangles exactly
+// every B index through its source index reproduces list A's oriented triangle
+// multiset; triangle order and cyclic corner order can differ
 // (14,502 / 14,502 parts). A source vertex is repeated only when it needs a second
 // tangent frame at a UV seam, which is why renderVertexCount >= vertexCount.
 //
