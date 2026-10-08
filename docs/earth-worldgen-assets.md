@@ -186,6 +186,59 @@ index path/bounds/count rejection. `Test-EarthWorldgen.ps1 -Manifest` accepts
 either a manifest or an index for actual prepared-source CPU parsing. Installed
 acceptance must still check actual model visibility and boundary transitions.
 
+## Installed two-region residency check
+
+`scripts/Test-EarthWorldgenRegionsInstalled.ps1 -SelfTest` checks its receipt
+parsers and rejection controls without accessing the game. The installed run
+requires the matching deployment's `-ExpectedCommit` and the shared game lock:
+
+```bash
+LOCK_OWNER="Earth Worldgen region acceptance" scripts/with-game-lock.sh \
+  pwsh -NoProfile -File scripts/Test-EarthWorldgenRegionsInstalled.ps1 \
+  -ExpectedCommit <installed-source-commit>
+```
+
+The default index is the external lab file
+`D:/OpenPoseidon-Worldgen-Lab-20261008/worldgen-regions-complete.json`. Prepare
+exactly two entries under that common directory: ID 1 references
+`lux-region-03/generated/manifest.json` with bbox
+`[49.6035,6.12,49.6165,6.14]`; ID 2 references
+`mamer-worldgen-complete-02/generated/manifest.json` with bbox
+`[49.59,6.00,49.64,6.08]`. Use the region-index schema above. Both paths must
+remain relative and contained. Override `-Index`/region IDs for another prepared
+index matching these two geographic fixtures. Inputs are hashed before and after
+the run. The script neither generates source regions nor downloads missing DEM
+tiles; the cached Earth windows for both poses must already be available.
+
+Mount only the complete Mamer `@CWR-Milestone4/AddOns` archive root (the default
+`-AddonRoot` accepts either the mod directory or its `AddOns` directory). Its
+generated water-tower model uses the same `earth_lux_worldgen` PBO prefix as the
+city output. City model references are stock assets, so simultaneously mounting
+both same-prefix PBOs would introduce ambiguous lookup without adding required
+models. The original installed stock assets remain required.
+
+The bounded run captures city at origin `[49.61,6.13]`, Mamer at
+`[49.615,6.04]`, then the same city view. Each geographic Go must invalidate the
+previous ground revision, receive fresh resident elevation, and complete model
+admission for that exact revision/generation. It also holds and releases actual
+SDL D once across a 256-metre request-cell edge before the first capture, proving
+ordinary camera movement can refresh the selection without geographic Go.
+Captures wait 30 rendered frames after admission and verify actual camera
+position, view direction and 5–30-metre ground clearance. Logs must show the
+requested region, city-source retirement at Mamer, a globally bounded 2,048
+selected/created placements, successful road/house/tree model registration and
+zero publication/model errors. Returning to the same city pose must reproduce
+its source, covered, selected, created and resident-region counts.
+
+The process owns one PID, exits it cleanly and verifies the deployment stamp is
+unchanged. `build/earth-worldgen-regions-installed/<run>/result.json` and three
+PNG files retain the evidence. A diagnostic PASS does **not** accept their
+visual quality, object collision, road navigation or upstream playability.
+The runtime bridge exposes counts and resident region IDs, not individual
+placement IDs or retired GPU slots; their stable namespace behavior remains
+covered by the CPU tests, not claimed by this installed receipt. This finite
+check covers two offline prepared outputs, not worldwide populated data.
+
 ## First actual offline region receipt
 
 On 2026-10-08, upstream M4 at the source revision above generated a Luxembourg
