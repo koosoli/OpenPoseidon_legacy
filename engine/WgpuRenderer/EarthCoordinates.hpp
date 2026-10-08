@@ -10,6 +10,7 @@ constexpr double Pi = 3.14159265358979323846;
 constexpr double Radius = 6378137.0;
 constexpr double MaxLatitude = 85.0511287798066;
 constexpr int Zoom = 10;
+constexpr int MaxZoom = 12;
 constexpr int TilePixels = 256;
 constexpr int GridSamples = 257;
 constexpr float GridMetres = 100.0f;
@@ -19,6 +20,22 @@ constexpr float HalfWindow = 128 * GridMetres;
 constexpr int HorizonSamples = 257;
 constexpr int HorizonInnerBegin = 96;
 constexpr int HorizonInnerEnd = 160;
+
+enum class NearDetail { Coarse, Fine };
+// Hysteresis keeps small altitude changes from rebuilding/downloading a patch.
+// Both bands retain 257 samples: detail spends coverage, not more vertices.
+inline NearDetail SelectNearDetail(float altitude, NearDetail current)
+{
+    if (!std::isfinite(altitude)) return current;
+    if (altitude <= 8000.0f) return NearDetail::Fine;
+    if (altitude >= 12000.0f) return NearDetail::Coarse;
+    return current;
+}
+constexpr float NearGrid(NearDetail detail) { return detail == NearDetail::Fine ? 25.0f : GridMetres; }
+constexpr int NearZoom(NearDetail detail) { return detail == NearDetail::Fine ? MaxZoom : Zoom; }
+constexpr float NearHalfWindow(float grid) { return 128.0f * grid; }
+constexpr float NearRecenter(float grid) { return 32.0f * grid; }
+constexpr float NearBlendWidth(float grid) { return 40.0f * grid; }
 
 // Stable spherical sagitta, in the fixed origin's tangent frame. The rational
 // form avoids subtracting two Earth-sized numbers near the origin. This is a
@@ -42,20 +59,20 @@ inline float HorizonRadius(float altitude)
 
 // A dense inner boundary exactly matches the near window. Quadratically spaced
 // outer samples cover the horizon with a fixed vertex/triangle budget.
-inline float HorizonOffset(int i, float radius)
+inline float HorizonOffset(int i, float radius, float halfWindow = HalfWindow)
 {
     if (i >= HorizonInnerBegin && i <= HorizonInnerEnd)
-        return (i - 128) * (HalfWindow / 32.0f);
+        return (i - 128) * (halfWindow / 32.0f);
     const bool left = i < HorizonInnerBegin;
     const float t = float(left ? HorizonInnerBegin - i : i - HorizonInnerEnd) / 96.0f;
-    const float distance = HalfWindow + (radius - HalfWindow) * t * t;
+    const float distance = halfWindow + (radius - halfWindow) * t * t;
     return left ? -distance : distance;
 }
 
 inline int HorizonZoom(double latitude, float radius)
 {
-    // Roughly four source tiles span the whole far window. The inner seam still
-    // samples zoom 10; very distant terrain does not download fine source tiles.
+    // Roughly four source tiles span the whole far window. The inner seam uses
+    // the selected near source separately; distant terrain never needs zoom 12.
     const double circumference = 2.0 * Pi * Radius * std::cos(latitude * Pi / 180.0);
     return std::clamp(int(std::floor(std::log2(circumference * 2.0 / radius))), 3, Zoom);
 }
@@ -111,5 +128,5 @@ inline float Terrarium(unsigned char r, unsigned char g, unsigned char b)
     return float(int(r) * 256 + int(g) - 32768) + float(b) / 256.0f;
 }
 
-inline int CenterCell(float coordinate) { return int(std::floor(coordinate / RecenterMetres)); }
+inline int CenterCell(float coordinate, float stride = RecenterMetres) { return int(std::floor(coordinate / stride)); }
 }

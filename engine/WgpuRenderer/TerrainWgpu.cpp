@@ -3276,35 +3276,41 @@ void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p)
 {
     constexpr int n = Earth::HorizonSamples;
     std::vector<WgrMeshVertex> vertices(n*n);
-    const float cx = p.x + Earth::HalfWindow, cz = p.z + Earth::HalfWindow;
+    vertices.reserve(n*n + Earth::GridSamples*Earth::GridSamples + 4*256*4);
+    const float halfWindow = Earth::NearHalfWindow(p.gridMetres);
+    const float cx = p.x + halfWindow, cz = p.z + halfWindow;
+    const auto geographicUv = [&](float x, float z) {
+        // Always use the fixed geographic origin. Replacing its latitude with
+        // a moving patch centre changes the longitude scale and swims imagery.
+        const auto geo=Earth::FromLocal(p.originLatitude,p.originLongitude,x,z);
+        return WgrVec2{float((geo.longitude+180.0)/360.0),float((90.0-geo.latitude)/180.0)};
+    };
     for (int z = 0; z < n; ++z)
     {
         for (int x = 0; x < n; ++x)
         {
             auto& v = vertices[z*n+x];
-            v.pos = {cx + Earth::HorizonOffset(x,p.horizonRadius),p.horizonHeights[z*n+x],
-                     cz + Earth::HorizonOffset(z,p.horizonRadius)};
+            v.pos = {cx + Earth::HorizonOffset(x,p.horizonRadius,halfWindow),p.horizonHeights[z*n+x],
+                     cz + Earth::HorizonOffset(z,p.horizonRadius,halfWindow)};
             const int loX = std::max(0,x-1), hiX = std::min(n-1,x+1);
             const int loZ = std::max(0,z-1), hiZ = std::min(n-1,z+1);
             const float dx = (p.horizonHeights[z*n+hiX] - p.horizonHeights[z*n+loX]) /
-                (Earth::HorizonOffset(hiX,p.horizonRadius)-Earth::HorizonOffset(loX,p.horizonRadius));
+                (Earth::HorizonOffset(hiX,p.horizonRadius,halfWindow)-Earth::HorizonOffset(loX,p.horizonRadius,halfWindow));
             const float dz = (p.horizonHeights[hiZ*n+x] - p.horizonHeights[loZ*n+x]) /
-                (Earth::HorizonOffset(hiZ,p.horizonRadius)-Earth::HorizonOffset(loZ,p.horizonRadius));
+                (Earth::HorizonOffset(hiZ,p.horizonRadius,halfWindow)-Earth::HorizonOffset(loZ,p.horizonRadius,halfWindow));
             const float inv = 1.0f / std::sqrt(dx*dx+dz*dz+1.0f);
             v.normal = {-dx*inv,inv,-dz*inv};
-            const auto geo=Earth::FromLocal(p.latitude,p.longitude,
-                Earth::Anchor+v.pos.x-cx,Earth::Anchor+v.pos.z-cz);
-            v.uv={float((geo.longitude+180.0)/360.0),float((90.0-geo.latitude)/180.0)};
+            v.uv=geographicUv(v.pos.x,v.pos.z);
         }
     }
     std::vector<uint32_t> indices;
-    indices.reserve((n-1)*(n-1)*6);
+    indices.reserve(((n-1)*(n-1) + 256*256 + 4*256)*6);
     for (int z = 0; z < n-1; ++z)
     {
         for (int x = 0; x < n-1; ++x)
         {
             // Leave exactly the near terrain's rectangle open. Both regions
-            // are published together and share the boundary's zoom-10 heights.
+            // are published together and share the selected near-source heights.
             if (x >= Earth::HorizonInnerBegin && x < Earth::HorizonInnerEnd &&
                 z >= Earth::HorizonInnerBegin && z < Earth::HorizonInnerEnd) continue;
             const uint32_t a = z*n+x, b = a+1, c = a+n, d = c+1;
@@ -3312,16 +3318,37 @@ void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p)
             indices.insert(indices.end(),{a,c,b,b,c,d});
         }
     }
+    const auto point = [&](int x,int z) {
+        constexpr int size=Earth::GridSamples;
+        WgrMeshVertex v{};
+        v.pos = {p.x+x*p.gridMetres,p.heights[z*size+x],p.z+z*p.gridMetres};
+        const int loX=std::max(0,x-1), hiX=std::min(size-1,x+1);
+        const int loZ=std::max(0,z-1), hiZ=std::min(size-1,z+1);
+        const float dx=(p.heights[z*size+hiX]-p.heights[z*size+loX])/((hiX-loX)*p.gridMetres);
+        const float dz=(p.heights[hiZ*size+x]-p.heights[loZ*size+x])/((hiZ-loZ)*p.gridMetres);
+        const float inv=1.0f/std::sqrt(dx*dx+dz*dz+1.0f);
+        // Heights already include Earth's curvature, so this gradient follows
+        // the spherical up direction rather than lighting every patch as flat.
+        v.normal={-dx*inv,inv,-dz*inv};
+        v.uv=geographicUv(v.pos.x,v.pos.z);
+        return v;
+    };
+    // The near mesh shares the far mesh's imagery and Earth material route.
+    // Its 257² vertices are bounded at either resolution; no finite CWA ground
+    // tile/cave material is drawn underneath the geographic terrain preview.
+    const uint32_t nearBase=uint32_t(vertices.size());
+    for(int z=0;z<Earth::GridSamples;++z)
+        for(int x=0;x<Earth::GridSamples;++x) vertices.push_back(point(x,z));
+    for(int z=0;z<Earth::GridSamples-1;++z)
+        for(int x=0;x<Earth::GridSamples-1;++x)
+        {
+            const uint32_t a=nearBase+z*Earth::GridSamples+x, b=a+1, c=a+Earth::GridSamples, d=c+1;
+            indices.insert(indices.end(),{a,c,b,b,c,d});
+        }
     // Vertical edge skirts close the fine-grid/coarse-boundary T junctions;
     // they do not cover or move either region's top surface.
     auto skirt = [&](int x0,int z0,int x1,int z1) {
         const uint32_t a = uint32_t(vertices.size());
-        const auto point = [&](int x,int z) {
-            WgrMeshVertex v{};
-            v.pos = {p.x+x*Earth::GridMetres,p.heights[z*Earth::GridSamples+x],p.z+z*Earth::GridMetres};
-            v.normal = {0,1,0};
-            return v;
-        };
         auto first = point(x0,z0), second = point(x1,z1);
         vertices.push_back(first); vertices.push_back(second);
         first.pos.y -= 300.0f; second.pos.y -= 300.0f;
@@ -3363,8 +3390,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         _earthPatch = std::move(patch);
         const auto& p = *_earthPatch;
         _params.world_origin = {p.x, p.z};
-        _params.terrain_grid = Earth::GridMetres;
-        _params.land_grid = Earth::GridMetres;
+        _params.terrain_grid = p.gridMetres;
+        _params.land_grid = p.gridMetres;
         _params.hm_width = _params.hm_height = Earth::GridSamples;
         _params.land_range = Earth::GridSamples;
         _params.sea_level = -12000.0f;
@@ -3372,38 +3399,18 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         EngineWgpu::AcquireProducerWindow("Earth terrain patch");
         UploadEarthHorizon(p);
         wgr_terrain_set_heightmap(_renderer, p.heights.data(), &_params);
-        auto bounds = [&](int x, int z, int span, float& mn, float& mx) {
-            CdlodHeightBounds(x,z,span,Earth::GridSamples,false,
-                [&](int row,int col) { return p.heights[row*Earth::GridSamples+col]; },mn,mx);
-        };
-        BuildCdlodTree(Earth::GridSamples-1,0,0,Earth::GridMetres,TerrainGridN,bounds,
-            _tree,_rootIndex,_numLevels,_leafSize);
-        for (auto& node : _tree) { node.originX += p.x; node.originZ += p.z; }
-        ComputeCdlodRanges(_leafSize*_baseMult,_lodRatio,_numLevels,_ranges);
         const auto extrema = std::minmax_element(p.heights.begin(),p.heights.end());
         LOG_INFO(Graphics, "Earth terrain patch {}: origin [{},{}], centre [{},{}], height {}..{}m, downloads {}, disk hits {}, worker {}s",
             p.generation,p.x,p.z,p.latitude,p.longitude,*extrema.first,*extrema.second,p.downloads,p.cacheHits,p.seconds);
         LOG_INFO(Graphics, "Earth horizon: radius {}km, source zoom {}, {} triangles; curved tangent projection",
             p.horizonRadius/1000.0f,p.horizonZoom,_earthHorizonIndices/3);
+        LOG_INFO(Graphics, "Earth near detail: grid {}m, source zoom {}, window {}km, recenter {}m",
+            p.gridMetres,p.sourceZoom,p.gridMetres*256.0f/1000.0f,Earth::NearRecenter(p.gridMetres));
     }
     if (!_earthPatch) return;
+    // Retain the native heightmap for terrain/fog queries, but the geographic
+    // surface itself is the bounded near/far Earth mesh with shared imagery.
     _engine.QueueTerrainParams(_params);
-    const auto& patch = *_earthPatch;
-    _selected.clear();
-    SelectVisibleCdlod(_tree,_rootIndex,_numLevels,_ranges,_morphRegion,camera,
-        patch.x,patch.z,patch.x+256*Earth::GridMetres,patch.z+256*Earth::GridMetres,
-        [](const CdlodNode&) { return true; },[&](const CdlodSelection& s) {
-            _selected.push_back({{s.originX,s.originZ},s.size,uint32_t(s.level),s.morphStart,s.morphEnd});
-        },0.0f,true);
-    if (_selected.empty())
-    {
-        // At stratospheric heights even the coarsest ordinary terrain LOD
-        // range is shorter than camera-to-ground distance. Keep the centre
-        // filled instead of opening a square hole in the horizon mesh.
-        _selected.push_back({{patch.x,patch.z},256*Earth::GridMetres,
-            uint32_t(_numLevels-1),1.0e10f,2.0e10f});
-    }
-    _engine.SubmitTerrain(_selected);
     _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices,_earthGlobeTexture);
 }
 
