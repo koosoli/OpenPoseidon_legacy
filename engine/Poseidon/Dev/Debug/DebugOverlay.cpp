@@ -7604,11 +7604,16 @@ void DrawMainWindow()
                 });
             };
             if (Dev::Button("Go##Earth")) go(location.latitude,location.longitude,location.altitude);
+            Dev::PanelSameLine();
+            if (Dev::Button("Globe##Earth")) go(current.latitude,current.longitude,18000000);
+            Dev::PanelSameLine();
+            if (Dev::Button("Luxembourg##Earth")) go(49.61,6.13,1000);
             if (Dev::Button("Alps##Earth")) go(46.6,8.1,4500);
             Dev::PanelSameLine();
             if (Dev::Button("Grand Canyon##Earth")) go(36.1,-112.1,6000);
             Dev::PanelSameLine();
             if (Dev::Button("Dateline##Earth")) go(-16.8,179.95,12000);
+            Dev::PanelHelp("Freefly: W/S follow the view, Shift accelerates, mouse wheel changes travel speed.");
             ImGui::Text("Origin %.6f, %.6f; revision %llu",current.latitude,current.longitude,
                 static_cast<unsigned long long>(current.revision));
             ImGui::TextWrapped("%s",s_zeusStatus.c_str());
