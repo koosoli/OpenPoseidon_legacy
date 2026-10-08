@@ -9,6 +9,7 @@
 #include "TerrainPuddles.hpp"
 #include "EarthTerrainStream.hpp"
 #include "EarthBuildingStream.hpp"
+#include "EarthSurfaceStream.hpp"
 
 #include <cstdint>
 #include <string>
@@ -125,6 +126,10 @@ class TerrainWgpu : public ITerrainRenderer
     std::unique_ptr<EarthTerrainStream> _earthStream;
     std::unique_ptr<EarthTerrainStream::Patch> _earthPatch;
     std::unique_ptr<EarthBuildingStream> _earthBuildings;
+    std::unique_ptr<EarthSurfaceStream> _earthSurface;
+    WgrMesh _earthNearMesh=0;
+    uint32_t _earthNearIndices=0;
+    WgrTexture _earthSurfaceTexture=0;
     WgrMesh _earthBuildingMesh=0;
     uint32_t _earthBuildingIndices=0;
     uint64_t _earthBuildingGeneration=0;
@@ -136,6 +141,7 @@ class TerrainWgpu : public ITerrainRenderer
     uint64_t _earthOriginRevision = 0;
     void UploadEarthGlobe(double latitude,double longitude);
     void UploadEarthHorizon(const EarthTerrainStream::Patch& patch);
+    void UploadEarthNear(const EarthTerrainStream::Patch& patch,bool localUv);
     // (Re)uploads and rebuilds the quadtree when the map changes; returns true if it did.
     bool UploadIfNeeded(const Landscape& land);
     void BuildQuadtree(const Landscape& land);
