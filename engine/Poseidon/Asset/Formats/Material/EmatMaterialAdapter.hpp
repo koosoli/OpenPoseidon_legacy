@@ -566,6 +566,67 @@ inline bool ReadNativePbrStandardMasks(const EmatMaterial& emat,
     return true;
 }
 
+inline bool ReadNativePbrNormalUv(const EmatMaterial& emat, const std::string& name,
+                                 std::array<float, 4>& uv, bool required)
+{
+    const auto* transform = emat.Find(name);
+    if (!transform) return !required;
+    for (size_t i = 0; i < transform->values.size(); ++i)
+    {
+        const auto& key = transform->values[i];
+        if (key.isNumber) return false;
+        int lane = -1;
+        if (EmatMaterial::NameMatches(key.text, "TilingU")) lane = 0;
+        else if (EmatMaterial::NameMatches(key.text, "TilingV")) lane = 1;
+        else if (EmatMaterial::NameMatches(key.text, "OffsetU")) lane = 2;
+        else if (EmatMaterial::NameMatches(key.text, "OffsetV")) lane = 3;
+        const bool rotation = EmatMaterial::NameMatches(key.text, "Rotation");
+        if (lane < 0 && !rotation)
+        {
+            // Only the class/GUID tokens may accompany supported scalar fields.
+            if (key.text == "{" || key.text == "}" || EmatMaterial::NameMatches(key.text, "MatUVTransform") ||
+                (!key.guid.empty() && key.text.empty())) continue;
+            return false;
+        }
+        if (i + 1 >= transform->values.size() || !transform->values[i + 1].isNumber) return false;
+        const float value = static_cast<float>(transform->values[++i].number);
+        if (!std::isfinite(value) || (rotation && value != 0.0f)) return false;
+        if (lane >= 0) uv[lane] = value;
+    }
+    return uv[0] > 0.0f && uv[1] > 0.0f;
+}
+
+// A deliberately narrow normal preview: four explicit RG detail normals on UV0,
+// a separate diagonal global transform, and the standard ordered mask contract.
+// Missing strengths and alternate UV/basis switches have no inferred defaults.
+inline EmatMultiNormalParameters ReadNativePbrMultiNormals(const EmatMaterial& emat)
+{
+    EmatMultiNormalParameters result;
+    std::array<std::array<float, 4>, 3> masks{};
+    if (!ReadNativePbrStandardMasks(emat, masks) || emat.TextureOf("GlobalNMOMap").empty() ||
+        !emat.FloatOf("NormalPower", result.globalPower) || !std::isfinite(result.globalPower) ||
+        result.globalPower < 0.0f || result.globalPower > 1.0f ||
+        !ReadNativePbrNormalUv(emat, "GlobalNMOUVTransform", result.globalUv, true))
+        return result;
+    for (size_t i = 0; i < 4; ++i)
+    {
+        const std::string suffix = std::to_string(i + 1);
+        float enabled = 1.0f;
+        if (emat.Has("Enabled_" + suffix) && !emat.FloatOf("Enabled_" + suffix, enabled)) return result;
+        if (emat.TextureOf("BCR_" + suffix).empty() || emat.TextureOf("NMO_" + suffix).empty() ||
+            enabled != 1.0f)
+            return result;
+        std::array<float, 4> layerUv{1.0f, 1.0f, 0.0f, 0.0f};
+        if (!ReadNativePbrNormalUv(emat, "UVTransform_" + suffix, layerUv, false)) return result;
+        result.detailStrength[i] = ReadEmatPbrScalar(emat, "DetNormal_" + suffix);
+        const auto& strength = result.detailStrength[i];
+        if (!strength.present || !std::isfinite(strength.value) || strength.value < 0.0f || strength.value > 16.0f)
+            return result;
+    }
+    result.supported = true;
+    return result;
+}
+
 // Translates an `.emat` into the engine's material form. `family` is carried through from
 // the rvmat that pointed here.
 inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::string& origin, const std::string& family)
@@ -705,6 +766,7 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         for (size_t i = 0; i < pbr->maskScale.size(); ++i)
             pbr->maskScale[i] = ReadEmatPbrScalar(emat, maskKeys[i]);
         pbr->standardMaskBlend = ReadNativePbrStandardMasks(emat, pbr->layerMaskParams);
+        pbr->normals = ReadNativePbrMultiNormals(emat);
         if (pbr->standardMaskBlend)
         {
             const MaterialSlot maskSlots[] = {MaterialSlot::LayerMask1, MaterialSlot::LayerMask2,

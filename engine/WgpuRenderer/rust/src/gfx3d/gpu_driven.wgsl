@@ -118,6 +118,8 @@ struct SectionMaterial {
     native_pbr_scales: vec4<f32>,
     layer_mask: array<vec4<f32>, 3>,
     srgb_bcr_slots: vec4<u32>,
+    global_normal_uv: vec4<f32>,
+    detail_normal_strength: vec4<f32>,
 };
 
 @group(1) @binding(0) var<storage, read> instances: array<Instance>;
@@ -193,6 +195,38 @@ fn tint_albedo(c: vec3<f32>, k: vec3<f32>) -> vec3<f32> {
 
 #ifdef NATIVE_PBR_PREVIEW
 const SECTION_NATIVE_PBR_SRGB: u32 = 256u;
+const SECTION_NATIVE_PBR_NORMALS: u32 = 512u;
+fn native_pbr_normal_rg(rg: vec2<f32>) -> vec2<f32> {
+    return select(rg, vec2<f32>(rg.x, 1.0 - rg.y), matdbg_flag(MATDBG_INVERT_NORMAL_Y));
+}
+// Decode each detail normal at its own intensity before ordered interpolation.
+// Do not normalize here: strong detail vectors and overlapping mask weights
+// must retain their relative lengths until the final world-space normal.
+fn native_pbr_detail_normal(rg: vec2<f32>, strength: f32) -> vec3<f32> {
+    let xy = (rg * 2.0 - vec2<f32>(1.0)) * strength;
+    return vec3<f32>(xy, sqrt(1.0 - clamp(dot(xy, xy), 0.0, 1.0)));
+}
+
+fn native_pbr_global_normal(rg: vec2<f32>, strength: f32) -> vec3<f32> {
+    let xy = (rg * 2.0 - vec2<f32>(1.0)) * strength;
+    return vec3<f32>(xy, sqrt(1.00001001358 - clamp(dot(xy, xy), 0.0, 1.0)));
+}
+
+// Shortest-arc rotation carries the global perturbation onto the detail normal.
+// Qualification restricts the global map to its forward hemisphere. The frame
+// remains the renderer's derivative frame; no authored tangent stream is implied.
+fn native_pbr_composed_normal(geo: vec3<f32>, tangent: vec3<f32>, bitangent: vec3<f32>,
+                              global_ts: vec3<f32>, detail_ts: vec3<f32>) -> vec3<f32> {
+    let global_world = normalize(tangent * global_ts.x + bitangent * global_ts.y + geo * global_ts.z);
+    let detail_world = tangent * detail_ts.x + bitangent * detail_ts.y + geo * detail_ts.z;
+    let axis = cross(geo, global_world);
+    let rotated = detail_world + cross(axis, detail_world) +
+        cross(axis, cross(axis, detail_world)) / max(1.0 + dot(geo, global_world), 1.0e-5);
+    let length2 = dot(rotated, rotated);
+    if (length2 > 1.0e-8) { return rotated * inverseSqrt(length2); }
+    return geo;
+}
+
 // Hardware sRGB views decode before filtering. Keep their samples linear for
 // tint and layer mixing; encode once only at the existing shade() boundary.
 fn native_pbr_encode_albedo(c: vec3<f32>) -> vec3<f32> {
@@ -1120,6 +1154,9 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     var pbr_sampled = false;
     let preview_multi = (sm.flags & SECTION_NATIVE_PBR_PREVIEW) != 0u &&
         sm.mask_slot != 0u && sm.specular_slot != 0u;
+    let preview_normals = preview_multi && sm.native_pbr_scales.w > 1.5 &&
+        (sm.flags & SECTION_NATIVE_PBR_NORMALS) != 0u;
+    var global_normal_ts = vec3<f32>(0.0, 0.0, 1.0);
 #endif
     // MAT-048. Multi blends its NORMALS across the same four layers as its colours, with the
     // same mask weights. Until this, only layer 0's normal was ever bound, so on a wall whose
@@ -1149,9 +1186,12 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         if (preview_multi) {
             let uv0 = in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw;
             let normal_sample = textureSampleBias(textures[sm.specular_slot], samplers[sm.sampler_idx], uv0, frame.renscale.x);
-            // NMO_1 contributes its material channels. Keep the established
-            // global normal in normal_slot: replacing it with this tiling normal
-            // swung whole roof slopes toward the sun in the first A/B.
+            if (preview_normals) {
+                normal_ts = native_pbr_detail_normal(native_pbr_normal_rg(normal_sample.rg), sm.detail_normal_strength.x);
+            }
+            // The normal preview uses NMO_1 for detail, with the independent
+            // global perturbation applied later. Its B/A material channels are
+            // shared by both preview modes.
             let base_weight = select(1.0 - min(layer_w.x + layer_w.y + layer_w.z, 1.0),
                                      layer_base_weight, sm.native_pbr_scales.w > 1.5);
             pbr_metal = normal_sample.b * base_weight;
@@ -1160,17 +1200,25 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         }
 #endif
         if (sm.normal_slot != 0u) {
-            let uv0 = select(in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw, in.uv1,
+            var uv0 = select(in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw, in.uv1,
                 (sm.flags & SECTION_GLOBALNMO_UV1) != 0u);
-            let normal_sample = textureSampleBias(textures[sm.normal_slot], samplers[sm.sampler_idx], uv0, frame.renscale.x);
-            normal_ts = decode_nohq_packed(normal_sample,
-                normal_rg);
 #ifdef NATIVE_PBR_PREVIEW
+            if (preview_normals) { uv0 = in.uv * sm.global_normal_uv.xy + sm.global_normal_uv.zw; }
+#endif
+            let normal_sample = textureSampleBias(textures[sm.normal_slot], samplers[sm.sampler_idx], uv0, frame.renscale.x);
+#ifdef NATIVE_PBR_PREVIEW
+            if (preview_normals) {
+                global_normal_ts = native_pbr_global_normal(native_pbr_normal_rg(normal_sample.rg), sm.normal_power);
+            } else {
+                normal_ts = decode_nohq_packed(normal_sample, normal_rg);
+            }
             if ((sm.flags & SECTION_NATIVE_PBR_PREVIEW) != 0u && !preview_multi) {
                 pbr_metal = clamp(normal_sample.b, 0.0, 1.0);
                 pbr_ao = clamp(normal_sample.a, 0.0, 1.0);
                 pbr_sampled = true;
             }
+#else
+            normal_ts = decode_nohq_packed(normal_sample, normal_rg);
 #endif
 #ifdef NATIVE_LEAF_CAVITY
             if ((sm.flags & 16u) != 0u) {
@@ -1192,7 +1240,12 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
             }
             let uvn = in.uv * sm.layer_uv[i + 1u].xy + sm.layer_uv[i + 1u].zw;
             let layer_sample = textureSampleBias(textures[sm.layer_normal_slot[i]], samplers[sm.sampler_idx], uvn, frame.renscale.x);
-            let layer_n = decode_nohq_packed(layer_sample, normal_rg);
+            var layer_n = decode_nohq_packed(layer_sample, normal_rg);
+#ifdef NATIVE_PBR_PREVIEW
+            if (preview_normals) {
+                layer_n = native_pbr_detail_normal(native_pbr_normal_rg(layer_sample.rg), sm.detail_normal_strength[i + 1u]);
+            }
+#endif
             n_sum = n_sum + layer_n * layer_w[i];
             n_weight = n_weight + layer_w[i];
 #ifdef NATIVE_PBR_PREVIEW
@@ -1202,6 +1255,11 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
             }
 #endif
         }
+#ifdef NATIVE_PBR_PREVIEW
+        if (preview_normals) {
+            normal_ts = normal_ts * layer_base_weight + n_sum;
+        } else {
+#endif
         if (n_weight > 0.0) {
             let mixed = normal_ts * (1.0 - n_weight) + n_sum;
             // Every contributor would have to lie exactly in the tangent plane and cancel for
@@ -1218,6 +1276,9 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         // normals share it (scaling commutes with the blend weights above).
         let powered_xy = clamp(normal_ts.xy * sm.normal_power, vec2<f32>(-1.0), vec2<f32>(1.0));
         normal_ts = vec3<f32>(powered_xy, sqrt(max(1.0 - dot(powered_xy, powered_xy), 1e-4)));
+#ifdef NATIVE_PBR_PREVIEW
+        }
+#endif
         normal_ts_dbg = normal_ts;
         let duv_dx = dpdx(in.uv);
         let duv_dy = dpdy(in.uv);
@@ -1242,8 +1303,16 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
             let inv_scale = inverseSqrt(frame_scale2);
             let tangent = tangent_raw * inv_scale;
             let bitangent = bitangent_raw * inv_scale;
-            shading_normal =
-                normalize(tangent * normal_ts.x + bitangent * normal_ts.y + geometric_normal * normal_ts.z);
+#ifdef NATIVE_PBR_PREVIEW
+            if (preview_normals) {
+                shading_normal = native_pbr_composed_normal(geometric_normal, tangent, bitangent,
+                    global_normal_ts, normal_ts);
+            } else {
+                shading_normal = normalize(tangent * normal_ts.x + bitangent * normal_ts.y + geometric_normal * normal_ts.z);
+            }
+#else
+            shading_normal = normalize(tangent * normal_ts.x + bitangent * normal_ts.y + geometric_normal * normal_ts.z);
+#endif
         }
     }
     // DZ-005 -- reflective (CalmWater) sections OVERRIDE that tangent-space result with a

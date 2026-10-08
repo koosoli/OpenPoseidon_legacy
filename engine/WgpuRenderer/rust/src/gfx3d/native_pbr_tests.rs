@@ -114,9 +114,90 @@ fn native_pbr_basic_scaled_preview_and_legacy_shaders_compose() {
                             .map(|m| (m.offset, *span))
                     } else { None }
                 });
-                assert_eq!(layout, Some((368, 384)), "{path} material stride");
+                assert_eq!(layout, Some((368, 416)), "{path} material stride");
+                let normal_layout: Vec<_> = module.types.iter().filter_map(|(_, ty)| {
+                    if let naga::TypeInner::Struct { members, .. } = &ty.inner {
+                        let fields: Vec<_> = members.iter().filter_map(|m| {
+                            match m.name.as_deref() {
+                                Some("global_normal_uv") | Some("detail_normal_strength") => Some(m.offset),
+                                _ => None,
+                            }
+                        }).collect();
+                        if !fields.is_empty() { return Some(fields); }
+                    }
+                    None
+                }).flatten().collect();
+                assert_eq!(normal_layout, [384, 400], "{path} independent normal fields");
             }
         }
+    }
+}
+
+fn ordered_normal_probe() -> naga::Module {
+    let mut source = String::new();
+    for helper in ["native_pbr_detail_normal", "native_pbr_global_normal",
+                   "native_pbr_composed_normal", "native_pbr_ordered_weights"] {
+        let start = PRODUCTION.find(&format!("fn {helper}(")).unwrap();
+        let end = start + PRODUCTION[start..].find("\n}").unwrap() + 2;
+        source.push_str(&PRODUCTION[start..end]);
+        source.push('\n');
+    }
+    source.push_str(r#"
+@group(0) @binding(0) var<storage,read_write> output:array<vec4<f32>>;
+@compute @workgroup_size(1) fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>) {
+    var geo = vec3<f32>(0.0,0.0,1.0);
+    var tangent = vec3<f32>(1.0,0.0,0.0);
+    var bitangent = vec3<f32>(0.0,1.0,0.0);
+    var global = native_pbr_global_normal(vec2<f32>(0.5),0.0);
+    var detail = native_pbr_detail_normal(vec2<f32>(0.8,0.5),0.5);
+    if (id.x == 1u) {
+        global = native_pbr_global_normal(vec2<f32>(0.75,0.5),0.8);
+        detail = native_pbr_detail_normal(vec2<f32>(0.5),1.0);
+    }
+    if (id.x == 2u) { detail = native_pbr_detail_normal(vec2<f32>(1.0,0.5),2.0); }
+    if (id.x == 3u) {
+        let w = native_pbr_ordered_weights(vec3<f32>(0.5));
+        detail = native_pbr_detail_normal(vec2<f32>(1.0,0.5),2.0) * w.x +
+            native_pbr_detail_normal(vec2<f32>(0.5),0.0) * w.y +
+            native_pbr_detail_normal(vec2<f32>(0.5,1.0),0.5) * w.z +
+            native_pbr_detail_normal(vec2<f32>(0.25,0.5),1.0) * w.w;
+    }
+    if (id.x == 4u) {
+        geo = vec3<f32>(0.0,1.0,0.0);
+        bitangent = vec3<f32>(0.0,0.0,-1.0);
+        global = native_pbr_global_normal(vec2<f32>(0.8,0.5),1.0);
+        detail = native_pbr_detail_normal(vec2<f32>(0.5,0.8),1.0);
+    }
+    output[id.x] = vec4<f32>(native_pbr_composed_normal(geo,tangent,bitangent,global,detail),1.0);
+}
+"#);
+    let module = naga::front::wgsl::parse_str(&source).unwrap();
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+        .validate(&module).unwrap();
+    module
+}
+
+#[test]
+fn native_ordered_normal_helpers_validate() {
+    let _ = ordered_normal_probe();
+}
+
+#[test]
+fn native_ordered_normal_actual_gpu_keeps_detail_strength_and_rotates_global_independently() {
+    let actual = gpu_channels_result(ordered_normal_probe());
+    let epsilon = 0.00001001358_f32;
+    let global_x = 0.4 / (1.0 + epsilon).sqrt();
+    let global_z = (0.84 + epsilon).sqrt() / (1.0 + epsilon).sqrt();
+    let overlap_z = 0.125 + 0.75 * 0.75_f32.sqrt();
+    let overlap_len = (0.125_f32.powi(2) + overlap_z.powi(2)).sqrt();
+    let tilt_x = 0.6 / (1.0 + epsilon).sqrt();
+    let tilt_y = (0.64 + epsilon).sqrt() / (1.0 + epsilon).sqrt();
+    let expected = [0.3,0.0,0.91_f32.sqrt(),1.0,
+        global_x,0.0,global_z,1.0, 1.0,0.0,0.0,1.0,
+        0.0,0.125/overlap_len,overlap_z/overlap_len,1.0,
+        0.8*tilt_x,0.8*tilt_y,-0.6,1.0];
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert!((actual - expected).abs() < 2e-6, "{actual} != {expected}");
     }
 }
 

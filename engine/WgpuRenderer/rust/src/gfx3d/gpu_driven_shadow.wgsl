@@ -81,6 +81,8 @@ struct SectionMaterial {
     native_pbr_scales: vec4<f32>,
     layer_mask: array<vec4<f32>, 3>,
     srgb_bcr_slots: vec4<u32>,
+    global_normal_uv: vec4<f32>,
+    detail_normal_strength: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> pass_data: PassData;

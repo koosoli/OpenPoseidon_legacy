@@ -353,6 +353,9 @@ pub struct WgrModelMaterial {
     // Params are (UV scale, sharpness, offset, source 0/1). Zero handle = white.
     pub layer_mask_texture_id: [u64; 3],
     pub layer_mask_params: [[f32; 4]; 3],
+    // Optional independent global UV and four effective detail-normal strengths.
+    pub global_normal_uv: [f32; 4],
+    pub detail_normal_strength: [f32; 4],
 }
 
 // One drawable LOD level of a model: its FindSqrtLevel resolution threshold (`_resolutions[i]`)
@@ -1735,7 +1738,9 @@ const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 68);
 const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 288);
 const _: () = assert!(std::mem::size_of::<WgrLight>() == 64);
 const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);
-const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 408);
+const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 440);
+const _: () = assert!(std::mem::offset_of!(WgrModelMaterial, global_normal_uv) == 408);
+const _: () = assert!(std::mem::offset_of!(WgrModelMaterial, detail_normal_strength) == 424);
 const _: () = assert!(std::mem::size_of::<WgrModelLod>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrInstance>() == 144);
 const _: () = assert!(std::mem::size_of::<WgrTonemap>() == 64);
@@ -1911,9 +1916,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(23)
+            .unwrap_or(24)
     } else {
-        23
+        24
     }
 }
 
@@ -2219,7 +2224,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 23); // Append-only layer detail masks
+        assert_eq!(super::wgr_abi_version(), 24); // Append-only independent normal parameters
     }
 
     #[test]

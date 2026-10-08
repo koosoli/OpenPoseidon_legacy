@@ -29,6 +29,68 @@ using Poseidon::Asset::Material::TranslatedMaterial;
 using Poseidon::Asset::Material::TranslatedSlot;
 using Poseidon::Asset::Material::TranslateEmat;
 
+TEST_CASE("Ordered normal parameters keep global UV separate and reject unsupported inputs",
+          "[asset][material][emat][arf][normal-preview]")
+{
+    using namespace Poseidon::Asset::Material;
+    std::string body = "MatPBRMulti {\n NormalPower .2\n"
+        " GlobalNMOMap \"{0000000000000001}Assets/Owned_Global_NMO.edds\"\n"
+        " GlobalNMOUVTransform MatUVTransform \"{0000000000000004}\" { TilingU .25 TilingV .5 OffsetU .1 OffsetV -.2 }\n";
+    for (int i = 1; i <= 4; ++i)
+    {
+        const std::string suffix = std::to_string(i);
+        body += " BCR_" + suffix + " \"{0000000000000002}Assets/Owned_BCR.edds\"\n";
+        body += " NMO_" + suffix + " \"{0000000000000003}Assets/Owned_NMO.edds\"\n";
+        body += " DetNormal_" + suffix + " " + std::to_string(i * .2f) + "\n";
+        body += " UVTransform_" + suffix + " { TilingU 2 TilingV 3 }\n";
+        if (i != 1) body += " MaskSharpness_" + suffix + " 1\n";
+    }
+    const auto parsed = ParseEmat(body + "}\n");
+    const auto normal = ReadNativePbrMultiNormals(parsed);
+    REQUIRE(normal.supported);
+    REQUIRE(normal.globalUv == std::array<float, 4>{.25f, .5f, .1f, -.2f});
+    REQUIRE(normal.globalPower == .2f);
+    REQUIRE(normal.detailStrength[0].value == .2f);
+    REQUIRE(normal.detailStrength[3].value == .8f);
+    const auto translated = TranslateEmat(parsed, "Assets/Owned.emat", "");
+    REQUIRE(translated.Find(MaterialSlot::BaseColour)->uvTransform.aside[0] == 2.0f);
+    if (EmatPbrProvenanceEnabled())
+    {
+        REQUIRE(translated.ematPbr->normals.supported);
+        REQUIRE(translated.ematPbr->normals.globalUv == normal.globalUv);
+    }
+    for (const char* key : {"NormalPower", "DetNormal_2", "GlobalNMOMap", "NMO_4", "GlobalNMOUVTransform"})
+    {
+        auto missing = parsed;
+        std::erase_if(missing.properties, [key](const auto& p) { return EmatMaterial::NameMatches(p.name, key); });
+        REQUIRE_FALSE(ReadNativePbrMultiNormals(missing).supported);
+    }
+    for (const char* unsupported : {" FineMask_2 1\n", " UVSrcGlobNormal \"UV set 2\"\n"})
+        REQUIRE_FALSE(ReadNativePbrMultiNormals(ParseEmat(body + unsupported + "}\n")).supported);
+    for (const float invalid : {-1.0f, 17.0f, std::numeric_limits<float>::infinity(),
+                                std::numeric_limits<float>::quiet_NaN()})
+    {
+        auto bad = parsed;
+        for (auto& property : bad.properties)
+            if (EmatMaterial::NameMatches(property.name, "DetNormal_2")) property.values[0].number = invalid;
+        REQUIRE_FALSE(ReadNativePbrMultiNormals(bad).supported);
+    }
+    for (const char* transform : {"{ Rotation 10 }", "{ TilingU 0 }", "{ TilingV -1 }",
+                                  "{ TilingU \"bad\" }", "{ Shear 1 }"})
+    {
+        auto bad = parsed;
+        const auto replacement = ParseEmat(std::string("MatPBRMulti {\n GlobalNMOUVTransform ") + transform + "\n}\n");
+        for (auto& property : bad.properties)
+            if (EmatMaterial::NameMatches(property.name, "GlobalNMOUVTransform")) property = replacement.properties[0];
+        REQUIRE_FALSE(ReadNativePbrMultiNormals(bad).supported);
+    }
+    auto badLayer = parsed;
+    const auto replacement = ParseEmat("MatPBRMulti {\n UVTransform_2 { TilingU \"bad\" }\n}\n");
+    for (auto& property : badLayer.properties)
+        if (EmatMaterial::NameMatches(property.name, "UVTransform_2")) property = replacement.properties[0];
+    REQUIRE_FALSE(ReadNativePbrMultiNormals(badLayer).supported);
+}
+
 TEST_CASE("Standard ordered masks preserve detail parameters and reject unsupported contracts",
           "[asset][material][emat][arf][ordered-masks]")
 {

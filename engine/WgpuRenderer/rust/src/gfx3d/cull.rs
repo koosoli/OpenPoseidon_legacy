@@ -252,6 +252,8 @@ pub struct SectionMaterialGpu {
     // Internal color-role descriptors; no public C ABI fields. Original slots
     // remain authoritative for residency feedback and alpha/prepasses.
     pub srgb_bcr_slots: [u32; 4],
+    pub global_normal_uv: [f32; 4],
+    pub detail_normal_strength: [f32; 4],
 }
 
 // A permissive plane that never culls anything: dot(0, p) + BIG >= -radius always holds.

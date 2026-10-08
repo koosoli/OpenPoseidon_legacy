@@ -189,6 +189,16 @@ struct EmatAuthoredScalar
     bool present = false;
 };
 
+// Independent normal metadata. Colour-tile UVs and material-channel scales are
+// not substitutes for the global normal transform or detail-normal strengths.
+struct EmatMultiNormalParameters
+{
+    bool supported = false;
+    std::array<float, 4> globalUv{1.0f, 1.0f, 0.0f, 0.0f};
+    float globalPower = 1.0f;
+    std::array<EmatAuthoredScalar, 4> detailStrength{};
+};
+
 struct EmatPbrProvenance
 {
     // Index 0 is BCRMap (or BCR_1); indices 1..3 are BCR_2..4.
@@ -207,6 +217,7 @@ struct EmatPbrProvenance
     bool standardMaskBlend = false;
     // (UV scale, sharpness, offset, UV source 0/1) for Mask_2..4.
     std::array<std::array<float, 4>, 3> layerMaskParams{};
+    EmatMultiNormalParameters normals;
 };
 
 struct TranslatedMaterial

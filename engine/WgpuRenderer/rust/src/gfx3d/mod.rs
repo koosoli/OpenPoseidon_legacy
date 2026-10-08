@@ -9577,6 +9577,8 @@ impl Gfx3d {
                     crown_ao_p1: m.crown_ao_p1,
                     native_pbr_scales: m.native_pbr_scales,
                     srgb_bcr_slots,
+                    global_normal_uv: m.global_normal_uv,
+                    detail_normal_strength: m.detail_normal_strength,
                     layer_mask: std::array::from_fn(|i| {
                         let slot = textures.texture_slot(m.layer_mask_texture_id[i]);
                         debug_assert!(slot < 0x8000_0000);
@@ -12555,7 +12557,7 @@ fn multi_layer_normals_keep_every_layout_in_step() {
     // Mirrors the C++ static_assert in include/wgpu_renderer.hpp.
     assert_eq!(
         std::mem::size_of::<WgrModelMaterial>(),
-        408,
+        440,
         "WgrModelMaterial includes native PBR scales; wgpu_renderer.hpp must agree"
     );
     assert_eq!(
@@ -12568,6 +12570,8 @@ fn multi_layer_normals_keep_every_layout_in_step() {
     assert_eq!(std::mem::offset_of!(WgrModelMaterial, native_pbr_scales), 316);
     assert_eq!(std::mem::offset_of!(WgrModelMaterial, layer_mask_texture_id), 336);
     assert_eq!(std::mem::offset_of!(WgrModelMaterial, layer_mask_params), 360);
+    assert_eq!(std::mem::offset_of!(WgrModelMaterial, global_normal_uv), 408);
+    assert_eq!(std::mem::offset_of!(WgrModelMaterial, detail_normal_strength), 424);
 
     // The GPU-side struct: WGSL 16-aligns the trailing array<vec4<f32>>, Rust does not, so
     // the pad words are explicit and the offsets are the contract.
@@ -12583,10 +12587,12 @@ fn multi_layer_normals_keep_every_layout_in_step() {
         std::mem::offset_of!(cull::SectionMaterialGpu, layer_colour),
         192
     );
-    assert_eq!(std::mem::size_of::<cull::SectionMaterialGpu>(), 384);
+    assert_eq!(std::mem::size_of::<cull::SectionMaterialGpu>(), 416);
     assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, native_pbr_scales), 304);
     assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, layer_mask), 320);
     assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, srgb_bcr_slots), 368);
+    assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, global_normal_uv), 384);
+    assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, detail_normal_strength), 400);
     assert_eq!(
         std::mem::offset_of!(cull::SectionMaterialGpu, normal_power),
         256
@@ -12626,7 +12632,7 @@ fn multi_layer_normals_keep_every_layout_in_step() {
                 "{name} needs three pad words after normal_power for the 16 stride"
             );
         }
-        for field in ["crown_ao_p0: vec4<f32>,", "crown_ao_p1: vec4<f32>,", "native_pbr_scales: vec4<f32>,", "layer_mask: array<vec4<f32>, 3>,", "srgb_bcr_slots: vec4<u32>,"] {
+        for field in ["crown_ao_p0: vec4<f32>,", "crown_ao_p1: vec4<f32>,", "native_pbr_scales: vec4<f32>,", "layer_mask: array<vec4<f32>, 3>,", "srgb_bcr_slots: vec4<u32>,", "global_normal_uv: vec4<f32>,", "detail_normal_strength: vec4<f32>,"] {
             assert!(
                 src.contains(field),
                 "{name} must mirror SectionMaterialGpu::{field}"
@@ -12663,9 +12669,10 @@ fn multi_blends_layer_normals_with_the_same_weights_as_the_colours() {
     );
     // RGBA samples retain layer alpha for authored roughness; only RGB enters
     // the albedo blend. Its coverage is the original base alpha, not mask sum.
-    assert!(src.contains("let layer = textureSampleBias(textures[sm.layer_slot[i]], samplers[sm.sampler_idx], uv_i, frame.renscale.x);"));
+    assert!(src.contains("var layer_slot = sm.layer_slot[i];"));
+    assert!(src.contains("let layer = textureSampleBias(textures[layer_slot], samplers[sm.sampler_idx], uv_i, frame.renscale.x);"));
     assert!(src.contains("lw = lw / total;"));
-    assert!(src.contains("base = vec4<f32>(base.rgb * (1.0 - weight) + blended, base.a);"));
+    assert!(src.contains("base = vec4<f32>(base.rgb * layer_base_weight + blended, base.a);"));
     assert!(
         src.contains("layer_n * layer_w[i]"),
         "layer normals must be weighted by the SAME mask weights the colours use"
@@ -12699,7 +12706,7 @@ fn multi_blends_layer_normals_with_the_same_weights_as_the_colours() {
     let compact = src.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
         compact.contains("normal_ts = decode_nohq_packed(normal_sample, normal_rg);")
-            && compact.contains("let layer_n = decode_nohq_packed(layer_sample, normal_rg);"),
+            && compact.contains("var layer_n = decode_nohq_packed(layer_sample, normal_rg);"),
         "both the base normal and the layer normals must decode with the same convention flag"
     );
     // A typed RGBA sample is also read for authored PBR channels. Its normal
@@ -12712,7 +12719,7 @@ fn multi_blends_layer_normals_with_the_same_weights_as_the_colours() {
     );
     assert!(
         compact.contains(&format!("let layer_sample = {layer_sample};"))
-            && compact.contains("let layer_n = decode_nohq_packed(layer_sample, normal_rg);")
+            && compact.contains("var layer_n = decode_nohq_packed(layer_sample, normal_rg);")
             && compact.contains("n_sum = n_sum + layer_n * layer_w[i];"),
         "each layer's normal must be decoded at its sample site, not blended packed"
     );

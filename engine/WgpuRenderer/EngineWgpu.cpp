@@ -15469,6 +15469,48 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                                 LOG_INFO(Graphics, "Wgpu Reforger ordered-layer preview skipped: material={} unsupported source mask contract",
                                          path);
                         }
+                        static const bool normalPreview = []
+                        {
+                            const char* value = std::getenv("WGR_REFORGER_NORMAL_PREVIEW");
+                            return value && value[0] == '1' && value[1] == '\0';
+                        }();
+                        static const std::string normalMaterial = []
+                        {
+                            const char* value = std::getenv("WGR_REFORGER_NORMAL_MATERIAL");
+                            return std::string(value ? value : "");
+                        }();
+                        const bool normalTarget = normalMaterial.empty() ||
+                            (materialName.size() >= normalMaterial.size() &&
+                             Asset::Material::EmatMaterial::NameMatches(
+                                 materialName.substr(materialName.size() - normalMaterial.size()), normalMaterial));
+                        if (normalPreview && normalTarget)
+                        {
+                            const auto& parameters = found->second.ematPbr->normals;
+                            const bool sourceSupported = parameters.supported;
+                            bool bindingsComplete = sourceSupported && mat.native_pbr_scales.w == 2.0f && mat.normal_texture_id != 0 &&
+                                (sec.flags & WGR_MODEL_SECTION_GLOBALNMO_UV1) == 0u &&
+                                checkedNmo(Slot::NormalMap) == mat.normal_texture_id;
+                            for (size_t layer = 0; layer < 3; ++layer)
+                                bindingsComplete = bindingsComplete && mat.layer_texture_id[layer] != 0 &&
+                                    mat.layer_normal_texture_id[layer] != 0;
+                            if (bindingsComplete)
+                            {
+                                const auto& uv = parameters.globalUv;
+                                mat.global_normal_uv = {uv[0], uv[1], uv[2], uv[3]};
+                                const auto& detail = parameters.detailStrength;
+                                // Preserve authored source facts separately from this
+                                // preview's small positive detail-intensity floor.
+                                mat.detail_normal_strength = {detail[0].value + 0.001f, detail[1].value + 0.001f,
+                                                              detail[2].value + 0.001f, detail[3].value + 0.001f};
+                                mat.normal_power = parameters.globalPower;
+                                sec.flags |= WGR_MODEL_SECTION_NATIVE_PBR_NORMALS;
+                            }
+                            static std::unordered_set<std::string> reportedNormals;
+                            if (reportedNormals.size() < 32 && reportedNormals.insert(path).second)
+                                LOG_INFO(Graphics, "Wgpu native PBR normal preview: material={} admission={} sourceSupported={} ordered={} globalUV={}/{} globalPower={}",
+                                         path, bindingsComplete, sourceSupported, mat.native_pbr_scales.w == 2.0f, parameters.globalUv[0],
+                                         parameters.globalUv[1], parameters.globalPower);
+                        }
                         static bool reportedMultiPreview = false;
                         if (!reportedMultiPreview)
                         {

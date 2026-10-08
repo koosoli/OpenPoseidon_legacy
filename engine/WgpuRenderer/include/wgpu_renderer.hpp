@@ -35,7 +35,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 23u // Append-only optional layered detail-mask descriptors
+#define WGR_ABI_VERSION 24u // Append-only optional independent normal parameters
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -455,7 +455,9 @@ enum WgrModelSectionFlags : uint32_t
      * Snow colour/normal must both refuse it; existing alpha and draw ownership remain. */
     WGR_MODEL_SECTION_NO_OBJECT_SNOW = 128u,
     /* Preview-only hardware sRGB BCR views; original texture slots stay linear. */
-    WGR_MODEL_SECTION_NATIVE_PBR_SRGB = 256u
+    WGR_MODEL_SECTION_NATIVE_PBR_SRGB = 256u,
+    /* Separate ordered-detail/global normal preview; requires supported source metadata. */
+    WGR_MODEL_SECTION_NATIVE_PBR_NORMALS = 512u
 };
 
 /* Per-section shading, parallel to a model's sections (one per section). The RAW
@@ -521,6 +523,10 @@ struct WgrModelMaterial
      * meaning. The renderer resolves these handles into its own descriptor slots. */
     WgrTexture layer_mask_texture_id[3]{};
     WgrVec4 layer_mask_params[3]{};
+    /* Optional normal preview only. Global normal UV is independent of colour
+     * tiling; strengths apply to decoded RG before Z reconstruction per layer. */
+    WgrVec4 global_normal_uv{1.0f, 1.0f, 0.0f, 0.0f};
+    WgrVec4 detail_normal_strength{1.0f, 1.0f, 1.0f, 1.0f};
 };
 
 /* One drawable LOD level: its FindSqrtLevel resolution threshold (_resolutions[i]) +
@@ -593,9 +599,11 @@ struct WgrInstance
  * inherit it. These reserved lanes preserve the public struct layout. */
 
 static_assert(sizeof(WgrModelSection) == 24, "WgrModelSection must match Rust");
-static_assert(sizeof(WgrModelMaterial) == 408, "WgrModelMaterial must match Rust");
+static_assert(sizeof(WgrModelMaterial) == 440, "WgrModelMaterial must match Rust");
 static_assert(offsetof(WgrModelMaterial, layer_mask_texture_id) == 336, "Append-only mask handles");
 static_assert(offsetof(WgrModelMaterial, layer_mask_params) == 360, "Append-only mask parameters");
+static_assert(offsetof(WgrModelMaterial, global_normal_uv) == 408, "Append-only global normal UV");
+static_assert(offsetof(WgrModelMaterial, detail_normal_strength) == 424, "Append-only detail normal strengths");
 static_assert(sizeof(WgrModelLod) == 16, "WgrModelLod must match Rust");
 static_assert(sizeof(WgrInstance) == 144, "WgrInstance must match Rust");
 
