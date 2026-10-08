@@ -641,3 +641,20 @@ median/p95 completed GPU samples and wall intervals by phase, preserve raw
 samples, and inspect distance paling before choosing any quality/cost threshold.
 Timestamp execution, 4x silhouettes and UI restart behavior still need actual
 parent runtime evidence; the existing 1x visual result does not establish them.
+
+
+A CPU-only receipt report is available after that successful measured run:
+
+```powershell
+python scripts/Summarize-ReShadeTiming.py build/reshade-depth/<measured-run>/result.json --output build/reshade-depth/<measured-run>/timing-summary.json
+```
+
+It requires all four completed 120-frame windows, increasing generations,
+unchanged depth preview, supported frequency, matching sample flags/counts,
+finite durations and at least 108 genuine brackets per ON window. It reports
+per-window and pooled ON GPU median/mean/nearest-rank p95, plus separately scoped
+wall cadence statistics and descriptive ON-minus-OFF wall median. An absent OFF
+GPU bracket remains null, never a fabricated zero-cost baseline. Failed capture,
+cleanup or measurement receipts are rejected. Two synthetic CPU tests cover
+statistics and falsified/incomplete evidence rejection; they are not measured
+performance results. Visual distance quality and cost acceptance remain pending.
