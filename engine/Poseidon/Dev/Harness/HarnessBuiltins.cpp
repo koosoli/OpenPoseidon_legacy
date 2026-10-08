@@ -1,4 +1,5 @@
 #include <Poseidon/Dev/Harness/HarnessBuiltins.hpp>
+#include <Poseidon/Dev/Debug/ReShadeOptional.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Input/KeyInput.hpp>
 using namespace Poseidon;
@@ -448,6 +449,7 @@ void RegisterStreamingProbes(HarnessServer& hs)
 
 void RegisterScreenshot(HarnessServer& hs)
 {
+    RegisterOptionalReShadeHarness(hs);
     RegisterStreamingProbes(hs);
     hs.RegisterCommand({"stream_lod_demand", "Explicit bounded selected retained-GPU LOD demand diagnostic", {}},
         [](const std::string&, cJSON* root) -> std::string {

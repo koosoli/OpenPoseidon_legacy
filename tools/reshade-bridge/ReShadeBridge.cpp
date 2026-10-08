@@ -10,6 +10,11 @@ namespace
 std::atomic<int> requested{-1};
 std::atomic<int> observed{-1};
 std::atomic<bool> comparisonRequested{false};
+std::atomic<unsigned> techniqueCount{0};
+std::atomic<unsigned> activeTechniqueCount{0};
+std::atomic<unsigned> captureCount{0};
+std::atomic<unsigned> captureStage{0};
+std::atomic<unsigned> presentCount{0};
 int comparisonStage = 0;
 int settleFrames = 0;
 bool restoreEffects = false;
@@ -25,16 +30,30 @@ void OnDestroy(reshade::api::effect_runtime*)
     requested.store(-1);
     comparisonStage = 0;
     comparisonRequested.store(false);
+    techniqueCount.store(0);
+    activeTechniqueCount.store(0);
+    captureStage.store(0);
 }
 
 void OnPresent(reshade::api::effect_runtime* runtime)
 {
+    presentCount.fetch_add(1);
+    unsigned techniques = 0;
+    unsigned active = 0;
+    runtime->enumerate_techniques(nullptr, [&](reshade::api::effect_runtime* current,
+                                             reshade::api::effect_technique technique)
+    {
+        ++techniques;
+        if (current->get_technique_state(technique)) ++active;
+    });
+    techniqueCount.store(techniques);
+    activeTechniqueCount.store(active);
     const int next = requested.exchange(-1);
     if (next >= 0)
         runtime->set_effects_state(next != 0);
     // This event runs after effects. Capture each state only after it has
     // actually rendered, rather than relabelling the engine's pre-injector frame.
-    if (comparisonStage == 0 && comparisonRequested.exchange(false))
+    if (comparisonStage == 0 && techniques > 0 && comparisonRequested.exchange(false))
     {
         restoreEffects = runtime->get_effects_state();
         runtime->set_effects_state(false);
@@ -54,9 +73,11 @@ void OnPresent(reshade::api::effect_runtime* runtime)
         {
             runtime->set_effects_state(restoreEffects);
             comparisonStage = 0;
+            captureCount.fetch_add(1);
         }
     }
     observed.store(runtime->get_effects_state() ? 1 : 0);
+    captureStage.store(comparisonStage);
 }
 }
 
@@ -78,6 +99,11 @@ extern "C" __declspec(dllexport) void OpReShadeCaptureComparison()
 {
     comparisonRequested.store(true);
 }
+extern "C" __declspec(dllexport) unsigned OpReShadeGetTechniqueCount() { return techniqueCount.load(); }
+extern "C" __declspec(dllexport) unsigned OpReShadeGetActiveTechniqueCount() { return activeTechniqueCount.load(); }
+extern "C" __declspec(dllexport) unsigned OpReShadeGetCaptureCount() { return captureCount.load(); }
+extern "C" __declspec(dllexport) unsigned OpReShadeGetCaptureStage() { return captureStage.load(); }
+extern "C" __declspec(dllexport) unsigned OpReShadeGetPresentCount() { return presentCount.load(); }
 
 extern "C" __declspec(dllexport) bool AddonInit(HMODULE module, HMODULE reshadeModule)
 {

@@ -44,6 +44,25 @@ Keep the camera still; the capture briefly switches effects off/on and restores
 the original state. The engine's ordinary pre-presentation screenshot can omit
 injected effects, so it is not sufficient evidence for a comparison.
 
+For unattended validation, the existing localhost JSON harness exposes:
+
+```json
+{"cmd":"optional_reshade","action":"state"}
+{"cmd":"optional_reshade","action":"off"}
+{"cmd":"optional_reshade","action":"on"}
+{"cmd":"optional_reshade","action":"capture"}
+```
+
+It requires `--dev` and rejects multiplayer. Responses contain `ready`,
+`enabled`, `techniques`, `activeTechniques`, `captureCount`, `captureStage`,
+`presentCount` and `queued`. Commands queue work for ReShade's presentation
+callback; poll `state` for the applied result. Wait for `ready` and at least one
+actual enumerated technique before capturing. `captureCount` advances after both
+screenshot API calls, not after a file-system success acknowledgement; validate
+the actual `Native` and `ReShade` files separately. On/off does not change the
+per-technique selection, so `activeTechniques` can remain positive while the
+global `enabled` flag is false.
+
 ## Compatibility and provenance
 
 Pinned installer SHA256:
