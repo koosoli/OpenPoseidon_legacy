@@ -353,3 +353,34 @@ path in this installed version. The next bounded opt-in correction is
 hardware sRGB color-role views and linear layer composition. Normal
 composition and lighting remain approximate and require separate checks;
 these previews do not establish full material parity.
+
+## Optional sRGB integration checkpoint
+
+Engine source `fd66c9e6` passes the full supported build; the paired install
+is stamped `acbe7617` at 12:17 (the additional commit records verification
+documentation only). Two actual synthetic GPU tests pass: hardware
+decode-before-filter with unchanged alpha, and alias replacement / lease /
+eviction / generation / cap handling. No additional pixel storage or texture
+sample is introduced; the internal material stride adds 16 bytes and each
+eligible unique BCR consumes one capped descriptor.
+
+Pub-facing on/off runs under
+`build/native-reforger-perf/Pub-srgb-{on,off}-acbe7617/run-01.*` both pass
+lifecycle and settle at 20683 registered / 6295 main instances and
+11826164 main triangles. Source admission succeeds and the renderer admits
+all six targeted sections. The facade and gable crop differences are at
+most one RGB byte, with mean absolute differences 0.026 and 0.027.
+Consequently this scene does **not** demonstrate a meaningful visible
+improvement, despite the tested filtering/composition correction. Moving
+foliage prevents whole-frame deltas from isolating this material change.
+Single-frame samples of 55.989/60.704ms are not a speedup or cost claim.
+The preview remains disabled by default; normal and lighting approximations
+remain open.
+
+The installed classic scene regression check
+`build/reshade-depth/20261008-122344-SceneProbe/result.json` passes effect
+compilation, live toggling, paired capture and clean exit. Its fresh witness
+has 256 finite / 227 nonzero depth values; inspection still aligns terrain,
+trees, pole and weapon with the native scene and leaves sky white. This
+checks the shared material-layout integration without claiming new ReShade
+quality or compatibility coverage.
