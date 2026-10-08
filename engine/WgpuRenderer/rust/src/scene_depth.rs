@@ -115,7 +115,14 @@ pub struct State {
 }
 impl State {
     pub fn enabled() -> bool {
-        cfg!(windows) && std::env::var("WGR_RESHADE_SCENE_DEPTH").ok().as_deref() == Some("1")
+        cfg!(windows)
+            && matches!(
+                std::env::var("WGR_RESHADE_SCENE_DEPTH").ok().as_deref(),
+                Some("1" | "2")
+            )
+    }
+    pub fn requested(&self) -> bool {
+        std::env::var("WGR_RESHADE_SCENE_DEPTH").ok().as_deref() == Some("1") || native::requested()
     }
     pub fn new() -> Self {
         Self {
@@ -139,6 +146,9 @@ impl State {
         self.captured = false;
     }
     pub fn begin(&mut self) {
+        if !self.requested() && self.gpu.is_some() {
+            self.invalidate();
+        }
         self.frame = self.frame.checked_add(1).unwrap_or(u64::MAX);
         self.captured = false;
         self.publication.flags &= !1;
@@ -506,6 +516,14 @@ mod native {
             }
         }
     }
+    pub fn requested() -> bool {
+        let address = symbol(b"OpReShadeWantsSceneDepthV1\0");
+        if address.is_null() {
+            return false;
+        }
+        let call: unsafe extern "C" fn() -> u32 = unsafe { std::mem::transmute(address) };
+        unsafe { call() != 0 }
+    }
     pub fn handles(
         device: &wgpu::Device,
         texture: &wgpu::Texture,
@@ -530,6 +548,9 @@ mod native {
 mod native {
     pub fn publish(_: &super::Publication) {}
     pub fn invalidate() {}
+    pub fn requested() -> bool {
+        false
+    }
     pub fn handles(
         _: &wgpu::Device,
         _: &wgpu::Texture,

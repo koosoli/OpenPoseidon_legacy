@@ -6,8 +6,12 @@
 #include <cstring>
 #include <mutex>
 #include <vector>
+#include <filesystem>
+#include <cstdlib>
 #include <reshade.hpp>
 #include "../../engine/Poseidon/Dev/Debug/ReShadeSceneDepthContract.hpp"
+#include "../../engine/Poseidon/Dev/Debug/ReShadePreviewPolicy.hpp"
+#include "ReShadeTiming.hpp"
 
 namespace
 {
@@ -24,6 +28,11 @@ std::atomic<unsigned> presentCount{0};
 int comparisonStage = 0;
 int settleFrames = 0;
 bool restoreEffects = false;
+std::atomic<int> previewRequested{-1};
+std::atomic<unsigned> previewSelected{OpReShadePreview::External};
+std::atomic<unsigned> previewStatus{0}; // 1=pending, 2=applied, 3=missing, 4=copy failed, 5=waiting depth, 6=waiting exact technique
+bool previewWantsEffects = false;
+OpReShadeTiming timing;
 std::mutex depthMutex;
 OpReShadeSceneDepthStateV1 depthState{};
 std::uint64_t depthBoundQueue = 0;
@@ -48,8 +57,7 @@ void DepthReady(reshade::api::effect_runtime* runtime, bool ready)
     }
 }
 
-void OnBeginEffects(reshade::api::effect_runtime* runtime, reshade::api::command_list*,
-                    reshade::api::resource_view, reshade::api::resource_view)
+void BindSceneDepth(reshade::api::effect_runtime* runtime)
 {
     std::lock_guard lock(depthMutex);
     const auto& p = depthState.publication;
@@ -100,8 +108,25 @@ void OnBeginEffects(reshade::api::effect_runtime* runtime, reshade::api::command
     }
 }
 
+void OnBeginEffects(reshade::api::effect_runtime* runtime, reshade::api::command_list* commands,
+                    reshade::api::resource_view, reshade::api::resource_view)
+{ BindSceneDepth(runtime); timing.Begin(runtime, commands); }
+void OnFinishEffects(reshade::api::effect_runtime* runtime, reshade::api::command_list* commands,
+                    reshade::api::resource_view, reshade::api::resource_view)
+{ timing.End(runtime, commands); }
+
 void OnInit(reshade::api::effect_runtime* runtime)
 {
+    char current[4096]{};
+    runtime->get_current_preset_path(current);
+    const auto name = std::filesystem::path(current).filename().string();
+    // Engine session files never auto-enable a remembered depth/GI preview on
+    // restart. Explicit diagnostic presets and ordinary external presets retain
+    // the existing startup behavior. A live resize preserves the selected mode.
+    if (previewSelected.load() == OpReShadePreview::External && name.starts_with("OpenPoseidon-UI-Session-"))
+        previewSelected.store(OpReShadePreview::Off);
+    if (previewSelected.load() != OpReShadePreview::External)
+        runtime->set_effects_state(false);
     observed.store(runtime->get_effects_state() ? 1 : 0);
     std::lock_guard lock(depthMutex);
     depthRuntimes.push_back(runtime);
@@ -109,6 +134,7 @@ void OnInit(reshade::api::effect_runtime* runtime)
 
 void OnDestroy(reshade::api::effect_runtime* runtime)
 {
+    timing.Destroy(runtime);
     {
         std::lock_guard lock(depthMutex);
         std::erase(depthRuntimes, runtime);
@@ -124,8 +150,90 @@ void OnDestroy(reshade::api::effect_runtime* runtime)
     captureStage.store(0);
 }
 
+bool PreviewTechniqueReady(reshade::api::effect_runtime* runtime)
+{
+    const unsigned mode = previewSelected.load();
+    if (mode == OpReShadePreview::External) return true;
+    if (mode == OpReShadePreview::Off) return false;
+    const char* effect = mode == OpReShadePreview::ColorLook ? "OpenPoseidonLook.fx" :
+        mode == OpReShadePreview::SceneDepth ? "OpenPoseidonDepthProbe.fx" : "OpenPoseidonDH.fx";
+    const char* name = mode == OpReShadePreview::ColorLook ? "OpenPoseidonLook" :
+        mode == OpReShadePreview::SceneDepth ? "OpenPoseidonDepthProbe" : "DH_UBER_RT";
+    unsigned active = 0, expected = 0;
+    runtime->enumerate_techniques(nullptr, [&](reshade::api::effect_runtime* current,
+                                             reshade::api::effect_technique technique) {
+        if (!current->get_technique_state(technique)) return;
+        ++active;
+        char effectName[512]{}, techniqueName[512]{};
+        current->get_technique_effect_name(technique, effectName);
+        current->get_technique_name(technique, techniqueName);
+        if (std::strcmp(effectName, effect) == 0 && std::strcmp(techniqueName, name) == 0) ++expected;
+    });
+    return active == 1 && expected == 1;
+}
+
 void OnPresent(reshade::api::effect_runtime* runtime)
 {
+    if (comparisonStage == 0)
+    {
+        const int mode = previewRequested.exchange(-1);
+        if (mode >= 0)
+        {
+            runtime->set_effects_state(false);
+            previewWantsEffects = false;
+            previewSelected.store(OpReShadePreview::Off);
+            if (mode == OpReShadePreview::Off)
+            {
+                previewSelected.store(mode);
+                previewStatus.store(2);
+            }
+            else
+            {
+                const char* base = std::getenv("RESHADE_BASE_PATH_OVERRIDE");
+                const auto root = base ? std::filesystem::path(base) : std::filesystem::path();
+                const auto source = root / OpReShadePreview::Preset(mode);
+                std::error_code error;
+                if (root.empty() || !std::filesystem::is_regular_file(source, error)) previewStatus.store(3);
+                else
+                {
+                    char current[4096]{}; runtime->get_current_preset_path(current);
+                    // Alternate owned session copies: set_current_preset_path saves
+                    // the old preset first, so never overwrite its active file.
+                    const bool wasA = std::filesystem::path(current).filename() == "OpenPoseidon-UI-Session-A.ini";
+                    const auto target = root / (wasA ? "OpenPoseidon-UI-Session-B.ini" : "OpenPoseidon-UI-Session-A.ini");
+                    std::filesystem::copy_file(source, target, std::filesystem::copy_options::overwrite_existing, error);
+                    if (error) previewStatus.store(4);
+                    else
+                    {
+                        runtime->set_current_preset_path(target.string().c_str());
+                        previewSelected.store(mode);
+                        previewWantsEffects = true;
+                        previewStatus.store(OpReShadePreview::UsesDepth(mode) ? 5 : 2);
+                    }
+                }
+            }
+        }
+    }
+    const bool techniqueReady = PreviewTechniqueReady(runtime);
+    if (OpReShadePreview::UsesDepth(previewSelected.load()))
+    {
+        // Binding/readiness must also advance with effects disabled while waiting
+        // for the first numerical witness; otherwise begin-effects never runs.
+        BindSceneDepth(runtime);
+        std::lock_guard lock(depthMutex);
+        const bool ready = depthState.status == 2 && techniqueReady;
+        if (comparisonStage == 0) runtime->set_effects_state(previewWantsEffects && ready);
+        else if (!ready)
+        { comparisonStage = 0; comparisonRequested.store(false); runtime->set_effects_state(false); }
+        previewStatus.store(!techniqueReady ? 6 : ready ? 2 : 5);
+    }
+    else if (comparisonStage == 0 && previewSelected.load() == OpReShadePreview::Off)
+        runtime->set_effects_state(false);
+    else if (comparisonStage == 0 && previewSelected.load() == OpReShadePreview::ColorLook)
+    {
+        runtime->set_effects_state(previewWantsEffects && techniqueReady);
+        previewStatus.store(techniqueReady ? 2 : 6);
+    }
     presentCount.fetch_add(1);
     unsigned techniques = 0;
     unsigned active = 0;
@@ -137,12 +245,21 @@ void OnPresent(reshade::api::effect_runtime* runtime)
     });
     techniqueCount.store(techniques);
     activeTechniqueCount.store(active);
-    const int next = requested.exchange(-1);
+    const int next = comparisonStage == 0 ? requested.exchange(-1) : -1;
     if (next >= 0)
-        runtime->set_effects_state(next != 0);
+    {
+        previewWantsEffects = next != 0;
+        bool allowed = previewSelected.load() != OpReShadePreview::Off && techniqueReady;
+        if (OpReShadePreview::UsesDepth(previewSelected.load()))
+        {
+            std::lock_guard lock(depthMutex);
+            allowed = allowed && depthState.status == 2;
+        }
+        runtime->set_effects_state(next != 0 && allowed);
+    }
     // This event runs after effects. Capture each state only after it has
     // actually rendered, rather than relabelling the engine's pre-injector frame.
-    if (comparisonStage == 0 && techniques > 0 && comparisonRequested.exchange(false))
+    if (comparisonStage == 0 && previewSelected.load() != OpReShadePreview::Off && techniqueReady && techniques > 0 && comparisonRequested.exchange(false))
     {
         restoreEffects = runtime->get_effects_state();
         runtime->set_effects_state(false);
@@ -167,6 +284,7 @@ void OnPresent(reshade::api::effect_runtime* runtime)
     }
     observed.store(runtime->get_effects_state() ? 1 : 0);
     captureStage.store(comparisonStage);
+    timing.Present(runtime, previewSelected.load());
 }
 }
 
@@ -186,13 +304,29 @@ extern "C" __declspec(dllexport) void OpReShadeSetEnabled(int enabled)
 }
 extern "C" __declspec(dllexport) void OpReShadeCaptureComparison()
 {
-    comparisonRequested.store(true);
+    if (previewSelected.load() != OpReShadePreview::Off && !timing.Busy()) comparisonRequested.store(true);
 }
 extern "C" __declspec(dllexport) unsigned OpReShadeGetTechniqueCount() { return techniqueCount.load(); }
 extern "C" __declspec(dllexport) unsigned OpReShadeGetActiveTechniqueCount() { return activeTechniqueCount.load(); }
 extern "C" __declspec(dllexport) unsigned OpReShadeGetCaptureCount() { return captureCount.load(); }
 extern "C" __declspec(dllexport) unsigned OpReShadeGetCaptureStage() { return captureStage.load(); }
 extern "C" __declspec(dllexport) unsigned OpReShadeGetPresentCount() { return presentCount.load(); }
+extern "C" __declspec(dllexport) unsigned OpReShadeSelectPreviewV1(unsigned mode)
+{
+    if (mode > OpReShadePreview::DhGi) return 0;
+    previewRequested.store(static_cast<int>(mode)); previewStatus.store(1); return 1;
+}
+extern "C" __declspec(dllexport) unsigned OpReShadeGetPreviewV1() { return previewSelected.load(); }
+extern "C" __declspec(dllexport) unsigned OpReShadeGetPreviewStatusV1() { return previewStatus.load(); }
+extern "C" __declspec(dllexport) unsigned OpReShadeWantsSceneDepthV1()
+{
+    const int pending = previewRequested.load();
+    return OpReShadePreview::UsesDepth(pending >= 0 ? static_cast<unsigned>(pending) : previewSelected.load());
+}
+extern "C" __declspec(dllexport) unsigned OpReShadeStartTimingV1(unsigned frames)
+{ return captureStage.load() || comparisonRequested.load() ? 0 : timing.Request(frames); }
+extern "C" __declspec(dllexport) unsigned OpReShadeGetTimingV1(OpReShadeTimingV1* out, unsigned bytes, unsigned version)
+{ return timing.Query(out, bytes, version); }
 
 extern "C" __declspec(dllexport) unsigned OpReShadePublishSceneDepthV1(
     const OpReShadeSceneDepthV1* publication, unsigned bytes, unsigned version)
@@ -260,6 +394,7 @@ extern "C" __declspec(dllexport) bool AddonInit(HMODULE module, HMODULE reshadeM
         return false;
     reshade::register_event<reshade::addon_event::init_effect_runtime>(OnInit);
     reshade::register_event<reshade::addon_event::reshade_begin_effects>(OnBeginEffects);
+    reshade::register_event<reshade::addon_event::reshade_finish_effects>(OnFinishEffects);
     reshade::register_event<reshade::addon_event::destroy_effect_runtime>(OnDestroy);
     reshade::register_event<reshade::addon_event::reshade_present>(OnPresent);
     return true;
@@ -270,6 +405,7 @@ extern "C" __declspec(dllexport) void AddonUninit(HMODULE module, HMODULE)
     OpReShadeInvalidateSceneDepthV1();
     {
         std::lock_guard lock(depthMutex);
+        for (auto* runtime : depthRuntimes) timing.Destroy(runtime);
         depthRuntimes.clear();
     }
     observed.store(-1);

@@ -1,5 +1,7 @@
 #include <Poseidon/Dev/Debug/ReShadeOptional.hpp>
 #include <Poseidon/Dev/Debug/ReShadeSceneDepthContract.hpp>
+#include <Poseidon/Dev/Debug/ReShadePreviewPolicy.hpp>
+#include <Poseidon/Dev/Debug/ReShadeTimingContract.hpp>
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <Poseidon/Dev/Harness/HarnessServer.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
@@ -8,6 +10,8 @@
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/UI/Settings/GraphicsConfig.hpp>
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/Graphics/Core/Engine.hpp>
+#include <cmath>
 #include <array>
 #include <cstdlib>
 #include <cstring>
@@ -58,6 +62,63 @@ bool ValidateRuntime(const std::filesystem::path& directory)
            FileDigestMatches(directory / "ReShade64.json", "aa21713718843e531da396e2bfc80772c9cb3c369d6c30b836be6b0ae812d503");
 }
 
+bool ValidatePreview(unsigned mode)
+{
+    const auto root = RuntimeDirectory();
+    if (mode == OpReShadePreview::Off) return true;
+    if (mode == OpReShadePreview::ColorLook)
+    {
+        if (!FileDigestMatches(root / "Shaders/OpenPoseidonLook.fx", "ec0db3cb49f9c990d061a7a02c7e1e7a4e2e59c1f19b8db919481098c24451e6")) return false;
+        std::ifstream preset(root / "OpenPoseidon.ini"); std::string line;
+        while (std::getline(preset, line))
+        {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line.starts_with("Techniques=")) return line == "Techniques=OpenPoseidonLook@OpenPoseidonLook.fx";
+        }
+        return false;
+    }
+    if (!OpReShadePreview::UsesDepth(mode)) return false;
+    std::ifstream receipt(root / "DEPTH-PROVENANCE.json", std::ios::binary | std::ios::ate);
+    const auto length = receipt.tellg();
+    if (!receipt || length <= 0 || length > 32768) return false;
+    std::string text(static_cast<size_t>(length), '\0'); receipt.seekg(0); receipt.read(text.data(), text.size());
+    auto* json = cJSON_Parse(text.c_str());
+    if (!json) return false;
+    const auto matches = [](const cJSON* object, const char* key, const char* expected) {
+        const auto* value = cJSON_GetObjectItemCaseSensitive(object, key);
+        return cJSON_IsString(value) && value->valuestring && std::strcmp(value->valuestring, expected) == 0;
+    };
+    bool validReceipt = matches(json, "probe_license", "GPL-3.0-or-later");
+    if (mode != OpReShadePreview::SceneDepth)
+    {
+        const auto* adapter = cJSON_GetObjectItemCaseSensitive(json, "scene_adapter");
+        validReceipt = validReceipt && matches(json, "dh_license", "GPL-2.0 (upstream LICENSE)") &&
+            matches(adapter, "source_sha256", OpReShadePreview::DepthAssets[4].digest) &&
+            matches(adapter, "generated_sha256", OpReShadePreview::DepthAssets[1].digest) &&
+            matches(adapter, "helper_sha256", OpReShadePreview::DepthAssets[2].digest) && matches(adapter, "helper_license", "MIT");
+    }
+    cJSON_Delete(json);
+    if (!validReceipt) return false;
+    for (size_t i = 0; i < OpReShadePreview::DepthAssets.size(); ++i)
+    {
+        if (mode == OpReShadePreview::SceneDepth && i != 0 && i != 6) continue;
+        const auto& asset = OpReShadePreview::DepthAssets[i];
+        if (!FileDigestMatches(root / asset.path, asset.digest)) return false;
+    }
+    if (mode == OpReShadePreview::DhDepth)
+        return FileDigestMatches(root / OpReShadePreview::DhDebugPreset.path, OpReShadePreview::DhDebugPreset.digest);
+    if (mode == OpReShadePreview::DhGi)
+        return FileDigestMatches(root / OpReShadePreview::DhGiPreset.path, OpReShadePreview::DhGiPreset.digest);
+    return true;
+}
+
+bool DepthPreviewSettingsSupported()
+{
+    const auto* engine = Poseidon::GEngine;
+    return engine && engine->SupportsTonemap() && std::abs(engine->GetRenderScale() - 1.0f) < 0.001f &&
+        (engine->GetMsaaSamples() == 1 || engine->GetMsaaSamples() == 4);
+}
+
 #if defined(_WIN32)
 void AddEnvironmentEntry(const char* name, const std::string& value)
 {
@@ -73,6 +134,8 @@ using Query = unsigned (*)();
 using SetEnabled = void (*)(int);
 using Capture = void (*)();
 using QuerySceneDepth = unsigned (*)(OpReShadeSceneDepthStateV1*, unsigned, unsigned);
+using SelectPreview = unsigned (*)(unsigned);
+using QueryTiming = unsigned (*)(OpReShadeTimingV1*, unsigned, unsigned);
 struct Bridge
 {
     Query status = nullptr;
@@ -84,6 +147,11 @@ struct Bridge
     Query captureStage = nullptr;
     Query presentCount = nullptr;
     QuerySceneDepth sceneDepth = nullptr;
+    SelectPreview selectPreview = nullptr;
+    Query preview = nullptr;
+    Query previewStatus = nullptr;
+    SelectPreview startTiming = nullptr;
+    QueryTiming timing = nullptr;
 };
 
 Bridge GetBridge()
@@ -106,6 +174,11 @@ Bridge GetBridge()
             bridge.captureStage = reinterpret_cast<Query>(GetProcAddress(module, "OpReShadeGetCaptureStage"));
             bridge.presentCount = reinterpret_cast<Query>(GetProcAddress(module, "OpReShadeGetPresentCount"));
             bridge.sceneDepth = reinterpret_cast<QuerySceneDepth>(GetProcAddress(module, "OpReShadeGetSceneDepthV1"));
+            bridge.selectPreview = reinterpret_cast<SelectPreview>(GetProcAddress(module, "OpReShadeSelectPreviewV1"));
+            bridge.preview = reinterpret_cast<Query>(GetProcAddress(module, "OpReShadeGetPreviewV1"));
+            bridge.previewStatus = reinterpret_cast<Query>(GetProcAddress(module, "OpReShadeGetPreviewStatusV1"));
+            bridge.startTiming = reinterpret_cast<SelectPreview>(GetProcAddress(module, "OpReShadeStartTimingV1"));
+            bridge.timing = reinterpret_cast<QueryTiming>(GetProcAddress(module, "OpReShadeGetTimingV1"));
         }
     }
 #endif
@@ -144,6 +217,10 @@ void PrepareOptionalReShadeEnvironment(bool enabled)
         LOG_WARN(Graphics, "{}", startupMessage);
         return;
     }
+    // 1 is the explicit diagnostic harness; 2 only makes live developer
+    // selection available. The renderer does no snapshot/resolve until requested.
+    if (config.DevMode() && ValidatePreview(OpReShadePreview::SceneDepth) && !std::getenv("WGR_RESHADE_SCENE_DEPTH"))
+        _putenv_s("WGR_RESHADE_SCENE_DEPTH", "2");
     AddEnvironmentEntry("VK_ADD_LAYER_PATH", directory.string());
     AddEnvironmentEntry("VK_INSTANCE_LAYERS", "VK_LAYER_reshade");
     _putenv_s("RESHADE_BASE_PATH_OVERRIDE", directory.string().c_str());
@@ -188,16 +265,60 @@ void DrawOptionalReShadeControls()
     const unsigned status = Read(bridge.status);
     if ((status & 1u) && bridge.setEnabled)
     {
+        if (bridge.selectPreview && bridge.preview)
+        {
+            const char* choices[] = {"Off", "Color look", "Scene depth", "DH depth debug", "DH GI (experimental)", "External preset"};
+            int preview = static_cast<int>(Read(bridge.preview));
+            if (Dev::Combo("ReShade preview", &preview, choices, 6) && preview < OpReShadePreview::External)
+            {
+                const auto& app = Poseidon::Foundation::AppConfig::Instance();
+                const char* available = std::getenv("WGR_RESHADE_SCENE_DEPTH");
+                const bool devSp = app.DevMode() && app.GetRenderBackend() == "wgpu" && !app.IsHostServer() &&
+                    (!Poseidon::GWorld || Poseidon::GWorld->GetMode() != Poseidon::GModeNetware);
+                if (!devSp) preferenceMessage = "Preview selection requires developer single-player WGPU.";
+                else if (!ValidatePreview(preview)) preferenceMessage = "Prepared preset/shader/licence checks failed. Prepare the optional depth files first.";
+                else if (OpReShadePreview::UsesDepth(preview) && (!available || (*available != '1' && *available != '2')))
+                    preferenceMessage = "Depth preview was not prepared at startup. Restart after preparing the optional depth files.";
+                else if (OpReShadePreview::UsesDepth(preview) && !DepthPreviewSettingsSupported())
+                    preferenceMessage = "Depth previews require 1x or 4x MSAA, 100% render scale and HDR. Change graphics settings separately.";
+                else preferenceMessage = bridge.selectPreview(preview) ? "Preview requested for this session." : "Preview request refused.";
+            }
+            Dev::PanelTooltip("Uses only the separately prepared, verified presets. Depth/GI stays off on the next launch.\n"
+                "DH GI is experimental: current distance color lifting and total GPU cost still need acceptance.");
+            const unsigned selectionStatus = Read(bridge.previewStatus);
+            if (selectionStatus == 6) Dev::PanelHelp("Waiting for exactly the selected compiled technique; effects remain off.");
+            if (selectionStatus == 5) Dev::PanelHelp("Waiting for a valid world-depth snapshot; effects remain off.");
+            if (OpReShadePreview::UsesDepth(Read(bridge.preview)) && !DepthPreviewSettingsSupported())
+                Dev::PanelHelp("Depth preview paused: requires 1x/4x MSAA, 100%% render scale and HDR. Graphics settings are unchanged.");
+            else if (selectionStatus == 3 || selectionStatus == 4) Dev::PanelHelp("Preset selection failed; check the prepared local cache.");
+        }
         bool enabled = (status & 2u) != 0;
-        if (Dev::Checkbox("ReShade effects", &enabled))
+        if ((!bridge.preview || Read(bridge.preview) != OpReShadePreview::Off) && Dev::Checkbox("ReShade effects", &enabled))
             bridge.setEnabled(enabled ? 1 : 0);
         Dev::PanelTooltip("Live control of the actual optional ReShade runtime.\n"
                           "Home opens its own preset controls. This does not change native fog, GTAO or GI.");
         Dev::PanelHelp("Loaded techniques: %u; enabled techniques: %u", Read(bridge.techniques), Read(bridge.activeTechniques));
-        if (bridge.capture && Dev::Button("Save ReShade before/after"))
+        if (bridge.capture && (!bridge.preview || Read(bridge.preview) != OpReShadePreview::Off) && Dev::Button("Save ReShade before/after"))
             bridge.capture();
         Dev::PanelTooltip("Hold the camera still. Saves Native and ReShade images in the optional\n"
                           "runtime Screenshots directory, then restores the original effects state.");
+        if (bridge.startTiming && Dev::Button("Measure ReShade GPU (120 frames)")) bridge.startTiming(120);
+        Dev::PanelTooltip("Measures all ReShade effects with GPU timestamps and total frame intervals.\n"
+            "Hold the camera/settings still. Initialization may wait before excluded warmup; readback never waits per frame.");
+        OpReShadeTimingV1 timing{};
+        if (bridge.timing && bridge.timing(&timing, sizeof(timing), 1))
+        {
+            if (timing.status >= 2 && timing.status <= 4) Dev::PanelHelp("Timing: %u/%u frames, %u GPU brackets complete.", timing.recorded, timing.frames, timing.completedGpu);
+            else if (timing.status == 5)
+            {
+                double gpu = 0, wall = 0; unsigned count = 0;
+                for (unsigned i = 0; i < timing.recorded; ++i)
+                { wall += timing.samples[i].presentMs; if (timing.samples[i].flags & 2) { gpu += timing.samples[i].gpuMs; ++count; } }
+                if (count) Dev::PanelHelp("Mean ReShade GPU %.3f ms (%u brackets); total frame interval %.3f ms.", gpu/count, count, timing.recorded ? wall/timing.recorded : 0);
+                else Dev::PanelHelp("No GPU bracket samples (effects off); total frame interval %.3f ms.", timing.recorded ? wall/timing.recorded : 0);
+            }
+            else if (timing.status >= 6) Dev::PanelHelp("Timing unavailable/interrupted (status %u); no cost acceptance.", timing.status);
+        }
         return;
     }
     Dev::PanelHelp("Inactive. Prepare the optional runtime, enable loading above, then restart.");
@@ -207,7 +328,7 @@ void DrawOptionalReShadeControls()
 
 void RegisterOptionalReShadeHarness(Dev::HarnessServer& harness)
 {
-    harness.RegisterCommand({"optional_reshade", "Dev/SP optional runtime state, on/off or final-frame comparison", {{"action", "string", false}}},
+    harness.RegisterCommand({"optional_reshade", "Dev/SP optional runtime state, preview, timing or comparison", {{"action", "string", false}, {"preview", "number", false}, {"frames", "number", false}}},
         [](const std::string&, cJSON* root) -> std::string
         {
             if (!Poseidon::Foundation::AppConfig::Instance().DevMode() ||
@@ -215,20 +336,50 @@ void RegisterOptionalReShadeHarness(Dev::HarnessServer& harness)
                 return Dev::HarnessProtocol::ErrorResponse("optional ReShade controls require --dev and single-player");
             const auto* item = cJSON_GetObjectItemCaseSensitive(root, "action");
             if (item && (!cJSON_IsString(item) || !item->valuestring))
-                return Dev::HarnessProtocol::ErrorResponse("action must be state, on, off or capture");
+                return Dev::HarnessProtocol::ErrorResponse("action must be state, select, measure, on, off or capture");
             const char* action = item ? item->valuestring : "state";
             const bool state = std::strcmp(action, "state") == 0;
             const bool on = std::strcmp(action, "on") == 0;
             const bool off = std::strcmp(action, "off") == 0;
             const bool capture = std::strcmp(action, "capture") == 0;
-            if (!state && !on && !off && !capture)
-                return Dev::HarnessProtocol::ErrorResponse("action must be state, on, off or capture");
+            const bool select = std::strcmp(action, "select") == 0;
+            const bool measure = std::strcmp(action, "measure") == 0;
+            if (!state && !on && !off && !capture && !select && !measure)
+                return Dev::HarnessProtocol::ErrorResponse("action must be state, select, measure, on, off or capture");
             const Bridge bridge = GetBridge();
             const unsigned status = Read(bridge.status);
             if (!state && (!(status & 1u) || !bridge.setEnabled || !bridge.capture))
                 return Dev::HarnessProtocol::ErrorResponse("optional ReShade runtime unavailable; use opt-in launcher");
             if (on || off) bridge.setEnabled(on ? 1 : 0);
-            if (capture) bridge.capture();
+            if (capture)
+            {
+                if (bridge.preview && Read(bridge.preview) == OpReShadePreview::Off)
+                    return Dev::HarnessProtocol::ErrorResponse("select a preview before capture");
+                OpReShadeTimingV1 timing{};
+                if (bridge.timing && bridge.timing(&timing, sizeof(timing), 1) && timing.status >= 2 && timing.status <= 4)
+                    return Dev::HarnessProtocol::ErrorResponse("wait for the bounded timing window before capture");
+                bridge.capture();
+            }
+            if (select)
+            {
+                const auto* value = cJSON_GetObjectItemCaseSensitive(root, "preview");
+                if (!bridge.selectPreview || !cJSON_IsNumber(value) || value->valuedouble < 0 ||
+                    value->valuedouble > static_cast<double>(OpReShadePreview::DhGi) || value->valuedouble != value->valueint)
+                    return Dev::HarnessProtocol::ErrorResponse("preview must be 0=off, 1=color, 2=scene depth, 3=DH depth, 4=DH GI; updated add-on required");
+                const auto mode = static_cast<unsigned>(value->valueint);
+                const char* available = std::getenv("WGR_RESHADE_SCENE_DEPTH");
+                if (!ValidatePreview(mode)) return Dev::HarnessProtocol::ErrorResponse("prepared preview shader/preset/licence digest checks failed");
+                if (OpReShadePreview::UsesDepth(mode) && (!available || (*available != '1' && *available != '2') || !DepthPreviewSettingsSupported()))
+                    return Dev::HarnessProtocol::ErrorResponse("depth preview requires prepared startup, HDR, render scale 1 and 1x/4x MSAA; settings unchanged");
+                if (!bridge.selectPreview(mode)) return Dev::HarnessProtocol::ErrorResponse("preview request refused");
+            }
+            if (measure)
+            {
+                const auto* frames = cJSON_GetObjectItemCaseSensitive(root, "frames");
+                if (!bridge.startTiming || !cJSON_IsNumber(frames) || frames->valuedouble != frames->valueint ||
+                    frames->valueint < 30 || frames->valueint > 240 || !bridge.startTiming(frames->valueint))
+                    return Dev::HarnessProtocol::ErrorResponse("timing needs updated add-on, frames 30..240 and no queued request");
+            }
             auto* result = cJSON_CreateObject();
             cJSON_AddBoolToObject(result, "ready", (status & 1u) != 0);
             cJSON_AddBoolToObject(result, "enabled", (status & 2u) != 0);
@@ -238,6 +389,29 @@ void RegisterOptionalReShadeHarness(Dev::HarnessServer& harness)
             cJSON_AddNumberToObject(result, "captureCount", Read(bridge.captureCount));
             cJSON_AddNumberToObject(result, "captureStage", Read(bridge.captureStage));
             cJSON_AddNumberToObject(result, "presentCount", Read(bridge.presentCount));
+            cJSON_AddNumberToObject(result, "preview", bridge.preview ? Read(bridge.preview) : OpReShadePreview::External);
+            cJSON_AddNumberToObject(result, "previewStatus", Read(bridge.previewStatus));
+            OpReShadeTimingV1 timing{};
+            if (bridge.timing && bridge.timing(&timing, sizeof(timing), 1))
+            {
+                auto* row = cJSON_AddObjectToObject(result, "timing");
+                cJSON_AddNumberToObject(row, "status", timing.status);
+                cJSON_AddNumberToObject(row, "generation", static_cast<double>(timing.generation));
+                cJSON_AddNumberToObject(row, "frequency", static_cast<double>(timing.frequency));
+                cJSON_AddNumberToObject(row, "frames", timing.frames);
+                cJSON_AddNumberToObject(row, "recorded", timing.recorded);
+                cJSON_AddNumberToObject(row, "completedGpu", timing.completedGpu);
+                cJSON_AddNumberToObject(row, "preview", timing.preview);
+                auto* samples = cJSON_AddArrayToObject(row, "samples");
+                for (unsigned i = 0; i < timing.recorded && i < 240; ++i)
+                {
+                    auto* sample = cJSON_CreateObject(); cJSON_AddItemToArray(samples, sample);
+                    cJSON_AddNumberToObject(sample, "gpuMs", timing.samples[i].gpuMs);
+                    cJSON_AddNumberToObject(sample, "presentMs", timing.samples[i].presentMs);
+                    cJSON_AddNumberToObject(sample, "flags", timing.samples[i].flags);
+                }
+                cJSON_AddStringToObject(row, "scope", "GPU: complete ReShade begin/finish-effects bracket, excludes engine snapshot/overlay. Present intervals: total wall frame cadence, not GPU busy time. Initialization wait and 20 warmup frames excluded; no query reuse or per-frame waits.");
+            }
             OpReShadeSceneDepthStateV1 depth{};
             if (bridge.sceneDepth && bridge.sceneDepth(&depth, sizeof(depth), 1) == 1)
             {

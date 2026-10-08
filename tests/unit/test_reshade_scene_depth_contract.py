@@ -24,6 +24,17 @@ class State(C.Structure):
                 ("status", C.c_uint32), ("reserved", C.c_uint32)]
 
 
+class TimingSample(C.Structure):
+    _fields_ = [("gpuMs", C.c_double), ("presentMs", C.c_double),
+                ("flags", C.c_uint32), ("reserved", C.c_uint32)]
+
+
+class Timing(C.Structure):
+    _fields_ = [(name, C.c_uint32) for name in (
+        "bytes", "version", "status", "frames", "recorded", "completedGpu", "warmup", "preview")
+    ] + [("frequency", C.c_uint64), ("generation", C.c_uint64), ("samples", TimingSample * 240)]
+
+
 @unittest.skipUnless(os.name == "nt" and os.environ.get("OP_SCENE_DEPTH_TEST_ADDON"), "explicit local CPU bridge artifact required")
 class Contract(unittest.TestCase):
     @classmethod
@@ -99,6 +110,45 @@ class Contract(unittest.TestCase):
         self.assertEqual(self.query(C.byref(state), 1232, 1), 1)
         self.assertEqual(state.status, 0)
         self.assertEqual(state.publication.view, 0)
+
+    def test_preview_requests_are_bounded_and_do_not_touch_a_runtime(self):
+        select = self.library.OpReShadeSelectPreviewV1
+        select.argtypes = [C.c_uint32]
+        select.restype = C.c_uint32
+        wants = self.library.OpReShadeWantsSceneDepthV1
+        wants.restype = C.c_uint32
+        selected = self.library.OpReShadeGetPreviewV1
+        selected.restype = C.c_uint32
+        self.assertEqual(select(5), 0)  # External is observation only.
+        self.assertEqual(select(0xffffffff), 0)
+        self.assertEqual(select(3), 1)
+        self.assertEqual(wants(), 1)  # Availability starts only on explicit request.
+        self.assertEqual(selected(), 5)  # Queueing alone never pretends application.
+        self.assertEqual(select(0), 1)
+        self.assertEqual(wants(), 0)
+
+    def test_timing_abi_and_bounded_queue_without_gpu(self):
+        query = self.library.OpReShadeGetTimingV1
+        query.argtypes = [C.POINTER(Timing), C.c_uint32, C.c_uint32]
+        query.restype = C.c_uint32
+        request = self.library.OpReShadeStartTimingV1
+        request.argtypes = [C.c_uint32]
+        request.restype = C.c_uint32
+        self.assertEqual(C.sizeof(TimingSample), 24)
+        self.assertEqual(C.sizeof(Timing), 5808)
+        self.assertEqual(Timing.samples.offset, 48)
+        state = Timing()
+        self.assertEqual(query(None, 5808, 1), 0)
+        self.assertEqual(query(C.byref(state), 5800, 1), 0)
+        self.assertEqual(query(C.byref(state), 5808, 2), 0)
+        self.assertEqual(query(C.byref(state), 5808, 1), 1)
+        self.assertEqual((state.bytes, state.version, state.status, state.recorded), (5808, 1, 0, 0))
+        for frames in (0, 29, 241, 0xffffffff):
+            self.assertEqual(request(frames), 0)
+        self.assertEqual(request(120), 1)
+        self.assertEqual(request(120), 0)  # One bounded queued window, never an unbounded loop.
+        self.assertEqual(query(C.byref(state), 5808, 1), 1)
+        self.assertEqual(state.status, 0)  # Request alone cannot fabricate GPU evidence.
 
 
 if __name__ == "__main__":

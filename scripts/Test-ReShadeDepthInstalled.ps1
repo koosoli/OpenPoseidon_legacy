@@ -8,6 +8,8 @@ param(
  [ValidateSet('Probe','SceneProbe','SceneDHDebug','SceneDH','DHDebug','DH')][string]$Mode='Probe',
  [ValidateSet(1,2,4,8)][int]$MsaaSamples=1,
  [switch]$VerifyResize,
+ [switch]$UsePreviewControl,
+ [switch]$MeasureGpu,
  # Official GenericDepth 6.8: 0=end-of-frame, 1=before-clears,
  # 2=before-clears plus Vulkan depth-unbind copies (no end-of-frame fallback).
  [ValidateSet(0,1,2)][int]$DepthCopyBeforeClears=1,
@@ -24,6 +26,8 @@ $source=(Resolve-Path -LiteralPath $RuntimeDirectory).Path
 $probeMode=$Mode-in@('Probe','SceneProbe')
 $sceneMode=$Mode-in@('SceneProbe','SceneDHDebug','SceneDH')
 $sceneDhMode=$Mode-in@('SceneDHDebug','SceneDH')
+Require (!$MeasureGpu-or$UsePreviewControl) 'GPU measurement fixture requires live UI selection control'
+Require (!$UsePreviewControl-or$sceneMode) 'Live UI selection fixture requires an engine scene-depth mode'
 Require (!$VerifyResize-or$sceneMode) 'Resize witness verification requires an engine scene-depth mode'
 $effectiveDepthCopy=if($sceneMode){0}else{$DepthCopyBeforeClears}
 $presetName=switch($Mode){'Probe'{'OpenPoseidon-Depth-Probe.ini'};'SceneProbe'{'OpenPoseidon-Depth-Scene-Probe.ini'};'SceneDHDebug'{'OpenPoseidon-DH-Scene-Debug.ini'};'SceneDH'{'OpenPoseidon-DH-Scene-Preview.ini'};'DHDebug'{'OpenPoseidon-DH-Depth-Debug.ini'};'DH'{'OpenPoseidon-DH-RTGI-Preview.ini'}}
@@ -33,6 +37,8 @@ $required=@('ReShade64.dll','ReShade64.json','OpenPoseidonReShade.addon64','Open
  'Shaders/OpenPoseidonLook.fx','DEPTH-PROVENANCE.json',('Presets/'+$presetName),('Shaders/'+$effectName))
 if(!$probeMode){$required+=@('Shaders/ReShade.fxh','Sources/dh_uber_rt.fx','Licenses/DH-UBER-RT-GPL-2.0.txt')}
 if($sceneDhMode){$required+='Shaders/OpenPoseidonSceneDepth.fxh'}
+if($UsePreviewControl){$required+=@('Shaders/OpenPoseidonDepthProbe.fx','Presets/OpenPoseidon-Depth-Scene-Probe.ini')}
+$required=@($required|Select-Object -Unique)
 foreach($name in $required){Require (Test-Path -LiteralPath (Join-Path $source $name) -PathType Leaf) ('Stage the licensed runtime first; missing '+$name)}
 $digests=@{
  'ReShade64.dll'='0cee63f9c9f13f3ac909c5b4903f4dbb4b719a7ab3b4f13b0deaf83c814b94f7';
@@ -74,12 +80,18 @@ foreach($name in $required){
  $null=New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target)
  Copy-Item -LiteralPath (Join-Path $source $name) -Destination $target
 }
+# Emulate a remembered UI session without touching any existing runtime.
+$startupPreset='.\Presets\'+$presetName
+if($UsePreviewControl){
+ Copy-Item -LiteralPath (Join-Path $runtime ('Presets/'+$presetName)) -Destination (Join-Path $runtime 'OpenPoseidon-UI-Session-A.ini')
+ $startupPreset='.\OpenPoseidon-UI-Session-A.ini'
+}
 # A fresh config deliberately selects one preset and has no global add-on paths.
 @"
 [GENERAL]
 EffectSearchPaths=.\Shaders
 TextureSearchPaths=.\Textures
-PresetPath=.\Presets\$presetName
+PresetPath=$startupPreset
 PerformanceMode=0
 [ADDON]
 AddonPath=.
@@ -122,7 +134,7 @@ foreach($key in $keys){
  $saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')
 }
 $receipt=@{installed=$stamp;mode=$Mode;selectedTechnique=$technique;selectedPreset=$presetName;
- sourceRuntime=$source;scratch=$scratch;runtime=$runtime;msaaSamples=$MsaaSamples;optionalReShade=1;verifyResize=[bool]$VerifyResize;
+ sourceRuntime=$source;scratch=$scratch;runtime=$runtime;msaaSamples=$MsaaSamples;optionalReShade=1;verifyResize=[bool]$VerifyResize;usePreviewControl=[bool]$UsePreviewControl;measureGpu=[bool]$MeasureGpu;
  genericDepth=@{DepthCopyBeforeClears=$effectiveDepthCopy;DepthCopyAtClearIndex=0;UseAspectRatioHeuristics=3;FilterFormat=6;
   scope='Official 6.8 GenericDepth isolated configuration: exact output resolution and D32S8; clear-index selection remains automatic';
   source='https://github.com/crosire/reshade/blob/18deaa52de0c425a78b329e9cb3c497281cd00ec/examples/09-depth/generic_depth_addon.cpp'};
@@ -139,7 +151,7 @@ try{
  foreach($key in $keys){Remove-Item -LiteralPath ('Env:'+ $key) -ErrorAction SilentlyContinue}
  $env:POSEIDON_USER_DIR=$user;$env:POSEIDON_WHOLE_WORLD='0';$env:WGPU_BACKEND='vulkan'
  $env:WGR_DLSS='0';$env:WGR_AUTO_EXPOSURE='0';$env:WGR_EXPOSURE='0.5';$env:WGR_GTAO='0';$env:WGR_GI='0'
- if($sceneMode){$env:WGR_RESHADE_SCENE_DEPTH='1';$env:WGR_RENDER_SCALE='1';$env:WGR_HDR='1'}
+ if($sceneMode){$env:WGR_RESHADE_SCENE_DEPTH=if($UsePreviewControl){'2'}else{'1'};$env:WGR_RENDER_SCALE='1';$env:WGR_HDR='1'}
  $env:VK_ADD_LAYER_PATH=$runtime;$env:VK_INSTANCE_LAYERS='VK_LAYER_reshade';$env:RESHADE_BASE_PATH_OVERRIDE=$runtime
  $env:VK_LOADER_DEBUG='error,warn,layer'
  $receipt.launchEnvironment=@{}
@@ -188,6 +200,12 @@ try{
  Require (!(Select-String -Path $log -Pattern 'Critical error:|Cannot load --test-world' -Quiet)) 'Comparison world failed to load'
  Require (Select-String -Path $log -Pattern 'worlds[\\/]eden.wrp' -Quiet) 'Everon landscape load missing'
  $state=Send @{cmd='optional_reshade';action='state'}
+ if($UsePreviewControl){
+  Require ($state.preview-eq0-and!$state.enabled-and$state.sceneDepth.frame-eq0) 'Remembered session must start Off without depth capture before explicit selection'
+  $previewId=switch($Mode){'SceneProbe'{2};'SceneDHDebug'{3};'SceneDH'{4}}
+  $receipt.previewRequest=Send @{cmd='optional_reshade';action='select';preview=$previewId}
+  Start-Sleep -Milliseconds 500;$state=Send @{cmd='optional_reshade';action='state'}
+ }
  $sceneFrameAfterPose=0
  if($sceneMode){
   Require ($null-ne$state.sceneDepth) 'Rebuild/stage the versioned scene-depth bridge and matching engine first'
@@ -198,7 +216,8 @@ try{
  # At most 90 seconds for compilation/readiness, separate from startup.
  $deadline=[DateTime]::UtcNow.AddSeconds(90)
  while(!$state.ready-or$state.techniques-lt1-or!(Test-Path -LiteralPath $reshadeLog)-or
-       !(Select-String -Path $reshadeLog -Pattern $compilePattern -Quiet)){
+       !(Select-String -Path $reshadeLog -Pattern $compilePattern -Quiet)-or
+       ($UsePreviewControl-and($state.preview-ne$previewId-or$state.previewStatus-ne2))){
   Require ([DateTime]::UtcNow-lt$deadline) 'ReShade compilation/readiness deadline'
   Start-Sleep -Milliseconds 500;$state=Send @{cmd='optional_reshade';action='state'}
  }
@@ -218,11 +237,33 @@ try{
    Start-Sleep -Milliseconds 250;$receipt.on=Send @{cmd='optional_reshade';action='state'}
   }
   $receipt.sceneDepth=$receipt.on.sceneDepth
+  if($UsePreviewControl){Require ($receipt.on.preview-eq$previewId-and$receipt.on.previewStatus-eq2) 'Live preview selection was not applied'}
   Require ($receipt.sceneDepth.sourceSamples-eq$MsaaSamples) 'Snapshot source MSAA count differs from requested fixture'
   Require ($receipt.sceneDepth.finiteSamples-eq256-and$receipt.sceneDepth.nonzeroSamples-gt0-and
       $receipt.sceneDepth.maximum-gt$receipt.sceneDepth.minimum-and$receipt.sceneDepth.nearPlane-gt0) 'Scene-depth numeric witness invalid'
  }
  $receipt.onEnginePerformance=Send @{cmd='frame_performance'}
+ if($MeasureGpu){
+  $receipt.timingWindows=@()
+  foreach($enabled in @($false,$true,$true,$false)){
+   $null=Send @{cmd='optional_reshade';action=$(if($enabled){'on'}else{'off'})}
+   Start-Sleep -Milliseconds 500
+   $before=Send @{cmd='optional_reshade';action='state'}
+   Require ($before.enabled-eq$enabled-and$before.preview-eq$previewId) 'Timing phase toggle/selection mismatch'
+   $generation=$before.timing.generation
+   $null=Send @{cmd='optional_reshade';action='measure';frames=120}
+   $deadline=[DateTime]::UtcNow.AddSeconds(45)
+   do{
+    Start-Sleep -Milliseconds 100;$measured=Send @{cmd='optional_reshade';action='state'}
+    Require ([DateTime]::UtcNow-lt$deadline) 'Injected GPU timing deadline'
+    Require ($measured.timing.status-lt6) 'GPU timing unsupported/interrupted; no engine-timer fallback'
+   }while($measured.timing.generation-le$generation-or$measured.timing.status-ne5)
+   Require ($measured.timing.recorded-eq120-and$measured.timing.preview-eq$previewId) 'Timing window incomplete or selection changed'
+   if($enabled){Require ($measured.timing.completedGpu-ge108) 'Too few completed true GPU brackets for the enabled phase'}
+   $receipt.timingWindows+=@{enabled=$enabled;timing=$measured.timing}
+  }
+  $receipt.performanceScope='Four 120-frame off/on/on/off windows; true GPU timestamps bracket all ReShade effects, excludes engine depth snapshot and overlay. Present intervals are total wall cadence, not GPU busy time. Initialization wait +20 warmup frames excluded; no per-frame readback waits.'
+ }
  $startCapture=Get-Date;$count=$receipt.on.captureCount
  $null=Send @{cmd='optional_reshade';action='capture'}
  $deadline=[DateTime]::UtcNow.AddSeconds(30)
@@ -265,6 +306,15 @@ try{
   }
   Require ($size-ceq$originalSize) 'Window did not return to original dimensions'
   $receipt.resizeWitnessPassed=$true
+ }
+ if($UsePreviewControl){
+  $null=Send @{cmd='optional_reshade';action='select';preview=0}
+  $deadline=[DateTime]::UtcNow.AddSeconds(15)
+  do{
+   Start-Sleep -Milliseconds 250;$state=Send @{cmd='optional_reshade';action='state'}
+   Require ([DateTime]::UtcNow-lt$deadline) 'Live Off/depth release deadline'
+  }while($state.preview-ne0-or$state.enabled-or$state.sceneDepth.frame-ne0)
+  $receipt.previewOff=$state
  }
  $null=Send @{cmd='exit'};$null=$p.WaitForExit(10000)
  Require $p.HasExited 'Clean exit deadline';$receipt.exitCode=$p.ExitCode

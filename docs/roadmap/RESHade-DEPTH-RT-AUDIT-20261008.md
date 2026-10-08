@@ -553,3 +553,91 @@ source count to match the fixture. CPU checks validate the support/rejection
 and contract flags. Actual 4x edge alignment and numeric evidence remain for
 the parent to capture with `SceneProbe -MsaaSamples 4`, then DH debug only after
 acceptance. This is separate from the forthcoming live UI selection/gating work.
+
+
+## Session preview controls and bounded injected-effect GPU timing (runtime pending)
+
+The Graphics developer panel now selects Off, the existing color look, Scene
+Depth, DH Depth Debug or experimental DH GI. Selection requires developer
+single-player WGPU and verified local shader/preset/licence digests; depth
+selection additionally requires HDR, output-sized render scale and 1x/4x MSAA.
+No graphics setting changes automatically. Loading the optional Vulkan layer
+still defaults off and requires restart. An engine-selected preset stays off on
+the next launch, including a previously remembered DH selection.
+
+The engine only publishes commands. The add-on applies preset changes on its
+presentation callback, alternating two owned session INIs because the official
+preset setter first saves its previous file. The fixed prepared templates stay
+intact. Selected effects wait for exactly one enabled technique from the
+expected shader; depth modes also wait for a fresh, numerically valid matching
+binding. Unsupported settings, missing depth, resize or technique mismatch keep
+the selected preview disabled. Ordinary external presets retain their existing
+explicit-launch behavior; the engine does not certify arbitrary Home-menu effects.
+
+`WGR_RESHADE_SCENE_DEPTH=2` means available to the developer selector, with no
+snapshot/nearest resolve until a depth preview is selected. The explicit
+harness value 1 retains always-requested diagnostics. Selecting Off releases
+and unbinds the borrowed snapshot using the existing serialized queue lifetime
+contract. Toggling effects off for a comparison keeps the selected depth producer
+running, so OFF/ON timing windows have the same snapshot cost. Comparison capture
+and timing requests do not overlap. No engine renderer ABI is changed.
+
+The optional add-on timing ABI records 30..240 frames, after 20 excluded warmup
+frames. Each window allocates fresh timestamp query indices and never wraps or
+reuses them, avoiding a stale-result race before a submitted reset executes.
+Initialization and final heap destruction may wait outside the measured window;
+per-frame result reads are nonblocking. State/selection changes invalidate the
+window. Unsupported timestamps or incomplete query results are reported rather
+than substituted with engine timings.
+
+This follows the pinned official Vulkan implementation: timestamp `end_query`
+resets/writes its query, and result reads use 64-bit results without WAIT_BIT.
+The queue exposes its timestamp frequency only when supported. The official
+runtime invokes the begin/finish callbacks around the effect loop; those form
+the measured GPU bracket. See the pinned
+[command-list implementation](https://github.com/crosire/reshade/blob/18deaa52de0c425a78b329e9cb3c497281cd00ec/source/vulkan/vulkan_impl_command_list.cpp),
+[device implementation](https://github.com/crosire/reshade/blob/18deaa52de0c425a78b329e9cb3c497281cd00ec/source/vulkan/vulkan_impl_device.cpp),
+[queue implementation](https://github.com/crosire/reshade/blob/18deaa52de0c425a78b329e9cb3c497281cd00ec/source/vulkan/vulkan_impl_command_queue.cpp)
+and [runtime](https://github.com/crosire/reshade/blob/18deaa52de0c425a78b329e9cb3c497281cd00ec/source/runtime.cpp).
+
+The receipt distinguishes complete ReShade effect GPU brackets from QPC present
+intervals. The GPU bracket excludes the engine depth snapshot/resolve, overlay
+and layer work outside those callbacks; it is not total GPU frame cost. Present
+intervals are total wall frame cadence, including scheduling/present waits, not
+GPU busy time. Existing `frame_performance` remains explicitly scoped to engine
+work before injection and is not used to judge injected effect cost.
+
+CPU validation: the add-on builds, the engine UI translation unit passes a
+syntax check, four Rust scene-depth CPU/WGSL tests pass, 13 offline preparation,
+reconstruction and built-add-on contract tests pass, and the installed script
+parses. The built add-on tests check the actual 5808-byte timing layout, invalid
+ABI rejection, request bounds/duplicate refusal and that merely queueing a
+request cannot fabricate GPU samples. All fixed policy digests were checked
+against the fresh existing licensed offline stage. No new download, runtime
+launch, full engine build, deployment or GPU validation occurred in this slice.
+
+The fresh full stage is `build/scene-depth-preview-ui` in the isolated ReShade
+worktree. Its CPU-built add-on SHA256 is
+`92f5a1cb6a91ef3a504eed2bbe5bcf3baf3a2acb79a4ded062ffd6cd0a62e3c6`.
+After the parent integrates/builds/deploys this checkpoint under the game lock:
+
+```powershell
+# Prove actual normal-profile 4x depth and live request/Off release first.
+./scripts/Test-ReShadeDepthInstalled.ps1 -ExpectedCommit <installed-commit> -RuntimeDirectory <fresh-stage> -Mode SceneProbe -MsaaSamples 4 -UsePreviewControl -VerifyResize
+# Then inspect reconstruction and silhouettes before GI.
+./scripts/Test-ReShadeDepthInstalled.ps1 -ExpectedCommit <installed-commit> -RuntimeDirectory <fresh-stage> -Mode SceneDHDebug -MsaaSamples 4 -UsePreviewControl
+# Only after debug acceptance: paired injected captures and bounded GPU evidence.
+./scripts/Test-ReShadeDepthInstalled.ps1 -ExpectedCommit <installed-commit> -RuntimeDirectory <fresh-stage> -Mode SceneDH -MsaaSamples 4 -UsePreviewControl -MeasureGpu
+```
+
+The locked stock Everon camera, weather/time and `setAccTime 0` fixture is
+unchanged. Live control requires no producer frame before selection, then the
+exact selected mode, valid witness and enabled technique. Off must return to
+zero snapshot frame. Resize retains its generation/witness gates. MeasureGpu
+records four 120-frame OFF/ON/ON/OFF windows, requires at least 108 actual GPU
+brackets in each ON window, then captures Native/ReShade images through the
+injector bridge. Compile-error gates remain strict. The parent should compare
+median/p95 completed GPU samples and wall intervals by phase, preserve raw
+samples, and inspect distance paling before choosing any quality/cost threshold.
+Timestamp execution, 4x silhouettes and UI restart behavior still need actual
+parent runtime evidence; the existing 1x visual result does not establish them.
