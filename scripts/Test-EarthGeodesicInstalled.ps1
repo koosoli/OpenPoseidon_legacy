@@ -95,7 +95,7 @@ $overall=[DateTime]::UtcNow.AddSeconds(200+2*$PatchTimeoutSeconds)
 function Health{Require ($p -and !$p.HasExited) 'Owned game exited';Require ([DateTime]::UtcNow-lt$overall) 'Overall acceptance deadline'}
 function Send($command){
     Health;$writer.WriteLine(($command|ConvertTo-Json -Depth 10 -Compress))
-    do{$line=$reader.ReadLine();Require $line 'Harness disconnected';$reply=$line|ConvertFrom-Json}while($null-eq$reply.ok)
+    do{$line=$reader.ReadLine();Require (![string]::IsNullOrEmpty($line)) 'Harness disconnected';$reply=$line|ConvertFrom-Json}while($null-eq$reply.ok)
     Require $reply.ok $line;return $reply
 }
 function Eval([string]$code){return Decode ([string](Send @{cmd='eval';code=$code}).result)}
