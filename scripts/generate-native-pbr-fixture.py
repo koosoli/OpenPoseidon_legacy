@@ -32,7 +32,8 @@ def create_fixture(root):
         material.write_text(
             'MatPBRBasic {\n Cull none\n Color 1 1 1 1\n'
             f' RoughnessScale {roughness}\n MetalnessScale {metalness}\n'
-            f' BCRMap "{bcr.as_posix()}"\n NMOMap "{nmo.as_posix()}"\n}}\n',
+            f' BCRMap "{{0000000000000001}}{bcr.as_posix()}"\n'
+            f' NMOMap "{{0000000000000002}}{nmo.as_posix()}"\n}}\n',
             encoding="ascii")
         offset = len(points)
         rings, segments = 12, 24

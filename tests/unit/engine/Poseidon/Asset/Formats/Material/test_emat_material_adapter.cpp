@@ -59,7 +59,8 @@ TEST_CASE("Opaque native PBR Basic scales preserve zero and leave other material
 
     const auto translated = TranslateEmat(
         ParseEmat("MatPBRBasic {\n RoughnessScale 0.48\n MetalnessScale 0\n"
-                  " BCRMap \"Assets/Test_BCR.edds\"\n NMOMap \"Assets/Test_NMO.edds\"\n}\n"),
+                  " BCRMap \"{0000000000000001}Assets/Test_BCR.edds\"\n"
+                  " NMOMap \"{0000000000000002}Assets/Test_NMO.edds\"\n}\n"),
         "Assets/Test.emat", "");
     if (EmatPbrProvenanceEnabled())
         REQUIRE(NativePbrBasicScales(translated) == std::array<float, 2>{0.48f, 0.0f});
@@ -372,7 +373,7 @@ TEST_CASE("EMAT two-layer mask uses its authored UV stream independently of glob
     using namespace Poseidon::Asset::Material;
     // Synthetic source representing the separate mask key used by native
     // two-layer brick/rock materials. No native texture pixels are needed.
-    const auto source = ParseEmat("MatPBR2Layers {\n MaskMap \"Assets/Owned_mask.edds\"\n"
+    const auto source = ParseEmat("MatPBR2Layers {\n MaskMap \"{0000000000000003}Assets/Owned_mask.edds\"\n"
                                   " UVSrcMaskMap \"UV set 2\"\n}\n");
     REQUIRE(EmatMaskUsesUvSet2(source));
     const auto translated = TranslateEmat(source, "Assets/Owned.emat", "");
