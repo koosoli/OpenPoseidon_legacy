@@ -7,6 +7,7 @@
 #include <fstream>
 #include <numeric>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace Poseidon
 {
@@ -79,18 +80,27 @@ EarthBuildingStream::Cell EarthBuildingStream::CellAt(double latitude,double lon
 std::string EarthBuildingStream::FileName(Cell cell) {
     return std::to_string(cell.latitude)+"_"+std::to_string(cell.longitude)+".json";
 }
-EarthBuildingStream::Mesh EarthBuildingStream::BuildCell(const std::string& json,const Ground& g,Cell cell) {
-    Mesh result;result.cell=cell;result.revision=g.revision;result.generation=g.generation;
+namespace {
+using Buildings=EarthBuildingStream;
+void AppendCell(Buildings::Mesh& result,const std::string& json,const Buildings::Ground& g,Buildings::Cell cell,
+                std::unordered_set<uint64_t>& ids) {
+    constexpr auto MaxBytes=Buildings::MaxBytes,MaxBuildings=Buildings::MaxBuildings,
+        MaxVertices=Buildings::MaxVertices,MaxTriangles=Buildings::MaxTriangles;
+    constexpr auto CellDegrees=Buildings::CellDegrees;
     if(json.size()>MaxBytes || g.heights.size()!=257*257 || !std::isfinite(g.grid)||g.grid<=0 ||
-        !std::isfinite(g.latitude)||!std::isfinite(g.longitude)||std::abs(g.latitude)>84) {result.error="invalid bounded cell/terrain";return result;}
+        !std::isfinite(g.latitude)||!std::isfinite(g.longitude)||std::abs(g.latitude)>84) {result.error="invalid bounded cell/terrain";return;}
     std::unique_ptr<cJSON,decltype(&cJSON_Delete)> root(cJSON_ParseWithLength(json.data(),json.size()),cJSON_Delete);
-    if(!root){result.error="invalid cached JSON";return result;}
+    if(!root){result.error="invalid cached JSON";return;}
     const auto* elements=cJSON_GetObjectItemCaseSensitive(root.get(),"elements");
-    if(!cJSON_IsArray(elements)){result.error="missing elements";return result;}
+    if(!cJSON_IsArray(elements)){result.error="missing elements";return;}
     size_t visited=0;
     const cJSON* element=nullptr;
     cJSON_ArrayForEach(element,elements) {
         if(++visited>MaxBuildings)break;
+        const double sourceId=Number(element,"id");
+        const uint64_t id=std::isfinite(sourceId)&&sourceId>0&&sourceId<=9007199254740991.0&&std::floor(sourceId)==sourceId?
+            uint64_t(sourceId):0;
+        if(id && ids.contains(id)){++result.skipped;continue;}
         const auto* tags=cJSON_GetObjectItemCaseSensitive(element,"tags");
         const char* kind=Text(element,"type"),*building=Text(tags,"building");
         const auto* geometry=cJSON_GetObjectItemCaseSensitive(element,"geometry");
@@ -135,13 +145,45 @@ EarthBuildingStream::Mesh EarthBuildingStream::BuildCell(const std::string& json
         for(size_t i=0;i<p.size();++i) {
             const auto a=p[i],b=p[(i+1)%p.size()];const float dx=float(b.x-a.x),dz=float(b.z-a.z),length=std::hypot(dx,dz);
             const uint32_t base=uint32_t(result.vertices.size());
-            for(auto v:std::array<Vertex,4>{{{float(a.x),bottom,float(a.z),dz/length,0,-dx/length},
+            for(auto v:std::array<Buildings::Vertex,4>{{{float(a.x),bottom,float(a.z),dz/length,0,-dx/length},
                 {float(b.x),bottom,float(b.z),dz/length,0,-dx/length},{float(a.x),top,float(a.z),dz/length,0,-dx/length},
                 {float(b.x),top,float(b.z),dz/length,0,-dx/length}}})result.vertices.push_back(v);
             result.indices.insert(result.indices.end(),{base,base+2,base+1,base+1,base+2,base+3});
         }
         ++result.buildings;if(estimated)++result.estimatedHeights;
+        if(id)ids.insert(id);
     }
+}
+}
+EarthBuildingStream::Mesh EarthBuildingStream::BuildCell(const std::string& json,const Ground& g,Cell cell) {
+    Mesh result;result.cell=cell;result.revision=g.revision;result.generation=g.generation;
+    std::unordered_set<uint64_t> ids;AppendCell(result,json,g,cell,ids);return result;
+}
+EarthBuildingStream::Mesh EarthBuildingStream::BuildNeighborhood(const std::filesystem::path& cache,const Ground& g,Cell centre,
+                                                               const std::function<bool()>& cancelled) {
+    Mesh result;result.cell=centre;result.revision=g.revision;result.generation=g.generation;
+    std::unordered_set<uint64_t> ids;
+    // Centre first, then edges and corners: nearby cells get the shared budget first.
+    constexpr int offsets[9][2]={{0,0},{-1,0},{1,0},{0,-1},{0,1},{-1,-1},{-1,1},{1,-1},{1,1}};
+    bool cached=false;
+    for(const auto& offset:offsets) {
+        if(cancelled && cancelled()){result.error="request cancelled";return result;}
+        Cell cell{centre.latitude+offset[0],((centre.longitude+offset[1]+27000)%18000)-9000};
+        if(std::abs((cell.latitude+.5)*CellDegrees)>84)continue;
+        try {
+            const auto path=cache/"buildings"/FileName(cell);std::error_code error;
+            const auto bytes=std::filesystem::file_size(path,error);
+            if(error)continue; // An empty neighbouring cell cannot evict a cached one.
+            cached=true;
+            if(bytes>MaxBytes){result.error="cached cell exceeds 4MiB";continue;}
+            std::string json(size_t(bytes),'\0');std::ifstream input(path,std::ios::binary);
+            if(!input.read(json.data(),std::streamsize(bytes))){result.error="cell read failed";continue;}
+            if(cancelled && cancelled()){result.error="request cancelled";return result;}
+            AppendCell(result,json,g,cell,ids);
+        }catch(const std::exception& e){result.error=e.what();}
+        if(result.indices.size()/3>=MaxTriangles)break;
+    }
+    if(!cached)result.error="no cached cells in 3x3 window";
     return result;
 }
 EarthBuildingStream::EarthBuildingStream(std::filesystem::path cache):_cache(std::move(cache)){_worker=std::thread(&EarthBuildingStream::Run,this);}
@@ -162,13 +204,9 @@ void EarthBuildingStream::Run(){
     for(;;){
         Ground ground;Cell cell;uint64_t request;
         {std::unique_lock lock(_mutex);_wake.wait(lock,[&]{return _stop||_pending;});if(_stop)return;ground=_ground;cell=_cell;request=_request;_pending=false;}
-        auto mesh=std::make_unique<Mesh>();mesh->cell=cell;mesh->revision=ground.revision;mesh->generation=ground.generation;
-        try{
-            const auto path=_cache/"buildings"/FileName(cell);std::error_code error;const auto bytes=std::filesystem::file_size(path,error);
-            if(error)mesh->error="cell not cached";
-            else if(bytes>MaxBytes)mesh->error="cached cell exceeds 4MiB";
-            else {std::string json(size_t(bytes),'\0');std::ifstream input(path,std::ios::binary);if(!input.read(json.data(),std::streamsize(bytes)))mesh->error="cell read failed";else *mesh=BuildCell(json,ground,cell);}
-        }catch(const std::exception& e){mesh->error=e.what();}
+        auto mesh=std::make_unique<Mesh>(BuildNeighborhood(_cache,ground,cell,[&]{
+            std::lock_guard lock(_mutex);return _stop || request!=_request;
+        }));
         {std::lock_guard lock(_mutex);if(!_stop && request==_request)_ready=std::move(mesh);}
     }
 }

@@ -2,6 +2,7 @@
 #include "EarthTerrainStream.hpp"
 #include <condition_variable>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <thread>
 
@@ -32,6 +33,10 @@ public:
     static Cell CellAt(double latitude,double longitude);
     static std::string FileName(Cell cell);
     static Mesh BuildCell(const std::string& json,const Ground& ground,Cell cell);
+    // Cached 3x3 cell window, one shared geometry budget, no network. Checks
+    // cancellation between files; cancelled output is never published by Run.
+    static Mesh BuildNeighborhood(const std::filesystem::path& cache,const Ground& ground,Cell centre,
+                                  const std::function<bool()>& cancelled={});
     explicit EarthBuildingStream(std::filesystem::path cache);
     ~EarthBuildingStream();
     void Request(const EarthTerrainStream::Patch& ground,float cameraX,float cameraZ);

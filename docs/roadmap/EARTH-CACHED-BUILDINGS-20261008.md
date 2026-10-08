@@ -1,7 +1,9 @@
 # Cached Earth buildings: bounded presentation slice
 
 Opt-in only: `POSEIDON_EARTH_BUILDINGS=1` with the existing Earth mode/cache.
-The game reads one local 0.02-degree building cell around the camera on a worker.
+The game reads a 3x3 window of local 0.02-degree building cells around the camera
+on a worker, centre first. Entering an adjacent empty cell keeps nearby cached
+buildings visible. Repeated OSM way IDs across cells are extruded only once.
 No Overpass request is made by the game. Preparing a cell while the game is
 running requires crossing a cell boundary or relocating to refresh it.
 
@@ -24,10 +26,12 @@ footprint boundary and roofs start above its highest sample. Slopes over
 and unsupported height ranges are skipped. No interiors, collision,
 vegetation, roads, custom assets or accurate roof shapes are provided.
 
-Limits: 4MiB/cell; at most 2000 ways, 128 polygon vertices and 200000 triangles;
+Limits: 4MiB/cell; at most 2000 ways/cell, 128 polygon vertices and 200000 triangles
+shared across the entire 3x3 mesh, not multiplied by its nine cells;
 the manual preparer permits at most 64 cell files. The manual query samples
 at most 2000 ways, so a dense cell can be incomplete. One GPU mesh is live.
-Work and publication are generation/revision checked. Default Earth and OFP
+Obsolete work cancels between files; work and publication are generation/revision
+checked. Default Earth and OFP
 rendering are unchanged. Full build and installed runtime acceptance are
 owned by the parent integration task.
 
@@ -46,9 +50,11 @@ needs licensed bulk/local data or a controlled backend before expansion.
 Source validation: `scripts/Test-EarthBuildings.ps1` passed convex/concave roofs,
 outward winding, known sloped foundations, degenerate/open/self-intersecting
 outlines, height and size limits, triangle caps and relocation publication.
+Additional CPU tests cover neighbouring empty-cell retention through the real
+worker, cross-cell way-ID deduplication, a combined triangle cap across two
+cached cells, cancellation between files and cleared publication on relocation.
 One explicit Luxembourg cell query produced 1,586,100 bytes. Parsing it against
 synthetic flat 300m ground produced 1995 buildings, 5 skipped and 46281 triangles;
 this checks data ingestion, not actual terrain or runtime visual acceptance.
 `TerrainWgpu.cpp` and `DebugOverlay.cpp` passed clang-cl MSVC syntax validation. Parent integration
 still owns full linking, deployment and the installed-game acceptance.
-
