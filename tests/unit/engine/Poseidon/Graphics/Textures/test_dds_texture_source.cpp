@@ -19,6 +19,7 @@
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
 #include <Poseidon/Graphics/Textures/EnfusionTextureName.hpp>
 #include <Poseidon/Graphics/Textures/NativeNormalChannels.hpp>
+#include <Poseidon/Graphics/Textures/NativeGlobalOverlayData.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
 
 #include <algorithm>
@@ -702,12 +703,13 @@ TEST_CASE("Prepared DDS ownership uses the existing store lifecycle", "[graphics
         CHECK(store.TakeDdsPrepared("colour.edds", options).get() == identity);
     }
     SECTION("each configuration mismatch retires the old result") {
-        for (int field = 0; field < 3; ++field) {
+        for (int field = 0; field < 4; ++field) {
             REQUIRE(store.PutDdsPrepared("colour.edds", make(), options, store.Generation()));
             auto changed = options;
             if (field == 0) changed.compressedPassthrough = !changed.compressedPassthrough;
             if (field == 1) changed.linearTintMultiply = !changed.linearTintMultiply;
             if (field == 2) changed.decodedMaxEdge = options.decodedMaxEdge == 64 ? 128 : 64;
+            if (field == 3) changed.globalOverlayDataSuffix = "selected_mcr.edds";
             const auto misses = store.SnapshotStats().ddsConfigurationMisses;
             CHECK_FALSE(store.TakeDdsPrepared("colour.edds", changed));
             CHECK(store.SnapshotStats().ddsConfigurationMisses == misses + 1);
@@ -1109,4 +1111,50 @@ TEST_CASE("Enfusion composite names nest: tint outside coverage", "[graphics][ed
     REQUIRE(Poseidon::Enfusion::SkipLayerTint(plain) == plain);
     REQUIRE(!Poseidon::Enfusion::SplitLayerTintName(plain, back, &rest));
     REQUIRE(!Poseidon::Enfusion::SplitLayerTintName("enft|0.5,0.5,0.5", back, &rest)); // no inner
+}
+
+TEST_CASE("Selected global overlay keeps original linear BC7 data alpha only under all preview gates",
+          "[graphics][edds][global-overlay]")
+{
+    const auto suffix = Poseidon::NativeGlobalOverlayDataSuffix(true, true, true, true, "Fixture_Ext.emat");
+    REQUIRE(suffix == "fixture_ext_mcr.edds");
+    for (int disabled = 0; disabled < 4; ++disabled)
+        CHECK(Poseidon::NativeGlobalOverlayDataSuffix(disabled != 0, disabled != 1,
+                  disabled != 2, disabled != 3, "Fixture_Ext.emat").empty());
+    CHECK(Poseidon::NativeGlobalOverlayDataSuffix(true,true,true,true,"fixture.paa").empty());
+    CHECK(Poseidon::NativeGlobalOverlayDataSuffix(true,true,true,true,"enft|x.emat").empty());
+    CHECK(Poseidon::NativeGlobalOverlayDataSuffix(true,true,true,true,std::string(1025,'x').c_str()).empty());
+    CHECK(Poseidon::NativeGlobalOverlayDataName("Assets\\Fixture_Ext_MCR.edds", suffix));
+    CHECK_FALSE(Poseidon::NativeGlobalOverlayDataName("Assets/Other_Fixture_Ext_MCR.edds", suffix));
+    CHECK_FALSE(Poseidon::NativeGlobalOverlayDataName("enft|1,1,1|Fixture_Ext_MCR.edds", suffix));
+    CHECK_FALSE(Poseidon::NativeGlobalOverlayDataName("Assets/Fixture_Ext_MCR.paa", suffix));
+    CHECK_FALSE(Poseidon::NativeGlobalOverlayDataName(nullptr, suffix));
+    const auto linear = BcrBc7Alpha200();
+    auto srgb = linear;
+    PutU32(srgb, 128, 99); // Original BC7_UNORM_SRGB metadata is not overridden.
+    const auto check = [&](const std::vector<uint8_t>& file, const char* name,
+                           Poseidon::DdsPreparationOptions options, Poseidon::PacFormat expected) {
+        TextureSourceDDS source;
+        PacLevelMem mips[16]{};
+        REQUIRE(source.InitFromReader(name, mips, 16,
+            [&](const char*, std::vector<uint8_t>& out) { out=file; return true; }, options));
+        CHECK(source.GetFormat() == expected);
+        if (expected == Poseidon::PacBC7) {
+            CHECK_FALSE(source.IsAlpha());
+            uint8_t block[16]{};
+            mips[0].SetDestFormat(Poseidon::PacBC7,8);
+            REQUIRE(source.GetMipmapData(block,mips[0],0));
+            CHECK(std::equal(block,block+16,file.end()-16));
+        }
+    };
+    Poseidon::DdsPreparationOptions selected{true,true,1024,suffix};
+    check(linear,"Assets/Fixture_Ext_MCR.edds",selected,Poseidon::PacBC7);
+    check(srgb,"Assets/Fixture_Ext_MCR.edds",selected,PacARGB8888);
+    check(linear,"Assets/Ordinary_MCR.edds",selected,PacARGB8888);
+    check(linear,"Assets/Ordinary_Coverage.edds",selected,PacARGB8888);
+    selected.globalOverlayDataSuffix.clear();
+    check(linear,"Assets/Fixture_Ext_MCR.edds",selected,PacARGB8888);
+    selected.globalOverlayDataSuffix=suffix;
+    selected.compressedPassthrough=false;
+    check(linear,"Assets/Fixture_Ext_MCR.edds",selected,PacARGB8888);
 }

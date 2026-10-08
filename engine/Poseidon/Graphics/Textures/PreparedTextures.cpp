@@ -816,7 +816,8 @@ std::unique_ptr<TextureSourceDDS> PreparedTextureStore::TakeDdsPrepared(
         const auto& stored = it->second->ddsOptions;
         if (stored.compressedPassthrough == options.compressedPassthrough &&
             stored.linearTintMultiply == options.linearTintMultiply &&
-            stored.decodedMaxEdge == options.decodedMaxEdge) {
+            stored.decodedMaxEdge == options.decodedMaxEdge &&
+            stored.globalOverlayDataSuffix == options.globalOverlayDataSuffix) {
             result = std::move(it->second->preparedDds);
             ++_impl->stats.ddsPreparedTakes;
             _impl->stats.takeBytes += it->second->preparedDdsBytes;

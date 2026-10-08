@@ -9,6 +9,7 @@
 #include <vector>
 #include <functional>
 #include <memory>
+#include <string>
 
 namespace Poseidon
 {
@@ -69,6 +70,7 @@ struct DdsPreparationOptions
     bool compressedPassthrough;
     bool linearTintMultiply;
     int decodedMaxEdge;
+    std::string globalOverlayDataSuffix{};
 };
 DdsPreparationOptions CaptureDdsPreparationOptions();
 

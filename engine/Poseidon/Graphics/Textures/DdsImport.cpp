@@ -5,6 +5,7 @@
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/Graphics/Textures/DdsImport.hpp>
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>
+#include <Poseidon/Graphics/Textures/NativeGlobalOverlayData.hpp>
 
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
@@ -359,7 +360,15 @@ void ApplyEnfusionLayerTint(std::vector<DDSMipLevel>& levels, const float rgb[3]
 
 DdsPreparationOptions CaptureDdsPreparationOptions()
 {
-    return {DdsCompressedPassthrough(), Enfusion::LayerTintLinearMultiply(), DecodedMaxEdge()};
+    const auto enabled = [](const char* key) {
+        const char* value = std::getenv(key);
+        return value && std::strcmp(value, "1") == 0;
+    };
+    return {DdsCompressedPassthrough(), Enfusion::LayerTintLinearMultiply(), DecodedMaxEdge(),
+            NativeGlobalOverlayDataSuffix(enabled("WGR_REFORGER_PBR_PREVIEW"),
+                enabled("WGR_REFORGER_LAYER_ORDER_PREVIEW"), enabled("WGR_REFORGER_SRGB_PREVIEW"),
+                enabled("WGR_REFORGER_GLOBAL_OVERLAY_PREVIEW"),
+                std::getenv("WGR_REFORGER_GLOBAL_OVERLAY_MATERIAL"))};
 }
 
 void SetDdsCompressedPassthrough(bool on)
@@ -509,7 +518,12 @@ bool TextureSourceDDS::InitFromMemoryWithOptions(const void* data, size_t size, 
         // uploads of the 1024 class, 500 MB, and every one of them a BC7/BC5 file.
         const std::string lowerWho = LowerCopy(who);
         const bool roughnessInAlpha = lowerWho.find("_bcr") != std::string::npos;
-        const bool dataInAlpha = roughnessInAlpha || lowerWho.find("_nmo") != std::string::npos ||
+        // The opt-in global overlay carries roughness in alpha. Preserve only
+        // the selected original linear BC7 source; composites and sRGB sources
+        // retain the existing decoding/coverage behavior.
+        const bool globalOverlayData = _format == PixelFormat::BC7 && !_bc7Srgb &&
+            NativeGlobalOverlayDataName(who, options.globalOverlayDataSuffix);
+        const bool dataInAlpha = globalOverlayData || roughnessInAlpha || lowerWho.find("_nmo") != std::string::npos ||
                                  lowerWho.find("_nho") != std::string::npos ||
                                  lowerWho.find("_ntc") != std::string::npos ||
                                  lowerWho.find("_mask") != std::string::npos;
