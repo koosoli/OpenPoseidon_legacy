@@ -15,7 +15,8 @@ retries. Existing image/receipt pairs are checked and reused. Data and its
 SHA256/source/bounds receipt stay outside Git, under
 `%LOCALAPPDATA%/OpenPoseidon/world-stream/surface/`.
 
-Start the existing Earth preview with `POSEIDON_EARTH_SURFACE=1` in addition to
+Start `scripts/Launch-WholeWorld.ps1 -LocalSurface -CachedBuildings -Latitude 49.61 -Longitude 6.13 -Altitude 2000`.
+The launcher sets `POSEIDON_EARTH_SURFACE=1` in addition to
 its existing `POSEIDON_EARTH_CACHE` and `POSEIDON_EARTH_IMAGERY` settings. The
 NASA file remains `blue-marble-june-5400.jpg` in the Earth cache. Go to
 latitude 49.61, longitude 6.13, altitude about 2000–4500 m using Earth navigation.

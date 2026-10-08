@@ -6,7 +6,8 @@ param(
     [Parameter(Mandatory)][string]$ExpectedCommit,
     [string]$CacheDirectory=(Join-Path $env:LOCALAPPDATA 'OpenPoseidon/world-stream'),
     [ValidateRange(60,240)][int]$PatchTimeoutSeconds=150,
-    [switch]$CachedBuildings
+    [switch]$CachedBuildings,
+    [switch]$LocalSurface
 )
 $ErrorActionPreference='Stop'
 function Require($ok,[string]$message){if(!$ok){throw $message}}
@@ -26,12 +27,13 @@ $settings=@{
     POSEIDON_WHOLE_WORLD='1';POSEIDON_EARTH_LATITUDE='46.6';POSEIDON_EARTH_LONGITUDE='8.1';
     POSEIDON_EARTH_CACHE=$CacheDirectory;POSEIDON_EARTH_IMAGERY=$imagery;
     POSEIDON_EARTH_BUILDINGS=$(if($CachedBuildings){'1'}else{'0'});
+    POSEIDON_EARTH_SURFACE=$(if($LocalSurface){'1'}else{'0'});
     WGR_GRASS='0';WGR_TERRAIN_RESOURCE_REUSE='1';WGR_WET_SOIL_DIAGNOSTIC='1';
     POSEIDON_USER_DIR=(Join-Path $out 'user')
 }
 $saved=@{}
 foreach($key in $settings.Keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process');[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
-$receipt=@{installed=$stamp;views=@();invalid=@();superseded=@();passed=$false;source='NASA overview + Terrarium elevation; no worldwide playable objects'}
+$receipt=@{installed=$stamp;localSurface=[bool]$LocalSurface;views=@();invalid=@();superseded=@();passed=$false;source='NASA overview + Terrarium elevation; optional single cached ACT surface; no worldwide playable objects'}
 $p=$null;$client=$null;$writer=$null;$reader=$null
 $log=Join-Path $out 'engine.log'
 $stderr=Join-Path $out 'stderr.log'
@@ -97,6 +99,17 @@ function WaitCapture([string]$path){
         Start-Sleep -Milliseconds 100
     }
 }
+function WaitSurface($location,[bool]$local){
+    if(!$LocalSurface){return ''}
+    $expected=if($local){'ACT ortho_2023 CC0'}else{'NASA fallback'}
+    $deadline=[DateTime]::UtcNow.AddSeconds(30)
+    do{
+        $rows=@(Select-String -Path $log -Pattern ('Earth local surface: '+$expected+'.*revision '+$location.revision+'(?:,|$)'))
+        if($rows.Count){return $rows[-1].Line}
+        Require (!$p.HasExited -and [DateTime]::UtcNow-lt$deadline) ('Local surface publication missing: '+$expected+' '+$location.raw)
+        Start-Sleep -Milliseconds 200
+    }while($true)
+}
 function Go([string]$name,[double]$latitude,[double]$longitude,[double]$altitude){
     $previous=Location
     $code='triEarthLocation ['+$latitude.ToString('R',$culture)+','+$longitude.ToString('R',$culture)+','+$altitude.ToString('R',$culture)+']'
@@ -107,12 +120,13 @@ function Go([string]$name,[double]$latitude,[double]$longitude,[double]$altitude
     Require ($location.revision-eq$previous.revision+1) 'Go did not increment origin revision once'
     Require ([Math]::Abs($location.latitude-$latitude)-lt.0001 -and [Math]::Abs($location.longitude-$expectedLongitude)-lt.0001 -and [Math]::Abs($location.altitude-$altitude)-lt1) 'Origin query differs from requested Go'
     $patch=WaitPatch $location
+    $surface=WaitSurface $location ($name-eq'luxembourg')
     Start-Sleep -Milliseconds 500
     $camera=Camera;CheckCamera $camera $altitude
     CheckNoSuperseded $location
     $path=Join-Path $out ($name+'.png');$null=Send @{cmd='screenshot';path=$path}
     WaitCapture $path
-    $receipt.views+=@{name=$name;location=$location;camera=$camera;patch=$patch;screenshot=$path;tiles=(CheckCache);performance=(Send @{cmd='frame_performance'})}
+    $receipt.views+=@{name=$name;location=$location;camera=$camera;patch=$patch;surface=$surface;screenshot=$path;tiles=(CheckCache);performance=(Send @{cmd='frame_performance'})}
     return $location
 }
 try{
@@ -149,8 +163,12 @@ try{
         Require ($pose.StartsWith('OK')) 'Building overview camera refused'
         Start-Sleep -Seconds 1
         $path=Join-Path $out 'luxembourg-buildings.png';$null=Send @{cmd='screenshot';path=$path};WaitCapture $path
+        $receipt.localOverview=@{camera=(Camera);performance=(Send @{cmd='frame_performance'});screenshot=$path}
         # Cross east into an uncached centre cell. The previously cached town
         # remains in the bounded 3x3 neighborhood instead of vanishing.
+        $beforeNeighbor=@(PatchRows)[-1]
+        Require ($beforeNeighbor.line-match'Earth terrain patch ([0-9]+):') 'Missing pre-move patch generation'
+        $beforeNeighborGeneration=[uint64]$Matches[1]
         $pose=Eval 'triFreeFlyPose "7500 6400 1000 270 -35"'
         Require ($pose.StartsWith('OK')) 'Neighbor-cell camera refused'
         $deadline=[DateTime]::UtcNow.AddSeconds(15)
@@ -161,6 +179,19 @@ try{
             Start-Sleep -Milliseconds 200
         }while($true)
         $receipt.neighborBuildings=$neighbor[-1].Line
+        if($LocalSurface){
+            # Both rolling workers must publish the same terrain generation.
+            $deadline=[DateTime]::UtcNow.AddSeconds(30)
+            do{
+                $patches=@(PatchRows);$last=$patches[-1]
+                Require ($last.line-match'Earth terrain patch ([0-9]+):') 'Missing latest patch generation'
+                $generation=$Matches[1]
+                $surface=@(Select-String -Path $log -Pattern ('Earth local surface: ACT ortho_2023 CC0.*generation '+$generation+', revision '+(Location).revision))
+                if($surface.Count -and [uint64]$generation-gt$beforeNeighborGeneration){$receipt.neighborSurface=$surface[-1].Line;break}
+                Require ([DateTime]::UtcNow-lt$deadline) 'Neighbor surface generation did not catch up'
+                Start-Sleep -Milliseconds 200
+            }while($true)
+        }
         $path=Join-Path $out 'luxembourg-neighbor.png';$null=Send @{cmd='screenshot';path=$path};WaitCapture $path
     }
     $null=Go 'alps' 46.6 8.1 4500
