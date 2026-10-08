@@ -2377,6 +2377,7 @@ EngineWgpu::~EngineWgpu()
     if (_sharedMeshEpoch) _sharedMeshEpoch->Close();
     if (_geometryOwnerLedger) _geometryOwnerLedger->CloseEpoch(_geometryOwnerEpoch);
     ClearFarObjects();
+    ClearEarthWorldgenObjects();
     s_self = nullptr;
     // FIRST: every VertexBufferWgpu still alive holds this link, and Shapes outlive the
     // engine on some teardown orders. Nulling it here turns a late SetSkinData into a no-op
@@ -5938,7 +5939,7 @@ void EngineWgpu::NextFrame()
         // sides cannot disagree about whether the path exists.
         //
         // WGR_SHADOW_LEGACY_GATE=1 restores the old gate (and the old `_smCamPos` handling with it).
-        const bool gpuDrivenShadowCasters = _gpuDriven && (!_gpuInstances.empty() || _geometryPageFixtureActive);
+        const bool gpuDrivenShadowCasters = _gpuDriven && (!_gpuInstances.empty() || !_earthWorldgenInstances.empty() || _geometryPageFixtureActive);
         // GRASS is a third independent caster set, and the Rust side already knew that: its own
         // gate is `casters.is_empty() && !gpu_shadows && !grass.casts_shadows()` (gfx3d/mod.rs:4404).
         // Mirroring only the gpu_shadows term left a frame with no CPU casters and an empty
@@ -16117,6 +16118,9 @@ void EngineWgpu::MarkRetainedModelLiveness()
 
     // Far instances have no Object entry; retain their shared material liveness.
     for (const auto& [shape, count] : _farGpuModelRefs)
+        markShape(shape);
+    // Earth assets have their own IDs/lifecycle but share material residency.
+    for (const auto& [shape, count] : _earthWorldgenModelRefs)
         markShape(shape);
 
     const size_t end = std::min(buckets, _livenessCursor + perFrame);

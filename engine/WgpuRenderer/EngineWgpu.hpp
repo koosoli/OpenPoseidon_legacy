@@ -209,6 +209,10 @@ class EngineWgpu : public EngineDummy
     bool SceneFarObjectCreated(uint32_t id, LODShapeWithShadow* shape, const Matrix4& transform) override;
     void SceneFarObjectRemoved(uint32_t id) override;
     void ClearFarObjects() override;
+    // Independent Worldgen presentation owners. Authored affine transforms are
+    // already grounded against resident Earth; never sample the native island.
+    bool CreateEarthWorldgenObject(uint32_t id, const char* model, const Matrix4& transform);
+    void ClearEarthWorldgenObjects();
     void SceneObjectRemoved(Object* obj) override;
     void SceneObjectMoved(Object* obj) override;
     GpuDrawCoverage GpuDrivenCoverage(const Object* obj) const override;
@@ -810,6 +814,8 @@ class EngineWgpu : public EngineDummy
         Ref<LODShapeWithShadow> shape;
     };
     std::unordered_map<uint32_t, FarGpuInstance> _farGpuInstances;
+    std::unordered_map<uint32_t, FarGpuInstance> _earthWorldgenInstances;
+    std::unordered_map<const LODShapeWithShadow*, uint32_t> _earthWorldgenModelRefs;
     std::unordered_map<const LODShapeWithShadow*, uint32_t> _farGpuModelRefs;
     // REN-TEMP-001H / ID-1: draw-object identity for motion vectors. The scene draw
     // loop brackets each object via Engine::SetDrawObject; the identity itself lives ON

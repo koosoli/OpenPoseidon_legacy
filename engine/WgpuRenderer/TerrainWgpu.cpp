@@ -396,6 +396,8 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
     if (EarthStreaming::Enabled())
     {
         _earthStream = std::make_unique<EarthTerrainStream>();
+        if(const char* manifest=std::getenv("POSEIDON_EARTH_WORLDGEN_MANIFEST");manifest&&*manifest)
+            _earthWorldgen=std::make_unique<EarthWorldgen>(std::filesystem::u8path(manifest));
         if(const char* surface=std::getenv("POSEIDON_EARTH_SURFACE");surface && std::strcmp(surface,"1")==0)
         {
             const char* cache=std::getenv("POSEIDON_EARTH_CACHE");
@@ -3230,6 +3232,8 @@ TerrainWgpu::~TerrainWgpu()
     _earthSurface.reset();
     _earthBuildings.reset();
     _earthFeatures.reset();
+    _earthWorldgen.reset();
+    _engine.ClearEarthWorldgenObjects();
     EarthStreaming::Locations().ClearGround();
     _earthStream.reset(); // Cancel HTTPS and join before any render-owned state disappears.
     // EngineWgpu releases TerrainWgpu after stopping its render thread, while
@@ -3438,6 +3442,13 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
     // its geometry, grass and finite-world water are not submitted in this mode.
     if (!_uploaded) UploadIfNeeded(land);
     const auto origin=EarthStreaming::GetLocation();
+    const double worldgenAltitude=Earth::CameraAltitude(camera.Position().X(),camera.Position().Y(),camera.Position().Z());
+    const bool worldgenNear=std::isfinite(worldgenAltitude)&&worldgenAltitude<12000;
+    if(_earthWorldgen && !worldgenNear)
+    {
+        _earthWorldgen->Relocate();_earthWorldgenSnapshot.reset();_earthWorldgenGeneration=0;
+        _engine.ClearEarthWorldgenObjects();
+    }
     if (_earthOriginRevision!=origin.revision)
     {
         // No frame may mix a previous region's height patch with a new globe.
@@ -3449,6 +3460,9 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         if(_earthSurfaceTexture){EngineWgpu::AcquireProducerWindow("Earth surface relocate");wgr_texture_destroy(_renderer,_earthSurfaceTexture);_earthSurfaceTexture=0;}
         if(_earthFarTexture){EngineWgpu::AcquireProducerWindow("Earth far surface relocate");wgr_texture_destroy(_renderer,_earthFarTexture);_earthFarTexture=0;}
         if(_earthFeatures)_earthFeatures->Relocate();
+        if(_earthWorldgen)_earthWorldgen->Relocate();
+        _earthWorldgenSnapshot.reset();_earthWorldgenGeneration=0;
+        _engine.ClearEarthWorldgenObjects();
         for(size_t i=0;i<_earthFeatureMeshes.size();++i)if(_earthFeatureMeshes[i]){EngineWgpu::AcquireProducerWindow("Earth features relocate");wgr_mesh_destroy(_renderer,_earthFeatureMeshes[i]);_earthFeatureMeshes[i]=0;_earthFeatureIndices[i]=0;}
 
         if(_earthBuildings)_earthBuildings->Relocate();
@@ -3490,6 +3504,11 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             p.gridMetres,p.sourceZoom,p.gridMetres*256.0f/1000.0f,Earth::NearRecenter(p.gridMetres));
     }
     if (!_earthPatch) return;
+    if(_earthWorldgen && _earthWorldgenGeneration!=_earthPatch->generation)
+    {
+        _earthWorldgenSnapshot.reset();_earthWorldgenAttemptedModels.clear();_earthWorldgenFailedModels.clear();
+        _engine.ClearEarthWorldgenObjects();_earthWorldgenGeneration=_earthPatch->generation;
+    }
     // Retain the native heightmap for terrain/fog queries, but the geographic
     // surface itself is the bounded near/far Earth mesh with shared imagery.
     _engine.QueueTerrainParams(_params);
@@ -3571,6 +3590,39 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                 mesh->cell.latitude,mesh->cell.longitude,mesh->buildings,mesh->indices.size()/3,mesh->skipped,mesh->estimatedHeights,mesh->error);
         }
         if(_earthBuildingGeneration==_earthPatch->generation)_engine.SubmitEarthHorizon(_earthBuildingMesh,_earthBuildingIndices);
+    }
+    if(_earthWorldgen && worldgenNear)
+    {
+        _earthWorldgen->Request(*_earthPatch,camera.Position().X(),camera.Position().Z());
+        if(auto snapshot=_earthWorldgen->TakeReady();snapshot && snapshot->revision==origin.revision && snapshot->generation==_earthPatch->generation)
+        {
+            _engine.ClearEarthWorldgenObjects();_earthWorldgenAttemptedModels.clear();_earthWorldgenFailedModels.clear();
+            _earthWorldgenNext=0;_earthWorldgenCreated=0;
+            LOG_INFO(Graphics,"Earth Worldgen publication: revision {} generation {} source {} covered {} selected {} modelLimitSkipped {} error {}",
+                snapshot->revision,snapshot->generation,snapshot->sourceObjects,snapshot->coveredObjects,snapshot->objects.size(),snapshot->modelLimitSkipped,snapshot->error);
+            _earthWorldgenSnapshot=std::move(snapshot);
+        }
+        size_t attempted=0,newModels=0;
+        while(_earthWorldgenSnapshot && _earthWorldgenNext<_earthWorldgenSnapshot->objects.size() && attempted<32)
+        {
+            const auto& object=_earthWorldgenSnapshot->objects[_earthWorldgenNext];
+            if(!_earthWorldgenAttemptedModels.count(object.model))
+            {
+                if(newModels==2)break;
+                ++newModels;_earthWorldgenAttemptedModels.insert(object.model);
+            }
+            const auto& m=object.matrix;
+            Matrix4 matrix(m[0],m[3],m[6],m[9],m[1],m[4],m[7],m[10],m[2],m[5],m[8],m[11]);
+            if(!_earthWorldgenFailedModels.count(object.model))
+            {
+                if(_engine.CreateEarthWorldgenObject(object.id,object.model.c_str(),matrix))++_earthWorldgenCreated;
+                else _earthWorldgenFailedModels.insert(object.model);
+            }
+            ++_earthWorldgenNext;++attempted;
+            if(_earthWorldgenNext==_earthWorldgenSnapshot->objects.size())
+                LOG_INFO(Graphics,"Earth Worldgen installed assets: revision {} generation {} created {} attempted {} models {}; presentation only",
+                    _earthWorldgenSnapshot->revision,_earthWorldgenSnapshot->generation,_earthWorldgenCreated,_earthWorldgenNext,_earthWorldgenAttemptedModels.size());
+        }
     }
     // Water's scene-colour snapshot must include every opaque Earth draw.
     if(auto* water=static_cast<WaterWgpu*>(_engine.GetWaterRenderer()))

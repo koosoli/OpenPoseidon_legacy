@@ -58,6 +58,7 @@ corrosion_import_crate(
 
 add_library(WgpuRenderer STATIC
     EngineWgpu.cpp
+    EngineWgpuEarth.cpp
     EngineWgpuRetailPages.cpp
     EngineWgpuRetailInstances.cpp
     EngineWgpuRetailWorld.cpp
@@ -69,6 +70,7 @@ add_library(WgpuRenderer STATIC
     EarthBuildingStream.cpp
     EarthContentSource.cpp
     EarthFeatureStream.cpp
+    EarthWorldgen.cpp
     EarthSurfaceStream.cpp
     TerrainWgpuEnfusionClutter.cpp
     TerrainWgpuEnfusionSurface.cpp

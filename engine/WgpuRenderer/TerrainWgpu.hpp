@@ -11,10 +11,12 @@
 #include "EarthBuildingStream.hpp"
 #include "EarthSurfaceStream.hpp"
 #include "EarthFeatureStream.hpp"
+#include "EarthWorldgen.hpp"
 
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <unordered_set>
 
 namespace Poseidon
 {
@@ -129,6 +131,12 @@ class TerrainWgpu : public ITerrainRenderer
     std::unique_ptr<EarthBuildingStream> _earthBuildings;
     std::unique_ptr<EarthSurfaceStream> _earthSurface;
     std::unique_ptr<EarthFeatureStream> _earthFeatures;
+    std::unique_ptr<EarthWorldgen> _earthWorldgen;
+    std::unique_ptr<EarthWorldgen::Snapshot> _earthWorldgenSnapshot;
+    std::unordered_set<std::string> _earthWorldgenAttemptedModels;
+    std::unordered_set<std::string> _earthWorldgenFailedModels;
+    size_t _earthWorldgenNext=0,_earthWorldgenCreated=0;
+    uint64_t _earthWorldgenGeneration=0;
     std::array<WgrMesh,EarthFeatureStream::KindCount> _earthFeatureMeshes{};
     std::array<uint32_t,EarthFeatureStream::KindCount> _earthFeatureIndices{};
     std::array<WgrTexture,EarthFeatureStream::KindCount> _earthFeatureTextures{};
