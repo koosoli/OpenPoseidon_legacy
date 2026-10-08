@@ -739,6 +739,12 @@ TEST_CASE("Authored tangent option invalidates earlier model cache keys", "[ast0
     previous.AddOption("blobFormat",std::to_string(ModelBlob::kFormatVersion));
     previous.AddOption("authoredUv0TangentProducer","1");
     REQUIRE(authored!=previous.Compute()); // broken V1 container mark must not return
+    Asset::Cache::DerivedAssetKey previousV2;
+    previousV2.AddInput("model",Asset::VirtualPath::Parse("owned.xob"),std::string(64,'a'));
+    previousV2.AddOption("modelProducer","1");
+    previousV2.AddOption("blobFormat",std::to_string(ModelBlob::kFormatVersion));
+    previousV2.AddOption("authoredUv0TangentProducer","2");
+    REQUIRE(authored!=previousV2.Compute()); // whole-LOD transport cannot qualify as partial provenance
     tangent.set("0");
     REQUIRE(ModelDerivedCache::MakeKey("owned.xob",std::string(64,'a')).Compute()==original);
     tangent.set("1");pbr.set("0");

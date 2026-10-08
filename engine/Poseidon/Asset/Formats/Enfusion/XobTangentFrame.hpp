@@ -7,25 +7,31 @@
 namespace Poseidon::Asset::Formats::Enfusion
 {
 inline constexpr const char* kXobTangentProducerKey = "xobAuthoredUv0TangentProducer";
-inline constexpr const char* kXobTangentProducer = "XOB_TSPACE_UV0_V2";
+inline constexpr const char* kXobTangentProducer = "XOB_TSPACE_UV0_V3";
 inline void MarkXobAuthoredTangentProducer(Poseidon::Model::Model& model)
 {
     // Container identity controls the modern adapter and streaming routes.
     // Producer provenance is independent and survives the existing blob metadata.
     if (model.sourceFormat == "MLOD") model.metadata[kXobTangentProducerKey] = kXobTangentProducer;
 }
-inline bool HasXobAuthoredTangentFrame(const Poseidon::Model::Model& model, const Poseidon::Model::Mesh& mesh)
+inline bool HasXobAuthoredTangentProducer(const Poseidon::Model::Model& model)
 {
     const auto producer = model.metadata.find(kXobTangentProducerKey);
-    if (model.sourceFormat != "MLOD" || producer == model.metadata.end() ||
-        producer->second != kXobTangentProducer || mesh.vertices.empty()) return false;
+    return model.sourceFormat == "MLOD" && producer != model.metadata.end() &&
+           producer->second == kXobTangentProducer;
+}
+inline bool ValidXobAuthoredTangentVertex(const Poseidon::Model::Vertex& vertex)
+{
+    const auto& n = vertex.normal;
+    const float n2 = n.x*n.x + n.y*n.y + n.z*n.z;
+    return std::isfinite(n2) && n2 > 1e-8f &&
+           MLOD::ValidTangentFrame({vertex.tangent,vertex.binormal,vertex.hasTangentFrame});
+}
+inline bool HasXobAuthoredTangentFrame(const Poseidon::Model::Model& model, const Poseidon::Model::Mesh& mesh)
+{
+    if (!HasXobAuthoredTangentProducer(model) || mesh.vertices.empty()) return false;
     for (const auto& vertex : mesh.vertices)
-    {
-        const auto& n = vertex.normal;
-        const float n2 = n.x*n.x + n.y*n.y + n.z*n.z;
-        if (!std::isfinite(n2) || n2 <= 1e-8f ||
-            !MLOD::ValidTangentFrame({vertex.tangent,vertex.binormal,vertex.hasTangentFrame})) return false;
-    }
+        if (!ValidXobAuthoredTangentVertex(vertex)) return false;
     return true;
 }
 inline bool XobAuthoredTangentPreviewEnabled()

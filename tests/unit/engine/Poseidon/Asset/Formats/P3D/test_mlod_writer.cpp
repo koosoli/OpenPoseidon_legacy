@@ -563,8 +563,20 @@ TEST_CASE("Authored UV0 tangent sidecar preserves seams winding and cache proven
     REQUIRE_FALSE(Enfusion::XobCornerTangentFrame(part,0,0,0).supplied); // parallel axes
     source.tangentFrames[0][1][0].supplied=false;
     auto partial=MLODLoader::loadFromBuffer(bytes.data(),int(bytes.size()),"owned.xob",&source.tangentFrames);
-    REQUIRE(partial.lodLevels[0].mesh.vertices.size()==3);
-    for (const auto& v : partial.lodLevels[0].mesh.vertices) REQUIRE_FALSE(v.hasTangentFrame);
+    REQUIRE(partial.lodLevels[0].mesh.vertices.size()==4); // missing corner cannot merge with authored seam
+    size_t supplied=0;
+    for (const auto& v : partial.lodLevels[0].mesh.vertices) supplied+=v.hasTangentFrame?1:0;
+    REQUIRE(supplied==3);
+    Enfusion::MarkXobAuthoredTangentProducer(partial);
+    REQUIRE(Enfusion::HasXobAuthoredTangentProducer(partial));
+    REQUIRE_FALSE(Enfusion::HasXobAuthoredTangentFrame(partial,partial.lodLevels[0].mesh));
+    const auto partialBlob=Poseidon::ModelBlob::Serialize(partial);
+    Poseidon::Model::Model partialRestored;
+    REQUIRE(Poseidon::ModelBlob::Deserialize(partialBlob.data(),partialBlob.size(),partialRestored));
+    REQUIRE(Poseidon::ModelBlob::Serialize(partialRestored)==partialBlob);
+    auto staleV2=partial;
+    staleV2.metadata[Enfusion::kXobTangentProducerKey]="XOB_TSPACE_UV0_V2";
+    REQUIRE_FALSE(Enfusion::HasXobAuthoredTangentProducer(staleV2));
     source.tangentFrames[0].pop_back();
     auto mismatch=MLODLoader::loadFromBuffer(bytes.data(),int(bytes.size()),"owned.xob",&source.tangentFrames);
     for (const auto& v : mismatch.lodLevels[0].mesh.vertices) REQUIRE_FALSE(v.hasTangentFrame);

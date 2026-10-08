@@ -156,15 +156,9 @@ class MLODLoader
         auto     taggData    = MLOD::readP3DMTAGGSection(reader, header.nPos, header.nFace, totalFaceVertices);
 
         convertUVChannels(lod, faceTable, taggData);
-        // A partial sidecar must not change vertex merging in the fallback path.
-        if (frames)
-        {
-            bool complete = frames->size() == faceTable.faces.size();
-            for (size_t f = 0; complete && f < faceTable.faces.size(); ++f)
-                for (int c = 0; c < faceTable.faces[f].n; ++c)
-                    complete = complete && c < 4 && MLOD::ValidTangentFrame((*frames)[f][c]);
-            if (!complete) frames = nullptr;
-        }
+        // A correctly sized sidecar may contain invalid corners. Preserve valid
+        // authored seams; each invalid corner keeps generated-frame fallback.
+        if (frames && frames->size() != faceTable.faces.size()) frames = nullptr;
         auto vertexToPoint = convertGeometry(lod.mesh, vertexTable, normalTable, faceTable, taggData, frames);
         convertMaterials(lod.mesh, faceTable);
         convertSelections(lod.mesh, taggData.namedSelections, vertexTable, faceTable, vertexToPoint);

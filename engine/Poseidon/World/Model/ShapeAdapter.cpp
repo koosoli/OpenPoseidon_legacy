@@ -870,7 +870,8 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
         const auto tanT0 = ::Poseidon::Dev::Perf::Now();
         const std::vector<std::array<float, 3>> generatedTangents = buildTangents(mesh, generatedBinormals);
         tanMs += ::Poseidon::Dev::Perf::ElapsedMs(tanT0);
-        const bool authoredTangentFrame = Asset::Formats::Enfusion::HasXobAuthoredTangentFrame(model, mesh);
+        const bool authoredTangentProducer = Asset::Formats::Enfusion::HasXobAuthoredTangentProducer(model);
+        bool anyAuthoredTangent = false;
         bool hasGeneratedTangentFrame = false;
         for (size_t vertexIndex = 0; vertexIndex < generatedTangents.size(); ++vertexIndex)
         {
@@ -927,10 +928,15 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
             anyUv1 = mesh.vertices[v].uv1.u != 0.0f || mesh.vertices[v].uv1.v != 0.0f;
         if (anyUv1)
             shape->_lods[i]->ResizeUV1(vertexCount);
+        if (authoredTangentProducer) shape->_lods[i]->ResizeAuthoredTangentVertices(vertexCount);
         const auto vfillT0 = ::Poseidon::Dev::Perf::Now();
         for (int v = 0; v < vertexCount; ++v)
         {
             const Vertex& vertex = mesh.vertices[v];
+            const bool authoredTangentFrame = authoredTangentProducer &&
+                Asset::Formats::Enfusion::ValidXobAuthoredTangentVertex(vertex);
+            if (authoredTangentProducer) shape->_lods[i]->SetAuthoredTangentVertex(v, authoredTangentFrame);
+            anyAuthoredTangent = anyAuthoredTangent || authoredTangentFrame;
             if (anyUv1)
                 shape->_lods[i]->SetUV1(v, vertex.uv1.u, vertex.uv1.v);
             shape->_lods[i]->SetPos(v) = ::Vector3(vertex.position.x, vertex.position.y, vertex.position.z);
@@ -953,7 +959,7 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
             shape->_lods[i]->SetClip(v, c);
         }
         vfillMs += ::Poseidon::Dev::Perf::ElapsedMs(vfillT0);
-        shape->_lods[i]->SetHasTangentFrame(authoredTangentFrame || hasGeneratedTangentFrame);
+        shape->_lods[i]->SetHasTangentFrame(anyAuthoredTangent || hasGeneratedTangentFrame);
 
         if (isODOL && !mesh.frames.empty())
         {
@@ -1225,7 +1231,7 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
             shape->_lods[i]->_prop.Add(::NamedProperty(prop.name.c_str(), prop.value.c_str()));
         }
 
-        if (authoredTangentFrame) shape->_lods[i]->SetProperty("wgrnativeframe", "1");
+        if (anyAuthoredTangent) shape->_lods[i]->SetProperty("wgrnativeframe", "3");
         else if (shape->_lods[i]->FindProperty("wgrnativeframe") >= 0)
             shape->_lods[i]->SetProperty("wgrnativeframe", "0");
         shape->_lods[i]->Compact();

@@ -33,6 +33,9 @@ void BuildOrigVertices(const Shape& src, SVertex* out);
 void BuildIndices(const Shape& src, VertexIndex* out);
 
 void BuildSections(const Shape& src, AutoArray<MeshSection>& out);
+// True only if every actual referenced corner in this nonempty section came
+// from an authored tangent frame. Unreferenced invalid vertices are irrelevant.
+bool HasAuthoredSectionTangentFrame(const Shape& src, int section);
 
 } // namespace render::mesh
 } // namespace Poseidon

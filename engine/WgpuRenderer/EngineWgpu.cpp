@@ -15537,13 +15537,12 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadC
                                     const char* value = std::getenv("WGR_REFORGER_TANGENT_PREVIEW");
                                     return value && std::strcmp(value, "1") == 0;
                                 }();
-                                const bool authoredBasis = tangentPreview && s->HasTangentFrame() &&
-                                    s->FindProperty("wgrnativeframe") >= 0 &&
-                                    std::strcmp(s->PropertyValue("wgrnativeframe").Data(), "1") == 0;
+                                const bool authoredBasis = tangentPreview &&
+                                    render::mesh::HasAuthoredSectionTangentFrame(*s, i);
                                 if (authoredBasis) sec.flags |= WGR_MODEL_SECTION_NATIVE_PBR_TANGENTS;
                                 static std::unordered_set<std::string> reportedTangents;
                                 if (tangentPreview && reportedTangents.size() < 32 && reportedTangents.insert(path).second)
-                                    LOG_INFO(Graphics, "Wgpu authored UV0 tangent preview: material={} admission={} producer=2", path, authoredBasis);
+                                    LOG_INFO(Graphics, "Wgpu authored UV0 tangent preview: material={} admission={} producer=3", path, authoredBasis);
                             }
                             static std::unordered_set<std::string> reportedNormals;
                             if (reportedNormals.size() < 32 && reportedNormals.insert(path).second)

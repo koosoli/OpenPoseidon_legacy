@@ -48,6 +48,7 @@ VertexTable::~VertexTable()
 
 void VertexTable::AllocTables(int nPos)
 {
+    _authoredTangentVertices.Clear();
     _pos.Realloc(nPos);
     _pos.Resize(nPos);
     _clip.Realloc(nPos);
@@ -73,6 +74,7 @@ void VertexTable::Reserve(int nPos)
 
 void VertexTable::Resize(int nPos)
 {
+    _authoredTangentVertices.Clear();
     _pos.Resize(nPos);
     _clip.Resize(nPos);
     _norm.Resize(nPos);
@@ -99,11 +101,13 @@ void VertexTable::ReleaseTables()
     _tangent.Clear();
     _binormal.Clear();
     _hasTangentFrame = false;
+    _authoredTangentVertices.Clear();
     _orig.Clear();
     _origClip.Clear();
 }
 void VertexTable::ReallocTable(int nPos)
 {
+    _authoredTangentVertices.Clear();
     // no need to release before alocating - we reuse content if possible
     _pos.Realloc(nPos);
     _pos.Resize(nPos);
@@ -121,6 +125,7 @@ void VertexTable::ReallocTable(int nPos)
 
 void VertexTable::Init(int nPos)
 {
+    _authoredTangentVertices.Clear();
     _pos.Init(nPos), _pos.Resize(nPos);
     _tex.Init(nPos), _tex.Resize(nPos);
     _clip.Init(nPos), _clip.Resize(nPos);
@@ -139,6 +144,7 @@ void VertexTable::DoConstruct(const VertexTable& src)
     _tangent = src._tangent;
     _binormal = src._binormal;
     _hasTangentFrame = src._hasTangentFrame;
+    _authoredTangentVertices = src._authoredTangentVertices;
     _orHints = src._orHints;
     _andHints = src._andHints;
 

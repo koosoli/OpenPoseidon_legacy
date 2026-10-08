@@ -6,6 +6,8 @@
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
 
 #include <memory>
+#include <Poseidon/Asset/Formats/Enfusion/XobTangentFrame.hpp>
+#include <Poseidon/Graphics/Rendering/Primitives/MeshBuild.hpp>
 
 using namespace Poseidon::Model;
 
@@ -191,4 +193,40 @@ TEST_CASE("ShapeAdapter still rejects a face indexing past the vertex table", "[
     REQUIRE(shape);
     REQUIRE(shape->Level(0)->NVertex() == 64);
     REQUIRE(shape->Level(0)->NFaces() == 1);
+}
+
+TEST_CASE("Authored tangent admission follows section corner references", "[ShapeAdapter][tangent][authored]")
+{
+    Model model;
+    model.sourceFormat="MLOD";
+    Poseidon::Asset::Formats::Enfusion::MarkXobAuthoredTangentProducer(model);
+    LODLevel level(1.f);
+    auto& mesh=level.mesh;
+    for(int i=0;i<6;++i)
+    {
+        mesh.vertices.emplace_back(Poseidon::Model::Vector3{float(i%3==1),float(i%3==2)+2.f*float(i/3),0},
+                                   Poseidon::Model::Vector3{0,0,1},Poseidon::Model::Vector2{float(i%3==1),float(i%3==2)});
+        auto& v=mesh.vertices.back();
+        v.hasTangentFrame=true;v.tangent={0,1,0};v.binormal={-1,0,0};
+    }
+    mesh.vertices[5].hasTangentFrame=false;
+    mesh.materials.emplace_back("first","first.paa");
+    mesh.materials.emplace_back("second","second.paa");
+    mesh.triangles.emplace_back(0,1,2);mesh.triangles.back().materialIndex=0;
+    mesh.triangles.emplace_back(3,4,5);mesh.triangles.back().materialIndex=1;
+    model.lodLevels.push_back(std::move(level));
+    REQUIRE(model.compile());
+    std::unique_ptr<LODShapeWithShadow> result(ShapeAdapter::convertToLODShape(model,false));
+    REQUIRE(result);
+    const auto& lod=*result->Level(0);
+    REQUIRE(lod.HasAuthoredTangentVertex(0));
+    REQUIRE_FALSE(lod.HasAuthoredTangentVertex(5));
+    REQUIRE(lod.Tangent(0)[1]==Catch::Approx(1.f)); // authored axes survive a different section's missing corner
+    REQUIRE(lod.NSections()==2);
+    int admitted=0;
+    for(int i=0;i<lod.NSections();++i)
+        admitted+=Poseidon::render::mesh::HasAuthoredSectionTangentFrame(lod,i)?1:0;
+    REQUIRE(admitted==1);
+    REQUIRE_FALSE(Poseidon::render::mesh::HasAuthoredSectionTangentFrame(lod,-1));
+    REQUIRE_FALSE(Poseidon::render::mesh::HasAuthoredSectionTangentFrame(lod,lod.NSections()));
 }

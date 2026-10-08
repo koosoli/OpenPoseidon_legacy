@@ -110,6 +110,25 @@ void BuildIndices(const Shape& src, VertexIndex* out)
     }
 }
 
+bool HasAuthoredSectionTangentFrame(const Shape& src, int section)
+{
+    if (!src.HasTangentFrame() || src.NTangent()<src.NVertex() || src.NBinormal()<src.NVertex() ||
+        section<0 || section>=src.NSections()) return false;
+    const ShapeSection& range=src.GetSection(section);
+    bool referenced=false;
+    for (Offset f=range.beg;f<range.end;src.NextFace(f))
+    {
+        const Poly& face=src.Face(f);
+        if(face.N()<3) return false;
+        for(int corner=0;corner<face.N();++corner)
+        {
+            if(!src.HasAuthoredTangentVertex(face.GetVertex(corner))) return false;
+            referenced=true;
+        }
+    }
+    return referenced;
+}
+
 void BuildSections(const Shape& src, AutoArray<MeshSection>& out)
 {
     out.Realloc(src.NSections());
