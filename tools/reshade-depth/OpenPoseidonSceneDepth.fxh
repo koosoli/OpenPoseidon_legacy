@@ -31,7 +31,13 @@ float OpSceneLinearDepth(float2 uv)
 {
     float raw = tex2Dlod(OpSceneDepthSampler, float4(uv, 0, 0)).r;
     // Sky/invalid binding is a sentinel beyond the bounded DH tracing range.
-    return OpSceneReady && raw > 0.0 ? OpSceneProjection.z / (raw * OpSceneRange) : 2.0;
+    return OpSceneReady && raw > 0.0 && raw <= 1.0 && OpSceneRange > 0.0 ? OpSceneProjection.z / (raw * OpSceneRange) : 2.0;
+}
+// A bounded screen-space trace has no receiver/donor outside this open range.
+// Native fog/sky colors are not radiance samples of a visible valid surface.
+bool OpSceneTraceDepthValid(float normalizedDepth)
+{
+    return OpSceneReady && normalizedDepth > 0.0 && normalizedDepth < 1.0;
 }
 float3 OpSceneViewPosition(float2 uv, float normalizedDepth)
 {

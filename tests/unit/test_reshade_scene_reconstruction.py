@@ -24,7 +24,7 @@ class Vector(tuple):
 def execute(name, **values):
     # These helpers are straight-line scalar/vector arithmetic. Evaluate the
     # actual shader expressions, including its branch, rather than repeat math.
-    body = re.search(r"float[23]? " + name + r"\([^)]*\)\s*\{(.*?)\n\}", SOURCE, re.S).group(1)
+    body = re.search(r"(?:float[23]?|bool) " + name + r"\([^)]*\)\s*\{(.*?)\n\}", SOURCE, re.S).group(1)
     body = re.sub(r"//[^\n]*", "", body)
     scope = dict(values, float2=Vector, float3=Vector)
     def expression(text):
@@ -84,6 +84,21 @@ class Reconstruction(unittest.TestCase):
         self.assertEqual(positions[1], positions[2])
         # Screen-down reflection preserves metric lengths and angles.
         self.assertAlmostEqual(math.dist(positions[0], (0,0,0)), math.sqrt(sum(x*x for x in positions[0])))
+
+    def test_bounded_trace_validity_rejects_far_invalid_and_nan_without_brightness_changes(self):
+        inputs = self.inputs()
+        for z in (.1, 10, 500, 999.99):
+            depth = execute("OpSceneLinearDepth", uv=Vector(.5,.5), raw=inputs["OpSceneProjection"].z/z, **inputs)
+            self.assertTrue(execute("OpSceneTraceDepthValid", normalizedDepth=depth, **inputs))
+        for z in (1000, 1001, 100000):
+            depth = execute("OpSceneLinearDepth", uv=Vector(.5,.5), raw=inputs["OpSceneProjection"].z/z, **inputs)
+            self.assertFalse(execute("OpSceneTraceDepthValid", normalizedDepth=depth, **inputs))
+        for depth in (0, -1, 1, 2, float("inf"), float("nan")):
+            self.assertFalse(execute("OpSceneTraceDepthValid", normalizedDepth=depth, **inputs))
+        for raw in (0, -1, 1.001, float("inf"), float("nan")):
+            self.assertEqual(execute("OpSceneLinearDepth", uv=Vector(.5,.5), raw=raw, **inputs), 2)
+        inputs["OpSceneReady"] = False
+        self.assertFalse(execute("OpSceneTraceDepthValid", normalizedDepth=.25, **inputs))
 
     def test_sky_and_missing_binding_never_divide_by_zero(self):
         inputs = self.inputs()

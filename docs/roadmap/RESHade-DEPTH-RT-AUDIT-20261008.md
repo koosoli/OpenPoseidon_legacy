@@ -722,3 +722,71 @@ or legacy old-paths can change that). Exact normal UI and offline commands are
 in [the optional preview instructions](OPTIONAL-RESHADE-PREVIEW.md). Applying
 the upgrade to the default cache and normal-profile UI verification remain
 parent-owned; this agent has not changed that cache or launched the game.
+
+
+## Actual 4x timing passed; distance color rejected and bounded validity corrected
+
+The parent installed `554c8c44` and ran
+`20261008-135519-SceneDH/result.json` with active 4x MSAA, live selection and
+four OFF/ON/ON/OFF timing windows. The report contains 240 genuine completed ON
+GPU brackets: median 2.161 ms, nearest-rank p95 2.705 ms. The descriptive
+ON-minus-OFF wall median was +2.774 ms. These are the tested injected-effect
+bracket/wall scopes, not total GPU frame busy duration or a standing hardware
+budget. The parent rejected visual quality: distant mountain/forest colors
+became conspicuously pale while the foreground remained usable. The agent
+inspected those retained captures and the matching 13:52 depth debug image;
+no new GPU launch was made. The default cache has not been upgraded.
+
+The pinned DH composition has three unsafe boundary behaviors for the engine's
+bounded scene adapter. Its smoothers return native scene RGB as GI at sky/far
+receivers, which composition can add as extra lighting. Beauty composition
+continues AO/SSR/levels even when the receiver has no valid trace depth, and its
+distance-fade ratio is unclamped for out-of-range/sentinel depth. Trace donors
+also accept sky/fog colors without a valid in-range visible surface, and the
+smoother can rescue current invalid donors using previous-frame depth. Native
+fog/sky color is already present in this post-tonemap scene and is not an
+additional validated surface-radiance observation. These are source-driven
+correctness issues; they do not establish a unique cause for every pale pixel.
+The sparse 16x16 numeric witness max reconstructed Z was about 664 m, so it
+cannot justify classifying all visible pale distant geometry as beyond 1000 m.
+
+The locally generated derivative now uses the actual metric depth to restrict
+receivers/donors to the open interval (0,1000 m). Invalid/boundary/far receivers
+produce neutral GI=0/AO=1 in smoothing, preserve native color in composition,
+and directly sample the native backbuffer in the beauty pass before
+AO/SSR/levels/fading. Invalid/no-surface sky/fog trace donors and stale-depth
+rescues are rejected. The existing DH fade ratio is clamped; its existing 0.9
+fade start, metric reconstruction, 1000 m working range and all foreground
+preset settings remain unchanged. No global brightness adjustment or new
+arbitrary distance knob is introduced. Raw invalid/NaN depth is rejected, and
+depth debug still shows the bounded validity domain. Native atmosphere outside
+that domain is retained by construction; this still needs actual shader/image
+validation rather than a claim that every distant in-range artifact is solved.
+
+The untouched pinned GPL source remains hash-identical outside active effect
+scan. Generated DH SHA256 is
+`c9be672baabc3814ee19183bbadd3e131ba51889b131691f6c9614576eacca98`;
+original MIT helper SHA256 is
+`5d59fbc169f0457e394f7f30f380a0884912d9e6d48d95ae6955a53d94acf03a`.
+The engine's fixed optional policy hashes are updated, so the parent must
+rebuild its affected C++ gate before using live selection with this stage.
+No Rust/engine rendering or add-on code/ABI changes are needed; the previously
+verified add-on binary remains valid. The upgrade preparer naturally uses this
+new fixed payload and still refuses conflicting old/custom files.
+
+Twenty offline tests pass, including exact transformation/early beauty guard,
+neutral smoother output, donor/history rejection and clamped fade; actual
+helper expression tests cover valid metric points, exact range boundary, far,
+missing binding, invalid raw values and NaN. Actual pinned offline preparation
+completed and all 12 payload hashes/licence entries validate against the new
+policy. Fresh full stage: this worktree's `build/scene-dh-native-preserve`.
+No default cache changes, downloads, shader runtime compile, GPU/game launch,
+engine build or deployment occurred here.
+
+After parent integration, repeat the existing `SceneDHDebug -MsaaSamples 4
+-UsePreviewControl` and then `SceneDH -MsaaSamples 4 -UsePreviewControl -MeasureGpu`
+with that fresh stage. Retain the strict compile gate, inspect original
+sky/fog/distant colors and foreground effect, and remeasure the corrected shader.
+Only after those quality checks should the parent apply the offline upgrade to
+the user's normal local cache. The earlier passing timing is retained evidence
+for the previous shader and does not waive this new runtime/quality gate.

@@ -27,8 +27,8 @@ constexpr const char* Preset(unsigned mode)
 struct Asset { const char* path; const char* digest; };
 inline constexpr std::array<Asset, 7> DepthAssets{{
     {"Shaders/OpenPoseidonDepthProbe.fx", "1496367bb8ff05527608037921864302746a2b53141b8ca9924ec6db3c5a7393"},
-    {"Shaders/OpenPoseidonDH.fx", "500a545d3b27cb434c46035b7884d0341ad3fdb2ad06358af4e7b62cdb3a5c46"},
-    {"Shaders/OpenPoseidonSceneDepth.fxh", "d80225dde781c7e84d45efe6dd25b9eb8e90a2780c02b07ddea712ccc627095f"},
+    {"Shaders/OpenPoseidonDH.fx", "c9be672baabc3814ee19183bbadd3e131ba51889b131691f6c9614576eacca98"},
+    {"Shaders/OpenPoseidonSceneDepth.fxh", "5d59fbc169f0457e394f7f30f380a0884912d9e6d48d95ae6955a53d94acf03a"},
     {"Shaders/ReShade.fxh", "6dabfbbaf968c3871905d2ea17f96572ff7b1cec01310b5d0e5252b66b30174f"},
     {"Sources/dh_uber_rt.fx", "c14f19eb7b0359cb4042749e52c28c6a18c2df89b9fd40f5ab9bd209e36e5320"},
     {"Licenses/DH-UBER-RT-GPL-2.0.txt", "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"},

@@ -51,7 +51,7 @@ def adapt_dh(data):
         if count != 1:
             raise RuntimeError(f"DH adapter function mismatch: {name}, {count}")
     body('getDepthMultiplier', '        return 1.0; // engine snapshot: no game-specific depth multiplier')
-    body('isSky', '        return depth > 1.0; // sky sentinel or beyond explicit metric working range')
+    body('isSky', '        return !OpSceneTraceDepthValid(depth); // invalid receiver/donor or bounded range exhausted')
     body('getDepth', '        return float2(OpSceneLinearDepth(coords), 0.0); // no weapon heuristic')
     body('getWorldPositionForNormal', '        return OpSceneViewPosition(coords, getDepth(coords).x); // metric normals, no roughness displacement')
     body('getWorldPosition', '        return OpSceneViewPosition(coords, depth);')
@@ -63,6 +63,40 @@ def adapt_dh(data):
         '        ' + m[2], source, flags=re.S)
     if count != 1:
         raise RuntimeError('DH depth debug patch mismatch')
+    # The pinned smoother writes native scene color into GI for sky/far pixels.
+    # That is not neutral lighting: it gets added again during composition.
+    def replace_once(old, new, label):
+        nonlocal source
+        if source.count(old) != 1:
+            raise RuntimeError(f'DH scene-preservation patch mismatch: {label}')
+        source = source.replace(old, new, 1)
+    for coordinate in ('scaledCoords', 'coords'):
+        replace_once(f'outGI = float4(getColor({coordinate}).rgb,1);',
+                     'outGI = float4(0,0,0,1); // invalid/far: zero indirect light, unoccluded AO',
+                     'neutral smoother ' + coordinate)
+    replace_once('\n        float3 color = refColor;',
+                 '\n        if(isSky(depth)) return refColor; // preserve native fog/sky, including Reinhard input\n'
+                 '        float3 color = refColor;', 'composition receiver')
+    replace_once('        if(iDebug==DEBUG_OFF) {',
+                 '        if(iDebug==DEBUG_OFF) {\n'
+                 '            if(isSky(getDepth(coords).x)) {\n'
+                 '                outPixel = tex2Dlod(ReShade::BackBuffer,float4(coords,0,0));\n'
+                 '                return; // exact native beauty passthrough before AO/SSR/levels/fading\n'
+                 '            }', 'beauty receiver')
+    replace_once('float ratio = diff/max;', 'float ratio = saturate(diff/max);', 'bounded existing range fade')
+    donor = r'if\(hitPosition.status==RT_HIT_SKY \|\| isSky\(screenCoords.z\)\) \{.*?return;\s*\}'
+    source, count = re.subn(donor,
+        'if(hitPosition.status==RT_HIT_SKY || isSky(screenCoords.z) || isSky(getDepth(screenCoords.xy).x)) {\n'
+        '            return; // no visible in-range surface: no extra sky/fog screen-space radiance\n'
+        '        }', source, flags=re.S)
+    if count != 1:
+        raise RuntimeError('DH valid donor patch mismatch')
+    history = r'if\(isSky\(depth.x\)\) \{\s*#if DX9_MODE\s*return;\s*#else.*?#endif\s*\}'
+    source, count = re.subn(history,
+        'if(isSky(depth.x)) {\n            return; // current invalid/far donor cannot be rescued by stale depth\n        }',
+        source, flags=re.S)
+    if count != 1:
+        raise RuntimeError('DH current-depth donor patch mismatch')
     # ReShade 6.8 tracks transitive sampler use, including compureResult's
     # reinhardFirstPass=false branch when PS_ReinhardPass passes true. Never
     # sample and attach that same image. Preserve the original 1/64 blend in a
@@ -154,7 +188,8 @@ def prepare(root, local_sources=None, probe_only=False):
         "scene_adapter": None if adapter is None else {"source_sha256": FILES[1][4], "generated_sha256": sha(adapter),
             "helper_sha256": sha((own / 'OpenPoseidonSceneDepth.fxh').read_bytes()), "helper_license": "MIT",
             "projection": "metric z=near/raw; exact p00/p55/offset inverse, screen-down Y; 1000m bounded DH range; sky=2",
-            "reinhard": "retained 1x1 work target with upstream blend, then separate publish pass; no same-image feedback"},
+            "reinhard": "retained 1x1 work target with upstream blend, then separate publish pass; no same-image feedback",
+            "validity": "native beauty passthrough outside open metric working range; neutral invalid GI/AO; no sky/fog/stale-depth donors; clamped existing fade"},
         "common_license": "CC0-1.0 (SPDX in header)", "probe_license": "GPL-3.0-or-later",
         "configuration": "No active preset/config/preference modified; depth availability not established",
         "motion": "No external motion provider; accumulation=1 stationary validation preset only"}, indent=2) + "\n")

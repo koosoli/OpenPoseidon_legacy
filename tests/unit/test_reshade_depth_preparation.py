@@ -20,6 +20,13 @@ class Preparation(unittest.TestCase):
                 ('float3', 'getWorldPosition', 'float2 coords,float depth'), ('float3', 'getScreenPosition', 'float3 wp')]:
             source += f'    {kind} {name}({args}) {{\n        return 42;\n    }}\n'
         source += '} else if(iDebug==DEBUG_DEPTH) {\n result = 42;\n} else if(iDebug==DEBUG_NORMAL) {\n'
+        source += '\n        float3 color = refColor;\n'
+        source += 'outGI = float4(getColor(scaledCoords).rgb,1);\n'
+        source += 'outGI = float4(getColor(coords).rgb,1);\n'
+        source += '        if(iDebug==DEBUG_OFF) {\n            result = getColorSampler(resultSampler,coords).rgb;\n        }\n'
+        source += 'float ratio = diff/max;\n'
+        source += 'if(hitPosition.status==RT_HIT_SKY || isSky(screenCoords.z)) {\n sky = getRayColor(screenCoords.xy).rgb;\n return;\n}\n'
+        source += 'if(isSky(depth.x)) {\n#if DX9_MODE\n return;\n#else\n depth = getColorSampler(previousDepthSampler,currentScaledCoords).x;\n if(isSky(depth.x)) { return; }\n#endif\n}\n'
         source += '\n    sampler reinhardSampler { Texture = reinhardTex; };\n'
         source += '        pass {\n            PixelShader = PS_ReinhardPass;\n            RenderTarget = reinhardTex;\n'
         source += '            ClearRenderTargets = false;\n            BlendEnable = true;\n            SrcBlend = SRCALPHA;\n            DestBlend = INVSRCALPHA;\n        }\n'
@@ -43,6 +50,16 @@ class Preparation(unittest.TestCase):
             self.assertFalse((runtime / 'Shaders/dh_uber_rt.fx').exists())
             adapted = (runtime / 'Shaders/OpenPoseidonDH.fx').read_bytes()
             self.assertIn(b'OpenPoseidon local adaptation, 2026-10-08', adapted)
+            self.assertIn(b'!OpSceneTraceDepthValid(depth)', adapted)
+            self.assertEqual(adapted.count(b'invalid/far: zero indirect light, unoccluded AO'), 2)
+            self.assertNotIn(b'outGI = float4(getColor(coords).rgb,1)', adapted)
+            self.assertIn(b'if(isSky(depth)) return refColor;', adapted)
+            beauty = adapted.split(b'if(iDebug==DEBUG_OFF) {', 1)[1]
+            self.assertLess(beauty.index(b'outPixel = tex2Dlod(ReShade::BackBuffer'),
+                            beauty.index(b'result = getColorSampler(resultSampler'))
+            self.assertIn(b'isSky(getDepth(screenCoords.xy).x)', adapted)
+            self.assertNotIn(b'depth = getColorSampler(previousDepthSampler,currentScaledCoords).x;', adapted)
+            self.assertIn(b'float ratio = saturate(diff/max);', adapted)
             self.assertIn(b'OpSceneLinearDepth(coords)', adapted)
             self.assertIn(b'OpSceneViewPosition(coords, depth)', adapted)
             self.assertIn(b'OpSceneScreenPosition(wp)', adapted)
