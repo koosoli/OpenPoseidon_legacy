@@ -5,7 +5,8 @@
 param(
     [Parameter(Mandatory)][string]$ExpectedCommit,
     [string]$CacheDirectory=(Join-Path $env:LOCALAPPDATA 'OpenPoseidon/world-stream'),
-    [ValidateRange(60,240)][int]$PatchTimeoutSeconds=150
+    [ValidateRange(60,240)][int]$PatchTimeoutSeconds=150,
+    [switch]$CachedBuildings
 )
 $ErrorActionPreference='Stop'
 function Require($ok,[string]$message){if(!$ok){throw $message}}
@@ -24,6 +25,7 @@ $mission=Join-Path $CacheDirectory 'fixture/earth-preview.abel'
 $settings=@{
     POSEIDON_WHOLE_WORLD='1';POSEIDON_EARTH_LATITUDE='46.6';POSEIDON_EARTH_LONGITUDE='8.1';
     POSEIDON_EARTH_CACHE=$CacheDirectory;POSEIDON_EARTH_IMAGERY=$imagery;
+    POSEIDON_EARTH_BUILDINGS=$(if($CachedBuildings){'1'}else{'0'});
     WGR_GRASS='0';WGR_TERRAIN_RESOURCE_REUSE='1';WGR_WET_SOIL_DIAGNOSTIC='1';
     POSEIDON_USER_DIR=(Join-Path $out 'user')
 }
@@ -132,6 +134,22 @@ try{
     $null=Send @{cmd='exec';code='player allowDamage false;0 setRain 0;0 setOvercast 0;0 setFog 0;setDate [1985,6,21,12,0]'}
     $receipt.initial=Location
     Require ((Location).raw-ceq$receipt.initial.raw) 'Origin query changed the revision'
+    if($CachedBuildings){
+        Require (Test-Path (Join-Path $CacheDirectory 'buildings/2480_306.json')) 'Prepare the single Luxembourg cell before this optional acceptance'
+        $null=Go 'luxembourg' 49.61 6.13 1000
+        $deadline=[DateTime]::UtcNow.AddSeconds(15)
+        do{
+            $building=@(Select-String -Path $log -Pattern 'Earth cached buildings: cell \[2480,306\], [1-9][0-9]* buildings')
+            if($building.Count){break}
+            Require ([DateTime]::UtcNow-lt$deadline) 'Cached Luxembourg building mesh was not published'
+            Start-Sleep -Milliseconds 200
+        }while($true)
+        $receipt.buildings=$building[-1].Line
+        $pose=Eval 'triFreeFlyPose "6400 6400 1000 30 -45"'
+        Require ($pose.StartsWith('OK')) 'Building overview camera refused'
+        Start-Sleep -Seconds 1
+        $path=Join-Path $out 'luxembourg-buildings.png';$null=Send @{cmd='screenshot';path=$path};WaitCapture $path
+    }
     $null=Go 'alps' 46.6 8.1 4500
     $null=Go 'grand-canyon' 36.1 -112.1 6000
     # Fine near window straddles longitude180; verifies tile wrap and UV seam.

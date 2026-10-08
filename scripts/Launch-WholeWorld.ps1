@@ -10,6 +10,7 @@ param(
     [ValidateRange(-180,180)][double]$Longitude = 8.1,
     [ValidateRange(500,30000000)][double]$Altitude = 4500,
     [switch]$Globe,
+    [switch]$CachedBuildings,
     [string]$CacheDirectory = (Join-Path $env:LOCALAPPDATA 'OpenPoseidon/world-stream'),
     [switch]$Fullscreen,
     [int]$HarnessPort = 0,
@@ -29,6 +30,7 @@ if (!$PrepareOnly -and !$env:LOCK_OWNER) {
         '-CacheDirectory',$CacheDirectory,'-HarnessPort',"$HarnessPort")
     if ($Fullscreen) { $forward += '-Fullscreen' }
     if ($Globe) { $forward += '-Globe' }
+    if ($CachedBuildings) { $forward += '-CachedBuildings' }
     if ($LogFile) { $forward += @('-LogFile',$LogFile) }
     $previous = $env:LOCK_OWNER
     try {
@@ -118,7 +120,8 @@ $settings = @{
     POSEIDON_WHOLE_WORLD='1'; POSEIDON_EARTH_LATITUDE=$Latitude.ToString('R',[Globalization.CultureInfo]::InvariantCulture);
     POSEIDON_EARTH_LONGITUDE=$Longitude.ToString('R',[Globalization.CultureInfo]::InvariantCulture);
     POSEIDON_EARTH_CACHE=$CacheDirectory; POSEIDON_EARTH_IMAGERY=$imagery;
-    WGR_GRASS='0'; WGR_TERRAIN_RESOURCE_REUSE='1'
+    WGR_GRASS='0'; WGR_TERRAIN_RESOURCE_REUSE='1';
+    POSEIDON_EARTH_BUILDINGS=$(if($CachedBuildings){'1'}else{'0'})
 }
 $saved = @{}
 foreach ($key in $settings.Keys) { $saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process'); [Environment]::SetEnvironmentVariable($key,$settings[$key],'Process') }
