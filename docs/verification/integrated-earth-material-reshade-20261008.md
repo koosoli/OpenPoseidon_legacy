@@ -334,3 +334,22 @@ silhouettes align with the scene; preview images show a visible effect,
 including lifted distant contrast. This is a bounded screen-space prototype,
 not hardware ray tracing or final visual acceptance. ReShade stays off by
 default. No injected-GPU timing or general MSAA/DLSS compatibility is claimed.
+
+## Pub-facing material comparison
+
+The corrected Pub-facing ordered-mask on/off runs on installed `905ba2dc`
+both pass capture lifecycle and settle at 20683 registered / 6295 main
+instances and 11826164 main triangles. Receipts are under
+`build/native-reforger-perf/Pub-ordered-{on,off}-905ba2dc/run-01.*`.
+Inspection finds a small localized plaster/detail change, not a decisive
+overall visual improvement. Mean absolute RGB differences in the facade
+and gable crops are 0.303 and 0.429 byte values (maximum 8); a neighboring
+facade stays within 1 byte. Whole-frame differences also include moving
+foliage/sky, so they are not a material correctness test. Single-frame
+GPU samples of 56.595/55.031ms are not a controlled cost measurement.
+
+Color filtering and layer mixing still use the existing encoded-color
+path in this installed version. The next bounded opt-in correction is
+hardware sRGB color-role views and linear layer composition. Normal
+composition and lighting remain approximate and require separate checks;
+these previews do not establish full material parity.
