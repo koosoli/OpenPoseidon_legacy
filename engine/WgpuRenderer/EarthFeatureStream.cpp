@@ -163,6 +163,69 @@ void Tree(Features::Mesh& result, const Features::Ground& g, Point p, double h, 
     }
     ++batch.features;
 }
+void Forest(Features::Mesh& result, const Features::Ground& g, const cJSON* geometry)
+{
+    // Choose a source-derived frame, independent of camera origin, source file
+    // cell and closed-ring ordering. Geometry edits may intentionally move it.
+    Earth::Coordinate anchor{90, 180};
+    for (int i = 0; i < cJSON_GetArraySize(geometry) - 1; ++i)
+    {
+        const auto* node = cJSON_GetArrayItem(geometry, i);
+        const Earth::Coordinate coordinate{Number(node, "lat"), Earth::WrapLongitude(Number(node, "lon"))};
+        if (coordinate.latitude < anchor.latitude ||
+            (coordinate.latitude == anchor.latitude && coordinate.longitude < anchor.longitude))
+            anchor = coordinate;
+    }
+    const auto cell = EarthBuildingStream::CellAt(anchor.latitude, anchor.longitude);
+    anchor = {(cell.latitude + .5) * EarthBuildingStream::CellDegrees,
+              (cell.longitude + .5) * EarthBuildingStream::CellDegrees};
+    std::vector<Point> polygon;
+    double xmin = INFINITY, zmin = INFINITY, xmax = -INFINITY, zmax = -INFINITY;
+    for (int i = 0; i < cJSON_GetArraySize(geometry) - 1; ++i)
+    {
+        const auto* node = cJSON_GetArrayItem(geometry, i);
+        const auto p = Earth::ToLocal(anchor.latitude, anchor.longitude, Number(node, "lat"), Number(node, "lon"));
+        polygon.push_back({p.x, p.z});
+        xmin = std::min(xmin, p.x);
+        xmax = std::max(xmax, p.x);
+        zmin = std::min(zmin, p.z);
+        zmax = std::max(zmax, p.z);
+    }
+    // Bound the inverse projection of the resident rectangle by a disk. Its
+    // derivative stretches by at most 1/up at its farthest corner; a subsequent
+    // orthographic projection cannot increase that spherical arc length.
+    const double lowX = double(g.x) + 4, lowZ = double(g.z) + 4, highX = double(g.x) + double(g.grid) * 256 - 4,
+                 highZ = double(g.z) + double(g.grid) * 256 - 4;
+    if (lowX > highX || lowZ > highZ)
+        return;
+    const double farX = std::max(std::abs(lowX - Earth::Anchor), std::abs(highX - Earth::Anchor)),
+                 farZ = std::max(std::abs(lowZ - Earth::Anchor), std::abs(highZ - Earth::Anchor)),
+                 upSquared = 1 - (farX * farX + farZ * farZ) / (Earth::Radius * Earth::Radius);
+    if (!(upSquared > 0))
+        return;
+    const auto centreGeo = Earth::FromLocal(g.latitude, g.longitude, (lowX + highX) * .5, (lowZ + highZ) * .5);
+    const auto centre = Earth::ToLocal(anchor.latitude, anchor.longitude, centreGeo.latitude, centreGeo.longitude);
+    const double reach = std::hypot(highX - lowX, highZ - lowZ) * .5 / std::sqrt(upSquared);
+    xmin = std::max(xmin, centre.x - reach);
+    xmax = std::min(xmax, centre.x + reach);
+    zmin = std::max(zmin, centre.z - reach);
+    zmax = std::min(zmax, centre.z + reach);
+    for (double z = std::ceil(zmin / 32) * 32;
+         z <= zmax && result.forestSamples < 16000 && result.batches[Features::Trees].features < Features::MaxTrees;
+         z += 32)
+        for (double x = std::ceil(xmin / 32) * 32;
+             x <= xmax && result.forestSamples < 16000 && result.batches[Features::Trees].features < Features::MaxTrees;
+             x += 32)
+        {
+            ++result.forestSamples;
+            const auto coordinate = Earth::FromLocal(anchor.latitude, anchor.longitude, x, z);
+            const auto local = Earth::ToLocal(g.latitude, g.longitude, coordinate.latitude, coordinate.longitude);
+            if (!local.visible || local.x < lowX || local.x > highX || local.z < lowZ || local.z > highZ)
+                continue;
+            if (Inside({x, z}, polygon))
+                Tree(result, g, {local.x, local.z}, 9, true);
+        }
+}
 void Sign(Features::Mesh& result, const Features::Ground& g, Point p)
 {
     auto& b = result.batches[Features::Signs];
@@ -355,32 +418,7 @@ void Append(Features::Mesh& result, const std::string& json, const Features::Gro
                     continue;
                 }
                 p.pop_back();
-                double xmin = INFINITY, zmin = INFINITY, xmax = -INFINITY, zmax = -INFINITY;
-                for (auto v : p)
-                {
-                    xmin = std::min(xmin, v.x);
-                    xmax = std::max(xmax, v.x);
-                    zmin = std::min(zmin, v.z);
-                    zmax = std::max(zmax, v.z);
-                }
-                xmin = std::max(xmin, double(g.x) + 4);
-                xmax = std::min(xmax, double(g.x + g.grid * 256) - 4);
-                zmin = std::max(zmin, double(g.z) + 4);
-                zmax = std::min(zmax, double(g.z + g.grid * 256) - 4);
-                // Fixed origin-relative spacing and no PRNG: repeated builds match.
-                for (double z = std::ceil(zmin / 32) * 32;
-                     z <= zmax && result.forestSamples < 16000 &&
-                     result.batches[Features::Trees].features < Features::MaxTrees;
-                     z += 32)
-                    for (double x = std::ceil(xmin / 32) * 32;
-                         x <= xmax && result.forestSamples < 16000 &&
-                         result.batches[Features::Trees].features < Features::MaxTrees;
-                         x += 32)
-                    {
-                        ++result.forestSamples;
-                        if (Inside({x, z}, p))
-                            Tree(result, g, {x, z}, 9, true);
-                    }
+                Forest(result, g, geometry);
             }
             else
                 ++result.skipped;

@@ -9,13 +9,14 @@
 using Features = Poseidon::EarthFeatureStream;
 using Buildings = Poseidon::EarthBuildingStream;
 using Point = std::pair<double, double>;
-std::string Way(uint64_t id, const char* tags, const std::vector<Point>& points)
+std::string Way(uint64_t id, const char* tags, const std::vector<Point>& points, double latitude = 0,
+                double longitude = 0)
 {
     std::ostringstream out;
     out << std::setprecision(12) << "{\"type\":\"way\",\"id\":" << id << ",\"tags\":{" << tags << "},\"geometry\":[";
     for (size_t i = 0; i < points.size(); ++i)
     {
-        const auto c = Poseidon::Earth::FromLocal(0, 0, points[i].first, points[i].second);
+        const auto c = Poseidon::Earth::FromLocal(latitude, longitude, points[i].first, points[i].second);
         if (i)
             out << ",";
         out << "{\"lat\":" << c.latitude << ",\"lon\":" << c.longitude << "}";
@@ -110,9 +111,100 @@ void TreeGeometry()
                 assert(Trees::PalettePixels[(band * 4 + pixel) * 4 + channel] ==
                        Trees::PalettePixels[band * 16 + channel]);
 }
+void ForestRebase()
+{
+    namespace Earth = Poseidon::Earth;
+    const std::vector<Point> polygon{{6320, 6320}, {6480, 6320}, {6480, 6480}, {6320, 6480}, {6320, 6320}};
+    struct Sample
+    {
+        Earth::Coordinate centre;
+        float height, leaf;
+    };
+    const auto samples = [](const Features::Mesh& mesh, const Features::Ground& ground)
+    {
+        std::vector<Sample> result;
+        const auto& vertices = mesh.batches[Features::Trees].vertices;
+        for (size_t i = 0; i < vertices.size(); i += Poseidon::EarthTrees::VertexCount)
+        {
+            // Each of the four trunk base corners appears three times.
+            double x = 0, z = 0;
+            int count = 0;
+            float high = 300;
+            for (size_t j = 0; j < Poseidon::EarthTrees::VertexCount; ++j)
+            {
+                const auto v = vertices[i + j];
+                high = std::max(high, v.y);
+                if (v.y == 300)
+                {
+                    x += v.x;
+                    z += v.z;
+                    ++count;
+                }
+            }
+            assert(count == 12);
+            result.push_back({Earth::FromLocal(ground.latitude, ground.longitude, x / count, z / count), high - 300,
+                              vertices[i + 24].u});
+        }
+        return result;
+    };
+    for (Earth::Coordinate source : {Earth::Coordinate{0, 0}, {49.61, 6.13}, {83.5, 179.999}})
+    {
+        const auto json = Json(Way(70, "\"landuse\":\"forest\"", polygon, source.latitude, source.longitude));
+        const Features::Ground initial{
+            6272, 6272, 1, source.latitude, source.longitude, 1, 1, std::vector<float>(257 * 257, 300)};
+        const auto cell = Buildings::CellAt(source.latitude, source.longitude);
+        const auto mesh = Features::BuildCell(json, initial, cell);
+        Valid(mesh);
+        const auto reference = samples(mesh, initial);
+        assert(reference.size() >= 16 && reference.size() <= 36); // Approx. one sample per 32x32 metres.
+        const auto neighborMesh = Features::BuildCell(json, initial, {cell.latitude, cell.longitude + 1});
+        const auto neighborSamples = samples(neighborMesh, initial);
+        assert(neighborSamples.size() == reference.size());
+        for (size_t i = 0; i < reference.size(); ++i)
+            assert(neighborSamples[i].centre.latitude == reference[i].centre.latitude &&
+                   neighborSamples[i].centre.longitude == reference[i].centre.longitude);
+        auto remote = initial;
+        remote.x = remote.z = 100000;
+        const auto absent = Features::BuildCell(json, remote, cell);
+        assert(absent.forestSamples == 0 && absent.batches[Features::Trees].features == 0);
+        for (Earth::Coordinate origin : {Earth::Coordinate{source.latitude - .3, source.longitude - .2},
+                                         {source.latitude - 3, source.longitude - 2}})
+        {
+            const auto centre = Earth::ToLocal(origin.latitude, origin.longitude, source.latitude, source.longitude);
+            auto moved = initial;
+            moved.latitude = origin.latitude;
+            moved.longitude = origin.longitude;
+            moved.x = float(centre.x - 128);
+            moved.z = float(centre.z - 128);
+            const auto rebased = Features::BuildCell(json, moved, cell);
+            Valid(rebased);
+            const auto actual = samples(rebased, moved);
+            assert(actual.size() == reference.size());
+            for (size_t i = 0; i < actual.size(); ++i)
+            {
+                const auto delta = Earth::ToLocal(reference[i].centre.latitude, reference[i].centre.longitude,
+                                                  actual[i].centre.latitude, actual[i].centre.longitude);
+                assert(std::hypot(delta.x - Earth::Anchor, delta.z - Earth::Anchor) <
+                       .05); // Float mesh quantization only.
+                assert(actual[i].height == reference[i].height && actual[i].leaf == reference[i].leaf);
+            }
+        }
+        auto reversed = polygon;
+        std::reverse(reversed.begin(), reversed.end());
+        const auto reverseMesh = Features::BuildCell(
+            Json(Way(70, "\"landuse\":\"forest\"", reversed, source.latitude, source.longitude)), initial, cell);
+        assert(reverseMesh.batches[Features::Trees].indices == mesh.batches[Features::Trees].indices);
+        const auto reversedSamples = samples(reverseMesh, initial);
+        assert(reversedSamples.size() == reference.size());
+        for (size_t i = 0; i < reference.size(); ++i)
+            assert(reversedSamples[i].centre.latitude == reference[i].centre.latitude &&
+                   reversedSamples[i].centre.longitude == reference[i].centre.longitude);
+    }
+}
 int main(int argc, char** argv)
 {
     TreeGeometry();
+    ForestRebase();
     Features::Ground g{6272, 6272, 1, 0, 0, 5, 7, std::vector<float>(257 * 257, 10)};
     const auto cell = Buildings::CellAt(0, 0);
     const auto road = Way(42, "\"highway\":\"residential\",\"width\":\"6\"", {{6350, 6400}, {6450, 6400}});
@@ -299,6 +391,7 @@ int main(int argc, char** argv)
         assert(mesh.batches[Features::PavedRoad].features > 0 && mesh.batches[Features::Trees].features > 0);
     }
     std::cout << "PASS Earth features: road terrain sampling/clipping, bridge exclusion, forests, trees/signs, simple "
-                 "water, procedural trunk/crown smooth normals and winding, caps, offline transport-cache "
+                 "water, procedural trunk/crown smooth normals and winding, geographic forest placement across "
+                 "rebases/dateline, caps, offline transport-cache "
                  "fallback/prepared priority, neighborhood/deduplication, cancellation, revision-safe worker\n";
 }
