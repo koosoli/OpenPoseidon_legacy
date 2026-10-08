@@ -405,3 +405,65 @@ checked, the open-inventory image was inspected, and both owned processes
 exit cleanly. This supersedes the pending default-key choice above. The
 physical inventory remains single-player only; custom bindings remain
 configurable in Controls.
+
+## Continued three-task integration
+
+The three implementation tracks remain active. Installed `554c8c44` at 13:48
+contains the following source changes; full supported game/test builds pass.
+Only the private safety branch was pushed.
+
+- Earth addressing now matches the spherical render projection. Geographic
+  free flight rebases its ENU frame at an altitude-dependent 32–400 km
+  deadband; finite mission entities remain local. Roads and buildings use
+  the same projection. CPU checks include 900 repeated rebases, dateline,
+  ECEF position/view/speed, stale revisions and surface alignment.
+- Optional pre-tiled HTTPS content cells can follow the resident camera
+  window with bounded background transfers and a separate generated cache.
+  No worldwide content server is supplied or contacted by default. Real
+  synthetic-loopback tests pass byte/JSON/redirect limits, repair,
+  cancellation, eviction and failure cooldown. Existing feature/building
+  geometry tests pass after the spherical consumer conversion.
+- The independent global/detail-normal preview adds 32 bytes per material
+  (public ABI24, internal 416-byte material), without new textures/samples.
+  The actual production normal helper passes a synthetic GPU readback test
+  covering independent detail strengths, ordered overlap and global rotation.
+  Fixed-camera material comparison is pending. Authored tangent and complete
+  lighting parity are not established.
+- ReShade supports nearest-resolved 4x source depth, session-only Graphics
+  preview selection and bounded real effect-GPU timestamp windows. Fifteen
+  offline checks pass, including the actual staged add-on's publication and
+  timing ABI. Actual 4x lifecycle/alignment and GPU cost tests are pending.
+
+The first installed live-selector test on `25a85692` correctly refused its
+settings because the gate incorrectly read WGPU's inherited legacy MSAA
+getter (zero). It now reads active target dimensions/MSAA via temporal info
+and records those settings in the receipt. That failed run is preserved at
+`build/reshade-depth/20261008-133235-SceneProbe/result.json`.
+
+The first actual Earth threshold test on `25a85692` preserved global view
+direction but failed its strict up-vector check (0.0053388). A later aiming
+update reset up to local world-up. `554c8c44` corrects that Earth-only path;
+the strict continuity test is unchanged and now starts above Luxembourg
+terrain. The failed receipt remains under `build/earth-geodesic-installed`.
+These failures are diagnosed, not represented as passing runtime evidence.
+
+The subsequent installed checks on `554c8c44` pass:
+
+- `build/earth-geodesic-installed/20261008-135053-85f917/result.json`:
+  actual SDL D crosses the near threshold and publishes fresh matching
+  ground; the old-frame query has no stale support. Near global direction
+  and up errors are below 4e-8. The orbital arm crosses from longitude
+  179.5 to -179.52473939 with direction/up errors about 1e-5, bounded source
+  cache and no orbital DEM publication. Its screenshot looks into space;
+  it is continuity evidence, not an improved globe-quality image.
+- `build/reshade-depth/20261008-134906-SceneProbe/result.json`: actual HDR,
+  native 1600x900, MSAA4 and availability-only startup are recorded. No
+  depth producer runs before selection. The first fresh witness and resized
+  generations 2/3 have 256 finite samples; fullscreen3441x1440 returns to
+  window1600x900. Off returns snapshot frame zero. Image inspection aligns
+  terrain, foliage, pole and weapon with the scene; sky remains white.
+- `build/reshade-depth/20261008-135220-SceneDHDebug/result.json`: 4x
+  reconstructed metric depth, exact selected technique, Off release,
+  compilation, paired captures and clean exit pass. Debug inspection aligns
+  silhouettes and separates out-of-range/sky in blue. This permits the
+  subsequent bounded GI/performance check, not final GI quality acceptance.
