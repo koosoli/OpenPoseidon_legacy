@@ -12,6 +12,7 @@
 
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/AI.hpp>
@@ -1709,6 +1710,16 @@ GameValue ObjSetPos(const GameState* state, GameValuePar oper1, GameValuePar ope
     if (obj1->GetType() == Primary || obj1->GetType() == Network)
     {
         return NOTHING;
+    }
+
+    if (EarthStreaming::Enabled())
+    {
+        const auto ground = EarthStreaming::Locations().Ground();
+        if (!ground || !ground->Contains(pos.X(), pos.Z(), std::max(2.0f, obj1->GetRadius())))
+        {
+            LOG_WARN(World, "setPos refused: Earth near ground not resident at [{},{}]", pos.X(), pos.Z());
+            return NOTHING;
+        }
     }
 
     // let vehicle adjust position

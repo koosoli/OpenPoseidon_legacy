@@ -483,6 +483,15 @@ void BeamPlayerToZeusCamera()
     }
 
     Vector3 position = s_zeusCamera->Position();
+    if (EarthStreaming::Enabled())
+    {
+        const auto ground = EarthStreaming::Locations().Ground();
+        if (!ground || !ground->Contains(position.X(), position.Z(), 2.0f))
+        {
+            s_zeusStatus = "Earth ground is not resident here yet. Wait for near elevation before beaming.";
+            return;
+        }
+    }
     position[1] = GLandscape->RoadSurfaceYAboveWater(position[0], position[2]);
     Vector3 direction = s_zeusCamera->Direction();
     direction[1] = 0.0f;
@@ -494,11 +503,13 @@ void BeamPlayerToZeusCamera()
     transform.SetPosition(position);
     transform.SetDirectionAndUp(direction, VUp);
     Vector3 normal;
-    if (EntityAI* entity = dyn_cast<EntityAI>(player))
-        AIUnit::FindFreePosition(position, normal, true, entity);
+    if (!EarthStreaming::Enabled())
+        if (EntityAI* entity = dyn_cast<EntityAI>(player))
+            AIUnit::FindFreePosition(position, normal, true, entity);
     transform.SetPosition(position);
     player->PlaceOnSurface(transform);
     player->SetTransform(transform);
+    if (EarthStreaming::Enabled()) player->SetSpeed(VZero);
 
     // The camera must be released before switching back to the player.  This
     // returns input and view control in the same operation, rather than
@@ -769,6 +780,12 @@ void MoveZeusSelectionAtPixel(float pixelX, float pixelY)
         const auto& record = s_zeusSelection[i];
         Matrix4 transform = record.object->Transform();
         Vector3 position = target + s_zeusMoveOffsets[i];
+        if (EarthStreaming::Enabled())
+        {
+            const auto ground = EarthStreaming::Locations().Ground();
+            if (!ground || !ground->Contains(position.X(), position.Z(), std::max(2.0f, record.object->GetRadius())))
+                continue;
+        }
         position[1] = GLandscape->RoadSurfaceYAboveWater(position[0], position[2]);
         transform.SetPosition(position);
         if (Person* person = dyn_cast<Person>(record.object.GetLink()))
@@ -776,7 +793,7 @@ void MoveZeusSelectionAtPixel(float pixelX, float pixelY)
             StabilizeZeusInfantry(person, transform.Direction());
             Vector3 normal;
             EntityAI* entity = dyn_cast<EntityAI>(record.object.GetLink());
-            if (entity && AIUnit::FindFreePosition(position, normal, true, entity))
+            if (!EarthStreaming::Enabled() && entity && AIUnit::FindFreePosition(position, normal, true, entity))
                 transform.SetPosition(position);
             person->PlaceOnSurface(transform);
             person->SetTransform(transform);
@@ -855,6 +872,12 @@ bool SpawnZeusVehicle(const char* className, Vector3Par position, float heading)
     Ref<Entity> vehicle = NewNonAIVehicle(className);
     if (!vehicle)
         return false;
+    if (EarthStreaming::Enabled())
+    {
+        const auto ground = EarthStreaming::Locations().Ground();
+        if (!ground || !ground->Contains(position.X(), position.Z(), std::max(2.0f, vehicle->GetRadius())))
+            return false;
+    }
 
     EntityAI* aiVehicle = dyn_cast<EntityAI>(vehicle.GetRef());
     Matrix4 transform;
@@ -894,6 +917,11 @@ bool SpawnZeusVehicle(const char* className, Vector3Par position, float heading)
 
 bool SpawnZeusUnit(const char* className, TargetSide side, Vector3Par position, float heading)
 {
+    if (EarthStreaming::Enabled())
+    {
+        const auto ground = EarthStreaming::Locations().Ground();
+        if (!ground || !ground->Contains(position.X(), position.Z(), 2.0f)) return false;
+    }
     AICenter* center = GWorld->GetCenter(side);
     if (!center)
         center = GWorld->CreateCenter(side);
@@ -925,7 +953,7 @@ bool SpawnZeusUnit(const char* className, TargetSide side, Vector3Par position, 
     // initializing the soldier, which prevents invalid move/action state.
     Vector3 normal;
     Vector3 safePosition = position;
-    if (AIUnit::FindFreePosition(safePosition, normal, true, vehicle))
+    if (!EarthStreaming::Enabled() && AIUnit::FindFreePosition(safePosition, normal, true, vehicle))
     {
         float dx, dz;
         safePosition[1] = GLandscape->RoadSurfaceYAboveWater(safePosition[0], safePosition[2], &dx, &dz);

@@ -6,6 +6,7 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/World/Terrain/SimulationResidencyState.hpp>
 #include <Poseidon/World/Scene/MapThings.hpp>
 #include <Poseidon/World/Scene/Thing.hpp>
@@ -1619,6 +1620,12 @@ float Landscape::CalculateBump(float xC, float zC, Texture* texture, float bumpy
 float Landscape::BumpySurfaceY(float xC, float zC, float& rdX, float& rdY, Texture*& texture, float bumpy,
                                float& bump) const
 {
+    if (EarthStreaming::Enabled())
+    {
+        bump = 0;
+        texture = nullptr;
+        return EarthStreaming::GroundHeight(xC, zC, &rdX, &rdY);
+    }
     // fine rectangles are not used - use rough instead
     // calculate surface level on given coordinates
     float xRel = xC * _invTerrainGrid;
@@ -1680,6 +1687,13 @@ float Landscape::BumpySurfaceY(float xC, float zC, float& rdX, float& rdY, Textu
 
 void Landscape::SurfacePlane(Plane& plane, float xC, float zC) const
 {
+    if (EarthStreaming::Enabled())
+    {
+        float dx, dz;
+        const float y = EarthStreaming::GroundHeight(xC, zC, &dx, &dz);
+        plane = Plane(Vector3(-dx, 1, -dz), Vector3(xC, y, zC));
+        return;
+    }
     // calculate surface level on given coordinates
     float xRel = xC * _invTerrainGrid;
     float zRel = zC * _invTerrainGrid;
@@ -1742,6 +1756,7 @@ void Landscape::SurfacePlane(Plane& plane, float xC, float zC) const
 
 float Landscape::SurfaceY(float x, float z) const
 {
+    if (EarthStreaming::Enabled()) return EarthStreaming::GroundHeight(x, z);
     // code equivalent to
     // return SurfaceY(x,z,nullptr,nullptr,nullptr);
     // as this case is quite common, it is optimized
@@ -1797,6 +1812,11 @@ float Landscape::SurfaceY(float x, float z) const
 
 float Landscape::SurfaceY(float x, float z, float* rdX, float* rdY, Texture** texture) const
 {
+    if (EarthStreaming::Enabled())
+    {
+        if (texture) *texture = nullptr;
+        return EarthStreaming::GroundHeight(x, z, rdX, rdY);
+    }
     // fine rectangles are not used - use rough instead
     // calculate surface level on given coordinates
     float xRel = x * _invTerrainGrid;
@@ -1869,6 +1889,7 @@ float Landscape::SurfaceY(float x, float z, float* rdX, float* rdY, Texture** te
 
 float Landscape::RoadSurfaceY(float xC, float zC, float* dX, float* dZ, Texture** texture) const
 {
+    if (EarthStreaming::Enabled()) return SurfaceY(xC, zC, dX, dZ, texture);
     Texture* surfTexture = nullptr;
     float sdX, sdZ;
     float landY = SurfaceY(xC, zC, &sdX, &sdZ, &surfTexture);
@@ -2031,6 +2052,11 @@ float Landscape::RoadSurfaceY(float xC, float zC, float* dX, float* dZ, Texture*
 
 float Landscape::RoadSurfaceY(Vector3Par pos, float* dX, float* dZ, Texture** texture, Object** obj) const
 {
+    if (EarthStreaming::Enabled())
+    {
+        if (obj) *obj = nullptr;
+        return SurfaceY(pos.X(), pos.Z(), dX, dZ, texture);
+    }
     Texture* surfTexture = nullptr;
     float sdX, sdZ;
     float landY = SurfaceY(pos.X(), pos.Z(), &sdX, &sdZ, &surfTexture);
@@ -2218,6 +2244,7 @@ float Landscape::RoadSurfaceY(Vector3Par pos, float* dX, float* dZ, Texture** te
 
 float Landscape::RoadSurfaceYAboveWater(Vector3Par pos, float* dX, float* dZ, Texture** texture) const
 {
+    if (EarthStreaming::Enabled()) return RoadSurfaceY(pos, dX, dZ, texture);
     float y = RoadSurfaceY(pos, dX, dZ, texture);
     float minY = GetSeaLevel();
     if (y < minY)
@@ -2237,6 +2264,7 @@ float Landscape::RoadSurfaceYAboveWater(Vector3Par pos, float* dX, float* dZ, Te
 
 float Landscape::SurfaceYAboveWater(float x, float z) const
 {
+    if (EarthStreaming::Enabled()) return SurfaceY(x, z);
     float y = SurfaceY(x, z, nullptr, nullptr, nullptr);
     float minY = GetSeaLevel();
     if (y < minY)
@@ -2248,6 +2276,7 @@ float Landscape::SurfaceYAboveWater(float x, float z) const
 
 float Landscape::SurfaceYAboveWater(float x, float z, float* rdX, float* rdZ, Texture** texture) const
 {
+    if (EarthStreaming::Enabled()) return SurfaceY(x, z, rdX, rdZ, texture);
     float y = SurfaceY(x, z, rdX, rdZ, texture);
     float minY = GetSeaLevel();
     if (y < minY)
@@ -2267,6 +2296,7 @@ float Landscape::SurfaceYAboveWater(float x, float z, float* rdX, float* rdZ, Te
 
 float Landscape::RoadSurfaceYAboveWater(float xC, float zC, float* dX, float* dZ, Texture** texture) const
 {
+    if (EarthStreaming::Enabled()) return RoadSurfaceY(xC, zC, dX, dZ, texture);
     float y = RoadSurfaceY(xC, zC, dX, dZ, texture);
     float minY = GetSeaLevel();
     if (y < minY)

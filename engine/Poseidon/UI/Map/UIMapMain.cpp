@@ -8,6 +8,7 @@
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <SDL3/SDL_keycode.h>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/World/Terrain/Roads.hpp>
 #include <Poseidon/World/Detection/Detector.hpp>
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
@@ -2123,6 +2124,12 @@ void CStaticMapMain::OnLButtonClick(float x, float y)
                 if (veh)
                 {
                     Vector3 pos = ScreenToWorld(DrawCoord(x, y));
+                    if (EarthStreaming::Enabled())
+                    {
+                        const auto ground = EarthStreaming::Locations().Ground();
+                        if (!ground || !ground->Contains(pos.X(), pos.Z(), std::max(2.0f, veh->GetRadius())))
+                            return;
+                    }
                     if (GLandscape)
                         pos[1] = GLandscape->SurfaceYAboveWater(pos[0], pos[2]) + 0.5f;
                     Matrix4 trans = veh->Transform();

@@ -8,6 +8,7 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/World/Terrain/WaterSurfaceQuery.hpp>
 #include <Poseidon/World/Terrain/WaterBodies.hpp>
 #include <stdlib.h>
@@ -558,6 +559,39 @@ float Landscape::UnderRoadSurface(const Object* obj, Vector3Par modelPos, float 
 void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, const Frame& withPos, float above,
                                 float bumpy, bool enableLandcontact, bool soldier) const
 {
+    if (EarthStreaming::Enabled())
+    {
+        // One immutable resident patch for all contact vertices. Legacy map
+        // roads, terrain holes and water are not part of the Earth near mesh.
+        const auto ground = EarthStreaming::Locations().Ground();
+        if (!ground || !with || !with->GetShape()) return;
+        int level = with->GetShape()->FindLandContactLevel();
+        if (level < 0 || (!soldier && (!enableLandcontact || withPos.DirectionUp().Y() < 0.7f)))
+            level = with->GetShape()->FindGeometryLevel();
+        if (level < 0) return;
+        Shape* shape = with->GetShape()->LevelOpaque(level);
+        if (!shape) return;
+        with->Animate(level);
+        for (int j = 0; j < shape->NPos(); ++j)
+        {
+            const Point3 pos(VFastTransform, withPos.Transform(), shape->Pos(j));
+            const auto sample = ground->Sample(pos.X(), pos.Z());
+            if (!sample || sample->Penetration(pos.Y(), above) <= 0) continue;
+            UndergroundInfo& info = retVal.Append();
+            info.texture = nullptr;
+            info.obj = nullptr;
+            info.under = sample->Penetration(pos.Y(), above);
+            info.underFlat = info.under;
+            info.pos = pos;
+            info.dX = sample->dX;
+            info.dZ = sample->dZ;
+            info.vertex = j;
+            info.level = level;
+            info.type = GroundSolid;
+        }
+        with->Deanimate(level);
+        return;
+    }
     Vector3Val wPos = withPos.Position();
 
     // for normal orientation use LandContact LOD level
@@ -883,6 +917,11 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
 void Landscape::GroundCollisionPlane(GroundCollisionBuffer& retVal, Object* with, const Frame& withPos, float above,
                                      float bumpy, bool enableLandcontact)
 {
+    if (EarthStreaming::Enabled())
+    {
+        GroundCollision(retVal, with, withPos, above, 0, enableLandcontact);
+        return;
+    }
     // for normal orientation use LandContact LOD level
     int level = with->GetShape()->FindLandContactLevel();
     if (level < 0 || withPos.DirectionUp().Y() < 0.7 || !enableLandcontact)

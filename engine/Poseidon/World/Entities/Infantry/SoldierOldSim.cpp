@@ -8,6 +8,7 @@
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
 #include <Poseidon/World/Terrain/WaterSurfaceQuery.hpp>
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/Network/NetworkCustomAssets.hpp>
 #include <limits.h>
 #include <stdio.h>
@@ -348,6 +349,32 @@ void Man::OnAddImpulse(Vector3Par force, Vector3Par torque)
 
 void Man::Simulate(float deltaT, SimulationImportance prec)
 {
+    if (EarthStreaming::Enabled() && !_isDead && IsInLandscape() && GWorld && GWorld->GetRealPlayer() == this)
+    {
+        const auto ground = EarthStreaming::QueryGround(Position().X(), Position().Z());
+        if (!ground)
+        {
+            // Streaming/relocation has no support yet. Preserve the player's
+            // root instead of falling through an unqueried overview mesh.
+            _speed = VZero;
+            base::Simulate(deltaT, prec);
+            return;
+        }
+        if (Position().Y() < ground->height)
+        {
+            // Resident elevation can first arrive above the fixture's initial
+            // spawn, or replace an older/coarser patch. Recover once, then use
+            // ordinary animated-foot contacts for standing/walking/crawling.
+            Matrix4 transform = Transform();
+            Vector3 position = Position();
+            position[1] = ground->height;
+            transform.SetPosition(position);
+            Move(transform);
+            _speed = VZero;
+            _landContact = true;
+            _freeFallUntil = Glob.time;
+        }
+    }
     if (!_isDead && !IsDammageDestroyed() && IsInLandscape()) PrepareAutomaticInfantryTerrain();
     if (!_isDead && !IsDammageDestroyed() && IsInLandscape()) _automaticDeathEligible = true;
     if (_automaticCorpsePose && _automaticCorpsePose->pending)
@@ -392,7 +419,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
         return;
     }
     // Sinkhole W3: in water too deep to stand the man swims (SoldierOldSwim.cpp)
-    if (UpdateSwimming())
+    if (!EarthStreaming::Enabled() && UpdateSwimming())
     {
         SimSwimMovement(deltaT, prec);
         base::Simulate(deltaT, prec);
@@ -449,7 +476,7 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             pForce[0] = 0;
             pForce[1] = -G_CONST * GetMass();
             pForce[2] = 0;
-            if (playerControlled && !IsDead() && _waterBuoyancyContact)
+            if (!EarthStreaming::Enabled() && playerControlled && !IsDead() && _waterBuoyancyContact)
             {
                 const float waveTime = Glob.time.toFloat();
                 const float seaLevel = GLOB_LAND->GetSeaLevel();
@@ -590,10 +617,26 @@ void Man::Simulate(float deltaT, SimulationImportance prec)
             moveTrans.SetPosition(position);
         }
 
+        if (EarthStreaming::Enabled())
+        {
+            // Do not walk off the resident near mesh into unqueried horizon
+            // terrain. Keep a small margin for the animated land-contact feet.
+            const auto ground = EarthStreaming::Locations().Ground();
+            const auto desired = moveTrans.Position();
+            if (!ground || !ground->Contains(desired.X(), desired.Z(), 2.0f))
+            {
+                Vector3 held = desired;
+                held[0] = Position().X();
+                held[2] = Position().Z();
+                moveTrans.SetPosition(held);
+                _speed[0] = _speed[2] = 0;
+            }
+        }
+
         // Malprave terrainHole5: a man down in a terrain hole (a cellar) cannot leave it sideways under the ground. AI men
         // and bodies do not collide with walls, so a dying slide or an explosion's push carried them out into the earth,
         // where the terrain then lifted them to the surface. Keep the old X/Z (the vertical move still applies).
-        if (GLOB_LAND->LeavesTerrainHoleUnderground(Position(), moveTrans.Position()))
+        if (!EarthStreaming::Enabled() && GLOB_LAND->LeavesTerrainHoleUnderground(Position(), moveTrans.Position()))
         {
             Vector3 held = moveTrans.Position();
             held[0] = Position().X();
