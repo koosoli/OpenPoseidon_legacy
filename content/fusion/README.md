@@ -63,6 +63,13 @@ walk-through versions): DefaultWorld's, Malden's and Nogova's (11 rules). With D
 Nogova's forests -- other models -- stayed solid to infantry and AI. And the map grid gets a third label character
 (the islands' two run out at 100 squares of 128 m; Fusion is 400 across).
 
+Ambient sounds are per island: `class SoundRegions` gives each island's tile its source world's `EnvSounds`
+(engine: `Poseidon/World/EnvSoundRegions.hpp`). Each island plays its own loops; over the sea between two they
+crossfade within 1 km of the halfway line. In the stock data only Malden has its own set (a quieter sea,
+crickets in the trees, lighter wind and rain). Everon, Kolgujev, Nogova and Desert Island all use `CfgEnvSounds`.
+A mod that gives any of their world classes its own `EnvSounds` is picked up on the next build. Which loop plays
+where (sea, trees, meadows, hills) comes from each island's own sound map, as before.
+
 This is an experimental composite world. Loading costs exceed one original map.
 Existing campaigns do not automatically migrate: absolute positions and object IDs
 would need per-mission work.

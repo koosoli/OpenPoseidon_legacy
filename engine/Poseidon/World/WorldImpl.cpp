@@ -25,6 +25,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Dev/Diag/DiagPause.hpp>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp> // IndoorRoomAt/IndoorClearanceAt: the SERoom producer
+#include <Poseidon/World/EnvSoundRegions.hpp>           // OFP Fusion: ambient loops per island
 #include <algorithm>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
@@ -1471,17 +1472,58 @@ void World::PerformSound(Entity* inside, float deltaT)
             }
         }
     }
-    const char* ss[5];
     bool night = _scene.MainLight()->NightEffect() > 0.5;
+    // OFP Fusion: on a world of several islands each plays its own loops (EnvSoundRegions.hpp), two crossfaded over
+    // the water between them; one file from two slots or two regions is one sound at the summed volume. Slot 5 (a mission's
+    // override) stays the world's.
+    const EnvSoundSet* regionSets[2];
+    float regionWeights[2];
+    const int regions = EnvSoundRegionsAt(camPos.X(), camPos.Z(), regionSets, regionWeights);
+    const char* envNames[2 * 5];
+    float envVols[2 * 5];
+    int envCount = 0;
+    auto addEnv = [&](const char* name, float vol)
+    {
+        if (!name || !*name || vol <= 0)
+        {
+            return;
+        }
+        for (int j = 0; j < envCount; j++)
+        {
+            if (!stricmp(envNames[j], name))
+            {
+                envVols[j] += vol;
+                return;
+            }
+        }
+        envNames[envCount] = name;
+        envVols[envCount++] = vol;
+    };
     for (i = 0; i < 5; i++)
     {
-        ss[i] = MapWaveSound(night, s[i], v[i]);
+        if (regions == 0)
+        {
+            // a single-island world: as it always was
+            const char* name = MapWaveSound(night, s[i], v[i]);
+            GSoundScene->SetEnvSound(name, v[i]);
+            continue;
+        }
+        if (s[i] < 0 || s[i] >= EnvSoundSet::Count)
+        {
+            const char* name = MapWaveSound(night, s[i], v[i]);
+            addEnv(name, v[i]);
+            continue;
+        }
+        for (int r = 0; r < regions; r++)
+        {
+            const SoundPars& pars = night ? regionSets[r]->night[s[i]] : regionSets[r]->day[s[i]];
+            addEnv(pars.name, v[i] * pars.vol * regionWeights[r]);
+        }
     }
-    GSoundScene->SetEnvSound(ss[0], v[0]);
-    GSoundScene->SetEnvSound(ss[1], v[1]);
-    GSoundScene->SetEnvSound(ss[2], v[2]);
-    GSoundScene->SetEnvSound(ss[3], v[3]);
-    GSoundScene->SetEnvSound(ss[4], v[4]);
+    for (i = 0; i < envCount; i++)
+    {
+        GSoundScene->SetEnvSound(envNames[i], envVols[i]);
+    }
     GSoundScene->AdvanceEnvSounds();
 #endif
 }

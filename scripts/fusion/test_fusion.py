@@ -1,7 +1,8 @@
 import struct
 import unittest
 import math
-from build_fusion import compressed, translate_objects, fixed, ISLANDS, world_data, array_entry
+from build_fusion import compressed, translate_objects, fixed, ISLANDS, world_data, array_entry, \
+    env_sounds, sound_regions, CELL
 
 
 class FusionTests(unittest.TestCase):
@@ -34,6 +35,19 @@ class FusionTests(unittest.TestCase):
         self.assertEqual(names[0]['name'], 'Regina')
         self.assertEqual(names[0]['position'], [8197, 4347, 50])
         self.assertEqual(world_data([cfg], 'cain', 0, 0), (None, []))
+
+    def test_each_island_keeps_its_ambient_sounds(self):
+        cfg = """class CfgWorlds { class DefaultWorld { class EnvSounds: CfgEnvSounds {}; };
+            class Eden: DefaultWorld { class Sounds {}; };
+            class Abel: DefaultWorld { class EnvSounds: CfgEnvSounds {
+                class Sea { sound[]={"Environmental\\wave_break",0.0001,1}; }; }; class Names {}; }; };"""
+        self.assertIn('wave_break', env_sounds([cfg], 'abel'))
+        self.assertEqual(env_sounds([cfg], 'eden'), '')
+        regions = sound_regions([cfg])
+        self.assertEqual(regions.count('class EnvSounds: CfgEnvSounds'), len(ISLANDS))
+        ox, oz = ISLANDS[1][2] * CELL, ISLANDS[1][3] * CELL
+        self.assertIn('class Malden {area[]={%d,%d,%d,%d}; class EnvSounds: CfgEnvSounds {class Sea'
+                      % (ox, oz, ox + 256 * CELL, oz + 256 * CELL), regions)
 
     def test_placement_preserves_rotation_height_name_and_unique_id(self):
         matrix = (0.,0.,-1., 0.,1.,0., 1.,0.,0., 100.,23.,200.)

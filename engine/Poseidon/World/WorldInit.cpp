@@ -17,6 +17,7 @@
 #include <Poseidon/UI/Settings/AspectRatio.hpp>
 #include <Poseidon/Graphics/Cursor/GameCursorOverlay.hpp>
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/World/EnvSoundRegions.hpp> // OFP Fusion: ambient loops per island
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
@@ -1068,6 +1069,7 @@ void World::InitLandscape(Landscape* landscape)
 
         tStep = Poseidon::Foundation::GlobalTickCount();
         InitEnvSounds(world >> "EnvSounds");
+        InitEnvSoundRegions(world); // OFP Fusion: each island its own loops
         InsertSeaGulls();
         LOG_INFO(Core, "InitLandscape phase: InitEnvSounds+SeaGulls {} ms",
                  Poseidon::Foundation::GlobalTickCount() - tStep);

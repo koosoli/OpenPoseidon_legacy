@@ -2,8 +2,8 @@
 
 Inputs are RVW4 exports from PoseidonTools terrain export-rvw4. No rescaling or
 rotation: translations preserve road pieces, forests and authored building poses.
-With --config (the debinarised BIN config and Noe's), every source world's airport
-and map names come along too, moved with their island.
+With --config (the debinarised BIN config and Noe's), every source world's airport,
+map names and ambient sounds come along too, moved with their island.
 """
 import argparse
 from array import array
@@ -211,6 +211,28 @@ def replace_objects(config_texts):
     return rules
 
 
+def env_sounds(config_texts, key):
+    """A source world's own EnvSounds entries, as the body of a `class EnvSounds: CfgEnvSounds` (Malden overrides
+    Sea, Trees, Meadows, Hills and Rain; the others keep CfgEnvSounds'). None without its world class."""
+    for text in config_texts:
+        worlds = class_block(text, 'CfgWorlds')
+        body = class_block(worlds, WORLD_CLASS[key]) if worlds else None
+        if body is None:
+            continue
+        block = class_block(body, 'EnvSounds')
+        return ' '.join(block.split()) if block else ''
+    return None
+
+
+def sound_regions(config_texts):
+    """One SoundRegions class per island: its tile and its world's EnvSounds (the engine's EnvSoundRegions.hpp).
+    Fusion's own EnvSounds are Everon's, everywhere."""
+    return ''.join('class %s {area[]={%d,%d,%d,%d}; class EnvSounds: CfgEnvSounds {%s};};'
+                   % (label.replace(' ', ''), ox * CELL, oz * CELL, (ox + 256) * CELL, (oz + 256) * CELL,
+                      env_sounds(config_texts, key) or '')
+                   for key, label, ox, oz in ISLANDS)
+
+
 def num(v):
     return ('%.3f' % v).rstrip('0').rstrip('.')
 
@@ -319,6 +341,10 @@ def build(source, output, config_texts=()):
     replace = replace_objects(config_texts)
     manifest['replace_objects'] = len(replace)
     replace_cfg = (' class ReplaceObjects {%s};\n' % ''.join(replace)) if replace else ''
+    # each island its own ambient loops, crossfaded over the water between them
+    regions = sound_regions(config_texts)
+    manifest['sound_regions'] = {label: ('own' if env_sounds(config_texts, key) else 'CfgEnvSounds')
+                                 for key, label, _, _ in ISLANDS}
     config = ('class CfgPatches {class FusionOFP {units[]={}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={"Noe"};};};\n'
               'class CfgWorlds {class Eden; class FusionOFP: Eden {\n'
               ' access=2; description="OFP Fusion - Five Islands"; worldName="\\fusion_ofp\\FusionOFP.wrp";\n'
@@ -333,9 +359,10 @@ def build(source, output, config_texts=()):
               ' class Zoom2 {zoomMax=1e30; format="XY"; formatX="Aa"; formatY="00"; stepX=1280; stepY=1280;};};\n'
               ' class SecondaryAirports {%s};\n'
               '%s'
+              ' class SoundRegions {%s};\n'
               ' class Names {%s};\n'
               '};}; class CfgWorldList {class FusionOFP {};};\n'
-              % ((ISLANDS[1][2] + 128) * CELL, (ISLANDS[1][3] + 128) * CELL, ils, secondary, replace_cfg,
+              % ((ISLANDS[1][2] + 128) * CELL, (ISLANDS[1][3] + 128) * CELL, ils, secondary, replace_cfg, regions,
                  labels + ''.join(places)))
     output.mkdir(parents=True, exist_ok=True)
     (output/'fusion.wrp').write_bytes(data)
