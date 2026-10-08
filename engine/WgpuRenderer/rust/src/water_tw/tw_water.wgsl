@@ -81,14 +81,39 @@ fn earthWaterDrop(xz: vec2<f32>) -> f32 {
     return r2 / (radius + sqrt(max(radius * radius - r2, 0.0)));
 }
 fn waterLevelAt(xz: vec2<f32>) -> f32 { return tw.sea.x - earthWaterDrop(xz); }
+fn earthMaterialCorner(ix: i32, iz: i32) -> f32 {
+    let corner = clamp(vec2<i32>(ix, iz), vec2<i32>(0), vec2<i32>(i32(cf.hm_width) - 1, i32(cf.hm_height) - 1));
+    let xz = cf.origin + vec2<f32>(corner) * cf.terrain_grid;
+    let h = hm_load(corner.x, corner.y);
+    // Match EarthRenderBathymetry.hpp's render-only ocean vertices. The
+    // original heightmap/resident collision ground retains the source height.
+    // [-5,0.5]m is a height heuristic, not a sea mask: low dry land can match.
+    let datum = -earthWaterDrop(xz);
+    let elevation = h - datum;
+    return select(h, datum - 200.0, elevation >= -5.0 && elevation <= 0.5);
+}
 fn materialTerrainHeightAt(xz: vec2<f32>) -> f32 {
-    let h = terrainHeightAt(xz);
-    if (earthWater()) {
-        // Terrarium ocean tiles are elevation zero, not seabed. Supply a visual
-        // deep floor there; retain curved land. No gameplay depth changes.
-        return select(h, waterLevelAt(xz) - 200.0, h + earthWaterDrop(xz) <= 0.5);
+    if (!earthWater() || cf.enabled <= 0.5 || cf.hm_width < 2u || cf.hm_height < 2u) {
+        return terrainHeightAt(xz);
     }
-    return h;
+    // Lower corners before interpolation, exactly as the opaque near mesh.
+    // Classifying an interpolated height instead leaves a depth discontinuity
+    // across mixed land/ocean triangles and makes offshore pixels shallow surf.
+    let t = (xz - cf.origin) / max(cf.terrain_grid, 1e-4);
+    let base = floor(t);
+    let f = t - base;
+    let ix = i32(base.x); let iz = i32(base.y);
+    let a = earthMaterialCorner(ix, iz); let b = earthMaterialCorner(ix + 1, iz);
+    let c = earthMaterialCorner(ix, iz + 1); let d = earthMaterialCorner(ix + 1, iz + 1);
+    let lower = a + (c - a) * f.y + (b - a) * f.x;
+    let upper = c + (b - d) - (c - d) * f.x - (b - d) * f.y;
+    let h = select(upper, lower, f.x + f.y <= 1.0);
+    // Preserve the existing finite off-map transition, with Earth's curved
+    // datum. Clamped dry edge texels must not run out to the water horizon.
+    let size = vec2<f32>(f32(cf.hm_width - 1u), f32(cf.hm_height - 1u)) * cf.terrain_grid;
+    let r = xz - cf.origin;
+    let outside = length(max(max(-r, r - size), vec2<f32>(0.0)));
+    return mix(h, min(h, waterLevelAt(xz) - 200.0), smoothstep(0.0, 400.0, outside));
 }
 
 // ------------------------------------------------------------------ CDLOD.js
@@ -638,13 +663,13 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     let screenUV = in.clip.xy / vec2<f32>(textureDimensions(waterSceneDepth));
     let posV = twView(vec4<f32>(rel, 1.0));
     let lagXZ = in.lagXZ;
-    let vDepth = in.seaDepth;
+    let groundH = materialTerrainHeightAt(pos.xz);
+    let vDepth = select(in.seaDepth, waterLevelAt(pos.xz) - groundH, earthWater());
     let vHeight = in.waveH;
     // derivatives in uniform control flow
     let footprint = max(length(fwidth(lagXZ)), 1e-4);
     let dwx = dpdx(rel);
     let dwy = dpdy(rel);
-    let groundH = materialTerrainHeightAt(pos.xz);
     var thickness = pos.y - groundH;
 
     let dist = length(rel);

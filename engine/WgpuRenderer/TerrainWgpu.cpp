@@ -14,6 +14,7 @@
 
 #include "CdlodDriver.hpp"
 #include "RainWaterPublication.hpp"
+#include "EarthRenderBathymetry.hpp"
 #include "SandUploadReceipt.hpp"
 #include "EngineWgpu.hpp"
 #include "TextureWgpu.hpp"
@@ -3257,8 +3258,11 @@ void TerrainWgpu::UploadEarthGlobe(double latitude,double longitude)
         {
             const auto n=Earth::GlobeNormal(latitude,longitude,90.0-y*180.0/rows,x*360.0/cols-180.0);
             auto& v=vertices[y*(cols+1)+x];
-            v.pos={float(Earth::Anchor+Earth::Radius*n.x),float(Earth::Radius*(n.y-1.0)),
-                   float(Earth::Anchor+Earth::Radius*n.z)};
+            // The overview is also an opaque sea background. Keep it below
+            // wave troughs even when an exact globe vertex meets the origin.
+            constexpr double overviewRadius=Earth::Radius-Earth::RenderOceanDepth;
+            v.pos={float(Earth::Anchor+overviewRadius*n.x),float(overviewRadius*n.y-Earth::Radius),
+                   float(Earth::Anchor+overviewRadius*n.z)};
             v.normal={float(n.x),float(n.y),float(n.z)};
             v.uv={float(x)/cols,float(y)/rows};
             if (x<cols && y<rows)
@@ -3301,6 +3305,7 @@ static WgrMeshVertex EarthNearPoint(const EarthTerrainStream::Patch& p,int x,int
     constexpr int size=Earth::GridSamples;
     WgrMeshVertex v{};
     v.pos = {p.x+x*p.gridMetres,p.heights[z*size+x],p.z+z*p.gridMetres};
+    v.pos.y = Earth::RenderTerrainHeight(v.pos.x,v.pos.z,v.pos.y);
     const int loX=std::max(0,x-1), hiX=std::min(size-1,x+1);
     const int loZ=std::max(0,z-1), hiZ=std::min(size-1,z+1);
     const float dx=(p.heights[z*size+hiX]-p.heights[z*size+loX])/((hiX-loX)*p.gridMetres);
@@ -3335,6 +3340,7 @@ void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p,bool loc
             auto& v = vertices[z*n+x];
             v.pos = {cx + Earth::HorizonOffset(x,p.horizonRadius,halfWindow),p.horizonHeights[z*n+x],
                      cz + Earth::HorizonOffset(z,p.horizonRadius,halfWindow)};
+            v.pos.y = Earth::RenderTerrainHeight(v.pos.x,v.pos.z,v.pos.y);
             const int loX = std::max(0,x-1), hiX = std::min(n-1,x+1);
             const int loZ = std::max(0,z-1), hiZ = std::min(n-1,z+1);
             const float dx = (p.horizonHeights[z*n+hiX] - p.horizonHeights[z*n+loX]) /

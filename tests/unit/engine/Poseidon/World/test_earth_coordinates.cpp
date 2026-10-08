@@ -1,4 +1,5 @@
 #include "WgpuRenderer/EarthCoordinates.hpp"
+#include "WgpuRenderer/EarthRenderBathymetry.hpp"
 #include "Poseidon/World/Terrain/EarthStreamingMode.hpp"
 #include <cassert>
 #include <iostream>
@@ -32,6 +33,38 @@ int main()
     assert(std::abs(CurvatureDrop(Anchor+100000,Anchor)-784.0)<1.0);
     assert(CurvatureDrop(Anchor+100,Anchor)>0 && CurvatureDrop(Anchor+100,Anchor)<.001);
     assert(std::abs(CurvatureDrop(Anchor+100000,Anchor)-CurvatureDrop(Anchor,Anchor-100000))<1e-9);
+    for (float x : {Anchor,8000.0f,25000.0f})
+    {
+        const float datum=-float(CurvatureDrop(x,4800));
+        // Every ordinary wave trough now lies above opaque ocean background.
+        const float floor=RenderTerrainHeight(x,4800,datum);
+        assert(std::abs(floor-(datum-200))<.001f);
+        for (float wave : {-4.0f,-1.0f,0.0f,4.0f}) assert(datum+wave>floor);
+        for (float elevation : {1.0f,50.0f,-20.0f,-400.0f})
+            assert(RenderTerrainHeight(x,4800,datum+elevation)==datum+elevation);
+    }
+    // Both triangles meet at the same continuous render-only shoreline floor.
+    // Original source-backed gameplay support remains untouched, including
+    // the near-zero source heights which cannot establish physical bathymetry.
+    const std::vector<float> source={0,0,0,10};
+    Poseidon::EarthStreaming::GroundPatch actual{Anchor,Anchor,25,2,1,1,source};
+    auto visual=actual;
+    for(int z=0;z<2;++z)for(int x=0;x<2;++x)
+        visual.heights[z*2+x]=RenderTerrainHeight(Anchor+x*25,Anchor+z*25,source[z*2+x]);
+    assert(actual.Sample(Anchor+5,Anchor+5)->height==0);
+    assert(visual.Sample(Anchor+5,Anchor+5)->height<-199);
+    assert(actual.Sample(Anchor+15,Anchor+15)->height>1.9f);
+    assert(visual.Sample(Anchor+15,Anchor+15)->height<-157);
+    assert(std::abs(visual.Sample(Anchor+12.5f-.001f,Anchor+12.5f)->height-
+                    visual.Sample(Anchor+12.5f+.001f,Anchor+12.5f)->height)<.05f);
+    assert(actual.heights==source);
+    // The overview's real equator/prime-meridian grid vertex is exactly at the
+    // tangent origin. Leaving it at 0 would still depth-clip a -4 m water trough
+    // even after lowering the near/far zero-height meshes.
+    const auto overviewUp=GlobeNormal(0,0,0,0);
+    const double originalOverview=Radius*(overviewUp.y-1);
+    const double submergedOverview=(Radius-RenderOceanDepth)*overviewUp.y-Radius;
+    assert(originalOverview==0 && -4<originalOverview && -4>submergedOverview);
     assert(HorizonRadius(NAN)==64000 && HorizonRadius(-100)==64000);
     assert(HorizonRadius(4500)>HorizonRadius(1000));
     assert(HorizonRadius(250000)==2048000 && HorizonRadius(1e20f)==2048000);
@@ -177,5 +210,5 @@ int main()
     rejected=false;
     try { LocationState invalid({90,0,4500}); } catch(const std::invalid_argument&) { rejected=true; }
     assert(rejected);
-    std::cout<<"Earth coordinates: origin, orientation, seams, elevation, polar guards, curved horizon, adaptive detail/hysteresis, live relocation revisions PASS\n";
+    std::cout<<"Earth coordinates: origin, orientation, seams, elevation, polar guards, curved horizon, render-only ocean proxy/triangles, adaptive detail/hysteresis, live relocation revisions PASS\n";
 }
