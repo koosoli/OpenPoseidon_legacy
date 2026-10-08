@@ -63,6 +63,12 @@ class Contract(unittest.TestCase):
         p.view = 14
         p.projection[0] = 0
         self.assertEqual(self.publish(C.byref(p), 1208, 1), 0)
+        p.projection[0] = 1
+        p.flags = 5  # Current capture, original source 4x; published image is 1x.
+        self.assertEqual(self.publish(C.byref(p), 1208, 1), 1)
+        p.frame = 2
+        p.flags = 9  # Unknown source-format bit must remain rejected.
+        self.assertEqual(self.publish(C.byref(p), 1208, 1), 0)
 
     def test_publication_is_not_binding_and_rejects_stale_or_invalid_witness(self):
         p = self.publication()

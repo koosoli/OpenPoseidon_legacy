@@ -6708,6 +6708,14 @@ impl Gfx3d {
         self.water_depth_view.as_ref()
     }
 
+    // Optional post-processing snapshot: nearest covered sample, refreshed at
+    // the caller's world/UI boundary rather than relying on an earlier Hi-Z pass.
+    // Both the live 1x view and MSAA resolve are single-sample depth textures.
+    pub fn scene_depth_snapshot(&self, encoder: &mut wgpu::CommandEncoder) -> Option<&wgpu::TextureView> {
+        self.resolve_depth_sample(encoder);
+        self.depth_sample_view.as_ref()
+    }
+
     // REN-TEMP-001M: the far-resolve's TEXTURE, for native (NGX) interop. None at 1x —
     // there the "resolved" view is the live depth aspect and DLSS gets its image from
     // the depth target instead (not wired yet; MSAA is the supported first path).

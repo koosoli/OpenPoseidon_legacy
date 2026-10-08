@@ -527,3 +527,29 @@ must rerun `SceneDHDebug` with that stage, retain the strict error gate, inspect
 the aligned depth result, then run `SceneDH` only after the debug gate succeeds.
 The corrected shader's ReShade compilation and GI beauty/performance are still
 pending that runtime check; prior visual depth evidence does not waive X3020.
+
+## Optional 4x MSAA source support (runtime proof pending)
+
+The parent confirmed corrected `SceneDHDebug` and `SceneDH` on installed
+`905ba2dc` at 11:50/11:53, with visible depth effects. Distance lifting/paling
+remains a quality concern; this is not final beauty or cost acceptance. A newer
+installed `25abb7dc` SceneProbe at 12:23 again confirmed the bound/aligned depth
+fixture (256 finite, 227 nonzero).
+
+The minimal 4x extension reuses the existing nearest-covered-sample depth
+resolve, explicitly refreshed at the world/UI snapshot boundary. That resolve
+already outputs a single-sample Depth32Float texture compatible with the
+original snapshot shader. It does not use the water farthest-sample resolve,
+which can remove partial-coverage foliage silhouettes. No new world rendering,
+MSAA geometry or material pipeline is introduced. The published R32Float image
+remains single-sample; publication flag 4 records that the source was resolved
+4x MSAA. Changing between 1x and 4x invalidates the resource generation and its
+numeric witness. Other source sample counts and scaling remain unsupported.
+
+The resolve runs only inside the opt-in snapshot block, avoiding work on normal
+launches. This source slice does not silently change user graphics settings.
+The installed helper permits explicit `-MsaaSamples 4` and requires the reported
+source count to match the fixture. CPU checks validate the support/rejection
+and contract flags. Actual 4x edge alignment and numeric evidence remain for
+the parent to capture with `SceneProbe -MsaaSamples 4`, then DH debug only after
+acceptance. This is separate from the forthcoming live UI selection/gating work.

@@ -23,7 +23,8 @@ struct OpReShadeSceneDepthStateV1
     std::uint64_t boundFrame, boundGeneration;
     std::uint32_t status, reserved;
 };
-// publication flags: 1 = captured this frame, 2 = completed finite/nonempty grid.
+// publication flags: 1 = captured this frame, 2 = completed finite/nonempty grid,
+// 4 = source was 4x MSAA (nearest-covered-sample resolve); published image is 1x.
 // status: 0=no publication, 1=waiting numeric proof, 2=bound, 3=device/queue mismatch,
 // 4=unsupported dimensions/samples, 5=invalid publication.
 static_assert(sizeof(OpReShadeSceneDepthV1) == 1208);

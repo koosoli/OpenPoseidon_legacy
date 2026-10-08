@@ -202,7 +202,7 @@ extern "C" __declspec(dllexport) unsigned OpReShadePublishSceneDepthV1(
         return 0;
     std::lock_guard lock(depthMutex);
     const auto& p = *publication;
-    if ((p.flags & ~3u) || ((p.flags & 1u) && (!p.generation || !p.frame || !p.device || !p.queue || !p.image || !p.view ||
+    if ((p.flags & ~7u) || ((p.flags & 1u) && (!p.generation || !p.frame || !p.device || !p.queue || !p.image || !p.view ||
         !p.width || !p.height || p.width > 8192 || p.height > 8192 || p.samples != 1 ||
         p.gridWidth != 16 || p.gridHeight != 16 || !std::isfinite(p.nearPlane) || p.nearPlane <= 0 ||
         p.generation < depthState.publication.generation ||

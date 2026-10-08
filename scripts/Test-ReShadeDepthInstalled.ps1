@@ -50,7 +50,7 @@ if(!$probeMode){Require ($provenance.dh_license-ceq'GPL-2.0 (upstream LICENSE)')
 $preset=Get-Content -LiteralPath (Join-Path $source ('Presets/'+$presetName)) -Raw
 Require ([regex]::IsMatch($preset,'(?m)^Techniques='+[regex]::Escape($technique)+'\r?$')) 'Preset must select exactly the requested technique'
 if($sceneMode){
- Require ($MsaaSamples-eq1) 'First engine scene-depth handoff supports exactly one sample'
+ Require ($MsaaSamples-in@(1,4)) 'Scene-depth handoff supports one sample or nearest-resolved 4x MSAA'
  if($Mode-eq'SceneProbe'){Require ($preset-match'(?m)^PreprocessorDefinitions=OPENPOSEIDON_ENGINE_DEPTH=1\r?$') 'SceneProbe must select the independent engine semantic'}
 }
 if($sceneDhMode){
@@ -218,6 +218,7 @@ try{
    Start-Sleep -Milliseconds 250;$receipt.on=Send @{cmd='optional_reshade';action='state'}
   }
   $receipt.sceneDepth=$receipt.on.sceneDepth
+  Require ($receipt.sceneDepth.sourceSamples-eq$MsaaSamples) 'Snapshot source MSAA count differs from requested fixture'
   Require ($receipt.sceneDepth.finiteSamples-eq256-and$receipt.sceneDepth.nonzeroSamples-gt0-and
       $receipt.sceneDepth.maximum-gt$receipt.sceneDepth.minimum-and$receipt.sceneDepth.nearPlane-gt0) 'Scene-depth numeric witness invalid'
  }

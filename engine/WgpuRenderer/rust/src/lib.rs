@@ -6377,9 +6377,9 @@ impl Renderer {
 
             // Preserve only the first completed world segment, before the
             // ClearDepth/Resolve seam lets cockpit/UI overwrite its attachment.
-            if start == 0 {
+            if start == 0 && self.scene_depth.is_some() {
                 if let (Some(depth), Some(source), Some(camera)) =
-                    (self.scene_depth.as_mut(), self.gfx3d.water_depth_view(), cameras.get(main_scene_cam)) {
+                    (self.scene_depth.as_mut(), self.gfx3d.scene_depth_snapshot(&mut encoder), cameras.get(main_scene_cam)) {
                     depth.capture(&self.device, &mut encoder, source,
                         self.hdr_size, (self.config.width, self.config.height), self.sample_count, camera);
                 }

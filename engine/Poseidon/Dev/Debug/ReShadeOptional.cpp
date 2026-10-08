@@ -252,6 +252,7 @@ void RegisterOptionalReShadeHarness(Dev::HarnessServer& harness)
                 cJSON_AddNumberToObject(row, "sampleFrame", static_cast<double>(p.sampleFrame));
                 cJSON_AddNumberToObject(row, "sampleGeneration", static_cast<double>(p.sampleGeneration));
                 cJSON_AddNumberToObject(row, "width", p.width);
+                cJSON_AddNumberToObject(row, "sourceSamples", (p.flags & 4u) ? 4 : 1);
                 cJSON_AddNumberToObject(row, "height", p.height);
                 cJSON_AddNumberToObject(row, "finiteSamples", p.finiteSamples);
                 cJSON_AddNumberToObject(row, "nonzeroSamples", p.nonzeroSamples);

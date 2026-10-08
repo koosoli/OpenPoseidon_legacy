@@ -159,13 +159,17 @@ impl State {
             }
             if !self.rejected_logged {
                 eprintln!(
-                    "[wgr] scene-depth snapshot rejected: requires Vulkan, 1 sample, output-sized scene and finite infinite-far projection"
+                    "[wgr] scene-depth snapshot rejected: requires Vulkan, 1x/4x samples, output-sized scene and finite infinite-far projection"
                 );
                 self.rejected_logged = true;
             }
             return;
         }
-        if self.gpu.is_none() || (self.publication.width, self.publication.height) != size {
+        let source_msaa_flag = if samples == 4 { 4 } else { 0 };
+        if self.gpu.is_none()
+            || (self.publication.width, self.publication.height) != size
+            || self.publication.flags & 4 != source_msaa_flag
+        {
             self.invalidate();
             let Some(generation) = self.publication.generation.checked_add(1) else {
                 return;
@@ -190,6 +194,7 @@ impl State {
             self.publication.width = size.0;
             self.publication.height = size.1;
             self.publication.samples = 1;
+            self.publication.flags |= source_msaa_flag;
             self.gpu = Some(gpu);
         }
         let gpu = self.gpu.as_ref().unwrap();
@@ -314,7 +319,7 @@ impl State {
     }
 }
 fn supported(size: (u32, u32), output: (u32, u32), samples: u32, p: &[f32; 16]) -> bool {
-    samples == 1
+    matches!(samples, 1 | 4)
         && size == output
         && size.0 > 0
         && size.1 > 0
@@ -571,7 +576,8 @@ mod tests {
         p[11] = 1.0;
         p[14] = -0.1;
         assert!(supported((1600, 900), (1600, 900), 1, &p));
-        assert!(!supported((1600, 900), (1600, 900), 4, &p));
+        assert!(supported((1600, 900), (1600, 900), 4, &p));
+        assert!(!supported((1600, 900), (1600, 900), 2, &p));
         assert!(!supported((800, 450), (1600, 900), 1, &p));
         p[8] = 0.025;
         p[9] = -0.04;
