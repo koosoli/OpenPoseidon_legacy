@@ -71,6 +71,9 @@ if($SelfTest){
     Require ([Math]::Abs((CheckContinuity $a $b 1000).eastMovementMetres-100)-lt1e-7) 'Continuity check rejected a correct spherical rebase'
     $b.camera.direction=@(1,0,0);$rejected=$false;try{$null=CheckContinuity $a $b 1000}catch{$rejected=$true}
     Require $rejected 'Continuity check accepted a rotated physical view'
+    $b.camera.direction=@(0,0,1);$b.camera.up=@(0,1,0);$rejected=$false
+    try{$null=CheckContinuity $a $b 1000}catch{$rejected=$true}
+    Require $rejected 'Continuity check accepted direction-preserving loss of transported roll'
     Write-Host 'Earth geodesic installed-test parser/ECEF/continuity negative controls PASS';return
 }
 Require ($ExpectedCommit -and $env:LOCK_OWNER) 'ExpectedCommit and scripts/with-game-lock.sh are required'
@@ -85,7 +88,7 @@ $null=New-Item -ItemType Directory -Force -Path $out
 $world=& "$PSScriptRoot/Launch-WholeWorld.ps1" -PrepareOnly -CacheDirectory $CacheDirectory
 $mission=Join-Path $CacheDirectory 'fixture/earth-preview.abel'
 $log=Join-Path $out 'engine.log';$stderr=Join-Path $out 'stderr.log'
-$settings=@{POSEIDON_WHOLE_WORLD='1';POSEIDON_EARTH_LATITUDE='46.6';POSEIDON_EARTH_LONGITUDE='8.1';POSEIDON_EARTH_CACHE=$CacheDirectory;POSEIDON_EARTH_IMAGERY=$imagery;
+$settings=@{POSEIDON_WHOLE_WORLD='1';POSEIDON_EARTH_LATITUDE='49.61';POSEIDON_EARTH_LONGITUDE='6.13';POSEIDON_EARTH_CACHE=$CacheDirectory;POSEIDON_EARTH_IMAGERY=$imagery;
     POSEIDON_EARTH_FEATURES='0';POSEIDON_EARTH_BUILDINGS='0';POSEIDON_EARTH_SURFACE='0';POSEIDON_EARTH_CONTENT_URL='';
     WGR_GRASS='0';WGR_TERRAIN_RESOURCE_REUSE='1';WGR_WET_SOIL_DIAGNOSTIC='1';POSEIDON_USER_DIR=(Join-Path $out 'user')}
 if($Offline){$settings.HTTPS_PROXY='http://127.0.0.1:9';$settings.HTTP_PROXY='http://127.0.0.1:9';$settings.ALL_PROXY='http://127.0.0.1:9';$settings.NO_PROXY=''}
@@ -181,8 +184,11 @@ try{
     Require (!(Select-String -LiteralPath $log -Pattern 'Cannot load --test-world|Critical error' -Quiet)) 'Fixture world failed to load'
     $null=Send @{cmd='exec';code='setAccTime 1;player allowDamage false;0 setRain 0;0 setOvercast 0;0 setFog 0;triDevPanelShow 0;triCursorMove [0,0]'}
     $result.initial=WaitGround (Location)
+    Require ($result.initial.ground.height-lt950) 'Initial Luxembourg camera is not safely above actual resident terrain'
     $near=RebaseArm 'near-1000m' 1000 32000 5000
     $near.fresh=WaitGround $near.after.location $result.initial.ground.generation
+    $near.cameraGround=Ground $near.after.camera.position[0] $near.after.camera.position[2]
+    Require ($near.cameraGround.covered -and $near.after.camera.position[1]-gt$near.cameraGround.height+10) 'Rebased near camera is not above current resident terrain'
     $near.screenshot=Capture 'near-rebased'
     $relocated=@(Select-String -LiteralPath $log -Pattern ('Earth relocated: .*revision '+$near.after.location.revision+'$'))
     Require ($relocated.Count-gt0) 'Near renderer rebase receipt missing'

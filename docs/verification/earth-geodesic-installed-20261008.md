@@ -22,7 +22,8 @@ downloaded by the test. It uses only the initial region, its nearby rebase
 window and an orbital dateline view, retaining the existing 256-tile/2-MiB-per-
 tile elevation cache bounds.
 
-The test waits for initial resident support, positions the actual Earth manual
+The test starts at Luxembourg 49.61,6.13, waits for initial resident support and
+requires terrain below 950 m so its 1000 m camera is above actual land. It positions the actual Earth manual
 camera 10 m inside its 32 km threshold at local Y=1000 m, and holds ordinary
 SDL D until a simulation tick advances the geographic revision. It then checks:
 
@@ -64,3 +65,19 @@ Self-tests cover the location/SQF parsers, an orthonormal ECEF basis, a correct
 spherical rebase with real east displacement, and negative controls for
 transverse position jumps and a rotated physical view. Installed execution is
 delegated to the parent and remains pending at this checkpoint.
+
+## Following-tick up-vector regression
+
+The parent installed run `20261008-134056-4b8f31` crossed the near threshold
+and preserved physical direction (error 2.85e-8), but failed physical up
+continuity (error 0.0053388). `CameraVehicle::CamEffectFOV` subsequently rebuilt
+the camera with local `VUp`, discarding the roll transported by the rebase.
+Manual altitude-scaled Earth cameras now retain their current orientation's
+up vector when aiming at the virtual target. Native/scripted cameras retain
+their prior world-up behavior. The runtime assertion is unchanged, and the
+CPU self-test additionally rejects direction-preserving roll loss. A parent
+installed rerun is required; this source fix does not establish a runtime pass.
+The failed receipt's up vector matches the normalized projection of local
+world-up onto the plane perpendicular to its direction within 7.26e-8,
+confirming this source path. The PowerShell parser/self-test, coordinate
+regressions and production `CameraHold.cpp` syntax check passed after the fix.

@@ -266,7 +266,12 @@ float CameraVehicle::CamEffectFOV() const
         Vector3 norm = _lastTgtPos - Position();
         Vector3 dir = norm.Normalized();
 
-        const_cast<CameraVehicle*>(this)->SetDirectionAndUp(dir, VUp);
+        // Earth free-flight transports its whole orientation between ENU
+        // frames. Rebuilding against local world-up here would discard that
+        // transported roll on the next camera-effect update after a rebase.
+        const Vector3 up = GetManual() && _altitudeSpeedScaling && EarthStreaming::Enabled()
+            ? Orientation().DirectionUp() : VUp;
+        const_cast<CameraVehicle*>(this)->SetDirectionAndUp(dir, up);
 
         float invDist = (_lastTgtPos - Position()).InvSize();
         float fov = invDist * 10;
