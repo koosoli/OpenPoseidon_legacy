@@ -203,6 +203,10 @@ struct EmatPbrProvenance
     EmatAuthoredScalar roughnessScale2;            // RoughnessScale2 (MatPBR2Layers)
     EmatAuthoredScalar metalnessScale2;            // MetalnessScale2 (MatPBR2Layers)
     std::array<EmatAuthoredScalar, 3> maskScale{}; // MaskRed/Green/BlueScale (MatPBRMulti)
+    // Standard ordered-mask preview; unsupported modes keep this false.
+    bool standardMaskBlend = false;
+    // (UV scale, sharpness, offset, UV source 0/1) for Mask_2..4.
+    std::array<std::array<float, 4>, 3> layerMaskParams{};
 };
 
 struct TranslatedMaterial

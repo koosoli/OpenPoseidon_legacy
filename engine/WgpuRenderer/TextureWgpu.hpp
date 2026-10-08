@@ -208,6 +208,7 @@ class TextureWgpu : public Texture
     bool NormalIsRgPacked() const;
     bool NormalHasNativeCavity() const;
     bool NormalHasNativePbrChannels() const;
+    bool HasNativeLinearMask(bool singleChannel) const;
 
     bool VerifyChecksum(const MipInfo&) const override { return true; }
     bool IsGpuResident() const override { return _gpuHandle != 0; }

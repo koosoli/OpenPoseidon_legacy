@@ -1723,6 +1723,15 @@ bool TextureWgpu::NormalHasNativeCavity() const
                                             NormalIsRgPacked(), Name());
 }
 
+bool TextureWgpu::HasNativeLinearMask(bool singleChannel) const
+{
+    // The ordered-mask preview supports original linear one-channel DDS sources.
+    // Converted PAAs and decoded/color composites cannot qualify by filename.
+    return !_dynamic && _src && _nMipmaps > 0 &&
+        _mipmaps[0].DstFormat() == (singleChannel ? PacBC4 : PacBC7) &&
+        dynamic_cast<TextureSourceDDS*>(static_cast<ITextureSource*>(_src)) != nullptr;
+}
+
 bool TextureWgpu::NormalHasNativePbrChannels() const
 {
     if (_nMipmaps <= 0)

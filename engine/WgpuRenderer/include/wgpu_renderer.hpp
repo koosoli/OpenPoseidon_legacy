@@ -35,7 +35,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 22u // Terrain-following fog and coherent density modulation
+#define WGR_ABI_VERSION 23u // Append-only optional layered detail-mask descriptors
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -510,9 +510,15 @@ struct WgrModelMaterial
     WgrVec4 crown_ao_p0;
     WgrVec4 crown_ao_p1;
     /* Optional native opaque PBR preview: Basic roughness/metalness multipliers.
-     * Multi mask-scale opt-in uses RGB multipliers in xyz and w=1 as its tag.
+     * Multi uses RGB mask multipliers in xyz: w=1 for mask scales, w=2 for
+     * the separately opted-in standard ordered/detail-mask composition.
      * Defaults keep Basic identity; never used by legacy/cutout shading. */
     WgrVec4 native_pbr_scales{1.0f, 1.0f, 0.0f, 0.0f};
+    /* Optional ordered-layer preview only. Zero handle samples white. Parameters
+     * are (UV scale, sharpness, offset, UV source 0/1); existing lanes retain their
+     * meaning. The renderer resolves these handles into its own descriptor slots. */
+    WgrTexture layer_mask_texture_id[3]{};
+    WgrVec4 layer_mask_params[3]{};
 };
 
 /* One drawable LOD level: its FindSqrtLevel resolution threshold (_resolutions[i]) +
@@ -585,7 +591,9 @@ struct WgrInstance
  * inherit it. These reserved lanes preserve the public struct layout. */
 
 static_assert(sizeof(WgrModelSection) == 24, "WgrModelSection must match Rust");
-static_assert(sizeof(WgrModelMaterial) == 336, "WgrModelMaterial must match Rust");
+static_assert(sizeof(WgrModelMaterial) == 408, "WgrModelMaterial must match Rust");
+static_assert(offsetof(WgrModelMaterial, layer_mask_texture_id) == 336, "Append-only mask handles");
+static_assert(offsetof(WgrModelMaterial, layer_mask_params) == 360, "Append-only mask parameters");
 static_assert(sizeof(WgrModelLod) == 16, "WgrModelLod must match Rust");
 static_assert(sizeof(WgrInstance) == 144, "WgrInstance must match Rust");
 

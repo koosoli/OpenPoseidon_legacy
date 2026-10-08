@@ -349,6 +349,10 @@ pub struct WgrModelMaterial {
     pub crown_ao_p1: [f32; 4],
     // Optional native opaque PBR preview, identity for all other materials.
     pub native_pbr_scales: [f32; 4],
+    // Optional ordered preview: each handle is a linear detail-mask texture.
+    // Params are (UV scale, sharpness, offset, source 0/1). Zero handle = white.
+    pub layer_mask_texture_id: [u64; 3],
+    pub layer_mask_params: [[f32; 4]; 3],
 }
 
 // One drawable LOD level of a model: its FindSqrtLevel resolution threshold (`_resolutions[i]`)
@@ -1731,7 +1735,7 @@ const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 68);
 const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 288);
 const _: () = assert!(std::mem::size_of::<WgrLight>() == 64);
 const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);
-const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 336);
+const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 408);
 const _: () = assert!(std::mem::size_of::<WgrModelLod>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrInstance>() == 144);
 const _: () = assert!(std::mem::size_of::<WgrTonemap>() == 64);
@@ -1907,9 +1911,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(22)
+            .unwrap_or(23)
     } else {
-        22
+        23
     }
 }
 
@@ -2215,7 +2219,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 21); // Paired cave/hole/swimmer integration
+        assert_eq!(super::wgr_abi_version(), 23); // Append-only layer detail masks
     }
 
     #[test]

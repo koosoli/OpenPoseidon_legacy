@@ -37,6 +37,48 @@ fn channels_probe(mask: bool) -> naga::Module {
     module
 }
 
+fn ordered_mask_probe() -> naga::Module {
+    let mut source = String::new();
+    for helper in ["native_pbr_detail_mask", "native_pbr_ordered_weights"] {
+        let start = PRODUCTION.find(&format!("fn {helper}(")).unwrap();
+        let end = start + PRODUCTION[start..].find("\n}").unwrap() + 2;
+        source.push_str(&PRODUCTION[start..end]);
+        source.push('\n');
+    }
+    source.push_str(r#"
+@group(0) @binding(0) var<storage,read_write> output:array<vec4<f32>>;
+@compute @workgroup_size(1) fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>) {
+    let masks = array<vec3<f32>,5>(vec3<f32>(1.0,1.0,0.0), vec3<f32>(0.5,0.5,0.5),
+        vec3<f32>(1.0,0.0,1.0), vec3<f32>(0.0), vec3<f32>(0.4,0.0,0.0));
+    // Last case exercises the interior detail-remap value, not only endpoints.
+    var mask = masks[id.x];
+    if (id.x == 4u) { mask.x = native_pbr_detail_mask(mask.x,0.6,1.0,0.05); }
+    output[id.x] = native_pbr_ordered_weights(mask);
+}
+"#);
+    let module = naga::front::wgsl::parse_str(&source).unwrap();
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+        .validate(&module).unwrap();
+    module
+}
+
+#[test]
+fn native_multi_ordered_preview_helpers_validate() {
+    let _ = ordered_mask_probe();
+}
+
+#[test]
+fn native_multi_ordered_actual_gpu_resolves_overlapping_masks_and_detail_remap() {
+    let actual = gpu_channels_result(ordered_mask_probe());
+    // Full R+G selects the later layer. Half R+G+B leaves 1/8 base,
+    // 1/8 second, 1/4 third, 1/2 fourth; no normalized additive average.
+    let expected = [0.0,0.0,1.0,0.0, 0.125,0.125,0.25,0.5,
+                    0.0,0.0,0.0,1.0, 1.0,0.0,0.0,0.0, 0.5,0.5,0.0,0.0];
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert!((actual - expected).abs() < 1e-6, "{actual} != {expected}");
+    }
+}
+
 #[test]
 fn native_pbr_basic_scaled_preview_and_legacy_shaders_compose() {
     for preview in [false, true] {

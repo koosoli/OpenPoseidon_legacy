@@ -29,6 +29,34 @@ using Poseidon::Asset::Material::TranslatedMaterial;
 using Poseidon::Asset::Material::TranslatedSlot;
 using Poseidon::Asset::Material::TranslateEmat;
 
+TEST_CASE("Standard ordered masks preserve detail parameters and reject unsupported contracts",
+          "[asset][material][emat][arf][ordered-masks]")
+{
+    using namespace Poseidon::Asset::Material;
+    std::array<std::array<float, 4>, 3> params{};
+    const std::string body = "MatPBRMulti {\n"
+        " BCR_1 \"{0000000000000001}Assets/Owned_BCR.edds\"\n"
+        " MaskSharpness_2 4\n MaskOffset_2 0.125\n MaskUVScale_2 0.25\n"
+        " Mask_2 \"{0000000000000002}Assets/Owned_Mask1.edds\"\n";
+    REQUIRE(ReadNativePbrStandardMasks(ParseEmat(body + "}\n"), params));
+    REQUIRE(params[0] == std::array<float, 4>{0.25f, 4.0f, 0.125f, 0.0f});
+    REQUIRE(params[1] == std::array<float, 4>{1.0f, 0.0f, 0.0f, 0.0f});
+    for (const char* unsupported : {" FineMask_2 1\n", " BlendMode_2 1\n",
+                                   " AngleMask 1\n", " MaskUVScale_2 -1\n",
+                                   " UVTransform_2 { Rotation 15 }\n"})
+    {
+        // Duplicate keys keep the first authored value, so use an independent
+        // material for each unsupported feature rather than overriding body.
+        REQUIRE_FALSE(ReadNativePbrStandardMasks(ParseEmat(std::string("MatPBRMulti {\n") +
+            unsupported + "}\n"), params));
+    }
+    auto invalid = ParseEmat("MatPBRMulti {\n MaskSharpness_2 1\n}\n");
+    invalid.properties[0].values[0].number = std::numeric_limits<double>::infinity();
+    REQUIRE_FALSE(ReadNativePbrStandardMasks(invalid, params));
+    REQUIRE_FALSE(ReadNativePbrStandardMasks(ParseEmat("MatPBRBasic {\n}\n"), params));
+    REQUIRE_FALSE(ReadNativePbrStandardMasks(ParseEmat("MatPBRMulti {\n OpacityMap \"{1}cutout.edds\"\n}\n"), params));
+}
+
 TEST_CASE("Native Multi mask scales preserve identity and authored zero without changing Basic",
           "[asset][material][emat][arf][mask-scales]")
 {

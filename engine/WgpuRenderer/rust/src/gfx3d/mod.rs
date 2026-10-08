@@ -9544,6 +9544,13 @@ impl Gfx3d {
                 crown_ao_p0: m.crown_ao_p0,
                 crown_ao_p1: m.crown_ao_p1,
                 native_pbr_scales: m.native_pbr_scales,
+                layer_mask: std::array::from_fn(|i| {
+                    let slot = textures.texture_slot(m.layer_mask_texture_id[i]);
+                    debug_assert!(slot < 0x8000_0000);
+                    let params = m.layer_mask_params[i];
+                    let packed = slot | if params[3] == 1.0 { 0x8000_0000 } else { 0 };
+                    [f32::from_bits(packed), params[0], params[1], params[2]]
+                }),
             })
             .collect();
         // Source allocation precedes the coherent three-table commit; IDs remain append-only.
@@ -12509,7 +12516,7 @@ fn multi_layer_normals_keep_every_layout_in_step() {
     // Mirrors the C++ static_assert in include/wgpu_renderer.hpp.
     assert_eq!(
         std::mem::size_of::<WgrModelMaterial>(),
-        336,
+        408,
         "WgrModelMaterial includes native PBR scales; wgpu_renderer.hpp must agree"
     );
     assert_eq!(
@@ -12520,6 +12527,8 @@ fn multi_layer_normals_keep_every_layout_in_step() {
     assert_eq!(std::mem::offset_of!(WgrModelMaterial, layer_uv), 152);
     assert_eq!(std::mem::offset_of!(WgrModelMaterial, layer_colour), 216);
     assert_eq!(std::mem::offset_of!(WgrModelMaterial, native_pbr_scales), 316);
+    assert_eq!(std::mem::offset_of!(WgrModelMaterial, layer_mask_texture_id), 336);
+    assert_eq!(std::mem::offset_of!(WgrModelMaterial, layer_mask_params), 360);
 
     // The GPU-side struct: WGSL 16-aligns the trailing array<vec4<f32>>, Rust does not, so
     // the pad words are explicit and the offsets are the contract.
@@ -12535,8 +12544,9 @@ fn multi_layer_normals_keep_every_layout_in_step() {
         std::mem::offset_of!(cull::SectionMaterialGpu, layer_colour),
         192
     );
-    assert_eq!(std::mem::size_of::<cull::SectionMaterialGpu>(), 320);
+    assert_eq!(std::mem::size_of::<cull::SectionMaterialGpu>(), 368);
     assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, native_pbr_scales), 304);
+    assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, layer_mask), 320);
     assert_eq!(
         std::mem::offset_of!(cull::SectionMaterialGpu, normal_power),
         256
@@ -12576,7 +12586,7 @@ fn multi_layer_normals_keep_every_layout_in_step() {
                 "{name} needs three pad words after normal_power for the 16 stride"
             );
         }
-        for field in ["crown_ao_p0: vec4<f32>,", "crown_ao_p1: vec4<f32>,", "native_pbr_scales: vec4<f32>,"] {
+        for field in ["crown_ao_p0: vec4<f32>,", "crown_ao_p1: vec4<f32>,", "native_pbr_scales: vec4<f32>,", "layer_mask: array<vec4<f32>, 3>,"] {
             assert!(
                 src.contains(field),
                 "{name} must mirror SectionMaterialGpu::{field}"

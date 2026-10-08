@@ -499,6 +499,73 @@ inline std::array<float, 3> NativePbrMultiMaskScales(const TranslatedMaterial& m
     return scales;
 }
 
+// Deliberately bounded standard blend contract. Unknown material switches are
+// rejected, rather than silently treated as standard interpolation. In particular
+// this preview has no fine masks, angle masks, alternate overlay or rotated UVs.
+inline bool ReadNativePbrStandardMasks(const EmatMaterial& emat,
+                                     std::array<std::array<float, 4>, 3>& params)
+{
+    if (!EmatMaterial::NameMatches(emat.className, "MatPBRMulti") ||
+        !EmatIsOpaqueSolid(emat) || emat.Has("BCRMap"))
+        return false;
+    const auto allowed = [](const std::string& key)
+    {
+        const char* common[] = {"DisableInteriorProbes", "SurfaceProperties", "GlobalMCRMap",
+            "OverlayBlackPower", "OverlayWhitePower", "UVSrcGlobalMaps", "MaskMap",
+            "MaskRedScale", "MaskGreenScale", "MaskBlueScale", "VFXMap", "NormalPower",
+            "GlobalNMOMap", "GlobalNMOUVTransform", "MudOpacity", "MudColor", "MudMetalness",
+            "MudDetNormal", "MudBCRMap", "MudNMOMap", "MudMaskMap", "MudUVTransform",
+            "DirtOpacity", "DirtLayerSharpness", "DirtColor", "DirtRoughness", "DirtMaskMap",
+            "DirtUVTransform"};
+        for (const char* item : common)
+            if (EmatMaterial::NameMatches(key, item)) return true;
+        const char* layer[] = {"Enabled_", "Color_", "BCR_", "NMO_", "UVTransform_",
+            "DetNormal_", "AO_", "Roughness_", "Metalness_"};
+        for (int i = 1; i <= 4; ++i)
+            for (const char* prefix : layer)
+                if (EmatMaterial::NameMatches(key, std::string(prefix) + std::to_string(i))) return true;
+        for (int i = 2; i <= 4; ++i)
+            for (const char* prefix : {"Mask_", "MaskUVScale_", "MaskSharpness_", "MaskOffset_"})
+                if (EmatMaterial::NameMatches(key, std::string(prefix) + std::to_string(i))) return true;
+        return false;
+    };
+    for (const auto& property : emat.properties)
+    {
+        if (!allowed(property.name)) return false;
+        if (property.name.size() >= 12 && EmatMaterial::NameMatches(property.name.substr(0, 12), "UVTransform_"))
+            for (size_t i = 0; i + 1 < property.values.size(); ++i)
+            {
+                if (property.values[i + 1].isNumber && !std::isfinite(property.values[i + 1].number)) return false;
+                if (EmatMaterial::NameMatches(property.values[i].text, "Rotation") &&
+                    (!property.values[i + 1].isNumber || property.values[i + 1].number != 0.0)) return false;
+            }
+    }
+    for (const char* key : {"MaskRedScale", "MaskGreenScale", "MaskBlueScale"})
+    {
+        float value = 1.0f;
+        if (emat.Has(key) && (!emat.FloatOf(key, value) || !std::isfinite(value) || value < 0.0f)) return false;
+    }
+    for (size_t i = 0; i < params.size(); ++i)
+    {
+        const std::string suffix = std::to_string(i + 2);
+        if (emat.Has("Mask_" + suffix) && emat.TextureOf("Mask_" + suffix).empty()) return false;
+        if (emat.Has("Enabled_" + suffix) && emat.FloatOr("Enabled_" + suffix, 1.0f) != 0.0f &&
+            emat.TextureOf("BCR_" + suffix).empty()) return false;
+        if (!emat.TextureOf("BCR_" + suffix).empty() && emat.FloatOr("Enabled_" + suffix, 1.0f) != 0.0f &&
+            !emat.Has("MaskSharpness_" + suffix)) return false;
+        params[i] = {1.0f, 0.0f, 0.0f, 0.0f};
+        const char* keys[] = {"MaskUVScale_", "MaskSharpness_", "MaskOffset_"};
+        for (size_t p = 0; p < 3; ++p)
+        {
+            const std::string key = std::string(keys[p]) + suffix;
+            if (emat.Has(key) && !emat.FloatOf(key, params[i][p])) return false;
+            if (!std::isfinite(params[i][p])) return false;
+        }
+        if (params[i][0] <= 0.0f || params[i][1] < 0.0f) return false;
+    }
+    return true;
+}
+
 // Translates an `.emat` into the engine's material form. `family` is carried through from
 // the rvmat that pointed here.
 inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::string& origin, const std::string& family)
@@ -637,6 +704,14 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         const char* maskKeys[3] = {"MaskRedScale", "MaskGreenScale", "MaskBlueScale"};
         for (size_t i = 0; i < pbr->maskScale.size(); ++i)
             pbr->maskScale[i] = ReadEmatPbrScalar(emat, maskKeys[i]);
+        pbr->standardMaskBlend = ReadNativePbrStandardMasks(emat, pbr->layerMaskParams);
+        if (pbr->standardMaskBlend)
+        {
+            const MaterialSlot maskSlots[] = {MaterialSlot::LayerMask1, MaterialSlot::LayerMask2,
+                                              MaterialSlot::LayerMask3};
+            for (size_t i = 0; i < 3; ++i)
+                AddEmatSlot(out, emat, ("Mask_" + std::to_string(i + 2)).c_str(), maskSlots[i]);
+        }
         out.ematPbr = std::move(pbr);
     }
 

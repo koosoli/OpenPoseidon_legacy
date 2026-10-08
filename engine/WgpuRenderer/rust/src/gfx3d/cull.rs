@@ -246,6 +246,9 @@ pub struct SectionMaterialGpu {
     pub crown_ao_p0: [f32; 4],
     pub crown_ao_p1: [f32; 4],
     pub native_pbr_scales: [f32; 4],
+    // (bitcast descriptor slot with UV1 in bit 31, UV scale, sharpness, offset).
+    // Only the explicitly opted-in ordered blend samples these descriptors.
+    pub layer_mask: [[f32; 4]; 3],
 }
 
 // A permissive plane that never culls anything: dot(0, p) + BIG >= -radius always holds.

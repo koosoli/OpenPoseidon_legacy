@@ -116,6 +116,7 @@ struct SectionMaterial {
     crown_ao_p0: vec4<f32>,
     crown_ao_p1: vec4<f32>,
     native_pbr_scales: vec4<f32>,
+    layer_mask: array<vec4<f32>, 3>,
 };
 
 @group(1) @binding(0) var<storage, read> instances: array<Instance>;
@@ -817,6 +818,19 @@ fn native_pbr_mask_channels(mask: vec3<f32>, scales: vec4<f32>) -> vec3<f32> {
     return clamp(mask * scales.xyz, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
+// Standard detail masks sharpen and bias each channel before layer composition.
+fn native_pbr_detail_mask(mask: f32, detail: f32, sharpness: f32, offset: f32) -> f32 {
+    return clamp((mask + offset) * (sharpness + 1.0) - sharpness + detail * sharpness, 0.0, 1.0);
+}
+
+// Successive standard blends: each later layer covers the preceding composite.
+fn native_pbr_ordered_weights(mask: vec3<f32>) -> vec4<f32> {
+    let remaining = vec3<f32>(1.0) - mask;
+    return vec4<f32>(remaining.x * remaining.y * remaining.z,
+                     mask.x * remaining.y * remaining.z,
+                     mask.y * remaining.z, mask.z);
+}
+
 fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
@@ -866,6 +880,7 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // sample, one set of weights, colours and normals agreeing per fragment by construction.
     // All zero means "layer 0 alone", which is every non-Multi section.
     var layer_w = vec3<f32>(0.0);
+    var layer_base_weight = 1.0;
 #ifdef NATIVE_PBR_PREVIEW
     var pbr_roughness = base.a;
 #endif
@@ -880,6 +895,17 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
 #ifdef NATIVE_PBR_PREVIEW
         if ((sm.flags & SECTION_NATIVE_PBR_PREVIEW) != 0u) {
             lw = native_pbr_mask_channels(lw, sm.native_pbr_scales);
+            if (sm.native_pbr_scales.w > 1.5) {
+                for (var i = 0u; i < 3u; i = i + 1u) {
+                    let params = sm.layer_mask[i];
+                    let packed = bitcast<u32>(params.x);
+                    let detail_slot = packed & 0x7fffffffu;
+                    let source_uv = select(in.uv, in.uv1, (packed & 0x80000000u) != 0u);
+                    let detail_uv = (source_uv * sm.layer_uv[i + 1u].xy + sm.layer_uv[i + 1u].zw) * params.y;
+                    let detail = textureSampleBias(textures[detail_slot], samplers[sm.sampler_idx], detail_uv, frame.renscale.x).r;
+                    lw[i] = native_pbr_detail_mask(lw[i], detail, params.z, params.w);
+                }
+            }
         }
 #endif
         if (sm.layer_slot[0] == 0u) {
@@ -894,9 +920,18 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         // The unpainted remainder belongs to layer 0. Where the mask over-paints, the
         // layers are renormalised rather than allowed to sum past one.
         let total = lw.x + lw.y + lw.z;
-        if (total > 1.0) {
-            lw = lw / total;
+        layer_base_weight = 1.0 - min(total, 1.0);
+#ifdef NATIVE_PBR_PREVIEW
+        if ((sm.flags & SECTION_NATIVE_PBR_PREVIEW) != 0u && sm.native_pbr_scales.w > 1.5) {
+            let ordered = native_pbr_ordered_weights(lw);
+            layer_base_weight = ordered.x;
+            lw = ordered.yzw;
+        } else {
+#endif
+            if (total > 1.0) { lw = lw / total; }
+#ifdef NATIVE_PBR_PREVIEW
         }
+#endif
         layer_w = lw;
         var blended = vec3<f32>(0.0);
 #ifdef NATIVE_PBR_PREVIEW
@@ -914,13 +949,12 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
             blended_roughness = blended_roughness + layer.a * lw[i];
 #endif
         }
-        let weight = min(total, 1.0);
 #ifdef NATIVE_PBR_PREVIEW
         if ((sm.flags & SECTION_NATIVE_PBR_PREVIEW) != 0u) {
-            pbr_roughness = base.a * (1.0 - weight) + blended_roughness;
+            pbr_roughness = base.a * layer_base_weight + blended_roughness;
         }
 #endif
-        base = vec4<f32>(base.rgb * (1.0 - weight) + blended, base.a);
+        base = vec4<f32>(base.rgb * layer_base_weight + blended, base.a);
     }
     // A2C (MSAA): cutout sections (sm.alpha_ref > 0, uniform per quad) emit a sharpened coverage
     // alpha; opaque sections keep full coverage (1.0). Without A2C, the classic hard discard.
@@ -1077,7 +1111,8 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
             // NMO_1 contributes its material channels. Keep the established
             // global normal in normal_slot: replacing it with this tiling normal
             // swung whole roof slopes toward the sun in the first A/B.
-            let base_weight = 1.0 - min(layer_w.x + layer_w.y + layer_w.z, 1.0);
+            let base_weight = select(1.0 - min(layer_w.x + layer_w.y + layer_w.z, 1.0),
+                                     layer_base_weight, sm.native_pbr_scales.w > 1.5);
             pbr_metal = normal_sample.b * base_weight;
             pbr_ao = normal_sample.a * base_weight;
             pbr_sampled = true;

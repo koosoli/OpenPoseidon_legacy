@@ -79,6 +79,7 @@ struct SectionMaterial {
     crown_ao_p0: vec4<f32>,
     crown_ao_p1: vec4<f32>,
     native_pbr_scales: vec4<f32>,
+    layer_mask: array<vec4<f32>, 3>,
 };
 
 @group(0) @binding(0) var<uniform> pass_data: PassData;

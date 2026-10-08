@@ -15392,6 +15392,83 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                                 LOG_INFO(Graphics, "Wgpu Reforger mask-scale preview: material={} RGB={}/{}/{}",
                                          path, scales[0], scales[1], scales[2]);
                         }
+                        static const bool orderedPreview = []
+                        {
+                            const char* value = std::getenv("WGR_REFORGER_LAYER_ORDER_PREVIEW");
+                            return value && value[0] == '1' && value[1] == '\0';
+                        }();
+                        static const std::string orderedMaterial = []
+                        {
+                            const char* value = std::getenv("WGR_REFORGER_LAYER_ORDER_MATERIAL");
+                            return std::string(value ? value : "");
+                        }();
+                        const std::string_view materialName(path);
+                        const bool orderedTarget = orderedMaterial.empty() ||
+                            (materialName.size() >= orderedMaterial.size() &&
+                             Asset::Material::EmatMaterial::NameMatches(
+                                 materialName.substr(materialName.size() - orderedMaterial.size()), orderedMaterial));
+                        if (orderedPreview && orderedTarget && found->second.ematPbr->standardMaskBlend)
+                        {
+                            const Slot masks[] = {Slot::LayerMask1, Slot::LayerMask2, Slot::LayerMask3};
+                            const Slot colours[] = {Slot::LayerColour1, Slot::LayerColour2, Slot::LayerColour3};
+                            const auto* globalMask = found->second.Find(Slot::Mask);
+                            bool masksComplete = globalMask && !globalMask->texture.isProcedural &&
+                                !globalMask->texture.path.empty() &&
+                                (globalMask->uvSource != "tex1" || s->HasUV1());
+                            if (masksComplete)
+                            {
+                                Ref<Texture> texture = _wbank->Load(globalMask->texture.path.canonical().c_str());
+                                auto* native = static_cast<TextureWgpu*>(texture.GetRef());
+                                masksComplete = native && native->HasNativeLinearMask(false) &&
+                                    native->GpuHandle() == mat.mask_texture_id;
+                            }
+                            for (size_t layer = 0; layer < 3; ++layer)
+                            {
+                                const auto& params = found->second.ematPbr->layerMaskParams[layer];
+                                mat.layer_mask_params[layer] = {params[0], params[1], params[2], params[3]};
+                                if (mat.layer_texture_id[layer] == 0)
+                                {
+                                    masksComplete = masksComplete && found->second.Find(colours[layer]) == nullptr;
+                                    continue;
+                                }
+                                const auto* entry = found->second.Find(masks[layer]);
+                                if (!entry) continue; // authored absence is the white detail fallback
+                                if (entry->texture.isProcedural || entry->texture.path.empty())
+                                {
+                                    masksComplete = false;
+                                    continue;
+                                }
+                                Ref<Texture> texture = _wbank->Load(entry->texture.path.canonical().c_str());
+                                auto* native = static_cast<TextureWgpu*>(texture.GetRef());
+                                mat.layer_mask_texture_id[layer] = native && native->HasNativeLinearMask(true)
+                                    ? native->EnsureUploaded() : 0;
+                                masksComplete = masksComplete && mat.layer_mask_texture_id[layer] != 0;
+                            }
+                            if (masksComplete)
+                            {
+                                const auto scales = Asset::Material::NativePbrMultiMaskScales(found->second);
+                                mat.native_pbr_scales = {scales[0], scales[1], scales[2], 2.0f};
+                                static std::unordered_set<std::string> reportedOrdered;
+                                if (reportedOrdered.size() < 32 && reportedOrdered.insert(path).second)
+                                    LOG_INFO(Graphics, "Wgpu Reforger ordered-layer preview: material={} detailMasks={}/{}/{}",
+                                             path, mat.layer_mask_texture_id[0] != 0,
+                                             mat.layer_mask_texture_id[1] != 0, mat.layer_mask_texture_id[2] != 0);
+                            }
+                            else
+                            {
+                                static std::unordered_set<std::string> reportedSkipped;
+                                if (reportedSkipped.size() < 32 && reportedSkipped.insert(path).second)
+                                    LOG_INFO(Graphics, "Wgpu Reforger ordered-layer preview skipped: material={} mask bindings/UV unavailable",
+                                             path);
+                            }
+                        }
+                        else if (orderedPreview && orderedTarget)
+                        {
+                            static std::unordered_set<std::string> reportedUnsupported;
+                            if (reportedUnsupported.size() < 32 && reportedUnsupported.insert(path).second)
+                                LOG_INFO(Graphics, "Wgpu Reforger ordered-layer preview skipped: material={} unsupported source mask contract",
+                                         path);
+                        }
                         static bool reportedMultiPreview = false;
                         if (!reportedMultiPreview)
                         {
