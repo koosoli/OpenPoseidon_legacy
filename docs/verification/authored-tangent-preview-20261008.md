@@ -15,11 +15,14 @@ geometry processing. Aggregate sidecars are capped at 32 MiB per model; the temp
 four-corner record is 112 bytes on the current layout. Existing canonical vertices
 and model blobs already contain the axes, so their layout does not grow.
 
-A versioned source-producer mark plus full-frame validation qualifies the runtime
+A versioned producer metadata entry plus full-frame validation qualifies the runtime
 shape. Old blobs lack this producer mark. The optional producer schema also changes
 the derived-cache key, preserving the default key when disabled. A property found
 in arbitrary source data cannot qualify an older producer. No blob format bump is
 needed because the serialized fields already exist.
+Container identity remains `MLOD`, preserving modern adapter, preparation and
+simulation admission. Producer version 2 invalidates earlier optional blobs whose
+producer marker replaced that container identity. The default cache key is unchanged.
 
 Admission additionally requires the existing four-layer opaque ordered-normal
 contract. Retained rendering reads the existing tangent/binormal fields at 36/48
@@ -33,8 +36,9 @@ their lengths through global/detail composition before final normalization.
 
 ABI 24 and its material offsets remain unchanged. No texture samples, descriptors
 or backing allocations are added. The default shader has no extra attributes or
-varyings. The enabled shader adds two axes and packs existing crown/snow scalars
-together to stay within 16 inter-stage variables. Colour/prepass and retained
+varyings. The enabled shader adds two axes, packs existing crown/snow scalars
+and combines two flat integer owner proofs. It uses 15 user varyings, leaving
+one of the baseline 16 fragment input variables for `FrontFacing`. Colour/prepass and retained
 weather-depth builders use matching optional vertex attributes. Direct drawing
 keeps its existing material path; this preview does not qualify a direct PBR draw.
 Legacy OFP imports and shaders remain on their previous path.
@@ -43,7 +47,10 @@ Validation: owned synthetic corner seam, reversed winding, sort, model-blob byte
 roundtrip, old-producer decline, invalid mapping, unsupported packing/skinning,
 parallel axes and partial sidecars; optional cache-key invalidation; actual C++
 production/unit syntax; whole Rust test metadata; actual composed retained/direct/
-shadow shaders with PBR off, PBR on and authored on, including the 16-variable limit.
+shadow shaders with PBR off, PBR on and authored on, including the fragment
+input limit with builtin deductions. A real device-pipeline test uses the
+production varying declaration and fragment signature at 1x/4x MSAA; its extra
+varying negative control must fail the 16-variable limit.
 A separate production-helper GPU readback test covers nonuniform transforms,
 mirroring, independent nonorthogonal axes, singular decline, interpolation and
 backface normal orientation. The integrator runs this test and installed fixed-camera

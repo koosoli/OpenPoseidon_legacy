@@ -561,7 +561,12 @@ struct VsOut {
     // 1 = this instance is vegetation (any canopy flag, i.e. MapType ∈ tree/bush/forest), so the
     // foliage lighting (leaf SSS + canopy AO) may apply; 0 = other cutouts (fences, grills, decals)
     // that must NOT pick up the leaf look. The alpha-test discard itself stays keyed on alpha_ref.
+#ifdef NATIVE_PBR_TANGENTS
+    // Preserve both integer owner proofs while reserving a slot for FrontFacing.
+    @location(5) @interpolate(flat) vegetation_receivers: vec2<u32>,
+#else
     @location(5) @interpolate(flat) is_veg: u32,
+#endif
     // MODEL-space position + this instance's model id, for the baked sky-visibility volume.
     // Model space is the whole point: the volume is a property of the building, so the lookup
     // must happen in the building's own frame rather than the camera's — which is precisely what
@@ -580,14 +585,14 @@ struct VsOut {
     // Crown self-occlusion factor from the vertex shader (Enfusion GeometryAO volume,
     // 1 = open sky). Smooth-interpolated like a baked vertex colour, which is what it
     // replaces. 1.0 for every section whose material names no volume.
-    @location(13) @interpolate(flat) surface_receivers: u32,
 #ifdef NATIVE_PBR_TANGENTS
     // Pack the existing three scalars only in this variant to stay within
-    // the device's16 inter-stage-variable baseline. Values are unchanged.
+    // the device's 16-variable baseline, including FrontFacing. Values are unchanged.
     @location(12) crown_tree_snow: vec3<f32>,
-    @location(14) authored_tangent: vec3<f32>,
-    @location(15) authored_binormal: vec3<f32>,
+    @location(13) authored_tangent: vec3<f32>,
+    @location(14) authored_binormal: vec3<f32>,
 #else
+    @location(13) @interpolate(flat) surface_receivers: u32,
     @location(12) crown_ao: f32,
     @location(14) tree_snow: vec2<f32>,
 #endif
@@ -814,13 +819,19 @@ fn vs_gpu(
     out.section = rec.section;
     // Vegetation = any canopy flag (bush/tree/forest cover the whole vegetation MapType set);
     // gates the foliage lighting in fs_gpu so non-plant cutouts don't get the leaf look.
-    out.is_veg = select(0u, 1u, canopy != 0u);
+    let is_veg = select(0u, 1u, canopy != 0u);
     // Explicit actual-owner proof; CPU admission permits rigid or Keep-only visual
     // LODs. Keep retains roof height above SurfaceY. Pinned On vertices, forest
     // planes, proxies and vegetation remain excluded in colour and both prepasses.
     let snow_conform = mode == 0.0 || (mode == 2.0 && conform_sel <= 1u);
     // Existing flat lane: bit0 snow, bit1 grounded rigid paving. No extra varyings.
-    out.surface_receivers = select(0u, (inst.flags >> 7u) & 3u, canopy == 0u && snow_conform);
+    let surface_receivers = select(0u, (inst.flags >> 7u) & 3u, canopy == 0u && snow_conform);
+#ifdef NATIVE_PBR_TANGENTS
+    out.vegetation_receivers = vec2<u32>(is_veg, surface_receivers);
+#else
+    out.is_veg = is_veg;
+    out.surface_receivers = surface_receivers;
+#endif
     let tree_proof = select(0.0, inst.conform2.w, canopy == INST_CANOPY_TREE);
     var tree_snow_values = vec2<f32>(tree_snow_height(pos.y, inst.conform0.y, inst.conform0.z, tree_proof), inst.conform1.x);
     // Separate exact-stock owner proof, carried in existing lanes. Forest mode1
@@ -872,18 +883,33 @@ fn decode_nohq_packed(texel: vec4<f32>, rg_packed: bool) -> vec3<f32> {
 // The colour fragment body, shared by the two entries below. It discards (the cutout alpha
 // test), which is why the hardware cannot test depth before running it -- unless the entry
 // says so (REN-OBJ-004).
+fn retained_is_veg(in: VsOut) -> u32 {
+#ifdef NATIVE_PBR_TANGENTS
+    return in.vegetation_receivers.x;
+#else
+    return in.is_veg;
+#endif
+}
+fn retained_surface_receivers(in: VsOut) -> u32 {
+#ifdef NATIVE_PBR_TANGENTS
+    return in.vegetation_receivers.y;
+#else
+    return in.surface_receivers;
+#endif
+}
+
 fn retained_snow_receiver(in: VsOut) -> bool {
     let sm = section_materials[in.section];
     // Retained draws are opaque/cutout. Original base alpha drives their discard
     // and A2C coverage independently of the RGB-only snow material layer.
-    return (in.surface_receivers & 1u) != 0u &&
+    return (retained_surface_receivers(in) & 1u) != 0u &&
         (sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER | SECTION_NO_OBJECT_SNOW)) == 0u &&
         dot(sm.emissive.rgb, sm.emissive.rgb) < 1e-8 && dot(in.normal, in.normal) > 1e-8;
 }
 
 fn retained_ground_receiver(in: VsOut) -> bool {
-    if ((in.surface_receivers & 2u) == 0u || frame.ground_weather.x <= 0.18 || linear <= 0.5 ||
-        in.is_veg != 0u) { return false; }
+    if ((retained_surface_receivers(in) & 2u) == 0u || frame.ground_weather.x <= 0.18 || linear <= 0.5 ||
+        retained_is_veg(in) != 0u) { return false; }
     let sm = section_materials[in.section];
     if ((sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER)) != 0u ||
         dot(sm.emissive.rgb, sm.emissive.rgb) >= 1e-8) { return false; }
@@ -1162,7 +1188,7 @@ fn fs_gpu_body(in: VsOut
     // core bounded to a sensible scene-linear value, while vegetation receives
     // no legacy emissive compensation at all.
     let emissive_peak = max(sm.emissive.r, max(sm.emissive.g, sm.emissive.b));
-    if (in.is_veg != 0u) {
+    if (retained_is_veg(in) != 0u) {
         // Legacy vegetation emissive was a fixed-function visibility boost, not
         // source radiance. Keep a small daytime residual only.
         m.emissive = sm.emissive.rgb * 0.10;
@@ -1208,7 +1234,7 @@ fn fs_gpu_body(in: VsOut
     // cutouts (Stage 2 MapType gate, carried per-instance via the canopy flag) — other alpha-tested
     // cutouts (fences, grills, road/footprint decals) light normally. GPU-driven set is
     // opaque/cutout, never the glass path. The alpha discard above stays keyed on alpha_ref.
-    let veg_cutout = in.is_veg != 0u && sm.alpha_ref > 0.0;
+    let veg_cutout = retained_is_veg(in) != 0u && sm.alpha_ref > 0.0;
     // Debug: the baked volume as greyscale, before fog, matching the per-frame path's reach view.
     // The SHAPED value (strength + floor applied), not the raw one, because that is what the
     // lighting will actually use — a debug view of a number the renderer does not consume is how
@@ -1518,7 +1544,7 @@ fn fs_gpu_body(in: VsOut
             mat3x3<f32>(in.model_rot0, in.model_rot1, in.model_rot2)),
         foliage_shadow_ao,
         // Retained objects are never the first-person cockpit (is_cockpit = false).
-        veg_cutout, false, veg_cutout, in.is_veg != 0u, false, in.clip.xy,
+        veg_cutout, false, veg_cutout, retained_is_veg(in) != 0u, false, in.clip.xy,
         !(veg_cutout && foliage_screen_ao < 0.5),
         retained_snow_receiver(in), retained_snow_exposure(in),
         retained_tree_snow_cover(in),

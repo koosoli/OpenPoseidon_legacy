@@ -15514,7 +15514,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                                 if (authoredBasis) sec.flags |= WGR_MODEL_SECTION_NATIVE_PBR_TANGENTS;
                                 static std::unordered_set<std::string> reportedTangents;
                                 if (tangentPreview && reportedTangents.size() < 32 && reportedTangents.insert(path).second)
-                                    LOG_INFO(Graphics, "Wgpu authored UV0 tangent preview: material={} admission={} producer=1", path, authoredBasis);
+                                    LOG_INFO(Graphics, "Wgpu authored UV0 tangent preview: material={} admission={} producer=2", path, authoredBasis);
                             }
                             static std::unordered_set<std::string> reportedNormals;
                             if (reportedNormals.size() < 32 && reportedNormals.insert(path).second)

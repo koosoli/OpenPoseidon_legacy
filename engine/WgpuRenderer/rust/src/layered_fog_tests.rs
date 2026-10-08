@@ -210,7 +210,7 @@ fn actual_fog_receivers_gpu_keep_intervening_air_without_changing_alpha() {
  let retained=include_str!("gfx3d/gpu_driven.wgsl");let shared=include_str!("shaders/shading.wgsl");
  assert!(frame.contains("return apply_fog_receiver(rgb, world_pos_rel, true)"),"Generic source gates preserved");
  assert!(direct.contains("material.sun_ambient.w > 0.5,"),"Actual direct MapType role includes trunks");
- assert!(retained.contains("veg_cutout, false, veg_cutout, in.is_veg != 0u"),"Actual retained MapType role includes trunks");
+ assert!(retained.contains("veg_cutout, false, veg_cutout, retained_is_veg(in) != 0u"),"Actual retained MapType role includes trunks");
  assert!(shared.contains("!is_cockpit && cave.y >= 0.999"),"Cockpit/native interior receiver exclusion is preserved");
  assert!(direct.contains("return vec4<f32>(out_rgb, out_a2)"));
  assert!(retained.contains("return vec4<f32>(out_rgb, out_a)"));

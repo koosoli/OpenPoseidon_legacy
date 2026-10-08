@@ -168,6 +168,29 @@ fn native_pbr_basic_scaled_preview_and_legacy_shaders_compose() {
                 }).collect();
                 assert!(locations.len()<=16 && locations.iter().all(|&v|v<16));
                 assert_eq!(output.iter().any(|m|m.name.as_deref()==Some("authored_tangent")),tangents);
+                let _=authored_interface_probe(tangents,false);
+                if tangents {let _=authored_interface_probe(true,true);}
+                // Naga module validation does not enforce the device's stage-I/O limit.
+                // FrontFacing consumes one of the baseline 16 fragment input variables.
+                for entry in module.entry_points.iter().filter(|e|e.stage==naga::ShaderStage::Fragment) {
+                    let mut inputs=0usize;
+                    let mut builtins=0usize;
+                    let mut visit=|ty:naga::Handle<naga::Type>, binding:&Option<naga::Binding>| {
+                        match binding {
+                            Some(naga::Binding::Location {..}) => inputs+=1,
+                            Some(naga::Binding::BuiltIn(naga::BuiltIn::FrontFacing |
+                                naga::BuiltIn::SampleIndex | naga::BuiltIn::SampleMask)) => builtins+=1,
+                            None => if let naga::TypeInner::Struct {members,..}=&module.types[ty].inner {
+                                inputs+=members.iter().filter(|m|matches!(m.binding,Some(naga::Binding::Location {..}))).count();
+                            },
+                            _ => {},
+                        }
+                    };
+                    for argument in &entry.function.arguments {visit(argument.ty,&argument.binding);}
+                    assert!(inputs+builtins<=16,
+                        "{} preview={preview} tangents={tangents}: {inputs} inputs + {builtins} builtins exceed 16",
+                        entry.name);
+                }
             }
             if path != "gfx3d/shader3d.wgsl" {
                 let layout = module.types.iter().find_map(|(_, ty)| {
@@ -190,6 +213,73 @@ fn native_pbr_basic_scaled_preview_and_legacy_shaders_compose() {
                     None
                 }).flatten().collect();
                 assert_eq!(normal_layout, [384, 400], "{path} independent normal fields");
+            }
+        }
+    }
+}
+
+// A real device pipeline catches stage-I/O limits that Naga composition alone
+// cannot. Reuse the production varying declaration and fragment signature;
+// resource-free bodies isolate interface validation from bindless features.
+fn authored_interface_probe(tangents: bool, extra_varying: bool) -> naga::Module {
+    let start=PRODUCTION.find("struct VsOut {").unwrap();
+    let end=start+PRODUCTION[start..].find("\n};").unwrap()+3;
+    let mut interface=PRODUCTION[start..end].to_owned();
+    if extra_varying {
+        interface=interface.replace("\n};", "\n    @location(15) extra: f32,\n};");
+    }
+    let start=PRODUCTION.find("fn fs_gpu(").unwrap();
+    let end=start+PRODUCTION[start..].find(" {").unwrap();
+    let signature=&PRODUCTION[start..end];
+    let source=format!(r#"{interface}
+@vertex fn vs_probe() -> VsOut {{ return VsOut(); }}
+@fragment {signature} {{
+#ifdef NATIVE_PBR_TANGENTS
+    return select(vec4<f32>(in.uv,0.0,1.0),vec4<f32>(in.uv,1.0,1.0),front);
+#else
+    return vec4<f32>(in.uv,0.0,1.0);
+#endif
+}}
+"#);
+    let mut defs=std::collections::HashMap::new();
+    if tangents {defs.insert("NATIVE_PBR_TANGENTS".to_owned(),ShaderDefValue::Bool(true));}
+    let mut composer=crate::shaders::build_composer();
+    composer.make_naga_module(NagaModuleDescriptor {
+        source:&source,file_path:"authored_interface_probe.wgsl",shader_defs:defs,..Default::default()
+    }).unwrap_or_else(|e|panic!("{}",e.emit_to_string(&composer)))
+}
+
+#[test]
+fn authored_tangent_interface_actual_device_pipeline_reserves_front_facing_slot() {
+    let (device,_queue)=super::cull::tests::headless().expect("authored interface proof requires GPU");
+    assert_eq!(device.limits().max_inter_stage_shader_variables,16,
+        "prove the production baseline, not an expanded adapter limit");
+    for (tangents,extra) in [(false,false),(true,false),(true,true)] {
+        let module=authored_interface_probe(tangents,extra);
+        let shader=device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label:Some("production authored varying interface"),
+            source:wgpu::ShaderSource::Naga(std::borrow::Cow::Owned(module)),
+        });
+        for samples in [1,4] {
+            let scope=device.push_error_scope(wgpu::ErrorFilter::Validation);
+            let _pipeline=device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label:Some("authored varying device proof"),layout:None,
+                vertex:wgpu::VertexState {module:&shader,entry_point:Some("vs_probe"),
+                    compilation_options:Default::default(),buffers:&[]},
+                primitive:Default::default(),depth_stencil:None,
+                multisample:wgpu::MultisampleState {count:samples,..Default::default()},
+                fragment:Some(wgpu::FragmentState {module:&shader,entry_point:Some("fs_gpu"),
+                    compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState {
+                        format:wgpu::TextureFormat::Rgba8Unorm,blend:None,write_mask:wgpu::ColorWrites::ALL,
+                    })]}),
+                multiview_mask:None,cache:None,
+            });
+            let error=pollster::block_on(scope.pop());
+            if extra {
+                let error=error.expect("negative control must reject 16 locations plus FrontFacing").to_string();
+                assert!(error.contains("max_inter_stage_shader_variables"),"{error}");
+            } else {
+                assert!(error.is_none(),"tangents={tangents} samples={samples}: {error:?}");
             }
         }
     }

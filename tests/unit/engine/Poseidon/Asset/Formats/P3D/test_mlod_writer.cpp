@@ -530,18 +530,29 @@ TEST_CASE("Authored UV0 tangent sidecar preserves seams winding and cache proven
     REQUIRE(mesh.vertices[mesh.triangles[0].indices[1]].tangent.z==0.f); // loader reverses0/1
     REQUIRE(mesh.vertices[mesh.triangles[1].indices[1]].tangent.z==.25f);
     for (const auto& v : mesh.vertices) REQUIRE(v.hasTangentFrame);
-    authored.sourceFormat="XOB_TSPACE_UV0_V1";
+    Enfusion::MarkXobAuthoredTangentProducer(authored);
+    REQUIRE(authored.sourceFormat=="MLOD"); // container still enters modern adapter/streaming
+    REQUIRE(authored.metadata.at(Enfusion::kXobTangentProducerKey)==Enfusion::kXobTangentProducer);
     const auto blob=Poseidon::ModelBlob::Serialize(authored);
     Poseidon::Model::Model restored;
     REQUIRE(Poseidon::ModelBlob::Deserialize(blob.data(),blob.size(),restored));
-    REQUIRE(restored.sourceFormat=="XOB_TSPACE_UV0_V1");
+    REQUIRE(restored.sourceFormat=="MLOD");
+    REQUIRE(restored.metadata.at(Enfusion::kXobTangentProducerKey)==Enfusion::kXobTangentProducer);
     REQUIRE(Poseidon::ModelBlob::Serialize(restored)==blob);
     REQUIRE(Enfusion::HasXobAuthoredTangentFrame(restored,restored.lodLevels[0].mesh));
+    auto brokenV1=restored;
+    brokenV1.sourceFormat="XOB_TSPACE_UV0_V1";
+    brokenV1.metadata.clear();
+    REQUIRE_FALSE(Enfusion::HasXobAuthoredTangentFrame(brokenV1,brokenV1.lodLevels[0].mesh));
+    auto staleMetadata=restored;
+    staleMetadata.metadata[Enfusion::kXobTangentProducerKey]="XOB_TSPACE_UV0_V1";
+    REQUIRE_FALSE(Enfusion::HasXobAuthoredTangentFrame(staleMetadata,staleMetadata.lodLevels[0].mesh));
     restored.lodLevels[0].mesh.vertices[0].normal={0,0,0};
     REQUIRE_FALSE(Enfusion::HasXobAuthoredTangentFrame(restored,restored.lodLevels[0].mesh));
     const auto oldBlob=Poseidon::ModelBlob::Serialize(legacy);
     REQUIRE(Poseidon::ModelBlob::Deserialize(oldBlob.data(),oldBlob.size(),restored));
-    REQUIRE(restored.sourceFormat!="XOB_TSPACE_UV0_V1"); // old producer cannot qualify
+    REQUIRE(restored.sourceFormat=="MLOD");
+    REQUIRE(restored.metadata.find(Enfusion::kXobTangentProducerKey)==restored.metadata.end());
     REQUIRE_FALSE(Enfusion::HasXobAuthoredTangentFrame(restored,restored.lodLevels[0].mesh));
     REQUIRE_FALSE(Enfusion::XobCornerTangentFrame(part,0,1,0).supplied); // source mapping
     REQUIRE_FALSE(Enfusion::XobCornerTangentFrame(part,3,0,0).supplied); // bounds

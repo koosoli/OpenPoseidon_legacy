@@ -733,6 +733,12 @@ TEST_CASE("Authored tangent option invalidates earlier model cache keys", "[ast0
     tangent.set("1");
     const auto authored=ModelDerivedCache::MakeKey("owned.xob",std::string(64,'a')).Compute();
     REQUIRE(authored!=original);
+    Asset::Cache::DerivedAssetKey previous;
+    previous.AddInput("model",Asset::VirtualPath::Parse("owned.xob"),std::string(64,'a'));
+    previous.AddOption("modelProducer","1");
+    previous.AddOption("blobFormat",std::to_string(ModelBlob::kFormatVersion));
+    previous.AddOption("authoredUv0TangentProducer","1");
+    REQUIRE(authored!=previous.Compute()); // broken V1 container mark must not return
     tangent.set("0");
     REQUIRE(ModelDerivedCache::MakeKey("owned.xob",std::string(64,'a')).Compute()==original);
     tangent.set("1");pbr.set("0");

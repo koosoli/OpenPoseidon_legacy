@@ -6,10 +6,19 @@
 
 namespace Poseidon::Asset::Formats::Enfusion
 {
-inline constexpr const char* kXobTangentProducer = "XOB_TSPACE_UV0_V1";
+inline constexpr const char* kXobTangentProducerKey = "xobAuthoredUv0TangentProducer";
+inline constexpr const char* kXobTangentProducer = "XOB_TSPACE_UV0_V2";
+inline void MarkXobAuthoredTangentProducer(Poseidon::Model::Model& model)
+{
+    // Container identity controls the modern adapter and streaming routes.
+    // Producer provenance is independent and survives the existing blob metadata.
+    if (model.sourceFormat == "MLOD") model.metadata[kXobTangentProducerKey] = kXobTangentProducer;
+}
 inline bool HasXobAuthoredTangentFrame(const Poseidon::Model::Model& model, const Poseidon::Model::Mesh& mesh)
 {
-    if (model.sourceFormat != kXobTangentProducer || mesh.vertices.empty()) return false;
+    const auto producer = model.metadata.find(kXobTangentProducerKey);
+    if (model.sourceFormat != "MLOD" || producer == model.metadata.end() ||
+        producer->second != kXobTangentProducer || mesh.vertices.empty()) return false;
     for (const auto& vertex : mesh.vertices)
     {
         const auto& n = vertex.normal;

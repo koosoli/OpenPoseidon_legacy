@@ -1632,7 +1632,7 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
                                       options.preserveTangentFrame ? &model.tangentFrames : nullptr));
     // A versioned producer mark prevents older/generated cached frames qualifying.
     // Serialized Model::Vertex already retains the optional axes; no blob layout change.
-    if (options.preserveTangentFrame) parsed->sourceFormat = Enf::kXobTangentProducer;
+    if (options.preserveTangentFrame) Enf::MarkXobAuthoredTangentProducer(*parsed);
     if (parsed->lodLevels.empty())
     {
         why = "MLOD loader produced no levels";

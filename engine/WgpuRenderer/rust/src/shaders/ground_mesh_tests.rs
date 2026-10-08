@@ -78,8 +78,8 @@ fn ground_mesh_actual_fragment_helper_and_both_routes_compose() {
             .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&composer)));
     }
     let retained = include_str!("../gfx3d/gpu_driven.wgsl");
-    assert!(retained.contains("(in.surface_receivers & 1u) != 0u"));
-    assert!(retained.contains("(in.surface_receivers & 2u) == 0u"));
+    assert!(retained.contains("(retained_surface_receivers(in) & 1u) != 0u"));
+    assert!(retained.contains("(retained_surface_receivers(in) & 2u) == 0u"));
     assert!(!retained.contains("@location(15)"));
 }
 
