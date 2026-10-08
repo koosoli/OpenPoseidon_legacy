@@ -125,7 +125,7 @@ Installed acceptance:
   the local atlas. Actual Luxembourg imagery publishes at generation4/revision2,
   then generation5/revision2 after the near-window move. Buildings remain.
   Alps, Grand Canyon and dateline publish NASA fallback; no stale local image
-  follows the geographic relocation. Clean renderer logs and exit.
+  follows the geographic relocation. No renderer/device failures and clean exit.
 - `build/earth-streaming/20261008-042509/result.json`: optional local-surface
   and building workers enabled, rolling near windows, coarse horizons, orbit
   and return all pass. Actual two-second SDL W/S input moves from 12,000,000m
@@ -155,3 +155,8 @@ The useful bounded slice is complete and tested. VBS4 parity is **not achieved**
 global detailed imagery, buildings, roads, vegetation, streamed collision/AI,
 global editor placement and seamless floating-origin travel remain substantial
 future work. This does not change the ordinary OFP simulation world.
+
+The empty Earth fixture can emit the existing `No shape object NOID <no shape>
+tested for aiming position` player diagnostic. The camera preview renders and
+remains interactive, but this fixture is not character/gameplay acceptance and
+its log should not be described as error-free.
