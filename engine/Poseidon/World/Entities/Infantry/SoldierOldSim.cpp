@@ -349,7 +349,9 @@ void Man::OnAddImpulse(Vector3Par force, Vector3Par torque)
 
 void Man::Simulate(float deltaT, SimulationImportance prec)
 {
-    if (EarthStreaming::Enabled() && !_isDead && IsInLandscape() && GWorld && GWorld->GetRealPlayer() == this)
+    if (EarthStreaming::Enabled() && !_isDead && IsInLandscape() && GWorld && GWorld->GetRealPlayer() == this &&
+        !_ladderBuilding && (!Brain() || !Brain()->GetVehicleIn()) && !_falling &&
+        _freeFallUntil <= Glob.time && std::abs(Speed().Y()) < 0.1f)
     {
         const auto ground = EarthStreaming::QueryGround(Position().X(), Position().Z());
         if (!ground)
