@@ -17,7 +17,7 @@ struct TwSurface {
     material1: vec4<f32>,  // roughness, ssr on, debug view, water glow (W3j: in-scatter scale)
     absorption: vec4<f32>, // rgb 1/m
     scattering: vec4<f32>, // rgb 1/m
-    detail: vec4<f32>,     // gust, slick, streak amounts
+    detail: vec4<f32>,     // gust, slick, streak amounts, Earth preview marker
     shore0: vec4<f32>,     // ShoreParams: period (s), amplitude (H/2, m), variation, gamma
     shore1: vec4<f32>,     // ShoreParams: breakSpan, curl, runup, enabled (0 until the field exists)
     shore2: vec4<f32>,     // ShoreParams: turbidity (1/m), swell heading (rad, travel), shore field centre xz
@@ -45,6 +45,16 @@ struct ConformParams {
 
 // ------------------------------------------------------------------ terrain (OP heightmap)
 
+fn earthWater() -> bool { return tw.detail.w > 0.5; }
+fn earthWaterDrop(xz: vec2<f32>) -> f32 {
+    if (!earthWater()) { return 0.0; }
+    let d = xz - vec2<f32>(6400.0);
+    let r2 = dot(d, d);
+    let radius = 6378137.0;
+    return r2 / (radius + sqrt(max(radius * radius - r2, 0.0)));
+}
+fn waterLevelAt(xz: vec2<f32>) -> f32 { return tw.sea.x - earthWaterDrop(xz); }
+
 fn hm_load(ix: i32, iz: i32) -> f32 {
     let cx = clamp(ix, 0, i32(cf.hm_width) - 1);
     let cz = clamp(iz, 0, i32(cf.hm_height) - 1);
@@ -71,6 +81,11 @@ fn terrainHeightAt(xz: vec2<f32>) -> f32 {
     let lower = y00 + (y10 - y00) * f.y + (y01 - y00) * f.x;
     let upper = y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y;
     let h = select(upper, lower, f.x <= 1.0 - f.y);
+    if (earthWater()) {
+        // Terrarium ocean tiles are elevation zero, not seabed. Supply a visual deep
+        // floor there; retain real curved terrain on land. No gameplay depth changes.
+        return select(h, waterLevelAt(xz) - 200.0, h + earthWaterDrop(xz) <= 0.5);
+    }
     // (W9b, OP) beyond the map the heightmap repeats its edge texels outward, so every edge texel
     // ran on to the horizon as a straight strip of its own depth: seen from high up, parallel
     // lines of shallow (cyan) or dry (holed) sea. The water's idea of the ground goes deep there

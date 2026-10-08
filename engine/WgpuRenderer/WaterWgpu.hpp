@@ -25,6 +25,10 @@ class WaterWgpu : public IWaterRenderer
 
     void DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd) override;
 
+    // Earth preview: bounded visual sea on the currently published rolling heightmap.
+    // No finite Landscape shore/body/interaction or gameplay-water authority is used.
+    void DrawEarthWater(Scene& scene, float originX, float originZ, float grid, uint32_t samples);
+
   private:
     void QueueRainWater(bool enabled);
     uint64_t _rainWaterRevision = UINT64_MAX;

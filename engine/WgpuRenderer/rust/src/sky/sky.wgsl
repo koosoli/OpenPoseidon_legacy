@@ -37,7 +37,7 @@ struct Sky {
     // x = linear output (1) vs self-tonemap (0), y = star intensity, z = lens-flare gain,
     // w = second cloud layer (high cirrus): 0 = off, 1 = flat sheet, 2 = volumetric shell march.
     output: vec4<f32>,
-    cam_pos: vec4<f32>,       // xyz = absolute camera; w = height above ocean, 0 disables ocean clipping
+    cam_pos: vec4<f32>,       // xyz = absolute camera; w = ocean height, 0 off, -1 Earth preview
     // CLD-020 cloud sun-transmittance map. xy = world-xz of the map's min corner (SNAPPED to the
     // texel grid on the CPU, so the field does not crawl as the camera moves), z = 1/span in
     // metres, w = strength (0 = the pass is skipped entirely and every surface reads fully lit).
@@ -383,7 +383,8 @@ fn raymarch_sky(pos: vec3<f32>, ray: vec3<f32>, sun: vec3<f32>, t_max: f32) -> v
     let cos_t = dot(ray, sun);
     let rp = rayleigh_phase(cos_t);
     let mp = mie_phase(cos_t);
-    let steps = max(sky.control.y, 4.0);
+    let steps = select(max(sky.control.y, 4.0), 16.0,
+                       earth_preview() && sky.night_zenith.w > 100000.0);
 
     var lum = vec3<f32>(0.0);
     var trans = vec3<f32>(1.0);
@@ -451,8 +452,27 @@ fn hash21(p: vec2<f32>) -> f32 {
 // Star radiance alone: the catalogue field + the Milky Way band, gated to night by sun altitude
 // and scaled by the master gain (Dev Tools -> Sky -> Stars -> "Star brightness"). Split out of
 // sky_radiance so a caller can ask for a STAR-FREE sky; see sky_radiance_weighted.
+fn earth_preview() -> bool { return sky.cam_pos.w < -0.5; }
+fn sky_origin() -> vec3<f32> {
+    if (earth_preview()) {
+        // Same tangent-frame centre as EarthCoordinates.hpp, including lateral flight.
+        return vec3<f32>(sky.cam_pos.x - 6400.0, sky.params.z + sky.cam_pos.y,
+                         sky.cam_pos.z - 6400.0);
+    }
+    return vec3<f32>(0.0, sky.params.z + max(sky.night_zenith.w, 0.0), 0.0);
+}
+fn earth_space_weight() -> f32 {
+    if (!earth_preview()) { return 0.0; }
+    return smoothstep(30000.0, 100000.0, length(sky_origin()) - sky.params.z);
+}
+fn earth_cloud_weight() -> f32 {
+    if (!earth_preview()) { return 0.0; }
+    return smoothstep(15000.0, 60000.0, length(sky_origin()) - sky.params.z);
+}
+
 fn star_radiance(dir: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
-    let night_blend_stars = 1.0 - smoothstep(sky.night_params.y, sky.night_params.x, sun.y);
+    let night_blend_stars = max(1.0 - smoothstep(sky.night_params.y, sky.night_params.x, sun.y),
+                               earth_space_weight());
     let star_amount = max(sky.output.y, 0.0);
     if (star_amount > 0.001 && night_blend_stars > 0.0) {
         return star_field(dir, sun) * star_amount * night_blend_stars;
@@ -472,23 +492,35 @@ fn sky_radiance_lanes(dir: vec3<f32>, star_weight: f32) -> SkyRadianceLanes {
     let planet_r = sky.params.z;
     let top_r = planet_r + sky.params.w;
     let cam_alt = max(sky.night_zenith.w, 0.0);
-    let pos = vec3<f32>(0.0, planet_r + cam_alt, 0.0);
+    let pos = sky_origin();
 
     // Sun radiance scale x the authored exposure (radiance -> scene-referred).
     let radiance = sky.sun_dir.w * sky.params.y;
 
     // March a horizon-floored direction so the sky BELOW the horizon smoothly continues the
     // horizon colour instead of darkening into an ugly band (the terrain / water draws over it).
-    let march_dir = normalize(vec3<f32>(dir.x, max(dir.y, 0.0), dir.z));
+    let march_dir = select(normalize(vec3<f32>(dir.x, max(dir.y, 0.0), dir.z)), dir,
+                           earth_preview());
     let atmo = ray_sphere(pos, march_dir, top_r);
     var color = vec3<f32>(0.0);
     if (atmo.y > 0.0) {
-        color = raymarch_sky(pos, march_dir, sun, atmo.y) * radiance;
+        if (earth_preview()) {
+            // From space integrate only the crossed atmosphere, stopping at the planet.
+            // Marching millions of metres of vacuum undersamples the thin blue limb.
+            let ground = ray_sphere(pos, march_dir, planet_r);
+            let begin = max(atmo.x, 0.0);
+            let end = select(atmo.y, min(atmo.y, ground.x), ground.x > 0.0);
+            if (end > begin) {
+                color = raymarch_sky(pos + march_dir * begin, march_dir, sun, end - begin) * radiance;
+            }
+        } else {
+            color = raymarch_sky(pos, march_dir, sun, atmo.y) * radiance;
+        }
     }
 
     // Night-faded horizon haze: blend toward the scene fog colour near the horizon so the fogged
     // distant terrain and the sky meet without a seam. Fades out at night (dark sky).
-    let haze_strength = sky.fog_color.w * (1.0 - sky.ground_albedo.w);
+    let haze_strength = sky.fog_color.w * (1.0 - sky.ground_albedo.w) * (1.0 - earth_space_weight());
     if (haze_strength > 0.0) {
         var fog = sky.fog_color.rgb;
         if (sky.output.x > 0.5) {
@@ -513,7 +545,7 @@ fn sky_radiance_lanes(dir: vec3<f32>, star_weight: f32) -> SkyRadianceLanes {
     let night_blend = 1.0 - smoothstep(sky.night_params.y, sky.night_params.x, sun.y);
     if (night_blend > 0.0) {
         let night = mix(sky.night_horizon.rgb, sky.night_zenith.rgb, clamp(dir.y, 0.0, 1.0));
-        color = color + night * sky.night_params.z * night_blend;
+        color = color + night * sky.night_params.z * night_blend * (1.0 - earth_space_weight());
     }
 
     return SkyRadianceLanes(max(color,vec3<f32>(0.0)),atmosphere);
@@ -1061,7 +1093,11 @@ fn star_field(dir_in: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
     // Below the horizon there is no sky to put stars in, and near it atmospheric extinction takes
     // them out well before the geometric horizon -- so fade rather than cut. Measured on the WORLD
     // up direction, not the celestial one: the horizon does not tilt with the pole.
-    let horizon = smoothstep(-0.02, 0.16, dir_in.y);
+    var horizon = mix(smoothstep(-0.02, 0.16, dir_in.y), 1.0, earth_space_weight());
+    if (earth_preview()) {
+        let ground = ray_sphere(sky_origin(), dir_in, sky.params.z);
+        if (ground.x > 0.0 && ground.x <= ground.y) { horizon = 0.0; }
+    }
     if (horizon <= 0.0) {
         return vec3<f32>(0.0);
     }
@@ -1141,6 +1177,34 @@ struct CloudResult {
     inscatter: vec3<f32>, // premultiplied cloud in-scatter (already faded); composite = bg*trans + inscatter
     trans: f32,           // view-ray transmittance through the cloud
 };
+
+// Distant Earth clouds use a single spherical sheet with broad weather banks. Three
+// samples of the existing noise volume replace the local cloud march above 60 km.
+// This is a visual cloud envelope, not global weather simulation or satellite data.
+fn earth_planet_cloud(dir: vec3<f32>, max_dist: f32) -> CloudResult {
+    let pos = sky_origin();
+    let shell = ray_sphere(pos, dir, sky.params.z + 5500.0);
+    let t = select(shell.y, shell.x, shell.x > 0.0);
+    if (shell.x > shell.y || t <= 0.0 || t >= max_dist || sky.cloud0.x <= 0.001) {
+        return CloudResult(vec3<f32>(0.0), 1.0);
+    }
+    let n = normalize(pos + dir * t);
+    let drift = vec3<f32>(sky.cloud1.x, sky.cloud4.z * 0.05, sky.cloud1.y) / 2000000.0;
+    let broad = textureSampleLevel(cloud_noise, cloud_samp, n * 2.8 - drift, 0.0).r;
+    let bands = textureSampleLevel(cloud_noise, cloud_samp,
+                                  n * 7.0 + vec3<f32>(broad * 0.28) - drift, 0.0).r;
+    let fine = textureSampleLevel(cloud_noise, cloud_samp, n * 24.0 - drift, 0.0).g;
+    let field = broad * 0.72 + bands * 0.23 + fine * 0.05;
+    let threshold = mix(0.63, 0.34, clamp(sky.cloud0.x, 0.0, 1.0));
+    let cover = smoothstep(threshold - 0.045, threshold + 0.09, field);
+    let opacity = cover * 0.92;
+    let sun = normalize(sky.sun_dir.xyz);
+    let daylight = max(dot(n, sun), 0.0);
+    let sun_t = sample_transmittance(n * (sky.params.z + 5500.0), sun);
+    let lit = (vec3<f32>(0.018, 0.027, 0.045) + sun_t * daylight *
+               (sky.sun_dir.w * sky.params.y / PI)) * mix(0.72, 1.0, fine);
+    return CloudResult(lit * opacity, 1.0 - opacity);
+}
 
 // March the cloud shell and return raw (inscatter, transmittance) — NOT composited over the
 // background. `bg` is used only as the local sky colour for the cloud AMBIENT; the caller composites
@@ -2102,7 +2166,7 @@ fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
     let sun = normalize(sky.sun_dir.xyz);
     let planet_r = sky.params.z;
     let cam_alt = max(sky.night_zenith.w, 0.0);
-    let pos = vec3<f32>(0.0, planet_r + cam_alt, 0.0);
+    let pos = sky_origin();
 
     // Two lanes on purpose: `bg` is what a CLOUD standing on this ray may be lit by (star-free at
     // night), `color` is what the eye sees. With the default occlusion of 1 exactly one of the two
@@ -2140,7 +2204,7 @@ fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
         let in_moon = sky.moon_params.w >= 0.5 &&
                       dot(dir, moon_dir) > cos(max(sky.moon_params.x, 1.0e-4));
         var disc_cover = 1.0;
-        if (cos_sun > cos_radius || in_moon) {
+        if ((cos_sun > cos_radius || in_moon) && earth_cloud_weight() < 1.0) {
             let t = disc_cloud_cover(pos, dir, sun, sky.sun_dir.w * sky.params.y, bg);
             disc_cover = t * t;
         }
@@ -2192,6 +2256,10 @@ fn fs_sky_env(in: VsOut) -> @location(0) vec4<f32> {
     if (star_occl > 0.001) {
         color = color + star_radiance(dir, normalize(sky.sun_dir.xyz)) * star_occl;
     }
+    if (earth_cloud_weight() >= 1.0) {
+        let cloud = earth_planet_cloud(dir, 1e12);
+        return vec4<f32>(cloud.inscatter + color * cloud.trans, 1.0);
+    }
     // Cheap low-step cloud path (few primary + light steps): the 256x128 env map is re-baked
     // every frame and projected to SH-9, so the full detailed march would both cost a lot AND
     // alias the wind-scrolled noise into temporal SH flicker. Low frequencies are all SH keeps.
@@ -2209,7 +2277,12 @@ fn fs_sky_env(in: VsOut) -> @location(0) vec4<f32> {
     // the same two-layer sky the camera does. It runs in whatever mode the Sky tab selected, and
     // the env map is only 256x128, so even the volumetric path is a rounding error here; the
     // measured cost of the layer as a whole is dominated by the full-resolution cloud pass.
-    let cloud = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, bg, 0.0, 1e12));
+    var cloud = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, bg, 0.0, 1e12));
+    if (earth_preview()) {
+        let planet = earth_planet_cloud(dir, 1e12);
+        cloud = CloudResult(mix(cloud.inscatter, planet.inscatter, earth_cloud_weight()),
+                            mix(cloud.trans, planet.trans, earth_cloud_weight()));
+    }
     return vec4<f32>(color * cloud.trans + cloud.inscatter, 1.0);
 }
 
@@ -2249,6 +2322,11 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
         scene_dist = min(scene_dist, sky.cam_pos.w / -dir.y);
     }
 
+    if (earth_cloud_weight() >= 1.0) {
+        let cloud = earth_planet_cloud(dir, scene_dist);
+        return vec4<f32>(cloud.inscatter, cloud.trans);
+    }
+
     // Local sky colour for the cloud AMBIENT -- star-free (see sky_radiance_cloud_bg). This is the
     // pixel where the bug lived: with the full sky radiance here, a star's radiance became the
     // ambient lighting the cloud in front of it, so the composite handed it straight back.
@@ -2257,8 +2335,13 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
     let deck = march_clouds(pos, dir, sun, radiance, bg,
                             CLOUD_STEPS, CLOUD_LIGHT_STEPS, hash21(in.clip.xy), scene_dist);
     // Second layer, behind the deck. Bounded by the same scene distance, so terrain occludes it.
-    let cloud = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, bg,
+    var cloud = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, bg,
                                                      hash21(in.clip.xy), scene_dist));
+    if (earth_preview()) {
+        let planet = earth_planet_cloud(dir, scene_dist);
+        cloud = CloudResult(mix(cloud.inscatter, planet.inscatter, earth_cloud_weight()),
+                            mix(cloud.trans, planet.trans, earth_cloud_weight()));
+    }
 
     // ---- Lens flare -----------------------------------------------------------------------
     // Written here rather than as its own pass because this shader already holds everything a

@@ -20643,7 +20643,9 @@ void EngineWgpu::PushSkyRuntime()
     const double evoDetail = std::fmod(evo * 2.0 * cloudT, kWindWrap);
     const double evoWeather = std::fmod(evo * 0.5 * cloudT, kWindWrap);
     rt.cloud_evolve = {static_cast<float>(evoShape), static_cast<float>(evoDetail), static_cast<float>(evoWeather),
-                       0.0f};
+                       (_terrain && _terrain->IsEarthStreaming()) ? 1.0f : 0.0f};
+    // Reserved runtime lane: Earth presentation only. Rust consumes this marker before
+    // replacing cloud4.w with the ordinary cirrus puffiness; the public ABI is unchanged.
     _pendingSet.skyRuntime = rt; // REN-THR-013: queued
     _pendingSet.skyRuntimeDirty = true;
 }

@@ -312,6 +312,13 @@ struct FrameInputs<'a> {
     rotor: rotor_wash::RotorWash,
 }
 
+fn earth_preview(p: &WgrWaterParams) -> bool { p.flow_direction_speed[3] < -0.5 }
+fn earth_node_in_window(p: &WgrWaterParams, n: &[f32; 4]) -> bool {
+    let max_x = p.world_origin.x + p.hm_width.saturating_sub(1) as f32 * p.terrain_grid;
+    let max_z = p.world_origin.y + p.hm_height.saturating_sub(1) as f32 * p.terrain_grid;
+    n[0] < max_x && n[1] < max_z && n[0] + n[2] > p.world_origin.x && n[1] + n[2] > p.world_origin.y
+}
+
 fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
     let tw = p.tidewater;
     let detail_offset = f.detail_offset;
@@ -344,7 +351,7 @@ fn surface_block(p: &WgrWaterParams, f: &FrameInputs<'_>) -> TwSurface {
         material1: [tw[2][1], tw[1][2], debug_view_override().unwrap_or(tw[3][3]), glow_override().unwrap_or(p.tidewater_fx[2]).clamp(0.0, 2.0)],
         absorption: [WATER_ABSORPTION[0], WATER_ABSORPTION[1], WATER_ABSORPTION[2], 0.0],
         scattering: [WATER_SCATTERING[0], WATER_SCATTERING[1], WATER_SCATTERING[2], 0.0],
-        detail: [tw[3][0], tw[3][1], tw[3][2], 0.0],
+        detail: [tw[3][0], tw[3][1], tw[3][2], if earth_preview(p) { 1.0 } else { 0.0 }],
         shore0,
         shore1,
         shore2,
@@ -1007,7 +1014,13 @@ impl Tidewater {
 
     fn prepare_inner(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, camera: Option<&WgrCamera>) {
         if let Some(p) = self.last_params {
-            self.update_shore_field(device, queue, &p);
+            if earth_preview(&p) {
+                // A rolling Earth height window has no authoritative bathymetry/coast sim.
+                self.shore_grid = None;
+                self.coast.clear();
+            } else {
+                self.update_shore_field(device, queue, &p);
+            }
         }
         let (Some(p), Some(cam)) = (self.last_params, camera) else {
             self.instance_count = 0;
@@ -1099,7 +1112,12 @@ impl Tidewater {
         let clip = glam::Mat4::from_cols_array(&cam.proj) * glam::Mat4::from_cols_array(&cam.view);
         let planes = cdlod::SidePlanes::from_clip(clip);
         let tc = std::time::Instant::now();
-        let nodes = cdlod::Selection::new(&self.cdlod, cam_pos, p.sea_level, Some(planes)).run();
+        let mut nodes = cdlod::Selection::new(&self.cdlod, cam_pos, p.sea_level, Some(planes)).run();
+        if earth_preview(&p) {
+            // Keep the existing CDLOD budget; discard nodes outside the known terrain.
+            // The material clips crossing nodes precisely and softens the window edge.
+            nodes.retain(|n| earth_node_in_window(&p, n));
+        }
         self.prep_stats[3] += tc.elapsed().as_secs_f32() * 1000.0;
         self.instance_count = nodes.len() as u32;
         if !nodes.is_empty() {
@@ -1111,6 +1129,7 @@ impl Tidewater {
     pub fn update(&mut self, encoder: &mut wgpu::CommandEncoder, timers: &crate::gpu_timers::GpuTimers) {
         if self.last_params.is_some() {
             self.fft.dispatch(encoder, timers);
+            if self.last_params.as_ref().is_some_and(earth_preview) { return; }
             // W5b: the caustics follow this frame's FFT (W7h: timed)
             if !self.bind_dirty {
                 timers.begin(encoder, crate::gpu_timers::Region::TwCaustics);
@@ -1482,6 +1501,26 @@ impl Tidewater {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn earth_window_keeps_crossing_nodes_and_rejects_unrelated_ocean() {
+        let mut p = <WgrWaterParams as bytemuck::Zeroable>::zeroed();
+        p.world_origin = crate::ffi::WgrVec2 { x: -3200.0, y: 5000.0 };
+        p.hm_width = 257;
+        p.hm_height = 257;
+        p.terrain_grid = 25.0;
+        assert!(earth_node_in_window(&p, &[-4000.0, 4500.0, 2000.0, 8.0]));
+        assert!(!earth_node_in_window(&p, &[-5200.0, 5000.0, 2000.0, 8.0]));
+        assert!(!earth_node_in_window(&p, &[3200.0, 5000.0, 2000.0, 8.0]));
+        assert!(!earth_node_in_window(&p, &[0.0, 11400.0, 2000.0, 8.0]));
+        let c = cdlod::Cdlod::default();
+        let all = cdlod::Selection::new(&c, glam::DVec3::new(0.0, 500.0, 8000.0), 0.0, None).run();
+        let kept = all.iter().filter(|n| earth_node_in_window(&p, n)).count();
+        assert!(kept > 0 && kept < all.len() && kept <= cdlod::MAX_INSTANCES);
+        assert!(!earth_preview(&p));
+        p.flow_direction_speed[3] = -1.0;
+        assert!(earth_preview(&p));
+    }
 
     #[test]
     fn surface_block_layout_matches_the_wgsl() {

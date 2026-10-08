@@ -327,7 +327,8 @@ mod sky_device_tests {
             queue,
             params,
             ivp,
-            [0.0, 0.0, 0.0, 0.0],
+            if params.cloud4[3] > 0.5 { [6400.0, params.night_zenith[3], 6400.0, 0.0] }
+            else { [0.0, 0.0, 0.0, 0.0] },
             &bytemuck::Zeroable::zeroed(),
             &bytemuck::Zeroable::zeroed(),
         );
@@ -395,6 +396,36 @@ mod sky_device_tests {
         drop(data);
         buf.unmap();
         out
+    }
+
+    #[test]
+    fn earth_daylight_space_has_catalogue_stars_below_the_tangent_horizon() {
+        let Some((device, queue)) = headless() else { return; };
+        let mut sky = super::Sky::new(&device, &queue, crate::HDR_FORMAT, 1);
+        sky.milky_way = 0.0; // Verify actual catalogue points, not a diffuse band.
+        let fwd = normalize([0.0, -0.25, 1.0]);
+        let right = normalize(cross([0.0, 1.0, 0.0], fwd));
+        let up = cross(fwd, right);
+        let ivp = [
+            [right[0] * 0.5, right[1] * 0.5, right[2] * 0.5, 0.0],
+            [up[0] * 0.5, up[1] * 0.5, up[2] * 0.5, 0.0],
+            [0.0; 4], [fwd[0], fwd[1], fwd[2], 1.0],
+        ];
+        let mut p = crate::ffi::WgrSky::default();
+        p.sun_dir = [0.0, 1.0, 0.0, 22.0]; // Daytime; ordinary night gate is closed.
+        p.params[1] = 0.0; // Isolate catalogue radiance from atmosphere/discs.
+        p.night_params[2] = 0.0;
+        p.fog_color[3] = 0.0;
+        p.night_zenith[3] = 10_000_000.0;
+        p.cloud0[0] = 0.0;
+        p.moon_params[3] = 0.0;
+        let ordinary = render_sky_rgba(&device, &queue, &mut sky, &p, ivp);
+        p.cloud4[3] = 1.0;
+        let earth = render_sky_rgba(&device, &queue, &mut sky, &p, ivp);
+        let energy = |v: &[[f32; 4]]| v.iter().map(|p| p[0] + p[1] + p[2]).sum::<f32>();
+        assert!(energy(&ordinary) < 1e-5, "ordinary daylight sky acquired stars");
+        assert!(energy(&earth) > 1e-3, "space catalogue missing: {}", energy(&earth));
+        assert!(earth.iter().flatten().all(|v| v.is_finite()));
     }
 
     #[test]
@@ -2527,6 +2558,10 @@ impl Sky {
             }
         }
 
+        let earth_preview = sky.cloud4[3] > 0.5;
+        let mut adjusted_sky = *sky;
+        if earth_preview { adjusted_sky.params[2] = 6_378_137.0; }
+        let sky = &adjusted_sky;
         let key = lut_key(sky);
         if self.last_lut != Some(key) {
             self.last_lut = Some(key);
@@ -2581,7 +2616,9 @@ impl Sky {
             ],
             cam_pos: [
                 cam_pos[0], cam_pos[1], cam_pos[2],
-                self.ocean_level.map_or(0.0, |level| (cam_pos[1] - level).max(0.0)),
+                if earth_preview { -1.0 } else {
+                    self.ocean_level.map_or(0.0, |level| (cam_pos[1] - level).max(0.0))
+                },
             ],
             // Whatever begin_cloud_shadow_frame fixed for this frame -- NOT a fresh
             // derivation from this call's cam_pos. This is the identical number the camera

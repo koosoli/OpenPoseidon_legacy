@@ -132,7 +132,7 @@ struct TwDisp {
 };
 
 fn twDisplace(worldXZ: vec2<f32>, spacing: f32) -> TwDisp {
-    let seaLevel = tw.sea.x;
+    let seaLevel = waterLevelAt(worldXZ);
     let ground = terrainHeightAt(worldXZ);
     let depth = seaLevel - ground;
 
@@ -643,9 +643,15 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         }
         horizon = srgb_to_linear(horizon);
     }
-    let csm = shadow_strength(rel, vec3<f32>(0.0, 1.0, 0.0), fogK, dwx, dwy);
-    let ter = terrain_sun_shadow(pos.xz, pos.y) * fogK;
-    var sunLight = sunDiffuse * PI * (1.0 - max(csm, ter)) * cloud_sun_shadow(pos.xz);
+    var csm = 0.0;
+    var ter = 0.0;
+    var cloudShadow = 1.0;
+    if (!earthWater()) {
+        csm = shadow_strength(rel, vec3<f32>(0.0, 1.0, 0.0), fogK, dwx, dwy);
+        ter = terrain_sun_shadow(pos.xz, pos.y) * fogK;
+        cloudShadow = cloud_sun_shadow(pos.xz);
+    }
+    var sunLight = sunDiffuse * PI * (1.0 - max(csm, ter)) * cloudShadow;
 
     // water film thickness at this pixel and the distance to the swash front (ShoreWaves.swashEdge):
     // the sheet ends exactly on its analytic leading edge, not on the mesh triangles
@@ -999,6 +1005,16 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         res = dbgUnder * 2.0;
     } else if (dbg == 23) {
         res = dbgLight * vec3<f32>(0.1, 1.0, 1.0);
+    }
+    if (earthWater()) {
+        let size = vec2<f32>(f32(cf.hm_width - 1u), f32(cf.hm_height - 1u)) * cf.terrain_grid;
+        let local = lagXZ - cf.origin;
+        let edge = min(min(local.x, local.y), min(size.x - local.x, size.y - local.y));
+        if (edge <= 0.0 || thickness <= 0.0) { discard; }
+        let fade = smoothstep(0.0, 200.0, edge) *
+                   (1.0 - smoothstep(6000.0, 8000.0, frame.cam_pos.y));
+        let base = textureSampleLevel(waterSceneColor, smpLinearClamp, screenUV, 0.0).rgb;
+        res = mix(base, res, fade);
     }
     return vec4<f32>(res, 1.0);
 }

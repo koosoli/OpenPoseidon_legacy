@@ -873,6 +873,55 @@ void WaterWgpu::QueueRainWater(bool enabled)
     if (_rainWaterHasSurface) _engine.SubmitRainWaterMarker();
 }
 
+void WaterWgpu::DrawEarthWater(Scene& scene, float originX, float originZ, float grid, uint32_t samples)
+{
+    Camera* camera = scene.GetCamera();
+    const auto& look = _engine.WaterLook();
+    if (!_renderer || !camera || !look.enabled || !EarthStreaming::Enabled() ||
+        camera->Position().Y() >= 8000.0f || samples < 2 || grid <= 0.0f)
+        return;
+    static const bool forceCurrentOp = [] {
+        const char* value = std::getenv("WGR_WATER_BACKEND");
+        return value && std::strcmp(value, "0") == 0;
+    }();
+    if (forceCurrentOp) return; // This preview adapter requires Tidewater's bounded material.
+
+    // Tidewater owns its camera-centred CDLOD mesh. This marker submits that path;
+    // its shader clips to this Earth window and follows the spherical sea datum.
+    // The height source has coast elevations, no bathymetry: zero-elevation ocean
+    // receives a presentation-only deep floor. Shore simulation stays disabled.
+    WgrWaterParams p{};
+    p.world_origin = {originX, originZ};
+    p.terrain_grid = grid;
+    p.hm_width = p.hm_height = samples;
+    p.sea_level = 0.0f;
+    p.time = look.freeze.freezeTime ? look.freeze.fixedTime : render::frame::GPresentationSnapshot().timeSeconds;
+    p.water_backend = 1u; // Tidewater Native
+    p.flow_direction_speed.w = -1.0f; // Earth-only presentation marker; normal ocean kind is zero.
+    p.fft_control = {1.0f, 1337.0f, 0.0f, 0.0f};
+    uint32_t freezeMask = look.freeze.freezeFft ? WGR_WATER_FREEZE_FFT : 0u;
+    std::memcpy(&p.fft_control.z, &freezeMask, sizeof(freezeMask));
+    p.fft_wind_sea = {0.82f, 0.57f, 7.0f, 0.65f};
+    UpdateSeaWind(p.time);
+    const float amplitude = _seaWindInit ? WeatherAmplitudeScale(_seaWindSpeed, 7.0f, look.seaCalmScale) : 1.0f;
+    const auto& t = look.tidewater;
+    p.tidewater[0] = {std::max(t.amplitude, 0.0f) * amplitude, std::clamp(t.choppiness, 0.0f, 2.0f),
+                      std::max(t.swellScale, 0.0f), t.swellHeadingDeg};
+    p.tidewater[1] = {std::max(t.foamCoverage, 0.0f), std::max(t.foamIntensity, 0.0f), 0.0f,
+                      std::max(t.reflectionStrength, 0.0f)};
+    p.tidewater[2] = {std::clamp(t.cascadeScale, 0.25f, 4.0f), std::clamp(t.roughness, 0.0f, 1.0f),
+                      std::max(t.sss, 0.0f), std::clamp(t.backscatter, 0.0f, 1.0f)};
+    p.tidewater[3] = {std::max(t.gust, 0.0f), std::max(t.slick, 0.0f), std::max(t.windrow, 0.0f), float(t.debugView)};
+    p.tidewater_fx.z = std::clamp(t.waterGlow, 0.0f, 2.0f);
+    p.tidewater_sea = {7.0f, 100.0f, std::clamp(t.whitecaps, 0.0f, 1.0f), 0.0f};
+    p.optics_params = {1.0f, 1.0f, 0.0f, 1.0f};
+    _engine.QueueWaterParams(p);
+    WgrWaterNode marker{};
+    marker.origin = {originX, originZ};
+    marker.size = (samples - 1) * grid;
+    _engine.SubmitWater(std::span<const WgrWaterNode>(&marker, 1));
+}
+
 void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
 {
     // The rolling Earth heightmap is presentation-only. The finite Landscape's
