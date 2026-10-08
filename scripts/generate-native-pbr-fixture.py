@@ -71,7 +71,7 @@ def create_fixture(root):
     model = root / "native-pbr-spheres.p3d"
     model.write_bytes(b"MLOD" + struct.pack("<II", 0x101, 1) + lod)
     terrain = bytearray(b"4WVR" + struct.pack("<II", 256, 256))
-    terrain.extend(struct.pack("<h", 50) * (256 * 256))
+    terrain.extend(struct.pack("<h", 5000) * (256 * 256))
     terrain.extend(struct.pack("<H", 1) * (256 * 256))
     names = bytearray(512 * 32 + 128)
     names[:len(b"landtext\\mo.pac")] = b"landtext\\mo.pac"

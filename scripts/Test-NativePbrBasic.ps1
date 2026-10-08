@@ -18,7 +18,10 @@ $repo=Split-Path $PSScriptRoot -Parent
 if(!$Output){$Output=Join-Path $repo ('build/native-pbr-basic/'+(Get-Date -Format 'yyyyMMdd-HHmmss'))}
 $Output=[IO.Path]::GetFullPath($Output)
 New-Item -ItemType Directory -Path $Output -Force | Out-Null
-$fixture=& $Python (Join-Path $PSScriptRoot 'generate-native-pbr-fixture.py') (Join-Path $Output 'fixture') | ConvertFrom-Json
+# Legacy shape names have a shorter limit than graphics profile paths. Keep
+# every embedded model/material/texture name short even in a long worktree.
+$fixtureDirectory=Join-Path ([IO.Path]::GetTempPath()) ('op-pbr-'+[guid]::NewGuid().ToString('N').Substring(0,8))
+$fixture=& $Python (Join-Path $PSScriptRoot 'generate-native-pbr-fixture.py') $fixtureDirectory | ConvertFrom-Json
 if($LASTEXITCODE-ne0){throw 'Synthetic fixture generation failed'}
 if($PrepareOnly){$fixture;return}
 if(!$env:LOCK_OWNER){throw 'Run through scripts/with-game-lock.sh'}
@@ -70,7 +73,9 @@ try{
    }while($true)
    $null=Send @{cmd='exec';code='player allowDamage false;0 setRain 0;0 setOvercast 0;0 setFog 0;setDate [1985,6,21,16,0]'}
    Start-Sleep -Seconds 4
-   if(!(Select-String -LiteralPath $log -Pattern '\-\-test-model: placed ' -Quiet)){throw 'Synthetic model did not load'}
+   if(!(Select-String -LiteralPath $log -Pattern '\-\-test-model: placed .*\(lods=[1-9][0-9]* faces=[1-9][0-9]*\)' -Quiet)){
+    throw 'Synthetic model has no drawable geometry; check legacy shape-path length and fixture format'
+   }
    # --test-model places relative to the player, not a freefly CameraEffect.
    # Read its actual pose, then center both captures on that exact fixed object.
    $position=Select-String -LiteralPath $log -Pattern '--test-model: object pos ([\d.+eE-]+) ([\d.+eE-]+) ([\d.+eE-]+)' | Select-Object -Last 1
