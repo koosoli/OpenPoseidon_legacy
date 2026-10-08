@@ -25,6 +25,7 @@ inline bool Enabled()
 }
 constexpr float CoordinateLimit = 500000.0f;
 constexpr float OrbitAltitudeLimit = 30000000.0f;
+constexpr float FreeFlightAltitudeMinimum = -12000.0f;
 constexpr float CameraAnchor = 6400.0f;
 struct Location
 {
@@ -37,6 +38,14 @@ inline bool ValidateLocation(double latitude, double longitude, double altitude)
     return std::isfinite(latitude) && std::abs(latitude)<=84.0 &&
         std::isfinite(longitude) && std::abs(longitude)<=180.0 &&
         std::isfinite(altitude) && altitude>=500.0 && altitude<=OrbitAltitudeLimit;
+}
+// Internal physical flight/rebase may approach low/negative resident terrain.
+// Explicit geographic Go retains its separate safe starting-altitude contract.
+inline bool ValidateFlightLocation(double latitude, double longitude, double altitude)
+{
+    return std::isfinite(latitude) && std::abs(latitude)<=84.0 &&
+        std::isfinite(longitude) && std::abs(longitude)<=180.0 &&
+        std::isfinite(altitude) && altitude>=FreeFlightAltitudeMinimum && altitude<=OrbitAltitudeLimit;
 }
 // Geographic frame for explicit teleports and Earth free-flight rebasing.
 // Finite OFP map objects/navigation remain local.
@@ -64,7 +73,7 @@ class LocationState
     // explicit Go wins; neither old worker results nor old ground survive.
     bool Rebase(uint64_t expectedRevision, double latitude, double longitude, double altitude)
     {
-        if (!ValidateLocation(latitude,longitude,altitude)) return false;
+        if (!ValidateFlightLocation(latitude,longitude,altitude)) return false;
         std::lock_guard lock(_mutex);
         if (_location.revision != expectedRevision) return false;
         _location={latitude,longitude==180.0 ? -180.0 : longitude,float(altitude),_location.revision+1};

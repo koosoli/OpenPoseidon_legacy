@@ -15,6 +15,7 @@
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
+#include <Poseidon/World/Terrain/EarthFreeFlight.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -370,16 +371,19 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
         Matrix3 speedOrient;
         speedOrient.SetUpAndDirection(VUp, Direction());
 
+        const bool earth = EarthStreaming::Enabled();
+        const auto earthLocation = earth ? EarthStreaming::GetLocation() : EarthStreaming::Location{};
+        const auto earthGround = earth ? EarthStreaming::Locations().Ground() : nullptr;
+        const EarthStreaming::FlightPoint earthPrevious{Position()[0], Position()[1], Position()[2]};
         float speedScale = 1.0f;
         if (_altitudeSpeedScaling)
         {
             // The curve steepens with altitude: precise placement close to the
             // ground, then rapidly increasing travel speed high above the map.
-            const bool earthPreview=EarthStreaming::Enabled();
-            const float altitude = earthPreview ? float(Earth::CameraAltitude(Position()[0],Position()[1],Position()[2])) :
+            const float altitude = earth ? 0.0f :
                 fmax(Position()[1] - GLandscape->SurfaceYAboveWater(Position()[0],Position()[2]),0.0f);
-            speedScale = fmin(1.0f + altitude * 0.03f + altitude * altitude * 0.00002f, 64.0f);
-            if (earthPreview) speedScale=std::max(speedScale,std::min(altitude/80.0f,250000.0f));
+            speedScale = earth ? EarthStreaming::FlightSpeedScale(earthPrevious, earthGround.get(), earthLocation.revision) :
+                fmin(1.0f + altitude * 0.03f + altitude * altitude * 0.00002f, 64.0f);
 
             // Shift is an absolute two-times multiplier for Zeus flight: it
             // accelerates sideways, vertical, and forward movement equally.
@@ -390,13 +394,14 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
         }
 
         Vector3 speedWanted = speedOrient * Vector3(aside, up, forward) * speedScale;
-        if (EarthStreaming::Enabled())
+        if (earth)
         {
             // Ordinary Zeus flight keeps W/S parallel to the ground. Planet
             // exploration must instead approach the point we are looking at,
             // including a nearly vertical descent from orbit. Retain world-up
-            // for the separate raise/lower controls.
-            speedWanted=(Orientation()*Vector3(aside,0,forward)+VUp*up)*speedScale;
+            // for the separate raise/lower controls, using physical radial up.
+            const auto radial = EarthStreaming::FlightUp(earthPrevious);
+            speedWanted=(Orientation()*Vector3(aside,0,forward)+Vector3(float(radial.x),float(radial.y),float(radial.z))*up)*speedScale;
         }
         if (_inertia)
         {
@@ -414,9 +419,16 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
             _speed = speedWanted;
         }
 
-        const bool earth = EarthStreaming::Enabled();
-        const auto earthLocation = earth ? EarthStreaming::GetLocation() : EarthStreaming::Location{};
         Vector3 position = Position() + _speed * deltaT;
+        if (earth)
+        {
+            const auto next = EarthStreaming::ConstrainFlight(earthPrevious,
+                {position[0],position[1],position[2]}, earthGround.get(), earthLocation.revision);
+            if (next.x != position[0]) _speed[0] = 0;
+            if (next.z != position[2]) _speed[2] = 0;
+            if (next.y != position[1]) _speed[1] = 0;
+            position = Vector3(next.x,next.y,next.z);
+        }
         if (_altitudeSpeedScaling)
         {
             // Zeus is a map-level camera. Its altitude speed boost makes it
@@ -436,12 +448,11 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
             {
                 if (earth)
                 {
-                    saturate(position[1],500.0f,EarthStreaming::OrbitAltitudeLimit);
                     const Earth::Coordinate oldOrigin{earthLocation.latitude,earthLocation.longitude};
                     if (const auto next = Earth::CameraRebase(oldOrigin,position[0],position[1],position[2]))
                     {
-                        const double altitude = std::clamp(next->altitude,500.0,double(EarthStreaming::OrbitAltitudeLimit));
-                        if (EarthStreaming::ValidateLocation(next->origin.latitude,next->origin.longitude,altitude))
+                        const double altitude = std::clamp(next->altitude,double(EarthStreaming::FreeFlightAltitudeMinimum),double(EarthStreaming::OrbitAltitudeLimit));
+                        if (EarthStreaming::ValidateFlightLocation(next->origin.latitude,next->origin.longitude,altitude))
                         {
                             if (!EarthStreaming::Locations().Rebase(earthLocation.revision,
                                 next->origin.latitude,next->origin.longitude,altitude))
@@ -500,10 +511,12 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
         // above the ground / sea bed only. The clipboard export below keeps heights relative to
         // the sea surface, so an underwater shot exports as a negative camSetPos height.
         // Sinkhole W1 (Malprave terrainHole4): inside a terrain hole it may go down to the hole's floor.
-        Vector3 floorPos = position;
-        float surfY = earth ? -12000.0f : GLandscape->CameraFloorY(floorPos, nullptr, false);
-        saturateMax(position[1], surfY + 0.05);
-        if (earth) saturate(position[1],500.0f,EarthStreaming::OrbitAltitudeLimit);
+        if (!earth)
+        {
+            Vector3 floorPos = position;
+            const float surfY = GLandscape->CameraFloorY(floorPos, nullptr, false);
+            saturateMax(position[1], surfY + 0.05);
+        }
         Move(position);
         // The legacy manual camera aims at a point 100 km ahead. Orbital flight
         // can cross that point in one update, causing CamEffectFOV to turn the

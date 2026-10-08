@@ -12,6 +12,7 @@
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
+#include <Poseidon/World/Terrain/EarthFreeFlight.hpp>
 
 // The PCH pulls in Logging.hpp which #defines DebugLog() as a logging macro.
 // That collides with the method ImGui::DebugLog().  Undef before including
@@ -7617,15 +7618,16 @@ void DrawMainWindow()
         {
             static auto location=EarthStreaming::GetLocation();
             const auto current=EarthStreaming::GetLocation();
-            if (location.revision!=current.revision) location=current;
+            if (location.revision!=current.revision) { location=current; location.altitude=std::max(location.altitude,500.0f); }
             ImGui::TextWrapped("Go to a geographic region without restarting. Elevation streams in after the overview; this preview does not relocate the playable mission.");
             ImGui::TextWrapped("Resident near ground supports infantry; uncovered teleports are rejected. Geographic Go moves the camera, not the player.");
             ImGui::TextWrapped("Cached buildings and landscape features: (c) OpenStreetMap contributors, ODbL 1.0. openstreetmap.org/copyright. Presentation prototype; no building collision or road navigation.");
             ImGui::TextWrapped("Optional Luxembourg imagery: ACT ortho_2023, CC0 1.0. Prepared regional coverage; NASA overview elsewhere.");
             ImGui::InputDouble("Latitude",&location.latitude,0.1,1.0,"%.6f");
             ImGui::InputDouble("Longitude",&location.longitude,0.1,1.0,"%.6f");
-            ImGui::InputFloat("Altitude (metres)",&location.altitude,500.0f,5000.0f,"%.0f");
-            ImGui::TextDisabled("Latitude -84..84; longitude -180..180; altitude 500..30,000,000m");
+            ImGui::InputFloat("Go starting altitude (metres)",&location.altitude,500.0f,5000.0f,"%.0f");
+            ImGui::TextDisabled("Latitude -84..84; longitude -180..180; Go starts at 500..30,000,000m above datum");
+            ImGui::TextWrapped("Manual flight can descend to resident terrain +0.30m. Unknown ground retains a guarded 500m radial fallback; low flight pauses at coverage gaps.");
             const auto go=[&](double latitude,double longitude,double altitude) {
                 Defer([latitude,longitude,altitude] {
                     s_zeusStatus=SetEarthPreviewLocation(latitude,longitude,altitude)
@@ -7643,7 +7645,7 @@ void DrawMainWindow()
             if (Dev::Button("Grand Canyon##Earth")) go(36.1,-112.1,6000);
             Dev::PanelSameLine();
             if (Dev::Button("Dateline##Earth")) go(-16.8,179.95,12000);
-            Dev::PanelHelp("Freefly: W/S follow the view, Shift accelerates, mouse wheel changes travel speed.");
+            Dev::PanelHelp("Freefly: W/S follow the view, Shift accelerates, mouse wheel changes ground clearance/altitude.");
             ImGui::Text("Origin %.6f, %.6f; revision %llu",current.latitude,current.longitude,
                 static_cast<unsigned long long>(current.revision));
             ImGui::TextWrapped("%s",s_zeusStatus.c_str());
@@ -8117,7 +8119,11 @@ void ProcessEvent(const SDL_Event& event)
             Defer([steps] {
                 if (!s_zeusCamera) return;
                 Vector3 position=s_zeusCamera->Position();
-                position[1]=EarthStreaming::ZoomAltitude(position[1],steps);
+                const auto location = EarthStreaming::GetLocation();
+                const auto ground = EarthStreaming::Locations().Ground();
+                const auto next = EarthStreaming::ZoomFlight({position[0],position[1],position[2]}, steps,
+                    ground.get(), location.revision);
+                position = Vector3(next.x,next.y,next.z);
                 s_zeusCamera->SetPosition(position);
                 s_zeusCamera->ResetTargets();
             });

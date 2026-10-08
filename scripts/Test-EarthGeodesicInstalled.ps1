@@ -9,6 +9,7 @@ param(
     [string]$CacheDirectory=(Join-Path $env:LOCALAPPDATA 'OpenPoseidon/world-stream'),
     [ValidateRange(60,240)][int]$PatchTimeoutSeconds=150,
     [switch]$Offline,
+    [switch]$GroundApproachOnly,
     [switch]$SelfTest
 )
 $ErrorActionPreference='Stop'
@@ -94,6 +95,7 @@ $settings=@{POSEIDON_WHOLE_WORLD='1';POSEIDON_EARTH_LATITUDE='49.61';POSEIDON_EA
 if($Offline){$settings.HTTPS_PROXY='http://127.0.0.1:9';$settings.HTTP_PROXY='http://127.0.0.1:9';$settings.ALL_PROXY='http://127.0.0.1:9';$settings.NO_PROXY=''}
 $saved=@{};$p=$null;$client=$null;$writer=$null;$reader=$null;$heldKey=$null
 $result=@{installed=$stamp;cacheDirectory=$CacheDirectory;offline=[bool]$Offline;passed=$false;arms=@();scope='Actual Earth free-flight only; finite mission entities/navigation are not globally rebased. Screenshots require inspection.'}
+$result.groundApproachOnly=[bool]$GroundApproachOnly
 $overall=[DateTime]::UtcNow.AddSeconds(200+2*$PatchTimeoutSeconds)
 function Health{Require ($p -and !$p.HasExited) 'Owned game exited';Require ([DateTime]::UtcNow-lt$overall) 'Overall acceptance deadline'}
 function Send($command){
@@ -166,6 +168,35 @@ function RebaseArm([string]$name,[double]$altitude,[double]$threshold,[double]$m
     Require ($retired.generation-eq0 -or $retired.generation-gt$oldGround.generation) 'Old resident generation survived the origin change'
     return $arm
 }
+function GroundApproachArm {
+    $location=Location;$support=Ground $anchor $anchor
+    Require ($support.covered -and $support.height-lt490) 'Close-ground regression arm needs current lowland resident support below490m'
+    Require ((Eval ('triFreeFlyPose "6400 6400 '+(Fmt ($support.height+3))+' 0 -15"'))-ceq'OK') 'Near-ground test pose refused'
+    WaitFrames 3;$before=Snapshot
+    Require ($before.camera.position[1]-lt500) 'Manual camera still enforces500m navigation floor'
+    $until=[DateTime]::UtcNow.AddSeconds(8)
+    try {
+        $script:heldKey=29;$null=Send @{cmd='key';sc=29;hold=$true} # actual default SDL Z, MoveDown
+        do {
+            WaitFrames 2;$during=Snapshot;$g=Ground $during.camera.position[0] $during.camera.position[2]
+            Require ($g.covered -and $g.revision-eq$location.revision) 'Resident support disappeared during bounded vertical approach'
+            $clearance=(Num $during.camera.position[1])-(Num $g.height)
+            Require ($clearance-ge.25) 'Manual descent tunneled into resident triangles'
+            Require ([DateTime]::UtcNow-lt$until) 'Actual held SDL Z did not approach resident terrain'
+        } while($clearance-gt.35)
+        WaitFrames 10;$rest=Snapshot;$floor=Ground $rest.camera.position[0] $rest.camera.position[2]
+    } finally {$null=Send @{cmd='key_up';sc=29};$script:heldKey=$null}
+    $clearance=(Num $rest.camera.position[1])-(Num $floor.height)
+    Require ($floor.covered -and $clearance-ge.25 -and $clearance-le.35) 'Held descent failed to remain at resident terrain+.30m'
+    $arm=@{name='actual-lowland-ground-approach';before=$before;after=$rest;ground=$floor;clearance=$clearance;input='Actual SDL Z/29 held through floor, then Q/20 ascent'}
+    $script:result.arms+=,$arm;$arm.screenshot=Capture 'ground-030m'
+    try {
+        $script:heldKey=20;$null=Send @{cmd='key';sc=20;hold=$true};$until=[DateTime]::UtcNow.AddSeconds(6)
+        do {WaitFrames 2;$ascent=Snapshot;Require ([DateTime]::UtcNow-lt$until) 'Actual SDL Q could not leave the floor'} while((Num $ascent.camera.position[1])-(Num $rest.camera.position[1])-lt1)
+    } finally {$null=Send @{cmd='key_up';sc=20};$script:heldKey=$null}
+    $arm.ascent=$ascent
+    Require ($ascent.location.revision-eq$location.revision) 'Vertical near-ground controls rebased the geographic origin'
+}
 try{
     foreach($key in $settings.Keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process');[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
     $null=New-Item -ItemType Directory -Force -Path $env:POSEIDON_USER_DIR
@@ -185,6 +216,7 @@ try{
     $null=Send @{cmd='exec';code='setAccTime 1;player allowDamage false;0 setRain 0;0 setOvercast 0;0 setFog 0;triDevPanelShow 0;triCursorMove [0,0]'}
     $result.initial=WaitGround (Location)
     Require ($result.initial.ground.height-lt950) 'Initial Luxembourg camera is not safely above actual resident terrain'
+    if($GroundApproachOnly){GroundApproachArm}else{
     $near=RebaseArm 'near-1000m' 1000 32000 5000
     $near.fresh=WaitGround $near.after.location $result.initial.ground.generation
     $near.cameraGround=Ground $near.after.camera.position[0] $near.after.camera.position[2]
@@ -202,6 +234,7 @@ try{
     Require ($orbit.before.location.longitude-gt179 -and $orbit.after.location.longitude-lt0) 'Automatic orbital rebase did not wrap the dateline'
     Require (!(@(PatchRows)|Where-Object {$_.revision-ge$orbitLocation.revision})) 'Orbital arm unexpectedly requested/published near DEM'
     $orbit.screenshot=Capture 'orbital-dateline-rebased'
+    }
     $result.performance=Send @{cmd='frame_performance'}
     $tiles=@(Get-ChildItem -LiteralPath $CacheDirectory -Directory -Filter 'terrarium-z*'|Get-ChildItem -Filter '*.png')
     Require ($tiles.Count-le256 -and !($tiles|Where-Object {$_.Length-gt2MB})) 'Elevation disk cache bound exceeded'
@@ -212,7 +245,7 @@ try{
     $result.passed=$true;Write-Host ('Earth geodesic installed acceptance PASS: '+$out)
 }catch{$result.error=$_.Exception.Message;throw}finally{
     if($p -and !$p.HasExited){
-        if($writer){try{if($null-ne$heldKey){$writer.WriteLine('{"cmd":"key_up","sc":7}')};$writer.WriteLine('{"cmd":"exit"}');$null=$p.WaitForExit(10000)}catch{}}
+        if($writer){try{if($null-ne$heldKey){$writer.WriteLine((@{cmd='key_up';sc=$heldKey}|ConvertTo-Json -Compress))};$writer.WriteLine('{"cmd":"exit"}');$null=$p.WaitForExit(10000)}catch{}}
         if(!$p.HasExited){$p.Kill();$null=$p.WaitForExit(10000)}
     }
     if($client){$client.Dispose()}
