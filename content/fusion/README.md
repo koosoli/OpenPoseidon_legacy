@@ -52,8 +52,25 @@ Placed as close to CWA as the 51.2 km world allows (owner, 2026-10-09). North up
 `Install-Fusion.ps1` debinarises the game's `BIN\config.bin` and Nogova's config and
 passes them to the builder (`--config`): every source world's airport (ILS point,
 direction and taxi paths) and map names move with their island. Everon's airport is the
-main one; Malden's and Nogova's are `SecondaryAirports`, and each AI plane uses the
-nearest (World::NearestAirport; worlds without SecondaryAirports keep their one airport).
+main one; Malden's and Nogova's are `SecondaryAirports` (worlds without SecondaryAirports keep their one airport).
+
+Which one a plane lands at (`AirplaneAuto::Airport`, every 2 s in the air):
+
+1. the nearest its side may use and does not know to be held by the enemy, i.e. no known enemy on the ground
+   (not static, not dead) within 1.5 km of the runway's middle. This uses what the side knows, so a field taken
+   unseen counts as friendly until someone reports it. Its own units need not be there (captured or empty fields
+   are fine), and aircraft flying over don't count;
+2. failing that, the nearest it may use; failing that, the nearest. A plane always has somewhere to come down.
+
+In the pattern it diverts only away from a field that has turned hostile or been closed, not to one that has
+become nearer. On short final it goes around first, then diverts. On the ground it uses the field it is on.
+Missions decide with two commands. The airport is given by number (0 = Everon's, then Malden, Nogova) or by name
+(`"Everon"`, `"Malden"`, `"Nogova"`):
+
+    setAirportClosed ["Malden", true]      // closed to everyone; false opens it again
+    setAirportSide ["Nogova", east]        // only East and its friends land there; sideLogic = anyone again
+
+These are local, like `setFriend`. In multiplayer, run them where the AI planes are simulated (the server).
 Kolgujev and Desert Island have no airport in the game's config. The map carries the
 game's own names: 18 on Everon, 14 on Malden, 30 on Nogova (Kolgujev and Desert Island
 have none in the original config), plus the five island labels.

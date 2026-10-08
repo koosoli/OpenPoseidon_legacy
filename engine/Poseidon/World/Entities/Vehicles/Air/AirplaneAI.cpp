@@ -11,6 +11,7 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/AI/AI.hpp>
+#include <Poseidon/AI/AICenter.hpp> // the side's knowledge of enemies at an airfield
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Simulation/FrameInv.hpp>
@@ -997,19 +998,155 @@ AirplaneAuto::PathResult AirplaneAuto::PathAutopilot(const Vector3* path, int nP
     return ret;
 }
 
+namespace
+{
+// an airfield is "held by the enemy" when the plane's side knows an enemy within this of its runway's middle
+constexpr float kAirportThreatRadius = 1500.0f;
+// the runway runs from the ILS point back against ilsDir; its middle is about this far in
+constexpr float kRunwayHalf = 600.0f;
+// seconds between checks in the air
+constexpr float kAirportCheckPeriod = 2.0f;
+
+// The side knows an enemy on the ground (not static, not dead or gone) near the airport. What the side knows, not
+// the truth: a field taken unseen is still "ours" until someone reports it. An aircraft flying over does not close
+// a field; one parked on it does.
+bool AirportHeldByEnemy(const AICenter* center, const World::Airport& airport)
+{
+    const Vector3 middle = airport.pos - airport.dir * kRunwayHalf;
+    for (int i = 0; i < center->NTargets(); i++)
+    {
+        const AITargetInfo& info = center->GetTarget(i);
+        if (info._destroyed || info._vanished || !info._idExact || info._idExact->IsDammageDestroyed() || !info._type)
+        {
+            continue;
+        }
+        if (!center->IsEnemy(info._side) || info._type->IsKindOf(GWorld->Preloaded(VTypeStatic)))
+        {
+            continue;
+        }
+        if (info._pos.DistanceXZ2(middle) > Square(kAirportThreatRadius))
+        {
+            continue;
+        }
+        if (info._pos.Y() - GLOB_LAND->SurfaceYAboveWater(info._pos.X(), info._pos.Z()) > 30.0f)
+        {
+            continue; // in the air
+        }
+        return true;
+    }
+    return false;
+}
+
+// May this side land there: not closed by the mission, not given to a side it is not friends with.
+bool AirportAllowed(const AICenter* center, const World::Airport& airport)
+{
+    if (airport.closed)
+    {
+        return false;
+    }
+    return airport.side < 0 || !center || airport.side == center->GetSide() ||
+           center->IsFriendly(static_cast<TargetSide>(airport.side));
+}
+
+// The nearest airport the side may use and does not know to be held by the enemy; failing that the nearest it may
+// use; failing that the nearest (a plane must come down somewhere).
+int ChooseAirport(const AICenter* center, Vector3Par pos)
+{
+    int best[3] = {-1, -1, -1};
+    float bestDist2[3] = {1e30f, 1e30f, 1e30f};
+    for (int i = 0; i < GWorld->AirportCount(); i++)
+    {
+        const World::Airport& airport = GWorld->GetAirport(i);
+        const float d2 = airport.pos.DistanceXZ2(pos);
+        const bool allowed = AirportAllowed(center, airport);
+        const int tier = !allowed ? 2 : (center && AirportHeldByEnemy(center, airport)) ? 1 : 0;
+        for (int t = tier; t < 3; t++)
+        {
+            if (d2 < bestDist2[t])
+            {
+                bestDist2[t] = d2;
+                best[t] = i;
+            }
+        }
+    }
+    for (int t = 0; t < 3; t++)
+    {
+        if (best[t] >= 0)
+        {
+            return best[t];
+        }
+    }
+    return 0;
+}
+} // namespace
+
 int AirplaneAuto::Airport()
 {
     if (GWorld->AirportCount() <= 1)
     {
         return 0; // one airport: as ever
     }
-    // re-chosen on the ground and in free flight; from the landing pattern to the touchdown it stays put, so an
-    // approach never switches field half way
-    const bool landing = _planeState == Marshall || _planeState == Approach || _planeState == Final ||
-                         _planeState == Landing || _planeState == Touchdown || _planeState == WaveOff;
-    if (_airport < 0 || !landing)
+    // on the ground: the field it is on (taxiing and taking off use that field's paths)
+    const bool onGround = _planeState == TaxiIn || _planeState == TaxiOff || _planeState == Takeoff ||
+                          (_planeState == Touchdown && _landContact);
+    if (onGround)
     {
         _airport = GWorld->NearestAirport(Position());
+        return _airport;
+    }
+    if (_airport < 0)
+    {
+        _airport = GWorld->NearestAirport(Position());
+        _airportCheckTime = Glob.time; // and choose properly now
+    }
+    if (Glob.time < _airportCheckTime)
+    {
+        return _airport;
+    }
+    _airportCheckTime = Glob.time + kAirportCheckPeriod;
+    AIUnit* commander = CommanderUnit();
+    AIGroup* group = commander ? commander->GetGroup() : nullptr;
+    const AICenter* center = group ? group->GetCenter() : nullptr;
+    const int choice = ChooseAirport(center, Position());
+    if (choice == _airport)
+    {
+        return _airport;
+    }
+    switch (_planeState)
+    {
+        case Flight:
+            // free flight: simply the better field
+            _airport = choice;
+            break;
+        case Marshall:
+        case Approach:
+        case Final:
+            // in the pattern: divert only away from a field it should not use (not for one that became nearer)
+            if (!AirportAllowed(center, GWorld->GetAirport(_airport)) ||
+                (center && AirportHeldByEnemy(center, GWorld->GetAirport(_airport))))
+            {
+                LOG_INFO(Physics, "{}: diverting from airport {} to {}", (const char*)GetDebugName(),
+                         (const char*)GWorld->GetAirport(_airport).name, (const char*)GWorld->GetAirport(choice).name);
+                _airport = choice;
+                _planeState = Marshall;
+            }
+            break;
+        case Landing:
+        case Touchdown:
+            // short final, not yet down: go around first (WaveOff flies the missed approach of the old field),
+            // then divert from the pattern as above
+            if (!AirportAllowed(center, GWorld->GetAirport(_airport)) ||
+                (center && AirportHeldByEnemy(center, GWorld->GetAirport(_airport))))
+            {
+                LOG_INFO(Physics, "{}: going around, airport {} held by the enemy or closed",
+                         (const char*)GetDebugName(), (const char*)GWorld->GetAirport(_airport).name);
+                _planeState = WaveOff;
+                _airportCheckTime = Glob.time; // the next check (in Marshall) diverts
+            }
+            break;
+        default:
+            // WaveOff: finish the go-around first
+            break;
     }
     return _airport;
 }

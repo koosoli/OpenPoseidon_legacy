@@ -339,6 +339,18 @@ int World::NearestAirport(Vector3Par pos) const
     return best;
 }
 
+int World::FindAirport(const char* name) const
+{
+    for (int i = 0; i < static_cast<int>(_airports.size()); i++)
+    {
+        if (!stricmp(_airports[i].name, name))
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
 bool World::GetILS(Vector3& pos, Vector3& dir, TargetSide side, int airport)
 {
     if (airport <= 0 || airport >= static_cast<int>(_airports.size()))
@@ -1003,6 +1015,7 @@ void World::InitLandscape(Landscape* landscape)
         // the main airport first, then the world's SecondaryAirports (none: the main one only, as before)
         _airports.clear();
         _airports.push_back(Airport{_ilsPosWest, _ilsDirWest, _taxiInPathsWest, _taxiOffPathsWest});
+        _airports[0].name = world.FindEntry("airportName") ? RString(world >> "airportName") : RString("main");
         if (const ParamEntry* secondary = world.FindEntry("SecondaryAirports"))
         {
             for (int i = 0; i < secondary->GetEntryCount(); i++)
@@ -1015,6 +1028,7 @@ void World::InitLandscape(Landscape* landscape)
                 const ParamEntry& p = cls >> "ilsPosition";
                 const ParamEntry& d = cls >> "ilsDirection";
                 Airport airport;
+                airport.name = cls.GetName();
                 airport.pos = Vector3(p[0], 0, p[1]);
                 airport.pos[1] = GLOB_LAND->SurfaceY(airport.pos[0], airport.pos[2]);
                 airport.dir = Vector3(d[0], d[1], d[2]);

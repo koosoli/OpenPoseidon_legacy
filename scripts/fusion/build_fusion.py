@@ -370,7 +370,8 @@ def build(source, output, config_texts=()):
     # nearest (World::NearestAirport). Without config input: Everon's ILS point, moved, and no taxi paths.
     main = next((a for k, _, a in airports if k == 'eden'), None) or (airports[0][2] if airports else None)
     if main:
-        ils = airport_cfg(main)
+        # its name for the missions' setAirportClosed / setAirportSide (the SecondaryAirports go by their class)
+        ils = ' airportName="%s";' % next(label for _, label, a in airports if a is main) + airport_cfg(main)
     else:
         ils = (' ilsPosition[]={%d,%d}; ilsDirection[]={0,0.08,-1}; ilsTaxiIn[]={}; ilsTaxiOff[]={};'
                % (4772 + ISLANDS[0][2] * CELL, 10923 + ISLANDS[0][3] * CELL))
