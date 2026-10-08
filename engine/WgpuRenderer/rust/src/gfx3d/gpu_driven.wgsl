@@ -115,6 +115,7 @@ struct SectionMaterial {
     // w = intensity 0 = off; second lane x = height reserved, y = radius).
     crown_ao_p0: vec4<f32>,
     crown_ao_p1: vec4<f32>,
+    native_pbr_scales: vec4<f32>,
 };
 
 @group(1) @binding(0) var<storage, read> instances: array<Instance>;
@@ -799,6 +800,14 @@ fn retained_snow_exposure(in: VsOut) -> f32 {
     return object_snow_baked_exposure(raw, true);
 }
 
+// The opaque Basic preview uses the authored channel scales before its existing
+// legacy-BRDF approximation. AO is independent; cutout alpha is never an input.
+fn native_pbr_scaled_channels(channels: vec3<f32>, scales: vec4<f32>) -> vec3<f32> {
+    return vec3<f32>(clamp(channels.x * scales.x, 0.08, 1.0),
+                     clamp(channels.y * scales.y, 0.0, 1.0),
+                     clamp(channels.z, 0.0, 1.0));
+}
+
 fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
@@ -1169,8 +1178,10 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // and removes its diffuse share; NMO A attenuates ambient only. No extra fetch.
     var pbr_diffuse_scale = 1.0;
     if (pbr_sampled) {
-        let roughness = clamp(pbr_roughness, 0.08, 1.0);
-        m.native_ao = clamp(pbr_ao, 0.0, 1.0);
+        let scaled = native_pbr_scaled_channels(vec3<f32>(pbr_roughness, pbr_metal, pbr_ao), sm.native_pbr_scales);
+        let roughness = scaled.x;
+        pbr_metal = scaled.y;
+        m.native_ao = scaled.z;
         m.spec_power = clamp(2.0 / (roughness * roughness) - 2.0, 1.0, 256.0);
         let reflected_f0 = mix(vec3<f32>(0.22), base.rgb, pbr_metal);
         m.specular = frame.sun_diffuse.rgb * reflected_f0;

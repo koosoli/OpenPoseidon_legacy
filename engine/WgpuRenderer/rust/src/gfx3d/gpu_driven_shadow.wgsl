@@ -78,6 +78,7 @@ struct SectionMaterial {
     // stays field-for-field with SectionMaterialGpu (304 bytes, 16 stride).
     crown_ao_p0: vec4<f32>,
     crown_ao_p1: vec4<f32>,
+    native_pbr_scales: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> pass_data: PassData;

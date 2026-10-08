@@ -7,7 +7,9 @@
 #include <Poseidon/Asset/Formats/Material/ShaderSchema.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
+#include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -440,10 +442,36 @@ inline bool EmatPbrProvenanceEnabled()
     // branch per translated EMAT, with no extra key scans or allocations.
     static const bool enabled = []
     {
-        const char* value = std::getenv("WGR_REFORGER_PBR_PROVENANCE");
-        return value && value[0] == '1' && value[1] == '\0';
+        const auto enabled = [](const char* name)
+        {
+            const char* value = std::getenv(name);
+            return value && value[0] == '1' && value[1] == '\0';
+        };
+        // The preview consumes this metadata. Enabling it must not also require
+        // an undocumented second switch; provenance-only diagnostics still work.
+        return enabled("WGR_REFORGER_PBR_PROVENANCE") || enabled("WGR_REFORGER_PBR_PREVIEW");
     }();
     return enabled;
+}
+
+// Only the unlayered opaque native preview has established scalar semantics.
+// Keep missing values at identity, preserve an authored zero, and reject invalid
+// numeric inputs before they can enter a GPU material. Multi/2Layers need their
+// own layer contract and must not acquire these Basic multipliers implicitly.
+inline std::array<float, 2> NativePbrBasicScales(const TranslatedMaterial& material)
+{
+    std::array<float, 2> scales{1.0f, 1.0f};
+    if (!material.ematPbr || !material.ematPbr->bcrAlphaIsRoughness[0] ||
+        !EmatMaterial::NameMatches(material.shaderFamily, "MatPBRBasic"))
+        return scales;
+    const auto scalar = [](const EmatAuthoredScalar& source)
+    {
+        return source.present && std::isfinite(source.value)
+            ? std::max(source.value, 0.0f) : 1.0f;
+    };
+    scales[0] = scalar(material.ematPbr->roughnessScale);
+    scales[1] = scalar(material.ematPbr->metalnessScale);
+    return scales;
 }
 
 // Translates an `.emat` into the engine's material form. `family` is carried through from

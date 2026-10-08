@@ -347,6 +347,8 @@ pub struct WgrModelMaterial {
     // w = intensity (0 = off); second lane x = height (reserved), y = radius.
     pub crown_ao_p0: [f32; 4],
     pub crown_ao_p1: [f32; 4],
+    // Optional native opaque PBR preview, identity for all other materials.
+    pub native_pbr_scales: [f32; 4],
 }
 
 // One drawable LOD level of a model: its FindSqrtLevel resolution threshold (`_resolutions[i]`)
@@ -1729,7 +1731,7 @@ const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 68);
 const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 288);
 const _: () = assert!(std::mem::size_of::<WgrLight>() == 64);
 const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);
-const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 320);
+const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 336);
 const _: () = assert!(std::mem::size_of::<WgrModelLod>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrInstance>() == 144);
 const _: () = assert!(std::mem::size_of::<WgrTonemap>() == 64);

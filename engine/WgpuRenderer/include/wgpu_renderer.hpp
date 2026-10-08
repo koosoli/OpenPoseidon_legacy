@@ -509,6 +509,9 @@ struct WgrModelMaterial
      * exactly where it was. */
     WgrVec4 crown_ao_p0;
     WgrVec4 crown_ao_p1;
+    /* Optional native opaque PBR preview: roughness/metalness multipliers.
+     * Defaults are identity; z/w reserved. Never used by legacy/cutout shading. */
+    WgrVec4 native_pbr_scales{1.0f, 1.0f, 0.0f, 0.0f};
 };
 
 /* One drawable LOD level: its FindSqrtLevel resolution threshold (_resolutions[i]) +
@@ -581,7 +584,7 @@ struct WgrInstance
  * inherit it. These reserved lanes preserve the public struct layout. */
 
 static_assert(sizeof(WgrModelSection) == 24, "WgrModelSection must match Rust");
-static_assert(sizeof(WgrModelMaterial) == 320, "WgrModelMaterial must match Rust");
+static_assert(sizeof(WgrModelMaterial) == 336, "WgrModelMaterial must match Rust");
 static_assert(sizeof(WgrModelLod) == 16, "WgrModelLod must match Rust");
 static_assert(sizeof(WgrInstance) == 144, "WgrInstance must match Rust");
 

@@ -15216,10 +15216,14 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                         found->second.ematPbr && found->second.ematPbr->bcrAlphaIsRoughness[0])
                     {
                         sec.flags |= WGR_MODEL_SECTION_NATIVE_PBR_PREVIEW;
+                        const auto scales = Asset::Material::NativePbrBasicScales(found->second);
+                        mat.native_pbr_scales = {scales[0], scales[1], 0.0f, 0.0f};
                         static bool reportedPreview = false;
                         if (!reportedPreview)
                         {
-                            LOG_INFO(Graphics, "Wgpu Reforger PBR preview: first eligible opaque section material={}", path);
+                            LOG_INFO(Graphics,
+                                     "Wgpu Reforger PBR preview: first eligible opaque section material={} roughnessScale={} metalnessScale={}",
+                                     path, scales[0], scales[1]);
                             reportedPreview = true;
                         }
                     }

@@ -245,6 +245,7 @@ pub struct SectionMaterialGpu {
     // 16-aligned on both sides, so the stride stays a multiple of 16.
     pub crown_ao_p0: [f32; 4],
     pub crown_ao_p1: [f32; 4],
+    pub native_pbr_scales: [f32; 4],
 }
 
 // A permissive plane that never culls anything: dot(0, p) + BIG >= -radius always holds.

@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,44 @@ using Poseidon::Asset::Material::ParseEmat;
 using Poseidon::Asset::Material::TranslatedMaterial;
 using Poseidon::Asset::Material::TranslatedSlot;
 using Poseidon::Asset::Material::TranslateEmat;
+
+TEST_CASE("Opaque native PBR Basic scales preserve zero and leave other material routes alone",
+          "[asset][material][emat][arf][pbr-scales]")
+{
+    using namespace Poseidon::Asset::Material;
+    TranslatedMaterial material;
+    material.shaderFamily = "MatPBRBasic";
+    REQUIRE(NativePbrBasicScales(material) == std::array<float, 2>{1.0f, 1.0f});
+    auto pbr = std::make_shared<EmatPbrProvenance>();
+    material.ematPbr = pbr;
+    pbr->bcrAlphaIsRoughness[0] = true;
+    pbr->roughnessScale = {0.48f, true};
+    pbr->metalnessScale = {0.0f, true};
+    REQUIRE(NativePbrBasicScales(material) == std::array<float, 2>{0.48f, 0.0f});
+    pbr->roughnessScale = {2.0f, true};
+    REQUIRE(NativePbrBasicScales(material)[0] == 2.0f);
+    pbr->roughnessScale = {-1.0f, true};
+    REQUIRE(NativePbrBasicScales(material)[0] == 0.0f);
+    pbr->roughnessScale = {std::numeric_limits<float>::quiet_NaN(), true};
+    pbr->metalnessScale = {std::numeric_limits<float>::infinity(), true};
+    REQUIRE(NativePbrBasicScales(material) == std::array<float, 2>{1.0f, 1.0f});
+    pbr->roughnessScale = {0.5f, true};
+    pbr->metalnessScale = {0.2f, true};
+    material.shaderFamily = "MatPBRMulti";
+    REQUIRE(NativePbrBasicScales(material) == std::array<float, 2>{1.0f, 1.0f});
+    material.shaderFamily = "MatPBRBasic";
+    pbr->bcrAlphaIsRoughness[0] = false; // opacity composites / converted PAA
+    REQUIRE(NativePbrBasicScales(material) == std::array<float, 2>{1.0f, 1.0f});
+
+    const auto translated = TranslateEmat(
+        ParseEmat("MatPBRBasic {\n RoughnessScale 0.48\n MetalnessScale 0\n"
+                  " BCRMap \"Assets/Test_BCR.edds\"\n NMOMap \"Assets/Test_NMO.edds\"\n}\n"),
+        "Assets/Test.emat", "");
+    if (EmatPbrProvenanceEnabled())
+        REQUIRE(NativePbrBasicScales(translated) == std::array<float, 2>{0.48f, 0.0f});
+    else
+        REQUIRE_FALSE(translated.ematPbr);
+}
 
 namespace
 {
