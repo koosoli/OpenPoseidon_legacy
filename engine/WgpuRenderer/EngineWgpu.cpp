@@ -2455,7 +2455,10 @@ bool EngineWgpu::SetWindowMode(WindowMode mode)
         return false;
     const WindowMode previous = GetCurrentWindowMode();
     if (previous == mode)
+    {
+        _windowed = mode == WindowMode::Windowed;
         return true;
+    }
     // SDL owns the actual window. Keep its logical restore size separate from
     // the renderer's pixel dimensions, as the GL/SDL path does on HighDPI.
     if (previous == WindowMode::Windowed)
@@ -2697,11 +2700,13 @@ uint32_t EngineWgpu::LocalShadowCasterMask(float relX, float relY, float relZ) c
 
 void EngineWgpu::ResizeSurface(int w, int h)
 {
-    WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)
-    if (w <= 0 || h <= 0)
+    // SDL may report the same final extent again after SetWindowMode's pixel
+    // readback. Avoid a redundant swapchain/optional-effects recreation.
+    if (w <= 0 || h <= 0 || (w == _w && h == _h))
     {
         return;
     }
+    WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)
     _w = w;
     _h = h;
     if (_renderer)
