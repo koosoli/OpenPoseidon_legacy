@@ -131,5 +131,5 @@ complete region's count. Reuse this `osm.json` directly with a matching prepared
 heightmap, or deliberately adapt that preparation contract; do not silently
 remove records to fit it. No 5 km game region was generated or visually accepted
 by this import check. Generated output must also respect the Earth Worldgen
-adapter's separate 65,536-source-object and regional asset budgets; denser output
+adapter's separate 131,072-source-object and regional asset budgets; denser output
 may need bounded partitioning before any wider geographic provider work.

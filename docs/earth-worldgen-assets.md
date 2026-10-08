@@ -16,7 +16,8 @@ format interoperability and does not copy its generator, styles or textures.
 ## Source and activation contract
 
 Set `POSEIDON_EARTH_WORLDGEN_MANIFEST` to the generated output's `manifest.json`
-before starting an Earth-enabled game. Restart to load a changed output.
+or a prepared region index before starting an Earth-enabled game. Restart to
+load changed outputs or index metadata.
 
 The adapter reads these existing Worldgen manifest fields:
 
@@ -60,8 +61,8 @@ no additional bounding-centre correction or native-island grounding.
 
 ## Bounds, threading and lifecycle
 
-One manifest is loaded once on a value-only worker. Limits are 4 MiB manifest,
-32 MiB RVW4, 2,048 grid cells per axis and 65,536 source object records. Each
+Manifest/index metadata is read once on a value-only worker. Limits are 4 MiB
+manifest, 32 MiB RVW4, 2,048 grid cells per axis and 131,072 source object records. Each
 snapshot selects at most 2,048 nearest covered objects and 64 model paths.
 Coverage means the object's base lies on valid resident ground. Selection is
 deterministic by distance, then source ID. Snapshots carry geographic revision
@@ -97,10 +98,11 @@ terrain; a positive instance count alone is not visual acceptance. Missing model
 and texture diagnostics must also be checked. Rebase and move out of resident
 coverage to verify retirement/republication; above 12 km the near assets retire.
 
-This first connection loads one regional Worldgen output. It is not a worldwide
-generated dataset or an automatic regional output provider. Beyond that region,
-more licensed outputs and a bounded geographic output index/provider are still
-needed. The existing optional feature JSON backend supplies input features,
+This connection loads up to two prepared regional Worldgen outputs from an
+explicit offline index. It is not a worldwide generated dataset or an automatic
+regional generation/distribution service. Beyond the indexed coverage, more
+licensed outputs and an appropriate distribution source are still needed.
+The existing optional feature JSON backend supplies input features,
 not generated P3Ds or Worldgen placement records. Generated texture/material
 styles, terrain grading, road network/navigation, enterable building simulation,
 destruction and object collision are not transferred by retained rendering.
@@ -108,6 +110,81 @@ Nested proxy completeness and forest conformity require actual model-family
 acceptance. Source road/forest pitch/shear is retained; differences between the
 generated terrain and resident DEM can still cause local fit errors. No global
 playability or parity claim follows from this adapter.
+
+## Prepared region index and camera residency
+
+The same environment input can name this versioned, offline JSON index:
+
+```json
+{
+  "earth_worldgen_regions": 1,
+  "regions": [
+    {
+      "id": 1,
+      "manifest": "lux-region-01/generated-compatible/manifest.json",
+      "bbox": [49.6035, 6.12, 49.6165, 6.14]
+    },
+    {
+      "id": 2,
+      "manifest": "mamer-worldgen-01/generated/manifest.json",
+      "bbox": [49.59, 6.00, 49.64, 6.08]
+    }
+  ]
+}
+```
+
+The index is <=64 KiB with 1–64 entries. Stable integer region IDs are 1–255 and
+must be unique, as must manifest paths. Paths are relative to and contained
+within the index directory; absolute paths, traversal and escaping symlinks
+are refused. Each finite, non-antimeridian-crossing bbox must match its actual
+manifest within 1e-9 degrees. The manifest continues to define the source grid,
+height scale and exact inverse Worldgen geographic projection. The index does
+not reinterpret a region's source height datum or change resident collision.
+Mount the necessary local generated addons/dependencies before launch.
+
+The worker chooses at most two camera-containing/nearest regions within the
+current resident patch's reach plus a 512-metre margin, bounded to 20 km. It
+evicts unselected sources before loading replacements. No other indexed WRP
+or game models are loaded. Requests remain keyed to geographic revision,
+ground generation and 256-metre camera cells; cancelling during a file load or
+build prevents stale publication. Travel with a moving near patch and later
+geographic rebases both select replacements. Outside prepared coverage the
+snapshot is empty; this does not invent a populated world.
+
+The two sources share the existing 2,048 selected-instance and 64-model caps.
+The source-record limit was raised from 65,536 only because the actual Mamer
+5.8 km output has 98,421 placements in a 12,876,556-byte WRP; the 32 MiB file and
+rendered-instance limits remain. Source value storage is estimated conservatively
+from height/object vector capacities and model strings and bounded to 32 MiB per
+source, 64 MiB total. Runtime logs report valid resident region IDs, wire bytes
+and value bytes. These bounds exclude temporary JSON/parser/sort allocations,
+asset-bank allocations and the rest of the process; they are not a process-memory
+or frame-time guarantee.
+
+Indexed placements receive a stable uint32 renderer ID:
+`(regionId << 24) | rank`, where rank is the zero-based order of the original
+unique authored source IDs. This survives source-record/index reordering,
+eviction/reload, camera movement and geographic rebase. Single-manifest mode
+retains authored IDs. Sources are immutable during a run: size/mtime metadata
+is checked around reads and pinned per visited region, so detected replacements
+are refused after eviction. This detects ordinary regeneration, not malicious
+changes preserving both size and modification timestamps.
+
+For overlapping prepared rectangles, the lowest-ID **valid loaded** source owns
+placements whose bases lie in its bbox. Higher-ID placements in that overlap are
+suppressed, avoiding double buildings or vegetation. Missing, invalid or changed
+sources cannot suppress valid ones. This policy assumes each prepared output
+actually covers its declared rectangle; it does not infer per-feature holes or
+merge independently generated roads across a boundary. A source unavailable at
+load time remains a reported error until evicted/revisited or restarted. Source
+preparation and generated asset mounts remain the operator's responsibility.
+
+CPU tests cover ordinary camera travel, eviction/reload, subsequent rebase,
+stable sparse-ID namespaces, global instance/model caps, overlap ownership with
+invalid/missing sources, modified-output refusal, dateline-near selection and
+index path/bounds/count rejection. `Test-EarthWorldgen.ps1 -Manifest` accepts
+either a manifest or an index for actual prepared-source CPU parsing. Installed
+acceptance must still check actual model visibility and boundary transitions.
 
 ## First actual offline region receipt
 

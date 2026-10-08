@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <unordered_set>
 
 namespace Poseidon
@@ -13,6 +14,48 @@ double Number(const cJSON* object, const char* key)
 {
     const auto* value = cJSON_GetObjectItemCaseSensitive(object, key);
     return cJSON_IsNumber(value) ? value->valuedouble : NAN;
+}
+void Cancel(const std::function<bool()>& cancelled)
+{
+    if (cancelled && cancelled())
+        throw std::runtime_error("request cancelled");
+}
+std::string ReadJson(const std::filesystem::path& path)
+{
+    const auto bytes = std::filesystem::file_size(path);
+    if (bytes > 4 * 1024 * 1024)
+        throw std::runtime_error("Worldgen manifest/index exceeds 4MiB");
+    std::ifstream file(path, std::ios::binary);
+    std::string json(size_t(bytes), '\0');
+    if (!file.read(json.data(), std::streamsize(bytes)))
+        throw std::runtime_error("Worldgen manifest/index read failed");
+    return json;
+}
+void ReadBounds(const cJSON* bbox, double& south, double& west, double& north, double& east)
+{
+    if (!cJSON_IsArray(bbox) || cJSON_GetArraySize(bbox) != 4)
+        throw std::runtime_error("Worldgen geographic bbox required");
+    double* bounds[] = {&south, &west, &north, &east};
+    for (int i = 0; i < 4; ++i)
+    {
+        const auto* value = cJSON_GetArrayItem(bbox, i);
+        if (!cJSON_IsNumber(value) || !std::isfinite(value->valuedouble))
+            throw std::runtime_error("Worldgen bbox invalid");
+        *bounds[i] = value->valuedouble;
+    }
+    if (south < -84 || north > 84 || south >= north || west < -180 || east > 180 || west >= east)
+        throw std::runtime_error("Worldgen bbox must be non-crossing within supported latitude");
+}
+bool Contains(double south, double west, double north, double east, Earth::Coordinate p)
+{
+    const double longitude = (west + east) * .5 + Earth::WrapLongitude(p.longitude - (west + east) * .5);
+    return p.latitude >= south && p.latitude <= north && longitude >= west && longitude <= east;
+}
+bool ValidGround(const EarthBuildingStream::Ground& g, float x, float z)
+{
+    return g.heights.size() == 257 * 257 && std::isfinite(g.x) && std::isfinite(g.z) && std::isfinite(g.latitude) &&
+           std::isfinite(g.longitude) && std::abs(g.latitude) <= 84 && std::isfinite(g.grid) && g.grid > 0 &&
+           std::isfinite(x) && std::isfinite(z);
 }
 bool ModelPath(const std::string& path)
 {
@@ -67,18 +110,112 @@ double SourceHeight(const EarthWorldgen::Source& source, double x, double z)
             tz * ((1 - tx) * source.heights[jz * source.cells + ix] + tx * source.heights[jz * source.cells + jx]));
 }
 } // namespace
-EarthWorldgen::Source EarthWorldgen::Load(const std::filesystem::path& manifest)
+EarthWorldgen::Catalog EarthWorldgen::LoadCatalog(const std::filesystem::path& path)
+{
+    Catalog catalog;
+    try
+    {
+        const auto json = ReadJson(path);
+        std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root(cJSON_ParseWithLength(json.data(), json.size()),
+                                                             cJSON_Delete);
+        const auto* version = cJSON_GetObjectItemCaseSensitive(root.get(), "earth_worldgen_regions");
+        if (!version)
+        {
+            Region region;
+            region.manifest = path;
+            ReadBounds(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root.get(), "world"), "bbox"),
+                       region.south, region.west, region.north, region.east);
+            catalog.regions.push_back(std::move(region));
+            return catalog;
+        }
+        catalog.indexed = true;
+        const auto* regions = cJSON_GetObjectItemCaseSensitive(root.get(), "regions");
+        if (json.size() > 64 * 1024 || !cJSON_IsNumber(version) || version->valuedouble != 1 ||
+            !cJSON_IsArray(regions) || cJSON_GetArraySize(regions) < 1 || cJSON_GetArraySize(regions) > MaxRegions)
+            throw std::runtime_error("Worldgen region index version/count/64KiB budget invalid");
+        const auto base = std::filesystem::weakly_canonical(path.parent_path());
+        std::unordered_set<uint32_t> ids;
+        std::unordered_set<std::string> paths;
+        const cJSON* entry = nullptr;
+        cJSON_ArrayForEach(entry, regions)
+        {
+            const double id = Number(entry, "id");
+            const auto* manifest = cJSON_GetObjectItemCaseSensitive(entry, "manifest");
+            if (!std::isfinite(id) || id < 1 || id > 255 || std::floor(id) != id || !ids.insert(uint32_t(id)).second ||
+                !cJSON_IsString(manifest))
+                throw std::runtime_error("Worldgen region ID/path invalid or duplicate");
+            const std::string name = manifest->valuestring;
+            if (name.empty() || name.size() > 512 || name.front() == '/' || name.front() == '\\' ||
+                name.find(':') != name.npos || name.find("..") != name.npos)
+                throw std::runtime_error("Worldgen region manifest must be a contained relative path");
+            for (unsigned char c : name)
+                if (c < 32)
+                    throw std::runtime_error("Worldgen region manifest path contains control characters");
+            Region region;
+            region.id = uint32_t(id);
+            region.manifest = std::filesystem::weakly_canonical(
+                base / std::filesystem::path(std::u8string(name.begin(), name.end())));
+            const auto relative = region.manifest.lexically_relative(base);
+            if (relative.empty() || *relative.begin() == ".." || !paths.insert(region.manifest.generic_string()).second)
+                throw std::runtime_error("Worldgen region manifest escapes index directory or duplicates a path");
+            ReadBounds(cJSON_GetObjectItemCaseSensitive(entry, "bbox"), region.south, region.west, region.north,
+                       region.east);
+            catalog.regions.push_back(std::move(region));
+        }
+        std::sort(catalog.regions.begin(), catalog.regions.end(),
+                  [](const auto& a, const auto& b) { return a.id < b.id; });
+    }
+    catch (const std::exception& e)
+    {
+        catalog.error = e.what();
+        catalog.regions.clear();
+    }
+    return catalog;
+}
+std::vector<EarthWorldgen::Region>
+EarthWorldgen::SelectRegions(const Catalog& catalog, const EarthBuildingStream::Ground& g, float cameraX, float cameraZ)
+{
+    if (!catalog.error.empty() || !ValidGround(g, cameraX, cameraZ))
+        return {};
+    const auto camera = Earth::FromLocal(g.latitude, g.longitude, cameraX, cameraZ);
+    double reach = 0;
+    for (double x : {double(g.x), double(g.x) + 256 * g.grid})
+        for (double z : {double(g.z), double(g.z) + 256 * g.grid})
+            reach = std::max(reach, std::hypot(x - cameraX, z - cameraZ));
+    reach = std::min(20000.0, reach + 512); // Fixed neighborhood bound, including request-cell movement.
+    std::vector<std::pair<double, const Region*>> candidates;
+    for (const auto& region : catalog.regions)
+    {
+        const double middle = (region.west + region.east) * .5;
+        const double longitude = middle + Earth::WrapLongitude(camera.longitude - middle);
+        const auto p =
+            Earth::ToLocal(camera.latitude, camera.longitude, std::clamp(camera.latitude, region.south, region.north),
+                           Earth::WrapLongitude(std::clamp(longitude, region.west, region.east)));
+        const double distance = std::hypot(p.x - Earth::Anchor, p.z - Earth::Anchor);
+        if (p.visible && distance <= reach)
+            candidates.push_back({distance, &region});
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b)
+              { return a.first != b.first ? a.first < b.first : a.second->id < b.second->id; });
+    std::vector<Region> selected;
+    for (const auto& candidate : candidates)
+    {
+        if (selected.size() == MaxResidentRegions)
+            break;
+        selected.push_back(*candidate.second);
+    }
+    return selected;
+}
+EarthWorldgen::Source EarthWorldgen::Load(const std::filesystem::path& manifest, const std::function<bool()>& cancelled)
 {
     Source source;
     try
     {
-        const auto bytes = std::filesystem::file_size(manifest);
-        if (bytes > 4 * 1024 * 1024)
-            throw std::runtime_error("Worldgen manifest exceeds 4MiB");
-        std::ifstream jsonFile(manifest, std::ios::binary);
-        std::string json(size_t(bytes), '\0');
-        if (!jsonFile.read(json.data(), std::streamsize(bytes)))
-            throw std::runtime_error("Worldgen manifest read failed");
+        Cancel(cancelled);
+        source.stamp.manifestTime = std::filesystem::last_write_time(manifest);
+        source.stamp.manifestBytes = std::filesystem::file_size(manifest);
+        const auto json = ReadJson(manifest);
+        Cancel(cancelled);
         std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root(cJSON_ParseWithLength(json.data(), json.size()),
                                                              cJSON_Delete);
         const auto* world = cJSON_GetObjectItemCaseSensitive(root.get(), "world");
@@ -96,17 +233,8 @@ EarthWorldgen::Source EarthWorldgen::Load(const std::filesystem::path& manifest)
         for (char c : worldName)
             if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
                 throw std::runtime_error("Worldgen world name unsafe");
-        const auto* bbox = cJSON_GetObjectItemCaseSensitive(world, "bbox");
-        if (cJSON_GetArraySize(bbox) != 4)
-            throw std::runtime_error("Worldgen geographic bbox required");
-        double* bounds[] = {&source.south, &source.west, &source.north, &source.east};
-        for (int i = 0; i < 4; ++i)
-        {
-            const auto* value = cJSON_GetArrayItem(bbox, i);
-            if (!cJSON_IsNumber(value) || !std::isfinite(value->valuedouble))
-                throw std::runtime_error("Worldgen bbox invalid");
-            *bounds[i] = value->valuedouble;
-        }
+        ReadBounds(cJSON_GetObjectItemCaseSensitive(world, "bbox"), source.south, source.west, source.north,
+                   source.east);
         source.cellSize = Number(world, "cell_size");
         source.heightScale = Number(root.get(), "height_scale");
         const double cells = Number(world, "cells");
@@ -123,6 +251,9 @@ EarthWorldgen::Source EarthWorldgen::Load(const std::filesystem::path& manifest)
         if (!std::filesystem::is_regular_file(wrp))
             wrp = manifest.parent_path() / "source" / (worldName + ".wrp");
         const auto wrpBytes = std::filesystem::file_size(wrp);
+        source.stamp.wrpTime = std::filesystem::last_write_time(wrp);
+        source.stamp.wrpBytes = wrpBytes;
+        source.sourceBytes = size_t(wrpBytes);
         const size_t count = size_t(source.cells) * source.cells, offset = 12 + count * 4 + 512 * 32;
         if (wrpBytes > MaxSourceBytes || wrpBytes < offset + 128 || (wrpBytes - offset) % 128 ||
             (wrpBytes - offset) / 128 > MaxSourceObjects + 1)
@@ -136,13 +267,23 @@ EarthWorldgen::Source EarthWorldgen::Load(const std::filesystem::path& manifest)
         if (std::memcmp(magic, "4WVR", 4) || width != source.cells || height != source.cells)
             throw std::runtime_error("Worldgen RVW4 header mismatch");
         source.heights.resize(count);
-        input.read(reinterpret_cast<char*>(source.heights.data()), std::streamsize(count * 2));
+        for (size_t first = 0; first < count; first += 262144)
+        {
+            Cancel(cancelled);
+            input.read(reinterpret_cast<char*>(source.heights.data() + first),
+                       std::streamsize(std::min(size_t(262144), count - first) * 2));
+            if (!input)
+                throw std::runtime_error("Worldgen RVW4 heights truncated");
+        }
         input.seekg(std::streamoff(offset));
         std::unordered_set<uint32_t> ids;
         const double extent = source.cells * source.cellSize;
         bool terminated = false;
+        source.objects.reserve((wrpBytes - offset) / 128 - 1);
         for (size_t record = 0; record < (wrpBytes - offset) / 128; ++record)
         {
+            if (record % 256 == 0)
+                Cancel(cancelled);
             Object object{};
             char model[76]{};
             input.read(reinterpret_cast<char*>(object.matrix.data()), 48);
@@ -167,59 +308,146 @@ EarthWorldgen::Source EarthWorldgen::Load(const std::filesystem::path& manifest)
         }
         if (!terminated)
             throw std::runtime_error("Worldgen RVW4 terminator invalid");
+        if (std::filesystem::last_write_time(manifest) != source.stamp.manifestTime ||
+            std::filesystem::file_size(manifest) != source.stamp.manifestBytes ||
+            std::filesystem::last_write_time(wrp) != source.stamp.wrpTime ||
+            std::filesystem::file_size(wrp) != source.stamp.wrpBytes)
+            throw std::runtime_error("Worldgen source changed during read; restart with immutable prepared data");
+        source.valueBytes =
+            sizeof(Source) + source.heights.capacity() * sizeof(int16_t) + source.objects.capacity() * sizeof(Object);
+        for (const auto& object : source.objects)
+            source.valueBytes += object.model.capacity() + 1; // Conservative: also counts inline strings.
+        if (source.valueBytes > MaxResidentValueBytes / MaxResidentRegions)
+            throw std::runtime_error("Worldgen source value-memory budget exceeded");
     }
     catch (const std::exception& e)
     {
         source.error = e.what();
-        source.objects.clear();
-        source.heights.clear();
+        std::vector<Object>().swap(source.objects);
+        std::vector<int16_t>().swap(source.heights);
+        source.valueBytes = 0;
+    }
+    return source;
+}
+EarthWorldgen::Source EarthWorldgen::LoadRegion(const Region& region, const std::function<bool()>& cancelled)
+{
+    auto source = Load(region.manifest, cancelled);
+    if (!source.error.empty())
+        return source;
+    if (region.id > 255 || !std::isfinite(region.south) || !std::isfinite(region.west) ||
+        !std::isfinite(region.north) || !std::isfinite(region.east) || std::abs(source.south - region.south) > 1e-9 ||
+        std::abs(source.west - region.west) > 1e-9 || std::abs(source.north - region.north) > 1e-9 ||
+        std::abs(source.east - region.east) > 1e-9)
+    {
+        source.error = "Worldgen index/manifest geographic bounds mismatch";
+        std::vector<Object>().swap(source.objects);
+        std::vector<int16_t>().swap(source.heights);
+        source.valueBytes = 0;
+        return source;
+    }
+    source.regionId = region.id;
+    if (region.id)
+    {
+        std::sort(source.objects.begin(), source.objects.end(),
+                  [](const auto& a, const auto& b) { return a.id < b.id; });
+        for (size_t rank = 0; rank < source.objects.size(); ++rank)
+            source.objects[rank].id = (region.id << 24) | uint32_t(rank);
     }
     return source;
 }
 EarthWorldgen::Snapshot EarthWorldgen::Build(const Source& source, const EarthBuildingStream::Ground& g, float cameraX,
                                              float cameraZ, const std::function<bool()>& cancelled)
 {
+    return Build(std::vector<const Source*>{&source}, g, cameraX, cameraZ, cancelled);
+}
+EarthWorldgen::Snapshot EarthWorldgen::Build(const std::vector<const Source*>& sources,
+                                             const EarthBuildingStream::Ground& g, float cameraX, float cameraZ,
+                                             const std::function<bool()>& cancelled)
+{
     Snapshot output;
     output.revision = g.revision;
     output.generation = g.generation;
-    output.sourceObjects = source.objects.size();
-    output.sourceValidation = source.validation;
-    output.error = source.error;
-    if (!output.error.empty())
-        return output;
-    if (g.heights.size() != 257 * 257 || !std::isfinite(g.x) || !std::isfinite(g.z) || !std::isfinite(g.latitude) ||
-        !std::isfinite(g.longitude) || std::abs(g.latitude) > 84 || !std::isfinite(g.grid) || g.grid <= 0 ||
-        !std::isfinite(cameraX) || !std::isfinite(cameraZ) || source.cells < 16 || source.cells > 2048 ||
-        !std::isfinite(source.cellSize) || source.cellSize <= 0 || !std::isfinite(source.heightScale) ||
-        source.heightScale <= 0 || source.objects.size() > MaxSourceObjects ||
-        source.heights.size() != size_t(source.cells) * source.cells)
+    if (!ValidGround(g, cameraX, cameraZ) || sources.size() > MaxResidentRegions)
     {
         output.error = "Worldgen resident/source ground invalid";
+        return output;
+    }
+    std::vector<const Source*> valid;
+    std::unordered_set<uint32_t> regionIds;
+    output.sourceValidation = "succeeded";
+    for (const auto* source : sources)
+    {
+        if (!source || !source->error.empty())
+        {
+            output.error += (output.error.empty() ? "" : "; ") +
+                            (source ? source->error.substr(0, 1024) : "Worldgen source missing");
+            continue;
+        }
+        if (source->cells < 16 || source->cells > 2048 || !std::isfinite(source->cellSize) || source->cellSize <= 0 ||
+            !std::isfinite(source->heightScale) || source->heightScale <= 0 ||
+            source->objects.size() > MaxSourceObjects ||
+            source->heights.size() != size_t(source->cells) * source->cells || source->sourceBytes > MaxSourceBytes ||
+            source->valueBytes > MaxResidentValueBytes / MaxResidentRegions ||
+            !regionIds.insert(source->regionId).second)
+        {
+            output.error = "Worldgen resident/source ground invalid";
+            return output;
+        }
+        valid.push_back(source);
+        output.sourceObjects += source->objects.size();
+        output.residentSourceBytes += source->sourceBytes;
+        output.residentValueBytes += source->valueBytes;
+        output.regionIds.push_back(source->regionId);
+        if (source->validation == "failed")
+            output.sourceValidation = "failed";
+        else if (source->validation != "succeeded" && output.sourceValidation != "failed")
+            output.sourceValidation = "unspecified";
+    }
+    if (valid.empty())
+        output.sourceValidation = "unspecified";
+    if (output.residentSourceBytes > MaxSourceBytes * MaxResidentRegions ||
+        output.residentValueBytes > MaxResidentValueBytes)
+    {
+        output.error = "Worldgen aggregate source budget exceeded";
         return output;
     }
     struct Candidate
     {
         const Object* object;
+        const Source* source;
         Earth::Coordinate coordinate;
         Earth::LocalPoint local;
         double distance;
     };
     std::vector<Candidate> candidates;
-    const double extent = source.cells * source.cellSize;
-    for (const auto& object : source.objects)
+    for (const auto* source : valid)
     {
-        if (cancelled && cancelled())
+        const double extent = source->cells * source->cellSize;
+        for (const auto& object : source->objects)
         {
-            output.error = "request cancelled";
-            return output;
+            if (cancelled && cancelled())
+            {
+                output.error = "request cancelled";
+                return output;
+            }
+            const Earth::Coordinate coordinate{
+                source->south + object.matrix[11] * (source->north - source->south) / extent,
+                source->west + object.matrix[9] * (source->east - source->west) / extent};
+            const bool shadowed =
+                std::any_of(valid.begin(), valid.end(),
+                            [&](const auto* other)
+                            {
+                                return other->regionId < source->regionId &&
+                                       Contains(other->south, other->west, other->north, other->east, coordinate);
+                            });
+            if (shadowed)
+                continue;
+            const auto p = Earth::ToLocal(g.latitude, g.longitude, coordinate.latitude, coordinate.longitude);
+            if (!p.visible || p.x < g.x || p.z < g.z || p.x > double(g.x) + 256 * g.grid ||
+                p.z > double(g.z) + 256 * g.grid)
+                continue;
+            candidates.push_back({&object, source, coordinate, p, std::hypot(p.x - cameraX, p.z - cameraZ)});
         }
-        const Earth::Coordinate coordinate{source.south + object.matrix[11] * (source.north - source.south) / extent,
-                                           source.west + object.matrix[9] * (source.east - source.west) / extent};
-        const auto p = Earth::ToLocal(g.latitude, g.longitude, coordinate.latitude, coordinate.longitude);
-        if (!p.visible || p.x < g.x || p.z < g.z || p.x > double(g.x) + 256 * g.grid ||
-            p.z > double(g.z) + 256 * g.grid)
-            continue;
-        candidates.push_back({&object, coordinate, p, std::hypot(p.x - cameraX, p.z - cameraZ)});
     }
     output.coveredObjects = candidates.size();
     std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b)
@@ -230,6 +458,8 @@ EarthWorldgen::Snapshot EarthWorldgen::Build(const Source& source, const EarthBu
         if (output.objects.size() == MaxInstances)
             break;
         const auto& input = *candidate.object;
+        const auto& source = *candidate.source;
+        const double extent = source.cells * source.cellSize;
         if (!models.count(input.model) && models.size() == MaxModels)
         {
             ++output.modelLimitSkipped;
@@ -314,7 +544,11 @@ std::unique_ptr<EarthWorldgen::Snapshot> EarthWorldgen::TakeReady()
 }
 void EarthWorldgen::Run()
 {
-    const auto source = Load(_manifest);
+    const auto catalog = LoadCatalog(_manifest);
+    // Worker-only ownership: eviction precedes loads, so old regions do not
+    // accumulate while travelling through a large prepared index.
+    std::map<uint32_t, Source> resident;
+    std::map<uint32_t, Source::Stamp> pinned;
     for (;;)
     {
         EarthBuildingStream::Ground ground;
@@ -336,7 +570,46 @@ void EarthWorldgen::Run()
             std::lock_guard lock(_mutex);
             return _stop || _request != request;
         };
-        auto output = std::make_unique<Snapshot>(Build(source, ground, x, z, cancelled));
+        const auto selected = SelectRegions(catalog, ground, x, z);
+        for (auto it = resident.begin(); it != resident.end();)
+        {
+            if (std::none_of(selected.begin(), selected.end(),
+                             [&](const auto& region) { return region.id == it->first; }))
+                it = resident.erase(it);
+            else
+                ++it;
+        }
+        for (const auto& region : selected)
+        {
+            if (cancelled())
+                break;
+            if (!resident.count(region.id))
+            {
+                auto source = LoadRegion(region, cancelled);
+                if (cancelled())
+                    break;
+                if (source.error.empty())
+                {
+                    const auto [it, inserted] = pinned.emplace(region.id, source.stamp);
+                    if (!inserted && !(it->second == source.stamp))
+                    {
+                        source = Source{};
+                        source.error = "prepared source changed during run; restart to reload";
+                    }
+                }
+                if (!source.error.empty())
+                    source.error = "region " + std::to_string(region.id) + ": " + source.error;
+                resident.emplace(region.id, std::move(source));
+            }
+        }
+        if (cancelled())
+            continue;
+        std::vector<const Source*> sources;
+        for (const auto& region : selected)
+            sources.push_back(&resident.at(region.id));
+        auto output = std::make_unique<Snapshot>(Build(sources, ground, x, z, cancelled));
+        if (!catalog.error.empty())
+            output->error = catalog.error;
         {
             std::lock_guard lock(_mutex);
             if (!_stop && request == _request)
