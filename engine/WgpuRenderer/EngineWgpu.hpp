@@ -558,7 +558,8 @@ class EngineWgpu : public EngineDummy
     // Called by the terrain renderer: append a batch of `nodes` for the current
     // camera and enqueue its draw in submission order.
     void SubmitTerrain(std::span<const WgrTerrainNode> nodes);
-    void SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture = 0);
+    // Global imagery wraps longitude only; local atlas callers clamp both axes (3).
+    void SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture = 0, uint32_t sampler = 2);
 
     // GPU water renderer (active unless WGR_GPU_WATER=0; null keeps legacy water).
     IWaterRenderer* GetWaterRenderer() override;

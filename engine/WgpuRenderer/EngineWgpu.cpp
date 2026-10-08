@@ -7418,7 +7418,7 @@ void EngineWgpu::SubmitTerrain(std::span<const WgrTerrainNode> nodes)
     _cmds.push_back(cmd);
 }
 
-void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture)
+void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture, uint32_t sampler)
 {
     if (!_renderer || !mesh || !indexCount) return;
     EnsureCamera();
@@ -7432,6 +7432,7 @@ void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTextur
     d.blend = WGR_BLEND_OPAQUE;
     d.flags = WGR_DRAW3D_DOUBLE_SIDED | WGR_DRAW3D_EARTH_SURFACE;
     d.texture_id = texture;
+    d.sampler = sampler;
     d.world.m[0] = d.world.m[5] = d.world.m[10] = d.world.m[15] = 1.0f;
     d.world.m[12] = -camera.pos[0];
     d.world.m[13] = -camera.pos[1];
