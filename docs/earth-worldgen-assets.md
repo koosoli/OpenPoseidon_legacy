@@ -232,7 +232,12 @@ its source, covered, selected, created and resident-region counts.
 
 The process owns one PID, exits it cleanly and verifies the deployment stamp is
 unchanged. `build/earth-worldgen-regions-installed/<run>/result.json` and three
-PNG files retain the evidence. A diagnostic PASS does **not** accept their
+PNG files retain the evidence. Region dictionary keys serialize as decimal
+strings, with numeric `id` values preserved. A `passed: false` receipt is written
+before launch and after each completed capture; the final receipt alone can
+record all teardown and unchanged-source checks as passed. JSON conversion
+finishes before replacing the previous checkpoint, preserving it on a later
+serialization failure. A diagnostic PASS does **not** accept their
 visual quality, object collision, road navigation or upstream playability.
 The runtime bridge exposes counts and resident region IDs, not individual
 placement IDs or retired GPU slots; their stable namespace behavior remains

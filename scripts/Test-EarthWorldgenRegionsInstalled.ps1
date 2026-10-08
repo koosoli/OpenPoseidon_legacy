@@ -19,6 +19,13 @@ $culture=[Globalization.CultureInfo]::InvariantCulture
 function Require([bool]$ok,[string]$message){if(!$ok){throw $message}}
 function Finite([double]$value){return (![double]::IsNaN($value)-and![double]::IsInfinity($value))}
 function Fmt([double]$value){Require (Finite $value) 'Nonfinite coordinate';return $value.ToString('R',$culture)}
+function ReceiptJson($receipt){return ($receipt|ConvertTo-Json -Depth 30)}
+function SaveReceipt($receipt,[string]$path){
+    # Convert first so a serialization error cannot truncate the last checkpoint.
+    $json=ReceiptJson $receipt;$temporary=$path+'.partial'
+    $json|Set-Content -LiteralPath $temporary
+    Move-Item -LiteralPath $temporary -Destination $path -Force
+}
 function Decode([string]$value){$value=$value.Trim();if($value.StartsWith('"')){Require ($value.EndsWith('"')) 'Malformed SQF string';return $value.Substring(1,$value.Length-2).Replace('""','"')};return $value}
 function ParseLocation([string]$value){
     Require ($value-match'^OK:latitude=([-+0-9.eE]+) longitude=([-+0-9.eE]+) altitude=([-+0-9.eE]+) revision=(\d+)$') ('Malformed Earth location: '+$value)
@@ -104,7 +111,16 @@ if($SelfTest){
     Require (!(Families @('Earth Worldgen model unavailable/bounded: data3d\str smrk.p3d')).tree) 'Unavailable model falsely registered'
     Require ((ViewError @{direction=@(0,0,1)} 0 0)-lt1e-9) 'Compass view parser'
     Require ((ViewError @{direction=@(0,0,1)} 90 -35)-gt1) 'Wrong capture direction accepted'
-    Write-Host 'Worldgen region installed-test parser, stale-publication, cap, retirement and model negative controls PASS';return
+    $sources=@{};$id=2;$sources[([string]$id)]=@{id=$id;manifest='mamer/manifest.json';bbox=@(49.59,6,49.64,6.08)}
+    $receipt=ReceiptJson @{passed=$false;sources=$sources;poses=@(@{selection=$block})}|ConvertFrom-Json
+    Require (!$receipt.passed-and$receipt.sources.'2'.id-eq2-and$receipt.sources.'2'.manifest-ceq'mamer/manifest.json'-and$receipt.poses[0].selection.installed.created-eq2048) 'Nested receipt JSON string-key roundtrip'
+    $checkpoint=[IO.Path]::GetTempFileName()
+    try{
+        SaveReceipt @{passed=$false;sources=$sources} $checkpoint;$saved=(Get-FileHash -LiteralPath $checkpoint).Hash
+        $rejected=$false;try{SaveReceipt @{sources=@{2=@{id=2}}} $checkpoint}catch{$rejected=$true}
+        Require ($rejected-and(Get-FileHash -LiteralPath $checkpoint).Hash-ceq$saved) 'Integer dictionary keys did not fail before preserving previous receipt checkpoint'
+    }finally{Remove-Item -LiteralPath $checkpoint -ErrorAction SilentlyContinue;Remove-Item -LiteralPath ($checkpoint+'.partial') -ErrorAction SilentlyContinue}
+    Write-Host 'Worldgen region installed-test parser, stale-publication, cap, retirement, model and JSON checkpoint controls PASS';return
 }
 Require (![string]::IsNullOrEmpty($ExpectedCommit)-and![string]::IsNullOrEmpty($env:LOCK_OWNER)) 'ExpectedCommit and scripts/with-game-lock.sh are required'
 Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue)) 'Existing game preserved'
@@ -118,7 +134,7 @@ Require ($catalog.earth_worldgen_regions-eq1-and$catalog.regions.Count-eq2) 'Thi
 $indexDirectory=Split-Path -Parent $Index;$identities=@{};$regionSources=@{};$seenPaths=@{}
 $identities[$Index]=(Get-FileHash -LiteralPath $Index).Hash
 foreach($region in $catalog.regions){
-    $id=[int]$region.id;Require ($id-ge1-and$id-le255-and[double]$region.id-eq$id-and!$regionSources.ContainsKey($id)) 'Invalid/duplicate region ID'
+    $id=[int]$region.id;$idKey=[string]$id;Require ($id-ge1-and$id-le255-and[double]$region.id-eq$id-and!$regionSources.ContainsKey($idKey)) 'Invalid/duplicate region ID'
     $relative=[string]$region.manifest
     Require (![string]::IsNullOrEmpty($relative)-and$relative.Length-le512-and![IO.Path]::IsPathRooted($relative)-and!$relative.Contains('..')-and!$relative.Contains(':')) 'Index manifests must be contained relative paths'
     $manifestPath=[IO.Path]::GetFullPath((Join-Path $indexDirectory $relative));$prefix=$indexDirectory.TrimEnd('\','/')+[IO.Path]::DirectorySeparatorChar
@@ -131,11 +147,11 @@ foreach($region in $catalog.regions){
     if(!(Test-Path -LiteralPath $wrp -PathType Leaf)){$wrp=Join-Path (Split-Path -Parent $manifestPath) ('source/'+$source.world.name+'.wrp')}
     Require ((Get-Item -LiteralPath $wrp).Length-le33554432) 'WRP exceeds per-source 32 MiB cap'
     $identities[$manifestPath]=(Get-FileHash -LiteralPath $manifestPath).Hash;$identities[$wrp]=(Get-FileHash -LiteralPath $wrp).Hash
-    $regionSources[$id]=@{manifest=$manifestPath;wrp=$wrp;bbox=$region.bbox;validation=$source.final_validation}
+    $regionSources[$idKey]=@{id=$id;manifest=$manifestPath;wrp=$wrp;bbox=$region.bbox;validation=$source.final_validation}
 }
-Require ($regionSources.ContainsKey($CityRegionId)-and$regionSources.ContainsKey($MamerRegionId)) 'Requested fixture IDs absent from index'
+Require ($regionSources.ContainsKey(([string]$CityRegionId))-and$regionSources.ContainsKey(([string]$MamerRegionId))) 'Requested fixture IDs absent from index'
 foreach($pose in @(@{id=$CityRegionId;lat=49.61;lon=6.13},@{id=$MamerRegionId;lat=49.615;lon=6.04})){
-    $box=$regionSources[$pose.id].bbox;Require ($pose.lat-ge$box[0]-and$pose.lat-le$box[2]-and$pose.lon-ge$box[1]-and$pose.lon-le$box[3]) 'Fixture origin not covered by its indexed region'
+    $box=$regionSources[([string]$pose.id)].bbox;Require ($pose.lat-ge$box[0]-and$pose.lat-le$box[2]-and$pose.lon-ge$box[1]-and$pose.lon-le$box[3]) 'Fixture origin not covered by its indexed region'
 }
 $addonArchiveRoot=$AddonRoot;if(!@(Get-ChildItem -LiteralPath $addonArchiveRoot -File -Filter '*.pbo').Count){$addonArchiveRoot=Join-Path $AddonRoot 'AddOns'}
 Require (@(Get-ChildItem -LiteralPath $addonArchiveRoot -File -Filter '*.pbo' -ErrorAction SilentlyContinue).Count-gt0) 'Mount the Mamer addon archive root for its generated water-tower P3D'
@@ -156,6 +172,7 @@ $log=Join-Path $out 'engine.log';$stderr=Join-Path $out 'stderr.log';$overall=[D
 $result=@{installed=$stamp;expectedCommit=$ExpectedCommit;index=$Index;sources=$regionSources;sourceHashes=$identities;addonArchiveRoot=$addonArchiveRoot;cacheDirectory=$CacheDirectory;userDirectory=$user;
     passed=$false;visualAccepted=$false;playabilityAccepted=$false;stablePlacementIdsObserved=$false;stablePlacementIdsReason='Runtime bridge/logs expose resident region IDs and counts, not placement IDs or retired GPU slots. Stable placement namespaces are CPU-tested separately.';
     poses=@();offline=$true;scope='Bounded prepared Worldgen region residency and retained model registration. Images need inspection; no global data completeness, collision, road navigation or full model-family quality claim.'}
+$receiptPath=Join-Path $out 'result.json';SaveReceipt $result $receiptPath
 function Health{Require ($null-ne$p-and!$p.HasExited) 'Owned game exited';Require ([DateTime]::UtcNow-lt$overall) 'Overall region acceptance deadline'}
 function Send($command){Health;$writer.WriteLine(($command|ConvertTo-Json -Depth 10 -Compress));do{$line=$reader.ReadLine();Require (![string]::IsNullOrEmpty($line)) 'Harness disconnected';$reply=$line|ConvertFrom-Json}while($null-eq$reply.ok);Require ([bool]$reply.ok) $line;return $reply}
 function Eval([string]$code){return Decode ([string](Send @{cmd='eval';code=$code}).result)}
@@ -248,6 +265,7 @@ try{
         Require ($arm.performance.renderWidth-eq1600-and$arm.performance.renderHeight-eq900-and$arm.performance.outputWidth-eq1600-and$arm.performance.outputHeight-eq900-and$arm.performance.msaaSamples-eq4-and$arm.performance.activeUpscaler-eq0) 'Actual renderer must be native1600x900,4xMSAA,no upscaler'
         $path=Join-Path $out ($pose.name+'.png');$null=Send @{cmd='screenshot';path=$path};$until=[DateTime]::UtcNow.AddSeconds(15)
         while(!(Test-Path -LiteralPath $path)-or(Get-Item -LiteralPath $path).Length-eq0){Health;Require ([DateTime]::UtcNow-lt$until) 'Screenshot deadline';Start-Sleep -Milliseconds 100};$arm.screenshot=$path
+        SaveReceipt $result $receiptPath
     }
     $first=$result.poses[0].selection;$last=$result.poses[2].selection
     Require ($first.publication.source-eq$last.publication.source-and$first.publication.covered-eq$last.publication.covered-and$first.publication.selected-eq$last.publication.selected-and$first.installed.created-eq$last.installed.created-and(($first.residency.ids|Sort-Object)-join',')-ceq(($last.residency.ids|Sort-Object)-join',')) 'Returning to same city pose changed deterministic source/selection/residency counts'
@@ -263,5 +281,5 @@ try{
     if($p-and!$p.HasExited){if($writer){try{if($null-ne$heldKey){$writer.WriteLine('{"cmd":"key_up","sc":7}')};$writer.WriteLine('{"cmd":"exit"}');$null=$p.WaitForExit(10000)}catch{}};if(!$p.HasExited){$p.Kill();$null=$p.WaitForExit(10000);$result.forcedCleanup=$true}}
     if($writer){$writer.Dispose()};if($reader){$reader.Dispose()};if($client){$client.Dispose()}
     foreach($key in $saved.Keys){if($exists[$key]){[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}else{Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue}}
-    $result|ConvertTo-Json -Depth 30|Set-Content -LiteralPath (Join-Path $out 'result.json')
+    SaveReceipt $result $receiptPath
 }
