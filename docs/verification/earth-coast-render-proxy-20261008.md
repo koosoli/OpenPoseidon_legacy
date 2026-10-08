@@ -49,3 +49,14 @@ Installed acceptance stays bounded to the existing Guernsey setup at
 elevation -20; await current ground/horizon publication and capture. Confirm
 continuous visible sea with active FFT, then FFT retirement at 9000 m. The
 saved pre-fix image is not evidence that coastal visuals passed.
+
+Parent follow-up: matched `7a851e7a` installed at 10:11 and
+`build/earth-streaming/20261008-101152/result.json` pass the same camera,
+current ground/horizon, FFT-active and FFT-retired diagnostics. CPU coordinates
+and all four complete production shader compositions pass in the integrated
+tree. The inspected 1000m image has continuous water across most of the near
+window instead of the repeated clipped trough islands. It still has a visible
+near-water/overview transition, a dark corner artifact and a conspicuous
+near/far shading mismatch. This is partial rendering progress, **not final
+coastal visual acceptance** or a seamless worldwide ocean claim. The proxy
+height heuristic and absence of measured bathymetry remain unchanged limits.

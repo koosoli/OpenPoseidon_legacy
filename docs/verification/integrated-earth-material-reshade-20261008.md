@@ -242,3 +242,14 @@ therefore remain unaccepted and disabled; no beauty comparison or ray-tracing
 claim is made. See `docs/roadmap/RESHade-DEPTH-RT-AUDIT-20261008.md` for exact
 receipts and the bounded scene-depth handoff still required. Injected GPU work
 is outside the engine's timing brackets.
+
+Final paired Earth coastal checkpoint: `7a851e7a`, installed at 10:11. The
+render-only coastal floor correction preserves the original resident heights
+and avoids most wave-trough occlusion. Integrated numeric and production
+water/wake/breaker/shore composition tests pass. The same installed Guernsey
+test `build/earth-streaming/20261008-101152/result.json` again passes camera,
+publication and FFT lifecycle checks. Visual inspection still finds an obvious
+near-ocean/overview transition, a dark corner and differing near/far shading;
+worldwide ocean appearance is **not accepted as seamless**. See
+`docs/verification/earth-coast-render-proxy-20261008.md` for the elevation
+heuristic, possible low dry-land misclassification, exact source and receipts.
