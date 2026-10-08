@@ -2,7 +2,7 @@
    returns to the start, validates the upload receipts, captures rendered frames.
    Wrap in scripts/with-game-lock.sh. Stops only the process this script starts. #>
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$ExpectedCommit,[switch]$Offline,[switch]$Horizon,[switch]$Globe)
+param([Parameter(Mandatory)][string]$ExpectedCommit,[switch]$Offline,[switch]$Horizon,[switch]$Globe,[switch]$Controls)
 $ErrorActionPreference='Stop'
 if(!$env:LOCK_OWNER){throw 'Game lock required'}
 $repo=Split-Path -Parent $PSScriptRoot
@@ -85,6 +85,25 @@ try{
   Start-Sleep -Seconds 2
   $path=Join-Path $out 'return-from-orbit.png';$null=Send @{cmd='screenshot';path=$path}
   $receipt.views+=@{altitude=4500;screenshot=$path;performance=(Send @{cmd='frame_performance'})}
+ }
+ if($Controls){
+  # Drive the actual Freefly input path, not another scripted teleport. Commands
+  # enter this owned game's SDL queue; no desktop focus or human keys are used.
+  $null=Send @{cmd='exec';code='triFreeFlyPose "6400 6400 12000000 0 -89.9"'}
+  Start-Sleep -Milliseconds 500
+  $before=(Send @{cmd='dev_wet_soil_diagnostic';action='state'}).camera.position
+  try{$null=Send @{cmd='key';sc=26;hold=$true};Start-Sleep -Seconds 2}
+  finally{$null=Send @{cmd='key_up';sc=26}}
+  Start-Sleep -Milliseconds 300
+  $approach=(Send @{cmd='dev_wet_soil_diagnostic';action='state'}).camera.position
+  Require ($approach[1]-lt$before[1]-10000) 'Looking down and holding W did not approach Earth'
+  Require ([Math]::Abs($approach[0]-$before[0])-lt1000) 'Approach unexpectedly moved sideways'
+  try{$null=Send @{cmd='key';sc=22;hold=$true};Start-Sleep -Seconds 2}
+  finally{$null=Send @{cmd='key_up';sc=22}}
+  Start-Sleep -Milliseconds 300
+  $retreat=(Send @{cmd='dev_wet_soil_diagnostic';action='state'}).camera.position
+  $receipt.controls=@{before=$before;approach=$approach;retreat=$retreat;input='SDL W/S held for 2 seconds each'}
+  Require ($retreat[1]-gt$approach[1]+10000) 'Looking down and holding S did not retreat'
  }
  $receipt.tiles=@(Get-ChildItem $cache -Directory -Filter 'terrarium-z*' | Get-ChildItem -Filter '*.png').Count
  Require ($receipt.tiles-le256) 'Disk cache exceeds its bound'

@@ -465,6 +465,11 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
         saturateMax(position[1], surfY + 0.05);
         if (earth) saturate(position[1],500.0f,EarthStreaming::OrbitAltitudeLimit);
         Move(position);
+        // The legacy manual camera aims at a point 100 km ahead. Orbital flight
+        // can cross that point in one update, causing CamEffectFOV to turn the
+        // camera around. Translate the virtual target with Earth free flight
+        // so W/S retain their direction even at planetary travel speeds.
+        if (earth) ResetTargets();
 
         // get mouse movement
         // or numeric keyboard
