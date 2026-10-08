@@ -73,6 +73,12 @@ the actual `Native` and `ReShade` files separately. On/off does not change the
 per-technique selection, so `activeTechniques` can remain positive while the
 global `enabled` flag is false.
 
+Freshly prepared configurations use the official `OVERLAY/TutorialProgress=4`
+(Skip Tutorial) and `ShowScreenshotMessage=0` settings for clean comparisons.
+Existing user INI files are preserved; add these settings there if needed. Close
+the ReShade overlay and wait at least six seconds after effects finish loading
+before capturing, since the official startup splash still lasts five seconds.
+
 ## Compatibility and provenance
 
 Pinned installer SHA256:

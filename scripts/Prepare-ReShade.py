@@ -84,6 +84,7 @@ def main():
         config.write_text("[GENERAL]\nEffectSearchPaths=.\\Shaders\n"
                           "PresetPath=.\\OpenPoseidon.ini\nPerformanceMode=0\n"
                           "[ADDON]\nAddonPath=.\n[INPUT]\nKeyOverlay=36,0,0,0\n"
+                          "[OVERLAY]\nTutorialProgress=4\nShowScreenshotMessage=0\n"
                           "[SCREENSHOT]\nSavePath=.\\Screenshots\n", encoding="utf-8")
     preset = root / "OpenPoseidon.ini"
     if not preset.exists():
