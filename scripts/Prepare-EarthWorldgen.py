@@ -51,7 +51,7 @@ def cached_height(cache: Path, lat: float, lon: float, images: dict) -> float:
     raise ValueError(f"No cached elevation neighborhood at {lat},{lon}; prepare terrain first")
 
 
-def prepare(cache: Path, output: Path, bbox: list[float], cells: int) -> dict:
+def prepare(cache: Path, output: Path, bbox: list[float], cells: int, regional_source: Path | None = None) -> dict:
     south, west, north, east = bbox
     if not (-84 <= south < north <= 84 and -180 <= west < east <= 180):
         raise ValueError("Invalid supported, non-dateline bounding box")
@@ -60,7 +60,24 @@ def prepare(cache: Path, output: Path, bbox: list[float], cells: int) -> dict:
     output.mkdir(parents=True, exist_ok=False)
     elements = {}
     sources = []
+    if regional_source is not None:
+        if regional_source.stat().st_size > 16 * 1024 * 1024:
+            raise ValueError("Regional source exceeds 16MiB")
+        payload = regional_source.read_bytes()
+        document = json.loads(payload)
+        rows = document.get("elements")
+        if document.get("remark") or not isinstance(rows, list) or len(rows) > 64000:
+            raise ValueError("Incomplete or oversized regional source")
+        sources.append({"path": str(regional_source.resolve()), "sha256": hashlib.sha256(payload).hexdigest(),
+                        "elements": len(rows)})
+        for row in rows:
+            key = (row.get("type"), row.get("id"))
+            if key[0] not in ("node", "way", "relation") or not isinstance(key[1], int):
+                raise ValueError("Invalid regional OSM element")
+            elements[key] = row
     for kind in ("features", "buildings"):
+        if regional_source is not None:
+            break
         for a in range(math.floor(south / .02), math.floor(north / .02) + 1):
             for b in range(math.floor(west / .02), math.floor(east / .02) + 1):
                 source = cache / kind / f"{a}_{b}.json"
@@ -84,8 +101,8 @@ def prepare(cache: Path, output: Path, bbox: list[float], cells: int) -> dict:
                         elements[key] = row
     if not elements:
         raise ValueError("No cached OSM source cells in this region")
-    if len(elements) > 16000:
-        raise ValueError("Local generation limit: 16000 source elements")
+    if len(elements) > (64000 if regional_source is not None else 16000):
+        raise ValueError("Local generation source element limit exceeded")
     osm = output / "osm.json"
     osm.write_text(json.dumps({"version": .6, "elements": list(elements.values())}), encoding="utf-8")
     heights = []
@@ -116,6 +133,7 @@ def main() -> None:
     parser.add_argument("--bbox", nargs=4, type=float, default=[49.6035, 6.12, 49.6165, 6.14])
     parser.add_argument("--cells", type=int, choices=(64, 128, 256), default=128)
     parser.add_argument("--asset-root", type=Path, required=True)
+    parser.add_argument("--regional-source", type=Path, help="Complete bounded local OSM extract JSON, with attribution")
     parser.add_argument("--prepare-only", action="store_true")
     args = parser.parse_args()
     source = args.worldgen_source.resolve()
@@ -125,7 +143,7 @@ def main() -> None:
     asset_root = args.asset_root.resolve()
     if output == asset_root or asset_root in output.parents:
         raise ValueError("Generate outside the installed game; deployment is a separate operation")
-    receipt = prepare(args.cache.resolve(), output, args.bbox, args.cells)
+    receipt = prepare(args.cache.resolve(), output, args.bbox, args.cells, args.regional_source)
     if args.prepare_only:
         print(json.dumps(receipt, indent=2))
         return

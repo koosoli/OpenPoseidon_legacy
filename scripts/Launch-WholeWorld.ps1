@@ -62,6 +62,14 @@ if ($WorldgenAddonRoot) {
     if (!$WorldgenManifest) { throw 'WorldgenAddonRoot requires WorldgenManifest.' }
     $WorldgenAddonRoot=(Resolve-Path -LiteralPath $WorldgenAddonRoot).Path
     if (!(Test-Path -LiteralPath $WorldgenAddonRoot -PathType Container)) { throw 'Worldgen addon root must be a directory.' }
+    if (!(Get-ChildItem -LiteralPath $WorldgenAddonRoot -File -Filter '*.pbo')) {
+        $addonDirectory=Join-Path $WorldgenAddonRoot 'AddOns'
+        if (!(Test-Path -LiteralPath $addonDirectory -PathType Container) -or
+            !(Get-ChildItem -LiteralPath $addonDirectory -File -Filter '*.pbo')) {
+            throw 'Worldgen addon root must contain PBO archives or an AddOns directory with PBO archives.'
+        }
+        $WorldgenAddonRoot=$addonDirectory
+    }
 }
 $fixture = Join-Path $CacheDirectory 'fixture'
 $mission = Join-Path $fixture 'earth-preview.abel'

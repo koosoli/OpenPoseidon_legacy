@@ -514,6 +514,30 @@ all 7369 resident source bases and bounded selection of 2048 instances, without
 skipped model names. Stock model/texture assets remain local game references.
 Upstream final road/junction/grading validation reports **failed**; this is a
 real asset-presentation fixture, not an accepted playable generated island.
-Installed model rendering and near-ground freefly acceptance are still pending.
-Only this generated region exists; worldwide generated-region residency and
-automatic population are not complete.
+Installed `0e4e1ed4` passes the supported full game/test build. Ground-approach
+acceptance at `build/earth-geodesic-installed/20261008-152526-b3e871` uses actual
+SDL descent/ascent and holds 0.299987824 metres above current resident ground.
+The old 500-metre freefly floor is removed on covered Earth ground.
+
+The first actual Worldgen model test registered trees and houses, but stock
+alpha-blended OnSurface road sections were not retained: 1885 created of 2048
+attempted. Source parsing alone did not establish successful road rendering.
+Dedicated Earth road owners now use the supported cutout/A2C coverage route;
+native road ownership stays unchanged. This approximates road-edge alpha and
+still requires installed image inspection. Launcher addon roots now resolve to
+the direct PBO directory; the earlier startup failures remain in receipts.
+
+A bounded regional OSM PBF importer and offline generated-region index are
+integrated. Actual Mamer preparation covers roughly 5.8 by 5.6 km and contains
+98421 authored placements. The actual two-region CPU test parses 105790 records
+and selects 2048 under the shared instance cap. Upstream road/grading validation
+still fails; these are presentation fixtures. Installed boundary continuity,
+worldwide source coverage and automatic worldwide generation are not complete.
+
+Installed ReShade tests on `0e4e1ed4` pass active-native-fog GI refusal
+(`20261008-154735-SceneDH`) and fog-free 4x depth/GI lifecycle, paired captures,
+GPU timing and clean exit (`20261008-155035-SceneDH`). Inspection of the latter
+shows subtle ground/foliage illumination without the previous fogged pale hills.
+This accepts that bounded fog-free preview scene only; fog-compatible GI and
+general visual parity are not established. ReShade remains optional and off by
+default.
