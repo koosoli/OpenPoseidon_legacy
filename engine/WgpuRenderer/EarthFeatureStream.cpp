@@ -58,8 +58,10 @@ float Height(const Features::Ground& g, Point p)
     const int ix = std::min(255, int(x)), iz = std::min(255, int(z));
     const float a = g.heights[iz * 257 + ix], b = g.heights[iz * 257 + ix + 1], c = g.heights[(iz + 1) * 257 + ix],
                 d = g.heights[(iz + 1) * 257 + ix + 1];
-    const float y =
-        float((a * (1 - (x - ix)) + b * (x - ix)) * (1 - (z - iz)) + (c * (1 - (x - ix)) + d * (x - ix)) * (z - iz));
+    const double fx = x - ix, fz = z - iz;
+    // Resident terrain indices are {a,c,b,b,c,d}; interpolate its actual
+    // triangles rather than the bilinear surface between four heights.
+    const float y = float(fx + fz <= 1 ? a + (b - a) * fx + (c - a) * fz : d + (c - d) * (1 - fx) + (b - d) * (1 - fz));
     if (!std::isfinite(y))
         throw std::out_of_range("invalid ground");
     return y;

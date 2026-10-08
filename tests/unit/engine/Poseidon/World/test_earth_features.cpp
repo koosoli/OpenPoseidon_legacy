@@ -109,6 +109,24 @@ int main(int argc, char** argv)
     Valid(mesh);
     for (auto v : mesh.batches[Features::PavedRoad].vertices)
         assert(std::abs(v.y - (10 + (v.x - g.x) * .1f + .08f)) < .001);
+    // A non-planar quad distinguishes rendered triangles from bilinear height.
+    auto saddle = g;
+    saddle.x = 6400;
+    saddle.z = 6400;
+    saddle.heights.assign(257 * 257, 0);
+    saddle.heights[258] = 100;
+    for (double offset : {.25, .75})
+    {
+        const auto c = Poseidon::Earth::FromLocal(0, 0, 6400 + offset, 6400 + offset);
+        std::ostringstream node;
+        node << std::setprecision(15) << "{\"type\":\"node\",\"lat\":" << c.latitude << ",\"lon\":" << c.longitude
+             << ",\"tags\":{\"natural\":\"tree\"}}";
+        mesh = Features::BuildCell(Json(node.str()), saddle, cell);
+        float low = INFINITY;
+        for (auto v : mesh.batches[Features::Trees].vertices)
+            low = std::min(low, v.y);
+        assert(std::abs(low - (offset == .25 ? 1.08f : 51.08f)) < .001f);
+    }
     const Features::Ground wide{3200, 3200, 25, 0, 0, 1, 1, std::vector<float>(257 * 257, 10)};
     mesh = Features::BuildCell(
         Json(Way(47, "\"natural\":\"wood\"", {{5000, 5000}, {7600, 5000}, {7600, 7600}, {5000, 7600}, {5000, 5000}})),
