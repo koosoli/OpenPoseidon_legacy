@@ -8,7 +8,7 @@
 
 namespace Poseidon
 {
-// Cached OSM presentation only: no network, game assets, collision or simulation.
+// OSM presentation only: optional pre-tiled HTTPS source, no game assets, collision or simulation.
 class EarthBuildingStream
 {
 public:

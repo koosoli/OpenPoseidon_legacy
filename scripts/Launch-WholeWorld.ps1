@@ -13,6 +13,7 @@ param(
     [switch]$CachedBuildings,
     [switch]$CachedFeatures,
     [switch]$LocalSurface,
+    [string]$ContentUrlTemplate = '',
     [string]$CacheDirectory = (Join-Path $env:LOCALAPPDATA 'OpenPoseidon/world-stream'),
     [switch]$Fullscreen,
     [int]$HarnessPort = 0,
@@ -34,6 +35,7 @@ if (!$PrepareOnly -and !$env:LOCK_OWNER) {
     if ($Globe) { $forward += '-Globe' }
     if ($CachedBuildings) { $forward += '-CachedBuildings' }
     if ($CachedFeatures) { $forward += '-CachedFeatures' }
+    if ($ContentUrlTemplate) { $forward += @('-ContentUrlTemplate',$ContentUrlTemplate) }
     if ($LocalSurface) { $forward += '-LocalSurface' }
     if ($LogFile) { $forward += @('-LogFile',$LogFile) }
     $previous = $env:LOCK_OWNER
@@ -125,8 +127,9 @@ $settings = @{
     POSEIDON_EARTH_LONGITUDE=$Longitude.ToString('R',[Globalization.CultureInfo]::InvariantCulture);
     POSEIDON_EARTH_CACHE=$CacheDirectory; POSEIDON_EARTH_IMAGERY=$imagery;
     WGR_GRASS='0'; WGR_TERRAIN_RESOURCE_REUSE='1';
-    POSEIDON_EARTH_BUILDINGS=$(if($CachedBuildings){'1'}else{'0'});
-    POSEIDON_EARTH_FEATURES=$(if($CachedFeatures){'1'}else{'0'});
+    POSEIDON_EARTH_BUILDINGS=$(if($CachedBuildings -or $ContentUrlTemplate){'1'}else{'0'});
+    POSEIDON_EARTH_FEATURES=$(if($CachedFeatures -or $ContentUrlTemplate){'1'}else{'0'});
+    POSEIDON_EARTH_CONTENT_URL=$ContentUrlTemplate;
     POSEIDON_EARTH_SURFACE=$(if($LocalSurface){'1'}else{'0'})
 }
 $saved = @{}

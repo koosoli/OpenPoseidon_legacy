@@ -1,4 +1,5 @@
 #include "EarthFeatureStream.hpp"
+#include "EarthContentSource.hpp"
 #include <cjson/cJSON.h>
 #include <algorithm>
 #include <cmath>
@@ -46,9 +47,9 @@ Point Local(double lat, double lon, const Features::Ground& g, Features::Cell ce
     if (!std::isfinite(lat) || !std::isfinite(lon) || std::abs(lat - (cell.latitude + .5) * .02) > .06 ||
         std::abs(Earth::WrapLongitude(lon - (cell.longitude + .5) * .02)) > .06)
         throw std::out_of_range("feature outside cell margin");
-    return {Earth::Anchor + Earth::WrapLongitude(lon - g.longitude) * Earth::Pi / 180 * Earth::Radius *
-                                std::cos(g.latitude * Earth::Pi / 180),
-            Earth::Anchor + (lat - g.latitude) * Earth::Pi / 180 * Earth::Radius};
+    const auto local = Earth::ToLocal(g.latitude, g.longitude, lat, lon);
+    if (!local.visible) throw std::out_of_range("feature behind horizon");
+    return {local.x, local.z};
 }
 float Height(const Features::Ground& g, Point p)
 {
@@ -420,8 +421,10 @@ EarthFeatureStream::Mesh EarthFeatureStream::BuildNeighborhood(const std::filesy
         const Cell cell{centre.latitude + offset[0], ((centre.longitude + offset[1] + 27000) % 18000) - 9000};
         if (std::abs((cell.latitude + .5) * .02) > 84)
             continue;
-        const auto path = cache / "features" / EarthBuildingStream::FileName(cell);
+        auto path = cache / "features" / EarthBuildingStream::FileName(cell);
         std::error_code error;
+        if (!std::filesystem::is_regular_file(path, error))
+            path = EarthContentSource::StreamPath(cache, "features", cell.latitude, cell.longitude);
         const auto bytes = std::filesystem::file_size(path, error);
         if (error)
             continue;
@@ -495,6 +498,7 @@ std::unique_ptr<EarthFeatureStream::Mesh> EarthFeatureStream::TakeReady()
 }
 void EarthFeatureStream::Run()
 {
+    EarthContentSource source;
     for (;;)
     {
         Ground ground;
@@ -510,12 +514,9 @@ void EarthFeatureStream::Run()
             request = _request;
             _pending = false;
         }
-        auto mesh = std::make_unique<Mesh>(BuildNeighborhood(_cache, ground, cell,
-                                                             [&]
-                                                             {
-                                                                 std::lock_guard lock(_mutex);
-                                                                 return _stop || request != _request;
-                                                             }));
+        const auto cancelled = [&] { std::lock_guard lock(_mutex); return _stop || request != _request; };
+        source.EnsureNeighborhood(_cache, "features", cell.latitude, cell.longitude, cancelled);
+        auto mesh = std::make_unique<Mesh>(BuildNeighborhood(_cache, ground, cell, cancelled));
         {
             std::lock_guard lock(_mutex);
             if (!_stop && request == _request)

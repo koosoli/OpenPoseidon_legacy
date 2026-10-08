@@ -4,7 +4,7 @@
 
 namespace Poseidon
 {
-// Independent cached OSM presentation prototype. No network, collision, AI,
+// Independent cached OSM presentation prototype. No collision, AI,
 // retail asset redistribution, terrain grading or planet-wide completeness.
 class EarthFeatureStream
 {

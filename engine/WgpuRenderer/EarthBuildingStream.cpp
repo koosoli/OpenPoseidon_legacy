@@ -1,4 +1,5 @@
 #include "EarthBuildingStream.hpp"
+#include "EarthContentSource.hpp"
 #include <cjson/cJSON.h>
 #include <algorithm>
 #include <array>
@@ -115,8 +116,9 @@ void AppendCell(Buildings::Mesh& result,const std::string& json,const Buildings:
                 std::abs(Earth::WrapLongitude(lon-(cell.longitude+.5)*CellDegrees))>.04){valid=false;break;}
             if(i==0){firstLat=lat;firstLon=lon;}
             if(i==count-1){if(std::abs(firstLat-lat)>1e-9||std::abs(Earth::WrapLongitude(firstLon-lon))>1e-9)valid=false;break;}
-            const Point point{Earth::Anchor+Earth::WrapLongitude(lon-g.longitude)*Earth::Pi/180*Earth::Radius*std::cos(g.latitude*Earth::Pi/180),
-                Earth::Anchor+(lat-g.latitude)*Earth::Pi/180*Earth::Radius};
+            const auto local=Earth::ToLocal(g.latitude,g.longitude,lat,lon);
+            if(!local.visible){valid=false;break;}
+            const Point point{local.x,local.z};
             if(!p.empty() && std::hypot(point.x-p.back().x,point.z-p.back().z)<.01){valid=false;break;}
             p.push_back(point);
         }
@@ -171,7 +173,8 @@ EarthBuildingStream::Mesh EarthBuildingStream::BuildNeighborhood(const std::file
         Cell cell{centre.latitude+offset[0],((centre.longitude+offset[1]+27000)%18000)-9000};
         if(std::abs((cell.latitude+.5)*CellDegrees)>84)continue;
         try {
-            const auto path=cache/"buildings"/FileName(cell);std::error_code error;
+            auto path=cache/"buildings"/FileName(cell);std::error_code error;
+            if(!std::filesystem::is_regular_file(path,error))path=EarthContentSource::StreamPath(cache,"buildings",cell.latitude,cell.longitude);
             const auto bytes=std::filesystem::file_size(path,error);
             if(error)continue; // An empty neighbouring cell cannot evict a cached one.
             cached=true;
@@ -201,12 +204,15 @@ void EarthBuildingStream::Request(const EarthTerrainStream::Patch& p,float x,flo
 }
 std::unique_ptr<EarthBuildingStream::Mesh> EarthBuildingStream::TakeReady(){std::lock_guard lock(_mutex);return std::move(_ready);}
 void EarthBuildingStream::Run(){
+    EarthContentSource source;
     for(;;){
         Ground ground;Cell cell;uint64_t request;
         {std::unique_lock lock(_mutex);_wake.wait(lock,[&]{return _stop||_pending;});if(_stop)return;ground=_ground;cell=_cell;request=_request;_pending=false;}
-        auto mesh=std::make_unique<Mesh>(BuildNeighborhood(_cache,ground,cell,[&]{
+        const auto cancelled=[&]{
             std::lock_guard lock(_mutex);return _stop || request!=_request;
-        }));
+        };
+        source.EnsureNeighborhood(_cache,"buildings",cell.latitude,cell.longitude,cancelled);
+        auto mesh=std::make_unique<Mesh>(BuildNeighborhood(_cache,ground,cell,cancelled));
         {std::lock_guard lock(_mutex);if(!_stop && request==_request)_ready=std::move(mesh);}
     }
 }

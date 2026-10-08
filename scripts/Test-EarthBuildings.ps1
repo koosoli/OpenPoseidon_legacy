@@ -12,7 +12,7 @@ $exe=Join-Path $output 'earth-buildings-test.exe';$savedPath=$env:PATH
 Push-Location $output
 try{
  & $Compiler /nologo /std:c++20 /EHsc /MD /D_CRT_SECURE_NO_WARNINGS ('/I'+(Join-Path $repo 'engine')) ('/I'+(Join-Path $VcpkgDirectory 'include')) `
-  ('/Fe'+$exe) (Join-Path $repo 'tests/unit/engine/Poseidon/World/test_earth_buildings.cpp') (Join-Path $repo 'engine/WgpuRenderer/EarthBuildingStream.cpp') (Join-Path $VcpkgDirectory 'lib/cjson.lib')
+  ('/Fe'+$exe) (Join-Path $repo 'tests/unit/engine/Poseidon/World/test_earth_buildings.cpp') (Join-Path $repo 'engine/WgpuRenderer/EarthBuildingStream.cpp') (Join-Path $repo 'engine/WgpuRenderer/EarthContentSource.cpp') (Join-Path $VcpkgDirectory 'lib/cjson.lib') (Join-Path $VcpkgDirectory 'lib/libcurl.lib') (Join-Path $VcpkgDirectory 'lib/zs.lib') bcrypt.lib advapi32.lib crypt32.lib secur32.lib ws2_32.lib iphlpapi.lib
  if($LASTEXITCODE-ne0){throw 'Earth building CPU test compilation failed'}
  $env:PATH=(Join-Path $VcpkgDirectory 'bin')+';'+$env:PATH
  if($CellFile){& $exe $CellFile}else{& $exe}

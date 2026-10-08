@@ -67,6 +67,7 @@ add_library(WgpuRenderer STATIC
     TerrainWgpu.cpp
     EarthTerrainStream.cpp
     EarthBuildingStream.cpp
+    EarthContentSource.cpp
     EarthFeatureStream.cpp
     EarthSurfaceStream.cpp
     TerrainWgpuEnfusionClutter.cpp
