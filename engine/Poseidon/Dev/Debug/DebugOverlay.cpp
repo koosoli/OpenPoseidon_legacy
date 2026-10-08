@@ -7591,6 +7591,7 @@ void DrawMainWindow()
             const auto current=EarthStreaming::GetLocation();
             if (location.revision!=current.revision) location=current;
             ImGui::TextWrapped("Go to a geographic region without restarting. Elevation streams in after the overview; this preview does not relocate the playable mission.");
+            ImGui::TextWrapped("Cached building footprints: (c) OpenStreetMap contributors, ODbL 1.0. openstreetmap.org/copyright. Optional preview; no building collision or interiors.");
             ImGui::InputDouble("Latitude",&location.latitude,0.1,1.0,"%.6f");
             ImGui::InputDouble("Longitude",&location.longitude,0.1,1.0,"%.6f");
             ImGui::InputFloat("Altitude (metres)",&location.altitude,500.0f,5000.0f,"%.0f");

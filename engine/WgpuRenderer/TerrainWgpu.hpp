@@ -8,6 +8,7 @@
 #include <wgpu_renderer.hpp>
 #include "TerrainPuddles.hpp"
 #include "EarthTerrainStream.hpp"
+#include "EarthBuildingStream.hpp"
 
 #include <cstdint>
 #include <string>
@@ -123,6 +124,10 @@ class TerrainWgpu : public ITerrainRenderer
     void DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape& land);
     std::unique_ptr<EarthTerrainStream> _earthStream;
     std::unique_ptr<EarthTerrainStream::Patch> _earthPatch;
+    std::unique_ptr<EarthBuildingStream> _earthBuildings;
+    WgrMesh _earthBuildingMesh=0;
+    uint32_t _earthBuildingIndices=0;
+    uint64_t _earthBuildingGeneration=0;
     WgrMesh _earthHorizonMesh = 0;
     uint32_t _earthHorizonIndices = 0;
     WgrMesh _earthGlobeMesh = 0;

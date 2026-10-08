@@ -394,6 +394,11 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
     if (EarthStreaming::Enabled())
     {
         _earthStream = std::make_unique<EarthTerrainStream>();
+        if(const char* buildings=std::getenv("POSEIDON_EARTH_BUILDINGS");buildings && std::strcmp(buildings,"1")==0)
+        {
+            if(const char* cache=std::getenv("POSEIDON_EARTH_CACHE");cache && *cache)
+                _earthBuildings=std::make_unique<EarthBuildingStream>(std::filesystem::u8path(cache));
+        }
         LOG_INFO(Graphics, "Earth terrain prototype enabled: adaptive 6.4/25.6km near window plus curved horizon, freefly only");
     }
     _baseMult = EnvFloat("WGR_TERRAIN_LOD_BASE", 4.0f);
@@ -3208,11 +3213,13 @@ void TerrainWgpu::UpdateGroundTexturePages(const Landscape& land, const Camera& 
 
 TerrainWgpu::~TerrainWgpu()
 {
+    _earthBuildings.reset();
     _earthStream.reset(); // Cancel HTTPS and join before any render-owned state disappears.
     // EngineWgpu releases TerrainWgpu after stopping its render thread, while
     // the renderer and texture bank are still alive.
     if (_earthHorizonMesh) wgr_mesh_destroy(_renderer,_earthHorizonMesh);
     if (_earthGlobeMesh) wgr_mesh_destroy(_renderer,_earthGlobeMesh);
+    if (_earthBuildingMesh) wgr_mesh_destroy(_renderer,_earthBuildingMesh);
     if (_earthGlobeTexture) wgr_texture_destroy(_renderer,_earthGlobeTexture);
 }
 
@@ -3383,6 +3390,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         _earthStream->Relocate(origin);
         UploadEarthGlobe(origin.latitude,origin.longitude);
         _earthPatch.reset();
+        if(_earthBuildings)_earthBuildings->Relocate();
+        if(_earthBuildingMesh){EngineWgpu::AcquireProducerWindow("Earth buildings relocate");wgr_mesh_destroy(_renderer,_earthBuildingMesh);_earthBuildingMesh=0;_earthBuildingIndices=0;}
         _earthOriginRevision=origin.revision;
         LOG_INFO(Graphics,"Earth relocated: origin [{},{}], revision {}",origin.latitude,origin.longitude,origin.revision);
     }
@@ -3420,6 +3429,23 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
     // surface itself is the bounded near/far Earth mesh with shared imagery.
     _engine.QueueTerrainParams(_params);
     _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices,_earthGlobeTexture);
+    if(_earthBuildings && camera.Position().Y()<12000.0f)
+    {
+        _earthBuildings->Request(*_earthPatch,camera.Position().X(),camera.Position().Z());
+        if(auto mesh=_earthBuildings->TakeReady();mesh && mesh->revision==origin.revision && mesh->generation==_earthPatch->generation)
+        {
+            EngineWgpu::AcquireProducerWindow("Earth cached buildings");
+            std::vector<WgrMeshVertex> vertices(mesh->vertices.size());
+            for(size_t i=0;i<vertices.size();++i){const auto& v=mesh->vertices[i];vertices[i].pos={v.x,v.y,v.z};vertices[i].normal={v.nx,v.ny,v.nz};}
+            WgrMesh replacement=0;
+            if(!mesh->indices.empty())replacement=wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(vertices),WgrSlice<uint32_t>(mesh->indices));
+            if(_earthBuildingMesh)wgr_mesh_destroy(_renderer,_earthBuildingMesh);
+            _earthBuildingMesh=replacement;_earthBuildingIndices=replacement?uint32_t(mesh->indices.size()):0;_earthBuildingGeneration=mesh->generation;
+            LOG_INFO(Graphics,"Earth cached buildings: cell [{},{}], {} buildings, {} triangles, {} skipped, {} estimated heights; {}",
+                mesh->cell.latitude,mesh->cell.longitude,mesh->buildings,mesh->indices.size()/3,mesh->skipped,mesh->estimatedHeights,mesh->error);
+        }
+        if(_earthBuildingGeneration==_earthPatch->generation)_engine.SubmitEarthHorizon(_earthBuildingMesh,_earthBuildingIndices);
+    }
 }
 
 void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
