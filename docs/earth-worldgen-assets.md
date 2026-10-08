@@ -409,3 +409,60 @@ with identical scene/settings. Inspect actual tree/house cast shadows, contact A
 slope readability, grain stability during translation/rebase, and minification;
 shader compilation alone cannot accept their appearance or cost. No new ground
 shading runtime or visual acceptance is claimed at this source checkpoint.
+
+
+## Cached photographic surface capture readiness
+
+The installed `748de202` ground-detail run (region harness receipt
+`build/earth-worldgen-regions-installed/20261008-162446-d9fe86`) shows actual
+object shadows, but no `Earth local surface` publication before the captures.
+Source and cache inspection found no ACT receipt, decode, hash or allocation
+failure. The existing context and district 4,096-square images plus the city
+2,048-square image all validate against their cached ACT CC0 receipts. Source
+JPEG bytes total 10,491,166; decoded RGBA sources total 150,994,944 bytes, within
+the existing 256 MiB budget. No network request or source replacement was used.
+
+The worker composes the full paired near/far 2,048-square atlases (8,388,608
+pixels) asynchronously. A new terrain generation or geographic revision cancels
+its previous work, and only the current generation may upload. The region
+harness formerly waited for model admission and 30 rendered frames, then moved
+or exited without waiting for imagery. The captured log changes generations at
+16:24:58.822, 16:25:00.283, 16:25:01.488, 16:25:10.624 and 16:25:10.930;
+short pose dwell can therefore cancel valid atlas work before any photographic
+surface becomes visible. The actual CPU checks do not by themselves prove why
+every installed generation failed to publish; the strict readiness run below
+is needed to distinguish cancellation/contention from a runtime-only blocker. A long overall test duration does not establish a
+long stable current-generation dwell.
+
+CPU-only actual-cache validation on this machine measured clang-cl with the
+production `/O2 /Ob1` policy at 6.204 seconds cold, including source
+validation/decode/no-data preparation and composition, and 4.344 seconds for a
+warm recenter. The earlier default `/O2` run (without the production explicit
+inline restriction) measured 2.610/2.050 seconds; an unoptimized run measured
+8.189/5.239 seconds. These individual observations vary with CPU contention
+and compile policy; they are not a controlled performance comparison. The
+production capture may also contend with actual scene loading. These are wall
+measurements for a separate CPU worker, not engine frame time, GPU time or an
+installed-game latency guarantee. The production compositor and its strict
+cancellation/generation matching remain unchanged in this correction.
+
+`scripts/Test-EarthSurface.ps1 -Optimized -VcpkgDirectory <existing-vcpkg>
+-CacheDirectory <existing-cache>` now saves its CPU timing receipt beneath
+`build/earth-surface/optimized-result.json`; omit `-Optimized` for the debug test.
+Both actual-cache test paths validate a second complete warm generation and
+keep a bounded 30-second readiness deadline per worker result. Failed source
+receipt validation still publishes no pixels. These tests create no GPU device.
+
+For photographic-ground quality captures, the parent/operator must now run
+`scripts/Test-EarthWorldgenRegionsInstalled.ps1` with `-WaitForSurface` and the
+existing matched deployment arguments. This optional stricter gate waits within
+the pose deadline for the actual `Earth local surface: ACT ...` upload log with
+exact current geographic revision and terrain generation. It rejects explicit
+NASA fallback/cache-error publication, restarts selection settling if the ground
+generation changes, and records the matching publication and wait duration in
+each pose. Without this switch, receipts still record any matching publication
+present, but a residency/model-registration pass makes no claim of photographic
+surface readiness. Parser controls reject stale revision/generation, wrong
+provider status and failed receipts. Actual game readiness, imagery appearance
+and frame cost still require the parent-owned installed run; no such new runtime
+result is claimed here.

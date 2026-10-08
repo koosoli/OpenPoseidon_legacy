@@ -7,11 +7,12 @@
 #include <chrono>
 #include <iostream>
 #include <fstream>
+#include <iomanip>
 
 using Surface=Poseidon::EarthSurfaceStream;
 using namespace Poseidon;
 std::unique_ptr<Surface::Atlas> Wait(Surface& worker) {
-    for(int i=0;i<1000;++i){if(auto p=worker.TakeReady())return p;std::this_thread::sleep_for(std::chrono::milliseconds(10));}
+    for(int i=0;i<3000;++i){if(auto p=worker.TakeReady())return p;std::this_thread::sleep_for(std::chrono::milliseconds(10));}
     assert(false && "bounded worker timeout");return {};
 }
 int main(int argc,char** argv) {
@@ -100,10 +101,12 @@ int main(int argc,char** argv) {
     }
     if(argc==2) {
         const std::filesystem::path cache=std::filesystem::u8path(argv[1]);
+        const auto coldStart=std::chrono::steady_clock::now();
         Surface worker(cache,cache/"blue-marble-june-5400.jpg");
         worker.Request(patch);worker.Relocate();
         patch.originRevision=5;patch.generation=11;worker.Request(patch);
         const auto ready=Wait(worker);
+        const double coldSeconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-coldStart).count();
         assert(ready->error.empty() && ready->cellPresent && ready->window.revision==5 && ready->window.generation==11);
         assert(ready->pixels.size()==2048*2048*4);
         assert(ready->farPixels.size()==2048*2048*4);
@@ -114,6 +117,14 @@ int main(int argc,char** argv) {
         const auto outsideColor=Surface::Sample({ready->farPixels.data(),2048,2048},fuv.x,fuv.y,false);
         assert(outsideColor[0]<220 && outsideColor[1]<220 && outsideColor[2]<220);
         std::cout<<"Actual cached ACT/NASA decode/hash/composition PASS; generation 11 revision 5\n";
+        const auto warmStart=std::chrono::steady_clock::now();
+        patch.x+=800;patch.generation=12;worker.Request(patch);
+        const auto warmReady=Wait(worker);
+        const double warmSeconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-warmStart).count();
+        assert(warmReady->error.empty() && warmReady->cellPresent && warmReady->window.generation==12);
+        assert(warmReady->pixels.size()==2048*2048*4 && warmReady->farPixels.size()==2048*2048*4);
+        std::cout<<std::fixed<<std::setprecision(3)<<"EARTH_SURFACE_TIMING {\"coldWorkerSeconds\":"<<coldSeconds
+            <<",\"warmRecenterSeconds\":"<<warmSeconds<<",\"atlasSize\":2048,\"pairedPixels\":8388608}\n";
         // An invalid receipt never publishes pixels. Reusing the real cached
         // source tests the production validation path without another request.
         const auto bad=std::filesystem::temp_directory_path()/"openposeidon-surface-invalid-receipt";

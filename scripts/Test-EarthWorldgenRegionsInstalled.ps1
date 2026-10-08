@@ -1,6 +1,7 @@
 <# Parent/operator runs through scripts/with-game-lock.sh after matched deployment.
    Three captures: city -> Mamer -> city, plus one bounded actual SDL D movement.
    -SelfTest reads no game state. No downloads, deployment or source generation.
+   -WaitForSurface requires uploaded current ACT near/far imagery before captures.
    A diagnostic PASS is not visual, collision or upstream playability acceptance. #>
 [CmdletBinding()]
 param(
@@ -12,6 +13,7 @@ param(
     [string]$CacheDirectory=(Join-Path $env:LOCALAPPDATA 'OpenPoseidon/world-stream'),
     [string]$GameDir='D:/SteamLibrary/steamapps/common/ARMA Cold War Assault',
     [ValidateRange(30,180)][int]$PoseTimeoutSeconds=120,
+    [switch]$WaitForSurface,
     [switch]$SelfTest
 )
 $ErrorActionPreference='Stop'
@@ -42,6 +44,16 @@ function ParsePublication([string]$line){
     if($line-match'Earth Worldgen publication: revision (\d+) generation (\d+) source (\d+) covered (\d+) selected (\d+) modelLimitSkipped (\d+) error(.*)$'){
         return @{revision=[uint64]$Matches[1];generation=[uint64]$Matches[2];source=[int]$Matches[3];covered=[int]$Matches[4];selected=[int]$Matches[5];modelLimitSkipped=[int]$Matches[6];error=$Matches[7].Trim();raw=$line}
     }
+}
+function SurfacePublication($lines,[uint64]$revision,[uint64]$generation){
+    $latest=$null
+    foreach($line in $lines){
+        if($line-match'Earth local surface: (ACT ortho_2023 CC0, paired 2048x2048 near/far atlases|NASA fallback), generation (\d+), revision (\d+), (.*)$'){
+            $ready=$Matches[1]-like'ACT *';$gen=[uint64]$Matches[2];$rev=[uint64]$Matches[3];$reason=$Matches[4]
+            if($gen-eq$generation-and$rev-eq$revision){$latest=@{ready=$ready;generation=$gen;revision=$rev;reason=$reason;raw=$line}}
+        }
+    }
+    return $latest
 }
 function ParseResidency([string]$line){
     if($line-match'Earth Worldgen resident regions: (\d+) IDs \[(\d+),(\d+)\] sourceBytes (\d+) valueBytes (\d+); offline prepared index only'){
@@ -111,6 +123,11 @@ if($SelfTest){
     Require (!(Families @('Earth Worldgen model unavailable/bounded: data3d\str smrk.p3d')).tree) 'Unavailable model falsely registered'
     Require ((ViewError @{direction=@(0,0,1)} 0 0)-lt1e-9) 'Compass view parser'
     Require ((ViewError @{direction=@(0,0,1)} 90 -35)-gt1) 'Wrong capture direction accepted'
+    $surfaceRows=@('Earth local surface: ACT ortho_2023 CC0, paired 2048x2048 near/far atlases, generation 11, revision 7, one extra draw; no extra triangles')
+    Require ((SurfacePublication $surfaceRows 7 11).ready) 'Current ACT surface readiness parser'
+    Require ($null-eq(SurfacePublication $surfaceRows 8 11)-and$null-eq(SurfacePublication $surfaceRows 7 12)) 'Stale surface atlas accepted'
+    $surfaceRows+='Earth local surface: NASA fallback, generation 11, revision 7, surface receipt/hash/bounds mismatch'
+    Require (!(SurfacePublication $surfaceRows 7 11).ready-and(SurfacePublication $surfaceRows 7 11).reason-eq'surface receipt/hash/bounds mismatch') 'Fallback or failed cache accepted as ACT readiness'
     $sources=@{};$id=2;$sources[([string]$id)]=@{id=$id;manifest='mamer/manifest.json';bbox=@(49.59,6,49.64,6.08)}
     $receipt=ReceiptJson @{passed=$false;sources=$sources;poses=@(@{selection=$block})}|ConvertFrom-Json
     Require (!$receipt.passed-and$receipt.sources.'2'.id-eq2-and$receipt.sources.'2'.manifest-ceq'mamer/manifest.json'-and$receipt.poses[0].selection.installed.created-eq2048) 'Nested receipt JSON string-key roundtrip'
@@ -171,7 +188,7 @@ $saved=@{};$exists=@{};$p=$null;$client=$null;$reader=$null;$writer=$null;$heldK
 $log=Join-Path $out 'engine.log';$stderr=Join-Path $out 'stderr.log';$overall=[DateTime]::UtcNow.AddSeconds(240+4*$PoseTimeoutSeconds)
 $result=@{installed=$stamp;expectedCommit=$ExpectedCommit;index=$Index;sources=$regionSources;sourceHashes=$identities;addonArchiveRoot=$addonArchiveRoot;cacheDirectory=$CacheDirectory;userDirectory=$user;
     passed=$false;visualAccepted=$false;playabilityAccepted=$false;stablePlacementIdsObserved=$false;stablePlacementIdsReason='Runtime bridge/logs expose resident region IDs and counts, not placement IDs or retired GPU slots. Stable placement namespaces are CPU-tested separately.';
-    poses=@();offline=$true;scope='Bounded prepared Worldgen region residency and retained model registration. Images need inspection; no global data completeness, collision, road navigation or full model-family quality claim.'}
+    waitForSurface=[bool]$WaitForSurface;poses=@();offline=$true;scope='Bounded prepared Worldgen region residency and retained model registration. Images need inspection; no global data completeness, collision, road navigation or full model-family quality claim.'}
 $receiptPath=Join-Path $out 'result.json';SaveReceipt $result $receiptPath
 function Health{Require ($null-ne$p-and!$p.HasExited) 'Owned game exited';Require ([DateTime]::UtcNow-lt$overall) 'Overall region acceptance deadline'}
 function Send($command){Health;$writer.WriteLine(($command|ConvertTo-Json -Depth 10 -Compress));do{$line=$reader.ReadLine();Require (![string]::IsNullOrEmpty($line)) 'Harness disconnected';$reply=$line|ConvertFrom-Json}while($null-eq$reply.ok);Require ([bool]$reply.ok) $line;return $reply}
@@ -206,6 +223,21 @@ function WaitSelection($location,[double]$x,[double]$z,[int]$after,[int]$require
             if($block){ValidateSelection $block $requiredId $retiredId;$block.ground=$g;return $block}
         }
         Require ([DateTime]::UtcNow-lt$until) 'Current region selection did not finish admission';Start-Sleep -Milliseconds 250
+    }while($true)
+}
+function WaitSurface($location,[double]$x,[double]$z,[uint64]$generation,[DateTime]$until){
+    $watch=[Diagnostics.Stopwatch]::StartNew()
+    do{
+        Health;$ground=Ground $x $z
+        Require ($ground.revision-eq$location.revision) 'Surface wait geographic revision superseded'
+        if(!$ground.covered-or$ground.generation-ne$generation){return $null} # Caller resettles ground/selection.
+        $publication=SurfacePublication @(Get-Content -LiteralPath $log) $location.revision $generation
+        if($publication){
+            Require $publication.ready ('Current surface fell back instead of ACT imagery: '+$publication.reason)
+            $publication.waitSeconds=$watch.Elapsed.TotalSeconds;return $publication
+        }
+        Require ([DateTime]::UtcNow-lt$until) ('Current ACT surface atlas readiness deadline, generation '+$generation+' revision '+$location.revision)
+        Start-Sleep -Milliseconds 250
     }while($true)
 }
 function Pose([double]$x,[double]$z,[double]$y,[double]$heading,[double]$pitch){Require ((Eval ('triFreeFlyPose "'+(Fmt $x)+' '+(Fmt $z)+' '+(Fmt $y)+' '+(Fmt $heading)+' '+(Fmt $pitch)+'"'))-ceq'OK') 'Freefly pose refused'}
@@ -253,7 +285,14 @@ try{
         do{
             $selection=WaitSelection $location $pose.x $pose.z $poseMarker $pose.id $pose.retire
             WaitFrames 30;$arm.groundAfter=Ground $pose.x $pose.z
-            if($arm.groundAfter.covered-and$arm.groundAfter.generation-eq$selection.publication.generation){break}
+            if($arm.groundAfter.covered-and$arm.groundAfter.generation-eq$selection.publication.generation){
+                if($WaitForSurface){
+                    $arm.surface=WaitSurface $location $pose.x $pose.z $selection.publication.generation $settleUntil
+                    if(!$arm.surface){Require ([DateTime]::UtcNow-lt$settleUntil) 'Ground superseded throughout surface readiness wait';continue}
+                    $arm.groundAfter=Ground $pose.x $pose.z
+                }else{$arm.surface=SurfacePublication @(Get-Content -LiteralPath $log) $location.revision $selection.publication.generation}
+                break
+            }
             Require ([DateTime]::UtcNow-lt$settleUntil) 'Ground/selection did not remain settled across 30 rendered frames'
         }while($true)
         $arm.camera=Camera
