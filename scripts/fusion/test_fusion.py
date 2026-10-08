@@ -2,7 +2,7 @@ import struct
 import unittest
 import math
 from build_fusion import compressed, translate_objects, fixed, ISLANDS, world_data, array_entry, \
-    env_sounds, sound_regions, CELL
+    env_sounds, island_env_sounds, sound_regions, CELL
 
 
 class FusionTests(unittest.TestCase):
@@ -48,6 +48,13 @@ class FusionTests(unittest.TestCase):
         ox, oz = ISLANDS[1][2] * CELL, ISLANDS[1][3] * CELL
         self.assertIn('class Malden {area[]={%d,%d,%d,%d}; class EnvSounds: CfgEnvSounds {class Sea'
                       % (ox, oz, ox + 256 * CELL, oz + 256 * CELL), regions)
+        # Everon keeps CfgEnvSounds; the islands without their own get Fusion's, all different
+        self.assertIn('class Everon {area[]={%d,%d,%d,%d}; class EnvSounds: CfgEnvSounds {};};'
+                      % (ISLANDS[0][2] * CELL, ISLANDS[0][3] * CELL, (ISLANDS[0][2] + 256) * CELL,
+                         (ISLANDS[0][3] + 256) * CELL), regions)
+        sets = [island_env_sounds([cfg], key) for key, _, _, _ in ISLANDS]
+        self.assertEqual(len(set(sets)), len(ISLANDS))
+        self.assertIn('class Hills { sound[]={"environmental\\wind_thick",0.000126,1};', sets[2])
 
     def test_placement_preserves_rotation_height_name_and_unique_id(self):
         matrix = (0.,0.,-1., 0.,1.,0., 1.,0.,0., 100.,23.,200.)

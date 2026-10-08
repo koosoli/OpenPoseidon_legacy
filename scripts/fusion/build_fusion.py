@@ -224,12 +224,50 @@ def env_sounds(config_texts, key):
     return None
 
 
+# Fusion's own ambience for the islands whose worlds have none (owner, 2026-10-09: "give the other islands their
+# own sounds"). Not from OFP: the stock CfgEnvSounds is Everon's, and Malden keeps its own. Only CWA's own loops
+# (DTA\Sound.pbo), and only those that loop cleanly, measured: level step across the seam within 2.5 dB and a steady
+# level (p90-p10 of 20 ms frames <= 14 dB) -- wave_break, rain_hard, treesbirds, wind_heavy / _whistle / _thick,
+# crickets01 / 03 / 07, frogs. The bird calls (skylark, n_gale, jay ...) and frog2_* are single calls with gaps, so
+# they can't loop. Volumes are relative to CfgEnvSounds' (Sea 3.16e-4, Trees and Hills 1.78e-4, Meadows 5.62e-5,
+# Rain 1.78e-3). Per file: wind_thick is ~6 dB hotter than wind_heavy, crickets01 ~5 dB quieter than crickets07.
+# Per class: (day file, day volume, night file, night volume).
+ISLAND_AMBIENCE = {
+    # Kolgujev: the cold, windswept northern island -- a rougher sea, a hard wind, fewer birds and crickets
+    'cain': {'Sea': ('environmental\\wave_break', 4.47e-4, 'environmental\\wave_break', 4.47e-4),
+             'Trees': ('environmental\\treesbirds', 1.26e-4, 'animals\\crickets01', 1.78e-4),
+             'Meadows': ('animals\\crickets01', 5.62e-5, 'animals\\crickets01', 3.16e-5),
+             'Hills': ('environmental\\wind_thick', 1.26e-4, 'environmental\\wind_whistle', 2.51e-4)},
+    # Nogova: green and sheltered, valleys and streams -- more birdsong, a calmer sea, frogs in the meadows at night
+    'noe': {'Sea': ('environmental\\wave_break', 2.24e-4, 'environmental\\wave_break', 2.24e-4),
+            'Trees': ('environmental\\treesbirds', 2.82e-4, 'animals\\crickets07', 1.26e-4),
+            'Meadows': ('animals\\crickets03', 5.62e-5, 'animals\\frogs', 1.0e-4),
+            'Hills': ('environmental\\wind_heavy', 1.0e-4, 'environmental\\wind_heavy', 1.0e-4)},
+    # Desert Island: dry scrub -- insects instead of birds, a dusty wind, little rain
+    'intro': {'Trees': ('animals\\crickets07', 1.26e-4, 'animals\\crickets03', 1.78e-4),
+              'Meadows': ('animals\\crickets01', 1.78e-4, 'animals\\crickets03', 1.0e-4),
+              'Hills': ('environmental\\wind_thick', 1.0e-4, 'environmental\\wind_whistle', 1.78e-4),
+              'Rain': ('environmental\\rain_hard', 9.0e-4, 'environmental\\rain_hard', 9.0e-4)},
+}
+
+
+def ambience_cfg(key):
+    """ISLAND_AMBIENCE's classes for an island, as EnvSounds entries ('' when it has none)."""
+    return ' '.join('class %s { sound[]={"%s",%g,1}; soundNight[]={"%s",%g,1}; };' % (cls, day, dv, night, nv)
+                    for cls, (day, dv, night, nv) in ISLAND_AMBIENCE.get(key, {}).items())
+
+
+def island_env_sounds(config_texts, key):
+    """An island's EnvSounds entries: its world's own (Malden; or a mod's), else Fusion's ISLAND_AMBIENCE, else
+    none (CfgEnvSounds, Everon's)."""
+    return env_sounds(config_texts, key) or ambience_cfg(key)
+
+
 def sound_regions(config_texts):
-    """One SoundRegions class per island: its tile and its world's EnvSounds (the engine's EnvSoundRegions.hpp).
-    Fusion's own EnvSounds are Everon's, everywhere."""
+    """One SoundRegions class per island: its tile and its EnvSounds (the engine's EnvSoundRegions.hpp)."""
     return ''.join('class %s {area[]={%d,%d,%d,%d}; class EnvSounds: CfgEnvSounds {%s};};'
                    % (label.replace(' ', ''), ox * CELL, oz * CELL, (ox + 256) * CELL, (oz + 256) * CELL,
-                      env_sounds(config_texts, key) or '')
+                      island_env_sounds(config_texts, key))
                    for key, label, ox, oz in ISLANDS)
 
 
@@ -343,7 +381,8 @@ def build(source, output, config_texts=()):
     replace_cfg = (' class ReplaceObjects {%s};\n' % ''.join(replace)) if replace else ''
     # each island its own ambient loops, crossfaded over the water between them
     regions = sound_regions(config_texts)
-    manifest['sound_regions'] = {label: ('own' if env_sounds(config_texts, key) else 'CfgEnvSounds')
+    manifest['sound_regions'] = {label: ('world' if env_sounds(config_texts, key) else
+                                         'fusion' if key in ISLAND_AMBIENCE else 'CfgEnvSounds')
                                  for key, label, _, _ in ISLANDS}
     config = ('class CfgPatches {class FusionOFP {units[]={}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={"Noe"};};};\n'
               'class CfgWorlds {class Eden; class FusionOFP: Eden {\n'

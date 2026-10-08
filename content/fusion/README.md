@@ -66,8 +66,17 @@ Nogova's forests -- other models -- stayed solid to infantry and AI. And the map
 Ambient sounds are per island: `class SoundRegions` gives each island's tile its source world's `EnvSounds`
 (engine: `Poseidon/World/EnvSoundRegions.hpp`). Each island plays its own loops; over the sea between two they
 crossfade within 1 km of the halfway line. In the stock data only Malden has its own set (a quieter sea,
-crickets in the trees, lighter wind and rain). Everon, Kolgujev, Nogova and Desert Island all use `CfgEnvSounds`.
-A mod that gives any of their world classes its own `EnvSounds` is picked up on the next build. Which loop plays
+crickets in the trees, lighter wind and rain); Everon keeps `CfgEnvSounds`. Kolgujev, Nogova and Desert Island,
+which use `CfgEnvSounds` in OFP, get Fusion's own sets (`ISLAND_AMBIENCE` in `build_fusion.py`, made only from CWA's
+own loops that loop cleanly):
+
+| Island | Character |
+| --- | --- |
+| Kolgujev | cold and windswept: rougher sea, `wind_thick` by day and a louder whistle at night, fewer birds and crickets |
+| Nogova | green and sheltered: more birdsong, a calmer sea, softer wind, frogs in the meadows at night |
+| Desert Island | dry scrub: insects instead of birds, a dusty `wind_thick`, half the rain |
+
+A mod that gives any world class its own `EnvSounds` takes precedence on the next build. Which loop plays
 where (sea, trees, meadows, hills) comes from each island's own sound map, as before.
 
 This is an experimental composite world. Loading costs exceed one original map.
