@@ -5,7 +5,7 @@
 // point): the plain pipeline binds `object`, the skinned pipeline binds the
 // bone `palette` (from the skin module). Shadowing is the shared cascade kernel.
 
-#import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, apply_fog_terrain, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_FRESNEL_ENV}
+#import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, apply_fog_terrain, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_FRESNEL_ENV, sky_irradiance}
 #import shadow::shadow_strength
 #import frame::{surface_rays, cloud_shadow_tex, terrain_shadow_samp, terrain_shadow_map}
 #import frame::monitor_scene
@@ -878,7 +878,14 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
                                       in.uv, boot_duv_dx, boot_duv_dy).rgb;
         let n = normalize(in.normal);
         let daylight = max(dot(n, -frame.sun_dir_world.xyz), 0.0);
-        let light = material.sun_ambient.rgb + material.sun_diffuse.rgb * daylight;
+        var light = material.sun_ambient.rgb + material.sun_diffuse.rgb * daylight;
+        if (frame.sun_diffuse.w > 0.5 && (packed >> 3u) != 0u) {
+            // The producer's material light is legacy-scaled. Match the rest
+            // of the physical scene using this frame's sun and directional sky,
+            // without finite-map receivers or an artificial night-time floor.
+            // Slot zero keeps the producer's legacy plain-fallback tint.
+            light = sky_irradiance(n) * frame.sun_ambient.w + frame.sun_diffuse.rgb * daylight;
+        }
         return vec4<f32>(srgb_to_linear(albedo) * light, 1.0);
     }
 

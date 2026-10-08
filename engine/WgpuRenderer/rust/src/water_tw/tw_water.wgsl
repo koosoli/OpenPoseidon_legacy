@@ -28,7 +28,7 @@
 // * The per-cascade shallow-water attenuation reads the live cascade sizes (Tidewater bakes the
 //   defaults in); identical unless the Water tab's cascade scale is moved off 1.
 
-#import frame::{frame, reverse_z, fog_factor, apply_fog, terrain_sun_shadow, cloud_sun_shadow}
+#import frame::{frame, reverse_z, fog_factor, apply_fog, terrain_sun_shadow, cloud_sun_shadow, sky_irradiance}
 #import shadow::shadow_strength
 #import color::srgb_to_linear
 
@@ -693,6 +693,12 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
             skyIrr = srgb_to_linear(skyIrr);
         }
         horizon = srgb_to_linear(horizon);
+    }
+    if (earthWater() && linear > 0.5 && frame.sun_diffuse.w > 0.5) {
+        // Match physical Earth land's directional sky irradiance. The legacy
+        // flat ambient RGB is an artistic sun-scaled fill, not sky radiance;
+        // feeding it to the water volume/foam produces an ambient wash.
+        skyIrr = sky_irradiance(earthWaterNormal(pos.xz)) * frame.sun_ambient.w;
     }
     var csm = 0.0;
     var ter = 0.0;
