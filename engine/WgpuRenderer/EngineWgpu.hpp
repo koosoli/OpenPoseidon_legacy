@@ -136,6 +136,8 @@ class EngineWgpu : public EngineDummy
     void HandleEvents() override { _eventWindow.HandleEvents(); }
     bool IsOpen() const override { return _eventWindow.IsOpen(); }
     WindowMode GetCurrentWindowMode() const override;
+    bool SetWindowMode(WindowMode mode) override;
+    void OnFullscreenChanged(bool) override { _windowed = GetCurrentWindowMode() == WindowMode::Windowed; }
     void SetMouseGrab(bool grab) override { _eventWindow.SetMouseGrab(grab); }
     bool IsMouseGrabbed() const override { return _eventWindow.IsMouseGrabbed(); }
 
@@ -736,6 +738,8 @@ class EngineWgpu : public EngineDummy
     int _h = 0;
     int _swapInterval = 1;
     bool _windowed = true;
+    int _windowedRestoreW = 0;
+    int _windowedRestoreH = 0;
 
     float _clear[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     std::vector<WgrVertex2D> _verts;

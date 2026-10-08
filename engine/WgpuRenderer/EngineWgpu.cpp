@@ -68,6 +68,7 @@
 #include <Poseidon/Graphics/Core/ParkedModelRefill.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/LegacyGlass.hpp>
 #include <Poseidon/Graphics/Shared/SdlWindow.hpp>
+#include <Poseidon/Graphics/Shared/WindowPlacement.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/Graphics/Rendering/Effects/SmokeVolumetric.hpp> // SMK-037 soft particles
 #include <Poseidon/Graphics/Rendering/Primitives/Draw2DGeometry.hpp>
@@ -1625,6 +1626,10 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     _w = win.widthPx;
     _h = win.heightPx;
     _windowed = win.windowed;
+    _windowedRestoreW = params.width;
+    _windowedRestoreH = params.height;
+    if (_windowed)
+        SDL_GetWindowSize(_window, &_windowedRestoreW, &_windowedRestoreH);
 
     WgrSurfaceDesc desc{};
     DescribeSurface(_window, desc);
@@ -2442,6 +2447,96 @@ WindowMode EngineWgpu::GetCurrentWindowMode() const
     if (flags & SDL_WINDOW_BORDERLESS)
         return WindowMode::Borderless;
     return WindowMode::Windowed;
+}
+
+bool EngineWgpu::SetWindowMode(WindowMode mode)
+{
+    if (!_window || (mode != WindowMode::Windowed && mode != WindowMode::Borderless && mode != WindowMode::Fullscreen))
+        return false;
+    const WindowMode previous = GetCurrentWindowMode();
+    if (previous == mode)
+        return true;
+    // SDL owns the actual window. Keep its logical restore size separate from
+    // the renderer's pixel dimensions, as the GL/SDL path does on HighDPI.
+    if (previous == WindowMode::Windowed)
+        SDL_GetWindowSize(_window, &_windowedRestoreW, &_windowedRestoreH);
+    const SDL_DisplayID current = SDL_GetDisplayForWindow(_window);
+    const SDL_DisplayID display = current ? current : SDL_GetPrimaryDisplay();
+    const SDL_DisplayMode* desktop = SDL_GetDesktopDisplayMode(display);
+    if (!desktop)
+    {
+        LOG_WARN(Graphics, "Wgpu: cannot resolve display mode: {}", SDL_GetError());
+        return false;
+    }
+    DisplayPlacementInput input;
+    input.displayMode = mode == WindowMode::Windowed ? "windowed" : mode == WindowMode::Borderless ? "borderless" : "exclusive";
+    input.width = mode == WindowMode::Windowed ? _windowedRestoreW : _w;
+    input.height = mode == WindowMode::Windowed ? _windowedRestoreH : _h;
+    // Borderless placement may deliberately extend one column beyond the
+    // monitor. That workaround is not an exclusive display resolution.
+    if (mode == WindowMode::Fullscreen && previous == WindowMode::Borderless)
+    {
+        input.width = desktop->w;
+        input.height = desktop->h;
+    }
+    const auto placement = ResolveWindowPlacement(input, desktop->w, desktop->h, static_cast<int>(desktop->refresh_rate + .5f));
+    SDL_DisplayMode exclusive{};
+    if (mode == WindowMode::Fullscreen &&
+        !SDL_GetClosestFullscreenDisplayMode(display, placement.width, placement.height,
+                                            static_cast<float>(placement.refreshHz), true, &exclusive))
+    {
+        LOG_WARN(Graphics, "Wgpu: no matching exclusive display mode: {}", SDL_GetError());
+        return false;
+    }
+    WaitRenderIdle(); // Do not mutate the surface while the render owner uses it.
+    bool ok = true;
+    const auto check = [&](bool result)
+    {
+        if (!result)
+        {
+            LOG_WARN(Graphics, "Wgpu: SDL window mode request failed: {}", SDL_GetError());
+            ok = false;
+        }
+    };
+    if (mode == WindowMode::Windowed)
+    {
+        check(SDL_SetWindowFullscreenMode(_window, nullptr));
+        check(SDL_SetWindowFullscreen(_window, false));
+        check(SDL_SetWindowBordered(_window, true));
+        check(SDL_SetWindowResizable(_window, true));
+        check(SDL_SetWindowSize(_window, placement.width, placement.height));
+        check(SDL_SetWindowPosition(_window, SDL_WINDOWPOS_CENTERED_DISPLAY(display), SDL_WINDOWPOS_CENTERED_DISPLAY(display)));
+    }
+    else if (mode == WindowMode::Fullscreen)
+    {
+        check(SDL_SetWindowFullscreenMode(_window, &exclusive));
+        check(SDL_SetWindowFullscreen(_window, true));
+    }
+    else
+    {
+        // Match CreateGameWindow/GL: Windows uses a positioned borderless
+        // window; other compositors receive real desktop-fullscreen state.
+        check(SDL_SetWindowFullscreenMode(_window, nullptr));
+#ifdef _WIN32
+        check(SDL_SetWindowFullscreen(_window, false));
+        check(SDL_SetWindowBordered(_window, false));
+        check(SDL_SetWindowSize(_window, placement.width, placement.height));
+        SDL_Rect bounds{};
+        SDL_GetDisplayBounds(display, &bounds);
+        check(SDL_SetWindowPosition(_window, bounds.x + placement.posX, bounds.y + placement.posY));
+#else
+        check(SDL_SetWindowFullscreen(_window, true));
+#endif
+    }
+    _windowed = GetCurrentWindowMode() == WindowMode::Windowed;
+    int width = 0, height = 0;
+    if (SDL_GetWindowSizeInPixels(_window, &width, &height) && width > 0 && height > 0 && (width != _w || height != _h))
+        OnWindowResized(width, height);
+    // Asynchronous compositor changes still arrive through SDLEventWindow's
+    // existing resize/fullscreen events and the same wgr_resize path.
+    LOG_INFO(Graphics, "Wgpu: window mode request {} -> {}x{} pixels (success={})",
+             input.displayMode, _w, _h, ok);
+    return ok;
 }
 
 int EngineWgpu::Width() const
