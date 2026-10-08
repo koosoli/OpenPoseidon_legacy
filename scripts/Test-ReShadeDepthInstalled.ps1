@@ -201,6 +201,8 @@ try{
  Require (Select-String -Path $log -Pattern 'worlds[\\/]eden.wrp' -Quiet) 'Everon landscape load missing'
  $state=Send @{cmd='optional_reshade';action='state'}
  if($UsePreviewControl){
+  $receipt.previewStartupState=$state
+  Require ($state.previewSettings.startupDepth-ceq'2'-and$state.previewSettings.supported-and$state.previewSettings.activeMsaaSamples-eq$MsaaSamples) 'Actual renderer preview settings differ from fixture; inspect previewStartupState.previewSettings'
   Require ($state.preview-eq0-and!$state.enabled-and$state.sceneDepth.frame-eq0) 'Remembered session must start Off without depth capture before explicit selection'
   $previewId=switch($Mode){'SceneProbe'{2};'SceneDHDebug'{3};'SceneDH'{4}}
   $receipt.previewRequest=Send @{cmd='optional_reshade';action='select';preview=$previewId}

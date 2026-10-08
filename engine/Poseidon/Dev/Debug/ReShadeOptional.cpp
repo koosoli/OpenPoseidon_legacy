@@ -112,12 +112,27 @@ bool ValidatePreview(unsigned mode)
     return true;
 }
 
-bool DepthPreviewSettingsSupported()
+struct DepthPreviewSettings
 {
-    const auto* engine = Poseidon::GEngine;
-    return engine && engine->SupportsTonemap() && std::abs(engine->GetRenderScale() - 1.0f) < 0.001f &&
-        (engine->GetMsaaSamples() == 1 || engine->GetMsaaSamples() == 4);
+    bool hdr = false;
+    Poseidon::Engine::TemporalInfo targets{};
+    bool Supported() const
+    {
+        return OpReShadePreview::SupportsDepthSettings(hdr, targets.renderWidth, targets.renderHeight,
+            targets.outputWidth, targets.outputHeight, targets.msaaSamples);
+    }
+};
+DepthPreviewSettings ReadDepthPreviewSettings()
+{
+    DepthPreviewSettings settings;
+    auto* engine = Poseidon::GEngine;
+    settings.hdr = engine && engine->SupportsTonemap();
+    // WGPU only overrides the legacy setters: GetMsaaSamples() is the base 0
+    // and GetRenderScale() the base 1. Actual dimensions/MSAA come from Rust.
+    if (settings.hdr) settings.targets = engine->GetTemporalInfo();
+    return settings;
 }
+bool DepthPreviewSettingsSupported() { return ReadDepthPreviewSettings().Supported(); }
 
 #if defined(_WIN32)
 void AddEnvironmentEntry(const char* name, const std::string& value)
@@ -391,6 +406,17 @@ void RegisterOptionalReShadeHarness(Dev::HarnessServer& harness)
             cJSON_AddNumberToObject(result, "presentCount", Read(bridge.presentCount));
             cJSON_AddNumberToObject(result, "preview", bridge.preview ? Read(bridge.preview) : OpReShadePreview::External);
             cJSON_AddNumberToObject(result, "previewStatus", Read(bridge.previewStatus));
+            const auto settings = ReadDepthPreviewSettings();
+            const char* availability = std::getenv("WGR_RESHADE_SCENE_DEPTH");
+            auto* settingsJson = cJSON_AddObjectToObject(result, "previewSettings");
+            cJSON_AddBoolToObject(settingsJson, "hdr", settings.hdr);
+            cJSON_AddBoolToObject(settingsJson, "supported", settings.Supported());
+            cJSON_AddStringToObject(settingsJson, "startupDepth", availability ? availability : "");
+            cJSON_AddNumberToObject(settingsJson, "renderWidth", settings.targets.renderWidth);
+            cJSON_AddNumberToObject(settingsJson, "renderHeight", settings.targets.renderHeight);
+            cJSON_AddNumberToObject(settingsJson, "outputWidth", settings.targets.outputWidth);
+            cJSON_AddNumberToObject(settingsJson, "outputHeight", settings.targets.outputHeight);
+            cJSON_AddNumberToObject(settingsJson, "activeMsaaSamples", settings.targets.msaaSamples);
             OpReShadeTimingV1 timing{};
             if (bridge.timing && bridge.timing(&timing, sizeof(timing), 1))
             {

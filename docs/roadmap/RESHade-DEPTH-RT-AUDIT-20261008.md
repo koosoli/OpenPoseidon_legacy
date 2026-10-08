@@ -658,3 +658,33 @@ GPU bracket remains null, never a fabricated zero-cost baseline. Failed capture,
 cleanup or measurement receipts are rejected. Two synthetic CPU tests cover
 statistics and falsified/incomplete evidence rejection; they are not measured
 performance results. Visual distance quality and cost acceptance remain pending.
+
+
+## Installed live-selection rejection: obsolete getters corrected
+
+The parent installed ABI24 `25a85692` and ran
+`20261008-133235-SceneProbe` with 4x/live selection/resize. Injection succeeded
+and the remembered session started Off with zero producer frames, but selection
+failed the graphics-settings gate before a snapshot was requested. The retained
+receipt records startup depth availability 2, WGR_HDR=1, WGR_RENDER_SCALE=1 and
+isolated graphics.cfg MSAA 4. Runtime stderr explicitly reports HDR true and
+MSAA 4x. This was a gate failure, not 4x depth or timestamp execution evidence.
+
+Source diagnosis: EngineWgpu overrides SetMsaaSamples and SetRenderScale but
+inherits the old base GetMsaaSamples=0 and GetRenderScale=1. The former made the
+new gate reject every WGPU launch; the latter could conceal actual scaling.
+The corrected owned ReShade gate uses the existing GetTemporalInfo query,
+which reads actual scene/output dimensions and launch-active msaa_samples from
+Rust. It requires positive identical target dimensions and active samples 1 or
+4, alongside the existing SupportsTonemap HDR/renderer check. Pending next-launch
+preferences and environment wishes are not treated as actual target state.
+No EngineWgpu, Rust, public ABI or add-on behavior change is needed.
+
+The harness state now exposes previewSettings (HDR, startup availability,
+actual render/output sizes, active samples and policy result). The installed
+helper retains its complete startup state in the receipt and checks it before
+requesting selection. A standalone CPU policy test passes actual native 1x/4x
+sizes and rejects unknown 0, unsupported 2x/8x, HDR off, scaling, mismatched and
+absent dimensions. The owned engine translation unit passes syntax checking,
+PowerShell parsing and diff checks pass. The parent must repeat the same 4x live
+SceneProbe fixture after integration; no new GPU/runtime proof is claimed here.

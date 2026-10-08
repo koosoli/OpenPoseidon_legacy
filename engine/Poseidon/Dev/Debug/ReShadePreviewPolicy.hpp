@@ -8,6 +8,16 @@ namespace OpReShadePreview
 {
 enum : unsigned { Off, ColorLook, SceneDepth, DhDepth, DhGi, External };
 constexpr bool UsesDepth(unsigned mode) { return mode >= SceneDepth && mode <= DhGi; }
+// Use actual scene/output target sizes and launch-active MSAA, never the legacy
+// GL-style preference getters or a pending next-launch sample-count request.
+constexpr bool SupportsDepthSettings(bool hdr, int renderWidth, int renderHeight,
+                                     int outputWidth, int outputHeight, int activeSamples)
+{
+    return hdr && renderWidth > 0 && renderHeight > 0 && outputWidth > 0 && outputHeight > 0 &&
+        renderWidth == outputWidth && renderHeight == outputHeight &&
+        (activeSamples == 1 || activeSamples == 4);
+}
+
 constexpr const char* Preset(unsigned mode)
 {
     constexpr const char* paths[] = {"", "OpenPoseidon.ini", "Presets/OpenPoseidon-Depth-Scene-Probe.ini",
