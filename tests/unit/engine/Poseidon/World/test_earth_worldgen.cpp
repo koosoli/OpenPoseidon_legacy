@@ -12,7 +12,8 @@ Worldgen::Object Object(uint32_t id, const char* model, float x, float y, float 
     return {id, model, {1, .2f, 0, 0, 1, 0, 0, 0, 1, x, y, z}};
 }
 void Fixture(const std::filesystem::path& directory, const std::vector<Worldgen::Object>& objects,
-             bool terminate = true, const char* validation = nullptr, double latitude = 0, double longitude = 0)
+             bool terminate = true, const char* validation = nullptr, double latitude = 0, double longitude = 0,
+             const char* groundRoadIds = nullptr)
 {
     const double half = 128 / Earth::Radius * 180 / Earth::Pi;
     {
@@ -20,6 +21,8 @@ void Fixture(const std::filesystem::path& directory, const std::vector<Worldgen:
         out << std::setprecision(17) << "{";
         if (validation)
             out << "\"final_validation\":{\"status\":\"" << validation << "\"},";
+        if (groundRoadIds)
+            out << "\"earth_ground_road_ids\":" << groundRoadIds << ",";
         out << "\"height_scale\":0.05,\"world\":{\"name\":\"fixture\",\"cells\":16,\"cell_size\":16,\"bbox\":["
             << latitude - half << "," << longitude - half << "," << latitude + half << "," << longitude + half << "]}}";
     }
@@ -248,6 +251,72 @@ void IndexTests(const std::filesystem::path& root, const std::vector<Worldgen::O
     }
     std::filesystem::remove(root / "index.json");
 }
+void GroundRoadTests(const std::filesystem::path& root)
+{
+    const auto directory = root / "ground-roads";
+    std::filesystem::create_directories(directory / "source");
+    auto road = [](uint32_t id, float y, float z)
+    { return Worldgen::Object{id, "o\\road\\sil25.p3d", {1, 0, 0, 0, 1, 0, 0, 0, 1, 128, y, z}}; };
+    const std::vector<Worldgen::Object> records{road(10, 100, 115.5f), road(11, 200, 140.5f), road(12, 30, 128)};
+    Fixture(directory, records, true, "failed", 0, 0, "[10,11]");
+    auto source = Worldgen::Load(directory / "manifest.json");
+    assert(source.error.empty() && source.objects[0].groundRoad && source.objects[1].groundRoad &&
+           !source.objects[2].groundRoad);
+    Poseidon::EarthBuildingStream::Ground g{6272, 6272, 1, 0, 0, 5, 7, std::vector<float>(257 * 257)};
+    for (int z = 0; z <= 256; ++z)
+        for (int x = 0; x <= 256; ++x)
+            g.heights[z * 257 + x] = 300 + .01f * (x - 128) + .02f * (z - 128);
+    auto snapshot = Worldgen::Build(source, g, 6400, 6400);
+    assert(snapshot.objects.size() == 3 && snapshot.groundRoadsFitted == 2 && snapshot.groundRoadCoverageSkipped == 0 &&
+           snapshot.sourceValidation == "failed");
+    const Worldgen::Object* first = nullptr;
+    const Worldgen::Object* second = nullptr;
+    for (const auto& object : snapshot.objects)
+    {
+        if (object.id == 12)
+            assert(std::abs(object.matrix[10] - 320) < .001); // Unlisted elevated road lift survives.
+        else
+        {
+            assert(std::abs(object.matrix[1] - .01) < .0001 && std::abs(object.matrix[7] - .02) < .0001);
+            assert(std::abs(object.matrix[9] - 6400) < .001);
+            if (object.id == 10)
+                first = &object;
+            else
+                second = &object;
+        }
+    }
+    assert(first && second &&
+           std::abs(first->matrix[10] + 12.5 * first->matrix[7] - second->matrix[10] + 12.5 * second->matrix[7]) <
+               .001);
+    const auto indexed =
+        Worldgen::LoadRegion({7, directory / "manifest.json", source.south, source.west, source.north, source.east});
+    assert(indexed.error.empty() && indexed.objects[0].groundRoad && indexed.objects[0].id == (7u << 24));
+    auto invalidGround = g;
+    invalidGround.heights[128 * 257 + 128] = NAN;
+    snapshot = Worldgen::Build(source, invalidGround, 6400, 6400);
+    assert(snapshot.groundRoadsFitted == 0 && snapshot.groundRoadCoverageSkipped == 2);
+    // Full five-sample footprint is required, not only an in-bounds centre.
+    g.x = 6400;
+    snapshot = Worldgen::Build(source, g, 6400, 6400);
+    assert(snapshot.groundRoadsFitted == 0 && snapshot.groundRoadCoverageSkipped == 2 && snapshot.objects.size() == 1);
+    for (const char* ids : {"[10,10]", "[99]", "[-1]", "[10.5]", "{}"})
+    {
+        Fixture(directory, records, true, nullptr, 0, 0, ids);
+        assert(!Worldgen::Load(directory / "manifest.json").error.empty());
+    }
+    auto pitched = records;
+    pitched[0].matrix[7] = .1f;
+    Fixture(directory, pitched, true, nullptr, 0, 0, "[10]");
+    assert(!Worldgen::Load(directory / "manifest.json").error.empty());
+    auto other = records;
+    other[0].model = "o\\hous\\domek_sedy.p3d";
+    Fixture(directory, other, true, nullptr, 0, 0, "[10]");
+    assert(!Worldgen::Load(directory / "manifest.json").error.empty());
+    std::filesystem::remove(directory / "manifest.json");
+    std::filesystem::remove(directory / "source/fixture.wrp");
+    std::filesystem::remove(directory / "source");
+    std::filesystem::remove(directory);
+}
 int main(int argc, char** argv)
 {
     const auto directory =
@@ -259,6 +328,7 @@ int main(int argc, char** argv)
                                                 Object(3, "o\\hous\\domek_sedy.p3d", 128, 10, 144)};
     Fixture(directory, objects);
     IndexTests(directory, objects);
+    GroundRoadTests(directory);
     auto source = Worldgen::Load(directory / "manifest.json");
     assert(source.error.empty() && source.objects.size() == 3 && source.heights.size() == 256);
     assert(source.validation == "unspecified");
@@ -401,7 +471,9 @@ int main(int argc, char** argv)
                   << " regions=" << snapshot.regionIds.size() << " source=" << snapshot.sourceObjects
                   << " sourceBytes=" << snapshot.residentSourceBytes << " valueBytes=" << snapshot.residentValueBytes
                   << " covered=" << snapshot.coveredObjects << " selected=" << snapshot.objects.size()
-                  << " modelsSkipped=" << snapshot.modelLimitSkipped << "\n";
+                  << " modelsSkipped=" << snapshot.modelLimitSkipped
+                  << " groundRoadsFitted=" << snapshot.groundRoadsFitted
+                  << " roadCoverageSkipped=" << snapshot.groundRoadCoverageSkipped << "\n";
     }
     std::cout
         << "PASS Worldgen actual RVW4 wire parsing, stock model identities, resident grounding/relative lift, "

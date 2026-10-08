@@ -244,6 +244,75 @@ placement IDs or retired GPU slots; their stable namespace behavior remains
 covered by the CPU tests, not claimed by this installed receipt. This finite
 check covers two offline prepared outputs, not worldwide populated data.
 
+## Explicit ground-road presentation fitting
+
+The M4 terrain-road fitter authors ordinary straight pieces as flat rectangles
+at each footprint's maximum support height plus 4 cm. City source records
+886/887 already differ vertically by 4.083 m at their nominal adjacent endpoints;
+their axial footprints overlap by about 0.301 m. Preserving each piece's separate
+clearance above the graded source WRP when moving it to the original DEM can
+increase that vertical difference to about 10.054 m. These cached-input DEM
+numbers diagnose the transform policy; they are not installed measurements.
+M4 also leaves junction/sharp-corner holes for its generated road ground
+material. Neither that graded terrain nor its road material underlay is imported
+by the retained-object adapter, so terrain-filled junctions remain incomplete.
+
+The optional manifest array `earth_ground_road_ids` explicitly lists unique
+**original RVW4 IDs**, at most 131,072. Absent/unlisted placements retain their
+authored lift, pitch and shear, including elevated roads, bridge objects,
+buildings and vegetation. Listed records must be flat unit-scale stock
+`o/road/{sil,ces}{25,12,6}.p3d`; invalid, duplicate, missing or unsupported IDs
+refuse the source. Classification survives stable indexed ID remapping.
+
+Only listed roads receive a resident-ground presentation plane. Its centre is
+current ground +2 cm; opposite endpoint samples set the forward gradient and
+samples 5 m to either side set the lateral gradient. The five samples share the
+immutable resident patch's triangle interpolation and must all be finite and
+covered. Otherwise that road waits for coverage. Horizontal footprint, object
+ID, shared model and global instance/model budgets stay unchanged. This is an
+affine approximation: it cannot conform every vertex to multiple terrain
+triangles, guarantee endpoint seams on sharply changing slopes, fill junctions,
+grade terrain or provide road-model collision. Source elevation and collision
+remain unchanged. Snapshot counters expose fitted and coverage-skipped roads.
+
+Use the offline classifier on a prepared output:
+
+```powershell
+python scripts/Classify-EarthGroundRoads.py --manifest D:/lab/region/generated/manifest.json
+```
+
+By default it writes a fresh sibling `manifest-earth-ground-roads.json` plus a
+SHA-256/association receipt; point the region index at that sibling. It reads the
+original generated `osm-source.json` and WRP, with no network, game access,
+asset generation or redistribution. `--osm` chooses another complete matching
+source. Explicit `--apply` instead annotates the original manifest after keeping
+a byte-identical named backup. Original upstream validation fields are retained.
+Change prepared inputs only between runs: running streams pin visited sources.
+
+Classification is **geometric inference, not exact generator provenance**.
+The centre and both road-axis endpoints must each lie strictly within 5 m of one
+unique OSM way, follow its tangent within 15 degrees, and identify the same way.
+Multiple nearby ways or separate passages of the same way are rejected; no
+nearest-road winner suppresses ambiguity. Bridge/tunnel/covered/indoor values
+other than absent/explicit false, nonzero/invalid layer or level, and elevated
+location/bridge-structure tags reject the association. Unsupported transforms
+and footprints beyond the prepared rectangle stay authored. Missing highway
+geometry refuses classification entirely. Missing or incorrect OSM elevation
+tags remain a data limitation; the receipt does not prove bridge completeness.
+Inputs are bounded to 64 MiB JSON, 100,000 elements, 2 million geometry points,
+200,000 indexed segments/2 million index references, and the existing 32 MiB WRP
+and record caps. There is no silent truncation.
+
+The actual city03 source conservatively classifies 471/1,057 road pieces;
+complete Mamer02 classifies 6,475/8,536. City886/887 are ambiguous and deliberately
+remain authored. Both Mamer6459/6460 are classified: the cached-input DEM plane
+prototype reduces their estimated vertical endpoint difference from 9.130 m to
+0.0026 m. This does not claim installed appearance. Original WRP/assets/status
+are unchanged; both sources still have failed upstream final validation.
+The external lab `worldgen-regions-ground-roads.json` references both annotated
+sidecars. Run the installed region harness with that explicit `-Index`, inspect
+the images and fitted-road logs, and retain the remaining junction limitations.
+
 ## First actual offline region receipt
 
 On 2026-10-08, upstream M4 at the source revision above generated a Luxembourg

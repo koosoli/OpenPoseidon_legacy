@@ -95,6 +95,55 @@ float GroundHeight(const EarthBuildingStream::Ground& g, double x, double z)
                 d = g.heights[(iz + 1) * 257 + ix + 1];
     return float(tx + tz <= 1 ? a + (b - a) * tx + (c - a) * tz : d + (c - d) * (1 - tx) + (b - d) * (1 - tz));
 }
+double GroundRoadLength(const EarthWorldgen::Object& object)
+{
+    std::string model = object.model;
+    for (char& c : model)
+    {
+        if (c >= 'A' && c <= 'Z')
+            c = char(c + 32);
+        if (c == '\\')
+            c = '/';
+    }
+    double length = 0;
+    for (const char* family : {"sil", "ces"})
+        for (const auto& piece : {std::pair{"25", 25.0}, std::pair{"12", 12.5}, std::pair{"6", 6.25}})
+            if (model == std::string("o/road/") + family + piece.first + ".p3d")
+                length = piece.second;
+    const auto& m = object.matrix;
+    // Only the flat unit-scale stock-road records emitted by the terrain-road
+    // fitter are supported. A marked bridge, curve, pitched/scaled road is refused.
+    if (!length || std::abs(m[1]) > 1e-4 || std::abs(m[7]) > 1e-4 || std::abs(m[3]) > 1e-4 ||
+        std::abs(m[4] - 1) > 1e-4 || std::abs(m[5]) > 1e-4 || std::abs(std::hypot(m[0], m[2]) - 1) > 1e-4 ||
+        std::abs(std::hypot(m[6], m[8]) - 1) > 1e-4 || std::abs(m[0] * m[6] + m[2] * m[8]) > 1e-4)
+        return 0;
+    return length;
+}
+bool FitGroundRoad(EarthWorldgen::Object& object, const EarthBuildingStream::Ground& g, double length, double centre)
+{
+    auto& m = object.matrix;
+    const auto sample = [&](double x, double z) -> double
+    {
+        if (x < g.x || z < g.z || x > g.x + 256 * g.grid || z > g.z + 256 * g.grid)
+            return NAN;
+        return double(GroundHeight(g, x, z));
+    };
+    const double half = length * .5;
+    const double forward = sample(m[9] + half * m[6], m[11] + half * m[8]);
+    const double back = sample(m[9] - half * m[6], m[11] - half * m[8]);
+    const double right = sample(m[9] + 5 * m[0], m[11] + 5 * m[2]);
+    const double left = sample(m[9] - 5 * m[0], m[11] - 5 * m[2]);
+    if (!std::isfinite(centre) || !std::isfinite(forward) || !std::isfinite(back) || !std::isfinite(right) ||
+        !std::isfinite(left))
+        return false;
+    // An affine plane preserves the complete horizontal footprint and stable
+    // instance identity. It approximates the resident triangles; it does not
+    // grade terrain, deform each road vertex, or fill junctions.
+    m[10] = float(centre + .02);
+    m[1] = float((right - left) / 10);
+    m[7] = float((forward - back) / length);
+    return MatrixValid(m);
+}
 double SourceHeight(const EarthWorldgen::Source& source, double x, double z)
 {
     // Worldgen placement heights use its quantized source grid. Preserve their
@@ -237,6 +286,20 @@ EarthWorldgen::Source EarthWorldgen::Load(const std::filesystem::path& manifest,
                    source.east);
         source.cellSize = Number(world, "cell_size");
         source.heightScale = Number(root.get(), "height_scale");
+        std::unordered_set<uint32_t> groundRoadIds;
+        if (const auto* listed = cJSON_GetObjectItemCaseSensitive(root.get(), "earth_ground_road_ids"))
+        {
+            if (!cJSON_IsArray(listed) || cJSON_GetArraySize(listed) > MaxSourceObjects)
+                throw std::runtime_error("Worldgen ground-road classification budget/array invalid");
+            const cJSON* id = nullptr;
+            cJSON_ArrayForEach(id, listed)
+            {
+                if (!cJSON_IsNumber(id) || !std::isfinite(id->valuedouble) || id->valuedouble < 0 ||
+                    id->valuedouble > INT32_MAX || std::floor(id->valuedouble) != id->valuedouble ||
+                    !groundRoadIds.insert(uint32_t(id->valuedouble)).second)
+                    throw std::runtime_error("Worldgen ground-road classification ID invalid/duplicate");
+            }
+        }
         const double cells = Number(world, "cells");
         if (!std::isfinite(cells) || cells < 16 || cells > 2048 || std::floor(cells) != cells ||
             !std::isfinite(source.cellSize) || source.cellSize <= 0 || source.cellSize > 1000 ||
@@ -304,10 +367,15 @@ EarthWorldgen::Source EarthWorldgen::Load(const std::filesystem::path& manifest,
                 object.id > INT32_MAX || object.matrix[9] < 0 || object.matrix[9] > extent || object.matrix[11] < 0 ||
                 object.matrix[11] > extent || std::abs(object.matrix[10]) > 100000)
                 throw std::runtime_error("Worldgen RVW4 object invalid");
+            object.groundRoad = groundRoadIds.erase(object.id) != 0;
+            if (object.groundRoad && !GroundRoadLength(object))
+                throw std::runtime_error("Worldgen ground-road ID is not a flat unit stock straight road");
             source.objects.push_back(std::move(object));
         }
         if (!terminated)
             throw std::runtime_error("Worldgen RVW4 terminator invalid");
+        if (!groundRoadIds.empty())
+            throw std::runtime_error("Worldgen ground-road classification ID missing from RVW4");
         if (std::filesystem::last_write_time(manifest) != source.stamp.manifestTime ||
             std::filesystem::file_size(manifest) != source.stamp.manifestBytes ||
             std::filesystem::last_write_time(wrp) != source.stamp.wrpTime ||
@@ -468,7 +536,8 @@ EarthWorldgen::Snapshot EarthWorldgen::Build(const std::vector<const Source*>& s
         const float ground = GroundHeight(g, candidate.local.x, candidate.local.z);
         if (!std::isfinite(ground))
             continue;
-        const double lift = input.matrix[10] - SourceHeight(source, input.matrix[9], input.matrix[11]);
+        const double lift =
+            input.groundRoad ? 0 : input.matrix[10] - SourceHeight(source, input.matrix[9], input.matrix[11]);
         const auto normal =
             Earth::GlobeNormal(g.latitude, g.longitude, candidate.coordinate.latitude, candidate.coordinate.longitude);
         Object object = input;
@@ -487,6 +556,16 @@ EarthWorldgen::Snapshot EarthWorldgen::Build(const std::vector<const Source*>& s
             object.matrix[axis * 3] = float(direction.x);
             object.matrix[axis * 3 + 1] = float(direction.y);
             object.matrix[axis * 3 + 2] = float(direction.z);
+        }
+        if (input.groundRoad)
+        {
+            const double length = GroundRoadLength(input);
+            if (!length || !FitGroundRoad(object, g, length, ground))
+            {
+                ++output.groundRoadCoverageSkipped;
+                continue;
+            }
+            ++output.groundRoadsFitted;
         }
         if (!MatrixValid(object.matrix))
             continue;

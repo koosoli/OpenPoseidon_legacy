@@ -29,6 +29,8 @@ class EarthWorldgen
         uint32_t id;
         std::string model;
         std::array<float, 12> matrix;
+        // Explicit prepared semantic classification; never inferred from a model name.
+        bool groundRoad = false;
     };
     struct Source
     {
@@ -51,6 +53,7 @@ class EarthWorldgen
     {
         uint64_t revision = 0, generation = 0;
         size_t sourceObjects = 0, coveredObjects = 0, modelLimitSkipped = 0;
+        size_t groundRoadsFitted = 0, groundRoadCoverageSkipped = 0;
         size_t residentSourceBytes = 0, residentValueBytes = 0;
         std::vector<uint32_t> regionIds;
         std::vector<Object> objects;
