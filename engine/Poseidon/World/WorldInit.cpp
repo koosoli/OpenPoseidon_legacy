@@ -322,6 +322,51 @@ const AutoArray<Vector3> World::GetTaxiOffPath(TargetSide side)
     return _taxiOffPathsWest;
 }
 
+int World::NearestAirport(Vector3Par pos) const
+{
+    int best = 0;
+    float bestDist2 = 1e30f;
+    for (int i = 0; i < static_cast<int>(_airports.size()); i++)
+    {
+        const float d2 = _airports[i].pos.DistanceXZ2(pos);
+        if (d2 < bestDist2)
+        {
+            bestDist2 = d2;
+            best = i;
+        }
+    }
+    return best;
+}
+
+bool World::GetILS(Vector3& pos, Vector3& dir, TargetSide side, int airport)
+{
+    if (airport <= 0 || airport >= static_cast<int>(_airports.size()))
+    {
+        return GetILS(pos, dir, side);
+    }
+    pos = _airports[airport].pos;
+    dir = _airports[airport].dir;
+    return true;
+}
+
+const AutoArray<Vector3> World::GetTaxiInPath(TargetSide side, int airport)
+{
+    if (airport <= 0 || airport >= static_cast<int>(_airports.size()))
+    {
+        return GetTaxiInPath(side);
+    }
+    return _airports[airport].taxiIn;
+}
+
+const AutoArray<Vector3> World::GetTaxiOffPath(TargetSide side, int airport)
+{
+    if (airport <= 0 || airport >= static_cast<int>(_airports.size()))
+    {
+        return GetTaxiOffPath(side);
+    }
+    return _airports[airport].taxiOff;
+}
+
 #define PLAYER_ONLY 0
 
 void World::InsertSeaGulls() {}
@@ -926,6 +971,7 @@ void World::InitLandscape(Landscape* landscape)
     LOG_INFO(Core, "InitLandscape phase: World::Clear {} ms", Poseidon::Foundation::GlobalTickCount() - tStep);
 
     tStep = Poseidon::Foundation::GlobalTickCount();
+    _airports.clear(); // a world without a config entry (the land editor) has none
     if (!ENGINE_CONFIG.landEditor || (Pars >> "CfgWorlds").FindEntry(Glob.header.worldname))
     {
         const ParamEntry& world = Pars >> "CfgWorlds" >> Glob.header.worldname;
@@ -952,6 +998,39 @@ void World::InitLandscape(Landscape* landscape)
 
         GetPosArray(_taxiInPathsWest, world >> "ilsTaxiIn");
         GetPosArray(_taxiOffPathsWest, world >> "ilsTaxiOff");
+
+        // the main airport first, then the world's SecondaryAirports (none: the main one only, as before)
+        _airports.clear();
+        _airports.push_back(Airport{_ilsPosWest, _ilsDirWest, _taxiInPathsWest, _taxiOffPathsWest});
+        if (const ParamEntry* secondary = world.FindEntry("SecondaryAirports"))
+        {
+            for (int i = 0; i < secondary->GetEntryCount(); i++)
+            {
+                const ParamEntry& cls = secondary->GetEntry(i);
+                if (!cls.IsClass() || !cls.FindEntry("ilsPosition") || !cls.FindEntry("ilsDirection"))
+                {
+                    continue;
+                }
+                const ParamEntry& p = cls >> "ilsPosition";
+                const ParamEntry& d = cls >> "ilsDirection";
+                Airport airport;
+                airport.pos = Vector3(p[0], 0, p[1]);
+                airport.pos[1] = GLOB_LAND->SurfaceY(airport.pos[0], airport.pos[2]);
+                airport.dir = Vector3(d[0], d[1], d[2]);
+                airport.dir.Normalize();
+                if (cls.FindEntry("ilsTaxiIn"))
+                {
+                    GetPosArray(airport.taxiIn, cls >> "ilsTaxiIn");
+                }
+                if (cls.FindEntry("ilsTaxiOff"))
+                {
+                    GetPosArray(airport.taxiOff, cls >> "ilsTaxiOff");
+                }
+                _airports.push_back(airport);
+            }
+            LOG_INFO(Core, "{}: {} airport(s) (the main one and {} secondary)", (const char*)Glob.header.worldname,
+                     _airports.size(), _airports.size() - 1);
+        }
     }
     LOG_INFO(Core, "InitLandscape phase: CfgWorlds InitGeneral+ILS {} ms",
              Poseidon::Foundation::GlobalTickCount() - tStep);

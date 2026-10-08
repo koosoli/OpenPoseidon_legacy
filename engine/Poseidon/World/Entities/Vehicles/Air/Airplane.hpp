@@ -231,6 +231,10 @@ class AirplaneAuto: public Airplane
 
 	AutopilotState _state;
 	AirplaneState _planeState;
+	// Which of the world's airports this plane uses (World::NearestAirport): chosen afresh on the ground and in
+	// free flight, kept from the landing pattern to the touchdown. -1 = not chosen yet.
+	int _airport = -1;
+	int Airport();
 
 	public:
 	AirplaneAuto( VehicleType *name, Person *pilot );

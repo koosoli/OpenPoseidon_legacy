@@ -1,4 +1,6 @@
 #pragma once
+
+#include <vector>
 #include <Poseidon/Core/Types.hpp>
 #include <Poseidon/Core/Game/FixedStepAccumulator.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
@@ -346,6 +348,16 @@ class World
 	AutoArray<Vector3> _taxiInPathsCiv;
 	AutoArray<Vector3> _taxiOffPathsCiv;
 
+	// Every airport of the world: [0] the main one (ilsPosition / ilsDirection / ilsTaxiIn / ilsTaxiOff), then
+	// each class of CfgWorlds >> world >> SecondaryAirports (Arma's convention; none = the main one only, as
+	// before). An AI plane uses the nearest (AirplaneAuto::Airport).
+	struct Airport
+	{
+		Vector3 pos, dir;
+		AutoArray<Vector3> taxiIn, taxiOff;
+	};
+	std::vector<Airport> _airports;
+
 	float _gridOffsetX;
 	float _gridOffsetY;
 	AutoArray<GridInfo> _gridInfo;
@@ -416,6 +428,12 @@ class World
 
 	const AutoArray<Vector3> GetTaxiInPath( TargetSide side );
 	const AutoArray<Vector3> GetTaxiOffPath( TargetSide side );
+	// The same for one of the world's airports (0 = the main one; out of range = the main one).
+	int AirportCount() const { return static_cast<int>(_airports.size()); }
+	int NearestAirport( Vector3Par pos ) const;
+	bool GetILS( Vector3 &pos, Vector3 &dir, TargetSide side, int airport );
+	const AutoArray<Vector3> GetTaxiInPath( TargetSide side, int airport );
+	const AutoArray<Vector3> GetTaxiOffPath( TargetSide side, int airport );
 
 	float GetGridOffsetX() const {return _gridOffsetX;}
 	float GetGridOffsetY() const {return _gridOffsetY;}

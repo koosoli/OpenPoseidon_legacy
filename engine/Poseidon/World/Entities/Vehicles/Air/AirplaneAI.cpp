@@ -997,16 +997,33 @@ AirplaneAuto::PathResult AirplaneAuto::PathAutopilot(const Vector3* path, int nP
     return ret;
 }
 
+int AirplaneAuto::Airport()
+{
+    if (GWorld->AirportCount() <= 1)
+    {
+        return 0; // one airport: as ever
+    }
+    // re-chosen on the ground and in free flight; from the landing pattern to the touchdown it stays put, so an
+    // approach never switches field half way
+    const bool landing = _planeState == Marshall || _planeState == Approach || _planeState == Final ||
+                         _planeState == Landing || _planeState == Touchdown || _planeState == WaveOff;
+    if (_airport < 0 || !landing)
+    {
+        _airport = GWorld->NearestAirport(Position());
+    }
+    return _airport;
+}
+
 bool AirplaneAuto::TaxiOffAutopilot()
 {
-    const AutoArray<Vector3>& path = GWorld->GetTaxiOffPath(_targetSide);
+    const AutoArray<Vector3>& path = GWorld->GetTaxiOffPath(_targetSide, Airport());
 
     return PathAutopilot(path.Data(), path.Size()) <= PathAborted;
 }
 
 bool AirplaneAuto::TaxiInAutopilot()
 {
-    const AutoArray<Vector3>& path = GWorld->GetTaxiInPath(_targetSide);
+    const AutoArray<Vector3>& path = GWorld->GetTaxiInPath(_targetSide, Airport());
 
     return PathAutopilot(path.Data(), path.Size()) <= PathFinished;
 }
@@ -1477,7 +1494,7 @@ void AirplaneAuto::AIPilot(AIUnit* unit, float deltaT)
     else if (_planeState == Takeoff)
     {
         Vector3 ilsPos, ilsDir;
-        GWorld->GetILS(ilsPos, ilsDir, _targetSide);
+        GWorld->GetILS(ilsPos, ilsDir, _targetSide, Airport());
 
         _pilotSpeed = 100;
 

@@ -351,7 +351,7 @@ void AirplaneAuto::DrawDiags()
     LODShapeWithShadow* forceArrow = GScene->ForceArrow();
 
     Vector3 ilsPos, ilsDir;
-    GWorld->GetILS(ilsPos, ilsDir, _targetSide);
+    GWorld->GetILS(ilsPos, ilsDir, _targetSide, Airport());
     {
         Ref<Object> arrow = new ObjectColored(forceArrow, -1);
 
@@ -1448,7 +1448,7 @@ void AirplaneAuto::Simulate(float deltaT, SimulationImportance prec)
                 float height = Position().Y() - surfaceY;
 
                 Vector3 ilsPos, ilsDir;
-                GWorld->GetILS(ilsPos, ilsDir, _targetSide);
+                GWorld->GetILS(ilsPos, ilsDir, _targetSide, Airport());
                 if (_pilotHelperThrust)
                 {
 #define EST_DELTA 2.0f
