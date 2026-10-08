@@ -13,7 +13,7 @@ COMMON_COMMIT = "fd0022170615ce0d8162d219bff07232fa6dd84f"
 FILES = (
     ("AlucardDH/dh-reshade-shaders", DH_COMMIT, "LICENSE", "Licenses/DH-UBER-RT-GPL-2.0.txt",
      "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"),
-    ("AlucardDH/dh-reshade-shaders", DH_COMMIT, "Shaders/dh_uber_rt.fx", "Shaders/dh_uber_rt.fx",
+    ("AlucardDH/dh-reshade-shaders", DH_COMMIT, "Shaders/dh_uber_rt.fx", "Sources/dh_uber_rt.fx",
      "c14f19eb7b0359cb4042749e52c28c6a18c2df89b9fd40f5ab9bd209e36e5320"),
     ("crosire/reshade-shaders", COMMON_COMMIT, "Shaders/ReShade.fxh", "Shaders/ReShade.fxh",
      "6dabfbbaf968c3871905d2ea17f96572ff7b1cec01310b5d0e5252b66b30174f"),
@@ -63,10 +63,31 @@ def adapt_dh(data):
         '        ' + m[2], source, flags=re.S)
     if count != 1:
         raise RuntimeError('DH depth debug patch mismatch')
+    # ReShade 6.8 tracks transitive sampler use, including compureResult's
+    # reinhardFirstPass=false branch when PS_ReinhardPass passes true. Never
+    # sample and attach that same image. Preserve the original 1/64 blend in a
+    # retained work target, then publish its complete 1x1 value in a new pass.
+    declaration = '    sampler reinhardSampler { Texture = reinhardTex; };'
+    if source.count(declaration) != 1:
+        raise RuntimeError('DH Reinhard declaration patch mismatch')
+    source = source.replace(declaration, declaration + '\n'
+        '    texture opReinhardWorkTex { Width = 1; Height = 1; Format = RGBA16F; };\n'
+        '    sampler opReinhardWorkSampler { Texture = opReinhardWorkTex; };\n'
+        '    void OpPublishReinhard(float4 p : SV_Position, float2 uv : TexCoord, out float4 value : SV_Target0) {\n'
+        '        value = tex2Dlod(opReinhardWorkSampler, float4(0.5,0.5,0,0));\n    }', 1)
+    pattern = r'(PixelShader = PS_ReinhardPass;\s*RenderTarget = )reinhardTex;(.*?\n        \})'
+    source, count = re.subn(pattern, lambda m: m[1] + 'opReinhardWorkTex;' + m[2] + '\n'
+        '        pass {\n            VertexShader = PostProcessVS;\n'
+        '            PixelShader = OpPublishReinhard;\n            RenderTarget = reinhardTex;\n'
+        '            BlendEnable = false;\n        }', source, flags=re.S)
+    if count != 1:
+        raise RuntimeError('DH Reinhard pass patch mismatch')
     return source.encode()
 
 
 def prepare(root, local_sources=None, probe_only=False):
+    if not probe_only and (root / 'Shaders/dh_uber_rt.fx').exists():
+        raise RuntimeError('Original DH source remains in active effect scan; choose a fresh isolated runtime')
     receipt = []
     staged = []
     for repo, commit, source, target, expected in (() if probe_only else FILES):
@@ -96,7 +117,7 @@ def prepare(root, local_sources=None, probe_only=False):
         staged.append((root / 'Shaders/OpenPoseidonDH.fx', adapter))
         staged.append((root / 'Shaders/OpenPoseidonSceneDepth.fxh', (own / 'OpenPoseidonSceneDepth.fxh').read_bytes()))
     presets = {
-        "OpenPoseidon-Depth-Off.ini": "Techniques=\nTechniqueSorting=OpenPoseidonDepthProbe@OpenPoseidonDepthProbe.fx,DH_UBER_RT@dh_uber_rt.fx\n",
+        "OpenPoseidon-Depth-Off.ini": "Techniques=\nTechniqueSorting=OpenPoseidonDepthProbe@OpenPoseidonDepthProbe.fx,DH_UBER_RT@OpenPoseidonDH.fx\n",
         "OpenPoseidon-Depth-Probe.ini": "Techniques=OpenPoseidonDepthProbe@OpenPoseidonDepthProbe.fx\n"
             "TechniqueSorting=OpenPoseidonDepthProbe@OpenPoseidonDepthProbe.fx\n"
             "\n[OpenPoseidonDepthProbe.fx]\nReversedZ=1\nFlipY=0\nDepthPower=0.125\nOverlay=0.25\n",
@@ -132,7 +153,8 @@ def prepare(root, local_sources=None, probe_only=False):
     receipt_path.write_text(json.dumps({"probe_only": probe_only, "files": receipt, "dh_license": "GPL-2.0 (upstream LICENSE)",
         "scene_adapter": None if adapter is None else {"source_sha256": FILES[1][4], "generated_sha256": sha(adapter),
             "helper_sha256": sha((own / 'OpenPoseidonSceneDepth.fxh').read_bytes()), "helper_license": "MIT",
-            "projection": "metric z=near/raw; exact p00/p55/offset inverse, screen-down Y; 1000m bounded DH range; sky=2"},
+            "projection": "metric z=near/raw; exact p00/p55/offset inverse, screen-down Y; 1000m bounded DH range; sky=2",
+            "reinhard": "retained 1x1 work target with upstream blend, then separate publish pass; no same-image feedback"},
         "common_license": "CC0-1.0 (SPDX in header)", "probe_license": "GPL-3.0-or-later",
         "configuration": "No active preset/config/preference modified; depth availability not established",
         "motion": "No external motion provider; accumulation=1 stationary validation preset only"}, indent=2) + "\n")

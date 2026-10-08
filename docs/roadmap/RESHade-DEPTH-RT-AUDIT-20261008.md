@@ -483,3 +483,47 @@ A complete isolated staging directory is prepared at this worktree's
 CPU-built add-on, the original helper and pinned GPL/CC0 files. No game launch,
 GPU access, integrated build or deployment occurred here. Parent captures and
 external total-frame timing remain required before any beauty/performance claim.
+
+## Runtime lifecycle proof and Reinhard feedback correction
+
+The parent ran installed `905ba2dc` with `SceneProbe -VerifyResize`: resource
+generations changed 1 -> 2 at 3441x1440 -> 3 at 1600x900, each with a fresh bound
+numeric grid, then clean exit. This confirms the tested resize/rebind/teardown
+fixture. The parent also visually checked the metric DH debug image: aligned
+logarithmic depth and blue sky. However, the strict harness correctly failed the
+`20261008-113420-SceneDHDebug/ReShade.log` X3020 diagnostic in both original and
+adapted DH: reinhardTex was sampled and attached in the same pass. ReShade calls
+this a successful compilation with warnings in its summary, but the nested
+`error X3020` is a real correctness failure and remains a hard gate.
+
+The pinned shader's `PS_ReinhardPass` calls `compureResult(..., true)`. That shared
+function's other branch samples reinhardSampler, and ReShade 6.8 records the
+transitive read even when the caller passes the constant true. The generated
+local adaptation now keeps the original 1/64 temporal blend in a separate
+retained 1x1 RGBA16F work target. A subsequent pass copies its complete value to
+reinhardTex with blending explicitly disabled, before the final merger. The
+work and published textures retain identical values after every frame, including
+frames discarded when Reinhard is disabled; current-frame merge timing and the
+upstream blend are preserved. No pass samples its own attached image.
+
+The untouched, hash-verified GPL source is now staged as
+`Sources/dh_uber_rt.fx`, outside the `Shaders` effect scan. The installed helper
+copies it for provenance without scanning/compiling it. Legacy generic DH modes
+are explicitly refused; use `SceneDHDebug` / `SceneDH`. The preparer refuses an
+old staging directory containing an original shader under active Shaders and
+asks for a fresh isolated destination, preserving existing files. All original
+source/licence/hash receipts remain available; no upstream shader is committed.
+
+Six preparation tests now cover exact retained-work/publish transformation,
+unchanged original/hash provenance, active-scan exclusion and no-overwrite
+failure, as well as temporal blend equivalence including discarded frames.
+Three metric expression tests and two built add-on ABI tests pass. PowerShell
+parsing passes. Actual pinned-source preparation completed from the existing
+offline cache. This correction changes no engine, renderer or add-on code and
+needs no new engine build. No game/GPU launch was made by this agent.
+
+Fresh full stage: this worktree's `build/scene-dh-feedback-fixed-v2`. The parent
+must rerun `SceneDHDebug` with that stage, retain the strict error gate, inspect
+the aligned depth result, then run `SceneDH` only after the debug gate succeeds.
+The corrected shader's ReShade compilation and GI beauty/performance are still
+pending that runtime check; prior visual depth evidence does not waive X3020.

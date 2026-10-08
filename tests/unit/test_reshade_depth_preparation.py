@@ -20,6 +20,9 @@ class Preparation(unittest.TestCase):
                 ('float3', 'getWorldPosition', 'float2 coords,float depth'), ('float3', 'getScreenPosition', 'float3 wp')]:
             source += f'    {kind} {name}({args}) {{\n        return 42;\n    }}\n'
         source += '} else if(iDebug==DEBUG_DEPTH) {\n result = 42;\n} else if(iDebug==DEBUG_NORMAL) {\n'
+        source += '\n    sampler reinhardSampler { Texture = reinhardTex; };\n'
+        source += '        pass {\n            PixelShader = PS_ReinhardPass;\n            RenderTarget = reinhardTex;\n'
+        source += '            ClearRenderTargets = false;\n            BlendEnable = true;\n            SrcBlend = SRCALPHA;\n            DestBlend = INVSRCALPHA;\n        }\n'
         data = [b'licence fixture', source.encode(), b'common fixture']
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
@@ -36,18 +39,53 @@ class Preparation(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'exact pinned'):
                     DEPTH.adapt_dh(b'different pin')
             runtime = base / 'runtime'
-            self.assertEqual((runtime / 'Shaders/dh_uber_rt.fx').read_bytes(), source.encode())
+            self.assertEqual((runtime / 'Sources/dh_uber_rt.fx').read_bytes(), source.encode())
+            self.assertFalse((runtime / 'Shaders/dh_uber_rt.fx').exists())
             adapted = (runtime / 'Shaders/OpenPoseidonDH.fx').read_bytes()
             self.assertIn(b'OpenPoseidon local adaptation, 2026-10-08', adapted)
             self.assertIn(b'OpSceneLinearDepth(coords)', adapted)
             self.assertIn(b'OpSceneViewPosition(coords, depth)', adapted)
             self.assertIn(b'OpSceneScreenPosition(wp)', adapted)
             self.assertIn(b'log2(1.0 + depth * OpSceneRange)', adapted)
+            # The original pass's transitive read remains reinhardTex, but its
+            # retained blended target is now separate. A subsequent pass copies
+            # work -> published value, so the merger sees the current frame.
+            self.assertIn(b'PixelShader = PS_ReinhardPass;\n            RenderTarget = opReinhardWorkTex;', adapted)
+            self.assertIn(b'PixelShader = OpPublishReinhard;\n            RenderTarget = reinhardTex;', adapted)
+            self.assertIn(b'RenderTarget = reinhardTex;\n            BlendEnable = false;', adapted)
+            self.assertIn(b'tex2Dlod(opReinhardWorkSampler, float4(0.5,0.5,0,0))', adapted)
+            self.assertIn(b'ClearRenderTargets = false;', adapted)
+            self.assertIn(b'DestBlend = INVSRCALPHA;', adapted)
             provenance = json.loads(receipt.read_text())['scene_adapter']
             self.assertEqual(provenance['generated_sha256'], hashlib.sha256(adapted).hexdigest())
             self.assertEqual(provenance['helper_license'], 'MIT')
             self.assertIn('OpSceneRange=1000', (runtime / 'Presets/OpenPoseidon-DH-Scene-Debug.ini').read_text())
             self.assertTrue((runtime / 'Presets/OpenPoseidon-Depth-Off.ini').read_text().startswith('Techniques=\n'))
+
+    def test_original_in_active_scan_requires_fresh_stage_without_writes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            original = root / 'Shaders/dh_uber_rt.fx'
+            original.parent.mkdir()
+            original.write_bytes(b'user-owned original')
+            with patch.object(DEPTH.subprocess, 'run', side_effect=AssertionError('network')):
+                with self.assertRaisesRegex(RuntimeError, 'active effect scan'):
+                    DEPTH.prepare(root)
+            self.assertEqual(original.read_bytes(), b'user-owned original')
+            self.assertFalse((root / 'DEPTH-PROVENANCE.json').exists())
+
+    def test_reinhard_retained_work_and_publish_preserve_temporal_blend(self):
+        # Upstream color blend uses source alpha=1/64, retained destination,
+        # then the adapter publishes the entire 1x1 value without another blend.
+        # Exercise discarded frames as well; both retained images stay equal.
+        expected = work = published = 0.0
+        for frame in range(128):
+            incoming = (frame * 17 % 31) / 10
+            if frame % 7:
+                expected = incoming / 64 + expected * 63 / 64
+                work = incoming / 64 + work * 63 / 64
+            published = work
+            self.assertEqual(published, expected)
 
     def test_probe_never_downloads_or_changes_selected_preset(self):
         with tempfile.TemporaryDirectory() as temporary:

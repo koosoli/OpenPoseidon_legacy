@@ -16,6 +16,7 @@ $ErrorActionPreference='Stop'
 function Require($ok,[string]$message){if(!$ok){throw $message}}
 Require ([bool]$env:LOCK_OWNER) 'Shared game lock required'
 Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue)) 'Existing game preserved'
+Require ($Mode-notin@('DHDebug','DH')) 'Legacy generic DH has an upstream ReShade 6.8 feedback error; use SceneDHDebug/SceneDH with the generated adapter'
 $repo=Split-Path -Parent $PSScriptRoot
 $stamp=(Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw).Trim()
 Require ($stamp.Contains($ExpectedCommit)) 'Unexpected installed source'
@@ -30,7 +31,7 @@ $effectName=if($probeMode){'OpenPoseidonDepthProbe.fx'}elseif($sceneDhMode){'Ope
 $technique=if($probeMode){'OpenPoseidonDepthProbe@OpenPoseidonDepthProbe.fx'}else{'DH_UBER_RT@'+$effectName}
 $required=@('ReShade64.dll','ReShade64.json','OpenPoseidonReShade.addon64','OpenPoseidon.ini',
  'Shaders/OpenPoseidonLook.fx','DEPTH-PROVENANCE.json',('Presets/'+$presetName),('Shaders/'+$effectName))
-if(!$probeMode){$required+=@('Shaders/ReShade.fxh','Shaders/dh_uber_rt.fx','Licenses/DH-UBER-RT-GPL-2.0.txt')}
+if(!$probeMode){$required+=@('Shaders/ReShade.fxh','Sources/dh_uber_rt.fx','Licenses/DH-UBER-RT-GPL-2.0.txt')}
 if($sceneDhMode){$required+='Shaders/OpenPoseidonSceneDepth.fxh'}
 foreach($name in $required){Require (Test-Path -LiteralPath (Join-Path $source $name) -PathType Leaf) ('Stage the licensed runtime first; missing '+$name)}
 $digests=@{
@@ -39,7 +40,7 @@ $digests=@{
 }
 if(!$probeMode){
  $digests['Licenses/DH-UBER-RT-GPL-2.0.txt']='8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643'
- $digests['Shaders/dh_uber_rt.fx']='c14f19eb7b0359cb4042749e52c28c6a18c2df89b9fd40f5ab9bd209e36e5320'
+ $digests['Sources/dh_uber_rt.fx']='c14f19eb7b0359cb4042749e52c28c6a18c2df89b9fd40f5ab9bd209e36e5320'
  $digests['Shaders/ReShade.fxh']='6dabfbbaf968c3871905d2ea17f96572ff7b1cec01310b5d0e5252b66b30174f'
 }
 foreach($name in $digests.Keys){Require ((Get-FileHash -LiteralPath (Join-Path $source $name)).Hash.ToLowerInvariant()-ceq$digests[$name]) ('Staged file digest mismatch: '+$name)}
