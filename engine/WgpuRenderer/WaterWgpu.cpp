@@ -887,7 +887,7 @@ void WaterWgpu::DrawEarthWater(Scene& scene, float originX, float originZ, float
     if (forceCurrentOp) return; // This preview adapter requires Tidewater's bounded material.
 
     // Tidewater owns its camera-centred CDLOD mesh. This marker submits that path;
-    // its shader clips to this Earth window and follows the spherical sea datum.
+    // its shader follows the spherical sea datum and keeps opaque scene land.
     // The height source has coast elevations, no bathymetry: zero-elevation ocean
     // receives a presentation-only deep floor. Shore simulation stays disabled.
     WgrWaterParams p{};

@@ -81,6 +81,11 @@ fn earthWaterDrop(xz: vec2<f32>) -> f32 {
     return r2 / (radius + sqrt(max(radius * radius - r2, 0.0)));
 }
 fn waterLevelAt(xz: vec2<f32>) -> f32 { return tw.sea.x - earthWaterDrop(xz); }
+fn earthWaterNormal(xz: vec2<f32>) -> vec3<f32> {
+    if (!earthWater()) { return vec3<f32>(0.0, 1.0, 0.0); }
+    let p = xz - vec2<f32>(6400.0);
+    return normalize(vec3<f32>(p.x, 6378137.0 - earthWaterDrop(xz), p.y));
+}
 fn earthMaterialCorner(ix: i32, iz: i32) -> f32 {
     let corner = clamp(vec2<i32>(ix, iz), vec2<i32>(0), vec2<i32>(i32(cf.hm_width) - 1, i32(cf.hm_height) - 1));
     let xz = cf.origin + vec2<f32>(corner) * cf.terrain_grid;
@@ -201,7 +206,7 @@ fn twDisplace(worldXZ: vec2<f32>, spacing: f32) -> TwDisp {
     disp *= tw.surface.x;
 
     var extra = vec3<f32>(0.0);
-    var shoreN = vec3<f32>(0.0, 1.0, 0.0);
+    var shoreN = earthWaterNormal(worldXZ);
     var shoreFoam = 0.0;
     var surfMask = vec2<f32>(0.0); // clear plunging face, whitewater roller relief (m)
     // Offshore of WATER_SHORE_DEEP the shore waves have faded out completely (their envelope is 0
@@ -1053,12 +1058,13 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         res = dbgLight * vec3<f32>(0.1, 1.0, 1.0);
     }
     if (earthWater()) {
-        let size = vec2<f32>(f32(cf.hm_width - 1u), f32(cf.hm_height - 1u)) * cf.terrain_grid;
-        let local = lagXZ - cf.origin;
-        let edge = min(min(local.x, local.y), min(size.x - local.x, size.y - local.y));
-        if (edge <= 0.0 || thickness <= 0.0) { discard; }
-        let fade = smoothstep(0.0, 200.0, edge) *
-                   (1.0 - smoothstep(6000.0, 8000.0, frame.cam_pos.y));
+        // Source coverage is not a rectangular ocean boundary. Existing CDLOD
+        // geometry follows the sphere; reject its hidden far side analytically.
+        // Match the pipeline's GreaterEqual reverse-Z test against the opaque
+        // snapshot explicitly: unknown source height must never override land.
+        if (thickness <= 0.0 || dot(earthWaterNormal(pos.xz), -rel) <= 0.0 ||
+            in.clip.z < _waterSceneDepthAt(screenUV)) { discard; }
+        let fade = 1.0 - smoothstep(6000.0, 8000.0, frame.cam_pos.y);
         let base = textureSampleLevel(waterSceneColor, smpLinearClamp, screenUV, 0.0).rgb;
         res = mix(base, res, fade);
     }
