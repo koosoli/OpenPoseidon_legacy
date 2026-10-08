@@ -2,6 +2,7 @@
 
 #include <Poseidon/Asset/Formats/BISStructures.hpp>
 #include <Poseidon/World/Model/Model.hpp>
+#include <Poseidon/Asset/Formats/P3D/MLODTangentFrames.hpp>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -115,6 +116,7 @@ struct WriteLod
 struct WriteModel
 {
     std::vector<WriteLod> lods; // 1-100; the reader rejects a count outside that
+    TangentFrames tangentFrames; // optional import sidecar; not serialized
 };
 
 } // namespace MLOD

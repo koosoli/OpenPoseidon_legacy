@@ -1591,6 +1591,7 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
     // repeated ~47 times across the wall as dark patches. The exporter has had the flag
     // since AST-011C; the native path never set it, so no native model had a `uv1`.
     options.secondUv = true;
+    options.preserveTangentFrame = Enf::XobAuthoredTangentPreviewEnabled();
     // The native path has no texture baker, so the `.xob`'s own material paths are
     // written and the models draw untextured until the material side lands.
     Fmt::MLOD::WriteModel model;
@@ -1627,7 +1628,11 @@ std::shared_ptr<Poseidon::Model::Model> BuildModelFromXob(const EnfusionMount& m
         return nullptr;
     }
     auto parsed = std::make_shared<Poseidon::Model::Model>(
-        Fmt::MLODLoader::loadFromBuffer(buffer.data(), static_cast<int>(buffer.size()), xobPath));
+        Fmt::MLODLoader::loadFromBuffer(buffer.data(), static_cast<int>(buffer.size()), xobPath,
+                                      options.preserveTangentFrame ? &model.tangentFrames : nullptr));
+    // A versioned producer mark prevents older/generated cached frames qualifying.
+    // Serialized Model::Vertex already retains the optional axes; no blob layout change.
+    if (options.preserveTangentFrame) parsed->sourceFormat = Enf::kXobTangentProducer;
     if (parsed->lodLevels.empty())
     {
         why = "MLOD loader produced no levels";

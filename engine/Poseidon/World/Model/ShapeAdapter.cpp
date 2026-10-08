@@ -6,6 +6,7 @@
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
 #include <Poseidon/Dev/Diag/ScopedTimer.hpp>
 #include <Poseidon/World/Model/Model.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/XobTangentFrame.hpp>
 
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Material.hpp>
@@ -869,6 +870,7 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
         const auto tanT0 = ::Poseidon::Dev::Perf::Now();
         const std::vector<std::array<float, 3>> generatedTangents = buildTangents(mesh, generatedBinormals);
         tanMs += ::Poseidon::Dev::Perf::ElapsedMs(tanT0);
+        const bool authoredTangentFrame = Asset::Formats::Enfusion::HasXobAuthoredTangentFrame(model, mesh);
         bool hasGeneratedTangentFrame = false;
         for (size_t vertexIndex = 0; vertexIndex < generatedTangents.size(); ++vertexIndex)
         {
@@ -933,8 +935,10 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
                 shape->_lods[i]->SetUV1(v, vertex.uv1.u, vertex.uv1.v);
             shape->_lods[i]->SetPos(v) = ::Vector3(vertex.position.x, vertex.position.y, vertex.position.z);
             shape->_lods[i]->SetNorm(v) = ::Vector3(vertex.normal.x, vertex.normal.y, vertex.normal.z);
-            shape->_lods[i]->SetTangent(v) = ::Vector3(generatedTangents[v][0], generatedTangents[v][1], generatedTangents[v][2]);
-            shape->_lods[i]->SetBinormal(v) = ::Vector3(generatedBinormals[v][0], generatedBinormals[v][1], generatedBinormals[v][2]);
+            shape->_lods[i]->SetTangent(v) = authoredTangentFrame ? ::Vector3(vertex.tangent.x, vertex.tangent.y, vertex.tangent.z) :
+                ::Vector3(generatedTangents[v][0], generatedTangents[v][1], generatedTangents[v][2]);
+            shape->_lods[i]->SetBinormal(v) = authoredTangentFrame ? ::Vector3(vertex.binormal.x, vertex.binormal.y, vertex.binormal.z) :
+                ::Vector3(generatedBinormals[v][0], generatedBinormals[v][1], generatedBinormals[v][2]);
             shape->_lods[i]->SetU(v, vertex.uv.u);
             shape->_lods[i]->SetV(v, vertex.uv.v);
 
@@ -949,7 +953,7 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
             shape->_lods[i]->SetClip(v, c);
         }
         vfillMs += ::Poseidon::Dev::Perf::ElapsedMs(vfillT0);
-        shape->_lods[i]->SetHasTangentFrame(hasGeneratedTangentFrame);
+        shape->_lods[i]->SetHasTangentFrame(authoredTangentFrame || hasGeneratedTangentFrame);
 
         if (isODOL && !mesh.frames.empty())
         {
@@ -1221,6 +1225,9 @@ LODShapeWithShadow* ConvertWithContext(const Poseidon::Model::Model& model, bool
             shape->_lods[i]->_prop.Add(::NamedProperty(prop.name.c_str(), prop.value.c_str()));
         }
 
+        if (authoredTangentFrame) shape->_lods[i]->SetProperty("wgrnativeframe", "1");
+        else if (shape->_lods[i]->FindProperty("wgrnativeframe") >= 0)
+            shape->_lods[i]->SetProperty("wgrnativeframe", "0");
         shape->_lods[i]->Compact();
 
         if (!isODOL)

@@ -4,6 +4,8 @@
 #include <Poseidon/Asset/Formats/P3D/MLODLoader.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODWriter.hpp>
 #include <Poseidon/World/Model/Model.hpp>
+#include <Poseidon/World/Model/ModelBlob.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/XobTangentFrame.hpp>
 
 #include "../../../test_fixtures.hpp"
 
@@ -492,4 +494,67 @@ TEST_CASE("MLODWriter: rejects selections and mass the reader would misread", "[
         model.lods[1].mass = {1.0f, 2.0f};
         REQUIRE_THROWS_WITH(MLODWriter::writeToBuffer(model), Catch::Matchers::ContainsSubstring("mass"));
     }
+}
+
+TEST_CASE("Authored UV0 tangent sidecar preserves seams winding and cache provenance", "[mlod][writer][tangents]")
+{
+    using namespace Poseidon::Asset::Formats;
+    MLODW::WriteModel source;
+    MLODW::WriteLod lod;
+    for (const auto& p : {Poseidon::Model::Vector3{0,0,0}, {1,0,0}, {0,1,0}})
+    {
+        lod.points.push_back({{p.x,p.y,p.z},0});
+        lod.normals.push_back({0,0,-1});
+    }
+    MLODW::WriteFace face;
+    face.vertexCount = 3;
+    for (int c=0;c<3;++c) { face.vertices[c].point=c; face.vertices[c].normal=c; }
+    lod.faces = {face,face};
+    source.lods.push_back(lod);
+    Enfusion::XobPart part;
+    part.renderSource={0,1,2};
+    part.tangents={{1,0,0},{1,0,0},{1,0,0}};
+    part.bitangents={{0,1,0},{0,1,0},{0,1,0}};
+    source.tangentFrames.resize(1);
+    source.tangentFrames[0].resize(2);
+    for (int f=0;f<2;++f) for (int c=0;c<3;++c)
+        source.tangentFrames[0][f][c]=Enfusion::XobCornerTangentFrame(part,c,c,0);
+    source.tangentFrames[0][1][0].tangent={1,0,.25f};
+    const auto bytes=MLODWriter::writeToBuffer(source);
+    auto legacy=MLODLoader::loadFromBuffer(bytes.data(),int(bytes.size()),"owned.xob");
+    REQUIRE(legacy.lodLevels[0].mesh.vertices.size()==3);
+    for (const auto& v : legacy.lodLevels[0].mesh.vertices) REQUIRE_FALSE(v.hasTangentFrame);
+    auto authored=MLODLoader::loadFromBuffer(bytes.data(),int(bytes.size()),"owned.xob",&source.tangentFrames);
+    auto& mesh=authored.lodLevels[0].mesh;
+    REQUIRE(mesh.vertices.size()==4); // tangent-only seam must not merge
+    REQUIRE(mesh.vertices[mesh.triangles[0].indices[1]].tangent.z==0.f); // loader reverses0/1
+    REQUIRE(mesh.vertices[mesh.triangles[1].indices[1]].tangent.z==.25f);
+    for (const auto& v : mesh.vertices) REQUIRE(v.hasTangentFrame);
+    authored.sourceFormat="XOB_TSPACE_UV0_V1";
+    const auto blob=Poseidon::ModelBlob::Serialize(authored);
+    Poseidon::Model::Model restored;
+    REQUIRE(Poseidon::ModelBlob::Deserialize(blob.data(),blob.size(),restored));
+    REQUIRE(restored.sourceFormat=="XOB_TSPACE_UV0_V1");
+    REQUIRE(Poseidon::ModelBlob::Serialize(restored)==blob);
+    REQUIRE(Enfusion::HasXobAuthoredTangentFrame(restored,restored.lodLevels[0].mesh));
+    restored.lodLevels[0].mesh.vertices[0].normal={0,0,0};
+    REQUIRE_FALSE(Enfusion::HasXobAuthoredTangentFrame(restored,restored.lodLevels[0].mesh));
+    const auto oldBlob=Poseidon::ModelBlob::Serialize(legacy);
+    REQUIRE(Poseidon::ModelBlob::Deserialize(oldBlob.data(),oldBlob.size(),restored));
+    REQUIRE(restored.sourceFormat!="XOB_TSPACE_UV0_V1"); // old producer cannot qualify
+    REQUIRE_FALSE(Enfusion::HasXobAuthoredTangentFrame(restored,restored.lodLevels[0].mesh));
+    REQUIRE_FALSE(Enfusion::XobCornerTangentFrame(part,0,1,0).supplied); // source mapping
+    REQUIRE_FALSE(Enfusion::XobCornerTangentFrame(part,3,0,0).supplied); // bounds
+    REQUIRE_FALSE(Enfusion::XobCornerTangentFrame(part,0,0,1).supplied); // experimental packing
+    part.skinned=true;
+    REQUIRE_FALSE(Enfusion::XobCornerTangentFrame(part,0,0,0).supplied);
+    part.skinned=false; part.bitangents[0]={1,0,0};
+    REQUIRE_FALSE(Enfusion::XobCornerTangentFrame(part,0,0,0).supplied); // parallel axes
+    source.tangentFrames[0][1][0].supplied=false;
+    auto partial=MLODLoader::loadFromBuffer(bytes.data(),int(bytes.size()),"owned.xob",&source.tangentFrames);
+    REQUIRE(partial.lodLevels[0].mesh.vertices.size()==3);
+    for (const auto& v : partial.lodLevels[0].mesh.vertices) REQUIRE_FALSE(v.hasTangentFrame);
+    source.tangentFrames[0].pop_back();
+    auto mismatch=MLODLoader::loadFromBuffer(bytes.data(),int(bytes.size()),"owned.xob",&source.tangentFrames);
+    for (const auto& v : mismatch.lodLevels[0].mesh.vertices) REQUIRE_FALSE(v.hasTangentFrame);
 }

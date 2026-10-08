@@ -4330,7 +4330,7 @@ pub fn build_gpu_pipeline(
     // Location 7 is the SECOND UV set (byte 60, after the authored tangent frame): Multi's
     // mask / macro / ambient-shadow stages are authored on `tex1`, and sampling them with
     // the tiling uv painted rectangles across every Multi wall on Takistan (walls_l3.rvmat).
-    let vbuf_attrs = [
+    let mut vbuf_attrs = vec![
         wgpu::VertexAttribute {
             format: wgpu::VertexFormat::Float32x3,
             offset: 0,
@@ -4357,6 +4357,13 @@ pub fn build_gpu_pipeline(
             shader_location: 7,
         },
     ];
+    // Existing backing stride; no extra attributes/varyings in the default shader.
+    if crate::shaders::shader_defs().contains_key("NATIVE_PBR_TANGENTS") {
+        vbuf_attrs.extend([
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 36, shader_location: 6 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 48, shader_location: 8 },
+        ]);
+    }
     let vbuf_layout = wgpu::VertexBufferLayout {
         array_stride: super::BAKED_VERT_SIZE,
         step_mode: wgpu::VertexStepMode::Vertex,

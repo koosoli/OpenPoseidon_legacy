@@ -23,6 +23,7 @@
 #include <Poseidon/Asset/Formats/Enfusion/XobCollision.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobCollisionGeometry.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobModel.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/XobTangentFrame.hpp>
 #include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODWriter.hpp>
 
@@ -143,6 +144,7 @@ struct TextureOptions
 struct ConvertOptions
 {
     float resolution = 1.0f;  //!< runtime detail value at which the first coarser LOD becomes active
+    bool preserveTangentFrame = false; // optional UV0 render-frame import sidecar
     bool secondUv = false;    //!< emit both #UVSet# blocks when a part declares two sets
     bool flipWinding = false; //!< see the winding note at the top of this file
     //! Fact 6: negate the written normal AND swap corners 0/1, together. Half of this
@@ -443,6 +445,9 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                      [&](size_t a, size_t b) { return header.lods[a].threshold > header.lods[b].threshold; });
 
     out.lods.clear();
+    out.tangentFrames.clear();
+    bool preserveTangentFrame = options.preserveTangentFrame;
+    size_t tangentCornersBudget = (32u * 1024u * 1024u) / sizeof(Fmt::MLOD::FaceTangentFrames);
     for (size_t rank = 0; rank < lodOrder.size(); ++rank)
     {
         const size_t lodIndex = lodOrder[rank];
@@ -460,6 +465,18 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
         }
 
         Fmt::MLOD::WriteLod writeLod;
+        Fmt::MLOD::LodTangentFrames tangentFrames;
+        if (preserveTangentFrame)
+        {
+            size_t faces = 0;
+            for (const auto& part : lod.parts) faces += part.indices.size() / 3;
+            if (faces > tangentCornersBudget)
+            {
+                preserveTangentFrame = false;
+                out.tangentFrames.clear(); // bounded decline; all LODs fall back together
+            }
+            else { tangentFrames.reserve(faces); tangentCornersBudget -= faces; }
+        }
         // Fact 7. On every LOD, not just LOD0: `Model.cpp:67` reads lodLevels[0] but
         // `LODShape::PropertyValue` consults the GEOMETRY LOD first, and a converted
         // model has no geometry LOD today but may grow one.
@@ -742,6 +759,15 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                         face.vertices[c].v1 = (renderUv && part.renderUvSets.size() > 1) ? part.renderUvSets[1][rcorner[c]].v : part.uvSets[1][corner[c]].v;
                     }
                 }
+                if (preserveTangentFrame)
+                {
+                    Fmt::MLOD::FaceTangentFrames frames{};
+                    // Only the ordinary two-direction packing is supported. Experimental
+                    // render-UV word interpretations and skinning must not qualify.
+                    for (int c = 0; c < 3; ++c)
+                        frames[c] = XobCornerTangentFrame(part, rcorner[c], corner[c], XobRenderUvWord());
+                    tangentFrames.push_back(frames);
+                }
                 writeLod.faces.push_back(std::move(face));
             }
         }
@@ -821,6 +847,7 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                 writeLod.resolution = 899.0f;
         }
         out.lods.push_back(std::move(writeLod));
+        if (preserveTangentFrame) out.tangentFrames.push_back(std::move(tangentFrames));
     }
 
     stats.materials = materialPaths.size();

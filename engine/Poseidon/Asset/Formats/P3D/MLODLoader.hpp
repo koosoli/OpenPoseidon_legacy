@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/World/Model/Model.hpp>
+#include <Poseidon/Asset/Formats/P3D/MLODTangentFrames.hpp>
 #include <Poseidon/World/Model/ModelComputation.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODStructures.hpp>
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
@@ -44,7 +45,8 @@ class MLODLoader
         return loadFromBuffer(buffer.data(), static_cast<int>(buffer.size()), filePath);
     }
 
-    static Model loadFromBuffer(const char* data, int size, const std::string& sourcePath)
+    static Model loadFromBuffer(const char* data, int size, const std::string& sourcePath,
+                                const MLOD::TangentFrames* frames = nullptr)
     {
         QIStream     stream(const_cast<char*>(data), size);
         BinaryReader reader(stream);
@@ -57,7 +59,7 @@ class MLODLoader
         model.sourceVersion = header.versionMajor * 10 + header.versionMinor;
 
         for (uint32_t lodIdx = 0; lodIdx < header.lodCount; ++lodIdx)
-            model.lodLevels.push_back(loadLOD(reader, lodIdx));
+            model.lodLevels.push_back(loadLOD(reader, lodIdx, frames && lodIdx < frames->size() ? &(*frames)[lodIdx] : nullptr));
 
         return model;
     }
@@ -75,7 +77,7 @@ class MLODLoader
     // is only knowable by parsing it, which is AST-011B. Guessing a length would
     // resynchronise on arbitrary bytes and yield a model that loads and is wrong,
     // which is worse than one that refuses.
-    static LODLevel loadLOD(BinaryReader& reader, uint32_t lodIndex)
+    static LODLevel loadLOD(BinaryReader& reader, uint32_t lodIndex, const MLOD::LodTangentFrames* frames)
     {
         const MLOD::LodSignature signature = MLOD::peekLodSignature(reader);
         switch (signature)
@@ -83,7 +85,7 @@ class MLODLoader
             case MLOD::LodSignature::SP3X:
                 return loadSP3XLOD(reader);
             case MLOD::LodSignature::P3DM:
-                return loadP3DMLOD(reader);
+                return loadP3DMLOD(reader, frames);
             default:
                 throw MLOD::UnsupportedLodFormat(
                     signature, lodIndex,
@@ -136,7 +138,7 @@ class MLODLoader
     // encodings differ in how the tables are stored, not in what they mean, so a
     // second converter would be a second place for the winding and vertex-merge
     // rules to drift apart.
-    static LODLevel loadP3DMLOD(BinaryReader& reader)
+    static LODLevel loadP3DMLOD(BinaryReader& reader, const MLOD::LodTangentFrames* frames)
     {
         LODLevel lod;
         auto     header = MLOD::readP3DMHeader(reader);
@@ -154,7 +156,16 @@ class MLODLoader
         auto     taggData    = MLOD::readP3DMTAGGSection(reader, header.nPos, header.nFace, totalFaceVertices);
 
         convertUVChannels(lod, faceTable, taggData);
-        auto vertexToPoint = convertGeometry(lod.mesh, vertexTable, normalTable, faceTable, taggData);
+        // A partial sidecar must not change vertex merging in the fallback path.
+        if (frames)
+        {
+            bool complete = frames->size() == faceTable.faces.size();
+            for (size_t f = 0; complete && f < faceTable.faces.size(); ++f)
+                for (int c = 0; c < faceTable.faces[f].n; ++c)
+                    complete = complete && c < 4 && MLOD::ValidTangentFrame((*frames)[f][c]);
+            if (!complete) frames = nullptr;
+        }
+        auto vertexToPoint = convertGeometry(lod.mesh, vertexTable, normalTable, faceTable, taggData, frames);
         convertMaterials(lod.mesh, faceTable);
         convertSelections(lod.mesh, taggData.namedSelections, vertexTable, faceTable, vertexToPoint);
         convertProperties(lod.mesh, taggData.namedProperties);
@@ -266,7 +277,8 @@ class MLODLoader
                                                  const MLOD::VertexTable& vertexTable,
                                                  const MLOD::NormalTable& normalTable,
                                                  const MLOD::FaceTable&   faceTable,
-                                                 const MLOD::TAGGData&    taggData)
+                                                 const MLOD::TAGGData&    taggData,
+                                                 const MLOD::LodTangentFrames* frames = nullptr)
     {
         if (faceTable.faces.empty() && !vertexTable.points.empty())
         {
@@ -314,6 +326,10 @@ class MLODLoader
                 return false;
             if (std::abs(a.uv1.v - b.uv1.v) > precUV)
                 return false;
+            if (a.hasTangentFrame != b.hasTangentFrame) return false;
+            if (a.hasTangentFrame &&
+                (a.tangent.x != b.tangent.x || a.tangent.y != b.tangent.y || a.tangent.z != b.tangent.z ||
+                 a.binormal.x != b.binormal.x || a.binormal.y != b.binormal.y || a.binormal.z != b.binormal.z)) return false;
             return true;
         };
 
@@ -356,6 +372,16 @@ class MLODLoader
                             v.uv1 = Vector2((*uv1Source)[at], (*uv1Source)[at + 1]);
                     }
 
+                    if (frames && frames->size() == faceTable.faces.size())
+                    {
+                        const auto& frame = (*frames)[faceIndex][i];
+                        if (MLOD::ValidTangentFrame(frame))
+                        {
+                            v.tangent = frame.tangent;
+                            v.binormal = frame.binormal;
+                            v.hasTangentFrame = true;
+                        }
+                    }
                     uint32_t foundIndex = UINT32_MAX;
                     if (pointIndex >= 0 && pointIndex < static_cast<int32_t>(pointToVertices.size()))
                     {
@@ -412,6 +438,16 @@ class MLODLoader
                             v.uv1 = Vector2((*uv1Source)[at], (*uv1Source)[at + 1]);
                     }
 
+                    if (frames && frames->size() == faceTable.faces.size())
+                    {
+                        const auto& frame = (*frames)[faceIndex][i];
+                        if (MLOD::ValidTangentFrame(frame))
+                        {
+                            v.tangent = frame.tangent;
+                            v.binormal = frame.binormal;
+                            v.hasTangentFrame = true;
+                        }
+                    }
                     uint32_t foundIndex = UINT32_MAX;
                     if (pointIndex >= 0 && pointIndex < static_cast<int32_t>(pointToVertices.size()))
                     {

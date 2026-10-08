@@ -81,13 +81,15 @@ fn native_multi_ordered_actual_gpu_resolves_overlapping_masks_and_detail_remap()
 
 #[test]
 fn native_pbr_basic_scaled_preview_and_legacy_shaders_compose() {
-    for preview in [false, true] {
+    for (preview,tangents) in [(false,false), (true,false), (true,true)] {
         let mut defs = crate::shaders::shader_defs();
         if preview {
             defs.insert("NATIVE_PBR_PREVIEW".to_owned(), ShaderDefValue::Bool(true));
         } else {
             defs.remove("NATIVE_PBR_PREVIEW");
         }
+        if tangents { defs.insert("NATIVE_PBR_TANGENTS".to_owned(),ShaderDefValue::Bool(true)); }
+        else { defs.remove("NATIVE_PBR_TANGENTS"); }
         for (source, path) in [
             (PRODUCTION, "gfx3d/gpu_driven.wgsl"),
             (
@@ -107,6 +109,19 @@ fn native_pbr_basic_scaled_preview_and_legacy_shaders_compose() {
                 .unwrap_or_else(|e| {
                     panic!("{path} preview={preview}: {}", e.emit_to_string(&composer))
                 });
+            if path == "gfx3d/gpu_driven.wgsl" {
+                let output = module.types.iter().find_map(|(_,ty)| {
+                    if ty.name.as_deref()==Some("VsOut") {
+                        if let naga::TypeInner::Struct {members,..}=&ty.inner {return Some(members);}
+                    }
+                    None
+                }).unwrap();
+                let locations:Vec<_>=output.iter().filter_map(|m| match &m.binding {
+                    Some(naga::Binding::Location {location,..})=>Some(*location),_=>None
+                }).collect();
+                assert!(locations.len()<=16 && locations.iter().all(|&v|v<16));
+                assert_eq!(output.iter().any(|m|m.name.as_deref()==Some("authored_tangent")),tangents);
+            }
             if path != "gfx3d/shader3d.wgsl" {
                 let layout = module.types.iter().find_map(|(_, ty)| {
                     if let naga::TypeInner::Struct { members, span } = &ty.inner {
@@ -225,17 +240,20 @@ fn native_multi_mask_actual_gpu_preserves_off_identity_zero_and_saturates_each_r
     }
 }
 
-fn gpu_channels_result(module: naga::Module) -> Vec<f32> {
+fn gpu_channels_result(module: naga::Module) -> Vec<f32> { gpu_channels_result_count(module,5) }
+
+fn gpu_channels_result_count(module: naga::Module, count: u32) -> Vec<f32> {
+    let bytes = count as u64 * 16;
     let (device, queue) =
         super::cull::tests::headless().expect("native PBR scale proof requires GPU");
     let output = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("native PBR scaled channels"),
-        contents: &[0u8; 80],
+        contents: &vec![0u8; bytes as usize],
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
     });
     let staging = device.create_buffer(&wgpu::BufferDescriptor {
         label: None,
-        size: 80,
+        size: bytes,
         mapped_at_creation: false,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
     });
@@ -264,9 +282,9 @@ fn gpu_channels_result(module: naga::Module) -> Vec<f32> {
         let mut pass = encoder.begin_compute_pass(&Default::default());
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bind, &[]);
-        pass.dispatch_workgroups(5, 1, 1);
+        pass.dispatch_workgroups(count, 1, 1);
     }
-    encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, 80);
+    encoder.copy_buffer_to_buffer(&output, 0, &staging, 0, bytes);
     queue.submit([encoder.finish()]);
     let (tx, rx) = std::sync::mpsc::channel();
     staging.slice(..).map_async(wgpu::MapMode::Read, move |r| {
@@ -279,4 +297,55 @@ fn gpu_channels_result(module: naga::Module) -> Vec<f32> {
     drop(data);
     staging.unmap();
     actual
+}
+
+fn authored_tangent_probe() -> naga::Module {
+    let mut source=String::new();
+    for name in ["native_pbr_valid_axis", "native_pbr_authored_frame", "native_pbr_authored_composed_normal"] {
+        let start=PRODUCTION.find(&format!("fn {name}(")).unwrap();
+        let end=start+PRODUCTION[start..].find("\n}").unwrap()+2;
+        source.push_str(&PRODUCTION[start..end]); source.push('\n');
+    }
+    source.push_str(r#"
+@group(0) @binding(0) var<storage,read_write> output:array<vec4<f32>>;
+@compute @workgroup_size(1) fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>) {
+    var m=mat3x3<f32>(vec3<f32>(2.0,0.0,0.0),vec3<f32>(0.0,1.0,0.0),vec3<f32>(0.0,0.0,0.5));
+    var t=vec3<f32>(1.0,0.0,1.0);
+    var b=vec3<f32>(0.0,1.0,0.0);
+    if(id.x==1u) {m[0].x=-2.0;}
+    if(id.x==2u) {m=mat3x3<f32>(vec3<f32>(1.0,0.0,0.0),vec3<f32>(0.0,1.0,0.0),vec3<f32>(0.0,0.0,1.0));b=vec3<f32>(0.1,1.0,0.1);}
+    if(id.x==3u) {m[2]=vec3<f32>(0.0);}
+    let frame=native_pbr_authored_frame(m,t,b,vec3<f32>(0.0,0.0,1.0));
+    var value=frame[0];
+    if(id.x==2u) {value=frame[1];}
+    if(id.x==4u) {value=native_pbr_authored_composed_normal(vec3<f32>(0.0,0.0,0.8),vec3<f32>(1.0,0.0,0.0),vec3<f32>(0.0,1.0,0.0),vec3<f32>(0.4,0.0,0.9165151),vec3<f32>(0.3,0.2,0.9327379));}
+    if(id.x==5u) {value=native_pbr_authored_composed_normal(vec3<f32>(0.0,0.0,-0.8),vec3<f32>(1.0,0.0,0.0),vec3<f32>(0.0,1.0,0.0),vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.3,0.2,0.9327379));}
+    output[id.x]=vec4<f32>(value,1.0);
+}"#);
+    let module=naga::front::wgsl::parse_str(&source).unwrap();
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(),naga::valid::Capabilities::all()).validate(&module).unwrap();
+    module
+}
+#[test]
+fn authored_tangent_production_helpers_validate() {let _=authored_tangent_probe();}
+
+#[test]
+fn authored_tangent_actual_gpu_preserves_nonuniform_mirrored_and_interpolated_axes() {
+    let actual=gpu_channels_result_count(authored_tangent_probe(),6);
+    let x=2.0/4.25_f32.sqrt(); let z=0.5/4.25_f32.sqrt();
+    let b=0.1/1.02_f32.sqrt(); let by=1.0/1.02_f32.sqrt();
+    // Independent f64 quaternion oracle: interpolated N is deliberately not unit.
+    let g=[0.4_f64,0.0,0.8*0.9165151];
+    let length=(g[0]*g[0]+g[2]*g[2]).sqrt();let g=[g[0]/length,0.0,g[2]/length];
+    let d=1.0+0.8*g[2]; let scale=1.0/(2.0*d).sqrt();
+    let q=0.8*g[0]*scale;let w=d*scale;
+    let v=[0.3_f64,0.2,0.8*0.9327379];
+    let a=w*w-q*q;
+    let rotated=[a*v[0]+2.0*w*q*v[2],(a+2.0*q*q)*v[1],a*v[2]-2.0*w*q*v[0]];
+    let len=rotated.iter().map(|v|v*v).sum::<f64>().sqrt();
+    let back_z=-0.8*0.9327379_f32;let back_len=(0.3_f32.powi(2)+0.2_f32.powi(2)+back_z*back_z).sqrt();
+    let expected=[x,0.0,z,1.0,-x,0.0,z,1.0,b,by,b,1.0,0.0,0.0,0.0,1.0,
+        (rotated[0]/len) as f32,(rotated[1]/len) as f32,(rotated[2]/len) as f32,1.0,
+        0.3/back_len,0.2/back_len,back_z/back_len,1.0];
+    for (actual,expected) in actual.iter().zip(expected) {assert!((actual-expected).abs()<2e-5,"{actual} != {expected}");}
 }

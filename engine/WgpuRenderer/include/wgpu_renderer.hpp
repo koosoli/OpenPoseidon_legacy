@@ -457,7 +457,9 @@ enum WgrModelSectionFlags : uint32_t
     /* Preview-only hardware sRGB BCR views; original texture slots stay linear. */
     WGR_MODEL_SECTION_NATIVE_PBR_SRGB = 256u,
     /* Separate ordered-detail/global normal preview; requires supported source metadata. */
-    WGR_MODEL_SECTION_NATIVE_PBR_NORMALS = 512u
+    WGR_MODEL_SECTION_NATIVE_PBR_NORMALS = 512u,
+    /* Optional validated authored UV0 frame; only with the ordered normal preview. */
+    WGR_MODEL_SECTION_NATIVE_PBR_TANGENTS = 1024u
 };
 
 /* Per-section shading, parallel to a model's sections (one per section). The RAW

@@ -15504,6 +15504,17 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                                                               detail[2].value + 0.001f, detail[3].value + 0.001f};
                                 mat.normal_power = parameters.globalPower;
                                 sec.flags |= WGR_MODEL_SECTION_NATIVE_PBR_NORMALS;
+                                static const bool tangentPreview = [] {
+                                    const char* value = std::getenv("WGR_REFORGER_TANGENT_PREVIEW");
+                                    return value && std::strcmp(value, "1") == 0;
+                                }();
+                                const bool authoredBasis = tangentPreview && s->HasTangentFrame() &&
+                                    s->FindProperty("wgrnativeframe") >= 0 &&
+                                    std::strcmp(s->PropertyValue("wgrnativeframe").Data(), "1") == 0;
+                                if (authoredBasis) sec.flags |= WGR_MODEL_SECTION_NATIVE_PBR_TANGENTS;
+                                static std::unordered_set<std::string> reportedTangents;
+                                if (tangentPreview && reportedTangents.size() < 32 && reportedTangents.insert(path).second)
+                                    LOG_INFO(Graphics, "Wgpu authored UV0 tangent preview: material={} admission={} producer=1", path, authoredBasis);
                             }
                             static std::unordered_set<std::string> reportedNormals;
                             if (reportedNormals.size() < 32 && reportedNormals.insert(path).second)

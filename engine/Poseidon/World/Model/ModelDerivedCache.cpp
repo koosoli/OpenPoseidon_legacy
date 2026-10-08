@@ -6,6 +6,7 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/World/Model/ModelBlob.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/XobTangentFrame.hpp>
 
 #include <cstdlib>
 #include <cstring>
@@ -137,6 +138,10 @@ Asset::Cache::DerivedAssetKey ModelDerivedCache::MakeKey(const std::string& virt
     key.AddInput("model", Asset::VirtualPath::Parse(virtualPath), contentSha);
     key.AddOption("modelProducer", std::to_string(kModelProducerVersion));
     key.AddOption("blobFormat", std::to_string(ModelBlob::kFormatVersion));
+    // Opt-in imports retain a different, versioned corner basis. Old blobs lack
+    // producer provenance and must not be reused for this configuration.
+    if (Asset::Formats::Enfusion::XobAuthoredTangentPreviewEnabled())
+        key.AddOption("authoredUv0TangentProducer", "1");
     return key;
 }
 

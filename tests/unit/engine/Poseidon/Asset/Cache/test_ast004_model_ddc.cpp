@@ -712,3 +712,29 @@ TEST_CASE("Model DDC cold vs warm on a real model corpus", "[.][ast004bench]")
     std::fflush(stdout);
     SUCCEED();
 }
+
+TEST_CASE("Authored tangent option invalidates earlier model cache keys", "[ast004][tangents]")
+{
+    struct EnvRestore {
+        const char* key; bool present; std::string value;
+        EnvRestore(const char* k):key(k) { const char* p=std::getenv(key);present=p!=nullptr;value=p?p:""; }
+        void set(const char* v) {
+#ifdef _WIN32
+            _putenv_s(key,v?v:"");
+#else
+            if(v) setenv(key,v,1); else unsetenv(key);
+#endif
+        }
+        ~EnvRestore() {set(present?value.c_str():nullptr);}
+    } tangent("WGR_REFORGER_TANGENT_PREVIEW"), normal("WGR_REFORGER_NORMAL_PREVIEW"),
+      order("WGR_REFORGER_LAYER_ORDER_PREVIEW"), pbr("WGR_REFORGER_PBR_PREVIEW");
+    normal.set("1");order.set("1");pbr.set("1");tangent.set(nullptr);
+    const auto original=ModelDerivedCache::MakeKey("owned.xob",std::string(64,'a')).Compute();
+    tangent.set("1");
+    const auto authored=ModelDerivedCache::MakeKey("owned.xob",std::string(64,'a')).Compute();
+    REQUIRE(authored!=original);
+    tangent.set("0");
+    REQUIRE(ModelDerivedCache::MakeKey("owned.xob",std::string(64,'a')).Compute()==original);
+    tangent.set("1");pbr.set("0");
+    REQUIRE(ModelDerivedCache::MakeKey("owned.xob",std::string(64,'a')).Compute()==original);
+}

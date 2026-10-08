@@ -227,6 +227,38 @@ fn native_pbr_composed_normal(geo: vec3<f32>, tangent: vec3<f32>, bitangent: vec
     return geo;
 }
 
+#ifdef NATIVE_PBR_TANGENTS
+const SECTION_NATIVE_PBR_TANGENTS: u32 = 1024u;
+fn native_pbr_valid_axis(v: vec3<f32>) -> bool {
+    return dot(v,v) > 1e-12 && all(abs(v) < vec3<f32>(1e10));
+}
+fn native_pbr_authored_frame(m: mat3x3<f32>, t: vec3<f32>, b: vec3<f32>, n: vec3<f32>) -> mat3x3<f32> {
+    let wt = m*t;
+    let wb = m*b;
+    let wn = m*n;
+    if (abs(dot(m[0], cross(m[1],m[2]))) > 1e-12 && native_pbr_valid_axis(wt) &&
+        native_pbr_valid_axis(wb) && native_pbr_valid_axis(wn)) {
+        return mat3x3<f32>(normalize(wt), normalize(wb), normalize(wn));
+    }
+    return mat3x3<f32>(vec3<f32>(0.0),vec3<f32>(0.0),vec3<f32>(0.0));
+}
+// Authored axes are normalized at vertices, then interpolated independently.
+// Keep that frame shape, including mirrored B and the interpolated N length.
+fn native_pbr_authored_composed_normal(geo: vec3<f32>, t: vec3<f32>, b: vec3<f32>,
+                                       global_ts: vec3<f32>, detail_ts: vec3<f32>) -> vec3<f32> {
+    let global_world = normalize(t * global_ts.x + b * global_ts.y + geo * global_ts.z);
+    let detail_world = t * detail_ts.x + b * detail_ts.y + geo * detail_ts.z;
+    let d = max(1.0 + dot(geo, global_world), 1e-5);
+    let scale = inverseSqrt(2.0 * d);
+    let q = cross(geo, global_world) * scale;
+    let w = d * scale;
+    let rotated = (w*w - dot(q,q)) * detail_world + 2.0 * q * dot(q,detail_world) +
+                  2.0 * w * cross(q,detail_world);
+    if (native_pbr_valid_axis(rotated)) { return normalize(rotated); }
+    return normalize(geo);
+}
+#endif
+
 // Hardware sRGB views decode before filtering. Keep their samples linear for
 // tint and layer mixing; encode once only at the existing shade() boundary.
 fn native_pbr_encode_albedo(c: vec3<f32>) -> vec3<f32> {
@@ -542,9 +574,17 @@ struct VsOut {
     // Crown self-occlusion factor from the vertex shader (Enfusion GeometryAO volume,
     // 1 = open sky). Smooth-interpolated like a baked vertex colour, which is what it
     // replaces. 1.0 for every section whose material names no volume.
-    @location(12) crown_ao: f32,
     @location(13) @interpolate(flat) surface_receivers: u32,
-    @location(14) tree_snow: vec2<f32>, // authored crown height, cached actual world roof proof
+#ifdef NATIVE_PBR_TANGENTS
+    // Pack the existing three scalars only in this variant to stay within
+    // the device's16 inter-stage-variable baseline. Values are unchanged.
+    @location(12) crown_tree_snow: vec3<f32>,
+    @location(14) authored_tangent: vec3<f32>,
+    @location(15) authored_binormal: vec3<f32>,
+#else
+    @location(12) crown_ao: f32,
+    @location(14) tree_snow: vec2<f32>,
+#endif
 };
 
 // WgrInstance::flags bits: vegetation canopy — bend cutout-section normals toward a radial crown
@@ -580,6 +620,10 @@ fn vs_gpu(
     @location(2) uv: vec2<f32>,
     @location(5) conform_sel: u32, // per-vertex conform selector (mode 2): 0 rigid / 1 keep / 2 on
     @location(7) uv1: vec2<f32>,   // second UV set (tex1), see VsOut
+#ifdef NATIVE_PBR_TANGENTS
+    @location(6) authored_tangent: vec3<f32>,
+    @location(8) authored_binormal: vec3<f32>,
+#endif
 ) -> VsOut {
     let rec = records[rec_slot];
     let inst = instances[rec.instance];
@@ -745,6 +789,21 @@ fn vs_gpu(
     out.uv1 = uv1;
     out.world_pos = world_pos;
     out.normal = normal_ws;
+#ifdef NATIVE_PBR_TANGENTS
+    out.authored_tangent = vec3<f32>(0.0);
+    out.authored_binormal = vec3<f32>(0.0);
+    let tangent_flags = section_materials[rec.section].flags;
+    let tangent_admitted = (tangent_flags & (SECTION_NATIVE_PBR_NORMALS | SECTION_NATIVE_PBR_TANGENTS)) ==
+        (SECTION_NATIVE_PBR_NORMALS | SECTION_NATIVE_PBR_TANGENTS) && mode == 0.0 && canopy == 0u;
+    if (tangent_admitted) {
+        let basis = native_pbr_authored_frame(rot, authored_tangent, authored_binormal, norm);
+        if (native_pbr_valid_axis(basis[2])) {
+            out.authored_tangent = basis[0];
+            out.authored_binormal = basis[1];
+            out.normal = basis[2];
+        }
+    }
+#endif
     out.fog = fog_factor(length(world_pos));
     out.section = rec.section;
     // Vegetation = any canopy flag (bush/tree/forest cover the whole vegetation MapType set);
@@ -757,16 +816,21 @@ fn vs_gpu(
     // Existing flat lane: bit0 snow, bit1 grounded rigid paving. No extra varyings.
     out.surface_receivers = select(0u, (inst.flags >> 7u) & 3u, canopy == 0u && snow_conform);
     let tree_proof = select(0.0, inst.conform2.w, canopy == INST_CANOPY_TREE);
-    out.tree_snow = vec2<f32>(tree_snow_height(pos.y, inst.conform0.y, inst.conform0.z, tree_proof), inst.conform1.x);
+    var tree_snow_values = vec2<f32>(tree_snow_height(pos.y, inst.conform0.y, inst.conform0.z, tree_proof), inst.conform1.x);
     // Separate exact-stock owner proof, carried in existing lanes. Forest mode1
     // plane coefficients and per-vertex component selectors are never repurposed.
     if (canopy == INST_CANOPY_FOREST && inst.conform2.w == 2.0 && (mode == 0.0 || mode == 1.0)) {
-        out.tree_snow = vec2<f32>(0.0, -2.0);
+        tree_snow_values = vec2<f32>(0.0, -2.0);
     }
     // Undeformed model-space position: the baked volume is a property of the AUTHORED model, so
     // the lookup must use the authored vertex, not a terrain-conformed one.
     out.model_pos = pos;
+#ifdef NATIVE_PBR_TANGENTS
+    out.crown_tree_snow = vec3<f32>(crown_ao, tree_snow_values);
+#else
     out.crown_ao = crown_ao;
+    out.tree_snow = tree_snow_values;
+#endif
     out.model_id = inst.model;
     out.model_rot0 = world[0].xyz;
     out.model_rot1 = world[1].xyz;
@@ -820,15 +884,29 @@ fn retained_ground_receiver(in: VsOut) -> bool {
     return rigid_ground_fragment(in.world_pos + frame.cam_pos.xyz, in.normal, in.world_pos);
 }
 
+fn retained_tree_snow_values(in: VsOut) -> vec2<f32> {
+#ifdef NATIVE_PBR_TANGENTS
+    return in.crown_tree_snow.yz;
+#else
+    return in.tree_snow;
+#endif
+}
+fn retained_crown_ao(in: VsOut) -> f32 {
+#ifdef NATIVE_PBR_TANGENTS
+    return in.crown_tree_snow.x;
+#else
+    return in.crown_ao;
+#endif
+}
 fn retained_tree_snow_cover(in: VsOut) -> f32 {
     let sm = section_materials[in.section];
     if (sm.alpha_ref <= 0.0 || linear <= 0.5 ||
         (sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER)) != 0u) { return 0.0; }
-    if (in.tree_snow.y == -2.0) {
+    if (retained_tree_snow_values(in).y == -2.0) {
         return forest_snow_coverage(in.world_pos, forest_snow_sample_uv(in.uv, sm.sampler_idx),
             (sm.flags >> 16u) & 255u);
     }
-    return tree_snow_coverage(in.world_pos, in.tree_snow.x, in.tree_snow.y);
+    return tree_snow_coverage(in.world_pos, retained_tree_snow_values(in).x, retained_tree_snow_values(in).y);
 }
 
 // Raw baked sky is only a conservative FAR fallback: diffuse light through a side window
@@ -877,7 +955,11 @@ fn native_pbr_ordered_weights(mask: vec3<f32>) -> vec4<f32> {
                      mask.y * remaining.z, mask.z);
 }
 
-fn fs_gpu_body(in: VsOut) -> vec4<f32> {
+fn fs_gpu_body(in: VsOut
+#ifdef NATIVE_PBR_TANGENTS
+    , front: bool
+#endif
+) -> vec4<f32> {
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
     census(0u); // every rasterised colour fragment; word 1 (cutout survivors) is counted after the alpha test
@@ -934,7 +1016,7 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // Crown self-occlusion: the vertex shader's GeometryAO factor, applied to the
     // albedo like a baked vertex colour (which is what it replaces). 1.0 for every
     // section whose material names no volume, so this is a no-op everywhere else.
-    base = vec4<f32>(base.rgb * in.crown_ao, base.a);
+    base = vec4<f32>(base.rgb * retained_crown_ao(in), base.a);
     // The final per-layer mask weights, hoisted out of the block below so the NORMAL blend
     // (MAT-048, further down) uses exactly the weights the colour blend used — one mask
     // sample, one set of weights, colours and normals agreeing per fragment by construction.
@@ -1131,7 +1213,7 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
 #ifdef FOREST_SNOW_COVER_DEBUG
     // Owner proof, ordinary cutout material and actual authored UV admission
     // must all survive. Alpha/A2C/discard above and the prepass remain intact.
-    if (in.tree_snow.y == -2.0 && sm.alpha_ref > 0.0 && linear > 0.5 &&
+    if (retained_tree_snow_values(in).y == -2.0 && sm.alpha_ref > 0.0 && linear > 0.5 &&
         (sm.flags & (SECTION_REFLECTIVE | SECTION_NIGHT_EMITTER)) == 0u) {
         let coat_debug = forest_snow_diagnostic_colour(
             forest_snow_sample_uv(in.uv, sm.sampler_idx), (sm.flags >> 16u) & 255u,
@@ -1139,7 +1221,7 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
         if (coat_debug.w > 0.5) { return vec4<f32>(coat_debug.rgb, out_a); }
     }
 #endif
-    // Stage1 normal mapping. The retained mesh carries no authored tangent stream, so the
+    // Stage1 normal mapping. The default retained path uses a derivative frame, so the
     // frame comes from the interpolated UV0 / world-position derivatives -- the same
     // recovery the per-draw path uses, and the reason this needs no vertex-format change.
     // Decode matches it too: NOHQ stores X in A and Y in G, Z is reconstructed.
@@ -1157,6 +1239,11 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     let preview_normals = preview_multi && sm.native_pbr_scales.w > 1.5 &&
         (sm.flags & SECTION_NATIVE_PBR_NORMALS) != 0u;
     var global_normal_ts = vec3<f32>(0.0, 0.0, 1.0);
+#ifdef NATIVE_PBR_TANGENTS
+    let use_authored_normal = preview_normals && (sm.flags & SECTION_NATIVE_PBR_TANGENTS) != 0u &&
+        native_pbr_valid_axis(in.authored_tangent) && native_pbr_valid_axis(in.authored_binormal) &&
+        native_pbr_valid_axis(in.normal);
+#endif
 #endif
     // MAT-048. Multi blends its NORMALS across the same four layers as its colours, with the
     // same mask weights. Until this, only layer 0's normal was ever bound, so on a wall whose
@@ -1305,8 +1392,15 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
             let bitangent = bitangent_raw * inv_scale;
 #ifdef NATIVE_PBR_PREVIEW
             if (preview_normals) {
+#ifdef NATIVE_PBR_TANGENTS
+                if (!use_authored_normal) {
                 shading_normal = native_pbr_composed_normal(geometric_normal, tangent, bitangent,
                     global_normal_ts, normal_ts);
+                }
+#else
+                shading_normal = native_pbr_composed_normal(geometric_normal, tangent, bitangent,
+                    global_normal_ts, normal_ts);
+#endif
             } else {
                 shading_normal = normalize(tangent * normal_ts.x + bitangent * normal_ts.y + geometric_normal * normal_ts.z);
             }
@@ -1314,7 +1408,15 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
             shading_normal = normalize(tangent * normal_ts.x + bitangent * normal_ts.y + geometric_normal * normal_ts.z);
 #endif
         }
+#ifdef NATIVE_PBR_TANGENTS
+    if (use_authored_normal) {
+        let geo = select(-in.normal, in.normal, front);
+        shading_normal = native_pbr_authored_composed_normal(geo, in.authored_tangent, in.authored_binormal,
+                                                           global_normal_ts, normal_ts);
     }
+#endif
+    }
+
     // DZ-005 -- reflective (CalmWater) sections OVERRIDE that tangent-space result with a
     // world-space sample of the same normal map. See water_ripple_normal: the mesh uv on these
     // surfaces is either identically zero (ponds) or 360x anisotropic (rivers), so the frame
@@ -1470,8 +1572,16 @@ fn prepass_clipped(world_pos: vec3<f32>) -> bool {
 // section_materials (the GPU-driven path is per-section, not per-instance). Cutout foliage
 // applies the SAME discard as fs_gpu so prepass coverage matches the colour pass.
 @fragment
-fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
-    return fs_gpu_body(in);
+fn fs_gpu(in: VsOut
+#ifdef NATIVE_PBR_TANGENTS
+    , @builtin(front_facing) front: bool
+#endif
+) -> @location(0) vec4<f32> {
+    return fs_gpu_body(in
+#ifdef NATIVE_PBR_TANGENTS
+        , front
+#endif
+    );
 }
 
 #ifdef EARLY_DEPTH
@@ -1484,8 +1594,16 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
 // EARLY_DEPTH define); WGR_OBJECT_EARLY_Z selects it (cull.rs / mod.rs).
 @fragment
 @early_depth_test(force)
-fn fs_gpu_early(in: VsOut) -> @location(0) vec4<f32> {
-    return fs_gpu_body(in);
+fn fs_gpu_early(in: VsOut
+#ifdef NATIVE_PBR_TANGENTS
+    , @builtin(front_facing) front: bool
+#endif
+) -> @location(0) vec4<f32> {
+    return fs_gpu_body(in
+#ifdef NATIVE_PBR_TANGENTS
+        , front
+#endif
+    );
 }
 #endif
 
