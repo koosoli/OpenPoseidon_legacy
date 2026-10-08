@@ -185,6 +185,32 @@ def world_data(config_texts, key, dx, dz):
     return None, []
 
 
+def replace_objects(config_texts):
+    """Every source world's ReplaceObjects rules (DefaultWorld's, which Everon / Kolgujev / Desert Island use,
+    plus Malden's and Nogova's own), one per replaced model. The engine swaps a forest block for its walk-through
+    version by them (Geography.cpp); Fusion inherited only DefaultWorld's, so Malden's and Nogova's forests -- other
+    models -- would have stayed solid to infantry and AI."""
+    rules, seen = [], set()
+    for text in config_texts:
+        worlds = class_block(text, 'CfgWorlds')
+        if not worlds:
+            continue
+        for world in ['DefaultWorld'] + list(WORLD_CLASS.values()):
+            body = class_block(worlds, world)
+            block = class_block(body, 'ReplaceObjects') if body else None
+            if not block:
+                continue
+            for m in _CLASS.finditer(block):
+                if block.count('{', 0, m.start()) != block.count('}', 0, m.start()):
+                    continue
+                rule = block[m.end():_close(block, m.end()) - 1]
+                model = (scalar_entry(rule, 'replace') or '').lower()
+                if model and model not in seen:
+                    seen.add(model)
+                    rules.append('class %s_%s {%s};' % (world, m.group(1), ' '.join(rule.split())))
+    return rules
+
+
 def num(v):
     return ('%.3f' % v).rstrip('0').rstrip('.')
 
@@ -290,6 +316,9 @@ def build(source, output, config_texts=()):
                % (4772 + ISLANDS[0][2] * CELL, 10923 + ISLANDS[0][3] * CELL))
     secondary = ''.join('class %s {%s};' % (label.replace(' ', ''), airport_cfg(a))
                         for _, label, a in airports if a is not main)
+    replace = replace_objects(config_texts)
+    manifest['replace_objects'] = len(replace)
+    replace_cfg = (' class ReplaceObjects {%s};\n' % ''.join(replace)) if replace else ''
     config = ('class CfgPatches {class FusionOFP {units[]={}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={"Noe"};};};\n'
               'class CfgWorlds {class Eden; class FusionOFP: Eden {\n'
               ' access=2; description="OFP Fusion - Five Islands"; worldName="\\fusion_ofp\\FusionOFP.wrp";\n'
@@ -297,10 +326,17 @@ def build(source, output, config_texts=()):
               ' startTime="12:00"; startDate="21/6/1985"; startWeather=0.2; forecastWeather=0.2;\n'
               ' startFog=0; forecastFog=0; seagullPos[]={%d,%d,150};\n'
               '%s\n'
+              # the map grid: the islands' "Aa"/"00" labels (base 10 per character, UIMap GridFormat) run out at 100
+              # squares of 128 m, the far zoom's "A"/"0" at 10 of 1280 m; Fusion is 400 / 40 across
+              ' class Grid {offsetX=0; offsetY=0;'
+              ' class Zoom1 {zoomMax=0.2; format="XY"; formatX="Aa0"; formatY="000"; stepX=128; stepY=128;};'
+              ' class Zoom2 {zoomMax=1e30; format="XY"; formatX="Aa"; formatY="00"; stepX=1280; stepY=1280;};};\n'
               ' class SecondaryAirports {%s};\n'
+              '%s'
               ' class Names {%s};\n'
               '};}; class CfgWorldList {class FusionOFP {};};\n'
-              % ((ISLANDS[1][2] + 128) * CELL, (ISLANDS[1][3] + 128) * CELL, ils, secondary, labels + ''.join(places)))
+              % ((ISLANDS[1][2] + 128) * CELL, (ISLANDS[1][3] + 128) * CELL, ils, secondary, replace_cfg,
+                 labels + ''.join(places)))
     output.mkdir(parents=True, exist_ok=True)
     (output/'fusion.wrp').write_bytes(data)
     (output/'fusion_ofp.pbo').write_bytes(pack_pbo({'config.cpp':config.encode('latin-1'),'FusionOFP.wrp':data}))

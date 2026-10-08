@@ -58,6 +58,11 @@ Kolgujev and Desert Island have no airport in the game's config. The map carries
 game's own names: 18 on Everon, 14 on Malden, 30 on Nogova (Kolgujev and Desert Island
 have none in the original config), plus the five island labels.
 
+The builder also merges every source world's `ReplaceObjects` (the forest blocks the engine swaps for their
+walk-through versions): DefaultWorld's, Malden's and Nogova's (11 rules). With DefaultWorld's alone, Malden's and
+Nogova's forests -- other models -- stayed solid to infantry and AI. And the map grid gets a third label character
+(the islands' two run out at 100 squares of 128 m; Fusion is 400 across).
+
 This is an experimental composite world. Loading costs exceed one original map.
 Existing campaigns do not automatically migrate: absolute positions and object IDs
 would need per-mission work.
