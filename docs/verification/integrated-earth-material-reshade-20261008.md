@@ -289,3 +289,48 @@ effect, a total GPU cost, or support for other renderer configurations.
 
 The same installed source shows the bearing readout only while the compass
 is open. This UI behavior still needs its own interactive runtime check.
+
+## Integrated ABI23 runtime checkpoint
+
+Paired source `905ba2dc`, deployed at 11:31, passes the full supported build.
+`build/earth-streaming/20261008-113741/result.json` passes the same coastal
+checks. Both inspected 1000m/9000m captures now lack the dark grazing sky
+band: the Earth sphere-miss interval predicate had incorrectly truncated
+atmosphere rays to one metre. Coarse overview imagery, low coastline detail
+and the angular source-backed land corner remain visible; this is not
+worldwide ocean/terrain visual parity or new collision coverage.
+
+`build/physical-inventory/20261008-113914-007/result.json` passes real SDL
+compass down/up, screenshots and clean exit. The inspected open-compass
+capture shows the bearing above the instrument; closed captures omit it.
+Tab still cycles targets and Shift still controls sprint. Inventory remains
+on the configurable O action while the requested conflicting-key choice is
+pending; no custom bindings have been migrated.
+
+The ordered/detail-mask material preview is strictly opt-in. Actual Village
+on/off runs both settle at 20683 registered instances, 4930 main instances
+and 13451410 main triangles. The on log confirms the requested Pub external
+material has three real detail masks bound. However, the established Village
+camera points away from that Pub, so these images do not establish its visual
+improvement. Single-frame engine GPU samples (55.929/54.234ms on/off) are not
+a controlled cost conclusion. A separate Pub-facing camera is now available
+in `Measure-NativeReforger.ps1 -Pose Pub` for an appropriate comparison.
+
+Scene-depth lifecycle on this installed pair passes in
+`build/reshade-depth/20261008-113233-SceneProbe/result.json`: fullscreen
+3441x1440 generation2 and return to 1600x900 generation3 both bind fresh
+finite scene-depth witnesses, followed by clean teardown. The first metric
+DH test correctly failed its strict gate on an upstream same-image
+read/write conflict. The generated adapter now retains the original source
+outside the effect scan and uses a separate 1x1 Reinhard blend target plus
+publish pass. The error gate is unchanged. Eleven Python checks pass with
+the actual compiled bridge loaded for contract tests.
+
+With the corrected isolated stage, metric depth debug
+`build/reshade-depth/20261008-115017-SceneDHDebug/result.json` and preview
+`build/reshade-depth/20261008-115253-SceneDH/result.json` pass compilation,
+real depth binding, live off/on, paired captures and clean exit. Debug
+silhouettes align with the scene; preview images show a visible effect,
+including lifted distant contrast. This is a bounded screen-space prototype,
+not hardware ray tracing or final visual acceptance. ReShade stays off by
+default. No injected-GPU timing or general MSAA/DLSS compatibility is claimed.

@@ -4,7 +4,7 @@ param(
  [ValidateRange(1,16)][int]$MotionSamples=1,
  [ValidateRange(0.25,5)][double]$MotionInterval=0.5,
  [ValidateRange(30,600)][int]$WarmupSeconds=90,
- [ValidateSet('Village','Coast','Forest','ForestHigh','Church','Reference')][string]$Pose='Village',
+ [ValidateSet('Village','Pub','Coast','Forest','ForestHigh','Church','Reference')][string]$Pose='Village',
  [ValidateRange(-1,23.999)][double]$WorldHour=-1,
  [ValidateRange(0,1)][int]$NativeTextureKeys=1,
  [ValidateRange(-1,1)][int]$LazyBcrTint=-1,
@@ -33,6 +33,8 @@ if ($LazyBcrTint -ge 0) {$settings.WGR_LAZY_BCR_TINT=[string]$LazyBcrTint}
 foreach ($key in $Overrides.Keys) {$settings[$key]=$Overrides[$key]}
 $camera=switch ($Pose) {
  'Village' {@(5092.61,3995.64,18.3,200.9,-13.5)}
+ # Same established viewpoint, turned toward the nearby pub at X5107.25/Z4039.11.
+ 'Pub' {@(5092.61,3995.64,18.3,18.62,0)}
  'Coast' {@(3800,7960,4,40,-5)}
  'Forest' {@(4697.60,3998.02,50.23,220.6,-5.0)}
  'ForestHigh' {@(4697.60,3998.02,450.0,220.6,-25.0)}
