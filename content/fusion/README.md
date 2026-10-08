@@ -20,13 +20,47 @@ Set-Location 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 Also available in Single Missions as **OFP Fusion - Five Islands**, and as a
 separate editor world. The tour starts in a helicopter; its Visit actions jump
 between islands within the same loaded world. Ordinary flight crosses the water
-without a mission change. The three southern islands run west to east: Everon,
-Malden, Kolgujev. Nogova and Desert Island are to the north.
+without a mission change.
+
+## Layout (lore)
+
+Placed as close to CWA as the 51.2 km world allows (owner, 2026-10-09). North up:
+
+```
+  Desert Island                              Everon
+  Nogova
+                       Kolgujev
+        Malden
+```
+
+* Everon is north-east of Malden ("Everon Island, Northeast of Malden", the Flashpoint
+  mission) and the easternmost island ("Everon, the easternmost island in this group",
+  Blake, x01iansoffice).
+* Kolgujev is east-north-east of Malden: in Planes Start the A-10s leave Malden heading
+  east / north-east, and Maverick starts them off Kolgujev's east-south-east coast flying
+  north-west.
+* Nogova is north-north-west of Malden (Reforger's Malden-islands map; the CWA campaigns
+  only call it one of "the Malden islands"). Reforger also puts it south-south-west of
+  Everon; with Everon easternmost and Kolgujev east of Malden that cannot fit at this
+  scale, so Everon is east-north-east of it here.
+* Kolgujev follows the 1985 campaign, not Reforger (which puts it 300 km north).
+* Desert Island, the menu intro island, is in no campaign: apart in the north-west.
+* Distances are compressed: canon puts the islands 179-300 km apart.
+
+## Airports and map names
+
+`Install-Fusion.ps1` debinarises the game's `BIN\config.bin` and Nogova's config and
+passes them to the builder (`--config`): every source world's airport (ILS point,
+direction and taxi paths) and map names move with their island. Everon's airport is the
+main one; Malden's and Nogova's are `SecondaryAirports`, and each AI plane uses the
+nearest (World::NearestAirport; worlds without SecondaryAirports keep their one airport).
+Kolgujev and Desert Island have no airport in the game's config. The map carries the
+game's own names: 18 on Everon, 14 on Malden, 30 on Nogova (Kolgujev and Desert Island
+have none in the original config), plus the five island labels.
 
 This is an experimental composite world. Loading costs exceed one original map.
-Existing campaigns do not automatically migrate: absolute positions, object IDs,
-location metadata and airport/ILS definitions would need per-mission work.
-The map currently labels the five islands, not all original towns/airports.
+Existing campaigns do not automatically migrate: absolute positions and object IDs
+would need per-mission work.
 Source shoreline edge samples are retained, including the tiny Nogova edge.
 The generated manifest records source hashes, offsets and object counts.
 

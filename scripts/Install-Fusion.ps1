@@ -13,7 +13,12 @@ foreach ($name in @('eden','abel','cain','intro','noe')) {
  & $tools terrain export-rvw4 $source (Join-Path $build "sources/$name.wrp")
  if ($LASTEXITCODE -ne 0) {throw "Terrain export failed: $name"}
 }
-python (Join-Path $PSScriptRoot 'fusion/build_fusion.py') (Join-Path $build 'sources') (Join-Path $build 'output')
+# the source worlds' airports and map names: the game's own config (BIN) and Nogova's, debinarised
+& $tools config debin (Join-Path $GameDir 'BIN/config.bin') | Set-Content -Encoding Default (Join-Path $build 'config-base.cpp')
+if ($LASTEXITCODE -ne 0) {throw 'Debinarising BIN/config.bin failed'}
+& $tools config debin (Join-Path $build 'source-noe/config.bin') | Set-Content -Encoding Default (Join-Path $build 'config-noe.cpp')
+if ($LASTEXITCODE -ne 0) {throw 'Debinarising Noe config.bin failed'}
+python (Join-Path $PSScriptRoot 'fusion/build_fusion.py') (Join-Path $build 'sources') (Join-Path $build 'output') --config (Join-Path $build 'config-base.cpp') --config (Join-Path $build 'config-noe.cpp')
 if ($LASTEXITCODE -ne 0) {throw 'Fusion generation failed'}
 & $tools terrain inspect (Join-Path $build 'output/fusion.wrp')
 if ($LASTEXITCODE -ne 0) {throw 'Generated WRP validation failed'}

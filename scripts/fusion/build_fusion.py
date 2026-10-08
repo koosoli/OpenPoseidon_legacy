@@ -2,22 +2,36 @@
 
 Inputs are RVW4 exports from PoseidonTools terrain export-rvw4. No rescaling or
 rotation: translations preserve road pieces, forests and authored building poses.
+With --config (the debinarised BIN config and Noe's), every source world's airport
+and map names come along too, moved with their island.
 """
 import argparse
 from array import array
 import hashlib
 import json
 from pathlib import Path
+import re
 import struct
 import sys
 
 CELL = 50
 SIZE = 1024
-# Grid offsets, each original world is 256 x 256 cells. Adjacent source tiles
-# have at least 3.2 km of additional water between them.
-ISLANDS = [('eden', 'Everon', 64, 160), ('abel', 'Malden', 384, 160),
-           ('cain', 'Kolgujev', 704, 160), ('noe', 'Nogova', 224, 480),
-           ('intro', 'Desert Island', 544, 480)]
+# Grid offsets (cells, x east / z north), each original world is 256 x 256 cells; adjacent tiles have at least
+# 3.2 km (64 cells) of water between them. The layout follows the CWA 1985 campaign, then Reforger's
+# Malden-islands map where CWA is silent (owner, 2026-10-09: "what would be closest to CWA"):
+#   * Everon north-east of Malden ("Ile d'Everon, au nord-est de Malden", 01flashpoint) and the easternmost
+#     island of the group ("Everon, the easternmost island in this group", x01iansoffice);
+#   * Kolgujev east-north-east of Malden: 31aplanesstart's A-10s head east / north-east out of Malden's NE corner,
+#     and 31bmaverick starts them off Kolgujev's east-south-east coast heading north-west;
+#   * Nogova north-north-west of Malden (Reforger; the CWA campaigns only call it one of "the Malden islands").
+#     Reforger also has it south-south-west of Everon -- at this scale that cannot hold together with the above,
+#     so here Everon is east-north-east of it;
+#   * Desert Island (the menu intro island, in no campaign) apart in the north-west.
+ISLANDS = [('eden', 'Everon', 736, 736), ('abel', 'Malden', 160, 96),
+           ('cain', 'Kolgujev', 480, 224), ('noe', 'Nogova', 32, 432),
+           ('intro', 'Desert Island', 32, 752)]
+# the source worlds' CfgWorlds classes
+WORLD_CLASS = {'eden': 'Eden', 'abel': 'Abel', 'cain': 'Cain', 'intro': 'Intro', 'noe': 'Noe'}
 
 
 def fixed(text, size):
@@ -79,7 +93,117 @@ def compressed(raw):
     return result
 
 
-def build(source, output):
+# --- the source worlds' airports and map names, from debinarised config text ---------------------------------
+
+_CLASS = re.compile(r'\bclass\s+(\w+)\s*(?::\s*\w+)?\s*\{')
+
+
+def _close(text, i):
+    """Index just past the brace that closes the one opened before `i`."""
+    depth = 1
+    while depth and i < len(text):
+        depth += {'{': 1, '}': -1}.get(text[i], 0)
+        i += 1
+    return i
+
+
+def class_block(text, name, start=0):
+    """The body (without braces) of the first `class <name>` at or after `start`; None when absent."""
+    for m in _CLASS.finditer(text, start):
+        if m.group(1).lower() == name.lower():
+            return text[m.end():_close(text, m.end()) - 1]
+    return None
+
+
+def top_level(body):
+    """`body` with its nested classes cut out: this class's own entries."""
+    out, i = [], 0
+    while True:
+        m = _CLASS.search(body, i)
+        if not m:
+            out.append(body[i:])
+            return ''.join(out)
+        out.append(body[i:m.start()])
+        i = _close(body, m.end())
+
+
+def array_entry(body, key):
+    """The values of `key[]={...};` among a class's own entries: numbers, or the arithmetic strings the taxi
+    paths use ("4772+69"), evaluated. None when absent."""
+    m = re.search(r'\b%s\[\]\s*=\s*\{(.*?)\};' % re.escape(key), top_level(body), re.S)
+    if not m:
+        return None
+    values = []
+    for quoted, bare in re.findall(r'"([^"]*)"|([-+]?[\d.]+(?:e[-+]?\d+)?)', m.group(1)):
+        expr = quoted or bare
+        if not re.fullmatch(r'[\d.+\-*/ ()e]+', expr):
+            raise ValueError(f'unexpected config value {expr!r} in {key}')
+        values.append(float(eval(expr, {'__builtins__': {}}, {})))
+    return values
+
+
+def scalar_entry(body, key):
+    m = re.search(r'\b%s\s*=\s*(?:"([^"]*)"|([^;]*));' % re.escape(key), top_level(body))
+    if not m:
+        return None
+    return m.group(1) if m.group(1) is not None else m.group(2).strip()
+
+
+def world_data(config_texts, key, dx, dz):
+    """A source world's airport (moved by dx, dz metres; None if it has none) and its map names."""
+    for text in config_texts:
+        worlds = class_block(text, 'CfgWorlds')
+        body = class_block(worlds, WORLD_CLASS[key]) if worlds else None
+        if body is None:
+            continue
+        airport = None
+        pos, direction = array_entry(body, 'ilsPosition'), array_entry(body, 'ilsDirection')
+        if pos and (pos[0] or pos[1]) and direction:
+            def moved(path):
+                return [v + (dx if i % 2 == 0 else dz) for i, v in enumerate(path or [])]
+            airport = dict(pos=[pos[0] + dx, pos[1] + dz], dir=direction[:3],
+                           taxi_in=moved(array_entry(body, 'ilsTaxiIn')),
+                           taxi_off=moved(array_entry(body, 'ilsTaxiOff')))
+        names = []
+        names_body = class_block(body, 'Names')
+        if names_body:
+            for m in _CLASS.finditer(names_body):
+                if names_body.count('{', 0, m.start()) != names_body.count('}', 0, m.start()):
+                    continue  # nested deeper than one level
+                entry = names_body[m.end():_close(names_body, m.end()) - 1]
+                p = array_entry(entry, 'position')
+                if not p:
+                    continue
+                item = dict(cls=m.group(1), name=scalar_entry(entry, 'name') or m.group(1),
+                            position=[p[0] + dx, p[1] + dz] + p[2:])
+                for k in ('type', 'radiusA', 'radiusB', 'angle'):
+                    v = scalar_entry(entry, k)
+                    if v is not None:
+                        item[k] = v
+                names.append(item)
+        return airport, names
+    return None, []
+
+
+def num(v):
+    return ('%.3f' % v).rstrip('0').rstrip('.')
+
+
+def airport_cfg(a):
+    def listed(vs):
+        return ','.join(num(v) for v in vs)
+    return (' ilsPosition[]={%s}; ilsDirection[]={%s}; ilsTaxiIn[]={%s}; ilsTaxiOff[]={%s};'
+            % (listed(a['pos']), listed(a['dir']), listed(a['taxi_in']), listed(a['taxi_off'])))
+
+
+def name_cfg(key, n):
+    extra = ''.join(' type="%s";' % v if k == 'type' else ' %s=%s;' % (k, v)
+                    for k, v in n.items() if k in ('type', 'radiusA', 'radiusB', 'angle'))
+    return 'class %s_%s {name="%s"; position[]={%s};%s};' % (
+        key, n['cls'], n['name'], ','.join(num(v) for v in n['position']), extra)
+
+
+def build(source, output, config_texts=()):
     heights = array('f', [-100])*(SIZE*SIZE)
     tex = array('H', [0])*(SIZE*SIZE)
     geography = bytearray(SIZE*SIZE*4)
@@ -147,19 +271,40 @@ def build(source, output):
     manifest['objects'] = len(placements)//128
     manifest['world_sha256'] = hashlib.sha256(data).hexdigest()
     labels = ''.join(f'class Island{i} {{name="{v[1]}"; position[]={{{(v[2]+128)*CELL},{(v[3]+128)*CELL}}}; type="NameLocal"; radiusA=4000; radiusB=4000;}};' for i,v in enumerate(ISLANDS))
-    config = '''class CfgPatches {class FusionOFP {units[]={}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={"Noe"};};};
-class CfgWorlds {class Eden; class FusionOFP: Eden {
- access=2; description="OFP Fusion - Five Islands"; worldName="\\fusion_ofp\\FusionOFP.wrp";
- worldSize=51200; landGrid=50; centerPosition[]={25600,25600,0};
- startTime="12:00"; startDate="21/6/1985"; startWeather=0.2; forecastWeather=0.2;
- startFog=0; forecastFog=0; seagullPos[]={9600,14400,150};
- ilsPosition[]={7972,18923}; ilsDirection[]={0,0.08,-1}; ilsTaxiIn[]={}; ilsTaxiOff[]={};
- class Names {'''+labels+'''};
-};}; class CfgWorldList {class FusionOFP {};};
-'''
+    # every source world's own airport and map names (towns, villages, places), moved with its island
+    airports, places = [], []
+    for key, label, ox, oz in ISLANDS:
+        airport, world_names = world_data(config_texts, key, ox * CELL, oz * CELL)
+        if airport:
+            airports.append((key, label, airport))
+        places.extend(name_cfg(key, n) for n in world_names)
+    manifest['airports'] = [dict(island=label, ils=a['pos']) for _, label, a in airports]
+    manifest['map_names'] = len(places)
+    # the main airport is Everon's (the campaign's); the others are SecondaryAirports, each AI plane using the
+    # nearest (World::NearestAirport). Without config input: Everon's ILS point, moved, and no taxi paths.
+    main = next((a for k, _, a in airports if k == 'eden'), None) or (airports[0][2] if airports else None)
+    if main:
+        ils = airport_cfg(main)
+    else:
+        ils = (' ilsPosition[]={%d,%d}; ilsDirection[]={0,0.08,-1}; ilsTaxiIn[]={}; ilsTaxiOff[]={};'
+               % (4772 + ISLANDS[0][2] * CELL, 10923 + ISLANDS[0][3] * CELL))
+    secondary = ''.join('class %s {%s};' % (label.replace(' ', ''), airport_cfg(a))
+                        for _, label, a in airports if a is not main)
+    config = ('class CfgPatches {class FusionOFP {units[]={}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={"Noe"};};};\n'
+              'class CfgWorlds {class Eden; class FusionOFP: Eden {\n'
+              ' access=2; description="OFP Fusion - Five Islands"; worldName="\\fusion_ofp\\FusionOFP.wrp";\n'
+              ' worldSize=51200; landGrid=50; centerPosition[]={25600,25600,0};\n'
+              ' startTime="12:00"; startDate="21/6/1985"; startWeather=0.2; forecastWeather=0.2;\n'
+              ' startFog=0; forecastFog=0; seagullPos[]={%d,%d,150};\n'
+              '%s\n'
+              ' class SecondaryAirports {%s};\n'
+              ' class Names {%s};\n'
+              '};}; class CfgWorldList {class FusionOFP {};};\n'
+              % ((ISLANDS[1][2] + 128) * CELL, (ISLANDS[1][3] + 128) * CELL, ils, secondary, labels + ''.join(places)))
     output.mkdir(parents=True, exist_ok=True)
     (output/'fusion.wrp').write_bytes(data)
-    (output/'fusion_ofp.pbo').write_bytes(pack_pbo({'config.cpp':config.encode('ascii'),'FusionOFP.wrp':data}))
+    (output/'fusion_ofp.pbo').write_bytes(pack_pbo({'config.cpp':config.encode('latin-1'),'FusionOFP.wrp':data}))
+    (output/'config.cpp').write_text(config, encoding='latin-1')
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='ascii')
     print(json.dumps(manifest,indent=2))
 
@@ -168,5 +313,7 @@ if __name__ == '__main__':
     parser=argparse.ArgumentParser()
     parser.add_argument('source',type=Path)
     parser.add_argument('output',type=Path)
+    parser.add_argument('--config',type=Path,action='append',default=[],
+                        help='debinarised config text with the source worlds (BIN config, Noe): airports and map names')
     args=parser.parse_args()
-    build(args.source,args.output)
+    build(args.source,args.output,[c.read_text(encoding='latin-1') for c in args.config])
