@@ -3600,6 +3600,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             _earthWorldgenNext=0;_earthWorldgenCreated=0;
             LOG_INFO(Graphics,"Earth Worldgen publication: revision {} generation {} source {} covered {} selected {} modelLimitSkipped {} error {}",
                 snapshot->revision,snapshot->generation,snapshot->sourceObjects,snapshot->coveredObjects,snapshot->objects.size(),snapshot->modelLimitSkipped,snapshot->error);
+            LOG_INFO(Graphics,"Earth Worldgen upstream final validation: {}; asset presentation only",snapshot->sourceValidation);
             _earthWorldgenSnapshot=std::move(snapshot);
         }
         size_t attempted=0,newModels=0;

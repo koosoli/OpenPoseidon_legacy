@@ -12,13 +12,15 @@ Worldgen::Object Object(uint32_t id, const char* model, float x, float y, float 
     return {id, model, {1, .2f, 0, 0, 1, 0, 0, 0, 1, x, y, z}};
 }
 void Fixture(const std::filesystem::path& directory, const std::vector<Worldgen::Object>& objects,
-             bool terminate = true)
+             bool terminate = true, const char* validation = nullptr)
 {
     const double half = 128 / Earth::Radius * 180 / Earth::Pi;
     {
         std::ofstream out(directory / "manifest.json");
-        out << std::setprecision(17)
-            << "{\"height_scale\":0.05,\"world\":{\"name\":\"fixture\",\"cells\":16,\"cell_size\":16,\"bbox\":["
+        out << std::setprecision(17) << "{";
+        if (validation)
+            out << "\"final_validation\":{\"status\":\"" << validation << "\"},";
+        out << "\"height_scale\":0.05,\"world\":{\"name\":\"fixture\",\"cells\":16,\"cell_size\":16,\"bbox\":["
             << -half << "," << -half << "," << half << "," << half << "]}}";
     }
     std::ofstream out(directory / "source/fixture.wrp", std::ios::binary);
@@ -58,7 +60,16 @@ int main(int argc, char** argv)
     Fixture(directory, objects);
     auto source = Worldgen::Load(directory / "manifest.json");
     assert(source.error.empty() && source.objects.size() == 3 && source.heights.size() == 256);
+    assert(source.validation == "unspecified");
+    Fixture(directory, objects, true, "failed");
+    std::filesystem::create_directories(directory / "source/fixture");
+    std::filesystem::rename(directory / "source/fixture.wrp", directory / "source/fixture/fixture.wrp");
+    const auto packaged = Worldgen::Load(directory / "manifest.json");
+    assert(packaged.error.empty() && packaged.objects.size() == 3 && packaged.validation == "failed");
+    std::filesystem::rename(directory / "source/fixture/fixture.wrp", directory / "source/fixture.wrp");
+    std::filesystem::remove(directory / "source/fixture");
     Poseidon::EarthBuildingStream::Ground ground{6272, 6272, 1, 0, 0, 5, 7, std::vector<float>(257 * 257, 300)};
+    assert(Worldgen::Build(packaged, ground, 6400, 6400).sourceValidation == "failed");
     auto snapshot = Worldgen::Build(source, ground, 6400, 6400);
     assert(snapshot.error.empty() && snapshot.revision == 5 && snapshot.generation == 7 &&
            snapshot.coveredObjects == 3 && snapshot.objects.size() == 3);
@@ -161,12 +172,15 @@ int main(int argc, char** argv)
     if (argc > 1)
     {
         const auto actual = Worldgen::Load(argv[1]);
+        if (!actual.error.empty())
+            std::cerr << "Actual Worldgen source error: " << actual.error << "\n";
         assert(actual.error.empty() && !actual.objects.empty());
         const double lat = (actual.south + actual.north) * .5, lon = (actual.west + actual.east) * .5;
         ground = {3200, 3200, 25, lat, lon, 1, 1, std::vector<float>(257 * 257, 300)};
         snapshot = Worldgen::Build(actual, ground, 6400, 6400);
         assert(snapshot.error.empty() && !snapshot.objects.empty());
-        std::cout << "Actual Worldgen CPU: source=" << actual.objects.size() << " covered=" << snapshot.coveredObjects
+        std::cout << "Actual Worldgen CPU: upstreamValidation=" << actual.validation
+                  << " source=" << actual.objects.size() << " covered=" << snapshot.coveredObjects
                   << " selected=" << snapshot.objects.size() << " modelsSkipped=" << snapshot.modelLimitSkipped << "\n";
     }
     std::cout << "PASS Worldgen actual RVW4 wire parsing, stock model identities, resident grounding/relative lift, "

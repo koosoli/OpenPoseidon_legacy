@@ -23,6 +23,7 @@ class EarthWorldgen
         int cells = 0;
         std::vector<int16_t> heights;
         std::vector<Object> objects;
+        std::string validation = "unspecified";
         std::string error;
     };
     struct Snapshot
@@ -30,6 +31,7 @@ class EarthWorldgen
         uint64_t revision = 0, generation = 0;
         size_t sourceObjects = 0, coveredObjects = 0, modelLimitSkipped = 0;
         std::vector<Object> objects;
+        std::string sourceValidation;
         std::string error;
     };
     static Source Load(const std::filesystem::path& manifest);

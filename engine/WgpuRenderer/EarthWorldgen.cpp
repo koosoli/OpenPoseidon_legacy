@@ -82,6 +82,11 @@ EarthWorldgen::Source EarthWorldgen::Load(const std::filesystem::path& manifest)
         std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root(cJSON_ParseWithLength(json.data(), json.size()),
                                                              cJSON_Delete);
         const auto* world = cJSON_GetObjectItemCaseSensitive(root.get(), "world");
+        const auto* validation = cJSON_GetObjectItemCaseSensitive(root.get(), "final_validation");
+        const auto* status = cJSON_GetObjectItemCaseSensitive(validation, "status");
+        if (cJSON_IsString(status) &&
+            (std::strcmp(status->valuestring, "failed") == 0 || std::strcmp(status->valuestring, "succeeded") == 0))
+            source.validation = status->valuestring;
         const auto* name = cJSON_GetObjectItemCaseSensitive(world, "name");
         if (!cJSON_IsString(name))
             throw std::runtime_error("Worldgen world name missing");
@@ -112,7 +117,11 @@ EarthWorldgen::Source EarthWorldgen::Load(const std::filesystem::path& manifest)
             source.east > 180 || source.west >= source.east)
             throw std::runtime_error("Worldgen geographic/grid contract invalid");
         source.cells = int(cells);
-        const auto wrp = manifest.parent_path() / "source" / (worldName + ".wrp");
+        // The current Worldgen single-world-PBO policy nests the original
+        // source under its addon prefix. Older outputs keep the flat layout.
+        auto wrp = manifest.parent_path() / "source" / worldName / (worldName + ".wrp");
+        if (!std::filesystem::is_regular_file(wrp))
+            wrp = manifest.parent_path() / "source" / (worldName + ".wrp");
         const auto wrpBytes = std::filesystem::file_size(wrp);
         const size_t count = size_t(source.cells) * source.cells, offset = 12 + count * 4 + 512 * 32;
         if (wrpBytes > MaxSourceBytes || wrpBytes < offset + 128 || (wrpBytes - offset) % 128 ||
@@ -174,6 +183,7 @@ EarthWorldgen::Snapshot EarthWorldgen::Build(const Source& source, const EarthBu
     output.revision = g.revision;
     output.generation = g.generation;
     output.sourceObjects = source.objects.size();
+    output.sourceValidation = source.validation;
     output.error = source.error;
     if (!output.error.empty())
         return output;

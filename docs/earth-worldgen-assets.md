@@ -24,7 +24,8 @@ The adapter reads these existing Worldgen manifest fields:
 - `world.bbox`: `[south, west, north, east]`;
 - top-level `height_scale`.
 
-The corresponding file is `source/<world.name>.wrp` below the manifest directory.
+The current packaged source is `source/<world.name>/<world.name>.wrp` below the
+manifest directory. Older flat `source/<world.name>.wrp` outputs also work.
 The safe world name cannot traverse paths. The file must be uncompressed RVW4:
 `4WVR`, two little-endian int32 dimensions, two int16 grids, 512 texture paths
 of 32 bytes, then 128-byte object records (`12 float32`, int32 ID, 76-byte model
@@ -107,3 +108,38 @@ Nested proxy completeness and forest conformity require actual model-family
 acceptance. Source road/forest pitch/shear is retained; differences between the
 generated terrain and resident DEM can still cause local fit errors. No global
 playability or parity claim follows from this adapter.
+
+## First actual offline region receipt
+
+On 2026-10-08, upstream M4 at the source revision above generated a Luxembourg
+region from existing cached OSM and Terrarium data, without network requests.
+The source rectangle is `[49.6035, 6.12, 49.6165, 6.14]`, with 128 cells and
+11.2582600703422 metres per source cell. The local lab output is
+`D:/OpenPoseidon-Worldgen-Lab-20261008/lux-region-01/generated-compatible`;
+its `manifest.json` and `@CWR-Milestone4` mod root are the adapter/launcher inputs.
+The actual WRP SHA-256 is
+`94962459cf79c5cb75046ff78ce6e6fcab0386fd40d48d01ea3bdd6fb925dcca`.
+
+M4 initially failed because its bridge policy called `dataclasses.replace` with
+fields absent from M4's `PlayabilitySpec`. The local upstream compatibility
+guard uses that replacement only when both bridge fields exist; otherwise it
+uses the already existing read-through stock-bridge proxy. The external lab
+contains the exact patch and command receipt. No feature family was disabled.
+Twelve upstream bridge-policy tests and the M4 compatibility probe passed.
+
+The actual CPU adapter test parsed 7,369 objects, covered all of them in its
+synthetic resident patch, selected 2,048 and skipped zero model names. Source
+totals are 1,057 road pieces, 1,249 houses, 2,950 single trees, 2,066 bushes and
+47 forest blocks across 16 model paths. Upstream verified all 17 asset records
+with zero missing required models. This proves source interoperability, not
+installed model rendering or grounding.
+
+Upstream `final_validation.status` is **failed**, despite generation exit zero
+and `deployment_allowed: true`. Failures include 386 of 547 road-junction
+connections, 3.854 metres maximum road-axis overlap, sampled road grade worsening
+from 43.91% to 127.79%, and a town-name catalogue containing only two places.
+The adapter exposes the supplied known validation status in publication logs.
+Use this output as an asset-presentation fixture; it is not a validated playable
+island. The local lab's `worldgen-camera-poses.json` supplies three record-derived
+road/house/tree views and nearest-selection counts. Their heights use cached DEM
+samples: installed acceptance must query current resident ground before capture.
