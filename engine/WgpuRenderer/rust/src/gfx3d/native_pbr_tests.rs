@@ -128,7 +128,7 @@ fn native_multi_ordered_actual_gpu_resolves_overlapping_masks_and_detail_remap()
 
 #[test]
 fn native_pbr_basic_scaled_preview_and_legacy_shaders_compose() {
-    for (preview,tangents) in [(false,false), (true,false), (true,true)] {
+    for (preview,tangents,overlay) in [(false,false,false), (true,false,false), (true,true,false), (true,false,true), (true,true,true)] {
         let mut defs = crate::shaders::shader_defs();
         if preview {
             defs.insert("NATIVE_PBR_PREVIEW".to_owned(), ShaderDefValue::Bool(true));
@@ -137,6 +137,8 @@ fn native_pbr_basic_scaled_preview_and_legacy_shaders_compose() {
         }
         if tangents { defs.insert("NATIVE_PBR_TANGENTS".to_owned(),ShaderDefValue::Bool(true)); }
         else { defs.remove("NATIVE_PBR_TANGENTS"); }
+        if overlay { defs.insert("NATIVE_PBR_GLOBAL_OVERLAY".to_owned(),ShaderDefValue::Bool(true)); }
+        else { defs.remove("NATIVE_PBR_GLOBAL_OVERLAY"); }
         for (source, path) in [
             (PRODUCTION, "gfx3d/gpu_driven.wgsl"),
             (
@@ -199,12 +201,12 @@ fn native_pbr_basic_scaled_preview_and_legacy_shaders_compose() {
                             .map(|m| (m.offset, *span))
                     } else { None }
                 });
-                assert_eq!(layout, Some((368, 416)), "{path} material stride");
+                assert_eq!(layout, Some((368, 432)), "{path} material stride");
                 let normal_layout: Vec<_> = module.types.iter().filter_map(|(_, ty)| {
                     if let naga::TypeInner::Struct { members, .. } = &ty.inner {
                         let fields: Vec<_> = members.iter().filter_map(|m| {
                             match m.name.as_deref() {
-                                Some("global_normal_uv") | Some("detail_normal_strength") => Some(m.offset),
+                                Some("global_normal_uv") | Some("detail_normal_strength") | Some("global_overlay") => Some(m.offset),
                                 _ => None,
                             }
                         }).collect();
@@ -212,7 +214,7 @@ fn native_pbr_basic_scaled_preview_and_legacy_shaders_compose() {
                     }
                     None
                 }).flatten().collect();
-                assert_eq!(normal_layout, [384, 400], "{path} independent normal fields");
+                assert_eq!(normal_layout, [384, 400, 416], "{path} independent normal and overlay fields");
             }
         }
     }
@@ -485,4 +487,55 @@ fn authored_tangent_actual_gpu_preserves_nonuniform_mirrored_and_interpolated_ax
         (rotated[0]/len) as f32,(rotated[1]/len) as f32,(rotated[2]/len) as f32,1.0,
         0.3/back_len,0.2/back_len,back_z/back_len,1.0];
     for (actual,expected) in actual.iter().zip(expected) {assert!((actual-expected).abs()<2e-5,"{actual} != {expected}");}
+}
+
+fn global_overlay_probe() -> naga::Module {
+    let mut source=String::new();
+    for helper in ["native_pbr_global_overlay","native_pbr_ordered_weights"] {
+        let start=PRODUCTION.find(&format!("fn {helper}(")).unwrap();
+        let end=start+PRODUCTION[start..].find("\n}").unwrap()+2;
+        source.push_str(&PRODUCTION[start..end]);source.push('\n');
+    }
+    source.push_str(r#"
+@group(0) @binding(0) var<storage,read_write> output:array<vec4<f32>>;
+@compute @workgroup_size(1) fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>) {
+    var base=array<vec4<f32>,5>(vec4<f32>(0.2,0.7,0.4,0.6),vec4<f32>(0.2,0.7,0.4,0.6),
+        vec4<f32>(0.8,0.2,0.5,0.7),vec4<f32>(0.8,0.2,0.5,0.7),vec4<f32>(0.0));
+    let masks=array<vec4<f32>,5>(vec4<f32>(0.5),vec4<f32>(0.25,0.5,0.75,0.25),
+        vec4<f32>(0.75,0.25,1.0,0.75),vec4<f32>(0.0,1.0,0.3,1.0),vec4<f32>(0.25,0.5,0.75,0.25));
+    var powers=vec2<f32>(0.9,0.6);
+    if(id.x==3u) {powers=vec2<f32>(4.0);}
+    if(id.x==4u) {
+        let weights=native_pbr_ordered_weights(vec3<f32>(0.5));
+        base[4]=weights.x*vec4<f32>(1,0,0,0.1)+weights.y*vec4<f32>(0,1,0,0.3)+
+            weights.z*vec4<f32>(0,0,1,0.5)+weights.w*vec4<f32>(1,1,0,0.9);
+    }
+    output[id.x]=native_pbr_global_overlay(base[id.x],masks[id.x],powers);
+}
+"#);
+    let module=naga::front::wgsl::parse_str(&source).unwrap();
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(),naga::valid::Capabilities::all()).validate(&module).unwrap();
+    module
+}
+
+#[test]
+fn native_global_overlay_helper_and_admission_validate() {
+    let _=global_overlay_probe();
+    let admitted=super::cull::global_overlay_parameters(17,64|256,2.0,0.9,0.6);
+    assert_eq!(admitted[0].to_bits(),17);assert_eq!(admitted[1..],[0.9,0.6,1.0]);
+    for (slot,flags,ordered,black,white) in [(0,320,2.0,0.9,0.6),(17,64,2.0,0.9,0.6),
+        (17,256,2.0,0.9,0.6),(17,320,1.0,0.9,0.6),(17,320,2.0,f32::NAN,0.6),
+        (17,320,2.0,0.9,f32::INFINITY),(17,320,2.0,-0.1,0.6),(17,320,2.0,0.9,16.01)] {
+        assert_eq!(super::cull::global_overlay_parameters(slot,flags,ordered,black,white),[0.0;4]);
+    }
+}
+
+#[test]
+fn native_global_overlay_actual_gpu_preserves_alpha_and_ordered_composition() {
+    let actual=gpu_channels_result(global_overlay_probe());
+    let expected=[0.2,0.7,0.4,0.6, 0.11,0.7,0.58,0.3, 0.86,0.11,0.8,0.85, 0.0,1.0,0.0,1.0,
+                  0.34375,0.625,0.475,0.3125];
+    for(actual,expected) in actual.iter().zip(expected) {
+        assert!((actual-expected).abs()<1e-6,"{actual} != {expected}");
+    }
 }

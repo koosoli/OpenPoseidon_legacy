@@ -35,7 +35,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 24u // Append-only optional independent normal parameters
+#define WGR_ABI_VERSION 25u // Append-only optional linear global overlay
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -532,6 +532,10 @@ struct WgrModelMaterial
      * tiling; strengths apply to decoded RG before Z reconstruction per layer. */
     WgrVec4 global_normal_uv{1.0f, 1.0f, 0.0f, 0.0f};
     WgrVec4 detail_normal_strength{1.0f, 1.0f, 1.0f, 1.0f};
+    /* Optional supported linear GlobalMCR only; zero disables the sample. */
+    WgrTexture global_overlay_texture_id{};
+    float global_overlay_black{};
+    float global_overlay_white{};
 };
 
 /* One drawable LOD level: its FindSqrtLevel resolution threshold (_resolutions[i]) +
@@ -604,11 +608,14 @@ struct WgrInstance
  * inherit it. These reserved lanes preserve the public struct layout. */
 
 static_assert(sizeof(WgrModelSection) == 24, "WgrModelSection must match Rust");
-static_assert(sizeof(WgrModelMaterial) == 440, "WgrModelMaterial must match Rust");
+static_assert(sizeof(WgrModelMaterial) == 456, "WgrModelMaterial must match Rust");
 static_assert(offsetof(WgrModelMaterial, layer_mask_texture_id) == 336, "Append-only mask handles");
 static_assert(offsetof(WgrModelMaterial, layer_mask_params) == 360, "Append-only mask parameters");
 static_assert(offsetof(WgrModelMaterial, global_normal_uv) == 408, "Append-only global normal UV");
 static_assert(offsetof(WgrModelMaterial, detail_normal_strength) == 424, "Append-only detail normal strengths");
+static_assert(offsetof(WgrModelMaterial, global_overlay_texture_id) == 440, "Append-only global overlay handle");
+static_assert(offsetof(WgrModelMaterial, global_overlay_black) == 448, "Append-only global overlay powers");
+static_assert(offsetof(WgrModelMaterial, global_overlay_white) == 452, "Append-only global overlay powers");
 static_assert(sizeof(WgrModelLod) == 16, "WgrModelLod must match Rust");
 static_assert(sizeof(WgrInstance) == 144, "WgrInstance must match Rust");
 

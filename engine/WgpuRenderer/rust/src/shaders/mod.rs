@@ -96,6 +96,10 @@ pub(crate) fn shader_defs() -> std::collections::HashMap<String, naga_oil::compo
     }
     if std::env::var("WGR_REFORGER_PBR_PREVIEW").as_deref() == Ok("1") {
         defs.insert("NATIVE_PBR_PREVIEW".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+        if ["WGR_REFORGER_GLOBAL_OVERLAY_PREVIEW", "WGR_REFORGER_LAYER_ORDER_PREVIEW", "WGR_REFORGER_SRGB_PREVIEW"]
+            .iter().all(|key| std::env::var(key).as_deref() == Ok("1")) {
+            defs.insert("NATIVE_PBR_GLOBAL_OVERLAY".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+        }
         if ["WGR_REFORGER_TANGENT_PREVIEW", "WGR_REFORGER_NORMAL_PREVIEW", "WGR_REFORGER_LAYER_ORDER_PREVIEW"]
             .iter().all(|key| std::env::var(key).as_deref() == Ok("1")) {
             defs.insert("NATIVE_PBR_TANGENTS".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));

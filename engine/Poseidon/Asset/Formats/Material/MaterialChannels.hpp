@@ -205,6 +205,16 @@ struct EmatMultiAoParameters
     std::array<float, 4> scale{1.0f, 1.0f, 1.0f, 1.0f};
 };
 
+// Linear, per-object overlay data has a dedicated role; it is not Super's
+// macro-colour texture. The initial preview supports the standard UV1 contract.
+struct EmatGlobalOverlayParameters
+{
+    bool supported = false;
+    RvTextureRef texture;
+    float blackPower = 0.0f;
+    float whitePower = 0.0f;
+};
+
 struct EmatPbrProvenance
 {
     // Index 0 is BCRMap (or BCR_1); indices 1..3 are BCR_2..4.
@@ -225,6 +235,7 @@ struct EmatPbrProvenance
     std::array<std::array<float, 4>, 3> layerMaskParams{};
     EmatMultiNormalParameters normals;
     EmatMultiAoParameters layerAo;
+    EmatGlobalOverlayParameters globalOverlay;
 };
 
 struct TranslatedMaterial

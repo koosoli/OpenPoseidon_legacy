@@ -29,6 +29,43 @@ using Poseidon::Asset::Material::TranslatedMaterial;
 using Poseidon::Asset::Material::TranslatedSlot;
 using Poseidon::Asset::Material::TranslateEmat;
 
+TEST_CASE("Global overlay metadata round trips and declines unsupported inputs",
+          "[asset][material][emat][global-overlay]")
+{
+    using namespace Poseidon::Asset::Material;
+    const std::string body="MatPBRMulti {\n GlobalMCRMap \"{0000000000000001}Assets/Owned_MCR.edds\"\n"
+        " UVSrcGlobalMaps \"UV set 2\"\n OverlayBlackPower .9\n OverlayWhitePower .6\n";
+    const auto parsed=ParseEmat(body+"}\n");
+    const auto result=ReadNativePbrGlobalOverlay(parsed);
+    REQUIRE(result.supported);
+    REQUIRE(result.texture.path==Poseidon::Asset::VirtualPath::Parse("Assets/Owned_MCR.edds"));
+    REQUIRE(result.blackPower==.9f);
+    REQUIRE(result.whitePower==.6f);
+    const auto round=ReadNativePbrGlobalOverlay(ParseEmat(WriteEmatText(parsed)));
+    REQUIRE(round.supported);
+    REQUIRE(round.texture.path==result.texture.path);
+    REQUIRE(round.blackPower==result.blackPower);
+    REQUIRE(round.whitePower==result.whitePower);
+    for(const char* extra : {"OverlayMode 1\n", "Roughness_1 .5\n", "Color_1 1 1 1 .5\n",
+        "Roughness_2 \"bad\"\n", "GlobalMapsUVTransform { TilingU 2 }\n", "FineMask_2 1\n"})
+        REQUIRE_FALSE(ReadNativePbrGlobalOverlay(ParseEmat(body+extra+"}\n")).supported);
+    for(const char* key : {"OverlayBlackPower","OverlayWhitePower","UVSrcGlobalMaps","GlobalMCRMap"}) {
+        auto missing=parsed;
+        std::erase_if(missing.properties,[&](const auto& property){return EmatMaterial::NameMatches(property.name,key);});
+        REQUIRE_FALSE(ReadNativePbrGlobalOverlay(missing).supported);
+    }
+    for(float invalid : {-1.f,17.f,std::numeric_limits<float>::quiet_NaN(),std::numeric_limits<float>::infinity()}) {
+        auto malformed=parsed;
+        for(auto& property:malformed.properties) if(property.name=="OverlayBlackPower") property.values[0].number=invalid;
+        REQUIRE_FALSE(ReadNativePbrGlobalOverlay(malformed).supported);
+    }
+    auto malformed=parsed;
+    for(auto& property:malformed.properties) if(property.name=="OverlayWhitePower") property.values.push_back(property.values[0]);
+    REQUIRE_FALSE(ReadNativePbrGlobalOverlay(malformed).supported);
+    REQUIRE_FALSE(ReadNativePbrGlobalOverlay(ParseEmat("MatPBRMulti {\n UVSrcGlobalMaps \"UV set 1\"\n OverlayBlackPower 1\n OverlayWhitePower 1\n GlobalMCRMap \"Assets/Owned_MCR.edds\"\n}\n")).supported);
+    REQUIRE_FALSE(ReadNativePbrGlobalOverlay(ParseEmat("MatPBRMulti {\n UVSrcGlobalMaps \"UV set 2\"\n OverlayBlackPower 1\n OverlayWhitePower 1\n GlobalMCRMap \"Assets/Owned_BCR.edds\"\n}\n")).supported);
+}
+
 TEST_CASE("Ordered normal parameters keep global UV separate and reject unsupported inputs",
           "[asset][material][emat][arf][normal-preview]")
 {

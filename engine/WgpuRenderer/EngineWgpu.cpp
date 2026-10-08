@@ -15640,6 +15640,52 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadC
                 if (path && target && reportedSrgb.size() < 32 && reportedSrgb.insert(path).second)
                     LOG_INFO(Graphics, "Wgpu native PBR sRGB preview: material={} sourceAdmission={}", path, complete);
             }
+            static const bool globalOverlayPreview = [] {
+                const char* value = std::getenv("WGR_REFORGER_GLOBAL_OVERLAY_PREVIEW");
+                return value && std::strcmp(value, "1") == 0;
+            }();
+            static const std::string globalOverlayMaterial = [] {
+                const char* value = std::getenv("WGR_REFORGER_GLOBAL_OVERLAY_MATERIAL");
+                return std::string(value && *value ? value : "Pub_Village_E_01_L_Ext.emat");
+            }();
+            if (globalOverlayPreview && nativeSrgbPreview)
+            {
+                const auto& sourceSection = s->GetSection(i);
+                const char* path = sourceSection.surfMat ? sourceSection.surfMat->GetName().Data() : nullptr;
+                const std::string name(path ? path : "");
+                const bool target = name.size() >= globalOverlayMaterial.size() &&
+                    Asset::Material::EmatMaterial::NameMatches(
+                        name.substr(name.size() - globalOverlayMaterial.size()), globalOverlayMaterial);
+                if (target)
+                {
+                    const auto found = _materialBindings.find(path);
+                    const bool sourceSupported = found != _materialBindings.end() && found->second.ematPbr &&
+                        found->second.ematPbr->globalOverlay.supported;
+                    bool admitted = sourceSupported && s->HasUV1() &&
+                        (sec.flags & WGR_MODEL_SECTION_NATIVE_PBR_SRGB) != 0u &&
+                        mat.native_pbr_scales.w == 2.0f;
+                    if (admitted)
+                    {
+                        const auto& overlay = found->second.ematPbr->globalOverlay;
+                        // Load through the existing model capture: the source handle
+                        // remains leased by model snapshots, including deferred uploads.
+                        Ref<Texture> texture = _wbank->Load(overlay.texture.path.canonical().c_str());
+                        auto* native = static_cast<TextureWgpu*>(texture.GetRef());
+                        const uint64_t handle = native && native->HasNativeLinearMask(false) ? native->EnsureUploaded() : 0;
+                        admitted = handle != 0;
+                        if (admitted)
+                        {
+                            mat.global_overlay_texture_id = handle;
+                            mat.global_overlay_black = overlay.blackPower;
+                            mat.global_overlay_white = overlay.whitePower;
+                        }
+                    }
+                    static std::unordered_set<std::string> reportedOverlay;
+                    if (reportedOverlay.size() < 32 && reportedOverlay.insert(path).second)
+                        LOG_INFO(Graphics, "Wgpu native global overlay preview: material={} sourceSupported={} uv1={} sourceAdmission={}",
+                                 path, sourceSupported, s->HasUV1(), admitted);
+                }
+            }
             // Multi's mask lives on the second UV set in the BI corpora (TexGen uvSource
             // "tex1") and in Reforger's (`UVSrcGlobalMaps "UV set 2"`, RFG-072); the shader
             // samples it with uv1 when told so -- and ONLY when the shape carries a second

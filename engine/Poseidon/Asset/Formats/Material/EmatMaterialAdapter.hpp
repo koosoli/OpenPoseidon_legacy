@@ -643,6 +643,51 @@ inline EmatMultiAoParameters ReadNativePbrMultiAo(const EmatMaterial& emat)
     return result;
 }
 
+inline EmatGlobalOverlayParameters ReadNativePbrGlobalOverlay(const EmatMaterial& emat)
+{
+    EmatGlobalOverlayParameters result;
+    std::array<std::array<float, 4>, 3> masks{};
+    const auto scalar = [&](const char* key, float& value) {
+        const auto* property = emat.Find(key);
+        return property && property->values.size() == 1 && property->values[0].isNumber && emat.FloatOf(key, value);
+    };
+    const auto* uvSource = emat.Find("UVSrcGlobalMaps");
+    if (!ReadNativePbrStandardMasks(emat, masks) || !uvSource || uvSource->values.size() != 1 ||
+        !EmatMaterial::NameMatches(emat.WordOf("UVSrcGlobalMaps"), "UV set 2") ||
+        !scalar("OverlayBlackPower", result.blackPower) ||
+        !scalar("OverlayWhitePower", result.whitePower) ||
+        !std::isfinite(result.blackPower) || !std::isfinite(result.whitePower) ||
+        result.blackPower < 0.0f || result.blackPower > 16.0f ||
+        result.whitePower < 0.0f || result.whitePower > 16.0f)
+        return result;
+    const auto* texture = emat.Find("GlobalMCRMap");
+    if (!texture || texture->values.size() != 1 || texture->values[0].isNumber) return result;
+    result.texture = RvTextureRef::Parse(emat.TextureOf("GlobalMCRMap"));
+    const std::string path = result.texture.path.canonical();
+    if (result.texture.isProcedural || path.size() < 9 ||
+        path.compare(path.size() - 9, 9, "_mcr.edds") != 0)
+        return result;
+    // This first contract leaves global and per-layer roughness multipliers at
+    // identity. Unsupported modifiers must not silently qualify by filename.
+    for (size_t layer = 1; layer <= 4; ++layer)
+    {
+        const std::string suffix = std::to_string(layer);
+        const std::string roughness = "Roughness_" + suffix;
+        float scale = 1.0f;
+        if (emat.Has(roughness) && (!scalar(roughness.c_str(), scale) || scale != 1.0f)) return result;
+        float colour[4] = {};
+        const std::string tint = "Color_" + suffix;
+        if (emat.Has(tint)) {
+            const auto* property = emat.Find(tint);
+            if (!property || property->values.size() != 4 ||
+                !emat.Vec4Of(tint, colour) || colour[3] != 1.0f) return result;
+            for (float channel : colour) if (!std::isfinite(channel)) return result;
+        }
+    }
+    result.supported = true;
+    return result;
+}
+
 // Translates an `.emat` into the engine's material form. `family` is carried through from
 // the rvmat that pointed here.
 inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::string& origin, const std::string& family)
@@ -784,6 +829,7 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         pbr->standardMaskBlend = ReadNativePbrStandardMasks(emat, pbr->layerMaskParams);
         pbr->normals = ReadNativePbrMultiNormals(emat);
         pbr->layerAo = ReadNativePbrMultiAo(emat);
+        pbr->globalOverlay = ReadNativePbrGlobalOverlay(emat);
         if (pbr->standardMaskBlend)
         {
             const MaterialSlot maskSlots[] = {MaterialSlot::LayerMask1, MaterialSlot::LayerMask2,
@@ -856,13 +902,9 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         }
     }
 
-    // `GlobalMCRMap` (2,041 files) is NOT bound, and the omission is the point. The
-    // slots this engine has are the ones whose channel layout was measured -- see
-    // MaterialChannels.hpp, where every entry names the sample it came from. What an
-    // Enfusion MCR map holds per channel has not been measured here, and the nearest
-    // free slot (Macro) already means something else: Super's Stage3 macro COLOUR.
-    // Binding a data map there would make a future consumer sample it as colour. The
-    // key stays in the `EmatMaterial`, where whoever measures it can reach it.
+    // GlobalMCR remains outside the generic slots: Macro means Super macro colour.
+    // Its dedicated source metadata is consumed only by the optional supported
+    // native overlay preview, with a linear texture and separate powers.
 
     // `Color` is the surface's tint and, in its fourth component, its opacity -- pond
     // water is 0.37, Sakhal's ice is 1.0. Diffuse is where the rest of the pipeline

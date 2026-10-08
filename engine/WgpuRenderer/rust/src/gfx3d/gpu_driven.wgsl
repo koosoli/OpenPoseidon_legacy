@@ -120,6 +120,7 @@ struct SectionMaterial {
     srgb_bcr_slots: vec4<u32>,
     global_normal_uv: vec4<f32>,
     detail_normal_strength: vec4<f32>,
+    global_overlay: vec4<f32>,
 };
 
 @group(1) @binding(0) var<storage, read> instances: array<Instance>;
@@ -267,6 +268,18 @@ fn native_pbr_authored_composed_normal(geo: vec3<f32>, t: vec3<f32>, b: vec3<f32
 
 // Hardware sRGB views decode before filtering. Keep their samples linear for
 // tint and layer mixing; encode once only at the existing shade() boundary.
+#ifdef NATIVE_PBR_GLOBAL_OVERLAY
+// Linear overlay data is applied to composed layers. RGB has independent
+// dark/light powers; alpha directly overlays roughness without those powers.
+fn native_pbr_global_overlay(base: vec4<f32>, data: vec4<f32>, powers: vec2<f32>) -> vec4<f32> {
+    let strength = select(vec3<f32>(powers.y), vec3<f32>(powers.x), data.rgb < vec3<f32>(0.5));
+    let rgb = clamp(vec3<f32>(0.5) + (data.rgb - vec3<f32>(0.5)) * strength, vec3<f32>(0.0), vec3<f32>(1.0));
+    let q = vec4<f32>(rgb, data.a);
+    let low = 2.0 * base * q;
+    let high = vec4<f32>(1.0) - 2.0 * (vec4<f32>(1.0) - base) * (vec4<f32>(1.0) - q);
+    return select(low, high, q > vec4<f32>(0.5));
+}
+#endif
 fn native_pbr_encode_albedo(c: vec3<f32>) -> vec3<f32> {
     let lo = c * 12.92;
     let hi = 1.055 * pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4)) - 0.055;
@@ -1143,6 +1156,15 @@ fn fs_gpu_body(in: VsOut
         base = vec4<f32>(base.rgb * layer_base_weight + blended, base.a);
     }
 #ifdef NATIVE_PBR_PREVIEW
+#ifdef NATIVE_PBR_GLOBAL_OVERLAY
+    if (bcr_linear && sm.global_overlay.w > 0.5 && sm.native_pbr_scales.w > 1.5) {
+        let overlay_slot = bitcast<u32>(sm.global_overlay.x);
+        let overlay = textureSampleBias(textures[overlay_slot], samplers[sm.sampler_idx], in.uv1, frame.renscale.x);
+        let composed = native_pbr_global_overlay(vec4<f32>(base.rgb, pbr_roughness), overlay, sm.global_overlay.yz);
+        base = vec4<f32>(composed.rgb, base.a);
+        pbr_roughness = composed.a;
+    }
+#endif
     if (bcr_linear) { base = vec4<f32>(native_pbr_encode_albedo(base.rgb), base.a); }
 #endif
     // A2C (MSAA): cutout sections (sm.alpha_ref > 0, uniform per quad) emit a sharpened coverage

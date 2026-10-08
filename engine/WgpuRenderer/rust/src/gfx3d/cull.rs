@@ -254,6 +254,18 @@ pub struct SectionMaterialGpu {
     pub srgb_bcr_slots: [u32; 4],
     pub global_normal_uv: [f32; 4],
     pub detail_normal_strength: [f32; 4],
+    // (linear descriptor slot bitcast, black power, white power, enabled).
+    pub global_overlay: [f32; 4],
+}
+
+// Resource lookup resolves stale/invalid source handles to slot zero. Never
+// convert that white fallback into an admitted overlay operation.
+pub(crate) fn global_overlay_parameters(slot: u32, flags: u32, ordered: f32, black: f32, white: f32) -> [f32;4] {
+    const REQUIRED: u32 = 64 | 256; // native PBR and successful sRGB BCR admission
+    if slot == 0 || flags & REQUIRED != REQUIRED || ordered != 2.0 ||
+        !black.is_finite() || !white.is_finite() ||
+        !(0.0..=16.0).contains(&black) || !(0.0..=16.0).contains(&white) { return [0.0;4]; }
+    [f32::from_bits(slot),black,white,1.0]
 }
 
 // A permissive plane that never culls anything: dot(0, p) + BIG >= -radius always holds.

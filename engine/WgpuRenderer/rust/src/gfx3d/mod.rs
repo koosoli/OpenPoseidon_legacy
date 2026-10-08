@@ -9517,13 +9517,14 @@ impl Gfx3d {
         self.gpu_section_refresh.invalidate();
 
         // `materials` is parallel to `sections` (one material per section), so the
-        // section's flags word rides across here -- DZ-003's reflective bit lives in
-        // WgrModelSection::flags because WgrModelMaterial is size-locked at 192 bytes.
+        // section's flags word rides across here in WgrModelSection::flags.
+        // WgrModelMaterial carries the independent texture/scalar payload.
         // zip() stops at the shorter of the two, which is the same defensive length rule
         // the section/material pairing already relies on.
         const NATIVE_PBR: u32 = 64;
         const NATIVE_PBR_SRGB: u32 = 256;
         let mut srgb_admission = (0usize, 0usize);
+        let mut global_overlay_admission = (0usize, 0usize);
         let gpu_materials: Vec<cull::SectionMaterialGpu> = materials
             .iter()
             .zip(sections.iter())
@@ -9548,6 +9549,13 @@ impl Gfx3d {
                         srgb_bcr_slots = [0; 4];
                     }
                 } else { flags &= !NATIVE_PBR_SRGB; }
+                let global_overlay = cull::global_overlay_parameters(
+                    textures.texture_slot(m.global_overlay_texture_id), flags,
+                    m.native_pbr_scales[3], m.global_overlay_black, m.global_overlay_white);
+                if m.global_overlay_texture_id != 0 {
+                    global_overlay_admission.0 += 1;
+                    if global_overlay[3] > 0.5 { global_overlay_admission.1 += 1; }
+                }
                 cull::SectionMaterialGpu {
                     emissive: m.emissive,
                     ambient: m.ambient,
@@ -9581,6 +9589,7 @@ impl Gfx3d {
                     srgb_bcr_slots,
                     global_normal_uv: m.global_normal_uv,
                     detail_normal_strength: m.detail_normal_strength,
+                    global_overlay,
                     layer_mask: std::array::from_fn(|i| {
                         let slot = textures.texture_slot(m.layer_mask_texture_id[i]);
                         debug_assert!(slot < 0x8000_0000);
@@ -9595,6 +9604,11 @@ impl Gfx3d {
             self.queued_log.push(format!(
                 "[wgr] native PBR sRGB views: model={} admittedSections={}/{}",
                 name.unwrap_or("(unnamed)"), srgb_admission.1, srgb_admission.0));
+        }
+        if global_overlay_admission.0 != 0 {
+            self.queued_log.push(format!(
+                "[wgr] native global overlay bindings: model={} admittedSections={}/{}",
+                name.unwrap_or("(unnamed)"), global_overlay_admission.1, global_overlay_admission.0));
         }
         // Source allocation precedes the coherent three-table commit; IDs remain append-only.
         self.gpu_section_src.reserve(srcs.len());
@@ -12559,7 +12573,7 @@ fn multi_layer_normals_keep_every_layout_in_step() {
     // Mirrors the C++ static_assert in include/wgpu_renderer.hpp.
     assert_eq!(
         std::mem::size_of::<WgrModelMaterial>(),
-        440,
+        456,
         "WgrModelMaterial includes native PBR scales; wgpu_renderer.hpp must agree"
     );
     assert_eq!(
@@ -12574,6 +12588,9 @@ fn multi_layer_normals_keep_every_layout_in_step() {
     assert_eq!(std::mem::offset_of!(WgrModelMaterial, layer_mask_params), 360);
     assert_eq!(std::mem::offset_of!(WgrModelMaterial, global_normal_uv), 408);
     assert_eq!(std::mem::offset_of!(WgrModelMaterial, detail_normal_strength), 424);
+    assert_eq!(std::mem::offset_of!(WgrModelMaterial, global_overlay_texture_id), 440);
+    assert_eq!(std::mem::offset_of!(WgrModelMaterial, global_overlay_black), 448);
+    assert_eq!(std::mem::offset_of!(WgrModelMaterial, global_overlay_white), 452);
 
     // The GPU-side struct: WGSL 16-aligns the trailing array<vec4<f32>>, Rust does not, so
     // the pad words are explicit and the offsets are the contract.
@@ -12589,12 +12606,13 @@ fn multi_layer_normals_keep_every_layout_in_step() {
         std::mem::offset_of!(cull::SectionMaterialGpu, layer_colour),
         192
     );
-    assert_eq!(std::mem::size_of::<cull::SectionMaterialGpu>(), 416);
+    assert_eq!(std::mem::size_of::<cull::SectionMaterialGpu>(), 432);
     assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, native_pbr_scales), 304);
     assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, layer_mask), 320);
     assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, srgb_bcr_slots), 368);
     assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, global_normal_uv), 384);
     assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, detail_normal_strength), 400);
+    assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, global_overlay), 416);
     assert_eq!(
         std::mem::offset_of!(cull::SectionMaterialGpu, normal_power),
         256
@@ -12634,7 +12652,7 @@ fn multi_layer_normals_keep_every_layout_in_step() {
                 "{name} needs three pad words after normal_power for the 16 stride"
             );
         }
-        for field in ["crown_ao_p0: vec4<f32>,", "crown_ao_p1: vec4<f32>,", "native_pbr_scales: vec4<f32>,", "layer_mask: array<vec4<f32>, 3>,", "srgb_bcr_slots: vec4<u32>,", "global_normal_uv: vec4<f32>,", "detail_normal_strength: vec4<f32>,"] {
+        for field in ["crown_ao_p0: vec4<f32>,", "crown_ao_p1: vec4<f32>,", "native_pbr_scales: vec4<f32>,", "layer_mask: array<vec4<f32>, 3>,", "srgb_bcr_slots: vec4<u32>,", "global_normal_uv: vec4<f32>,", "detail_normal_strength: vec4<f32>,", "global_overlay: vec4<f32>,"] {
             assert!(
                 src.contains(field),
                 "{name} must mirror SectionMaterialGpu::{field}"
