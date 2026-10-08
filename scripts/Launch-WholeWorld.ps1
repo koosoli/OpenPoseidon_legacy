@@ -11,6 +11,7 @@ param(
     [ValidateRange(500,30000000)][double]$Altitude = 4500,
     [switch]$Globe,
     [switch]$CachedBuildings,
+    [switch]$CachedFeatures,
     [switch]$LocalSurface,
     [string]$CacheDirectory = (Join-Path $env:LOCALAPPDATA 'OpenPoseidon/world-stream'),
     [switch]$Fullscreen,
@@ -32,6 +33,7 @@ if (!$PrepareOnly -and !$env:LOCK_OWNER) {
     if ($Fullscreen) { $forward += '-Fullscreen' }
     if ($Globe) { $forward += '-Globe' }
     if ($CachedBuildings) { $forward += '-CachedBuildings' }
+    if ($CachedFeatures) { $forward += '-CachedFeatures' }
     if ($LocalSurface) { $forward += '-LocalSurface' }
     if ($LogFile) { $forward += @('-LogFile',$LogFile) }
     $previous = $env:LOCK_OWNER
@@ -124,6 +126,7 @@ $settings = @{
     POSEIDON_EARTH_CACHE=$CacheDirectory; POSEIDON_EARTH_IMAGERY=$imagery;
     WGR_GRASS='0'; WGR_TERRAIN_RESOURCE_REUSE='1';
     POSEIDON_EARTH_BUILDINGS=$(if($CachedBuildings){'1'}else{'0'});
+    POSEIDON_EARTH_FEATURES=$(if($CachedFeatures){'1'}else{'0'});
     POSEIDON_EARTH_SURFACE=$(if($LocalSurface){'1'}else{'0'})
 }
 $saved = @{}

@@ -52,8 +52,28 @@ int main(int argc,char** argv) {
     assert(!Surface::Build(invalid,{black,1,1},{northSouth,2,2},64).error.empty());
     auto remote=window;remote.latitude=0;remote.longitude=179.995;
     assert(Surface::Build(remote,{black,1,1},{northSouth,2,2},64).pixels.empty());
+    // A prepared regional pyramid covers the far mesh too; near-window edge
+    // pixels converge to its exact sampled colour rather than raw NASA.
+    auto regionalWindow=window;regionalWindow.horizonRadius=2000;
+    const std::vector<Surface::SourceView> sources{{{northSouth,2,2},49.58,6.08,49.64,6.18,100}};
+    const auto regional=Surface::BuildRegional(regionalWindow,{black,1,1},sources,64);
+    assert(regional.cellPresent && regional.error.empty() && regional.farPixels.size()==64*64*4);
+    const auto farWindow=Surface::FarWindow(regionalWindow);
+    for(int row:{0,12,32,63})for(int col:{0,63}) {
+        const double x=window.x+(col+.5)*window.span/64,z=window.z+(64-row-.5)*window.span/64;
+        const auto fuv=Surface::LocalUv(farWindow,x,z);
+        const auto farColor=Surface::Sample({regional.farPixels.data(),64,64},fuv.x,fuv.y,false);
+        for(int k=0;k<3;++k)assert(std::abs(regional.pixels[(row*64+col)*4+k]-farColor[k])<=2);
+    }
+    auto outsideNear=regionalWindow;outsideNear.x=outsideNear.z=9500;outsideNear.horizonRadius=64000;
+    assert(Surface::BuildRegional(outsideNear,{black,1,1},sources,64).cellPresent);
+    assert(Surface::BuildRegional(remote,{black,1,1},sources,64).pixels.empty());
+    int cancelRows=0;const auto regionalCancelled=Surface::BuildRegional(regionalWindow,{black,1,1},sources,64,[&]{return ++cancelRows==68;});
+    assert(regionalCancelled.error=="superseded" && regionalCancelled.pixels.empty() && regionalCancelled.farPixels.empty());
+    auto badSource=sources;badSource[0].featherMetres=0;
+    assert(!Surface::BuildRegional(regionalWindow,{black,1,1},badSource,64).error.empty());
     EarthTerrainStream::Patch patch{};patch.originLatitude=49.61;patch.originLongitude=6.13;
-    patch.x=patch.z=3200;patch.gridMetres=25;patch.originRevision=3;patch.generation=9;
+    patch.x=patch.z=3200;patch.gridMetres=25;patch.originRevision=3;patch.generation=9;patch.horizonRadius=64000;
     {
         Surface missing("absent-surface-cache","absent-overview.jpg");
         missing.Request(patch);patch.originRevision=4;patch.generation=10;missing.Request(patch);
@@ -69,6 +89,15 @@ int main(int argc,char** argv) {
         const auto ready=Wait(worker);
         assert(ready->error.empty() && ready->cellPresent && ready->window.revision==5 && ready->window.generation==11);
         assert(ready->pixels.size()==2048*2048*4);
+        assert(ready->farPixels.size()==2048*2048*4);
+        // The regional JPEG's white exterior is missing national coverage, not
+        // white terrain. It must yield the NASA fallback beyond that boundary.
+        const double metres=Earth::Radius*Earth::Pi/180;
+        const double outsideX=Earth::Anchor+(6.4-6.13)*metres*std::cos(49.61*Earth::Pi/180);
+        const double outsideZ=Earth::Anchor+(49.95-49.61)*metres;
+        const auto fuv=Surface::LocalUv(Surface::FarWindow(ready->window),outsideX,outsideZ);
+        const auto outsideColor=Surface::Sample({ready->farPixels.data(),2048,2048},fuv.x,fuv.y,false);
+        assert(outsideColor[0]<220 && outsideColor[1]<220 && outsideColor[2]<220);
         std::cout<<"Actual cached ACT/NASA decode/hash/composition PASS; generation 11 revision 5\n";
         // An invalid receipt never publishes pixels. Reusing the real cached
         // source tests the production validation path without another request.

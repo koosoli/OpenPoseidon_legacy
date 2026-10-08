@@ -3,7 +3,13 @@
 This opt-in Freefly experiment loads real elevation around a geographic origin
 and moves the terrain working set as the camera travels. Normal OFP gameplay is
 unchanged. It includes a low-detail satellite globe overview; it is not
-a VBS4-equivalent world simulation.
+a VBS4-equivalent world simulation. The 2026-10-08 extension connects resident
+near terrain to infantry ground/contact queries, adds optional cached OSM roads,
+forests, signs and inland water, expands Luxembourg imagery into a regional
+near/far pyramid, and adds altitude-aware clouds, stars and bounded near ocean.
+Far terrain remains presentation only. See the integrated verification ledger
+and Worldgen feature audit for tested limits; full Worldgen functionality has
+not been transferred.
 
 ## Backup and development
 

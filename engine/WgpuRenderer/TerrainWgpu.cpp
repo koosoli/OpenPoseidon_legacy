@@ -18,6 +18,7 @@
 #include "EngineWgpu.hpp"
 #include "TextureWgpu.hpp"
 #include "TextureBankWgpu.hpp"
+#include "WaterWgpu.hpp"
 
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Graphics/Rendering/Frame/PresentationSnapshot.hpp> // RenderSnapshot S1: the frame clock
@@ -406,7 +407,12 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
             if(const char* cache=std::getenv("POSEIDON_EARTH_CACHE");cache && *cache)
                 _earthBuildings=std::make_unique<EarthBuildingStream>(std::filesystem::u8path(cache));
         }
-        LOG_INFO(Graphics, "Earth terrain prototype enabled: adaptive 6.4/25.6km near window plus curved horizon, freefly only");
+        if(const char* features=std::getenv("POSEIDON_EARTH_FEATURES");features && std::strcmp(features,"1")==0)
+        {
+            if(const char* cache=std::getenv("POSEIDON_EARTH_CACHE");cache && *cache)
+                _earthFeatures=std::make_unique<EarthFeatureStream>(std::filesystem::u8path(cache));
+        }
+        LOG_INFO(Graphics, "Earth terrain prototype enabled: adaptive 6.4/25.6km resident ground plus curved horizon");
     }
     _baseMult = EnvFloat("WGR_TERRAIN_LOD_BASE", 4.0f);
     _lodRatio = EnvFloat("WGR_TERRAIN_LOD_RATIO", 2.0f);
@@ -3222,6 +3228,8 @@ TerrainWgpu::~TerrainWgpu()
 {
     _earthSurface.reset();
     _earthBuildings.reset();
+    _earthFeatures.reset();
+    EarthStreaming::Locations().ClearGround();
     _earthStream.reset(); // Cancel HTTPS and join before any render-owned state disappears.
     // EngineWgpu releases TerrainWgpu after stopping its render thread, while
     // the renderer and texture bank are still alive.
@@ -3231,6 +3239,9 @@ TerrainWgpu::~TerrainWgpu()
     if (_earthGlobeTexture) wgr_texture_destroy(_renderer,_earthGlobeTexture);
     if (_earthNearMesh) wgr_mesh_destroy(_renderer,_earthNearMesh);
     if (_earthSurfaceTexture) wgr_texture_destroy(_renderer,_earthSurfaceTexture);
+    if (_earthFarTexture) wgr_texture_destroy(_renderer,_earthFarTexture);
+    for(auto mesh:_earthFeatureMeshes)if(mesh)wgr_mesh_destroy(_renderer,mesh);
+    for(auto texture:_earthFeatureTextures)if(texture)wgr_texture_destroy(_renderer,texture);
 }
 
 void TerrainWgpu::UploadEarthGlobe(double latitude,double longitude)
@@ -3303,7 +3314,7 @@ static WgrMeshVertex EarthNearPoint(const EarthTerrainStream::Patch& p,int x,int
     return v;
 }
 
-void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p)
+void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p,bool localUv)
 {
     constexpr int n = Earth::HorizonSamples;
     std::vector<WgrMeshVertex> vertices(n*n);
@@ -3313,7 +3324,8 @@ void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p)
     const auto geographicUv = [&](float x, float z) {
         // Always use the fixed geographic origin. Replacing its latitude with
         // a moving patch centre changes the longitude scale and swims imagery.
-        const auto uv=Earth::OverviewUv(p.originLatitude,p.originLongitude,x,z);
+        const EarthSurfaceStream::Window window{p.originLatitude,p.originLongitude,p.x,p.z,256*p.gridMetres,p.originRevision,p.generation,p.horizonRadius};
+        const auto uv=localUv?EarthSurfaceStream::LocalUv(EarthSurfaceStream::FarWindow(window),x,z):Earth::OverviewUv(p.originLatitude,p.originLongitude,x,z);
         return WgrVec2{float(uv.x),float(uv.y)};
     };
     for (int z = 0; z < n; ++z)
@@ -3370,6 +3382,7 @@ void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p)
     auto skirt = [&](int x0,int z0,int x1,int z1) {
         const uint32_t a = uint32_t(vertices.size());
         auto first = point(x0,z0), second = point(x1,z1);
+        if(localUv){first.uv=geographicUv(first.pos.x,first.pos.z);second.uv=geographicUv(second.pos.x,second.pos.z);}
         vertices.push_back(first); vertices.push_back(second);
         first.pos.y -= 300.0f; second.pos.y -= 300.0f;
         vertices.push_back(first); vertices.push_back(second);
@@ -3385,7 +3398,7 @@ void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p)
     if (_earthHorizonMesh) wgr_mesh_destroy(_renderer,_earthHorizonMesh);
     _earthHorizonMesh = replacement;
     _earthHorizonIndices = uint32_t(indices.size());
-    if(_earthSurface)UploadEarthNear(p,false);
+    if(_earthSurface)UploadEarthNear(p,localUv);
 }
 
 void TerrainWgpu::UploadEarthNear(const EarthTerrainStream::Patch& p,bool localUv)
@@ -3428,6 +3441,9 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         _earthPatch.reset();
         if(_earthSurface)_earthSurface->Relocate();
         if(_earthSurfaceTexture){EngineWgpu::AcquireProducerWindow("Earth surface relocate");wgr_texture_destroy(_renderer,_earthSurfaceTexture);_earthSurfaceTexture=0;}
+        if(_earthFarTexture){EngineWgpu::AcquireProducerWindow("Earth far surface relocate");wgr_texture_destroy(_renderer,_earthFarTexture);_earthFarTexture=0;}
+        if(_earthFeatures)_earthFeatures->Relocate();
+        for(size_t i=0;i<_earthFeatureMeshes.size();++i)if(_earthFeatureMeshes[i]){EngineWgpu::AcquireProducerWindow("Earth features relocate");wgr_mesh_destroy(_renderer,_earthFeatureMeshes[i]);_earthFeatureMeshes[i]=0;_earthFeatureIndices[i]=0;}
 
         if(_earthBuildings)_earthBuildings->Relocate();
         if(_earthBuildingMesh){EngineWgpu::AcquireProducerWindow("Earth buildings relocate");wgr_mesh_destroy(_renderer,_earthBuildingMesh);_earthBuildingMesh=0;_earthBuildingIndices=0;}
@@ -3454,8 +3470,10 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         EngineWgpu::AcquireProducerWindow("Earth terrain patch");
         UploadEarthHorizon(p);
         if(_earthSurfaceTexture){wgr_texture_destroy(_renderer,_earthSurfaceTexture);_earthSurfaceTexture=0;}
+        if(_earthFarTexture){wgr_texture_destroy(_renderer,_earthFarTexture);_earthFarTexture=0;}
 
         wgr_terrain_set_heightmap(_renderer, p.heights.data(), &_params);
+        EarthStreaming::Locations().PublishGround({p.x,p.z,p.gridMetres,Earth::GridSamples,p.originRevision,p.generation,p.heights});
         const auto extrema = std::minmax_element(p.heights.begin(),p.heights.end());
         LOG_INFO(Graphics, "Earth terrain patch {}: origin [{},{}], centre [{},{}], height {}..{}m, downloads {}, disk hits {}, worker {}s, geographic origin [{},{}], revision {}",
             p.generation,p.x,p.z,p.latitude,p.longitude,*extrema.first,*extrema.second,p.downloads,p.cacheHits,p.seconds,
@@ -3480,18 +3498,51 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                 const auto texture=wgr_texture_create(_renderer,EarthSurfaceStream::AtlasSize,EarthSurfaceStream::AtlasSize,WGR_TEXTURE_RGBA8,1,
                     WGR_TEXTURE_GEN_MIPS,atlas->pixels.data(),uint32_t(atlas->pixels.size()));
                 if(!texture)throw std::runtime_error("Earth surface atlas allocation failed");
-                UploadEarthNear(*_earthPatch,true);
+                const auto farTexture=wgr_texture_create(_renderer,EarthSurfaceStream::AtlasSize,EarthSurfaceStream::AtlasSize,WGR_TEXTURE_RGBA8,1,
+                    WGR_TEXTURE_GEN_MIPS,atlas->farPixels.data(),uint32_t(atlas->farPixels.size()));
+                if(!farTexture){wgr_texture_destroy(_renderer,texture);throw std::runtime_error("Earth far surface atlas allocation failed");}
+                UploadEarthHorizon(*_earthPatch,true);
                 if(_earthSurfaceTexture)wgr_texture_destroy(_renderer,_earthSurfaceTexture);
                 _earthSurfaceTexture=texture;
-                LOG_INFO(Graphics,"Earth local surface: ACT ortho_2023 CC0, 2048x2048 atlas, generation {}, revision {}, one extra draw; no extra triangles",
+                if(_earthFarTexture)wgr_texture_destroy(_renderer,_earthFarTexture);
+                _earthFarTexture=farTexture;
+                LOG_INFO(Graphics,"Earth local surface: ACT ortho_2023 CC0, paired 2048x2048 near/far atlases, generation {}, revision {}, one extra draw; no extra triangles",
                     atlas->window.generation,atlas->window.revision);
             }
             else LOG_INFO(Graphics,"Earth local surface: NASA fallback, generation {}, revision {}, {}",
                 atlas->window.generation,atlas->window.revision,atlas->error.empty()?"outside prepared Luxembourg cell":atlas->error);
         }
     }
-    _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices,_earthGlobeTexture);
-    if(_earthSurface)_engine.SubmitEarthHorizon(_earthNearMesh,_earthNearIndices,_earthSurfaceTexture?_earthSurfaceTexture:_earthGlobeTexture);
+    _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices,_earthFarTexture?_earthFarTexture:_earthGlobeTexture,_earthFarTexture?3:2);
+    if(_earthSurface)_engine.SubmitEarthHorizon(_earthNearMesh,_earthNearIndices,_earthSurfaceTexture?_earthSurfaceTexture:_earthGlobeTexture,_earthSurfaceTexture?3:2);
+    if(_earthFeatures && camera.Position().Y()<12000.0f)
+    {
+        _earthFeatures->Request(*_earthPatch,camera.Position().X(),camera.Position().Z());
+        if(auto mesh=_earthFeatures->TakeReady();mesh && mesh->revision==origin.revision && mesh->generation==_earthPatch->generation)
+        {
+            EngineWgpu::AcquireProducerWindow("Earth cached landscape features");
+            constexpr uint8_t colors[EarthFeatureStream::KindCount][4]={{67,65,59,255},{116,97,69,255},{46,67,38,255},{184,178,153,255},{42,73,79,255}};
+            for(size_t kind=0;kind<EarthFeatureStream::KindCount;++kind)
+            {
+                const auto& batch=mesh->batches[kind];
+                std::vector<WgrMeshVertex> vertices(batch.vertices.size());
+                for(size_t i=0;i<vertices.size();++i){const auto& v=batch.vertices[i];vertices[i].pos={v.x,v.y,v.z};vertices[i].normal={v.nx,v.ny,v.nz};vertices[i].uv={.5f,.5f};}
+                WgrMesh replacement=0;
+                if(!batch.indices.empty())replacement=wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(vertices),WgrSlice<uint32_t>(batch.indices));
+                if(!batch.indices.empty() && !replacement)throw std::runtime_error("Earth feature mesh allocation failed");
+                if(!_earthFeatureTextures[kind])_earthFeatureTextures[kind]=wgr_texture_create(_renderer,1,1,WGR_TEXTURE_RGBA8,1,0,colors[kind],4);
+                if(!_earthFeatureTextures[kind])throw std::runtime_error("Earth feature tint allocation failed");
+                if(_earthFeatureMeshes[kind])wgr_mesh_destroy(_renderer,_earthFeatureMeshes[kind]);
+                _earthFeatureMeshes[kind]=replacement;_earthFeatureIndices[kind]=uint32_t(batch.indices.size());
+                LOG_INFO(Graphics,"Earth cached feature kind {}: {} features, {} triangles; OpenStreetMap contributors, ODbL",kind,batch.features,batch.indices.size()/3);
+            }
+            _earthFeatureGeneration=mesh->generation;
+            if(!mesh->error.empty())LOG_INFO(Graphics,"Earth cached features: {}",mesh->error);
+        }
+        if(_earthFeatureGeneration==_earthPatch->generation)
+            for(size_t kind=0;kind<EarthFeatureStream::KindCount;++kind)
+                _engine.SubmitEarthHorizon(_earthFeatureMeshes[kind],_earthFeatureIndices[kind],_earthFeatureTextures[kind]);
+    }
     if(_earthBuildings && camera.Position().Y()<12000.0f)
     {
         _earthBuildings->Request(*_earthPatch,camera.Position().X(),camera.Position().Z());
@@ -3509,6 +3560,9 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         }
         if(_earthBuildingGeneration==_earthPatch->generation)_engine.SubmitEarthHorizon(_earthBuildingMesh,_earthBuildingIndices);
     }
+    // Water's scene-colour snapshot must include every opaque Earth draw.
+    if(auto* water=static_cast<WaterWgpu*>(_engine.GetWaterRenderer()))
+        water->DrawEarthWater(scene,_params.world_origin.x,_params.world_origin.y,_params.terrain_grid,_params.hm_width);
 }
 
 void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)

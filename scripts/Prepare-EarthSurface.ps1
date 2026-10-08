@@ -1,19 +1,24 @@
-param([string]$CacheDirectory=(Join-Path $env:LOCALAPPDATA 'OpenPoseidon/world-stream'))
+param([string]$CacheDirectory=(Join-Path $env:LOCALAPPDATA 'OpenPoseidon/world-stream'),
+ [ValidateSet('Cell','District','Context')][string]$Region='Cell')
 $ErrorActionPreference='Stop'
 $directory=[IO.Path]::GetFullPath((Join-Path $CacheDirectory 'surface'))
 $repo=[IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
 if($directory.StartsWith($repo+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Geographic data must remain outside the repository'}
-$image=Join-Path $directory 'lux-ortho-2023.jpg';$receipt=Join-Path $directory 'lux-ortho-2023.json'
+$south=49.60;$west=6.12;$north=49.62;$east=6.14;$size=2048;$name='lux-ortho-2023'
+if($Region-eq'District'){$south=49.52;$west=6.00;$north=49.70;$east=6.26;$size=4096;$name='lux-district-2023'}
+if($Region-eq'Context'){$south=49.40;$west=5.70;$north=50.20;$east=6.60;$size=4096;$name='lux-context-2023'}
+$image=Join-Path $directory ($name+'.jpg');$receipt=Join-Path $directory ($name+'.json')
 if((Test-Path -LiteralPath $image) -or (Test-Path -LiteralPath $receipt)){
  if(!(Test-Path -LiteralPath $image) -or !(Test-Path -LiteralPath $receipt)){throw 'Incomplete existing cache; inspect it before preparing again'}
  $existing=Get-Content -Raw -LiteralPath $receipt|ConvertFrom-Json
  if((Get-FileHash -LiteralPath $image -Algorithm SHA256).Hash.ToLowerInvariant() -ne $existing.sha256){throw 'Existing cache SHA mismatch; inspect it before preparing again'}
- Write-Output "Using existing prepared cell: $image";return
+ Write-Output "Using existing prepared $Region image: $image";return
 }
 # One manual WMS request, no retries, no background/worldwide imagery download.
 # WMS 1.3 EPSG:4326 axis order is latitude,longitude; row zero is north.
-$url='https://wmts1.geoportail.lu/opendata/service?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=ortho_2023&STYLES=&CRS=EPSG%3A4326&BBOX=49.60%2C6.12%2C49.62%2C6.14&WIDTH=2048&HEIGHT=2048&FORMAT=image%2Fjpeg'
-$max=8*1024*1024
+$bounds=(@($south,$west,$north,$east)|ForEach-Object{$_.ToString('R',[Globalization.CultureInfo]::InvariantCulture)})-join'%2C'
+$url="https://wmts1.geoportail.lu/opendata/service?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&LAYERS=ortho_2023&STYLES=&CRS=EPSG%3A4326&BBOX=$bounds&WIDTH=$size&HEIGHT=$size&FORMAT=image%2Fjpeg"
+$max=16*1024*1024
 Add-Type -AssemblyName System.Net.Http
 $client=[Net.Http.HttpClient]::new();$client.Timeout=[TimeSpan]::FromSeconds(60)
 $client.DefaultRequestHeaders.UserAgent.ParseAdd('OpenPoseidon-local-surface-prototype/1.0')
@@ -22,7 +27,7 @@ try{
  $response=$client.GetAsync($url,[Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
  $response.EnsureSuccessStatusCode()|Out-Null
  if($response.Content.Headers.ContentType.MediaType-ne'image/jpeg'){throw 'WMS did not return JPEG'}
- if($response.Content.Headers.ContentLength-gt$max){throw 'WMS compressed image exceeds 8 MiB'}
+ if($response.Content.Headers.ContentLength-gt$max){throw 'WMS compressed image exceeds 16 MiB'}
  $stream=$response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
  $buffer=[byte[]]::new(65536);$deadline=[DateTime]::UtcNow.AddSeconds(60)
  $cancel=[Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(60))
@@ -51,7 +56,7 @@ try{
   }
   $offset+=$length
  }
- if($width-ne2048 -or $height-ne2048){throw "Unexpected JPEG dimensions: ${width}x${height}"}
+ if($width-ne$size -or $height-ne$size){throw "Unexpected JPEG dimensions: ${width}x${height}"}
  New-Item -ItemType Directory -Force -Path $directory|Out-Null
  $temporary=$image+'.partial';[IO.File]::WriteAllBytes($temporary,$bytes)
  $hash=(Get-FileHash -LiteralPath $temporary -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -60,11 +65,11 @@ try{
   source='https://data.public.lu/fr/datasets/orthophoto-officielle-du-grand-duche-de-luxembourg-edition-2023/'
   licenceSource='https://data.public.lu/fr/datasets/bd-l-ortho-webservices-wms-et-wmts/'
   request=$url;crs='EPSG:4326';axisOrder='south latitude,west longitude,north latitude,east longitude';rowZero='north'
-  south=49.60;west=6.12;north=49.62;east=6.14;width=2048;height=2048;bytes=$bytes.Length;sha256=$hash
+  south=$south;west=$west;north=$north;east=$east;width=$size;height=$size;bytes=$bytes.Length;sha256=$hash;region=$Region
   preparedUtc=[DateTime]::UtcNow.ToString('o')
  }
  $manifest|ConvertTo-Json|Set-Content -LiteralPath ($receipt+'.partial') -Encoding utf8
  Move-Item -LiteralPath $temporary -Destination $image
  Move-Item -LiteralPath ($receipt+'.partial') -Destination $receipt
- Write-Output "Prepared one CC0 ACT 2023 cell: $image ($($bytes.Length) bytes; SHA256 $hash)"
+ Write-Output "Prepared one CC0 ACT 2023 $Region image: $image ($($bytes.Length) bytes; SHA256 $hash)"
 }finally{if($stream){$stream.Dispose()};if($response){$response.Dispose()};$memory.Dispose();$client.Dispose()}

@@ -7619,7 +7619,9 @@ void DrawMainWindow()
             const auto current=EarthStreaming::GetLocation();
             if (location.revision!=current.revision) location=current;
             ImGui::TextWrapped("Go to a geographic region without restarting. Elevation streams in after the overview; this preview does not relocate the playable mission.");
-            ImGui::TextWrapped("Cached building footprints: (c) OpenStreetMap contributors, ODbL 1.0. openstreetmap.org/copyright. Optional preview; no building collision or interiors.");
+            ImGui::TextWrapped("Resident near ground supports infantry; uncovered teleports are rejected. Geographic Go moves the camera, not the player.");
+            ImGui::TextWrapped("Cached buildings and landscape features: (c) OpenStreetMap contributors, ODbL 1.0. openstreetmap.org/copyright. Presentation prototype; no building collision or road navigation.");
+            ImGui::TextWrapped("Optional Luxembourg imagery: ACT ortho_2023, CC0 1.0. Prepared regional coverage; NASA overview elsewhere.");
             ImGui::InputDouble("Latitude",&location.latitude,0.1,1.0,"%.6f");
             ImGui::InputDouble("Longitude",&location.longitude,0.1,1.0,"%.6f");
             ImGui::InputFloat("Altitude (metres)",&location.altitude,500.0f,5000.0f,"%.0f");
