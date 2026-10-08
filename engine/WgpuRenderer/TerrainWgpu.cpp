@@ -3538,8 +3538,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                 atlas->window.generation,atlas->window.revision,atlas->error.empty()?"outside prepared Luxembourg cell":atlas->error);
         }
     }
-    _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices,_earthFarTexture?_earthFarTexture:_earthGlobeTexture,_earthFarTexture?3:2);
-    if(_earthSurface)_engine.SubmitEarthHorizon(_earthNearMesh,_earthNearIndices,_earthSurfaceTexture?_earthSurfaceTexture:_earthGlobeTexture,_earthSurfaceTexture?3:2);
+    _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices,_earthFarTexture?_earthFarTexture:_earthGlobeTexture,_earthFarTexture?3:2,true);
+    if(_earthSurface)_engine.SubmitEarthHorizon(_earthNearMesh,_earthNearIndices,_earthSurfaceTexture?_earthSurfaceTexture:_earthGlobeTexture,_earthSurfaceTexture?3:2,true);
     if(_earthFeatures && camera.Position().Y()<12000.0f)
     {
         _earthFeatures->Request(*_earthPatch,camera.Position().X(),camera.Position().Z());
