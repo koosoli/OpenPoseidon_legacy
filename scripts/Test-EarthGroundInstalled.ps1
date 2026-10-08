@@ -1,8 +1,8 @@
 <# Installed runtime owner invokes through scripts/with-game-lock.sh after a
    matched deployment. Tests the actual stock controlled SoldierWB and ordinary
    SDL input. The original retail Everon mission supplies real model/config data;
-   Earth rendering and resident ground replace its terrain queries. No empty WRP
-   or NoShape actor is accepted. Screenshots still require visual inspection. #>
+   Earth rendering and resident ground replace its terrain queries. The actual
+   player's land-contact vertices must exist. Screenshots require visual inspection. #>
 [CmdletBinding()]
 param(
     [ValidatePattern('^[a-fA-F0-9]{8,40}$')][string]$ExpectedCommit,
@@ -33,6 +33,13 @@ function GroundData([string]$value){
     return $ground
 }
 function HorizontalDistance($a,$b){return [Math]::Sqrt([Math]::Pow((Num $a[0])-(Num $b[0]),2)+[Math]::Pow((Num $a[1])-(Num $b[1]),2))}
+function AssertCameraView($camera,[string]$view){
+    # World::GetCameraType(): CamInternal=0, CamExternal=2. cameraView SQF is
+    # unavailable here; the existing read-only harness reports the same state.
+    $expected=if($view-ceq'EXTERNAL'){2}else{Require ($view-ceq'INTERNAL') 'Unknown capture view';0}
+    Require ($null-ne$camera.cameraType -and (Num $camera.cameraType)-eq$expected) ('Actual camera view is not '+$view)
+    Require (!$camera.cameraEffect -and !$camera.playerSuspended) 'Player camera is overridden/suspended'
+}
 function AssertStanding($state){
     Require ($state.alive -and $state.onFoot -and $state.ground.covered) 'Controlled player lost live resident ground'
     Require ($state.ground.playerContactPoints-gt0 -and $state.contactClearance-gt-9000) 'Stock model has no real land-contact shape (NoShape is not acceptance)'
@@ -52,6 +59,9 @@ if($SelfTest){
         try{AssertStanding $copy}catch{$rejected=$true};Require $rejected 'Invalid model/contact clearance accepted'
     }
     $rejected=$false;try{$null=Num 'NaN'}catch{$rejected=$true};Require $rejected 'Nonfinite coordinate accepted'
+    AssertCameraView @{cameraType=2;cameraEffect=$false;playerSuspended=$false} 'EXTERNAL'
+    $rejected=$false;try{AssertCameraView @{cameraType=0;cameraEffect=$false;playerSuspended=$false} 'EXTERNAL'}catch{$rejected=$true}
+    Require $rejected 'First-person camera accepted as an external capture'
     Write-Host 'Earth installed acceptance helpers PASS; no game, profile or GPU accessed'
     return
 }
@@ -83,7 +93,7 @@ $settings=@{
 }
 $clear=@('POSEIDON_REFORGER_WORLD','POSEIDON_REFORGER_OBJECTS','POSEIDON_REFORGER_STREAM','POSEIDON_TEST_RAIN','POSEIDON_SNOW_TEST_RATE','POSEIDON_SNOW_TEST_FLAKES')
 $saved=@{};foreach($key in @($settings.Keys)+$clear){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
-$result=[ordered]@{passed=$false;installed=$before;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;fixture=$mission;samples=@();captures=@{};scope='Actual live stock player, near-resident terrain only, ordinary W and Z input. Native buildings/water/navigation, globe/far collision and appearance are not established. Parent inspects captures.'}
+$result=[ordered]@{passed=$false;installed=$before;scriptSha256=(Get-FileHash -LiteralPath $PSCommandPath).Hash;fixture=$mission;samples=@();captures=@{};captureViews=@{};scope='Actual live stock player, near-resident terrain only, ordinary W and Z input. Native buildings/water/navigation, globe/far collision and appearance are not established. Parent inspects captures.'}
 $p=$null;$client=$null;$writer=$null;$reader=$null;$heldKey=$null
 $totalDeadline=[DateTime]::UtcNow.AddSeconds(240+3*$PatchTimeoutSeconds)
 function Health{
@@ -120,11 +130,30 @@ function WaitGround([uint64]$revision){
         Start-Sleep -Milliseconds 250
     }while($true)
 }
-function Capture([string]$label){
+function CameraView([string]$view){
+    $state=Send @{cmd='player_weapon_state'};AssertCameraView $state $view
+    $position=(Send @{cmd='dev_wet_soil_diagnostic';action='state'}).camera.position
+    Require ($position.Count-eq3) 'Missing actual rendered camera'
+    $distance=HorizontalDistance @($position[0],$position[2]) @($state.x,$state.z)
+    if($view-ceq'EXTERNAL'){Require ($distance-gt1 -and $distance-lt30) 'External mode has not moved the rendered camera behind the player'}
+    return @{cameraView=$view;cameraType=$state.cameraType;positionEngineXYZ=$position;playerDistanceHorizontal=$distance}
+}
+function SwitchView([string]$view){
+    # Camera smoothing must advance before pausing again for a screenshot.
+    Exec ('setAccTime 1;player switchCamera "'+$view+'"');Start-Sleep -Milliseconds 1500
+    Exec 'setAccTime 0';Start-Sleep -Milliseconds 200
+    $null=CameraView $view
+}
+function Capture([string]$label,[string]$view){
+    if($label.EndsWith('-third')){Require ($view-ceq'EXTERNAL') 'Third-person capture requires an explicit external view check'}
+    if($label.EndsWith('-first')){Require ($view-ceq'INTERNAL') 'First-person capture requires an explicit internal view check'}
+    $beforeView=if($view){CameraView $view}else{$null}
     $path=Join-Path $out ($label+'.png');$null=Send @{cmd='screenshot';path=$path}
     $until=[DateTime]::UtcNow.AddSeconds(15)
     while(!(Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length-eq0){Health;Require ([DateTime]::UtcNow-lt$until) 'Screenshot missing';Start-Sleep -Milliseconds 100}
+    $afterView=if($view){CameraView $view}else{$null}
     $result.captures[$label]=$path
+    if($view){$result.captureViews[$label]=@{before=$beforeView;after=$afterView}}
 }
 function CameraClearance{
     $camera=(Send @{cmd='dev_wet_soil_diagnostic';action='state'}).camera.position
@@ -156,6 +185,11 @@ try{
     foreach($key in $clear){[Environment]::SetEnvironmentVariable($key,$null,'Process')}
     foreach($key in $settings.Keys){[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}
     [IO.File]::WriteAllText((Join-Path $profile 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
+    # Difficulty belongs to UserInfo.cfg, not graphics.cfg. Seed both modes in
+    # the private test profile, without touching the owner's saved preferences.
+    $playerProfile=Join-Path $profile 'Users/EarthGroundAcceptance';$null=New-Item -ItemType Directory -Force -Path $playerProfile
+    [IO.File]::WriteAllText((Join-Path $playerProfile 'UserInfo.cfg'),"diff3rdPersonView[]={1,1};`neasyMode=1;`n")
+    [IO.File]::WriteAllText((Join-Path $profile 'game.cfg'),"activeProfile=""EarthGroundAcceptance"";`n")
     $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
     $argv=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--vd','4000','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--test-world-hour','12','--log-file',('"'+$log+'"'))
     $p=Start-Process (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -ArgumentList $argv -RedirectStandardOutput (Join-Path $out 'stdout.log') -RedirectStandardError $stderr -PassThru
@@ -169,8 +203,9 @@ try{
     while((Eval 'triSceneReady')-cne'OK'){Health;Require ([DateTime]::UtcNow-lt$until) 'Scene-ready deadline';Start-Sleep -Milliseconds 250}
     Exec 'setAccTime 0;player allowDamage false;0 setRain 0;0 setOvercast 0;0 setFog 0;triDevPanelShow 0;player switchCamera "INTERNAL"'
     Require ((Eval 'typeOf player')-ceq'SoldierWB' -and (Eval 'vehicle player == player')) 'Actual stock on-foot player missing'
+    Require ((Eval 'triPlayerName')-ceq'EarthGroundAcceptance') 'Isolated difficulty profile was not selected'
     $initialLocation=Location;$result.initialGround=WaitGround $initialLocation.revision
-    Require ($result.initialGround.playerContactPoints-gt0) 'Stock player is NoShape or lacks actual land-contact vertices'
+    Require ($result.initialGround.playerContactPoints-gt0) 'Actual stock player lacks land-contact vertices'
     # Exact owner reproduction: third SQF coordinate is AGL, not absolute Y.
     Exec 'player setPos [6181.81,6985.71,0.60];player setDir 283.2;player setUnitPos "UP"'
     $teleport=State 'reported-teleport-paused';$result.teleport=$teleport
@@ -178,15 +213,15 @@ try{
     Require ($teleport.ground.height-gt100 -and $teleport.position[2]-gt100) 'Reported buried-player reproduction used zero/fixture ground'
     Exec 'setAccTime 1';CentreLook;Start-Sleep -Milliseconds 800
     $standing=State 'standing-settled';Require (!$standing.ground.playerDown) 'Initial player is prone'
-    $result.walk=Walk 'walk' 4 $false;$result.standingCamera=CameraClearance;Capture 'standing-first'
-    Exec 'player switchCamera "EXTERNAL"';Start-Sleep -Milliseconds 350;Capture 'standing-third'
-    Exec 'player switchCamera "INTERNAL";setAccTime 1';Tap 29
+    $result.walk=Walk 'walk' 4 $false;$result.standingCamera=CameraClearance;Capture 'standing-first' 'INTERNAL'
+    SwitchView 'EXTERNAL';Capture 'standing-third' 'EXTERNAL'
+    SwitchView 'INTERNAL';Exec 'setAccTime 1';Tap 29
     $until=[DateTime]::UtcNow.AddSeconds(8)
     do{Start-Sleep -Milliseconds 200;$prone=State 'prone-transition';Require ([DateTime]::UtcNow-lt$until) 'Ordinary Z did not enter prone posture'}while(!$prone.ground.playerDown)
-    $result.crawl=Walk 'crawl' 2 $true;$result.proneCamera=CameraClearance;Capture 'prone-first'
+    $result.crawl=Walk 'crawl' 2 $true;$result.proneCamera=CameraClearance;Capture 'prone-first' 'INTERNAL'
     Require ($result.proneCamera.clearance-lt$result.standingCamera.clearance-.25) 'Prone camera did not lower with actual posture'
-    Exec 'player switchCamera "EXTERNAL"';Start-Sleep -Milliseconds 350;Capture 'prone-third'
-    Exec 'player switchCamera "INTERNAL";setAccTime 1';Tap 29
+    SwitchView 'EXTERNAL';Capture 'prone-third' 'EXTERNAL'
+    SwitchView 'INTERNAL';Exec 'setAccTime 1';Tap 29
     $until=[DateTime]::UtcNow.AddSeconds(8)
     do{Start-Sleep -Milliseconds 200;$up=State 'stand-transition';Require ([DateTime]::UtcNow-lt$until) 'Ordinary Z did not leave prone posture'}while($up.ground.playerDown)
     Exec 'setAccTime 0'
