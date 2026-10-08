@@ -2151,6 +2151,15 @@ void Landscape::Draw(Scene& scene)
             GEngine->EnableReorderQueues(true);
             terrain->DrawTerrain(scene,0,0,GetLandRange(),GetLandRange());
         }
+        // DrawRect normally owns these scene passes as well as finite terrain.
+        // Skipping that rectangle must not discard the queued player/objects:
+        // ObjectsDrawn only runs Pass3 and clears the working merger list.
+        GEngine->FlushQueues();
+        GEngine->EnableReorderQueues(true);
+        scene.DrawObjectsAndShadowsPass1();
+        GEngine->FlushQueues();
+        scene.DrawObjectsAndShadowsPass2();
+        GEngine->EnableReorderQueues(false);
         return;
     }
 
