@@ -131,6 +131,27 @@ fog; it never changes weather/fog settings. Fog-free GI remains experimental
 pending paired image acceptance. The 1000 m working range alone does not make
 fogged backbuffer colors valid lighting donors.
 
+The installed harness accepts `-FogAmount` (default `0.25`, matching earlier
+stock-Everon receipts). Run these as separate owned launches under the shared
+game lock, with the integrated installed commit and an already prepared stage:
+
+```powershell
+./scripts/Test-ReShadeDepthInstalled.ps1 -ExpectedCommit <commit> -RuntimeDirectory <stage> -Mode SceneDH -MsaaSamples 4 -UsePreviewControl -FogAmount 0 -MeasureGpu
+./scripts/Test-ReShadeDepthInstalled.ps1 -ExpectedCommit <commit> -RuntimeDirectory <stage> -Mode SceneDH -MsaaSamples 4 -UsePreviewControl -FogAmount 0.25 -ExpectFogRefusal
+```
+
+The first retains the fixed-camera native/processed beauty pair and true GPU
+timing windows; operator image judgement is still required. The second expects
+status 7 instead of waiting for status 2, requires a fresh valid bound depth
+witness with the producer's fog-disabled flag false, and verifies explicit
+native-fog errors for `on`, `capture` and `measure`. It checks disabled effects,
+unchanged capture/timing queues, saves a native screenshot, then selects Off and
+checks depth release and clean exit. Its receipt sets `fogRefusalPassed` and
+`testSucceeded` on success, while `captureSucceeded` and `visualAccepted` stay
+false. It does not claim processed beauty or performance acceptance. Expected
+refusal cannot be combined with measurement or resize acceptance. Fog values
+use invariant decimal formatting in both mission and runtime setup.
+
 The loading checkbox defaults false in `GraphicsConfig` and uses the same
 `GamePaths::UserDir()/graphics.cfg` as startup. On normal Windows CWR paths this
 is `%APPDATA%/CWR/graphics.cfg`; `POSEIDON_USER_DIR` overrides it for an isolated

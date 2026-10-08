@@ -10,6 +10,8 @@ param(
  [switch]$VerifyResize,
  [switch]$UsePreviewControl,
  [switch]$MeasureGpu,
+ [ValidateRange(0.0,1.0)][double]$FogAmount=0.25,
+ [switch]$ExpectFogRefusal,
  # Official GenericDepth 6.8: 0=end-of-frame, 1=before-clears,
  # 2=before-clears plus Vulkan depth-unbind copies (no end-of-frame fallback).
  [ValidateSet(0,1,2)][int]$DepthCopyBeforeClears=1,
@@ -29,6 +31,11 @@ $sceneDhMode=$Mode-in@('SceneDHDebug','SceneDH')
 Require (!$MeasureGpu-or$UsePreviewControl) 'GPU measurement fixture requires live UI selection control'
 Require (!$UsePreviewControl-or$sceneMode) 'Live UI selection fixture requires an engine scene-depth mode'
 Require (!$VerifyResize-or$sceneMode) 'Resize witness verification requires an engine scene-depth mode'
+Require ([double]::IsFinite($FogAmount)) 'FogAmount must be finite'
+Require (!$ExpectFogRefusal-or($Mode-eq'SceneDH'-and$UsePreviewControl-and$FogAmount-gt0)) 'Expected fog refusal requires SceneDH, live preview control and FogAmount greater than zero'
+Require (!$ExpectFogRefusal-or(!$MeasureGpu-and!$VerifyResize)) 'Fog refusal checks blocked timing/capture requests; do not request measurement or resize acceptance'
+Require ($Mode-ne'SceneDH'-or$FogAmount-eq0-or$ExpectFogRefusal) 'SceneDH beauty requires FogAmount 0; use ExpectFogRefusal with live preview control to verify native fog protection'
+$fogLiteral=$FogAmount.ToString('R',[Globalization.CultureInfo]::InvariantCulture)
 $effectiveDepthCopy=if($sceneMode){0}else{$DepthCopyBeforeClears}
 $presetName=switch($Mode){'Probe'{'OpenPoseidon-Depth-Probe.ini'};'SceneProbe'{'OpenPoseidon-Depth-Scene-Probe.ini'};'SceneDHDebug'{'OpenPoseidon-DH-Scene-Debug.ini'};'SceneDH'{'OpenPoseidon-DH-Scene-Preview.ini'};'DHDebug'{'OpenPoseidon-DH-Depth-Debug.ini'};'DH'{'OpenPoseidon-DH-RTGI-Preview.ini'}}
 $effectName=if($probeMode){'OpenPoseidonDepthProbe.fx'}elseif($sceneDhMode){'OpenPoseidonDH.fx'}else{'dh_uber_rt.fx'}
@@ -106,11 +113,11 @@ DepthCopyAtClearIndex=0
 UseAspectRatioHeuristics=3
 FilterFormat=6
 "@ | Set-Content -LiteralPath (Join-Path $runtime 'ReShade.ini') -Encoding UTF8
-@'
+@"
 version=11;
 class Mission {
  randomSeed=42;
- class Intel {year=1985;month=6;day=21;hour=16;minute=0;startWeather=0.25;forecastWeather=0.25;startFog=0.25;};
+ class Intel {year=1985;month=6;day=21;hour=16;minute=0;startWeather=0.25;forecastWeather=0.25;startFog=$fogLiteral;};
  class Groups {items=1;class Item0 {side="WEST";class Vehicles {items=1;class Item0 {
   position[]={8131.43,0,4086.37};azimut=229.1;id=0;side="WEST";vehicle="SoldierWB";
   player="PLAYER COMMANDER";leader=1;skill=1.0;
@@ -119,7 +126,7 @@ class Mission {
 class Intro {randomSeed=1;class Intel {};};
 class OutroWin {randomSeed=2;class Intel {};};
 class OutroLoose {randomSeed=3;class Intel {};};
-'@ | Set-Content -LiteralPath (Join-Path $mission 'mission.sqm')
+"@ | Set-Content -LiteralPath (Join-Path $mission 'mission.sqm')
 & "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $user -DlssMode 0 -MsaaSamples $MsaaSamples
 # Exercise the engine's validated startup route as well as explicit layer env.
 # This file is newly created above; ordinary graphics profiles are never changed.
@@ -135,6 +142,7 @@ foreach($key in $keys){
 }
 $receipt=@{installed=$stamp;mode=$Mode;selectedTechnique=$technique;selectedPreset=$presetName;
  sourceRuntime=$source;scratch=$scratch;runtime=$runtime;msaaSamples=$MsaaSamples;optionalReShade=1;verifyResize=[bool]$VerifyResize;usePreviewControl=[bool]$UsePreviewControl;measureGpu=[bool]$MeasureGpu;
+ fogAmount=$FogAmount;expectFogRefusal=[bool]$ExpectFogRefusal;fogRefusalPassed=$false;testSucceeded=$false;
  genericDepth=@{DepthCopyBeforeClears=$effectiveDepthCopy;DepthCopyAtClearIndex=0;UseAspectRatioHeuristics=3;FilterFormat=6;
   scope='Official 6.8 GenericDepth isolated configuration: exact output resolution and D32S8; clear-index selection remains automatic';
   source='https://github.com/crosire/reshade/blob/18deaa52de0c425a78b329e9cb3c497281cd00ec/examples/09-depth/generic_depth_addon.cpp'};
@@ -174,10 +182,13 @@ try{
  }while(!$client)
  $stream=$client.GetStream();$stream.ReadTimeout=10000
  $reader=[IO.StreamReader]::new($stream);$writer=[IO.StreamWriter]::new($stream,[Text.UTF8Encoding]::new($false));$writer.AutoFlush=$true
- function Send($command){
+ function Send($command,[switch]$ExpectFogError){
   $writer.WriteLine(($command|ConvertTo-Json -Compress -Depth 8))
   do{$line=$reader.ReadLine();Require ([bool]$line) 'Harness disconnected';$reply=$line|ConvertFrom-Json}while($null-eq$reply.ok)
-  Require $reply.ok $line;return $reply
+  if($ExpectFogError){
+   Require (!$reply.ok-and$reply.error-ceq'DH GI unsupported: native fog is active or unverified; depth debug remains available; fog unchanged') ('Expected explicit native fog refusal: '+$line)
+  }else{Require $reply.ok $line}
+  return $reply
  }
  # The harness is registered after renderer initialization. No runtime log here
  # means injection/discovery failed, rather than an expensive shader compilation.
@@ -193,7 +204,7 @@ try{
  while(([string](Send @{cmd='eval';code='triSceneReady'}).result).Trim('"')-cne'OK'){
   Require ([DateTime]::UtcNow-lt$deadline) 'Scene startup deadline';Start-Sleep -Milliseconds 250
  }
- $null=Send @{cmd='exec';code='player allowDamage false;0 setRain 0;0 setOvercast .25;0 setFog .25;setDate [1985,6,21,16,0];setAccTime 0'}
+ $null=Send @{cmd='exec';code=('player allowDamage false;0 setRain 0;0 setOvercast .25;0 setFog '+$fogLiteral+';setDate [1985,6,21,16,0];setAccTime 0')}
  $pose=([string](Send @{cmd='eval';code='triFreeFlyPose "8131.43 4086.37 191.04 229.1 -11.3"'}).result).Trim('"')
  Require ($pose.StartsWith('OK')) ('Freefly comparison pose refused: '+$pose)
  $receipt.pose=$pose
@@ -217,12 +228,44 @@ try{
  $compilePattern=[regex]::Escape($effectName)+'.*successfully|successfully.*'+[regex]::Escape($effectName)
  # At most 90 seconds for compilation/readiness, separate from startup.
  $deadline=[DateTime]::UtcNow.AddSeconds(90)
+ $expectedPreviewStatus=if($ExpectFogRefusal){7}else{2}
  while(!$state.ready-or$state.techniques-lt1-or!(Test-Path -LiteralPath $reshadeLog)-or
        !(Select-String -Path $reshadeLog -Pattern $compilePattern -Quiet)-or
-       ($UsePreviewControl-and($state.preview-ne$previewId-or$state.previewStatus-ne2))){
+       ($UsePreviewControl-and($state.preview-ne$previewId-or$state.previewStatus-ne$expectedPreviewStatus))){
   Require ([DateTime]::UtcNow-lt$deadline) 'ReShade compilation/readiness deadline'
   Start-Sleep -Milliseconds 500;$state=Send @{cmd='optional_reshade';action='state'}
  }
+ if($ExpectFogRefusal){
+  # A fresh bound scene proves this is the native-fog gate, not missing depth.
+  $deadline=[DateTime]::UtcNow.AddSeconds(15)
+  while(!$state.sceneDepth.bound-or$state.sceneDepth.sampleFrame-le$sceneFrameAfterPose){
+   Require ([DateTime]::UtcNow-lt$deadline) 'Fog refusal scene-depth witness deadline'
+   Start-Sleep -Milliseconds 250;$state=Send @{cmd='optional_reshade';action='state'}
+  }
+  # activeTechniques counts selected technique flags even while global effects
+  # are disabled; enabled is the actual runtime execution gate.
+  Require ($state.preview-eq4-and$state.previewStatus-eq7-and!$state.enabled) 'Fogged GI must remain explicitly unsupported and disabled'
+  Require ($state.previewReason-match'native fog'-and!$state.sceneDepth.nativeSurfaceFogDisabled) 'Fresh producer fog flag and visible refusal reason disagree'
+  Require ($state.sceneDepth.sourceSamples-eq$MsaaSamples-and$state.sceneDepth.finiteSamples-eq256-and$state.sceneDepth.nonzeroSamples-gt0-and$state.sceneDepth.maximum-gt$state.sceneDepth.minimum) 'Fog refusal must retain valid scene-depth data'
+  $receipt.fogRefusalInitial=$state;$receipt.sceneDepth=$state.sceneDepth
+  $receipt.fogRefusals=@()
+  foreach($action in @('on','capture','measure')){
+   $request=@{cmd='optional_reshade';action=$action}
+   if($action-eq'measure'){$request.frames=30}
+   $refused=Send $request -ExpectFogError
+   $after=Send @{cmd='optional_reshade';action='state'}
+   Require ($after.preview-eq4-and$after.previewStatus-eq7-and!$after.enabled) ('Fog gate changed after refused '+$action)
+   Require ($after.captureCount-eq$state.captureCount-and$after.captureStage-eq0-and$after.timing.generation-eq$state.timing.generation-and$after.timing.status-notin@(2,3,4)) ('Refused '+$action+' queued capture/timing work')
+   $receipt.fogRefusals+=@{action=$action;response=$refused;state=$after}
+  }
+  $path=Join-Path $out 'fog-refused-native.png'
+  $null=Send @{cmd='screenshot';path=$path};$deadline=[DateTime]::UtcNow.AddSeconds(15)
+  while(!(Test-Path -LiteralPath $path)-or(Get-Item -LiteralPath $path).Length-eq0){
+   Require ([DateTime]::UtcNow-lt$deadline) 'Native fog-refusal screenshot deadline';Start-Sleep -Milliseconds 100
+  }
+  $receipt.nativeFogScreenshot=$path;$receipt.final=$after;$receipt.fogRefusalPassed=$true
+  $receipt.depthAvailability='Valid fresh scene-depth witness; GI explicitly refused for active native fog. No processed beauty capture or visual acceptance.'
+ }else{
  $null=Send @{cmd='optional_reshade';action='off'};Start-Sleep -Seconds 3
  $receipt.off=Send @{cmd='optional_reshade';action='state'}
  Require (!$receipt.off.enabled) 'Live off toggle failed'
@@ -243,6 +286,7 @@ try{
   Require ($receipt.sceneDepth.sourceSamples-eq$MsaaSamples) 'Snapshot source MSAA count differs from requested fixture'
   Require ($receipt.sceneDepth.finiteSamples-eq256-and$receipt.sceneDepth.nonzeroSamples-gt0-and
       $receipt.sceneDepth.maximum-gt$receipt.sceneDepth.minimum-and$receipt.sceneDepth.nearPlane-gt0) 'Scene-depth numeric witness invalid'
+  if($Mode-eq'SceneDH'){Require $receipt.sceneDepth.nativeSurfaceFogDisabled 'Fog-free beauty requires fresh producer proof that native surface fog is disabled'}
  }
  $receipt.onEnginePerformance=Send @{cmd='frame_performance'}
  if($MeasureGpu){
@@ -309,6 +353,7 @@ try{
   Require ($size-ceq$originalSize) 'Window did not return to original dimensions'
   $receipt.resizeWitnessPassed=$true
  }
+ }
  if($UsePreviewControl){
   $null=Send @{cmd='optional_reshade';action='select';preview=0}
   $deadline=[DateTime]::UtcNow.AddSeconds(15)
@@ -328,8 +373,10 @@ try{
  Require (Select-String -Path $reshadeLog -Pattern $compilePattern -Quiet) 'Selected shader successful compilation not evidenced in log'
  Require (!(Select-String -Path @($log,(Join-Path $out 'stderr.log')) -Pattern 'UNHANDLED EXCEPTION|Validation Error|DeviceLost|panicked at|wgr_create failed|Critical error:' -Quiet)) 'Renderer runtime error'
  Require ((Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw).Trim()-ceq$stamp) 'Build changed during capture'
- $receipt.captureSucceeded=$true
- Write-Host ('Depth capture ready for operator inspection ('+$technique+'): '+$out)
+ $receipt.captureSucceeded=!$ExpectFogRefusal
+ $receipt.testSucceeded=$true
+ if($ExpectFogRefusal){Write-Host ('Native fog refusal and clean teardown verified: '+$out)}
+ else{Write-Host ('Depth capture ready for operator inspection ('+$technique+'): '+$out)}
 }catch{$receipt.error=$_.Exception.Message;throw}finally{
  if($p-and!$p.HasExited){
   try{$receipt.loadedReShadeModules=@($p.Modules|Where-Object {$_.ModuleName-match'ReShade'}|ForEach-Object {$_.FileName})}
