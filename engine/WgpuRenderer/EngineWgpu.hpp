@@ -816,6 +816,9 @@ class EngineWgpu : public EngineDummy
     std::unordered_map<uint32_t, FarGpuInstance> _farGpuInstances;
     std::unordered_map<uint32_t, FarGpuInstance> _earthWorldgenInstances;
     std::unordered_map<const LODShapeWithShadow*, uint32_t> _earthWorldgenModelRefs;
+    // Dedicated shape identities prevent Earth road alpha coverage from changing
+    // the native island's shared retained model/CPU-complement ownership.
+    std::unordered_map<std::string, Ref<LODShapeWithShadow>> _earthWorldgenRoadShapes;
     std::unordered_map<const LODShapeWithShadow*, uint32_t> _farGpuModelRefs;
     // REN-TEMP-001H / ID-1: draw-object identity for motion vectors. The scene draw
     // loop brackets each object via Engine::SetDrawObject; the identity itself lives ON
@@ -994,7 +997,7 @@ class EngineWgpu : public EngineDummy
     void OnShapeDestroyed(const LODShape* shape);
     // Register `shape` (all graphical LODs + per-section geometry/material) if not already,
     // returning its model id or WGR_INVALID_MODEL if it is ineligible for the GPU path.
-    uint32_t RegisterGpuModel(LODShapeWithShadow* shape);
+    uint32_t RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadCoverage = false);
 
     // --- Retained-path admission census -----------------------------------------------------
     //

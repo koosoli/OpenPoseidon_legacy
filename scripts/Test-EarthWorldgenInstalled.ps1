@@ -134,7 +134,19 @@ try{
  $result.assetDiagnostics=@(Select-String -LiteralPath $log -Pattern 'Worldgen|Cannot load texture|Cannot open object|Cannot load model'|ForEach-Object {$_.Line})
  $result.performanceScope='Published engine timings only; no injected GPU cost or global performance acceptance.'
  $result.passed=$true;Write-Host ('Worldgen installed presentation evidence ready; images and grounding need inspection: '+$out)
-}catch{$result.error=$_.Exception.Message;throw}finally{
+}catch{
+ $failure=$_;$result.error=$failure.Exception.Message
+ # Keep the strict failed registration verdict, but preserve the actual scene
+ # for diagnosis when the owned renderer is still responsive.
+ if($p-and!$p.HasExited-and$writer){
+  try{
+   $path=Join-Path $out 'failure-native.png';$null=Send @{cmd='screenshot';path=$path};$until=[DateTime]::UtcNow.AddSeconds(5)
+   while(!(Test-Path -LiteralPath $path)-or(Get-Item -LiteralPath $path).Length-eq0){Require ([DateTime]::UtcNow-lt$until) 'Failure screenshot deadline';Start-Sleep -Milliseconds 100}
+   $result.failureScreenshot=$path
+  }catch{$result.failureScreenshotError=$_.Exception.Message}
+ }
+ throw $failure
+}finally{
  if($p-and!$p.HasExited){if($writer){try{$writer.WriteLine('{"cmd":"exit"}');$null=$p.WaitForExit(10000)}catch{}};if(!$p.HasExited){$p.Kill();$null=$p.WaitForExit(10000);$result.forcedCleanup=$true}}
  if($writer){$writer.Dispose()};if($reader){$reader.Dispose()};if($client){$client.Dispose()}
  foreach($key in $saved.Keys){if($exists[$key]){[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}else{Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue}}

@@ -34,6 +34,7 @@
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp> // REN-THR-004: ticks per frame beside the frame hash
 #include <Poseidon/Dev/Diag/FramePaceTrace.hpp> // PACE-001: per-frame pacing trace
 #include "EngineWgpu.hpp"
+#include "EarthRoadCoverage.hpp"
 #include "ForestSnowSurface.hpp"
 #include <typeinfo>
 #include "GeometryOwnerLedger.hpp"
@@ -9861,7 +9862,8 @@ static void TraceEmatBlendDecision(const ShapeSection& sec, TextureWgpu* texture
 }
 
 bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::mesh::MeshSection>& secs, int i,
-                        WgrModelSection& secOut, WgrModelMaterial& matOut, bool preparedPilot=false)
+                        WgrModelSection& secOut, WgrModelMaterial& matOut, bool preparedPilot=false,
+                        bool earthRoadCoverage=false)
 {
     if (i >= secs.Size())
     {
@@ -9878,7 +9880,11 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     const render::RenderPassDescriptor desc = render::BuildRenderPassDescriptor(split, ctx);
     // The same ownership question Shape::Draw's skip and RegisterGpuModel ask (ClipShape.hpp).
     // Answering it differently here is how a section ends up drawn by nobody.
-    if (!SectionGpuOwned(sec))
+    auto* texture = static_cast<TextureWgpu*>(sec.properties.GetTexture());
+    const bool earthRoadSection = EarthRoadCoverage::Section(earthRoadCoverage,
+        desc.blend == render::BlendMode::AlphaBlend, desc.surface == render::SurfaceMode::OnSurface,
+        texture != nullptr, (spec & (IsHidden | IsHiddenProxy)) != 0);
+    if (!SectionGpuOwned(sec) && !earthRoadSection)
     {
         TraceClassifyReject(sec, "SectionGpuOwned false");
 
@@ -9898,7 +9904,6 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     secOut.index_count = U32(indexCount);
     uint64_t tex = 0;
     Poseidon::AlphaStats::Kind alphaClass = Poseidon::AlphaStats::Opaque;
-    auto* texture = static_cast<TextureWgpu*>(sec.properties.GetTexture());
     if (texture)
     {
         tex = texture->EnsureUploaded();
@@ -9996,7 +10001,7 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
                                          !texture->HasAlphaHoles() && MaterialIsFullyOpaque(m) &&
                                          GpuEmatIsOpaqueSolid(sec.surfMat);
     if (alphaClass == Poseidon::AlphaStats::Blend && !bark && !materialCutout && !legacyPlantCutout &&
-        !blendOpaqueRoute && !enfusionOpaqueRoughness)
+        !blendOpaqueRoute && !enfusionOpaqueRoughness && !earthRoadSection)
     {
         TraceClassifyReject(sec, "blend/opaque route");
         TraceEmatBlendDecision(sec, texture, m, false);
@@ -10021,6 +10026,13 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
                           desc.blend == render::BlendMode::AlphaBlend))
     {
         alphaRef = std::max(alphaRef, 0.5f);
+    }
+    if (earthRoadSection)
+    {
+        // Surface-road alpha is coverage only for this independent Earth owner.
+        // Reuse the tested cutout/MSAA A2C path, never an opaque glass shortcut.
+        if (!EarthRoadCoverage::CanShade(earthRoadSection, tex != 0, MaterialIsFullyOpaque(m))) return false;
+        alphaRef = EarthRoadCoverage::AlphaReference;
     }
     // Cull-none cutouts (wire mesh) stay CPU-drawn: the material is authored
     // double-sided and the retained path culls backfaces. Vegetation is
@@ -14365,7 +14377,7 @@ render::RegistrationCost EngineWgpu::QueryRegistrationCost(const LODShapeWithSha
         });
 }
 
-uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
+uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape, bool earthRoadCoverage)
 {
     if (auto found = _gpuModels.find(shape); found != _gpuModels.end())
     {
@@ -14760,7 +14772,11 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // Full -- which suppresses the CPU draw wholesale, so the complement that was
             // supposed to repaint it never runs. That is how A1's hotel lost 10,496 triangles
             // of glass and blinds. See ClipShape.hpp for the full contract.
-            if (SectionGpuOwned(shSec))
+            const auto roadDesc = render::BuildRenderPassDescriptor(render::SplitLegacy(shSec.properties.Special()));
+            const bool earthRoadSection = EarthRoadCoverage::Section(earthRoadCoverage,
+                roadDesc.blend == render::BlendMode::AlphaBlend, roadDesc.surface == render::SurfaceMode::OnSurface,
+                shSec.properties.GetTexture() != nullptr, false);
+            if (SectionGpuOwned(shSec) || earthRoadSection)
             {
                 levelHasOwned = true;
             }
@@ -14936,7 +14952,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             }();
             const bool preparedPilot=preparedSectionEnabled&&shape->Name()&&
                 std::strcmp(shape->Name(),R"(dz\structures\residential\tenements\tenement_small.p3d)")==0;
-            if (!ClassifyGpuSection(*s, mesh, secs, i, sec, mat,preparedPilot))
+            if (!ClassifyGpuSection(*s, mesh, secs, i, sec, mat,preparedPilot,earthRoadCoverage))
             {
                 // RFG-074: for the traced shape, say which sections the classifier
                 // REJECTED and what they carried -- these never reach the layer path.

@@ -258,3 +258,40 @@ textures and depth in all images before accepting appearance. Retirement,
 rebase, collision, navigation and upstream road validation are outside this
 three-pose smoke test. `-SelfTest` runs only parser and failed-registration
 negative controls, without accessing the game or GPU.
+
+## Earth-only stock road coverage admission
+
+The installed `0e4e1ed4` presentation attempt at
+`build/earth-worldgen-installed/20261008-153940-3ce881` correctly failed its road
+registration gate: 1,885 of 2,048 attempted objects registered, including real
+trees and houses, while `o/road/sil25.p3d` and `ces25.p3d` were not retained.
+The actual sil25 section diagnostic was `special=0x24102 blend=1 surface=1`,
+texture `o/road/sil_new.paa`, alpha class 2 and `owned=0`. Road GPU vertex-buffer
+creation succeeded. The shared ownership contract deliberately excludes
+alpha-blended OnSurface geometry; ClipLand loading was not the blocker.
+
+The bounded correction deep-copies each selected stock `o/road/*.p3d` shape
+into a dedicated Earth identity, retaining its authored source geometry,
+textures, materials and LODs. An explicit Earth-road registration argument
+admits only visible textured alpha-blend OnSurface sections of that owner, with
+successfully uploaded texture and opaque section material. Native shared shape
+identities and the CPU/retained ownership predicate remain unchanged. The
+independent copies retire with the Earth publication and use ordinary retained
+texture pins and model teardown.
+
+This route uses the existing retained cutout variant with alpha reference 0.5;
+MSAA enables the existing alpha-to-coverage behavior. It approximates the
+original smoothly blended road edges, and a one-sample profile uses hard cutout.
+It does not add a retained translucent/decal pipeline. A 0.02 metre offset along
+the authored road up axis replaces the unavailable native OnSurface depth bias;
+authored affine geometry and relative resident placement remain otherwise
+unchanged. It does not grade the resident DEM or cure the upstream road-junction,
+overlap and grade validation failures. Registration and edge/ground-fit images
+must pass the strict installed harness before accepting this correction.
+
+`scripts/Test-EarthRoadCoverage.ps1` covers actual stock identities and captured
+section facts, with negative controls for native owners, other model families,
+unsafe paths, glass/default surfaces, missing texture uploads, hidden sections
+and translucent material. Production C++ syntax checks are CPU-only; they do
+not establish a successful GPU draw. The installed harness now also attempts a
+bounded native screenshot on failure while retaining the failed verdict.

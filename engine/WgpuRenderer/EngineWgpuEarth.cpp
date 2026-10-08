@@ -1,5 +1,6 @@
 #include "EngineWgpu.hpp"
 #include "EarthWorldgen.hpp"
+#include "EarthRoadCoverage.hpp"
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
@@ -9,6 +10,21 @@
 
 namespace Poseidon
 {
+namespace
+{
+class EarthRoadShape final : public LODShapeWithShadow
+{
+public:
+    explicit EarthRoadShape(const LODShapeWithShadow& source)
+    {
+        // LODShape's assignment DEEP-copies every Shape and its sections; its
+        // copy deliberately clears the name, which this independent owner keeps.
+        static_cast<LODShape&>(*this) = source;
+        _name = source.Name();
+        ScanProperties();
+    }
+};
+}
 bool EngineWgpu::CreateEarthWorldgenObject(uint32_t id, const char* modelName, const Matrix4& transform)
 {
     if (!Foundation::IsMainThread() || !_gpuDriven || !_renderer || !modelName || !modelName[0] ||
@@ -18,14 +34,31 @@ bool EngineWgpu::CreateEarthWorldgenObject(uint32_t id, const char* modelName, c
         return true;
     AcquireProducerWindow("Earth Worldgen installed model");
     ShapeBank::WorldModelScope worldModel(Shapes);
-    Ref<LODShapeWithShadow> shape = Shapes.New(modelName, false, true);
+    const bool roadCoverage = EarthRoadCoverage::StockRoad(modelName);
+    Ref<LODShapeWithShadow> shape;
+    if (roadCoverage)
+    {
+        auto found = _earthWorldgenRoadShapes.find(modelName);
+        if (found != _earthWorldgenRoadShapes.end()) shape = found->second;
+        else
+        {
+            Ref<LODShapeWithShadow> source = Shapes.New(modelName, false, true);
+            if (source)
+            {
+                shape = new EarthRoadShape(*source);
+                _earthWorldgenRoadShapes.emplace(modelName, shape);
+                LOG_INFO(Graphics, "Earth Worldgen road alpha coverage: {} dedicated owner, cutout/A2C alphaRef 0.5, lift 0.02m; approximate blend edges", modelName);
+            }
+        }
+    }
+    else shape = Shapes.New(modelName, false, true);
     if (!shape || !shape->NLevels() || !shape->Level(0) || shape->Level(0)->NPos() <= 0 ||
         shape->Level(0)->NPos() > 250000)
     {
         LOG_INFO(Graphics, "Earth Worldgen model unavailable/bounded: {}", modelName);
         return false;
     }
-    const uint32_t model = RegisterGpuModel(shape);
+    const uint32_t model = RegisterGpuModel(shape, roadCoverage);
     if (model == WGR_INVALID_MODEL)
     {
         LOG_INFO(Graphics, "Earth Worldgen model not retained: {}", modelName);
@@ -37,7 +70,10 @@ bool EngineWgpu::CreateEarthWorldgenObject(uint32_t id, const char* modelName, c
     // unrelated native island heightmap. Native instance admission is unchanged.
     WgrInstance instance{};
     GfxMatrix matrix;
-    ConvertMatrix(matrix, transform);
+    Matrix4 placed = transform;
+    if (roadCoverage)
+        placed.SetPosition(transform.Position() + transform.DirectionUp().Normalized() * EarthRoadCoverage::SurfaceLiftMetres);
+    ConvertMatrix(matrix, placed);
     std::memcpy(instance.world.m, &matrix, sizeof(instance.world.m));
     instance.model = model;
     const auto position = transform.Position();
@@ -72,5 +108,6 @@ void EngineWgpu::ClearEarthWorldgenObjects()
     }
     _earthWorldgenInstances.clear();
     _earthWorldgenModelRefs.clear();
+    _earthWorldgenRoadShapes.clear();
 }
 } // namespace Poseidon
