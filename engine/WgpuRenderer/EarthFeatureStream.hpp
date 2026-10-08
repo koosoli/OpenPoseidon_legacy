@@ -1,5 +1,6 @@
 #pragma once
 #include "EarthBuildingStream.hpp"
+#include "EarthTreeMesh.hpp"
 #include <array>
 
 namespace Poseidon
@@ -11,7 +12,7 @@ class EarthFeatureStream
   public:
     using Ground = EarthBuildingStream::Ground;
     using Cell = EarthBuildingStream::Cell;
-    using Vertex = EarthBuildingStream::Vertex;
+    using Vertex = EarthTrees::Vertex;
     enum Kind : size_t
     {
         PavedRoad,

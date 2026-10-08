@@ -147,18 +147,19 @@ bool Inside(Point p, const std::vector<Point>& polygon)
     }
     return inside;
 }
-void Tree(Features::Mesh& result, const Features::Ground& g, Point p, double h)
+void Tree(Features::Mesh& result, const Features::Ground& g, Point p, double h, bool varyHeight = false)
 {
     auto& batch = result.batches[Features::Trees];
-    if (batch.features >= Features::MaxTrees || Triangles(result) + 8 > Features::MaxTriangles)
+    if (batch.features >= Features::MaxTrees || Triangles(result) + EarthTrees::TriangleCount > Features::MaxTriangles)
         return;
-    const float y = Height(g, p), radius = float(h * .26);
-    const auto top = V(p, y + float(h)), bottom = V(p, y + float(h * .12));
-    const Point ring[4] = {{p.x - radius, p.z}, {p.x, p.z + radius}, {p.x + radius, p.z}, {p.x, p.z - radius}};
-    for (int i = 0; i < 4; ++i)
+    const auto coordinate = Earth::FromLocal(g.latitude, g.longitude, p.x, p.z);
+    const auto tree = EarthTrees::Build(
+        p.x, Height(g, p), p.z, h, EarthTrees::GeographicSeed(coordinate.latitude, coordinate.longitude), varyHeight);
+    const uint32_t first = uint32_t(batch.vertices.size());
+    batch.vertices.insert(batch.vertices.end(), tree.begin(), tree.end());
+    for (uint32_t i = 0; i < tree.size(); ++i)
     {
-        Triangle(batch, top, V(ring[i], y + float(h * .35)), V(ring[(i + 1) % 4], y + float(h * .35)));
-        Triangle(batch, bottom, V(ring[(i + 1) % 4], y + float(h * .35)), V(ring[i], y + float(h * .35)));
+        batch.indices.push_back(first + i);
     }
     ++batch.features;
 }
@@ -378,7 +379,7 @@ void Append(Features::Mesh& result, const std::string& json, const Features::Gro
                     {
                         ++result.forestSamples;
                         if (Inside({x, z}, p))
-                            Tree(result, g, {x, z}, 9);
+                            Tree(result, g, {x, z}, 9, true);
                     }
             }
             else

@@ -3532,11 +3532,17 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             {
                 const auto& batch=mesh->batches[kind];
                 std::vector<WgrMeshVertex> vertices(batch.vertices.size());
-                for(size_t i=0;i<vertices.size();++i){const auto& v=batch.vertices[i];vertices[i].pos={v.x,v.y,v.z};vertices[i].normal={v.nx,v.ny,v.nz};vertices[i].uv={.5f,.5f};}
+                for(size_t i=0;i<vertices.size();++i){const auto& v=batch.vertices[i];vertices[i].pos={v.x,v.y,v.z};vertices[i].normal={v.nx,v.ny,v.nz};vertices[i].uv={v.u,v.v};}
                 WgrMesh replacement=0;
                 if(!batch.indices.empty())replacement=wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(vertices),WgrSlice<uint32_t>(batch.indices));
                 if(!batch.indices.empty() && !replacement)throw std::runtime_error("Earth feature mesh allocation failed");
-                if(!_earthFeatureTextures[kind])_earthFeatureTextures[kind]=wgr_texture_create(_renderer,1,1,WGR_TEXTURE_RGBA8,1,0,colors[kind],4);
+                if(!_earthFeatureTextures[kind])
+                {
+                    if(kind==EarthFeatureStream::Trees)
+                        _earthFeatureTextures[kind]=wgr_texture_create(_renderer,EarthTrees::PaletteWidth,1,WGR_TEXTURE_RGBA8,1,0,
+                            EarthTrees::PalettePixels.data(),uint32_t(EarthTrees::PalettePixels.size()));
+                    else _earthFeatureTextures[kind]=wgr_texture_create(_renderer,1,1,WGR_TEXTURE_RGBA8,1,0,colors[kind],4);
+                }
                 if(!_earthFeatureTextures[kind])throw std::runtime_error("Earth feature tint allocation failed");
                 if(_earthFeatureMeshes[kind])wgr_mesh_destroy(_renderer,_earthFeatureMeshes[kind]);
                 _earthFeatureMeshes[kind]=replacement;_earthFeatureIndices[kind]=uint32_t(batch.indices.size());
