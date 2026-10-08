@@ -335,10 +335,12 @@ void Append(Features::Mesh& result, const std::string& json, const Features::Gro
                 Ribbon(result, g, p, dirt ? Features::UnpavedRoad : Features::PavedRoad,
                        Metres(tags, "width", fallback, 1, 30));
             }
-            else if (*Text(tags, "waterway") && !Is(tags, "waterway", "dam"))
+            else if (Is(tags, "waterway", "river") || Is(tags, "waterway", "stream") || Is(tags, "waterway", "canal") ||
+                     Is(tags, "waterway", "drain") || Is(tags, "waterway", "ditch"))
                 Ribbon(result, g, p, Features::InlandWater,
                        Metres(tags, "width", Is(tags, "waterway", "river") ? 8 : 2, 1, 80));
-            else if (Is(tags, "natural", "water") || Is(tags, "landuse", "reservoir"))
+            else if (Is(tags, "natural", "water") || Is(tags, "landuse", "reservoir") ||
+                     Is(tags, "waterway", "riverbank"))
                 Water(result, g, p);
             else if (Is(tags, "landuse", "forest") || Is(tags, "natural", "wood"))
             {

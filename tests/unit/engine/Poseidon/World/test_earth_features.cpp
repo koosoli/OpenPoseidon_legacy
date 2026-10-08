@@ -70,9 +70,26 @@ int main(int argc, char** argv)
     Valid(mesh);
     const auto again = Features::BuildCell(Json(forest), g, cell);
     assert(again.batches[Features::Trees].indices == mesh.batches[Features::Trees].indices);
+    for (size_t i = 0; i < mesh.batches[Features::Trees].vertices.size(); ++i)
+    {
+        const auto a = mesh.batches[Features::Trees].vertices[i], b = again.batches[Features::Trees].vertices[i];
+        assert(a.x == b.x && a.y == b.y && a.z == b.z && a.nx == b.nx && a.ny == b.ny && a.nz == b.nz);
+    }
     mesh = Features::BuildCell(Json(Way(46, "\"natural\":\"water\"", polygon)), g, cell);
     assert(mesh.batches[Features::InlandWater].features == 1 &&
            mesh.batches[Features::InlandWater].indices.size() == 6);
+    Valid(mesh);
+    mesh = Features::BuildCell(Json(Way(48, "\"waterway\":\"dam\"", {{6350, 6400}, {6450, 6400}})), g, cell);
+    assert(mesh.batches[Features::InlandWater].features == 0);
+    mesh = Features::BuildCell(Json(Way(49, "\"waterway\":\"riverbank\"", polygon)), g, cell);
+    assert(mesh.batches[Features::InlandWater].features == 1 &&
+           mesh.batches[Features::InlandWater].indices.size() == 6);
+    auto dateline = g;
+    dateline.longitude = 179.999;
+    mesh =
+        Features::BuildCell(R"({"elements":[{"type":"node","id":42,"lat":0,"lon":179.999,"tags":{"natural":"tree"}}]})",
+                            dateline, {0, 8999});
+    assert(mesh.batches[Features::Trees].features == 1);
     Valid(mesh);
     mesh = Features::BuildCell(
         R"({"elements":[{"type":"node","id":42,"lat":0,"lon":0,"tags":{"natural":"tree"}},{"type":"node","id":43,"lat":0,"lon":0,"tags":{"highway":"stop"}}]})",
