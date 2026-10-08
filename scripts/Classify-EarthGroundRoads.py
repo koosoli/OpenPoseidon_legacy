@@ -28,6 +28,12 @@ RADIUS = 5.0
 BUCKET = 64.0
 ROAD = re.compile(r"^o/road/(sil|ces)(25|12|6)\.p3d$")
 FALSE = frozenset(("", "no", "false", "0"))
+# CWR-Worldgen b46124fc osm.py road_is_supported/_MAJOR_HIGHWAYS/_MINOR_HIGHWAYS.
+# Match the recorded source emission policy, not every nearby highway feature.
+MAJOR_HIGHWAYS = frozenset(("motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link",
+                           "secondary", "secondary_link", "tertiary", "tertiary_link", "unclassified",
+                           "residential", "living_street", "service", "road", "track"))
+MINOR_HIGHWAYS = frozenset(("path", "footway", "cycleway", "bridleway", "pedestrian"))
 
 
 def read_json(path: Path, maximum=MAX_JSON, identities=None):
@@ -76,6 +82,12 @@ def safe_tags(tags):
     return tags.get("highway") not in ("construction", "proposed")
 
 
+def emitted_road(tags, include_minor):
+    return (tags.get("tunnel") in (None, "", "no") and
+            (tags.get("highway") in MAJOR_HIGHWAYS or
+             (include_minor and tags.get("highway") in MINOR_HIGHWAYS)))
+
+
 def bounds(manifest):
     world = manifest["world"]
     south, west, north, east = map(float, world["bbox"])
@@ -104,10 +116,13 @@ class Segment:
     a: tuple[float, float]
     b: tuple[float, float]
     safe: bool
+    emitted: bool
 
 
 class Roads:
-    def __init__(self, source, bbox):
+    def __init__(self, source, bbox, include_minor=False):
+        if not isinstance(include_minor, bool):
+            raise ValueError("Manifest include_minor_roads must be boolean")
         elements = source["elements"]
         if not isinstance(elements, list) or len(elements) > MAX_ELEMENTS:
             raise ValueError("OSM element budget")
@@ -147,7 +162,7 @@ class Roads:
                 if len(self.segments) >= MAX_SEGMENTS:
                     raise ValueError("OSM segment budget")
                 index = len(self.segments)
-                self.segments.append(Segment(way, ordinal, a, b, safe_tags(tags)))
+                self.segments.append(Segment(way, ordinal, a, b, safe_tags(tags), emitted_road(tags, include_minor)))
                 for x in range(math.floor(left/BUCKET), math.floor(right/BUCKET)+1):
                     for z in range(math.floor(low/BUCKET), math.floor(high/BUCKET)+1):
                         refs += 1
@@ -170,19 +185,24 @@ class Roads:
             passages[segment.way].append(segment.ordinal)
             if segment.way not in nearby or distance < nearby[segment.way][0]:
                 alignment = abs((direction[0]*dx+direction[1]*dz)/math.sqrt(squared))
-                nearby[segment.way] = distance, alignment, segment.safe
+                nearby[segment.way] = distance, alignment, segment.safe, segment.emitted
         if not nearby:
             return None, "unassociated"
-        if len(nearby) != 1:
+        # Ineligible footways/steps can be benign false competitors, but an
+        # elevated footbridge/underpass still vetoes this inferred classification.
+        if any(not safe for _, _, safe, _ in nearby.values()):
+            return None, "bridge_tunnel_layer_or_elevated_tags"
+        candidates = {way: value for way, value in nearby.items() if value[3]}
+        if not candidates:
+            return None, "no_emitted_source_way"
+        if len(candidates) != 1:
             return None, "ambiguous_multiple_ways"
-        way, (distance, alignment, safe) = next(iter(nearby.items()))
+        way, (distance, alignment, _, _) = next(iter(candidates.items()))
         if max(passages[way])-min(passages[way]) > 2:
             return None, "ambiguous_same_way_passages"
-        if not safe:
-            return None, "bridge_tunnel_layer_or_elevated_tags"
         if alignment < math.cos(math.radians(15)):
             return None, "direction_mismatch"
-        return (way, distance), "accepted"
+        return (way, distance, tuple(sorted(set(nearby)-set(candidates)))), "accepted"
 
 
 def road_length(model, matrix):
@@ -218,9 +238,10 @@ def classify_record(model, matrix, roads, extent):
         if match is None:
             return None, reason
         matches.append(match)
-    if len({way for way, _ in matches}) != 1:
+    if len({match[0] for match in matches}) != 1:
         return None, "different_ways_across_footprint"
-    return {"osmWay": matches[0][0], "maximumAssociationDistanceMetres": max(d for _, d in matches)}, "accepted"
+    return {"osmWay": matches[0][0], "maximumAssociationDistanceMetres": max(match[1] for match in matches),
+            "ignoredSafeUnemittedWays": sorted({way for match in matches for way in match[2]})}, "accepted"
 
 
 def classify(manifest_path: Path, osm_path: Path | None = None):
@@ -237,7 +258,8 @@ def classify(manifest_path: Path, osm_path: Path | None = None):
         raise ValueError("WRP byte budget")
     osm_path = osm_path or manifest_path.parent/"osm-source.json"
     source = read_json(osm_path, identities=identities)
-    roads = Roads(source, bbox)
+    include_minor = manifest["world"].get("include_minor_roads", False)
+    roads = Roads(source, bbox, include_minor)
     # A missing way may hide a crossing/bridge near an otherwise safe road.
     if roads.missing_geometry:
         raise ValueError("Highway geometry incomplete; cannot prove unique association")
@@ -273,13 +295,14 @@ def classify(manifest_path: Path, osm_path: Path | None = None):
     if any(digest(path) != identity for path, identity in identities.items()):
         raise ValueError("Source changed during classification; use immutable prepared input")
     manifest["earth_ground_road_ids"] = sorted(record["id"] for record in selected)
-    receipt = {"schema": 1, "createdUTC": datetime.now(timezone.utc).isoformat(), "classification": "inferred_geometry_not_generator_provenance",
+    receipt = {"schema": 2, "createdUTC": datetime.now(timezone.utc).isoformat(), "classification": "inferred_geometry_generator_eligible_not_provenance",
                "manifest": str(manifest_path), "manifestInputSHA256": identities[manifest_path], "wrp": str(wrp), "wrpSHA256": identities[wrp],
                "osm": str(osm_path), "osmSHA256": identities[osm_path], "bbox": manifest["world"]["bbox"], "records": len(seen),
                "selected": len(selected), "reasons": dict(counts), "highwayWays": roads.ways, "indexedSegments": len(roads.segments),
                "maximumAssociationDistanceMetresExclusive": RADIUS, "maximumTangentDifferenceDegrees": 15,
+               "sourceEmissionPolicy": {"include_minor_roads": include_minor, "reference": "CWR-Worldgen b46124fc osm.py road_is_supported; positive candidates only; every elevated nearby way vetoes"},
                "sourceValidationUnchanged": manifest.get("final_validation"), "associations": selected,
-               "limits": "All three road-axis probes must associate uniquely to the same safe-tagged OSM way. Ambiguity preserves authored placement. Missing/wrong OSM tags remain a source limitation; this is not bridge or global road validation."}
+               "limits": "All three road-axis probes must associate uniquely to the same safe-tagged generator-eligible OSM way. Any nearby elevated way vetoes, even ineligible footbridges. Competing eligible roads preserve authored placement. Missing/wrong OSM tags remain a source limitation; this is not exact provenance, bridge or global road validation."}
     return manifest, receipt
 
 

@@ -292,8 +292,17 @@ Change prepared inputs only between runs: running streams pin visited sources.
 Classification is **geometric inference, not exact generator provenance**.
 The centre and both road-axis endpoints must each lie strictly within 5 m of one
 unique OSM way, follow its tangent within 15 degrees, and identify the same way.
-Multiple nearby ways or separate passages of the same way are rejected; no
-nearest-road winner suppresses ambiguity. Bridge/tunnel/covered/indoor values
+Positive candidates now follow the recorded generator emission policy from
+CWR-Worldgen `b46124fc` (`osm.py::road_is_supported`): the major highway set is
+eligible, while path/footway/cycleway/bridleway/pedestrian require the manifest's
+boolean `world.include_minor_roads`. Steps are never emitted by that predicate.
+Multiple nearby eligible ways or separate passages of the same way are rejected;
+no nearest-road winner suppresses their ambiguity. **Every** nearby unsafe way
+still vetoes association, including an un-emitted footbridge or tunnel. Ordinary
+safe un-emitted ways are listed in each accepted receipt's
+`ignoredSafeUnemittedWays`. This is policy-aware inference, not exact source
+provenance; a different generator policy needs a corresponding classifier review.
+Bridge/tunnel/covered/indoor values
 other than absent/explicit false, nonzero/invalid layer or level, and elevated
 location/bridge-structure tags reject the association. Unsupported transforms
 and footprints beyond the prepared rectangle stay authored. Missing highway
@@ -303,15 +312,34 @@ Inputs are bounded to 64 MiB JSON, 100,000 elements, 2 million geometry points,
 200,000 indexed segments/2 million index references, and the existing 32 MiB WRP
 and record caps. There is no silent truncation.
 
-The actual city03 source conservatively classifies 471/1,057 road pieces;
-complete Mamer02 classifies 6,475/8,536. City886/887 are ambiguous and deliberately
-remain authored. Both Mamer6459/6460 are classified: the cached-input DEM plane
-prototype reduces their estimated vertical endpoint difference from 9.130 m to
-0.0026 m. This does not claim installed appearance. Original WRP/assets/status
-are unchanged; both sources still have failed upstream final validation.
-The external lab `worldgen-regions-ground-roads.json` references both annotated
-sidecars. Run the installed region harness with that explicit `-Index`, inspect
-the images and fitted-road logs, and retain the remaining junction limitations.
+The earlier all-highway association classified city03 471/1,057 road pieces
+and complete Mamer02 6,475/8,536. Respecting their recorded `include_minor_roads=false`
+policy increases those counts to **665** and **6,924**, respectively; all earlier
+selected IDs remain selected. City886/887 now uniquely associate with primary
+way8160423 rather than competing with ordinary un-emitted footpaths. Competing
+eligible residential roads still exclude city107. Nearby elevated/tunnel/covered
+negative controls remain excluded, even when their highway type was not emitted.
+
+A CPU run of production `EarthWorldgen::Build` uses an offline reconstruction of
+the exact cached zoom12 25 m patch, geographic origin
+`49.61000061035156,6.130000114440918`, grid origin `3200,3200`, and camera
+`6625.248046875,6857.04296875`. Its height range matches the installed patch log
+(235.04503 to 371.09888 m). City886/887's closest endpoint vertical difference
+changes from **9.93965 m to 0.05019 m**; their horizontal overlap is unchanged at
+about 0.303 m. Both snapshots select 2,048 objects; fitted roads increase from
+92 to 115 at this camera. This is a CPU transform result, not installed visual
+acceptance. The affine plane still cannot repair junction holes, curved-road
+meshes, sharp DEM changes, missing semantic tags or all unclassified floating
+pieces. Original WRP/assets/status remain unchanged, and both sources still have
+failed upstream final validation.
+
+Fresh external siblings `manifest-earth-ground-roads-emission.json` and their
+association/hash receipts are stored beside both original generated manifests.
+The lab `worldgen-regions-ground-roads-emission.json` references those siblings;
+`worldgen-road-emission-native-proof.json` records the production placement
+comparison above. The previous sidecars/index remain intact. Run the installed
+region harness with the fresh explicit `-Index`, inspect the images and fitted
+road logs, and retain the remaining junction limitations.
 
 ## First actual offline region receipt
 

@@ -48,10 +48,36 @@ class ClassificationTests(unittest.TestCase):
                 self.assertEqual(reason, "bridge_tunnel_layer_or_elevated_tags")
 
     def test_multiple_ways_overlap_is_not_nearest_winner(self):
-        for second in (way(11, x=503), way(11, tags={"bridge": "yes"})):
+        for second, expected in ((way(11, x=503), "ambiguous_multiple_ways"),
+                                 (way(11, tags={"bridge": "yes"}), "bridge_tunnel_layer_or_elevated_tags")):
             match, reason = self.classify([way(10), second])
             self.assertIsNone(match)
-            self.assertEqual(reason, "ambiguous_multiple_ways")
+            self.assertEqual(reason, expected)
+
+    def test_unemitted_ordinary_footway_does_not_hide_surface_road(self):
+        for highway in ("footway", "path", "steps", "pedestrian"):
+            with self.subTest(highway=highway):
+                match, reason = self.classify([way(10), way(11, x=503, tags={"highway": highway})])
+                self.assertEqual(reason, "accepted")
+                self.assertEqual(match["osmWay"], 10)
+                self.assertEqual(match["ignoredSafeUnemittedWays"], [11])
+
+    def test_ineligible_elevated_ways_still_veto(self):
+        for tags in ({"highway": "footway", "bridge": "yes"}, {"highway": "footway", "layer": "1"},
+                     {"highway": "steps", "tunnel": "yes"}, {"highway": "path", "covered": "yes"}):
+            with self.subTest(tags=tags):
+                match, reason = self.classify([way(10), way(11, x=503, tags=tags)])
+                self.assertIsNone(match)
+                self.assertEqual(reason, "bridge_tunnel_layer_or_elevated_tags")
+
+    def test_include_minor_emission_policy_and_steps(self):
+        source = {"elements": [way(10), way(11, x=503, tags={"highway": "footway"})]}
+        roads = mod.Roads(source, BBOX, include_minor=True)
+        self.assertEqual(mod.classify_record("o/road/sil25.p3d", matrix(), roads, 1000)[1], "ambiguous_multiple_ways")
+        self.assertEqual(self.classify([way(11, tags={"highway": "footway"})])[1], "no_emitted_source_way")
+        self.assertFalse(mod.emitted_road({"highway": "steps"}, True))
+        with self.assertRaises(ValueError):
+            mod.Roads(source, BBOX, include_minor="false")
 
     def test_same_way_hairpin_ambiguity(self):
         points = [{"lat": .004, "lon": .005}, {"lat": .006, "lon": .005},
