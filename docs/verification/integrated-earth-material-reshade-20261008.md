@@ -160,3 +160,11 @@ The empty Earth fixture can emit the existing `No shape object NOID <no shape>
 tested for aiming position` player diagnostic. The camera preview renders and
 remains interactive, but this fixture is not character/gameplay acceptance and
 its log should not be described as error-free.
+
+Final usability correction: installed `c044d322` at 04:35 local time. Geographic
+Go above500km now looks down at the planet rather than reusing the slanted
+ground view. The Globe button and harness use that same transaction.
+`build/earth-streaming/20261008-043547/result.json` passed actual geographic
+orbital Go, screenshot, near-window return and real W/S input; the inspected
+`globe.png` shows the complete centered planet. The change is camera-only;
+the material, local-surface and ReShade receipts above remain applicable.
