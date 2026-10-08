@@ -913,7 +913,7 @@ void WaterWgpu::DrawEarthWater(Scene& scene, float originX, float originZ, float
                       std::max(t.sss, 0.0f), std::clamp(t.backscatter, 0.0f, 1.0f)};
     p.tidewater[3] = {std::max(t.gust, 0.0f), std::max(t.slick, 0.0f), std::max(t.windrow, 0.0f), float(t.debugView)};
     p.tidewater_fx.z = std::clamp(t.waterGlow, 0.0f, 2.0f);
-    p.tidewater_sea = {7.0f, 100.0f, std::clamp(t.whitecaps, 0.0f, 1.0f), 0.0f};
+    p.tidewater_sea = {7.0f, 120.0f, std::clamp(t.whitecaps, 0.0f, 1.0f), 0.0f};
     p.optics_params = {1.0f, 1.0f, 0.0f, 1.0f};
     _engine.QueueWaterParams(p);
     WgrWaterNode marker{};

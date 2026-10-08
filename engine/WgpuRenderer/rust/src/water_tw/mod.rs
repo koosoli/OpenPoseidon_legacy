@@ -1026,6 +1026,13 @@ impl Tidewater {
             self.instance_count = 0;
             return;
         };
+        // Params persist when the C++ producer stops submitting near water. Retire
+        // its selection as we leave that altitude band, rather than simulating a
+        // no-longer-drawn ocean during the whole trip to space.
+        if earth_preview(&p) && cam.cam_pos[1] >= 8000.0 {
+            self.instance_count = 0;
+            return;
+        }
         // water clock, pause-coherent like Current OP's (Glob.time)
         let dt = self.last_time.map_or(0.0, |t| (p.time - t).clamp(0.0, 0.1));
         self.last_time = Some(p.time);
@@ -1128,6 +1135,7 @@ impl Tidewater {
     /// Per-frame compute before the water draw: the FFT and its mip chain.
     pub fn update(&mut self, encoder: &mut wgpu::CommandEncoder, timers: &crate::gpu_timers::GpuTimers) {
         if self.last_params.is_some() {
+            if self.last_params.as_ref().is_some_and(earth_preview) && self.instance_count == 0 { return; }
             self.fft.dispatch(encoder, timers);
             if self.last_params.as_ref().is_some_and(earth_preview) { return; }
             // W5b: the caustics follow this frame's FFT (W7h: timed)
