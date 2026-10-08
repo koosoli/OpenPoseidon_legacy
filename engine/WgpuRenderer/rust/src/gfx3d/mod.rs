@@ -24,6 +24,8 @@ mod muzzle_flash_tests;
 mod boot_relief_tests;
 #[cfg(test)]
 mod native_pbr_tests;
+#[cfg(test)]
+mod earth_ground_detail_tests;
 mod interior_publication;
 mod weather_cover;
 mod weather_cover_policy;

@@ -348,3 +348,59 @@ unsafe paths, glass/default surfaces, missing texture uploads, hidden sections
 and translucent material. Production C++ syntax checks are CPU-only; they do
 not establish a successful GPU draw. The installed harness now also attempts a
 bounded native screenshot on failure while retaining the failed verdict.
+
+
+## Resident Earth ground shading follow-up
+
+The installed `ea71483b` three-pose run at
+`build/earth-worldgen-installed/20261008-160045-77ebe8` passed actual retained
+registration (2,048/2,048 at every pose, no model errors), including roads,
+trees and houses. Its images still show uniformly olive near ground. This is a
+separate presentation defect from upstream's invalid road connections.
+
+The Earth material's early shader return used its coarse overview albedo and
+global sun/sky alone. A 4,096 by 2,048 global overview has kilometre-scale pixels;
+it cannot supply ground detail. The resident DEM already supplies height-derived
+slope/curvature normals. The material return also bypassed the ordinary scene
+shadow and depth-AO receivers, along with the finite native island maps which
+must remain excluded from Earth.
+
+An explicit internal `SubmitEarthHorizon(..., bool groundDetail=false)` argument
+now marks only the horizon/resident ground submissions when the caller opts in.
+The two ground calls in `TerrainWgpu.cpp` must pass `true`; globe, geographic
+feature and proxy-building calls keep the default. This adds no public ABI,
+texture or vertex layout. Previously unused Earth local-light lanes carry a
+512-metre high/low ECEF origin and the marker. The detail evaluates absolute
+metre coordinates in that geographic frame, independently of camera movement;
+the split prevents Earth-sized float cancellation. Three fixed bands at 8 metres,
+1 metre and 0.125 metres add bounded neutral reflectance and analytic tangent
+normal variation. Pixel-footprint attenuation removes unresolved bands before
+Nyquist; distance attenuation is exactly neutral beyond 180 metres. These are
+procedural surface irregularities, not sourced land cover or biome classification.
+The current implementation uses at most 24 lattice corner hashes per nearby
+fragment and adds no detail texture reads or fog work.
+
+Only marked ground within 400 metres receives existing camera-relative scene
+CSM and screen-depth GTAO, fading between 200 and 400 metres. GTAO multiplies
+ambient light; shadows multiply direct sun. Their existing no-cascade/AO-disabled
+readiness guards remain in force. Source inspection establishes that
+`SetShadowCascades` captures the scene camera origin, passes camera-relative
+cascade matrices, and shares that origin with retained caster culling/depth;
+`shadow_strength` consumes camera-relative receiver positions. This establishes
+the intended coordinate contract, not actual shadow presence in this Earth
+fixture. Native finite-heightmap cave, GI, wetness and terrain-shadow receivers
+remain excluded. The global sphere's material behavior is unchanged.
+
+CPU verification: `scripts/Test-EarthGroundDetail.ps1` checks origin split
+precision at the dateline and supported latitude extremes plus two-frame ECEF
+reconstruction within two centimetres; Rust
+`earth_ground_detail_` tests validate the actual production shader through Naga,
+check bounded noise/analytic gradients and split invariance, and verify exact
+minified/distant neutral endpoints. Existing native-material preview/tangent
+shader composition variants also pass. Production `EngineWgpu.cpp` passes single-TU
+syntax validation. These checks create no GPU device. The parent/operator still
+needs the integrated installed three-pose images and engine frame-cost comparison
+with identical scene/settings. Inspect actual tree/house cast shadows, contact AO,
+slope readability, grain stability during translation/rebase, and minification;
+shader compilation alone cannot accept their appearance or cost. No new ground
+shading runtime or visual acceptance is claimed at this source checkpoint.

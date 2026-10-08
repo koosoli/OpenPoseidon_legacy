@@ -158,6 +158,71 @@ fn material_flags(m: Material) -> u32 {
     return u32(m.normal_map.w + 0.5);
 }
 
+// BEGIN_EARTH_GROUND_DETAIL_HELPERS
+// Three fixed world-metre bands, 24 bounded integer corner hashes total.
+// High ECEF lattice coordinates stay separate from small local coordinates so
+// neither Earth-sized float cancellation nor camera motion drives the grain.
+fn earth_ground_hash(cell: vec3<i32>) -> f32 {
+    let bits = bitcast<vec3<u32>>(cell);
+    var h = (bits.x * 1597334677u) ^ (bits.y * 3812015801u) ^ (bits.z * 2798796415u);
+    h = (h ^ (h >> 16u)) * 2246822519u;
+    h = (h ^ (h >> 13u)) * 3266489917u;
+    return f32((h ^ (h >> 16u)) & 65535u) / 65535.0;
+}
+
+fn earth_ground_noise(high: vec3<f32>, low: vec3<f32>, frequency: f32) -> vec4<f32> {
+    let p = low * frequency;
+    let cell = vec3<i32>(high * frequency) + vec3<i32>(floor(p));
+    let f = fract(p);
+    let s = f * f * (vec3<f32>(3.0) - 2.0 * f);
+    let ds = 6.0 * f * (vec3<f32>(1.0) - f);
+    var value = 0.0;
+    var gradient = vec3<f32>(0.0);
+    for (var z = 0; z < 2; z++) {
+        for (var y = 0; y < 2; y++) {
+            for (var x = 0; x < 2; x++) {
+                let corner = earth_ground_hash(cell + vec3<i32>(x,y,z));
+                let w = select(vec3<f32>(1.0) - s, s, vec3<bool>(x == 1,y == 1,z == 1));
+                let dw = select(-ds, ds, vec3<bool>(x == 1,y == 1,z == 1));
+                value += corner * w.x * w.y * w.z;
+                gradient += corner * vec3<f32>(dw.x * w.y * w.z, w.x * dw.y * w.z, w.x * w.y * dw.z);
+            }
+        }
+    }
+    return vec4<f32>(value, gradient * frequency);
+}
+
+fn earth_ground_band(footprint: f32, frequency: f32, distance: f32) -> f32 {
+    return (1.0 - smoothstep(0.12, 0.5, footprint * frequency)) *
+        (1.0 - smoothstep(25.0, 180.0, distance));
+}
+
+struct EarthGroundDetailSample { normal: vec3<f32>, reflectance: f32, };
+fn earth_ground_detail(absolute: vec3<f32>, normal: vec3<f32>, footprint: f32, distance: f32,
+                       high: vec3<f32>, low: vec3<f32>) -> EarthGroundDetailSample {
+    var result: EarthGroundDetailSample;
+    result.normal = normal;
+    result.reflectance = 1.0;
+    if (distance >= 180.0) { return result; }
+    let up = normalize(high + low);
+    let east = normalize(vec3<f32>(-up.z, 0.0, up.x));
+    let north = cross(east, up);
+    let local = absolute - vec3<f32>(6400.0,0.0,6400.0);
+    let p = low + east * local.x + up * local.y + north * local.z;
+    let coarse = earth_ground_noise(high, p, 0.125);
+    let middle = earth_ground_noise(high, p, 1.0);
+    let fine = earth_ground_noise(high, p, 8.0);
+    let weights = vec3<f32>(earth_ground_band(footprint,0.125,distance),
+        earth_ground_band(footprint,1.0,distance),earth_ground_band(footprint,8.0,distance));
+    result.reflectance = 1.0 + dot((vec3<f32>(coarse.x,middle.x,fine.x) * 2.0 - vec3<f32>(1.0)) * weights,
+        vec3<f32>(0.12,0.09,0.04));
+    let gradient = coarse.yzw * (0.12 * weights.x) + middle.yzw * (0.035 * weights.y) + fine.yzw * (0.004 * weights.z);
+    let local_gradient = vec3<f32>(dot(gradient,east),dot(gradient,up),dot(gradient,north));
+    result.normal = normalize(normal - (local_gradient - normal * dot(local_gradient,normal)));
+    return result;
+}
+// END_EARTH_GROUND_DETAIL_HELPERS
+
 // Per-draw world matrix + material as read-only storage arrays, indexed by
 // @builtin(instance_index) (fed as the draw's base_instance). One upload per
 // frame, group(1) bound once — no per-draw dynamic offsets. The skinned pipeline
@@ -873,20 +938,39 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
     if ((material_flags(material) & MATFLAG_EARTH_SURFACE) != 0u) {
         // The global sphere is outside the finite landscape heightmap. Sampling
         // that map's cave, shadow, wetness or GI receivers would turn its curved
-        // surface black below the local datum. Use only global sun and albedo.
+        // surface black below the local datum. Marked near ground adds bounded
+        // detail and actual scene CSM/depth AO; the globe keeps global light.
         let albedo = textureSampleGrad(textures[packed >> 3u], samplers[packed & 7u],
                                       in.uv, boot_duv_dx, boot_duv_dy).rgb;
-        let n = normalize(in.normal);
+        var n = normalize(in.normal);
+        let ground_detail = material.light_ambient.w > 0.5;
+        let distance = length(in.world_pos);
+        var reflectance = 1.0;
+        if (ground_detail) {
+            let detail = earth_ground_detail(in.world_pos + frame.cam_pos.xyz, n,
+                max(length(dwx),length(dwy)), distance, material.light_diffuse.xyz, material.light_ambient.xyz);
+            n = detail.normal;
+            reflectance = detail.reflectance;
+        }
         let daylight = max(dot(n, -frame.sun_dir_world.xyz), 0.0);
-        var light = material.sun_ambient.rgb + material.sun_diffuse.rgb * daylight;
+        var ambient_occlusion = 1.0;
+        var sun_occlusion = 1.0;
+        if (ground_detail && distance < 400.0) {
+            // Actual camera-relative scene CSM and depth AO, with their existing
+            // readiness guards. Never sample the finite island's cave/GI maps.
+            let receiver = 1.0 - smoothstep(200.0,400.0,distance);
+            ambient_occlusion = mix(1.0,gtao_ao(in.clip.xy),receiver);
+            sun_occlusion = 1.0 - receiver * shadow_strength(in.world_pos, n, 1.0, dwx, dwy);
+        }
+        var light = material.sun_ambient.rgb * ambient_occlusion + material.sun_diffuse.rgb * daylight * sun_occlusion;
         if (frame.sun_diffuse.w > 0.5 && (packed >> 3u) != 0u) {
             // The producer's material light is legacy-scaled. Match the rest
             // of the physical scene using this frame's sun and directional sky,
             // without finite-map receivers or an artificial night-time floor.
             // Slot zero keeps the producer's legacy plain-fallback tint.
-            light = sky_irradiance(n) * frame.sun_ambient.w + frame.sun_diffuse.rgb * daylight;
+            light = sky_irradiance(n) * frame.sun_ambient.w * ambient_occlusion + frame.sun_diffuse.rgb * daylight * sun_occlusion;
         }
-        return vec4<f32>(srgb_to_linear(albedo) * light, 1.0);
+        return vec4<f32>(srgb_to_linear(albedo) * reflectance * light, 1.0);
     }
 
     if ((material_flags(material) & MATFLAG_BOOT_RELIEF) != 0u) {

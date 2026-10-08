@@ -35,6 +35,8 @@
 #include <Poseidon/Dev/Diag/FramePaceTrace.hpp> // PACE-001: per-frame pacing trace
 #include "EngineWgpu.hpp"
 #include "EarthRoadCoverage.hpp"
+#include "EarthGroundDetail.hpp"
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include "ForestSnowSurface.hpp"
 #include <typeinfo>
 #include "GeometryOwnerLedger.hpp"
@@ -7420,7 +7422,7 @@ void EngineWgpu::SubmitTerrain(std::span<const WgrTerrainNode> nodes)
     _cmds.push_back(cmd);
 }
 
-void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture, uint32_t sampler)
+void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture, uint32_t sampler, bool groundDetail)
 {
     if (!_renderer || !mesh || !indexCount) return;
     EnsureCamera();
@@ -7447,6 +7449,16 @@ void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTextur
     const float r = texture ? 1.0f : .35f, g = texture ? 1.0f : .32f, b = texture ? 1.0f : .26f;
     d.mat_sun_ambient = {ambient.R()*r,ambient.G()*g,ambient.B()*b,0};
     d.mat_sun_diffuse = {diffuse.R()*r,diffuse.G()*g,diffuse.B()*b,0};
+    if (groundDetail)
+    {
+        const auto origin = EarthStreaming::Locations().Get();
+        const auto split = EarthGroundDetail::SplitOrigin(origin.latitude, origin.longitude);
+        // Earth's early material route does not consume local-light modulation.
+        // Reuse these lanes as an explicitly marked high/low ECEF origin, keeping
+        // world-metre grain stable through camera movement and geographic rebases.
+        d.mat_light_diffuse = {split.high[0],split.high[1],split.high[2],0};
+        d.mat_light_ambient = {split.low[0],split.low[1],split.low[2],1};
+    }
     _draws3d.push_back(d);
     _cmds.push_back(WgrCmd{WGR_CMD_DRAW_3D,U32(_draws3d.size()-1)});
 }
