@@ -38,8 +38,8 @@ try{
  foreach($x in @(6400,9600,16000,32000,6400)){
   $before=@(Select-String -Path $log -Pattern 'Earth terrain patch ').Count
   $null=Send @{cmd='exec';code=('triFreeFlyPose "'+$x+' 6400 4500 30 -20"')}
-  $origin=$x-12800
-  $pattern='origin \['+$origin+',-6400\]'
+  $origin=$x-3200 # 4500m selects the 25m/z12 detail band.
+  $pattern='origin \['+$origin+',3200\]'
   $deadline=[DateTime]::UtcNow.AddSeconds(90)
   do{
    Require (!$p.HasExited) 'Game exited during streaming'
