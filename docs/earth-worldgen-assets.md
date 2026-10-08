@@ -220,3 +220,41 @@ Use this output as an asset-presentation fixture; it is not a validated playable
 island. The local lab's `worldgen-camera-poses.json` supplies three record-derived
 road/house/tree views and nearest-selection counts. Their heights use cached DEM
 samples: installed acceptance must query current resident ground before capture.
+
+## Bounded installed presentation harness
+
+`scripts/Test-EarthWorldgenInstalled.ps1` defaults to the actual region-03
+`generated/manifest.json` and `generated/@CWR-Milestone4` in the external lab.
+The parent/operator runs it only after a matched integrated deployment, through
+the shared game lock:
+
+```powershell
+./scripts/Test-EarthWorldgenInstalled.ps1 -ExpectedCommit <integrated-commit> -Manifest D:/OpenPoseidon-Worldgen-Lab-20261008/lux-region-03/generated/manifest.json -AddonRoot D:/OpenPoseidon-Worldgen-Lab-20261008/lux-region-03/generated/@CWR-Milestone4 -CacheDirectory <existing-Earth-cache>
+```
+
+This launches one owned empty Earth fixture at geographic origin 49.61/6.13,
+with the generated mod mounted through `--addon-root`, local imagery enabled and
+cached proxy buildings/features disabled. It uses an isolated graphics profile
+and verifies actual native 1600×900, 4x MSAA, no upscaler. Invalid local network
+proxies enforce a cache-only fixture; no shader, imagery or data preparation
+downloads run. The existing supported `-PrepareOnly` helper writes the empty
+fixture below the caller's cache.
+
+Three record-derived poses query current resident ground before placing the
+camera 15 metres above it, facing headings 5.56°, 220.875° and 237.315°, with
+pitch −35°. Each pose waits for a fresh matching-revision/terrain-generation
+Worldgen publication and terminal admission log (`attempted == selected <=
+2048`). Successful retained model logs must include stock tree, road and house
+families in that publication. Missing models and any created/attempted shortfall
+remain explicit receipt fields; positive source-parser counts cannot satisfy
+this gate. It saves each actual camera, ground, model identities, screenshot,
+weather and published engine performance, then checks clean exit, unchanged
+deployment/source manifest, no elevation downloads and no GPU/runtime errors.
+
+The receipt carries upstream's failed validation status unchanged. Its pass
+means these presentation gates completed, with `visualAccepted=false` and
+`playabilityAccepted=false`. Inspect road fit, tree/forest grounding, houses,
+textures and depth in all images before accepting appearance. Retirement,
+rebase, collision, navigation and upstream road validation are outside this
+three-pose smoke test. `-SelfTest` runs only parser and failed-registration
+negative controls, without accessing the game or GPU.
