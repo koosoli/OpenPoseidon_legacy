@@ -8397,8 +8397,11 @@ bool SetEarthPreviewLocation(double latitude,double longitude,double altitude)
     if (!EarthStreaming::Enabled() || MultiplayerSession() || !ZeusWorldAvailable() ||
         !EarthStreaming::ValidateLocation(latitude,longitude,altitude)) return false;
     char pose[160];
-    snprintf(pose,sizeof(pose),"[%g,%g,%.9g] az 0 el -60",double(EarthStreaming::CameraAnchor),
-        double(EarthStreaming::CameraAnchor),altitude);
+    // At orbital distances a slanted ground view puts the whole planet below
+    // the frame. Geographic Go and the Globe button share this transaction.
+    const double elevation=altitude>500000.0 ? -89.9 : -60.0;
+    snprintf(pose,sizeof(pose),"[%g,%g,%.9g] az 0 el %g",double(EarthStreaming::CameraAnchor),
+        double(EarthStreaming::CameraAnchor),altitude,elevation);
     if (!SetFreeFlyTestPose(pose)) return false;
     return EarthStreaming::Locations().Set(latitude,longitude,altitude);
 }

@@ -74,7 +74,9 @@ try{
  }
  if($Globe){
   Require (Test-Path -LiteralPath $settings.POSEIDON_EARTH_IMAGERY) 'Globe imagery cache required; launch preview once online'
-  $null=Send @{cmd='exec';code='0 setOvercast 0;triFreeFlyPose "6400 6400 18000000 0 -89.9"'}
+  $null=Send @{cmd='exec';code='0 setOvercast 0'}
+  $go=Send @{cmd='eval';code='triEarthLocation [46.6,8.1,18000000]'}
+  Require ($go.result-match'OK:latitude=') 'Orbital geographic Go was rejected'
   Start-Sleep -Seconds 2
   $camera=Send @{cmd='dev_wet_soil_diagnostic';action='state'}
   Require ([Math]::Abs($camera.camera.position[1]-18000000)-lt10) 'Actual orbital camera height differs'
