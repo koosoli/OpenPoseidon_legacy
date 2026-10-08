@@ -89,6 +89,9 @@ public:
 	bool      alphaToCoverage  = true;          // MSAA alpha-to-coverage on cutout draws (fence wire,
 	                                             // foliage) — grades sub-pixel features instead of the
 	                                             // hard alpha-test keeping/killing whole pixels
+	// Explicit external ReShade preview; requires separately prepared official
+	// runtime in the local user cache. Applied before renderer creation.
+	bool      optionalReShade = false;
 	// Upscaler choice: -1 = AUTO (DLSS when the driver supports it, else FSR 1),
 	// 0 = off (pure native), 1 = DLSS, 2 = FSR 1. Persisted; seeds WGR_DLSS /
 	// WGR_RENDER_SCALE at boot and live-applies through the temporal tuning.

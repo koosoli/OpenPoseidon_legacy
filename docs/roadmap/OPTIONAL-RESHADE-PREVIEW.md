@@ -1,7 +1,7 @@
 # Optional ReShade preview
 
 This is an opt-in **single-player Windows x64 Vulkan** experiment. Normal engine
-launches do not load ReShade. No system-wide Vulkan layer or registry entry is
+launches default to ReShade off. No system-wide Vulkan layer or registry entry is
 installed. ReShade is a separate post-processing runtime, not a replacement for
 the engine's materials, GTAO, GI or fog. It cannot add missing map assets.
 
@@ -12,7 +12,7 @@ engine's C++ toolchain available:
 
 ```powershell
 .\scripts\Prepare-ReShade.ps1
-.\scripts\Launch-ReShade.ps1 --window --width 1600 --height 900
+.\scripts\Launch-ReShade.ps1 -GameArguments @('--window','--width','1600','--height','900')
 ```
 
 Preparation downloads the official 6.8.0 full-add-on installer from
@@ -28,11 +28,21 @@ The launcher selects Vulkan, adds the layer only to its child process, and
 restores the invoking process environment afterward. It holds the repository's
 game lock and refuses an already running game. For initial compatibility
 isolation DLSS is disabled in this opt-in launch; `-EnableDlss` allows testing it
-later. Other normal launch arguments can follow the script parameters. Do not
+later. Pass normal launch arguments as the `GameArguments` string array. Do not
 use the full-add-on experiment for multiplayer.
 
-In **Dev Tools → Graphics**, **ReShade effects** switches the actual ReShade
-runtime on/off live. If the add-on is absent the panel explains how to opt in;
+Alternatively, after preparing once, enable **Dev Tools → Graphics → Load
+optional ReShade on next launch**. This persists `optionalReShade` in
+`graphics.cfg`; restart manually to load/unload the runtime. Before renderer
+creation the engine verifies the official DLL and manifest hashes and required
+cache files, then enables process-local Vulkan layer discovery. A missing or
+mismatched cache is reported in the log and panel and keeps the normal renderer.
+There is no automatic download, installation or restart. Known multiplayer
+startup arguments skip this preview. An explicit `WGR_DLSS` launch value is
+preserved; otherwise this experimental path disables DLSS for isolation.
+
+**ReShade effects** switches the actual ReShade runtime on/off live. If the
+add-on is absent the panel explains how to opt in;
 it does not silently substitute a native effect. **Home** opens ReShade's own
 preset controls. Our default comparison effect is a mild color-only sharpening
 and contrast adjustment, with a strength slider in that overlay. It needs no
@@ -89,4 +99,5 @@ engine exe/DLL versions, preset/add-ons and exact launch command. First compare
 a normal launch with an opt-in launch containing only our color effect. Test
 depth effects only after validating reversed-Z depth selection, MSAA and render
 scale. Uninstalling the experiment means closing the game and removing its
-dedicated optional cache directory; normal launches require no cleanup.
+dedicated optional cache directory. Disable **Load optional ReShade on next
+launch** to restore ordinary startup; no global layer needs removing.

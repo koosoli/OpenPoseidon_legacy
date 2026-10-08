@@ -297,6 +297,8 @@ bool GraphicsConfig::Load(const std::string& path)
         fpsCap = (int)*e;
     if (auto* e = cfg.FindEntry("alphaToCoverage"))
         alphaToCoverage = (int)*e != 0;
+    if (auto* e = cfg.FindEntry("optionalReShade"))
+        optionalReShade = (int)*e != 0;
     if (auto* e = cfg.FindEntry("renderScale"))
         renderScale = (float)*e;
     if (auto* e = cfg.FindEntry("msaaSamples"))
@@ -341,6 +343,7 @@ bool GraphicsConfig::Save(const std::string& path) const
     cfg.Add("vsync", static_cast<int>(vsync));
     cfg.Add("fpsCap", fpsCap);
     cfg.Add("alphaToCoverage", alphaToCoverage ? 1 : 0);
+    cfg.Add("optionalReShade", optionalReShade ? 1 : 0);
     cfg.Add("renderScale", renderScale);
     cfg.Add("msaaSamples", msaaSamples);
     cfg.Add("dlssMode", dlssMode);

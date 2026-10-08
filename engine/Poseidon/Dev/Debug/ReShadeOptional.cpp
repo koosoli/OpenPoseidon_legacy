@@ -2,8 +2,16 @@
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <Poseidon/Dev/Harness/HarnessServer.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
+#include <Poseidon/Foundation/Algorithms/Sha256.hpp>
+#include <Poseidon/Foundation/Common/GamePaths.hpp>
+#include <Poseidon/Foundation/Logging/Logging.hpp>
+#include <Poseidon/UI/Settings/GraphicsConfig.hpp>
 #include <Poseidon/World/World.hpp>
+#include <array>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 
 #if defined(_WIN32)
 #include <Windows.h>
@@ -13,6 +21,53 @@ namespace Dev = Poseidon::Dev;
 
 namespace
 {
+std::string startupMessage;
+
+std::filesystem::path RuntimeDirectory()
+{
+    // An explicit launcher may choose another prepared cache.
+    if (const char* path = std::getenv("RESHADE_BASE_PATH_OVERRIDE"); path && *path)
+        return path;
+    if (const char* local = std::getenv("LOCALAPPDATA"); local && *local)
+        return std::filesystem::path(local) / "OpenPoseidon" / "reshade" / "6.8.0";
+    return {};
+}
+
+bool FileDigestMatches(const std::filesystem::path& path, const char* expected)
+{
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return false;
+    Poseidon::Foundation::Sha256 hash;
+    std::array<char, 64 * 1024> bytes;
+    while (file)
+    {
+        file.read(bytes.data(), bytes.size());
+        hash.Update(bytes.data(), static_cast<size_t>(file.gcount()));
+    }
+    return file.eof() && hash.Hex() == expected;
+}
+
+bool ValidateRuntime(const std::filesystem::path& directory)
+{
+    if (directory.empty()) return false;
+    std::error_code ec;
+    for (const char* name : {"OpenPoseidonReShade.addon64", "ReShade.ini", "OpenPoseidon.ini", "Shaders/OpenPoseidonLook.fx"})
+        if (!std::filesystem::is_regular_file(directory / name, ec)) return false;
+    return FileDigestMatches(directory / "ReShade64.dll", "0cee63f9c9f13f3ac909c5b4903f4dbb4b719a7ab3b4f13b0deaf83c814b94f7") &&
+           FileDigestMatches(directory / "ReShade64.json", "aa21713718843e531da396e2bfc80772c9cb3c369d6c30b836be6b0ae812d503");
+}
+
+#if defined(_WIN32)
+void AddEnvironmentEntry(const char* name, const std::string& value)
+{
+    const char* current = std::getenv(name);
+    const std::string list = current ? current : "";
+    // Do not append duplicates when an explicit opt-in launcher already set it.
+    if ((";" + list + ";").find(";" + value + ";") == std::string::npos)
+        _putenv_s(name, (value + (list.empty() ? "" : ";" + list)).c_str());
+}
+#endif
+
 using Query = unsigned (*)();
 using SetEnabled = void (*)(int);
 using Capture = void (*)();
@@ -56,9 +111,64 @@ Bridge GetBridge()
 unsigned Read(Query query) { return query ? query() : 0; }
 }
 
+void PrepareOptionalReShadeEnvironment(bool enabled)
+{
+    if (!enabled) return;
+#if defined(_WIN32)
+    const auto& config = Poseidon::Foundation::AppConfig::Instance();
+    if (config.GetRenderBackend() != "wgpu" || config.IsHostServer() || config.GetConnectIP().GetLength() > 0)
+    {
+        startupMessage = "Optional ReShade was skipped: this preview requires a single-player WGPU launch.";
+        LOG_WARN(Graphics, "{}", startupMessage);
+        return;
+    }
+    const auto directory = RuntimeDirectory();
+    if (!ValidateRuntime(directory))
+    {
+        startupMessage = "ReShade cache missing or mismatched. Run scripts/Prepare-ReShade.ps1; normal renderer remains active.";
+        LOG_WARN(Graphics, "{}", startupMessage);
+        return;
+    }
+    AddEnvironmentEntry("VK_ADD_LAYER_PATH", directory.string());
+    AddEnvironmentEntry("VK_INSTANCE_LAYERS", "VK_LAYER_reshade");
+    _putenv_s("RESHADE_BASE_PATH_OVERRIDE", directory.string().c_str());
+    _putenv_s("WGPU_BACKEND", "vulkan");
+    // Isolate this preview from DLSS unless the launch explicitly opts in.
+    if (!std::getenv("WGR_DLSS")) _putenv_s("WGR_DLSS", "0");
+    startupMessage = "Optional ReShade requested for this launch (Vulkan).";
+    LOG_INFO(Graphics, "{}", startupMessage);
+#else
+    startupMessage = "Optional ReShade preview currently requires Windows.";
+#endif
+}
+
 void DrawOptionalReShadeControls()
 {
     Dev::PanelHelp("ReShade (optional, single-player preview)");
+    static bool preferenceLoaded = false;
+    static bool loadOnNextLaunch = false;
+    static std::string preferenceMessage;
+    const std::string path = Poseidon::Foundation::GamePaths::Instance().UserDir() + "graphics.cfg";
+    if (!preferenceLoaded)
+    {
+        Poseidon::GraphicsConfig config;
+        config.Load(path);
+        loadOnNextLaunch = config.optionalReShade;
+        preferenceLoaded = true;
+    }
+    if (Dev::Checkbox("Load optional ReShade on next launch", &loadOnNextLaunch))
+    {
+        Poseidon::GraphicsConfig config;
+        config.Load(path);
+        config.optionalReShade = loadOnNextLaunch;
+        preferenceMessage = config.Save(path) ? "Saved. Restart the game to change runtime loading." : "Could not save graphics.cfg.";
+        if (loadOnNextLaunch && !ValidateRuntime(RuntimeDirectory()))
+            preferenceMessage += " Optional cache missing/mismatched: run scripts/Prepare-ReShade.ps1 first.";
+    }
+    Dev::PanelTooltip("Requires the separately prepared official local runtime (scripts/Prepare-ReShade.ps1).\n"
+                      "Default off. Restart required to load/unload the Vulkan layer; live effects switch below.");
+    if (!preferenceMessage.empty()) Dev::PanelHelp("%s", preferenceMessage.c_str());
+    if (!startupMessage.empty()) Dev::PanelHelp("%s", startupMessage.c_str());
     const Bridge bridge = GetBridge();
     const unsigned status = Read(bridge.status);
     if ((status & 1u) && bridge.setEnabled)
@@ -75,7 +185,7 @@ void DrawOptionalReShadeControls()
                           "runtime Screenshots directory, then restores the original effects state.");
         return;
     }
-    Dev::PanelHelp("Inactive. Start using scripts/Launch-ReShade.ps1 to opt in.");
+    Dev::PanelHelp("Inactive. Prepare the optional runtime, enable loading above, then restart.");
     Dev::PanelTooltip("Optional external post-processing; no ReShade dependency in a normal launch.\n"
                       "Use the official runtime, matching graphics API, and test without other add-ons first.");
 }

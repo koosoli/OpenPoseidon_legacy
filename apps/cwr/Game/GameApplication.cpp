@@ -590,6 +590,7 @@ __attribute__((used)) static void (*_forceLinkGameStateExtTest)() = &InitModuleG
 #include <Poseidon/UI/Settings/AspectRatio.hpp>
 #include <Poseidon/UI/Settings/Presentation.hpp>
 #include <Poseidon/UI/Settings/GraphicsConfig.hpp>
+#include <Poseidon/Dev/Debug/ReShadeOptional.hpp>
 #include <Poseidon/UI/Settings/GraphicsApply.hpp>
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
 #include <SDL3/SDL.h>
@@ -1024,6 +1025,7 @@ void SeedRendererEnvFromGraphicsConfig()
     GraphicsConfig cfg;
     if (!cfg.Load(GraphicsConfigPath()))
         return; // first boot: renderer defaults (4x) match the config default (4)
+    PrepareOptionalReShadeEnvironment(cfg.optionalReShade);
     if (cfg.msaaSamples == 0 || cfg.msaaSamples == 2 || cfg.msaaSamples == 4 || cfg.msaaSamples == 8)
     {
         char buf[8];
