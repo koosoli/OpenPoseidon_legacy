@@ -43,6 +43,8 @@ struct EddsImage
     // the on-disk order is reversed during the read.
     std::vector<DDSMipLevel> mipmaps;
     bool hasAlpha = false;
+    // Original transfer-function metadata; compressed bytes are unchanged.
+    bool bc7Srgb = false;
     // Empty on success. Names the exact constraint that failed, because this is the
     // diagnostic entry point for a whole generation of assets and a bare "failed to
     // load" is what made the ODOL work a hex editor exercise (DZ-001).

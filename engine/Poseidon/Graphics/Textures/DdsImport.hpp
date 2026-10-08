@@ -88,6 +88,7 @@ class TextureSourceDDS : public ITextureSource
     int _mipmaps = 0;
     bool _hasAlpha = false;
     bool _isTransparent = false;
+    bool _bc7Srgb = false;
     PackedColor _avgColor{};
     Bc3MipChain _preparedBc3; // optional upload-only sidecar; original source/metadata stay unchanged
     bool InitFromMemoryWithOptions(const void* data, size_t size, const char* nameForErrors,
@@ -125,6 +126,7 @@ class TextureSourceDDS : public ITextureSource
 
     bool IsAlpha() const override { return _hasAlpha; }
     bool IsTransparent() const override { return _isTransparent; }
+    bool IsOriginalBc7Srgb() const { return _bc7Srgb; }
     void ForceAlpha() override { _hasAlpha = true; }
 
     // Testable entry point -- decode from an in-memory buffer, so unit tests can

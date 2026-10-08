@@ -15478,6 +15478,57 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                     }
                 }
             }
+            static const bool nativeSrgbPreview = []
+            {
+                const char* value = std::getenv("WGR_REFORGER_SRGB_PREVIEW");
+                return value && value[0] == '1' && value[1] == '\0';
+            }();
+            static const std::string nativeSrgbMaterial = []
+            {
+                const char* value = std::getenv("WGR_REFORGER_SRGB_MATERIAL");
+                return std::string(value ? value : "");
+            }();
+            if (nativeSrgbPreview && (sec.flags & WGR_MODEL_SECTION_NATIVE_PBR_PREVIEW) != 0u)
+            {
+                const auto& sourceSection = s->GetSection(i);
+                const char* path = sourceSection.surfMat && sourceSection.surfMat->GetName().Data()
+                    ? sourceSection.surfMat->GetName().Data() : nullptr;
+                const auto found = path ? _materialBindings.find(path) : _materialBindings.end();
+                const std::string_view name(path ? path : "");
+                const bool target = nativeSrgbMaterial.empty() ||
+                    (name.size() >= nativeSrgbMaterial.size() &&
+                     Asset::Material::EmatMaterial::NameMatches(
+                         name.substr(name.size() - nativeSrgbMaterial.size()), nativeSrgbMaterial));
+                bool complete = target && found != _materialBindings.end();
+                if (complete)
+                {
+                    using Slot = Asset::Material::MaterialSlot;
+                    const Slot roles[] = {Slot::BaseColour, Slot::LayerColour1, Slot::LayerColour2, Slot::LayerColour3};
+                    const uint64_t handles[] = {mat.texture_id, mat.layer_texture_id[0],
+                                                mat.layer_texture_id[1], mat.layer_texture_id[2]};
+                    for (size_t layer = 0; layer < 4; ++layer)
+                    {
+                        if (layer != 0 && handles[layer] == 0) continue;
+                        const auto* entry = found->second.Find(roles[layer]);
+                        if (!entry || entry->texture.isProcedural || entry->texture.path.empty())
+                        {
+                            complete = false;
+                            break;
+                        }
+                        Ref<Texture> texture = _wbank->Load(entry->texture.path.canonical().c_str());
+                        auto* native = static_cast<TextureWgpu*>(texture.GetRef());
+                        if (!native || !native->HasNativeSrgbBcr() || native->GpuHandle() != handles[layer])
+                        {
+                            complete = false;
+                            break;
+                        }
+                    }
+                }
+                if (complete) sec.flags |= WGR_MODEL_SECTION_NATIVE_PBR_SRGB;
+                static std::unordered_set<std::string> reportedSrgb;
+                if (path && target && reportedSrgb.size() < 32 && reportedSrgb.insert(path).second)
+                    LOG_INFO(Graphics, "Wgpu native PBR sRGB preview: material={} sourceAdmission={}", path, complete);
+            }
             // Multi's mask lives on the second UV set in the BI corpora (TexGen uvSource
             // "tex1") and in Reforger's (`UVSrcGlobalMaps "UV set 2"`, RFG-072); the shader
             // samples it with uv1 when told so -- and ONLY when the shape carries a second

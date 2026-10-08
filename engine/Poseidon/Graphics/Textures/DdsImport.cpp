@@ -410,6 +410,7 @@ bool TextureSourceDDS::InitFromMemoryWithOptions(const void* data, size_t size, 
 {
     _tintAverageLevel = {};
     _preparedBc3 = {};
+    _bc7Srgb = false;
     const char* who = nameForErrors ? nameForErrors : "?";
 
     if (IsEddsBuffer(data, size))
@@ -427,6 +428,7 @@ bool TextureSourceDDS::InitFromMemoryWithOptions(const void* data, size_t size, 
         _w = image.width;
         _h = image.height;
         _hasAlpha = image.hasAlpha;
+        _bc7Srgb = image.bc7Srgb;
         _levels = std::move(image.mipmaps);
     }
     else

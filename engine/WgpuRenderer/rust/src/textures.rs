@@ -189,7 +189,11 @@ impl TextureRegistry {
             dimension: wgpu::TextureDimension::D2,
             format: format.wgpu_format(),
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
+            // An optional color-role view shares these exact BC7 blocks. Normal,
+            // masks and all legacy consumers keep the default UNORM view.
+            view_formats: if format == TextureFormat::Bc7 {
+                &[wgpu::TextureFormat::Bc7RgbaUnormSrgb]
+            } else { &[] },
         });
 
         if gen_mips {
@@ -296,6 +300,9 @@ pub struct SharedTextures {
     // of evict/re-upload CYCLES. Measured worst case in the corpus is DayZ Chernarus at
     // 3,552 distinct object textures against an `object_cap` of 8,192 (lib.rs).
     bindless_leased: std::collections::HashSet<u32>,
+    // Original logical slot -> optional color-role slot. One descriptor, no
+    // additional pixels; leased entries survive eviction and refresh on upload.
+    srgb_aliases: std::collections::HashMap<u32, u32>,
     object_cap: u32,
     partially_bound: bool,
     // Bindless sampler layout + the 8-variant array bind (frame-constant), for the
@@ -606,6 +613,7 @@ impl SharedTextures {
             retiring_this_submission: 0,
             bindless_dirty: false,
             bindless_leased: std::collections::HashSet::new(),
+            srgb_aliases: std::collections::HashMap::new(),
             object_cap,
             partially_bound,
             sampler_array_layout,
@@ -703,6 +711,11 @@ impl SharedTextures {
             *entry = None;
             self.bindless_dirty = true;
         }
+        if let Some(alias) = self.srgb_aliases.remove(&slot) {
+            self.bindless_slots[alias as usize] = None;
+            self.bindless_retired.push(alias);
+            self.bindless_dirty = true;
+        }
         self.bindless_free.push(slot);
         true
     }
@@ -730,6 +743,9 @@ impl SharedTextures {
         {
             self.bindless_slots[lease as usize] = Some(t.view.clone());
             self.bindless_dirty = true;
+            if let Some(&alias) = self.srgb_aliases.get(&lease) {
+                self.bindless_slots[alias as usize] = Self::srgb_view(t);
+            }
         }
         handle
     }
@@ -751,6 +767,13 @@ impl SharedTextures {
                 && self.bindless_slots[slot as usize].as_ref() == Some(&t.view) {
                 self.bindless_slots[slot as usize] = None;
                 self.bindless_dirty = true;
+                if let Some(&alias) = self.srgb_aliases.get(&slot) {
+                    self.bindless_slots[alias as usize] = None;
+                    if !self.bindless_leased.contains(&slot) {
+                        self.srgb_aliases.remove(&slot);
+                        self.bindless_retired.push(alias);
+                    }
+                }
                 // TWO rules apply here and they compose (REN-RES-001 + the submit-boundary
                 // retire). A LEASED slot survives its upload entirely: it stays reserved,
                 // now sampling the white fallback, so the re-upload reclaims this exact
@@ -790,6 +813,35 @@ impl SharedTextures {
     // bindless texture array.
     pub fn texture_slot(&self, handle: u64) -> u32 {
         self.registry.get(handle).map_or(0, |t| t.slot)
+    }
+
+    fn srgb_view(t: &Texture2D) -> Option<wgpu::TextureView> {
+        (t.texture.format() == wgpu::TextureFormat::Bc7RgbaUnorm).then(|| {
+            t.texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("wgr_native_bcr_srgb"),
+                format: Some(wgpu::TextureFormat::Bc7RgbaUnormSrgb),
+                ..Default::default()
+            })
+        })
+    }
+
+    /// Explicit color-role alias for admitted native BCRs. Original slots remain
+    /// unchanged for normal/data consumers, feedback and legacy materials.
+    /// Cap exhaustion/unsupported/stale handles decline the complete preview.
+    pub fn srgb_slot(&mut self, handle: u64) -> Option<u32> {
+        let t = self.registry.get(handle)?;
+        let source = t.slot;
+        if source == 0 || self.bindless_slots.get(source as usize)?.as_ref() != Some(&t.view) {
+            return None;
+        }
+        if t.texture.format() != wgpu::TextureFormat::Bc7RgbaUnorm { return None; }
+        if let Some(&alias) = self.srgb_aliases.get(&source) { return Some(alias); }
+        let view = Self::srgb_view(t)?;
+        let alias = self.alloc_slot()?;
+        self.bindless_slots[alias as usize] = Some(view);
+        self.srgb_aliases.insert(source, alias);
+        self.bindless_dirty = true;
+        Some(alias)
     }
 
     // The bindless object-texture bind group (valid after ensure_bindless this frame).
@@ -1026,6 +1078,10 @@ mod tests {
     // skips) when there is no adapter or the adapter cannot do binding arrays -- the same
     // convention as gfx3d::cull::tests::headless.
     fn bindless_headless() -> Option<(wgpu::Device, wgpu::Queue)> {
+        bindless_headless_bc(false)
+    }
+
+    fn bindless_headless_bc(bc: bool) -> Option<(wgpu::Device, wgpu::Queue)> {
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -1035,7 +1091,8 @@ mod tests {
         }))
         .ok()?;
         let needed = wgpu::Features::TEXTURE_BINDING_ARRAY
-            | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
+            | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
+            | if bc { wgpu::Features::TEXTURE_COMPRESSION_BC } else { wgpu::Features::empty() };
         if !adapter.features().contains(needed) {
             return None;
         }
@@ -1083,6 +1140,11 @@ mod tests {
         slot: u32,
         single_handle: Option<u64>,
     ) -> [u8; 4] {
+        sample_binding_with_filter(device, queue, shared, slot, single_handle, false)
+    }
+
+    fn sample_binding_with_filter(device: &wgpu::Device, queue: &wgpu::Queue,
+        shared: &SharedTextures, slot: u32, single_handle: Option<u64>, filtered: bool) -> [u8; 4] {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("bindless_probe"),
             source: wgpu::ShaderSource::Wgsl(
@@ -1109,6 +1171,10 @@ fn fs() -> @location(0) vec4<f32> {
                     if single_handle.is_some() {
                         source.replace("binding_array<texture_2d<f32>>", "texture_2d<f32>")
                             .replace("textures[which.slot.x]", "textures").into()
+                    } else if filtered {
+                        source.replace("// vec4 so", "@group(2) @binding(0) var samplers: binding_array<sampler>;\n// vec4 so")
+                            .replace("textureLoad(textures[which.slot.x], vec2<i32>(0, 0), 0)",
+                                     "textureSampleLevel(textures[which.slot.x], samplers[0], vec2<f32>(0.5), 0.0)").into()
                     } else { source.into() }
                 },
             ),
@@ -1145,7 +1211,9 @@ fn fs() -> @location(0) vec4<f32> {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[Some(if single_handle.is_some() { &shared.texture_layout } else { &shared.bindless_layout }), Some(&which_layout)],
+            bind_group_layouts: &if filtered {
+                vec![Some(&shared.bindless_layout), Some(&which_layout), Some(&shared.sampler_array_layout)]
+            } else { vec![Some(if single_handle.is_some() { &shared.texture_layout } else { &shared.bindless_layout }), Some(&which_layout)] },
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -1215,6 +1283,7 @@ fn fs() -> @location(0) vec4<f32> {
             pass.set_pipeline(&pipeline);
             pass.set_bind_group(0, single_handle.map_or_else(|| shared.bindless_bind(), |h| shared.texture_bind(device, h)), &[]);
             pass.set_bind_group(1, &which_bind, &[]);
+            if filtered { pass.set_bind_group(2, shared.sampler_array_bind(), &[]); }
             pass.draw(0..3, 0..1);
         }
         enc.copy_texture_to_buffer(
@@ -1515,6 +1584,89 @@ fn fs() -> @location(0) vec4<f32> {
         assert_ne!(other, 0);
         assert_ne!(shared.texture_slot(other), 61);
     }
+
+    // Independently constructed BC7 mode 6 solid block, even RGBA endpoints.
+    fn bc7_solid(rgba: [u8; 4]) -> Vec<u8> {
+        let mut out = vec![0u8;16]; let mut bit = 0;
+        let mut write = |value:u32, count:usize| {
+            for i in 0..count { out[bit/8] |= (((value>>i)&1) as u8) << (bit%8); bit+=1; }
+        };
+        write(64,7);
+        for c in rgba { assert_eq!(c&1,0); write((c/2) as u32,7); write((c/2) as u32,7); }
+        write(0,1); write(0,1); write(0,3);
+        for _ in 1..16 { write(0,4); }
+        out
+    }
+    fn bc7_data(bytes:&[u8], width:u32) -> TextureData<'_> {
+        TextureData { width,height:4,format:TextureFormat::Bc7,mip_count:1,gen_mips:false,bytes }
+    }
+
+    #[test]
+    fn native_srgb_alias_filters_before_decode_and_keeps_alpha_linear() {
+        let Some((device,queue))=bindless_headless_bc(true) else { return; };
+        let mut st=SharedTextures::new(&device,&queue,true,SLOTS,false,&LogSink::none());
+        let mut bytes=bc7_solid([0,0,0,64]); bytes.extend(bc7_solid([254,254,254,192]));
+        let h=st.create(&device,&queue,&bc7_data(&bytes,8)); let linear=st.texture_slot(h);
+        let before=st.residency(); let alias=st.srgb_slot(h).unwrap();
+        assert_eq!(before,st.residency(),"view aliases must not allocate pixels or registry handles");
+        assert_eq!(st.srgb_slot(h),Some(alias)); assert_ne!(alias,linear);
+        st.ensure_bindless(&device);
+        let raw=sample_binding_with_filter(&device,&queue,&st,linear,None,true);
+        let corrected=sample_binding_with_filter(&device,&queue,&st,alias,None,true);
+        // Mean of decoded endpoints ~.495; decode(mean encoded endpoints) ~.212.
+        // Raw output is encoded values; the corrected sample is already linear.
+        assert!((corrected[0] as i32-126).abs()<=2, "{corrected:?}");
+        let decoded_after_filter=((raw[0] as f32/255.0+0.055)/1.055).powf(2.4);
+        assert!((corrected[0] as f32/255.0-decoded_after_filter).abs()>0.25);
+        assert!((corrected[3] as i32-128).abs()<=1);
+        assert_eq!(corrected[3],raw[3],"roughness alpha has no sRGB transfer");
+        let middle=bc7_solid([128,128,128,200]);
+        let h2=st.create(&device,&queue,&bc7_data(&middle,4)); let a2=st.srgb_slot(h2).unwrap();
+        st.ensure_bindless(&device);
+        assert_eq!(sample_slot(&device,&queue,&st,st.texture_slot(h2)),[128,128,128,200]);
+        let c=sample_slot(&device,&queue,&st,a2);
+        assert!((c[0] as i32-55).abs()<=1); assert_eq!(c[3],200);
+    }
+
+    #[test]
+    fn native_srgb_alias_lease_upload_eviction_generation_and_cap() {
+        let Some((device,queue))=bindless_headless_bc(true) else { return; };
+        let mut st=SharedTextures::new(&device,&queue,true,SLOTS,false,&LogSink::none());
+        let bytes=bc7_solid([128,128,128,200]); let lease=st.slot_acquire();
+        let first=st.create_in_slot(&device,&queue,&bc7_data(&bytes,4),lease);
+        let alias=st.srgb_slot(first).unwrap();
+        // Invalid replacement must leave both views unchanged.
+        let bad=TextureData {width:0,..bc7_data(&bytes,4)};
+        assert_eq!(st.create_in_slot(&device,&queue,&bad,lease),0);
+        assert_eq!(st.srgb_slot(first),Some(alias));
+        let replacement_bytes=bc7_solid([96,96,96,100]);
+        let replacement=st.create_in_slot(&device,&queue,&bc7_data(&replacement_bytes,4),lease);
+        assert_eq!(st.srgb_slot(replacement),Some(alias));
+        assert!(st.destroy(first)); assert!(!st.destroy(first));
+        st.ensure_bindless(&device);
+        let c=sample_slot(&device,&queue,&st,alias); assert!((c[0] as i32-30).abs()<=1); assert_eq!(c[3],100);
+        assert!(st.destroy(replacement)); assert_eq!(st.srgb_slot(replacement),None);
+        st.ensure_bindless(&device); assert_eq!(sample_slot(&device,&queue,&st,alias),[255;4]);
+        let reuploaded=st.create_in_slot(&device,&queue,&bc7_data(&bytes,4),lease);
+        assert_eq!(st.srgb_slot(reuploaded),Some(alias));
+        assert!(st.slot_release(lease));
+        assert!(!st.bindless_free.contains(&alias),"alias retirement waits for submission");
+        assert!(st.bindless_retired.contains(&alias));
+        let rgba=st.create(&device,&queue,&data(&[20,40,60,255]));
+        assert_eq!(st.srgb_slot(rgba),None);
+        assert_eq!(st.srgb_slot(reuploaded),None,"released generation cannot borrow another occupant");
+        st.frame_submitted(&queue); assert!(st.bindless_free.contains(&alias));
+        assert!(st.destroy(reuploaded));
+        let mut cap=SharedTextures::new(&device,&queue,true,2,false,&LogSink::none());
+        let h=cap.create(&device,&queue,&bc7_data(&bytes,4));
+        assert_ne!(h,0); assert_eq!(cap.srgb_slot(h),None);
+        assert_eq!(cap.bindless_slots.len(),2); assert_eq!(cap.residency(),(16,1));
+        let mut unleased=SharedTextures::new(&device,&queue,true,SLOTS,false,&LogSink::none());
+        let h=unleased.create(&device,&queue,&bc7_data(&bytes,4));let a=unleased.srgb_slot(h).unwrap();
+        assert!(unleased.destroy(h)); assert!(unleased.srgb_aliases.is_empty());
+        assert!(unleased.bindless_retired.contains(&a));
+    }
+
 }
 
 // 2x2 box-filter downsample of an RGBA8 image to (nw, nh).

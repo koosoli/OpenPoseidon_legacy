@@ -249,6 +249,7 @@ EddsImage ReadEddsBuffer(const void* data, size_t size)
     size_t cursor = kDdsHeaderSize;
     PixelFormat format = PixelFormat::Unknown;
     bool hasAlpha = false;
+    bool bc7Srgb = false;
 
     if (pfFlags & kDdpfFourCC)
     {
@@ -257,6 +258,7 @@ EddsImage ReadEddsBuffer(const void* data, size_t size)
             if (size < kDdsHeaderSize + kDxt10HeaderSize)
                 return Unreadable("DX10 header truncated");
             const uint32_t dxgi = ReadU32(base, kDdsHeaderSize);
+            bc7Srgb = dxgi == 99; // DXGI_FORMAT_BC7_UNORM_SRGB
             cursor += kDxt10HeaderSize;
             // Reforger is a BC7-era corpus where DayZ was a DXT-era one: over a
             // stratified 1,692-file sample of its 29,026 `.edds`, BC7 was 87.2% of
@@ -383,6 +385,7 @@ EddsImage ReadEddsBuffer(const void* data, size_t size)
     image.width = width;
     image.height = height;
     image.hasAlpha = hasAlpha;
+    image.bc7Srgb = bc7Srgb;
     image.mipmaps.resize(static_cast<size_t>(mipCount));
 
     std::vector<uint8_t> expanded;

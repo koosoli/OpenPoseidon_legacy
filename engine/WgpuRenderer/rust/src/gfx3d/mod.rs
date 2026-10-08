@@ -9441,7 +9441,7 @@ impl Gfx3d {
         lods: &[WgrModelLod],
         sections: &[WgrModelSection],
         materials: &[WgrModelMaterial],
-        textures: &SharedTextures,
+        textures: &mut SharedTextures,
         name: Option<&str>,
     ) -> u32 {
         let gpu_lods: Vec<cull::LodGpu> = lods
@@ -9511,48 +9511,79 @@ impl Gfx3d {
         // WgrModelSection::flags because WgrModelMaterial is size-locked at 192 bytes.
         // zip() stops at the shorter of the two, which is the same defensive length rule
         // the section/material pairing already relies on.
+        const NATIVE_PBR: u32 = 64;
+        const NATIVE_PBR_SRGB: u32 = 256;
+        let mut srgb_admission = (0usize, 0usize);
         let gpu_materials: Vec<cull::SectionMaterialGpu> = materials
             .iter()
             .zip(sections.iter())
-            .map(|(m, s)| cull::SectionMaterialGpu {
-                emissive: m.emissive,
-                ambient: m.ambient,
-                diffuse: m.diffuse,
-                specular: m.specular,
-                texture_slot: textures.texture_slot(m.texture_id),
-                sampler: m.sampler,
-                alpha_ref: m.alpha_ref,
-                specular_slot: textures.texture_slot(m.specular_texture_id),
-                normal_slot: textures.texture_slot(m.normal_texture_id),
-                mask_slot: textures.texture_slot(m.mask_texture_id),
-                layer_slot: [
-                    textures.texture_slot(m.layer_texture_id[0]),
-                    textures.texture_slot(m.layer_texture_id[1]),
-                    textures.texture_slot(m.layer_texture_id[2]),
-                ],
-                flags: s.flags,
-                layer_normal_slot: [
-                    textures.texture_slot(m.layer_normal_texture_id[0]),
-                    textures.texture_slot(m.layer_normal_texture_id[1]),
-                    textures.texture_slot(m.layer_normal_texture_id[2]),
-                ],
-                _pad_layer: [0; 3],
-                layer_uv: m.layer_uv,
-                layer_colour: m.layer_colour,
-                normal_power: m.normal_power,
-                _pad_np: [0; 3],
-                crown_ao_p0: m.crown_ao_p0,
-                crown_ao_p1: m.crown_ao_p1,
-                native_pbr_scales: m.native_pbr_scales,
-                layer_mask: std::array::from_fn(|i| {
-                    let slot = textures.texture_slot(m.layer_mask_texture_id[i]);
-                    debug_assert!(slot < 0x8000_0000);
-                    let params = m.layer_mask_params[i];
-                    let packed = slot | if params[3] == 1.0 { 0x8000_0000 } else { 0 };
-                    [f32::from_bits(packed), params[0], params[1], params[2]]
-                }),
+            .map(|(m, s)| {
+                let mut flags = s.flags;
+                let mut srgb_bcr_slots = [0; 4];
+                if flags & NATIVE_PBR_SRGB != 0 && flags & NATIVE_PBR != 0 {
+                    srgb_admission.0 += 1;
+                    let handles = [m.texture_id, m.layer_texture_id[0], m.layer_texture_id[1], m.layer_texture_id[2]];
+                    let mut complete = true;
+                    for (i, handle) in handles.into_iter().enumerate() {
+                        if i != 0 && handle == 0 { continue; }
+                        match textures.srgb_slot(handle) {
+                            Some(slot) => srgb_bcr_slots[i] = slot,
+                            None => complete = false,
+                        }
+                    }
+                    if complete {
+                        srgb_admission.1 += 1;
+                    } else {
+                        flags &= !NATIVE_PBR_SRGB;
+                        srgb_bcr_slots = [0; 4];
+                    }
+                } else { flags &= !NATIVE_PBR_SRGB; }
+                cull::SectionMaterialGpu {
+                    emissive: m.emissive,
+                    ambient: m.ambient,
+                    diffuse: m.diffuse,
+                    specular: m.specular,
+                    texture_slot: textures.texture_slot(m.texture_id),
+                    sampler: m.sampler,
+                    alpha_ref: m.alpha_ref,
+                    specular_slot: textures.texture_slot(m.specular_texture_id),
+                    normal_slot: textures.texture_slot(m.normal_texture_id),
+                    mask_slot: textures.texture_slot(m.mask_texture_id),
+                    layer_slot: [
+                        textures.texture_slot(m.layer_texture_id[0]),
+                        textures.texture_slot(m.layer_texture_id[1]),
+                        textures.texture_slot(m.layer_texture_id[2]),
+                    ],
+                    flags,
+                    layer_normal_slot: [
+                        textures.texture_slot(m.layer_normal_texture_id[0]),
+                        textures.texture_slot(m.layer_normal_texture_id[1]),
+                        textures.texture_slot(m.layer_normal_texture_id[2]),
+                    ],
+                    _pad_layer: [0; 3],
+                    layer_uv: m.layer_uv,
+                    layer_colour: m.layer_colour,
+                    normal_power: m.normal_power,
+                    _pad_np: [0; 3],
+                    crown_ao_p0: m.crown_ao_p0,
+                    crown_ao_p1: m.crown_ao_p1,
+                    native_pbr_scales: m.native_pbr_scales,
+                    srgb_bcr_slots,
+                    layer_mask: std::array::from_fn(|i| {
+                        let slot = textures.texture_slot(m.layer_mask_texture_id[i]);
+                        debug_assert!(slot < 0x8000_0000);
+                        let params = m.layer_mask_params[i];
+                        let packed = slot | if params[3] == 1.0 { 0x8000_0000 } else { 0 };
+                        [f32::from_bits(packed), params[0], params[1], params[2]]
+                    }),
+                }
             })
             .collect();
+        if srgb_admission.0 != 0 {
+            self.queued_log.push(format!(
+                "[wgr] native PBR sRGB views: model={} admittedSections={}/{}",
+                name.unwrap_or("(unnamed)"), srgb_admission.1, srgb_admission.0));
+        }
         // Source allocation precedes the coherent three-table commit; IDs remain append-only.
         self.gpu_section_src.reserve(srcs.len());
         let previous_source_len = self.gpu_section_src.len();
@@ -12544,9 +12575,10 @@ fn multi_layer_normals_keep_every_layout_in_step() {
         std::mem::offset_of!(cull::SectionMaterialGpu, layer_colour),
         192
     );
-    assert_eq!(std::mem::size_of::<cull::SectionMaterialGpu>(), 368);
+    assert_eq!(std::mem::size_of::<cull::SectionMaterialGpu>(), 384);
     assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, native_pbr_scales), 304);
     assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, layer_mask), 320);
+    assert_eq!(std::mem::offset_of!(cull::SectionMaterialGpu, srgb_bcr_slots), 368);
     assert_eq!(
         std::mem::offset_of!(cull::SectionMaterialGpu, normal_power),
         256
@@ -12586,7 +12618,7 @@ fn multi_layer_normals_keep_every_layout_in_step() {
                 "{name} needs three pad words after normal_power for the 16 stride"
             );
         }
-        for field in ["crown_ao_p0: vec4<f32>,", "crown_ao_p1: vec4<f32>,", "native_pbr_scales: vec4<f32>,", "layer_mask: array<vec4<f32>, 3>,"] {
+        for field in ["crown_ao_p0: vec4<f32>,", "crown_ao_p1: vec4<f32>,", "native_pbr_scales: vec4<f32>,", "layer_mask: array<vec4<f32>, 3>,", "srgb_bcr_slots: vec4<u32>,"] {
             assert!(
                 src.contains(field),
                 "{name} must mirror SectionMaterialGpu::{field}"

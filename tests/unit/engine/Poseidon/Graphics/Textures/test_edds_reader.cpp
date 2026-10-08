@@ -241,6 +241,23 @@ TEST_CASE("EDDS: a still-unsupported DXGI format is named, not swallowed", "[gra
     REQUIRE(image.error.find("BC6H") != std::string::npos);
 }
 
+TEST_CASE("EDDS preserves explicit BC7 sRGB role without changing block bytes", "[graphics][edds][srgb]")
+{
+    for (uint32_t format : {97u, 98u, 99u, 83u})
+    {
+        auto file = Header(4, 4, 1);
+        PutU32(file, 0x50, 0x04);
+        std::memcpy(file.data() + 0x54, "DX10", 4);
+        for (uint32_t word : {format, 3u, 0u, 1u, 0u, 0x59504F43u, 16u}) AppendU32(file, word);
+        file.insert(file.end(), 16, 0x7a);
+        const auto image = ReadEddsBuffer(file.data(), file.size());
+        REQUIRE(image.valid());
+        CHECK(image.bc7Srgb == (format == 99u));
+        REQUIRE(image.mipmaps.size() == 1);
+        CHECK(image.mipmaps[0].data == std::vector<uint8_t>(16, 0x7a));
+    }
+}
+
 TEST_CASE("EDDS: both extensions reach the DDS texture source", "[graphics][edds][dz-002]")
 {
     // The registration half of the fix, asserted separately because nothing in the

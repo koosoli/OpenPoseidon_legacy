@@ -97,7 +97,7 @@ fn native_pbr_basic_scaled_preview_and_legacy_shaders_compose() {
             (include_str!("shader3d.wgsl"), "gfx3d/shader3d.wgsl"),
         ] {
             let mut composer = crate::shaders::build_composer();
-            composer
+            let module = composer
                 .make_naga_module(NagaModuleDescriptor {
                     source,
                     file_path: path,
@@ -107,6 +107,15 @@ fn native_pbr_basic_scaled_preview_and_legacy_shaders_compose() {
                 .unwrap_or_else(|e| {
                     panic!("{path} preview={preview}: {}", e.emit_to_string(&composer))
                 });
+            if path != "gfx3d/shader3d.wgsl" {
+                let layout = module.types.iter().find_map(|(_, ty)| {
+                    if let naga::TypeInner::Struct { members, span } = &ty.inner {
+                        members.iter().find(|m| m.name.as_deref() == Some("srgb_bcr_slots"))
+                            .map(|m| (m.offset, *span))
+                    } else { None }
+                });
+                assert_eq!(layout, Some((368, 384)), "{path} material stride");
+            }
         }
     }
 }

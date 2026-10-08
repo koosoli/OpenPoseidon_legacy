@@ -117,6 +117,7 @@ struct SectionMaterial {
     crown_ao_p1: vec4<f32>,
     native_pbr_scales: vec4<f32>,
     layer_mask: array<vec4<f32>, 3>,
+    srgb_bcr_slots: vec4<u32>,
 };
 
 @group(1) @binding(0) var<storage, read> instances: array<Instance>;
@@ -189,6 +190,17 @@ fn tint_albedo(c: vec3<f32>, k: vec3<f32>) -> vec3<f32> {
     }
     return c * k;
 }
+
+#ifdef NATIVE_PBR_PREVIEW
+const SECTION_NATIVE_PBR_SRGB: u32 = 256u;
+// Hardware sRGB views decode before filtering. Keep their samples linear for
+// tint and layer mixing; encode once only at the existing shade() boundary.
+fn native_pbr_encode_albedo(c: vec3<f32>) -> vec3<f32> {
+    let lo = c * 12.92;
+    let hi = 1.055 * pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(hi, lo, c <= vec3<f32>(0.0031308));
+}
+#endif
 
 const ENV_TWO_PI: f32 = 6.28318530718;
 fn sky_env_sample(dir: vec3<f32>) -> vec3<f32> {
@@ -865,12 +877,26 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     // The mask / specular / normal / further-layer slots share the material's fate and their
     // own answer would be the same number for a fraction more atomic traffic.
     mip_feedback_note(sm.texture_slot, duvx * sm.layer_uv[0].xy, duvy * sm.layer_uv[0].xy);
-    var base = textureSampleBias(textures[sm.texture_slot],
+    var bcr_slot = sm.texture_slot;
+#ifdef NATIVE_PBR_PREVIEW
+    let bcr_linear = linear > 0.5 && (sm.flags & SECTION_NATIVE_PBR_PREVIEW) != 0u &&
+        (sm.flags & SECTION_NATIVE_PBR_SRGB) != 0u;
+    if (bcr_linear) { bcr_slot = sm.srgb_bcr_slots.x; }
+#endif
+    var base = textureSampleBias(textures[bcr_slot],
                              samplers[sm.sampler_idx],
                              in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw, frame.renscale.x);
     // RFG-072: layer 0 worn in its own colour. Identity (1,1,1) for every material that
     // names none, so this is a no-op outside a native MatPBRMulti. See tint_albedo.
-    base = vec4<f32>(tint_albedo(base.rgb, sm.layer_colour[0].rgb), base.a);
+#ifdef NATIVE_PBR_PREVIEW
+    if (bcr_linear) {
+        base = vec4<f32>(base.rgb * sm.layer_colour[0].rgb, base.a);
+    } else {
+#endif
+        base = vec4<f32>(tint_albedo(base.rgb, sm.layer_colour[0].rgb), base.a);
+#ifdef NATIVE_PBR_PREVIEW
+    }
+#endif
     // Crown self-occlusion: the vertex shader's GeometryAO factor, applied to the
     // albedo like a baked vertex colour (which is what it replaces). 1.0 for every
     // section whose material names no volume, so this is a no-op everywhere else.
@@ -942,9 +968,21 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
                 continue;
             }
             let uv_i = in.uv * sm.layer_uv[i + 1u].xy + sm.layer_uv[i + 1u].zw;
-            let layer = textureSampleBias(textures[sm.layer_slot[i]], samplers[sm.sampler_idx], uv_i, frame.renscale.x);
+            var layer_slot = sm.layer_slot[i];
+#ifdef NATIVE_PBR_PREVIEW
+            if (bcr_linear) { layer_slot = sm.srgb_bcr_slots[i + 1u]; }
+#endif
+            let layer = textureSampleBias(textures[layer_slot], samplers[sm.sampler_idx], uv_i, frame.renscale.x);
             // RFG-072: each further layer in ITS colour (`Color_2..4`), identity when unnamed.
-            blended = blended + tint_albedo(layer.rgb, sm.layer_colour[i + 1u].rgb) * lw[i];
+#ifdef NATIVE_PBR_PREVIEW
+            if (bcr_linear) {
+                blended = blended + layer.rgb * sm.layer_colour[i + 1u].rgb * lw[i];
+            } else {
+#endif
+                blended = blended + tint_albedo(layer.rgb, sm.layer_colour[i + 1u].rgb) * lw[i];
+#ifdef NATIVE_PBR_PREVIEW
+            }
+#endif
 #ifdef NATIVE_PBR_PREVIEW
             blended_roughness = blended_roughness + layer.a * lw[i];
 #endif
@@ -956,6 +994,9 @@ fn fs_gpu_body(in: VsOut) -> vec4<f32> {
 #endif
         base = vec4<f32>(base.rgb * layer_base_weight + blended, base.a);
     }
+#ifdef NATIVE_PBR_PREVIEW
+    if (bcr_linear) { base = vec4<f32>(native_pbr_encode_albedo(base.rgb), base.a); }
+#endif
     // A2C (MSAA): cutout sections (sm.alpha_ref > 0, uniform per quad) emit a sharpened coverage
     // alpha; opaque sections keep full coverage (1.0). Without A2C, the classic hard discard.
     // Cutout alpha with the mip-coverage lift; the sampled alpha itself stays what it was

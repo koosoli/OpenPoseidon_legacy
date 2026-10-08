@@ -6883,7 +6883,7 @@ impl Renderer {
             lods,
             sections,
             materials,
-            &self.textures,
+            &mut self.textures,
             name,
         )
     }

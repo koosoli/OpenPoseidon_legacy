@@ -453,7 +453,9 @@ enum WgrModelSectionFlags : uint32_t
     WGR_MODEL_SECTION_NATIVE_PBR_PREVIEW = 64u,
     /* Section intersects a known procedural clock selection or lacks its proof.
      * Snow colour/normal must both refuse it; existing alpha and draw ownership remain. */
-    WGR_MODEL_SECTION_NO_OBJECT_SNOW = 128u
+    WGR_MODEL_SECTION_NO_OBJECT_SNOW = 128u,
+    /* Preview-only hardware sRGB BCR views; original texture slots stay linear. */
+    WGR_MODEL_SECTION_NATIVE_PBR_SRGB = 256u
 };
 
 /* Per-section shading, parallel to a model's sections (one per section). The RAW

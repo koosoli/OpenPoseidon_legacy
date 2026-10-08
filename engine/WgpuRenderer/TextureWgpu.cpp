@@ -1742,6 +1742,14 @@ bool TextureWgpu::NormalHasNativePbrChannels() const
                                                NormalIsRgPacked(), Name());
 }
 
+bool TextureWgpu::HasNativeSrgbBcr() const
+{
+    if (_dynamic || !_src || _nMipmaps <= 0 || _mipmaps[0].DstFormat() != PacBC7)
+        return false;
+    const auto* dds = dynamic_cast<const TextureSourceDDS*>(static_cast<ITextureSource*>(_src));
+    return dds && dds->IsOriginalBc7Srgb();
+}
+
 bool TextureWgpu::NormalIsRgPacked() const
 {
     if (_nMipmaps <= 0)

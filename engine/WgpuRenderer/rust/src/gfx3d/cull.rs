@@ -249,6 +249,9 @@ pub struct SectionMaterialGpu {
     // (bitcast descriptor slot with UV1 in bit 31, UV scale, sharpness, offset).
     // Only the explicitly opted-in ordered blend samples these descriptors.
     pub layer_mask: [[f32; 4]; 3],
+    // Internal color-role descriptors; no public C ABI fields. Original slots
+    // remain authoritative for residency feedback and alpha/prepasses.
+    pub srgb_bcr_slots: [u32; 4],
 }
 
 // A permissive plane that never culls anything: dot(0, p) + BIG >= -radius always holds.

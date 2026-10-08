@@ -215,6 +215,23 @@ TEST_CASE("Borrowed BC7 BCR tint matches baked pixels and averages without a dec
     CHECK(capped->GetAverageColor() == baked.GetAverageColor());
 }
 
+TEST_CASE("DDS source retains explicit sRGB metadata across compressed and decoded preparation", "[graphics][edds][srgb]")
+{
+    auto bytes = BcrBc7Alpha200();
+    for (uint32_t format : {98u, 99u})
+    {
+        PutU32(bytes, 128, format);
+        for (bool decode : {false, true})
+        {
+            TextureSourceDDS source;
+            REQUIRE(source.InitFromMemory(bytes.data(), bytes.size(), "synthetic_bcr.edds", decode));
+            CHECK(source.IsOriginalBc7Srgb() == (format == 99u));
+            REQUIRE(source.InitFromMemory(BcrBc7Alpha200().data(), bytes.size(), "synthetic_bcr.edds", decode));
+            CHECK_FALSE(source.IsOriginalBc7Srgb());
+        }
+    }
+}
+
 TEST_CASE("Installed Reforger BCR tint views match the original CPU chain", "[.][lazy-tint-corpus]")
 {
     namespace fs = std::filesystem;
