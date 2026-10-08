@@ -78,5 +78,32 @@ next-launch loading preference and a separate live effect toggle. The verified
 official runtime is an optional local cache, not a system-wide layer install.
 
 Engine GPU timestamps exclude injected ReShade work; the stored CPU/engine
-samples do not establish total ReShade GPU cost. Display-transition and saved
-preference acceptance must be recorded separately before claiming those passed.
+samples do not establish total ReShade GPU cost.
+
+## Final paired checkpoint: `64b1df89`
+
+Built and deployed the matching EXE/DLL at 03:51 local time, then passed:
+
+- `build/reshade-preference/20261008-035140-66608/result.json`: saved off starts
+  without ReShade; saved on loads the verified cache and real effect; saved on
+  with missing cache starts normally with a clear warning. Live off/on passes.
+  Actual Alt+Enter goes from 1280x720 to 3441x1440 borderless and restores
+  1280x720, with ReShade presentation resuming. All three arms exit zero.
+- `build/earth-locations/20261008-035220/result.json`: the 3x3 cached building
+  window retains all 1995 buildings/46281 triangles when moving from cell
+  2480,306 into uncached center cell 2480,307. The same relocation, camera,
+  stale-request and invalid-input checks pass. No extra geographic data was
+  downloaded for the neighboring-cell change.
+- `build/reshade-acceptance/20261008-035236/result.json`: clean stock-Everon
+  final-frame comparison, live effect state, normal/opt-in launches and exits.
+  Stable convenience copies: `build/reshade-before.png` and
+  `build/reshade-after.png`.
+- CPU Earth building checks pass convex/concave/slope geometry, 3x3 retention,
+  cross-cell ID deduplication, one shared 200k-triangle cap, cancellation and
+  geographic revision rejection. Earth coordinate/adaptive-detail checks pass.
+
+The display test exposed a pre-existing WGPU dummy `SetWindowMode` no-op. WGPU
+now performs the actual SDL transition and forwards real pixel extents through
+its existing resize path; redundant same-size notifications do not recreate
+the swapchain. Exclusive-mode selection uses the existing placement resolver,
+but only borderless/windowed switching was runtime accepted on this monitor.

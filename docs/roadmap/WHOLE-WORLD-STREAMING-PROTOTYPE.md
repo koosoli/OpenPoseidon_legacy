@@ -191,3 +191,10 @@ The adaptive near/far mesh and actual W/S input passed in
 test-script-only correction. At 12,000km altitude W approached to 10,847,989m;
 S retreated to 11,988,383m without reversing the view. Geometry stays bounded:
 at most 256,000 near/far/skirts triangles plus 65,536 overview triangles.
+
+The final paired `64b1df89` acceptance additionally passed optional cached
+Luxembourg buildings and neighboring-cell retention, then repeated geographic
+relocation. The current 3x3 window keeps 1995 buildings/46281 triangles visible
+when entering an adjacent uncached cell, with a shared 200k-triangle ceiling.
+Detailed receipts and remaining limits are in
+[the integrated verification note](../verification/integrated-earth-material-reshade-20261008.md).

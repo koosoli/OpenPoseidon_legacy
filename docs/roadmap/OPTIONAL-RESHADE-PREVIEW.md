@@ -100,6 +100,13 @@ visual quality.** Installed-game shader compilation, live toggle, final-frame
 before/after captures, resize/fullscreen and frame-time checks remain required
 before treating this as accepted support.
 
+Integrated installed acceptance subsequently passed on paired build `64b1df89`:
+normal/opt-in launches, live effects, final-frame stock-Everon comparisons,
+persisted off/on/missing-cache fallback, actual borderless/windowed resize and
+clean exit. See [the integrated receipt](../verification/integrated-earth-material-reshade-20261008.md).
+This does not establish depth effects, arbitrary third-party add-ons, DLSS with
+ReShade, exclusive fullscreen or complete injected-GPU timing support.
+
 For a crash, collect the engine log, optional runtime `ReShade.log`, GPU/driver,
 engine exe/DLL versions, preset/add-ons and exact launch command. First compare
 a normal launch with an opt-in launch containing only our color effect. Test
