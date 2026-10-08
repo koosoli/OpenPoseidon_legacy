@@ -165,6 +165,7 @@ struct Bridge
     SelectPreview selectPreview = nullptr;
     Query preview = nullptr;
     Query previewStatus = nullptr;
+    Query previewCapabilities = nullptr;
     SelectPreview startTiming = nullptr;
     QueryTiming timing = nullptr;
 };
@@ -192,6 +193,7 @@ Bridge GetBridge()
             bridge.selectPreview = reinterpret_cast<SelectPreview>(GetProcAddress(module, "OpReShadeSelectPreviewV1"));
             bridge.preview = reinterpret_cast<Query>(GetProcAddress(module, "OpReShadeGetPreviewV1"));
             bridge.previewStatus = reinterpret_cast<Query>(GetProcAddress(module, "OpReShadeGetPreviewStatusV1"));
+            bridge.previewCapabilities = reinterpret_cast<Query>(GetProcAddress(module, "OpReShadeGetPreviewCapabilitiesV1"));
             bridge.startTiming = reinterpret_cast<SelectPreview>(GetProcAddress(module, "OpReShadeStartTimingV1"));
             bridge.timing = reinterpret_cast<QueryTiming>(GetProcAddress(module, "OpReShadeGetTimingV1"));
         }
@@ -291,6 +293,8 @@ void DrawOptionalReShadeControls()
                 const bool devSp = app.DevMode() && app.GetRenderBackend() == "wgpu" && !app.IsHostServer() &&
                     (!Poseidon::GWorld || Poseidon::GWorld->GetMode() != Poseidon::GModeNetware);
                 if (!devSp) preferenceMessage = "Preview selection requires developer single-player WGPU.";
+                else if (preview == OpReShadePreview::DhGi && !(Read(bridge.previewCapabilities) & 1u))
+                    preferenceMessage = "DH GI requires the updated optional add-on with native fog compatibility checks. Prepare the local stage and restart.";
                 else if (!ValidatePreview(preview)) preferenceMessage = "Prepared preset/shader/licence checks failed. Prepare the optional depth files first.";
                 else if (OpReShadePreview::UsesDepth(preview) && (!available || (*available != '1' && *available != '2')))
                     preferenceMessage = "Depth preview was not prepared at startup. Restart after preparing the optional depth files.";
@@ -299,25 +303,28 @@ void DrawOptionalReShadeControls()
                 else preferenceMessage = bridge.selectPreview(preview) ? "Preview requested for this session." : "Preview request refused.";
             }
             Dev::PanelTooltip("Uses only the separately prepared, verified presets. Depth/GI stays off on the next launch.\n"
-                "DH GI is experimental: current distance color lifting and total GPU cost still need acceptance.");
+                "DH GI requires native surface fog disabled; fogged color is not a valid lighting donor.\n"
+                "It never changes weather/fog. Fog-free image quality still needs acceptance.");
             const unsigned selectionStatus = Read(bridge.previewStatus);
             if (selectionStatus == 6) Dev::PanelHelp("Waiting for exactly the selected compiled technique; effects remain off.");
             if (selectionStatus == 5) Dev::PanelHelp("Waiting for a valid world-depth snapshot; effects remain off.");
+            if (selectionStatus == 7) Dev::PanelHelp("DH GI paused: native fog is active or unverified. Unfogged surface lighting/transport is unavailable; native fog is preserved. Depth debug remains available.");
             if (OpReShadePreview::UsesDepth(Read(bridge.preview)) && !DepthPreviewSettingsSupported())
                 Dev::PanelHelp("Depth preview paused: requires 1x/4x MSAA, 100%% render scale and HDR. Graphics settings are unchanged.");
             else if (selectionStatus == 3 || selectionStatus == 4) Dev::PanelHelp("Preset selection failed; check the prepared local cache.");
         }
         bool enabled = (status & 2u) != 0;
-        if ((!bridge.preview || Read(bridge.preview) != OpReShadePreview::Off) && Dev::Checkbox("ReShade effects", &enabled))
+        const bool fogBlocked = Read(bridge.previewStatus) == 7;
+        if (!fogBlocked && (!bridge.preview || Read(bridge.preview) != OpReShadePreview::Off) && Dev::Checkbox("ReShade effects", &enabled))
             bridge.setEnabled(enabled ? 1 : 0);
         Dev::PanelTooltip("Live control of the actual optional ReShade runtime.\n"
                           "Home opens its own preset controls. This does not change native fog, GTAO or GI.");
         Dev::PanelHelp("Loaded techniques: %u; enabled techniques: %u", Read(bridge.techniques), Read(bridge.activeTechniques));
-        if (bridge.capture && (!bridge.preview || Read(bridge.preview) != OpReShadePreview::Off) && Dev::Button("Save ReShade before/after"))
+        if (!fogBlocked && bridge.capture && (!bridge.preview || Read(bridge.preview) != OpReShadePreview::Off) && Dev::Button("Save ReShade before/after"))
             bridge.capture();
         Dev::PanelTooltip("Hold the camera still. Saves Native and ReShade images in the optional\n"
                           "runtime Screenshots directory, then restores the original effects state.");
-        if (bridge.startTiming && Dev::Button("Measure ReShade GPU (120 frames)")) bridge.startTiming(120);
+        if (!fogBlocked && bridge.startTiming && Dev::Button("Measure ReShade GPU (120 frames)")) bridge.startTiming(120);
         Dev::PanelTooltip("Measures all ReShade effects with GPU timestamps and total frame intervals.\n"
             "Hold the camera/settings still. Initialization may wait before excluded warmup; readback never waits per frame.");
         OpReShadeTimingV1 timing{};
@@ -365,6 +372,8 @@ void RegisterOptionalReShadeHarness(Dev::HarnessServer& harness)
             const unsigned status = Read(bridge.status);
             if (!state && (!(status & 1u) || !bridge.setEnabled || !bridge.capture))
                 return Dev::HarnessProtocol::ErrorResponse("optional ReShade runtime unavailable; use opt-in launcher");
+            if ((on || capture || measure) && Read(bridge.previewStatus) == 7)
+                return Dev::HarnessProtocol::ErrorResponse("DH GI unsupported: native fog is active or unverified; depth debug remains available; fog unchanged");
             if (on || off) bridge.setEnabled(on ? 1 : 0);
             if (capture)
             {
@@ -382,6 +391,8 @@ void RegisterOptionalReShadeHarness(Dev::HarnessServer& harness)
                     value->valuedouble > static_cast<double>(OpReShadePreview::DhGi) || value->valuedouble != value->valueint)
                     return Dev::HarnessProtocol::ErrorResponse("preview must be 0=off, 1=color, 2=scene depth, 3=DH depth, 4=DH GI; updated add-on required");
                 const auto mode = static_cast<unsigned>(value->valueint);
+                if (mode == OpReShadePreview::DhGi && !(Read(bridge.previewCapabilities) & 1u))
+                    return Dev::HarnessProtocol::ErrorResponse("DH GI requires updated add-on with native fog compatibility checks; restart after local preparation");
                 const char* available = std::getenv("WGR_RESHADE_SCENE_DEPTH");
                 if (!ValidatePreview(mode)) return Dev::HarnessProtocol::ErrorResponse("prepared preview shader/preset/licence digest checks failed");
                 if (OpReShadePreview::UsesDepth(mode) && (!available || (*available != '1' && *available != '2') || !DepthPreviewSettingsSupported()))
@@ -406,6 +417,9 @@ void RegisterOptionalReShadeHarness(Dev::HarnessServer& harness)
             cJSON_AddNumberToObject(result, "presentCount", Read(bridge.presentCount));
             cJSON_AddNumberToObject(result, "preview", bridge.preview ? Read(bridge.preview) : OpReShadePreview::External);
             cJSON_AddNumberToObject(result, "previewStatus", Read(bridge.previewStatus));
+            cJSON_AddNumberToObject(result, "previewCapabilities", Read(bridge.previewCapabilities));
+            cJSON_AddStringToObject(result, "previewReason", Read(bridge.previewStatus) == 7 ?
+                "DH GI unsupported: native fog active or unverified; unfogged surface lighting/transport unavailable; native scene preserved" : "");
             const auto settings = ReadDepthPreviewSettings();
             const char* availability = std::getenv("WGR_RESHADE_SCENE_DEPTH");
             auto* settingsJson = cJSON_AddObjectToObject(result, "previewSettings");
@@ -443,6 +457,7 @@ void RegisterOptionalReShadeHarness(Dev::HarnessServer& harness)
             {
                 const auto& p = depth.publication;
                 auto* row = cJSON_AddObjectToObject(result, "sceneDepth");
+                cJSON_AddBoolToObject(row, "nativeSurfaceFogDisabled", (p.flags & 8u) != 0);
                 cJSON_AddNumberToObject(row, "version", 1);
                 cJSON_AddNumberToObject(row, "status", depth.status);
                 cJSON_AddBoolToObject(row, "bound", depth.status == 2 && depth.boundGeneration == p.generation);

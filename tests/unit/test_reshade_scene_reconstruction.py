@@ -26,7 +26,7 @@ def execute(name, **values):
     # actual shader expressions, including its branch, rather than repeat math.
     body = re.search(r"(?:float[23]?|bool) " + name + r"\([^)]*\)\s*\{(.*?)\n\}", SOURCE, re.S).group(1)
     body = re.sub(r"//[^\n]*", "", body)
-    scope = dict(values, float2=Vector, float3=Vector)
+    scope = dict(values, float2=Vector, float3=Vector, abs=abs, saturate=lambda x: max(0.0, min(1.0, x)))
     def expression(text):
         text = text.strip().replace("&&", " and ")
         if "?" in text:
@@ -105,6 +105,21 @@ class Reconstruction(unittest.TestCase):
         for ready, raw in [(True, 0), (False, .5), (False, 0)]:
             inputs["OpSceneReady"] = ready
             self.assertEqual(execute("OpSceneLinearDepth", uv=Vector(.5,.5), raw=raw, **inputs), 2)
+
+    def test_metric_filter_remains_symmetric_and_rejects_separated_far_layers(self):
+        for scale in (1000, 10000):
+            inputs = self.inputs(scale)
+            for center in (1, 40, 500, 650):
+                for separation in (0, 1, 5, 10, 100):
+                    a, b = center / scale, (center + separation) / scale
+                    weight = execute("OpSceneDepthFilterWeight", centerDepth=a, sampleDepth=b, **inputs)
+                    reverse = execute("OpSceneDepthFilterWeight", centerDepth=b, sampleDepth=a, **inputs)
+                    self.assertAlmostEqual(weight, max(0, 1-separation/10), places=10)
+                    self.assertEqual(weight, reverse)
+            for invalid in (0, -1, 1, 2, float("inf"), float("nan")):
+                self.assertEqual(execute("OpSceneDepthFilterWeight", centerDepth=.65, sampleDepth=invalid, **inputs), 0)
+        inputs["OpSceneReady"] = False
+        self.assertEqual(execute("OpSceneDepthFilterWeight", centerDepth=.65, sampleDepth=.65, **inputs), 0)
 
 
 if __name__ == "__main__":

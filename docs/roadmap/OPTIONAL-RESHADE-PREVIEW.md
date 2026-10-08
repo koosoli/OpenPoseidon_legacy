@@ -123,6 +123,14 @@ remembered engine session preset starts Off on the next launch. An existing
 manually selected external/color startup preset retains its existing behavior
 so the upgrade does not silently change user tuning or startup configuration.
 
+DH GI also requires an updated bridge and a fresh producer capture explicitly
+proving native surface fog is disabled. With active or unverified native fog,
+Graphics reports **DH GI paused**, the bridge reports `previewStatus=7` and a
+reason, and effects stay off. Depth debug still works. This preserves native
+fog; it never changes weather/fog settings. Fog-free GI remains experimental
+pending paired image acceptance. The 1000 m working range alone does not make
+fogged backbuffer colors valid lighting donors.
+
 The loading checkbox defaults false in `GraphicsConfig` and uses the same
 `GamePaths::UserDir()/graphics.cfg` as startup. On normal Windows CWR paths this
 is `%APPDATA%/CWR/graphics.cfg`; `POSEIDON_USER_DIR` overrides it for an isolated

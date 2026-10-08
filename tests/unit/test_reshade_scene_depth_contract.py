@@ -78,7 +78,10 @@ class Contract(unittest.TestCase):
         p.flags = 5  # Current capture, original source 4x; published image is 1x.
         self.assertEqual(self.publish(C.byref(p), 1208, 1), 1)
         p.frame = 2
-        p.flags = 9  # Unknown source-format bit must remain rejected.
+        p.flags = 9  # Current capture explicitly proves native surface fog off.
+        self.assertEqual(self.publish(C.byref(p), 1208, 1), 1)
+        p.frame = 3
+        p.flags = 17  # Unknown source-format bit must remain rejected.
         self.assertEqual(self.publish(C.byref(p), 1208, 1), 0)
 
     def test_publication_is_not_binding_and_rejects_stale_or_invalid_witness(self):
@@ -112,6 +115,9 @@ class Contract(unittest.TestCase):
         self.assertEqual(state.publication.view, 0)
 
     def test_preview_requests_are_bounded_and_do_not_touch_a_runtime(self):
+        capabilities = self.library.OpReShadeGetPreviewCapabilitiesV1
+        capabilities.restype = C.c_uint32
+        self.assertEqual(capabilities(), 1)
         select = self.library.OpReShadeSelectPreviewV1
         select.argtypes = [C.c_uint32]
         select.restype = C.c_uint32
@@ -126,6 +132,19 @@ class Contract(unittest.TestCase):
         self.assertEqual(selected(), 5)  # Queueing alone never pretends application.
         self.assertEqual(select(0), 1)
         self.assertEqual(wants(), 0)
+
+    def test_fog_compatibility_is_fresh_capture_metadata_not_sticky_generation_state(self):
+        p = self.publication()
+        p.flags = 13  # Current capture,4x source,native fog disabled.
+        self.assertEqual(self.publish(C.byref(p), 1208, 1), 1)
+        state = State()
+        self.assertEqual(self.query(C.byref(state), 1232, 1), 1)
+        self.assertEqual(state.publication.flags, 13)
+        p.frame = 2
+        p.flags = 5  # Same generation/sample mode; fog enabled again.
+        self.assertEqual(self.publish(C.byref(p), 1208, 1), 1)
+        self.assertEqual(self.query(C.byref(state), 1232, 1), 1)
+        self.assertEqual(state.publication.flags, 5)
 
     def test_timing_abi_and_bounded_queue_without_gpu(self):
         query = self.library.OpReShadeGetTimingV1

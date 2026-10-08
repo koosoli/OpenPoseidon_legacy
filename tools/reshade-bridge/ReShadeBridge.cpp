@@ -30,7 +30,7 @@ int settleFrames = 0;
 bool restoreEffects = false;
 std::atomic<int> previewRequested{-1};
 std::atomic<unsigned> previewSelected{OpReShadePreview::External};
-std::atomic<unsigned> previewStatus{0}; // 1=pending, 2=applied, 3=missing, 4=copy failed, 5=waiting depth, 6=waiting exact technique
+std::atomic<unsigned> previewStatus{0}; // 1=pending, 2=applied, 3=missing, 4=copy failed, 5=waiting depth, 6=waiting exact technique, 7=fog incompatible
 bool previewWantsEffects = false;
 OpReShadeTiming timing;
 std::mutex depthMutex;
@@ -45,6 +45,9 @@ void DepthReady(reshade::api::effect_runtime* runtime, bool ready)
     if (uniform.handle) runtime->set_uniform_value_bool(uniform, &ready, 1);
     const auto dhReady = runtime->find_uniform_variable("OpenPoseidonDH.fx", "OpSceneReady");
     if (dhReady.handle) runtime->set_uniform_value_bool(dhReady, &ready, 1);
+    const bool giReady = ready && OpReShadePreview::FogCompatible(OpReShadePreview::DhGi, depthState.publication.flags);
+    const auto dhGiReady = runtime->find_uniform_variable("OpenPoseidonDH.fx", "OpSceneGiReady");
+    if (dhGiReady.handle) runtime->set_uniform_value_bool(dhGiReady, &giReady, 1);
     if (ready)
     {
         const auto& p = depthState.publication;
@@ -221,11 +224,13 @@ void OnPresent(reshade::api::effect_runtime* runtime)
         // for the first numerical witness; otherwise begin-effects never runs.
         BindSceneDepth(runtime);
         std::lock_guard lock(depthMutex);
-        const bool ready = depthState.status == 2 && techniqueReady;
+        const bool fogCompatible = OpReShadePreview::FogCompatible(previewSelected.load(), depthState.publication.flags);
+        const bool ready = depthState.status == 2 && techniqueReady && fogCompatible;
+        if (!fogCompatible) comparisonRequested.store(false);
         if (comparisonStage == 0) runtime->set_effects_state(previewWantsEffects && ready);
         else if (!ready)
         { comparisonStage = 0; comparisonRequested.store(false); runtime->set_effects_state(false); }
-        previewStatus.store(!techniqueReady ? 6 : ready ? 2 : 5);
+        previewStatus.store(!techniqueReady ? 6 : depthState.status != 2 ? 5 : !fogCompatible ? 7 : 2);
     }
     else if (comparisonStage == 0 && previewSelected.load() == OpReShadePreview::Off)
         runtime->set_effects_state(false);
@@ -253,13 +258,14 @@ void OnPresent(reshade::api::effect_runtime* runtime)
         if (OpReShadePreview::UsesDepth(previewSelected.load()))
         {
             std::lock_guard lock(depthMutex);
-            allowed = allowed && depthState.status == 2;
+            allowed = allowed && depthState.status == 2 &&
+                OpReShadePreview::FogCompatible(previewSelected.load(), depthState.publication.flags);
         }
         runtime->set_effects_state(next != 0 && allowed);
     }
     // This event runs after effects. Capture each state only after it has
     // actually rendered, rather than relabelling the engine's pre-injector frame.
-    if (comparisonStage == 0 && previewSelected.load() != OpReShadePreview::Off && techniqueReady && techniques > 0 && comparisonRequested.exchange(false))
+    if (comparisonStage == 0 && previewSelected.load() != OpReShadePreview::Off && previewStatus.load() != 7 && techniqueReady && techniques > 0 && comparisonRequested.exchange(false))
     {
         restoreEffects = runtime->get_effects_state();
         runtime->set_effects_state(false);
@@ -304,7 +310,7 @@ extern "C" __declspec(dllexport) void OpReShadeSetEnabled(int enabled)
 }
 extern "C" __declspec(dllexport) void OpReShadeCaptureComparison()
 {
-    if (previewSelected.load() != OpReShadePreview::Off && !timing.Busy()) comparisonRequested.store(true);
+    if (previewSelected.load() != OpReShadePreview::Off && previewStatus.load() != 7 && !timing.Busy()) comparisonRequested.store(true);
 }
 extern "C" __declspec(dllexport) unsigned OpReShadeGetTechniqueCount() { return techniqueCount.load(); }
 extern "C" __declspec(dllexport) unsigned OpReShadeGetActiveTechniqueCount() { return activeTechniqueCount.load(); }
@@ -318,13 +324,16 @@ extern "C" __declspec(dllexport) unsigned OpReShadeSelectPreviewV1(unsigned mode
 }
 extern "C" __declspec(dllexport) unsigned OpReShadeGetPreviewV1() { return previewSelected.load(); }
 extern "C" __declspec(dllexport) unsigned OpReShadeGetPreviewStatusV1() { return previewStatus.load(); }
+// Optional capability bit1: producer-native surface fog gate/status7. An older
+// bridge can still serve depth debug, but cannot advertise safe DH GI selection.
+extern "C" __declspec(dllexport) unsigned OpReShadeGetPreviewCapabilitiesV1() { return 1; }
 extern "C" __declspec(dllexport) unsigned OpReShadeWantsSceneDepthV1()
 {
     const int pending = previewRequested.load();
     return OpReShadePreview::UsesDepth(pending >= 0 ? static_cast<unsigned>(pending) : previewSelected.load());
 }
 extern "C" __declspec(dllexport) unsigned OpReShadeStartTimingV1(unsigned frames)
-{ return captureStage.load() || comparisonRequested.load() ? 0 : timing.Request(frames); }
+{ return captureStage.load() || comparisonRequested.load() || previewStatus.load() == 7 ? 0 : timing.Request(frames); }
 extern "C" __declspec(dllexport) unsigned OpReShadeGetTimingV1(OpReShadeTimingV1* out, unsigned bytes, unsigned version)
 { return timing.Query(out, bytes, version); }
 
@@ -336,7 +345,7 @@ extern "C" __declspec(dllexport) unsigned OpReShadePublishSceneDepthV1(
         return 0;
     std::lock_guard lock(depthMutex);
     const auto& p = *publication;
-    if ((p.flags & ~7u) || ((p.flags & 1u) && (!p.generation || !p.frame || !p.device || !p.queue || !p.image || !p.view ||
+    if ((p.flags & ~15u) || ((p.flags & 1u) && (!p.generation || !p.frame || !p.device || !p.queue || !p.image || !p.view ||
         !p.width || !p.height || p.width > 8192 || p.height > 8192 || p.samples != 1 ||
         p.gridWidth != 16 || p.gridHeight != 16 || !std::isfinite(p.nearPlane) || p.nearPlane <= 0 ||
         p.generation < depthState.publication.generation ||

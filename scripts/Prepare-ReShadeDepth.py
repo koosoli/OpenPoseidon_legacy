@@ -79,7 +79,7 @@ def adapt_dh(data):
                  '        float3 color = refColor;', 'composition receiver')
     replace_once('        if(iDebug==DEBUG_OFF) {',
                  '        if(iDebug==DEBUG_OFF) {\n'
-                 '            if(isSky(getDepth(coords).x)) {\n'
+                 '            if(!OpSceneGiReady || isSky(getDepth(coords).x)) {\n'
                  '                outPixel = tex2Dlod(ReShade::BackBuffer,float4(coords,0,0));\n'
                  '                return; // exact native beauty passthrough before AO/SSR/levels/fading\n'
                  '            }', 'beauty receiver')
@@ -97,6 +97,26 @@ def adapt_dh(data):
         source, flags=re.S)
     if count != 1:
         raise RuntimeError('DH current-depth donor patch mismatch')
+    # Both spatial and history filters used a factor that disables depth
+    # rejection in the far half of the normalized range. Keep the pin's near
+    # 10 m bandwidth in metric units throughout the scene, without a leak floor.
+    old_weight = 'max(0.001,1.0-100*diffDepth*saturate(1.0-refDepth*2.0))'
+    if source.count(old_weight) != 2:
+        raise RuntimeError('DH metric bilateral filter patch mismatch')
+    source = source.replace(old_weight, 'OpSceneDepthFilterWeight(refDepth.x, depth.x)')
+    # Defined accumulators and neutral zero-coverage results are necessary when
+    # every candidate is rejected; don't normalize undefined/empty weights.
+    if source.count('float2 weightSum;') != 2:
+        raise RuntimeError('DH smoother accumulator patch mismatch')
+    source = source.replace('float2 weightSum;', 'float2 weightSum = 0.0;')
+    replace_once('float3 result = giAo.rgb/weightSum.x;',
+        'float3 result = weightSum.x > 0.0 ? giAo.rgb/weightSum.x : 0.0;', 'empty spatial weights')
+    replace_once('(giAo.rgb/ weightSum.x).x',
+        '(giAo.rgb/ max(weightSum.x, 0.000001)).x', 'empty history comparison')
+    if source.count('giAo.rgb /= weightSum.x;') != 2:
+        raise RuntimeError('DH empty normalization patch mismatch')
+    source = source.replace('giAo.rgb /= weightSum.x;',
+        'giAo.rgb = weightSum.x > 0.0 ? giAo.rgb/weightSum.x : 0.0;')
     # ReShade 6.8 tracks transitive sampler use, including compureResult's
     # reinhardFirstPass=false branch when PS_ReinhardPass passes true. Never
     # sample and attach that same image. Preserve the original 1/64 blend in a
@@ -189,7 +209,8 @@ def prepare(root, local_sources=None, probe_only=False):
             "helper_sha256": sha((own / 'OpenPoseidonSceneDepth.fxh').read_bytes()), "helper_license": "MIT",
             "projection": "metric z=near/raw; exact p00/p55/offset inverse, screen-down Y; 1000m bounded DH range; sky=2",
             "reinhard": "retained 1x1 work target with upstream blend, then separate publish pass; no same-image feedback",
-            "validity": "native beauty passthrough outside open metric working range; neutral invalid GI/AO; no sky/fog/stale-depth donors; clamped existing fade"},
+            "validity": "native beauty passthrough unless producer proves native surface fog disabled; independent depth debug; open metric working range; neutral invalid GI/AO; no invalid/stale-depth donors; clamped existing fade",
+            "filter": "symmetric 10m depth bandwidth, inherited from pinned near filter at1000m; zero weight for invalid/separated layers; defined empty accumulators; not a fog correction"},
         "common_license": "CC0-1.0 (SPDX in header)", "probe_license": "GPL-3.0-or-later",
         "configuration": "No active preset/config/preference modified; depth availability not established",
         "motion": "No external motion provider; accumulation=1 stationary validation preset only"}, indent=2) + "\n")

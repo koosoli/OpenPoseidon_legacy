@@ -20,6 +20,10 @@
 texture2D OpSceneDepth : OP_SCENE_DEPTH;
 sampler2D OpSceneDepthSampler { Texture = OpSceneDepth; MinFilter = POINT; MagFilter = POINT; };
 uniform bool OpSceneReady = false;
+// Separate from depth: the producer must explicitly prove its native surface
+// fog is disabled. Fogged post-tonemap color cannot be treated as radiance.
+// Missing/older producer or add-on leaves beauty unchanged, debug available.
+uniform bool OpSceneGiReady = false;
 // Driven every effects frame by the checked bridge, never preset estimates.
 uniform float4 OpSceneProjection = float4(1.0, 1.0, 0.1, 0.0); // p00,p55,near,unused
 uniform float2 OpSceneOffset = float2(0.0, 0.0); // projection p08,p09
@@ -38,6 +42,15 @@ float OpSceneLinearDepth(float2 uv)
 bool OpSceneTraceDepthValid(float normalizedDepth)
 {
     return OpSceneReady && normalizedDepth > 0.0 && normalizedDepth < 1.0;
+}
+// The pinned DH near-depth filter reaches zero at 10 m in our 1000 m
+// normalization. Retain that bandwidth in metres everywhere: its original
+// (1 - 2*depth) factor disabled rejection entirely at/after 500 m. Symmetric,
+// independent of working range, with no minimum weight leaking other layers.
+float OpSceneDepthFilterWeight(float centerDepth, float sampleDepth)
+{
+    return OpSceneReady && centerDepth > 0.0 && centerDepth < 1.0 && sampleDepth > 0.0 && sampleDepth < 1.0 ?
+        saturate(1.0 - abs(sampleDepth - centerDepth) * OpSceneRange * 0.1) : 0.0;
 }
 float3 OpSceneViewPosition(float2 uv, float normalizedDepth)
 {

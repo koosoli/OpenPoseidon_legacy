@@ -790,3 +790,78 @@ sky/fog/distant colors and foreground effect, and remeasure the corrected shader
 Only after those quality checks should the parent apply the offline upgrade to
 the user's normal local cache. The earlier passing timing is retained evidence
 for the previous shader and does not waive this new runtime/quality gate.
+
+
+## In-range fog diagnosis and conservative compatibility gate (14:20 evidence)
+
+Parent's corrected `9672d1aa` 4x SceneDH receipt at
+`build/reshade-depth/20261008-142025-SceneDH/result.json` proves lifecycle and
+240 injected-effect GPU brackets (median 2.134528 ms, p95 2.507776 ms). The paired
+14:20:56 Native/ReShade images still show conspicuous whitening/grain on distant
+terrain and forest with valid depth. Quality is **not accepted** and the default
+cache remains unchanged. These cost figures describe the previous shader; they
+do not establish this correction's runtime cost.
+
+The invalid/range fix was insufficient. In pinned DH, `PS_RayColorPass` reads
+post-tonemap scene color; `handleHit` treats it as a surface-light donor and
+`compureResult` adds it to the same already fogged scene. Native
+`frame.wgsl::apply_fog_receiver` forms a distance-power aerial blend with spatial
+froxel airlight, and can additionally compose layered local/distant transport
+through `fog_legacy_closure`. Airlight already present in a valid geometry pixel
+is therefore eligible for a second lighting contribution. Depth and projection
+alone cannot separate surface radiance from that transport. Native bloom,
+exposure and tonemapping further prevent an exact post-color subtraction.
+This is a source-supported explanation of the failure, not an isolated GPU
+attribution of every noisy pixel.
+
+A separate concrete filtering error occurs in both `smoothWeight` and
+`smoothAccu`: `1-100*depthDifference*saturate(1-2*referenceDepth)` makes depth
+rejection identically disappear in the far half of the working range (>=500 m
+with the staged 1000 m range). The local derivative now uses a symmetric 10 m
+metric depth bandwidth, inherited from the pin's near-depth slope at 1000 m.
+Separated/invalid layers have zero weight, regardless of working-range choice.
+Both accumulators start at zero and empty normalizations return neutral GI/AO.
+This removes a defined cross-layer leak; it does not recover unfogged radiance
+or claim to fix native fog by itself.
+
+For this finite slice, producer publication flags bit 8 certifies that the
+captured main-camera native surface-fog mode is finite and in [0,0.5], matching
+the renderer's disabled branch. Flag 8 is refreshed on every capture, independently
+of image generation/MSAA. Existing V1 struct sizes and the normal renderer ABI
+are unchanged. Missing/older producers fail closed. The updated add-on advertises
+`OpReShadeGetPreviewCapabilitiesV1` bit 1; older add-ons cannot be selected for DH
+GI through the updated Graphics UI/harness.
+
+Depth availability remains independent. With a valid depth binding but no fog
+compatibility proof, DH GI reports status 7 and an explicit Graphics/harness reason,
+keeps effects off and refuses comparison/timing/on requests. The shader's separate
+bridge-driven `OpSceneGiReady` defaults false and its beauty path returns the
+native backbuffer unchanged if unsupported, including manual external activation.
+Depth probes and DH depth debug continue to work with fog. No settings are changed
+automatically; fog-free optional GI still requires installed image acceptance.
+
+CPU validation: 22 Python tests including 5 actual built-add-on POD/export tests,
+a standalone C++ preview policy test, the modified engine UI translation unit's
+syntax check, and 5 Rust scene-depth CPU/Naga tests. No GPU/game launch by this
+agent. The rebuilt add-on and regenerated files are staged in the isolated
+`build/scene-dh-fog-compatible`; its initial preset is Off. Original pinned GPL
+source/licence remain unchanged outside active effect scanning. No new download
+or default-cache write was performed.
+
+Parent installed verification remains required: fog-on selection must yield
+status 7, enabled=false, an explicit reason and `nativeSurfaceFogDisabled=false`;
+depth debug must still bind. Then an explicitly zero-fog, above-ground stock scene
+must report `nativeSurfaceFogDisabled=true`, status 2 and actual technique enabled,
+produce paired stationary native/beauty images, and pass shader-error/lifecycle
+checks. Restore positive fog while selected and verify status 7/effects off;
+restore fog 0 only by explicit test command, never a preview side effect. Remeasure
+true injected-effect brackets only after fog-free beauty is accepted. Do not
+apply the default-cache upgrade based on CPU checks.
+
+The smallest future exact fog-compatible producer path is separately exported
+pre-fog surface lighting and the receiver's actual native transport, co-registered
+with the chosen depth sample and explicit validity for alpha/cockpit/transparent
+pixels. Apply the lighting change in linear surface space, then native transport
+and the existing tone/bloom chain once. Exporting only fog distance/color or
+multiplying a screen-space result by a guessed distance fade cannot meet that
+contract. This larger renderer path is intentionally outside the current slice.

@@ -27,6 +27,11 @@ class Preparation(unittest.TestCase):
         source += 'float ratio = diff/max;\n'
         source += 'if(hitPosition.status==RT_HIT_SKY || isSky(screenCoords.z)) {\n sky = getRayColor(screenCoords.xy).rgb;\n return;\n}\n'
         source += 'if(isSky(depth.x)) {\n#if DX9_MODE\n return;\n#else\n depth = getColorSampler(previousDepthSampler,currentScaledCoords).x;\n if(isSky(depth.x)) { return; }\n#endif\n}\n'
+        source += 'weight *= max(0.001,1.0-100*diffDepth*saturate(1.0-refDepth*2.0));\n' * 2
+        source += 'float2 weightSum;\n' * 2
+        source += 'float3 result = giAo.rgb/weightSum.x;\n'
+        source += '(giAo.rgb/ weightSum.x).x\n'
+        source += 'giAo.rgb /= weightSum.x;\n' * 2
         source += '\n    sampler reinhardSampler { Texture = reinhardTex; };\n'
         source += '        pass {\n            PixelShader = PS_ReinhardPass;\n            RenderTarget = reinhardTex;\n'
         source += '            ClearRenderTargets = false;\n            BlendEnable = true;\n            SrcBlend = SRCALPHA;\n            DestBlend = INVSRCALPHA;\n        }\n'
@@ -60,6 +65,12 @@ class Preparation(unittest.TestCase):
             self.assertIn(b'isSky(getDepth(screenCoords.xy).x)', adapted)
             self.assertNotIn(b'depth = getColorSampler(previousDepthSampler,currentScaledCoords).x;', adapted)
             self.assertIn(b'float ratio = saturate(diff/max);', adapted)
+            self.assertIn(b'!OpSceneGiReady || isSky(getDepth(coords).x)', adapted)
+            self.assertEqual(adapted.count(b'OpSceneDepthFilterWeight(refDepth.x, depth.x)'), 2)
+            self.assertNotIn(b'saturate(1.0-refDepth*2.0)', adapted)
+            self.assertEqual(adapted.count(b'float2 weightSum = 0.0;'), 2)
+            self.assertNotIn(b'giAo.rgb /= weightSum.x;', adapted)
+            self.assertIn(b'weightSum.x > 0.0 ? giAo.rgb/weightSum.x : 0.0;', adapted)
             self.assertIn(b'OpSceneLinearDepth(coords)', adapted)
             self.assertIn(b'OpSceneViewPosition(coords, depth)', adapted)
             self.assertIn(b'OpSceneScreenPosition(wp)', adapted)

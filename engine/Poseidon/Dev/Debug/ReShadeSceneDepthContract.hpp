@@ -25,6 +25,9 @@ struct OpReShadeSceneDepthStateV1
 };
 // publication flags: 1 = captured this frame, 2 = completed finite/nonempty grid,
 // 4 = source was 4x MSAA (nearest-covered-sample resolve); published image is 1x.
+// 8 = this capture's native surface-fog mode is explicitly disabled. Required
+// for DH GI, never for depth debug. Absence includes old/unknown producers and
+// active fog; there is no unfogged-radiance/native-transport handoff in V1.
 // status: 0=no publication, 1=waiting numeric proof, 2=bound, 3=device/queue mismatch,
 // 4=unsupported dimensions/samples, 5=invalid publication.
 static_assert(sizeof(OpReShadeSceneDepthV1) == 1208);

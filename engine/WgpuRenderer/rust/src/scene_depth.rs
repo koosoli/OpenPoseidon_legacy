@@ -275,6 +275,10 @@ impl State {
         self.publication.frame = self.frame;
         self.publication.projection = camera.proj;
         self.publication.near_plane = -camera.proj[14];
+        self.publication.flags &= !8;
+        if surface_fog_disabled(camera.params.fog_enabled) {
+            self.publication.flags |= 8;
+        }
         self.publication.flags |= 1;
         self.captured = true;
     }
@@ -560,9 +564,23 @@ mod native {
     }
 }
 
+// Native frame::apply_fog_receiver and shading::shade bypass surface fog in
+// this mode. Do not infer compatibility from colors, a distance threshold, or
+// an absent/zero-filled inverse range; a non-finite mode fails closed.
+fn surface_fog_disabled(enabled: f32) -> bool {
+    enabled.is_finite() && (0.0..=0.5).contains(&enabled)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fog_compatibility_requires_explicit_finite_disabled_native_mode() {
+        for mode in [0.0, 0.5] { assert!(surface_fog_disabled(mode)); }
+        for mode in [-1.0, 0.5001, 1.0, 2.0, f32::NAN, f32::INFINITY] {
+            assert!(!surface_fog_disabled(mode));
+        }
+    }
     #[test]
     fn contract_layout_matches_cpp_and_grid_is_bounded() {
         assert_eq!(std::mem::size_of::<Publication>(), 1208);
