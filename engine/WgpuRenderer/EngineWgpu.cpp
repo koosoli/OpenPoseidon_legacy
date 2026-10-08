@@ -15522,6 +15522,36 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                                          path, bindingsComplete, sourceSupported, mat.native_pbr_scales.w == 2.0f, parameters.globalUv[0],
                                          parameters.globalUv[1], parameters.globalPower);
                         }
+                        static const bool aoPreview = [] {
+                            const char* value = std::getenv("WGR_REFORGER_AO_PREVIEW");
+                            return value && std::strcmp(value, "1") == 0;
+                        }();
+                        static const std::string aoMaterial = [] {
+                            const char* value = std::getenv("WGR_REFORGER_AO_MATERIAL");
+                            return std::string(value ? value : "");
+                        }();
+                        const bool aoTarget = aoMaterial.empty() ||
+                            (materialName.size() >= aoMaterial.size() &&
+                             Asset::Material::EmatMaterial::NameMatches(
+                                 materialName.substr(materialName.size() - aoMaterial.size()), aoMaterial));
+                        if (aoPreview && aoTarget)
+                        {
+                            const auto& ao = found->second.ematPbr->layerAo;
+                            bool admitted = ao.supported && mat.native_pbr_scales.w == 2.0f;
+                            for (size_t layer = 0; layer < 3; ++layer)
+                                admitted = admitted && mat.layer_texture_id[layer] != 0 &&
+                                    mat.layer_normal_texture_id[layer] != 0;
+                            if (admitted)
+                            {
+                                for (size_t layer = 0; layer < 4; ++layer)
+                                    mat.layer_colour[layer][3] = ao.scale[layer];
+                                sec.flags |= WGR_MODEL_SECTION_NATIVE_PBR_LAYER_AO;
+                            }
+                            static std::unordered_set<std::string> reportedAo;
+                            if (reportedAo.size() < 32 && reportedAo.insert(path).second)
+                                LOG_INFO(Graphics, "Wgpu native PBR layer AO preview: material={} admission={} scales={}/{}/{}/{}",
+                                         path, admitted, ao.scale[0], ao.scale[1], ao.scale[2], ao.scale[3]);
+                        }
                         static bool reportedMultiPreview = false;
                         if (!reportedMultiPreview)
                         {

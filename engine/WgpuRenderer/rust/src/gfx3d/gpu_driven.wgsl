@@ -196,6 +196,12 @@ fn tint_albedo(c: vec3<f32>, k: vec3<f32>) -> vec3<f32> {
 #ifdef NATIVE_PBR_PREVIEW
 const SECTION_NATIVE_PBR_SRGB: u32 = 256u;
 const SECTION_NATIVE_PBR_NORMALS: u32 = 512u;
+const SECTION_NATIVE_PBR_LAYER_AO: u32 = 2048u;
+fn native_pbr_layer_ao(alpha: f32, scale: f32) -> f32 {
+    // Clamp each contributor before composition; clamping the weighted sum
+    // permits an over-range layer to brighten unrelated layers.
+    return clamp(alpha * scale, 0.0, 1.0);
+}
 fn native_pbr_normal_rg(rg: vec2<f32>) -> vec2<f32> {
     return select(rg, vec2<f32>(rg.x, 1.0 - rg.y), matdbg_flag(MATDBG_INVERT_NORMAL_Y));
 }
@@ -1238,6 +1244,8 @@ fn fs_gpu_body(in: VsOut
         sm.mask_slot != 0u && sm.specular_slot != 0u;
     let preview_normals = preview_multi && sm.native_pbr_scales.w > 1.5 &&
         (sm.flags & SECTION_NATIVE_PBR_NORMALS) != 0u;
+    let preview_layer_ao = preview_multi && sm.native_pbr_scales.w > 1.5 &&
+        (sm.flags & SECTION_NATIVE_PBR_LAYER_AO) != 0u;
     var global_normal_ts = vec3<f32>(0.0, 0.0, 1.0);
 #ifdef NATIVE_PBR_TANGENTS
     let use_authored_normal = preview_normals && (sm.flags & SECTION_NATIVE_PBR_TANGENTS) != 0u &&
@@ -1282,7 +1290,9 @@ fn fs_gpu_body(in: VsOut
             let base_weight = select(1.0 - min(layer_w.x + layer_w.y + layer_w.z, 1.0),
                                      layer_base_weight, sm.native_pbr_scales.w > 1.5);
             pbr_metal = normal_sample.b * base_weight;
-            pbr_ao = normal_sample.a * base_weight;
+            let base_ao = select(normal_sample.a, native_pbr_layer_ao(normal_sample.a, sm.layer_colour[0].a),
+                                 preview_layer_ao);
+            pbr_ao = base_ao * base_weight;
             pbr_sampled = true;
         }
 #endif
@@ -1338,7 +1348,9 @@ fn fs_gpu_body(in: VsOut
 #ifdef NATIVE_PBR_PREVIEW
             if (preview_multi) {
                 pbr_metal = pbr_metal + layer_sample.b * layer_w[i];
-                pbr_ao = pbr_ao + layer_sample.a * layer_w[i];
+                let layer_ao = select(layer_sample.a,
+                    native_pbr_layer_ao(layer_sample.a, sm.layer_colour[i + 1u].a), preview_layer_ao);
+                pbr_ao = pbr_ao + layer_ao * layer_w[i];
             }
 #endif
         }

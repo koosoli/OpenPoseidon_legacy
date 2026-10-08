@@ -52,12 +52,29 @@ TEST_CASE("Ordered normal parameters keep global UV separate and reject unsuppor
     REQUIRE(normal.globalPower == .2f);
     REQUIRE(normal.detailStrength[0].value == .2f);
     REQUIRE(normal.detailStrength[3].value == .8f);
+    REQUIRE(ReadNativePbrMultiAo(parsed).supported);
+    REQUIRE(ReadNativePbrMultiAo(parsed).scale == std::array<float, 4>{1, 1, 1, 1});
+    const auto authoredAo = ParseEmat(body + " AO_1 0\n AO_3 2\n}\n");
+    REQUIRE(ReadNativePbrMultiAo(authoredAo).supported);
+    REQUIRE(ReadNativePbrMultiAo(authoredAo).scale == std::array<float, 4>{0, 1, 2, 1});
+    for (const float invalid : {-1.0f, std::numeric_limits<float>::infinity(),
+                                std::numeric_limits<float>::quiet_NaN()})
+    {
+        auto bad = authoredAo;
+        for (auto& property : bad.properties)
+            if (EmatMaterial::NameMatches(property.name, "AO_3")) property.values[0].number = invalid;
+        REQUIRE_FALSE(ReadNativePbrMultiAo(bad).supported);
+    }
+    REQUIRE_FALSE(ReadNativePbrMultiAo(ParseEmat(body + " AO_3 \"bad\"\n}\n")).supported);
+    REQUIRE_FALSE(ReadNativePbrMultiAo(ParseEmat(body + " FineMask_2 1\n}\n")).supported);
     const auto translated = TranslateEmat(parsed, "Assets/Owned.emat", "");
     REQUIRE(translated.Find(MaterialSlot::BaseColour)->uvTransform.aside[0] == 2.0f);
     if (EmatPbrProvenanceEnabled())
     {
         REQUIRE(translated.ematPbr->normals.supported);
         REQUIRE(translated.ematPbr->normals.globalUv == normal.globalUv);
+        REQUIRE(TranslateEmat(authoredAo, "Assets/Owned.emat", "").ematPbr->layerAo.scale ==
+                std::array<float, 4>{0, 1, 2, 1});
     }
     for (const char* key : {"NormalPower", "DetNormal_2", "GlobalNMOMap", "NMO_4", "GlobalNMOUVTransform"})
     {

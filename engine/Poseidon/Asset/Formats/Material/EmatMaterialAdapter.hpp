@@ -627,6 +627,22 @@ inline EmatMultiNormalParameters ReadNativePbrMultiNormals(const EmatMaterial& e
     return result;
 }
 
+// Bounded to the same complete four-layer source contract as the normal preview.
+// AO is a per-layer multiplier, independent of colour alpha and normal strength.
+inline EmatMultiAoParameters ReadNativePbrMultiAo(const EmatMaterial& emat)
+{
+    EmatMultiAoParameters result;
+    if (!ReadNativePbrMultiNormals(emat).supported) return result;
+    for (size_t i = 0; i < result.scale.size(); ++i)
+    {
+        const std::string key = "AO_" + std::to_string(i + 1);
+        if (emat.Has(key) && !emat.FloatOf(key, result.scale[i])) return result;
+        if (!std::isfinite(result.scale[i]) || result.scale[i] < 0.0f) return result;
+    }
+    result.supported = true;
+    return result;
+}
+
 // Translates an `.emat` into the engine's material form. `family` is carried through from
 // the rvmat that pointed here.
 inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::string& origin, const std::string& family)
@@ -767,6 +783,7 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
             pbr->maskScale[i] = ReadEmatPbrScalar(emat, maskKeys[i]);
         pbr->standardMaskBlend = ReadNativePbrStandardMasks(emat, pbr->layerMaskParams);
         pbr->normals = ReadNativePbrMultiNormals(emat);
+        pbr->layerAo = ReadNativePbrMultiAo(emat);
         if (pbr->standardMaskBlend)
         {
             const MaterialSlot maskSlots[] = {MaterialSlot::LayerMask1, MaterialSlot::LayerMask2,

@@ -67,6 +67,53 @@ fn native_multi_ordered_preview_helpers_validate() {
     let _ = ordered_mask_probe();
 }
 
+fn ordered_ao_probe() -> naga::Module {
+    let mut source = String::new();
+    for helper in ["native_pbr_layer_ao", "native_pbr_ordered_weights"] {
+        let start = PRODUCTION.find(&format!("fn {helper}(")).unwrap();
+        let end = start + PRODUCTION[start..].find("\n}").unwrap() + 2;
+        source.push_str(&PRODUCTION[start..end]);
+        source.push('\n');
+    }
+    source.push_str(r#"
+@group(0) @binding(0) var<storage,read_write> output:array<vec4<f32>>;
+@compute @workgroup_size(1) fn cs_probe(@builtin(global_invocation_id) id:vec3<u32>) {
+    let scales = array<vec4<f32>,5>(vec4<f32>(1.0),vec4<f32>(0.0),
+        vec4<f32>(2.0),vec4<f32>(1.0,1.0,2.0,1.0),vec4<f32>(0.0,1.0,2.0,1.0));
+    let masks = array<vec3<f32>,5>(vec3<f32>(0.0),vec3<f32>(0.0),
+        vec3<f32>(0.0),vec3<f32>(0.5),vec3<f32>(1.0,1.0,0.0));
+    let w = native_pbr_ordered_weights(masks[id.x]);
+    let s = scales[id.x];
+    let clamped = vec4<f32>(native_pbr_layer_ao(0.8,s.x),native_pbr_layer_ao(0.8,s.y),
+        native_pbr_layer_ao(0.8,s.z),native_pbr_layer_ao(0.8,s.w));
+    // y deliberately shows the incorrect clamp-after-composition result.
+    output[id.x] = vec4<f32>(dot(clamped,w),clamp(dot(vec4<f32>(0.8)*s,w),0.0,1.0),w.z,1.0);
+}
+"#);
+    let module = naga::front::wgsl::parse_str(&source).unwrap();
+    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+        .validate(&module).unwrap();
+    module
+}
+
+#[test]
+fn native_ordered_ao_helper_validates_and_remains_scoped() {
+    let _ = ordered_ao_probe();
+    assert!(PRODUCTION.contains("let preview_layer_ao = preview_multi && sm.native_pbr_scales.w > 1.5"));
+    assert!(PRODUCTION.contains("native_pbr_layer_ao(normal_sample.a, sm.layer_colour[0].a)"));
+    assert!(PRODUCTION.contains("native_pbr_layer_ao(layer_sample.a, sm.layer_colour[i + 1u].a)"));
+}
+
+#[test]
+fn native_ordered_ao_actual_gpu_clamps_each_layer_before_overlapping_mix() {
+    let actual = gpu_channels_result(ordered_ao_probe());
+    let expected = [0.8,0.8,0.0,1.0, 0.0,0.0,0.0,1.0, 1.0,1.0,0.0,1.0,
+                    0.85,1.0,0.25,1.0, 1.0,1.0,1.0,1.0];
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert!((actual - expected).abs() < 1e-6, "{actual} != {expected}");
+    }
+}
+
 #[test]
 fn native_multi_ordered_actual_gpu_resolves_overlapping_masks_and_detail_remap() {
     let actual = gpu_channels_result(ordered_mask_probe());

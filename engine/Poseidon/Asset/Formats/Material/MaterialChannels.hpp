@@ -199,6 +199,12 @@ struct EmatMultiNormalParameters
     std::array<EmatAuthoredScalar, 4> detailStrength{};
 };
 
+struct EmatMultiAoParameters
+{
+    bool supported = false;
+    std::array<float, 4> scale{1.0f, 1.0f, 1.0f, 1.0f};
+};
+
 struct EmatPbrProvenance
 {
     // Index 0 is BCRMap (or BCR_1); indices 1..3 are BCR_2..4.
@@ -218,6 +224,7 @@ struct EmatPbrProvenance
     // (UV scale, sharpness, offset, UV source 0/1) for Mask_2..4.
     std::array<std::array<float, 4>, 3> layerMaskParams{};
     EmatMultiNormalParameters normals;
+    EmatMultiAoParameters layerAo;
 };
 
 struct TranslatedMaterial

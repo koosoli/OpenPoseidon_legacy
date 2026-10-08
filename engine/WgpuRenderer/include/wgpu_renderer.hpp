@@ -459,7 +459,10 @@ enum WgrModelSectionFlags : uint32_t
     /* Separate ordered-detail/global normal preview; requires supported source metadata. */
     WGR_MODEL_SECTION_NATIVE_PBR_NORMALS = 512u,
     /* Optional validated authored UV0 frame; only with the ordered normal preview. */
-    WGR_MODEL_SECTION_NATIVE_PBR_TANGENTS = 1024u
+    WGR_MODEL_SECTION_NATIVE_PBR_TANGENTS = 1024u,
+    // Optional ordered native AO. layer_colour[].w carries AO multipliers only
+    // under this flag; RGB tint and public struct layout remain unchanged.
+    WGR_MODEL_SECTION_NATIVE_PBR_LAYER_AO = 2048u
 };
 
 /* Per-section shading, parallel to a model's sections (one per section). The RAW
