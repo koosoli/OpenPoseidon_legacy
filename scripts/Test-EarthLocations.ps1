@@ -7,6 +7,7 @@ param(
     [string]$CacheDirectory=(Join-Path $env:LOCALAPPDATA 'OpenPoseidon/world-stream'),
     [ValidateRange(60,240)][int]$PatchTimeoutSeconds=150,
     [switch]$CachedBuildings,
+    [switch]$CachedFeatures,
     [switch]$LocalSurface
 )
 $ErrorActionPreference='Stop'
@@ -27,6 +28,7 @@ $settings=@{
     POSEIDON_WHOLE_WORLD='1';POSEIDON_EARTH_LATITUDE='46.6';POSEIDON_EARTH_LONGITUDE='8.1';
     POSEIDON_EARTH_CACHE=$CacheDirectory;POSEIDON_EARTH_IMAGERY=$imagery;
     POSEIDON_EARTH_BUILDINGS=$(if($CachedBuildings){'1'}else{'0'});
+    POSEIDON_EARTH_FEATURES=$(if($CachedFeatures){'1'}else{'0'});
     POSEIDON_EARTH_SURFACE=$(if($LocalSurface){'1'}else{'0'});
     WGR_GRASS='0';WGR_TERRAIN_RESOURCE_REUSE='1';WGR_WET_SOIL_DIAGNOSTIC='1';
     POSEIDON_USER_DIR=(Join-Path $out 'user')
@@ -159,6 +161,16 @@ try{
             Start-Sleep -Milliseconds 200
         }while($true)
         $receipt.buildings=$building[-1].Line
+        if($CachedFeatures){
+            $deadline=[DateTime]::UtcNow.AddSeconds(15)
+            do{
+                $features=@(Select-String -Path $log -Pattern 'Earth cached feature kind [0-4]: [1-9][0-9]* features')
+                if(@($features|ForEach-Object {if($_.Line-match'kind ([0-4]):'){$Matches[1]}}|Select-Object -Unique).Count-eq5){break}
+                Require ([DateTime]::UtcNow-lt$deadline) 'All five cached landscape feature kinds were not published'
+                Start-Sleep -Milliseconds 200
+            }while($true)
+            $receipt.features=@($features|ForEach-Object Line)
+        }
         $pose=Eval 'triFreeFlyPose "6400 6400 1000 30 -45"'
         Require ($pose.StartsWith('OK')) 'Building overview camera refused'
         Start-Sleep -Seconds 1
