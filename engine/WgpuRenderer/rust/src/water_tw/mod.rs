@@ -1573,6 +1573,37 @@ mod tests {
     }
 
     #[test]
+    fn production_wake_kernel_validates() {
+        // Validate the exact concatenated source passed to WakeGpu::new, without
+        // inventing material bindings that the production wake kernel does not own.
+        let module = naga::front::wgsl::parse_str(TW_WAKE_KERNEL_WGSL)
+            .unwrap_or_else(|e| panic!("{}", e.emit_to_string(TW_WAKE_KERNEL_WGSL)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+            .validate(&module).expect("production wake kernel validation");
+    }
+
+    #[test]
+    fn production_wake_pipelines_build_on_a_real_device() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            compatible_surface: None,
+            force_fallback_adapter: false,
+            ..Default::default()
+        })) else {
+            eprintln!("production wake device test skipped: no headless adapter");
+            return;
+        };
+        let (device, _) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+            .expect("production wake test device");
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        // This creates the actual three wake compute pipelines and their bind
+        // layouts. The concatenated source is identical to startup's source.
+        let _wake = wake::WakeGpu::new(&device, TW_WAKE_KERNEL_WGSL);
+        let error = pollster::block_on(scope.pop());
+        assert!(error.is_none(), "production wake pipeline validation: {error:?}");
+    }
+
+    #[test]
     fn tidewater_water_shader_composes() {
         let mut composer = crate::shaders::build_composer();
         if let Err(e) = composer.make_naga_module(naga_oil::compose::NagaModuleDescriptor {

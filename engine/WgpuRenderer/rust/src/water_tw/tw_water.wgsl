@@ -70,6 +70,27 @@ struct OceanParams {
 @group(1) @binding(23) var causticsFineTex: texture_2d<f32>;  // W5b caustics (caustics.rs)
 @group(1) @binding(24) var causticsBroadTex: texture_2d<f32>;
 
+// Earth presentation belongs to the material: the wake kernel also consumes
+// tw_common.wgsl, but deliberately has no TwSurface binding.
+fn earthWater() -> bool { return tw.detail.w > 0.5; }
+fn earthWaterDrop(xz: vec2<f32>) -> f32 {
+    if (!earthWater()) { return 0.0; }
+    let d = xz - vec2<f32>(6400.0);
+    let r2 = dot(d, d);
+    let radius = 6378137.0;
+    return r2 / (radius + sqrt(max(radius * radius - r2, 0.0)));
+}
+fn waterLevelAt(xz: vec2<f32>) -> f32 { return tw.sea.x - earthWaterDrop(xz); }
+fn materialTerrainHeightAt(xz: vec2<f32>) -> f32 {
+    let h = terrainHeightAt(xz);
+    if (earthWater()) {
+        // Terrarium ocean tiles are elevation zero, not seabed. Supply a visual
+        // deep floor there; retain curved land. No gameplay depth changes.
+        return select(h, waterLevelAt(xz) - 200.0, h + earthWaterDrop(xz) <= 0.5);
+    }
+    return h;
+}
+
 // ------------------------------------------------------------------ CDLOD.js
 
 struct CdlodVertex { worldXZ: vec2<f32>, spacing: f32, morphK: f32, lod: f32, size: f32 };
@@ -133,7 +154,7 @@ struct TwDisp {
 
 fn twDisplace(worldXZ: vec2<f32>, spacing: f32) -> TwDisp {
     let seaLevel = waterLevelAt(worldXZ);
-    let ground = terrainHeightAt(worldXZ);
+    let ground = materialTerrainHeightAt(worldXZ);
     let depth = seaLevel - ground;
 
     var disp = vec3<f32>(0.0);
@@ -623,7 +644,7 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
     let footprint = max(length(fwidth(lagXZ)), 1e-4);
     let dwx = dpdx(rel);
     let dwy = dpdy(rel);
-    let groundH = terrainHeightAt(pos.xz);
+    let groundH = materialTerrainHeightAt(pos.xz);
     var thickness = pos.y - groundH;
 
     let dist = length(rel);
@@ -747,8 +768,8 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         // taken here from central differences of OP's heightmap.
         let edgeW = max((1.0 - smoothstep(0.0, 0.006, thickness)) * uprush, lipW);
         let e = 0.5;
-        let gradH = vec2<f32>(terrainHeightAt(pos.xz + vec2<f32>(e, 0.0)) - terrainHeightAt(pos.xz - vec2<f32>(e, 0.0)),
-                              terrainHeightAt(pos.xz + vec2<f32>(0.0, e)) - terrainHeightAt(pos.xz - vec2<f32>(0.0, e))) / (2.0 * e);
+        let gradH = vec2<f32>(materialTerrainHeightAt(pos.xz + vec2<f32>(e, 0.0)) - materialTerrainHeightAt(pos.xz - vec2<f32>(e, 0.0)),
+                              materialTerrainHeightAt(pos.xz + vec2<f32>(0.0, e)) - materialTerrainHeightAt(pos.xz - vec2<f32>(0.0, e))) / (2.0 * e);
         let uphill = normalize(gradH + vec2<f32>(1e-5, 0.0));
         let N = normalize(Nview + vec3<f32>(uphill.x, 0.0, uphill.y) * (edgeW * edgeW * 0.7));
         let NdV = max(dot(N, V), 1e-4);
@@ -795,8 +816,8 @@ fn fs_tidewater(in: VsOut, @builtin(front_facing) front: bool) -> @location(0) v
         let L0 = max(pos.y - groundH, 0.0) / tDown;
         var Lt = L0;
         if (L0 < 100.0) {
-            let L1 = max(pos.y - terrainHeightAt(pos.xz + Tv.xz * min(L0, 200.0)), 0.0) / tDown;
-            Lt = max(pos.y - terrainHeightAt(pos.xz + Tv.xz * min(L1 * 0.5 + L0 * 0.5, 200.0)), 0.0) / tDown;
+            let L1 = max(pos.y - materialTerrainHeightAt(pos.xz + Tv.xz * min(L0, 200.0)), 0.0) / tDown;
+            Lt = max(pos.y - materialTerrainHeightAt(pos.xz + Tv.xz * min(L1 * 0.5 + L0 * 0.5, 200.0)), 0.0) / tDown;
         }
         let Lter = clamp(Lt, 0.0, 400.0);
         // thin breaking crests: the refracted ray leaves through the back of the wave into the sky
