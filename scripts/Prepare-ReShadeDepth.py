@@ -58,6 +58,10 @@ def prepare(root, local_sources=None, probe_only=False):
         "OpenPoseidon-Depth-Probe.ini": "Techniques=OpenPoseidonDepthProbe@OpenPoseidonDepthProbe.fx\n"
             "TechniqueSorting=OpenPoseidonDepthProbe@OpenPoseidonDepthProbe.fx\n"
             "\n[OpenPoseidonDepthProbe.fx]\nReversedZ=1\nFlipY=0\nDepthPower=0.125\nOverlay=0.25\n",
+        "OpenPoseidon-Depth-Scene-Probe.ini": "PreprocessorDefinitions=OPENPOSEIDON_ENGINE_DEPTH=1\n"
+            "Techniques=OpenPoseidonDepthProbe@OpenPoseidonDepthProbe.fx\n"
+            "TechniqueSorting=OpenPoseidonDepthProbe@OpenPoseidonDepthProbe.fx\n"
+            "\n[OpenPoseidonDepthProbe.fx]\nReversedZ=1\nFlipY=0\nDepthPower=0.125\nOverlay=0\n",
         "OpenPoseidon-DH-RTGI-Preview.ini": "PreprocessorDefinitions=RESHADE_DEPTH_INPUT_IS_REVERSED=1,RESHADE_DEPTH_INPUT_IS_UPSIDE_DOWN=0\n"
             "Techniques=DH_UBER_RT@dh_uber_rt.fx\nTechniqueSorting=DH_UBER_RT@dh_uber_rt.fx\n"
             "\n[dh_uber_rt.fx]\niDebug=0\nbSSR=0\nbRemoveAmbient=0\nfGIRenderScale=0.333\niRTMaxRays=2\n"

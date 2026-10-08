@@ -16,7 +16,7 @@ crate-type = ["cdylib", "rlib"]
 # for distribution must never enable this (docs/temporal-upscaling-plan.md §0.1). The
 # build script links the static NGX lib out of the untracked .tmp-dlss-sdk checkout
 # (or WGR_DLSS_SDK).
-dlss = ["dep:ash"]
+dlss = []
 
 [dependencies]
 # naga-ir: lets us hand wgpu a pre-composed naga::Module (ShaderSource::Naga),
@@ -40,10 +40,11 @@ glam = { version = "0.33.2", features = ["bytemuck"] }
 # profiling); keys are small and engine-authored, so the fast hasher is the right
 # trade. Already in the lock via wgpu, so this adds no new download.
 rustc-hash = "2"
-# dlss only: raw Vulkan instance/device creation with the NGX-required extensions,
+# Raw Vulkan handle access for the optional developer depth handoff, and DLSS
+# instance/device creation with the NGX-required extensions,
 # wrapped back into wgpu via wgpu-hal from_raw/device_from_raw. Version MUST match the
 # ash wgpu-hal 29 pins (0.38), or the two disagree about handle types.
-ash = { version = "0.38", optional = true }
+ash = { version = "0.38" }
 
 [dev-dependencies]
 # dlss bring-up diagnostics only (LoadLibrary probe of the NGX snippet DLL).

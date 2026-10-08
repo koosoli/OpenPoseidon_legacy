@@ -1,4 +1,5 @@
 #include <Poseidon/Dev/Debug/ReShadeOptional.hpp>
+#include <Poseidon/Dev/Debug/ReShadeSceneDepthContract.hpp>
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <Poseidon/Dev/Harness/HarnessServer.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
@@ -71,6 +72,7 @@ void AddEnvironmentEntry(const char* name, const std::string& value)
 using Query = unsigned (*)();
 using SetEnabled = void (*)(int);
 using Capture = void (*)();
+using QuerySceneDepth = unsigned (*)(OpReShadeSceneDepthStateV1*, unsigned, unsigned);
 struct Bridge
 {
     Query status = nullptr;
@@ -81,6 +83,7 @@ struct Bridge
     Query captureCount = nullptr;
     Query captureStage = nullptr;
     Query presentCount = nullptr;
+    QuerySceneDepth sceneDepth = nullptr;
 };
 
 Bridge GetBridge()
@@ -102,6 +105,7 @@ Bridge GetBridge()
             bridge.captureCount = reinterpret_cast<Query>(GetProcAddress(module, "OpReShadeGetCaptureCount"));
             bridge.captureStage = reinterpret_cast<Query>(GetProcAddress(module, "OpReShadeGetCaptureStage"));
             bridge.presentCount = reinterpret_cast<Query>(GetProcAddress(module, "OpReShadeGetPresentCount"));
+            bridge.sceneDepth = reinterpret_cast<QuerySceneDepth>(GetProcAddress(module, "OpReShadeGetSceneDepthV1"));
         }
     }
 #endif
@@ -113,9 +117,20 @@ unsigned Read(Query query) { return query ? query() : 0; }
 
 void PrepareOptionalReShadeEnvironment(bool enabled)
 {
-    if (!enabled) return;
+    if (!enabled)
+    {
+#if defined(_WIN32)
+        _putenv_s("WGR_RESHADE_SCENE_DEPTH", "0");
+#endif
+        return;
+    }
 #if defined(_WIN32)
     const auto& config = Poseidon::Foundation::AppConfig::Instance();
+    // An opt-in diagnostic only; never let a remembered user profile enable a
+    // raw native handoff in ordinary/multiplayer/server launches.
+    if (!config.DevMode() || config.GetRenderBackend() != "wgpu" ||
+        config.IsHostServer() || config.GetConnectIP().GetLength() > 0)
+        _putenv_s("WGR_RESHADE_SCENE_DEPTH", "0");
     if (config.GetRenderBackend() != "wgpu" || config.IsHostServer() || config.GetConnectIP().GetLength() > 0)
     {
         startupMessage = "Optional ReShade was skipped: this preview requires a single-player WGPU launch.";
@@ -223,6 +238,32 @@ void RegisterOptionalReShadeHarness(Dev::HarnessServer& harness)
             cJSON_AddNumberToObject(result, "captureCount", Read(bridge.captureCount));
             cJSON_AddNumberToObject(result, "captureStage", Read(bridge.captureStage));
             cJSON_AddNumberToObject(result, "presentCount", Read(bridge.presentCount));
+            OpReShadeSceneDepthStateV1 depth{};
+            if (bridge.sceneDepth && bridge.sceneDepth(&depth, sizeof(depth), 1) == 1)
+            {
+                const auto& p = depth.publication;
+                auto* row = cJSON_AddObjectToObject(result, "sceneDepth");
+                cJSON_AddNumberToObject(row, "version", 1);
+                cJSON_AddNumberToObject(row, "status", depth.status);
+                cJSON_AddBoolToObject(row, "bound", depth.status == 2 && depth.boundGeneration == p.generation);
+                cJSON_AddNumberToObject(row, "frame", static_cast<double>(p.frame));
+                cJSON_AddNumberToObject(row, "generation", static_cast<double>(p.generation));
+                cJSON_AddNumberToObject(row, "boundFrame", static_cast<double>(depth.boundFrame));
+                cJSON_AddNumberToObject(row, "sampleFrame", static_cast<double>(p.sampleFrame));
+                cJSON_AddNumberToObject(row, "sampleGeneration", static_cast<double>(p.sampleGeneration));
+                cJSON_AddNumberToObject(row, "width", p.width);
+                cJSON_AddNumberToObject(row, "height", p.height);
+                cJSON_AddNumberToObject(row, "finiteSamples", p.finiteSamples);
+                cJSON_AddNumberToObject(row, "nonzeroSamples", p.nonzeroSamples);
+                cJSON_AddNumberToObject(row, "minimum", p.minimum);
+                cJSON_AddNumberToObject(row, "maximum", p.maximum);
+                cJSON_AddNumberToObject(row, "nearPlane", p.nearPlane);
+                auto* grid = cJSON_AddArrayToObject(row, "grid");
+                for (float value : p.grid) cJSON_AddItemToArray(grid, cJSON_CreateNumber(value));
+                auto* projection = cJSON_AddArrayToObject(row, "projection");
+                for (float value : p.projection) cJSON_AddItemToArray(projection, cJSON_CreateNumber(value));
+                cJSON_AddStringToObject(row, "scope", "Developer world snapshot; 16x16 bin-centre witness, not full-image reduction. Raw reversed-Z; visual alignment unverified.");
+            }
             cJSON_AddStringToObject(result, "scope", "Atomic published runtime state; requests apply on ReShade presentation. Capture count records paired save_screenshot calls; verify actual files separately.");
             return Dev::HarnessProtocol::JsonResponse(result);
         });

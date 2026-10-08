@@ -25,6 +25,9 @@ class Preparation(unittest.TestCase):
             self.assertEqual(json.loads(receipt.read_text())["files"], [])
             self.assertTrue((root / "Presets/OpenPoseidon-Depth-Off.ini").read_text().startswith("Techniques=\n"))
             self.assertFalse((root / "Shaders/dh_uber_rt.fx").exists())
+            scene = (root / "Presets/OpenPoseidon-Depth-Scene-Probe.ini").read_text()
+            self.assertIn("OPENPOSEIDON_ENGINE_DEPTH=1", scene)
+            self.assertIn("Overlay=0", scene)
 
     def test_bad_source_hash_writes_no_shader(self):
         with tempfile.TemporaryDirectory() as temporary:

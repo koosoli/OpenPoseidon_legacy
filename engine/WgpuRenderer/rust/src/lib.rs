@@ -17,6 +17,7 @@ mod handles;
 mod log;
 mod main_camera_tuple;
 mod post_optics_probe;
+mod scene_depth;
 mod demand_view_snapshot;
 mod planar_mips;
 mod shaders;
@@ -1038,6 +1039,7 @@ pub struct Renderer {
     // immediately after presentation.
     screenshot_requested: bool,
     post_optics_probe: Option<post_optics_probe::State>,
+    scene_depth: Option<scene_depth::State>,
     screenshot_pixels: Option<ScreenshotPixels>,
 }
 
@@ -1047,6 +1049,7 @@ pub struct Renderer {
 // the GPU has finished with the last frame and before the device goes.
 impl Drop for Renderer {
     fn drop(&mut self) {
+        if let Some(depth) = self.scene_depth.as_mut() { depth.invalidate(); }
         if !self.upscalers.is_empty() {
             let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
             self.upscalers.clear();
@@ -2103,6 +2106,7 @@ impl Renderer {
             cull_debug_draw: false,
             screenshot_requested: false,
             post_optics_probe: post_optics_probe::enabled().then(post_optics_probe::State::new),
+            scene_depth: scene_depth::State::enabled().then(scene_depth::State::new),
             screenshot_pixels: None,
         })
     }
@@ -2972,6 +2976,7 @@ impl Renderer {
         if width == 0 || height == 0 {
             return;
         }
+        if let Some(depth) = self.scene_depth.as_mut() { depth.invalidate(); }
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
@@ -4875,6 +4880,7 @@ impl Renderer {
         // and Resolve is a no-op (scene_view IS the swapchain throughout).
         use crate::gfx3d::Plan3dOp;
         let ops = &plan.ops;
+        if let Some(depth) = self.scene_depth.as_mut() { depth.begin(); }
 
         // The clear colour seeds the scene target. On the HDR path that target is
         // linear, so decode the gamma-space clear the engine supplies.
@@ -6369,6 +6375,15 @@ impl Renderer {
                 self.far_depth_resolve_current = false;
             }
 
+            // Preserve only the first completed world segment, before the
+            // ClearDepth/Resolve seam lets cockpit/UI overwrite its attachment.
+            if start == 0 {
+                if let (Some(depth), Some(source), Some(camera)) =
+                    (self.scene_depth.as_mut(), self.gfx3d.water_depth_view(), cameras.get(main_scene_cam)) {
+                    depth.capture(&self.device, &mut encoder, source,
+                        self.hdr_size, (self.config.width, self.config.height), self.sample_count, camera);
+                }
+            }
             // Freeze the completed world for the held LLDR screen, before the
             // first-person segment paints the device over it. Reuse water's snapshot.
             let has_monitor = draws3d.iter().any(|d| d.flags & ffi::WGR_DRAW3D_MONITOR != 0);
@@ -6591,6 +6606,9 @@ impl Renderer {
             main_count_request.is_some_and(|(token, _, _)|
                 self.gfx3d.batch_target_count_before_submit(token));
         self.queue.submit(std::iter::once(main_commands));
+        // Same Vulkan queue submission precedes ReShade's presentation callback.
+        // Publication exposes only an owned snapshot in explicit shader-read state.
+        if let Some(depth) = self.scene_depth.as_mut() { depth.submitted(&self.device); }
         self.gfx3d.interior_publications_submitted();
         self.gfx3d.gi_rsm_publication_submitted();
         self.gfx3d.local_publications_submitted();

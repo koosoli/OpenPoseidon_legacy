@@ -5,7 +5,7 @@
 param(
  [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{8,40}$')][string]$ExpectedCommit,
  [Parameter(Mandatory)][string]$RuntimeDirectory,
- [ValidateSet('Probe','DHDebug','DH')][string]$Mode='Probe',
+ [ValidateSet('Probe','SceneProbe','DHDebug','DH')][string]$Mode='Probe',
  [ValidateSet(1,2,4,8)][int]$MsaaSamples=1,
  # Official GenericDepth 6.8: 0=end-of-frame, 1=before-clears,
  # 2=before-clears plus Vulkan depth-unbind copies (no end-of-frame fallback).
@@ -19,18 +19,20 @@ $repo=Split-Path -Parent $PSScriptRoot
 $stamp=(Get-Content -LiteralPath (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw).Trim()
 Require ($stamp.Contains($ExpectedCommit)) 'Unexpected installed source'
 $source=(Resolve-Path -LiteralPath $RuntimeDirectory).Path
-$presetName=switch($Mode){'Probe'{'OpenPoseidon-Depth-Probe.ini'};'DHDebug'{'OpenPoseidon-DH-Depth-Debug.ini'};'DH'{'OpenPoseidon-DH-RTGI-Preview.ini'}}
-$effectName=if($Mode-eq'Probe'){'OpenPoseidonDepthProbe.fx'}else{'dh_uber_rt.fx'}
-$technique=if($Mode-eq'Probe'){'OpenPoseidonDepthProbe@OpenPoseidonDepthProbe.fx'}else{'DH_UBER_RT@dh_uber_rt.fx'}
+$probeMode=$Mode-in@('Probe','SceneProbe')
+$effectiveDepthCopy=if($Mode-eq'SceneProbe'){0}else{$DepthCopyBeforeClears}
+$presetName=switch($Mode){'Probe'{'OpenPoseidon-Depth-Probe.ini'};'SceneProbe'{'OpenPoseidon-Depth-Scene-Probe.ini'};'DHDebug'{'OpenPoseidon-DH-Depth-Debug.ini'};'DH'{'OpenPoseidon-DH-RTGI-Preview.ini'}}
+$effectName=if($probeMode){'OpenPoseidonDepthProbe.fx'}else{'dh_uber_rt.fx'}
+$technique=if($probeMode){'OpenPoseidonDepthProbe@OpenPoseidonDepthProbe.fx'}else{'DH_UBER_RT@dh_uber_rt.fx'}
 $required=@('ReShade64.dll','ReShade64.json','OpenPoseidonReShade.addon64','OpenPoseidon.ini',
  'Shaders/OpenPoseidonLook.fx','DEPTH-PROVENANCE.json',('Presets/'+$presetName),('Shaders/'+$effectName))
-if($Mode-ne'Probe'){$required+=@('Shaders/ReShade.fxh','Licenses/DH-UBER-RT-GPL-2.0.txt')}
+if(!$probeMode){$required+=@('Shaders/ReShade.fxh','Licenses/DH-UBER-RT-GPL-2.0.txt')}
 foreach($name in $required){Require (Test-Path -LiteralPath (Join-Path $source $name) -PathType Leaf) ('Stage the licensed runtime first; missing '+$name)}
 $digests=@{
  'ReShade64.dll'='0cee63f9c9f13f3ac909c5b4903f4dbb4b719a7ab3b4f13b0deaf83c814b94f7';
  'ReShade64.json'='aa21713718843e531da396e2bfc80772c9cb3c369d6c30b836be6b0ae812d503'
 }
-if($Mode-ne'Probe'){
+if(!$probeMode){
  $digests['Licenses/DH-UBER-RT-GPL-2.0.txt']='8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643'
  $digests['Shaders/dh_uber_rt.fx']='c14f19eb7b0359cb4042749e52c28c6a18c2df89b9fd40f5ab9bd209e36e5320'
  $digests['Shaders/ReShade.fxh']='6dabfbbaf968c3871905d2ea17f96572ff7b1cec01310b5d0e5252b66b30174f'
@@ -38,9 +40,13 @@ if($Mode-ne'Probe'){
 foreach($name in $digests.Keys){Require ((Get-FileHash -LiteralPath (Join-Path $source $name)).Hash.ToLowerInvariant()-ceq$digests[$name]) ('Staged file digest mismatch: '+$name)}
 $provenance=Get-Content -LiteralPath (Join-Path $source 'DEPTH-PROVENANCE.json') -Raw|ConvertFrom-Json
 Require ($provenance.probe_license-ceq'GPL-3.0-or-later') 'Probe licence receipt missing'
-if($Mode-ne'Probe'){Require ($provenance.dh_license-ceq'GPL-2.0 (upstream LICENSE)') 'DH licence receipt missing'}
+if(!$probeMode){Require ($provenance.dh_license-ceq'GPL-2.0 (upstream LICENSE)') 'DH licence receipt missing'}
 $preset=Get-Content -LiteralPath (Join-Path $source ('Presets/'+$presetName)) -Raw
 Require ([regex]::IsMatch($preset,'(?m)^Techniques='+[regex]::Escape($technique)+'\r?$')) 'Preset must select exactly the requested technique'
+if($Mode-eq'SceneProbe'){
+ Require ($MsaaSamples-eq1) 'First engine scene-depth handoff supports exactly one sample'
+ Require ($preset-match'(?m)^PreprocessorDefinitions=OPENPOSEIDON_ENGINE_DEPTH=1\r?$') 'SceneProbe must select the independent engine semantic'
+}
 # Short scratch paths avoid the legacy profile path limit. Only newly created
 # files below this directory are writable; the caller's staged files stay intact.
 $scratch=Join-Path ([IO.Path]::GetTempPath()) ('op-rsd-'+[Guid]::NewGuid().ToString('N').Substring(0,8))
@@ -69,7 +75,7 @@ ShowScreenshotMessage=0
 [SCREENSHOT]
 SavePath=.\Screenshots
 [DEPTH]
-DepthCopyBeforeClears=$DepthCopyBeforeClears
+DepthCopyBeforeClears=$effectiveDepthCopy
 DepthCopyAtClearIndex=0
 UseAspectRatioHeuristics=3
 FilterFormat=6
@@ -94,7 +100,8 @@ class OutroLoose {randomSeed=3;class Intel {};};
 Add-Content -LiteralPath (Join-Path $user 'graphics.cfg') -Value 'optionalReShade=1;'
 $keys=@('POSEIDON_USER_DIR','POSEIDON_WHOLE_WORLD','VK_ADD_LAYER_PATH','VK_LAYER_PATH',
  'VK_INSTANCE_LAYERS','VK_LOADER_LAYERS_ENABLE','VK_LOADER_LAYERS_DISABLE','DISABLE_VK_LAYER_reshade_1','VK_LOADER_DEBUG',
- 'RESHADE_BASE_PATH_OVERRIDE','WGPU_BACKEND','WGR_DLSS','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_GTAO','WGR_GI')
+ 'RESHADE_BASE_PATH_OVERRIDE','WGPU_BACKEND','WGR_DLSS','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_GTAO','WGR_GI',
+ 'WGR_RESHADE_SCENE_DEPTH','WGR_RENDER_SCALE','WGR_HDR')
 $saved=@{};$savedExists=@{}
 foreach($key in $keys){
  $savedExists[$key]=Test-Path -LiteralPath ('Env:'+ $key)
@@ -102,7 +109,7 @@ foreach($key in $keys){
 }
 $receipt=@{installed=$stamp;mode=$Mode;selectedTechnique=$technique;selectedPreset=$presetName;
  sourceRuntime=$source;scratch=$scratch;runtime=$runtime;msaaSamples=$MsaaSamples;optionalReShade=1;
- genericDepth=@{DepthCopyBeforeClears=$DepthCopyBeforeClears;DepthCopyAtClearIndex=0;UseAspectRatioHeuristics=3;FilterFormat=6;
+ genericDepth=@{DepthCopyBeforeClears=$effectiveDepthCopy;DepthCopyAtClearIndex=0;UseAspectRatioHeuristics=3;FilterFormat=6;
   scope='Official 6.8 GenericDepth isolated configuration: exact output resolution and D32S8; clear-index selection remains automatic';
   source='https://github.com/crosire/reshade/blob/18deaa52de0c425a78b329e9cb3c497281cd00ec/examples/09-depth/generic_depth_addon.cpp'};
  captureSucceeded=$false;visualAccepted=$false;depthAvailability='Pending operator inspection of probe/debug image';
@@ -118,6 +125,7 @@ try{
  foreach($key in $keys){Remove-Item -LiteralPath ('Env:'+ $key) -ErrorAction SilentlyContinue}
  $env:POSEIDON_USER_DIR=$user;$env:POSEIDON_WHOLE_WORLD='0';$env:WGPU_BACKEND='vulkan'
  $env:WGR_DLSS='0';$env:WGR_AUTO_EXPOSURE='0';$env:WGR_EXPOSURE='0.5';$env:WGR_GTAO='0';$env:WGR_GI='0'
+ if($Mode-eq'SceneProbe'){$env:WGR_RESHADE_SCENE_DEPTH='1';$env:WGR_RENDER_SCALE='1';$env:WGR_HDR='1'}
  $env:VK_ADD_LAYER_PATH=$runtime;$env:VK_INSTANCE_LAYERS='VK_LAYER_reshade';$env:RESHADE_BASE_PATH_OVERRIDE=$runtime
  $env:VK_LOADER_DEBUG='error,warn,layer'
  $receipt.launchEnvironment=@{}
@@ -166,6 +174,12 @@ try{
  Require (!(Select-String -Path $log -Pattern 'Critical error:|Cannot load --test-world' -Quiet)) 'Comparison world failed to load'
  Require (Select-String -Path $log -Pattern 'worlds[\\/]eden.wrp' -Quiet) 'Everon landscape load missing'
  $state=Send @{cmd='optional_reshade';action='state'}
+ $sceneFrameAfterPose=0
+ if($Mode-eq'SceneProbe'){
+  Require ($null-ne$state.sceneDepth) 'Rebuild/stage the versioned scene-depth bridge and matching engine first'
+  $sceneFrameAfterPose=[UInt64]$state.sceneDepth.frame
+  $receipt.sceneFrameAfterPose=$sceneFrameAfterPose
+ }
  $compilePattern=[regex]::Escape($effectName)+'.*successfully|successfully.*'+[regex]::Escape($effectName)
  # At most 90 seconds for compilation/readiness, separate from startup.
  $deadline=[DateTime]::UtcNow.AddSeconds(90)
@@ -181,6 +195,18 @@ try{
  $null=Send @{cmd='optional_reshade';action='on'};Start-Sleep -Seconds 3
  $receipt.on=Send @{cmd='optional_reshade';action='state'}
  Require ($receipt.on.enabled-and$receipt.on.activeTechniques-eq1) 'Expected exactly one active selected effect'
+ if($Mode-eq'SceneProbe'){
+  Require ($null-ne$receipt.on.sceneDepth) 'Rebuild/stage the versioned scene-depth bridge and matching engine first'
+  $deadline=[DateTime]::UtcNow.AddSeconds(30)
+  while(!$receipt.on.sceneDepth.bound-or$receipt.on.sceneDepth.sampleFrame-le$sceneFrameAfterPose){
+   $receipt.sceneDepth=$receipt.on.sceneDepth
+   Require ([DateTime]::UtcNow-lt$deadline) 'Engine scene-depth snapshot not bound; inspect sceneDepth numeric witness/status and game stderr, no DH fallback'
+   Start-Sleep -Milliseconds 250;$receipt.on=Send @{cmd='optional_reshade';action='state'}
+  }
+  $receipt.sceneDepth=$receipt.on.sceneDepth
+  Require ($receipt.sceneDepth.finiteSamples-eq256-and$receipt.sceneDepth.nonzeroSamples-gt0-and
+      $receipt.sceneDepth.maximum-gt$receipt.sceneDepth.minimum-and$receipt.sceneDepth.nearPlane-gt0) 'Scene-depth numeric witness invalid'
+ }
  $receipt.onEnginePerformance=Send @{cmd='frame_performance'}
  $startCapture=Get-Date;$count=$receipt.on.captureCount
  $null=Send @{cmd='optional_reshade';action='capture'}
@@ -194,6 +220,9 @@ try{
  Require (@($files|Where-Object Name -Match 'ReShade').Count-gt0) 'Processed final-frame capture missing'
  foreach($file in $files){Copy-Item -LiteralPath $file.FullName -Destination $out}
  $receipt.captures=@($files|ForEach-Object {Join-Path $out $_.Name});$receipt.final=$state
+ if($Mode-eq'SceneProbe'){
+  Require ($state.sceneDepth.generation-eq$receipt.sceneDepth.generation) 'Scene-depth generation changed during capture'
+ }
  $null=Send @{cmd='exit'};$null=$p.WaitForExit(10000)
  Require $p.HasExited 'Clean exit deadline';$receipt.exitCode=$p.ExitCode
  Require ($p.ExitCode-eq0) 'Game exited unsuccessfully'

@@ -303,3 +303,104 @@ no running process, normal profile or active preset.
 This is a scoped future task, not an implemented handoff. No additional shader,
 executable tooling, renderer change, build, deployment or runtime attempt was
 made for this diagnosis update.
+
+## Continued implementation: explicit world snapshot (runtime proof pending)
+
+The next authorized implementation slice adds an opt-in handoff rather than
+another GenericDepth setting test. `WGR_RESHADE_SCENE_DEPTH=1` is effective only
+with optional loading enabled in a developer single-player WGPU launch. It is
+absent/off by default and is not a persistent look preference. The bounded first
+case requires Vulkan, HDR, exactly one sample, scene/output dimensions equal,
+and the engine's finite forward infinite-far projection. Unsupported cases do
+not bind a fallback or claim usable depth.
+
+`rust/src/scene_depth.rs` records an original WGSL pass immediately after the
+first completed world segment, before the ClearDepth/Resolve/UI seam. It samples
+the depth-only scene view into its own R32Float texture; the original attachment
+and all terrain/water/sky rendering remain unchanged. A 16x16 grid samples the
+centres of screen bins at the same boundary, at most once per 60 frames. Only a
+4096-byte padded staging buffer is mapped asynchronously; numeric counts and
+min/max describe those 256 samples, not a full-image reduction. The witness
+reports its own frame and resource generation separately from the live image.
+Empty, uniform, nonfinite, out-of-range and stale-generation witnesses cannot
+qualify the binding. This is finite numeric evidence, not visual alignment proof.
+
+The versioned POD contract is checked on both sides (1208-byte publication,
+1232-byte query state). The Rust producer pins only an already loaded add-on and
+calls optional exports; normal startup has no new required DLL. The add-on
+checks API, native device and queue, tracked image/view identity, dimensions,
+format and numeric witness before binding `OP_SCENE_DEPTH`. It does not touch
+GenericDepth's `DEPTH` binding or `bufready_depth`. The original probe's new
+`OPENPOSEIDON_ENGINE_DEPTH=1` variant reads the independent semantic with zero
+scene overlay and a bridge-driven readiness strip. A green strip here still
+does not prove pixel alignment or reconstruction correctness.
+
+The contract follows the pinned official API rather than reinterpreting opaque
+handles speculatively:
+
+- [Resource/view handles](https://github.com/crosire/reshade/blob/18deaa52de0c425a78b329e9cb3c497281cd00ec/include/reshade_api_resource.hpp)
+  document Vulkan VkImage/VkImageView.
+- [Native device/queue access](https://github.com/crosire/reshade/blob/18deaa52de0c425a78b329e9cb3c497281cd00ec/include/reshade_api_device.hpp)
+  documents VkDevice/VkQueue and queue idle waiting.
+- [Texture semantic binding](https://github.com/crosire/reshade/blob/18deaa52de0c425a78b329e9cb3c497281cd00ec/include/reshade_api.hpp)
+  requires shader-resource state when effects execute. The producer records
+  wgpu 29's explicit native-interoperability transition to RESOURCE, which the
+  installed Vulkan HAL maps to SHADER_READ_ONLY_OPTIMAL for R32Float.
+
+Publication follows the engine's queue submission and precedes presentation on
+that same native queue. Subsequent engine writes also use that queue; the
+external consumer performs only shader reads and leaves the documented layout
+unchanged. Before resize/replacement/renderer destruction, the producer calls
+invalidation on its serialized render/present thread. The bridge clears borrowed
+bindings, waits the matching external queue (wgpu's submission fences cannot
+cover injected work), then permits owner resources to drop. The add-on never
+destroys the engine's image/view. Resource generations prevent old numeric
+witnesses from authorizing replacements. A separate present queue, MSAA,
+upscaling, reconstruction and vendor-specific multi-queue support are outside
+this first implementation.
+
+The optional state harness now exposes `sceneDepth` with binding status,
+publication/bound/sample frames, generation, dimensions, near plane, projection,
+sample counts, range and row-major grid. Status 1 means waiting for valid numeric
+proof; 2 means binding accepted; 3 identifies device/queue mismatch; 4 identifies
+dimension/sample mismatch; 5 identifies invalid resource/publication. Numeric
+success alone never sets `visualAccepted`.
+The add-on recomputes the grid's range/count to reject inconsistent claimed
+statistics and will not bind using a witness older than 120 producer frames.
+
+The parent must integrate/build the matching engine/DLL and build the updated
+optional add-on before runtime verification. A CPU-compiled add-on is available
+in this worktree at `build/scene-depth-bridge/OpenPoseidonReShade.addon64`; it has
+not been installed. Stage a **fresh** isolated runtime from the already prepared
+official core cache, this updated add-on, `OpenPoseidon.ini` and the original
+`Shaders/OpenPoseidonLook.fx`, then run the zero-download preparer from the new
+source tree:
+
+```powershell
+python ./scripts/Prepare-ReShadeDepth.py C:/Temp/op-scene-depth-staged --probe-only
+./scripts/Test-ReShadeDepthInstalled.ps1 -ExpectedCommit <new-installed-commit> -RuntimeDirectory C:/Temp/op-scene-depth-staged -Mode SceneProbe
+```
+
+The installed capture helper opts into the new world snapshot only for
+`SceneProbe`, forces one sample/HDR/render scale 1, requires a valid grid sampled
+after the locked camera pose, and rejects a generation change during capture.
+GenericDepth preservation is zero for this mode; its selected DEPTH resource
+is unused by the independent engine-semantic probe.
+It captures the bridge's final-frame native/processed pair and preserves the
+numeric receipt. Parent inspection must find terrain/building/foliage depth
+aligned with the native image, meaningful foreground ordering and correct sky,
+then verify resize and clean teardown. No DH debug/beauty comparison is enabled
+by this mode. Reconstruction and GI remain gated until this proof succeeds.
+
+Verification completed without GPU access: four focused Rust tests pass
+(including Naga parsing/validation of both new fragment entries), the optional
+add-on compiles against the pinned locally prepared official headers, two CPU
+tests of that built add-on's POD exports reject invalid ABI/stale/invalid numeric
+publication and prove publication alone does not equal binding, and three
+offline preparation tests pass. PowerShell parsing succeeds. The CPU add-on test
+does not call AddonInit or create any runtime/device. No integrated engine build,
+game launch, deployment, actual numeric depth, ReShade FX compilation, resize
+capture, screenshot acceptance or total injected GPU timing has been performed
+in this implementation worktree. The earlier three failed GenericDepth probes
+remain valid evidence for the old path; this explicit snapshot is unverified
+until the parent runs it.
