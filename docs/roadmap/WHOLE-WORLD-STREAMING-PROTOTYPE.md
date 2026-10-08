@@ -35,6 +35,8 @@ and run from the source checkout:
 ./scripts/Launch-WholeWorld.ps1 -Globe
 # Optional locally cached Luxembourg building footprints:
 ./scripts/Launch-WholeWorld.ps1 -Latitude 49.61 -Longitude 6.13 -Altitude 1000 -CachedBuildings
+# Prepared regional Luxembourg imagery plus all five cached feature kinds:
+./scripts/Launch-WholeWorld.ps1 -Latitude 49.61 -Longitude 6.13 -Altitude 1000 -LocalSurface -CachedBuildings -CachedFeatures
 ```
 
 The default view starts above the Swiss Alps at latitude 46.6, longitude 8.1,
@@ -43,8 +45,11 @@ several seconds to appear on an empty cache; the log records each completed patc
 The launcher obtains the shared game-folder lock and restores process environment
 variables when the game exits. It creates its own empty test world and mission;
 no retail map is copied into this fixture. Near and far Earth surfaces share the
-cached NASA overview imagery. Its coarse resolution is particularly visible
-near the ground; detailed satellite tiles are not implemented. Dev Tools
+cached NASA overview imagery by default. Its coarse resolution is particularly
+visible near the ground. `-LocalSurface` additionally uses the prepared ACT
+Luxembourg imagery pyramid; it does not download detailed imagery worldwide.
+`-CachedFeatures` adds the independently prepared local OSM feature cache.
+See `docs/earth-local-surface-prototype.md` for preparation and coverage. Dev Tools
 **Earth** changes geographic origin in the same session. W/S follow the view
 direction, the mouse wheel changes travel speed, and Shift accelerates. The
 virtual camera target translates with movement, so approaching Earth no longer
@@ -57,7 +62,8 @@ overtakes the target and reverses the view.
 - Mapzen Terrarium near elevation uses a fixed 257 x 257 grid: 25m spacing and
   zoom12 below 8km altitude, 100m and zoom10 above 12km, with hysteresis between.
   Coverage is respectively 6.4 or25.6km. Source pixel spacing varies with latitude;
-  this remains a rendering preview rather than infantry-ready ground.
+  resident triangles now supply local infantry ground/contact queries. Far
+  geometry remains a rendering preview without global gameplay collision.
 - A second, nonuniform 257 x 257 mesh fills the area outside the near rectangle.
   Its half-width grows in power-of-two bands from 64 km to 2048 km, based on
   geometric horizon distance and altitude. At 4500 m it is 512 km; at 120 km it

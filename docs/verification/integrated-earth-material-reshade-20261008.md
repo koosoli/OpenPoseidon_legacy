@@ -168,3 +168,77 @@ ground view. The Globe button and harness use that same transaction.
 orbital Go, screenshot, near-window return and real W/S input; the inspected
 `globe.png` shows the complete centered planet. The change is camera-only;
 the material, local-surface and ReShade receipts above remain applicable.
+
+## Resident ground, regional imagery and cached features — 8 October follow-up
+
+The matched installed checkpoint `e5e6fc68` at 09:41 contains the resident
+height/contact adapter, paired regional imagery, cached landscape features,
+altitude-aware sky and near ocean, and an experimental layered-material mask
+scale switch. The latter requires both `WGR_REFORGER_PBR_PREVIEW=1` and
+`WGR_REFORGER_MASK_SCALE_PREVIEW=1`; normal startup remains unchanged.
+
+The Earth terrain heightmap now publishes an immutable revision/generation
+snapshot for local infantry ground queries. It uses the same triangle diagonal
+as rendering. Geographic relocation invalidates coverage immediately; uncovered
+teleports are rejected and the player is held at the resident boundary. This is
+not worldwide vehicle physics, water physics, building collision or navigation.
+
+Actual installed verification:
+
+- `build/earth-ground-installed/20261008-094341-43bb66/result.json`, installed
+  `e5e6fc68`: the reported Luxembourg teleport resolves to ground 314.675m;
+  standing, walking, crawling, local contact slopes, boundary rejection and
+  rapid geographic revision changes pass using a real stock `SoldierWB`.
+  Actual external/internal camera state is checked. Inspected third-person
+  captures now show the player. The first visual check exposed that Earth's
+  draw branch skipped scene object passes 1/2; restoring those passes fixed
+  the missing figure. Passing numeric ground checks alone had not proved this.
+- `build/earth-locations/20261008-092325/result.json`, installed `c35727c7`:
+  Luxembourg near/far imagery, 3x3 cached building retention, all five feature
+  kinds, adjacent-window relocation, geographic changes and stale-request
+  rejection pass. Actual center window has 1021 paved roads, 1525 unpaved roads,
+  438 procedural trees, 19 generic signs and 23 inland-water features, plus
+  1995 simple building extrusions. Source feature coverage is only about
+  2.2x1.4km; this is not worldwide object coverage or a full Worldgen port.
+- `build/earth-streaming/20261008-093211/result.json`, installed `c35727c7`:
+  rolling near windows, 30km/120km horizons, orbital geographic Go and actual
+  SDL W/S approach/retreat pass. Inspected orbital capture shows scaled clouds
+  and catalog stars. Local clouds blend to a simpler planetary presentation.
+- `build/earth-streaming/20261008-094943/result.json`, installed `e5e6fc68`:
+  Guernsey current ground/horizon publication and actual camera checks pass;
+  published FFT diagnostics are active at 1000m and retired above 8km. However,
+  the 1000m image exposed a coastal rendering defect: sea-level elevation
+  geometry clips wave troughs and leaves foam-like islands. This diagnostic
+  PASS is explicitly **not coastal visual acceptance**; the render-only floor
+  correction requires a fresh paired deployment and image check.
+
+Luxembourg has three manually prepared external ACT CC0 imagery sources:
+2048px center, 4096px district and 4096px context. Sources feather into paired
+2048px near/far atlases; edge-connected white NoData pixels are masked without
+discarding isolated white roofs. No runtime imagery HTTP was added. Near and
+far geometry still share a fixed triangle budget. Resource sizes, preparation
+and regional limits are in `docs/earth-local-surface-prototype.md`.
+
+The initial `0153c072` installed smoke test failed during shared water-shader
+initialization. `f9e6f5e2` separated Earth-only bindings from the shared wake
+module, and the actual production wake/GPU pipeline regression tests pass.
+Only subsequent successful installed runs are acceptance evidence.
+
+The layered-material candidate passes three shader tests, including actual
+GPU helper readbacks and composition of retained/direct/shadow routes. The
+newly built C++ `[mask-scales]` test passes with provenance off/on (9/11
+assertions). `Village-mask-off-20261008` and `Village-mask-on-20261008` capture
+the same native scene on `e5e6fc68`: 1920x1080, 4xMSAA, no DLSS, fixed camera,
+16h, exposure0.5, 60s warmup and 20683 registered instances in each arm. Both
+exit cleanly and the intended wall material becomes eligible. Single frame
+GPU samples are 56.62/53.81ms, not a speedup or complete cost measurement.
+The subtle comparison does not establish the original renderer's layer
+contract or visual parity; the candidate remains separately opt-in.
+
+ReShade injection, selected technique compilation, live off/on and final-frame
+capture work. Raw depth probes on `c35727c7` with preservation modes 0, 1 and 2
+all show a selected but empty depth resource. Depth-dependent GI/RT previews
+therefore remain unaccepted and disabled; no beauty comparison or ray-tracing
+claim is made. See `docs/roadmap/RESHade-DEPTH-RT-AUDIT-20261008.md` for exact
+receipts and the bounded scene-depth handoff still required. Injected GPU work
+is outside the engine's timing brackets.
