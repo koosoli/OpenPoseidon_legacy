@@ -46,7 +46,9 @@ Require (!(Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue
 $stampPath=Join-Path $GameDir 'DEPLOYED-FROM.txt';$stamp=(Get-Content -LiteralPath $stampPath -Raw).Trim()
 Require ($stamp.Contains($ExpectedCommit)) 'Installed source differs from ExpectedCommit'
 $Manifest=(Resolve-Path -LiteralPath $Manifest).Path;$AddonRoot=(Resolve-Path -LiteralPath $AddonRoot).Path;$CacheDirectory=(Resolve-Path -LiteralPath $CacheDirectory).Path
-Require (Test-Path -LiteralPath (Join-Path $AddonRoot 'AddOns') -PathType Container) 'Generated mod AddOns directory missing'
+$addonArchiveRoot=$AddonRoot
+if(!@(Get-ChildItem -LiteralPath $addonArchiveRoot -File -Filter '*.pbo').Count){$addonArchiveRoot=Join-Path $AddonRoot 'AddOns'}
+Require ((Test-Path -LiteralPath $addonArchiveRoot -PathType Container)-and@(Get-ChildItem -LiteralPath $addonArchiveRoot -File -Filter '*.pbo' -ErrorAction SilentlyContinue).Count-gt0) 'Generated addon archive root must contain PBO files directly, or provide a mod root with an AddOns child containing PBO files'
 $source=Get-Content -LiteralPath $Manifest -Raw|ConvertFrom-Json
 Require ($source.world.bbox.Count-eq4-and[double]$source.world.bbox[0]-lt49.61-and[double]$source.world.bbox[2]-gt49.61-and[double]$source.world.bbox[1]-lt6.13-and[double]$source.world.bbox[3]-gt6.13) 'Fixture source must contain Luxembourg origin 49.61/6.13'
 $imagery=Join-Path $CacheDirectory 'blue-marble-june-5400.jpg';Require (Test-Path -LiteralPath $imagery) 'Cached NASA overview required; no test downloads'
@@ -65,7 +67,7 @@ $settings=@{POSEIDON_WHOLE_WORLD='1';POSEIDON_EARTH_LATITUDE='49.61';POSEIDON_EA
  HTTPS_PROXY='http://127.0.0.1:9';HTTP_PROXY='http://127.0.0.1:9';ALL_PROXY='http://127.0.0.1:9';NO_PROXY=''}
 $saved=@{};$exists=@{};$p=$null;$client=$null;$reader=$null;$writer=$null
 $log=Join-Path $out 'engine.log';$stderr=Join-Path $out 'stderr.log';$overall=[DateTime]::UtcNow.AddSeconds(180+3*$PoseTimeoutSeconds)
-$result=@{installed=$stamp;expectedCommit=$ExpectedCommit;manifest=$Manifest;manifestSha256=(Get-FileHash -LiteralPath $Manifest).Hash;addonRoot=$AddonRoot;cacheDirectory=$CacheDirectory;userDirectory=$user;
+$result=@{installed=$stamp;expectedCommit=$ExpectedCommit;manifest=$Manifest;manifestSha256=(Get-FileHash -LiteralPath $Manifest).Hash;addonRoot=$AddonRoot;addonArchiveRoot=$addonArchiveRoot;cacheDirectory=$CacheDirectory;userDirectory=$user;
  origin=@(49.61,6.13);width=1600;height=900;msaaSamples=4;surface=1;proxyFeatures=0;proxyBuildings=0;offline=$true;upstreamValidation=$source.final_validation;
  passed=$false;visualAccepted=$false;playabilityAccepted=$false;poses=@();scope='Actual local Worldgen asset presentation only. Upstream validation may be failed. Counts prove retained registration, not pixels, collision, navigation, complete proxies or grounding quality.'}
 function Health{Require ($p-and!$p.HasExited) 'Owned game exited';Require ([DateTime]::UtcNow-lt$overall) 'Overall Worldgen presentation deadline'}
@@ -77,7 +79,7 @@ function WaitFrames([int]$count){$start=[double](Eval 'triFrameCount');$until=[D
 try{
  foreach($key in $settings.Keys){$exists[$key]=Test-Path -LiteralPath ('Env:'+$key);$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process');if($null-eq$settings[$key]){Remove-Item -LiteralPath ('Env:'+$key) -ErrorAction SilentlyContinue}else{[Environment]::SetEnvironmentVariable($key,$settings[$key],'Process')}}
  $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
- $argv=@('--render=wgpu','--window','--dev','--width','1600','--height','900','--vd','3000','--harness',"$port",'--addon-root',$AddonRoot,'--test-mission',$mission,'--test-world',$world,'--test-world-freefly','6400','6400','1000','0','-20','--test-world-hour','12','--log-file',$log)
+ $argv=@('--render=wgpu','--window','--dev','--width','1600','--height','900','--vd','3000','--harness',"$port",'--addon-root',$addonArchiveRoot,'--test-mission',$mission,'--test-world',$world,'--test-world-freefly','6400','6400','1000','0','-20','--test-world-hour','12','--log-file',$log)
  $result.arguments=$argv;$result.environment=$settings
  $p=Start-Process (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -ArgumentList (($argv|ForEach-Object {'"'+$_+'"'})-join' ') -RedirectStandardOutput (Join-Path $out 'stdout.log') -RedirectStandardError $stderr -PassThru
  $result.ownedPID=$p.Id;$until=[DateTime]::UtcNow.AddSeconds(150)
