@@ -107,3 +107,51 @@ now performs the actual SDL transition and forwards real pixel extents through
 its existing resize path; redundant same-size notifications do not recreate
 the swapchain. Exclusive-mode selection uses the existing placement resolver,
 but only borderless/windowed switching was runtime accepted on this monitor.
+
+## Local imagery and final installed source: `27b7bf23`
+
+Built and deployed the matching EXE/DLL at 04:20 local time. The Earth tab now
+offers Globe and Luxembourg buttons alongside editable geographic coordinates.
+The optional `-LocalSurface` launcher switch adds exactly one prepared ACT CC0
+Luxembourg orthophoto; `-CachedBuildings` enables the previously tested OSM
+extrusions. Sources remain external local caches, with no runtime imagery HTTP.
+
+Installed acceptance:
+
+- `build/earth-locations/20261008-042108/result.json`: NASA baseline, cached
+  buildings, adjacent cell, geographic relocation, invalid input and latest
+  request checks pass.
+- `build/earth-locations/20261008-042202/result.json`: same build/camera with
+  the local atlas. Actual Luxembourg imagery publishes at generation4/revision2,
+  then generation5/revision2 after the near-window move. Buildings remain.
+  Alps, Grand Canyon and dateline publish NASA fallback; no stale local image
+  follows the geographic relocation. Clean renderer logs and exit.
+- `build/earth-streaming/20261008-042509/result.json`: optional local-surface
+  and building workers enabled, rolling near windows, coarse horizons, orbit
+  and return all pass. Actual two-second SDL W/S input moves from 12,000,000m
+  to 10,860,824m and back to 12,002,561m; the view remains stable.
+- `build/reshade-acceptance/20261008-042339/result.json`: normal and actual
+  process-local ReShade launch, live off/on, final-frame capture pair, stock
+  Everon load and clean exit all pass on the final installed source.
+
+Inspected `luxembourg-buildings.png` baseline/local pair has identical camera
+and buildings. The local arm reveals roads, forest and city imagery, with a
+feathered boundary into the deliberately coarse global overview. White buildings
+remain simple untextured footprint extrusions; most heights are estimates.
+Stable local copies: `build/earth-surface-before.png`,
+`build/earth-surface-after.png`, `build/reshade-before.png`,
+`build/reshade-after.png`. ReShade's change is intentionally subtle sharpening
+and contrast; it does not replace the native material fixes.
+
+One local-overview GPU sample was 5.27ms baseline and 5.18ms local at 1280x720,
+4xMSAA/no DLSS. These nonblocking samples are not a benchmark or speedup claim.
+Both startup-containing CPU windows also include roughly 2.3-second land-phase
+maxima, so they cannot establish stutter-free startup or streaming. The new
+atlas adds one draw and about 21.33MiB GPU, without new triangles or fullscreen
+passes. Worker memory/source-validation bounds and restart-after-preparation
+limits are documented in `docs/earth-local-surface-prototype.md`.
+
+The useful bounded slice is complete and tested. VBS4 parity is **not achieved**:
+global detailed imagery, buildings, roads, vegetation, streamed collision/AI,
+global editor placement and seamless floating-origin travel remain substantial
+future work. This does not change the ordinary OFP simulation world.

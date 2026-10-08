@@ -198,3 +198,12 @@ relocation. The current 3x3 window keeps 1995 buildings/46281 triangles visible
 when entering an adjacent uncached cell, with a shared 200k-triangle ceiling.
 Detailed receipts and remaining limits are in
 [the integrated verification note](../verification/integrated-earth-material-reshade-20261008.md).
+
+Installed source `27b7bf23` adds one cached ACT CC0 Luxembourg orthophoto via
+`Launch-WholeWorld.ps1 -LocalSurface -CachedBuildings`. The Earth tab's
+Luxembourg button visits the prepared cell; Globe returns to orbit. The atlas
+shares identical near geometry, feathers into NASA and costs one additional
+draw, with no extra triangles. Runtime before/after, recenter, geographic
+fallback and actual W/S approach checks pass on this installed source; receipts
+are in the integrated note. See [surface preparation and limits](../../earth-local-surface-prototype.md).
+This one cell does not establish worldwide detailed surfaces or VBS4 parity.
