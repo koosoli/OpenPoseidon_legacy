@@ -27,6 +27,8 @@ and run from the source checkout:
 ./scripts/Launch-WholeWorld.ps1 -Altitude 120000
 # Complete globe from orbit:
 ./scripts/Launch-WholeWorld.ps1 -Globe
+# Optional locally cached Luxembourg building footprints:
+./scripts/Launch-WholeWorld.ps1 -Latitude 49.61 -Longitude 6.13 -Altitude 1000 -CachedBuildings
 ```
 
 The default view starts above the Swiss Alps at latitude 46.6, longitude 8.1,
@@ -34,28 +36,34 @@ altitude 4500 metres. Use the existing Freefly controls. Initial terrain can tak
 several seconds to appear on an empty cache; the log records each completed patch.
 The launcher obtains the shared game-folder lock and restores process environment
 variables when the game exits. It creates its own empty test world and mission;
-no retail map is copied into this fixture. The ordinary ground material still
-comes from the user's installed CWA data.
+no retail map is copied into this fixture. Near and far Earth surfaces share the
+cached NASA overview imagery. Its coarse resolution is particularly visible
+near the ground; detailed satellite tiles are not implemented. Dev Tools
+**Earth** changes geographic origin in the same session. W/S follow the view
+direction, the mouse wheel changes travel speed, and Shift accelerates. The
+virtual camera target translates with movement, so approaching Earth no longer
+overtakes the target and reverses the view.
 
 ## Implementation and bounds
 
 - Fixed geographic origin and double-precision coordinate conversion. Tile
   longitude wraps across the dateline; northern image rows become positive world Z.
-- Mapzen Terrarium near elevation at zoom 10; 257 x 257 samples spaced 100 metres apart,
-  covering 25.6 x 25.6 km. Resolution is a prototype tradeoff, not detailed ground
-  suitable for infantry. Source pixel spacing varies with latitude.
+- Mapzen Terrarium near elevation uses a fixed 257 x 257 grid: 25m spacing and
+  zoom12 below 8km altitude, 100m and zoom10 above 12km, with hysteresis between.
+  Coverage is respectively 6.4 or25.6km. Source pixel spacing varies with latitude;
+  this remains a rendering preview rather than infantry-ready ground.
 - A second, nonuniform 257 x 257 mesh fills the area outside the near rectangle.
   Its half-width grows in power-of-two bands from 64 km to 2048 km, based on
   geometric horizon distance and altitude. At 4500 m it is 512 km; at 120 km it
   is 2048 km. Its triangle budget stays fixed (about 125,000 plus seam skirts).
   This uses the existing mesh/depth/lighting pipeline, not another fullscreen pass.
 - Far source zoom is chosen to keep approximately four source tiles across the
-  window. Near the shared boundary it blends back to zoom-10 heights; edge
+  window. Near the shared boundary it blends back to the active near heights; edge
   skirts close fine/coarse T junctions. Near and far geometry publish together.
   Both use a stable spherical sagitta about the fixed origin, so the far horizon
   curves. This elevation window uses a curved tangent presentation; the separate
   global overview sphere covers the rest of Earth.
-- The window recentres in 3.2 km steps. Its 12.8 km margin loads terrain ahead of
+- The window recentres in 800m or3.2km steps. Its resident margin loads terrain ahead of
   ordinary camera motion without creating an unbounded request queue. Very fast
   jumps can outrun the current window; it stays visible until a replacement is ready.
 - One background worker performs HTTPS, disk access, PNG validation and bilinear
@@ -96,14 +104,16 @@ approval. Terrain source coverage and quality vary.
 
 The active rendering area moves; the underlying `Landscape`, AI, collision,
 navigation, weather ground sampling and mission editor remain finite. Stay in
-Freefly. There are no worldwide buildings, vegetation, roads, physical oceans or
-terrain-aware spawn points yet. A cached low-detail satellite texture covers the
-globe and far mesh; the near ground still uses the installed CWA material.
+Freefly. There are no worldwide vegetation, roads, physical oceans or terrain-aware
+spawn points yet. An optional bounded, locally cached OSM building presentation
+layer is described in [the building prototype](EARTH-CACHED-BUILDINGS-20261008.md);
+it has no interiors or collision and is not a worldwide settlement database.
+The cached low-detail satellite texture covers the globe and near/far meshes.
 Curved elevation coverage is bounded to 2048 km half-width and altitude up to
 500 km; beyond that the overview sphere remains visible without tile downloads.
 The geographic addressing remains an approximate tangent map, constrained to
 500 km of engine coordinates per axis, and the provider has no coverage above
-85.051 degrees latitude. Different global origins can be selected at launch, but
+85.051 degrees latitude. Different global origins can be selected at launch or live in the Earth tab, but
 one cannot yet circumnavigate the globe in a single session. Elevation cells beyond
 the provider's latitude coverage are omitted; the overview sphere covers the poles.
 
@@ -166,4 +176,18 @@ plane to preserve reversed-Z depth precision at Earth-scale distances.
 `Test-EarthStreaming.ps1 -ExpectedCommit <sha> -Horizon -Globe` additionally
 checks the actual orbital camera position, image upload, screenshot and return
 to the near terrain. Coordinate tests check the sphere's origin, antipode,
-unit normals, longitude seam and poles. Installed visual acceptance is pending.
+unit normals, longitude seam and poles.
+
+## Integrated acceptance, 8 October
+
+Installed `292e86fd` passed live Alps -> Grand Canyon -> dateline -> Alps
+relocation in `build/earth-locations/20261008-031645/result.json`. Camera positions,
+origin revisions, bounded cache, invalid requests and cancellation of superseded
+requests passed. Screenshots were inspected: geographic relief is present, while
+near imagery remains coarse. This is not detailed terrain-texture acceptance.
+
+The adaptive near/far mesh and actual W/S input passed in
+`build/earth-streaming/20261008-023809/result.json`, source `dbeb9d36` plus a
+test-script-only correction. At 12,000km altitude W approached to 10,847,989m;
+S retreated to 11,988,383m without reversing the view. Geometry stays bounded:
+at most 256,000 near/far/skirts triangles plus 65,536 overview triangles.
