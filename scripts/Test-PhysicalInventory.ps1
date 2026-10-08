@@ -1,7 +1,8 @@
 <# Installed single-player inventory without a custom invicons asset pack.
    Run under with-game-lock.sh. Uses isolated settings, exits only its own process. #>
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$ExpectedCommit,[switch]$Multiplayer,[switch]$CombatAssists,[switch]$CompassOnly)
+param([Parameter(Mandatory)][string]$ExpectedCommit,[switch]$Multiplayer,[switch]$CombatAssists,[switch]$CompassOnly,
+      [switch]$LegacyBindings,[switch]$KeysOnly)
 $ErrorActionPreference = 'Stop'
 if (!$env:LOCK_OWNER) { throw 'Game lock required' }
 $root = Split-Path $PSScriptRoot -Parent
@@ -54,6 +55,10 @@ function Button($down) { $null=Send @{cmd='mouse_button';button=1;down=$down}; S
 function Click($x,$y) { Pointer $x $y; Button $true; Button $false }
 try {
     [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'graphics.cfg'),"qualityPreset=3;`nmsaaSamples=4;`ndlssMode=0;`nvsync=0;`nfpsCap=60;`n")
+    if ($LegacyBindings) {
+        [IO.File]::WriteAllText((Join-Path $env:POSEIDON_USER_DIR 'contextControls.cfg'),
+            "contextControlsVersion=6;`nctxInfantryInventory[]={18};`nctxInfantryInventoryEditMenu[]={14};`nctxInfantryLockTargets[]={43};`nctxInfantryTurbo[]={225};`nctxTankGunnerLockTargets[]={43};`nctxTankGunnerInventory[]={18};`n")
+    }
     $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0); $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
     $log=Join-Path $out 'engine.log'; $stderr=Join-Path $out 'stderr.log'
     $args=@('--render=wgpu','--window','--dev','--width','1280','--height','720','--harness',"$port",'--private','--log-file',('"'+$log+'"'))
@@ -97,6 +102,26 @@ try {
         $receipt.passed=$true; Write-Host ('Evidence: '+$out); return
     }
     while ((Value 'triSceneReady') -cne 'OK') { Require ([DateTime]::UtcNow -lt $until) 'Scene deadline'; Start-Sleep -Milliseconds 250 }
+    if ($KeysOnly) {
+        Display 46
+        Key 225; Display 46
+        Key 18; Display 46
+        Key 43; Display 62020; Snap 'tab_open'
+        Key 43; Display 46; Snap 'tab_closed'
+        $bindings=Get-Content -LiteralPath (Join-Path $env:POSEIDON_USER_DIR 'contextControls.cfg') -Raw
+        Require ($bindings -match 'contextControlsVersion\s*=\s*7') 'Binding migration version missing'
+        Require ($bindings -match 'ctxInfantryInventory\[\]\s*=\s*\{\s*43\s*\}') 'Infantry inventory not bound to Tab'
+        Require ($bindings -match 'ctxInfantryLockTargets\[\]\s*=\s*\{\s*18\s*\}') 'Infantry target cycle not moved to O'
+        Require ($bindings -match 'ctxTankGunnerLockTargets\[\]\s*=\s*\{\s*43\s*\}') 'Vehicle target cycle changed'
+        $receipt.keyBindings=@{tabOpenedAndClosed=$true;shiftDidNotOpen=$true;oDidNotOpen=$true;legacyMigration=[bool]$LegacyBindings}
+        $null=Send @{cmd='exit'}
+        Require ($p.WaitForExit(20000) -and $p.ExitCode -eq 0) 'Normal key test exit failed'
+        Require (!(Select-String -Path @($log,$stderr) -Pattern 'UNHANDLED EXCEPTION|Validation Error|DeviceLost|panicked at|wgr_create failed' -Quiet)) 'Key test runtime error'
+        Require ((Get-Content (Join-Path $game 'DEPLOYED-FROM.txt') -Raw).Trim() -ceq $stamp) 'Installed pair changed'
+        $receipt.passed=$true
+        Write-Host ('Inventory key checks passed: '+$out)
+        return
+    }
     if ($CompassOnly) {
         Exec 'player allowDamage false;0 setRain 0;0 setFog 0;player setDir 0'
         Display 46

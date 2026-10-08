@@ -44,7 +44,7 @@ The current engine includes:
   support on Windows and Linux, alongside Direct3D 12 on Windows. The active
   API depends on the platform, GPU and driver; the legacy OpenGL renderer remains
   available separately.
-- **Physical inventory (single player):** open with **O** for vicinity cargo,
+- **Physical inventory (single player):** open with **Tab ↹** on foot (**O** in vehicle control seats) for vicinity cargo,
   drag/drop, equipped slots and weight/volume budgets; **K** opens inventory
   settings, including optional bearing callouts, a bearing readout and grenade-launcher
   ground-range estimates. Includes 17 original realistic equipment icons; addon pictures and
