@@ -298,7 +298,7 @@ TEST_CASE("ContextControlsConfig: version 5 seeds only inventory actions", "[Set
     CHECK(migrated.migratedOnLoad);
     const auto& infantry = migrated.profiles[(int)InputContext::Infantry];
     CHECK(infantry.HasBinding(UAFire, InputCode::Key(SDL_SCANCODE_F1)));
-    CHECK(infantry.HasBinding(UAInventory, InputCode::Key(SDL_SCANCODE_O)));
+    CHECK(infantry.HasBinding(UAInventory, InputCode::Key(SDL_SCANCODE_TAB)));
     CHECK(infantry.HasBinding(UAInventoryEditToggle, InputCode::Key(SDL_SCANCODE_K)));
     // These absent actions were intentionally unbound in an already-current
     // profile. An inventory upgrade must not restore all gameplay defaults.
@@ -357,5 +357,64 @@ TEST_CASE("ContextControlsConfig: current inventory profile roundtrip does not r
     REQUIRE(settings.size() == 1);
     CHECK_FALSE(settings[0].code.valid());
     CHECK(reloaded.profiles[(int)InputContext::CarDriver].BindingCount(UAInventory) == 0);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ContextControlsConfig: infantry Tab inventory keeps vehicle targets and sprint",
+          "[Settings][ContextControlsConfig]")
+{
+    ContextControlsConfig cfg;
+    cfg.LoadDefaults();
+    const auto& infantry = cfg.profiles[(int)InputContext::Infantry];
+    CHECK(infantry.HasBinding(UAInventory, InputCode::Key(SDL_SCANCODE_TAB)));
+    CHECK_FALSE(infantry.HasBinding(UALockTargets, InputCode::Key(SDL_SCANCODE_TAB)));
+    CHECK(infantry.HasBinding(UALockTargets, InputCode::Key(SDL_SCANCODE_O)));
+    CHECK(infantry.HasBinding(UATurbo, InputCode::Key(SDL_SCANCODE_LSHIFT)));
+    const auto& gunner = cfg.profiles[(int)InputContext::TankGunner];
+    CHECK(gunner.HasBinding(UALockTargets, InputCode::Key(SDL_SCANCODE_TAB)));
+    CHECK(gunner.HasBinding(UAInventory, InputCode::Key(SDL_SCANCODE_O)));
+}
+
+TEST_CASE("ContextControlsConfig: v6 inventory key migrates once without stealing custom keys",
+          "[Settings][ContextControlsConfig]")
+{
+    const std::string path = TmpPath("context_controls_v6_tab.cfg");
+    SECTION("standard profile")
+    {
+        std::ofstream file(path);
+        file << "contextControlsVersion=6;\nctxInfantryInventory[]={18};\n"
+                "ctxInfantryLockTargets[]={43};\nctxTankGunnerLockTargets[]={43};\n";
+    }
+    SECTION("custom inventory")
+    {
+        std::ofstream file(path);
+        file << "contextControlsVersion=6;\nctxInfantryInventory[]={59};\n"
+                "ctxInfantryLockTargets[]={43};\n";
+    }
+    SECTION("custom Tab conflict")
+    {
+        std::ofstream file(path);
+        file << "contextControlsVersion=6;\nctxInfantryInventory[]={18};\n"
+                "ctxInfantryLockTargets[]={43};\nctxInfantryReloadMagazine[]={43};\n";
+    }
+    ContextControlsConfig cfg;
+    REQUIRE(cfg.Load(path));
+    CHECK(cfg.migratedOnLoad);
+    const auto& infantry = cfg.profiles[(int)InputContext::Infantry];
+    if (infantry.HasBinding(UAInventory, InputCode::Key(SDL_SCANCODE_F2)) ||
+        infantry.HasBinding(UAReloadMagazine, InputCode::Key(SDL_SCANCODE_TAB)))
+        CHECK(infantry.HasBinding(UALockTargets, InputCode::Key(SDL_SCANCODE_TAB)));
+    else
+    {
+        CHECK(infantry.HasBinding(UAInventory, InputCode::Key(SDL_SCANCODE_TAB)));
+        CHECK(infantry.HasBinding(UALockTargets, InputCode::Key(SDL_SCANCODE_O)));
+        CHECK(cfg.profiles[(int)InputContext::TankGunner].HasBinding(UALockTargets, InputCode::Key(SDL_SCANCODE_TAB)));
+    }
+    REQUIRE(cfg.Save(path));
+    ContextControlsConfig reloaded;
+    REQUIRE(reloaded.Load(path));
+    CHECK_FALSE(reloaded.migratedOnLoad);
+    CHECK(reloaded.profiles[(int)InputContext::Infantry].GetBindingEntries(UAInventory) ==
+          infantry.GetBindingEntries(UAInventory));
     std::filesystem::remove(path);
 }

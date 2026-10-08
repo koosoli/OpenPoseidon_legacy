@@ -119,7 +119,7 @@ try {
     }
     Exec 'player allowDamage false;removeAllWeapons player;player addMagazine "HandGrenade";player addMagazine "HandGrenade";0 setRain 0;0 setFog 0;setAccTime 1'
     $before=Value 'magazines player'
-    Key 18; Display 62020; Snap '01_open'
+    Key 43; Display 62020; Snap '01_open'
     # At 16:9 the first storage tile is centred here; drag across panes to Ground.
     Pointer 0.681 0.318; Button $true; Pointer 0.12 0.40; Button $false
     $afterDrop=Value 'magazines player'
@@ -132,20 +132,20 @@ try {
     Snap '03_pickup'
     Key 14; Snap '04_settings'; Key 14
     Key 41; Display 46
-    Key 18; Display 62020; Snap '05_reopen'; Key 18; Display 46
+    Key 43; Display 62020; Snap '05_reopen'; Key 43; Display 46
     Exec 'removeAllWeapons player;player addMagazine "M16";player addMagazine "M16";player addWeapon "M16"'
-    Key 18; Display 62020; Snap '06_weapon_icons'; Key 41; Display 46
+    Key 43; Display 62020; Snap '06_weapon_icons'; Key 41; Display 46
     # A script may remove the exact magazine being dragged. Its tile/ghost must
     # remain safe to draw, and releasing it must not recreate the removed item.
     Exec 'removeAllWeapons player;player addMagazine "HandGrenade"'
-    Key 18; Display 62020
+    Key 43; Display 62020
     Pointer 0.681 0.318; Button $true; Pointer 0.12 0.40
     Exec 'player removeMagazine "HandGrenade"'
     Snap '07_removed_during_drag'
     Button $false
     Require ((@((Value 'magazines player')|ConvertFrom-Json)).Count -eq 0) 'Removed magazine recreated by stale drag'
     Key 41; Display 46
-    Key 18; Display 62020
+    Key 43; Display 62020
     Snap '08_removed_drag_reopen'
     Click 0.052 0.218
     Require ((Value 'magazines player') -ceq '[]') 'Removed magazine reappeared'
@@ -153,7 +153,7 @@ try {
     # Hold a ground item while a mission script fills the player's inventory.
     # Releasing must check current capacity, not the display's pre-drag snapshot.
     Exec 'player addMagazine "HandGrenade"'
-    Key 18; Display 62020
+    Key 43; Display 62020
     Pointer 0.681 0.318; Button $true; Pointer 0.12 0.40; Button $false
     Pointer 0.052 0.218; Button $true; Pointer 0.70 0.40
     # Ordinary SQF addMagazine obeys stock slots (five AT mines, not eight).
@@ -169,7 +169,7 @@ try {
     Snap '09_live_capacity_refusal'
     Key 41; Display 46
     Exec 'removeAllWeapons player'
-    Key 18; Display 62020; Click 0.052 0.218
+    Key 43; Display 62020; Click 0.052 0.218
     Require ((@((Value 'magazines player')|ConvertFrom-Json)).Count -eq 1) 'Refused pickup lost ground item'
     Snap '10_capacity_recovered'; Key 41; Display 46
     $receipt.audit=@{removedDuringDragSafe=$true;liveCapacityRefused=$true;refusedItemRecovered=$true}
@@ -189,14 +189,14 @@ try {
         Start-Sleep -Milliseconds 700
         Snap '13_grenade_mark'
         $null=Send @{cmd='mouse_button';button=3;down=$false}
-        Key 18; Display 62020; Key 14; Snap '14_combat_settings'
+        Key 43; Display 62020; Key 14; Snap '14_combat_settings'
         Click 0.335 0.6885; Click 0.335 0.715; Click 0.335 0.7415
         $assistCfg=Join-Path $env:POSEIDON_USER_DIR 'combat_assists.cfg'
         $disabled=Get-Content -LiteralPath $assistCfg -Raw
         Require ($disabled -match 'bearingCallouts=0' -and $disabled -match 'bearingReadout=0' -and $disabled -match 'grenadeRange=0') 'Combat options did not persist'
         Key 41; Display 46
         Snap '15_combat_assists_disabled'
-        Key 18; Display 62020
+        Key 43; Display 62020
         Click 0.475 0.781
         $defaults=Get-Content -LiteralPath $assistCfg -Raw
         Require ($defaults -match 'bearingCallouts=1' -and $defaults -match 'bearingReadout=1' -and $defaults -match 'grenadeRange=1') 'Combat reset did not restore defaults'

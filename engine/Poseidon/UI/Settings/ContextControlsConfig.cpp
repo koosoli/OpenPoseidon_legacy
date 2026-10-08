@@ -15,7 +15,7 @@ namespace Poseidon
 {
 namespace
 {
-constexpr int kContextControlsVersion = 6;
+constexpr int kContextControlsVersion = 7;
 constexpr int kGamepadButtonA = 0;
 constexpr int kGamepadButtonB = 1;
 constexpr int kGamepadButtonX = 2;
@@ -195,6 +195,10 @@ void ApplyContextDefaults(InputContext ctx, InputProfile& profile)
         case InputContext::Infantry:
             ApplyInfantryGamepadDefaults(profile);
             ApplyFreelookDefaults(profile);
+            profile.Unbind(UAInventory, InputCode::Key(SDL_SCANCODE_O));
+            profile.Bind(UAInventory, InputCode::Key(SDL_SCANCODE_TAB));
+            profile.Unbind(UALockTargets, InputCode::Key(SDL_SCANCODE_TAB));
+            profile.Bind(UALockTargets, InputCode::Key(SDL_SCANCODE_O));
             break;
         case InputContext::CarDriver:
             ApplyDriverGamepadDefaults(profile);
@@ -216,6 +220,34 @@ bool IsKeyboardMouseBinding(const InputBinding& binding)
         return true;
     const int device = InputBindingDevice(binding.code.toLegacy());
     return device == INPUT_DEVICE_KEYBOARD || device == INPUT_DEVICE_MOUSE || device == INPUT_DEVICE_MOUSE_AXIS;
+}
+
+void MigrateInfantryInventoryKey(InputProfile& profile)
+{
+    const InputBinding oldInventory(InputCode::Key(SDL_SCANCODE_O));
+    const InputBinding oldTarget(InputCode::Key(SDL_SCANCODE_TAB));
+    const auto& inventory = profile.GetBindingEntries(UAInventory);
+    // Only upgrade the old single default. Keep custom/chorded/cleared actions.
+    if (inventory.size() != 1 || !(inventory[0] == oldInventory))
+        return;
+    for (int action = 0; action < UAN; ++action)
+    {
+        for (const auto& binding : profile.GetBindingEntries(static_cast<UserAction>(action)))
+        {
+            if (binding.code == oldTarget.code &&
+                !(action == UALockTargets && binding == oldTarget))
+                return;
+            if (action != UAInventory && action != UALockTargets && binding.code == oldInventory.code)
+                return;
+        }
+    }
+    profile.ClearBindings(UAInventory);
+    profile.Bind(UAInventory, oldTarget);
+    if (profile.HasBinding(UALockTargets, oldTarget))
+    {
+        profile.Unbind(UALockTargets, oldTarget);
+        profile.Bind(UALockTargets, oldInventory);
+    }
 }
 
 void AddMapWheelToEmptySlot(InputProfile& profile, UserAction action, InputCode wheel)
@@ -282,6 +314,13 @@ bool ContextControlsConfig::Load(const std::string& path)
         {
             profile.LoadDefaults();
             ApplyContextDefaults(ctx, profile);
+            if (ctx == InputContext::Infantry)
+            {
+                // Seed the historical inventory key before loading old overrides;
+                // the guarded migration below resolves the complete profile.
+                profile.ClearBindings(UAInventory);
+                profile.Bind(UAInventory, InputCode::Key(SDL_SCANCODE_O));
+            }
         }
         else if (version < 6)
         {
@@ -329,6 +368,8 @@ bool ContextControlsConfig::Load(const std::string& path)
             AddMapWheelToEmptySlot(profile, UAMapZoomIn, InputCode::MouseWheelDown());
             AddMapWheelToEmptySlot(profile, UAMapZoomOut, InputCode::MouseWheelUp());
         }
+        if (version < 7 && ctx == InputContext::Infantry)
+            MigrateInfantryInventoryKey(profile);
     }
 
     return true;
