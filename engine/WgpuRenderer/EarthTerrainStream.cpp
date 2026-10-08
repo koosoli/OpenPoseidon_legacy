@@ -72,11 +72,15 @@ void EarthTerrainStream::Request(float x, float z, float altitude)
     // a subsequent stage. Bad camera positions must not reach indexing/math.
     if (!std::isfinite(x) || !std::isfinite(z) || std::abs(x) > EarthStreaming::CoordinateLimit ||
         std::abs(z) > EarthStreaming::CoordinateLimit) return;
-    const int cx = Earth::CenterCell(x), cz = Earth::CenterCell(z);
     const float radius = Earth::HorizonRadius(altitude);
     std::lock_guard lock(_mutex);
-    if (_requested && cx == _requestX && cz == _requestZ && radius == _requestRadius) return;
+    const auto detail = Earth::SelectNearDetail(altitude, _requestDetail);
+    const float stride = Earth::NearRecenter(Earth::NearGrid(detail));
+    const int cx = Earth::CenterCell(x, stride), cz = Earth::CenterCell(z, stride);
+    if (_requested && cx == _requestX && cz == _requestZ && radius == _requestRadius && detail == _requestDetail) return;
     _requestX = cx; _requestZ = cz; _requestRadius = radius; _requested = true;
+    _requestDetail = detail;
+    _ready.reset(); // A completed old band/cell must not be published after this request.
     ++_generation;
     _wake.notify_one();
 }
@@ -84,6 +88,7 @@ void EarthTerrainStream::Request(float x, float z, float altitude)
 std::unique_ptr<EarthTerrainStream::Patch> EarthTerrainStream::TakeReady()
 {
     std::lock_guard lock(_mutex);
+    if (_ready && _ready->generation != _generation.load()) _ready.reset();
     return std::move(_ready);
 }
 
@@ -207,7 +212,7 @@ float EarthTerrainStream::Sample(double x, double y, int zoom)
 void EarthTerrainStream::TrimDisk()
 {
     std::vector<std::filesystem::directory_entry> files;
-    for (int zoom = 3; zoom <= Earth::Zoom; ++zoom)
+    for (int zoom = 3; zoom <= Earth::MaxZoom; ++zoom)
     {
         const auto directory = _cache / ("terrarium-z" + std::to_string(zoom));
         if (!std::filesystem::exists(directory)) continue;
@@ -227,6 +232,7 @@ void EarthTerrainStream::Run()
     {
         int cx, cz;
         float radius;
+        Earth::NearDetail detail;
         uint64_t version;
         {
             std::unique_lock lock(_mutex);
@@ -234,16 +240,22 @@ void EarthTerrainStream::Run()
             if (_stop.load()) return;
             cx = _requestX; cz = _requestZ; version = _generation.load();
             radius = _requestRadius;
+            detail = _requestDetail;
         }
         try
         {
             const auto start = std::chrono::steady_clock::now();
             auto patch = std::make_unique<Patch>();
-            patch->x = cx * Earth::RecenterMetres - 128 * Earth::GridMetres;
-            patch->z = cz * Earth::RecenterMetres - 128 * Earth::GridMetres;
+            patch->gridMetres = Earth::NearGrid(detail);
+            patch->sourceZoom = Earth::NearZoom(detail);
+            const float halfWindow = Earth::NearHalfWindow(patch->gridMetres);
+            const float stride = Earth::NearRecenter(patch->gridMetres);
+            patch->x = cx * stride - halfWindow;
+            patch->z = cz * stride - halfWindow;
             const auto centre = Earth::FromLocal(_latitude, _longitude,
-                cx * Earth::RecenterMetres, cz * Earth::RecenterMetres);
+                cx * stride, cz * stride);
             patch->latitude = centre.latitude; patch->longitude = centre.longitude;
+            patch->originLatitude = _latitude; patch->originLongitude = _longitude;
             patch->generation = version;
             patch->heights.resize(Earth::GridSamples * Earth::GridSamples);
             const unsigned downloads = _downloads, hits = _cacheHits;
@@ -254,11 +266,11 @@ void EarthTerrainStream::Run()
                 for (int x = 0; x < Earth::GridSamples; ++x)
                 {
                     const auto position = Earth::ToPixel(Earth::FromLocal(_latitude, _longitude,
-                        patch->x + x * Earth::GridMetres, patch->z + z * Earth::GridMetres));
-                    const double wx = patch->x + x * Earth::GridMetres;
-                    const double wz = patch->z + z * Earth::GridMetres;
+                        patch->x + x * patch->gridMetres, patch->z + z * patch->gridMetres),patch->sourceZoom);
+                    const double wx = patch->x + x * patch->gridMetres;
+                    const double wz = patch->z + z * patch->gridMetres;
                     patch->heights[z * Earth::GridSamples + x] =
-                        Sample(position.x, position.y) - float(Earth::CurvatureDrop(wx,wz));
+                        Sample(position.x, position.y,patch->sourceZoom) - float(Earth::CurvatureDrop(wx,wz));
                 }
             }
             if (_generation.load() != version) { handled = version; continue; }
@@ -272,9 +284,9 @@ void EarthTerrainStream::Run()
                 if (_generation.load() != version) break;
                 for (int x = 0; x < Earth::HorizonSamples; ++x)
                 {
-                    const float ox = Earth::HorizonOffset(x,radius), oz = Earth::HorizonOffset(z,radius);
-                    const double wx = cx * Earth::RecenterMetres + ox;
-                    const double wz = cz * Earth::RecenterMetres + oz;
+                    const float ox = Earth::HorizonOffset(x,radius,halfWindow), oz = Earth::HorizonOffset(z,radius,halfWindow);
+                    const double wx = cx * stride + ox;
+                    const double wz = cz * stride + oz;
                     const auto geographic = Earth::FromLocal(_latitude,_longitude,wx,wz);
                     const size_t index = z * Earth::HorizonSamples + x;
                     if (std::abs(geographic.latitude) > Earth::MaxLatitude)
@@ -284,15 +296,16 @@ void EarthTerrainStream::Run()
                     }
                     const auto coarse = Earth::ToPixel(geographic,patch->horizonZoom);
                     float height = Sample(coarse.x,coarse.y,patch->horizonZoom);
-                    // The inner 25.6km square is not drawn by this mesh. Its edge
-                    // shares the near source; blend source resolutions outside
+                    // The inner near square is not drawn by this mesh. Its edge
+                    // shares the selected near source; blend resolutions outside
                     // it instead of making an elevation cliff at the join.
-                    const float edge = std::max(std::abs(ox),std::abs(oz)) - Earth::HalfWindow;
-                    if (edge < 4000.0f)
+                    const float edge = std::max(std::abs(ox),std::abs(oz)) - halfWindow;
+                    const float blendWidth = Earth::NearBlendWidth(patch->gridMetres);
+                    if (edge < blendWidth)
                     {
-                        const auto fine = Earth::ToPixel(geographic);
-                        const float weight = std::clamp(edge / 4000.0f,0.0f,1.0f);
-                        height = Sample(fine.x,fine.y) * (1-weight) + height * weight;
+                        const auto fine = Earth::ToPixel(geographic,patch->sourceZoom);
+                        const float weight = std::clamp(edge / blendWidth,0.0f,1.0f);
+                        height = Sample(fine.x,fine.y,patch->sourceZoom) * (1-weight) + height * weight;
                     }
                     patch->horizonHeights[index] = height - float(Earth::CurvatureDrop(wx,wz));
                 }

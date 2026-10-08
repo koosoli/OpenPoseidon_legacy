@@ -22,10 +22,13 @@ class EarthTerrainStream
     {
         float x, z;
         double latitude, longitude;
+        double originLatitude, originLongitude;
         uint64_t generation;
         unsigned downloads, cacheHits;
         double seconds;
         std::vector<float> heights;
+        float gridMetres;
+        int sourceZoom;
         float horizonRadius;
         int horizonZoom;
         std::vector<float> horizonHeights;
@@ -54,6 +57,7 @@ class EarthTerrainStream
     std::condition_variable _wake;
     int _requestX = 0, _requestZ = 0;
     float _requestRadius = 64000.0f;
+    Earth::NearDetail _requestDetail = Earth::NearDetail::Coarse;
     bool _requested = false;
     std::unique_ptr<Patch> _ready;
     std::map<std::tuple<int,int,int>, Tile> _tiles;
