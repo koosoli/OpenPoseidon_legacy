@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Opt-in Earth elevation streaming preview. Downloads public Terrain Tiles
-    into a bounded local cache. Freefly only; no worldwide collision or assets.
+    into a bounded local cache. Optional prepared Worldgen assets; freefly only.
 #>
 [CmdletBinding()]
 param(
@@ -52,6 +52,7 @@ if (!$PrepareOnly -and !$env:LOCK_OWNER) {
 }
 if (Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue) { throw 'Close the existing game before starting this preview.' }
 if ($WorldgenManifest) {
+    $LocalSurface=$true
     $WorldgenManifest=(Resolve-Path -LiteralPath $WorldgenManifest).Path
     if (!(Test-Path -LiteralPath $WorldgenManifest -PathType Leaf)) { throw 'Worldgen manifest must be a file.' }
     if ($CachedBuildings -or $CachedFeatures -or $ContentUrlTemplate) {
@@ -108,7 +109,8 @@ https://github.com/tilezen/joerd/blob/master/docs/attribution.md
 EU terrain includes Copernicus EU-DEM; worldwide coverage combines multiple sources.
 Retain/check the source acknowledgements before redistributing downloaded data.
 Cache: at most 256 validated PNG tiles (2 MiB each maximum), 64 decoded in memory.
-Only freefly rendering is implemented. Curved tangent horizon, no global buildings or collision.
+Freefly rendering with a curved horizon. Optional prepared regional Worldgen models.
+No worldwide populated source, collision, navigation or simulation.
 Global overview: NASA Blue Marble Next Generation, June 2004, NASA Earth Observatory.
 https://science.nasa.gov/earth/earth-observatory/blue-marble-next-generation/base-map/
 https://www.nasa.gov/nasa-brand-center/images-and-media/

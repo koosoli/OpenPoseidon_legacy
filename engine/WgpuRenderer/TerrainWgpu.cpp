@@ -3601,6 +3601,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             LOG_INFO(Graphics,"Earth Worldgen publication: revision {} generation {} source {} covered {} selected {} modelLimitSkipped {} error {}",
                 snapshot->revision,snapshot->generation,snapshot->sourceObjects,snapshot->coveredObjects,snapshot->objects.size(),snapshot->modelLimitSkipped,snapshot->error);
             LOG_INFO(Graphics,"Earth Worldgen upstream final validation: {}; asset presentation only",snapshot->sourceValidation);
+            LOG_INFO(Graphics,"Earth Worldgen ground roads: fitted {} coverageSkipped {}; five resident samples, inferred prepared IDs",
+                snapshot->groundRoadsFitted,snapshot->groundRoadCoverageSkipped);
             LOG_INFO(Graphics,"Earth Worldgen resident regions: {} IDs [{},{}] sourceBytes {} valueBytes {}; offline prepared index only",
                 snapshot->regionIds.size(),snapshot->regionIds.empty()?0:snapshot->regionIds[0],snapshot->regionIds.size()>1?snapshot->regionIds[1]:0,
                 snapshot->residentSourceBytes,snapshot->residentValueBytes);

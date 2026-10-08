@@ -134,6 +134,7 @@ def main() -> None:
     parser.add_argument("--cells", type=int, choices=(64, 128, 256), default=128)
     parser.add_argument("--asset-root", type=Path, required=True)
     parser.add_argument("--regional-source", type=Path, help="Complete bounded local OSM extract JSON, with attribution")
+    parser.add_argument("--keep-authored-roads", action="store_true", help="Skip the conservative Earth ground-road sidecar")
     parser.add_argument("--prepare-only", action="store_true")
     args = parser.parse_args()
     source = args.worldgen_source.resolve()
@@ -167,6 +168,13 @@ def main() -> None:
     manifest = json.loads((output / "generated/manifest.json").read_text(encoding="utf-8"))
     status = manifest.get("final_validation", {}).get("status", "unspecified")
     print(f"Upstream final validation: {status}. Output is a presentation fixture until accepted.")
+    if not args.keep_authored_roads:
+        # Preserve upstream's original output and validation. The sibling manifest
+        # explicitly classifies only unambiguous, ordinary OSM ground-road pieces.
+        subprocess.run([sys.executable, str(Path(__file__).with_name("Classify-EarthGroundRoads.py")),
+                        "--manifest", str(output / "generated/manifest.json"),
+                        "--osm", str(output / "osm.json")], check=True, timeout=120)
+        print(f"Earth manifest: {output / 'generated/manifest-earth-ground-roads.json'}")
 
 
 if __name__ == "__main__":
