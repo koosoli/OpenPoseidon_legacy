@@ -515,8 +515,15 @@ void EarthFeatureStream::Run()
             _pending = false;
         }
         const auto cancelled = [&] { std::lock_guard lock(_mutex); return _stop || request != _request; };
-        source.EnsureNeighborhood(_cache, "features", cell.latitude, cell.longitude, cancelled);
         auto mesh = std::make_unique<Mesh>(BuildNeighborhood(_cache, ground, cell, cancelled));
+        if (source.Enabled())
+        {
+            // Present resident cached neighbors immediately while new cells
+            // transfer. The render thread never waits for network readiness.
+            { std::lock_guard lock(_mutex); if (!_stop && request == _request) _ready = std::move(mesh); }
+            if (!source.EnsureNeighborhood(_cache, "features", cell.latitude, cell.longitude, cancelled)) continue;
+            mesh = std::make_unique<Mesh>(BuildNeighborhood(_cache, ground, cell, cancelled));
+        }
         {
             std::lock_guard lock(_mutex);
             if (!_stop && request == _request)

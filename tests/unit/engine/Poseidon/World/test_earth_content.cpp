@@ -24,15 +24,16 @@ int main(int argc, char** argv)
     Source source(url, true);
     assert(source.Enabled());
     assert(!source.Ensure(cache, "features", 0, 0, [] { return true; }));
-    assert(source.Ensure(cache, "features", 0, 0));
+    bool downloaded = false;
+    assert(source.Ensure(cache, "features", 0, 0, {}, &downloaded) && downloaded);
     const auto file = Source::StreamPath(cache, "features", 0, 0);
     assert(std::filesystem::exists(file));
-    assert(source.Ensure(cache, "features", 0, 0)); // No repeat request.
+    assert(source.Ensure(cache, "features", 0, 0, {}, &downloaded) && !downloaded); // No repeat request.
     {
         std::ofstream out(file);
         out << "corrupt";
     }
-    assert(source.Ensure(cache, "features", 0, 0)); // Repair generated cache.
+    assert(source.Ensure(cache, "features", 0, 0, {}, &downloaded) && downloaded); // Repair generated cache.
     for (int lon : {1, 2, 3, 5})
     {
         assert(!source.Ensure(cache, "features", 0, lon));

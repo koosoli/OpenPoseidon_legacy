@@ -159,8 +159,10 @@ bool EarthContentSource::ValidCell(const std::string& bytes, const char* kind)
     return cJSON_IsArray(elements) && cJSON_GetArraySize(elements) <= (std::string(kind) == "buildings" ? 2000 : 6000);
 }
 bool EarthContentSource::Ensure(const std::filesystem::path& cache, const char* kind, int lat, int lon,
-                                const std::function<bool()>& cancelled)
+                                const std::function<bool()>& cancelled, bool* downloaded)
 {
+    if (downloaded)
+        *downloaded = false;
     if (!Enabled() || !Kind(kind) || lat < -4200 || lat >= 4200 || lon < -9000 || lon >= 9000 || Cancelled(cancelled))
         return false;
     // No more than two presentation workers contend here; the render thread never waits on this mutex.
@@ -250,6 +252,8 @@ bool EarthContentSource::Ensure(const std::filesystem::path& cache, const char* 
         }
         std::filesystem::rename(temporary, path);
         failures.erase(url);
+        if (downloaded)
+            *downloaded = true;
         return true;
     }
     catch (const std::filesystem::filesystem_error&)
@@ -258,19 +262,23 @@ bool EarthContentSource::Ensure(const std::filesystem::path& cache, const char* 
         return failed();
     }
 }
-void EarthContentSource::EnsureNeighborhood(const std::filesystem::path& cache, const char* kind, int lat, int lon,
+bool EarthContentSource::EnsureNeighborhood(const std::filesystem::path& cache, const char* kind, int lat, int lon,
                                             const std::function<bool()>& cancelled)
 {
     if (!Enabled())
-        return;
+        return false;
+    bool changed = false;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
     const auto bounded = [&] { return Cancelled(cancelled) || std::chrono::steady_clock::now() >= deadline; };
     constexpr int offsets[9][2] = {{0, 0}, {-1, 0}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {-1, 1}, {1, -1}, {1, 1}};
     for (const auto& offset : offsets)
     {
         if (bounded())
-            return;
-        Ensure(cache, kind, lat + offset[0], ((lon + offset[1] + 27000) % 18000) - 9000, bounded);
+            break;
+        bool downloaded = false;
+        Ensure(cache, kind, lat + offset[0], ((lon + offset[1] + 27000) % 18000) - 9000, bounded, &downloaded);
+        changed = changed || downloaded;
     }
+    return changed;
 }
 } // namespace Poseidon

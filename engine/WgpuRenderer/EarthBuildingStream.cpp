@@ -211,8 +211,12 @@ void EarthBuildingStream::Run(){
         const auto cancelled=[&]{
             std::lock_guard lock(_mutex);return _stop || request!=_request;
         };
-        source.EnsureNeighborhood(_cache,"buildings",cell.latitude,cell.longitude,cancelled);
         auto mesh=std::make_unique<Mesh>(BuildNeighborhood(_cache,ground,cell,cancelled));
+        if(source.Enabled()){
+            {std::lock_guard lock(_mutex);if(!_stop && request==_request)_ready=std::move(mesh);}
+            if(!source.EnsureNeighborhood(_cache,"buildings",cell.latitude,cell.longitude,cancelled))continue;
+            mesh=std::make_unique<Mesh>(BuildNeighborhood(_cache,ground,cell,cancelled));
+        }
         {std::lock_guard lock(_mutex);if(!_stop && request==_request)_ready=std::move(mesh);}
     }
 }
