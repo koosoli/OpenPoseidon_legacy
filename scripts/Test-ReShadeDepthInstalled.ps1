@@ -81,12 +81,19 @@ class OutroWin {randomSeed=2;class Intel {};};
 class OutroLoose {randomSeed=3;class Intel {};};
 '@ | Set-Content -LiteralPath (Join-Path $mission 'mission.sqm')
 & "$PSScriptRoot/Write-BenchmarkGraphics.ps1" -UserDir $user -DlssMode 0 -MsaaSamples $MsaaSamples
+# Exercise the engine's validated startup route as well as explicit layer env.
+# This file is newly created above; ordinary graphics profiles are never changed.
+Add-Content -LiteralPath (Join-Path $user 'graphics.cfg') -Value 'optionalReShade=1;'
 $keys=@('POSEIDON_USER_DIR','POSEIDON_WHOLE_WORLD','VK_ADD_LAYER_PATH','VK_LAYER_PATH',
- 'VK_INSTANCE_LAYERS','VK_LOADER_LAYERS_ENABLE','VK_LOADER_LAYERS_DISABLE','DISABLE_VK_LAYER_reshade_1',
+ 'VK_INSTANCE_LAYERS','VK_LOADER_LAYERS_ENABLE','VK_LOADER_LAYERS_DISABLE','DISABLE_VK_LAYER_reshade_1','VK_LOADER_DEBUG',
  'RESHADE_BASE_PATH_OVERRIDE','WGPU_BACKEND','WGR_DLSS','WGR_AUTO_EXPOSURE','WGR_EXPOSURE','WGR_GTAO','WGR_GI')
-$saved=@{};foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
+$saved=@{};$savedExists=@{}
+foreach($key in $keys){
+ $savedExists[$key]=Test-Path -LiteralPath ('Env:'+ $key)
+ $saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')
+}
 $receipt=@{installed=$stamp;mode=$Mode;selectedTechnique=$technique;selectedPreset=$presetName;
- sourceRuntime=$source;scratch=$scratch;runtime=$runtime;msaaSamples=$MsaaSamples;
+ sourceRuntime=$source;scratch=$scratch;runtime=$runtime;msaaSamples=$MsaaSamples;optionalReShade=1;
  captureSucceeded=$false;visualAccepted=$false;depthAvailability='Pending operator inspection of probe/debug image';
  performanceScope='Engine frame_performance timers exclude injected ReShade GPU work; no total GPU cost claim';
  depthHint='Probe top strip: red=no selected DEPTH resource; green=selected resource only. Check scene geometry alignment.';
@@ -95,10 +102,17 @@ foreach($name in $required){$receipt.fileHashes[$name]=(Get-FileHash -LiteralPat
 $p=$null;$client=$null;$reader=$null;$writer=$null
 try{
  # Clear inherited explicit layer selection, then opt in solely for this process.
- foreach($key in $keys){[Environment]::SetEnvironmentVariable($key,$null,'Process')}
+ # Recent .NET preserves an empty environment entry for SetEnvironmentVariable
+ # with null. Vulkan enable/disable filters require absence, not an empty value.
+ foreach($key in $keys){Remove-Item -LiteralPath ('Env:'+ $key) -ErrorAction SilentlyContinue}
  $env:POSEIDON_USER_DIR=$user;$env:POSEIDON_WHOLE_WORLD='0';$env:WGPU_BACKEND='vulkan'
  $env:WGR_DLSS='0';$env:WGR_AUTO_EXPOSURE='0';$env:WGR_EXPOSURE='0.5';$env:WGR_GTAO='0';$env:WGR_GI='0'
  $env:VK_ADD_LAYER_PATH=$runtime;$env:VK_INSTANCE_LAYERS='VK_LAYER_reshade';$env:RESHADE_BASE_PATH_OVERRIDE=$runtime
+ $env:VK_LOADER_DEBUG='error,warn,layer'
+ $receipt.launchEnvironment=@{}
+ foreach($key in $keys){
+  $receipt.launchEnvironment[$key]=@{present=(Test-Path -LiteralPath ('Env:'+ $key));value=[Environment]::GetEnvironmentVariable($key,'Process')}
+ }
  $reserve=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$reserve.Start();$port=$reserve.LocalEndpoint.Port;$reserve.Stop()
  $log=Join-Path $out 'game.log'
  $argsGame=@('--render=wgpu','--window','--dev','--width','1600','--height','900','--vd','3000',
@@ -120,6 +134,16 @@ try{
   do{$line=$reader.ReadLine();Require ([bool]$line) 'Harness disconnected';$reply=$line|ConvertFrom-Json}while($null-eq$reply.ok)
   Require $reply.ok $line;return $reply
  }
+ # The harness is registered after renderer initialization. No runtime log here
+ # means injection/discovery failed, rather than an expensive shader compilation.
+ $reshadeLog=Join-Path $runtime 'ReShade.log'
+ $loadDeadline=[DateTime]::UtcNow.AddSeconds(10)
+ while(!(Test-Path -LiteralPath $reshadeLog)){
+  Require ([DateTime]::UtcNow-lt$loadDeadline) 'ReShade did not load: no isolated ReShade.log within 10s after renderer/harness startup; inspect Vulkan loader diagnostics in stderr.log and launchEnvironment in result.json'
+  Start-Sleep -Milliseconds 250
+ }
+ $receipt.runtimeLogCreated=$true
+ Require (Select-String -Path $log -Pattern 'Optional ReShade requested for this launch' -Quiet) 'Engine validated ReShade startup opt-in was not evidenced in game.log'
  while(([string](Send @{cmd='eval';code='triSceneReady'}).result).Trim('"')-cne'OK'){
   Require ([DateTime]::UtcNow-lt$deadline) 'Scene startup deadline';Start-Sleep -Milliseconds 250
  }
@@ -131,7 +155,6 @@ try{
  Require (Select-String -Path $log -Pattern 'worlds[\\/]eden.wrp' -Quiet) 'Everon landscape load missing'
  $state=Send @{cmd='optional_reshade';action='state'}
  $compilePattern=[regex]::Escape($effectName)+'.*successfully|successfully.*'+[regex]::Escape($effectName)
- $reshadeLog=Join-Path $runtime 'ReShade.log'
  # At most 90 seconds for compilation/readiness, separate from startup.
  $deadline=[DateTime]::UtcNow.AddSeconds(90)
  while(!$state.ready-or$state.techniques-lt1-or!(Test-Path -LiteralPath $reshadeLog)-or
@@ -171,9 +194,20 @@ try{
  $receipt.captureSucceeded=$true
  Write-Host ('Depth capture ready for operator inspection ('+$technique+'): '+$out)
 }catch{$receipt.error=$_.Exception.Message;throw}finally{
+ if($p-and!$p.HasExited){
+  try{$receipt.loadedReShadeModules=@($p.Modules|Where-Object {$_.ModuleName-match'ReShade'}|ForEach-Object {$_.FileName})}
+  catch{$receipt.moduleInspectionError=$_.Exception.Message}
+ }
  if($p-and!$p.HasExited){$p.Kill();$null=$p.WaitForExit(10000);$receipt.forcedCleanup=$true}
  if($writer){$writer.Dispose()};if($reader){$reader.Dispose()};if($client){$client.Dispose()}
- foreach($key in $saved.Keys){[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}
+ foreach($key in $saved.Keys){
+  if($savedExists[$key]){[Environment]::SetEnvironmentVariable($key,$saved[$key],'Process')}
+  else{Remove-Item -LiteralPath ('Env:'+ $key) -ErrorAction SilentlyContinue}
+ }
+ $stderr=Join-Path $out 'stderr.log'
+ if(Test-Path -LiteralPath $stderr){
+  $receipt.loaderDiagnostics=@(Select-String -Path $stderr -Pattern 'LOADER|VK_LAYER|ReShade'|Select-Object -First 200|ForEach-Object {$_.Line})
+ }
  # Retain scratch logs/configs for diagnosis; never delete caller-owned files.
  foreach($name in @('ReShade.log','ReShade.ini',('Presets/'+$presetName))){
   $path=Join-Path $runtime $name

@@ -176,3 +176,16 @@ false, and depth availability awaits inspection. Probe green means a selected
 resource, not correct scene depth. Engine frame performance explicitly excludes
 injected ReShade GPU cost, so these counters cannot establish total overhead.
 No runtime execution was performed by the feature agent.
+
+The parent's first installed probe (2026-10-08 09:12, installed `c35727c7`)
+loaded Everon but never loaded the optional runtime: the scratch runtime had
+no `ReShade.log`. This was an injection failure, not evidence against depth
+support. Read-only follow-up found the fresh profile lacked the startup opt-in,
+and a unique-variable local check demonstrated that this host's .NET 10.0.11
+null environment setter creates a present empty entry. The harness now writes
+`optionalReShade=1` into its new profile, clears inherited selectors with
+`Remove-Item Env:...`, restores originally absent keys by deletion, and records
+`VK_LOADER_DEBUG=error,warn,layer` output in stderr and the result receipt. After
+renderer/harness startup it allows only ten seconds for an isolated runtime log
+before reporting injection failure. Target shader compilation keeps its separate
+90 second bound. The feature agent has not executed the revised game test.
