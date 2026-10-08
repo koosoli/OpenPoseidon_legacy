@@ -1893,7 +1893,7 @@ static const EditToggleDef kEditToggles[] = {
     { "Infinite weight",      InventoryInfiniteWeight,    SetInventoryInfiniteWeight    },
     { "Infinite volume",      InventoryInfiniteVolume,    SetInventoryInfiniteVolume    },
     { "Bearing callouts",     BearingCalloutsEnabled,     SetBearingCalloutsEnabled     },
-    { "Bearing readout",      BearingReadoutEnabled,      SetBearingReadoutEnabled      },
+    { "Compass bearing readout", BearingReadoutEnabled,   SetBearingReadoutEnabled      },
     { "Grenade range (SP)",   GrenadeRangeEnabled,        SetGrenadeRangeEnabled        },
 };
 static const int kEditToggleCount = (int)(sizeof(kEditToggles) / sizeof(kEditToggles[0]));
