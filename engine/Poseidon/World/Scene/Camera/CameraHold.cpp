@@ -385,6 +385,14 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
         }
 
         Vector3 speedWanted = speedOrient * Vector3(aside, up, forward) * speedScale;
+        if (EarthStreaming::Enabled())
+        {
+            // Ordinary Zeus flight keeps W/S parallel to the ground. Planet
+            // exploration must instead approach the point we are looking at,
+            // including a nearly vertical descent from orbit. Retain world-up
+            // for the separate raise/lower controls.
+            speedWanted=(Orientation()*Vector3(aside,0,forward)+VUp*up)*speedScale;
+        }
         if (_inertia)
         {
             // smooth changes
@@ -455,6 +463,7 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
         Vector3 floorPos = position;
         float surfY = earth ? -12000.0f : GLandscape->CameraFloorY(floorPos, nullptr, false);
         saturateMax(position[1], surfY + 0.05);
+        if (earth) saturate(position[1],500.0f,EarthStreaming::OrbitAltitudeLimit);
         Move(position);
 
         // get mouse movement
