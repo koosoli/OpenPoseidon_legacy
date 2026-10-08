@@ -143,3 +143,36 @@ three pinned hashes, and subsequently repeated from local cached sources. The
 final staged assets are in `build/reshade-depth-final` in the feature agent's
 worktree. **FX compilation, actual depth availability, new before/after images
 and total frame cost remain unverified until the parent runs the capture plan.**
+
+## Installed bounded capture helper
+
+The parent/operator can run `scripts/Test-ReShadeDepthInstalled.ps1` under the
+shared game lock. Stage the official core runtime plus the prepared depth files
+into one isolated input directory first; the test itself downloads nothing.
+For example, with the installed stamp's full commit:
+
+```powershell
+./scripts/Test-ReShadeDepthInstalled.ps1 -ExpectedCommit <installed-commit> -RuntimeDirectory C:/Temp/op-depth-staged -Mode Probe
+./scripts/Test-ReShadeDepthInstalled.ps1 -ExpectedCommit <installed-commit> -RuntimeDirectory C:/Temp/op-depth-staged -Mode DHDebug
+./scripts/Test-ReShadeDepthInstalled.ps1 -ExpectedCommit <installed-commit> -RuntimeDirectory C:/Temp/op-depth-staged -Mode DH
+```
+
+Each invocation launches exactly one injected game and uses the existing bridge
+to capture its native/processed final-frame pair. It copies only required staged
+files into a fresh short temporary runtime, writes a fresh isolated config/profile,
+verifies pinned official binary and DH licence/source hashes, fixes the stock
+Everon camera/weather/date, and sets `setAccTime 0`. Default MSAA is one sample
+to avoid confusing a first depth test with depth resolve selection; explicit
+`-MsaaSamples 4` is a separate optional follow-up. Engine GTAO/GI are disabled
+for both images. All changed environment variables are restored, and only its
+owned process can be terminated. Caller runtime files and normal user profiles
+are never written. Compile readiness has a 90 second deadline. Scratch files
+are retained for diagnosis; the receipt records their absolute path.
+
+The result logs the exact preset/technique, shader compilation evidence, active
+technique count, hashes, captures, exit code and engine performance counters.
+`captureSucceeded` reports the automation/capture result; `visualAccepted` stays
+false, and depth availability awaits inspection. Probe green means a selected
+resource, not correct scene depth. Engine frame performance explicitly excludes
+injected ReShade GPU cost, so these counters cannot establish total overhead.
+No runtime execution was performed by the feature agent.
