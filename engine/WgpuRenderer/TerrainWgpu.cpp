@@ -3539,7 +3539,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         }
     }
     _engine.SubmitEarthHorizon(_earthHorizonMesh,_earthHorizonIndices,_earthFarTexture?_earthFarTexture:_earthGlobeTexture,_earthFarTexture?3:2,true);
-    if(_earthSurface)_engine.SubmitEarthHorizon(_earthNearMesh,_earthNearIndices,_earthSurfaceTexture?_earthSurfaceTexture:_earthGlobeTexture,_earthSurfaceTexture?3:2,true);
+    if(_earthSurface)_engine.SubmitEarthHorizon(_earthNearMesh,_earthNearIndices,_earthSurfaceTexture?_earthSurfaceTexture:_earthGlobeTexture,_earthSurfaceTexture?3:2,true,_earthSurfaceTexture != 0);
     if(_earthFeatures && camera.Position().Y()<12000.0f)
     {
         _earthFeatures->Request(*_earthPatch,camera.Position().X(),camera.Position().Z());
