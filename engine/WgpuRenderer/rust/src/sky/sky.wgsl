@@ -453,6 +453,9 @@ fn hash21(p: vec2<f32>) -> f32 {
 // and scaled by the master gain (Dev Tools -> Sky -> Stars -> "Star brightness"). Split out of
 // sky_radiance so a caller can ask for a STAR-FREE sky; see sky_radiance_weighted.
 fn earth_preview() -> bool { return sky.cam_pos.w < -0.5; }
+fn earth_forward_sphere_hit(interval: vec2<f32>) -> bool {
+    return interval.x > 0.0 && interval.x <= interval.y;
+}
 fn sky_origin() -> vec3<f32> {
     if (earth_preview()) {
         // Same tangent-frame centre as EarthCoordinates.hpp, including lateral flight.
@@ -509,7 +512,9 @@ fn sky_radiance_lanes(dir: vec3<f32>, star_weight: f32) -> SkyRadianceLanes {
             // Marching millions of metres of vacuum undersamples the thin blue limb.
             let ground = ray_sphere(pos, march_dir, planet_r);
             let begin = max(atmo.x, 0.0);
-            let end = select(atmo.y, min(atmo.y, ground.x), ground.x > 0.0);
+            // ray_sphere's miss sentinel is (1,-1): a positive first value
+            // alone is not a hit. Grazing misses must march the full atmosphere.
+            let end = select(atmo.y, min(atmo.y, ground.x), earth_forward_sphere_hit(ground));
             if (end > begin) {
                 color = raymarch_sky(pos + march_dir * begin, march_dir, sun, end - begin) * radiance;
             }
@@ -2195,7 +2200,9 @@ fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
     // the view ray misses the planet. Added here (not in sky_radiance) so the water reflection —
     // which uses its own analytic glint — doesn't double up on the sun.
     let ground = ray_sphere(pos, dir, planet_r);
-    if (ground.x <= 0.0) {
+    // Preserve native sky gating; Earth misses have the (1,-1) sentinel and
+    // must leave the sun/moon visible through the same full atmospheric path.
+    if (ground.x <= 0.0 || (earth_preview() && !earth_forward_sphere_hit(ground))) {
         let cos_sun = dot(dir, sun);
         let cos_radius = cos(sky.params.x);
         // Is this pixel inside EITHER disc? Only then is the short cloud march below worth firing,
