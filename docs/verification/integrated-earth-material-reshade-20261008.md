@@ -467,3 +467,53 @@ The subsequent installed checks on `554c8c44` pass:
   compilation, paired captures and clean exit pass. Debug inspection aligns
   silhouettes and separates out-of-range/sky in blue. This permits the
   subsequent bounded GI/performance check, not final GI quality acceptance.
+
+## Installed tests and actual Worldgen connection
+
+Installed `9672d1aa` (14:16) passes the supported full game/test build. Earth
+location acceptance at `build/earth-locations/20261008-142520/result.json`
+passes Luxembourg cached roads/buildings/grounded procedural trees, neighboring
+cell retention, Alps/Canyon/dateline relocation and stale-revision rejection.
+Those trees and buildings are simplified previews, not the upstream Worldgen
+stock asset pipeline.
+
+Normal preview on/off at `Pub-normal-{on,off}-554c8c44` has successful targeted
+normal admission in the on log (line 8983). Both fixed-camera runs settle at
+20683 registered / 6295 main instances. The image difference is modest at this
+distance. Synthetic GPU tests pass independent global/detail normals, authored
+mirrored/nonuniform axes and per-layer AO clamping before ordered overlap.
+
+The first installed authored-tangent on run at `Pub-tangent-on-9672d1aa` failed:
+producer provenance incorrectly replaced MLOD container identity, and the
+retained shader exceeded the device fragment input limit when FrontFacing was
+included. `ae99a29d` fixes both and invalidates the affected optional cache key.
+Its actual 1x/4x device-pipeline test passes, including rejection of an extra
+varying negative control. The failed installed run is not performance evidence;
+the corrected installed comparison remains pending.
+
+ReShade corrected debug/beauty runs `20261008-141723-SceneDHDebug` and
+`20261008-142025-SceneDH` pass lifecycle, 4x depth and clean teardown. The latter
+records 240 real GPU brackets: median 2.134528 ms, p95 2.507776 ms; this excludes
+engine snapshot/overlay work. Fogged distant geometry still becomes pale and
+grainy: native airlight was being donated as surface radiance. Consequently GI
+quality was **not accepted**, and the normal local runtime cache was not upgraded.
+The integrated compatibility gate explicitly refuses DH GI with active native
+fog, while retaining depth debug; fog-free beauty and refusal tests are pending.
+
+Worldgen now has a distinct, bounded real-model placement path, rather than
+equating proxy OSM meshes with completed upstream integration. The local
+preparation scripts combine existing cached OSM cells and cached Terrarium
+elevation and invoke the upstream M4 generator. They make no map-data requests
+and write outside the installed game. A narrow M4 stock-bridge dataclass
+compatibility shim preserves upstream's existing proxy behavior.
+
+Actual preparation at `D:/OpenPoseidon-Worldgen-Lab-20261008/lux-region-03`
+produces 7369 model placements: 1057 roads, 1249 houses, 2950 individual trees,
+2066 bushes and 47 forest blocks. CPU parsing passes the actual packaged WRP,
+all 7369 resident source bases and bounded selection of 2048 instances, without
+skipped model names. Stock model/texture assets remain local game references.
+Upstream final road/junction/grading validation reports **failed**; this is a
+real asset-presentation fixture, not an accepted playable generated island.
+Installed model rendering and near-ground freefly acceptance are still pending.
+Only this generated region exists; worldwide generated-region residency and
+automatic population are not complete.

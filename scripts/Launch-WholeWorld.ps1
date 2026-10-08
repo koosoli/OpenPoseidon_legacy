@@ -13,6 +13,8 @@ param(
     [switch]$CachedBuildings,
     [switch]$CachedFeatures,
     [switch]$LocalSurface,
+    [string]$WorldgenManifest = '',
+    [string]$WorldgenAddonRoot = '',
     [string]$ContentUrlTemplate = '',
     [string]$CacheDirectory = (Join-Path $env:LOCALAPPDATA 'OpenPoseidon/world-stream'),
     [switch]$Fullscreen,
@@ -37,6 +39,8 @@ if (!$PrepareOnly -and !$env:LOCK_OWNER) {
     if ($CachedFeatures) { $forward += '-CachedFeatures' }
     if ($ContentUrlTemplate) { $forward += @('-ContentUrlTemplate',$ContentUrlTemplate) }
     if ($LocalSurface) { $forward += '-LocalSurface' }
+    if ($WorldgenManifest) { $forward += @('-WorldgenManifest',$WorldgenManifest) }
+    if ($WorldgenAddonRoot) { $forward += @('-WorldgenAddonRoot',$WorldgenAddonRoot) }
     if ($LogFile) { $forward += @('-LogFile',$LogFile) }
     $previous = $env:LOCK_OWNER
     try {
@@ -47,6 +51,18 @@ if (!$PrepareOnly -and !$env:LOCK_OWNER) {
     return
 }
 if (Get-Process OpenPoseidon,ColdWarAssault -ErrorAction SilentlyContinue) { throw 'Close the existing game before starting this preview.' }
+if ($WorldgenManifest) {
+    $WorldgenManifest=(Resolve-Path -LiteralPath $WorldgenManifest).Path
+    if (!(Test-Path -LiteralPath $WorldgenManifest -PathType Leaf)) { throw 'Worldgen manifest must be a file.' }
+    if ($CachedBuildings -or $CachedFeatures -or $ContentUrlTemplate) {
+        throw 'Use Worldgen assets or simplified OSM previews separately to avoid duplicate geometry.'
+    }
+}
+if ($WorldgenAddonRoot) {
+    if (!$WorldgenManifest) { throw 'WorldgenAddonRoot requires WorldgenManifest.' }
+    $WorldgenAddonRoot=(Resolve-Path -LiteralPath $WorldgenAddonRoot).Path
+    if (!(Test-Path -LiteralPath $WorldgenAddonRoot -PathType Container)) { throw 'Worldgen addon root must be a directory.' }
+}
 $fixture = Join-Path $CacheDirectory 'fixture'
 $mission = Join-Path $fixture 'earth-preview.abel'
 $null = New-Item -ItemType Directory -Force -Path $mission
@@ -130,6 +146,7 @@ $settings = @{
     POSEIDON_EARTH_BUILDINGS=$(if($CachedBuildings -or $ContentUrlTemplate){'1'}else{'0'});
     POSEIDON_EARTH_FEATURES=$(if($CachedFeatures -or $ContentUrlTemplate){'1'}else{'0'});
     POSEIDON_EARTH_CONTENT_URL=$ContentUrlTemplate;
+    POSEIDON_EARTH_WORLDGEN_MANIFEST=$WorldgenManifest;
     POSEIDON_EARTH_SURFACE=$(if($LocalSurface){'1'}else{'0'})
 }
 $saved = @{}
@@ -141,6 +158,7 @@ try {
         $(if($Globe){'-89.9'}else{'-20'}),'--test-world-hour','12')
     if (!$Fullscreen) { $argv += '--window' }
     if ($HarnessPort) { $argv += @('--harness',"$HarnessPort") }
+    if ($WorldgenAddonRoot) { $argv += @('--addon-root',$WorldgenAddonRoot) }
     if (!$LogFile) { $LogFile = Join-Path $CacheDirectory 'earth-preview.log' }
     $argv += @('--log-file',$LogFile)
     Write-Host "Earth preview at $Latitude, $Longitude. Freefly only. Cache: $CacheDirectory"
