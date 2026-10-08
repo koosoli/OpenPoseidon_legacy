@@ -205,5 +205,5 @@ Luxembourg button visits the prepared cell; Globe returns to orbit. The atlas
 shares identical near geometry, feathers into NASA and costs one additional
 draw, with no extra triangles. Runtime before/after, recenter, geographic
 fallback and actual W/S approach checks pass on this installed source; receipts
-are in the integrated note. See [surface preparation and limits](../../earth-local-surface-prototype.md).
+are in the integrated note. See [surface preparation and limits](../earth-local-surface-prototype.md).
 This one cell does not establish worldwide detailed surfaces or VBS4 parity.
