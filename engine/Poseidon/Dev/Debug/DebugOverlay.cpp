@@ -27,6 +27,7 @@
 #include <glad/gl.h>
 
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
+#include <Poseidon/Dev/Debug/ReShadeOptional.hpp>
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <Poseidon/Dev/Debug/DebugCheats.hpp>
 #include <Poseidon/Dev/Debug/DebugCommands.hpp>
@@ -5530,6 +5531,7 @@ void DrawRenderTab()
 // to a live frame-time readout, so the sweet spot is found by eye and measured in fps.
 void DrawTemporalTab()
 {
+    DrawOptionalReShadeControls();
     if (!GEngine)
     {
         Dev::PanelHelp("engine not up");
