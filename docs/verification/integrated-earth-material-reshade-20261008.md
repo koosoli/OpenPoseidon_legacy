@@ -384,3 +384,24 @@ has 256 finite / 227 nonzero depth values; inspection still aligns terrain,
 trees, pole and weapon with the native scene and leaves sky white. This
 checks the shared material-layout integration without claiming new ReShade
 quality or compatibility coverage.
+
+## Inventory Tab binding follow-up
+
+Installed `25abb7dc` at 12:47 includes engine change `c98b09b8`: Infantry
+inventory now opens/closes with Tab; infantry target cycling moves to O.
+Shift sprint bindings and vehicle target cycling remain unchanged. Context
+profile version 7 migrates the old single O inventory default, retaining
+custom/chorded/cleared bindings and refusing conflicting custom Tab/O use.
+The supported game and test builds pass. The context-controls suite passes
+146 assertions across 13 cases, including migration, roundtrip, conflicts
+and vehicle/sprint defaults.
+
+Installed real SDL key tests pass with fresh profiles
+(`build/physical-inventory/20261008-124816-711/result.json`) and a v6 profile
+(`build/physical-inventory/20261008-124931-122/result.json`). In each, Tab
+opens display 62020 and closes back to mission display 46; Shift and O do
+not open inventory. Persisted infantry keys and retained vehicle Tab are
+checked, the open-inventory image was inspected, and both owned processes
+exit cleanly. This supersedes the pending default-key choice above. The
+physical inventory remains single-player only; custom bindings remain
+configurable in Controls.
