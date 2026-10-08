@@ -146,5 +146,36 @@ int main()
         }
     }
     assert(WrapPixel(-1,MaxZoom)==1048575 && WrapPixel(1048576,MaxZoom)==0);
-    std::cout<<"Earth coordinates: origin, orientation, seams, elevation, polar guards, curved horizon, adaptive detail/hysteresis PASS\n";
+    using namespace Poseidon::EarthStreaming;
+    assert(CameraAnchor==Anchor);
+    LocationState locations;
+    const auto initial=locations.Get();
+    assert(locations.IsCurrent(initial.revision));
+    for (const auto& invalid : {Location{85,0,4500},Location{0,181,4500},Location{0,0,499},
+            Location{NAN,0,4500},Location{0,INFINITY,4500},Location{0,0,INFINITY}})
+    {
+        assert(!locations.Set(invalid.latitude,invalid.longitude,invalid.altitude));
+        assert(locations.IsCurrent(initial.revision));
+    }
+    assert(locations.Set(-16.8,180,12000));
+    const auto dateline=locations.Get();
+    assert(dateline.longitude==-180 && dateline.latitude==-16.8 && dateline.altitude==12000);
+    assert(!locations.IsCurrent(initial.revision) && locations.IsCurrent(dateline.revision));
+    assert(ToPixel(FromLocal(dateline.latitude,dateline.longitude,Anchor+10000,Anchor),MaxZoom).x>=0);
+    const auto leftUv=OverviewUv(dateline.latitude,dateline.longitude,Anchor-25,Anchor);
+    const auto rightUv=OverviewUv(dateline.latitude,dateline.longitude,Anchor+25,Anchor);
+    assert(leftUv.x<0 && rightUv.x>0 && rightUv.x-leftUv.x<.00001);
+    const auto plus180=OverviewUv(0,180,Anchor+25,Anchor);
+    const auto minus180=OverviewUv(0,-180,Anchor+25,Anchor);
+    assert(std::abs(plus180.x-minus180.x-1.0)<1e-12);
+    assert(locations.Set(36.1,-112.1,6000));
+    const auto canyon=locations.Get();
+    assert(canyon.revision==dateline.revision+1 && !locations.IsCurrent(dateline.revision));
+    // Even a repeated Go invalidates a prior ready patch and resets the camera.
+    assert(locations.Set(canyon.latitude,canyon.longitude,canyon.altitude));
+    assert(!locations.IsCurrent(canyon.revision));
+    rejected=false;
+    try { LocationState invalid({90,0,4500}); } catch(const std::invalid_argument&) { rejected=true; }
+    assert(rejected);
+    std::cout<<"Earth coordinates: origin, orientation, seams, elevation, polar guards, curved horizon, adaptive detail/hysteresis, live relocation revisions PASS\n";
 }

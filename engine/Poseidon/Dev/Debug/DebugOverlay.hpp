@@ -76,5 +76,7 @@ namespace DebugOverlay
     void AdoptFreeFlyCamera(CameraVehicle* camera);
     // Harness uses the same enter/teleport path as the Zeus coordinate control.
     bool SetFreeFlyTestPose(const char* coordinates);
+    // Earth-only geographic teleport; same path for the UI and harness SQF.
+    bool SetEarthPreviewLocation(double latitude,double longitude,double altitude);
 } // namespace DebugOverlay
 } // namespace Poseidon::Dev

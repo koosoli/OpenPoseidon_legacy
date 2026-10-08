@@ -15,15 +15,6 @@ namespace Poseidon
 {
 namespace
 {
-double Setting(const char* name, double fallback)
-{
-    const char* value = std::getenv(name);
-    if (!value) return fallback;
-    char* end = nullptr;
-    const double result = std::strtod(value, &end);
-    if (end == value || *end || !std::isfinite(result)) throw std::invalid_argument(name);
-    return result;
-}
 constexpr size_t MaxTileBytes = 2 * 1024 * 1024;
 size_t Receive(char* data, size_t size, size_t count, void* destination)
 {
@@ -35,18 +26,22 @@ size_t Receive(char* data, size_t size, size_t count, void* destination)
     catch (...) { return 0; } // Exceptions must never cross a C callback.
     return n;
 }
+struct Cancellation
+{
+    const std::atomic<bool>& stop;
+    const std::atomic<uint64_t>& generation;
+    uint64_t expected;
+};
 int Progress(void* context, curl_off_t, curl_off_t, curl_off_t, curl_off_t)
 {
-    return static_cast<std::atomic<bool>*>(context)->load() ? 1 : 0;
+    const auto& token=*static_cast<Cancellation*>(context);
+    return token.stop.load() || token.generation.load()!=token.expected ? 1 : 0;
 }
 }
 
 EarthTerrainStream::EarthTerrainStream()
-    : _latitude(Setting("POSEIDON_EARTH_LATITUDE", 46.6)),
-      _longitude(Setting("POSEIDON_EARTH_LONGITUDE", 8.1))
 {
-    if (std::abs(_latitude) > 84.0 || std::abs(_longitude) > 180.0)
-        throw std::invalid_argument("Earth origin outside supported latitude/longitude range");
+    _requestOrigin=EarthStreaming::GetLocation();
     const char* path = std::getenv("POSEIDON_EARTH_CACHE");
     if (!path || !*path) throw std::invalid_argument("POSEIDON_EARTH_CACHE must name a writable cache directory");
     _cache = std::filesystem::u8path(path);
@@ -66,20 +61,34 @@ EarthTerrainStream::~EarthTerrainStream()
     if (_worker.joinable()) _worker.join();
 }
 
-void EarthTerrainStream::Request(float x, float z, float altitude)
+void EarthTerrainStream::Relocate(const EarthStreaming::Location& origin)
 {
-    // Bound this planar prototype before integer conversion; globe rebasing is
-    // a subsequent stage. Bad camera positions must not reach indexing/math.
+    if (!EarthStreaming::ValidateLocation(origin.latitude,origin.longitude,origin.altitude)) return;
+    std::lock_guard lock(_mutex);
+    _requestOrigin=origin;
+    _requested=false;
+    _ready.reset();
+    ++_generation; // Cancel even at orbital altitude, where no new DEM is needed.
+    _wake.notify_one();
+}
+
+void EarthTerrainStream::Request(float x, float z, float altitude, const EarthStreaming::Location& origin)
+{
+    // Bound local travel before integer conversion. Geographic relocation is
+    // explicit; continuous globe circumnavigation is not supported here.
     if (!std::isfinite(x) || !std::isfinite(z) || std::abs(x) > EarthStreaming::CoordinateLimit ||
-        std::abs(z) > EarthStreaming::CoordinateLimit) return;
+        std::abs(z) > EarthStreaming::CoordinateLimit ||
+        !EarthStreaming::ValidateLocation(origin.latitude,origin.longitude,origin.altitude)) return;
     const float radius = Earth::HorizonRadius(altitude);
     std::lock_guard lock(_mutex);
     const auto detail = Earth::SelectNearDetail(altitude, _requestDetail);
     const float stride = Earth::NearRecenter(Earth::NearGrid(detail));
     const int cx = Earth::CenterCell(x, stride), cz = Earth::CenterCell(z, stride);
-    if (_requested && cx == _requestX && cz == _requestZ && radius == _requestRadius && detail == _requestDetail) return;
+    if (_requested && cx == _requestX && cz == _requestZ && radius == _requestRadius && detail == _requestDetail &&
+        origin.revision==_requestOrigin.revision) return;
     _requestX = cx; _requestZ = cz; _requestRadius = radius; _requested = true;
     _requestDetail = detail;
+    _requestOrigin = origin;
     _ready.reset(); // A completed old band/cell must not be published after this request.
     ++_generation;
     _wake.notify_one();
@@ -88,7 +97,8 @@ void EarthTerrainStream::Request(float x, float z, float altitude)
 std::unique_ptr<EarthTerrainStream::Patch> EarthTerrainStream::TakeReady()
 {
     std::lock_guard lock(_mutex);
-    if (_ready && _ready->generation != _generation.load()) _ready.reset();
+    if (_ready && (_ready->generation != _generation.load() ||
+        !EarthStreaming::Locations().IsCurrent(_ready->originRevision))) _ready.reset();
     return std::move(_ready);
 }
 
@@ -105,12 +115,13 @@ bool EarthTerrainStream::Download(const std::string& url, std::vector<unsigned c
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &bytes);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, Progress);
-    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &_stop);
+    Cancellation token{_stop,_generation,_activeGeneration};
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &token);
     const CURLcode result = curl_easy_perform(curl);
     long status = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
     curl_easy_cleanup(curl);
-    if (result != CURLE_OK || status != 200)
+    if ((result != CURLE_OK || status != 200) && result!=CURLE_ABORTED_BY_CALLBACK)
         std::fprintf(stderr, "Earth terrain HTTPS: %s, HTTP %ld (%s)\n", curl_easy_strerror(result), status, url.c_str());
     return result == CURLE_OK && status == 200 && !bytes.empty();
 }
@@ -233,14 +244,17 @@ void EarthTerrainStream::Run()
         int cx, cz;
         float radius;
         Earth::NearDetail detail;
+        EarthStreaming::Location origin;
         uint64_t version;
         {
             std::unique_lock lock(_mutex);
-            _wake.wait(lock, [&] { return _stop.load() || _generation.load() != handled; });
+            _wake.wait(lock, [&] { return _stop.load() || (_requested && _generation.load() != handled); });
             if (_stop.load()) return;
             cx = _requestX; cz = _requestZ; version = _generation.load();
             radius = _requestRadius;
             detail = _requestDetail;
+            origin = _requestOrigin;
+            _activeGeneration = version;
         }
         try
         {
@@ -252,10 +266,11 @@ void EarthTerrainStream::Run()
             const float stride = Earth::NearRecenter(patch->gridMetres);
             patch->x = cx * stride - halfWindow;
             patch->z = cz * stride - halfWindow;
-            const auto centre = Earth::FromLocal(_latitude, _longitude,
+            const auto centre = Earth::FromLocal(origin.latitude, origin.longitude,
                 cx * stride, cz * stride);
             patch->latitude = centre.latitude; patch->longitude = centre.longitude;
-            patch->originLatitude = _latitude; patch->originLongitude = _longitude;
+            patch->originLatitude = origin.latitude; patch->originLongitude = origin.longitude;
+            patch->originRevision = origin.revision;
             patch->generation = version;
             patch->heights.resize(Earth::GridSamples * Earth::GridSamples);
             const unsigned downloads = _downloads, hits = _cacheHits;
@@ -265,7 +280,7 @@ void EarthTerrainStream::Run()
                 if (_generation.load() != version) break;
                 for (int x = 0; x < Earth::GridSamples; ++x)
                 {
-                    const auto position = Earth::ToPixel(Earth::FromLocal(_latitude, _longitude,
+                    const auto position = Earth::ToPixel(Earth::FromLocal(origin.latitude, origin.longitude,
                         patch->x + x * patch->gridMetres, patch->z + z * patch->gridMetres),patch->sourceZoom);
                     const double wx = patch->x + x * patch->gridMetres;
                     const double wz = patch->z + z * patch->gridMetres;
@@ -287,7 +302,7 @@ void EarthTerrainStream::Run()
                     const float ox = Earth::HorizonOffset(x,radius,halfWindow), oz = Earth::HorizonOffset(z,radius,halfWindow);
                     const double wx = cx * stride + ox;
                     const double wz = cz * stride + oz;
-                    const auto geographic = Earth::FromLocal(_latitude,_longitude,wx,wz);
+                    const auto geographic = Earth::FromLocal(origin.latitude,origin.longitude,wx,wz);
                     const size_t index = z * Earth::HorizonSamples + x;
                     if (std::abs(geographic.latitude) > Earth::MaxLatitude)
                     {
@@ -319,7 +334,8 @@ void EarthTerrainStream::Run()
         }
         catch (const std::exception& e)
         {
-            std::fprintf(stderr, "Earth terrain: %s; retaining last completed patch, retry in 10s\n", e.what());
+            if (_generation.load()==version && !_stop.load())
+                std::fprintf(stderr, "Earth terrain: %s; retaining last completed patch, retry in 10s\n", e.what());
             std::unique_lock lock(_mutex);
             _wake.wait_for(lock, std::chrono::seconds(10), [&] { return _stop.load() || _generation.load() != version; });
             // Retry the same request after backoff; a newer request supersedes it.

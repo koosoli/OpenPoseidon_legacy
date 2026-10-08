@@ -394,7 +394,7 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
     if (EarthStreaming::Enabled())
     {
         _earthStream = std::make_unique<EarthTerrainStream>();
-        LOG_INFO(Graphics, "Earth terrain prototype enabled: 25.6km near window plus curved altitude-adaptive horizon, freefly only");
+        LOG_INFO(Graphics, "Earth terrain prototype enabled: adaptive 6.4/25.6km near window plus curved horizon, freefly only");
     }
     _baseMult = EnvFloat("WGR_TERRAIN_LOD_BASE", 4.0f);
     _lodRatio = EnvFloat("WGR_TERRAIN_LOD_RATIO", 2.0f);
@@ -3216,15 +3216,9 @@ TerrainWgpu::~TerrainWgpu()
     if (_earthGlobeTexture) wgr_texture_destroy(_renderer,_earthGlobeTexture);
 }
 
-void TerrainWgpu::UploadEarthGlobe()
+void TerrainWgpu::UploadEarthGlobe(double latitude,double longitude)
 {
     EngineWgpu::AcquireProducerWindow("Earth globe");
-    const auto setting = [](const char* key, double fallback) {
-        const char* value = std::getenv(key);
-        return value ? std::strtod(value,nullptr) : fallback;
-    };
-    const double latitude=setting("POSEIDON_EARTH_LATITUDE",46.6);
-    const double longitude=setting("POSEIDON_EARTH_LONGITUDE",8.1);
     constexpr int rows=128, cols=256;
     std::vector<WgrMeshVertex> vertices((rows+1)*(cols+1));
     std::vector<uint32_t> indices;
@@ -3249,13 +3243,15 @@ void TerrainWgpu::UploadEarthGlobe()
             }
         }
     }
-    _earthGlobeMesh=wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(vertices),WgrSlice<uint32_t>(indices));
-    if (!_earthGlobeMesh) throw std::runtime_error("Earth globe mesh allocation failed");
+    const auto mesh=wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(vertices),WgrSlice<uint32_t>(indices));
+    if (!mesh) throw std::runtime_error("Earth globe mesh allocation failed");
+    if (_earthGlobeMesh) wgr_mesh_destroy(_renderer,_earthGlobeMesh);
+    _earthGlobeMesh=mesh;
     _earthGlobeIndices=uint32_t(indices.size());
     // An external, optional local cache. Never reads or redistributes game assets.
     const char* imagePath=std::getenv("POSEIDON_EARTH_IMAGERY");
     int width=0,height=0,channels=0;
-    if (imagePath && stbi_info(imagePath,&width,&height,&channels) &&
+    if (!_earthGlobeTexture && imagePath && stbi_info(imagePath,&width,&height,&channels) &&
         width>0 && height>0 && width<=8192 && height<=4096)
     {
         if (auto* rgba=stbi_load(imagePath,&width,&height,&channels,4))
@@ -3282,8 +3278,8 @@ void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p)
     const auto geographicUv = [&](float x, float z) {
         // Always use the fixed geographic origin. Replacing its latitude with
         // a moving patch centre changes the longitude scale and swims imagery.
-        const auto geo=Earth::FromLocal(p.originLatitude,p.originLongitude,x,z);
-        return WgrVec2{float((geo.longitude+180.0)/360.0),float((90.0-geo.latitude)/180.0)};
+        const auto uv=Earth::OverviewUv(p.originLatitude,p.originLongitude,x,z);
+        return WgrVec2{float(uv.x),float(uv.y)};
     };
     for (int z = 0; z < n; ++z)
     {
@@ -3379,14 +3375,25 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
     // Classic upload supplies the one owned fixture's material bindings once;
     // its geometry, grass and finite-world water are not submitted in this mode.
     if (!_uploaded) UploadIfNeeded(land);
-    if (!_earthGlobeMesh) UploadEarthGlobe();
+    const auto origin=EarthStreaming::GetLocation();
+    if (_earthOriginRevision!=origin.revision)
+    {
+        // No frame may mix a previous region's height patch with a new globe.
+        // The overview stays visible while replacement elevation streams in.
+        _earthStream->Relocate(origin);
+        UploadEarthGlobe(origin.latitude,origin.longitude);
+        _earthPatch.reset();
+        _earthOriginRevision=origin.revision;
+        LOG_INFO(Graphics,"Earth relocated: origin [{},{}], revision {}",origin.latitude,origin.longitude,origin.revision);
+    }
     _engine.SubmitEarthHorizon(_earthGlobeMesh,_earthGlobeIndices,_earthGlobeTexture);
     // Orbit needs only the fixed global overview. Do not download finer terrain
     // that covers less than one pixel at this distance.
     if (camera.Position().Y()>500000.0f) return;
-    _earthStream->Request(camera.Position().X(), camera.Position().Z(),camera.Position().Y());
+    _earthStream->Request(camera.Position().X(), camera.Position().Z(),camera.Position().Y(),origin);
     if (auto patch = _earthStream->TakeReady())
     {
+        if (patch->originRevision!=origin.revision) return;
         _earthPatch = std::move(patch);
         const auto& p = *_earthPatch;
         _params.world_origin = {p.x, p.z};
@@ -3400,8 +3407,9 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         UploadEarthHorizon(p);
         wgr_terrain_set_heightmap(_renderer, p.heights.data(), &_params);
         const auto extrema = std::minmax_element(p.heights.begin(),p.heights.end());
-        LOG_INFO(Graphics, "Earth terrain patch {}: origin [{},{}], centre [{},{}], height {}..{}m, downloads {}, disk hits {}, worker {}s",
-            p.generation,p.x,p.z,p.latitude,p.longitude,*extrema.first,*extrema.second,p.downloads,p.cacheHits,p.seconds);
+        LOG_INFO(Graphics, "Earth terrain patch {}: origin [{},{}], centre [{},{}], height {}..{}m, downloads {}, disk hits {}, worker {}s, geographic origin [{},{}], revision {}",
+            p.generation,p.x,p.z,p.latitude,p.longitude,*extrema.first,*extrema.second,p.downloads,p.cacheHits,p.seconds,
+            p.originLatitude,p.originLongitude,p.originRevision);
         LOG_INFO(Graphics, "Earth horizon: radius {}km, source zoom {}, {} triangles; curved tangent projection",
             p.horizonRadius/1000.0f,p.horizonZoom,_earthHorizonIndices/3);
         LOG_INFO(Graphics, "Earth near detail: grid {}m, source zoom {}, window {}km, recenter {}m",

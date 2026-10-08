@@ -128,7 +128,8 @@ class TerrainWgpu : public ITerrainRenderer
     WgrMesh _earthGlobeMesh = 0;
     WgrTexture _earthGlobeTexture = 0;
     uint32_t _earthGlobeIndices = 0;
-    void UploadEarthGlobe();
+    uint64_t _earthOriginRevision = 0;
+    void UploadEarthGlobe(double latitude,double longitude);
     void UploadEarthHorizon(const EarthTerrainStream::Patch& patch);
     // (Re)uploads and rebuilds the quadtree when the map changes; returns true if it did.
     bool UploadIfNeeded(const Landscape& land);

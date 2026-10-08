@@ -7585,6 +7585,34 @@ void DrawMainWindow()
             if (!available) ImGui::TextWrapped("Load a single-player mission to edit terrain.");
             ImGui::EndTabItem();
         }
+        if (EarthStreaming::Enabled() && Dev::PanelTabItem("Earth"))
+        {
+            static auto location=EarthStreaming::GetLocation();
+            const auto current=EarthStreaming::GetLocation();
+            if (location.revision!=current.revision) location=current;
+            ImGui::TextWrapped("Go to a geographic region without restarting. Elevation streams in after the overview; this preview does not relocate the playable mission.");
+            ImGui::InputDouble("Latitude",&location.latitude,0.1,1.0,"%.6f");
+            ImGui::InputDouble("Longitude",&location.longitude,0.1,1.0,"%.6f");
+            ImGui::InputFloat("Altitude (metres)",&location.altitude,500.0f,5000.0f,"%.0f");
+            ImGui::TextDisabled("Latitude -84..84; longitude -180..180; altitude 500..30,000,000m");
+            const auto go=[&](double latitude,double longitude,double altitude) {
+                Defer([latitude,longitude,altitude] {
+                    s_zeusStatus=SetEarthPreviewLocation(latitude,longitude,altitude)
+                        ? "Earth region changed; elevation is streaming."
+                        : "Earth Go rejected: check coordinates and single-player freefly.";
+                });
+            };
+            if (Dev::Button("Go##Earth")) go(location.latitude,location.longitude,location.altitude);
+            if (Dev::Button("Alps##Earth")) go(46.6,8.1,4500);
+            Dev::PanelSameLine();
+            if (Dev::Button("Grand Canyon##Earth")) go(36.1,-112.1,6000);
+            Dev::PanelSameLine();
+            if (Dev::Button("Dateline##Earth")) go(-16.8,179.95,12000);
+            ImGui::Text("Origin %.6f, %.6f; revision %llu",current.latitude,current.longitude,
+                static_cast<unsigned long long>(current.revision));
+            ImGui::TextWrapped("%s",s_zeusStatus.c_str());
+            ImGui::EndTabItem();
+        }
         // Not a diagnostic: this tab CHANGES what the AI does. See AITab.cpp.
         if (Dev::PanelTabItem("AI"))
         {
@@ -8356,6 +8384,17 @@ bool SetFreeFlyTestPose(const char* coordinates)
     snprintf(s_zeusGotoBuf, sizeof(s_zeusGotoBuf), "%s", coordinates);
     GoToZeusCoordinates();
     return s_zeusCamera != nullptr;
+}
+
+bool SetEarthPreviewLocation(double latitude,double longitude,double altitude)
+{
+    if (!EarthStreaming::Enabled() || MultiplayerSession() || !ZeusWorldAvailable() ||
+        !EarthStreaming::ValidateLocation(latitude,longitude,altitude)) return false;
+    char pose[160];
+    snprintf(pose,sizeof(pose),"[%g,%g,%.9g] az 0 el -60",double(EarthStreaming::CameraAnchor),
+        double(EarthStreaming::CameraAnchor),altitude);
+    if (!SetFreeFlyTestPose(pose)) return false;
+    return EarthStreaming::Locations().Set(latitude,longitude,altitude);
 }
 
 } // namespace DebugOverlay

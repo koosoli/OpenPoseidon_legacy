@@ -11,6 +11,7 @@
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp> // Shapes (triLoadedShapeCount)
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/Network/NetworkCustomAssets.hpp>
 #include <Poseidon/Network/NetworkImpl.hpp>
@@ -1171,6 +1172,29 @@ GameValue TriPlayerPosZ(const GameState* /*state*/)
         return GameValue(-1.0f);
     EntityAI* veh = GWorld->GetRealPlayer()->Brain()->GetVehicle();
     return GameValue(veh ? veh->Position()[2] : -1.0f);
+}
+
+/// triEarthLocation [latitude,longitude,altitude] relocates the opt-in Earth
+/// preview through the same camera/origin transaction as its navigation tab.
+/// An empty array queries the current origin and revision for harness assertions.
+GameValue TriEarthLocation(const GameState*, GameValuePar arg)
+{
+    if (!EarthStreaming::Enabled()) return GameValue("FAIL:earth_preview_disabled");
+    const GameArrayType& values=arg;
+    if (values.Size()!=0 && values.Size()!=3) return GameValue("FAIL:expected_lat_lon_altitude");
+    if (values.Size()==3)
+    {
+        for (int i=0;i<3;++i)
+            if (values[i].GetType()!=GameScalar) return GameValue("FAIL:expected_scalars");
+        if (!DebugOverlay::SetEarthPreviewLocation((GameScalarType)values[0],(GameScalarType)values[1],
+                (GameScalarType)values[2])) return GameValue("FAIL:invalid_location_or_camera");
+    }
+    const auto location=EarthStreaming::GetLocation();
+    char result[192];
+    snprintf(result,sizeof(result),"OK:latitude=%.8f longitude=%.8f altitude=%.3f revision=%llu",
+        location.latitude,location.longitude,double(location.altitude),
+        static_cast<unsigned long long>(location.revision));
+    return GameValue(result);
 }
 
 /// triPlayerGroundClearance — signed distance from the player vehicle origin to
@@ -3131,6 +3155,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerPosX", TriPlayerPosX));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerPosY", TriPlayerPosY));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerPosZ", TriPlayerPosZ));
+    GGameState.NewFunction(GameFunction(GameString, "triEarthLocation", TriEarthLocation, GameArray));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerGroundClearance", TriPlayerGroundClearance));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerTerrainClearance", TriPlayerTerrainClearance));
     GGameState.NewNularOp(GameNular(GameScalar, "triPlayerContactGroundClearance", TriPlayerContactGroundClearance));

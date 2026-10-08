@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EarthCoordinates.hpp"
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <atomic>
 #include <condition_variable>
 #include <filesystem>
@@ -24,6 +25,7 @@ class EarthTerrainStream
         double latitude, longitude;
         double originLatitude, originLongitude;
         uint64_t generation;
+        uint64_t originRevision;
         unsigned downloads, cacheHits;
         double seconds;
         std::vector<float> heights;
@@ -38,7 +40,8 @@ class EarthTerrainStream
     ~EarthTerrainStream();
     EarthTerrainStream(const EarthTerrainStream&) = delete;
     EarthTerrainStream& operator=(const EarthTerrainStream&) = delete;
-    void Request(float x, float z, float altitude);
+    void Request(float x, float z, float altitude, const EarthStreaming::Location& origin);
+    void Relocate(const EarthStreaming::Location& origin);
     std::unique_ptr<Patch> TakeReady();
 
   private:
@@ -48,7 +51,8 @@ class EarthTerrainStream
     float Sample(double x, double y, int zoom = Earth::Zoom);
     bool Download(const std::string& url, std::vector<unsigned char>& bytes);
     void TrimDisk();
-    double _latitude, _longitude;
+    EarthStreaming::Location _requestOrigin;
+    uint64_t _activeGeneration = 0; // Worker-only download cancellation token.
     std::filesystem::path _cache;
     std::atomic<bool> _stop{false};
     std::atomic<uint64_t> _generation{0};

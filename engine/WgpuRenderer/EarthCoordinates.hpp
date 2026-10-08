@@ -107,6 +107,15 @@ inline Coordinate FromLocal(double latitude, double longitude, double x, double 
         (Radius * std::cos(latitude * Pi / 180.0)) * 180.0 / Pi)};
 }
 
+inline Pixel OverviewUv(double latitude,double longitude,double x,double z)
+{
+    // Keep longitude continuous across +/-180 inside a triangle. The imagery
+    // sampler repeats U; wrapping each vertex would smear the whole map over
+    // a single quad at the dateline.
+    return {(longitude+180.0)/360.0+(x-Anchor)/(2.0*Pi*Radius*std::cos(latitude*Pi/180.0)),
+        (90.0-FromLocal(latitude,longitude,x,z).latitude)/180.0};
+}
+
 inline Pixel ToPixel(Coordinate c, int zoom = Zoom)
 {
     if (!std::isfinite(c.latitude) || !std::isfinite(c.longitude) || std::abs(c.latitude) > MaxLatitude)
