@@ -88,6 +88,13 @@ function CheckNoSuperseded($location){
     $after=@(PatchRows|Where-Object {$_.lineNumber-gt$rebase[-1].LineNumber})
     Require (!($after|Where-Object {$_.revision-ne$location.revision})) 'Superseded geographic patch published after latest rebase'
 }
+function WaitCapture([string]$path){
+    $deadline=[DateTime]::UtcNow.AddSeconds(15)
+    while(!(Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length-eq0){
+        Require ([DateTime]::UtcNow-lt$deadline) ('Screenshot missing: '+$path)
+        Start-Sleep -Milliseconds 100
+    }
+}
 function Go([string]$name,[double]$latitude,[double]$longitude,[double]$altitude){
     $previous=Location
     $code='triEarthLocation ['+$latitude.ToString('R',$culture)+','+$longitude.ToString('R',$culture)+','+$altitude.ToString('R',$culture)+']'
@@ -102,7 +109,7 @@ function Go([string]$name,[double]$latitude,[double]$longitude,[double]$altitude
     $camera=Camera;CheckCamera $camera $altitude
     CheckNoSuperseded $location
     $path=Join-Path $out ($name+'.png');$null=Send @{cmd='screenshot';path=$path}
-    Require ((Test-Path -LiteralPath $path) -and (Get-Item -LiteralPath $path).Length-gt0) 'Screenshot missing'
+    WaitCapture $path
     $receipt.views+=@{name=$name;location=$location;camera=$camera;patch=$patch;screenshot=$path;tiles=(CheckCache);performance=(Send @{cmd='frame_performance'})}
     return $location
 }
@@ -152,7 +159,7 @@ try{
     CheckNoSuperseded $final
     $camera=Camera;CheckCamera $camera 4500
     $path=Join-Path $out 'return-alps.png';$null=Send @{cmd='screenshot';path=$path}
-    Require ((Test-Path -LiteralPath $path) -and (Get-Item -LiteralPath $path).Length-gt0) 'Return screenshot missing'
+    WaitCapture $path
     $receipt.views+=@{name='return-alps';location=$final;camera=$camera;patch=$patch;screenshot=$path;tiles=(CheckCache);performance=(Send @{cmd='frame_performance'})}
     Require (!(Select-String -Path @($log,$stderr) -Pattern 'UNHANDLED EXCEPTION|Validation Error|DeviceLost|panicked at|wgr_create failed|Critical error' -Quiet)) 'Runtime error'
     Require ((Get-Content (Join-Path $game 'DEPLOYED-FROM.txt') -Raw).Trim()-ceq$stamp) 'Installed build changed'

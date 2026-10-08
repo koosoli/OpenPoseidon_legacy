@@ -12,6 +12,24 @@ $stamp=(Get-Content (Join-Path $GameDir 'DEPLOYED-FROM.txt') -Raw).Trim()
 if(!$stamp.Contains($ExpectedCommit)){throw 'Unexpected installed source'}
 $out=Join-Path $repo ('build/reshade-acceptance/'+(Get-Date -Format yyyyMMdd-HHmmss))
 $null=New-Item -ItemType Directory -Force -Path $out
+$mission=Join-Path $out 'comparison.eden'
+$null=New-Item -ItemType Directory -Force -Path $mission
+# Stock OPRW2 worlds use the normal mission loader; --test-world is an importer
+# and can silently leave an unrelated empty fallback landscape on rejection.
+@'
+version=11;
+class Mission {
+ randomSeed=42;
+ class Intel {year=1985;month=6;day=21;hour=16;minute=0;startWeather=0.25;forecastWeather=0.25;startFog=0.25;};
+ class Groups {items=1;class Item0 {side="WEST";class Vehicles {items=1;class Item0 {
+  position[]={8131.43,0,4086.37};azimut=229.1;id=0;side="WEST";vehicle="SoldierWB";
+  player="PLAYER COMMANDER";leader=1;skill=1.0;
+ };};};};
+};
+class Intro {randomSeed=1;class Intel {};};
+class OutroWin {randomSeed=2;class Intel {};};
+class OutroLoose {randomSeed=3;class Intel {};};
+'@ | Set-Content (Join-Path $mission 'mission.sqm')
 $keys=@('POSEIDON_USER_DIR','POSEIDON_WHOLE_WORLD','VK_ADD_LAYER_PATH','VK_INSTANCE_LAYERS',
  'RESHADE_BASE_PATH_OVERRIDE','WGPU_BACKEND','WGR_DLSS','WGR_AUTO_EXPOSURE','WGR_EXPOSURE')
 $saved=@{};foreach($key in $keys){$saved[$key]=[Environment]::GetEnvironmentVariable($key,'Process')}
@@ -37,8 +55,7 @@ try{
   $log=Join-Path $arm 'game.log';$p=$null;$client=$null;$writer=$null
   try{
    $argsGame=@('--render=wgpu','--window','--dev','--width','1600','--height','900','--vd','3000',
-    '--test-mission',(Join-Path $GameDir 'dev-missions/devtest.abel'),
-    '--test-world',(Join-Path $GameDir 'Worlds/eden.wrp'),
+    '--test-mission',$mission,
     '--test-world-freefly','8131.43','4086.37','191.04','229.1','-11.3',
     '--test-world-hour','16','--harness',"$port",'--log-file',$log)
    $quoted=($argsGame|ForEach-Object {'"'+$_+'"'})-join' '
@@ -61,7 +78,11 @@ try{
     Require ([DateTime]::UtcNow-lt$deadline) 'Scene deadline';Start-Sleep -Milliseconds 250
    }
    $null=Send @{cmd='exec';code='player allowDamage false;0 setRain 0;0 setOvercast .25;0 setFog .25;setDate [1985,6,21,16,0]'}
+   $pose=([string](Send @{cmd='eval';code='triFreeFlyPose "8131.43 4086.37 191.04 229.1 -11.3"'}).result).Trim('"')
+   Require ($pose.StartsWith('OK')) ('Freefly comparison pose refused: '+$pose)
    Start-Sleep -Seconds 5
+   Require (!(Select-String -Path $log -Pattern 'Critical error:|Cannot load --test-world' -Quiet)) 'Comparison world failed to load'
+   Require (Select-String -Path $log -Pattern 'worlds[\\/]eden.wrp' -Quiet) 'Everon landscape load missing'
    $state=Send @{cmd='optional_reshade';action='state'}
    $record=@{injected=$injected;initial=$state;log=$log}
    if(!$injected){
@@ -100,7 +121,7 @@ try{
    $record.performance=Send @{cmd='frame_performance'};$receipt.arms+=$record
    $null=Send @{cmd='exit'};$null=$p.WaitForExit(10000)
    Require $p.HasExited 'Clean exit deadline'
-   Require (!(Select-String -Path @($log,(Join-Path $arm 'stderr.log')) -Pattern 'UNHANDLED EXCEPTION|Validation Error|DeviceLost|panicked at|wgr_create failed' -Quiet)) 'Renderer runtime error'
+   Require (!(Select-String -Path @($log,(Join-Path $arm 'stderr.log')) -Pattern 'UNHANDLED EXCEPTION|Validation Error|DeviceLost|panicked at|wgr_create failed|Critical error:' -Quiet)) 'Renderer runtime error'
   }finally{
    if($p-and!$p.HasExited){$p.Kill();$null=$p.WaitForExit(10000)}
    if($client){$client.Dispose()}
