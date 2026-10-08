@@ -79,6 +79,63 @@ Existing user INI files are preserved; add these settings there if needed. Close
 the ReShade overlay and wait at least six seconds after effects finish loading
 before capturing, since the official startup splash still lasts five seconds.
 
+## Upgrade the existing cache to licensed scene previews, offline
+
+Use a current integrated engine containing the scene-depth bridge and actual
+WGPU target-settings gate. Close the game. The upgrade below uses the existing
+official 6.8 runtime/SDK and previously cached pinned GPL DH/CC0 header sources;
+it has no download fallback. It builds the current repository add-on in a fresh
+stage, checks all fixed shader/preset hashes and defaults to a read-only plan:
+
+```powershell
+$offline = 'C:/Users/mail/.codex/worktrees/worldgen-features-20261008/build/reshade-depth-offline-sources'
+./scripts/Upgrade-ReShadeScenePreview.ps1 -LocalSources $offline
+```
+
+The source directory must contain `AlucardDH/dh-reshade-shaders/LICENSE`,
+`AlucardDH/dh-reshade-shaders/Shaders/dh_uber_rt.fx` and
+`crosire/reshade-shaders/Shaders/ReShade.fxh`, with their existing pinned hashes.
+A missing or different source fails before staging; it never fetches a substitute.
+The wrapper prints the fresh stage and complete `UPGRADE-RESULT.json` plan. To
+prepare and apply in one explicit command, add `-Apply`. To apply an already
+reviewed stage without rebuilding, with the game closed:
+
+```powershell
+python scripts/Upgrade-ReShadeSceneCache.py install "$env:LOCALAPPDATA/OpenPoseidon/reshade/6.8.0" '<prepared-stage>' --apply
+```
+
+Only the fixed scene-probe/DH source, helper, licence, scene/Off templates,
+provenance and our compiled add-on are installed. Original DH source stays in
+`Sources`, outside the effect scan; unsupported legacy generic-DH presets are
+not added to the normal cache. The official DLL/manifest, ReShade.ini,
+OpenPoseidon.ini color strength, custom/session presets and graphics.cfg are
+preserved. Conflicting fixed assets refuse the upgrade before destination writes;
+use a separate runtime to preserve those custom files. Replacing our previous
+add-on/receipt creates `Backups/scene-preview/<id>` with old bytes, config copies
+and the plan. An installation failure rolls back completed payload replacements.
+
+This does not enable runtime loading. In developer single-player WGPU, enable
+**Load optional ReShade on next launch**, restart, then choose **Scene depth** or
+**DH depth debug** in **ReShade preview** before experimental **DH GI**. The live
+settings gate requires actual output-sized HDR targets and active 1x/4x MSAA; it
+does not change graphics settings. Depth/GI needs explicit selection, and a
+remembered engine session preset starts Off on the next launch. An existing
+manually selected external/color startup preset retains its existing behavior
+so the upgrade does not silently change user tuning or startup configuration.
+
+The loading checkbox defaults false in `GraphicsConfig` and uses the same
+`GamePaths::UserDir()/graphics.cfg` as startup. On normal Windows CWR paths this
+is `%APPDATA%/CWR/graphics.cfg`; `POSEIDON_USER_DIR` overrides it for an isolated
+profile, and legacy `--oldpaths` uses the game working directory. The upgrade
+never edits any of these preference files. Runtime cache location is separately
+`%LOCALAPPDATA%/OpenPoseidon/reshade/6.8.0`, unless explicitly overridden.
+
+DH source is GPL-2.0, the common header CC0 and our independent projection helper
+MIT; the pinned licence/source receipts are retained. No paid RTGI shader is
+installed. See [the depth/RT audit](RESHade-DEPTH-RT-AUDIT-20261008.md) for actual
+installed evidence and remaining 4x/quality/GPU timing acceptance. Selecting an
+effect is not a claim that all ReShade effects or ray tracing are integrated.
+
 ## Compatibility and provenance
 
 Pinned installer SHA256:

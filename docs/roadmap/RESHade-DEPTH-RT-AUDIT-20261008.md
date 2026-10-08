@@ -688,3 +688,37 @@ sizes and rejects unknown 0, unsupported 2x/8x, HDR off, scaling, mismatched and
 absent dimensions. The owned engine translation unit passes syntax checking,
 PowerShell parsing and diff checks pass. The parent must repeat the same 4x live
 SceneProbe fixture after integration; no new GPU/runtime proof is claimed here.
+
+
+## Preserving offline upgrade for the existing mild cache
+
+`Upgrade-ReShadeScenePreview.ps1` prepares a new stage from the existing official
+core/SDK plus mandatory cached pinned sources, builds the current add-on through
+shared `Build-ReShadeBridge.ps1`, then reports the full upgrade without changing
+the destination unless `-Apply` is passed. There is no network fallback. The
+standalone install helper also refuses a running game, verifies the payload,
+preflights all conflicts and preserves config/preset/preference bytes. Replaced
+owned add-on/receipt bytes are backed up; completed writes roll back on failure.
+The original official preparer now calls that same build helper.
+
+The default cache was inspected read-only: mild Strength=0.45 color preset,
+PresetPath=OpenPoseidon.ini, existing declared pinned API/core, and no depth
+files. Its user configs were not modified. A full actual pinned-source
+prepare/plan/apply check succeeded only against a newly created worktree build
+fixture, with the already built add-on. It preserved config and custom-session
+bytes, retained original DH outside active scan, and verified default-cache
+configs remained unchanged. No network, game launch or GPU work occurred. Four
+filesystem CPU tests cover read-only planning, idempotence, preservation/backup,
+conflict refusal before writes, rollback and path containment; PowerShell
+parsing passes. The refactored CMake build sequence is unchanged apart from
+canonical paths; it was not invoked while the parent's game was running.
+
+The optional runtime preference still defaults false. A fresh engine-selected
+session restarts Off; the existing explicitly selected external/color preset
+keeps its prior behavior. The upgrade does not rewrite user ReShade.ini to force
+a different preset. The loading checkbox and startup both use the same resolved
+GamePaths UserDir graphics.cfg (normally APPDATA/CWR; explicit isolated UserDir
+or legacy old-paths can change that). Exact normal UI and offline commands are
+in [the optional preview instructions](OPTIONAL-RESHADE-PREVIEW.md). Applying
+the upgrade to the default cache and normal-profile UI verification remain
+parent-owned; this agent has not changed that cache or launched the game.
