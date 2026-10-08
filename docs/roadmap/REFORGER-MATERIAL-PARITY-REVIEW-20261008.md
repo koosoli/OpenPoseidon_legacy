@@ -58,6 +58,22 @@ assets are distributed. The script is prepared, not yet runtime-validated.
 
 ## Next bounded investigations
 
+### Second source correction: two-layer mask UV selection
+
+The installed `ControlTower_01_Ruin_Bricks.emat` uses `MatPBR2Layers` with
+`UVSrcMaskMap` selecting the second UV stream. The adapter only recognized
+`UVSrcGlobalMaps`, incorrectly selecting UV0 for this material. Two-layer
+materials now honor an explicit `UVSrcMaskMap` (including explicit set 1),
+falling back to the existing global-map spelling when absent. Other material
+families are unchanged. This correction works in the normal native material
+route and does not require the PBR preview flag. The renderer's existing
+second-stream availability check still protects meshes with only one UV set.
+
+Added a synthetic adapter test covering separate mask selection, precedence,
+fallback and unaffected families. MSVC adapter-test syntax and five executable
+production-helper/parser checks pass. The parent owns full build and runtime
+acceptance; the material subagent did not launch the game.
+
 Check a locally installed opaque material with known nonunity scales against
 its native appearance before enabling the preview by default. Then establish
 constant-color/far-LOD material and `AOScale` semantics, and inspect normal

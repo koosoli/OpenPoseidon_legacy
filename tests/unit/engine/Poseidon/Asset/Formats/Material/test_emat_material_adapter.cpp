@@ -366,6 +366,28 @@ const char* kCrownEmat =
     "}";
 } // namespace
 
+TEST_CASE("EMAT two-layer mask uses its authored UV stream independently of global maps",
+          "[asset][material][emat][arf][mask-uv]")
+{
+    using namespace Poseidon::Asset::Material;
+    // Synthetic source representing the separate mask key used by native
+    // two-layer brick/rock materials. No native texture pixels are needed.
+    const auto source = ParseEmat("MatPBR2Layers {\n MaskMap \"Assets/Owned_mask.edds\"\n"
+                                  " UVSrcMaskMap \"UV set 2\"\n}\n");
+    REQUIRE(EmatMaskUsesUvSet2(source));
+    const auto translated = TranslateEmat(source, "Assets/Owned.emat", "");
+    const auto* mask = translated.Find(MaterialSlot::Mask);
+    REQUIRE(mask);
+    REQUIRE(mask->uvSource == "tex1");
+    REQUIRE_FALSE(EmatMaskUsesUvSet2(ParseEmat(
+        "MatPBR2Layers {\n UVSrcMaskMap \"UV set 1\"\n UVSrcGlobalMaps \"UV set 2\"\n}\n")));
+    REQUIRE(EmatMaskUsesUvSet2(ParseEmat(
+        "MatPBR2Layers {\n UVSrcGlobalMaps \"UV set 2\"\n}\n")));
+    REQUIRE_FALSE(EmatMaskUsesUvSet2(ParseEmat(
+        "MatPBRMulti {\n UVSrcMaskMap \"UV set 2\"\n}\n")));
+    REQUIRE_FALSE(EmatMaskUsesUvSet2(ParseEmat("MatPBRBasic {\n}\n")));
+}
+
 TEST_CASE("EMAT adapter: a Reforger MatPBRBasic binds its BCR and its NMO", "[asset][material][emat][arf]")
 {
     const TranslatedMaterial material =

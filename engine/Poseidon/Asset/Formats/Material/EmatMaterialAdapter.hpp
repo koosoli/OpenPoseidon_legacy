@@ -371,6 +371,15 @@ inline bool EmatNamesUvSet2(const EmatMaterial& emat, const char* key)
     return !text.empty() && text.back() == '2';
 }
 
+inline bool EmatMaskUsesUvSet2(const EmatMaterial& emat)
+{
+    // MatPBR2Layers names the mask's UV source separately from the other
+    // global maps. An explicit mask source takes precedence, including set 1.
+    const char* key = EmatMaterial::NameMatches(emat.className, "MatPBR2Layers") &&
+                      emat.Find("UVSrcMaskMap") ? "UVSrcMaskMap" : "UVSrcGlobalMaps";
+    return EmatNamesUvSet2(emat, key);
+}
+
 // RFG-072: attach a layer's `Color_N` to a slot the material already bound. Absent or
 // malformed leaves the identity tint in place.
 inline void SetEmatSlotTint(TranslatedMaterial& material, MaterialSlot slot, const EmatMaterial& emat,
@@ -642,7 +651,9 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     // `maxMaskSize`. `tex1` is recorded here as the material's answer; the renderer still
     // takes it only when the shape actually carries a second set (ClassifyGpuSection), so
     // a converted model without one keeps uv0 exactly as before.
-    if (EmatNamesUvSet2(emat, "UVSrcGlobalMaps"))
+    // The two-layer family can author the mask separately (UVSrcMaskMap).
+    // Keep the shared global-map spelling as its fallback and for Multi.
+    if (EmatMaskUsesUvSet2(emat))
         SetEmatSlotUv(out, MaterialSlot::Mask, emat, std::string(), "tex1");
     // And the global normal map on the same second set when the material says
     // so (`UVSrcGlobNormal "UV set 2"`); the renderer takes it only when the
