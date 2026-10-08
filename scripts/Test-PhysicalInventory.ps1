@@ -1,7 +1,7 @@
 <# Installed single-player inventory without a custom invicons asset pack.
    Run under with-game-lock.sh. Uses isolated settings, exits only its own process. #>
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$ExpectedCommit,[switch]$Multiplayer,[switch]$CombatAssists)
+param([Parameter(Mandatory)][string]$ExpectedCommit,[switch]$Multiplayer,[switch]$CombatAssists,[switch]$CompassOnly)
 $ErrorActionPreference = 'Stop'
 if (!$env:LOCK_OWNER) { throw 'Game lock required' }
 $root = Split-Path $PSScriptRoot -Parent
@@ -97,6 +97,26 @@ try {
         $receipt.passed=$true; Write-Host ('Evidence: '+$out); return
     }
     while ((Value 'triSceneReady') -cne 'OK') { Require ([DateTime]::UtcNow -lt $until) 'Scene deadline'; Start-Sleep -Milliseconds 250 }
+    if ($CompassOnly) {
+        Exec 'player allowDamage false;0 setRain 0;0 setFog 0;player setDir 0'
+        Display 46
+        Snap 'compass_closed'
+        Exec 'triKeyDown 10'
+        Start-Sleep -Seconds 1
+        Snap 'compass_open'
+        Exec 'triKeyUp 10'
+        Start-Sleep -Seconds 1
+        Snap 'compass_closed_again'
+        Display 46
+        $null=Send @{cmd='exit'}
+        Require ($p.WaitForExit(20000) -and $p.ExitCode -eq 0) 'Normal compass test exit failed'
+        Require (!(Select-String -Path @($log,$stderr) -Pattern 'UNHANDLED EXCEPTION|Validation Error|DeviceLost|panicked at|wgr_create failed' -Quiet)) 'Compass runtime error'
+        Require ((Get-Content (Join-Path $game 'DEPLOYED-FROM.txt') -Raw).Trim() -ceq $stamp) 'Installed pair changed'
+        $receipt.compassVisualReview='pending: readout must appear only in compass_open.png'
+        $receipt.passed=$true
+        Write-Host ('Compass captures ready for inspection: '+$out)
+        return
+    }
     Exec 'player allowDamage false;removeAllWeapons player;player addMagazine "HandGrenade";player addMagazine "HandGrenade";0 setRain 0;0 setFog 0;setAccTime 1'
     $before=Value 'magazines player'
     Key 18; Display 62020; Snap '01_open'

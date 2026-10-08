@@ -1078,7 +1078,7 @@ void InGameUI::DrawCombatAssists(const Camera& camera, EntityAI* vehicle)
     if (weapon >= 0 && weapon < man->NMagazineSlots()) direction = man->GetWeaponDirection(weapon);
     const PackedColor color(Color(0.90f, 0.94f, 0.90f, 0.95f));
     if (BearingReadoutEnabled() && GWorld->HasCompass())
-        GEngine->DrawTextF(Point2DFloat(0.455f, 0.59f), 0.020f, _font24, color,
+        GEngine->DrawTextF(Point2DFloat(0.455f, 0.35f), 0.020f, _font24, color,
                           "Bearing %03d", CombatAssists::BearingDegrees(direction.X(), direction.Z()));
 
     if (!GrenadeRangeEnabled() || weapon < 0 || weapon >= man->NMagazineSlots())
