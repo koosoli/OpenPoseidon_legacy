@@ -77,6 +77,14 @@ EarthSurfaceStream::SourceView Validate(const std::vector<uint8_t>& bytes,const 
 }
 }
 Earth::Pixel EarthSurfaceStream::LocalUv(const Window& w,double x,double z) {return {(x-w.x)/w.span,1-(z-w.z)/w.span};}
+Earth::Pixel EarthSurfaceStream::NearUv(Earth::Pixel uv) {
+    const auto warp=[](double value){const double q=2*value-1;return .5+.5*q/(.25+.75*std::abs(q));};
+    return {warp(uv.x),warp(uv.y)};
+}
+Earth::Pixel EarthSurfaceStream::NearPoint(const Window& w,double u,double v) {
+    const auto inverse=[](double value){const double q=2*value-1;return .5+.5*.25*q/(1-.75*std::abs(q));};
+    return {w.x+w.span*inverse(u),w.z+w.span*(1-inverse(v))};
+}
 double EarthSurfaceStream::OrthoWeight(const Window& w,double x,double z) {
     if(!std::isfinite(w.span)||w.span<=0)return 0;
     const auto c=Earth::FromLocal(w.latitude,w.longitude,x,z);
@@ -180,7 +188,11 @@ EarthSurfaceStream::Atlas EarthSurfaceStream::BuildRegional(const Window& w,Imag
     for(int row=0;row<size;++row) {
         if(cancelled && cancelled()){result.pixels.clear();result.farPixels.clear();result.error="superseded";return result;}
         for(int col=0;col<size;++col) {
-            const double x=w.x+(col+.5)*w.span/size,z=w.z+(size-row-.5)*w.span/size;
+            const auto point=NearPoint(w,(col+.5)/size,(row+.5)/size);
+            // Clamp sampling exposes the outermost texel at the exact mesh
+            // boundary. Pin that row/column to the same far-atlas coordinate.
+            const double x=col==0?w.x:col+1==size?double(w.x)+w.span:point.x;
+            const double z=row==0?double(w.z)+w.span:row+1==size?w.z:point.y;
             const auto uv=LocalUv(far,x,z);
             auto base=Sample({result.farPixels.data(),size,size},uv.x,uv.y,false);
             const auto local=colorAt(x,z);

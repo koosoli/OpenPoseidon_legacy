@@ -30,6 +30,10 @@ public:
         bool cellPresent=false;
     };
     static Earth::Pixel LocalUv(const Window& w,double x,double z);
+    // A fixed patch-centred chart; density increases near the resident camera
+    // without changing atlas bytes, geometry or the exact far-atlas boundary.
+    static Earth::Pixel NearUv(Earth::Pixel linearUv);
+    static Earth::Pixel NearPoint(const Window& w,double u,double v);
     static double OrthoWeight(const Window& w,double x,double z);
     static std::array<double,4> Sample(ImageView image,double u,double v,bool repeatU);
     static Atlas Build(const Window& w,ImageView overview,ImageView ortho,int size=AtlasSize,

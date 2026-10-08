@@ -60,6 +60,15 @@ int main(int argc,char** argv) {
                 assert(Surface::OrthoWeight(w,point.x,point.y)==0);
         }
     }
+    for(double u:{0.0,.0001,.1,.25,.5,.75,.9,.9999,1.0})for(double v:{0.0,.1,.5,.9,1.0}) {
+        const auto point=Surface::NearPoint(window,u,v);
+        const auto chart=Surface::NearUv(Surface::LocalUv(window,point.x,point.y));
+        assert(std::abs(chart.x-u)<1e-12 && std::abs(chart.y-v)<1e-12);
+    }
+    assert(Surface::NearPoint(window,0,0).x==window.x && Surface::NearPoint(window,0,0).y==window.z+window.span);
+    assert(Surface::NearPoint(window,1,1).x==window.x+window.span && Surface::NearPoint(window,1,1).y==window.z);
+    const auto centreA=Surface::NearPoint(wider,.5-.5/2048,.5),centreB=Surface::NearPoint(wider,.5+.5/2048,.5);
+    assert(centreB.x-centreA.x>.781 && centreB.x-centreA.x<.782);
     const uint8_t repeat[]{255,0,0,255,0,0,255,255};
     assert(Surface::Sample({repeat,2,1},0,.5,true)==Surface::Sample({repeat,2,1},1,.5,true));
     const auto top=Surface::Sample({northSouth,2,2},.5,0,false);
@@ -78,16 +87,31 @@ int main(int argc,char** argv) {
     assert(regional.cellPresent && regional.error.empty() && regional.farPixels.size()==64*64*4);
     const auto farWindow=Surface::FarWindow(regionalWindow);
     for(int row:{0,12,32,63})for(int col:{0,63}) {
-        const double x=window.x+(col+.5)*window.span/64,z=window.z+(64-row-.5)*window.span/64;
+        const auto point=Surface::NearPoint(window,(col+.5)/64,(row+.5)/64);
+        const double x=col==0?window.x:double(window.x)+window.span;
+        const double z=row==0?double(window.z)+window.span:row==63?window.z:point.y;
         const auto fuv=Surface::LocalUv(farWindow,x,z);
         const auto farColor=Surface::Sample({regional.farPixels.data(),64,64},fuv.x,fuv.y,false);
-        for(int k=0;k<3;++k)assert(std::abs(regional.pixels[(row*64+col)*4+k]-farColor[k])<=2);
+        for(int k=0;k<3;++k)assert(std::abs(regional.pixels[(row*64+col)*4+k]-farColor[k])<=.5);
     }
     auto outsideNear=regionalWindow;outsideNear.x=outsideNear.z=9500;outsideNear.horizonRadius=64000;
     assert(Surface::BuildRegional(outsideNear,{black,1,1},sources,64).cellPresent);
     assert(Surface::BuildRegional(remote,{black,1,1},sources,64).pixels.empty());
     int cancelRows=0;const auto regionalCancelled=Surface::BuildRegional(regionalWindow,{black,1,1},sources,64,[&]{return ++cancelRows==68;});
     assert(regionalCancelled.error=="superseded" && regionalCancelled.pixels.empty() && regionalCancelled.farPixels.empty());
+    // Coarse district and fine city remain geographically bounded: concentrating
+    // the chart never stretches fine city data over the unrelated Mamer region.
+    const uint8_t cityRed[]{255,0,0,255},districtBlue[]{0,0,255,255};
+    const std::vector<Surface::SourceView> pyramid{{{districtBlue,1,1},49.52,6.0,49.7,6.26,100},
+        {{cityRed,1,1},49.60,6.12,49.62,6.14,100}};
+    auto cityWindow=regionalWindow;cityWindow.x=cityWindow.z=3200;cityWindow.span=6400;
+    const auto cityAtlas=Surface::BuildRegional(cityWindow,{black,1,1},pyramid,64);
+    auto mamerWindow=cityWindow;mamerWindow.latitude=49.615;mamerWindow.longitude=6.04;
+    const auto mamerAtlas=Surface::BuildRegional(mamerWindow,{black,1,1},pyramid,64);
+    assert(cityAtlas.cellPresent && mamerAtlas.cellPresent && cityAtlas.error.empty() && mamerAtlas.error.empty());
+    assert(cityAtlas.pixels[(32*64+32)*4]==255 && cityAtlas.pixels[(32*64+32)*4+2]==0);
+    assert(mamerAtlas.pixels[(32*64+32)*4]==0 && mamerAtlas.pixels[(32*64+32)*4+2]==255);
+    assert(Surface::BuildRegional(remote,{black,1,1},pyramid,64).pixels.empty());
     auto badSource=sources;badSource[0].featherMetres=0;
     assert(!Surface::BuildRegional(regionalWindow,{black,1,1},badSource,64).error.empty());
     EarthTerrainStream::Patch patch{};patch.originLatitude=49.61;patch.originLongitude=6.13;
@@ -123,8 +147,15 @@ int main(int argc,char** argv) {
         const double warmSeconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-warmStart).count();
         assert(warmReady->error.empty() && warmReady->cellPresent && warmReady->window.generation==12);
         assert(warmReady->pixels.size()==2048*2048*4 && warmReady->farPixels.size()==2048*2048*4);
+        patch.originLatitude=49.615;patch.originLongitude=6.04;patch.x=patch.z=3200;
+        patch.originRevision=6;patch.generation=13;
+        const auto mamerStart=std::chrono::steady_clock::now();worker.Request(patch);
+        const auto mamerReady=Wait(worker);
+        const double mamerSeconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-mamerStart).count();
+        assert(mamerReady->error.empty() && mamerReady->cellPresent && mamerReady->window.revision==6 && mamerReady->window.generation==13);
+        assert(mamerReady->pixels.size()==2048*2048*4 && mamerReady->farPixels.size()==2048*2048*4);
         std::cout<<std::fixed<<std::setprecision(3)<<"EARTH_SURFACE_TIMING {\"coldWorkerSeconds\":"<<coldSeconds
-            <<",\"warmRecenterSeconds\":"<<warmSeconds<<",\"atlasSize\":2048,\"pairedPixels\":8388608}\n";
+            <<",\"warmRecenterSeconds\":"<<warmSeconds<<",\"mamerSeconds\":"<<mamerSeconds<<",\"atlasSize\":2048,\"pairedPixels\":8388608}\n";
         // An invalid receipt never publishes pixels. Reusing the real cached
         // source tests the production validation path without another request.
         const auto bad=std::filesystem::temp_directory_path()/"openposeidon-surface-invalid-receipt";

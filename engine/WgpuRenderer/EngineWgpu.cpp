@@ -7422,7 +7422,7 @@ void EngineWgpu::SubmitTerrain(std::span<const WgrTerrainNode> nodes)
     _cmds.push_back(cmd);
 }
 
-void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture, uint32_t sampler, bool groundDetail)
+void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTexture texture, uint32_t sampler, bool groundDetail, bool nearAtlas)
 {
     if (!_renderer || !mesh || !indexCount) return;
     EnsureCamera();
@@ -7437,6 +7437,9 @@ void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTextur
     d.flags = WGR_DRAW3D_DOUBLE_SIDED | WGR_DRAW3D_EARTH_SURFACE;
     d.texture_id = texture;
     d.sampler = sampler;
+    // Only an uploaded clamped near atlas uses the concentrated chart. NASA
+    // fallback and the far/globe atlases retain their existing linear UVs.
+    d.mat_specular.w = nearAtlas && texture && sampler == 3 ? 1.0f : 0.0f;
     d.world.m[0] = d.world.m[5] = d.world.m[10] = d.world.m[15] = 1.0f;
     d.world.m[12] = -camera.pos[0];
     d.world.m[13] = -camera.pos[1];

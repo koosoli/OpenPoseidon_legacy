@@ -117,3 +117,28 @@ fn earth_ground_detail_has_exact_distant_and_minified_neutral_endpoints() {
     // multiplier without inventing radiance when sun/ambient are zero.
     assert!((0.12f32 + 0.09 + 0.04 - 0.25).abs() < 1e-6);
 }
+
+#[test]
+fn earth_ground_detail_near_chart_gradient_is_finite_monotone_and_edge_exact() {
+    fn chart(u: f32) -> (f32, f32) {
+        let q = 2.0 * u - 1.0;
+        let d = 0.25 + 0.75 * q.abs();
+        (0.5 + 0.5 * q / d, 0.25 / (d * d))
+    }
+    assert_eq!(chart(0.0), (0.0, 0.25));
+    assert_eq!(chart(0.5), (0.5, 4.0));
+    assert_eq!(chart(1.0), (1.0, 0.25));
+    for u in [
+        -0.001, 0.0, 0.0001, 0.2, 0.499, 0.5, 0.501, 0.8, 0.9999, 1.0, 1.001,
+    ] {
+        let (value, derivative) = chart(u);
+        assert!(value.is_finite() && derivative.is_finite() && derivative > 0.0);
+        assert_eq!(value < 0.5, u < 0.5);
+        assert_eq!(value > 0.5, u > 0.5);
+        let numeric = (chart(u + 0.0001).0 - chart(u - 0.0001).0) / 0.0002;
+        assert!((numeric - derivative).abs() < 0.005, "u={u}");
+    }
+    assert!(SOURCE.contains("sample_dx *= chart.zw;"));
+    assert!(SOURCE.contains("sample_dy *= chart.zw;"));
+    assert!(SOURCE.contains("if (material.specular.w > 0.5)"));
+}

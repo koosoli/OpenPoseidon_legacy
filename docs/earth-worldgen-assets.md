@@ -563,3 +563,73 @@ surface readiness. Parser controls reject stale revision/generation, wrong
 provider status and failed receipts. Actual game readiness, imagery appearance
 and frame cost still require the parent-owned installed run; no such new runtime
 result is claimed here.
+
+
+## Bounded near-atlas resolution concentration
+
+The installed `88098b01` strict photographic run
+`build/earth-worldgen-regions-installed/20261008-164932-e254bd` finally confirms
+current ACT atlas uploads in all three captures (waits about 1.2–1.4 seconds).
+The city and Mamer ground is still blurred at a 15-metre camera clearance. The
+existing sampler already uses trilinear mip filtering and 16x anisotropy; its
+pixel gradients are supplied explicitly. The current resolution limits are:
+
+| Cached image or atlas | Approximate ground spacing |
+| --- | --- |
+| City ACT, 0.02° square, 2,048 square | 0.70 m east/west, 1.09 m north/south |
+| District ACT, 0.26° by 0.18°, 4,096 square | 4.58 m east/west, 4.89 m north/south |
+| Existing linear near atlas, 6,400 m by 2,048 | 3.125 m in both axes |
+| Concentrated near atlas at patch centre | 0.782 m in both axes |
+| Concentrated atlas at city pose offset 225/457 m | About 1.15/1.60 m in the two axes |
+
+These source spacings follow the actual cached geographic bounds/dimensions at
+49.61° latitude; they are not claims of sensor resolution. Mamer longitude 6.04
+is outside the city source's 6.12–6.14 bounds, so its best existing photographic
+source remains the district image. Concentrating an atlas cannot invent finer
+Mamer imagery. The resident terrain itself still has 25-metre DEM sample spacing.
+The ground-detail marker, world coordinates and local-light lanes reach the
+production shader; subtle smooth procedural modulation is consistent with its
+small linear-light coefficients. This change does not increase those coefficients
+or claim that generic procedural grain is sourced photographic detail.
+
+The correction preserves the existing 2,048-square near and far textures,
+geometry, memory bounds, source list and one albedo sample per fragment. A fixed
+patch-centred rational chart maps each linear UV coordinate using
+`q = 2*u-1; atlasUV = .5 + .5*q/(.25+.75*abs(q))`. The CPU compositor samples its
+exact inverse. Analytic chart gradients multiply the existing explicit UV
+pixel gradients, preserving proper mip/anisotropic filtering. This increases
+sampling density near the current resident camera without camera-dependent
+pattern motion. World coordinates and procedural normal/noise frequencies remain
+unchanged. The exact outer UV endpoints remain 0 and 1; outer rows/columns are
+pinned to the same far-atlas boundary samples, while the existing 200-metre
+world-space near/far blend remains. Resolution decreases toward the outer edge;
+source filtering and far/near appearance still need the installed comparison.
+
+Integration requires the parent-owned **near draw only** to pass sixth argument
+`_earthSurfaceTexture != 0` to `SubmitEarthHorizon`; retain fifth `groundDetail`
+argument `true`. Horizon/far, globe and feature calls keep sixth argument false.
+The helper additionally requires a nonzero texture and clamped atlas sampler 3
+before setting the otherwise-unused Earth specular marker. NASA fallback stays
+linear. CPU and shader changes must be integrated together with that near hook;
+an atlas/UV mismatch would distort geographic alignment. No public ABI changes.
+
+CPU controls cover chart inverse roundtrip, centre resolution, finite monotone
+analytic gradients across centre/edges and correct west/east half-plane; exact
+far-boundary sample agreement; synthetic coarse-district/fine-city geographic
+negative coverage; existing dateline, cancellation and invalid-receipt controls;
+and full cached city, warm recenter and Mamer atlas composition. The CPU script
+records source-file hashes and verifies all cached imagery/receipt inputs remain
+unchanged. Latest actual-cache `/O2 /Ob1` worker wall observations were 2.819
+seconds cold, 2.474 seconds for warm recenter and 2.449 seconds for Mamer, with
+the same 8,388,608 paired pixels; these are not injected or engine GPU costs.
+Worldgen manifests and assets are untouched. Production shader Naga
+validation and production C++ syntax checks create no GPU device. Parent-owned
+installed quality and frame-cost checks remain required; this source checkpoint
+makes no new visual acceptance claim.
+
+The images' clipped-looking house and planar road are separate placement limits:
+the current adapter preserves authored affine placement and source relative
+lift/burial at one resident ground sample; it does not fit each house footprint
+or foundation. Roads require explicit eligible classification before the narrow
+resident triangle fit. A screenshot alone cannot establish an individual model's
+correct foundation or road classification, and this atlas change edits neither.

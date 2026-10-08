@@ -159,6 +159,14 @@ fn material_flags(m: Material) -> u32 {
 }
 
 // BEGIN_EARTH_GROUND_DETAIL_HELPERS
+// Matched inverse chart: EarthSurfaceStream::NearPoint. The analytic gradient
+// keeps the existing trilinear/anisotropic sampler's true pixel footprint.
+fn earth_near_uv(uv: vec2<f32>) -> vec4<f32> {
+    let q = 2.0 * uv - vec2<f32>(1.0);
+    let denominator = vec2<f32>(0.25) + 0.75 * abs(q);
+    return vec4<f32>(vec2<f32>(0.5) + 0.5 * q / denominator,
+                     vec2<f32>(0.25) / (denominator * denominator));
+}
 // Three fixed world-metre bands, 24 bounded integer corner hashes total.
 // High ECEF lattice coordinates stay separate from small local coordinates so
 // neither Earth-sized float cancellation nor camera motion drives the grain.
@@ -940,8 +948,17 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         // that map's cave, shadow, wetness or GI receivers would turn its curved
         // surface black below the local datum. Marked near ground adds bounded
         // detail and actual scene CSM/depth AO; the globe keeps global light.
+        var sample_uv = in.uv;
+        var sample_dx = boot_duv_dx;
+        var sample_dy = boot_duv_dy;
+        if (material.specular.w > 0.5) {
+            let chart = earth_near_uv(in.uv);
+            sample_uv = chart.xy;
+            sample_dx *= chart.zw;
+            sample_dy *= chart.zw;
+        }
         let albedo = textureSampleGrad(textures[packed >> 3u], samplers[packed & 7u],
-                                      in.uv, boot_duv_dx, boot_duv_dy).rgb;
+                                      sample_uv, sample_dx, sample_dy).rgb;
         var n = normalize(in.normal);
         let ground_detail = material.light_ambient.w > 0.5;
         let distance = length(in.world_pos);
