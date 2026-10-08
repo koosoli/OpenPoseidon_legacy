@@ -5,12 +5,56 @@
 #include <iostream>
 
 using namespace Poseidon::Earth;
+
+// Independent global ECEF reference (Y is the north pole), used to prove that
+// an origin shift changes only coordinates, not the camera's physical pose.
+Direction Ecef(Coordinate origin, Direction local)
+{
+    const double lat=origin.latitude*Pi/180,lon=origin.longitude*Pi/180;
+    return {-std::sin(lon)*local.x+std::cos(lat)*std::cos(lon)*local.y-std::sin(lat)*std::cos(lon)*local.z,
+        std::sin(lat)*local.y+std::cos(lat)*local.z,
+        std::cos(lon)*local.x+std::cos(lat)*std::sin(lon)*local.y-std::sin(lat)*std::sin(lon)*local.z};
+}
+double Difference(Direction a,Direction b)
+{
+    return std::hypot(std::hypot(a.x-b.x,a.y-b.y),a.z-b.z);
+}
+
 int main()
 {
     const auto origin = FromLocal(46.6,8.1,Anchor,Anchor);
     assert(std::abs(origin.latitude-46.6)<1e-12 && std::abs(origin.longitude-8.1)<1e-12);
     assert(FromLocal(46.6,8.1,Anchor,Anchor+10000).latitude>origin.latitude);
     assert(FromLocal(46.6,8.1,Anchor+10000,Anchor).longitude>origin.longitude);
+    for(double lat : {-84.0,-49.45,0.0,49.45,84.0})
+        for(double lon : {-179.99,8.1,179.99})
+            for(double dx : {-2048000.0,-32001.0,0.0,32001.0,2048000.0})
+                for(double dz : {-2048000.0,0.0,2048000.0})
+                {
+                    const auto c=FromLocal(lat,lon,Anchor+dx,Anchor+dz);
+                    const auto local=ToLocal(lat,lon,c.latitude,c.longitude);
+                    assert(local.visible);
+                    assert(std::abs(local.x-Anchor-dx)<1e-7 && std::abs(local.z-Anchor-dz)<1e-7);
+                    const auto n=GlobeNormal(lat,lon,c.latitude,c.longitude);
+                    // Source addressing, OSM inverse and rendered curvature all
+                    // identify exactly the same point on the spherical datum.
+                    assert(std::abs(Radius*(n.y-1)+CurvatureDrop(Anchor+dx,Anchor+dz))<1e-7);
+                }
+    assert(!ToLocal(0,0,0,180).visible && !ToLocal(0,0,NAN,0).visible);
+    bool outsideHemisphere=false;
+    try { FromLocal(0,0,Anchor+Radius,Anchor); } catch(const std::out_of_range&) {outsideHemisphere=true;}
+    assert(outsideHemisphere);
+    // Bounding rejection must not lose a source corner when projected at high
+    // latitude, across the dateline, or from a different geographic frame.
+    for(Coordinate frame : {Coordinate{49.6,6.1},Coordinate{84,179.99},Coordinate{-40,-179.99}})
+        for(double west : {-180.01,6.1,179.99})
+            for(double lat : {-50.0,49.6,83.9})
+                for(double cornerLat : {lat,lat+.02})
+                    for(double cornerLon : {west,west+.02})
+                    {
+                        const auto corner=ToLocal(frame.latitude,frame.longitude,cornerLat,cornerLon);
+                        assert(GeographicBoundsOverlap(frame,lat,west,lat+.02,west+.02,corner.x-.5,corner.z-.5,1));
+                    }
     const auto equator=ToPixel({0,0});
     assert(equator.x==131072 && std::abs(equator.y-131072)<1e-7);
     assert(std::abs(ToPixel({0,180}).x-ToPixel({0,-180}).x)<1e-9);
@@ -207,8 +251,62 @@ int main()
     // Even a repeated Go invalidates a prior ready patch and resets the camera.
     assert(locations.Set(canyon.latitude,canyon.longitude,canyon.altitude));
     assert(!locations.IsCurrent(canyon.revision));
+    // Camera-only rebase has a deadband. A 32 km rolling window never changes
+    // geographic revision; neither normal patch recenter nor stationary flight
+    // causes ground invalidation or a new provider request.
+    assert(!CameraRebase({49.45,-2.55},Anchor+32000,1000,Anchor));
+    assert(!CameraRebase({49.45,-2.55},NAN,1000,Anchor));
+    assert(RecenterDistance(500)==32000 && RecenterDistance(100000)==32000);
+    assert(RecenterDistance(1000000)==250000 && RecenterDistance(30000000)==400000);
+    assert(!CameraRebase({0,0},Anchor+400000,18000000,Anchor));
+    for(Coordinate frame : {Coordinate{0,179.99},Coordinate{49.45,-2.55},Coordinate{-70,150}})
+        for(double altitude : {500.0,1000.0,9000.0,18000000.0})
+        {
+            const Direction point{RecenterDistance(altitude)+10000,Radius+altitude,-12000};
+            const auto next=CameraRebase(frame,Anchor+point.x,altitude,Anchor+point.z);
+            assert(next);
+            assert(Difference(Ecef(frame,point),Ecef(next->origin,{0,Radius+next->altitude,0}))<1e-7);
+            for(Direction v : {Direction{1,0,0},Direction{0,1,0},Direction{0,0,1},Direction{5,-3,8}})
+            {
+                const auto moved=RotateFrame(frame,next->origin,v);
+                assert(Difference(Ecef(frame,v),Ecef(next->origin,moved))<1e-12);
+                assert(Difference(v,RotateFrame(next->origin,frame,moved))<1e-12);
+            }
+        }
+    LocationState travel({0,179.8,1000});
+    // Synthetic constant-altitude waypoints make a complete equatorial circuit
+    // and return to the starting origin, crossing the antimeridian twice. The
+    // camera itself moves toward its view; it does not auto-level or auto-orbit.
+    for(int step=1;step<=900;++step)
+    {
+        const auto before=travel.Get();
+        const Coordinate waypoint{0,WrapLongitude(179.8+.4*step)};
+        const auto n=GlobeNormal(before.latitude,before.longitude,waypoint.latitude,waypoint.longitude);
+        const double r=Radius+1000;
+        const auto next=CameraRebase({before.latitude,before.longitude},Anchor+n.x*r,n.y*r-Radius,Anchor+n.z*r);
+        assert(next && std::abs(next->altitude-1000)<1e-7);
+        assert(std::abs(WrapLongitude(next->origin.longitude-waypoint.longitude))<1e-10);
+        GroundPatch patch{Anchor,Anchor,25,2,before.revision,1,{100,101,102,103}};
+        assert(travel.PublishGround(patch));
+        const auto immutable=travel.Ground();
+        assert(travel.Rebase(before.revision,next->origin.latitude,next->origin.longitude,next->altitude));
+        assert(!travel.QueryGround(Anchor,Anchor) && !travel.PublishGround(patch));
+        assert(!travel.Rebase(before.revision,0,0,1000)); // stale free flight cannot overwrite a Go
+        assert(immutable->Sample(Anchor,Anchor)->height==100);
+        assert(travel.Get().revision==before.revision+1);
+    }
+    assert(std::abs(WrapLongitude(travel.Get().longitude-179.8))<1e-10);
+    const auto polarRevision=travel.Get().revision;
+    assert(!travel.Rebase(polarRevision,85,0,1000) && travel.IsCurrent(polarRevision));
+    assert(travel.Set(49.45,-2.55,1000));
+    const auto explicitGo=travel.Get();
+    const GroundPatch newGround{Anchor,Anchor,25,2,explicitGo.revision,1,{300,300,300,300}};
+    assert(travel.PublishGround(newGround));
+    assert(!travel.Rebase(polarRevision,0,0,1000));
+    assert(travel.Get().latitude==49.45 && travel.Get().longitude==-2.55);
+    assert(travel.QueryGround(Anchor,Anchor)->height==300); // stale flight cannot clear new support
     rejected=false;
     try { LocationState invalid({90,0,4500}); } catch(const std::invalid_argument&) { rejected=true; }
     assert(rejected);
-    std::cout<<"Earth coordinates: origin, orientation, seams, elevation, polar guards, curved horizon, render-only ocean proxy/triangles, adaptive detail/hysteresis, live relocation revisions PASS\n";
+    std::cout<<"Earth coordinates: spherical projection/inverse, ENU pose continuity, 900-rebase circumnavigation, stale ground/origin rejection, atlas bounds, seams, elevation, polar guards, curved horizon, render-only ocean proxy, adaptive detail PASS\n";
 }

@@ -1,13 +1,12 @@
 #pragma once
 
+#include <Poseidon/World/Terrain/EarthFrame.hpp>
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
 namespace Poseidon::Earth
 {
-constexpr double Pi = 3.14159265358979323846;
-constexpr double Radius = 6378137.0;
 constexpr double MaxLatitude = 85.0511287798066;
 constexpr int Zoom = 10;
 constexpr int MaxZoom = 12;
@@ -15,7 +14,6 @@ constexpr int TilePixels = 256;
 constexpr int GridSamples = 257;
 constexpr float GridMetres = 100.0f;
 constexpr float RecenterMetres = 3200.0f;
-constexpr float Anchor = 6400.0f;
 constexpr float HalfWindow = 128 * GridMetres;
 constexpr int HorizonSamples = 257;
 constexpr int HorizonInnerBegin = 96;
@@ -77,43 +75,16 @@ inline int HorizonZoom(double latitude, float radius)
     return std::clamp(int(std::floor(std::log2(circumference * 2.0 / radius))), 3, Zoom);
 }
 
-struct Coordinate { double latitude, longitude; };
 struct Pixel { double x, y; };
-
-struct Direction { double x, y, z; };
-// ECEF unit sphere expressed in the fixed origin's east/up/north basis.
-// Unlike the streaming window's local map this covers the poles and far side.
-inline Direction GlobeNormal(double originLat, double originLon, double lat, double lon)
-{
-    const double p0=originLat*Pi/180.0;
-    const double p=lat*Pi/180.0, dl=(lon-originLon)*Pi/180.0;
-    return {std::cos(p)*std::sin(dl),
-        std::sin(p0)*std::sin(p)+std::cos(p0)*std::cos(p)*std::cos(dl),
-        std::cos(p0)*std::sin(p)-std::sin(p0)*std::cos(p)*std::cos(dl)};
-}
-
-inline double WrapLongitude(double degrees)
-{
-    return degrees - 360.0 * std::floor((degrees + 180.0) / 360.0);
-}
-
-// A fixed geographic origin, independent of the moving render window. Double
-// precision prevents texture/tile jitter when a window changes. This prototype
-// uses a local tangent map; it does not claim globe curvature or polar coverage.
-inline Coordinate FromLocal(double latitude, double longitude, double x, double z)
-{
-    const double lat = latitude + (z - Anchor) / Radius * 180.0 / Pi;
-    return {lat, WrapLongitude(longitude + (x - Anchor) /
-        (Radius * std::cos(latitude * Pi / 180.0)) * 180.0 / Pi)};
-}
 
 inline Pixel OverviewUv(double latitude,double longitude,double x,double z)
 {
     // Keep longitude continuous across +/-180 inside a triangle. The imagery
     // sampler repeats U; wrapping each vertex would smear the whole map over
     // a single quad at the dateline.
-    return {(longitude+180.0)/360.0+(x-Anchor)/(2.0*Pi*Radius*std::cos(latitude*Pi/180.0)),
-        (90.0-FromLocal(latitude,longitude,x,z).latitude)/180.0};
+    const auto c = FromLocal(latitude, longitude, x, z);
+    return {(longitude+180.0+WrapLongitude(c.longitude-longitude))/360.0,
+        (90.0-c.latitude)/180.0};
 }
 
 inline Pixel ToPixel(Coordinate c, int zoom = Zoom)

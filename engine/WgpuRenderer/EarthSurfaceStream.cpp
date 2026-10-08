@@ -110,11 +110,7 @@ EarthSurfaceStream::Atlas EarthSurfaceStream::Build(const Window& w,ImageView na
        !std::isfinite(w.x) || !std::isfinite(w.z)) {result.error="invalid surface source/window";return result;}
     // Outside this explicitly prepared cell, preserve the existing NASA draw
     // without allocating or filling a 16 MiB atlas on every rolling window.
-    const double metres=Earth::Radius*Earth::Pi/180.0;
-    const double west=Earth::Anchor+Earth::WrapLongitude(West-w.longitude)*metres*std::cos(w.latitude*Earth::Pi/180.0);
-    const double east=west+(East-West)*metres*std::cos(w.latitude*Earth::Pi/180.0);
-    const double south=Earth::Anchor+(South-w.latitude)*metres,north=south+(North-South)*metres;
-    if(east<=w.x || west>=w.x+w.span || north<=w.z || south>=w.z+w.span)return result;
+    if(!Earth::GeographicBoundsOverlap({w.latitude,w.longitude},South,West,North,East,w.x,w.z,w.span))return result;
     result.pixels.resize(size_t(size)*size*4);
     for(int row=0;row<size;++row) {
         if(cancelled && cancelled()){result.pixels.clear();result.error="superseded";return result;}
@@ -151,10 +147,8 @@ EarthSurfaceStream::Atlas EarthSurfaceStream::BuildRegional(const Window& w,Imag
     for(const auto& s:sources) {
         if(!s.image.pixels || s.image.width<1 || s.image.height<1 || !(s.north>s.south) || !(s.east>s.west) ||
            !std::isfinite(s.featherMetres) || s.featherMetres<=0) {result.error="invalid regional source/window";return result;}
-        const double west=Earth::Anchor+Earth::WrapLongitude(s.west-w.longitude)*metres*std::cos(w.latitude*Earth::Pi/180);
-        const double east=west+(s.east-s.west)*metres*std::cos(w.latitude*Earth::Pi/180);
-        const double south=Earth::Anchor+(s.south-w.latitude)*metres,north=south+(s.north-s.south)*metres;
-        intersects|=east>far.x && west<far.x+far.span && north>far.z && south<far.z+far.span;
+        intersects|=Earth::GeographicBoundsOverlap({w.latitude,w.longitude},s.south,s.west,s.north,s.east,
+            far.x,far.z,far.span);
     }
     if(!intersects)return result; // No allocation for an unrelated part of Earth.
     auto colorAt=[&](double x,double z) {

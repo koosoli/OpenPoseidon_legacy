@@ -409,8 +409,9 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
             _speed = speedWanted;
         }
 
-        Vector3 position = Position() + _speed * deltaT;
         const bool earth = EarthStreaming::Enabled();
+        const auto earthLocation = earth ? EarthStreaming::GetLocation() : EarthStreaming::Location{};
+        Vector3 position = Position() + _speed * deltaT;
         if (_altitudeSpeedScaling)
         {
             // Zeus is a map-level camera. Its altitude speed boost makes it
@@ -428,6 +429,40 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
             }
             else
             {
+                if (earth)
+                {
+                    saturate(position[1],500.0f,EarthStreaming::OrbitAltitudeLimit);
+                    const Earth::Coordinate oldOrigin{earthLocation.latitude,earthLocation.longitude};
+                    if (const auto next = Earth::CameraRebase(oldOrigin,position[0],position[1],position[2]))
+                    {
+                        const double altitude = std::clamp(next->altitude,500.0,double(EarthStreaming::OrbitAltitudeLimit));
+                        if (EarthStreaming::ValidateLocation(next->origin.latitude,next->origin.longitude,altitude))
+                        {
+                            if (!EarthStreaming::Locations().Rebase(earthLocation.revision,
+                                next->origin.latitude,next->origin.longitude,altitude))
+                                return; // An explicit geographic Go superseded this movement.
+                            const auto rotate = [&](Vector3Val v) {
+                                const auto r = Earth::RotateFrame(oldOrigin,next->origin,{v[0],v[1],v[2]});
+                                return Vector3(float(r.x),float(r.y),float(r.z));
+                            };
+                            const Vector3 direction = rotate(Direction()), upDirection = rotate(Orientation().DirectionUp());
+                            Matrix3 orient;
+                            orient.SetDirectionAndUp(direction,upDirection);
+                            SetOrientation(orient);
+                            _speed = rotate(_speed);
+                            position = Vector3(EarthStreaming::CameraAnchor,float(altitude),EarthStreaming::CameraAnchor);
+                        }
+                        else
+                        {
+                            // Mercator data does not cover the poles. Keep the
+                            // last valid camera frame rather than shift to an
+                            // origin the terrain/feature providers cannot use.
+                            position = Position();
+                            _speed = VZero;
+                            constrained = true;
+                        }
+                    }
+                }
                 const float oldX = position[0];
                 const float oldZ = position[2];
                 const float lower = earth ? -EarthStreaming::CoordinateLimit : 0.0f;

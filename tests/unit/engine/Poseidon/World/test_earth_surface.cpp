@@ -27,9 +27,26 @@ int main(int argc,char** argv) {
     assert(Surface::OrthoWeight(window,6400,6400)==1);
     const double edge=Surface::OrthoWeight(window,5900,6400),middle=Surface::OrthoWeight(window,6000,6400);
     assert(edge==0 && middle>0 && middle<1);
-    const double west=Earth::Anchor+(6.12-6.13)*Earth::Pi/180*Earth::Radius*std::cos(49.61*Earth::Pi/180);
+    const auto west=Earth::ToLocal(49.61,6.13,49.61,6.12);
     auto wider=window;wider.x=3200;wider.z=3200;wider.span=6400;
-    assert(Surface::OrthoWeight(wider,west,6400)<1e-20);
+    assert(Surface::OrthoWeight(wider,west.x,west.z)<1e-20);
+    // The same prepared cell remains aligned after an origin shift. Its new
+    // projected centre may be far from Anchor; overlap culling must retain it.
+    auto shifted=window;shifted.longitude=6.5;
+    const auto cellCentre=Earth::ToLocal(shifted.latitude,shifted.longitude,49.61,6.13);
+    shifted.x=float(cellCentre.x-500);shifted.z=float(cellCentre.z-500);
+    assert(Surface::OrthoWeight(shifted,cellCentre.x,cellCentre.z)>.999999);
+    const auto shiftedAtlas=Surface::Build(shifted,{black,1,1},{northSouth,2,2},64);
+    assert(shiftedAtlas.cellPresent && shiftedAtlas.error.empty());
+    for(double latitude : {49.607,49.613}) {
+        const auto oldPoint=Earth::ToLocal(window.latitude,window.longitude,latitude,6.13);
+        const auto newPoint=Earth::ToLocal(shifted.latitude,shifted.longitude,latitude,6.13);
+        const auto oldUv=Surface::LocalUv(window,oldPoint.x,oldPoint.z);
+        const auto newUv=Surface::LocalUv(shifted,newPoint.x,newPoint.z);
+        const auto oldColor=Surface::Sample({atlas.pixels.data(),64,64},oldUv.x,oldUv.y,false);
+        const auto newColor=Surface::Sample({shiftedAtlas.pixels.data(),64,64},newUv.x,newUv.y,false);
+        for(int channel=0;channel<3;++channel)assert(std::abs(oldColor[channel]-newColor[channel])<2);
+    }
     // Both altitude bands retain the identical near/far top-surface seam. UVs
     // change only on the split near draw; its boundary is entirely NASA.
     for(float grid:{25.f,100.f}) {
@@ -92,10 +109,8 @@ int main(int argc,char** argv) {
         assert(ready->farPixels.size()==2048*2048*4);
         // The regional JPEG's white exterior is missing national coverage, not
         // white terrain. It must yield the NASA fallback beyond that boundary.
-        const double metres=Earth::Radius*Earth::Pi/180;
-        const double outsideX=Earth::Anchor+(6.4-6.13)*metres*std::cos(49.61*Earth::Pi/180);
-        const double outsideZ=Earth::Anchor+(49.95-49.61)*metres;
-        const auto fuv=Surface::LocalUv(Surface::FarWindow(ready->window),outsideX,outsideZ);
+        const auto outsidePoint=Earth::ToLocal(49.61,6.13,49.95,6.4);
+        const auto fuv=Surface::LocalUv(Surface::FarWindow(ready->window),outsidePoint.x,outsidePoint.z);
         const auto outsideColor=Surface::Sample({ready->farPixels.data(),2048,2048},fuv.x,fuv.y,false);
         assert(outsideColor[0]<220 && outsideColor[1]<220 && outsideColor[2]<220);
         std::cout<<"Actual cached ACT/NASA decode/hash/composition PASS; generation 11 revision 5\n";

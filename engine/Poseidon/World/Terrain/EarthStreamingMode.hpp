@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EarthGroundPatch.hpp"
+#include "EarthFrame.hpp"
 
 #include <cstdlib>
 #include <cstring>
@@ -37,7 +38,8 @@ inline bool ValidateLocation(double latitude, double longitude, double altitude)
         std::isfinite(longitude) && std::abs(longitude)<=180.0 &&
         std::isfinite(altitude) && altitude>=500.0 && altitude<=OrbitAltitudeLimit;
 }
-// An explicit geographic teleport. Finite OFP map objects/navigation remain local.
+// Geographic frame for explicit teleports and Earth free-flight rebasing.
+// Finite OFP map objects/navigation remain local.
 // Origin and revision are read together so a worker can never combine two Gos.
 class LocationState
 {
@@ -58,6 +60,17 @@ class LocationState
         return true;
     }
     bool IsCurrent(uint64_t revision) const { return Get().revision==revision; }
+    // A camera may only rebase the frame it actually read. A simultaneous
+    // explicit Go wins; neither old worker results nor old ground survive.
+    bool Rebase(uint64_t expectedRevision, double latitude, double longitude, double altitude)
+    {
+        if (!ValidateLocation(latitude,longitude,altitude)) return false;
+        std::lock_guard lock(_mutex);
+        if (_location.revision != expectedRevision) return false;
+        _location={latitude,longitude==180.0 ? -180.0 : longitude,float(altitude),_location.revision+1};
+        _ground.reset();
+        return true;
+    }
     bool PublishGround(GroundPatch patch)
     {
         if (!patch.Valid()) return false;
