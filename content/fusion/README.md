@@ -27,24 +27,32 @@ without a mission change.
 Placed as close to CWA as the 51.2 km world allows (owner, 2026-10-09). North up:
 
 ```
-  Desert Island                              Everon
-  Nogova
+  Desert Island
+  Nogova                          Everon
                        Kolgujev
         Malden
 ```
 
 * Everon is north-east of Malden ("Everon Island, Northeast of Malden", the Flashpoint
   mission) and the easternmost island ("Everon, the easternmost island in this group",
-  Blake, x01iansoffice).
-* Kolgujev is east-north-east of Malden: in Planes Start the A-10s leave Malden heading
-  east / north-east, and Maverick starts them off Kolgujev's east-south-east coast flying
-  north-west.
+  Blake, x01iansoffice), within helicopter range of Malden ("Choppers are waiting to ferry
+  you to Everon"). It sits just north of Kolgujev: 6 km coast to coast, like the group's
+  other neighbours (5-9 km), and 24 km from Malden. No campaign asks for open ocean round it.
+* Kolgujev is east-north-east of Malden: in Planes Start the A-10s leave Malden's runway
+  north-east ("heading east to Kolgujev"), and Maverick starts them east-south-east of
+  Kolgujev heading west-north-west, then along the south coast. That start is due east of
+  Malden's airfield here. (Maverick's caption, "5 miles North East of Kolgujev", disagrees
+  with its own coordinates; Planes Start's "North East of Everon" is a slip for Malden.)
+* Nogova: US forces reach it from the south / south-west and Soviet Su-25s from the
+  south-east (Resistance endings), matching Malden south of it and Kolgujev south-east.
 * Nogova is north-north-west of Malden (Reforger's Malden-islands map; the CWA campaigns
   only call it one of "the Malden islands"). Reforger also puts it south-south-west of
   Everon; with Everon easternmost and Kolgujev east of Malden that cannot fit at this
-  scale, so Everon is east-north-east of it here.
+  scale, so Everon is east of it here.
 * Kolgujev follows the 1985 campaign, not Reforger (which puts it 300 km north).
 * Desert Island, the menu intro island, is in no campaign: apart in the north-west.
+* One clue fits no arrangement: in Return to Eden the invasion helicopters reach Everon's
+  north edge heading west-south-west, as if from the north-east.
 * Distances are compressed: canon puts the islands 179-300 km apart.
 
 ## Airports and map names

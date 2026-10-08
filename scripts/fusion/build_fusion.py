@@ -20,14 +20,20 @@ SIZE = 1024
 # 3.2 km (64 cells) of water between them. The layout follows the CWA 1985 campaign, then Reforger's
 # Malden-islands map where CWA is silent (owner, 2026-10-09: "what would be closest to CWA"):
 #   * Everon north-east of Malden ("Ile d'Everon, au nord-est de Malden", 01flashpoint) and the easternmost
-#     island of the group ("Everon, the easternmost island in this group", x01iansoffice);
-#   * Kolgujev east-north-east of Malden: 31aplanesstart's A-10s head east / north-east out of Malden's NE corner,
-#     and 31bmaverick starts them off Kolgujev's east-south-east coast heading north-west;
-#   * Nogova north-north-west of Malden (Reforger; the CWA campaigns only call it one of "the Malden islands").
-#     Reforger also has it south-south-west of Everon -- at this scale that cannot hold together with the above,
-#     so here Everon is east-north-east of it;
+#     island of the group ("Everon, the easternmost island in this group", x01iansoffice), within helicopter range
+#     ("Choppers are waiting to ferry you to Everon", x01iansoffice). No campaign asks for open ocean around it:
+#     it sits just north of Kolgujev, ~6 km coast to coast like the group's other neighbours (owner, 2026-10-09:
+#     "do what fits best"; it was in the far north-east corner, 16 km from its nearest neighbour, 32 km from Malden);
+#   * Kolgujev east-north-east of Malden: 31aplanesstart's A-10s leave Malden's runway north-east ("heading east to
+#     Kolgujev"), and 31bmaverick starts them east-south-east of Kolgujev heading west-north-west, then along the
+#     south coast -- due east of Malden's field, as here;
+#   * Nogova one of "the Malden islands" (x06allies): US forces reach it from the south / south-west and Soviet
+#     Su-25s from the south-east (x12gameover, x13badend), i.e. Malden south of it and Kolgujev south-east;
+#   * Nogova north-north-west of Malden (Reforger, consistent with the above). Reforger also has it
+#     south-south-west of Everon -- at this scale that cannot hold together with the above, so here Everon is
+#     east of it;
 #   * Desert Island (the menu intro island, in no campaign) apart in the north-west.
-ISLANDS = [('eden', 'Everon', 736, 736), ('abel', 'Malden', 160, 96),
+ISLANDS = [('eden', 'Everon', 672, 544), ('abel', 'Malden', 160, 96),
            ('cain', 'Kolgujev', 480, 224), ('noe', 'Nogova', 32, 432),
            ('intro', 'Desert Island', 32, 752)]
 # the source worlds' CfgWorlds classes

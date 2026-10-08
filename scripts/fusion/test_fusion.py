@@ -23,6 +23,17 @@ class FusionTests(unittest.TestCase):
         self.assertEqual(max(centre[k][0] for k in ('abel', 'eden', 'cain', 'noe')), centre['eden'][0])  # easternmost
         self.assertTrue(45 <= bearing('abel', 'cain') <= 90)           # Kolgujev east / north-east of Malden (31a)
         self.assertTrue(315 <= bearing('abel', 'noe') <= 350)          # Nogova north-north-west of Malden (Reforger)
+        self.assertTrue(135 <= bearing('noe', 'abel') <= 225)          # US reach Nogova from the south (x12gameover)
+        self.assertTrue(90 <= bearing('noe', 'cain') <= 180)           # Soviet Su-25s from the south-east (x13badend)
+        # 31bmaverick's A-10 start (Kolgujev 15291,4271) lies east of Malden's runway (31a, 7921,9635): "heading east"
+        tile = {key: (x, z) for key, _, x, z in ISLANDS}
+        start = (tile['cain'][0] * CELL + 15291, tile['cain'][1] * CELL + 4271)
+        runway = (tile['abel'][0] * CELL + 7921, tile['abel'][1] * CELL + 9635)
+        self.assertTrue(70 <= math.degrees(math.atan2(start[0] - runway[0], start[1] - runway[1])) % 360 <= 110)
+        # Everon a neighbour, not out on its own: its tile within 6.4 km of Kolgujev's
+        (ex, ez), (kx, kz) = tile['eden'], tile['cain']
+        gap = max(kx - (ex + 256), ex - (kx + 256), kz - (ez + 256), ez - (kz + 256))
+        self.assertLessEqual(gap, 128)
 
     def test_airport_and_names_from_config_text(self):
         cfg = """class CfgWorlds { class DefaultWorld {}; class Eden: DefaultWorld {

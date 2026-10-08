@@ -70,7 +70,7 @@ try {
     $null=Send @{cmd='exec';code='fusionCam camSetPos [25600,22000,40000]; fusionCam camSetTarget [25600,22100,0]; fusionCam camCommit 0'}
     Start-Sleep -Seconds 4
     $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-high.png")}
-    $sites=if ($Large) {@(@('south',10000,10000),@('centre',51200,51200),@('north',92000,92000))} else {@(@('everon',41860,40700),@('malden',14400,11200),@('kolgujev',30400,17600),@('nogova',9364,26008),@('desert',11100,41200))}
+    $sites=if ($Large) {@(@('south',10000,10000),@('centre',51200,51200),@('north',92000,92000))} else {@(@('everon',38660,31100),@('malden',14400,11200),@('kolgujev',30400,17600),@('nogova',9364,26008),@('desert',11100,41200))}
     foreach ($site in $sites) {
         $name=$site[0]; $x=$site[1]; $z=$site[2]
         $height=[double](Send @{cmd='eval';code="triTerrainHeight [$x,$z]"}).result
