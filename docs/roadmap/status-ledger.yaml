@@ -8306,13 +8306,13 @@ tickets:
     class: ENGINE
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
-    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
-    # unfinished, into Oli); not started here.
-    scheduling_state: HOLD
-    status: PLANNED
+    # IMPLEMENTED (owner 2026-10-09: "make fuses work / add features"). The hand-grenade fuse is ON by default;
+    # the reaction is off by default (CfgAIFork grenadeDodge = 1).
+    scheduling_state: ACTIVE
+    status: IMPLEMENTED
     outcome: null
     owner: Dec
-    branch: null
+    branch: dec/ai-xray
     baseline_commit: b66d9b97
     verification_commit: null
     milestone: 0
@@ -8320,13 +8320,21 @@ tickets:
     depends_on: [AI-XRAY-001]
     blocked_by: []
     blocks: []
-    implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    implementation_commits: [96d32b43]
+    production_call_sites:
+      - file: engine/Poseidon/AI/AIGrenadeDanger.cpp
+        symbol: GrenadeDanger::React
+      - file: engine/Poseidon/World/Entities/Weapons/Shots.cpp
+        symbol: ShotShell::Simulate
+      - file: engine/Poseidon/World/Entities/Weapons/GrenadeFuse.cpp
+        symbol: GrenadeFuse::FuseSeconds
+    test_ids: [grenade, ai-xray-003-dropped-grenade-ai1, ai-xray-003-c02-on-off]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
+      - "Stock CWA grenades had no fuse (contact detonation); they now get 4 s by default, which changes stock play (AI throwers and the player). handGrenadeFuseSeconds = 0 restores it."
+      - "Grenades are noticed by distance only (no sight or sound check), as X-Ray registers explosives."
       - "Not started in Malprave; CWA AI ignore thrown grenades."
     fallback: null
     reviewer: null

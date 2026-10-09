@@ -189,6 +189,15 @@ From Malprave job 23 (29 Sep), the first and only A/B test of the X-Ray patches:
     * Both runs show the pre-existing `ValidateOutVehicle` assert.
     * The target log printed re-picks of the current target as switches (41 for one soldier); it now logs
       only real changes.
+* **2026-10-09, AI-XRAY-003 (96d32b43): hand grenades get a fuse, and soldiers run from them.**
+  * **Fuse, on by default.** Stock CWA grenades went off on contact, so there was nothing to react to. A thrown
+    grenade with no `explosionTime` now gets `GrenadeFuse::handGrenadeFuseSeconds`, 4 s. Setting it to 0
+    restores contact detonation.
+  * **Reaction, off by default** (`CfgAIFork grenadeDodge = 1`).
+    * Soldiers inside a grenade's danger radius (2× blast range + 1 m) run straight away to its edge and are held
+      there until it goes off.
+    * Going prone was tried first and saves nobody: blast damage depends on distance and cover only.
+    * Dropped-grenade test: off, 2 of 3 killed; on, all 3 live with ≤ 0.12 damage.
 
 ## 5. X-Ray research (Lost Alpha docs, 2026-10-09)
 
