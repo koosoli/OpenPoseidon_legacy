@@ -27,6 +27,7 @@
 namespace Poseidon
 {
 class AIUnit;
+class AICenter;
 
 namespace DangerList
 {
@@ -65,5 +66,13 @@ float Priority(Type type, float ageMs);
 float Range(Type type);
 float Memory(Type type);
 const char* Name(Type type);
+
+// AI-XRAY-006: cover where one of a side's soldiers was hit is bad cover for that side for 120 s within 3 m
+// (X-Ray CDangerCoverLocation, ai_stalker_fire.cpp). Off by default: class CfgAIFork { badCover = 1; }.
+bool BadCoverEnabled();
+//! a soldier of `side` was hit by the enemy while in cover at `pos`
+void NoteBadCover(const AICenter* side, Vector3Par pos);
+//! cover at `pos` is bad for `side` (EntityAI::FindHideBehind skips it)
+bool IsBadCover(const AICenter* side, Vector3Par pos);
 } // namespace DangerList
 } // namespace Poseidon

@@ -229,12 +229,21 @@ void EntityAI::HitBy(EntityAI* killer, float howMuch, RString ammo)
     base::HitBy(killer, howMuch, ammo);
     AIGroup* g = GetGroup();
     // AI-XRAY-004: the victim notes where the shooter is, squadmates near him that he was hit or killed
-    if (DangerList::Enabled() && howMuch > 0.01f)
+    if ((DangerList::Enabled() || DangerList::BadCoverEnabled()) && howMuch > 0.01f)
     {
         AIUnit* me = CommanderUnit();
         AICenter* myCenter = g ? g->GetCenter() : nullptr;
         // only an enemy's fire: not a friend's stray round, a fall, a friendly truck, his own grenade
         const bool hostile = me && killer && killer != this && myCenter && !myCenter->IsFriendly(killer->GetTargetSide());
+        // AI-XRAY-006: hit by the enemy while hiding behind something: that cover is bad for his side
+        if (hostile && me->IsFreeSoldier() && DangerList::BadCoverEnabled())
+        {
+            const Object* cover = GetHideBehind();
+            if (cover && Position().DistanceXZ(cover->Position()) < cover->CollisionSize() + CollisionSize() + 4.0f)
+            {
+                DangerList::NoteBadCover(myCenter, Position());
+            }
+        }
         if (hostile && me->IsFreeSoldier()) // a soldier on foot (not a hit vehicle's commander)
         {
             // where it came from is a guess, as the stock reaction's +-100 m reveal of the killer is

@@ -19,4 +19,6 @@ class CfgAIFork
     targetScoring = 1;
     grenadeDodge = 1;
     dangerList = 1;
+    lookOut = 1;
+    badCover = 1;
 };

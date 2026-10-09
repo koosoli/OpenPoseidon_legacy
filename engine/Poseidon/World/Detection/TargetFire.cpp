@@ -24,6 +24,7 @@
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <Poseidon/AI/AIHunt.hpp>
+#include <Poseidon/AI/AIDangerList.hpp> // AI-XRAY-006: bad cover
 
 #if _ENABLE_CHEATS
 
@@ -887,6 +888,11 @@ void EntityAI::FindHideBehind(Vector3 pos, float maxDist)
                     Vector3 wantedPos = obj->Position() - tgtDir * behind;
 
                     if (!unit->CheckEmpty(wantedPos))
+                    {
+                        continue;
+                    }
+                    // AI-XRAY-006: not where one of ours was just hit in cover
+                    if (DangerList::IsBadCover(center, wantedPos))
                     {
                         continue;
                     }

@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <unordered_map>
+#include <vector>
 
 namespace Poseidon
 {
@@ -52,6 +53,17 @@ struct Rec
 std::unordered_map<const AIUnit*, Rec> s_recs;
 float s_lastNow = 0;
 
+// AI-XRAY-006
+constexpr float kBadCoverRadius = 3.0f;
+constexpr float kBadCoverMemory = 120.0f;
+struct BadCover
+{
+    const AICenter* side;
+    Vector3 pos;
+    float time;
+};
+std::vector<BadCover> s_badCovers;
+
 float Now()
 {
     return Glob.time.toFloat();
@@ -73,6 +85,7 @@ void CheckClock(float now)
     if (now + 1.0f < s_lastNow)
     {
         s_recs.clear();
+        s_badCovers.clear();
     }
     s_lastNow = now;
 }
@@ -282,6 +295,74 @@ bool Top(const AIUnit* unit, Vector3& pos, Type* type, bool (*accept)(Type))
     if (type)
         *type = r.entries[best].type;
     return true;
+}
+
+bool BadCoverEnabled()
+{
+    static bool enabled = false;
+    static bool loaded = false;
+    if (!loaded)
+    {
+        loaded = true;
+        if (const ParamEntry* cls = Pars.FindEntry("CfgAIFork"))
+        {
+            if (const ParamEntry* e = cls->FindEntry("badCover"))
+            {
+                enabled = static_cast<float>(*e) != 0;
+            }
+        }
+    }
+    return enabled;
+}
+
+void NoteBadCover(const AICenter* side, Vector3Par pos)
+{
+    if (!BadCoverEnabled() || !side)
+        return;
+    const float now = Now();
+    CheckClock(now);
+    // drop the expired; the same spot again only refreshes it
+    s_badCovers.erase(std::remove_if(s_badCovers.begin(), s_badCovers.end(),
+                                     [now](const BadCover& c) { return now - c.time > kBadCoverMemory; }),
+                      s_badCovers.end());
+    for (BadCover& c : s_badCovers)
+    {
+        if (c.side == side && c.pos.DistanceXZ2(pos) < Square(kBadCoverRadius))
+        {
+            c.time = now;
+            return;
+        }
+    }
+    if (s_badCovers.size() >= 256)
+        s_badCovers.erase(s_badCovers.begin()); // the oldest
+    s_badCovers.push_back({side, pos, now});
+    if (LogOn())
+    {
+        LOG_INFO(World, "Danger: bad cover at ({:.0f},{:.0f}) t={:.1f}", pos.X(), pos.Z(), now);
+    }
+}
+
+bool IsBadCover(const AICenter* side, Vector3Par pos)
+{
+    if (!BadCoverEnabled() || s_badCovers.empty())
+        return false;
+    const float now = Now();
+    for (const BadCover& c : s_badCovers)
+    {
+        const float age = now - c.time;
+        if (c.side == side && age >= 0 && age <= kBadCoverMemory && c.pos.DistanceXZ2(pos) < Square(kBadCoverRadius))
+        {
+            static float s_nextLog = 0;
+            if (LogOn() && (now >= s_nextLog || s_nextLog - now > 10))
+            {
+                s_nextLog = now + 2;
+                LOG_INFO(World, "Danger: cover at ({:.0f},{:.0f}) skipped (bad, {:.0f} s old) t={:.1f}", pos.X(),
+                         pos.Z(), age, now);
+            }
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace DangerList
