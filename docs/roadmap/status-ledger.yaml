@@ -8423,13 +8423,12 @@ tickets:
     class: ENGINE
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
-    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
-    # unfinished, into Oli); not started here.
-    scheduling_state: HOLD
-    status: PLANNED
+    # IMPLEMENTED (owner 2026-10-09: "continue on ai"), off by default (CfgAIFork lookOut = 1; badCover = 1).
+    scheduling_state: ACTIVE
+    status: IMPLEMENTED
     outcome: null
     owner: Dec
-    branch: null
+    branch: dec/ai-xray
     baseline_commit: b66d9b97
     verification_commit: null
     milestone: 0
@@ -8437,13 +8436,18 @@ tickets:
     depends_on: [AI-XRAY-001]
     blocked_by: []
     blocks: []
-    implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    implementation_commits: [bbb93088]
+    production_call_sites:
+      - file: engine/Poseidon/AI/AIHunt.cpp
+        symbol: Hunt::ThinkImpl
+      - file: engine/Poseidon/World/Detection/TargetFire.cpp
+        symbol: EntityAI::FindHideBehind
+    test_ids: [ai-xray-006-hunt-lookout, ai-xray-006-c02-badcover]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
+      - "Cover eviction (a mate closer to a cover spot takes it) is not done: CWA picks cover per soldier in FindHideBehind with no reservation to evict from. The 3 m enemy rule is already covered by FindHideBehind's own minimum distance."
       - "Spacing and flank cap are in (aiCoverGrenades); eviction, the 3 m enemy rule and the peek are not."
     fallback: null
     reviewer: null

@@ -254,6 +254,13 @@ From Malprave job 23 (29 Sep), the first and only A/B test of the X-Ray patches:
   * A grenade at the top of the list hid a danger worth searching.
   * Records left from before a restart, or at a reused address, could be picked.
   * Checked in game: an enemy body is ignored, a friendly body is searched.
+* **2026-10-09, AI-XRAY-006 (bbb93088), off by default** (`CfgAIFork lookOut = 1; badCover = 1`).
+  * **Look-out:** during a hold, the soldier rises for 1.5 s facing the threat, then gets his stance back.
+    Shown in 2 hunt runs.
+  * **Bad cover:** cover where a soldier was hit by the enemy is skipped by his side for 120 s within 3 m.
+    Shown in C02: marked, then skipped 1 s and 4 s later.
+  * **Not done:** cover eviction. CWA picks cover per soldier with no reservation to evict from.
+  * The 3 m enemy rule is already stricter in FindHideBehind.
 
 ## 5. X-Ray research (Lost Alpha docs, 2026-10-09)
 
