@@ -8224,13 +8224,13 @@ tickets:
     class: ENGINE
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
-    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
-    # unfinished, into Oli); not started here.
-    scheduling_state: HOLD
-    status: PLANNED
+    # IN_PROGRESS (owner 2026-10-09: "continue the AI work"): grenade limit and spotting cadence fixed; the
+    # beach report is terrain; hunting with B on and the B-off regression on vanilla missions still to run.
+    scheduling_state: ACTIVE
+    status: IN_PROGRESS
     outcome: null
     owner: Dec
-    branch: null
+    branch: dec/ai-xray
     baseline_commit: b66d9b97
     verification_commit: null
     milestone: 0
@@ -8238,13 +8238,20 @@ tickets:
     depends_on: [AI-PORT-001]
     blocked_by: []
     blocks: []
-    implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    implementation_commits: [bfcdc2f9]
+    production_call_sites:
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldAI.cpp
+        symbol: Man::FireWeapon
+      - file: engine/Poseidon/World/Detection/Target.cpp
+        symbol: GradualSpotting::Accumulate
+    test_ids: [ai-xray-001-ai3-grenades, ai-xray-001-walkin-gradual-on-off, ai-xray-001-ai3l-los]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
+      - "FIXED bfcdc2f9: grenade limit (now one per group per 5 s, AI3: 1.5/7.3 s and 4.5/9.5 s); gradual spotting 10x slow within 100 m and stuck at the 5 s cadence (now 2-4 s for a visible man at 120 m)."
+      - "NOT A BUG: the 130-150 m beach case (AI3L) is a terrain rise 1.5 m over the eye line; visibility 0 with or without the patches."
+      - "Mission start still gives every unit what it can see at once (stock); tests must bring the enemy into view after the start."
       - "Malprave job 23: grenade limit failed (4 throws in 1.6 s), spotting/hunting test broken by setPos teleports; knowsAbout reads 0."
       - "Oli 2026-10-04: a standing enemy at 130-150 m on the Everon beach is never noticed (B on or off); with gradual spotting on, ~15 s to notice one at 60 m. Owner: AI in combat stance slow to zero in (AI-AIM-001). Hunting tests must not teleport the enemy (out of the 300 m range); POSEIDON_AI_HUNT_LOG=1 shows the gates."
     fallback: null

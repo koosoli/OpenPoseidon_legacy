@@ -147,3 +147,98 @@ From Malprave job 23 (29 Sep), the first and only A/B test of the X-Ray patches:
     * A standing enemy at 130–150 m on the beach is never noticed (with or without B).
     * Gradual spotting takes ~15 s at 60 m.
     * Teleported enemies leave the 300 m hunt range.
+* **2026-10-09, AI-XRAY-001 on `dec/ai-xray` (bfcdc2f9):**
+  * **Grenade limit fixed.** It was checked when a soldier chose to throw but recorded only when the grenade
+    left his hand, after the throw animation. It is now checked and claimed when the throw starts.
+    AI3 (40 m): one grenade per group per ≥ 5 s, and 826 attempts refused.
+  * **Gradual spotting fixed.**
+    * It credited only the period each look passed in: 0 within 100 m (Oli's 0.5 s throttle), so 10× slow.
+    * It forgot after 1 s, while looks come every 5 s when no enemy is known.
+    * It now follows real time.
+    * Walk-in test (AI3L with `.tw/ai/evals-walkin.txt`): a visible walking man is spotted 0–4 s after line
+      of sight, and prone, still defenders after 6.6–9.7 s.
+  * **The beach "never noticed at 130–150 m" is terrain.** A rise 1.5 m above the eye line hides the squads
+    from each other.
+  * **Test pitfall:** at mission start every unit is given what it can see at once (stock). A spotting test
+    must bring the enemy into view later. The AI3/AI3M runs measure nothing for spotting.
+  * **Harness:** `.tw/test-ai.ps1 -Exe <branch build>` runs a branch's OpenPoseidon.exe on the installed game
+    data without deploying it. `POSEIDON_AI_SPOT_LOG=1` logs every look at an unknown target.
+
+## 5. X-Ray research (Lost Alpha docs, 2026-10-09)
+
+Source, read only: `M:\Claude\Lost Alpha - Xray Research\docs` (owner, 2026-10-09). Mainly
+`01_AI_System_Engine_vs_LostAlpha.md` (§ numbers below), with 05, 06, 14, 21, 23 and 31. The docs mark
+each fact as source-verified (OpenXRay or Lost Alpha source), binary-verified or calculated.
+
+Corrections and additions to §2:
+
+* **AI-XRAY-002 (§2.5, `CEnemyManager::evaluate`):**
+  * The score starts at 10000 and the lowest score wins.
+  * Adjustments: −1500 if the player last hit me, −500 for anyone else; −1000 if visible;
+    + distance²/100; + victory probability/100.
+  * Inertia: 3 s when switching between others, 6 s when switching away from the player, and
+    **0 s when switching to the player** (instant).
+* **AI-XRAY-003 (§3.3, §4.3; 31 §5.5):**
+  * Grenades are dangers with a 10 m radius.
+  * Lost Alpha counts them within 15 m, for 20 s.
+  * The chain is take cover → wait for the explosion → take cover again → look around → search.
+* **AI-XRAY-004 (§2.6, `danger_manager.cpp`):**
+  * Value = type weight × 10 + age in ms, and the **lowest value wins**: grenades and enemy sounds first,
+    older dangers later.
+  * Type weights: ricochet 3000, attack sound 2500, entity attacked 2000, entity death 3000,
+    fresh corpse 2250, attacked 2000, grenade 1000, enemy sound 1000.
+  * Dangers expire 3 s after a fight ends.
+  * Lost Alpha's per-type range and memory:
+
+    | Type | Range | Memory |
+    | --- | --- | --- |
+    | hit | 150 m | 60 s |
+    | grenade | 15 m | 20 s |
+    | corpse | 20 m | 10 s (bodies older than 30 s ignored) |
+    | sound | 40 m | 15 s |
+    | death | 20 m | 15 s |
+    | ricochet | 10 m | 30 s |
+
+  * Add the three types missing from §2: enemy sound, entity death and entity attacked.
+* **AI-XRAY-005 (§4.4):**
+  * The steps are fill → danger → assign → permutate → masks. It runs once a second, and only one member
+    finishes off a wounded enemy.
+  * The "(1 − p)" weighting and the target swap in §2 are **not in the docs**. Check them against the
+    OpenXRay source (`agent_enemy_manager.cpp`) before writing them.
+* **AI-XRAY-006 (§3.3, §4.1):**
+  * A cover where a member was hit is marked dangerous for 120 s within 3 m.
+  * The 3 m minimum enemy distance is Lost Alpha's. It searches 10 m around with an enemy window of
+    3–170 m, then 30 m around with 10–170 m.
+  * The docs give no look-out timings.
+* **AI-XRAY-007 (06 §1.1, §2.6):**
+  * Each node stores four 4-bit cover values, where 0 means enclosed and 15 means exposed. They come from
+    clear rays cast from 1 m up toward nodes within 30 m.
+  * The Best evaluator scores min(high, low cover) toward the enemy, +10 for a neighbour node. It rejects
+    covers with the threat "on the way" (< 30°, < 1.5× the path); this confirms §2.
+* **AI-XRAY-008 (§2.2–2.3):**
+  * The view range falls off **linearly** with the angle: (1 − α/(fov/2))·(max − min) + min.
+  * Hearing threshold = max(own-sound factor·threshold·0.95^(Δt/250 ms), base threshold).
+
+Tuning references for what is in:
+* **Spotting speed:**
+  * X-Ray notices a standing man at 20 m in daylight in about 0.08 s.
+  * Our 2 s `spotBuildTime` is deliberately slower. It matches Lost Alpha's helicopter accumulator
+    (2 s to acquire, 1.4 s to lose; doc 23).
+* **Night:** spotting is slower by √(noon light / light): 2.7× on a moonlit night, 6.9× on a moonless one.
+* **Hearing (14, 21):**
+  * Gunshots carry 50–200 m (median 100 m), silenced 7–50 m.
+  * Footsteps: crouching ≈ 2 m, walking ≈ 4 m, running ≈ 20 m.
+
+Other X-Ray mechanisms worth a ticket, highest value per cost first:
+1. No shooting through friends (a muzzle ray plus 4 offset rays).
+2. Bursts by distance band.
+3. Dispersion by movement state (use OpenXRay's interpolation; Lost Alpha's has a sign bug).
+4. A sudden attack when entering combat unseen.
+5. Lingering 3 s after combat before searching.
+
+Pitfalls not to copy:
+* Lost Alpha's dispersion sign bug.
+* OpenXRay ignoring the difficulty rows.
+* A* that ignores height.
+* The 32-member squad mask assert.
+* Corridor maps where every edge node becomes a "cover".
