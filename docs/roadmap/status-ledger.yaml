@@ -8320,7 +8320,7 @@ tickets:
     depends_on: [AI-XRAY-001]
     blocked_by: []
     blocks: []
-    implementation_commits: [96d32b43]
+    implementation_commits: [d69df045]
     production_call_sites:
       - file: engine/Poseidon/AI/AIGrenadeDanger.cpp
         symbol: GrenadeDanger::React

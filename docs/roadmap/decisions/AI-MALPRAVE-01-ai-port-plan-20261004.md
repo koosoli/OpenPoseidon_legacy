@@ -189,7 +189,7 @@ From Malprave job 23 (29 Sep), the first and only A/B test of the X-Ray patches:
     * Both runs show the pre-existing `ValidateOutVehicle` assert.
     * The target log printed re-picks of the current target as switches (41 for one soldier); it now logs
       only real changes.
-* **2026-10-09, AI-XRAY-003 (96d32b43): hand grenades get a fuse, and soldiers run from them.**
+* **2026-10-09, AI-XRAY-003 (d69df045): hand grenades get a fuse, and soldiers run from them.**
   * **Fuse, on by default.** Stock CWA grenades went off on contact, so there was nothing to react to. A thrown
     grenade with no `explosionTime` now gets `GrenadeFuse::handGrenadeFuseSeconds`, 4 s. Setting it to 0
     restores contact detonation.
