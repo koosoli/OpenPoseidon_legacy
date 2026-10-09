@@ -285,13 +285,21 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
         }
     }
 
-    // Local content browser and whole-world entry are normal main-menu entries (no --dev needed): clones of
-    // Quit's styling, placed clear of every other entry.
+    // Local content browser and whole-world entry are normal main-menu entries (no --dev needed). They are
+    // clones of a column entry (Multiplayer, else Quit) so they share its font and alignment, stacked under
+    // it at the column's own row pitch. Only other menu ENTRIES count as obstacles: the menu also holds
+    // large pictures and lines, and treating those as occupied once pushed both entries onto one spot.
     const auto injectEntry = [&](ParamFile& resource, const char* className, int idc, const char* label)
     {
-        Control* quit = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_QUIT));
-        ParamEntry* source = Res.FindEntry(mainRsc) ? (Res >> mainRsc).FindEntry("Quit") : nullptr;
-        if (!quit || !source || !source->IsClass())
+        const bool menu = Res.FindEntry(mainRsc) != nullptr;
+        Control* anchor = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_MULTIPLAYER));
+        ParamEntry* source = menu ? (Res >> mainRsc).FindEntry("Multiplayer") : nullptr;
+        if (!anchor || !source || !source->IsClass())
+        {
+            anchor = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_QUIT));
+            source = menu ? (Res >> mainRsc).FindEntry("Quit") : nullptr;
+        }
+        if (!anchor || !source || !source->IsClass())
             return;
         resource.Clear();
         ParamClass* cls = resource.AddClass(className);
@@ -302,29 +310,45 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
         Control* button = dynamic_cast<Control*>(GetCtrl(idc));
         if (!button)
             return;
-        std::vector<MainMenuControlRect> foreground;
+        std::vector<MainMenuControlRect> entries;
         for (int i = 0; i < _controlsForeground.Size(); ++i)
         {
             Control* control = _controlsForeground[i];
-            if (control && control != quit && control != button)
-                foreground.push_back({control->X(), control->Y(), control->W(), control->H(), control->IsVisible()});
+            if (control && control != button && control->IsVisible() && dynamic_cast<CActiveText*>(control))
+                entries.push_back({control->X(), control->Y(), control->W(), control->H(), true});
         }
-        auto pos = CalculateMainMenuModsPlacement({quit->X(), quit->Y(), quit->W(), quit->H(), quit->IsVisible()},
-                                                  foreground);
-        const auto overlaps = [&](float x, float y) {
-            for (const auto& other : foreground)
-                if (other.visible && x < other.x + other.w && x + pos.w > other.x && y < other.y + other.h &&
-                    y + pos.h > other.y) return true;
-            return false;
+        const float w = anchor->W(), h = anchor->H();
+        float pitch = h * 1.2f;
+        if (Control* single = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_SINGLE)))
+            if (const float step = anchor->Y() - single->Y(); step > h * 0.9f && step < h * 2.5f)
+                pitch = step;
+        const auto free = [&](float x, float y)
+        {
+            if (y < 0.02f || y + h > 0.97f)
+                return false;
+            for (const auto& other : entries) // a hair of margin: labels are drawn taller than their row
+                if (x < other.x + other.w && x + w > other.x && y < other.y + other.h + 0.004f &&
+                    y + h + 0.004f > other.y)
+                    return false;
+            return true;
         };
-        // Horizontal custom menus may already have Mods beside Quit.
-        for (int row = 0; row < 12 && overlaps(pos.x, pos.y); ++row)
-            pos.y = 0.08f + row * (pos.h + 0.01f);
-        button->SetPos(pos.x, pos.y, pos.w, pos.h);
+        for (int k = 1; k <= 12; ++k)
+            for (const float y : {anchor->Y() + k * pitch, anchor->Y() - k * pitch})
+                if (free(anchor->X(), y))
+                {
+                    button->SetPos(anchor->X(), y, w, h);
+                    return;
+                }
+        // No room in the column: the old placement beside Quit.
+        if (Control* quit = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_QUIT)))
+        {
+            const auto pos = CalculateMainMenuModsPlacement({quit->X(), quit->Y(), quit->W(), quit->H(), true}, entries);
+            button->SetPos(pos.x, pos.y, pos.w, pos.h);
+        }
     };
     static ParamFile mapButtonResource, worldButtonResource;
-    injectEntry(mapButtonResource, "LocalMapsButton", LocalMapsMenuId, "Local maps");
-    injectEntry(worldButtonResource, "WholeWorldButton", WholeWorldMenuId, "Whole world");
+    injectEntry(mapButtonResource, "LocalMapsButton", LocalMapsMenuId, "LOCAL MAPS");
+    injectEntry(worldButtonResource, "WholeWorldButton", WholeWorldMenuId, "WHOLE WORLD");
 
     // Guard every control lookup: when the RscDisplayMain class is absent or
     // minimal (PoseidonUITest's own RESOURCE.BIN, or a headless --test-mission
