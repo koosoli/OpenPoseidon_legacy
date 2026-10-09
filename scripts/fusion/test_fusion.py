@@ -1,8 +1,10 @@
+import random
 import struct
+from array import array
 import unittest
 import math
 from build_fusion import compressed, translate_objects, fixed, ISLANDS, world_data, array_entry, \
-    env_sounds, island_env_sounds, sound_regions, CELL, SIZE
+    env_sounds, island_env_sounds, sound_regions, sea_floor, CELL, SIZE
 
 
 class FusionTests(unittest.TestCase):
@@ -68,6 +70,38 @@ class FusionTests(unittest.TestCase):
         sets = [island_env_sounds([cfg], key) for key, _, _, _ in ISLANDS]
         self.assertEqual(len(set(sets)), len(ISLANDS))
         self.assertIn('class Hills { sound[]={"environmental\\wind_thick",0.000126,1};', sets[2])
+
+    def test_sea_floor_has_no_cliffs_or_stray_land(self):
+        size, ox, oz = 800, 272, 272
+        rng = random.Random(7)
+        heights = array('f', [-100]) * (size * size)
+        for z in range(256):  # an island in the middle, a varied sea bed 20-90 m deep round it
+            for x in range(256):
+                depth = -55 + 30 * math.sin(x / 13) * math.cos(z / 17) + rng.uniform(-2, 2)
+                heights[(oz + z) * size + ox + x] = 80.0 if min(x, z, 255 - x, 255 - z) > 60 else depth
+        heights[(oz + 255) * size + ox + 100] = 3.6  # a source edge above water, like Nogova's north
+        island = array('f', heights)
+        sea_floor(heights, size, [(ox, oz)])
+        inside = lambda x, z: ox <= x < ox + 256 and oz <= z < oz + 256
+        worst = 0
+        for z in range(size):
+            for x in range(size):
+                h = heights[z * size + x]
+                if inside(x, z):
+                    self.assertEqual(h, island[z * size + x])  # the island's own data is untouched
+                    continue
+                self.assertLess(h, -1.0)                       # no land outside the source maps
+                self.assertGreaterEqual(h, -400.0)
+                if abs(x - (ox + 100)) <= 4 and abs(z - (oz + 255)) <= 4:
+                    continue  # the beach below the spike: checked by assertLess above
+                for nx, nz in ((x + 1, z), (x, z + 1)):
+                    if nx < size and nz < size:
+                        worst = max(worst, abs(h - heights[nz * size + nx]))
+        self.assertLess(worst, 12.0)  # metres per 50 m cell: was an 80 m wall at the tile edge
+        far = [heights[z * size + 80] for z in range(80, size - 80)]   # 9.6 km from the tile: the basin
+        self.assertTrue(-400 <= min(far) and max(far) <= -200)
+        rim = [heights[z * size] for z in range(size)] + [heights[x] for x in range(size)]
+        self.assertEqual(set(rim), {-100.0})  # the world's edge meets the engine's ground beyond the map
 
     def test_placement_preserves_rotation_height_name_and_unique_id(self):
         matrix = (0.,0.,-1., 0.,1.,0., 1.,0.,0., 100.,23.,200.)

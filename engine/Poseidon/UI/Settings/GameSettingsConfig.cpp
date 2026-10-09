@@ -142,7 +142,7 @@ void GameSettingsConfig::LoadDefaults(const Environment& env)
     voiceLanguage = textLanguage;
     activeProfile.clear();
     blood = true;
-    preferredViewDistance = kMaxViewDistance;
+    preferredViewDistance = kDefaultViewDistance;
     respectMissionViewDistance = false;
 }
 

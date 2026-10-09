@@ -105,6 +105,81 @@ def compressed(raw):
     return result
 
 
+# --- the open sea between the islands ------------------------------------------------------------------------
+# Owner 2026-10-09: "make the sea floors realistic". The source maps end 20-100 m deep at the edge of their
+# 12.8 km square; a flat -100 m fill left a 50-80 m underwater cliff round every square, drawn as a pale line from
+# the air. Instead each island's own sea bed carries on outward as a shelf down to ~120 m (a real continental
+# shelf edge), then a slope to a basin ~200-400 m deep between the islands, with gentle relief. Shelf and slope
+# take 8.5 km; neighbouring tiles are >= 19 km apart, so two islands' slopes never meet.
+SHELF_CELLS = 60    # 3 km of shelf
+SLOPE_CELLS = 110   # 5.5 km of slope
+EDGE_BLUR = 12      # cells along the edge: the source's edge samples, smoothed over 1.2 km of edge...
+EDGE_BLEND = 4      # ...take over from the raw samples within 200 m, so a lone spike leaves no ridge
+OUTSIDE_DEPTH = -100.0  # the engine's ground beyond the map (Landscape YOutsideMap); the world's edge meets it
+BORDER_CELLS = 60       # over its last 3 km, or the drop at the edge draws a line from the air
+
+
+def _hash01(ix, iz, seed):
+    h = (ix * 374761393 + iz * 668265263 + seed * 2246822519) & 0xffffffff
+    h = ((h ^ (h >> 13)) * 1274126177) & 0xffffffff
+    return ((h ^ (h >> 16)) & 0xffff) / 65535.0
+
+
+def _noise(x, z, spacing, seed):
+    """Smooth value noise in [0, 1], lattice every `spacing` cells."""
+    fx, fz = x / spacing, z / spacing
+    ix, iz = int(fx), int(fz)
+    tx, tz = fx - ix, fz - iz
+    tx, tz = tx * tx * (3 - 2 * tx), tz * tz * (3 - 2 * tz)
+    a = _hash01(ix, iz, seed) + (_hash01(ix + 1, iz, seed) - _hash01(ix, iz, seed)) * tx
+    b = _hash01(ix, iz + 1, seed) + (_hash01(ix + 1, iz + 1, seed) - _hash01(ix, iz + 1, seed)) * tx
+    return a + (b - a) * tz
+
+
+def _smooth(t):
+    t = 0.0 if t < 0 else 1.0 if t > 1 else t
+    return t * t * (3 - 2 * t)
+
+
+def sea_floor(heights, size, tiles, tile=256):
+    """Fill every cell outside the island tiles (offsets `tiles`, `tile` cells square) in place."""
+    edges = []
+    for ox, oz in tiles:
+        # the tile's border, walked round once, and the same values smoothed along it (circularly)
+        ring = ([(ox + i, oz) for i in range(tile)] + [(ox + tile - 1, oz + i) for i in range(1, tile)] +
+                [(ox + tile - 1 - i, oz + tile - 1) for i in range(1, tile)] +
+                [(ox, oz + tile - 1 - i) for i in range(1, tile - 1)])
+        raw = [heights[z * size + x] for x, z in ring]
+        n = len(raw)
+        blurred = [sum(raw[(i + k) % n] for k in range(-EDGE_BLUR, EDGE_BLUR + 1)) / (2 * EDGE_BLUR + 1)
+                   for i in range(n)]
+        edges.append((ox, oz, {p: (raw[i], blurred[i]) for i, p in enumerate(ring)}))
+    for z in range(size):
+        for x in range(size):
+            best = None
+            for ox, oz, ring in edges:
+                px = ox if x < ox else ox + tile - 1 if x > ox + tile - 1 else x
+                pz = oz if z < oz else oz + tile - 1 if z > oz + tile - 1 else z
+                d = ((x - px) ** 2 + (z - pz) ** 2) ** 0.5
+                if best is None or d < best[0]:
+                    best = (d, ring, px, pz)
+            d, ring, px, pz = best
+            if d == 0:
+                continue  # the island's own data
+            shelf = 110 + 25 * _noise(x, z, 40, 1)                               # 110-135 m
+            basin = 200 + 150 * _noise(x, z, 160, 2) + 50 * _noise(x, z, 40, 3)  # 200-400 m
+            raw, blurred = ring[(px, pz)]
+            edge = raw + (blurred - raw) * _smooth(d / EDGE_BLEND)
+            edge = min(edge, -1.0 - d)  # a source edge above water (Nogova's north) runs down like a beach
+            if d <= SHELF_CELLS:
+                h = edge + (-shelf - edge) * _smooth(d / SHELF_CELLS)
+            else:
+                h = -shelf + (shelf - basin) * _smooth((d - SHELF_CELLS) / SLOPE_CELLS)
+            border = min(x, z, size - 1 - x, size - 1 - z)
+            h = OUTSIDE_DEPTH + (h - OUTSIDE_DEPTH) * _smooth(border / BORDER_CELLS)
+            heights[z * size + x] = h
+
+
 # --- the source worlds' airports and map names, from debinarised config text ---------------------------------
 
 _CLASS = re.compile(r'\bclass\s+(\w+)\s*(?::\s*\w+)?\s*\{')
@@ -345,6 +420,7 @@ def build(source, output, config_texts=()):
         placements.extend(translate_objects(objects, ox*CELL, oz*CELL, first))
         manifest['islands'].append(dict(key=key,name=label,offset=[ox*CELL,oz*CELL],
             extent=256*CELL,objects=len(objects)//128,first_object_id=first,source_sha256=digest))
+    sea_floor(heights, SIZE, [(ox, oz) for _, _, ox, oz in ISLANDS])
     data = b'OPRW'+struct.pack('<5I',3,SIZE,SIZE,SIZE,SIZE)
     if sys.byteorder != 'little': heights.byteswap(); tex.byteswap()
     data += compressed(geography)+compressed(sounds)

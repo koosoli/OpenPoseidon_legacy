@@ -18,7 +18,7 @@ class GameSettingsConfig
     std::string voiceLanguage;
     std::string activeProfile;
     bool blood = true;
-    float preferredViewDistance = kMaxViewDistance;
+    float preferredViewDistance = kDefaultViewDistance;
     bool respectMissionViewDistance = false;
 
     static constexpr float kMinViewDistance = 100.0f;
@@ -48,6 +48,9 @@ class GameSettingsConfig
     // measured on Fusion 2026-10-09, playing at 150 km coarsens the terrain near the camera (Malden at 1.2 km
     // altitude lost most of its road and tree detail against 50 km), so use it for overviews (setViewDistance).
     static constexpr float kMaxViewDistance = 150000.0f;
+    // The new-player default: the former 50 km maximum. It used to be kMaxViewDistance itself; raising the cap to
+    // 150 km must not raise everyone's default to the setting measured above as coarsening near terrain.
+    static constexpr float kDefaultViewDistance = 50000.0f;
 
     void LoadDefaults();
     void LoadDefaults(const Environment& env);

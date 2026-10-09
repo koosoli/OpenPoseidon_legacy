@@ -108,6 +108,21 @@ This is an experimental composite world. Loading costs exceed one original map.
 Existing campaigns do not automatically migrate: absolute positions and object IDs
 would need per-mission work.
 Source shoreline edge samples are retained, including the tiny Nogova edge.
+
+## Sea floor
+
+The source maps end 20-100 m deep at the edge of their squares. Fusion used to fill the open sea at a flat 100 m,
+which left a 50-80 m underwater cliff round every island, drawn as a pale outline from the air. `sea_floor` in
+`build_fusion.py` now models it (owner 2026-10-09, "make the sea floors realistic"):
+
+* Each island's own sea bed carries on outward. Its edge samples are smoothed along the edge within the first
+  200 m, then it slopes to a shelf edge 110-135 m deep 3 km out.
+* A continental slope runs down to a basin 200-400 m deep, 8.5 km out, with gentle relief on 2 km and 8 km
+  scales. Neighbouring islands are at least 19 km apart, so their slopes never meet.
+* Nogova's few edge samples above water (+3.6 m) run down like a beach instead of standing on a wall.
+* The last 3 km before the world's edge rise back to 100 m deep, the engine's ground beyond the map
+  (`YOutsideMap`).
+* The islands' own 12.8 km squares are not touched.
 The generated manifest records source hashes, offsets and object counts.
 
 ## Verified size and refinement limits
@@ -160,7 +175,8 @@ Results below are from the 51.2 km five-island build unless marked.
   * The terrain is 12.5 m (refinement cap) and the satmap is 4096 (25 m a texel, so the roads hold up from the air).
   * The view-distance cap is now 150 km. The test plays at 50 km and switches to 150 km (`setViewDistance`) only for
     the two overview shots, which then show all four islands. Playing at 150 km coarsens the near terrain.
-  * Faint lines trace each island's tile edge from high up (also in earlier builds).
+  * Sea floor (below): the pale lines that traced each island's 12.8 km square from the air are gone, with no
+    line at the world's edge either.
 * **Not yet tested:**
   * a side-aware diversion (an enemy-held field);
   * the ambient sounds by ear;
