@@ -29,9 +29,9 @@ struct TypeInfo
 };
 
 constexpr TypeInfo kTypes[int(Type::Count)] = {
-    {"hit", 2000, 150, 60},           {"grenade", 1000, 15, 20},       {"corpse", 2250, 20, 10},
-    {"gunfire", 2500, 150, 15},       {"squadmate died", 3000, 20, 15}, {"squadmate hit", 2000, 20, 15},
-    {"ricochet", 3000, 10, 30},
+    {"hit", 2000, 2000, 45},          {"grenade", 1000, 15, 10},       {"corpse", 2250, 50, 30},
+    {"gunfire", 2500, 150, 15},       {"squadmate died", 3000, 50, 20}, {"squadmate hit", 2000, 50, 15},
+    {"ricochet", 3000, 40, 15},
 };
 
 constexpr int kMaxPerUnit = 8;

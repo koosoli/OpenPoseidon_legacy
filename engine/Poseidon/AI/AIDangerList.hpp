@@ -1,18 +1,20 @@
 #pragma once
 
-// AI-XRAY-004: a typed danger list per soldier (after X-Ray's CDangerManager, danger_manager.cpp; Lost Alpha's
-// xr_danger.script for the ranges and memory -- AI-MALPRAVE-01 §5). CWA has one on/off "danger" per unit; X-Ray
-// keeps what happened where, and a soldier with nothing better to do looks there.
+// AI-XRAY-004: a typed danger list per soldier (weights and priority rule after OpenXRay, MIT). CWA has one on/off
+// "danger" per unit; this keeps what happened where, and a soldier with nothing better to do looks there.
 //
+// Ranges and memory are CWA's own, each taken from a quantity the engine already has:
 //   type             weight  range  memory   fed from
-//   Hit                2000   150 m   60 s    EntityAI::HitBy (I was hit: where the shooter is)
-//   Grenade            1000    15 m   20 s    GrenadeDanger (a live grenade near me)
-//   Corpse             2250    20 m   10 s    TrackTargets (a friendly body, newly found)
-//   Gunfire            2500   150 m   15 s    TrackTargets (unseen gunfire heard; Lost Alpha: 40 m -- CWA
-//                                             fights at longer range, so the range is CWA's hearing)
-//   SquadmateDied      3000    20 m   15 s    EntityAI::HitBy (a squadmate killed near me)
-//   SquadmateHit       2000    20 m   15 s    EntityAI::HitBy (a squadmate hit near me)
-//   Ricochet           3000    10 m   30 s    ApplyNearMissSuppression (a round past me)
+//   Hit                2000  2000 m   45 s    EntityAI::HitBy (I was hit: where the shooter is). A shooter who hit
+//                                             me is in range by definition; the cap only drops impossible values
+//   Grenade            1000    15 m   10 s    GrenadeDanger (a live grenade near me): CWA's hand-grenade danger
+//                                             radius (2 x 7 m blast + 1 m); the 4 s fuse + 6 s to look round
+//   Corpse             2250    50 m   30 s    TrackTargets (a friendly body, newly found): a squad's spread
+//   Gunfire            2500   150 m   15 s    TrackTargets (unseen gunfire heard; CWA's hearing range)
+//   SquadmateDied      3000    50 m   20 s    EntityAI::HitBy (a squadmate killed near me): a squad's spread
+//   SquadmateHit       2000    50 m   15 s    EntityAI::HitBy (a squadmate hit near me): a squad's spread
+//   Ricochet           3000    40 m   15 s    ApplyNearMissSuppression (a round past me): 10x the 4 m near-miss
+//                                             radius; remembered as long as heard gunfire
 //
 // Priority = weight x 10 + age in ms, and the LOWEST wins (X-Ray): by weight grenade 1000, hit and squadmate hit
 // 2000, corpse 2250, gunfire 2500, squadmate died and ricochet 3000; among the same type the newest. A danger is

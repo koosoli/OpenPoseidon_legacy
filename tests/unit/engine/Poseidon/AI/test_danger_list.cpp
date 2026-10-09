@@ -1,5 +1,5 @@
-// AI-XRAY-004: the danger list's priority rule (X-Ray CDangerManager: weight x 10 + age in ms, LOWEST wins) and
-// the Lost Alpha ranges and memory it carries. Easy to get backwards, so pinned here.
+// AI-XRAY-004: the danger list's priority rule (weight x 10 + age in ms, LOWEST wins) and the CWA-derived ranges
+// and memory it carries. Easy to get backwards, so pinned here.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -27,12 +27,13 @@ TEST_CASE("age catches up with weight", "[danger]")
     CHECK(Priority(Type::Grenade, 19999) < Priority(Type::Ricochet, 0));
 }
 
-TEST_CASE("ranges and memory follow Lost Alpha", "[danger]")
+TEST_CASE("ranges and memory come from CWA's own quantities", "[danger]")
 {
-    CHECK(DangerList::Range(Type::Grenade) == 15);
-    CHECK(DangerList::Memory(Type::Grenade) == 20);
-    CHECK(DangerList::Range(Type::Corpse) == 20);
-    CHECK(DangerList::Memory(Type::Corpse) == 10);
-    CHECK(DangerList::Range(Type::Ricochet) == 10);
-    CHECK(DangerList::Memory(Type::Hit) == 60);
+    CHECK(DangerList::Range(Type::Grenade) == 2 * 7 + 1); // CWA hand grenade: 2x its 7 m blast + 1 m
+    CHECK(DangerList::Memory(Type::Grenade) == 4 + 6);    // the 4 s fuse, then 6 s to look round
+    CHECK(DangerList::Range(Type::Corpse) == 50);
+    CHECK(DangerList::Memory(Type::Corpse) == 30);
+    CHECK(DangerList::Range(Type::Ricochet) == 10 * 4); // 10x the 4 m near-miss radius
+    CHECK(DangerList::Memory(Type::Ricochet) == DangerList::Memory(Type::Gunfire));
+    CHECK(DangerList::Memory(Type::Hit) == 45);
 }

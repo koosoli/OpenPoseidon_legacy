@@ -30,7 +30,7 @@ constexpr float kGravity = 9.81f;
 struct Settings
 {
     bool enabled = false;
-    float dodgeRadius = 15; // m: grenades further than this are not noticed (Lost Alpha xr_danger: 15 m)
+    float dodgeRadius = 0; // m: optional cap on noticing; 0 = the grenade's own danger radius decides
 };
 
 const Settings& Cfg()
@@ -48,7 +48,7 @@ const Settings& Cfg()
                 return e ? static_cast<float>(*e) : def;
             };
             s.enabled = num("grenadeDodge", 0) != 0;
-            s.dodgeRadius = std::max(1.0f, num("dodgeRadius", s.dodgeRadius));
+            s.dodgeRadius = std::max(0.0f, num("dodgeRadius", s.dodgeRadius));
         }
     }
     return s;
@@ -245,7 +245,7 @@ void React(AIUnit* unit)
     {
         const Grenade& c = kv.second;
         const float d2 = c.landing.DistanceXZ2(me);
-        if (d2 > Square(cfg.dodgeRadius) || d2 > Square(c.radius))
+        if ((cfg.dodgeRadius > 0 && d2 > Square(cfg.dodgeRadius)) || d2 > Square(c.radius))
             continue;
         if (!g || c.explodesAt < g->explodesAt)
         {

@@ -230,7 +230,7 @@ From Malprave job 23 (29 Sep), the first and only A/B test of the X-Ray patches:
     DebugOverlay.cpp, HarnessBuiltins.cpp and renderer files, image saving, network fixtures).
 * **2026-10-09, AI-XRAY-004 (7db710cb), off by default** (`CfgAIFork dangerList = 1`).
   * Each soldier keeps up to 8 typed dangers (hit, grenade, corpse, gunfire, squadmate died / hit, ricochet).
-    The ranges and memory are Lost Alpha's, except gunfire at 150 m.
+    Ranges and memory are taken from CWA's own quantities (blast radius, fuse, near-miss radius, hearing).
   * Priority is weight × 10 + age in ms, and the lowest wins.
   * A danger puts the soldier on alert. One in the default watch mode with no enemy in view turns to the top
     danger.
@@ -268,81 +268,26 @@ From Malprave job 23 (29 Sep), the first and only A/B test of the X-Ray patches:
     * A hit soldier leaves the bad cover himself (C02: skipped 0.1 s after the hit).
     * Bad-cover records are checked against the clock after a restart.
 
-## 5. X-Ray research (Lost Alpha docs, 2026-10-09)
+## 5. Tuning notes
 
-Source, read only: `M:\Claude\Lost Alpha - Xray Research\docs` (owner, 2026-10-09). Mainly
-`01_AI_System_Engine_vs_LostAlpha.md` (§ numbers below), with 05, 06, 14, 21, 23 and 31. The docs mark
-each fact as source-verified (OpenXRay or Lost Alpha source), binary-verified or calculated.
+Danger ranges and memory (AI-XRAY-004) are CWA's own, each derived from a quantity the engine already has:
 
-Corrections and additions to §2:
+| Type | Range | Memory | From |
+| --- | --- | --- | --- |
+| hit | 2000 m | 45 s | a shooter who hit you is in range; the cap only drops impossible values |
+| grenade | 15 m | 10 s | 2 × the hand grenade's 7 m blast + 1 m; 4 s fuse + 6 s to look round |
+| corpse | 50 m | 30 s | a squad's spread in contact |
+| gunfire | 150 m | 15 s | CWA's hearing range |
+| squadmate died / hit | 50 m | 20 / 15 s | a squad's spread in contact |
+| ricochet | 40 m | 15 s | 10 × the 4 m near-miss radius; as long as heard gunfire |
 
-* **AI-XRAY-002 (§2.5, `CEnemyManager::evaluate`):**
-  * The score starts at 10000 and the lowest score wins.
-  * Adjustments: −1500 if the player last hit me, −500 for anyone else; −1000 if visible;
-    + distance²/100; + victory probability/100.
-  * Inertia: 3 s when switching between others, 6 s when switching away from the player, and
-    **0 s when switching to the player** (instant).
-* **AI-XRAY-003 (§3.3, §4.3; 31 §5.5):**
-  * Grenades are dangers with a 10 m radius.
-  * Lost Alpha counts them within 15 m, for 20 s.
-  * The chain is take cover → wait for the explosion → take cover again → look around → search.
-* **AI-XRAY-004 (§2.6, `danger_manager.cpp`):**
-  * Value = type weight × 10 + age in ms, and the **lowest value wins**: grenades and enemy sounds first,
-    older dangers later.
-  * Type weights: ricochet 3000, attack sound 2500, entity attacked 2000, entity death 3000,
-    fresh corpse 2250, attacked 2000, grenade 1000, enemy sound 1000.
-  * Dangers expire 3 s after a fight ends.
-  * Lost Alpha's per-type range and memory:
+Grenade noticing (AI-XRAY-003) uses each grenade's own danger radius; `CfgAIFork dodgeRadius` is an optional cap
+(0, the default, means none). None of these values has been play-tested yet; tune them in C02 before turning the
+switches on by default.
 
-    | Type | Range | Memory |
-    | --- | --- | --- |
-    | hit | 150 m | 60 s |
-    | grenade | 15 m | 20 s |
-    | corpse | 20 m | 10 s (bodies older than 30 s ignored) |
-    | sound | 40 m | 15 s |
-    | death | 20 m | 15 s |
-    | ricochet | 10 m | 30 s |
-
-  * Add the three types missing from §2: enemy sound, entity death and entity attacked.
-* **AI-XRAY-005 (§4.4):**
-  * The steps are fill → danger → assign → permutate → masks. It runs once a second, and only one member
-    finishes off a wounded enemy.
-  * The "(1 − p)" weighting and the target swap in §2 are **not in the docs**. Check them against the
-    OpenXRay source (`agent_enemy_manager.cpp`) before writing them.
-* **AI-XRAY-006 (§3.3, §4.1):**
-  * A cover where a member was hit is marked dangerous for 120 s within 3 m.
-  * The 3 m minimum enemy distance is Lost Alpha's. It searches 10 m around with an enemy window of
-    3–170 m, then 30 m around with 10–170 m.
-  * The docs give no look-out timings.
-* **AI-XRAY-007 (06 §1.1, §2.6):**
-  * Each node stores four 4-bit cover values, where 0 means enclosed and 15 means exposed. They come from
-    clear rays cast from 1 m up toward nodes within 30 m.
-  * The Best evaluator scores min(high, low cover) toward the enemy, +10 for a neighbour node. It rejects
-    covers with the threat "on the way" (< 30°, < 1.5× the path); this confirms §2.
-* **AI-XRAY-008 (§2.2–2.3):**
-  * The view range falls off **linearly** with the angle: (1 − α/(fov/2))·(max − min) + min.
-  * Hearing threshold = max(own-sound factor·threshold·0.95^(Δt/250 ms), base threshold).
-
-Tuning references for what is in:
-* **Spotting speed:**
-  * X-Ray notices a standing man at 20 m in daylight in about 0.08 s.
-  * Our 2 s `spotBuildTime` is deliberately slower. It matches Lost Alpha's helicopter accumulator
-    (2 s to acquire, 1.4 s to lose; doc 23).
-* **Night:** spotting is slower by √(noon light / light): 2.7× on a moonlit night, 6.9× on a moonless one.
-* **Hearing (14, 21):**
-  * Gunshots carry 50–200 m (median 100 m), silenced 7–50 m.
-  * Footsteps: crouching ≈ 2 m, walking ≈ 4 m, running ≈ 20 m.
-
-Other X-Ray mechanisms worth a ticket, highest value per cost first:
-1. No shooting through friends (a muzzle ray plus 4 offset rays).
+Mechanisms worth a ticket, highest value per cost first:
+1. No shooting through friends (a muzzle ray plus offset rays).
 2. Bursts by distance band.
-3. Dispersion by movement state (use OpenXRay's interpolation; Lost Alpha's has a sign bug).
+3. Dispersion by movement state.
 4. A sudden attack when entering combat unseen.
-5. Lingering 3 s after combat before searching.
-
-Pitfalls not to copy:
-* Lost Alpha's dispersion sign bug.
-* OpenXRay ignoring the difficulty rows.
-* A* that ignores height.
-* The 32-member squad mask assert.
-* Corridor maps where every edge node becomes a "cover".
+5. Lingering a few seconds after combat before searching.
