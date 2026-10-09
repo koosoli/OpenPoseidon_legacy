@@ -121,6 +121,8 @@ float Rand(float a, float b)
 void Purge()
 {
     const float now = Now();
+    if (now < s_purge)
+        s_purge = now - 10; // mission time went back (restart, load): purge now, not once it has caught up
     if (now - s_purge < 10)
         return;
     s_purge = now;
@@ -274,7 +276,12 @@ void EndPeek(Rec& r, AIUnit* unit)
     if (unit->GetUnitPosition() == UPUp)
         unit->SetUnitPosition(r.peekOldPos);
     if (r.peekWatch && unit->GetWatchMode() == AIUnit::WMPos)
+    {
+        // SetNoWatch also drops the target his leader assigned: keep it
+        Target* assigned = unit->GetTargetAssigned();
         unit->SetNoWatch();
+        unit->AssignTarget(assigned);
+    }
     static const bool logOn = [] { const char* v = std::getenv("POSEIDON_AI_HUNT_LOG"); return v && v[0] == '1'; }();
     if (logOn)
     {
@@ -543,12 +550,15 @@ void ThinkImpl(AIUnit* unit)
     switch (r.phase)
     {
         case Hold:
-            // AI-XRAY-006: X-Ray's look_out between take_cover and hold -- rise for a moment facing the threat
-            if (r.peeking && now >= r.peekUntil)
+        {
+            // AI-XRAY-006: X-Ray's look_out between take_cover and hold -- rise for a moment facing the threat.
+            // Never into fire: not while in danger (stock lies him down then, ~5 s) or under any suppression
+            const bool underFire = unit->IsDanger() || unit->IsPinnedDown() || unit->GetSuppression() > 0.05f;
+            if (r.peeking && (now >= r.peekUntil || underFire))
             {
                 EndPeek(r, unit);
             }
-            else if (!r.peeking && r.peekAt > 0 && now >= r.peekAt && now + 1.0f < r.until)
+            else if (!r.peeking && r.peekAt > 0 && now >= r.peekAt && now + 1.0f < r.until && !underFire)
             {
                 r.peekAt = 0;
                 r.peekOldPos = unit->GetUnitPosition();
@@ -556,7 +566,12 @@ void ThinkImpl(AIUnit* unit)
                 const Vector3 look = r.byDanger ? r.dangerPos : (cur ? cur->AimingPosition() : unit->Position());
                 r.peekWatch = unit->GetWatchMode() == AIUnit::WMNo;
                 if (r.peekWatch)
+                {
+                    // SetWatchPosition also drops the target his leader assigned: keep it
+                    Target* assigned = unit->GetTargetAssigned();
                     unit->SetWatchPosition(look);
+                    unit->AssignTarget(assigned);
+                }
                 r.peeking = true;
                 r.peekUntil = now + 1.5f;
                 if (HuntLog())
@@ -590,8 +605,10 @@ void ThinkImpl(AIUnit* unit)
             else
             {
                 r.until = now + Rand(Cfg().holdMin, Cfg().holdMax); // half the squad already out: keep covering
+                r.peekAt = Cfg().lookOut ? now + Rand(1.5f, 3.0f) : 0;  // and another look in a while
             }
             return;
+        }
         case Flank:
         case Search:
         {
@@ -621,6 +638,19 @@ void ThinkImpl(AIUnit* unit)
         }
         default:
             return;
+    }
+}
+
+void EndAllPeeks()
+{
+    for (auto& kv : s_recs)
+    {
+        Rec& r = kv.second;
+        if (r.peeking && r.unit)
+        {
+            EndPeek(r, r.unit);
+        }
+        r.peekAt = 0;
     }
 }
 

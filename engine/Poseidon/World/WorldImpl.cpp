@@ -20,6 +20,7 @@
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/UI/UIActiveDisplay.hpp>
 #include <Poseidon/UI/OptionsUICommon.hpp>
+#include <Poseidon/AI/AIHunt.hpp> // AI-XRAY-006: end look-outs before a save
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/AI/AICostAccum.hpp> // PERF-014: the AI stage's per-bucket accumulator
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -2133,6 +2134,7 @@ LSError World::Serialize(ParamArchive& ar, int message)
     PARAM_CHECK(ar.CheckMaxVersion(WorldSerializeVersion))
     if (ar.IsSaving())
     {
+        Hunt::EndAllPeeks(); // AI-XRAY-006: no soldier saved half-way through a look-out
         ProgressReset();
         ProgressClear(false);
         ProgressStart(LocalizeString(message));

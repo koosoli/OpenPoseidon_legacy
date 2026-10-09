@@ -33,6 +33,10 @@ void Think(AIUnit* unit);
 //! true when this soldier is allowed to hunt right now (all the gates above)
 bool MayHunt(AIUnit* unit);
 
+//! AI-XRAY-006: every look-out ends now (stance and watch given back) -- before a save: the hunt's own state is
+//! not saved, so a soldier saved mid-look would stay standing after the load
+void EndAllPeeks();
+
 // ---- squad rules (X-Ray agent manager) -----------------------------------------
 
 //! an AI soldier of this group has just thrown a hand grenade

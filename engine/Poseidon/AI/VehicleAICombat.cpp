@@ -242,6 +242,10 @@ void EntityAI::HitBy(EntityAI* killer, float howMuch, RString ammo)
             if (cover && Position().DistanceXZ(cover->Position()) < cover->CollisionSize() + CollisionSize() + 4.0f)
             {
                 DangerList::NoteBadCover(myCenter, Position());
+                // and he moves on himself (X-Ray): drop this cover and look again now (HideThink keeps a soldier
+                // behind his cover otherwise); the new search skips the bad spot
+                _hideBehind = nullptr;
+                _hideRefreshTime = Glob.time - 10;
             }
         }
         if (hostile && me->IsFreeSoldier()) // a soldier on foot (not a hit vehicle's commander)

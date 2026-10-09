@@ -334,7 +334,11 @@ void NoteBadCover(const AICenter* side, Vector3Par pos)
         }
     }
     if (s_badCovers.size() >= 256)
-        s_badCovers.erase(s_badCovers.begin()); // the oldest
+    {
+        // the stalest (refreshed entries keep their place, so the first is not necessarily the oldest)
+        s_badCovers.erase(std::min_element(s_badCovers.begin(), s_badCovers.end(),
+                                           [](const BadCover& a, const BadCover& b) { return a.time < b.time; }));
+    }
     s_badCovers.push_back({side, pos, now});
     if (LogOn())
     {
@@ -347,6 +351,9 @@ bool IsBadCover(const AICenter* side, Vector3Par pos)
     if (!BadCoverEnabled() || s_badCovers.empty())
         return false;
     const float now = Now();
+    CheckClock(now);
+    if (s_badCovers.empty())
+        return false;
     for (const BadCover& c : s_badCovers)
     {
         const float age = now - c.time;
