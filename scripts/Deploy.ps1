@@ -179,7 +179,10 @@ if (Test-Path -LiteralPath $stampPath)
     $prev = (Get-Content -LiteralPath $stampPath -TotalCount 1)
     Write-Host "Installed now: $prev"
     # If the previous stamp names a commit we can resolve, refuse to go backwards without -Force.
-    if ($commit -and $prev -match '\b([0-9a-f]{7,40})\b')
+    # The stamp is "<branch> <commit> <time> <tool>". Take the commit FIELD: a regex over the whole
+    # line matched the date inside branch names like codex/whole-world-horizon-20261008 (digits are hex).
+    $prevFields = @($prev -split '\s+')
+    if ($commit -and $prevFields.Count -ge 2 -and $prevFields[1] -match '^([0-9a-f]{7,40})(\+dirty)?$')
     {
         $prevCommit = $matches[1]
         & git -C $repoRoot merge-base --is-ancestor $commit $prevCommit 2>$null
