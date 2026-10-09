@@ -1,4 +1,6 @@
 #pragma once
+
+#include <vector>
 #include <Poseidon/Core/Types.hpp>
 #include <Poseidon/Core/Game/FixedStepAccumulator.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
@@ -346,6 +348,23 @@ class World
 	AutoArray<Vector3> _taxiInPathsCiv;
 	AutoArray<Vector3> _taxiOffPathsCiv;
 
+	// Every airport of the world: [0] the main one (ilsPosition / ilsDirection / ilsTaxiIn / ilsTaxiOff), then
+	// each class of CfgWorlds >> world >> SecondaryAirports (Arma's convention; none = the main one only, as
+	// before). An AI plane uses the nearest its side may use (AirplaneAuto::Airport).
+	public:
+	struct Airport
+	{
+		Vector3 pos, dir;
+		AutoArray<Vector3> taxiIn, taxiOff;
+		// the class name ("main" or the world's airportName for [0]); a mission's say (setAirportClosed,
+		// setAirportSide): closed to all, or only for this side and its friends (-1: anyone)
+		RString name;
+		bool closed = false;
+		int side = -1;
+	};
+	protected:
+	std::vector<Airport> _airports;
+
 	float _gridOffsetX;
 	float _gridOffsetY;
 	AutoArray<GridInfo> _gridInfo;
@@ -416,6 +435,17 @@ class World
 
 	const AutoArray<Vector3> GetTaxiInPath( TargetSide side );
 	const AutoArray<Vector3> GetTaxiOffPath( TargetSide side );
+	// The same for one of the world's airports (0 = the main one; out of range = the main one).
+	int AirportCount() const { return static_cast<int>(_airports.size()); }
+	int NearestAirport( Vector3Par pos ) const;
+	// by number (0 = the main one) or name, case-insensitive; -1 when there is none
+	int FindAirport( const char *name ) const;
+	const Airport &GetAirport( int airport ) const {return _airports[airport];}
+	void SetAirportClosed( int airport, bool closed ) {_airports[airport].closed = closed;}
+	void SetAirportSide( int airport, int side ) {_airports[airport].side = side;}
+	bool GetILS( Vector3 &pos, Vector3 &dir, TargetSide side, int airport );
+	const AutoArray<Vector3> GetTaxiInPath( TargetSide side, int airport );
+	const AutoArray<Vector3> GetTaxiOffPath( TargetSide side, int airport );
 
 	float GetGridOffsetX() const {return _gridOffsetX;}
 	float GetGridOffsetY() const {return _gridOffsetY;}

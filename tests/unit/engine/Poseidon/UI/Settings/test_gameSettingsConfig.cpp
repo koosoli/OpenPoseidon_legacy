@@ -44,7 +44,7 @@ TEST_CASE("GameSettingsConfig: defaults follow detected language", "[Settings][G
     CHECK(cfg.voiceLanguage == "Czech");
     CHECK(cfg.activeProfile.empty());
     CHECK(cfg.blood == true);
-    CHECK(cfg.preferredViewDistance == GameSettingsConfig::kMaxViewDistance);
+    CHECK(cfg.preferredViewDistance == GameSettingsConfig::kDefaultViewDistance);
     CHECK(cfg.respectMissionViewDistance == false);
 }
 

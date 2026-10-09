@@ -1,0 +1,33 @@
+# OFP Fusion (102.4 km, world class FusionOFP) over a dedicated server.
+# Needs real CWA data with Mods/@OP_Fusion installed: run with --data-dir <game dir>
+# (MP tests ignore a data_dir key here). Units sit on islands 61-65 km apart.
+mission = "content/fusion/tests/FusionMP.FusionOFP"
+game_port = 0
+timeout = 180
+
+tags = ["headful", "network", "exclusive", "full_game", "ci-host-blocked", "fusion"]
+
+[[instances]]
+extra_args = ["--no-strict", "--log-format", "jsonl"]
+name = "server"
+type = "server"
+
+[[instances]]
+extra_args = ["--no-strict", "--name", "client1", "--log-format", "jsonl"]
+name = "client1"
+type = "client"
+connect = "server"
+after = "server"
+wait_ngs = 13
+mp_assign = "WEST:1"
+machine_id = "trident:fusion_mp:client1"
+
+[[instances]]
+extra_args = ["--no-strict", "--name", "client2", "--log-format", "jsonl"]
+name = "client2"
+type = "client"
+connect = "server"
+after = "server"
+wait_ngs = 13
+mp_assign = "WEST:2"
+machine_id = "trident:fusion_mp:client2"

@@ -2,22 +2,48 @@
 
 Inputs are RVW4 exports from PoseidonTools terrain export-rvw4. No rescaling or
 rotation: translations preserve road pieces, forests and authored building poses.
+With --config (the debinarised BIN config and Noe's), every source world's airport,
+map names and ambient sounds come along too, moved with their island.
 """
 import argparse
 from array import array
 import hashlib
 import json
 from pathlib import Path
+import re
 import struct
 import sys
 
 CELL = 50
-SIZE = 1024
-# Grid offsets, each original world is 256 x 256 cells. Adjacent source tiles
-# have at least 3.2 km of additional water between them.
-ISLANDS = [('eden', 'Everon', 64, 160), ('abel', 'Malden', 384, 160),
-           ('cain', 'Kolgujev', 704, 160), ('noe', 'Nogova', 224, 480),
-           ('intro', 'Desert Island', 544, 480)]
+SIZE = 2048  # cells of 50 m: 102.4 km, the largest world the engine supports (TerrainSatmap caps landRange at 2048)
+# Grid offsets (cells, x east / z north), each original world is 256 x 256 cells; adjacent tiles have at least
+# 3.2 km (64 cells) of water between them. The layout follows the CWA 1985 campaign, then Reforger's
+# Malden-islands map where CWA is silent (owner, 2026-10-09: "what would be closest to CWA"):
+#   * Everon north-east of Malden ("Ile d'Everon, au nord-est de Malden", 01flashpoint) and the easternmost
+#     island of the group ("Everon, the easternmost island in this group", x01iansoffice), within helicopter range
+#     ("Choppers are waiting to ferry you to Everon", x01iansoffice). No campaign asks for open ocean around it:
+#     it sits just north of Kolgujev, ~6 km coast to coast like the group's other neighbours (owner, 2026-10-09:
+#     "do what fits best"; it was in the far north-east corner, 16 km from its nearest neighbour, 32 km from Malden);
+#   * Kolgujev east-north-east of Malden: 31aplanesstart's A-10s leave Malden's runway north-east ("heading east to
+#     Kolgujev"), and 31bmaverick starts them east-south-east of Kolgujev heading west-north-west, then along the
+#     south coast -- due east of Malden's field, as here;
+#   * Nogova one of "the Malden islands" (x06allies): US forces reach it from the south / south-west and Soviet
+#     Su-25s from the south-east (x12gameover, x13badend), i.e. Malden south of it and Kolgujev south-east;
+#   * Nogova north-north-west of Malden (Reforger, consistent with the above). Reforger also has it
+#     south-south-west of Everon -- at this scale that cannot hold together with the above, so here Everon is
+#     east of it;
+#   * Desert Island (the menu intro island, in no campaign) is left out: owner 2026-10-09, "only a test island",
+#     and it frees resources.
+#
+# Scale (owner 2026-10-09: "make the gaps realistic but lore accurate"): canon puts these islands 180-300 km
+# apart, far beyond the engine's 102.4 km limit. The layout is the 51.2 km one scaled by 2 about the world's corner
+# (every island's centre twice as far out), so every bearing above is unchanged and the gaps are those of a real
+# island group: 20-25 km of sea between neighbours, ~68 km Malden to Everon centre to centre (a Black Hawk:
+# ~15-20 min). Above 51.2 km the terrain refinement budget (8192 samples a side) gives 12.5 m instead of 6.25 m.
+ISLANDS = [('eden', 'Everon', 1472, 1216), ('abel', 'Malden', 448, 320),
+           ('cain', 'Kolgujev', 1088, 576), ('noe', 'Nogova', 192, 992)]
+# the source worlds' CfgWorlds classes
+WORLD_CLASS = {'eden': 'Eden', 'abel': 'Abel', 'cain': 'Cain', 'noe': 'Noe'}
 
 
 def fixed(text, size):
@@ -79,7 +105,273 @@ def compressed(raw):
     return result
 
 
-def build(source, output):
+# --- the open sea between the islands ------------------------------------------------------------------------
+# Owner 2026-10-09: "make the sea floors realistic". The source maps end 20-100 m deep at the edge of their
+# 12.8 km square; a flat -100 m fill left a 50-80 m underwater cliff round every square, drawn as a pale line from
+# the air. Instead each island's own sea bed carries on outward as a shelf down to ~120 m (a real continental
+# shelf edge), then a slope to a basin ~200-400 m deep between the islands, with gentle relief. Shelf and slope
+# take 8.5 km; neighbouring tiles are >= 19 km apart, so two islands' slopes never meet.
+SHELF_CELLS = 60    # 3 km of shelf
+SLOPE_CELLS = 110   # 5.5 km of slope
+EDGE_BLUR = 12      # cells along the edge: the source's edge samples, smoothed over 1.2 km of edge...
+EDGE_BLEND = 4      # ...take over from the raw samples within 200 m, so a lone spike leaves no ridge
+OUTSIDE_DEPTH = -100.0  # the engine's ground beyond the map (Landscape YOutsideMap); the world's edge meets it
+BORDER_CELLS = 60       # over its last 3 km, or the drop at the edge draws a line from the air
+
+
+def _hash01(ix, iz, seed):
+    h = (ix * 374761393 + iz * 668265263 + seed * 2246822519) & 0xffffffff
+    h = ((h ^ (h >> 13)) * 1274126177) & 0xffffffff
+    return ((h ^ (h >> 16)) & 0xffff) / 65535.0
+
+
+def _noise(x, z, spacing, seed):
+    """Smooth value noise in [0, 1], lattice every `spacing` cells."""
+    fx, fz = x / spacing, z / spacing
+    ix, iz = int(fx), int(fz)
+    tx, tz = fx - ix, fz - iz
+    tx, tz = tx * tx * (3 - 2 * tx), tz * tz * (3 - 2 * tz)
+    a = _hash01(ix, iz, seed) + (_hash01(ix + 1, iz, seed) - _hash01(ix, iz, seed)) * tx
+    b = _hash01(ix, iz + 1, seed) + (_hash01(ix + 1, iz + 1, seed) - _hash01(ix, iz + 1, seed)) * tx
+    return a + (b - a) * tz
+
+
+def _smooth(t):
+    t = 0.0 if t < 0 else 1.0 if t > 1 else t
+    return t * t * (3 - 2 * t)
+
+
+def sea_floor(heights, size, tiles, tile=256):
+    """Fill every cell outside the island tiles (offsets `tiles`, `tile` cells square) in place."""
+    edges = []
+    for ox, oz in tiles:
+        # the tile's border, walked round once, and the same values smoothed along it (circularly)
+        ring = ([(ox + i, oz) for i in range(tile)] + [(ox + tile - 1, oz + i) for i in range(1, tile)] +
+                [(ox + tile - 1 - i, oz + tile - 1) for i in range(1, tile)] +
+                [(ox, oz + tile - 1 - i) for i in range(1, tile - 1)])
+        raw = [heights[z * size + x] for x, z in ring]
+        n = len(raw)
+        blurred = [sum(raw[(i + k) % n] for k in range(-EDGE_BLUR, EDGE_BLUR + 1)) / (2 * EDGE_BLUR + 1)
+                   for i in range(n)]
+        edges.append((ox, oz, {p: (raw[i], blurred[i]) for i, p in enumerate(ring)}))
+    for z in range(size):
+        for x in range(size):
+            best = None
+            for ox, oz, ring in edges:
+                px = ox if x < ox else ox + tile - 1 if x > ox + tile - 1 else x
+                pz = oz if z < oz else oz + tile - 1 if z > oz + tile - 1 else z
+                d = ((x - px) ** 2 + (z - pz) ** 2) ** 0.5
+                if best is None or d < best[0]:
+                    best = (d, ring, px, pz)
+            d, ring, px, pz = best
+            if d == 0:
+                continue  # the island's own data
+            shelf = 110 + 25 * _noise(x, z, 40, 1)                               # 110-135 m
+            basin = 200 + 150 * _noise(x, z, 160, 2) + 50 * _noise(x, z, 40, 3)  # 200-400 m
+            raw, blurred = ring[(px, pz)]
+            edge = raw + (blurred - raw) * _smooth(d / EDGE_BLEND)
+            edge = min(edge, -1.0 - d)  # a source edge above water (Nogova's north) runs down like a beach
+            if d <= SHELF_CELLS:
+                h = edge + (-shelf - edge) * _smooth(d / SHELF_CELLS)
+            else:
+                h = -shelf + (shelf - basin) * _smooth((d - SHELF_CELLS) / SLOPE_CELLS)
+            border = min(x, z, size - 1 - x, size - 1 - z)
+            h = OUTSIDE_DEPTH + (h - OUTSIDE_DEPTH) * _smooth(border / BORDER_CELLS)
+            heights[z * size + x] = h
+
+
+# --- the source worlds' airports and map names, from debinarised config text ---------------------------------
+
+_CLASS = re.compile(r'\bclass\s+(\w+)\s*(?::\s*\w+)?\s*\{')
+
+
+def _close(text, i):
+    """Index just past the brace that closes the one opened before `i`."""
+    depth = 1
+    while depth and i < len(text):
+        depth += {'{': 1, '}': -1}.get(text[i], 0)
+        i += 1
+    return i
+
+
+def class_block(text, name, start=0):
+    """The body (without braces) of the first `class <name>` at or after `start`; None when absent."""
+    for m in _CLASS.finditer(text, start):
+        if m.group(1).lower() == name.lower():
+            return text[m.end():_close(text, m.end()) - 1]
+    return None
+
+
+def top_level(body):
+    """`body` with its nested classes cut out: this class's own entries."""
+    out, i = [], 0
+    while True:
+        m = _CLASS.search(body, i)
+        if not m:
+            out.append(body[i:])
+            return ''.join(out)
+        out.append(body[i:m.start()])
+        i = _close(body, m.end())
+
+
+def array_entry(body, key):
+    """The values of `key[]={...};` among a class's own entries: numbers, or the arithmetic strings the taxi
+    paths use ("4772+69"), evaluated. None when absent."""
+    m = re.search(r'\b%s\[\]\s*=\s*\{(.*?)\};' % re.escape(key), top_level(body), re.S)
+    if not m:
+        return None
+    values = []
+    for quoted, bare in re.findall(r'"([^"]*)"|([-+]?[\d.]+(?:e[-+]?\d+)?)', m.group(1)):
+        expr = quoted or bare
+        if not re.fullmatch(r'[\d.+\-*/ ()e]+', expr):
+            raise ValueError(f'unexpected config value {expr!r} in {key}')
+        values.append(float(eval(expr, {'__builtins__': {}}, {})))
+    return values
+
+
+def scalar_entry(body, key):
+    m = re.search(r'\b%s\s*=\s*(?:"([^"]*)"|([^;]*));' % re.escape(key), top_level(body))
+    if not m:
+        return None
+    return m.group(1) if m.group(1) is not None else m.group(2).strip()
+
+
+def world_data(config_texts, key, dx, dz):
+    """A source world's airport (moved by dx, dz metres; None if it has none) and its map names."""
+    for text in config_texts:
+        worlds = class_block(text, 'CfgWorlds')
+        body = class_block(worlds, WORLD_CLASS[key]) if worlds else None
+        if body is None:
+            continue
+        airport = None
+        pos, direction = array_entry(body, 'ilsPosition'), array_entry(body, 'ilsDirection')
+        if pos and (pos[0] or pos[1]) and direction:
+            def moved(path):
+                return [v + (dx if i % 2 == 0 else dz) for i, v in enumerate(path or [])]
+            airport = dict(pos=[pos[0] + dx, pos[1] + dz], dir=direction[:3],
+                           taxi_in=moved(array_entry(body, 'ilsTaxiIn')),
+                           taxi_off=moved(array_entry(body, 'ilsTaxiOff')))
+        names = []
+        names_body = class_block(body, 'Names')
+        if names_body:
+            for m in _CLASS.finditer(names_body):
+                if names_body.count('{', 0, m.start()) != names_body.count('}', 0, m.start()):
+                    continue  # nested deeper than one level
+                entry = names_body[m.end():_close(names_body, m.end()) - 1]
+                p = array_entry(entry, 'position')
+                if not p:
+                    continue
+                item = dict(cls=m.group(1), name=scalar_entry(entry, 'name') or m.group(1),
+                            position=[p[0] + dx, p[1] + dz] + p[2:])
+                for k in ('type', 'radiusA', 'radiusB', 'angle'):
+                    v = scalar_entry(entry, k)
+                    if v is not None:
+                        item[k] = v
+                names.append(item)
+        return airport, names
+    return None, []
+
+
+def replace_objects(config_texts):
+    """Every source world's ReplaceObjects rules (DefaultWorld's, which Everon / Kolgujev use,
+    plus Malden's and Nogova's own), one per replaced model. The engine swaps a forest block for its walk-through
+    version by them (Geography.cpp); Fusion inherited only DefaultWorld's, so Malden's and Nogova's forests -- other
+    models -- would have stayed solid to infantry and AI."""
+    rules, seen = [], set()
+    for text in config_texts:
+        worlds = class_block(text, 'CfgWorlds')
+        if not worlds:
+            continue
+        for world in ['DefaultWorld'] + list(WORLD_CLASS.values()):
+            body = class_block(worlds, world)
+            block = class_block(body, 'ReplaceObjects') if body else None
+            if not block:
+                continue
+            for m in _CLASS.finditer(block):
+                if block.count('{', 0, m.start()) != block.count('}', 0, m.start()):
+                    continue
+                rule = block[m.end():_close(block, m.end()) - 1]
+                model = (scalar_entry(rule, 'replace') or '').lower()
+                if model and model not in seen:
+                    seen.add(model)
+                    rules.append('class %s_%s {%s};' % (world, m.group(1), ' '.join(rule.split())))
+    return rules
+
+
+def env_sounds(config_texts, key):
+    """A source world's own EnvSounds entries, as the body of a `class EnvSounds: CfgEnvSounds` (Malden overrides
+    Sea, Trees, Meadows, Hills and Rain; the others keep CfgEnvSounds'). None without its world class."""
+    for text in config_texts:
+        worlds = class_block(text, 'CfgWorlds')
+        body = class_block(worlds, WORLD_CLASS[key]) if worlds else None
+        if body is None:
+            continue
+        block = class_block(body, 'EnvSounds')
+        return ' '.join(block.split()) if block else ''
+    return None
+
+
+# Fusion's own ambience for the islands whose worlds have none (owner, 2026-10-09: "give the other islands their
+# own sounds"). Not from OFP: the stock CfgEnvSounds is Everon's, and Malden keeps its own. Only CWA's own loops
+# (DTA\Sound.pbo), and only those that loop cleanly, measured: level step across the seam within 2.5 dB and a steady
+# level (p90-p10 of 20 ms frames <= 14 dB) -- wave_break, rain_hard, treesbirds, wind_heavy / _whistle / _thick,
+# crickets01 / 03 / 07, frogs. The bird calls (skylark, n_gale, jay ...) and frog2_* are single calls with gaps, so
+# they can't loop. Volumes are relative to CfgEnvSounds' (Sea 3.16e-4, Trees and Hills 1.78e-4, Meadows 5.62e-5,
+# Rain 1.78e-3). Per file: wind_thick is ~6 dB hotter than wind_heavy, crickets01 ~5 dB quieter than crickets07.
+# Per class: (day file, day volume, night file, night volume).
+ISLAND_AMBIENCE = {
+    # Kolgujev: the cold, windswept northern island -- a rougher sea, a hard wind, fewer birds and crickets
+    'cain': {'Sea': ('environmental\\wave_break', 4.47e-4, 'environmental\\wave_break', 4.47e-4),
+             'Trees': ('environmental\\treesbirds', 1.26e-4, 'animals\\crickets01', 1.78e-4),
+             'Meadows': ('animals\\crickets01', 5.62e-5, 'animals\\crickets01', 3.16e-5),
+             'Hills': ('environmental\\wind_thick', 1.26e-4, 'environmental\\wind_whistle', 2.51e-4)},
+    # Nogova: green and sheltered, valleys and streams -- more birdsong, a calmer sea, frogs in the meadows at night
+    'noe': {'Sea': ('environmental\\wave_break', 2.24e-4, 'environmental\\wave_break', 2.24e-4),
+            'Trees': ('environmental\\treesbirds', 2.82e-4, 'animals\\crickets07', 1.26e-4),
+            'Meadows': ('animals\\crickets03', 5.62e-5, 'animals\\frogs', 1.0e-4),
+            'Hills': ('environmental\\wind_heavy', 1.0e-4, 'environmental\\wind_heavy', 1.0e-4)},
+}
+
+
+def ambience_cfg(key):
+    """ISLAND_AMBIENCE's classes for an island, as EnvSounds entries ('' when it has none)."""
+    return ' '.join('class %s { sound[]={"%s",%g,1}; soundNight[]={"%s",%g,1}; };' % (cls, day, dv, night, nv)
+                    for cls, (day, dv, night, nv) in ISLAND_AMBIENCE.get(key, {}).items())
+
+
+def island_env_sounds(config_texts, key):
+    """An island's EnvSounds entries: its world's own (Malden; or a mod's), else Fusion's ISLAND_AMBIENCE, else
+    none (CfgEnvSounds, Everon's)."""
+    return env_sounds(config_texts, key) or ambience_cfg(key)
+
+
+def sound_regions(config_texts):
+    """One SoundRegions class per island: its tile and its EnvSounds (the engine's EnvSoundRegions.hpp)."""
+    return ''.join('class %s {area[]={%d,%d,%d,%d}; class EnvSounds: CfgEnvSounds {%s};};'
+                   % (label.replace(' ', ''), ox * CELL, oz * CELL, (ox + 256) * CELL, (oz + 256) * CELL,
+                      island_env_sounds(config_texts, key))
+                   for key, label, ox, oz in ISLANDS)
+
+
+def num(v):
+    return ('%.3f' % v).rstrip('0').rstrip('.')
+
+
+def airport_cfg(a):
+    def listed(vs):
+        return ','.join(num(v) for v in vs)
+    return (' ilsPosition[]={%s}; ilsDirection[]={%s}; ilsTaxiIn[]={%s}; ilsTaxiOff[]={%s};'
+            % (listed(a['pos']), listed(a['dir']), listed(a['taxi_in']), listed(a['taxi_off'])))
+
+
+def name_cfg(key, n):
+    extra = ''.join(' type="%s";' % v if k == 'type' else ' %s=%s;' % (k, v)
+                    for k, v in n.items() if k in ('type', 'radiusA', 'radiusB', 'angle'))
+    return 'class %s_%s {name="%s"; position[]={%s};%s};' % (
+        key, n['cls'], n['name'], ','.join(num(v) for v in n['position']), extra)
+
+
+def build(source, output, config_texts=()):
     heights = array('f', [-100])*(SIZE*SIZE)
     tex = array('H', [0])*(SIZE*SIZE)
     geography = bytearray(SIZE*SIZE*4)
@@ -128,6 +420,7 @@ def build(source, output):
         placements.extend(translate_objects(objects, ox*CELL, oz*CELL, first))
         manifest['islands'].append(dict(key=key,name=label,offset=[ox*CELL,oz*CELL],
             extent=256*CELL,objects=len(objects)//128,first_object_id=first,source_sha256=digest))
+    sea_floor(heights, SIZE, [(ox, oz) for _, _, ox, oz in ISLANDS])
     data = b'OPRW'+struct.pack('<5I',3,SIZE,SIZE,SIZE,SIZE)
     if sys.byteorder != 'little': heights.byteswap(); tex.byteswap()
     data += compressed(geography)+compressed(sounds)
@@ -147,19 +440,62 @@ def build(source, output):
     manifest['objects'] = len(placements)//128
     manifest['world_sha256'] = hashlib.sha256(data).hexdigest()
     labels = ''.join(f'class Island{i} {{name="{v[1]}"; position[]={{{(v[2]+128)*CELL},{(v[3]+128)*CELL}}}; type="NameLocal"; radiusA=4000; radiusB=4000;}};' for i,v in enumerate(ISLANDS))
-    config = '''class CfgPatches {class FusionOFP {units[]={}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={"Noe"};};};
-class CfgWorlds {class Eden; class FusionOFP: Eden {
- access=2; description="OFP Fusion - Five Islands"; worldName="\\fusion_ofp\\FusionOFP.wrp";
- worldSize=51200; landGrid=50; centerPosition[]={25600,25600,0};
- startTime="12:00"; startDate="21/6/1985"; startWeather=0.2; forecastWeather=0.2;
- startFog=0; forecastFog=0; seagullPos[]={9600,14400,150};
- ilsPosition[]={7972,18923}; ilsDirection[]={0,0.08,-1}; ilsTaxiIn[]={}; ilsTaxiOff[]={};
- class Names {'''+labels+'''};
-};}; class CfgWorldList {class FusionOFP {};};
-'''
+    # every source world's own airport and map names (towns, villages, places), moved with its island
+    airports, places = [], []
+    for key, label, ox, oz in ISLANDS:
+        airport, world_names = world_data(config_texts, key, ox * CELL, oz * CELL)
+        if airport:
+            airports.append((key, label, airport))
+        places.extend(name_cfg(key, n) for n in world_names)
+    manifest['airports'] = [dict(island=label, ils=a['pos']) for _, label, a in airports]
+    manifest['map_names'] = len(places)
+    # the main airport is Everon's (the campaign's); the others are SecondaryAirports, each AI plane using the
+    # nearest (World::NearestAirport). Without config input: Everon's ILS point, moved, and no taxi paths.
+    main = next((a for k, _, a in airports if k == 'eden'), None) or (airports[0][2] if airports else None)
+    if main:
+        # its name for the missions' setAirportClosed / setAirportSide (the SecondaryAirports go by their class)
+        ils = ' airportName="%s";' % next(label for _, label, a in airports if a is main) + airport_cfg(main)
+    else:
+        ils = (' ilsPosition[]={%d,%d}; ilsDirection[]={0,0.08,-1}; ilsTaxiIn[]={}; ilsTaxiOff[]={};'
+               % (4772 + ISLANDS[0][2] * CELL, 10923 + ISLANDS[0][3] * CELL))
+    secondary = ''.join('class %s {%s};' % (label.replace(' ', ''), airport_cfg(a))
+                        for _, label, a in airports if a is not main)
+    replace = replace_objects(config_texts)
+    manifest['replace_objects'] = len(replace)
+    replace_cfg = (' class ReplaceObjects {%s};\n' % ''.join(replace)) if replace else ''
+    # each island its own ambient loops, crossfaded over the water between them
+    regions = sound_regions(config_texts)
+    manifest['sound_regions'] = {label: ('world' if env_sounds(config_texts, key) else
+                                         'fusion' if key in ISLAND_AMBIENCE else 'CfgEnvSounds')
+                                 for key, label, _, _ in ISLANDS}
+    config = ('class CfgPatches {class FusionOFP {units[]={}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={"Noe"};};};\n'
+              # the island sound classes derive from the game's CfgEnvSounds: an add-on must declare it before use
+              # (the engine resolves a base class while it reads the file; undeclared, the parse of the rest of
+              # FusionOFP failed -- found by the in-game test, 2026-10-09)
+              'class CfgEnvSounds;\n'
+              'class CfgWorlds {class Eden; class FusionOFP: Eden {\n'
+              ' access=2; description="OFP Fusion - Four Islands"; worldName="\\fusion_ofp\\FusionOFP.wrp";\n'
+              ' worldSize=%d; landGrid=50; centerPosition[]={%d,%d,0};\n'
+              ' startTime="12:00"; startDate="21/6/1985"; startWeather=0.2; forecastWeather=0.2;\n'
+              ' startFog=0; forecastFog=0; seagullPos[]={%d,%d,150};\n'
+              '%s\n'
+              # the map grid: the islands' "Aa"/"00" labels (base 10 per character, UIMap GridFormat) run out at 100
+              # squares of 128 m, the far zoom's "A"/"0" at 10 of 1280 m; Fusion is 800 / 80 across
+              ' class Grid {offsetX=0; offsetY=0;'
+              ' class Zoom1 {zoomMax=0.2; format="XY"; formatX="Aa0"; formatY="000"; stepX=128; stepY=128;};'
+              ' class Zoom2 {zoomMax=1e30; format="XY"; formatX="Aa"; formatY="00"; stepX=1280; stepY=1280;};};\n'
+              ' class SecondaryAirports {%s};\n'
+              '%s'
+              ' class SoundRegions {%s};\n'
+              ' class Names {%s};\n'
+              '};}; class CfgWorldList {class FusionOFP {};};\n'
+              % (SIZE * CELL, SIZE * CELL // 2, SIZE * CELL // 2,
+                 (ISLANDS[1][2] + 128) * CELL, (ISLANDS[1][3] + 128) * CELL, ils, secondary, replace_cfg, regions,
+                 labels + ''.join(places)))
     output.mkdir(parents=True, exist_ok=True)
     (output/'fusion.wrp').write_bytes(data)
-    (output/'fusion_ofp.pbo').write_bytes(pack_pbo({'config.cpp':config.encode('ascii'),'FusionOFP.wrp':data}))
+    (output/'fusion_ofp.pbo').write_bytes(pack_pbo({'config.cpp':config.encode('latin-1'),'FusionOFP.wrp':data}))
+    (output/'config.cpp').write_text(config, encoding='latin-1')
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='ascii')
     print(json.dumps(manifest,indent=2))
 
@@ -168,5 +504,7 @@ if __name__ == '__main__':
     parser=argparse.ArgumentParser()
     parser.add_argument('source',type=Path)
     parser.add_argument('output',type=Path)
+    parser.add_argument('--config',type=Path,action='append',default=[],
+                        help='debinarised config text with the source worlds (BIN config, Noe): airports and map names')
     args=parser.parse_args()
-    build(args.source,args.output)
+    build(args.source,args.output,[c.read_text(encoding='latin-1') for c in args.config])

@@ -658,6 +658,8 @@ GameValue CamSetRelPos(const GameState* state, GameValuePar oper1, GameValuePar 
 GameValue CamSetTargetObj(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue CamSetTargetVec(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue CenterSetFriend(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue SetAirportClosed(const GameState* state, GameValuePar oper1);
+GameValue SetAirportSide(const GameState* state, GameValuePar oper1);
 GameValue ClassAdd(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ClassOpen(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue ConfigSave(const GameState* state, GameValuePar oper1, GameValuePar oper2);
@@ -1051,6 +1053,8 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameString, "localize", StrLocalize, GameString),
 
         GameFunction(GameNothing, "skipTime", SkipDayTime, GameScalar),
+        GameFunction(GameNothing, "setAirportClosed", SetAirportClosed, GameArray),
+        GameFunction(GameNothing, "setAirportSide", SetAirportSide, GameArray),
         GameFunction(GameNothing, "setViewDistance", SetViewDistance, GameScalar),
         GameFunction(GameNothing, "setTerrainGrid", SetTerrainGrid, GameScalar),
 

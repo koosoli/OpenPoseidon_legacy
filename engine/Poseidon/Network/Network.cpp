@@ -450,7 +450,13 @@ float NetworkObject::CalculateErrorCoef(Vector3Par position, Vector3Par cameraPo
 
     // coef = limit / distance (maximum is 1)
     const float limit = 20.0f;
-    float dist2 = position.Distance2(cameraPosition);
+    // ...and its minimum is that at farSync. Uncapped, 20^2/d^2 shrank an update's error ~10^7 times for a unit
+    // 60 km away (OFP Fusion, 102.4 km): an 11 km teleport scored ~0.001 against MinErrorToSend 0.01, and the
+    // time term that forces a stale update is scaled the same way, so other players saw a far unit frozen where
+    // they last had it (measured 2026-10-09, tests/integration/multiplayer/fusion_mp.test). Units beyond 2.5 km
+    // are now weighted as if at 2.5 km; nearer ones are unchanged.
+    const float farSync = 2500.0f;
+    float dist2 = std::min(position.Distance2(cameraPosition), Square(farSync));
     if (dist2 <= Square(limit))
     {
         return 1.0;

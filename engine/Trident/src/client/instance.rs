@@ -582,7 +582,7 @@ pub fn find_game_binary(game_dir: &Path, named: Option<&str>) -> Result<PathBuf>
     let defaults: &[&str] = if cfg!(windows) {
         &["OpenPoseidon.exe", "PoseidonGame.exe", "OFPR.exe"]
     } else {
-        &["PoseidonGame", "OFPR"]
+        &["OpenPoseidon", "PoseidonGame", "OFPR"]
     };
     for name in defaults {
         if let Some(found) = locate(&with_ext(name)) {
@@ -738,6 +738,19 @@ mod tests {
             find_game_binary(dir.path(), Some("PoseidonServer")).unwrap(),
             server
         );
+    }
+
+    #[test]
+    fn find_binary_named_openposeidon() {
+        let dir = TempDir::new().unwrap();
+        let binary = dir.path().join(if cfg!(windows) {
+            "OpenPoseidon.exe"
+        } else {
+            "OpenPoseidon"
+        });
+        std::fs::write(&binary, "").unwrap();
+        let result = find_game_binary(dir.path(), None).unwrap();
+        assert_eq!(result, binary);
     }
 
     #[test]

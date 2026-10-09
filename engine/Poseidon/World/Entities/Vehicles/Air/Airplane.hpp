@@ -231,6 +231,13 @@ class AirplaneAuto: public Airplane
 
 	AutopilotState _state;
 	AirplaneState _planeState;
+	// Which of the world's airports this plane uses. In the air: the nearest its side may use (not closed or given
+	// to another side by the mission) and does not know to be held by the enemy, else the nearest it may use, else
+	// the nearest. Re-checked every 2 s: in the pattern it diverts only away from a field turned hostile or closed
+	// (going around first when on short final). On the ground: the field it is on. -1 = not chosen yet.
+	int _airport = -1;
+	Foundation::Time _airportCheckTime;
+	int Airport();
 
 	public:
 	AirplaneAuto( VehicleType *name, Person *pilot );

@@ -174,7 +174,8 @@ TEST_CASE("automatic satellite budgets include Fusion without unbounded allocati
     CHECK(TerrainSatmapResolution(300,256) == 1024);
     CHECK(TerrainSatmapResolution(1024,512) == 1024);
     CHECK(TerrainSatmapResolution(1092,1024) == 2048);
-    CHECK(TerrainSatmapResolution(4094,2048) == 2048);
+    CHECK(TerrainSatmapResolution(4094,2048) == 4096); // 102.4 km Fusion: 25 m a texel, as at 51.2 km
+    CHECK(TerrainSatmapResolution(1092,1025) == 4096);
     for (int count : {-1,0,4095,1000000}) CHECK(TerrainSatmapResolution(count,1024) == 0);
     for (int range : {-1,0,1,2049,1000000}) CHECK(TerrainSatmapResolution(1092,range) == 0);
 }

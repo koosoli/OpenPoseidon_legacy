@@ -690,6 +690,66 @@ GameValue CenterSetFriend(const GameState* state, GameValuePar oper1, GameValueP
     return NOTHING;
 }
 
+// Several airports (World::_airports): a mission's say over which a side's planes land at (AirplaneAuto::Airport).
+//   setAirportClosed [airport, true]   closed to everyone (false: open again)
+//   setAirportSide [airport, west]     only that side and its friends land there (sideLogic: anyone again)
+// `airport` is a number (0 the main one, then the world's SecondaryAirports in order) or its name: the
+// SecondaryAirports class ("Malden"), or for the main one "main" or the world's airportName ("Everon" in Fusion).
+static int ScriptAirport(const GameState* state, GameValuePar value)
+{
+    int airport = -1;
+    if (value.GetType() == GameScalar)
+    {
+        airport = toInt(static_cast<float>(value));
+    }
+    else if (CheckType(state, value, GameString))
+    {
+        const GameStringType name = value;
+        airport = GWorld->FindAirport(name);
+    }
+    else
+    {
+        return -1;
+    }
+    if (airport < 0 || airport >= GWorld->AirportCount())
+    {
+        LOG_WARN(Script, "no such airport ({} in this world)", GWorld->AirportCount());
+        return -1;
+    }
+    return airport;
+}
+
+GameValue SetAirportClosed(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& array = oper1;
+    if (!CheckSize(state, array, 2) || !CheckType(state, array[1], GameBool))
+    {
+        return NOTHING;
+    }
+    const int airport = ScriptAirport(state, array[0]);
+    if (airport >= 0)
+    {
+        GWorld->SetAirportClosed(airport, static_cast<bool>(array[1]));
+    }
+    return NOTHING;
+}
+
+GameValue SetAirportSide(const GameState* state, GameValuePar oper1)
+{
+    const GameArrayType& array = oper1;
+    if (!CheckSize(state, array, 2) || !CheckType(state, array[1], GameSide))
+    {
+        return NOTHING;
+    }
+    const int airport = ScriptAirport(state, array[0]);
+    if (airport >= 0)
+    {
+        const GameSideType side = GetSide(array[1]);
+        GWorld->SetAirportSide(airport, side < TSideUnknown ? static_cast<int>(side) : -1);
+    }
+    return NOTHING;
+}
+
 GameValue GroupCreate(const GameState* state, GameValuePar oper1)
 {
     GameSideType side = GetSide(oper1);

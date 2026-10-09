@@ -1,0 +1,50 @@
+version=11;
+class Mission
+{
+ addOns[]={"FusionOFP"}; randomSeed=1234;
+ class Intel {briefingName="Fusion airport test: enemy-held field"; year=1985; month=6; day=21; hour=12; minute=0; startWeather=0.1; forecastWeather=0.1; startFog=0; forecastFog=0;};
+ class Groups
+ {
+  items=4;
+  class Item0
+  {
+   side="WEST";
+   class Vehicles
+   {
+    items=1;
+    class Item0 {position[]={60800,0,35200}; azimut=0; id=0; side="WEST"; vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=1; text="p1";};
+   };
+  };
+  class Item1
+  {
+   side="WEST";
+   class Vehicles
+   {
+    items=1;
+    class Item0 {position[]={17000,300,55000}; azimut=270; id=1; side="WEST"; vehicle="A10"; leader=1; skill=1; special="FLY"; text="a10";};
+   };
+  };
+  class Item2
+  {
+   side="EAST";
+   class Vehicles
+   {
+    items=2;
+    class Item0 {position[]={11300,0,54700}; azimut=0; id=2; side="EAST"; vehicle="SoldierEB"; leader=1; skill=1; text="e1";};
+    class Item1 {position[]={11320,0,54720}; azimut=0; id=3; side="EAST"; vehicle="SoldierEB"; skill=1; text="e2";};
+   };
+  };
+  class Item3
+  {
+   side="WEST";
+   class Vehicles
+   {
+    items=1;
+    class Item0 {position[]={11480,0,54700}; azimut=270; id=4; side="WEST"; vehicle="SoldierWB"; leader=1; skill=1; text="obs";};
+   };
+  };
+ };
+};
+class Intro {randomSeed=1; class Intel {};};
+class OutroWin {randomSeed=2; class Intel {};};
+class OutroLoose {randomSeed=3; class Intel {};};

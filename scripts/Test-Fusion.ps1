@@ -4,7 +4,10 @@ param(
     [switch]$DumpSatmap,
     [string]$Pose='',
     [ValidateSet(-1,0,1)][int]$SatmapObjects=-1,
-    [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
+    [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
+    # an OpenPoseidon.exe outside the game folder (a branch build), run with the game folder as its working
+    # directory; default: the installed one
+    [string]$Exe=''
 )
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
@@ -26,7 +29,8 @@ $mission=if ($Large) {'Mods\@OP_SizeProbe\Missions\OpenPoseidon\SizeProbe.Fusion
 $log=Join-Path $output "$prefix.log"
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
-$p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList @('--render','wgpu','--window','--dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
+$exePath=if ($Exe) {$Exe} else {Join-Path $GameDir 'OpenPoseidon.exe'}
+$p=Start-Process -FilePath $exePath -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList @('--render','wgpu','--window','--dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
 $null=$p.Handle
 $client=$null
 try {
@@ -64,22 +68,48 @@ try {
         Start-Sleep -Seconds 2
     } else {
     $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-start.png")}
-    $null=Send @{cmd='exec';code='hint ""; showCinemaBorder false; fusionCam="camera" camCreate [25600,13000,29000]; fusionCam cameraEffect ["internal","back"]; fusionCam camSetTarget [25600,22000,0]; fusionCam camCommit 0'}
+    $null=Send @{cmd='exec';code='hint ""; showCinemaBorder false; setViewDistance 150000; fusionCam="camera" camCreate [51200,26000,58000]; fusionCam cameraEffect ["internal","back"]; fusionCam camSetTarget [51200,44000,0]; fusionCam camCommit 0'}
     Start-Sleep -Seconds 4
     $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-overview.png")}
-    $null=Send @{cmd='exec';code='fusionCam camSetPos [25600,22000,40000]; fusionCam camSetTarget [25600,22100,0]; fusionCam camCommit 0'}
+    $null=Send @{cmd='exec';code='fusionCam camSetPos [51200,44000,80000]; fusionCam camSetTarget [51200,44100,0]; fusionCam camCommit 0'}
     Start-Sleep -Seconds 4
     $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-high.png")}
-    $sites=if ($Large) {@(@('south',10000,10000),@('centre',51200,51200),@('north',92000,92000))} else {@(@('everon',8260,11900),@('malden',25600,14400),@('kolgujev',41600,14400),@('nogova',18964,28408),@('desert',36700,27600))}
+    $sites=if ($Large) {@(@('south',10000,10000),@('centre',51200,51200),@('north',92000,92000))} else {@(@('everon',78660,64700),@('malden',28800,22400),@('kolgujev',60800,35200),@('nogova',17364,54008))}
     foreach ($site in $sites) {
         $name=$site[0]; $x=$site[1]; $z=$site[2]
         $height=[double](Send @{cmd='eval';code="triTerrainHeight [$x,$z]"}).result
         if ($height -le 0) {throw "Expected above-water height at $name, got $height"}
-        $null=Send @{cmd='exec';code="vehicle player setPos [$x,$z,1200]; vehicle player setVelocity [0,0,0]; fusionCam camSetPos [$x,$($z-500),1200]; fusionCam camSetTarget [$x,$($z+800),0]; fusionCam camCommit 0"}
+        $null=Send @{cmd='exec';code="setViewDistance 50000; vehicle player setPos [$x,$z,1200]; vehicle player setVelocity [0,0,0]; fusionCam camSetPos [$x,$($z-500),1200]; fusionCam camSetTarget [$x,$($z+800),0]; fusionCam camCommit 0"}
         Start-Sleep -Seconds 3
         $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-$name.png")}
         $null=Send @{cmd='eval';code='getPos vehicle player'}
         $p.Refresh(); Write-Host "$name height=$height workingSetMB=$([int]($p.WorkingSet64/1MB))"
+    }
+    if (!$Large) {
+        # the map at Kolgujev: squares past 100 (Fusion is 800 across) need the grid's third label character
+        $null=Send @{cmd='exec';code='fusionCam cameraEffect ["terminate","back"]; camDestroy fusionCam; vehicle player setPos [60800,35200,400]; vehicle player setVelocity [0,0,0]'}
+        Start-Sleep -Seconds 2
+        foreach ($c in @('triOpenMap','triShowMap 1')) { if ((Send @{cmd='eval';code=$c}).result.Trim('"') -ne 'OK') {throw "$c failed"} }
+        foreach ($zoom in @(@('near',0.05),@('far',0.6))) {
+            $null=Send @{cmd='eval';code="triMapSetScale $($zoom[1])"}
+            Start-Sleep -Seconds 2
+            $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-map-$($zoom[0]).png")}
+        }
+        $null=Send @{cmd='eval';code='triShowMap 0'}
+        # save and load on the big world: the load must put the player back on Kolgujev, not where it moved after
+        function PosOf { ((Send @{cmd='eval';code='getPos vehicle player'}).result -replace '[\[\]" ]','').Split(',') | ForEach-Object {[double]::Parse($_,[Globalization.CultureInfo]::InvariantCulture)} }
+        $saved=PosOf
+        if ((Send @{cmd='eval';code='triSaveGame "fusion-acceptance"'}).result.Trim('"') -ne 'OK') {throw 'Save failed'}
+        $null=Send @{cmd='exec';code='vehicle player setPos [28800,22400,1200]'}
+        Start-Sleep -Seconds 1
+        if ((Send @{cmd='eval';code='triLoadGame "fusion-acceptance"'}).result.Trim('"') -ne 'OK') {throw 'Load failed'}
+        Start-Sleep -Seconds 5
+        $loaded=PosOf
+        $moved=[Math]::Sqrt([Math]::Pow($loaded[0]-$saved[0],2)+[Math]::Pow($loaded[1]-$saved[1],2))
+        Write-Host "save/load: saved $($saved[0..1] -join ',') loaded $($loaded[0..1] -join ',') ($([int]$moved) m apart)"
+        if ($moved -gt 500) {throw "Load did not restore the position: $moved m from the save"}
+        if ([double](Send @{cmd='eval';code='triTerrainHeight [60800,35200]'}).result -le 0) {throw 'Terrain lost after load'}
+        $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-loaded.png")}
     }
     }
     $null=Send @{cmd='exit'}
@@ -87,6 +117,13 @@ try {
     $text=Get-Content -LiteralPath $log -Raw
     if ($SatmapObjects -ne 0 -and !$NoSatmap -and $text -notmatch 'OFP satmap objects: [1-9][0-9]* models, [1-9][0-9]* textures, [1-9][0-9]* instances') {throw 'Object satellite bake was not exercised'}
     if ($text -match 'heightfield upload failed|UNHANDLED EXCEPTION' -or $text -notmatch 'heightfield ready=true') {throw 'Terrain upload acceptance failed'}
+    if (!$Large -and !$Pose) {
+        # each island's own ambient set played while the camera was there (EnvSoundRegions.cpp logs each crossing)
+        foreach ($island in @('Everon','Malden','Kolgujev','Nogova')) {
+            if ($text -notmatch "Ambient sound region: $island ") {throw "No ambient sound region change into $island"}
+        }
+        $text -split "`n" | Where-Object {$_ -match 'Ambient sound region:'} | ForEach-Object {Write-Host ($_ -replace '^.*Ambient','Ambient').Trim()}
+    }
     Write-Host "Runtime checks passed; visually inspect $output/$prefix-*.png."
 } finally {
     if ($null -ne $client) {$client.Dispose()}

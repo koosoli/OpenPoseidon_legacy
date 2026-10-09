@@ -23,7 +23,9 @@ inline int TerrainSatmapResolution(int textureCount, int landRange)
 {
     if (textureCount <= 0 || textureCount > 4094 || landRange < 2 || landRange > 2048)
         return 0;
-    return landRange <= 512 ? 1024 : 2048;
+    // Fusion at 102.4 km (2048 cells): 2048 texels left 50 m each and the roads faded out; 4096 keeps the 25 m a
+    // texel the 51.2 km world had (85 MiB with mips)
+    return landRange <= 512 ? 1024 : landRange <= 1024 ? 2048 : 4096;
 }
 
 // World-anchored wide cell blend for the far albedo bake. The callback retains
