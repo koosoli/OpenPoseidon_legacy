@@ -163,6 +163,15 @@ From Malprave job 23 (29 Sep), the first and only A/B test of the X-Ray patches:
     must bring the enemy into view later. The AI3/AI3M runs measure nothing for spotting.
   * **Harness:** `.tw/test-ai.ps1 -Exe <branch build>` runs a branch's OpenPoseidon.exe on the installed game
     data without deploying it. `POSEIDON_AI_SPOT_LOG=1` logs every look at an unknown target.
+* **2026-10-09, AI-XRAY-002 (1047fc35), off by default:**
+  * Switch on with `CfgAIFork { targetScoring = 1; }`. Tunable: `attackerMemory` 10 s, `inertia` 3 s,
+    `inertiaFromPlayer` 6 s.
+  * An enemy who hit the soldier in the last 10 s breaks his target lock: after 3 s on the current target,
+    after 6 s if that is the player, and at once if the attacker is the player.
+  * The attacker is weighed before the leader's assignment and the four-enemy scan.
+  * Among other targets, one seen in the last second beats one only remembered.
+  * Captured in the walk-in test: a switch to the attacker after 4.8 s on the previous target.
+  * The player rules are untested.
 
 ## 5. X-Ray research (Lost Alpha docs, 2026-10-09)
 

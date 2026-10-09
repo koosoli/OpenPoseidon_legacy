@@ -8267,13 +8267,12 @@ tickets:
     class: ENGINE
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
-    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
-    # unfinished, into Oli); not started here.
-    scheduling_state: HOLD
-    status: PLANNED
+    # IMPLEMENTED (owner 2026-10-09: "continue the AI work"), off by default (CfgAIFork targetScoring = 1).
+    scheduling_state: ACTIVE
+    status: IMPLEMENTED
     outcome: null
     owner: Dec
-    branch: null
+    branch: dec/ai-xray
     baseline_commit: b66d9b97
     verification_commit: null
     milestone: 0
@@ -8281,14 +8280,18 @@ tickets:
     depends_on: [AI-XRAY-001]
     blocked_by: []
     blocks: []
-    implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    implementation_commits: [1047fc35]
+    production_call_sites:
+      - file: engine/Poseidon/World/Detection/TargetFire.cpp
+        symbol: EntityAI::SelectFireWeapon
+    test_ids: [ai-xray-002-walkin-target-log]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
       - "Not started in Malprave."
+      - "The player rules (switch to the player at once, 6 s away from the player) are untested: no human in the walk-in test."
+      - "X-Ray's distance-squared and victory-probability terms are not used: the FireResult surplus stays the base score."
     fallback: null
     reviewer: null
     reviewer_method: null
