@@ -1,5 +1,6 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
+#include <Poseidon/AI/AIDangerList.hpp> // AI-XRAY-004: typed dangers
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
@@ -48,7 +49,6 @@
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
 #include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
-#include <Poseidon/AI/AIHunt.hpp>
 
 extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 
@@ -228,6 +228,46 @@ void EntityAI::HitBy(EntityAI* killer, float howMuch, RString ammo)
     }
     base::HitBy(killer, howMuch, ammo);
     AIGroup* g = GetGroup();
+    // AI-XRAY-004: the victim notes where the shooter is, squadmates near him that he was hit or killed
+    if ((DangerList::Enabled() || DangerList::BadCoverEnabled()) && howMuch > 0.01f)
+    {
+        AIUnit* me = CommanderUnit();
+        AICenter* myCenter = g ? g->GetCenter() : nullptr;
+        // only an enemy's fire: not a friend's stray round, a fall, a friendly truck, his own grenade
+        const bool hostile = me && killer && killer != this && myCenter && !myCenter->IsFriendly(killer->GetTargetSide());
+        // AI-XRAY-006: hit by the enemy while hiding behind something: that cover is bad for his side
+        if (hostile && me->IsFreeSoldier() && DangerList::BadCoverEnabled())
+        {
+            const Object* cover = GetHideBehind();
+            if (cover && Position().DistanceXZ(cover->Position()) < cover->CollisionSize() + CollisionSize() + 4.0f)
+            {
+                DangerList::NoteBadCover(myCenter, Position());
+                // and he moves on himself (X-Ray): drop this cover and look again now (HideThink keeps a soldier
+                // behind his cover otherwise); the new search skips the bad spot
+                _hideBehind = nullptr;
+                _hideRefreshTime = Glob.time - 10;
+            }
+        }
+        if (hostile && me->IsFreeSoldier()) // a soldier on foot (not a hit vehicle's commander)
+        {
+            // where it came from is a guess, as the stock reaction's +-100 m reveal of the killer is
+            const float dist = killer->Position().Distance(Position());
+            DangerList::Note(me, DangerList::Type::Hit, killer->Position(), dist * 0.1f);
+        }
+        if (hostile && g && me->IsFreeSoldier()) // a soldier on foot (a hit vehicle is not a squadmate down)
+        {
+            const DangerList::Type what =
+                IsDammageDestroyed() ? DangerList::Type::SquadmateDied : DangerList::Type::SquadmateHit;
+            for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
+            {
+                AIUnit* mate = g->UnitWithID(id);
+                if (mate && mate != me)
+                {
+                    DangerList::Note(mate, what, Position());
+                }
+            }
+        }
+    }
     if (g && killer)
     {
         AIUnit* killerUnit = killer->CommanderUnit();
@@ -2537,15 +2577,8 @@ bool EntityAI::FireWeapon(int weapon, TargetType* target)
 
     int burst = mode->_mult;
     saturateMin(burst, magazine->_ammo);
-    // Malprave aiCoverGrenades: squad grenade interval (AIHunt) -- remember when an AI soldier threw one
-    if (mode->_ammo && mode->_ammo->_simulation == AmmoShotShell && type && type->_initSpeed < 30)
-    {
-        AIUnit* thrower = CommanderUnit();
-        if (thrower && !thrower->IsAnyPlayer())
-        {
-            Hunt::OnGrenadeThrown(thrower->GetGroup());
-        }
-    }
+    // Malprave aiCoverGrenades: the squad grenade interval is claimed when the throw starts (Man::FireWeapon,
+    // AI-XRAY-001), not here at the release
     magazine->_ammo -= burst;
     // Infinite ammo cheat — refund the burst we just consumed.  Hook
     // lives here so it covers MGun / shell / missile firing through

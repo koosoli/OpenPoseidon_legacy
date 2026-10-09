@@ -4,6 +4,8 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 
+#include <Poseidon/AI/AIDangerList.hpp> // AI-XRAY-004: typed dangers
+#include <Poseidon/AI/AITuning.hpp> // TrackNearTargetsPeriod: the gradual-spotting cadence
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOld.hpp>
@@ -770,14 +772,28 @@ static const Settings& Get()
     return s;
 }
 
+//! AI-XRAY-001: POSEIDON_AI_SPOT_LOG=1 logs every sighting of an unknown target (by eye) and when it is spotted
+static bool SpotLog()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("POSEIDON_AI_SPOT_LOG");
+        return v && v[0] == '1';
+    }();
+    return on;
+}
+
 struct Build
 {
+    float firstSeen = 0;   // when the build-up began (s)
     float value = 0;       // 0..1, spotted at 1
     float lastAdd = 0;     // last time awareness was added (s)
     float lastSeen = 0;    // last time anyone in the group could see him (s)
 };
 
 static std::unordered_map<const Target*, Build> s_builds;
+// s: the longest interval between two looks of one observer (WhatIsVisible's 5 s with no enemy in range), plus margin
+constexpr float kSlowestLook = 5.5f;
 static float s_lastPurge = 0;
 
 //! one observer's view of a not-yet-known target; true once the group has spotted it
@@ -786,6 +802,11 @@ static bool Accumulate(const Target* target, float ratio, bool firing, float per
     const Settings& cfg = Get();
     const float now = Glob.time.toFloat();
 
+    if (now + 1.0f < s_lastPurge)
+    {
+        s_builds.clear(); // mission time went back (restart, load)
+        s_lastPurge = now;
+    }
     if (now - s_lastPurge > 30)
     {
         s_lastPurge = now;
@@ -805,22 +826,37 @@ static bool Accumulate(const Target* target, float ratio, bool firing, float per
 
     auto [it, isNew] = s_builds.try_emplace(target);
     Build& b = it->second;
-    const float step = floatMin(floatMax(period, 0.05f), 2.0f);
+    // AI-XRAY-001: awareness follows real time. Observers look at a target at their own cadence: every 1 s, every
+    // 5 s while their group knows no enemy in range (WhatIsVisible), every AITuning::TrackNearTargetsPeriod (0.5 s)
+    // within 100 m -- which passes a period of 0. Crediting only the period passed (min 0.05 s) and fading after
+    // 1 s made one observer never get anywhere at the 5 s cadence (each look forgot what the last one added) and
+    // 10x slow within 100 m: ~15 s to notice a man at 60 m (Oli 2026-10-04) for a 2 s spotBuildTime.
+    const float cadence =
+        floatMin(floatMax(period > 0 ? period : AITuning::TrackNearTargetsPeriod(), 0.05f), kSlowestLook);
     if (isNew)
     {
-        b.lastAdd = now - step;
+        // the build-up starts at the first look: crediting a whole interval up front spotted anything visible at
+        // all (ratio >= 0.4 at the 5 s cadence) on the spot
+        b.lastAdd = now;
         b.lastSeen = now;
+        b.firstSeen = now;
     }
-    // fade while nobody could see him (1 s grace)
-    const float unseen = now - b.lastSeen - 1.0f;
+    // seen again after a gap: the time in between was not spent looking at him
+    if (now - b.lastSeen > cadence + 0.5f)
+    {
+        b.lastAdd = now;
+    }
+    // fade only once nobody has seen him for longer than the slowest look
+    const float unseen = now - b.lastSeen - kSlowestLook;
     if (unseen > 0)
     {
         b.value = floatMax(0.0f, b.value - unseen * cfg.forgetRate);
     }
     b.lastSeen = now;
 
-    // several observers in the same moment don't multiply real time
-    const float dt = floatMin(step, now - b.lastAdd);
+    // the time since anyone last added (several observers in the same moment don't multiply it), at most this
+    // observer's own interval
+    const float dt = floatMin(cadence, now - b.lastAdd);
     if (dt > 0)
     {
         float rate = ratio / cfg.buildTime;
@@ -833,6 +869,11 @@ static bool Accumulate(const Target* target, float ratio, bool firing, float per
     }
     if (b.value >= 1)
     {
+        if (SpotLog())
+        {
+            LOG_INFO(AI, "Spot: gradual build-up done after {:.1f} s (ratio {:.2f}, {:.0f} m)", now - b.firstSeen, ratio,
+                     dist);
+        }
         s_builds.erase(target);
         return true;
     }
@@ -1194,6 +1235,8 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
 
         actSpotabilityEye *= spotCoef;
         actSpotabilityEar *= aiAudible * sensitivityEar;
+        const float logVisibility = visibility, logSpotCoef = spotCoef, logEye = actSpotabilityEye,
+                    logEar = actSpotabilityEar;
 
         float actSpotability = actSpotabilityEye;
         bool byEye = !radarContact && !laserContact; // gradual spotting applies to sight only
@@ -1213,6 +1256,14 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             const float heard = floatMin(audibleFire * 0.6f, 1.2f);
             if (heard > actSpotability)
             {
+                // AI-XRAY-004: gunfire he cannot see the source of is a danger where it came from -- not his own
+                // side's (a friendly squad firing nearby must not have him turn to it or go and search it)
+                if (ai->GetGroup() != group && !center->IsFriendly(ai->GetTargetSide()))
+                {
+                    // placed as the engine places sounds (0.4 x distance)
+                    DangerList::Note(unit, DangerList::Type::Gunfire, ai->Position(),
+                                     ai->Position().Distance(Position()) * 0.4f);
+                }
                 spotError = ai->Position().Distance(Position()) * 0.4f; // gunshots are easier to place than footsteps
                 delayCoef = 2.0f;
                 actSpotability = heard;
@@ -1302,6 +1353,20 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
         }
         if (!target->destroyed && ai->IsDammageDestroyed())
         {
+            // AI-XRAY-004: one of ours, newly found dead -- a danger for whoever of the group is near the body. The
+            // side he had alive: a dead man's target side is civilian (EntityAI::GetTargetSide), which every side
+            // takes for friendly; civilians are not "ours" either
+            const TargetSide aliveSide = ai->Entity::GetTargetSide();
+            if (DangerList::Enabled() && aliveSide != TCivilian && center->IsFriendly(aliveSide))
+            {
+                for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
+                {
+                    if (AIUnit* mate = group->UnitWithID(id))
+                    {
+                        DangerList::Note(mate, DangerList::Type::Corpse, ai->Position());
+                    }
+                }
+            }
             target->destroyed = true;
             target->timeReported = TIME_MIN;
             target->posReported = VZero;
@@ -1384,6 +1449,29 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             {
                 spotted = GradualSpotting::Accumulate(target, newSpotability / spotTreshold, visibleFire > 0.8f,
                                                       trackTargetsPeriod, ai->Position().Distance(Position()));
+            }
+            if (GradualSpotting::SpotLog() && notManual && !initialize &&
+                !ai->GetType()->IsKindOf(GWorld->Preloaded(VTypeStatic)))
+            {
+                // once per second per target while unknown, then the moment it is spotted
+                static std::unordered_map<const Target*, float> s_logged;
+                const float now = Glob.time.toFloat();
+                if (s_logged.size() > 4096)
+                {
+                    s_logged.clear(); // log-only throttle
+                }
+                float& next = s_logged[target];
+                if (spotted || now >= next)
+                {
+                    next = now + 1.0f;
+                    LOG_INFO(AI,
+                             "Spot: {} {} {} at {:.0f} m: ratio {:.2f}{} by {} (vis {:.3f} x coef {:.2f} = eye {:.3f}, "
+                             "ear {:.3f}, thr {:.2f}) t={:.1f}",
+                             (const char*)unit->GetPerson()->GetDebugName(), spotted ? "SPOTTED" : "sees",
+                             (const char*)ai->GetDebugName(), ai->Position().Distance(Position()),
+                             newSpotability / spotTreshold, visibleFire > 0.8f ? " (firing)" : "",
+                             byEye ? "eye" : "ear", logVisibility, logSpotCoef, logEye, logEar, spotTreshold, now);
+                }
             }
             if (spotted)
             {
@@ -1840,10 +1928,8 @@ bool EntityAI::WhatShootResult(FireResult& result, const Target& target, int wea
         const Man* man = dyn_cast<const Man>(this);
         if (man && man->ImprovedAutonomousCombat())
         {
-            const auto& fuse = GrenadeFuse::Get();
-            const float delay = fuse.enabled && aInfo->explosionTime > 0
-                ? (fuse.fuseOverrideSeconds > 0 ? fuse.fuseOverrideSeconds : aInfo->explosionTime)
-                : dist / floatMax(1, ammoInfo->_initSpeed);
+            const float fuse = GrenadeFuse::FuseSeconds(aInfo->explosionTime, aInfo->thrown);
+            const float delay = fuse > 0 ? fuse : dist / floatMax(1, ammoInfo->_initSpeed);
             if (!man->CombatExplosiveAreaSafe(target.AimingPosition(),
                     4 * aInfo->indirectHitRange + target.posError.Size() + 1, delay))
                 return false;

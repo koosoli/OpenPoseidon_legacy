@@ -631,8 +631,8 @@ void DrawPhysicsTab()
     {
         ImGui::SetTooltip(
             "A 2001 grenade detonates the instant it touches anything. With this on,\n"
-            "ammo whose config declares `explosionTime` bounces instead and goes off\n"
-            "when its fuse runs out.\n"
+            "ammo whose config declares `explosionTime`, and every thrown hand grenade\n"
+            "(see Hand grenade fuse), bounces instead and goes off when its fuse runs out.\n"
             "\n"
             "WHICH rounds have a fuse is decided by CONFIG, never here -- flares and\n"
             "smoke shells descend from the same Grenade class and must not acquire\n"
@@ -666,6 +666,13 @@ void DrawPhysicsTab()
     {
         ImGui::SetTooltip("Slower than this and it is left to lie and count down.\n"
                           "Higher settles it sooner.");
+    }
+    ImGui::SetNextItemWidth(200.0f);
+    Dev::SliderFloat("Hand grenade fuse", &fuse.handGrenadeFuseSeconds, 0.0f, 8.0f, "%.1f s");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("The fuse of a thrown grenade whose config declares none (stock CWA).\n"
+                          "Zero gives back the stock contact detonation.");
     }
     ImGui::SetNextItemWidth(200.0f);
     Dev::SliderFloat("Fuse override", &fuse.fuseOverrideSeconds, 0.0f, 8.0f, "%.1f s");

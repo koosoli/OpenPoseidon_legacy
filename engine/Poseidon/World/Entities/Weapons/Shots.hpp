@@ -136,7 +136,8 @@ protected:
 
 	/// Seconds left on the fuse. Only meaningful while `_fuseArmed`.
 	float _fuse = 0.0f;
-	/// True when the ammo config declared `explosionTime > 0`. Everything the fuse
+	/// True when the round has a fuse (GrenadeFuse::FuseSeconds > 0: the config's `explosionTime`, or the default
+	/// one a stock hand grenade now gets). Everything the fuse
 	/// changes hangs off this one flag, so a round without it takes byte-identical
 	/// paths to before.
 	bool _fuseArmed = false;

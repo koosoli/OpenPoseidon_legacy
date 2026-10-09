@@ -142,6 +142,8 @@ struct FireDecision
 	Foundation::Time _nextTargetAquire;
 	//! Time when changing target is enabled
 	Foundation::Time _nextTargetChange;
+	//! AI-XRAY-002: when _fireTarget was last changed (the X-Ray enemy inertia counts from it)
+	Foundation::Time _targetSince;
 
 	//! Initial state of target.
 	//! We continue to fire until state is decreased.

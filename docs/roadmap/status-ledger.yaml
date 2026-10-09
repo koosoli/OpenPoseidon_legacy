@@ -8858,13 +8858,13 @@ tickets:
     class: ENGINE
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
-    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
-    # unfinished, into Oli); not started here.
-    scheduling_state: HOLD
-    status: PLANNED
+    # IN_PROGRESS (owner 2026-10-09: "continue the AI work"): grenade limit and spotting cadence fixed; the
+    # beach report is terrain; hunting with B on and the B-off regression on vanilla missions still to run.
+    scheduling_state: ACTIVE
+    status: IN_PROGRESS
     outcome: null
     owner: Dec
-    branch: null
+    branch: dec/ai-xray
     baseline_commit: b66d9b97
     verification_commit: null
     milestone: 0
@@ -8872,13 +8872,21 @@ tickets:
     depends_on: [AI-PORT-001]
     blocked_by: []
     blocks: []
-    implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    implementation_commits: [bfcdc2f9]
+    production_call_sites:
+      - file: engine/Poseidon/World/Entities/Infantry/SoldierOldAI.cpp
+        symbol: Man::FireWeapon
+      - file: engine/Poseidon/World/Detection/Target.cpp
+        symbol: GradualSpotting::Accumulate
+    test_ids: [ai-xray-001-ai3-grenades, ai-xray-001-walkin-gradual-on-off, ai-xray-001-ai3l-los, ai-xray-001-hunt-walkin, ai-xray-001-c02-battlefields-on-off]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
+      - "FIXED bfcdc2f9: grenade limit (now one per group per 5 s, AI3: 1.5/7.3 s and 4.5/9.5 s); gradual spotting 10x slow within 100 m and stuck at the 5 s cadence (now 2-4 s for a visible man at 120 m)."
+      - "Hunting captured 2026-10-09 (hold -> half-squad flank -> back to combat on re-sighting); rejoin after the enemy is gone and the Search step unmeasured. C02Battlefields 180 s with everything on: runs clean apart from the pre-existing ValidateOutVehicle assert."
+      - "NOT A BUG: the 130-150 m beach case (AI3L) is a terrain rise 1.5 m over the eye line; visibility 0 with or without the patches."
+      - "Mission start still gives every unit what it can see at once (stock); tests must bring the enemy into view after the start."
       - "Malprave job 23: grenade limit failed (4 throws in 1.6 s), spotting/hunting test broken by setPos teleports; knowsAbout reads 0."
       - "Oli 2026-10-04: a standing enemy at 130-150 m on the Everon beach is never noticed (B on or off); with gradual spotting on, ~15 s to notice one at 60 m. Owner: AI in combat stance slow to zero in (AI-AIM-001). Hunting tests must not teleport the enemy (out of the 300 m range); POSEIDON_AI_HUNT_LOG=1 shows the gates."
     fallback: null
@@ -8894,13 +8902,12 @@ tickets:
     class: ENGINE
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
-    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
-    # unfinished, into Oli); not started here.
-    scheduling_state: HOLD
-    status: PLANNED
+    # IMPLEMENTED (owner 2026-10-09: "continue the AI work"), off by default (CfgAIFork targetScoring = 1).
+    scheduling_state: ACTIVE
+    status: IMPLEMENTED
     outcome: null
     owner: Dec
-    branch: null
+    branch: dec/ai-xray
     baseline_commit: b66d9b97
     verification_commit: null
     milestone: 0
@@ -8908,14 +8915,18 @@ tickets:
     depends_on: [AI-XRAY-001]
     blocked_by: []
     blocks: []
-    implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    implementation_commits: [1047fc35]
+    production_call_sites:
+      - file: engine/Poseidon/World/Detection/TargetFire.cpp
+        symbol: EntityAI::SelectFireWeapon
+    test_ids: [ai-xray-002-walkin-target-log]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
       - "Not started in Malprave."
+      - "The player rules (switch to the player at once, 6 s away from the player) are untested: no human in the walk-in test."
+      - "X-Ray's distance-squared and victory-probability terms are not used: the FireResult surplus stays the base score."
     fallback: null
     reviewer: null
     reviewer_method: null
@@ -8929,13 +8940,13 @@ tickets:
     class: ENGINE
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
-    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
-    # unfinished, into Oli); not started here.
-    scheduling_state: HOLD
-    status: PLANNED
+    # IMPLEMENTED (owner 2026-10-09: "make fuses work / add features"). The hand-grenade fuse is ON by default;
+    # the reaction is off by default (CfgAIFork grenadeDodge = 1).
+    scheduling_state: ACTIVE
+    status: IMPLEMENTED
     outcome: null
     owner: Dec
-    branch: null
+    branch: dec/ai-xray
     baseline_commit: b66d9b97
     verification_commit: null
     milestone: 0
@@ -8943,13 +8954,21 @@ tickets:
     depends_on: [AI-XRAY-001]
     blocked_by: []
     blocks: []
-    implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    implementation_commits: [d69df045]
+    production_call_sites:
+      - file: engine/Poseidon/AI/AIGrenadeDanger.cpp
+        symbol: GrenadeDanger::React
+      - file: engine/Poseidon/World/Entities/Weapons/Shots.cpp
+        symbol: ShotShell::Simulate
+      - file: engine/Poseidon/World/Entities/Weapons/GrenadeFuse.cpp
+        symbol: GrenadeFuse::FuseSeconds
+    test_ids: [grenade, ai-xray-003-dropped-grenade-ai1, ai-xray-003-c02-on-off]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
+      - "Stock CWA grenades had no fuse (contact detonation); they now get 4 s by default, which changes stock play (AI throwers and the player). handGrenadeFuseSeconds = 0 restores it."
+      - "Grenades are noticed by distance only (no sight or sound check), as X-Ray registers explosives."
       - "Not started in Malprave; CWA AI ignore thrown grenades."
     fallback: null
     reviewer: null
@@ -8964,13 +8983,12 @@ tickets:
     class: ENGINE
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
-    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
-    # unfinished, into Oli); not started here.
-    scheduling_state: HOLD
-    status: PLANNED
+    # IMPLEMENTED (owner 2026-10-09: "continue on xray"), off by default (CfgAIFork dangerList = 1).
+    scheduling_state: ACTIVE
+    status: IMPLEMENTED
     outcome: null
     owner: Dec
-    branch: null
+    branch: dec/ai-xray
     baseline_commit: b66d9b97
     verification_commit: null
     milestone: 0
@@ -8978,13 +8996,18 @@ tickets:
     depends_on: [AI-XRAY-001]
     blocked_by: []
     blocks: []
-    implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    implementation_commits: [7db710cb]
+    production_call_sites:
+      - file: engine/Poseidon/AI/AIDangerList.cpp
+        symbol: DangerList::Note
+      - file: engine/Poseidon/AI/AIUnitImpl.cpp
+        symbol: AIUnit::SetWatch
+    test_ids: [danger, ai-xray-004-c02-on-off]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
+      - "Danger search added (hold, then walk to the danger); hunting and searches only on SEEK AND DESTROY / GUARD waypoints (owner rule 2026-10-09). The staged unseen-gunfire test was inconclusive; turning is measured in C02 only."
       - "Not started in Malprave."
     fallback: null
     reviewer: null
@@ -9034,13 +9057,12 @@ tickets:
     class: ENGINE
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
-    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
-    # unfinished, into Oli); not started here.
-    scheduling_state: HOLD
-    status: PLANNED
+    # IMPLEMENTED (owner 2026-10-09: "continue on ai"), off by default (CfgAIFork lookOut = 1; badCover = 1).
+    scheduling_state: ACTIVE
+    status: IMPLEMENTED
     outcome: null
     owner: Dec
-    branch: null
+    branch: dec/ai-xray
     baseline_commit: b66d9b97
     verification_commit: null
     milestone: 0
@@ -9048,13 +9070,18 @@ tickets:
     depends_on: [AI-XRAY-001]
     blocked_by: []
     blocks: []
-    implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    implementation_commits: [bbb93088]
+    production_call_sites:
+      - file: engine/Poseidon/AI/AIHunt.cpp
+        symbol: Hunt::ThinkImpl
+      - file: engine/Poseidon/World/Detection/TargetFire.cpp
+        symbol: EntityAI::FindHideBehind
+    test_ids: [ai-xray-006-hunt-lookout, ai-xray-006-c02-badcover]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
+      - "Cover eviction (a mate closer to a cover spot takes it) is not done: CWA picks cover per soldier in FindHideBehind with no reservation to evict from. The 3 m enemy rule is already covered by FindHideBehind's own minimum distance."
       - "Spacing and flank cap are in (aiCoverGrenades); eviction, the 3 m enemy rule and the peek are not."
     fallback: null
     reviewer: null
@@ -9191,10 +9218,10 @@ tickets:
     obligation: OPTIONAL
     execution_mode: INVESTIGATE
     scheduling_state: OPEN
-    status: PLANNED
+    status: IMPLEMENTED
     outcome: null
     owner: Dec
-    branch: null
+    branch: dec/ai-xray
     baseline_commit: 0eddd247
     verification_commit: null
     milestone: 0
@@ -9209,7 +9236,8 @@ tickets:
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
-      - "Not yet measured. Tools: POSEIDON_COMBAT_AUDIT=1 with a unit named auditShooter (Man::GetAimed gates). Check aiSuppression's wider spread for suppressed gunners is not the cause."
+      - "Measured 2026-10-09 (.tw/ai/AIM.Eden: 4 West vs 4 East standing still, East holding fire, 80 m; COMBAT_AUDIT on auditShooter, which now also logs target, speed, body/gun angle off the target, cover, order, animation). Two of the four East stand behind the rise that hides the AI3L squads, so only two are ever visible (an earlier note here, 2 of 4 in 30 s, was that artefact). The aim settles in ~0.8 s once still; the time went on stock CWA combat movement: going prone first (combattolying, 1.7 s, no shot), moving to cover while FireInit waits 0.2-0.7 s before aiming, and slow prone turns (lyingturnr, ~1.6 s for 80 deg). Same with POSEIDON_AI_COMBAT_LEGACY=1."
+      - "Owner 2026-10-09 chose both fixes (AICombatPace, off by default): CfgAIFork shootFirst = 1 (a 4 s firing window after taking a visible target, not under fire: aim at once, stay up) and proneSpeed = 1.6 (AI only: prone transitions, prone turn animations and the lying turn cap). Both visible East down by 5.8 / 5.9 / 6.2 s stock vs 2.4 / 2.8 / 4.6 s with both (3 runs each)."
     fallback: null
     reviewer: null
     reviewer_method: null

@@ -1,6 +1,8 @@
 #include <cstdlib>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AIHunt.hpp>
+#include <Poseidon/AI/AIGrenadeDanger.hpp>
+#include <Poseidon/AI/AIDangerList.hpp>
 
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -38,6 +40,7 @@ struct Settings
     float cooldown = 30;     // s before the same soldier hunts again
     float lostAttack = 20;   // s: an attack on a target nobody has seen this long hands over to hunting
     float grenadeInterval = 0; // s between hand grenades from one group (0 = no limit)
+    bool lookOut = false;      // AI-XRAY-006: rise for a look during the hold (CfgAIFork lookOut = 1)
 };
 
 const Settings& Cfg()
@@ -63,6 +66,7 @@ const Settings& Cfg()
             s.maxTravel = std::max(20.0f, num("huntMaxTravel", s.maxTravel));
             s.lostAttack = std::max(5.0f, num("huntLostAttack", s.lostAttack));
             s.grenadeInterval = std::max(0.0f, num("grenadeInterval", s.grenadeInterval));
+            s.lookOut = num("lookOut", 0) != 0;
         }
         LOG_INFO(World, "CfgAIFork (AIHunt): {} hunting={} grenadeInterval={:.1f}",
                  Pars.FindEntry("CfgAIFork") ? "found" : "absent", s.enabled ? 1 : 0, s.grenadeInterval);
@@ -90,6 +94,15 @@ struct Rec
     float next = 0;
     Vector3 goal = VZero;
     float logNext = 0; // POSEIDON_AI_HUNT_LOG throttle
+    // AI-XRAY-004: searching a danger's position (no enemy to chase) rather than hunting a lost enemy
+    bool byDanger = false;
+    Vector3 dangerPos = VZero;
+    // AI-XRAY-006: the look-out during the hold
+    float peekAt = 0;   // when it starts (0: done or none)
+    float peekUntil = 0;
+    bool peeking = false;
+    bool peekWatch = false; // we borrowed his watch direction (he was in the default mode)
+    UnitPosition peekOldPos = UPAuto;
 };
 
 std::unordered_map<const AIUnit*, Rec> s_recs;
@@ -108,6 +121,8 @@ float Rand(float a, float b)
 void Purge()
 {
     const float now = Now();
+    if (now < s_purge)
+        s_purge = now - 10; // mission time went back (restart, load): purge now, not once it has caught up
     if (now - s_purge < 10)
         return;
     s_purge = now;
@@ -123,43 +138,41 @@ bool MainBusy(AIGroup* grp)
     return c && c->_message != Command::Wait && c->_message != Command::Hide;
 }
 
+//! Owner 2026-10-09: hunting and danger searches are for groups whose orders are to find the enemy -- a SEEK AND
+//! DESTROY or GUARD waypoint. A soldier or squad placed with no waypoint (or on Move, Hold, Sentry, Cycle, ...)
+//! stays where the mission put it, by design. (Malprave let any group without waypoints hunt.)
 bool WaypointAllows(AIGroup* grp)
 {
     if (grp->GetScript())
         return false;
     const Mission* m = grp->GetMission();
     if (!m || m->_action != Mission::Arcade || !grp->GetCurrent())
-        return true; // no waypoints: free to react
+        return false; // no waypoints: stays put
     const int idx = grp->GetCurrent()->_fsm->Var(0);
     if (idx < 0 || idx >= grp->NWaypoints())
-        return true;
+        return false;
     switch (grp->GetWaypoint(idx).type)
     {
-        case ACHOLD:
-        case ACSENTRY:
-        case ACSCRIPTED:
-        case ACGETIN:
-        case ACGETOUT:
-        case ACLOAD:
-        case ACUNLOAD:
-        case ACTRANSPORTUNLOAD:
-        case ACSUPPORT:
-        case ACJOIN:
-        case ACLEADER:
-            return false;
-        default:
+        case ACSEEKANDDESTROY:
+        case ACGUARD:
             return true;
+        default:
+            return false;
     }
 }
 
-bool Allowed(AIUnit* unit, AIGroup* grp)
+//! `dangerSearch`: for searching a danger's position (AI-XRAY-004) an alert (Aware) soldier may go too, as X-Ray's
+//! do; hunting a lost enemy needs Combat or Stealth
+bool Allowed(AIUnit* unit, AIGroup* grp, bool dangerSearch = false)
 {
     if (!Cfg().enabled || !grp || unit->IsAnyPlayer() || grp->IsAnyPlayerGroup() || grp->GetFlee())
         return false;
     if (unit == grp->Leader() || !unit->IsFreeSoldier())
         return false;
+    if (GrenadeDanger::IsRunning(unit))
+        return false; // getting clear of a grenade first
     const CombatMode cm = unit->GetCombatMode();
-    if (cm != CMCombat && cm != CMStealth)
+    if (cm != CMCombat && cm != CMStealth && !(dangerSearch && cm == CMAware))
         return false;
     if (unit->IsKeepingFormation())
         return false; // Blue / Green / Yellow: stay with the group
@@ -178,7 +191,7 @@ bool Allowed(AIUnit* unit, AIGroup* grp)
 }
 
 //! the first gate of Allowed that blocks (for the hunt log)
-const char* BlockReason(AIUnit* unit, AIGroup* grp)
+const char* BlockReason(AIUnit* unit, AIGroup* grp, bool dangerSearch = false)
 {
     if (!grp) return "no group";
     if (unit->IsAnyPlayer()) return "player";
@@ -187,7 +200,8 @@ const char* BlockReason(AIUnit* unit, AIGroup* grp)
     if (unit == grp->Leader()) return "leader";
     if (!unit->IsFreeSoldier()) return "not a free soldier";
     const CombatMode cm = unit->GetCombatMode();
-    if (cm != CMCombat && cm != CMStealth) return "not combat/stealth";
+    if (cm != CMCombat && cm != CMStealth && !(dangerSearch && cm == CMAware))
+        return dangerSearch ? "not combat/stealth/aware" : "not combat/stealth";
     if (unit->IsKeepingFormation()) return "keeping formation (blue/green/yellow)";
     if (unit->GetAIDisabled() & AIUnit::DAMove) return "move disabled";
     Person* p = unit->GetPerson();
@@ -254,19 +268,63 @@ bool OurOrderOnTop(AIUnit* unit)
     return c && c->_message == Command::Move && c->_param == kTag;
 }
 
+//! the look-out over: his stance and watch given back
+void EndPeek(Rec& r, AIUnit* unit)
+{
+    if (!r.peeking)
+        return;
+    if (unit->GetUnitPosition() == UPUp)
+        unit->SetUnitPosition(r.peekOldPos);
+    if (r.peekWatch && unit->GetWatchMode() == AIUnit::WMPos)
+    {
+        // SetNoWatch also drops the target his leader assigned: keep it
+        Target* assigned = unit->GetTargetAssigned();
+        unit->SetNoWatch();
+        unit->AssignTarget(assigned);
+    }
+    static const bool logOn = [] { const char* v = std::getenv("POSEIDON_AI_HUNT_LOG"); return v && v[0] == '1'; }();
+    if (logOn)
+    {
+        LOG_INFO(World, "Hunt: {} back from the look-out (stance {}) t={:.1f}", (const char*)unit->GetDebugName(),
+                 int(unit->GetUnitPosition()), Now());
+    }
+    r.peeking = false;
+    r.peekWatch = false;
+}
+
 void Abort(Rec& r, AIUnit* unit, float rest)
 {
-    if (OurOrderOnTop(unit))
+    EndPeek(r, unit);
+    r.peekAt = 0;
+    // drop our moves wherever they sit (not only one on top: one left under the engine's Hide would resume
+    // later); whatever else is there resumes, and a subgroup left without orders rejoins the group by itself
+    AISubgroup* sub = unit->GetSubgroup();
+    AIGroup* grp = unit->GetGroup();
+    if (sub && grp && sub != grp->MainSubgroup())
     {
-        // drop only our move; whatever was under it (e.g. the engine's Hide) resumes,
-        // and a subgroup left without orders rejoins the group by itself
-        AISubgroup* sub = unit->GetSubgroup();
-        AISubgroupContext ctx(sub);
-        sub->PopTask(&ctx);
+        sub->ClearTaggedCommands(kTag);
     }
     r.phase = Rest;
     r.until = Now() + rest;
     r.target = nullptr;
+    r.byDanger = false;
+}
+
+//! AI-XRAY-004: dangers worth walking over to look at (X-Ray's danger planners end in a search); not a grenade
+//! or a round going past
+bool WorthSearching(DangerList::Type type)
+{
+    switch (type)
+    {
+        case DangerList::Type::Hit:
+        case DangerList::Type::Gunfire:
+        case DangerList::Type::Corpse:
+        case DangerList::Type::SquadmateDied:
+        case DangerList::Type::SquadmateHit:
+            return true;
+        default:
+            return false;
+    }
 }
 
 void Go(AIUnit* unit, AIGroup* grp, Vector3 pos)
@@ -377,12 +435,17 @@ void ThinkImpl(AIUnit* unit)
     r.next = now + 1.0f;
     r.group = grp;
 
-    if (!Allowed(unit, grp))
+    const bool mayHunt = Allowed(unit, grp);
+    const bool maySearch = DangerList::Enabled() && Allowed(unit, grp, true);
+    // a danger search under way only needs the search gates; anything else needs the hunting ones
+    if (r.byDanger ? !maySearch : (!mayHunt && !((r.phase == Idle || r.phase == Rest) && maySearch)))
     {
         if (HuntLog() && now >= r.logNext)
         {
             r.logNext = now + 5;
-            LOG_INFO(World, "Hunt: {} blocked: {} t={:.1f}", (const char*)unit->GetDebugName(), BlockReason(unit, grp), now);
+            LOG_INFO(World, "Hunt: {} blocked: {}{}{} t={:.1f}", (const char*)unit->GetDebugName(), BlockReason(unit, grp),
+                     DangerList::Enabled() ? "; search: " : "",
+                     DangerList::Enabled() ? BlockReason(unit, grp, true) : "", now);
         }
         if (r.phase == Flank || r.phase == Search || r.phase == Hold)
             Abort(r, unit, 5);
@@ -416,7 +479,34 @@ void ThinkImpl(AIUnit* unit)
                 r.phase = Idle;
             return;
         case Idle:
-            if (!t || seenNow || attacking)
+            // AI-XRAY-004: no enemy to chase, but a danger to look into (a body, gunfire from out of sight, where he
+            // was hit from): hold, then search its position -- X-Ray's take cover, look round, search
+            if (!t && !seenNow && !attacking && maySearch)
+            {
+                Vector3 dangerPos;
+                DangerList::Type type;
+                if (DangerList::Top(unit, dangerPos, &type, &WorthSearching)) // the top one worth a look
+                {
+                    const float d2 = dangerPos.DistanceXZ2(unit->Position());
+                    if (d2 > Square(8.0f) && d2 < Square(Cfg().maxTravel))
+                    {
+                        r.byDanger = true;
+                        r.dangerPos = dangerPos;
+                        r.target = nullptr;
+                        r.phase = Hold;
+                        r.until = now + Rand(Cfg().holdMin, Cfg().holdMax);
+                        r.peekAt = Cfg().lookOut ? now + Rand(1.5f, 3.0f) : 0;
+                        if (HuntLog())
+                        {
+                            LOG_INFO(World, "Hunt: {} will search a danger ({}) at ({:.0f},{:.0f}) t={:.1f}",
+                                     (const char*)unit->GetDebugName(), DangerList::Name(type), dangerPos.X(),
+                                     dangerPos.Z(), now);
+                        }
+                        return;
+                    }
+                }
+            }
+            if (!t || seenNow || attacking || !mayHunt)
             {
                 if (HuntLog() && now >= r.logNext)
                 {
@@ -428,8 +518,10 @@ void ThinkImpl(AIUnit* unit)
                 return;
             }
             r.target = t;
+            r.byDanger = false;
             r.phase = Hold; // stay in cover (the engine's own hide logic) and watch
             r.until = now + Rand(Cfg().holdMin, Cfg().holdMax);
+            r.peekAt = Cfg().lookOut ? now + Rand(1.5f, 3.0f) : 0;
             return;
         default:
             break;
@@ -437,7 +529,19 @@ void ThinkImpl(AIUnit* unit)
 
     // an enemy back in sight, or the contact gone: normal combat takes over
     Target* cur = r.target;
-    if (seenNow || attacking || !cur || cur->destroyed || cur->vanished || Glob.time - cur->lastSeen > 120)
+    // a real lost enemy turns up while he waits to search a danger: the hunt for it takes over
+    if (r.byDanger && r.phase == Hold && t && mayHunt && !seenNow && !attacking)
+    {
+        r.byDanger = false;
+        r.target = t;
+        cur = t;
+    }
+    // a danger search: given up while still holding if every danger worth a look is forgotten; once walking he
+    // finishes it (a body is remembered 10 s, the hold alone takes 5-10)
+    Vector3 anyDanger;
+    const bool lost = r.byDanger ? (r.phase == Hold && !DangerList::Top(unit, anyDanger, nullptr, &WorthSearching))
+                                 : (!cur || cur->destroyed || cur->vanished || Glob.time - cur->lastSeen > 120);
+    if (seenNow || attacking || lost)
     {
         Abort(r, unit, 5);
         return;
@@ -446,9 +550,52 @@ void ThinkImpl(AIUnit* unit)
     switch (r.phase)
     {
         case Hold:
+        {
+            // AI-XRAY-006: X-Ray's look_out between take_cover and hold -- rise for a moment facing the threat.
+            // Never into fire: not while in danger (stock lies him down then, ~5 s) or under any suppression
+            const bool underFire = unit->IsDanger() || unit->IsPinnedDown() || unit->GetSuppression() > 0.05f;
+            if (r.peeking && (now >= r.peekUntil || underFire))
+            {
+                EndPeek(r, unit);
+            }
+            else if (!r.peeking && r.peekAt > 0 && now >= r.peekAt && now + 1.0f < r.until && !underFire)
+            {
+                r.peekAt = 0;
+                r.peekOldPos = unit->GetUnitPosition();
+                unit->SetUnitPosition(UPUp);
+                const Vector3 look = r.byDanger ? r.dangerPos : (cur ? cur->AimingPosition() : unit->Position());
+                r.peekWatch = unit->GetWatchMode() == AIUnit::WMNo;
+                if (r.peekWatch)
+                {
+                    // SetWatchPosition also drops the target his leader assigned: keep it
+                    Target* assigned = unit->GetTargetAssigned();
+                    unit->SetWatchPosition(look);
+                    unit->AssignTarget(assigned);
+                }
+                r.peeking = true;
+                r.peekUntil = now + 1.5f;
+                if (HuntLog())
+                {
+                    LOG_INFO(World, "Hunt: {} looks out towards ({:.0f},{:.0f}) t={:.1f}",
+                             (const char*)unit->GetDebugName(), look.X(), look.Z(), now);
+                }
+            }
             if (now < r.until)
                 return;
-            if (Hunters(grp) < std::max(1, grp->NUnits() / 2))
+            EndPeek(r, unit);
+            if (r.byDanger && Hunters(grp) < std::max(1, grp->NUnits() / 2))
+            {
+                // straight to it (nobody to flank), stopping a few metres short at a random side
+                Vector3 p = r.dangerPos;
+                p[0] += Rand(-3, 3);
+                p[2] += Rand(-3, 3);
+                p[1] = GLandscape ? GLandscape->SurfaceY(p[0], p[2]) : p[1];
+                r.goal = p;
+                Go(unit, grp, r.goal);
+                r.phase = Search;
+                r.until = now + Cfg().phaseTimeout;
+            }
+            else if (!r.byDanger && Hunters(grp) < std::max(1, grp->NUnits() / 2))
             {
                 r.goal = FlankPoint(unit, cur->AimingPosition());
                 Go(unit, grp, r.goal);
@@ -458,12 +605,15 @@ void ThinkImpl(AIUnit* unit)
             else
             {
                 r.until = now + Rand(Cfg().holdMin, Cfg().holdMax); // half the squad already out: keep covering
+                r.peekAt = Cfg().lookOut ? now + Rand(1.5f, 3.0f) : 0;  // and another look in a while
             }
             return;
+        }
         case Flank:
         case Search:
         {
-            const bool arrived = unit->Position().Distance2(r.goal) < Square(8) ||
+            // a danger's spot is looked at from close by; a lost enemy's area from 8 m
+            const bool arrived = unit->Position().Distance2(r.goal) < Square(r.byDanger ? 3.0f : 8.0f) ||
                                  (!OurOrderOnTop(unit) && unit->GetSubgroup() == grp->MainSubgroup());
             if (!arrived && now < r.until)
                 return;
@@ -476,12 +626,31 @@ void ThinkImpl(AIUnit* unit)
             }
             else
             {
+                if (r.byDanger)
+                {
+                    // looked at: a danger remembered for longer than the cooldown (a hit: 60 s) must not send him
+                    // back to the same spot
+                    DangerList::Forget(unit, r.dangerPos, 6.0f);
+                }
                 Abort(r, unit, Cfg().cooldown); // searched: back to the group
             }
             return;
         }
         default:
             return;
+    }
+}
+
+void EndAllPeeks()
+{
+    for (auto& kv : s_recs)
+    {
+        Rec& r = kv.second;
+        if (r.peeking && r.unit)
+        {
+            EndPeek(r, r.unit);
+        }
+        r.peekAt = 0;
     }
 }
 
@@ -499,8 +668,8 @@ std::unordered_map<const AIGroup*, float> s_lastGrenade;
 
 void OnGrenadeThrown(const AIGroup* grp)
 {
-    if (!grp)
-        return;
+    if (!grp || Cfg().grenadeInterval <= 0)
+        return; // no limit configured: nothing to remember (stock)
     if (s_lastGrenade.size() > 512)
         s_lastGrenade.clear(); // stale groups; worst case one early throw
     s_lastGrenade[grp] = Now();
@@ -512,10 +681,12 @@ void OnGrenadeThrown(const AIGroup* grp)
 
 bool GrenadeAllowed(const AIGroup* grp)
 {
-    if (!grp)
-        return true;
+    if (!grp || Cfg().grenadeInterval <= 0)
+        return true; // no limit configured (stock): never looked up
     auto it = s_lastGrenade.find(grp);
-    const bool ok = it == s_lastGrenade.end() || Now() - it->second >= Cfg().grenadeInterval;
+    // a throw "in the future" is from before a restart or a load (mission time went back): it does not count
+    const float since = it == s_lastGrenade.end() ? FLT_MAX : Now() - it->second;
+    const bool ok = since < 0 || since >= Cfg().grenadeInterval;
     if (!ok && HuntLog())
     {
         LOG_INFO(World, "Hunt: grenade refused for group {} ({:.1f} s after the last) t={:.1f}",

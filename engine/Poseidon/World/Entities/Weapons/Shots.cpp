@@ -1,5 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
+#include <Poseidon/AI/AIDangerList.hpp> // AI-XRAY-004: typed dangers
+#include <Poseidon/AI/AIGrenadeDanger.hpp> // AI-XRAY-003: live grenades for the AI
 #include <Poseidon/World/Scene/CargoSurface.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -260,6 +262,29 @@ static void ApplyNearMissSuppression(EntityAI* shooter, const AmmoType* type, Ve
         }
         const float d = sqrt(d2);
         unit->AddSuppression(PerRound * power * (1 - d / Radius), shooter);
+        // AI-XRAY-004: a round past him from an enemy: a danger where it came from (he turns to the shooter, not
+        // sideways to where it passed)
+        if (shooter && unit->GetGroup() && unit->GetGroup()->GetCenter() &&
+            !unit->GetGroup()->GetCenter()->IsFriendly(shooter->GetTargetSide()))
+        {
+            const Vector3 origin = shooter->Position();
+            if (origin.DistanceXZ2(p) <= Square(DangerList::Range(DangerList::Type::Ricochet)))
+            {
+                DangerList::Note(unit, DangerList::Type::Ricochet, origin);
+            }
+            else
+            {
+                // further off: the danger is noted where it passed him, pointing back along the round
+                Vector3 back = from - to;
+                back[1] = 0;
+                if (back.SquareSize() > 1e-4f)
+                {
+                    back.Normalize();
+                }
+                DangerList::Note(unit, DangerList::Type::Ricochet,
+                                 p + back * (DangerList::Range(DangerList::Type::Ricochet) * 0.9f));
+            }
+        }
     }
 }
 
@@ -822,19 +847,12 @@ ShotShell::ShotShell(EntityAI* parent, const AmmoType* type) : base(parent, type
 
     _waterImpactDone = false;
 
-    // Zero for every stock round -- see AmmoType::explosionTime. A grenade only
-    // gets a fuse if its config asks for one.
-    _fuse = type->explosionTime;
-    // The panel override wins when set, so a delay can be tried without
-    // rebuilding -- but only for ammo the CONFIG already gave a fuse. It changes
-    // how long, never which rounds, so flares and smoke shells (which also
-    // descend from Grenade) cannot acquire one by moving a slider.
-    const GrenadeFuse::Settings& tuning = GrenadeFuse::Get();
-    if (_fuse > 0.0f && tuning.fuseOverrideSeconds > 0.0f)
-    {
-        _fuse = tuning.fuseOverrideSeconds;
-    }
-    _fuseArmed = tuning.enabled && _fuse > 0.0f;
+    // The config's explosionTime, else the hand-grenade fuse for a thrown grenade (AI-XRAY-003: stock CWA
+    // declares none). The panel override changes how long, never which rounds, so flares and smoke shells
+    // (which also descend from Grenade, but are not shot-shells thrown by hand) cannot acquire one. Every
+    // machine runs this constructor, so a remote copy of the round bounces and cooks off the same way.
+    _fuse = GrenadeFuse::FuseSeconds(type->explosionTime, type->thrown);
+    _fuseArmed = _fuse > 0.0f;
 }
 
 /// Reflection off a surface, with the energy a real bounce loses.
@@ -974,9 +992,9 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
     Dev::OpDiag::OnShotStep(this); // DIAG-001: flight path
 #endif
 
-    // FUSE. Only ammo whose config declares `explosionTime` gets here; for
-    // everything else `_fuseArmed` is false and every path below is the one it
-    // always took. See AmmoType::explosionTime for why absent means zero.
+    // FUSE. Only ammo whose config declares `explosionTime`, or a hand grenade given the default fuse
+    // (GrenadeFuse::handGrenadeFuseSeconds, AI-XRAY-003), gets here; for everything else `_fuseArmed` is
+    // false and every path below is the one it always took.
     if (_fuseArmed)
     {
         _fuse -= deltaT;
@@ -991,6 +1009,8 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
             _delete = true;
             return;
         }
+        // AI-XRAY-003: soldiers near a live grenade get clear of it (AIGrenadeDanger)
+        GrenadeDanger::Report(this, Position(), _speed, _fuse, Type()->indirectHitRange, _atRest);
         if (_atRest)
         {
             // Lying still, counting down. Integration is skipped ENTIRELY rather

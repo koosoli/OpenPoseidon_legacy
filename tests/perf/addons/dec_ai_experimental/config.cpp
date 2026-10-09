@@ -16,4 +16,11 @@ class CfgAIFork
     hunting = 1;
     grenadeInterval = 5;
     exposedParts = 1;
+    targetScoring = 1;
+    grenadeDodge = 1;
+    dangerList = 1;
+    lookOut = 1;
+    badCover = 1;
+    shootFirst = 1;
+    proneSpeed = 1.6;
 };

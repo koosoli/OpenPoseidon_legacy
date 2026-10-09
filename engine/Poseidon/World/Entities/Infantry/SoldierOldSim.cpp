@@ -1,4 +1,5 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
+#include <Poseidon/AI/AICombatPace.hpp> // AI-AIM-001
 #include <Poseidon/World/Entities/Infantry/BodyWaterResponse.hpp>
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/RainWaterField.hpp>
@@ -100,6 +101,12 @@ bool Man::SimulateAnimations(float& turn, float& moveX, float& moveZ, float delt
 
     ActionMap* map = Type()->GetActionMap(_primaryMove.id);
     float turnSpeed = map ? map->GetTurnSpeed() : 0;
+    // AI-AIM-001 (CfgAIFork proneSpeed): an AI soldier turns faster lying down (the player never)
+    if (map && map->GetUpDegree() == ManPosLying && CombatPace::ProneSpeed() != 1.0f && Brain() &&
+        !Brain()->IsPlayer() && !QIsManual())
+    {
+        turnSpeed *= CombatPace::ProneSpeed();
+    }
     saturate(turn, -turnSpeed * deltaT, +turnSpeed * deltaT);
 
     if (fabs(turn) > 1e-3)

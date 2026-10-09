@@ -1,3 +1,4 @@
+#include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/World/Simulation/CollisionQueryMath.hpp>
@@ -1460,8 +1461,9 @@ void Landscape::ExplosionDammage(EntityAI* owner, Shot* shot, Object* directHit,
     GetNetworkManager().ExplosionDammageEffects(owner, shot, directHit, pos, dir, type, enemyDammage);
     // Apply after damage/effects so their ground queries see the impact's original surface.
     // ShotBullet inherits ShotShell: classify by ammo simulation, not that base class.
-    // Timed hand grenades retain their existing behaviour.
-    const bool impactShell = type->_simulation == AmmoShotShell && type->explosionTime <= 0.0f;
+    // Timed hand grenades retain their existing behaviour (stock ones are timed too now: AI-XRAY-003).
+    const bool impactShell = type->_simulation == AmmoShotShell &&
+                             GrenadeFuse::FuseSeconds(type->explosionTime, type->thrown) <= 0.0f;
     if (Dev::RocketCraters().enabled && shot && (dyn_cast<Missile>(shot) || impactShell))
     {
         const bool changed = !directHit && type->indirectHit > 0 &&

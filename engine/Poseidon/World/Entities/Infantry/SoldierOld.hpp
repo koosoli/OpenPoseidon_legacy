@@ -642,6 +642,10 @@ class Man: public Person
 	MotionPath _queueMove; // shortest path to desired move; desired move is last element
     bool _cargoWeaponRequested = false;
     mutable InfantryCombat::FireLaneWait _combatLaneWait;
+    // AI-AIM-001 (CfgAIFork shootFirst): the fire target the current firing window belongs to (compared only, never
+    // dereferenced) and when it opened
+    const void* _shootFirstTarget = nullptr;
+    Foundation::Time _shootFirstSince;
     mutable const char* _combatLastGate = "not-evaluated";
     unsigned _combatLaneYields = 0;
     float _combatRepositionAfter = 0;

@@ -75,6 +75,10 @@ class AmmoType: public VehicleNonAIType
 	/// asks for one. That keeps every existing mission and every upstream config
 	/// working unchanged, which matters more here than a nicer default.
 	float explosionTime;
+	/// AI-XRAY-003: thrown by hand -- some magazine fires it slower than 30 m/s as a shell (the engine's
+	/// hand-grenade test), set by MagazineType::Init. Such a round gets GrenadeFuse's hand-grenade fuse when
+	/// it declares no explosionTime of its own.
+	bool thrown = false;
 
 	Ref<Texture> _texture;
 	AmmoSimulation _simulation;

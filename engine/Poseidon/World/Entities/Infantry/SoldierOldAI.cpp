@@ -25,6 +25,8 @@
 #include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
 #include <Poseidon/AI/InfantryCombat.hpp>
 #include <Poseidon/AI/FriendlyFire.hpp>
+#include <Poseidon/AI/AIHunt.hpp>
+#include <Poseidon/AI/AICombatPace.hpp> // AI-AIM-001
 #include <Poseidon/World/Weather/WindModel.hpp>
 
 namespace Poseidon
@@ -1333,8 +1335,8 @@ bool Man::CombatShotSafe(int weapon, const Target* target) const
     if (!target || !target->idExact) return false;
     const auto shell = Ballistics::ShellParamsFor(*ammo);
     const auto& fuseSettings = GrenadeFuse::Get();
-    const float fuse = fuseSettings.enabled && ammo->explosionTime > 0
-        ? (fuseSettings.fuseOverrideSeconds > 0 ? fuseSettings.fuseOverrideSeconds : ammo->explosionTime) : 0;
+    // the fuse the round will really have: stock hand grenades get one too now (AI-XRAY-003)
+    const float fuse = GrenadeFuse::FuseSeconds(ammo->explosionTime, ammo->thrown);
     if (fuse > 8 || shell.initTime > 0) return false;
     Vector3 position = origin;
     Vector3 velocity = Speed() + direction * magazine->_type->_initSpeed;
@@ -1582,6 +1584,19 @@ bool Soldier::FireWeapon(int weapon, TargetType* target)
                     MoveId moveWanted = map->GetAction(selAction);
                     if (moveWanted != MoveIdNone)
                     {
+                        // AI-XRAY-001: the squad grenade interval (AIHunt) is claimed when the throw starts. The
+                        // grenade leaves the hand only when the animation ends (ThrowGrenadeAction), so recording
+                        // it then let every squadmate who chose to throw in that 1-2 s through (Malprave job 23:
+                        // four grenades in 1.6 s from one group). Not claimed when this pose has no throw.
+                        AIUnit* thrower = Brain();
+                        if (thrower && !thrower->IsAnyPlayer() && mode->_ammo->_simulation == AmmoShotShell)
+                        {
+                            if (!Hunt::GrenadeAllowed(thrower->GetGroup()))
+                            {
+                                return false;
+                            }
+                            Hunt::OnGrenadeThrown(thrower->GetGroup());
+                        }
                         Ref<ActionContextDefault> context = new ActionContextDefault;
                         context->function = MFThrowGrenade;
                         context->param = weapon;
@@ -1970,10 +1985,35 @@ float Man::GetAimed(int weapon, Target* target) const
         // An accepted aim also must not erase emission-gate rejections.
     }
     if (log)
-        LOG_INFO(AI, "COMBAT-AUDIT t={} weapon={} current={} gate={} visibility={} miss={} tolerance={} aimed={} seenAge={} posError={}",
+    {
+        // AI-AIM-001: who he aims at, whether he is moving, and how far his body and his gun are turned off the
+        // target (degrees)
+        float bodyOff = 0, gunOff = 0;
+        if (target && target->idExact)
+        {
+            Vector3 to = target->idExact->AimingPosition() - Position();
+            to[1] = 0;
+            Vector3 body = Direction();
+            body[1] = 0;
+            Vector3 gun = weapon >= 0 && weapon < NMagazineSlots() ? GetWeaponDirection(weapon) : Direction();
+            gun[1] = 0;
+            if (to.SquareSize() > 1e-4f && body.SquareSize() > 1e-4f && gun.SquareSize() > 1e-4f)
+            {
+                bodyOff = std::acos(std::clamp(body.Normalized() * to.Normalized(), -1.0f, 1.0f)) * 57.2958f;
+                gunOff = std::acos(std::clamp(gun.Normalized() * to.Normalized(), -1.0f, 1.0f)) * 57.2958f;
+            }
+        }
+        LOG_INFO(AI, "COMBAT-AUDIT t={} weapon={} current={} gate={} visibility={} miss={} tolerance={} aimed={} seenAge={} posError={} target={} speed={:.1f} bodyOff={:.0f} gunOff={:.0f} hide={} cmd={} move={}",
             Glob.time.toFloat(), weapon, _currentWeapon, diagnostics.gate,
             diagnostics.visibility, diagnostics.error, diagnostics.targetSize, result,
-            target ? Glob.time - target->lastSeen : -1.0f, target ? target->posError.Size() : -1.0f);
+            target ? Glob.time - target->lastSeen : -1.0f, target ? target->posError.Size() : -1.0f,
+            target && target->idExact ? (const char*)target->idExact->GetDebugName() : "-", Speed().Size(), bodyOff,
+            gunOff, GetHideBehind() ? 1 : 0,
+            Brain() && Brain()->GetSubgroup() && Brain()->GetSubgroup()->GetCommand()
+                ? int(Brain()->GetSubgroup()->GetCommand()->_message)
+                : -1,
+            (const char*)GetPrimaryMoveName());
+    }
     return result;
 }
 
@@ -2456,6 +2496,22 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
     }
     else _combatLaneWait.Clear();
 
+    // AI-AIM-001 (CfgAIFork shootFirst): for a few seconds after taking a target he can see, and while nobody is
+    // shooting at him, he aims at once and stays up (AICombatPace.hpp); after that, stock: down, then cover
+    bool shootFirst = false;
+    if (CombatPace::ShootFirstEnabled() && !unit->IsPlayer() && IsLocal() && !QIsManual())
+    {
+        const Target* t = _fire._fireTarget;
+        if (t != _shootFirstTarget)
+        {
+            _shootFirstTarget = t;
+            _shootFirstSince = Glob.time;
+        }
+        shootFirst = t && t->idExact && !t->idExact->IsDammageDestroyed() && t->lastSeen >= Glob.time - 1.0f &&
+                     Glob.time - _shootFirstSince < CombatPace::kShootFirstWindow && !unit->IsDanger() &&
+                     !unit->IsPinnedDown() && unit->GetSuppression() <= 0.05f;
+    }
+
     if (unit->GetState() == AIUnit::Stopping)
     {
         unit->SendAnswer(AI::StepCompleted);
@@ -2488,7 +2544,8 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
         }
         if (_fireState == FireInit)
         {
-            if (Glob.time > _fireStateDelay)
+            // AI-AIM-001: in a firing window, no wait (moving on meanwhile) before aiming
+            if (Glob.time > _fireStateDelay || shootFirst)
             {
                 float maxDist = 1000;
                 if (mode && mode->_ammo)
@@ -2651,7 +2708,11 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
     }
     else if (_unitPos == UPAuto)
     {
-        if ((unit->IsDanger() || unit->IsPinnedDown()) && !_inBuilding)
+        if (shootFirst && !IsDown())
+        {
+            minPos = maxPos = ManPosCombat; // AI-AIM-001: up and firing first; he lies down after the window
+        }
+        else if ((unit->IsDanger() || unit->IsPinnedDown()) && !_inBuilding)
         {
             maxPos = ManPosLying; // force lying (in danger, or pinned down by incoming fire)
         }

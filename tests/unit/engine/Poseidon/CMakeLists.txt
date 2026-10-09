@@ -645,6 +645,7 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # AI tests
     AI/test_ai.cpp
+    AI/test_danger_list.cpp
     AI/test_path_planner.cpp
     AI/test_simple_path_admission.cpp
     AI/test_entity_event_handlers.cpp

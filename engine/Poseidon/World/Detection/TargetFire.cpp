@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 
@@ -23,6 +24,7 @@
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <Poseidon/AI/AIHunt.hpp>
+#include <Poseidon/AI/AIDangerList.hpp> // AI-XRAY-006: bad cover
 
 #if _ENABLE_CHEATS
 
@@ -889,6 +891,11 @@ void EntityAI::FindHideBehind(Vector3 pos, float maxDist)
                     {
                         continue;
                     }
+                    // AI-XRAY-006: not where one of ours was just hit in cover
+                    if (DangerList::IsBadCover(center, wantedPos))
+                    {
+                        continue;
+                    }
                     if (!ObstacleFree(unit, obj))
                     {
                         continue;
@@ -1660,6 +1667,7 @@ FireDecision::FireDecision()
     _nextWeaponSwitch = Glob.time;
     _nextTargetAquire = Glob.time;
     _nextTargetChange = Glob.time;
+    _targetSince = Glob.time;
     _initState = TargetAlive;
 }
 
@@ -1670,6 +1678,7 @@ void FireDecision::SetTarget(AIUnit* sensor, Target* tgt)
         return;
     }
     _fireTarget = tgt;
+    _targetSince = Glob.time;
     if (!tgt)
     {
         _initState = TargetAlive;
@@ -1688,6 +1697,96 @@ bool FireDecision::GetTargetFinished(AIUnit* sensor) const
     TargetState state = _fireTarget->State(sensor);
     return state < _initState;
 }
+
+// ---------------------------------------------------------------------------
+// AI-XRAY-002: X-Ray's enemy inertia and scoring (CEnemyManager::evaluate / enemy_inertia; AI-MALPRAVE-01 5).
+// Once a soldier picks a target he keeps it until _nextTargetChange (the weapon's minFireTime), even while
+// somebody else is shooting him, and a new target is the best FireResult surplus among the first four enemies on
+// the group list. With
+//   class CfgAIFork { targetScoring = 1; attackerMemory = 10; inertia = 3; inertiaFromPlayer = 6; };
+// an enemy who hit him in the last attackerMemory seconds and whom the group knows is taken in preference to
+// anything else: after `inertia` s on the current target, `inertiaFromPlayer` s if that is the player, at once if
+// the attacker is the player (X-Ray: 3 s / 6 s / 0 s). Among other targets one seen in the last second beats one
+// only remembered, then the surplus decides as before. Off by default like the other X-Ray switches.
+// POSEIDON_AI_TARGET_LOG=1 logs each switch to an attacker.
+// ---------------------------------------------------------------------------
+namespace TargetScoring
+{
+struct Settings
+{
+    bool enabled = false;
+    float attackerMemory = 10;
+    float inertia = 3;
+    float inertiaFromPlayer = 6;
+};
+
+static const Settings& Get()
+{
+    static Settings s;
+    static bool loaded = false;
+    if (!loaded)
+    {
+        loaded = true;
+        if (const ParamEntry* cls = Pars.FindEntry("CfgAIFork"))
+        {
+            auto num = [&](const char* name, float def) -> float
+            {
+                const ParamEntry* e = cls->FindEntry(name);
+                return e ? static_cast<float>(*e) : def;
+            };
+            s.enabled = num("targetScoring", 0) != 0;
+            s.attackerMemory = floatMax(num("attackerMemory", s.attackerMemory), 0.0f);
+            s.inertia = floatMax(num("inertia", s.inertia), 0.0f);
+            s.inertiaFromPlayer = floatMax(num("inertiaFromPlayer", s.inertiaFromPlayer), 0.0f);
+        }
+    }
+    return s;
+}
+
+static bool LogOn()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("POSEIDON_AI_TARGET_LOG");
+        return v && v[0] == '1';
+    }();
+    return on;
+}
+
+static bool IsPlayerTarget(const Target* t)
+{
+    const EntityAI* who = t ? t->idExact.GetLink() : nullptr;
+    const AIUnit* u = who ? who->CommanderUnit() : nullptr;
+    return u && u->IsAnyPlayer();
+}
+
+//! seen by the group in the last second (not only remembered)
+static bool SeenNow(const Target* t)
+{
+    return t->lastSeen >= Glob.time - 1.0f;
+}
+
+//! an enemy who hit `self` lately and whom the group knows
+static Target* RecentAttacker(EntityAI* who, Foundation::Time when, const EntityAI* self, AIUnit* unit, AIGroup* grp,
+                              AICenter* center)
+{
+    const Settings& cfg = Get();
+    if (!cfg.enabled || !who || who == self || when < Glob.time - cfg.attackerMemory || who->IsDammageDestroyed())
+    {
+        return nullptr;
+    }
+    const TargetList& list = grp->GetTargetList();
+    for (int i = 0; i < list.Size(); i++)
+    {
+        Target* t = list[i];
+        if (t->idExact == who && t->IsKnownBy(unit) && !t->destroyed && !t->vanished && center->IsEnemy(t->side))
+        {
+            return t;
+        }
+    }
+    return nullptr;
+}
+} // namespace TargetScoring
 
 void EntityAI::SelectFireWeapon()
 {
@@ -1744,6 +1843,27 @@ void EntityAI::SelectFireWeapon(FireDecision& fire)
         else if (fire._fireTarget->vanished)
         {
             fire.SetTarget(unit, nullptr);
+        }
+    }
+    // AI-XRAY-002: whoever hit me lately may break the lock on the current target (see TargetScoring)
+    Target* attacker = TargetScoring::RecentAttacker(_lastDammage, _lastDammageTime, this, unit, grp, center);
+    if (attacker && grp->IsAnyPlayerGroup() && unit->GetTargetAssigned())
+    {
+        attacker = nullptr; // a target the player gave him wins
+    }
+    if (attacker && fire._fireTarget && fire._fireTarget != attacker && fire._nextTargetChange >= Glob.time)
+    {
+        const TargetScoring::Settings& cfg = TargetScoring::Get();
+        const float inertia = TargetScoring::IsPlayerTarget(attacker)          ? 0.0f
+                              : TargetScoring::IsPlayerTarget(fire._fireTarget) ? cfg.inertiaFromPlayer
+                                                                                : cfg.inertia;
+        // only for an attacker he can engage: otherwise the lock would drop and he could re-pick a third target
+        FireResult check;
+        if (Glob.time - fire._targetSince >= inertia && !unit->IsHoldingFire() &&
+            !(unit->GetAIDisabled() & AIUnit::DAAutoTarget) && WhatFireResult(check, *attacker, unit->GetTimeToLive()))
+        {
+            fire._nextTargetChange = Glob.time - 0.001f;
+            fire._nextWeaponSwitch = Glob.time - 0.001f;
         }
     }
     if (unit->GetCombatMode() <= CMAware || fire._fireTarget)
@@ -1839,6 +1959,28 @@ void EntityAI::SelectFireWeapon(FireDecision& fire)
 #endif
         fire._firePrepareOnly = false;
     }
+    // AI-XRAY-002: the attacker first, before the leader's assignment and the four-enemy scan
+    if (attacker && enableOtherTarget && !unit->IsHoldingFire() && attacker != tgt)
+    {
+        FireResult aResult;
+        if (WhatFireResult(aResult, *attacker, timeToLive))
+        {
+            if (TargetScoring::LogOn() && fire._fireTarget != attacker) // a real change, not keeping him
+            {
+                LOG_INFO(AI, "Target: {} switches to its attacker {} (from {}, {:.1f} s on it) t={:.1f}",
+                         (const char*)GetDebugName(), (const char*)attacker->idExact->GetDebugName(),
+                         fire._fireTarget && fire._fireTarget->idExact
+                             ? (const char*)fire._fireTarget->idExact->GetDebugName()
+                             : "none",
+                         Glob.time - fire._targetSince, Glob.time.toFloat());
+            }
+            fResult = aResult;
+            tgt = attacker;
+            fResultPossible = true;
+        }
+    }
+    const bool scoring = TargetScoring::Get().enabled;
+    bool bestSeenNow = fResultPossible && tgt && TargetScoring::SeenNow(tgt);
     if (!fResultPossible && enableOtherTarget && !unit->IsHoldingFire())
     {
         const TargetList& list = grp->GetTargetList();
@@ -1881,11 +2023,17 @@ void EntityAI::SelectFireWeapon(FireDecision& fire)
                 LOG_DEBUG(AI, "{} to {}: surplus {}", (const char*)GetDebugName(),
                           (const char*)tgtI->idExact->GetDebugName(), tResult.Surplus());
 #endif
-                if (tResult.Surplus() > fResult.Surplus())
+                // AI-XRAY-002: seen now beats only remembered, then the surplus
+                const bool seenNow = scoring && TargetScoring::SeenNow(tgtI);
+                const bool better = scoring && fResultPossible && seenNow != bestSeenNow
+                                        ? seenNow
+                                        : tResult.Surplus() > fResult.Surplus();
+                if (better)
                 {
                     fResult = tResult;
                     tgt = tgtI;
                     fResultPossible = true;
+                    bestSeenNow = seenNow;
                 }
             }
 #if DIAG_TARGET >= 2

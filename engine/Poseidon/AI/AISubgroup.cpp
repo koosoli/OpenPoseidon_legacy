@@ -1838,6 +1838,48 @@ void AISubgroup::ClearAttackCommands()
     }
 }
 
+bool AISubgroup::ClearTaggedCommands(int tag)
+{
+    // as ClearAttackCommands: delete in place, then Stop if the running one went
+    bool deletedLast = false, deleted = false;
+    for (int i = 0; i < _stack.Size();)
+    {
+        Command* cmd = _stack[i]._task;
+        if ((cmd->_context == Command::CtxAuto || cmd->_context == Command::CtxAutoSilent) && cmd->_param == tag)
+        {
+            if (i == _stack.Size() - 1)
+            {
+                deletedLast = true;
+            }
+            AISubgroupContext context(this);
+            base::Delete(i, &context, false); // do not refresh
+            deleted = true;
+        }
+        else
+        {
+            i++;
+        }
+    }
+    if (deletedLast)
+    {
+        Stop();
+    }
+    return deleted;
+}
+
+bool AISubgroup::HasTaggedCommand(int tag) const
+{
+    for (int i = 0; i < _stack.Size(); i++)
+    {
+        const Command* cmd = _stack[i]._task;
+        if ((cmd->_context == Command::CtxAuto || cmd->_context == Command::CtxAutoSilent) && cmd->_param == tag)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 void AISubgroup::ClearGetInCommands()
 {
     int i;

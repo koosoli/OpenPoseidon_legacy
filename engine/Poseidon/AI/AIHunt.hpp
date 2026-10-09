@@ -9,8 +9,11 @@
 //     soldiers leave formation (White / Red "engage at will")
 //   * never while stopped (stop / doStop / player Stop), disableAI "MOVE",
 //     pinned down, fleeing, in a vehicle, or on a scripted waypoint
-//   * never while the group is moving or attacking for its waypoint, and never
-//     on Hold / Sentry / Get in / Load / Unload / Support / Join waypoints
+//   * only for a group on a SEEK AND DESTROY or GUARD waypoint (owner 2026-10-09): a soldier or squad placed
+//     with no waypoint, or on Move / Hold / Sentry / Cycle / ..., stays where the mission put it; and never
+//     while the group is moving or attacking for its waypoint
+//   * AI-XRAY-004: with the danger list on, such a soldier with no enemy to chase searches the position of a
+//     danger worth a look (a body, unseen gunfire, where he was hit from); Aware is enough for that
 //   * moves are ordinary auto orders on the soldier's own subgroup, so waypoint
 //     completion never waits for them and he rejoins the group afterwards
 // Tunable or switched off with class CfgAIFork { hunting = 0; ... }.
@@ -29,6 +32,10 @@ void Think(AIUnit* unit);
 
 //! true when this soldier is allowed to hunt right now (all the gates above)
 bool MayHunt(AIUnit* unit);
+
+//! AI-XRAY-006: every look-out ends now (stance and watch given back) -- before a save: the hunt's own state is
+//! not saved, so a soldier saved mid-look would stay standing after the load
+void EndAllPeeks();
 
 // ---- squad rules (X-Ray agent manager) -----------------------------------------
 
