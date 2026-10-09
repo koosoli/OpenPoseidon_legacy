@@ -1981,10 +1981,35 @@ float Man::GetAimed(int weapon, Target* target) const
         // An accepted aim also must not erase emission-gate rejections.
     }
     if (log)
-        LOG_INFO(AI, "COMBAT-AUDIT t={} weapon={} current={} gate={} visibility={} miss={} tolerance={} aimed={} seenAge={} posError={}",
+    {
+        // AI-AIM-001: who he aims at, whether he is moving, and how far his body and his gun are turned off the
+        // target (degrees)
+        float bodyOff = 0, gunOff = 0;
+        if (target && target->idExact)
+        {
+            Vector3 to = target->idExact->AimingPosition() - Position();
+            to[1] = 0;
+            Vector3 body = Direction();
+            body[1] = 0;
+            Vector3 gun = weapon >= 0 && weapon < NMagazineSlots() ? GetWeaponDirection(weapon) : Direction();
+            gun[1] = 0;
+            if (to.SquareSize() > 1e-4f && body.SquareSize() > 1e-4f && gun.SquareSize() > 1e-4f)
+            {
+                bodyOff = std::acos(std::clamp(body.Normalized() * to.Normalized(), -1.0f, 1.0f)) * 57.2958f;
+                gunOff = std::acos(std::clamp(gun.Normalized() * to.Normalized(), -1.0f, 1.0f)) * 57.2958f;
+            }
+        }
+        LOG_INFO(AI, "COMBAT-AUDIT t={} weapon={} current={} gate={} visibility={} miss={} tolerance={} aimed={} seenAge={} posError={} target={} speed={:.1f} bodyOff={:.0f} gunOff={:.0f} hide={} cmd={} move={}",
             Glob.time.toFloat(), weapon, _currentWeapon, diagnostics.gate,
             diagnostics.visibility, diagnostics.error, diagnostics.targetSize, result,
-            target ? Glob.time - target->lastSeen : -1.0f, target ? target->posError.Size() : -1.0f);
+            target ? Glob.time - target->lastSeen : -1.0f, target ? target->posError.Size() : -1.0f,
+            target && target->idExact ? (const char*)target->idExact->GetDebugName() : "-", Speed().Size(), bodyOff,
+            gunOff, GetHideBehind() ? 1 : 0,
+            Brain() && Brain()->GetSubgroup() && Brain()->GetSubgroup()->GetCommand()
+                ? int(Brain()->GetSubgroup()->GetCommand()->_message)
+                : -1,
+            (const char*)GetPrimaryMoveName());
+    }
     return result;
 }
 

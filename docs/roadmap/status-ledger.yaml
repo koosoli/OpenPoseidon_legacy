@@ -8584,10 +8584,10 @@ tickets:
     obligation: OPTIONAL
     execution_mode: INVESTIGATE
     scheduling_state: OPEN
-    status: PLANNED
+    status: INVESTIGATED
     outcome: null
     owner: Dec
-    branch: null
+    branch: dec/ai-xray
     baseline_commit: 0eddd247
     verification_commit: null
     milestone: 0
@@ -8602,7 +8602,7 @@ tickets:
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
-      - "Not yet measured. Tools: POSEIDON_COMBAT_AUDIT=1 with a unit named auditShooter (Man::GetAimed gates). Check aiSuppression's wider spread for suppressed gunners is not the cause."
+      - "Measured 2026-10-09 (.tw/ai/AIM.Eden: 4 West vs 4 East standing still in the open at 80 m, East holding fire; COMBAT_AUDIT on auditShooter, which now also logs target, speed, body/gun angle off the target, cover, order and animation): only 2 of 4 East down in 30 s in every arm (AWARE, COMBAT, improved combat off). The aim itself settles in ~0.8 s once still. The time goes on stock CWA combat behaviour: going prone first (combattolying, 1.7 s, no shot possible, body drifts up to 27 deg); crawling to the assigned cover between targets (Hide order, lyingcrawlf), body 75-86 deg off the next target; turning prone is slow (lyingturnr, ~1.6 s for 80 deg). Not the X-Ray switches, not suppression (none: East held fire), not Oli's improved combat (same with POSEIDON_AI_COMBAT_LEGACY=1)."
     fallback: null
     reviewer: null
     reviewer_method: null
