@@ -228,6 +228,14 @@ From Malprave job 23 (29 Sep), the first and only A/B test of the X-Ray patches:
     * Only the pre-existing `ValidateOutVehicle` assert.
   * Unit tests: 3946 cases; the 19 failures are all in files this branch does not touch (source audits of
     DebugOverlay.cpp, HarnessBuiltins.cpp and renderer files, image saving, network fixtures).
+* **2026-10-09, AI-XRAY-004 (7db710cb), off by default** (`CfgAIFork dangerList = 1`).
+  * Each soldier keeps up to 8 typed dangers (hit, grenade, corpse, gunfire, squadmate died / hit, ricochet).
+    The ranges and memory are Lost Alpha's, except gunfire at 150 m.
+  * Priority is weight × 10 + age in ms, and the lowest wins.
+  * A danger puts the soldier on alert. One in the default watch mode with no enemy in view turns to the top
+    danger.
+  * In C02 every type was noted, and 70 soldiers turned to a danger.
+  * Not done yet: hunting searching danger positions.
 
 ## 5. X-Ray research (Lost Alpha docs, 2026-10-09)
 

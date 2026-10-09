@@ -8349,13 +8349,12 @@ tickets:
     class: ENGINE
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
-    # HOLD, PLANNED: recorded to-do (owner 2026-10-04: bring Malprave's AI work, finished and
-    # unfinished, into Oli); not started here.
-    scheduling_state: HOLD
-    status: PLANNED
+    # IMPLEMENTED (owner 2026-10-09: "continue on xray"), off by default (CfgAIFork dangerList = 1).
+    scheduling_state: ACTIVE
+    status: IMPLEMENTED
     outcome: null
     owner: Dec
-    branch: null
+    branch: dec/ai-xray
     baseline_commit: b66d9b97
     verification_commit: null
     milestone: 0
@@ -8363,13 +8362,18 @@ tickets:
     depends_on: [AI-XRAY-001]
     blocked_by: []
     blocks: []
-    implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    implementation_commits: [7db710cb]
+    production_call_sites:
+      - file: engine/Poseidon/AI/AIDangerList.cpp
+        symbol: DangerList::Note
+      - file: engine/Poseidon/AI/AIUnitImpl.cpp
+        symbol: AIUnit::SetWatch
+    test_ids: [danger, ai-xray-004-c02-on-off]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
+      - "Hunting does not yet search danger positions (walking over to a body). The staged unseen-gunfire test was inconclusive; the effect is measured in C02 only (70 soldiers turned to a danger)."
       - "Not started in Malprave."
     fallback: null
     reviewer: null
