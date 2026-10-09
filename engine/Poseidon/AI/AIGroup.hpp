@@ -175,6 +175,11 @@ public:
 	void ClearMissionCommands();
 	void ClearEscapeCommands();
 	void ClearAttackCommands();
+	//! AI-XRAY: remove every auto command carrying this _param tag, wherever it sits in the stack (AIHunt,
+	//! AIGrenadeDanger mark their own orders with one); true if any was removed
+	bool ClearTaggedCommands(int tag);
+	//! AI-XRAY: an auto command with this _param tag is somewhere in the stack
+	bool HasTaggedCommand(int tag) const;
 	void ClearGetInCommands();
 	bool CheckHide() const;
 	void ReceiveCommand(Command &cmd);

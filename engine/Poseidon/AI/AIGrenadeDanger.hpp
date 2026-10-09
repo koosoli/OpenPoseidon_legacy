@@ -27,5 +27,8 @@ void Report(const void* shot, Vector3Par position, Vector3Par speed, float fuseL
 
 //! per-unit reaction, from AIUnit::Think (local, alive units); throttled inside
 void React(AIUnit* unit);
+
+//! he is getting clear of a grenade right now (hunting leaves him alone meanwhile)
+bool IsRunning(const AIUnit* unit);
 } // namespace GrenadeDanger
 } // namespace Poseidon

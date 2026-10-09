@@ -1574,25 +1574,25 @@ bool Soldier::FireWeapon(int weapon, TargetType* target)
             {
                 if (!IsActionInProgress(MFThrowGrenade))
                 {
-                    // AI-XRAY-001: the squad grenade interval (AIHunt) is claimed when the throw starts. The
-                    // grenade leaves the hand only when the animation ends (ThrowGrenadeAction), so recording it
-                    // then let every squadmate who chose to throw in that 1-2 s through (Malprave job 23: four
-                    // grenades in 1.6 s from one group)
-                    AIUnit* thrower = Brain();
-                    if (thrower && !thrower->IsAnyPlayer() && mode->_ammo->_simulation == AmmoShotShell)
-                    {
-                        if (!Hunt::GrenadeAllowed(thrower->GetGroup()))
-                        {
-                            return false;
-                        }
-                        Hunt::OnGrenadeThrown(thrower->GetGroup());
-                    }
                     ActionMap* map = Type()->GetActionMap(_primaryMove.id);
                     // get which action is it (based on action map)
                     ManAction selAction = ManActThrowGrenade;
                     MoveId moveWanted = map->GetAction(selAction);
                     if (moveWanted != MoveIdNone)
                     {
+                        // AI-XRAY-001: the squad grenade interval (AIHunt) is claimed when the throw starts. The
+                        // grenade leaves the hand only when the animation ends (ThrowGrenadeAction), so recording
+                        // it then let every squadmate who chose to throw in that 1-2 s through (Malprave job 23:
+                        // four grenades in 1.6 s from one group). Not claimed when this pose has no throw.
+                        AIUnit* thrower = Brain();
+                        if (thrower && !thrower->IsAnyPlayer() && mode->_ammo->_simulation == AmmoShotShell)
+                        {
+                            if (!Hunt::GrenadeAllowed(thrower->GetGroup()))
+                            {
+                                return false;
+                            }
+                            Hunt::OnGrenadeThrown(thrower->GetGroup());
+                        }
                         Ref<ActionContextDefault> context = new ActionContextDefault;
                         context->function = MFThrowGrenade;
                         context->param = weapon;

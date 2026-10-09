@@ -91,9 +91,23 @@ struct Rec
     Reaction reaction = Reaction::None;
     Vector3 goal = VZero;
     float next = 0;
+    float nextGo = 0; // the earliest he may be sent back to his spot
+    int reissued = 0; // how often he was; an unreachable spot must not keep him at it
 };
 
 std::unordered_map<const AIUnit*, Rec> s_recs;
+float s_lastNow = 0;
+
+//! mission time went back (restart, load): everything recorded belongs to another session
+void CheckClock(float now)
+{
+    if (now + 1.0f < s_lastNow)
+    {
+        s_grenades.clear();
+        s_recs.clear();
+    }
+    s_lastNow = now;
+}
 
 void Purge(float now)
 {
@@ -104,16 +118,6 @@ void Purge(float now)
         for (auto it = s_recs.begin(); it != s_recs.end();)
             it = !it->second.unit ? s_recs.erase(it) : std::next(it);
     }
-}
-
-bool OurOrderOnTop(AIUnit* unit)
-{
-    AISubgroup* sub = unit->GetSubgroup();
-    AIGroup* grp = unit->GetGroup();
-    if (!sub || !grp || sub == grp->MainSubgroup())
-        return false;
-    const Command* c = sub->GetCommand();
-    return c && c->_message == Command::Move && c->_param == kTag;
 }
 
 void Go(AIUnit* unit, AIGroup* grp, Vector3 pos)
@@ -131,11 +135,13 @@ void Go(AIUnit* unit, AIGroup* grp, Vector3 pos)
 //! the danger is over (or no longer his): withdraw what we did
 void Finish(Rec& r, AIUnit* unit, bool exploded)
 {
-    if (r.reaction == Reaction::Run && OurOrderOnTop(unit))
+    // every order of ours, not only one on top: the group may have pushed its Hide over it, and an order left
+    // underneath would walk him back to the old spot when that ends (review 2026-10-09)
+    AISubgroup* sub = unit->GetSubgroup();
+    AIGroup* grp = unit->GetGroup();
+    if (r.reaction == Reaction::Run && sub && grp && sub != grp->MainSubgroup())
     {
-        AISubgroup* sub = unit->GetSubgroup();
-        AISubgroupContext ctx(sub);
-        sub->PopTask(&ctx); // a subgroup left without orders rejoins the group by itself
+        sub->ClearTaggedCommands(kTag); // a subgroup left without orders rejoins the group by itself
     }
     if (exploded && !unit->IsDanger())
     {
@@ -155,6 +161,7 @@ void Report(const void* shot, Vector3Par position, Vector3Par speed, float fuseL
 {
     if (!Cfg().enabled)
         return;
+    CheckClock(Now());
     Vector3 landing = position;
     if (!atRest && GLandscape)
     {
@@ -164,6 +171,10 @@ void Report(const void* shot, Vector3Par position, Vector3Par speed, float fuseL
         const float t = (vy + std::sqrt(vy * vy + 2 * kGravity * h)) / kGravity;
         landing = position + Vector3(speed.X(), 0, speed.Z()) * t;
         landing[1] = GLandscape->SurfaceYAboveWater(landing.X(), landing.Z());
+    }
+    if (s_grenades.size() > 64)
+    {
+        Purge(Now()); // nobody reacting (no AI near any grenade) must not let it grow
     }
     Grenade& g = s_grenades[shot];
     g.landing = landing;
@@ -180,6 +191,7 @@ void React(AIUnit* unit)
     if (!unit || !cfg.enabled)
         return;
     const float now = Now();
+    CheckClock(now);
     Rec& r = s_recs[unit];
     if (!r.unit)
     {
@@ -197,14 +209,25 @@ void React(AIUnit* unit)
         Finish(r, unit, true);
         return;
     }
+    if (r.reaction == Reaction::Run &&
+        (unit->IsAnyPlayer() || !unit->IsFreeSoldier() || unit->GetLifeState() != AIUnit::LSAlive))
+    {
+        Finish(r, unit, false); // got into a vehicle, taken over by a player, down: no longer ours to move
+        return;
+    }
     if (r.reaction == Reaction::Run)
     {
         // there, his order completes and he walks back to the formation -- towards the grenade, while it still
         // has a second or two (AI1 test): send him back to his spot until it has gone off
+        // only when no order of ours is left anywhere, at most once a second and three times
         AIGroup* g = unit->GetGroup();
-        if (g && !OurOrderOnTop(unit) && unit->Position().DistanceXZ2(r.goal) > Square(2.0f))
+        AISubgroup* sub = unit->GetSubgroup();
+        if (g && sub && !sub->HasTaggedCommand(kTag) && unit->Position().DistanceXZ2(r.goal) > Square(2.0f) &&
+            now >= r.nextGo && r.reissued < 3)
         {
             Go(unit, g, r.goal);
+            r.nextGo = now + 1.0f;
+            r.reissued++;
         }
         return;
     }
@@ -254,6 +277,8 @@ void React(AIUnit* unit)
         Go(unit, grp, goal);
         r.goal = goal;
         r.reaction = Reaction::Run;
+        r.nextGo = now + 1.0f;
+        r.reissued = 0;
     }
     else
     {
@@ -266,6 +291,12 @@ void React(AIUnit* unit)
                  (const char*)unit->GetDebugName(), unit == grp->Leader() ? " (leader)" : "", dist, timeLeft,
                  kReaction + runFor / kRunSpeed, g->radius, now);
     }
+}
+
+bool IsRunning(const AIUnit* unit)
+{
+    auto it = s_recs.find(unit);
+    return it != s_recs.end() && it->second.reaction == Reaction::Run;
 }
 
 } // namespace GrenadeDanger

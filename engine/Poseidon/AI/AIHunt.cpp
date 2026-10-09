@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AIHunt.hpp>
+#include <Poseidon/AI/AIGrenadeDanger.hpp>
 
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -158,6 +159,8 @@ bool Allowed(AIUnit* unit, AIGroup* grp)
         return false;
     if (unit == grp->Leader() || !unit->IsFreeSoldier())
         return false;
+    if (GrenadeDanger::IsRunning(unit))
+        return false; // getting clear of a grenade first
     const CombatMode cm = unit->GetCombatMode();
     if (cm != CMCombat && cm != CMStealth)
         return false;
@@ -256,13 +259,13 @@ bool OurOrderOnTop(AIUnit* unit)
 
 void Abort(Rec& r, AIUnit* unit, float rest)
 {
-    if (OurOrderOnTop(unit))
+    // drop our moves wherever they sit (not only one on top: one left under the engine's Hide would resume
+    // later); whatever else is there resumes, and a subgroup left without orders rejoins the group by itself
+    AISubgroup* sub = unit->GetSubgroup();
+    AIGroup* grp = unit->GetGroup();
+    if (sub && grp && sub != grp->MainSubgroup())
     {
-        // drop only our move; whatever was under it (e.g. the engine's Hide) resumes,
-        // and a subgroup left without orders rejoins the group by itself
-        AISubgroup* sub = unit->GetSubgroup();
-        AISubgroupContext ctx(sub);
-        sub->PopTask(&ctx);
+        sub->ClearTaggedCommands(kTag);
     }
     r.phase = Rest;
     r.until = Now() + rest;
@@ -499,8 +502,8 @@ std::unordered_map<const AIGroup*, float> s_lastGrenade;
 
 void OnGrenadeThrown(const AIGroup* grp)
 {
-    if (!grp)
-        return;
+    if (!grp || Cfg().grenadeInterval <= 0)
+        return; // no limit configured: nothing to remember (stock)
     if (s_lastGrenade.size() > 512)
         s_lastGrenade.clear(); // stale groups; worst case one early throw
     s_lastGrenade[grp] = Now();
@@ -512,10 +515,12 @@ void OnGrenadeThrown(const AIGroup* grp)
 
 bool GrenadeAllowed(const AIGroup* grp)
 {
-    if (!grp)
-        return true;
+    if (!grp || Cfg().grenadeInterval <= 0)
+        return true; // no limit configured (stock): never looked up
     auto it = s_lastGrenade.find(grp);
-    const bool ok = it == s_lastGrenade.end() || Now() - it->second >= Cfg().grenadeInterval;
+    // a throw "in the future" is from before a restart or a load (mission time went back): it does not count
+    const float since = it == s_lastGrenade.end() ? FLT_MAX : Now() - it->second;
+    const bool ok = since < 0 || since >= Cfg().grenadeInterval;
     if (!ok && HuntLog())
     {
         LOG_INFO(World, "Hunt: grenade refused for group {} ({:.1f} s after the last) t={:.1f}",

@@ -1837,13 +1837,20 @@ void EntityAI::SelectFireWeapon(FireDecision& fire)
     }
     // AI-XRAY-002: whoever hit me lately may break the lock on the current target (see TargetScoring)
     Target* attacker = TargetScoring::RecentAttacker(_lastDammage, _lastDammageTime, this, unit, grp, center);
+    if (attacker && grp->IsAnyPlayerGroup() && unit->GetTargetAssigned())
+    {
+        attacker = nullptr; // a target the player gave him wins
+    }
     if (attacker && fire._fireTarget && fire._fireTarget != attacker && fire._nextTargetChange >= Glob.time)
     {
         const TargetScoring::Settings& cfg = TargetScoring::Get();
         const float inertia = TargetScoring::IsPlayerTarget(attacker)          ? 0.0f
                               : TargetScoring::IsPlayerTarget(fire._fireTarget) ? cfg.inertiaFromPlayer
                                                                                 : cfg.inertia;
-        if (Glob.time - fire._targetSince >= inertia)
+        // only for an attacker he can engage: otherwise the lock would drop and he could re-pick a third target
+        FireResult check;
+        if (Glob.time - fire._targetSince >= inertia && !unit->IsHoldingFire() &&
+            !(unit->GetAIDisabled() & AIUnit::DAAutoTarget) && WhatFireResult(check, *attacker, unit->GetTimeToLive()))
         {
             fire._nextTargetChange = Glob.time - 0.001f;
             fire._nextWeaponSwitch = Glob.time - 0.001f;
@@ -1952,7 +1959,9 @@ void EntityAI::SelectFireWeapon(FireDecision& fire)
             {
                 LOG_INFO(AI, "Target: {} switches to its attacker {} (from {}, {:.1f} s on it) t={:.1f}",
                          (const char*)GetDebugName(), (const char*)attacker->idExact->GetDebugName(),
-                         fire._fireTarget ? (const char*)fire._fireTarget->idExact->GetDebugName() : "none",
+                         fire._fireTarget && fire._fireTarget->idExact
+                             ? (const char*)fire._fireTarget->idExact->GetDebugName()
+                             : "none",
                          Glob.time - fire._targetSince, Glob.time.toFloat());
             }
             fResult = aResult;

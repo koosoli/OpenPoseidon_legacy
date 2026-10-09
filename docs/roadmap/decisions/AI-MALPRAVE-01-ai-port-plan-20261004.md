@@ -198,6 +198,36 @@ From Malprave job 23 (29 Sep), the first and only A/B test of the X-Ray patches:
       there until it goes off.
     * Going prone was tried first and saves nobody: blast damage depends on distance and cover only.
     * Dropped-grenade test: off, 2 of 3 killed; on, all 3 live with ≤ 0.12 damage.
+* **2026-10-09, review of AI-XRAY-001..003 (owner: "triple check work").** The review was my own plus an
+  independent one.
+  * Fixed:
+    * The grenade limit was claimed even in a pose with no throw animation.
+    * A recent attacker broke the target lock even when he could not be engaged (a third target could then
+      be picked); the attacker also overrode a player's explicit target order.
+    * After a restart or load, mission time goes back, so the static records (grenade and spotting state,
+      grenade times, hunt records) looked like they were in the future. That gave ghost grenades, blocked
+      spotting and blocked grenade throws, and with `grenadeInterval` 0 (stock) an old future timestamp
+      could still veto a throw. Interval 0 now means no limit and nothing is recorded, and the records are
+      cleared when the clock goes back.
+    * A dodge or hunt order left under the group's own Hide resumed later. All tagged orders are now removed
+      (`AISubgroup::ClearTaggedCommands`), and hunting skips a soldier while he is getting clear of a grenade.
+    * A target seen again after a gap got a whole check interval of credit at once.
+    * The dodge re-issued its order every 0.2 s, and endlessly for an unreachable spot. It is now at most once
+      a second and three times.
+    * Log-only: a null dereference, and an unbounded map.
+  * Known, not fixed:
+    * The hand-grenade fuse is set per machine. A dev-panel slider change, or a multiplayer peer on another
+      build, gives different fuses.
+    * `AmmoType::thrown` depends on the hand-grenade magazine having been loaded on that machine.
+  * Retested after the fixes:
+    * Dropped grenade: all 3 live, damage ≤ 0.10.
+    * Walk-in: spotted 0–1 s after sight.
+    * Hunt: holds and flanks on both sides.
+    * C02 180 s, everything on: 3 grenades, 60 refused, 24 dodges, 36 switches, 54 hunt moves. Everything off:
+      no X-Ray activity at all.
+    * Only the pre-existing `ValidateOutVehicle` assert.
+  * Unit tests: 3946 cases; the 19 failures are all in files this branch does not touch (source audits of
+    DebugOverlay.cpp, HarnessBuiltins.cpp and renderer files, image saving, network fixtures).
 
 ## 5. X-Ray research (Lost Alpha docs, 2026-10-09)
 

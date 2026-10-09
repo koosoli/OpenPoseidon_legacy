@@ -801,6 +801,11 @@ static bool Accumulate(const Target* target, float ratio, bool firing, float per
     const Settings& cfg = Get();
     const float now = Glob.time.toFloat();
 
+    if (now + 1.0f < s_lastPurge)
+    {
+        s_builds.clear(); // mission time went back (restart, load)
+        s_lastPurge = now;
+    }
     if (now - s_lastPurge > 30)
     {
         s_lastPurge = now;
@@ -834,6 +839,11 @@ static bool Accumulate(const Target* target, float ratio, bool firing, float per
         b.lastAdd = now;
         b.lastSeen = now;
         b.firstSeen = now;
+    }
+    // seen again after a gap: the time in between was not spent looking at him
+    if (now - b.lastSeen > cadence + 0.5f)
+    {
+        b.lastAdd = now;
     }
     // fade only once nobody has seen him for longer than the slowest look
     const float unseen = now - b.lastSeen - kSlowestLook;
@@ -1423,6 +1433,10 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
                 // once per second per target while unknown, then the moment it is spotted
                 static std::unordered_map<const Target*, float> s_logged;
                 const float now = Glob.time.toFloat();
+                if (s_logged.size() > 4096)
+                {
+                    s_logged.clear(); // log-only throttle
+                }
                 float& next = s_logged[target];
                 if (spotted || now >= next)
                 {
