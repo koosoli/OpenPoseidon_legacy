@@ -11,6 +11,8 @@ namespace Poseidon {
 class EarthSurfaceStream {
 public:
     static constexpr int AtlasSize=2048;
+    // The far atlas spans the whole horizon (up to ~1000 km) and is warped toward its centre (FarUv).
+    static constexpr int FarAtlasSize=4096;
     static constexpr size_t MaxOrthoBytes=8*1024*1024,MaxOverviewBytes=16*1024*1024;
     struct Window {
         double latitude=0,longitude=0;
@@ -28,6 +30,8 @@ public:
         Window window;
         std::vector<uint8_t> pixels;
         std::vector<uint8_t> farPixels;
+        int farSize=0;
+        std::string sources; // what fed it, for the log
         std::string error;
         bool cellPresent=false;
     };
@@ -41,8 +45,13 @@ public:
     static Atlas Build(const Window& w,ImageView overview,ImageView ortho,int size=AtlasSize,
                        const std::function<bool()>& cancelled={});
     static Window FarWindow(const Window& window);
+    // The far chart: per-axis log warp around the near window, so texel density is highest just beyond
+    // the near atlas and falls off toward the horizon (the near atlas is warped the same way, gentler).
+    static double FarWarpK(const Window& w);
+    static Earth::Pixel FarUv(const Window& w,double x,double z);
+    static Earth::Pixel FarPoint(const Window& w,double u,double v);
     static Atlas BuildRegional(const Window& window,ImageView overview,const std::vector<SourceView>& sources,
-                               int size=AtlasSize,const std::function<bool()>& cancelled={});
+                               int size=AtlasSize,const std::function<bool()>& cancelled={},int farSize=0);
     EarthSurfaceStream(std::filesystem::path cache,std::filesystem::path overview);
     ~EarthSurfaceStream();
     void Request(const EarthTerrainStream::Patch& patch);

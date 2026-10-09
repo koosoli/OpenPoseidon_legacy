@@ -90,7 +90,7 @@ int main(int argc,char** argv) {
         const auto point=Surface::NearPoint(window,(col+.5)/64,(row+.5)/64);
         const double x=col==0?window.x:double(window.x)+window.span;
         const double z=row==0?double(window.z)+window.span:row==63?window.z:point.y;
-        const auto fuv=Surface::LocalUv(farWindow,x,z);
+        const auto fuv=Surface::FarUv(regionalWindow,x,z);
         const auto farColor=Surface::Sample({regional.farPixels.data(),64,64},fuv.x,fuv.y,false);
         for(int k=0;k<3;++k)assert(std::abs(regional.pixels[(row*64+col)*4+k]-farColor[k])<=.5);
     }

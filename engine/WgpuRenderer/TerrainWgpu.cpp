@@ -3349,7 +3349,7 @@ void TerrainWgpu::UploadEarthHorizon(const EarthTerrainStream::Patch& p,bool loc
         // Always use the fixed geographic origin. Replacing its latitude with
         // a moving patch centre changes the longitude scale and swims imagery.
         const EarthSurfaceStream::Window window{p.originLatitude,p.originLongitude,p.x,p.z,256*p.gridMetres,p.originRevision,p.generation,p.horizonRadius};
-        const auto uv=localUv?EarthSurfaceStream::LocalUv(EarthSurfaceStream::FarWindow(window),x,z):Earth::OverviewUv(p.originLatitude,p.originLongitude,x,z);
+        const auto uv=localUv?EarthSurfaceStream::FarUv(window,x,z):Earth::OverviewUv(p.originLatitude,p.originLongitude,x,z);
         return WgrVec2{float(uv.x),float(uv.y)};
     };
     for (int z = 0; z < n; ++z)
@@ -3538,7 +3538,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                 const auto texture=wgr_texture_create(_renderer,EarthSurfaceStream::AtlasSize,EarthSurfaceStream::AtlasSize,WGR_TEXTURE_RGBA8,1,
                     WGR_TEXTURE_GEN_MIPS,atlas->pixels.data(),uint32_t(atlas->pixels.size()));
                 if(!texture)throw std::runtime_error("Earth surface atlas allocation failed");
-                const auto farTexture=wgr_texture_create(_renderer,EarthSurfaceStream::AtlasSize,EarthSurfaceStream::AtlasSize,WGR_TEXTURE_RGBA8,1,
+                const auto farTexture=wgr_texture_create(_renderer,atlas->farSize,atlas->farSize,WGR_TEXTURE_RGBA8,1,
                     WGR_TEXTURE_GEN_MIPS,atlas->farPixels.data(),uint32_t(atlas->farPixels.size()));
                 if(!farTexture){wgr_texture_destroy(_renderer,texture);throw std::runtime_error("Earth far surface atlas allocation failed");}
                 UploadEarthHorizon(*_earthPatch,true);
@@ -3546,8 +3546,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                 _earthSurfaceTexture=texture;
                 if(_earthFarTexture)wgr_texture_destroy(_renderer,_earthFarTexture);
                 _earthFarTexture=farTexture;
-                LOG_INFO(Graphics,"Earth local surface: ACT ortho_2023 CC0, paired 2048x2048 near/far atlases, generation {}, revision {}, one extra draw; no extra triangles",
-                    atlas->window.generation,atlas->window.revision);
+                LOG_INFO(Graphics,"Earth local surface: near 2048 / far {} (warped) atlases, generation {}, revision {}; {}",
+                    atlas->farSize,atlas->window.generation,atlas->window.revision,atlas->sources);
             }
             else LOG_INFO(Graphics,"Earth local surface: NASA fallback, generation {}, revision {}, {}",
                 atlas->window.generation,atlas->window.revision,atlas->error.empty()?"outside prepared Luxembourg cell":atlas->error);

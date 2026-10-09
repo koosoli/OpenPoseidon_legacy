@@ -14,11 +14,16 @@ if($CacheDirectory){
  }
 }
 Push-Location $output
+# The surface stream now streams provider imagery (EarthImageryTiles), whose overview writer needs stb's
+# JPEG writer; the engine supplies its implementation, this standalone test supplies its own.
+$stbWrite=Join-Path $output 'stb_image_write_impl.cpp'
+Set-Content -LiteralPath $stbWrite -Value @('#define STB_IMAGE_WRITE_IMPLEMENTATION','#include <stb_image_write.h>') -Encoding ascii
 try{
  & $Compiler @optimizationArgs /nologo /std:c++20 /EHsc /MD /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS /D_SILENCE_CXX20_U8PATH_DEPRECATION_WARNING `
   ('/I'+(Join-Path $repo 'engine')) ('/I'+(Join-Path $VcpkgDirectory 'include')) ('/Fe'+$exe) `
   (Join-Path $repo 'tests/unit/engine/Poseidon/World/test_earth_surface.cpp') (Join-Path $repo 'engine/WgpuRenderer/EarthSurfaceStream.cpp') `
-  (Join-Path $VcpkgDirectory 'lib/cjson.lib')
+  (Join-Path $repo 'engine/WgpuRenderer/EarthImageryTiles.cpp') $stbWrite `
+  (Join-Path $VcpkgDirectory 'lib/cjson.lib') (Join-Path $VcpkgDirectory 'lib/libcurl.lib') (Join-Path $VcpkgDirectory 'lib/zs.lib') ws2_32.lib crypt32.lib secur32.lib bcrypt.lib normaliz.lib advapi32.lib iphlpapi.lib wldap32.lib
  if($LASTEXITCODE-ne0){throw 'Earth surface CPU compilation failed'}
  $env:PATH=(Join-Path $VcpkgDirectory 'bin')+';'+$env:PATH
  if($CacheDirectory){$testOutput=@(& $exe $CacheDirectory)}else{$testOutput=@(& $exe)}

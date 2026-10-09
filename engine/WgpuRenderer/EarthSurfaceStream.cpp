@@ -142,8 +142,25 @@ EarthSurfaceStream::Window EarthSurfaceStream::FarWindow(const Window& w) {
     auto far=w;const float radius=std::max(w.horizonRadius,w.span);
     far.x=w.x+w.span*.5f-radius;far.z=w.z+w.span*.5f-radius;far.span=2*radius;return far;
 }
+double EarthSurfaceStream::FarWarpK(const Window& w) {
+    return std::clamp(double(FarWindow(w).span)/std::max(1.0,double(w.span)),1.0,4000.0);
+}
+Earth::Pixel EarthSurfaceStream::FarUv(const Window& w,double x,double z) {
+    const double k=FarWarpK(w),norm=std::log1p(k);
+    const auto warp=[&](double q){return std::copysign(std::log1p(k*std::abs(q))/norm,q);};
+    const auto l=LocalUv(FarWindow(w),x,z);
+    return {.5+.5*warp(2*l.x-1),.5+.5*warp(2*l.y-1)};
+}
+Earth::Pixel EarthSurfaceStream::FarPoint(const Window& w,double u,double v) {
+    const double k=FarWarpK(w),norm=std::log1p(k);
+    const auto unwarp=[&](double q){return std::copysign(std::expm1(std::abs(q)*norm)/k,q);};
+    const auto f=FarWindow(w);
+    const double lu=.5+.5*unwarp(2*u-1),lv=.5+.5*unwarp(2*v-1);
+    return {f.x+f.span*lu,f.z+f.span*(1-lv)};
+}
 EarthSurfaceStream::Atlas EarthSurfaceStream::BuildRegional(const Window& w,ImageView nasa,
-    const std::vector<SourceView>& sources,int size,const std::function<bool()>& cancelled) {
+    const std::vector<SourceView>& sources,int size,const std::function<bool()>& cancelled,int farSize) {
+    if(farSize<=0)farSize=size;
     Atlas result;result.window=w;
     if(!nasa.pixels || size<2 || size>AtlasSize || !std::isfinite(w.latitude) || std::abs(w.latitude)>84 ||
        !std::isfinite(w.longitude) || !std::isfinite(w.x) || !std::isfinite(w.z) ||
@@ -178,11 +195,18 @@ EarthSurfaceStream::Atlas EarthSurfaceStream::BuildRegional(const Window& w,Imag
         const size_t index=(size_t(row)*size+col)*4;
         for(int k=0;k<3;++k)pixels[index+k]=uint8_t(std::clamp(std::lround(color[k]),0l,255l));pixels[index+3]=255;
     };
-    result.farPixels.resize(size_t(size)*size*4);
-    for(int row=0;row<size;++row) {
+    const auto storeFar=[&](int row,int col,const std::array<double,4>& color) {
+        const size_t index=(size_t(row)*farSize+col)*4;
+        for(int k=0;k<3;++k)result.farPixels[index+k]=uint8_t(std::clamp(std::lround(color[k]),0l,255l));result.farPixels[index+3]=255;
+    };
+    result.farSize=farSize;
+    result.farPixels.resize(size_t(farSize)*farSize*4);
+    for(int row=0;row<farSize;++row) {
         if(cancelled && cancelled()){result.farPixels.clear();result.error="superseded";return result;}
-        for(int col=0;col<size;++col)store(result.farPixels,row,col,colorAt(
-            far.x+(col+.5)*far.span/size,far.z+(size-row-.5)*far.span/size));
+        for(int col=0;col<farSize;++col) {
+            const auto p=FarPoint(w,(col+.5)/farSize,(row+.5)/farSize);
+            storeFar(row,col,colorAt(p.x,p.y));
+        }
     }
     result.pixels.resize(size_t(size)*size*4);
     for(int row=0;row<size;++row) {
@@ -193,8 +217,8 @@ EarthSurfaceStream::Atlas EarthSurfaceStream::BuildRegional(const Window& w,Imag
             // boundary. Pin that row/column to the same far-atlas coordinate.
             const double x=col==0?w.x:col+1==size?double(w.x)+w.span:point.x;
             const double z=row==0?double(w.z)+w.span:row+1==size?w.z:point.y;
-            const auto uv=LocalUv(far,x,z);
-            auto base=Sample({result.farPixels.data(),size,size},uv.x,uv.y,false);
+            const auto uv=FarUv(w,x,z);
+            auto base=Sample({result.farPixels.data(),farSize,farSize},uv.x,uv.y,false);
             const auto local=colorAt(x,z);
             // Both sides of the near/far geometry boundary sample the very same
             // far atlas. Detail increases smoothly toward the near interior.
@@ -256,7 +280,7 @@ void EarthSurfaceStream::Run() {
             const auto cancelled=[&]{return _stop.load() || _version!=version;};
             // Provider imagery first (coarse far, then fine near); prepared caches stay on top.
             std::vector<SourceView> frame;
-            EarthImageryTiles::Mosaic far,near;
+            std::vector<EarthImageryTiles::Mosaic> mosaics;
             if(_tiles) {
                 const auto bounds=[&](const Window& w,double& s,double& wst,double& n,double& e) {
                     s=90;wst=180;n=-90;e=-180;
@@ -273,15 +297,33 @@ void EarthSurfaceStream::Run() {
                     v.featherMetres=std::clamp(.02*w.span,50.0,5000.0);
                     frame.push_back(v);
                 };
+                // Nested rings, coarse to fine, each at the resolution the warped far atlas has there;
+                // BuildRegional lets the finer ring win wherever it covers. Then the near window.
                 const auto farWindow=FarWindow(window);
-                add(farWindow,farWindow.span/AtlasSize,AtlasSize,64,far);
+                const double cx=window.x+window.span*.5,cz=window.z+window.span*.5;
+                std::vector<Window> rings{farWindow};
+                for(double s=farWindow.span/4;s>window.span*1.5;s/=4) {
+                    Window r=window;r.span=float(s);r.x=float(cx-s*.5);r.z=float(cz-s*.5);rings.push_back(r);
+                }
+                // At most 8 sources in all: drop the coarsest inner rings first (the far ring stays).
+                while(rings.size()+1+sources.size()>8 && rings.size()>1)rings.erase(rings.begin()+1);
+                mosaics.resize(rings.size()+1);
+                for(size_t i=0;i<rings.size();++i)
+                    add(rings[i],rings[i].span/2048.0,2048,i?96:64,mosaics[i]);
                 // The near atlas is warped ~4x denser at its centre; ask for that, within the tile budget.
-                add(window,window.span/(AtlasSize*4.0),4096,256,near);
+                add(window,window.span/(AtlasSize*4.0),4096,256,mosaics.back());
                 if(cancelled()){result->error="superseded";}
             }
             frame.insert(frame.end(),sources.begin(),sources.end());
             if(result->error.empty())
-                *result=BuildRegional(window,{nasa.data(),4096,2048},frame,AtlasSize,cancelled);
+            {
+                *result=BuildRegional(window,{nasa.data(),4096,2048},frame,AtlasSize,cancelled,FarAtlasSize);
+                std::string fed;
+                for(const auto& m:mosaics)
+                    fed+="z"+std::to_string(m.zoom)+" "+std::to_string(m.tiles-m.failures)+"/"+std::to_string(m.tiles)+
+                         " tiles ("+std::to_string(m.downloads)+" new), ";
+                result->sources=fed+std::to_string(sources.size())+" prepared";
+            }
         } catch(const std::exception& e) {sourceError=e.what();result->error=sourceError;}
         {std::lock_guard lock(_mutex);if(!_stop && _version==version)_ready=std::move(result);}
     }
