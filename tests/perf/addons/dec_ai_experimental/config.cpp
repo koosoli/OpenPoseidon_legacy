@@ -21,4 +21,6 @@ class CfgAIFork
     dangerList = 1;
     lookOut = 1;
     badCover = 1;
+    shootFirst = 1;
+    proneSpeed = 1.6;
 };

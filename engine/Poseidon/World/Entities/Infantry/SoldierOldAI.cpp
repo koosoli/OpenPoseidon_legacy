@@ -26,6 +26,7 @@
 #include <Poseidon/AI/InfantryCombat.hpp>
 #include <Poseidon/AI/FriendlyFire.hpp>
 #include <Poseidon/AI/AIHunt.hpp>
+#include <Poseidon/AI/AICombatPace.hpp> // AI-AIM-001
 #include <Poseidon/World/Weather/WindModel.hpp>
 
 namespace Poseidon
@@ -2492,6 +2493,22 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
     }
     else _combatLaneWait.Clear();
 
+    // AI-AIM-001 (CfgAIFork shootFirst): for a few seconds after taking a target he can see, and while nobody is
+    // shooting at him, he aims at once and stays up (AICombatPace.hpp); after that, stock: down, then cover
+    bool shootFirst = false;
+    if (CombatPace::ShootFirstEnabled() && !unit->IsPlayer() && IsLocal() && !QIsManual())
+    {
+        const Target* t = _fire._fireTarget;
+        if (t != _shootFirstTarget)
+        {
+            _shootFirstTarget = t;
+            _shootFirstSince = Glob.time;
+        }
+        shootFirst = t && t->idExact && !t->idExact->IsDammageDestroyed() && t->lastSeen >= Glob.time - 1.0f &&
+                     Glob.time - _shootFirstSince < CombatPace::kShootFirstWindow && !unit->IsDanger() &&
+                     !unit->IsPinnedDown() && unit->GetSuppression() <= 0.05f;
+    }
+
     if (unit->GetState() == AIUnit::Stopping)
     {
         unit->SendAnswer(AI::StepCompleted);
@@ -2523,7 +2540,8 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
         }
         if (_fireState == FireInit)
         {
-            if (Glob.time > _fireStateDelay)
+            // AI-AIM-001: in a firing window, no wait (moving on meanwhile) before aiming
+            if (Glob.time > _fireStateDelay || shootFirst)
             {
                 float maxDist = 1000;
                 if (mode && mode->_ammo)
@@ -2686,7 +2704,11 @@ void Soldier::AIPilot(float deltaT, SimulationImportance prec)
     }
     else if (_unitPos == UPAuto)
     {
-        if ((unit->IsDanger() || unit->IsPinnedDown()) && !_inBuilding)
+        if (shootFirst && !IsDown())
+        {
+            minPos = maxPos = ManPosCombat; // AI-AIM-001: up and firing first; he lies down after the window
+        }
+        else if ((unit->IsDanger() || unit->IsPinnedDown()) && !_inBuilding)
         {
             maxPos = ManPosLying; // force lying (in danger, or pinned down by incoming fire)
         }

@@ -8584,7 +8584,7 @@ tickets:
     obligation: OPTIONAL
     execution_mode: INVESTIGATE
     scheduling_state: OPEN
-    status: INVESTIGATED
+    status: IMPLEMENTED
     outcome: null
     owner: Dec
     branch: dec/ai-xray
@@ -8602,7 +8602,8 @@ tickets:
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
-      - "Measured 2026-10-09 (.tw/ai/AIM.Eden: 4 West vs 4 East standing still in the open at 80 m, East holding fire; COMBAT_AUDIT on auditShooter, which now also logs target, speed, body/gun angle off the target, cover, order and animation): only 2 of 4 East down in 30 s in every arm (AWARE, COMBAT, improved combat off). The aim itself settles in ~0.8 s once still. The time goes on stock CWA combat behaviour: going prone first (combattolying, 1.7 s, no shot possible, body drifts up to 27 deg); crawling to the assigned cover between targets (Hide order, lyingcrawlf), body 75-86 deg off the next target; turning prone is slow (lyingturnr, ~1.6 s for 80 deg). Not the X-Ray switches, not suppression (none: East held fire), not Oli's improved combat (same with POSEIDON_AI_COMBAT_LEGACY=1)."
+      - "Measured 2026-10-09 (.tw/ai/AIM.Eden: 4 West vs 4 East standing still, East holding fire, 80 m; COMBAT_AUDIT on auditShooter, which now also logs target, speed, body/gun angle off the target, cover, order, animation). Two of the four East stand behind the rise that hides the AI3L squads, so only two are ever visible (an earlier note here, 2 of 4 in 30 s, was that artefact). The aim settles in ~0.8 s once still; the time went on stock CWA combat movement: going prone first (combattolying, 1.7 s, no shot), moving to cover while FireInit waits 0.2-0.7 s before aiming, and slow prone turns (lyingturnr, ~1.6 s for 80 deg). Same with POSEIDON_AI_COMBAT_LEGACY=1."
+      - "Owner 2026-10-09 chose both fixes (AICombatPace, off by default): CfgAIFork shootFirst = 1 (a 4 s firing window after taking a visible target, not under fire: aim at once, stay up) and proneSpeed = 1.6 (AI only: prone transitions, prone turn animations and the lying turn cap). Both visible East down by 5.8 / 5.9 / 6.2 s stock vs 2.4 / 2.8 / 4.6 s with both (3 runs each)."
     fallback: null
     reviewer: null
     reviewer_method: null

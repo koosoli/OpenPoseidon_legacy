@@ -1,4 +1,5 @@
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
+#include <Poseidon/AI/AICombatPace.hpp> // AI-AIM-001
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
@@ -243,6 +244,23 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
     {
         const AnimationRT* primA = *prim;
         float priSpeed = prim->GetSpeed();
+        // AI-AIM-001 (CfgAIFork proneSpeed): AI drop to prone and turn while prone faster (the player never)
+        if (CombatPace::ProneSpeed() != 1.0f && Brain() && !Brain()->IsPlayer() && !QIsManual())
+        {
+            const RStringB name = Type()->GetMoveName(_primaryMove.id);
+            const char* n = name;
+            auto has = [n](const char* part)
+            {
+                for (const char* p = n; p && *p; ++p)
+                    if (strnicmp(p, part, strlen(part)) == 0)
+                        return true;
+                return false;
+            };
+            if (has("tolying") || has("lyingturn"))
+            {
+                priSpeed *= CombatPace::ProneSpeed();
+            }
+        }
         if (priSpeed > 1e5)
         {
             // static looped animation: no movement contribution
