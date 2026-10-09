@@ -150,6 +150,41 @@ bool CActiveText::OnKeyUp(unsigned nChar, unsigned nRepCnt, unsigned nFlags)
     return false;
 }
 
+bool CActiveText::IsInside(float x, float y)
+{
+    if (_text.GetLength() == 0 || !_font)
+        return Control::IsInside(x, y);
+    // The same placement OnDraw uses, so the hot area is exactly the label.
+    const float size = _scale * _size;
+    const float wText = GLOB_ENGINE->GetTextWidth(size, _font, _text);
+    float left = _x, top = _y + 0.5f * (_h - size), w = wText, h = size;
+    switch (_style & ST_HPOS)
+    {
+        case ST_UP:
+            left = _x + 0.5f * (_w - size), top = _y, w = size, h = wText;
+            break;
+        case ST_VCENTER:
+            left = _x + 0.5f * (_w - size), top = _y + 0.5f * (_h - wText), w = size, h = wText;
+            break;
+        case ST_DOWN:
+            left = _x + 0.5f * (_w - size), top = _y + _h - wText, w = size, h = wText;
+            break;
+        case ST_RIGHT:
+            left = _x + _w - wText;
+            break;
+        case ST_CENTER:
+            left = _x + 0.5f * (_w - wText);
+            break;
+        default:
+            break;
+    }
+    // A hair of slack so the edge of a glyph still counts; never past the control.
+    constexpr float pad = 0.004f;
+    const float x0 = std::max(_x, left - pad), x1 = std::min(_x + _w, left + w + pad);
+    const float y0 = std::max(_y, top - pad), y1 = std::min(_y + _h, top + h + pad);
+    return x >= x0 && x <= x1 && y >= y0 && y <= y1;
+}
+
 void CActiveText::OnMouseMove(float x, float y, bool active)
 {
     OnMouseHold(x, y, active);
@@ -176,7 +211,10 @@ void CActiveText::OnLButtonDown(float x, float y)
 
 void CActiveText::OnLButtonUp(float x, float y)
 {
-    if (IsInside(x, y) || PointInRect(x, y, _pressX, _pressY, _pressW, _pressH))
+    // Released over the label it was pressed on. (The press rectangle is kept for
+    // a control that moved between press and release, but only where its label was.)
+    if (IsInside(x, y) || (PointInRect(x, y, _pressX, _pressY, _pressW, _pressH) &&
+                           IsInside(x - (_pressX - _x), y - (_pressY - _y))))
     {
         PlaySound(_clickSound);
         if (_action.GetLength() > 0)

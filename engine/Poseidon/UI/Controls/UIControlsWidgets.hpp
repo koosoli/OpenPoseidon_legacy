@@ -184,6 +184,11 @@ public:
 
 	CActiveText(ControlsContainer *parent, int idc, const ParamEntry &cls);
 
+	// Hover and click respond only over the drawn text, not the whole layout
+	// rectangle: menu rows are far wider than their labels, and a click beside
+	// one used to land on it. A control without text keeps its full rectangle.
+	bool IsInside(float x, float y) override;
+
 	bool OnKeyDown(unsigned nChar, unsigned nRepCnt, unsigned nFlags) override;
 	bool OnKeyUp(unsigned nChar, unsigned nRepCnt, unsigned nFlags) override;
 	void OnMouseMove(float x, float y, bool active = true) override;
