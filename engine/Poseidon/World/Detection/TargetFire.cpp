@@ -1948,7 +1948,7 @@ void EntityAI::SelectFireWeapon(FireDecision& fire)
         FireResult aResult;
         if (WhatFireResult(aResult, *attacker, timeToLive))
         {
-            if (TargetScoring::LogOn())
+            if (TargetScoring::LogOn() && fire._fireTarget != attacker) // a real change, not keeping him
             {
                 LOG_INFO(AI, "Target: {} switches to its attacker {} (from {}, {:.1f} s on it) t={:.1f}",
                          (const char*)GetDebugName(), (const char*)attacker->idExact->GetDebugName(),

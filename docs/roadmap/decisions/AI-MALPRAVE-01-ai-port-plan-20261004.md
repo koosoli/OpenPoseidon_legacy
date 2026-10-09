@@ -172,6 +172,23 @@ From Malprave job 23 (29 Sep), the first and only A/B test of the X-Ray patches:
   * Among other targets, one seen in the last second beats one only remembered.
   * Captured in the walk-in test: a switch to the attacker after 4.8 s on the previous target.
   * The player rules are untested.
+* **2026-10-09, AI-XRAY-001 play-test continued:**
+  * **Hunting** (AI3L with `.tw/ai/evals-hunt.txt`: East walks in, then holds fire and runs back behind the
+    rise):
+    * West's three soldiers hold at 30 s, two flank about 100 m to the last known positions at 36–37 s, and
+      normal combat takes over at 57 s when they see East again. That re-sighting is why Search was not
+      reached.
+    * The leader never hunts.
+    * Rejoining after the enemy is really gone is still unmeasured.
+  * **Stock mission** (`C02Battlefields.Eden`, 180 s, branch build):
+    * Everything off: no change by construction. With no `CfgAIFork`, grenadeInterval is 0 and the other
+      switches are off.
+    * Everything on: the battle runs to the end, with 1 grenade thrown and 20 refused, 25 hunt phase changes
+      and 22 switches to an attacker. No soldier switched more than 3 times; the median was 3.1 s on the
+      previous target.
+    * Both runs show the pre-existing `ValidateOutVehicle` assert.
+    * The target log printed re-picks of the current target as switches (41 for one soldier); it now logs
+      only real changes.
 
 ## 5. X-Ray research (Lost Alpha docs, 2026-10-09)
 

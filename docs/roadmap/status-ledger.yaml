@@ -8244,12 +8244,13 @@ tickets:
         symbol: Man::FireWeapon
       - file: engine/Poseidon/World/Detection/Target.cpp
         symbol: GradualSpotting::Accumulate
-    test_ids: [ai-xray-001-ai3-grenades, ai-xray-001-walkin-gradual-on-off, ai-xray-001-ai3l-los]
+    test_ids: [ai-xray-001-ai3-grenades, ai-xray-001-walkin-gradual-on-off, ai-xray-001-ai3l-los, ai-xray-001-hunt-walkin, ai-xray-001-c02-battlefields-on-off]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
       - "FIXED bfcdc2f9: grenade limit (now one per group per 5 s, AI3: 1.5/7.3 s and 4.5/9.5 s); gradual spotting 10x slow within 100 m and stuck at the 5 s cadence (now 2-4 s for a visible man at 120 m)."
+      - "Hunting captured 2026-10-09 (hold -> half-squad flank -> back to combat on re-sighting); rejoin after the enemy is gone and the Search step unmeasured. C02Battlefields 180 s with everything on: runs clean apart from the pre-existing ValidateOutVehicle assert."
       - "NOT A BUG: the 130-150 m beach case (AI3L) is a terrain rise 1.5 m over the eye line; visibility 0 with or without the patches."
       - "Mission start still gives every unit what it can see at once (stock); tests must bring the enemy into view after the start."
       - "Malprave job 23: grenade limit failed (4 throws in 1.6 s), spotting/hunting test broken by setPos teleports; knowsAbout reads 0."
