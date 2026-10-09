@@ -4,6 +4,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 
+#include <Poseidon/AI/AIDangerList.hpp> // AI-XRAY-004: typed dangers
 #include <Poseidon/AI/AITuning.hpp> // TrackNearTargetsPeriod: the gradual-spotting cadence
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
@@ -1255,6 +1256,11 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             const float heard = floatMin(audibleFire * 0.6f, 1.2f);
             if (heard > actSpotability)
             {
+                // AI-XRAY-004: gunfire he cannot see the source of is a danger where it came from
+                if (ai->GetGroup() != group)
+                {
+                    DangerList::Note(unit, DangerList::Type::Gunfire, ai->Position());
+                }
                 spotError = ai->Position().Distance(Position()) * 0.4f; // gunshots are easier to place than footsteps
                 delayCoef = 2.0f;
                 actSpotability = heard;
@@ -1344,6 +1350,17 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
         }
         if (!target->destroyed && ai->IsDammageDestroyed())
         {
+            // AI-XRAY-004: one of ours, newly found dead -- a danger for whoever of the group is near the body
+            if (DangerList::Enabled() && center->IsFriendly(target->side))
+            {
+                for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
+                {
+                    if (AIUnit* mate = group->UnitWithID(id))
+                    {
+                        DangerList::Note(mate, DangerList::Type::Corpse, ai->Position());
+                    }
+                }
+            }
             target->destroyed = true;
             target->timeReported = TIME_MIN;
             target->posReported = VZero;

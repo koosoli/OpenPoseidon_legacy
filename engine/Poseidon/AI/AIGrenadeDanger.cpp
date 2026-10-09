@@ -4,6 +4,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AIGrenadeDanger.hpp>
 
+#include <Poseidon/AI/AIDangerList.hpp> // AI-XRAY-004: typed dangers
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
@@ -159,7 +160,7 @@ void Finish(Rec& r, AIUnit* unit, bool exploded)
 
 void Report(const void* shot, Vector3Par position, Vector3Par speed, float fuseLeft, float blastRadius, bool atRest)
 {
-    if (!Cfg().enabled)
+    if (!Cfg().enabled && !DangerList::Enabled())
         return;
     CheckClock(Now());
     Vector3 landing = position;
@@ -188,7 +189,7 @@ void Report(const void* shot, Vector3Par position, Vector3Par speed, float fuseL
 void React(AIUnit* unit)
 {
     const Settings& cfg = Cfg();
-    if (!unit || !cfg.enabled)
+    if (!unit || (!cfg.enabled && !DangerList::Enabled()))
         return;
     const float now = Now();
     CheckClock(now);
@@ -254,6 +255,9 @@ void React(AIUnit* unit)
     }
     if (!g)
         return;
+    DangerList::Note(unit, DangerList::Type::Grenade, g->landing); // AI-XRAY-004
+    if (!cfg.enabled)
+        return; // noted, but no dodging
 
     const float dist = std::sqrt(g->landing.DistanceXZ2(me));
     const float timeLeft = g->explodesAt - now;

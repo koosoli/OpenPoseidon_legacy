@@ -1,5 +1,6 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
+#include <Poseidon/AI/AIDangerList.hpp> // AI-XRAY-004: typed dangers
 #include <Poseidon/AI/AIGrenadeDanger.hpp> // AI-XRAY-003: live grenades for the AI
 #include <Poseidon/World/Scene/CargoSurface.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
@@ -261,6 +262,7 @@ static void ApplyNearMissSuppression(EntityAI* shooter, const AmmoType* type, Ve
         }
         const float d = sqrt(d2);
         unit->AddSuppression(PerRound * power * (1 - d / Radius), shooter);
+        DangerList::Note(unit, DangerList::Type::Ricochet, from + seg * t); // AI-XRAY-004
     }
 }
 

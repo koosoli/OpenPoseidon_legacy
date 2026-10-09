@@ -1,5 +1,6 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/OpDiag.hpp> // DIAG-001 hooks, empty unless POSEIDON_DIAG
+#include <Poseidon/AI/AIDangerList.hpp> // AI-XRAY-004: typed dangers
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
@@ -227,6 +228,28 @@ void EntityAI::HitBy(EntityAI* killer, float howMuch, RString ammo)
     }
     base::HitBy(killer, howMuch, ammo);
     AIGroup* g = GetGroup();
+    // AI-XRAY-004: the victim notes where the shooter is, squadmates near him that he was hit or killed
+    if (DangerList::Enabled() && howMuch > 0.01f)
+    {
+        AIUnit* me = CommanderUnit();
+        if (me && killer && killer != this)
+        {
+            DangerList::Note(me, DangerList::Type::Hit, killer->Position());
+        }
+        if (g && me && me->IsFreeSoldier()) // a soldier on foot (a hit vehicle is not a squadmate down)
+        {
+            const DangerList::Type what =
+                IsDammageDestroyed() ? DangerList::Type::SquadmateDied : DangerList::Type::SquadmateHit;
+            for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
+            {
+                AIUnit* mate = g->UnitWithID(id);
+                if (mate && mate != me)
+                {
+                    DangerList::Note(mate, what, Position());
+                }
+            }
+        }
+    }
     if (g && killer)
     {
         AIUnit* killerUnit = killer->CommanderUnit();

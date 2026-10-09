@@ -18,4 +18,5 @@ class CfgAIFork
     exposedParts = 1;
     targetScoring = 1;
     grenadeDodge = 1;
+    dangerList = 1;
 };
