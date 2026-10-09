@@ -261,6 +261,12 @@ From Malprave job 23 (29 Sep), the first and only A/B test of the X-Ray patches:
     Shown in C02: marked, then skipped 1 s and 4 s later.
   * **Not done:** cover eviction. CWA picks cover per soldier with no reservation to evict from.
   * The 3 m enemy rule is already stricter in FindHideBehind.
+  * Review fixes:
+    * The look-out kept wiping the leader's assigned target. It no longer does.
+    * No look-out in danger or under suppression.
+    * Look-outs end before a save: the hunt's state is not saved, so a soldier saved mid-look stayed standing.
+    * A hit soldier leaves the bad cover himself (C02: skipped 0.1 s after the hit).
+    * Bad-cover records are checked against the clock after a restart.
 
 ## 5. X-Ray research (Lost Alpha docs, 2026-10-09)
 
