@@ -51,6 +51,7 @@ class EarthTerrainStream
     const Tile& LoadTile(int zoom, int x, int y);
     float Sample(double x, double y, int zoom = Earth::Zoom);
     bool Download(const std::string& url, std::vector<unsigned char>& bytes);
+    bool DownloadOnce(const std::string& url, std::vector<unsigned char>& bytes, long& status);
     void TrimDisk();
     std::filesystem::path TileDirectory(int zoom) const;
     EarthStreaming::Location _requestOrigin;

@@ -105,8 +105,31 @@ std::unique_ptr<EarthTerrainStream::Patch> EarthTerrainStream::TakeReady()
 
 bool EarthTerrainStream::Download(const std::string& url, std::vector<unsigned char>& bytes)
 {
+    // Transient connection/TLS failures are common on real networks (Earth imagery measured 4 of 5
+    // handshakes failing in a row on one machine); one failed tile used to stall the whole patch 10 s.
+    for (int attempt = 0; attempt < 4; ++attempt)
+    {
+        if (attempt)
+        {
+            for (int waited = 0; waited < 250 * attempt; waited += 50)
+            {
+                if (_stop.load() || _generation.load() != _activeGeneration) return false;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            }
+        }
+        bytes.clear();
+        long status = 0;
+        const bool aborted = !DownloadOnce(url, bytes, status);
+        if (status == 200 && !bytes.empty()) return true;
+        if (aborted || (status >= 400 && status < 500 && status != 408 && status != 429)) return false;
+    }
+    return false;
+}
+
+bool EarthTerrainStream::DownloadOnce(const std::string& url, std::vector<unsigned char>& bytes, long& status)
+{
     CURL* curl = curl_easy_init();
-    if (!curl) return false;
+    if (!curl) return true;
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "OpenPoseidon-EarthPrototype/1");
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
@@ -119,13 +142,15 @@ bool EarthTerrainStream::Download(const std::string& url, std::vector<unsigned c
     Cancellation token{_stop,_generation,_activeGeneration};
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &token);
     const CURLcode result = curl_easy_perform(curl);
-    long status = 0;
+    status = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
     curl_easy_cleanup(curl);
+    if (result != CURLE_OK)
+        status = 0;
     if ((result != CURLE_OK || status != 200) && result!=CURLE_ABORTED_BY_CALLBACK)
         std::fprintf(stderr, "Earth terrain HTTPS: %s, HTTP %ld (%s)\n", curl_easy_strerror(result), status,
                      EarthProviders::Redact(url, _elevation.key).c_str());
-    return result == CURLE_OK && status == 200 && !bytes.empty();
+    return result != CURLE_ABORTED_BY_CALLBACK; // false: cancelled, do not retry
 }
 
 std::filesystem::path EarthTerrainStream::TileDirectory(int zoom) const

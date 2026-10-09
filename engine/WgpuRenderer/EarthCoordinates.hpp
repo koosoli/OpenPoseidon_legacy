@@ -9,7 +9,7 @@ namespace Poseidon::Earth
 {
 constexpr double MaxLatitude = 85.0511287798066;
 constexpr int Zoom = 10;
-constexpr int MaxZoom = 12;
+constexpr int MaxZoom = 14;
 constexpr int TilePixels = 256;
 constexpr int GridSamples = 257;
 constexpr float GridMetres = 100.0f;
@@ -19,18 +19,28 @@ constexpr int HorizonSamples = 257;
 constexpr int HorizonInnerBegin = 96;
 constexpr int HorizonInnerEnd = 160;
 
-enum class NearDetail { Coarse, Fine };
+enum class NearDetail { Coarse, Fine, Ultra };
 // Hysteresis keeps small altitude changes from rebuilding/downloading a patch.
-// Both bands retain 257 samples: detail spends coverage, not more vertices.
+// Every band retains 257 samples: detail spends coverage, not more vertices.
+// Ultra (6.25 m grid, zoom 14, a 1.6 km window) is the ground-level band: below 1.5 km
+// altitude, held until 2.5 km so a climb out of a valley does not flap between bands.
 inline NearDetail SelectNearDetail(float altitude, NearDetail current)
 {
     if (!std::isfinite(altitude)) return current;
+    if (altitude <= 1500.0f) return NearDetail::Ultra;
+    if (current == NearDetail::Ultra && altitude < 2500.0f) return NearDetail::Ultra;
     if (altitude <= 8000.0f) return NearDetail::Fine;
     if (altitude >= 12000.0f) return NearDetail::Coarse;
-    return current;
+    return current == NearDetail::Ultra ? NearDetail::Fine : current;
 }
-constexpr float NearGrid(NearDetail detail) { return detail == NearDetail::Fine ? 25.0f : GridMetres; }
-constexpr int NearZoom(NearDetail detail) { return detail == NearDetail::Fine ? MaxZoom : Zoom; }
+constexpr float NearGrid(NearDetail detail)
+{
+    return detail == NearDetail::Ultra ? 6.25f : detail == NearDetail::Fine ? 25.0f : GridMetres;
+}
+constexpr int NearZoom(NearDetail detail)
+{
+    return detail == NearDetail::Ultra ? 14 : detail == NearDetail::Fine ? 12 : Zoom;
+}
 constexpr float NearHalfWindow(float grid) { return 128.0f * grid; }
 constexpr float NearRecenter(float grid) { return 32.0f * grid; }
 constexpr float NearBlendWidth(float grid) { return 40.0f * grid; }

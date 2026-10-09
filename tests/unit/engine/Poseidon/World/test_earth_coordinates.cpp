@@ -150,7 +150,12 @@ int main()
     assert(SelectNearDetail(10000,NearDetail::Fine)==NearDetail::Fine);
     assert(SelectNearDetail(10000,NearDetail::Coarse)==NearDetail::Coarse);
     assert(SelectNearDetail(NAN,NearDetail::Fine)==NearDetail::Fine);
-    assert(SelectNearDetail(-100,NearDetail::Coarse)==NearDetail::Fine);
+    assert(SelectNearDetail(-100,NearDetail::Coarse)==NearDetail::Ultra); // below 1.5 km: the ground band
+    assert(SelectNearDetail(1500,NearDetail::Fine)==NearDetail::Ultra);
+    assert(SelectNearDetail(2000,NearDetail::Ultra)==NearDetail::Ultra); // held until 2.5 km
+    assert(SelectNearDetail(2000,NearDetail::Fine)==NearDetail::Fine);
+    assert(SelectNearDetail(2600,NearDetail::Ultra)==NearDetail::Fine);
+    assert(NearGrid(NearDetail::Ultra)==6.25f && NearZoom(NearDetail::Ultra)==14);
     // A noisy flight inside the hysteresis band cannot change its source/grid.
     auto detail=NearDetail::Fine;
     for(float altitude : {9990.0f,10010.0f,11000.0f,9000.0f,11999.0f})
@@ -222,7 +227,7 @@ int main()
             }
         }
     }
-    assert(WrapPixel(-1,MaxZoom)==1048575 && WrapPixel(1048576,MaxZoom)==0);
+    assert(WrapPixel(-1,12)==1048575 && WrapPixel(1048576,12)==0);
     using namespace Poseidon::EarthStreaming;
     assert(CameraAnchor==Anchor);
     LocationState locations;
