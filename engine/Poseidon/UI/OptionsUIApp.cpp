@@ -1,4 +1,5 @@
 #include <Poseidon/UI/LocalMapsDisplay.hpp>
+#include <Poseidon/UI/WholeWorldDisplay.hpp>
 #include <Poseidon/UI/LocalMapEditor.hpp>
 
 #include <Poseidon/Foundation/Platform/InitBridge.hpp> // IsMenuOverriddenByMod (custom-menu hijack)
@@ -284,43 +285,46 @@ DisplayMain::DisplayMain(ControlsContainer* parent) : Display(parent)
         }
     }
 
-    // Local content browser is a normal main-menu entry and does not require --dev.
-    if (Control* quit = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_QUIT)))
+    // Local content browser and whole-world entry are normal main-menu entries (no --dev needed): clones of
+    // Quit's styling, placed clear of every other entry.
+    const auto injectEntry = [&](ParamFile& resource, const char* className, int idc, const char* label)
     {
+        Control* quit = dynamic_cast<Control*>(GetCtrl(IDC_MAIN_QUIT));
         ParamEntry* source = Res.FindEntry(mainRsc) ? (Res >> mainRsc).FindEntry("Quit") : nullptr;
-        if (source && source->IsClass())
+        if (!quit || !source || !source->IsClass())
+            return;
+        resource.Clear();
+        ParamClass* cls = resource.AddClass(className);
+        cls->Add("idc", idc);
+        cls->Add("text", RString(label));
+        cls->SetBase(source->GetClassInterface());
+        LoadControl(*cls);
+        Control* button = dynamic_cast<Control*>(GetCtrl(idc));
+        if (!button)
+            return;
+        std::vector<MainMenuControlRect> foreground;
+        for (int i = 0; i < _controlsForeground.Size(); ++i)
         {
-            static ParamFile mapButtonResource;
-            mapButtonResource.Clear();
-            ParamClass* cls = mapButtonResource.AddClass("LocalMapsButton");
-            cls->Add("idc", LocalMapsMenuId);
-            cls->Add("text", RString("Local maps"));
-            cls->SetBase(source->GetClassInterface());
-            LoadControl(*cls);
-            if (Control* button = dynamic_cast<Control*>(GetCtrl(LocalMapsMenuId)))
-            {
-                std::vector<MainMenuControlRect> foreground;
-                for (int i = 0; i < _controlsForeground.Size(); ++i)
-                {
-                    Control* control = _controlsForeground[i];
-                    if (control && control != quit && control != button)
-                        foreground.push_back({control->X(), control->Y(), control->W(), control->H(), control->IsVisible()});
-                }
-                auto pos = CalculateMainMenuModsPlacement(
-                    {quit->X(), quit->Y(), quit->W(), quit->H(), quit->IsVisible()}, foreground);
-                const auto overlaps = [&](float x, float y) {
-                    for (const auto& other : foreground)
-                        if (other.visible && x < other.x + other.w && x + pos.w > other.x &&
-                            y < other.y + other.h && y + pos.h > other.y) return true;
-                    return false;
-                };
-                // Horizontal custom menus may already have Mods beside Quit.
-                for (int row = 0; row < 12 && overlaps(pos.x, pos.y); ++row)
-                    pos.y = 0.08f + row * (pos.h + 0.01f);
-                button->SetPos(pos.x, pos.y, pos.w, pos.h);
-            }
+            Control* control = _controlsForeground[i];
+            if (control && control != quit && control != button)
+                foreground.push_back({control->X(), control->Y(), control->W(), control->H(), control->IsVisible()});
         }
-    }
+        auto pos = CalculateMainMenuModsPlacement({quit->X(), quit->Y(), quit->W(), quit->H(), quit->IsVisible()},
+                                                  foreground);
+        const auto overlaps = [&](float x, float y) {
+            for (const auto& other : foreground)
+                if (other.visible && x < other.x + other.w && x + pos.w > other.x && y < other.y + other.h &&
+                    y + pos.h > other.y) return true;
+            return false;
+        };
+        // Horizontal custom menus may already have Mods beside Quit.
+        for (int row = 0; row < 12 && overlaps(pos.x, pos.y); ++row)
+            pos.y = 0.08f + row * (pos.h + 0.01f);
+        button->SetPos(pos.x, pos.y, pos.w, pos.h);
+    };
+    static ParamFile mapButtonResource, worldButtonResource;
+    injectEntry(mapButtonResource, "LocalMapsButton", LocalMapsMenuId, "Local maps");
+    injectEntry(worldButtonResource, "WholeWorldButton", WholeWorldMenuId, "Whole world");
 
     // Guard every control lookup: when the RscDisplayMain class is absent or
     // minimal (PoseidonUITest's own RESOURCE.BIN, or a headless --test-mission
@@ -2245,6 +2249,7 @@ void DisplayModDownload::OnSimulate(EntityAI* vehicle)
 void DisplayMain::OnButtonClicked(int idc)
 {
     if (idc == LocalMapsMenuId) { CreateChild(CreateLocalMapsDisplay(this)); return; }
+    if (idc == WholeWorldMenuId) { CreateChild(CreateWholeWorldDisplay(this)); return; }
     // Dispatch registered game module buttons via registry
     if (auto* mod = GameModuleRegistry::FindByIDC(idc))
     {

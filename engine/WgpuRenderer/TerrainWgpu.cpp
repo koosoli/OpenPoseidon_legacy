@@ -398,13 +398,28 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
         _earthStream = std::make_unique<EarthTerrainStream>();
         if(const char* manifest=std::getenv("POSEIDON_EARTH_WORLDGEN_MANIFEST");manifest&&*manifest)
             _earthWorldgen=std::make_unique<EarthWorldgen>(std::filesystem::u8path(manifest));
-        if(const char* surface=std::getenv("POSEIDON_EARTH_SURFACE");surface && std::strcmp(surface,"1")==0)
+        const char* cache=std::getenv("POSEIDON_EARTH_CACHE");
+        // A configured imagery provider (providers.cfg / env) streams detail everywhere and, when no
+        // NASA overview is installed, supplies the globe image too.
+        std::unique_ptr<EarthImageryTiles> provider;
+        if(cache && *cache)
         {
-            const char* cache=std::getenv("POSEIDON_EARTH_CACHE");
-            const char* image=std::getenv("POSEIDON_EARTH_IMAGERY");
-            if(cache && *cache && image && *image)
-                _earthSurface=std::make_unique<EarthSurfaceStream>(std::filesystem::u8path(cache),std::filesystem::u8path(image));
+            provider=std::make_unique<EarthImageryTiles>(std::filesystem::u8path(cache),
+                EarthProviders::Load(std::filesystem::u8path(cache)).Imagery());
+            if(!provider->Enabled()) provider.reset();
         }
+        if(const char* image=std::getenv("POSEIDON_EARTH_IMAGERY");image && *image && std::filesystem::exists(std::filesystem::u8path(image)))
+            _earthImageryPath=image;
+        else if(provider)
+        {
+            const auto overview=provider->Overview().u8string();
+            _earthImageryPath.assign(overview.begin(),overview.end());
+            LOG_INFO(Graphics, "Earth imagery provider '%s': overview %s", provider->Source().id.c_str(),
+                     _earthImageryPath.empty() ? "unavailable (plain globe)" : _earthImageryPath.c_str());
+        }
+        const char* surface=std::getenv("POSEIDON_EARTH_SURFACE");
+        if(cache && *cache && !_earthImageryPath.empty() && ((surface && std::strcmp(surface,"1")==0) || provider))
+            _earthSurface=std::make_unique<EarthSurfaceStream>(std::filesystem::u8path(cache),std::filesystem::u8path(_earthImageryPath));
         if(const char* buildings=std::getenv("POSEIDON_EARTH_BUILDINGS");buildings && std::strcmp(buildings,"1")==0)
         {
             if(const char* cache=std::getenv("POSEIDON_EARTH_CACHE");cache && *cache)
@@ -3285,7 +3300,7 @@ void TerrainWgpu::UploadEarthGlobe(double latitude,double longitude)
     _earthGlobeMesh=mesh;
     _earthGlobeIndices=uint32_t(indices.size());
     // An external, optional local cache. Never reads or redistributes game assets.
-    const char* imagePath=std::getenv("POSEIDON_EARTH_IMAGERY");
+    const char* imagePath=_earthImageryPath.empty() ? nullptr : _earthImageryPath.c_str();
     int width=0,height=0,channels=0;
     if (!_earthGlobeTexture && imagePath && stbi_info(imagePath,&width,&height,&channels) &&
         width>0 && height>0 && width<=8192 && height<=4096)

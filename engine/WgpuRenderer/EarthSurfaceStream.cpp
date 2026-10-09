@@ -206,7 +206,11 @@ EarthSurfaceStream::Atlas EarthSurfaceStream::BuildRegional(const Window& w,Imag
     result.cellPresent=true;return result;
 }
 EarthSurfaceStream::EarthSurfaceStream(std::filesystem::path cache,std::filesystem::path overview):
-    _cache(std::move(cache)),_overview(std::move(overview)) {_worker=std::thread(&EarthSurfaceStream::Run,this);}
+    _cache(std::move(cache)),_overview(std::move(overview)) {
+    _tiles=std::make_unique<EarthImageryTiles>(_cache,EarthProviders::Load(_cache).Imagery());
+    if(!_tiles->Enabled())_tiles.reset();
+    _worker=std::thread(&EarthSurfaceStream::Run,this);
+}
 EarthSurfaceStream::~EarthSurfaceStream(){_stop=true;++_version;_wake.notify_one();_worker.join();}
 void EarthSurfaceStream::Request(const EarthTerrainStream::Patch& p) {
     std::lock_guard lock(_mutex);
@@ -246,10 +250,38 @@ void EarthSurfaceStream::Run() {
                     FeatherNoData(pixels.get(),width,height);
                     decoded+=count;source.image.pixels=pixels.get();sources.push_back(source);images.push_back(std::move(pixels));
                 }
-                if(sources.empty())throw std::runtime_error("prepared surface cache missing");
+                if(sources.empty() && !_tiles)throw std::runtime_error("prepared surface cache missing");
             }
             if(!sourceError.empty())throw std::runtime_error(sourceError);
-            *result=BuildRegional(window,{nasa.data(),4096,2048},sources,AtlasSize,[&]{return _stop || _version!=version;});
+            const auto cancelled=[&]{return _stop.load() || _version!=version;};
+            // Provider imagery first (coarse far, then fine near); prepared caches stay on top.
+            std::vector<SourceView> frame;
+            EarthImageryTiles::Mosaic far,near;
+            if(_tiles) {
+                const auto bounds=[&](const Window& w,double& s,double& wst,double& n,double& e) {
+                    s=90;wst=180;n=-90;e=-180;
+                    for(int i=0;i<3;++i)for(int j=0;j<3;++j) {
+                        const auto c=Earth::FromLocal(w.latitude,w.longitude,w.x+w.span*.5*i,w.z+w.span*.5*j);
+                        s=std::min(s,c.latitude);n=std::max(n,c.latitude);wst=std::min(wst,c.longitude);e=std::max(e,c.longitude);
+                    }
+                };
+                const auto add=[&](const Window& w,double metresPerPixel,int size,unsigned tiles,EarthImageryTiles::Mosaic& m) {
+                    double s,wst,n,e;bounds(w,s,wst,n,e);
+                    if(!_tiles->Build(s,wst,n,e,metresPerPixel,size,tiles,m,cancelled))return;
+                    SourceView v;v.image={m.pixels.data(),m.width,m.height};
+                    v.south=m.south;v.west=m.west;v.north=m.north;v.east=m.east;
+                    v.featherMetres=std::clamp(.02*w.span,50.0,5000.0);
+                    frame.push_back(v);
+                };
+                const auto farWindow=FarWindow(window);
+                add(farWindow,farWindow.span/AtlasSize,AtlasSize,64,far);
+                // The near atlas is warped ~4x denser at its centre; ask for that, within the tile budget.
+                add(window,window.span/(AtlasSize*4.0),4096,256,near);
+                if(cancelled()){result->error="superseded";}
+            }
+            frame.insert(frame.end(),sources.begin(),sources.end());
+            if(result->error.empty())
+                *result=BuildRegional(window,{nasa.data(),4096,2048},frame,AtlasSize,cancelled);
         } catch(const std::exception& e) {sourceError=e.what();result->error=sourceError;}
         {std::lock_guard lock(_mutex);if(!_stop && _version==version)_ready=std::move(result);}
     }

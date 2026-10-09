@@ -130,6 +130,7 @@ class TerrainWgpu : public ITerrainRenderer
     std::unique_ptr<EarthTerrainStream::Patch> _earthPatch;
     std::unique_ptr<EarthBuildingStream> _earthBuildings;
     std::unique_ptr<EarthSurfaceStream> _earthSurface;
+    std::string _earthImageryPath; // globe/overview image: POSEIDON_EARTH_IMAGERY or the provider overview
     std::unique_ptr<EarthFeatureStream> _earthFeatures;
     std::unique_ptr<EarthWorldgen> _earthWorldgen;
     std::unique_ptr<EarthWorldgen::Snapshot> _earthWorldgenSnapshot;

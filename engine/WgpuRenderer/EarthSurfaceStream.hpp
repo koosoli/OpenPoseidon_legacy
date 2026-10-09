@@ -1,11 +1,13 @@
 #pragma once
 #include "EarthTerrainStream.hpp"
+#include "EarthImageryTiles.hpp"
 #include <array>
 #include <functional>
 #include <string>
 
 namespace Poseidon {
-// Explicitly prepared, cache-only presentation. No HTTP or gameplay collision.
+// Prepared regional caches, plus streamed provider imagery when one is configured (providers.cfg).
+// No gameplay collision.
 class EarthSurfaceStream {
 public:
     static constexpr int AtlasSize=2048;
@@ -49,6 +51,7 @@ public:
 private:
     void Run();
     std::filesystem::path _cache,_overview;
+    std::unique_ptr<EarthImageryTiles> _tiles; // null: no imagery provider
     std::thread _worker;
     std::mutex _mutex;
     std::condition_variable _wake;

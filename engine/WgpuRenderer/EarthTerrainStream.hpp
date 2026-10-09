@@ -2,6 +2,7 @@
 
 #include "EarthCoordinates.hpp"
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
+#include <Poseidon/World/Terrain/EarthProviders.hpp>
 #include <atomic>
 #include <condition_variable>
 #include <filesystem>
@@ -51,9 +52,11 @@ class EarthTerrainStream
     float Sample(double x, double y, int zoom = Earth::Zoom);
     bool Download(const std::string& url, std::vector<unsigned char>& bytes);
     void TrimDisk();
+    std::filesystem::path TileDirectory(int zoom) const;
     EarthStreaming::Location _requestOrigin;
     uint64_t _activeGeneration = 0; // Worker-only download cancellation token.
     std::filesystem::path _cache;
+    EarthProviders::Source _elevation; // where elevation tiles come from (providers.cfg)
     std::atomic<bool> _stop{false};
     std::atomic<uint64_t> _generation{0};
     std::thread _worker;
