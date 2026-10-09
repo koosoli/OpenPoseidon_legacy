@@ -12,7 +12,7 @@ class Mission
    class Vehicles
    {
     items=1;
-    class Item0 {position[]={30400,0,17600}; azimut=0; id=0; side="WEST"; vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=1; text="p1";};
+    class Item0 {position[]={60800,0,35200}; azimut=0; id=0; side="WEST"; vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=1; text="p1";};
    };
   };
   class Item1
@@ -21,7 +21,7 @@ class Mission
    class Vehicles
    {
     items=1;
-    class Item0 {position[]={9000,300,27000}; azimut=270; id=1; side="WEST"; vehicle="A10"; leader=1; skill=1; special="FLY"; text="a10";};
+    class Item0 {position[]={17000,300,55000}; azimut=270; id=1; side="WEST"; vehicle="A10"; leader=1; skill=1; special="FLY"; text="a10";};
    };
   };
  };

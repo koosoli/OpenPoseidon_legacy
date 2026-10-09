@@ -1,3 +1,3 @@
-vehicle player setPos [38660,31100,1200]
+vehicle player setPos [78660,64700,1200]
 vehicle player setVelocity [0,0,0]
 exit

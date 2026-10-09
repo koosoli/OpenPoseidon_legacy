@@ -144,7 +144,7 @@ try {
   Send @{cmd='exec';code='triClickText "Open"'}
   Start-Sleep -Seconds 2
   Send @{cmd='eval';code='triAssertListText [101,"Showcase Lab - Physics and Light"]'} '"OK"'
-  Send @{cmd='eval';code='triAssertListText [101,"OFP Fusion - Five Islands"]'} '"OK"'
+  Send @{cmd='eval';code='triAssertListText [101,"OFP Fusion - Four Islands"]'} '"OK"'
   Send @{cmd='eval';code='triSelectListByData [101,"jeep-manual.Intro"]'} 'true'
   Send @{cmd='eval';code='triSelectListByData [101,"jeep-ride.Intro"]'} 'true'
   Send @{cmd='eval';code='triSelectListByData [101,"ShowcaseLab.Intro"]'} 'true'

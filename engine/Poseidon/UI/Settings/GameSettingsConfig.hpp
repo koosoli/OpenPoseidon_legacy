@@ -43,8 +43,11 @@ class GameSettingsConfig
     // camera near the middle has already run out of island by ~3.3 km and everything past
     // that is sea and terrain. On stock CWA content a 10 km setting buys horizon, not
     // detail; it is worth having, but do not expect it to fill the distance with objects.
-    // VD-002: whole-island viewing, also used by the Options slider and resolver.
-    static constexpr float kMaxViewDistance = 50000.0f;
+    // VD-002: whole-island viewing, also used by the Options slider and resolver. 150 km (was 50): corner to corner
+    // of the largest world the engine takes (2048 cells of 50 m, Fusion at 102.4 km). A ceiling, not a default:
+    // measured on Fusion 2026-10-09, playing at 150 km coarsens the terrain near the camera (Malden at 1.2 km
+    // altitude lost most of its road and tree detail against 50 km), so use it for overviews (setViewDistance).
+    static constexpr float kMaxViewDistance = 150000.0f;
 
     void LoadDefaults();
     void LoadDefaults(const Environment& env);

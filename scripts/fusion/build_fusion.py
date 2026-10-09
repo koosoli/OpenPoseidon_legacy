@@ -15,7 +15,7 @@ import struct
 import sys
 
 CELL = 50
-SIZE = 1024
+SIZE = 2048  # cells of 50 m: 102.4 km, the largest world the engine supports (TerrainSatmap caps landRange at 2048)
 # Grid offsets (cells, x east / z north), each original world is 256 x 256 cells; adjacent tiles have at least
 # 3.2 km (64 cells) of water between them. The layout follows the CWA 1985 campaign, then Reforger's
 # Malden-islands map where CWA is silent (owner, 2026-10-09: "what would be closest to CWA"):
@@ -32,12 +32,18 @@ SIZE = 1024
 #   * Nogova north-north-west of Malden (Reforger, consistent with the above). Reforger also has it
 #     south-south-west of Everon -- at this scale that cannot hold together with the above, so here Everon is
 #     east of it;
-#   * Desert Island (the menu intro island, in no campaign) apart in the north-west.
-ISLANDS = [('eden', 'Everon', 672, 544), ('abel', 'Malden', 160, 96),
-           ('cain', 'Kolgujev', 480, 224), ('noe', 'Nogova', 32, 432),
-           ('intro', 'Desert Island', 32, 752)]
+#   * Desert Island (the menu intro island, in no campaign) is left out: owner 2026-10-09, "only a test island",
+#     and it frees resources.
+#
+# Scale (owner 2026-10-09: "make the gaps realistic but lore accurate"): canon puts these islands 180-300 km
+# apart, far beyond the engine's 102.4 km limit. The layout is the 51.2 km one scaled by 2 about the world's corner
+# (every island's centre twice as far out), so every bearing above is unchanged and the gaps are those of a real
+# island group: 20-25 km of sea between neighbours, ~68 km Malden to Everon centre to centre (a Black Hawk:
+# ~15-20 min). Above 51.2 km the terrain refinement budget (8192 samples a side) gives 12.5 m instead of 6.25 m.
+ISLANDS = [('eden', 'Everon', 1472, 1216), ('abel', 'Malden', 448, 320),
+           ('cain', 'Kolgujev', 1088, 576), ('noe', 'Nogova', 192, 992)]
 # the source worlds' CfgWorlds classes
-WORLD_CLASS = {'eden': 'Eden', 'abel': 'Abel', 'cain': 'Cain', 'intro': 'Intro', 'noe': 'Noe'}
+WORLD_CLASS = {'eden': 'Eden', 'abel': 'Abel', 'cain': 'Cain', 'noe': 'Noe'}
 
 
 def fixed(text, size):
@@ -192,7 +198,7 @@ def world_data(config_texts, key, dx, dz):
 
 
 def replace_objects(config_texts):
-    """Every source world's ReplaceObjects rules (DefaultWorld's, which Everon / Kolgujev / Desert Island use,
+    """Every source world's ReplaceObjects rules (DefaultWorld's, which Everon / Kolgujev use,
     plus Malden's and Nogova's own), one per replaced model. The engine swaps a forest block for its walk-through
     version by them (Geography.cpp); Fusion inherited only DefaultWorld's, so Malden's and Nogova's forests -- other
     models -- would have stayed solid to infantry and AI."""
@@ -249,11 +255,6 @@ ISLAND_AMBIENCE = {
             'Trees': ('environmental\\treesbirds', 2.82e-4, 'animals\\crickets07', 1.26e-4),
             'Meadows': ('animals\\crickets03', 5.62e-5, 'animals\\frogs', 1.0e-4),
             'Hills': ('environmental\\wind_heavy', 1.0e-4, 'environmental\\wind_heavy', 1.0e-4)},
-    # Desert Island: dry scrub -- insects instead of birds, a dusty wind, little rain
-    'intro': {'Trees': ('animals\\crickets07', 1.26e-4, 'animals\\crickets03', 1.78e-4),
-              'Meadows': ('animals\\crickets01', 1.78e-4, 'animals\\crickets03', 1.0e-4),
-              'Hills': ('environmental\\wind_thick', 1.0e-4, 'environmental\\wind_whistle', 1.78e-4),
-              'Rain': ('environmental\\rain_hard', 9.0e-4, 'environmental\\rain_hard', 9.0e-4)},
 }
 
 
@@ -397,13 +398,13 @@ def build(source, output, config_texts=()):
               # FusionOFP failed -- found by the in-game test, 2026-10-09)
               'class CfgEnvSounds;\n'
               'class CfgWorlds {class Eden; class FusionOFP: Eden {\n'
-              ' access=2; description="OFP Fusion - Five Islands"; worldName="\\fusion_ofp\\FusionOFP.wrp";\n'
-              ' worldSize=51200; landGrid=50; centerPosition[]={25600,25600,0};\n'
+              ' access=2; description="OFP Fusion - Four Islands"; worldName="\\fusion_ofp\\FusionOFP.wrp";\n'
+              ' worldSize=%d; landGrid=50; centerPosition[]={%d,%d,0};\n'
               ' startTime="12:00"; startDate="21/6/1985"; startWeather=0.2; forecastWeather=0.2;\n'
               ' startFog=0; forecastFog=0; seagullPos[]={%d,%d,150};\n'
               '%s\n'
               # the map grid: the islands' "Aa"/"00" labels (base 10 per character, UIMap GridFormat) run out at 100
-              # squares of 128 m, the far zoom's "A"/"0" at 10 of 1280 m; Fusion is 400 / 40 across
+              # squares of 128 m, the far zoom's "A"/"0" at 10 of 1280 m; Fusion is 800 / 80 across
               ' class Grid {offsetX=0; offsetY=0;'
               ' class Zoom1 {zoomMax=0.2; format="XY"; formatX="Aa0"; formatY="000"; stepX=128; stepY=128;};'
               ' class Zoom2 {zoomMax=1e30; format="XY"; formatX="Aa"; formatY="00"; stepX=1280; stepY=1280;};};\n'
@@ -412,7 +413,8 @@ def build(source, output, config_texts=()):
               ' class SoundRegions {%s};\n'
               ' class Names {%s};\n'
               '};}; class CfgWorldList {class FusionOFP {};};\n'
-              % ((ISLANDS[1][2] + 128) * CELL, (ISLANDS[1][3] + 128) * CELL, ils, secondary, replace_cfg, regions,
+              % (SIZE * CELL, SIZE * CELL // 2, SIZE * CELL // 2,
+                 (ISLANDS[1][2] + 128) * CELL, (ISLANDS[1][3] + 128) * CELL, ils, secondary, replace_cfg, regions,
                  labels + ''.join(places)))
     output.mkdir(parents=True, exist_ok=True)
     (output/'fusion.wrp').write_bytes(data)

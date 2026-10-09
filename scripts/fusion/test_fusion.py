@@ -2,14 +2,14 @@ import struct
 import unittest
 import math
 from build_fusion import compressed, translate_objects, fixed, ISLANDS, world_data, array_entry, \
-    env_sounds, island_env_sounds, sound_regions, CELL
+    env_sounds, island_env_sounds, sound_regions, CELL, SIZE
 
 
 class FusionTests(unittest.TestCase):
     def test_tiles_separate_and_fit(self):
         for i, (_, _, x, z) in enumerate(ISLANDS):
             self.assertGreaterEqual(x, 0); self.assertGreaterEqual(z, 0)
-            self.assertLessEqual(x+256, 1024); self.assertLessEqual(z+256, 1024)
+            self.assertLessEqual(x+256, SIZE); self.assertLessEqual(z+256, SIZE)
             for _, _, xx, zz in ISLANDS[i+1:]:
                 self.assertTrue(x+256+64 <= xx or xx+256+64 <= x or
                                 z+256+64 <= zz or zz+256+64 <= z)
@@ -30,10 +30,12 @@ class FusionTests(unittest.TestCase):
         start = (tile['cain'][0] * CELL + 15291, tile['cain'][1] * CELL + 4271)
         runway = (tile['abel'][0] * CELL + 7921, tile['abel'][1] * CELL + 9635)
         self.assertTrue(70 <= math.degrees(math.atan2(start[0] - runway[0], start[1] - runway[1])) % 360 <= 110)
-        # Everon a neighbour, not out on its own: its tile within 6.4 km of Kolgujev's
-        (ex, ez), (kx, kz) = tile['eden'], tile['cain']
-        gap = max(kx - (ex + 256), ex - (kx + 256), kz - (ez + 256), ez - (kz + 256))
-        self.assertLessEqual(gap, 128)
+        # Everon a neighbour, not out on its own: its tile no further from Kolgujev's than Malden's is from
+        # Nogova's (the group's other neighbours)
+        def gap(a, b):
+            (ax, az), (bx, bz) = tile[a], tile[b]
+            return max(bx - (ax + 256), ax - (bx + 256), bz - (az + 256), az - (bz + 256))
+        self.assertLessEqual(gap('eden', 'cain'), gap('abel', 'noe') * 1.25)
 
     def test_airport_and_names_from_config_text(self):
         cfg = """class CfgWorlds { class DefaultWorld {}; class Eden: DefaultWorld {

@@ -1,7 +1,8 @@
-# OFP Fusion - Five Islands
+# OFP Fusion - Four Islands
 
-A separate flat 51.2 x 51.2 km world, not a globe and not a replacement for the
-original maps. Everon, Malden, Kolgujev, Nogova and Desert Island are neighbours.
+A separate flat 102.4 x 102.4 km world, not a globe and not a replacement for the
+original maps. Everon, Malden, Kolgujev and Nogova are neighbours. (Desert Island, the
+menu intro island, was dropped on 2026-10-09: it was only a test island and is in no campaign.)
 Original height samples, terrain semantics, ground textures and object transforms
 are preserved, translated without scaling. Object IDs are reassigned uniquely.
 
@@ -17,17 +18,16 @@ Set-Location 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
 .\OpenPoseidon.exe --render wgpu --window --test-mission 'Missions\FusionTour.FusionOFP'
 ```
 
-Also available in Single Missions as **OFP Fusion - Five Islands**, and as a
+Also available in Single Missions as **OFP Fusion - Four Islands**, and as a
 separate editor world. The tour starts in a helicopter; its Visit actions jump
 between islands within the same loaded world. Ordinary flight crosses the water
 without a mission change.
 
 ## Layout (lore)
 
-Placed as close to CWA as the 51.2 km world allows (owner, 2026-10-09). North up:
+Placed as close to CWA as the engine's largest world allows (owner, 2026-10-09). North up:
 
 ```
-  Desert Island
   Nogova                          Everon
                        Kolgujev
         Malden
@@ -36,8 +36,8 @@ Placed as close to CWA as the 51.2 km world allows (owner, 2026-10-09). North up
 * Everon is north-east of Malden ("Everon Island, Northeast of Malden", the Flashpoint
   mission) and the easternmost island ("Everon, the easternmost island in this group",
   Blake, x01iansoffice), within helicopter range of Malden ("Choppers are waiting to ferry
-  you to Everon"). It sits just north of Kolgujev: 6 km coast to coast, like the group's
-  other neighbours (5-9 km), and 24 km from Malden. No campaign asks for open ocean round it.
+  you to Everon"). It sits just north of Kolgujev, its tile 19 km from Kolgujev's like the group's
+  other neighbours (19-21 km), and 68 km from Malden centre to centre. No campaign asks for open ocean round it.
 * Kolgujev is east-north-east of Malden: in Planes Start the A-10s leave Malden's runway
   north-east ("heading east to Kolgujev"), and Maverick starts them east-south-east of
   Kolgujev heading west-north-west, then along the south coast. That start is due east of
@@ -50,10 +50,11 @@ Placed as close to CWA as the 51.2 km world allows (owner, 2026-10-09). North up
   Everon; with Everon easternmost and Kolgujev east of Malden that cannot fit at this
   scale, so Everon is east of it here.
 * Kolgujev follows the 1985 campaign, not Reforger (which puts it 300 km north).
-* Desert Island, the menu intro island, is in no campaign: apart in the north-west.
 * One clue fits no arrangement: in Return to Eden the invasion helicopters reach Everon's
   north edge heading west-south-west, as if from the north-east.
-* Distances are compressed: canon puts the islands 179-300 km apart.
+* Scale: canon puts the islands 179-300 km apart, beyond the engine's 102.4 km limit. The layout is
+  the first 51.2 km one scaled by 2 (bearings unchanged): 19-21 km between neighbouring island tiles
+  (more from coast to coast), 34-37 km centre to centre, Malden to Everon 68 km.
 
 ## Airports and map names
 
@@ -79,19 +80,19 @@ Missions decide with two commands. The airport is given by number (0 = Everon's,
     setAirportSide ["Nogova", east]        // only East and its friends land there; sideLogic = anyone again
 
 These are local, like `setFriend`. In multiplayer, run them where the AI planes are simulated (the server).
-Kolgujev and Desert Island have no airport in the game's config. The map carries the
-game's own names: 18 on Everon, 14 on Malden, 30 on Nogova (Kolgujev and Desert Island
-have none in the original config), plus the five island labels.
+Kolgujev has no airport in the game's config. The map carries the
+game's own names: 18 on Everon, 14 on Malden, 30 on Nogova (Kolgujev has none in the
+original config), plus the four island labels.
 
 The builder also merges every source world's `ReplaceObjects` (the forest blocks the engine swaps for their
 walk-through versions): DefaultWorld's, Malden's and Nogova's (11 rules). With DefaultWorld's alone, Malden's and
 Nogova's forests -- other models -- stayed solid to infantry and AI. And the map grid gets a third label character
-(the islands' two run out at 100 squares of 128 m; Fusion is 400 across).
+(the islands' two run out at 100 squares of 128 m; Fusion is 800 across).
 
 Ambient sounds are per island: `class SoundRegions` gives each island's tile its source world's `EnvSounds`
 (engine: `Poseidon/World/EnvSoundRegions.hpp`). Each island plays its own loops; over the sea between two they
 crossfade within 1 km of the halfway line. In the stock data only Malden has its own set (a quieter sea,
-crickets in the trees, lighter wind and rain); Everon keeps `CfgEnvSounds`. Kolgujev, Nogova and Desert Island,
+crickets in the trees, lighter wind and rain); Everon keeps `CfgEnvSounds`. Kolgujev and Nogova,
 which use `CfgEnvSounds` in OFP, get Fusion's own sets (`ISLAND_AMBIENCE` in `build_fusion.py`, made only from CWA's
 own loops that loop cleanly):
 
@@ -99,7 +100,6 @@ own loops that loop cleanly):
 | --- | --- |
 | Kolgujev | cold and windswept: rougher sea, `wind_thick` by day and a louder whistle at night, fewer birds and crickets |
 | Nogova | green and sheltered: more birdsong, a calmer sea, softer wind, frogs in the meadows at night |
-| Desert Island | dry scrub: insects instead of birds, a dusty `wind_thick`, half the rain |
 
 A mod that gives any world class its own `EnvSounds` takes precedence on the next build. Which loop plays
 where (sea, trees, meadows, hills) comes from each island's own sound map, as before.
@@ -112,7 +112,7 @@ The generated manifest records source hashes, offsets and object counts.
 
 ## Verified size and refinement limits
 
-Installed 4f1bd59c renders the five-island Fusion world at 6.25 m terrain grid.
+Installed 4f1bd59c rendered the earlier 51.2 km five-island Fusion world at 6.25 m terrain grid.
 The acceptance run visited all islands with the player helicopter and ended cleanly;
 sampled process working set was 2.2-2.3 GB. This is not a large-battle benchmark.
 
@@ -140,6 +140,8 @@ the resulting screenshots as well as the exit status and terrain-ready log check
 
 ## Tested in game (2026-10-09, branch build on the CWA-OLI data)
 
+Results below are from the 51.2 km five-island build unless marked.
+
 * **Acceptance** (`scripts/Test-Fusion.ps1 -GameDir G:\CWA-OLI -Exe <branch build>`):
   * The world loads in about 3 s.
   * The terrain upload succeeds.
@@ -153,6 +155,12 @@ the resulting screenshots as well as the exit status and terrain-ready log check
   * It lands at Nogova, the nearest field, touching down at the threshold at ~118 s and taxiing.
   * With `setAirportClosed ["Nogova", true]`, it flies 21 km to Malden and is on short final over Malden's
     runway at 235 s.
+* **102.4 km, four islands** (same test, 2026-10-09, 53e379cd + these changes):
+  * It loads with no errors and the working set is ~2.5 GB.
+  * The terrain is 12.5 m (refinement cap) and the satmap is 4096 (25 m a texel, so the roads hold up from the air).
+  * The view-distance cap is now 150 km. The test plays at 50 km and switches to 150 km (`setViewDistance`) only for
+    the two overview shots, which then show all four islands. Playing at 150 km coarsens the near terrain.
+  * Faint lines trace each island's tile edge from high up (also in earlier builds).
 * **Not yet tested:**
   * a side-aware diversion (an enemy-held field);
   * the ambient sounds by ear;

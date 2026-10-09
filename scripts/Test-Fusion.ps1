@@ -68,18 +68,18 @@ try {
         Start-Sleep -Seconds 2
     } else {
     $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-start.png")}
-    $null=Send @{cmd='exec';code='hint ""; showCinemaBorder false; fusionCam="camera" camCreate [25600,13000,29000]; fusionCam cameraEffect ["internal","back"]; fusionCam camSetTarget [25600,22000,0]; fusionCam camCommit 0'}
+    $null=Send @{cmd='exec';code='hint ""; showCinemaBorder false; setViewDistance 150000; fusionCam="camera" camCreate [51200,26000,58000]; fusionCam cameraEffect ["internal","back"]; fusionCam camSetTarget [51200,44000,0]; fusionCam camCommit 0'}
     Start-Sleep -Seconds 4
     $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-overview.png")}
-    $null=Send @{cmd='exec';code='fusionCam camSetPos [25600,22000,40000]; fusionCam camSetTarget [25600,22100,0]; fusionCam camCommit 0'}
+    $null=Send @{cmd='exec';code='fusionCam camSetPos [51200,44000,80000]; fusionCam camSetTarget [51200,44100,0]; fusionCam camCommit 0'}
     Start-Sleep -Seconds 4
     $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-high.png")}
-    $sites=if ($Large) {@(@('south',10000,10000),@('centre',51200,51200),@('north',92000,92000))} else {@(@('everon',38660,31100),@('malden',14400,11200),@('kolgujev',30400,17600),@('nogova',9364,26008),@('desert',11100,41200))}
+    $sites=if ($Large) {@(@('south',10000,10000),@('centre',51200,51200),@('north',92000,92000))} else {@(@('everon',78660,64700),@('malden',28800,22400),@('kolgujev',60800,35200),@('nogova',17364,54008))}
     foreach ($site in $sites) {
         $name=$site[0]; $x=$site[1]; $z=$site[2]
         $height=[double](Send @{cmd='eval';code="triTerrainHeight [$x,$z]"}).result
         if ($height -le 0) {throw "Expected above-water height at $name, got $height"}
-        $null=Send @{cmd='exec';code="vehicle player setPos [$x,$z,1200]; vehicle player setVelocity [0,0,0]; fusionCam camSetPos [$x,$($z-500),1200]; fusionCam camSetTarget [$x,$($z+800),0]; fusionCam camCommit 0"}
+        $null=Send @{cmd='exec';code="setViewDistance 50000; vehicle player setPos [$x,$z,1200]; vehicle player setVelocity [0,0,0]; fusionCam camSetPos [$x,$($z-500),1200]; fusionCam camSetTarget [$x,$($z+800),0]; fusionCam camCommit 0"}
         Start-Sleep -Seconds 3
         $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-$name.png")}
         $null=Send @{cmd='eval';code='getPos vehicle player'}
