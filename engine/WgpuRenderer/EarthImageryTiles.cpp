@@ -13,6 +13,8 @@
 #include <fstream>
 #include <future>
 #include <iterator>
+#include <chrono>
+#include <thread>
 
 namespace Poseidon
 {
@@ -80,11 +82,43 @@ std::filesystem::path EarthImageryTiles::TilePath(int z, int x, int y) const
 }
 
 bool EarthImageryTiles::Download(const std::string& url, std::vector<uint8_t>& bytes,
-                                 const std::function<bool()>& cancelled)
+                                 const std::function<bool()>& cancelled, bool& permanent)
+{
+    // Handshakes and connections fail transiently on real networks (measured on this machine: 4 of 5
+    // TLS handshakes to one tile server failing in a row). Retry those; only a server refusal is final.
+    permanent = false;
+    for (int attempt = 0; attempt < 4; ++attempt)
+    {
+        for (int waited = 0; waited < 250 * attempt; waited += 50)
+        {
+            if (cancelled && cancelled())
+                return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        bytes.clear();
+        long status = 0;
+        const int result = Perform(url, bytes, cancelled, status);
+        if (result == CURLE_OK && status == 200 && !bytes.empty())
+            return true;
+        if (result == CURLE_ABORTED_BY_CALLBACK)
+            return false;
+        permanent = result == CURLE_OK && status >= 400 && status < 500 && status != 408 && status != 429;
+        if (permanent || attempt == 3)
+        {
+            std::fprintf(stderr, "Earth imagery HTTPS: %s, HTTP %ld (%s)\n", curl_easy_strerror(CURLcode(result)),
+                         status, EarthProviders::Redact(url, _source.key).c_str());
+            return false;
+        }
+    }
+    return false;
+}
+
+int EarthImageryTiles::Perform(const std::string& url, std::vector<uint8_t>& bytes,
+                               const std::function<bool()>& cancelled, long& status)
 {
     CURL* curl = curl_easy_init();
     if (!curl)
-        return false;
+        return CURLE_FAILED_INIT;
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "OpenPoseidon-Earth/1");
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
@@ -98,13 +132,9 @@ bool EarthImageryTiles::Download(const std::string& url, std::vector<uint8_t>& b
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, Progress);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &cancelled);
     const CURLcode result = curl_easy_perform(curl);
-    long status = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
     curl_easy_cleanup(curl);
-    if ((result != CURLE_OK || status != 200) && result != CURLE_ABORTED_BY_CALLBACK)
-        std::fprintf(stderr, "Earth imagery HTTPS: %s, HTTP %ld (%s)\n", curl_easy_strerror(result), status,
-                     EarthProviders::Redact(url, _source.key).c_str());
-    return result == CURLE_OK && status == 200 && !bytes.empty();
+    return int(result);
 }
 
 void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys, unsigned& downloads,
@@ -135,15 +165,21 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
         stbi_image_free(rgba);
         return true;
     };
+    int deadBatches = 0;
     for (size_t begin = 0; begin < missing.size(); begin += ParallelDownloads)
     {
         if (cancelled && cancelled())
             return;
         const size_t end = std::min(missing.size(), begin + ParallelDownloads);
-        std::vector<std::future<std::pair<bool, Tile>>> jobs;
+        struct Job
+        {
+            bool ok = false, permanent = false;
+            Tile tile;
+        };
+        std::vector<std::future<Job>> jobs;
         for (size_t i = begin; i < end; ++i)
         {
-            jobs.push_back(std::async(std::launch::async, [&, key = missing[i]]() -> std::pair<bool, Tile>
+            jobs.push_back(std::async(std::launch::async, [&, key = missing[i]]() -> Job
             {
                 const auto [z, x, y] = key;
                 const auto path = TilePath(z, x, y);
@@ -156,11 +192,14 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
                     std::ifstream input(path, std::ios::binary);
                     bytes.assign(std::istreambuf_iterator<char>(input), {});
                     if (decode(bytes, tile))
-                        return {true, std::move(tile)};
+                        return {true, false, std::move(tile)};
                     bytes.clear();
                 }
-                if (!Download(EarthProviders::ExpandUrl(_source, z, x, y), bytes, cancelled) || !decode(bytes, tile))
-                    return {false, {}};
+                bool permanent = false;
+                if (!Download(EarthProviders::ExpandUrl(_source, z, x, y), bytes, cancelled, permanent))
+                    return {false, permanent, {}};
+                if (!decode(bytes, tile))
+                    return {false, true, {}}; // not an image: an error page or an unsupported format
                 // Only a decodable tile is cached; a partial write never becomes a final file.
                 std::filesystem::create_directories(path.parent_path(), ec);
                 const auto temporary = path.string() + ".part";
@@ -172,17 +211,17 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
                 if (ec)
                     std::filesystem::remove(temporary, ec);
                 tile.use = 1; // marks a network fetch for the caller's count
-                return {true, std::move(tile)};
+                return {true, false, std::move(tile)};
             }));
         }
         bool any = false;
         for (size_t i = begin; i < end; ++i)
         {
-            auto [ok, tile] = jobs[i - begin].get();
+            auto [ok, permanent, tile] = jobs[i - begin].get();
             std::lock_guard lock(_mutex);
             if (!ok)
             {
-                if (!(cancelled && cancelled()))
+                if (permanent) // transient failures are retried by the next window build
                     _failed.insert(missing[i]);
                 continue;
             }
@@ -191,9 +230,10 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
             tile.use = ++_use;
             _tiles[missing[i]] = std::move(tile);
         }
-        // A whole batch failing means the provider or the network is down: stop rather than wait out
-        // every remaining timeout (the start-up overview would otherwise stall for tens of seconds).
-        if (!any)
+        // Two whole batches failing (after retries) means the provider or the network is down: stop rather
+        // than wait out every remaining timeout (the start-up overview would otherwise stall).
+        deadBatches = any ? 0 : deadBatches + 1;
+        if (deadBatches >= 2)
             break;
     }
     std::lock_guard lock(_mutex);

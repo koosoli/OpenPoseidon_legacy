@@ -414,7 +414,7 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
         {
             const auto overview=provider->Overview().u8string();
             _earthImageryPath.assign(overview.begin(),overview.end());
-            LOG_INFO(Graphics, "Earth imagery provider '%s': overview %s", provider->Source().id.c_str(),
+            LOG_INFO(Graphics, "Earth imagery provider '{}': overview {}", provider->Source().id,
                      _earthImageryPath.empty() ? "unavailable (plain globe)" : _earthImageryPath.c_str());
         }
         const char* surface=std::getenv("POSEIDON_EARTH_SURFACE");

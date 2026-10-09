@@ -55,7 +55,10 @@ class EarthImageryTiles
     const Tile* Find(int z, int x, int y);
     void Fetch(const std::vector<std::tuple<int, int, int>>& keys, unsigned& downloads,
                const std::function<bool()>& cancelled);
-    bool Download(const std::string& url, std::vector<uint8_t>& bytes, const std::function<bool()>& cancelled);
+    bool Download(const std::string& url, std::vector<uint8_t>& bytes, const std::function<bool()>& cancelled,
+                  bool& permanent);
+    int Perform(const std::string& url, std::vector<uint8_t>& bytes, const std::function<bool()>& cancelled,
+                long& status);
     std::filesystem::path TilePath(int z, int x, int y) const;
 
     std::filesystem::path _dir;
