@@ -243,6 +243,17 @@ From Malprave job 23 (29 Sep), the first and only A/B test of the X-Ray patches:
     GUARD waypoint. A soldier or squad with no waypoint, or on Move / Hold / Sentry / Cycle, stays put by design.
     * Grenade dodging and turning to look at a danger are unaffected.
     * Result: stock C02 no longer hunts. Its groups are not on those waypoints.
+* **2026-10-09, review of AI-XRAY-004 (owner: "check over work").** Fixed:
+  * Enemy and civilian bodies counted as friendly: a dead man's target side is civilian, which every side
+    takes for friendly.
+  * Friendly fire, friendly gunfire, falls and own grenades made dangers. Only hostile sources count now.
+  * Ricochets turned soldiers sideways. They now point at the shooter.
+  * A hidden shooter's position was exact. It is now a guess (0.1 × distance for a hit, 0.4 × for gunfire).
+  * The player's own AI squad reacted to dangers. It no longer does.
+  * Searches aborted when the danger's memory ran out, and repeated after the cooldown.
+  * A grenade at the top of the list hid a danger worth searching.
+  * Records left from before a restart, or at a reused address, could be picked.
+  * Checked in game: an enemy body is ignored, a friendly body is searched.
 
 ## 5. X-Ray research (Lost Alpha docs, 2026-10-09)
 
