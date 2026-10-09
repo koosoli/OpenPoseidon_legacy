@@ -414,6 +414,13 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
         {
             const auto overview=provider->Overview().u8string();
             _earthImageryPath.assign(overview.begin(),overview.end());
+            // Incomplete this time (network): the NASA overview, when the launcher cached it, beats a plain globe.
+            if(_earthImageryPath.empty())
+            {
+                const auto nasa=(std::filesystem::u8path(cache)/"blue-marble-june-5400.jpg").u8string();
+                if(std::filesystem::exists(std::filesystem::u8path(cache)/"blue-marble-june-5400.jpg"))
+                    _earthImageryPath.assign(nasa.begin(),nasa.end());
+            }
             LOG_INFO(Graphics, "Earth imagery provider '{}': overview {}", provider->Source().id,
                      _earthImageryPath.empty() ? "unavailable (plain globe)" : _earthImageryPath.c_str());
         }

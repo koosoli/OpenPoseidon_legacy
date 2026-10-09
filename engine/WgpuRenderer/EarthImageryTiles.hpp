@@ -37,10 +37,11 @@ class EarthImageryTiles
     // Bounds in degrees; `metresPerPixel` is the wanted ground resolution. The zoom is the finest that
     // keeps the tile count within `maxTiles` and the provider's max zoom; output is at most maxSize².
     bool Build(double south, double west, double north, double east, double metresPerPixel, int maxSize,
-               unsigned maxTiles, Mosaic& out, const std::function<bool()>& cancelled = {});
+               unsigned maxTiles, Mosaic& out, const std::function<bool()>& cancelled = {}, bool network = true);
 
-    // A 4096x2048 equirectangular world image from zoom-3 tiles, written once as JPEG. Returns the
-    // path, or empty when the provider could not supply it.
+    // A 4096x2048 equirectangular world image from zoom-3 tiles, written once as JPEG -- only when every
+    // tile arrived (a partial one would bake black holes into the globe for good). Returns the path, or
+    // empty when the provider could not supply all of it this time.
     std::filesystem::path Overview();
 
     static int ChooseZoom(double latitude, double metresPerPixel, int maxZoom);
@@ -54,7 +55,7 @@ class EarthImageryTiles
     };
     const Tile* Find(int z, int x, int y);
     void Fetch(const std::vector<std::tuple<int, int, int>>& keys, unsigned& downloads,
-               const std::function<bool()>& cancelled);
+               const std::function<bool()>& cancelled, bool network);
     bool Download(const std::string& url, std::vector<uint8_t>& bytes, const std::function<bool()>& cancelled,
                   bool& permanent);
     int Perform(const std::string& url, std::vector<uint8_t>& bytes, const std::function<bool()>& cancelled,

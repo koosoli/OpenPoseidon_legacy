@@ -22,7 +22,7 @@ namespace
 {
 constexpr size_t MaxTileBytes = 4 * 1024 * 1024;
 constexpr size_t MaxResidentTiles = 384;
-constexpr unsigned ParallelDownloads = 8;
+constexpr unsigned ParallelDownloads = 16;
 constexpr double MercatorLimit = 85.0511287798066;
 
 size_t Receive(char* data, size_t size, size_t count, void* destination)
@@ -123,7 +123,7 @@ int EarthImageryTiles::Perform(const std::string& url, std::vector<uint8_t>& byt
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "OpenPoseidon-Earth/1");
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 3L);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 3L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Receive);
@@ -138,7 +138,7 @@ int EarthImageryTiles::Perform(const std::string& url, std::vector<uint8_t>& byt
 }
 
 void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys, unsigned& downloads,
-                              const std::function<bool()>& cancelled)
+                              const std::function<bool()>& cancelled, bool network)
 {
     // Disk first, then the network in small parallel batches. Decoding happens off the lock.
     std::vector<std::tuple<int, int, int>> missing;
@@ -195,6 +195,8 @@ void EarthImageryTiles::Fetch(const std::vector<std::tuple<int, int, int>>& keys
                         return {true, false, std::move(tile)};
                     bytes.clear();
                 }
+                if (!network)
+                    return {false, false, {}}; // cache-only pass: not on disk yet
                 bool permanent = false;
                 if (!Download(EarthProviders::ExpandUrl(_source, z, x, y), bytes, cancelled, permanent))
                     return {false, permanent, {}};
@@ -252,7 +254,8 @@ const EarthImageryTiles::Tile* EarthImageryTiles::Find(int z, int x, int y)
 }
 
 bool EarthImageryTiles::Build(double south, double west, double north, double east, double metresPerPixel,
-                              int maxSize, unsigned maxTiles, Mosaic& out, const std::function<bool()>& cancelled)
+                              int maxSize, unsigned maxTiles, Mosaic& out, const std::function<bool()>& cancelled,
+                              bool network)
 {
     out = {};
     if (!Enabled() || !(north > south) || !(east > west) || east - west > 180.0 || !std::isfinite(metresPerPixel) ||
@@ -280,7 +283,7 @@ bool EarthImageryTiles::Build(double south, double west, double north, double ea
     for (int y = y0; y <= y1; ++y)
         for (int x = x0; x <= x1; ++x)
             keys.emplace_back(zoom, x, y);
-    Fetch(keys, out.downloads, cancelled);
+    Fetch(keys, out.downloads, cancelled, network);
     if (cancelled && cancelled())
         return false;
 
@@ -338,7 +341,7 @@ std::filesystem::path EarthImageryTiles::Overview()
 {
     if (!Enabled())
         return {};
-    const auto path = _dir / "overview-4096.jpg";
+    const auto path = _dir / "overview-v2-4096.jpg"; // v2: v1 could be cached with missing tiles
     std::error_code ec;
     if (std::filesystem::file_size(path, ec) > 0 && !ec)
         return path;
@@ -349,7 +352,8 @@ std::filesystem::path EarthImageryTiles::Overview()
     std::vector<uint8_t> world(size_t(W) * H * 3);
     Mosaic halves[2];
     if (!Build(-MercatorLimit, -180.0, MercatorLimit, 0.0, 9800.0, 2048, 64, halves[0]) ||
-        !Build(-MercatorLimit, 0.0, MercatorLimit, 180.0, 9800.0, 2048, 64, halves[1]))
+        !Build(-MercatorLimit, 0.0, MercatorLimit, 180.0, 9800.0, 2048, 64, halves[1]) ||
+        halves[0].failures || halves[1].failures)
         return {};
     for (int row = 0; row < H; ++row)
     {
