@@ -201,6 +201,11 @@ GameValue TriPhysicsShowcase(const GameState*, GameValuePar);
 GameValue TriTerrainBrushMode(const GameState*, GameValuePar);
 GameValue TriFreeFlyPose(const GameState*, GameValuePar);
 GameValue TriEarthGround(const GameState*, GameValuePar);
+GameValue EarthLocation(const GameState*);
+GameValue EarthPosToGeo(const GameState*, GameValuePar);
+GameValue EarthGeoToPos(const GameState*, GameValuePar);
+GameValue EarthGoTo(const GameState*, GameValuePar);
+GameValue EarthGroundHeight(const GameState*, GameValuePar);
 GameValue TriTerrainPaint(const GameState*, GameValuePar);
 GameValue TriRocketCraters(const GameState*, GameValuePar);
 GameValue TriTerrainHeight(const GameState*, GameValuePar);
@@ -3270,6 +3275,12 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameString, "triTerrainBrushMode", TriTerrainBrushMode, GameString));
     GGameState.NewFunction(GameFunction(GameString, "triFreeFlyPose", TriFreeFlyPose, GameString));
     GGameState.NewFunction(GameFunction(GameString, "triEarthGround", TriEarthGround, GameArray));
+    // Whole-world commands for mission makers (GameStateExtTestEarthGround.cpp).
+    GGameState.NewNularOp(GameNular(GameArray, "earthLocation", EarthLocation));
+    GGameState.NewFunction(GameFunction(GameArray, "earthPosToGeo", EarthPosToGeo, GameArray));
+    GGameState.NewFunction(GameFunction(GameArray, "earthGeoToPos", EarthGeoToPos, GameArray));
+    GGameState.NewFunction(GameFunction(GameBool, "earthGoTo", EarthGoTo, GameArray));
+    GGameState.NewFunction(GameFunction(GameArray, "earthGroundHeight", EarthGroundHeight, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triTerrainPaint", TriTerrainPaint, GameArray));
     GGameState.NewFunction(GameFunction(GameString, "triRocketCraters", TriRocketCraters, GameString));
     GGameState.NewFunction(GameFunction(GameScalar, "triTerrainHeight", TriTerrainHeight, GameArray));
