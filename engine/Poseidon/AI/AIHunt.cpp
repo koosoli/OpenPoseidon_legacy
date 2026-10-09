@@ -449,7 +449,7 @@ void ThinkImpl(AIUnit* unit)
             {
                 Vector3 dangerPos;
                 DangerList::Type type;
-                if (DangerList::Top(unit, dangerPos, &type) && WorthSearching(type))
+                if (DangerList::Top(unit, dangerPos, &type, &WorthSearching)) // the top one worth a look
                 {
                     const float d2 = dangerPos.DistanceXZ2(unit->Position());
                     if (d2 > Square(8.0f) && d2 < Square(Cfg().maxTravel))
@@ -491,8 +491,17 @@ void ThinkImpl(AIUnit* unit)
 
     // an enemy back in sight, or the contact gone: normal combat takes over
     Target* cur = r.target;
+    // a real lost enemy turns up while he waits to search a danger: the hunt for it takes over
+    if (r.byDanger && r.phase == Hold && t && mayHunt && !seenNow && !attacking)
+    {
+        r.byDanger = false;
+        r.target = t;
+        cur = t;
+    }
+    // a danger search: given up while still holding if every danger worth a look is forgotten; once walking he
+    // finishes it (a body is remembered 10 s, the hold alone takes 5-10)
     Vector3 anyDanger;
-    const bool lost = r.byDanger ? !DangerList::Top(unit, anyDanger) // every danger forgotten
+    const bool lost = r.byDanger ? (r.phase == Hold && !DangerList::Top(unit, anyDanger, nullptr, &WorthSearching))
                                  : (!cur || cur->destroyed || cur->vanished || Glob.time - cur->lastSeen > 120);
     if (seenNow || attacking || lost)
     {
@@ -546,6 +555,12 @@ void ThinkImpl(AIUnit* unit)
             }
             else
             {
+                if (r.byDanger)
+                {
+                    // looked at: a danger remembered for longer than the cooldown (a hit: 60 s) must not send him
+                    // back to the same spot
+                    DangerList::Forget(unit, r.dangerPos, 6.0f);
+                }
                 Abort(r, unit, Cfg().cooldown); // searched: back to the group
             }
             return;

@@ -1256,10 +1256,13 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
             const float heard = floatMin(audibleFire * 0.6f, 1.2f);
             if (heard > actSpotability)
             {
-                // AI-XRAY-004: gunfire he cannot see the source of is a danger where it came from
-                if (ai->GetGroup() != group)
+                // AI-XRAY-004: gunfire he cannot see the source of is a danger where it came from -- not his own
+                // side's (a friendly squad firing nearby must not have him turn to it or go and search it)
+                if (ai->GetGroup() != group && !center->IsFriendly(ai->GetTargetSide()))
                 {
-                    DangerList::Note(unit, DangerList::Type::Gunfire, ai->Position());
+                    // placed as the engine places sounds (0.4 x distance)
+                    DangerList::Note(unit, DangerList::Type::Gunfire, ai->Position(),
+                                     ai->Position().Distance(Position()) * 0.4f);
                 }
                 spotError = ai->Position().Distance(Position()) * 0.4f; // gunshots are easier to place than footsteps
                 delayCoef = 2.0f;
@@ -1350,8 +1353,11 @@ void EntityAI::TrackTargets(TargetList& res, AIUnit* unit, int canSee, bool init
         }
         if (!target->destroyed && ai->IsDammageDestroyed())
         {
-            // AI-XRAY-004: one of ours, newly found dead -- a danger for whoever of the group is near the body
-            if (DangerList::Enabled() && center->IsFriendly(target->side))
+            // AI-XRAY-004: one of ours, newly found dead -- a danger for whoever of the group is near the body. The
+            // side he had alive: a dead man's target side is civilian (EntityAI::GetTargetSide), which every side
+            // takes for friendly; civilians are not "ours" either
+            const TargetSide aliveSide = ai->Entity::GetTargetSide();
+            if (DangerList::Enabled() && aliveSide != TCivilian && center->IsFriendly(aliveSide))
             {
                 for (int id = 1; id <= MAX_UNITS_PER_GROUP; id++)
                 {

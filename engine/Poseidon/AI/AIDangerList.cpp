@@ -8,6 +8,7 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/World/World.hpp>
+#include <Random/randomGen.hpp>
 
 #include <algorithm>
 #include <unordered_map>
@@ -82,7 +83,8 @@ void Expire(Rec& r, float now)
     for (int i = 0; i < r.count; i++)
     {
         const Entry& e = r.entries[i];
-        if (now - e.time <= kTypes[int(e.type)].memory)
+        const float age = now - e.time;
+        if (age >= 0 && age <= kTypes[int(e.type)].memory) // a negative age: from before mission time went back
         {
             r.entries[n++] = e;
         }
@@ -129,10 +131,34 @@ const char* Name(Type type)
     return kTypes[int(type)].name;
 }
 
-void Note(AIUnit* unit, Type type, Vector3Par pos)
+//! his record, if it is really his (not one left at a reused address); after the clock check
+Rec* Find(const AIUnit* unit)
 {
-    if (!Enabled() || !unit || unit->IsAnyPlayer() || !unit->IsLocal() || unit->GetLifeState() != AIUnit::LSAlive)
+    auto it = s_recs.find(unit);
+    if (it == s_recs.end())
+        return nullptr;
+    if (it->second.unit.GetLink() != unit)
+    {
+        s_recs.erase(it);
+        return nullptr;
+    }
+    return &it->second;
+}
+
+void Note(AIUnit* unit, Type type, Vector3Par where, float error)
+{
+    if (!Enabled() || !unit || unit->IsAnyPlayer() || !unit->IsLocal() || unit->GetLifeState() != AIUnit::LSAlive ||
+        !unit->IsFreeSoldier())
         return;
+    AIGroup* grp = unit->GetGroup();
+    if (!grp || grp->IsAnyPlayerGroup())
+        return;
+    Vector3 pos = where;
+    if (error > 0)
+    {
+        pos[0] += (GRandGen.RandomValue() * 2 - 1) * error;
+        pos[2] += (GRandGen.RandomValue() * 2 - 1) * error;
+    }
     if (unit->Position().DistanceXZ2(pos) > Square(Range(type)))
         return;
     const float now = Now();
@@ -142,8 +168,9 @@ void Note(AIUnit* unit, Type type, Vector3Par pos)
         for (auto it = s_recs.begin(); it != s_recs.end();)
             it = !it->second.unit ? s_recs.erase(it) : std::next(it);
     }
-    Rec& r = s_recs[unit];
-    if (!r.unit)
+    Rec* found = Find(unit);
+    Rec& r = found ? *found : s_recs[unit];
+    if (!found)
     {
         r = Rec{};
         r.unit = unit;
@@ -153,7 +180,8 @@ void Note(AIUnit* unit, Type type, Vector3Par pos)
     for (int i = 0; i < r.count; i++)
     {
         Entry& e = r.entries[i];
-        if (e.type == type && e.pos.DistanceXZ2(pos) < Square(5.0f))
+        // (within 5 m, plus the guess's spread: a heard shooter is placed afresh at every shot)
+        if (e.type == type && e.pos.DistanceXZ2(pos) < Square(5.0f + 2 * error))
         {
             e.pos = pos;
             e.time = now;
@@ -190,6 +218,24 @@ void Note(AIUnit* unit, Type type, Vector3Par pos)
     }
 }
 
+void Forget(const AIUnit* unit, Vector3Par pos, float radius)
+{
+    CheckClock(Now());
+    Rec* found = Find(unit);
+    if (!found)
+        return;
+    Rec& r = *found;
+    int n = 0;
+    for (int i = 0; i < r.count; i++)
+    {
+        if (r.entries[i].pos.DistanceXZ2(pos) > Square(radius))
+        {
+            r.entries[n++] = r.entries[i];
+        }
+    }
+    r.count = n;
+}
+
 void LogTurn(const AIUnit* unit, Vector3Par pos)
 {
     if (!LogOn())
@@ -206,20 +252,23 @@ void LogTurn(const AIUnit* unit, Vector3Par pos)
              pos.Z(), now);
 }
 
-bool Top(const AIUnit* unit, Vector3& pos, Type* type)
+bool Top(const AIUnit* unit, Vector3& pos, Type* type, bool (*accept)(Type))
 {
     if (!Enabled())
         return false;
-    auto it = s_recs.find(unit);
-    if (it == s_recs.end())
-        return false;
     const float now = Now();
-    Rec& r = it->second;
+    CheckClock(now);
+    Rec* found = Find(unit);
+    if (!found)
+        return false;
+    Rec& r = *found;
     Expire(r, now);
     int best = -1;
     float bestValue = 0;
     for (int i = 0; i < r.count; i++)
     {
+        if (accept && !accept(r.entries[i].type))
+            continue;
         const float v = Priority(r.entries[i].type, (now - r.entries[i].time) * 1000);
         if (best < 0 || v < bestValue)
         {

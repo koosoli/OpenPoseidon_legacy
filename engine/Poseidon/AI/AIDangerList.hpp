@@ -14,8 +14,10 @@
 //   SquadmateHit       2000    20 m   15 s    EntityAI::HitBy (a squadmate hit near me)
 //   Ricochet           3000    10 m   30 s    ApplyNearMissSuppression (a round past me)
 //
-// Priority = weight x 10 + age in ms, and the LOWEST wins (X-Ray): grenades and gunfire first, and among the
-// same type the newest. A danger is noted only by a local AI soldier, and puts him on alert (AIUnit::SetDanger).
+// Priority = weight x 10 + age in ms, and the LOWEST wins (X-Ray): by weight grenade 1000, hit and squadmate hit
+// 2000, corpse 2250, gunfire 2500, squadmate died and ricochet 3000; among the same type the newest. A danger is
+// noted only by a local AI soldier on foot outside a player-led group (stock keeps a player's squad out of the
+// automatic danger reactions), and puts him on alert (AIUnit::SetDanger). Only hostile sources count.
 // A soldier in the default watch mode (no doWatch / formation watch only) who is not looking at a known enemy
 // turns to the top danger (AIUnit::SetWatch). Off by default: class CfgAIFork { dangerList = 1; }.
 // POSEIDON_AI_DANGER_LOG=1 logs each danger noted.
@@ -43,11 +45,16 @@ enum class Type
 //! CfgAIFork dangerList
 bool Enabled();
 
-//! `unit` learns of a danger at `pos` (ignored beyond the type's range from him, or for players / remote units)
-void Note(AIUnit* unit, Type type, Vector3Par pos);
+//! `unit` learns of a danger at `pos` (ignored beyond the type's range from him, or for players / remote units /
+//! soldiers in a player's group / crews). `error`: m of random displacement -- where a hidden shooter is, is a
+//! guess (the engine places sounds at 0.4 x distance)
+void Note(AIUnit* unit, Type type, Vector3Par pos, float error = 0.0f);
 
-//! the top danger he remembers: false when none
-bool Top(const AIUnit* unit, Vector3& pos, Type* type = nullptr);
+//! he has dealt with what is at `pos` (searched it): forget his dangers within `radius` of it
+void Forget(const AIUnit* unit, Vector3Par pos, float radius);
+
+//! the top danger he remembers (of the types `accept` takes, when given): false when none
+bool Top(const AIUnit* unit, Vector3& pos, Type* type = nullptr, bool (*accept)(Type) = nullptr);
 
 //! POSEIDON_AI_DANGER_LOG: he turned to look at the top danger (throttled per soldier)
 void LogTurn(const AIUnit* unit, Vector3Par pos);

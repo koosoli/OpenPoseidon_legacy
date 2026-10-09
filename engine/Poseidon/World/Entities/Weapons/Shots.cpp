@@ -262,7 +262,29 @@ static void ApplyNearMissSuppression(EntityAI* shooter, const AmmoType* type, Ve
         }
         const float d = sqrt(d2);
         unit->AddSuppression(PerRound * power * (1 - d / Radius), shooter);
-        DangerList::Note(unit, DangerList::Type::Ricochet, from + seg * t); // AI-XRAY-004
+        // AI-XRAY-004: a round past him from an enemy: a danger where it came from (he turns to the shooter, not
+        // sideways to where it passed)
+        if (shooter && unit->GetGroup() && unit->GetGroup()->GetCenter() &&
+            !unit->GetGroup()->GetCenter()->IsFriendly(shooter->GetTargetSide()))
+        {
+            const Vector3 origin = shooter->Position();
+            if (origin.DistanceXZ2(p) <= Square(DangerList::Range(DangerList::Type::Ricochet)))
+            {
+                DangerList::Note(unit, DangerList::Type::Ricochet, origin);
+            }
+            else
+            {
+                // further off: the danger is noted where it passed him, pointing back along the round
+                Vector3 back = from - to;
+                back[1] = 0;
+                if (back.SquareSize() > 1e-4f)
+                {
+                    back.Normalize();
+                }
+                DangerList::Note(unit, DangerList::Type::Ricochet,
+                                 p + back * (DangerList::Range(DangerList::Type::Ricochet) * 0.9f));
+            }
+        }
     }
 }
 

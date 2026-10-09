@@ -232,11 +232,16 @@ void EntityAI::HitBy(EntityAI* killer, float howMuch, RString ammo)
     if (DangerList::Enabled() && howMuch > 0.01f)
     {
         AIUnit* me = CommanderUnit();
-        if (me && killer && killer != this)
+        AICenter* myCenter = g ? g->GetCenter() : nullptr;
+        // only an enemy's fire: not a friend's stray round, a fall, a friendly truck, his own grenade
+        const bool hostile = me && killer && killer != this && myCenter && !myCenter->IsFriendly(killer->GetTargetSide());
+        if (hostile && me->IsFreeSoldier()) // a soldier on foot (not a hit vehicle's commander)
         {
-            DangerList::Note(me, DangerList::Type::Hit, killer->Position());
+            // where it came from is a guess, as the stock reaction's +-100 m reveal of the killer is
+            const float dist = killer->Position().Distance(Position());
+            DangerList::Note(me, DangerList::Type::Hit, killer->Position(), dist * 0.1f);
         }
-        if (g && me && me->IsFreeSoldier()) // a soldier on foot (a hit vehicle is not a squadmate down)
+        if (hostile && g && me->IsFreeSoldier()) // a soldier on foot (a hit vehicle is not a squadmate down)
         {
             const DangerList::Type what =
                 IsDammageDestroyed() ? DangerList::Type::SquadmateDied : DangerList::Type::SquadmateHit;
