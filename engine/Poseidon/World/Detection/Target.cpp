@@ -1887,10 +1887,8 @@ bool EntityAI::WhatShootResult(FireResult& result, const Target& target, int wea
         const Man* man = dyn_cast<const Man>(this);
         if (man && man->ImprovedAutonomousCombat())
         {
-            const auto& fuse = GrenadeFuse::Get();
-            const float delay = fuse.enabled && aInfo->explosionTime > 0
-                ? (fuse.fuseOverrideSeconds > 0 ? fuse.fuseOverrideSeconds : aInfo->explosionTime)
-                : dist / floatMax(1, ammoInfo->_initSpeed);
+            const float fuse = GrenadeFuse::FuseSeconds(aInfo->explosionTime, aInfo->thrown);
+            const float delay = fuse > 0 ? fuse : dist / floatMax(1, ammoInfo->_initSpeed);
             if (!man->CombatExplosiveAreaSafe(target.AimingPosition(),
                     4 * aInfo->indirectHitRange + target.posError.Size() + 1, delay))
                 return false;

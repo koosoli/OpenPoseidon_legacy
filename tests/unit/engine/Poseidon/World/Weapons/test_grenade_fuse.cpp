@@ -83,3 +83,37 @@ TEST_CASE("reset restores the defaults", "[grenade]")
     CHECK(GrenadeFuse::Get().tangentialKeep == GrenadeFuse::Settings{}.tangentialKeep);
     CHECK(GrenadeFuse::Get().enabled);
 }
+
+// AI-XRAY-003: which rounds get a fuse, and how long.
+TEST_CASE("a thrown grenade without a config fuse gets the hand-grenade fuse", "[grenade]")
+{
+    GrenadeFuse::Reset();
+    CHECK(GrenadeFuse::FuseSeconds(0.0f, true) == GrenadeFuse::Settings{}.handGrenadeFuseSeconds);
+    CHECK(GrenadeFuse::FuseSeconds(0.0f, true) > 0.0f);
+    // launched or fired rounds stay contact-detonated
+    CHECK(GrenadeFuse::FuseSeconds(0.0f, false) == 0.0f);
+    // the config's own fuse wins, thrown or not
+    CHECK(GrenadeFuse::FuseSeconds(2.5f, true) == 2.5f);
+    CHECK(GrenadeFuse::FuseSeconds(2.5f, false) == 2.5f);
+}
+
+TEST_CASE("the hand-grenade fuse can be turned back to contact detonation", "[grenade]")
+{
+    GrenadeFuse::Reset();
+    GrenadeFuse::Get().handGrenadeFuseSeconds = 0.0f;
+    CHECK(GrenadeFuse::FuseSeconds(0.0f, true) == 0.0f);
+    CHECK(GrenadeFuse::FuseSeconds(3.0f, true) == 3.0f);
+    GrenadeFuse::Get().enabled = false;
+    CHECK(GrenadeFuse::FuseSeconds(3.0f, true) == 0.0f);
+    GrenadeFuse::Reset();
+}
+
+TEST_CASE("the override changes how long, never which rounds", "[grenade]")
+{
+    GrenadeFuse::Reset();
+    GrenadeFuse::Get().fuseOverrideSeconds = 6.0f;
+    CHECK(GrenadeFuse::FuseSeconds(0.0f, true) == 6.0f);
+    CHECK(GrenadeFuse::FuseSeconds(2.0f, false) == 6.0f);
+    CHECK(GrenadeFuse::FuseSeconds(0.0f, false) == 0.0f);
+    GrenadeFuse::Reset();
+}

@@ -38,6 +38,13 @@ struct Settings
     /// be tried at 2 s and 5 s without rebuilding or touching CONFIG.BIN. Zero
     /// means the ammo config decides, which is the shipping behaviour.
     float fuseOverrideSeconds = 0.0f;
+
+    /// AI-XRAY-003 (owner 2026-10-09: "make fuses work"): the fuse a THROWN hand grenade gets when its
+    /// config declares none. Stock CWA's GrenadeHand declares none and went off the instant it touched
+    /// anything, so a grenade landing at a soldier's feet left nothing to react to. 4 s is about an M67 or
+    /// an RGD-5. Zero gives back the stock contact detonation. Launched and fired rounds (M203, mortars)
+    /// are not thrown and are never given one.
+    float handGrenadeFuseSeconds = 4.0f;
 };
 
 /// The live settings. Mutable on purpose: the dev panel binds sliders straight
@@ -47,6 +54,11 @@ Settings& Get();
 
 /// Back to the values written above.
 void Reset();
+
+/// Seconds on the fuse of a new round, 0 for contact detonation: the config's `explosionTime`, else
+/// handGrenadeFuseSeconds for a thrown grenade; the panel override replaces either. Off (`enabled` false):
+/// always 0.
+float FuseSeconds(float explosionTime, bool thrown);
 
 /// What a bounce does to a velocity.
 struct BounceResult

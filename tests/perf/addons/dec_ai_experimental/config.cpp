@@ -17,4 +17,5 @@ class CfgAIFork
     grenadeInterval = 5;
     exposedParts = 1;
     targetScoring = 1;
+    grenadeDodge = 1;
 };

@@ -660,6 +660,13 @@ void DrawPhysicsTab()
                           "Higher settles it sooner.");
     }
     ImGui::SetNextItemWidth(200.0f);
+    Dev::SliderFloat("Hand grenade fuse", &fuse.handGrenadeFuseSeconds, 0.0f, 8.0f, "%.1f s");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("The fuse of a thrown grenade whose config declares none (stock CWA).\n"
+                          "Zero gives back the stock contact detonation.");
+    }
+    ImGui::SetNextItemWidth(200.0f);
     Dev::SliderFloat("Fuse override", &fuse.fuseOverrideSeconds, 0.0f, 8.0f, "%.1f s");
     if (ImGui::IsItemHovered())
     {

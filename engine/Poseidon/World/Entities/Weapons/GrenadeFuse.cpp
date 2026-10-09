@@ -14,6 +14,17 @@ Settings& Get() { return g_settings; }
 // struct and cannot drift out of step with a second copy of them.
 void Reset() { g_settings = Settings{}; }
 
+float FuseSeconds(float explosionTime, bool thrown)
+{
+    const Settings& s = g_settings;
+    float fuse = explosionTime > 0.0f ? explosionTime : thrown ? s.handGrenadeFuseSeconds : 0.0f;
+    if (fuse > 0.0f && s.fuseOverrideSeconds > 0.0f)
+    {
+        fuse = s.fuseOverrideSeconds;
+    }
+    return s.enabled ? fuse : 0.0f;
+}
+
 BounceResult Bounce(Vector3Par speed, Vector3Par surfaceNormal, const Settings& settings)
 {
     BounceResult result;

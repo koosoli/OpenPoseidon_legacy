@@ -400,6 +400,15 @@ void MagazineType::Init(const char* name)
             _modes[i]->Init(cls >> mode);
         }
     }
+    // AI-XRAY-003: mark ammo thrown by hand (see AmmoType::thrown)
+    for (int i = 0; i < n; i++)
+    {
+        const AmmoType* ammo = _modes[i]->_ammo;
+        if (ammo && ammo->_simulation == AmmoShotShell && _initSpeed < 30)
+        {
+            const_cast<AmmoType*>(ammo)->thrown = true;
+        }
+    }
 
     entry = cls.FindEntry("useAction");
     if (entry)
