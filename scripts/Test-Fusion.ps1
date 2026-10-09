@@ -4,7 +4,10 @@ param(
     [switch]$DumpSatmap,
     [string]$Pose='',
     [ValidateSet(-1,0,1)][int]$SatmapObjects=-1,
-    [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
+    [string]$GameDir='D:\SteamLibrary\steamapps\common\ARMA Cold War Assault',
+    # an OpenPoseidon.exe outside the game folder (a branch build), run with the game folder as its working
+    # directory; default: the installed one
+    [string]$Exe=''
 )
 $ErrorActionPreference='Stop'
 if (!$env:LOCK_OWNER) {throw 'Use scripts/with-game-lock.sh'}
@@ -26,7 +29,8 @@ $mission=if ($Large) {'Mods\@OP_SizeProbe\Missions\OpenPoseidon\SizeProbe.Fusion
 $log=Join-Path $output "$prefix.log"
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
 $listener.Start(); $port=$listener.LocalEndpoint.Port; $listener.Stop()
-$p=Start-Process -FilePath (Join-Path $GameDir 'OpenPoseidon.exe') -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList @('--render','wgpu','--window','--dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
+$exePath=if ($Exe) {$Exe} else {Join-Path $GameDir 'OpenPoseidon.exe'}
+$p=Start-Process -FilePath $exePath -WorkingDirectory $GameDir -WindowStyle Hidden -PassThru -ArgumentList @('--render','wgpu','--window','--dev','--width','1280','--height','720','--harness',"$port",'--test-mission',('"'+$mission+'"'),'--log-file',('"'+$log+'"'))
 $null=$p.Handle
 $client=$null
 try {

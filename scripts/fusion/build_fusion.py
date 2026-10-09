@@ -392,6 +392,10 @@ def build(source, output, config_texts=()):
                                          'fusion' if key in ISLAND_AMBIENCE else 'CfgEnvSounds')
                                  for key, label, _, _ in ISLANDS}
     config = ('class CfgPatches {class FusionOFP {units[]={}; weapons[]={}; requiredVersion=1.96; requiredAddons[]={"Noe"};};};\n'
+              # the island sound classes derive from the game's CfgEnvSounds: an add-on must declare it before use
+              # (the engine resolves a base class while it reads the file; undeclared, the parse of the rest of
+              # FusionOFP failed -- found by the in-game test, 2026-10-09)
+              'class CfgEnvSounds;\n'
               'class CfgWorlds {class Eden; class FusionOFP: Eden {\n'
               ' access=2; description="OFP Fusion - Five Islands"; worldName="\\fusion_ofp\\FusionOFP.wrp";\n'
               ' worldSize=51200; landGrid=50; centerPosition[]={25600,25600,0};\n'

@@ -1,0 +1,2 @@
+1|setAirportClosed ["Nogova", true]; 0
+3|a10 land "LAND"; 0

@@ -137,3 +137,26 @@ Run the checked-in `scripts/Test-Fusion.ps1` through the game lock for repeatabl
 installed tests, or pass `-Large` for the sparse size probe. Tests use a private
 profile under `build/fusion/acceptance/user`, not the player's settings. Inspect
 the resulting screenshots as well as the exit status and terrain-ready log check.
+
+## Tested in game (2026-10-09, branch build on the CWA-OLI data)
+
+* **Acceptance** (`scripts/Test-Fusion.ps1 -GameDir G:\CWA-OLI -Exe <branch build>`):
+  * The world loads in about 3 s.
+  * The terrain upload succeeds.
+  * All five islands are land where expected.
+  * The working set is about 2.4 GB.
+  * The log reports 3 airports and 5 ambient sound regions.
+* **Config fix:** the first run found that the add-on's config did not parse past `SoundRegions`
+  (`Undefined base class 'CfgEnvSounds'`). That also lost the map names. The builder now declares
+  `class CfgEnvSounds;` first, and the second run has no errors.
+* **Airports** (`tests/AirportTest.FusionOFP`: an AI A-10 at 300 m east of Nogova, ordered to land at 3 s):
+  * It lands at Nogova, the nearest field, touching down at the threshold at ~118 s and taxiing.
+  * With `setAirportClosed ["Nogova", true]`, it flies 21 km to Malden and is on short final over Malden's
+    runway at 235 s.
+* **Not yet tested:**
+  * a side-aware diversion (an enemy-held field);
+  * the ambient sounds by ear;
+  * the map grid labels;
+  * multiplayer;
+  * save/load.
+
