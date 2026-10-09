@@ -623,8 +623,8 @@ void DrawPhysicsTab()
     {
         ImGui::SetTooltip(
             "A 2001 grenade detonates the instant it touches anything. With this on,\n"
-            "ammo whose config declares `explosionTime` bounces instead and goes off\n"
-            "when its fuse runs out.\n"
+            "ammo whose config declares `explosionTime`, and every thrown hand grenade\n"
+            "(see Hand grenade fuse), bounces instead and goes off when its fuse runs out.\n"
             "\n"
             "WHICH rounds have a fuse is decided by CONFIG, never here -- flares and\n"
             "smoke shells descend from the same Grenade class and must not acquire\n"

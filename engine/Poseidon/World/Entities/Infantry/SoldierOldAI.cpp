@@ -1331,8 +1331,8 @@ bool Man::CombatShotSafe(int weapon, const Target* target) const
     if (!target || !target->idExact) return false;
     const auto shell = Ballistics::ShellParamsFor(*ammo);
     const auto& fuseSettings = GrenadeFuse::Get();
-    const float fuse = fuseSettings.enabled && ammo->explosionTime > 0
-        ? (fuseSettings.fuseOverrideSeconds > 0 ? fuseSettings.fuseOverrideSeconds : ammo->explosionTime) : 0;
+    // the fuse the round will really have: stock hand grenades get one too now (AI-XRAY-003)
+    const float fuse = GrenadeFuse::FuseSeconds(ammo->explosionTime, ammo->thrown);
     if (fuse > 8 || shell.initTime > 0) return false;
     Vector3 position = origin;
     Vector3 velocity = Speed() + direction * magazine->_type->_initSpeed;

@@ -992,9 +992,9 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
     Dev::OpDiag::OnShotStep(this); // DIAG-001: flight path
 #endif
 
-    // FUSE. Only ammo whose config declares `explosionTime` gets here; for
-    // everything else `_fuseArmed` is false and every path below is the one it
-    // always took. See AmmoType::explosionTime for why absent means zero.
+    // FUSE. Only ammo whose config declares `explosionTime`, or a hand grenade given the default fuse
+    // (GrenadeFuse::handGrenadeFuseSeconds, AI-XRAY-003), gets here; for everything else `_fuseArmed` is
+    // false and every path below is the one it always took.
     if (_fuseArmed)
     {
         _fuse -= deltaT;
