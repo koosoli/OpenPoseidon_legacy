@@ -8373,7 +8373,7 @@ tickets:
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AI-MALPRAVE-01-ai-port-plan-20261004.md
     known_failures:
-      - "Hunting does not yet search danger positions (walking over to a body). The staged unseen-gunfire test was inconclusive; the effect is measured in C02 only (70 soldiers turned to a danger)."
+      - "Danger search added (hold, then walk to the danger); hunting and searches only on SEEK AND DESTROY / GUARD waypoints (owner rule 2026-10-09). The staged unseen-gunfire test was inconclusive; turning is measured in C02 only."
       - "Not started in Malprave."
     fallback: null
     reviewer: null

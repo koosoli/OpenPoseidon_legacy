@@ -235,7 +235,14 @@ From Malprave job 23 (29 Sep), the first and only A/B test of the X-Ray patches:
   * A danger puts the soldier on alert. One in the default watch mode with no enemy in view turns to the top
     danger.
   * In C02 every type was noted, and 70 soldiers turned to a danger.
-  * Not done yet: hunting searching danger positions.
+  * **Danger search** (follow-up commit):
+    * A soldier with no enemy to chase searches the position of a danger worth a look (a body, unseen gunfire,
+      where he was hit from, a squadmate down): hold 5–10 s, go within 3 m, rest, rejoin. Aware is enough.
+    * Test: a body 10 m away with a Guard waypoint is searched at 13 s, and he is back in formation by 23 s.
+  * **Owner rule (2026-10-09):** hunting and danger searches only happen for a group on a SEEK AND DESTROY or
+    GUARD waypoint. A soldier or squad with no waypoint, or on Move / Hold / Sentry / Cycle, stays put by design.
+    * Grenade dodging and turning to look at a danger are unaffected.
+    * Result: stock C02 no longer hunts. Its groups are not on those waypoints.
 
 ## 5. X-Ray research (Lost Alpha docs, 2026-10-09)
 
