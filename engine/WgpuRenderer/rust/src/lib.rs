@@ -1133,6 +1133,34 @@ impl Renderer {
                 }
             }
         };
+        // AMD on Windows: the Vulkan driver (amdvlk64) crashes inside its shader compiler while
+        // building the GPU-driven pipelines (gpu_driven.wgsl) at start-up -- two testers, RX 6600 and
+        // RX 6700 XT, identical fault offset, 2026-10-09. Prefer DX12 there unless the backend was
+        // chosen explicitly (WGPU_BACKEND) or WGR_AMD_VULKAN=1 asks for Vulkan anyway.
+        #[cfg(windows)]
+        if std::env::var_os("WGPU_BACKEND").is_none()
+            && std::env::var("WGR_AMD_VULKAN").map(|v| v == "0").unwrap_or(true)
+        {
+            let mut probe_desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+            probe_desc.backends = wgpu::Backends::VULKAN;
+            let probe = wgpu::Instance::new(probe_desc);
+            let amd = pollster::block_on(probe.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            }))
+            .map(|a| a.get_info().vendor == 0x1002)
+            .unwrap_or(false);
+            drop(probe);
+            if amd {
+                instance_desc.backends = wgpu::Backends::DX12;
+                log.log(
+                    log_level::WARN,
+                    "AMD GPU: using DX12 instead of Vulkan (the AMD Vulkan driver crashes compiling the \
+                     GPU-driven pipelines). WGR_AMD_VULKAN=1 or WGPU_BACKEND=vulkan forces Vulkan.",
+                );
+            }
+        }
         #[cfg(feature = "dlss")]
         let mut dlss_instance_active = false;
         let instance = 'inst: {
