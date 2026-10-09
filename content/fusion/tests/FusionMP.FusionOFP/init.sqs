@@ -1,0 +1,3 @@
+; handshake flags for tests/integration/multiplayer/fusion_mp.test
+fusionSeen = 0
+fusionMoveSeen = 0

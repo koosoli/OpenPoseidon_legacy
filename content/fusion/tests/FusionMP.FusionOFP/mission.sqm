@@ -1,0 +1,45 @@
+version=11;
+class Mission
+{
+ addOns[]={"FusionOFP"}; randomSeed=4242;
+ class Intel {briefingName="Fusion MP test"; year=1985; month=6; day=21; hour=12; minute=0; startWeather=0.1; forecastWeather=0.1; startFog=0; forecastFog=0;};
+ class Groups
+ {
+  items=3;
+  class Item0
+  {
+   side="WEST";
+   class Vehicles
+   {
+    items=1;
+    class Item0 {position[]={28800,0,22400}; azimut=0; id=0; side="WEST"; vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=0.6; text="p1";};
+   };
+  };
+  class Item1
+  {
+   side="WEST";
+   class Vehicles
+   {
+    items=1;
+    class Item0 {position[]={78660,0,64700}; azimut=0; id=1; side="WEST"; vehicle="SoldierWB"; player="PLAYER COMMANDER"; leader=1; skill=0.6; text="p2";};
+   };
+  };
+  class Item2
+  {
+   side="WEST";
+   class Vehicles
+   {
+    items=1;
+    class Item0 {position[]={60800,150,35200}; azimut=300; id=2; side="WEST"; vehicle="UH60"; leader=1; skill=1; special="FLY"; text="heli1";};
+   };
+   class Waypoints
+   {
+    items=1;
+    class Item0 {position[]={17364,0,54008};};
+   };
+  };
+ };
+};
+class Intro {randomSeed=1; class Intel {};};
+class OutroWin {randomSeed=2; class Intel {};};
+class OutroLoose {randomSeed=3; class Intel {};};

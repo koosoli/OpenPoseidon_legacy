@@ -502,10 +502,11 @@ pub fn find_game_binary(game_dir: &Path, named: Option<&str>) -> Result<PathBuf>
         }
     }
 
-    let defaults: [&str; 2] = if cfg!(windows) {
-        ["PoseidonGame.exe", "OFPR.exe"]
+    // OpenPoseidon is the name the client is copied to in dist/ and installed under in a game folder.
+    let defaults: [&str; 3] = if cfg!(windows) {
+        ["PoseidonGame.exe", "OpenPoseidon.exe", "OFPR.exe"]
     } else {
-        ["PoseidonGame", "OFPR"]
+        ["PoseidonGame", "OpenPoseidon", "OFPR"]
     };
     for name in &defaults {
         if let Some(found) = locate(&with_ext(name)) {
@@ -620,6 +621,19 @@ mod tests {
             "PoseidonGame.exe"
         } else {
             "PoseidonGame"
+        });
+        std::fs::write(&binary, "").unwrap();
+        let result = find_game_binary(dir.path(), None).unwrap();
+        assert_eq!(result, binary);
+    }
+
+    #[test]
+    fn find_binary_named_openposeidon() {
+        let dir = TempDir::new().unwrap();
+        let binary = dir.path().join(if cfg!(windows) {
+            "OpenPoseidon.exe"
+        } else {
+            "OpenPoseidon"
         });
         std::fs::write(&binary, "").unwrap();
         let result = find_game_binary(dir.path(), None).unwrap();

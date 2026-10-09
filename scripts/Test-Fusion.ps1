@@ -85,12 +85,45 @@ try {
         $null=Send @{cmd='eval';code='getPos vehicle player'}
         $p.Refresh(); Write-Host "$name height=$height workingSetMB=$([int]($p.WorkingSet64/1MB))"
     }
+    if (!$Large) {
+        # the map at Kolgujev: squares past 100 (Fusion is 800 across) need the grid's third label character
+        $null=Send @{cmd='exec';code='fusionCam cameraEffect ["terminate","back"]; camDestroy fusionCam; vehicle player setPos [60800,35200,400]; vehicle player setVelocity [0,0,0]'}
+        Start-Sleep -Seconds 2
+        foreach ($c in @('triOpenMap','triShowMap 1')) { if ((Send @{cmd='eval';code=$c}).result.Trim('"') -ne 'OK') {throw "$c failed"} }
+        foreach ($zoom in @(@('near',0.05),@('far',0.6))) {
+            $null=Send @{cmd='eval';code="triMapSetScale $($zoom[1])"}
+            Start-Sleep -Seconds 2
+            $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-map-$($zoom[0]).png")}
+        }
+        $null=Send @{cmd='eval';code='triShowMap 0'}
+        # save and load on the big world: the load must put the player back on Kolgujev, not where it moved after
+        function PosOf { ((Send @{cmd='eval';code='getPos vehicle player'}).result -replace '[\[\]" ]','').Split(',') | ForEach-Object {[double]::Parse($_,[Globalization.CultureInfo]::InvariantCulture)} }
+        $saved=PosOf
+        if ((Send @{cmd='eval';code='triSaveGame "fusion-acceptance"'}).result.Trim('"') -ne 'OK') {throw 'Save failed'}
+        $null=Send @{cmd='exec';code='vehicle player setPos [28800,22400,1200]'}
+        Start-Sleep -Seconds 1
+        if ((Send @{cmd='eval';code='triLoadGame "fusion-acceptance"'}).result.Trim('"') -ne 'OK') {throw 'Load failed'}
+        Start-Sleep -Seconds 5
+        $loaded=PosOf
+        $moved=[Math]::Sqrt([Math]::Pow($loaded[0]-$saved[0],2)+[Math]::Pow($loaded[1]-$saved[1],2))
+        Write-Host "save/load: saved $($saved[0..1] -join ',') loaded $($loaded[0..1] -join ',') ($([int]$moved) m apart)"
+        if ($moved -gt 500) {throw "Load did not restore the position: $moved m from the save"}
+        if ([double](Send @{cmd='eval';code='triTerrainHeight [60800,35200]'}).result -le 0) {throw 'Terrain lost after load'}
+        $null=Send @{cmd='screenshot';path=(Join-Path $output "$prefix-loaded.png")}
+    }
     }
     $null=Send @{cmd='exit'}
     if (!$p.WaitForExit(20000) -or $p.ExitCode -ne 0) {throw 'Game exit failed'}
     $text=Get-Content -LiteralPath $log -Raw
     if ($SatmapObjects -ne 0 -and !$NoSatmap -and $text -notmatch 'OFP satmap objects: [1-9][0-9]* models, [1-9][0-9]* textures, [1-9][0-9]* instances') {throw 'Object satellite bake was not exercised'}
     if ($text -match 'heightfield upload failed|UNHANDLED EXCEPTION' -or $text -notmatch 'heightfield ready=true') {throw 'Terrain upload acceptance failed'}
+    if (!$Large -and !$Pose) {
+        # each island's own ambient set played while the camera was there (EnvSoundRegions.cpp logs each crossing)
+        foreach ($island in @('Everon','Malden','Kolgujev','Nogova')) {
+            if ($text -notmatch "Ambient sound region: $island ") {throw "No ambient sound region change into $island"}
+        }
+        $text -split "`n" | Where-Object {$_ -match 'Ambient sound region:'} | ForEach-Object {Write-Host ($_ -replace '^.*Ambient','Ambient').Trim()}
+    }
     Write-Host "Runtime checks passed; visually inspect $output/$prefix-*.png."
 } finally {
     if ($null -ne $client) {$client.Dispose()}

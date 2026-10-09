@@ -19,6 +19,7 @@ const char* const kClasses[EnvSoundSet::Count] = {"Sea", "Trees", "Meadows", "Hi
 
 struct Region
 {
+    RString name;
     float xMin, zMin, xMax, zMax;
     EnvSoundSet set;
 
@@ -31,11 +32,14 @@ struct Region
 };
 
 std::vector<Region> GRegions;
+// the region last heard loudest, for the log line on crossing into another island's (-1: none yet)
+int GLastLoudest = -1;
 } // namespace
 
 void InitEnvSoundRegions(const ParamEntry& world)
 {
     GRegions.clear();
+    GLastLoudest = -1;
     const ParamEntry* regions = world.FindEntry("SoundRegions");
     if (!regions)
     {
@@ -51,6 +55,7 @@ void InitEnvSoundRegions(const ParamEntry& world)
             continue;
         }
         Region region;
+        region.name = cls.GetName();
         region.xMin = (*area)[0];
         region.zMin = (*area)[1];
         region.xMax = (*area)[2];
@@ -86,6 +91,13 @@ int EnvSoundRegionsAt(float x, float z, const EnvSoundSet* sets[2], float weight
         {
             b = i, db = d;
         }
+    }
+    if (a != GLastLoudest)
+    {
+        // one line per island crossed: which set now plays (its sea and trees loops tell the sets apart)
+        LOG_INFO(Audio, "Ambient sound region: {} (Sea {}, Trees {})", (const char*)GRegions[a].name,
+                 (const char*)GRegions[a].set.day[0].name, (const char*)GRegions[a].set.day[1].name);
+        GLastLoudest = a;
     }
     // half each on the halfway line, the nearer one's alone kBlend metres closer to it
     const float wb = b < 0 ? 0.0f : 0.5f * (1.0f - std::clamp((db - da) / (2.0f * kBlend), 0.0f, 1.0f));

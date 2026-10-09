@@ -177,10 +177,30 @@ Results below are from the 51.2 km five-island build unless marked.
     the two overview shots, which then show all four islands. Playing at 150 km coarsens the near terrain.
   * Sea floor (below): the pale lines that traced each island's 12.8 km square from the air are gone, with no
     line at the world's edge either.
-* **Not yet tested:**
-  * a side-aware diversion (an enemy-held field);
-  * the ambient sounds by ear;
-  * the map grid labels;
-  * multiplayer;
-  * save/load.
+* **Enemy-held airfield** (`tests/AirportEnemyTest.FusionOFP`, 102.4 km): two East soldiers by Nogova's runway, a West
+  observer who reports them, everyone holding fire. At 1 s: `obs reveal e1; a10 reveal e1`, combat mode BLUE; at
+  3 s: `a10 land "LAND"`.
+  * The A-10 never turns for Nogova, though it is the nearest field. It flies south-south-east for Malden from the
+    start (23.1 km, 39.3 km at 169 s, still closing).
+  * Without the enemy (AirportTest) the same A-10 lands at Nogova at ~118 s.
+* **Map grid** (Test-Fusion, map at Kolgujev): squares past 100 carry the third character, e.g. columns `Fg0`-`Fj9`
+  and rows `283`-`308`. The far zoom shows the islands with their own place names.
+* **Save/load** (Test-Fusion): `triSaveGame` over Kolgujev, a teleport to Malden, then `triLoadGame`. The player is
+  back 62 m from the save (the helicopter flies on) and the terrain is intact.
+* **Ambient sounds** (Test-Fusion): each crossing into an island's area logs `Ambient sound region: <island>` with
+  its sea and trees loops. The test requires all four. Malden plays its own crickets; Kolgujev and Nogova play
+  Fusion's sets (same files as Everon's for sea and trees, different volumes and other loops). Not yet judged by ear.
+* **Multiplayer** (`tests/integration/multiplayer/fusion_mp.test`, a dedicated server and two clients, run with
+  `tri test --game-dir dist/x64-win-rwdi --data-dir <game dir> tests/integration/multiplayer/fusion_mp.test`):
+  * Both clients join in progress and see land on all four islands.
+  * Each sees the other's unit where it is, 65 km apart.
+  * An AI UH-60 flies.
+  * After a teleport from Malden to Nogova, the other client must see the new position.
+  * **Bug found and fixed:** that last step failed. The server weights a unit's updates by `20^2 / distance^2`
+    (`NetworkObject::CalculateErrorCoef`), ~10^-7 at 61 km. A far unit was never re-sent, even after an 11 km
+    jump, so other players saw it frozen. Beyond 2.5 km units are now weighted as at 2.5 km, and all three roles
+    pass.
+  * Seen in passing, not Fusion's: both clients log `Assertion failed 'ValidateOutVehicle(vehicle)'`
+    (WorldSetup.cpp) as the helicopter crew is moved out of the landscape on joining.
+* **Not yet tested:** the ambient sounds by ear; a full multiplayer session (respawn, vehicles, many players).
 
