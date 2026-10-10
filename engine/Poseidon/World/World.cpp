@@ -1684,6 +1684,24 @@ void World::Simulate(float deltaT, bool& enableDraw)
                         Vector3 focPos = renderDelta.FastTransform(cameraVehicle->CameraPosition());
                         Vector3 camPos = vehOrient * dist + focPos;
                         ClipCamera(camPos, cameraVehicle, focPos, _camMaxDist[_camType]);
+                        // ClipCamera tests objects only. On steep real-world relief (Whole World) a convex
+                        // slope between camera and body hid the player completely; lift the camera until
+                        // its line of sight to the focus clears the ground in between.
+                        {
+                            float needY = camPos.Y();
+                            for (int s = 2; s < 10; ++s)
+                            {
+                                const float t = s / 10.0f; // fraction of the way from the focus to the camera
+                                const Vector3 p = focPos + (camPos - focPos) * t;
+                                const float groundY = GLandscape->SurfaceY(p.X(), p.Z()) + 0.3f;
+                                if (groundY > p.Y())
+                                {
+                                    saturateMax(needY, focPos.Y() + (groundY - focPos.Y()) / t);
+                                }
+                            }
+                            const float maxLift = (camPos - focPos).Size();
+                            camPos[1] = std::min(needY, camPos.Y() + maxLift);
+                        }
                         transform.SetPosition(camPos);
                         camChange = M3Identity;
                         camInsideVehicle = nullptr;

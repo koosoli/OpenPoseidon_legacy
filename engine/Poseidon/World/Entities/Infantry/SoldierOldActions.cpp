@@ -2388,13 +2388,30 @@ Vector3 Man::CalculateCameraPosition(Matrix4Par pos) const
     return pos.FastTransform(AnimatePoint(level, sel[0]));
 }
 
+// The cached points refresh only when the man moves. A man placed and then lifted without moving (Whole
+// World spawns at height 0 and the streamed ground arrives later, 1100 m higher at Grand Canyon) kept
+// them at the spawn height: the 3rd person camera sat on the ground looking at his boots, and AI aimed
+// below him. A cache far from the body is stale by definition; recompute it from the current frame.
+static bool CachedPointStale(Vector3Par cached, Vector3Par body)
+{
+    return cached.Distance2(body) > Square(20.0f);
+}
+
 Vector3 Man::AimingPosition() const
 {
+    if (IsInLandscape() && CachedPointStale(_aimingPositionWorld, Position()))
+    {
+        return CalculateAimingPosition(WorldTransform());
+    }
     return _aimingPositionWorld;
 }
 
 Vector3 Man::CameraPosition() const
 {
+    if (IsInLandscape() && CachedPointStale(_cameraPositionWorld, Position()))
+    {
+        return CalculateCameraPosition(WorldTransform());
+    }
     return _cameraPositionWorld;
 }
 
