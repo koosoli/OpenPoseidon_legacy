@@ -720,7 +720,16 @@ float LookHour(float clockHour)
         return clockHour;
     const auto& snap = render::frame::GPresentationSnapshot();
     const Vector3 toSun = -snap.sunDirection;
-    const float e = std::asin(std::clamp(toSun.Y(), -1.0f, 1.0f)) * (180.0f / 3.14159265f);
+    // The sun's height where the CAMERA is on the globe (radial up from the planet centre), not at the
+    // map origin; and from space (above 60 km) the lit hemisphere is exposed as daylight -- with the
+    // origin's evening look the day side saturated up to a knife-edge terminator.
+    const double ox = double(snap.cameraPos.X()) - 6400.0, oz = double(snap.cameraPos.Z()) - 6400.0;
+    const double oy = double(snap.cameraPos.Y()) + 6378137.0;
+    const double r = std::sqrt(ox * ox + oy * oy + oz * oz);
+    if (r - 6378137.0 > 60000.0)
+        return 12.0f;
+    const float sinE = r > 0.0 ? float((ox * toSun.X() + oy * toSun.Y() + oz * toSun.Z()) / r) : toSun.Y();
+    const float e = std::asin(std::clamp(sinE, -1.0f, 1.0f)) * (180.0f / 3.14159265f);
     const auto lerp = [](float a, float b, float t) { return a + (b - a) * std::clamp(t, 0.0f, 1.0f); };
     if (toSun.X() > 0.0f) // morning: night 2:00 .. dawn 5:50 (sun at the horizon) .. noon
         return e < 0.0f ? lerp(2.0f, 5.833f, (e + 12.0f) / 12.0f) : lerp(5.833f, 12.0f, e / 60.0f);
