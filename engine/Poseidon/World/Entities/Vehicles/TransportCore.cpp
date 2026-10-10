@@ -8,6 +8,7 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
@@ -1751,6 +1752,24 @@ void Transport::Refuel(float ammount)
 
 void Transport::Simulate(float deltaT, SimulationImportance prec)
 {
+    // Whole World: vehicles spawn at the fixture's height and the streamed ground arrives later (and can be
+    // replaced by a finer patch); set one found below the ground back onto it, as Man::Simulate does.
+    if (EarthStreaming::Enabled() && IsInLandscape() && !IsDammageDestroyed())
+    {
+        if (const auto ground = EarthStreaming::QueryGround(Position().X(), Position().Z()))
+        {
+            const float bottom = GetShape() ? -GetShape()->Min().Y() : 1.0f;
+            if (Position().Y() - bottom < ground->height - 0.5f)
+            {
+                Matrix4 transform = Transform();
+                Vector3 position = Position();
+                position[1] = ground->height + bottom + 0.2f;
+                transform.SetPosition(position);
+                Move(transform);
+                _speed = VZero;
+            }
+        }
+    }
     // turn in / turn out
     const float turnInOutSpeed = 1.0;
     if (_commanderHiddenWanted > _commanderHidden)

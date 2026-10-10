@@ -7,7 +7,7 @@
 
 #import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, apply_layered_fog, apply_fog_terrain, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_FRESNEL_ENV, sky_irradiance}
 #import shadow::shadow_strength
-#import frame::{surface_rays, cloud_shadow_tex, terrain_shadow_samp, terrain_shadow_map}
+#import frame::{surface_rays, cloud_shadow_tex, terrain_shadow_samp, terrain_shadow_map, cloud_sun_shadow}
 #import frame::monitor_scene
 #import skin::{skin_pos, skin_normal}
 #import lighting::lights_contrib
@@ -989,6 +989,15 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
             let receiver = 1.0 - smoothstep(200.0,400.0,distance);
             ambient_occlusion = mix(1.0,gtao_ao(in.clip.xy),receiver);
             sun_occlusion = 1.0 - receiver * shadow_strength(in.world_pos, n, 1.0, dwx, dwy);
+        }
+        // Cloud shadows. The deck's shadow map is marched from sea level; this ground can stand kilometres
+        // higher, so look it up where the sun ray through this point would leave sea level -- that is the
+        // same ray through the deck, and the shadow lands under its cloud instead of beside it.
+        {
+            let sun_to = -frame.sun_dir_world.xyz;
+            let world = in.world_pos + frame.cam_pos.xyz;
+            let shift = sun_to.xz / max(sun_to.y, 0.05) * max(world.y, 0.0);
+            sun_occlusion = sun_occlusion * cloud_sun_shadow(world.xz - shift);
         }
         var light = material.sun_ambient.rgb * ambient_occlusion * twilight + material.sun_diffuse.rgb * daylight * sun_occlusion;
         if (frame.sun_diffuse.w > 0.5 && (packed >> 3u) != 0u) {

@@ -356,7 +356,9 @@ void Man::OnAddImpulse(Vector3Par force, Vector3Par torque)
 
 void Man::Simulate(float deltaT, SimulationImportance prec)
 {
-    if (EarthStreaming::Enabled() && !_isDead && IsInLandscape() && GWorld && GWorld->GetRealPlayer() == this &&
+    // Every man, not only the player: a planned Whole World mission places AI too, all spawned at the fixture's
+    // height and only later given streamed ground.
+    if (EarthStreaming::Enabled() && !_isDead && IsInLandscape() && GWorld &&
         !_ladderBuilding && (!Brain() || !Brain()->GetVehicleIn()) && !_falling &&
         _freeFallUntil <= Glob.time && std::abs(Speed().Y()) < 0.1f)
     {
