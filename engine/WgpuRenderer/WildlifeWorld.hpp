@@ -12,6 +12,9 @@
 #include <Poseidon/World/Terrain/EarthFrame.hpp>
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>
+#include <cctype>
+#include <string>
 
 namespace Poseidon::Wildlife
 {
@@ -40,5 +43,25 @@ inline float Ground(float x, float z)
         return sample->height;
     }
     return GLandscape ? GLandscape->SurfaceY(x, z) : 0.0f;
+}
+// Bare sand at (x, z)? On a map, from the terrain surface's CfgSurfaces class / sound environment
+// ("sand", Czech "pisek", "beach"); in Earth mode there is no surface data: any low ground counts.
+inline bool Sand(float x, float z)
+{
+    if (Earth() || !GLandscape)
+        return true;
+    const SurfaceInfo& s = GLandscape->SurfaceAt(x, z);
+    auto has = [](const RStringB& name)
+    {
+        const char* p = name;
+        if (!p)
+            return false;
+        std::string l(p);
+        for (char& c : l)
+            c = char(std::tolower(static_cast<unsigned char>(c)));
+        return l.find("sand") != std::string::npos || l.find("pisek") != std::string::npos ||
+               l.find("beach") != std::string::npos;
+    };
+    return has(s._class) || has(s._soundEnv) || has(s._name);
 }
 } // namespace Poseidon::Wildlife

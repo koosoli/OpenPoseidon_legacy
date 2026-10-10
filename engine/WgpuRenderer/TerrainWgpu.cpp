@@ -2,6 +2,7 @@
 #include "FishSchools.hpp"
 #include "BirdFlocks.hpp"
 #include "ReefLife.hpp"
+#include "BeachCritters.hpp"
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/SnowShelter.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
@@ -3794,6 +3795,9 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
             if (!_birds)
                 _birds = std::make_unique<BirdFlocks>(_engine, _renderer);
             _birds->Update(camera->Position(), Glob.time.toFloat());
+            if (!_crabs)
+                _crabs = std::make_unique<BeachCritters>(_engine, _renderer);
+            _crabs->Update(camera->Position(), Glob.time.toFloat());
         }
         return;
     }
@@ -4128,6 +4132,9 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         if (!_reef)
             _reef = std::make_unique<ReefLife>(_engine, _renderer);
         _reef->Update(camera->Position(), Glob.time.toFloat());
+        if (!_crabs)
+            _crabs = std::make_unique<BeachCritters>(_engine, _renderer);
+        _crabs->Update(camera->Position(), Glob.time.toFloat());
     }
 }
 

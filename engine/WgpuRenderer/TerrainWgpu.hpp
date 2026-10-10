@@ -153,6 +153,7 @@ class TerrainWgpu : public ITerrainRenderer
     std::unique_ptr<class FishSchools> _fish;
     std::unique_ptr<class BirdFlocks> _birds;
     std::unique_ptr<class ReefLife> _reef;
+    std::unique_ptr<class BeachCritters> _crabs;
     WgrMesh _earthBuildingMesh=0;
     WgrTexture _earthBuildingTexture=0; // wall/roof colour palette (EarthBuildingStream::Palette)
     uint32_t _earthBuildingIndices=0;
