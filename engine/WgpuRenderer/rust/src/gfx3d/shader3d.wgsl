@@ -975,6 +975,9 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         let earth_centre = vec3<f32>(6400.0, -6378137.0, 6400.0);
         let radial_up = normalize(in.world_pos + frame.cam_pos.xyz - earth_centre);
         let sun_height = dot(radial_up, -frame.sun_dir_world.xyz);
+        // Mesh normals are built in the origin's flat tangent frame (up = +Y); tilt them onto the true
+        // radial up so the globe and far horizon shade as a sphere. Near the origin this is a no-op.
+        n = normalize(n + radial_up - vec3<f32>(0.0, 1.0, 0.0));
         let twilight = smoothstep(-0.12, 0.05, sun_height);     // sky light: gone ~7 degrees below
         let sun_reach = smoothstep(-0.015, 0.06, sun_height);   // direct sun thins out through the air
         let daylight = max(dot(n, -frame.sun_dir_world.xyz), 0.0) * sun_reach;
