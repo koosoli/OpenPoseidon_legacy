@@ -220,6 +220,14 @@ fn uwLit(m: f32, sigT: vec3<f32>, zc: f32, dirY: f32, dist: f32) -> vec3<f32> {
 fn fs_uw(in: UwOut) -> @location(0) vec4<f32> {
     let uv = in.uv;
     let dims = vec2<f32>(textureDimensions(uwScene));
+    // (OP) the cutscene letterbox and widescreen pillarbox (CameraEffect::Draw) are drawn into the
+    // scene before this pass, exact black (the border model with depth, the bars without). Leave
+    // them black -- the water's colour used to fill the bars whenever the camera went under. Lit
+    // geometry in the HDR scene is never exactly zero.
+    let raw = textureSampleLevel(uwScene, uwClamp, uv, 0.0).rgb;
+    if (max(raw.r, max(raw.g, raw.b)) <= 0.0) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
     let camWater = uwWaterHeight(uw.cam.xz);
     let camH = uw.cam.y - camWater;
     let here = uwMedium(uv, camH);
