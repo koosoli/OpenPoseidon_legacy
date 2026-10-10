@@ -27,7 +27,7 @@ namespace Poseidon
 namespace
 {
 constexpr int ListId = 62101, LatId = 62102, LonId = 62103, AltId = 62104, ImageryId = 62105, ElevationId = 62106,
-              KeyId = 62107, StatusId = 62108, EnterId = 62109, BackId = 62110, PanelId = 62111, ContentId = 62117;
+              KeyId = 62107, StatusId = 62108, EnterId = 62109, BackId = 62110, PanelId = 62111, ContentId = 62117, StartId = 62118;
 
 struct Place
 {
@@ -77,6 +77,7 @@ class WholeWorldDisplay : public Display
     ParamFile _resources;
     EarthProviders::Config _config;
     int _imagery = 0, _elevation = 0, _selected = -1;
+    bool _onFoot = false; // start as the soldier on the ground instead of the free-flight camera
 
     void AddControl(const char* base, const char* name, int id, const char* text, float x, float y, float w, float h)
     {
@@ -147,6 +148,7 @@ class WholeWorldDisplay : public Display
         SetLabel(ElevationId, std::string("Elevation: ") + Elevation().label);
         const bool osm = _config.contentId == "overpass";
         SetLabel(ContentId, osm ? "3D buildings, roads: OpenStreetMap" : "3D buildings, roads: off");
+        SetLabel(StartId, _onFoot ? "Start: on foot (soldier)" : "Start: free flight camera");
         std::string note = "Imagery: ";
         note += Imagery().attribution;
         note += ". Elevation: ";
@@ -270,12 +272,6 @@ class WholeWorldDisplay : public Display
                                          Utf8(mission),
                                          "--test-world",
                                          Utf8(world),
-                                         "--test-world-freefly",
-                                         "6400",
-                                         "6400",
-                                         Number(alt, 0),
-                                         "30",
-                                         orbit ? "-89.9" : "-20",
                                          "--test-world-hour",
                                          "12",
                                          "--vd",
@@ -290,6 +286,10 @@ class WholeWorldDisplay : public Display
                                      "--width", std::to_string(GEngine->Width()),
                                      "--height", std::to_string(GEngine->Height())});
         }
+        // On foot the mission's soldier stands at map [6400,6400] -- the chosen place -- and is set down on the
+        // streamed ground as it arrives (Man::Simulate); the near ground follows him as he moves.
+        if (!_onFoot)
+            args.insert(args.end(), {"--test-world-freefly", "6400", "6400", Number(alt, 0), "30", orbit ? "-89.9" : "-20"});
         if (Foundation::AppConfig::Instance().DevMode())
             args.push_back("--dev"); // the Earth panel (Go to a place, clearance) lives in the dev panel
         std::vector<const char*> argv;
@@ -365,7 +365,8 @@ class WholeWorldDisplay : public Display
         AddControl("RscText", "KeyLabel", 62116, "API key", 0.52f, 0.52f, 0.16f, 0.05f);
         AddControl("RscEdit", "Key", KeyId, "", 0.70f, 0.52f, 0.24f, 0.05f);
         AddControl("RscButton", "Content", ContentId, "", 0.52f, 0.58f, 0.42f, 0.05f);
-        AddControl("RscText", "Status", StatusId, "", 0.06f, 0.65f, 0.88f, 0.14f);
+        AddControl("RscButton", "Start", StartId, "", 0.52f, 0.64f, 0.42f, 0.05f);
+        AddControl("RscText", "Status", StatusId, "", 0.06f, 0.70f, 0.88f, 0.11f);
         AddControl("RscButton", "Enter", EnterId, "Enter whole world", 0.06f, 0.82f, 0.35f, 0.05f);
         AddControl("RscButton", "Back", BackId, "Back", 0.74f, 0.82f, 0.20f, 0.05f);
         if (auto* list = dynamic_cast<CListBox*>(GetCtrl(ListId)))
@@ -393,6 +394,11 @@ class WholeWorldDisplay : public Display
         else if (idc == ImageryId)
         {
             _imagery = (_imagery + 1) % int(EarthProviders::ImageryPresets().size());
+            ShowProviders();
+        }
+        else if (idc == StartId)
+        {
+            _onFoot = !_onFoot;
             ShowProviders();
         }
         else if (idc == ContentId)
