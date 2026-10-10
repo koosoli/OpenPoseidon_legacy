@@ -1160,7 +1160,8 @@ Cloudlet* CloudletSource::Drop(Vector3Par pos, Vector3Par speed, const Vector3* 
 {
     Cloudlet* cloudlet = new Cloudlet(_cloudletShape, _cloudletAnimPeriod, _cloudletDuration);
     cloudlet->SetSmokeShadow(_smokeShadow);
-    cloudlet->SetFades(_cloudletFadeIn, _cloudletFadeOut);
+    const float fadeIn = floatMax(_cloudletFadeIn, _handoffFadeIn);
+    cloudlet->SetFades(fadeIn, _cloudletFadeOut);
     cloudlet->SetGrowUp(_cloudletGrowUp, _cloudletSize * _generalize);
     cloudlet->SetAlpha(_cloudletAlpha);
     cloudlet->SetSpeed(_cloudletSpeed + speed);
@@ -1172,7 +1173,7 @@ Cloudlet* CloudletSource::Drop(Vector3Par pos, Vector3Par speed, const Vector3* 
     cloudlet->SetTemperature(_cloudletInitT, delta, _cloudletTTable);
     // SMK-035: where this particle's plume starts, and the life it is given -- the yardstick
     // the optical depth is measured against.
-    const float life = floatMax(_cloudletFadeIn + _cloudletDuration + _cloudletFadeOut, 0.05f);
+    const float life = floatMax(fadeIn + _cloudletDuration + _cloudletFadeOut, 0.05f);
     cloudlet->SetShadeOrigin(centre ? *centre : pos, life);
     cloudlet->SetPosition(pos);
     return cloudlet;

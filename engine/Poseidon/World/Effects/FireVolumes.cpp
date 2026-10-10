@@ -48,7 +48,9 @@ std::unordered_set<const void*>& Drawn()
 float BoxWidth(const FireVolumeReport& r)
 {
     if (r.kind == FireKindSmoke)
-        return std::max(r.radius * 10.0f, 6.0f); // a cloud spreads far wider than its source
+        // a cloud spreads wider than its source; the box's cells (width / 48) must stay small enough
+        // for its billows, so the length downwind comes from the wind-turned box, not the width
+        return std::max(r.radius * 10.0f, 8.0f);
     return r.kind == FireKindExplosion ? r.radius * 4.0f : std::max(r.radius * 5.0f, 2.4f);
 }
 

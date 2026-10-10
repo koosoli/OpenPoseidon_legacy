@@ -2079,6 +2079,16 @@ void SmokeShell::Simulate(float deltaT, SimulationImportance prec)
     }
 
     Move(position);
+    // FIRE-001: while the volumetric plume is drawn, the old puffs take over only where it leaves
+    // its box: downwind in a breeze (the wind-turned box runs ~19 m past the source), upward in
+    // calm air
+    if (FireVolumeDrawn(this))
+    {
+        const float wind = GLandscape ? GLandscape->GetWind().SizeXZ() : 0.0f;
+        _smoke.SetHandoffFadeIn(std::clamp(17.0f / std::max(wind, 1.5f), 3.0f, 10.0f));
+    }
+    else
+        _smoke.SetHandoffFadeIn(0.0f);
     _smoke.Simulate(Position(), Speed(), deltaT, prec);
     // FIRE-001: a volumetric plume while it lies smoking (Fire Pro's industrial smoke), fading
     // over its last ten seconds

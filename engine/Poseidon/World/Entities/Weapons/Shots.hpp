@@ -290,7 +290,7 @@ class SmokeShell: public ShotShell
 
 protected:
 	SmokeSource _smoke;
-	float _volumeColor[4] = {0.8f, 0.8f, 0.8f, 0.6f}; // FIRE-001 smoke plume: linear albedo, density
+	float _volumeColor[4] = {0.8f, 0.8f, 0.8f, 1.2f}; // FIRE-001 smoke plume: linear albedo, density
 
 public:
 	SmokeShell( EntityAI *parent, const AmmoType *type );

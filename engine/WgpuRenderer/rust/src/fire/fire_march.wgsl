@@ -17,6 +17,7 @@ struct Box {
     origin_cell: vec4<f32>, // min corner relative to the camera (m), w: cell size
     dims_fade: vec4<f32>,   // nx, ny, nz, fade in (0..1)
     smoke: vec4<f32>,       // smoke colour (linear albedo), w: density (1/m per unit)
+    frame: vec4<f32>,       // the frame's pivot (camera-relative), w: its turn about +y (rad)
 };
 
 struct MarchParams {
@@ -60,11 +61,29 @@ fn sampleField(i: u32, q: vec3<f32>) -> vec4<f32> {
     }
 }
 
+// a camera-relative point / direction in box i's frame (a plume box is turned to the wind about
+// the vertical through its source; an upright box's turn is 0 and this is the identity)
+fn toBox(i: u32, rel: vec3<f32>) -> vec3<f32> {
+    let f = M.boxes[i].frame;
+    let cs = vec2<f32>(cos(f.w), sin(f.w));
+    let d = rel.xz - f.xz;
+    return vec3<f32>(f.x + d.x * cs.x + d.y * cs.y, rel.y, f.z - d.x * cs.y + d.y * cs.x);
+}
+fn dirToBox(i: u32, dir: vec3<f32>) -> vec3<f32> {
+    let cs = vec2<f32>(cos(M.boxes[i].frame.w), sin(M.boxes[i].frame.w));
+    return vec3<f32>(dir.x * cs.x + dir.z * cs.y, dir.y, -dir.x * cs.y + dir.z * cs.x);
+}
+// box i's texture coordinates of camera-relative `rel`
+fn boxQ(i: u32, rel: vec3<f32>) -> vec3<f32> {
+    let b = M.boxes[i];
+    return (toBox(i, rel) - b.origin_cell.xyz) / (b.dims_fade.xyz * b.origin_cell.w);
+}
+
 // the field at camera-relative `rel`, faded out at the box's sides and top so the box never
 // shows (the bottom stands on the ground and keeps its edge)
 fn fieldAt(i: u32, rel: vec3<f32>) -> vec4<f32> {
     let b = M.boxes[i];
-    let q = (rel - b.origin_cell.xyz) / (b.dims_fade.xyz * b.origin_cell.w);
+    let q = boxQ(i, rel);
     if (any(q < vec3<f32>(0.0)) || any(q > vec3<f32>(1.0))) { return vec4<f32>(0.0); }
     let side = min(min(q.x, 1.0 - q.x), min(q.z, 1.0 - q.z));
     let fade = smoothstep(0.0, 0.1, side) * smoothstep(0.0, 0.15, 1.0 - q.y) * b.dims_fade.w;
@@ -72,9 +91,10 @@ fn fieldAt(i: u32, rel: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(f.x * fade, f.y, f.z * fade, f.w);
 }
 
-fn boxSpan(i: u32, dir: vec3<f32>) -> vec2<f32> {
+fn boxSpan(i: u32, dirWorld: vec3<f32>) -> vec2<f32> {
     let b = M.boxes[i];
-    let lo = b.origin_cell.xyz;
+    let dir = dirToBox(i, dirWorld);
+    let lo = b.origin_cell.xyz - toBox(i, vec3<f32>(0.0));
     let hi = lo + b.dims_fade.xyz * b.origin_cell.w;
     let inv = 1.0 / select(vec3<f32>(1e-6), dir, abs(dir) > vec3<f32>(1e-6));
     let t0 = lo * inv;
@@ -137,7 +157,7 @@ fn fs_fire(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
             if (s.y <= s.x) { continue; }
             for (var k = 0u; k < 64u; k++) {
                 let t = s.x + (s.y - s.x) * (f32(k) + 0.5) / 64.0;
-                mx = max(mx, sampleField(i, (dir * t - M.boxes[i].origin_cell.xyz) / (M.boxes[i].dims_fade.xyz * M.boxes[i].origin_cell.w)));
+                mx = max(mx, sampleField(i, boxQ(i, dir * t)));
             }
         }
         return vec4<f32>(0.05 + min(mx.y, 4.0), min(mx.z, 1.0) * 4.0, min(mx.x, 4.0), 0.5);
@@ -182,11 +202,13 @@ fn fs_fire(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
                     // a plume (bright, wide) needs the longer shadow march and its core darkened
                     // under the sky too; a flame's soot is lit by the fire anyway
                     let plume = M.boxes[i].dims_fade.w > 0.0 && smoke.x + smoke.y + smoke.z > 0.3;
-                    let taps = select(2, 4, plume);
+                    // a plume's shadow reaches across the box (6 taps, ~57 cells): its far side and
+                    // underside go dark, which is what gives smoke its shape in sunlight
+                    let taps = select(2, 6, plume);
                     var sunVis = 1.0;
                     if (sunLit) { sunVis = shadowAlong(i, rel, M.sun_dir.xyz, taps); }
                     var skyVis = 1.0;
-                    if (plume) { skyVis = mix(0.3, 1.0, shadowAlong(i, rel, vec3<f32>(0.0, 1.0, 0.0), 3)); }
+                    if (plume) { skyVis = mix(0.1, 1.0, shadowAlong(i, rel, vec3<f32>(0.0, 1.0, 0.0), 4)); }
                     scattering = smoke.xyz * (M.ambient.xyz * skyVis + direct * sunVis) * density;
                 }
                 let sigma = density + glow(f.z) * M.fire.z;

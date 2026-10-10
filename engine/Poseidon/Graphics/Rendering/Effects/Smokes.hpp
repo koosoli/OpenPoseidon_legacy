@@ -370,6 +370,7 @@ class CloudletSource: public SerializeClass
 	bool _smokeShadow = true;
 	float _cloudletGrowUp;
 	float _cloudletFadeIn;
+	float _handoffFadeIn = 0;
 	float _cloudletFadeOut;
 	float _cloudletAccY;
 	float _cloudletMinYSpeed;
@@ -391,6 +392,10 @@ class CloudletSource: public SerializeClass
 	void SetInterval( float interval ){_interval=interval;}
 	void SetShape( LODShapeWithShadow *shape ){_cloudletShape=shape;}
 	void SetAlpha( float alpha ) {_cloudletAlpha=alpha;}
+	//! FIRE-001: while a volumetric plume (FireVolumes) is drawn over this source, its puffs fade in
+	//! over at least this long, so they appear where the plume leaves the volume's box instead of
+	//! piling the old look over the new one at the source. 0: the configured fade-in.
+	void SetHandoffFadeIn( float seconds ) {_handoffFadeIn=seconds;}
 	void SetSmokeShadow(bool enabled) {_smokeShadow = enabled;}
 	void SetSize( float size ) {_cloudletSize=size;}
 	void SetTimes( float duration, float animPeriod )

@@ -23,7 +23,8 @@ struct SimParams {
     motion: vec4<f32>,      // buoyancy, smoke weight, damping (1/s), vorticity
     losses: vec4<f32>,      // cooling (1/s), dissipation (1/s), turbulence strength, turbulence scale
     wind: vec4<f32>,        // wind velocity x, bed patchiness (0..1), wind z, response (1/s)
-    extra: vec4<f32>,       // x: flame (1) or smoke only (0), y: share of the wind taken up
+    extra: vec4<f32>,       // x: flame (1) or smoke only (0), y: share of the wind taken up,
+                            // z: the box frame's turn about the vertical through the emitter (rad)
     // the solids (Fire Pro's colliders, solids.wgsl): 10 x 10 columns over the box, each open
     // from floor to ceiling (world y); a wall is a column whose ceiling is below its floor
     floor_h: array<vec4<f32>, 25>,
@@ -42,8 +43,12 @@ struct SimParams {
 
 fn dims() -> vec3<i32> { return vec3<i32>(S.dims.xyz); }
 
-fn solidAt(world: vec3<f32>) -> bool {
-    // the engine probed the columns around the bed (the box itself may sit downwind of it)
+fn solidAt(p: vec3<f32>) -> bool {
+    // the engine probed the columns around the bed (the box itself may sit downwind of it) in
+    // world axes; a wind-turned box's frame turns back about the emitter first
+    let cs = vec2<f32>(cos(S.extra.z), sin(S.extra.z));
+    let d = p.xz - S.emitter.xz;
+    let world = vec3<f32>(S.emitter.x + d.x * cs.x - d.y * cs.y, p.y, S.emitter.z + d.x * cs.y + d.y * cs.x);
     let corner = S.emitter.xz - 5.0 * S.step.w;
     let c = clamp(vec2<i32>(floor((world.xz - corner) / S.step.w)), vec2<i32>(0), vec2<i32>(9));
     let k = c.y * 10 + c.x;

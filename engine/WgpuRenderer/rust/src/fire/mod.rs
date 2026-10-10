@@ -16,6 +16,14 @@ pub const MAX_FIRES: usize = 4;
 const NX: u32 = 40;
 const NY: u32 = 72;
 const NZ: u32 = 40;
+/// A smoke-only plume in a breeze gets a box turned to face the wind and long that way: PX cells
+/// downwind, PY up, PZ across. The axis-aligned box was as wide as it was deep, so a drifting
+/// plume hit its downwind wall within a few metres and the old puffs carried the rest.
+const PX: u32 = 112;
+const PY: u32 = 48;
+const PZ: u32 = 48;
+/// below this wind (m/s) a plume rises: the upright box
+const PLUME_WIND: f32 = 0.8;
 const JACOBI: u32 = 24;
 const STEP: f32 = 1.0 / 60.0;
 /// Beyond this a fire is not simulated or drawn (the legacy sprites still are).
@@ -70,6 +78,8 @@ struct MarchBox {
     dims_fade: [f32; 4],
     /// smoke colour (linear albedo), w: density (1/m per unit of smoke)
     smoke: [f32; 4],
+    /// the box frame's pivot (camera-relative), w: its turn about +y (rad; local +x = world (cos, sin))
+    frame: [f32; 4],
 }
 
 #[repr(C)]
@@ -117,9 +127,13 @@ struct Grid {
     cur: usize,
     pcur: usize,
     params: wgpu::Buffer,
-    /// grid min corner (world) and cell size
+    /// grid min corner and cell size, in the box's frame: the world turned by `yaw` about the
+    /// vertical through `pivot` (the emitter), so an upright box (yaw 0) is in world coordinates
     origin: [f32; 3],
     cell: f32,
+    dims: [u32; 3],
+    yaw: f32,
+    pivot: [f32; 3],
     /// the width the engine probed the solids for (centred on the bed)
     width: f32,
     src: FireSource,
@@ -546,15 +560,17 @@ impl FireSystem {
         };
         let patchy = if smoke_only { 0.0 } else { ((radius - 0.6) / 1.2).clamp(0.0, 0.75) };
         // Fire Pro's industrial-smoke preset (editor/presets/industrial-smoke.json): no flame, a
-        // little heat, a lot of smoke, a steady rise; it drifts with the wind
+        // little heat, a lot of smoke, a steady rise; it drifts with the wind. Scaled to the
+        // smoke's 0.06/s dissipation (what stays is rate / dissipation) and cooler than a stack's:
+        // a grenade's cloud rolls along a few metres up rather than climbing to the box's lid
         let (heat, smoke_rate, rise, buoy) = if smoke_only {
-            (3.0, 20.0 * intensity.max(0.05), 2.0 * froude, 1.6)
+            (3.0, 4.0 * intensity.max(0.05), 1.2 * froude, 1.8)
         } else {
             (heat, 1.5 * smokiness * smokiness, rise, buoy)
         };
         let p = SimParams {
             origin_cell: [g.origin[0], g.origin[1], g.origin[2], g.cell],
-            dims: [NX, NY, NZ, 1],
+            dims: [g.dims[0], g.dims[1], g.dims[2], 1],
             // w: the solids' column size (the box width / 10)
             step: [STEP, g.time, (g.key % 97) as f32 * 1.7, g.width / 10.0],
             // the bed's flattened sphere stands on the ground (its half-height is 0.45 r)
@@ -564,7 +580,11 @@ impl FireSystem {
             motion: [buoy, 0.12, 0.1, 3.2],
             // turbulence: stronger for a bigger fire, its eddies a metre or so whatever the size
             losses: if smoke_only {
-                [0.62, 0.35, 0.5 * froude, 2.0]
+                // stronger, larger eddies than a flame's: what makes a plume billow instead of
+                // spreading as a smooth sheet; a grenade's smoke lasts (dissipation 0.06/s: at
+                // 0.35 a drifting plume was down to an eighth six seconds out, and the box's far
+                // end stood empty while the old puffs carried the cloud)
+                [0.62, 0.06, 0.5 * froude, 1.6]
             } else {
                 [0.62 / froude, 0.94 - 0.5 * smokiness, 0.8 * froude, 1.1]
             },
@@ -574,13 +594,19 @@ impl FireSystem {
             // was 0.15/s at half the wind: the flames stood straight while the smoke drifted).
             // The buoyant rise keeps its own vertical speed, so a flame leans, it does not lie down.
             // y: how patchily the bed burns (0 a steady bed)
-            wind: [s.wind[0], patchy, s.wind[2], if smoke_only { 1.5 } else { 1.8 }],
-            extra: [if smoke_only { 0.0 } else { 1.0 }, if smoke_only { 1.0 } else { 0.7 }, 0.0, 0.0],
+            // the wind in the box's frame; extra.z: the frame's turn, for the world's solid columns
+            wind: [
+                s.wind[0] * g.yaw.cos() + s.wind[2] * g.yaw.sin(),
+                patchy,
+                -s.wind[0] * g.yaw.sin() + s.wind[2] * g.yaw.cos(),
+                if smoke_only { 1.5 } else { 1.8 },
+            ],
+            extra: [if smoke_only { 0.0 } else { 1.0 }, if smoke_only { 1.0 } else { 0.7 }, g.yaw, 0.0],
             floor: s.floor,
             ceiling: s.ceiling,
         };
         queue.write_buffer(&g.params, 0, bytemuck::bytes_of(&p));
-        let groups = (NX.div_ceil(4), NY.div_ceil(4), NZ.div_ceil(4));
+        let groups = (g.dims[0].div_ceil(4), g.dims[1].div_ceil(4), g.dims[2].div_ceil(4));
         let c = g.cur;
         let n = 1 - c;
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("wgr_fire_step"), timestamp_writes: None });
@@ -687,16 +713,19 @@ impl FireSystem {
         // the march: nearest box first
         let mut order: Vec<usize> = (0..self.grids.len()).collect();
         let dist = |g: &Grid| {
-            let c = [g.origin[0] + NX as f32 * g.cell * 0.5 - cam[0], g.origin[1] - cam[1], g.origin[2] + NZ as f32 * g.cell * 0.5 - cam[2]];
+            let c = [g.pivot[0] - cam[0], g.origin[1] - cam[1], g.pivot[2] - cam[2]];
             c[0] * c[0] + c[1] * c[1] + c[2] * c[2]
         };
         order.sort_by(|&a, &b| dist(&self.grids[a]).total_cmp(&dist(&self.grids[b])));
-        let mut boxes = [MarchBox { origin_cell: [0.0; 4], dims_fade: [0.0; 4], smoke: [0.0; 4] }; MAX_FIRES];
+        let mut boxes = [MarchBox { origin_cell: [0.0; 4], dims_fade: [0.0; 4], smoke: [0.0; 4], frame: [0.0; 4] }; MAX_FIRES];
         for (slot, &gi) in order.iter().enumerate() {
             let g = &self.grids[gi];
+            // the box frame's coordinates less the camera's world ones: the march turns a
+            // camera-relative point about the pivot into the same space
             boxes[slot] = MarchBox {
                 origin_cell: [g.origin[0] - cam[0], g.origin[1] - cam[1], g.origin[2] - cam[2], g.cell],
-                dims_fade: [NX as f32, NY as f32, NZ as f32, g.fade],
+                dims_fade: [g.dims[0] as f32, g.dims[1] as f32, g.dims[2] as f32, g.fade],
+                frame: [g.pivot[0] - cam[0], g.pivot[1] - cam[1], g.pivot[2] - cam[2], g.yaw],
                 // the source's colour; Fire Pro's campfire density 7.11 / m for soot, its
                 // industrial smoke's 6 for a plume
                 smoke: [
@@ -712,7 +741,7 @@ impl FireSystem {
             inv_view_proj,
             sizes: [render_size.0 as f32, render_size.1 as f32, order.len() as f32, self.clock],
             sun_dir: [sun_dir[0], sun_dir[1], sun_dir[2], 0.38],
-            sun_radiance: [sun_radiance[0], sun_radiance[1], sun_radiance[2], 3.5],
+            sun_radiance: [sun_radiance[0], sun_radiance[1], sun_radiance[2], 5.0],
             ambient: [ambient[0], ambient[1], ambient[2], 1.0],
             // Fire Pro's smoke colour #25292e (linear), its campfire density 7.11 / m
             smoke: [0.0185, 0.0212, 0.0273, 7.11 * self.smoke_scale],
@@ -788,9 +817,6 @@ impl FireSystem {
 
 impl Grid {
     fn new(device: &wgpu::Device, key: u32, src: FireSource) -> Self {
-        let size = (NX, NY, NZ);
-        let rgba = wgpu::TextureFormat::Rgba16Float;
-        let r = wgpu::TextureFormat::R32Float;
         let radius = src.pos_radius[3].max(0.2);
         // the box: five bed radii wide (at least 2.4 m), standing two cells into the ground
         // the engine sends the width it probed the solids for
@@ -801,12 +827,23 @@ impl Grid {
         } else {
             (radius * 5.0).max(2.4)
         };
+        let (wx, wz) = (src.wind[0], src.wind[2]);
+        let wlen = (wx * wx + wz * wz).sqrt();
+        let pivot = [src.pos_radius[0], src.pos_radius[1], src.pos_radius[2]];
+        if src.params[3] > 2.5 && wlen > PLUME_WIND {
+            // a drifting plume: turned to the wind, `width` across, PX cells long, the source a
+            // tenth of the way in from the upwind end
+            let size = (PX, PY, PZ);
+            let cell = width / PZ as f32;
+            let length = PX as f32 * cell;
+            let origin = [pivot[0] - 0.1 * length, pivot[1] - 2.0 * cell, pivot[2] - width * 0.5];
+            return Grid::build(device, key, src, size, origin, cell, width, wz.atan2(wx), pivot);
+        }
+        let size = (NX, NY, NZ);
         let cell = width / NX as f32;
         // downwind: a plume leans with the wind, so the box gives it room on that side (the
         // engine probes the solids for the centred box; the shift is under a third of a column
         // set and the solids are sampled by world position, clamped to the edge columns)
-        let (wx, wz) = (src.wind[0], src.wind[2]);
-        let wlen = (wx * wx + wz * wz).sqrt();
         let lean = if src.params[3] > 2.5 { 0.3 } else { 0.32 };
         let shift = if wlen > 0.1 { (wlen * 0.9).min(width * lean) / wlen } else { 0.0 };
         let origin = [
@@ -814,6 +851,23 @@ impl Grid {
             src.pos_radius[1] - 2.0 * cell,
             src.pos_radius[2] - width * 0.5 + wz * shift,
         ];
+        Grid::build(device, key, src, size, origin, cell, width, 0.0, pivot)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build(
+        device: &wgpu::Device,
+        key: u32,
+        src: FireSource,
+        size: (u32, u32, u32),
+        origin: [f32; 3],
+        cell: f32,
+        width: f32,
+        yaw: f32,
+        pivot: [f32; 3],
+    ) -> Self {
+        let rgba = wgpu::TextureFormat::Rgba16Float;
+        let r = wgpu::TextureFormat::R32Float;
         Grid {
             key,
             fields: [make_tex(device, "wgr_fire_fields_a", rgba, size), make_tex(device, "wgr_fire_fields_b", rgba, size)],
@@ -833,6 +887,9 @@ impl Grid {
             }),
             origin,
             cell,
+            dims: [size.0, size.1, size.2],
+            yaw,
+            pivot,
             width,
             src,
             fade: 0.0,
