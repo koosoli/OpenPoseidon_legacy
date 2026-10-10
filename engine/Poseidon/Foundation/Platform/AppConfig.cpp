@@ -762,6 +762,10 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
         showOption(debugGroup->add_option("--test-mission,--test", _testMissionPath,
                                           "Run mission folder or mission.sqm directly and exit"),
                    CliHelpVisibility::Dev);
+        showOption(debugGroup->add_flag("--test-editor", _testEditor,
+                                        "Open the --test-mission in the mission editor instead of playing it "
+                                        "(the Whole World planner)"),
+                   CliHelpVisibility::Dev);
 
         // Spawn one or more models in front of the player once a --test-mission reaches
         // gameplay. The point is to get an arbitrary P3D through the real

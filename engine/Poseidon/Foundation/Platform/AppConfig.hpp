@@ -268,6 +268,7 @@ class AppConfig
 
     /// Test mission path (--test-mission)
     const std::string& GetTestMissionPath() const { return _testMissionPath; }
+    bool TestEditor() const { return _testEditor; }
     const std::vector<std::string>& GetTestModelPaths() const { return _testModelPaths; }
     // Overrides the .wrp the landscape loads, whatever world the mission asked
     // for. The only way to point the engine at an Arma 3 world today: those live
@@ -532,6 +533,7 @@ class AppConfig
     float _confirmRevertTimeoutSeconds = 0.f; // 0 → engine default (15s)
     float _appTimeoutSeconds = 0.f;
     std::string _testMissionPath;
+    bool _testEditor = false;
     std::vector<std::string> _testModelPaths;
     std::string _testWorldPath;
     int _testWorldMaxObjects = 0;

@@ -37,9 +37,7 @@ namespace
 constexpr int ListId = 62101, LatId = 62102, LonId = 62103, AltId = 62104, ImageryId = 62105, ElevationId = 62106,
               KeyId = 62107, StatusId = 62108, EnterId = 62109, BackId = 62110, PanelId = 62111, ContentId = 62117, StartId = 62118, DayCycleId = 62119;
 
-constexpr int PlanId = 62120, PlannerMapId = 62130, PlannerListId = 62131, PlannerStatusId = 62132,
-              ZoomInId = 62133, ZoomOutId = 62134, ClearId = 62135, DoneId = 62136, PlannerPanelId = 62137,
-              PlannerHelpId = 62237;
+constexpr int PlanId = 62120;
 
 struct Place
 {
@@ -103,7 +101,7 @@ class WholeWorldScreen : public Display
         cls->Add("y", y);
         cls->Add("w", w);
         cls->Add("h", h);
-        const bool multiLine = id == StatusId || id == PlannerStatusId || id == PlannerHelpId;
+        const bool multiLine = id == StatusId;
         cls->Add("sizeEx", multiLine ? 0.025f : 0.032f);
         if (const ParamEntry* inheritedSize = inherited->FindEntry("size"))
             cls->Add("size", static_cast<float>(*inheritedSize) * 1.6f);
@@ -119,7 +117,7 @@ class WholeWorldScreen : public Display
         color("colorActive", 0.24f, 0.38f, 0.49f, 1.0f);
         const bool button = std::string(base) == "RscButton", edit = std::string(base) == "RscEdit";
         color("colorBackground", button ? 0.12f : 0.04f, button ? 0.19f : 0.05f, button ? 0.25f : 0.065f,
-              id == PanelId || id == PlannerPanelId ? 0.94f : (button || edit ? 1.0f : 0.0f));
+              id == PanelId ? 0.94f : (button || edit ? 1.0f : 0.0f));
         if (multiLine)
         {
             cls->Add("style", ST_MULTI);
@@ -161,328 +159,13 @@ class WholeWorldScreen : public Display
     }
 };
 
-// ---- Mission planner: a satellite map of the area to place units on; they become the launched mission ----
-
-
-struct UnitType
-{
-    const char* label;
-    const char* className;
-    const char* side; // mission.sqm side; EMPTY = an unmanned vehicle
-};
-constexpr UnitType UnitTypes[] = {
-    {"BLUFOR rifleman", "SoldierWB", "WEST"},       {"BLUFOR machine gunner", "SoldierWMG", "WEST"},
-    {"BLUFOR AT soldier", "SoldierWAT", "WEST"},    {"BLUFOR M1A1 tank", "M1Abrams", "WEST"},
-    {"BLUFOR M113 APC", "M113", "WEST"},            {"BLUFOR UH-60 helicopter", "UH60", "WEST"},
-    {"BLUFOR jeep", "Jeep", "WEST"},                {"OPFOR rifleman", "SoldierEB", "EAST"},
-    {"OPFOR machine gunner", "SoldierEMG", "EAST"}, {"OPFOR AT soldier", "SoldierEAT", "EAST"},
-    {"OPFOR T-72 tank", "T72", "EAST"},             {"OPFOR BMP", "BMP", "EAST"},
-    {"OPFOR Mi-24 helicopter", "Mi24", "EAST"},     {"OPFOR UAZ", "UAZ", "EAST"},
-    {"Resistance soldier", "SoldierGB", "GUER"},    {"Empty truck", "Truck5t", "EMPTY"},
-    {"Empty jeep", "Jeep", "EMPTY"},
-};
-
-struct PlannedUnit
-{
-    double latitude, longitude;
-    int type;
-};
-
-// The unit types the loaded data actually has (a demo install lacks some).
-std::vector<int> AvailableUnitTypes()
-{
-    std::vector<int> result;
-    const ParamEntry* vehicles = Pars.FindEntry("CfgVehicles");
-    for (int i = 0; i < int(std::size(UnitTypes)); ++i)
-        if (vehicles && vehicles->FindEntry(UnitTypes[i].className))
-            result.push_back(i);
-    return result;
-}
-
-class PlannerMapCtrl : public CStatic
-{
-  public:
-    struct Marker
-    {
-        float u, v;
-        PackedColor color;
-        std::string label;
-        bool player;
-    };
-    Ref<Texture> map;
-    std::vector<Marker> markers;
-    std::function<void(float, float)> onLeft, onRight;
-    std::function<void(float)> onWheel;
-
-    PlannerMapCtrl(ControlsContainer* parent, int idc, const ParamEntry& cls) : CStatic(parent, idc, cls)
-    {
-        EnableCtrl(true);
-    }
-    void OnLButtonDown(float x, float y) override
-    {
-        if (onLeft)
-            onLeft((x - _x) / _w, (y - _y) / _h);
-    }
-    void OnRButtonDown(float x, float y) override
-    {
-        if (onRight)
-            onRight((x - _x) / _w, (y - _y) / _h);
-    }
-    void OnMouseZChanged(float dz) override
-    {
-        if (onWheel)
-            onWheel(dz);
-    }
-    void OnDraw(float alpha) override
-    {
-        const float w = GLOB_ENGINE->Width2D(), h = GLOB_ENGINE->Height2D();
-        const Rect2DPixel rect(_x * w, _y * h, _w * w, _h * h);
-        Draw2DPars pars;
-        pars.mip = GLOB_ENGINE->TextBank()->UseMipmap(map, 0, 0);
-        pars.SetColor(PackedColor(Color(map ? 1.0f : 0.1f, map ? 1.0f : 0.12f, map ? 1.0f : 0.15f, alpha)));
-        pars.spec = NoZBuf | IsAlpha | IsAlphaFog;
-        pars.SetU(0, 1);
-        pars.SetV(0, 1);
-        GLOB_ENGINE->Draw2D(pars, rect);
-        // centre cross: the chosen place
-        const PackedColor cross(Color(1, 1, 1, 0.6f * alpha));
-        const float cx = rect.x + rect.w * 0.5f, cy = rect.y + rect.h * 0.5f;
-        GLOB_ENGINE->DrawLine(Line2DPixel(cx - 8, cy, cx + 8, cy), cross, cross);
-        GLOB_ENGINE->DrawLine(Line2DPixel(cx, cy - 8, cx, cy + 8), cross, cross);
-        const MipInfo plain = GLOB_ENGINE->TextBank()->UseMipmap(nullptr, 0, 0);
-        const Rect2DFloat clip(_x, _y, _w, _h);
-        for (const auto& marker : markers)
-        {
-            if (marker.u < 0 || marker.u > 1 || marker.v < 0 || marker.v > 1)
-                continue;
-            const float px = rect.x + marker.u * rect.w, py = rect.y + marker.v * rect.h;
-            const float r = marker.player ? 7.0f : 5.0f;
-            if (marker.player)
-                GLOB_ENGINE->Draw2D(plain, PackedColor(Color(1, 1, 1, alpha)), Rect2DPixel(px - r - 2, py - r - 2, 2 * r + 4, 2 * r + 4));
-            GLOB_ENGINE->Draw2D(plain, PackedColor(Color(marker.color.R8() / 255.0f, marker.color.G8() / 255.0f, marker.color.B8() / 255.0f, alpha)), Rect2DPixel(px - r, py - r, 2 * r, 2 * r));
-            GLOB_ENGINE->DrawText(Point2DFloat(_x + (marker.u * rect.w + r + 4) / w, _y + (marker.v * rect.h - r) / h),
-                                  _size * 0.8f, clip, _font, PackedColor(Color(1, 1, 1, alpha)), marker.label.c_str());
-        }
-    }
-};
-
-class WholeWorldPlanner : public WholeWorldScreen
-{
-    std::filesystem::path _cache;
-    double _latitude, _longitude;
-    std::vector<PlannedUnit>& _plan;
-    std::vector<int> _types;
-    int _zoom = 1;
-    static constexpr double HalfSizes[] = {1000, 2500, 5000, 10000}; // metres from centre to map edge
-    double _south = 0, _west = 0, _north = 0, _east = 0;
-    std::future<std::pair<bool, std::string>> _build;
-    std::shared_ptr<std::atomic<bool>> _cancel = std::make_shared<std::atomic<bool>>(false);
-    std::filesystem::path _pending;
-    int _generation = 0;
-
-    PlannerMapCtrl* Map() { return dynamic_cast<PlannerMapCtrl*>(GetCtrl(PlannerMapId)); }
-    void Bounds()
-    {
-        const double half = HalfSizes[_zoom];
-        const double dLat = half / Earth::Radius * 180.0 / Earth::Pi;
-        const double dLon = dLat / std::max(0.05, std::cos(_latitude * Earth::Pi / 180.0));
-        _south = _latitude - dLat;
-        _north = _latitude + dLat;
-        _west = _longitude - dLon;
-        _east = _longitude + dLon;
-    }
-    void RequestMap()
-    {
-        Bounds();
-        RefreshMarkers();
-        if (auto* map = Map())
-            map->map = nullptr;
-        if (!EarthPlannerMap::Hook())
-        {
-            SetLabel(PlannerStatusId, "The map imagery needs the WGPU renderer (--render wgpu).");
-            return;
-        }
-        if (_build.valid())
-            return; // the running build finishes first; OnSimulate restarts for the new zoom
-        _pending = _cache / "planner" / ("map-" + std::to_string(++_generation) + "-" +
-                                         std::to_string(SDL_GetTicks()) + ".png");
-        const auto builder = EarthPlannerMap::Hook();
-        const auto cache = _cache, out = _pending;
-        const double s = _south, w = _west, n = _north, e = _east;
-        const auto cancel = _cancel;
-        _build = std::async(std::launch::async, [=]
-        {
-            std::string message;
-            const bool ok = builder(cache, s, w, n, e, 1024, out, message, [cancel] { return cancel->load(); });
-            return std::make_pair(ok, message);
-        });
-        SetLabel(PlannerStatusId, "Loading the satellite map...");
-    }
-    void RefreshMarkers()
-    {
-        auto* map = Map();
-        if (!map)
-            return;
-        map->markers.clear();
-        for (size_t i = 0; i < _plan.size(); ++i)
-        {
-            const auto& unit = _plan[i];
-            const UnitType& type = UnitTypes[unit.type];
-            const std::string side = type.side;
-            const Color color = side == "WEST" ? Color(0.2f, 0.45f, 1.0f, 1) :
-                                side == "EAST" ? Color(1.0f, 0.25f, 0.2f, 1) :
-                                side == "GUER" ? Color(0.2f, 0.85f, 0.3f, 1) : Color(0.95f, 0.85f, 0.2f, 1);
-            map->markers.push_back({float((unit.longitude - _west) / (_east - _west)),
-                                    float((_north - unit.latitude) / (_north - _south)), PackedColor(color),
-                                    (i == 0 ? std::string("YOU: ") : std::string()) + type.label, i == 0});
-        }
-        std::string text = "Left click: place the selected unit.  Right click: remove the nearest.  Mouse wheel or "
-                            "the buttons: zoom.  The first unit placed is you.  ";
-        text += std::to_string(_plan.size()) + " unit(s) planned; map " + Number(2 * HalfSizes[_zoom] / 1000, 0) +
-                " km across.";
-        SetLabel(PlannerHelpId, text);
-    }
-    int SelectedType()
-    {
-        auto* list = dynamic_cast<CListBox*>(GetCtrl(PlannerListId));
-        const int row = list ? list->GetCurSel() : -1;
-        return row >= 0 && row < int(_types.size()) ? _types[row] : -1;
-    }
-    void Place(float u, float v)
-    {
-        const int type = SelectedType();
-        if (type < 0 || u < 0 || u > 1 || v < 0 || v > 1)
-            return;
-        _plan.push_back({_north - v * (_north - _south), _west + u * (_east - _west), type});
-        RefreshMarkers();
-    }
-    void Remove(float u, float v)
-    {
-        int best = -1;
-        float bestDistance = 0.03f * 0.03f;
-        for (size_t i = 0; i < _plan.size(); ++i)
-        {
-            const float du = float((_plan[i].longitude - _west) / (_east - _west)) - u;
-            const float dv = float((_north - _plan[i].latitude) / (_north - _south)) - v;
-            if (du * du + dv * dv < bestDistance)
-            {
-                bestDistance = du * du + dv * dv;
-                best = int(i);
-            }
-        }
-        if (best >= 0)
-        {
-            _plan.erase(_plan.begin() + best);
-            RefreshMarkers();
-        }
-    }
-    void Zoom(int step)
-    {
-        const int zoom = std::clamp(_zoom + step, 0, int(std::size(HalfSizes)) - 1);
-        if (zoom == _zoom)
-            return;
-        _zoom = zoom;
-        RequestMap();
-    }
-
-  public:
-    WholeWorldPlanner(ControlsContainer* parent, std::filesystem::path cache, double latitude, double longitude,
-                      std::vector<PlannedUnit>& plan)
-        : WholeWorldScreen(parent), _cache(std::move(cache)), _latitude(latitude), _longitude(longitude), _plan(plan)
-    {
-        _idd = WholeWorldMenuId + 1;
-        _types = AvailableUnitTypes();
-        // A square map on screen: its width in screen units follows the display's aspect.
-        const float mapH = 0.84f;
-        const float aspect = GEngine && GEngine->Height() > 0 ? float(GEngine->Width()) / GEngine->Height() : 16.0f / 9.0f;
-        const float mapW = std::min(0.62f, mapH / aspect * (4.0f / 3.0f));
-        AddControl("RscText", "PlannerPanel", PlannerPanelId, "", 0.01f, 0.03f, 0.98f, 0.94f);
-        AddControl("RscText", "PlannerMap", PlannerMapId, "", 0.02f, 0.08f, mapW, mapH);
-        const float x = 0.04f + mapW, w = 0.97f - x;
-        AddControl("RscText", "PlannerTitle", 62138, "PLAN MISSION", x, 0.05f, w, 0.05f);
-        AddControl("RscListBox", "PlannerUnits", PlannerListId, "", x, 0.11f, w, 0.40f);
-        AddControl("RscButton", "ZoomIn", ZoomInId, "Zoom in", x, 0.53f, w * 0.48f, 0.05f);
-        AddControl("RscButton", "ZoomOut", ZoomOutId, "Zoom out", x + w * 0.52f, 0.53f, w * 0.48f, 0.05f);
-        AddControl("RscButton", "Clear", ClearId, "Remove all units", x, 0.59f, w, 0.05f);
-        AddControl("RscText", "PlannerHelp", PlannerHelpId, "", x, 0.65f, w, 0.13f);
-        AddControl("RscText", "PlannerStatus", PlannerStatusId, "", x, 0.79f, w, 0.06f);
-        AddControl("RscButton", "Done", DoneId, "Done", x, 0.87f, w, 0.05f);
-        for (int id : {PlannerHelpId, PlannerStatusId})
-            if (auto* text = dynamic_cast<CStatic*>(GetCtrl(id)))
-                text->EnableCtrl(false);
-        if (auto* list = dynamic_cast<CListBox*>(GetCtrl(PlannerListId)))
-        {
-            for (int type : _types)
-                list->AddString(UnitTypes[type].label);
-            list->SetCurSel(0);
-        }
-        if (auto* map = Map())
-        {
-            map->onLeft = [this](float u, float v) { Place(u, v); };
-            map->onRight = [this](float u, float v) { Remove(u, v); };
-            map->onWheel = [this](float dz) { Zoom(dz > 0 ? -1 : 1); };
-        }
-        RequestMap();
-    }
-    ~WholeWorldPlanner() override
-    {
-        _cancel->store(true);
-        if (_build.valid())
-            _build.wait();
-    }
-    Control* OnCreateCtrl(int type, int idc, const ParamEntry& cls) override
-    {
-        if (idc == PlannerMapId)
-            return new PlannerMapCtrl(this, idc, cls);
-        return WholeWorldScreen::OnCreateCtrl(type, idc, cls);
-    }
-    void OnButtonClicked(int idc) override
-    {
-        if (idc == DoneId)
-            Exit(1);
-        else if (idc == ZoomInId)
-            Zoom(-1);
-        else if (idc == ZoomOutId)
-            Zoom(1);
-        else if (idc == ClearId)
-        {
-            _plan.clear();
-            RefreshMarkers();
-        }
-        else
-            WholeWorldScreen::OnButtonClicked(idc);
-    }
-    void OnSimulate(EntityAI* vehicle) override
-    {
-        if (_build.valid() && _build.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
-        {
-            const auto [ok, message] = _build.get();
-            const auto built = _pending;
-            Bounds();
-            const bool current = built.filename().string().rfind("map-" + std::to_string(_generation) + "-", 0) == 0;
-            if (!current)
-                RequestMap(); // the zoom changed while it loaded
-            else if (ok)
-            {
-                if (auto* map = Map())
-                    map->map = GlobLoadTexture(RStringB(Utf8(built).c_str()));
-                SetLabel(PlannerStatusId, message);
-            }
-            else
-                SetLabel(PlannerStatusId, message);
-        }
-        WholeWorldScreen::OnSimulate(vehicle);
-    }
-};
-
 class WholeWorldDisplay : public WholeWorldScreen
 {
     EarthProviders::Config _config;
     int _imagery = 0, _elevation = 0, _selected = -1;
     bool _onFoot = false; // start as the soldier on the ground instead of the free-flight camera
     bool _dayCycle = false; // test aid: one day per minute
-    std::vector<PlannedUnit> _plan; // from the mission planner; empty = the lone default soldier
-    double _planLatitude = 0, _planLongitude = 0;
+    bool _editor = false; // open the mission editor (Plan mission) instead of playing
 
     const EarthProviders::Preset& Imagery() const { return EarthProviders::ImageryPresets()[_imagery]; }
     const EarthProviders::Preset& Elevation() const { return EarthProviders::ElevationPresets()[_elevation]; }
@@ -570,60 +253,13 @@ class WholeWorldDisplay : public WholeWorldScreen
         };
         return parse(LatId, lat) && parse(LonId, lon) && std::abs(lat) <= 84 && std::abs(lon) <= 180;
     }
+    // Plan mission: the same whole-world restart, but the start mission opens in OFP's mission editor
+    // (units, waypoints, triggers, Preview), whose map shows the provider's satellite image there.
     void OpenPlanner()
     {
-        double lat = 0, lon = 0;
-        if (!ParsePlace(lat, lon))
-        {
-            Status("Enter a valid latitude and longitude first.");
-            return;
-        }
-        // A plan belongs to its place: choosing another place starts an empty one.
-        if (!_plan.empty() && (std::abs(_planLatitude - lat) > 1e-4 || std::abs(_planLongitude - lon) > 1e-4))
-            _plan.clear();
-        _planLatitude = lat;
-        _planLongitude = lon;
-        CreateChild(new WholeWorldPlanner(this, WorldStreamCache(), lat, lon, _plan));
-    }
-    // The planned units as mission.sqm groups (each unit its own group; the first is the player), and the
-    // empty vehicles. Positions in the local frame the Earth origin anchors at map [6400,6400].
-    void WritePlan(std::ofstream& sqm, double lat, double lon)
-    {
-        std::vector<std::string> groups, empties;
-        int id = 0;
-        for (size_t i = 0; i < _plan.size(); ++i)
-        {
-            const auto& unit = _plan[i];
-            const UnitType& type = UnitTypes[unit.type];
-            const auto local = Earth::ToLocal(lat, lon, unit.latitude, unit.longitude);
-            std::string item = "position[]={" + Number(local.x, 2) + ",0," + Number(local.z, 2) + "};id=" +
-                               std::to_string(id++) + ";side=\"" + type.side + "\";vehicle=\"" + type.className +
-                               "\";skill=0.6;";
-            if (std::string(type.side) == "EMPTY")
-            {
-                empties.push_back(item);
-                continue;
-            }
-            if (i == 0)
-                item += "player=\"PLAYER COMMANDER\";init=\"this allowDamage false;0 setOvercast 0.3\";";
-            groups.push_back(std::string("side=\"") + type.side + "\";class Vehicles {items=1;class Item0 {" + item +
-                             "leader=1;};};");
-        }
-        sqm << " class Groups {items=" << groups.size() << ";\n";
-        for (size_t i = 0; i < groups.size(); ++i)
-            sqm << "  class Item" << i << " {" << groups[i] << "};\n";
-        sqm << " };\n";
-        if (!empties.empty())
-        {
-            sqm << " class Vehicles {items=" << empties.size() << ";\n";
-            for (size_t i = 0; i < empties.size(); ++i)
-                sqm << "  class Item" << i << " {" << empties[i] << "};\n";
-            sqm << " };\n";
-        }
-    }
-    bool PlanHasPlayer() const
-    {
-        return !_plan.empty() && std::string(UnitTypes[_plan.front().type].side) != "EMPTY";
+        _editor = true;
+        Enter();
+        _editor = false;
     }
 
     // The engine starts whole-world mode at boot (the terrain renderer is built for it), so like Local maps
@@ -654,18 +290,23 @@ class WholeWorldDisplay : public WholeWorldScreen
             std::ofstream file(world, std::ios::binary | std::ios::trunc);
             file.write(reinterpret_cast<const char*>(data.data()), std::streamsize(data.size()));
             std::ofstream sqm(mission / "mission.sqm", std::ios::trunc);
-            sqm << "version=11;\nclass Mission {\n randomSeed=42;\n"
-                   " class Intel {weather=0.3;weatherForecast=0.3;fog=0;fogForecast=0;year=1985;month=6;day=21;hour=12;minute=0;};\n";
-            if (PlanHasPlayer())
-                WritePlan(sqm, lat, lon);
-            else
-                sqm << " class Groups {items=1;class Item0 {side=\"WEST\";class Vehicles {items=1;class Item0 {\n"
-                       "  position[]={6400,0,6400};id=0;side=\"WEST\";vehicle=\"SoldierWB\";\n"
-                       "  player=\"PLAYER COMMANDER\";leader=1;skill=1;"
-                       "init=\"this allowDamage false;0 setRain 0;0 setOvercast 0.3;0 setFog 0\";\n"
-                       " };};};};\n";
-            sqm << "};\n"
-                   "class Intro {randomSeed=1;};class OutroWin {randomSeed=1;};class OutroLoose {randomSeed=1;};\n";
+            // The full layout OFP's editor writes: the editor's loader (the Mission editor button opens this
+            // file in it) refuses a mission without its empty Waypoints/Sensors/Markers classes, and reads the
+            // weather as startWeather/forecastWeather. Starts at overcast 0.3.
+            const char* intel = "  class Intel {startWeather=0.3;forecastWeather=0.3;startFog=0;forecastFog=0;"
+                                "year=1985;month=6;day=21;hour=12;minute=0;};\n";
+            const char* empty = "  class Vehicles {items=0;};\n  class Markers {items=0;};\n  class Sensors {items=0;};\n";
+            sqm << "version=11;\nclass Mission\n{\n  addOns[]={};\n  addOnsAuto[]={};\n  randomSeed=42;\n" << intel
+                << "  class Groups\n  {\n    items=1;\n    class Item0\n    {\n      side=\"WEST\";\n"
+                   "      class Vehicles\n      {\n        items=1;\n        class Item0\n        {\n"
+                   "          position[]={6400,0,6400};\n          id=0;\n          side=\"WEST\";\n"
+                   "          vehicle=\"SoldierWB\";\n          player=\"PLAYER COMMANDER\";\n          leader=1;\n"
+                   "          skill=0.6;\n        };\n      };\n"
+                   "      class Waypoints {items=0;};\n      class Sensors {items=0;};\n    };\n  };\n"
+                << empty << "};\n";
+            for (const char* section : {"Intro", "OutroWin", "OutroLoose"})
+                sqm << "class " << section << "\n{\n  addOns[]={};\n  addOnsAuto[]={};\n  randomSeed=1;\n" << intel
+                    << "  class Groups {items=0;};\n" << empty << "};\n";
             // Test aid: a whole day in one minute (0.02 h every 0.05 s), to judge sunrise, noon, sunset
             // and night lighting from one spot. Off: no init script at all.
             const auto initScript = mission / "init.sqs";
@@ -717,7 +358,9 @@ class WholeWorldDisplay : public WholeWorldScreen
         }
         // On foot the mission's soldier stands at map [6400,6400] -- the chosen place -- and is set down on the
         // streamed ground as it arrives (Man::Simulate); the near ground follows him as he moves.
-        if (!_onFoot)
+        if (_editor)
+            args.push_back("--test-editor");
+        else if (!_onFoot)
             args.insert(args.end(), {"--test-world-freefly", "6400", "6400", Number(alt, 0), "30", orbit ? "-89.9" : "-20"});
         if (Foundation::AppConfig::Instance().DevMode())
             args.push_back("--dev"); // the Earth panel (Go to a place, clearance) lives in the dev panel
@@ -798,7 +441,7 @@ class WholeWorldDisplay : public WholeWorldScreen
         AddControl("RscButton", "DayCycle", DayCycleId, "", 0.06f, 0.64f, 0.42f, 0.05f);
         AddControl("RscText", "Status", StatusId, "", 0.06f, 0.70f, 0.88f, 0.11f);
         AddControl("RscButton", "Enter", EnterId, "Enter whole world", 0.06f, 0.82f, 0.32f, 0.05f);
-        AddControl("RscButton", "Plan", PlanId, "Plan mission (map)", 0.40f, 0.82f, 0.32f, 0.05f);
+        AddControl("RscButton", "Plan", PlanId, "Mission editor", 0.40f, 0.82f, 0.32f, 0.05f);
         AddControl("RscButton", "Back", BackId, "Back", 0.74f, 0.82f, 0.20f, 0.05f);
         if (auto* list = dynamic_cast<CListBox*>(GetCtrl(ListId)))
         {

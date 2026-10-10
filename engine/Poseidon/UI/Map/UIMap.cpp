@@ -19,6 +19,17 @@
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/Roads.hpp>
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
+#include <Poseidon/World/Terrain/EarthFrame.hpp>
+#include <Poseidon/World/Terrain/EarthPlannerMap.hpp>
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>
+#include <chrono>
+#include <cstdlib>
+#include <filesystem>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <vector>
 
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Detection/Detector.hpp>
@@ -749,8 +760,156 @@ struct MountainList
     }
 };
 
+// Whole World: the landscape behind the editor/briefing map is an empty placeholder, so the map shows the
+// provider's satellite image of the world square around the chosen place instead (the origin anchors map
+// [6400,6400]). One 2048 px overview (~6 m/px over 12.8 km) under a 4x4 grid of 1024 px detail tiles
+// (~3 m/px), all built once per run on one worker through EarthPlannerMap, nearest the centre first.
+namespace
+{
+struct EarthMapPiece
+{
+    float x0, z0, x1, z1; // world square it covers
+    int size;
+    std::filesystem::path file;
+    Ref<Texture> texture;
+    bool ready = false;
+};
+struct EarthMapImageryState
+{
+    std::vector<EarthMapPiece> pieces; // [0] = overview
+    std::future<void> worker;
+    std::shared_ptr<std::vector<std::pair<int, std::string>>> done = std::make_shared<std::vector<std::pair<int, std::string>>>();
+    std::shared_ptr<std::mutex> lock = std::make_shared<std::mutex>();
+    std::string status = "Loading the satellite map...";
+    bool started = false;
+};
+
+EarthMapImageryState& EarthMapImagery()
+{
+    static EarthMapImageryState state;
+    if (state.started)
+    {
+        std::vector<std::pair<int, std::string>> finished;
+        {
+            std::lock_guard<std::mutex> guard(*state.lock);
+            finished.swap(*state.done);
+        }
+        for (const auto& [index, message] : finished)
+        {
+            auto& piece = state.pieces[index];
+            piece.ready = true;
+            if (!message.empty())
+            {
+                if (index == 0)
+                    state.status = message;
+                continue;
+            }
+            const auto name = piece.file.u8string();
+            piece.texture = GlobLoadTexture(RStringB(std::string(name.begin(), name.end()).c_str()));
+            if (index == 0)
+            {
+                state.status = piece.texture ? std::string() : "The satellite map could not be loaded as a texture.";
+                LOG_INFO(Graphics, "Whole World editor map: overview {}", piece.texture ? "loaded" : "FAILED");
+            }
+        }
+        return state;
+    }
+    state.started = true;
+    const auto builder = EarthPlannerMap::Hook();
+    const char* cache = std::getenv("POSEIDON_EARTH_CACHE");
+    const char* latText = std::getenv("POSEIDON_EARTH_LATITUDE");
+    const char* lonText = std::getenv("POSEIDON_EARTH_LONGITUDE");
+    if (!builder || !cache || !latText || !lonText)
+    {
+        state.status = "No satellite map: whole-world imagery is not available in this renderer.";
+        return state;
+    }
+    const double lat = std::atof(latText), lon = std::atof(lonText);
+    const float size = LandGrid * LandRange;
+    const auto cacheDir = std::filesystem::u8path(cache);
+    const auto stamp = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    state.pieces.push_back({0, 0, size, size, 2048, cacheDir / "planner" / ("editor-" + stamp + "-all.png")});
+    constexpr int Grid = 4;
+    std::vector<std::pair<float, int>> order;
+    for (int j = 0; j < Grid; ++j)
+        for (int i = 0; i < Grid; ++i)
+        {
+            const float step = size / Grid;
+            state.pieces.push_back({i * step, j * step, (i + 1) * step, (j + 1) * step, 1024,
+                                    cacheDir / "planner" / ("editor-" + stamp + "-" + std::to_string(i) + "-" + std::to_string(j) + ".png")});
+            const float dx = (i + 0.5f) * step - 0.5f * size, dz = (j + 0.5f) * step - 0.5f * size;
+            order.push_back({dx * dx + dz * dz, int(state.pieces.size()) - 1});
+        }
+    std::sort(order.begin(), order.end());
+    std::vector<int> sequence = {0};
+    for (const auto& item : order)
+        sequence.push_back(item.second);
+    struct Job
+    {
+        int index;
+        double south, west, north, east;
+        int size;
+        std::filesystem::path file;
+    };
+    std::vector<Job> jobs;
+    for (int index : sequence)
+    {
+        const auto& piece = state.pieces[index];
+        try
+        {
+            const auto sw = Earth::FromLocal(lat, lon, piece.x0, piece.z0), ne = Earth::FromLocal(lat, lon, piece.x1, piece.z1);
+            jobs.push_back({index, sw.latitude, sw.longitude, ne.latitude, ne.longitude, piece.size, piece.file});
+        }
+        catch (...)
+        {
+        }
+    }
+    auto done = state.done;
+    auto lock = state.lock;
+    state.worker = std::async(std::launch::async, [=]
+    {
+        for (const auto& job : jobs)
+        {
+            std::string message;
+            const bool ok = builder(cacheDir, job.south, job.west, job.north, job.east, job.size, job.file, message, {});
+            std::lock_guard<std::mutex> guard(*lock);
+            done->push_back({job.index, ok ? std::string() : (message.empty() ? std::string("No imagery.") : message)});
+        }
+    });
+    return state;
+}
+} // namespace
+
 void CStaticMap::DrawBackground()
 {
+    if (EarthStreaming::Enabled())
+    {
+        auto& imagery = EarthMapImagery();
+        const float size = LandGrid * LandRange;
+        const auto drawSquare = [&](float x0, float z0, float x1, float z1, Texture* texture, PackedColor color)
+        {
+            const DrawCoord topLeft = WorldToScreen(Vector3(x0, 0, z1)), bottomRight = WorldToScreen(Vector3(x1, 0, z0));
+            const Rect2DPixel rect(topLeft.x * _wScreen, topLeft.y * _hScreen, (bottomRight.x - topLeft.x) * _wScreen,
+                                   (bottomRight.y - topLeft.y) * _hScreen);
+            Draw2DPars pars;
+            pars.mip = GLOB_ENGINE->TextBank()->UseMipmap(texture, 0, 0);
+            pars.SetColor(color);
+            pars.spec = NoZBuf | IsAlpha | IsAlphaFog;
+            pars.SetU(0, 1);
+            pars.SetV(0, 1);
+            GEngine->Draw2D(pars, rect, _clipRect);
+        };
+        const bool overview = !imagery.pieces.empty() && imagery.pieces[0].texture;
+        drawSquare(0, 0, size, size, overview ? imagery.pieces[0].texture.GetRef() : nullptr,
+                   overview ? PackedColor(Color(1, 1, 1, 1)) : PackedColor(Color(0.16f, 0.18f, 0.2f, 1)));
+        for (size_t i = 1; i < imagery.pieces.size(); ++i)
+            if (const auto& piece = imagery.pieces[i]; piece.texture)
+                drawSquare(piece.x0, piece.z0, piece.x1, piece.z1, piece.texture.GetRef(), PackedColor(Color(1, 1, 1, 1)));
+        if (!imagery.status.empty() && _font)
+            GEngine->DrawText(Point2DFloat(_x + 0.02f, _y + 0.02f), _size, Rect2DFloat(_x, _y, _w, _h), _font,
+                              PackedColor(Color(1, 1, 1, 1)), imagery.status.c_str());
+        return;
+    }
     float invLandRange = 1.0 / LandRange;
     float ptsLand = 800.0 * _invScaleX * invLandRange; // avoid dependece on video resolution
     float invPtsLand = 1.0 / ptsLand;

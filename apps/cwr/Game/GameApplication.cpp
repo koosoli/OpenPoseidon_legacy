@@ -3038,8 +3038,10 @@ void GameApplication::StartGameMode()
 
             strncpy(LoadFile, loadPath->c_str(), sizeof(LoadFile) - 1);
             LoadFile[sizeof(LoadFile) - 1] = 0;
-            AutoTest = true;
-            LOG_INFO(Core, "Test mission: {} -> {}", testMission, *loadPath);
+            // --test-editor: OFP's own behaviour for a mission given at start-up without autotest is to
+            // open it in the editor (World::StartIntro -> OpenEditor).
+            AutoTest = !AppConfig::Instance().TestEditor();
+            LOG_INFO(Core, "Test mission{}: {} -> {}", AutoTest ? "" : " (editor)", testMission, *loadPath);
         }
         else if (Benchmark)
         {
