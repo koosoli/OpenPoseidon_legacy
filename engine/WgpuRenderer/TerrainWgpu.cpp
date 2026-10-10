@@ -3602,7 +3602,41 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
     }
     // Retain the native heightmap for terrain/fog queries, but the geographic
     // surface itself is the bounded near/far Earth mesh with shared imagery.
+    // Snow (whole world). DrawTerrain returns before its snow code in this mode, so the island's fixed
+    // 645 m line and an empty track window were all the Earth terrain ever saw. A real-world snow line: the
+    // permanent line falls from ~5,000 m at the equator to ~2,900 m in the Alps and ~1,700 m in Norway
+    // (5000 cos(lat)^1.5), and outside the tropics winter brings it down by up to 2,200 m (Alps in December
+    // ~700 m). 250 m ramp; 30 cm of cover above it, deep enough for footprints and tracks to press in.
+    if (GSnow().EffSnowlineEnabled() && !SnowField::ResolveSnowlineOverride().active)
+    {
+        const double lat = std::abs(origin.latitude);
+        const double c = std::cos(lat * Earth::Pi / 180.0);
+        const double permanent = 5000.0 * c * std::sqrt(std::max(c, 0.0));
+        const double year = Glob.clock.GetTimeInYear(); // 0 = 1 January
+        const double summerNorth = std::cos(2.0 * Earth::Pi * (year - 172.0 / 365.0)); // +1 on 21 June
+        const double winter = 0.5 * (1.0 - (origin.latitude >= 0 ? summerNorth : -summerNorth));
+        const double t = std::clamp((lat - 20.0) / 25.0, 0.0, 1.0);
+        GSnow().snowlineHeight = float(std::max(permanent - winter * 2200.0 * t * t * (3.0 - 2.0 * t), 0.0));
+        GSnow().snowlineRange = 250.0f;
+        GSnow().snowlineDepth = 0.3f;
+    }
+    _params.snowline_height =
+        GSnow().EffSnowlineEnabled() && GSnow().snowlineRange > 0.0f ? GSnow().EffSnowlineHeight() : -1.0f;
+    _params.snowline_range = std::max(GSnow().snowlineRange, 0.0f);
+    _params.snowline_depth = std::clamp(GSnow().snowlineDepth, 0.0f, 1.0f);
     _engine.QueueTerrainParams(_params);
+    {
+        // The deficit window (footprints, wheel and rotor tracks) the snow shading reads.
+        const auto& snow = GSnow();
+        const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        if ((snow.CoverActive() || _snowWasEnabled) &&
+            (snow.CoverActive() != _snowWasEnabled || wall - _snowUploadWallTime >= 0.1))
+        {
+            _engine.QueueSnow(snow.Snapshot(camera.Position().X(), camera.Position().Z()));
+            _snowUploadWallTime = wall;
+            _snowWasEnabled = snow.CoverActive();
+        }
+    }
     if(_earthSurface)
     {
         const EarthTerrainStream::Patch& wanted = _earthPendingPatch ? *_earthPendingPatch : *_earthPatch;
@@ -3799,26 +3833,6 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     _params.snowline_height =
         GSnow().EffSnowlineEnabled() && GSnow().snowlineRange > 0.0f ? GSnow().EffSnowlineHeight() : -1.0f;
     _params.snowline_range = std::max(GSnow().snowlineRange, 0.0f);
-    if (EarthStreaming::Enabled() && GSnow().EffSnowlineEnabled() && !SnowField::ResolveSnowlineOverride().active)
-    {
-        // Whole World: the island's fixed 645 m line would whiten every real highland (Grand Canyon's
-        // rim). Use a real-world snow line instead: the permanent line falls from ~5,000 m at the
-        // equator to ~2,900 m in the Alps and ~1,700 m in Norway (5000 cos(lat)^1.5), and outside the
-        // tropics winter brings it down by up to 2,200 m (Alps in December ~700 m). Ramp 250 m.
-        const double lat = std::abs(EarthStreaming::GetLocation().latitude);
-        const double c = std::cos(lat * Earth::Pi / 180.0);
-        const double permanent = 5000.0 * c * std::sqrt(std::max(c, 0.0));
-        const double year = Glob.clock.GetTimeInYear(); // 0 = 1 January
-        const double summerNorth = std::cos(2.0 * Earth::Pi * (year - 172.0 / 365.0)); // +1 on 21 June
-        const double summer = EarthStreaming::GetLocation().latitude >= 0 ? summerNorth : -summerNorth;
-        const double winter = 0.5 * (1.0 - summer);
-        const double t = std::clamp((lat - 20.0) / 25.0, 0.0, 1.0);
-        const double seasonal = winter * 2200.0 * t * t * (3.0 - 2.0 * t);
-        _params.snowline_height = float(std::max(permanent - seasonal, 0.0));
-        _params.snowline_range = 250.0f;
-        GSnow().snowlineHeight = _params.snowline_height; // objects and trees use the same line
-        GSnow().snowlineRange = 250.0f;
-    }
     _params.snowline_depth = std::clamp(GSnow().snowlineDepth, 0.0f, 1.0f);
     const auto& weather = render::frame::GPresentationSnapshot();
     _params._pad2 = UniformWettingDensity(weather.landscapeRainDensity, weather.rainEffectiveDensity,

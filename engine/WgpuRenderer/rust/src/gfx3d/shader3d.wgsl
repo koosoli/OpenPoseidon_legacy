@@ -20,7 +20,7 @@
 #import tree_snow::{tree_snow_height, tree_snow_coverage}
 // Group(4) terrain heightmap + surface_y, shared with the shadow depth pass.
 // surface_grad tilts conformed veg normals to follow the ground slope (color pass only).
-#import conform::{surface_y, surface_grad, surface_y_raster, hm_params, snow_depth, rigid_ground_fragment, cave_daylight}
+#import conform::{surface_y, surface_grad, surface_y_raster, hm_params, snow_depth, snow_deficit, rigid_ground_fragment, cave_daylight}
 
 // BEGIN_MUZZLE_FLASH_HELPERS (actual helper exercised by the GPU probe)
 fn stock_muzzle_flash_radiance(srgb: vec3<f32>, linear: f32) -> vec3<f32> {
@@ -991,11 +991,24 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
                 depth = max(depth, smoothstep(frame.snow_surface.y, frame.snow_surface.y + frame.snow_surface.z, altitude)
                     * frame.snow_surface.w);
             }
-            let cover = snow_surface_coverage(depth, dot(n, radial_up), 1.0);
+            // Footprints and tracks (the deficit window around the camera) press into the cover: the
+            // carved snow is compacted (darker) and its walls tilt the normal, so a trail reads as depth.
+            let deficit = snow_deficit(world_abs.xz);
+            let carved = clamp(deficit / max(depth, 0.01), 0.0, 1.0);
+            // Real alpine cover clings to slopes well past the 45 degrees fresh-fall shading allows.
+            let up = dot(n, radial_up);
+            let cover = smoothstep(0.002, 0.04, depth) * smoothstep(0.18, 0.45, up);
             if (cover > 0.0) {
                 let footprint = max(length(dwx), length(dwy));
-                surface = mix(surface, snow_powder_albedo(world_abs, footprint, 0.0), cover);
-                n = normalize(mix(n, snow_powder_normal(world_abs, n, footprint), cover));
+                var snow_n = snow_powder_normal(world_abs, n, footprint);
+                if (deficit > 0.0) {
+                    let e = 0.125;
+                    let gx = snow_deficit(world_abs.xz + vec2<f32>(e, 0.0)) - snow_deficit(world_abs.xz - vec2<f32>(e, 0.0));
+                    let gz = snow_deficit(world_abs.xz + vec2<f32>(0.0, e)) - snow_deficit(world_abs.xz - vec2<f32>(0.0, e));
+                    snow_n = normalize(snow_n + vec3<f32>(gx, 0.0, gz) / (2.0 * e));
+                }
+                surface = mix(surface, snow_powder_albedo(world_abs, footprint, carved), cover);
+                n = normalize(mix(n, snow_n, cover));
             }
         }
         let twilight = smoothstep(-0.12, 0.05, sun_height);     // sky light: gone ~7 degrees below
