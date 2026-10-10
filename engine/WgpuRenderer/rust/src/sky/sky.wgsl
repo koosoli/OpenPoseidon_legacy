@@ -1206,7 +1206,10 @@ fn earth_planet_cloud(dir: vec3<f32>, max_dist: f32) -> CloudResult {
     let sun = normalize(sky.sun_dir.xyz);
     let daylight = max(dot(n, sun), 0.0);
     let sun_t = sample_transmittance(n * (sky.params.z + 5500.0), sun);
-    let lit = (vec3<f32>(0.018, 0.027, 0.045) + sun_t * daylight *
+    // The sky-light ambient belongs to the day side: across the terminator it fades to a trace, or the
+    // night half of the globe showed bright cloud blobs over black ground.
+    let ambient = vec3<f32>(0.018, 0.027, 0.045) * mix(0.04, 1.0, smoothstep(-0.25, 0.05, dot(n, sun)));
+    let lit = (ambient + sun_t * daylight *
                (sky.sun_dir.w * sky.params.y / PI)) * mix(0.72, 1.0, fine);
     return CloudResult(lit * opacity, 1.0 - opacity);
 }

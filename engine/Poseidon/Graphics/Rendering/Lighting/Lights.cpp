@@ -714,6 +714,16 @@ void LightSun::Recalculate(World* world)
         _sunColor = _colorFull;
     }
 
+    // Whole world: real twilight. The 2001 model goes to full night the moment the sun touches the
+    // horizon, so a sunset over the Grand Canyon (sun 1.7 degrees down) rendered as black night with
+    // stars. Night now ramps from the sun at +2 degrees to -8 degrees (civil twilight and a little).
+    if (earth)
+    {
+        const float altitudeDeg = asin(floatMin(floatMax(sinSun, -1.0f), 1.0f)) * (180.0f / H_PI);
+        _nightEffect = Saturate01((2.0f - altitudeDeg) / 10.0f);
+        _starsVisible = Saturate01((-2.0f - altitudeDeg) / 8.0f);
+    }
+
     float sinMoon = -_moonDirection.Y();
     if (sinMoon < 0) // moon below horizont
     {
