@@ -460,6 +460,55 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
         static_cast<int>(WGR_TERRAIN_MAX_GROUND_LAYERS)));
 }
 
+// Whole-world trees as the game's own tree models: every OSM tree (and every tree scattered over an
+// OSM forest) becomes a retained instance of an OFP tree from the player's install, chosen by the tree's
+// geographic seed and its latitude (conifers toward the boreal belt, stone pines and figs in the
+// Mediterranean), at its natural size give or take 15%. False (and nothing placed) when the models
+// are unavailable -- Demo data, the GPU-driven path off, WGR_EARTH_TREE_MODELS=0 -- and the coarse
+// batch with the procedural detail tier carries the trees instead.
+bool TerrainWgpu::PlaceEarthTreeModels(const std::vector<EarthFeatureStream::TreeInstance>& trees)
+{
+    _engine.ClearEarthTreeObjects();
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_EARTH_TREE_MODELS");
+        return !(v && v[0] == '0');
+    }();
+    if (!enabled || trees.empty())
+        return false;
+    static const char* const broadleaf[] = {"data3d\\str buk.p3d", "data3d\\str dub.p3d", "data3d\\str lipa.p3d",
+                                            "data3d\\str javor.p3d", "data3d\\str kastan.p3d", "data3d\\str briza.p3d",
+                                            "data3d\\str habr.p3d", "data3d\\str dub jiny.p3d", "data3d\\str_topol.p3d"};
+    static const char* const conifer[] = {"data3d\\str smrk.p3d", "data3d\\str smrk vysoky.p3d", "data3d\\str jedle.p3d",
+                                          "data3d\\str smrk dvoj.p3d", "data3d\\str borovice.p3d"};
+    static const char* const mediterranean[] = {"data3d\\str_pinie.p3d", "data3d\\str borovice.p3d",
+                                                "data3d\\str_fikovnik.p3d", "data3d\\str dub.p3d", "data3d\\str kastan.p3d"};
+    size_t placed = 0;
+    for (size_t i = 0; i < trees.size(); ++i)
+    {
+        const auto& t = trees[i];
+        const uint64_t s = t.seed;
+        const float lat = float(std::fabs(t.latitude));
+        const float conifers = std::clamp((lat - 38.0f) / 22.0f, 0.0f, 0.85f);
+        const float pick = float((s >> 8) & 0xffff) / 65535.0f;
+        const char* model;
+        if (lat < 42.0f)
+            model = mediterranean[(s >> 24) % std::size(mediterranean)];
+        else if (pick < conifers)
+            model = conifer[(s >> 24) % std::size(conifer)];
+        else
+            model = broadleaf[(s >> 24) % std::size(broadleaf)];
+        const float yaw = float((s >> 32) & 0xffff) / 65535.0f * 6.2831853f;
+        const float scale = 0.85f + 0.3f * float((s >> 48) & 0xffff) / 65535.0f;
+        if (_engine.CreateEarthTreeObject(uint32_t(i), model, t.x, t.y, t.z, yaw, scale))
+            ++placed;
+    }
+    LOG_INFO(Graphics, "Earth tree models: {} of {} trees placed as the game's own trees", placed, trees.size());
+    if (placed == 0)
+        return false;
+    return true;
+}
+
 void TerrainWgpu::BuildQuadtree(const Landscape& land)
 {
     const int range = land.GetTerrainRange();
@@ -3261,6 +3310,7 @@ TerrainWgpu::~TerrainWgpu()
     _earthFeatures.reset();
     _earthWorldgen.reset();
     _engine.ClearEarthWorldgenObjects();
+    _engine.ClearEarthTreeObjects();
     EarthStreaming::Locations().ClearGround();
     _earthStream.reset(); // Cancel HTTPS and join before any render-owned state disappears.
     // EngineWgpu releases TerrainWgpu after stopping its render thread, while
@@ -3537,6 +3587,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         _earthWorldgenSnapshot.reset();_earthWorldgenGeneration=0;
         _engine.ClearEarthWorldgenObjects();
         if(_earthTreeDetail)_earthTreeDetail->Clear();
+        _engine.ClearEarthTreeObjects();_earthTreeModels=false;
         for(size_t i=0;i<_earthFeatureMeshes.size();++i)if(_earthFeatureMeshes[i]){EngineWgpu::AcquireProducerWindow("Earth features relocate");wgr_mesh_destroy(_renderer,_earthFeatureMeshes[i]);_earthFeatureMeshes[i]=0;_earthFeatureIndices[i]=0;}
 
         if(_earthBuildings)_earthBuildings->Relocate();
@@ -3710,14 +3761,18 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             _earthFeatureGeneration=mesh->generation;
             if(!_earthTreeDetail)_earthTreeDetail=std::make_unique<EarthTreeDetail>(_engine,_renderer);
             _earthTreeDetail->SetTrees(mesh->trees,_earthFeatureMeshes[EarthFeatureStream::Trees],std::move(treeVertices));
+            _earthTreeModels=PlaceEarthTreeModels(mesh->trees);
             if(!mesh->error.empty())LOG_INFO(Graphics,"Earth cached features: {}",mesh->error);
         }
         if(_earthFeatureGeneration==_earthPatch->generation)
         {
+            // with the game's own tree models standing in for every tree, neither the coarse batch nor
+            // the procedural detail tier draws
             for(size_t kind=0;kind<EarthFeatureStream::KindCount;++kind)
-                _engine.SubmitEarthHorizon(_earthFeatureMeshes[kind],_earthFeatureIndices[kind],_earthFeatureTextures[kind]);
+                if(!(_earthTreeModels && kind==EarthFeatureStream::Trees))
+                    _engine.SubmitEarthHorizon(_earthFeatureMeshes[kind],_earthFeatureIndices[kind],_earthFeatureTextures[kind]);
             // the trees near the camera in detail (Tidewater's technique; the batch keeps the far ones)
-            if(_earthTreeDetail)_earthTreeDetail->Draw(camera.Position(),Glob.time.toFloat());
+            if(_earthTreeDetail && !_earthTreeModels)_earthTreeDetail->Draw(camera.Position(),Glob.time.toFloat());
         }
     }
     if(_earthBuildings && camera.Position().Y()<12000.0f)

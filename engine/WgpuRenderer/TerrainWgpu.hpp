@@ -155,6 +155,8 @@ class TerrainWgpu : public ITerrainRenderer
     std::unique_ptr<class ReefLife> _reef;
     std::unique_ptr<class BeachCritters> _crabs;
     std::unique_ptr<class EarthTreeDetail> _earthTreeDetail;
+    bool _earthTreeModels = false; // the game's own tree models carry the trees (PlaceEarthTreeModels)
+    bool PlaceEarthTreeModels(const std::vector<EarthFeatureStream::TreeInstance>& trees);
     // one mesh per EarthBuildingStream::Material, drawn with the game's house texture (when it loads) or
     // the palette colour
     std::array<WgrMesh,EarthBuildingStream::MaterialCount> _earthBuildingMeshes{};

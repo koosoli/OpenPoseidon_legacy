@@ -2439,6 +2439,7 @@ EngineWgpu::~EngineWgpu()
     if (_geometryOwnerLedger) _geometryOwnerLedger->CloseEpoch(_geometryOwnerEpoch);
     ClearFarObjects();
     ClearEarthWorldgenObjects();
+    ClearEarthTreeObjects();
     s_self = nullptr;
     // FIRST: every VertexBufferWgpu still alive holds this link, and Shapes outlive the
     // engine on some teardown orders. Nulling it here turns a late SetSkinData into a no-op

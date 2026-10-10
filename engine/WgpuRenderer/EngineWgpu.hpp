@@ -213,6 +213,12 @@ class EngineWgpu : public EngineDummy
     // already grounded against resident Earth; never sample the native island.
     bool CreateEarthWorldgenObject(uint32_t id, const char* model, const Matrix4& transform);
     void ClearEarthWorldgenObjects();
+    // Whole-world trees as the game's own tree models (EarthTreeModels): one retained instance per
+    // OSM tree, its trunk base on the ground at (x, groundY, z), turned by yaw and scaled. False when
+    // the model does not load or the GPU-driven path is off (the caller keeps its own trees then).
+    bool CreateEarthTreeObject(uint32_t id, const char* model, float x, float groundY, float z, float yaw, float scale);
+    void ClearEarthTreeObjects();
+    size_t EarthTreeObjectCount() const { return _earthTreeInstances.size(); }
     void SceneObjectRemoved(Object* obj) override;
     void SceneObjectMoved(Object* obj) override;
     GpuDrawCoverage GpuDrivenCoverage(const Object* obj) const override;
@@ -822,6 +828,8 @@ class EngineWgpu : public EngineDummy
     // Dedicated shape identities prevent Earth road alpha coverage from changing
     // the native island's shared retained model/CPU-complement ownership.
     std::unordered_map<std::string, Ref<LODShapeWithShadow>> _earthWorldgenRoadShapes;
+    std::unordered_map<uint32_t, FarGpuInstance> _earthTreeInstances;
+    std::unordered_map<std::string, Ref<LODShapeWithShadow>> _earthTreeShapes; // null: did not load
     std::unordered_map<const LODShapeWithShadow*, uint32_t> _farGpuModelRefs;
     // REN-TEMP-001H / ID-1: draw-object identity for motion vectors. The scene draw
     // loop brackets each object via Engine::SetDrawObject; the identity itself lives ON
