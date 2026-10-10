@@ -2295,7 +2295,11 @@ fn fs_sky_env(in: VsOut) -> @location(0) vec4<f32> {
     // march bands slightly instead, but the low step count + huge texels blur that away; the smooth
     // result is what the SH projection + reflection want.
     let radiance = sky.sun_dir.w * sky.params.y;
-    let deck = march_clouds(pos, dir, sun, radiance, bg, 12.0, 2, 0.0, 1e12);
+    // Near the horizon a reflected ray crosses tens of km of the deck and 12 steps leapt over it:
+    // the env kept the clear sky there, and under an overcast sky every wave back reflected cyan
+    // stripes (owner, 2026-10-10). Grazing directions get the steps the path needs.
+    let env_steps = mix(64.0, 12.0, smoothstep(0.02, 0.35, abs(dir.y)));
+    let deck = march_clouds(pos, dir, sun, radiance, bg, env_steps, 2, 0.0, 1e12);
     // The cirrus layer goes into the env bake too, so the water reflects — and the SH ambient sees —
     // the same two-layer sky the camera does. It runs in whatever mode the Sky tab selected, and
     // the env map is only 256x128, so even the volumetric path is a rounding error here; the

@@ -1,0 +1,11 @@
+; Swimming next to a boat (water / buoyancy troubleshooting): the player in deep water off the
+; Everon bay beach, an empty BoatW fifteen metres to his left. Get in with the action menu.
+setViewDistance 1500
+player setPos [9950, 1430, 0]
+player setDir 180
+player switchCamera "EXTERNAL"
+testBoat = "BoatW" createVehicle [9935, 1424, 0]
+testBoat setDir 180
+~2
+hint "Swim next to a boat: W to swim, action menu to board. Head for the beach to stand up."
+exit
