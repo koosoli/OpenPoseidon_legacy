@@ -3795,6 +3795,26 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     _params.snowline_height =
         GSnow().EffSnowlineEnabled() && GSnow().snowlineRange > 0.0f ? GSnow().EffSnowlineHeight() : -1.0f;
     _params.snowline_range = std::max(GSnow().snowlineRange, 0.0f);
+    if (EarthStreaming::Enabled() && GSnow().EffSnowlineEnabled() && !SnowField::ResolveSnowlineOverride().active)
+    {
+        // Whole World: the island's fixed 645 m line would whiten every real highland (Grand Canyon's
+        // rim). Use a real-world snow line instead: the permanent line falls from ~5,000 m at the
+        // equator to ~2,900 m in the Alps and ~1,700 m in Norway (5000 cos(lat)^1.5), and outside the
+        // tropics winter brings it down by up to 2,200 m (Alps in December ~700 m). Ramp 250 m.
+        const double lat = std::abs(EarthStreaming::GetLocation().latitude);
+        const double c = std::cos(lat * Earth::Pi / 180.0);
+        const double permanent = 5000.0 * c * std::sqrt(std::max(c, 0.0));
+        const double year = Glob.clock.GetTimeInYear(); // 0 = 1 January
+        const double summerNorth = std::cos(2.0 * Earth::Pi * (year - 172.0 / 365.0)); // +1 on 21 June
+        const double summer = EarthStreaming::GetLocation().latitude >= 0 ? summerNorth : -summerNorth;
+        const double winter = 0.5 * (1.0 - summer);
+        const double t = std::clamp((lat - 20.0) / 25.0, 0.0, 1.0);
+        const double seasonal = winter * 2200.0 * t * t * (3.0 - 2.0 * t);
+        _params.snowline_height = float(std::max(permanent - seasonal, 0.0));
+        _params.snowline_range = 250.0f;
+        GSnow().snowlineHeight = _params.snowline_height; // objects and trees use the same line
+        GSnow().snowlineRange = 250.0f;
+    }
     _params.snowline_depth = std::clamp(GSnow().snowlineDepth, 0.0f, 1.0f);
     const auto& weather = render::frame::GPresentationSnapshot();
     _params._pad2 = UniformWettingDensity(weather.landscapeRainDensity, weather.rainEffectiveDensity,

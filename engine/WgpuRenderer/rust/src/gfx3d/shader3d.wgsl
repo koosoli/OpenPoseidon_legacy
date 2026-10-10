@@ -7,6 +7,7 @@
 
 #import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, apply_layered_fog, apply_fog_terrain, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_FRESNEL_ENV, sky_irradiance}
 #import shadow::shadow_strength
+#import snow_material::{snow_powder_albedo, snow_powder_normal, snow_surface_coverage}
 #import frame::{surface_rays, cloud_shadow_tex, terrain_shadow_samp, terrain_shadow_map, cloud_sun_shadow}
 #import frame::monitor_scene
 #import skin::{skin_pos, skin_normal}
@@ -978,6 +979,25 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         // Mesh normals are built in the origin's flat tangent frame (up = +Y); tilt them onto the true
         // radial up so the globe and far horizon shade as a sphere. Near the origin this is a no-op.
         n = normalize(n + radial_up - vec3<f32>(0.0, 1.0, 0.0));
+        // Snow: the same snowline and deposit the objects and trees use (the Whole World producer sets a
+        // real-world line from latitude and season), by altitude above the globe rather than the flat
+        // frame's Y, which drops with curvature and stripped distant peaks. Cliffs stay bare.
+        var surface = srgb_to_linear(albedo);
+        if (frame.snow_surface.x > 0.0 || (frame.snow_surface.y >= 0.0 && frame.snow_surface.z > 0.0)) {
+            let world_abs = in.world_pos + frame.cam_pos.xyz;
+            let altitude = length(world_abs - earth_centre) - 6378137.0;
+            var depth = frame.snow_surface.x;
+            if (frame.snow_surface.y >= 0.0 && frame.snow_surface.z > 0.0) {
+                depth = max(depth, smoothstep(frame.snow_surface.y, frame.snow_surface.y + frame.snow_surface.z, altitude)
+                    * frame.snow_surface.w);
+            }
+            let cover = snow_surface_coverage(depth, dot(n, radial_up), 1.0);
+            if (cover > 0.0) {
+                let footprint = max(length(dwx), length(dwy));
+                surface = mix(surface, snow_powder_albedo(world_abs, footprint, 0.0), cover);
+                n = normalize(mix(n, snow_powder_normal(world_abs, n, footprint), cover));
+            }
+        }
         let twilight = smoothstep(-0.12, 0.05, sun_height);     // sky light: gone ~7 degrees below
         let sun_reach = smoothstep(-0.015, 0.06, sun_height);   // direct sun thins out through the air
         let daylight = max(dot(n, -frame.sun_dir_world.xyz), 0.0) * sun_reach;
@@ -1016,7 +1036,7 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
         }
         // Ground and valley fog (layered fog) in front of the Earth surface; whole-world terrain used to
         // skip every fog term.
-        return vec4<f32>(apply_layered_fog(srgb_to_linear(albedo) * reflectance * light, in.world_pos), 1.0);
+        return vec4<f32>(apply_layered_fog(surface * reflectance * light, in.world_pos), 1.0);
     }
 
     if ((material_flags(material) & MATFLAG_BOOT_RELIEF) != 0u) {
