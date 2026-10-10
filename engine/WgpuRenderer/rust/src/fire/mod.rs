@@ -568,11 +568,14 @@ impl FireSystem {
             } else {
                 [0.62 / froude, 0.94 - 0.5 * smokiness, 0.8 * froude, 1.1]
             },
-            // the wind bends the plume; Fire Pro pushes with a gentle constant force, OP relaxes
-            // toward the weather's wind slowly enough that a flame still stands up in a breeze
+            // the wind bends the plume; Fire Pro pushes with a gentle constant force, OP relaxes the
+            // gas toward the weather's wind (the one the sprite smoke drifts with). A flame lives
+            // about a second, so it must take the wind up within that second to lean at all (it
+            // was 0.15/s at half the wind: the flames stood straight while the smoke drifted).
+            // The buoyant rise keeps its own vertical speed, so a flame leans, it does not lie down.
             // y: how patchily the bed burns (0 a steady bed)
-            wind: [s.wind[0], patchy, s.wind[2], if smoke_only { 0.6 } else { 0.15 }],
-            extra: [if smoke_only { 0.0 } else { 1.0 }, if smoke_only { 0.9 } else { 0.5 }, 0.0, 0.0],
+            wind: [s.wind[0], patchy, s.wind[2], if smoke_only { 1.5 } else { 1.8 }],
+            extra: [if smoke_only { 0.0 } else { 1.0 }, if smoke_only { 1.0 } else { 0.7 }, 0.0, 0.0],
             floor: s.floor,
             ceiling: s.ceiling,
         };
@@ -804,8 +807,8 @@ impl Grid {
         // set and the solids are sampled by world position, clamped to the edge columns)
         let (wx, wz) = (src.wind[0], src.wind[2]);
         let wlen = (wx * wx + wz * wz).sqrt();
-        let lean = if src.params[3] > 2.5 { 0.3 } else { 0.25 };
-        let shift = if wlen > 0.1 { (wlen * 0.6).min(width * lean) / wlen } else { 0.0 };
+        let lean = if src.params[3] > 2.5 { 0.3 } else { 0.32 };
+        let shift = if wlen > 0.1 { (wlen * 0.9).min(width * lean) / wlen } else { 0.0 };
         let origin = [
             src.pos_radius[0] - width * 0.5 + wx * shift,
             src.pos_radius[1] - 2.0 * cell,

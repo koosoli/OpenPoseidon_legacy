@@ -310,9 +310,13 @@ fn cs_forces(@builtin(global_invocation_id) gid: vec3<u32>) {
         force += (curlNoise(q) + 0.45 * curlNoise(q * 2.03 + vec3<f32>(13.7, 5.3, 19.1))) * S.losses.z;
     }
     var v = textureLoad(velIn, id, 0).xyz * exp(-S.motion.z * dt) + dt * force;
-    // the wind carries the gas (OP: a relaxation toward the wind, Fire Pro: a constant push)
-    let windV = vec3<f32>(S.wind.x * S.extra.y, v.y, S.wind.z * S.extra.y);
-    v = mix(v, windV, 1.0 - exp(-S.wind.w * dt));
+    // the wind carries the gas (OP: a relaxation toward the wind, Fire Pro: a constant push), with
+    // the ground's boundary layer: weak at the bed, full a few bed radii up, so a flame leans from a
+    // base that stays on its fuel instead of being blown off it
+    let bedBase = S.emitter.y - 0.45 * S.emitter.w;
+    let layer = clamp(sqrt(max(p.y - bedBase, 0.0) / (3.0 * S.emitter.w + 1.0)), 0.2, 1.0);
+    let windV = vec3<f32>(S.wind.x * S.extra.y * layer, v.y, S.wind.z * S.extra.y * layer);
+    v = mix(v, windV, 1.0 - exp(-S.wind.w * layer * dt));
     // the source's own velocity (sourceVelocity): a rise out of the bed
     let d = (p - S.emitter.xyz) / max(vec3<f32>(S.emitter.w, S.emitter.w * 0.45, S.emitter.w), vec3<f32>(0.03));
     let r = length(d);
