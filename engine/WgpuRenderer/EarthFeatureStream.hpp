@@ -30,9 +30,18 @@ class EarthFeatureStream
         std::vector<uint32_t> indices;
         size_t features = 0;
     };
+    // Every tree the batch draws, as an instance for the near detail tier (EarthTreeDetail): its
+    // base on the ground (frame of the batch), its height and its geographic seed.
+    struct TreeInstance
+    {
+        float x, y, z, height;
+        uint64_t seed;
+        double latitude;
+    };
     struct Mesh
     {
         Cell cell{};
+        std::vector<TreeInstance> trees;
         uint64_t revision = 0, generation = 0;
         std::array<Batch, KindCount> batches;
         size_t skipped = 0, forestSamples = 0;

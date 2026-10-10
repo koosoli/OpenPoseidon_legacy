@@ -153,8 +153,11 @@ void Tree(Features::Mesh& result, const Features::Ground& g, Point p, double h, 
     if (batch.features >= Features::MaxTrees || Triangles(result) + EarthTrees::TriangleCount > Features::MaxTriangles)
         return;
     const auto coordinate = Earth::FromLocal(g.latitude, g.longitude, p.x, p.z);
-    const auto tree = EarthTrees::Build(
-        p.x, Height(g, p), p.z, h, EarthTrees::GeographicSeed(coordinate.latitude, coordinate.longitude), varyHeight);
+    const uint64_t seed = EarthTrees::GeographicSeed(coordinate.latitude, coordinate.longitude);
+    const auto tree = EarthTrees::Build(p.x, Height(g, p), p.z, h, seed, varyHeight);
+    // the same height EarthTrees::Build gives it (its lane 1)
+    const double drawn = h * (varyHeight ? .82 + .36 * (double(EarthTrees::Mix(seed + 1) >> 40) / 16777216.0) : 1.0);
+    result.trees.push_back({float(p.x), Height(g, p), float(p.z), float(drawn), seed, coordinate.latitude});
     const uint32_t first = uint32_t(batch.vertices.size());
     batch.vertices.insert(batch.vertices.end(), tree.begin(), tree.end());
     for (uint32_t i = 0; i < tree.size(); ++i)

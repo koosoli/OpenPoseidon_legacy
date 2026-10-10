@@ -7540,7 +7540,8 @@ void EngineWgpu::SubmitEarthHorizon(WgrMesh mesh, uint32_t indexCount, WgrTextur
     _cmds.push_back(WgrCmd{WGR_CMD_DRAW_3D,U32(_draws3d.size()-1)});
 }
 
-void EngineWgpu::SubmitDynamicMesh(WgrMesh mesh, uint32_t indexCount, const float world[16], WgrTexture texture, uint32_t sampler)
+void EngineWgpu::SubmitDynamicMesh(WgrMesh mesh, uint32_t indexCount, const float world[16], WgrTexture texture, uint32_t sampler,
+                                   float alphaRef)
 {
     if (!_renderer || !mesh || !indexCount) return;
     EnsureCamera();
@@ -7555,6 +7556,7 @@ void EngineWgpu::SubmitDynamicMesh(WgrMesh mesh, uint32_t indexCount, const floa
     d.flags = WGR_DRAW3D_DOUBLE_SIDED;
     d.texture_id = texture;
     d.sampler = sampler;
+    d.alpha_ref = alphaRef; // > 0: the alpha-tested cutout pipeline (leaf cards)
     for (int i = 0; i < 16; ++i) d.world.m[i] = world[i];
     d.world.m[12] -= camera.pos[0];
     d.world.m[13] -= camera.pos[1];

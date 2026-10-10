@@ -141,6 +141,7 @@ models, textures, cloud noise files) is used.
 | `BeachCritters.cpp` (wgpu renderer, ghost crabs, hermit crabs and burrows) | `src/world/wildlife/CritterShapes.js` (the template and limb tables), `CritterBatch.js` (the gait joints and colours), `Crabs.js` (behaviour, sizes, speeds) |
 | `ReefLife.cpp` (wgpu renderer, life on the sea floor around the camera) | `src/world/reef/ReefGeometry.js` (the builders and the organisms: meadow, sargassum, sea fan, sea rod, dome, mound, barrel, tubes, urchin, anemone, rubble), `src/world/Reef.js` (sizes, palettes, zonation) |
 | `BirdFlocks.cpp` (wgpu renderer, the seabirds around the camera) | `src/world/wildlife/BirdShapes.js` (species and the template), `BirdPose.js` (wing articulation), `Flight.js` (flight model), `BirdBatch.js` (plumage), `Birds.js` (behaviours) |
+| `EarthTreeDetail.cpp` (wgpu renderer, the whole-world trees near the camera) | `src/world/Vegetation.js` and `src/world/vegetation/PlantGeometry.js` (the broadleaf limbs, lobes and leaf-cluster cards, the conifer tiers, the outermost-first card order) |
 | `engine/Poseidon/World/Entities/Vehicles/Misc/ShipTidewater.cpp` (the small-boat float and drive model) | `src/player/BoatController.js` |
 
 Written for OpenPoseidon, with no Tidewater counterpart (not ported; listed so the table above

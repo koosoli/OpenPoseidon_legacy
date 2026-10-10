@@ -3,6 +3,7 @@
 #include "BirdFlocks.hpp"
 #include "ReefLife.hpp"
 #include "BeachCritters.hpp"
+#include "EarthTreeDetail.hpp"
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/SnowShelter.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
@@ -3535,6 +3536,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         if(_earthWorldgen)_earthWorldgen->Relocate();
         _earthWorldgenSnapshot.reset();_earthWorldgenGeneration=0;
         _engine.ClearEarthWorldgenObjects();
+        if(_earthTreeDetail)_earthTreeDetail->Clear();
         for(size_t i=0;i<_earthFeatureMeshes.size();++i)if(_earthFeatureMeshes[i]){EngineWgpu::AcquireProducerWindow("Earth features relocate");wgr_mesh_destroy(_renderer,_earthFeatureMeshes[i]);_earthFeatureMeshes[i]=0;_earthFeatureIndices[i]=0;}
 
         if(_earthBuildings)_earthBuildings->Relocate();
@@ -3683,6 +3685,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         {
             EngineWgpu::AcquireProducerWindow("Earth cached landscape features");
             constexpr uint8_t colors[EarthFeatureStream::KindCount][4]={{67,65,59,255},{116,97,69,255},{46,67,38,255},{184,178,153,255},{42,73,79,255}};
+            std::vector<WgrMeshVertex> treeVertices;
             for(size_t kind=0;kind<EarthFeatureStream::KindCount;++kind)
             {
                 const auto& batch=mesh->batches[kind];
@@ -3701,14 +3704,21 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                 if(!_earthFeatureTextures[kind])throw std::runtime_error("Earth feature tint allocation failed");
                 if(_earthFeatureMeshes[kind])wgr_mesh_destroy(_renderer,_earthFeatureMeshes[kind]);
                 _earthFeatureMeshes[kind]=replacement;_earthFeatureIndices[kind]=uint32_t(batch.indices.size());
+                if(kind==EarthFeatureStream::Trees)treeVertices=std::move(vertices);
                 LOG_INFO(Graphics,"Earth cached feature kind {}: {} features, {} triangles; OpenStreetMap contributors, ODbL",kind,batch.features,batch.indices.size()/3);
             }
             _earthFeatureGeneration=mesh->generation;
+            if(!_earthTreeDetail)_earthTreeDetail=std::make_unique<EarthTreeDetail>(_engine,_renderer);
+            _earthTreeDetail->SetTrees(mesh->trees,_earthFeatureMeshes[EarthFeatureStream::Trees],std::move(treeVertices));
             if(!mesh->error.empty())LOG_INFO(Graphics,"Earth cached features: {}",mesh->error);
         }
         if(_earthFeatureGeneration==_earthPatch->generation)
+        {
             for(size_t kind=0;kind<EarthFeatureStream::KindCount;++kind)
                 _engine.SubmitEarthHorizon(_earthFeatureMeshes[kind],_earthFeatureIndices[kind],_earthFeatureTextures[kind]);
+            // the trees near the camera in detail (Tidewater's technique; the batch keeps the far ones)
+            if(_earthTreeDetail)_earthTreeDetail->Draw(camera.Position(),Glob.time.toFloat());
+        }
     }
     if(_earthBuildings && camera.Position().Y()<12000.0f)
     {
