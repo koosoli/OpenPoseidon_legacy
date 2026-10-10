@@ -26,8 +26,24 @@ public:
         std::vector<float> horizonHeights;
         std::vector<uint8_t> horizonValid;
     };
-    // u picks the building's colour from the Palette (walls 0-3, pitched roofs 4-6, flat roofs 7).
-    struct Vertex { float x,y,z,nx,ny,nz,u=0,v=.5f; };
+    // u picks the building's colour from the Palette (walls 0-3, pitched roofs 4-6, flat roofs 7); tu/tv are
+    // the face's texture coordinates in its Material's tiles and `material` the Material it is drawn with.
+    struct Vertex { float x,y,z,nx,ny,nz,u=0,v=.5f,tu=0,tv=0; uint32_t material=0; };
+    // The surfaces a building is drawn with when the game's own house textures are available (the renderer
+    // falls back to the Palette colour, MaterialPalette, for any it cannot load): two-storey facades for
+    // houses, the ones without a door for taller blocks (the tile repeats per two floors; OFP's one-storey
+    // window bands carry a dark eave stripe that turned a block into a striped crate), roof tiles, a flat
+    // roof. Sizes are one texture tile in metres; a facade's bottom edge stands on the ground.
+    enum Material : uint32_t { Plaster,Derelict,Brick,PlainPlaster,BlockA,BlockB,TilesRed,TilesDark,TilesBrown,FlatRoof,
+                               MaterialCount };
+    static constexpr const char* MaterialTexture[MaterialCount]={
+        "data\\hruzdum_backn.pac","data\\dum2_s.pac","data\\cihldum.pac","data\\hruzdum_siden.pac",
+        "data\\hruzdum_siden.pac","data\\hruzdum_backn.pac",
+        "data\\tasky_p.pac","data\\tasky_tmavsi.pac","data\\hruzdum_strecha.pac","data\\kostel_t_strecha.pac"};
+    static constexpr float MaterialTile[MaterialCount][2]={
+        {6.4f,6.4f},{6.4f,6.4f},{6.4f,6.4f},{6.4f,6.4f},{6.4f,6.4f},{6.4f,6.4f},
+        {4.0f,4.0f},{4.0f,4.0f},{5.0f,5.0f},{8.0f,8.0f}};
+    static constexpr int MaterialPalette[MaterialCount]={0,1,2,3,3,0,4,5,6,7};
     static constexpr int PaletteSize=8;
     static constexpr uint8_t Palette[PaletteSize][4]={
         {214,204,184,255},{232,228,218,255},{188,180,168,255},{202,186,160,255}, // plaster, white, grey, sand

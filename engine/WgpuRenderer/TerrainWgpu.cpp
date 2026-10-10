@@ -3267,7 +3267,7 @@ TerrainWgpu::~TerrainWgpu()
     // the renderer and texture bank are still alive.
     if (_earthHorizonMesh) wgr_mesh_destroy(_renderer,_earthHorizonMesh);
     if (_earthGlobeMesh) wgr_mesh_destroy(_renderer,_earthGlobeMesh);
-    if (_earthBuildingMesh) wgr_mesh_destroy(_renderer,_earthBuildingMesh);
+    for (auto mesh : _earthBuildingMeshes) if (mesh) wgr_mesh_destroy(_renderer,mesh);
     if (_earthBuildingTexture) wgr_texture_destroy(_renderer,_earthBuildingTexture);
     if (_earthGlobeTexture) wgr_texture_destroy(_renderer,_earthGlobeTexture);
     if (_earthNearMesh) wgr_mesh_destroy(_renderer,_earthNearMesh);
@@ -3540,7 +3540,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         for(size_t i=0;i<_earthFeatureMeshes.size();++i)if(_earthFeatureMeshes[i]){EngineWgpu::AcquireProducerWindow("Earth features relocate");wgr_mesh_destroy(_renderer,_earthFeatureMeshes[i]);_earthFeatureMeshes[i]=0;_earthFeatureIndices[i]=0;}
 
         if(_earthBuildings)_earthBuildings->Relocate();
-        if(_earthBuildingMesh){EngineWgpu::AcquireProducerWindow("Earth buildings relocate");wgr_mesh_destroy(_renderer,_earthBuildingMesh);_earthBuildingMesh=0;_earthBuildingIndices=0;}
+        for(size_t i=0;i<_earthBuildingMeshes.size();++i)if(_earthBuildingMeshes[i]){EngineWgpu::AcquireProducerWindow("Earth buildings relocate");wgr_mesh_destroy(_renderer,_earthBuildingMeshes[i]);_earthBuildingMeshes[i]=0;_earthBuildingIndices[i]=0;}
         _earthOriginRevision=origin.revision;
         LOG_INFO(Graphics,"Earth relocated: origin [{},{}], revision {}",origin.latitude,origin.longitude,origin.revision);
     }
@@ -3726,19 +3726,63 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         if(auto mesh=_earthBuildings->TakeReady();mesh && mesh->revision==origin.revision && mesh->generation==_earthPatch->generation)
         {
             EngineWgpu::AcquireProducerWindow("Earth cached buildings");
-            std::vector<WgrMeshVertex> vertices(mesh->vertices.size());
-            for(size_t i=0;i<vertices.size();++i){const auto& v=mesh->vertices[i];vertices[i].pos={v.x,v.y,v.z};vertices[i].normal={v.nx,v.ny,v.nz};vertices[i].uv={v.u,v.v};}
+            // The game's own house textures (loaded from the player's install, never shipped): once, and only
+            // those that resolve; WGR_EARTH_BUILDING_TEXTURES=0 keeps the plain colours.
+            if(!_earthBuildingTexturesTried)
+            {
+                _earthBuildingTexturesTried=true;
+                const char* off=std::getenv("WGR_EARTH_BUILDING_TEXTURES");
+                int resolved=0;
+                if(!(off && off[0]=='0'))
+                    for(size_t m=0;m<EarthBuildingStream::MaterialCount;++m)
+                        {_earthBuildingTextures[m]=GlobLoadTexture(EarthBuildingStream::MaterialTexture[m]);if(_earthBuildingTextures[m].NotNull())++resolved;}
+                LOG_INFO(Graphics,"Earth buildings: {} of {} house textures from the game data",resolved,size_t(EarthBuildingStream::MaterialCount));
+            }
             if(!_earthBuildingTexture)
                 _earthBuildingTexture=wgr_texture_create(_renderer,EarthBuildingStream::PaletteSize,1,WGR_TEXTURE_RGBA8,1,0,
                     &EarthBuildingStream::Palette[0][0],uint32_t(sizeof(EarthBuildingStream::Palette)));
-            WgrMesh replacement=0;
-            if(!mesh->indices.empty())replacement=wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(vertices),WgrSlice<uint32_t>(mesh->indices));
-            if(_earthBuildingMesh)wgr_mesh_destroy(_renderer,_earthBuildingMesh);
-            _earthBuildingMesh=replacement;_earthBuildingIndices=replacement?uint32_t(mesh->indices.size()):0;_earthBuildingGeneration=mesh->generation;
+            // Split by material. Faces never share vertices, so a triangle's material is its first vertex's.
+            std::array<std::vector<WgrMeshVertex>,EarthBuildingStream::MaterialCount> parts;
+            std::array<std::vector<uint32_t>,EarthBuildingStream::MaterialCount> partIndices;
+            std::vector<uint32_t> remap(mesh->vertices.size(),UINT32_MAX);
+            for(size_t t=0;t+2<mesh->indices.size();t+=3)
+            {
+                const uint32_t m=std::min<uint32_t>(mesh->vertices[mesh->indices[t]].material,EarthBuildingStream::MaterialCount-1);
+                const bool textured=_earthBuildingTextures[m].NotNull();
+                for(int k=0;k<3;++k)
+                {
+                    const uint32_t i=mesh->indices[t+k];
+                    if(remap[i]==UINT32_MAX)
+                    {
+                        const auto& v=mesh->vertices[i];
+                        WgrMeshVertex w{};
+                        w.pos={v.x,v.y,v.z};w.normal={v.nx,v.ny,v.nz};
+                        w.uv=textured?WgrVec2{v.tu,v.tv}:WgrVec2{EarthBuildingStream::PaletteU(EarthBuildingStream::MaterialPalette[m]),.5f};
+                        remap[i]=uint32_t(parts[m].size());parts[m].push_back(w);
+                    }
+                    partIndices[m].push_back(remap[i]);
+                }
+            }
+            for(size_t m=0;m<parts.size();++m)
+            {
+                WgrMesh replacement=0;
+                if(!partIndices[m].empty())replacement=wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(parts[m]),WgrSlice<uint32_t>(partIndices[m]));
+                if(_earthBuildingMeshes[m])wgr_mesh_destroy(_renderer,_earthBuildingMeshes[m]);
+                _earthBuildingMeshes[m]=replacement;_earthBuildingIndices[m]=replacement?uint32_t(partIndices[m].size()):0;
+            }
+            _earthBuildingGeneration=mesh->generation;
             LOG_INFO(Graphics,"Earth cached buildings: cell [{},{}], {} buildings, {} triangles, {} skipped, {} estimated heights; {}",
                 mesh->cell.latitude,mesh->cell.longitude,mesh->buildings,mesh->indices.size()/3,mesh->skipped,mesh->estimatedHeights,mesh->error);
         }
-        if(_earthBuildingGeneration==_earthPatch->generation)_engine.SubmitEarthHorizon(_earthBuildingMesh,_earthBuildingIndices,_earthBuildingTexture);
+        if(_earthBuildingGeneration==_earthPatch->generation)
+            for(size_t m=0;m<_earthBuildingMeshes.size();++m)
+            {
+                Texture* raw=_earthBuildingTextures[m];
+                const WgrTexture texture=raw?static_cast<TextureWgpu*>(raw)->EnsureUploaded():0;
+                // a texture tiles (sampler 0, repeat); the palette is a strip (sampler 2)
+                if(texture)_engine.SubmitEarthHorizon(_earthBuildingMeshes[m],_earthBuildingIndices[m],texture,0);
+                else _engine.SubmitEarthHorizon(_earthBuildingMeshes[m],_earthBuildingIndices[m],_earthBuildingTexture);
+            }
     }
     if(_earthWorldgen && worldgenNear)
     {

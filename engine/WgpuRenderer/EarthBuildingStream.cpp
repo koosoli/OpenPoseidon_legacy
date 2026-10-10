@@ -190,6 +190,33 @@ std::string EarthBuildingStream::FileName(Cell cell) {
 }
 namespace {
 using Buildings=EarthBuildingStream;
+// The texture coordinates of one building's faces (vertices [first, end)), from each face's normal: walls
+// run along the wall horizontally and stand on the ground (`ground`, the footprint's lowest terrain) so
+// the facade's ground floor sits on it; roofs are tiled in their own plane, rows across the slope.
+// Relative to the building's first corner, so the coordinates stay small in a frame tens of km wide.
+void TextureFaces(Buildings::Mesh& result,size_t first,Point origin,float ground,uint32_t wall,uint32_t roof) {
+    for(size_t i=first;i<result.vertices.size();++i) {
+        auto& v=result.vertices[i];
+        const double x=v.x-origin.x,z=v.z-origin.z;
+        const bool isWall=std::abs(v.ny)<.3f;
+        v.material=isWall?wall:roof;
+        const float* tile=Buildings::MaterialTile[v.material];
+        if(isWall) {
+            const double h=std::hypot(double(v.nx),double(v.nz));
+            const double ax=h>1e-6?v.nz/h:1,az=h>1e-6?-v.nx/h:0; // the viewer's right, facing the wall
+            v.tu=float((x*ax+z*az)/tile[0]);
+            v.tv=float(1-(v.y-ground)/tile[1]);
+        } else if(v.ny>.99f) {
+            v.tu=float(x/tile[0]);v.tv=float(z/tile[1]);
+        } else {
+            // downslope horizontal direction; the slope length is the horizontal one over the pitch's cosine
+            const double h=std::hypot(double(v.nx),double(v.nz));
+            const double dx=v.nx/h,dz=v.nz/h;
+            v.tu=float((x*-dz+z*dx)/tile[0]);
+            v.tv=float((x*dx+z*dz)/(tile[1]*v.ny));
+        }
+    }
+}
 void AppendCell(Buildings::Mesh& result,const std::string& json,const Buildings::Ground& g,Buildings::Cell cell,
                 std::unordered_set<uint64_t>& ids) {
     constexpr auto MaxBytes=Buildings::MaxBytes,MaxBuildings=Buildings::MaxBuildings,
@@ -253,6 +280,11 @@ void AppendCell(Buildings::Mesh& result,const std::string& json,const Buildings:
         const uint64_t variant=id?id*2654435761ull:uint64_t(result.buildings)*40503ull;
         const float wallU=EarthBuildingStream::PaletteU(int((variant>>8)%4)),pitchedU=EarthBuildingStream::PaletteU(4+int((variant>>12)%3)),
             flatU=EarthBuildingStream::PaletteU(7);
+        // House facades for a building up to 8 m tall, the doorless ones above. By the building's height,
+        // not its wall: on a slope the downhill wall is metres longer and every house became a block.
+        const size_t firstVertex=result.vertices.size();
+        const uint32_t houseWall=uint32_t((variant>>8)%4),blockWall=Buildings::BlockA+uint32_t((variant>>20)%2),
+            pitchedRoof=Buildings::TilesRed+uint32_t((variant>>12)%3);
         double halfWidth=0;
         const std::vector<Point> outline=DropStraightPoints(p);
         const RoofShape roofShape=h<=15?ChooseRoof(Text(tags,"roof:shape"),building,outline,!estimated,halfWidth):RoofShape::Flat;
@@ -261,6 +293,7 @@ void AppendCell(Buildings::Mesh& result,const std::string& json,const Buildings:
             const double rise=std::clamp(halfWidth*.7,1.0,6.0);
             const double eaves=estimated?top:std::max(double(top)-rise,double(high)+2.5);
             const double ridgeY=eaves+rise;
+            const uint32_t wallMaterial=h>8?blockWall:houseWall;
             // Long side first: q0->q1 is a long edge, q1->q2 a short (gable) edge.
             std::vector<Point> q=outline;
             if(std::hypot(q[1].x-q[0].x,q[1].z-q[0].z)<std::hypot(q[2].x-q[1].x,q[2].z-q[1].z))std::rotate(q.begin(),q.begin()+1,q.end());
@@ -289,6 +322,7 @@ void AppendCell(Buildings::Mesh& result,const std::string& json,const Buildings:
                 AddFace(result.vertices,result.indices,{C(q[1],eaves),C(q[2],eaves),C(r1,ridgeY)},out(m1.x,m1.z),wallU);
                 AddFace(result.vertices,result.indices,{C(q[3],eaves),C(q[0],eaves),C(r0,ridgeY)},out(m0.x,m0.z),wallU);
             }
+            TextureFaces(result,firstVertex,p[0],low,wallMaterial,pitchedRoof);
             ++result.buildings;if(estimated)++result.estimatedHeights;
             if(id)ids.insert(id);
             continue;
@@ -304,6 +338,7 @@ void AppendCell(Buildings::Mesh& result,const std::string& json,const Buildings:
                 {float(b.x),top,float(b.z),dz/length,0,-dx/length,wallU}}})result.vertices.push_back(v);
             result.indices.insert(result.indices.end(),{base,base+2,base+1,base+1,base+2,base+3});
         }
+        TextureFaces(result,firstVertex,p[0],low,h>8?blockWall:houseWall,Buildings::FlatRoof);
         ++result.buildings;if(estimated)++result.estimatedHeights;
         if(id)ids.insert(id);
     }

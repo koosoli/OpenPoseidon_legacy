@@ -155,9 +155,13 @@ class TerrainWgpu : public ITerrainRenderer
     std::unique_ptr<class ReefLife> _reef;
     std::unique_ptr<class BeachCritters> _crabs;
     std::unique_ptr<class EarthTreeDetail> _earthTreeDetail;
-    WgrMesh _earthBuildingMesh=0;
+    // one mesh per EarthBuildingStream::Material, drawn with the game's house texture (when it loads) or
+    // the palette colour
+    std::array<WgrMesh,EarthBuildingStream::MaterialCount> _earthBuildingMeshes{};
+    std::array<uint32_t,EarthBuildingStream::MaterialCount> _earthBuildingIndices{};
+    std::array<Ref<Texture>,EarthBuildingStream::MaterialCount> _earthBuildingTextures{};
+    bool _earthBuildingTexturesTried=false;
     WgrTexture _earthBuildingTexture=0; // wall/roof colour palette (EarthBuildingStream::Palette)
-    uint32_t _earthBuildingIndices=0;
     uint64_t _earthBuildingGeneration=0;
     WgrMesh _earthHorizonMesh = 0;
     uint32_t _earthHorizonIndices = 0;
