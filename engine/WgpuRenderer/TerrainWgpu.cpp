@@ -3784,7 +3784,17 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     Camera* camera = scene.GetCamera();
     if (_earthStream)
     {
-        if (camera) DrawEarthTerrain(scene,*camera,land);
+        if (camera)
+        {
+            DrawEarthTerrain(scene,*camera,land);
+            // Tidewater wildlife in whole-world mode (WildlifeWorld.hpp answers its sea and ground)
+            if (!_fish)
+                _fish = std::make_unique<FishSchools>(_engine, _renderer);
+            _fish->Update(camera->Position(), Glob.time.toFloat());
+            if (!_birds)
+                _birds = std::make_unique<BirdFlocks>(_engine, _renderer);
+            _birds->Update(camera->Position(), Glob.time.toFloat());
+        }
         return;
     }
     const bool uploaded = UploadIfNeeded(land);

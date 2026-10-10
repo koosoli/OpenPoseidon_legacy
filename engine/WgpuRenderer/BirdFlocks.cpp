@@ -21,6 +21,7 @@
 
 #include "BirdFlocks.hpp"
 #include "EngineWgpu.hpp"
+#include "WildlifeWorld.hpp"
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -37,7 +38,7 @@ namespace
 {
 constexpr float Tau = 6.2831853f, Pi = 3.14159265f, Grav = 9.81f;
 constexpr int Phases = 16; // flap cycle; mesh index Phases is the glide pose
-constexpr float DrawRange = 320.0f, SimRange = 450.0f;
+constexpr float DrawRange = 1000.0f, SimRange = 450.0f; // drawn as far as they are a pixel or so
 
 using Pts = std::vector<std::pair<float, float>>;
 struct Bill
@@ -674,8 +675,7 @@ void BirdFlocks::EnsureMeshes()
 
 float BirdFlocks::Floor(float x, float z) const
 {
-    const float sea = GLandscape->GetSeaLevel();
-    return std::max(GLandscape->SurfaceY(x, z), sea);
+    return std::max(Wildlife::Ground(x, z), Wildlife::SeaLevel(x, z));
 }
 
 void BirdFlocks::Steer(Flyer& f, float dt, float tx, float ty, float tz, float speed, float power, float turnGain,
@@ -742,8 +742,8 @@ void BirdFlocks::Animate(Flyer& f, float dt)
 
 void BirdFlocks::Spawn(const Vector3& camera)
 {
-    const float sea = GLandscape->GetSeaLevel();
-    auto water = [&](float x, float z) { return GLandscape->SurfaceY(x, z) < sea - 0.5f; };
+    const float sea = Wildlife::SeaLevel(camera.X(), camera.Z());
+    auto water = [&](float x, float z) { return Wildlife::Ground(x, z) < Wildlife::SeaLevel(x, z) - 0.5f; };
     // a random point near the camera, over water if asked (a few tries)
     auto pick = [&](float rMin, float rMax, bool overWater, float& x, float& z)
     {
@@ -855,7 +855,7 @@ void BirdFlocks::Update(const Vector3& camera, float time)
     }();
     if (!enabled || !GLandscape || !_renderer)
         return;
-    const float sea = GLandscape->GetSeaLevel();
+    const float sea = Wildlife::SeaLevel(camera.X(), camera.Z());
     float dt = _lastTime < 0 ? 0.0f : time - _lastTime;
     _lastTime = time;
     dt = Clamp(dt, 0.0f, 0.1f);
@@ -871,7 +871,8 @@ void BirdFlocks::Update(const Vector3& camera, float time)
             for (int k = 0; k < 16 && _nearSea > 1e8f; ++k)
             {
                 const float a = Tau * k / 16;
-                if (GLandscape->SurfaceY(camera.X() + std::cos(a) * r, camera.Z() + std::sin(a) * r) < sea - 0.5f)
+                const float px = camera.X() + std::cos(a) * r, pz = camera.Z() + std::sin(a) * r;
+                if (Wildlife::Ground(px, pz) < Wildlife::SeaLevel(px, pz) - 0.5f)
                     _nearSea = r;
             }
             if (_nearSea < 1e8f)
@@ -898,7 +899,7 @@ void BirdFlocks::Update(const Vector3& camera, float time)
                 if (int(i) != lead)
                     _birds[i].leader = lead;
             }
-        if (_nearSea < 700.0f && camera.Y() < sea + 400.0f)
+        if (_nearSea < 700.0f && camera.Y() < sea + 1200.0f)
             Spawn(camera);
     }
     if (_birds.empty())
@@ -955,7 +956,7 @@ void BirdFlocks::Update(const Vector3& camera, float time)
         }
         // keep clear of the land under it and ahead
         const float aheadX = f.x + std::sin(f.yaw) * 30, aheadZ = f.z + std::cos(f.yaw) * 30;
-        const float ground = std::max(GLandscape->SurfaceY(f.x, f.z), GLandscape->SurfaceY(aheadX, aheadZ));
+        const float ground = std::max(Wildlife::Ground(f.x, f.z), Wildlife::Ground(aheadX, aheadZ));
         if (ground > sea)
             ty = std::max(ty, ground + (f.mode == 2 ? 12.0f : 6.0f));
         Steer(f, dt, tx, ty, tz, speed, power, turn, wind.X(), wind.Z());
@@ -964,25 +965,25 @@ void BirdFlocks::Update(const Vector3& camera, float time)
     }
 
     // draw
+    // WGR_BIRDS_SCALE: a debug magnifier for checking the shapes in a capture
+    static const float debugScale = []
+    {
+        const char* v = std::getenv("WGR_BIRDS_SCALE");
+        return v ? std::max(0.1f, float(std::atof(v))) : 1.0f;
+    }();
     int drawn = 0;
     for (const Flyer& f : _birds)
     {
         const float dx = f.x - camera.X(), dy = f.y - camera.Y(), dz = f.z - camera.Z();
         const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
         const Species& sp = SpeciesTable[f.species];
-        if (dist > DrawRange || sp.length * f.scale / std::max(dist, 0.1f) < 0.0015f)
+        if (dist > DrawRange || sp.length * f.scale * debugScale / std::max(dist, 0.1f) < 0.0012f)
             continue;
         // pose: a phase of the flap cycle, or the glide pose
         const int pose = f.flap < 0.2f ? Phases : std::clamp(int(f.phase / Tau * Phases), 0, Phases - 1);
         const size_t mi = size_t(f.species) * (Phases + 1) + pose;
         // body: along the flight path, banked (Kit.js qYawPitchRoll), a small heave with the beat
         const BQ q = QMul(QMul(QAxis(0, 1, 0, f.yaw), QAxis(1, 0, 0, -f.pitch)), QAxis(0, 0, 1, -f.bank));
-        // WGR_BIRDS_SCALE: a debug magnifier for checking the shapes in a capture
-        static const float debugScale = []
-        {
-            const char* v = std::getenv("WGR_BIRDS_SCALE");
-            return v ? std::max(0.1f, float(std::atof(v))) : 1.0f;
-        }();
         const float s = f.scale * debugScale;
         const BV3 ax = QRot(q, {s, 0, 0}), up = QRot(q, {0, s, 0}), fw = QRot(q, {0, 0, s});
         const float heave = -std::cos(f.phase) * 0.012f * sp.length * f.flap;
@@ -994,8 +995,9 @@ void BirdFlocks::Update(const Vector3& camera, float time)
     if (time >= nextLog)
     {
         nextLog = time + 5.0f;
-        LOG_INFO(Graphics, "Birds: {} flying, {} drawn, sea {:.0f} m from the camera", _birds.size(), drawn,
-                 _nearSea > 1e8f ? -1.0f : _nearSea);
+        LOG_INFO(Graphics, "Birds: {} flying, {} drawn, sea {:.0f} m from the camera; camera {:.0f} {:.0f} {:.0f}, first {:.0f} {:.0f} {:.0f}",
+                 _birds.size(), drawn, _nearSea > 1e8f ? -1.0f : _nearSea, camera.X(), camera.Y(), camera.Z(), _birds[0].x,
+                 _birds[0].y, _birds[0].z);
     }
 }
 } // namespace Poseidon

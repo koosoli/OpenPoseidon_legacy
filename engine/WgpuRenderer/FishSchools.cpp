@@ -15,6 +15,7 @@
 
 #include "FishSchools.hpp"
 #include "EngineWgpu.hpp"
+#include "WildlifeWorld.hpp"
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -378,10 +379,10 @@ void FishSchools::EnsureMeshes()
 bool FishSchools::SpawnGroup(const Vector3& camera)
 {
     std::uniform_real_distribution<float> unit(0.0f, 1.0f);
-    const float sea = GLandscape->GetSeaLevel();
+    const float sea = Wildlife::SeaLevel(camera.X(), camera.Z());
     const float angle = Tau * unit(_rng), radius = 3.0f + 25.0f * unit(_rng);
     const Vector3 home(camera.X() + std::cos(angle) * radius, 0, camera.Z() + std::sin(angle) * radius);
-    const float floor = GLandscape->SurfaceY(home.X(), home.Z());
+    const float floor = Wildlife::Ground(home.X(), home.Z());
     const float depth = sea - floor;
     if (depth < 1.5f)
         return false;
@@ -432,7 +433,7 @@ bool FishSchools::SpawnGroup(const Vector3& camera)
 void FishSchools::Step(Group& g, const Vector3& camera, float dt)
 {
     const Behaviour& b = Behaviours[g.behaviour];
-    const float sea = GLandscape->GetSeaLevel();
+    const float sea = Wildlife::SeaLevel(camera.X(), camera.Z());
     g.wanderAngle += dt * 0.08f;
     const Vector3 goal(g.home.X() + std::cos(g.wanderAngle) * b.homeRadius * 0.6f, g.homeY,
                        g.home.Z() + std::sin(g.wanderAngle) * b.homeRadius * 0.6f);
@@ -492,7 +493,7 @@ void FishSchools::Step(Group& g, const Vector3& camera, float dt)
             }
         }
         // the water column: above the seabed, below the surface
-        const float floor = GLandscape->SurfaceY(f.pos.X(), f.pos.Z()) + 0.18f + len * 0.5f;
+        const float floor = Wildlife::Ground(f.pos.X(), f.pos.Z()) + 0.18f + len * 0.5f;
         const float ceiling = sea - 0.7f;
         if (f.pos.Y() < floor + 0.4f)
             steer += Vector3(0, (floor + 0.4f - f.pos.Y()) * 3.0f, 0);
@@ -526,7 +527,7 @@ void FishSchools::Update(const Vector3& camera, float time)
     }();
     if (!enabled || !GLandscape || !_renderer)
         return;
-    const float sea = GLandscape->GetSeaLevel();
+    const float sea = Wildlife::SeaLevel(camera.X(), camera.Z());
     // Only near the sea: no simulation for a camera high above it or far inland.
     if (camera.Y() > sea + 60.0f)
         return;

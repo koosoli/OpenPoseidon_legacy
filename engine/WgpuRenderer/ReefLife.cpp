@@ -18,6 +18,7 @@
 
 #include "ReefLife.hpp"
 #include "EngineWgpu.hpp"
+#include "WildlifeWorld.hpp"
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -984,7 +985,8 @@ void ReefLife::Update(const Vector3& camera, float time)
         const char* v = std::getenv("WGR_REEF");
         return !(v && v[0] == '0');
     }();
-    if (!enabled || !GLandscape || !_renderer)
+    // whole-world mode has no bathymetry: no sea floor for anything to sit on
+    if (!enabled || !GLandscape || !_renderer || Wildlife::Earth())
         return;
     const float sea = GLandscape->GetSeaLevel();
     // under the water, or near it looking in (from high above the floor is not seen)
