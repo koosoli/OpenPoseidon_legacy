@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 namespace Poseidon
@@ -228,9 +229,6 @@ bool EarthContentSource::Ensure(const std::filesystem::path& cache, const char* 
     const auto now = std::chrono::steady_clock::now();
     if (auto it = failures.find(url); it != failures.end() && now - it->second < std::chrono::seconds(60))
         return false;
-    std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(), curl_easy_cleanup);
-    if (!curl)
-        return false;
     std::string bytes;
     auto failed = [&]
     {
@@ -239,25 +237,45 @@ bool EarthContentSource::Ensure(const std::filesystem::path& cache, const char* 
         failures[url] = now;
         return false;
     };
-    curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl.get(), CURLOPT_PROTOCOLS_STR, _loopbackTest ? "https,http" : "https");
-    curl_easy_setopt(curl.get(), CURLOPT_FOLLOWLOCATION, 0L);
-    // A pre-tiled source answers at once; Overpass evaluates a query (seconds, more under load).
-    curl_easy_setopt(curl.get(), CURLOPT_CONNECTTIMEOUT_MS, _overpass.empty() ? 1000L : 5000L);
-    curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT_MS, _overpass.empty() ? 3000L : 30000L);
-    curl_easy_setopt(curl.get(), CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(curl.get(), CURLOPT_USERAGENT,
-                     "OpenPoseidon-EarthContent/1 (+https://github.com/koosoli/OpenPoseidon)");
-    curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, Receive);
-    curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &bytes);
-    curl_easy_setopt(curl.get(), CURLOPT_NOPROGRESS, 0L);
-    curl_easy_setopt(curl.get(), CURLOPT_XFERINFOFUNCTION, Progress);
-    curl_easy_setopt(curl.get(), CURLOPT_XFERINFODATA, &cancelled);
-    const auto status = curl_easy_perform(curl.get());
+    // Connections and TLS handshakes fail transiently (measured 4 of 5 in a row on one machine). A building
+    // cell that fails once is otherwise not asked for again until the camera moves to another cell.
+    CURLcode status = CURLE_FAILED_INIT;
     long http = 0;
-    curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &http);
-    if (Cancelled(cancelled))
-        return false;
+    for (int attempt = 0; attempt < 3; ++attempt)
+    {
+        if (attempt)
+            for (int waited = 0; waited < 1000 * attempt; waited += 100)
+            {
+                if (Cancelled(cancelled))
+                    return false;
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(), curl_easy_cleanup);
+        if (!curl)
+            return false;
+        bytes.clear();
+        http = 0;
+        curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl.get(), CURLOPT_PROTOCOLS_STR, _loopbackTest ? "https,http" : "https");
+        curl_easy_setopt(curl.get(), CURLOPT_FOLLOWLOCATION, 0L);
+        // A pre-tiled source answers at once; Overpass evaluates a query (seconds, more under load).
+        curl_easy_setopt(curl.get(), CURLOPT_CONNECTTIMEOUT_MS, _overpass.empty() ? 1000L : 5000L);
+        curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT_MS, _overpass.empty() ? 3000L : 30000L);
+        curl_easy_setopt(curl.get(), CURLOPT_NOSIGNAL, 1L);
+        curl_easy_setopt(curl.get(), CURLOPT_USERAGENT,
+                         "OpenPoseidon-EarthContent/1 (+https://github.com/koosoli/OpenPoseidon)");
+        curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, Receive);
+        curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &bytes);
+        curl_easy_setopt(curl.get(), CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(curl.get(), CURLOPT_XFERINFOFUNCTION, Progress);
+        curl_easy_setopt(curl.get(), CURLOPT_XFERINFODATA, &cancelled);
+        status = curl_easy_perform(curl.get());
+        curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &http);
+        if (Cancelled(cancelled))
+            return false;
+        if (status == CURLE_OK && (http == 200 || (http >= 400 && http < 500 && http != 408 && http != 429)))
+            break; // success, or a refusal that retrying will not change
+    }
     if (status != CURLE_OK || http != 200 || !ValidCell(bytes, kind))
     {
         return failed();
@@ -311,6 +329,10 @@ bool EarthContentSource::EnsureNeighborhood(const std::filesystem::path& cache, 
         bool downloaded = false;
         Ensure(cache, kind, lat + offset[0], ((lon + offset[1] + 27000) % 18000) - 9000, bounded, &downloaded);
         changed = changed || downloaded;
+        // Overpass cells take seconds each and both workers share one transfer lock; std::mutex is not fair,
+        // so without a pause the features worker re-took it cell after cell and buildings never got a turn.
+        if (downloaded && !_overpass.empty())
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     return changed;
 }
