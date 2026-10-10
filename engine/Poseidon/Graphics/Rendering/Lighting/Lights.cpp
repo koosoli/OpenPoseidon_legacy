@@ -1,4 +1,5 @@
 
+#include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Ephemeris.hpp>
@@ -534,7 +535,23 @@ void LightSun::Recalculate(World* world)
     // Everything above this line is the 2001 toy model, kept because it is still the
     // SUN's default (see Engine::SkySettings::sunRealistic) and the fallback when the
     // ephemeris is switched off. Below, the real positions overwrite it.
-    const Engine::SkySettings celestial = ResolveCelestialSettings();
+    Engine::SkySettings celestial = ResolveCelestialSettings();
+    // Whole world: the sun and moon are the real ephemeris for the real place. The observer is the
+    // live geographic origin; the clock stays local mean solar time at the START longitude, i.e. a
+    // fixed universal time, so flying east or west moves you through day and night instead of
+    // carrying noon along. In the origin's tangent frame the light direction then lights the globe
+    // with the real terminator, and the sun sets behind the curved horizon.
+    const bool earth = EarthStreaming::Enabled();
+    double earthLatitude = 0, earthLongitude = 0, earthClockLongitude = 0;
+    if (earth)
+    {
+        const auto origin = EarthStreaming::GetLocation();
+        static const double startLongitude = origin.longitude;
+        earthLatitude = origin.latitude * (H_PI / 180.0);
+        earthLongitude = origin.longitude * (H_PI / 180.0);
+        earthClockLongitude = startLongitude * (H_PI / 180.0);
+        celestial.sunRealistic = celestial.moonRealistic = true;
+    }
 
     // Legacy phase, computed before any overwrite so the fallback path is unchanged.
     float cosMoonPhase = -(_direction * _moonDirection);
@@ -551,8 +568,8 @@ void LightSun::Recalculate(World* world)
 
     if (celestial.moonRealistic || celestial.sunRealistic)
     {
-        double latitudeRad = astro::GeographicLatitudeFromWorld(static_cast<double>(latitudeCoord));
-        if (celestial.moonLatitudeOverride)
+        double latitudeRad = earth ? earthLatitude : astro::GeographicLatitudeFromWorld(static_cast<double>(latitudeCoord));
+        if (celestial.moonLatitudeOverride && !earth)
         {
             latitudeRad = static_cast<double>(celestial.moonLatitudeDeg) * (H_PI / 180.0);
         }
@@ -560,10 +577,10 @@ void LightSun::Recalculate(World* world)
         double hoursLocal = 12.0;
         CelestialDateTime(celestial, year, month, day, hoursLocal);
 
-        const double jd =
-            astro::JulianDayFromLocal(year, month, day, hoursLocal, static_cast<double>(longitudeCoord));
-        const astro::SkyState sky =
-            astro::Compute(jd, astro::GeoObserver{latitudeRad, static_cast<double>(longitudeCoord)});
+        const double jd = astro::JulianDayFromLocal(year, month, day, hoursLocal,
+                                                    earth ? earthClockLongitude : static_cast<double>(longitudeCoord));
+        const astro::SkyState sky = astro::Compute(
+            jd, astro::GeoObserver{latitudeRad, earth ? earthLongitude : static_cast<double>(longitudeCoord)});
 
         // The terminator's orientation always comes from the REAL sun, even when the
         // drawn/lighting sun is the legacy one: a moon whose phase is right but whose
