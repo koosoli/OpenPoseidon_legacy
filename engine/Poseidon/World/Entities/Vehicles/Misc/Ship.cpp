@@ -659,9 +659,46 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                             // W11b/W11e: the water drag below reads the depth the legacy lift would
                             // give: this point's depth less the extra the lower gain lets it sink
                             float planingDepthShift = 0.0f;
+                            // DISPLACEMENT BUOYANCY (Tidewater's boat model, re-implemented on the CPU
+                            // sea so servers and headless runs agree). The legacy lift multiplied each
+                            // point's depth by 9-26 and turned the hull at a fifth of its lever arm,
+                            // so a boat sat on the MEAN sea: in a trough it hung in the air, on a crest
+                            // the wave washed over it, and it barely pitched or rolled with the swell
+                            // (owner, 2026-10-10: "boat buoyancy is not right"). Here every hull point
+                            // carries its share of the weight at the hull's rest draft, in proportion
+                            // to its own depth under the WAVE surface, at its full lever arm, with
+                            // heave damping on the point's own vertical speed. A fast small hull gets a
+                            // bounded dynamic (planing) lift. POSEIDON_BOAT_LEGACY=1: the old model.
+                            static const bool legacyBuoyancy = []
+                            {
+                                const char* v = std::getenv("POSEIDON_BOAT_LEGACY");
+                                return v && v[0] == '1';
+                            }();
+                            if (!legacyBuoyancy)
+                            {
+                                // The lift itself comes from the hull-patch grid after this loop (these
+                                // contacts are the hull LOD's vertices, keel to cabin roof, not equal
+                                // areas of hull). Here only the drag: it keeps reading the depth the legacy
+                                // lift would give at the same load, so top speed, acceleration and turning
+                                // stay as tuned.
+                                const float draft = smallShip ? 0.35f : floatMax(1.0f, 4.0f * sizeCoef);
+                                const float fwd = floatMax(speed[2], 0);
+                                const float legacyGain = smallShip ? 20 + floatMin(fwd * 6, 100) : 1.0f;
+                                const float legacyStiffness = (1200000 / baseMass) * GetMass() * legacyGain;
+                                const float equivalentStiffness =
+                                    GetMass() * G_CONST / (draft * float(std::max(gCollision.Size(), 1)));
+                                planingDepthShift = floatMax(info.under, 0.0f) * (1.0f - equivalentStiffness / legacyStiffness);
+                                if (buoyDiag)
+                                {
+                                    ++diagWaterN;
+                                    diagUnder += info.under;
+                                    diagUnderFlat += info.underFlat;
+                                }
+                                pCenter = info.pos - wCenter;
+                            }
                             // TW-WATER W6a.2: a wreck does not plane. With the lift a boat killed
                             // at speed skimmed on for 150 m while it "sank" (twboats, 98aee494).
-                            if (smallShip && !_isDead)
+                            else if (smallShip && !_isDead)
                             {
                                 // PLANING LIFT. A small hull gets up to 120x the static buoyancy
                                 // as it picks up speed, which is the 2001 engine's stand-in for
@@ -711,16 +748,19 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                                 const float lift = (flat * gain + wave) * Inv(floatMax(info.under, 1e-3f));
                                 pForce *= floatMax(lift, 1.0f);
                             }
-                            if (buoyDiag)
+                            if (legacyBuoyancy)
                             {
-                                ++diagWaterN;
-                                diagUnder += info.under;
-                                diagUnderFlat += info.underFlat;
-                                diagLift += pForce.Y();
+                                if (buoyDiag)
+                                {
+                                    ++diagWaterN;
+                                    diagUnder += info.under;
+                                    diagUnderFlat += info.underFlat;
+                                    diagLift += pForce.Y();
+                                }
+                                pCenter = info.pos - wCenter;
+                                torque += pCenter.CrossProduct(pForce * 0.2);
+                                totForce += pForce;
                             }
-                            pCenter = info.pos - wCenter;
-                            torque += pCenter.CrossProduct(pForce * 0.2);
-                            totForce += pForce;
 
 #if ARROWS
                             AddForce(wCenter + pCenter, pForce * InvMass(), Color(1, 0, 1, 0.5));
@@ -752,6 +792,11 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
 
                             pForce[0] *= dragDepth;
                             pForce[1] *= info.under; // Keep vertical wave damping and buoyancy unchanged.
+                            // The hull-patch model damps heave itself; this vertical friction (about 25x
+                            // the hull's mass per m/s over a typical contact set) made the boat lag every
+                            // wave by seconds -- lifted 3x its weight on a crest it had not yet climbed.
+                            if (!legacyBuoyancy)
+                                pForce[1] = 0;
                             pForce[2] *= dragDepth;
                             pForce = DirectionModelToWorld(pForce) * GetMass() * (1.0 / 7000);
 #if ARROWS
@@ -760,8 +805,10 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                             friction += pForce * coefNPoints;
                             if (smallShip)
                             {
-                                Vector3 tf = _angMomentum * 0.7 * info.under;
-                                tf[1] *= 0.05;
+                                // Roll/pitch friction per wet point; lighter with hull-patch buoyancy so
+                                // the hull can follow the swell (yaw keeps its own 5%).
+                                Vector3 tf = _angMomentum * (legacyBuoyancy ? 0.7f : 0.15f) * info.under;
+                                tf[1] *= legacyBuoyancy ? 0.05f : 0.2f;
                                 torqueFriction += tf;
                             }
                             else
@@ -883,9 +930,85 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                         }
                     }
                 }
+                // HULL-PATCH BUOYANCY (Tidewater's boat model). A 5 x 3 grid over the hull's footprint
+                // at keel level; each patch asks the wave surface above it (as drawn near the camera)
+                // how deep its column is, and carries its share of the weight in proportion: the whole
+                // hull's stiffness is weight / rest draft (a 0.35 m draft heaves at ~1.2 s, like a real
+                // small boat), applied at the patch, so the hull pitches and rolls with the swell.
+                // Critically damped heave on the patch's own vertical speed; a fast small hull gets a
+                // bounded dynamic (planing) lift. POSEIDON_BOAT_LEGACY=1: the 2001 model above.
+                static const bool legacyHull = []
+                {
+                    const char* v = std::getenv("POSEIDON_BOAT_LEGACY");
+                    return v && v[0] == '1';
+                }();
+                if (!legacyHull && GLandscape)
+                {
+                    const LODShape* hull = GetShape();
+                    const Vector3 lo = hull->Min(), hi = hull->Max();
+                    // Centred on the centre of mass, not the bounding box: a hull trims until its centre
+                    // of buoyancy sits under its weight, and BoatW's mass is well aft (engine, cabin) --
+                    // a box-centred grid floated it bow up with the stern deck awash.
+                    const Vector3 com = GetCenterOfMass();
+                    const float halfX = floatMin(com.X() - lo.X(), hi.X() - com.X()) * 0.85f;
+                    const float halfZ = floatMin(com.Z() - lo.Z(), hi.Z() - com.Z()) * 0.9f;
+                    const float draft = smallShip ? 0.35f : floatMax(1.0f, 4.0f * sizeCoef);
+                    const float hullDepthCap = floatMax(draft * 4.0f, 1.0f);
+                    constexpr int Along = 5, Across = 3;
+                    constexpr float Patches = float(Along * Across);
+                    const float fwd = floatMax(speed[2], 0);
+                    const float planing = smallShip && !_isDead ? 1.0f + floatMin(fwd * 0.04f, 0.8f) : 1.0f;
+                    const float patchStiffness = GetMass() * G_CONST / (draft * Patches) * planing;
+                    const float omega = sqrtf(G_CONST / draft);
+                    const float patchDamping = 2.0f * omega * GetMass() / Patches;
+                    float lift = 0.0f;
+                    int wet = 0;
+                    for (int a = 0; a < Along; ++a)
+                    {
+                        for (int c = 0; c < Across; ++c)
+                        {
+                            const float u = (a + 0.5f) / Along, w = (c + 0.5f) / Across;
+                            // The footprint is a little inside the bounding box (bow and stern taper).
+                            const Vector3 model(com.X() + halfX * (2.0f * w - 1.0f), lo.Y(),
+                                                com.Z() + halfZ * (2.0f * u - 1.0f));
+                            const Vector3 world = moveTrans.PositionModelToWorld(model);
+                            if (GLandscape->SurfaceY(world.X(), world.Z()) >= GLandscape->GetSeaLevel())
+                                continue; // this patch is over land
+                            const float surface = SwimWaterSurfaceY(world.X(), world.Z()) + _sink * -1.0f;
+                            const float depth = floatMin(surface - world.Y(), hullDepthCap);
+                            if (depth <= 0.0f)
+                                continue;
+                            ++wet;
+                            const Vector3 lever = world - wCenter;
+                            const Vector3 pointVelocity = _speed + _angVelocity.CrossProduct(lever);
+                            const float wetShare = floatMin(depth / draft, 1.0f);
+                            const Vector3 patchForce(0, patchStiffness * depth - patchDamping * wetShare * pointVelocity.Y(), 0);
+                            torque += lever.CrossProduct(patchForce);
+                            totForce += patchForce;
+                            lift += patchForce.Y();
+                        }
+                    }
+                    if (wet > 0)
+                        _waterContact = true;
+                    static const bool hullDiag = std::getenv("POSEIDON_BOAT_DIAG") != nullptr;
+                    if (hullDiag)
+                    {
+                        static std::unordered_map<uint32_t, float> nextHull;
+                        float& next = nextHull[RenderId()];
+                        if (Glob.time.toFloat() >= next)
+                        {
+                            next = Glob.time.toFloat() + 1.0f;
+                            LOG_INFO(Physics, "Boat hull: t={:.1f} object={} wet patches={}/15 lift/weight={:.3f} planing={:.2f} y={:.2f} pitch-up={:.3f} vy={:.2f}",
+                                     Glob.time.toFloat(), RenderId(), wet, lift / floatMax(GetMass() * G_CONST, 1.0f), planing,
+                                     Position().Y(), Direction().Y(), _speed.Y());
+                        }
+                    }
+                }
                 if (_waterContact)
                 {
-                    torque += Vector3(0, 800 * sizeCoef * GetMass(), 0).CrossProduct(stabilize);
+                    // The 2001 "stay upright" torque; with real buoyancy torques it only needs to stop a
+                    // capsize, not hold the deck level against the swell.
+                    torque += Vector3(0, (legacyHull ? 800 : 400) * sizeCoef * GetMass(), 0).CrossProduct(stabilize);
                 }
             }
 
