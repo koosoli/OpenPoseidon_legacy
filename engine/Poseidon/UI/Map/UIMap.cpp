@@ -27,6 +27,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <future>
+#include <atomic>
+#include <thread>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -783,7 +785,10 @@ struct EarthMapPiece
 struct EarthMapImageryState
 {
     std::vector<EarthMapPiece> pieces; // [0] = overview
-    std::future<void> worker;
+    // Detached on purpose: a std::future's destructor would hold process exit (and the editor's move-the-mission
+    // restart) until every remaining tile download finished. Exit sets `stop`; a running download ends with it.
+    std::shared_ptr<std::atomic<bool>> stop = std::make_shared<std::atomic<bool>>(false);
+    ~EarthMapImageryState() { stop->store(true); }
     std::shared_ptr<std::vector<std::pair<int, std::string>>> done = std::make_shared<std::vector<std::pair<int, std::string>>>();
     std::shared_ptr<std::mutex> lock = std::make_shared<std::mutex>();
     std::string status = "Loading the satellite map...";
@@ -893,16 +898,22 @@ EarthMapImageryState& EarthMapImagery()
     }
     auto done = state.done;
     auto lock = state.lock;
-    state.worker = std::async(std::launch::async, [=]
+    const auto stop = state.stop;
+    std::thread([=]
     {
         for (const auto& job : jobs)
         {
+            if (stop->load())
+                return;
             std::string message;
-            const bool ok = builder(cacheDir, job.south, job.west, job.north, job.east, job.size, job.file, message, {});
+            const bool ok = builder(cacheDir, job.south, job.west, job.north, job.east, job.size, job.file, message,
+                                    [stop] { return stop->load(); });
+            if (stop->load())
+                return;
             std::lock_guard<std::mutex> guard(*lock);
             done->push_back({job.index, ok ? std::string() : (message.empty() ? std::string("No imagery.") : message)});
         }
-    });
+    }).detach();
     return state;
 }
 } // namespace
