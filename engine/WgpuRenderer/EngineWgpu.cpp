@@ -714,7 +714,7 @@ Engine::TonemapSettings LerpTonemap(const Engine::TonemapSettings& a, const Engi
 // dusk 18:30. Whole-world mode has the real sun for the real place, so a Grand Canyon sunset at 18:54
 // was already being darkened toward the 20:00 night preset. There the key is the hour at which the
 // tuned island has the same sun elevation: dawn keys while the sun is in the east, dusk keys in the west.
-float LookHour(float clockHour)
+float LookHour(float clockHour, bool skyRadiance = false)
 {
     if (!EarthStreaming::Enabled())
         return clockHour;
@@ -731,8 +731,14 @@ float LookHour(float clockHour)
     const float sinE = r > 0.0 ? float((ox * toSun.X() + oy * toSun.Y() + oz * toSun.Z()) / r) : toSun.Y();
     const float e = std::asin(std::clamp(sinE, -1.0f, 1.0f)) * (180.0f / 3.14159265f);
     const auto lerp = [](float a, float b, float t) { return a + (b - a) * std::clamp(t, 0.0f, 1.0f); };
-    if (toSun.X() > 0.0f) // morning: night 2:00 .. dawn 5:50 (sun at the horizon) .. noon
-        return e < 0.0f ? lerp(2.0f, 5.833f, (e + 12.0f) / 12.0f) : lerp(5.833f, 12.0f, e / 60.0f);
+    // The SKY presets scale the sun's radiance down toward evening (noon 22.5, dusk 3.2, night 0.56
+    // as intensity x exposure): the island's stand-in for twilight. The real atmosphere already
+    // darkens a low sun's sky, so on top of it the sky went black the moment the sun touched the
+    // horizon. Keep the noon scale through civil twilight (sun -6 deg) and ease to night by -12.
+    if (skyRadiance)
+        return e > -6.0f ? 12.0f : lerp(12.0f, 20.0f, (-6.0f - e) / 6.0f);
+    // Mornings are graded with the evening curve as well: the island's 5:50 dawn key carries a 2.76x
+    // gain that, under real twilight exposure, blew the dawn out to white (day-cycle test, 04:24).
     if (e >= 20.0f) // afternoon: 17:00 at 20 degrees .. noon at 60
         return lerp(17.0f, 12.0f, (e - 20.0f) / 40.0f);
     if (e >= 3.0f) // 18:30 dusk at 3 degrees .. 17:00 at 20
@@ -19292,6 +19298,49 @@ void EngineWgpu::UpdateAutoTonemap()
         const double altitude = std::sqrt(ox * ox + oy * oy + oz * oz) - 6378137.0;
         const float space = float(std::clamp((altitude - 30000.0) / 70000.0, 0.0, 1.0));
         _tonemap.exposure *= 1.0f - 0.6f * space;
+        // Twilight: with the real atmosphere the sky 4 degrees after sunset is a few hundred times
+        // darker than at noon, and auto-exposure could only brighten 1.1x (it exists to stop glare),
+        // so dusk rendered black. Let it adapt like an eye through civil twilight, then let night be
+        // night: ceiling 1.1x above +5 deg, 10x at -6 deg, back to 4x by -15 deg (30x blew dawn clouds out).
+        const Vector3 toSun = -render::frame::GPresentationSnapshot().sunDirection;
+        const double r = altitude + 6378137.0;
+        const float sinE = r > 0.0 ? float((ox * toSun.X() + oy * toSun.Y() + oz * toSun.Z()) / r) : toSun.Y();
+        const float e = std::asin(std::clamp(sinE, -1.0f, 1.0f)) * (180.0f / 3.14159265f);
+        float ceiling = 1.1f;
+        if (e < 5.0f)
+            ceiling = e > -6.0f ? 1.1f + (10.0f - 1.1f) * (5.0f - e) / 11.0f
+                                : 10.0f + (4.0f - 10.0f) * std::clamp((-6.0f - e) / 9.0f, 0.0f, 1.0f);
+        _exposure.maxScale = std::max(ceiling * (1.0f - space) + 1.1f * space, 1.1f);
+        // A fast clock (the Whole World "Day cycle" test runs 24 h per minute) moves the light far
+        // faster than eye-like adaptation follows: dusk went dark before sunset and dawn blew out on
+        // night exposure. While game time runs >20x real time, adapt in 0.15 s; restore after.
+        static double lastDay = -1.0;
+        static auto lastAt = std::chrono::steady_clock::now();
+        static float speed = 1.0f, savedTau = -1.0f;
+        static bool overridden = false;
+        const double day = render::frame::GPresentationSnapshot().timeOfDay;
+        const auto nowAt = std::chrono::steady_clock::now();
+        const double realDt = std::chrono::duration<double>(nowAt - lastAt).count();
+        if (lastDay >= 0.0 && realDt > 0.0 && realDt < 1.0)
+        {
+            double dDay = day - lastDay;
+            if (dDay < -0.5) dDay += 1.0; // past midnight
+            const float instant = float(std::clamp(dDay * 86400.0 / realDt, 0.0, 100000.0));
+            speed += (instant - speed) * 0.1f;
+        }
+        lastDay = day;
+        lastAt = nowAt;
+        if (speed > 20.0f && !overridden)
+        {
+            savedTau = _autoExposureTau;
+            _autoExposureTau = 0.15f;
+            overridden = true;
+        }
+        else if (speed < 5.0f && overridden)
+        {
+            _autoExposureTau = savedTau;
+            overridden = false;
+        }
     }
     // The push happens in NextFrame after UpdateAutoSky (PushRenderParams).
 }
@@ -20303,7 +20352,7 @@ void EngineWgpu::UpdateAutoSky()
     // everything else (density heights, night colours/band, samples, planet/atmosphere
     // geometry, and the user toggles: sky lighting, ambient, aerial shadow, fog falloff,
     // enabled) stays exactly as the Sky tab left it. Kept in sync with LerpSky's field set.
-    const SkySettings k = SkyAtHour(LookHour(render::frame::GPresentationSnapshot().timeOfDay * 24.0f));
+    const SkySettings k = SkyAtHour(LookHour(render::frame::GPresentationSnapshot().timeOfDay * 24.0f, true));
     _sky.exposure = k.exposure;
     _sky.sunIntensity = k.sunIntensity;
     _sky.sunAngularRadius = k.sunAngularRadius;

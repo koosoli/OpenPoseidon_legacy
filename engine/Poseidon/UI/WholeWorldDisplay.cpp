@@ -27,7 +27,7 @@ namespace Poseidon
 namespace
 {
 constexpr int ListId = 62101, LatId = 62102, LonId = 62103, AltId = 62104, ImageryId = 62105, ElevationId = 62106,
-              KeyId = 62107, StatusId = 62108, EnterId = 62109, BackId = 62110, PanelId = 62111, ContentId = 62117, StartId = 62118;
+              KeyId = 62107, StatusId = 62108, EnterId = 62109, BackId = 62110, PanelId = 62111, ContentId = 62117, StartId = 62118, DayCycleId = 62119;
 
 struct Place
 {
@@ -78,6 +78,7 @@ class WholeWorldDisplay : public Display
     EarthProviders::Config _config;
     int _imagery = 0, _elevation = 0, _selected = -1;
     bool _onFoot = false; // start as the soldier on the ground instead of the free-flight camera
+    bool _dayCycle = false; // test aid: one day per minute
 
     void AddControl(const char* base, const char* name, int id, const char* text, float x, float y, float w, float h)
     {
@@ -149,6 +150,7 @@ class WholeWorldDisplay : public Display
         const bool osm = _config.contentId == "overpass";
         SetLabel(ContentId, osm ? "3D buildings, roads: OpenStreetMap" : "3D buildings, roads: off");
         SetLabel(StartId, _onFoot ? "Start: on foot (soldier)" : "Start: free flight camera");
+        SetLabel(DayCycleId, _dayCycle ? "Day cycle: 24 h per minute (test)" : "Day cycle: real time");
         std::string note = "Imagery: ";
         note += Imagery().attribution;
         note += ". Elevation: ";
@@ -250,6 +252,19 @@ class WholeWorldDisplay : public Display
                    "init=\"this allowDamage false;0 setRain 0;0 setOvercast 0;0 setFog 0\";\n"
                    " };};};};\n};\n"
                    "class Intro {randomSeed=1;};class OutroWin {randomSeed=1;};class OutroLoose {randomSeed=1;};\n";
+            // Test aid: a whole day in one minute (0.02 h every 0.05 s), to judge sunrise, noon, sunset
+            // and night lighting from one spot. Off: no init script at all.
+            const auto initScript = mission / "init.sqs";
+            if (_dayCycle)
+            {
+                std::ofstream init(initScript, std::ios::trunc);
+                // Broken cloud too, so the decks' lighting through dawn, noon, dusk and night can be judged.
+                init << "; OpenPoseidon whole world: one day per minute (Day cycle test option)\n"
+                        "0 setOvercast 0.55\n"
+                        "#loop\n~0.05\nskipTime 0.02\ngoto \"loop\"\n";
+            }
+            else
+                std::filesystem::remove(initScript, ec);
             if (!file || !sqm)
             {
                 error = "Cannot write the whole-world start files to " + Utf8(fixture);
@@ -366,6 +381,7 @@ class WholeWorldDisplay : public Display
         AddControl("RscEdit", "Key", KeyId, "", 0.70f, 0.52f, 0.24f, 0.05f);
         AddControl("RscButton", "Content", ContentId, "", 0.52f, 0.58f, 0.42f, 0.05f);
         AddControl("RscButton", "Start", StartId, "", 0.52f, 0.64f, 0.42f, 0.05f);
+        AddControl("RscButton", "DayCycle", DayCycleId, "", 0.06f, 0.64f, 0.42f, 0.05f);
         AddControl("RscText", "Status", StatusId, "", 0.06f, 0.70f, 0.88f, 0.11f);
         AddControl("RscButton", "Enter", EnterId, "Enter whole world", 0.06f, 0.82f, 0.35f, 0.05f);
         AddControl("RscButton", "Back", BackId, "Back", 0.74f, 0.82f, 0.20f, 0.05f);
@@ -394,6 +410,11 @@ class WholeWorldDisplay : public Display
         else if (idc == ImageryId)
         {
             _imagery = (_imagery + 1) % int(EarthProviders::ImageryPresets().size());
+            ShowProviders();
+        }
+        else if (idc == DayCycleId)
+        {
+            _dayCycle = !_dayCycle;
             ShowProviders();
         }
         else if (idc == StartId)
