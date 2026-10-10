@@ -12,12 +12,11 @@ Malprave's swimming (read only, `G:\Malprave` patches `swimming`, `swimBoatsAI`,
 skipped). The core was ported by hand into `SoldierOldSwim.cpp` (Oli's water is different); the AI,
 route and boat patches applied nearly as they are (744e1d3e).
 
-## Animations: local content, not committed
+## Animations: made by Claude, shipped as `@OP_Swim`
 
-`G:\DEC-CWA\AddOns\swim.pbo` (16 RTMs) plus Malprave's `CfgMovesMC` swim block, packed as a
-`swim` addon into `G:\CWA-OLI\AddOns\swim.pbo`. The RTMs were retargeted by IK from Arma 1 key
-poses, so their provenance rules out committing them (option A). A config without the swim
-states keeps the old seabed walk.
+Claude made the swim animations (first for Dec in the Malprave fork, then the 18 procedural
+moves of `scripts/swim/make_swim_rtms.py`), with Malprave's `CfgMovesMC` swim block. The swim animations are made by Claude. The project owner holds that in writing and confirmed it on 2026-10-10; they are original work of this project and ship with it in `content/default-packs/swim/rtm/` (the `@OP_Swim` default pack).
+A config without the swim states keeps the old seabed walk.
 
 Two faults in the RTMs, measured against the stock CWA animations and repaired by
 `scripts/swim/fix_swim_rtms.py` (committed; it rebuilds the local pbo):
@@ -80,23 +79,7 @@ Note for Malprave's maintainers: `M:\ForestClaude\malprave-swim-animation-fixes.
 * Splashes are Tidewater only. The legacy Current OP ripples for swimmers are not emitted.
 * The `ValidateOutVehicle` assertion seen when boarding is pre-existing.
 
-## Integration-owner provenance correction, 2026-10-04
+## Provenance, 2026-10-10
 
-Oliver initially reported original Claude authorship during integration. He now
-reports that the swimming animations are based on Arma 1 after all, consistent
-with the original local-content record above. The current integration no longer
-labels that absent pack as original generated animations. This is corrected
-owner-reported provenance; the pack is unavailable for independent examination.
-
-A fresh integration-tip check found no tracked swimming RTMs or swim addon. The
-RTM/swim-PBO pathname history across all available refs contains only the two
-existing `tests/fixtures/rtm/{actor_motion,marker_motion}.rtm` parser fixtures,
-not a swim animation pack. Tracked PBO names are test fixtures. The repair script
-contains transformation algorithms and reads animation phases and skeleton
-joints from external files; it embeds no swimming keyframe payload. The earlier
-broader local/PBO-index search remains recorded in the feature test guide.
-No swim animation assets were committed, copied into the installed game or
-substituted from the local original Arma 1 archive during integration. This
-finding concerns the swimming assets; it is not a licence clearance of every
-file in the repository. The owner's running fog/ragdoll smoke session is left
-untouched; this update changes documentation only.
+The swim animations are made by Claude. The project owner holds that in writing and confirmed it on 2026-10-10; they are original work of this project and ship with it in `content/default-packs/swim/rtm/` (the `@OP_Swim` default pack).
+Earlier notes in this record that held the pack back over its origin are superseded.

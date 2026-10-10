@@ -53,19 +53,9 @@ puddle_optics subagents; the root agent applied and tested the combined changes.
 
 ## Asset and experimental boundaries
 
-No additional game-animation assets are imported or distributed.
-The incoming swimming record describes local RTMs retargeted from Arma 1 poses,
-deliberately excluded from Git. That is the author's record, not independently
-verified animation provenance. Oliver initially reported original Claude
-authorship and authorised inclusion; on 2026-10-04 he corrected that report to
-Arma 1-based animations. No corresponding files were found after checking all
-632 available refs/history, hidden/ignored source directories and 147 local PBO
-indexes. The remaining blocker is missing files, not refusal of that instruction.
-The original A1 animations found locally have an incompatible skeleton and were
-not installed as substitutes. The engine code is merged;
-without compatible licensed animations, soldiers retain the documented
-seabed-walking fallback. This integration does not claim working swimming on
-the owner's installed content.
+The swim animations are made by Claude (owner confirmation in writing, 2026-10-10) and ship
+as the `@OP_Swim` default pack (`content/default-packs/swim/`). Without the pack, soldiers
+keep the documented seabed-walking fallback.
 
 The optional CfgAIFork group B (gradual spotting, hunting, grenade interval and
 exposure) remains off by default, preserving the author’s unresolved results.

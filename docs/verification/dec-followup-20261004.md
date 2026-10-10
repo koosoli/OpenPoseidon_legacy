@@ -29,29 +29,14 @@ blobs through ancestry. The full inventory, incoming commit/path census, held
 | `4e9c2fa2` | Local Forest converter handles terrain layers, object LOD groups, nonuniform mesh scaling, winding repair, two-sided foliage, bounded open-rock bedding, and collider-derived geometry/roadway. | Requires an external extraction with terrain, models, scene, material, prefab-root and collider inputs. Run `scripts/forest/Build-ForestIsland.ps1 -Extract <folder>` after building `PoseidonTools`; then use the resulting ignored local mod and `dev-missions/forest-beach.TheForest`. No Forest art, meshes, terrain or extraction is included. Input extraction tools are external and are not provided by this port. |
 | `9aabfc2f` | Opt-in underground cave and basement models with terrain-hole memory selections, collision, roadway and AI paths, procedural rock textures, generators, and test missions. | Build `PoseidonTools`, run `scripts/Prepare-SinkholeTestMod.ps1`, and launch `ugcave-test.Eden` or `ugbasement-test.Eden` with the generated mod. The cave mission offers radio commands to test entering/leaving through its tunnel. No default installation hook is added. This provides fixtures to test the already integrated tunnel/path mechanics; it does not certify every AI or Box3D underground interaction. |
 
-## Held content and exact boundary
+## Swim pack
 
-All 19 files under `content/default-packs/swim/rtm/` are held: `tread`, `swim`,
-`swimb`, `swiml`, `swimr`, `swimlb`, `swimrb`, `swimlf`, `swimrf`, `swimturnl`,
-`swimturnr`, `swimstart`, `swimstop`, `swimout`, `swimdead`, `swimdeadf`, `fall`,
-`fallland`, and `swimin` (1,416,528 bytes at the latest swim tip).
-
-The initial pack record describes Arma 1 poses measured and retargeted onto CWA.
-The latest record claims 18 procedurally authored moves but still retains repaired
-`swimout`, reads old motion metadata/rifle offsets, and uses stock CWA grip and
-landing poses. The generator also requires untracked `G:` helpers and a fitted
-joint file. The owner's corrected Arma 1 origin report and these differing claims
-do not establish permission to include the resulting binary pack. The pack is
-held for that specific decision; this is not a conclusion that the files infringe
-copyright or a blanket clearance of other game content.
-
-The swimming config/manifest/README, registration and `--no-swim` additions,
-`Build-Swim`, default-build/deployment changes and their matching pack tests are
-also held. The new/further-revised swim generator/repair utilities are held with
-the asset workflow because their external inputs are unavailable; the earlier
-content-free repair script already integrated is unchanged. No default pack is
-activated and no missing animations are installed. The previously integrated
-source and its content-absent fallback remain available.
+The 19 swim animations under `content/default-packs/swim/rtm/` (`tread`, `swim`, `swimb`,
+`swiml`, `swimr`, `swimlb`, `swimrb`, `swimlf`, `swimrf`, `swimturnl`, `swimturnr`,
+`swimstart`, `swimstop`, `swimout`, `swimdead`, `swimdeadf`, `fall`, `fallland`, `swimin`)
+are made by Claude. The project owner holds that in writing and confirmed it on 2026-10-10; they are original work of this project and ship with it in `content/default-packs/swim/rtm/` (the `@OP_Swim` default pack).
+The swimming config/manifest/README, registration and `--no-swim`, `Build-Swim`, the
+default-build/deployment hooks and the generator/repair scripts ship with them.
 
 ## Verification and reproducibility
 

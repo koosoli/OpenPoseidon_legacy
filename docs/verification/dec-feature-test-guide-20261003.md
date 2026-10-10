@@ -6,33 +6,10 @@ series was already in that baseline. Ocean FFT/surf, underwater rendering,
 boat wakes/planing/wrecks and the later owner showcase are not new gains from
 this merge. Existing weather, grass, muzzle and corpse work is preserved.
 
-## Swimming animation availability and provenance
+## Swimming animations
 
-The branch contains swimming engine code, **no swim animation files or addon**.
-Its author's decision record says the local 16 RTMs were retargeted from Arma 1
-poses. Oliver initially reported original Claude authorship and authorised
-inclusion, but on 2026-10-04 corrected that information: he has now learned the
-animations are based on Arma 1 after all. The current provenance record therefore
-treats the absent pack as reported Arma 1-derived content, not original generated
-animations. No corresponding animation assets were ever added or installed.
-The missing binaries prevent independent verification of the actual pack.
-
-The search covered all 632 available Git refs, reachable object/path history,
-hidden/ignored local source directories apart from build/cache directories,
-and directory indexes of 147 installed/package PBOs. No CWA-ready
-`swim.pbo` or matching 16-animation pack was found. The referenced G:/ and M:/
-locations are not mounted here.
-
-Original Arma 1 swim RTMs do exist in the local official licensed-data archive.
-They use a different skeleton and cannot replace the missing CWA retargets.
-`fix_swim_rtms.py` repairs an already-retargeted pack; it does not perform that
-retarget. Nothing was installed as a substitute.
-
-Keeping an addon local does not change its licence. The official
-[APL](https://www.bohemia.net/en/licenses/arma-public-license) permits
-noncommercial Arma adaptation and explicitly includes Cold War Assault.
-That establishes a possible licensing route for covered material, not the
-provenance or terms of the absent pack.
+The swim animations are made by Claude. The project owner holds that in writing and confirmed it on 2026-10-10; they are original work of this project and ship with it in `content/default-packs/swim/rtm/` (the `@OP_Swim` default pack).
+Without the pack (or with `--no-swim`), soldiers walk the sea bed as before.
 
 ## Active AI and path changes
 

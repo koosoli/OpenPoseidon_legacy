@@ -1,0 +1,6 @@
+{
+  "name": "OpenPoseidon Swimming",
+  "version": "1.0.0",
+  "defaultContentApi": "1",
+  "description": "Swim moves for infantry in deep water (tread, strokes in eight directions, turns, standing up, floating dead). Engine support: SoldierOldSwim.cpp. Disable with --no-swim."
+}

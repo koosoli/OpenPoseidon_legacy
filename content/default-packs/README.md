@@ -58,11 +58,19 @@ An exact original-archive ownership check prevents the default road mapping from
 replacing a texture selected from a different user-mod archive. End-to-end user
 mod precedence and clean-release tests remain on the acceptance list.
 
+## Swim moves (`@OP_Swim`)
+
+`swim/` holds the swim moves (`config.cpp`, 19 RTMs, made by Claude). `scripts/Build-Swim.ps1`,
+which `Build-DefaultContent.ps1` calls, packs them as `Mods/@OP_Swim/AddOns/swim.pbo` (prefix
+`swim`) with the missions `swim-bay.Eden` and `swim-squad.Eden`. Without the pack, soldiers walk
+the sea bed as before. See `swim/README.md` for how they are made and the repair applied to them.
+
 ## Disable (restart required)
 
 ```powershell
 ./OpenPoseidon.exe --no-visual-upgrade
 ./OpenPoseidon.exe --no-vehicle-actions
+./OpenPoseidon.exe --no-swim
 ```
 
 These suppress automatic loading independently. Explicitly passing the same

@@ -279,6 +279,7 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
     _parsed = true;
     bool disableVisualUpgrade = false;
     bool disableVehicleActions = false;
+    bool disableSwim = false;
 
     // Console attachment is handled by entry points (WinMain / main)
     // via attachParentConsole() before Application::Run()
@@ -493,6 +494,8 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                               "Disable the shipped ground/road material pack (restart required)");
         configGroup->add_flag("--no-vehicle-actions", disableVehicleActions,
                               "Disable the shipped Jeep passenger actions pack (restart required)");
+        configGroup->add_flag("--no-swim", disableSwim,
+                              "Disable the shipped swim moves pack; soldiers walk the sea bed (restart required)");
 
         std::string addonArchiveRootsStr;
         showOption(configGroup->add_option("--addon-root", addonArchiveRootsStr,
@@ -1255,6 +1258,8 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
         disabledContent.emplace_back("@OP_VisualUpgrade");
     if (disableVehicleActions)
         disabledContent.emplace_back("@OP_VehicleActions");
+    if (disableSwim)
+        disabledContent.emplace_back("@OP_Swim");
     const auto defaultContent = ResolveDefaultContentPacks(
         _workingDirectory.empty() ? "." : _workingDirectory, disabledContent, (const char*)_modPaths);
     _defaultContentDiagnostics = defaultContent.diagnostics;
