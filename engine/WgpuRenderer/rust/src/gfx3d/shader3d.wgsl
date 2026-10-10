@@ -5,7 +5,7 @@
 // point): the plain pipeline binds `object`, the skinned pipeline binds the
 // bone `palette` (from the skin module). Shadowing is the shared cascade kernel.
 
-#import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, apply_fog_terrain, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_FRESNEL_ENV, sky_irradiance}
+#import frame::{frame, reverse_z, fog_factor, atmo_applied, terrain_sun_shadow, apply_fog, apply_layered_fog, apply_fog_terrain, veg_sway_offset, gtao_ao, matdbg_view, matdbg_flag, MATDBG_VIEW_FULL, MATDBG_VIEW_BASE_COLOR, MATDBG_VIEW_NORMAL, MATDBG_VIEW_AMBIENT_SHADOW, MATDBG_VIEW_SPECULAR_GLOSS, MATDBG_VIEW_UV, MATDBG_VIEW_LIGHTING, MATDBG_DISABLE_FRESNEL_ENV, sky_irradiance}
 #import shadow::shadow_strength
 #import frame::{surface_rays, cloud_shadow_tex, terrain_shadow_samp, terrain_shadow_map}
 #import frame::monitor_scene
@@ -1005,7 +1005,9 @@ fn shade_fragment(in: VsOut, ground_surface: bool) -> vec4<f32> {
                                 frame.sun_diffuse.rgb * 0.05 * clamp(sun_height * 2.0 + 0.2, 0.0, 1.0), space);
             light = sky_light * ambient_occlusion * twilight + frame.sun_diffuse.rgb * daylight * sun_occlusion;
         }
-        return vec4<f32>(srgb_to_linear(albedo) * reflectance * light, 1.0);
+        // Ground and valley fog (layered fog) in front of the Earth surface; whole-world terrain used to
+        // skip every fog term.
+        return vec4<f32>(apply_layered_fog(srgb_to_linear(albedo) * reflectance * light, in.world_pos), 1.0);
     }
 
     if ((material_flags(material) & MATFLAG_BOOT_RELIEF) != 0u) {

@@ -1,5 +1,5 @@
 #define_import_path frame
-#import layered_fog_optics::{FogConsumer, fog_camera_matches, fog_legacy_closure, fog_surface_open, fog_ray_far}
+#import layered_fog_optics::{FogConsumer, fog_camera_matches, fog_legacy_closure, fog_surface_open, fog_ray_far, fog_transport}
 
 // Shared group(0): the per-frame camera/environment UBO plus the cascade shadow
 // map + comparison sampler. Every 3D pipeline (lit meshes, terrain) binds this
@@ -676,6 +676,19 @@ fn apply_fog_receiver(rgb: vec3<f32>, world_pos_rel: vec3<f32>, receiver: bool) 
         vec3<f32>(uv, sqrt(clamp(dist / ray_far, 0.0, 1.0))), 0.0);
     let distant = textureSampleLevel(layer_fog_tex, froxel_samp, vec3<f32>(uv, 1.0), 0.0);
     return fog_legacy_closure(rgb, inscat, amount, local, distant, surface_open);
+}
+// Whole world: ONLY the layered (ground/valley) fog in front of a surface, without the classic
+// distance ramp -- that ramp is pinned to the island's fog range and would erase terrain 20+ km out.
+fn apply_layered_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
+    if (!fog_camera_matches(layer_fog_packet, frame.view, frame.proj, frame.cam_pos.xyz)) { return rgb; }
+    let dist = length(world_pos_rel);
+    let clip = frame.proj * frame.view * vec4<f32>(world_pos_rel, 1.0);
+    let uv = (clip.xy / clip.w) * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5, 0.5);
+    let ray_far = fog_ray_far(layer_fog_packet.control.y, frame.cam_pos.y, world_pos_rel.y / max(dist, 0.00001),
+                              layer_fog_packet.camera.w, layer_fog_packet.control.w);
+    let local = textureSampleLevel(layer_fog_tex, froxel_samp,
+        vec3<f32>(uv, sqrt(clamp(dist / ray_far, 0.0, 1.0))), 0.0);
+    return fog_transport(rgb, local);
 }
 fn apply_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
     return apply_fog_receiver(rgb, world_pos_rel, true);
