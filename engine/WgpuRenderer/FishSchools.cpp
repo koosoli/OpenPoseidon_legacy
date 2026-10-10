@@ -545,7 +545,7 @@ void FishSchools::Update(const Vector3& camera, float time)
                                  }),
                   _groups.end());
     _spawnCooldown -= dt;
-    if (int(_groups.size()) < MaxGroups && _spawnCooldown <= 0)
+    if (int(_groups.size()) < Wildlife::Scaled(MaxGroups) && _spawnCooldown <= 0)
     {
         for (int attempt = 0; attempt < 4; ++attempt)
             if (SpawnGroup(camera))

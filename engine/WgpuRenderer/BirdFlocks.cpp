@@ -782,7 +782,7 @@ void BirdFlocks::Spawn(const Vector3& camera)
     const float r0 = first ? 20.0f : 180.0f, r1 = first ? 220.0f : 260.0f;
     float x, z;
     // gulls: roaming, circling over the coast and the sea
-    while (count(Gull) < 6 && pick(r0, r1, false, x, z))
+    while (count(Gull) < Wildlife::Scaled(6) && pick(r0, r1, false, x, z))
     {
         Flyer f = make(Gull);
         f.mode = 0;
@@ -797,7 +797,7 @@ void BirdFlocks::Spawn(const Vector3& camera)
         _birds.push_back(f);
     }
     // terns: patrolling lanes beyond the surf, 8-12 m over the sea
-    while (count(Tern) < 3 && pick(r0, r1, true, x, z))
+    while (count(Tern) < Wildlife::Scaled(3) && pick(r0, r1, true, x, z))
     {
         Flyer f = make(Tern);
         f.mode = 1;
@@ -810,7 +810,8 @@ void BirdFlocks::Spawn(const Vector3& camera)
         _birds.push_back(f);
     }
     // pelicans: a line of five skimming the swell in ground effect
-    if (count(Pelican) == 0 && pick(first ? 40.0f : r0, r1, true, x, z))
+    // one line of five per unit of density
+    if (count(Pelican) < 5 * (Wildlife::Scaled(1)) && pick(first ? 40.0f : r0, r1, true, x, z))
     {
         const int leader = int(_birds.size());
         for (int k = 0; k < 5; ++k)
@@ -830,7 +831,7 @@ void BirdFlocks::Spawn(const Vector3& camera)
         }
     }
     // frigatebirds: circling high on the wind
-    while (count(Frigate) < 2 && pick(r0, r1 + 100, false, x, z))
+    while (count(Frigate) < Wildlife::Scaled(2) && pick(r0, r1 + 100, false, x, z))
     {
         Flyer f = make(Frigate);
         f.mode = 3;

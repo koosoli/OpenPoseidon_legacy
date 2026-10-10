@@ -7673,7 +7673,7 @@ void DrawMainWindow()
             Poseidon::Dev::DrawWeatherTab();
             ImGui::EndTabItem();
         }
-        if (Dev::PanelTabItem("Smoke"))
+        if (Dev::PanelTabItem("Particles")) // smoke, fire and the emitters (SmokeTab.cpp)
         {
             Poseidon::Dev::DrawSmokeTab();
             ImGui::EndTabItem();

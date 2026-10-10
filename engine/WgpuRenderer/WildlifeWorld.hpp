@@ -13,7 +13,9 @@
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
+#include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <string>
 
 namespace Poseidon::Wildlife
@@ -21,6 +23,21 @@ namespace Poseidon::Wildlife
 constexpr float EarthSeaFloorDepth = 14.0f;
 
 inline bool Earth() { return EarthStreaming::Enabled(); }
+
+// How many animals around the camera, as a multiple of the Tidewater numbers the modules were tuned on:
+// WGR_WILDLIFE_DENSITY (0.25-4, default 2).
+inline float Density()
+{
+    static const float d = []
+    {
+        const char* v = std::getenv("WGR_WILDLIFE_DENSITY");
+        const float f = v ? float(std::atof(v)) : 2.0f;
+        return f > 0 ? std::min(std::max(f, 0.25f), 4.0f) : 2.0f;
+    }();
+    return d;
+}
+// `base` scaled by the density, at least one
+inline int Scaled(int base) { return std::max(1, int(base * Density() + 0.5f)); }
 
 inline float SeaLevel(float x, float z)
 {

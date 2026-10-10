@@ -1,6 +1,6 @@
 #pragma once
 
-// The dev-panel "Smoke" tab.  Body lives in its own translation unit for the
+// The dev-panel "Particles" tab.  Body lives in its own translation unit for the
 // same reason BallisticsTab and WeatherTab do.
 
 namespace Poseidon::Dev

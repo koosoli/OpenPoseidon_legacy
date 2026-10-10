@@ -1,4 +1,4 @@
-// The dev-panel "Smoke" tab.
+// The dev-panel "Particles" tab (smoke, volumetric fire, emitters).
 //
 // Three jobs, in the order the panel presents them:
 //
