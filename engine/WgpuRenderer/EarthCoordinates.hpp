@@ -65,16 +65,27 @@ inline float HorizonRadius(float altitude)
     return radius;
 }
 
-// A dense inner boundary exactly matches the near window. Quadratically spaced
-// outer samples cover the horizon with a fixed vertex/triangle budget.
+// A dense inner boundary exactly matches the near window. The outer samples are spaced
+// geometrically: each step is a fixed fraction of its distance, so a vertex covers about the
+// same screen size near and far (terrain LOD). With quadratic spacing the mesh was ~1.2 km
+// apart 10 km out over a 512 km horizon and mountains past the near window read as flat.
 inline float HorizonOffset(int i, float radius, float halfWindow = HalfWindow)
 {
     if (i >= HorizonInnerBegin && i <= HorizonInnerEnd)
         return (i - 128) * (halfWindow / 32.0f);
     const bool left = i < HorizonInnerBegin;
     const float t = float(left ? HorizonInnerBegin - i : i - HorizonInnerEnd) / 96.0f;
-    const float distance = halfWindow + (radius - halfWindow) * t * t;
+    const float distance = t >= 1.0f || !(radius > halfWindow) ? radius
+        : halfWindow * std::pow(radius / halfWindow, t);
     return left ? -distance : distance;
+}
+// The finest elevation zoom whose pixels are no smaller than `spacing` metres, within [coarsest, finest].
+inline int SpacingZoom(double latitude, double spacing, int coarsest, int finest)
+{
+    const double metres = 156543.03392804097 * std::cos(std::clamp(latitude, -85.0, 85.0) * Pi / 180.0);
+    int zoom = coarsest;
+    while (zoom < finest && metres / double(1 << (zoom + 1)) >= spacing) ++zoom;
+    return zoom;
 }
 
 inline int HorizonZoom(double latitude, float radius)

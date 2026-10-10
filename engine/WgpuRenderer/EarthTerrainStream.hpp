@@ -4,6 +4,7 @@
 #include <Poseidon/World/Terrain/EarthStreamingMode.hpp>
 #include <Poseidon/World/Terrain/EarthProviders.hpp>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <filesystem>
 #include <map>
@@ -50,6 +51,8 @@ class EarthTerrainStream
     void Run();
     const Tile& LoadTile(int zoom, int x, int y);
     float Sample(double x, double y, int zoom = Earth::Zoom);
+    // Sample at `zoom`, falling back one zoom at a time to `coarsest` where finer tiles are unavailable.
+    float SampleFallback(const Earth::Coordinate& c, int zoom, int coarsest);
     bool Download(const std::string& url, std::vector<unsigned char>& bytes);
     bool DownloadOnce(const std::string& url, std::vector<unsigned char>& bytes, long& status);
     void TrimDisk();
@@ -69,6 +72,8 @@ class EarthTerrainStream
     bool _requested = false;
     std::unique_ptr<Patch> _ready;
     std::map<std::tuple<int,int,int>, Tile> _tiles;
+    // Tiles that failed to download recently: skipped for a minute instead of being retried per sample.
+    std::map<std::tuple<int,int,int>, std::chrono::steady_clock::time_point> _failedTiles;
     uint64_t _use = 0;
     unsigned _downloads = 0, _cacheHits = 0;
 };

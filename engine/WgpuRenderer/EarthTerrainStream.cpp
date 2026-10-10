@@ -169,6 +169,9 @@ const EarthTerrainStream::Tile& EarthTerrainStream::LoadTile(int zoom, int x, in
         it->second.use = ++_use;
         return it->second;
     }
+    if (auto failed = _failedTiles.find(key);
+        failed != _failedTiles.end() && std::chrono::steady_clock::now() - failed->second < std::chrono::seconds(60))
+        throw std::runtime_error("terrain tile recently unavailable");
     const auto directory = TileDirectory(zoom);
     std::filesystem::create_directories(directory);
     const auto file = directory / (std::to_string(x) + "-" + std::to_string(y) + ".png");
@@ -213,7 +216,14 @@ const EarthTerrainStream::Tile& EarthTerrainStream::LoadTile(int zoom, int x, in
     {
         const std::string url = EarthProviders::ExpandUrl(_elevation, zoom, x, y);
         if (!Download(url, bytes))
+        {
+            if (!_stop.load() && _generation.load() == _activeGeneration)
+            {
+                if (_failedTiles.size() >= 1024) _failedTiles.clear();
+                _failedTiles[key] = std::chrono::steady_clock::now();
+            }
             throw std::runtime_error("terrain tile unavailable: " + EarthProviders::Redact(url, _elevation.key));
+        }
         tile = decode();
         ++_downloads;
         // Only validated bytes enter the cache. Interrupted writes never become
@@ -230,13 +240,29 @@ const EarthTerrainStream::Tile& EarthTerrainStream::LoadTile(int zoom, int x, in
         }
         else std::filesystem::remove(temporary, ec);
     }
-    if (_tiles.size() >= 64)
+    if (_tiles.size() >= 384) // the distance-matched horizon touches several zooms at once
     {
         const auto oldest = std::min_element(_tiles.begin(), _tiles.end(),
             [](const auto& a, const auto& b) { return a.second.use < b.second.use; });
         _tiles.erase(oldest);
     }
     return _tiles.emplace(key, std::move(tile)).first->second;
+}
+
+float EarthTerrainStream::SampleFallback(const Earth::Coordinate& c, int zoom, int coarsest)
+{
+    for (int z = zoom;; --z)
+    {
+        try
+        {
+            const auto p = Earth::ToPixel(c, z);
+            return Sample(p.x, p.y, z);
+        }
+        catch (const std::exception&)
+        {
+            if (z <= coarsest || _stop.load() || _generation.load() != _activeGeneration) throw;
+        }
+    }
 }
 
 float EarthTerrainStream::Sample(double x, double y, int zoom)
@@ -349,8 +375,16 @@ void EarthTerrainStream::Run()
                         patch->horizonValid[index] = 0; // Never invent polar source data.
                         continue;
                     }
-                    const auto coarse = Earth::ToPixel(geographic,patch->horizonZoom);
-                    float height = Sample(coarse.x,coarse.y,patch->horizonZoom);
+                    // Terrain LOD: each vertex samples the zoom matching its own spacing, finest near
+                    // the near window and coarsest at the horizon, falling back where tiles are missing.
+                    const float spacing = std::max(
+                        Earth::HorizonOffset(std::min(x+1,Earth::HorizonSamples-1),radius,halfWindow) -
+                            Earth::HorizonOffset(std::max(x-1,0),radius,halfWindow),
+                        Earth::HorizonOffset(std::min(z+1,Earth::HorizonSamples-1),radius,halfWindow) -
+                            Earth::HorizonOffset(std::max(z-1,0),radius,halfWindow)) * 0.5f;
+                    const int zoom = Earth::SpacingZoom(geographic.latitude, spacing, patch->horizonZoom,
+                                                        std::min(patch->sourceZoom, 12));
+                    float height = SampleFallback(geographic, zoom, patch->horizonZoom);
                     // The inner near square is not drawn by this mesh. Its edge
                     // shares the selected near source; blend resolutions outside
                     // it instead of making an elevation cliff at the join.
