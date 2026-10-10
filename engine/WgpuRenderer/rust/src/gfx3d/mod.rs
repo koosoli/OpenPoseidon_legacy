@@ -6720,11 +6720,16 @@ impl Gfx3d {
         self.depth_sample_view.as_ref()
     }
 
-    // REN-TEMP-001M: the far-resolve's TEXTURE, for native (NGX) interop. None at 1x —
-    // there the "resolved" view is the live depth aspect and DLSS gets its image from
-    // the depth target instead (not wired yet; MSAA is the supported first path).
+    // REN-TEMP-001M: the TEXTURE behind water_depth_view, for native (NGX) interop: the
+    // far-resolve under MSAA, the depth target itself at 1x (water_depth_view is then its
+    // depth aspect). Without the 1x case DLSS refused to run with MSAA off and the chain fell
+    // through to FSR 1, so turning MSAA off silently swapped the upscaler.
     pub fn water_depth_texture(&self) -> Option<&wgpu::Texture> {
-        self.depth_resolve_far.as_ref().and_then(|d| d.texture.as_ref())
+        if self.depth_resolve.is_some() {
+            self.depth_resolve_far.as_ref().and_then(|d| d.texture.as_ref())
+        } else {
+            self.depth.as_ref().map(|(t, _)| t)
+        }
     }
 
     // Record the water far-resolve (MSAA depth → single-sample farthest). No-op at 1x (water_depth_view

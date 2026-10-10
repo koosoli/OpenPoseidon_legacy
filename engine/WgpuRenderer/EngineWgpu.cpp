@@ -17039,6 +17039,9 @@ void EngineWgpu::SetMsaaSamples(int samples)
     WgrTemporalInfo w{};
     wgr_get_temporal_info(_renderer, &w);
     const int active = static_cast<int>(w.msaa_samples) <= 1 ? 0 : static_cast<int>(w.msaa_samples);
+    // with the DLSS route up the renderer boots without MSAA whatever is asked (lib.rs)
+    if (w.dlss_route && active == 0)
+        return;
     if (active != samples)
         LOG_INFO(Graphics, "Wgpu: MSAA {} requested (active {}); takes effect on the next launch",
                  samples, active);

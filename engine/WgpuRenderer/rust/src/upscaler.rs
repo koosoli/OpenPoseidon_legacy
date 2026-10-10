@@ -793,9 +793,16 @@ impl TemporalUpscaler for DlssUpscaler {
                 read_write: rw,
             })
         };
+        // The MSAA far-resolve is D32_SFLOAT; at 1x the depth target itself is handed over
+        // (D32_SFLOAT_S8_UINT=130 or D24_UNORM_S8_UINT=129), viewed through its depth aspect.
+        let depth_vk_format = match depth.0.format() {
+            wgpu::TextureFormat::Depth32FloatStencil8 => 130,
+            wgpu::TextureFormat::Depth24PlusStencil8 => 129,
+            _ => 126,
+        };
         let (Some(mut color), Some(mut depth_r), Some(mut motion), Some(mut expo), Some(mut out)) = (
             vk_res(&color_tex, &ctx.color_view, 97, 1, render, false),
-            vk_res(&depth.0, &depth.1, 126, 2, render, false),
+            vk_res(&depth.0, &depth.1, depth_vk_format, 2, render, false),
             vk_res(&velocity.0, &velocity.1, 83, 1, render, false),
             vk_res(&exposure.0, &exposure.1, 100, 1, (1, 1), false),
             vk_res(&ctx.output_tex, &ctx.output_view, 97, 1, output, true),

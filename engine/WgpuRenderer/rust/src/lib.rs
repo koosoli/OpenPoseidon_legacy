@@ -1625,10 +1625,28 @@ impl Renderer {
         // resolved to a single-sample HDR target the tonemap samples, and WebGPU has no depth
         // resolve_target, so the LDR-direct-to-swapchain path stays 1x. Clamped to what the
         // adapter supports for every multisampled scene format (colour + depth + normal G-buffer).
-        let msaa_req = std::env::var("WGR_MSAA")
+        let msaa_env = std::env::var("WGR_MSAA")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(4);
+        // DLSS antialiases on its own (jittered render, temporal resolve); MSAA underneath it
+        // only multiplies the scene's sample cost. Measured 2026-10-10, RTX 3070 at 3440x1440,
+        // DLSS Quality: 22.6 ms GPU with 4x, 19.6 ms with 1x, edges as clean. WGR_MSAA_WITH_DLSS=1
+        // keeps the requested count. (DLSS at 1x needs the depth target as its depth input:
+        // gfx3d water_depth_texture.)
+        let msaa_req = if dlss_up
+            && hdr_enabled
+            && msaa_env > 1
+            && std::env::var("WGR_MSAA_WITH_DLSS").map_or(true, |v| v != "1")
+        {
+            log.log(
+                log_level::INFO,
+                &format!("wgpu MSAA {msaa_env}x requested; off while DLSS is the upscaler (WGR_MSAA_WITH_DLSS=1 keeps it)"),
+            );
+            1
+        } else {
+            msaa_env
+        };
         let sample_count = if hdr_enabled && msaa_req > 1 {
             let ok = [color_format, gfx3d::depth_format(&device), gfx3d::NORMAL_FORMAT]
                 .iter()
