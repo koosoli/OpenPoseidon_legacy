@@ -267,10 +267,13 @@ void EarthTerrainStream::TrimDisk()
         for (const auto& item : std::filesystem::directory_iterator(directory))
             if (item.is_regular_file() && item.path().extension() == ".png") files.push_back(item);
     }
-    if (files.size() <= 256) return;
+    // Room for an offline region pack (scripts/Prepare-EarthRegion.py: z10-z14 around a place) plus normal
+    // streaming; terrarium PNGs are ~100 KB, so this caps the elevation cache near 400 MB.
+    constexpr size_t MaxFiles = 4096;
+    if (files.size() <= MaxFiles) return;
     std::sort(files.begin(), files.end(), [](const auto& a, const auto& b) { return a.last_write_time() < b.last_write_time(); });
     std::error_code ec;
-    for (size_t i = 0; i < files.size() - 256; ++i) std::filesystem::remove(files[i].path(), ec);
+    for (size_t i = 0; i < files.size() - MaxFiles; ++i) std::filesystem::remove(files[i].path(), ec);
 }
 
 void EarthTerrainStream::Run()
