@@ -20437,7 +20437,32 @@ void EngineWgpu::PushRenderParams()
         _sky.cloudCoverage = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
     }
 
-    p.sky.cloud0 = {_sky.cloudCoverage, _sky.cloudDensity, _sky.cloudBottom, _sky.cloudTop};
+    float cloudBottom = _sky.cloudBottom, cloudTop = _sky.cloudTop;
+    // Whole world: the deck's heights are above sea level, tuned for islands near sea level, so in the
+    // Alps the mountains stood inside it. Lift the base to at least 1.5 km over the resident ground's
+    // mean and 300 m over its highest point, keeping the deck's thickness.
+    if (EarthStreaming::Enabled())
+    {
+        static uint64_t cachedGeneration = 0;
+        static float groundMean = 0.0f, groundMax = 0.0f;
+        if (const auto ground = EarthStreaming::Locations().Ground(); ground && ground->generation != cachedGeneration)
+        {
+            cachedGeneration = ground->generation;
+            double sum = 0.0;
+            float highest = -1.0e9f;
+            for (const float h : ground->heights)
+            {
+                sum += h;
+                highest = std::max(highest, h);
+            }
+            groundMean = ground->heights.empty() ? 0.0f : float(sum / double(ground->heights.size()));
+            groundMax = ground->heights.empty() ? 0.0f : highest;
+        }
+        const float base = std::max({cloudBottom, groundMean + 1500.0f, groundMax + 300.0f});
+        cloudTop = base + std::max(cloudTop - cloudBottom, 200.0f);
+        cloudBottom = base;
+    }
+    p.sky.cloud0 = {_sky.cloudCoverage, _sky.cloudDensity, cloudBottom, cloudTop};
     p.sky.cloud1 = {0.0f, 0.0f, shapeScale, detailScale};
     p.sky.cloud2 = {_sky.cloudHgG, _sky.cloudPowder, _sky.cloudAmbient, _sky.cloudMaxDist};
     p.sky.cloud3 = {weatherScale, _sky.cloudWeatherAmount, warpScale, _sky.cloudWarpAmount};
@@ -20866,7 +20891,11 @@ void EngineWgpu::PushSkyRuntime()
     const float fogFar = skySnap.hasScene ? skySnap.fogMaxRange : 0.0f;
 
     WgrSkyRuntime rt{};
-    rt.sun_dir = {_skySunDir.X(), _skySunDir.Y(), _skySunDir.Z(), 0.0f};
+    // w (spare): whole-world origin latitude in radians, for the Earth-fixed planet cloud layer.
+    const auto earthOrigin = EarthStreaming::Enabled() ? EarthStreaming::GetLocation() : EarthStreaming::Location{};
+    const float earthLatitude = EarthStreaming::Enabled() ? float(earthOrigin.latitude * 3.14159265358979 / 180.0) : 0.0f;
+    const float earthLongitude = EarthStreaming::Enabled() ? float(earthOrigin.longitude * 3.14159265358979 / 180.0) : 0.0f;
+    rt.sun_dir = {_skySunDir.X(), _skySunDir.Y(), _skySunDir.Z(), earthLatitude};
     // MOON. Everything here comes straight from LightSun's ephemeris, UNSMOOTHED: the
     // illuminated fraction and the angular radius move on a monthly timescale and the
     // sub-solar direction moves ~0.04 deg per minute, so there is nothing to pop.
@@ -20972,7 +21001,7 @@ void EngineWgpu::PushSkyRuntime()
     }
     rt.misc = {_skyNight, camAlt, static_cast<float>(windX), static_cast<float>(windZ)};
     rt.layer_fog_weather = {skySnap.weatherFog, skySnap.hasLandscape ? 1.0f : 0.0f,
-                            skySnap.hasCamera ? 1.0f : 0.0f, 0.0f};
+                            skySnap.hasCamera ? 1.0f : 0.0f, earthLongitude}; // w: whole-world origin longitude
     // Cloud EVOLUTION offsets, on the same clock and the same wrap as the wind above (so they
     // freeze together under the Water tab's freeze switches). Wind translates the field; these
     // walk it through the noise volume's third axis, which is what makes clouds form and dissolve

@@ -78,6 +78,10 @@ struct Sky {
     // says so rather than a number quietly baked into the tint.
     // w = actual admitted weather-fog neutral chroma strength, reset per camera.
     night_sky: vec4<f32>,
+    // Whole world: x = geographic origin latitude, y = longitude (radians). The planet cloud layer
+    // is sampled in an Earth-fixed frame built from these, so it does not turn with the camera's
+    // tangent frame when free flight rebases the origin.
+    earth_frame: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> sky: Sky;
@@ -1193,8 +1197,16 @@ fn earth_planet_cloud(dir: vec3<f32>, max_dist: f32) -> CloudResult {
     if (shell.x > shell.y || t <= 0.0 || t >= max_dist || sky.cloud0.x <= 0.001) {
         return CloudResult(vec3<f32>(0.0), 1.0);
     }
-    let n = normalize(pos + dir * t);
-    let drift = vec3<f32>(sky.cloud1.x, sky.cloud4.z * 0.05, sky.cloud1.y) / 2000000.0;
+    let local_n = normalize(pos + dir * t);
+    // Tangent frame (x east, y up, z north) at the origin -> Earth-centred, Earth-fixed.
+    let lat = sky.earth_frame.x;
+    let lon = sky.earth_frame.y;
+    let east = vec3<f32>(-sin(lon), cos(lon), 0.0);
+    let north = vec3<f32>(-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat));
+    let up = vec3<f32>(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat));
+    let n = east * local_n.x + up * local_n.y + north * local_n.z;
+    // Only the weather clock drifts this layer; the deck's wind offset is a local-map quantity.
+    let drift = vec3<f32>(0.0, sky.cloud4.z * 0.05, 0.0) / 2000000.0;
     let broad = textureSampleLevel(cloud_noise, cloud_samp, n * 2.8 - drift, 0.0).r;
     let bands = textureSampleLevel(cloud_noise, cloud_samp,
                                   n * 7.0 + vec3<f32>(broad * 0.28) - drift, 0.0).r;
@@ -1204,11 +1216,12 @@ fn earth_planet_cloud(dir: vec3<f32>, max_dist: f32) -> CloudResult {
     let cover = smoothstep(threshold - 0.045, threshold + 0.09, field);
     let opacity = cover * 0.92;
     let sun = normalize(sky.sun_dir.xyz);
-    let daylight = max(dot(n, sun), 0.0);
-    let sun_t = sample_transmittance(n * (sky.params.z + 5500.0), sun);
+    // Lighting stays in the tangent frame the sun direction is expressed in.
+    let daylight = max(dot(local_n, sun), 0.0);
+    let sun_t = sample_transmittance(local_n * (sky.params.z + 5500.0), sun);
     // The sky-light ambient belongs to the day side: across the terminator it fades to a trace, or the
     // night half of the globe showed bright cloud blobs over black ground.
-    let ambient = vec3<f32>(0.018, 0.027, 0.045) * mix(0.04, 1.0, smoothstep(-0.25, 0.05, dot(n, sun)));
+    let ambient = vec3<f32>(0.018, 0.027, 0.045) * mix(0.04, 1.0, smoothstep(-0.25, 0.05, dot(local_n, sun)));
     let lit = (ambient + sun_t * daylight *
                (sky.sun_dir.w * sky.params.y / PI)) * mix(0.72, 1.0, fine);
     return CloudResult(lit * opacity, 1.0 - opacity);

@@ -2358,6 +2358,9 @@ impl Renderer {
         s.cloud4 = rt.cloud_evolve; // shape / detail / weather drift offsets (m, CPU-wrapped)
         s.moon_params = rt.moon_params; // radius / illuminated fraction / radiance / draw
         s.moon_sun = rt.moon_sun; // sub-solar direction + earthshine
+        // Whole world rides the two spare runtime lanes: sun_dir.w = origin latitude, layer_fog_weather.w =
+        // origin longitude (radians). Zero outside whole-world mode, where nothing reads them.
+        self.sky.set_earth_frame(rt.sun_dir[3], rt.layer_fog_weather[3]);
         self.layer_fog_weather = if rt.layer_fog_weather[1] >= 0.5 && rt.layer_fog_weather[2] >= 0.5
             && rt.layer_fog_weather[0].is_finite() && (0.0..=1.0).contains(&rt.layer_fog_weather[0])
             { rt.layer_fog_weather[0] } else { 0.0 };

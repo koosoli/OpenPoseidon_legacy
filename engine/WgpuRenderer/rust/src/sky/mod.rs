@@ -773,6 +773,8 @@ struct SkyUniform {
     // own. SKY-004: y = moonlight gain on the cloud decks, z = the stylistic blue shift on that
     // light. w = current admitted weather-fog chroma neutralization (private).
     night_sky: [f32; 4],
+    // Whole world: x = origin latitude, y = longitude (radians); see sky.wgsl's `earth_frame`.
+    earth_frame: [f32; 4],
 }
 
 // The atmosphere-only fields that determine the LUTs (sun/night/exposure excluded,
@@ -1230,6 +1232,7 @@ pub struct Sky {
     cirrus_soft: f32,
     /// Eased, for the same reason the others are: this changes every cloud edge on screen at once.
     cirrus_soft_now: f32,
+    earth_frame: [f32; 4],
     // Group(1) of cs_froxel: the terrain sun-shadow mask, rebuilt each frame (the mask
     // texture is Terrain-owned and regenerated) from the lent view + these two.
     froxel_shadow_layout: wgpu::BindGroupLayout,
@@ -2345,6 +2348,7 @@ impl Sky {
             cirrus_match_now: look_env.map_or(CIRRUS_MATCH_DEFAULT, |v| v.1),
             cirrus_soft: soft_env.unwrap_or(CIRRUS_SOFT_DEFAULT),
             cirrus_soft_now: soft_env.unwrap_or(CIRRUS_SOFT_DEFAULT),
+            earth_frame: [0.0; 4],
             cloud_shadow_span: CLOUD_SHADOW_SPAN_MIN,
             cloud_shadow_map_params: [0.0, 0.0, 1.0 / CLOUD_SHADOW_SPAN_MIN, 0.85],
             froxel_view,
@@ -2519,6 +2523,11 @@ impl Sky {
     // Queue writes precede the entire encoder, including its earlier froxel
     // dispatch. upload() resets this lane for every camera; unknown/unencoded
     // weather and Legacy mode therefore leave both sky and froxels unchanged.
+    /// Whole world: origin latitude/longitude (radians) for the Earth-fixed planet cloud layer.
+    pub fn set_earth_frame(&mut self, latitude: f32, longitude: f32) {
+        self.earth_frame = [latitude, longitude, 0.0, 0.0];
+    }
+
     pub fn update_fog_chroma(&self,queue:&wgpu::Queue,ready:bool,weather:f32) {
         let strength=if ready && weather.is_finite() && (0.0..=1.0).contains(&weather) {
             0.85*(weather*4.0).min(1.0)
@@ -2643,6 +2652,7 @@ impl Sky {
                 self.moon_cloud_blue,
                 0.0,
             ],
+            earth_frame: self.earth_frame,
         };
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
         // Terrain sun-shadow mask mapping for cs_froxel's occlusion lookup (own copy so
