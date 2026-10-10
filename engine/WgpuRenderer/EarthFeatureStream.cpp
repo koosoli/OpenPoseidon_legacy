@@ -236,7 +236,38 @@ void Forest(Features::Mesh& result, const Features::Ground& g, const cJSON* geom
             if (!local.visible || local.x < lowX || local.x > highX || local.z < lowZ || local.z > highZ)
                 continue;
             if (Inside({x, z}, polygon))
+            {
+                const size_t before = result.trees.size();
                 Tree(result, g, {local.x, local.z}, 9, true);
+                if (result.trees.size() > before)
+                    result.trees.back().forestSample = true;
+            }
+        }
+    // The dense forest for the model tier: a tree every ~7 m, jittered by a geographic hash so the
+    // stand is the same from any frame; the coarse samples above stand in where models are absent.
+    const double s = Features::ForestSpacing;
+    for (double z = std::ceil(zmin / s) * s; z <= zmax && result.forestTrees.size() < Features::MaxForestTrees; z += s)
+        for (double x = std::ceil(xmin / s) * s; x <= xmax && result.forestTrees.size() < Features::MaxForestTrees; x += s)
+        {
+            const auto sample = Earth::FromLocal(anchor.latitude, anchor.longitude, x, z);
+            const uint64_t seed = EarthTrees::GeographicSeed(sample.latitude, sample.longitude);
+            const double jx = (double((seed >> 8) & 0xffff) / 65535.0 - .5) * s * .8,
+                         jz = (double((seed >> 24) & 0xffff) / 65535.0 - .5) * s * .8;
+            if (!Inside({x + jx, z + jz}, polygon))
+                continue;
+            const auto coordinate = Earth::FromLocal(anchor.latitude, anchor.longitude, x + jx, z + jz);
+            const auto local = Earth::ToLocal(g.latitude, g.longitude, coordinate.latitude, coordinate.longitude);
+            if (!local.visible || local.x < lowX || local.x > highX || local.z < lowZ || local.z > highZ)
+                continue;
+            try
+            {
+                const float y = Height(g, {local.x, local.z});
+                const uint64_t treeSeed = EarthTrees::GeographicSeed(coordinate.latitude, coordinate.longitude);
+                result.forestTrees.push_back({float(local.x), y, float(local.z), 9.0f, treeSeed, coordinate.latitude});
+            }
+            catch (const std::out_of_range&)
+            {
+            }
         }
 }
 void Sign(Features::Mesh& result, const Features::Ground& g, Point p)

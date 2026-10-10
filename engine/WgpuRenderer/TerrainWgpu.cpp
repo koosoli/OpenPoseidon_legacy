@@ -522,6 +522,86 @@ bool TerrainWgpu::UploadEarthGrass(const EarthTerrainStream::Patch& patch, const
     return true;
 }
 
+// Forest where the satellite atlas shows it. OSM maps most big forests as multipolygon relations,
+// which the cached ways do not carry, so whole wooded slopes stood bare; the near atlas shows every
+// canopy. A tree every ~7 m (jittered by a geographic hash, so the stand is the same from any frame)
+// where the pixel is canopy: dark, green over red and blue, not water. Cliffs steeper than 45 degrees
+// stay bare. Nearest the patch centre first, at most MaxForestTrees.
+std::vector<EarthFeatureStream::TreeInstance> TerrainWgpu::EarthCanopyTrees(const EarthTerrainStream::Patch& patch,
+    const EarthSurfaceStream::Window& window, const std::vector<uint8_t>& pixels)
+{
+    std::vector<EarthFeatureStream::TreeInstance> trees;
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_EARTH_CANOPY_TREES");
+        return !(v && v[0] == '0');
+    }();
+    constexpr int HmN = 257;
+    const int size = EarthSurfaceStream::AtlasSize;
+    if (!enabled || patch.heights.size() != size_t(HmN) * HmN || pixels.size() != size_t(size) * size * 4 ||
+        !(patch.gridMetres > 0))
+        return trees;
+    const auto height = [&](double x, double z, double& slope)
+    {
+        const double fx = std::clamp((x - patch.x) / patch.gridMetres, 0.0, HmN - 1.001),
+                     fz = std::clamp((z - patch.z) / patch.gridMetres, 0.0, HmN - 1.001);
+        const int ix = int(fx), iz = int(fz);
+        const double tx = fx - ix, tz = fz - iz;
+        const auto at = [&](int i, int j) { return double(patch.heights[size_t(j) * HmN + i]); };
+        const double a = at(ix, iz), b = at(ix + 1, iz), c = at(ix, iz + 1), d = at(ix + 1, iz + 1);
+        slope = std::hypot((b - a) * (1 - tz) + (d - c) * tz, (c - a) * (1 - tx) + (d - b) * tx) / patch.gridMetres;
+        return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
+    };
+    const double span = patch.gridMetres * (HmN - 1), step = EarthFeatureStream::ForestSpacing;
+    const double cx = patch.x + span * 0.5, cz = patch.z + span * 0.5;
+    for (double z = patch.z + step * 0.5; z < patch.z + span; z += step)
+        for (double x = patch.x + step * 0.5; x < patch.x + span; x += step)
+        {
+            const auto geo = Earth::FromLocal(patch.originLatitude, patch.originLongitude, x, z);
+            const uint64_t cellSeed = EarthTrees::GeographicSeed(std::round(geo.latitude * 16000.0) / 16000.0,
+                                                                 std::round(geo.longitude * 16000.0) / 16000.0);
+            const double px = x + (double((cellSeed >> 8) & 0xffff) / 65535.0 - .5) * step * .8,
+                         pz = z + (double((cellSeed >> 24) & 0xffff) / 65535.0 - .5) * step * .8;
+            const auto uv = EarthSurfaceStream::NearUv(EarthSurfaceStream::LocalUv(window, px, pz));
+            if (!(uv.x >= 0 && uv.x < 1 && uv.y >= 0 && uv.y < 1))
+                continue;
+            const size_t k = (size_t(uv.y * size) * size + size_t(uv.x * size)) * 4;
+            const float r = pixels[k] / 255.0f, g = pixels[k + 1] / 255.0f, b = pixels[k + 2] / 255.0f;
+            const float lum = 0.299f * r + 0.587f * g + 0.114f * b;
+            const bool canopy = lum > 0.04f && lum < 0.2f && g >= r * 0.98f && g >= b * 0.98f && b < g * 1.05f;
+            if (!canopy)
+                continue;
+            double slope = 0;
+            const double y = height(px, pz, slope);
+            if (slope > 1.0)
+                continue;
+            const auto treeGeo = Earth::FromLocal(patch.originLatitude, patch.originLongitude, px, pz);
+            trees.push_back({float(px), float(y), float(pz), 9.0f, EarthTrees::GeographicSeed(treeGeo.latitude, treeGeo.longitude),
+                             treeGeo.latitude});
+        }
+    std::sort(trees.begin(), trees.end(), [&](const auto& a, const auto& b)
+              { return Square(a.x - cx) + Square(a.z - cz) < Square(b.x - cx) + Square(b.z - cz); });
+    if (trees.size() > EarthFeatureStream::MaxForestTrees)
+        trees.resize(EarthFeatureStream::MaxForestTrees);
+    LOG_INFO(Graphics, "Earth canopy: {} trees where the imagery shows forest on the near patch", trees.size());
+    return trees;
+}
+
+// The model tier's trees: single OSM trees always; the forest from the imagery when there is
+// one, else OSM's own forests (dense) -- never both, or a mapped forest would be planted twice.
+void TerrainWgpu::RefreshEarthTreeModels()
+{
+    std::vector<EarthFeatureStream::TreeInstance> placed;
+    const bool canopy = !_earthCanopyTrees.empty();
+    placed.reserve(_earthFeatureTreeSet.size() + (canopy ? _earthCanopyTrees.size() : _earthForestTreeSet.size()));
+    for (const auto& t : _earthFeatureTreeSet)
+        if (!t.forestSample || (!canopy && _earthForestTreeSet.empty()))
+            placed.push_back(t);
+    const auto& forest = canopy ? _earthCanopyTrees : _earthForestTreeSet;
+    placed.insert(placed.end(), forest.begin(), forest.end());
+    _earthTreeModels = PlaceEarthTreeModels(placed);
+}
+
 bool TerrainWgpu::PlaceEarthTreeModels(const std::vector<EarthFeatureStream::TreeInstance>& trees)
 {
     _engine.ClearEarthTreeObjects();
@@ -3644,6 +3724,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         _engine.ClearEarthWorldgenObjects();
         if(_earthTreeDetail)_earthTreeDetail->Clear();
         _engine.ClearEarthTreeObjects();_earthTreeModels=false;
+        _earthFeatureTreeSet.clear();_earthForestTreeSet.clear();_earthCanopyTrees.clear();
         if(_earthGrass){EngineWgpu::AcquireProducerWindow("Earth grass relocate");wgr_grass_clear_earth_ground(_renderer);_earthGrass=false;}
         for(size_t i=0;i<_earthFeatureMeshes.size();++i)if(_earthFeatureMeshes[i]){EngineWgpu::AcquireProducerWindow("Earth features relocate");wgr_mesh_destroy(_renderer,_earthFeatureMeshes[i]);_earthFeatureMeshes[i]=0;_earthFeatureIndices[i]=0;}
 
@@ -3772,6 +3853,8 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
                 if(_earthSurfaceTexture)wgr_texture_destroy(_renderer,_earthSurfaceTexture);
                 _earthSurfaceTexture=texture;
                 _earthGrass=UploadEarthGrass(*_earthPatch,EarthSurfaceStreamAtlasRef{atlas->window,atlas->pixels});
+                _earthCanopyTrees=EarthCanopyTrees(*_earthPatch,atlas->window,atlas->pixels);
+                RefreshEarthTreeModels();
                 if(_earthFarTexture)wgr_texture_destroy(_renderer,_earthFarTexture);
                 _earthFarTexture=farTexture;
                 LOG_INFO(Graphics,"Earth local surface: near 2048 / far {} (warped) atlases, generation {}, revision {}; {}",
@@ -3819,7 +3902,9 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             _earthFeatureGeneration=mesh->generation;
             if(!_earthTreeDetail)_earthTreeDetail=std::make_unique<EarthTreeDetail>(_engine,_renderer);
             _earthTreeDetail->SetTrees(mesh->trees,_earthFeatureMeshes[EarthFeatureStream::Trees],std::move(treeVertices));
-            _earthTreeModels=PlaceEarthTreeModels(mesh->trees);
+            _earthFeatureTreeSet=mesh->trees;
+            _earthForestTreeSet=mesh->forestTrees;
+            RefreshEarthTreeModels();
             if(!mesh->error.empty())LOG_INFO(Graphics,"Earth cached features: {}",mesh->error);
         }
         if(_earthFeatureGeneration==_earthPatch->generation)

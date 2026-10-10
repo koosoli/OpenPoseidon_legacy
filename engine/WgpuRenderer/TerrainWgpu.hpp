@@ -157,6 +157,12 @@ class TerrainWgpu : public ITerrainRenderer
     std::unique_ptr<class EarthTreeDetail> _earthTreeDetail;
     bool _earthTreeModels = false; // the game's own tree models carry the trees (PlaceEarthTreeModels)
     bool PlaceEarthTreeModels(const std::vector<EarthFeatureStream::TreeInstance>& trees);
+    // the model tier's two sources: the OSM features' trees and the forest canopy the satellite atlas
+    // shows (EarthCanopyTrees); RefreshEarthTreeModels places their union
+    std::vector<EarthFeatureStream::TreeInstance> _earthFeatureTreeSet, _earthForestTreeSet, _earthCanopyTrees;
+    void RefreshEarthTreeModels();
+    static std::vector<EarthFeatureStream::TreeInstance> EarthCanopyTrees(const EarthTerrainStream::Patch& patch,
+        const EarthSurfaceStream::Window& window, const std::vector<uint8_t>& pixels);
     // one mesh per EarthBuildingStream::Material, drawn with the game's house texture (when it loads) or
     // the palette colour
     std::array<WgrMesh,EarthBuildingStream::MaterialCount> _earthBuildingMeshes{};

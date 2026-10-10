@@ -37,11 +37,17 @@ class EarthFeatureStream
         float x, y, z, height;
         uint64_t seed;
         double latitude;
+        bool forestSample = false; // one of the coarse batch's sparse forest samples (32 m apart)
     };
+    // OFP-like forest density for the game's own tree models: a jittered tree every ~7 m inside each
+    // OSM forest on the near patch (no coarse geometry; the model tier places them)
+    static constexpr size_t MaxForestTrees = 40000;
+    static constexpr double ForestSpacing = 7.0;
     struct Mesh
     {
         Cell cell{};
         std::vector<TreeInstance> trees;
+        std::vector<TreeInstance> forestTrees;
         uint64_t revision = 0, generation = 0;
         std::array<Batch, KindCount> batches;
         size_t skipped = 0, forestSamples = 0;
