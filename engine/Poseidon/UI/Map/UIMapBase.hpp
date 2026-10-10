@@ -322,6 +322,7 @@ protected:
 
 	virtual void DrawLabel(struct SignInfo &info, PackedColor color) {}
 	void DrawBackground();
+	void DrawEarthRoads(); // Whole World: the OpenStreetMap roads over the satellite map
 	void DrawLegend();
 	void DrawName(const ParamEntry &cls);
 	void DrawMount(Vector3Par pos);

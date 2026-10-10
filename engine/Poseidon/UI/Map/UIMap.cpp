@@ -916,7 +916,169 @@ EarthMapImageryState& EarthMapImagery()
     }).detach();
     return state;
 }
+
+// Whole World: the OpenStreetMap roads over the satellite map, so the planner can see where the
+// streets are (the 3D roads come from the same cells). Fetched on one worker in 3 x 3 sub-squares,
+// nearest the centre first, each shown as it arrives.
+struct EarthMapRoad
+{
+    EarthPlannerMap::Road road;
+    float x0, z0, x1, z1; // bounds, for culling
+};
+struct EarthMapRoadsState
+{
+    std::vector<EarthMapRoad> roads;
+    std::shared_ptr<std::atomic<bool>> stop = std::make_shared<std::atomic<bool>>(false);
+    ~EarthMapRoadsState() { stop->store(true); }
+    std::shared_ptr<std::vector<EarthPlannerMap::Road>> done = std::make_shared<std::vector<EarthPlannerMap::Road>>();
+    std::shared_ptr<std::mutex> lock = std::make_shared<std::mutex>();
+    bool started = false;
+};
+
+EarthMapRoadsState& EarthMapRoads()
+{
+    static EarthMapRoadsState state;
+    if (state.started)
+    {
+        std::vector<EarthPlannerMap::Road> arrived;
+        {
+            std::lock_guard<std::mutex> guard(*state.lock);
+            arrived.swap(*state.done);
+        }
+        for (auto& road : arrived)
+        {
+            EarthMapRoad r{std::move(road), 1e30f, 1e30f, -1e30f, -1e30f};
+            for (size_t i = 0; i + 1 < r.road.xz.size(); i += 2)
+            {
+                r.x0 = std::min(r.x0, r.road.xz[i]), r.x1 = std::max(r.x1, r.road.xz[i]);
+                r.z0 = std::min(r.z0, r.road.xz[i + 1]), r.z1 = std::max(r.z1, r.road.xz[i + 1]);
+            }
+            state.roads.push_back(std::move(r));
+        }
+        return state;
+    }
+    state.started = true;
+    const auto builder = EarthPlannerMap::RoadsHook();
+    const char* cache = std::getenv("POSEIDON_EARTH_CACHE");
+    const char* latText = std::getenv("POSEIDON_EARTH_LATITUDE");
+    const char* lonText = std::getenv("POSEIDON_EARTH_LONGITUDE");
+    if (!builder || !cache || !latText || !lonText)
+        return state;
+    const double lat = std::atof(latText), lon = std::atof(lonText);
+    const float size = LandGrid * LandRange;
+    const auto cacheDir = std::filesystem::u8path(cache);
+    struct Job
+    {
+        double south, west, north, east;
+    };
+    std::vector<std::pair<float, Job>> order;
+    constexpr int Grid = 3;
+    const float step = size / Grid;
+    for (int j = 0; j < Grid; ++j)
+        for (int i = 0; i < Grid; ++i)
+            try
+            {
+                const auto sw = Earth::FromLocal(lat, lon, i * step, j * step);
+                const auto ne = Earth::FromLocal(lat, lon, (i + 1) * step, (j + 1) * step);
+                const float dx = (i + 0.5f) * step - 0.5f * size, dz = (j + 0.5f) * step - 0.5f * size;
+                order.push_back({dx * dx + dz * dz, Job{sw.latitude, sw.longitude, ne.latitude, ne.longitude}});
+            }
+            catch (...)
+            {
+            }
+    std::sort(order.begin(), order.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    auto done = state.done;
+    auto lock = state.lock;
+    const auto stop = state.stop;
+    std::thread([=]
+    {
+        size_t total = 0;
+        for (const auto& [distance, job] : order)
+        {
+            if (stop->load())
+                return;
+            std::vector<EarthPlannerMap::Road> roads;
+            std::string message;
+            builder(cacheDir, lat, lon, job.south, job.west, job.north, job.east, roads, message,
+                    [stop] { return stop->load(); });
+            if (stop->load())
+                return;
+            total += roads.size();
+            std::lock_guard<std::mutex> guard(*lock);
+            for (auto& road : roads)
+                done->push_back(std::move(road));
+        }
+        LOG_INFO(Graphics, "Whole World editor map: {} OpenStreetMap roads", total);
+    }).detach();
+    return state;
+}
 } // namespace
+
+// Whole World: the planner's roads, over the satellite image (OSM ways; see EarthMapRoads)
+void CStaticMap::DrawEarthRoads()
+{
+    auto& state = EarthMapRoads();
+    if (state.roads.empty())
+        return;
+    // pixels per metre at this zoom
+    const DrawCoord o = WorldToScreen(Vector3(0, 0, 0)), e = WorldToScreen(Vector3(100, 0, 0));
+    const float ppm = std::fabs(e.x - o.x) * _wScreen / 100.0f;
+    float vx0, vx1, vz0, vz1;
+    {
+        const Point2DFloat tl(_x, _y), br(_x + _w, _y + _h);
+        const Vector3 a = ScreenToWorld(tl), b = ScreenToWorld(br);
+        vx0 = std::min(a.X(), b.X()), vx1 = std::max(a.X(), b.X());
+        vz0 = std::min(a.Z(), b.Z()), vz1 = std::max(a.Z(), b.Z());
+    }
+    using Road = EarthPlannerMap::Road;
+    const PackedColor colors[3] = {PackedColor(Color(0.95f, 0.62f, 0.2f, 1.0f)), PackedColor(Color(0.97f, 0.95f, 0.86f, 0.95f)),
+                                   PackedColor(Color(0.62f, 0.48f, 0.32f, 0.9f))};
+    const PackedColor casing(Color(0.15f, 0.12f, 0.1f, 0.75f));
+    for (const auto& r : state.roads)
+    {
+        // zoomed out, the small ways would be a grey felt: tracks from ~1 px/10 m, the rest from ~1 px/40 m
+        if (r.road.kind == Road::Track && ppm < 0.1f)
+            continue;
+        if (r.road.kind == Road::Minor && ppm < 0.025f)
+            continue;
+        if (r.x1 < vx0 || r.x0 > vx1 || r.z1 < vz0 || r.z0 > vz1)
+            continue;
+        const float widthPx = std::max(r.road.width * ppm, r.road.kind == Road::Major ? 2.0f : 1.0f);
+        const PackedColor color = colors[r.road.kind];
+        for (size_t i = 0; i + 3 < r.road.xz.size(); i += 2)
+        {
+            const DrawCoord a = WorldToScreen(Vector3(r.road.xz[i], 0, r.road.xz[i + 1]));
+            const DrawCoord b = WorldToScreen(Vector3(r.road.xz[i + 2], 0, r.road.xz[i + 3]));
+            const float ax = a.x * _wScreen, ay = a.y * _hScreen, bx = b.x * _wScreen, by = b.y * _hScreen;
+            if (widthPx < 2.5f)
+            {
+                GEngine->DrawLine(Line2DPixel(ax, ay, bx, by), color, color, _clipRect);
+                continue;
+            }
+            // a band the road's width, on a dark casing a pixel wider each side
+            const float dx = bx - ax, dy = by - ay, len = std::sqrt(dx * dx + dy * dy);
+            if (len < 0.5f)
+                continue;
+            for (int pass = 0; pass < 2; ++pass)
+            {
+                const float h = 0.5f * widthPx + (pass == 0 ? 1.0f : 0.0f);
+                const float nx = -dy / len * h, ny = dx / len * h;
+                Vertex2DPixel vs[4];
+                const float xs[4] = {ax + nx, bx + nx, bx - nx, ax - nx}, ys[4] = {ay + ny, by + ny, by - ny, ay - ny};
+                for (int k = 0; k < 4; ++k)
+                {
+                    vs[k].x = xs[k];
+                    vs[k].y = ys[k];
+                    vs[k].u = 0;
+                    vs[k].v = 0;
+                    vs[k].color = pass == 0 ? casing : color;
+                }
+                MipInfo mip = GEngine->TextBank()->UseMipmap(nullptr, 0, 0);
+                GEngine->DrawPoly(mip, vs, 4, _clipRect);
+            }
+        }
+    }
+}
 
 void CStaticMap::DrawBackground()
 {
@@ -965,6 +1127,7 @@ void CStaticMap::DrawBackground()
         for (size_t i = 1; i < imagery.pieces.size(); ++i)
             if (const auto& piece = imagery.pieces[i]; piece.texture && !piece.under)
                 drawSquare(piece.x0, piece.z0, piece.x1, piece.z1, piece.texture.GetRef(), PackedColor(Color(1, 1, 1, 1)));
+        DrawEarthRoads();
         // The mission square: units, triggers and the 3D world live inside it.
         {
             const DrawCoord a = WorldToScreen(Vector3(0, 0, size)), b = WorldToScreen(Vector3(size, 0, 0));

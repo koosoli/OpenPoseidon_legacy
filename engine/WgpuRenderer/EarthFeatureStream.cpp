@@ -1,5 +1,6 @@
 #include "EarthFeatureStream.hpp"
 #include "EarthContentSource.hpp"
+#include <Poseidon/World/Terrain/EarthPlannerMap.hpp>
 #include <cjson/cJSON.h>
 #include <algorithm>
 #include <cmath>
@@ -582,4 +583,96 @@ void EarthFeatureStream::Run()
         }
     }
 }
+
+// ---------------------------------------------------------------- the mission planner's roads
+namespace
+{
+// The highways of the cached OSM feature cells covering the bounds, for the planner's 2D map, classed
+// and filtered as the 3D roads are (Append): no areas, bridges, tunnels, steps or roads not yet built.
+bool BuildPlannerRoads(const std::filesystem::path& cache, double originLatitude, double originLongitude, double south,
+                       double west, double north, double east, std::vector<EarthPlannerMap::Road>& out,
+                       std::string& message, const std::function<bool()>& cancelled)
+{
+    using Road = EarthPlannerMap::Road;
+    EarthContentSource source;
+    std::unordered_set<double> ids;
+    const auto c0 = EarthBuildingStream::CellAt(south, west), c1 = EarthBuildingStream::CellAt(north, east);
+    size_t cells = 0, ways = 0;
+    for (int la = c0.latitude; la <= c1.latitude; ++la)
+        for (int lo = c0.longitude; lo <= c1.longitude; ++lo)
+        {
+            if (cancelled && cancelled())
+                return false;
+            const EarthBuildingStream::Cell cell{la, lo};
+            auto path = cache / "features" / EarthBuildingStream::FileName(cell);
+            std::error_code error;
+            if (!std::filesystem::is_regular_file(path, error))
+                path = EarthContentSource::StreamPath(cache, "features", la, lo);
+            if (!std::filesystem::is_regular_file(path, error) && source.Enabled())
+            {
+                source.EnsureNeighborhood(cache, "features", la, lo, cancelled);
+                path = cache / "features" / EarthBuildingStream::FileName(cell);
+                if (!std::filesystem::is_regular_file(path, error))
+                    path = EarthContentSource::StreamPath(cache, "features", la, lo);
+            }
+            const auto bytes = std::filesystem::file_size(path, error);
+            if (error || bytes > Features::MaxBytes)
+                continue;
+            std::string json(size_t(bytes), '\0');
+            std::ifstream input(path, std::ios::binary);
+            if (!input.read(json.data(), std::streamsize(bytes)))
+                continue;
+            std::unique_ptr<cJSON, decltype(&cJSON_Delete)> root(cJSON_ParseWithLength(json.data(), json.size()), cJSON_Delete);
+            const auto* elements = root ? cJSON_GetObjectItemCaseSensitive(root.get(), "elements") : nullptr;
+            if (!cJSON_IsArray(elements))
+                continue;
+            ++cells;
+            const cJSON* element = nullptr;
+            cJSON_ArrayForEach(element, elements)
+            {
+                const auto* tags = cJSON_GetObjectItemCaseSensitive(element, "tags");
+                const std::string highway = Text(tags, "highway");
+                if (highway.empty() || !Is(element, "type", "way") || Is(tags, "area", "yes") || highway == "construction" ||
+                    highway == "proposed" || highway == "steps" || highway == "platform")
+                    continue;
+                const double id = Number(element, "id");
+                if (std::isfinite(id) && !ids.insert(id).second)
+                    continue; // a way crossing cells is in each of them
+                const auto* geometry = cJSON_GetObjectItemCaseSensitive(element, "geometry");
+                const int count = cJSON_GetArraySize(geometry);
+                if (count < 2)
+                    continue;
+                Road road;
+                const bool major = highway == "motorway" || highway == "trunk" || highway == "primary" ||
+                                   highway == "secondary" || highway == "motorway_link" || highway == "trunk_link" ||
+                                   highway == "primary_link" || highway == "secondary_link";
+                const bool track = highway == "track" || highway == "path" || highway == "footway" ||
+                                   highway == "cycleway" || highway == "bridleway" || highway == "pedestrian";
+                road.kind = major ? Road::Major : track ? Road::Track : Road::Minor;
+                road.width = float(Metres(tags, "width", major ? 9 : track ? 2.5 : 5, 1, 30));
+                for (int i = 0; i < count; ++i)
+                {
+                    const auto* node = cJSON_GetArrayItem(geometry, i);
+                    const double lat = Number(node, "lat"), lon = Number(node, "lon");
+                    if (!std::isfinite(lat) || !std::isfinite(lon))
+                        continue;
+                    const auto local = Earth::ToLocal(originLatitude, originLongitude, lat, lon);
+                    if (!local.visible)
+                        continue;
+                    road.xz.push_back(float(local.x));
+                    road.xz.push_back(float(local.z));
+                }
+                if (road.xz.size() >= 4)
+                {
+                    out.push_back(std::move(road));
+                    ++ways;
+                }
+            }
+        }
+    if (cells == 0)
+        message = "no OpenStreetMap cells for the roads";
+    return cells > 0;
+}
+const bool PlannerRoadsRegistered = (EarthPlannerMap::RoadsHook() = &BuildPlannerRoads, true);
+} // namespace
 } // namespace Poseidon
