@@ -20,6 +20,11 @@ public:
         double latitude,longitude;
         uint64_t revision,generation;
         std::vector<float> heights;
+        // The coarser horizon grid around the near patch (HorizonOffset spacing): buildings beyond the near
+        // patch stand on it. At ground level the near patch is only 1.6 km across.
+        float centreX=0,centreZ=0,horizonRadius=0;
+        std::vector<float> horizonHeights;
+        std::vector<uint8_t> horizonValid;
     };
     struct Vertex { float x,y,z,nx,ny,nz; };
     struct Mesh {

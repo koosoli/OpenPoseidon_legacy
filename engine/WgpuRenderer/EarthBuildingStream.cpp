@@ -65,9 +65,33 @@ double TagMetres(const cJSON* object,const char* key) {
     if(!end || end==value || (*end && std::string(end)!="m") || !std::isfinite(number)) return NAN;
     return number;
 }
+// Index i with HorizonOffset(i) <= offset <= HorizonOffset(i+1) and the fraction between them.
+bool HorizonCell(float offset,float radius,float halfWindow,int& i,double& f) {
+    if(!(radius>halfWindow) || offset<Earth::HorizonOffset(0,radius,halfWindow) ||
+       offset>Earth::HorizonOffset(Earth::HorizonSamples-1,radius,halfWindow))return false;
+    int lo=0,hi=Earth::HorizonSamples-1;
+    while(hi-lo>1){const int mid=(lo+hi)/2;if(Earth::HorizonOffset(mid,radius,halfWindow)<=offset)lo=mid;else hi=mid;}
+    const float a=Earth::HorizonOffset(lo,radius,halfWindow),b=Earth::HorizonOffset(hi,radius,halfWindow);
+    i=lo;f=b>a?(offset-a)/(b-a):0;return true;
+}
+float HorizonHeight(const EarthBuildingStream::Ground& g,Point p) {
+    constexpr int n=Earth::HorizonSamples;
+    const float half=Earth::NearHalfWindow(g.grid);
+    int ix,iz;double fx,fz;
+    if(g.horizonHeights.size()!=size_t(n)*n || g.horizonValid.size()!=g.horizonHeights.size() ||
+       !HorizonCell(float(p.x-g.centreX),g.horizonRadius,half,ix,fx) ||
+       !HorizonCell(float(p.z-g.centreZ),g.horizonRadius,half,iz,fz))
+        throw std::out_of_range("outside resident terrain");
+    const size_t i00=size_t(iz)*n+ix,i10=i00+1,i01=i00+n,i11=i01+1;
+    if(!g.horizonValid[i00]||!g.horizonValid[i10]||!g.horizonValid[i01]||!g.horizonValid[i11])
+        throw std::out_of_range("no horizon terrain");
+    const auto& h=g.horizonHeights;
+    const float y=float((h[i00]*(1-fx)+h[i10]*fx)*(1-fz)+(h[i01]*(1-fx)+h[i11]*fx)*fz);
+    if(!std::isfinite(y))throw std::out_of_range("invalid terrain");return y;
+}
 float Height(const EarthBuildingStream::Ground& g,Point p) {
     const double x=(p.x-g.x)/g.grid,z=(p.z-g.z)/g.grid;
-    if(x<0 || z<0 || x>256 || z>256) throw std::out_of_range("outside resident terrain");
+    if(x<0 || z<0 || x>256 || z>256) return HorizonHeight(g,p);
     const int ix=std::min(255,int(x)),iz=std::min(255,int(z));
     const float a=g.heights[iz*257+ix],b=g.heights[iz*257+ix+1],c=g.heights[(iz+1)*257+ix],d=g.heights[(iz+1)*257+ix+1];
     const float y=float((a*(1-(x-ix))+b*(x-ix))*(1-(z-iz))+(c*(1-(x-ix))+d*(x-ix))*(z-iz));
@@ -127,7 +151,7 @@ void AppendCell(Buildings::Mesh& result,const std::string& json,const Buildings:
         double h=TagMetres(tags,"height");bool estimated=false;
         if(!std::isfinite(h)){h=TagMetres(tags,"building:levels")*3;estimated=true;}
         if(!std::isfinite(h)){h=6;estimated=true;}
-        if(h<2 || h>150){++result.skipped;continue;}
+        if(h<2 || h>900){++result.skipped;continue;}
         float low=INFINITY,high=-INFINITY;
         try {
             for(size_t i=0;i<p.size();++i) {
@@ -200,6 +224,9 @@ void EarthBuildingStream::Request(const EarthTerrainStream::Patch& p,float x,flo
     std::lock_guard lock(_mutex);
     if(_requested && cell==_cell && p.generation==_ground.generation && p.originRevision==_ground.revision)return;
     _cell=cell;_ground={p.x,p.z,p.gridMetres,p.originLatitude,p.originLongitude,p.originRevision,p.generation,p.heights};
+    const float half=Earth::NearHalfWindow(p.gridMetres);
+    _ground.centreX=p.x+half;_ground.centreZ=p.z+half;_ground.horizonRadius=p.horizonRadius;
+    _ground.horizonHeights=p.horizonHeights;_ground.horizonValid=p.horizonValid;
     ++_request;_requested=true;_pending=true;_ready.reset();_wake.notify_one();
 }
 std::unique_ptr<EarthBuildingStream::Mesh> EarthBuildingStream::TakeReady(){std::lock_guard lock(_mutex);return std::move(_ready);}
