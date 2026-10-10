@@ -30,10 +30,13 @@ inline float FlightSpeedScale(FlightPoint point, const GroundPatch* ground, uint
 {
     const auto support = FlightGround(ground, revision, point);
     const double clearance = std::max(support ? double(point.y) - support->height : FlightAltitude(point), 0.0);
-    // Same orbital curve as before, evaluated above the actual resident ground.
-    // No discontinuous high-mountain sea-level speed boost near its surface.
-    return float(std::max(std::min(1.0 + clearance*.03 + clearance*clearance*.00002, 64.0),
-        std::min(clearance/80.0, 250000.0)));
+    // Evaluated above the actual resident ground (no sea-level boost beside a mountain). Strictly rising
+    // with height: the old curve sat flat at 64x from ~1.6 km to ~5 km, so climbing bought nothing there.
+    // Precise below 1 km (51x at 1 km), then a smooth power law: ~200x at 5 km, ~2,600x at 100 km,
+    // ~18,000x at 1,000 km, capped near orbit.
+    if (clearance <= 1000.0)
+        return float(1.0 + clearance * .03 + clearance * clearance * .00002);
+    return float(std::min(51.0 * std::pow(clearance / 1000.0, 0.85), 250000.0));
 }
 inline FlightPoint ConstrainFlight(FlightPoint previous, FlightPoint next, const GroundPatch* ground, uint64_t revision)
 {

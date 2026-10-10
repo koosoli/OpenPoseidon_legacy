@@ -25,6 +25,14 @@ int main()
     assert(FlightSpeedScale({6405,8001,6405},&mountain,1)<1.04); // no mountain speed boost
     assert(FlightSpeedScale({6405,18000000,6405},nullptr,1)>200000); // retain orbital travel
     assert(std::abs(FlightSpeedScale({6405,18000000,6405},&lowland,1)-FlightSpeedScale({6405,18000000,6405},nullptr,1))<5);
+    // Higher is always faster: no plateau anywhere between the ground and orbit.
+    float lastScale = 0;
+    for (float clearance = 1; clearance < 5.0e6f; clearance *= 1.25f)
+    {
+        const float scale = FlightSpeedScale({6405,clearance,6405},&sea,1);
+        assert(scale > lastScale);
+        lastScale = scale;
+    }
 
     GroundPatch triangles{0,0,10,2,1,1,{100,110,120,250}};
     assert(Close(ConstrainFlight({2.5,200,2.5},{2.5,0,2.5},&triangles,1).y,107.8));
