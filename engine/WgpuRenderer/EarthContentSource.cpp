@@ -3,6 +3,7 @@
 #include <curl/curl.h>
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <map>
@@ -129,6 +130,10 @@ EarthContentSource::EarthContentSource(std::string urlTemplate, bool loopbackTes
     if (urlTemplate.empty())
         if (const auto* value = std::getenv("POSEIDON_EARTH_CONTENT_URL"))
             urlTemplate = value;
+    if (urlTemplate.empty())
+        if (const auto* overpass = std::getenv("POSEIDON_EARTH_CONTENT_OVERPASS");
+            overpass && *overpass && std::string(overpass).size() < 512 && SafeUrl(overpass, loopbackTest))
+            _overpass = overpass;
     if (urlTemplate.size() > 2048 || urlTemplate.find("{kind}") == std::string::npos ||
         urlTemplate.find("{lat}") == std::string::npos || urlTemplate.find("{lon}") == std::string::npos)
         return;
@@ -145,6 +150,22 @@ std::filesystem::path EarthContentSource::StreamPath(const std::filesystem::path
     if (!Kind(kind))
         return {};
     return cache / "content-stream" / kind / (std::to_string(lat) + "_" + std::to_string(lon) + ".json");
+}
+std::string EarthContentSource::OverpassQuery(const char* kind, int lat, int lon)
+{
+    // The same selectors as scripts/Prepare-EarthCell.ps1 and Prepare-EarthFeatures.ps1, for one cell.
+    char bounds[128];
+    std::snprintf(bounds, sizeof(bounds), "(%.8f,%.8f,%.8f,%.8f)", lat * .02, lon * .02, (lat + 1) * .02,
+                  (lon + 1) * .02);
+    if (std::string(kind) == "buildings")
+        return std::string("[out:json][timeout:25][maxsize:33554432];way[\"building\"]") + bounds +
+               ";out tags geom 2000;";
+    std::string query = "[out:json][timeout:25][maxsize:33554432];(";
+    for (const char* selector : {"way[\"highway\"]", "way[\"waterway\"]", "way[\"natural\"~\"^(water|wood)$\"]",
+                                 "way[\"landuse\"~\"^(forest|reservoir)$\"]", "node[\"traffic_sign\"]",
+                                 "node[\"highway\"~\"^(stop|give_way)$\"]"})
+        query += std::string(selector) + bounds + ";";
+    return query + ");out tags geom 6000;";
 }
 bool EarthContentSource::ValidCell(const std::string& bytes, const char* kind)
 {
@@ -191,6 +212,16 @@ bool EarthContentSource::Ensure(const std::filesystem::path& cache, const char* 
             return false;
     }
     auto url = _url;
+    if (!_overpass.empty())
+    {
+        std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> escaper(curl_easy_init(), curl_easy_cleanup);
+        const auto query = OverpassQuery(kind, lat, lon);
+        char* escaped = escaper ? curl_easy_escape(escaper.get(), query.c_str(), int(query.size())) : nullptr;
+        if (!escaped)
+            return false;
+        url = _overpass + "?data=" + escaped;
+        curl_free(escaped);
+    }
     Replace(url, "{kind}", kind);
     Replace(url, "{lat}", std::to_string(lat));
     Replace(url, "{lon}", std::to_string(lon));
@@ -211,10 +242,12 @@ bool EarthContentSource::Ensure(const std::filesystem::path& cache, const char* 
     curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl.get(), CURLOPT_PROTOCOLS_STR, _loopbackTest ? "https,http" : "https");
     curl_easy_setopt(curl.get(), CURLOPT_FOLLOWLOCATION, 0L);
-    curl_easy_setopt(curl.get(), CURLOPT_CONNECTTIMEOUT_MS, 1000L);
-    curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT_MS, 3000L);
+    // A pre-tiled source answers at once; Overpass evaluates a query (seconds, more under load).
+    curl_easy_setopt(curl.get(), CURLOPT_CONNECTTIMEOUT_MS, _overpass.empty() ? 1000L : 5000L);
+    curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT_MS, _overpass.empty() ? 3000L : 30000L);
     curl_easy_setopt(curl.get(), CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(curl.get(), CURLOPT_USERAGENT, "OpenPoseidon-EarthContent/1");
+    curl_easy_setopt(curl.get(), CURLOPT_USERAGENT,
+                     "OpenPoseidon-EarthContent/1 (+https://github.com/koosoli/OpenPoseidon)");
     curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, Receive);
     curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &bytes);
     curl_easy_setopt(curl.get(), CURLOPT_NOPROGRESS, 0L);
@@ -268,7 +301,7 @@ bool EarthContentSource::EnsureNeighborhood(const std::filesystem::path& cache, 
     if (!Enabled())
         return false;
     bool changed = false;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(_overpass.empty() ? 6 : 60);
     const auto bounded = [&] { return Cancelled(cancelled) || std::chrono::steady_clock::now() >= deadline; };
     constexpr int offsets[9][2] = {{0, 0}, {-1, 0}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {-1, 1}, {1, -1}, {1, 1}};
     for (const auto& offset : offsets)

@@ -14,6 +14,8 @@
 //   elevation_url = https://.../{z}/{x}/{y}.png             POSEIDON_EARTH_ELEVATION_URL (custom only)
 //   elevation_format = terrarium | terrain-rgb              POSEIDON_EARTH_ELEVATION_FORMAT (custom only)
 //   elevation_key = ...                                     POSEIDON_EARTH_ELEVATION_KEY
+//   content = none | overpass                               (3D buildings, roads, forests from OpenStreetMap)
+//   content_url = https://overpass-api.de/api/interpreter   POSEIDON_EARTH_CONTENT_OVERPASS
 //
 // URL templates are web-mercator XYZ tiles: {z} {x} {y}, {-y} for TMS row order, {q} for a Bing-style
 // quadkey, {s} for an a/b/c subdomain, {key} for the API key. Imagery none keeps the built-in sources
@@ -99,6 +101,7 @@ struct Config
     std::string imageryId = "none", imageryUrl, imageryKey;
     int imageryMaxZoom = 0;
     std::string elevationId = "terrarium", elevationUrl, elevationFormat, elevationKey;
+    std::string contentId = "none", contentUrl = "https://overpass-api.de/api/interpreter";
     Source Imagery() const;
     Source Elevation() const;
 };
@@ -139,6 +142,8 @@ inline Config Load(const std::filesystem::path& cache)
             else if (name == "elevation_url") c.elevationUrl = value;
             else if (name == "elevation_format") c.elevationFormat = value;
             else if (name == "elevation_key") c.elevationKey = value;
+            else if (name == "content") c.contentId = value;
+            else if (name == "content_url" && !value.empty()) c.contentUrl = value;
         }
     }
     const auto env = [](const char* name, std::string& target)
@@ -179,7 +184,9 @@ inline bool Save(const std::filesystem::path& cache, const Config& c)
     file << "elevation = " << c.elevationId << "\n"
          << "elevation_url = " << c.elevationUrl << "\n"
          << "elevation_format = " << c.elevationFormat << "\n"
-         << "elevation_key = " << c.elevationKey << "\n";
+         << "elevation_key = " << c.elevationKey << "\n"
+         << "content = " << c.contentId << "\n"
+         << "content_url = " << c.contentUrl << "\n";
     return bool(file);
 }
 

@@ -27,7 +27,7 @@ namespace Poseidon
 namespace
 {
 constexpr int ListId = 62101, LatId = 62102, LonId = 62103, AltId = 62104, ImageryId = 62105, ElevationId = 62106,
-              KeyId = 62107, StatusId = 62108, EnterId = 62109, BackId = 62110, PanelId = 62111;
+              KeyId = 62107, StatusId = 62108, EnterId = 62109, BackId = 62110, PanelId = 62111, ContentId = 62117;
 
 struct Place
 {
@@ -145,6 +145,8 @@ class WholeWorldDisplay : public Display
     {
         SetLabel(ImageryId, std::string("Imagery: ") + Imagery().label);
         SetLabel(ElevationId, std::string("Elevation: ") + Elevation().label);
+        const bool osm = _config.contentId == "overpass";
+        SetLabel(ContentId, osm ? "3D buildings, roads: OpenStreetMap" : "3D buildings, roads: off");
         std::string note = "Imagery: ";
         note += Imagery().attribution;
         note += ". Elevation: ";
@@ -154,6 +156,9 @@ class WholeWorldDisplay : public Display
             note += " Enter your own API key; it is stored in providers.cfg in your local app data.";
         if (std::string(Imagery().id) == "esri")
             note += " Check Esri's terms of use for your purpose.";
+        if (_config.contentId == "overpass")
+            note += " Buildings/roads: OpenStreetMap contributors (ODbL), fetched cell by cell from the Overpass API"
+                    " and cached; a busy public server can be slow -- set content_url to your own.";
         if (std::string(Imagery().id) == "custom" && _config.imageryUrl.empty())
             note += " Custom needs imagery_url in providers.cfg ({z}/{x}/{y}, {q}, {key}).";
         Status(note);
@@ -307,6 +312,10 @@ class WholeWorldDisplay : public Display
         set("POSEIDON_EARTH_CACHE", cacheText);
         set("POSEIDON_EARTH_IMAGERY", std::filesystem::exists(nasa, ec) ? Utf8(nasa) : std::string());
         set("POSEIDON_EARTH_SURFACE", prepared ? "1" : "0");
+        const bool osm = _config.contentId == "overpass";
+        set("POSEIDON_EARTH_CONTENT_OVERPASS", osm ? _config.contentUrl : std::string());
+        set("POSEIDON_EARTH_BUILDINGS", osm ? "1" : "0");
+        set("POSEIDON_EARTH_FEATURES", osm ? "1" : "0");
         set("WGR_GRASS", "0");
         set("WGR_TERRAIN_RESOURCE_REUSE", "1");
         configured = configured && SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data()) &&
@@ -355,6 +364,7 @@ class WholeWorldDisplay : public Display
         AddControl("RscButton", "Elevation", ElevationId, "", 0.52f, 0.45f, 0.42f, 0.05f);
         AddControl("RscText", "KeyLabel", 62116, "API key", 0.52f, 0.52f, 0.16f, 0.05f);
         AddControl("RscEdit", "Key", KeyId, "", 0.70f, 0.52f, 0.24f, 0.05f);
+        AddControl("RscButton", "Content", ContentId, "", 0.52f, 0.58f, 0.42f, 0.05f);
         AddControl("RscText", "Status", StatusId, "", 0.06f, 0.65f, 0.88f, 0.14f);
         AddControl("RscButton", "Enter", EnterId, "Enter whole world", 0.06f, 0.82f, 0.35f, 0.05f);
         AddControl("RscButton", "Back", BackId, "Back", 0.74f, 0.82f, 0.20f, 0.05f);
@@ -383,6 +393,11 @@ class WholeWorldDisplay : public Display
         else if (idc == ImageryId)
         {
             _imagery = (_imagery + 1) % int(EarthProviders::ImageryPresets().size());
+            ShowProviders();
+        }
+        else if (idc == ContentId)
+        {
+            _config.contentId = _config.contentId == "overpass" ? "none" : "overpass";
             ShowProviders();
         }
         else if (idc == ElevationId)
