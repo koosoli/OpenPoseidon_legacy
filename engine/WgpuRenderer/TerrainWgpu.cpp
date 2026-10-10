@@ -1,5 +1,6 @@
 #include "TerrainWgpu.hpp"
 #include "FishSchools.hpp"
+#include "BirdFlocks.hpp"
 #include <Poseidon/World/Weather/SnowField.hpp>
 #include <Poseidon/World/Weather/SnowShelter.hpp>
 #include <Poseidon/World/Weather/MudField.hpp>
@@ -4110,6 +4111,9 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         if (!_fish)
             _fish = std::make_unique<FishSchools>(_engine, _renderer);
         _fish->Update(camera->Position(), Glob.time.toFloat());
+        if (!_birds)
+            _birds = std::make_unique<BirdFlocks>(_engine, _renderer);
+        _birds->Update(camera->Position(), Glob.time.toFloat());
     }
 }
 

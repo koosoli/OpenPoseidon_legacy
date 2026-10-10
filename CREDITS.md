@@ -138,6 +138,7 @@ models, textures, cloud noise files) is used.
 | `water_tw/wake.rs`, `water_tw/tw_wake_kernel.wgsl`, `water_tw/tw_wake.wgsl` | `src/ocean/WakeSim.js` |
 | `water_tw/boat_spray.rs` (with the boat bodies and CPU-emitted tail in `spray.rs` / `tw_spray_update.wgsl`) | `src/player/BoatSpray.js` — its contact model is noted in the source as being "after threejs-water-pro", a product by the same author; it is used here under Tidewater's MIT grant on the repository owner's decision |
 | `FishSchools.cpp`, `FishSpeciesTable.inc` (wgpu renderer, the fish around the camera) | `src/world/fish/FishSpecies.js` (the species anatomy, generated into the table), `src/world/Fish.js` (behaviour rows, boids, flight from the swimmer) |
+| `BirdFlocks.cpp` (wgpu renderer, the seabirds around the camera) | `src/world/wildlife/BirdShapes.js` (species and the template), `BirdPose.js` (wing articulation), `Flight.js` (flight model), `BirdBatch.js` (plumage), `Birds.js` (behaviours) |
 | `engine/Poseidon/World/Entities/Vehicles/Misc/ShipTidewater.cpp` (the small-boat float and drive model) | `src/player/BoatController.js` |
 
 Written for OpenPoseidon, with no Tidewater counterpart (not ported; listed so the table above
