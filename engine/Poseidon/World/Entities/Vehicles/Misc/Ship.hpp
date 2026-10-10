@@ -68,6 +68,20 @@ class Ship: public Transport
 
 	float _sink; // current sink status
 
+	// Tidewater boat model (ShipTidewater.cpp): its own 120 Hz integrator and the water under each hull
+	// sample from the previous frame (height, the water's vertical velocity, where it was asked, slope).
+	static constexpr int TwSamples = 21;
+	struct TidewaterState
+	{
+		float acc = 0;
+		bool hasWater = false;
+		float rudder = 0, throttle = 0, rpm = 0;
+		float waterH[TwSamples] = {}, waterV[TwSamples] = {}, qx[TwSamples] = {}, qz[TwSamples] = {},
+			gx[TwSamples] = {}, gz[TwSamples] = {};
+		float heaveSpeed = 0; // last hull vertical speed relative to the water (ripples)
+	} _tw;
+	bool SimulateTidewater(float deltaT, Frame& moveTrans);
+
 	public:
 	Ship( VehicleType *name, Person *driver );
 

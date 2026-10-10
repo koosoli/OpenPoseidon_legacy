@@ -357,6 +357,18 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
 
     if (!CheckPredictionFrozen())
     {
+        // Tidewater's boat model (ShipTidewater.cpp) owns the whole hull dynamics while the boat is
+        // afloat; POSEIDON_BOAT_LEGACY=1 keeps the 2001 force model below. A beached hull, a sinking
+        // wreck and a ship that is not small fall back to it as well.
+        static const bool legacyModel = []
+        {
+            const char* v = std::getenv("POSEIDON_BOAT_LEGACY");
+            return v && v[0] == '1';
+        }();
+        Frame moveTrans;
+        const bool tidewater = !legacyModel && smallShip && !_isDead && _sink <= 0 && SimulateTidewater(deltaT, moveTrans);
+        if (!tidewater)
+        {
         // calculate all forces, frictions and torques
         Vector3 force(VZero), friction(VZero);
         Vector3 torque(VZero), torqueFriction(VZero);
@@ -461,7 +473,6 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
 
         Matrix4 movePos;
         ApplySpeed(movePos, deltaT);
-        Frame moveTrans;
         moveTrans.SetTransform(movePos);
 
         // body air friction
@@ -961,8 +972,8 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                     const float patchStiffness = GetMass() * G_CONST / (draft * Patches) * planing;
                     const float omega = sqrtf(G_CONST / draft);
                     const float patchDamping = 2.0f * omega * GetMass() / Patches;
-                    float lift = 0.0f;
-                    int wet = 0;
+                    float lift = 0.0f, surfaceSum = 0.0f, keelSum = 0.0f;
+                    int wet = 0, sampled = 0;
                     for (int a = 0; a < Along; ++a)
                     {
                         for (int c = 0; c < Across; ++c)
@@ -976,6 +987,9 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                                 continue; // this patch is over land
                             const float surface = SwimWaterSurfaceY(world.X(), world.Z()) + _sink * -1.0f;
                             const float depth = floatMin(surface - world.Y(), hullDepthCap);
+                            surfaceSum += surface;
+                            keelSum += world.Y();
+                            ++sampled;
                             if (depth <= 0.0f)
                                 continue;
                             ++wet;
@@ -997,10 +1011,11 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                         float& next = nextHull[RenderId()];
                         if (Glob.time.toFloat() >= next)
                         {
-                            next = Glob.time.toFloat() + 1.0f;
-                            LOG_INFO(Physics, "Boat hull: t={:.1f} object={} wet patches={}/15 lift/weight={:.3f} planing={:.2f} y={:.2f} pitch-up={:.3f} vy={:.2f}",
+                            next = Glob.time.toFloat() + 0.25f;
+                            LOG_INFO(Physics, "Boat hull: t={:.1f} object={} wet patches={}/15 lift/weight={:.3f} planing={:.2f} y={:.2f} pitch-up={:.3f} vy={:.2f} surface={:.2f} keel={:.2f} sea={:.2f} keelOffset={:.2f}",
                                      Glob.time.toFloat(), RenderId(), wet, lift / floatMax(GetMass() * G_CONST, 1.0f), planing,
-                                     Position().Y(), Direction().Y(), _speed.Y());
+                                     Position().Y(), Direction().Y(), _speed.Y(), sampled ? surfaceSum / sampled : 0.0f,
+                                     sampled ? keelSum / sampled : 0.0f, GLandscape->GetSeaLevel(), lo.Y());
                         }
                     }
                 }
@@ -1056,6 +1071,7 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                 }
             }
         }
+        } // legacy force model
 
         // simulate track drawing
         if (EnableVisualEffects(prec) && DirectionUp().Y() >= 0.3)
@@ -1067,17 +1083,22 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                 // slots instead of appending a new wake every simulation frame.
                 Vector3Val worldSpeed = Speed();
                 const float wakeSpeed = std::sqrt(worldSpeed.X() * worldSpeed.X() + worldSpeed.Z() * worldSpeed.Z());
-                if (wakeSpeed > 0.25f)
+                // A hull heaving against the water rings it too, not only one under way (owner: "it is not
+                // causing ripples"): a bobbing boat emits from its middle, scaled by how fast it moves
+                // against the surface (Tidewater model's heave, ShipTidewater.cpp).
+                const float bob = std::fabs(_tw.heaveSpeed);
+                if (wakeSpeed > 0.25f || bob > 0.12f)
                 {
+                    const bool underWay = wakeSpeed > 0.25f;
                     const float hullRadius = _shape->GeometrySphere();
-                    const float sternOffset = floatMin(floatMax(hullRadius * 0.55f, 2.0f), 25.0f);
+                    const float sternOffset = underWay ? floatMin(floatMax(hullRadius * 0.55f, 2.0f), 25.0f) : 0.0f;
                     const Vector3 stern = PositionModelToWorld(Vector3(0, 0, -sternOffset) - _shape->BoundingCenter());
                     HydroWaterInteractionEvent event{};
                     event.positionRadius[0] = stern.X();
                     event.positionRadius[1] = stern.Z();
                     event.positionRadius[2] = floatMin(floatMax(hullRadius * 0.35f + wakeSpeed * 0.45f, 1.5f), 18.0f);
                     event.positionRadius[3] = floatMin(
-                        floatMax(wakeSpeed * 0.045f + (std::fabs(_thrustL) + std::fabs(_thrustR)) * 0.04f, 0.08f),
+                        floatMax(wakeSpeed * 0.045f + (std::fabs(_thrustL) + std::fabs(_thrustR)) * 0.04f + bob * 0.25f, 0.08f),
                         0.75f);
                     event.velocityKind[0] = worldSpeed.X();
                     event.velocityKind[1] = worldSpeed.Z();
@@ -1088,8 +1109,8 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                     // one-shot events and the local-player continuous emitter.
                     const uintptr_t wakeId = (reinterpret_cast<uintptr_t>(this) >> 4u) & 0x007fffffu;
                     event.timeLifeFoamMass[3] = static_cast<float>(wakeId + 2u);
-                    event.directionDepthFlags[0] = worldSpeed.X() / wakeSpeed;
-                    event.directionDepthFlags[1] = worldSpeed.Z() / wakeSpeed;
+                    event.directionDepthFlags[0] = underWay ? worldSpeed.X() / wakeSpeed : Direction().X();
+                    event.directionDepthFlags[1] = underWay ? worldSpeed.Z() / wakeSpeed : Direction().Z();
                     event.directionDepthFlags[2] = floatMin(hullRadius * 0.15f, 6.0f);
                     event.directionDepthFlags[3] = HydroWaterInteractionPendingImpulse | HydroWaterInteractionCapsule |
                                                    HydroWaterInteractionLargeBody;
