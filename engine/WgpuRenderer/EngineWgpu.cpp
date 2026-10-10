@@ -20937,8 +20937,18 @@ void EngineWgpu::PushSkyRuntime()
     _cloudOffsetClock = cloudT;
     _cloudOffsetX = std::fmod(_cloudOffsetX + windVelX * cloudDt, kWindWrap);
     _cloudOffsetZ = std::fmod(_cloudOffsetZ + windVelZ * cloudDt, kWindWrap);
-    const double windX = _cloudOffsetX;
-    const double windZ = _cloudOffsetZ;
+    double windX = _cloudOffsetX;
+    double windZ = _cloudOffsetZ;
+    // Earth free flight rebases the camera back to the anchor every 32 km; the deck is sampled at
+    // camera + offset, so without the accumulated rebase distance it jumped back with the camera and
+    // seemed to follow it. The wrap is the noise period, so subtracting keeps it seamless.
+    if (EarthStreaming::Enabled())
+    {
+        double travelX = 0, travelZ = 0;
+        EarthStreaming::Locations().Travel(travelX, travelZ);
+        windX = std::fmod(windX - travelX, kWindWrap);
+        windZ = std::fmod(windZ - travelZ, kWindWrap);
+    }
     rt.misc = {_skyNight, camAlt, static_cast<float>(windX), static_cast<float>(windZ)};
     rt.layer_fog_weather = {skySnap.weatherFog, skySnap.hasLandscape ? 1.0f : 0.0f,
                             skySnap.hasCamera ? 1.0f : 0.0f, 0.0f};

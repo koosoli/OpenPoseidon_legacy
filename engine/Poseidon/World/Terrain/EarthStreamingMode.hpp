@@ -91,6 +91,11 @@ class LocationState
         return true;
     }
     void ClearGround() { std::lock_guard lock(_mutex); _ground.reset(); }
+    // Total local distance the free-flight origin has been rebased by. Anything laid out in local
+    // map coordinates that must stay attached to the ground across rebases (the cloud deck) adds
+    // this, otherwise it snaps back with the camera every 32 km and seems to follow it.
+    void AddTravel(double x, double z) { std::lock_guard lock(_mutex); _travelX += x; _travelZ += z; }
+    void Travel(double& x, double& z) const { std::lock_guard lock(_mutex); x = _travelX; z = _travelZ; }
     std::shared_ptr<const GroundPatch> Ground() const
     {
         std::lock_guard lock(_mutex);
@@ -105,6 +110,7 @@ class LocationState
     mutable std::mutex _mutex;
     Location _location;
     std::shared_ptr<const GroundPatch> _ground;
+    double _travelX = 0, _travelZ = 0;
 };
 inline LocationState& Locations()
 {

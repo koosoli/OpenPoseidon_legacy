@@ -473,6 +473,8 @@ void CameraVehicle::Simulate(float deltaT, SimulationImportance prec)
                             orient.SetDirectionAndUp(direction,upDirection);
                             SetOrientation(orient);
                             _speed = rotate(_speed);
+                            EarthStreaming::Locations().AddTravel(position[0] - EarthStreaming::CameraAnchor,
+                                                                  position[2] - EarthStreaming::CameraAnchor);
                             position = Vector3(EarthStreaming::CameraAnchor,float(altitude),EarthStreaming::CameraAnchor);
                         }
                         else
