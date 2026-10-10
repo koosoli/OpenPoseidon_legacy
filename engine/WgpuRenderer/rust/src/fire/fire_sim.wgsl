@@ -23,6 +23,7 @@ struct SimParams {
     motion: vec4<f32>,      // buoyancy, smoke weight, damping (1/s), vorticity
     losses: vec4<f32>,      // cooling (1/s), dissipation (1/s), turbulence strength, turbulence scale
     wind: vec4<f32>,        // wind velocity x, bed patchiness (0..1), wind z, response (1/s)
+    extra: vec4<f32>,       // x: flame (1) or smoke only (0), y: share of the wind taken up
     // the solids (Fire Pro's colliders, solids.wgsl): 10 x 10 columns over the box, each open
     // from floor to ceiling (world y); a wall is a column whose ceiling is below its floor
     floor_h: array<vec4<f32>, 25>,
@@ -195,7 +196,7 @@ fn cs_evolve(@builtin(global_invocation_id) gid: vec3<u32>) {
             let q = (p - S.emitter.xyz) / 0.55 + vec3<f32>(3.17, -t * 1.7, 11.29) + vec3<f32>(0.0, 0.0, t * 0.35);
             vary = vec2<f32>(1.0) - S.wind.y * vec2<f32>(vnoise(q), vnoise(q + vec3<f32>(17.3, 2.8, 8.6)));
         }
-        lifetime = max(lifetime, S.emit.x * weight * vary.y);
+        if (S.extra.x > 0.5) { lifetime = max(lifetime, S.emit.x * weight * vary.y); }
         sourceProducts = vec2<f32>(S.emit.z, S.emit.y * vary.x) * weight * dt * S.emit.x;
     }
     // evaluateFlame: one step of lifetime, and what the flame produces over it
@@ -310,7 +311,8 @@ fn cs_forces(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     var v = textureLoad(velIn, id, 0).xyz * exp(-S.motion.z * dt) + dt * force;
     // the wind carries the gas (OP: a relaxation toward the wind, Fire Pro: a constant push)
-    v = mix(v, vec3<f32>(S.wind.x, v.y, S.wind.z) * 0.5, 1.0 - exp(-S.wind.w * dt));
+    let windV = vec3<f32>(S.wind.x * S.extra.y, v.y, S.wind.z * S.extra.y);
+    v = mix(v, windV, 1.0 - exp(-S.wind.w * dt));
     // the source's own velocity (sourceVelocity): a rise out of the bed
     let d = (p - S.emitter.xyz) / max(vec3<f32>(S.emitter.w, S.emitter.w * 0.45, S.emitter.w), vec3<f32>(0.03));
     let r = length(d);

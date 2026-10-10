@@ -20666,6 +20666,7 @@ void EngineWgpu::PushRenderParams()
                     w = WgrFireSource{{f.base.X(), f.base.Y(), f.base.Z(), f.radius},
                                       {f.intensity, f.smoke, key, static_cast<float>(f.kind)},
                                       {wind.X(), wind.Y(), wind.Z(), f.boxWidth}};
+                    std::memcpy(w.color, f.color, sizeof w.color);
                     std::memcpy(w.floor, f.floor, sizeof w.floor);
                     std::memcpy(w.ceiling, f.ceiling, sizeof w.ceiling);
                 }

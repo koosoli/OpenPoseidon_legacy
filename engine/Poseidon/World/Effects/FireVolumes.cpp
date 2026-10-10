@@ -47,6 +47,8 @@ std::unordered_set<const void*>& Drawn()
 // The renderer's box for this fire (fire/mod.rs Grid::new uses the width it is sent).
 float BoxWidth(const FireVolumeReport& r)
 {
+    if (r.kind == FireKindSmoke)
+        return std::max(r.radius * 10.0f, 6.0f); // a cloud spreads far wider than its source
     return r.kind == FireKindExplosion ? r.radius * 4.0f : std::max(r.radius * 5.0f, 2.4f);
 }
 
@@ -61,7 +63,7 @@ void ProbeSolids(FireVolumeReport& r)
     const float col = r.boxWidth / n;
     const float height = r.boxWidth * 1.8f;
     const Vector3 bed = r.base + Vector3(0, 0.3f + 0.6f * std::min(r.radius, 1.0f), 0);
-    bool walls = r.kind == FireKindBed;
+    bool walls = r.kind == FireKindBed || r.kind == FireKindSmoke;
     if (r.kind == FireKindExplosion)
         walls = q.IsSheltered(bed, 12.0f);
     for (int j = 0; j < n; ++j)
@@ -124,7 +126,8 @@ bool FireVolumesEnabled()
     return on;
 }
 
-void ReportFireVolume(const void* owner, Vector3Par base, float radius, float intensity, float smoke, int kind)
+void ReportFireVolume(const void* owner, Vector3Par base, float radius, float intensity, float smoke, int kind,
+                      const float* color)
 {
     if (!FireVolumesEnabled())
         return;
@@ -137,6 +140,8 @@ void ReportFireVolume(const void* owner, Vector3Par base, float radius, float in
     r.smoke = std::clamp(smoke, 0.0f, 1.0f);
     r.kind = kind;
     r.time = Glob.time.toFloat();
+    if (color)
+        std::copy(color, color + 4, r.color);
     if (!r.solidsValid || (r.solidsAt - base).SquareSize() > 0.25f || std::fabs(r.boxWidth - BoxWidth(r)) > 0.01f)
         ProbeSolids(r);
 }

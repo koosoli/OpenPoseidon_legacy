@@ -7,6 +7,7 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
+#include <Poseidon/World/Effects/FireVolumes.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/World.hpp>
@@ -2011,7 +2012,13 @@ SmokeShell::SmokeShell(EntityAI* parent, const AmmoType* type) : base(parent, ty
 
     const ParamEntry& cls = *type->_par;
     _smoke.Load(cls >> "Smoke");
-    _smoke.SetColor(GetColor(cls >> "smokeColor"));
+    const Color color = GetColor(cls >> "smokeColor");
+    _smoke.SetColor(color);
+    // the plume's albedo: the configured colour, kept from going black (a grenade's smoke is
+    // bright: a dark config colour tints it, it does not make soot)
+    _volumeColor[0] = std::clamp(color.R(), 0.15f, 0.9f);
+    _volumeColor[1] = std::clamp(color.G(), 0.15f, 0.9f);
+    _volumeColor[2] = std::clamp(color.B(), 0.15f, 0.9f);
 }
 
 void SmokeShell::Simulate(float deltaT, SimulationImportance prec)
@@ -2073,6 +2080,13 @@ void SmokeShell::Simulate(float deltaT, SimulationImportance prec)
 
     Move(position);
     _smoke.Simulate(Position(), Speed(), deltaT, prec);
+    // FIRE-001: a volumetric plume while it lies smoking (Fire Pro's industrial smoke), fading
+    // over its last ten seconds
+    if (_initDelay <= 0 && _speed.SquareSize() < 0.01f && _timeToLive > 0)
+    {
+        ReportFireVolume(this, Position(), 0.35f, std::min(1.0f, _timeToLive / 10.0f), 1.0f, FireKindSmoke,
+                         _volumeColor);
+    }
 }
 
 LSError SmokeShell::Serialize(ParamArchive& ar)

@@ -145,6 +145,14 @@ void SmokeVolume::Emit(float deltaT)
     {
         return;
     }
+    if (!_params.fire && !_params.balloons)
+    {
+        // FIRE-001: the plume near the camera as a volume too (fire emitters report from EmitFire)
+        const float color[4] = {std::clamp(_params.red * 0.85f, 0.03f, 0.9f), std::clamp(_params.green * 0.85f, 0.03f, 0.9f),
+                                std::clamp(_params.blue * 0.85f, 0.03f, 0.9f), std::clamp(_params.opacity * 1.5f, 0.2f, 1.5f)};
+        ReportFireVolume(this, _emitterPosition, std::clamp(_params.emitterRadius, 0.2f, 3.0f),
+                         std::clamp(_params.rate / 35.0f, 0.2f, 1.0f), 1.0f, FireKindSmoke, color);
+    }
     if (_params.fire && !_fireShape.IsNull())
     {
         // With fire on, the flames ARE the smoke source: each flame that burns

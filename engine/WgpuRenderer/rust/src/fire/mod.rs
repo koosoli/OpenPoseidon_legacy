@@ -22,7 +22,7 @@ const STEP: f32 = 1.0 / 60.0;
 const RANGE: f32 = 300.0;
 const LUT_SIZE: usize = 512;
 
-/// One fire, as the engine reports it (`WgrFireSource`, 848 bytes).
+/// One fire, as the engine reports it (`WgrFireSource`, 864 bytes).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct FireSource {
@@ -32,6 +32,8 @@ pub struct FireSource {
     pub params: [f32; 4],
     /// wind velocity (m/s), w: box width (m; 0 = the default for the bed)
     pub wind: [f32; 4],
+    /// the smoke's colour (linear albedo), w: density scale
+    pub color: [f32; 4],
     /// the box's 10 x 10 columns (+x then +z) are open from floor to ceiling (world y)
     pub floor: [[f32; 4]; 25],
     pub ceiling: [[f32; 4]; 25],
@@ -55,6 +57,8 @@ struct SimParams {
     motion: [f32; 4],
     losses: [f32; 4],
     wind: [f32; 4],
+    /// x: flame (1) or smoke only (0), y: how much of the wind the gas takes up
+    extra: [f32; 4],
     floor: [[f32; 4]; 25],
     ceiling: [[f32; 4]; 25],
 }
@@ -64,6 +68,8 @@ struct SimParams {
 struct MarchBox {
     origin_cell: [f32; 4],
     dims_fade: [f32; 4],
+    /// smoke colour (linear albedo), w: density (1/m per unit of smoke)
+    smoke: [f32; 4],
 }
 
 #[repr(C)]
@@ -525,7 +531,8 @@ impl FireSystem {
         // and the smoke to how much this fire smokes (a wreck's burning fuel and tyres, a
         // fireplace's wood). An explosion (kind 2) is a burst: a fireball off the ground, hotter,
         // rising faster, its gas expanding as it burns (Fire Pro's fuel-fireball look).
-        let explosion = s.params[3] > 1.5;
+        let explosion = s.params[3] > 1.5 && s.params[3] < 2.5;
+        let smoke_only = s.params[3] > 2.5;
         // Froude scaling from the campfire the preset was tuned on (a 0.8 m bed): a fire twice
         // the size has flames twice as tall, rising and living sqrt(2) longer and faster. Big
         // beds also burn patchily (Fire Pro's burst variation), which breaks one tall tongue
@@ -537,7 +544,14 @@ impl FireSystem {
         } else {
             (0.5, 10.0, 0.92 * froude, 0.65 * froude, 0.3, 4.7)
         };
-        let patchy = ((radius - 0.6) / 1.2).clamp(0.0, 0.75);
+        let patchy = if smoke_only { 0.0 } else { ((radius - 0.6) / 1.2).clamp(0.0, 0.75) };
+        // Fire Pro's industrial-smoke preset (editor/presets/industrial-smoke.json): no flame, a
+        // little heat, a lot of smoke, a steady rise; it drifts with the wind
+        let (heat, smoke_rate, rise, buoy) = if smoke_only {
+            (3.0, 20.0 * intensity.max(0.05), 2.0 * froude, 1.6)
+        } else {
+            (heat, 1.5 * smokiness * smokiness, rise, buoy)
+        };
         let p = SimParams {
             origin_cell: [g.origin[0], g.origin[1], g.origin[2], g.cell],
             dims: [NX, NY, NZ, 1],
@@ -545,15 +559,20 @@ impl FireSystem {
             step: [STEP, g.time, (g.key % 97) as f32 * 1.7, g.width / 10.0],
             // the bed's flattened sphere stands on the ground (its half-height is 0.45 r)
             emitter: [s.pos_radius[0], s.pos_radius[1] + radius * lift, s.pos_radius[2], radius],
-            emit: [intensity, heat, 1.5 * smokiness * smokiness, rise],
+            emit: [intensity, heat, smoke_rate, rise],
             flame: [life, 0.6 + 1.2 * smokiness, 3.0, expand],
             motion: [buoy, 0.12, 0.1, 3.2],
             // turbulence: stronger for a bigger fire, its eddies a metre or so whatever the size
-            losses: [0.62 / froude, 0.94 - 0.5 * smokiness, 0.8 * froude, 1.1],
+            losses: if smoke_only {
+                [0.62, 0.35, 0.5 * froude, 2.0]
+            } else {
+                [0.62 / froude, 0.94 - 0.5 * smokiness, 0.8 * froude, 1.1]
+            },
             // the wind bends the plume; Fire Pro pushes with a gentle constant force, OP relaxes
             // toward the weather's wind slowly enough that a flame still stands up in a breeze
             // y: how patchily the bed burns (0 a steady bed)
-            wind: [s.wind[0], patchy, s.wind[2], 0.15],
+            wind: [s.wind[0], patchy, s.wind[2], if smoke_only { 0.6 } else { 0.15 }],
+            extra: [if smoke_only { 0.0 } else { 1.0 }, if smoke_only { 0.9 } else { 0.5 }, 0.0, 0.0],
             floor: s.floor,
             ceiling: s.ceiling,
         };
@@ -669,12 +688,20 @@ impl FireSystem {
             c[0] * c[0] + c[1] * c[1] + c[2] * c[2]
         };
         order.sort_by(|&a, &b| dist(&self.grids[a]).total_cmp(&dist(&self.grids[b])));
-        let mut boxes = [MarchBox { origin_cell: [0.0; 4], dims_fade: [0.0; 4] }; MAX_FIRES];
+        let mut boxes = [MarchBox { origin_cell: [0.0; 4], dims_fade: [0.0; 4], smoke: [0.0; 4] }; MAX_FIRES];
         for (slot, &gi) in order.iter().enumerate() {
             let g = &self.grids[gi];
             boxes[slot] = MarchBox {
                 origin_cell: [g.origin[0] - cam[0], g.origin[1] - cam[1], g.origin[2] - cam[2], g.cell],
                 dims_fade: [NX as f32, NY as f32, NZ as f32, g.fade],
+                // the source's colour; Fire Pro's campfire density 7.11 / m for soot, its
+                // industrial smoke's 6 for a plume
+                smoke: [
+                    g.src.color[0],
+                    g.src.color[1],
+                    g.src.color[2],
+                    g.src.color[3].max(0.0) * if g.src.params[3] > 2.5 { 6.0 } else { 7.11 } * self.smoke_scale,
+                ],
             };
         }
         let mp = MarchParams {
@@ -777,7 +804,8 @@ impl Grid {
         // set and the solids are sampled by world position, clamped to the edge columns)
         let (wx, wz) = (src.wind[0], src.wind[2]);
         let wlen = (wx * wx + wz * wz).sqrt();
-        let shift = if wlen > 0.1 { (wlen * 0.4).min(width * 0.25) / wlen } else { 0.0 };
+        let lean = if src.params[3] > 2.5 { 0.3 } else { 0.25 };
+        let shift = if wlen > 0.1 { (wlen * 0.6).min(width * lean) / wlen } else { 0.0 };
         let origin = [
             src.pos_radius[0] - width * 0.5 + wx * shift,
             src.pos_radius[1] - 2.0 * cell,
@@ -905,7 +933,7 @@ mod tests {
     }
 
     #[test]
-    fn source_layout_is_848_bytes() {
-        assert_eq!(std::mem::size_of::<FireSource>(), 848);
+    fn source_layout_is_864_bytes() {
+        assert_eq!(std::mem::size_of::<FireSource>(), 864);
     }
 }

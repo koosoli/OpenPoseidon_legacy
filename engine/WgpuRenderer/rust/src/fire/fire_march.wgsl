@@ -16,6 +16,7 @@ const MAX_FIRES: u32 = 4u;
 struct Box {
     origin_cell: vec4<f32>, // min corner relative to the camera (m), w: cell size
     dims_fade: vec4<f32>,   // nx, ny, nz, fade in (0..1)
+    smoke: vec4<f32>,       // smoke colour (linear albedo), w: density (1/m per unit)
 };
 
 struct MarchParams {
@@ -25,7 +26,7 @@ struct MarchParams {
     sun_dir: vec4<f32>,         // toward the sun, w: Henyey-Greenstein g
     sun_radiance: vec4<f32>,    // w: smoke self-shadow density
     ambient: vec4<f32>,         // w: soot glow
-    smoke: vec4<f32>,           // smoke colour (linear), w: smoke density (1/m per unit)
+    smoke: vec4<f32>,           // unused (each box carries its own smoke colour and density)
     fire: vec4<f32>,            // temperature (K), brightness, flame opacity (1/m), gain
 };
 
@@ -87,8 +88,8 @@ fn boxSpan(i: u32, dir: vec3<f32>) -> vec2<f32> {
 fn glow(life: f32) -> f32 { return clamp(life * 5.0, 0.0, 1.0); }
 
 // fireProEmission: thermal emission of the flame and the hot soot
-fn emission(f: vec4<f32>) -> vec3<f32> {
-    let absorption = (vec3<f32>(1.0) - M.smoke.xyz) * max(0.0, f.x) * M.smoke.w;
+fn emission(f: vec4<f32>, smoke: vec4<f32>) -> vec3<f32> {
+    let absorption = (vec3<f32>(1.0) - smoke.xyz) * max(0.0, f.x) * smoke.w;
     let source = absorption * M.ambient.w + vec3<f32>(glow(f.z) * M.fire.z);
     if (all(source == vec3<f32>(0.0))) { return vec3<f32>(0.0); }
     let heat = max(0.0, f.y);
@@ -101,16 +102,18 @@ fn emission(f: vec4<f32>) -> vec3<f32> {
 }
 
 // optical depth toward the sun through the same box (four widening steps)
-fn sunShadow(i: u32, rel: vec3<f32>) -> f32 {
+// optical depth along `dir` through the same box, in `taps` widening steps (a flame's box: 2,
+// reaching ~7 cells; a plume's: 4, reaching ~26 cells -- Fire Pro reads a light volume instead)
+fn shadowAlong(i: u32, rel: vec3<f32>, dir: vec3<f32>, taps: i32) -> f32 {
     let cell = M.boxes[i].origin_cell.w;
     var tau = 0.0;
     var t = cell;
-    for (var k = 0; k < 2; k++) {
+    for (var k = 0; k < taps; k++) {
         let ds = cell * (2.0 + f32(k) * 3.0);
-        tau += max(fieldAt(i, rel + M.sun_dir.xyz * (t + ds * 0.5)).x, 0.0) * ds;
+        tau += max(fieldAt(i, rel + dir * (t + ds * 0.5)).x, 0.0) * ds;
         t += ds;
     }
-    return exp(-tau * M.sun_radiance.w);
+    return exp(-tau * M.sun_radiance.w * M.boxes[i].smoke.w / 7.11);
 }
 
 @fragment
@@ -171,16 +174,23 @@ fn fs_fire(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
             let rel = dir * (t0 + (f32(k) + jitter) * ds);
             let f = fieldAt(i, rel);
             if (f.x + glow(f.z) > 0.002) {
-                let density = max(0.0, f.x) * M.smoke.w;
+                let smoke = M.boxes[i].smoke;
+                let density = max(0.0, f.x) * smoke.w;
                 var scattering = vec3<f32>(0.0);
                 if (density > 0.0) {
                     // the self-shadow only matters while the sun is up
+                    // a plume (bright, wide) needs the longer shadow march and its core darkened
+                    // under the sky too; a flame's soot is lit by the fire anyway
+                    let plume = M.boxes[i].dims_fade.w > 0.0 && smoke.x + smoke.y + smoke.z > 0.3;
+                    let taps = select(2, 4, plume);
                     var sunVis = 1.0;
-                    if (sunLit) { sunVis = sunShadow(i, rel); }
-                    scattering = M.smoke.xyz * (M.ambient.xyz + direct * sunVis) * density;
+                    if (sunLit) { sunVis = shadowAlong(i, rel, M.sun_dir.xyz, taps); }
+                    var skyVis = 1.0;
+                    if (plume) { skyVis = mix(0.3, 1.0, shadowAlong(i, rel, vec3<f32>(0.0, 1.0, 0.0), 3)); }
+                    scattering = smoke.xyz * (M.ambient.xyz * skyVis + direct * sunVis) * density;
                 }
                 let sigma = density + glow(f.z) * M.fire.z;
-                let src = scattering + emission(f);
+                let src = scattering + emission(f, smoke);
                 let tau = sigma * ds;
                 var integral = ds * (1.0 - 0.5 * tau + tau * tau / 6.0);
                 if (tau >= 0.001) { integral = (1.0 - exp(-tau)) / sigma; }
@@ -212,7 +222,7 @@ fn fs_fire_mask(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         let ds = (t1 - s.x) / 16.0;
         for (var k = 0u; k < 16u; k++) {
             let f = fieldAt(i, dir * (s.x + (f32(k) + 0.5) * ds));
-            tau += (max(f.x, 0.0) * M.smoke.w + glow(f.z) * M.fire.z * 3.0) * ds;
+            tau += (max(f.x, 0.0) * M.boxes[i].smoke.w + glow(f.z) * M.fire.z * 3.0) * ds;
         }
     }
     return vec4<f32>(clamp((1.0 - exp(-tau)) * 2.0, 0.0, 1.0), 0.0, 0.0, 1.0);
