@@ -1481,6 +1481,24 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     // authoritative when the owner switches fog mode or edits a layer later.
     if (const char* fogMode = std::getenv("WGR_LAYERED_FOG"))
         _sky.layeredFog = std::strcmp(fogMode, "1") == 0;
+    // Whole world: the island fog is a 35 m film over the ground with valleys found within 150 m.
+    // Real valleys are kilometres wide and fog pools hundreds of metres deep in them, so scale the
+    // layers and the valley search to that (env profiles below still override).
+    if (EarthStreaming::Enabled())
+    {
+        _sky.fogTerrainFollow = 0.7f; // partly settles into low ground instead of hugging every slope
+        _sky.fogTerrainReference = 0.0f;
+        _sky.fogValleyStrength = 1.5f;
+        _sky.fogValleyRadius = 1000.0f;
+        _sky.fogLayerBase[0] = 0.0f;
+        _sky.fogLayerTop[0] = 200.0f;
+        _sky.fogLayerFeather[0] = 60.0f;
+        _sky.fogLayerExtinction[0] = 0.006f;
+        _sky.fogLayerBase[1] = 200.0f;
+        _sky.fogLayerTop[1] = 600.0f;
+        _sky.fogLayerFeather[1] = 120.0f;
+        _sky.fogLayerExtinction[1] = 0.0012f;
+    }
     for (int i = 0; i < 2; ++i)
     {
         const char* profile = std::getenv(i == 0 ? "WGR_FOG_LAYER0" : "WGR_FOG_LAYER1");
