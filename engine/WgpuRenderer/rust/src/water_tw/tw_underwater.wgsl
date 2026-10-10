@@ -26,6 +26,12 @@
 // (W9a) within this of the surface the medium is decided per pixel on the lens (was 0.35 m while
 // the camera's height came from the FFT alone; the probe's is the drawn surface's own)
 const UW_STRADDLE: f32 = 1.0;
+// (OP) the split is decided on a virtual dome port this far along the view, not on the near plane:
+// the near plane is a few cm tall on screen terms, so the waterline crossed the whole frame within
+// +-5 cm of bob and the view flipped between air and water as each wave passed. At 0.6 m it sweeps
+// the frame over about +-0.35 m, the bob the waves actually give a swimmer's eye -- a half-submerged
+// camera's waterline, rising and falling across the lens.
+const UW_PORT: f32 = 0.6;
 const UW_BAND: i32 = 16;
 const UW_IOR: f32 = 1.333;
 const UW_PI: f32 = 3.141592653589793;
@@ -191,7 +197,7 @@ fn uwMedium(uv: vec2<f32>, camH: f32) -> f32 {
     if (abs(camH) < UW_STRADDLE) {
         let dir = uwDir(uv);
         let fwd = uwDir(vec2<f32>(0.5, 0.5));
-        let q = uw.cam.xyz + dir * (uw.cam.w / max(dot(dir, fwd), 0.1));
+        let q = uw.cam.xyz + dir * (max(uw.cam.w, UW_PORT) / max(dot(dir, fwd), 0.1));
         water = select(0.0, 1.0, q.y < uwWaterHeight(q.xz));
     }
     return water;
