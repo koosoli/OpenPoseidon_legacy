@@ -710,6 +710,27 @@ Engine::TonemapSettings LerpTonemap(const Engine::TonemapSettings& a, const Engi
     return r;
 }
 
+// The look presets (sky + tonemap) are keyed by clock hour, tuned for one island's sun: dawn 5:50,
+// dusk 18:30. Whole-world mode has the real sun for the real place, so a Grand Canyon sunset at 18:54
+// was already being darkened toward the 20:00 night preset. There the key is the hour at which the
+// tuned island has the same sun elevation: dawn keys while the sun is in the east, dusk keys in the west.
+float LookHour(float clockHour)
+{
+    if (!EarthStreaming::Enabled())
+        return clockHour;
+    const auto& snap = render::frame::GPresentationSnapshot();
+    const Vector3 toSun = -snap.sunDirection;
+    const float e = std::asin(std::clamp(toSun.Y(), -1.0f, 1.0f)) * (180.0f / 3.14159265f);
+    const auto lerp = [](float a, float b, float t) { return a + (b - a) * std::clamp(t, 0.0f, 1.0f); };
+    if (toSun.X() > 0.0f) // morning: night 2:00 .. dawn 5:50 (sun at the horizon) .. noon
+        return e < 0.0f ? lerp(2.0f, 5.833f, (e + 12.0f) / 12.0f) : lerp(5.833f, 12.0f, e / 60.0f);
+    if (e >= 20.0f) // afternoon: 17:00 at 20 degrees .. noon at 60
+        return lerp(17.0f, 12.0f, (e - 20.0f) / 40.0f);
+    if (e >= 3.0f) // 18:30 dusk at 3 degrees .. 17:00 at 20
+        return lerp(18.5f, 17.0f, (e - 3.0f) / 17.0f);
+    return lerp(20.0f, 18.5f, (e + 12.0f) / 15.0f); // night 20:00 at -12 .. dusk at 3
+}
+
 Engine::TonemapSettings TonemapAtHour(float hour)
 {
     const int n = int(sizeof(kTonemapPresets) / sizeof(kTonemapPresets[0]));
@@ -19227,7 +19248,7 @@ void EngineWgpu::UpdateAutoTonemap()
     // current values across the auto overwrite (else the Tonemap tab's bloom sliders
     // would be reset every frame in auto mode).
     const float bi = _tonemap.bloomIntensity, bt = _tonemap.bloomThreshold, bk = _tonemap.bloomKnee;
-    _tonemap = TonemapAtHour(render::frame::GPresentationSnapshot().timeOfDay * 24.0f);
+    _tonemap = TonemapAtHour(LookHour(render::frame::GPresentationSnapshot().timeOfDay * 24.0f));
     _tonemap.bloomIntensity = bi;
     _tonemap.bloomThreshold = bt;
     _tonemap.bloomKnee = bk;
@@ -20241,7 +20262,7 @@ void EngineWgpu::UpdateAutoSky()
     // everything else (density heights, night colours/band, samples, planet/atmosphere
     // geometry, and the user toggles: sky lighting, ambient, aerial shadow, fog falloff,
     // enabled) stays exactly as the Sky tab left it. Kept in sync with LerpSky's field set.
-    const SkySettings k = SkyAtHour(render::frame::GPresentationSnapshot().timeOfDay * 24.0f);
+    const SkySettings k = SkyAtHour(LookHour(render::frame::GPresentationSnapshot().timeOfDay * 24.0f));
     _sky.exposure = k.exposure;
     _sky.sunIntensity = k.sunIntensity;
     _sky.sunAngularRadius = k.sunAngularRadius;
