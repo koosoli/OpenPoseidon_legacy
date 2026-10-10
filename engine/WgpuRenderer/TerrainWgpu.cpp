@@ -3263,6 +3263,7 @@ TerrainWgpu::~TerrainWgpu()
     if (_earthHorizonMesh) wgr_mesh_destroy(_renderer,_earthHorizonMesh);
     if (_earthGlobeMesh) wgr_mesh_destroy(_renderer,_earthGlobeMesh);
     if (_earthBuildingMesh) wgr_mesh_destroy(_renderer,_earthBuildingMesh);
+    if (_earthBuildingTexture) wgr_texture_destroy(_renderer,_earthBuildingTexture);
     if (_earthGlobeTexture) wgr_texture_destroy(_renderer,_earthGlobeTexture);
     if (_earthNearMesh) wgr_mesh_destroy(_renderer,_earthNearMesh);
     if (_earthSurfaceTexture) wgr_texture_destroy(_renderer,_earthSurfaceTexture);
@@ -3678,7 +3679,10 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         {
             EngineWgpu::AcquireProducerWindow("Earth cached buildings");
             std::vector<WgrMeshVertex> vertices(mesh->vertices.size());
-            for(size_t i=0;i<vertices.size();++i){const auto& v=mesh->vertices[i];vertices[i].pos={v.x,v.y,v.z};vertices[i].normal={v.nx,v.ny,v.nz};}
+            for(size_t i=0;i<vertices.size();++i){const auto& v=mesh->vertices[i];vertices[i].pos={v.x,v.y,v.z};vertices[i].normal={v.nx,v.ny,v.nz};vertices[i].uv={v.u,v.v};}
+            if(!_earthBuildingTexture)
+                _earthBuildingTexture=wgr_texture_create(_renderer,EarthBuildingStream::PaletteSize,1,WGR_TEXTURE_RGBA8,1,0,
+                    &EarthBuildingStream::Palette[0][0],uint32_t(sizeof(EarthBuildingStream::Palette)));
             WgrMesh replacement=0;
             if(!mesh->indices.empty())replacement=wgr_mesh_create(_renderer,WgrSlice<WgrMeshVertex>(vertices),WgrSlice<uint32_t>(mesh->indices));
             if(_earthBuildingMesh)wgr_mesh_destroy(_renderer,_earthBuildingMesh);
@@ -3686,7 +3690,7 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
             LOG_INFO(Graphics,"Earth cached buildings: cell [{},{}], {} buildings, {} triangles, {} skipped, {} estimated heights; {}",
                 mesh->cell.latitude,mesh->cell.longitude,mesh->buildings,mesh->indices.size()/3,mesh->skipped,mesh->estimatedHeights,mesh->error);
         }
-        if(_earthBuildingGeneration==_earthPatch->generation)_engine.SubmitEarthHorizon(_earthBuildingMesh,_earthBuildingIndices);
+        if(_earthBuildingGeneration==_earthPatch->generation)_engine.SubmitEarthHorizon(_earthBuildingMesh,_earthBuildingIndices,_earthBuildingTexture);
     }
     if(_earthWorldgen && worldgenNear)
     {

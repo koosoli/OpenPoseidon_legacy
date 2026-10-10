@@ -15,6 +15,89 @@ namespace Poseidon
 namespace
 {
 struct Point { double x,z; };
+
+// Pitched roofs. OSM footprints are extruded to their real outline; a flat lid on every one read as a
+// field of blocks. A rectangle gets the roof OSM tags it with (roof:shape), and an untagged small
+// house-like rectangle the gabled roof most real houses have, ridge along its long side.
+enum class RoofShape { Flat, Gabled, Hipped };
+RoofShape ChooseRoof(const char* roofTag, const std::string& building, const std::vector<Point>& p, bool heightTagged,
+                     double& halfWidth)
+{
+    if (p.size() != 4) return RoofShape::Flat;
+    double longest = 0, shortest = 1e9;
+    for (size_t i = 0; i < 4; ++i)
+    {
+        const auto a = p[i], b = p[(i + 1) % 4], c = p[(i + 2) % 4];
+        const double ex = b.x - a.x, ez = b.z - a.z, fx = c.x - b.x, fz = c.z - b.z;
+        const double le = std::hypot(ex, ez), lf = std::hypot(fx, fz);
+        if (le < .5 || lf < .5 || std::abs((ex * fx + ez * fz) / (le * lf)) > .26) return RoofShape::Flat; // not ~90 deg
+        longest = std::max(longest, le);
+        shortest = std::min(shortest, le);
+    }
+    halfWidth = shortest * .5;
+    const std::string tag = roofTag ? roofTag : "";
+    if (tag == "gabled" || tag == "saltbox" || tag == "gambrel" || tag == "mansard") return RoofShape::Gabled;
+    if (tag == "hipped" || tag == "pyramidal" || tag == "half-hipped") return RoofShape::Hipped;
+    if (!tag.empty()) return RoofShape::Flat; // flat, skillion, dome, ...: keep the lid
+    static const char* houses[] = {"house", "detached", "semidetached_house", "farm", "barn", "cabin", "bungalow",
+                                   "hut", "shed", "farm_auxiliary", "chapel", "terrace", "stable", "cowshed"};
+    const bool house = std::find_if(std::begin(houses), std::end(houses), [&](const char* h) { return building == h; }) !=
+                       std::end(houses);
+    // Untagged "yes" is most often a house too when it is house-sized and has no measured height.
+    if ((house || building == "residential" || (building == "yes" && !heightTagged && longest * shortest < 220)) &&
+        shortest <= 16)
+        return RoofShape::Gabled;
+    return RoofShape::Flat;
+}
+
+// OSM rectangles often carry extra nodes along a wall (a shared corner with the neighbour, a gate):
+// drop points where the outline barely turns, so the rectangle is recognised as one.
+std::vector<Point> DropStraightPoints(std::vector<Point> p)
+{
+    for (bool removed = true; removed && p.size() > 3;)
+    {
+        removed = false;
+        for (size_t i = 0; i < p.size() && p.size() > 3; ++i)
+        {
+            const auto a = p[(i + p.size() - 1) % p.size()], b = p[i], c = p[(i + 1) % p.size()];
+            const double ux = b.x - a.x, uz = b.z - a.z, vx = c.x - b.x, vz = c.z - b.z;
+            const double lu = std::hypot(ux, uz), lv = std::hypot(vx, vz);
+            if (lu < .3 || lv < .3 || std::abs(ux * vz - uz * vx) / (lu * lv) < .2) // < ~12 deg turn
+            {
+                p.erase(p.begin() + i);
+                removed = true;
+                break;
+            }
+        }
+    }
+    return p;
+}
+
+struct Corner { double x,y,z; };
+// One planar face with its own normal; turned so its normal points along `outward` (the stream's winding:
+// cross(p1-p0, p2-p0) is the outside).
+template<class Vertices, class Indices>
+void AddFace(Vertices& vertices, Indices& indices, std::initializer_list<Corner> corners, Corner outward, float u)
+{
+    std::vector<Corner> c(corners);
+    const auto cross = [&](const Corner& a, const Corner& b, const Corner& d) {
+        const double ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z, vx = d.x - a.x, vy = d.y - a.y, vz = d.z - a.z;
+        return Corner{uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx};
+    };
+    Corner n = cross(c[0], c[1], c[2]);
+    if (n.x * outward.x + n.y * outward.y + n.z * outward.z < 0)
+    {
+        std::reverse(c.begin(), c.end());
+        n = {-n.x, -n.y, -n.z};
+    }
+    const double length = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+    if (length < 1e-9) return;
+    const uint32_t base = uint32_t(vertices.size());
+    for (const auto& v : c)
+        vertices.push_back({float(v.x), float(v.y), float(v.z), float(n.x / length), float(n.y / length), float(n.z / length), u});
+    for (uint32_t i = 1; i + 1 < c.size(); ++i)
+        indices.insert(indices.end(), {base, base + i, base + i + 1});
+}
 double Cross(Point a,Point b,Point c) { return (b.x-a.x)*(c.z-a.z)-(b.z-a.z)*(c.x-a.x); }
 bool On(Point a,Point b,Point p) {
     return std::abs(Cross(a,b,p))<1e-7 && p.x>=std::min(a.x,b.x)-1e-7 && p.x<=std::max(a.x,b.x)+1e-7 &&
@@ -164,16 +247,61 @@ void AppendCell(Buildings::Mesh& result,const std::string& json,const Buildings:
         if(high-low>30){++result.skipped;continue;}
         const size_t triangles=roof.size()/3+p.size()*2;
         if(result.indices.size()/3+triangles>MaxTriangles)break;
-        const float bottom=low-1,top=high+float(h);
+        const float bottom=low-1;
+        float top=high+float(h);
+        // A stable per-building variation, so a street is not one colour.
+        const uint64_t variant=id?id*2654435761ull:uint64_t(result.buildings)*40503ull;
+        const float wallU=EarthBuildingStream::PaletteU(int((variant>>8)%4)),pitchedU=EarthBuildingStream::PaletteU(4+int((variant>>12)%3)),
+            flatU=EarthBuildingStream::PaletteU(7);
+        double halfWidth=0;
+        const std::vector<Point> outline=DropStraightPoints(p);
+        const RoofShape roofShape=h<=15?ChooseRoof(Text(tags,"roof:shape"),building,outline,!estimated,halfWidth):RoofShape::Flat;
+        if(roofShape!=RoofShape::Flat) {
+            // 35 degree pitch. A tagged height includes the roof; an estimated one is the walls.
+            const double rise=std::clamp(halfWidth*.7,1.0,6.0);
+            const double eaves=estimated?top:std::max(double(top)-rise,double(high)+2.5);
+            const double ridgeY=eaves+rise;
+            // Long side first: q0->q1 is a long edge, q1->q2 a short (gable) edge.
+            std::vector<Point> q=outline;
+            if(std::hypot(q[1].x-q[0].x,q[1].z-q[0].z)<std::hypot(q[2].x-q[1].x,q[2].z-q[1].z))std::rotate(q.begin(),q.begin()+1,q.end());
+            const Point m0{(q[3].x+q[0].x)*.5,(q[3].z+q[0].z)*.5},m1{(q[1].x+q[2].x)*.5,(q[1].z+q[2].z)*.5};
+            Point r0=m0,r1=m1;
+            if(roofShape==RoofShape::Hipped) {
+                const double ax=m1.x-m0.x,az=m1.z-m0.z,len=std::hypot(ax,az);
+                const double inset=std::min(halfWidth,len*.5);
+                r0={m0.x+ax/len*inset,m0.z+az/len*inset};r1={m1.x-ax/len*inset,m1.z-az/len*inset};
+            }
+            const double cx=(q[0].x+q[1].x+q[2].x+q[3].x)*.25,cz=(q[0].z+q[1].z+q[2].z+q[3].z)*.25;
+            const auto out=[&](double x,double z){return Corner{x-cx,0,z-cz};};
+            const auto C=[&](Point v,double y){return Corner{v.x,y,v.z};};
+            for(size_t i=0;i<4;++i) {
+                const auto a=q[i],b=q[(i+1)%4];
+                AddFace(result.vertices,result.indices,{C(a,bottom),C(b,bottom),C(b,eaves),C(a,eaves)},out((a.x+b.x)*.5,(a.z+b.z)*.5),wallU);
+            }
+            const Corner up{0,1,0};
+            AddFace(result.vertices,result.indices,{C(q[0],eaves),C(q[1],eaves),C(r1,ridgeY),C(r0,ridgeY)},up,pitchedU);
+            AddFace(result.vertices,result.indices,{C(q[2],eaves),C(q[3],eaves),C(r0,ridgeY),C(r1,ridgeY)},up,pitchedU);
+            if(roofShape==RoofShape::Hipped) {
+                AddFace(result.vertices,result.indices,{C(q[1],eaves),C(q[2],eaves),C(r1,ridgeY)},up,pitchedU);
+                AddFace(result.vertices,result.indices,{C(q[3],eaves),C(q[0],eaves),C(r0,ridgeY)},up,pitchedU);
+            } else {
+                // Gable ends: upright triangles over the short walls.
+                AddFace(result.vertices,result.indices,{C(q[1],eaves),C(q[2],eaves),C(r1,ridgeY)},out(m1.x,m1.z),wallU);
+                AddFace(result.vertices,result.indices,{C(q[3],eaves),C(q[0],eaves),C(r0,ridgeY)},out(m0.x,m0.z),wallU);
+            }
+            ++result.buildings;if(estimated)++result.estimatedHeights;
+            if(id)ids.insert(id);
+            continue;
+        }
         const uint32_t roofBase=uint32_t(result.vertices.size());
-        for(auto v:p)result.vertices.push_back({float(v.x),top,float(v.z),0,1,0});
+        for(auto v:p)result.vertices.push_back({float(v.x),top,float(v.z),0,1,0,flatU});
         for(auto index:roof)result.indices.push_back(roofBase+index);
         for(size_t i=0;i<p.size();++i) {
             const auto a=p[i],b=p[(i+1)%p.size()];const float dx=float(b.x-a.x),dz=float(b.z-a.z),length=std::hypot(dx,dz);
             const uint32_t base=uint32_t(result.vertices.size());
-            for(auto v:std::array<Buildings::Vertex,4>{{{float(a.x),bottom,float(a.z),dz/length,0,-dx/length},
-                {float(b.x),bottom,float(b.z),dz/length,0,-dx/length},{float(a.x),top,float(a.z),dz/length,0,-dx/length},
-                {float(b.x),top,float(b.z),dz/length,0,-dx/length}}})result.vertices.push_back(v);
+            for(auto v:std::array<Buildings::Vertex,4>{{{float(a.x),bottom,float(a.z),dz/length,0,-dx/length,wallU},
+                {float(b.x),bottom,float(b.z),dz/length,0,-dx/length,wallU},{float(a.x),top,float(a.z),dz/length,0,-dx/length,wallU},
+                {float(b.x),top,float(b.z),dz/length,0,-dx/length,wallU}}})result.vertices.push_back(v);
             result.indices.insert(result.indices.end(),{base,base+2,base+1,base+1,base+2,base+3});
         }
         ++result.buildings;if(estimated)++result.estimatedHeights;

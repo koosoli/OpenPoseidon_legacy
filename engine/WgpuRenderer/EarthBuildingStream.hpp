@@ -26,7 +26,14 @@ public:
         std::vector<float> horizonHeights;
         std::vector<uint8_t> horizonValid;
     };
-    struct Vertex { float x,y,z,nx,ny,nz; };
+    // u picks the building's colour from the Palette (walls 0-3, pitched roofs 4-6, flat roofs 7).
+    struct Vertex { float x,y,z,nx,ny,nz,u=0,v=.5f; };
+    static constexpr int PaletteSize=8;
+    static constexpr uint8_t Palette[PaletteSize][4]={
+        {214,204,184,255},{232,228,218,255},{188,180,168,255},{202,186,160,255}, // plaster, white, grey, sand
+        {146,70,50,255},{104,74,58,255},{78,80,86,255},                          // terracotta, brown, slate
+        {120,120,116,255}};                                                      // flat roof
+    static constexpr float PaletteU(int index){return (index+.5f)/PaletteSize;}
     struct Mesh {
         Cell cell{};
         uint64_t revision=0,generation=0;

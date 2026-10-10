@@ -151,6 +151,7 @@ class TerrainWgpu : public ITerrainRenderer
     WgrTexture _earthSurfaceTexture=0;
     WgrTexture _earthFarTexture=0;
     WgrMesh _earthBuildingMesh=0;
+    WgrTexture _earthBuildingTexture=0; // wall/roof colour palette (EarthBuildingStream::Palette)
     uint32_t _earthBuildingIndices=0;
     uint64_t _earthBuildingGeneration=0;
     WgrMesh _earthHorizonMesh = 0;
