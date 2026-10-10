@@ -3768,9 +3768,28 @@ void TerrainWgpu::DrawEarthTerrain(Scene& scene, Camera& camera, const Landscape
         {
             // with the game's own tree models standing in for every tree, neither the coarse batch nor
             // the procedural detail tier draws
+            // OSM roads in the game's own surfaces (WGR_EARTH_ROAD_TEXTURES=0: the plain colours)
+            if(!_earthRoadTexturesTried)
+            {
+                _earthRoadTexturesTried=true;
+                const char* off=std::getenv("WGR_EARTH_ROAD_TEXTURES");
+                if(!(off && off[0]=='0'))
+                {
+                    _earthRoadTextures[0]=GlobLoadTexture("data\\silnice_top_hi.pac");
+                    _earthRoadTextures[1]=GlobLoadTexture("data\\cesta.paa");
+                }
+                LOG_INFO(Graphics,"Earth roads: paved {}, unpaved {} from the game data",
+                    _earthRoadTextures[0].NotNull()?"textured":"plain",_earthRoadTextures[1].NotNull()?"textured":"plain");
+            }
             for(size_t kind=0;kind<EarthFeatureStream::KindCount;++kind)
-                if(!(_earthTreeModels && kind==EarthFeatureStream::Trees))
-                    _engine.SubmitEarthHorizon(_earthFeatureMeshes[kind],_earthFeatureIndices[kind],_earthFeatureTextures[kind]);
+            {
+                if(_earthTreeModels && kind==EarthFeatureStream::Trees)continue;
+                Texture* road=kind==EarthFeatureStream::PavedRoad?(Texture*)_earthRoadTextures[0]:
+                              kind==EarthFeatureStream::UnpavedRoad?(Texture*)_earthRoadTextures[1]:nullptr;
+                const WgrTexture roadTexture=road?static_cast<TextureWgpu*>(road)->EnsureUploaded():0;
+                if(roadTexture)_engine.SubmitEarthHorizon(_earthFeatureMeshes[kind],_earthFeatureIndices[kind],roadTexture,0);
+                else _engine.SubmitEarthHorizon(_earthFeatureMeshes[kind],_earthFeatureIndices[kind],_earthFeatureTextures[kind]);
+            }
             // the trees near the camera in detail (Tidewater's technique; the batch keeps the far ones)
             if(_earthTreeDetail && !_earthTreeModels)_earthTreeDetail->Draw(camera.Position(),Glob.time.toFloat());
         }

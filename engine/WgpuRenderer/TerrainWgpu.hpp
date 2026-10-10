@@ -163,6 +163,9 @@ class TerrainWgpu : public ITerrainRenderer
     std::array<uint32_t,EarthBuildingStream::MaterialCount> _earthBuildingIndices{};
     std::array<Ref<Texture>,EarthBuildingStream::MaterialCount> _earthBuildingTextures{};
     bool _earthBuildingTexturesTried=false;
+    // the game's own road surfaces for the paved and unpaved OSM ways (null: the plain colour)
+    std::array<Ref<Texture>,2> _earthRoadTextures{};
+    bool _earthRoadTexturesTried=false;
     WgrTexture _earthBuildingTexture=0; // wall/roof colour palette (EarthBuildingStream::Palette)
     uint64_t _earthBuildingGeneration=0;
     WgrMesh _earthHorizonMesh = 0;

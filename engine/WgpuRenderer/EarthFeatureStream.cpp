@@ -100,6 +100,11 @@ void Ribbon(Features::Mesh& result, const Features::Ground& g, const std::vector
 {
     auto& batch = result.batches[kind];
     bool emitted = false;
+    // texture coordinates for the game's road textures: u across (0 left edge, 1 right), v along the
+    // way in tiles of the texture's own proportion (silnice_top_hi is square, cesta twice as wide as
+    // it is long), running on from segment to segment so the surface does not jump at a node
+    const double tile = kind == Features::UnpavedRoad ? width * .5 : width;
+    double run = 0;
     for (size_t i = 1; i < p.size(); ++i)
     {
         const auto a = p[i - 1], b = p[i];
@@ -118,8 +123,11 @@ void Ribbon(Features::Mesh& result, const Features::Ground& g, const std::vector
             try
             {
                 const float lift = kind == Features::InlandWater ? .12f : .08f;
-                const auto vl0 = V(l0, Height(g, l0) + lift), vr0 = V(r0, Height(g, r0) + lift),
-                           vl1 = V(l1, Height(g, l1) + lift), vr1 = V(r1, Height(g, r1) + lift);
+                auto vl0 = V(l0, Height(g, l0) + lift), vr0 = V(r0, Height(g, r0) + lift),
+                     vl1 = V(l1, Height(g, l1) + lift), vr1 = V(r1, Height(g, r1) + lift);
+                const float v0 = float((run + length * t0) / tile), v1 = float((run + length * t1) / tile);
+                vl0.u = vl1.u = 0, vr0.u = vr1.u = 1;
+                vl0.v = vr0.v = v0, vl1.v = vr1.v = v1;
                 Triangle(batch, vl0, vl1, vr0);
                 Triangle(batch, vr0, vl1, vr1);
                 emitted = true;
@@ -128,6 +136,7 @@ void Ribbon(Features::Mesh& result, const Features::Ground& g, const std::vector
             {
             } // A long way can cross the resident patch.
         }
+        run += length;
     }
     if (emitted)
         ++batch.features;
